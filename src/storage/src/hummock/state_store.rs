@@ -442,6 +442,13 @@ impl StateStore for HummockStorage {
     fn get_uncommitted_ssts(&self, epoch: u64) -> Vec<LocalSstableInfo> {
         self.local_version_manager.get_uncommitted_ssts(epoch)
     }
+
+    fn clear_shared_buffer(&self) -> Self::ClearSharedBufferFuture<'_> {
+        async move {
+            self.local_version_manager.clear_shared_buffer().await;
+            Ok(())
+        }
+    }
 }
 
 pub struct HummockStateStoreIter {
