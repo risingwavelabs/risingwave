@@ -101,7 +101,7 @@ mod tests {
         for (i, case @ (string_expr, delimiter_expr, nth_expr, expected)) in
             cases.iter().enumerate()
         {
-            let builder = Utf8ArrayBuilder::new(1).unwrap();
+            let builder = Utf8ArrayBuilder::new(1);
             let writer = builder.writer();
             let actual = split_part(string_expr, delimiter_expr, *nth_expr, writer);
 

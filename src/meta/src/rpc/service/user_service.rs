@@ -166,7 +166,14 @@ impl<S: MetaStore> UserService for UserServiceImpl<S> {
         let revoke_grant_option = req.revoke_grant_option;
         let version = self
             .user_manager
-            .revoke_privilege(&req.users, &privileges, revoke_grant_option, req.cascade)
+            .revoke_privilege(
+                &req.users,
+                &privileges,
+                req.granted_by,
+                req.revoke_by,
+                revoke_grant_option,
+                req.cascade,
+            )
             .await
             .map_err(tonic_err)?;
 

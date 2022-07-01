@@ -184,7 +184,7 @@ mod tests {
     #[test]
     fn test_vec_decode_encode() {
         let mut result = vec![];
-        let value_meta = ValueMeta { vnode: 63492 };
+        let value_meta = ValueMeta { vnode: 233 };
         HummockValue::Put(value_meta, b"233333".to_vec()).encode(&mut result);
         assert_eq!(
             HummockValue::Put(value_meta, b"233333".to_vec()),
@@ -195,7 +195,7 @@ mod tests {
     #[test]
     fn test_slice_decode_encode() {
         let mut result = vec![];
-        let value_meta = ValueMeta { vnode: 63492 };
+        let value_meta = ValueMeta { vnode: 233 };
         HummockValue::Put(value_meta, b"233333".to_vec()).encode(&mut result);
         assert_eq!(
             HummockValue::Put(value_meta, b"233333".as_slice()),

@@ -36,7 +36,7 @@ mod tests {
             .map(NaiveDateWrapper::with_days)
             .map(|x| x.ok())
             .collect_vec();
-        let mut builder = NaiveDateArrayBuilder::new(0).unwrap();
+        let mut builder = NaiveDateArrayBuilder::new(0);
         for i in &v {
             builder.append(*i).unwrap();
         }
