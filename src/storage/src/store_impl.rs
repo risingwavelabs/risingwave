@@ -17,7 +17,9 @@ use std::sync::Arc;
 
 use enum_as_inner::EnumAsInner;
 use risingwave_common::config::StorageConfig;
-use risingwave_object_store::object::{parse_object_store, HybridObjectStore, ObjectStoreImpl};
+use risingwave_object_store::object::{
+    parse_local_object_store, parse_remote_object_store, ObjectStoreImpl,
+};
 use risingwave_rpc_client::HummockMetaClient;
 
 use crate::error::StorageResult;
@@ -92,25 +94,24 @@ impl StateStoreImpl {
     ) -> StorageResult<Self> {
         let store = match s {
             hummock if hummock.starts_with("hummock+") => {
-                let remote_object_store =
-                    parse_object_store(hummock.strip_prefix("hummock+").unwrap(), false).await;
+                let remote_object_store = parse_remote_object_store(
+                    hummock.strip_prefix("hummock+").unwrap(),
+                    object_store_metrics.clone(),
+                )
+                .await;
                 let object_store = if config.enable_local_spill {
-                    let local_object_store = Arc::from(
-                        parse_object_store(config.local_object_store.as_str(), true).await,
-                    );
-                    Box::new(HybridObjectStore::new(
-                        local_object_store,
-                        Arc::from(remote_object_store),
-                    ))
+                    let local_object_store = parse_local_object_store(
+                        config.local_object_store.as_str(),
+                        object_store_metrics.clone(),
+                    )
+                    .await;
+                    ObjectStoreImpl::hybrid(local_object_store, remote_object_store)
                 } else {
                     remote_object_store
                 };
 
                 let sstable_store = Arc::new(SstableStore::new(
-                    Arc::new(ObjectStoreImpl::new(
-                        object_store,
-                        object_store_metrics.clone(),
-                    )),
+                    Arc::new(object_store),
                     config.data_directory.to_string(),
                     config.block_cache_capacity_mb * (1 << 20),
                     config.meta_cache_capacity_mb * (1 << 20),

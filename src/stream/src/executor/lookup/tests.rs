@@ -124,14 +124,13 @@ fn create_arrangement(
         ],
     );
 
-    Box::new(MaterializeExecutor::new(
+    Box::new(MaterializeExecutor::new_for_test(
         Box::new(source),
         memory_state_store,
         table_id,
         arrangement_col_arrange_rules(),
         column_ids,
         1,
-        vec![0usize],
     ))
 }
 
@@ -247,6 +246,7 @@ async fn test_lookup_this_epoch() {
             ReadOptions {
                 epoch: u64::MAX,
                 table_id: Default::default(),
+                ttl: None,
             },
         )
         .await

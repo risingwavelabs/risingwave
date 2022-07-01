@@ -171,7 +171,6 @@ message ChainNode {
 message BatchPlanNode {
   plan_common.CellBasedTableDesc table_desc = 1;
   repeated int32 column_ids = 2;
-  repeated uint32 distribution_keys = 3;
 }
 
 message ArrangementInfo {

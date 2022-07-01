@@ -12,16 +12,18 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::collections::HashSet;
+use std::sync::Arc;
 
 use futures::StreamExt;
 use futures_async_stream::try_stream;
 use itertools::Itertools;
 use risingwave_common::array::Op::*;
 use risingwave_common::array::Row;
+use risingwave_common::buffer::Bitmap;
 use risingwave_common::catalog::{ColumnDesc, ColumnId, Schema, TableId};
 use risingwave_common::util::sort_util::OrderPair;
 use risingwave_storage::table::state_table::StateTable;
+use risingwave_storage::table::Distribution;
 use risingwave_storage::StateStore;
 
 use crate::executor::error::StreamExecutorError;
@@ -42,6 +44,10 @@ pub struct MaterializeExecutor<S: StateStore> {
 }
 
 impl<S: StateStore> MaterializeExecutor<S> {
+    /// Create a new `MaterializeExecutor` with distribution specified with `distribution_keys` and
+    /// `vnodes`. For singleton distribution, `distribution_keys` should be empty and `vnodes`
+    /// should be `None`.
+    #[allow(clippy::too_many_arguments)]
     pub fn new(
         input: BoxedExecutor,
         store: S,
@@ -50,34 +56,38 @@ impl<S: StateStore> MaterializeExecutor<S> {
         column_ids: Vec<ColumnId>,
         executor_id: u64,
         distribution_keys: Vec<usize>,
+        vnodes: Option<Arc<Bitmap>>,
     ) -> Self {
         let arrange_columns: Vec<usize> = keys.iter().map(|k| k.column_idx).collect();
-        let arrange_columns_set: HashSet<usize> =
-            keys.iter().map(|k| k.column_idx).collect::<HashSet<_>>();
-        let dist_key_set = distribution_keys.iter().copied().collect::<HashSet<_>>();
-        assert!(
-            dist_key_set.is_subset(&arrange_columns_set),
-            "dist_key_set={:?}, arrange_columns_set={:?}",
-            dist_key_set,
-            arrange_columns_set
-        );
         let arrange_order_types = keys.iter().map(|k| k.order_type).collect();
+
         let schema = input.schema().clone();
-        let column_descs = column_ids
+        let columns = column_ids
             .into_iter()
-            .zip_eq(schema.fields.iter().cloned())
+            .zip_eq(schema.fields.iter())
             .map(|(column_id, field)| ColumnDesc::unnamed(column_id, field.data_type()))
             .collect_vec();
+
+        let distribution = match vnodes {
+            Some(vnodes) => Distribution {
+                dist_key_indices: distribution_keys,
+                vnodes,
+            },
+            None => Distribution::fallback(),
+        };
+
+        let state_table = StateTable::new_with_distribution(
+            store,
+            table_id,
+            columns,
+            arrange_order_types,
+            arrange_columns.clone(),
+            distribution,
+        );
+
         Self {
             input,
-            state_table: StateTable::new(
-                store,
-                table_id,
-                column_descs,
-                arrange_order_types,
-                Some(distribution_keys),
-                arrange_columns.clone(),
-            ),
+            state_table,
             arrange_columns: arrange_columns.clone(),
             info: ExecutorInfo {
                 schema,
@@ -85,6 +95,27 @@ impl<S: StateStore> MaterializeExecutor<S> {
                 identity: format!("MaterializeExecutor {:X}", executor_id),
             },
         }
+    }
+
+    /// Create a new `MaterializeExecutor` without distribution info for test purpose.
+    pub fn new_for_test(
+        input: BoxedExecutor,
+        store: S,
+        table_id: TableId,
+        keys: Vec<OrderPair>,
+        column_ids: Vec<ColumnId>,
+        executor_id: u64,
+    ) -> Self {
+        Self::new(
+            input,
+            store,
+            table_id,
+            keys,
+            column_ids,
+            executor_id,
+            vec![],
+            None,
+        )
     }
 
     #[try_stream(ok = Message, error = StreamExecutorError)]
@@ -221,6 +252,7 @@ mod tests {
             ColumnDesc::unnamed(column_ids[0], DataType::Int32),
             ColumnDesc::unnamed(column_ids[1], DataType::Int32),
         ];
+
         let table = CellBasedTable::new_for_test(
             memory_state_store.clone(),
             table_id,
@@ -228,14 +260,14 @@ mod tests {
             order_types,
             vec![0],
         );
-        let mut materialize_executor = Box::new(MaterializeExecutor::new(
+
+        let mut materialize_executor = Box::new(MaterializeExecutor::new_for_test(
             Box::new(source),
             memory_state_store,
             table_id,
             vec![OrderPair::new(0, OrderType::Ascending)],
             column_ids,
             1,
-            vec![0],
         ))
         .execute();
 

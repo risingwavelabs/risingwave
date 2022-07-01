@@ -809,14 +809,13 @@ mod tests {
             u64::MAX,
         )?;
 
-        let mut materialize = MaterializeExecutor::new(
+        let mut materialize = MaterializeExecutor::new_for_test(
             Box::new(source_exec),
             mem_state_store.clone(),
             TableId::from(0x2333),
             vec![OrderPair::new(0, OrderType::Ascending)],
             column_ids.clone(),
             2,
-            vec![0usize],
         )
         .boxed()
         .execute();

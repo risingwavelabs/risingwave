@@ -16,12 +16,10 @@ use std::borrow::Cow;
 use std::cmp::Ordering;
 use std::marker::PhantomData;
 use std::ops::{Index, RangeBounds};
-use std::sync::Arc;
 
 use futures::{pin_mut, Stream, StreamExt};
 use futures_async_stream::try_stream;
 use risingwave_common::array::Row;
-use risingwave_common::buffer::Bitmap;
 use risingwave_common::catalog::{ColumnDesc, TableId};
 use risingwave_common::util::ordered::{serialize_pk, OrderedRowSerializer};
 use risingwave_common::util::sort_util::OrderType;
@@ -29,6 +27,7 @@ use risingwave_hummock_sdk::key::range_of_prefix;
 
 use super::cell_based_table::{CellBasedTableBase, READ_WRITE};
 use super::mem_table::{MemTable, RowOp};
+use super::Distribution;
 use crate::cell_based_row_serializer::CellBasedRowSerializer;
 use crate::dedup_pk_cell_based_row_serializer::DedupPkCellBasedRowSerializer;
 use crate::error::{StorageError, StorageResult};
@@ -81,20 +80,19 @@ impl<S: StateStore, SER: RowSerializer> StateTableBase<S, SER> {
             columns,
             order_types,
             pk_indices,
-            vec![],
-            CellBasedTableBase::<S, SER, READ_WRITE>::fallback_vnodes(),
+            Distribution::fallback(),
         )
     }
 
-    /// Create a state table with distribution specified with `dist_key_indices` and `vnodes`.
+    /// Create a state table with distribution specified with `distribution`. Should use
+    /// `Distribution::fallback()` for singleton executors and tests.
     pub fn new_with_distribution(
         store: S,
         table_id: TableId,
         columns: Vec<ColumnDesc>,
         order_types: Vec<OrderType>,
         pk_indices: Vec<usize>,
-        dist_key_indices: Vec<usize>,
-        vnodes: Arc<Bitmap>,
+        distribution: Distribution,
     ) -> Self {
         Self {
             mem_table: MemTable::new(),
@@ -104,8 +102,7 @@ impl<S: StateStore, SER: RowSerializer> StateTableBase<S, SER> {
                 columns,
                 order_types,
                 pk_indices,
-                dist_key_indices,
-                vnodes,
+                distribution,
             ),
         }
     }

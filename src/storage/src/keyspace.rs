@@ -34,6 +34,7 @@ pub struct Keyspace<S: StateStore> {
     table_id: TableId,
 }
 
+// FIX: ReadOptions with ttl
 impl<S: StateStore> Keyspace<S> {
     /// Creates a shared root [`Keyspace`] for all executors of the same operator.
     ///
@@ -92,6 +93,7 @@ impl<S: StateStore> Keyspace<S> {
                 ReadOptions {
                     epoch,
                     table_id: Some(self.table_id),
+                    ttl: None,
                 },
             )
             .await
@@ -111,6 +113,7 @@ impl<S: StateStore> Keyspace<S> {
                 ReadOptions {
                     epoch,
                     table_id: Some(self.table_id),
+                    ttl: None,
                 },
             )
             .await
@@ -151,6 +154,7 @@ impl<S: StateStore> Keyspace<S> {
                 ReadOptions {
                     epoch,
                     table_id: Some(self.table_id),
+                    ttl: None,
                 },
             )
             .await?;
@@ -187,6 +191,7 @@ impl<S: StateStore> Keyspace<S> {
                 ReadOptions {
                     epoch,
                     table_id: Some(self.table_id),
+                    ttl: None,
                 },
             )
             .await?;
