@@ -14,6 +14,7 @@
 
 use std::sync::Arc;
 
+use risingwave_object_store::object::ObjectStore;
 use risingwave_pb::hummock::VacuumTask;
 use risingwave_rpc_client::HummockMetaClient;
 
