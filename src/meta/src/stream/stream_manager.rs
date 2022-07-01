@@ -46,7 +46,7 @@ pub struct CreateMaterializedViewContext {
     /// New dispatches to add from upstream actors to downstream actors.
     pub dispatches: HashMap<(ActorId, DispatcherId), Vec<ActorId>>,
     /// Upstream mview actor ids grouped by node id.
-    pub upstream_node_actors: HashMap<WorkerId, Vec<ActorId>>,
+    pub upstream_node_actors: HashMap<WorkerId, HashSet<ActorId>>,
     /// Upstream mview actor ids grouped by table id.
     pub table_sink_map: HashMap<TableId, Vec<ActorId>>,
     /// Dependent table ids
@@ -117,7 +117,7 @@ where
         table_fragments: &mut TableFragments,
         dependent_table_ids: &HashSet<TableId>,
         dispatches: &mut HashMap<(ActorId, DispatcherId), Vec<ActorId>>,
-        upstream_node_actors: &mut HashMap<WorkerId, Vec<ActorId>>,
+        upstream_node_actors: &mut HashMap<WorkerId, HashSet<ActorId>>,
         locations: &ScheduledLocations,
     ) -> Result<()> {
         // The closure environment. Used to simulate recursive closure.
@@ -130,7 +130,7 @@ where
             locations: &'a ScheduledLocations,
 
             dispatches: &'a mut HashMap<(ActorId, DispatcherId), Vec<ActorId>>,
-            upstream_node_actors: &'a mut HashMap<WorkerId, Vec<ActorId>>,
+            upstream_node_actors: &'a mut HashMap<WorkerId, HashSet<ActorId>>,
         }
 
         impl Env<'_> {
