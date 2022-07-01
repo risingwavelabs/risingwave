@@ -360,7 +360,7 @@ impl LogicalAggBuilder {
 
     /// check if the expression is a group by key, and try to return the group key
     pub fn try_as_group_expr(&self, expr: &ExprImpl) -> Option<usize> {
-        if let Some(input_index) = self.input_proj_builder.expr_index(&expr) {
+        if let Some(input_index) = self.input_proj_builder.expr_index(expr) {
             if let Some(index) = self
                 .group_keys
                 .iter()
@@ -369,7 +369,7 @@ impl LogicalAggBuilder {
                 return Some(index);
             }
         }
-        return None;
+        None
     }
 }
 
