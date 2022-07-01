@@ -136,9 +136,8 @@ impl RowExpression {
         Self { expr }
     }
 
-    pub fn eval(&mut self, row: &Row, data_types: &[DataType]) -> Result<ArrayRef> {
-        let input = DataChunk::from_rows(slice::from_ref(row), data_types)?;
-        self.expr.eval_checked(&input)
+    pub fn eval(&mut self, row: &Row) -> Result<Datum> {
+        self.expr.eval_row(&row)
     }
 
     pub fn return_type(&self) -> DataType {
