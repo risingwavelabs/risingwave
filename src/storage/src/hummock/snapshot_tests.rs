@@ -34,6 +34,7 @@ macro_rules! assert_count_range_scan {
                 ReadOptions {
                     epoch: $epoch,
                     table_id: Default::default(),
+                    ttl: None,
                 },
             )
             .await
@@ -57,6 +58,7 @@ macro_rules! assert_count_backward_range_scan {
                 ReadOptions {
                     epoch: $epoch,
                     table_id: Default::default(),
+                    ttl: None,
                 },
             )
             .await

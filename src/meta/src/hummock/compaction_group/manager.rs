@@ -16,13 +16,14 @@ use std::collections::{BTreeMap, HashMap, HashSet};
 use std::sync::Arc;
 
 use itertools::Itertools;
+use risingwave_common::catalog::TableOption;
 use risingwave_hummock_sdk::compaction_group::{StateTableId, StaticCompactionGroupId};
 use risingwave_hummock_sdk::CompactionGroupId;
 use risingwave_pb::hummock::CompactionConfig;
 use tokio::sync::RwLock;
 
 use crate::hummock::compaction::compaction_config::CompactionConfigBuilder;
-use crate::hummock::compaction_group::{CompactionGroup, TableOption};
+use crate::hummock::compaction_group::CompactionGroup;
 use crate::hummock::error::{Error, Result};
 use crate::manager::{MetaSrvEnv, SourceId};
 use crate::model::{MetadataModel, TableFragments, ValTransaction, VarTransaction};
@@ -81,13 +82,13 @@ impl<S: MetaStore> CompactionGroupManager<S> {
         table_fragments: &TableFragments,
         table_properties: &HashMap<String, String>,
     ) -> Result<()> {
-        let table_option = CompactionGroup::build_table_option(table_properties);
+        let table_option = TableOption::build_table_option(table_properties);
         let mut pairs = vec![];
         // materialized_view or materialized_source
         pairs.push((
             table_fragments.table_id().table_id,
             CompactionGroupId::from(StaticCompactionGroupId::MaterializedView),
-            table_option.clone(),
+            table_option,
         ));
         // internal states
         for table_id in table_fragments.internal_table_ids() {
@@ -95,7 +96,7 @@ impl<S: MetaStore> CompactionGroupManager<S> {
             pairs.push((
                 table_id,
                 CompactionGroupId::from(StaticCompactionGroupId::StateDefault),
-                table_option.clone(),
+                table_option,
             ));
         }
         self.inner
@@ -124,7 +125,7 @@ impl<S: MetaStore> CompactionGroupManager<S> {
         source_id: u32,
         table_properties: &HashMap<String, String>,
     ) -> Result<()> {
-        let table_option = CompactionGroup::build_table_option(table_properties);
+        let table_option = TableOption::build_table_option(table_properties);
         self.inner
             .write()
             .await
@@ -291,7 +292,7 @@ impl CompactionGroupManagerInner {
             compaction_group.member_table_ids.insert(*table_id);
             compaction_group
                 .table_id_to_options
-                .insert(*table_id, table_option.clone());
+                .insert(*table_id, *table_option);
         }
         let mut trx = Transaction::default();
         compaction_groups.apply_to_txn(&mut trx)?;
@@ -358,7 +359,7 @@ impl CompactionGroupManagerInner {
     ) -> Result<TableOption> {
         let compaction_group = self.compaction_group(compaction_group_id)?;
         match compaction_group.table_id_to_options().get(&table_id) {
-            Some(table_option) => Ok(table_option.clone()),
+            Some(table_option) => Ok(*table_option),
 
             None => Ok(TableOption::default()),
         }
@@ -371,11 +372,11 @@ mod tests {
     use std::collections::HashMap;
     use std::ops::Deref;
 
-    use risingwave_common::catalog::TableId;
+    use risingwave_common::catalog::{TableId, TableOption};
     use risingwave_hummock_sdk::compaction_group::StaticCompactionGroupId;
 
     use crate::hummock::compaction_group::manager::{
-        CompactionGroup, CompactionGroupManager, CompactionGroupManagerInner,
+        CompactionGroupManager, CompactionGroupManagerInner,
     };
     use crate::hummock::test_utils::setup_compute_env;
     use crate::model::TableFragments;
@@ -406,7 +407,7 @@ mod tests {
         assert_eq!(registered_number(inner.read().await.deref()), 0);
 
         let table_properties = HashMap::from([(String::from("ttl"), String::from("300"))]);
-        let table_option = CompactionGroup::build_table_option(&table_properties);
+        let table_option = TableOption::build_table_option(&table_properties);
 
         // Test register
         inner
@@ -416,7 +417,7 @@ mod tests {
                 &[(
                     1u32,
                     StaticCompactionGroupId::StateDefault.into(),
-                    table_option.clone(),
+                    table_option,
                 )],
                 env.meta_store(),
             )
@@ -429,7 +430,7 @@ mod tests {
                 &[(
                     2u32,
                     StaticCompactionGroupId::MaterializedView.into(),
-                    table_option.clone(),
+                    table_option,
                 )],
                 env.meta_store(),
             )

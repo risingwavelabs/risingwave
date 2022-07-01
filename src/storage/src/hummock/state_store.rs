@@ -85,6 +85,7 @@ impl HummockStorage {
             .table_id
             .as_ref()
             .map(|table_id| self.get_compaction_group_id(*table_id));
+        let min_epoch = read_options.min_epoch();
         let iter_read_options = Arc::new(IterReadOptions::default());
         let mut overlapped_iters = vec![];
 
@@ -185,6 +186,7 @@ impl HummockStorage {
             self.stats.clone(),
             key_range,
             epoch,
+            min_epoch,
             Some(pinned_version),
         );
 
@@ -466,6 +468,13 @@ impl StateStore for HummockStorage {
 
     fn get_uncommitted_ssts(&self, epoch: u64) -> Vec<LocalSstableInfo> {
         self.local_version_manager.get_uncommitted_ssts(epoch)
+    }
+
+    fn clear_shared_buffer(&self) -> Self::ClearSharedBufferFuture<'_> {
+        async move {
+            self.local_version_manager.clear_shared_buffer().await;
+            Ok(())
+        }
     }
 }
 

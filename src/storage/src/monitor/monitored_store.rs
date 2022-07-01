@@ -253,6 +253,15 @@ where
     fn get_uncommitted_ssts(&self, epoch: u64) -> Vec<LocalSstableInfo> {
         self.inner.get_uncommitted_ssts(epoch)
     }
+
+    fn clear_shared_buffer(&self) -> Self::ClearSharedBufferFuture<'_> {
+        async move {
+            self.inner
+                .clear_shared_buffer()
+                .await
+                .inspect_err(|e| error!("Failed in clear_shared_buffer: {:?}", e))
+        }
+    }
 }
 
 impl MonitoredStateStore<HummockStorage> {

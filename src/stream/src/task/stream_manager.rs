@@ -25,6 +25,7 @@ use risingwave_common::error::{ErrorCode, Result, RwError};
 use risingwave_common::try_match_expand;
 use risingwave_common::util::addr::{is_local_address, HostAddr};
 use risingwave_common::util::compress::decompress_data;
+use risingwave_hummock_sdk::LocalSstableInfo;
 use risingwave_pb::common::ActorInfo;
 use risingwave_pb::stream_plan::stream_node::NodeBody;
 use risingwave_pb::{stream_plan, stream_service};
@@ -183,40 +184,36 @@ impl LocalStreamManager {
         barrier_manager.drain_collect_rx(prev_epoch);
     }
 
-    /// Use `prev_epoch` to find collect rx. And wait for all actor to be collected before
+    /// Use `epoch` to find collect rx. And wait for all actor to be collected before
     /// returning.
-    pub async fn collect_barrier_and_sync(
-        &self,
-        prev_epoch: u64,
-        need_sync: bool,
-    ) -> CollectResult {
+    pub async fn collect_barrier(&self, epoch: u64) -> CollectResult {
         let rx = {
             let core = self.core.lock();
             let mut barrier_manager = core.context.lock_barrier_manager();
-            barrier_manager.remove_collect_rx(prev_epoch)
+            barrier_manager.remove_collect_rx(epoch)
         };
         // Wait for all actors finishing this barrier.
-        let mut collect_result = rx.await.unwrap();
+        rx.await.unwrap()
+    }
 
-        // Sync states from shared buffer to S3 before telling meta service we've done.
-        if need_sync {
-            dispatch_state_store!(self.state_store(), store, {
-                match store.sync(Some(prev_epoch)).await {
-                    Ok(_) => {
-                        collect_result.synced_sstables =
-                        store.get_uncommitted_ssts(prev_epoch);
-                    }
-                    // TODO: Handle sync failure by propagating it
-                    // back to global barrier manager
-                    Err(e) => panic!(
-                        "Failed to sync state store after receiving barrier prev_epoch {:?} due to {}",
-                        prev_epoch, e
-                    ),
-                }
-            });
-        }
+    pub async fn sync_epoch(&self, epoch: u64) -> Vec<LocalSstableInfo> {
+        dispatch_state_store!(self.state_store(), store, {
+            match store.sync(Some(epoch)).await {
+                Ok(_) => store.get_uncommitted_ssts(epoch),
+                // TODO: Handle sync failure by propagating it
+                // back to global barrier manager
+                Err(e) => panic!(
+                    "Failed to sync state store after receiving barrier prev_epoch {:?} due to {}",
+                    epoch, e
+                ),
+            }
+        })
+    }
 
-        collect_result
+    pub async fn clear_storage_buffer(&self) {
+        dispatch_state_store!(self.state_store(), store, {
+            store.clear_shared_buffer().await.unwrap();
+        });
     }
 
     /// Broadcast a barrier to all senders. Returns immediately, and caller won't be notified when
@@ -261,8 +258,9 @@ impl LocalStreamManager {
 
         self.drain_collect_rx(barrier.epoch.prev);
         self.send_barrier(barrier, actor_ids_to_send, actor_ids_to_collect)?;
-        self.collect_barrier_and_sync(barrier.epoch.prev, false)
-            .await;
+        self.collect_barrier(barrier.epoch.prev).await;
+        // Clear shared buffer in storage to release memory
+        self.clear_storage_buffer().await;
         self.core.lock().drop_all_actors();
 
         Ok(())

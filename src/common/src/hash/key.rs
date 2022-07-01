@@ -58,7 +58,7 @@ impl HashCode {
     }
 
     pub fn to_vnode(self) -> VirtualNode {
-        (self.0 % VIRTUAL_NODE_COUNT as u64) as u16
+        (self.0 % VIRTUAL_NODE_COUNT as u64) as VirtualNode
     }
 }
 
