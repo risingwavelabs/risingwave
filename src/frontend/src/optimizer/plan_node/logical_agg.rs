@@ -536,6 +536,11 @@ impl LogicalAgg {
         self.o2i_col_mapping().inverse()
     }
 
+    /// get the Mapping of columnIndex from input column index to out column index
+    pub fn i2o_col_mapping_with_required_out(&self, required: &FixedBitSet) -> ColIndexMapping {
+        self.o2i_col_mapping().inverse_with_required(required)
+    }
+
     fn derive_schema(
         input: &Schema,
         group_keys: &[usize],
@@ -658,7 +663,6 @@ impl ColPrunable for LogicalAgg {
     fn prune_col(&self, required_cols: &[usize]) -> PlanRef {
         let upstream_required_cols = {
             let mapping = self.o2i_col_mapping();
-
             FixedBitSet::from_iter(
                 required_cols
                     .iter()
@@ -683,7 +687,7 @@ impl ColPrunable for LogicalAgg {
         };
 
         let input_required_cols = {
-            let mut tmp: FixedBitSet = upstream_required_cols;
+            let mut tmp: FixedBitSet = upstream_required_cols.clone();
             tmp.union_with(&group_key_required_cols);
             tmp.union_with(&agg_call_required_cols);
             tmp.ones().collect_vec()
@@ -717,7 +721,7 @@ impl ColPrunable for LogicalAgg {
             )
         };
         let new_output_cols = {
-            let mapping = self.i2o_col_mapping();
+            let mapping = self.i2o_col_mapping_with_required_out(&upstream_required_cols);
             let mut tmp = input_required_cols
                 .iter()
                 .filter_map(|&idx| mapping.try_map(idx))
