@@ -81,6 +81,7 @@ impl HummockStorage {
         T: HummockIteratorType,
     {
         let epoch = read_options.epoch;
+        let min_epoch = read_options.min_epoch();
         let iter_read_options = Arc::new(IterReadOptions::default());
         let mut overlapped_iters = vec![];
 
@@ -170,6 +171,7 @@ impl HummockStorage {
             self.stats.clone(),
             key_range,
             epoch,
+            min_epoch,
             Some(pinned_version),
         );
 

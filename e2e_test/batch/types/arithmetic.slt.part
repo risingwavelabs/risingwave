@@ -72,3 +72,54 @@ query T
 SELECT interval '1 month' / 2000;
 ----
 00:21:36
+
+query T
+select Date '2022-06-23' + 4;
+----
+2022-06-27
+
+query T
+select 4 + Date '2022-06-23';
+----
+2022-06-27
+
+query T
+select Date '2022-06-23' - 4;
+----
+2022-06-19
+
+query T
+select Date '2022-06-23' + TIME '19:24:00';
+----
+2022-06-23 19:24:00
+
+query T
+select TIME '19:24:00' +  Date '2022-06-23';
+----
+2022-06-23 19:24:00
+
+query T
+select TIME '18:20:49' -  TIME '16:07:16';
+----
+02:13:33
+
+query T
+select TIME '18:20:49' -  interval '2 hours';
+----
+16:20:49
+
+query T
+select TIME '18:20:49' -  interval '1 day';
+----
+18:20:49
+
+query T
+select TIME '18:20:49' +  interval '1 day';
+----
+18:20:49
+
+query T
+select TIME '18:20:49' +  interval '1 hour';
+----
+19:20:49
+

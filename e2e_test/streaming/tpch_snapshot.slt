@@ -1,3 +1,5 @@
+control sortmode rowsort
+
 include ../tpch/create_tables.slt.part
 
 include ../tpch/insert_customer.slt.part

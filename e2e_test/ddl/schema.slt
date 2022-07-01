@@ -1,3 +1,5 @@
+control sortmode rowsort
+
 # Create a table under the default schema.
 statement ok
 create table ddl_table;

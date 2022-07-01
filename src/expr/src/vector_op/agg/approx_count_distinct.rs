@@ -223,7 +223,7 @@ mod tests {
         let inputs_start: [i32; 3] = [0, 20000, 30000];
 
         let mut agg = ApproxCountDistinct::new(DataType::Int64, 0);
-        let mut builder = ArrayBuilderImpl::Int64(I64ArrayBuilder::new(3).unwrap());
+        let mut builder = ArrayBuilderImpl::Int64(I64ArrayBuilder::new(3));
 
         for i in 0..3 {
             let data_chunk = generate_data_chunk(inputs_size[i], inputs_start[i]);
@@ -240,7 +240,7 @@ mod tests {
         let mut a = ApproxCountDistinct::new(DataType::Int64, 0);
 
         let data_chunk = generate_data_chunk(30001, 0);
-        let mut builder = ArrayBuilderImpl::Int64(I64ArrayBuilder::new(5).unwrap());
+        let mut builder = ArrayBuilderImpl::Int64(I64ArrayBuilder::new(5));
         let mut group = EqGroups::new(vec![5000, 10000, 14000, 20000, 30000]);
         group.set_limit(5);
 
