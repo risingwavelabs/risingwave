@@ -425,7 +425,7 @@ mod tests {
             let array_builders = data_types
                 .iter()
                 .map(|data_type| data_type.create_array_builder(1024))
-                .try_collect()?;
+                .collect();
 
             Ok(Self {
                 data_types,

@@ -37,9 +37,9 @@ Composite data types (WIP):
 
 In-memory data is encoded in arrays for vectorized execution. For variable-length data like strings, generally we use another offset array to mark the start of encoded values in a byte buffer. 
 
-A Data Chunk consists of multiple columns and a visibility array to mark each row as visible or not, which helps filtering some rows while keeping other data arrays unchanged.
+A Data Chunk consists of multiple columns and a visibility array, as is shown in the left subgraph below. The visibility array marks each row as visible or not. This helps filtering some rows while keeping other data arrays unchanged.
 
-A Stream Chunk consists of columns, visibility array and an additional `ops` column to mark the operation of row, which can be one of `Delete`, `Insert`, `UpdateDelete` and `UpdateInsert`.
+A Stream Chunk consists of columns, visibility array and an additional `ops` column, as is shown in the right subgraph below. The `ops` column marks the operation of row, which can be one of `Delete`, `Insert`, `UpdateDelete` and `UpdateInsert`.
 
 ![chunk](./images/data-model-and-encoding/chunk.svg)
 
@@ -47,11 +47,11 @@ A Stream Chunk consists of columns, visibility array and an additional `ops` col
 
 > Source files: `utils/memcomparable`, `utils/value-encoding`
 
-RisingWave stores user data in shared key-value storage called 'Hummock'. Tables, materialized views and checkpoints of internal streaming operators are encoded into key-value entries. Every field of a row aka. cell is encoded as a key-value entry, except `NULL` values are omitted.
+RisingWave stores user data in shared key-value storage called 'Hummock'. Tables, materialized views and checkpoints of internal streaming operators are encoded into key-value entries. Every field of a row, a.k.a. cell, is encoded as a key-value entry, except that `NULL` values are omitted.
 
 ![row-format](./images/data-model-and-encoding/row-format.svg)
 
-Considering that ordering matters in some cases like result set of an order-by query, fields of keys must preserve the order of original values after being encoded into bytes. This is what `memcomparable` for. For example, integers must be encoded in big-endien and the sign bit must be flipped to preserve order. In contrast, the encoding of values does not need to preserve order.
+Considering that ordering matters in some cases, e.g. result set of an order-by query, fields of keys must preserve the order of original values after being encoded into bytes. This is what `memcomparable` is used for. For example, integers must be encoded in big-endien and the sign bit must be flipped to preserve order. In contrast, the encoding of values does not need to preserve order.
 
 
 

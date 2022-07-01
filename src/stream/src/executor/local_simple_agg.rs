@@ -107,10 +107,7 @@ impl LocalSimpleAggExecutor {
                     if is_dirty {
                         is_dirty = false;
 
-                        let mut builders = info
-                            .schema
-                            .create_array_builders(1)
-                            .map_err(StreamExecutorError::eval_error)?;
+                        let mut builders = info.schema.create_array_builders(1);
                         states.iter_mut().zip_eq(builders.iter_mut()).try_for_each(
                             |(state, builder)| {
                                 let data = state.get_output()?;

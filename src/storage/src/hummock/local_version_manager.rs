@@ -19,7 +19,7 @@ use std::sync::{Arc, Weak};
 use std::time::Duration;
 
 use bytes::Bytes;
-use futures::future::join_all;
+use futures::future::{join_all, try_join_all};
 use itertools::Itertools;
 use parking_lot::RwLock;
 use risingwave_common::config::StorageConfig;
@@ -61,14 +61,14 @@ struct BufferTracker {
     global_buffer_size: Arc<AtomicUsize>,
     global_upload_task_size: Arc<AtomicUsize>,
 
-    buffer_event_sender: Arc<mpsc::UnboundedSender<SharedBufferEvent>>,
+    buffer_event_sender: mpsc::UnboundedSender<SharedBufferEvent>,
 }
 
 impl BufferTracker {
     pub fn new(
         flush_threshold: usize,
         block_write_threshold: usize,
-        buffer_event_sender: Arc<mpsc::UnboundedSender<SharedBufferEvent>>,
+        buffer_event_sender: mpsc::UnboundedSender<SharedBufferEvent>,
     ) -> Self {
         assert!(
             flush_threshold <= block_write_threshold,
@@ -177,7 +177,7 @@ impl LocalVersionManager {
                 // TODO: enable setting the ratio with config
                 capacity * 4 / 5,
                 capacity,
-                Arc::new(buffer_event_sender),
+                buffer_event_sender,
             ),
             write_conflict_detector: write_conflict_detector.clone(),
             shared_buffer_uploader: Arc::new(SharedBufferUploader::new(
@@ -764,11 +764,39 @@ impl LocalVersionManager {
                             epoch
                         );
                     }
+
+                    SharedBufferEvent::Clear(notifier) => {
+                        // Wait for all ongoing flush to finish.
+                        let ongoing_flush_handles: Vec<_> =
+                            epoch_join_handle.drain().flat_map(|e| e.1).collect();
+                        if let Err(e) = try_join_all(ongoing_flush_handles).await {
+                            error!("Failed to join flush handle {:?}", e)
+                        }
+
+                        // There cannot be any pending write requests since we should only clear
+                        // shared buffer after all actors stop processing data.
+                        assert!(pending_write_requests.is_empty());
+
+                        // Clear shared buffer
+                        local_version_manager
+                            .local_version
+                            .write()
+                            .clear_shared_buffer();
+
+                        // Notify completion of the Clear event.
+                        notifier.send(()).unwrap();
+                    }
                 };
             } else {
                 break;
             }
         }
+    }
+
+    pub async fn clear_shared_buffer(&self) {
+        let (tx, rx) = oneshot::channel();
+        self.buffer_tracker.send_event(SharedBufferEvent::Clear(tx));
+        rx.await.unwrap();
     }
 }
 
@@ -936,7 +964,7 @@ mod tests {
             let batch = SharedBufferBatch::new(
                 LocalVersionManager::build_shared_buffer_item_batches(kvs[i].clone(), epochs[i]),
                 epochs[i],
-                Arc::new(mpsc::unbounded_channel().0),
+                mpsc::unbounded_channel().0,
                 StaticCompactionGroupId::StateDefault.into(),
             );
             assert_eq!(
@@ -1101,5 +1129,56 @@ mod tests {
         // Check uncommitted ssts
         assert!(local_version.get_shared_buffer(epochs[0]).is_none());
         assert!(local_version.get_shared_buffer(epochs[1]).is_none());
+    }
+
+    #[tokio::test]
+    async fn test_clear_shared_buffer() {
+        let opt = Arc::new(default_config_for_test());
+        let (_, hummock_manager_ref, _, worker_node) = setup_compute_env(8080).await;
+        let local_version_manager = LocalVersionManager::new(
+            opt.clone(),
+            mock_sstable_store(),
+            Arc::new(StateStoreMetrics::unused()),
+            Arc::new(MockHummockMetaClient::new(
+                hummock_manager_ref.clone(),
+                worker_node.id,
+            )),
+            ConflictDetector::new_from_config(opt),
+        )
+        .await;
+
+        let pinned_version = local_version_manager.get_pinned_version();
+        let initial_max_commit_epoch = pinned_version.max_committed_epoch();
+
+        let epochs: Vec<u64> = vec![initial_max_commit_epoch + 1, initial_max_commit_epoch + 2];
+        let batches: Vec<Vec<(Bytes, StorageValue)>> =
+            epochs.iter().map(|e| gen_dummy_batch(*e)).collect();
+
+        // Fill shared buffer with a dummy empty batch in epochs[0] and epochs[1]
+        for i in 0..2 {
+            local_version_manager
+                .write_shared_buffer(epochs[i], batches[i].clone(), false)
+                .await
+                .unwrap();
+            let local_version = local_version_manager.get_local_version();
+            assert_eq!(
+                local_version
+                    .get_shared_buffer(epochs[i])
+                    .unwrap()
+                    .read()
+                    .size(),
+                SharedBufferBatch::measure_batch_size(
+                    &LocalVersionManager::build_shared_buffer_item_batches(
+                        batches[i].clone(),
+                        epochs[i]
+                    )
+                )
+            );
+        }
+
+        // Clear shared buffer and check
+        local_version_manager.clear_shared_buffer().await;
+        let local_version = local_version_manager.get_local_version();
+        assert_eq!(local_version.iter_shared_buffer().count(), 0)
     }
 }

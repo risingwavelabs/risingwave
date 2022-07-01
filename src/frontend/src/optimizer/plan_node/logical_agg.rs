@@ -297,7 +297,7 @@ impl LogicalAgg {
             .collect();
         let total_agg_logical_plan =
             LogicalAgg::new(total_agg_types, self.group_keys().to_vec(), input);
-        Ok(StreamSimpleAgg::new(total_agg_logical_plan).into())
+        Ok(StreamGlobalSimpleAgg::new(total_agg_logical_plan).into())
     }
 }
 
@@ -826,7 +826,7 @@ impl ToStream for LogicalAgg {
                 self.gen_two_phase_streaming_agg_plan(input_stream)
             // simple 1-phase-agg
             } else {
-                Ok(StreamSimpleAgg::new(self.clone_with_input(
+                Ok(StreamGlobalSimpleAgg::new(self.clone_with_input(
                     input.to_stream_with_dist_required(&RequiredDist::single())?,
                 ))
                 .into())

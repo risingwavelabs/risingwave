@@ -323,7 +323,7 @@ mod tests {
             ongoing: false,
             group_value: None,
         };
-        let mut builder = I32ArrayBuilder::new(0).unwrap();
+        let mut builder = I32ArrayBuilder::new(0);
 
         let input = I32Array::from_slice(&[Some(1), Some(1), Some(3)]).unwrap();
         let eq = g.detect_groups_concrete(&input)?;
@@ -355,11 +355,11 @@ mod tests {
     #[test]
     fn vec_agg_group() -> Result<()> {
         let mut g0 = GeneralSortedGrouper::<I32Array>::new(false, None);
-        let mut g0_builder = I32ArrayBuilder::new(0).unwrap();
+        let mut g0_builder = I32ArrayBuilder::new(0);
         let mut g1 = GeneralSortedGrouper::<I32Array>::new(false, None);
-        let mut g1_builder = I32ArrayBuilder::new(0).unwrap();
+        let mut g1_builder = I32ArrayBuilder::new(0);
         let mut a = GeneralAgg::<I32Array, _, I64Array>::new(DataType::Int64, 0, sum, None);
-        let mut a_builder = I64ArrayBuilder::new(0).unwrap();
+        let mut a_builder = I64ArrayBuilder::new(0);
 
         let g0_input = I32Array::from_slice(&[Some(1), Some(1), Some(3)]).unwrap();
         let eq0 = g0.detect_groups_concrete(&g0_input)?;
@@ -402,7 +402,7 @@ mod tests {
     #[test]
     fn vec_count_star() {
         let mut g0 = GeneralSortedGrouper::<I32Array>::new(false, None);
-        let mut g0_builder = I32ArrayBuilder::new(0).unwrap();
+        let mut g0_builder = I32ArrayBuilder::new(0);
         let prost = AggCall {
             r#type: Type::Count as i32,
             args: vec![],
@@ -416,7 +416,7 @@ mod tests {
             .unwrap()
             .create_agg_state()
             .unwrap();
-        let mut a_builder = agg.return_type().create_array_builder(0).unwrap();
+        let mut a_builder = agg.return_type().create_array_builder(0);
 
         let input = I32Array::from_slice(&[Some(1), Some(1), Some(3)]).unwrap();
         let eq = g0.detect_groups_concrete(&input).unwrap();
