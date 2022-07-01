@@ -39,7 +39,7 @@ impl Binder {
                 fractional_seconds_precision: None,
             } => self.bind_interval(value, leading_field),
             _ => Err(ErrorCode::NotImplemented(
-                format!("unsupported value: {:?}", value),
+                format!("value: {:?}", value),
                 None.into(),
             )
             .into()),

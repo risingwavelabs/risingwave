@@ -53,7 +53,7 @@ impl Binder {
 
             _ => {
                 return Err(ErrorCode::NotImplemented(
-                    format!("unsuported binary op: {:?}", op),
+                    format!("binary op: {:?}", op),
                     112.into(),
                 )
                 .into())

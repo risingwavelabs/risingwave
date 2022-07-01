@@ -55,7 +55,7 @@ impl Binder {
             )
             .into()),
             _ => Err(ErrorCode::NotImplemented(
-                format!("unsupported set expr: {:}", set_expr),
+                format!("set expr: {:}", set_expr),
                 None.into(),
             )
             .into()),
