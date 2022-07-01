@@ -40,7 +40,6 @@ impl ExecutorBuilder for DynamicFilterExecutorBuilder {
         let source_r = params.input.remove(1);
         let source_l = params.input.remove(0);
         let key_l = node.get_left_key() as usize;
-        let key_r = 0usize;
 
         let prost_condition = node.get_condition()?;
         let condition = RowExpression::new(build_from_prost(prost_condition)?);

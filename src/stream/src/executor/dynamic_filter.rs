@@ -20,14 +20,13 @@ use anyhow::anyhow;
 use futures::StreamExt;
 use futures_async_stream::try_stream;
 use itertools::Itertools;
-use risingwave_common::array::{Array, ArrayRef, Op, Row, RowRef, StreamChunk};
+use risingwave_common::array::{Op, Row, StreamChunk};
 use risingwave_common::buffer::BitmapBuilder;
 use risingwave_common::catalog::Schema;
-use risingwave_common::types::{DataType, Datum, ScalarImpl, ToOwnedDatum};
+use risingwave_common::types::{Datum, ScalarImpl, ToOwnedDatum};
 use risingwave_expr::expr::RowExpression;
 use risingwave_pb::expr::expr_node::Type as ExprNodeType;
 use risingwave_pb::expr::expr_node::Type::*;
-use risingwave_storage::{Keyspace, StateStore};
 
 use super::barrier_align::*;
 use super::error::StreamExecutorError;
@@ -81,7 +80,16 @@ impl DynamicFilterExecutor {
         let mut prev_epoch_value: Option<Datum> = None;
         let mut current_epoch_value: Option<Datum> = None;
         // The state is sorted by the comparison value
+        //
         // TODO: convert this into a `StateTable` compatible managed state
+        //
+        // TODO: It could be potentially expensive memory-wise to store `HashSet`.
+        //       If I'm not wrong, the memory overhead is a backing Vec of size 4
+        //       (See: https://github.com/rust-lang/hashbrown/pull/162)
+        //       + some byte-per-entry metadata. Well, `Row` is on heap anyway...
+        //       It could be preferred to find a way to do prefix range scans on the left key and
+        //       storing as `BTreeSet<(ScalarImpl, Row)>`.
+        //       We could solve it if `ScalarImpl` had a successor/predecessor function.
         let mut state = BTreeMap::<ScalarImpl, HashSet<Row>>::new();
 
         let input_l = self.source_l;
@@ -117,10 +125,10 @@ impl DynamicFilterExecutor {
                         // Evaluate the condition and determine if it should be forwarded
                         if let Some(right_val) = &prev_epoch_value {
                             let inputs = Row::new(vec![left_val.clone(), right_val.clone()]);
+
                             // If the condition evaluates to true, we forward it
                             // TODO: optimization - allow eval on left side data chunk,
                             // right side Datum
-
                             let res = self
                                 .cond
                                 .eval(&inputs)?
@@ -196,7 +204,7 @@ impl DynamicFilterExecutor {
                     }
                     let new_visibility = new_visibility.finish();
 
-                    let (columns, vis) = data_chunk.into_parts();
+                    let (columns, _) = data_chunk.into_parts();
 
                     if new_visibility.num_high_bits() > 0 {
                         let new_chunk = StreamChunk::new(new_ops, columns, Some(new_visibility));
@@ -221,6 +229,8 @@ impl DynamicFilterExecutor {
                         }
                     }
 
+                    // Alternatively, the behaviour can be to flatten the deletion of
+                    // `current_epoch_value` into a NULL represented by a `None: Datum`
                     if !last_is_insert {
                         return Err(anyhow!("RHS updates should always end with inserts").into());
                     }
