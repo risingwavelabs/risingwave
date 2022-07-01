@@ -1,7 +1,7 @@
 // Copyright 2022 Singularity Data
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
-// you may not use this file except in compliance with the License.
+// you may not use this file& except in compliance with the License.
 // You may obtain a copy of the License at
 //
 // http://www.apache.org/licenses/LICENSE-2.0
@@ -12,20 +12,24 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+use std::collections::VecDeque;
 use std::fs::OpenOptions;
 use std::marker::PhantomData;
 use std::mem::{forget, ManuallyDrop};
 use std::os::unix::prelude::{AsRawFd, RawFd};
 use std::path::Path;
 
-use bitvec::prelude::*;
 use bytes::{Buf, BufMut};
 use libc::c_void;
 use nix::fcntl::{fallocate, FallocateFlags};
-use nix::sys::mman::{mmap, msync, munmap, MapFlags, MsFlags, ProtFlags};
+use nix::sys::mman::{mmap, mremap, msync, munmap, MRemapFlags, MapFlags, MsFlags, ProtFlags};
+use nix::sys::stat::fstat;
 
 use super::coding::CacheKey;
 use super::error::Result;
+use super::{utils, ST_BLOCK_SIZE};
+
+const GROW_UNIT: usize = 1024 * 1024; // 1 MiB
 
 pub type SlotId = usize;
 
@@ -41,7 +45,7 @@ impl BlockLoc {
     /// block count in cache file
     #[inline(always)]
     pub fn blen(&self, bsz: u32) -> u32 {
-        u32_align_up(bsz, self.len)
+        utils::u32::align_up(bsz, self.len)
     }
 
     #[inline(always)]
@@ -75,11 +79,6 @@ pub struct MetaFile<K>
 where
     K: CacheKey,
 {
-    /// Meta file capacity in bytes.
-    capacity: usize,
-    /// Total slots of the meta file.
-    slots: usize,
-
     /// File descriptor of the meta file.
     fd: RawFd,
 
@@ -89,9 +88,11 @@ where
     /// Use `ManuallyDrop` to skip `drop()` call of `Vec`, the mapped memory needs to be
     /// `unmmap(2)` manually when dropping.
     buffer: ManuallyDrop<Vec<u8>>,
+    /// Meta file size in bytes.
+    size: usize,
 
-    /// Valid slots bitmap, to fasten free slot seeking.
-    valid: BitVec,
+    /// Valid slots list.
+    valid: VecDeque<usize>,
 
     _phantom: PhantomData<K>,
 }
@@ -103,7 +104,7 @@ impl<K> MetaFile<K>
 where
     K: CacheKey,
 {
-    pub fn open(path: impl AsRef<Path>, capacity: usize) -> Result<Self> {
+    pub fn open(path: impl AsRef<Path>) -> Result<Self> {
         let mut oopts = OpenOptions::new();
         oopts.create(true);
         oopts.write(true);
@@ -113,38 +114,45 @@ where
         // Skip `drop()` for `file`. Close it manually after `msync(2)` and `munmap(2)`.
         forget(file);
 
-        fallocate(fd, FallocateFlags::empty(), 0, capacity as i64)?;
+        let stat = fstat(fd)?;
+        let size = if stat.st_blocks == 0 {
+            // newly created
+            fallocate(fd, FallocateFlags::empty(), 0, GROW_UNIT as i64)?;
+            GROW_UNIT
+        } else {
+            stat.st_blocks as usize * ST_BLOCK_SIZE
+        };
 
         let (ptr, buffer) = unsafe {
             let ptr = mmap(
                 std::ptr::null_mut(),
-                capacity,
+                size,
                 ProtFlags::PROT_READ | ProtFlags::PROT_WRITE,
                 MapFlags::MAP_SHARED,
                 fd,
                 0,
             )? as *mut u8;
-            let buffer = ManuallyDrop::new(Vec::from_raw_parts(ptr, capacity, capacity));
+            let buffer = ManuallyDrop::new(Vec::from_raw_parts(ptr, size, size));
             (ptr, buffer)
         };
 
-        let slots = capacity / Self::slot_info_len();
-        let mut valid = bitvec![usize,Lsb0;0;slots];
-
-        let mut cursor = 0;
-        for slot in 0..slots {
-            valid.set(slot, (&buffer[cursor..cursor + 4]).get_u32() != 0);
-            cursor += BlockLoc::encoded_len() + K::encoded_len();
+        let mut valid = VecDeque::new();
+        for slot in 0..size / Self::slot_info_len() {
+            // Invalid if `len == 0`;
+            if (&buffer[slot * Self::slot_info_len() + 4..slot * Self::slot_info_len() + 8])
+                .get_u32()
+                == 0
+            {
+                valid.push_back(slot);
+            }
         }
 
         Ok(Self {
-            capacity,
-            slots,
-
             fd,
 
             ptr,
             buffer,
+            size,
 
             valid,
 
@@ -152,39 +160,82 @@ where
         })
     }
 
-    pub fn set(&mut self, slot: SlotId, bloc: &BlockLoc, key: &K) {
-        debug_assert!(
-            slot < self.slots,
-            "slot: {}, self.slots: {}",
-            slot,
-            self.slots
-        );
+    pub fn insert(&mut self, key: &K, bloc: &BlockLoc) -> Result<usize> {
+        if self.valid.is_empty() {
+            self.grow()?;
+        }
+        let slot = self.valid.pop_front().unwrap();
+
         let mut cursor = Self::slot_info_len() * slot;
         bloc.encode(&mut self.buffer[cursor..cursor + BlockLoc::encoded_len()]);
         cursor += BlockLoc::encoded_len();
         key.encode(&mut self.buffer[cursor..cursor + K::encoded_len()]);
-        self.valid.set(slot, bloc.is_valid());
+
+        Ok(slot)
     }
 
     pub fn get(&self, slot: SlotId) -> Option<(BlockLoc, K)> {
         debug_assert!(
-            slot < self.slots,
-            "slot: {}, self.slots: {}",
+            (slot + 1) * Self::slot_info_len() <= self.size,
+            "slot: {}, offset: {}, size: {}",
             slot,
-            self.slots
+            slot * Self::slot_info_len(),
+            self.size
         );
-        if !*self.valid.get(slot).unwrap() {
-            return None;
-        }
+
         let mut cursor = Self::slot_info_len() * slot;
+
         let bloc = BlockLoc::decode(&self.buffer[cursor..cursor + BlockLoc::encoded_len()]);
         cursor += BlockLoc::encoded_len();
+
+        if !bloc.is_valid() {
+            return None;
+        }
+
         let key = K::decode(&self.buffer[cursor..cursor + K::encoded_len()]);
+
         Some((bloc, key))
     }
 
+    pub fn size(&self) -> usize {
+        self.size
+    }
+
+    #[inline(always)]
     fn slot_info_len() -> usize {
         BlockLoc::encoded_len() + K::encoded_len()
+    }
+
+    fn grow(&mut self) -> Result<()> {
+        let old_size = self.size;
+        let new_size = old_size + GROW_UNIT;
+
+        fallocate(
+            self.fd,
+            FallocateFlags::empty(),
+            old_size as i64,
+            GROW_UNIT as i64,
+        )?;
+        let (ptr, buffer) = unsafe {
+            let ptr = mremap(
+                self.ptr as *mut c_void,
+                old_size,
+                new_size,
+                MRemapFlags::MREMAP_MAYMOVE,
+                None,
+            )? as *mut u8;
+            let buffer = ManuallyDrop::new(Vec::from_raw_parts(ptr, new_size, new_size));
+            (ptr, buffer)
+        };
+
+        for slot in (old_size / Self::slot_info_len())..(new_size / Self::slot_info_len()) {
+            self.valid.push_back(slot);
+        }
+
+        self.ptr = ptr;
+        self.buffer = buffer;
+        self.size = new_size;
+        Ok(())
     }
 }
 
@@ -194,45 +245,62 @@ where
 {
     fn drop(&mut self) {
         unsafe {
-            msync(self.ptr as *mut c_void, self.capacity, MsFlags::MS_SYNC).unwrap();
-            munmap(self.ptr as *mut c_void, self.capacity).unwrap()
+            msync(self.ptr as *mut c_void, self.size, MsFlags::MS_SYNC).unwrap();
+            munmap(self.ptr as *mut c_void, self.size).unwrap()
         }
         nix::unistd::close(self.fd).unwrap();
     }
 }
 
-#[inline(always)]
-fn u32_align_up(align: u32, v: u32) -> u32 {
-    (v + align - 1) & !(align - 1)
-}
-
 #[cfg(test)]
 mod tests {
+
+    use std::collections::HashMap;
 
     use super::super::test_utils::TestCacheKey;
     use super::*;
 
     #[test]
     fn test_enc_dec() {
-        const SIZE: usize = 4 * 1024 * 1024;
         let dir = tempfile::tempdir().unwrap();
+        let mut map = HashMap::new();
 
-        let mut mf: MetaFile<TestCacheKey> =
-            MetaFile::open(dir.path().join("test-meta-001"), SIZE).unwrap();
+        let mut mf: MetaFile<TestCacheKey> = MetaFile::open(dir.path().join("test-meta")).unwrap();
+        assert_eq!(mf.size(), GROW_UNIT);
 
         let bloc = BlockLoc { bidx: 1, len: 2 };
         let key = TestCacheKey(3);
-        mf.set(0, &bloc, &key);
-        let (bloc0, key0) = mf.get(0).unwrap();
+        let slot = mf.insert(&key, &bloc).unwrap();
+        let (bloc0, key0) = mf.get(slot).unwrap();
         assert_eq!(bloc0, bloc);
         assert_eq!(key0, key);
         drop(mf);
 
-        let mf: MetaFile<TestCacheKey> =
-            MetaFile::open(dir.path().join("test-meta-001"), SIZE).unwrap();
-        let (bloc0, key0) = mf.get(0).unwrap();
+        let mut mf: MetaFile<TestCacheKey> = MetaFile::open(dir.path().join("test-meta")).unwrap();
+        let (bloc0, key0) = mf.get(slot).unwrap();
         assert_eq!(bloc0, bloc);
         assert_eq!(key0, key);
-        drop(mf);
+
+        map.insert(slot, (key, bloc));
+
+        for (i, _) in (0..mf.size)
+            .step_by(MetaFile::<TestCacheKey>::slot_info_len())
+            .enumerate()
+        {
+            let i = i + 1;
+            let key = TestCacheKey(i as u64);
+            let bloc = BlockLoc {
+                bidx: i as u32 * 2,
+                len: i as u32 * 3,
+            };
+            let slot = mf.insert(&key, &bloc).unwrap();
+            map.insert(slot, (key, bloc));
+        }
+        assert_eq!(mf.size(), GROW_UNIT * 2);
+        for (slot, (key, bloc)) in map.drain() {
+            let (gbloc, gkey) = mf.get(slot).unwrap();
+            assert_eq!(gbloc, bloc);
+            assert_eq!(gkey, key);
+        }
     }
 }

@@ -24,7 +24,6 @@ use super::store::{Store, StoreOptions, StoreRef};
 
 pub struct FileCacheOptions {
     pub dir: String,
-    pub slots: usize,
     pub capacity: usize,
     pub cache_file_fallocate_unit: usize,
     pub filters: Vec<Arc<dyn Filter>>,
@@ -49,7 +48,6 @@ where
     pub async fn open(options: FileCacheOptions) -> Result<Self> {
         let cache_file_manager = Store::open(StoreOptions {
             dir: options.dir,
-            slots: options.slots,
             capacity: options.capacity,
             cache_file_fallocate_unit: options.cache_file_fallocate_unit,
         })
@@ -99,7 +97,6 @@ mod tests {
 
         let options = FileCacheOptions {
             dir: tempdir.path().to_str().unwrap().to_string(),
-            slots: 64,
             capacity: 256 * 1024 * 1024,
             cache_file_fallocate_unit: 64 * 1024 * 1024,
             filters: vec![],

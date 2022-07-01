@@ -21,7 +21,7 @@ use risingwave_common::cache::{LruCache, LruCacheEventListener};
 use super::coding::CacheKey;
 use super::error::{Error, Result};
 use super::file::{CacheFile, CacheFileOptions};
-use super::meta::{BlockLoc, MetaFile, SlotId};
+use super::meta::{MetaFile, SlotId};
 
 const META_FILE_FILENAME: &str = "meta";
 const CACHE_FILE_FILENAME: &str = "cache";
@@ -34,7 +34,6 @@ pub enum FsType {
 
 pub struct StoreOptions {
     pub dir: String,
-    pub slots: usize,
     pub capacity: usize,
     pub cache_file_fallocate_unit: usize,
 }
@@ -72,7 +71,6 @@ where
         };
         let fs_block_size = fs_stat.block_size() as usize;
 
-        let mf_capacity = options.slots * (K::encoded_len() + BlockLoc::encoded_len());
         let cf_opts = CacheFileOptions {
             fs_block_size,
             // TODO: Make it configurable.
@@ -80,10 +78,7 @@ where
             fallocate_unit: options.cache_file_fallocate_unit,
         };
 
-        let mf = MetaFile::open(
-            PathBuf::from(&options.dir).join(META_FILE_FILENAME),
-            mf_capacity,
-        )?;
+        let mf = MetaFile::open(PathBuf::from(&options.dir).join(META_FILE_FILENAME))?;
 
         let cf = CacheFile::open(
             PathBuf::from(&options.dir).join(CACHE_FILE_FILENAME),

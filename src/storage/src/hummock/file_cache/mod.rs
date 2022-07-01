@@ -46,6 +46,10 @@ where
 ///
 /// For more details, see man open(2) NOTES section.
 const LOGICAL_BLOCK_SIZE: usize = 512;
+/// Size of `st_blocks` with `fstat(2)`.
+const ST_BLOCK_SIZE: usize = 512;
+
 type DioBuffer = Vec<u8, &'static alloc::AlignedAllocator<LOGICAL_BLOCK_SIZE>>;
+
 static DIO_BUFFER_ALLOCATOR: alloc::AlignedAllocator<LOGICAL_BLOCK_SIZE> =
     alloc::AlignedAllocator::<LOGICAL_BLOCK_SIZE>;

@@ -22,9 +22,7 @@ use nix::fcntl::{fallocate, FallocateFlags};
 use nix::sys::stat::fstat;
 
 use super::error::Result;
-use super::{asyncify, utils, DioBuffer, DIO_BUFFER_ALLOCATOR, LOGICAL_BLOCK_SIZE};
-
-const ST_BLOCK_SIZE: usize = 512;
+use super::{asyncify, utils, DioBuffer, DIO_BUFFER_ALLOCATOR, LOGICAL_BLOCK_SIZE, ST_BLOCK_SIZE};
 
 #[derive(Clone, Debug)]
 pub struct CacheFileOptions {
