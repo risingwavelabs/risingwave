@@ -210,14 +210,6 @@ impl StreamChunkBuilder {
             .into_iter()
             .map(|array_impl| Column::new(Arc::new(array_impl)))
             .collect::<Vec<_>>();
-        dbg!(
-            &self.index_mapping,
-            &self.ops,
-            &new_columns
-                .iter()
-                .map(|col| col.array_ref().len())
-                .collect_vec()
-        );
         Ok(Some(StreamChunk::new(
             std::mem::take(&mut self.ops),
             new_columns,
