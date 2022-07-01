@@ -37,12 +37,13 @@ impl BatchSimpleAgg {
         match input_dist {
             Distribution::Single | Distribution::SomeShard | Distribution::HashShard(_) => {}
         };
-        let base = PlanBase::new_batch(
-            ctx,
-            logical.schema().clone(),
-            input_dist.clone(),
-            Order::any(),
-        );
+        let dist = if logical.agg_calls().iter().any(|call| call.distinct) {
+            // TODO: MPP distinct aggregation
+            Distribution::Single
+        } else {
+            input_dist.clone()
+        };
+        let base = PlanBase::new_batch(ctx, logical.schema().clone(), dist, Order::any());
         BatchSimpleAgg { base, logical }
     }
 
