@@ -4367,6 +4367,7 @@ dependencies = [
  "serde_derive",
  "serde_json",
  "smallvec",
+ "static_assertions",
  "tempfile",
  "thiserror",
  "tokio-retry",

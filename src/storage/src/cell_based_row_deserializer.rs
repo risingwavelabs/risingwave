@@ -125,7 +125,7 @@ impl<Desc: Deref<Target = ColumnDescMapping>> CellBasedRowDeserializer<Desc> {
         }
 
         let (vnode, key_bytes) = if WITH_VNODE {
-            let (vnode_bytes, key_bytes) = raw_key.split_at(2);
+            let (vnode_bytes, key_bytes) = raw_key.split_at(VIRTUAL_NODE_SIZE);
             let vnode = VirtualNode::from_be_bytes(vnode_bytes.try_into().unwrap());
             (vnode, key_bytes)
         } else {

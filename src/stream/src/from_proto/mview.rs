@@ -12,6 +12,8 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+use std::sync::Arc;
+
 use risingwave_common::catalog::{ColumnId, TableId};
 use risingwave_common::util::sort_util::OrderPair;
 
@@ -56,6 +58,7 @@ impl ExecutorBuilder for MaterializeExecutorBuilder {
             column_ids,
             params.executor_id,
             distribution_keys,
+            params.vnode_bitmap.map(Arc::new),
         );
 
         Ok(executor.boxed())
@@ -95,6 +98,11 @@ impl ExecutorBuilder for ArrangeExecutorBuilder {
             .map(|key| *key as usize)
             .collect();
 
+        // FIXME: Lookup is now implemented without cell-based table API and relies on all vnodes
+        // being `DEFAULT_VNODE`, so we need to make the Arrange a singleton.
+        let vnodes = None;
+        // let vnodes = params.vnode_bitmap.map(Arc::new);
+
         let executor = MaterializeExecutor::new(
             params.input.remove(0),
             keyspace,
@@ -102,6 +110,7 @@ impl ExecutorBuilder for ArrangeExecutorBuilder {
             column_ids,
             params.executor_id,
             distribution_keys,
+            vnodes,
         );
 
         Ok(executor.boxed())
