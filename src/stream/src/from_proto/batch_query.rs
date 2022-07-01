@@ -16,6 +16,7 @@ use itertools::Itertools;
 use risingwave_common::catalog::{ColumnDesc, ColumnId, OrderedColumnDesc, TableId};
 use risingwave_pb::plan_common::CellBasedTableDesc;
 use risingwave_storage::table::cell_based_table::CellBasedTable;
+use risingwave_storage::table::Distribution;
 use risingwave_storage::{Keyspace, StateStore};
 
 use super::*;
@@ -30,7 +31,6 @@ impl ExecutorBuilder for BatchQueryExecutorBuilder {
         state_store: impl StateStore,
         _stream: &mut LocalStreamManagerCore,
     ) -> Result<BoxedExecutor> {
-        let pk_indices = node.pk_indices.iter().map(|&i| i as usize).collect();
         let node = try_match_expand!(node.get_node_body().unwrap(), NodeBody::BatchPlan)?;
 
         let table_desc: &CellBasedTableDesc = node.get_table_desc()?;
@@ -57,21 +57,36 @@ impl ExecutorBuilder for BatchQueryExecutorBuilder {
             .map(ColumnId::from)
             .collect();
 
+        // Use indices based on full table instead of streaming executor output.
+        let pk_indices = table_desc
+            .pk_indices
+            .iter()
+            .map(|&k| k as usize)
+            .collect_vec();
+
+        let dist_key_indices = table_desc
+            .dist_key_indices
+            .iter()
+            .map(|&k| k as usize)
+            .collect_vec();
+
         let keyspace = Keyspace::table_root(state_store, &table_id);
+
+        let distribution = match params.vnode_bitmap {
+            Some(vnodes) => Distribution {
+                dist_key_indices,
+                vnodes: vnodes.into(),
+            },
+            None => Distribution::fallback(),
+        };
         let table = CellBasedTable::new_partial(
             keyspace,
             column_descs,
             column_ids,
             order_types,
             pk_indices,
+            distribution,
         );
-        let key_indices = node
-            .get_distribution_keys()
-            .iter()
-            .map(|key| *key as usize)
-            .collect_vec();
-
-        let hash_filter = params.vnode_bitmap.expect("no vnode bitmap");
 
         let schema = table.schema().clone();
         let executor = BatchQueryExecutor::new(
@@ -82,8 +97,6 @@ impl ExecutorBuilder for BatchQueryExecutorBuilder {
                 pk_indices: params.pk_indices,
                 identity: "BatchQuery".to_owned(),
             },
-            key_indices,
-            hash_filter,
             pk_descs,
         );
 
