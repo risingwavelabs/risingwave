@@ -644,7 +644,7 @@ impl<K: HashKey, S: StateStore, const T: JoinTypePrimitive> HashJoinExecutor<K, 
                 let new_row =
                     Self::row_concat(row_update, update_start_pos, row_matched, matched_start_pos);
 
-                cond_match = cond.eval(&new_row)?.unwrap_or(false);
+                cond_match = cond.eval(&new_row)?.map(|s| *s.as_bool()).unwrap_or(false);
             }
             Ok(cond_match)
         };
