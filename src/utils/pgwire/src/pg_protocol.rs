@@ -179,14 +179,11 @@ where
                     if types.is_empty() {
                         let session = self.session.clone().unwrap();
                         let rows_res = session.infer_return_type(query).await;
-                        match rows_res {
-                            Ok(r) => r,
-                            Err(e) => {
-                                self.write_message_no_flush(&BeMessage::ErrorResponse(e))?;
-                                // TODO: Error handle needed modified later.
-                                unimplemented!();
-                            }
+                        if let Err(e) = rows_res {
+                            self.write_message_no_flush(&BeMessage::ErrorResponse(e))?;
+                            return Ok(false);
                         }
+                        rows_res.unwrap()
                     } else {
                         query
                             .split(&[' ', ',', ';'])
@@ -269,7 +266,7 @@ where
                     unnamed_portal
                 } else {
                     // NOTE Error handle need modify later.
-                    named_portals.get_mut(&portal_name).expect("statement_name managed by client_driver, hence assume statement name always valid")
+                    named_portals.get_mut(&portal_name).expect("portal_name managed by client_driver, hence assume portal name always valid")
                 };
 
                 tracing::trace!(
@@ -316,8 +313,11 @@ where
                     self.write_message(&BeMessage::RowDescription(&portal.row_desc()))
                         .await?;
                 } else {
-                    // TODO: Error Handle #3404
-                    todo!()
+                    self.write_message(&BeMessage::ErrorResponse(
+                        PsqlError::unrecognized_param(&(m.kind as char).to_string()).into(),
+                    ))
+                    .await?;
+                    return Ok(true);
                 }
             }
             FeMessage::Sync => {
@@ -330,7 +330,11 @@ where
                 } else if m.kind == b'P' {
                     named_portals.remove_entry(&name);
                 } else {
-                    // NOTE Error handle need modify later.
+                    self.write_message(&BeMessage::ErrorResponse(
+                        PsqlError::unrecognized_param(&(m.kind as char).to_string()).into(),
+                    ))
+                    .await?;
+                    return Ok(true);
                 }
                 self.write_message(&BeMessage::CloseComplete).await?;
             }
