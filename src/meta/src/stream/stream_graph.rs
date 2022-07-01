@@ -518,10 +518,6 @@ impl StreamGraphBuilder {
                 .or_insert(vec![])
                 .push(actor);
         }
-        for actor_ids in ctx.upstream_node_actors.values_mut() {
-            actor_ids.sort_unstable();
-            actor_ids.dedup();
-        }
 
         Ok((graph, internal_tables))
     }
