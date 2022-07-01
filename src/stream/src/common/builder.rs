@@ -107,6 +107,10 @@ impl StreamChunkBuilder {
         })
     }
 
+    fn original_output_column_count(&self) -> usize {
+        self.index_mapping.len()
+    }
+
     /// Increase chunk size
     ///
     /// A [`StreamChunk`] will be returned when `size == capacity`
@@ -160,7 +164,7 @@ impl StreamChunkBuilder {
                 self.column_builders[idx].append_datum_ref(d)?;
             }
         }
-        for i in 0..self.column_builders.len() - row_update.size() {
+        for i in 0..self.original_output_column_count() - row_update.size() {
             if let Some(idx) = self.index_mapping[i + self.matched_start_pos] {
                 self.column_builders[idx].append_datum(&None)?;
             }
@@ -178,7 +182,7 @@ impl StreamChunkBuilder {
         row_matched: &Row,
     ) -> ArrayResult<Option<StreamChunk>> {
         self.ops.push(op);
-        for i in 0..self.column_builders.len() - row_matched.size() {
+        for i in 0..self.original_output_column_count() - row_matched.size() {
             if let Some(idx) = self.index_mapping[i + self.update_start_pos] {
                 self.column_builders[idx].append_datum_ref(None)?;
             }
@@ -206,7 +210,14 @@ impl StreamChunkBuilder {
             .into_iter()
             .map(|array_impl| Column::new(Arc::new(array_impl)))
             .collect::<Vec<_>>();
-
+        dbg!(
+            &self.index_mapping,
+            &self.ops,
+            &new_columns
+                .iter()
+                .map(|col| col.array_ref().len())
+                .collect_vec()
+        );
         Ok(Some(StreamChunk::new(
             std::mem::take(&mut self.ops),
             new_columns,
