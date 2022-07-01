@@ -27,6 +27,7 @@ use risingwave_hummock_sdk::key::range_of_prefix;
 
 use super::cell_based_table::{CellBasedTableBase, READ_WRITE};
 use super::mem_table::{MemTable, RowOp};
+use super::Distribution;
 use crate::cell_based_row_serializer::CellBasedRowSerializer;
 use crate::dedup_pk_cell_based_row_serializer::DedupPkCellBasedRowSerializer;
 use crate::error::{StorageError, StorageResult};
@@ -52,21 +53,41 @@ pub struct StateTableBase<S: StateStore, SER: RowSerializer> {
 }
 
 impl<S: StateStore, SER: RowSerializer> StateTableBase<S, SER> {
+    /// Note: `dist_key_indices` is ignored, use `new_with[out]_distribution` instead.
+    // TODO: remove this after all state table usages are replaced by `new_with[out]_distribution`.
     pub fn new(
         keyspace: Keyspace<S>,
-        column_descs: Vec<ColumnDesc>,
+        columns: Vec<ColumnDesc>,
         order_types: Vec<OrderType>,
-        dist_key_indices: Option<Vec<usize>>,
+        _dist_key_indices: Option<Vec<usize>>,
         pk_indices: Vec<usize>,
+    ) -> Self {
+        Self::new_with_distribution(
+            keyspace,
+            columns,
+            order_types,
+            pk_indices,
+            Distribution::fallback(),
+        )
+    }
+
+    /// Create a state table with distribution specified with `distribution`. Should use
+    /// `Distribution::fallback()` for singleton executors and tests.
+    pub fn new_with_distribution(
+        keyspace: Keyspace<S>,
+        columns: Vec<ColumnDesc>,
+        order_types: Vec<OrderType>,
+        pk_indices: Vec<usize>,
+        distribution: Distribution,
     ) -> Self {
         Self {
             mem_table: MemTable::new(),
             cell_based_table: CellBasedTableBase::new(
                 keyspace,
-                column_descs,
+                columns,
                 order_types,
                 pk_indices,
-                dist_key_indices,
+                distribution,
             ),
         }
     }
@@ -94,7 +115,7 @@ impl<S: StateStore, SER: RowSerializer> StateTableBase<S, SER> {
     /// value. To convert `Option<Cow<Row>>` to `Option<Row>`, just call `into_owned`.
     pub async fn get_row<'a>(
         &'a self,
-        pk: &'_ Row,
+        pk: &'a Row,
         epoch: u64,
     ) -> StorageResult<Option<Cow<'a, Row>>> {
         let pk_bytes = serialize_pk(pk, self.pk_serializer());

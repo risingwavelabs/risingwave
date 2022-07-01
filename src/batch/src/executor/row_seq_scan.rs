@@ -18,9 +18,10 @@ use futures::pin_mut;
 use futures_async_stream::try_stream;
 use itertools::Itertools;
 use risingwave_common::array::{DataChunk, Row};
+use risingwave_common::buffer::Bitmap;
 use risingwave_common::catalog::{ColumnDesc, ColumnId, OrderedColumnDesc, Schema, TableId};
 use risingwave_common::error::{Result, RwError};
-use risingwave_common::types::{DataType, Datum, ScalarImpl};
+use risingwave_common::types::{DataType, Datum, ScalarImpl, VIRTUAL_NODE_COUNT};
 use risingwave_common::util::sort_util::OrderType;
 use risingwave_pb::batch_plan::plan_node::NodeBody;
 use risingwave_pb::batch_plan::{scan_range, ScanRange};
@@ -28,7 +29,7 @@ use risingwave_pb::plan_common::CellBasedTableDesc;
 use risingwave_storage::table::cell_based_table::{
     BatchDedupPkIter, CellBasedIter, CellBasedTable,
 };
-use risingwave_storage::table::TableIter;
+use risingwave_storage::table::{Distribution, TableIter};
 use risingwave_storage::{dispatch_state_store, Keyspace, StateStore, StateStoreImpl};
 
 use crate::executor::monitor::BatchMetrics;
@@ -168,18 +169,6 @@ impl BoxedExecutorBuilder for RowSeqScanExecutorBuilder {
             table_desc.order_key.iter().map(|d| d.into()).collect();
         let order_types: Vec<OrderType> = pk_descs.iter().map(|desc| desc.order).collect();
 
-        let pk_indices = pk_descs
-            .iter()
-            .map(|desc| desc.column_desc.column_id)
-            .map(|pk_id| {
-                column_descs
-                    .iter()
-                    .find_position(|desc| desc.column_id == pk_id)
-                    .unwrap()
-                    .0
-            })
-            .collect_vec();
-
         let scan_range = seq_scan_node.scan_range.as_ref().unwrap();
         let (pk_prefix_value, next_col_bounds) = get_scan_bound(
             scan_range.clone(),
@@ -187,10 +176,23 @@ impl BoxedExecutorBuilder for RowSeqScanExecutorBuilder {
                 .iter()
                 .map(|desc| desc.column_desc.data_type.clone()),
         );
-        warn!(
-            "scan_range: {:#?}\npk_prefix_value: {:#?}",
-            scan_range, pk_prefix_value
-        );
+
+        let pk_indices = table_desc
+            .pk_indices
+            .iter()
+            .map(|&k| k as usize)
+            .collect_vec();
+
+        let dist_key_indices = table_desc
+            .dist_key_indices
+            .iter()
+            .map(|&k| k as usize)
+            .collect_vec();
+        let vnodes = Bitmap::all_high_bits(VIRTUAL_NODE_COUNT); // TODO: use vnodes from scheduler to parallelize scan
+        let distribution = Distribution {
+            vnodes: vnodes.into(),
+            dist_key_indices,
+        };
 
         dispatch_state_store!(source.context().try_get_state_store()?, state_store, {
             let keyspace = Keyspace::table_root(state_store.clone(), &table_id);
@@ -201,7 +203,7 @@ impl BoxedExecutorBuilder for RowSeqScanExecutorBuilder {
                 column_ids,
                 order_types,
                 pk_indices,
-                None,
+                distribution,
             );
 
             let scan_type = if pk_prefix_value.size() == 0 && is_full_range(&next_col_bounds) {

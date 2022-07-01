@@ -143,3 +143,25 @@ pub fn gen_merge_iterator_interleave_test_sstable_iters(
         })
         .collect_vec()
 }
+
+pub async fn gen_iterator_test_sstable_with_incr_epoch(
+    sst_id: HummockSSTableId,
+    opts: SSTableBuilderOptions,
+    idx_mapping: impl Fn(usize) -> usize,
+    sstable_store: SstableStoreRef,
+    total: usize,
+    epoch_base: u64,
+) -> Sstable {
+    gen_test_sstable(
+        opts,
+        sst_id,
+        (0..total).map(|i| {
+            (
+                iterator_test_key_of_epoch(idx_mapping(i), epoch_base + i as u64),
+                HummockValue::put(iterator_test_value_of(idx_mapping(i))),
+            )
+        }),
+        sstable_store,
+    )
+    .await
+}

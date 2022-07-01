@@ -1,3 +1,5 @@
+control sortmode rowsort
+
 # Create a super user.
 statement ok
 CREATE USER user WITH SUPERUSER PASSWORD 'password';
