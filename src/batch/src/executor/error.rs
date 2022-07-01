@@ -35,8 +35,8 @@ pub enum BatchExecutorError {
     #[error("Expr error: {0}")]
     Expr(Box<dyn Error>),
 
-    #[error("Can't get sourse in {0} Executor")]
-    Source(&'static str),
+    #[error(transparent)]
+    RwError(#[from] RwError),
 
     #[error(transparent)]
     Internal(#[from] anyhow::Error),
@@ -44,6 +44,9 @@ pub enum BatchExecutorError {
 
 impl From<BatchExecutorError> for RwError {
     fn from(s: BatchExecutorError) -> Self {
-        ErrorCode::BatchExecutorError(Box::new(s)).into()
+        match s {
+            BatchExecutorError::RwError(e) => e,
+            _ => ErrorCode::BatchExecutorError(Box::new(s)).into(),
+        }
     }
 }
