@@ -1,5 +1,3 @@
-control sortmode rowsort
-
 statement ok
 SET RW_FORCE_DELTA_JOIN TO true;
 

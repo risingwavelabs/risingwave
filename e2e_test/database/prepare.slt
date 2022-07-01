@@ -1,5 +1,3 @@
-control sortmode rowsort
-
 # Create a test database.
 statement ok
 create database test;

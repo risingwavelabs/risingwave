@@ -1,5 +1,3 @@
-control sortmode rowsort
-
 statement ok
 create materialized source s1 (v1 int, v2 varchar) with ( 'connector' = 'kafka', 'kafka.topic' = 'kafka_1_partition_topic', 'kafka.brokers' = '127.0.0.1:29092', 'kafka.scan.startup.mode'='earliest' ) row format json
 

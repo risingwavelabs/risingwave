@@ -1,4 +1,2 @@
-control sortmode rowsort
-
 statement ok
 set extra_float_digits = 3;
