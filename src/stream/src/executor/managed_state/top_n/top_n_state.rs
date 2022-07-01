@@ -24,7 +24,7 @@ use risingwave_common::types::DataType;
 use risingwave_common::util::ordered::*;
 use risingwave_common::util::sort_util::OrderType;
 use risingwave_storage::table::state_table::StateTable;
-use risingwave_storage::{Keyspace, StateStore};
+use risingwave_storage::StateStore;
 
 use super::variants::*;
 use crate::executor::error::StreamExecutorResult;
@@ -309,7 +309,7 @@ mod tests {
     use risingwave_common::types::DataType;
     use risingwave_common::util::sort_util::OrderType;
     use risingwave_storage::memory::MemoryStateStore;
-    use risingwave_storage::{Keyspace, StateStore};
+    use risingwave_storage::StateStore;
 
     use super::super::variants::TOP_N_MAX;
     use super::*;
@@ -324,7 +324,7 @@ mod tests {
         let ordered_row_deserializer = OrderedRowDeserializer::new(data_types.clone(), order_types);
 
         ManagedTopNState::<S, TOP_N_TYPE>::new(
-            Some(0),
+            Some(2),
             row_count,
             store.clone(),
             TableId::from(0x2333),

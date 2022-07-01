@@ -24,7 +24,7 @@ use risingwave_common::catalog::{Schema, TableId};
 use risingwave_common::hash::HashKey;
 use risingwave_common::types::{DataType, ToOwnedDatum};
 use risingwave_expr::expr::RowExpression;
-use risingwave_storage::{Keyspace, StateStore};
+use risingwave_storage::StateStore;
 
 use super::barrier_align::*;
 use super::error::{StreamExecutorError, StreamExecutorResult};

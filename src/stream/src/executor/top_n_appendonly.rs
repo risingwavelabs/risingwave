@@ -17,7 +17,7 @@ use risingwave_common::array::{Op, StreamChunk};
 use risingwave_common::catalog::{Schema, TableId};
 use risingwave_common::util::ordered::{OrderedRow, OrderedRowDeserializer};
 use risingwave_common::util::sort_util::{OrderPair, OrderType};
-use risingwave_storage::{Keyspace, StateStore};
+use risingwave_storage::StateStore;
 
 use super::error::StreamExecutorResult;
 use super::managed_state::top_n::variants::TOP_N_MAX;
@@ -41,7 +41,9 @@ impl<S: StateStore> AppendOnlyTopNExecutor<S> {
         offset_and_limit: (usize, Option<usize>),
         pk_indices: PkIndices,
         store: S,
-        table_id: TableId,
+        table_id_l: TableId,
+        table_id_h: TableId,
+
         cache_size: Option<usize>,
         total_count: (usize, usize),
         executor_id: u64,
@@ -59,7 +61,8 @@ impl<S: StateStore> AppendOnlyTopNExecutor<S> {
                 offset_and_limit,
                 pk_indices,
                 store,
-                table_id,
+                table_id_l,
+                table_id_h,
                 cache_size,
                 total_count,
                 executor_id,
@@ -116,7 +119,8 @@ impl<S: StateStore> InnerAppendOnlyTopNExecutor<S> {
         offset_and_limit: (usize, Option<usize>),
         pk_indices: PkIndices,
         store: S,
-        table_id: TableId,
+        table_id_l: TableId,
+        table_id_h: TableId,
         cache_size: Option<usize>,
         total_count: (usize, usize),
         executor_id: u64,
@@ -145,7 +149,7 @@ impl<S: StateStore> InnerAppendOnlyTopNExecutor<S> {
                 cache_size,
                 total_count.0,
                 store.clone(),
-                table_id.clone(),
+                table_id_l,
                 row_data_types.clone(),
                 ordered_row_deserializer.clone(),
                 internal_key_indices.clone(),
@@ -153,8 +157,8 @@ impl<S: StateStore> InnerAppendOnlyTopNExecutor<S> {
             managed_higher_state: ManagedTopNState::<S, TOP_N_MAX>::new(
                 cache_size,
                 total_count.1,
-                store.clone(),
-                table_id.clone(),
+                store,
+                table_id_h,
                 row_data_types,
                 ordered_row_deserializer,
                 internal_key_indices.clone(),
@@ -292,7 +296,7 @@ mod tests {
     use risingwave_common::util::sort_util::{OrderPair, OrderType};
     use risingwave_storage::memory::MemoryStateStore;
 
-    use crate::executor::test_utils::{create_in_memory_keyspace, MockSource};
+    use crate::executor::test_utils::MockSource;
     use crate::executor::top_n_appendonly::AppendOnlyTopNExecutor;
     use crate::executor::{Barrier, Epoch, Executor, Message, PkIndices};
 
@@ -370,7 +374,6 @@ mod tests {
         let order_pairs = create_order_pairs();
         let source = create_source();
 
-        let keyspace = create_in_memory_keyspace();
         let top_n_executor = Box::new(
             AppendOnlyTopNExecutor::new(
                 source as Box<dyn Executor>,
@@ -379,6 +382,7 @@ mod tests {
                 vec![0, 1],
                 MemoryStateStore::new(),
                 TableId::from(0x2333),
+                TableId::from(0x2334),
                 Some(2),
                 (0, 0),
                 1,
@@ -445,7 +449,6 @@ mod tests {
         let order_pairs = create_order_pairs();
         let source = create_source();
 
-        let keyspace = create_in_memory_keyspace();
         let top_n_executor = Box::new(
             AppendOnlyTopNExecutor::new(
                 source as Box<dyn Executor>,
@@ -454,6 +457,7 @@ mod tests {
                 vec![0, 1],
                 MemoryStateStore::new(),
                 TableId::from(0x2333),
+                TableId::from(0x2334),
                 Some(2),
                 (0, 0),
                 1,
@@ -526,7 +530,6 @@ mod tests {
         let order_pairs = create_order_pairs();
         let source = create_source();
 
-        let keyspace = create_in_memory_keyspace();
         let top_n_executor = Box::new(
             AppendOnlyTopNExecutor::new(
                 source as Box<dyn Executor>,
@@ -535,6 +538,7 @@ mod tests {
                 vec![0, 1],
                 MemoryStateStore::new(),
                 TableId::from(0x2333),
+                TableId::from(0x2334),
                 Some(2),
                 (0, 0),
                 1,

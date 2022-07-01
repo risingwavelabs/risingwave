@@ -344,11 +344,14 @@ impl StreamFragmenter {
             }
 
             NodeBody::TopN(top_n_node) => {
-                top_n_node.table_id = state.gen_table_id();
+                top_n_node.table_id_l = state.gen_table_id();
+                top_n_node.table_id_m = state.gen_table_id();
+                top_n_node.table_id_h = state.gen_table_id();
             }
 
             NodeBody::AppendOnlyTopN(append_only_top_n_node) => {
-                append_only_top_n_node.table_id = state.gen_table_id();
+                append_only_top_n_node.table_id_l = state.gen_table_id();
+                append_only_top_n_node.table_id_h = state.gen_table_id();
             }
 
             _ => {}
@@ -535,7 +538,7 @@ mod tests {
 
             if let NodeBody::TopN(top_n_node) = stream_node.node_body.as_ref().unwrap() {
                 expect_table_id += 1;
-                assert_eq!(expect_table_id, top_n_node.table_id);
+                assert_eq!(expect_table_id, top_n_node.table_id_l);
             }
         }
 
@@ -552,8 +555,8 @@ mod tests {
             if let NodeBody::AppendOnlyTopN(append_only_top_n_node) =
                 stream_node.node_body.as_ref().unwrap()
             {
-                expect_table_id += 1;
-                assert_eq!(expect_table_id, append_only_top_n_node.table_id);
+                expect_table_id += 3;
+                assert_eq!(expect_table_id, append_only_top_n_node.table_id_l);
             }
         }
     }

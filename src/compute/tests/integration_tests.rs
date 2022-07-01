@@ -41,7 +41,7 @@ use risingwave_storage::table::state_table::StateTable;
 use risingwave_storage::Keyspace;
 use risingwave_stream::executor::monitor::StreamingMetrics;
 use risingwave_stream::executor::{
-    Barrier, Executor as StreamExecutor, MaterializeExecutor, Message, PkIndices, SourceExecutor,
+    Barrier, Executor, MaterializeExecutor, Message, PkIndices, SourceExecutor,
 };
 use tokio::sync::mpsc::unbounded_channel;
 
@@ -152,10 +152,10 @@ async fn test_table_v2_materialize() -> Result<()> {
     )?;
 
     // Create a `Materialize` to write the changes to storage
-    let keyspace = Keyspace::table_root(memory_state_store.clone(), &source_table_id);
     let mut materialize = MaterializeExecutor::new(
         Box::new(stream_source),
-        keyspace.clone(),
+        memory_state_store.clone(),
+        source_table_id,
         vec![OrderPair::new(0, OrderType::Ascending)],
         all_column_ids.clone(),
         2,
@@ -378,7 +378,6 @@ async fn test_table_v2_materialize() -> Result<()> {
 async fn test_row_seq_scan() -> Result<()> {
     // In this test we test if the memtable can be correctly scanned for K-V pair insertions.
     let memory_state_store = MemoryStateStore::new();
-    let keyspace = Keyspace::table_root(memory_state_store.clone(), &TableId::from(0x42));
 
     let schema = Schema::new(vec![
         Field::unnamed(DataType::Int32), // pk
@@ -394,7 +393,8 @@ async fn test_row_seq_scan() -> Result<()> {
     ];
 
     let mut state = StateTable::new(
-        keyspace.clone(),
+        memory_state_store.clone(),
+        TableId::from(0x42),
         column_descs.clone(),
         vec![OrderType::Ascending],
         None,

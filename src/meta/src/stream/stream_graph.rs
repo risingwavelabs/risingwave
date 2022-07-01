@@ -604,8 +604,10 @@ impl StreamGraphBuilder {
                     }
 
                     NodeBody::TopN(node) | NodeBody::AppendOnlyTopN(node) => {
-                        node.table_id += table_id_offset;
-                        ctx.internal_table_id_set.insert(node.table_id);
+                        node.table_id_l += table_id_offset;
+                        node.table_id_m += table_id_offset;
+                        node.table_id_h += table_id_offset;
+                        ctx.internal_table_id_set.insert(node.table_id_l);
                     }
 
                     NodeBody::GlobalSimpleAgg(node) | NodeBody::LocalSimpleAgg(node) => {

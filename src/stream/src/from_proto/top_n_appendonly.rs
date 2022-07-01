@@ -40,7 +40,8 @@ impl ExecutorBuilder for AppendOnlyTopNExecutorBuilder {
         };
         let cache_size = Some(1024);
         let total_count = (0, 0);
-        let table_id = TableId::new(node.table_id);
+        let table_id_l = TableId::new(node.table_id_l);
+        let table_id_h = TableId::new(node.table_id_h);
         let key_indices = node
             .get_distribution_keys()
             .iter()
@@ -53,7 +54,8 @@ impl ExecutorBuilder for AppendOnlyTopNExecutorBuilder {
             (node.offset as usize, limit),
             params.pk_indices,
             store,
-            table_id,
+            table_id_l,
+            table_id_h,
             cache_size,
             total_count,
             params.executor_id,

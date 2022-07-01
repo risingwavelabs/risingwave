@@ -16,7 +16,6 @@ use futures::StreamExt;
 use futures_async_stream::try_stream;
 use risingwave_common::catalog::{Schema, TableId};
 use risingwave_storage::memory::MemoryStateStore;
-use risingwave_storage::Keyspace;
 use tokio::sync::mpsc;
 
 use super::error::StreamExecutorError;
@@ -131,10 +130,6 @@ impl Executor for MockSource {
     }
 }
 
-pub fn create_in_memory_keyspace() -> Keyspace<MemoryStateStore> {
-    Keyspace::table_root(MemoryStateStore::new(), &TableId::from(0x2333))
-}
-
 /// `row_nonnull` builds a `Row` with concrete values.
 /// TODO: add macro row!, which requires a new trait `ToScalarValue`.
 #[macro_export]
@@ -149,14 +144,11 @@ macro_rules! row_nonnull {
 }
 
 /// Create a vector of memory keyspace with len `num_ks`.
-pub fn create_in_memory_keyspace_agg(num_ks: usize) -> Vec<Keyspace<MemoryStateStore>> {
+pub fn create_in_memory_keyspace_agg(num_ks: usize) -> Vec<(MemoryStateStore, TableId)> {
     let mut returned_vec = vec![];
     let mem_state = MemoryStateStore::new();
     for idx in 0..num_ks {
-        returned_vec.push(Keyspace::table_root(
-            mem_state.clone(),
-            &TableId::new(idx as u32),
-        ));
+        returned_vec.push((mem_state.clone(), TableId::new(idx as u32)));
     }
     returned_vec
 }
@@ -255,14 +247,15 @@ pub mod global_simple_agg {
     use risingwave_common::types::DataType;
     use risingwave_common::util::sort_util::OrderType;
     use risingwave_expr::expr::AggKind;
+    use risingwave_storage::memory::MemoryStateStore;
     use risingwave_storage::table::state_table::StateTable;
-    use risingwave_storage::{Keyspace, StateStore};
+    use risingwave_storage::StateStore;
 
     use crate::executor::aggregation::{generate_agg_schema, AggCall};
     use crate::executor::{BoxedExecutor, Executor, GlobalSimpleAggExecutor, PkIndices};
 
     pub fn new_boxed_simple_agg_executor(
-        keyspace: Vec<Keyspace<impl StateStore>>,
+        keyspace_gen: Vec<(MemoryStateStore, TableId)>,
         input: BoxedExecutor,
         agg_calls: Vec<AggCall>,
         pk_indices: PkIndices,
@@ -270,13 +263,13 @@ pub mod global_simple_agg {
         key_indices: Vec<usize>,
     ) -> Box<dyn Executor> {
         let agg_schema = generate_agg_schema(input.as_ref(), &agg_calls, Some(&key_indices));
-        let state_tables = keyspace
+        let state_tables = keyspace_gen
             .iter()
             .zip_eq(agg_calls.iter())
             .map(|(ks, agg_call)| {
                 generate_state_table(
-                    store,
-                    table_id,
+                    ks.0.clone(),
+                    ks.1,
                     agg_call,
                     &key_indices,
                     &pk_indices,

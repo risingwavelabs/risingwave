@@ -75,8 +75,14 @@ impl<S: StateStore> ManagedTopNBottomNState<S> {
                 ColumnDesc::unnamed(ColumnId::from(id as i32), data_type.clone())
             })
             .collect::<Vec<_>>();
-        let state_table =
-            StateTable::new(store, table_id, column_descs, order_type, None, pk_indices);
+        let state_table = StateTable::new(
+            store.clone(),
+            table_id,
+            column_descs,
+            order_type,
+            None,
+            pk_indices,
+        );
         let keyspace = Keyspace::table_root(store, &table_id);
         Self {
             top_n: BTreeMap::new(),
@@ -320,7 +326,7 @@ mod tests {
     use risingwave_common::types::DataType;
     use risingwave_common::util::sort_util::OrderType;
     use risingwave_storage::memory::MemoryStateStore;
-    use risingwave_storage::{Keyspace, StateStore};
+    use risingwave_storage::StateStore;
 
     use super::*;
     use crate::row_nonnull;
