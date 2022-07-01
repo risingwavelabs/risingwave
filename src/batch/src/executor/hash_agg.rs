@@ -219,7 +219,7 @@ impl<K: HashKey + Send + Sync> HashAggExecutor<K> {
                 .group_key_types
                 .iter()
                 .map(|datatype| datatype.create_array_builder(cardinality))
-                .try_collect()?;
+                .collect();
 
             let mut agg_builders: Vec<_> = self
                 .agg_factories
@@ -229,7 +229,7 @@ impl<K: HashKey + Send + Sync> HashAggExecutor<K> {
                         .get_return_type()
                         .create_array_builder(cardinality)
                 })
-                .try_collect()?;
+                .collect();
 
             let mut has_next = false;
             let mut array_len = 0;

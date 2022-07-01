@@ -77,7 +77,10 @@ impl ExecutorBuilder for HashAggExecutorBuilder {
             .map(|idx| input.schema().fields[*idx].data_type())
             .collect_vec();
         let kind = calc_hash_key_kind(&keys);
-        let state_tables = generate_state_tables_from_proto(store, &node.internal_tables);
+
+        let vnodes = params.vnode_bitmap.expect("vnodes not set for hash agg");
+        let state_tables =
+            generate_state_tables_from_proto(store, &node.internal_tables, Some(vnodes.into()));
 
         let args = HashAggExecutorDispatcherArgs {
             input,

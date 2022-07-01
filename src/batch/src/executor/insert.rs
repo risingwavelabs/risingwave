@@ -86,7 +86,7 @@ impl InsertExecutor {
             assert!(data_chunk.visibility().is_none());
 
             // add row-id column as first column
-            let mut builder = I64ArrayBuilder::new(len).unwrap();
+            let mut builder = I64ArrayBuilder::new(len);
             for _ in 0..len {
                 builder.append(Some(source_desc.next_row_id())).unwrap();
             }
@@ -116,7 +116,7 @@ impl InsertExecutor {
 
         // create ret value
         {
-            let mut array_builder = PrimitiveArrayBuilder::<i64>::new(1)?;
+            let mut array_builder = PrimitiveArrayBuilder::<i64>::new(1);
             array_builder.append(Some(rows_inserted as i64))?;
 
             let array = array_builder.finish()?;
@@ -306,6 +306,7 @@ mod tests {
                 ReadOptions {
                     epoch,
                     table_id: Default::default(),
+                    ttl: None,
                 },
             )
             .await?;
