@@ -308,8 +308,6 @@ impl LogicalAgg {
 struct LogicalAggBuilder {
     /// the builder of the input Project
     input_proj_builder: LogicalProjectBuilder,
-    /// the column [0..input_group_key_num) in the project's output is the group key
-    input_group_key_num: usize,
     /// the group keys column indices in the project's output
     group_keys: Vec<usize>,
     /// the agg calls
@@ -336,13 +334,11 @@ impl LogicalAggBuilder {
             .map(|expr| input_proj_builder.add_expr(&expr))
             .collect_vec();
 
-        let input_group_key_num = input_proj_builder.exprs_num();
         Ok(LogicalAggBuilder {
             group_keys,
             agg_calls: vec![],
             error: None,
             input_proj_builder,
-            input_group_key_num,
         })
     }
 
@@ -360,6 +356,20 @@ impl LogicalAggBuilder {
             return Err(error.into());
         }
         Ok(rewritten_expr)
+    }
+
+    /// check if the expression is a group by key, and try to return the group key
+    pub fn try_as_group_expr(&self, expr: &ExprImpl) -> Option<usize> {
+        if let Some(input_index) = self.input_proj_builder.expr_index(&expr) {
+            if let Some(index) = self
+                .group_keys
+                .iter()
+                .position(|group_key| *group_key == input_index)
+            {
+                return Some(index);
+            }
+        }
+        return None;
     }
 }
 
@@ -444,9 +454,9 @@ impl ExprRewriter for LogicalAggBuilder {
     /// When there is an `FunctionCall` (outside of agg call), it must refers to a group column.
     /// Or all `InputRef`s appears in it must refer to a group column.
     fn rewrite_function_call(&mut self, func_call: FunctionCall) -> ExprImpl {
-        let expr: ExprImpl = func_call.into();
-        if let Some(index) = self.input_proj_builder.expr_index(&expr) && index < self.input_group_key_num {
-            InputRef::new(index, expr.return_type()).into()
+        let expr = func_call.into();
+        if let Some(group_key) = self.try_as_group_expr(&expr) {
+            InputRef::new(group_key, expr.return_type()).into()
         } else {
             let (func_type, inputs, ret) = expr.into_function_call().unwrap().decompose();
             let inputs = inputs
@@ -460,8 +470,8 @@ impl ExprRewriter for LogicalAggBuilder {
     /// When there is an `InputRef` (outside of agg call), it must refers to a group column.
     fn rewrite_input_ref(&mut self, input_ref: InputRef) -> ExprImpl {
         let expr = input_ref.into();
-        if let Some(index) = self.input_proj_builder.expr_index(&expr) && index < self.input_group_key_num {
-            InputRef::new(index, expr.return_type()).into()
+        if let Some(group_key) = self.try_as_group_expr(&expr) {
+            InputRef::new(group_key, expr.return_type()).into()
         } else {
             self.error = Some(ErrorCode::InvalidInputSyntax(
                 "column must appear in the GROUP BY clause or be used in an aggregate function"

@@ -52,7 +52,7 @@ impl LogicalProjectBuilder {
         }
     }
 
-    pub fn expr_index(&mut self, expr: &ExprImpl) -> Option<usize> {
+    pub fn expr_index(&self, expr: &ExprImpl) -> Option<usize> {
         if expr.has_subquery() {
             return None;
         }
