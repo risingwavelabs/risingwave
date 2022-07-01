@@ -27,7 +27,8 @@ pub struct StreamChunkBuilder {
     ops: Vec<Op>,
     /// Map the index from the original_indices to output_indices
     /// For example, if the original schema of the Chunk is [A, B, C, D, E],
-    /// and the output_indices is [2, 5, 0]. Then the `index_mapping` will be
+    /// and the output_indices is [2, 4, 0] (i.e. [C, E, A]).
+    /// Then the `index_mapping` will be
     /// `[Some(2), None, Some(0), None, Some(1)]`
     index_mapping: Vec<Option<usize>>,
 
