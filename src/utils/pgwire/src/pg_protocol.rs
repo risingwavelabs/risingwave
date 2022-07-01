@@ -237,6 +237,8 @@ where
                     unnamed_statement
                 } else {
                     // NOTE Error handle method may need to modified.
+                    // Postgresql doc needs write ErrorResponse if name not found. We may revisit
+                    // this part if needed.
                     named_statements.get(&statement_name).expect("statement_name managed by client_driver, hence assume statement name always valid.")
                 };
 
