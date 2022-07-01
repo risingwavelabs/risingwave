@@ -32,7 +32,6 @@ pub mod expr_unary;
 mod template;
 
 use std::convert::TryFrom;
-
 use std::sync::Arc;
 
 pub use agg::AggKind;
