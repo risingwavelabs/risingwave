@@ -15,7 +15,7 @@
 use bytes::Buf;
 use risingwave_hummock_sdk::compaction_group::hummock_version_ext::HummockVersionExt;
 use risingwave_hummock_sdk::compaction_group::StaticCompactionGroupId;
-use risingwave_object_store::object::BlockLocation;
+use risingwave_object_store::object::{BlockLocation, ObjectStore};
 use risingwave_rpc_client::HummockMetaClient;
 use risingwave_storage::hummock::CompressionAlgorithm;
 use risingwave_storage::monitor::StoreLocalStatistic;
