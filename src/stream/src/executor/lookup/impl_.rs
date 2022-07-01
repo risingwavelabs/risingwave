@@ -399,25 +399,25 @@ impl<S: StateStore> LookupExecutor<S> {
         tracing::trace!(target: "events::stream::lookup::lookup_row", "{:?}", lookup_row);
 
         let mut all_rows = vec![];
-        let all_data_iter = self
-            .arrangement
-            .state_table
-            .iter_with_pk_prefix(&lookup_row, lookup_epoch)
-            .await?
-            .fuse();
-        pin_mut!(all_data_iter);
-        while let Some(inner) = all_data_iter.next().await {
-            let ret = inner?;
-            all_rows.push(ret.into_owned());
+        // Drop the stream.
+        {
+            let all_data_iter = self
+                .arrangement
+                .state_table
+                .iter_with_pk_prefix(&lookup_row, lookup_epoch)
+                .await?
+                .fuse();
+            pin_mut!(all_data_iter);
+            while let Some(inner) = all_data_iter.next().await {
+                let ret = inner?;
+                all_rows.push(ret.into_owned());
+            }
         }
-        // // Drop the stream to teach compiler.
-        // drop(all_data_iter);
 
         tracing::trace!(target: "events::stream::lookup::result", "{:?} => {:?}", lookup_row, all_rows);
 
-        // TODO: Fix this clone()
         self.lookup_cache
-            .batch_update(lookup_row.clone(), all_rows.iter().cloned());
+            .batch_update(lookup_row, all_rows.iter().cloned());
 
         Ok(all_rows)
     }
