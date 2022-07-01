@@ -196,6 +196,26 @@ impl ChangedTableId {
         s == ActorState::Running && !self.drop_table_id.contains(table_id)
             || s == ActorState::Inactive && self.create_table_id.contains(table_id)
     }
+
+    pub fn new<'a, S: MetaStore>(
+        queue_changed_table: impl Iterator<Item = &'a EpochNode<S>>,
+        new_changed_table: ChangedTableState,
+    ) -> Self {
+        let mut create_table_id = vec![];
+        let mut drop_table_id = vec![];
+        queue_changed_table.for_each(|node| match node.command_ctx.command.changed_table_id() {
+            Create(table_id) => create_table_id.push(table_id),
+            Drop(table_id) => drop_table_id.push(table_id),
+            _ => {}
+        });
+        if let Create(table_id) = new_changed_table {
+            create_table_id.push(table_id);
+        };
+        Self {
+            create_table_id,
+            drop_table_id,
+        }
+    }
 }
 
 impl<S> CheckpointControl<S>
@@ -209,20 +229,8 @@ where
     }
 
     /// Get all create(drop) actor id from queue.
-    fn get_changed_table_id(&self) -> ChangedTableId {
-        let mut create_table_id = vec![];
-        let mut drop_table_id = vec![];
-        self.command_ctx_queue.iter().for_each(|node| {
-            match node.command_ctx.command.changed_table_id() {
-                Create(table_id) => create_table_id.push(table_id),
-                Drop(table_id) => drop_table_id.push(table_id),
-                _ => {}
-            }
-        });
-        ChangedTableId {
-            create_table_id,
-            drop_table_id,
-        }
+    fn get_changed_table_id(&self, new_changed_table: ChangedTableState) -> ChangedTableId {
+        ChangedTableId::new(self.command_ctx_queue.iter(), new_changed_table)
     }
 
     /// Return the nums of barrier (the nums of in-flight-barrier , the nums of all-barrier)
@@ -288,17 +296,16 @@ where
 
     /// Pause inject barrier until True
     fn can_inject_barrier(&self, in_flight_barrier_nums: usize) -> bool {
-        !self
-            .command_ctx_queue
+        self.command_ctx_queue
             .iter()
             .filter(|x| matches!(x.state, InFlight))
             .count()
-            >= in_flight_barrier_nums
+            < in_flight_barrier_nums
     }
 }
 
 /// The state and message of this barrier
-struct EpochNode<S: MetaStore> {
+pub struct EpochNode<S: MetaStore> {
     timer: Option<HistogramTimer>,
     result: Option<Result<Vec<BarrierCompleteResponse>>>,
     state: BarrierEpochState,
@@ -423,10 +430,8 @@ where
             }
             barrier_timer = Some(self.metrics.barrier_send_latency.start_timer());
             let (command, notifiers) = self.scheduled_barriers.pop_or_default().await;
-            let mut changed_table_id = checkpoint_control.get_changed_table_id();
-            if let Create(table_id) = command.changed_table_id() {
-                changed_table_id.create_table_id.push(table_id);
-            };
+            let changed_table_id =
+                checkpoint_control.get_changed_table_id(command.changed_table_id());
             let info = self.resolve_actor_info(changed_table_id).await;
             // When there's no actors exist in the cluster, we don't need to send the barrier. This
             // is an advance optimization. Besides if another barrier comes immediately,
