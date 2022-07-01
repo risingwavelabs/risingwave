@@ -30,7 +30,7 @@ use crate::optimizer::plan_node::CollectInputRef;
 use crate::optimizer::property::{Distribution, Order, RequiredDist};
 use crate::utils::{ColIndexMapping, Condition, Substitute};
 
-/// the `LogicalProjectBuilder` is the way to construct a `LogicalProject` to dedup the duplicate
+/// Construct a `LogicalProject` and dedup expressions.
 /// expressions
 #[derive(Default)]
 pub struct LogicalProjectBuilder {
