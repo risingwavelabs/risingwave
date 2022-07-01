@@ -996,7 +996,6 @@ mod tests {
             (actor_id, dispatcher_id),
             vec![helper_make_local_actor(235)],
         );
-        add_local_channels(ctx.clone(), vec![(233, 235)]);
         let b2 = Barrier::new_test_barrier(1).with_mutation(Mutation::UpdateOutputs(updates2));
 
         tx.send(Message::Barrier(b2)).await.unwrap();
