@@ -160,6 +160,7 @@ impl FakeExchangeSource {
 
 impl ExchangeSource for FakeExchangeSource {
     type TakeDataFuture<'a> = impl Future<Output = Result<Option<DataChunk>>>;
+
     fn take_data(&mut self) -> Self::TakeDataFuture<'_> {
         async {
             if let Some(chunk) = self.chunks.pop() {

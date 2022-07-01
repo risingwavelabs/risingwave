@@ -5,7 +5,6 @@ use risingwave_common::array::DataChunk;
 
 use crate::execution::grpc_exchange::GrpcExchangeSource;
 use crate::execution::local_exchange::LocalExchangeSource;
-#[cfg(test)]
 use crate::executor::test_utils::FakeExchangeSource;
 
 /// Each `ExchangeSource` maps to one task, it takes the execution result from task chunk by chunk.
@@ -21,7 +20,6 @@ pub trait ExchangeSource: Send + Debug {
 pub enum ExchangeSourceImpl {
     Grpc(GrpcExchangeSource),
     Local(LocalExchangeSource),
-    #[cfg(test)]
     Fake(FakeExchangeSource),
 }
 
@@ -32,7 +30,6 @@ impl ExchangeSourceImpl {
         match self {
             ExchangeSourceImpl::Grpc(grpc) => grpc.take_data().await,
             ExchangeSourceImpl::Local(local) => local.take_data().await,
-            #[cfg(test)]
             ExchangeSourceImpl::Fake(fake) => fake.take_data().await,
         }
     }
