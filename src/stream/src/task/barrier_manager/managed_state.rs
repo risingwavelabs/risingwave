@@ -45,8 +45,10 @@ enum ManagedBarrierStateInner {
 
 #[derive(Debug)]
 pub(super) struct ManagedBarrierState {
+    /// Record barrier state for each epoch of concurrent checkpoints.
     epoch_barrier_state_map: HashMap<u64, ManagedBarrierStateInner>,
 
+    /// Record the progress updates of creating mviews for each epoch of concurrent checkpoints.
     pub(super) create_mview_progress: HashMap<u64, HashMap<ActorId, ChainState>>,
 }
 
