@@ -32,7 +32,7 @@ pub mod expr_unary;
 mod template;
 
 use std::convert::TryFrom;
-use std::slice;
+
 use std::sync::Arc;
 
 pub use agg::AggKind;
@@ -137,7 +137,7 @@ impl RowExpression {
     }
 
     pub fn eval(&mut self, row: &Row) -> Result<Datum> {
-        self.expr.eval_row(&row)
+        self.expr.eval_row(row)
     }
 
     pub fn return_type(&self) -> DataType {
