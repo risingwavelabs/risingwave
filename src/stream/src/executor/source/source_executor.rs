@@ -23,7 +23,6 @@ use risingwave_common::array::column::Column;
 use risingwave_common::array::{ArrayBuilder, ArrayImpl, I64ArrayBuilder, StreamChunk};
 use risingwave_common::catalog::{ColumnId, Schema, TableId};
 use risingwave_common::error::{internal_error, Result, RwError, ToRwResult};
-use risingwave_connector::state::SourceStateHandler;
 use risingwave_connector::{ConnectorState, SplitImpl, SplitMetaData};
 use risingwave_source::connector_source::SourceContext;
 use risingwave_source::*;
@@ -31,9 +30,10 @@ use risingwave_storage::{Keyspace, StateStore};
 use tokio::sync::mpsc::{unbounded_channel, UnboundedReceiver};
 use tokio::sync::{Mutex, Notify};
 
-use super::error::StreamExecutorError;
-use super::monitor::StreamingMetrics;
-use super::*;
+use crate::executor::error::StreamExecutorError;
+use crate::executor::monitor::StreamingMetrics;
+use crate::executor::source::state::SourceStateHandler;
+use crate::executor::*;
 
 /// [`SourceExecutor`] is a streaming source, from risingwave's batch table, or external systems
 /// such as Kafka.
@@ -105,7 +105,7 @@ impl<S: StateStore> SourceExecutor<S> {
 
     /// Generate a row ID column.
     fn gen_row_id_column(&mut self, len: usize) -> Column {
-        let mut builder = I64ArrayBuilder::new(len).unwrap();
+        let mut builder = I64ArrayBuilder::new(len);
         let row_ids = self.source_desc.next_row_id_batch(len);
 
         for row_id in row_ids {
@@ -808,13 +808,12 @@ mod tests {
             u64::MAX,
         )?;
 
-        let mut materialize = MaterializeExecutor::new(
+        let mut materialize = MaterializeExecutor::new_for_test(
             Box::new(source_exec),
             keyspace.clone(),
             vec![OrderPair::new(0, OrderType::Ascending)],
             column_ids.clone(),
             2,
-            vec![0usize],
         )
         .boxed()
         .execute();

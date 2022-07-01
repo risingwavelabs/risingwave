@@ -110,7 +110,7 @@ impl UpdateExecutor {
 
             // Merge two data chunks into (U-, U+) pairs.
             // TODO: split chunks
-            let mut builders = schema.create_array_builders(len * 2)?;
+            let mut builders = schema.create_array_builders(len * 2);
             for row in data_chunk
                 .rows()
                 .zip_eq(updated_data_chunk.rows())
@@ -151,7 +151,7 @@ impl UpdateExecutor {
 
         // Create ret value
         {
-            let mut array_builder = PrimitiveArrayBuilder::<i64>::new(1)?;
+            let mut array_builder = PrimitiveArrayBuilder::<i64>::new(1);
             array_builder.append(Some(rows_updated as i64))?;
 
             let array = array_builder.finish()?;

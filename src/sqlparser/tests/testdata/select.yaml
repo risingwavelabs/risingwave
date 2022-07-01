@@ -1,7 +1,7 @@
 - input: SELECT sqrt(id) FROM foo
   formatted_sql: SELECT sqrt(id) FROM foo
   formatted_ast: |
-    Query(Query { with: None, body: Select(Select { distinct: false, projection: [UnnamedExpr(Function(Function { name: ObjectName([Ident { value: "sqrt", quote_style: None }]), args: [Unnamed(Expr(Identifier(Ident { value: "id", quote_style: None })))], over: None, distinct: false }))], from: [TableWithJoins { relation: Table { name: ObjectName([Ident { value: "foo", quote_style: None }]), alias: None, args: [] }, joins: [] }], lateral_views: [], selection: None, group_by: [], having: None }), order_by: [], limit: None, offset: None, fetch: None })
+    Query(Query { with: None, body: Select(Select { distinct: false, projection: [UnnamedExpr(Function(Function { name: ObjectName([Ident { value: "sqrt", quote_style: None }]), args: [Unnamed(Expr(Identifier(Ident { value: "id", quote_style: None })))], over: None, distinct: false, order_by: [] }))], from: [TableWithJoins { relation: Table { name: ObjectName([Ident { value: "foo", quote_style: None }]), alias: None, args: [] }, joins: [] }], lateral_views: [], selection: None, group_by: [], having: None }), order_by: [], limit: None, offset: None, fetch: None })
 
 # Typed string literal
 - input: SELECT INT '1'

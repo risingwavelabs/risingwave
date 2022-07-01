@@ -59,7 +59,7 @@ mod tests {
         ];
 
         for (s, characters, expected) in cases {
-            let builder = Utf8ArrayBuilder::new(1).unwrap();
+            let builder = Utf8ArrayBuilder::new(1);
             let writer = builder.writer();
             let guard = trim_characters(s, characters, writer).unwrap();
             let array = guard.into_inner().finish().unwrap();
@@ -77,7 +77,7 @@ mod tests {
         ];
 
         for (s, characters, expected) in cases {
-            let builder = Utf8ArrayBuilder::new(1).unwrap();
+            let builder = Utf8ArrayBuilder::new(1);
             let writer = builder.writer();
             let guard = ltrim_characters(s, characters, writer).unwrap();
             let array = guard.into_inner().finish().unwrap();
@@ -95,7 +95,7 @@ mod tests {
         ];
 
         for (s, characters, expected) in cases {
-            let builder = Utf8ArrayBuilder::new(1).unwrap();
+            let builder = Utf8ArrayBuilder::new(1);
             let writer = builder.writer();
             let guard = rtrim_characters(s, characters, writer).unwrap();
             let array = guard.into_inner().finish().unwrap();
