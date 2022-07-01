@@ -449,7 +449,7 @@ mod tests {
 
         let existing_table_id = 2;
         let kv_count = 1001;
-        let base_epoch = Epoch::now();
+        let base_epoch = Epoch(0);
         let mut epoch: u64 = base_epoch.0;
         let millisec_for_epoch: u64 = 1 << 16;
         let keyspace = Keyspace::table_root(storage.clone(), &TableId::new(existing_table_id));
@@ -568,12 +568,15 @@ mod tests {
             .await
             .unwrap();
         let mut scan_count = 0;
-        let min_epoch = Epoch(watermark).subtract_ms(ttl_expire_second as u64 * 1000);
+        let min_epoch = Epoch(watermark).subtract_ms((ttl_expire_second * 1000) as u64);
         for (k, _) in scan_result {
             let table_id = get_table_id(&k).unwrap();
-            let epoch = get_epoch(&k);
+            let epoch = Epoch(get_epoch(&k));
             assert_eq!(table_id, existing_table_id);
-            assert!(epoch >= min_epoch.0);
+            if epoch < min_epoch {
+                tracing::info!("epoch {:?} min_epoch {:?}", epoch, min_epoch);
+            }
+            assert!(epoch >= min_epoch);
             scan_count += 1;
         }
         assert_eq!(key_count, scan_count);
