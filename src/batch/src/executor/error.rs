@@ -13,10 +13,13 @@
 // limitations under the License.
 
 pub use anyhow::anyhow;
+use risingwave_common::array::ArrayError;
 use risingwave_common::error::{ErrorCode, RwError};
 use thiserror::Error;
 
 pub type Result<T> = std::result::Result<T, BatchExecutorError>;
+
+pub trait Error = std::error::Error + Send + Sync + 'static;
 
 #[derive(Error, Debug)]
 pub enum BatchExecutorError {
@@ -25,6 +28,18 @@ pub enum BatchExecutorError {
 
     #[error("Can't cast {0} to {1}")]
     Cast(&'static str, &'static str),
+
+    #[error("Array error: {0}")]
+    Array(#[from] ArrayError),
+
+    #[error("Expr error: {0}")]
+    Expr(Box<dyn Error>),
+
+    #[error("Can't get sourse in {0} Executor")]
+    Source(&'static str),
+
+    #[error(transparent)]
+    Internal(#[from] anyhow::Error),
 }
 
 impl From<BatchExecutorError> for RwError {
