@@ -33,7 +33,7 @@ pub struct DecimalArray {
 
 impl DecimalArray {
     pub fn from_slice(data: &[Option<Decimal>]) -> ArrayResult<Self> {
-        let mut builder = <Self as Array>::Builder::new(data.len())?;
+        let mut builder = <Self as Array>::Builder::new(data.len());
         for i in data {
             builder.append(*i)?;
         }
@@ -110,6 +110,10 @@ impl Array for DecimalArray {
         &self.bitmap
     }
 
+    fn into_null_bitmap(self) -> Bitmap {
+        self.bitmap
+    }
+
     fn set_bitmap(&mut self, bitmap: Bitmap) {
         self.bitmap = bitmap;
     }
@@ -124,7 +128,7 @@ impl Array for DecimalArray {
     }
 
     fn create_builder(&self, capacity: usize) -> ArrayResult<ArrayBuilderImpl> {
-        let array_builder = DecimalArrayBuilder::new(capacity)?;
+        let array_builder = DecimalArrayBuilder::new(capacity);
         Ok(ArrayBuilderImpl::Decimal(array_builder))
     }
 }
@@ -139,11 +143,11 @@ pub struct DecimalArrayBuilder {
 impl ArrayBuilder for DecimalArrayBuilder {
     type ArrayType = DecimalArray;
 
-    fn with_meta(capacity: usize, _meta: ArrayMeta) -> ArrayResult<Self> {
-        Ok(Self {
+    fn with_meta(capacity: usize, _meta: ArrayMeta) -> Self {
+        Self {
             bitmap: BitmapBuilder::with_capacity(capacity),
             data: Vec::with_capacity(capacity),
-        })
+        }
     }
 
     fn append(&mut self, value: Option<Decimal>) -> ArrayResult<()> {
@@ -188,7 +192,7 @@ mod tests {
     #[test]
     fn test_decimal_builder() {
         let v = (0..1000).map(Decimal::from_i64).collect_vec();
-        let mut builder = DecimalArrayBuilder::new(0).unwrap();
+        let mut builder = DecimalArrayBuilder::new(0);
         for i in &v {
             builder.append(*i).unwrap();
         }
@@ -279,7 +283,7 @@ mod tests {
         let arrs = vecs
             .iter()
             .map(|v| {
-                let mut builder = DecimalArrayBuilder::new(0).unwrap();
+                let mut builder = DecimalArrayBuilder::new(0);
                 for i in v {
                     builder.append(*i).unwrap();
                 }

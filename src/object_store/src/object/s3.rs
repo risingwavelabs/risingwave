@@ -18,8 +18,8 @@ use fail::fail_point;
 use futures::future::try_join_all;
 use itertools::Itertools;
 
-use super::{BlockLocation, ObjectError, ObjectMetadata, ObjectResult};
-use crate::object::{Bytes, ObjectStore};
+use super::{BlockLocation, ObjectError, ObjectMetadata};
+use crate::object::{Bytes, ObjectResult, ObjectStore};
 
 /// Object store with S3 backend
 pub struct S3ObjectStore {

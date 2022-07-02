@@ -22,9 +22,7 @@ use rand::{Rng, SeedableRng};
 use serde_json::json;
 
 use super::{DEFAULT_END, DEFAULT_MAX, DEFAULT_MIN, DEFAULT_START};
-use crate::datagen::source::field_generator::{
-    NumericFieldRandomGenerator, NumericFieldSequenceGenerator,
-};
+use crate::field_generator::{NumericFieldRandomGenerator, NumericFieldSequenceGenerator};
 
 trait NumericType
 where

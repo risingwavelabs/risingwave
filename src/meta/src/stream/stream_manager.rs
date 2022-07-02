@@ -14,10 +14,8 @@
 
 use std::collections::{BTreeMap, HashMap, HashSet};
 use std::sync::Arc;
-use std::time::Instant;
 
 use itertools::Itertools;
-use log::{debug, info};
 use risingwave_common::catalog::TableId;
 use risingwave_common::error::{internal_error, Result};
 use risingwave_common::types::{ParallelUnitId, VIRTUAL_NODE_COUNT};
@@ -48,7 +46,7 @@ pub struct CreateMaterializedViewContext {
     /// New dispatches to add from upstream actors to downstream actors.
     pub dispatches: HashMap<(ActorId, DispatcherId), Vec<ActorId>>,
     /// Upstream mview actor ids grouped by node id.
-    pub upstream_node_actors: HashMap<WorkerId, Vec<ActorId>>,
+    pub upstream_node_actors: HashMap<WorkerId, HashSet<ActorId>>,
     /// Upstream mview actor ids grouped by table id.
     pub table_sink_map: HashMap<TableId, Vec<ActorId>>,
     /// Dependent table ids
@@ -119,7 +117,7 @@ where
         table_fragments: &mut TableFragments,
         dependent_table_ids: &HashSet<TableId>,
         dispatches: &mut HashMap<(ActorId, DispatcherId), Vec<ActorId>>,
-        upstream_node_actors: &mut HashMap<WorkerId, Vec<ActorId>>,
+        upstream_node_actors: &mut HashMap<WorkerId, HashSet<ActorId>>,
         locations: &ScheduledLocations,
     ) -> Result<()> {
         // The closure environment. Used to simulate recursive closure.
@@ -132,7 +130,7 @@ where
             locations: &'a ScheduledLocations,
 
             dispatches: &'a mut HashMap<(ActorId, DispatcherId), Vec<ActorId>>,
-            upstream_node_actors: &'a mut HashMap<WorkerId, Vec<ActorId>>,
+            upstream_node_actors: &'a mut HashMap<WorkerId, HashSet<ActorId>>,
         }
 
         impl Env<'_> {
@@ -616,21 +614,6 @@ where
         self.source_manager
             .drop_update(Some(source_fragments), Some(actor_ids))
             .await?;
-
-        Ok(())
-    }
-
-    /// Flush means waiting for the next barrier to collect.
-    pub async fn flush(&self) -> Result<()> {
-        let start = Instant::now();
-
-        debug!("start barrier flush");
-        self.barrier_manager
-            .wait_for_next_barrier_to_collect()
-            .await?;
-
-        let elapsed = Instant::now().duration_since(start);
-        info!("barrier flushed in {:?}", elapsed);
 
         Ok(())
     }

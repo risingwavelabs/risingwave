@@ -81,6 +81,7 @@ impl HummockStorage {
         T: HummockIteratorType,
     {
         let epoch = read_options.epoch;
+        let min_epoch = read_options.min_epoch();
         let iter_read_options = Arc::new(IterReadOptions::default());
         let mut overlapped_iters = vec![];
 
@@ -108,7 +109,7 @@ impl HummockStorage {
         // Generate iterators for versioned ssts by filter out ssts that do not overlap with given
         // `key_range`
         for level in pinned_version.levels() {
-            let table_infos = prune_ssts(level.get_table_infos().iter(), &key_range);
+            let table_infos = prune_ssts(level.table_infos.iter(), &key_range);
             if table_infos.is_empty() {
                 continue;
             }
@@ -170,6 +171,7 @@ impl HummockStorage {
             self.stats.clone(),
             key_range,
             epoch,
+            min_epoch,
             Some(pinned_version),
         );
 
@@ -439,6 +441,13 @@ impl StateStore for HummockStorage {
 
     fn get_uncommitted_ssts(&self, epoch: u64) -> Vec<LocalSstableInfo> {
         self.local_version_manager.get_uncommitted_ssts(epoch)
+    }
+
+    fn clear_shared_buffer(&self) -> Self::ClearSharedBufferFuture<'_> {
+        async move {
+            self.local_version_manager.clear_shared_buffer().await;
+            Ok(())
+        }
     }
 }
 
