@@ -191,7 +191,8 @@ impl RearrangedChainExecutor {
                     // consumed the whole snapshot and be on the upstream now.
                     RearrangedMessage::PhantomBarrier(barrier) => {
                         // Update the progress since we've consumed all chunks before this phantom.
-                        self.progress.update(barrier.epoch.curr);
+                        self.progress
+                            .update(last_rearranged_epoch.curr, barrier.epoch.curr);
 
                         if barrier.epoch.curr >= last_rearranged_epoch.curr {
                             // Stop the background rearrangement task.
@@ -220,8 +221,8 @@ impl RearrangedChainExecutor {
 
             // 8. Consume remainings.
             let mut finish_on_barrier = |msg: &Message| {
-                if msg.as_barrier().is_some() {
-                    self.progress.finish();
+                if let Some(barrier) = msg.as_barrier() {
+                    self.progress.finish(barrier.epoch.curr);
                 }
             };
 
