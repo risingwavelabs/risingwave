@@ -97,6 +97,9 @@ impl MetaClient {
         let resp = self.inner.add_worker_node(request).await?;
         let worker_node = resp.node.expect("AddWorkerNodeResponse::node is empty");
         self.set_worker_id(worker_node.id);
+        // unpin snapshot before MAX will create a new snapshot with last committed epoch and then
+        //  we do not create snapshot during every pin_snapshot.
+        self.unpin_snapshot_before(u64::MAX).await?;
         Ok(worker_node.id)
     }
 

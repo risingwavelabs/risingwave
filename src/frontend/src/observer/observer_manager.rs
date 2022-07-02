@@ -44,7 +44,6 @@ pub(crate) struct ObserverManager {
     catalog_updated_tx: Sender<CatalogVersion>,
     user_info_manager: Arc<RwLock<UserInfoManager>>,
     user_info_updated_tx: Sender<UserInfoVersion>,
-    hummock_snapshot_manager: HummockSnapshotManagerRef,
 }
 
 const RE_SUBSCRIBE_RETRY_INTERVAL: Duration = Duration::from_millis(100);
@@ -59,7 +58,7 @@ impl ObserverManager {
         catalog_updated_tx: Sender<CatalogVersion>,
         user_info_manager: Arc<RwLock<UserInfoManager>>,
         user_info_updated_tx: Sender<UserInfoVersion>,
-        hummock_snapshot_manager: HummockSnapshotManagerRef,
+        _hummock_snapshot_manager: HummockSnapshotManagerRef,
     ) -> Self {
         let rx = meta_client
             .subscribe(&addr, WorkerType::Frontend)
@@ -74,7 +73,6 @@ impl ObserverManager {
             catalog_updated_tx,
             user_info_manager,
             user_info_updated_tx,
-            hummock_snapshot_manager,
         }
     }
 
@@ -204,10 +202,8 @@ impl ObserverManager {
                     resp
                 )
             }
-            Info::HummockSnapshot(hummock_snapshot) => {
-                self.hummock_snapshot_manager
-                    .update_snapshot_status(hummock_snapshot.epoch)
-                    .await;
+            Info::HummockSnapshot(_) => {
+                // TODO: remove snapshot notify
             }
         }
     }
