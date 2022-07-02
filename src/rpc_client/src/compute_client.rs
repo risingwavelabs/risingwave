@@ -12,10 +12,8 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::fmt::Debug;
 use std::time::Duration;
 
-use risingwave_common::array::DataChunk;
 use risingwave_common::util::addr::HostAddr;
 use risingwave_pb::batch_plan::exchange_info::DistributionMode;
 use risingwave_pb::batch_plan::{ExchangeInfo, PlanFragment, PlanNode, TaskId, TaskOutputId};
@@ -134,10 +132,4 @@ impl ComputeClient {
     pub async fn execute(&self, req: ExecuteRequest) -> Result<Streaming<GetDataResponse>> {
         Ok(self.task_client.to_owned().execute(req).await?.into_inner())
     }
-}
-
-/// Each ExchangeSource maps to one task, it takes the execution result from task chunk by chunk.
-#[async_trait::async_trait]
-pub trait ExchangeSource: Send + Debug {
-    async fn take_data(&mut self) -> risingwave_common::error::Result<Option<DataChunk>>;
 }
