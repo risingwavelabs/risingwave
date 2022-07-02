@@ -87,10 +87,10 @@ impl<Desc: Deref<Target = ColumnDescMapping>> DedupPkCellBasedRowDeserializer<De
         &self,
         raw_result: Option<(VirtualNode, Vec<u8>, Row)>,
     ) -> Result<Option<(VirtualNode, Vec<u8>, Row)>> {
-        if let Some((_vnode, pk, row)) = raw_result {
+        if let Some((vnode, pk, row)) = raw_result {
             let pk_datums = self.pk_deserializer.deserialize(&pk)?;
             Ok(Some((
-                _vnode,
+                vnode,
                 pk,
                 self.replace_dedupped_datums_into_row(pk_datums.into_vec(), row),
             )))
