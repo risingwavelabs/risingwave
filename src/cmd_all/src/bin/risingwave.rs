@@ -47,8 +47,11 @@ async fn main() -> Result<()> {
 
                     let opts = risingwave_compute::ComputeNodeOpts::parse_from(args);
 
-                    risingwave_logging::oneshot_common();
-                    risingwave_logging::init_risingwave_logger(opts.enable_jaeger_tracing, false);
+                    risingwave_rt::oneshot_common();
+                    risingwave_rt::init_risingwave_logger(risingwave_rt::LoggerSettings::new(
+                        opts.enable_jaeger_tracing,
+                        false,
+                    ));
 
                     risingwave_compute::start(opts).await;
 
@@ -68,8 +71,10 @@ async fn main() -> Result<()> {
 
                     let opts = risingwave_meta::MetaNodeOpts::parse_from(args);
 
-                    risingwave_logging::oneshot_common();
-                    risingwave_logging::init_risingwave_logger(false, false);
+                    risingwave_rt::oneshot_common();
+                    risingwave_rt::init_risingwave_logger(
+                        risingwave_rt::LoggerSettings::new_default(),
+                    );
 
                     risingwave_meta::start(opts).await;
 
@@ -89,8 +94,10 @@ async fn main() -> Result<()> {
 
                     let opts = risingwave_frontend::FrontendOpts::parse_from(args);
 
-                    risingwave_logging::oneshot_common();
-                    risingwave_logging::init_risingwave_logger(false, false);
+                    risingwave_rt::oneshot_common();
+                    risingwave_rt::init_risingwave_logger(
+                        risingwave_rt::LoggerSettings::new_default(),
+                    );
 
                     risingwave_frontend::start(opts).await;
 
@@ -110,8 +117,10 @@ async fn main() -> Result<()> {
 
                     let opts = risingwave_compactor::CompactorOpts::parse_from(args);
 
-                    risingwave_logging::oneshot_common();
-                    risingwave_logging::init_risingwave_logger(false, false);
+                    risingwave_rt::oneshot_common();
+                    risingwave_rt::init_risingwave_logger(
+                        risingwave_rt::LoggerSettings::new_default(),
+                    );
 
                     risingwave_compactor::start(opts).await;
 
@@ -129,8 +138,8 @@ async fn main() -> Result<()> {
                 eprintln!("launching risectl");
 
                 let opts = risingwave_ctl::CliOpts::parse_from(args);
-                risingwave_logging::oneshot_common();
-                risingwave_logging::init_risingwave_logger(false, true);
+                risingwave_rt::oneshot_common();
+                risingwave_rt::init_risingwave_logger(risingwave_rt::LoggerSettings::new_default());
 
                 risingwave_ctl::start(opts).await
             })

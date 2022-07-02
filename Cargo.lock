@@ -1023,6 +1023,42 @@ dependencies = [
 ]
 
 [[package]]
+name = "console-api"
+version = "0.3.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "06c5fd425783d81668ed68ec98408a80498fb4ae2fd607797539e1a9dfa3618f"
+dependencies = [
+ "prost",
+ "prost-types",
+ "tonic",
+ "tracing-core",
+]
+
+[[package]]
+name = "console-subscriber"
+version = "0.1.6"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "31432bc31ff8883bf6a693a79371862f73087822470c82d6a1ec778781ee3978"
+dependencies = [
+ "console-api",
+ "crossbeam-channel",
+ "crossbeam-utils 0.8.8",
+ "futures",
+ "hdrhistogram",
+ "humantime",
+ "prost-types",
+ "serde",
+ "serde_json",
+ "thread_local",
+ "tokio",
+ "tokio-stream",
+ "tonic",
+ "tracing",
+ "tracing-core",
+ "tracing-subscriber",
+]
+
+[[package]]
 name = "core-foundation"
 version = "0.9.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1967,6 +2003,19 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "db0d4cf898abf0081f964436dc980e96670a0f36863e4b83aaacdb65c9d7ccc3"
 
 [[package]]
+name = "hdrhistogram"
+version = "7.5.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "31672b7011be2c4f7456c4ddbcb40e7e9a4a9fad8efe49a6ebaf5f307d0109c0"
+dependencies = [
+ "base64",
+ "byteorder",
+ "flate2",
+ "nom 7.1.1",
+ "num-traits",
+]
+
+[[package]]
 name = "heck"
 version = "0.4.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -2574,6 +2623,15 @@ name = "maplit"
 version = "1.0.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "3e2e65a1a2e43cfcb47a895c4c8b10d1f4a61097f9f254f183aee60cad9c651d"
+
+[[package]]
+name = "matchers"
+version = "0.1.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "8263075bb86c5a1b1427b5ae862e8889656f126e9f77c484496e8b47cf5c5558"
+dependencies = [
+ "regex-automata",
+]
 
 [[package]]
 name = "matches"
@@ -3775,6 +3833,9 @@ name = "regex-automata"
 version = "0.1.10"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "6c230d73fb8d8c1b9c0b3135c5142a8acee3a0558fb8db5cf1cb65f8d7862132"
+dependencies = [
+ "regex-syntax",
+]
 
 [[package]]
 name = "regex-syntax"
@@ -3931,9 +3992,10 @@ dependencies = [
  "risingwave_compute",
  "risingwave_ctl",
  "risingwave_frontend",
- "risingwave_logging",
  "risingwave_meta",
+ "risingwave_rt",
  "tikv-jemallocator",
+ "tokio",
  "tracing",
  "workspace-hack",
  "workspace-static-link",
@@ -3953,8 +4015,8 @@ dependencies = [
  "risingwave_compute",
  "risingwave_ctl",
  "risingwave_frontend",
- "risingwave_logging",
  "risingwave_meta",
+ "risingwave_rt",
  "tikv-jemallocator",
  "tracing",
  "workspace-hack",
@@ -4301,26 +4363,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "risingwave_logging"
-version = "0.1.9"
-dependencies = [
- "async-trait",
- "futures",
- "isahc",
- "madsim",
- "madsim-tokio",
- "opentelemetry",
- "opentelemetry-jaeger",
- "parking_lot",
- "thrift",
- "tokio-stream",
- "tracing",
- "tracing-opentelemetry",
- "tracing-subscriber",
- "workspace-hack",
-]
-
-[[package]]
 name = "risingwave_meta"
 version = "0.1.9"
 dependencies = [
@@ -4454,6 +4496,28 @@ dependencies = [
  "thiserror",
  "tokio-retry",
  "tracing",
+ "workspace-hack",
+]
+
+[[package]]
+name = "risingwave_rt"
+version = "0.1.9"
+dependencies = [
+ "async-trait",
+ "console",
+ "console-subscriber",
+ "futures",
+ "isahc",
+ "madsim",
+ "madsim-tokio",
+ "opentelemetry",
+ "opentelemetry-jaeger",
+ "parking_lot",
+ "thrift",
+ "tokio-stream",
+ "tracing",
+ "tracing-opentelemetry",
+ "tracing-subscriber",
  "workspace-hack",
 ]
 
@@ -5418,6 +5482,7 @@ dependencies = [
  "signal-hook-registry",
  "socket2",
  "tokio-macros",
+ "tracing",
  "winapi",
 ]
 
@@ -5709,9 +5774,14 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "4bc28f93baff38037f64e6f43d34cfa1605f27a49c34e8a04c5e78b0babf2596"
 dependencies = [
  "ansi_term",
+ "lazy_static",
+ "matchers",
+ "parking_lot",
+ "regex",
  "sharded-slab",
  "smallvec",
  "thread_local",
+ "tracing",
  "tracing-core",
  "tracing-log",
 ]
@@ -6121,6 +6191,7 @@ dependencies = [
  "either",
  "fail",
  "fixedbitset",
+ "flate2",
  "frunk_core",
  "futures",
  "futures-channel",
@@ -6150,6 +6221,7 @@ dependencies = [
  "prometheus",
  "rand 0.8.5",
  "regex",
+ "regex-automata",
  "regex-syntax",
  "serde",
  "serde_json",

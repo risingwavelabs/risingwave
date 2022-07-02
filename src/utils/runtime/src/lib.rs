@@ -12,6 +12,8 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+//! Configures the RisingWave binary, including logging, locks, panic handler, etc.
+
 #![feature(let_chains)]
 
 mod trace_runtime;
@@ -64,8 +66,31 @@ fn configure_risingwave_targets_fmt(targets: filter::Targets) -> filter::Targets
     // }
 }
 
-/// Init logger for RisingWave binaries.
-pub fn init_risingwave_logger(enable_jaeger_tracing: bool, colorful: bool) {
+pub struct LoggerSettings {
+    /// Enable Jaeger tracing.
+    enable_jaeger_tracing: bool,
+    /// Enable tokio console output.
+    enable_tokio_console: bool,
+    /// Enable colorful output in console.
+    colorful: bool,
+}
+
+impl LoggerSettings {
+    pub fn new_default() -> Self {
+        Self::new(false, false)
+    }
+
+    pub fn new(enable_jaeger_tracing: bool, enable_tokio_console: bool) -> Self {
+        Self {
+            enable_jaeger_tracing,
+            enable_tokio_console,
+            colorful: console::colors_enabled_stderr(),
+        }
+    }
+}
+
+/// Set panic hook to abort the process (without losing debug info and stack trace).
+pub fn set_panic_abort() {
     use std::panic;
 
     let default_hook = panic::take_hook();
@@ -74,21 +99,26 @@ pub fn init_risingwave_logger(enable_jaeger_tracing: bool, colorful: bool) {
         default_hook(info);
         std::process::abort();
     }));
+}
 
+/// Init logger for RisingWave binaries.
+pub fn init_risingwave_logger(settings: LoggerSettings) {
     use isahc::config::Configurable;
 
     let fmt_layer = {
         // Configure log output to stdout
         let fmt_layer = tracing_subscriber::fmt::layer()
             .compact()
-            .with_ansi(colorful);
+            .with_ansi(settings.colorful);
+
         let filter = filter::Targets::new()
             // Only enable WARN and ERROR for 3rd-party crates
             .with_target("aws_endpoint", Level::WARN)
             .with_target("hyper", Level::WARN)
             .with_target("h2", Level::WARN)
             .with_target("tower", Level::WARN)
-            .with_target("isahc", Level::WARN);
+            .with_target("isahc", Level::WARN)
+            .with_target("console_subscriber", Level::WARN);
 
         // Configure RisingWave's own crates to log at TRACE level, uncomment the following line if
         // needed.
@@ -102,7 +132,7 @@ pub fn init_risingwave_logger(enable_jaeger_tracing: bool, colorful: bool) {
         fmt_layer.with_filter(filter)
     };
 
-    if enable_jaeger_tracing {
+    let opentelemetry_layer = if settings.enable_jaeger_tracing {
         // With Jaeger tracing enabled, we should configure opentelemetry endpoints.
 
         opentelemetry::global::set_text_map_propagator(opentelemetry_jaeger::Propagator::new());
@@ -124,50 +154,87 @@ pub fn init_risingwave_logger(enable_jaeger_tracing: bool, colorful: bool) {
         let filter = filter::Targets::new();
         let filter = configure_risingwave_targets_jaeger(filter);
 
-        let opentelemetry_layer = opentelemetry_layer.with_filter(filter);
-
-        tracing_subscriber::registry()
-            .with(fmt_layer)
-            .with(opentelemetry_layer)
-            .init();
+        Some(opentelemetry_layer.with_filter(filter))
     } else {
-        // Otherwise, simply enable fmt_layer.
-        tracing_subscriber::registry().with(fmt_layer).init();
+        None
+    };
+
+    let tokio_console_layer = if settings.enable_tokio_console {
+        let (console_layer, server) = console_subscriber::ConsoleLayer::builder()
+            .with_default_env()
+            .build();
+        let console_layer = console_layer.with_filter(
+            filter::Targets::new()
+                .with_target("tokio", Level::TRACE)
+                .with_target("runtime", Level::TRACE),
+        );
+        Some((console_layer, server))
+    } else {
+        None
+    };
+
+    match (opentelemetry_layer, tokio_console_layer) {
+        (Some(_), Some(_)) => {
+            // tracing_subscriber::registry()
+            //     .with(fmt_layer)
+            //     .with(opentelemetry_layer)
+            //     .with(tokio_console_layer)
+            //     .init();
+            // Strange compiler bug is preventing us from enabling both of them...
+            panic!("cannot enable opentelemetry layer and tokio console layer at the same time");
+        }
+        (Some(opentelemetry_layer), None) => {
+            tracing_subscriber::registry()
+                .with(fmt_layer)
+                .with(opentelemetry_layer)
+                .init();
+        }
+        (None, Some((tokio_console_layer, server))) => {
+            tracing_subscriber::registry()
+                .with(fmt_layer)
+                .with(tokio_console_layer)
+                .init();
+            tokio::spawn(async move {
+                tracing::info!("serving console subscriber");
+                server.serve().await.unwrap();
+            });
+        }
+        (None, None) => {
+            tracing_subscriber::registry().with(fmt_layer).init();
+        }
     }
 
     // TODO: add file-appender tracing subscriber in the future
+}
+
+/// Enable parking lot's deadlock detection.
+pub fn enable_parking_lot_deadlock_detection() {
+    // TODO: deadlock detection as a feature instead of always enabling
+    std::thread::spawn(move || loop {
+        std::thread::sleep(Duration::from_secs(3));
+        let deadlocks = parking_lot::deadlock::check_deadlock();
+        if deadlocks.is_empty() {
+            continue;
+        }
+
+        println!("{} deadlocks detected", deadlocks.len());
+        for (i, threads) in deadlocks.iter().enumerate() {
+            println!("Deadlock #{}", i);
+            for t in threads {
+                println!("Thread Id {:#?}", t.thread_id());
+                println!("{:#?}", t.backtrace());
+            }
+        }
+    });
 }
 
 /// Common set-up for all RisingWave binaries. Currently, this includes:
 ///
 /// * Set panic hook to abort the whole process.
 pub fn oneshot_common() {
-    use std::panic;
+    set_panic_abort();
 
     if cfg!(debug_assertion) {
-        let default_hook = panic::take_hook();
-
-        panic::set_hook(Box::new(move |info| {
-            default_hook(info);
-            std::process::abort();
-        }));
-
-        // TODO: deadlock detection as a feature instead of always enabling
-        std::thread::spawn(move || loop {
-            std::thread::sleep(Duration::from_secs(3));
-            let deadlocks = parking_lot::deadlock::check_deadlock();
-            if deadlocks.is_empty() {
-                continue;
-            }
-
-            println!("{} deadlocks detected", deadlocks.len());
-            for (i, threads) in deadlocks.iter().enumerate() {
-                println!("Deadlock #{}", i);
-                for t in threads {
-                    println!("Thread Id {:#?}", t.thread_id());
-                    println!("{:#?}", t.backtrace());
-                }
-            }
-        });
+        enable_parking_lot_deadlock_detection();
     }
 }
