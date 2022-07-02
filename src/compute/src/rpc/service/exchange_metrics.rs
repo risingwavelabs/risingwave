@@ -32,7 +32,7 @@ impl ExchangeServiceMetrics {
         .unwrap();
 
         let actor_sampled_serialize_duration_ns = register_int_counter_vec_with_registry!(
-            "stream_sampled_serialize_duration_ns_total",
+            "actor_sampled_deserialize_duration_ns",
             "Duration (ns) of sampled chunk serialization",
             &["actor_id"],
             registry
