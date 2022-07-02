@@ -6152,6 +6152,7 @@ dependencies = [
  "rand 0.8.5",
  "regex",
  "regex-syntax",
+ "scopeguard",
  "serde",
  "serde_json",
  "smallvec",
