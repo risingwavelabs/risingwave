@@ -9,7 +9,7 @@ cd "$DIR"
 cat ../rust-toolchain
 # shellcheck disable=SC2155
 export RUST_TOOLCHAIN=$(cat ../rust-toolchain)
-export BUILD_ENV_VERSION=v20220623-v2
+export BUILD_ENV_VERSION=v20220702
 export BUILD_TAG="public.ecr.aws/x5u3w5h6/rw-build-env:${BUILD_ENV_VERSION}"
 
 echo "+++ Arch"
