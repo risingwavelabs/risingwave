@@ -122,6 +122,12 @@ impl StateStore for PanicStateStore {
             panic!("should not sync from the panic state store!");
         }
     }
+
+    fn clear_shared_buffer(&self) -> Self::ClearSharedBufferFuture<'_> {
+        async move {
+            panic!("should not clear shared buffer from the panic state store!");
+        }
+    }
 }
 
 pub struct PanicStateStoreIter {}

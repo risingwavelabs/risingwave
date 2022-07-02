@@ -42,6 +42,7 @@ macro_rules! define_state_store_associated_type {
         type SyncFuture<'a> = impl EmptyFutureTrait<'a>;
         type IterFuture<'a, R, B> = impl Future<Output = $crate::error::StorageResult<Self::Iter>> + Send where R: 'static + Send, B: 'static + Send;
         type BackwardIterFuture<'a, R, B> = impl Future<Output = $crate::error::StorageResult<Self::Iter>> + Send where R: 'static + Send, B: 'static + Send;
+        type ClearSharedBufferFuture<'a> = impl EmptyFutureTrait<'a>;
     }
 }
 
@@ -77,6 +78,8 @@ pub trait StateStore: Send + Sync + 'static + Clone {
     where
         R: 'static + Send,
         B: 'static + Send;
+
+    type ClearSharedBufferFuture<'a>: EmptyFutureTrait<'a>;
 
     /// Point gets a value from the state store.
     /// The result is based on a snapshot corresponding to the given `epoch`.
@@ -169,6 +172,12 @@ pub trait StateStore: Send + Sync + 'static + Clone {
 
     /// Gets `epoch`'s uncommitted `SSTables`.
     fn get_uncommitted_ssts(&self, _epoch: u64) -> Vec<LocalSstableInfo> {
+        todo!()
+    }
+
+    /// Clears contents in shared buffer.
+    /// This method should only be called when dropping all actors in the local compute node.
+    fn clear_shared_buffer(&self) -> Self::ClearSharedBufferFuture<'_> {
         todo!()
     }
 }
