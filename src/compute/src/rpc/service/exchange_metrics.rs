@@ -18,6 +18,7 @@ use prometheus::{register_int_counter_vec_with_registry, Registry};
 pub struct ExchangeServiceMetrics {
     pub registry: Registry,
     pub stream_exchange_bytes: GenericCounterVec<AtomicU64>,
+    pub actor_sampled_serialize_duration_ns: GenericCounterVec<AtomicU64>,
 }
 
 impl ExchangeServiceMetrics {
@@ -30,9 +31,18 @@ impl ExchangeServiceMetrics {
         )
         .unwrap();
 
+        let actor_sampled_serialize_duration_ns = register_int_counter_vec_with_registry!(
+            "stream_sampled_serialize_duration_ns_total",
+            "Duration (ns) of sampled chunk serialization",
+            &["actor_id"],
+            registry
+        )
+        .unwrap();
+
         Self {
             registry,
             stream_exchange_bytes,
+            actor_sampled_serialize_duration_ns,
         }
     }
 

@@ -15,6 +15,7 @@
 use std::net::SocketAddr;
 use std::sync::Arc;
 
+use madsim::time::Instant;
 use risingwave_batch::task::BatchManager;
 use risingwave_common::error::{ErrorCode, Result, RwError};
 use risingwave_pb::task_service::exchange_service_server::ExchangeService;
@@ -115,13 +116,29 @@ impl ExchangeServiceImpl {
         tokio::spawn(async move {
             let up_actor_id = up_down_ids.0.to_string();
             let down_actor_id = up_down_ids.1.to_string();
+            let mut rr = 0;
+            const SAMPLING_FREQUENCY: u64 = 100;
+
             loop {
                 let msg = receiver.recv().await;
                 match msg {
                     // the sender is closed, we close the receiver and stop forwarding message
                     None => break,
                     Some(msg) => {
-                        let res = match msg.to_protobuf() {
+                        let proto = if rr % SAMPLING_FREQUENCY == 0 {
+                            let start_time = Instant::now();
+                            let proto = msg.to_protobuf();
+                            metrics
+                                .actor_sampled_serialize_duration_ns
+                                .with_label_values(&[&up_actor_id])
+                                .inc_by(start_time.elapsed().as_nanos() as u64);
+                            proto
+                        } else {
+                            msg.to_protobuf()
+                        };
+                        rr += 1;
+
+                        let res = match proto {
                             Ok(stream_msg) => Ok(GetStreamResponse {
                                 message: Some(stream_msg),
                             }),
