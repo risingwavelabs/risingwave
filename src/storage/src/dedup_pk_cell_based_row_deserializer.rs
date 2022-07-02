@@ -37,6 +37,7 @@ pub struct DedupPkCellBasedRowDeserializer<Desc: Deref<Target = ColumnDescMappin
 impl<Desc: Deref<Target = ColumnDescMapping>> DedupPkCellBasedRowDeserializer<Desc> {
     /// Create a [`DedupPkCellBasedRowDeserializer`]
     /// to decode cell based row with dedup pk encoding.
+    /// TODO: Refactor args. Creating `DedupPkCellBasedRowDeserializer` should not have overhead.
     pub fn new(column_mapping: Desc, pk_descs: &[OrderedColumnDesc]) -> Self {
         let (pk_data_types, pk_order_types) = pk_descs
             .iter()
