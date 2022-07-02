@@ -279,7 +279,7 @@ pub use logical_insert::LogicalInsert;
 pub use logical_join::LogicalJoin;
 pub use logical_limit::LogicalLimit;
 pub use logical_multi_join::{LogicalMultiJoin, LogicalMultiJoinBuilder};
-pub use logical_project::LogicalProject;
+pub use logical_project::{LogicalProject, LogicalProjectBuilder};
 pub use logical_scan::LogicalScan;
 pub use logical_source::LogicalSource;
 pub use logical_table_function::LogicalTableFunction;
