@@ -626,13 +626,16 @@ impl<K: HashKey, S: StateStore, const T: JoinTypePrimitive> HashJoinExecutor<K, 
             (side_update.start_pos, side_match.start_pos)
         };
 
+        let update_range = update_start_pos..(update_start_pos + side_update.col_types.len());
+        let matched_range = matched_start_pos..(side_match.col_types.len() + matched_start_pos);
+
         let mut hashjoin_chunk_builder = HashJoinChunkBuilder::<T, SIDE> {
             stream_chunk_builder: StreamChunkBuilder::new(
                 PROCESSING_WINDOW_SIZE,
                 output_data_types,
                 output_indices,
-                update_start_pos,
-                matched_start_pos,
+                update_range,
+                matched_range,
             )?,
         };
 

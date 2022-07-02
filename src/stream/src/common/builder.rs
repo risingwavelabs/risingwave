@@ -12,6 +12,8 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+use std::collections::HashMap;
+use std::ops::Range;
 use std::sync::Arc;
 
 use itertools::Itertools;
@@ -25,12 +27,6 @@ use risingwave_common::types::DataType;
 pub struct StreamChunkBuilder {
     /// operations in the data chunk to build
     ops: Vec<Op>,
-    /// Map the index from the original_indices to output_indices
-    /// For example, if the original schema of the Chunk is [A, B, C, D, E],
-    /// and the output_indices is [2, 4, 0] (i.e. [C, E, A]).
-    /// Then the `index_mapping` will be
-    /// `[Some(2), None, Some(0), None, Some(1)]`
-    index_mapping: Vec<Option<usize>>,
 
     /// arrays in the data chunk to build
     column_builders: Vec<ArrayBuilderImpl>,
@@ -38,19 +34,11 @@ pub struct StreamChunkBuilder {
     /// Data types of columns
     data_types: Vec<DataType>,
 
-    /// The start position of the columns of the side
-    /// stream coming from. If the coming side is the
-    /// left, the `update_start_pos` should be 0.
-    /// If the coming side is the right, the `update_start_pos`
-    /// is the number of columns of the left side.
-    update_start_pos: usize,
+    output_indices: Vec<usize>,
 
-    /// The start position of the columns of the opposite side
-    /// stream coming from. If the coming side is the
-    /// left, the `matched_start_pos` should be the number of columns of the left side.
-    /// If the coming side is the right, the `matched_start_pos`
-    /// should be 0.
-    matched_start_pos: usize,
+    /// mapping the original column index to the index of update
+    update_mapping: HashMap<usize, usize>,
+    matched_mapping: HashMap<usize, usize>,
 
     /// Maximum capacity of column builder
     capacity: usize,
@@ -70,8 +58,8 @@ impl StreamChunkBuilder {
         capacity: usize,
         original_data_types: &[DataType],
         output_indices: &[usize],
-        update_start_pos: usize,
-        matched_start_pos: usize,
+        update_range: Range<usize>,
+        matched_range: Range<usize>,
     ) -> ArrayResult<Self> {
         // Leave room for paired `UpdateDelete` and `UpdateInsert`. When there are `capacity - 1`
         // ops in current builder and the last op is `UpdateDelete`, we delay the chunk generation
@@ -89,27 +77,34 @@ impl StreamChunkBuilder {
             .iter()
             .map(|datatype| datatype.create_array_builder(reduced_capacity))
             .collect();
-        let output_mapping = {
-            let mut mapping = vec![None; original_data_types.len()];
-            for (i, &output_index) in output_indices.iter().enumerate() {
-                mapping[output_index] = Some(i);
+        let (update_mapping, matched_mapping) = {
+            let mut update_mapping = HashMap::new();
+            let mut matched_mapping = HashMap::new();
+            for i in 0..original_data_types.len() {
+                let in_update = update_range.contains(&i);
+                let in_matched = matched_range.contains(&i);
+                if in_update {
+                    update_mapping.insert(i, i - update_range.start);
+                }
+                if in_matched {
+                    matched_mapping.insert(i, i - matched_range.start);
+                }
+                if !in_matched && !in_update {
+                    unreachable!("{} should be contained in either update_range: {:?} or matched range: {:?}", i, update_range, matched_range);
+                }
             }
-            mapping
+            (update_mapping, matched_mapping)
         };
         Ok(Self {
             ops,
             column_builders,
             data_types: data_types_after_mapping,
-            update_start_pos,
-            matched_start_pos,
             capacity: reduced_capacity,
             size: 0,
-            index_mapping: output_mapping,
+            output_indices: output_indices.to_owned(),
+            update_mapping,
+            matched_mapping,
         })
-    }
-
-    fn original_output_column_count(&self) -> usize {
-        self.index_mapping.len()
     }
 
     /// Increase chunk size
@@ -137,17 +132,14 @@ impl StreamChunkBuilder {
         row_matched: &Row,
     ) -> ArrayResult<Option<StreamChunk>> {
         self.ops.push(op);
-        for (i, d) in row_update.values().enumerate() {
-            if let Some(idx) = self.index_mapping[i + self.update_start_pos] {
-                self.column_builders[idx].append_datum_ref(d)?;
+        for (i, &original_output_idx) in self.output_indices.iter().enumerate() {
+            if let Some(&idx) = self.update_mapping.get(&original_output_idx) {
+                self.column_builders[i].append_datum_ref(row_update.value_at(idx))?;
+            }
+            if let Some(&idx) = self.matched_mapping.get(&original_output_idx) {
+                self.column_builders[i].append_datum(&row_matched[idx])?;
             }
         }
-        for (i, d) in row_matched.values().enumerate() {
-            if let Some(idx) = self.index_mapping[i + self.matched_start_pos] {
-                self.column_builders[idx].append_datum(d)?;
-            }
-        }
-
         self.inc_size()
     }
 
@@ -160,17 +152,13 @@ impl StreamChunkBuilder {
         row_update: &RowRef<'_>,
     ) -> ArrayResult<Option<StreamChunk>> {
         self.ops.push(op);
-        for (i, d) in row_update.values().enumerate() {
-            if let Some(idx) = self.index_mapping[i + self.update_start_pos] {
-                self.column_builders[idx].append_datum_ref(d)?;
+        for (i, &original_output_idx) in self.output_indices.iter().enumerate() {
+            if let Some(&idx) = self.update_mapping.get(&original_output_idx) {
+                self.column_builders[i].append_datum_ref(row_update.value_at(idx))?;
+            } else {
+                self.column_builders[i].append_datum(&None)?;
             }
         }
-        for i in 0..self.original_output_column_count() - row_update.size() {
-            if let Some(idx) = self.index_mapping[i + self.matched_start_pos] {
-                self.column_builders[idx].append_datum(&None)?;
-            }
-        }
-
         self.inc_size()
     }
 
@@ -183,17 +171,13 @@ impl StreamChunkBuilder {
         row_matched: &Row,
     ) -> ArrayResult<Option<StreamChunk>> {
         self.ops.push(op);
-        for i in 0..self.original_output_column_count() - row_matched.size() {
-            if let Some(idx) = self.index_mapping[i + self.update_start_pos] {
-                self.column_builders[idx].append_datum_ref(None)?;
+        for (i, &original_output_idx) in self.output_indices.iter().enumerate() {
+            if let Some(&idx) = self.matched_mapping.get(&original_output_idx) {
+                self.column_builders[i].append_datum(&row_matched[idx])?;
+            } else {
+                self.column_builders[i].append_datum_ref(None)?;
             }
         }
-        for i in 0..row_matched.size() {
-            if let Some(idx) = self.index_mapping[i + self.matched_start_pos] {
-                self.column_builders[idx].append_datum(&row_matched[i])?;
-            }
-        }
-
         self.inc_size()
     }
 

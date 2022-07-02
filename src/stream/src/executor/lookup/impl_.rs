@@ -313,8 +313,9 @@ impl<S: StateStore> LookupExecutor<S> {
                         PROCESSING_WINDOW_SIZE,
                         &self.chunk_data_types,
                         &self.column_mapping,
-                        0,
-                        self.stream.col_types.len(),
+                        0..self.stream.col_types.len(),
+                        self.stream.col_types.len()
+                            ..(self.stream.col_types.len() + self.arrangement.col_types.len()),
                     )
                     .map_err(StreamExecutorError::eval_error)?;
 
