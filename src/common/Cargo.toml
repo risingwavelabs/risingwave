@@ -16,6 +16,7 @@ comfy-table = "6"
 crc32fast = "1"
 either = "1"
 futures = { version = "0.3", default-features = false, features = ["alloc"] }
+humantime = "2.1"
 hyper = "0.14"
 itertools = "0.10"
 lazy_static = "1"
@@ -29,10 +30,13 @@ parking_lot = "0.12"
 paste = "1"
 prometheus = { version = "0.13" }
 prost = "0.10"
+rand = "0.8"
 regex = "1"
 risingwave_pb = { path = "../prost" }
 rust_decimal = "1"
 serde = { version = "1", features = ["derive"] }
+serde_derive = "1"
+serde_json = "1"
 smallvec = "1"
 spin = "0.9"
 thiserror = "1"

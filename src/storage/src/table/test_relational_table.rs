@@ -25,10 +25,11 @@ use risingwave_common::util::sort_util::OrderType;
 use crate::cell_based_row_serializer::CellBasedRowSerializer;
 use crate::error::StorageResult;
 use crate::memory::MemoryStateStore;
+use crate::row_serializer::RowSerializer;
 use crate::storage_value::{StorageValue, ValueMeta};
 use crate::store::{StateStore, WriteOptions};
 use crate::table::cell_based_table::{CellBasedTable, DEFAULT_VNODE};
-use crate::table::state_table::StateTable;
+use crate::table::state_table::{DedupPkStateTable, StateTable};
 use crate::table::TableIter;
 use crate::Keyspace;
 
@@ -1775,4 +1776,91 @@ async fn test_state_table_iter_with_prefix() {
     // pk without the prefix the range will not be scan
     let res = iter.next().await;
     assert!(res.is_none());
+}
+
+#[tokio::test]
+async fn test_dedup_pk_table_write_with_cell_based_read() {
+    // ---------- init state store
+    let state_store = MemoryStateStore::new();
+    let keyspace = Keyspace::table_root(state_store, &TableId::from(0x42));
+
+    // ---------- declare table layout
+    let column_ids = vec![ColumnId::from(0), ColumnId::from(1), ColumnId::from(2)];
+    let actual_column_descs = vec![
+        ColumnDesc::unnamed(column_ids[0], DataType::Int32),
+        ColumnDesc::unnamed(column_ids[1], DataType::Int32),
+        ColumnDesc::unnamed(column_ids[2], DataType::Int32),
+    ];
+
+    // ---------- declare pk
+    let order_types = vec![OrderType::Descending];
+    let pk_indices = vec![1_usize];
+    let pk_ordered_descs = vec![OrderedColumnDesc {
+        column_desc: ColumnDesc::unnamed(ColumnId::from(1), DataType::Int32),
+        order: OrderType::Descending,
+    }];
+
+    // ---------- Init state table interface
+    let mut state = DedupPkStateTable::new(
+        keyspace.clone(),
+        actual_column_descs.clone(),
+        order_types.clone(),
+        None,
+        pk_indices.clone(),
+    );
+
+    // ---------- Init table for reads
+    state
+        .insert(Row(vec![
+            Some(1_i32.into()),
+            Some(11_i32.into()),
+            Some(111_i32.into()),
+        ]))
+        .unwrap();
+
+    state
+        .insert(Row(vec![
+            Some(2_i32.into()),
+            Some(22_i32.into()),
+            Some(222_i32.into()),
+        ]))
+        .unwrap();
+
+    let epoch: u64 = 0;
+    state.commit(epoch).await.unwrap();
+
+    // ---------- Init reader
+    let table = CellBasedTable::new_for_test(
+        keyspace.clone(),
+        actual_column_descs,
+        order_types,
+        pk_indices,
+    );
+    let epoch: u64 = 0;
+    let iter = table
+        .batch_dedup_pk_iter(epoch, &pk_ordered_descs)
+        .await
+        .unwrap();
+    pin_mut!(iter);
+
+    // ---------- Read + Deserialize from storage
+    let expected_2 = Row(vec![
+        Some(2_i32.into()),
+        Some(22_i32.into()),
+        Some(222_i32.into()),
+    ]);
+    let actual_2 = iter.next_row().await.unwrap();
+    assert!(actual_2.is_some());
+    assert_eq!(actual_2.unwrap(), expected_2);
+
+    let expected_1 = Row(vec![
+        Some(1_i32.into()),
+        Some(11_i32.into()),
+        Some(111_i32.into()),
+    ]);
+    let actual_1 = iter.next_row().await.unwrap();
+    assert!(actual_1.is_some());
+    assert_eq!(actual_1.unwrap(), expected_1);
+    let actual_3 = iter.next_row().await.unwrap();
+    assert!(actual_3.is_none())
 }

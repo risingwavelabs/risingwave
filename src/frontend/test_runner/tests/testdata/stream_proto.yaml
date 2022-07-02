@@ -32,11 +32,13 @@
                             isNullable: true
                           name: _row_id
                         order: ASCENDING
+                    pkIndices:
+                      - 0
+                    distKeyIndices:
+                      - 0
                   columnIds:
                     - 1
                     - 0
-                  distributionKeys:
-                    - 1
             pkIndices:
               - 1
             fields:
@@ -175,11 +177,13 @@
                         isNullable: true
                       name: _row_id
                     order: ASCENDING
+                pkIndices:
+                  - 0
+                distKeyIndices:
+                  - 0
               columnIds:
                 - 1
                 - 0
-              distributionKeys:
-                - 1
         pkIndices:
           - 1
         fields:
@@ -293,11 +297,13 @@
                         isNullable: true
                       name: _row_id
                     order: ASCENDING
+                pkIndices:
+                  - 0
+                distKeyIndices:
+                  - 0
               columnIds:
                 - 1
                 - 0
-              distributionKeys:
-                - 1
         pkIndices:
           - 1
         fields:
@@ -413,11 +419,13 @@
                                     isNullable: true
                                   name: _row_id
                                 order: ASCENDING
+                            pkIndices:
+                              - 0
+                            distKeyIndices:
+                              - 0
                           columnIds:
                             - 1
                             - 0
-                          distributionKeys:
-                            - 1
                     pkIndices:
                       - 1
                     fields:
@@ -626,12 +634,14 @@
                                         isNullable: true
                                       name: _row_id
                                     order: ASCENDING
+                                pkIndices:
+                                  - 0
+                                distKeyIndices:
+                                  - 0
                               columnIds:
                                 - 1
                                 - 2
                                 - 0
-                              distributionKeys:
-                                - 2
                         pkIndices:
                           - 2
                         fields:
@@ -737,7 +747,7 @@
                   isNullable: true
                 name: "agg#1"
             hashAgg:
-              distributionKeys:
+              groupKeys:
                 - 0
               aggCalls:
                 - type: COUNT

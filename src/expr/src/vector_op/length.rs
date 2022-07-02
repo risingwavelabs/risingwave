@@ -19,6 +19,16 @@ pub fn length_default(s: &str) -> Result<i32> {
     Ok(s.chars().count() as i32)
 }
 
+#[inline(always)]
+pub fn octet_length(s: &str) -> Result<i32> {
+    Ok(s.as_bytes().len() as i32)
+}
+
+#[inline(always)]
+pub fn bit_length(s: &str) -> Result<i32> {
+    octet_length(s).map(|n| n * 8)
+}
+
 #[cfg(test)]
 mod tests {
 
@@ -30,6 +40,28 @@ mod tests {
 
         for (s, expected) in cases {
             assert_eq!(length_default(s).unwrap(), expected)
+        }
+    }
+
+    #[test]
+    fn test_octet_length() {
+        let cases = [("hello world", 11), ("你好", 6), ("😇哈哈hhh", 13)];
+
+        for (s, expected) in cases {
+            assert_eq!(octet_length(s).unwrap(), expected)
+        }
+    }
+
+    #[test]
+    fn test_bit_length() {
+        let cases = [
+            ("hello world", 11 * 8),
+            ("你好", 6 * 8),
+            ("😇哈哈hhh", 13 * 8),
+        ];
+
+        for (s, expected) in cases {
+            assert_eq!(bit_length(s).unwrap(), expected)
         }
     }
 }

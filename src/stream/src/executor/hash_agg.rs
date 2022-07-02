@@ -174,7 +174,7 @@ impl<K: HashKey, S: StateStore> HashAggExecutor<K, S> {
                 (
                     key.clone(),
                     hash_code.clone(),
-                    key_to_vis_maps.remove(key).unwrap().try_into().unwrap(),
+                    key_to_vis_maps.remove(key).unwrap().into_iter().collect(),
                 )
             })
             .collect_vec();
@@ -200,8 +200,7 @@ impl<K: HashKey, S: StateStore> HashAggExecutor<K, S> {
 
         // Compute hash code here before serializing keys to avoid duplicate hash code computation.
         let hash_codes = data_chunk.get_hash_values(key_indices, CRC32FastBuilder)?;
-        let keys = K::build_from_hash_code(key_indices, &data_chunk, hash_codes.clone())
-            .map_err(StreamExecutorError::eval_error)?;
+        let keys = K::build_from_hash_code(key_indices, &data_chunk, hash_codes.clone());
         let (columns, vis) = data_chunk.into_parts();
         let visibility = match vis {
             Vis::Bitmap(b) => Some(b),
@@ -351,9 +350,7 @@ impl<K: HashKey, S: StateStore> HashAggExecutor<K, S> {
                 // --- Create array builders ---
                 // As the datatype is retrieved from schema, it contains both group key and
                 // aggregation state outputs.
-                let mut builders = schema
-                    .create_array_builders(dirty_cnt * 2)
-                    .map_err(StreamExecutorError::eval_error)?;
+                let mut builders = schema.create_array_builders(dirty_cnt * 2);
                 let mut new_ops = Vec::with_capacity(dirty_cnt);
 
                 // --- Retrieve modified states and put the changes into the builders ---
@@ -455,9 +452,8 @@ mod tests {
     use risingwave_storage::table::state_table::StateTable;
     use risingwave_storage::{Keyspace, StateStore};
 
-    use crate::executor::aggregation::{
-        generate_agg_schema, generate_state_table, AggArgs, AggCall,
-    };
+    use crate::executor::aggregation::{generate_agg_schema, AggArgs, AggCall};
+    use crate::executor::test_utils::global_simple_agg::generate_state_table;
     use crate::executor::test_utils::*;
     use crate::executor::{Executor, HashAggExecutor, Message, PkIndices};
 

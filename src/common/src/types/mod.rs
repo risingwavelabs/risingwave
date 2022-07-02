@@ -63,9 +63,9 @@ pub type ParallelUnitId = u32;
 
 // VirtualNode (a.k.a. VNode) is a minimal partition that a set of keys belong to. It is used for
 // consistent hashing.
-pub type VirtualNode = u16;
-pub const VIRTUAL_NODE_SIZE: usize = 2;
-pub const VNODE_BITS: usize = 11;
+pub type VirtualNode = u8;
+pub const VIRTUAL_NODE_SIZE: usize = std::mem::size_of::<VirtualNode>();
+pub const VNODE_BITS: usize = 8;
 pub const VIRTUAL_NODE_COUNT: usize = 1 << VNODE_BITS;
 
 pub type OrderedF32 = ordered_float::OrderedFloat<f32>;
@@ -154,37 +154,37 @@ impl Display for DataType {
 }
 
 impl DataType {
-    pub fn create_array_builder(&self, capacity: usize) -> ArrayResult<ArrayBuilderImpl> {
+    pub fn create_array_builder(&self, capacity: usize) -> ArrayBuilderImpl {
         use crate::array::*;
-        Ok(match self {
-            DataType::Boolean => BoolArrayBuilder::new(capacity)?.into(),
-            DataType::Int16 => PrimitiveArrayBuilder::<i16>::new(capacity)?.into(),
-            DataType::Int32 => PrimitiveArrayBuilder::<i32>::new(capacity)?.into(),
-            DataType::Int64 => PrimitiveArrayBuilder::<i64>::new(capacity)?.into(),
-            DataType::Float32 => PrimitiveArrayBuilder::<OrderedF32>::new(capacity)?.into(),
-            DataType::Float64 => PrimitiveArrayBuilder::<OrderedF64>::new(capacity)?.into(),
-            DataType::Decimal => DecimalArrayBuilder::new(capacity)?.into(),
-            DataType::Date => NaiveDateArrayBuilder::new(capacity)?.into(),
-            DataType::Varchar => Utf8ArrayBuilder::new(capacity)?.into(),
-            DataType::Time => NaiveTimeArrayBuilder::new(capacity)?.into(),
-            DataType::Timestamp => NaiveDateTimeArrayBuilder::new(capacity)?.into(),
-            DataType::Timestampz => PrimitiveArrayBuilder::<i64>::new(capacity)?.into(),
-            DataType::Interval => IntervalArrayBuilder::new(capacity)?.into(),
+        match self {
+            DataType::Boolean => BoolArrayBuilder::new(capacity).into(),
+            DataType::Int16 => PrimitiveArrayBuilder::<i16>::new(capacity).into(),
+            DataType::Int32 => PrimitiveArrayBuilder::<i32>::new(capacity).into(),
+            DataType::Int64 => PrimitiveArrayBuilder::<i64>::new(capacity).into(),
+            DataType::Float32 => PrimitiveArrayBuilder::<OrderedF32>::new(capacity).into(),
+            DataType::Float64 => PrimitiveArrayBuilder::<OrderedF64>::new(capacity).into(),
+            DataType::Decimal => DecimalArrayBuilder::new(capacity).into(),
+            DataType::Date => NaiveDateArrayBuilder::new(capacity).into(),
+            DataType::Varchar => Utf8ArrayBuilder::new(capacity).into(),
+            DataType::Time => NaiveTimeArrayBuilder::new(capacity).into(),
+            DataType::Timestamp => NaiveDateTimeArrayBuilder::new(capacity).into(),
+            DataType::Timestampz => PrimitiveArrayBuilder::<i64>::new(capacity).into(),
+            DataType::Interval => IntervalArrayBuilder::new(capacity).into(),
             DataType::Struct { fields } => StructArrayBuilder::with_meta(
                 capacity,
                 ArrayMeta::Struct {
                     children: fields.clone(),
                 },
-            )?
+            )
             .into(),
             DataType::List { datatype } => ListArrayBuilder::with_meta(
                 capacity,
                 ArrayMeta::List {
                     datatype: datatype.clone(),
                 },
-            )?
+            )
             .into(),
-        })
+        }
     }
 
     pub fn prost_type_name(&self) -> TypeName {

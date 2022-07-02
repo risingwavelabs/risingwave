@@ -29,25 +29,44 @@ pub mod object_metrics;
 pub use error::*;
 use object_metrics::ObjectStoreMetrics;
 
-use crate::object::disk::LocalDiskObjectStore;
+use crate::object::disk::DiskObjectStore;
 
 pub const LOCAL_OBJECT_STORE_PATH_PREFIX: &str = "@local:";
 
-pub fn is_local_path(path: &str) -> bool {
-    path.starts_with(LOCAL_OBJECT_STORE_PATH_PREFIX)
+#[derive(Debug)]
+pub enum ObjectStorePath<'a> {
+    Local(&'a str),
+    Remote(&'a str),
+}
+
+impl ObjectStorePath<'_> {
+    pub fn is_local(&self) -> bool {
+        match self {
+            ObjectStorePath::Local(_) => true,
+            ObjectStorePath::Remote(_) => false,
+        }
+    }
+
+    pub fn is_remote(&self) -> bool {
+        !self.is_local()
+    }
+
+    pub fn as_str(&self) -> &str {
+        match self {
+            ObjectStorePath::Local(path) => path,
+            ObjectStorePath::Remote(path) => path,
+        }
+    }
 }
 
 pub fn get_local_path(path: &str) -> String {
     LOCAL_OBJECT_STORE_PATH_PREFIX.to_string() + path
 }
 
-pub fn strip_path_local(path: &str, is_local: bool) -> &str {
-    assert_eq!(is_local_path(path), is_local);
-    if is_local {
-        // Since it passes the `is_local_path` check, it's safe to unwrap
-        path.strip_prefix(LOCAL_OBJECT_STORE_PATH_PREFIX).unwrap()
-    } else {
-        path
+pub fn parse_object_store_path(path: &str) -> ObjectStorePath<'_> {
+    match path.strip_prefix(LOCAL_OBJECT_STORE_PATH_PREFIX) {
+        Some(path) => ObjectStorePath::Local(path),
+        None => ObjectStorePath::Remote(path),
     }
 }
 
@@ -73,8 +92,6 @@ impl BlockLocation {
 }
 
 /// The implementation must be thread-safe.
-/// For `path`, if the `path` starts with `LOCAL_OBJECT_STORE_PATH_PREFIX`, it indicates that the
-/// operation should be performed on the local object store.
 #[async_trait::async_trait]
 pub trait ObjectStore: Send + Sync {
     /// Uploads the object to `ObjectStore`.
@@ -93,80 +110,114 @@ pub trait ObjectStore: Send + Sync {
 
     /// Deletes blob permanently.
     async fn delete(&self, path: &str) -> ObjectResult<()>;
-}
 
-pub struct HybridObjectStore {
-    local: Arc<dyn ObjectStore>,
-    remote: Arc<dyn ObjectStore>,
-}
-
-impl HybridObjectStore {
-    pub fn new(local: Arc<dyn ObjectStore>, remote: Arc<dyn ObjectStore>) -> Self {
-        HybridObjectStore { local, remote }
-    }
-
-    pub fn local(&self) -> &Arc<dyn ObjectStore> {
-        &self.local
-    }
-
-    pub fn remote(&self) -> &Arc<dyn ObjectStore> {
-        &self.remote
-    }
-}
-
-#[async_trait::async_trait]
-impl ObjectStore for HybridObjectStore {
-    async fn upload(&self, path: &str, obj: Bytes) -> ObjectResult<()> {
-        if is_local_path(path) {
-            self.local.upload(path, obj).await
-        } else {
-            self.remote.upload(path, obj).await
-        }
-    }
-
-    async fn read(&self, path: &str, block_loc: Option<BlockLocation>) -> ObjectResult<Bytes> {
-        if is_local_path(path) {
-            self.local.read(path, block_loc).await
-        } else {
-            self.remote.read(path, block_loc).await
-        }
-    }
-
-    async fn readv(&self, path: &str, block_locs: &[BlockLocation]) -> ObjectResult<Vec<Bytes>> {
-        if is_local_path(path) {
-            self.local.readv(path, block_locs).await
-        } else {
-            self.remote.readv(path, block_locs).await
-        }
-    }
-
-    async fn metadata(&self, path: &str) -> ObjectResult<ObjectMetadata> {
-        if is_local_path(path) {
-            self.local.metadata(path).await
-        } else {
-            self.remote.metadata(path).await
-        }
-    }
-
-    async fn delete(&self, path: &str) -> ObjectResult<()> {
-        if is_local_path(path) {
-            self.local.delete(path).await
-        } else {
-            self.remote.delete(path).await
-        }
+    fn monitored(self, metrics: Arc<ObjectStoreMetrics>) -> MonitoredObjectStore<Self>
+    where
+        Self: Sized,
+    {
+        MonitoredObjectStore::new(self, metrics)
     }
 }
 
 pub type ObjectStoreRef = Arc<ObjectStoreImpl>;
 
-pub struct ObjectStoreImpl {
-    inner: Box<dyn ObjectStore>,
+pub enum ObjectStoreImpl {
+    InMem(MonitoredObjectStore<InMemObjectStore>),
+    Disk(MonitoredObjectStore<DiskObjectStore>),
+    S3(MonitoredObjectStore<S3ObjectStore>),
+    Hybrid {
+        local: Box<ObjectStoreImpl>,
+        remote: Box<ObjectStoreImpl>,
+    },
+}
+
+impl ObjectStoreImpl {
+    pub fn hybrid(local: ObjectStoreImpl, remote: ObjectStoreImpl) -> Self {
+        ObjectStoreImpl::Hybrid {
+            local: Box::new(local),
+            remote: Box::new(remote),
+        }
+    }
+}
+
+/// This macro routes the object store operation to the real implementation by the ObjectStoreImpl
+/// enum type and the `path`.
+///
+/// For `path`, if the `path` starts with `LOCAL_OBJECT_STORE_PATH_PREFIX`, it indicates that the
+/// operation should be performed on the local object store, and otherwise the operation should be
+/// performed on remote object store.
+macro_rules! object_store_impl_method_body {
+    ($object_store:expr, $method_name:ident, $path:expr $(, $args:expr)*) => {
+        {
+            let path = parse_object_store_path($path);
+            match $object_store {
+                ObjectStoreImpl::InMem(in_mem) => {
+                    assert!(path.is_remote(), "get local path in pure in-mem object store: {:?}", $path);
+                    in_mem.$method_name(path.as_str() $(, $args)*).await
+                },
+                ObjectStoreImpl::Disk(disk) => {
+                    assert!(path.is_remote(), "get local path in pure disk object store: {:?}", $path);
+                    disk.$method_name(path.as_str() $(, $args)*).await
+                },
+                ObjectStoreImpl::S3(s3) => {
+                    assert!(path.is_remote(), "get local path in pure s3 object store: {:?}", $path);
+                    s3.$method_name(path.as_str() $(, $args)*).await
+                },
+                ObjectStoreImpl::Hybrid {
+                    local: local,
+                    remote: remote,
+                } => {
+                    match path {
+                        ObjectStorePath::Local(_) => match local.as_ref() {
+                            ObjectStoreImpl::InMem(in_mem) => in_mem.$method_name(path.as_str() $(, $args)*).await,
+                            ObjectStoreImpl::Disk(disk) => disk.$method_name(path.as_str() $(, $args)*).await,
+                            ObjectStoreImpl::S3(_) => unreachable!("S3 cannot be used as local object store"),
+                            ObjectStoreImpl::Hybrid {..} => unreachable!("local object store of hybrid object store cannot be hybrid")
+                        },
+                        ObjectStorePath::Remote(_) => match remote.as_ref() {
+                            ObjectStoreImpl::InMem(in_mem) => in_mem.$method_name(path.as_str() $(, $args)*).await,
+                            ObjectStoreImpl::Disk(disk) => disk.$method_name(path.as_str() $(, $args)*).await,
+                            ObjectStoreImpl::S3(s3) => s3.$method_name(path.as_str() $(, $args)*).await,
+                            ObjectStoreImpl::Hybrid {..} => unreachable!("remote object store of hybrid object store cannot be hybrid")
+                        },
+                    }
+                }
+            }
+        }
+    };
+}
+
+#[async_trait::async_trait]
+impl ObjectStore for ObjectStoreImpl {
+    async fn upload(&self, path: &str, obj: Bytes) -> ObjectResult<()> {
+        object_store_impl_method_body!(self, upload, path, obj)
+    }
+
+    async fn read(&self, path: &str, block_loc: Option<BlockLocation>) -> ObjectResult<Bytes> {
+        object_store_impl_method_body!(self, read, path, block_loc)
+    }
+
+    async fn readv(&self, path: &str, block_locs: &[BlockLocation]) -> ObjectResult<Vec<Bytes>> {
+        object_store_impl_method_body!(self, readv, path, block_locs)
+    }
+
+    async fn metadata(&self, path: &str) -> ObjectResult<ObjectMetadata> {
+        object_store_impl_method_body!(self, metadata, path)
+    }
+
+    async fn delete(&self, path: &str) -> ObjectResult<()> {
+        object_store_impl_method_body!(self, delete, path)
+    }
+}
+
+pub struct MonitoredObjectStore<OS: ObjectStore> {
+    inner: OS,
     object_store_metrics: Arc<ObjectStoreMetrics>,
 }
 
 /// Manually dispatch trait methods.
-impl ObjectStoreImpl {
-    pub fn new(store: Box<dyn ObjectStore>, object_store_metrics: Arc<ObjectStoreMetrics>) -> Self {
+impl<OS: ObjectStore> MonitoredObjectStore<OS> {
+    pub fn new(store: OS, object_store_metrics: Arc<ObjectStoreMetrics>) -> Self {
         Self {
             inner: store,
             object_store_metrics,
@@ -243,33 +294,55 @@ impl ObjectStoreImpl {
     }
 }
 
-pub async fn parse_object_store(url: &str, is_local: bool) -> Box<dyn ObjectStore> {
+pub async fn parse_remote_object_store(
+    url: &str,
+    metrics: Arc<ObjectStoreMetrics>,
+) -> ObjectStoreImpl {
     match url {
-        s3 if s3.starts_with("s3://") => {
-            assert!(!is_local, "s3 cannot be used as local object store");
-            Box::new(S3ObjectStore::new(s3.strip_prefix("s3://").unwrap().to_string()).await)
-        }
+        s3 if s3.starts_with("s3://") => ObjectStoreImpl::S3(
+            S3ObjectStore::new(s3.strip_prefix("s3://").unwrap().to_string())
+                .await
+                .monitored(metrics),
+        ),
         minio if minio.starts_with("minio://") => {
-            assert!(!is_local, "minio cannot be used as local object store");
-            Box::new(S3ObjectStore::with_minio(minio).await)
+            ObjectStoreImpl::S3(S3ObjectStore::with_minio(minio).await.monitored(metrics))
         }
-        disk if disk.starts_with("disk://") => Box::new(LocalDiskObjectStore::new(
-            disk.strip_prefix("disk://").unwrap(),
-            is_local,
-        )),
+        disk if disk.starts_with("disk://") => ObjectStoreImpl::Disk(
+            DiskObjectStore::new(disk.strip_prefix("disk://").unwrap()).monitored(metrics),
+        ),
+        memory if memory.starts_with("memory") => {
+            tracing::warn!("You're using Hummock in-memory remote object store. This should never be used in benchmarks and production environment.");
+            ObjectStoreImpl::InMem(InMemObjectStore::new().monitored(metrics))
+        }
+        other => {
+            unimplemented!(
+                "{} hummock remote object store only supports s3, minio, disk, and memory for now.",
+                other
+            )
+        }
+    }
+}
+
+pub async fn parse_local_object_store(
+    url: &str,
+    metrics: Arc<ObjectStoreMetrics>,
+) -> ObjectStoreImpl {
+    match url {
+        disk if disk.starts_with("disk://") => ObjectStoreImpl::Disk(
+            DiskObjectStore::new(disk.strip_prefix("disk://").unwrap()).monitored(metrics),
+        ),
         temp_disk if temp_disk.starts_with("tempdisk") => {
-            assert!(is_local, "tempdisk cannot be used as remote object store");
             let path = tempfile::TempDir::new()
                 .expect("should be able to create temp dir")
                 .into_path()
                 .to_str()
                 .expect("should be able to convert to str")
                 .to_owned();
-            Box::new(LocalDiskObjectStore::new(path.as_str(), true))
+            ObjectStoreImpl::Disk(DiskObjectStore::new(path.as_str()).monitored(metrics))
         }
         memory if memory.starts_with("memory") => {
-            tracing::warn!("You're using Hummock in-memory object store. This should never be used in benchmarks and production environment.");
-            Box::new(InMemObjectStore::new(is_local))
+            tracing::warn!("You're using Hummock in-memory local object store. This should never be used in benchmarks and production environment.");
+            ObjectStoreImpl::InMem(InMemObjectStore::new().monitored(metrics))
         }
         other => {
             unimplemented!(
