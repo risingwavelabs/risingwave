@@ -165,7 +165,7 @@ pub async fn register_table_ids_to_compaction_group<S>(
     S: MetaStore,
 {
     compaction_group_manager_ref
-        .register_for_test(
+        .register_table_ids(
             &table_ids
                 .iter()
                 .map(|table_id| (*table_id, compaction_group_id, TableOption::default()))
@@ -182,7 +182,7 @@ pub async fn unregister_table_ids_from_compaction_group<S>(
     S: MetaStore,
 {
     compaction_group_manager_ref
-        .unregister_for_test(table_ids)
+        .unregister_table_ids(table_ids)
         .await
         .unwrap();
 }

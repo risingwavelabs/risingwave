@@ -81,7 +81,7 @@ impl<S: MetaStore> CompactionGroupManager<S> {
         &self,
         table_fragments: &TableFragments,
         table_properties: &HashMap<String, String>,
-    ) -> Result<()> {
+    ) -> Result<Vec<StateTableId>> {
         let table_option = TableOption::build_table_option(table_properties);
         let mut pairs = vec![];
         // materialized_view or materialized_source
@@ -124,7 +124,7 @@ impl<S: MetaStore> CompactionGroupManager<S> {
         &self,
         source_id: u32,
         table_properties: &HashMap<String, String>,
-    ) -> Result<()> {
+    ) -> Result<Vec<StateTableId>> {
         let table_option = TableOption::build_table_option(table_properties);
         self.inner
             .write()
@@ -200,10 +200,10 @@ impl<S: MetaStore> CompactionGroupManager<S> {
         Ok(table_id_set)
     }
 
-    pub async fn register_for_test(
+    pub async fn register_table_ids(
         &self,
         pairs: &[(StateTableId, CompactionGroupId, TableOption)],
-    ) -> Result<()> {
+    ) -> Result<Vec<StateTableId>> {
         self.inner
             .write()
             .await
@@ -211,7 +211,7 @@ impl<S: MetaStore> CompactionGroupManager<S> {
             .await
     }
 
-    pub async fn unregister_for_test(&self, table_ids: &[StateTableId]) -> Result<()> {
+    pub async fn unregister_table_ids(&self, table_ids: &[StateTableId]) -> Result<()> {
         self.inner
             .write()
             .await
@@ -283,7 +283,7 @@ impl CompactionGroupManagerInner {
         &mut self,
         pairs: &[(StateTableId, CompactionGroupId, TableOption)],
         meta_store: &S,
-    ) -> Result<()> {
+    ) -> Result<Vec<StateTableId>> {
         let mut compaction_groups = VarTransaction::new(&mut self.compaction_groups);
         for (table_id, compaction_group_id, table_option) in pairs {
             let compaction_group = compaction_groups
@@ -303,7 +303,7 @@ impl CompactionGroupManagerInner {
         for (table_id, compaction_group_id, _) in pairs {
             self.index.insert(*table_id, *compaction_group_id);
         }
-        Ok(())
+        Ok(pairs.iter().map(|(table_id, ..)| *table_id).collect_vec())
     }
 
     async fn unregister<S: MetaStore>(

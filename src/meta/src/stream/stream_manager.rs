@@ -284,6 +284,19 @@ where
             ..
         }: CreateMaterializedViewContext,
     ) -> Result<()> {
+        // This scope guard does clean up jobs ASYNCHRONOUSLY before Err returns.
+        // It MUST be cleared before Ok returns.
+        let mut revert_funcs = scopeguard::guard(
+            vec![],
+            |revert_funcs: Vec<futures::future::BoxFuture<()>>| {
+                tokio::spawn(async move {
+                    for revert_func in revert_funcs {
+                        revert_func.await;
+                    }
+                });
+            },
+        );
+
         let nodes = self
             .cluster_manager
             .list_worker_node(
@@ -537,13 +550,19 @@ where
         }
 
         // Register to compaction group beforehand.
-        // If any following operation fails, the registration will be eventually reverted.
         //
         // Note that this step must be before building actors, because we will explicitly sync this
         // info in the beginning of actors.
-        self.compaction_group_manager
+        let registered_table_ids = self
+            .compaction_group_manager
             .register_table_fragments(&table_fragments, &table_properties)
             .await?;
+        let compaction_group_manager_ref = self.compaction_group_manager.clone();
+        revert_funcs.push(Box::pin(async move {
+            if let Err(e) = compaction_group_manager_ref.unregister_table_ids(&registered_table_ids).await {
+                tracing::warn!("Failed to unregister_table_ids {:#?}.\nThey will be cleaned up on node restart.\n{:#?}", registered_table_ids, e);
+            }
+        }));
 
         // In the second stage, each [`WorkerNode`] builds local actors and connect them with
         // channels.
@@ -597,6 +616,7 @@ where
                 .await?;
         }
 
+        revert_funcs.clear();
         Ok(())
     }
 
