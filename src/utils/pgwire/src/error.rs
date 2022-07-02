@@ -19,11 +19,17 @@ use thiserror::Error;
 pub enum PsqlError {
     #[error("Encode error {0}.")]
     CancelError(String),
+    #[error("{0}")]
+    UnrecognizedParamError(String),
 }
 
 impl PsqlError {
     /// Construct a Cancel error. Used when Ctrl-c a processing query. Similar to PG.
     pub fn cancel() -> Self {
         PsqlError::CancelError("ERROR:  canceling statement due to user request".to_string())
+    }
+
+    pub fn unrecognized_param(param: &str) -> Self {
+        PsqlError::UnrecognizedParamError(format!("ERROR: unrecognized parameter {}", param))
     }
 }
