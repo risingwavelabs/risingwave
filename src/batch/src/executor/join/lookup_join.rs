@@ -38,7 +38,8 @@ use crate::executor::join::{
     concatenate, convert_datum_refs_to_chunk, convert_row_to_chunk, JoinType,
 };
 use crate::executor::{
-    BoxedDataChunkStream, BoxedExecutor, BoxedExecutorBuilder, Executor, ExecutorBuilder,
+    data_chunk_stream, BoxedDataChunkStream, BoxedExecutor, BoxedExecutorBuilder, Executor,
+    ExecutorBuilder,
 };
 use crate::task::BatchTaskContext;
 
@@ -46,25 +47,27 @@ struct BuildSideSourceParams {
     table_desc: CellBasedTableDesc,
     column_ids: Vec<i32>,
     probe_side_idxs: Vec<usize>,
-    sources: Vec<ProstExchangeSource>,
+    source_templates: Vec<ProstExchangeSource>,
 }
 
 struct GatherExecutor {
-    actual_sources: Vec<ProstExchangeSource>,
+    prost_sources: Vec<ProstExchangeSource>,
 }
 
 impl GatherExecutor {
     fn new_boxed() -> Box<Self> {
         Box::new(GatherExecutor {
-            actual_sources: vec![],
+            prost_sources: vec![],
         })
     }
 
-    fn create_build_side_stream(
+    /// Creates the `RowSeqScanNode` that will be used for scanning the build side table
+    /// based on the passed `RowRef` and the `BuildSideSourceParams`.
+    fn create_row_seq_scan_node(
         self: &mut Box<Self>,
         cur_row: &RowRef,
         params: &BuildSideSourceParams,
-    ) -> Result<()> {
+    ) -> Result<NodeBody> {
         let eq_conds = params
             .probe_side_idxs
             .iter()
@@ -76,30 +79,43 @@ impl GatherExecutor {
                     .to_protobuf()
             })
             .collect();
+
         let scan_range = Some(ScanRange {
             eq_conds,
             lower_bound: None,
             upper_bound: None,
         });
 
+        Ok(NodeBody::RowSeqScan(RowSeqScanNode {
+            table_desc: Some(params.table_desc.clone()),
+            column_ids: params.column_ids.clone(),
+            scan_range,
+        }))
+    }
+
+    /// Manually recreates the actual vector of `ProstExchangeSources` to be used for sending
+    /// RPC calls using the `source_templates` in the passed `BuildSideSourceParams`.
+    fn create_build_side_prost_sources(
+        self: &mut Box<Self>,
+        cur_row: &RowRef,
+        params: &BuildSideSourceParams,
+    ) -> Result<()> {
+        let Plan(inner_template_plan) =
+            params.source_templates[0].get_local_execute_plan().unwrap();
         let local_execute_plan = LocalExecutePlan {
             plan: Some(PlanFragment {
                 root: Some(PlanNode {
                     children: vec![],
                     identity: Uuid::new_v4().to_string(),
-                    node_body: Some(NodeBody::RowSeqScan(RowSeqScanNode {
-                        table_desc: Some(params.table_desc.clone()),
-                        column_ids: params.column_ids.clone(),
-                        scan_range,
-                    })),
+                    node_body: Some(self.create_row_seq_scan_node(cur_row, params)?),
                 }),
                 exchange_info: None,
             }),
-            epoch: 0, // change dis
+            epoch: inner_template_plan.epoch,
         };
 
-        self.actual_sources = params
-            .sources
+        self.prost_sources = params
+            .source_templates
             .iter()
             .map(|source| ProstExchangeSource {
                 task_output_id: Some(source.get_task_output_id().unwrap().clone()),
@@ -115,15 +131,18 @@ impl GatherExecutor {
         self.get_build_side_chunk()
     }
 
+    /// Sends RPC calls to retrieve data from the build side table using the vector of
+    /// `ProstExchangeSources` that was created after calling `create_build_side_prost_sources()`
     #[try_stream(boxed, ok = DataChunk, error = RwError)]
     async fn get_build_side_chunk(self: Box<Self>) {
         let mut exchange_sources: Vec<Box<dyn ExchangeSource>> = vec![];
 
-        for prost_source in &self.actual_sources {
+        for prost_source in &self.prost_sources {
             let exchange_source = Box::new(GrpcExchangeSource::create(prost_source.clone()).await?);
             exchange_sources.push(exchange_source);
         }
 
+        // Merge the streams from all the exchange sources into one stream
         let mut stream = select_all(
             exchange_sources
                 .into_iter()
@@ -179,7 +198,8 @@ impl LookupJoinExecutor {
             let cur_row = cur_row.unwrap();
 
             let mut gather_executor = GatherExecutor::new_boxed();
-            gather_executor.create_build_side_stream(&cur_row, &self.build_side_source_params)?;
+            gather_executor
+                .create_build_side_prost_sources(&cur_row, &self.build_side_source_params)?;
             let mut build_side_stream = gather_executor.execute();
 
             let mut chunk_added = false;
@@ -311,20 +331,6 @@ impl LookupJoinExecutor {
     }
 }
 
-#[try_stream(boxed, ok = DataChunk, error = RwError)]
-async fn data_chunk_stream(mut source: Box<dyn ExchangeSource>) {
-    loop {
-        if let Some(res) = source.take_data().await? {
-            if res.cardinality() == 0 {
-                debug!("Exchange source {:?} output empty chunk.", source);
-            }
-            yield res;
-            continue;
-        }
-        break;
-    }
-}
-
 #[async_trait::async_trait]
 impl BoxedExecutorBuilder for LookupJoinExecutor {
     async fn new_boxed_executor<C: BatchTaskContext>(
@@ -372,23 +378,20 @@ impl BoxedExecutorBuilder for LookupJoinExecutor {
             .map(|&idx| original_schema[idx].clone())
             .collect();
 
+        // Initialize parameters for creating the build side source
         let mut probe_side_idxs = vec![];
         for probe_side_key in lookup_join_node.get_probe_side_key() {
             probe_side_idxs.push(*probe_side_key as usize)
         }
 
-        // Initialize parameters for creating the build side source
-        // let mut build_side_idxs = vec![];
-        // for build_side_key in lookup_join_node.get_build_side_key() {
-        // build_side_idxs.push(*build_side_key as usize)
-        // }
-
         let build_side_table_desc = lookup_join_node.get_build_side_table_desc()?;
+
+        ensure!(!lookup_join_node.get_sources().is_empty());
         let build_side_source_params = BuildSideSourceParams {
             table_desc: build_side_table_desc.clone(),
             column_ids: lookup_join_node.get_build_side_column_ids().to_vec(),
             probe_side_idxs,
-            sources: lookup_join_node.get_sources().to_vec(),
+            source_templates: lookup_join_node.get_sources().to_vec(),
         };
 
         Ok(Box::new(Self {

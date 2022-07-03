@@ -189,14 +189,13 @@ message MergeSortExchangeNode {
 
 message LookupJoinNode {
   plan_common.JoinType join_type = 1;
-  repeated int32 probe_side_key = 2;
-  plan_common.CellBasedTableDesc build_side_table_desc = 3;
-  repeated int32 build_side_column_ids = 4;
-  repeated plan_common.Field build_side_schema = 5;
-  repeated int32 build_side_key = 6;
-  expr.ExprNode condition = 7;
-  repeated uint32 output_indices = 8;
-  repeated ExchangeSource sources = 9;
+  expr.ExprNode condition = 2;
+  repeated int32 probe_side_key = 3;
+  plan_common.CellBasedTableDesc build_side_table_desc = 4;
+  repeated int32 build_side_column_ids = 5;
+  repeated plan_common.Field build_side_schema = 6;
+  repeated uint32 output_indices = 7;
+  repeated ExchangeSource sources = 8;
 }
 
 message PlanNode {

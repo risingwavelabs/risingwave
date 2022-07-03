@@ -177,3 +177,60 @@ fn convert_row_to_chunk(
     let datum_refs = row_ref.values().collect_vec();
     convert_datum_refs_to_chunk(&datum_refs, num_tuples, data_types)
 }
+
+#[cfg(test)]
+mod tests {
+    use std::sync::Arc;
+
+    use risingwave_common::array::column::Column;
+    use risingwave_common::array::{ArrayBuilder, DataChunk, PrimitiveArrayBuilder, Vis};
+    use risingwave_common::catalog::{Field, Schema};
+    use risingwave_common::types::{DataType, ScalarRefImpl};
+
+    use crate::executor::join::{concatenate, convert_datum_refs_to_chunk};
+
+    #[test]
+    fn test_concatenate() {
+        let num_of_columns: usize = 2;
+        let length = 5;
+        let mut columns = vec![];
+        for i in 0..num_of_columns {
+            let mut builder = PrimitiveArrayBuilder::<i32>::new(length);
+            for _ in 0..length {
+                builder.append(Some(i as i32)).unwrap();
+            }
+            let arr = builder.finish().unwrap();
+            columns.push(Column::new(Arc::new(arr.into())))
+        }
+        let chunk1: DataChunk = DataChunk::new(columns.clone(), length);
+        let bool_vec = vec![true, false, true, false, false];
+        let chunk2: DataChunk = DataChunk::new(
+            columns.clone(),
+            Vis::Bitmap((bool_vec.clone()).into_iter().collect()),
+        );
+        let chunk = concatenate(&chunk1, &chunk2).unwrap();
+        assert_eq!(chunk.capacity(), chunk1.capacity());
+        assert_eq!(chunk.capacity(), chunk2.capacity());
+        assert_eq!(chunk.columns().len(), chunk1.columns().len() * 2);
+        assert_eq!(
+            chunk.visibility().cloned().unwrap(),
+            (bool_vec).into_iter().collect()
+        );
+    }
+
+    /// Test the function of convert row into constant row chunk (one row repeat multiple times).
+    #[test]
+    fn test_convert_row_to_chunk() {
+        let row = vec![Some(ScalarRefImpl::Int32(3))];
+        let probe_side_schema = Schema {
+            fields: vec![Field::unnamed(DataType::Int32)],
+        };
+        let const_row_chunk =
+            convert_datum_refs_to_chunk(&row, 5, &probe_side_schema.data_types()).unwrap();
+        assert_eq!(const_row_chunk.capacity(), 5);
+        assert_eq!(
+            const_row_chunk.row_at(2).unwrap().0.value_at(0),
+            Some(ScalarRefImpl::Int32(3))
+        );
+    }
+}

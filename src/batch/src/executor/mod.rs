@@ -38,6 +38,7 @@ use async_recursion::async_recursion;
 pub use delete::*;
 pub use filter::*;
 use futures::stream::BoxStream;
+use futures_async_stream::try_stream;
 pub use generic_exchange::*;
 pub use hash_agg::*;
 pub use hop_window::*;
@@ -51,9 +52,10 @@ pub use project::*;
 use risingwave_common::array::DataChunk;
 use risingwave_common::catalog::Schema;
 use risingwave_common::error::ErrorCode::InternalError;
-use risingwave_common::error::Result;
+use risingwave_common::error::{Result, RwError};
 use risingwave_pb::batch_plan::plan_node::NodeBody;
 use risingwave_pb::batch_plan::PlanNode;
+use risingwave_rpc_client::ExchangeSource;
 pub use row_seq_scan::*;
 pub use sort_agg::*;
 pub use table_function::*;
@@ -192,6 +194,20 @@ impl<'a, C: BatchTaskContext> ExecutorBuilder<'a, C> {
         .await?;
         let input_desc = real_executor.identity().to_string();
         Ok(Box::new(TraceExecutor::new(real_executor, input_desc)) as BoxedExecutor)
+    }
+}
+
+#[try_stream(boxed, ok = DataChunk, error = RwError)]
+async fn data_chunk_stream(mut source: Box<dyn ExchangeSource>) {
+    loop {
+        if let Some(res) = source.take_data().await? {
+            if res.cardinality() == 0 {
+                debug!("Exchange source {:?} output empty chunk.", source);
+            }
+            yield res;
+            continue;
+        }
+        break;
     }
 }
 
