@@ -168,6 +168,13 @@ impl CatalogWriter for MockCatalogWriter {
         Ok(())
     }
 
+    async fn create_sink(&self, mut table: ProstTable, _graph: StreamFragmentGraph) -> Result<()> {
+        table.id = self.gen_id();
+        self.catalog.write().create_table(&table);
+        self.add_table_or_source_id(table.id, table.schema_id, table.database_id);
+        Ok(())
+    }
+
     async fn create_materialized_view(
         &self,
         mut table: ProstTable,

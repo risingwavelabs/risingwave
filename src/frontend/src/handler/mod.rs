@@ -25,6 +25,7 @@ mod create_database;
 pub mod create_index;
 pub mod create_mv;
 mod create_schema;
+pub mod create_sink;
 pub mod create_source;
 pub mod create_table;
 pub mod create_user;
@@ -162,6 +163,7 @@ pub(super) async fn handle(
             ABORT,
             "Ignored temporarily.See detail in issue#2541".to_string(),
         )),
+        Statement::CreateSink { stmt } => create_sink::handle_create_sink(context, stmt).await,
         _ => {
             Err(ErrorCode::NotImplemented(format!("Unhandled ast: {:?}", stmt), None.into()).into())
         }

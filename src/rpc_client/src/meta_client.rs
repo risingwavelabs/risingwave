@@ -183,6 +183,19 @@ impl MetaClient {
         Ok((resp.table_id.into(), resp.source_id, resp.version))
     }
 
+    pub async fn create_sink(
+        &self,
+        table: ProstTable,
+        graph: StreamFragmentGraph,
+    ) -> Result<(TableId, CatalogVersion)> {
+        let request = CreateSinkRequest {
+            sink: Some(table),
+            fragment_graph: Some(graph),
+        };
+        let resp = self.inner.create_sink(request).await?;
+        Ok((resp.table_id.into(), resp.version))
+    }
+
     pub async fn drop_materialized_source(
         &self,
         source_id: u32,
@@ -564,6 +577,7 @@ macro_rules! for_all_meta_rpc {
             ,{ ddl_client, drop_database, DropDatabaseRequest, DropDatabaseResponse }
             ,{ ddl_client, drop_schema, DropSchemaRequest, DropSchemaResponse }
             ,{ ddl_client, list_materialized_view, ListMaterializedViewRequest, ListMaterializedViewResponse }
+            ,{ ddl_client, create_sink, CreateSinkRequest, CreateSinkResponse}
             ,{ hummock_client, pin_version, PinVersionRequest, PinVersionResponse }
             ,{ hummock_client, unpin_version, UnpinVersionRequest, UnpinVersionResponse }
             ,{ hummock_client, pin_snapshot, PinSnapshotRequest, PinSnapshotResponse }

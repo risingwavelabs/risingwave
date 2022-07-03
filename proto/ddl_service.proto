@@ -76,6 +76,17 @@ message CreateMaterializedViewResponse {
   uint64 version = 3;
 }
 
+message CreateSinkRequest {
+  catalog.Table sink = 1;
+  stream_plan.StreamFragmentGraph fragment_graph = 2;
+}
+
+message CreateSinkResponse {
+  common.Status status = 1;
+  uint32 table_id = 2;
+  uint64 version = 3;
+}
+
 message DropMaterializedViewRequest {
   uint32 table_id = 1;
 }
@@ -128,4 +139,5 @@ service DdlService {
   rpc CreateMaterializedSource(CreateMaterializedSourceRequest) returns (CreateMaterializedSourceResponse);
   rpc DropMaterializedSource(DropMaterializedSourceRequest) returns (DropMaterializedSourceResponse);
   rpc ListMaterializedView(ListMaterializedViewRequest) returns (ListMaterializedViewResponse);
+  rpc CreateSink(CreateSinkRequest) returns (CreateSinkResponse);
 }

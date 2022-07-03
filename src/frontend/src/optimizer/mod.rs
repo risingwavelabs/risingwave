@@ -273,6 +273,18 @@ impl PlanRoot {
         )
     }
 
+    pub fn gen_create_sink_plan(&mut self, sink_name: String) -> Result<StreamMaterialize> {
+        let stream_plan = self.gen_stream_plan()?;
+        StreamMaterialize::create(
+            stream_plan,
+            sink_name,
+            self.required_order.clone(),
+            self.out_fields.clone(),
+            self.out_names.clone(),
+            None,
+        )
+    }
+
     /// Optimize and generate a create index plan.
     pub fn gen_create_index_plan(
         &mut self,

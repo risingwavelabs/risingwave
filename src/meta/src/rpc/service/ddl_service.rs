@@ -226,6 +226,17 @@ where
         }))
     }
 
+    async fn create_sink(
+        &self,
+        request: Request<CreateSinkRequest>,
+    ) -> Result<Response<CreateSinkResponse>, Status> {
+        Ok(Response::new(CreateSinkResponse {
+            status: None,
+            version: 0,
+            table_id: 0,
+        }))
+    }
+
     async fn create_materialized_view(
         &self,
         request: Request<CreateMaterializedViewRequest>,
