@@ -31,6 +31,7 @@ impl<'a, R: Rng> SqlGenerator<'a, R> {
     }
 
     fn gen_table(&mut self) -> TableWithJoins {
+        // TODO: Leave branching to gen_table_factor?
         if self.can_recurse() {
             return match self.rng.gen_bool(0.5) {
                 true => self.gen_simple_table(),
@@ -59,8 +60,17 @@ impl<'a, R: Rng> SqlGenerator<'a, R> {
         relation
     }
 
-    fn gen_join_table(&mut self) -> TableWithJoins {
+    fn gen_table_factor(&mut self) -> TableFactor {
+        // allow nesting
         todo!()
+    }
+
+    fn gen_join_table(&mut self) -> TableWithJoins {
+        let left = self.gen_table_factor();
+        let right = self.gen_table_factor();
+        todo!()
+        // find available columns to join on.
+        // shuffle, pick columns to join on
     }
 
     fn gen_subquery(&mut self) -> TableWithJoins {
