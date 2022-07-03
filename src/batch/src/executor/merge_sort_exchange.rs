@@ -24,8 +24,8 @@ use risingwave_common::types::ToOwnedDatum;
 use risingwave_common::util::sort_util::{HeapElem, OrderPair, K_PROCESSING_WINDOW_SIZE};
 use risingwave_pb::batch_plan::plan_node::NodeBody;
 use risingwave_pb::batch_plan::ExchangeSource as ProstExchangeSource;
-use risingwave_rpc_client::ExchangeSource;
 
+use crate::exchange_source::ExchangeSourceImpl;
 use crate::executor::{
     BoxedDataChunkStream, BoxedExecutor, BoxedExecutorBuilder, CreateSource, DefaultCreateSource,
     Executor, ExecutorBuilder,
@@ -45,7 +45,7 @@ pub struct MergeSortExchangeExecutorImpl<CS, C> {
     order_pairs: Arc<Vec<OrderPair>>,
     min_heap: BinaryHeap<HeapElem>,
     proto_sources: Vec<ProstExchangeSource>,
-    sources: Vec<Box<dyn ExchangeSource>>,
+    sources: Vec<ExchangeSourceImpl>, // impl
     /// Mock-able CreateSource.
     source_creators: Vec<CS>,
     schema: Schema,
