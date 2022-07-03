@@ -305,7 +305,8 @@ where
         }
     }
 
-    /// Used in [`crate::barrier::GlobalBarrierManager`], load all actor that need to be sent or collected
+    /// Used in [`crate::barrier::GlobalBarrierManager`], load all actor that need to be sent or
+    /// collected
     pub async fn load_all_actors(&self, changed_table_id: ChangedTableId) -> ActorInfos {
         let mut actor_maps = HashMap::new();
         let mut source_actor_ids = HashMap::new();
@@ -313,7 +314,7 @@ where
         let map = &self.core.read().await.table_fragments;
         for fragments in map.values() {
             let check_state = |s: ActorState| {
-                with_creating_table.can_actor_send_or_collect(s, &fragments.table_id())
+                changed_table_id.can_actor_send_or_collect(s, &fragments.table_id())
             };
             for (node_id, actor_states) in fragments.node_actor_states() {
                 for actor_state in actor_states {
