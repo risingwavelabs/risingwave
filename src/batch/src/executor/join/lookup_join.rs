@@ -189,12 +189,13 @@ impl Executor for LookupJoinExecutor {
 impl LookupJoinExecutor {
     #[try_stream(boxed, ok = DataChunk, error = RwError)]
     async fn do_execute(mut self: Box<Self>) {
+        self.probe_side_source.load_data().await?;
+
         loop {
             let cur_row = self.probe_side_source.get_current_row_ref();
             if cur_row.is_none() {
                 break;
             }
-
             let cur_row = cur_row.unwrap();
 
             let mut gather_executor = GatherExecutor::new_boxed();
@@ -252,6 +253,11 @@ impl LookupJoinExecutor {
             }
 
             self.probe_side_source.advance_row();
+        }
+
+        // Consume and yield all the remaining chunks in the chunk builder
+        if let Some(data_chunk) = self.chunk_builder.consume_all()? {
+            yield data_chunk.reorder_columns(&self.output_indices);
         }
     }
 
