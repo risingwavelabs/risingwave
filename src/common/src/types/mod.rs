@@ -63,9 +63,9 @@ pub type ParallelUnitId = u32;
 
 // VirtualNode (a.k.a. VNode) is a minimal partition that a set of keys belong to. It is used for
 // consistent hashing.
-pub type VirtualNode = u16;
-pub const VIRTUAL_NODE_SIZE: usize = 2;
-pub const VNODE_BITS: usize = 11;
+pub type VirtualNode = u8;
+pub const VIRTUAL_NODE_SIZE: usize = std::mem::size_of::<VirtualNode>();
+pub const VNODE_BITS: usize = 8;
 pub const VIRTUAL_NODE_COUNT: usize = 1 << VNODE_BITS;
 
 pub type OrderedF32 = ordered_float::OrderedFloat<f32>;

@@ -29,9 +29,9 @@ use risingwave_pb::batch_plan::{
     RowSeqScanNode, ScanRange,
 };
 use risingwave_pb::plan_common::CellBasedTableDesc;
-use risingwave_rpc_client::ExchangeSource;
 use uuid::Uuid;
 
+use crate::exchange_source::ExchangeSourceImpl;
 use crate::execution::grpc_exchange::GrpcExchangeSource;
 use crate::executor::join::row_level_iter::RowLevelIter;
 use crate::executor::join::{
@@ -90,6 +90,7 @@ impl GatherExecutor {
             table_desc: Some(params.table_desc.clone()),
             column_ids: params.column_ids.clone(),
             scan_range,
+            vnode_bitmap: None,
         }))
     }
 
@@ -135,10 +136,11 @@ impl GatherExecutor {
     /// `ProstExchangeSources` that was created after calling `create_build_side_prost_sources()`
     #[try_stream(boxed, ok = DataChunk, error = RwError)]
     async fn get_build_side_chunk(self: Box<Self>) {
-        let mut exchange_sources: Vec<Box<dyn ExchangeSource>> = vec![];
+        let mut exchange_sources: Vec<ExchangeSourceImpl> = vec![];
 
         for prost_source in &self.prost_sources {
-            let exchange_source = Box::new(GrpcExchangeSource::create(prost_source.clone()).await?);
+            let exchange_source =
+                ExchangeSourceImpl::Grpc(GrpcExchangeSource::create(prost_source.clone()).await?);
             exchange_sources.push(exchange_source);
         }
 

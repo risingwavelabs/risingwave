@@ -55,7 +55,6 @@ use risingwave_common::error::ErrorCode::InternalError;
 use risingwave_common::error::{Result, RwError};
 use risingwave_pb::batch_plan::plan_node::NodeBody;
 use risingwave_pb::batch_plan::PlanNode;
-use risingwave_rpc_client::ExchangeSource;
 pub use row_seq_scan::*;
 pub use sort_agg::*;
 pub use table_function::*;
@@ -64,6 +63,7 @@ pub use trace::*;
 pub use update::*;
 pub use values::*;
 
+use crate::exchange_source::ExchangeSourceImpl;
 use crate::executor::sys_row_seq_scan::SysRowSeqScanExecutorBuilder;
 use crate::task::{BatchTaskContext, TaskId};
 
@@ -198,7 +198,7 @@ impl<'a, C: BatchTaskContext> ExecutorBuilder<'a, C> {
 }
 
 #[try_stream(boxed, ok = DataChunk, error = RwError)]
-async fn data_chunk_stream(mut source: Box<dyn ExchangeSource>) {
+async fn data_chunk_stream(mut source: ExchangeSourceImpl) {
     loop {
         if let Some(res) = source.take_data().await? {
             if res.cardinality() == 0 {

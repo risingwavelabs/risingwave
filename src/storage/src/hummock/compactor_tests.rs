@@ -15,7 +15,7 @@
 #[cfg(test)]
 mod tests {
 
-    use std::collections::HashMap;
+    use std::collections::{BTreeSet, HashMap};
     use std::sync::Arc;
 
     use bytes::Bytes;
@@ -23,9 +23,10 @@ mod tests {
     use risingwave_common::catalog::TableId;
     use risingwave_common::config::constant::hummock::CompactionFilterFlag;
     use risingwave_common::config::StorageConfig;
+    use risingwave_common::util::epoch::Epoch;
     use risingwave_hummock_sdk::compaction_group::hummock_version_ext::HummockVersionExt;
     use risingwave_hummock_sdk::compaction_group::StaticCompactionGroupId;
-    use risingwave_hummock_sdk::key::{get_epoch, get_table_id};
+    use risingwave_hummock_sdk::key::get_table_id;
     use risingwave_meta::hummock::compaction::ManualCompactionOption;
     use risingwave_meta::hummock::test_utils::setup_compute_env;
     use risingwave_meta::hummock::MockHummockMetaClient;
@@ -173,6 +174,7 @@ mod tests {
                 ReadOptions {
                     epoch,
                     table_id: Default::default(),
+                    ttl: None,
                 },
             )
             .await
@@ -303,7 +305,7 @@ mod tests {
 
         let drop_table_id = 1;
         let existing_table_ids = 2;
-        let kv_count = 1024;
+        let kv_count = 128;
         let mut epoch: u64 = 1;
         for index in 0..kv_count {
             let table_id = if index % 2 == 0 {
@@ -408,6 +410,7 @@ mod tests {
                 ReadOptions {
                     epoch,
                     table_id: Default::default(),
+                    ttl: None,
                 },
             )
             .await
@@ -441,14 +444,19 @@ mod tests {
         };
 
         // 1. add sstables
-        let val = Bytes::from(b"0"[..].repeat(1 << 10)); // 1024 Byte value
+        let val = Bytes::from(b"0"[..].to_vec()); // 1 Byte value
 
         let existing_table_id = 2;
-        let kv_count = 128;
-        let mut epoch: u64 = 1;
+        let kv_count = 11;
+        // let base_epoch = Epoch(0);
+        let base_epoch = Epoch::now();
+        let mut epoch: u64 = base_epoch.0;
+        let millisec_interval_epoch: u64 = (1 << 16) * 100;
         let keyspace = Keyspace::table_root(storage.clone(), &TableId::new(existing_table_id));
+        let mut epoch_set = BTreeSet::new();
         for _ in 0..kv_count {
-            epoch += 1;
+            epoch += millisec_interval_epoch;
+            epoch_set.insert(epoch);
             let mut write_batch = keyspace.state_store().start_write_batch(WriteOptions {
                 epoch,
                 table_id: Default::default(),
@@ -458,12 +466,14 @@ mod tests {
             let ramdom_key = rand::thread_rng().gen::<[u8; 32]>();
             local.put(ramdom_key, StorageValue::new_default_put(val.clone()));
             write_batch.ingest().await.unwrap();
+        }
 
-            storage.sync(Some(epoch)).await.unwrap();
+        storage.sync(None).await.unwrap();
+        for epoch in &epoch_set {
             hummock_meta_client
                 .commit_epoch(
-                    epoch,
-                    storage.local_version_manager.get_uncommitted_ssts(epoch),
+                    *epoch,
+                    storage.local_version_manager.get_uncommitted_ssts(*epoch),
                 )
                 .await
                 .unwrap();
@@ -486,10 +496,13 @@ mod tests {
         compact_task.existing_table_ids.push(existing_table_id);
         let compaction_filter_flag = CompactionFilterFlag::STATE_CLEAN | CompactionFilterFlag::TTL;
         compact_task.compaction_filter_mask = compaction_filter_flag.bits();
-        let ttl_expire = 60;
-        compact_task.table_options =
-            HashMap::from_iter([(existing_table_id, TableOption { ttl: ttl_expire })]);
-        let watermark = compact_task.watermark;
+        let ttl_expire_second = 1;
+        compact_task.table_options = HashMap::from_iter([(
+            existing_table_id,
+            TableOption {
+                ttl: ttl_expire_second,
+            },
+        )]);
 
         hummock_manager_ref
             .assign_compaction_task(&compact_task, worker_node.id, async { true })
@@ -499,7 +512,7 @@ mod tests {
         // assert compact_task
         assert_eq!(
             compact_task.input_ssts.first().unwrap().table_infos.len(),
-            kv_count
+            kv_count,
         );
 
         // 3. compact
@@ -525,7 +538,8 @@ mod tests {
                 .meta
                 .key_count;
         }
-        assert_eq!(ttl_expire, key_count); // ttl will clean the key (which epoch < epoch - ttl)
+        let expect_count = kv_count as u32 - ttl_expire_second;
+        assert_eq!(expect_count, key_count); // ttl will clean the key (which epoch < epoch - ttl)
 
         // 5. get compact task and there should be none
         let compact_task = hummock_manager_ref
@@ -548,6 +562,7 @@ mod tests {
                 ReadOptions {
                     epoch,
                     table_id: Default::default(),
+                    ttl: None,
                 },
             )
             .await
@@ -555,9 +570,7 @@ mod tests {
         let mut scan_count = 0;
         for (k, _) in scan_result {
             let table_id = get_table_id(&k).unwrap();
-            let epoch = get_epoch(&k);
             assert_eq!(table_id, existing_table_id);
-            assert!(epoch >= (watermark - ttl_expire as u64));
             scan_count += 1;
         }
         assert_eq!(key_count, scan_count);

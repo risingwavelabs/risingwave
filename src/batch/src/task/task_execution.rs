@@ -222,7 +222,7 @@ impl<C: BatchTaskContext> BatchTaskExecution<C> {
         *self.state.lock() = TaskStatus::Running;
         let exec = ExecutorBuilder::new(
             self.plan.root.as_ref().unwrap(),
-            &self.task_id.clone(),
+            &self.task_id,
             self.context.clone(),
             self.epoch,
         )

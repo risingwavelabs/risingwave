@@ -153,13 +153,12 @@ async fn test_table_v2_materialize() -> Result<()> {
 
     // Create a `Materialize` to write the changes to storage
     let keyspace = Keyspace::table_root(memory_state_store.clone(), &source_table_id);
-    let mut materialize = MaterializeExecutor::new(
+    let mut materialize = MaterializeExecutor::new_for_test(
         Box::new(stream_source),
         keyspace.clone(),
         vec![OrderPair::new(0, OrderType::Ascending)],
         all_column_ids.clone(),
         2,
-        vec![0usize],
     )
     .boxed()
     .execute();
@@ -225,7 +224,6 @@ async fn test_table_v2_materialize() -> Result<()> {
                 .await?,
         ),
         1024,
-        true,
         "RowSeqExecutor2".to_string(),
         Arc::new(BatchMetrics::unused()),
     ));
@@ -288,7 +286,6 @@ async fn test_table_v2_materialize() -> Result<()> {
                 .await?,
         ),
         1024,
-        true,
         "RowSeqScanExecutor2".to_string(),
         Arc::new(BatchMetrics::unused()),
     ));
@@ -360,7 +357,6 @@ async fn test_table_v2_materialize() -> Result<()> {
                 .await?,
         ),
         1024,
-        true,
         "RowSeqScanExecutor2".to_string(),
         Arc::new(BatchMetrics::unused()),
     ));
@@ -438,7 +434,6 @@ async fn test_row_seq_scan() -> Result<()> {
                 .unwrap(),
         ),
         1,
-        true,
         "RowSeqScanExecutor2".to_string(),
         Arc::new(BatchMetrics::unused()),
     ));
