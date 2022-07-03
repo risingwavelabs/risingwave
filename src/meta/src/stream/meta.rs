@@ -305,8 +305,8 @@ where
         }
     }
 
-    /// Used in [`crate::barrier::GlobalBarrierManager`]
-    pub async fn load_all_actors(&self, with_creating_table: ChangedTableId) -> ActorInfos {
+    /// Used in [`crate::barrier::GlobalBarrierManager`], load all actor that need to be sent or collected
+    pub async fn load_all_actors(&self, changed_table_id: ChangedTableId) -> ActorInfos {
         let mut actor_maps = HashMap::new();
         let mut source_actor_ids = HashMap::new();
 

@@ -186,13 +186,18 @@ struct CheckpointControl<S: MetaStore> {
     /// Save the state and message of barrier in order
     command_ctx_queue: VecDeque<EpochNode<S>>,
 }
-/// The changed table id vec.
+/// All changed tables of uncommitted barrier
 #[derive(Default)]
 pub struct ChangedTableId {
+    ///In addition to the actors in `Running`.The barrier need to send or collect the actors of these tables.
     create_table_id: Vec<TableId>,
+    /// The barrier does not send or collect the actors of these tables, even if they are `Running`
     drop_table_id: Vec<TableId>,
 }
 impl ChangedTableId {
+    /// We will return true and send or collect to the actor, if
+    /// 1. `Running` and not be stop by the previous uncommitted barrier
+    /// 2. no `Running` but create by the previous uncommitted barrier or will create by this barrier.
     pub fn can_actor_send_or_collect(&self, s: ActorState, table_id: &TableId) -> bool {
         s == ActorState::Running && !self.drop_table_id.contains(table_id)
             || s == ActorState::Inactive && self.create_table_id.contains(table_id)
@@ -229,7 +234,7 @@ where
         }
     }
 
-    /// Get all create(drop) actor id from queue.
+    /// Get the ChangedTableId used to modify the actor(send and collect)
     fn get_changed_table_id(&self, new_changed_table: ChangedTableState) -> ChangedTableId {
         ChangedTableId::new(self.command_ctx_queue.iter(), new_changed_table)
     }
@@ -282,7 +287,8 @@ where
         let index = match self
             .command_ctx_queue
             .iter()
-            .find_position(|x| !matches!(x.state, Complete))
+            .position(|x| !matches!(x.state, Complete))
+            .unwrap_or(self.command_ctx_queue.len())
         {
             Some((index, _)) => index,
             None => self.command_ctx_queue.len(),
@@ -711,7 +717,9 @@ where
         Ok(())
     }
 
-    /// Resolve actor information from cluster and fragment manager.
+    /// Resolve actor information from cluster, fragment manager and ChangedTableId.
+    /// We use `changed_table_id` to modify the actors to be sent or collected. Because these actor will create or drop
+    /// before this barrier flow through them.
     async fn resolve_actor_info(&self, changed_table_id: ChangedTableId) -> BarrierActorInfo {
         let all_nodes = self
             .cluster_manager
