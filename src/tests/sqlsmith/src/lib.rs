@@ -213,6 +213,11 @@ impl<'a, R: Rng> SqlGenerator<'a, R> {
     fn flip_coin(&mut self) -> bool {
         self.rng.gen_bool(0.5)
     }
+
+    /// Provide recursion bounds.
+    pub(crate) fn can_recurse(&mut self) -> bool {
+        self.rng.gen_bool(0.3)
+    }
 }
 
 /// Generate a random SQL string.

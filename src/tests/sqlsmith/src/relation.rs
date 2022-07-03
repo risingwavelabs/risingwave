@@ -22,12 +22,22 @@ impl<'a, R: Rng> SqlGenerator<'a, R> {
     /// A relation specified in the FROM clause.
     pub(crate) fn gen_from_relation(&mut self) -> TableWithJoins {
         match self.rng.gen_range(0..=9) {
-            0..=9 => self.gen_simple_table(),
+            0..=9 => self.gen_table(),
             // TODO: unreachable, should change to 9..=9,
             // but currently it will cause panic due to some wrong assertions.
             10..=10 => self.gen_subquery(),
             _ => unreachable!(),
         }
+    }
+
+    fn gen_table(&mut self) -> TableWithJoins {
+        if self.can_recurse() {
+            return match self.rng.gen_bool(0.5) {
+                true => self.gen_simple_table(),
+                false => self.gen_join_table(),
+            };
+        }
+        self.gen_simple_table() // use this as base-case
     }
 
     fn gen_simple_table(&mut self) -> TableWithJoins {
@@ -47,6 +57,10 @@ impl<'a, R: Rng> SqlGenerator<'a, R> {
         table.name = alias; // Rename the table.
         self.bound_relations.push(table);
         relation
+    }
+
+    fn gen_join_table(&mut self) -> TableWithJoins {
+        todo!()
     }
 
     fn gen_subquery(&mut self) -> TableWithJoins {
