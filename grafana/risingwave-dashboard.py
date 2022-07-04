@@ -395,14 +395,9 @@ def section_streaming_actors(outer_panels):
                     "actor_sampled_deserialize_duration_ns", "{{actor_id}}"
                 ),
             ]),
-            panels.timeseries_ns("Actor Sampled Deserilization Time", [
-                panels.target(
-                    "rate(actor_sampled_deserialize_duration_ns[1m]) > 0", "{{actor_id}}"
-                ),
-            ]),
             panels.timeseries_ns("Actor Sampled Serilization Time", [
                 panels.target(
-                    "rate(actor_sampled_serialize_duration_ns[1m]) > 0", "{{actor_id}}"
+                    "actor_sampled_deserialize_duration_ns", "{{actor_id}}"
                 ),
             ]),
             panels.timeseries_actor_latency("Actor Barrier Latency", [
