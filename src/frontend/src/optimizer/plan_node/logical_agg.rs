@@ -704,7 +704,8 @@ impl ColPrunable for LogicalAgg {
         let group_key_required_cols = FixedBitSet::from_iter(self.group_keys.iter().copied());
 
         let (agg_call_required_cols, agg_calls) = {
-            let mut tmp = FixedBitSet::with_capacity(self.input().schema().fields().len());
+            let input_cnt = self.input().schema().fields().len();
+            let mut tmp = FixedBitSet::with_capacity(input_cnt);
             let new_agg_calls = required_cols
                 .iter()
                 .filter(|&&index| index >= self.group_keys.len())
@@ -712,6 +713,10 @@ impl ColPrunable for LogicalAgg {
                     let index = index - self.group_keys.len();
                     let agg_call = self.agg_calls[index].clone();
                     tmp.extend(agg_call.inputs.iter().map(|x| x.index()));
+                    // collect columns used in aggregate filter expressions
+                    for i in &agg_call.filter.conjunctions {
+                        tmp.union_with(&i.collect_input_refs(input_cnt));
+                    }
                     agg_call
                 })
                 .collect_vec();
