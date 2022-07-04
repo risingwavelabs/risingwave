@@ -17,7 +17,7 @@ use std::sync::Arc;
 use itertools::Itertools;
 use risingwave_common::catalog::TableId;
 use risingwave_common::error::{tonic_err, Result as RwResult};
-use risingwave_pb::catalog::{Sink, Source};
+use risingwave_pb::catalog::Source;
 use risingwave_pb::stream_service::barrier_complete_response::GroupedSstableInfo;
 use risingwave_pb::stream_service::stream_service_server::StreamService;
 use risingwave_pb::stream_service::*;
@@ -220,47 +220,6 @@ impl StreamService for StreamServiceImpl {
 
         Ok(Response::new(DropSourceResponse { status: None }))
     }
-
-    #[cfg_attr(coverage, no_coverage)]
-    async fn create_sink(
-        &self,
-        request: Request<CreateSinkRequest>,
-    ) -> Result<Response<CreateSinkResponse>, Status> {
-        let sink = request.into_inner().sink.unwrap();
-        self.create_sink_inner(&sink).await.map_err(tonic_err)?;
-        tracing::debug!(id = %sink.id, "create table sink");
-
-        Ok(Response::new(CreateSinkResponse { status: None }))
-    }
-
-    #[cfg_attr(coverage, no_coverage)]
-    async fn sync_sinks(
-        &self,
-        request: Request<SyncSinksRequest>,
-    ) -> Result<Response<SyncSinksResponse>, Status> {
-        let sinks = request.into_inner().sinks;
-        self.env.sink_manager().clear_sinks().map_err(tonic_err)?;
-        for sink in sinks {
-            self.create_sink_inner(&sink).await.map_err(tonic_err)?
-        }
-
-        Ok(Response::new(SyncSinksResponse { status: None }))
-    }
-
-    #[cfg_attr(coverage, no_coverage)]
-    async fn drop_sink(
-        &self,
-        request: Request<DropSinkRequest>,
-    ) -> Result<Response<DropSinkResponse>, Status> {
-        let id = request.into_inner().sink_id;
-        let id = TableId::new(id); // TODO: use SinkId instead
-
-        self.env.sink_manager().drop_sink(&id).map_err(tonic_err)?;
-
-        tracing::debug!(id = %id, "drop sink");
-
-        Ok(Response::new(DropSinkResponse { status: None }))
-    }
 }
 
 impl StreamServiceImpl {
@@ -289,14 +248,6 @@ impl StreamServiceImpl {
                     .create_table_source(&id, columns)?;
             }
         };
-
-        Ok(())
-    }
-
-    async fn create_sink_inner(&self, sink: &Sink) -> RwResult<()> {
-        let id = TableId::new(sink.id); // TODO: use SinkId instead
-
-        self.env.sink_manager().create_sink(&id).await?;
 
         Ok(())
     }
