@@ -20,11 +20,11 @@ use itertools::Itertools;
 use madsim::collections::HashSet;
 use risingwave_common::array::{Array, ArrayRef, Op, Row, RowRef, StreamChunk};
 use risingwave_common::bail;
-use risingwave_common::catalog::Schema;
+use risingwave_common::catalog::{Schema, TableId};
 use risingwave_common::hash::HashKey;
 use risingwave_common::types::{DataType, ToOwnedDatum};
 use risingwave_expr::expr::RowExpression;
-use risingwave_storage::{Keyspace, StateStore};
+use risingwave_storage::StateStore;
 
 use super::barrier_align::*;
 use super::error::{StreamExecutorError, StreamExecutorResult};
@@ -382,8 +382,10 @@ impl<K: HashKey, S: StateStore, const T: JoinTypePrimitive> HashJoinExecutor<K, 
         executor_id: u64,
         cond: Option<RowExpression>,
         op_info: String,
-        ks_l: Keyspace<S>,
-        ks_r: Keyspace<S>,
+        store_l: S,
+        table_id_l: TableId,
+        store_r: S,
+        table_id_r: TableId,
         is_append_only: bool,
         metrics: Arc<StreamingMetrics>,
     ) -> Self {
@@ -456,7 +458,8 @@ impl<K: HashKey, S: StateStore, const T: JoinTypePrimitive> HashJoinExecutor<K, 
                     pk_indices_l.clone(),
                     params_l.key_indices.clone(),
                     col_l_datatypes.clone(),
-                    ks_l,
+                    store_l,
+                    table_id_l,
                     Some(params_l.dist_keys.clone()),
                     metrics.clone(),
                     actor_id,
@@ -473,7 +476,8 @@ impl<K: HashKey, S: StateStore, const T: JoinTypePrimitive> HashJoinExecutor<K, 
                     pk_indices_r.clone(),
                     params_r.key_indices.clone(),
                     col_r_datatypes.clone(),
-                    ks_r,
+                    store_r,
+                    table_id_r,
                     Some(params_r.dist_keys.clone()),
                     metrics.clone(),
                     actor_id,
@@ -788,14 +792,6 @@ mod tests {
     use crate::executor::test_utils::{MessageSender, MockSource};
     use crate::executor::{Barrier, Epoch, Message};
 
-    fn create_in_memory_keyspace() -> (Keyspace<MemoryStateStore>, Keyspace<MemoryStateStore>) {
-        let mem_state = MemoryStateStore::new();
-        (
-            Keyspace::table_root(mem_state.clone(), &TableId::new(0)),
-            Keyspace::table_root(mem_state, &TableId::new(1)),
-        )
-    }
-
     fn create_cond() -> RowExpression {
         let left_expr = InputRefExpression::new(DataType::Int64, 1);
         let right_expr = InputRefExpression::new(DataType::Int64, 3);
@@ -822,8 +818,8 @@ mod tests {
         let params_l = JoinParams::new(vec![0], vec![]);
         let params_r = JoinParams::new(vec![0], vec![]);
         let cond = with_condition.then(create_cond);
+        let mem_state = MemoryStateStore::new();
 
-        let (ks_l, ks_r) = create_in_memory_keyspace();
         let schema_len = match T {
             JoinType::LeftSemi | JoinType::LeftAnti => source_l.schema().len(),
             JoinType::RightSemi | JoinType::RightAnti => source_r.schema().len(),
@@ -840,8 +836,10 @@ mod tests {
             1,
             cond,
             "HashJoinExecutor".to_string(),
-            ks_l,
-            ks_r,
+            mem_state.clone(),
+            TableId::new(0),
+            mem_state,
+            TableId::new(1),
             false,
             Arc::new(StreamingMetrics::unused()),
         );
@@ -863,8 +861,7 @@ mod tests {
         let params_l = JoinParams::new(vec![0, 1], vec![]);
         let params_r = JoinParams::new(vec![0, 1], vec![]);
         let cond = with_condition.then(create_cond);
-
-        let (ks_l, ks_r) = create_in_memory_keyspace();
+        let mem_store = MemoryStateStore::new();
         let schema_len = match T {
             JoinType::LeftSemi | JoinType::LeftAnti => source_l.schema().len(),
             JoinType::RightSemi | JoinType::RightAnti => source_r.schema().len(),
@@ -881,8 +878,10 @@ mod tests {
             1,
             cond,
             "HashJoinExecutor".to_string(),
-            ks_l,
-            ks_r,
+            mem_store.clone(),
+            TableId::new(0),
+            mem_store,
+            TableId::new(1),
             true,
             Arc::new(StreamingMetrics::unused()),
         );
