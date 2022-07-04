@@ -145,7 +145,7 @@ impl HashMappingManagerCore {
     ) -> Vec<ParallelUnitId> {
         let mut vnode_mapping = Vec::with_capacity(VIRTUAL_NODE_COUNT);
         let mut owner_mapping: HashMap<ParallelUnitId, Vec<VirtualNode>> = HashMap::new();
-        let mut load_balancer: BTreeMap<usize, Vec<ParallelUnitId>> = BTreeMap::new();
+
         let hash_shard_size = VIRTUAL_NODE_COUNT / parallel_units.len();
         let mut one_more_count = VIRTUAL_NODE_COUNT % parallel_units.len();
         let mut init_bound = 0;
@@ -165,6 +165,8 @@ impl HashMappingManagerCore {
                 .collect();
             owner_mapping.insert(parallel_unit_id, vnodes);
         });
+
+        let mut load_balancer: BTreeMap<usize, Vec<ParallelUnitId>> = BTreeMap::new();
 
         owner_mapping.iter().for_each(|(parallel_unit_id, vnodes)| {
             let vnode_count = vnodes.len();
