@@ -19,6 +19,7 @@ use risingwave_common::types::DataType;
 
 use crate::expr::template::TernaryBytesExpression;
 use crate::expr::BoxedExpression;
+use crate::vector_op::overlay::overlay;
 use crate::vector_op::replace::replace;
 use crate::vector_op::split_part::split_part;
 use crate::vector_op::substr::substr_start_for;
@@ -88,6 +89,23 @@ pub fn new_split_part_expr(
             nth_expr,
             return_type,
             split_part,
+        ),
+    )
+}
+
+pub fn new_overlay_exp(
+    s: BoxedExpression,
+    new_sub_str: BoxedExpression,
+    start: BoxedExpression,
+    return_type: DataType,
+) -> BoxedExpression {
+    Box::new(
+        TernaryBytesExpression::<Utf8Array, Utf8Array, I32Array, _>::new(
+            s,
+            new_sub_str,
+            start,
+            return_type,
+            overlay,
         ),
     )
 }
