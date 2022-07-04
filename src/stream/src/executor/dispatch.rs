@@ -142,6 +142,7 @@ pub fn new_output(
         loop {
             let mut bp_cnt = 0;
             for _ in 0..REPORT_FREQUENCY {
+                // Buffer being fully occupied means backpressure happened.
                 if tx_clone.capacity() == 0 {
                     bp_cnt += 1;
                 }
