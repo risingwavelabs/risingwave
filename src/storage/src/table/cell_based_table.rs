@@ -32,7 +32,7 @@ use risingwave_common::types::{Datum, VirtualNode};
 use risingwave_common::util::hash_util::CRC32FastBuilder;
 use risingwave_common::util::ordered::*;
 use risingwave_common::util::sort_util::OrderType;
-use risingwave_hummock_sdk::key::{next_key, prefixed_range, range_of_prefix};
+use risingwave_hummock_sdk::key::{end_bound_of_prefix, next_key, prefixed_range, range_of_prefix};
 
 use super::mem_table::RowOp;
 use super::{Distribution, TableIter};
@@ -476,6 +476,7 @@ impl<S: StateStore, SER: RowSerializer, const T: AccessType> CellBasedTableBase<
         &self,
         encoded_key_range: R,
         epoch: u64,
+        vnode_hint: Option<VirtualNode>,
         wait_epoch: bool,
         ordered: bool,
     ) -> StorageResult<CellBasedIter<S>>
@@ -484,12 +485,16 @@ impl<S: StateStore, SER: RowSerializer, const T: AccessType> CellBasedTableBase<
         B: AsRef<[u8]> + Send,
     {
         // Vnodes that are set and should be accessed.
-        let vnodes = self
-            .vnodes
-            .iter()
-            .enumerate()
-            .filter(|&(_, set)| set)
-            .map(|(i, _)| i as VirtualNode);
+        #[auto_enum(Iterator)]
+        let vnodes = match vnode_hint {
+            Some(vnode) => std::iter::once(vnode),
+            None => self
+                .vnodes
+                .iter()
+                .enumerate()
+                .filter(|&(_, set)| set)
+                .map(|(i, _)| i as VirtualNode),
+        };
 
         // For each vnode, construct an iterator.
         // TODO: if there're some vnodes continuously in the range and we don't care about order, we
@@ -524,40 +529,109 @@ impl<S: StateStore, SER: RowSerializer, const T: AccessType> CellBasedTableBase<
         Ok(iter)
     }
 
-    /// Get a [`CellBasedIter`] for streaming use with given `encoded_key_range`.
-    pub(super) async fn streaming_iter_with_encoded_key_range<R, B>(
+    // TODO: support Row for `next_col_bounds`.
+    async fn iter_with_pk_bounds(
         &self,
-        encoded_key_range: R,
         epoch: u64,
-    ) -> StorageResult<CellBasedIter<S>>
-    where
-        R: RangeBounds<B> + Send + Clone,
-        B: AsRef<[u8]> + Send,
-    {
-        self.iter_with_encoded_key_range(encoded_key_range, epoch, false, true)
+        pk_prefix: &Row,
+        next_col_bounds: impl RangeBounds<Datum>,
+        wait_epoch: bool,
+        ordered: bool,
+    ) -> StorageResult<CellBasedIter<S>> {
+        fn serialize_pk_bound(
+            pk_serializer: &OrderedRowSerializer,
+            pk_prefix: &Row,
+            next_col_bound: Bound<&Datum>,
+            is_start_bound: bool,
+        ) -> Bound<Vec<u8>> {
+            match next_col_bound {
+                Included(k) => {
+                    let pk_prefix_serializer = pk_serializer.prefix(pk_prefix.size() + 1);
+                    let mut key = pk_prefix.clone();
+                    key.0.push(k.clone());
+                    let serialized_key = serialize_pk(&key, &pk_prefix_serializer);
+                    if is_start_bound {
+                        Included(serialized_key)
+                    } else {
+                        // Should use excluded next key for end bound.
+                        // Otherwise keys starting with the bound is not included.
+                        end_bound_of_prefix(&serialized_key)
+                    }
+                }
+                Excluded(k) => {
+                    let pk_prefix_serializer = pk_serializer.prefix(pk_prefix.size() + 1);
+                    let mut key = pk_prefix.clone();
+                    key.0.push(k.clone());
+                    let serialized_key = serialize_pk(&key, &pk_prefix_serializer);
+                    if is_start_bound {
+                        // storage doesn't support excluded begin key yet, so transform it to
+                        // included
+                        // FIXME: what if `serialized_key` is `\xff\xff..`?
+                        Included(next_key(&serialized_key))
+                    } else {
+                        Excluded(serialized_key)
+                    }
+                }
+                Unbounded => {
+                    let pk_prefix_serializer = pk_serializer.prefix(pk_prefix.size());
+                    let serialized_pk_prefix = serialize_pk(pk_prefix, &pk_prefix_serializer);
+                    if pk_prefix.size() == 0 {
+                        Unbounded
+                    } else if is_start_bound {
+                        Included(serialized_pk_prefix)
+                    } else {
+                        end_bound_of_prefix(&serialized_pk_prefix)
+                    }
+                }
+            }
+        }
+
+        let start_key = serialize_pk_bound(
+            &self.pk_serializer,
+            pk_prefix,
+            next_col_bounds.start_bound(),
+            true,
+        );
+        let end_key = serialize_pk_bound(
+            &self.pk_serializer,
+            pk_prefix,
+            next_col_bounds.end_bound(),
+            false,
+        );
+
+        trace!(
+            "iter_with_pk_bounds: start_key: {:?}, end_key: {:?}",
+            start_key,
+            end_key
+        );
+
+        self.iter_with_encoded_key_range((start_key, end_key), epoch, None, wait_epoch, ordered)
             .await
     }
 
-    /// Get a [`CellBasedIter`] with given `encoded_key_range`.
-    /// Differs from the streaming one, this iterator will wait for the epoch before iteration.
-    pub(super) async fn batch_iter_with_encoded_key_range<R, B>(
+    pub async fn batch_iter_with_pk_bounds(
         &self,
-        encoded_key_range: R,
         epoch: u64,
-    ) -> StorageResult<CellBasedIter<S>>
-    where
-        R: RangeBounds<B> + Send + Clone,
-        B: AsRef<[u8]> + Send,
-    {
-        // Currently batch does not expect scan order, so we just concat mutiple ranges.
-        // TODO: introduce unordered batch iterator
-        self.iter_with_encoded_key_range(encoded_key_range, epoch, true, true)
+        pk_prefix: &Row,
+        next_col_bounds: impl RangeBounds<Datum>,
+    ) -> StorageResult<CellBasedIter<S>> {
+        self.iter_with_pk_bounds(epoch, pk_prefix, next_col_bounds, true, true)
+            .await
+    }
+
+    pub async fn streaming_iter_with_pk_bounds(
+        &self,
+        epoch: u64,
+        pk_prefix: &Row,
+        next_col_bounds: impl RangeBounds<Datum>,
+    ) -> StorageResult<CellBasedIter<S>> {
+        self.iter_with_pk_bounds(epoch, pk_prefix, next_col_bounds, false, true)
             .await
     }
 
     // The returned iterator will iterate data from a snapshot corresponding to the given `epoch`
     pub async fn batch_iter(&self, epoch: u64) -> StorageResult<CellBasedIter<S>> {
-        self.batch_iter_with_encoded_key_range::<_, &[u8]>(.., epoch)
+        self.batch_iter_with_pk_bounds(epoch, Row::empty(), ..)
             .await
     }
 
@@ -579,99 +653,12 @@ impl<S: StateStore, SER: RowSerializer, const T: AccessType> CellBasedTableBase<
         .into_stream())
     }
 
-    pub async fn batch_iter_with_pk_bounds(
-        &self,
-        epoch: u64,
-        pk_prefix: Row,
-        next_col_bounds: impl RangeBounds<Datum>,
-    ) -> StorageResult<CellBasedIter<S>> {
-        fn serialize_pk_bound(
-            pk_serializer: &OrderedRowSerializer,
-            pk_prefix: &Row,
-            next_col_bound: Bound<&Datum>,
-            is_start_bound: bool,
-        ) -> Bound<Vec<u8>> {
-            match next_col_bound {
-                Included(k) => {
-                    let pk_prefix_serializer = pk_serializer.prefix(pk_prefix.size() + 1);
-                    let mut key = pk_prefix.clone();
-                    key.0.push(k.clone());
-                    let serialized_key = serialize_pk(&key, &pk_prefix_serializer);
-                    if is_start_bound {
-                        Included(serialized_key)
-                    } else {
-                        // Should use excluded next key for end bound.
-                        // Otherwise keys starting with the bound is not included.
-                        Excluded(next_key(&serialized_key))
-                    }
-                }
-                Excluded(k) => {
-                    let pk_prefix_serializer = pk_serializer.prefix(pk_prefix.size() + 1);
-                    let mut key = pk_prefix.clone();
-                    key.0.push(k.clone());
-                    let serialized_key = serialize_pk(&key, &pk_prefix_serializer);
-                    if is_start_bound {
-                        // storage doesn't support excluded begin key yet, so transform it to
-                        // included
-                        Included(next_key(&serialized_key))
-                    } else {
-                        Excluded(serialized_key)
-                    }
-                }
-                Unbounded => {
-                    let pk_prefix_serializer = pk_serializer.prefix(pk_prefix.size());
-                    let serialized_pk_prefix = serialize_pk(pk_prefix, &pk_prefix_serializer);
-                    if pk_prefix.size() == 0 {
-                        Unbounded
-                    } else if is_start_bound {
-                        Included(serialized_pk_prefix)
-                    } else {
-                        Excluded(next_key(&serialized_pk_prefix))
-                    }
-                }
-            }
-        }
-
-        let start_key = serialize_pk_bound(
-            &self.pk_serializer,
-            &pk_prefix,
-            next_col_bounds.start_bound(),
-            true,
-        );
-        let end_key = serialize_pk_bound(
-            &self.pk_serializer,
-            &pk_prefix,
-            next_col_bounds.end_bound(),
-            false,
-        );
-
-        trace!(
-            "iter_with_pk_bounds: start_key: {:?}, end_key: {:?}",
-            start_key,
-            end_key
-        );
-
-        self.batch_iter_with_encoded_key_range((start_key, end_key), epoch)
-            .await
-    }
-
     pub async fn batch_iter_with_pk_prefix(
         &self,
         epoch: u64,
-        pk_prefix: Row,
+        pk_prefix: &Row,
     ) -> StorageResult<CellBasedIter<S>> {
-        let prefix_serializer = self.pk_serializer.prefix(pk_prefix.size());
-        let serialized_pk_prefix = serialize_pk(&pk_prefix, &prefix_serializer);
-
-        let key_range = range_of_prefix(&serialized_pk_prefix);
-
-        trace!(
-            "iter_with_pk_prefix: key_range {:?}",
-            (key_range.start_bound(), key_range.end_bound())
-        );
-
-        self.batch_iter_with_encoded_key_range(key_range, epoch)
-            .await
+        self.batch_iter_with_pk_bounds(epoch, &pk_prefix, ..).await
     }
 }
 

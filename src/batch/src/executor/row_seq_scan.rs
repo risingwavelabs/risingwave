@@ -213,16 +213,9 @@ impl BoxedExecutorBuilder for RowSeqScanExecutorBuilder {
                 ScanType::PointGet(row)
             } else {
                 assert!(pk_prefix_value.size() < pk_descs.len());
-
-                let iter = if is_full_range(&next_col_bounds) {
-                    table
-                        .batch_iter_with_pk_prefix(source.epoch, pk_prefix_value)
-                        .await?
-                } else {
-                    table
-                        .batch_iter_with_pk_bounds(source.epoch, pk_prefix_value, next_col_bounds)
-                        .await?
-                };
+                let iter = table
+                    .batch_iter_with_pk_bounds(source.epoch, &pk_prefix_value, ..)
+                    .await?;
                 ScanType::RangeScan(iter)
             };
 
