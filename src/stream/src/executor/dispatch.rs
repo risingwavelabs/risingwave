@@ -142,7 +142,7 @@ pub fn new_output(
             let mut cnt = 0;
             const SAMPLING_FREQUENCY: usize = 15;
             for _ in 0..SAMPLING_FREQUENCY {
-                if tx_clone.capacity() == LOCAL_OUTPUT_CHANNEL_SIZE {
+                if tx_clone.capacity() == 0 {
                     cnt += 1;
                 }
                 tokio::time::sleep(std::time::Duration::from_secs(1)).await;
