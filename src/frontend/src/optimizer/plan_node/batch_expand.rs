@@ -16,7 +16,7 @@ use std::fmt;
 
 use itertools::Itertools;
 use risingwave_common::error::Result;
-use risingwave_pb::batch_plan::expand_node::Keys;
+use risingwave_pb::batch_plan::expand_node::Subset;
 use risingwave_pb::batch_plan::plan_node::NodeBody;
 use risingwave_pb::batch_plan::ExpandNode;
 
@@ -44,8 +44,8 @@ impl BatchExpand {
         BatchExpand { base, logical }
     }
 
-    pub fn expanded_keys(&self) -> &Vec<Vec<usize>> {
-        self.logical.expanded_keys()
+    pub fn column_subsets(&self) -> &Vec<Vec<usize>> {
+        self.logical.column_subsets()
     }
 }
 
@@ -53,8 +53,8 @@ impl fmt::Display for BatchExpand {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         write!(
             f,
-            "BatchExpand {{ expanded_keys: {:#?} }}",
-            self.expanded_keys()
+            "BatchExpand {{ column_subsets: {:?} }}",
+            self.column_subsets()
         )
     }
 }
@@ -81,18 +81,18 @@ impl ToDistributedBatch for BatchExpand {
 impl ToBatchProst for BatchExpand {
     fn to_batch_prost_body(&self) -> NodeBody {
         NodeBody::Expand(ExpandNode {
-            expanded_keys: self
-                .expanded_keys()
+            column_subsets: self
+                .column_subsets()
                 .iter()
-                .map(|keys| keys_to_protobuf(keys))
+                .map(|subset| subset_to_protobuf(subset))
                 .collect_vec(),
         })
     }
 }
 
-fn keys_to_protobuf(keys: &[usize]) -> Keys {
-    let keys = keys.iter().map(|key| *key as u32).collect_vec();
-    Keys { keys }
+fn subset_to_protobuf(subset: &[usize]) -> Subset {
+    let subset = subset.iter().map(|key| *key as u32).collect_vec();
+    Subset { subset }
 }
 
 impl ToLocalBatch for BatchExpand {

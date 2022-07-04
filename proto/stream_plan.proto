@@ -222,10 +222,10 @@ message LookupUnionNode {
 }
 
 message ExpandNode {
-  message Keys {
-    repeated uint32 keys = 1;
+  message Subset {
+    repeated uint32 subset = 1;
   }
-  repeated Keys expanded_keys = 1;
+  repeated Subset column_subsets = 1;
 }
 
 message StreamNode {

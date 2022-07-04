@@ -27,11 +27,11 @@ impl ExecutorBuilder for ExpandExecutorBuilder {
         let expand_node = try_match_expand!(node.get_node_body().unwrap(), NodeBody::Expand)?;
         let input = params.input.remove(0);
         let pk_indices = params.pk_indices;
-        let expanded_keys = expand_node
-            .expanded_keys
+        let column_subsets = expand_node
+            .column_subsets
             .iter()
-            .map(|keys| keys.keys.iter().map(|key| *key as usize).collect_vec())
+            .map(|subset| subset.subset.iter().map(|key| *key as usize).collect_vec())
             .collect_vec();
-        Ok(ExpandExecutor::new(input, pk_indices, expanded_keys).boxed())
+        Ok(ExpandExecutor::new(input, pk_indices, column_subsets).boxed())
     }
 }

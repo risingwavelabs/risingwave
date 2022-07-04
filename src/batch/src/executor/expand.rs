@@ -12,14 +12,11 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::sync::Arc;
-
 use futures_async_stream::try_stream;
 use itertools::Itertools;
 use risingwave_common::array::column::Column;
-use risingwave_common::array::{DataChunk, PrimitiveArray, Vis};
+use risingwave_common::array::{DataChunk, Vis};
 use risingwave_common::catalog::{Field, Schema};
-use risingwave_common::error::ErrorCode::InternalError;
 use risingwave_common::error::{Result, RwError};
 use risingwave_common::types::DataType;
 use risingwave_common::util::chunk_coalesce::{DataChunkBuilder, SlicedDataChunk};
@@ -29,7 +26,7 @@ use super::{BoxedDataChunkStream, BoxedExecutor, BoxedExecutorBuilder, Executor,
 use crate::task::BatchTaskContext;
 
 pub struct ExpandExecutor {
-    expanded_keys: Vec<Vec<usize>>,
+    column_subsets: Vec<Vec<usize>>,
     child: BoxedExecutor,
     schema: Schema,
     identity: String,
@@ -62,48 +59,14 @@ impl ExpandExecutor {
             let (columns, vis) = data_chunk.into_parts();
             assert_eq!(vis, Vis::Compact(cardinality));
 
-            let null_columns: Vec<Column> = columns
-                .iter()
-                .map(|column| {
-                    let array = column.array_ref();
-                    let mut builder = array.create_builder(cardinality)?;
-                    (0..cardinality).try_for_each(|_i| builder.append_null())?;
-                    Ok::<Column, RwError>(Column::new(Arc::new(builder.finish()?)))
-                })
-                .try_collect()?;
-
-            for (i, keys) in self.expanded_keys.iter().enumerate() {
-                let mut new_columns = null_columns.clone();
-                for key in keys {
-                    new_columns[*key] = columns[*key].clone();
-                }
-                let flags = Column::from(PrimitiveArray::<i64>::from_slice(&vec![
-                    Some(i as i64);
-                    cardinality
-                ])?);
-                new_columns.push(flags);
-                let new_data_chunk = DataChunk::new(new_columns, vis.clone());
-                let mut sliced_data_chunk = SlicedDataChunk::new_checked(new_data_chunk)?;
-                loop {
-                    let (left_data, output) = data_chunk_builder.append_chunk(sliced_data_chunk)?;
-                    match (left_data, output) {
-                        (Some(left_data), Some(output)) => {
-                            sliced_data_chunk = left_data;
-                            yield output;
-                        }
-                        (None, Some(output)) => {
-                            yield output;
-                            break;
-                        }
-                        (None, None) => {
-                            break;
-                        }
-                        _ => {
-                            return Err(
-                                InternalError("Data chunk builder error".to_string()).into()
-                            );
-                        }
-                    }
+            for new_columns in
+                Column::expand_columns(cardinality, columns, self.column_subsets.to_owned())?
+            {
+                for data_chunk in SlicedDataChunk::trunc_data_chunk(
+                    &mut data_chunk_builder,
+                    DataChunk::new(new_columns, vis.clone()),
+                )? {
+                    yield data_chunk;
                 }
             }
         }
@@ -125,10 +88,10 @@ impl BoxedExecutorBuilder for ExpandExecutor {
             NodeBody::Expand
         )?;
 
-        let expanded_keys = expand_node
-            .expanded_keys
+        let column_subsets = expand_node
+            .column_subsets
             .iter()
-            .map(|keys| keys.keys.iter().map(|key| *key as usize).collect_vec())
+            .map(|subset| subset.subset.iter().map(|key| *key as usize).collect_vec())
             .collect_vec();
 
         let child = inputs.remove(0);
@@ -139,7 +102,7 @@ impl BoxedExecutorBuilder for ExpandExecutor {
             .push(Field::with_name(DataType::Int64, "flag"));
 
         Ok(Box::new(Self {
-            expanded_keys,
+            column_subsets,
             child,
             schema,
             identity: "ExpandExecutor".to_string(),
@@ -181,9 +144,9 @@ mod tests {
              1 2 3
              2 3 4",
         ));
-        let expanded_keys = vec![vec![0, 1], vec![1, 2]];
+        let column_subsets = vec![vec![0, 1], vec![1, 2]];
         let expand_executor = Box::new(ExpandExecutor {
-            expanded_keys,
+            column_subsets,
             child: Box::new(mock_executor),
             schema: expand_schema,
             identity: "ExpandExecutor".to_string(),

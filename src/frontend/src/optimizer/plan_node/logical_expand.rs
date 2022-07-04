@@ -25,20 +25,20 @@ use super::{
 use crate::risingwave_common::error::Result;
 use crate::utils::{ColIndexMapping, Condition};
 
-/// [`LogicalExpand`] expand one row multiple times according to `expanded_keys`.
+/// [`LogicalExpand`] expand one row multiple times according to `column_subsets`.
 ///
 /// It can be used to implement distinct aggregation and group set.
 #[derive(Debug, Clone)]
 pub struct LogicalExpand {
     pub base: PlanBase,
-    expanded_keys: Vec<Vec<usize>>,
+    column_subsets: Vec<Vec<usize>>,
     input: PlanRef,
 }
 
 impl LogicalExpand {
-    pub fn new(input: PlanRef, expanded_keys: Vec<Vec<usize>>) -> Self {
+    pub fn new(input: PlanRef, column_subsets: Vec<Vec<usize>>) -> Self {
         let input_schema_len = input.schema().len();
-        for key in expanded_keys.iter().flatten() {
+        for key in column_subsets.iter().flatten() {
             assert!(*key < input_schema_len);
         }
         // The last column should be the flag.
@@ -50,13 +50,13 @@ impl LogicalExpand {
         let base = PlanBase::new_logical(ctx, schema, pk_indices);
         LogicalExpand {
             base,
-            expanded_keys,
+            column_subsets,
             input,
         }
     }
 
-    pub fn create(input: PlanRef, expanded_keys: Vec<Vec<usize>>) -> PlanRef {
-        Self::new(input, expanded_keys).into()
+    pub fn create(input: PlanRef, column_subsets: Vec<Vec<usize>>) -> PlanRef {
+        Self::new(input, column_subsets).into()
     }
 
     fn derive_schema(input_schema: &Schema) -> Schema {
@@ -65,8 +65,8 @@ impl LogicalExpand {
         Schema::new(fields)
     }
 
-    pub fn expanded_keys(&self) -> &Vec<Vec<usize>> {
-        &self.expanded_keys
+    pub fn column_subsets(&self) -> &Vec<Vec<usize>> {
+        &self.column_subsets
     }
 }
 
@@ -76,7 +76,7 @@ impl PlanTreeNodeUnary for LogicalExpand {
     }
 
     fn clone_with_input(&self, input: PlanRef) -> Self {
-        Self::new(input, self.expanded_keys.clone())
+        Self::new(input, self.column_subsets.clone())
     }
 
     #[must_use]
@@ -85,15 +85,15 @@ impl PlanTreeNodeUnary for LogicalExpand {
         input: PlanRef,
         input_col_change: ColIndexMapping,
     ) -> (Self, ColIndexMapping) {
-        let mut expanded_keys = self.expanded_keys.clone();
-        for key in expanded_keys.iter_mut().flat_map(|r| r.iter_mut()) {
+        let mut column_subsets = self.column_subsets.clone();
+        for key in column_subsets.iter_mut().flat_map(|r| r.iter_mut()) {
             *key = input_col_change.map(*key);
         }
         let (mut map, new_input_col_num) = input_col_change.into_parts();
         assert_eq!(new_input_col_num, input.schema().len());
         map.push(Some(new_input_col_num));
 
-        (Self::new(input, expanded_keys), ColIndexMapping::new(map))
+        (Self::new(input, column_subsets), ColIndexMapping::new(map))
     }
 }
 
@@ -103,8 +103,8 @@ impl fmt::Display for LogicalExpand {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         write!(
             f,
-            "LogicalExpand {{ expanded_keys: {:#?} }}",
-            self.expanded_keys
+            "LogicalExpand {{ column_subsets: {:?} }}",
+            self.column_subsets
         )
     }
 }
@@ -119,14 +119,14 @@ impl ColPrunable for LogicalExpand {
             .collect_vec();
         let new_input = self.input.prune_col(&input_required_cols);
 
-        // `input_required_cols` should be a subset of `expanded_keys`
+        // `input_required_cols` should be a subset of `column_subsets`
         let input_change = ColIndexMapping::with_remaining_columns(
             &input_required_cols,
             self.input.schema().len(),
         );
-        // Filter those unneeded `expanded_keys`.
-        let expanded_keys = self
-            .expanded_keys
+        // Filter those unneeded `column_subsets`.
+        let column_subsets = self
+            .column_subsets
             .iter()
             .filter_map(|keys| {
                 let keys = keys
@@ -140,7 +140,7 @@ impl ColPrunable for LogicalExpand {
                 }
             })
             .collect_vec();
-        LogicalExpand::create(new_input, expanded_keys)
+        LogicalExpand::create(new_input, column_subsets)
     }
 }
 
@@ -184,12 +184,12 @@ mod tests {
     #[tokio::test]
     /// Pruning
     /// ```text
-    /// Expand(expanded_keys: [[0, 1], [2]]
+    /// Expand(column_subsets: [[0, 1], [2]]
     ///   TableScan(v1, v2, v3)
     /// ```
     /// with required columns [1] will result in
     /// ```text
-    /// Expand(expanded_keys: [[0]])
+    /// Expand(column_subsets: [[0]])
     ///   TableScan(v2)
     /// ```
     async fn test_prune_expand() {
@@ -207,8 +207,8 @@ mod tests {
             ctx,
         );
 
-        let expanded_keys = vec![vec![0, 1], vec![2]];
-        let expand = LogicalExpand::create(values.into(), expanded_keys);
+        let column_subsets = vec![vec![0, 1], vec![2]];
+        let expand = LogicalExpand::create(values.into(), column_subsets);
 
         // Perform the prune
         let required_cols = vec![1];
@@ -216,9 +216,9 @@ mod tests {
 
         // Check the result
         let expand = plan.as_logical_expand().unwrap();
-        let expanded_keys = expand.expanded_keys();
+        let column_subsets = expand.column_subsets();
         assert_eq!(expand.schema().len(), 2);
-        assert_eq!(expanded_keys, &vec![vec![0_usize]]);
+        assert_eq!(column_subsets, &vec![vec![0_usize]]);
 
         let values = expand.input();
         let values = values.as_logical_values().unwrap();

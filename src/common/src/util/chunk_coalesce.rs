@@ -18,6 +18,7 @@ use std::sync::Arc;
 use itertools::Itertools;
 
 use crate::array::column::Column;
+use crate::array::error::anyhow;
 use crate::array::{ArrayBuilderImpl, ArrayResult, DataChunk, RowRef};
 use crate::types::{DataType, Datum, DatumRef};
 
@@ -255,6 +256,34 @@ impl SlicedDataChunk {
 
     fn capacity(&self) -> usize {
         self.data_chunk.capacity() - self.offset
+    }
+
+    pub fn trunc_data_chunk(
+        data_chunk_builder: &mut DataChunkBuilder,
+        data_chunk: DataChunk,
+    ) -> ArrayResult<Vec<DataChunk>> {
+        let mut sliced_data_chunk = SlicedDataChunk::new_checked(data_chunk)?;
+        let mut res = vec![];
+        loop {
+            let (left_data, output) = data_chunk_builder.append_chunk(sliced_data_chunk)?;
+            match (left_data, output) {
+                (Some(left_data), Some(output)) => {
+                    sliced_data_chunk = left_data;
+                    res.push(output);
+                }
+                (None, Some(output)) => {
+                    res.push(output);
+                    break;
+                }
+                (None, None) => {
+                    break;
+                }
+                _ => {
+                    return Err(anyhow!("Data chunk builder error").into());
+                }
+            }
+        }
+        Ok(res)
     }
 }
 

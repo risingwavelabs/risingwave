@@ -16,7 +16,6 @@ use std::fmt::Debug;
 
 use futures::StreamExt;
 use futures_async_stream::try_stream;
-use risingwave_common::array::PrimitiveArray;
 use risingwave_common::catalog::{Field, Schema};
 use risingwave_common::types::DataType;
 
@@ -27,14 +26,14 @@ pub struct ExpandExecutor {
     input: BoxedExecutor,
     schema: Schema,
     pk_indices: PkIndices,
-    expanded_keys: Vec<Vec<usize>>,
+    column_subsets: Vec<Vec<usize>>,
 }
 
 impl ExpandExecutor {
     pub fn new(
         input: Box<dyn Executor>,
         pk_indices: PkIndices,
-        expanded_keys: Vec<Vec<usize>>,
+        column_subsets: Vec<Vec<usize>>,
     ) -> Self {
         let mut schema = input.schema().to_owned();
         schema
@@ -44,7 +43,7 @@ impl ExpandExecutor {
             input,
             schema,
             pk_indices,
-            expanded_keys,
+            column_subsets,
         }
     }
 
@@ -52,8 +51,7 @@ impl ExpandExecutor {
     async fn execute_inner(self) {
         #[for_await]
         for msg in self.input.execute() {
-            let msg = msg?;
-            match msg {
+            match msg? {
                 Message::Chunk(chunk) => {
                     // TODO: handle dummy chunk.
                     let chunk = chunk.compact()?;
@@ -61,28 +59,11 @@ impl ExpandExecutor {
                     let cardinality = data_chunk.cardinality();
                     let (columns, _) = data_chunk.into_parts();
 
-                    let null_columns: Vec<Column> = columns
-                        .iter()
-                        .map(|column| {
-                            let array = column.array_ref();
-                            let mut builder = array.create_builder(cardinality)?;
-                            (0..cardinality).try_for_each(|_i| builder.append_null())?;
-                            Ok::<Column, StreamExecutorError>(Column::new(Arc::new(
-                                builder.finish()?,
-                            )))
-                        })
-                        .try_collect()?;
-
-                    for (i, keys) in self.expanded_keys.iter().enumerate() {
-                        let mut new_columns = null_columns.clone();
-                        for key in keys {
-                            new_columns[*key] = columns[*key].clone();
-                        }
-                        let flags = Column::from(PrimitiveArray::<i64>::from_slice(&vec![
-                            Some(i as i64);
-                            cardinality
-                        ])?);
-                        new_columns.push(flags);
+                    for new_columns in Column::expand_columns(
+                        cardinality,
+                        columns,
+                        self.column_subsets.to_owned(),
+                    )? {
                         let stream_chunk = StreamChunk::new(ops.clone(), new_columns, None);
                         yield Message::Chunk(stream_chunk)
                     }
@@ -96,7 +77,7 @@ impl ExpandExecutor {
 impl Debug for ExpandExecutor {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.debug_struct("ExpandExecutor")
-            .field("expanded_keys", &self.expanded_keys)
+            .field("column_subsets", &self.column_subsets)
             .finish()
     }
 }
@@ -148,11 +129,11 @@ mod tests {
         };
         let source = MockSource::with_chunks(schema, PkIndices::new(), vec![chunk1]);
 
-        let expanded_keys = vec![vec![0, 1], vec![1, 2]];
+        let column_subsets = vec![vec![0, 1], vec![1, 2]];
         let expand = Box::new(ExpandExecutor::new(
             Box::new(source),
             PkIndices::new(),
-            expanded_keys,
+            column_subsets,
         ));
         let mut expand = expand.execute();
 
