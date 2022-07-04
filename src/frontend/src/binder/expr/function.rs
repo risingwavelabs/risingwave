@@ -58,7 +58,9 @@ impl Binder {
                     kind, inputs, f.distinct, filter,
                 )?)));
             } else if f.filter.is_some() {
-                return Err(ErrorCode::BindError("filter clause is only allowed in aggregation functions".to_string())
+                return Err(ErrorCode::BindError(
+                    "filter clause is only allowed in aggregation functions".to_string(),
+                )
                 .into());
             }
             let function_type = match function_name.as_str() {
