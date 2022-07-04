@@ -157,6 +157,7 @@ impl CompactStatus {
             target_file_size: ret.target_file_size,
             compaction_filter_mask: 0,
             table_options: HashMap::default(),
+            current_epoch_time: 0,
         };
         Some(compact_task)
     }

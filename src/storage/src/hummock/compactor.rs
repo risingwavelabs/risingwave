@@ -99,7 +99,7 @@ pub struct CompactorContext {
 }
 
 trait CompactionFilter: Send + DynClone {
-    fn filter(&self, _: &[u8]) -> bool {
+    fn filter(&mut self, _: &[u8]) -> bool {
         true
     }
 }
@@ -125,7 +125,7 @@ impl StateCleanUpCompactionFilter {
 }
 
 impl CompactionFilter for StateCleanUpCompactionFilter {
-    fn filter(&self, key: &[u8]) -> bool {
+    fn filter(&mut self, key: &[u8]) -> bool {
         let table_id_option = get_table_id(key);
         match table_id_option {
             None => true,
@@ -137,23 +137,34 @@ impl CompactionFilter for StateCleanUpCompactionFilter {
 #[derive(Clone)]
 pub struct TTLCompactionFilter {
     table_id_to_ttl: HashMap<u32, u32>,
-    expire: u64,
+    expire_epoch: u64,
+    last_table_and_ttl: Option<(u32, u64)>,
 }
 
 impl CompactionFilter for TTLCompactionFilter {
-    fn filter(&self, key: &[u8]) -> bool {
+    fn filter(&mut self, key: &[u8]) -> bool {
         pub use risingwave_common::util::epoch::Epoch;
         let (table_id, epoch) = extract_table_id_and_epoch(key);
         match table_id {
-            Some(table_id) => match self.table_id_to_ttl.get(&table_id) {
-                Some(ttl_second_u32) => {
-                    assert!(*ttl_second_u32 != TABLE_OPTION_DUMMY_TTL);
-                    let min_epoch = Epoch(self.expire).subtract_ms((*ttl_second_u32 * 1000) as u64);
-                    Epoch(epoch) > min_epoch
+            Some(table_id) => {
+                if let Some((last_table_id, ttl_mill)) = self.last_table_and_ttl.as_ref() {
+                    if *last_table_id == table_id {
+                        let min_epoch = Epoch(self.expire_epoch).subtract_ms(*ttl_mill);
+                        return Epoch(epoch) > min_epoch;
+                    }
                 }
-                None => true,
-            },
-
+                match self.table_id_to_ttl.get(&table_id) {
+                    Some(ttl_second_u32) => {
+                        assert!(*ttl_second_u32 != TABLE_OPTION_DUMMY_TTL);
+                        // default to zero.
+                        let ttl_mill = (*ttl_second_u32 * 1000) as u64;
+                        let min_epoch = Epoch(self.expire_epoch).subtract_ms(ttl_mill);
+                        self.last_table_and_ttl = Some((table_id, ttl_mill));
+                        Epoch(epoch) > min_epoch
+                    }
+                    None => true,
+                }
+            }
             None => true,
         }
     }
@@ -163,7 +174,7 @@ impl TTLCompactionFilter {
     fn new(table_id_to_ttl: HashMap<u32, u32>, expire: u64) -> Self {
         Self {
             table_id_to_ttl,
-            expire,
+            expire_epoch: expire,
         }
     }
 }
@@ -174,8 +185,8 @@ struct MultiCompactionFilter {
 }
 
 impl CompactionFilter for MultiCompactionFilter {
-    fn filter(&self, key: &[u8]) -> bool {
-        !self.filter_vec.iter().any(|filter| !filter.filter(key))
+    fn filter(&mut self, key: &[u8]) -> bool {
+        !self.filter_vec.iter_mut().any(|filter| !filter.filter(key))
     }
 }
 
@@ -305,6 +316,7 @@ impl Compactor {
             compression_algorithm: 0,
             compaction_filter_mask: 0,
             table_options: HashMap::default(),
+            current_epoch_time: 0,
         };
 
         let sstable_store = context.sstable_store.clone();
@@ -507,7 +519,10 @@ impl Compactor {
                 })
                 .map(|id_to_option| (*id_to_option.0, id_to_option.1.ttl))
                 .collect();
-            let ttl_filter = Box::new(TTLCompactionFilter::new(id_to_ttl, compact_task.watermark));
+            let ttl_filter = Box::new(TTLCompactionFilter::new(
+                id_to_ttl,
+                compact_task.current_epoch_time,
+            ));
             multi_filter.register(ttl_filter);
         }
 

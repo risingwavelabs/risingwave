@@ -162,6 +162,7 @@ message CompactTask {
   uint64 target_file_size = 15;
   uint32 compaction_filter_mask = 16;
   map<uint32, TableOption> table_options = 17;
+  uint64 current_epoch_time = 18;
 }
 
 message LevelHandler {
