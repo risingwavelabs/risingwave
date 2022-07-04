@@ -91,20 +91,3 @@ enum RowFormatType {
   DEBEZIUM_JSON = 2;
   AVRO = 3;
 }
-
-message StreamSourceInfo {
-  bool append_only = 1;
-  map<string, string> properties = 2;
-  RowFormatType row_format = 3;
-  string row_schema_location = 4;
-  int32 row_id_index = 5;
-}
-
-message TableSourceInfo {}
-
-message MaterializedViewInfo {
-  TableRefId associated_table_ref_id = 1;
-  repeated ColumnOrder column_orders = 2;
-  repeated int32 pk_indices = 3;
-  repeated TableRefId dependent_tables = 4;
-}
