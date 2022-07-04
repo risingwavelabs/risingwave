@@ -371,3 +371,21 @@
             StreamExchange { dist: HashShard([0, 1]) }
               StreamProject { exprs: [$2, $1, $0, $3] }
                 StreamTableScan { table: t, columns: [v1, v2, v3, _row_id], pk_indices: [3] }
+- sql: |
+    /* filter clause */
+    create table t(v1 int);
+    select sum(v1) FILTER (WHERE v1 > 0) AS sa from t;
+  logical_plan: |
+    LogicalProject { exprs: [$0] }
+      LogicalAgg { group_keys: [], agg_calls: [sum($0) filter(($1 > 0:Int32))] }
+        LogicalProject { exprs: [$1] }
+          LogicalScan { table: t, columns: [_row_id, v1] }
+  optimized_logical_plan: |
+    LogicalAgg { group_keys: [], agg_calls: [sum($0) filter(($1 > 0:Int32))] }
+      LogicalScan { table: t, columns: [v1] }
+  stream_plan: |
+    StreamMaterialize { columns: [agg#0(hidden), sa], pk_columns: [] }
+      StreamGlobalSimpleAgg { aggs: [sum($0), sum($1) filter(($1 > 0:Int32))] }
+        StreamExchange { dist: Single }
+          StreamLocalSimpleAgg { aggs: [count, sum($0) filter(($1 > 0:Int32))] }
+            StreamTableScan { table: t, columns: [v1, _row_id], pk_indices: [1] }

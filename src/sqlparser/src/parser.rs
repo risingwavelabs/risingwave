@@ -592,7 +592,7 @@ impl Parser {
         } else {
             None
         };
-        
+
         let filter = if self.parse_keyword(Keyword::FILTER) {
             self.expect_token(&Token::LParen)?;
             self.expect_keyword(Keyword::WHERE)?;
@@ -609,7 +609,7 @@ impl Parser {
             over,
             distinct,
             order_by,
-            filter
+            filter,
         }))
     }
 

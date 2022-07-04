@@ -23,6 +23,7 @@ use risingwave_sqlparser::ast::{Function, FunctionArg, FunctionArgExpr};
 use crate::binder::bind_context::Clause;
 use crate::binder::Binder;
 use crate::expr::{AggCall, Expr, ExprImpl, ExprType, FunctionCall, Literal};
+use crate::utils::Condition;
 
 impl Binder {
     pub(super) fn bind_function(&mut self, f: Function) -> Result<ExprImpl> {
@@ -49,9 +50,16 @@ impl Binder {
             };
             if let Some(kind) = agg_kind {
                 self.ensure_aggregate_allowed()?;
+                let filter = match f.filter {
+                    Some(filter) => Condition::with_expr(self.bind_expr(*filter)?),
+                    None => Condition::true_cond(),
+                };
                 return Ok(ExprImpl::AggCall(Box::new(AggCall::new(
-                    kind, inputs, f.distinct,
+                    kind, inputs, f.distinct, filter,
                 )?)));
+            } else if f.filter.is_some() {
+                return Err(ErrorCode::BindError("filter clause is only allowed in aggregation functions".to_string())
+                .into());
             }
             let function_type = match function_name.as_str() {
                 // comparison

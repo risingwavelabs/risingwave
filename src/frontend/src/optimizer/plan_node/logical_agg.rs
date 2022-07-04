@@ -49,6 +49,10 @@ pub struct PlanAggCall {
     pub inputs: Vec<InputRef>,
 
     pub distinct: bool,
+    /// Selective aggregation: only the input rows for which
+    /// the filter_clause evaluates to true will be fed to aggregate function.
+    /// Other rows are discarded.
+    pub filter: Condition,
 }
 
 impl fmt::Debug for PlanAggCall {
@@ -66,6 +70,9 @@ impl fmt::Debug for PlanAggCall {
                 }
             }
             write!(f, ")")?;
+        }
+        if !self.filter.always_true() {
+            write!(f, " filter({:?})", self.filter.as_expr_unless_true().unwrap())?;
         }
         Ok(())
     }
@@ -106,6 +113,7 @@ impl PlanAggCall {
             return_type: DataType::Int64,
             inputs: vec![],
             distinct: false,
+            filter: Condition::true_cond(),
         }
     }
 }
@@ -382,14 +390,16 @@ impl ExprRewriter for LogicalAggBuilder {
     /// Note that the rewriter does not traverse into inputs of agg calls.
     fn rewrite_agg_call(&mut self, agg_call: AggCall) -> ExprImpl {
         let return_type = agg_call.return_type();
-        let (agg_kind, inputs, distinct) = agg_call.decompose();
+        let (agg_kind, inputs, distinct, filter) = agg_call.decompose();
 
         for i in &inputs {
             if i.has_agg_call() {
                 self.error = Some(ErrorCode::InvalidInputSyntax(
                     "Aggregation calls should not be nested".into(),
                 ));
-                return AggCall::new(agg_kind, inputs, distinct).unwrap().into();
+                return AggCall::new(agg_kind, inputs, distinct, filter)
+                    .unwrap()
+                    .into();
             }
         }
 
@@ -413,6 +423,7 @@ impl ExprRewriter for LogicalAggBuilder {
                 return_type: left_return_type.clone(),
                 inputs: inputs.clone(),
                 distinct,
+                filter: filter.clone(),
             });
             let left = ExprImpl::from(InputRef::new(
                 self.group_keys.len() + self.agg_calls.len() - 1,
@@ -429,6 +440,7 @@ impl ExprRewriter for LogicalAggBuilder {
                 return_type: right_return_type.clone(),
                 inputs,
                 distinct,
+                filter
             });
 
             let right = InputRef::new(
@@ -443,6 +455,7 @@ impl ExprRewriter for LogicalAggBuilder {
                 return_type: return_type.clone(),
                 inputs,
                 distinct,
+                filter
             });
             ExprImpl::from(InputRef::new(
                 self.group_keys.len() + self.agg_calls.len() - 1,
@@ -930,8 +943,13 @@ mod tests {
 
         // Test case: select v1, min(v2) from test group by v1;
         {
-            let min_v2 =
-                AggCall::new(AggKind::Min, vec![input_ref_2.clone().into()], false).unwrap();
+            let min_v2 = AggCall::new(
+                AggKind::Min,
+                vec![input_ref_2.clone().into()],
+                false,
+                Condition::true_cond(),
+            )
+            .unwrap();
             let select_exprs = vec![input_ref_1.clone().into(), min_v2.into()];
             let group_exprs = vec![input_ref_1.clone().into()];
 
@@ -949,10 +967,20 @@ mod tests {
 
         // Test case: select v1, min(v2) + max(v3) from t group by v1;
         {
-            let min_v2 =
-                AggCall::new(AggKind::Min, vec![input_ref_2.clone().into()], false).unwrap();
-            let max_v3 =
-                AggCall::new(AggKind::Max, vec![input_ref_3.clone().into()], false).unwrap();
+            let min_v2 = AggCall::new(
+                AggKind::Min,
+                vec![input_ref_2.clone().into()],
+                false,
+                Condition::true_cond(),
+            )
+            .unwrap();
+            let max_v3 = AggCall::new(
+                AggKind::Max,
+                vec![input_ref_3.clone().into()],
+                false,
+                Condition::true_cond(),
+            )
+            .unwrap();
             let func_call =
                 FunctionCall::new(ExprType::Add, vec![min_v2.into(), max_v3.into()]).unwrap();
             let select_exprs = vec![input_ref_1.clone().into(), ExprImpl::from(func_call)];
@@ -985,7 +1013,13 @@ mod tests {
                 vec![input_ref_1.into(), input_ref_3.into()],
             )
             .unwrap();
-            let agg_call = AggCall::new(AggKind::Min, vec![v1_mult_v3.into()], false).unwrap();
+            let agg_call = AggCall::new(
+                AggKind::Min,
+                vec![v1_mult_v3.into()],
+                false,
+                Condition::true_cond(),
+            )
+            .unwrap();
             let select_exprs = vec![input_ref_2.clone().into(), agg_call.into()];
             let group_exprs = vec![input_ref_2.into()];
 
@@ -1015,6 +1049,7 @@ mod tests {
             return_type: ty.clone(),
             inputs: vec![InputRef::new(2, ty.clone())],
             distinct: false,
+            filter: Condition::true_cond(),
         };
         LogicalAgg::new(vec![agg_call], vec![1], values.into())
     }
@@ -1132,6 +1167,7 @@ mod tests {
             return_type: ty.clone(),
             inputs: vec![InputRef::new(2, ty.clone())],
             distinct: false,
+            filter: Condition::true_cond(),
         };
         let agg = LogicalAgg::new(vec![agg_call], vec![1], values.into());
 
@@ -1195,12 +1231,14 @@ mod tests {
                 return_type: ty.clone(),
                 inputs: vec![InputRef::new(2, ty.clone())],
                 distinct: false,
+                filter: Condition::true_cond(),
             },
             PlanAggCall {
                 agg_kind: AggKind::Max,
                 return_type: ty.clone(),
                 inputs: vec![InputRef::new(1, ty.clone())],
                 distinct: false,
+                filter: Condition::true_cond(),
             },
         ];
         let agg = LogicalAgg::new(agg_calls, vec![1, 2], values.into());
