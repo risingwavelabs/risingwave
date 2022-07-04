@@ -17,16 +17,36 @@ use risingwave_common::array::{BytesGuard, BytesWriter};
 use crate::Result;
 
 #[inline(always)]
-fn overlay(
+fn overlay(s: &str, new_sub_str: &str, start: i32, writer: BytesWriter) -> Result<BytesGuard> {
+    // If count is omitted, it defaults to the length of new_sub_str.
+    overlay_for(s, new_sub_str, start, new_sub_str.len() as i32, writer)
+}
+
+#[inline(always)]
+fn overlay_for(
     s: &str,
     new_sub_str: &str,
     start: i32,
-    count: Option<i32>,
+    count: i32,
     writer: BytesWriter,
 ) -> Result<BytesGuard> {
-    Err(crate::error::ExprError::UnsupportedFunction(String::from(
-        "overlay",
-    )))
+    let count = count.max(0) as usize;
+
+    // If start is out of range, attach it to the end.
+    // Note that indices are 1-based.
+    let start = ((start - 1).max(0) as usize).min(s.len());
+
+    let remaining = start + count;
+
+    let mut writer = writer.begin();
+    writer.write_ref(&s[..start])?;
+    writer.write_ref(new_sub_str)?;
+
+    if remaining < s.len() {
+        writer.write_ref(&s[remaining..])?;
+    }
+
+    writer.finish().map_err(Into::into)
 }
 
 #[cfg(test)]
@@ -59,7 +79,11 @@ mod tests {
         for (s, new_sub_str, start, count, expected) in cases {
             let builder = Utf8ArrayBuilder::new(1);
             let writer = builder.writer();
-            let guard = overlay(s, new_sub_str, start, count, writer).unwrap();
+            let guard = match count {
+                None => overlay(s, new_sub_str, start, writer),
+                Some(count) => overlay_for(s, new_sub_str, start, count, writer),
+            }
+            .unwrap();
             let array = guard.into_inner().finish().unwrap();
             let v = array.value_at(0).unwrap();
             assert_eq!(v, expected);
