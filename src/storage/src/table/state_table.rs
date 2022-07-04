@@ -20,7 +20,7 @@ use std::ops::{Index, RangeBounds};
 use futures::{pin_mut, Stream, StreamExt};
 use futures_async_stream::try_stream;
 use risingwave_common::array::Row;
-use risingwave_common::catalog::ColumnDesc;
+use risingwave_common::catalog::{ColumnDesc, TableId};
 use risingwave_common::util::ordered::{serialize_pk, OrderedRowSerializer};
 use risingwave_common::util::sort_util::OrderType;
 use risingwave_hummock_sdk::key::range_of_prefix;
@@ -32,7 +32,7 @@ use crate::cell_based_row_serializer::CellBasedRowSerializer;
 use crate::dedup_pk_cell_based_row_serializer::DedupPkCellBasedRowSerializer;
 use crate::error::{StorageError, StorageResult};
 use crate::row_serializer::RowSerializer;
-use crate::{Keyspace, StateStore};
+use crate::StateStore;
 
 /// Identical to `StateTable`. Used when we want to
 /// rows to have dedup pk cell encoding.
@@ -56,14 +56,27 @@ impl<S: StateStore, SER: RowSerializer> StateTableBase<S, SER> {
     /// Note: `dist_key_indices` is ignored, use `new_with[out]_distribution` instead.
     // TODO: remove this after all state table usages are replaced by `new_with[out]_distribution`.
     pub fn new(
-        keyspace: Keyspace<S>,
+        store: S,
+        table_id: TableId,
         columns: Vec<ColumnDesc>,
         order_types: Vec<OrderType>,
         _dist_key_indices: Option<Vec<usize>>,
         pk_indices: Vec<usize>,
     ) -> Self {
+        Self::new_without_distribution(store, table_id, columns, order_types, pk_indices)
+    }
+
+    /// Create a state table without distribution, used for singleton executors and tests.
+    pub fn new_without_distribution(
+        store: S,
+        table_id: TableId,
+        columns: Vec<ColumnDesc>,
+        order_types: Vec<OrderType>,
+        pk_indices: Vec<usize>,
+    ) -> Self {
         Self::new_with_distribution(
-            keyspace,
+            store,
+            table_id,
             columns,
             order_types,
             pk_indices,
@@ -74,7 +87,8 @@ impl<S: StateStore, SER: RowSerializer> StateTableBase<S, SER> {
     /// Create a state table with distribution specified with `distribution`. Should use
     /// `Distribution::fallback()` for singleton executors and tests.
     pub fn new_with_distribution(
-        keyspace: Keyspace<S>,
+        store: S,
+        table_id: TableId,
         columns: Vec<ColumnDesc>,
         order_types: Vec<OrderType>,
         pk_indices: Vec<usize>,
@@ -83,7 +97,8 @@ impl<S: StateStore, SER: RowSerializer> StateTableBase<S, SER> {
         Self {
             mem_table: MemTable::new(),
             cell_based_table: CellBasedTableBase::new(
-                keyspace,
+                store,
+                table_id,
                 columns,
                 order_types,
                 pk_indices,

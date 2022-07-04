@@ -15,11 +15,11 @@
 use async_trait::async_trait;
 use madsim::collections::HashSet;
 use risingwave_common::array::{Op, StreamChunk};
-use risingwave_common::catalog::Schema;
+use risingwave_common::catalog::{Schema, TableId};
 use risingwave_common::types::DataType;
 use risingwave_common::util::ordered::{OrderedRow, OrderedRowDeserializer};
 use risingwave_common::util::sort_util::{OrderPair, OrderType};
-use risingwave_storage::{Keyspace, StateStore};
+use risingwave_storage::StateStore;
 
 use super::error::StreamExecutorResult;
 use super::managed_state::top_n::variants::{TOP_N_MAX, TOP_N_MIN};
@@ -38,7 +38,10 @@ impl<S: StateStore> TopNExecutor<S> {
         order_pairs: Vec<OrderPair>,
         offset_and_limit: (usize, Option<usize>),
         pk_indices: PkIndices,
-        keyspace: Keyspace<S>,
+        store: S,
+        table_id_l: TableId,
+        table_id_m: TableId,
+        table_id_h: TableId,
         cache_size: Option<usize>,
         total_count: (usize, usize, usize),
         executor_id: u64,
@@ -55,7 +58,10 @@ impl<S: StateStore> TopNExecutor<S> {
                 order_pairs,
                 offset_and_limit,
                 pk_indices,
-                keyspace,
+                store,
+                table_id_l,
+                table_id_m,
+                table_id_h,
                 cache_size,
                 total_count,
                 executor_id,
@@ -138,7 +144,10 @@ impl<S: StateStore> InnerTopNExecutor<S> {
         order_pairs: Vec<OrderPair>,
         offset_and_limit: (usize, Option<usize>),
         pk_indices: PkIndices,
-        keyspace: Keyspace<S>,
+        store: S,
+        table_id_l: TableId,
+        table_id_m: TableId,
+        table_id_h: TableId,
         cache_size: Option<usize>,
         total_count: (usize, usize, usize),
         executor_id: u64,
@@ -155,13 +164,12 @@ impl<S: StateStore> InnerTopNExecutor<S> {
             .iter()
             .map(|field| field.data_type.clone())
             .collect::<Vec<_>>();
-        let lower_sub_keyspace = keyspace.append_u8(b'l');
-        let middle_sub_keyspace = keyspace.append_u8(b'm');
-        let higher_sub_keyspace = keyspace.append_u8(b'h');
+
         let managed_lowest_state = ManagedTopNState::<S, TOP_N_MAX>::new(
             cache_size,
             total_count.0,
-            lower_sub_keyspace,
+            store.clone(),
+            table_id_l,
             row_data_types.clone(),
             ordered_row_deserializer.clone(),
             internal_key_indices.clone(),
@@ -169,7 +177,8 @@ impl<S: StateStore> InnerTopNExecutor<S> {
         let managed_middle_state = ManagedTopNBottomNState::new(
             cache_size,
             total_count.1,
-            middle_sub_keyspace,
+            store.clone(),
+            table_id_m,
             row_data_types.clone(),
             ordered_row_deserializer.clone(),
             internal_key_indices.clone(),
@@ -177,7 +186,8 @@ impl<S: StateStore> InnerTopNExecutor<S> {
         let managed_highest_state = ManagedTopNState::<S, TOP_N_MIN>::new(
             cache_size,
             total_count.2,
-            higher_sub_keyspace,
+            store,
+            table_id_h,
             row_data_types,
             ordered_row_deserializer,
             internal_key_indices.clone(),
@@ -440,9 +450,10 @@ mod tests {
     use risingwave_common::catalog::Field;
     use risingwave_common::types::DataType;
     use risingwave_common::util::sort_util::OrderType;
+    use risingwave_storage::memory::MemoryStateStore;
 
     use super::*;
-    use crate::executor::test_utils::{create_in_memory_keyspace, MockSource};
+    use crate::executor::test_utils::MockSource;
     use crate::executor::{Barrier, Message};
 
     fn create_stream_chunks() -> Vec<StreamChunk> {
@@ -520,14 +531,16 @@ mod tests {
     async fn test_top_n_executor_with_offset() {
         let order_types = create_order_pairs();
         let source = create_source();
-        let keyspace = create_in_memory_keyspace();
         let top_n_executor = Box::new(
             TopNExecutor::new(
                 source as Box<dyn Executor>,
                 order_types,
                 (3, None),
                 vec![0, 1],
-                keyspace,
+                MemoryStateStore::new(),
+                TableId::from(0x2333),
+                TableId::from(0x2334),
+                TableId::from(0x2335),
                 Some(2),
                 (0, 0, 0),
                 1,
@@ -616,14 +629,16 @@ mod tests {
     async fn test_top_n_executor_with_limit() {
         let order_types = create_order_pairs();
         let source = create_source();
-        let keyspace = create_in_memory_keyspace();
         let top_n_executor = Box::new(
             TopNExecutor::new(
                 source as Box<dyn Executor>,
                 order_types,
                 (0, Some(4)),
                 vec![0, 1],
-                keyspace,
+                MemoryStateStore::new(),
+                TableId::from(0x2333),
+                TableId::from(0x2334),
+                TableId::from(0x2335),
                 Some(2),
                 (0, 0, 0),
                 1,
@@ -721,14 +736,16 @@ mod tests {
     async fn test_top_n_executor_with_offset_and_limit() {
         let order_types = create_order_pairs();
         let source = create_source();
-        let keyspace = create_in_memory_keyspace();
         let top_n_executor = Box::new(
             TopNExecutor::new(
                 source as Box<dyn Executor>,
                 order_types,
                 (3, Some(4)),
                 vec![0, 1],
-                keyspace,
+                MemoryStateStore::new(),
+                TableId::from(0x2333),
+                TableId::from(0x2334),
+                TableId::from(0x2335),
                 Some(2),
                 (0, 0, 0),
                 1,

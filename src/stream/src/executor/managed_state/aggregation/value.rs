@@ -126,13 +126,13 @@ impl ManagedValueState {
 #[cfg(test)]
 mod tests {
     use risingwave_common::array::{I64Array, Op};
-    use risingwave_common::catalog::{ColumnDesc, ColumnId};
+    use risingwave_common::catalog::{ColumnDesc, ColumnId, TableId};
     use risingwave_common::types::{DataType, ScalarImpl};
+    use risingwave_storage::memory::MemoryStateStore;
     use risingwave_storage::table::state_table::StateTable;
 
     use super::*;
     use crate::executor::aggregation::AggArgs;
-    use crate::executor::test_utils::create_in_memory_keyspace;
 
     fn create_test_count_state() -> AggCall {
         AggCall {
@@ -145,9 +145,9 @@ mod tests {
 
     #[tokio::test]
     async fn test_managed_value_state() {
-        let keyspace = create_in_memory_keyspace();
         let mut state_table = StateTable::new(
-            keyspace.clone(),
+            MemoryStateStore::new(),
+            TableId::from(0x2333),
             vec![ColumnDesc::unnamed(ColumnId::new(0), DataType::Int64)],
             vec![],
             None,
@@ -205,10 +205,10 @@ mod tests {
 
     #[tokio::test]
     async fn test_managed_value_state_append_only() {
-        let keyspace = create_in_memory_keyspace();
         let pk_index = vec![];
         let mut state_table = StateTable::new(
-            keyspace.clone(),
+            MemoryStateStore::new(),
+            TableId::from(0x2333),
             vec![ColumnDesc::unnamed(ColumnId::new(0), DataType::Int64)],
             vec![],
             None,

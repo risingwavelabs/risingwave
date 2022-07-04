@@ -276,10 +276,10 @@ mod tests {
     use assert_matches::assert_matches;
     use futures::StreamExt;
     use risingwave_common::array::stream_chunk::StreamChunkTestExt;
-    use risingwave_common::catalog::Field;
+    use risingwave_common::catalog::{Field, TableId};
     use risingwave_common::types::*;
     use risingwave_expr::expr::*;
-    use risingwave_storage::{Keyspace, StateStore};
+    use risingwave_storage::memory::MemoryStateStore;
 
     use crate::executor::aggregation::{AggArgs, AggCall};
     use crate::executor::test_utils::*;
@@ -290,7 +290,7 @@ mod tests {
         test_local_simple_aggregation(create_in_memory_keyspace_agg(4)).await
     }
 
-    async fn test_local_simple_aggregation(keyspace: Vec<Keyspace<impl StateStore>>) {
+    async fn test_local_simple_aggregation(keyspace: Vec<(MemoryStateStore, TableId)>) {
         let schema = Schema {
             fields: vec![
                 Field::unnamed(DataType::Int64),

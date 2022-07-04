@@ -17,7 +17,7 @@ use futures::{pin_mut, StreamExt};
 use risingwave_frontend::catalog::TableCatalog;
 use risingwave_rpc_client::MetaClient;
 use risingwave_storage::table::state_table::StateTable;
-use risingwave_storage::{Keyspace, StateStore};
+use risingwave_storage::StateStore;
 
 use crate::common::HummockServiceOpts;
 
@@ -39,7 +39,8 @@ pub fn print_table_catalog(table: &TableCatalog) {
 
 pub fn make_state_table<S: StateStore>(hummock: S, table: &TableCatalog) -> StateTable<S> {
     StateTable::new(
-        Keyspace::table_root(hummock, &table.id),
+        hummock,
+        table.id,
         table
             .columns()
             .iter()

@@ -82,7 +82,9 @@ message TopNNode {
   uint64 offset = 3;
   repeated uint32 distribution_keys = 4;
   // Used for internal table states
-  uint32 table_id = 5;
+  uint32 table_id_l = 5;
+  uint32 table_id_m = 6;
+  uint32 table_id_h = 7;
 }
 
 message HashJoinNode {

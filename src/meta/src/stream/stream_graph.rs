@@ -599,9 +599,22 @@ impl StreamGraphBuilder {
                         }
                     }
 
-                    NodeBody::TopN(node) | NodeBody::AppendOnlyTopN(node) => {
-                        node.table_id += table_id_offset;
-                        ctx.internal_table_id_set.insert(node.table_id);
+                    NodeBody::TopN(node) => {
+                        node.table_id_l += table_id_offset;
+                        node.table_id_m += table_id_offset;
+                        node.table_id_h += table_id_offset;
+                        ctx.internal_table_id_set.insert(node.table_id_l);
+                        ctx.internal_table_id_set.insert(node.table_id_m);
+                        ctx.internal_table_id_set.insert(node.table_id_h);
+                    }
+
+                    NodeBody::AppendOnlyTopN(node) => {
+                        node.table_id_l += table_id_offset;
+                        node.table_id_m += table_id_offset;
+                        node.table_id_h += table_id_offset;
+                        ctx.internal_table_id_set.insert(node.table_id_l);
+                        ctx.internal_table_id_set.insert(node.table_id_m);
+                        ctx.internal_table_id_set.insert(node.table_id_h);
                     }
 
                     NodeBody::GlobalSimpleAgg(node) | NodeBody::LocalSimpleAgg(node) => {

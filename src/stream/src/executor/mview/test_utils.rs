@@ -19,13 +19,11 @@ use risingwave_common::util::sort_util::OrderType;
 use risingwave_storage::memory::MemoryStateStore;
 use risingwave_storage::table::cell_based_table::{CellBasedTable, READ_ONLY};
 use risingwave_storage::table::state_table::StateTable;
-use risingwave_storage::Keyspace;
 
 pub async fn gen_basic_table(row_count: usize) -> CellBasedTable<MemoryStateStore, READ_ONLY> {
     let state_store = MemoryStateStore::new();
 
     let order_types = vec![OrderType::Ascending, OrderType::Descending];
-    let keyspace = Keyspace::table_root(state_store, &TableId::from(0x42));
     let column_ids = vec![0.into(), 1.into(), 2.into()];
     let column_descs = vec![
         ColumnDesc::unnamed(column_ids[0], DataType::Int32),
@@ -34,7 +32,8 @@ pub async fn gen_basic_table(row_count: usize) -> CellBasedTable<MemoryStateStor
     ];
     let pk_indices = vec![0_usize, 1_usize];
     let mut state = StateTable::new(
-        keyspace.clone(),
+        state_store,
+        TableId::from(0x42),
         column_descs.clone(),
         order_types,
         None,
