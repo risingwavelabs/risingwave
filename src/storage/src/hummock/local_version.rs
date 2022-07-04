@@ -83,6 +83,7 @@ impl LocalVersion {
     }
 
     pub fn read_version(this: &RwLock<Self>, read_epoch: HummockEpoch) -> ReadVersion {
+        use parking_lot::RwLockReadGuard;
         let (pinned_version, shared_buffer) = {
             let guard = this.read();
             let smallest_uncommitted_epoch = guard.pinned_version.max_committed_epoch() + 1;
@@ -90,17 +91,21 @@ impl LocalVersion {
             (
                 pinned_version,
                 if read_epoch >= smallest_uncommitted_epoch {
-                    guard
+                    let result = guard
                         .shared_buffer
                         .range(smallest_uncommitted_epoch..=read_epoch)
                         .rev() // Important: order by epoch descendingly
                         .map(|(_, shared_buffer)| shared_buffer.clone())
-                        .collect()
+                        .collect();
+                    RwLockReadGuard::unlock_fair(guard);
+                    result
                 } else {
+                    RwLockReadGuard::unlock_fair(guard);
                     Vec::new()
                 },
             )
         };
+
         ReadVersion {
             shared_buffer: shared_buffer.into_iter().map(|x| x.read_arc()).collect(),
             pinned_version,
