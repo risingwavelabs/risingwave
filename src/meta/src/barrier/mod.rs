@@ -12,7 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::collections::{HashMap, VecDeque};
+use std::collections::{HashMap, HashSet, VecDeque};
 use std::iter::once;
 use std::mem::take;
 use std::sync::Arc;
@@ -185,43 +185,51 @@ pub struct GlobalBarrierManager<S: MetaStore> {
 struct CheckpointControl<S: MetaStore> {
     /// Save the state and message of barrier in order
     command_ctx_queue: VecDeque<EpochNode<S>>,
+
+    changed_table_ids: ChangedTableIds,
 }
 /// All changed tables of uncommitted barrier
-#[derive(Default)]
-pub struct ChangedTableId {
-    /// In addition to the actors in `Running`.The barrier need to send or collect the actors of
-    /// these tables.
-    create_table_id: Vec<TableId>,
-    /// The barrier does not send or collect the actors of these tables, even if they are `Running`
-    drop_table_id: Vec<TableId>,
+#[derive(Default, Debug)]
+pub struct ChangedTableIds {
+    /// In addition to the actors with status `Running`.The barrier needs to send or collect the
+    /// actors of these tables.
+    creating_table_ids: HashSet<TableId>,
+    /// The barrier does not send or collect the actors of these tables, even if they are
+    /// `Running`.
+    dropping_table_ids: HashSet<TableId>,
 }
-impl ChangedTableId {
-    /// We will return true and send or collect to the actor, if
-    /// 1. `Running` and not be stop by the previous uncommitted barrier
-    /// 2. no `Running` but create by the previous uncommitted barrier or will create by this
-    /// barrier.
+impl ChangedTableIds {
+    /// Barrier can be sent to and collected from an actor if:
+    /// 1. The actor is Running and not being dropped.
+    /// 2. The actor is Inactive and belongs to a creating MV.
     pub fn can_actor_send_or_collect(&self, s: ActorState, table_id: &TableId) -> bool {
-        s == ActorState::Running && !self.drop_table_id.contains(table_id)
-            || s == ActorState::Inactive && self.create_table_id.contains(table_id)
+        s == ActorState::Running && !self.dropping_table_ids.contains(table_id)
+            || s == ActorState::Inactive && self.creating_table_ids.contains(table_id)
     }
 
-    pub fn new<'a, S: MetaStore>(
-        queue_changed_table: impl Iterator<Item = &'a EpochNode<S>>,
-        new_changed_table: ChangedTableState,
-    ) -> Self {
-        let mut create_table_id = vec![];
-        let mut drop_table_id = vec![];
-        queue_changed_table.for_each(|node| match node.command_ctx.command.changed_table_id() {
-            Create(table_id) => create_table_id.push(table_id),
-            Drop(table_id) => drop_table_id.push(table_id),
+    /// Add changed tabled ids in set
+    pub fn push_changed_table_ids(&mut self, new_changed_table: ChangedTableState) {
+        match new_changed_table {
+            Create(table_id) => {
+                self.creating_table_ids.insert(table_id);
+            }
+            Drop(table_id) => {
+                self.dropping_table_ids.insert(table_id);
+            }
             _ => {}
-        });
-        if let Create(table_id) = new_changed_table {
-            create_table_id.push(table_id);
-        };
-        Self {
-            create_table_id,
-            drop_table_id,
+        }
+    }
+
+    /// Remove changed tabled ids in set
+    pub fn remove_changed_table_ids(&mut self, reomve_changed_table: ChangedTableState) {
+        match reomve_changed_table {
+            Create(table_id) => {
+                self.creating_table_ids.remove(&table_id);
+            }
+            Drop(table_id) => {
+                self.dropping_table_ids.remove(&table_id);
+            }
+            _ => {}
         }
     }
 }
@@ -233,12 +241,18 @@ where
     fn new() -> Self {
         Self {
             command_ctx_queue: VecDeque::default(),
+            changed_table_ids: Default::default(),
         }
     }
 
-    /// Get the `ChangedTableId` used to modify the actor(send and collect)
-    fn get_changed_table_id(&self, new_changed_table: ChangedTableState) -> ChangedTableId {
-        ChangedTableId::new(self.command_ctx_queue.iter(), new_changed_table)
+    /// Get the `ChangedTableId` used to modify the actor(send and collect), If we create table in
+    /// this barrier, We need to add it.
+    fn get_changed_table_id(&mut self, new_changed_table: ChangedTableState) -> &ChangedTableIds {
+        if matches!(new_changed_table, Create(_)) {
+            self.changed_table_ids
+                .push_changed_table_ids(new_changed_table);
+        }
+        &self.changed_table_ids
     }
 
     /// Return the nums of barrier (the nums of in-flight-barrier , the nums of all-barrier)
@@ -259,6 +273,11 @@ where
         notifiers: SmallVec<[Notifier; 1]>,
         timer: HistogramTimer,
     ) {
+        let change_table_id = command_ctx.command.changed_table_id();
+        if matches!(change_table_id, Drop(_)) {
+            self.changed_table_ids
+                .push_changed_table_ids(change_table_id);
+        }
         self.command_ctx_queue.push_back(EpochNode {
             timer: Some(timer),
             result: None,
@@ -289,13 +308,23 @@ where
         let index = self
             .command_ctx_queue
             .iter()
-            .position(|x| !matches!(x.state, Complete))
+            .position(|x| {
+                if matches!(x.state, Complete) {
+                    self.changed_table_ids
+                        .remove_changed_table_ids(x.command_ctx.command.changed_table_id());
+                }
+                !matches!(x.state, Complete)
+            })
             .unwrap_or(self.command_ctx_queue.len());
         self.command_ctx_queue.drain(..index).collect()
     }
 
     /// Remove all nodes from queue and return them.
     fn fail(&mut self) -> impl Iterator<Item = EpochNode<S>> + '_ {
+        self.command_ctx_queue.iter().for_each(|x| {
+            self.changed_table_ids
+                .remove_changed_table_ids(x.command_ctx.command.changed_table_id())
+        });
         self.command_ctx_queue.drain(..)
     }
 
@@ -718,7 +747,7 @@ where
     /// Resolve actor information from cluster, fragment manager and `ChangedTableId`.
     /// We use `changed_table_id` to modify the actors to be sent or collected. Because these actor
     /// will create or drop before this barrier flow through them.
-    async fn resolve_actor_info(&self, changed_table_id: ChangedTableId) -> BarrierActorInfo {
+    async fn resolve_actor_info(&self, changed_table_id: &ChangedTableIds) -> BarrierActorInfo {
         let all_nodes = self
             .cluster_manager
             .list_worker_node(WorkerType::ComputeNode, Some(Running))

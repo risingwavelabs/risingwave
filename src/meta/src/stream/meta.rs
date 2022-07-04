@@ -26,7 +26,7 @@ use risingwave_pb::meta::table_fragments::ActorState;
 use risingwave_pb::stream_plan::{FragmentType, StreamActor};
 use tokio::sync::RwLock;
 
-use crate::barrier::ChangedTableId;
+use crate::barrier::ChangedTableIds;
 use crate::cluster::WorkerId;
 use crate::hummock::compaction_group::manager::CompactionGroupManagerRef;
 use crate::manager::{HashMappingManagerRef, MetaSrvEnv};
@@ -307,7 +307,7 @@ where
 
     /// Used in [`crate::barrier::GlobalBarrierManager`], load all actor that need to be sent or
     /// collected
-    pub async fn load_all_actors(&self, changed_table_id: ChangedTableId) -> ActorInfos {
+    pub async fn load_all_actors(&self, changed_table_id: &ChangedTableIds) -> ActorInfos {
         let mut actor_maps = HashMap::new();
         let mut source_actor_ids = HashMap::new();
 
