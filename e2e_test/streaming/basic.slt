@@ -1,5 +1,3 @@
-control sortmode rowsort
-
 statement ok
 create table t1 (v1 int not null, v2 int not null, v3 int not null);
 

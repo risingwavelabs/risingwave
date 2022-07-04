@@ -32,11 +32,14 @@ impl StreamHopWindow {
         let pk_indices = logical.base.pk_indices.to_vec();
         let input = logical.input();
 
+        let i2o = logical.i2o_col_mapping();
+        let dist = i2o.rewrite_provided_distribution(input.distribution());
+
         let base = PlanBase::new_stream(
             ctx,
             logical.schema().clone(),
             pk_indices,
-            input.distribution().clone(),
+            dist,
             logical.input().append_only(),
         );
         Self { base, logical }

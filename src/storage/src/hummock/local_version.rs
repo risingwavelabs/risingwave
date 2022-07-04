@@ -106,6 +106,10 @@ impl LocalVersion {
             pinned_version,
         }
     }
+
+    pub fn clear_shared_buffer(&mut self) {
+        self.shared_buffer.clear();
+    }
 }
 
 #[derive(Debug)]
