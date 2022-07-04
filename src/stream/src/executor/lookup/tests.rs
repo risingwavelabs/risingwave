@@ -24,7 +24,7 @@ use risingwave_common::util::sort_util::{OrderPair, OrderType};
 use risingwave_common::util::value_encoding::deserialize_cell;
 use risingwave_storage::memory::MemoryStateStore;
 use risingwave_storage::store::ReadOptions;
-use risingwave_storage::{Keyspace, StateStore};
+use risingwave_storage::StateStore;
 
 use crate::executor::lookup::impl_::LookupExecutorParams;
 use crate::executor::lookup::LookupExecutor;
@@ -215,7 +215,8 @@ async fn test_lookup_this_epoch() {
     let lookup_executor = Box::new(LookupExecutor::new(LookupExecutorParams {
         arrangement,
         stream,
-        arrangement_keyspace: Keyspace::table_root(store.clone(), &table_id),
+        arrangement_store: store.clone(),
+        arrangement_table_id: table_id,
         arrangement_col_descs: arrangement_col_descs(),
         arrangement_order_rules: arrangement_col_arrange_rules_join_key(),
         pk_indices: vec![1, 2],
@@ -295,7 +296,8 @@ async fn test_lookup_last_epoch() {
     let lookup_executor = Box::new(LookupExecutor::new(LookupExecutorParams {
         arrangement,
         stream,
-        arrangement_keyspace: Keyspace::table_root(store.clone(), &table_id),
+        arrangement_store: store.clone(),
+        arrangement_table_id: table_id,
         arrangement_col_descs: arrangement_col_descs(),
         arrangement_order_rules: arrangement_col_arrange_rules_join_key(),
         pk_indices: vec![1, 2],
