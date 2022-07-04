@@ -3,7 +3,6 @@ syntax = "proto3";
 package plan_common;
 
 import "data.proto";
-import "expr.proto";
 
 option optimize_for = SPEED;
 
