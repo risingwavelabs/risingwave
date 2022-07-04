@@ -613,6 +613,10 @@ def section_hummock(panels):
             panels.target(
                 "sum by(le, job, instance)(rate(state_store_iter_duration_sum[1m])) / sum by(le, job,instance) (rate(state_store_iter_duration_count[1m]))", "avg - {{job}} @ {{instance}}"
             ),
+
+            panels.target(
+                    "sum(rate(state_store_iter_in_process_counts[1m])) by(job,instance)", "iter_in_process_counts - {{instance}} "
+            ),
         ]),
         panels.timeseries_latency("Read Duration - Iter Pure Scan", [
             *quantile(lambda quantile, legend:
