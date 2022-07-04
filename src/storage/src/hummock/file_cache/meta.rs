@@ -178,7 +178,7 @@ where
         Ok(slot)
     }
 
-    pub fn free(&mut self, slot: SlotId) {
+    pub fn free(&mut self, slot: SlotId) -> Option<BlockLoc> {
         debug_assert!(
             (slot + 1) * Self::slot_info_len() <= self.size,
             "slot: {}, offset: {}, size: {}",
@@ -187,10 +187,16 @@ where
             self.size
         );
         if !*self.valid.get(slot).unwrap() {
-            return;
+            return None;
         }
         self.valid.set(slot, false);
         self.free.push_back(slot);
+
+        let bloc = BlockLoc::decode(
+            &self.buffer[Self::slot_info_len() * slot
+                ..Self::slot_info_len() * slot + BlockLoc::encoded_len()],
+        );
+        Some(bloc)
     }
 
     pub fn get(&self, slot: SlotId) -> Option<(BlockLoc, K)> {
@@ -314,7 +320,7 @@ mod tests {
             map.insert(slot, (key, bloc));
         }
         assert_eq!(mf.size(), GROW_UNIT * 2);
-        for (slot, (key, bloc)) in map.iter() {
+        for (slot, (key, bloc)) in &map {
             let (gbloc, gkey) = mf.get(*slot).unwrap();
             assert_eq!(gbloc, *bloc);
             assert_eq!(gkey, *key);
@@ -324,9 +330,9 @@ mod tests {
             assert_eq!(mf.get(slot), None);
         }
 
-        for (slot, _) in map.drain() {
-            mf.free(slot);
-            mf.free(slot);
+        for (slot, (_key, bloc)) in map.drain() {
+            assert_eq!(mf.free(slot), Some(bloc));
+            assert_eq!(mf.free(slot), None);
         }
 
         for slot in 0..(GROW_UNIT * 2 / slot_info_len) {

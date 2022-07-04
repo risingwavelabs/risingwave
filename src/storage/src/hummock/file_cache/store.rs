@@ -15,13 +15,16 @@
 use std::path::PathBuf;
 use std::sync::Arc;
 
+use itertools::Itertools;
 use nix::sys::statfs::{statfs, FsType as NixFsType, EXT4_SUPER_MAGIC};
+use parking_lot::RwLock;
 use risingwave_common::cache::{LruCache, LruCacheEventListener};
 
 use super::coding::CacheKey;
 use super::error::{Error, Result};
 use super::file::{CacheFile, CacheFileOptions};
-use super::meta::{MetaFile, SlotId};
+use super::meta::{BlockLoc, MetaFile, SlotId};
+use super::{utils, DioBuffer, DIO_BUFFER_ALLOCATOR};
 
 const META_FILE_FILENAME: &str = "meta";
 const CACHE_FILE_FILENAME: &str = "cache";
@@ -35,6 +38,7 @@ pub enum FsType {
 pub struct StoreOptions {
     pub dir: String,
     pub capacity: usize,
+    pub buffer_capacity: usize,
     pub cache_file_fallocate_unit: usize,
 }
 
@@ -47,9 +51,11 @@ where
 
     _fs_type: FsType,
     _fs_block_size: usize,
+    block_size: usize,
+    buffer_capacity: usize,
 
-    _mf: MetaFile<K>,
-    _cf: CacheFile,
+    mf: Arc<RwLock<MetaFile<K>>>,
+    cf: CacheFile,
 }
 
 impl<K> Store<K>
@@ -92,10 +98,17 @@ where
 
             _fs_type: fs_type,
             _fs_block_size: fs_block_size,
+            // TODO: Make it configurable.
+            block_size: fs_block_size,
+            buffer_capacity: options.buffer_capacity,
 
-            _mf: mf,
-            _cf: cf,
+            mf: Arc::new(RwLock::new(mf)),
+            cf,
         })
+    }
+
+    pub fn block_size(&self) -> usize {
+        self.block_size
     }
 
     pub async fn restore(&self, _indices: &LruCache<K, SlotId>) -> Result<()> {
@@ -103,12 +116,55 @@ where
         Ok(())
     }
 
-    pub fn insert(&self) -> Result<()> {
-        todo!()
+    pub async fn insert(&self, batch: &[(&K, &[u8])]) -> Result<Vec<SlotId>> {
+        let mut buf = DioBuffer::with_capacity_in(self.buffer_capacity, &DIO_BUFFER_ALLOCATOR);
+        let mut blocs = Vec::with_capacity(batch.len());
+        let mut slots = Vec::with_capacity(batch.len());
+
+        for (_key, value) in batch {
+            let bloc = BlockLoc {
+                bidx: buf.len() as u32 / self.block_size as u32,
+                len: value.len() as u32,
+            };
+            blocs.push(bloc);
+            buf.extend_from_slice(value);
+            buf.resize(utils::usize::align_up(self.block_size, buf.len()), 0);
+        }
+
+        let boff = self.cf.append(buf).await? as u32 / self.block_size as u32;
+
+        for bloc in &mut blocs {
+            bloc.bidx += boff;
+        }
+
+        let mut mf = self.mf.write();
+        for ((key, _value), bloc) in batch.iter().zip_eq(blocs.iter()) {
+            slots.push(mf.insert(key, bloc)?);
+        }
+
+        Ok(slots)
     }
 
-    pub fn erase(&self) -> Result<()> {
-        todo!()
+    pub async fn get(&self, slot: SlotId) -> Result<Vec<u8>> {
+        let (bloc, _key) = self.mf.read().get(slot).ok_or(Error::InvalidSlot(slot))?;
+        let offset = bloc.bidx as u64 * self.block_size as u64;
+        let blen = bloc.blen(self.block_size as u32) as usize;
+        let buf = self.cf.read(offset, blen).await?;
+        Ok(buf.to_vec())
+    }
+
+    pub fn erase(&self, slot: SlotId) -> Result<()> {
+        self.free(slot)
+    }
+
+    fn free(&self, slot: SlotId) -> Result<()> {
+        let bloc = match self.mf.write().free(slot) {
+            None => return Ok(()),
+            Some(bloc) => bloc,
+        };
+        let offset = bloc.bidx as u64 * self.block_size as u64;
+        let len = bloc.blen(self.block_size as u32) as usize;
+        self.cf.punch_hole(offset, len)
     }
 }
 
@@ -119,12 +175,14 @@ where
     type K = K;
     type T = SlotId;
 
-    fn on_evict(&self, _key: &Self::K, _value: &Self::T) {
-        // TODO: Trigger invalidate cache slot.
+    fn on_evict(&self, _key: &Self::K, slot: &Self::T) {
+        // TODO: Throw warning log instead?
+        self.free(*slot).unwrap();
     }
 
-    fn on_erase(&self, _key: &Self::K, _value: &Self::T) {
-        // TODO: Trigger invalidate cache slot.
+    fn on_erase(&self, _key: &Self::K, slot: &Self::T) {
+        // TODO: Throw warning log instead?
+        self.free(*slot).unwrap();
     }
 }
 

@@ -21,5 +21,3 @@ pub trait CacheKey: Eq + Send + Sync + Hash + Clone + 'static {
 
     fn decode(buf: &[u8]) -> Self;
 }
-
-pub trait CacheValue: Send + Sync {}

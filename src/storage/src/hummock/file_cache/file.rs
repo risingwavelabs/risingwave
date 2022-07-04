@@ -125,14 +125,15 @@ impl CacheFile {
         Ok(cache_file)
     }
 
-    pub async fn append(&self, buf: Arc<DioBuffer>) -> Result<()> {
+    pub async fn append(&self, buf: DioBuffer) -> Result<u64> {
         utils::usize::debug_assert_aligned(self.block_size, buf.len());
 
         let core = self.core.clone();
         let fallocate_unit = self.fallocate_unit;
 
+        let offset = core.len.fetch_add(buf.len(), Ordering::SeqCst);
+
         asyncify(move || {
-            let offset = core.len.fetch_add(buf.len(), Ordering::SeqCst);
             let mut capacity = core.capacity.load(Ordering::Acquire);
 
             // Append the buffer will exceed the cache file allocated capacity, pre-allocate some
@@ -172,7 +173,9 @@ impl CacheFile {
 
             Ok(())
         })
-        .await
+        .await?;
+
+        Ok(offset as u64)
     }
 
     pub async fn read(&self, offset: u64, len: usize) -> Result<DioBuffer> {
@@ -185,6 +188,19 @@ impl CacheFile {
             Ok(buf)
         })
         .await
+    }
+
+    // TODO(MrCroxx): Should be async (likely not)?
+    pub fn punch_hole(&self, offset: u64, len: usize) -> Result<()> {
+        utils::u64::debug_assert_aligned(self.block_size as u64, offset);
+        utils::usize::debug_assert_aligned(self.block_size, len);
+        fallocate(
+            self.fd(),
+            FallocateFlags::FALLOC_FL_PUNCH_HOLE | FallocateFlags::FALLOC_FL_KEEP_SIZE,
+            offset as i64,
+            len as i64,
+        )?;
+        Ok(())
     }
 
     pub async fn sync_all(&self) -> Result<()> {
@@ -235,9 +251,7 @@ impl CacheFile {
     pub fn block_size(&self) -> usize {
         self.block_size
     }
-}
 
-impl CacheFile {
     #[inline(always)]
     fn fd(&self) -> RawFd {
         self.core.file.as_raw_fd()
@@ -271,14 +285,13 @@ mod tests {
 
         let mut wbuf = DioBuffer::with_capacity_in(4096, &DIO_BUFFER_ALLOCATOR);
         wbuf.extend_from_slice(&[b'x'; 4096]);
-        let wbuf = Arc::new(wbuf);
 
         cf.append(wbuf.clone()).await.unwrap();
         assert_eq!(cf.len(), 4096);
         assert_eq!(cf.size(), 4 * 4096);
 
         let rbuf = cf.read(0, 4096).await.unwrap();
-        assert_eq!(&rbuf, wbuf.as_ref());
+        assert_eq!(rbuf, wbuf);
 
         cf.append(wbuf.clone()).await.unwrap();
         cf.append(wbuf.clone()).await.unwrap();
