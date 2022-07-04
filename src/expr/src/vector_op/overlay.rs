@@ -12,6 +12,23 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+use risingwave_common::array::{BytesGuard, BytesWriter};
+
+use crate::Result;
+
+#[inline(always)]
+fn overlay(
+    s: &str,
+    new_sub_str: &str,
+    start: i32,
+    count: Option<i32>,
+    writer: BytesWriter,
+) -> Result<BytesGuard> {
+    Err(crate::error::ExprError::UnsupportedFunction(String::from(
+        "overlay",
+    )))
+}
+
 #[cfg(test)]
 mod tests {
 }
