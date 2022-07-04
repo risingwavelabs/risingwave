@@ -18,15 +18,13 @@ use itertools::Itertools;
 use risingwave_common::catalog::TableDesc;
 use risingwave_common::types::ParallelUnitId;
 use risingwave_common::util::compress::decompress_data;
-use risingwave_common::util::sort_util::OrderType;
 use risingwave_pb::catalog::table::OptionalAssociatedSourceId;
 use risingwave_pb::catalog::Table as ProstTable;
-use risingwave_pb::plan_common::OrderType as ProstOrderType;
 
 use super::column_catalog::ColumnCatalog;
 use super::{DatabaseId, SchemaId};
 use crate::catalog::TableId;
-use crate::optimizer::property::{Direction, FieldOrder};
+use crate::optimizer::property::FieldOrder;
 
 #[derive(Clone, Debug, PartialEq)]
 pub struct TableCatalog {
@@ -114,26 +112,13 @@ impl TableCatalog {
     }
 
     pub fn to_prost(&self, schema_id: SchemaId, database_id: DatabaseId) -> ProstTable {
-        let (order_column_ids, orders): (Vec<i32>, Vec<i32>) = self
-            .order_keys
-            .iter()
-            .map(|col| {
-                (
-                    self.columns[col.index].column_desc.column_id.get_id(),
-                    col.direct.to_protobuf() as i32,
-                )
-            })
-            .unzip();
-        assert!(orders.iter().all(|o| *o > 0));
-
         ProstTable {
             id: self.id.table_id as u32,
             schema_id,
             database_id,
             name: self.name.clone(),
             columns: self.columns().iter().map(|c| c.to_protobuf()).collect(),
-            order_column_ids,
-            orders,
+            order_keys: self.order_keys.iter().map(|o| o.to_protobuf()).collect(),
             pk: self.pks.iter().map(|x| *x as _).collect(),
             dependent_relations: vec![],
             optional_associated_source_id: self
@@ -177,21 +162,9 @@ impl From<ProstTable> for TableCatalog {
         }
 
         let order_keys = tb
-            .order_column_ids
-            .clone()
-            .into_iter()
-            .zip_eq(
-                tb.orders
-                    .into_iter()
-                    .map(|x| OrderType::from_prost(&ProstOrderType::from_i32(x).unwrap())),
-            )
-            .map(|(col_id, order)| FieldOrder {
-                index: *col_index.get(&col_id).unwrap(),
-                direct: match order {
-                    OrderType::Ascending => Direction::Asc,
-                    OrderType::Descending => Direction::Desc,
-                },
-            })
+            .order_keys
+            .iter()
+            .map(FieldOrder::from_protobuf)
             .collect();
 
         let vnode_mapping = if let Some(mapping) = tb.mapping.as_ref() {
@@ -239,7 +212,6 @@ mod tests {
     use risingwave_common::test_prelude::*;
     use risingwave_common::types::*;
     use risingwave_common::util::compress::compress_data;
-    use risingwave_common::util::sort_util::OrderType;
     use risingwave_pb::catalog::table::OptionalAssociatedSourceId;
     use risingwave_pb::catalog::Table as ProstTable;
     use risingwave_pb::common::ParallelUnitMapping;
@@ -289,9 +261,12 @@ mod tests {
                     is_hidden: false,
                 },
             ],
-            order_column_ids: vec![0],
+            order_keys: vec![FieldOrder {
+                index: 0,
+                direct: Direction::Asc,
+            }
+            .to_protobuf()],
             pk: vec![0],
-            orders: vec![OrderType::Ascending.to_prost() as i32],
             dependent_relations: vec![],
             distribution_keys: vec![],
             optional_associated_source_id: OptionalAssociatedSourceId::AssociatedSourceId(233)

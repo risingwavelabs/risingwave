@@ -89,6 +89,14 @@ impl FieldOrder {
         }
     }
 
+    pub fn from_protobuf(column_order: &ColumnOrder) -> Self {
+        let order_type: ProstOrderType = ProstOrderType::from_i32(column_order.order_type).unwrap();
+        Self {
+            direct: Direction::from_protobuf(&order_type),
+            index: column_order.index as usize,
+        }
+    }
+
     // TODO: unify them
     pub fn to_order_pair(&self) -> OrderPair {
         OrderPair {
@@ -138,6 +146,14 @@ impl Direction {
             Self::Asc => ProstOrderType::Ascending,
             Self::Desc => ProstOrderType::Descending,
             _ => unimplemented!(),
+        }
+    }
+
+    pub fn from_protobuf(order_type: &ProstOrderType) -> Self {
+        match order_type {
+            ProstOrderType::Ascending => Self::Asc,
+            ProstOrderType::Descending => Self::Desc,
+            ProstOrderType::Invalid => unreachable!(),
         }
     }
 
