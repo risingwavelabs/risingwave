@@ -116,7 +116,6 @@ message GetEpochResponse {
 
 message UnpinSnapshotRequest {
   uint32 context_id = 1;
-  repeated HummockSnapshot snapshots = 2;
 }
 
 message UnpinSnapshotResponse {

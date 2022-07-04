@@ -144,11 +144,7 @@ where
         request: Request<UnpinSnapshotRequest>,
     ) -> Result<Response<UnpinSnapshotResponse>, Status> {
         let req = request.into_inner();
-        if let Err(e) = self
-            .hummock_manager
-            .unpin_snapshot(req.context_id, req.snapshots)
-            .await
-        {
+        if let Err(e) = self.hummock_manager.unpin_snapshot(req.context_id).await {
             return Err(tonic_err(e));
         }
         Ok(Response::new(UnpinSnapshotResponse { status: None }))

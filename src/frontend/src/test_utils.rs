@@ -443,7 +443,7 @@ impl FrontendMetaClient for MockFrontendMetaClient {
         Ok(HashMap::default())
     }
 
-    async fn unpin_snapshot(&self, _epoch: u64) -> RpcResult<()> {
+    async fn unpin_snapshot(&self) -> RpcResult<()> {
         Ok(())
     }
 

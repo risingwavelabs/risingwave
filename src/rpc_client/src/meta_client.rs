@@ -99,7 +99,7 @@ impl MetaClient {
         self.set_worker_id(worker_node.id);
         // unpin snapshot before MAX will create a new snapshot with last committed epoch and then
         //  we do not create snapshot during every pin_snapshot.
-        self.unpin_snapshot_before(u64::MAX).await?;
+        self.pin_snapshot().await?;
         Ok(worker_node.id)
     }
 
@@ -380,15 +380,9 @@ impl HummockMetaClient for MetaClient {
         Ok(resp.snapshot.unwrap().epoch)
     }
 
-    async fn unpin_snapshot(&self, pinned_epochs: &[HummockEpoch]) -> Result<()> {
+    async fn unpin_snapshot(&self) -> Result<()> {
         let req = UnpinSnapshotRequest {
             context_id: self.worker_id(),
-            snapshots: pinned_epochs
-                .iter()
-                .map(|epoch| HummockSnapshot {
-                    epoch: epoch.to_owned(),
-                })
-                .collect(),
         };
         self.inner.unpin_snapshot(req).await?;
         Ok(())

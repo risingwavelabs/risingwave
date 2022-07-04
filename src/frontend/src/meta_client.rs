@@ -36,7 +36,7 @@ pub trait FrontendMetaClient: Send + Sync {
         table_ids: &[u32],
     ) -> Result<HashMap<u32, TableFragmentInfo>>;
 
-    async fn unpin_snapshot(&self, epoch: u64) -> Result<()>;
+    async fn unpin_snapshot(&self) -> Result<()>;
 
     async fn unpin_snapshot_before(&self, epoch: u64) -> Result<()>;
 }
@@ -64,8 +64,8 @@ impl FrontendMetaClient for FrontendMetaClientImpl {
         self.0.list_table_fragments(table_ids).await
     }
 
-    async fn unpin_snapshot(&self, epoch: u64) -> Result<()> {
-        self.0.unpin_snapshot(&[epoch]).await
+    async fn unpin_snapshot(&self) -> Result<()> {
+        self.0.unpin_snapshot().await
     }
 
     async fn unpin_snapshot_before(&self, epoch: u64) -> Result<()> {

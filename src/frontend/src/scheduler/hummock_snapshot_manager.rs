@@ -13,8 +13,8 @@
 // limitations under the License.
 
 use std::collections::{BTreeMap, HashSet};
-use std::sync::Arc;
 use std::sync::atomic::{AtomicU64, Ordering};
+use std::sync::Arc;
 use std::time::{Duration, Instant};
 
 use anyhow::anyhow;
@@ -218,9 +218,9 @@ impl HummockSnapshotManagerCore {
         // do not block other requests getting epoch.
         tokio::spawn(async move {
             tracing::info!("Unpin epoch {:?} with RPC", min_epoch);
-             match meta_client.unpin_snapshot_before(min_epoch).await {
-                 Ok(()) => last_unpin_epoch.store(min_epoch, Ordering::Release),
-                 Err(e) => error!("Request meta to unpin snapshot failed {:?}!", e),
+            match meta_client.unpin_snapshot_before(min_epoch).await {
+                Ok(()) => last_unpin_epoch.store(min_epoch, Ordering::Release),
+                Err(e) => error!("Request meta to unpin snapshot failed {:?}!", e),
             }
         });
     }

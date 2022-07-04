@@ -497,11 +497,21 @@ where
         })
     }
 
-    pub async fn unpin_snapshot(
-        &self,
-        _context_id: HummockContextId,
-        _hummock_snapshots: impl AsRef<[HummockSnapshot]>,
-    ) -> Result<()> {
+    pub async fn unpin_snapshot(&self, context_id: HummockContextId) -> Result<()> {
+        let mut versioning_guard = self.versioning.write().await;
+        let mut pinned_snapshots = VarTransaction::new(&mut versioning_guard.pinned_snapshots);
+        let release_snapshot = pinned_snapshots.remove(&context_id);
+
+        if release_snapshot.is_some() {
+            commit_multi_var!(self, Some(context_id), pinned_snapshots)?;
+        }
+
+        #[cfg(test)]
+        {
+            drop(versioning_guard);
+            self.check_state_consistency().await;
+        }
+
         Ok(())
     }
 
