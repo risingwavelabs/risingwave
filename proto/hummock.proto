@@ -106,8 +106,7 @@ message PinSnapshotResponse {
   HummockSnapshot snapshot = 2;
 }
 
-message GetEpochRequest {
-}
+message GetEpochRequest {}
 
 message GetEpochResponse {
   common.Status status = 1;
