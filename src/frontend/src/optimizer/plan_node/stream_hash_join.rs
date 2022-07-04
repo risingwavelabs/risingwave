@@ -48,8 +48,6 @@ pub struct StreamHashJoin {
     /// only. Will remove after we have fully support shared state and index.
     is_delta: bool,
 
-    dist_key_l: Distribution,
-    dist_key_r: Distribution,
     /// Whether can optimize for append-only stream.
     /// It is true if input of both side is append-only
     is_append_only: bool,
@@ -72,9 +70,6 @@ impl StreamHashJoin {
                 .composite(&logical.i2o_col_mapping()),
         );
 
-        let dist_l = logical.left().distribution().clone();
-        let dist_r = logical.right().distribution().clone();
-
         let force_delta = if let Some(config) = ctx.inner().session_ctx.get_config(DELTA_JOIN) {
             config.is_set(false)
         } else {
@@ -95,8 +90,6 @@ impl StreamHashJoin {
             logical,
             eq_join_predicate,
             is_delta: force_delta,
-            dist_key_l: dist_l,
-            dist_key_r: dist_r,
             is_append_only: append_only,
         }
     }
@@ -206,18 +199,6 @@ impl ToStreamProst for StreamHashJoin {
                 .other_cond()
                 .as_expr_unless_true()
                 .map(|x| x.to_expr_proto()),
-            dist_key_l: self
-                .dist_key_l
-                .dist_column_indices()
-                .iter()
-                .map(|idx| *idx as u32)
-                .collect_vec(),
-            dist_key_r: self
-                .dist_key_r
-                .dist_column_indices()
-                .iter()
-                .map(|idx| *idx as u32)
-                .collect_vec(),
             is_delta_join: self.is_delta,
             left_table: Some(infer_internal_table_catalog(self.left()).to_prost(
                 SchemaId::placeholder() as u32,

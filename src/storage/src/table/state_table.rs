@@ -20,10 +20,11 @@ use std::ops::{Index, RangeBounds};
 use futures::{pin_mut, Stream, StreamExt};
 use futures_async_stream::try_stream;
 use risingwave_common::array::Row;
-use risingwave_common::catalog::ColumnDesc;
+use risingwave_common::catalog::{ColumnDesc, TableId};
 use risingwave_common::util::ordered::{serialize_pk, OrderedRowSerializer};
 use risingwave_common::util::sort_util::OrderType;
 use risingwave_hummock_sdk::key::range_of_prefix;
+use risingwave_pb::catalog::Table;
 
 use super::cell_based_table::{CellBasedTable, READ_WRITE};
 use super::mem_table::{MemTable, RowOp};
@@ -58,6 +59,41 @@ impl<S: StateStore> StateTable<S> {
                 dist_key_indices,
             ),
         }
+    }
+
+    /// Create state table from table catalog and store.
+    pub fn from_table_catalog(table_catalog: &Table, store: S) -> Self {
+        let table_columns = table_catalog
+                    .columns
+                    .iter()
+                    .map(|col| col.column_desc.as_ref().unwrap().into())
+                    .collect();
+                let order_types = table_catalog
+                    .orders
+                    .iter()
+                    .map(|order_type| {
+                        OrderType::from_prost(
+                            &risingwave_pb::plan_common::OrderType::from_i32(*order_type).unwrap(),
+                        )
+                    })
+                    .collect();
+                let dist_key_indices = table_catalog
+                    .distribution_keys
+                    .iter()
+                    .map(|dist_index| *dist_index as usize)
+                    .collect();
+                let pk_indices = table_catalog
+                    .pk
+                    .iter()
+                    .map(|pk_index| *pk_index as usize)
+                    .collect();
+                StateTable::new(
+                    Keyspace::table_root(store.clone(), &TableId::new(table_catalog.id)),
+                    table_columns,
+                    order_types,
+                    Some(dist_key_indices),
+                    pk_indices,
+                )
     }
 
     /// Get the underlying [`CellBasedTable`]. Should only be used for tests.

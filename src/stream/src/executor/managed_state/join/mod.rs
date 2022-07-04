@@ -23,14 +23,12 @@ use futures_async_stream::for_await;
 use itertools::Itertools;
 pub use join_entry_state::JoinEntryState;
 use risingwave_common::array::Row;
-use risingwave_common::catalog::{ColumnDesc, ColumnId};
 use risingwave_common::collection::evictable::EvictableHashMap;
 use risingwave_common::error::{ErrorCode, Result as RwResult, RwError};
 use risingwave_common::hash::{HashKey, PrecomputedBuildHasher};
 use risingwave_common::types::{DataType, Datum, ScalarImpl};
-use risingwave_common::util::sort_util::OrderType;
 use risingwave_storage::table::state_table::StateTable;
-use risingwave_storage::{Keyspace, StateStore};
+use risingwave_storage::StateStore;
 use stats_alloc::{SharedStatsAlloc, StatsAlloc};
 
 use crate::executor::monitor::StreamingMetrics;
@@ -179,8 +177,7 @@ impl<K: HashKey, S: StateStore> JoinHashMap<K, S> {
         pk_indices: Vec<usize>,
         join_key_indices: Vec<usize>,
         mut data_types: Vec<DataType>,
-        keyspace: Keyspace<S>,
-        dist_key_indices: Option<Vec<usize>>,
+        state_table: StateTable<S>,
         metrics: Arc<StreamingMetrics>,
         actor_id: u64,
         side: &'static str,
@@ -193,24 +190,6 @@ impl<K: HashKey, S: StateStore> JoinHashMap<K, S> {
         // Put the degree to the last column of the table.
         data_types.push(DataType::Int64);
 
-        let column_descs = data_types
-            .iter()
-            .enumerate()
-            .map(|(id, data_type)| ColumnDesc::unnamed(ColumnId::new(id as i32), data_type.clone()))
-            .collect_vec();
-
-        let table_pk_indices = [join_key_indices, pk_indices.clone()].concat();
-
-        // Order type doesn not affect correctness. Choose Ascending for better performance.
-        let order_types = vec![OrderType::Ascending; table_pk_indices.len()];
-
-        let state_table = StateTable::new(
-            keyspace,
-            column_descs,
-            order_types,
-            dist_key_indices,
-            table_pk_indices,
-        );
         let alloc = StatsAlloc::new(Global).shared();
         Self {
             inner: EvictableHashMap::with_hasher_in(

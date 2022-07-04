@@ -24,7 +24,8 @@ use risingwave_common::error::{internal_error, Result, RwError};
 use risingwave_common::hash::HashKey;
 use risingwave_common::types::{DataType, ToOwnedDatum};
 use risingwave_expr::expr::RowExpression;
-use risingwave_storage::{Keyspace, StateStore};
+use risingwave_storage::table::state_table::StateTable;
+use risingwave_storage::StateStore;
 
 use super::barrier_align::*;
 use super::error::StreamExecutorError;
@@ -370,8 +371,8 @@ impl<K: HashKey, S: StateStore, const T: JoinTypePrimitive> HashJoinExecutor<K, 
         executor_id: u64,
         cond: Option<RowExpression>,
         op_info: String,
-        ks_l: Keyspace<S>,
-        ks_r: Keyspace<S>,
+        state_table_l: StateTable<S>,
+        state_table_r: StateTable<S>,
         is_append_only: bool,
         metrics: Arc<StreamingMetrics>,
     ) -> Self {
@@ -444,8 +445,7 @@ impl<K: HashKey, S: StateStore, const T: JoinTypePrimitive> HashJoinExecutor<K, 
                     pk_indices_l.clone(),
                     params_l.key_indices.clone(),
                     col_l_datatypes.clone(),
-                    ks_l,
-                    Some(params_l.dist_keys.clone()),
+                    state_table_l,
                     metrics.clone(),
                     actor_id,
                     "left",
@@ -461,8 +461,7 @@ impl<K: HashKey, S: StateStore, const T: JoinTypePrimitive> HashJoinExecutor<K, 
                     pk_indices_r.clone(),
                     params_r.key_indices.clone(),
                     col_r_datatypes.clone(),
-                    ks_r,
-                    Some(params_r.dist_keys.clone()),
+                    state_table_r,
                     metrics.clone(),
                     actor_id,
                     "right",
@@ -768,23 +767,42 @@ impl<K: HashKey, S: StateStore, const T: JoinTypePrimitive> HashJoinExecutor<K, 
 mod tests {
     use risingwave_common::array::stream_chunk::StreamChunkTestExt;
     use risingwave_common::array::*;
-    use risingwave_common::catalog::{Field, Schema, TableId};
+    use risingwave_common::catalog::{Field, Schema, TableId, ColumnDesc, ColumnId};
     use risingwave_common::hash::{Key128, Key64};
+    use risingwave_common::util::sort_util::OrderType;
     use risingwave_expr::expr::expr_binary_nonnull::new_binary_expr;
     use risingwave_expr::expr::{InputRefExpression, RowExpression};
     use risingwave_pb::expr::expr_node::Type;
     use risingwave_storage::memory::MemoryStateStore;
+    use risingwave_storage::Keyspace;
 
     use super::*;
     use crate::executor::test_utils::{MessageSender, MockSource};
     use crate::executor::{Barrier, Epoch, Message};
 
-    fn create_in_memory_keyspace() -> (Keyspace<MemoryStateStore>, Keyspace<MemoryStateStore>) {
+    fn create_in_memory_state_table() -> (StateTable<MemoryStateStore>, StateTable<MemoryStateStore>) {
         let mem_state = MemoryStateStore::new();
-        (
+
+        let column_descs = [DataType::Int64, DataType::Int64]
+            .iter()
+            .enumerate()
+            .map(|(id, data_type)| ColumnDesc::unnamed(ColumnId::new(id as i32), data_type.clone()))
+            .collect_vec();
+        let state_table_l = StateTable::new(
             Keyspace::table_root(mem_state.clone(), &TableId::new(0)),
-            Keyspace::table_root(mem_state, &TableId::new(1)),
-        )
+            column_descs.clone(),
+            vec![OrderType::Ascending],
+            Some(vec![1]),
+            vec![0],
+        );
+        let state_table_r = StateTable::new(
+            Keyspace::table_root(mem_state.clone(), &TableId::new(0)),
+            column_descs,
+            vec![OrderType::Ascending],
+            Some(vec![1]),
+            vec![0],
+        );
+        (state_table_l ,state_table_r)
     }
 
     fn create_cond() -> RowExpression {
@@ -814,7 +832,7 @@ mod tests {
         let params_r = JoinParams::new(vec![0], vec![]);
         let cond = with_condition.then(create_cond);
 
-        let (ks_l, ks_r) = create_in_memory_keyspace();
+        let (ks_l, ks_r) = create_in_memory_state_table();
         let schema_len = match T {
             JoinType::LeftSemi | JoinType::LeftAnti => source_l.schema().len(),
             JoinType::RightSemi | JoinType::RightAnti => source_r.schema().len(),
@@ -855,7 +873,7 @@ mod tests {
         let params_r = JoinParams::new(vec![0, 1], vec![]);
         let cond = with_condition.then(create_cond);
 
-        let (ks_l, ks_r) = create_in_memory_keyspace();
+        let (ks_l, ks_r) = create_in_memory_state_table();
         let schema_len = match T {
             JoinType::LeftSemi | JoinType::LeftAnti => source_l.schema().len(),
             JoinType::RightSemi | JoinType::RightAnti => source_r.schema().len(),

@@ -16,9 +16,7 @@
 
 use std::marker::PhantomData;
 
-use risingwave_common::catalog::TableId;
 use risingwave_common::hash::{calc_hash_key_kind, HashKey, HashKeyDispatcher};
-use risingwave_common::util::sort_util::OrderType;
 use risingwave_storage::table::state_table::StateTable;
 
 use super::*;
@@ -86,41 +84,7 @@ impl ExecutorBuilder for HashAggExecutorBuilder {
         let mut state_tables = Vec::with_capacity(agg_calls_len);
         for table_catalog in &node.internal_tables {
             // Parse info from proto and create state table.
-            let state_table = {
-                let table_columns = table_catalog
-                    .columns
-                    .iter()
-                    .map(|col| col.column_desc.as_ref().unwrap().into())
-                    .collect();
-                let order_types = table_catalog
-                    .orders
-                    .iter()
-                    .map(|order_type| {
-                        OrderType::from_prost(
-                            &risingwave_pb::plan_common::OrderType::from_i32(*order_type).unwrap(),
-                        )
-                    })
-                    .collect();
-                let dist_key_indices = table_catalog
-                    .distribution_keys
-                    .iter()
-                    .map(|dist_index| *dist_index as usize)
-                    .collect();
-                let pk_indices = table_catalog
-                    .pk
-                    .iter()
-                    .map(|pk_index| *pk_index as usize)
-                    .collect();
-                StateTable::new(
-                    Keyspace::table_root(store.clone(), &TableId::new(table_catalog.id)),
-                    table_columns,
-                    order_types,
-                    Some(dist_key_indices),
-                    pk_indices,
-                )
-            };
-
-            state_tables.push(state_table)
+            state_tables.push(StateTable::from_table_catalog(table_catalog, store.clone()));
         }
 
         let args = HashAggExecutorDispatcherArgs {
