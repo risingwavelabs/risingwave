@@ -131,7 +131,7 @@ select TIME '18:20:49' +  interval '1 hour';
 query T
 select real '6.1' * interval '1' second;
 ----
-00:00:06.1
+00:00:6.1
 
 query T
 select real '61.1' * interval '1' second;
@@ -156,7 +156,7 @@ select real '86' * interval '849884';
 query T
 select interval '1' second * real '6.1';
 ----
-00:00:06.1
+00:00:6.1
 
 query T
 select  interval '1' second * real '61.1';
