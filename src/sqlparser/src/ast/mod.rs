@@ -243,6 +243,13 @@ pub enum Expr {
         substring_from: Option<Box<Expr>>,
         substring_for: Option<Box<Expr>>,
     },
+    /// OVERLAY(<expr> PLACING <expr> FROM <expr> [ FOR <expr> ])
+    Overlay {
+        expr: Box<Expr>,
+        new_substring: Box<Expr>,
+        start: Box<Expr>,
+        count: Option<Box<Expr>>,
+    },
     /// TRIM([BOTH | LEADING | TRAILING] <expr> [FROM <expr>])\
     /// Or\
     /// TRIM(<expr>)
@@ -440,6 +447,17 @@ impl fmt::Display for Expr {
                 }
                 if let Some(from_part) = substring_for {
                     write!(f, " FOR {}", from_part)?;
+                }
+
+                write!(f, ")")
+            }
+            Expr::Overlay { expr, new_substring, start, count } => {
+                write!(f, "OVERLAY({}", expr)?;
+                write!(f, " PLACING {}", new_substring)?;
+                write!(f, " FROM {}", start)?;
+
+                if let Some(count_expr) = count {
+                    write!(f, " FOR {}", count_expr)?;
                 }
 
                 write!(f, ")")
