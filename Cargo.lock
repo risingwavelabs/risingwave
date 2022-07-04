@@ -3940,7 +3940,6 @@ dependencies = [
  "risingwave_expr",
  "risingwave_pb",
  "risingwave_rpc_client",
- "risingwave_sink",
  "risingwave_source",
  "risingwave_storage",
  "serde",
@@ -4142,7 +4141,6 @@ dependencies = [
  "risingwave_connector",
  "risingwave_pb",
  "risingwave_rpc_client",
- "risingwave_sink",
  "risingwave_source",
  "risingwave_storage",
  "risingwave_stream",
@@ -4323,7 +4321,6 @@ dependencies = [
  "risingwave_expr",
  "risingwave_pb",
  "risingwave_rpc_client",
- "risingwave_sink",
  "risingwave_source",
  "risingwave_sqlparser",
  "risingwave_storage",
@@ -4530,21 +4527,6 @@ dependencies = [
  "tracing-opentelemetry",
  "tracing-subscriber",
  "workspace-hack",
-]
-
-[[package]]
-name = "risingwave_sink"
-version = "0.1.0"
-dependencies = [
- "anyhow",
- "async-stream",
- "async-trait",
- "parking_lot",
- "risingwave_common",
- "risingwave_connector",
- "risingwave_expr",
- "risingwave_pb",
- "risingwave_storage",
 ]
 
 [[package]]
@@ -4757,7 +4739,6 @@ dependencies = [
  "risingwave_hummock_sdk",
  "risingwave_pb",
  "risingwave_rpc_client",
- "risingwave_sink",
  "risingwave_source",
  "risingwave_storage",
  "serde",
