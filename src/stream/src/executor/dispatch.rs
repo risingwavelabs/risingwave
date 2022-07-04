@@ -141,9 +141,9 @@ pub fn new_output(
         loop {
             let mut cnt = 0;
             const SAMPLING_FREQUENCY: usize = 15;
-            for _ in 0..SAMPLING_FREQUENCY{
-                if tx_clone.capacity() == LOCAL_OUTPUT_CHANNEL_SIZE{
-                    cnt +=1;
+            for _ in 0..SAMPLING_FREQUENCY {
+                if tx_clone.capacity() == LOCAL_OUTPUT_CHANNEL_SIZE {
+                    cnt += 1;
                 }
                 tokio::time::sleep(std::time::Duration::from_secs(1)).await;
             }
