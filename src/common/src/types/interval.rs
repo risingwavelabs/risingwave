@@ -391,10 +391,11 @@ impl Display for IntervalUnit {
         }
         let mut format_time = format!("{hours:0>2}:{minutes:0>2}:{seconds:0>2}");
         if secs_fract != 0 {
+            format_time.push_str(&format!(".{secs_fract:03}"));
             while secs_fract % 10 == 0 {
                 secs_fract /= 10;
+                format_time.pop();
             }
-            format_time.push_str(&format!(".{secs_fract}"));
         }
         v.push(format_time);
         Display::fmt(&v.join(" "), f)
