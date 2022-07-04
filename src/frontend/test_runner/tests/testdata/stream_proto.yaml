@@ -811,8 +811,6 @@
                   pk:
                     - 0
                   owner: root
-              columnMapping:
-                0: 0
         pkIndices:
           - 1
         fields:
