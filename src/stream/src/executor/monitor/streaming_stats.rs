@@ -90,7 +90,7 @@ impl StreamingMetrics {
 
         let actor_output_buffer_blocking_duration = register_int_counter_vec_with_registry!(
             "stream_actor_output_buffer_blocking_duration",
-            "Total blocking duration of output buffer",
+            "Total blocking duration (ns) of output buffer",
             &["actor_id"],
             registry
         )
