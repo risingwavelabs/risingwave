@@ -22,6 +22,7 @@ pub fn overlay(s: &str, new_sub_str: &str, start: i32, writer: BytesWriter) -> R
     overlay_for(s, new_sub_str, start, new_sub_str.len() as i32, writer)
 }
 
+// ToDo: needs QuaternaryBytesExpression?
 #[inline(always)]
 pub fn overlay_for(
     s: &str,
