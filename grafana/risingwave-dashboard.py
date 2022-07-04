@@ -73,7 +73,7 @@ class Panels:
         return TimeSeries(title=title, targets=targets, gridPos=gridPos, fillOpacity=10,
                           legendDisplayMode="table", legendPlacement="right", legendCalcs=["max"])
 
-    def timeseries_usage_rate(self, title, targets):
+    def timeseries_backpressured_rate(self, title, targets):
         gridPos = self.layout.next_half_width_graph()
         return TimeSeries(title=title, targets=targets, gridPos=gridPos, unit="%", fillOpacity=10,
                           legendDisplayMode="table", legendPlacement="right", legendCalcs=["max"])
@@ -405,9 +405,9 @@ def section_streaming_actors(outer_panels):
                     "rate(stream_actor_actor_execution_time[1m]) > 0", "{{actor_id}}"
                 ),
             ]),
-            panels.timeseries_usage_rate("Actor Output Buffer Usage Rate", [
+            panels.timeseries_backpressured_rate("Actor Output Buffer Backpressured Rate", [
                 panels.target(
-                    "stream_actor_output_buffer_usage_rate", "{{actor_id}}"
+                    "stream_actor_output_buffer_backpressured_rate", "{{actor_id}}"
                 ),
             ]),
             panels.timeseries_row("Actor Input Row", [
