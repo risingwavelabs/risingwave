@@ -29,13 +29,14 @@ use tonic::Streaming;
 use super::error::StreamExecutorError;
 use super::*;
 use crate::executor::monitor::StreamingMetrics;
-use crate::task::UpDownActorIds;
+use crate::task::{UpDownActorIds,UpDownFragmentIds};
 
 /// Receive data from `gRPC` and forwards to `MergerExecutor`/`ReceiverExecutor`
 pub struct RemoteInput {
     stream: Streaming<GetStreamResponse>,
     sender: Sender<Message>,
     up_down_ids: UpDownActorIds,
+    up_down_frag: UpDownFragmentIds,
     metrics: Arc<StreamingMetrics>,
 }
 
@@ -45,6 +46,7 @@ impl RemoteInput {
     pub async fn create(
         client: ComputeClient,
         up_down_ids: UpDownActorIds,
+        up_down_frag: UpDownFragmentIds,
         sender: Sender<Message>,
         metrics: Arc<StreamingMetrics>,
     ) -> Result<Self> {
@@ -53,6 +55,7 @@ impl RemoteInput {
             stream,
             sender,
             up_down_ids,
+            up_down_frag,
             metrics,
         })
     }
@@ -60,6 +63,10 @@ impl RemoteInput {
     pub async fn run(self) {
         let up_actor_id = self.up_down_ids.0.to_string();
         let down_actor_id = self.up_down_ids.1.to_string();
+
+        let up_fragment_id = self.up_down_frag.0.to_string();
+        let down_fragment_id = self.up_down_frag.1.to_string();
+
         #[for_await]
         for data_res in self.stream {
             match data_res {
@@ -73,7 +80,12 @@ impl RemoteInput {
                     self.metrics
                         .exchange_recv_size
                         .with_label_values(&[&up_actor_id, &down_actor_id])
-                        .inc_by(bytes as u64);
+                        .inc_by(bytes.clone() as u64);
+
+                    self.metrics
+                        .exchange_frag_recv_size
+                        .with_label_values(&[&up_fragment_id, &down_fragment_id])
+                        .inc_by(bytes.clone() as u64);
                     match msg_res {
                         Ok(msg) => {
                             self.sender.send(msg).await.unwrap();
