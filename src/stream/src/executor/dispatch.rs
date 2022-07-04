@@ -34,7 +34,7 @@ use tracing::event;
 
 use crate::executor::monitor::StreamingMetrics;
 use crate::executor::{Barrier, BoxedExecutor, Message, Mutation, StreamConsumer};
-use crate::task::{ActorId, DispatcherId, SharedContext, LOCAL_OUTPUT_CHANNEL_SIZE};
+use crate::task::{ActorId, DispatcherId, SharedContext};
 
 /// `Output` provides an interface for `Dispatcher` to send data into downstream actors.
 #[async_trait]
