@@ -99,8 +99,8 @@ pub struct CompactorContext {
 }
 
 trait CompactionFilter: Send + DynClone {
-    fn filter(&mut self, _: &[u8]) -> bool {
-        true
+    fn should_delete(&mut self, _: &[u8]) -> bool {
+        false
     }
 }
 
@@ -114,22 +114,33 @@ impl CompactionFilter for DummyCompactionFilter {}
 #[derive(Clone)]
 pub struct StateCleanUpCompactionFilter {
     existing_table_ids: HashSet<u32>,
+    last_table: Option<(u32, bool)>,
 }
 
 impl StateCleanUpCompactionFilter {
     fn new(table_id_set: HashSet<u32>) -> Self {
         StateCleanUpCompactionFilter {
             existing_table_ids: table_id_set,
+            last_table: None,
         }
     }
 }
 
 impl CompactionFilter for StateCleanUpCompactionFilter {
-    fn filter(&mut self, key: &[u8]) -> bool {
+    fn should_delete(&mut self, key: &[u8]) -> bool {
         let table_id_option = get_table_id(key);
         match table_id_option {
-            None => true,
-            Some(table_id) => self.existing_table_ids.contains(&table_id),
+            None => false,
+            Some(table_id) => {
+                if let Some((last_table_id, removed)) = self.last_table.as_ref() {
+                    if *last_table_id == table_id {
+                        return *removed;
+                    }
+                }
+                let removed = !self.existing_table_ids.contains(&table_id);
+                self.last_table = Some((table_id, removed));
+                removed
+            },
         }
     }
 }
@@ -142,7 +153,7 @@ pub struct TTLCompactionFilter {
 }
 
 impl CompactionFilter for TTLCompactionFilter {
-    fn filter(&mut self, key: &[u8]) -> bool {
+    fn should_delete(&mut self, key: &[u8]) -> bool {
         pub use risingwave_common::util::epoch::Epoch;
         let (table_id, epoch) = extract_table_id_and_epoch(key);
         match table_id {
@@ -150,7 +161,7 @@ impl CompactionFilter for TTLCompactionFilter {
                 if let Some((last_table_id, ttl_mill)) = self.last_table_and_ttl.as_ref() {
                     if *last_table_id == table_id {
                         let min_epoch = Epoch(self.expire_epoch).subtract_ms(*ttl_mill);
-                        return Epoch(epoch) > min_epoch;
+                        return Epoch(epoch) <= min_epoch;
                     }
                 }
                 match self.table_id_to_ttl.get(&table_id) {
@@ -160,12 +171,12 @@ impl CompactionFilter for TTLCompactionFilter {
                         let ttl_mill = (*ttl_second_u32 * 1000) as u64;
                         let min_epoch = Epoch(self.expire_epoch).subtract_ms(ttl_mill);
                         self.last_table_and_ttl = Some((table_id, ttl_mill));
-                        Epoch(epoch) > min_epoch
+                        Epoch(epoch) <= min_epoch
                     }
-                    None => true,
+                    None => false,
                 }
             }
-            None => true,
+            None => false,
         }
     }
 }
@@ -186,8 +197,8 @@ struct MultiCompactionFilter {
 }
 
 impl CompactionFilter for MultiCompactionFilter {
-    fn filter(&mut self, key: &[u8]) -> bool {
-        !self.filter_vec.iter_mut().any(|filter| !filter.filter(key))
+    fn should_delete(&mut self, key: &[u8]) -> bool {
+        self.filter_vec.iter_mut().any(|filter| filter.should_delete(key))
     }
 }
 
@@ -1006,7 +1017,7 @@ impl Compactor {
                 drop = true;
             }
 
-            if !drop && !compaction_filter.filter(&iter_key) {
+            if !drop && compaction_filter.should_delete(&iter_key) {
                 drop = true;
             }
 
