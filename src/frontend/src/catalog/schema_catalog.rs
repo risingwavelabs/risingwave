@@ -37,7 +37,7 @@ pub struct SchemaCatalog {
     source_by_name: HashMap<String, SourceCatalog>,
     source_name_by_id: HashMap<SourceId, String>,
 
-    // Can be replaced with a bijective map: https://crates.io/crates/bimap.
+    // TODO(nanderstabel): Can be replaced with a bijective map: https://crates.io/crates/bimap.
     sink_id_by_name: HashMap<String, SinkId>,
     sink_name_by_id: HashMap<SinkId, String>,
 
@@ -87,9 +87,7 @@ impl SchemaCatalog {
         let name = prost.name.clone();
         let id = prost.id;
 
-        self.sink_id_by_name
-            .try_insert(name.clone(), id)
-            .unwrap();
+        self.sink_id_by_name.try_insert(name.clone(), id).unwrap();
         self.sink_name_by_id.try_insert(id, name).unwrap();
     }
 
@@ -151,9 +149,7 @@ impl SchemaCatalog {
 
     /// Iterate all sinks.
     pub fn iter_sink(&self) -> impl Iterator<Item = &u32> {
-        self.sink_id_by_name
-            .iter()
-            .map(|(_, v)| v)
+        self.sink_id_by_name.iter().map(|(_, v)| v)
     }
 
     pub fn iter_system_tables(&self) -> impl Iterator<Item = &SystemCatalog> {

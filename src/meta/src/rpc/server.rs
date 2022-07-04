@@ -289,11 +289,7 @@ pub async fn rpc_serve_with_store<S: MetaStore>(
     let env = MetaSrvEnv::<S>::new(opts, meta_store.clone(), info).await;
     let compaction_group_manager =
         Arc::new(CompactionGroupManager::new(env.clone()).await.unwrap());
-    let fragment_manager = Arc::new(
-        FragmentManager::new(env.clone(), compaction_group_manager.clone())
-            .await
-            .unwrap(),
-    );
+    let fragment_manager = Arc::new(FragmentManager::new(env.clone()).await.unwrap());
     let meta_metrics = Arc::new(MetaMetrics::new());
     let compactor_manager = Arc::new(hummock::CompactorManager::new());
 
@@ -383,6 +379,7 @@ pub async fn rpc_serve_with_store<S: MetaStore>(
             barrier_manager.clone(),
             cluster_manager.clone(),
             source_manager.clone(),
+            compaction_group_manager.clone(),
         )
         .await
         .unwrap(),
@@ -403,6 +400,7 @@ pub async fn rpc_serve_with_store<S: MetaStore>(
                 .into_iter()
                 .map(|source| source.id)
                 .collect_vec(),
+            &source_manager.get_source_ids_in_fragments().await,
         )
         .await
         .unwrap();

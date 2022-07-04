@@ -15,14 +15,14 @@
 use std::collections::HashMap;
 
 use pgwire::pg_response::{PgResponse, StatementType};
-use risingwave_common::error::{Result};
+use risingwave_common::error::Result;
 use risingwave_pb::catalog::Sink as ProstSink;
-use risingwave_sqlparser::ast::{CreateSinkStatement};
+use risingwave_sqlparser::ast::CreateSinkStatement;
 
+use super::util::handle_with_properties;
 use crate::binder::Binder;
 use crate::catalog::{DatabaseId, SchemaId};
-use crate::session::{OptimizerContext};
-use super::util::handle_with_properties;
+use crate::session::OptimizerContext;
 
 pub(crate) fn make_prost_sink(
     database_id: DatabaseId,
@@ -30,9 +30,8 @@ pub(crate) fn make_prost_sink(
     name: String,
     mv_name: String,
     properties: HashMap<String, String>,
-    owner: String
+    owner: String,
 ) -> Result<ProstSink> {
-
     Ok(ProstSink {
         id: 0,
         schema_id,
@@ -107,11 +106,7 @@ pub async fn handle_create_sink(
         .env()
         .catalog_reader()
         .read_guard()
-        .check_relation_name_duplicated(
-            session.database(),
-            &schema_name,
-            sink_name.as_str(),
-        )?;
+        .check_relation_name_duplicated(session.database(), &schema_name, sink_name.as_str())?;
 
     let mv_name = stmt.materialized_view.to_string();
     let sink = make_prost_sink(
@@ -176,10 +171,11 @@ pub mod tests {
         assert_eq!(table.name(), "mv1");
 
         // Check sink exists.
-        let sink = catalog_reader
-            .read_guard()
-            .get_sink_id_by_name(DEFAULT_DATABASE_NAME, DEFAULT_SCHEMA_NAME, "snk1")
-            .clone();
+        let sink = catalog_reader.read_guard().get_sink_id_by_name(
+            DEFAULT_DATABASE_NAME,
+            DEFAULT_SCHEMA_NAME,
+            "snk1",
+        );
         assert!(sink.is_ok());
     }
 }

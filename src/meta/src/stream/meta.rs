@@ -27,7 +27,6 @@ use risingwave_pb::stream_plan::{FragmentType, StreamActor};
 use tokio::sync::RwLock;
 
 use crate::cluster::WorkerId;
-use crate::hummock::compaction_group::manager::CompactionGroupManagerRef;
 use crate::manager::{HashMappingManagerRef, MetaSrvEnv};
 use crate::model::{ActorId, MetadataModel, TableFragments, Transactional};
 use crate::storage::{MetaStore, Transaction};
@@ -42,8 +41,6 @@ pub struct FragmentManager<S: MetaStore> {
     meta_store: Arc<S>,
 
     core: RwLock<FragmentManagerCore>,
-
-    compaction_group_manager: CompactionGroupManagerRef<S>,
 }
 
 pub struct ActorInfos {
@@ -66,10 +63,7 @@ impl<S: MetaStore> FragmentManager<S>
 where
     S: MetaStore,
 {
-    pub async fn new(
-        env: MetaSrvEnv<S>,
-        compaction_group_manager: CompactionGroupManagerRef<S>,
-    ) -> Result<Self> {
+    pub async fn new(env: MetaSrvEnv<S>) -> Result<Self> {
         let meta_store = env.meta_store_ref();
         let table_fragments = try_match_expand!(
             TableFragments::list(&*meta_store).await,
@@ -87,7 +81,6 @@ where
         Ok(Self {
             meta_store,
             core: RwLock::new(FragmentManagerCore { table_fragments }),
-            compaction_group_manager,
         })
     }
 
@@ -131,11 +124,7 @@ where
 
     /// Start create a new `TableFragments` and insert it into meta store, currently the actors'
     /// state is `ActorState::Inactive`.
-    pub async fn start_create_table_fragments(
-        &self,
-        table_fragment: TableFragments,
-        table_properties: HashMap<String, String>,
-    ) -> Result<()> {
+    pub async fn start_create_table_fragments(&self, table_fragment: TableFragments) -> Result<()> {
         let map = &mut self.core.write().await.table_fragments;
 
         match map.entry(table_fragment.table_id()) {
@@ -144,12 +133,6 @@ where
                 table_fragment.table_id()
             )))),
             Entry::Vacant(v) => {
-                // Register to compaction group beforehand.
-                // If any following operation fails, the registration will be eventually reverted.
-                self.compaction_group_manager
-                    .register_table_fragments(&table_fragment, &table_properties)
-                    .await?;
-
                 table_fragment.insert(&*self.meta_store).await?;
                 v.insert(table_fragment);
                 Ok(())
@@ -164,19 +147,7 @@ where
         match map.entry(*table_id) {
             Entry::Occupied(o) => {
                 TableFragments::delete(&*self.meta_store, &table_id.table_id).await?;
-                let table_fragments = o.remove();
-                // Unregister from compaction group afterwards.
-                if let Err(e) = self
-                    .compaction_group_manager
-                    .unregister_table_fragments(&table_fragments)
-                    .await
-                {
-                    tracing::warn!(
-                        "Failed to unregister table {}. It wll be unregistered eventually.\n{:#?}",
-                        table_id,
-                        e
-                    );
-                }
+                o.remove();
                 Ok(())
             }
             Entry::Vacant(_) => Err(RwError::from(InternalError(format!(
@@ -279,21 +250,9 @@ where
             }
 
             self.meta_store.txn(transaction).await?;
-            let table_fragments = map.remove(table_id).unwrap();
+            map.remove(table_id).unwrap();
             for dependent_table in dependent_tables {
                 map.insert(dependent_table.table_id(), dependent_table);
-            }
-            // Unregister from compaction group afterwards.
-            if let Err(e) = self
-                .compaction_group_manager
-                .unregister_table_fragments(&table_fragments)
-                .await
-            {
-                tracing::warn!(
-                    "Failed to unregister table {}. It wll be unregistered eventually.\n{:#?}",
-                    table_id,
-                    e
-                );
             }
             Ok(())
         } else {

@@ -26,7 +26,7 @@ use itertools::Itertools;
 use log::trace;
 use risingwave_common::array::Row;
 use risingwave_common::buffer::Bitmap;
-use risingwave_common::catalog::{ColumnDesc, ColumnId, OrderedColumnDesc, Schema};
+use risingwave_common::catalog::{ColumnDesc, ColumnId, OrderedColumnDesc, Schema, TableId};
 use risingwave_common::error::RwError;
 use risingwave_common::types::{Datum, VirtualNode};
 use risingwave_common::util::hash_util::CRC32FastBuilder;
@@ -133,7 +133,8 @@ impl<S: StateStore, SER: RowSerializer> CellBasedTableBase<S, SER, READ_ONLY> {
     /// order.
     /// This is parameterized on cell based row serializer.
     pub fn new_partial(
-        keyspace: Keyspace<S>,
+        store: S,
+        table_id: TableId,
         table_columns: Vec<ColumnDesc>,
         column_ids: Vec<ColumnId>,
         order_types: Vec<OrderType>,
@@ -141,7 +142,8 @@ impl<S: StateStore, SER: RowSerializer> CellBasedTableBase<S, SER, READ_ONLY> {
         distribution: Distribution,
     ) -> Self {
         Self::new_inner(
-            keyspace,
+            store,
+            table_id,
             table_columns,
             column_ids,
             order_types,
@@ -155,7 +157,8 @@ impl<S: StateStore, SER: RowSerializer> CellBasedTableBase<S, SER, READ_WRITE> {
     /// Create a read-write [`CellBasedTableBase`] given a complete set of `columns`.
     /// This is parameterized on cell based row serializer.
     pub fn new(
-        keyspace: Keyspace<S>,
+        store: S,
+        table_id: TableId,
         columns: Vec<ColumnDesc>,
         order_types: Vec<OrderType>,
         pk_indices: Vec<usize>,
@@ -164,7 +167,8 @@ impl<S: StateStore, SER: RowSerializer> CellBasedTableBase<S, SER, READ_WRITE> {
         let column_ids = columns.iter().map(|c| c.column_id).collect();
 
         Self::new_inner(
-            keyspace,
+            store,
+            table_id,
             columns,
             column_ids,
             order_types,
@@ -174,13 +178,15 @@ impl<S: StateStore, SER: RowSerializer> CellBasedTableBase<S, SER, READ_WRITE> {
     }
 
     pub fn new_for_test(
-        keyspace: Keyspace<S>,
+        store: S,
+        table_id: TableId,
         columns: Vec<ColumnDesc>,
         order_types: Vec<OrderType>,
         pk_indices: Vec<usize>,
     ) -> Self {
         Self::new(
-            keyspace,
+            store,
+            table_id,
             columns,
             order_types,
             pk_indices,
@@ -199,8 +205,11 @@ impl<S: StateStore, SER: RowSerializer> From<CellBasedTableBase<S, SER, READ_WRI
 }
 
 impl<S: StateStore, SER: RowSerializer, const T: AccessType> CellBasedTableBase<S, SER, T> {
+    #[allow(clippy::too_many_arguments)]
+
     fn new_inner(
-        keyspace: Keyspace<S>,
+        store: S,
+        table_id: TableId,
         table_columns: Vec<ColumnDesc>,
         column_ids: Vec<ColumnId>,
         order_types: Vec<OrderType>,
@@ -230,7 +239,7 @@ impl<S: StateStore, SER: RowSerializer, const T: AccessType> CellBasedTableBase<
                     })
             })
             .collect_vec();
-
+        let keyspace = Keyspace::table_root(store, &table_id);
         Self {
             keyspace,
             table_columns,
