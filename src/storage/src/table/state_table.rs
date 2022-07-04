@@ -216,7 +216,7 @@ impl<S: StateStore> StateTable<S> {
             .await?;
 
         let mem_table_iter = {
-            // TODO: reuse serialized key in cell-based table.
+            // TODO: reuse calculated serialized key from cell-based table.
             let prefix_serializer = self.pk_serializer().prefix(pk_prefix.size());
             let encoded_prefix = serialize_pk(pk_prefix, &prefix_serializer);
             let encoded_key_range = range_of_prefix(&encoded_prefix);

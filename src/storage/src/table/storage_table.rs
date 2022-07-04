@@ -316,7 +316,8 @@ impl<S: StateStore, E: Encoding, const T: AccessType> StorageTableBase<S, E, T> 
         self.compute_vnode(pk, &self.dist_key_in_pk_indices)
     }
 
-    /// Get vnode value with given primary key prefix.
+    /// Try getting vnode value with given primary key prefix, used for `vnode_hint` in iterators.
+    /// Return `None` if the provided columns are not enough.
     fn try_compute_vnode_by_pk_prefix(&self, pk_prefix: &Row) -> Option<VirtualNode> {
         self.dist_key_in_pk_indices
             .iter()
@@ -479,8 +480,8 @@ impl<S: PkAndRowStream + Unpin> TableIter for S {
 
 /// Iterators
 impl<S: StateStore, E: Encoding, const T: AccessType> StorageTableBase<S, E, T> {
-    /// Get multiple [`StorageTableIter`] based on the specified vnodes, and merge or concat them by
-    /// given `ordered`.
+    /// Get multiple [`StorageTableIter`] based on the specified vnodes of this table with
+    /// `vnode_hint`, and merge or concat them by given `ordered`.
     async fn iter_with_encoded_key_range<R, B>(
         &self,
         encoded_key_range: R,
@@ -496,7 +497,9 @@ impl<S: StateStore, E: Encoding, const T: AccessType> StorageTableBase<S, E, T> 
         // Vnodes that are set and should be accessed.
         #[auto_enum(Iterator)]
         let vnodes = match vnode_hint {
+            // If `vnode_hint` is set, we can only access this single vnode.
             Some(vnode) => std::iter::once(vnode),
+            // Otherwise, we need to access all vnodes of this table.
             None => self
                 .vnodes
                 .iter()
@@ -538,7 +541,9 @@ impl<S: StateStore, E: Encoding, const T: AccessType> StorageTableBase<S, E, T> 
         Ok(iter)
     }
 
-    // TODO: support Row for `next_col_bounds`.
+    /// Iterates on the table with the given prefix of the pk in `pk_prefix` and the range bounds of
+    /// the next primary key column in `next_col_bounds`.
+    // TODO: support multiple datums or `Row` for `next_col_bounds`.
     async fn iter_with_pk_bounds(
         &self,
         epoch: u64,
@@ -575,7 +580,8 @@ impl<S: StateStore, E: Encoding, const T: AccessType> StorageTableBase<S, E, T> 
                     if is_start_bound {
                         // storage doesn't support excluded begin key yet, so transform it to
                         // included
-                        // FIXME: what if `serialized_key` is `\xff\xff..`?
+                        // FIXME: What if `serialized_key` is `\xff\xff..`? Should the frontend
+                        // rejects this?
                         Included(next_key(&serialized_key))
                     } else {
                         Excluded(serialized_key)
@@ -614,21 +620,19 @@ impl<S: StateStore, E: Encoding, const T: AccessType> StorageTableBase<S, E, T> 
             end_key
         );
 
-        let vnode_hint = self.try_compute_vnode_by_pk_prefix(pk_prefix);
-        if vnode_hint.is_some() {
-            println!("vnode_hint! {:?}", vnode_hint);
-        }
-
         self.iter_with_encoded_key_range(
             (start_key, end_key),
             epoch,
-            vnode_hint,
+            self.try_compute_vnode_by_pk_prefix(pk_prefix),
             wait_epoch,
             ordered,
         )
         .await
     }
 
+    /// Construct a [`StorageTableIter`] for batch executors.
+    /// The batch iterator will wait for the epoch to be committed before iterating.
+    // TODO: introduce unordered batch iterator.
     pub async fn batch_iter_with_pk_bounds(
         &self,
         epoch: u64,
@@ -639,6 +643,8 @@ impl<S: StateStore, E: Encoding, const T: AccessType> StorageTableBase<S, E, T> 
             .await
     }
 
+    /// Construct a [`StorageTableIter`] for streaming executors.
+    /// The batch iterator will wait for the epoch to be committed before iterating.
     pub async fn streaming_iter_with_pk_bounds(
         &self,
         epoch: u64,
@@ -649,7 +655,7 @@ impl<S: StateStore, E: Encoding, const T: AccessType> StorageTableBase<S, E, T> 
             .await
     }
 
-    // The returned iterator will iterate data from a snapshot corresponding to the given `epoch`
+    // The returned iterator will iterate data from a snapshot corresponding to the given `epoch`.
     pub async fn batch_iter(&self, epoch: u64) -> StorageResult<StorageTableIter<S>> {
         self.batch_iter_with_pk_bounds(epoch, Row::empty(), ..)
             .await
@@ -671,14 +677,6 @@ impl<S: StateStore, E: Encoding, const T: AccessType> StorageTableBase<S, E, T> 
         )
         .await?
         .into_stream())
-    }
-
-    pub async fn batch_iter_with_pk_prefix(
-        &self,
-        epoch: u64,
-        pk_prefix: &Row,
-    ) -> StorageResult<StorageTableIter<S>> {
-        self.batch_iter_with_pk_bounds(epoch, &pk_prefix, ..).await
     }
 }
 
