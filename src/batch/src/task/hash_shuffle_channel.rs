@@ -64,7 +64,7 @@ fn generate_new_data_chunks(
     chunk: &DataChunk,
     hash_info: &exchange_info::HashInfo,
     hash_values: &[usize],
-) -> Result<Vec<DataChunk>> {
+) -> Vec<DataChunk> {
     let output_count = hash_info.output_count as usize;
     let mut vis_maps = vec![vec![]; output_count];
     hash_values.iter().for_each(|hash| {
@@ -78,9 +78,9 @@ fn generate_new_data_chunks(
     });
     let mut res = Vec::with_capacity(output_count);
     for (sink_id, vis_map_vec) in vis_maps.into_iter().enumerate() {
-        let vis_map: Bitmap = vis_map_vec.try_into()?;
+        let vis_map: Bitmap = vis_map_vec.into_iter().collect();
         let vis_map = if let Some(visibility) = chunk.get_visibility_ref() {
-            vis_map.bitand(visibility)?
+            vis_map.bitand(visibility)
         } else {
             vis_map
         };
@@ -92,7 +92,7 @@ fn generate_new_data_chunks(
         );
         res.push(new_data_chunk);
     }
-    Ok(res)
+    res
 }
 
 impl ChanSender for HashShuffleSender {
@@ -111,7 +111,7 @@ impl ChanSender for HashShuffleSender {
 impl HashShuffleSender {
     async fn send_chunk(&mut self, chunk: DataChunk) -> Result<()> {
         let hash_values = generate_hash_values(&chunk, &self.hash_info)?;
-        let new_data_chunks = generate_new_data_chunks(&chunk, &self.hash_info, &hash_values)?;
+        let new_data_chunks = generate_new_data_chunks(&chunk, &self.hash_info, &hash_values);
 
         for (sink_id, new_data_chunk) in new_data_chunks.into_iter().enumerate() {
             trace!(

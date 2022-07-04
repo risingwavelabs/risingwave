@@ -25,8 +25,9 @@ use risingwave_expr::expr::AggKind;
 use risingwave_pb::expr::AggCall as ProstAggCall;
 
 use super::{
-    BatchHashAgg, BatchSimpleAgg, ColPrunable, PlanBase, PlanRef, PlanTreeNodeUnary,
-    PredicatePushdown, StreamHashAgg, StreamLocalSimpleAgg, StreamSimpleAgg, ToBatch, ToStream,
+    BatchHashAgg, BatchSimpleAgg, ColPrunable, LogicalProjectBuilder, PlanBase, PlanRef,
+    PlanTreeNodeUnary, PredicatePushdown, StreamGlobalSimpleAgg, StreamHashAgg,
+    StreamLocalSimpleAgg, ToBatch, ToStream,
 };
 use crate::catalog::column_catalog::ColumnCatalog;
 use crate::catalog::table_catalog::TableCatalog;
@@ -296,54 +297,57 @@ impl LogicalAgg {
             .collect();
         let total_agg_logical_plan =
             LogicalAgg::new(total_agg_types, self.group_keys().to_vec(), input);
-        Ok(StreamSimpleAgg::new(total_agg_logical_plan).into())
+        Ok(StreamGlobalSimpleAgg::new(total_agg_logical_plan).into())
     }
 }
 
-/// `ExprHandler` extracts agg calls and references to group columns from select list, in
-/// preparation for generating a plan like `LogicalProject - LogicalAgg - LogicalProject`.
-struct ExprHandler {
-    /// `project` contains all the ExprImpl inside GROUP BY clause (e.g. v1 for group by v1)
-    /// followed by those inside aggregates (e.g. v1 + v2 for min(v1 + v2)).
-    pub project: Vec<ExprImpl>,
-    group_key_len: usize,
-    /// When dedup (rewriting AggCall inputs), it is the index into projects.
-    /// When rewriting InputRef outside AggCall, where it is required to refer to a group column,
-    /// this is the index into LogicalAgg::schema.
-    /// This 2 indices happen to be the same because we always put group exprs at the beginning of
-    /// schema, and they are at the beginning of projects.
-    expr_index: HashMap<ExprImpl, usize>,
-    pub agg_calls: Vec<PlanAggCall>,
-    pub error: Option<ErrorCode>,
+/// `LogicalAggBuilder` extracts agg calls and references to group columns from select list and
+/// build the plan like `LogicalAgg - LogicalProject`.
+/// it is constructed by `group_exprs` and collect and rewrite the expression in selection and
+/// having clause.
+struct LogicalAggBuilder {
+    /// the builder of the input Project
+    input_proj_builder: LogicalProjectBuilder,
+    /// the group keys column indices in the project's output
+    group_keys: Vec<usize>,
+    /// the agg calls
+    agg_calls: Vec<PlanAggCall>,
+    /// the error during the expression rewriting
+    error: Option<ErrorCode>,
 }
 
-impl ExprHandler {
+impl LogicalAggBuilder {
     fn new(group_exprs: Vec<ExprImpl>) -> Result<Self> {
-        let group_key_len = group_exprs.len();
+        let mut input_proj_builder = LogicalProjectBuilder::default();
 
-        // Please note that we currently don't dedup columns in GROUP BY clause.
-        let mut expr_index = HashMap::new();
-        group_exprs
-            .iter()
-            .enumerate()
-            .try_for_each(|(index, expr)| {
-                if !expr.has_subquery() && !expr.has_agg_call() {
-                    expr_index.insert(expr.clone(), index);
-                    Ok(())
-                } else {
-                    Err(ErrorCode::InvalidInputSyntax(
-                        "GROUP BY expr should not contain subquery or aggregation function".into(),
-                    ))
-                }
-            })?;
+        for expr in &group_exprs {
+            if expr.has_subquery() || expr.has_agg_call() {
+                return Err(ErrorCode::InvalidInputSyntax(
+                    "GROUP BY expr should not contain subquery or aggregation function".into(),
+                )
+                .into());
+            }
+        }
 
-        Ok(ExprHandler {
-            project: group_exprs,
-            group_key_len,
-            expr_index,
+        let group_keys = group_exprs
+            .into_iter()
+            .map(|expr| input_proj_builder.add_expr(&expr))
+            .collect_vec();
+
+        Ok(LogicalAggBuilder {
+            group_keys,
             agg_calls: vec![],
             error: None,
+            input_proj_builder,
         })
+    }
+
+    pub fn build(self, input: PlanRef) -> LogicalAgg {
+        // This LogicalProject focuses on the exprs in aggregates and GROUP BY clause.
+        let logical_project = self.input_proj_builder.build(input);
+
+        // This LogicalAgg focuses on calculating the aggregates and grouping.
+        LogicalAgg::new(self.agg_calls, self.group_keys, logical_project.into())
     }
 
     fn rewrite_with_error(&mut self, expr: ExprImpl) -> Result<ExprImpl> {
@@ -353,9 +357,23 @@ impl ExprHandler {
         }
         Ok(rewritten_expr)
     }
+
+    /// check if the expression is a group by key, and try to return the group key
+    pub fn try_as_group_expr(&self, expr: &ExprImpl) -> Option<usize> {
+        if let Some(input_index) = self.input_proj_builder.expr_index(expr) {
+            if let Some(index) = self
+                .group_keys
+                .iter()
+                .position(|group_key| *group_key == input_index)
+            {
+                return Some(index);
+            }
+        }
+        None
+    }
 }
 
-impl ExprRewriter for ExprHandler {
+impl ExprRewriter for LogicalAggBuilder {
     /// When there is an agg call, there are 3 things to do:
     /// 1. eval its inputs via project;
     /// 2. add a `PlanAggCall` to agg;
@@ -375,53 +393,46 @@ impl ExprRewriter for ExprHandler {
             }
         }
 
-        let mut index = self.project.len();
-        let mut input_refs = vec![];
-        self.project.extend(inputs.into_iter().filter(|expr| {
-            if let Some(idx) = self.expr_index.get(expr) {
-                input_refs.push(InputRef::new(*idx, expr.return_type()));
-                false
-            } else {
-                self.expr_index.insert(expr.clone(), index);
-                input_refs.push(InputRef::new(index, expr.return_type()));
-                index += 1;
-                true
-            }
-        }));
+        let inputs = inputs
+            .iter()
+            .map(|expr| {
+                let index = self.input_proj_builder.add_expr(expr);
+                InputRef::new(index, expr.return_type())
+            })
+            .collect_vec();
 
         if agg_kind == AggKind::Avg {
-            assert_eq!(input_refs.len(), 1);
+            assert_eq!(inputs.len(), 1);
 
             let left_return_type =
-                AggCall::infer_return_type(&AggKind::Sum, &[input_refs[0].return_type()]).unwrap();
+                AggCall::infer_return_type(&AggKind::Sum, &[inputs[0].return_type()]).unwrap();
 
             // Rewrite avg to cast(sum as avg_return_type) / count.
             self.agg_calls.push(PlanAggCall {
                 agg_kind: AggKind::Sum,
                 return_type: left_return_type.clone(),
-                inputs: input_refs.clone(),
+                inputs: inputs.clone(),
                 distinct,
             });
             let left = ExprImpl::from(InputRef::new(
-                self.group_key_len + self.agg_calls.len() - 1,
+                self.group_keys.len() + self.agg_calls.len() - 1,
                 left_return_type,
             ))
             .cast_implicit(return_type)
             .unwrap();
 
             let right_return_type =
-                AggCall::infer_return_type(&AggKind::Count, &[input_refs[0].return_type()])
-                    .unwrap();
+                AggCall::infer_return_type(&AggKind::Count, &[inputs[0].return_type()]).unwrap();
 
             self.agg_calls.push(PlanAggCall {
                 agg_kind: AggKind::Count,
                 return_type: right_return_type.clone(),
-                inputs: input_refs,
+                inputs,
                 distinct,
             });
 
             let right = InputRef::new(
-                self.group_key_len + self.agg_calls.len() - 1,
+                self.group_keys.len() + self.agg_calls.len() - 1,
                 right_return_type,
             );
 
@@ -430,11 +441,11 @@ impl ExprRewriter for ExprHandler {
             self.agg_calls.push(PlanAggCall {
                 agg_kind,
                 return_type: return_type.clone(),
-                inputs: input_refs,
+                inputs,
                 distinct,
             });
             ExprImpl::from(InputRef::new(
-                self.group_key_len + self.agg_calls.len() - 1,
+                self.group_keys.len() + self.agg_calls.len() - 1,
                 return_type,
             ))
         }
@@ -443,9 +454,9 @@ impl ExprRewriter for ExprHandler {
     /// When there is an `FunctionCall` (outside of agg call), it must refers to a group column.
     /// Or all `InputRef`s appears in it must refer to a group column.
     fn rewrite_function_call(&mut self, func_call: FunctionCall) -> ExprImpl {
-        let expr: ExprImpl = func_call.into();
-        if !expr.has_subquery() && let Some(index) = self.expr_index.get(&expr) && *index < self.group_key_len {
-            InputRef::new(*index, expr.return_type()).into()
+        let expr = func_call.into();
+        if let Some(group_key) = self.try_as_group_expr(&expr) {
+            InputRef::new(group_key, expr.return_type()).into()
         } else {
             let (func_type, inputs, ret) = expr.into_function_call().unwrap().decompose();
             let inputs = inputs
@@ -459,8 +470,8 @@ impl ExprRewriter for ExprHandler {
     /// When there is an `InputRef` (outside of agg call), it must refers to a group column.
     fn rewrite_input_ref(&mut self, input_ref: InputRef) -> ExprImpl {
         let expr = input_ref.into();
-        if let Some(index) = self.expr_index.get(&expr) && *index < self.group_key_len {
-            InputRef::new(*index, expr.return_type()).into()
+        if let Some(group_key) = self.try_as_group_expr(&expr) {
+            InputRef::new(group_key, expr.return_type()).into()
         } else {
             self.error = Some(ErrorCode::InvalidInputSyntax(
                 "column must appear in the GROUP BY clause or be used in an aggregate function"
@@ -525,6 +536,11 @@ impl LogicalAgg {
         self.o2i_col_mapping().inverse()
     }
 
+    /// get the Mapping of columnIndex from input column index to out column index
+    pub fn i2o_col_mapping_with_required_out(&self, required: &FixedBitSet) -> ColIndexMapping {
+        self.o2i_col_mapping().inverse_with_required(required)
+    }
+
     fn derive_schema(
         input: &Schema,
         group_keys: &[usize],
@@ -561,24 +577,21 @@ impl LogicalAgg {
         having: Option<ExprImpl>,
         input: PlanRef,
     ) -> Result<(PlanRef, Vec<ExprImpl>, Option<ExprImpl>)> {
-        let group_keys = (0..group_exprs.len()).collect();
-        let mut expr_handler = ExprHandler::new(group_exprs)?;
+        let mut agg_builder = LogicalAggBuilder::new(group_exprs)?;
 
         let rewritten_select_exprs = select_exprs
             .into_iter()
-            .map(|expr| expr_handler.rewrite_with_error(expr))
+            .map(|expr| agg_builder.rewrite_with_error(expr))
             .collect::<Result<_>>()?;
         let rewritten_having = having
-            .map(|expr| expr_handler.rewrite_with_error(expr))
+            .map(|expr| agg_builder.rewrite_with_error(expr))
             .transpose()?;
 
-        // This LogicalProject focuses on the exprs in aggregates and GROUP BY clause.
-        let logical_project = LogicalProject::create(input, expr_handler.project);
-
-        // This LogicalAgg focuses on calculating the aggregates and grouping.
-        let logical_agg = LogicalAgg::new(expr_handler.agg_calls, group_keys, logical_project);
-
-        Ok((logical_agg.into(), rewritten_select_exprs, rewritten_having))
+        Ok((
+            agg_builder.build(input).into(),
+            rewritten_select_exprs,
+            rewritten_having,
+        ))
     }
 
     /// Get a reference to the logical agg's agg calls.
@@ -650,7 +663,6 @@ impl ColPrunable for LogicalAgg {
     fn prune_col(&self, required_cols: &[usize]) -> PlanRef {
         let upstream_required_cols = {
             let mapping = self.o2i_col_mapping();
-
             FixedBitSet::from_iter(
                 required_cols
                     .iter()
@@ -675,7 +687,7 @@ impl ColPrunable for LogicalAgg {
         };
 
         let input_required_cols = {
-            let mut tmp: FixedBitSet = upstream_required_cols;
+            let mut tmp: FixedBitSet = upstream_required_cols.clone();
             tmp.union_with(&group_key_required_cols);
             tmp.union_with(&agg_call_required_cols);
             tmp.ones().collect_vec()
@@ -709,7 +721,7 @@ impl ColPrunable for LogicalAgg {
             )
         };
         let new_output_cols = {
-            let mapping = self.i2o_col_mapping();
+            let mapping = self.i2o_col_mapping_with_required_out(&upstream_required_cols);
             let mut tmp = input_required_cols
                 .iter()
                 .filter_map(|&idx| mapping.try_map(idx))
@@ -814,7 +826,7 @@ impl ToStream for LogicalAgg {
                 self.gen_two_phase_streaming_agg_plan(input_stream)
             // simple 1-phase-agg
             } else {
-                Ok(StreamSimpleAgg::new(self.clone_with_input(
+                Ok(StreamGlobalSimpleAgg::new(self.clone_with_input(
                     input.to_stream_with_dist_required(&RequiredDist::single())?,
                 ))
                 .into())

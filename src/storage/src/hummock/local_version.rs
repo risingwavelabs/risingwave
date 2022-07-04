@@ -16,11 +16,11 @@ use std::collections::BTreeMap;
 use std::sync::atomic::AtomicUsize;
 use std::sync::Arc;
 
+use itertools::Itertools;
 use parking_lot::lock_api::ArcRwLockReadGuard;
 use parking_lot::{RawRwLock, RwLock};
 use risingwave_hummock_sdk::compaction_group::hummock_version_ext::HummockVersionExt;
-use risingwave_hummock_sdk::compaction_group::StaticCompactionGroupId;
-use risingwave_hummock_sdk::{HummockEpoch, HummockVersionId};
+use risingwave_hummock_sdk::{CompactionGroupId, HummockEpoch, HummockVersionId};
 use risingwave_pb::hummock::{HummockVersion, Level};
 use tokio::sync::mpsc::UnboundedSender;
 
@@ -106,6 +106,10 @@ impl LocalVersion {
             pinned_version,
         }
     }
+
+    pub fn clear_shared_buffer(&mut self) {
+        self.shared_buffer.clear();
+    }
 }
 
 #[derive(Debug)]
@@ -135,10 +139,15 @@ impl PinnedVersion {
         self.version.id
     }
 
-    pub fn levels(&self) -> &Vec<Level> {
-        // TODO #2065: use correct compaction group id
-        self.version
-            .get_compaction_group_levels(StaticCompactionGroupId::StateDefault.into())
+    pub fn levels(&self, compaction_group_id: Option<CompactionGroupId>) -> Vec<&Level> {
+        match compaction_group_id {
+            None => self.version.get_combined_levels(),
+            Some(compaction_group_id) => self
+                .version
+                .get_compaction_group_levels(compaction_group_id)
+                .iter()
+                .collect_vec(),
+        }
     }
 
     pub fn max_committed_epoch(&self) -> u64 {

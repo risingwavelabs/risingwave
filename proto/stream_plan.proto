@@ -61,6 +61,7 @@ message MaterializeNode {
 // Local and global aggregator distinguish with each other in PlanNode definition.
 message SimpleAggNode {
   repeated expr.AggCall agg_calls = 1;
+  // Only used for local simple agg, not used for global simple agg.
   repeated uint32 distribution_keys = 2;
   repeated catalog.Table internal_tables = 3;
   map<uint32, int32> column_mapping = 4;
@@ -86,7 +87,9 @@ message TopNNode {
   uint64 offset = 3;
   repeated uint32 distribution_keys = 4;
   // Used for internal table states
-  uint32 table_id = 5;
+  uint32 table_id_l = 5;
+  uint32 table_id_m = 6;
+  uint32 table_id_h = 7;
 }
 
 message HashJoinNode {
@@ -173,7 +176,6 @@ message ChainNode {
 message BatchPlanNode {
   plan_common.CellBasedTableDesc table_desc = 1;
   repeated int32 column_ids = 2;
-  repeated uint32 distribution_keys = 3;
 }
 
 message ArrangementInfo {

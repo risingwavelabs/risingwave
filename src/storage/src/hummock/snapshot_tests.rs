@@ -12,13 +12,14 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-#[cfg(test)]
 use std::sync::Arc;
 
 use risingwave_meta::hummock::test_utils::setup_compute_env;
 use risingwave_meta::hummock::MockHummockMetaClient;
 
 use super::*;
+use crate::hummock::compaction_group::StaticCompactionGroupId;
+use crate::hummock::compaction_group_client::DummyCompactionGroupClient;
 use crate::hummock::iterator::test_utils::mock_sstable_store;
 use crate::hummock::test_utils::default_config_for_test;
 use crate::storage_value::StorageValue;
@@ -33,6 +34,7 @@ macro_rules! assert_count_range_scan {
                 ReadOptions {
                     epoch: $epoch,
                     table_id: Default::default(),
+                    ttl: None,
                 },
             )
             .await
@@ -56,6 +58,7 @@ macro_rules! assert_count_backward_range_scan {
                 ReadOptions {
                     epoch: $epoch,
                     table_id: Default::default(),
+                    ttl: None,
                 },
             )
             .await
@@ -86,6 +89,9 @@ async fn test_snapshot_inner(enable_sync: bool, enable_commit: bool) {
         sstable_store,
         mock_hummock_meta_client.clone(),
         Arc::new(StateStoreMetrics::unused()),
+        Arc::new(DummyCompactionGroupClient::new(
+            StaticCompactionGroupId::StateDefault.into(),
+        )),
     )
     .await
     .unwrap();
@@ -204,6 +210,9 @@ async fn test_snapshot_range_scan_inner(enable_sync: bool, enable_commit: bool) 
         sstable_store,
         mock_hummock_meta_client.clone(),
         Arc::new(StateStoreMetrics::unused()),
+        Arc::new(DummyCompactionGroupClient::new(
+            StaticCompactionGroupId::StateDefault.into(),
+        )),
     )
     .await
     .unwrap();
@@ -269,6 +278,9 @@ async fn test_snapshot_backward_range_scan_inner(enable_sync: bool, enable_commi
         sstable_store,
         mock_hummock_meta_client.clone(),
         Arc::new(StateStoreMetrics::unused()),
+        Arc::new(DummyCompactionGroupClient::new(
+            StaticCompactionGroupId::StateDefault.into(),
+        )),
     )
     .await
     .unwrap();

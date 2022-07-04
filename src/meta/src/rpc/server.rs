@@ -289,11 +289,7 @@ pub async fn rpc_serve_with_store<S: MetaStore>(
     let env = MetaSrvEnv::<S>::new(opts, meta_store.clone(), info).await;
     let compaction_group_manager =
         Arc::new(CompactionGroupManager::new(env.clone()).await.unwrap());
-    let fragment_manager = Arc::new(
-        FragmentManager::new(env.clone(), compaction_group_manager.clone())
-            .await
-            .unwrap(),
-    );
+    let fragment_manager = Arc::new(FragmentManager::new(env.clone()).await.unwrap());
     let meta_metrics = Arc::new(MetaMetrics::new());
     let compactor_manager = Arc::new(hummock::CompactorManager::new());
 
@@ -364,6 +360,7 @@ pub async fn rpc_serve_with_store<S: MetaStore>(
             barrier_manager.clone(),
             cluster_manager.clone(),
             source_manager.clone(),
+            compaction_group_manager.clone(),
         )
         .await
         .unwrap(),
@@ -384,6 +381,7 @@ pub async fn rpc_serve_with_store<S: MetaStore>(
                 .into_iter()
                 .map(|source| source.id)
                 .collect_vec(),
+            &source_manager.get_source_ids_in_fragments().await,
         )
         .await
         .unwrap();
@@ -400,14 +398,18 @@ pub async fn rpc_serve_with_store<S: MetaStore>(
     let ddl_srv = DdlServiceImpl::<S>::new(
         env.clone(),
         catalog_manager.clone(),
-        stream_manager.clone(),
+        stream_manager,
         source_manager,
         cluster_manager.clone(),
         fragment_manager.clone(),
     );
     let user_srv = UserServiceImpl::<S>::new(catalog_manager.clone(), user_manager.clone());
     let cluster_srv = ClusterServiceImpl::<S>::new(cluster_manager.clone());
-    let stream_srv = StreamServiceImpl::<S>::new(env.clone(), stream_manager);
+    let stream_srv = StreamServiceImpl::<S>::new(
+        env.clone(),
+        barrier_manager.clone(),
+        fragment_manager.clone(),
+    );
     let hummock_srv = HummockServiceImpl::new(
         hummock_manager.clone(),
         compactor_manager.clone(),
