@@ -81,7 +81,7 @@ impl Output for LocalOutput {
     async fn send(&mut self, message: Message) -> Result<()> {
         // if the buffer is full when sending, the sender is backpressured
         if self.ch.capacity() == 0 {
-            let start_time = Some(Instant::now());
+            let start_time = Instant::now();
             // local channel should never fail
             self.ch
                 .send(message)
@@ -90,7 +90,7 @@ impl Output for LocalOutput {
             self.metrics
                 .actor_output_buffer_blocking_duration
                 .with_label_values(&[&self.actor_id_str])
-                .inc_by(start_time.unwrap().elapsed().as_nanos() as u64);
+                .inc_by(start_time.elapsed().as_nanos() as u64);
         } else {
             self.ch
                 .send(message)
@@ -141,7 +141,7 @@ impl Output for RemoteOutput {
     async fn send(&mut self, message: Message) -> Result<()> {
         // if the buffer is full when sending, the sender is backpressured
         if self.ch.capacity() == 0 {
-            let start_time = Some(Instant::now());
+            let start_time = Instant::now();
             // local channel should never fail
             self.ch
                 .send(message)
@@ -150,7 +150,7 @@ impl Output for RemoteOutput {
             self.metrics
                 .actor_output_buffer_blocking_duration
                 .with_label_values(&[&self.actor_id_str])
-                .inc_by(start_time.unwrap().elapsed().as_nanos() as u64);
+                .inc_by(start_time.elapsed().as_nanos() as u64);
         } else {
             self.ch
                 .send(message)
