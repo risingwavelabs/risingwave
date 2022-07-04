@@ -102,6 +102,12 @@ async fn test_hummock_compaction_task() {
     // Add some sstables and commit.
     let epoch: u64 = 1;
     let original_tables = generate_test_tables(epoch, get_sst_ids(&hummock_manager, sst_num).await);
+    register_sstable_infos_to_compaction_group(
+        hummock_manager.compaction_group_manager_ref_for_test(),
+        &original_tables,
+        StaticCompactionGroupId::StateDefault.into(),
+    )
+    .await;
     hummock_manager
         .commit_epoch(epoch, to_local_sstable_info(&original_tables))
         .await
@@ -216,6 +222,12 @@ async fn test_hummock_table() {
 
     let epoch: u64 = 1;
     let original_tables = generate_test_tables(epoch, get_sst_ids(&hummock_manager, 2).await);
+    register_sstable_infos_to_compaction_group(
+        hummock_manager.compaction_group_manager_ref_for_test(),
+        &original_tables,
+        StaticCompactionGroupId::StateDefault.into(),
+    )
+    .await;
     hummock_manager
         .commit_epoch(epoch, to_local_sstable_info(&original_tables))
         .await
@@ -256,6 +268,12 @@ async fn test_hummock_transaction() {
     {
         // Add tables in epoch1
         let tables_in_epoch1 = generate_test_tables(epoch1, get_sst_ids(&hummock_manager, 2).await);
+        register_sstable_infos_to_compaction_group(
+            hummock_manager.compaction_group_manager_ref_for_test(),
+            &tables_in_epoch1,
+            StaticCompactionGroupId::StateDefault.into(),
+        )
+        .await;
         // Get tables before committing epoch1. No tables should be returned.
         let pinned_version = hummock_manager
             .pin_version(context_id, u64::MAX)
@@ -300,6 +318,12 @@ async fn test_hummock_transaction() {
     {
         // Add tables in epoch2
         let tables_in_epoch2 = generate_test_tables(epoch2, get_sst_ids(&hummock_manager, 2).await);
+        register_sstable_infos_to_compaction_group(
+            hummock_manager.compaction_group_manager_ref_for_test(),
+            &tables_in_epoch2,
+            StaticCompactionGroupId::StateDefault.into(),
+        )
+        .await;
         // Get tables before committing epoch2. tables_in_epoch1 should be returned and
         // tables_in_epoch2 should be invisible.
         let pinned_version = hummock_manager
@@ -403,8 +427,6 @@ async fn test_context_id_validation() {
     let (_env, hummock_manager, cluster_manager, worker_node) = setup_compute_env(80).await;
     let invalid_context_id = HummockContextId::MAX;
     let context_id = worker_node.id;
-    let epoch: u64 = 1;
-    let _original_tables = generate_test_tables(epoch, get_sst_ids(&hummock_manager, 2).await);
 
     // Invalid context id is rejected.
     let error = hummock_manager
@@ -461,6 +483,12 @@ async fn test_hummock_manager_basic() {
     // Add some sstables and commit.
     let epoch: u64 = 1;
     let original_tables = generate_test_tables(epoch, get_sst_ids(&hummock_manager, 2).await);
+    register_sstable_infos_to_compaction_group(
+        hummock_manager.compaction_group_manager_ref_for_test(),
+        &original_tables,
+        StaticCompactionGroupId::StateDefault.into(),
+    )
+    .await;
     hummock_manager
         .commit_epoch(epoch, to_local_sstable_info(&original_tables))
         .await
@@ -561,6 +589,12 @@ async fn test_retryable_pin_version() {
                 hummock_manager.get_new_table_id().await.unwrap(),
             ],
         );
+        register_sstable_infos_to_compaction_group(
+            hummock_manager.compaction_group_manager_ref_for_test(),
+            &test_tables,
+            StaticCompactionGroupId::StateDefault.into(),
+        )
+        .await;
         // Increase the version
         hummock_manager
             .commit_epoch(epoch, to_local_sstable_info(&test_tables))
@@ -594,6 +628,12 @@ async fn test_retryable_pin_version() {
                 hummock_manager.get_new_table_id().await.unwrap(),
             ],
         );
+        register_sstable_infos_to_compaction_group(
+            hummock_manager.compaction_group_manager_ref_for_test(),
+            &test_tables,
+            StaticCompactionGroupId::StateDefault.into(),
+        )
+        .await;
         // Increase the version
         hummock_manager
             .commit_epoch(epoch, to_local_sstable_info(&test_tables))
@@ -632,6 +672,12 @@ async fn test_pin_snapshot_response_lost() {
             hummock_manager.get_new_table_id().await.unwrap(),
         ],
     );
+    register_sstable_infos_to_compaction_group(
+        hummock_manager.compaction_group_manager_ref_for_test(),
+        &test_tables,
+        StaticCompactionGroupId::StateDefault.into(),
+    )
+    .await;
     // [ ] -> [ e0 ]
     hummock_manager
         .commit_epoch(epoch, to_local_sstable_info(&test_tables))
@@ -655,6 +701,12 @@ async fn test_pin_snapshot_response_lost() {
             hummock_manager.get_new_table_id().await.unwrap(),
         ],
     );
+    register_sstable_infos_to_compaction_group(
+        hummock_manager.compaction_group_manager_ref_for_test(),
+        &test_tables,
+        StaticCompactionGroupId::StateDefault.into(),
+    )
+    .await;
     // [ e0:pinned ] -> [ e0:pinned, e1 ]
     hummock_manager
         .commit_epoch(epoch, to_local_sstable_info(&test_tables))
@@ -687,6 +739,12 @@ async fn test_pin_snapshot_response_lost() {
             hummock_manager.get_new_table_id().await.unwrap(),
         ],
     );
+    register_sstable_infos_to_compaction_group(
+        hummock_manager.compaction_group_manager_ref_for_test(),
+        &test_tables,
+        StaticCompactionGroupId::StateDefault.into(),
+    )
+    .await;
     // [ e0, e1:pinned ] -> [ e0, e1:pinned, e2 ]
     hummock_manager
         .commit_epoch(epoch, to_local_sstable_info(&test_tables))
@@ -710,6 +768,12 @@ async fn test_pin_snapshot_response_lost() {
             hummock_manager.get_new_table_id().await.unwrap(),
         ],
     );
+    register_sstable_infos_to_compaction_group(
+        hummock_manager.compaction_group_manager_ref_for_test(),
+        &test_tables,
+        StaticCompactionGroupId::StateDefault.into(),
+    )
+    .await;
     // [ e0, e1:pinned, e2:pinned ] -> [ e0, e1:pinned, e2:pinned, e3 ]
     hummock_manager
         .commit_epoch(epoch, to_local_sstable_info(&test_tables))
@@ -733,6 +797,12 @@ async fn test_print_compact_task() {
     // Add some sstables and commit.
     let epoch: u64 = 1;
     let original_tables = generate_test_tables(epoch, get_sst_ids(&hummock_manager, 2).await);
+    register_sstable_infos_to_compaction_group(
+        hummock_manager.compaction_group_manager_ref_for_test(),
+        &original_tables,
+        StaticCompactionGroupId::StateDefault.into(),
+    )
+    .await;
     hummock_manager
         .commit_epoch(epoch, to_local_sstable_info(&original_tables))
         .await
@@ -762,6 +832,12 @@ async fn test_invalid_sst_id() {
     let (_, hummock_manager, _cluster_manager, _) = setup_compute_env(80).await;
     let epoch = 1;
     let ssts = generate_test_tables(epoch, vec![HummockSSTableId::MAX]);
+    register_sstable_infos_to_compaction_group(
+        hummock_manager.compaction_group_manager_ref_for_test(),
+        &ssts,
+        StaticCompactionGroupId::StateDefault.into(),
+    )
+    .await;
     let error = hummock_manager
         .commit_epoch(epoch, to_local_sstable_info(&ssts))
         .await
@@ -785,6 +861,12 @@ async fn test_mark_orphan_ssts() {
         epoch,
         vec![hummock_manager.get_new_table_id().await.unwrap()],
     );
+    register_sstable_infos_to_compaction_group(
+        hummock_manager.compaction_group_manager_ref_for_test(),
+        &ssts,
+        StaticCompactionGroupId::StateDefault.into(),
+    )
+    .await;
     let marked = hummock_manager
         .mark_orphan_ssts(Duration::from_secs(0))
         .await
@@ -847,6 +929,12 @@ async fn test_trigger_manual_compaction() {
     // Add some sstables and commit.
     let epoch: u64 = 1;
     let original_tables = generate_test_tables(epoch, get_sst_ids(&hummock_manager, sst_num).await);
+    register_sstable_infos_to_compaction_group(
+        hummock_manager.compaction_group_manager_ref_for_test(),
+        &original_tables,
+        StaticCompactionGroupId::StateDefault.into(),
+    )
+    .await;
     hummock_manager
         .commit_epoch(epoch, to_local_sstable_info(&original_tables))
         .await

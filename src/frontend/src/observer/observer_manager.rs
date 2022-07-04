@@ -187,7 +187,11 @@ impl ObserverManager {
         };
 
         match info {
-            Info::Database(_) | Info::Schema(_) | Info::Table(_) | Info::Source(_) => {
+            Info::Database(_)
+            | Info::Schema(_)
+            | Info::Table(_)
+            | Info::Source(_)
+            | Info::Sink(_) => {
                 self.handle_catalog_notification(resp);
             }
             Info::Node(node) => {

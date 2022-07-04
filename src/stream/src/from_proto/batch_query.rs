@@ -15,9 +15,9 @@
 use itertools::Itertools;
 use risingwave_common::catalog::{ColumnDesc, ColumnId, OrderedColumnDesc, TableId};
 use risingwave_pb::plan_common::CellBasedTableDesc;
-use risingwave_storage::table::cell_based_table::CellBasedTable;
+use risingwave_storage::table::storage_table::StorageTable;
 use risingwave_storage::table::Distribution;
-use risingwave_storage::{Keyspace, StateStore};
+use risingwave_storage::StateStore;
 
 use super::*;
 use crate::executor::BatchQueryExecutor;
@@ -70,8 +70,6 @@ impl ExecutorBuilder for BatchQueryExecutorBuilder {
             .map(|&k| k as usize)
             .collect_vec();
 
-        let keyspace = Keyspace::table_root(state_store, &table_id);
-
         let distribution = match params.vnode_bitmap {
             Some(vnodes) => Distribution {
                 dist_key_indices,
@@ -79,8 +77,9 @@ impl ExecutorBuilder for BatchQueryExecutorBuilder {
             },
             None => Distribution::fallback(),
         };
-        let table = CellBasedTable::new_partial(
-            keyspace,
+        let table = StorageTable::new_partial(
+            state_store,
+            table_id,
             column_descs,
             column_ids,
             order_types,

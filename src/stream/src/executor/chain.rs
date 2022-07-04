@@ -39,18 +39,13 @@ pub struct ChainExecutor {
     info: ExecutorInfo,
 }
 
-fn mapping(upstream_indices: &[usize], msg: Message) -> Message {
-    match msg {
-        Message::Chunk(chunk) => {
-            let (ops, columns, visibility) = chunk.into_inner();
-            let mapped_columns = upstream_indices
-                .iter()
-                .map(|&i| columns[i].clone())
-                .collect();
-            Message::Chunk(StreamChunk::new(ops, mapped_columns, visibility))
-        }
-        _ => msg,
-    }
+fn mapping(upstream_indices: &[usize], chunk: StreamChunk) -> StreamChunk {
+    let (ops, columns, visibility) = chunk.into_inner();
+    let mapped_columns = upstream_indices
+        .iter()
+        .map(|&i| columns[i].clone())
+        .collect();
+    StreamChunk::new(ops, mapped_columns, visibility)
 }
 
 impl ChainExecutor {
@@ -103,13 +98,19 @@ impl ChainExecutor {
             }
         }
 
-        // 3. Report that we've finished the creation.
-        self.progress.finish();
-
-        // 4. Continuously consume the upstream.
+        // 3. Continuously consume the upstream. Report that we've finished the creation on the
+        // first barrier.
         #[for_await]
         for msg in upstream {
-            yield mapping(&self.upstream_indices, msg?);
+            match msg? {
+                Message::Chunk(chunk) => {
+                    yield Message::Chunk(mapping(&self.upstream_indices, chunk));
+                }
+                Message::Barrier(barrier) => {
+                    self.progress.finish(barrier.epoch.curr);
+                    yield Message::Barrier(barrier);
+                }
+            }
         }
     }
 }
