@@ -377,15 +377,54 @@
     select sum(v1) FILTER (WHERE v1 > 0) AS sa from t;
   logical_plan: |
     LogicalProject { exprs: [$0] }
-      LogicalAgg { group_keys: [], agg_calls: [sum($0) filter(($1 > 0:Int32))] }
+      LogicalAgg { group_keys: [], agg_calls: [sum($0) filter(($0 > 0:Int32))] }
         LogicalProject { exprs: [$1] }
           LogicalScan { table: t, columns: [_row_id, v1] }
   optimized_logical_plan: |
-    LogicalAgg { group_keys: [], agg_calls: [sum($0) filter(($1 > 0:Int32))] }
+    LogicalAgg { group_keys: [], agg_calls: [sum($0) filter(($0 > 0:Int32))] }
       LogicalScan { table: t, columns: [v1] }
   stream_plan: |
     StreamMaterialize { columns: [agg#0(hidden), sa], pk_columns: [] }
-      StreamGlobalSimpleAgg { aggs: [sum($0), sum($1) filter(($1 > 0:Int32))] }
+      StreamGlobalSimpleAgg { aggs: [sum($0), sum($1) filter(($0 > 0:Int32))] }
         StreamExchange { dist: Single }
-          StreamLocalSimpleAgg { aggs: [count, sum($0) filter(($1 > 0:Int32))] }
+          StreamLocalSimpleAgg { aggs: [count, sum($0) filter(($0 > 0:Int32))] }
             StreamTableScan { table: t, columns: [v1, _row_id], pk_indices: [1] }
+- sql: |
+    /* complex filter clause */
+    create table t(a int, b int);
+    select max(a * b) FILTER (WHERE a < b AND a + b < 100 AND a * b != a + b - 1) AS sab from t;
+  logical_plan: |
+    LogicalProject { exprs: [$0] }
+      LogicalAgg { group_keys: [], agg_calls: [max($2) filter(((($0 < $1) AND (($0 + $1) < 100:Int32)) AND (($0 * $1) <> (($0 + $1) - 1:Int32))))] }
+        LogicalProject { exprs: [$1, $2, ($1 * $2)] }
+          LogicalScan { table: t, columns: [_row_id, a, b] }
+  optimized_logical_plan: |
+    LogicalAgg { group_keys: [], agg_calls: [max($0) filter(((($0 < $1) AND (($0 + $1) < 100:Int32)) AND (($0 * $1) <> (($0 + $1) - 1:Int32))))] }
+      LogicalProject { exprs: [($0 * $1)] }
+        LogicalScan { table: t, columns: [a, b] }
+  stream_plan: |
+    StreamMaterialize { columns: [agg#0(hidden), sab], pk_columns: [] }
+      StreamGlobalSimpleAgg { aggs: [count, max($0) filter(((($0 < $1) AND (($0 + $1) < 100:Int32)) AND (($0 * $1) <> (($0 + $1) - 1:Int32))))] }
+        StreamExchange { dist: Single }
+          StreamProject { exprs: [($0 * $1), $2] }
+            StreamTableScan { table: t, columns: [a, b, _row_id], pk_indices: [2] }
+- sql: |
+    /* avg filter clause */
+    create table t(a int, b int);
+    select avg(a) FILTER (WHERE a > b) AS avga from t;
+  logical_plan: |
+    LogicalProject { exprs: [($0::Decimal / $1)] }
+      LogicalAgg { group_keys: [], agg_calls: [sum($0) filter(($0 > $1)), count($0) filter(($0 > $1))] }
+        LogicalProject { exprs: [$1, $2] }
+          LogicalScan { table: t, columns: [_row_id, a, b] }
+  optimized_logical_plan: |
+    LogicalProject { exprs: [($0::Decimal / $1)] }
+      LogicalAgg { group_keys: [], agg_calls: [sum($0) filter(($0 > $1)), count($0) filter(($0 > $1))] }
+        LogicalScan { table: t, columns: [a] }
+  stream_plan: |
+    StreamMaterialize { columns: [avga], pk_columns: [] }
+      StreamProject { exprs: [($1::Decimal / $2)] }
+        StreamGlobalSimpleAgg { aggs: [sum($0), sum($1) filter(($0 > $1)), sum($2) filter(($0 > $1))] }
+          StreamExchange { dist: Single }
+            StreamLocalSimpleAgg { aggs: [count, sum($0) filter(($0 > $1)), count($0) filter(($0 > $1))] }
+              StreamTableScan { table: t, columns: [a, _row_id], pk_indices: [1] }

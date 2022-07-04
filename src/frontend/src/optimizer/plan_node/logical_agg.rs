@@ -72,7 +72,11 @@ impl fmt::Debug for PlanAggCall {
             write!(f, ")")?;
         }
         if !self.filter.always_true() {
-            write!(f, " filter({:?})", self.filter.as_expr_unless_true().unwrap())?;
+            write!(
+                f,
+                " filter({:?})",
+                self.filter.as_expr_unless_true().unwrap()
+            )?;
         }
         Ok(())
     }
@@ -309,6 +313,10 @@ impl LogicalAgg {
     }
 }
 
+struct FilterClauseRewriter {}
+
+impl ExprRewriter for FilterClauseRewriter {}
+
 /// `LogicalAggBuilder` extracts agg calls and references to group columns from select list and
 /// build the plan like `LogicalAgg - LogicalProject`.
 /// it is constructed by `group_exprs` and collect and rewrite the expression in selection and
@@ -322,6 +330,12 @@ struct LogicalAggBuilder {
     agg_calls: Vec<PlanAggCall>,
     /// the error during the expression rewriting
     error: Option<ErrorCode>,
+    /// If `is_in_filter_clause` is true, it means that
+    /// we are processing a filter clause.
+    /// This field is needed because input refs in filter clause
+    /// are allowed to refer to any columns, while those not in filter
+    /// clause are only allowed to refer to group keys.
+    is_in_filter_clause: bool,
 }
 
 impl LogicalAggBuilder {
@@ -347,6 +361,7 @@ impl LogicalAggBuilder {
             agg_calls: vec![],
             error: None,
             input_proj_builder,
+            is_in_filter_clause: false,
         })
     }
 
@@ -391,7 +406,9 @@ impl ExprRewriter for LogicalAggBuilder {
     fn rewrite_agg_call(&mut self, agg_call: AggCall) -> ExprImpl {
         let return_type = agg_call.return_type();
         let (agg_kind, inputs, distinct, filter) = agg_call.decompose();
-
+        self.is_in_filter_clause = true;
+        let filter = filter.rewrite_expr(self);
+        self.is_in_filter_clause = false;
         for i in &inputs {
             if i.has_agg_call() {
                 self.error = Some(ErrorCode::InvalidInputSyntax(
@@ -440,7 +457,7 @@ impl ExprRewriter for LogicalAggBuilder {
                 return_type: right_return_type.clone(),
                 inputs,
                 distinct,
-                filter
+                filter,
             });
 
             let right = InputRef::new(
@@ -455,7 +472,7 @@ impl ExprRewriter for LogicalAggBuilder {
                 return_type: return_type.clone(),
                 inputs,
                 distinct,
-                filter
+                filter,
             });
             ExprImpl::from(InputRef::new(
                 self.group_keys.len() + self.agg_calls.len() - 1,
@@ -485,6 +502,8 @@ impl ExprRewriter for LogicalAggBuilder {
         let expr = input_ref.into();
         if let Some(group_key) = self.try_as_group_expr(&expr) {
             InputRef::new(group_key, expr.return_type()).into()
+        } else if self.is_in_filter_clause {
+            InputRef::new(self.input_proj_builder.add_expr(&expr), expr.return_type()).into()
         } else {
             self.error = Some(ErrorCode::InvalidInputSyntax(
                 "column must appear in the GROUP BY clause or be used in an aggregate function"
