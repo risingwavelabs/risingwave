@@ -22,13 +22,14 @@ use risingwave_common::types::DataType;
 use risingwave_common::util::ordered::{serialize_pk, OrderedRowSerializer};
 use risingwave_common::util::sort_util::OrderType;
 
-use crate::cell_based_row_serializer::CellBasedRowSerializer;
+use crate::encoding::cell_based_row_serializer::CellBasedRowSerializer;
+use crate::encoding::Encoding;
 use crate::error::StorageResult;
 use crate::memory::MemoryStateStore;
 use crate::storage_value::{StorageValue, ValueMeta};
 use crate::store::{StateStore, WriteOptions};
-use crate::table::cell_based_table::{CellBasedTable, DEFAULT_VNODE};
-use crate::table::state_table::StateTable;
+use crate::table::state_table::{DedupPkStateTable, StateTable};
+use crate::table::storage_table::{StorageTable, DEFAULT_VNODE};
 use crate::table::TableIter;
 use crate::Keyspace;
 
@@ -42,7 +43,6 @@ use crate::Keyspace;
 #[tokio::test]
 async fn test_state_table() -> StorageResult<()> {
     let state_store = MemoryStateStore::new();
-    let keyspace = Keyspace::table_root(state_store.clone(), &TableId::from(0x42));
     let column_descs = vec![
         ColumnDesc::unnamed(ColumnId::from(0), DataType::Int32),
         ColumnDesc::unnamed(ColumnId::from(1), DataType::Int32),
@@ -50,8 +50,14 @@ async fn test_state_table() -> StorageResult<()> {
     ];
     let order_types = vec![OrderType::Ascending];
     let pk_index = vec![0_usize];
-    let mut state_table =
-        StateTable::new(keyspace.clone(), column_descs, order_types, None, pk_index);
+    let mut state_table = StateTable::new(
+        state_store.clone(),
+        TableId::from(0x42),
+        column_descs,
+        order_types,
+        None,
+        pk_index,
+    );
     let mut epoch: u64 = 0;
     state_table
         .insert(Row(vec![
@@ -172,7 +178,6 @@ async fn test_state_table() -> StorageResult<()> {
 #[tokio::test]
 async fn test_state_table_update_insert() -> StorageResult<()> {
     let state_store = MemoryStateStore::new();
-    let keyspace = Keyspace::table_root(state_store.clone(), &TableId::from(0x42));
     let column_descs = vec![
         ColumnDesc::unnamed(ColumnId::from(0), DataType::Int32),
         ColumnDesc::unnamed(ColumnId::from(1), DataType::Int32),
@@ -181,8 +186,14 @@ async fn test_state_table_update_insert() -> StorageResult<()> {
     ];
     let order_types = vec![OrderType::Ascending];
     let pk_index = vec![0_usize];
-    let mut state_table =
-        StateTable::new(keyspace.clone(), column_descs, order_types, None, pk_index);
+    let mut state_table = StateTable::new(
+        state_store.clone(),
+        TableId::from(0x42),
+        column_descs,
+        order_types,
+        None,
+        pk_index,
+    );
     let mut epoch: u64 = 0;
     state_table
         .insert(Row(vec![
@@ -350,7 +361,6 @@ async fn test_state_table_update_insert() -> StorageResult<()> {
 async fn test_state_table_iter() {
     let state_store = MemoryStateStore::new();
     let order_types = vec![OrderType::Ascending, OrderType::Descending];
-    let keyspace = Keyspace::table_root(state_store, &TableId::from(0x42));
     let column_ids = vec![ColumnId::from(0), ColumnId::from(1), ColumnId::from(2)];
     let column_descs = vec![
         ColumnDesc::unnamed(column_ids[0], DataType::Int32),
@@ -359,7 +369,8 @@ async fn test_state_table_iter() {
     ];
     let pk_index = vec![0_usize, 1_usize];
     let mut state = StateTable::new(
-        keyspace.clone(),
+        state_store.clone(),
+        TableId::from(0x42),
         column_descs.clone(),
         order_types.clone(),
         Some(vec![1]),
@@ -597,9 +608,6 @@ async fn test_multi_state_table_iter() {
     let state_store = MemoryStateStore::new();
     // let pk_columns = vec![0, 1]; leave a message to indicate pk columns
     let order_types = vec![OrderType::Ascending, OrderType::Descending];
-
-    let keyspace_1 = Keyspace::table_root(state_store.clone(), &TableId::from(0x1111));
-    let keyspace_2 = Keyspace::table_root(state_store.clone(), &TableId::from(0x2222));
     let epoch: u64 = 0;
 
     let column_ids = vec![ColumnId::from(0), ColumnId::from(1), ColumnId::from(2)];
@@ -615,14 +623,16 @@ async fn test_multi_state_table_iter() {
     ];
     let pk_index = vec![0_usize, 1_usize];
     let mut state_1 = StateTable::new(
-        keyspace_1.clone(),
+        state_store.clone(),
+        TableId::from(0x1111),
         column_descs_1.clone(),
         order_types.clone(),
         None,
         pk_index.clone(),
     );
     let mut state_2 = StateTable::new(
-        keyspace_2.clone(),
+        state_store.clone(),
+        TableId::from(0x2222),
         column_descs_2.clone(),
         order_types.clone(),
         None,
@@ -719,9 +729,9 @@ async fn test_cell_based_get_row_by_scan() {
     ];
     let pk_indices = vec![0_usize, 1_usize];
     let order_types = vec![OrderType::Ascending, OrderType::Descending];
-    let keyspace = Keyspace::table_root(state_store, &TableId::from(0x42));
     let mut state = StateTable::new(
-        keyspace.clone(),
+        state_store.clone(),
+        TableId::from(0x42),
         column_descs.clone(),
         order_types.clone(),
         None,
@@ -790,9 +800,9 @@ async fn test_cell_based_get_row_by_multi_get() {
     ];
     let pk_indices = vec![0_usize, 1_usize];
     let order_types = vec![OrderType::Ascending, OrderType::Descending];
-    let keyspace = Keyspace::table_root(state_store, &TableId::from(0x42));
     let mut state = StateTable::new(
-        keyspace.clone(),
+        state_store.clone(),
+        TableId::from(0x42),
         column_descs.clone(),
         order_types.clone(),
         None,
@@ -853,7 +863,6 @@ async fn test_cell_based_get_row_by_multi_get() {
 async fn test_cell_based_get_row_for_string() {
     let state_store = MemoryStateStore::new();
     let order_types = vec![OrderType::Ascending, OrderType::Descending];
-    let keyspace = Keyspace::table_root(state_store, &TableId::from(0x42));
     let column_ids = vec![ColumnId::from(1), ColumnId::from(4), ColumnId::from(7)];
     let column_descs = vec![
         ColumnDesc::unnamed(column_ids[0], DataType::Varchar),
@@ -862,7 +871,8 @@ async fn test_cell_based_get_row_for_string() {
     ];
     let pk_indices = vec![0_usize, 1_usize];
     let mut state = StateTable::new(
-        keyspace.clone(),
+        state_store.clone(),
+        TableId::from(0x42),
         column_descs.clone(),
         order_types.clone(),
         None,
@@ -938,10 +948,10 @@ async fn test_shuffled_column_id_for_get_row() {
     ];
 
     let order_types = vec![OrderType::Ascending, OrderType::Descending];
-    let keyspace = Keyspace::table_root(state_store, &TableId::from(0x42));
     let pk_indices = vec![0_usize, 1_usize];
     let mut state = StateTable::new(
-        keyspace.clone(),
+        state_store.clone(),
+        TableId::from(0x42),
         column_descs.clone(),
         order_types.clone(),
         None,
@@ -1002,7 +1012,6 @@ async fn test_shuffled_column_id_for_get_row() {
 async fn test_cell_based_table_iter() {
     let state_store = MemoryStateStore::new();
     let order_types = vec![OrderType::Ascending, OrderType::Descending];
-    let keyspace = Keyspace::table_root(state_store, &TableId::from(0x42));
     let column_ids = vec![ColumnId::from(0), ColumnId::from(1), ColumnId::from(2)];
     let column_descs = vec![
         ColumnDesc::unnamed(column_ids[0], DataType::Int32),
@@ -1011,7 +1020,8 @@ async fn test_cell_based_table_iter() {
     ];
     let pk_indices = vec![0_usize, 1_usize];
     let mut state = StateTable::new(
-        keyspace.clone(),
+        state_store.clone(),
+        TableId::from(0x42),
         column_descs.clone(),
         order_types.clone(),
         None,
@@ -1067,9 +1077,6 @@ async fn test_multi_cell_based_table_iter() {
     let state_store = MemoryStateStore::new();
     // let pk_columns = vec![0, 1]; leave a message to indicate pk columns
     let order_types = vec![OrderType::Ascending, OrderType::Descending];
-
-    let keyspace_1 = Keyspace::table_root(state_store.clone(), &TableId::from(0x1111));
-    let keyspace_2 = Keyspace::table_root(state_store.clone(), &TableId::from(0x2222));
     let epoch: u64 = 0;
 
     let column_ids = vec![ColumnId::from(0), ColumnId::from(1), ColumnId::from(2)];
@@ -1085,14 +1092,16 @@ async fn test_multi_cell_based_table_iter() {
     ];
     let pk_indices = vec![0_usize, 1_usize];
     let mut state_1 = StateTable::new(
-        keyspace_1.clone(),
+        state_store.clone(),
+        TableId::from(0x1111),
         column_descs_1.clone(),
         order_types.clone(),
         None,
         pk_indices.clone(),
     );
     let mut state_2 = StateTable::new(
-        keyspace_2.clone(),
+        state_store.clone(),
+        TableId::from(0x2222),
         column_descs_2.clone(),
         order_types.clone(),
         None,
@@ -1225,8 +1234,13 @@ async fn test_dedup_cell_based_table_iter_with(
     let ordered_row_serializer = OrderedRowSerializer::new(order_types.clone());
 
     // ---------- Init table for writes
-    let table =
-        CellBasedTable::new_for_test(keyspace.clone(), row_descs, order_types, pk_indices.clone());
+    let table = StorageTable::new_for_test(
+        state_store.clone(),
+        TableId::from(0x1111),
+        row_descs,
+        order_types,
+        pk_indices.clone(),
+    );
 
     for Row(row) in rows.clone() {
         // ---------- Serialize to cell repr
@@ -1244,7 +1258,7 @@ async fn test_dedup_cell_based_table_iter_with(
             .collect_vec());
 
         let bytes = cell_based_row_serializer
-            .serialize(DEFAULT_VNODE, &pk_bytes, partial_row)
+            .cell_based_serialize(DEFAULT_VNODE, &pk_bytes, partial_row)
             .unwrap();
 
         // ---------- Batch-write
@@ -1339,10 +1353,10 @@ async fn test_cell_based_scan_empty_column_ids_cardinality() {
     ];
     // let pk_columns = vec![0, 1]; leave a message to indicate pk columns
     let order_types = vec![OrderType::Ascending, OrderType::Descending];
-    let keyspace = Keyspace::table_root(state_store, &TableId::from(0x42));
     let pk_indices = vec![0_usize, 1_usize];
     let mut state = StateTable::new(
-        keyspace.clone(),
+        state_store.clone(),
+        TableId::from(0x42),
         column_descs.clone(),
         order_types.clone(),
         None,
@@ -1383,7 +1397,6 @@ async fn test_state_table_iter_with_bounds() {
     let state_store = MemoryStateStore::new();
     // let pk_columns = vec![0, 1]; leave a message to indicate pk columns
     let order_types = vec![OrderType::Ascending, OrderType::Descending];
-    let keyspace = Keyspace::table_root(state_store, &TableId::from(0x42));
     let column_ids = vec![ColumnId::from(0), ColumnId::from(1), ColumnId::from(2)];
     let column_descs = vec![
         ColumnDesc::unnamed(column_ids[0], DataType::Int32),
@@ -1392,7 +1405,8 @@ async fn test_state_table_iter_with_bounds() {
     ];
     let pk_index = vec![0_usize, 1_usize];
     let mut state = StateTable::new(
-        keyspace.clone(),
+        state_store.clone(),
+        TableId::from(0x42),
         column_descs.clone(),
         order_types.clone(),
         None,
@@ -1513,7 +1527,6 @@ async fn test_state_table_iter_with_unbounded_range() {
     let state_store = MemoryStateStore::new();
     // let pk_columns = vec![0, 1]; leave a message to indicate pk columns
     let order_types = vec![OrderType::Ascending, OrderType::Descending];
-    let keyspace = Keyspace::table_root(state_store, &TableId::from(0x42));
     let column_ids = vec![ColumnId::from(0), ColumnId::from(1), ColumnId::from(2)];
     let column_descs = vec![
         ColumnDesc::unnamed(column_ids[0], DataType::Int32),
@@ -1522,7 +1535,8 @@ async fn test_state_table_iter_with_unbounded_range() {
     ];
     let pk_index = vec![0_usize, 1_usize];
     let mut state = StateTable::new(
-        keyspace.clone(),
+        state_store.clone(),
+        TableId::from(0x42),
         column_descs.clone(),
         order_types.clone(),
         None,
@@ -1654,7 +1668,6 @@ async fn test_state_table_iter_with_prefix() {
     let state_store = MemoryStateStore::new();
     // let pk_columns = vec![0, 1]; leave a message to indicate pk columns
     let order_types = vec![OrderType::Ascending, OrderType::Descending];
-    let keyspace = Keyspace::table_root(state_store, &TableId::from(0x42));
 
     let column_ids = vec![ColumnId::from(0), ColumnId::from(1), ColumnId::from(2)];
     let column_descs = vec![
@@ -1664,7 +1677,8 @@ async fn test_state_table_iter_with_prefix() {
     ];
     let pk_index = vec![0_usize, 1_usize];
     let mut state = StateTable::new(
-        keyspace.clone(),
+        state_store.clone(),
+        TableId::from(0x42),
         column_descs.clone(),
         order_types.clone(),
         None,
@@ -1775,4 +1789,92 @@ async fn test_state_table_iter_with_prefix() {
     // pk without the prefix the range will not be scan
     let res = iter.next().await;
     assert!(res.is_none());
+}
+
+#[tokio::test]
+async fn test_dedup_pk_table_write_with_cell_based_read() {
+    // ---------- init state store
+    let state_store = MemoryStateStore::new();
+
+    // ---------- declare table layout
+    let column_ids = vec![ColumnId::from(0), ColumnId::from(1), ColumnId::from(2)];
+    let actual_column_descs = vec![
+        ColumnDesc::unnamed(column_ids[0], DataType::Int32),
+        ColumnDesc::unnamed(column_ids[1], DataType::Int32),
+        ColumnDesc::unnamed(column_ids[2], DataType::Int32),
+    ];
+
+    // ---------- declare pk
+    let order_types = vec![OrderType::Descending];
+    let pk_indices = vec![1_usize];
+    let pk_ordered_descs = vec![OrderedColumnDesc {
+        column_desc: ColumnDesc::unnamed(ColumnId::from(1), DataType::Int32),
+        order: OrderType::Descending,
+    }];
+
+    // ---------- Init state table interface
+    let mut state = DedupPkStateTable::new(
+        state_store.clone(),
+        TableId::from(0x42),
+        actual_column_descs.clone(),
+        order_types.clone(),
+        None,
+        pk_indices.clone(),
+    );
+
+    // ---------- Init table for reads
+    state
+        .insert(Row(vec![
+            Some(1_i32.into()),
+            Some(11_i32.into()),
+            Some(111_i32.into()),
+        ]))
+        .unwrap();
+
+    state
+        .insert(Row(vec![
+            Some(2_i32.into()),
+            Some(22_i32.into()),
+            Some(222_i32.into()),
+        ]))
+        .unwrap();
+
+    let epoch: u64 = 0;
+    state.commit(epoch).await.unwrap();
+
+    // ---------- Init reader
+    let table = StorageTable::new_for_test(
+        state_store.clone(),
+        TableId::from(0x42),
+        actual_column_descs,
+        order_types,
+        pk_indices,
+    );
+    let epoch: u64 = 0;
+    let iter = table
+        .batch_dedup_pk_iter(epoch, &pk_ordered_descs)
+        .await
+        .unwrap();
+    pin_mut!(iter);
+
+    // ---------- Read + Deserialize from storage
+    let expected_2 = Row(vec![
+        Some(2_i32.into()),
+        Some(22_i32.into()),
+        Some(222_i32.into()),
+    ]);
+    let actual_2 = iter.next_row().await.unwrap();
+    assert!(actual_2.is_some());
+    assert_eq!(actual_2.unwrap(), expected_2);
+
+    let expected_1 = Row(vec![
+        Some(1_i32.into()),
+        Some(11_i32.into()),
+        Some(111_i32.into()),
+    ]);
+    let actual_1 = iter.next_row().await.unwrap();
+    assert!(actual_1.is_some());
+    assert_eq!(actual_1.unwrap(), expected_1);
+    let actual_3 = iter.next_row().await.unwrap();
+    assert!(actual_3.is_none())
 }

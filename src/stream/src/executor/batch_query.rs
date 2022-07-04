@@ -14,12 +14,9 @@
 
 use futures::{pin_mut, StreamExt};
 use futures_async_stream::try_stream;
-use risingwave_common::array::{DataChunk, Op, StreamChunk};
-use risingwave_common::buffer::{Bitmap, BitmapBuilder};
+use risingwave_common::array::{Op, StreamChunk};
 use risingwave_common::catalog::{OrderedColumnDesc, Schema};
-use risingwave_common::types::VIRTUAL_NODE_COUNT;
-use risingwave_common::util::hash_util::CRC32FastBuilder;
-use risingwave_storage::table::cell_based_table::{CellBasedTable, READ_ONLY};
+use risingwave_storage::table::storage_table::{StorageTable, READ_ONLY};
 use risingwave_storage::table::TableIter;
 use risingwave_storage::StateStore;
 
@@ -28,19 +25,13 @@ use super::{Executor, ExecutorInfo, Message};
 use crate::executor::BoxedMessageStream;
 
 pub struct BatchQueryExecutor<S: StateStore> {
-    /// The [`CellBasedTable`] that needs to be queried
-    table: CellBasedTable<S, READ_ONLY>,
+    /// The [`StorageTable`] that needs to be queried
+    table: StorageTable<S, READ_ONLY>,
 
     /// The number of tuples in one [`StreamChunk`]
     batch_size: usize,
 
     info: ExecutorInfo,
-
-    /// Indices of the columns on which key distribution depends.
-    key_indices: Vec<usize>,
-
-    /// vnode bitmap used to filter data belong to this parallel unit.
-    hash_filter: Bitmap,
 
     /// public key field descriptors. Used to decode pk into datums
     /// for dedup pk encoding.
@@ -54,19 +45,15 @@ where
     const DEFAULT_BATCH_SIZE: usize = 100;
 
     pub fn new(
-        table: CellBasedTable<S, READ_ONLY>,
+        table: StorageTable<S, READ_ONLY>,
         batch_size: Option<usize>,
         info: ExecutorInfo,
-        key_indices: Vec<usize>,
-        hash_filter: Bitmap,
         pk_descs: Vec<OrderedColumnDesc>,
     ) -> Self {
         Self {
             table,
             batch_size: batch_size.unwrap_or(Self::DEFAULT_BATCH_SIZE),
             info,
-            key_indices,
-            hash_filter,
             pk_descs,
         }
     }
@@ -83,41 +70,9 @@ where
             .collect_data_chunk(self.schema(), Some(self.batch_size))
             .await?
         {
-            // Filter out rows
-            let filtered_data_chunk = match self.filter_chunk(data_chunk) {
-                Some(chunk) => chunk,
-                None => {
-                    continue;
-                }
-            };
-            let compacted_chunk = filtered_data_chunk.compact()?;
-            let ops = vec![Op::Insert; compacted_chunk.cardinality()];
-            let stream_chunk = StreamChunk::from_parts(ops, compacted_chunk);
+            let ops = vec![Op::Insert; data_chunk.capacity()];
+            let stream_chunk = StreamChunk::from_parts(ops, data_chunk);
             yield Message::Chunk(stream_chunk);
-        }
-    }
-
-    /// Now we use hash as a workaround for supporting parallelized chain.
-    fn filter_chunk(&self, data_chunk: DataChunk) -> Option<DataChunk> {
-        let hash_values = data_chunk
-            .get_hash_values(self.key_indices.as_ref(), CRC32FastBuilder)
-            .unwrap();
-        let n = data_chunk.cardinality();
-        let (columns, _visibility) = data_chunk.into_parts();
-
-        let mut new_visibility = BitmapBuilder::with_capacity(n);
-        for hv in &hash_values {
-            new_visibility.append(
-                self.hash_filter
-                    .is_set((hv.0 % VIRTUAL_NODE_COUNT as u64) as usize)
-                    .unwrap_or(false),
-            );
-        }
-        let new_visibility = new_visibility.finish();
-        if new_visibility.num_high_bits() > 0 {
-            Some(DataChunk::new(columns, new_visibility))
-        } else {
-            None
         }
     }
 }
@@ -171,13 +126,7 @@ mod test {
             pk_indices: vec![0, 1],
             identity: "BatchQuery".to_owned(),
         };
-        let hash_filter = {
-            let mut builder = BitmapBuilder::with_capacity(VIRTUAL_NODE_COUNT);
-            for _ in 0..VIRTUAL_NODE_COUNT {
-                builder.append(true);
-            }
-            builder.finish()
-        };
+
         let pk_descs = vec![
             OrderedColumnDesc {
                 column_desc: ColumnDesc::unnamed(ColumnId::from(0), DataType::Int32),
@@ -193,8 +142,6 @@ mod test {
             table,
             Some(test_batch_size),
             info,
-            vec![],
-            hash_filter,
             pk_descs,
         ));
 

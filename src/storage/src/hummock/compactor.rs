@@ -19,14 +19,18 @@ use std::sync::Arc;
 use std::time::{Duration, Instant};
 
 use bytes::{Bytes, BytesMut};
+use dyn_clone::DynClone;
 use futures::future::{try_join_all, BoxFuture};
 use futures::{stream, FutureExt, StreamExt, TryFutureExt};
 use itertools::Itertools;
+use risingwave_common::config::constant::hummock::{CompactionFilterFlag, TABLE_OPTION_DUMMY_TTL};
 use risingwave_common::config::StorageConfig;
 use risingwave_common::util::compress::decompress_data;
 use risingwave_hummock_sdk::compact::compact_task_to_string;
 use risingwave_hummock_sdk::compaction_group::StaticCompactionGroupId;
-use risingwave_hummock_sdk::key::{get_epoch, get_table_id, Epoch, FullKey};
+use risingwave_hummock_sdk::key::{
+    extract_table_id_and_epoch, get_epoch, get_table_id, Epoch, FullKey,
+};
 use risingwave_hummock_sdk::key_range::KeyRange;
 use risingwave_hummock_sdk::{CompactionGroupId, HummockSSTableId, VersionedComparator};
 use risingwave_pb::hummock::{CompactTask, SstableInfo, SubscribeCompactTasksResponse, VacuumTask};
@@ -50,7 +54,7 @@ use crate::hummock::sstable_store::SstableStoreRef;
 use crate::hummock::state_store::ForwardIter;
 use crate::hummock::utils::can_concat;
 use crate::hummock::vacuum::Vacuum;
-use crate::hummock::HummockError;
+use crate::hummock::{CachePolicy, HummockError};
 use crate::monitor::{StateStoreMetrics, StoreLocalStatistic};
 
 pub type SstableIdGenerator =
@@ -94,13 +98,17 @@ pub struct CompactorContext {
     pub compaction_executor: Option<Arc<CompactionExecutor>>,
 }
 
-trait CompactionFilter {
+trait CompactionFilter: Send + DynClone {
     fn filter(&self, _: &[u8]) -> bool {
         true
     }
 }
 
+dyn_clone::clone_trait_object!(CompactionFilter);
+
+#[derive(Clone)]
 pub struct DummyCompactionFilter;
+
 impl CompactionFilter for DummyCompactionFilter {}
 
 #[derive(Clone)]
@@ -123,6 +131,57 @@ impl CompactionFilter for StateCleanUpCompactionFilter {
             None => true,
             Some(table_id) => self.existing_table_ids.contains(&table_id),
         }
+    }
+}
+
+#[derive(Clone)]
+pub struct TTLCompactionFilter {
+    table_id_to_ttl: HashMap<u32, u32>,
+    expire: u64,
+}
+
+impl CompactionFilter for TTLCompactionFilter {
+    fn filter(&self, key: &[u8]) -> bool {
+        pub use risingwave_common::util::epoch::Epoch;
+        let (table_id, epoch) = extract_table_id_and_epoch(key);
+        match table_id {
+            Some(table_id) => match self.table_id_to_ttl.get(&table_id) {
+                Some(ttl_second_u32) => {
+                    assert!(*ttl_second_u32 != TABLE_OPTION_DUMMY_TTL);
+                    let min_epoch = Epoch(self.expire).subtract_ms((*ttl_second_u32 * 1000) as u64);
+                    Epoch(epoch) > min_epoch
+                }
+                None => true,
+            },
+
+            None => true,
+        }
+    }
+}
+
+impl TTLCompactionFilter {
+    fn new(table_id_to_ttl: HashMap<u32, u32>, expire: u64) -> Self {
+        Self {
+            table_id_to_ttl,
+            expire,
+        }
+    }
+}
+
+#[derive(Default, Clone)]
+struct MultiCompactionFilter {
+    filter_vec: Vec<Box<dyn CompactionFilter>>,
+}
+
+impl CompactionFilter for MultiCompactionFilter {
+    fn filter(&self, key: &[u8]) -> bool {
+        !self.filter_vec.iter().any(|filter| !filter.filter(key))
+    }
+}
+
+impl MultiCompactionFilter {
+    fn register(&mut self, filter: Box<dyn CompactionFilter>) {
+        self.filter_vec.push(filter);
     }
 }
 
@@ -240,10 +299,12 @@ impl Compactor {
             task_status: false,
             // VNode mappings are not required when compacting shared buffer to L0
             vnode_mappings: vec![],
-            compaction_group_id: StaticCompactionGroupId::StateDefault.into(),
+            compaction_group_id: StaticCompactionGroupId::SharedBuffer.into(),
             existing_table_ids: vec![],
             target_file_size: context.options.sstable_size_mb as u64 * (1 << 20),
             compression_algorithm: 0,
+            compaction_filter_mask: 0,
+            table_options: HashMap::default(),
         };
 
         let sstable_store = context.sstable_store.clone();
@@ -345,6 +406,7 @@ impl Compactor {
     /// Handle a compaction task and report its status to hummock manager.
     /// Always return `Ok` and let hummock manager handle errors.
     pub async fn compact(context: Arc<CompactorContext>, mut compact_task: CompactTask) -> bool {
+        use risingwave_common::catalog::TableOption;
         tracing::info!("Ready to handle compaction task: {}", compact_task.task_id,);
         let group_label = compact_task.compaction_group_id.to_string();
         let cur_level_label = compact_task.input_ssts[0].level_idx.to_string();
@@ -422,33 +484,38 @@ impl Compactor {
                 })
                 .collect(),
         );
-        let tables = compact_task
-            .input_ssts
-            .iter()
-            .flat_map(|level| level.table_infos.iter())
-            .map(|table| table.id)
-            .collect_vec();
-        if let Err(e) = compactor
-            .context
-            .sstable_store
-            .prefetch_sstables(tables)
-            .await
-        {
-            tracing::warn!(
-                "Compaction task {} prefetch failed with error: {:#?}",
-                compact_task.task_id,
-                e
-            );
+
+        let mut multi_filter = MultiCompactionFilter::default();
+        let compaction_filter_flag =
+            CompactionFilterFlag::from_bits(compact_task.compaction_filter_mask)
+                .unwrap_or_default();
+        if compaction_filter_flag.contains(CompactionFilterFlag::STATE_CLEAN) {
+            let state_clean_up_filter = Box::new(StateCleanUpCompactionFilter::new(
+                HashSet::from_iter(compact_task.existing_table_ids),
+            ));
+
+            multi_filter.register(state_clean_up_filter);
         }
 
-        let compaction_filter =
-            StateCleanUpCompactionFilter::new(HashSet::from_iter(compact_task.existing_table_ids));
+        if compaction_filter_flag.contains(CompactionFilterFlag::TTL) {
+            let id_to_ttl = compact_task
+                .table_options
+                .iter()
+                .filter(|id_to_option| {
+                    let table_option: TableOption = id_to_option.1.into();
+                    table_option.ttl.is_some()
+                })
+                .map(|id_to_option| (*id_to_option.0, id_to_option.1.ttl))
+                .collect();
+            let ttl_filter = Box::new(TTLCompactionFilter::new(id_to_ttl, compact_task.watermark));
+            multi_filter.register(ttl_filter);
+        }
 
         for (split_index, _) in compact_task.splits.iter().enumerate() {
             let compactor = compactor.clone();
             let vnode2unit = vnode2unit.clone();
             let compaction_executor = compactor.context.compaction_executor.as_ref().cloned();
-            let filter = compaction_filter.clone();
+            let filter = multi_filter.clone();
             let split_task = async move {
                 let merge_iter = compactor.build_sst_iter().await?;
                 compactor
@@ -565,9 +632,17 @@ impl Compactor {
         };
 
         let get_id_time = Arc::new(AtomicU64::new(0));
+        let max_target_file_size = self.context.options.sstable_size_mb as usize * (1 << 20);
+        let cache_policy = if !self.context.is_share_buffer_compact
+            && (self.compact_task.target_file_size as usize) < max_target_file_size
+        {
+            CachePolicy::Fill
+        } else {
+            CachePolicy::NotFill
+        };
         let target_file_size = std::cmp::min(
             self.compact_task.target_file_size as usize,
-            self.context.options.sstable_size_mb as usize * (1 << 20),
+            max_target_file_size,
         );
 
         // NOTICE: should be user_key overlap, NOT full_key overlap!
@@ -589,6 +664,7 @@ impl Compactor {
                 Ok(builder)
             },
             VirtualNodeGrouping::new(vnode2unit),
+            cache_policy,
             self.context.sstable_store.clone(),
         );
 
@@ -623,9 +699,9 @@ impl Compactor {
             unit_id,
         } in sealed_builders
         {
-            let sst = Sstable { id: table_id, meta };
+            let sst = Sstable::new(table_id, meta);
             let len = data_len;
-            ssts.push((sst.clone(), unit_id, table_ids));
+            ssts.push((sst, unit_id, table_ids));
             upload_join_handles.push(upload_join_handle);
 
             if self.context.is_share_buffer_compact {
@@ -684,6 +760,8 @@ impl Compactor {
         let mut table_iters: Vec<BoxedForwardHummockIterator> = Vec::new();
         let mut stats = StoreLocalStatistic::default();
         let read_options = Arc::new(ReadOptions { prefetch: true });
+
+        // TODO: check memory limit
         for level in &self.compact_task.input_ssts {
             if level.table_infos.is_empty() {
                 continue;
@@ -700,18 +778,18 @@ impl Compactor {
             // 1024) as f64;     read_statistics.cnt += 1;
             // }
 
-            if can_concat(&level.get_table_infos().iter().collect_vec()) {
+            if can_concat(&level.table_infos.iter().collect_vec()) {
                 table_iters.push(Box::new(ConcatIterator::new(
                     level.table_infos.clone(),
                     self.context.sstable_store.clone(),
                     read_options.clone(),
-                )));
+                )) as BoxedForwardHummockIterator);
             } else {
                 for table_info in &level.table_infos {
                     let table = self
                         .context
                         .sstable_store
-                        .sstable(table_info.id, &mut stats)
+                        .load_table(table_info.id, true, &mut stats)
                         .await?;
                     table_iters.push(Box::new(SSTableIterator::create(
                         table,

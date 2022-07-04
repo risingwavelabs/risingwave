@@ -16,7 +16,7 @@ use std::collections::HashMap;
 
 use rand::seq::SliceRandom;
 use rand::Rng;
-use risingwave_frontend::expr::{func_sig_map, DataTypeName, ExprType, FuncSign};
+use risingwave_frontend::expr::{func_sigs, DataTypeName, ExprType, FuncSign};
 use risingwave_sqlparser::ast::{
     BinaryOperator, Expr, Function, FunctionArg, FunctionArgExpr, Ident, ObjectName,
     TrimWhereField, UnaryOperator, Value,
@@ -32,9 +32,7 @@ lazy_static::lazy_static! {
 
 fn init_op_table() -> HashMap<DataTypeName, Vec<FuncSign>> {
     let mut funcs = HashMap::<DataTypeName, Vec<FuncSign>>::new();
-    func_sig_map()
-        .iter()
-        .for_each(|(func, ret)| funcs.entry(*ret).or_default().push(func.clone()));
+    func_sigs().for_each(|func| funcs.entry(func.ret_type).or_default().push(func.clone()));
     funcs
 }
 
@@ -166,6 +164,7 @@ fn make_func(func_name: &str, exprs: &[Expr]) -> Function {
         args,
         over: None,
         distinct: false,
+        order_by: vec![],
     }
 }
 

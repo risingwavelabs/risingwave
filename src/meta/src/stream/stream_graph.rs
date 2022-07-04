@@ -518,10 +518,6 @@ impl StreamGraphBuilder {
                 .or_insert(vec![])
                 .push(actor);
         }
-        for actor_ids in ctx.upstream_node_actors.values_mut() {
-            actor_ids.sort_unstable();
-            actor_ids.dedup();
-        }
 
         Ok((graph, internal_tables))
     }
@@ -603,9 +599,22 @@ impl StreamGraphBuilder {
                         }
                     }
 
-                    NodeBody::TopN(node) | NodeBody::AppendOnlyTopN(node) => {
-                        node.table_id += table_id_offset;
-                        ctx.internal_table_id_set.insert(node.table_id);
+                    NodeBody::TopN(node) => {
+                        node.table_id_l += table_id_offset;
+                        node.table_id_m += table_id_offset;
+                        node.table_id_h += table_id_offset;
+                        ctx.internal_table_id_set.insert(node.table_id_l);
+                        ctx.internal_table_id_set.insert(node.table_id_m);
+                        ctx.internal_table_id_set.insert(node.table_id_h);
+                    }
+
+                    NodeBody::AppendOnlyTopN(node) => {
+                        node.table_id_l += table_id_offset;
+                        node.table_id_m += table_id_offset;
+                        node.table_id_h += table_id_offset;
+                        ctx.internal_table_id_set.insert(node.table_id_l);
+                        ctx.internal_table_id_set.insert(node.table_id_m);
+                        ctx.internal_table_id_set.insert(node.table_id_h);
                     }
 
                     NodeBody::GlobalSimpleAgg(node) | NodeBody::LocalSimpleAgg(node) => {

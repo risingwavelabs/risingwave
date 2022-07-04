@@ -13,19 +13,18 @@
 // limitations under the License.
 
 use std::collections::BTreeMap;
+use std::sync::atomic::AtomicUsize;
 use std::sync::Arc;
 
+use itertools::Itertools;
 use parking_lot::lock_api::ArcRwLockReadGuard;
 use parking_lot::{RawRwLock, RwLock};
 use risingwave_hummock_sdk::compaction_group::hummock_version_ext::HummockVersionExt;
-use risingwave_hummock_sdk::compaction_group::StaticCompactionGroupId;
-use risingwave_hummock_sdk::{HummockEpoch, HummockVersionId};
+use risingwave_hummock_sdk::{CompactionGroupId, HummockEpoch, HummockVersionId};
 use risingwave_pb::hummock::{HummockVersion, Level};
 use tokio::sync::mpsc::UnboundedSender;
 
 use super::shared_buffer::SharedBuffer;
-use crate::hummock::shared_buffer::shared_buffer_uploader::UploadTaskPayload;
-use crate::hummock::shared_buffer::{OrderIndex, UploadTaskType};
 
 #[derive(Debug, Clone)]
 pub struct LocalVersion {
@@ -58,10 +57,14 @@ impl LocalVersion {
         self.shared_buffer.iter()
     }
 
-    pub fn new_shared_buffer(&mut self, epoch: HummockEpoch) -> Arc<RwLock<SharedBuffer>> {
+    pub fn new_shared_buffer(
+        &mut self,
+        epoch: HummockEpoch,
+        global_upload_task_size: Arc<AtomicUsize>,
+    ) -> Arc<RwLock<SharedBuffer>> {
         self.shared_buffer
             .entry(epoch)
-            .or_insert_with(|| Arc::new(RwLock::new(SharedBuffer::default())))
+            .or_insert_with(|| Arc::new(RwLock::new(SharedBuffer::new(global_upload_task_size))))
             .clone()
     }
 
@@ -80,6 +83,7 @@ impl LocalVersion {
     }
 
     pub fn read_version(this: &RwLock<Self>, read_epoch: HummockEpoch) -> ReadVersion {
+        use parking_lot::RwLockReadGuard;
         let (pinned_version, shared_buffer) = {
             let guard = this.read();
             let smallest_uncommitted_epoch = guard.pinned_version.max_committed_epoch() + 1;
@@ -87,31 +91,29 @@ impl LocalVersion {
             (
                 pinned_version,
                 if read_epoch >= smallest_uncommitted_epoch {
-                    guard
+                    let result = guard
                         .shared_buffer
                         .range(smallest_uncommitted_epoch..=read_epoch)
                         .rev() // Important: order by epoch descendingly
                         .map(|(_, shared_buffer)| shared_buffer.clone())
-                        .collect()
+                        .collect();
+                    RwLockReadGuard::unlock_fair(guard);
+                    result
                 } else {
+                    RwLockReadGuard::unlock_fair(guard);
                     Vec::new()
                 },
             )
         };
+
         ReadVersion {
             shared_buffer: shared_buffer.into_iter().map(|x| x.read_arc()).collect(),
             pinned_version,
         }
     }
 
-    pub fn new_upload_task(
-        &self,
-        epoch: HummockEpoch,
-        task_type: UploadTaskType,
-    ) -> Option<(OrderIndex, UploadTaskPayload)> {
-        self.shared_buffer
-            .get(&epoch)
-            .and_then(|shared_buffer| shared_buffer.write().new_upload_task(task_type))
+    pub fn clear_shared_buffer(&mut self) {
+        self.shared_buffer.clear();
     }
 }
 
@@ -142,10 +144,15 @@ impl PinnedVersion {
         self.version.id
     }
 
-    pub fn levels(&self) -> &Vec<Level> {
-        // TODO #2065: use correct compaction group id
-        self.version
-            .get_compaction_group_levels(StaticCompactionGroupId::StateDefault.into())
+    pub fn levels(&self, compaction_group_id: Option<CompactionGroupId>) -> Vec<&Level> {
+        match compaction_group_id {
+            None => self.version.get_combined_levels(),
+            Some(compaction_group_id) => self
+                .version
+                .get_compaction_group_levels(compaction_group_id)
+                .iter()
+                .collect_vec(),
+        }
     }
 
     pub fn max_committed_epoch(&self) -> u64 {

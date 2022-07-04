@@ -16,6 +16,7 @@ use risingwave_pb::expr::InputRefExpr;
 use risingwave_pb::plan_common::{CellBasedTableDesc, ColumnOrder};
 
 use super::{ColumnDesc, OrderedColumnDesc, TableId};
+use crate::types::ParallelUnitId;
 
 /// the table descriptor of table with cell based encoding in state store and include all
 /// information for compute node to access data of the table.
@@ -36,6 +37,10 @@ pub struct TableDesc {
 
     /// Whether the table source is append-only
     pub appendonly: bool,
+
+    /// Mapping from vnode to parallel unit. Indicates data distribution and partition of the
+    /// table.
+    pub vnode_mapping: Option<Vec<ParallelUnitId>>,
 }
 
 impl TableDesc {
@@ -65,6 +70,8 @@ impl TableDesc {
             table_id: self.table_id.into(),
             columns: self.columns.iter().map(Into::into).collect(),
             order_key: self.order_desc.iter().map(|v| v.into()).collect(),
+            pk_indices: self.pks.iter().map(|&k| k as u32).collect(),
+            dist_key_indices: self.distribution_keys.iter().map(|&k| k as u32).collect(),
         }
     }
 }

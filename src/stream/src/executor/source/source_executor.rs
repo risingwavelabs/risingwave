@@ -23,16 +23,17 @@ use risingwave_common::array::column::Column;
 use risingwave_common::array::{ArrayBuilder, ArrayImpl, I64ArrayBuilder, StreamChunk};
 use risingwave_common::catalog::{ColumnId, Schema, TableId};
 use risingwave_common::error::{internal_error, Result, RwError, ToRwResult};
-use risingwave_connector::state::SourceStateHandler;
 use risingwave_connector::{ConnectorState, SplitImpl, SplitMetaData};
+use risingwave_source::connector_source::SourceContext;
 use risingwave_source::*;
 use risingwave_storage::{Keyspace, StateStore};
 use tokio::sync::mpsc::{unbounded_channel, UnboundedReceiver};
 use tokio::sync::{Mutex, Notify};
 
-use super::error::StreamExecutorError;
-use super::monitor::StreamingMetrics;
-use super::*;
+use crate::executor::error::StreamExecutorError;
+use crate::executor::monitor::StreamingMetrics;
+use crate::executor::source::state::SourceStateHandler;
+use crate::executor::*;
 
 /// [`SourceExecutor`] is a streaming source, from risingwave's batch table, or external systems
 /// such as Kafka.
@@ -104,7 +105,7 @@ impl<S: StateStore> SourceExecutor<S> {
 
     /// Generate a row ID column.
     fn gen_row_id_column(&mut self, len: usize) -> Column {
-        let mut builder = I64ArrayBuilder::new(len).unwrap();
+        let mut builder = I64ArrayBuilder::new(len);
         let row_ids = self.source_desc.next_row_id_batch(len);
 
         for row_id in row_ids {
@@ -218,7 +219,7 @@ impl SourceReader {
         select_with_strategy(
             barrier_receiver.map(Either::Left),
             stream_reader.map(Either::Right),
-            |_: &mut ()| PollNext::Left, // perfer barrier
+            |_: &mut ()| PollNext::Left, // prefer barrier
         )
     }
 }
@@ -276,7 +277,12 @@ impl<S: StateStore> SourceExecutor<S> {
                 .await
                 .map(SourceStreamReaderImpl::TableV2),
             SourceImpl::Connector(c) => c
-                .stream_reader(state, self.column_ids.clone())
+                .stream_reader(
+                    state,
+                    self.column_ids.clone(),
+                    self.source_desc.metrics.clone(),
+                    SourceContext::new(self.actor_id as u32, self.source_id),
+                )
                 .await
                 .map(SourceStreamReaderImpl::Connector),
         }?;
@@ -751,7 +757,6 @@ mod tests {
     fn drop_row_id(chunk: StreamChunk) -> StreamChunk {
         let (ops, mut columns, bitmap) = chunk.into_inner();
         columns.remove(0);
-        // columns.pop();
         StreamChunk::new(ops, columns, bitmap)
     }
 
@@ -780,7 +785,8 @@ mod tests {
 
         let actor_id = ActorId::default();
         let source_desc = source_manager.get_source(&source_table_id)?;
-        let keyspace = Keyspace::table_root(MemoryStateStore::new(), &TableId::from(0x2333));
+        let mem_state_store = MemoryStateStore::new();
+        let keyspace = Keyspace::table_root(mem_state_store.clone(), &TableId::from(0x2333));
         let column_ids = vec![ColumnId::from(0), ColumnId::from(1)];
         let schema = get_schema(&column_ids, &source_desc);
         let pk_indices = vec![0_usize];
@@ -802,13 +808,13 @@ mod tests {
             u64::MAX,
         )?;
 
-        let mut materialize = MaterializeExecutor::new(
+        let mut materialize = MaterializeExecutor::new_for_test(
             Box::new(source_exec),
-            keyspace.clone(),
+            mem_state_store.clone(),
+            TableId::from(0x2333),
             vec![OrderPair::new(0, OrderType::Ascending)],
             column_ids.clone(),
             2,
-            vec![0usize],
         )
         .boxed()
         .execute();

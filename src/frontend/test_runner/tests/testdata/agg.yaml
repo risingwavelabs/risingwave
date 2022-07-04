@@ -52,7 +52,7 @@
   stream_plan: |
     StreamMaterialize { columns: [agg], pk_columns: [] }
       StreamProject { exprs: [($1 + ($2 * $3))] }
-        StreamSimpleAgg { aggs: [count, min($0), max($1), count($2)] }
+        StreamGlobalSimpleAgg { aggs: [count, min($0), max($1), count($2)] }
           StreamExchange { dist: Single }
             StreamTableScan { table: t, columns: [v1, v2, v3, _row_id], pk_indices: [3] }
 - sql: |
@@ -148,7 +148,7 @@
           BatchScan { table: t, columns: [v1, v2] }
   stream_plan: |
     StreamMaterialize { columns: [agg#0(hidden), cnt, sum], pk_columns: [] }
-      StreamSimpleAgg { aggs: [sum($0), sum($1), sum($2)] }
+      StreamGlobalSimpleAgg { aggs: [sum($0), sum($1), sum($2)] }
         StreamExchange { dist: Single }
           StreamLocalSimpleAgg { aggs: [count, count($0), sum($0)] }
             StreamProject { exprs: [($0 + $1), $2] }
@@ -254,7 +254,7 @@
   stream_plan: |
     StreamMaterialize { columns: [agg], pk_columns: [] }
       StreamProject { exprs: [($1 + ($2 * $3))] }
-        StreamSimpleAgg { aggs: [count, min($0), max($1), count($2)] }
+        StreamGlobalSimpleAgg { aggs: [count, min($0), max($1), count($2)] }
           StreamExchange { dist: Single }
             StreamProject { exprs: [$0, $2, $1, $3] }
               StreamTableScan { table: t, columns: [v1, v2, v3, _row_id], pk_indices: [3] }
@@ -270,8 +270,8 @@
             BatchScan { table: t, columns: [v1] }
   stream_plan: |
     StreamMaterialize { columns: [agg#0(hidden), s1], pk_columns: [] }
-      StreamSimpleAgg { aggs: [count, sum($1)] }
-        StreamSimpleAgg { aggs: [sum($0), sum($1)] }
+      StreamGlobalSimpleAgg { aggs: [count, sum($1)] }
+        StreamGlobalSimpleAgg { aggs: [sum($0), sum($1)] }
           StreamExchange { dist: Single }
             StreamLocalSimpleAgg { aggs: [count, sum($0)] }
               StreamTableScan { table: t, columns: [v1, _row_id], pk_indices: [1] }
@@ -286,7 +286,7 @@
           BatchScan { table: t, columns: [v1] }
   stream_plan: |
     StreamMaterialize { columns: [agg#0(hidden), s1], pk_columns: [] }
-      StreamSimpleAgg { aggs: [sum($0), sum($1)] }
+      StreamGlobalSimpleAgg { aggs: [sum($0), sum($1)] }
         StreamExchange { dist: Single }
           StreamLocalSimpleAgg { aggs: [count, sum($0)] }
             StreamTableScan { table: t, columns: [v1, _row_id], pk_indices: [1] }
@@ -304,7 +304,7 @@
                 BatchScan { table: t, columns: [v1, v2] }
   stream_plan: |
     StreamMaterialize { columns: [agg#0(hidden), s1], pk_columns: [] }
-      StreamSimpleAgg { aggs: [sum($0), sum($1)] }
+      StreamGlobalSimpleAgg { aggs: [sum($0), sum($1)] }
         StreamExchange { dist: Single }
           StreamLocalSimpleAgg { aggs: [count, sum($0)] }
             StreamProject { exprs: [$2, $0] }
@@ -317,7 +317,7 @@
     select min(v1) as a1, max(v2) as a2 from t;
   stream_plan: |
     StreamMaterialize { columns: [agg#0(hidden), a1, a2], pk_columns: [] }
-      StreamAppendOnlySimpleAgg { aggs: [count, min($0), max($1)] }
+      StreamAppendOnlyGlobalSimpleAgg { aggs: [count, min($0), max($1)] }
         StreamExchange { dist: Single }
           StreamTableScan { table: t, columns: [v1, v2, _row_id], pk_indices: [2] }
 - sql: |
@@ -326,6 +326,48 @@
     select sum(v1) as s1, min(v1) as a1, max(v2) as a2 from t;
   stream_plan: |
     StreamMaterialize { columns: [agg#0(hidden), s1, a1, a2], pk_columns: [] }
-      StreamSimpleAgg { aggs: [count, sum($0), min($0), max($1)] }
+      StreamGlobalSimpleAgg { aggs: [count, sum($0), min($0), max($1)] }
         StreamExchange { dist: Single }
           StreamTableScan { table: t, columns: [v1, v2, _row_id], pk_indices: [2] }
+- sql: |
+    /* dup group key */
+    create table t(v1 int) with ('appendonly' = false);
+    select v1 from t group by v1, v1;
+  logical_plan: |
+    LogicalProject { exprs: [$0] }
+      LogicalAgg { group_keys: [0, 0], agg_calls: [] }
+        LogicalProject { exprs: [$1] }
+          LogicalScan { table: t, columns: [_row_id, v1] }
+  optimized_logical_plan: |
+    LogicalProject { exprs: [$0] }
+      LogicalAgg { group_keys: [0, 0], agg_calls: [] }
+        LogicalScan { table: t, columns: [v1] }
+  stream_plan: |
+    StreamMaterialize { columns: [v1], pk_columns: [v1, v1], order_descs: [v1] }
+      StreamExchange { dist: HashShard([0]) }
+        StreamProject { exprs: [$0] }
+          StreamHashAgg { group_keys: [$0, $0], aggs: [count] }
+            StreamExchange { dist: HashShard([0]) }
+              StreamTableScan { table: t, columns: [v1, _row_id], pk_indices: [1] }
+- sql: |
+    /* dup group key */
+    create table t(v1 int, v2 int, v3 int) with ('appendonly' = false);
+    select v2, min(v1) as min_v1, v3, max(v1) as max_v1 from t group by v3, v2, v2;
+  logical_plan: |
+    LogicalProject { exprs: [$1, $3, $0, $4] }
+      LogicalAgg { group_keys: [0, 1, 1], agg_calls: [min($2), max($2)] }
+        LogicalProject { exprs: [$3, $2, $1] }
+          LogicalScan { table: t, columns: [_row_id, v1, v2, v3] }
+  optimized_logical_plan: |
+    LogicalProject { exprs: [$1, $2, $0, $3] }
+      LogicalAgg { group_keys: [0, 1, 1], agg_calls: [min($2), max($2)] }
+        LogicalProject { exprs: [$2, $1, $0] }
+          LogicalScan { table: t, columns: [v1, v2, v3] }
+  stream_plan: |
+    StreamMaterialize { columns: [v2, min_v1, v3, max_v1], pk_columns: [v3, v2, v2], order_descs: [v3, v2] }
+      StreamExchange { dist: HashShard([0, 2]) }
+        StreamProject { exprs: [$1, $2, $0, $4] }
+          StreamHashAgg { group_keys: [$0, $1, $1], aggs: [count, min($2), max($2)] }
+            StreamExchange { dist: HashShard([0, 1]) }
+              StreamProject { exprs: [$2, $1, $0, $3] }
+                StreamTableScan { table: t, columns: [v1, v2, v3, _row_id], pk_indices: [3] }

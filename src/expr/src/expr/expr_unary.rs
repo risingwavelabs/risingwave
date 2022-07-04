@@ -28,7 +28,7 @@ use crate::vector_op::bitwise_op::general_bitnot;
 use crate::vector_op::cast::*;
 use crate::vector_op::cmp::{is_false, is_not_false, is_not_true, is_true};
 use crate::vector_op::conjunction;
-use crate::vector_op::length::length_default;
+use crate::vector_op::length::{bit_length, length_default, octet_length};
 use crate::vector_op::lower::lower;
 use crate::vector_op::ltrim::ltrim;
 use crate::vector_op::md5::md5;
@@ -279,6 +279,16 @@ pub fn new_unary_expr(
             child_expr,
             return_type,
             length_default,
+        )),
+        (ProstType::OctetLength, _, _) => Box::new(UnaryExpression::<Utf8Array, I32Array, _>::new(
+            child_expr,
+            return_type,
+            octet_length,
+        )),
+        (ProstType::BitLength, _, _) => Box::new(UnaryExpression::<Utf8Array, I32Array, _>::new(
+            child_expr,
+            return_type,
+            bit_length,
         )),
         (ProstType::Neg, _, _) => {
             gen_unary_atm_expr! { "Neg", child_expr, return_type, general_neg,

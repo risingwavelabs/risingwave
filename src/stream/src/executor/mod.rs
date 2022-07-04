@@ -82,7 +82,7 @@ pub use chain::ChainExecutor;
 pub use debug::DebugExecutor;
 pub use dispatch::DispatchExecutor;
 pub use filter::FilterExecutor;
-pub use global_simple_agg::SimpleAggExecutor;
+pub use global_simple_agg::GlobalSimpleAggExecutor;
 pub use hash_agg::HashAggExecutor;
 pub use hash_join::*;
 pub use hop_window::HopWindowExecutor;
