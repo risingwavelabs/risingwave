@@ -315,6 +315,14 @@ impl<S: StateStore, SER: RowSerializer, const T: AccessType> CellBasedTableBase<
         self.compute_vnode(pk, &self.dist_key_in_pk_indices)
     }
 
+    /// Get vnode value with given primary key prefix.
+    fn try_compute_vnode_by_pk_prefix(&self, pk_prefix: &Row) -> Option<VirtualNode> {
+        self.dist_key_in_pk_indices
+            .iter()
+            .all(|&d| d < pk_prefix.0.len())
+            .then(|| self.compute_vnode(pk_prefix, &self.dist_key_in_pk_indices))
+    }
+
     /// `vnode | pk`
     fn serialize_pk_with_vnode(&self, pk: &Row) -> Vec<u8> {
         let mut output = Vec::new();
@@ -605,8 +613,19 @@ impl<S: StateStore, SER: RowSerializer, const T: AccessType> CellBasedTableBase<
             end_key
         );
 
-        self.iter_with_encoded_key_range((start_key, end_key), epoch, None, wait_epoch, ordered)
-            .await
+        let vnode_hint = self.try_compute_vnode_by_pk_prefix(pk_prefix);
+        if vnode_hint.is_some() {
+            println!("vnode_hint! {:?}", vnode_hint);
+        }
+
+        self.iter_with_encoded_key_range(
+            (start_key, end_key),
+            epoch,
+            vnode_hint,
+            wait_epoch,
+            ordered,
+        )
+        .await
     }
 
     pub async fn batch_iter_with_pk_bounds(
