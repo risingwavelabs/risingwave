@@ -69,9 +69,6 @@ pub struct LocalStreamManagerCore {
     /// Stores all actor tokio runtime montioring tasks.
     actor_coroutine_monitor_tasks: HashMap<ActorId, JoinHandle<()>>,
 
-    /// Stores all actor output buffer montioring tasks.
-    actor_output_buffer_monitor_tasks: HashMap<ActorId, JoinHandle<()>>,
-
     /// Mock source, `actor_id = 0`.
     /// TODO: remove this
     mock_source: ConsumableChannelPair,
@@ -373,7 +370,6 @@ impl LocalStreamManagerCore {
             actor_infos: HashMap::new(),
             actors: HashMap::new(),
             actor_coroutine_monitor_tasks: HashMap::new(),
-            actor_output_buffer_monitor_tasks: HashMap::new(),
             mock_source: (Some(tx), Some(rx)),
             state_store,
             streaming_metrics,
@@ -786,10 +782,6 @@ impl LocalStreamManagerCore {
             .remove(&actor_id)
             .unwrap()
             .abort();
-        self.actor_output_buffer_monitor_tasks
-            .remove(&actor_id)
-            .unwrap()
-            .abort();
         self.actor_infos.remove(&actor_id);
         self.actors.remove(&actor_id);
         // Task should have already stopped when this method is invoked.
@@ -802,10 +794,6 @@ impl LocalStreamManagerCore {
         for (actor_id, handle) in self.handles.drain() {
             self.context.retain(|&(up_id, _)| up_id != actor_id);
             self.actor_coroutine_monitor_tasks
-                .remove(&actor_id)
-                .unwrap()
-                .abort();
-            self.actor_output_buffer_monitor_tasks
                 .remove(&actor_id)
                 .unwrap()
                 .abort();

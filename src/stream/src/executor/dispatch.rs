@@ -197,7 +197,6 @@ struct DispatchExecutorInner {
     actor_id_str: String,
     context: Arc<SharedContext>,
     metrics: Arc<StreamingMetrics>,
-    actor_output_buffer_monitor_tasks: HashMap<ActorId, JoinHandle<()>>,
 }
 
 impl DispatchExecutorInner {
@@ -336,7 +335,6 @@ impl DispatchExecutor {
                 actor_id_str: actor_id.to_string(),
                 context,
                 metrics,
-                actor_output_buffer_monitor_tasks: HashMap::new(),
             },
         }
     }
