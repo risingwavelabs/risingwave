@@ -211,7 +211,7 @@ impl IntervalUnit {
         }
 
         let ms = self.as_ms_i64();
-        Some(IntervalUnit::from_total_ms((ms as f64 / rhs) as i64))
+        Some(IntervalUnit::from_total_ms((ms as f64 / rhs).round() as i64))
     }
 
     fn as_ms_i64(&self) -> i64 {
