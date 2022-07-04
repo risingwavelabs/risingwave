@@ -3,7 +3,6 @@ syntax = "proto3";
 package plan_common;
 
 import "data.proto";
-import "expr.proto";
 
 option optimize_for = SPEED;
 
@@ -81,8 +80,7 @@ enum OrderType {
 message ColumnOrder {
   // maybe other name
   OrderType order_type = 1;
-  expr.InputRefExpr input_ref = 2;
-  data.DataType return_type = 3;
+  uint32 index = 2;
 }
 
 enum RowFormatType {

@@ -21,7 +21,6 @@ use risingwave_common::catalog::{ColumnDesc, OrderedColumnDesc, TableId};
 use risingwave_common::error::ErrorCode::InternalError;
 use risingwave_common::error::Result;
 use risingwave_common::util::sort_util::OrderType;
-use risingwave_pb::expr::InputRefExpr;
 use risingwave_pb::plan_common::ColumnOrder;
 use risingwave_pb::stream_plan::stream_node::NodeBody as ProstStreamNode;
 
@@ -260,10 +259,7 @@ impl ToStreamProst for StreamMaterialize {
                     let idx = self.col_id_to_idx(col.column_desc.column_id);
                     ColumnOrder {
                         order_type: col.order.to_prost() as i32,
-                        input_ref: Some(InputRefExpr {
-                            column_idx: idx as i32,
-                        }),
-                        return_type: Some(col.column_desc.data_type.to_protobuf()),
+                        index: idx as u32,
                     }
                 })
                 .collect(),
