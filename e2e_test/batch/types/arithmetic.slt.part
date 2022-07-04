@@ -61,7 +61,7 @@ select interval '14000' / int '14';
 query T
 select interval '20' / float '12.5'
 ----
-00:00:1.6
+00:00:01.6
 
 query T
 select interval '12 days' / 4.2;
@@ -99,39 +99,39 @@ select Date '2022-06-23' + TIME '19:24:00';
 2022-06-23 19:24:00
 
 query T
-select TIME '19:24:00' +  Date '2022-06-23';
+select TIME '19:24:00' + Date '2022-06-23';
 ----
 2022-06-23 19:24:00
 
 query T
-select TIME '18:20:49' -  TIME '16:07:16';
+select TIME '18:20:49' - TIME '16:07:16';
 ----
 02:13:33
 
 query T
-select TIME '18:20:49' -  interval '2 hours';
+select TIME '18:20:49' - interval '2 hours';
 ----
 16:20:49
 
 query T
-select TIME '18:20:49' -  interval '1 day';
+select TIME '18:20:49' - interval '1 day';
 ----
 18:20:49
 
 query T
-select TIME '18:20:49' +  interval '1 day';
+select TIME '18:20:49' + interval '1 day';
 ----
 18:20:49
 
 query T
-select TIME '18:20:49' +  interval '1 hour';
+select TIME '18:20:49' + interval '1 hour';
 ----
 19:20:49
 
 query T
 select real '6.1' * interval '1' second;
 ----
-00:00:6.1
+00:00:06.1
 
 query T
 select real '61.1' * interval '1' second;
@@ -156,15 +156,15 @@ select real '86' * interval '849884';
 query T
 select interval '1' second * real '6.1';
 ----
-00:00:6.1
+00:00:06.1
 
 query T
-select  interval '1' second * real '61.1';
+select interval '1' second * real '61.1';
 ----
 00:01:01.1
 
 query T
-select  interval '1' second * real '0.0';
+select interval '1' second * real '0.0';
 ----
 00:00:00
 
