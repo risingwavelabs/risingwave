@@ -27,6 +27,11 @@ message SourceNode {
   SourceType source_type = 3;
 }
 
+message SinkNode {
+  plan_common.TableRefId table_ref_id = 1;
+  repeated int32 column_ids = 2;
+}
+
 message ProjectNode {
   repeated expr.ExprNode select_list = 1;
 }
@@ -82,7 +87,9 @@ message TopNNode {
   uint64 offset = 3;
   repeated uint32 distribution_keys = 4;
   // Used for internal table states
-  uint32 table_id = 5;
+  uint32 table_id_l = 5;
+  uint32 table_id_m = 6;
+  uint32 table_id_h = 7;
 }
 
 message HashJoinNode {
@@ -242,6 +249,7 @@ message StreamNode {
     LookupUnionNode lookup_union = 117;
     UnionNode union = 118;
     DeltaIndexJoinNode delta_index_join = 119;
+    SinkNode sink = 120;
   }
   // The id for the operator.
   uint64 operator_id = 1;

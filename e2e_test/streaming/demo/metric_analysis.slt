@@ -1,5 +1,3 @@
-control sortmode rowsort
-
 statement ok
 CREATE TABLE nics_metrics (
     device_id VARCHAR,

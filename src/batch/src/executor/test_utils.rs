@@ -13,6 +13,7 @@
 // limitations under the License.
 
 use std::collections::VecDeque;
+use std::future::Future;
 
 use assert_matches::assert_matches;
 use futures_async_stream::{for_await, try_stream};
@@ -20,8 +21,9 @@ use itertools::Itertools;
 use risingwave_common::array::DataChunk;
 use risingwave_common::catalog::Schema;
 use risingwave_common::error::{Result, RwError};
-use risingwave_rpc_client::ExchangeSource;
+use risingwave_pb::batch_plan::ExchangeSource as ProstExchangeSource;
 
+use crate::exchange_source::{ExchangeSource, ExchangeSourceImpl};
 use crate::executor::{BoxedDataChunkStream, BoxedExecutor, CreateSource, Executor};
 use crate::task::BatchTaskContext;
 
@@ -146,7 +148,7 @@ fn is_data_chunk_eq(left: &DataChunk, right: &DataChunk) {
 }
 
 #[derive(Debug, Clone)]
-pub(super) struct FakeExchangeSource {
+pub struct FakeExchangeSource {
     chunks: Vec<Option<DataChunk>>,
 }
 
@@ -156,13 +158,16 @@ impl FakeExchangeSource {
     }
 }
 
-#[async_trait::async_trait]
 impl ExchangeSource for FakeExchangeSource {
-    async fn take_data(&mut self) -> Result<Option<DataChunk>> {
-        if let Some(chunk) = self.chunks.pop() {
-            Ok(chunk)
-        } else {
-            Ok(None)
+    type TakeDataFuture<'a> = impl Future<Output = Result<Option<DataChunk>>>;
+
+    fn take_data(&mut self) -> Self::TakeDataFuture<'_> {
+        async {
+            if let Some(chunk) = self.chunks.pop() {
+                Ok(chunk)
+            } else {
+                Ok(None)
+            }
         }
     }
 }
@@ -180,15 +185,13 @@ impl FakeCreateSource {
     }
 }
 
-use risingwave_pb::batch_plan::ExchangeSource as ProstExchangeSource;
-
 #[async_trait::async_trait]
 impl CreateSource for FakeCreateSource {
     async fn create_source(
         &self,
         _: impl BatchTaskContext,
         _: &ProstExchangeSource,
-    ) -> Result<Box<dyn ExchangeSource>> {
-        Ok(Box::new(self.fake_exchange_source.clone()))
+    ) -> Result<ExchangeSourceImpl> {
+        Ok(ExchangeSourceImpl::Fake(self.fake_exchange_source.clone()))
     }
 }
