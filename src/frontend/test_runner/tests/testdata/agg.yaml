@@ -428,3 +428,13 @@
           StreamExchange { dist: Single }
             StreamLocalSimpleAgg { aggs: [count, sum($0) filter(($0 > $1)), count($0) filter(($0 > $1))] }
               StreamTableScan { table: t, columns: [a, b, _row_id], pk_indices: [2] }
+- sql: |
+    /* filter clause + non-boolean function */
+    create table t(a int, b int);
+    select avg(a) FILTER (WHERE abs(a)) AS avga from t;
+  binder_error: 'Invalid input syntax: the type of filter clause should be boolean, but found Int32'
+- sql: |
+    /* filter clause + subquery */
+    create table t(a int, b int);
+    select avg(a) FILTER (WHERE 0 < (select max(a) from t)) AS avga from t;
+  binder_error: 'Invalid input syntax: subquery in filter clause is not supported'

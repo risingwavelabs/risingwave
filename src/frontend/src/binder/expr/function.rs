@@ -51,14 +51,30 @@ impl Binder {
             if let Some(kind) = agg_kind {
                 self.ensure_aggregate_allowed()?;
                 let filter = match f.filter {
-                    Some(filter) => Condition::with_expr(self.bind_expr(*filter)?),
+                    Some(filter) => {
+                        let expr = self.bind_expr(*filter)?;
+                        if expr.return_type() != DataType::Boolean {
+                            return Err(ErrorCode::InvalidInputSyntax(format!(
+                                "the type of filter clause should be boolean, but found {:?}",
+                                expr.return_type()
+                            ))
+                            .into());
+                        }
+                        if expr.has_subquery() {
+                            return Err(ErrorCode::InvalidInputSyntax(
+                                "subquery in filter clause is not supported".to_string(),
+                            )
+                            .into());
+                        }
+                        Condition::with_expr(expr)
+                    }
                     None => Condition::true_cond(),
                 };
                 return Ok(ExprImpl::AggCall(Box::new(AggCall::new(
                     kind, inputs, f.distinct, filter,
                 )?)));
             } else if f.filter.is_some() {
-                return Err(ErrorCode::BindError(
+                return Err(ErrorCode::InvalidInputSyntax(
                     "filter clause is only allowed in aggregation functions".to_string(),
                 )
                 .into());
