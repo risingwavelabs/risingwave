@@ -600,7 +600,7 @@ def section_hummock(panels):
             ),
 
             panels.target(
-                    "sum(irate(state_store_iter_in_process_counts[1m])) by(job,instance)", "iter_in_process_counts - {{instance}} "
+                    "sum(rate(state_store_iter_in_process_counts[1m])) by(job,instance)", "iter_in_process_counts - {{instance}} "
             ),
         ]),
         panels.timeseries_latency("Read Duration - Iter Pure Scan", [
