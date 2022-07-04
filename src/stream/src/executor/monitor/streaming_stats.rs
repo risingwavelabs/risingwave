@@ -37,6 +37,7 @@ pub struct StreamingMetrics {
     pub actor_idle_cnt: GenericGaugeVec<AtomicI64>,
     pub actor_in_record_cnt: GenericCounterVec<AtomicU64>,
     pub actor_out_record_cnt: GenericCounterVec<AtomicU64>,
+    pub actor_sampled_deserialize_duration_ns: GenericCounterVec<AtomicU64>,
     pub source_output_row_count: GenericCounterVec<AtomicU64>,
     pub exchange_recv_size: GenericCounterVec<AtomicU64>,
     pub join_lookup_miss_count: GenericCounterVec<AtomicU64>,
@@ -190,6 +191,14 @@ impl StreamingMetrics {
         )
         .unwrap();
 
+        let actor_sampled_deserialize_duration_ns = register_int_counter_vec_with_registry!(
+            "actor_sampled_deserialize_duration_ns",
+            "Duration (ns) of sampled chunk deserialization",
+            &["actor_id"],
+            registry
+        )
+        .unwrap();
+
         let join_lookup_miss_count = register_int_counter_vec_with_registry!(
             "stream_join_lookup_miss_count",
             "Join executor lookup miss duration",
@@ -233,6 +242,7 @@ impl StreamingMetrics {
             actor_idle_cnt,
             actor_in_record_cnt,
             actor_out_record_cnt,
+            actor_sampled_deserialize_duration_ns,
             source_output_row_count,
             exchange_recv_size,
             join_lookup_miss_count,

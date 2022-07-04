@@ -22,14 +22,14 @@ use risingwave_common::types::DataType;
 use risingwave_common::util::ordered::{serialize_pk, OrderedRowSerializer};
 use risingwave_common::util::sort_util::OrderType;
 
-use crate::cell_based_row_serializer::CellBasedRowSerializer;
+use crate::encoding::cell_based_row_serializer::CellBasedRowSerializer;
+use crate::encoding::Encoding;
 use crate::error::StorageResult;
 use crate::memory::MemoryStateStore;
-use crate::row_serializer::RowSerializer;
 use crate::storage_value::{StorageValue, ValueMeta};
 use crate::store::{StateStore, WriteOptions};
-use crate::table::cell_based_table::{CellBasedTable, DEFAULT_VNODE};
 use crate::table::state_table::{DedupPkStateTable, StateTable};
+use crate::table::storage_table::{StorageTable, DEFAULT_VNODE};
 use crate::table::TableIter;
 use crate::Keyspace;
 
@@ -737,7 +737,7 @@ async fn test_cell_based_get_row_by_scan() {
         None,
         pk_indices.clone(),
     );
-    let table = state.cell_based_table().clone();
+    let table = state.storage_table().clone();
     let epoch: u64 = 0;
 
     state
@@ -808,7 +808,7 @@ async fn test_cell_based_get_row_by_multi_get() {
         None,
         pk_indices,
     );
-    let table = state.cell_based_table().clone();
+    let table = state.storage_table().clone();
     let epoch: u64 = 0;
 
     state
@@ -878,7 +878,7 @@ async fn test_cell_based_get_row_for_string() {
         None,
         pk_indices,
     );
-    let table = state.cell_based_table().clone();
+    let table = state.storage_table().clone();
     let epoch: u64 = 0;
 
     state
@@ -957,7 +957,7 @@ async fn test_shuffled_column_id_for_get_row() {
         None,
         pk_indices,
     );
-    let table = state.cell_based_table().clone();
+    let table = state.storage_table().clone();
     let epoch: u64 = 0;
 
     state
@@ -1027,7 +1027,7 @@ async fn test_cell_based_table_iter() {
         None,
         pk_indices,
     );
-    let table = state.cell_based_table().clone();
+    let table = state.storage_table().clone();
     let epoch: u64 = 0;
 
     state
@@ -1108,8 +1108,8 @@ async fn test_multi_cell_based_table_iter() {
         pk_indices,
     );
 
-    let table_1 = state_1.cell_based_table().clone();
-    let table_2 = state_2.cell_based_table().clone();
+    let table_1 = state_1.storage_table().clone();
+    let table_2 = state_2.storage_table().clone();
 
     state_1
         .insert(Row(vec![
@@ -1234,7 +1234,7 @@ async fn test_dedup_cell_based_table_iter_with(
     let ordered_row_serializer = OrderedRowSerializer::new(order_types.clone());
 
     // ---------- Init table for writes
-    let table = CellBasedTable::new_for_test(
+    let table = StorageTable::new_for_test(
         state_store.clone(),
         TableId::from(0x1111),
         row_descs,
@@ -1258,7 +1258,7 @@ async fn test_dedup_cell_based_table_iter_with(
             .collect_vec());
 
         let bytes = cell_based_row_serializer
-            .serialize(DEFAULT_VNODE, &pk_bytes, partial_row)
+            .cell_based_serialize(DEFAULT_VNODE, &pk_bytes, partial_row)
             .unwrap();
 
         // ---------- Batch-write
@@ -1362,7 +1362,7 @@ async fn test_cell_based_scan_empty_column_ids_cardinality() {
         None,
         pk_indices,
     );
-    let table = state.cell_based_table().clone();
+    let table = state.storage_table().clone();
     let epoch: u64 = 0;
 
     state
@@ -1843,7 +1843,7 @@ async fn test_dedup_pk_table_write_with_cell_based_read() {
     state.commit(epoch).await.unwrap();
 
     // ---------- Init reader
-    let table = CellBasedTable::new_for_test(
+    let table = StorageTable::new_for_test(
         state_store.clone(),
         TableId::from(0x42),
         actual_column_descs,

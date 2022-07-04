@@ -20,7 +20,7 @@ use risingwave_common::error::Result;
 use risingwave_common::types::{Datum, VirtualNode};
 use risingwave_common::util::ordered::OrderedRowDeserializer;
 
-use crate::cell_based_row_deserializer::{CellBasedRowDeserializer, ColumnDescMapping};
+use super::cell_based_row_deserializer::{CellBasedRowDeserializer, ColumnDescMapping};
 
 /// Similar to [`CellBasedRowDeserializer`], but for dedup pk cell encoding.
 #[derive(Clone)]
@@ -148,7 +148,7 @@ mod tests {
     use risingwave_common::util::sort_util::OrderType;
 
     use super::DedupPkCellBasedRowDeserializer;
-    use crate::cell_based_row_deserializer::ColumnDescMapping;
+    use crate::encoding::cell_based_row_deserializer::ColumnDescMapping;
 
     #[test]
     fn test_cell_based_deserializer() {
