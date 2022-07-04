@@ -117,6 +117,7 @@ impl PlanRoot {
         let mut plan = self.plan.clone();
 
         // Simple Unnesting.
+        // Pull correlated predicates up the algebra tree to unnest simple subquery.
         plan = {
             let rules = vec![PullUpCorrelatedPredicate::create()];
             let heuristic_optimizer = HeuristicOptimizer::new(ApplyOrder::TopDown, rules);
@@ -124,6 +125,8 @@ impl PlanRoot {
         };
 
         // General Unnesting.
+        // Translate Apply, push Apply down the plan and finally replace Apply with regular inner
+        // join.
         plan = {
             let rules = vec![TranslateApply::create()];
             let heuristic_optimizer = HeuristicOptimizer::new(ApplyOrder::BottomUp, rules);

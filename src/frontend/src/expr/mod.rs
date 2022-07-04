@@ -224,6 +224,7 @@ impl ExprImpl {
         visitor.has
     }
 
+    /// Collect `CorrelatedInputRef`s in `ExprImpl` and return theirs indices.
     pub fn collect_correlated_indices(&self) -> Vec<usize> {
         struct Collector {
             depth: usize,

@@ -51,8 +51,9 @@ impl Rule for TranslateApply {
             &mut index,
         )?;
 
-        // This `LogicalProject` is used to make sure that after `LogicalApply`'s left is rewritten
-        // the new index of `correlated_index` is always its position in `correlated_indices`.
+        // This `LogicalProject` is used to make sure that after `LogicalApply`'s left was
+        // rewritten, the new index of `correlated_index` is always at its position in
+        // `correlated_indices`.
         let exprs = correlated_indices
             .clone()
             .into_iter()
@@ -101,7 +102,7 @@ impl Rule for TranslateApply {
 
         let new_node = if new_join.join_type() != JoinType::LeftSemi {
             // `new_join`'s shcema is different from original apply's schema, so `LogicalProject` is
-            // needed to ensure they are the same.
+            // used to ensure they are the same.
             let mut exprs: Vec<ExprImpl> = vec![];
             new_join
                 .schema()
@@ -126,9 +127,10 @@ impl TranslateApply {
         Box::new(TranslateApply {})
     }
 
-    /// Used to rewrite `LogicalApply`'s left.
+    /// Rewrite `LogicalApply`'s left according to `correlated_indices`.
     ///
-    /// Assumption: only `LogicalJoin`, `LogicalScan` and `LogicalFilter` are in the left.
+    /// Assumption: only `LogicalJoin`, `LogicalScan`, `LogicalProject` and `LogicalFilter` are in
+    /// the left.
     fn rewrite(
         plan: &PlanRef,
         correlated_indices: Vec<usize>,
@@ -174,7 +176,8 @@ impl TranslateApply {
                 index,
             )
         } else {
-            panic!()
+            // TODO: better to return an error.
+            None
         }
     }
 
@@ -211,7 +214,6 @@ impl TranslateApply {
             (false, false) => {
                 let left = rewrite(join.left(), left_idxs, false)?;
                 let right = rewrite(join.right(), right_idxs, true)?;
-                // let new_join = join.clone_with_left_right(left, right);
                 let new_join =
                     LogicalJoin::new(left, right, join.join_type(), Condition::true_cond());
                 Some(new_join.into())

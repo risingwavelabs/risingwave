@@ -33,7 +33,7 @@ pub struct LogicalApply {
     on: Condition,
     join_type: JoinType,
 
-    /// The indices of `CorrelatedInputRef`s of `right`. It was collected in `Planner`.
+    /// The indices of `CorrelatedInputRef`s in `right`.
     correlated_indices: Vec<usize>,
 }
 
