@@ -74,8 +74,9 @@ impl Binder {
                     kind, inputs, f.distinct, filter,
                 )?)));
             } else if f.filter.is_some() {
-                return Err(ErrorCode::InvalidInputSyntax(
-                    "filter clause is only allowed in aggregation functions".to_string(),
+                return Err(ErrorCode::InvalidInputSyntax(format!(
+                    "filter clause is only allowed in aggregation functions, but `{}` is not an aggregation function", function_name
+                )
                 )
                 .into());
             }

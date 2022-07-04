@@ -438,3 +438,8 @@
     create table t(a int, b int);
     select avg(a) FILTER (WHERE 0 < (select max(a) from t)) AS avga from t;
   binder_error: 'Invalid input syntax: subquery in filter clause is not supported'
+- sql: |
+    /* filter clause + non-boolean function */
+    create table t(a int, b int);
+    select abs(a) FILTER (WHERE a > 0) AS avga from t;
+  binder_error: 'Invalid input syntax: filter clause is only allowed in aggregation functions, but `abs` is not an aggregation function'
