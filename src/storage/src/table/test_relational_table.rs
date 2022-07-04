@@ -737,7 +737,7 @@ async fn test_cell_based_get_row_by_scan() {
         None,
         pk_indices.clone(),
     );
-    let table = state.cell_based_table().clone();
+    let table = state.storage_table().clone();
     let epoch: u64 = 0;
 
     state
@@ -808,7 +808,7 @@ async fn test_cell_based_get_row_by_multi_get() {
         None,
         pk_indices,
     );
-    let table = state.cell_based_table().clone();
+    let table = state.storage_table().clone();
     let epoch: u64 = 0;
 
     state
@@ -878,7 +878,7 @@ async fn test_cell_based_get_row_for_string() {
         None,
         pk_indices,
     );
-    let table = state.cell_based_table().clone();
+    let table = state.storage_table().clone();
     let epoch: u64 = 0;
 
     state
@@ -957,7 +957,7 @@ async fn test_shuffled_column_id_for_get_row() {
         None,
         pk_indices,
     );
-    let table = state.cell_based_table().clone();
+    let table = state.storage_table().clone();
     let epoch: u64 = 0;
 
     state
@@ -1027,7 +1027,7 @@ async fn test_cell_based_table_iter() {
         None,
         pk_indices,
     );
-    let table = state.cell_based_table().clone();
+    let table = state.storage_table().clone();
     let epoch: u64 = 0;
 
     state
@@ -1108,8 +1108,8 @@ async fn test_multi_cell_based_table_iter() {
         pk_indices,
     );
 
-    let table_1 = state_1.cell_based_table().clone();
-    let table_2 = state_2.cell_based_table().clone();
+    let table_1 = state_1.storage_table().clone();
+    let table_2 = state_2.storage_table().clone();
 
     state_1
         .insert(Row(vec![
@@ -1362,7 +1362,7 @@ async fn test_cell_based_scan_empty_column_ids_cardinality() {
         None,
         pk_indices,
     );
-    let table = state.cell_based_table().clone();
+    let table = state.storage_table().clone();
     let epoch: u64 = 0;
 
     state

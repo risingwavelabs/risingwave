@@ -49,7 +49,7 @@ pub struct StateTableBase<S: StateStore, E: Encoding> {
     mem_table: MemTable,
 
     /// Relation layer
-    cell_based_table: StorageTableBase<S, E, READ_WRITE>,
+    storage_table: StorageTableBase<S, E, READ_WRITE>,
 }
 
 impl<S: StateStore, E: Encoding> StateTableBase<S, E> {
@@ -96,7 +96,7 @@ impl<S: StateStore, E: Encoding> StateTableBase<S, E> {
     ) -> Self {
         Self {
             mem_table: MemTable::new(),
-            cell_based_table: StorageTableBase::new(
+            storage_table: StorageTableBase::new(
                 store,
                 table_id,
                 columns,
@@ -108,17 +108,17 @@ impl<S: StateStore, E: Encoding> StateTableBase<S, E> {
     }
 
     /// Get the underlying [` StorageTableBase`]. Should only be used for tests.
-    pub fn cell_based_table(&self) -> &StorageTableBase<S, E, READ_WRITE> {
-        &self.cell_based_table
+    pub fn storage_table(&self) -> &StorageTableBase<S, E, READ_WRITE> {
+        &self.storage_table
     }
 
     fn pk_serializer(&self) -> &OrderedRowSerializer {
-        self.cell_based_table.pk_serializer()
+        self.storage_table.pk_serializer()
     }
 
     // TODO: remove, should not be exposed to user
     pub fn pk_indices(&self) -> &[usize] {
-        self.cell_based_table.pk_indices()
+        self.storage_table.pk_indices()
     }
 
     pub fn is_dirty(&self) -> bool {
@@ -126,7 +126,7 @@ impl<S: StateStore, E: Encoding> StateTableBase<S, E> {
     }
 
     /// Get a single row from state table. This function will return a Cow. If the value is from
-    /// memtable, it will be a [`Cow::Borrowed`]. If is from cell based table, it will be an owned
+    /// memtable, it will be a [`Cow::Borrowed`]. If is from storage table, it will be an owned
     /// value. To convert `Option<Cow<Row>>` to `Option<Row>`, just call `into_owned`.
     pub async fn get_row<'a>(
         &'a self,
@@ -141,11 +141,7 @@ impl<S: StateStore, E: Encoding> StateTableBase<S, E> {
                 RowOp::Delete(_) => Ok(None),
                 RowOp::Update((_, row)) => Ok(Some(Cow::Borrowed(row))),
             },
-            None => Ok(self
-                .cell_based_table
-                .get_row(pk, epoch)
-                .await?
-                .map(Cow::Owned)),
+            None => Ok(self.storage_table.get_row(pk, epoch).await?.map(Cow::Owned)),
         }
     }
 
@@ -190,7 +186,7 @@ impl<S: StateStore, E: Encoding> StateTableBase<S, E> {
 
     pub async fn commit(&mut self, new_epoch: u64) -> StorageResult<()> {
         let mem_table = std::mem::take(&mut self.mem_table).into_parts();
-        self.cell_based_table
+        self.storage_table
             .batch_write_rows(mem_table, new_epoch)
             .await?;
         Ok(())
@@ -210,8 +206,8 @@ impl<S: StateStore> StateTable<S> {
         pk_prefix: &'a Row,
         epoch: u64,
     ) -> StorageResult<RowStream<'a, S>> {
-        let cell_based_table_iter = self
-            .cell_based_table
+        let storage_table_iter = self
+            .storage_table
             .streaming_iter_with_pk_bounds(epoch, pk_prefix, ..)
             .await?;
 
@@ -223,7 +219,7 @@ impl<S: StateStore> StateTable<S> {
             self.mem_table.iter(encoded_key_range)
         };
 
-        Ok(StateTableRowIter::new(mem_table_iter, cell_based_table_iter).into_stream())
+        Ok(StateTableRowIter::new(mem_table_iter, storage_table_iter).into_stream())
     }
 }
 
@@ -231,46 +227,46 @@ pub type RowStream<'a, S: StateStore> = impl Stream<Item = StorageResult<Cow<'a,
 
 struct StateTableRowIter<'a, M, C> {
     mem_table_iter: M,
-    cell_based_table_iter: C,
+    storage_table_iter: C,
     _phantom: PhantomData<&'a ()>,
 }
 
 /// `StateTableRowIter` is able to read the just written data (uncommited data).
-/// It will merge the result of `mem_table_iter` and `cell_based_streaming_iter`.
+/// It will merge the result of `mem_table_iter` and `storage_streaming_iter`.
 impl<'a, M, C> StateTableRowIter<'a, M, C>
 where
     M: Iterator<Item = (&'a Vec<u8>, &'a RowOp)>,
     C: Stream<Item = StorageResult<(Vec<u8>, Row)>>,
 {
-    fn new(mem_table_iter: M, cell_based_table_iter: C) -> Self {
+    fn new(mem_table_iter: M, storage_table_iter: C) -> Self {
         Self {
             mem_table_iter,
-            cell_based_table_iter,
+            storage_table_iter,
             _phantom: PhantomData,
         }
     }
 
-    /// This function scans kv pairs from the `shared_storage`(`cell_based_table`) and
+    /// This function scans kv pairs from the `shared_storage`(`storage_table`) and
     /// memory(`mem_table`) with optional pk_bounds. If pk_bounds is
     /// (Included(prefix),Excluded(next_key(prefix))), all kv pairs within corresponding prefix will
-    /// be scanned. If a record exist in both `cell_based_table` and `mem_table`, result
+    /// be scanned. If a record exist in both `storage_table` and `mem_table`, result
     /// `mem_table` is returned according to the operation(RowOp) on it.
     #[try_stream(ok = Cow<'a, Row>, error = StorageError)]
     async fn into_stream(self) {
-        let cell_based_table_iter = self.cell_based_table_iter.fuse().peekable();
-        pin_mut!(cell_based_table_iter);
+        let storage_table_iter = self.storage_table_iter.fuse().peekable();
+        pin_mut!(storage_table_iter);
 
         let mut mem_table_iter = self.mem_table_iter.fuse().peekable();
 
         loop {
             match (
-                cell_based_table_iter.as_mut().peek().await,
+                storage_table_iter.as_mut().peek().await,
                 mem_table_iter.peek(),
             ) {
                 (None, None) => break,
                 // The mem table side has come to an end, return data from the shared storage.
                 (Some(_), None) => {
-                    let (_, row) = cell_based_table_iter.next().await.unwrap()?;
+                    let (_, row) = storage_table_iter.next().await.unwrap()?;
                     yield Cow::Owned(row);
                 }
                 // The stream side has come to an end, return data from the mem table.
@@ -283,11 +279,11 @@ where
                         _ => {}
                     }
                 }
-                (Some(Ok((cell_based_pk, _))), Some((mem_table_pk, _))) => {
-                    match cell_based_pk.cmp(mem_table_pk) {
+                (Some(Ok((storage_pk, _))), Some((mem_table_pk, _))) => {
+                    match storage_pk.cmp(mem_table_pk) {
                         Ordering::Less => {
-                            // yield data from cell based table
-                            let (_, row) = cell_based_table_iter.next().await.unwrap()?;
+                            // yield data from storage table
+                            let (_, row) = storage_table_iter.next().await.unwrap()?;
                             yield Cow::Owned(row);
                         }
                         Ordering::Equal => {
@@ -295,7 +291,7 @@ where
                             // iterators and return the data in memory.
                             let (_, row_op) = mem_table_iter.next().unwrap();
                             let (_, old_row_in_storage) =
-                                cell_based_table_iter.next().await.unwrap()?;
+                                storage_table_iter.next().await.unwrap()?;
                             match row_op {
                                 RowOp::Insert(row) => {
                                     yield Cow::Borrowed(row);
@@ -324,7 +320,7 @@ where
                 }
                 (Some(Err(_)), Some(_)) => {
                     // Throw the error.
-                    return Err(cell_based_table_iter.next().await.unwrap().unwrap_err());
+                    return Err(storage_table_iter.next().await.unwrap().unwrap_err());
                 }
             }
         }
