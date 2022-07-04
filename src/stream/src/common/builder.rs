@@ -189,7 +189,7 @@ impl StreamChunkBuilder {
     }
 
     /// `try_map_index_to_matched` will map `index` from original column index to
-    /// the index in matched columns. If `index` is not in matched_columns, `None`
+    /// the index in matched columns. If `index` is not in `matched_columns`, `None`
     /// will be returned.
     fn try_map_index_to_matched(&self, index: &usize) -> Option<usize> {
         if self.matched_range.contains(index) {
@@ -200,7 +200,7 @@ impl StreamChunkBuilder {
     }
 
     /// `try_map_index_to_matched` will map `index` from original column index to
-    /// the index in matched columns. If `index` is not in matched_columns, `None`
+    /// the index in matched columns. If `index` is not in `matched_columns`, `None`
     /// will be returned.
     fn try_map_index_to_update(&self, index: &usize) -> Option<usize> {
         if self.update_range.contains(index) {
