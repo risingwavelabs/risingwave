@@ -313,10 +313,6 @@ impl LogicalAgg {
     }
 }
 
-struct FilterClauseRewriter {}
-
-impl ExprRewriter for FilterClauseRewriter {}
-
 /// `LogicalAggBuilder` extracts agg calls and references to group columns from select list and
 /// build the plan like `LogicalAgg - LogicalProject`.
 /// it is constructed by `group_exprs` and collect and rewrite the expression in selection and
