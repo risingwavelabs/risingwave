@@ -25,7 +25,7 @@ pub struct StreamingMetrics {
     pub actor_processing_time: GenericGaugeVec<AtomicF64>,
     pub actor_barrier_time: GenericGaugeVec<AtomicF64>,
     pub actor_execution_time: GenericGaugeVec<AtomicF64>,
-    pub stream_actor_output_buffer_usage_rate: GenericGaugeVec<AtomicF64>,
+    pub actor_output_buffer_backpressured_rate: GenericGaugeVec<AtomicF64>,
     pub actor_scheduled_duration: GenericGaugeVec<AtomicF64>,
     pub actor_scheduled_cnt: GenericGaugeVec<AtomicI64>,
     pub actor_fast_poll_duration: GenericGaugeVec<AtomicF64>,
@@ -87,9 +87,9 @@ impl StreamingMetrics {
         )
         .unwrap();
 
-        let stream_actor_output_buffer_usage_rate = register_gauge_vec_with_registry!(
-            "stream_actor_output_buffer_usage_rate",
-            "Output buffer Usage rate of an actor",
+        let actor_output_buffer_backpressured_rate = register_gauge_vec_with_registry!(
+            "stream_actor_output_buffer_backpressured_rate",
+            "Output buffer backpressured rate of an actor",
             &["actor_id"],
             registry
         )
@@ -230,7 +230,7 @@ impl StreamingMetrics {
             actor_processing_time,
             actor_barrier_time,
             actor_execution_time,
-            stream_actor_output_buffer_usage_rate,
+            actor_output_buffer_backpressured_rate,
             actor_scheduled_duration,
             actor_scheduled_cnt,
             actor_fast_poll_duration,

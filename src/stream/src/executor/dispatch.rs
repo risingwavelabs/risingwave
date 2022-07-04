@@ -135,16 +135,22 @@ pub fn new_output(
     let tx = context.take_sender(&(actor_id, down_id))?;
 
     let tx_clone = tx.clone();
-    let actor_id_str = actor_id.to_string();
+    // monitor backpressure rate
     let task = tokio::spawn(async move {
-        // for calculate percent rate
-        let scaled_full_size = LOCAL_OUTPUT_CHANNEL_SIZE as f64 * 0.01;
+        let actor_id_str = actor_id.to_string();
         loop {
+            let mut cnt = 0;
+            const SAMPLING_FREQUENCY: usize = 15;
+            for _ in 0..SAMPLING_FREQUENCY{
+                if tx_clone.capacity() == LOCAL_OUTPUT_CHANNEL_SIZE{
+                    cnt +=1;
+                }
+                tokio::time::sleep(std::time::Duration::from_secs(1)).await;
+            }
             metrics
-                .stream_actor_output_buffer_usage_rate
+                .actor_output_buffer_backpressured_rate
                 .with_label_values(&[&actor_id_str])
-                .set(tx_clone.capacity() as f64 / scaled_full_size);
-            tokio::time::sleep(std::time::Duration::from_secs(1)).await;
+                .set(cnt as f64 / SAMPLING_FREQUENCY as f64);
         }
     });
     actor_output_buffer_monitor_tasks.insert(actor_id, task);
