@@ -489,7 +489,7 @@ mod tests {
     async fn test_managed_extreme_state() {
         let store = MemoryStateStore::new();
         let mut state_table =
-            state_table_create_helper(store, TableId::from(0x2333), 2, OrderType::Ascending);
+            state_table_create_helper(store, TableId::from(0x2333), 1, OrderType::Ascending);
 
         let mut managed_state = ManagedMinState::<_, I64Array>::new(
             Some(5),
@@ -677,7 +677,7 @@ mod tests {
                 DataType::Int64,
             ));
         }
-        let relational_pk_len = column_descs.len() - 1;
+        let relational_pk_len = column_descs.len();
         StateTable::new(
             store,
             table_id,
@@ -696,7 +696,7 @@ mod tests {
             OrderType::Ascending
         };
         let mut state_table =
-            state_table_create_helper(store, TableId::from(0x2333), 3, order_type);
+            state_table_create_helper(store, TableId::from(0x2333), 2, order_type);
 
         let mut managed_state = GenericExtremeState::<_, I64Array, EXTREME_TYPE>::new(
             Some(3),
@@ -802,7 +802,7 @@ mod tests {
             OrderType::Ascending
         };
         let mut state_table =
-            state_table_create_helper(store, TableId::from(0x2333), 3, order_type);
+            state_table_create_helper(store, TableId::from(0x2333), 2, order_type);
 
         let mut managed_state = GenericExtremeState::<_, I64Array, EXTREME_TYPE>::new(
             Some(3),
@@ -930,7 +930,7 @@ mod tests {
         .await
         .unwrap();
         let mut state_table =
-            state_table_create_helper(store, TableId::from(0x2333), 2, OrderType::Ascending);
+            state_table_create_helper(store, TableId::from(0x2333), 1, OrderType::Ascending);
 
         assert!(!state_table.is_dirty());
 
@@ -1016,7 +1016,7 @@ mod tests {
             OrderType::Ascending
         };
         let mut state_table =
-            state_table_create_helper(store, TableId::from(0x2333), 2, order_type);
+            state_table_create_helper(store, TableId::from(0x2333), 1, order_type);
 
         let mut managed_state = GenericExtremeState::<_, I64Array, EXTREME_TYPE>::new(
             Some(3),
@@ -1121,7 +1121,7 @@ mod tests {
         .await
         .unwrap();
         let mut state_table =
-            state_table_create_helper(store, TableId::from(0x2333), 2, OrderType::Ascending);
+            state_table_create_helper(store, TableId::from(0x2333), 1, OrderType::Ascending);
 
         assert!(!state_table.is_dirty());
 
