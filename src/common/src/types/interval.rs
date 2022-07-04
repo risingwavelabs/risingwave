@@ -196,7 +196,7 @@ impl IntervalUnit {
         }
 
         let months = (self.months as f64) / rhs;
-        let days = (self.days as f64) / rhs + (months % 1.0) * 30.0;
+        let days = (self.days as f64) / rhs + ((months % 1.0) * 30.0).round();
         let ms = ((self.ms as f64) / rhs + (days % 1.0) * 24.0 * 60.0 * 60.0 * 1000.0).round();
 
         Some(IntervalUnit {

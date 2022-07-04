@@ -74,6 +74,11 @@ SELECT interval '1 month' / 2000;
 00:21:36
 
 query T
+select interval '1' year / 5;
+----
+2 mons 12 days 00:00:00
+
+query T
 select Date '2022-06-23' + 4;
 ----
 2022-06-27
@@ -122,4 +127,3 @@ query T
 select TIME '18:20:49' +  interval '1 hour';
 ----
 19:20:49
-
