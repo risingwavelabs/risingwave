@@ -20,12 +20,12 @@ use risingwave_common::error::{ErrorCode, Result};
 use risingwave_common::types::ScalarImpl;
 
 use crate::binder::{
-    BoundBaseTable, BoundJoin, BoundSource, BoundSystemTable, BoundTableFunction,
+    BoundBaseTable, BoundJoin, BoundSink, BoundSource, BoundSystemTable, BoundTableFunction,
     BoundWindowTableFunction, FunctionType, Relation, WindowTableFunctionKind,
 };
 use crate::expr::{ExprImpl, ExprType, FunctionCall, InputRef};
 use crate::optimizer::plan_node::{
-    LogicalHopWindow, LogicalJoin, LogicalProject, LogicalScan, LogicalSource,
+    LogicalHopWindow, LogicalJoin, LogicalProject, LogicalScan, LogicalSink, LogicalSource,
     LogicalTableFunction, PlanRef,
 };
 use crate::planner::Planner;
@@ -40,6 +40,7 @@ impl Planner {
             Relation::Join(join) => self.plan_join(*join),
             Relation::WindowTableFunction(tf) => self.plan_window_table_function(*tf),
             Relation::Source(s) => self.plan_source(*s),
+            Relation::Sink(s) => self.plan_sink(*s),
             Relation::TableFunction(gs) => match gs.func_type {
                 FunctionType::Generate => self.plan_generate_series_function(*gs),
                 FunctionType::Unnest => self.plan_unnest_function(*gs),
@@ -75,6 +76,10 @@ impl Planner {
 
     pub(super) fn plan_source(&mut self, source: BoundSource) -> Result<PlanRef> {
         Ok(LogicalSource::new(Rc::new(source.catalog), self.ctx()).into())
+    }
+
+    pub(super) fn plan_sink(&mut self, sink: BoundSink) -> Result<PlanRef> {
+        Ok(LogicalSink::new(Rc::new(sink.name), self.ctx()).into())
     }
 
     pub(super) fn plan_join(&mut self, join: BoundJoin) -> Result<PlanRef> {

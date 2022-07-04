@@ -31,7 +31,9 @@ mod window_table_function;
 pub use join::BoundJoin;
 pub use subquery::BoundSubquery;
 pub use table_function::BoundTableFunction;
-pub use table_or_source::{BoundBaseTable, BoundSource, BoundSystemTable, BoundTableSource};
+pub use table_or_source::{
+    BoundBaseTable, BoundSink, BoundSource, BoundSystemTable, BoundTableSource,
+};
 pub use window_table_function::{BoundWindowTableFunction, WindowTableFunctionKind};
 
 /// A validated item that refers to a table-like entity, including base table, subquery, join, etc.
@@ -39,6 +41,7 @@ pub use window_table_function::{BoundWindowTableFunction, WindowTableFunctionKin
 #[derive(Debug, Clone)]
 pub enum Relation {
     Source(Box<BoundSource>),
+    Sink(Box<BoundSink>),
     BaseTable(Box<BoundBaseTable>),
     SystemTable(Box<BoundSystemTable>),
     Subquery(Box<BoundSubquery>),

@@ -38,7 +38,7 @@ message Sink {
   uint32 schema_id = 2;
   uint32 database_id = 3;
   string name = 4;
-  string mv_name = 5;
+  uint32 associated_table_id  = 5;
   map<string, string> properties = 6;
   string owner = 7;
 }

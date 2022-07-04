@@ -22,13 +22,17 @@ use risingwave_sqlparser::ast::CreateSinkStatement;
 use super::util::handle_with_properties;
 use crate::binder::Binder;
 use crate::catalog::{DatabaseId, SchemaId};
-use crate::session::OptimizerContext;
+use crate::optimizer::property::RequiredDist;
+use crate::optimizer::PlanRef;
+use crate::planner::Planner;
+use crate::session::{OptimizerContext, OptimizerContextRef, SessionImpl};
+use crate::stream_fragmenter::StreamFragmenter;
 
 pub(crate) fn make_prost_sink(
     database_id: DatabaseId,
     schema_id: SchemaId,
     name: String,
-    mv_name: String,
+    associated_table_id: u32,
     properties: HashMap<String, String>,
     owner: String,
 ) -> Result<ProstSink> {
@@ -37,9 +41,9 @@ pub(crate) fn make_prost_sink(
         schema_id,
         database_id,
         name,
-        mv_name,
+        associated_table_id,
         properties,
-        owner
+        owner,
     })
 }
 
@@ -100,23 +104,44 @@ pub async fn handle_create_sink(
 
     //     (sink, 1)
     // };
-    
+
     let (schema_name, sink_name) = Binder::resolve_table_name(stmt.sink_name.clone())?;
-    let (database_id, schema_id) = session
-        .env()
-        .catalog_reader()
-        .read_guard()
+    let (database_id, schema_id) = session.env().catalog_reader().read_guard()
         .check_relation_name_duplicated(session.database(), &schema_name, sink_name.as_str())?;
+    let associated_table_id = {
+        let catalog_reader =  session
+            .env()
+            .catalog_reader()
+            .read_guard();
+        let associated_table = catalog_reader
+            .get_table_by_name(session.database(), &schema_name, stmt.materialized_view.to_string().as_str())?;
+        associated_table.id().table_id.into()
+    };
+
+
+
+    
 
     let mv_name = stmt.materialized_view.to_string();
     let sink = make_prost_sink(
         database_id,
         schema_id,
         stmt.sink_name.to_string(),
-        mv_name,
+        associated_table_id,
         handle_with_properties("create_sink", stmt.with_properties.0)?,
         session.user_name().to_string(),
     )?;
+
+    // let relation = {
+    //     let mut binder = Binder::new(
+    //         session.env().catalog_reader().read_guard(),
+    //         session.database().to_string(),
+    //     );
+    //     binder.bind_table_or_source(schema_name.as_str(), mv_name.as_str(), None)
+    // }?;
+    
+    // let mut plan_root = Planner::new(context.into()).plan_relation(relation)?;
+    // plan_root.set_required_dist(RequiredDist::Any);
 
     let catalog_writer = session.env().catalog_writer();
     catalog_writer.create_sink(sink).await?;

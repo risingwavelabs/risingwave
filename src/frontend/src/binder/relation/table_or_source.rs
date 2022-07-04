@@ -53,6 +53,11 @@ pub struct BoundSource {
     pub catalog: SourceCatalog,
 }
 
+#[derive(Debug, Clone)]
+pub struct BoundSink {
+    pub name: String,
+}
+
 impl From<&SourceCatalog> for BoundSource {
     fn from(s: &SourceCatalog) -> Self {
         Self { catalog: s.clone() }
