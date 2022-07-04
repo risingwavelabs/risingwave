@@ -67,7 +67,7 @@ pub struct LocalStreamManagerCore {
     actors: HashMap<ActorId, stream_plan::StreamActor>,
 
     /// Stores all actor tokio runtime montioring tasks.
-    actor_coroutine_monitor_tasks: HashMap<ActorId, JoinHandle<()>>,
+    actor_monitor_tasks: HashMap<ActorId, JoinHandle<()>>,
 
     /// Mock source, `actor_id = 0`.
     /// TODO: remove this
@@ -369,7 +369,7 @@ impl LocalStreamManagerCore {
             context: Arc::new(context),
             actor_infos: HashMap::new(),
             actors: HashMap::new(),
-            actor_coroutine_monitor_tasks: HashMap::new(),
+            actor_monitor_tasks: HashMap::new(),
             mock_source: (Some(tx), Some(rx)),
             state_store,
             streaming_metrics,
@@ -732,7 +732,7 @@ impl LocalStreamManagerCore {
                     tokio::time::sleep(Duration::from_secs(1)).await;
                 }
             });
-            self.actor_coroutine_monitor_tasks.insert(actor_id, task);
+            self.actor_monitor_tasks.insert(actor_id, task);
         }
 
         Ok(())
@@ -778,10 +778,7 @@ impl LocalStreamManagerCore {
     fn drop_actor(&mut self, actor_id: ActorId) {
         let handle = self.handles.remove(&actor_id).unwrap();
         self.context.retain(|&(up_id, _)| up_id != actor_id);
-        self.actor_coroutine_monitor_tasks
-            .remove(&actor_id)
-            .unwrap()
-            .abort();
+        self.actor_monitor_tasks.remove(&actor_id).unwrap().abort();
         self.actor_infos.remove(&actor_id);
         self.actors.remove(&actor_id);
         // Task should have already stopped when this method is invoked.
@@ -793,10 +790,7 @@ impl LocalStreamManagerCore {
     fn drop_all_actors(&mut self) {
         for (actor_id, handle) in self.handles.drain() {
             self.context.retain(|&(up_id, _)| up_id != actor_id);
-            self.actor_coroutine_monitor_tasks
-                .remove(&actor_id)
-                .unwrap()
-                .abort();
+            self.actor_monitor_tasks.remove(&actor_id).unwrap().abort();
             self.actors.remove(&actor_id);
             // Task should have already stopped when this method is invoked.
             handle.abort();
