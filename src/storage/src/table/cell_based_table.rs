@@ -49,9 +49,12 @@ use crate::{Keyspace, StateStore, StateStoreIter};
 mod iter_utils;
 
 pub type AccessType = bool;
+/// Table with `READ_ONLY` is used for batch scan or point lookup.
 pub const READ_ONLY: AccessType = false;
+/// Table with `READ_WRITE` is used for streaming executors through `StateTable`.
 pub const READ_WRITE: AccessType = true;
 
+/// For tables without distribution (singleton), the `DEFAULT_VNODE` is encoded.
 pub const DEFAULT_VNODE: VirtualNode = 0;
 
 pub type DedupPkCellBasedTable<S, const T: AccessType> =
@@ -270,6 +273,28 @@ impl<S: StateStore, SER: RowSerializer, const T: AccessType> CellBasedTableBase<
 
 /// Get
 impl<S: StateStore, SER: RowSerializer, const T: AccessType> CellBasedTableBase<S, SER, T> {
+    /// Check whether the given `vnode` is set in the `vnodes` of this table.
+    ///
+    /// - For `READ_WRITE` or streaming usages, this will panic on `false` and always return `true`
+    ///   since the table should only be used to access entries with vnode specified in
+    ///   `self.vnodes`.
+    /// - For `READ_ONLY` or batch usages, this will return the result verbatim. The caller may
+    ///   filter out the scanned row according to the result.
+    fn check_vnode_is_set(&self, vnode: VirtualNode) -> bool {
+        let is_set = self.vnodes.is_set(vnode as usize).unwrap();
+        match T {
+            READ_WRITE => {
+                assert!(
+                    is_set,
+                    "vnode {} should not be accessed by this table: {:#?}, dist key {:?}",
+                    vnode, self.table_columns, self.dist_key_indices
+                );
+            }
+            READ_ONLY => {}
+        }
+        is_set
+    }
+
     /// Get vnode value with `indices` on the given `row`. Should not be used directly.
     fn compute_vnode(&self, row: &Row, indices: &[usize]) -> VirtualNode {
         let vnode = if indices.is_empty() {
@@ -281,14 +306,7 @@ impl<S: StateStore, SER: RowSerializer, const T: AccessType> CellBasedTableBase<
 
         tracing::trace!(target: "events::storage::cell_based_table", "compute vnode: {:?} keys {:?} => {}", row, indices, vnode);
 
-        // This table should only be used to access entries with vnode specified in `self.vnodes`.
-        assert!(
-            self.vnodes.is_set(vnode as usize).unwrap(),
-            "vnode {} should not be accessed by this table: {:#?}, dist key {:?}",
-            vnode,
-            self.table_columns,
-            self.dist_key_indices
-        );
+        let _ = self.check_vnode_is_set(vnode);
         vnode
     }
 
@@ -327,12 +345,7 @@ impl<S: StateStore, SER: RowSerializer, const T: AccessType> CellBasedTableBase<
         }
 
         let result = deserializer.take();
-        Ok(result.map(|(vnode, _pk, row)| {
-            // This table should only to used to access entries with vnode specified in
-            // `self.vnodes`.
-            assert!(self.vnodes.is_set(vnode as usize).unwrap());
-            row
-        }))
+        Ok(result.and_then(|(vnode, _pk, row)| self.check_vnode_is_set(vnode).then_some(row)))
     }
 
     /// Get a single row by range scan
@@ -351,12 +364,7 @@ impl<S: StateStore, SER: RowSerializer, const T: AccessType> CellBasedTableBase<
         }
 
         let result = deserializer.take();
-        Ok(result.map(|(vnode, _pk, row)| {
-            // This table should only be used to access entries with vnode specified in
-            // `self.vnodes`.
-            assert!(self.vnodes.is_set(vnode as usize).unwrap());
-            row
-        }))
+        Ok(result.and_then(|(vnode, _pk, row)| self.check_vnode_is_set(vnode).then_some(row)))
     }
 }
 

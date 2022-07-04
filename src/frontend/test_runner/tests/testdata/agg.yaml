@@ -329,3 +329,45 @@
       StreamGlobalSimpleAgg { aggs: [count, sum($0), min($0), max($1)] }
         StreamExchange { dist: Single }
           StreamTableScan { table: t, columns: [v1, v2, _row_id], pk_indices: [2] }
+- sql: |
+    /* dup group key */
+    create table t(v1 int) with ('appendonly' = false);
+    select v1 from t group by v1, v1;
+  logical_plan: |
+    LogicalProject { exprs: [$0] }
+      LogicalAgg { group_keys: [0, 0], agg_calls: [] }
+        LogicalProject { exprs: [$1] }
+          LogicalScan { table: t, columns: [_row_id, v1] }
+  optimized_logical_plan: |
+    LogicalProject { exprs: [$0] }
+      LogicalAgg { group_keys: [0, 0], agg_calls: [] }
+        LogicalScan { table: t, columns: [v1] }
+  stream_plan: |
+    StreamMaterialize { columns: [v1], pk_columns: [v1, v1], order_descs: [v1] }
+      StreamExchange { dist: HashShard([0]) }
+        StreamProject { exprs: [$0] }
+          StreamHashAgg { group_keys: [$0, $0], aggs: [count] }
+            StreamExchange { dist: HashShard([0]) }
+              StreamTableScan { table: t, columns: [v1, _row_id], pk_indices: [1] }
+- sql: |
+    /* dup group key */
+    create table t(v1 int, v2 int, v3 int) with ('appendonly' = false);
+    select v2, min(v1) as min_v1, v3, max(v1) as max_v1 from t group by v3, v2, v2;
+  logical_plan: |
+    LogicalProject { exprs: [$1, $3, $0, $4] }
+      LogicalAgg { group_keys: [0, 1, 1], agg_calls: [min($2), max($2)] }
+        LogicalProject { exprs: [$3, $2, $1] }
+          LogicalScan { table: t, columns: [_row_id, v1, v2, v3] }
+  optimized_logical_plan: |
+    LogicalProject { exprs: [$1, $2, $0, $3] }
+      LogicalAgg { group_keys: [0, 1, 1], agg_calls: [min($2), max($2)] }
+        LogicalProject { exprs: [$2, $1, $0] }
+          LogicalScan { table: t, columns: [v1, v2, v3] }
+  stream_plan: |
+    StreamMaterialize { columns: [v2, min_v1, v3, max_v1], pk_columns: [v3, v2, v2], order_descs: [v3, v2] }
+      StreamExchange { dist: HashShard([0, 2]) }
+        StreamProject { exprs: [$1, $2, $0, $4] }
+          StreamHashAgg { group_keys: [$0, $1, $1], aggs: [count, min($2), max($2)] }
+            StreamExchange { dist: HashShard([0, 1]) }
+              StreamProject { exprs: [$2, $1, $0, $3] }
+                StreamTableScan { table: t, columns: [v1, v2, v3, _row_id], pk_indices: [3] }

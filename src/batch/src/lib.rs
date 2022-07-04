@@ -38,6 +38,7 @@
 #![feature(iterator_try_collect)]
 #![feature(lint_reasons)]
 
+pub mod exchange_source;
 pub mod execution;
 pub mod executor;
 pub mod rpc;

@@ -225,7 +225,6 @@ async fn test_table_v2_materialize() -> Result<()> {
                 .await?,
         ),
         1024,
-        true,
         "RowSeqExecutor2".to_string(),
         Arc::new(BatchMetrics::unused()),
     ));
@@ -288,7 +287,6 @@ async fn test_table_v2_materialize() -> Result<()> {
                 .await?,
         ),
         1024,
-        true,
         "RowSeqScanExecutor2".to_string(),
         Arc::new(BatchMetrics::unused()),
     ));
@@ -360,7 +358,6 @@ async fn test_table_v2_materialize() -> Result<()> {
                 .await?,
         ),
         1024,
-        true,
         "RowSeqScanExecutor2".to_string(),
         Arc::new(BatchMetrics::unused()),
     ));
@@ -438,7 +435,6 @@ async fn test_row_seq_scan() -> Result<()> {
                 .unwrap(),
         ),
         1,
-        true,
         "RowSeqScanExecutor2".to_string(),
         Arc::new(BatchMetrics::unused()),
     ));
