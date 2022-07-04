@@ -12,6 +12,8 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+use std::marker::PhantomData;
+
 use futures::StreamExt;
 use futures_async_stream::try_stream;
 use itertools::Itertools;
@@ -46,29 +48,30 @@ use crate::task::BatchTaskContext;
 // Build side = "Left side", where we go through its rows one by one
 // Probe side = "Right side", where we find matches for each row from the build side
 
-struct ProbeSideSourceParams {
+#[derive(Default)]
+pub struct ProbeSideSourceParams {
     table_desc: CellBasedTableDesc,
     column_ids: Vec<i32>,
     build_side_idxs: Vec<usize>,
     source_templates: Vec<ProstExchangeSource>,
 }
 
-/// `GatherExecutor` is used to send and retrieve data from the probe side table using RPC calls
-struct GatherExecutor {
+/// Contains the functions of the `GatherExecutor` that are exposed
+pub trait GatherExecutor: Send {
+    fn new_boxed(cur_row: &RowRef, params: &ProbeSideSourceParams) -> Result<Box<Self>>;
+
+    fn execute(self: Box<Self>) -> BoxedDataChunkStream;
+}
+
+/// `DefaultGatherExecutor` sends and retrieves data from the probe side table using RPC calls
+struct DefaultGatherExecutor {
     prost_sources: Vec<ProstExchangeSource>,
 }
 
-impl GatherExecutor {
-    fn new_boxed() -> Box<Self> {
-        Box::new(GatherExecutor {
-            prost_sources: vec![],
-        })
-    }
-
+impl DefaultGatherExecutor {
     /// Creates the `RowSeqScanNode` that will be used for scanning the probe side table
     /// based on the passed `RowRef` and the `ProbeSideSourceParams`.
     fn create_row_seq_scan_node(
-        self: &mut Box<Self>,
         cur_row: &RowRef,
         params: &ProbeSideSourceParams,
     ) -> Result<NodeBody> {
@@ -96,44 +99,6 @@ impl GatherExecutor {
             scan_range,
             vnode_bitmap: None,
         }))
-    }
-
-    /// Manually recreates the actual vector of `ProstExchangeSources` to be used for sending
-    /// RPC calls using the `source_templates` in the passed `ProbeSideSourceParams`.
-    fn create_probe_side_prost_sources(
-        self: &mut Box<Self>,
-        cur_row: &RowRef,
-        params: &ProbeSideSourceParams,
-    ) -> Result<()> {
-        let Plan(inner_template_plan) =
-            params.source_templates[0].get_local_execute_plan().unwrap();
-        let local_execute_plan = LocalExecutePlan {
-            plan: Some(PlanFragment {
-                root: Some(PlanNode {
-                    children: vec![],
-                    identity: Uuid::new_v4().to_string(),
-                    node_body: Some(self.create_row_seq_scan_node(cur_row, params)?),
-                }),
-                exchange_info: None,
-            }),
-            epoch: inner_template_plan.epoch,
-        };
-
-        self.prost_sources = params
-            .source_templates
-            .iter()
-            .map(|source| ProstExchangeSource {
-                task_output_id: Some(source.get_task_output_id().unwrap().clone()),
-                host: Some(source.get_host().unwrap().clone()),
-                local_execute_plan: Some(Plan(local_execute_plan.clone())),
-            })
-            .collect();
-
-        Ok(())
-    }
-
-    fn execute(self: Box<Self>) -> BoxedDataChunkStream {
-        self.get_probe_side_chunk()
     }
 
     /// Sends RPC calls to retrieve data from the probe side table using the vector of
@@ -164,6 +129,47 @@ impl GatherExecutor {
     }
 }
 
+impl GatherExecutor for DefaultGatherExecutor {
+    /// Creates a new boxed `DefaultGatherExecutor` that stores a vector of `ProstExchangeSources`
+    /// that eill be used for sending RPC calls. They are made using the `source_templates` in the
+    /// passed `ProbeSideSourceParams`.
+    fn new_boxed(cur_row: &RowRef, params: &ProbeSideSourceParams) -> Result<Box<Self>> {
+        let Plan(inner_template_plan) =
+            params.source_templates[0].get_local_execute_plan().unwrap();
+
+        let local_execute_plan = LocalExecutePlan {
+            plan: Some(PlanFragment {
+                root: Some(PlanNode {
+                    children: vec![],
+                    identity: Uuid::new_v4().to_string(),
+                    node_body: Some(DefaultGatherExecutor::create_row_seq_scan_node(
+                        cur_row, params,
+                    )?),
+                }),
+                exchange_info: None,
+            }),
+            epoch: inner_template_plan.epoch,
+        };
+
+        let prost_sources = params
+            .source_templates
+            .iter()
+            .map(|source| ProstExchangeSource {
+                task_output_id: Some(source.get_task_output_id().unwrap().clone()),
+                host: Some(source.get_host().unwrap().clone()),
+                local_execute_plan: Some(Plan(local_execute_plan.clone())),
+            })
+            .collect();
+
+        Ok(Box::new(DefaultGatherExecutor { prost_sources }))
+    }
+
+    /// Execute the `GatherExecutor` and retrieve the data chunk stream
+    fn execute(self: Box<Self>) -> BoxedDataChunkStream {
+        self.get_probe_side_chunk()
+    }
+}
+
 /// Lookup Join Executor.
 /// High-level idea:
 /// 1) Iterate through each row in the build side
@@ -171,21 +177,22 @@ impl GatherExecutor {
 /// using the `GatherExecutor` to query the probe side
 /// 3) Join R and the matching rows on the probe side together with either inner or left outer join
 /// 4) Repeat 2-3) for every row in the build side
-pub struct LookupJoinExecutor {
+pub struct LookupJoinExecutor<GE> {
     join_type: JoinType,
     condition: Option<BoxedExpression>,
     build_side_source: RowLevelIter,
     build_side_data_types: Vec<DataType>,
     probe_side_data_types: Vec<DataType>,
     probe_side_source_params: ProbeSideSourceParams,
-    chunk_probeer: DataChunkBuilder,
+    chunk_builder: DataChunkBuilder,
     schema: Schema,
     output_indices: Vec<usize>,
     last_chunk: Option<SlicedDataChunk>,
     identity: String,
+    unused: PhantomData<GE>, // Only exists so we can use generic type
 }
 
-impl Executor for LookupJoinExecutor {
+impl<GE: 'static + GatherExecutor> Executor for LookupJoinExecutor<GE> {
     fn schema(&self) -> &Schema {
         &self.schema
     }
@@ -199,7 +206,7 @@ impl Executor for LookupJoinExecutor {
     }
 }
 
-impl LookupJoinExecutor {
+impl<GE: 'static + GatherExecutor> LookupJoinExecutor<GE> {
     #[try_stream(boxed, ok = DataChunk, error = RwError)]
     async fn do_execute(mut self: Box<Self>) {
         self.build_side_source.load_data().await?;
@@ -211,28 +218,30 @@ impl LookupJoinExecutor {
             }
             let cur_row = cur_row.unwrap();
 
-            let mut gather_executor = GatherExecutor::new_boxed();
-            gather_executor
-                .create_probe_side_prost_sources(&cur_row, &self.probe_side_source_params)?;
+            let gather_executor = GE::new_boxed(&cur_row, &self.probe_side_source_params)?;
             let mut probe_side_stream = gather_executor.execute();
 
             let mut chunk_added = false;
 
             loop {
                 let probe_side_chunk = probe_side_stream.next().await;
+                let chunk_is_none = probe_side_chunk.is_none();
 
-                // If None is received on the first build of probe_side_stream, don't break yet
-                // since on a Left Outer Join we still need to add a NULL-padded chunk
-                if probe_side_chunk.is_none() && chunk_added {
+                // If None is received for the first time on the probe_side_stream AND it's a Left
+                // Outer Join AND no chunks have been added for the current row, don't break yet
+                // as we need to add NULL-padded values
+                if chunk_is_none && (self.join_type == JoinType::Inner || chunk_added) {
                     break;
                 }
-                chunk_added = true;
 
                 // Join the cur_row and the probe_side_chunk depending on the given join type
                 // Currently, Lookup Join only supports Inner and Left Outer Join
                 let join_result = match self.join_type {
                     JoinType::Inner => self.do_inner_join(probe_side_chunk),
-                    JoinType::LeftOuter => self.do_left_outer_join(probe_side_chunk),
+                    // Only perform a Left Outer Join if chunk_is_none (and by extension no chunk
+                    // has been added yet for the current row)
+                    JoinType::LeftOuter if chunk_is_none => self.do_left_outer_join(),
+                    JoinType::LeftOuter if !chunk_is_none => self.do_inner_join(probe_side_chunk),
                     _ => Err(ErrorCode::NotImplemented(
                         format!(
                             "Lookup Join does not support join type {:?}",
@@ -243,9 +252,12 @@ impl LookupJoinExecutor {
                     .into()),
                 }?;
 
-                // Append chunk from the join result to the chunk probeer if it exists
+                // Append chunk from the join result to the chunk builder if it exists
                 if let Some(return_chunk) = join_result {
-                    if return_chunk.capacity() > 0 {
+                    if return_chunk.cardinality() > 0 {
+                        // println!{"{:?}", return_chunk}
+                        chunk_added = true;
+
                         if let Some(inner_chunk) =
                             self.append_chunk(SlicedDataChunk::new_checked(return_chunk)?)?
                         {
@@ -254,8 +266,8 @@ impl LookupJoinExecutor {
                     }
                 }
 
-                // Until we don't have any more last_chunks to append to the chunk probeer,
-                // keep appending them to the chunk probeer
+                // Until we don't have any more last_chunks to append to the chunk builder,
+                // keep appending them to the chunk builder
                 while self.last_chunk.is_some() {
                     let mut temp_chunk: Option<SlicedDataChunk> = None;
                     std::mem::swap(&mut temp_chunk, &mut self.last_chunk);
@@ -268,8 +280,8 @@ impl LookupJoinExecutor {
             self.build_side_source.advance_row();
         }
 
-        // Consume and yield all the remaining chunks in the chunk probeer
-        if let Some(data_chunk) = self.chunk_probeer.consume_all()? {
+        // Consume and yield all the remaining chunks in the chunk builder
+        if let Some(data_chunk) = self.chunk_builder.consume_all()? {
             yield data_chunk.reorder_columns(&self.output_indices);
         }
     }
@@ -305,53 +317,38 @@ impl LookupJoinExecutor {
         }
     }
 
-    /// If `cur_row` has a match with the probe side table, then just return the Inner Join result.
-    /// Otherwise, pad the row out with NULLs and return it.
-    fn do_left_outer_join(
-        &mut self,
-        probe_side_chunk: Option<Result<DataChunk>>,
-    ) -> Result<Option<DataChunk>> {
-        // The inner join result exists and has rows in it if and only if cur_row has a match
-        let ret = self.do_inner_join(probe_side_chunk)?;
-        if let Some(inner) = ret.as_ref() {
-            if inner.cardinality() > 0 {
-                self.build_side_source.set_cur_row_matched(true);
-            }
+    /// Pad the row out with NULLs and return it.
+    fn do_left_outer_join(&mut self) -> Result<Option<DataChunk>> {
+        let mut build_datum_refs = self
+            .build_side_source
+            .get_current_row_ref()
+            .unwrap()
+            .values()
+            .collect_vec();
+
+        for _ in 0..self.probe_side_data_types.len() {
+            build_datum_refs.push(None);
         }
 
-        if !self.build_side_source.get_cur_row_matched() {
-            assert!(ret.is_none());
-            let mut build_datum_refs = self
-                .build_side_source
-                .get_current_row_ref()
-                .unwrap()
-                .values()
-                .collect_vec();
+        let one_row_chunk =
+            convert_datum_refs_to_chunk(&build_datum_refs, 1, &self.schema.data_types())?;
 
-            for _ in 0..self.probe_side_data_types.len() {
-                build_datum_refs.push(None);
-            }
-
-            let one_row_chunk =
-                convert_datum_refs_to_chunk(&build_datum_refs, 1, &self.schema.data_types())?;
-
-            return Ok(Some(one_row_chunk));
-        }
-
-        Ok(ret)
+        Ok(Some(one_row_chunk))
     }
 
-    /// Appends `input_chunk` to the `self.chunk_probeer`. If there is a leftover chunk, assign it
+    /// Appends `input_chunk` to the `self.chunk_builder`. If there is a leftover chunk, assign it
     /// to `self.last_chunk`. Note that `self.last_chunk` is always None before this is called.
     fn append_chunk(&mut self, input_chunk: SlicedDataChunk) -> Result<Option<DataChunk>> {
-        let (mut left_data_chunk, return_chunk) = self.chunk_probeer.append_chunk(input_chunk)?;
+        let (mut left_data_chunk, return_chunk) = self.chunk_builder.append_chunk(input_chunk)?;
         std::mem::swap(&mut self.last_chunk, &mut left_data_chunk);
         Ok(return_chunk)
     }
 }
 
+pub struct LookupJoinExecutorBuilder {}
+
 #[async_trait::async_trait]
-impl BoxedExecutorBuilder for LookupJoinExecutor {
+impl BoxedExecutorBuilder for LookupJoinExecutorBuilder {
     async fn new_boxed_executor<C: BatchTaskContext>(
         source: &ExecutorBuilder<C>,
         mut inputs: Vec<BoxedExecutor>,
@@ -413,18 +410,183 @@ impl BoxedExecutorBuilder for LookupJoinExecutor {
             source_templates: lookup_join_node.get_sources().to_vec(),
         };
 
-        Ok(Box::new(Self {
+        Ok(Box::new(LookupJoinExecutor::<DefaultGatherExecutor> {
             join_type,
             condition,
             build_side_source: RowLevelIter::new(build_child),
             build_side_data_types,
             probe_side_data_types: probe_side_schema.data_types(),
             probe_side_source_params,
-            chunk_probeer: DataChunkBuilder::with_default_size(original_schema.data_types()),
+            chunk_builder: DataChunkBuilder::with_default_size(original_schema.data_types()),
             schema: actual_schema,
             output_indices,
             last_chunk: None,
             identity: "LookupJoinExecutor".to_string(),
+            unused: PhantomData,
         }))
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use std::marker::PhantomData;
+
+    use risingwave_common::array::{DataChunk, DataChunkTestExt};
+    use risingwave_common::catalog::{Field, Schema};
+    use risingwave_common::types::{DataType, ScalarImpl};
+    use risingwave_common::util::chunk_coalesce::DataChunkBuilder;
+    use risingwave_expr::expr::expr_binary_nonnull::new_binary_expr;
+    use risingwave_expr::expr::{BoxedExpression, InputRefExpression, LiteralExpression};
+    use risingwave_pb::expr::expr_node::Type;
+
+    use crate::executor::join::row_level_iter::RowLevelIter;
+    use crate::executor::join::JoinType;
+    use crate::executor::test_utils::{diff_executor_output, MockExecutor, MockGatherExecutor};
+    use crate::executor::{BoxedExecutor, LookupJoinExecutor, ProbeSideSourceParams};
+
+    fn create_build_child() -> BoxedExecutor {
+        let schema = Schema {
+            fields: vec![
+                Field::unnamed(DataType::Int32),
+                Field::unnamed(DataType::Float32),
+            ],
+        };
+        let mut executor = MockExecutor::new(schema);
+
+        executor.add(DataChunk::from_pretty(
+            "i f
+             1 6.1
+             2 8.4
+             3 3.9",
+        ));
+
+        executor.add(DataChunk::from_pretty(
+            "i f
+             2 5.5
+             5 9.1",
+        ));
+
+        Box::new(executor)
+    }
+
+    fn create_lookup_join_executor(
+        join_type: JoinType,
+        condition: Option<BoxedExpression>,
+    ) -> BoxedExecutor {
+        let build_child = create_build_child();
+
+        let fields = [
+            build_child.schema().fields.clone(),
+            build_child.schema().fields.clone(),
+        ]
+        .concat();
+        let original_schema = Schema { fields };
+
+        Box::new(LookupJoinExecutor::<MockGatherExecutor> {
+            join_type,
+            condition,
+            build_side_data_types: build_child.schema().data_types(),
+            probe_side_data_types: build_child.schema().data_types(),
+            build_side_source: RowLevelIter::new(build_child),
+            probe_side_source_params: ProbeSideSourceParams::default(),
+            chunk_builder: DataChunkBuilder::with_default_size(original_schema.data_types()),
+            schema: original_schema.clone(),
+            output_indices: (0..original_schema.len()).into_iter().collect(),
+            last_chunk: None,
+            identity: "TestLookupJoinExecutor".to_string(),
+            unused: PhantomData,
+        })
+    }
+
+    async fn do_test(join_type: JoinType, condition: Option<BoxedExpression>, expected: DataChunk) {
+        let lookup_join_executor = create_lookup_join_executor(join_type, condition);
+        let mut expected_mock_exec = MockExecutor::new(lookup_join_executor.schema().clone());
+        expected_mock_exec.add(expected);
+        diff_executor_output(lookup_join_executor, Box::new(expected_mock_exec)).await;
+    }
+
+    #[tokio::test]
+    async fn test_inner_join() {
+        let expected = DataChunk::from_pretty(
+            "i f   i f
+             1 6.1 1 9.2
+             2 8.4 2 4.4
+             2 8.4 2 5.5
+             2 5.5 2 4.4
+             2 5.5 2 5.5
+             5 9.1 5 3.7
+             5 9.1 5 2.3",
+        );
+
+        do_test(JoinType::Inner, None, expected).await;
+    }
+
+    #[tokio::test]
+    async fn test_left_outer_join() {
+        let expected = DataChunk::from_pretty(
+            "i f   i f
+             1 6.1 1 9.2
+             2 8.4 2 4.4
+             2 8.4 2 5.5
+             3 3.9 . .
+             2 5.5 2 4.4
+             2 5.5 2 5.5
+             5 9.1 5 3.7
+             5 9.1 5 2.3",
+        );
+
+        do_test(JoinType::LeftOuter, None, expected).await;
+    }
+
+    #[tokio::test]
+    async fn test_inner_join_with_condition() {
+        let expected = DataChunk::from_pretty(
+            "i f   i f
+             1 6.1 1 9.2
+             2 8.4 2 5.5
+             2 5.5 2 5.5",
+        );
+
+        do_test(
+            JoinType::Inner,
+            Some(new_binary_expr(
+                Type::LessThan,
+                DataType::Boolean,
+                Box::new(LiteralExpression::new(
+                    DataType::Int32,
+                    Some(ScalarImpl::Int32(5)),
+                )),
+                Box::new(InputRefExpression::new(DataType::Float32, 3)),
+            )),
+            expected,
+        )
+        .await;
+    }
+
+    #[tokio::test]
+    async fn test_left_outer_join_with_condition() {
+        let expected = DataChunk::from_pretty(
+            "i f   i f
+             1 6.1 1 9.2
+             2 8.4 2 5.5
+             3 3.9 . .
+             2 5.5 2 5.5
+             5 9.1 . .",
+        );
+
+        do_test(
+            JoinType::LeftOuter,
+            Some(new_binary_expr(
+                Type::LessThan,
+                DataType::Boolean,
+                Box::new(LiteralExpression::new(
+                    DataType::Int32,
+                    Some(ScalarImpl::Int32(5)),
+                )),
+                Box::new(InputRefExpression::new(DataType::Float32, 3)),
+            )),
+            expected,
+        )
+        .await;
     }
 }

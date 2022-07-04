@@ -189,7 +189,7 @@ impl<'a, C: BatchTaskContext> ExecutorBuilder<'a, C> {
             NodeBody::TableFunction => TableFunctionExecutorBuilder,
             NodeBody::HopWindow => HopWindowExecutor,
             NodeBody::SysRowSeqScan => SysRowSeqScanExecutorBuilder,
-            NodeBody::LookupJoin => LookupJoinExecutor,
+            NodeBody::LookupJoin => LookupJoinExecutorBuilder,
         }
         .await?;
         let input_desc = real_executor.identity().to_string();
