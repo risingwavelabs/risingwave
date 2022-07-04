@@ -19,9 +19,10 @@ use risingwave_common::catalog::{Field, Schema};
 use risingwave_common::types::DataType;
 
 use super::{
-    BatchExpand, ColPrunable, PlanBase, PlanRef, PlanTreeNodeUnary, PredicatePushdown,
-    StreamExpand, ToBatch, ToStream,
+    BatchExpand, ColPrunable, LogicalProject, PlanBase, PlanRef, PlanTreeNodeUnary,
+    PredicatePushdown, StreamExpand, ToBatch, ToStream,
 };
+use crate::expr::InputRef;
 use crate::risingwave_common::error::Result;
 use crate::utils::{ColIndexMapping, Condition};
 
@@ -112,35 +113,41 @@ impl fmt::Display for LogicalExpand {
 impl ColPrunable for LogicalExpand {
     fn prune_col(&self, required_cols: &[usize]) -> PlanRef {
         let pos_of_flag = self.input.schema().len();
+        {
+            let mut sorted_indices = required_cols.to_owned();
+            sorted_indices.sort();
+            sorted_indices.dedup();
+
+            let mut expaneded_cols = self.column_subsets.iter().flatten().cloned().collect_vec();
+            expaneded_cols.sort();
+            expaneded_cols.dedup();
+            expaneded_cols.push(pos_of_flag);
+
+            // expaned columns and `flag` are what required.
+            assert_eq!(sorted_indices, expaneded_cols);
+        }
+
         let input_required_cols = required_cols
             .iter()
             .copied()
             .filter(|i| *i != pos_of_flag)
             .collect_vec();
         let new_input = self.input.prune_col(&input_required_cols);
-
-        // `input_required_cols` should be a subset of `column_subsets`
-        let input_change = ColIndexMapping::with_remaining_columns(
+        let input_col_change = ColIndexMapping::with_remaining_columns(
             &input_required_cols,
             self.input.schema().len(),
         );
-        // Filter those unneeded `column_subsets`.
-        let column_subsets = self
-            .column_subsets
+        let (new_expand, col_change) = self.rewrite_with_input(new_input, input_col_change);
+
+        let exprs = required_cols
             .iter()
-            .filter_map(|keys| {
-                let keys = keys
-                    .iter()
-                    .filter_map(|key| input_change.try_map(*key))
-                    .collect_vec();
-                if keys.is_empty() {
-                    None
-                } else {
-                    Some(keys)
-                }
+            .map(|col| {
+                let mapped_col = col_change.map(*col);
+                let data_type = new_expand.base.schema.fields[mapped_col].data_type();
+                InputRef::new(mapped_col, data_type).into()
             })
             .collect_vec();
-        LogicalExpand::create(new_input, column_subsets)
+        LogicalProject::create(new_expand.into(), exprs)
     }
 }
 
@@ -178,7 +185,9 @@ mod tests {
     use risingwave_common::catalog::{Field, Schema};
     use risingwave_common::types::DataType;
 
-    use crate::optimizer::plan_node::{LogicalExpand, LogicalValues, PlanTreeNodeUnary};
+    use crate::optimizer::plan_node::{
+        LogicalExpand, LogicalProject, LogicalValues, PlanTreeNodeUnary,
+    };
     use crate::session::OptimizerContext;
 
     #[tokio::test]
@@ -187,10 +196,11 @@ mod tests {
     /// Expand(column_subsets: [[0, 1], [2]]
     ///   TableScan(v1, v2, v3)
     /// ```
-    /// with required columns [1] will result in
+    /// with required columns [0, 2, 3, 1] will result in
     /// ```text
-    /// Expand(column_subsets: [[0]])
-    ///   TableScan(v2)
+    /// Project(input_ref(0), input_ref(1), input_ref(3), input_ref(2))
+    ///   Expand(column_subsets: [[0, 2], [1]])
+    ///     TableScan(v1, v3, v2)
     /// ```
     async fn test_prune_expand() {
         let ctx = OptimizerContext::mock().await;
@@ -199,29 +209,44 @@ mod tests {
             Field::with_name(DataType::Int32, "v2"),
             Field::with_name(DataType::Int32, "v3"),
         ];
-        let values = LogicalValues::new(
-            vec![],
-            Schema {
-                fields: fields.clone(),
-            },
-            ctx,
-        );
+        let values = LogicalValues::new(vec![], Schema { fields }, ctx);
 
         let column_subsets = vec![vec![0, 1], vec![2]];
         let expand = LogicalExpand::create(values.into(), column_subsets);
 
         // Perform the prune
-        let required_cols = vec![1];
+        let required_cols = vec![0, 2, 3, 1];
         let plan = expand.prune_col(&required_cols);
 
         // Check the result
-        let expand = plan.as_logical_expand().unwrap();
-        let column_subsets = expand.column_subsets();
-        assert_eq!(expand.schema().len(), 2);
-        assert_eq!(column_subsets, &vec![vec![0_usize]]);
+        let project: &LogicalProject = plan.as_logical_project().unwrap();
+        let expected_schema = vec![
+            Field::with_name(DataType::Int32, "v1"),
+            Field::with_name(DataType::Int32, "v3"),
+            Field::with_name(DataType::Int64, "flag"),
+            Field::with_name(DataType::Int32, "v2"),
+        ];
+        assert_eq!(expected_schema, project.base.schema.fields().to_owned());
+
+        let expand = project.input();
+        let expand: &LogicalExpand = expand.as_logical_expand().unwrap();
+        let expected_schema = vec![
+            Field::with_name(DataType::Int32, "v1"),
+            Field::with_name(DataType::Int32, "v3"),
+            Field::with_name(DataType::Int32, "v2"),
+            Field::with_name(DataType::Int64, "flag"),
+        ];
+        let expected_column_subsets = vec![vec![0, 2], vec![1]];
+        assert_eq!(expected_schema, expand.base.schema.fields().to_owned());
+        assert_eq!(expected_column_subsets, expand.column_subsets.to_owned());
 
         let values = expand.input();
-        let values = values.as_logical_values().unwrap();
-        assert_eq!(values.schema().fields()[0], fields[1]);
+        let values: &LogicalValues = values.as_logical_values().unwrap();
+        let expected_schema = vec![
+            Field::with_name(DataType::Int32, "v1"),
+            Field::with_name(DataType::Int32, "v3"),
+            Field::with_name(DataType::Int32, "v2"),
+        ];
+        assert_eq!(expected_schema, values.base.schema.fields().to_owned());
     }
 }
