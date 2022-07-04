@@ -175,6 +175,7 @@ impl TTLCompactionFilter {
         Self {
             table_id_to_ttl,
             expire_epoch: expire,
+            last_table_and_ttl: None,
         }
     }
 }
@@ -956,7 +957,7 @@ impl Compactor {
         mut iter: BoxedForwardHummockIterator,
         gc_delete_key: bool,
         watermark: Epoch,
-        compaction_filter: impl CompactionFilter,
+        mut compaction_filter: impl CompactionFilter,
     ) -> HummockResult<()>
     where
         B: Clone + Fn() -> F,
@@ -970,6 +971,7 @@ impl Compactor {
         }
 
         let mut last_key = BytesMut::new();
+        let mut watermark_can_see_last_key = false;
 
         while iter.is_valid() {
             let iter_key = iter.key();
@@ -989,20 +991,27 @@ impl Compactor {
 
                 last_key.clear();
                 last_key.extend_from_slice(iter_key);
+                watermark_can_see_last_key = false;
             }
 
-            // Among keys with same user key, only retain keys which satisfy `epoch` >= `watermark`,
-            // and the latest key which satisfies `epoch` < `watermark`
-            if epoch < watermark {
-                // in our design, frontend avoid to access keys which had be deleted, so we dont
-                // need to consider the epoch when the compaction_filter match (it
-                // means that mv had drop)
-                if (gc_delete_key && iter.value().is_delete())
-                    || !is_new_user_key
-                    || !compaction_filter.filter(iter_key)
-                {
-                    drop = true;
-                }
+            // Among keys with same user key, only retain keys which satisfy `epoch` >= `watermark`.
+            // If there is no keys whose epoch is equal than `watermark`, keep the latest key which
+            // satisfies `epoch` < `watermark`
+            // in our design, frontend avoid to access keys which had be deleted, so we dont
+            // need to consider the epoch when the compaction_filter match (it
+            // means that mv had drop)
+            if (epoch <= watermark && gc_delete_key && iter.value().is_delete())
+                || (epoch < watermark && watermark_can_see_last_key)
+            {
+                drop = true;
+            }
+
+            if !drop && !compaction_filter.filter(&iter_key) {
+                drop = true;
+            }
+
+            if epoch <= watermark {
+                watermark_can_see_last_key = true;
             }
 
             if drop {
