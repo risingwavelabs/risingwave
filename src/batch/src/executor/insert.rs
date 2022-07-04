@@ -86,10 +86,11 @@ impl InsertExecutor {
             assert!(data_chunk.visibility().is_none());
 
             // add row-id column as first column
+            let row_ids = source_desc.next_row_id_batch(len);
             let mut builder = I64ArrayBuilder::new(len);
-            for _ in 0..len {
-                builder.append(Some(source_desc.next_row_id())).unwrap();
-            }
+            row_ids
+                .into_iter()
+                .for_each(|row_id| builder.append(Some(row_id)).unwrap());
 
             let rowid_column = once(Column::from(builder.finish().unwrap()));
             let child_columns = data_chunk.into_parts().0.into_iter();

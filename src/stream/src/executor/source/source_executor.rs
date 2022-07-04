@@ -219,7 +219,7 @@ impl SourceReader {
         select_with_strategy(
             barrier_receiver.map(Either::Left),
             stream_reader.map(Either::Right),
-            |_: &mut ()| PollNext::Left, // perfer barrier
+            |_: &mut ()| PollNext::Left, // prefer barrier
         )
     }
 }
@@ -757,7 +757,6 @@ mod tests {
     fn drop_row_id(chunk: StreamChunk) -> StreamChunk {
         let (ops, mut columns, bitmap) = chunk.into_inner();
         columns.remove(0);
-        // columns.pop();
         StreamChunk::new(ops, columns, bitmap)
     }
 

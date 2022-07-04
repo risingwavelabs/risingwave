@@ -12,7 +12,6 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::RwLock;
 
 use async_trait::async_trait;
@@ -45,9 +44,6 @@ pub struct TableSourceV2 {
 
     /// All columns in this table.
     column_descs: Vec<ColumnDesc>,
-
-    /// Current allocated row id.
-    next_row_id: AtomicUsize,
 }
 
 impl TableSourceV2 {
@@ -59,16 +55,7 @@ impl TableSourceV2 {
         Self {
             core: RwLock::new(core),
             column_descs,
-            next_row_id: 0.into(),
         }
-    }
-
-    /// Generate a global-unique row id with given `worker_id`.
-    pub fn next_row_id(&self, worker_id: u32) -> i64 {
-        let local_row_id = self.next_row_id.fetch_add(1, Ordering::SeqCst) as u32;
-
-        // Concatenate worker_id and local_row_id to produce a global-unique row_id
-        (((worker_id as u64) << 32) + (local_row_id as u64)) as i64
     }
 
     /// Asynchronously write stream chunk into table. Changes written here will be simply passed to
