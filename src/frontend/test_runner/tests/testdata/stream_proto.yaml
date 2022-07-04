@@ -127,10 +127,9 @@
           columnId: 1
           name: _row_id
         isHidden: true
-    orderColumnIds:
-      - 1
-    orders:
-      - ASCENDING
+    orderKeys:
+      - orderType: ASCENDING
+        index: 1
     distributionKeys:
       - 1
     pk:
@@ -233,10 +232,9 @@
           columnId: 1
           name: _row_id
         isHidden: true
-    orderColumnIds:
-      - 1
-    orders:
-      - ASCENDING
+    orderKeys:
+      - orderType: ASCENDING
+        index: 1
     distributionKeys:
       - 1
     pk:
@@ -348,10 +346,9 @@
           columnId: 1
           name: _row_id
         isHidden: true
-    orderColumnIds:
-      - 1
-    orders:
-      - ASCENDING
+    orderKeys:
+      - orderType: ASCENDING
+        index: 1
     distributionKeys:
       - 1
     pk:
@@ -742,10 +739,8 @@
                           typeName: INT64
                           isNullable: true
                         columnId: 1
-                  orderColumnIds:
-                    - 0
-                  orders:
-                    - ASCENDING
+                  orderKeys:
+                    - orderType: ASCENDING
                   distributionKeys:
                     - 0
                   pk:
@@ -765,10 +760,8 @@
                           typeName: INT64
                           isNullable: true
                         columnId: 1
-                  orderColumnIds:
-                    - 0
-                  orders:
-                    - ASCENDING
+                  orderKeys:
+                    - orderType: ASCENDING
                   distributionKeys:
                     - 0
                   pk:
@@ -835,10 +828,9 @@
           columnId: 1
           name: v2
         isHidden: true
-    orderColumnIds:
-      - 1
-    orders:
-      - ASCENDING
+    orderKeys:
+      - orderType: ASCENDING
+        index: 1
     distributionKeys:
       - 1
     pk:
