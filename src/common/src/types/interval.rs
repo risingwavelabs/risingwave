@@ -218,6 +218,18 @@ impl IntervalUnit {
         self.months as i64 * MONTH_MS + self.days as i64 * DAY_MS + self.ms
     }
 
+    /// times [`IntervalUnit`] with an integer/float.
+    pub fn mul_float<I>(&self, rhs: I) -> Option<Self>
+    where
+        I: TryInto<OrderedF64>,
+    {
+        let rhs = rhs.try_into().ok()?;
+        let rhs = rhs.0;
+
+        let ms = self.as_ms_i64();
+        Some(IntervalUnit::from_total_ms((ms as f64 * rhs).round() as i64))
+    }
+
     /// Performs an exact division, returns [`None`] if for any unit, lhs % rhs != 0.
     pub fn exact_div(&self, rhs: &Self) -> Option<i64> {
         let mut res = None;

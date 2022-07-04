@@ -127,3 +127,53 @@ query T
 select TIME '18:20:49' +  interval '1 hour';
 ----
 19:20:49
+
+query T
+select real '6.1' * interval '1' second;
+----
+00:00:06.1
+
+query T
+select real '61.1' * interval '1' second;
+----
+00:01:01.1
+
+query T
+select real '0.0' * interval '1' second;
+----
+00:00:00
+
+query T
+select real '0' * interval '1' second;
+----
+00:00:00
+
+query T
+select real '86' * interval '849884';
+----
+20302:47:04
+
+query T
+select interval '1' second * real '6.1';
+----
+00:00:06.1
+
+query T
+select  interval '1' second * real '61.1';
+----
+00:01:01.1
+
+query T
+select  interval '1' second * real '0.0';
+----
+00:00:00
+
+query T
+select interval '1' second * real '0';
+----
+00:00:00
+
+query T
+select interval '849884' * real '86';
+----
+20302:47:04
