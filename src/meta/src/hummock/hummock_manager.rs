@@ -927,24 +927,26 @@ where
         epoch: HummockEpoch,
         sstables: Vec<LocalSstableInfo>,
     ) -> Result<()> {
-        // Verify all table_ids have already been registered to compaction group.
-        //
-        // We don't expect any dropped table_ids here. Because
-        // GlobalStreamManager::drop_materialized_view:
-        //
-        // 1. first cause CN to sync tables and stop actors.
-        //
-        // 2. then unregister tables from compaction group.
+        // Warn of table_ids that is not found in expected compaction group.
+        // It indicates:
+        // 1. Either these table_ids are never registered to any compaction group. This is FATAL
+        // since compaction filter will remove these valid states incorrectly.
+        // 2. Or the owners of these table_ids have been dropped, but their stale states are still
+        // committed. This is OK since compaction filter will remove these stale states
+        // later.
         for (compaction_group_id, sst) in &sstables {
             let compaction_group = self
                 .compaction_group_manager
                 .compaction_group(*compaction_group_id)
                 .await
                 .unwrap_or_else(|| panic!("compaction group {} exists", compaction_group_id));
-            for table_id in &sst.table_ids {
-                assert!(
-                    compaction_group.member_table_ids().contains(table_id),
-                    "table {} doesn't belong to compaction group {}",
+            for table_id in sst
+                .table_ids
+                .iter()
+                .filter(|t| !compaction_group.member_table_ids().contains(t))
+            {
+                tracing::warn!(
+                    "table {} doesn't belong to expected compaction group {}",
                     table_id,
                     compaction_group_id
                 );
