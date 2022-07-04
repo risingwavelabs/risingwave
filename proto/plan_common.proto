@@ -81,7 +81,7 @@ enum OrderType {
 message ColumnOrder {
   // maybe other name
   OrderType order_type = 1;
-  expr.InputRefExpr input_ref = 2;
+  uint32 index = 2;
 }
 
 enum RowFormatType {

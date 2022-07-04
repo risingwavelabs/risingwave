@@ -18,7 +18,6 @@ use itertools::Itertools;
 use risingwave_common::catalog::Schema;
 use risingwave_common::error::Result;
 use risingwave_common::util::sort_util::OrderType;
-use risingwave_pb::expr::InputRefExpr;
 use risingwave_pb::plan_common::{ColumnOrder, OrderType as ProstOrderType};
 
 use super::super::plan_node::*;
@@ -38,13 +37,7 @@ impl Order {
     pub fn to_protobuf(&self, _schema: &Schema) -> Vec<ColumnOrder> {
         self.field_order
             .iter()
-            .map(|f| {
-                let (input_ref, order_type) = f.to_protobuf();
-                ColumnOrder {
-                    order_type: order_type as i32,
-                    input_ref: Some(input_ref),
-                }
-            })
+            .map(FieldOrder::to_protobuf)
             .collect_vec()
     }
 }
@@ -89,12 +82,11 @@ impl FieldOrder {
         }
     }
 
-    pub fn to_protobuf(&self) -> (InputRefExpr, ProstOrderType) {
-        let input_ref_expr = InputRefExpr {
-            column_idx: self.index as i32,
-        };
-        let order_type = self.direct.to_protobuf();
-        (input_ref_expr, order_type)
+    pub fn to_protobuf(&self) -> ColumnOrder {
+        ColumnOrder {
+            order_type: self.direct.to_protobuf() as i32,
+            index: self.index as u32,
+        }
     }
 }
 

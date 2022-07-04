@@ -90,10 +90,10 @@ fn make_field(type_name: TypeName) -> Field {
     }
 }
 
-fn make_column_order(idx: i32) -> ColumnOrder {
+fn make_column_order(index: u32) -> ColumnOrder {
     ColumnOrder {
         order_type: OrderType::Ascending as i32,
-        input_ref: Some(InputRefExpr { column_idx: idx }),
+        index,
     }
 }
 
