@@ -139,18 +139,18 @@ pub fn new_output(
     let task = tokio::spawn(async move {
         let actor_id_str = actor_id.to_string();
         loop {
-            let mut cnt = 0;
-            const SAMPLING_FREQUENCY: usize = 15;
-            for _ in 0..SAMPLING_FREQUENCY {
+            let mut bp_cnt = 0;
+            const REPORT_FREQUENCY: usize = 15;
+            for _ in 0..REPORT_FREQUENCY {
                 if tx_clone.capacity() == 0 {
-                    cnt += 1;
+                    bp_cnt += 1;
                 }
                 tokio::time::sleep(std::time::Duration::from_secs(1)).await;
             }
             metrics
                 .actor_output_buffer_backpressured_rate
                 .with_label_values(&[&actor_id_str])
-                .set(cnt as f64 / SAMPLING_FREQUENCY as f64);
+                .set(100.0 * bp_cnt as f64 / REPORT_FREQUENCY as f64);
         }
     });
     actor_output_buffer_monitor_tasks.insert(actor_id, task);
