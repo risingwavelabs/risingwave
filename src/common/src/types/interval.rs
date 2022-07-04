@@ -45,6 +45,7 @@ pub struct IntervalUnit {
 }
 
 const DAY_MS: i64 = 86400000;
+const MONTH_MS: i64 = 30 * DAY_MS;
 
 impl IntervalUnit {
     pub fn new(months: i32, days: i32, ms: i64) -> Self {
@@ -113,6 +114,20 @@ impl IntervalUnit {
             months: -self.months,
             days: -self.days,
             ms: -self.ms,
+        }
+    }
+
+    #[must_use]
+    pub fn from_total_ms(ms: i64) -> Self {
+        let mut remaining_ms = ms;
+        let months = remaining_ms / MONTH_MS;
+        remaining_ms -= months * MONTH_MS;
+        let days = remaining_ms / DAY_MS;
+        remaining_ms -= days * DAY_MS;
+        IntervalUnit {
+            months: (months as i32),
+            days: (days as i32),
+            ms: (remaining_ms as i64),
         }
     }
 
@@ -195,18 +210,12 @@ impl IntervalUnit {
             return None;
         }
 
-        let months = (self.months as f64) / rhs;
-        let mut days = (self.days as f64) / rhs + (months % 1.0) * 30.0;
-        if (days - days.round()).abs() < f64::EPSILON {
-            days = days.round()
-        };
-        let ms = ((self.ms as f64) / rhs + (days % 1.0) * 24.0 * 60.0 * 60.0 * 1000.0).round();
+        let ms = self.as_ms_i64();
+        Some(IntervalUnit::from_total_ms((ms as f64 / rhs) as i64))
+    }
 
-        Some(IntervalUnit {
-            months: (months as i32),
-            days: (days as i32),
-            ms: (ms as i64),
-        })
+    fn as_ms_i64(&self) -> i64 {
+        self.months as i64 * MONTH_MS + self.days as i64 * DAY_MS + self.ms
     }
 
     /// Performs an exact division, returns [`None`] if for any unit, lhs % rhs != 0.
