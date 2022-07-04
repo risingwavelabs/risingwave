@@ -214,6 +214,7 @@ impl ChangedTableIds {
                 self.creating_table_ids.insert(table_id);
             }
             Drop(table_id) => {
+                assert!(!self.creating_table_ids.contains(&table_id));
                 self.dropping_table_ids.insert(table_id);
             }
             _ => {}
@@ -247,7 +248,10 @@ where
 
     /// Get the `ChangedTableId` used to modify the actor(send and collect), If we create table in
     /// this barrier, We need to add it.
-    fn get_changed_table_id(&mut self, new_changed_table: ChangedTableState) -> &ChangedTableIds {
+    fn try_extend_changed_table_ids(
+        &mut self,
+        new_changed_table: ChangedTableState,
+    ) -> &ChangedTableIds {
         if matches!(new_changed_table, Create(_)) {
             self.changed_table_ids
                 .push_changed_table_ids(new_changed_table);
@@ -478,7 +482,7 @@ where
             barrier_timer = Some(self.metrics.barrier_send_latency.start_timer());
             let (command, notifiers) = self.scheduled_barriers.pop_or_default().await;
             let changed_table_id =
-                checkpoint_control.get_changed_table_id(command.changed_table_id());
+                checkpoint_control.try_extend_changed_table_ids(command.changed_table_id());
             let info = self.resolve_actor_info(changed_table_id).await;
             // When there's no actors exist in the cluster, we don't need to send the barrier. This
             // is an advance optimization. Besides if another barrier comes immediately,
