@@ -471,7 +471,7 @@ impl<S: PkAndRowStream + Unpin> TableIter for S {
 
 /// Iterators
 impl<S: StateStore, SER: RowEncoding, const T: AccessType> StorageTableBase<S, SER, T> {
-    /// Get multiple [`CellBasedIter`] based on the specified vnodes, and merge or concat them by
+    /// Get multiple [`StorageTableIter`] based on the specified vnodes, and merge or concat them by
     /// given `ordered`.
     async fn iter_with_encoded_key_range<R, B>(
         &self,
@@ -525,7 +525,7 @@ impl<S: StateStore, SER: RowEncoding, const T: AccessType> StorageTableBase<S, S
         Ok(iter)
     }
 
-    /// Get a [`CellBasedIter`] for streaming use with given `encoded_key_range`.
+    /// Get a [`StorageTableIter`] for streaming use with given `encoded_key_range`.
     pub(super) async fn streaming_iter_with_encoded_key_range<R, B>(
         &self,
         encoded_key_range: R,
@@ -539,7 +539,7 @@ impl<S: StateStore, SER: RowEncoding, const T: AccessType> StorageTableBase<S, S
             .await
     }
 
-    /// Get a [`CellBasedIter`] with given `encoded_key_range`.
+    /// Get a [`StorageTableIter`] with given `encoded_key_range`.
     /// Differs from the streaming one, this iterator will wait for the epoch before iteration.
     pub(super) async fn batch_iter_with_encoded_key_range<R, B>(
         &self,
@@ -731,7 +731,7 @@ impl<S: StateStore> StorageTableIterInner<S> {
     }
 }
 
-/// Provides a layer on top of [`CellBasedIter`]
+/// Provides a layer on top of [`StorageTableIter`]
 /// for decoding pk into its constituent datums in a row.
 ///
 /// Given the following row: `| user_id | age | name |`,
