@@ -76,6 +76,7 @@ impl ExchangeService for ExchangeServiceImpl {
             .remote_addr()
             .ok_or_else(|| Status::unavailable("get_stream connection unestablished"))?;
         let req = request.into_inner();
+        println!("get_stream {} {}", req.up_fragment_id, req.down_fragment_id);
         let up_down_ids = (req.up_fragment_id, req.down_fragment_id);
         let receiver = self.stream_mgr.take_receiver(up_down_ids)?;
         match self.get_stream_impl(peer_addr, receiver, up_down_ids).await {
@@ -112,6 +113,8 @@ impl ExchangeServiceImpl {
     ) -> Result<Response<<Self as ExchangeService>::GetStreamStream>> {
         let (tx, rx) = tokio::sync::mpsc::channel(EXCHANGE_BUFFER_SIZE);
         let metrics = self.metrics.clone();
+        let up_fragment_id = self.stream_mgr.get_fragment_id_from_actor_id(&up_down_ids.0)?.to_string();
+        let down_fragment_id = self.stream_mgr.get_fragment_id_from_actor_id(&up_down_ids.1)?.to_string();
         tracing::trace!(target: "events::compute::exchange", peer_addr = %peer_addr, "serve stream exchange RPC");
         tokio::spawn(async move {
             let up_actor_id = up_down_ids.0.to_string();
@@ -144,7 +147,11 @@ impl ExchangeServiceImpl {
                                 metrics
                                     .stream_exchange_bytes
                                     .with_label_values(&[&up_actor_id, &down_actor_id])
-                                    .inc_by(bytes as u64);
+                                    .inc_by(bytes.clone() as u64);
+                                metrics
+                                    .stream_fragment_exchange_bytes
+                                    .with_label_values(&[&up_fragment_id, &down_fragment_id])
+                                    .inc_by(bytes.clone() as u64);
                                 Ok(())
                             }
                             Err(e) => tx.send(Err(e.into())).await,

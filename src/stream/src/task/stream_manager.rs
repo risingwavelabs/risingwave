@@ -40,7 +40,7 @@ use crate::executor::monitor::StreamingMetrics;
 use crate::executor::*;
 use crate::from_proto::create_executor;
 use crate::task::{
-    ActorId, ConsumableChannelPair, SharedContext, StreamEnvironment, UpDownActorIds,
+    ActorId, FragmentId, ConsumableChannelPair, SharedContext, StreamEnvironment, UpDownActorIds,
     LOCAL_OUTPUT_CHANNEL_SIZE,
 };
 
@@ -261,6 +261,11 @@ impl LocalStreamManager {
     pub fn take_receiver(&self, ids: UpDownActorIds) -> Result<Receiver<Message>> {
         let core = self.core.lock();
         core.context.take_receiver(&ids)
+    }
+
+    pub fn get_fragment_id_from_actor_id(&self, actor_id:&ActorId) -> Result<FragmentId>{
+        let mut core = self.core.lock();
+        core.get_fragment_id_from_actor_id(actor_id)
     }
 
     pub fn update_actors(
@@ -563,6 +568,10 @@ impl LocalStreamManagerCore {
         .boxed()
     }
 
+    pub(crate) fn get_fragment_id_from_actor_id(&mut self, actor_id:&ActorId) -> Result<FragmentId>{
+        Ok(self.actors.get(actor_id).unwrap().fragment_id)
+    }
+
     pub(crate) fn get_receive_message(
         &mut self,
         actor_id: ActorId,
@@ -574,6 +583,8 @@ impl LocalStreamManagerCore {
             .iter()
             .map(|up_id| {
                 if *up_id == 0 {
+                    println!("up id zero");
+                        
                     Ok(self.mock_source.1.take().unwrap())
                 } else {
                     let upstream_addr = self.get_actor_info(up_id)?.get_host()?.into();
@@ -584,7 +595,12 @@ impl LocalStreamManagerCore {
                         let sender = self.context.take_sender(&(*up_id, actor_id))?;
                         // spawn the `RemoteInput`
                         let up_id = *up_id;
-
+                        
+                        // Get the fragment info
+                        let up_frag_id = self.get_fragment_id_from_actor_id(&up_id)?;
+                        let down_frag_id = self.get_fragment_id_from_actor_id(&actor_id)?;
+                        println!("up fragment id : {} , down fragment id : {}",up_frag_id,down_frag_id);
+                        
                         let pool = self.compute_client_pool.clone();
                         let metrics = self.streaming_metrics.clone();
                         tokio::spawn(async move {
@@ -592,6 +608,7 @@ impl LocalStreamManagerCore {
                                 let remote_input = RemoteInput::create(
                                     pool.get_client_for_addr(upstream_addr).await?,
                                     (up_id, actor_id),
+                                    (up_frag_id, down_frag_id),
                                     sender,
                                     metrics,
                                 )
