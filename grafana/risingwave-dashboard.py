@@ -390,12 +390,12 @@ def section_streaming_actors(outer_panels):
                     "rate(stream_executor_row_count[15s]) > 0", "{{actor_id}}->{{executor_id}}"
                 ),
             ]),
-            panels.timeseries_ns("Actor Sampled Deserilization Time", [
+            panels.timeseries_ns("Actor Sampled Deserialization Time", [
                 panels.target(
                     "actor_sampled_deserialize_duration_ns", "{{actor_id}}"
                 ),
             ]),
-            panels.timeseries_ns("Actor Sampled Serilization Time", [
+            panels.timeseries_ns("Actor Sampled serialization Time", [
                 panels.target(
                     "actor_sampled_serialize_duration_ns", "{{actor_id}}"
                 ),
