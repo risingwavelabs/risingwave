@@ -17,10 +17,10 @@ use risingwave_common::catalog::{ColumnDesc, TableId};
 use risingwave_common::types::DataType;
 use risingwave_common::util::sort_util::OrderType;
 use risingwave_storage::memory::MemoryStateStore;
-use risingwave_storage::table::cell_based_table::{CellBasedTable, READ_ONLY};
 use risingwave_storage::table::state_table::StateTable;
+use risingwave_storage::table::storage_table::{StorageTable, READ_ONLY};
 
-pub async fn gen_basic_table(row_count: usize) -> CellBasedTable<MemoryStateStore, READ_ONLY> {
+pub async fn gen_basic_table(row_count: usize) -> StorageTable<MemoryStateStore, READ_ONLY> {
     let state_store = MemoryStateStore::new();
 
     let order_types = vec![OrderType::Ascending, OrderType::Descending];
@@ -39,7 +39,7 @@ pub async fn gen_basic_table(row_count: usize) -> CellBasedTable<MemoryStateStor
         None,
         pk_indices,
     );
-    let table = state.cell_based_table().clone();
+    let table = state.storage_table().clone();
     let epoch: u64 = 0;
 
     for idx in 0..row_count {
