@@ -78,8 +78,8 @@ impl RemoteInput {
                     self.metrics
                         .exchange_recv_size
                         .with_label_values(&[&up_actor_id, &down_actor_id])
-                        .inc_by(bytes as u64);
-                    
+                        .inc_by(bytes.clone() as u64);
+
                     self.metrics
                         .exchange_frag_recv_size
                         .with_label_values(&[&up_fragment_id, &down_fragment_id])
