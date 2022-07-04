@@ -103,6 +103,7 @@ pub fn build_from_prost(prost: &ExprNode) -> Result<BoxedExpression> {
         Substr => build_substr_expr(prost),
         Length => build_length_expr(prost),
         Replace => build_replace_expr(prost),
+        Overlay => build_overlay_expr(prost),
         Like => build_like_expr(prost),
         Trim => build_trim_expr(prost),
         Ltrim => build_ltrim_expr(prost),
