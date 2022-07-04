@@ -79,10 +79,6 @@ impl LocalOutput {
 #[async_trait]
 impl Output for LocalOutput {
     async fn send(&mut self, message: Message) -> Result<()> {
-        let message = match message {
-            Message::Chunk(chk) => Message::Chunk(chk.compact()?),
-            _ => message,
-        };
         // if the buffer is full when sending, the sender is backpressured
         if self.ch.capacity() == 0 {
             let start_time = Instant::now();
