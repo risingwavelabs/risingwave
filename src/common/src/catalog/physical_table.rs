@@ -53,7 +53,6 @@ impl TableDesc {
                 input_ref: Some(InputRefExpr {
                     column_idx: x.column_desc.column_id.get_id(),
                 }),
-                return_type: None,
             })
             .collect()
     }

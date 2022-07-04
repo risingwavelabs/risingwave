@@ -263,7 +263,6 @@ impl ToStreamProst for StreamMaterialize {
                         input_ref: Some(InputRefExpr {
                             column_idx: idx as i32,
                         }),
-                        return_type: Some(col.column_desc.data_type.to_protobuf()),
                     }
                 })
                 .collect(),

@@ -40,11 +40,12 @@ message FilterNode {
   expr.ExprNode search_condition = 1;
 }
 
-// A materialized view is regarded as a table,
-// hence we copy the CreateTableNode definition in OLAP PlanNode.
+// A materialized view is regarded as a table.
 // In addition, we also specify primary key to MV for efficient point lookup during update and deletion.
-// The node will be used for both create mv and create index. When creating mv,
-// `pk == distribution_keys == column_orders`. When creating index, `column_orders` will contain both
+//
+// The node will be used for both create mv and create index. 
+// When creating mv, `pk == distribution_keys == column_orders`. 
+// When creating index, `column_orders` will contain both
 // arrange columns and pk columns, while distribution keys will be arrange columns.
 message MaterializeNode {
   plan_common.TableRefId table_ref_id = 1;

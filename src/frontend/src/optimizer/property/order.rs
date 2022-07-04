@@ -35,16 +35,14 @@ impl Order {
     }
 
     /// Convert into protobuf.
-    pub fn to_protobuf(&self, schema: &Schema) -> Vec<ColumnOrder> {
+    pub fn to_protobuf(&self, _schema: &Schema) -> Vec<ColumnOrder> {
         self.field_order
             .iter()
             .map(|f| {
                 let (input_ref, order_type) = f.to_protobuf();
-                let data_type = schema.fields[f.index].data_type.to_protobuf();
                 ColumnOrder {
                     order_type: order_type as i32,
                     input_ref: Some(input_ref),
-                    return_type: Some(data_type),
                 }
             })
             .collect_vec()

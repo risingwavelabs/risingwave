@@ -88,7 +88,6 @@ impl ToStreamProst for StreamTopN {
                 input_ref: Some(InputRefExpr {
                     column_idx: f.index as i32,
                 }),
-                return_type: Some(self.input().schema()[f.index].data_type().to_protobuf()),
             })
             .collect();
 

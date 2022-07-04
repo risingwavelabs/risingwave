@@ -129,7 +129,6 @@ impl StreamFragmenter {
                 input_ref: Some(InputRefExpr {
                     column_idx: x.column_idx as i32,
                 }),
-                return_type: None,
             })
             .collect();
 

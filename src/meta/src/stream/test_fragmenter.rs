@@ -94,10 +94,6 @@ fn make_column_order(idx: i32) -> ColumnOrder {
     ColumnOrder {
         order_type: OrderType::Ascending as i32,
         input_ref: Some(InputRefExpr { column_idx: idx }),
-        return_type: Some(DataType {
-            type_name: TypeName::Int64 as i32,
-            ..Default::default()
-        }),
     }
 }
 
