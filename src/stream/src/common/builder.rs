@@ -12,7 +12,6 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::collections::HashMap;
 use std::ops::Range;
 use std::sync::Arc;
 
@@ -36,9 +35,10 @@ pub struct StreamChunkBuilder {
 
     output_indices: Vec<usize>,
 
-    /// mapping the original column index to the index of update
-    update_mapping: HashMap<usize, usize>,
-    matched_mapping: HashMap<usize, usize>,
+    /// the range of update column indices
+    update_range: Range<usize>,
+    /// the range of matched column indices
+    matched_range: Range<usize>,
 
     /// Maximum capacity of column builder
     capacity: usize,
@@ -77,24 +77,6 @@ impl StreamChunkBuilder {
             .iter()
             .map(|datatype| datatype.create_array_builder(reduced_capacity))
             .collect();
-        let (update_mapping, matched_mapping) = {
-            let mut update_mapping = HashMap::new();
-            let mut matched_mapping = HashMap::new();
-            for i in 0..original_data_types.len() {
-                let in_update = update_range.contains(&i);
-                let in_matched = matched_range.contains(&i);
-                if in_update {
-                    update_mapping.insert(i, i - update_range.start);
-                }
-                if in_matched {
-                    matched_mapping.insert(i, i - matched_range.start);
-                }
-                if !in_matched && !in_update {
-                    unreachable!("{} should be contained in either update_range: {:?} or matched range: {:?}", i, update_range, matched_range);
-                }
-            }
-            (update_mapping, matched_mapping)
-        };
         Ok(Self {
             ops,
             column_builders,
@@ -102,8 +84,8 @@ impl StreamChunkBuilder {
             capacity: reduced_capacity,
             size: 0,
             output_indices: output_indices.to_owned(),
-            update_mapping,
-            matched_mapping,
+            update_range,
+            matched_range,
         })
     }
 
@@ -133,11 +115,15 @@ impl StreamChunkBuilder {
     ) -> ArrayResult<Option<StreamChunk>> {
         self.ops.push(op);
         for (i, &original_output_idx) in self.output_indices.iter().enumerate() {
-            if let Some(&idx) = self.update_mapping.get(&original_output_idx) {
+            if let Some(idx) = self.try_map_index_to_update(&original_output_idx) {
                 self.column_builders[i].append_datum_ref(row_update.value_at(idx))?;
-            }
-            if let Some(&idx) = self.matched_mapping.get(&original_output_idx) {
+            } else if let Some(idx) = self.try_map_index_to_matched(&original_output_idx) {
                 self.column_builders[i].append_datum(&row_matched[idx])?;
+            } else {
+                unreachable!(
+                    "output_indices[{}] = {} should be contained in either update_range: {:?} or matched range: {:?}",
+                    i, original_output_idx, self.update_range, self.matched_range
+                );
             }
         }
         self.inc_size()
@@ -153,7 +139,7 @@ impl StreamChunkBuilder {
     ) -> ArrayResult<Option<StreamChunk>> {
         self.ops.push(op);
         for (i, &original_output_idx) in self.output_indices.iter().enumerate() {
-            if let Some(&idx) = self.update_mapping.get(&original_output_idx) {
+            if let Some(idx) = self.try_map_index_to_update(&original_output_idx) {
                 self.column_builders[i].append_datum_ref(row_update.value_at(idx))?;
             } else {
                 self.column_builders[i].append_datum(&None)?;
@@ -172,7 +158,7 @@ impl StreamChunkBuilder {
     ) -> ArrayResult<Option<StreamChunk>> {
         self.ops.push(op);
         for (i, &original_output_idx) in self.output_indices.iter().enumerate() {
-            if let Some(&idx) = self.matched_mapping.get(&original_output_idx) {
+            if let Some(idx) = self.try_map_index_to_matched(&original_output_idx) {
                 self.column_builders[i].append_datum(&row_matched[idx])?;
             } else {
                 self.column_builders[i].append_datum_ref(None)?;
@@ -200,5 +186,27 @@ impl StreamChunkBuilder {
             new_columns,
             None,
         )))
+    }
+
+    /// `try_map_index_to_matched` will map `index` from original column index to
+    /// the index in matched columns. If `index` is not in matched_columns, `None`
+    /// will be returned.
+    fn try_map_index_to_matched(&self, index: &usize) -> Option<usize> {
+        if self.matched_range.contains(index) {
+            Some(index - self.matched_range.start)
+        } else {
+            None
+        }
+    }
+
+    /// `try_map_index_to_matched` will map `index` from original column index to
+    /// the index in matched columns. If `index` is not in matched_columns, `None`
+    /// will be returned.
+    fn try_map_index_to_update(&self, index: &usize) -> Option<usize> {
+        if self.update_range.contains(index) {
+            Some(index - self.update_range.start)
+        } else {
+            None
+        }
     }
 }
