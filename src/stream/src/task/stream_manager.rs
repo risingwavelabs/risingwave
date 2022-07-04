@@ -28,7 +28,9 @@ use risingwave_hummock_sdk::LocalSstableInfo;
 use risingwave_pb::common::ActorInfo;
 use risingwave_pb::{stream_plan, stream_service};
 use risingwave_rpc_client::ComputeClientPool;
-use risingwave_storage::{dispatch_state_store, StateStore, StateStoreImpl};
+use risingwave_storage::{
+    dispatch_hummock_state_store, dispatch_state_store, StateStore, StateStoreImpl,
+};
 use tokio::sync::mpsc::{channel, Receiver};
 use tokio::task::JoinHandle;
 
@@ -306,7 +308,11 @@ impl LocalStreamManager {
 
     /// This function could only be called once during the lifecycle of `LocalStreamManager` for
     /// now.
-    pub fn build_actors(&self, actors: &[ActorId], env: StreamEnvironment) -> Result<()> {
+    pub async fn build_actors(&self, actors: &[ActorId], env: StreamEnvironment) -> Result<()> {
+        // Ensure compaction group mapping is available locally.
+        dispatch_hummock_state_store!(self.state_store(), store, {
+            store.update_compaction_group_cache().await?;
+        });
         let mut core = self.core.lock();
         core.build_actors(actors, env)
     }
