@@ -27,8 +27,8 @@ pub enum StorageError {
         HummockError,
     ),
 
-    #[error("Cell-based table error: {0}")]
-    CellBasedTable(
+    #[error("Storage table error: {0}")]
+    StorageTable(
         #[backtrace]
         #[source]
         RwError,
