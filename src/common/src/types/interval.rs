@@ -371,7 +371,8 @@ impl Display for IntervalUnit {
         let days = self.days;
         let hours = self.ms / 1000 / 3600;
         let minutes = (self.ms / 1000 / 60) % 60;
-        let seconds = ((self.ms % 60000) as f64) / 1000.0;
+        let seconds = self.ms % 60000 / 1000;
+        let mut secs_fract = self.ms % 1000;
         let mut v = SmallVec::<[String; 4]>::new();
         if years == 1 {
             v.push(format!("{years} year"));
@@ -388,7 +389,14 @@ impl Display for IntervalUnit {
         } else if days != 0 {
             v.push(format!("{days} days"));
         }
-        v.push(format!("{hours:0>2}:{minutes:0>2}:{seconds:0>2}"));
+        let mut format_time = format!("{hours:0>2}:{minutes:0>2}:{seconds:0>2}");
+        if secs_fract != 0 {
+            while secs_fract % 10 == 0 {
+                secs_fract /= 10;
+            }
+            format_time.push_str(&format!(".{secs_fract}"));
+        }
+        v.push(format_time);
         Display::fmt(&v.join(" "), f)
     }
 }
