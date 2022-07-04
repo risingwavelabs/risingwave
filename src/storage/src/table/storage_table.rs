@@ -454,9 +454,9 @@ impl<S: StateStore, SER: RowEncoding> StorageTableBase<S, SER, READ_WRITE> {
 
 pub trait PkAndRowStream = Stream<Item = StorageResult<(Vec<u8>, Row)>> + Send;
 
-/// The row iterator of the cell-based table.
+/// The row iterator of the storage table.
 pub type StorageTableIter<S: StateStore> = impl PkAndRowStream;
-/// The wrapper of [`CellBasedIter`] if pk is not persisted.
+/// The wrapper of [`StorageTableIter`] if pk is not persisted.
 pub type BatchDedupPkIter<S: StateStore> = impl PkAndRowStream;
 
 #[async_trait::async_trait]
