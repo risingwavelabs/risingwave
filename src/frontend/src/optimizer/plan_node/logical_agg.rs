@@ -142,6 +142,10 @@ impl LogicalAgg {
             }
             match agg_call.agg_kind {
                 AggKind::Min | AggKind::Max | AggKind::StringAgg => {
+                    // Assume the first input must be the aggregated column at least for these 3
+                    // kind of AggCall.
+                    let agg_column_idx = agg_call.inputs[0].index;
+
                     if !append_only {
                         // Add sort key as part of pk.
                         let order_type = if agg_call.agg_kind == AggKind::Min {
@@ -149,12 +153,8 @@ impl LogicalAgg {
                         } else {
                             OrderType::Descending
                         };
-                        // Assume the first input must be the aggregated column at least for these 3
-                        // kind of AggCall.
-                        internal_table_catalog_builder.add_column_desc_from_field(
-                            Some(order_type),
-                            &fields[agg_call.inputs[0].index],
-                        );
+                        internal_table_catalog_builder
+                            .add_column_desc_from_field(Some(order_type), &fields[agg_column_idx]);
 
                         // Add upstream pk.
                         for pk_index in &base.pk_indices {
@@ -163,13 +163,11 @@ impl LogicalAgg {
                                 &fields[*pk_index],
                             );
                         }
+                    } else {
+                        // We still need at least one value cell for append only max/min.
+                        internal_table_catalog_builder
+                            .add_column_desc_from_field(None, &fields[agg_column_idx]);
                     }
-
-                    // TODO: Remove this (3474)
-                    internal_table_catalog_builder.add_column_desc_from_field(
-                        Some(OrderType::Ascending),
-                        &fields[agg_call.inputs[0].index],
-                    );
                 }
                 AggKind::Sum
                 | AggKind::Count
@@ -183,7 +181,6 @@ impl LogicalAgg {
                         .add_unnamed_column(None, agg_call.return_type.clone());
                 }
             }
-            // Always reserve 1 for agg call value. See related issue (#3474).
             table_catalogs.push(
                 internal_table_catalog_builder
                     .build(base.dist.dist_column_indices().to_vec(), append_only),

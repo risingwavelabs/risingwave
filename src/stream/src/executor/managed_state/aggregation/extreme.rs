@@ -316,16 +316,16 @@ where
                 if let Some(inner) = all_data_iter.next().await {
                     let row = inner?;
 
-                    // Get the agg call value.
-                    let value = row[row.0.len() - 1].clone();
+                    let group_key_len = self.group_key.as_ref().map_or(0, |row| row.size());
+                    // Get the agg call value. Same as sort key.
+                    let value = row[group_key_len].clone();
 
                     // Get sort key and extreme pk.
                     let sort_key = value.as_ref().map(|v| v.clone().try_into().unwrap());
                     let mut extreme_pk = ExtremePk::with_capacity(1);
-                    let group_key_len = self.group_key.as_ref().map_or(0, |row| row.size());
-                    // The layout is group_key/sort_key/extreme_pk/agg_call value. So the range
-                    // should be [group_key_len + 1, row.0.len() - 1).
-                    for extreme_pk_index in group_key_len + 1..row.0.len() - 1 {
+                    // The layout is group_key/sort_key/extreme_pk. So the range
+                    // should be [group_key_len + 1, row.0.len()).
+                    for extreme_pk_index in group_key_len + 1..row.0.len() {
                         extreme_pk.push(row[extreme_pk_index].clone());
                     }
 
@@ -358,9 +358,8 @@ where
         } else {
             vec![]
         };
-        sort_key_vec.push(sort_key.clone());
-        sort_key_vec.extend(extreme_pk.into_iter());
         sort_key_vec.push(sort_key);
+        sort_key_vec.extend(extreme_pk.into_iter());
         Row::new(sort_key_vec)
     }
 }
