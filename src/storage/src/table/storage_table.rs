@@ -581,7 +581,7 @@ impl<S: StateStore, E: Encoding, const T: AccessType> StorageTableBase<S, E, T> 
                         // storage doesn't support excluded begin key yet, so transform it to
                         // included
                         // FIXME: What if `serialized_key` is `\xff\xff..`? Should the frontend
-                        // rejects this?
+                        // reject this?
                         Included(next_key(&serialized_key))
                     } else {
                         Excluded(serialized_key)

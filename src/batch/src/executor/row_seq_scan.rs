@@ -212,7 +212,7 @@ impl BoxedExecutorBuilder for RowSeqScanExecutorBuilder {
             } else {
                 assert!(pk_prefix_value.size() < pk_descs.len());
                 let iter = table
-                    .batch_iter_with_pk_bounds(source.epoch, &pk_prefix_value, ..)
+                    .batch_iter_with_pk_bounds(source.epoch, &pk_prefix_value, next_col_bounds)
                     .await?;
                 ScanType::RangeScan(iter)
             };
