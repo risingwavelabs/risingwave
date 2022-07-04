@@ -197,7 +197,7 @@ impl IntervalUnit {
 
         let months = (self.months as f64) / rhs;
         let mut days = (self.days as f64) / rhs + (months % 1.0) * 30.0;
-        if (days - days.round()).abs() <= 0.0000001 {
+        if days.fract().abs() < f64::EPSILON {
             days = days.round()
         };
         let ms = ((self.ms as f64) / rhs + (days % 1.0) * 24.0 * 60.0 * 60.0 * 1000.0).round();
