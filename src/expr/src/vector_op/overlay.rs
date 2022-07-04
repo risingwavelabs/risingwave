@@ -31,4 +31,38 @@ fn overlay(
 
 #[cfg(test)]
 mod tests {
+    use risingwave_common::array::{Array, ArrayBuilder, Utf8ArrayBuilder};
+
+    use super::*;
+
+    #[test]
+    fn test_overlay() {
+        let cases = vec![
+            ("aaa__aaa", "XY", 4, None, "aaaXYaaa"),
+            // Place at end.
+            ("aaa", "XY", 4, None, "aaaXY"),
+            // Place at start.
+            ("aaa", "XY", 1, Some(0), "XYaaa"),
+            // Replace shorter string.
+            ("aaa_aaa", "XYZ", 4, Some(1), "aaaXYZaaa"),
+            ("aaaaaa", "XYZ", 4, Some(0), "aaaXYZaaa"),
+            // Replace longer string.
+            ("aaa___aaa", "X", 4, Some(3), "aaaXaaa"),
+            // start too small or large.
+            ("aaa", "XY", -123, None, "XYa"),
+            ("aaa", "XY", 123, None, "aaaXY"),
+            // count too small or large.
+            ("aaa", "X", 4, Some(-123), "aaaX"),
+            ("aaa_", "X", 4, Some(123), "aaaX"),
+        ];
+
+        for (s, new_sub_str, start, count, expected) in cases {
+            let builder = Utf8ArrayBuilder::new(1);
+            let writer = builder.writer();
+            let guard = overlay(s, new_sub_str, start, count, writer).unwrap();
+            let array = guard.into_inner().finish().unwrap();
+            let v = array.value_at(0).unwrap();
+            assert_eq!(v, expected);
+        }
+    }
 }
