@@ -103,9 +103,9 @@ class Panels:
         return TimeSeries(title=title, targets=targets, gridPos=gridPos, unit="row", fillOpacity=10,
                           legendDisplayMode="table", legendPlacement="right", legendCalcs=["max"])
 
-    def timeseries_ms(self, title, targets):
+    def timeseries_ns(self, title, targets):
         gridPos = self.layout.next_half_width_graph()
-        return TimeSeries(title=title, targets=targets, gridPos=gridPos, unit="ms", fillOpacity=10,
+        return TimeSeries(title=title, targets=targets, gridPos=gridPos, unit="ns", fillOpacity=10,
                           legendDisplayMode="table", legendPlacement="right", legendCalcs=["max"])
 
     def timeseries_kilobytes(self, title, targets):
@@ -395,12 +395,12 @@ def section_streaming_actors(outer_panels):
                     "actor_sampled_deserialize_duration_ns", "{{actor_id}}"
                 ),
             ]),
-            panels.timeseries_ms("Actor Sampled Deserilization Time", [
+            panels.timeseries_ns("Actor Sampled Deserilization Time", [
                 panels.target(
                     "rate(actor_sampled_deserialize_duration_ns[1m]) > 0", "{{actor_id}}"
                 ),
             ]),
-            panels.timeseries_ms("Actor Sampled Serilization Time", [
+            panels.timeseries_ns("Actor Sampled Serilization Time", [
                 panels.target(
                     "rate(actor_sampled_serialize_duration_ns[1m]) > 0", "{{actor_id}}"
                 ),
