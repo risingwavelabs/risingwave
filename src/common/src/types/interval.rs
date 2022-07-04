@@ -214,6 +214,18 @@ impl IntervalUnit {
         Some(IntervalUnit::from_total_ms((ms as f64 / rhs).round() as i64))
     }
 
+    /// times [`IntervalUnit`] with an integer/float.
+    pub fn mul_float<I>(&self, rhs: I) -> Option<Self>
+    where
+        I: TryInto<OrderedF64>,
+    {
+        let rhs = rhs.try_into().ok()?;
+        let rhs = rhs.0;
+
+        let ms = self.as_ms_i64();
+        Some(IntervalUnit::from_total_ms((ms as f64 * rhs).round() as i64))
+    }
+
     fn as_ms_i64(&self) -> i64 {
         self.months as i64 * MONTH_MS + self.days as i64 * DAY_MS + self.ms
     }
