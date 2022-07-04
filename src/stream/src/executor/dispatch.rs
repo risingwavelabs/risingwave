@@ -138,9 +138,9 @@ pub fn new_output(
     // monitor backpressure rate
     let task = tokio::spawn(async move {
         let actor_id_str = actor_id.to_string();
+        const REPORT_FREQUENCY: usize = 15;
         loop {
             let mut bp_cnt = 0;
-            const REPORT_FREQUENCY: usize = 15;
             for _ in 0..REPORT_FREQUENCY {
                 if tx_clone.capacity() == 0 {
                     bp_cnt += 1;
