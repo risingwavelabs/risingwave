@@ -44,15 +44,15 @@ pub type StateTable<S> = StateTableBase<S, CellBasedRowSerializer>;
 /// `StateTableBase` is the interface accessing relational data in KV(`StateStore`) with
 /// encoding, using `RowSerializer` for row to cell serializing.
 #[derive(Clone)]
-pub struct StateTableBase<S: StateStore, SER: Encoding> {
+pub struct StateTableBase<S: StateStore, E: Encoding> {
     /// buffer key/values
     mem_table: MemTable,
 
     /// Relation layer
-    cell_based_table: StorageTableBase<S, SER, READ_WRITE>,
+    cell_based_table: StorageTableBase<S, E, READ_WRITE>,
 }
 
-impl<S: StateStore, SER: Encoding> StateTableBase<S, SER> {
+impl<S: StateStore, E: Encoding> StateTableBase<S, E> {
     /// Note: `dist_key_indices` is ignored, use `new_with[out]_distribution` instead.
     // TODO: remove this after all state table usages are replaced by `new_with[out]_distribution`.
     pub fn new(
@@ -108,7 +108,7 @@ impl<S: StateStore, SER: Encoding> StateTableBase<S, SER> {
     }
 
     /// Get the underlying [` StorageTableBase`]. Should only be used for tests.
-    pub fn cell_based_table(&self) -> &StorageTableBase<S, SER, READ_WRITE> {
+    pub fn cell_based_table(&self) -> &StorageTableBase<S, E, READ_WRITE> {
         &self.cell_based_table
     }
 
