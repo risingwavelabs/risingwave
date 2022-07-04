@@ -53,7 +53,10 @@ message ColumnCatalog {
 message CellBasedTableDesc {
   uint32 table_id = 1;
   repeated ColumnDesc columns = 2;
+  // TODO: may refactor primary key representations
   repeated OrderedColumnDesc order_key = 3;
+  repeated uint32 pk_indices = 4;
+  repeated uint32 dist_key_indices = 5;
 }
 
 enum JoinType {

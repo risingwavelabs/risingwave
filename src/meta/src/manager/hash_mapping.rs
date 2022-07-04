@@ -145,7 +145,7 @@ impl HashMappingManagerCore {
     ) -> Vec<ParallelUnitId> {
         let mut vnode_mapping = Vec::with_capacity(VIRTUAL_NODE_COUNT);
         let mut owner_mapping: HashMap<ParallelUnitId, Vec<VirtualNode>> = HashMap::new();
-        let mut load_balancer: BTreeMap<usize, Vec<ParallelUnitId>> = BTreeMap::new();
+
         let hash_shard_size = VIRTUAL_NODE_COUNT / parallel_units.len();
         let mut one_more_count = VIRTUAL_NODE_COUNT % parallel_units.len();
         let mut init_bound = 0;
@@ -165,6 +165,8 @@ impl HashMappingManagerCore {
                 .collect();
             owner_mapping.insert(parallel_unit_id, vnodes);
         });
+
+        let mut load_balancer: BTreeMap<usize, Vec<ParallelUnitId>> = BTreeMap::new();
 
         owner_mapping.iter().for_each(|(parallel_unit_id, vnodes)| {
             let vnode_count = vnodes.len();
@@ -224,11 +226,15 @@ mod tests {
     use itertools::Itertools;
     use risingwave_common::types::VIRTUAL_NODE_COUNT;
     use risingwave_pb::common::{ParallelUnit, ParallelUnitType};
+    use static_assertions::const_assert_eq;
 
     use super::{HashMappingInfo, HashMappingManager};
 
     #[test]
     fn test_build_hash_mapping() {
+        // This test only works when VIRTUAL_NODE_COUNT is 256.
+        const_assert_eq!(VIRTUAL_NODE_COUNT, 256);
+
         let parallel_unit_count = 6usize;
         let parallel_units = (1..parallel_unit_count + 1)
             .map(|id| ParallelUnit {
@@ -263,14 +269,14 @@ mod tests {
                 .iter()
                 .filter(|&parallel_unit_id| *parallel_unit_id == 3)
                 .count(),
-            VIRTUAL_NODE_COUNT / parallel_unit_count
+            VIRTUAL_NODE_COUNT / parallel_unit_count + 1
         );
         assert_eq!(
             vnode_mapping
                 .iter()
                 .filter(|&parallel_unit_id| *parallel_unit_id == 4)
                 .count(),
-            VIRTUAL_NODE_COUNT / parallel_unit_count
+            VIRTUAL_NODE_COUNT / parallel_unit_count + 1
         );
         assert_eq!(
             vnode_mapping

@@ -644,7 +644,7 @@ pub enum ShowObject {
     Schema,
     MaterializedView { schema: Option<Ident> },
     Source { schema: Option<Ident> },
-    Sink { _schema: Option<Ident> },
+    Sink { schema: Option<Ident> },
     MaterializedSource { schema: Option<Ident> },
     Columns { table: ObjectName },
 }
@@ -672,7 +672,7 @@ impl fmt::Display for ShowObject {
             ShowObject::MaterializedSource { schema } => {
                 write!(f, "MATERIALIZED SOURCES{}", fmt_schema(schema))
             }
-            ShowObject::Sink { _schema } => write!(f, "SINKS{}", fmt_schema(_schema)),
+            ShowObject::Sink { schema } => write!(f, "SINKS{}", fmt_schema(schema)),
             ShowObject::Columns { table } => write!(f, "COLUMNS FROM {}", table),
         }
     }
@@ -1538,16 +1538,24 @@ pub struct Function {
     pub over: Option<WindowSpec>,
     // aggregate functions may specify eg `COUNT(DISTINCT x)`
     pub distinct: bool,
+    // string_agg and array_agg both support ORDER BY
+    pub order_by: Vec<OrderByExpr>,
 }
 
 impl fmt::Display for Function {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         write!(
             f,
-            "{}({}{})",
+            "{}({}{}{}{})",
             self.name,
             if self.distinct { "DISTINCT " } else { "" },
             display_comma_separated(&self.args),
+            if !self.order_by.is_empty() {
+                " ORDER BY "
+            } else {
+                ""
+            },
+            display_comma_separated(&self.order_by),
         )?;
         if let Some(o) = &self.over {
             write!(f, " OVER ({})", o)?;

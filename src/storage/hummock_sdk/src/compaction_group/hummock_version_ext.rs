@@ -20,11 +20,17 @@ use crate::prost_key_range::KeyRangeExt;
 use crate::CompactionGroupId;
 
 pub trait HummockVersionExt {
+    /// Gets `compaction_group_id`'s levels
     fn get_compaction_group_levels(&self, compaction_group_id: CompactionGroupId) -> &Vec<Level>;
+    /// Gets `compaction_group_id`'s levels
     fn get_compaction_group_levels_mut(
         &mut self,
         compaction_group_id: CompactionGroupId,
     ) -> &mut Vec<Level>;
+    /// Gets all levels.
+    ///
+    /// Levels belonging to the same compaction group retain their relative order.
+    fn get_combined_levels(&self) -> Vec<&Level>;
     fn apply_compact_ssts(
         levels: &mut Vec<Level>,
         delete_sst_levels: &[u32],
@@ -52,6 +58,14 @@ impl HummockVersionExt for HummockVersion {
             .get_mut(&compaction_group_id)
             .unwrap_or_else(|| panic!("compaction group {} exists", compaction_group_id))
             .levels
+    }
+
+    fn get_combined_levels(&self) -> Vec<&Level> {
+        let mut combined_levels = vec![];
+        for level in self.levels.values() {
+            combined_levels.extend(level.levels.iter());
+        }
+        combined_levels
     }
 
     fn apply_compact_ssts(

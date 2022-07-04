@@ -17,6 +17,7 @@ use std::sync::Arc;
 
 use bytes::Bytes;
 use risingwave_common::catalog::TableId;
+use risingwave_common::util::epoch::Epoch;
 use risingwave_hummock_sdk::LocalSstableInfo;
 
 use crate::error::StorageResult;
@@ -41,6 +42,7 @@ macro_rules! define_state_store_associated_type {
         type SyncFuture<'a> = impl EmptyFutureTrait<'a>;
         type IterFuture<'a, R, B> = impl Future<Output = $crate::error::StorageResult<Self::Iter>> + Send where R: 'static + Send, B: 'static + Send;
         type BackwardIterFuture<'a, R, B> = impl Future<Output = $crate::error::StorageResult<Self::Iter>> + Send where R: 'static + Send, B: 'static + Send;
+        type ClearSharedBufferFuture<'a> = impl EmptyFutureTrait<'a>;
     }
 }
 
@@ -76,6 +78,8 @@ pub trait StateStore: Send + Sync + 'static + Clone {
     where
         R: 'static + Send,
         B: 'static + Send;
+
+    type ClearSharedBufferFuture<'a>: EmptyFutureTrait<'a>;
 
     /// Point gets a value from the state store.
     /// The result is based on a snapshot corresponding to the given `epoch`.
@@ -170,6 +174,12 @@ pub trait StateStore: Send + Sync + 'static + Clone {
     fn get_uncommitted_ssts(&self, _epoch: u64) -> Vec<LocalSstableInfo> {
         todo!()
     }
+
+    /// Clears contents in shared buffer.
+    /// This method should only be called when dropping all actors in the local compute node.
+    fn clear_shared_buffer(&self) -> Self::ClearSharedBufferFuture<'_> {
+        todo!()
+    }
 }
 
 pub trait StateStoreIter: Send + 'static {
@@ -183,10 +193,21 @@ pub trait StateStoreIter: Send + 'static {
 pub struct ReadOptions {
     pub epoch: u64,
     pub table_id: Option<TableId>,
+    pub ttl: Option<u32>, // second
 }
 
 #[derive(Default, Clone)]
 pub struct WriteOptions {
     pub epoch: u64,
     pub table_id: TableId,
+}
+
+impl ReadOptions {
+    pub fn min_epoch(&self) -> u64 {
+        let epoch = Epoch(self.epoch);
+        match self.ttl {
+            Some(ttl_second_u32) => epoch.subtract_ms((ttl_second_u32 * 1000) as u64).0,
+            None => 0,
+        }
+    }
 }

@@ -786,7 +786,8 @@ mod tests {
 
         let actor_id = ActorId::default();
         let source_desc = source_manager.get_source(&source_table_id)?;
-        let keyspace = Keyspace::table_root(MemoryStateStore::new(), &TableId::from(0x2333));
+        let mem_state_store = MemoryStateStore::new();
+        let keyspace = Keyspace::table_root(mem_state_store.clone(), &TableId::from(0x2333));
         let column_ids = vec![ColumnId::from(0), ColumnId::from(1)];
         let schema = get_schema(&column_ids, &source_desc);
         let pk_indices = vec![0_usize];
@@ -808,13 +809,13 @@ mod tests {
             u64::MAX,
         )?;
 
-        let mut materialize = MaterializeExecutor::new(
+        let mut materialize = MaterializeExecutor::new_for_test(
             Box::new(source_exec),
-            keyspace.clone(),
+            mem_state_store.clone(),
+            TableId::from(0x2333),
             vec![OrderPair::new(0, OrderType::Ascending)],
             column_ids.clone(),
             2,
-            vec![0usize],
         )
         .boxed()
         .execute();
