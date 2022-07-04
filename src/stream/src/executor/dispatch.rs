@@ -23,6 +23,7 @@ use futures_async_stream::try_stream;
 use itertools::Itertools;
 use madsim::collections::{HashMap, HashSet};
 use madsim::task::JoinHandle;
+use madsim::time::Instant;
 use risingwave_common::array::{Op, StreamChunk};
 use risingwave_common::buffer::BitmapBuilder;
 use risingwave_common::error::{internal_error, Result};
@@ -50,7 +51,11 @@ type BoxedOutput = Box<dyn Output>;
 pub struct LocalOutput {
     actor_id: ActorId,
 
+    actor_id_str: String,
+
     ch: Sender<Message>,
+
+    metrics: Arc<StreamingMetrics>,
 }
 
 impl Debug for LocalOutput {
@@ -62,19 +67,38 @@ impl Debug for LocalOutput {
 }
 
 impl LocalOutput {
-    pub fn new(actor_id: ActorId, ch: Sender<Message>) -> Self {
-        Self { actor_id, ch }
+    pub fn new(actor_id: ActorId, ch: Sender<Message>, metrics: Arc<StreamingMetrics>) -> Self {
+        Self {
+            actor_id,
+            actor_id_str: actor_id.to_string(),
+            ch,
+            metrics,
+        }
     }
 }
 
 #[async_trait]
 impl Output for LocalOutput {
     async fn send(&mut self, message: Message) -> Result<()> {
-        // local channel should never fail
-        self.ch
-            .send(message)
-            .await
-            .map_err(|_| internal_error("failed to send"))?;
+        // if the buffer is full when sending, the sender is backpressured
+        if self.ch.capacity() == 0 {
+            let start_time = Some(Instant::now());
+            // local channel should never fail
+            self.ch
+                .send(message)
+                .await
+                .map_err(|_| internal_error("failed to send"))?;
+            self.metrics
+                .actor_output_buffer_blocking_duration
+                .with_label_values(&[&self.actor_id_str])
+                .inc_by(start_time.unwrap().elapsed().as_nanos() as u64);
+        } else {
+            self.ch
+                .send(message)
+                .await
+                .map_err(|_| internal_error("failed to send"))?;
+        };
+
         Ok(())
     }
 
@@ -87,7 +111,11 @@ impl Output for LocalOutput {
 pub struct RemoteOutput {
     actor_id: ActorId,
 
+    actor_id_str: String,
+
     ch: Sender<Message>,
+
+    metrics: Arc<StreamingMetrics>,
 }
 
 impl Debug for RemoteOutput {
@@ -99,23 +127,38 @@ impl Debug for RemoteOutput {
 }
 
 impl RemoteOutput {
-    pub fn new(actor_id: ActorId, ch: Sender<Message>) -> Self {
-        Self { actor_id, ch }
+    pub fn new(actor_id: ActorId, ch: Sender<Message>, metrics: Arc<StreamingMetrics>) -> Self {
+        Self {
+            actor_id,
+            actor_id_str: actor_id.to_string(),
+            ch,
+            metrics,
+        }
     }
 }
 
 #[async_trait]
 impl Output for RemoteOutput {
     async fn send(&mut self, message: Message) -> Result<()> {
-        let message = match message {
-            Message::Chunk(chk) => Message::Chunk(chk.compact()?),
-            _ => message,
+        // if the buffer is full when sending, the sender is backpressured
+        if self.ch.capacity() == 0 {
+            let start_time = Some(Instant::now());
+            // local channel should never fail
+            self.ch
+                .send(message)
+                .await
+                .map_err(|_| internal_error("failed to send"))?;
+            self.metrics
+                .actor_output_buffer_blocking_duration
+                .with_label_values(&[&self.actor_id_str])
+                .inc_by(start_time.unwrap().elapsed().as_nanos() as u64);
+        } else {
+            self.ch
+                .send(message)
+                .await
+                .map_err(|_| internal_error("failed to send"))?;
         };
-        // local channel should never fail
-        self.ch
-            .send(message)
-            .await
-            .map_err(|_| internal_error("failed to send"))?;
+
         Ok(())
     }
 
@@ -130,37 +173,13 @@ pub fn new_output(
     actor_id: ActorId,
     down_id: ActorId,
     metrics: Arc<StreamingMetrics>,
-    actor_output_buffer_monitor_tasks: &mut HashMap<ActorId, JoinHandle<()>>,
 ) -> Result<Box<dyn Output>> {
     let tx = context.take_sender(&(actor_id, down_id))?;
-
-    let tx_clone = tx.clone();
-    // monitor backpressure rate
-    let task = tokio::spawn(async move {
-        let actor_id_str = actor_id.to_string();
-        const REPORT_FREQUENCY: usize = 15;
-        loop {
-            let mut bp_cnt = 0;
-            for _ in 0..REPORT_FREQUENCY {
-                // Buffer being fully occupied means backpressure happened.
-                if tx_clone.capacity() == 0 {
-                    bp_cnt += 1;
-                }
-                tokio::time::sleep(std::time::Duration::from_secs(1)).await;
-            }
-            metrics
-                .actor_output_buffer_backpressured_rate
-                .with_label_values(&[&actor_id_str])
-                .set(100.0 * bp_cnt as f64 / REPORT_FREQUENCY as f64);
-        }
-    });
-    actor_output_buffer_monitor_tasks.insert(actor_id, task);
-
     if is_local_address(&addr, &context.addr) {
         // if this is a local downstream actor
-        Ok(Box::new(LocalOutput::new(down_id, tx)) as Box<dyn Output>)
+        Ok(Box::new(LocalOutput::new(down_id, tx, metrics)) as Box<dyn Output>)
     } else {
-        Ok(Box::new(RemoteOutput::new(down_id, tx)) as Box<dyn Output>)
+        Ok(Box::new(RemoteOutput::new(down_id, tx, metrics)) as Box<dyn Output>)
     }
 }
 
@@ -250,7 +269,6 @@ impl DispatchExecutorInner {
                                 self.actor_id,
                                 down_id,
                                 self.metrics.clone(),
-                                &mut self.actor_output_buffer_monitor_tasks,
                             )?);
                         }
                         dispatcher.set_outputs(new_outputs)
@@ -274,7 +292,6 @@ impl DispatchExecutorInner {
                                 self.actor_id,
                                 down_id,
                                 self.metrics.clone(),
-                                &mut self.actor_output_buffer_monitor_tasks,
                             )?);
                         }
                         dispatcher.add_outputs(outputs_to_add);

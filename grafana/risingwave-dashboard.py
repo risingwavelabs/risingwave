@@ -405,6 +405,11 @@ def section_streaming_actors(outer_panels):
                     "actor_sampled_serialize_duration_ns", "{{actor_id}}"
                 ),
             ]),
+            panels.timeseries_ns("Actor Backpressure Time Per 15s", [
+                panels.target(
+                    "rate(stream_actor_output_buffer_blocking_duration[15s]) > 0", "{{actor_id}}"
+                ),
+            ]),
             panels.timeseries_actor_latency("Actor Barrier Latency", [
                 panels.target(
                     "rate(stream_actor_barrier_time[1m]) > 0", "{{actor_id}}"
@@ -418,11 +423,6 @@ def section_streaming_actors(outer_panels):
             panels.timeseries_actor_latency("Actor Execution Time", [
                 panels.target(
                     "rate(stream_actor_actor_execution_time[1m]) > 0", "{{actor_id}}"
-                ),
-            ]),
-            panels.timeseries_backpressured_rate("Actor Output Buffer Backpressured Rate", [
-                panels.target(
-                    "stream_actor_output_buffer_backpressured_rate", "{{actor_id}}"
                 ),
             ]),
             panels.timeseries_row("Actor Input Row", [

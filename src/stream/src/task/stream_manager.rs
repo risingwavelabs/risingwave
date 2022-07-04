@@ -426,7 +426,6 @@ impl LocalStreamManagerCore {
                         actor_id,
                         *down_id,
                         self.streaming_metrics.clone(),
-                        &mut self.actor_output_buffer_monitor_tasks,
                     )
                 })
                 .collect::<Result<Vec<_>>>()?;
