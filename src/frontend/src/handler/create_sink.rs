@@ -106,21 +106,20 @@ pub async fn handle_create_sink(
     // };
 
     let (schema_name, sink_name) = Binder::resolve_table_name(stmt.sink_name.clone())?;
-    let (database_id, schema_id) = session.env().catalog_reader().read_guard()
+    let (database_id, schema_id) = session
+        .env()
+        .catalog_reader()
+        .read_guard()
         .check_relation_name_duplicated(session.database(), &schema_name, sink_name.as_str())?;
     let associated_table_id = {
-        let catalog_reader =  session
-            .env()
-            .catalog_reader()
-            .read_guard();
-        let associated_table = catalog_reader
-            .get_table_by_name(session.database(), &schema_name, stmt.materialized_view.to_string().as_str())?;
+        let catalog_reader = session.env().catalog_reader().read_guard();
+        let associated_table = catalog_reader.get_table_by_name(
+            session.database(),
+            &schema_name,
+            stmt.materialized_view.to_string().as_str(),
+        )?;
         associated_table.id().table_id.into()
     };
-
-
-
-    
 
     let mv_name = stmt.materialized_view.to_string();
     let sink = make_prost_sink(
@@ -139,7 +138,7 @@ pub async fn handle_create_sink(
     //     );
     //     binder.bind_table_or_source(schema_name.as_str(), mv_name.as_str(), None)
     // }?;
-    
+
     // let mut plan_root = Planner::new(context.into()).plan_relation(relation)?;
     // plan_root.set_required_dist(RequiredDist::Any);
 

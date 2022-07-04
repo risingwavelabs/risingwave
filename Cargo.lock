@@ -682,6 +682,12 @@ dependencies = [
 ]
 
 [[package]]
+name = "bimap"
+version = "0.6.2"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "bc0455254eb5c6964c4545d8bac815e1a1be4f3afe0ae695ea539c12d728d44b"
+
+[[package]]
 name = "bincode"
 version = "1.3.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -4286,6 +4292,7 @@ dependencies = [
  "assert-impl",
  "assert_matches",
  "async-trait",
+ "bimap",
  "byteorder",
  "bytes",
  "clap 3.1.18",

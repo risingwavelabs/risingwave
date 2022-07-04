@@ -14,6 +14,7 @@
 
 use std::collections::HashMap;
 
+use bimap::BiMap;
 use risingwave_common::catalog::{valid_table_name, TableId, PG_CATALOG_SCHEMA_NAME};
 use risingwave_pb::catalog::{
     Schema as ProstSchema, Sink as ProstSink, Source as ProstSource, Table as ProstTable,
@@ -36,10 +37,7 @@ pub struct SchemaCatalog {
     table_name_by_id: HashMap<TableId, String>,
     source_by_name: HashMap<String, SourceCatalog>,
     source_name_by_id: HashMap<SourceId, String>,
-
-    // TODO(nanderstabel): Can be replaced with a bijective map: https://crates.io/crates/bimap.
-    sink_id_by_name: HashMap<String, SinkId>,
-    sink_name_by_id: HashMap<SinkId, String>,
+    sink_bimap: BiMap<SinkId, String>,
 
     // This field only available when schema is "pg_catalog". Meanwhile, others will be empty.
     system_table_by_name: HashMap<String, SystemCatalog>,
@@ -86,14 +84,11 @@ impl SchemaCatalog {
     pub fn create_sink(&mut self, prost: ProstSink) {
         let name = prost.name.clone();
         let id = prost.id;
-
-        self.sink_id_by_name.try_insert(name.clone(), id).unwrap();
-        self.sink_name_by_id.try_insert(id, name).unwrap();
+        self.sink_bimap.insert_no_overwrite(id, name).unwrap();
     }
 
     pub fn drop_sink(&mut self, id: SinkId) {
-        let name = self.sink_name_by_id.remove(&id).unwrap();
-        self.sink_id_by_name.remove(&name).unwrap();
+        self.sink_bimap.remove_by_left(&id).unwrap();
     }
 
     pub fn iter_table(&self) -> impl Iterator<Item = &TableCatalog> {
@@ -149,7 +144,7 @@ impl SchemaCatalog {
 
     /// Iterate all sinks.
     pub fn iter_sink(&self) -> impl Iterator<Item = &u32> {
-        self.sink_id_by_name.iter().map(|(_, v)| v)
+        self.sink_bimap.iter().map(|(v, _)| v)
     }
 
     pub fn iter_system_tables(&self) -> impl Iterator<Item = &SystemCatalog> {
@@ -165,7 +160,7 @@ impl SchemaCatalog {
     }
 
     pub fn get_sink_id_by_name(&self, sink_name: &str) -> Option<SinkId> {
-        self.sink_id_by_name.get(sink_name).cloned()
+        self.sink_bimap.get_by_right(sink_name).cloned()
     }
 
     pub fn get_system_table_by_name(&self, table_name: &str) -> Option<&SystemCatalog> {
@@ -194,8 +189,7 @@ impl From<&ProstSchema> for SchemaCatalog {
             table_name_by_id: HashMap::new(),
             source_by_name: HashMap::new(),
             source_name_by_id: HashMap::new(),
-            sink_id_by_name: HashMap::new(),
-            sink_name_by_id: HashMap::new(),
+            sink_bimap: BiMap::new(),
             system_table_by_name: HashMap::new(),
             owner: schema.owner.clone(),
         }
