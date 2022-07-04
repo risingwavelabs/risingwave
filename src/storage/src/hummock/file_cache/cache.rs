@@ -66,16 +66,17 @@ where
         loop {
             self.notifier.notified().await;
 
-            let mut buf = Arc::new(LruCache::new(BUFFER_LRU_SHARD_BITS, self.buffer_capacity));
+            let _frozen = self.buffer.read().frozen_buffer.clone();
 
+            // TODO: Drain `buf`, inseret store, update `indices`.
+            // let slots = self.store.insert(batch).await?;
+
+            // rotate buffer
+            let mut buf = Arc::new(LruCache::new(BUFFER_LRU_SHARD_BITS, self.buffer_capacity));
             let mut buffer = self.buffer.write();
             std::mem::swap(&mut buf, &mut buffer.active_buffer);
             std::mem::swap(&mut buf, &mut buffer.frozen_buffer);
             drop(buffer);
-
-            // TODO: Drain `buf`, inseret store, update `indices`.
-            // let slots = self.store.insert(batch).await?;
-            todo!()
         }
     }
 }
