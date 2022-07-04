@@ -125,6 +125,7 @@ impl ExchangeServiceImpl {
                     // the sender is closed, we close the receiver and stop forwarding message
                     None => break,
                     Some(msg) => {
+                        // add serialization duration metric with given sampling frequency
                         let proto = if rr % SAMPLING_FREQUENCY == 0 {
                             let start_time = Instant::now();
                             let proto = msg.to_protobuf();
