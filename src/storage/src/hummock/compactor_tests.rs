@@ -137,7 +137,10 @@ mod tests {
         let compact_ctx = get_compactor_context(&storage, &hummock_meta_client);
 
         // 1. add sstables
-        let key = Bytes::from(&b"same_key"[..]);
+        let mut key = b"t".to_vec();
+        key.extend_from_slice(&1u32.to_be_bytes());
+        key.extend_from_slice(&0u64.to_be_bytes());
+        let key = Bytes::from(key);
         let mut val = b"0"[..].repeat(1 << 10);
         val.extend_from_slice(&32u64.to_be_bytes());
 
@@ -167,6 +170,7 @@ mod tests {
         let compaction_filter_flag = CompactionFilterFlag::STATE_CLEAN | CompactionFilterFlag::TTL;
         compact_task.watermark = 32;
         compact_task.compaction_filter_mask = compaction_filter_flag.bits();
+        compact_task.table_options = HashMap::from([(1, TableOption { ttl: 64 })]);
 
         hummock_manager_ref
             .assign_compaction_task(&compact_task, worker_node.id, async { true })

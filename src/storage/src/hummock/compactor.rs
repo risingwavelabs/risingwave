@@ -679,7 +679,7 @@ impl Compactor {
             &mut builder,
             kr,
             iter,
-            !self.compact_task.is_target_ultimate_and_leveling,
+            self.compact_task.is_target_ultimate_and_leveling,
             self.compact_task.watermark,
             compaction_filter,
         )
@@ -939,7 +939,7 @@ impl Compactor {
         sst_builder: &mut GroupedSstableBuilder<B, G>,
         kr: KeyRange,
         mut iter: BoxedForwardHummockIterator,
-        has_user_key_overlap: bool,
+        gc_delete_key: bool,
         watermark: Epoch,
         compaction_filter: impl CompactionFilter,
     ) -> HummockResult<()>
@@ -954,24 +954,16 @@ impl Compactor {
             iter.rewind().await?;
         }
 
-        let mut skip_key = BytesMut::new();
         let mut last_key = BytesMut::new();
 
         while iter.is_valid() {
             let iter_key = iter.key();
 
-            if !skip_key.is_empty() {
-                if VersionedComparator::same_user_key(iter_key, &skip_key) {
-                    iter.next().await?;
-                    continue;
-                } else {
-                    skip_key.clear();
-                }
-            }
-
             let is_new_user_key =
                 last_key.is_empty() || !VersionedComparator::same_user_key(iter_key, &last_key);
 
+            let mut drop = false;
+            let epoch = get_epoch(iter_key);
             if is_new_user_key {
                 if !kr.right.is_empty()
                     && VersionedComparator::compare_key(iter_key, &kr.right)
@@ -984,22 +976,18 @@ impl Compactor {
                 last_key.extend_from_slice(iter_key);
             }
 
-            let epoch = get_epoch(iter_key);
-
             // Among keys with same user key, only retain keys which satisfy `epoch` >= `watermark`,
             // and the latest key which satisfies `epoch` < `watermark`
-            let mut drop = false;
             if epoch < watermark {
-                skip_key = BytesMut::from(iter_key);
-                if iter.value().is_delete() && !has_user_key_overlap {
+                // in our design, frontend avoid to access keys which had be deleted, so we dont
+                // need to consider the epoch when the compaction_filter match (it
+                // means that mv had drop)
+                if (gc_delete_key && iter.value().is_delete())
+                    || !is_new_user_key
+                    || !compaction_filter.filter(iter_key)
+                {
                     drop = true;
                 }
-            }
-
-            // in our design, frontend avoid to access keys which had be deleted, so we dont need to
-            // consider the epoch when the compaction_filter match (it means that mv had drop)
-            if !drop && !compaction_filter.filter(iter_key) {
-                drop = true;
             }
 
             if drop {
