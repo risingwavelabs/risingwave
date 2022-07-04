@@ -17,7 +17,7 @@ use std::fmt;
 use itertools::Itertools;
 use risingwave_common::catalog::Schema;
 use risingwave_common::error::Result;
-use risingwave_common::util::sort_util::OrderType;
+use risingwave_common::util::sort_util::{OrderPair, OrderType};
 use risingwave_pb::plan_common::{ColumnOrder, OrderType as ProstOrderType};
 
 use super::super::plan_node::*;
@@ -55,7 +55,7 @@ impl fmt::Display for Order {
     }
 }
 
-#[derive(Clone)]
+#[derive(Clone, PartialEq)]
 pub struct FieldOrder {
     pub index: usize,
     pub direct: Direction,
@@ -86,6 +86,14 @@ impl FieldOrder {
         ColumnOrder {
             order_type: self.direct.to_protobuf() as i32,
             index: self.index as u32,
+        }
+    }
+
+    // TODO: unify them
+    pub fn to_order_pair(&self) -> OrderPair {
+        OrderPair {
+            column_idx: self.index,
+            order_type: self.direct.to_order(),
         }
     }
 }
@@ -130,6 +138,15 @@ impl Direction {
             Self::Asc => ProstOrderType::Ascending,
             Self::Desc => ProstOrderType::Descending,
             _ => unimplemented!(),
+        }
+    }
+
+    // TODO: unify them
+    pub fn to_order(&self) -> OrderType {
+        match self {
+            Self::Asc => OrderType::Ascending,
+            Self::Desc => OrderType::Descending,
+            _ => unreachable!(),
         }
     }
 }

@@ -15,7 +15,7 @@
 use std::collections::{HashMap, HashSet};
 
 use itertools::Itertools;
-use risingwave_common::catalog::{ColumnDesc, OrderedColumnDesc, TableDesc};
+use risingwave_common::catalog::TableDesc;
 use risingwave_common::types::ParallelUnitId;
 use risingwave_common::util::compress::decompress_data;
 use risingwave_common::util::sort_util::OrderType;
@@ -26,6 +26,7 @@ use risingwave_pb::plan_common::OrderType as ProstOrderType;
 use super::column_catalog::ColumnCatalog;
 use super::{DatabaseId, SchemaId};
 use crate::catalog::TableId;
+use crate::optimizer::property::{Direction, FieldOrder};
 
 #[derive(Clone, Debug, PartialEq)]
 pub struct TableCatalog {
@@ -39,7 +40,7 @@ pub struct TableCatalog {
     pub columns: Vec<ColumnCatalog>,
 
     /// Keys used as materialize's storage key prefix, including MV order keys and pks.
-    pub order_desc: Vec<OrderedColumnDesc>,
+    pub order_keys: Vec<FieldOrder>,
 
     /// Primary key columns indices.
     pub pks: Vec<usize>,
@@ -82,15 +83,19 @@ impl TableCatalog {
     }
 
     /// Get a reference to the table catalog's pk desc.
-    pub fn order_desc(&self) -> &[OrderedColumnDesc] {
-        self.order_desc.as_ref()
+    pub fn order_keys(&self) -> &[FieldOrder] {
+        self.order_keys.as_ref()
     }
 
     /// Get a [`TableDesc`] of the table.
     pub fn table_desc(&self) -> TableDesc {
         TableDesc {
             table_id: self.id,
-            order_desc: self.order_desc.clone(),
+            order_keys: self
+                .order_keys
+                .iter()
+                .map(FieldOrder::to_order_pair)
+                .collect(),
             pks: self.pks.clone(),
             columns: self.columns.iter().map(|c| c.column_desc.clone()).collect(),
             distribution_keys: self.distribution_keys.clone(),
@@ -109,16 +114,17 @@ impl TableCatalog {
     }
 
     pub fn to_prost(&self, schema_id: SchemaId, database_id: DatabaseId) -> ProstTable {
-        let (order_column_ids, orders) = self
-            .order_desc()
+        let (order_column_ids, orders): (Vec<i32>, Vec<i32>) = self
+            .order_keys
             .iter()
             .map(|col| {
                 (
-                    col.column_desc.column_id.get_id(),
-                    col.order.to_prost() as i32,
+                    self.columns[col.index].column_desc.column_id.get_id(),
+                    col.direct.to_protobuf() as i32,
                 )
             })
             .unzip();
+        assert!(orders.iter().all(|o| *o > 0));
 
         ProstTable {
             id: self.id.table_id as u32,
@@ -156,20 +162,21 @@ impl From<ProstTable> for TableCatalog {
         });
         let name = tb.name.clone();
         let mut col_names = HashSet::new();
-        let mut col_descs: HashMap<i32, ColumnDesc> = HashMap::new();
+        let mut col_index: HashMap<i32, usize> = HashMap::new();
         let columns: Vec<ColumnCatalog> = tb.columns.into_iter().map(ColumnCatalog::from).collect();
-        for catalog in columns.clone() {
+        for (idx, catalog) in columns.clone().into_iter().enumerate() {
             for col_desc in catalog.column_desc.flatten() {
                 let col_name = col_desc.name.clone();
                 if !col_names.insert(col_name.clone()) {
                     panic!("duplicated column name {} in table {} ", col_name, tb.name)
                 }
-                let col_id = col_desc.column_id.get_id();
-                col_descs.insert(col_id, col_desc);
             }
+
+            let col_id = catalog.column_desc.column_id.get_id();
+            col_index.insert(col_id, idx);
         }
 
-        let order_desc = tb
+        let order_keys = tb
             .order_column_ids
             .clone()
             .into_iter()
@@ -178,9 +185,12 @@ impl From<ProstTable> for TableCatalog {
                     .into_iter()
                     .map(|x| OrderType::from_prost(&ProstOrderType::from_i32(x).unwrap())),
             )
-            .map(|(col_id, order)| OrderedColumnDesc {
-                column_desc: col_descs.get(&col_id).unwrap().clone(),
-                order,
+            .map(|(col_id, order)| FieldOrder {
+                index: *col_index.get(&col_id).unwrap(),
+                direct: match order {
+                    OrderType::Ascending => Direction::Asc,
+                    OrderType::Descending => Direction::Desc,
+                },
             })
             .collect();
 
@@ -194,7 +204,7 @@ impl From<ProstTable> for TableCatalog {
             id: id.into(),
             associated_source_id: associated_source_id.map(Into::into),
             name,
-            order_desc,
+            order_keys,
             columns,
             is_index_on: if tb.is_index {
                 Some(tb.index_on_id.into())
@@ -225,7 +235,7 @@ impl From<&ProstTable> for TableCatalog {
 mod tests {
     use std::collections::HashMap;
 
-    use risingwave_common::catalog::{ColumnDesc, ColumnId, OrderedColumnDesc, TableId};
+    use risingwave_common::catalog::{ColumnDesc, ColumnId, TableId};
     use risingwave_common::test_prelude::*;
     use risingwave_common::types::*;
     use risingwave_common::util::compress::compress_data;
@@ -240,6 +250,7 @@ mod tests {
     use crate::catalog::column_catalog::ColumnCatalog;
     use crate::catalog::row_id_column_desc;
     use crate::catalog::table_catalog::TableCatalog;
+    use crate::optimizer::property::{Direction, FieldOrder};
 
     #[test]
     fn test_into_table_catalog() {
@@ -334,9 +345,9 @@ mod tests {
                     }
                 ],
                 pks: vec![0],
-                order_desc: vec![OrderedColumnDesc {
-                    column_desc: row_id_column_desc(),
-                    order: OrderType::Ascending
+                order_keys: vec![FieldOrder {
+                    index: 0,
+                    direct: Direction::Asc,
                 }],
                 distribution_keys: vec![],
                 appendonly: false,

@@ -26,12 +26,7 @@
                         columnId: 1
                         name: v1
                     orderKey:
-                      - columnDesc:
-                          columnType:
-                            typeName: INT64
-                            isNullable: true
-                          name: _row_id
-                        order: ASCENDING
+                      - orderType: ASCENDING
                     pkIndices:
                       - 0
                     distKeyIndices:
@@ -167,12 +162,7 @@
                     columnId: 1
                     name: v1
                 orderKey:
-                  - columnDesc:
-                      columnType:
-                        typeName: INT64
-                        isNullable: true
-                      name: _row_id
-                    order: ASCENDING
+                  - orderType: ASCENDING
                 pkIndices:
                   - 0
                 distKeyIndices:
@@ -283,12 +273,7 @@
                     columnId: 2
                     name: v2
                 orderKey:
-                  - columnDesc:
-                      columnType:
-                        typeName: INT64
-                        isNullable: true
-                      name: _row_id
-                    order: ASCENDING
+                  - orderType: ASCENDING
                 pkIndices:
                   - 0
                 distKeyIndices:
@@ -401,12 +386,7 @@
                                 columnId: 1
                                 name: v1
                             orderKey:
-                              - columnDesc:
-                                  columnType:
-                                    typeName: INT64
-                                    isNullable: true
-                                  name: _row_id
-                                order: ASCENDING
+                              - orderType: ASCENDING
                             pkIndices:
                               - 0
                             distKeyIndices:
@@ -616,12 +596,7 @@
                                     columnId: 2
                                     name: v2
                                 orderKey:
-                                  - columnDesc:
-                                      columnType:
-                                        typeName: INT64
-                                        isNullable: true
-                                      name: _row_id
-                                    order: ASCENDING
+                                  - orderType: ASCENDING
                                 pkIndices:
                                   - 0
                                 distKeyIndices:

@@ -14,8 +14,9 @@
 
 use risingwave_pb::plan_common::{CellBasedTableDesc, ColumnOrder};
 
-use super::{ColumnDesc, OrderedColumnDesc, TableId};
+use super::{ColumnDesc, ColumnId, TableId};
 use crate::types::ParallelUnitId;
+use crate::util::sort_util::OrderPair;
 
 /// the table descriptor of table with cell based encoding in state store and include all
 /// information for compute node to access data of the table.
@@ -24,7 +25,7 @@ pub struct TableDesc {
     /// Id of the table, to find in storage.
     pub table_id: TableId,
     /// The keys used to sort in storage.
-    pub order_desc: Vec<OrderedColumnDesc>,
+    pub order_keys: Vec<OrderPair>,
     /// All columns in the table, noticed it is NOT sorted by columnId in the vec.
     pub columns: Vec<ColumnDesc>,
     /// Distribution keys of this table, which corresponds to the corresponding column of the
@@ -45,19 +46,17 @@ pub struct TableDesc {
 impl TableDesc {
     pub fn arrange_key_orders_prost(&self) -> Vec<ColumnOrder> {
         // Set materialize key as arrange key + pk
-        self.order_desc
-            .iter()
-            .map(|x| ColumnOrder {
-                order_type: x.order.to_prost() as i32,
-                index: x.column_desc.column_id.get_id() as u32,
-            })
-            .collect()
+        self.order_keys.iter().map(|x| x.to_protobuf()).collect()
     }
 
-    pub fn order_column_ids(&self) -> Vec<usize> {
-        self.order_desc
+    pub fn order_column_indices(&self) -> Vec<usize> {
+        self.order_keys.iter().map(|col| (col.column_idx)).collect()
+    }
+
+    pub fn order_column_ids(&self) -> Vec<ColumnId> {
+        self.order_keys
             .iter()
-            .map(|col| (col.column_desc.column_id.get_id() as usize))
+            .map(|col| self.columns[col.column_idx].column_id)
             .collect()
     }
 
@@ -65,7 +64,7 @@ impl TableDesc {
         CellBasedTableDesc {
             table_id: self.table_id.into(),
             columns: self.columns.iter().map(Into::into).collect(),
-            order_key: self.order_desc.iter().map(|v| v.into()).collect(),
+            order_key: self.order_keys.iter().map(|v| v.to_protobuf()).collect(),
             pk_indices: self.pks.iter().map(|&k| k as u32).collect(),
             dist_key_indices: self.distribution_keys.iter().map(|&k| k as u32).collect(),
         }

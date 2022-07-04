@@ -16,8 +16,7 @@ use std::collections::HashMap;
 use std::fmt;
 
 use itertools::Itertools;
-use risingwave_common::catalog::{ColumnDesc, DatabaseId, OrderedColumnDesc, SchemaId, TableId};
-use risingwave_common::util::sort_util::OrderType;
+use risingwave_common::catalog::{ColumnDesc, DatabaseId, SchemaId, TableId};
 use risingwave_pb::plan_common::JoinType;
 use risingwave_pb::stream_plan::stream_node::NodeBody;
 use risingwave_pb::stream_plan::HashJoinNode;
@@ -27,7 +26,7 @@ use crate::catalog::column_catalog::ColumnCatalog;
 use crate::catalog::table_catalog::TableCatalog;
 use crate::expr::Expr;
 use crate::optimizer::plan_node::EqJoinPredicate;
-use crate::optimizer::property::Distribution;
+use crate::optimizer::property::{Direction, Distribution, FieldOrder};
 use crate::utils::ColIndexMapping;
 
 /// [`StreamHashJoin`] implements [`super::LogicalJoin`] with hash table. It builds a hash table
@@ -246,10 +245,10 @@ fn infer_internal_table_catalog(input: PlanRef) -> TableCatalog {
         })
         .collect_vec();
     let mut order_desc = vec![];
-    for &idx in pk_indices {
-        order_desc.push(OrderedColumnDesc {
-            column_desc: columns[idx].column_desc.clone(),
-            order: OrderType::Ascending,
+    for &index in pk_indices {
+        order_desc.push(FieldOrder {
+            index,
+            direct: Direction::Asc,
         });
     }
     TableCatalog {
@@ -257,7 +256,7 @@ fn infer_internal_table_catalog(input: PlanRef) -> TableCatalog {
         associated_source_id: None,
         name: String::new(),
         columns,
-        order_desc,
+        order_keys: order_desc,
         pks: pk_indices.clone(),
         distribution_keys: base.dist.dist_column_indices().to_vec(),
         is_index_on: None,

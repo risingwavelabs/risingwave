@@ -46,7 +46,11 @@ pub fn make_state_table<S: StateStore>(hummock: S, table: &TableCatalog) -> Stat
             .iter()
             .map(|x| x.column_desc.clone())
             .collect(),
-        table.order_desc().iter().map(|x| x.order).collect(),
+        table
+            .order_keys()
+            .iter()
+            .map(|x| x.direct.to_order())
+            .collect(),
         Some(table.pks.clone()),
         table.distribution_keys().to_vec(),
     )
