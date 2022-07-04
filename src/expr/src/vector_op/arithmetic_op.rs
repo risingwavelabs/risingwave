@@ -251,9 +251,7 @@ pub fn time_interval_sub<T1, T2, T3>(
     l: NaiveTimeWrapper,
     r: IntervalUnit,
 ) -> Result<NaiveTimeWrapper> {
-    let time = l.0;
-    let new_time = time - Duration::milliseconds(r.get_ms());
-    Ok(NaiveTimeWrapper::new(new_time))
+    time_interval_add::<T1, T2, T3>(l, r.negative())
 }
 
 #[inline(always)]
