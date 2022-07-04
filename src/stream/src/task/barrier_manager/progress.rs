@@ -26,13 +26,22 @@ pub(super) enum ChainState {
 }
 
 impl LocalBarrierManager {
-    fn update_create_mview_progress(&mut self, actor: ActorId, state: ChainState) {
+    fn update_create_mview_progress(
+        &mut self,
+        current_epoch: u64,
+        actor: ActorId,
+        state: ChainState,
+    ) {
         match &mut self.state {
             #[cfg(test)]
             BarrierState::Local => {}
 
             BarrierState::Managed(managed_state) => {
-                managed_state.create_mview_progress.insert(actor, state);
+                managed_state
+                    .create_mview_progress
+                    .entry(current_epoch)
+                    .or_default()
+                    .insert(actor, state);
             }
         }
     }
@@ -69,16 +78,19 @@ impl CreateMviewProgress {
         self.chain_actor_id
     }
 
-    fn update_inner(&mut self, state: ChainState) {
+    fn update_inner(&mut self, current_epoch: u64, state: ChainState) {
         self.state = Some(state);
-        self.barrier_manager
-            .lock()
-            .update_create_mview_progress(self.chain_actor_id, state);
+        self.barrier_manager.lock().update_create_mview_progress(
+            current_epoch,
+            self.chain_actor_id,
+            state,
+        );
     }
 
     /// Update the progress to `ConsumingUpstream(consumed_epoch)`. The epoch must be monotonically
     /// increasing.
-    pub fn update(&mut self, consumed_epoch: ConsumedEpoch) {
+    /// `current_epoch` should be provided to locate the barrier under concurrent checkpoint.
+    pub fn update(&mut self, current_epoch: u64, consumed_epoch: ConsumedEpoch) {
         match self.state {
             Some(ChainState::ConsumingUpstream(last)) => {
                 assert!(last < consumed_epoch);
@@ -86,15 +98,16 @@ impl CreateMviewProgress {
             Some(ChainState::Done) => unreachable!(),
             None => {}
         }
-        self.update_inner(ChainState::ConsumingUpstream(consumed_epoch));
+        self.update_inner(current_epoch, ChainState::ConsumingUpstream(consumed_epoch));
     }
 
     /// Finish the progress. If the progress is already finished, then perform no-op.
-    pub fn finish(&mut self) {
+    /// `current_epoch` should be provided to locate the barrier under concurrent checkpoint.
+    pub fn finish(&mut self, current_epoch: u64) {
         if let Some(ChainState::Done) = self.state {
             return;
         }
-        self.update_inner(ChainState::Done);
+        self.update_inner(current_epoch, ChainState::Done);
     }
 }
 
