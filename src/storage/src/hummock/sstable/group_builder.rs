@@ -17,7 +17,7 @@ use std::future::Future;
 use std::sync::Arc;
 
 use itertools::Itertools;
-use risingwave_hummock_sdk::compaction_group::Prefix;
+use risingwave_hummock_sdk::compaction_group::StateTableId;
 use risingwave_hummock_sdk::key::{get_table_id, FullKey};
 use risingwave_hummock_sdk::CompactionGroupId;
 
@@ -51,21 +51,21 @@ impl KeyValueGrouping for KeyValueGroupingImpl {
 /// Groups key value by compaction group
 #[derive(Clone)]
 pub struct CompactionGroupGrouping {
-    prefixes: HashMap<Prefix, CompactionGroupId>,
+    mapping: HashMap<StateTableId, CompactionGroupId>,
 }
 
 impl CompactionGroupGrouping {
-    pub fn new(prefixes: HashMap<Prefix, CompactionGroupId>) -> Self {
-        Self { prefixes }
+    pub fn new(mapping: HashMap<StateTableId, CompactionGroupId>) -> Self {
+        Self { mapping }
     }
 }
 
 impl KeyValueGrouping for CompactionGroupGrouping {
     fn group(&self, full_key: &FullKey<&[u8]>, _value: &HummockValue<&[u8]>) -> KeyValueGroupId {
-        let prefix = get_table_id(full_key.inner()).unwrap();
+        let table_id = get_table_id(full_key.inner()).unwrap();
         let group_key = self
-            .prefixes
-            .get(&prefix.into())
+            .mapping
+            .get(&table_id)
             .cloned()
             .unwrap_or(CompactionGroupId::MAX);
         group_key
@@ -183,7 +183,6 @@ mod tests {
     use std::sync::atomic::AtomicU64;
     use std::sync::atomic::Ordering::SeqCst;
 
-    use bytes::Buf;
     use risingwave_common::types::VirtualNode;
 
     use super::*;
@@ -209,10 +208,10 @@ mod tests {
                 },
             ))
         };
-        let prefix = b"\x01\x02\x03\x04".as_slice().get_u32();
+        let table_id = 1u32;
         // one compaction group defined
         let grouping = KeyValueGroupingImpl::CompactionGroup(CompactionGroupGrouping::new(
-            HashMap::from([(prefix.into(), 1 as CompactionGroupId)]),
+            HashMap::from([(table_id, 1 as CompactionGroupId)]),
         ));
         let mut builder = GroupedSstableBuilder::new(
             get_id_and_builder,
@@ -238,7 +237,9 @@ mod tests {
             builder
                 .add_full_key(
                     FullKey::from_user_key(
-                        [b"\x74", prefix.to_be_bytes().as_slice()].concat().to_vec(),
+                        [b"\x74", table_id.to_be_bytes().as_slice()]
+                            .concat()
+                            .to_vec(),
                         (table_capacity - i) as u64,
                     )
                     .as_slice(),

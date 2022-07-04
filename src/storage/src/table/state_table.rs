@@ -20,19 +20,19 @@ use std::ops::{Index, RangeBounds};
 use futures::{pin_mut, Stream, StreamExt};
 use futures_async_stream::try_stream;
 use risingwave_common::array::Row;
-use risingwave_common::catalog::ColumnDesc;
+use risingwave_common::catalog::{ColumnDesc, TableId};
 use risingwave_common::util::ordered::{serialize_pk, OrderedRowSerializer};
 use risingwave_common::util::sort_util::OrderType;
 use risingwave_hummock_sdk::key::range_of_prefix;
 
-use super::cell_based_table::{CellBasedTableBase, READ_WRITE};
 use super::mem_table::{MemTable, RowOp};
+use super::storage_table::{StorageTableBase, READ_WRITE};
 use super::Distribution;
-use crate::cell_based_row_serializer::CellBasedRowSerializer;
-use crate::dedup_pk_cell_based_row_serializer::DedupPkCellBasedRowSerializer;
+use crate::encoding::cell_based_row_serializer::CellBasedRowSerializer;
+use crate::encoding::dedup_pk_cell_based_row_serializer::DedupPkCellBasedRowSerializer;
+use crate::encoding::Encoding;
 use crate::error::{StorageError, StorageResult};
-use crate::row_serializer::RowSerializer;
-use crate::{Keyspace, StateStore};
+use crate::StateStore;
 
 /// Identical to `StateTable`. Used when we want to
 /// rows to have dedup pk cell encoding.
@@ -44,26 +44,39 @@ pub type StateTable<S> = StateTableBase<S, CellBasedRowSerializer>;
 /// `StateTableBase` is the interface accessing relational data in KV(`StateStore`) with
 /// encoding, using `RowSerializer` for row to cell serializing.
 #[derive(Clone)]
-pub struct StateTableBase<S: StateStore, SER: RowSerializer> {
+pub struct StateTableBase<S: StateStore, E: Encoding> {
     /// buffer key/values
     mem_table: MemTable,
 
     /// Relation layer
-    cell_based_table: CellBasedTableBase<S, SER, READ_WRITE>,
+    cell_based_table: StorageTableBase<S, E, READ_WRITE>,
 }
 
-impl<S: StateStore, SER: RowSerializer> StateTableBase<S, SER> {
+impl<S: StateStore, E: Encoding> StateTableBase<S, E> {
     /// Note: `dist_key_indices` is ignored, use `new_with[out]_distribution` instead.
     // TODO: remove this after all state table usages are replaced by `new_with[out]_distribution`.
     pub fn new(
-        keyspace: Keyspace<S>,
+        store: S,
+        table_id: TableId,
         columns: Vec<ColumnDesc>,
         order_types: Vec<OrderType>,
         _dist_key_indices: Option<Vec<usize>>,
         pk_indices: Vec<usize>,
     ) -> Self {
+        Self::new_without_distribution(store, table_id, columns, order_types, pk_indices)
+    }
+
+    /// Create a state table without distribution, used for singleton executors and tests.
+    pub fn new_without_distribution(
+        store: S,
+        table_id: TableId,
+        columns: Vec<ColumnDesc>,
+        order_types: Vec<OrderType>,
+        pk_indices: Vec<usize>,
+    ) -> Self {
         Self::new_with_distribution(
-            keyspace,
+            store,
+            table_id,
             columns,
             order_types,
             pk_indices,
@@ -74,7 +87,8 @@ impl<S: StateStore, SER: RowSerializer> StateTableBase<S, SER> {
     /// Create a state table with distribution specified with `distribution`. Should use
     /// `Distribution::fallback()` for singleton executors and tests.
     pub fn new_with_distribution(
-        keyspace: Keyspace<S>,
+        store: S,
+        table_id: TableId,
         columns: Vec<ColumnDesc>,
         order_types: Vec<OrderType>,
         pk_indices: Vec<usize>,
@@ -82,8 +96,9 @@ impl<S: StateStore, SER: RowSerializer> StateTableBase<S, SER> {
     ) -> Self {
         Self {
             mem_table: MemTable::new(),
-            cell_based_table: CellBasedTableBase::new(
-                keyspace,
+            cell_based_table: StorageTableBase::new(
+                store,
+                table_id,
                 columns,
                 order_types,
                 pk_indices,
@@ -92,8 +107,8 @@ impl<S: StateStore, SER: RowSerializer> StateTableBase<S, SER> {
         }
     }
 
-    /// Get the underlying [`CellBasedTableBase`]. Should only be used for tests.
-    pub fn cell_based_table(&self) -> &CellBasedTableBase<S, SER, READ_WRITE> {
+    /// Get the underlying [` StorageTableBase`]. Should only be used for tests.
+    pub fn cell_based_table(&self) -> &StorageTableBase<S, E, READ_WRITE> {
         &self.cell_based_table
     }
 
