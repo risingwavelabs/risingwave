@@ -32,3 +32,7 @@ impl CacheKey for TestCacheKey {
         Self(buf.get_u64())
     }
 }
+
+pub fn key(v: u64) -> TestCacheKey {
+    TestCacheKey(v)
+}

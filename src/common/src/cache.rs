@@ -305,6 +305,19 @@ impl<K: LruKey, T: LruValue> LruHandleTable<K, T> {
         assert_eq!(count, self.elems);
         self.list = new_list;
     }
+
+    unsafe fn fill_with<F>(&self, f: &mut F)
+    where
+        F: FnMut(&K, &T),
+    {
+        for idx in 0..self.list.len() {
+            let mut ptr = self.list[idx];
+            while !ptr.is_null() {
+                f((*ptr).get_key(), (*ptr).get_value());
+                ptr = (*ptr).next_hash;
+            }
+        }
+    }
 }
 
 type RequestQueue<K, T> = Vec<Sender<CachableEntry<K, T>>>;
@@ -543,6 +556,13 @@ impl<K: LruKey, T: LruValue> LruCacheShard<K, T> {
             self.erase((*handle).hash, (*handle).get_key());
         }
     }
+
+    fn fill_with<F>(&self, f: &mut F)
+    where
+        F: FnMut(&K, &T),
+    {
+        unsafe { self.table.fill_with(f) };
+    }
 }
 
 impl<K: LruKey, T: LruValue> Drop for LruCacheShard<K, T> {
@@ -713,6 +733,23 @@ impl<K: LruKey, T: LruValue> LruCache<K, T> {
 
     fn shard(&self, hash: u64) -> usize {
         hash as usize % self.shards.len()
+    }
+
+    /// # Safety
+    ///
+    /// This method is used for read-only [`LruCache`]. It locks one shard per loop to prevent the
+    /// filling progress from blocking reads among all shards.
+    ///
+    /// If there is another thread inserting entries at the same time, there will be data
+    /// inconsistency.
+    pub fn fill_with<F>(&self, mut f: F)
+    where
+        F: FnMut(&K, &T),
+    {
+        for shard in &self.shards {
+            let shard = shard.lock();
+            shard.fill_with(&mut f);
+        }
     }
 
     /// # Safety

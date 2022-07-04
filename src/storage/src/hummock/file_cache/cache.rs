@@ -17,6 +17,7 @@ use std::hash::Hasher;
 use std::sync::Arc;
 use std::u8;
 
+use itertools::Itertools;
 use parking_lot::RwLock;
 use risingwave_common::cache::LruCache;
 use tokio::sync::Notify;
@@ -53,8 +54,8 @@ where
 {
     buffer_capacity: usize,
     buffer: Arc<RwLock<Buffer<K>>>,
-    _store: StoreRef<K>,
-    _indices: Arc<LruCache<K, SlotId>>,
+    store: StoreRef<K>,
+    indices: Arc<LruCache<K, SlotId>>,
     notifier: Arc<Notify>,
 }
 
@@ -66,10 +67,18 @@ where
         loop {
             self.notifier.notified().await;
 
-            let _frozen = self.buffer.read().frozen_buffer.clone();
+            let frozen = self.buffer.read().frozen_buffer.clone();
 
-            // TODO: Drain `buf`, inseret store, update `indices`.
-            // let slots = self.store.insert(batch).await?;
+            let mut batch = Vec::new();
+            // TODO(MrCroxx): Avoid clone here?
+            frozen.fill_with(|key, value| batch.push((key.clone(), value.clone())));
+            let slots = self.store.insert(&batch).await?;
+            for ((key, value), slot) in batch.into_iter().zip_eq(slots.into_iter()) {
+                let mut hasher = DefaultHasher::new();
+                key.hash(&mut hasher);
+                let hash = hasher.finish();
+                self.indices.insert(key, hash, value.len(), slot);
+            }
 
             // rotate buffer
             let mut buf = Arc::new(LruCache::new(BUFFER_LRU_SHARD_BITS, self.buffer_capacity));
@@ -92,8 +101,6 @@ where
 
     store: StoreRef<K>,
 
-    _block_size: usize,
-
     buffer: Arc<RwLock<Buffer<K>>>,
     buffer_flusher_notifier: Arc<Notify>,
 }
@@ -112,7 +119,6 @@ where
             cache_file_fallocate_unit: options.cache_file_fallocate_unit,
         })
         .await?;
-        let block_size = store.block_size();
         let store = Arc::new(store);
 
         // TODO: Restore indices.
@@ -133,8 +139,8 @@ where
         let buffer_flusher = BufferFlusher {
             buffer_capacity,
             buffer: buffer.clone(),
-            _store: store.clone(),
-            _indices: indices.clone(),
+            store: store.clone(),
+            indices: indices.clone(),
             notifier: buffer_flusher_notifier.clone(),
         };
         // TODO(MrCroxx): Graceful shutdown.
@@ -150,7 +156,6 @@ where
             indices,
 
             store,
-            _block_size: block_size,
 
             buffer,
             buffer_flusher_notifier,
@@ -197,15 +202,30 @@ where
         Ok(None)
     }
 
-    pub fn earse(&self, _key: &K) -> Result<()> {
-        todo!()
+    pub fn earse(&self, key: &K) -> Result<()> {
+        let mut hasher = DefaultHasher::new();
+        key.hash(&mut hasher);
+        let hash = hasher.finish();
+
+        let buffer = self.buffer.read();
+        buffer.active_buffer.erase(hash, key);
+        buffer.frozen_buffer.erase(hash, key);
+        drop(buffer);
+        // No need to manually remove data from store. `LruCacheEventListener` on `indices` will
+        // free the slot.
+        self.indices.erase(hash, key);
+
+        Ok(())
     }
 }
 
 #[cfg(test)]
 mod tests {
 
-    use super::super::test_utils::TestCacheKey;
+    use std::path::Path;
+    use std::time::Duration;
+
+    use super::super::test_utils::{key, TestCacheKey};
     use super::*;
 
     fn is_send_sync_clone<T: Send + Sync + Clone + 'static>() {}
@@ -215,26 +235,40 @@ mod tests {
         is_send_sync_clone::<FileCache<TestCacheKey>>();
     }
 
-    #[tokio::test]
-    async fn test_file_cache_manager() {
+    fn tempdir() -> tempfile::TempDir {
         let ci: bool = std::env::var("RISINGWAVE_CI")
             .unwrap_or_else(|_| "false".to_string())
             .parse()
             .expect("env $RISINGWAVE_CI must be 'true' or 'false'");
 
-        let tempdir = if ci {
+        if ci {
             tempfile::Builder::new().tempdir_in("/risingwave").unwrap()
         } else {
             tempfile::tempdir().unwrap()
-        };
+        }
+    }
 
+    async fn create_file_cache_manager_for_test(dir: impl AsRef<Path>) -> FileCache<TestCacheKey> {
         let options = FileCacheOptions {
-            dir: tempdir.path().to_str().unwrap().to_string(),
+            dir: dir.as_ref().to_str().unwrap().to_string(),
             capacity: 256 * 1024 * 1024,
             total_buffer_capacity: 128 * 1024,
             cache_file_fallocate_unit: 64 * 1024 * 1024,
             filters: vec![],
         };
-        let _cache: FileCache<TestCacheKey> = FileCache::open(options).await.unwrap();
+        FileCache::open(options).await.unwrap()
+    }
+
+    #[tokio::test]
+    async fn test_file_cache_manager() {
+        let dir = tempdir();
+        let cache = create_file_cache_manager_for_test(dir.path()).await;
+
+        cache.insert(key(1), vec![b'1'; 1234]).unwrap();
+        tokio::time::sleep(Duration::from_secs(1)).await;
+        assert_eq!(cache.get(&key(1)).await.unwrap(), Some(vec![b'1'; 1234]));
+
+        cache.earse(&key(1)).unwrap();
+        assert_eq!(cache.get(&key(1)).await.unwrap(), None);
     }
 }
