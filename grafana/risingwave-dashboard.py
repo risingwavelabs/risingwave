@@ -395,7 +395,7 @@ def section_streaming_actors(outer_panels):
                     "actor_sampled_deserialize_duration_ns", "{{actor_id}}"
                 ),
             ]),
-            panels.timeseries_ns("Actor Sampled serialization Time", [
+            panels.timeseries_ns("Actor Sampled Serialization Time", [
                 panels.target(
                     "actor_sampled_serialize_duration_ns", "{{actor_id}}"
                 ),
