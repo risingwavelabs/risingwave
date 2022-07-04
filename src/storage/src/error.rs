@@ -27,7 +27,7 @@ pub enum StorageError {
         HummockError,
     ),
 
-    #[error("Storage-based table error: {0}")]
+    #[error("Storage table error: {0}")]
     StorageTable(
         #[backtrace]
         #[source]

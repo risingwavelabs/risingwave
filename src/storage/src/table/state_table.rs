@@ -30,7 +30,7 @@ use super::storage_table::{StorageTableBase, READ_WRITE};
 use super::Distribution;
 use crate::encoding::cell_based_row_serializer::CellBasedRowSerializer;
 use crate::encoding::dedup_pk_cell_based_row_serializer::DedupPkCellBasedRowSerializer;
-use crate::encoding::row_serializer::RowEncoding;
+use crate::encoding::Encoding;
 use crate::error::{StorageError, StorageResult};
 use crate::StateStore;
 
@@ -44,7 +44,7 @@ pub type StateTable<S> = StateTableBase<S, CellBasedRowSerializer>;
 /// `StateTableBase` is the interface accessing relational data in KV(`StateStore`) with
 /// encoding, using `RowSerializer` for row to cell serializing.
 #[derive(Clone)]
-pub struct StateTableBase<S: StateStore, SER: RowEncoding> {
+pub struct StateTableBase<S: StateStore, SER: Encoding> {
     /// buffer key/values
     mem_table: MemTable,
 
@@ -52,7 +52,7 @@ pub struct StateTableBase<S: StateStore, SER: RowEncoding> {
     cell_based_table: StorageTableBase<S, SER, READ_WRITE>,
 }
 
-impl<S: StateStore, SER: RowEncoding> StateTableBase<S, SER> {
+impl<S: StateStore, SER: Encoding> StateTableBase<S, SER> {
     /// Note: `dist_key_indices` is ignored, use `new_with[out]_distribution` instead.
     // TODO: remove this after all state table usages are replaced by `new_with[out]_distribution`.
     pub fn new(

@@ -18,9 +18,8 @@ use risingwave_common::catalog::{ColumnDesc, ColumnId};
 use risingwave_common::error::Result;
 use risingwave_common::types::VirtualNode;
 use risingwave_common::util::ordered::serialize_pk_and_row;
-use row_serializer::{KeyBytes, RowEncoding, ValueBytes};
 
-use super::row_serializer;
+use crate::encoding::{Encoding, KeyBytes, ValueBytes};
 
 #[derive(Clone)]
 pub struct CellBasedRowSerializer {
@@ -33,7 +32,7 @@ impl CellBasedRowSerializer {
     }
 }
 
-impl RowEncoding for CellBasedRowSerializer {
+impl Encoding for CellBasedRowSerializer {
     fn create_cell_based_serializer(
         _pk_indices: &[usize],
         _column_descs: &[ColumnDesc],

@@ -23,7 +23,7 @@ use risingwave_common::util::ordered::{serialize_pk, OrderedRowSerializer};
 use risingwave_common::util::sort_util::OrderType;
 
 use crate::encoding::cell_based_row_serializer::CellBasedRowSerializer;
-use crate::encoding::row_serializer::RowEncoding;
+use crate::encoding::Encoding;
 use crate::error::StorageResult;
 use crate::memory::MemoryStateStore;
 use crate::storage_value::{StorageValue, ValueMeta};
