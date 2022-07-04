@@ -184,19 +184,34 @@ impl IntervalUnit {
     }
 
     /// Divides [`IntervalUnit`] by an integer/float with zero check.
-    pub fn div_float<I>(&self, rhs: I) -> Option<Self>
+    pub fn try_div_float<I>(&self, rhs: I) -> Option<Self>
     where
         I: TryInto<OrderedF64>,
     {
         let rhs = rhs.try_into().ok()?;
         let rhs = rhs.0;
+        self.div_float(rhs)
+    }
 
+    pub fn try_float_mul<I>(&self, rhs: I) -> Option<Self>
+    where
+        I: TryInto<OrderedF64>,
+    {
+        let rhs = rhs.try_into().ok()?;
+        let rhs = rhs.0;
+        self.div_float(1.0 / rhs)
+    }
+
+    pub fn div_float(&self, rhs: f64) -> Option<Self> {
         if rhs == 0.0 {
             return None;
         }
 
         let months = (self.months as f64) / rhs;
-        let days = (self.days as f64) / rhs + (months % 1.0) * 30.0;
+        let mut days = (self.days as f64) / rhs + (months % 1.0) * 30.0;
+        if (days - days.round()).abs() <= 0.0000001 {
+            days = days.round()
+        };
         let ms = ((self.ms as f64) / rhs + (days % 1.0) * 24.0 * 60.0 * 60.0 * 1000.0).round();
 
         Some(IntervalUnit {
@@ -430,13 +445,13 @@ mod tests {
             let lhs = IntervalUnit::new(lhs.0 as i32, lhs.1 as i32, lhs.2 as i64);
             let expected = expected.map(|x| IntervalUnit::new(x.0 as i32, x.1 as i32, x.2 as i64));
 
-            let actual = lhs.div_float(rhs as i16);
+            let actual = lhs.try_div_float(rhs as i16);
             assert_eq!(actual, expected);
 
-            let actual = lhs.div_float(rhs as i32);
+            let actual = lhs.try_div_float(rhs as i32);
             assert_eq!(actual, expected);
 
-            let actual = lhs.div_float(rhs as i64);
+            let actual = lhs.try_div_float(rhs as i64);
             assert_eq!(actual, expected);
         }
 
@@ -444,10 +459,10 @@ mod tests {
             let lhs = IntervalUnit::new(lhs.0 as i32, lhs.1 as i32, lhs.2 as i64);
             let expected = expected.map(|x| IntervalUnit::new(x.0 as i32, x.1 as i32, x.2 as i64));
 
-            let actual = lhs.div_float(OrderedFloat::<f32>(rhs));
+            let actual = lhs.try_div_float(OrderedFloat::<f32>(rhs));
             assert_eq!(actual, expected);
 
-            let actual = lhs.div_float(OrderedFloat::<f64>(rhs as f64));
+            let actual = lhs.try_div_float(OrderedFloat::<f64>(rhs as f64));
             assert_eq!(actual, expected);
         }
     }

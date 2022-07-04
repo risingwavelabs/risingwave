@@ -271,7 +271,23 @@ pub fn interval_float_div<T1, T2, T3>(l: IntervalUnit, r: T2) -> Result<Interval
 where
     T2: TryInto<OrderedF64> + Debug,
 {
-    l.div_float(r).ok_or(ExprError::NumericOutOfRange)
+    l.try_div_float(r).ok_or(ExprError::NumericOutOfRange)
+}
+
+#[inline(always)]
+pub fn interval_float_mul<T1, T2, T3>(l: IntervalUnit, r: T2) -> Result<IntervalUnit>
+where
+    T2: TryInto<OrderedF64> + Debug,
+{
+    l.try_float_mul(r).ok_or(ExprError::NumericOutOfRange)
+}
+
+#[inline(always)]
+pub fn float_interval_mul<T1, T2, T3>(l: T1, r: IntervalUnit) -> Result<IntervalUnit>
+where
+    T1: TryInto<OrderedF64> + Debug,
+{
+    r.try_float_mul(l).ok_or(ExprError::NumericOutOfRange)
 }
 
 #[cfg(test)]

@@ -400,6 +400,10 @@ pub fn new_binary_expr(
                     { int16, interval, interval, int_interval_mul },
                     { int32, interval, interval, int_interval_mul },
                     { int64, interval, interval, int_interval_mul },
+                    { interval, float32, interval, interval_float_mul },
+                    { interval, float64, interval, interval_float_mul },
+                    { float64, interval, interval, float_interval_mul },
+                    { float32, interval, interval, float_interval_mul },
                 },
             }
         }

@@ -123,3 +123,47 @@ select TIME '18:20:49' +  interval '1 hour';
 ----
 19:20:49
 
+query T
+select interval '849884' * real '86';
+----
+20302:47:04
+
+query T
+select interval '20987' * real '12.5';
+----
+72:52:17.5
+
+query T
+select interval '12 days' * real '4.5';
+----
+54 days
+
+query T
+SELECT interval '1 month' * real '4.5';
+----
+4 mons 15 days 00:00:00
+
+query T
+SELECT interval '1 year' * real '4.5';
+----
+4 years 6 mons 00:00:00
+
+query T
+select real '86' * interval '849884';
+----
+20302:47:04
+
+query T
+select real '12.5' * interval '20987';
+----
+72:52:17.5
+
+query T
+select real '4.5' * interval '12 days';
+----
+54 days
+
+query T
+SELECT real '4.5' * interval '1 month';
+----
+4 mons 15 days 00:00:00
