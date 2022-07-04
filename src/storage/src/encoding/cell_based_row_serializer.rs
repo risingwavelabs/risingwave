@@ -18,8 +18,9 @@ use risingwave_common::catalog::{ColumnDesc, ColumnId};
 use risingwave_common::error::Result;
 use risingwave_common::types::VirtualNode;
 use risingwave_common::util::ordered::serialize_pk_and_row;
+use row_serializer::{KeyBytes, RowEncoding, ValueBytes};
 
-use crate::row_serializer::{KeyBytes, RowSerializer, ValueBytes};
+use super::row_serializer;
 
 #[derive(Clone)]
 pub struct CellBasedRowSerializer {
@@ -32,8 +33,8 @@ impl CellBasedRowSerializer {
     }
 }
 
-impl RowSerializer for CellBasedRowSerializer {
-    fn create(
+impl RowEncoding for CellBasedRowSerializer {
+    fn create_cell_based_serializer(
         _pk_indices: &[usize],
         _column_descs: &[ColumnDesc],
         column_ids: &[ColumnId],
@@ -45,7 +46,7 @@ impl RowSerializer for CellBasedRowSerializer {
 
     /// Serialize key and value. The `row` must be in the same order with the column ids in this
     /// serializer.
-    fn serialize(
+    fn cell_based_serialize(
         &mut self,
         vnode: VirtualNode,
         pk: &[u8],
@@ -63,7 +64,7 @@ impl RowSerializer for CellBasedRowSerializer {
     /// Serialize key and value. Each column id will occupy a position in Vec. For `column_ids` that
     /// doesn't correspond to a cell, the position will be None. Aparts from user-specified
     /// `column_ids`, there will also be a `SENTINEL_CELL_ID` at the end.
-    fn serialize_without_filter(
+    fn cell_based_serialize_without_filter(
         &mut self,
         vnode: VirtualNode,
         pk: &[u8],

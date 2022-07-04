@@ -25,13 +25,13 @@ use risingwave_common::util::ordered::{serialize_pk, OrderedRowSerializer};
 use risingwave_common::util::sort_util::OrderType;
 use risingwave_hummock_sdk::key::range_of_prefix;
 
-use super::cell_based_table::{CellBasedTableBase, READ_WRITE};
 use super::mem_table::{MemTable, RowOp};
+use super::storage_table::{StorageTableBase, READ_WRITE};
 use super::Distribution;
-use crate::cell_based_row_serializer::CellBasedRowSerializer;
-use crate::dedup_pk_cell_based_row_serializer::DedupPkCellBasedRowSerializer;
+use crate::encoding::cell_based_row_serializer::CellBasedRowSerializer;
+use crate::encoding::dedup_pk_cell_based_row_serializer::DedupPkCellBasedRowSerializer;
+use crate::encoding::row_serializer::RowEncoding;
 use crate::error::{StorageError, StorageResult};
-use crate::row_serializer::RowSerializer;
 use crate::StateStore;
 
 /// Identical to `StateTable`. Used when we want to
@@ -44,15 +44,15 @@ pub type StateTable<S> = StateTableBase<S, CellBasedRowSerializer>;
 /// `StateTableBase` is the interface accessing relational data in KV(`StateStore`) with
 /// encoding, using `RowSerializer` for row to cell serializing.
 #[derive(Clone)]
-pub struct StateTableBase<S: StateStore, SER: RowSerializer> {
+pub struct StateTableBase<S: StateStore, SER: RowEncoding> {
     /// buffer key/values
     mem_table: MemTable,
 
     /// Relation layer
-    cell_based_table: CellBasedTableBase<S, SER, READ_WRITE>,
+    cell_based_table: StorageTableBase<S, SER, READ_WRITE>,
 }
 
-impl<S: StateStore, SER: RowSerializer> StateTableBase<S, SER> {
+impl<S: StateStore, SER: RowEncoding> StateTableBase<S, SER> {
     /// Note: `dist_key_indices` is ignored, use `new_with[out]_distribution` instead.
     // TODO: remove this after all state table usages are replaced by `new_with[out]_distribution`.
     pub fn new(
@@ -96,7 +96,7 @@ impl<S: StateStore, SER: RowSerializer> StateTableBase<S, SER> {
     ) -> Self {
         Self {
             mem_table: MemTable::new(),
-            cell_based_table: CellBasedTableBase::new(
+            cell_based_table: StorageTableBase::new(
                 store,
                 table_id,
                 columns,
@@ -107,8 +107,8 @@ impl<S: StateStore, SER: RowSerializer> StateTableBase<S, SER> {
         }
     }
 
-    /// Get the underlying [`CellBasedTableBase`]. Should only be used for tests.
-    pub fn cell_based_table(&self) -> &CellBasedTableBase<S, SER, READ_WRITE> {
+    /// Get the underlying [` StorageTableBase`]. Should only be used for tests.
+    pub fn cell_based_table(&self) -> &StorageTableBase<S, SER, READ_WRITE> {
         &self.cell_based_table
     }
 

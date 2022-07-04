@@ -20,8 +20,8 @@ use risingwave_common::catalog::{ColumnDesc, ColumnId};
 use risingwave_common::error::Result;
 use risingwave_common::types::VirtualNode;
 
-use crate::cell_based_row_serializer::CellBasedRowSerializer;
-use crate::row_serializer::{KeyBytes, RowSerializer, ValueBytes};
+use super::cell_based_row_serializer::CellBasedRowSerializer;
+use super::row_serializer::{KeyBytes, RowEncoding, ValueBytes};
 
 /// [`DedupPkCellBasedRowSerializer`] is identical to [`CellBasedRowSerializer`].
 /// Difference is that before serializing a row, pk datums are filtered out.
@@ -85,31 +85,36 @@ impl DedupPkCellBasedRowSerializer {
     }
 }
 
-impl RowSerializer for DedupPkCellBasedRowSerializer {
-    fn create(pk_indices: &[usize], column_descs: &[ColumnDesc], column_ids: &[ColumnId]) -> Self {
+impl RowEncoding for DedupPkCellBasedRowSerializer {
+    fn create_cell_based_serializer(
+        pk_indices: &[usize],
+        column_descs: &[ColumnDesc],
+        column_ids: &[ColumnId],
+    ) -> Self {
         Self::new(pk_indices, column_descs, column_ids)
     }
 
     /// Remove dup pk datums + serialize
-    fn serialize(
+    fn cell_based_serialize(
         &mut self,
         vnode: VirtualNode,
         pk: &[u8],
         row: Row,
     ) -> Result<Vec<(KeyBytes, ValueBytes)>> {
         let row = self.remove_dup_pk_datums(row);
-        self.inner.serialize(vnode, pk, row)
+        self.inner.cell_based_serialize(vnode, pk, row)
     }
 
     /// Remove dup pk datums + `serialize_without_filter`
-    fn serialize_without_filter(
+    fn cell_based_serialize_without_filter(
         &mut self,
         vnode: VirtualNode,
         pk: &[u8],
         row: Row,
     ) -> Result<Vec<Option<(KeyBytes, ValueBytes)>>> {
         let row = self.remove_dup_pk_datums(row);
-        self.inner.serialize_without_filter(vnode, pk, row)
+        self.inner
+            .cell_based_serialize_without_filter(vnode, pk, row)
     }
 
     /// Get column ids used by cell serializer to serialize.
@@ -127,8 +132,8 @@ mod tests {
     use risingwave_common::types::DataType;
 
     use super::*;
-    use crate::cell_based_row_deserializer::make_cell_based_row_deserializer;
-    use crate::table::cell_based_table::DEFAULT_VNODE;
+    use crate::encoding::cell_based_row_deserializer::make_cell_based_row_deserializer;
+    use crate::table::storage_table::DEFAULT_VNODE;
 
     #[test]
     fn test_dedup_pk_serialization() {
@@ -151,7 +156,9 @@ mod tests {
             Some(111_i32.into()),
             Some(1111_f64.into()),
         ]);
-        let actual = serializer.serialize(DEFAULT_VNODE, &pk, input).unwrap();
+        let actual = serializer
+            .cell_based_serialize(DEFAULT_VNODE, &pk, input)
+            .unwrap();
         // datums not in pk (2)
         // + datums whose memcmp not equal to value enc (1)
         // + delimiter cell (1)
@@ -215,7 +222,9 @@ mod tests {
             Some(11_i32.into()),
             Some(111_i32.into()),
         ]);
-        let actual = serializer.serialize(DEFAULT_VNODE, &pk, input).unwrap();
+        let actual = serializer
+            .cell_based_serialize(DEFAULT_VNODE, &pk, input)
+            .unwrap();
         // delimiter cell (1)
         assert_eq!(actual.len(), 1);
 
