@@ -17,13 +17,13 @@ use risingwave_common::array::{BytesGuard, BytesWriter};
 use crate::Result;
 
 #[inline(always)]
-fn overlay(s: &str, new_sub_str: &str, start: i32, writer: BytesWriter) -> Result<BytesGuard> {
+pub fn overlay(s: &str, new_sub_str: &str, start: i32, writer: BytesWriter) -> Result<BytesGuard> {
     // If count is omitted, it defaults to the length of new_sub_str.
     overlay_for(s, new_sub_str, start, new_sub_str.len() as i32, writer)
 }
 
 #[inline(always)]
-fn overlay_for(
+pub fn overlay_for(
     s: &str,
     new_sub_str: &str,
     start: i32,
