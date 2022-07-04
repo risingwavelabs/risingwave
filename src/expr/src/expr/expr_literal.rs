@@ -54,11 +54,11 @@ impl Expression for LiteralExpression {
     }
 
     fn eval(&self, input: &DataChunk) -> Result<ArrayRef> {
-        let mut array_builder = self.return_type.create_array_builder(input.cardinality())?;
-        let cardinality = input.cardinality();
+        let mut array_builder = self.return_type.create_array_builder(input.capacity());
+        let capacity = input.capacity();
         let builder = &mut array_builder;
         let literal = &self.literal;
-        for_all_variants! {array_impl_literal_append, builder, literal, cardinality}
+        for_all_variants! {array_impl_literal_append, builder, literal, capacity}
         array_builder.finish().map(Arc::new).map_err(Into::into)
     }
 

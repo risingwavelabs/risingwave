@@ -27,6 +27,7 @@ use risingwave_pb::stream_service::stream_service_server::StreamServiceServer;
 use risingwave_pb::task_service::exchange_service_server::ExchangeServiceServer;
 use risingwave_pb::task_service::task_service_server::TaskServiceServer;
 use risingwave_rpc_client::MetaClient;
+use risingwave_source::monitor::SourceMetrics;
 use risingwave_source::MemSourceManager;
 use risingwave_storage::hummock::compaction_executor::CompactionExecutor;
 use risingwave_storage::hummock::compactor::Compactor;
@@ -86,6 +87,7 @@ pub async fn compute_node_serve(
     )];
     // Initialize the metrics subsystem.
     let registry = prometheus::Registry::new();
+    let source_metrics = Arc::new(SourceMetrics::new(registry.clone()));
     let hummock_metrics = Arc::new(HummockMetrics::new(registry.clone()));
     let streaming_metrics = Arc::new(StreamingMetrics::new(registry.clone()));
     let batch_metrics = Arc::new(BatchMetrics::new(registry.clone()));
@@ -118,13 +120,13 @@ pub async fn compute_node_serve(
             let (handle, shutdown_sender) = Compactor::start_compactor(
                 storage_config,
                 hummock_meta_client,
-                storage.inner().sstable_store(),
+                storage.sstable_store(),
                 state_store_metrics.clone(),
                 Some(Arc::new(CompactionExecutor::new(Some(1)))),
             );
             sub_tasks.push((handle, shutdown_sender));
         }
-        monitor_cache(storage.inner().sstable_store(), &registry).unwrap();
+        monitor_cache(storage.sstable_store(), &registry).unwrap();
     }
 
     // Initialize the managers.
@@ -135,7 +137,7 @@ pub async fn compute_node_serve(
         streaming_metrics.clone(),
         config.streaming.clone(),
     ));
-    let source_mgr = Arc::new(MemSourceManager::new(worker_id));
+    let source_mgr = Arc::new(MemSourceManager::new(worker_id, source_metrics));
 
     // Initialize batch environment.
     let batch_config = Arc::new(config.batch.clone());

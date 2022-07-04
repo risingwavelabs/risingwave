@@ -37,6 +37,8 @@ impl ExecutorBuilder for HashJoinExecutorBuilder {
         // Get table id and used as keyspace prefix.
         let node = try_match_expand!(node.get_node_body().unwrap(), NodeBody::HashJoin)?;
         let is_append_only = node.is_append_only;
+        let vnodes = Arc::new(params.vnode_bitmap.expect("vnodes not set for hash agg"));
+
         let source_l = params.input.remove(0);
         let source_r = params.input.remove(1);
         let table_l = node.get_left_table()?;
@@ -46,7 +48,8 @@ impl ExecutorBuilder for HashJoinExecutorBuilder {
                 .iter()
                 .map(|key| *key as usize)
                 .collect::<Vec<_>>(),
-                table_l.distribution_keys
+            table_l
+                .distribution_keys
                 .iter()
                 .map(|key| *key as usize)
                 .collect::<Vec<_>>(),
@@ -56,7 +59,8 @@ impl ExecutorBuilder for HashJoinExecutorBuilder {
                 .iter()
                 .map(|key| *key as usize)
                 .collect::<Vec<_>>(),
-                table_r.distribution_keys
+            table_r
+                .distribution_keys
                 .iter()
                 .map(|key| *key as usize)
                 .collect::<Vec<_>>(),
@@ -110,8 +114,9 @@ impl ExecutorBuilder for HashJoinExecutorBuilder {
             .collect_vec();
         let kind = calc_hash_key_kind(&keys);
 
-        let state_table_l = StateTable::from_table_catalog(table_l, store.clone());
-        let state_table_r = StateTable::from_table_catalog(table_r, store);
+        let state_table_l =
+            StateTable::from_table_catalog(table_l, store.clone(), Some(vnodes.clone()));
+        let state_table_r = StateTable::from_table_catalog(table_r, store, Some(vnodes));
 
         let args = HashJoinExecutorDispatcherArgs {
             source_l,

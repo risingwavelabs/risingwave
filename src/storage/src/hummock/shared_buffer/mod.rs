@@ -192,6 +192,9 @@ pub enum SharedBufferEvent {
 
     /// An epoch has been synced.
     EpochSynced(HummockEpoch),
+
+    /// Clear shared buffer and reset all states
+    Clear(oneshot::Sender<()>),
 }
 
 impl SharedBuffer {
@@ -501,7 +504,6 @@ impl SharedBuffer {
 mod tests {
     use std::cell::RefCell;
     use std::ops::DerefMut;
-    use std::sync::Arc;
 
     use bytes::Bytes;
     use risingwave_hummock_sdk::compaction_group::StaticCompactionGroupId;
@@ -540,7 +542,7 @@ mod tests {
         let batch = SharedBufferBatch::new(
             shared_buffer_items,
             epoch,
-            Arc::new(mpsc::unbounded_channel().0),
+            mpsc::unbounded_channel().0,
             StaticCompactionGroupId::StateDefault.into(),
         );
         if is_replicate {

@@ -20,7 +20,7 @@ use risingwave_common::hash::{calc_hash_key_kind, HashKey, HashKeyDispatcher};
 use risingwave_storage::table::state_table::StateTable;
 
 use super::*;
-use crate::executor::aggregation::AggCall;
+use crate::executor::aggregation::{generate_state_tables_from_proto, AggCall};
 use crate::executor::{HashAggExecutor, PkIndices};
 
 struct HashAggExecutorDispatcher<S: StateStore>(PhantomData<S>);
@@ -71,21 +71,16 @@ impl ExecutorBuilder for HashAggExecutorBuilder {
             .iter()
             .map(|agg_call| build_agg_call_from_prost(node.is_append_only, agg_call))
             .try_collect()?;
-        // Build vector of keyspace via table ids.
-        // One keyspace for one agg call.
         let input = params.input.remove(0);
         let keys = key_indices
             .iter()
             .map(|idx| input.schema().fields[*idx].data_type())
             .collect_vec();
         let kind = calc_hash_key_kind(&keys);
-        let agg_calls_len = agg_calls.len();
-        // Create internal tables used by hash agg.
-        let mut state_tables = Vec::with_capacity(agg_calls_len);
-        for table_catalog in &node.internal_tables {
-            // Parse info from proto and create state table.
-            state_tables.push(StateTable::from_table_catalog(table_catalog, store.clone()));
-        }
+
+        let vnodes = params.vnode_bitmap.expect("vnodes not set for hash agg");
+        let state_tables =
+            generate_state_tables_from_proto(store, &node.internal_tables, Some(vnodes.into()));
 
         let args = HashAggExecutorDispatcherArgs {
             input,

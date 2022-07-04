@@ -103,6 +103,11 @@ class Panels:
         return TimeSeries(title=title, targets=targets, gridPos=gridPos, unit="row", fillOpacity=10,
                           legendDisplayMode="table", legendPlacement="right", legendCalcs=["max"])
 
+    def timeseries_ns(self, title, targets):
+        gridPos = self.layout.next_half_width_graph()
+        return TimeSeries(title=title, targets=targets, gridPos=gridPos, unit="ns", fillOpacity=10,
+                          legendDisplayMode="table", legendPlacement="right", legendCalcs=["max"])
+
     def timeseries_kilobytes(self, title, targets):
         gridPos = self.layout.next_half_width_graph()
         return TimeSeries(title=title, targets=targets, gridPos=gridPos, unit="deckbytes", fillOpacity=10,
@@ -343,7 +348,7 @@ def section_streaming(panels):
     return [
         panels.row("Streaming"),
         panels.timeseries_count(
-            "Barrier Number",[
+            "Barrier Number", [
                 panels.target("all_barrier_nums", "all_barrier"),
                 panels.target("in_flight_barrier_nums", "in_flight_barrier"),
             ]),
@@ -369,6 +374,9 @@ def section_streaming(panels):
             panels.target(
                 "rate(stream_source_output_rows_counts[15s])", "source_id = {{source_id}}"
             ),
+            panels.target(
+                "rate(partition_input_count[5s])", "{{actor_id}}-{{source_id}}-{{partition}}"
+            )
         ]),
     ]
 
@@ -380,6 +388,16 @@ def section_streaming_actors(outer_panels):
             panels.timeseries_actor_rowsps("Executor Throughput", [
                 panels.target(
                     "rate(stream_executor_row_count[15s]) > 0", "{{actor_id}}->{{executor_id}}"
+                ),
+            ]),
+            panels.timeseries_ns("Actor Sampled Deserialization Time", [
+                panels.target(
+                    "actor_sampled_deserialize_duration_ns", "{{actor_id}}"
+                ),
+            ]),
+            panels.timeseries_ns("Actor Sampled Serialization Time", [
+                panels.target(
+                    "actor_sampled_serialize_duration_ns", "{{actor_id}}"
                 ),
             ]),
             panels.timeseries_actor_latency("Actor Barrier Latency", [
@@ -588,11 +606,27 @@ def section_hummock(panels):
         panels.timeseries_latency("Read Duration - Iter", [
             *quantile(lambda quantile, legend:
                       panels.target(
-                          f"histogram_quantile({quantile}, sum(rate(state_store_iter_duration_bucket[1m])) by (le, job, instance))", f"p{legend} - {{{{job}}}} @ {{{{instance}}}}"
+                          f"histogram_quantile({quantile}, sum(rate(state_store_iter_duration_bucket[1m])) by (le, job, instance))", f"p{legend} - {{{{job}}}} @ {{{{instance}}}}",
+                          legend == "max"
                       ),
                       [90, 99, 999, "max"]),
             panels.target(
                 "sum by(le, job, instance)(rate(state_store_iter_duration_sum[1m])) / sum by(le, job,instance) (rate(state_store_iter_duration_count[1m]))", "avg - {{job}} @ {{instance}}"
+            ),
+
+            panels.target(
+                    "sum(rate(state_store_iter_in_process_counts[1m])) by(job,instance)", "iter_in_process_counts - {{instance}} "
+            ),
+        ]),
+        panels.timeseries_latency("Read Duration - Iter Pure Scan", [
+            *quantile(lambda quantile, legend:
+                      panels.target(
+                          f"histogram_quantile({quantile}, sum(rate(state_store_iter_scan_duration_bucket[1m])) by (le, job, instance))", f"p{legend} - {{{{job}}}} @ {{{{instance}}}}",
+                          legend == "max"
+                      ),
+                      [90, 99, 999, "max"]),
+            panels.target(
+                "sum by(le, job, instance)(rate(state_store_scan_iter_duration_sum[1m])) / sum by(le, job,instance) (rate(state_store_iter_scan_duration_count[1m]))", "avg - {{job}} @ {{instance}}"
             ),
         ]),
         panels.timeseries_ops("Block Ops", [

@@ -41,10 +41,6 @@ enum StreamExecutorErrorInner {
     SerdeError(BoxedError),
 
     // TODO: remove this
-    #[error("Hash join error: {0}")]
-    HashJoinError(RwError),
-
-    // TODO: remove this
     #[error("Source error: {0}")]
     SourceError(RwError),
 
@@ -72,10 +68,6 @@ impl StreamExecutorError {
 
     pub fn serde_error(error: impl Error) -> Self {
         StreamExecutorErrorInner::SerdeError(error.into()).into()
-    }
-
-    pub fn hash_join_error(error: impl Into<RwError>) -> Self {
-        StreamExecutorErrorInner::HashJoinError(error.into()).into()
     }
 
     pub fn source_error(error: impl Into<RwError>) -> Self {

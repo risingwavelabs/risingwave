@@ -54,7 +54,13 @@ impl RowIdGenerator {
         }
     }
 
-    pub fn next(&mut self) -> RowId {
+    fn row_id(&self) -> RowId {
+        self.last_duration_ms << TIMESTAMP_SHIFT_BITS
+            | (self.worker_id << WORKER_ID_SHIFT_BITS) as i64
+            | self.sequence as i64
+    }
+
+    fn try_update_duration(&mut self) {
         let current_duration = self.epoch.elapsed().unwrap();
         let current_duration_ms = current_duration.as_millis() as i64;
         if current_duration_ms < self.last_duration_ms {
@@ -68,16 +74,7 @@ impl RowIdGenerator {
         if current_duration_ms > self.last_duration_ms {
             self.last_duration_ms = current_duration_ms;
             self.sequence = 0;
-        }
-
-        if self.sequence < SEQUENCE_UPPER_BOUND {
-            let row_id = self.last_duration_ms << TIMESTAMP_SHIFT_BITS
-                | (self.worker_id << WORKER_ID_SHIFT_BITS) as i64
-                | self.sequence as i64;
-            self.sequence += 1;
-
-            row_id
-        } else {
+        } else if self.sequence == SEQUENCE_UPPER_BOUND {
             // If the sequence reaches the upper bound, spin loop here and wait for next
             // millisecond. Here we do not consider time goes backwards, it can also be covered
             // here.
@@ -86,6 +83,31 @@ impl RowIdGenerator {
                 Duration::from_millis(current_duration.subsec_millis() as u64 + 1)
                     - Duration::from_nanos(current_duration.subsec_nanos() as u64),
             );
+        }
+    }
+
+    pub fn next_batch(&mut self, length: usize) -> Vec<RowId> {
+        self.try_update_duration();
+        let mut ret = Vec::with_capacity(length);
+        while ret.len() < length {
+            if self.sequence < SEQUENCE_UPPER_BOUND {
+                ret.push(self.row_id());
+                self.sequence += 1;
+            } else {
+                self.try_update_duration();
+            }
+        }
+
+        ret
+    }
+
+    pub fn next(&mut self) -> RowId {
+        self.try_update_duration();
+        if self.sequence < SEQUENCE_UPPER_BOUND {
+            let row_id = self.row_id();
+            self.sequence += 1;
+            row_id
+        } else {
             self.next()
         }
     }
@@ -93,6 +115,8 @@ impl RowIdGenerator {
 
 #[cfg(test)]
 mod tests {
+    use itertools::Itertools;
+
     use super::*;
 
     #[test]
@@ -104,7 +128,7 @@ mod tests {
             assert!(row_id > last_row_id);
             last_row_id = row_id;
         }
-        std::thread::sleep(std::time::Duration::from_millis(10));
+        std::thread::sleep(Duration::from_millis(10));
         let row_id = generator.next();
         assert!(row_id > last_row_id);
         assert_ne!(
@@ -112,5 +136,17 @@ mod tests {
             last_row_id >> TIMESTAMP_SHIFT_BITS
         );
         assert_eq!(row_id & (SEQUENCE_UPPER_BOUND as i64 - 1), 0);
+
+        let mut generator = RowIdGenerator::new(1);
+        let row_ids = generator.next_batch((SEQUENCE_UPPER_BOUND + 10) as usize);
+        let mut expected = (0..SEQUENCE_UPPER_BOUND).collect_vec();
+        expected.extend(0..10);
+        assert_eq!(
+            row_ids
+                .into_iter()
+                .map(|id| (id as u16) & (SEQUENCE_UPPER_BOUND - 1))
+                .collect_vec(),
+            expected
+        );
     }
 }

@@ -12,6 +12,9 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+use std::collections::HashMap;
+
+use risingwave_pb::meta::list_table_fragments_response::TableFragmentInfo;
 use risingwave_rpc_client::error::Result;
 use risingwave_rpc_client::{HummockMetaClient, MetaClient};
 
@@ -25,6 +28,11 @@ pub trait FrontendMetaClient: Send + Sync {
     async fn pin_snapshot(&self, last_pinned: u64) -> Result<u64>;
 
     async fn flush(&self) -> Result<()>;
+
+    async fn list_table_fragments(
+        &self,
+        table_ids: &[u32],
+    ) -> Result<HashMap<u32, TableFragmentInfo>>;
 
     async fn unpin_snapshot(&self, epoch: u64) -> Result<()>;
 
@@ -41,6 +49,13 @@ impl FrontendMetaClient for FrontendMetaClientImpl {
 
     async fn flush(&self) -> Result<()> {
         self.0.flush().await
+    }
+
+    async fn list_table_fragments(
+        &self,
+        table_ids: &[u32],
+    ) -> Result<HashMap<u32, TableFragmentInfo>> {
+        self.0.list_table_fragments(table_ids).await
     }
 
     async fn unpin_snapshot(&self, epoch: u64) -> Result<()> {
