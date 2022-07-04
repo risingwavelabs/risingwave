@@ -39,7 +39,7 @@ pub async fn gen_basic_table(row_count: usize) -> StorageTable<MemoryStateStore,
         None,
         pk_indices,
     );
-    let table = state.cell_based_table().clone();
+    let table = state.storage_table().clone();
     let epoch: u64 = 0;
 
     for idx in 0..row_count {

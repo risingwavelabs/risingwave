@@ -397,7 +397,7 @@ async fn test_row_seq_scan() -> Result<()> {
         None,
         vec![0_usize],
     );
-    let table = state.cell_based_table().clone();
+    let table = state.storage_table().clone();
 
     let epoch: u64 = 0;
 
