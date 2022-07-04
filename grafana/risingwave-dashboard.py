@@ -103,6 +103,11 @@ class Panels:
         return TimeSeries(title=title, targets=targets, gridPos=gridPos, unit="row", fillOpacity=10,
                           legendDisplayMode="table", legendPlacement="right", legendCalcs=["max"])
 
+    def timeseries_ns(self, title, targets):
+        gridPos = self.layout.next_half_width_graph()
+        return TimeSeries(title=title, targets=targets, gridPos=gridPos, unit="ns", fillOpacity=10,
+                          legendDisplayMode="table", legendPlacement="right", legendCalcs=["max"])
+
     def timeseries_kilobytes(self, title, targets):
         gridPos = self.layout.next_half_width_graph()
         return TimeSeries(title=title, targets=targets, gridPos=gridPos, unit="deckbytes", fillOpacity=10,
@@ -383,6 +388,16 @@ def section_streaming_actors(outer_panels):
             panels.timeseries_actor_rowsps("Executor Throughput", [
                 panels.target(
                     "rate(stream_executor_row_count[15s]) > 0", "{{actor_id}}->{{executor_id}}"
+                ),
+            ]),
+            panels.timeseries_ns("Actor Sampled Deserialization Time", [
+                panels.target(
+                    "actor_sampled_deserialize_duration_ns", "{{actor_id}}"
+                ),
+            ]),
+            panels.timeseries_ns("Actor Sampled Serialization Time", [
+                panels.target(
+                    "actor_sampled_serialize_duration_ns", "{{actor_id}}"
                 ),
             ]),
             panels.timeseries_actor_latency("Actor Barrier Latency", [
