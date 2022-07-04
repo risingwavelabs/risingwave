@@ -17,7 +17,7 @@ use std::sync::Arc;
 
 use itertools::Itertools;
 use risingwave_common::catalog::TableOption;
-use risingwave_hummock_sdk::compaction_group::{Prefix, StaticCompactionGroupId};
+use risingwave_hummock_sdk::compaction_group::{StateTableId, StaticCompactionGroupId};
 use risingwave_hummock_sdk::CompactionGroupId;
 use risingwave_pb::hummock::CompactionConfig;
 use tokio::sync::RwLock;
@@ -81,23 +81,20 @@ impl<S: MetaStore> CompactionGroupManager<S> {
         &self,
         table_fragments: &TableFragments,
         table_properties: &HashMap<String, String>,
-    ) -> Result<()> {
+    ) -> Result<Vec<StateTableId>> {
         let table_option = TableOption::build_table_option(table_properties);
         let mut pairs = vec![];
         // materialized_view or materialized_source
         pairs.push((
-            Prefix::from(table_fragments.table_id().table_id),
-            // TODO: before compaction group write path is finished, all SSTs belongs to
-            // `StateDefault`.
-            CompactionGroupId::from(StaticCompactionGroupId::StateDefault),
-            // CompactionGroupId::from(StaticCompactionGroupId::MaterializedView),
+            table_fragments.table_id().table_id,
+            CompactionGroupId::from(StaticCompactionGroupId::MaterializedView),
             table_option,
         ));
         // internal states
         for table_id in table_fragments.internal_table_ids() {
             assert_ne!(table_id, table_fragments.table_id().table_id);
             pairs.push((
-                Prefix::from(table_id),
+                table_id,
                 CompactionGroupId::from(StaticCompactionGroupId::StateDefault),
                 table_option,
             ));
@@ -111,17 +108,15 @@ impl<S: MetaStore> CompactionGroupManager<S> {
 
     /// Unregisters `table_fragments` from compaction groups
     pub async fn unregister_table_fragments(&self, table_fragments: &TableFragments) -> Result<()> {
-        let prefixes = table_fragments
+        let table_ids = table_fragments
             .internal_table_ids()
             .into_iter()
             .chain(std::iter::once(table_fragments.table_id().table_id))
-            .into_iter()
-            .map(Prefix::from)
             .collect_vec();
         self.inner
             .write()
             .await
-            .unregister(&prefixes, self.env.meta_store())
+            .unregister(&table_ids, self.env.meta_store())
             .await
     }
 
@@ -129,14 +124,14 @@ impl<S: MetaStore> CompactionGroupManager<S> {
         &self,
         source_id: u32,
         table_properties: &HashMap<String, String>,
-    ) -> Result<()> {
+    ) -> Result<Vec<StateTableId>> {
         let table_option = TableOption::build_table_option(table_properties);
         self.inner
             .write()
             .await
             .register(
                 &[(
-                    source_id.into(),
+                    source_id,
                     StaticCompactionGroupId::StateDefault.into(),
                     table_option,
                 )],
@@ -149,21 +144,29 @@ impl<S: MetaStore> CompactionGroupManager<S> {
         self.inner
             .write()
             .await
-            .unregister(&[source_id.into()], self.env.meta_store())
+            .unregister(&[source_id], self.env.meta_store())
             .await
     }
 
     /// Unregisters stale members
+    ///
+    /// Valid members includes:
+    /// - MV fragments.
+    /// - Source.
+    /// - Source in fragments. It's possible a source is dropped while associated fragments still
+    ///   exist. See `SourceManager::drop_source`.
     pub async fn purge_stale_members(
         &self,
         table_fragments_list: &[TableFragments],
         source_ids: &[SourceId],
+        source_ids_in_fragments: &[SourceId],
     ) -> Result<()> {
         let mut guard = self.inner.write().await;
         let registered_members = guard
             .compaction_groups
             .values()
-            .flat_map(|cg| cg.member_prefixes.iter())
+            .flat_map(|cg| cg.member_table_ids.iter())
+            .cloned()
             .collect_vec();
         let valid_ids = table_fragments_list
             .iter()
@@ -176,11 +179,12 @@ impl<S: MetaStore> CompactionGroupManager<S> {
                     .collect_vec()
             })
             .chain(source_ids.iter().cloned())
+            .chain(source_ids_in_fragments.iter().cloned())
+            .dedup()
             .collect_vec();
         let to_unregister = registered_members
             .into_iter()
-            .filter(|prefix| !valid_ids.contains(&u32::from(*prefix)))
-            .cloned()
+            .filter(|table_id| !valid_ids.contains(table_id))
             .collect_vec();
         guard
             .unregister(&to_unregister, self.env.meta_store())
@@ -190,11 +194,29 @@ impl<S: MetaStore> CompactionGroupManager<S> {
     pub async fn internal_table_ids_by_compaction_group_id(
         &self,
         compaction_group_id: u64,
-    ) -> Result<HashSet<u32>> {
+    ) -> Result<HashSet<StateTableId>> {
         let inner = self.inner.read().await;
-        let prefix_set = inner.prefixs_by_compaction_group_id(compaction_group_id)?;
+        let table_id_set = inner.table_ids_by_compaction_group_id(compaction_group_id)?;
+        Ok(table_id_set)
+    }
 
-        Ok(prefix_set.into_iter().map(u32::from).collect())
+    pub async fn register_table_ids(
+        &self,
+        pairs: &[(StateTableId, CompactionGroupId, TableOption)],
+    ) -> Result<Vec<StateTableId>> {
+        self.inner
+            .write()
+            .await
+            .register(pairs, self.env.meta_store())
+            .await
+    }
+
+    pub async fn unregister_table_ids(&self, table_ids: &[StateTableId]) -> Result<()> {
+        self.inner
+            .write()
+            .await
+            .unregister(table_ids, self.env.meta_store())
+            .await
     }
 
     pub async fn get_table_option(
@@ -210,7 +232,7 @@ impl<S: MetaStore> CompactionGroupManager<S> {
 #[derive(Default)]
 struct CompactionGroupManagerInner {
     compaction_groups: BTreeMap<CompactionGroupId, CompactionGroup>,
-    index: BTreeMap<Prefix, CompactionGroupId>,
+    index: BTreeMap<StateTableId, CompactionGroupId>,
 }
 
 impl CompactionGroupManagerInner {
@@ -249,7 +271,7 @@ impl CompactionGroupManagerInner {
 
         // Build in-memory index
         for (id, compaction_group) in &self.compaction_groups {
-            for member in &compaction_group.member_prefixes {
+            for member in &compaction_group.member_table_ids {
                 assert!(self.index.insert(*member, *id).is_none());
             }
         }
@@ -259,18 +281,18 @@ impl CompactionGroupManagerInner {
 
     async fn register<S: MetaStore>(
         &mut self,
-        pairs: &[(Prefix, CompactionGroupId, TableOption)],
+        pairs: &[(StateTableId, CompactionGroupId, TableOption)],
         meta_store: &S,
-    ) -> Result<()> {
+    ) -> Result<Vec<StateTableId>> {
         let mut compaction_groups = VarTransaction::new(&mut self.compaction_groups);
-        for (prefix, compaction_group_id, table_option) in pairs {
+        for (table_id, compaction_group_id, table_option) in pairs {
             let compaction_group = compaction_groups
                 .get_mut(compaction_group_id)
                 .ok_or(Error::InvalidCompactionGroup(*compaction_group_id))?;
-            compaction_group.member_prefixes.insert(*prefix);
+            compaction_group.member_table_ids.insert(*table_id);
             compaction_group
                 .table_id_to_options
-                .insert(prefix.into(), *table_option);
+                .insert(*table_id, *table_option);
         }
         let mut trx = Transaction::default();
         compaction_groups.apply_to_txn(&mut trx)?;
@@ -278,30 +300,29 @@ impl CompactionGroupManagerInner {
         compaction_groups.commit();
 
         // Update in-memory index
-        for (prefix, compaction_group_id, _) in pairs {
-            self.index.insert(*prefix, *compaction_group_id);
+        for (table_id, compaction_group_id, _) in pairs {
+            self.index.insert(*table_id, *compaction_group_id);
         }
-        Ok(())
+        Ok(pairs.iter().map(|(table_id, ..)| *table_id).collect_vec())
     }
 
     async fn unregister<S: MetaStore>(
         &mut self,
-        prefixes: &[Prefix],
+        table_ids: &[StateTableId],
         meta_store: &S,
     ) -> Result<()> {
         let mut compaction_groups = VarTransaction::new(&mut self.compaction_groups);
-        for prefix in prefixes {
+        for table_id in table_ids {
             let compaction_group_id = self
                 .index
-                .get(prefix)
+                .get(table_id)
                 .cloned()
-                .ok_or(Error::InvalidCompactionGroupMember(*prefix))?;
+                .ok_or(Error::InvalidCompactionGroupMember(*table_id))?;
             let compaction_group = compaction_groups
                 .get_mut(&compaction_group_id)
                 .ok_or(Error::InvalidCompactionGroup(compaction_group_id))?;
-            compaction_group.member_prefixes.remove(prefix);
-            let table_id: u32 = prefix.into();
-            compaction_group.table_id_to_options.remove(&table_id);
+            compaction_group.member_table_ids.remove(table_id);
+            compaction_group.table_id_to_options.remove(table_id);
         }
         let mut trx = Transaction::default();
         compaction_groups.apply_to_txn(&mut trx)?;
@@ -309,8 +330,8 @@ impl CompactionGroupManagerInner {
         compaction_groups.commit();
 
         // Update in-memory index
-        for prefix in prefixes {
-            self.index.remove(prefix);
+        for table_id in table_ids {
+            self.index.remove(table_id);
         }
         Ok(())
     }
@@ -323,12 +344,12 @@ impl CompactionGroupManagerInner {
         }
     }
 
-    pub fn prefixs_by_compaction_group_id(
+    pub fn table_ids_by_compaction_group_id(
         &self,
         compaction_group_id: u64,
-    ) -> Result<HashSet<Prefix>> {
+    ) -> Result<HashSet<StateTableId>> {
         let compaction_group = self.compaction_group(compaction_group_id)?;
-        Ok(compaction_group.member_prefixes)
+        Ok(compaction_group.member_table_ids)
     }
 
     pub fn table_option_by_table_id(
@@ -352,7 +373,7 @@ mod tests {
     use std::ops::Deref;
 
     use risingwave_common::catalog::{TableId, TableOption};
-    use risingwave_hummock_sdk::compaction_group::{Prefix, StaticCompactionGroupId};
+    use risingwave_hummock_sdk::compaction_group::StaticCompactionGroupId;
 
     use crate::hummock::compaction_group::manager::{
         CompactionGroupManager, CompactionGroupManagerInner,
@@ -370,7 +391,7 @@ mod tests {
             inner
                 .compaction_groups
                 .iter()
-                .map(|(_, cg)| cg.member_prefixes.len())
+                .map(|(_, cg)| cg.member_table_ids.len())
                 .sum::<usize>()
         };
 
@@ -394,7 +415,7 @@ mod tests {
             .await
             .register(
                 &[(
-                    Prefix::from(1u32),
+                    1u32,
                     StaticCompactionGroupId::StateDefault.into(),
                     table_option,
                 )],
@@ -407,7 +428,7 @@ mod tests {
             .await
             .register(
                 &[(
-                    Prefix::from(2u32),
+                    2u32,
                     StaticCompactionGroupId::MaterializedView.into(),
                     table_option,
                 )],
@@ -429,7 +450,7 @@ mod tests {
         inner
             .write()
             .await
-            .unregister(&[Prefix::from(2u32)], env.meta_store())
+            .unregister(&[2u32], env.meta_store())
             .await
             .unwrap();
         assert_eq!(inner.read().await.index.len(), 1);
@@ -482,7 +503,7 @@ mod tests {
                 .compaction_groups()
                 .await
                 .iter()
-                .map(|cg| cg.member_prefixes.len())
+                .map(|cg| cg.member_table_ids.len())
                 .sum::<usize>()
         };
         assert_eq!(registered_number().await, 0);
@@ -508,12 +529,12 @@ mod tests {
 
         // Test purge_stale_members: table fragments
         compaction_group_manager
-            .purge_stale_members(&[table_fragment_2], &[])
+            .purge_stale_members(&[table_fragment_2], &[], &[])
             .await
             .unwrap();
         assert_eq!(registered_number().await, 4);
         compaction_group_manager
-            .purge_stale_members(&[], &[])
+            .purge_stale_members(&[], &[], &[])
             .await
             .unwrap();
         assert_eq!(registered_number().await, 0);
@@ -549,7 +570,7 @@ mod tests {
 
         // Test purge_stale_members: source
         compaction_group_manager
-            .purge_stale_members(&[], &[source_3])
+            .purge_stale_members(&[], &[source_3], &[])
             .await
             .unwrap();
         assert_eq!(registered_number().await, 1);

@@ -23,6 +23,7 @@ use risingwave_object_store::object::{
 use risingwave_rpc_client::HummockMetaClient;
 
 use crate::error::StorageResult;
+use crate::hummock::compaction_group_client::CompactionGroupClientImpl;
 use crate::hummock::{HummockStorage, SstableStore};
 use crate::memory::MemoryStateStore;
 use crate::monitor::{MonitoredStateStore as Monitored, ObjectStoreMetrics, StateStoreMetrics};
@@ -84,6 +85,19 @@ macro_rules! dispatch_state_store {
     };
 }
 
+#[macro_export]
+macro_rules! dispatch_hummock_state_store {
+    ($impl:expr, $store:ident, $body:tt) => {
+        match $impl {
+            StateStoreImpl::MemoryStateStore($store) => {
+                let _store = $store;
+                unimplemented!("memory state store should never be used in release mode");
+            }
+            StateStoreImpl::HummockStateStore($store) => $body,
+        }
+    };
+}
+
 impl StateStoreImpl {
     pub async fn new(
         s: &str,
@@ -116,11 +130,14 @@ impl StateStoreImpl {
                     config.block_cache_capacity_mb * (1 << 20),
                     config.meta_cache_capacity_mb * (1 << 20),
                 ));
+                let compaction_group_client =
+                    Arc::new(CompactionGroupClientImpl::new(hummock_meta_client.clone()));
                 let inner = HummockStorage::new(
                     config.clone(),
                     sstable_store.clone(),
                     hummock_meta_client.clone(),
                     state_store_stats.clone(),
+                    compaction_group_client,
                 )
                 .await?;
                 StateStoreImpl::HummockStateStore(inner.monitored(state_store_stats))

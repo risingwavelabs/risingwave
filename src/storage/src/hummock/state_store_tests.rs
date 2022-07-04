@@ -22,6 +22,8 @@ use risingwave_meta::hummock::MockHummockMetaClient;
 use risingwave_rpc_client::HummockMetaClient;
 
 use super::HummockStorage;
+use crate::hummock::compaction_group::StaticCompactionGroupId;
+use crate::hummock::compaction_group_client::DummyCompactionGroupClient;
 use crate::hummock::iterator::test_utils::mock_sstable_store;
 use crate::hummock::test_utils::{count_iter, default_config_for_test};
 use crate::monitor::StateStoreMetrics;
@@ -44,6 +46,9 @@ async fn test_basic() {
         sstable_store,
         meta_client.clone(),
         Arc::new(StateStoreMetrics::unused()),
+        Arc::new(DummyCompactionGroupClient::new(
+            StaticCompactionGroupId::StateDefault.into(),
+        )),
     )
     .await
     .unwrap();
@@ -334,6 +339,9 @@ async fn test_state_store_sync() {
         sstable_store,
         meta_client.clone(),
         Arc::new(StateStoreMetrics::unused()),
+        Arc::new(DummyCompactionGroupClient::new(
+            StaticCompactionGroupId::StateDefault.into(),
+        )),
     )
     .await
     .unwrap();
@@ -449,6 +457,9 @@ async fn test_reload_storage() {
         sstable_store.clone(),
         hummock_meta_client.clone(),
         Arc::new(StateStoreMetrics::unused()),
+        Arc::new(DummyCompactionGroupClient::new(
+            StaticCompactionGroupId::StateDefault.into(),
+        )),
     )
     .await
     .unwrap();
@@ -494,6 +505,9 @@ async fn test_reload_storage() {
         sstable_store,
         hummock_meta_client,
         Arc::new(StateStoreMetrics::unused()),
+        Arc::new(DummyCompactionGroupClient::new(
+            StaticCompactionGroupId::StateDefault.into(),
+        )),
     )
     .await
     .unwrap();
@@ -630,6 +644,9 @@ async fn test_write_anytime() {
         sstable_store,
         meta_client.clone(),
         Arc::new(StateStoreMetrics::unused()),
+        Arc::new(DummyCompactionGroupClient::new(
+            StaticCompactionGroupId::StateDefault.into(),
+        )),
     )
     .await
     .unwrap();
@@ -849,6 +866,9 @@ async fn test_delete_get() {
         sstable_store.clone(),
         hummock_meta_client.clone(),
         Arc::new(StateStoreMetrics::unused()),
+        Arc::new(DummyCompactionGroupClient::new(
+            StaticCompactionGroupId::StateDefault.into(),
+        )),
     )
     .await
     .unwrap();

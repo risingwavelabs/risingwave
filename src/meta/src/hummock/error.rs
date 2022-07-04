@@ -13,7 +13,7 @@
 // limitations under the License.
 
 use risingwave_common::error::{ErrorCode, RwError, ToErrorStr};
-use risingwave_hummock_sdk::compaction_group::Prefix;
+use risingwave_hummock_sdk::compaction_group::StateTableId;
 use risingwave_hummock_sdk::{CompactionGroupId, HummockContextId};
 use thiserror::Error;
 
@@ -36,7 +36,7 @@ pub enum Error {
     #[error("compaction group {0} not found")]
     InvalidCompactionGroup(CompactionGroupId),
     #[error("compaction group member {0} not found")]
-    InvalidCompactionGroupMember(Prefix),
+    InvalidCompactionGroupMember(StateTableId),
     #[error("internal error: {0}")]
     InternalError(String),
 }
