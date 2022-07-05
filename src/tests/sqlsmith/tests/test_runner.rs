@@ -12,8 +12,11 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+#![feature(let_chains)]
+
 #[cfg(test)]
 mod tests {
+    use std::env;
     use std::panic;
     use std::sync::Arc;
 
@@ -68,6 +71,11 @@ mod tests {
         let session = frontend.session_ref();
         let tables = create_tables(session.clone()).await;
         let mut rng = rand::rngs::SmallRng::seed_from_u64(seed);
+
+        if let Ok(x) = env::var("RW_RANDOM_SEED_SQLSMITH") && x == "true" {
+            log::info!("random seed");
+            rng = rand::thread_rng();
+        }
 
         for _ in 0..512 {
             let sql = sql_gen(&mut rng, tables.clone());
