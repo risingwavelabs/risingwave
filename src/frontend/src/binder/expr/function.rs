@@ -147,6 +147,9 @@ impl Binder {
                     };
                     return Ok(ExprImpl::literal_varchar(v));
                 }
+                "current_database" if inputs.is_empty() => {
+                    return Ok(ExprImpl::literal_varchar(self.db_name.clone()));
+                }
                 _ => {
                     return Err(ErrorCode::NotImplemented(
                         format!("unsupported function: {:?}", function_name),
