@@ -397,8 +397,7 @@ impl BatchPlanFragmenter {
                     // FIXME: workaround because batch parallel scan on ordered mv may have unorderd
                     // results. should do a merge sort after parallel scan.
                     // Tracking issue: <https://github.com/singularity-data/risingwave/issues/3583>
-                    let is_singleton = true;
-                    // let is_singleton = builder.parallelism == 1;
+                    let is_singleton = builder.parallelism == 1 || table_desc.is_ordered();
 
                     assert!(
                         builder.table_scan_info.is_none()
@@ -507,6 +506,7 @@ mod tests {
                 table_id: 0.into(),
                 pks: vec![],
                 order_keys: vec![],
+                user_order_by: None,
                 columns: vec![
                     ColumnDesc {
                         data_type: DataType::Int32,

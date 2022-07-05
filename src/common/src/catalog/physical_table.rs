@@ -71,4 +71,11 @@ impl TableDesc {
             dist_key_indices: self.distribution_keys.iter().map(|&k| k as u32).collect(),
         }
     }
+
+    pub fn is_ordered(&self) -> bool {
+        match &self.user_order_by {
+            Some(vec) => !vec.is_empty(),
+            None => false,
+        }
+    }
 }

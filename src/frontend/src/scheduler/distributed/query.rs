@@ -402,6 +402,7 @@ mod tests {
                 table_id: 0.into(),
                 pks: vec![],
                 order_keys: vec![],
+                user_order_by: None,
                 columns: vec![
                     ColumnDesc {
                         data_type: DataType::Int32,
