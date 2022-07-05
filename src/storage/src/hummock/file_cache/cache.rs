@@ -17,6 +17,7 @@ use std::hash::Hasher;
 use std::sync::Arc;
 use std::u8;
 
+use async_trait::async_trait;
 use itertools::Itertools;
 use risingwave_common::cache::LruCache;
 use tokio::sync::Notify;
@@ -36,6 +37,19 @@ pub struct FileCacheOptions {
     pub total_buffer_capacity: usize,
     pub cache_file_fallocate_unit: usize,
     pub filters: Vec<Arc<dyn Filter>>,
+
+    pub flush_buffer_hooks: Vec<Arc<dyn FlushBufferHook>>,
+}
+
+#[async_trait]
+pub trait FlushBufferHook: Send + Sync + 'static {
+    async fn pre_flush(&self) -> Result<()> {
+        Ok(())
+    }
+
+    async fn post_flush(&self) -> Result<()> {
+        Ok(())
+    }
 }
 
 struct BufferFlusher<K>
@@ -46,6 +60,8 @@ where
     store: StoreRef<K>,
     indices: Arc<LruCache<K, SlotId>>,
     notifier: Arc<Notify>,
+
+    hooks: Vec<Arc<dyn FlushBufferHook>>,
 }
 
 impl<K> BufferFlusher<K>
@@ -55,6 +71,10 @@ where
     async fn run(&self) -> Result<()> {
         loop {
             self.notifier.notified().await;
+
+            for hook in &self.hooks {
+                hook.pre_flush().await?;
+            }
 
             let frozen = self.buffer.frozen();
 
@@ -74,6 +94,10 @@ where
                     self.indices.insert(key, hash, value.len(), slot);
                 }
                 self.buffer.rotate();
+            }
+
+            for hook in &self.hooks {
+                hook.post_flush().await?;
             }
         }
     }
@@ -127,6 +151,8 @@ where
             store: store.clone(),
             indices: indices.clone(),
             notifier: buffer_flusher_notifier.clone(),
+
+            hooks: options.flush_buffer_hooks,
         };
         // TODO(MrCroxx): Graceful shutdown.
         let _handle = tokio::task::spawn(async move {
@@ -195,10 +221,10 @@ where
 mod tests {
 
     use std::path::Path;
-    use std::time::Duration;
 
     use super::super::test_utils::{key, TestCacheKey};
     use super::*;
+    use crate::hummock::file_cache::test_utils::FlushHolder;
 
     fn is_send_sync_clone<T: Send + Sync + Clone + 'static>() {}
 
@@ -220,13 +246,18 @@ mod tests {
         }
     }
 
-    async fn create_file_cache_manager_for_test(dir: impl AsRef<Path>) -> FileCache<TestCacheKey> {
+    async fn create_file_cache_manager_for_test(
+        dir: impl AsRef<Path>,
+        flush_buffer_hooks: Vec<Arc<dyn FlushBufferHook>>,
+    ) -> FileCache<TestCacheKey> {
         let options = FileCacheOptions {
             dir: dir.as_ref().to_str().unwrap().to_string(),
             capacity: 256 * 1024 * 1024,
             total_buffer_capacity: 128 * 1024,
             cache_file_fallocate_unit: 64 * 1024 * 1024,
             filters: vec![],
+
+            flush_buffer_hooks,
         };
         FileCache::open(options).await.unwrap()
     }
@@ -234,10 +265,22 @@ mod tests {
     #[tokio::test]
     async fn test_file_cache_manager() {
         let dir = tempdir();
-        let cache = create_file_cache_manager_for_test(dir.path()).await;
+
+        let holder = Arc::new(FlushHolder::new());
+        let cache = create_file_cache_manager_for_test(dir.path(), vec![holder.clone()]).await;
 
         cache.insert(key(1), vec![b'1'; 1234]).unwrap();
-        tokio::time::sleep(Duration::from_secs(1)).await;
+
+        // active
+        assert_eq!(cache.get(&key(1)).await.unwrap(), Some(vec![b'1'; 1234]));
+        // frozen
+        holder.trigger();
+        holder.wait().await;
+        assert_eq!(cache.get(&key(1)).await.unwrap(), Some(vec![b'1'; 1234]));
+        // cache file
+        cache.buffer_flusher_notifier.notify_one();
+        holder.trigger();
+        holder.wait().await;
         assert_eq!(cache.get(&key(1)).await.unwrap(), Some(vec![b'1'; 1234]));
 
         cache.earse(&key(1)).unwrap();
