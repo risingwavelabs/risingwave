@@ -181,9 +181,9 @@ impl BoxedExecutorBuilder for RowSeqScanExecutorBuilder {
             get_scan_bound(scan_range.clone(), pk_types.into_iter());
 
         let pk_indices = table_desc
-            .pk_indices
+            .order_key
             .iter()
-            .map(|&k| k as usize)
+            .map(|k| k.index as usize)
             .collect_vec();
 
         let dist_key_indices = table_desc

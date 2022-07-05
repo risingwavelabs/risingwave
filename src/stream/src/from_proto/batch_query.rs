@@ -68,9 +68,9 @@ impl ExecutorBuilder for BatchQueryExecutorBuilder {
 
         // Use indices based on full table instead of streaming executor output.
         let pk_indices = table_desc
-            .pk_indices
+            .order_key
             .iter()
-            .map(|&k| k as usize)
+            .map(|k| k.index as usize)
             .collect_vec();
 
         let dist_key_indices = table_desc
