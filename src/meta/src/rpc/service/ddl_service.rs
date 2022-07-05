@@ -398,15 +398,15 @@ where
         }))
     }
 
-    async fn list_materialized_view(
+    async fn risectl_list_state_tables(
         &self,
-        _request: Request<ListMaterializedViewRequest>,
-    ) -> Result<Response<ListMaterializedViewResponse>, Status> {
+        _request: Request<RisectlListStateTablesRequest>,
+    ) -> Result<Response<RisectlListStateTablesResponse>, Status> {
         use crate::model::MetadataModel;
         let tables = Table::list(self.env.meta_store())
             .await
             .map_err(tonic_err)?;
-        Ok(Response::new(ListMaterializedViewResponse { tables }))
+        Ok(Response::new(RisectlListStateTablesResponse { tables }))
     }
 }
 
