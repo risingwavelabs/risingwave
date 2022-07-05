@@ -32,13 +32,12 @@ pub struct StreamChunkBuilder {
 
     /// Data types of columns
     data_types: Vec<DataType>,
-
-    output_indices: Vec<usize>,
-
-    /// the range of update column indices
-    update_range: Range<usize>,
-    /// the range of matched column indices
-    matched_range: Range<usize>,
+    /// Whether it is a semi/anti join or not
+    is_semi_anti_join: bool,
+    /// map indices in matched columns to output columns
+    matched_indices_mapping: Vec<(usize, usize)>,
+    /// map indices in update columns to output columns
+    update_indices_mapping: Vec<(usize, usize)>,
 
     /// Maximum capacity of column builder
     capacity: usize,
@@ -60,6 +59,7 @@ impl StreamChunkBuilder {
         output_indices: &[usize],
         update_range: Range<usize>,
         matched_range: Range<usize>,
+        is_semi_anti_join: bool,
     ) -> ArrayResult<Self> {
         // Leave room for paired `UpdateDelete` and `UpdateInsert`. When there are `capacity - 1`
         // ops in current builder and the last op is `UpdateDelete`, we delay the chunk generation
@@ -77,15 +77,28 @@ impl StreamChunkBuilder {
             .iter()
             .map(|datatype| datatype.create_array_builder(reduced_capacity))
             .collect();
+        let (matched_indices_mapping, update_indices_mapping) = {
+            let mut matched_indices_mapping = Vec::new();
+            let mut update_indices_mapping = Vec::new();
+            for (i, &output_idx) in output_indices.iter().enumerate() {
+                if matched_range.contains(&output_idx) {
+                    matched_indices_mapping.push((output_idx - matched_range.start, i));
+                }
+                if update_range.contains(&output_idx) {
+                    update_indices_mapping.push((output_idx - update_range.start, i));
+                }
+            }
+            (matched_indices_mapping, update_indices_mapping)
+        };
         Ok(Self {
             ops,
             column_builders,
             data_types: data_types_after_mapping,
             capacity: reduced_capacity,
             size: 0,
-            output_indices: output_indices.to_owned(),
-            update_range,
-            matched_range,
+            matched_indices_mapping,
+            update_indices_mapping,
+            is_semi_anti_join,
         })
     }
 
@@ -114,17 +127,11 @@ impl StreamChunkBuilder {
         row_matched: &Row,
     ) -> ArrayResult<Option<StreamChunk>> {
         self.ops.push(op);
-        for (i, &original_output_idx) in self.output_indices.iter().enumerate() {
-            if let Some(idx) = self.try_map_index_to_update(&original_output_idx) {
-                self.column_builders[i].append_datum_ref(row_update.value_at(idx))?;
-            } else if let Some(idx) = self.try_map_index_to_matched(&original_output_idx) {
-                self.column_builders[i].append_datum(&row_matched[idx])?;
-            } else {
-                unreachable!(
-                    "output_indices[{}] = {} should be contained in either update_range: {:?} or matched range: {:?}",
-                    i, original_output_idx, self.update_range, self.matched_range
-                );
-            }
+        for &(update_idx, output_idx) in &self.update_indices_mapping {
+            self.column_builders[output_idx].append_datum_ref(row_update.value_at(update_idx))?;
+        }
+        for &(matched_idx, output_idx) in &self.matched_indices_mapping {
+            self.column_builders[output_idx].append_datum(&row_matched[matched_idx])?;
         }
         self.inc_size()
     }
@@ -138,11 +145,12 @@ impl StreamChunkBuilder {
         row_update: &RowRef<'_>,
     ) -> ArrayResult<Option<StreamChunk>> {
         self.ops.push(op);
-        for (i, &original_output_idx) in self.output_indices.iter().enumerate() {
-            if let Some(idx) = self.try_map_index_to_update(&original_output_idx) {
-                self.column_builders[i].append_datum_ref(row_update.value_at(idx))?;
-            } else {
-                self.column_builders[i].append_datum(&None)?;
+        for &(update_idx, output_idx) in &self.update_indices_mapping {
+            self.column_builders[output_idx].append_datum_ref(row_update.value_at(update_idx))?;
+        }
+        if !self.is_semi_anti_join {
+            for &(_matched_idx, output_idx) in &self.matched_indices_mapping {
+                self.column_builders[output_idx].append_datum(&None)?;
             }
         }
         self.inc_size()
@@ -157,12 +165,13 @@ impl StreamChunkBuilder {
         row_matched: &Row,
     ) -> ArrayResult<Option<StreamChunk>> {
         self.ops.push(op);
-        for (i, &original_output_idx) in self.output_indices.iter().enumerate() {
-            if let Some(idx) = self.try_map_index_to_matched(&original_output_idx) {
-                self.column_builders[i].append_datum(&row_matched[idx])?;
-            } else {
-                self.column_builders[i].append_datum_ref(None)?;
+        if !self.is_semi_anti_join {
+            for &(_update_idx, output_idx) in &self.update_indices_mapping {
+                self.column_builders[output_idx].append_datum_ref(None)?;
             }
+        }
+        for &(matched_idx, output_idx) in &self.matched_indices_mapping {
+            self.column_builders[output_idx].append_datum(&row_matched[matched_idx])?;
         }
         self.inc_size()
     }
@@ -186,27 +195,5 @@ impl StreamChunkBuilder {
             new_columns,
             None,
         )))
-    }
-
-    /// `try_map_index_to_matched` will map `index` from original column index to
-    /// the index in matched columns. If `index` is not in `matched_columns`, `None`
-    /// will be returned.
-    fn try_map_index_to_matched(&self, index: &usize) -> Option<usize> {
-        if self.matched_range.contains(index) {
-            Some(index - self.matched_range.start)
-        } else {
-            None
-        }
-    }
-
-    /// `try_map_index_to_matched` will map `index` from original column index to
-    /// the index in matched columns. If `index` is not in `matched_columns`, `None`
-    /// will be returned.
-    fn try_map_index_to_update(&self, index: &usize) -> Option<usize> {
-        if self.update_range.contains(index) {
-            Some(index - self.update_range.start)
-        } else {
-            None
-        }
     }
 }

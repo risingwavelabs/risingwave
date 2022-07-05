@@ -640,6 +640,7 @@ impl<K: HashKey, S: StateStore, const T: JoinTypePrimitive> HashJoinExecutor<K, 
                 output_indices,
                 update_range,
                 matched_range,
+                is_semi_or_anti(T),
             )?,
         };
 
