@@ -42,6 +42,13 @@ impl BoundSetExpr {
             BoundSetExpr::Values(_) => false,
         }
     }
+
+    pub fn collect_correlated_indices(&self) -> Vec<usize> {
+        match self {
+            BoundSetExpr::Select(s) => s.collect_correlated_indices(),
+            BoundSetExpr::Values(_) => vec![],
+        }
+    }
 }
 
 impl Binder {
