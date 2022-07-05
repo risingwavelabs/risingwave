@@ -205,8 +205,7 @@ where
         }
     }
 
-    /// Get the `ChangedTableId` used to modify the actor(send and collect), If we create table in
-    /// this barrier, We need to add it.
+    /// Try to enxtend this command's `changed_table_id` in `creating_table_ids`.
     fn try_extend_command(&mut self, command: &Command) {
         if let Create(table) = command.changed_table_id() {
             self.creating_table_ids.insert(table);
