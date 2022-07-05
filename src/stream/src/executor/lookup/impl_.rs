@@ -174,16 +174,8 @@ impl<S: StateStore> LookupExecutor<S> {
         // resolve mapping from join keys in stream row -> joins keys for arrangement.
         let key_indices_mapping = arrangement_order_rules
             .iter()
-            // Order rules contains upstream pk, while here only care the join key part. By design,
-            // arrange join key should always ahead pk.
-            .take(arrange_join_key_indices.len())
             .map(|x| x.column_idx) // the required column idx in this position
-            .map(|x| {
-                arrange_join_key_indices
-                    .iter()
-                    .position(|y| *y == x)
-                    .unwrap()
-            }) // the position of the item in join keys
+            .filter_map(|x| arrange_join_key_indices.iter().position(|y| *y == x)) // the position of the item in join keys
             .map(|x| stream_join_key_indices[x]) // the actual column idx in stream
             .collect_vec();
 

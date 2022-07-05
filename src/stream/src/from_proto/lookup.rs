@@ -13,7 +13,7 @@
 // limitations under the License.
 
 use risingwave_common::catalog::{ColumnDesc, Field, Schema, TableId};
-use risingwave_common::util::sort_util::{OrderPair};
+use risingwave_common::util::sort_util::OrderPair;
 use risingwave_pb::stream_plan::lookup_node::ArrangementTableId;
 
 use super::*;
