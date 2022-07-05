@@ -52,6 +52,11 @@ impl BoundQuery {
                 .iter()
                 .any(|e| e.has_correlated_input_ref())
     }
+
+    pub fn collect_correlated_indices(&self) -> Vec<usize> {
+        // TODO: collect `correlated_input_ref` in `extra_order_exprs`.
+        self.body.collect_correlated_indices()
+    }
 }
 
 impl Binder {

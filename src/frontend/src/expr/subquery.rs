@@ -47,6 +47,13 @@ impl Subquery {
     pub fn is_correlated(&self) -> bool {
         self.query.is_correlated()
     }
+
+    pub fn collect_correlated_indices(&self) -> Vec<usize> {
+        let mut correlated_indices = self.query.collect_correlated_indices();
+        correlated_indices.sort();
+        correlated_indices.dedup();
+        correlated_indices
+    }
 }
 
 impl Clone for Subquery {

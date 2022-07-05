@@ -28,7 +28,7 @@ pub struct PullUpCorrelatedPredicate {}
 impl Rule for PullUpCorrelatedPredicate {
     fn apply(&self, plan: PlanRef) -> Option<PlanRef> {
         let apply = plan.as_logical_apply()?;
-        let (apply_left, apply_right, apply_on, join_type) = apply.clone().decompose();
+        let (apply_left, apply_right, apply_on, join_type, ..) = apply.clone().decompose();
 
         let project = apply_right.as_logical_project()?;
         let (mut proj_exprs, _) = project.clone().decompose();
