@@ -390,6 +390,20 @@
           StreamLocalSimpleAgg { aggs: [count, sum($0) filter(($0 > 0:Int32))] }
             StreamTableScan { table: t, columns: [v1, _row_id], pk_indices: [1] }
 - sql: |
+    /* filter clause */
+    /* extra calculation, should reuse result from project */
+    create table t(a int, b int);
+    select sum(a * b) filter (where a * b > 0) as sab from t;
+  logical_plan: |
+    LogicalProject { exprs: [$0] }
+      LogicalAgg { group_keys: [], agg_calls: [sum($2) filter((($0 * $1) > 0:Int32))] }
+        LogicalProject { exprs: [$1, $2, ($1 * $2)] }
+          LogicalScan { table: t, columns: [_row_id, a, b] }
+  optimized_logical_plan: |
+    LogicalAgg { group_keys: [], agg_calls: [sum($2) filter((($0 * $1) > 0:Int32))] }
+      LogicalProject { exprs: [$0, $1, ($0 * $1)] }
+        LogicalScan { table: t, columns: [a, b] }
+- sql: |
     /* complex filter clause */
     create table t(a int, b int);
     select max(a * b) FILTER (WHERE a < b AND a + b < 100 AND a * b != a + b - 1) AS sab from t;
@@ -457,6 +471,11 @@
     create table t(a int, b int);
     select avg(a) FILTER (WHERE 0 < (select max(a) from t)) AS avga from t;
   binder_error: 'Invalid input syntax: subquery in filter clause is not supported'
+- sql: |
+    /* aggregation in filter clause */
+    create table t(a int, b int);
+    select avg(a) FILTER (WHERE a < avg(b)) AS avga from t;
+  binder_error: 'Invalid input syntax: aggregation function in filter clause is not supported'
 - sql: |
     /* filter clause + non-boolean function */
     create table t(a int, b int);
