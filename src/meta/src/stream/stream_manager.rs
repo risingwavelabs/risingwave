@@ -19,7 +19,7 @@ use itertools::Itertools;
 use risingwave_common::catalog::TableId;
 use risingwave_common::error::{internal_error, Result};
 use risingwave_common::types::{ParallelUnitId, VIRTUAL_NODE_COUNT};
-use risingwave_pb::catalog::Source;
+use risingwave_pb::catalog::{Source, Table};
 use risingwave_pb::common::{ActorInfo, ParallelUnitMapping, WorkerType};
 use risingwave_pb::meta::table_fragments::{ActorState, ActorStatus};
 use risingwave_pb::stream_plan::stream_node::NodeBody;
@@ -56,8 +56,8 @@ pub struct CreateMaterializedViewContext {
     pub affiliated_source: Option<Source>,
     /// Table id offset get from meta id generator. Used to calculate global unique table id.
     pub table_id_offset: u32,
-    /// Internal TableID for MaterializedView.
-    pub internal_table_id_set: HashSet<u32>,
+    /// Internal TableID to Table mapping
+    pub internal_table_id_map: HashMap<u32, Option<Table>>,
     /// SchemaId of mview
     pub schema_id: SchemaId,
     /// DatabaseId of mview
@@ -276,13 +276,13 @@ where
         &self,
         mut table_fragments: TableFragments,
         CreateMaterializedViewContext {
-            mut dispatches,
-            mut upstream_node_actors,
+            dispatches,
+            upstream_node_actors,
             table_sink_map,
             dependent_table_ids,
             table_properties,
             ..
-        }: CreateMaterializedViewContext,
+        }: &mut CreateMaterializedViewContext,
     ) -> Result<()> {
         // This scope guard does clean up jobs ASYNCHRONOUSLY before Err returns.
         // It MUST be cleared before Ok returns.
@@ -325,9 +325,9 @@ where
         // 2. insert parallel unit id in batch query node
         self.resolve_chain_node(
             &mut table_fragments,
-            &dependent_table_ids,
-            &mut dispatches,
-            &mut upstream_node_actors,
+            dependent_table_ids,
+            dispatches,
+            upstream_node_actors,
             &locations,
         )
         .await?;
@@ -555,7 +555,7 @@ where
         // info in the beginning of actors.
         let registered_table_ids = self
             .compaction_group_manager
-            .register_table_fragments(&table_fragments, &table_properties)
+            .register_table_fragments(&table_fragments, table_properties)
             .await?;
         let compaction_group_manager_ref = self.compaction_group_manager.clone();
         revert_funcs.push(Box::pin(async move {
@@ -600,7 +600,7 @@ where
             .barrier_manager
             .run_command(Command::CreateMaterializedView {
                 table_fragments,
-                table_sink_map,
+                table_sink_map: table_sink_map.clone(),
                 dispatches,
                 source_state: init_split_assignment.clone(),
             })
@@ -976,11 +976,11 @@ mod tests {
         );
         let table_fragments = TableFragments::new(table_id, fragments, HashSet::default());
 
-        let ctx = CreateMaterializedViewContext::default();
+        let mut ctx = CreateMaterializedViewContext::default();
 
         services
             .global_stream_manager
-            .create_materialized_view(table_fragments, ctx)
+            .create_materialized_view(table_fragments, &mut ctx)
             .await?;
 
         for actor in actors {
@@ -1077,11 +1077,11 @@ mod tests {
 
         let table_fragments = TableFragments::new(table_id, fragments, internal_table_id.clone());
 
-        let ctx = CreateMaterializedViewContext::default();
+        let mut ctx = CreateMaterializedViewContext::default();
 
         services
             .global_stream_manager
-            .create_materialized_view(table_fragments, ctx)
+            .create_materialized_view(table_fragments, &mut ctx)
             .await?;
 
         for actor in actors {
@@ -1209,11 +1209,11 @@ mod tests {
 
         let table_fragments = TableFragments::new(table_id, fragments, internal_table_id.clone());
 
-        let ctx = CreateMaterializedViewContext::default();
+        let mut ctx = CreateMaterializedViewContext::default();
 
         services
             .global_stream_manager
-            .create_materialized_view(table_fragments, ctx)
+            .create_materialized_view(table_fragments, &mut ctx)
             .await
             .unwrap();
 
