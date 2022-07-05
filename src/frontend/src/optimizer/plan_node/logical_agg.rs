@@ -110,6 +110,7 @@ impl PlanAggCall {
         PlanAggCall {
             agg_kind: total_agg_kind,
             inputs: vec![InputRef::new(partial_output_idx, self.return_type.clone())],
+            filter: Condition::true_cond(),
             ..self.clone()
         }
     }

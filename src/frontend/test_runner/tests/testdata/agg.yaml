@@ -385,7 +385,7 @@
       LogicalScan { table: t, columns: [v1] }
   stream_plan: |
     StreamMaterialize { columns: [agg#0(hidden), sa], pk_columns: [] }
-      StreamGlobalSimpleAgg { aggs: [sum($0), sum($1) filter(($0 > 0:Int32))] }
+      StreamGlobalSimpleAgg { aggs: [sum($0), sum($1)] }
         StreamExchange { dist: Single }
           StreamLocalSimpleAgg { aggs: [count, sum($0) filter(($0 > 0:Int32))] }
             StreamTableScan { table: t, columns: [v1, _row_id], pk_indices: [1] }
@@ -443,7 +443,7 @@
       LogicalScan { table: t, columns: [a, b] }
   stream_plan: |
     StreamMaterialize { columns: [agg#0(hidden), cnt_agb], pk_columns: [] }
-      StreamGlobalSimpleAgg { aggs: [sum($0), sum($1) filter(($0 > $1))] }
+      StreamGlobalSimpleAgg { aggs: [sum($0), sum($1)] }
         StreamExchange { dist: Single }
           StreamLocalSimpleAgg { aggs: [count, count filter(($0 > $1))] }
             StreamTableScan { table: t, columns: [a, b, _row_id], pk_indices: [2] }
