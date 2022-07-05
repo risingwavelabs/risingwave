@@ -21,7 +21,7 @@ use std::time::Duration;
 use bytes::Bytes;
 use futures::future::{join_all, try_join_all};
 use itertools::Itertools;
-use parking_lot::{RwLock, RwLockWriteGuard};
+use parking_lot::{RwLock, RwLockReadGuard, RwLockUpgradableReadGuard, RwLockWriteGuard};
 use risingwave_common::config::StorageConfig;
 use risingwave_hummock_sdk::key::FullKey;
 use risingwave_hummock_sdk::{CompactionGroupId, LocalSstableInfo};
@@ -221,7 +221,7 @@ impl LocalVersionManager {
             }
         }
 
-        let old_version = self.local_version.read().clone();
+        let old_version = self.local_version.upgradable_read();
         if old_version.pinned_version().id() >= new_version_id {
             return false;
         }
@@ -230,10 +230,10 @@ impl LocalVersionManager {
             conflict_detector.set_watermark(newly_pinned_version.max_committed_epoch);
         }
 
-        let mut new_version = old_version;
+        let mut new_version = old_version.clone();
         new_version.set_pinned_version(newly_pinned_version);
         {
-            let mut guard = self.local_version.write();
+            let mut guard = RwLockUpgradableReadGuard::upgrade(old_version);
             *guard = new_version;
             RwLockWriteGuard::unlock_fair(guard);
         }
