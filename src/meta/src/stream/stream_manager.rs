@@ -813,7 +813,6 @@ mod tests {
         ) -> std::result::Result<Response<SyncSourcesResponse>, Status> {
             Ok(Response::new(SyncSourcesResponse::default()))
         }
-
     }
 
     struct MockServices {

@@ -97,6 +97,7 @@ pub use project::ProjectExecutor;
 pub use rearranged_chain::RearrangedChainExecutor;
 use risingwave_pb::source::{ConnectorSplit, ConnectorSplits};
 use simple::{SimpleExecutor, SimpleExecutorWrapper};
+pub use sink::SinkExecutor;
 pub use source::*;
 pub use top_n::TopNExecutor;
 pub use top_n_appendonly::AppendOnlyTopNExecutor;

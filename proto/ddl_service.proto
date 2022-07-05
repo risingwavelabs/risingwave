@@ -67,6 +67,7 @@ message DropSourceResponse {
 
 message CreateSinkRequest {
   catalog.Sink sink = 1;
+  stream_plan.StreamFragmentGraph fragment_graph = 2;
 }
 
 message CreateSinkResponse {

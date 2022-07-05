@@ -13,16 +13,24 @@
 // limitations under the License.
 
 use std::collections::HashMap;
+use std::rc::Rc;
 
+use fixedbitset::FixedBitSet;
 use pgwire::pg_response::{PgResponse, StatementType};
+use risingwave_common::catalog::TableDesc;
 use risingwave_common::error::Result;
 use risingwave_pb::catalog::Sink as ProstSink;
 use risingwave_sqlparser::ast::CreateSinkStatement;
 
 use super::util::handle_with_properties;
 use crate::binder::Binder;
-use crate::catalog::{DatabaseId, SchemaId};
-use crate::session::OptimizerContext;
+use crate::catalog::{DatabaseId, SchemaId, TableCatalog};
+use crate::optimizer::plan_node::{LogicalScan, StreamSink, StreamTableScan};
+use crate::optimizer::property::{Order, RequiredDist};
+use crate::optimizer::{PlanRef, PlanRoot};
+use crate::planner::Planner;
+use crate::session::{OptimizerContext, OptimizerContextRef, SessionImpl};
+use crate::stream_fragmenter::StreamFragmenter;
 
 pub(crate) fn make_prost_sink(
     database_id: DatabaseId,
@@ -43,10 +51,30 @@ pub(crate) fn make_prost_sink(
     })
 }
 
+fn gen_sink_plan(
+    context: OptimizerContextRef,
+    associated_table_name: String,
+    associated_table_desc: TableDesc,
+    owner: String,
+    properties: HashMap<String, String>,
+) -> Result<PlanRef> {
+    let scan_node: PlanRef = StreamTableScan::new(LogicalScan::create(
+        associated_table_name,
+        false,
+        Rc::new(associated_table_desc),
+        vec![],
+        context,
+    ))
+    .into();
+
+    Ok(StreamSink::new(scan_node).into())
+}
+
 pub async fn handle_create_sink(
     context: OptimizerContext,
     stmt: CreateSinkStatement,
 ) -> Result<PgResponse> {
+    let with_properties = handle_with_properties("create_sink", stmt.with_properties.0)?;
     let session = context.session_ctx.clone();
 
     let (schema_name, sink_name) = Binder::resolve_table_name(stmt.sink_name.clone())?;
@@ -55,14 +83,19 @@ pub async fn handle_create_sink(
         .catalog_reader()
         .read_guard()
         .check_relation_name_duplicated(session.database(), &schema_name, sink_name.as_str())?;
-    let associated_table_id = {
+
+    let (associated_table_id, associated_table_name, associated_table_desc) = {
         let catalog_reader = session.env().catalog_reader().read_guard();
-        let associated_table = catalog_reader.get_table_by_name(
+        let table = catalog_reader.get_table_by_name(
             session.database(),
             &schema_name,
             stmt.materialized_view.to_string().as_str(),
         )?;
-        associated_table.id().table_id.into()
+        (
+            table.id().table_id.into(),
+            table.name().to_string(),
+            table.table_desc(),
+        )
     };
 
     let sink = make_prost_sink(
@@ -70,12 +103,24 @@ pub async fn handle_create_sink(
         schema_id,
         stmt.sink_name.to_string(),
         associated_table_id,
-        handle_with_properties("create_sink", stmt.with_properties.0)?,
+        with_properties.clone(),
         session.user_name().to_string(),
     )?;
 
+    let graph = {
+        let plan = gen_sink_plan(
+            context.into(),
+            associated_table_name,
+            associated_table_desc,
+            session.user_name().to_string(),
+            with_properties.clone(),
+        )?;
+        let plan = plan.to_stream_prost();
+        StreamFragmenter::build_graph(plan)
+    };
+
     let catalog_writer = session.env().catalog_writer();
-    catalog_writer.create_sink(sink).await?;
+    catalog_writer.create_sink(sink, graph).await?;
 
     Ok(PgResponse::empty_result(StatementType::CREATE_SINK))
 }

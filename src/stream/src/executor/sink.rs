@@ -31,7 +31,7 @@ impl<S: Sink> SinkExecutor<S> {
         Self {
             child: materialize_executor,
             _external_sink,
-            identity: "SinkExecutor".to_string(),
+            identity: "SinkExecutor".to_string(), /* TODO(nanderstabel): convert to identity: format!("SinkExecutor {:X}", executor_id), */
         }
     }
 
