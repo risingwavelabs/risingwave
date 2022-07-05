@@ -113,6 +113,13 @@ message HashAggNode {
   repeated expr.AggCall agg_calls = 2;
 }
 
+message ExpandNode {
+  message Subset {
+    repeated uint32 keys = 1;
+  }
+  repeated Subset column_subsets = 1;
+}
+
 message SortAggNode {
   repeated expr.ExprNode group_keys = 1;
   repeated expr.AggCall agg_calls = 2;
@@ -223,7 +230,8 @@ message PlanNode {
     HopWindowNode hop_window = 25;
     TableFunctionNode table_function = 26;
     SysRowSeqScanNode sys_row_seq_scan = 27;
-    LookupJoinNode lookup_join = 28;
+    ExpandNode expand = 28;
+    LookupJoinNode lookup_join = 29;
   }
   string identity = 24;
 }

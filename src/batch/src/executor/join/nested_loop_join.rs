@@ -170,7 +170,6 @@ impl BoxedExecutorBuilder for NestedLoopJoinExecutor {
         let join_expr = expr_build_from_prost(nested_loop_join_node.get_join_cond()?)?;
 
         let left_child = inputs.remove(0);
-        let probe_side_schema = left_child.schema().data_types();
         let right_child = inputs.remove(0);
 
         // TODO(Bowen): Merge this with derive schema in Logical Join (#790).
@@ -193,10 +192,6 @@ impl BoxedExecutorBuilder for NestedLoopJoinExecutor {
             .map(|&x| x as usize)
             .collect();
         let original_schema = Schema { fields };
-        let actual_schema = output_indices
-            .iter()
-            .map(|&idx| original_schema[idx].clone())
-            .collect();
         match join_type {
             JoinType::Inner
             | JoinType::LeftOuter
@@ -206,24 +201,16 @@ impl BoxedExecutorBuilder for NestedLoopJoinExecutor {
             | JoinType::RightSemi
             | JoinType::RightAnti => {
                 // TODO: Support FULL OUTER.
-                let outer_table_source = RowLevelIter::new(left_child);
 
-                Ok(Box::new(Self {
+                Ok(Box::new(Self::new(
                     join_expr,
                     join_type,
-                    chunk_builder: DataChunkBuilder::with_default_size(
-                        original_schema.data_types(),
-                    ),
-                    schema: actual_schema,
+                    original_schema,
                     output_indices,
-                    last_chunk: None,
-                    probe_side_schema,
-                    probe_side_source: outer_table_source,
-                    build_table: RowLevelIter::new(right_child),
-                    probe_remain_chunk_idx: 0,
-                    probe_remain_row_idx: 0,
-                    identity: "NestedLoopJoinExecutor2".to_string(),
-                }))
+                    left_child,
+                    right_child,
+                    "NestedLoopJoinExecutor2".to_string(),
+                )))
             }
             _ => Err(ErrorCode::NotImplemented(
                 format!("Do not support {:?} join type now.", join_type),
@@ -233,7 +220,37 @@ impl BoxedExecutorBuilder for NestedLoopJoinExecutor {
         }
     }
 }
+
 impl NestedLoopJoinExecutor {
+    pub fn new(
+        join_expr: BoxedExpression,
+        join_type: JoinType,
+        original_schema: Schema,
+        output_indices: Vec<usize>,
+        left_child: BoxedExecutor,
+        right_child: BoxedExecutor,
+        identity: String,
+    ) -> Self {
+        let schema = output_indices
+            .iter()
+            .map(|&idx| original_schema[idx].clone())
+            .collect();
+        Self {
+            join_expr,
+            join_type,
+            schema,
+            output_indices,
+            chunk_builder: DataChunkBuilder::with_default_size(original_schema.data_types()),
+            last_chunk: None,
+            probe_side_schema: left_child.schema().data_types(),
+            probe_side_source: RowLevelIter::new(left_child),
+            build_table: RowLevelIter::new(right_child),
+            probe_remain_chunk_idx: 0,
+            probe_remain_row_idx: 0,
+            identity,
+        }
+    }
+
     /// Probe matched rows in `probe_table`.
     /// # Arguments
     /// * `first_probe`: whether the first probing. Init outer source if yes.

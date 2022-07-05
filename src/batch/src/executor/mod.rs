@@ -13,6 +13,7 @@
 // limitations under the License.
 
 mod delete;
+mod expand;
 mod filter;
 mod generic_exchange;
 mod hash_agg;
@@ -36,6 +37,7 @@ mod values;
 
 use async_recursion::async_recursion;
 pub use delete::*;
+pub use expand::*;
 pub use filter::*;
 use futures::stream::BoxStream;
 pub use generic_exchange::*;
@@ -187,6 +189,7 @@ impl<'a, C: BatchTaskContext> ExecutorBuilder<'a, C> {
             NodeBody::TableFunction => TableFunctionExecutorBuilder,
             NodeBody::HopWindow => HopWindowExecutor,
             NodeBody::SysRowSeqScan => SysRowSeqScanExecutorBuilder,
+            NodeBody::Expand => ExpandExecutor,
             NodeBody::LookupJoin => LookupJoinExecutorBuilder,
         }
         .await?;

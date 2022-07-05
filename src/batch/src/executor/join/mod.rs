@@ -36,7 +36,7 @@ pub use sort_merge_join::*;
 
 use crate::executor::join::JoinType::Inner;
 #[derive(Copy, Clone, Debug, PartialEq)]
-pub(super) enum JoinType {
+pub enum JoinType {
     Inner,
     LeftOuter,
     /// Semi join when probe side should output when matched
