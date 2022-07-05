@@ -30,9 +30,7 @@ use crate::executor::ExecutorBuilder;
 use crate::task::{BatchTaskContext, TaskId};
 
 pub type ExchangeExecutor<C> = GenericExchangeExecutor<DefaultCreateSource, C>;
-use crate::executor::{
-    data_chunk_stream, BoxedDataChunkStream, BoxedExecutor, BoxedExecutorBuilder, Executor,
-};
+use crate::executor::{BoxedDataChunkStream, BoxedExecutor, BoxedExecutorBuilder, Executor};
 
 pub struct GenericExchangeExecutor<CS, C> {
     sources: Vec<ProstExchangeSource>,
@@ -159,6 +157,20 @@ impl<CS: 'static + CreateSource, C: BatchTaskContext> GenericExchangeExecutor<CS
             let data_chunk = data_chunk?;
             yield data_chunk
         }
+    }
+}
+
+#[try_stream(boxed, ok = DataChunk, error = RwError)]
+async fn data_chunk_stream(mut source: ExchangeSourceImpl) {
+    loop {
+        if let Some(res) = source.take_data().await? {
+            if res.cardinality() == 0 {
+                debug!("Exchange source {:?} output empty chunk.", source);
+            }
+            yield res;
+            continue;
+        }
+        break;
     }
 }
 

@@ -26,8 +26,7 @@ use risingwave_pb::batch_plan::ExchangeSource as ProstExchangeSource;
 
 use crate::exchange_source::{ExchangeSource, ExchangeSourceImpl};
 use crate::executor::{
-    BoxedDataChunkStream, BoxedExecutor, CreateSource, Executor, GatherExecutor,
-    ProbeSideSourceParams,
+    BoxedDataChunkStream, BoxedExecutor, CreateSource, Executor, ProbeSideSourceBuilder,
 };
 use crate::task::BatchTaskContext;
 
@@ -200,12 +199,21 @@ impl CreateSource for FakeCreateSource {
     }
 }
 
-pub struct MockGatherExecutor {
-    chunks: Vec<DataChunk>,
+pub struct FakeProbeSideSourceBuilder {
+    schema: Schema,
 }
 
-impl GatherExecutor for MockGatherExecutor {
-    fn new_boxed(build_row: &RowRef, _: &ProbeSideSourceParams) -> Result<Box<Self>> {
+impl FakeProbeSideSourceBuilder {
+    pub fn new(schema: Schema) -> Self {
+        Self { schema }
+    }
+}
+
+#[async_trait::async_trait]
+impl ProbeSideSourceBuilder for FakeProbeSideSourceBuilder {
+    async fn build_source(&self, cur_row: &RowRef) -> Result<BoxedExecutor> {
+        let mut mock_executor = MockExecutor::new(self.schema.clone());
+
         let base_data_chunk = DataChunk::from_pretty(
             "i f
              1 9.2
@@ -216,31 +224,16 @@ impl GatherExecutor for MockGatherExecutor {
              5 2.3",
         );
 
-        let mut chunks = vec![];
         for idx in 0..base_data_chunk.capacity() {
             let probe_row = base_data_chunk.row_at_unchecked_vis(idx);
-            if build_row.value_at(0) == probe_row.value_at(0) {
+            if cur_row.value_at(0) == probe_row.value_at(0) {
                 let owned_row = probe_row.to_owned_row();
-                chunks.push(DataChunk::from_rows(
-                    &[owned_row],
-                    &[DataType::Int32, DataType::Float32],
-                )?);
+                let chunk =
+                    DataChunk::from_rows(&[owned_row], &[DataType::Int32, DataType::Float32])?;
+                mock_executor.add(chunk);
             }
         }
 
-        Ok(Box::new(Self { chunks }))
-    }
-
-    fn execute(self: Box<Self>) -> BoxedDataChunkStream {
-        self.do_execute()
-    }
-}
-
-impl MockGatherExecutor {
-    #[try_stream(boxed, ok = DataChunk, error = RwError)]
-    async fn do_execute(self: Box<Self>) {
-        for data_chunk in self.chunks {
-            yield data_chunk;
-        }
+        Ok(Box::new(mock_executor))
     }
 }

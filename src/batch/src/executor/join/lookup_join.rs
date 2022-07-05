@@ -12,8 +12,6 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::marker::PhantomData;
-
 use futures::StreamExt;
 use futures_async_stream::try_stream;
 use itertools::Itertools;
@@ -22,58 +20,49 @@ use risingwave_common::catalog::{ColumnDesc, Field, Schema};
 use risingwave_common::error::{ErrorCode, Result, RwError};
 use risingwave_common::types::{DataType, ToOwnedDatum};
 use risingwave_common::util::chunk_coalesce::{DataChunkBuilder, SlicedDataChunk};
-use risingwave_common::util::select_all;
 use risingwave_expr::expr::{build_from_prost, BoxedExpression};
 use risingwave_pb::batch_plan::exchange_source::LocalExecutePlan::Plan;
 use risingwave_pb::batch_plan::plan_node::NodeBody;
 use risingwave_pb::batch_plan::{
-    ExchangeSource as ProstExchangeSource, LocalExecutePlan, PlanFragment, PlanNode,
+    ExchangeNode, ExchangeSource as ProstExchangeSource, LocalExecutePlan, PlanFragment, PlanNode,
     RowSeqScanNode, ScanRange,
 };
 use risingwave_pb::plan_common::CellBasedTableDesc;
 use uuid::Uuid;
 
-use crate::exchange_source::ExchangeSourceImpl;
-use crate::execution::grpc_exchange::GrpcExchangeSource;
 use crate::executor::join::{
     concatenate, convert_datum_refs_to_chunk, convert_row_to_chunk, JoinType,
 };
 use crate::executor::{
-    data_chunk_stream, BoxedDataChunkStream, BoxedExecutor, BoxedExecutorBuilder, Executor,
-    ExecutorBuilder,
+    BoxedDataChunkStream, BoxedExecutor, BoxedExecutorBuilder, Executor, ExecutorBuilder,
 };
-use crate::task::BatchTaskContext;
+use crate::task::{BatchTaskContext, TaskId};
 
 // Build side = "Left side", where we go through its rows one by one
 // Probe side = "Right side", where we find matches for each row from the build side
 
 #[derive(Default)]
-pub struct ProbeSideSourceParams {
+pub struct ProbeSideSource<C> {
     table_desc: CellBasedTableDesc,
+    probe_side_schema: Schema,
     build_side_idxs: Vec<usize>,
     source_templates: Vec<ProstExchangeSource>,
+    context: C,
+    task_id: TaskId,
+    epoch: u64,
 }
 
 /// Contains the functions of the `GatherExecutor` that are exposed
-pub trait GatherExecutor: Send {
-    fn new_boxed(cur_row: &RowRef, params: &ProbeSideSourceParams) -> Result<Box<Self>>;
-
-    fn execute(self: Box<Self>) -> BoxedDataChunkStream;
+#[async_trait::async_trait]
+pub trait ProbeSideSourceBuilder: Send {
+    async fn build_source(&self, cur_row: &RowRef) -> Result<BoxedExecutor>;
 }
 
-/// `DefaultGatherExecutor` sends and retrieves data from the probe side table using RPC calls
-struct DefaultGatherExecutor {
-    prost_sources: Vec<ProstExchangeSource>,
-}
-
-impl DefaultGatherExecutor {
+impl<C: BatchTaskContext> ProbeSideSource<C> {
     /// Creates the `RowSeqScanNode` that will be used for scanning the probe side table
     /// based on the passed `RowRef` and the `ProbeSideSourceParams`.
-    fn create_row_seq_scan_node(
-        cur_row: &RowRef,
-        params: &ProbeSideSourceParams,
-    ) -> Result<NodeBody> {
-        let eq_conds = params
+    fn create_row_seq_scan_node(&self, cur_row: &RowRef) -> Result<NodeBody> {
+        let eq_conds = self
             .build_side_idxs
             .iter()
             .map(|&idx| {
@@ -92,8 +81,8 @@ impl DefaultGatherExecutor {
         });
 
         Ok(NodeBody::RowSeqScan(RowSeqScanNode {
-            table_desc: Some(params.table_desc.clone()),
-            column_ids: (0..params.table_desc.columns.len())
+            table_desc: Some(self.table_desc.clone()),
+            column_ids: (0..self.table_desc.columns.len())
                 .into_iter()
                 .map(|x| x as i32)
                 .collect(), // Scan all the columns
@@ -102,57 +91,22 @@ impl DefaultGatherExecutor {
         }))
     }
 
-    /// Sends RPC calls to retrieve data from the probe side table using the vector of
-    /// `ProstExchangeSources` that was created after calling `create_probe_side_prost_sources()`
-    #[try_stream(boxed, ok = DataChunk, error = RwError)]
-    async fn get_probe_side_chunk(self: Box<Self>) {
-        let mut exchange_sources: Vec<ExchangeSourceImpl> = vec![];
-
-        for prost_source in &self.prost_sources {
-            let exchange_source =
-                ExchangeSourceImpl::Grpc(GrpcExchangeSource::create(prost_source.clone()).await?);
-            exchange_sources.push(exchange_source);
-        }
-
-        // Merge the streams from all the exchange sources into one stream
-        let mut stream = select_all(
-            exchange_sources
-                .into_iter()
-                .map(data_chunk_stream)
-                .collect_vec(),
-        )
-        .boxed();
-
-        while let Some(data_chunk) = stream.next().await {
-            let data_chunk = data_chunk?;
-            yield data_chunk
-        }
-    }
-}
-
-impl GatherExecutor for DefaultGatherExecutor {
-    /// Creates a new boxed `DefaultGatherExecutor` that stores a vector of `ProstExchangeSources`
-    /// that eill be used for sending RPC calls. They are made using the `source_templates` in the
-    /// passed `ProbeSideSourceParams`.
-    fn new_boxed(cur_row: &RowRef, params: &ProbeSideSourceParams) -> Result<Box<Self>> {
-        let Plan(inner_template_plan) =
-            params.source_templates[0].get_local_execute_plan().unwrap();
+    fn build_prost_exchange_sources(&self, cur_row: &RowRef) -> Result<Vec<ProstExchangeSource>> {
+        let Plan(inner_template_plan) = self.source_templates[0].get_local_execute_plan().unwrap();
 
         let local_execute_plan = LocalExecutePlan {
             plan: Some(PlanFragment {
                 root: Some(PlanNode {
                     children: vec![],
                     identity: Uuid::new_v4().to_string(),
-                    node_body: Some(DefaultGatherExecutor::create_row_seq_scan_node(
-                        cur_row, params,
-                    )?),
+                    node_body: Some(self.create_row_seq_scan_node(cur_row)?),
                 }),
                 exchange_info: None,
             }),
             epoch: inner_template_plan.epoch,
         };
 
-        let prost_sources = params
+        let prost_exchange_sources = self
             .source_templates
             .iter()
             .map(|source| ProstExchangeSource {
@@ -162,12 +116,32 @@ impl GatherExecutor for DefaultGatherExecutor {
             })
             .collect();
 
-        Ok(Box::new(DefaultGatherExecutor { prost_sources }))
+        Ok(prost_exchange_sources)
     }
+}
 
-    /// Execute the `GatherExecutor` and retrieve the data chunk stream
-    fn execute(self: Box<Self>) -> BoxedDataChunkStream {
-        self.get_probe_side_chunk()
+#[async_trait::async_trait]
+impl<C: BatchTaskContext> ProbeSideSourceBuilder for ProbeSideSource<C> {
+    async fn build_source(&self, cur_row: &RowRef) -> Result<BoxedExecutor> {
+        let sources = self.build_prost_exchange_sources(cur_row)?;
+
+        let exchange_node = NodeBody::Exchange(ExchangeNode {
+            sources,
+            input_schema: self.probe_side_schema.to_prost(),
+        });
+
+        let plan_node = PlanNode {
+            children: vec![],
+            identity: "LookupJoinExchangeExecutor".to_string(),
+            node_body: Some(exchange_node),
+        };
+
+        let task_id = self.task_id.clone();
+
+        let executor_builder =
+            ExecutorBuilder::new(&plan_node, &task_id, self.context.clone(), self.epoch);
+
+        executor_builder.build().await
     }
 }
 
@@ -178,22 +152,21 @@ impl GatherExecutor for DefaultGatherExecutor {
 /// using the `GatherExecutor` to query the probe side
 /// 3) Join R and the matching rows on the probe side together with either inner or left outer join
 /// 4) Repeat 2-3) for every row in the build side
-pub struct LookupJoinExecutor<GE> {
+pub struct LookupJoinExecutor<P> {
     join_type: JoinType,
     condition: Option<BoxedExpression>,
     build_child: Option<BoxedExecutor>,
     build_side_data_types: Vec<DataType>,
-    probe_side_data_types: Vec<DataType>,
-    probe_side_source_params: ProbeSideSourceParams,
+    probe_side_source: P,
+    probe_side_len: usize,
     chunk_builder: DataChunkBuilder,
     schema: Schema,
     output_indices: Vec<usize>,
     last_chunk: Option<SlicedDataChunk>,
     identity: String,
-    unused: PhantomData<GE>, // Only exists so we can use generic type
 }
 
-impl<GE: 'static + GatherExecutor> Executor for LookupJoinExecutor<GE> {
+impl<P: 'static + ProbeSideSourceBuilder> Executor for LookupJoinExecutor<P> {
     fn schema(&self) -> &Schema {
         &self.schema
     }
@@ -207,7 +180,7 @@ impl<GE: 'static + GatherExecutor> Executor for LookupJoinExecutor<GE> {
     }
 }
 
-impl<GE: 'static + GatherExecutor> LookupJoinExecutor<GE> {
+impl<P: 'static + ProbeSideSourceBuilder> LookupJoinExecutor<P> {
     #[try_stream(boxed, ok = DataChunk, error = RwError)]
     async fn do_execute(mut self: Box<Self>) {
         let mut build_side_stream = self.build_child.take().unwrap().execute();
@@ -221,8 +194,8 @@ impl<GE: 'static + GatherExecutor> LookupJoinExecutor<GE> {
                     continue;
                 }
 
-                let gather_executor = GE::new_boxed(&cur_row, &self.probe_side_source_params)?;
-                let mut probe_side_stream = gather_executor.execute();
+                let probe_child = self.probe_side_source.build_source(&cur_row).await?;
+                let mut probe_side_stream = probe_child.execute();
 
                 let mut chunk_added = false;
 
@@ -323,7 +296,7 @@ impl<GE: 'static + GatherExecutor> LookupJoinExecutor<GE> {
     fn do_left_outer_join(&self, cur_row: &RowRef) -> Result<Option<DataChunk>> {
         let mut build_datum_refs = cur_row.values().collect_vec();
 
-        for _ in 0..self.probe_side_data_types.len() {
+        for _ in 0..self.probe_side_len {
             build_datum_refs.push(None);
         }
 
@@ -381,6 +354,7 @@ impl BoxedExecutorBuilder for LookupJoinExecutorBuilder {
                 .map(|column_desc| Field::from(&ColumnDesc::from(column_desc)))
                 .collect_vec(),
         };
+        let probe_side_len = probe_side_schema.len();
 
         let fields = [
             build_child.schema().fields.clone(),
@@ -400,33 +374,34 @@ impl BoxedExecutorBuilder for LookupJoinExecutorBuilder {
         }
 
         ensure!(!lookup_join_node.get_sources().is_empty());
-        let probe_side_source_params = ProbeSideSourceParams {
+        let probe_side_source = ProbeSideSource {
             table_desc: probe_side_table_desc.clone(),
+            probe_side_schema,
             build_side_idxs,
             source_templates: lookup_join_node.get_sources().to_vec(),
+            context: source.context().clone(),
+            task_id: source.task_id.clone(),
+            epoch: source.epoch(),
         };
 
-        Ok(Box::new(LookupJoinExecutor::<DefaultGatherExecutor> {
+        Ok(Box::new(LookupJoinExecutor {
             join_type,
             condition,
             build_child: Some(build_child),
             build_side_data_types,
-            probe_side_data_types: probe_side_schema.data_types(),
-            probe_side_source_params,
+            probe_side_source,
+            probe_side_len,
             chunk_builder: DataChunkBuilder::with_default_size(original_schema.data_types()),
             schema: actual_schema,
             output_indices,
             last_chunk: None,
             identity: "LookupJoinExecutor".to_string(),
-            unused: PhantomData,
         }))
     }
 }
 
 #[cfg(test)]
 mod tests {
-    use std::marker::PhantomData;
-
     use risingwave_common::array::{DataChunk, DataChunkTestExt};
     use risingwave_common::catalog::{Field, Schema};
     use risingwave_common::types::{DataType, ScalarImpl};
@@ -436,8 +411,14 @@ mod tests {
     use risingwave_pb::expr::expr_node::Type;
 
     use crate::executor::join::JoinType;
-    use crate::executor::test_utils::{diff_executor_output, MockExecutor, MockGatherExecutor};
-    use crate::executor::{BoxedExecutor, LookupJoinExecutor, ProbeSideSourceParams};
+    use crate::executor::test_utils::{
+        diff_executor_output, FakeProbeSideSourceBuilder, MockExecutor,
+    };
+    use crate::executor::{BoxedExecutor, LookupJoinExecutor};
+
+    pub struct MockGatherExecutor {
+        chunks: Vec<DataChunk>,
+    }
 
     fn create_build_child() -> BoxedExecutor {
         let schema = Schema {
@@ -477,19 +458,23 @@ mod tests {
         .concat();
         let original_schema = Schema { fields };
 
-        Box::new(LookupJoinExecutor::<MockGatherExecutor> {
+        let probe_side_schema = Schema {
+            fields: build_child.schema().fields.clone(),
+        };
+        let probe_side_len = build_child.schema().len();
+
+        Box::new(LookupJoinExecutor {
             join_type,
             condition,
             build_side_data_types: build_child.schema().data_types(),
-            probe_side_data_types: build_child.schema().data_types(),
             build_child: Some(build_child),
-            probe_side_source_params: ProbeSideSourceParams::default(),
+            probe_side_source: FakeProbeSideSourceBuilder::new(probe_side_schema),
+            probe_side_len,
             chunk_builder: DataChunkBuilder::with_default_size(original_schema.data_types()),
             schema: original_schema.clone(),
             output_indices: (0..original_schema.len()).into_iter().collect(),
             last_chunk: None,
             identity: "TestLookupJoinExecutor".to_string(),
-            unused: PhantomData,
         })
     }
 
