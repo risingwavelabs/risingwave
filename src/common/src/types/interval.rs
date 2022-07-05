@@ -13,7 +13,7 @@
 // limitations under the License.
 
 use std::cmp::Ordering;
-use std::fmt::{Display, Formatter};
+use std::fmt::{Display, Formatter, Write as _};
 use std::hash::{Hash, Hasher};
 use std::io::Write;
 use std::ops::{Add, Sub};
@@ -391,7 +391,7 @@ impl Display for IntervalUnit {
         }
         let mut format_time = format!("{hours:0>2}:{minutes:0>2}:{seconds:0>2}");
         if secs_fract != 0 {
-            format_time.push_str(&format!(".{secs_fract:03}"));
+            write!(format_time, ".{:03}", secs_fract)?;
             while secs_fract % 10 == 0 {
                 secs_fract /= 10;
                 format_time.pop();
