@@ -12,7 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::collections::{BTreeMap, BTreeSet, HashSet, VecDeque};
+use std::collections::{BTreeMap, HashSet, VecDeque};
 use std::future::Future;
 use std::ops::DerefMut;
 use std::sync::atomic::{AtomicU64, Ordering};
@@ -221,11 +221,6 @@ where
             .unwrap_or_else(CurrentHummockVersionId::new);
 
         let versions = HummockVersion::list(self.env.meta_store()).await?;
-        let mut version_ids: BTreeSet<_> = HummockVersion::list(self.env.meta_store())
-            .await?
-            .iter()
-            .map(|version| version.id)
-            .collect();
 
         let hummock_version_deltas: BTreeMap<_, _> =
             HummockVersionDelta::list(self.env.meta_store())
@@ -235,7 +230,7 @@ where
                 .collect();
 
         // Insert the initial version.
-        let mut redo_state = if version_ids.is_empty() {
+        let mut redo_state = if versions.is_empty() {
             let mut init_version = HummockVersion {
                 id: FIRST_VERSION_ID,
                 levels: Default::default(),
@@ -262,7 +257,6 @@ where
                     .levels
                     .insert(compaction_group.group_id(), Levels { levels });
             }
-            version_ids.insert(init_version.id);
             init_version.insert(self.env.meta_store()).await?;
             init_version
         } else {
