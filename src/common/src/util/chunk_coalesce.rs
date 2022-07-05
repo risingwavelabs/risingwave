@@ -15,11 +15,13 @@
 use std::mem::swap;
 use std::sync::Arc;
 
+use futures_async_stream::try_stream;
 use itertools::Itertools;
 
 use crate::array::column::Column;
-use crate::array::error::anyhow;
 use crate::array::{ArrayBuilderImpl, ArrayResult, DataChunk, RowRef};
+use crate::error::ErrorCode::InternalError;
+use crate::error::RwError;
 use crate::types::{DataType, Datum, DatumRef};
 
 pub const DEFAULT_CHUNK_BUFFER_SIZE: usize = 2048;
@@ -238,6 +240,30 @@ impl DataChunkBuilder {
     pub fn buffered_count(&self) -> usize {
         self.buffered_count
     }
+
+    #[try_stream(boxed, ok = DataChunk, error = RwError)]
+    pub async fn trunc_data_chunk(&mut self, data_chunk: DataChunk) {
+        let mut sliced_data_chunk = SlicedDataChunk::new_checked(data_chunk)?;
+        loop {
+            let (left_data, output) = self.append_chunk(sliced_data_chunk)?;
+            match (left_data, output) {
+                (Some(left_data), Some(output)) => {
+                    sliced_data_chunk = left_data;
+                    yield output;
+                }
+                (None, Some(output)) => {
+                    yield output;
+                    break;
+                }
+                (None, None) => {
+                    break;
+                }
+                _ => {
+                    return Err(InternalError("Data chunk builder error".to_string()).into());
+                }
+            }
+        }
+    }
 }
 
 impl SlicedDataChunk {
@@ -256,34 +282,6 @@ impl SlicedDataChunk {
 
     fn capacity(&self) -> usize {
         self.data_chunk.capacity() - self.offset
-    }
-
-    pub fn trunc_data_chunk(
-        data_chunk_builder: &mut DataChunkBuilder,
-        data_chunk: DataChunk,
-    ) -> ArrayResult<Vec<DataChunk>> {
-        let mut sliced_data_chunk = SlicedDataChunk::new_checked(data_chunk)?;
-        let mut res = vec![];
-        loop {
-            let (left_data, output) = data_chunk_builder.append_chunk(sliced_data_chunk)?;
-            match (left_data, output) {
-                (Some(left_data), Some(output)) => {
-                    sliced_data_chunk = left_data;
-                    res.push(output);
-                }
-                (None, Some(output)) => {
-                    res.push(output);
-                    break;
-                }
-                (None, None) => {
-                    break;
-                }
-                _ => {
-                    return Err(anyhow!("Data chunk builder error").into());
-                }
-            }
-        }
-        Ok(res)
     }
 }
 

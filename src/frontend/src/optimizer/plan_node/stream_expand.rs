@@ -80,6 +80,6 @@ impl ToStreamProst for StreamExpand {
 }
 
 fn subset_to_protobuf(subset: &[usize]) -> Subset {
-    let subset = subset.iter().map(|key| *key as u32).collect_vec();
-    Subset { subset }
+    let keys = subset.iter().map(|key| *key as u32).collect_vec();
+    Subset { keys }
 }

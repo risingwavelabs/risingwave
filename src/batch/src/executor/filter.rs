@@ -18,7 +18,7 @@ use risingwave_common::array::{Array, DataChunk};
 use risingwave_common::catalog::Schema;
 use risingwave_common::error::ErrorCode::InternalError;
 use risingwave_common::error::{Result, RwError};
-use risingwave_common::util::chunk_coalesce::{DataChunkBuilder, SlicedDataChunk};
+use risingwave_common::util::chunk_coalesce::DataChunkBuilder;
 use risingwave_expr::expr::{build_from_prost, BoxedExpression};
 use risingwave_pb::batch_plan::plan_node::NodeBody;
 
@@ -59,11 +59,11 @@ impl FilterExecutor {
             let vis_array = self.expr.eval(&data_chunk)?;
 
             if let Bool(vis) = vis_array.as_ref() {
-                for data_chunk in SlicedDataChunk::trunc_data_chunk(
-                    &mut data_chunk_builder,
-                    data_chunk.with_visibility(vis.iter().collect()),
-                )? {
-                    yield data_chunk;
+                #[for_await]
+                for data_chunk in data_chunk_builder
+                    .trunc_data_chunk(data_chunk.with_visibility(vis.iter().collect()))
+                {
+                    yield data_chunk?;
                 }
             } else {
                 return Err(InternalError("Filter can only receive bool array".to_string()).into());

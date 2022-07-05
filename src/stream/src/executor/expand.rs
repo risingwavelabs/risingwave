@@ -59,12 +59,11 @@ impl ExpandExecutor {
                     let cardinality = data_chunk.cardinality();
                     let (columns, _) = data_chunk.into_parts();
 
-                    for new_columns in Column::expand_columns(
-                        cardinality,
-                        columns,
-                        self.column_subsets.to_owned(),
-                    )? {
-                        let stream_chunk = StreamChunk::new(ops.clone(), new_columns, None);
+                    #[for_await]
+                    for new_columns in
+                        Column::expand_columns(cardinality, columns, self.column_subsets.to_owned())
+                    {
+                        let stream_chunk = StreamChunk::new(ops.clone(), new_columns?, None);
                         yield Message::Chunk(stream_chunk)
                     }
                 }

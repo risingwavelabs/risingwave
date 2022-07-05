@@ -30,7 +30,7 @@ impl ExecutorBuilder for ExpandExecutorBuilder {
         let column_subsets = expand_node
             .column_subsets
             .iter()
-            .map(|subset| subset.subset.iter().map(|key| *key as usize).collect_vec())
+            .map(|subset| subset.keys.iter().map(|key| *key as usize).collect_vec())
             .collect_vec();
         Ok(ExpandExecutor::new(input, pk_indices, column_subsets).boxed())
     }

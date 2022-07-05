@@ -4039,6 +4039,7 @@ dependencies = [
  "crc32fast",
  "either",
  "futures",
+ "futures-async-stream",
  "humantime",
  "hyper",
  "itertools",

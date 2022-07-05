@@ -19,7 +19,7 @@ use risingwave_common::array::{DataChunk, Vis};
 use risingwave_common::catalog::{Field, Schema};
 use risingwave_common::error::{Result, RwError};
 use risingwave_common::types::DataType;
-use risingwave_common::util::chunk_coalesce::{DataChunkBuilder, SlicedDataChunk};
+use risingwave_common::util::chunk_coalesce::DataChunkBuilder;
 use risingwave_pb::batch_plan::plan_node::NodeBody;
 
 use super::{BoxedDataChunkStream, BoxedExecutor, BoxedExecutorBuilder, Executor, ExecutorBuilder};
@@ -59,14 +59,15 @@ impl ExpandExecutor {
             let (columns, vis) = data_chunk.into_parts();
             assert_eq!(vis, Vis::Compact(cardinality));
 
+            #[for_await]
             for new_columns in
-                Column::expand_columns(cardinality, columns, self.column_subsets.to_owned())?
+                Column::expand_columns(cardinality, columns, self.column_subsets.to_owned())
             {
-                for data_chunk in SlicedDataChunk::trunc_data_chunk(
-                    &mut data_chunk_builder,
-                    DataChunk::new(new_columns, vis.clone()),
-                )? {
-                    yield data_chunk;
+                #[for_await]
+                for data_chunk in
+                    data_chunk_builder.trunc_data_chunk(DataChunk::new(new_columns?, vis.clone()))
+                {
+                    yield data_chunk?;
                 }
             }
         }
@@ -91,7 +92,7 @@ impl BoxedExecutorBuilder for ExpandExecutor {
         let column_subsets = expand_node
             .column_subsets
             .iter()
-            .map(|subset| subset.subset.iter().map(|key| *key as usize).collect_vec())
+            .map(|subset| subset.keys.iter().map(|key| *key as usize).collect_vec())
             .collect_vec();
 
         let child = inputs.remove(0);

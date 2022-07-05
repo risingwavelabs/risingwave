@@ -115,7 +115,7 @@ message HashAggNode {
 
 message ExpandNode {
   message Subset {
-    repeated uint32 subset = 1;
+    repeated uint32 keys = 1;
   }
   repeated Subset column_subsets = 1;
 }

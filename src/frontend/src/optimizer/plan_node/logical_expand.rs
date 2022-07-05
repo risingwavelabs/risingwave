@@ -19,8 +19,8 @@ use risingwave_common::catalog::{Field, Schema};
 use risingwave_common::types::DataType;
 
 use super::{
-    BatchExpand, ColPrunable, LogicalProject, PlanBase, PlanRef, PlanTreeNodeUnary,
-    PredicatePushdown, StreamExpand, ToBatch, ToStream,
+    gen_filter_and_pushdown, BatchExpand, ColPrunable, LogicalProject, PlanBase, PlanRef,
+    PlanTreeNodeUnary, PredicatePushdown, StreamExpand, ToBatch, ToStream,
 };
 use crate::expr::InputRef;
 use crate::risingwave_common::error::Result;
@@ -32,6 +32,8 @@ use crate::utils::{ColIndexMapping, Condition};
 #[derive(Debug, Clone)]
 pub struct LogicalExpand {
     pub base: PlanBase,
+    // `column_subsets` has many `subset`s which specifies the columns that need to be
+    // reserved and other columns will be filled with NULL.
     column_subsets: Vec<Vec<usize>>,
     input: PlanRef,
 }
@@ -153,8 +155,12 @@ impl ColPrunable for LogicalExpand {
 
 impl PredicatePushdown for LogicalExpand {
     fn predicate_pushdown(&self, predicate: Condition) -> PlanRef {
-        let new_input = self.input.predicate_pushdown(predicate);
-        self.clone_with_input(new_input).into()
+        // TODO: how to do predicate pushdown for Expand?
+        //
+        // let new_input = self.input.predicate_pushdown(predicate);
+        // self.clone_with_input(new_input).into()
+
+        gen_filter_and_pushdown(self, predicate, Condition::true_cond())
     }
 }
 
