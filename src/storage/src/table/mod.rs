@@ -29,6 +29,7 @@ use risingwave_common::catalog::Schema;
 use risingwave_common::types::VIRTUAL_NODE_COUNT;
 
 use crate::error::StorageResult;
+use crate::table::storage_table::DEFAULT_VNODE;
 
 /// Represents the distribution for a specific table instance.
 pub struct Distribution {
@@ -43,10 +44,10 @@ impl Distribution {
     /// Fallback distribution for singleton or tests.
     pub fn fallback() -> Self {
         lazy_static::lazy_static! {
-            /// A bitmap that only the vnode `0x0000` is set.
+            /// A bitmap that only the default vnode is set.
             static ref FALLBACK_VNODES: Arc<Bitmap> = {
                 let mut vnodes = BitmapBuilder::zeroed(VIRTUAL_NODE_COUNT);
-                vnodes.set(0, true);
+                vnodes.set(DEFAULT_VNODE as _, true);
                 vnodes.finish().into()
             };
         }
