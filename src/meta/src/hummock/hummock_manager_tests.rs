@@ -144,7 +144,7 @@ async fn test_unpin_snapshot_before() {
             .unwrap();
         assert_eq!(
             pin_snapshots_epoch(&HummockPinnedSnapshot::list(env.meta_store()).await.unwrap()),
-            vec![epoch + 1]
+            vec![epoch]
         );
     }
 }
