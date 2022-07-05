@@ -21,7 +21,7 @@ use risingwave_common::array::{DataChunk, Row};
 use risingwave_common::buffer::Bitmap;
 use risingwave_common::catalog::{ColumnDesc, ColumnId, OrderedColumnDesc, Schema, TableId};
 use risingwave_common::error::{Result, RwError};
-use risingwave_common::types::{DataType, Datum, ScalarImpl, VIRTUAL_NODE_COUNT};
+use risingwave_common::types::{DataType, Datum, ScalarImpl};
 use risingwave_common::util::sort_util::OrderType;
 use risingwave_pb::batch_plan::plan_node::NodeBody;
 use risingwave_pb::batch_plan::{scan_range, ScanRange};
@@ -191,16 +191,15 @@ impl BoxedExecutorBuilder for RowSeqScanExecutorBuilder {
             .iter()
             .map(|&k| k as usize)
             .collect_vec();
-        let vnodes = match seq_scan_node.vnode_bitmap.as_ref() {
-            Some(vnodes) => Bitmap::try_from(vnodes).unwrap(),
+
+        let distribution = match &seq_scan_node.vnode_bitmap {
+            Some(vnodes) => Distribution {
+                vnodes: Bitmap::try_from(vnodes).unwrap().into(),
+                dist_key_indices,
+            },
             // This is possbile for dml. vnode_bitmap is not filled by scheduler.
             // Or it's single distribution, e.g., distinct agg. We scan in a single executor.
-            None => Bitmap::all_high_bits(VIRTUAL_NODE_COUNT),
-        };
-
-        let distribution = Distribution {
-            vnodes: vnodes.into(),
-            dist_key_indices,
+            None => Distribution::all_vnodes(dist_key_indices),
         };
 
         dispatch_state_store!(source.context().try_get_state_store()?, state_store, {
