@@ -16,11 +16,12 @@ use std::fmt::{Debug, Formatter};
 use std::sync::Arc;
 
 use either::Either;
-use futures::stream::{select_with_strategy, PollNext};
+use futures::stream::{select_with_strategy, PollNext, SelectWithStrategy};
 use futures::{pin_mut, Stream, StreamExt};
 use futures_async_stream::try_stream;
 use risingwave_common::array::column::Column;
 use risingwave_common::array::{ArrayBuilder, ArrayImpl, I64ArrayBuilder, StreamChunk};
+use risingwave_common::bail;
 use risingwave_common::catalog::{ColumnId, Schema, TableId};
 use risingwave_common::error::{internal_error, Result, RwError, ToRwResult};
 use risingwave_connector::{ConnectorState, SplitImpl, SplitMetaData};
@@ -132,95 +133,62 @@ impl<S: StateStore> SourceExecutor<S> {
     }
 }
 
-struct SourceReader {
+type SourceReaderMessage = Either<Result<Message>, Result<StreamChunkWithState>>;
+type SourceReaderArm = BoxStream<'static, SourceReaderMessage>;
+type SourceReaderStream =
+    SelectWithStrategy<SourceReaderArm, SourceReaderArm, fn(&mut ()) -> PollNext, ()>;
+
+struct SourceReaderNew {
     /// The reader for stream source.
-    stream_reader: Arc<Mutex<Option<Box<SourceStreamReaderImpl>>>>,
+    stream_reader: Box<SourceStreamReaderImpl>,
+
     /// The reader for barrier.
     barrier_receiver: UnboundedReceiver<Barrier>,
-    /// Expected barrier latency in ms. If there are no barrier within the expected barrier
-    /// latency, source will stall.
-    expected_barrier_latency_ms: u64,
 }
 
-impl SourceReader {
+impl SourceReaderNew {
     #[try_stream(ok = StreamChunkWithState, error = RwError)]
-    async fn stream_reader(
-        stream_reader: Arc<Mutex<Option<Box<SourceStreamReaderImpl>>>>,
-        #[expect(unused_variables)] notifier: Arc<Notify>,
-        #[expect(unused_variables)] expected_barrier_latency_ms: u64,
-        mut abort_notifier: UnboundedReceiver<()>,
-    ) {
-        'outer: loop {
-            let mut reader = stream_reader.lock().await.take().unwrap();
-            let chunk_result: Option<Result<StreamChunkWithState>>;
-
-            {
-                let chunk_future = reader.next();
-                let abort_future = abort_notifier.recv();
-
-                pin_mut!(chunk_future);
-                pin_mut!(abort_future);
-
-                match futures::future::select(chunk_future, abort_future).await {
-                    futures::future::Either::Left((chunk, _)) => {
-                        chunk_result = Some(chunk);
-                    }
-                    futures::future::Either::Right(_) => {
-                        chunk_result = None;
-                    }
+    async fn stream_reader_new(mut stream_reader: Box<SourceStreamReaderImpl>) {
+        loop {
+            match stream_reader.next().await {
+                Ok(chunk) => yield chunk,
+                Err(err) => {
+                    error!("hang up stream reader due to polling error: {}", err);
+                    futures::future::pending().await
                 }
             }
-
-            let mut reader_guard = stream_reader.lock().await;
-            if reader_guard.is_none() {
-                *reader_guard = Some(reader);
-            } else {
-                continue;
-            }
-            drop(reader_guard);
-            if let Some(chunk) = chunk_result {
-                match chunk {
-                    Ok(c) => yield c,
-                    Err(e) => {
-                        error!("hang up stream reader due to polling error: {}", e);
-                        break 'outer;
-                    }
-                }
-            };
         }
-
-        futures::future::pending().await
     }
 
     #[try_stream(ok = Message, error = RwError)]
-    async fn barrier_receiver(mut rx: UnboundedReceiver<Barrier>, notifier: Arc<Notify>) {
+    async fn barrier_receiver(mut rx: UnboundedReceiver<Barrier>) {
         while let Some(barrier) = rx.recv().await {
             yield Message::Barrier(barrier);
-            notifier.notify_one();
         }
-        return Err(internal_error(
-            "barrier reader closed unexpectedly".to_string(),
-        ));
+        bail!("barrier reader closed unexpectedly");
     }
 
-    fn into_stream(
-        self,
-        abort_notifier: UnboundedReceiver<()>,
-    ) -> impl Stream<Item = Either<Result<Message>, Result<StreamChunkWithState>>> {
-        let notifier = Arc::new(Notify::new());
+    fn select_strategy(_: &mut ()) -> PollNext {
+        PollNext::Left
+    }
 
-        let barrier_receiver = Self::barrier_receiver(self.barrier_receiver, notifier.clone());
-        let stream_reader = Self::stream_reader(
-            self.stream_reader,
-            notifier,
-            self.expected_barrier_latency_ms,
-            abort_notifier,
-        );
+    fn into_stream(self) -> SourceReaderStream {
+        let barrier_receiver = Self::barrier_receiver(self.barrier_receiver);
+        let stream_reader = Self::stream_reader_new(self.stream_reader);
         select_with_strategy(
-            barrier_receiver.map(Either::Left),
-            stream_reader.map(Either::Right),
-            |_: &mut ()| PollNext::Left, // prefer barrier
+            barrier_receiver.map(Either::Left).boxed(),
+            stream_reader.map(Either::Right).boxed(),
+            Self::select_strategy, // prefer barrier
         )
+    }
+
+    fn replace_source_reader(
+        stream: &mut SourceReaderStream,
+        source_reader: Box<SourceStreamReaderImpl>,
+    ) {
+        *stream.get_mut().1 = Self::stream_reader_new(source_reader)
+            .map(Either::Right)
+            .boxed();
     }
 }
 
@@ -330,23 +298,19 @@ impl<S: StateStore> SourceExecutor<S> {
         };
 
         // todo: use epoch from msg to restore state from state store
-        let stream_reader = Arc::new(Mutex::new(Some(
-            self.build_stream_source_reader(recover_state)
-                .await
-                .map_err(StreamExecutorError::source_error)?,
-        )));
-
-        let reader = SourceReader {
-            stream_reader: stream_reader.clone(),
+        let stream_reader = self
+            .build_stream_source_reader(recover_state)
+            .await
+            .map_err(StreamExecutorError::source_error)?;
+        let reader = SourceReaderNew {
+            stream_reader,
             barrier_receiver,
-            expected_barrier_latency_ms: self.expected_barrier_latency_ms,
         };
+        let mut stream = reader.into_stream();
+
         yield Message::Barrier(barrier);
 
-        let (abort_tx, abort_rx) = unbounded_channel::<()>();
-
-        #[for_await]
-        for msg in reader.into_stream(abort_rx) {
+        while let Some(msg) = stream.next().await {
             match msg {
                 // This branch will be preferred.
                 Either::Left(barrier) => {
@@ -369,14 +333,19 @@ impl<S: StateStore> SourceExecutor<S> {
                                                 self.actor_id,
                                                 target_state
                                             );
+
                                             let reader = self
                                                 .build_stream_source_reader(Some(
                                                     target_state.clone(),
                                                 ))
                                                 .await
                                                 .map_err(StreamExecutorError::source_error)?;
-                                            abort_tx.send(()).unwrap();
-                                            *stream_reader.lock().await = Some(reader);
+
+                                            SourceReaderNew::replace_source_reader(
+                                                &mut stream,
+                                                reader,
+                                            );
+
                                             self.stream_source_splits = target_state;
                                         }
                                     }
@@ -429,6 +398,7 @@ impl<S: StateStore> SourceExecutor<S> {
                 }
             }
         }
+
         unreachable!();
     }
 }
