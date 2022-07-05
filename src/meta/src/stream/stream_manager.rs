@@ -33,6 +33,7 @@ use uuid::Uuid;
 use super::ScheduledLocations;
 use crate::barrier::{BarrierManagerRef, Command};
 use crate::cluster::{ClusterManagerRef, WorkerId};
+use crate::hummock::compaction_group::manager::CompactionGroupManagerRef;
 use crate::manager::{DatabaseId, HashMappingManagerRef, MetaSrvEnv, SchemaId};
 use crate::model::{ActorId, DispatcherId, TableFragments};
 use crate::storage::MetaStore;
@@ -88,6 +89,8 @@ pub struct GlobalStreamManager<S: MetaStore> {
 
     /// Client Pool to stream service on compute nodes
     client_pool: StreamClientPoolRef,
+
+    compaction_group_manager: CompactionGroupManagerRef<S>,
 }
 
 impl<S> GlobalStreamManager<S>
@@ -100,6 +103,7 @@ where
         barrier_manager: BarrierManagerRef<S>,
         cluster_manager: ClusterManagerRef<S>,
         source_manager: SourceManagerRef<S>,
+        compaction_group_manager: CompactionGroupManagerRef<S>,
     ) -> Result<Self> {
         Ok(Self {
             scheduler: Scheduler::new(cluster_manager.clone(), env.hash_mapping_manager_ref()),
@@ -109,6 +113,7 @@ where
             source_manager,
             _hash_mapping_manager: env.hash_mapping_manager_ref(),
             client_pool: env.stream_client_pool_ref(),
+            compaction_group_manager,
         })
     }
 
@@ -279,6 +284,19 @@ where
             ..
         }: CreateMaterializedViewContext,
     ) -> Result<()> {
+        // This scope guard does clean up jobs ASYNCHRONOUSLY before Err returns.
+        // It MUST be cleared before Ok returns.
+        let mut revert_funcs = scopeguard::guard(
+            vec![],
+            |revert_funcs: Vec<futures::future::BoxFuture<()>>| {
+                tokio::spawn(async move {
+                    for revert_func in revert_funcs {
+                        revert_func.await;
+                    }
+                });
+            },
+        );
+
         let nodes = self
             .cluster_manager
             .list_worker_node(
@@ -531,6 +549,21 @@ where
                 .await?;
         }
 
+        // Register to compaction group beforehand.
+        //
+        // Note that this step must be before building actors, because we will explicitly sync this
+        // info in the beginning of actors.
+        let registered_table_ids = self
+            .compaction_group_manager
+            .register_table_fragments(&table_fragments, &table_properties)
+            .await?;
+        let compaction_group_manager_ref = self.compaction_group_manager.clone();
+        revert_funcs.push(Box::pin(async move {
+            if let Err(e) = compaction_group_manager_ref.unregister_table_ids(&registered_table_ids).await {
+                tracing::warn!("Failed to unregister_table_ids {:#?}.\nThey will be cleaned up on node restart.\n{:#?}", registered_table_ids, e);
+            }
+        }));
+
         // In the second stage, each [`WorkerNode`] builds local actors and connect them with
         // channels.
         for (node_id, actors) in node_actors {
@@ -554,7 +587,7 @@ where
 
         // Add table fragments to meta store with state: `State::Creating`.
         self.fragment_manager
-            .start_create_table_fragments(table_fragments.clone(), table_properties)
+            .start_create_table_fragments(table_fragments.clone())
             .await?;
 
         let table_id = table_fragments.table_id();
@@ -583,6 +616,7 @@ where
                 .await?;
         }
 
+        revert_funcs.clear();
         Ok(())
     }
 
@@ -614,6 +648,19 @@ where
         self.source_manager
             .drop_update(Some(source_fragments), Some(actor_ids))
             .await?;
+
+        // Unregister from compaction group afterwards.
+        if let Err(e) = self
+            .compaction_group_manager
+            .unregister_table_fragments(&table_fragments)
+            .await
+        {
+            tracing::warn!(
+                "Failed to unregister table {}. It wll be unregistered eventually.\n{:#?}",
+                table_id,
+                e
+            );
+        }
 
         Ok(())
     }
@@ -814,10 +861,7 @@ mod tests {
             cluster_manager.activate_worker_node(host).await?;
 
             let catalog_manager = Arc::new(CatalogManager::new(env.clone()).await?);
-            let compaction_group_manager =
-                Arc::new(CompactionGroupManager::new(env.clone()).await?);
-            let fragment_manager =
-                Arc::new(FragmentManager::new(env.clone(), compaction_group_manager).await?);
+            let fragment_manager = Arc::new(FragmentManager::new(env.clone()).await?);
             let meta_metrics = Arc::new(MetaMetrics::new());
             let compaction_group_manager =
                 Arc::new(CompactionGroupManager::new(env.clone()).await.unwrap());
@@ -864,6 +908,7 @@ mod tests {
                 barrier_manager.clone(),
                 cluster_manager.clone(),
                 source_manager.clone(),
+                compaction_group_manager.clone(),
             )
             .await?;
 

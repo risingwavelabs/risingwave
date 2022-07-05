@@ -482,7 +482,6 @@ mod tests {
     use risingwave_common::types::ScalarImpl;
     use risingwave_common::util::sort_util::OrderType;
     use risingwave_storage::memory::MemoryStateStore;
-    use risingwave_storage::Keyspace;
     use smallvec::smallvec;
 
     use super::*;
@@ -490,8 +489,8 @@ mod tests {
     #[tokio::test]
     async fn test_managed_extreme_state() {
         let store = MemoryStateStore::new();
-        let keyspace = Keyspace::table_root(store.clone(), &TableId::from(0x2333));
-        let mut state_table = state_table_create_helper(keyspace.clone(), 2, OrderType::Ascending);
+        let mut state_table =
+            state_table_create_helper(store, TableId::from(0x2333), 2, OrderType::Ascending);
 
         let mut managed_state = ManagedMinState::<_, I64Array>::new(
             Some(5),
@@ -667,7 +666,8 @@ mod tests {
     }
 
     fn state_table_create_helper<S: StateStore>(
-        keyspace: Keyspace<S>,
+        store: S,
+        table_id: TableId,
         column_cnt: usize,
         order_type: OrderType,
     ) -> StateTable<S> {
@@ -680,7 +680,8 @@ mod tests {
         }
         let relational_pk_len = column_descs.len() - 1;
         StateTable::new(
-            keyspace,
+            store,
+            table_id,
             column_descs,
             vec![order_type; relational_pk_len],
             None,
@@ -690,13 +691,13 @@ mod tests {
 
     async fn test_replicated_value_not_null<const EXTREME_TYPE: usize>() {
         let store = MemoryStateStore::new();
-        let keyspace = Keyspace::table_root(store.clone(), &TableId::from(0x2333));
         let order_type = if EXTREME_TYPE == variants::EXTREME_MAX {
             OrderType::Descending
         } else {
             OrderType::Ascending
         };
-        let mut state_table = state_table_create_helper(keyspace.clone(), 3, order_type);
+        let mut state_table =
+            state_table_create_helper(store, TableId::from(0x2333), 3, order_type);
 
         let mut managed_state = GenericExtremeState::<_, I64Array, EXTREME_TYPE>::new(
             Some(3),
@@ -796,13 +797,13 @@ mod tests {
 
     async fn test_replicated_value_with_null<const EXTREME_TYPE: usize>() {
         let store = MemoryStateStore::new();
-        let keyspace = Keyspace::table_root(store.clone(), &TableId::from(0x2333));
         let order_type = if EXTREME_TYPE == variants::EXTREME_MAX {
             OrderType::Descending
         } else {
             OrderType::Ascending
         };
-        let mut state_table = state_table_create_helper(keyspace.clone(), 3, order_type);
+        let mut state_table =
+            state_table_create_helper(store, TableId::from(0x2333), 3, order_type);
 
         let mut managed_state = GenericExtremeState::<_, I64Array, EXTREME_TYPE>::new(
             Some(3),
@@ -920,7 +921,6 @@ mod tests {
     #[tokio::test]
     async fn test_same_group_of_value() {
         let store = MemoryStateStore::new();
-        let keyspace = Keyspace::table_root(store.clone(), &TableId::from(0x2333));
         let mut managed_state = ManagedMinState::<_, I64Array>::new(
             Some(3),
             0,
@@ -930,7 +930,8 @@ mod tests {
         )
         .await
         .unwrap();
-        let mut state_table = state_table_create_helper(keyspace.clone(), 2, OrderType::Ascending);
+        let mut state_table =
+            state_table_create_helper(store, TableId::from(0x2333), 2, OrderType::Ascending);
 
         assert!(!state_table.is_dirty());
 
@@ -1010,13 +1011,13 @@ mod tests {
         let mut remaining_values = &values_to_insert[..];
 
         let store = MemoryStateStore::new();
-        let keyspace = Keyspace::table_root(store.clone(), &TableId::from(0x2333));
         let order_type = if EXTREME_TYPE == variants::EXTREME_MAX {
             OrderType::Descending
         } else {
             OrderType::Ascending
         };
-        let mut state_table = state_table_create_helper(keyspace.clone(), 2, order_type);
+        let mut state_table =
+            state_table_create_helper(store, TableId::from(0x2333), 2, order_type);
 
         let mut managed_state = GenericExtremeState::<_, I64Array, EXTREME_TYPE>::new(
             Some(3),
@@ -1111,7 +1112,6 @@ mod tests {
         // The 6 should be deleted from the state store.
 
         let store = MemoryStateStore::new();
-        let keyspace = Keyspace::table_root(store.clone(), &TableId::from(0x2333));
         let mut managed_state = ManagedMinState::<_, I64Array>::new(
             Some(3),
             0,
@@ -1121,7 +1121,8 @@ mod tests {
         )
         .await
         .unwrap();
-        let mut state_table = state_table_create_helper(keyspace.clone(), 2, OrderType::Ascending);
+        let mut state_table =
+            state_table_create_helper(store, TableId::from(0x2333), 2, OrderType::Ascending);
 
         assert!(!state_table.is_dirty());
 
