@@ -53,6 +53,7 @@ pub use order_by::*;
 pub use project::*;
 use risingwave_common::array::DataChunk;
 use risingwave_common::catalog::Schema;
+use risingwave_common::error::Result;
 use risingwave_pb::batch_plan::plan_node::NodeBody;
 use risingwave_pb::batch_plan::PlanNode;
 pub use row_seq_scan::*;
@@ -63,13 +64,13 @@ pub use trace::*;
 pub use update::*;
 pub use values::*;
 
-use crate::executor::error::Result;
 use crate::executor::sys_row_seq_scan::SysRowSeqScanExecutorBuilder;
 use crate::task::{BatchTaskContext, TaskId};
 
 pub type BoxedExecutor = Box<dyn Executor>;
 pub type BoxedDataChunkStream = BoxStream<'static, Result<DataChunk>>;
 
+use error::BatchExecutorError;
 pub struct ExecutorInfo {
     pub schema: Schema,
     pub id: String,

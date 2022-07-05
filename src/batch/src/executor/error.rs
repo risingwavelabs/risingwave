@@ -32,11 +32,8 @@ pub enum BatchExecutorError {
     #[error("Array error: {0}")]
     Array(#[from] ArrayError),
 
-    #[error("Expr error: {0}")]
-    Expr(Box<dyn Error>),
-
-    #[error(transparent)]
-    RwError(#[from] RwError),
+    #[error("Out of range")]
+    NumericOutOfRange,
 
     #[error(transparent)]
     Internal(#[from] anyhow::Error),
@@ -44,9 +41,6 @@ pub enum BatchExecutorError {
 
 impl From<BatchExecutorError> for RwError {
     fn from(s: BatchExecutorError) -> Self {
-        match s {
-            BatchExecutorError::RwError(e) => e,
-            _ => ErrorCode::BatchExecutorError(Box::new(s)).into(),
-        }
+        ErrorCode::BatchExecutorError(Box::new(s)).into()
     }
 }
