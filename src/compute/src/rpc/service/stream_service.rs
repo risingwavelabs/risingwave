@@ -152,7 +152,7 @@ impl StreamService for StreamServiceImpl {
         request: Request<BarrierCompleteRequest>,
     ) -> Result<Response<BarrierCompleteResponse>, Status> {
         let req = request.into_inner();
-        let collect_result = self.mgr.collect_barrier(req.prev_epoch).await?;
+        let collect_result = self.mgr.collect_barrier(req.prev_epoch).await;
         // Must finish syncing data written in the epoch before respond back to ensure persistency
         // of the state.
         let synced_sstables = self.mgr.sync_epoch(req.prev_epoch).await;

@@ -26,7 +26,6 @@ use risingwave_pb::meta::table_fragments::ActorState;
 use risingwave_pb::stream_plan::{FragmentType, StreamActor};
 use tokio::sync::RwLock;
 
-use crate::barrier::ChangedTableIds;
 use crate::cluster::WorkerId;
 use crate::hummock::compaction_group::manager::CompactionGroupManagerRef;
 use crate::manager::{HashMappingManagerRef, MetaSrvEnv};
@@ -307,18 +306,18 @@ where
 
     /// Used in [`crate::barrier::GlobalBarrierManager`], load all actor that need to be sent or
     /// collected
-    pub async fn load_all_actors(&self, changed_table_id: &ChangedTableIds) -> ActorInfos {
+    pub async fn load_all_actors(
+        &self,
+        check_state: impl Fn(ActorState, &TableId) -> bool,
+    ) -> ActorInfos {
         let mut actor_maps = HashMap::new();
         let mut source_actor_ids = HashMap::new();
 
         let map = &self.core.read().await.table_fragments;
         for fragments in map.values() {
-            let check_state = |s: ActorState| {
-                changed_table_id.can_actor_send_or_collect(s, &fragments.table_id())
-            };
             for (node_id, actor_states) in fragments.node_actor_states() {
                 for actor_state in actor_states {
-                    if check_state(actor_state.1) {
+                    if check_state(actor_state.1, &fragments.table_id()) {
                         actor_maps
                             .entry(node_id)
                             .or_insert_with(Vec::new)
@@ -330,7 +329,7 @@ where
             let source_actors = fragments.node_source_actor_states();
             for (&node_id, actor_states) in &source_actors {
                 for actor_state in actor_states {
-                    if check_state(actor_state.1) {
+                    if check_state(actor_state.1, &fragments.table_id()) {
                         source_actor_ids
                             .entry(node_id)
                             .or_insert_with(Vec::new)

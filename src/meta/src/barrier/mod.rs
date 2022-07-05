@@ -185,54 +185,12 @@ pub struct GlobalBarrierManager<S: MetaStore> {
 struct CheckpointControl<S: MetaStore> {
     /// Save the state and message of barrier in order
     command_ctx_queue: VecDeque<EpochNode<S>>,
-
-    changed_table_ids: ChangedTableIds,
-}
-/// All changed tables of uncommitted barrier
-#[derive(Default, Debug)]
-pub struct ChangedTableIds {
     /// In addition to the actors with status `Running`.The barrier needs to send or collect the
     /// actors of these tables.
     creating_table_ids: HashSet<TableId>,
     /// The barrier does not send or collect the actors of these tables, even if they are
     /// `Running`.
     dropping_table_ids: HashSet<TableId>,
-}
-impl ChangedTableIds {
-    /// Barrier can be sent to and collected from an actor if:
-    /// 1. The actor is Running and not being dropped.
-    /// 2. The actor is Inactive and belongs to a creating MV.
-    pub fn can_actor_send_or_collect(&self, s: ActorState, table_id: &TableId) -> bool {
-        s == ActorState::Running && !self.dropping_table_ids.contains(table_id)
-            || s == ActorState::Inactive && self.creating_table_ids.contains(table_id)
-    }
-
-    /// Add changed tabled ids in set
-    pub fn push_changed_table_ids(&mut self, new_changed_table: ChangedTableState) {
-        match new_changed_table {
-            Create(table_id) => {
-                self.creating_table_ids.insert(table_id);
-            }
-            Drop(table_id) => {
-                assert!(!self.creating_table_ids.contains(&table_id));
-                self.dropping_table_ids.insert(table_id);
-            }
-            _ => {}
-        }
-    }
-
-    /// Remove changed tabled ids in set
-    pub fn remove_changed_table_ids(&mut self, reomve_changed_table: ChangedTableState) {
-        match reomve_changed_table {
-            Create(table_id) => {
-                self.creating_table_ids.remove(&table_id);
-            }
-            Drop(table_id) => {
-                self.dropping_table_ids.remove(&table_id);
-            }
-            _ => {}
-        }
-    }
 }
 
 impl<S> CheckpointControl<S>
@@ -242,21 +200,25 @@ where
     fn new() -> Self {
         Self {
             command_ctx_queue: VecDeque::default(),
-            changed_table_ids: Default::default(),
+            creating_table_ids: HashSet::default(),
+            dropping_table_ids: HashSet::default(),
         }
     }
 
     /// Get the `ChangedTableId` used to modify the actor(send and collect), If we create table in
     /// this barrier, We need to add it.
-    fn try_extend_changed_table_ids(
-        &mut self,
-        new_changed_table: ChangedTableState,
-    ) -> &ChangedTableIds {
-        if matches!(new_changed_table, Create(_)) {
-            self.changed_table_ids
-                .push_changed_table_ids(new_changed_table);
+    fn try_extend_command(&mut self, command: &Command) {
+        if let Create(table) = command.changed_table_id() {
+            self.creating_table_ids.insert(table);
         }
-        &self.changed_table_ids
+    }
+
+    /// Barrier can be sent to and collected from an actor if:
+    /// 1. The actor is Running and not being dropped.
+    /// 2. The actor is Inactive and belongs to a creating MV
+    fn can_actor_send_or_collect(&self, s: ActorState, table_id: &TableId) -> bool {
+        s == ActorState::Running && !self.dropping_table_ids.contains(table_id)
+            || s == ActorState::Inactive && self.creating_table_ids.contains(table_id)
     }
 
     /// Return the nums of barrier (the nums of in-flight-barrier , the nums of all-barrier)
@@ -277,10 +239,8 @@ where
         notifiers: SmallVec<[Notifier; 1]>,
         timer: HistogramTimer,
     ) {
-        let change_table_id = command_ctx.command.changed_table_id();
-        if matches!(change_table_id, Drop(_)) {
-            self.changed_table_ids
-                .push_changed_table_ids(change_table_id);
+        if let Drop(table) = command_ctx.command.changed_table_id() {
+            self.dropping_table_ids.insert(table);
         }
         self.command_ctx_queue.push_back(EpochNode {
             timer: Some(timer),
@@ -312,24 +272,23 @@ where
         let index = self
             .command_ctx_queue
             .iter()
-            .position(|x| {
-                if matches!(x.state, Complete) {
-                    self.changed_table_ids
-                        .remove_changed_table_ids(x.command_ctx.command.changed_table_id());
-                }
-                !matches!(x.state, Complete)
-            })
+            .position(|x| !matches!(x.state, Complete))
             .unwrap_or(self.command_ctx_queue.len());
-        self.command_ctx_queue.drain(..index).collect()
+        let complete_nodes: VecDeque<EpochNode<S>> =
+            self.command_ctx_queue.drain(..index).collect();
+        complete_nodes.iter().for_each(|node| {
+            self.remove_changed_table_ids(node.command_ctx.command.changed_table_id())
+        });
+        complete_nodes
     }
 
     /// Remove all nodes from queue and return them.
-    fn fail(&mut self) -> impl Iterator<Item = EpochNode<S>> + '_ {
-        self.command_ctx_queue.iter().for_each(|x| {
-            self.changed_table_ids
-                .remove_changed_table_ids(x.command_ctx.command.changed_table_id())
+    fn fail(&mut self) -> VecDeque<EpochNode<S>> {
+        let complete_nodes: VecDeque<EpochNode<S>> = self.command_ctx_queue.drain(..).collect();
+        complete_nodes.iter().for_each(|node| {
+            self.remove_changed_table_ids(node.command_ctx.command.changed_table_id())
         });
-        self.command_ctx_queue.drain(..)
+        complete_nodes
     }
 
     /// Pause inject barrier until True
@@ -339,6 +298,18 @@ where
             .filter(|x| matches!(x.state, InFlight))
             .count()
             < in_flight_barrier_nums
+    }
+
+    pub fn remove_changed_table_ids(&mut self, remove_changed_table: ChangedTableState) {
+        match remove_changed_table {
+            Create(table_id) => {
+                self.creating_table_ids.remove(&table_id);
+            }
+            Drop(table_id) => {
+                self.dropping_table_ids.remove(&table_id);
+            }
+            _ => {}
+        }
     }
 }
 
@@ -481,9 +452,8 @@ where
             }
             barrier_timer = Some(self.metrics.barrier_send_latency.start_timer());
             let (command, notifiers) = self.scheduled_barriers.pop_or_default().await;
-            let changed_table_id =
-                checkpoint_control.try_extend_changed_table_ids(command.changed_table_id());
-            let info = self.resolve_actor_info(changed_table_id).await;
+            checkpoint_control.try_extend_command(&command);
+            let info = self.resolve_actor_info(&checkpoint_control).await;
             // When there's no actors exist in the cluster, we don't need to send the barrier. This
             // is an advance optimization. Besides if another barrier comes immediately,
             // it may send a same epoch and fail the epoch check.
@@ -665,7 +635,7 @@ where
             fail_point!("inject_barrier_err_success");
             let fail_nodes = complete_nodes
                 .drain(index..)
-                .chain(checkpoint_control.fail());
+                .chain(checkpoint_control.fail().into_iter());
             let mut new_epoch = Epoch::from(INVALID_EPOCH);
             for node in fail_nodes {
                 if let Some(timer) = node.timer {
@@ -751,15 +721,18 @@ where
     /// Resolve actor information from cluster, fragment manager and `ChangedTableId`.
     /// We use `changed_table_id` to modify the actors to be sent or collected. Because these actor
     /// will create or drop before this barrier flow through them.
-    async fn resolve_actor_info(&self, changed_table_id: &ChangedTableIds) -> BarrierActorInfo {
+    async fn resolve_actor_info(
+        &self,
+        checkpoint_control: &CheckpointControl<S>,
+    ) -> BarrierActorInfo {
+        let check_state = |s: ActorState, table_id: &TableId| {
+            checkpoint_control.can_actor_send_or_collect(s, table_id)
+        };
         let all_nodes = self
             .cluster_manager
             .list_worker_node(WorkerType::ComputeNode, Some(Running))
             .await;
-        let all_actor_infos = self
-            .fragment_manager
-            .load_all_actors(changed_table_id)
-            .await;
+        let all_actor_infos = self.fragment_manager.load_all_actors(check_state).await;
         BarrierActorInfo::resolve(all_nodes, all_actor_infos)
     }
 

@@ -65,7 +65,7 @@ pub struct LocalBarrierManager {
     state: BarrierState,
 
     /// Save collect rx
-    collect_complete_receiver: HashMap<u64, Option<oneshot::Receiver<Result<CollectResult>>>>,
+    collect_complete_receiver: HashMap<u64, Option<oneshot::Receiver<CollectResult>>>,
 }
 
 impl Default for LocalBarrierManager {
@@ -160,10 +160,7 @@ impl LocalBarrierManager {
     }
 
     /// Use `prev_epoch` to remove collect rx and return rx.
-    pub fn remove_collect_rx(
-        &mut self,
-        prev_epoch: u64,
-    ) -> oneshot::Receiver<Result<CollectResult>> {
+    pub fn remove_collect_rx(&mut self, prev_epoch: u64) -> oneshot::Receiver<CollectResult> {
         self.collect_complete_receiver
             .remove(&prev_epoch)
             .unwrap_or_else(|| {

@@ -182,7 +182,7 @@ impl LocalStreamManager {
 
     /// Use `epoch` to find collect rx. And wait for all actor to be collected before
     /// returning.
-    pub async fn collect_barrier(&self, epoch: u64) -> Result<CollectResult> {
+    pub async fn collect_barrier(&self, epoch: u64) -> CollectResult {
         let rx = {
             let core = self.core.lock();
             let mut barrier_manager = core.context.lock_barrier_manager();
@@ -254,7 +254,7 @@ impl LocalStreamManager {
 
         self.send_barrier(barrier, actor_ids_to_send, actor_ids_to_collect)?;
 
-        self.collect_barrier(barrier.epoch.prev).await?;
+        self.collect_barrier(barrier.epoch.prev).await;
         // Clear shared buffer in storage to release memory
         self.clear_storage_buffer().await;
         self.drain_collect_rx(barrier.epoch.prev);
