@@ -128,6 +128,7 @@
     orderKeys:
       - orderType: ASCENDING
         index: 1
+    userOrderBy: {}
     distributionKeys:
       - 1
     pk:
@@ -231,6 +232,7 @@
     orderKeys:
       - orderType: ASCENDING
         index: 1
+    userOrderBy: {}
     distributionKeys:
       - 1
     pk:
@@ -343,6 +345,7 @@
     orderKeys:
       - orderType: ASCENDING
         index: 1
+    userOrderBy: {}
     distributionKeys:
       - 1
     pk:
@@ -549,6 +552,7 @@
             isNullable: true
           columnId: 1
           name: sum
+    userOrderBy: {}
     owner: root
 - sql: |
     /* test simple agg */
@@ -821,6 +825,7 @@
     orderKeys:
       - orderType: ASCENDING
         index: 1
+    userOrderBy: {}
     distributionKeys:
       - 1
     pk:
