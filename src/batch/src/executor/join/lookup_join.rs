@@ -41,7 +41,7 @@ use crate::task::{BatchTaskContext, TaskId};
 // Build side = "Left side", where we go through its rows one by one
 // Probe side = "Right side", where we find matches for each row from the build side
 
-#[derive(Default)]
+/// Probe side source for the `LookupJoinExecutor`
 pub struct ProbeSideSource<C> {
     table_desc: CellBasedTableDesc,
     probe_side_schema: Schema,
@@ -52,7 +52,7 @@ pub struct ProbeSideSource<C> {
     epoch: u64,
 }
 
-/// Contains the functions of the `GatherExecutor` that are exposed
+/// Used to build the executor for the probe side
 #[async_trait::async_trait]
 pub trait ProbeSideSourceBuilder: Send {
     async fn build_source(&self, cur_row: &RowRef) -> Result<BoxedExecutor>;
@@ -60,7 +60,7 @@ pub trait ProbeSideSourceBuilder: Send {
 
 impl<C: BatchTaskContext> ProbeSideSource<C> {
     /// Creates the `RowSeqScanNode` that will be used for scanning the probe side table
-    /// based on the passed `RowRef` and the `ProbeSideSourceParams`.
+    /// based on the passed `RowRef`.
     fn create_row_seq_scan_node(&self, cur_row: &RowRef) -> Result<NodeBody> {
         let eq_conds = self
             .build_side_idxs
@@ -91,6 +91,8 @@ impl<C: BatchTaskContext> ProbeSideSource<C> {
         }))
     }
 
+    /// Creates all the `ProstExchangeSource` that will be sent to the `ExchangeExecutor` using
+    /// the source templates.
     fn build_prost_exchange_sources(&self, cur_row: &RowRef) -> Result<Vec<ProstExchangeSource>> {
         let Plan(inner_template_plan) = self.source_templates[0].get_local_execute_plan().unwrap();
 
@@ -122,6 +124,8 @@ impl<C: BatchTaskContext> ProbeSideSource<C> {
 
 #[async_trait::async_trait]
 impl<C: BatchTaskContext> ProbeSideSourceBuilder for ProbeSideSource<C> {
+    /// Builds and returns the `ExchangeExecutor` used for the probe side of the
+    /// `LookupJoinExecutor`.
     async fn build_source(&self, cur_row: &RowRef) -> Result<BoxedExecutor> {
         let sources = self.build_prost_exchange_sources(cur_row)?;
 
