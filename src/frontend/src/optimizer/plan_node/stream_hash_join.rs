@@ -237,7 +237,7 @@ fn infer_internal_table_catalog(input: PlanRef) -> TableCatalog {
     let schema = &base.schema;
     let pk_indices = &base.pk_indices;
     let mut col_names = HashMap::new();
-    // FIXME: temp fix, use TableCatalogBuilder to avoid_duplicate_col_name in the future
+    // FIXME: temp fix, use TableCatalogBuilder to avoid_duplicate_col_name in the future (https://github.com/singularity-data/risingwave/issues/3657)
     let columns = schema
         .fields()
         .iter()

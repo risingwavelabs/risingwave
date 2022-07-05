@@ -16,7 +16,7 @@ use lazy_static::lazy_static;
 use regex::Regex;
 
 pub fn generate_intertable_name_with_type(
-    mview_name: &String,
+    mview_name: &str,
     table_id: u32,
     table_type: &str,
 ) -> String {
