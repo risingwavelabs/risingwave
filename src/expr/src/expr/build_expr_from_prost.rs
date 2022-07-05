@@ -85,9 +85,9 @@ pub fn build_overlay_expr(prost: &ExprNode) -> Result<BoxedExpression> {
     let new_sub_str = expr_build_from_prost(&children[1])?;
     let start = expr_build_from_prost(&children[2])?;
 
-    if (children.len() == 3) {
+    if children.len() == 3 {
         Ok(new_overlay_exp(s, new_sub_str, start, ret_type))
-    } else if (children.len() == 4) {
+    } else if children.len() == 4 {
         // ToDo: Implement framework for quaternary expression.
         Err(crate::ExprError::UnsupportedFunction(String::from(
             "overlay with four parameters",
