@@ -276,6 +276,7 @@ impl MonitoredStateStore<HummockStorage> {
         self.inner.local_version_manager().clone()
     }
 
+    // Note(bugen): should we use notification service for this?
     pub async fn update_compaction_group_cache(&self) -> StorageResult<()> {
         self.inner
             .update_compaction_group_cache()

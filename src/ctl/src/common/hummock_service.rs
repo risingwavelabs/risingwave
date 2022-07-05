@@ -117,6 +117,8 @@ impl HummockServiceOpts {
         &mut self,
     ) -> Result<(MetaClient, MonitoredStateStore<HummockStorage>)> {
         let (meta_client, hummock_client, _) = self.create_hummock_store_with_metrics().await?;
+        // Make sure compaction group cache is updated.
+        hummock_client.update_compaction_group_cache().await?;
         Ok((meta_client, hummock_client))
     }
 
