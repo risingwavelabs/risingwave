@@ -359,14 +359,14 @@
         LogicalProject { exprs: [$3, $2, $1] }
           LogicalScan { table: t, columns: [_row_id, v1, v2, v3] }
   optimized_logical_plan: |
-    LogicalProject { exprs: [$1, $2, $0, $3] }
+    LogicalProject { exprs: [$1, $3, $0, $4] }
       LogicalAgg { group_keys: [0, 1, 1], agg_calls: [min($2), max($2)] }
         LogicalProject { exprs: [$2, $1, $0] }
           LogicalScan { table: t, columns: [v1, v2, v3] }
   stream_plan: |
     StreamMaterialize { columns: [v2, min_v1, v3, max_v1], pk_columns: [v3, v2, v2], order_descs: [v3, v2] }
       StreamExchange { dist: HashShard([0, 2]) }
-        StreamProject { exprs: [$1, $2, $0, $4] }
+        StreamProject { exprs: [$1, $4, $0, $5] }
           StreamHashAgg { group_keys: [$0, $1, $1], aggs: [count, min($2), max($2)] }
             StreamExchange { dist: HashShard([0, 1]) }
               StreamProject { exprs: [$2, $1, $0, $3] }
