@@ -276,7 +276,7 @@ impl LogicalScan {
         )
     }
 
-    fn clone_with_output_indices(&self, output_col_idx: Vec<usize>) -> Self {
+    pub fn clone_with_output_indices(&self, output_col_idx: Vec<usize>) -> Self {
         Self::new(
             self.table_name.clone(),
             self.is_sys_table,
