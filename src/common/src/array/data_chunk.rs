@@ -38,7 +38,7 @@ pub struct DataChunk {
 
 /// `Vis` is a visibility bitmap of rows. When all rows are visible, it is considered compact and
 /// is represented by a single cardinality number rather than that many of ones.
-#[derive(Clone, PartialEq)]
+#[derive(Clone, PartialEq, Debug)]
 pub enum Vis {
     Bitmap(Bitmap),
     Compact(usize), // equivalent to all ones of this size
