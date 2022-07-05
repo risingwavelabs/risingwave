@@ -20,6 +20,7 @@ mod tests {
     use std::panic;
     use std::sync::Arc;
 
+    use rand::Rng;
     use rand::SeedableRng;
     use risingwave_frontend::binder::Binder;
     use risingwave_frontend::handler::create_table;
@@ -70,11 +71,13 @@ mod tests {
         let frontend = LocalFrontend::new(FrontendOpts::default()).await;
         let session = frontend.session_ref();
         let tables = create_tables(session.clone()).await;
-        let mut rng = rand::rngs::SmallRng::seed_from_u64(seed);
+        let mut rng = R: Rng;
 
         if let Ok(x) = env::var("RW_RANDOM_SEED_SQLSMITH") && x == "true" {
             log::info!("random seed");
             rng = rand::thread_rng();
+        } else {
+            rng = rand::rngs::SmallRng::seed_from_u64(seed);
         }
 
         for _ in 0..512 {
