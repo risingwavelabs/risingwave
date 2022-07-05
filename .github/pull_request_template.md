@@ -13,7 +13,7 @@ Please explain **IN DETAIL** what the changes are in this PR and why they are ne
 
 ## Checklist
 
-- [ ] I have written necessary rustdocs and comments
+- [ ] I have written necessary rustdoc comments
 - [ ] I have added necessary unit tests and integration tests
 - [ ] All checks passed in `./risedev check` (or alias, `./risedev c`)
 
