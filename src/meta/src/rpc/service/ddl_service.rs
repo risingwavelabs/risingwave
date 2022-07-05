@@ -323,10 +323,6 @@ where
                 internal_table
             }
         };
-        println!(
-            "create_mview_on_compute_node internal_tables_len {}",
-            internal_tables.len()
-        );
 
         // 4. Finally, update the catalog.
         let version = self

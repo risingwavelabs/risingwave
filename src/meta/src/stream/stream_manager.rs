@@ -56,11 +56,8 @@ pub struct CreateMaterializedViewContext {
     pub affiliated_source: Option<Source>,
     /// Table id offset get from meta id generator. Used to calculate global unique table id.
     pub table_id_offset: u32,
-    /// Internal TableID for MaterializedView.
-    // pub internal_table_id_set: HashSet<u32>,
-    /// Internal TableID to Table
+    /// Internal TableID to Table mapping
     pub internal_table_id_map: HashMap<u32, Option<Table>>,
-
     /// SchemaId of mview
     pub schema_id: SchemaId,
     /// DatabaseId of mview
@@ -331,7 +328,7 @@ where
             dependent_table_ids,
             dispatches,
             upstream_node_actors,
-            &mut locations,
+            &locations,
         )
         .await?;
 
@@ -558,7 +555,7 @@ where
         // info in the beginning of actors.
         let registered_table_ids = self
             .compaction_group_manager
-            .register_table_fragments(&table_fragments, &table_properties)
+            .register_table_fragments(&table_fragments, table_properties)
             .await?;
         let compaction_group_manager_ref = self.compaction_group_manager.clone();
         revert_funcs.push(Box::pin(async move {
@@ -1212,11 +1209,11 @@ mod tests {
 
         let table_fragments = TableFragments::new(table_id, fragments, internal_table_id.clone());
 
-        let ctx = CreateMaterializedViewContext::default();
+        let mut ctx = CreateMaterializedViewContext::default();
 
         services
             .global_stream_manager
-            .create_materialized_view(table_fragments, ctx)
+            .create_materialized_view(table_fragments, &mut ctx)
             .await
             .unwrap();
 

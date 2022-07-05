@@ -135,11 +135,6 @@ where
     T: MetadataModel,
 {
     fn upsert_in_transaction(&self, trx: &mut Transaction) -> Result<()> {
-        println!(
-            "upsert_in_transaction cf {:?} key {:?}",
-            Self::cf_name(),
-            self.key()?.encode_to_vec(),
-        );
         trx.put(
             Self::cf_name(),
             self.key()?.encode_to_vec(),

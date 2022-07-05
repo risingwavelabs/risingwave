@@ -264,10 +264,6 @@ where
                 table.upsert_in_transaction(&mut transaction)?;
             }
             table.upsert_in_transaction(&mut transaction)?;
-            println!(
-                "finish_create_table_procedure internal_tables_len {:?}",
-                internal_tables.len()
-            );
             core.env.meta_store().txn(transaction).await?;
 
             for internal_table in internal_tables {

@@ -495,8 +495,6 @@ impl StreamGraphBuilder {
             builder.seal(actor_id_offset, actor_id_len);
         }
 
-        // let mut internal_tables = vec![];
-        // let mut is_filled = false;
         for builder in self.actor_builders.values() {
             let actor_id = builder.actor_id;
             let mut actor = builder.build();
@@ -508,25 +506,12 @@ impl StreamGraphBuilder {
 
             let stream_node =
                 self.build_inner(ctx, actor.get_nodes()?, actor_id, &mut upstream_actors)?;
-            println!(
-                "stream_graph:511 inner_internal_tables_len {}",
-                ctx.internal_table_id_map.len()
-            );
-            // if !is_filled {
-            //     internal_tables.append(&mut inner_internal_tables);
-            //     is_filled = true;
-            // }
             actor.nodes = Some(stream_node);
             graph
                 .entry(builder.get_fragment_id())
                 .or_insert(vec![])
                 .push(actor);
         }
-
-        println!(
-            "stream_graph build internal_tables_len {}",
-            ctx.internal_table_id_map.len()
-        );
         Ok(graph)
     }
 
@@ -545,12 +530,9 @@ impl StreamGraphBuilder {
     ) -> Result<StreamNode> {
         let table_id_offset = ctx.table_id_offset;
         let mut check_and_fill_internal_table = |table_id: u32, table: Option<Table>| {
-            if !ctx.internal_table_id_map.contains_key(&table_id) {
-                ctx.internal_table_id_map.insert(table_id, table);
-            }
+            ctx.internal_table_id_map.entry(table_id).or_insert(table);
         };
 
-        // let mut internal_tables = vec![];
         match stream_node.get_node_body()? {
             NodeBody::Exchange(_) => {
                 panic!("ExchangeNode should be eliminated from the top of the plan node when converting fragments to actors: {:#?}", stream_node)
@@ -582,8 +564,6 @@ impl StreamGraphBuilder {
                             table.name = generate_intertable_name(&ctx.mview_name, right_table_id);
                             check_and_fill_internal_table(table.id, Some(table.clone()));
                         }
-                        // ctx.internal_table_id_set.insert(left_table_id);
-                        // ctx.internal_table_id_set.insert(right_table_id);
                     }
 
                     NodeBody::Lookup(node) => {
@@ -591,14 +571,12 @@ impl StreamGraphBuilder {
                             &mut node.arrangement_table_id
                         {
                             *table_id += table_id_offset;
-                            // ctx.internal_table_id_set.insert(*table_id);
                             check_and_fill_internal_table(*table_id, None);
                         }
                     }
 
                     NodeBody::Arrange(node) => {
                         node.table_id += table_id_offset;
-                        // ctx.internal_table_id_set.insert(node.table_id);
                         check_and_fill_internal_table(node.table_id, None);
                     }
 
@@ -610,8 +588,6 @@ impl StreamGraphBuilder {
                             table.schema_id = ctx.schema_id;
                             table.database_id = ctx.database_id;
                             table.name = generate_intertable_name(&ctx.mview_name, table.id);
-                            // ctx.internal_table_id_set.insert(table.id);
-                            // internal_tables.push(table.clone());
                             check_and_fill_internal_table(table.id, Some(table.clone()));
                         }
                     }
@@ -620,9 +596,6 @@ impl StreamGraphBuilder {
                         node.table_id_l += table_id_offset;
                         node.table_id_m += table_id_offset;
                         node.table_id_h += table_id_offset;
-                        // ctx.internal_table_id_set.insert(node.table_id_l);
-                        // ctx.internal_table_id_set.insert(node.table_id_m);
-                        // ctx.internal_table_id_set.insert(node.table_id_h);
 
                         // TODO add catalog::Table to TopNNode
                         check_and_fill_internal_table(node.table_id_l, None);
@@ -634,10 +607,8 @@ impl StreamGraphBuilder {
                         node.table_id_l += table_id_offset;
                         node.table_id_m += table_id_offset;
                         node.table_id_h += table_id_offset;
-                        // ctx.internal_table_id_set.insert(node.table_id_l);
-                        // ctx.internal_table_id_set.insert(node.table_id_m);
-                        // ctx.internal_table_id_set.insert(node.table_id_h);
 
+                        // TODO add catalog::Table to AppendOnlyTopN
                         check_and_fill_internal_table(node.table_id_l, None);
                         check_and_fill_internal_table(node.table_id_m, None);
                         check_and_fill_internal_table(node.table_id_h, None);
@@ -651,9 +622,6 @@ impl StreamGraphBuilder {
                             table.schema_id = ctx.schema_id;
                             table.database_id = ctx.database_id;
                             table.name = generate_intertable_name(&ctx.mview_name, table.id);
-                            // internal_tables.push(table.clone());
-                            // ctx.internal_table_id_set.insert(table.id);
-
                             check_and_fill_internal_table(table.id, Some(table.clone()));
                         }
                     }
@@ -683,18 +651,11 @@ impl StreamGraphBuilder {
                             new_stream_node.input[idx] = self.resolve_chain_node(input)?;
                         }
                         _ => {
-                            // let mut inner_internal_tables: Vec<Table>;
                             new_stream_node.input[idx] =
                                 self.build_inner(ctx, input, actor_id, upstream_actor_id)?;
-                            // internal_tables.append(&mut inner_internal_tables);
                         }
                     }
                 }
-
-                println!(
-                    "stream_graph build_inner internal_tables_len {}",
-                    ctx.internal_table_id_map.len()
-                );
                 Ok(new_stream_node)
             }
         }
