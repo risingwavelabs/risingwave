@@ -73,11 +73,6 @@ class Panels:
         return TimeSeries(title=title, targets=targets, gridPos=gridPos, fillOpacity=10,
                           legendDisplayMode="table", legendPlacement="right", legendCalcs=["max"])
 
-    def timeseries_backpressured_percent(self, title, targets):
-        gridPos = self.layout.next_half_width_graph()
-        return TimeSeries(title=title, targets=targets, gridPos=gridPos, unit="%", fillOpacity=10,
-                          legendDisplayMode="table", legendPlacement="right", legendCalcs=["max"])
-
     def timeseries_latency(self, title, targets):
         gridPos = self.layout.next_half_width_graph()
         return TimeSeries(title=title, targets=targets, gridPos=gridPos, unit="s", fillOpacity=10,
