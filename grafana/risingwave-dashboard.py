@@ -402,7 +402,7 @@ def section_streaming_actors(outer_panels):
             ]),
             panels.timeseries_ns("Actor Backpressure Time Per Second", [
                 panels.target(
-                    "rate(stream_actor_output_buffer_blocking_duration[15s]) / 15", "{{actor_id}}"
+                    "rate(stream_actor_output_buffer_blocking_duration[15s])", "{{actor_id}}"
                 ),
             ]),
             panels.timeseries_actor_latency("Actor Barrier Latency", [
