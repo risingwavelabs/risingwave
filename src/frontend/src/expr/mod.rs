@@ -303,6 +303,41 @@ impl ExprImpl {
         }
     }
 
+    pub fn as_comparison_cond(&self) -> Option<(InputRef, ExprType, InputRef)> {
+        fn reverse_comparison(comparison: ExprType) -> ExprType {
+            match comparison {
+                ExprType::LessThan => ExprType::GreaterThan,
+                ExprType::LessThanOrEqual => ExprType::GreaterThanOrEqual,
+                ExprType::GreaterThan => ExprType::LessThan,
+                ExprType::GreaterThanOrEqual => ExprType::LessThanOrEqual,
+                _ => unreachable!(),
+            }
+        }
+
+        if let ExprImpl::FunctionCall(function_call) = self {
+            match function_call.get_expr_type() {
+                ty @ (ExprType::LessThan
+                | ExprType::LessThanOrEqual
+                | ExprType::GreaterThan
+                | ExprType::GreaterThanOrEqual) => {
+                    let (_, op1, op2) = function_call.clone().decompose_as_binary();
+                    if let (ExprImpl::InputRef(x), ExprImpl::InputRef(y)) = (op1, op2) {
+                        if x.index < y.index {
+                            Some((*x, ty, *y))
+                        } else {
+                            Some((*y, reverse_comparison(ty), *x))
+                        }
+                    } else {
+                        None
+                    }
+                }
+                _ => None,
+            }
+        } else {
+            None
+        }
+    }
+
     pub fn as_eq_const(&self) -> Option<(InputRef, Literal)> {
         if let ExprImpl::FunctionCall(function_call) = self &&
         function_call.get_expr_type() == ExprType::Equal{
