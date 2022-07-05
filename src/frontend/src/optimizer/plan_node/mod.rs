@@ -233,7 +233,6 @@ mod logical_limit;
 mod logical_multi_join;
 mod logical_project;
 mod logical_scan;
-mod logical_sink;
 mod logical_source;
 mod logical_table_function;
 mod logical_topn;
@@ -250,7 +249,6 @@ mod stream_index_scan;
 mod stream_local_simple_agg;
 mod stream_materialize;
 mod stream_project;
-mod stream_sink;
 mod stream_source;
 mod stream_table_scan;
 mod stream_topn;
@@ -285,7 +283,6 @@ pub use logical_limit::LogicalLimit;
 pub use logical_multi_join::{LogicalMultiJoin, LogicalMultiJoinBuilder};
 pub use logical_project::{LogicalProject, LogicalProjectBuilder};
 pub use logical_scan::LogicalScan;
-pub use logical_sink::LogicalSink;
 pub use logical_source::LogicalSource;
 pub use logical_table_function::LogicalTableFunction;
 pub use logical_topn::LogicalTopN;
@@ -302,7 +299,6 @@ pub use stream_index_scan::StreamIndexScan;
 pub use stream_local_simple_agg::StreamLocalSimpleAgg;
 pub use stream_materialize::StreamMaterialize;
 pub use stream_project::StreamProject;
-pub use stream_sink::StreamSink;
 pub use stream_source::StreamSource;
 pub use stream_table_scan::StreamTableScan;
 pub use stream_topn::StreamTopN;
@@ -331,7 +327,6 @@ macro_rules! for_all_plan_nodes {
             , { Logical, Filter }
             , { Logical, Project }
             , { Logical, Scan }
-            , { Logical, Sink }
             , { Logical, Source }
             , { Logical, Insert }
             , { Logical, Delete }
@@ -364,7 +359,6 @@ macro_rules! for_all_plan_nodes {
             , { Stream, Project }
             , { Stream, Filter }
             , { Stream, TableScan }
-            , { Stream, Sink }
             , { Stream, Source }
             , { Stream, HashJoin }
             , { Stream, Exchange }
@@ -391,7 +385,6 @@ macro_rules! for_logical_plan_nodes {
             , { Logical, Filter }
             , { Logical, Project }
             , { Logical, Scan }
-            , { Logical, Sink }
             , { Logical, Source }
             , { Logical, Insert }
             , { Logical, Delete }
@@ -447,7 +440,6 @@ macro_rules! for_stream_plan_nodes {
             , { Stream, HashJoin }
             , { Stream, Exchange }
             , { Stream, TableScan }
-            , { Stream, Sink }
             , { Stream, Source }
             , { Stream, HashAgg }
             , { Stream, LocalSimpleAgg }

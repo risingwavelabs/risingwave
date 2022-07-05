@@ -724,29 +724,16 @@ where
         let mut core = self.core.lock().await;
         let sink = Sink::select(self.env.meta_store(), &sink_id).await?;
         if let Some(sink) = sink {
-            match core.get_ref_count(sink_id) {
-                Some(ref_count) => Err(CatalogError(
-                    anyhow!(
-                        "Fail to delete sink `{}` because {} other relation(s) depend on it.",
-                        sink.name,
-                        ref_count
-                    )
-                    .into(),
-                )
-                .into()),
-                None => {
-                    Sink::delete(self.env.meta_store(), &sink_id).await?;
-                    core.drop_sink(&sink);
+            Sink::delete(self.env.meta_store(), &sink_id).await?;
+            core.drop_sink(&sink);
 
-                    let version = self
-                        .env
-                        .notification_manager()
-                        .notify_frontend(Operation::Delete, Info::Sink(sink))
-                        .await;
+            let version = self
+                .env
+                .notification_manager()
+                .notify_frontend(Operation::Delete, Info::Sink(sink))
+                .await;
 
-                    Ok(version)
-                }
-            }
+            Ok(version)
         } else {
             Err(RwError::from(InternalError(
                 "sink doesn't exist".to_string(),

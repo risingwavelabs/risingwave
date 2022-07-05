@@ -36,7 +36,7 @@ pub use expr::bind_data_type;
 pub use insert::BoundInsert;
 pub use query::BoundQuery;
 pub use relation::{
-    BoundBaseTable, BoundJoin, BoundSink, BoundSource, BoundSystemTable, BoundTableFunction,
+    BoundBaseTable, BoundJoin, BoundSource, BoundSystemTable, BoundTableFunction,
     BoundTableSource, BoundWindowTableFunction, FunctionType, Relation, WindowTableFunctionKind,
 };
 pub use select::BoundSelect;

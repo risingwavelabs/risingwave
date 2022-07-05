@@ -22,11 +22,7 @@ use risingwave_sqlparser::ast::CreateSinkStatement;
 use super::util::handle_with_properties;
 use crate::binder::Binder;
 use crate::catalog::{DatabaseId, SchemaId};
-use crate::optimizer::property::RequiredDist;
-use crate::optimizer::PlanRef;
-use crate::planner::Planner;
-use crate::session::{OptimizerContext, OptimizerContextRef, SessionImpl};
-use crate::stream_fragmenter::StreamFragmenter;
+use crate::session::OptimizerContext;
 
 pub(crate) fn make_prost_sink(
     database_id: DatabaseId,
@@ -47,63 +43,11 @@ pub(crate) fn make_prost_sink(
     })
 }
 
-// pub fn gen_create_sink_plan(
-//     session: &SessionImpl,
-//     context: OptimizerContextRef,
-//     stmt: CreateSinkStatement,
-// ) -> Result<(PlanRef, ProstSink)> {
-//     let (schema_name, sink_name) = Binder::resolve_table_name(stmt.sink_name.clone())?;
-//     let (database_id, schema_id) = session
-//         .env()
-//         .catalog_reader()
-//         .read_guard()
-//         .check_relation_name_duplicated(
-//             session.database(),
-//             &schema_name,
-//             sink_name.as_str(),
-//         )?;
-
-//     let mv_name = stmt.materialized_view.to_string();
-
-//     let relation = {
-//         let mut binder = Binder::new(
-//             session.env().catalog_reader().read_guard(),
-//             session.database().to_string(),
-//         );
-//         binder.bind_table_or_source(
-//             &schema_name,
-//             mv_name.as_str(),
-//             None,
-//         )?
-//     };
-
-//     let plan = Planner::new(context).plan_relation(relation)?;
-
-//     let sink = make_prost_sink(
-//         database_id,
-//         schema_id,
-//         stmt.sink_name.to_string(),
-//         mv_name,
-//         handle_with_properties("create_sink", stmt.with_properties.0)?,
-//         session.user_name().to_string(),
-//     )?;
-
-//     Ok((plan, sink))
-// }
-
 pub async fn handle_create_sink(
     context: OptimizerContext,
     stmt: CreateSinkStatement,
 ) -> Result<PgResponse> {
     let session = context.session_ctx.clone();
-
-    // let (sink, graph) = {
-    //     let (plan, sink) = gen_create_sink_plan(&session, context.into(), stmt)?;
-    //     let stream_plan = plan.to_stream_prost();
-    //     let graph = StreamFragmenter::build_graph(stream_plan);
-
-    //     (sink, 1)
-    // };
 
     let (schema_name, sink_name) = Binder::resolve_table_name(stmt.sink_name.clone())?;
     let (database_id, schema_id) = session
@@ -121,7 +65,6 @@ pub async fn handle_create_sink(
         associated_table.id().table_id.into()
     };
 
-    let mv_name = stmt.materialized_view.to_string();
     let sink = make_prost_sink(
         database_id,
         schema_id,
@@ -130,17 +73,6 @@ pub async fn handle_create_sink(
         handle_with_properties("create_sink", stmt.with_properties.0)?,
         session.user_name().to_string(),
     )?;
-
-    // let relation = {
-    //     let mut binder = Binder::new(
-    //         session.env().catalog_reader().read_guard(),
-    //         session.database().to_string(),
-    //     );
-    //     binder.bind_table_or_source(schema_name.as_str(), mv_name.as_str(), None)
-    // }?;
-
-    // let mut plan_root = Planner::new(context.into()).plan_relation(relation)?;
-    // plan_root.set_required_dist(RequiredDist::Any);
 
     let catalog_writer = session.env().catalog_writer();
     catalog_writer.create_sink(sink).await?;

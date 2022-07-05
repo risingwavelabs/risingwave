@@ -169,7 +169,7 @@ impl MetaClient {
     }
 
     pub async fn create_sink(&self, sink: ProstSink) -> Result<(u32, CatalogVersion)> {
-        let request = CreateSinkRequest { sink: Some(sink) };
+        let request = CreateSinkRequest { sink: Some(sink), };
 
         let resp = self.inner.create_sink(request).await?;
         Ok((resp.sink_id, resp.version))

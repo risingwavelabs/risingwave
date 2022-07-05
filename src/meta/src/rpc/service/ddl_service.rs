@@ -229,7 +229,9 @@ where
         &self,
         request: Request<CreateSinkRequest>,
     ) -> Result<Response<CreateSinkResponse>, Status> {
-        let mut sink = request.into_inner().sink.unwrap();
+        let req = request.into_inner();
+
+        let mut sink = req.sink.unwrap();
 
         let id = self
             .env
@@ -262,7 +264,7 @@ where
     ) -> Result<Response<DropSinkResponse>, Status> {
         let sink_id = request.into_inner().sink_id;
 
-        // 1. Drop sink in catalog. Ref count will be checked.
+        // 1. Drop sink in catalog.
         let version = self
             .catalog_manager
             .drop_sink(sink_id)
