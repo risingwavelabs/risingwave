@@ -568,7 +568,7 @@ impl PlanTreeNodeUnary for LogicalAgg {
     fn rewrite_with_input(
         &self,
         input: PlanRef,
-        input_col_change: ColIndexMapping,
+        mut input_col_change: ColIndexMapping,
     ) -> (Self, ColIndexMapping) {
         let agg_calls = self
             .agg_calls
@@ -578,6 +578,7 @@ impl PlanTreeNodeUnary for LogicalAgg {
                 agg_call.inputs.iter_mut().for_each(|i| {
                     *i = InputRef::new(input_col_change.map(i.index()), i.return_type())
                 });
+                agg_call.filter = agg_call.filter.rewrite_expr(&mut input_col_change);
                 agg_call
             })
             .collect();
