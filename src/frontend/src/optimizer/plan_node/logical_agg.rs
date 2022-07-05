@@ -640,7 +640,7 @@ impl ColPrunable for LogicalAgg {
         };
 
         let input_required_cols = {
-            let mut tmp: FixedBitSet = upstream_required_cols.clone();
+            let mut tmp: FixedBitSet = upstream_required_cols;
             tmp.union_with(&group_key_required_cols);
             tmp.union_with(&agg_call_required_cols);
             tmp.ones().collect_vec()
@@ -674,11 +674,8 @@ impl ColPrunable for LogicalAgg {
             )
         };
         let new_output_cols = {
-            let mapping = self.i2o_col_mapping_with_required_out(&upstream_required_cols);
-            let mut tmp = input_required_cols
-                .iter()
-                .filter_map(|&idx| mapping.try_map(idx))
-                .collect_vec();
+            // group keys were never pruned or even re-ordered in current impl
+            let mut tmp = (0..agg.group_keys().len()).collect_vec();
             tmp.extend(
                 required_cols
                     .iter()
