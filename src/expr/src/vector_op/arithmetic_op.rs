@@ -251,9 +251,7 @@ pub fn time_interval_sub<T1, T2, T3>(
     l: NaiveTimeWrapper,
     r: IntervalUnit,
 ) -> Result<NaiveTimeWrapper> {
-    let time = l.0;
-    let new_time = time - Duration::milliseconds(r.get_ms());
-    Ok(NaiveTimeWrapper::new(new_time))
+    time_interval_add::<T1, T2, T3>(l, r.negative())
 }
 
 #[inline(always)]
@@ -272,6 +270,22 @@ where
     T2: TryInto<OrderedF64> + Debug,
 {
     l.div_float(r).ok_or(ExprError::NumericOutOfRange)
+}
+
+#[inline(always)]
+pub fn interval_float_mul<T1, T2, T3>(l: IntervalUnit, r: T2) -> Result<IntervalUnit>
+where
+    T2: TryInto<OrderedF64> + Debug,
+{
+    l.mul_float(r).ok_or(ExprError::NumericOutOfRange)
+}
+
+#[inline(always)]
+pub fn float_interval_mul<T1, T2, T3>(l: T1, r: IntervalUnit) -> Result<IntervalUnit>
+where
+    T1: TryInto<OrderedF64> + Debug,
+{
+    r.mul_float(l).ok_or(ExprError::NumericOutOfRange)
 }
 
 #[cfg(test)]
