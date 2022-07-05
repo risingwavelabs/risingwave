@@ -14,24 +14,25 @@
 
 use std::num::NonZeroUsize;
 
+use anyhow::anyhow;
 use futures_async_stream::try_stream;
 use itertools::Itertools;
 use num_traits::CheckedSub;
 use risingwave_common::array::column::Column;
 use risingwave_common::array::{DataChunk, Vis};
 use risingwave_common::catalog::{Field, Schema};
-use risingwave_common::error::{ErrorCode, Result, RwError};
+use risingwave_common::error::{Result, RwError};
 use risingwave_common::types::{DataType, IntervalUnit, ScalarImpl};
 use risingwave_expr::expr::expr_binary_nonnull::new_binary_expr;
 use risingwave_expr::expr::{Expression, InputRefExpression, LiteralExpression};
 use risingwave_pb::batch_plan::plan_node::NodeBody;
 use risingwave_pb::expr::expr_node;
 
+use crate::error::BatchError;
 use crate::executor::{
     BoxedDataChunkStream, BoxedExecutor, BoxedExecutorBuilder, Executor, ExecutorBuilder,
 };
 use crate::task::BatchTaskContext;
-
 pub struct HopWindowExecutor {
     child: BoxedExecutor,
     identity: String,
@@ -144,7 +145,7 @@ impl HopWindowExecutor {
             .exact_div(&window_slide)
             .and_then(|x| NonZeroUsize::new(usize::try_from(x).ok()?))
             .ok_or_else(|| {
-                RwError::from(ErrorCode::InternalError(format!(
+                BatchError::Internal(anyhow!(format!(
                     "window_size {} cannot be divided by window_slide {}",
                     window_size, window_slide
                 )))
@@ -162,7 +163,7 @@ impl HopWindowExecutor {
         // tumble_start(`time_col` - (`window_size` - `window_slide`), `window_slide`).
         // Let's pre calculate (`window_size` - `window_slide`).
         let window_size_sub_slide = window_size.checked_sub(&window_slide).ok_or_else(|| {
-            RwError::from(ErrorCode::InternalError(format!(
+            BatchError::Internal(anyhow!(format!(
                 "window_size {} cannot be subtracted by window_slide {}",
                 window_size, window_slide
             )))
@@ -189,7 +190,7 @@ impl HopWindowExecutor {
 
         for i in 0..units {
             let window_start_offset = window_slide.checked_mul_int(i).ok_or_else(|| {
-                RwError::from(ErrorCode::InternalError(format!(
+                BatchError::Internal(anyhow!(format!(
                     "window_slide {} cannot be multiplied by {}",
                     window_slide, i
                 )))
@@ -200,7 +201,7 @@ impl HopWindowExecutor {
             )
             .boxed();
             let window_end_offset = window_slide.checked_mul_int(i + units).ok_or_else(|| {
-                RwError::from(ErrorCode::InternalError(format!(
+                BatchError::Internal(anyhow!(format!(
                     "window_slide {} cannot be multiplied by {}",
                     window_slide, i
                 )))
@@ -231,9 +232,10 @@ impl HopWindowExecutor {
         let contains_window_end = output_indices.contains(&window_end_col_index);
         if !contains_window_start && !contains_window_end {
             // make sure that either window_start or window_end is in output indices.
-            return Err(RwError::from(ErrorCode::InternalError(
-                "neither window_start or window_end is in output_indices".to_string(),
-            )));
+            return Err(BatchError::Internal(anyhow!(
+                "neither window_start or window_end is in output_indices"
+            ))
+            .into());
         }
         #[for_await]
         for data_chunk in child.execute() {

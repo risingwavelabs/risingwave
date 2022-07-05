@@ -299,6 +299,6 @@ mod tests {
             assert_eq!(col0.array().as_int32().value_at(5), Some(3));
         }
         let res = stream.next().await;
-        assert_eq!(res, None);
+        assert!(res.is_none());
     }
 }
