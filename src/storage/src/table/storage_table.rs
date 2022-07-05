@@ -644,7 +644,6 @@ impl<S: StateStore, E: Encoding, const T: AccessType> StorageTableBase<S, E, T> 
     }
 
     /// Construct a [`StorageTableIter`] for streaming executors.
-    /// The batch iterator will wait for the epoch to be committed before iterating.
     pub async fn streaming_iter_with_pk_bounds(
         &self,
         epoch: u64,
