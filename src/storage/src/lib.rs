@@ -46,15 +46,12 @@
 #![feature(type_changing_struct_update)]
 #![test_runner(risingwave_test_runner::test_runner::run_failpont_tests)]
 
-pub mod cell_based_row_deserializer;
-pub mod cell_based_row_serializer;
-pub mod dedup_pk_cell_based_row_serializer;
+pub mod encoding;
 pub mod hummock;
 pub mod keyspace;
 pub mod memory;
 pub mod monitor;
 pub mod panic_store;
-pub mod row_serializer;
 pub mod storage_value;
 #[macro_use]
 pub mod store;

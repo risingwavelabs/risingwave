@@ -238,6 +238,10 @@ impl StateStore for MemoryStateStore {
             Ok(())
         }
     }
+
+    fn clear_shared_buffer(&self) -> Self::ClearSharedBufferFuture<'_> {
+        async move { Ok(()) }
+    }
 }
 
 pub struct MemoryStateStoreIter {
@@ -313,7 +317,8 @@ mod tests {
                     None,
                     ReadOptions {
                         epoch: 0,
-                        table_id: Default::default()
+                        table_id: Default::default(),
+                        ttl: None,
                     }
                 )
                 .await
@@ -330,7 +335,8 @@ mod tests {
                     Some(1),
                     ReadOptions {
                         epoch: 0,
-                        table_id: Default::default()
+                        table_id: Default::default(),
+                        ttl: None,
                     }
                 )
                 .await
@@ -344,7 +350,8 @@ mod tests {
                     None,
                     ReadOptions {
                         epoch: 1,
-                        table_id: Default::default()
+                        table_id: Default::default(),
+                        ttl: None,
                     }
                 )
                 .await
@@ -357,7 +364,8 @@ mod tests {
                     b"a",
                     ReadOptions {
                         epoch: 0,
-                        table_id: Default::default()
+                        table_id: Default::default(),
+                        ttl: None,
                     }
                 )
                 .await
@@ -370,7 +378,8 @@ mod tests {
                     b"b",
                     ReadOptions {
                         epoch: 0,
-                        table_id: Default::default()
+                        table_id: Default::default(),
+                        ttl: None,
                     }
                 )
                 .await
@@ -383,7 +392,8 @@ mod tests {
                     b"c",
                     ReadOptions {
                         epoch: 0,
-                        table_id: Default::default()
+                        table_id: Default::default(),
+                        ttl: None,
                     }
                 )
                 .await
@@ -396,7 +406,8 @@ mod tests {
                     b"a",
                     ReadOptions {
                         epoch: 1,
-                        table_id: Default::default()
+                        table_id: Default::default(),
+                        ttl: None,
                     }
                 )
                 .await
@@ -409,7 +420,8 @@ mod tests {
                     b"b",
                     ReadOptions {
                         epoch: 1,
-                        table_id: Default::default()
+                        table_id: Default::default(),
+                        ttl: None,
                     }
                 )
                 .await
@@ -422,7 +434,8 @@ mod tests {
                     b"c",
                     ReadOptions {
                         epoch: 1,
-                        table_id: Default::default()
+                        table_id: Default::default(),
+                        ttl: None,
                     }
                 )
                 .await

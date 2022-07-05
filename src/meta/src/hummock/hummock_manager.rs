@@ -23,10 +23,9 @@ use prost::Message;
 use risingwave_common::util::epoch::INVALID_EPOCH;
 use risingwave_hummock_sdk::compact::compact_task_to_string;
 use risingwave_hummock_sdk::compaction_group::hummock_version_ext::HummockVersionExt;
-use risingwave_hummock_sdk::compaction_group::StaticCompactionGroupId;
 use risingwave_hummock_sdk::{
     get_remote_sst_id, CompactionGroupId, HummockCompactionTaskId, HummockContextId, HummockEpoch,
-    HummockRefCount, HummockSSTableId, HummockVersionId, LocalSstableInfo,
+    HummockRefCount, HummockSSTableId, HummockVersionId, LocalSstableInfo, FIRST_VERSION_ID,
 };
 use risingwave_pb::hummock::hummock_version::Levels;
 use risingwave_pb::hummock::{
@@ -134,7 +133,6 @@ macro_rules! commit_multi_var {
 #[derive(Default)]
 struct Versioning {
     current_version_id: CurrentHummockVersionId,
-    // TODO #2065: split levels by compaction group id in `HummockVersion`
     hummock_versions: BTreeMap<HummockVersionId, HummockVersion>,
     hummock_version_deltas: BTreeMap<HummockVersionId, HummockVersionDelta>,
     pinned_versions: BTreeMap<HummockContextId, HummockPinnedVersion>,
@@ -220,22 +218,23 @@ where
             .await?
             .unwrap_or_else(CurrentHummockVersionId::new);
 
-        versioning_guard.hummock_versions = HummockVersion::list(self.env.meta_store())
+        let mut version_ids: HashSet<_> = HummockVersion::list(self.env.meta_store())
             .await?
             .into_iter()
-            .map(|version| (version.id, version))
+            .map(|version| version.id)
             .collect();
 
-        versioning_guard.hummock_version_deltas = HummockVersionDelta::list(self.env.meta_store())
-            .await?
-            .into_iter()
-            .map(|version_delta| (version_delta.id, version_delta))
-            .collect();
+        let hummock_version_deltas: BTreeMap<_, _> =
+            HummockVersionDelta::list(self.env.meta_store())
+                .await?
+                .into_iter()
+                .map(|version_delta| (version_delta.id, version_delta))
+                .collect();
 
         // Insert the initial version.
         if versioning_guard.hummock_versions.is_empty() {
             let mut init_version = HummockVersion {
-                id: versioning_guard.current_version_id.id(),
+                id: FIRST_VERSION_ID,
                 levels: Default::default(),
                 max_committed_epoch: INVALID_EPOCH,
                 safe_epoch: INVALID_EPOCH,
@@ -260,11 +259,57 @@ where
                     .levels
                     .insert(compaction_group.group_id(), Levels { levels });
             }
-            init_version.insert(self.env.meta_store()).await?;
-            versioning_guard
-                .hummock_versions
-                .insert(init_version.id, init_version);
+            if version_ids.is_empty() {
+                version_ids.insert(init_version.id);
+            }
+            let mut redo_state = init_version.clone();
+            if version_ids.contains(&init_version.id) {
+                init_version.insert(self.env.meta_store()).await?;
+                versioning_guard
+                    .hummock_versions
+                    .insert(init_version.id, init_version);
+            }
+
+            for (id, version_delta) in &hummock_version_deltas {
+                for (compaction_group_id, level_deltas) in &version_delta.level_deltas {
+                    let mut delete_sst_levels = Vec::with_capacity(level_deltas.level_deltas.len());
+                    let mut delete_sst_ids_set = HashSet::new();
+                    let mut insert_sst_level = u32::MAX;
+                    let mut insert_table_infos = vec![];
+                    for level_delta in &level_deltas.level_deltas {
+                        if !level_delta.removed_table_ids.is_empty() {
+                            delete_sst_levels.push(level_delta.level_idx);
+                            delete_sst_ids_set.extend(level_delta.removed_table_ids.iter().clone());
+                        }
+                        if !level_delta.inserted_table_infos.is_empty() {
+                            insert_sst_level = level_delta.level_idx;
+                            insert_table_infos
+                                .extend(level_delta.inserted_table_infos.iter().cloned());
+                        }
+                    }
+                    let operand = &mut redo_state
+                        .get_compaction_group_levels_mut(*compaction_group_id as CompactionGroupId);
+                    HummockVersion::apply_compact_ssts(
+                        operand,
+                        &delete_sst_levels,
+                        &delete_sst_ids_set,
+                        insert_sst_level,
+                        insert_table_infos,
+                    );
+                }
+                redo_state.id = *id;
+                redo_state.max_committed_epoch = version_delta.max_committed_epoch;
+                redo_state.safe_epoch = version_delta.safe_epoch;
+
+                if version_ids.contains(&redo_state.id) {
+                    redo_state.insert(self.env.meta_store()).await?;
+                    versioning_guard
+                        .hummock_versions
+                        .insert(redo_state.id, redo_state.clone());
+                }
+            }
         }
+        versioning_guard.hummock_version_deltas = hummock_version_deltas;
 
         versioning_guard.pinned_versions = HummockPinnedVersion::list(self.env.meta_store())
             .await?
@@ -563,11 +608,6 @@ where
         compaction_group_id: CompactionGroupId,
         manual_compaction_option: Option<ManualCompactionOption>,
     ) -> Result<Option<CompactTask>> {
-        // TODO #2065: Remove this line after split levels by compaction group.
-        // All SSTs belongs to `StateDefault` currently.
-        if compaction_group_id != u64::from(StaticCompactionGroupId::StateDefault) {
-            return Ok(None);
-        }
         let start_time = Instant::now();
         let mut compaction_guard = self.compaction.write().await;
         let compaction = compaction_guard.deref_mut();
@@ -783,6 +823,7 @@ where
             );
             let mut version_delta = HummockVersionDelta {
                 prev_id: old_version.id,
+                max_committed_epoch: old_version.max_committed_epoch,
                 ..Default::default()
             };
             let level_deltas = &mut version_delta
@@ -866,6 +907,7 @@ where
                     compact_task.compaction_group_id,
                 ))?,
             self.versioning.read().await.current_version_ref(),
+            compact_task.compaction_group_id,
         );
 
         self.try_send_compaction_request(compact_task.compaction_group_id);
@@ -885,8 +927,31 @@ where
         epoch: HummockEpoch,
         sstables: Vec<LocalSstableInfo>,
     ) -> Result<()> {
-        // TODO #2065: add SSTs to corresponding compaction groups' levels.
-        let sstables = sstables.into_iter().map(|(_, sst)| sst).collect_vec();
+        // Warn of table_ids that is not found in expected compaction group.
+        // It indicates:
+        // 1. Either these table_ids are never registered to any compaction group. This is FATAL
+        // since compaction filter will remove these valid states incorrectly.
+        // 2. Or the owners of these table_ids have been dropped, but their stale states are still
+        // committed. This is OK since compaction filter will remove these stale states
+        // later.
+        for (compaction_group_id, sst) in &sstables {
+            let compaction_group = self
+                .compaction_group_manager
+                .compaction_group(*compaction_group_id)
+                .await
+                .unwrap_or_else(|| panic!("compaction group {} exists", compaction_group_id));
+            for table_id in sst
+                .table_ids
+                .iter()
+                .filter(|t| !compaction_group.member_table_ids().contains(t))
+            {
+                tracing::warn!(
+                    "table {} doesn't belong to expected compaction group {}",
+                    table_id,
+                    compaction_group_id
+                );
+            }
+        }
 
         let mut versioning_guard = self.versioning.write().await;
         let old_version = versioning_guard.current_version();
@@ -901,6 +966,7 @@ where
             current_version_id.id(),
             HummockVersionDelta {
                 prev_id: old_version.id,
+                safe_epoch: old_version.safe_epoch,
                 ..Default::default()
             },
         );
@@ -921,7 +987,7 @@ where
         // happens, we temporarily set a large value for etcd's max-txn-ops. But we need to
         // formally fix this because the performance degradation is not acceptable anyway.
         let mut total_files_size = 0;
-        for sst in &sstables {
+        for sst in sstables.iter().map(|(_, sst)| sst) {
             match sstable_id_infos.get_mut(&sst.id) {
                 None => {
                     return Err(Error::InternalError(format!(
@@ -948,31 +1014,37 @@ where
             }
         }
 
-        let level_deltas = &mut new_version_delta
-            .level_deltas
-            .entry(StaticCompactionGroupId::StateDefault.into())
-            .or_default()
-            .level_deltas;
-        let level_delta = LevelDelta {
-            level_idx: 0,
-            inserted_table_infos: sstables.clone(),
-            ..Default::default()
-        };
-        level_deltas.push(level_delta);
+        let mut modified_compaction_groups = vec![];
+        // Append SSTs to a new version.
+        for (compaction_group_id, sstables) in &sstables.into_iter().group_by(|(cg_id, _)| *cg_id) {
+            modified_compaction_groups.push(compaction_group_id);
+            let group_sstables = sstables.into_iter().map(|(_, sst)| sst).collect_vec();
+            let level_deltas = &mut new_version_delta
+                .level_deltas
+                .entry(compaction_group_id)
+                .or_default()
+                .level_deltas;
+            let level_delta = LevelDelta {
+                level_idx: 0,
+                inserted_table_infos: group_sstables.clone(),
+                ..Default::default()
+            };
+            level_deltas.push(level_delta);
+
+            let version_first_level = new_hummock_version
+                .get_compaction_group_levels_mut(compaction_group_id)
+                .first_mut()
+                .expect("Expect at least one level");
+            assert_eq!(version_first_level.level_idx, 0);
+            assert_eq!(
+                version_first_level.level_type,
+                LevelType::Overlapping as i32
+            );
+            version_first_level.table_infos.extend(group_sstables);
+            version_first_level.total_file_size += total_files_size;
+        }
 
         // Create a new_version, possibly merely to bump up the version id and max_committed_epoch.
-        // TODO #2065: use correct compaction group id
-        let version_first_level = new_hummock_version
-            .get_compaction_group_levels_mut(StaticCompactionGroupId::StateDefault.into())
-            .first_mut()
-            .expect("Expect at least one level");
-        assert_eq!(version_first_level.level_idx, 0);
-        assert_eq!(
-            version_first_level.level_type,
-            LevelType::Overlapping as i32
-        );
-        version_first_level.table_infos.extend(sstables);
-        version_first_level.total_file_size += total_files_size;
         new_version_delta.max_committed_epoch = epoch;
         new_hummock_version.max_committed_epoch = epoch;
         commit_multi_var!(
@@ -999,8 +1071,8 @@ where
         drop(versioning_guard);
 
         // commit_epoch may contains SSTs from any compaction group
-        for id in self.compaction.read().await.compaction_statuses.keys() {
-            self.try_send_compaction_request(*id);
+        for id in modified_compaction_groups {
+            self.try_send_compaction_request(id);
         }
 
         #[cfg(test)]
@@ -1528,5 +1600,9 @@ where
         let compaction_guard = self.compaction.read().await;
         let assignment_ref = &compaction_guard.compact_task_assignment;
         assignment_ref.get(&task_id).cloned()
+    }
+
+    pub fn compaction_group_manager_ref_for_test(&self) -> CompactionGroupManagerRef<S> {
+        self.compaction_group_manager.clone()
     }
 }

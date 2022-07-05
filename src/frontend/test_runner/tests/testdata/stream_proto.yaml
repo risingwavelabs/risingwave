@@ -32,11 +32,13 @@
                             isNullable: true
                           name: _row_id
                         order: ASCENDING
+                    pkIndices:
+                      - 0
+                    distKeyIndices:
+                      - 0
                   columnIds:
                     - 1
                     - 0
-                  distributionKeys:
-                    - 1
             pkIndices:
               - 1
             fields:
@@ -107,11 +109,7 @@
     materialize:
       columnOrders:
         - orderType: ASCENDING
-          inputRef:
-            columnIdx: 1
-          returnType:
-            typeName: INT64
-            isNullable: true
+          index: 1
       columnIds:
         - 0
         - 1
@@ -175,11 +173,13 @@
                         isNullable: true
                       name: _row_id
                     order: ASCENDING
+                pkIndices:
+                  - 0
+                distKeyIndices:
+                  - 0
               columnIds:
                 - 1
                 - 0
-              distributionKeys:
-                - 1
         pkIndices:
           - 1
         fields:
@@ -220,11 +220,7 @@
     materialize:
       columnOrders:
         - orderType: ASCENDING
-          inputRef:
-            columnIdx: 1
-          returnType:
-            typeName: INT64
-            isNullable: true
+          index: 1
       columnIds:
         - 0
         - 1
@@ -293,11 +289,13 @@
                         isNullable: true
                       name: _row_id
                     order: ASCENDING
+                pkIndices:
+                  - 0
+                distKeyIndices:
+                  - 0
               columnIds:
                 - 1
                 - 0
-              distributionKeys:
-                - 1
         pkIndices:
           - 1
         fields:
@@ -342,11 +340,7 @@
     materialize:
       columnOrders:
         - orderType: ASCENDING
-          inputRef:
-            columnIdx: 1
-          returnType:
-            typeName: INT64
-            isNullable: true
+          index: 1
       columnIds:
         - 0
         - 1
@@ -413,11 +407,13 @@
                                     isNullable: true
                                   name: _row_id
                                 order: ASCENDING
+                            pkIndices:
+                              - 0
+                            distKeyIndices:
+                              - 0
                           columnIds:
                             - 1
                             - 0
-                          distributionKeys:
-                            - 1
                     pkIndices:
                       - 1
                     fields:
@@ -626,12 +622,14 @@
                                         isNullable: true
                                       name: _row_id
                                     order: ASCENDING
+                                pkIndices:
+                                  - 0
+                                distKeyIndices:
+                                  - 0
                               columnIds:
                                 - 1
                                 - 2
                                 - 0
-                              distributionKeys:
-                                - 2
                         pkIndices:
                           - 2
                         fields:
@@ -801,8 +799,6 @@
                   pk:
                     - 0
                   owner: root
-              columnMapping:
-                0: 0
         pkIndices:
           - 1
         fields:
@@ -841,11 +837,7 @@
     materialize:
       columnOrders:
         - orderType: ASCENDING
-          inputRef:
-            columnIdx: 1
-          returnType:
-            typeName: INT32
-            isNullable: true
+          index: 1
       columnIds:
         - 0
         - 1

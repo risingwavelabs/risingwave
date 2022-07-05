@@ -362,7 +362,12 @@ pub fn new_binary_expr(
                     { interval, timestamp, timestamp, interval_timestamp_add },
                     { interval, date, timestamp, interval_date_add },
                     { date, interval, timestamp, date_interval_add },
+                    { date, int32, date, date_int_add },
+                    { int32, date, date, int_date_add },
+                    { date, time, timestamp, date_time_add },
+                    { time, date, timestamp, time_date_add },
                     { interval, interval, interval, general_add },
+                    { time, interval, time, time_interval_add },
                 },
             }
         }
@@ -376,7 +381,10 @@ pub fn new_binary_expr(
                     { timestamp, interval, timestamp, timestamp_interval_sub },
                     { date, date, int32, date_date_sub },
                     { date, interval, timestamp, date_interval_sub },
+                    { time, time, interval, time_time_sub },
+                    { time, interval, time, time_interval_sub },
                     { interval, interval, interval, general_sub },
+                    { date, int32, date, date_int_sub },
                 },
             }
         }
@@ -389,9 +397,14 @@ pub fn new_binary_expr(
                     { interval, int16, interval, interval_int_mul },
                     { interval, int32, interval, interval_int_mul },
                     { interval, int64, interval, interval_int_mul },
+                    {interval, float32, interval, interval_float_mul },
+                    {interval, float64, interval, interval_float_mul },
+
                     { int16, interval, interval, int_interval_mul },
                     { int32, interval, interval, int_interval_mul },
                     { int64, interval, interval, int_interval_mul },
+                    { float32, interval, interval, float_interval_mul },
+                    { float64, interval, interval, float_interval_mul },
                 },
             }
         }

@@ -16,7 +16,6 @@ use std::collections::BinaryHeap;
 use std::sync::Arc;
 
 use futures_async_stream::try_stream;
-use itertools::Itertools;
 use risingwave_common::array::column::Column;
 use risingwave_common::array::DataChunk;
 use risingwave_common::catalog::{Field, Schema};
@@ -25,8 +24,8 @@ use risingwave_common::types::ToOwnedDatum;
 use risingwave_common::util::sort_util::{HeapElem, OrderPair, K_PROCESSING_WINDOW_SIZE};
 use risingwave_pb::batch_plan::plan_node::NodeBody;
 use risingwave_pb::batch_plan::ExchangeSource as ProstExchangeSource;
-use risingwave_rpc_client::ExchangeSource;
 
+use crate::exchange_source::ExchangeSourceImpl;
 use crate::executor::{
     BoxedDataChunkStream, BoxedExecutor, BoxedExecutorBuilder, CreateSource, DefaultCreateSource,
     Executor, ExecutorBuilder,
@@ -46,7 +45,7 @@ pub struct MergeSortExchangeExecutorImpl<CS, C> {
     order_pairs: Arc<Vec<OrderPair>>,
     min_heap: BinaryHeap<HeapElem>,
     proto_sources: Vec<ProstExchangeSource>,
-    sources: Vec<Box<dyn ExchangeSource>>,
+    sources: Vec<ExchangeSourceImpl>, // impl
     /// Mock-able CreateSource.
     source_creators: Vec<CS>,
     schema: Schema,
@@ -139,7 +138,7 @@ impl<CS: 'static + Send + CreateSource, C: BatchTaskContext> MergeSortExchangeEx
                         .data_type
                         .create_array_builder(K_PROCESSING_WINDOW_SIZE)
                 })
-                .try_collect()?;
+                .collect();
             let mut array_len = 0;
             while want_to_produce > 0 && !self.min_heap.is_empty() {
                 let top_elem = self.min_heap.pop().unwrap();

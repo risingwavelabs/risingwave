@@ -32,7 +32,7 @@ mod tests {
 
     #[test]
     fn test_concat_op() {
-        let writer = Utf8ArrayBuilder::new(1).unwrap().writer();
+        let writer = Utf8ArrayBuilder::new(1).writer();
         let guard = concat_op("114", "514", writer).unwrap();
         let array = guard.into_inner().finish().unwrap();
 
