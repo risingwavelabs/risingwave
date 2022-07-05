@@ -91,7 +91,9 @@ impl ExprImpl {
     /// A `count(*)` aggregate function.
     #[inline(always)]
     pub fn count_star() -> Self {
-        AggCall::new(AggKind::Count, vec![], false).unwrap().into()
+        AggCall::new(AggKind::Count, vec![], false, Condition::true_cond())
+            .unwrap()
+            .into()
     }
 
     /// Collect all `InputRef`s' indexes in the expression.
