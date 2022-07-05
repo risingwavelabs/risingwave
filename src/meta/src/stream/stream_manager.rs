@@ -19,7 +19,7 @@ use itertools::Itertools;
 use risingwave_common::catalog::TableId;
 use risingwave_common::error::{internal_error, Result};
 use risingwave_common::types::{ParallelUnitId, VIRTUAL_NODE_COUNT};
-use risingwave_pb::catalog::Source;
+use risingwave_pb::catalog::{Source, Table};
 use risingwave_pb::common::{ActorInfo, ParallelUnitMapping, WorkerType};
 use risingwave_pb::meta::table_fragments::{ActorState, ActorStatus};
 use risingwave_pb::stream_plan::stream_node::NodeBody;
@@ -33,6 +33,7 @@ use uuid::Uuid;
 use super::ScheduledLocations;
 use crate::barrier::{BarrierManagerRef, Command};
 use crate::cluster::{ClusterManagerRef, WorkerId};
+use crate::hummock::compaction_group::manager::CompactionGroupManagerRef;
 use crate::manager::{DatabaseId, HashMappingManagerRef, MetaSrvEnv, SchemaId};
 use crate::model::{ActorId, DispatcherId, TableFragments};
 use crate::storage::MetaStore;
@@ -55,8 +56,8 @@ pub struct CreateMaterializedViewContext {
     pub affiliated_source: Option<Source>,
     /// Table id offset get from meta id generator. Used to calculate global unique table id.
     pub table_id_offset: u32,
-    /// Internal TableID for MaterializedView.
-    pub internal_table_id_set: HashSet<u32>,
+    /// Internal TableID to Table mapping
+    pub internal_table_id_map: HashMap<u32, Option<Table>>,
     /// SchemaId of mview
     pub schema_id: SchemaId,
     /// DatabaseId of mview
@@ -88,6 +89,8 @@ pub struct GlobalStreamManager<S: MetaStore> {
 
     /// Client Pool to stream service on compute nodes
     client_pool: StreamClientPoolRef,
+
+    compaction_group_manager: CompactionGroupManagerRef<S>,
 }
 
 impl<S> GlobalStreamManager<S>
@@ -100,6 +103,7 @@ where
         barrier_manager: BarrierManagerRef<S>,
         cluster_manager: ClusterManagerRef<S>,
         source_manager: SourceManagerRef<S>,
+        compaction_group_manager: CompactionGroupManagerRef<S>,
     ) -> Result<Self> {
         Ok(Self {
             scheduler: Scheduler::new(cluster_manager.clone(), env.hash_mapping_manager_ref()),
@@ -109,6 +113,7 @@ where
             source_manager,
             _hash_mapping_manager: env.hash_mapping_manager_ref(),
             client_pool: env.stream_client_pool_ref(),
+            compaction_group_manager,
         })
     }
 
@@ -271,14 +276,27 @@ where
         &self,
         mut table_fragments: TableFragments,
         CreateMaterializedViewContext {
-            mut dispatches,
-            mut upstream_node_actors,
+            dispatches,
+            upstream_node_actors,
             table_sink_map,
             dependent_table_ids,
             table_properties,
             ..
-        }: CreateMaterializedViewContext,
+        }: &mut CreateMaterializedViewContext,
     ) -> Result<()> {
+        // This scope guard does clean up jobs ASYNCHRONOUSLY before Err returns.
+        // It MUST be cleared before Ok returns.
+        let mut revert_funcs = scopeguard::guard(
+            vec![],
+            |revert_funcs: Vec<futures::future::BoxFuture<()>>| {
+                tokio::spawn(async move {
+                    for revert_func in revert_funcs {
+                        revert_func.await;
+                    }
+                });
+            },
+        );
+
         let nodes = self
             .cluster_manager
             .list_worker_node(
@@ -307,9 +325,9 @@ where
         // 2. insert parallel unit id in batch query node
         self.resolve_chain_node(
             &mut table_fragments,
-            &dependent_table_ids,
-            &mut dispatches,
-            &mut upstream_node_actors,
+            dependent_table_ids,
+            dispatches,
+            upstream_node_actors,
             &locations,
         )
         .await?;
@@ -531,6 +549,21 @@ where
                 .await?;
         }
 
+        // Register to compaction group beforehand.
+        //
+        // Note that this step must be before building actors, because we will explicitly sync this
+        // info in the beginning of actors.
+        let registered_table_ids = self
+            .compaction_group_manager
+            .register_table_fragments(&table_fragments, table_properties)
+            .await?;
+        let compaction_group_manager_ref = self.compaction_group_manager.clone();
+        revert_funcs.push(Box::pin(async move {
+            if let Err(e) = compaction_group_manager_ref.unregister_table_ids(&registered_table_ids).await {
+                tracing::warn!("Failed to unregister_table_ids {:#?}.\nThey will be cleaned up on node restart.\n{:#?}", registered_table_ids, e);
+            }
+        }));
+
         // In the second stage, each [`WorkerNode`] builds local actors and connect them with
         // channels.
         for (node_id, actors) in node_actors {
@@ -554,7 +587,7 @@ where
 
         // Add table fragments to meta store with state: `State::Creating`.
         self.fragment_manager
-            .start_create_table_fragments(table_fragments.clone(), table_properties)
+            .start_create_table_fragments(table_fragments.clone())
             .await?;
 
         let table_id = table_fragments.table_id();
@@ -567,7 +600,7 @@ where
             .barrier_manager
             .run_command(Command::CreateMaterializedView {
                 table_fragments,
-                table_sink_map,
+                table_sink_map: table_sink_map.clone(),
                 dispatches,
                 source_state: init_split_assignment.clone(),
             })
@@ -583,6 +616,7 @@ where
                 .await?;
         }
 
+        revert_funcs.clear();
         Ok(())
     }
 
@@ -614,6 +648,19 @@ where
         self.source_manager
             .drop_update(Some(source_fragments), Some(actor_ids))
             .await?;
+
+        // Unregister from compaction group afterwards.
+        if let Err(e) = self
+            .compaction_group_manager
+            .unregister_table_fragments(&table_fragments)
+            .await
+        {
+            tracing::warn!(
+                "Failed to unregister table {}. It wll be unregistered eventually.\n{:#?}",
+                table_id,
+                e
+            );
+        }
 
         Ok(())
     }
@@ -814,10 +861,7 @@ mod tests {
             cluster_manager.activate_worker_node(host).await?;
 
             let catalog_manager = Arc::new(CatalogManager::new(env.clone()).await?);
-            let compaction_group_manager =
-                Arc::new(CompactionGroupManager::new(env.clone()).await?);
-            let fragment_manager =
-                Arc::new(FragmentManager::new(env.clone(), compaction_group_manager).await?);
+            let fragment_manager = Arc::new(FragmentManager::new(env.clone()).await?);
             let meta_metrics = Arc::new(MetaMetrics::new());
             let compaction_group_manager =
                 Arc::new(CompactionGroupManager::new(env.clone()).await.unwrap());
@@ -864,6 +908,7 @@ mod tests {
                 barrier_manager.clone(),
                 cluster_manager.clone(),
                 source_manager.clone(),
+                compaction_group_manager.clone(),
             )
             .await?;
 
@@ -931,11 +976,11 @@ mod tests {
         );
         let table_fragments = TableFragments::new(table_id, fragments, HashSet::default());
 
-        let ctx = CreateMaterializedViewContext::default();
+        let mut ctx = CreateMaterializedViewContext::default();
 
         services
             .global_stream_manager
-            .create_materialized_view(table_fragments, ctx)
+            .create_materialized_view(table_fragments, &mut ctx)
             .await?;
 
         for actor in actors {
@@ -1032,11 +1077,11 @@ mod tests {
 
         let table_fragments = TableFragments::new(table_id, fragments, internal_table_id.clone());
 
-        let ctx = CreateMaterializedViewContext::default();
+        let mut ctx = CreateMaterializedViewContext::default();
 
         services
             .global_stream_manager
-            .create_materialized_view(table_fragments, ctx)
+            .create_materialized_view(table_fragments, &mut ctx)
             .await?;
 
         for actor in actors {
@@ -1164,11 +1209,11 @@ mod tests {
 
         let table_fragments = TableFragments::new(table_id, fragments, internal_table_id.clone());
 
-        let ctx = CreateMaterializedViewContext::default();
+        let mut ctx = CreateMaterializedViewContext::default();
 
         services
             .global_stream_manager
-            .create_materialized_view(table_fragments, ctx)
+            .create_materialized_view(table_fragments, &mut ctx)
             .await
             .unwrap();
 

@@ -28,8 +28,7 @@ mod sstable;
 pub use sstable::*;
 
 pub mod compaction_executor;
-#[expect(dead_code)]
-mod compaction_group_client;
+pub mod compaction_group_client;
 pub mod compactor;
 #[cfg(test)]
 mod compactor_tests;
@@ -57,6 +56,7 @@ pub mod file_cache;
 
 pub use error::*;
 pub use risingwave_common::cache::{CachableEntry, LookupResult, LruCache};
+use risingwave_common::catalog::TableId;
 use value::*;
 
 use self::iterator::HummockIterator;
@@ -64,6 +64,7 @@ use self::key::user_key;
 pub use self::sstable_store::*;
 pub use self::state_store::HummockStateStoreIter;
 use super::monitor::StateStoreMetrics;
+use crate::hummock::compaction_group_client::CompactionGroupClient;
 use crate::hummock::conflict_detector::ConflictDetector;
 use crate::hummock::iterator::ReadOptions;
 use crate::hummock::local_version_manager::LocalVersionManager;
@@ -83,6 +84,8 @@ pub struct HummockStorage {
 
     /// Statistics
     stats: Arc<StateStoreMetrics>,
+
+    compaction_group_client: Arc<dyn CompactionGroupClient>,
 }
 
 impl HummockStorage {
@@ -92,8 +95,16 @@ impl HummockStorage {
         sstable_store: SstableStoreRef,
         hummock_meta_client: Arc<dyn HummockMetaClient>,
         hummock_metrics: Arc<StateStoreMetrics>,
+        compaction_group_client: Arc<dyn CompactionGroupClient>,
     ) -> HummockResult<Self> {
-        Self::new(options, sstable_store, hummock_meta_client, hummock_metrics).await
+        Self::new(
+            options,
+            sstable_store,
+            hummock_meta_client,
+            hummock_metrics,
+            compaction_group_client,
+        )
+        .await
     }
 
     /// Creates a [`HummockStorage`].
@@ -103,6 +114,7 @@ impl HummockStorage {
         hummock_meta_client: Arc<dyn HummockMetaClient>,
         // TODO: separate `HummockStats` from `StateStoreMetrics`.
         stats: Arc<StateStoreMetrics>,
+        compaction_group_client: Arc<dyn CompactionGroupClient>,
     ) -> HummockResult<Self> {
         // For conflict key detection. Enabled by setting `write_conflict_detection_enabled` to
         // true in `StorageConfig`
@@ -123,6 +135,7 @@ impl HummockStorage {
             hummock_meta_client,
             sstable_store,
             stats,
+            compaction_group_client,
         };
         Ok(instance)
     }
@@ -172,6 +185,16 @@ impl HummockStorage {
 
     pub fn local_version_manager(&self) -> &Arc<LocalVersionManager> {
         &self.local_version_manager
+    }
+
+    fn get_compaction_group_id(&self, table_id: TableId) -> CompactionGroupId {
+        self.compaction_group_client
+            .get_compaction_group_id(table_id.table_id)
+            .unwrap_or_else(|| panic!("{} matches a compaction group", table_id.table_id))
+    }
+
+    pub async fn update_compaction_group_cache(&self) -> HummockResult<()> {
+        self.compaction_group_client.update().await
     }
 }
 

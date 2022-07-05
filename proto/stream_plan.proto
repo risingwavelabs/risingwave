@@ -27,6 +27,11 @@ message SourceNode {
   SourceType source_type = 3;
 }
 
+message SinkNode {
+  plan_common.TableRefId table_ref_id = 1;
+  repeated int32 column_ids = 2;
+}
+
 message ProjectNode {
   repeated expr.ExprNode select_list = 1;
 }
@@ -35,12 +40,13 @@ message FilterNode {
   expr.ExprNode search_condition = 1;
 }
 
-// A materialized view is regarded as a table,
-// hence we copy the CreateTableNode definition in OLAP PlanNode.
+// A materialized view is regarded as a table.
 // In addition, we also specify primary key to MV for efficient point lookup during update and deletion.
-// The node will be used for both create mv and create index. When creating mv,
-// `pk == distribution_keys == column_orders`. When creating index, `column_orders` will contain both
-// arrange columns and pk columns, while distribution keys will be arrange columns.
+//
+// The node will be used for both create mv and create index.
+// - When creating mv, `pk == distribution_keys == column_orders`.
+// - When creating index, `column_orders` will contain both
+//   arrange columns and pk columns, while distribution keys will be arrange columns.
 message MaterializeNode {
   plan_common.TableRefId table_ref_id = 1;
   plan_common.TableRefId associated_table_ref_id = 2;
@@ -82,7 +88,9 @@ message TopNNode {
   uint64 offset = 3;
   repeated uint32 distribution_keys = 4;
   // Used for internal table states
-  uint32 table_id = 5;
+  uint32 table_id_l = 5;
+  uint32 table_id_m = 6;
+  uint32 table_id_h = 7;
 }
 
 message HashJoinNode {
@@ -220,6 +228,13 @@ message LookupUnionNode {
   repeated uint32 order = 1;
 }
 
+message ExpandNode {
+  message Subset {
+    repeated uint32 keys = 1;
+  }
+  repeated Subset column_subsets = 1;
+}
+
 message StreamNode {
   oneof node_body {
     SourceNode source = 100;
@@ -242,6 +257,8 @@ message StreamNode {
     LookupUnionNode lookup_union = 117;
     UnionNode union = 118;
     DeltaIndexJoinNode delta_index_join = 119;
+    SinkNode sink = 120;
+    ExpandNode expand = 121;
   }
   // The id for the operator.
   uint64 operator_id = 1;

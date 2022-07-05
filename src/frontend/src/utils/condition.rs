@@ -25,7 +25,7 @@ use crate::expr::{
     try_get_bool_constant, ExprImpl, ExprRewriter, ExprType, ExprVisitor, InputRef,
 };
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub struct Condition {
     /// Condition expressions in conjunction form (combined with `AND`)
     pub conjunctions: Vec<ExprImpl>,
@@ -379,7 +379,7 @@ impl Condition {
     }
 
     #[must_use]
-    pub fn rewrite_expr(self, rewriter: &mut impl ExprRewriter) -> Self {
+    pub fn rewrite_expr(self, rewriter: &mut (impl ExprRewriter + ?Sized)) -> Self {
         Self {
             conjunctions: self
                 .conjunctions
