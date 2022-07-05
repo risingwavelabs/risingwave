@@ -25,7 +25,7 @@ use risingwave_common::types::{DataType, Datum, ScalarImpl};
 use risingwave_common::util::sort_util::OrderType;
 use risingwave_pb::batch_plan::plan_node::NodeBody;
 use risingwave_pb::batch_plan::{scan_range, ScanRange};
-use risingwave_pb::plan_common::CellBasedTableDesc;
+use risingwave_pb::plan_common::{CellBasedTableDesc, OrderType as ProstOrderType};
 use risingwave_storage::table::storage_table::{BatchDedupPkIter, StorageTable, StorageTableIter};
 use risingwave_storage::table::{Distribution, TableIter};
 use risingwave_storage::{dispatch_state_store, Keyspace, StateStore, StateStoreImpl};
@@ -153,22 +153,37 @@ impl BoxedExecutorBuilder for RowSeqScanExecutorBuilder {
             .map(ColumnId::from)
             .collect();
 
-        let pk_descs: Vec<OrderedColumnDesc> =
-            table_desc.order_key.iter().map(|d| d.into()).collect();
-        let order_types: Vec<OrderType> = pk_descs.iter().map(|desc| desc.order).collect();
+        // TODO: remove this
+        let pk_descs = table_desc
+            .order_key
+            .iter()
+            .map(|order| OrderedColumnDesc {
+                column_desc: column_descs[order.index as usize].clone(),
+                order: OrderType::from_prost(&ProstOrderType::from_i32(order.order_type).unwrap()),
+            })
+            .collect_vec();
+        let pk_types = table_desc
+            .order_key
+            .iter()
+            .map(|order| column_descs[order.index as usize].clone().data_type)
+            .collect_vec();
+        let pk_len = table_desc.order_key.len();
+        let order_types: Vec<OrderType> = table_desc
+            .order_key
+            .iter()
+            .map(|order| {
+                OrderType::from_prost(&ProstOrderType::from_i32(order.order_type).unwrap())
+            })
+            .collect();
 
         let scan_range = seq_scan_node.scan_range.as_ref().unwrap();
-        let (pk_prefix_value, next_col_bounds) = get_scan_bound(
-            scan_range.clone(),
-            pk_descs
-                .iter()
-                .map(|desc| desc.column_desc.data_type.clone()),
-        );
+        let (pk_prefix_value, next_col_bounds) =
+            get_scan_bound(scan_range.clone(), pk_types.into_iter());
 
         let pk_indices = table_desc
-            .pk_indices
+            .order_key
             .iter()
-            .map(|&k| k as usize)
+            .map(|k| k.index as usize)
             .collect_vec();
 
         let dist_key_indices = table_desc
@@ -202,14 +217,14 @@ impl BoxedExecutorBuilder for RowSeqScanExecutorBuilder {
             let scan_type = if pk_prefix_value.size() == 0 && is_full_range(&next_col_bounds) {
                 let iter = table.batch_dedup_pk_iter(source.epoch, &pk_descs).await?;
                 ScanType::TableScan(iter)
-            } else if pk_prefix_value.size() == pk_descs.len() {
+            } else if pk_prefix_value.size() == pk_len {
                 let row = {
                     keyspace.state_store().wait_epoch(source.epoch).await?;
                     table.get_row(&pk_prefix_value, source.epoch).await?
                 };
                 ScanType::PointGet(row)
             } else {
-                assert!(pk_prefix_value.size() < pk_descs.len());
+                assert!(pk_prefix_value.size() < pk_len);
 
                 let iter = if is_full_range(&next_col_bounds) {
                     table
