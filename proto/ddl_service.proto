@@ -109,10 +109,10 @@ message DropMaterializedSourceResponse {
 }
 
 // Used by risectl (and in the future, dashboard)
-message ListStateTablesRequest {}
+message RisectlListStateTablesRequest {}
 
 // Used by risectl (and in the future, dashboard)
-message ListStateTablesResponse {
+message RisectlListStateTablesResponse {
   repeated catalog.Table tables = 1;
 }
 
@@ -127,5 +127,5 @@ service DdlService {
   rpc DropMaterializedView(DropMaterializedViewRequest) returns (DropMaterializedViewResponse);
   rpc CreateMaterializedSource(CreateMaterializedSourceRequest) returns (CreateMaterializedSourceResponse);
   rpc DropMaterializedSource(DropMaterializedSourceRequest) returns (DropMaterializedSourceResponse);
-  rpc RisectlListStateTables(ListStateTablesRequest) returns (ListStateTablesResponse);
+  rpc RisectlListStateTables(RisectlListStateTablesRequest) returns (RisectlListStateTablesResponse);
 }
