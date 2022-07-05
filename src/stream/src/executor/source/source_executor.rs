@@ -17,19 +17,18 @@ use std::sync::Arc;
 
 use either::Either;
 use futures::stream::{select_with_strategy, PollNext, SelectWithStrategy};
-use futures::{pin_mut, Stream, StreamExt};
+use futures::StreamExt;
 use futures_async_stream::try_stream;
 use risingwave_common::array::column::Column;
-use risingwave_common::array::{ArrayBuilder, ArrayImpl, I64ArrayBuilder, StreamChunk};
+use risingwave_common::array::{ArrayBuilder, I64ArrayBuilder, StreamChunk};
 use risingwave_common::bail;
 use risingwave_common::catalog::{ColumnId, Schema, TableId};
-use risingwave_common::error::{internal_error, Result, RwError, ToRwResult};
+use risingwave_common::error::Result;
 use risingwave_connector::{ConnectorState, SplitImpl, SplitMetaData};
 use risingwave_source::connector_source::SourceContext;
 use risingwave_source::*;
 use risingwave_storage::{Keyspace, StateStore};
-use tokio::sync::mpsc::{unbounded_channel, UnboundedReceiver};
-use tokio::sync::{Mutex, Notify};
+use tokio::sync::mpsc::UnboundedReceiver;
 
 use crate::executor::error::StreamExecutorError;
 use crate::executor::monitor::StreamingMetrics;
@@ -65,6 +64,7 @@ pub struct SourceExecutor<S: StateStore> {
 
     state_cache: HashMap<String, SplitImpl>,
 
+    #[expect(dead_code)]
     /// Expected barrier latency
     expected_barrier_latency_ms: u64,
 }
@@ -113,7 +113,7 @@ impl<S: StateStore> SourceExecutor<S> {
             builder.append(Some(row_id)).unwrap();
         }
 
-        Column::new(Arc::new(ArrayImpl::from(builder.finish().unwrap())))
+        builder.finish().unwrap().into()
     }
 
     fn refill_row_id_column(&mut self, chunk: StreamChunk) -> StreamChunk {
@@ -133,24 +133,33 @@ impl<S: StateStore> SourceExecutor<S> {
     }
 }
 
-type SourceReaderMessage = Either<Result<Message>, Result<StreamChunkWithState>>;
+type SourceReaderMessage =
+    Either<StreamExecutorResult<Barrier>, StreamExecutorResult<StreamChunkWithState>>;
 type SourceReaderArm = BoxStream<'static, SourceReaderMessage>;
 type SourceReaderStream =
     SelectWithStrategy<SourceReaderArm, SourceReaderArm, fn(&mut ()) -> PollNext, ()>;
 
-struct SourceReaderNew {
-    /// The reader for stream source.
-    stream_reader: Box<SourceStreamReaderImpl>,
-
+struct SourceReader {
     /// The reader for barrier.
     barrier_receiver: UnboundedReceiver<Barrier>,
+
+    /// The reader for stream source.
+    source_chunk_reader: Box<SourceStreamReaderImpl>,
 }
 
-impl SourceReaderNew {
-    #[try_stream(ok = StreamChunkWithState, error = RwError)]
-    async fn stream_reader_new(mut stream_reader: Box<SourceStreamReaderImpl>) {
+impl SourceReader {
+    #[try_stream(ok = Barrier, error = StreamExecutorError)]
+    async fn barrier_receiver(mut rx: UnboundedReceiver<Barrier>) {
+        while let Some(barrier) = rx.recv().await {
+            yield barrier;
+        }
+        bail!("barrier reader closed unexpectedly");
+    }
+
+    #[try_stream(ok = StreamChunkWithState, error = StreamExecutorError)]
+    async fn source_chunk_reader(mut reader: Box<SourceStreamReaderImpl>) {
         loop {
-            match stream_reader.next().await {
+            match reader.next().await {
                 Ok(chunk) => yield chunk,
                 Err(err) => {
                     error!("hang up stream reader due to polling error: {}", err);
@@ -160,35 +169,26 @@ impl SourceReaderNew {
         }
     }
 
-    #[try_stream(ok = Message, error = RwError)]
-    async fn barrier_receiver(mut rx: UnboundedReceiver<Barrier>) {
-        while let Some(barrier) = rx.recv().await {
-            yield Message::Barrier(barrier);
-        }
-        bail!("barrier reader closed unexpectedly");
-    }
-
-    fn select_strategy(_: &mut ()) -> PollNext {
+    /// We prefer barrier on the left hand side over source chunks.
+    fn prefer_barrier_strategy(_: &mut ()) -> PollNext {
         PollNext::Left
     }
 
     fn into_stream(self) -> SourceReaderStream {
         let barrier_receiver = Self::barrier_receiver(self.barrier_receiver);
-        let stream_reader = Self::stream_reader_new(self.stream_reader);
+        let source_chunk_reader = Self::source_chunk_reader(self.source_chunk_reader);
         select_with_strategy(
             barrier_receiver.map(Either::Left).boxed(),
-            stream_reader.map(Either::Right).boxed(),
-            Self::select_strategy, // prefer barrier
+            source_chunk_reader.map(Either::Right).boxed(),
+            Self::prefer_barrier_strategy,
         )
     }
 
-    fn replace_source_reader(
+    fn replace_source_chunk_reader(
         stream: &mut SourceReaderStream,
-        source_reader: Box<SourceStreamReaderImpl>,
+        reader: Box<SourceStreamReaderImpl>,
     ) {
-        *stream.get_mut().1 = Self::stream_reader_new(source_reader)
-            .map(Either::Right)
-            .boxed();
+        *stream.get_mut().1 = Self::source_chunk_reader(reader).map(Either::Right).boxed();
     }
 }
 
@@ -211,14 +211,10 @@ impl<S: StateStore> SourceExecutor<S> {
             }
         }
 
-        if no_change_flag {
-            None
-        } else {
-            Some(target_state)
-        }
+        (!no_change_flag).then_some(target_state)
     }
 
-    async fn take_snapshot(&mut self, epoch: u64) -> Result<()> {
+    async fn take_snapshot(&mut self, epoch: u64) -> StreamExecutorResult<()> {
         let cache = self
             .state_cache
             .iter()
@@ -229,7 +225,7 @@ impl<S: StateStore> SourceExecutor<S> {
             self.split_state_store
                 .take_snapshot(cache, epoch)
                 .await
-                .to_rw_result()?;
+                .map_err(StreamExecutorError::source_error)?;
         }
 
         Ok(())
@@ -238,7 +234,7 @@ impl<S: StateStore> SourceExecutor<S> {
     async fn build_stream_source_reader(
         &mut self,
         state: ConnectorState,
-    ) -> Result<Box<SourceStreamReaderImpl>> {
+    ) -> StreamExecutorResult<Box<SourceStreamReaderImpl>> {
         let reader = match self.source_desc.source.as_ref() {
             SourceImpl::TableV2(t) => t
                 .stream_reader(self.column_ids.clone())
@@ -253,7 +249,8 @@ impl<S: StateStore> SourceExecutor<S> {
                 )
                 .await
                 .map(SourceStreamReaderImpl::Connector),
-        }?;
+        }
+        .map_err(StreamExecutorError::source_error)?;
 
         Ok(Box::new(reader))
     }
@@ -281,8 +278,8 @@ impl<S: StateStore> SourceExecutor<S> {
                     .try_recover_from_state_store(ele, epoch)
                     .await
                 {
-                    Ok(recover_state) if recover_state.is_some() => {
-                        *ele = recover_state.unwrap();
+                    Ok(Some(recover_state)) => {
+                        *ele = recover_state;
                     }
                     Err(e) => {
                         return Err(StreamExecutorError::source_error(e));
@@ -291,22 +288,17 @@ impl<S: StateStore> SourceExecutor<S> {
                 }
             }
         }
-        let recover_state: ConnectorState = if boot_state.is_empty() {
-            None
-        } else {
-            Some(boot_state)
-        };
+
+        let recover_state: ConnectorState = (!boot_state.is_empty()).then_some(boot_state);
 
         // todo: use epoch from msg to restore state from state store
-        let stream_reader = self
-            .build_stream_source_reader(recover_state)
-            .await
-            .map_err(StreamExecutorError::source_error)?;
-        let reader = SourceReaderNew {
-            stream_reader,
+        let source_chunk_reader = self.build_stream_source_reader(recover_state).await?;
+
+        let mut stream = SourceReader {
+            source_chunk_reader,
             barrier_receiver,
-        };
-        let mut stream = reader.into_stream();
+        }
+        .into_stream();
 
         yield Message::Barrier(barrier);
 
@@ -314,55 +306,37 @@ impl<S: StateStore> SourceExecutor<S> {
             match msg {
                 // This branch will be preferred.
                 Either::Left(barrier) => {
-                    match barrier.map_err(StreamExecutorError::source_error)? {
-                        Message::Barrier(barrier) => {
-                            let epoch = barrier.epoch.prev;
-                            self.take_snapshot(epoch)
-                                .await
-                                .map_err(StreamExecutorError::source_error)?;
+                    let barrier = barrier?;
+                    let epoch = barrier.epoch.prev;
+                    self.take_snapshot(epoch).await?;
 
-                            if let Some(Mutation::SourceChangeSplit(mapping)) =
-                                barrier.mutation.as_deref()
-                            {
-                                if let Some(target_splits) = mapping.get(&self.actor_id).cloned() {
-                                    match self.get_diff(target_splits) {
-                                        None => {}
-                                        Some(target_state) => {
-                                            log::info!(
-                                                "actor {:?} apply source split change to {:?}",
-                                                self.actor_id,
-                                                target_state
-                                            );
+                    if let Some(Mutation::SourceChangeSplit(mapping)) = barrier.mutation.as_deref()
+                    {
+                        if let Some(target_splits) = mapping.get(&self.actor_id).cloned() {
+                            if let Some(target_state) = self.get_diff(target_splits) {
+                                log::info!(
+                                    "actor {:?} apply source split change to {:?}",
+                                    self.actor_id,
+                                    target_state
+                                );
 
-                                            let reader = self
-                                                .build_stream_source_reader(Some(
-                                                    target_state.clone(),
-                                                ))
-                                                .await
-                                                .map_err(StreamExecutorError::source_error)?;
+                                let reader = self
+                                    .build_stream_source_reader(Some(target_state.clone()))
+                                    .await?;
 
-                                            SourceReaderNew::replace_source_reader(
-                                                &mut stream,
-                                                reader,
-                                            );
+                                SourceReader::replace_source_chunk_reader(&mut stream, reader);
 
-                                            self.stream_source_splits = target_state;
-                                        }
-                                    }
-                                }
+                                self.stream_source_splits = target_state;
                             }
-                            self.state_cache.clear();
-                            yield Message::Barrier(barrier)
                         }
-                        _ => unreachable!(),
                     }
+                    self.state_cache.clear();
+                    yield Message::Barrier(barrier);
                 }
+
                 Either::Right(chunk_with_state) => {
-                    let chunk_with_state =
-                        chunk_with_state.map_err(StreamExecutorError::source_error)?;
-                    if chunk_with_state.split_offset_mapping.is_some() {
-                        let mapping: HashMap<String, String> =
-                            chunk_with_state.split_offset_mapping.unwrap();
+                    let chunk_with_state = chunk_with_state?;
+                    if let Some(mapping) = chunk_with_state.split_offset_mapping {
                         let state: HashMap<String, SplitImpl> = mapping
                             .iter()
                             .map(|(split, offset)| {
@@ -370,20 +344,25 @@ impl<S: StateStore> SourceExecutor<S> {
                                     .stream_source_splits
                                     .iter()
                                     .filter(|origin_split| origin_split.id().as_str() == split)
-                                    .collect::<Vec<&SplitImpl>>();
+                                    .collect_vec();
+
                                 if origin_split_impl.is_empty() {
-                                    Err(internal_error(format!(
+                                    bail!(
                                         "cannot find split: {:?} in stream_source_splits: {:?}",
-                                        split, self.stream_source_splits
-                                    )))
+                                        split,
+                                        self.stream_source_splits
+                                    )
                                 } else {
-                                    Ok((split.clone(), origin_split_impl[0].update(offset.clone())))
+                                    Ok::<_, StreamExecutorError>((
+                                        split.clone(),
+                                        origin_split_impl[0].update(offset.clone()),
+                                    ))
                                 }
                             })
-                            .collect::<Result<HashMap<String, SplitImpl>>>()
-                            .map_err(StreamExecutorError::source_error)?;
+                            .try_collect()?;
                         self.state_cache.extend(state);
                     }
+
                     let mut chunk = chunk_with_state.chunk;
 
                     if !matches!(self.source_desc.source.as_ref(), SourceImpl::TableV2(_)) {
