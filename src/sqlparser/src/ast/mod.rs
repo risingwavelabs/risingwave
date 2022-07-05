@@ -644,7 +644,7 @@ pub enum ShowObject {
     Schema,
     MaterializedView { schema: Option<Ident> },
     Source { schema: Option<Ident> },
-    Sink { _schema: Option<Ident> },
+    Sink { schema: Option<Ident> },
     MaterializedSource { schema: Option<Ident> },
     Columns { table: ObjectName },
 }
@@ -672,7 +672,7 @@ impl fmt::Display for ShowObject {
             ShowObject::MaterializedSource { schema } => {
                 write!(f, "MATERIALIZED SOURCES{}", fmt_schema(schema))
             }
-            ShowObject::Sink { _schema } => write!(f, "SINKS{}", fmt_schema(_schema)),
+            ShowObject::Sink { schema } => write!(f, "SINKS{}", fmt_schema(schema)),
             ShowObject::Columns { table } => write!(f, "COLUMNS FROM {}", table),
         }
     }
@@ -1540,6 +1540,7 @@ pub struct Function {
     pub distinct: bool,
     // string_agg and array_agg both support ORDER BY
     pub order_by: Vec<OrderByExpr>,
+    pub filter: Option<Box<Expr>>,
 }
 
 impl fmt::Display for Function {
@@ -1559,6 +1560,9 @@ impl fmt::Display for Function {
         )?;
         if let Some(o) = &self.over {
             write!(f, " OVER ({})", o)?;
+        }
+        if let Some(filter) = &self.filter {
+            write!(f, " FILTER(WHERE {})", filter)?;
         }
         Ok(())
     }

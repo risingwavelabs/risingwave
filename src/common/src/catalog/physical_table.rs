@@ -12,10 +12,10 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use risingwave_pb::expr::InputRefExpr;
 use risingwave_pb::plan_common::{CellBasedTableDesc, ColumnOrder};
 
 use super::{ColumnDesc, OrderedColumnDesc, TableId};
+use crate::types::ParallelUnitId;
 
 /// the table descriptor of table with cell based encoding in state store and include all
 /// information for compute node to access data of the table.
@@ -36,6 +36,10 @@ pub struct TableDesc {
 
     /// Whether the table source is append-only
     pub appendonly: bool,
+
+    /// Mapping from vnode to parallel unit. Indicates data distribution and partition of the
+    /// table.
+    pub vnode_mapping: Option<Vec<ParallelUnitId>>,
 }
 
 impl TableDesc {
@@ -45,10 +49,7 @@ impl TableDesc {
             .iter()
             .map(|x| ColumnOrder {
                 order_type: x.order.to_prost() as i32,
-                input_ref: Some(InputRefExpr {
-                    column_idx: x.column_desc.column_id.get_id(),
-                }),
-                return_type: None,
+                index: x.column_desc.column_id.get_id() as u32,
             })
             .collect()
     }

@@ -147,7 +147,11 @@ impl SharedContext {
 
     #[inline]
     pub fn add_channel_pairs(&self, ids: UpDownActorIds, channels: ConsumableChannelPair) {
-        self.lock_channel_map().insert(ids, channels);
+        assert!(
+            self.lock_channel_map().insert(ids, channels).is_none(),
+            "channel already exists: {:?}",
+            ids
+        );
     }
 
     pub fn retain<F>(&self, mut f: F)

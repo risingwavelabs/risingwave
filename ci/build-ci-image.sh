@@ -9,7 +9,13 @@ cd "$DIR"
 cat ../rust-toolchain
 # shellcheck disable=SC2155
 export RUST_TOOLCHAIN=$(cat ../rust-toolchain)
-export BUILD_ENV_VERSION=v20220623-v2
+
+######################################################
+# !!! CHANGE THIS WHEN YOU WANT TO BUMP CI IMAGE !!! #
+#          AND ALSO docker-compose.yml               #
+######################################################
+export BUILD_ENV_VERSION=v20220705
+
 export BUILD_TAG="public.ecr.aws/x5u3w5h6/rw-build-env:${BUILD_ENV_VERSION}"
 
 echo "+++ Arch"

@@ -26,13 +26,17 @@ mod tests {
     use risingwave_common::util::epoch::Epoch;
     use risingwave_hummock_sdk::compaction_group::hummock_version_ext::HummockVersionExt;
     use risingwave_hummock_sdk::compaction_group::StaticCompactionGroupId;
-    use risingwave_hummock_sdk::key::{get_epoch, get_table_id};
+    use risingwave_hummock_sdk::key::get_table_id;
     use risingwave_meta::hummock::compaction::ManualCompactionOption;
-    use risingwave_meta::hummock::test_utils::setup_compute_env;
+    use risingwave_meta::hummock::test_utils::{
+        register_table_ids_to_compaction_group, setup_compute_env,
+        unregister_table_ids_from_compaction_group,
+    };
     use risingwave_meta::hummock::MockHummockMetaClient;
     use risingwave_pb::hummock::{HummockVersion, TableOption};
     use risingwave_rpc_client::HummockMetaClient;
 
+    use crate::hummock::compaction_group_client::DummyCompactionGroupClient;
     use crate::hummock::compactor::{get_remote_sstable_id_generator, Compactor, CompactorContext};
     use crate::hummock::iterator::test_utils::mock_sstable_store;
     use crate::hummock::HummockStorage;
@@ -60,6 +64,9 @@ mod tests {
             sstable_store,
             hummock_meta_client.clone(),
             Arc::new(StateStoreMetrics::unused()),
+            Arc::new(DummyCompactionGroupClient::new(
+                StaticCompactionGroupId::StateDefault.into(),
+            )),
         )
         .await
         .unwrap()
@@ -214,13 +221,21 @@ mod tests {
         let val = Bytes::from(b"0"[..].repeat(1 << 10)); // 1024 Byte value
 
         let keyspace = Keyspace::table_root(storage.clone(), &TableId::new(1));
+        // Only registered table_ids are accepted in commit_epoch
+        register_table_ids_to_compaction_group(
+            hummock_manager_ref.compaction_group_manager_ref_for_test(),
+            &[keyspace.table_id().table_id],
+            StaticCompactionGroupId::StateDefault.into(),
+        )
+        .await;
+
         let kv_count = 128;
         let mut epoch: u64 = 1;
         for _ in 0..kv_count {
             epoch += 1;
             let mut write_batch = keyspace.state_store().start_write_batch(WriteOptions {
                 epoch,
-                table_id: Default::default(),
+                table_id: keyspace.table_id(),
             });
             let mut local = write_batch.prefixify(&keyspace);
 
@@ -229,14 +244,16 @@ mod tests {
             write_batch.ingest().await.unwrap();
 
             storage.sync(Some(epoch)).await.unwrap();
-            hummock_meta_client
-                .commit_epoch(
-                    epoch,
-                    storage.local_version_manager.get_uncommitted_ssts(epoch),
-                )
-                .await
-                .unwrap();
+            let ssts = storage.local_version_manager.get_uncommitted_ssts(epoch);
+            hummock_meta_client.commit_epoch(epoch, ssts).await.unwrap();
         }
+
+        // Mimic dropping table
+        unregister_table_ids_from_compaction_group(
+            hummock_manager_ref.compaction_group_manager_ref_for_test(),
+            &[keyspace.table_id().table_id],
+        )
+        .await;
 
         // 2. get compact task
         let manual_compcation_option = ManualCompactionOption {
@@ -314,10 +331,16 @@ mod tests {
                 existing_table_ids
             };
             let keyspace = Keyspace::table_root(storage.clone(), &TableId::new(table_id));
+            register_table_ids_to_compaction_group(
+                hummock_manager_ref.compaction_group_manager_ref_for_test(),
+                &[keyspace.table_id().table_id],
+                StaticCompactionGroupId::StateDefault.into(),
+            )
+            .await;
             epoch += 1;
             let mut write_batch = keyspace.state_store().start_write_batch(WriteOptions {
                 epoch,
-                table_id: Default::default(),
+                table_id: keyspace.table_id(),
             });
             let mut local = write_batch.prefixify(&keyspace);
 
@@ -334,6 +357,13 @@ mod tests {
                 .await
                 .unwrap();
         }
+
+        // Mimic dropping table
+        unregister_table_ids_from_compaction_group(
+            hummock_manager_ref.compaction_group_manager_ref_for_test(),
+            &[drop_table_id],
+        )
+        .await;
 
         // 2. get compact task
         let manual_compcation_option = ManualCompactionOption {
@@ -426,7 +456,6 @@ mod tests {
 
     #[tokio::test]
     async fn test_compaction_drop_key_by_ttl() {
-        // TODO: reduce cost time of test (which cause by commit_epoch 1000 times)
         let (_env, hummock_manager_ref, _cluster_manager_ref, worker_node) =
             setup_compute_env(8080).await;
         let hummock_meta_client = Arc::new(MockHummockMetaClient::new(
@@ -448,18 +477,25 @@ mod tests {
         let val = Bytes::from(b"0"[..].to_vec()); // 1 Byte value
 
         let existing_table_id = 2;
-        let kv_count = 1001;
+        let kv_count = 11;
+        // let base_epoch = Epoch(0);
         let base_epoch = Epoch::now();
         let mut epoch: u64 = base_epoch.0;
-        let millisec_for_epoch: u64 = 1 << 16;
+        let millisec_interval_epoch: u64 = (1 << 16) * 100;
         let keyspace = Keyspace::table_root(storage.clone(), &TableId::new(existing_table_id));
+        register_table_ids_to_compaction_group(
+            hummock_manager_ref.compaction_group_manager_ref_for_test(),
+            &[keyspace.table_id().table_id],
+            StaticCompactionGroupId::StateDefault.into(),
+        )
+        .await;
         let mut epoch_set = BTreeSet::new();
         for _ in 0..kv_count {
-            epoch += millisec_for_epoch;
+            epoch += millisec_interval_epoch;
             epoch_set.insert(epoch);
             let mut write_batch = keyspace.state_store().start_write_batch(WriteOptions {
                 epoch,
-                table_id: Default::default(),
+                table_id: keyspace.table_id(),
             });
             let mut local = write_batch.prefixify(&keyspace);
 
@@ -469,11 +505,11 @@ mod tests {
         }
 
         storage.sync(None).await.unwrap();
-        for epoch in epoch_set {
+        for epoch in &epoch_set {
             hummock_meta_client
                 .commit_epoch(
-                    epoch,
-                    storage.local_version_manager.get_uncommitted_ssts(epoch),
+                    *epoch,
+                    storage.local_version_manager.get_uncommitted_ssts(*epoch),
                 )
                 .await
                 .unwrap();
@@ -503,7 +539,6 @@ mod tests {
                 ttl: ttl_expire_second,
             },
         )]);
-        let watermark = compact_task.watermark;
 
         hummock_manager_ref
             .assign_compaction_task(&compact_task, worker_node.id, async { true })
@@ -539,7 +574,8 @@ mod tests {
                 .meta
                 .key_count;
         }
-        assert_eq!(ttl_expire_second * 1000, key_count); // ttl will clean the key (which epoch < epoch - ttl)
+        let expect_count = kv_count as u32 - ttl_expire_second;
+        assert_eq!(expect_count, key_count); // ttl will clean the key (which epoch < epoch - ttl)
 
         // 5. get compact task and there should be none
         let compact_task = hummock_manager_ref
@@ -568,12 +604,9 @@ mod tests {
             .await
             .unwrap();
         let mut scan_count = 0;
-        let min_epoch = Epoch(watermark).subtract_ms(ttl_expire_second as u64 * 1000);
         for (k, _) in scan_result {
             let table_id = get_table_id(&k).unwrap();
-            let epoch = get_epoch(&k);
             assert_eq!(table_id, existing_table_id);
-            assert!(epoch >= min_epoch.0);
             scan_count += 1;
         }
         assert_eq!(key_count, scan_count);
