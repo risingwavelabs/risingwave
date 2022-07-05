@@ -19,7 +19,7 @@ use std::sync::Arc;
 
 use assert_matches::assert_matches;
 use itertools::Itertools;
-use risingwave_common::catalog::{generate_intertable_name, TableId};
+use risingwave_common::catalog::{generate_intertable_name_with_type, TableId};
 use risingwave_common::error::{ErrorCode, Result};
 use risingwave_pb::catalog::Table;
 use risingwave_pb::meta::table_fragments::fragment::FragmentDistributionType;
@@ -553,7 +553,11 @@ impl StreamGraphBuilder {
                             table.id = left_table_id;
                             table.schema_id = ctx.schema_id;
                             table.database_id = ctx.database_id;
-                            table.name = generate_intertable_name(&ctx.mview_name, left_table_id);
+                            table.name = generate_intertable_name_with_type(
+                                &ctx.mview_name,
+                                left_table_id,
+                                "HashJoinLeft",
+                            );
                             check_and_fill_internal_table(table.id, Some(table.clone()));
                         }
                         if let Some(table) = &mut node.right_table {
@@ -561,7 +565,11 @@ impl StreamGraphBuilder {
                             table.id = right_table_id;
                             table.schema_id = ctx.schema_id;
                             table.database_id = ctx.database_id;
-                            table.name = generate_intertable_name(&ctx.mview_name, right_table_id);
+                            table.name = generate_intertable_name_with_type(
+                                &ctx.mview_name,
+                                right_table_id,
+                                "HashJoinRight",
+                            );
                             check_and_fill_internal_table(table.id, Some(table.clone()));
                         }
                     }
@@ -587,7 +595,11 @@ impl StreamGraphBuilder {
                             table.id += table_id_offset;
                             table.schema_id = ctx.schema_id;
                             table.database_id = ctx.database_id;
-                            table.name = generate_intertable_name(&ctx.mview_name, table.id);
+                            table.name = generate_intertable_name_with_type(
+                                &ctx.mview_name,
+                                table.id,
+                                "HashAgg",
+                            );
                             check_and_fill_internal_table(table.id, Some(table.clone()));
                         }
                     }
@@ -621,7 +633,11 @@ impl StreamGraphBuilder {
                             table.id += table_id_offset;
                             table.schema_id = ctx.schema_id;
                             table.database_id = ctx.database_id;
-                            table.name = generate_intertable_name(&ctx.mview_name, table.id);
+                            table.name = generate_intertable_name_with_type(
+                                &ctx.mview_name,
+                                table.id,
+                                "GlobalSimpleAgg",
+                            );
                             check_and_fill_internal_table(table.id, Some(table.clone()));
                         }
                     }

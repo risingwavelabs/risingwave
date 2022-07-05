@@ -236,12 +236,26 @@ fn infer_internal_table_catalog(input: PlanRef) -> TableCatalog {
     let base = input.plan_base();
     let schema = &base.schema;
     let pk_indices = &base.pk_indices;
+    let mut col_names = HashMap::new();
+    // FIXME: temp fix, use TableCatalogBuilder to avoid_duplicate_col_name in the future
     let columns = schema
         .fields()
         .iter()
-        .map(|field| ColumnCatalog {
-            column_desc: ColumnDesc::from_field_without_column_id(field),
-            is_hidden: false,
+        .enumerate()
+        .map(|(i, field)| {
+            let mut c = ColumnCatalog {
+                column_desc: ColumnDesc::from_field_with_column_id(field, i as i32),
+                is_hidden: false,
+            };
+            c.column_desc.name = match col_names.try_insert(field.name.clone(), 0) {
+                Ok(_) => field.name.clone(),
+                Err(mut err) => {
+                    let cnt = err.entry.get_mut();
+                    *cnt += 1;
+                    field.name.clone() + "#" + &cnt.to_string()
+                }
+            };
+            c
         })
         .collect_vec();
     let mut order_desc = vec![];

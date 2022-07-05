@@ -15,8 +15,12 @@
 use lazy_static::lazy_static;
 use regex::Regex;
 
-pub fn generate_intertable_name(mview_name: &String, table_id: u32) -> String {
-    format!("__INTERNAL_{}_{}", mview_name, table_id)
+pub fn generate_intertable_name_with_type(
+    mview_name: &String,
+    table_id: u32,
+    table_type: &str,
+) -> String {
+    format!("__INTERNAL_{}_{}_{}", mview_name, table_type, table_id)
 }
 
 pub fn valid_table_name(table_name: &str) -> bool {
