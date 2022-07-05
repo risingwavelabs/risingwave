@@ -324,6 +324,13 @@ where
             }
         };
 
+        // tracing for checking the diff of catalog::Table and internal_table_id count
+        tracing::info!(
+            "create_materialized_view internal_table_count {} internal_table_id_count {}",
+            internal_tables.len(),
+            ctx.internal_table_id_map.len()
+        );
+
         // 4. Finally, update the catalog.
         let version = self
             .catalog_manager
