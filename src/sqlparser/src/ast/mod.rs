@@ -451,7 +451,12 @@ impl fmt::Display for Expr {
 
                 write!(f, ")")
             }
-            Expr::Overlay { expr, new_substring, start, count } => {
+            Expr::Overlay {
+                expr,
+                new_substring,
+                start,
+                count,
+            } => {
                 write!(f, "OVERLAY({}", expr)?;
                 write!(f, " PLACING {}", new_substring)?;
                 write!(f, " FROM {}", start)?;

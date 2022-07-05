@@ -27,8 +27,8 @@ mod expr_input_ref;
 mod expr_is_null;
 mod expr_literal;
 mod expr_nested_construct;
-mod expr_ternary_bytes;
 mod expr_quaternary_bytes;
+mod expr_ternary_bytes;
 pub mod expr_unary;
 mod template;
 

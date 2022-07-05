@@ -28,16 +28,15 @@ pub fn new_overlay_for_exp(
     count: BoxedExpression,
     return_type: DataType,
 ) -> BoxedExpression {
-    Box::new(
-        QuaternaryBytesExpression::<Utf8Array, Utf8Array, I32Array, I32Array, _>::new(
-            s,
-            new_sub_str,
-            start,
-            count,
-            return_type,
-            overlay_for,
-        )
-    )
+    Box::new(QuaternaryBytesExpression::<
+        Utf8Array,
+        Utf8Array,
+        I32Array,
+        I32Array,
+        _,
+    >::new(
+        s, new_sub_str, start, count, return_type, overlay_for
+    ))
 }
 
 #[cfg(test)]
