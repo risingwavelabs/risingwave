@@ -79,6 +79,7 @@ impl DynamicFilterExecutor {
     async fn into_stream(mut self) {
         let mut prev_epoch_value: Option<Datum> = None;
         let mut current_epoch_value: Option<Datum> = None;
+
         // The state is sorted by the comparison value
         //
         // TODO: convert this into a `StateTable` compatible managed state
