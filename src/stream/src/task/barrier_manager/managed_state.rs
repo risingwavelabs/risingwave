@@ -83,8 +83,6 @@ impl ManagedBarrierState {
                     done: matches!(state, ChainState::Done),
                     consumed_epoch: match state {
                         ChainState::ConsumingUpstream(consumed_epoch) => {
-                            // assert!(consumed_epoch <=
-                            // curr_epoch,"con{:?},cu{:?}",consumed_epoch,curr_epoch);
                             consumed_epoch
                         }
                         ChainState::Done => curr_epoch,
@@ -139,7 +137,7 @@ impl ManagedBarrierState {
                 let exist = remaining_actors.remove(&actor_id);
                 assert!(
                     exist,
-                    "the actor doesn't exist; actor_id:{:?},curr_epoch:{:?}",
+                    "the actor doesn't exist. actor_id: {:?}, curr_epoch: {:?}",
                     actor_id, barrier.epoch.curr
                 );
                 self.may_notify(barrier.epoch.curr);

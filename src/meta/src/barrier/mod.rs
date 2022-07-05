@@ -206,7 +206,7 @@ where
     }
 
     /// Try to enxtend this command's `changed_table_id` in `creating_table_ids`.
-    fn try_extend_command(&mut self, command: &Command) {
+    fn pre_inject(&mut self, command: &Command) {
         if let Create(table) = command.changed_table_id() {
             self.creating_table_ids.insert(table);
         }
@@ -451,7 +451,7 @@ where
             }
             barrier_timer = Some(self.metrics.barrier_send_latency.start_timer());
             let (command, notifiers) = self.scheduled_barriers.pop_or_default().await;
-            checkpoint_control.try_extend_command(&command);
+            checkpoint_control.pre_inject(&command);
             let info = self.resolve_actor_info(&checkpoint_control).await;
             // When there's no actors exist in the cluster, we don't need to send the barrier. This
             // is an advance optimization. Besides if another barrier comes immediately,
