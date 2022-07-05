@@ -148,6 +148,7 @@ struct SourceReader {
 }
 
 impl SourceReader {
+    /// Receive barriers from barrier manager with the channel, error on channel close.
     #[try_stream(ok = Barrier, error = StreamExecutorError)]
     async fn barrier_receiver(mut rx: UnboundedReceiver<Barrier>) {
         while let Some(barrier) = rx.recv().await {
@@ -156,6 +157,7 @@ impl SourceReader {
         bail!("barrier reader closed unexpectedly");
     }
 
+    /// Receive chunks and states from the source reader, hang up on error.
     #[try_stream(ok = StreamChunkWithState, error = StreamExecutorError)]
     async fn source_chunk_reader(mut reader: Box<SourceStreamReaderImpl>) {
         loop {
@@ -174,6 +176,7 @@ impl SourceReader {
         PollNext::Left
     }
 
+    /// Convert this reader to a stream.
     fn into_stream(self) -> SourceReaderStream {
         let barrier_receiver = Self::barrier_receiver(self.barrier_receiver);
         let source_chunk_reader = Self::source_chunk_reader(self.source_chunk_reader);
@@ -184,6 +187,7 @@ impl SourceReader {
         )
     }
 
+    /// Replace the source chunk reader with a new one for given `stream`. Used for split change.
     fn replace_source_chunk_reader(
         stream: &mut SourceReaderStream,
         reader: Box<SourceStreamReaderImpl>,
@@ -271,21 +275,14 @@ impl<S: StateStore> SourceExecutor<S> {
         let epoch = barrier.epoch.prev;
 
         let mut boot_state = self.stream_source_splits.clone();
-        if !boot_state.is_empty() {
-            for ele in &mut boot_state {
-                match self
-                    .split_state_store
-                    .try_recover_from_state_store(ele, epoch)
-                    .await
-                {
-                    Ok(Some(recover_state)) => {
-                        *ele = recover_state;
-                    }
-                    Err(e) => {
-                        return Err(StreamExecutorError::source_error(e));
-                    }
-                    _ => {}
-                }
+        for ele in &mut boot_state {
+            if let Some(recover_state) = self
+                .split_state_store
+                .try_recover_from_state_store(ele, epoch)
+                .await
+                .map_err(StreamExecutorError::source_error)?
+            {
+                *ele = recover_state;
             }
         }
 
@@ -294,6 +291,7 @@ impl<S: StateStore> SourceExecutor<S> {
         // todo: use epoch from msg to restore state from state store
         let source_chunk_reader = self.build_stream_source_reader(recover_state).await?;
 
+        // Merge the chunks from source and the barriers into a single stream.
         let mut stream = SourceReader {
             barrier_receiver,
             source_chunk_reader,
@@ -320,10 +318,10 @@ impl<S: StateStore> SourceExecutor<S> {
                                     target_state
                                 );
 
+                                // Replace the source reader with a new one of the new state.
                                 let reader = self
                                     .build_stream_source_reader(Some(target_state.clone()))
                                     .await?;
-
                                 SourceReader::replace_source_chunk_reader(&mut stream, reader);
 
                                 self.stream_source_splits = target_state;
@@ -335,8 +333,12 @@ impl<S: StateStore> SourceExecutor<S> {
                 }
 
                 Either::Right(chunk_with_state) => {
-                    let chunk_with_state = chunk_with_state?;
-                    if let Some(mapping) = chunk_with_state.split_offset_mapping {
+                    let StreamChunkWithState {
+                        mut chunk,
+                        split_offset_mapping,
+                    } = chunk_with_state?;
+
+                    if let Some(mapping) = split_offset_mapping {
                         let state: HashMap<String, SplitImpl> = mapping
                             .iter()
                             .map(|(split, offset)| {
@@ -363,10 +365,11 @@ impl<S: StateStore> SourceExecutor<S> {
                         self.state_cache.extend(state);
                     }
 
-                    let mut chunk = chunk_with_state.chunk;
-
-                    if !matches!(self.source_desc.source.as_ref(), SourceImpl::TableV2(_)) {
-                        chunk = self.refill_row_id_column(chunk);
+                    match self.source_desc.source.as_ref() {
+                        // Refill row id column for connector sources.
+                        SourceImpl::Connector(_) => chunk = self.refill_row_id_column(chunk),
+                        // The row id column of table v2 is already set in `TableSource`.
+                        SourceImpl::TableV2(_) => {}
                     }
 
                     self.metrics
@@ -377,8 +380,6 @@ impl<S: StateStore> SourceExecutor<S> {
                 }
             }
         }
-
-        unreachable!();
     }
 }
 
