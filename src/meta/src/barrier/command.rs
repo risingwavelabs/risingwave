@@ -29,6 +29,8 @@ use risingwave_rpc_client::StreamClientPoolRef;
 use uuid::Uuid;
 
 use super::info::BarrierActorInfo;
+use crate::barrier::ChangedTableState;
+use crate::barrier::ChangedTableState::{Create, Drop, NoTable};
 use crate::model::{ActorId, DispatcherId, TableFragments};
 use crate::storage::MetaStore;
 use crate::stream::FragmentManagerRef;
@@ -72,12 +74,13 @@ impl Command {
         Self::Plain(None)
     }
 
-    pub fn creating_table_id(&self) -> Option<TableId> {
+    pub fn changed_table_id(&self) -> ChangedTableState {
         match self {
             Command::CreateMaterializedView {
                 table_fragments, ..
-            } => Some(table_fragments.table_id()),
-            _ => None,
+            } => Create(table_fragments.table_id()),
+            Command::Plain(_) => NoTable,
+            Command::DropMaterializedView(table_id) => Drop(*table_id),
         }
     }
 

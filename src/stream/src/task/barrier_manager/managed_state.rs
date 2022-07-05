@@ -82,11 +82,7 @@ impl ManagedBarrierState {
                     chain_actor_id: actor,
                     done: matches!(state, ChainState::Done),
                     consumed_epoch: match state {
-                        ChainState::ConsumingUpstream(consumed_epoch) => {
-                            // assert!(consumed_epoch <=
-                            // curr_epoch,"con{:?},cu{:?}",consumed_epoch,curr_epoch);
-                            consumed_epoch
-                        }
+                        ChainState::ConsumingUpstream(consumed_epoch) => consumed_epoch,
                         ChainState::Done => curr_epoch,
                     },
                 })
@@ -112,6 +108,12 @@ impl ManagedBarrierState {
         }
     }
 
+    /// Remove stop barrier (epoch < `curr_epoch`), and send err.
+    pub(crate) fn remove_stop_barrier(&mut self, curr_epoch: u64) {
+        self.epoch_barrier_state_map
+            .drain_filter(|k, _| k < &curr_epoch);
+    }
+
     /// Collect a `barrier` from the actor with `actor_id`.
     pub(super) fn collect(&mut self, actor_id: ActorId, barrier: &Barrier) {
         tracing::trace!(
@@ -131,7 +133,11 @@ impl ManagedBarrierState {
                 remaining_actors, ..
             }) => {
                 let exist = remaining_actors.remove(&actor_id);
-                assert!(exist);
+                assert!(
+                    exist,
+                    "the actor doesn't exist. actor_id: {:?}, curr_epoch: {:?}",
+                    actor_id, barrier.epoch.curr
+                );
                 self.may_notify(barrier.epoch.curr);
             }
             None => {
