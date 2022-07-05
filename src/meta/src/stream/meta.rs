@@ -346,6 +346,17 @@ where
         }
     }
 
+    /// Used in [`crate::barrier::GlobalBarrierManager`]
+    pub async fn migrate_actors(&self, migrate_map: &HashMap<u32,u32>) -> Result<()> {
+        let map = &mut self.core.write().await.table_fragments;
+        for fragments in map.values() {
+            let mut new_fragments = fragments.clone();
+            new_fragments.migrate_actors(migrate_map);
+            self.update_table_fragments(new_fragments).await?;
+        }
+        Ok(())
+    }
+
     pub async fn all_node_actors(
         &self,
         include_inactive: bool,

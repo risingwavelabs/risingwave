@@ -12,16 +12,18 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::collections::HashSet;
+use std::collections::{HashSet, HashMap};
 use std::iter::Map;
 use std::sync::Arc;
 use std::time::Duration;
 
 use futures::future::try_join_all;
+use itertools::Itertools;
 use log::{debug, error};
 use risingwave_common::error::{ErrorCode, Result, RwError};
 use risingwave_common::util::epoch::Epoch;
-use risingwave_pb::common::ActorInfo;
+use risingwave_pb::common::worker_node::State;
+use risingwave_pb::common::{ActorInfo, WorkerType};
 use risingwave_pb::data::Epoch as ProstEpoch;
 use risingwave_pb::stream_service::barrier_complete_response::CreateMviewProgress;
 use risingwave_pb::stream_service::{
@@ -69,7 +71,7 @@ where
 
             if self.enable_migrate {
                 // Migrate expired actors to newly joined node by changing actor_map
-                self.migrate_actors(&mut info).await;
+                self.migrate_actors(&mut info).await?;
             }
 
             // Reset all compute nodes, stop and drop existing actors.
@@ -137,49 +139,40 @@ where
                 .collect(),
         )
     }
-
-    async fn migrate_actors(&self, info: &mut BarrierActorInfo) {
-        loop {
-            let mut complete = true;
-            let mut origin_id: u32 = 0;
-            let mut origin_actors = Vec::new();
-            for (key, value) in &info.actor_map {
-                if !value.is_empty() && self.cluster_manager.get_worker_by_id(*key).await.is_none()
-                {
-                    // get origin node to migrate.
-                    complete = false;
-                    origin_actors = value.clone();
-                    origin_id = *key;
-                }
-            }
-            if complete {
-                break;
-            } else {
-                let mut target_id: u32 = 0;
-                let mut has_target = false;
-                loop {
-                    for (key, value) in &info.actor_map {
-                        if value.is_empty()
-                            && self.cluster_manager.get_worker_by_id(*key).await.is_some()
-                        {
-                            // get target node to migrate.
-                            has_target = true;
-                            target_id = *key;
-                        }
-                    }
-                    if has_target {
-                        for origin_actor in &origin_actors {
-                            info.actor_map
-                                .get_mut(&target_id)
-                                .unwrap()
-                                .push(*origin_actor);
-                        }
-                        info.actor_map.get_mut(&origin_id).unwrap().clear();
-                        break;
-                    }
-                }
+    
+    fn check_compute_node_alive(&self, info: &BarrierActorInfo) -> Vec<u32>{
+        let mut origin_ids = Vec::new();
+        for (key, value) in &info.actor_map {
+            if !value.is_empty() && !info.node_map.contains_key(key) {
+                origin_ids.push(*key);
             }
         }
+        origin_ids
+    }
+
+    async fn get_migrate_map(&self, info: &BarrierActorInfo, origin_ids: &Vec<u32>) -> HashMap<u32,u32> {
+        let mut n = origin_ids.len();
+        let mut migrate_map = HashMap::new();
+        let mut chosen_ids = HashSet::new();
+        while n > 0 {
+            let current_nodes = self.cluster_manager.list_worker_node(WorkerType::ComputeNode, Some(State::Running)).await;
+            let new_nodes = current_nodes.iter().filter(|&node| !info.node_map.contains_key(&node.id) && !migrate_map.contains_key(&node.id)).collect_vec();
+            for new_node in new_nodes {
+                if n > 0 && !chosen_ids.contains(&origin_ids[n]){
+                    chosen_ids.insert(origin_ids[n]);
+                    migrate_map.insert(origin_ids[n], new_node.id);
+                    n -= 1;
+                }
+            }
+            tokio::time::sleep(std::time::Duration::from_millis(100)).await;
+        }
+        migrate_map
+    }
+
+    async fn migrate_actors(&self, info: &BarrierActorInfo) -> Result<()>{
+        let origin_ids = self.check_compute_node_alive(info);
+        let migrate_map = self.get_migrate_map(info, &origin_ids).await;
+        self.fragment_manager.migrate_actors(&migrate_map).await
     }
 
     /// Sync all sources in compute nodes, the local source manager in compute nodes may be dirty
