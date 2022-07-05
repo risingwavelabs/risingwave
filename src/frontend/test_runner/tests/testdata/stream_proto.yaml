@@ -27,8 +27,6 @@
                         name: v1
                     orderKey:
                       - orderType: ASCENDING
-                    pkIndices:
-                      - 0
                     distKeyIndices:
                       - 0
                   columnIds:
@@ -162,8 +160,6 @@
                     name: v1
                 orderKey:
                   - orderType: ASCENDING
-                pkIndices:
-                  - 0
                 distKeyIndices:
                   - 0
               columnIds:
@@ -272,8 +268,6 @@
                     name: v2
                 orderKey:
                   - orderType: ASCENDING
-                pkIndices:
-                  - 0
                 distKeyIndices:
                   - 0
               columnIds:
@@ -384,8 +378,6 @@
                                 name: v1
                             orderKey:
                               - orderType: ASCENDING
-                            pkIndices:
-                              - 0
                             distKeyIndices:
                               - 0
                           columnIds:
@@ -594,8 +586,6 @@
                                     name: v2
                                 orderKey:
                                   - orderType: ASCENDING
-                                pkIndices:
-                                  - 0
                                 distKeyIndices:
                                   - 0
                               columnIds:
