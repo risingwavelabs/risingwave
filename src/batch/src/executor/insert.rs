@@ -107,9 +107,7 @@ impl InsertExecutor {
         // Wait for all chunks to be taken / written.
         let rows_inserted = try_join_all(notifiers)
             .await
-            .map_err(|_| {
-                BatchError::Internal(anyhow!("failed to wait chunks to be written"))
-            })?
+            .map_err(|_| BatchError::Internal(anyhow!("failed to wait chunks to be written")))?
             .into_iter()
             .sum::<usize>();
 

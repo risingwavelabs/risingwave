@@ -67,10 +67,9 @@ impl FilterExecutor {
                     yield data_chunk?;
                 }
             } else {
-                return Err(BatchError::Internal(anyhow!(
-                    "Filter can only receive bool array"
-                ))
-                .into());
+                return Err(
+                    BatchError::Internal(anyhow!("Filter can only receive bool array")).into(),
+                );
             }
         }
 

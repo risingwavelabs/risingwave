@@ -91,9 +91,7 @@ impl DeleteExecutor {
         // Wait for all chunks to be taken / written.
         let rows_deleted = try_join_all(notifiers)
             .await
-            .map_err(|_| {
-                BatchError::Internal(anyhow!("failed to wait chunks to be written"))
-            })?
+            .map_err(|_| BatchError::Internal(anyhow!("failed to wait chunks to be written")))?
             .into_iter()
             .sum::<usize>();
 
@@ -129,7 +127,7 @@ impl BoxedExecutorBuilder for DeleteExecutor {
             source
                 .context()
                 .source_manager_ref()
-                .ok_or_else(|| BatchError::from(anyhow!("Source manager not found")))?,
+                .ok_or_else(|| BatchError::Internal(anyhow!("Source manager not found")))?,
             inputs.remove(0),
         )))
     }

@@ -142,9 +142,7 @@ impl UpdateExecutor {
         let rows_updated = try_join_all(notifiers)
             .await
             .map_err(|_| {
-                BatchError::Internal(anyhow!(
-                    "failed to wait chunks to be written".to_owned(),
-                ))
+                BatchError::Internal(anyhow!("failed to wait chunks to be written".to_owned(),))
             })?
             .into_iter()
             .sum::<usize>()
