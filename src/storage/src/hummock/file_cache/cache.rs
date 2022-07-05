@@ -254,9 +254,9 @@ mod tests {
     ) -> FileCache<TestCacheKey> {
         let options = FileCacheOptions {
             dir: dir.as_ref().to_str().unwrap().to_string(),
-            capacity: 4 * 1024 * 1024,
-            total_buffer_capacity: 2 * 1024 * 1024,
-            cache_file_fallocate_unit: 512 * 1024,
+            capacity: 128 * 4 * 1024,
+            total_buffer_capacity: 32 * 2 * 4 * 1024,
+            cache_file_fallocate_unit: 64 * 4 * 1024,
             filters: vec![],
 
             flush_buffer_hooks,
@@ -297,18 +297,18 @@ mod tests {
         let cache = create_file_cache_manager_for_test(dir.path(), vec![holder.clone()]).await;
         let bs = cache.store.block_size();
 
-        for i in 1..=512 {
+        for i in 1..=64 {
             cache.insert(key(i), vec![b'x'; bs]).unwrap();
             assert_eq!(cache.get(&key(i)).await.unwrap(), Some(vec![b'x'; bs]));
         }
 
         let mut in_cache = HashSet::new();
-        for i in 1..=512 {
-            if let Some(_) = cache.get(&key(i)).await.unwrap() {
+        for i in 1..=64 {
+            if cache.get(&key(i)).await.unwrap().is_some() {
                 in_cache.insert(i);
             }
         }
-        assert!(in_cache.len() <= 256);
+        assert!(in_cache.len() <= 32);
 
         assert_eq!(cache.store.cache_file_len(), 0);
 
@@ -322,7 +322,7 @@ mod tests {
             cache.store.cache_file_len(),
             utils::usize::align_up(cache.store.block_size(), in_cache.len() * bs)
         );
-        for i in 1..=512 {
+        for i in 1..=64 {
             assert_eq!(
                 cache.get(&key(i)).await.unwrap(),
                 if in_cache.get(&i).is_some() {
@@ -334,25 +334,32 @@ mod tests {
         }
 
         in_cache.clear();
-        for i in 513..=513 + 1024 * 2 {
+        // Insert 4 times of capacity data to make sure old data in all shards are evicted.
+        let mut buffer_len = 0;
+        for i in 65..=65 + 128 * 4 {
             cache.insert(key(i), vec![b'x'; bs]).unwrap();
             assert_eq!(cache.get(&key(i)).await.unwrap(), Some(vec![b'x'; bs]));
 
-            holder.trigger();
-            holder.wait().await;
-            cache.buffer_flusher_notifier.notify_one();
-            holder.trigger();
-            holder.wait().await;
+            buffer_len += 1;
+
+            if buffer_len == 16 {
+                holder.trigger();
+                holder.wait().await;
+                cache.buffer_flusher_notifier.notify_one();
+                holder.trigger();
+                holder.wait().await;
+                buffer_len = 0;
+            }
         }
 
-        for i in 1..=512 {
-            assert_eq!(cache.get(&key(i)).await.unwrap(), None);
+        for i in 1..=64 {
+            assert_eq!(cache.get(&key(i)).await.unwrap(), None, "i: {}", i);
         }
-        for i in 513..=513 + 1024 * 2 {
-            if let Some(_) = cache.get(&key(i)).await.unwrap() {
+        for i in 65..=65 + 128 * 4 {
+            if cache.get(&key(i)).await.unwrap().is_some() {
                 in_cache.insert(i);
             }
         }
-        assert!(in_cache.len() * bs <= 4 * 1024 * 1024);
+        assert!(in_cache.len() * bs <= 128 * 4 * 1024);
     }
 }
