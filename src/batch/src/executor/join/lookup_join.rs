@@ -18,7 +18,7 @@ use futures::StreamExt;
 use futures_async_stream::try_stream;
 use itertools::Itertools;
 use risingwave_common::array::{Array, DataChunk, RowRef};
-use risingwave_common::catalog::{Field, Schema};
+use risingwave_common::catalog::{ColumnDesc, Field, Schema};
 use risingwave_common::error::{ErrorCode, Result, RwError};
 use risingwave_common::types::{DataType, ToOwnedDatum};
 use risingwave_common::util::chunk_coalesce::{DataChunkBuilder, SlicedDataChunk};
@@ -51,7 +51,6 @@ use crate::task::BatchTaskContext;
 #[derive(Default)]
 pub struct ProbeSideSourceParams {
     table_desc: CellBasedTableDesc,
-    column_ids: Vec<i32>,
     build_side_idxs: Vec<usize>,
     source_templates: Vec<ProstExchangeSource>,
 }
@@ -95,7 +94,10 @@ impl DefaultGatherExecutor {
 
         Ok(NodeBody::RowSeqScan(RowSeqScanNode {
             table_desc: Some(params.table_desc.clone()),
-            column_ids: params.column_ids.clone(),
+            column_ids: (0..params.table_desc.columns.len())
+                .into_iter()
+                .map(|x| x as i32)
+                .collect(),
             scan_range,
             vnode_bitmap: None,
         }))
@@ -366,22 +368,24 @@ impl BoxedExecutorBuilder for LookupJoinExecutorBuilder {
             Err(_) => None,
         };
 
-        let build_child = inputs.remove(0);
-        let build_side_data_types = build_child.schema().data_types();
-
-        let probe_side_schema = Schema {
-            fields: lookup_join_node
-                .get_probe_side_schema()
-                .iter()
-                .map(Field::from)
-                .collect(),
-        };
-
         let output_indices: Vec<usize> = lookup_join_node
             .get_output_indices()
             .iter()
             .map(|&x| x as usize)
             .collect();
+
+        let build_child = inputs.remove(0);
+        let build_side_data_types = build_child.schema().data_types();
+
+        let probe_side_table_desc = lookup_join_node.get_probe_side_table_desc()?;
+
+        let probe_side_schema = Schema {
+            fields: probe_side_table_desc
+                .columns
+                .iter()
+                .map(|column_desc| Field::from(&ColumnDesc::from(column_desc)))
+                .collect_vec(),
+        };
 
         let fields = [
             build_child.schema().fields.clone(),
@@ -400,12 +404,9 @@ impl BoxedExecutorBuilder for LookupJoinExecutorBuilder {
             build_side_idxs.push(*build_side_key as usize)
         }
 
-        let probe_side_table_desc = lookup_join_node.get_probe_side_table_desc()?;
-
         ensure!(!lookup_join_node.get_sources().is_empty());
         let probe_side_source_params = ProbeSideSourceParams {
             table_desc: probe_side_table_desc.clone(),
-            column_ids: lookup_join_node.get_probe_side_column_ids().to_vec(),
             build_side_idxs,
             source_templates: lookup_join_node.get_sources().to_vec(),
         };
