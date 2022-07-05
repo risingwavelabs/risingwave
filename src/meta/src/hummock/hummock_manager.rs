@@ -50,7 +50,7 @@ use crate::hummock::model::{
 };
 use crate::hummock::CompactorManagerRef;
 use crate::manager::{IdCategory, MetaSrvEnv};
-use crate::model::{MetadataModel, ValTransaction, VarTransaction};
+use crate::model::{BTreeMapTransaction, MetadataModel, ValTransaction, VarTransaction};
 use crate::rpc::metrics::MetaMetrics;
 use crate::rpc::{META_CF_NAME, META_LEADER_KEY};
 use crate::storage::{MetaStore, Transaction};
@@ -198,7 +198,7 @@ where
         } else {
             // Initialize compact status for each compaction group
             let mut compaction_statuses =
-                VarTransaction::new(&mut compaction_guard.compaction_statuses);
+                BTreeMapTransaction::new(&mut compaction_guard.compaction_statuses);
             for compaction_group in self.compaction_group_manager.compaction_groups().await {
                 let compact_status = CompactStatus::new(
                     compaction_group.group_id(),
@@ -385,7 +385,7 @@ where
     ) -> Result<HummockVersion> {
         let mut versioning_guard = self.versioning.write().await;
         let versioning = versioning_guard.deref_mut();
-        let mut pinned_versions = VarTransaction::new(&mut versioning.pinned_versions);
+        let mut pinned_versions = BTreeMapTransaction::new(&mut versioning.pinned_versions);
         let hummock_versions = &versioning.hummock_versions;
         let current_version_id = versioning.current_version_id.clone();
         let mut context_pinned_version = pinned_versions.new_entry_txn_or_default(
@@ -435,7 +435,7 @@ where
         pinned_version_ids: impl AsRef<[HummockVersionId]>,
     ) -> Result<()> {
         let mut versioning_guard = self.versioning.write().await;
-        let mut pinned_versions = VarTransaction::new(&mut versioning_guard.pinned_versions);
+        let mut pinned_versions = BTreeMapTransaction::new(&mut versioning_guard.pinned_versions);
         let mut context_pinned_version = match pinned_versions.new_entry_txn(context_id) {
             None => {
                 return Ok(());
@@ -477,7 +477,7 @@ where
             .unwrap()
             .max_committed_epoch;
 
-        let mut pinned_snapshots = VarTransaction::new(&mut versioning_guard.pinned_snapshots);
+        let mut pinned_snapshots = BTreeMapTransaction::new(&mut versioning_guard.pinned_snapshots);
         let mut context_pinned_snapshot = pinned_snapshots.new_entry_txn_or_default(
             context_id,
             HummockPinnedSnapshot {
@@ -527,7 +527,7 @@ where
         hummock_snapshots: impl AsRef<[HummockSnapshot]>,
     ) -> Result<()> {
         let mut versioning_guard = self.versioning.write().await;
-        let mut pinned_snapshots = VarTransaction::new(&mut versioning_guard.pinned_snapshots);
+        let mut pinned_snapshots = BTreeMapTransaction::new(&mut versioning_guard.pinned_snapshots);
 
         let mut context_pinned_snapshot = match pinned_snapshots.new_entry_txn(context_id) {
             None => {
@@ -571,7 +571,7 @@ where
             assert!(hummock_snapshot.epoch <= _max_committed_epoch);
         }
 
-        let mut pinned_snapshots = VarTransaction::new(&mut versioning_guard.pinned_snapshots);
+        let mut pinned_snapshots = BTreeMapTransaction::new(&mut versioning_guard.pinned_snapshots);
         let mut context_pinned_snapshot = match pinned_snapshots.new_entry_txn(context_id) {
             None => {
                 return Ok(());
@@ -760,7 +760,7 @@ where
 
         let compaction = compaction_guard.deref_mut();
         let mut compact_task_assignment =
-            VarTransaction::new(&mut compaction.compact_task_assignment);
+            BTreeMapTransaction::new(&mut compaction.compact_task_assignment);
         if let Some(assignment) = compact_task_assignment.get(&compact_task.task_id) {
             return Err(Error::CompactionTaskAlreadyAssigned(
                 compact_task.task_id,
@@ -801,8 +801,8 @@ where
                 ))?,
         );
         let mut compact_task_assignment =
-            VarTransaction::new(&mut compaction.compact_task_assignment);
-        let assignee_context_id = match compact_task_assignment.remove(&compact_task.task_id) {
+            BTreeMapTransaction::new(&mut compaction.compact_task_assignment);
+        let assignee_context_id = match compact_task_assignment.remove(compact_task.task_id) {
             None => {
                 // The task is not found.
                 return Ok(false);
@@ -816,11 +816,11 @@ where
             let old_version = versioning_guard.current_version();
             let versioning = versioning_guard.deref_mut();
             let mut current_version_id = VarTransaction::new(&mut versioning.current_version_id);
-            let mut hummock_versions = VarTransaction::new(&mut versioning.hummock_versions);
+            let mut hummock_versions = BTreeMapTransaction::new(&mut versioning.hummock_versions);
             let mut hummock_version_deltas =
-                VarTransaction::new(&mut versioning.hummock_version_deltas);
-            let mut stale_sstables = VarTransaction::new(&mut versioning.stale_sstables);
-            let mut sstable_id_infos = VarTransaction::new(&mut versioning.sstable_id_infos);
+                BTreeMapTransaction::new(&mut versioning.hummock_version_deltas);
+            let mut stale_sstables = BTreeMapTransaction::new(&mut versioning.stale_sstables);
+            let mut sstable_id_infos = BTreeMapTransaction::new(&mut versioning.sstable_id_infos);
             let mut version_stale_sstables = stale_sstables.new_entry_txn_or_default(
                 old_version.id,
                 HummockStaleSstables {
@@ -865,7 +865,7 @@ where
             hummock_version_deltas.insert(version_delta.id, version_delta);
 
             for SstableInfo { id: ref sst_id, .. } in &compact_task.sorted_output_ssts {
-                match sstable_id_infos.get_mut(sst_id) {
+                match sstable_id_infos.get_mut(*sst_id) {
                     None => {
                         return Err(Error::InternalError(format!(
                             "invalid sst id {}, may have been vacuumed",
@@ -940,12 +940,12 @@ where
         let old_version = versioning_guard.current_version();
         let versioning = versioning_guard.deref_mut();
         let mut current_version_id = VarTransaction::new(&mut versioning.current_version_id);
-        let mut hummock_versions = VarTransaction::new(&mut versioning.hummock_versions);
+        let mut hummock_versions = BTreeMapTransaction::new(&mut versioning.hummock_versions);
         let mut hummock_version_deltas =
-            VarTransaction::new(&mut versioning.hummock_version_deltas);
-        let mut sstable_id_infos = VarTransaction::new(&mut versioning.sstable_id_infos);
+            BTreeMapTransaction::new(&mut versioning.hummock_version_deltas);
+        let mut sstable_id_infos = BTreeMapTransaction::new(&mut versioning.sstable_id_infos);
         current_version_id.increase();
-        let mut new_version_delta = hummock_version_deltas.new_entry_txn_or_default(
+        let mut new_version_delta = hummock_version_deltas.new_entry_insert_txn(
             current_version_id.id(),
             HummockVersionDelta {
                 prev_id: old_version.id,
@@ -954,7 +954,7 @@ where
             },
         );
         let mut new_hummock_version =
-            hummock_versions.new_entry_txn_or_default(current_version_id.id(), old_version);
+            hummock_versions.new_entry_insert_txn(current_version_id.id(), old_version);
         new_hummock_version.id = current_version_id.id();
         new_version_delta.id = current_version_id.id();
         if epoch <= new_hummock_version.max_committed_epoch {
@@ -971,14 +971,14 @@ where
         // formally fix this because the performance degradation is not acceptable anyway.
         let mut total_files_size = 0;
         for sst in &sstables {
-            match sstable_id_infos.get_mut(&sst.id) {
+            match sstable_id_infos.get_mut(sst.id) {
                 None => {
                     return Err(Error::InternalError(format!(
                         "Invalid SST id {}, may have been vacuumed",
                         sst.id
                     )));
                 }
-                Some(sst_id_info) => {
+                Some(mut sst_id_info) => {
                     if sst_id_info.meta_delete_timestamp != INVALID_TIMESTAMP {
                         return Err(Error::InternalError(format!(
                             "SST id {} has been marked for vacuum",
@@ -1103,16 +1103,16 @@ where
     ) -> Result<()> {
         let mut compaction_guard = self.compaction.write().await;
         let compaction = compaction_guard.deref_mut();
-        let mut compact_statuses = VarTransaction::new(&mut compaction.compaction_statuses);
+        let mut compact_statuses = BTreeMapTransaction::new(&mut compaction.compaction_statuses);
         let mut compact_task_assignment =
-            VarTransaction::new(&mut compaction.compact_task_assignment);
+            BTreeMapTransaction::new(&mut compaction.compact_task_assignment);
         let mut versioning_guard = self.versioning.write().await;
         let versioning = versioning_guard.deref_mut();
-        let mut pinned_versions = VarTransaction::new(&mut versioning.pinned_versions);
-        let mut pinned_snapshots = VarTransaction::new(&mut versioning.pinned_snapshots);
+        let mut pinned_versions = BTreeMapTransaction::new(&mut versioning.pinned_versions);
+        let mut pinned_snapshots = BTreeMapTransaction::new(&mut versioning.pinned_snapshots);
         for context_id in context_ids.as_ref() {
             tracing::debug!("Release context {}", *context_id);
-            for assignment in compact_task_assignment.values() {
+            for assignment in compact_task_assignment.tree_ref().values() {
                 if assignment.context_id != *context_id {
                     continue;
                 }
@@ -1120,8 +1120,8 @@ where
                     .compact_task
                     .as_ref()
                     .expect("compact_task shouldn't be None");
-                let compact_status = compact_statuses
-                    .get_mut(&task.compaction_group_id)
+                let mut compact_status = compact_statuses
+                    .get_mut(task.compaction_group_id)
                     .ok_or(Error::InvalidCompactionGroup(task.compaction_group_id))?;
                 compact_status.report_compact_task(
                     assignment
@@ -1130,9 +1130,22 @@ where
                         .expect("compact_task shouldn't be None"),
                 );
             }
-            compact_task_assignment.retain(|_, v| v.context_id != *context_id);
-            pinned_versions.remove(context_id);
-            pinned_snapshots.remove(context_id);
+            let task_ids_to_remove = compact_task_assignment
+                .tree_ref()
+                .iter()
+                .filter_map(|(task_id, v)| {
+                    if v.context_id == *context_id {
+                        Some(*task_id)
+                    } else {
+                        None
+                    }
+                })
+                .collect_vec();
+            for task_id in task_ids_to_remove {
+                compact_task_assignment.remove(task_id);
+            }
+            pinned_versions.remove(*context_id);
+            pinned_snapshots.remove(*context_id);
         }
         commit_multi_var!(
             self,
@@ -1197,16 +1210,16 @@ where
     ) -> Result<()> {
         let mut versioning_guard = self.versioning.write().await;
         let versioning = versioning_guard.deref_mut();
-        let mut stale_sstables = VarTransaction::new(&mut versioning.stale_sstables);
-        let mut sstable_id_infos = VarTransaction::new(&mut versioning.sstable_id_infos);
-        if let Some(ssts_to_delete) = stale_sstables.get_mut(&version_id) {
+        let mut stale_sstables = BTreeMapTransaction::new(&mut versioning.stale_sstables);
+        let mut sstable_id_infos = BTreeMapTransaction::new(&mut versioning.sstable_id_infos);
+        if let Some(mut ssts_to_delete) = stale_sstables.get_mut(version_id) {
             // Delete sstables that are stale in the view of `version_id` Version, and
             // are Not referred by any other older Version.
             // No newer version would use any stale sstables in the current Version.
             let num_ssts_to_delete = ssts_to_delete.id.len();
             for idx in (0..num_ssts_to_delete).rev() {
                 let sst_id = ssts_to_delete.id[idx];
-                if !ssts_in_use.contains(&sst_id) && let Some(mut sst_id_info) = sstable_id_infos.get_mut(&sst_id) {
+                if !ssts_in_use.contains(&sst_id) && let Some(mut sst_id_info) = sstable_id_infos.get_mut(sst_id) {
                     sst_id_info.meta_delete_timestamp = sstable_id_info::get_timestamp_now();
                     // We don't want to repetitively set the delete timestamp of these that have been set,
                     // so we remove these ones.
@@ -1231,13 +1244,13 @@ where
         let mut versioning_guard = self.versioning.write().await;
         let versioning = versioning_guard.deref_mut();
         let pinned_versions_ref = &versioning.pinned_versions;
-        let mut hummock_versions = VarTransaction::new(&mut versioning.hummock_versions);
-        let mut stale_sstables = VarTransaction::new(&mut versioning.stale_sstables);
+        let mut hummock_versions = BTreeMapTransaction::new(&mut versioning.hummock_versions);
+        let mut stale_sstables = BTreeMapTransaction::new(&mut versioning.stale_sstables);
         for version_id in version_ids {
-            if hummock_versions.remove(version_id).is_none() {
+            if hummock_versions.remove(*version_id).is_none() {
                 continue;
             }
-            if let Some(ssts_to_delete) = stale_sstables.get_mut(version_id) {
+            if let Some(ssts_to_delete) = stale_sstables.get(version_id) {
                 if !ssts_to_delete.id.is_empty() {
                     return Err(Error::InternalError(format!(
                         "Version {} still has stale ssts undeleted:{:?}",
@@ -1245,7 +1258,7 @@ where
                     )));
                 }
             }
-            stale_sstables.remove(version_id);
+            stale_sstables.remove(*version_id);
 
             for version_pin in pinned_versions_ref.values() {
                 assert!(
@@ -1346,11 +1359,11 @@ where
 
     pub async fn delete_sstable_ids(&self, sst_ids: impl AsRef<[HummockSSTableId]>) -> Result<()> {
         let mut versioning_guard = self.versioning.write().await;
-        let mut sstable_id_infos = VarTransaction::new(&mut versioning_guard.sstable_id_infos);
+        let mut sstable_id_infos = BTreeMapTransaction::new(&mut versioning_guard.sstable_id_infos);
 
         // Update in-mem state after transaction succeeds.
         for sst_id in sst_ids.as_ref() {
-            sstable_id_infos.remove(sst_id);
+            sstable_id_infos.remove(*sst_id);
         }
 
         commit_multi_var!(self, None, sstable_id_infos)?;
@@ -1408,11 +1421,12 @@ where
         sst_retention_interval: Duration,
     ) -> Result<Vec<SstableIdInfo>> {
         let mut versioning_guard = self.versioning.write().await;
-        let mut sstable_id_infos = VarTransaction::new(&mut versioning_guard.sstable_id_infos);
+        let mut sstable_id_infos = BTreeMapTransaction::new(&mut versioning_guard.sstable_id_infos);
 
         let now = sstable_id_info::get_timestamp_now();
         let mut marked = vec![];
-        for (_, sstable_id_info) in sstable_id_infos.iter_mut() {
+        for (sstable_id, sstable_id_info) in sstable_id_infos.tree_ref().iter() {
+            let mut sstable_id_info = sstable_id_info.clone();
             if sstable_id_info.meta_delete_timestamp != INVALID_TIMESTAMP {
                 continue;
             }
@@ -1421,11 +1435,15 @@ where
                 && now - sstable_id_info.id_create_timestamp >= sst_retention_interval.as_secs();
             if is_orphan {
                 sstable_id_info.meta_delete_timestamp = now;
-                marked.push(sstable_id_info.clone());
+                marked.push((*sstable_id, sstable_id_info.clone()));
             }
         }
         if marked.is_empty() {
             return Ok(vec![]);
+        }
+
+        for (sstable_id, sstable_id_info) in &marked {
+            sstable_id_infos.insert(*sstable_id, sstable_id_info.clone());
         }
 
         commit_multi_var!(self, None, sstable_id_infos)?;
@@ -1437,7 +1455,7 @@ where
         }
 
         tracing::debug!("Mark {:?} as orphan SSTs", marked);
-        Ok(marked)
+        Ok(marked.into_iter().map(|t| t.1).collect())
     }
 
     /// Gets current version without pinning it.
@@ -1453,14 +1471,23 @@ where
     async fn cancel_unassigned_compaction_task(&self) -> Result<()> {
         let mut compaction_guard = self.compaction.write().await;
         let compaction = compaction_guard.deref_mut();
-        let mut compact_statuses = VarTransaction::new(&mut compaction.compaction_statuses);
+        let mut compact_statuses = BTreeMapTransaction::new(&mut compaction.compaction_statuses);
         let mut cancelled_count = 0;
-        for (_, compact_status) in compact_statuses.iter_mut() {
-            cancelled_count += compact_status.cancel_compaction_tasks_if(|pending_task_id| {
+        let mut modified_group_status = vec![];
+        for (group_id, compact_status) in compact_statuses.tree_ref().iter() {
+            let mut compact_status = compact_status.clone();
+            let count = compact_status.cancel_compaction_tasks_if(|pending_task_id| {
                 !compaction
                     .compact_task_assignment
                     .contains_key(&pending_task_id)
             });
+            if count > 0 {
+                cancelled_count += count;
+                modified_group_status.push((*group_id, compact_status));
+            }
+        }
+        for (group_id, compact_status) in modified_group_status {
+            compact_statuses.insert(group_id, compact_status);
         }
         if cancelled_count > 0 {
             commit_multi_var!(self, None, compact_statuses)?;
