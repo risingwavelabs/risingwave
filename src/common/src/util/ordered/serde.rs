@@ -12,6 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+use std::borrow::Cow;
 use std::cmp::Reverse;
 
 use itertools::Itertools;
@@ -76,9 +77,13 @@ impl OrderedRowSerializer {
     }
 
     #[must_use]
-    pub fn prefix(&self, len: usize) -> Self {
-        Self {
-            order_types: self.order_types[..len].to_vec(),
+    pub fn prefix(&self, len: usize) -> Cow<Self> {
+        if len == self.order_types.len() {
+            Cow::Borrowed(self)
+        } else {
+            Cow::Owned(Self {
+                order_types: self.order_types[..len].to_vec(),
+            })
         }
     }
 
