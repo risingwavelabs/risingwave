@@ -29,7 +29,8 @@
         price BIGINT,
         channel VARCHAR,
         url VARCHAR,
-        dateTime TIMESTAMP
+        dateTime TIMESTAMP,
+        extra VARCHAR
     );
 - id: nexmark_q0
   before:
@@ -344,9 +345,16 @@
   before:
     - create_tables
   sql: |
-    SELECT auction, bidder, price, dateTime, DATE_FORMAT(dateTime, 'yyyy-MM-dd'), DATE_FORMAT(dateTime, 'HH:mm')
+    SELECT auction, bidder, price, dateTime, TO_CHAR(dateTime, 'yyyy-MM-dd') as date, TO_CHAR(dateTime, 'HH:mm') as time
     FROM bid;
-  binder_error: 'Feature is not yet implemented: unsupported function: "date_format", Tracking issue: https://github.com/singularity-data/risingwave/issues/112'
+  batch_plan: |
+    BatchExchange { order: [], dist: Single }
+      BatchProject { exprs: [$0, $1, $2, $3, ToChar($3, 'yyyy-MM-dd':Varchar), ToChar($3, 'HH:mm':Varchar)] }
+        BatchScan { table: bid, columns: [auction, bidder, price, dateTime] }
+  stream_plan: |
+    StreamMaterialize { columns: [auction, bidder, price, dateTime, date, time, _row_id(hidden)], pk_columns: [_row_id] }
+      StreamProject { exprs: [$0, $1, $2, $3, ToChar($3, 'yyyy-MM-dd':Varchar), ToChar($3, 'HH:mm':Varchar), $4] }
+        StreamTableScan { table: bid, columns: [auction, bidder, price, dateTime, _row_id], pk_indices: [4] }
 - id: nexmark_q11
   before:
     - create_tables
@@ -389,8 +397,39 @@
 - id: nexmark_q14
   before:
     - create_tables
-  sql: "SELECT \n    auction,\n    bidder,\n    0.908 * price as price,\n    CASE\n        WHEN HOUR(dateTime) >= 8 AND HOUR(dateTime) <= 18 THEN 'dayTime'\n        WHEN HOUR(dateTime) <= 6 OR HOUR(dateTime) >= 20 THEN 'nightTime'\n        ELSE 'otherTime'\n    END AS bidTimeType,\n    dateTime,\n    extra,\n    count_char(extra, 'c') AS c_counts\nFROM bid\nWHERE 0.908 * price > 1000000 AND 0.908 * price < 50000000;\n"
-  binder_error: 'Feature is not yet implemented: unsupported function: "hour", Tracking issue: https://github.com/singularity-data/risingwave/issues/112'
+  sql: |
+    SELECT
+      auction,
+      bidder,
+      0.908 * price as price,
+      CASE
+        WHEN
+          extract(hour from dateTime) >= 8 AND
+          extract(hour from dateTime) <= 18
+        THEN 'dayTime'
+        WHEN
+          extract(hour from dateTime) <= 6 OR
+          extract(hour from dateTime) >= 20
+        THEN 'nightTime'
+        ELSE 'otherTime'
+      END AS bidTimeType,
+      dateTime,
+      extra
+      -- TODO: count_char is an UDF, add it back when we support similar functionality.
+      -- https://github.com/nexmark/nexmark/blob/master/nexmark-flink/src/main/java/com/github/nexmark/flink/udf/CountChar.java
+      -- count_char(extra, 'c') AS c_counts
+    FROM bid
+    WHERE 0.908 * price > 1000000 AND 0.908 * price < 50000000;
+  batch_plan: |
+    BatchExchange { order: [], dist: Single }
+      BatchProject { exprs: [$0, $1, (0.908:Decimal * $2), Case(((Extract('HOUR':Varchar, $3) >= 8:Int32) AND (Extract('HOUR':Varchar, $3) <= 18:Int32)), 'dayTime':Varchar, ((Extract('HOUR':Varchar, $3) <= 6:Int32) OR (Extract('HOUR':Varchar, $3) >= 20:Int32)), 'nightTime':Varchar, 'otherTime':Varchar), $3, $4] }
+        BatchFilter { predicate: ((0.908:Decimal * $2) > 1000000:Int32) AND ((0.908:Decimal * $2) < 50000000:Int32) }
+          BatchScan { table: bid, columns: [auction, bidder, price, dateTime, extra] }
+  stream_plan: |
+    StreamMaterialize { columns: [auction, bidder, price, bidTimeType, dateTime, extra, _row_id(hidden)], pk_columns: [_row_id] }
+      StreamProject { exprs: [$0, $1, (0.908:Decimal * $2), Case(((Extract('HOUR':Varchar, $3) >= 8:Int32) AND (Extract('HOUR':Varchar, $3) <= 18:Int32)), 'dayTime':Varchar, ((Extract('HOUR':Varchar, $3) <= 6:Int32) OR (Extract('HOUR':Varchar, $3) >= 20:Int32)), 'nightTime':Varchar, 'otherTime':Varchar), $3, $4, $5] }
+        StreamFilter { predicate: ((0.908:Decimal * $2) > 1000000:Int32) AND ((0.908:Decimal * $2) < 50000000:Int32) }
+          StreamTableScan { table: bid, columns: [auction, bidder, price, dateTime, extra, _row_id], pk_indices: [5] }
 - id: nexmark_q15
   before:
     - create_tables
@@ -491,7 +530,14 @@
   sql: |
     SELECT
         auction, bidder, price, channel,
-        SPLIT_INDEX(url, '/', 3) as dir1,
-        SPLIT_INDEX(url, '/', 4) as dir2,
-        SPLIT_INDEX(url, '/', 5) as dir3 FROM bid;
-  binder_error: 'Feature is not yet implemented: unsupported function: "split_index", Tracking issue: https://github.com/singularity-data/risingwave/issues/112'
+        SPLIT_PART(url, '/', 4) as dir1,
+        SPLIT_PART(url, '/', 5) as dir2,
+        SPLIT_PART(url, '/', 6) as dir3 FROM bid;
+  batch_plan: |
+    BatchExchange { order: [], dist: Single }
+      BatchProject { exprs: [$0, $1, $2, $3, SplitPart($4, '/':Varchar, 4:Int32), SplitPart($4, '/':Varchar, 5:Int32), SplitPart($4, '/':Varchar, 6:Int32)] }
+        BatchScan { table: bid, columns: [auction, bidder, price, channel, url] }
+  stream_plan: |
+    StreamMaterialize { columns: [auction, bidder, price, channel, dir1, dir2, dir3, _row_id(hidden)], pk_columns: [_row_id] }
+      StreamProject { exprs: [$0, $1, $2, $3, SplitPart($4, '/':Varchar, 4:Int32), SplitPart($4, '/':Varchar, 5:Int32), SplitPart($4, '/':Varchar, 6:Int32), $5] }
+        StreamTableScan { table: bid, columns: [auction, bidder, price, channel, url, _row_id], pk_indices: [5] }
