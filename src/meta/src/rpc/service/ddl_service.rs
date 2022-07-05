@@ -29,12 +29,12 @@ use risingwave_pb::stream_plan::{StreamFragmentGraph, StreamNode};
 use tonic::{Request, Response, Status};
 
 use crate::cluster::ClusterManagerRef;
-use crate::manager::{CatalogManagerRef, IdCategory, MetaSrvEnv, SourceId, TableId};
+use crate::manager::{CatalogManagerRef, IdCategory, MetaSrvEnv, SinkId, SourceId, TableId};
 use crate::model::{FragmentId, TableFragments};
 use crate::storage::MetaStore;
 use crate::stream::{
     ActorGraphBuilder, CreateMaterializedViewContext, FragmentManagerRef, GlobalStreamManagerRef,
-    SourceManagerRef, SinkManagerRef
+    SinkManagerRef, SourceManagerRef,
 };
 
 #[derive(Clone)]
@@ -237,6 +237,7 @@ where
         let req = request.into_inner();
 
         let mut sink = req.sink.unwrap();
+        let fragment_graph = req.fragment_graph.unwrap();
 
         let id = self
             .env
@@ -250,6 +251,8 @@ where
             .start_create_sink_procedure(&sink)
             .await
             .map_err(tonic_err)?;
+
+        self.create_sink_on_compute_node(fragment_graph, id)?;
 
         let version = self
             .catalog_manager
@@ -726,5 +729,13 @@ where
             )
             .into()),
         }
+    }
+
+    fn create_sink_on_compute_node(
+        &self,
+        fragment_graph: StreamFragmentGraph,
+        id: SinkId,
+    ) -> RwResult<()> {
+        todo!();
     }
 }

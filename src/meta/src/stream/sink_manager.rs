@@ -13,11 +13,12 @@
 // limitations under the License.
 
 use std::sync::Arc;
-use risingwave_common::error::{Result};
-use risingwave_pb::catalog::Sink;
-use tokio::sync::{Mutex};
 
-use crate::manager::{ MetaSrvEnv, SinkId};
+use risingwave_common::error::Result;
+use risingwave_pb::catalog::Sink;
+use tokio::sync::Mutex;
+
+use crate::manager::{MetaSrvEnv, SinkId};
 use crate::storage::MetaStore;
 use crate::stream::FragmentManagerRef;
 
@@ -38,9 +39,7 @@ where
     S: MetaStore,
 {
     fn new(fragment_manager: FragmentManagerRef<S>) -> Self {
-        Self {
-            fragment_manager,
-        }
+        Self { fragment_manager }
     }
 }
 
@@ -48,16 +47,10 @@ impl<S> SinkManager<S>
 where
     S: MetaStore,
 {
-    pub async fn new(
-        env: MetaSrvEnv<S>,
-        fragment_manager: FragmentManagerRef<S>,
-    ) -> Result<Self> {
+    pub async fn new(env: MetaSrvEnv<S>, fragment_manager: FragmentManagerRef<S>) -> Result<Self> {
         let core = Arc::new(Mutex::new(SinkManagerCore::new(fragment_manager)));
 
-        Ok(Self {
-            env,
-            core,
-        })
+        Ok(Self { env, core })
     }
 
     /// Broadcast the create sink request to all compute nodes.

@@ -15,7 +15,6 @@
 use std::collections::HashMap;
 use std::rc::Rc;
 
-use fixedbitset::FixedBitSet;
 use pgwire::pg_response::{PgResponse, StatementType};
 use risingwave_common::catalog::TableDesc;
 use risingwave_common::error::Result;
@@ -24,12 +23,10 @@ use risingwave_sqlparser::ast::CreateSinkStatement;
 
 use super::util::handle_with_properties;
 use crate::binder::Binder;
-use crate::catalog::{DatabaseId, SchemaId, TableCatalog};
+use crate::catalog::{DatabaseId, SchemaId};
 use crate::optimizer::plan_node::{LogicalScan, StreamSink, StreamTableScan};
-use crate::optimizer::property::{Order, RequiredDist};
-use crate::optimizer::{PlanRef, PlanRoot};
-use crate::planner::Planner;
-use crate::session::{OptimizerContext, OptimizerContextRef, SessionImpl};
+use crate::optimizer::PlanRef;
+use crate::session::{OptimizerContext, OptimizerContextRef};
 use crate::stream_fragmenter::StreamFragmenter;
 
 pub(crate) fn make_prost_sink(
@@ -55,8 +52,6 @@ fn gen_sink_plan(
     context: OptimizerContextRef,
     associated_table_name: String,
     associated_table_desc: TableDesc,
-    owner: String,
-    properties: HashMap<String, String>,
 ) -> Result<PlanRef> {
     let scan_node: PlanRef = StreamTableScan::new(LogicalScan::create(
         associated_table_name,
@@ -92,7 +87,7 @@ pub async fn handle_create_sink(
             stmt.materialized_view.to_string().as_str(),
         )?;
         (
-            table.id().table_id.into(),
+            table.id().table_id,
             table.name().to_string(),
             table.table_desc(),
         )
@@ -108,13 +103,7 @@ pub async fn handle_create_sink(
     )?;
 
     let graph = {
-        let plan = gen_sink_plan(
-            context.into(),
-            associated_table_name,
-            associated_table_desc,
-            session.user_name().to_string(),
-            with_properties.clone(),
-        )?;
+        let plan = gen_sink_plan(context.into(), associated_table_name, associated_table_desc)?;
         let plan = plan.to_stream_prost();
         StreamFragmenter::build_graph(plan)
     };

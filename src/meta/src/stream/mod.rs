@@ -14,8 +14,8 @@
 
 mod meta;
 mod scheduler;
-mod source_manager;
 mod sink_manager;
+mod source_manager;
 mod stream_graph;
 mod stream_manager;
 #[cfg(test)]
@@ -26,8 +26,8 @@ use risingwave_common::error::Result;
 use risingwave_pb::stream_plan::stream_node::NodeBody;
 use risingwave_pb::stream_plan::StreamNode;
 pub use scheduler::*;
-pub use source_manager::*;
 pub use sink_manager::*;
+pub use source_manager::*;
 pub use stream_graph::*;
 pub use stream_manager::*;
 

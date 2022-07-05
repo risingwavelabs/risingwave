@@ -50,7 +50,7 @@ use crate::rpc::service::stream_service::StreamServiceImpl;
 use crate::rpc::service::user_service::UserServiceImpl;
 use crate::rpc::{META_CF_NAME, META_LEADER_KEY, META_LEASE_KEY};
 use crate::storage::{Error, EtcdMetaStore, MemStore, MetaStore, Transaction};
-use crate::stream::{FragmentManager, GlobalStreamManager, SourceManager, SinkManager};
+use crate::stream::{FragmentManager, GlobalStreamManager, SinkManager, SourceManager};
 
 #[derive(Debug)]
 pub enum MetaStoreBackend {
@@ -347,12 +347,9 @@ pub async fn rpc_serve_with_store<S: MetaStore>(
     );
 
     let sink_manager = Arc::new(
-        SinkManager::new(
-            env.clone(),
-            fragment_manager.clone(),
-        )
-        .await
-        .unwrap(),
+        SinkManager::new(env.clone(), fragment_manager.clone())
+            .await
+            .unwrap(),
     );
 
     {

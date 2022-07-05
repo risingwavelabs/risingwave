@@ -220,7 +220,7 @@ impl StreamService for StreamServiceImpl {
 
         Ok(Response::new(DropSourceResponse { status: None }))
     }
-    
+
     #[cfg_attr(coverage, no_coverage)]
     async fn create_sink(
         &self,
