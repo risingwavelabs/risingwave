@@ -19,6 +19,7 @@ use risingwave_rpc_client::MetaClient;
 use risingwave_storage::hummock::HummockStorage;
 use risingwave_storage::monitor::MonitoredStateStore;
 use risingwave_storage::table::state_table::StateTable;
+use risingwave_storage::table::Distribution;
 use risingwave_storage::StateStore;
 
 use crate::common::HummockServiceOpts;
@@ -50,7 +51,7 @@ pub fn print_table_catalog(table: &TableCatalog) {
 }
 
 pub fn make_state_table<S: StateStore>(hummock: S, table: &TableCatalog) -> StateTable<S> {
-    StateTable::new(
+    StateTable::new_with_distribution(
         hummock,
         table.id,
         table
@@ -59,8 +60,8 @@ pub fn make_state_table<S: StateStore>(hummock: S, table: &TableCatalog) -> Stat
             .map(|x| x.column_desc.clone())
             .collect(),
         table.order_desc().iter().map(|x| x.order).collect(),
-        Some(table.pks.clone()),
-        table.distribution_keys().to_vec(),
+        table.pks.clone(), // FIXME: should use order keys
+        Distribution::all_vnodes(table.distribution_keys().to_vec()), // scan all vnodes
     )
 }
 
@@ -84,12 +85,14 @@ async fn do_scan(
     mut hummock_opts: HummockServiceOpts,
 ) -> Result<()> {
     print_table_catalog(&table);
+
+    // We use state table here instead of cell-based table to support iterating with u64::MAX epoch.
     let state_table = make_state_table(hummock.clone(), &table);
     let stream = state_table.iter(u64::MAX).await?;
+
     pin_mut!(stream);
     while let Some(item) = stream.next().await {
-        let item = item?;
-        println!("{:?}", item);
+        println!("{:?}", item?);
     }
 
     hummock_opts.shutdown().await;

@@ -116,12 +116,28 @@ impl PlanRoot {
     pub fn gen_optimized_logical_plan(&self) -> PlanRef {
         let mut plan = self.plan.clone();
 
-        // Subquery Unnesting.
+        // Simple Unnesting.
+        // Pull correlated predicates up the algebra tree to unnest simple subquery.
+        plan = {
+            let rules = vec![PullUpCorrelatedPredicate::create()];
+            let heuristic_optimizer = HeuristicOptimizer::new(ApplyOrder::TopDown, rules);
+            heuristic_optimizer.optimize(plan)
+        };
+
+        // General Unnesting.
+        // Translate Apply, push Apply down the plan and finally replace Apply with regular inner
+        // join.
+        plan = {
+            let rules = vec![TranslateApply::create()];
+            let heuristic_optimizer = HeuristicOptimizer::new(ApplyOrder::BottomUp, rules);
+            heuristic_optimizer.optimize(plan)
+        };
         plan = {
             let rules = vec![
-                // This rule should be applied first to pull up LogicalAgg.
-                UnnestAggForLOJ::create(),
-                PullUpCorrelatedPredicate::create(),
+                ApplyAgg::create(),
+                ApplyFilter::create(),
+                ApplyProj::create(),
+                ApplyScan::create(),
             ];
             let heuristic_optimizer = HeuristicOptimizer::new(ApplyOrder::TopDown, rules);
             heuristic_optimizer.optimize(plan)
