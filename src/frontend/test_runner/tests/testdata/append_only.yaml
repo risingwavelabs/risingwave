@@ -23,7 +23,7 @@
     create table t1 (v1 int, v2 int) with ('appendonly' = true);
     select v1 from t1 order by v1 limit 3 offset 3;
   stream_plan: |
-    StreamMaterialize { columns: [v1, _row_id(hidden)], pk_columns: [_row_id], order_descs: [v1, _row_id] }
+    StreamMaterialize { columns: [v1, _row_id(hidden)], pk_columns: [_row_id], order_descs: [v1, _row_id], order: [v1 ASC] }
       StreamAppendOnlyTopN { order: [$0 ASC], limit: 3, offset: 3 }
         StreamExchange { dist: Single }
           StreamTableScan { table: t1, columns: [v1, _row_id], pk_indices: [1] }

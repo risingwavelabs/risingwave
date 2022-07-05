@@ -214,6 +214,13 @@ impl fmt::Display for StreamMaterialize {
         if pk_column_names != order_descs {
             builder.field("order_descs", &format_args!("[{}]", order_descs));
         }
+        if let Some(order) = &table.user_order_by && !order.is_empty() {
+            let order_names = order
+                .iter()
+                .map(|o| format!("{} {}", &table.columns[o.index].column_desc.name, o.direct))
+                .join(", ");
+            builder.field("order", &format_args!("[{}]", order_names));
+        }
         builder.finish()
     }
 }

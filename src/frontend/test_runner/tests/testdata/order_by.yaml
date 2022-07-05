@@ -8,7 +8,7 @@
       BatchSort { order: [$0 DESC] }
         BatchScan { table: t, columns: [v1, v2] }
   stream_plan: |
-    StreamMaterialize { columns: [v1, v2, _row_id(hidden)], pk_columns: [_row_id], order_descs: [v1, _row_id] }
+    StreamMaterialize { columns: [v1, v2, _row_id(hidden)], pk_columns: [_row_id], order_descs: [v1, _row_id], order: [v1 DESC] }
       StreamTableScan { table: t, columns: [v1, v2, _row_id], pk_indices: [2] }
 - sql: |
     /* output names are not quailified after table names */
@@ -64,7 +64,7 @@
           BatchProject { exprs: [$0, $1, (1:Int32 + 1:Int32)] }
             BatchScan { table: t, columns: [v1, v2] }
   stream_plan: |
-    StreamMaterialize { columns: [v1, v2, expr#2(hidden), _row_id(hidden)], pk_columns: [_row_id], order_descs: [expr#2, _row_id] }
+    StreamMaterialize { columns: [v1, v2, expr#2(hidden), _row_id(hidden)], pk_columns: [_row_id], order_descs: [expr#2, _row_id], order: [expr#2 ASC] }
       StreamProject { exprs: [$0, $1, (1:Int32 + 1:Int32), $2] }
         StreamTableScan { table: t, columns: [v1, v2, _row_id], pk_indices: [2] }
 - sql: |
@@ -79,7 +79,7 @@
       BatchExchange { order: [], dist: Single }
         BatchScan { table: t, columns: [v1, v2] }
   stream_plan: |
-    StreamMaterialize { columns: [v1, v2, _row_id(hidden)], pk_columns: [_row_id], order_descs: [v1, _row_id] }
+    StreamMaterialize { columns: [v1, v2, _row_id(hidden)], pk_columns: [_row_id], order_descs: [v1, _row_id], order: [v1 DESC] }
       StreamTopN { order: [$0 DESC], limit: 5, offset: 0 }
         StreamExchange { dist: Single }
           StreamTableScan { table: t, columns: [v1, v2, _row_id], pk_indices: [2] }
@@ -91,7 +91,7 @@
       BatchExchange { order: [], dist: Single }
         BatchScan { table: t, columns: [v1, v2] }
   stream_plan: |
-    StreamMaterialize { columns: [v1, v2, _row_id(hidden)], pk_columns: [_row_id], order_descs: [v1, _row_id] }
+    StreamMaterialize { columns: [v1, v2, _row_id(hidden)], pk_columns: [_row_id], order_descs: [v1, _row_id], order: [v1 DESC] }
       StreamTopN { order: [$0 DESC], limit: 5, offset: 7 }
         StreamExchange { dist: Single }
           StreamTableScan { table: t, columns: [v1, v2, _row_id], pk_indices: [2] }
@@ -109,7 +109,7 @@
           BatchProject { exprs: [$0, $1, ($0 + $1), $2] }
             BatchScan { table: t, columns: [x, y, z] }
   stream_plan: |
-    StreamMaterialize { columns: [x, y, expr#2(hidden), z(hidden), _row_id(hidden)], pk_columns: [_row_id], order_descs: [expr#2, z, _row_id] }
+    StreamMaterialize { columns: [x, y, expr#2(hidden), z(hidden), _row_id(hidden)], pk_columns: [_row_id], order_descs: [expr#2, z, _row_id], order: [expr#2 ASC, z ASC] }
       StreamProject { exprs: [$0, $1, ($0 + $1), $2, $3] }
         StreamTableScan { table: t, columns: [x, y, z, _row_id], pk_indices: [3] }
 - sql: |
