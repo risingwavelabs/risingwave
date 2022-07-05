@@ -66,12 +66,12 @@ where
         debug!("recovery start!");
         let retry_strategy = Self::get_retry_strategy();
         let (new_epoch, responses) = tokio_retry::Retry::spawn(retry_strategy, || async {
-            let mut info = self.resolve_actor_info(None).await;
+            let info = self.resolve_actor_info(None).await;
             let mut new_epoch = prev_epoch.next();
 
             if self.enable_migrate {
                 // Migrate expired actors to newly joined node by changing actor_map
-                self.migrate_actors(&mut info).await?;
+                self.migrate_actors(&info).await?;
             }
 
             // Reset all compute nodes, stop and drop existing actors.
