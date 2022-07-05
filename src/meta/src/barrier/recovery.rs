@@ -166,12 +166,12 @@ where
             let new_nodes = current_nodes
                 .iter()
                 .filter(|&node| {
-                    !info.node_map.contains_key(&node.id) && !migrate_map.contains_key(&node.id)
+                    !info.node_map.contains_key(&node.id) && !chosen_ids.contains(&node.id)
                 })
                 .collect_vec();
             for new_node in new_nodes {
-                if n > 0 && !chosen_ids.contains(&origin_ids[n]) {
-                    chosen_ids.insert(origin_ids[n]);
+                if n > 0 {
+                    chosen_ids.insert(new_node.id);
                     migrate_map.insert(origin_ids[n], new_node.id);
                     n -= 1;
                 }
