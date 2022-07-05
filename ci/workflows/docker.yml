@@ -28,7 +28,7 @@ steps:
     if: build.source != "schedule"
     env:
       BUILDPIPE_SCOPE: project
-      PUSH_GHCR: flase
+      PUSH_GHCR: false
     retry: *auto-retry
 
   - label: "docker-build-push-main"

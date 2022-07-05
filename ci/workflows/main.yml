@@ -186,7 +186,7 @@ steps:
     command: "ci/scripts/docker.sh"
     if: build.tag != null
     env:
-      - PUSH_GHCR: true
+      PUSH_GHCR: true
     plugins:
       - seek-oss/aws-sm#v2.3.1:
           env:
