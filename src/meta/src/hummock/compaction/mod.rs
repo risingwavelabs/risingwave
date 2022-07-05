@@ -146,8 +146,9 @@ impl CompactStatus {
             sorted_output_ssts: vec![],
             task_id,
             target_level: target_level_id,
-            is_target_ultimate_and_leveling: target_level_id as usize
-                == self.level_handlers.len() - 1
+            // only gc delete keys in last level because there may be older version in more bottom
+            // level.
+            gc_delete_keys: target_level_id as usize == self.level_handlers.len() - 1
                 && select_level_id > 0,
             task_status: false,
             vnode_mappings: vec![],

@@ -140,7 +140,7 @@ impl CompactionFilter for StateCleanUpCompactionFilter {
                 let removed = !self.existing_table_ids.contains(&table_id);
                 self.last_table = Some((table_id, removed));
                 removed
-            },
+            }
         }
     }
 }
@@ -198,7 +198,9 @@ struct MultiCompactionFilter {
 
 impl CompactionFilter for MultiCompactionFilter {
     fn should_delete(&mut self, key: &[u8]) -> bool {
-        self.filter_vec.iter_mut().any(|filter| filter.should_delete(key))
+        self.filter_vec
+            .iter_mut()
+            .any(|filter| filter.should_delete(key))
     }
 }
 
@@ -318,7 +320,7 @@ impl Compactor {
             sorted_output_ssts: vec![],
             task_id: 0,
             target_level: 0,
-            is_target_ultimate_and_leveling: false,
+            gc_delete_keys: false,
             task_status: false,
             // VNode mappings are not required when compacting shared buffer to L0
             vnode_mappings: vec![],
@@ -706,7 +708,7 @@ impl Compactor {
             &mut builder,
             kr,
             iter,
-            self.compact_task.is_target_ultimate_and_leveling,
+            self.compact_task.gc_delete_keys,
             self.compact_task.watermark,
             compaction_filter,
         )
@@ -966,7 +968,7 @@ impl Compactor {
         sst_builder: &mut GroupedSstableBuilder<B, G>,
         kr: KeyRange,
         mut iter: BoxedForwardHummockIterator,
-        gc_delete_key: bool,
+        gc_delete_keys: bool,
         watermark: Epoch,
         mut compaction_filter: impl CompactionFilter,
     ) -> HummockResult<()>
@@ -1011,13 +1013,13 @@ impl Compactor {
             // in our design, frontend avoid to access keys which had be deleted, so we dont
             // need to consider the epoch when the compaction_filter match (it
             // means that mv had drop)
-            if (epoch <= watermark && gc_delete_key && iter.value().is_delete())
+            if (epoch <= watermark && gc_delete_keys && iter.value().is_delete())
                 || (epoch < watermark && watermark_can_see_last_key)
             {
                 drop = true;
             }
 
-            if !drop && compaction_filter.should_delete(&iter_key) {
+            if !drop && compaction_filter.should_delete(iter_key) {
                 drop = true;
             }
 
