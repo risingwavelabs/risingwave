@@ -14,9 +14,11 @@
 
 use std::sync::Arc;
 
+use futures_async_stream::try_stream;
+use itertools::Itertools;
 use risingwave_pb::data::Column as ProstColumn;
 
-use super::{Array, ArrayResult};
+use super::{Array, ArrayError, ArrayResult, PrimitiveArray};
 use crate::array::{ArrayImpl, ArrayRef};
 
 /// Column is owned by `DataChunk`. It consists of logic data type and physical array
@@ -52,6 +54,36 @@ impl Column {
 
     pub fn into_inner(self) -> ArrayRef {
         self.array
+    }
+
+    #[try_stream(boxed, ok = Vec<Column>, error = ArrayError)]
+    pub async fn expand_columns(
+        cardinality: usize,
+        columns: Vec<Column>,
+        column_subsets: Vec<Vec<usize>>,
+    ) {
+        let null_columns: Vec<Column> = columns
+            .iter()
+            .map(|column| {
+                let array = column.array_ref();
+                let mut builder = array.create_builder(cardinality)?;
+                // TODO: use a more efficient way to generate `null_column`.
+                (0..cardinality).try_for_each(|_i| builder.append_null())?;
+                Ok::<Column, ArrayError>(Column::new(Arc::new(builder.finish()?)))
+            })
+            .try_collect()?;
+        for (i, subset) in column_subsets.into_iter().enumerate() {
+            let mut new_columns = null_columns.clone();
+            for key in subset {
+                new_columns[key] = columns[key].clone();
+            }
+            let flags = Column::from(PrimitiveArray::<i64>::from_slice(&vec![
+                Some(i as i64);
+                cardinality
+            ])?);
+            new_columns.push(flags);
+            yield new_columns;
+        }
     }
 }
 
