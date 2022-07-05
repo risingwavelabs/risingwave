@@ -39,6 +39,74 @@ fn pin_versions_sum(pin_versions: &[HummockPinnedVersion]) -> usize {
     pin_versions.iter().map(|p| p.version_id.len()).sum()
 }
 
+fn pin_snapshots_epoch(pin_snapshots: &[HummockPinnedSnapshot]) -> Vec<u64> {
+    pin_snapshots
+        .iter()
+        .map(|p| p.minimal_pinned_snapshot)
+        .collect_vec()
+}
+
+#[tokio::test]
+async fn test_hummock_pin_unpin() {
+    let (env, hummock_manager, _cluster_manager, worker_node) = setup_compute_env(80).await;
+    let context_id = worker_node.id;
+    let version_id = FIRST_VERSION_ID;
+    let epoch = INVALID_EPOCH;
+
+    assert!(HummockPinnedVersion::list(env.meta_store())
+        .await
+        .unwrap()
+        .is_empty());
+    for _ in 0..2 {
+        let hummock_version = hummock_manager
+            .pin_version(context_id, u64::MAX)
+            .await
+            .unwrap();
+        let levels = hummock_version
+            .get_compaction_group_levels(StaticCompactionGroupId::StateDefault.into());
+        assert_eq!(version_id, hummock_version.id);
+        assert_eq!(7, levels.len());
+        assert_eq!(0, levels[0].table_infos.len());
+        assert_eq!(0, levels[1].table_infos.len());
+
+        let pinned_versions = HummockPinnedVersion::list(env.meta_store()).await.unwrap();
+        assert_eq!(pin_versions_sum(&pinned_versions), 1);
+        assert_eq!(pinned_versions[0].context_id, context_id);
+        assert_eq!(pinned_versions[0].version_id.len(), 1);
+        assert_eq!(pinned_versions[0].version_id[0], version_id);
+    }
+
+    // unpin nonexistent target will not return error
+    for _ in 0..3 {
+        hummock_manager
+            .unpin_version(context_id, vec![version_id])
+            .await
+            .unwrap();
+        assert_eq!(
+            pin_versions_sum(&HummockPinnedVersion::list(env.meta_store()).await.unwrap()),
+            0
+        );
+    }
+
+    assert!(HummockPinnedSnapshot::list(env.meta_store())
+        .await
+        .unwrap()
+        .is_empty());
+    for _ in 0..2 {
+        let pin_result = hummock_manager.pin_snapshot(context_id).await.unwrap();
+        assert_eq!(pin_result.epoch, epoch);
+        let pinned_snapshots = HummockPinnedSnapshot::list(env.meta_store()).await.unwrap();
+        assert_eq!(pin_snapshots_epoch(&pinned_snapshots), vec![epoch]);
+        assert_eq!(pinned_snapshots[0].context_id, context_id);
+    }
+    // unpin nonexistent target will not return error
+    hummock_manager.unpin_snapshot(context_id).await.unwrap();
+    assert!(HummockPinnedSnapshot::list(env.meta_store())
+        .await
+        .unwrap()
+        .is_empty());
+}
+
 #[tokio::test]
 async fn test_unpin_snapshot_before() {
     let (env, hummock_manager, _cluster_manager, worker_node) = setup_compute_env(80).await;
@@ -62,7 +130,10 @@ async fn test_unpin_snapshot_before() {
             .unpin_snapshot_before(context_id, HummockSnapshot { epoch })
             .await
             .unwrap();
-        // TODO: check minimal_pinned_snapshot
+        assert_eq!(
+            pin_snapshots_epoch(&HummockPinnedSnapshot::list(env.meta_store()).await.unwrap()),
+            vec![epoch]
+        );
     }
 
     // unpin nonexistent target will not return error
@@ -71,7 +142,10 @@ async fn test_unpin_snapshot_before() {
             .unpin_snapshot_before(context_id, HummockSnapshot { epoch: epoch + 1 })
             .await
             .unwrap();
-        // TODO: check minimal_pinned_snapshot
+        assert_eq!(
+            pin_snapshots_epoch(&HummockPinnedSnapshot::list(env.meta_store()).await.unwrap()),
+            vec![epoch + 1]
+        );
     }
 }
 
@@ -396,6 +470,13 @@ async fn test_release_context_resource() {
     hummock_manager.pin_snapshot(context_id_2).await.unwrap();
     assert_eq!(
         pin_versions_sum(&HummockPinnedVersion::list(env.meta_store()).await.unwrap()),
+        2
+    );
+    assert_eq!(
+        HummockPinnedSnapshot::list(env.meta_store())
+            .await
+            .unwrap()
+            .len(),
         2
     );
     hummock_manager
