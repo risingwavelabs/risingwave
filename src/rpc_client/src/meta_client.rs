@@ -319,9 +319,9 @@ impl MetaClient {
         (join_handle, shutdown_tx)
     }
 
-    pub async fn list_materialize_view(&self) -> Result<Vec<ProstTable>> {
-        let request = ListMaterializedViewRequest {};
-        let resp = self.inner.list_materialized_view(request).await?;
+    pub async fn risectl_list_state_tables(&self) -> Result<Vec<ProstTable>> {
+        let request = ListStateTablesRequest {};
+        let resp = self.inner.risectl_list_state_tables(request).await?;
         Ok(resp.tables)
     }
 
@@ -563,7 +563,7 @@ macro_rules! for_all_meta_rpc {
             ,{ ddl_client, drop_source, DropSourceRequest, DropSourceResponse }
             ,{ ddl_client, drop_database, DropDatabaseRequest, DropDatabaseResponse }
             ,{ ddl_client, drop_schema, DropSchemaRequest, DropSchemaResponse }
-            ,{ ddl_client, list_materialized_view, ListMaterializedViewRequest, ListMaterializedViewResponse }
+            ,{ ddl_client, risectl_list_state_tables, ListStateTablesRequest, ListStateTablesResponse }
             ,{ hummock_client, pin_version, PinVersionRequest, PinVersionResponse }
             ,{ hummock_client, unpin_version, UnpinVersionRequest, UnpinVersionResponse }
             ,{ hummock_client, pin_snapshot, PinSnapshotRequest, PinSnapshotResponse }
