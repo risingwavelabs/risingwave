@@ -30,3 +30,14 @@ start transaction;
 
 statement ok
 abort;
+
+statement ok
+SET QUERY_MODE TO local;
+
+query I
+show QUERY_MODE;
+----
+local
+
+statement ok
+SET QUERY_MODE TO distributed;
