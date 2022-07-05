@@ -13,7 +13,7 @@
 // limitations under the License.
 
 use std::cmp::Ordering;
-use std::fmt::{Display, Formatter};
+use std::fmt::{Display, Formatter, Write as _};
 use std::hash::{Hash, Hasher};
 use std::io::Write;
 use std::ops::{Add, Sub};
@@ -218,6 +218,18 @@ impl IntervalUnit {
         self.months as i64 * MONTH_MS + self.days as i64 * DAY_MS + self.ms
     }
 
+    /// times [`IntervalUnit`] with an integer/float.
+    pub fn mul_float<I>(&self, rhs: I) -> Option<Self>
+    where
+        I: TryInto<OrderedF64>,
+    {
+        let rhs = rhs.try_into().ok()?;
+        let rhs = rhs.0;
+
+        let ms = self.as_ms_i64();
+        Some(IntervalUnit::from_total_ms((ms as f64 * rhs).round() as i64))
+    }
+
     /// Performs an exact division, returns [`None`] if for any unit, lhs % rhs != 0.
     pub fn exact_div(&self, rhs: &Self) -> Option<i64> {
         let mut res = None;
@@ -359,7 +371,8 @@ impl Display for IntervalUnit {
         let days = self.days;
         let hours = self.ms / 1000 / 3600;
         let minutes = (self.ms / 1000 / 60) % 60;
-        let seconds = ((self.ms % 60000) as f64) / 1000.0;
+        let seconds = self.ms % 60000 / 1000;
+        let mut secs_fract = self.ms % 1000;
         let mut v = SmallVec::<[String; 4]>::new();
         if years == 1 {
             v.push(format!("{years} year"));
@@ -376,7 +389,15 @@ impl Display for IntervalUnit {
         } else if days != 0 {
             v.push(format!("{days} days"));
         }
-        v.push(format!("{hours:0>2}:{minutes:0>2}:{seconds:0>2}"));
+        let mut format_time = format!("{hours:0>2}:{minutes:0>2}:{seconds:0>2}");
+        if secs_fract != 0 {
+            write!(format_time, ".{:03}", secs_fract)?;
+            while secs_fract % 10 == 0 {
+                secs_fract /= 10;
+                format_time.pop();
+            }
+        }
+        v.push(format_time);
         Display::fmt(&v.join(" "), f)
     }
 }
