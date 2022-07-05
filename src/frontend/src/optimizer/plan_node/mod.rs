@@ -253,6 +253,8 @@ mod stream_source;
 mod stream_table_scan;
 mod stream_topn;
 
+mod utils;
+
 pub use batch_delete::BatchDelete;
 pub use batch_exchange::BatchExchange;
 pub use batch_filter::BatchFilter;

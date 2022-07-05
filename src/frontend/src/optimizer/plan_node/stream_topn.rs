@@ -14,12 +14,10 @@
 
 use std::fmt;
 
-use risingwave_pb::expr::InputRefExpr;
-use risingwave_pb::plan_common::ColumnOrder;
 use risingwave_pb::stream_plan::stream_node::NodeBody as ProstStreamNode;
 
 use super::{LogicalTopN, PlanBase, PlanRef, PlanTreeNodeUnary, ToStreamProst};
-use crate::optimizer::property::Distribution;
+use crate::optimizer::property::{Distribution, FieldOrder};
 
 /// `StreamTopN` implements [`super::LogicalTopN`] to find the top N elements with a heap
 #[derive(Debug, Clone)]
@@ -83,13 +81,7 @@ impl ToStreamProst for StreamTopN {
             .topn_order()
             .field_order
             .iter()
-            .map(|f| ColumnOrder {
-                order_type: f.direct.to_protobuf() as i32,
-                input_ref: Some(InputRefExpr {
-                    column_idx: f.index as i32,
-                }),
-                return_type: Some(self.input().schema()[f.index].data_type().to_protobuf()),
-            })
+            .map(FieldOrder::to_protobuf)
             .collect();
 
         let topn_node = TopNNode {
