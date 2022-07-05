@@ -23,7 +23,7 @@ use risingwave_pb::batch_plan::plan_node::NodeBody;
 use risingwave_pb::batch_plan::{RowSeqScanNode, SysRowSeqScanNode};
 use risingwave_pb::plan_common::ColumnDesc as ProstColumnDesc;
 
-use super::{PlanBase, PlanRef, ToBatchProst, ToDistributedBatch};
+use super::{PlanBase, PlanRef, ToBatchProst, ToDistributedBatch, BatchExchange};
 use crate::catalog::ColumnId;
 use crate::optimizer::plan_node::{LogicalScan, ToLocalBatch};
 use crate::optimizer::property::{Direction, Distribution, FieldOrder, Order};
@@ -102,7 +102,7 @@ impl BatchSeqScan {
                     })
                     .collect(),
             };
-            order.enforce(plan)
+            BatchExchange::new(order.enforce(plan), order, Distribution::Single).into() 
         } else {
             plan
         }
