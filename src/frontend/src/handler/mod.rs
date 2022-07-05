@@ -43,9 +43,9 @@ mod explain;
 mod flush;
 pub mod handle_privilege;
 pub mod query;
-mod set;
 mod show;
 pub mod util;
+mod variable;
 
 pub(super) async fn handle(
     session: Arc<SessionImpl>,
@@ -132,7 +132,8 @@ pub(super) async fn handle(
             local: _,
             variable,
             value,
-        } => set::handle_set(context, variable, value),
+        } => variable::handle_set(context, variable, value),
+        Statement::ShowVariable { variable } => variable::handle_show(context, variable),
         Statement::CreateIndex {
             name,
             table_name,

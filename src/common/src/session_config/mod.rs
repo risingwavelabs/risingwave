@@ -194,6 +194,24 @@ impl ConfigMap {
         Ok(())
     }
 
+    pub fn get(&self, key: &str) -> Result<String, RwError> {
+        if key.eq_ignore_ascii_case(ImplicitFlush::entry_name()) {
+            Ok(self.implicit_flush.to_string())
+        } else if key.eq_ignore_ascii_case(DeltaJoin::entry_name()) {
+            Ok(self.delta_join.to_string())
+        } else if key.eq_ignore_ascii_case(QueryMode::entry_name()) {
+            Ok(self.query_mode.to_string())
+        } else if key.eq_ignore_ascii_case(ExtraFloatDigit::entry_name()) {
+            Ok(self.extra_float_digit.to_string())
+        } else if key.eq_ignore_ascii_case(ApplicationName::entry_name()) {
+            Ok(self.application_name.to_string())
+        } else if key.eq_ignore_ascii_case(DateStyle::entry_name()) {
+            Ok(self.date_style.to_string())
+        } else {
+            Err(ErrorCode::UnrecognizedConfigurationParameter(key.to_string()).into())
+        }
+    }
+
     pub fn get_implicit_flush(&self) -> bool {
         *self.implicit_flush
     }
