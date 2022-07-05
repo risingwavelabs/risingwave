@@ -122,8 +122,10 @@ fn make_internal_table(is_agg_value: bool) -> ProstTable {
         database_id: DatabaseId::placeholder() as u32,
         name: String::new(),
         columns,
-        order_column_ids: vec![0],
-        orders: vec![2],
+        order_keys: vec![ColumnOrder {
+            index: 0,
+            order_type: 2,
+        }],
         pk: vec![2],
         ..Default::default()
     }

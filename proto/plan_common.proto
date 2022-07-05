@@ -39,11 +39,6 @@ message ColumnDesc {
   string type_name = 5;
 }
 
-message OrderedColumnDesc {
-  ColumnDesc column_desc = 1;
-  OrderType order = 2;
-}
-
 message ColumnCatalog {
   ColumnDesc column_desc = 1;
   bool is_hidden = 2;
@@ -53,8 +48,7 @@ message CellBasedTableDesc {
   uint32 table_id = 1;
   repeated ColumnDesc columns = 2;
   // TODO: may refactor primary key representations
-  repeated OrderedColumnDesc order_key = 3;
-  repeated uint32 pk_indices = 4;
+  repeated ColumnOrder order_key = 3;
   repeated uint32 dist_key_indices = 5;
 }
 

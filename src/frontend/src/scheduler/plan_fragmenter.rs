@@ -506,7 +506,7 @@ mod tests {
             Rc::new(TableDesc {
                 table_id: 0.into(),
                 pks: vec![],
-                order_desc: vec![],
+                order_keys: vec![],
                 columns: vec![
                     ColumnDesc {
                         data_type: DataType::Int32,

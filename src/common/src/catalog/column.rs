@@ -13,10 +13,7 @@
 // limitations under the License.
 
 use itertools::Itertools;
-use risingwave_pb::plan_common::{
-    ColumnDesc as ProstColumnDesc, OrderType as ProstOrderType,
-    OrderedColumnDesc as ProstOrderedColumnDesc,
-};
+use risingwave_pb::plan_common::ColumnDesc as ProstColumnDesc;
 
 use crate::catalog::Field;
 use crate::error::ErrorCode;
@@ -71,6 +68,7 @@ pub struct ColumnDesc {
     pub type_name: String,
 }
 
+// Deprecated. To be removed.
 #[derive(Clone, Debug, PartialEq)]
 pub struct OrderedColumnDesc {
     pub column_desc: ColumnDesc,
@@ -220,30 +218,6 @@ impl From<&ColumnDesc> for ProstColumnDesc {
             name: c.name.clone(),
             field_descs: c.field_descs.iter().map(ColumnDesc::to_protobuf).collect(),
             type_name: c.type_name.clone(),
-        }
-    }
-}
-
-impl From<ProstOrderedColumnDesc> for OrderedColumnDesc {
-    fn from(prost: ProstOrderedColumnDesc) -> Self {
-        Self {
-            column_desc: prost.column_desc.unwrap().into(),
-            order: OrderType::from_prost(&ProstOrderType::from_i32(prost.order).unwrap()),
-        }
-    }
-}
-
-impl From<&ProstOrderedColumnDesc> for OrderedColumnDesc {
-    fn from(prost: &ProstOrderedColumnDesc) -> Self {
-        prost.clone().into()
-    }
-}
-
-impl From<&OrderedColumnDesc> for ProstOrderedColumnDesc {
-    fn from(c: &OrderedColumnDesc) -> Self {
-        Self {
-            column_desc: Some((&c.column_desc).into()),
-            order: c.order.to_prost().into(),
         }
     }
 }
