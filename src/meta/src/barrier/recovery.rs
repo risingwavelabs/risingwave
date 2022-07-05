@@ -12,7 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::collections::{HashSet, HashMap};
+use std::collections::{HashMap, HashSet};
 use std::iter::Map;
 use std::sync::Arc;
 use std::time::Duration;
@@ -139,8 +139,8 @@ where
                 .collect(),
         )
     }
-    
-    fn check_compute_node_alive(&self, info: &BarrierActorInfo) -> Vec<u32>{
+
+    fn check_compute_node_alive(&self, info: &BarrierActorInfo) -> Vec<u32> {
         let mut origin_ids = Vec::new();
         for (key, value) in &info.actor_map {
             if !value.is_empty() && !info.node_map.contains_key(key) {
@@ -150,15 +150,27 @@ where
         origin_ids
     }
 
-    async fn get_migrate_map(&self, info: &BarrierActorInfo, origin_ids: &Vec<u32>) -> HashMap<u32,u32> {
+    async fn get_migrate_map(
+        &self,
+        info: &BarrierActorInfo,
+        origin_ids: &Vec<u32>,
+    ) -> HashMap<u32, u32> {
         let mut n = origin_ids.len();
         let mut migrate_map = HashMap::new();
         let mut chosen_ids = HashSet::new();
         while n > 0 {
-            let current_nodes = self.cluster_manager.list_worker_node(WorkerType::ComputeNode, Some(State::Running)).await;
-            let new_nodes = current_nodes.iter().filter(|&node| !info.node_map.contains_key(&node.id) && !migrate_map.contains_key(&node.id)).collect_vec();
+            let current_nodes = self
+                .cluster_manager
+                .list_worker_node(WorkerType::ComputeNode, Some(State::Running))
+                .await;
+            let new_nodes = current_nodes
+                .iter()
+                .filter(|&node| {
+                    !info.node_map.contains_key(&node.id) && !migrate_map.contains_key(&node.id)
+                })
+                .collect_vec();
             for new_node in new_nodes {
-                if n > 0 && !chosen_ids.contains(&origin_ids[n]){
+                if n > 0 && !chosen_ids.contains(&origin_ids[n]) {
                     chosen_ids.insert(origin_ids[n]);
                     migrate_map.insert(origin_ids[n], new_node.id);
                     n -= 1;
@@ -169,7 +181,7 @@ where
         migrate_map
     }
 
-    async fn migrate_actors(&self, info: &BarrierActorInfo) -> Result<()>{
+    async fn migrate_actors(&self, info: &BarrierActorInfo) -> Result<()> {
         let origin_ids = self.check_compute_node_alive(info);
         let migrate_map = self.get_migrate_map(info, &origin_ids).await;
         self.fragment_manager.migrate_actors(&migrate_map).await
