@@ -4,8 +4,9 @@
     create table t (v1 bigint, v2 double precision);
     select * from t order by v1 desc;
   batch_plan: |
-    BatchSort { order: [$0 DESC] }
-      BatchScan { table: t, columns: [v1, v2] }
+    BatchExchange { order: [$0 DESC], dist: Single }
+      BatchSort { order: [$0 DESC] }
+        BatchScan { table: t, columns: [v1, v2] }
   stream_plan: |
     StreamMaterialize { columns: [v1, v2, _row_id(hidden)], pk_columns: [_row_id], order_descs: [v1, _row_id], order: [v1 DESC] }
       StreamTableScan { table: t, columns: [v1, v2, _row_id], pk_indices: [2] }
@@ -14,28 +15,32 @@
     create table t (v1 bigint, v2 double precision);
     select t.* from t order by v1;
   batch_plan: |
-    BatchSort { order: [$1 ASC] }
-      BatchScan { table: t, columns: [_row_id, v1, v2] }
+    BatchExchange { order: [$1 ASC], dist: Single }
+      BatchSort { order: [$1 ASC] }
+        BatchScan { table: t, columns: [_row_id, v1, v2] }
 - sql: |
     create table t (v1 bigint, v2 double precision);
     select v1, v1+1 from t order by v1;
   batch_plan: |
-    BatchSort { order: [$0 ASC] }
-      BatchProject { exprs: [$0, ($0 + 1:Int32)] }
-        BatchScan { table: t, columns: [v1] }
+    BatchExchange { order: [$0 ASC], dist: Single }
+      BatchSort { order: [$0 ASC] }
+        BatchProject { exprs: [$0, ($0 + 1:Int32)] }
+          BatchScan { table: t, columns: [v1] }
 - sql: |
     create table t (v1 bigint, v2 double precision);
     select t.v1 from t order by v1;
   batch_plan: |
-    BatchSort { order: [$0 ASC] }
-      BatchScan { table: t, columns: [v1] }
+    BatchExchange { order: [$0 ASC], dist: Single }
+      BatchSort { order: [$0 ASC] }
+        BatchScan { table: t, columns: [v1] }
 - sql: |
     /* order by output alias */
     create table t (v1 bigint, v2 double precision);
     select v1 as a1 from t order by a1;
   batch_plan: |
-    BatchSort { order: [$0 ASC] }
-      BatchScan { table: t, columns: [v1] }
+    BatchExchange { order: [$0 ASC], dist: Single }
+      BatchSort { order: [$0 ASC] }
+        BatchScan { table: t, columns: [v1] }
 - sql: |
     /* order by ambiguous */
     create table t (v1 bigint, v2 double precision);
@@ -46,16 +51,18 @@
     create table t (v1 bigint, v2 double precision);
     select v1 as a, v2 as a from t order by 2;
   batch_plan: |
-    BatchSort { order: [$1 ASC] }
-      BatchScan { table: t, columns: [v1, v2] }
+    BatchExchange { order: [$1 ASC], dist: Single }
+      BatchSort { order: [$1 ASC] }
+        BatchScan { table: t, columns: [v1, v2] }
 - sql: |
     create table t (v1 bigint, v2 double precision);
     select * from t order by 1+1;
   batch_plan: |
     BatchProject { exprs: [$0, $1] }
-      BatchSort { order: [$2 ASC] }
-        BatchProject { exprs: [$0, $1, (1:Int32 + 1:Int32)] }
-          BatchScan { table: t, columns: [v1, v2] }
+      BatchExchange { order: [$2 ASC], dist: Single }
+        BatchSort { order: [$2 ASC] }
+          BatchProject { exprs: [$0, $1, (1:Int32 + 1:Int32)] }
+            BatchScan { table: t, columns: [v1, v2] }
   stream_plan: |
     StreamMaterialize { columns: [v1, v2, expr#2(hidden), _row_id(hidden)], pk_columns: [_row_id], order_descs: [expr#2, _row_id], order: [expr#2 ASC] }
       StreamProject { exprs: [$0, $1, (1:Int32 + 1:Int32), $2] }
@@ -97,9 +104,10 @@
       LogicalScan { table: t, columns: [x, y, z] }
   batch_plan: |
     BatchProject { exprs: [$0, $1] }
-      BatchSort { order: [$2 ASC, $3 ASC] }
-        BatchProject { exprs: [$0, $1, ($0 + $1), $2] }
-          BatchScan { table: t, columns: [x, y, z] }
+      BatchExchange { order: [$2 ASC, $3 ASC], dist: Single }
+        BatchSort { order: [$2 ASC, $3 ASC] }
+          BatchProject { exprs: [$0, $1, ($0 + $1), $2] }
+            BatchScan { table: t, columns: [x, y, z] }
   stream_plan: |
     StreamMaterialize { columns: [x, y, expr#2(hidden), z(hidden), _row_id(hidden)], pk_columns: [_row_id], order_descs: [expr#2, z, _row_id], order: [expr#2 ASC, z ASC] }
       StreamProject { exprs: [$0, $1, ($0 + $1), $2, $3] }
@@ -111,8 +119,9 @@
   optimized_logical_plan: |
     LogicalScan { table: t, columns: [x, y] }
   batch_plan: |
-    BatchSort { order: [$1 ASC] }
-      BatchScan { table: t, columns: [x, y] }
+    BatchExchange { order: [$1 ASC], dist: Single }
+      BatchSort { order: [$1 ASC] }
+        BatchScan { table: t, columns: [x, y] }
 - sql: |
     /* index exceeds the number of select items */
     create table t (x int, y int);

@@ -91,20 +91,23 @@
   sql: |
     SELECT * FROM orders_count_by_user_ordered WHERE user_id = 42
   batch_plan: |
-    BatchFilter { predicate: ($0 = 42:Int32) }
-      BatchSort { order: [$2 ASC] }
-        BatchScan { table: orders_count_by_user_ordered, columns: [user_id, date, orders_count] }
+    BatchExchange { order: [], dist: Single }
+      BatchFilter { predicate: ($0 = 42:Int32) }
+        BatchSort { order: [$2 ASC] }
+          BatchScan { table: orders_count_by_user_ordered, columns: [user_id, date, orders_count] }
 - before:
     - create_table_and_mv_ordered
   sql: |
     SELECT * FROM orders_count_by_user_ordered WHERE user_id > 42 AND orders_count = 10
   batch_plan: |
-    BatchSort { order: [$2 ASC] }
-      BatchScan { table: orders_count_by_user_ordered, columns: [user_id, date, orders_count], scan_range: [orders_count = Int64(10), user_id > Int32(42)] }
+    BatchExchange { order: [], dist: Single }
+      BatchSort { order: [$2 ASC] }
+        BatchScan { table: orders_count_by_user_ordered, columns: [user_id, date, orders_count], scan_range: [orders_count = Int64(10), user_id > Int32(42)] }
 - before:
     - create_table_and_mv_ordered
   sql: |
     SELECT * FROM orders_count_by_user_ordered WHERE orders_count = 10
   batch_plan: |
-    BatchSort { order: [$2 ASC] }
-      BatchScan { table: orders_count_by_user_ordered, columns: [user_id, date, orders_count], scan_range: [orders_count = Int64(10)] }
+    BatchExchange { order: [], dist: Single }
+      BatchSort { order: [$2 ASC] }
+        BatchScan { table: orders_count_by_user_ordered, columns: [user_id, date, orders_count], scan_range: [orders_count = Int64(10)] }
