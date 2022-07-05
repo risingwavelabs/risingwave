@@ -295,8 +295,8 @@ impl<S: StateStore> SourceExecutor<S> {
         let source_chunk_reader = self.build_stream_source_reader(recover_state).await?;
 
         let mut stream = SourceReader {
-            source_chunk_reader,
             barrier_receiver,
+            source_chunk_reader,
         }
         .into_stream();
 
