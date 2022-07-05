@@ -258,6 +258,8 @@ risedev:
     - use: compactor
 
   ci-3cn-1fe:
+    - use: prometheus
+    - use: grafana
     - use: minio
     - use: etcd
       unsafe-no-fsync: true

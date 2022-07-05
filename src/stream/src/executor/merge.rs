@@ -51,7 +51,7 @@ impl RemoteInput {
         sender: Sender<Message>,
         metrics: Arc<StreamingMetrics>,
     ) -> Result<Self> {
-        let stream = client.get_stream(up_down_ids.0, up_down_ids.1).await?;
+        let stream = client.get_stream(up_down_ids.0, up_down_ids.1,up_down_frag.0,up_down_frag.1).await?;
         Ok(Self {
             stream,
             sender,
