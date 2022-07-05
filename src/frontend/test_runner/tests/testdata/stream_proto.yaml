@@ -109,11 +109,7 @@
     materialize:
       columnOrders:
         - orderType: ASCENDING
-          inputRef:
-            columnIdx: 1
-          returnType:
-            typeName: INT64
-            isNullable: true
+          index: 1
       columnIds:
         - 0
         - 1
@@ -224,11 +220,7 @@
     materialize:
       columnOrders:
         - orderType: ASCENDING
-          inputRef:
-            columnIdx: 1
-          returnType:
-            typeName: INT64
-            isNullable: true
+          index: 1
       columnIds:
         - 0
         - 1
@@ -348,11 +340,7 @@
     materialize:
       columnOrders:
         - orderType: ASCENDING
-          inputRef:
-            columnIdx: 1
-          returnType:
-            typeName: INT64
-            isNullable: true
+          index: 1
       columnIds:
         - 0
         - 1
@@ -811,8 +799,6 @@
                   pk:
                     - 0
                   owner: root
-              columnMapping:
-                0: 0
         pkIndices:
           - 1
         fields:
@@ -851,11 +837,7 @@
     materialize:
       columnOrders:
         - orderType: ASCENDING
-          inputRef:
-            columnIdx: 1
-          returnType:
-            typeName: INT32
-            isNullable: true
+          index: 1
       columnIds:
         - 0
         - 1
