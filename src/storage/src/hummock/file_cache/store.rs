@@ -117,11 +117,13 @@ where
     }
 
     pub async fn insert(&self, batch: &[(K, Vec<u8>)]) -> Result<Vec<SlotId>> {
+        debug_assert!(!batch.is_empty());
         let mut buf = DioBuffer::with_capacity_in(self.buffer_capacity, &DIO_BUFFER_ALLOCATOR);
         let mut blocs = Vec::with_capacity(batch.len());
         let mut slots = Vec::with_capacity(batch.len());
 
         for (_key, value) in batch {
+            debug_assert!(!value.is_empty());
             let bloc = BlockLoc {
                 bidx: buf.len() as u32 / self.block_size as u32,
                 len: value.len() as u32,

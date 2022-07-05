@@ -18,10 +18,10 @@ use std::sync::Arc;
 use std::u8;
 
 use itertools::Itertools;
-use parking_lot::RwLock;
 use risingwave_common::cache::LruCache;
 use tokio::sync::Notify;
 
+use super::buffer::TwoLevelBuffer;
 use super::coding::CacheKey;
 use super::error::Result;
 use super::filter::Filter;
@@ -29,7 +29,6 @@ use super::meta::SlotId;
 use super::store::{Store, StoreOptions, StoreRef};
 
 const INDICES_LRU_SHARD_BITS: usize = 6;
-const BUFFER_LRU_SHARD_BITS: usize = 5;
 
 pub struct FileCacheOptions {
     pub dir: String,
@@ -39,21 +38,11 @@ pub struct FileCacheOptions {
     pub filters: Vec<Arc<dyn Filter>>,
 }
 
-#[derive(Clone)]
-struct Buffer<K>
-where
-    K: CacheKey,
-{
-    active_buffer: Arc<LruCache<K, Vec<u8>>>,
-    frozen_buffer: Arc<LruCache<K, Vec<u8>>>,
-}
-
 struct BufferFlusher<K>
 where
     K: CacheKey,
 {
-    buffer_capacity: usize,
-    buffer: Arc<RwLock<Buffer<K>>>,
+    buffer: TwoLevelBuffer<K>,
     store: StoreRef<K>,
     indices: Arc<LruCache<K, SlotId>>,
     notifier: Arc<Notify>,
@@ -67,25 +56,25 @@ where
         loop {
             self.notifier.notified().await;
 
-            let frozen = self.buffer.read().frozen_buffer.clone();
+            let frozen = self.buffer.frozen();
 
             let mut batch = Vec::new();
             // TODO(MrCroxx): Avoid clone here?
             frozen.fill_with(|key, value| batch.push((key.clone(), value.clone())));
-            let slots = self.store.insert(&batch).await?;
-            for ((key, value), slot) in batch.into_iter().zip_eq(slots.into_iter()) {
-                let mut hasher = DefaultHasher::new();
-                key.hash(&mut hasher);
-                let hash = hasher.finish();
-                self.indices.insert(key, hash, value.len(), slot);
-            }
 
-            // rotate buffer
-            let mut buf = Arc::new(LruCache::new(BUFFER_LRU_SHARD_BITS, self.buffer_capacity));
-            let mut buffer = self.buffer.write();
-            std::mem::swap(&mut buf, &mut buffer.active_buffer);
-            std::mem::swap(&mut buf, &mut buffer.frozen_buffer);
-            drop(buffer);
+            if batch.is_empty() {
+                // Avoid allocate a new buffer.
+                self.buffer.swap();
+            } else {
+                let slots = self.store.insert(&batch).await?;
+                for ((key, value), slot) in batch.into_iter().zip_eq(slots.into_iter()) {
+                    let mut hasher = DefaultHasher::new();
+                    key.hash(&mut hasher);
+                    let hash = hasher.finish();
+                    self.indices.insert(key, hash, value.len(), slot);
+                }
+                self.buffer.rotate();
+            }
         }
     }
 }
@@ -101,7 +90,7 @@ where
 
     store: StoreRef<K>,
 
-    buffer: Arc<RwLock<Buffer<K>>>,
+    buffer: TwoLevelBuffer<K>,
     buffer_flusher_notifier: Arc<Notify>,
 }
 
@@ -130,14 +119,10 @@ where
         store.restore(&indices).await?;
         let indices = Arc::new(indices);
 
-        let buffer = Arc::new(RwLock::new(Buffer {
-            active_buffer: Arc::new(LruCache::new(BUFFER_LRU_SHARD_BITS, buffer_capacity)),
-            frozen_buffer: Arc::new(LruCache::new(BUFFER_LRU_SHARD_BITS, buffer_capacity)),
-        }));
+        let buffer = TwoLevelBuffer::new(buffer_capacity);
         let buffer_flusher_notifier = Arc::new(Notify::new());
 
         let buffer_flusher = BufferFlusher {
-            buffer_capacity,
             buffer: buffer.clone(),
             store: store.clone(),
             indices: indices.clone(),
@@ -167,9 +152,7 @@ where
         key.hash(&mut hasher);
         let hash = hasher.finish();
 
-        let buffer = self.buffer.read();
-
-        buffer.active_buffer.insert(key, hash, value.len(), value);
+        self.buffer.insert(hash, key, value.len(), value);
 
         self.buffer_flusher_notifier.notify_one();
         Ok(())
@@ -181,16 +164,8 @@ where
         key.hash(&mut hasher);
         let hash = hasher.finish();
 
-        // Use a block to wrap the `RwLockGuard`, or clippy will raise a warning.
-        {
-            let buffer = self.buffer.read();
-            if let Some(entry) = buffer.active_buffer.lookup(hash, key) {
-                return Ok(Some(entry.value().clone()));
-            }
-            if let Some(entry) = buffer.frozen_buffer.lookup(hash, key) {
-                return Ok(Some(entry.value().clone()));
-            }
-            drop(buffer);
+        if let Some(value) = self.buffer.get(hash, key) {
+            return Ok(Some(value));
         }
 
         if let Some(entry) = self.indices.lookup(hash, key) {
@@ -207,10 +182,7 @@ where
         key.hash(&mut hasher);
         let hash = hasher.finish();
 
-        let buffer = self.buffer.read();
-        buffer.active_buffer.erase(hash, key);
-        buffer.frozen_buffer.erase(hash, key);
-        drop(buffer);
+        self.buffer.erase(hash, key);
         // No need to manually remove data from store. `LruCacheEventListener` on `indices` will
         // free the slot.
         self.indices.erase(hash, key);

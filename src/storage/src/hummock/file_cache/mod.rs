@@ -13,6 +13,7 @@
 // limitations under the License.
 
 pub mod alloc;
+pub mod buffer;
 pub mod cache;
 pub mod coding;
 pub mod error;
