@@ -65,8 +65,10 @@ pub struct LocalStreamManagerCore {
 
     /// Stores all actor information, taken after actor built.
     actors: HashMap<ActorId, stream_plan::StreamActor>,
-    /// Store all actor execution time montioring tasks.
+
+    /// Stores all actor tokio runtime montioring tasks.
     actor_monitor_tasks: HashMap<ActorId, JoinHandle<()>>,
+
     /// Mock source, `actor_id = 0`.
     /// TODO: remove this
     mock_source: ConsumableChannelPair,
@@ -414,7 +416,13 @@ impl LocalStreamManagerCore {
                 .iter()
                 .map(|down_id| {
                     let downstream_addr = self.get_actor_info(down_id)?.get_host()?.into();
-                    new_output(&self.context, downstream_addr, actor_id, *down_id)
+                    new_output(
+                        &self.context,
+                        downstream_addr,
+                        actor_id,
+                        *down_id,
+                        self.streaming_metrics.clone(),
+                    )
                 })
                 .collect::<Result<Vec<_>>>()?;
 
