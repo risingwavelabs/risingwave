@@ -22,6 +22,7 @@ use futures::Stream;
 use futures_async_stream::try_stream;
 use itertools::Itertools;
 use madsim::collections::{HashMap, HashSet};
+use madsim::time::Instant;
 use risingwave_common::array::{Op, StreamChunk};
 use risingwave_common::buffer::BitmapBuilder;
 use risingwave_common::error::{internal_error, Result};
@@ -49,7 +50,11 @@ type BoxedOutput = Box<dyn Output>;
 pub struct LocalOutput {
     actor_id: ActorId,
 
+    actor_id_str: String,
+
     ch: Sender<Message>,
+
+    metrics: Arc<StreamingMetrics>,
 }
 
 impl Debug for LocalOutput {
@@ -61,19 +66,38 @@ impl Debug for LocalOutput {
 }
 
 impl LocalOutput {
-    pub fn new(actor_id: ActorId, ch: Sender<Message>) -> Self {
-        Self { actor_id, ch }
+    pub fn new(actor_id: ActorId, ch: Sender<Message>, metrics: Arc<StreamingMetrics>) -> Self {
+        Self {
+            actor_id,
+            actor_id_str: actor_id.to_string(),
+            ch,
+            metrics,
+        }
     }
 }
 
 #[async_trait]
 impl Output for LocalOutput {
     async fn send(&mut self, message: Message) -> Result<()> {
-        // local channel should never fail
-        self.ch
-            .send(message)
-            .await
-            .map_err(|_| internal_error("failed to send"))?;
+        // if the buffer is full when sending, the sender is backpressured
+        if self.ch.capacity() == 0 {
+            let start_time = Instant::now();
+            // local channel should never fail
+            self.ch
+                .send(message)
+                .await
+                .map_err(|_| internal_error("failed to send"))?;
+            self.metrics
+                .actor_output_buffer_blocking_duration
+                .with_label_values(&[&self.actor_id_str])
+                .inc_by(start_time.elapsed().as_nanos() as u64);
+        } else {
+            self.ch
+                .send(message)
+                .await
+                .map_err(|_| internal_error("failed to send"))?;
+        };
+
         Ok(())
     }
 
@@ -86,7 +110,11 @@ impl Output for LocalOutput {
 pub struct RemoteOutput {
     actor_id: ActorId,
 
+    actor_id_str: String,
+
     ch: Sender<Message>,
+
+    metrics: Arc<StreamingMetrics>,
 }
 
 impl Debug for RemoteOutput {
@@ -98,8 +126,13 @@ impl Debug for RemoteOutput {
 }
 
 impl RemoteOutput {
-    pub fn new(actor_id: ActorId, ch: Sender<Message>) -> Self {
-        Self { actor_id, ch }
+    pub fn new(actor_id: ActorId, ch: Sender<Message>, metrics: Arc<StreamingMetrics>) -> Self {
+        Self {
+            actor_id,
+            actor_id_str: actor_id.to_string(),
+            ch,
+            metrics,
+        }
     }
 }
 
@@ -110,11 +143,25 @@ impl Output for RemoteOutput {
             Message::Chunk(chk) => Message::Chunk(chk.compact()?),
             _ => message,
         };
-        // local channel should never fail
-        self.ch
-            .send(message)
-            .await
-            .map_err(|_| internal_error("failed to send"))?;
+        // if the buffer is full when sending, the sender is backpressured
+        if self.ch.capacity() == 0 {
+            let start_time = Instant::now();
+            // local channel should never fail
+            self.ch
+                .send(message)
+                .await
+                .map_err(|_| internal_error("failed to send"))?;
+            self.metrics
+                .actor_output_buffer_blocking_duration
+                .with_label_values(&[&self.actor_id_str])
+                .inc_by(start_time.elapsed().as_nanos() as u64);
+        } else {
+            self.ch
+                .send(message)
+                .await
+                .map_err(|_| internal_error("failed to send"))?;
+        };
+
         Ok(())
     }
 
@@ -128,13 +175,14 @@ pub fn new_output(
     addr: HostAddr,
     actor_id: ActorId,
     down_id: ActorId,
+    metrics: Arc<StreamingMetrics>,
 ) -> Result<Box<dyn Output>> {
     let tx = context.take_sender(&(actor_id, down_id))?;
     if is_local_address(&addr, &context.addr) {
         // if this is a local downstream actor
-        Ok(Box::new(LocalOutput::new(down_id, tx)) as Box<dyn Output>)
+        Ok(Box::new(LocalOutput::new(down_id, tx, metrics)) as Box<dyn Output>)
     } else {
-        Ok(Box::new(RemoteOutput::new(down_id, tx)) as Box<dyn Output>)
+        Ok(Box::new(RemoteOutput::new(down_id, tx, metrics)) as Box<dyn Output>)
     }
 }
 
@@ -222,6 +270,7 @@ impl DispatchExecutorInner {
                                 downstream_addr,
                                 self.actor_id,
                                 down_id,
+                                self.metrics.clone(),
                             )?);
                         }
                         dispatcher.set_outputs(new_outputs)
@@ -244,6 +293,7 @@ impl DispatchExecutorInner {
                                 downstream_addr,
                                 self.actor_id,
                                 down_id,
+                                self.metrics.clone(),
                             )?);
                         }
                         dispatcher.add_outputs(outputs_to_add);

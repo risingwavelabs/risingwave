@@ -400,6 +400,11 @@ def section_streaming_actors(outer_panels):
                     "actor_sampled_serialize_duration_ns", "{{actor_id}}"
                 ),
             ]),
+            panels.timeseries_ns("Actor Backpressure Time Per Second", [
+                panels.target(
+                    "rate(stream_actor_output_buffer_blocking_duration[15s])", "{{actor_id}}"
+                ),
+            ]),
             panels.timeseries_actor_latency("Actor Barrier Latency", [
                 panels.target(
                     "rate(stream_actor_barrier_time[1m]) > 0", "{{actor_id}}"
