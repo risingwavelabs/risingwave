@@ -409,25 +409,44 @@
           StreamProject { exprs: [$0, $1, ($0 * $1), $2] }
             StreamTableScan { table: t, columns: [a, b, _row_id], pk_indices: [2] }
 - sql: |
-    /* avg filter clause */
+    /* avg filter clause + group by */
     create table t(a int, b int);
-    select avg(a) FILTER (WHERE a > b) AS avga from t;
+    select avg(a) FILTER (WHERE a > b) AS avga from t group by b ;
   logical_plan: |
-    LogicalProject { exprs: [($0::Decimal / $1)] }
-      LogicalAgg { group_keys: [], agg_calls: [sum($0) filter(($0 > $1)), count($0) filter(($0 > $1))] }
+    LogicalProject { exprs: [($1::Decimal / $2)] }
+      LogicalAgg { group_keys: [0], agg_calls: [sum($1) filter(($1 > $0)), count($1) filter(($1 > $0))] }
+        LogicalProject { exprs: [$2, $1] }
+          LogicalScan { table: t, columns: [_row_id, a, b] }
+  optimized_logical_plan: |
+    LogicalProject { exprs: [($1::Decimal / $2)] }
+      LogicalAgg { group_keys: [0], agg_calls: [sum($1) filter(($1 > $0)), count($1) filter(($1 > $0))] }
+        LogicalProject { exprs: [$1, $0] }
+          LogicalScan { table: t, columns: [a, b] }
+  stream_plan: |
+    StreamMaterialize { columns: [avga, b(hidden)], pk_columns: [b] }
+      StreamProject { exprs: [($2::Decimal / $3), $0] }
+        StreamHashAgg { group_keys: [$0], aggs: [count, sum($1) filter(($1 > $0)), count($1) filter(($1 > $0))] }
+          StreamExchange { dist: HashShard([0]) }
+            StreamProject { exprs: [$1, $0, $2] }
+              StreamTableScan { table: t, columns: [a, b, _row_id], pk_indices: [2] }
+- sql: |
+    /* count filter clause */
+    create table t(a int, b int);
+    select count(*) FILTER (WHERE a > b) AS cnt_agb from t;
+  logical_plan: |
+    LogicalProject { exprs: [$0] }
+      LogicalAgg { group_keys: [], agg_calls: [count filter(($0 > $1))] }
         LogicalProject { exprs: [$1, $2] }
           LogicalScan { table: t, columns: [_row_id, a, b] }
   optimized_logical_plan: |
-    LogicalProject { exprs: [($0::Decimal / $1)] }
-      LogicalAgg { group_keys: [], agg_calls: [sum($0) filter(($0 > $1)), count($0) filter(($0 > $1))] }
-        LogicalScan { table: t, columns: [a, b] }
+    LogicalAgg { group_keys: [], agg_calls: [count filter(($0 > $1))] }
+      LogicalScan { table: t, columns: [a, b] }
   stream_plan: |
-    StreamMaterialize { columns: [avga], pk_columns: [] }
-      StreamProject { exprs: [($1::Decimal / $2)] }
-        StreamGlobalSimpleAgg { aggs: [sum($0), sum($1) filter(($0 > $1)), sum($2) filter(($0 > $1))] }
-          StreamExchange { dist: Single }
-            StreamLocalSimpleAgg { aggs: [count, sum($0) filter(($0 > $1)), count($0) filter(($0 > $1))] }
-              StreamTableScan { table: t, columns: [a, b, _row_id], pk_indices: [2] }
+    StreamMaterialize { columns: [agg#0(hidden), cnt_agb], pk_columns: [] }
+      StreamGlobalSimpleAgg { aggs: [sum($0), sum($1) filter(($0 > $1))] }
+        StreamExchange { dist: Single }
+          StreamLocalSimpleAgg { aggs: [count, count filter(($0 > $1))] }
+            StreamTableScan { table: t, columns: [a, b, _row_id], pk_indices: [2] }
 - sql: |
     /* filter clause + non-boolean function */
     create table t(a int, b int);
