@@ -593,12 +593,23 @@ impl Parser {
             None
         };
 
+        let filter = if self.parse_keyword(Keyword::FILTER) {
+            self.expect_token(&Token::LParen)?;
+            self.expect_keyword(Keyword::WHERE)?;
+            let filter_expr = self.parse_expr()?;
+            self.expect_token(&Token::RParen)?;
+            Some(Box::new(filter_expr))
+        } else {
+            None
+        };
+
         Ok(Expr::Function(Function {
             name,
             args,
             over,
             distinct,
             order_by,
+            filter,
         }))
     }
 
