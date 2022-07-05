@@ -36,7 +36,6 @@ use risingwave_pb::stream_plan::{
     SimpleAggNode, SourceNode, StreamNode,
 };
 
-use crate::hummock::compaction_group::manager::CompactionGroupManager;
 use crate::manager::MetaSrvEnv;
 use crate::model::TableFragments;
 use crate::stream::stream_graph::ActorGraphBuilder;
@@ -91,14 +90,10 @@ fn make_field(type_name: TypeName) -> Field {
     }
 }
 
-fn make_column_order(idx: i32) -> ColumnOrder {
+fn make_column_order(index: u32) -> ColumnOrder {
     ColumnOrder {
         order_type: OrderType::Ascending as i32,
-        input_ref: Some(InputRefExpr { column_idx: idx }),
-        return_type: Some(DataType {
-            type_name: TypeName::Int64 as i32,
-            ..Default::default()
-        }),
+        index,
     }
 }
 
@@ -127,8 +122,10 @@ fn make_internal_table(is_agg_value: bool) -> ProstTable {
         database_id: DatabaseId::placeholder() as u32,
         name: String::new(),
         columns,
-        order_column_ids: vec![0],
-        orders: vec![2],
+        order_keys: vec![ColumnOrder {
+            index: 0,
+            order_type: 2,
+        }],
         pk: vec![2],
         ..Default::default()
     }
@@ -301,9 +298,7 @@ async fn test_fragmenter() -> Result<()> {
 
     let env = MetaSrvEnv::for_test().await;
     let stream_node = make_stream_node();
-    let compaction_group_manager = Arc::new(CompactionGroupManager::new(env.clone()).await?);
-    let fragment_manager =
-        Arc::new(FragmentManager::new(env.clone(), compaction_group_manager).await?);
+    let fragment_manager = Arc::new(FragmentManager::new(env.clone()).await?);
     let parallel_degree = 4;
     let mut ctx = CreateMaterializedViewContext::default();
     let graph = StreamFragmenter::build_graph(stream_node);

@@ -150,7 +150,8 @@ mod tests {
     use tokio::sync::mpsc::error::TryRecvError;
 
     use crate::hummock::test_utils::{
-        generate_test_tables, setup_compute_env, to_local_sstable_info,
+        generate_test_tables, register_sstable_infos_to_compaction_group, setup_compute_env,
+        to_local_sstable_info,
     };
     use crate::hummock::{CompactorManager, HummockManager};
     use crate::storage::MetaStore;
@@ -166,6 +167,12 @@ mod tests {
             epoch,
             vec![hummock_manager_ref.get_new_table_id().await.unwrap()],
         );
+        register_sstable_infos_to_compaction_group(
+            hummock_manager_ref.compaction_group_manager_ref_for_test(),
+            &original_tables,
+            StaticCompactionGroupId::StateDefault.into(),
+        )
+        .await;
         hummock_manager_ref
             .commit_epoch(epoch, to_local_sstable_info(&original_tables))
             .await
@@ -180,7 +187,7 @@ mod tests {
             sorted_output_ssts: vec![],
             task_id,
             target_level: 0,
-            is_target_ultimate_and_leveling: false,
+            gc_delete_keys: false,
             task_status: false,
             vnode_mappings: vec![],
             compaction_group_id: StaticCompactionGroupId::StateDefault.into(),
@@ -189,6 +196,7 @@ mod tests {
             target_file_size: 1,
             compaction_filter_mask: 0,
             table_options: HashMap::default(),
+            current_epoch_time: 0,
         }
     }
 

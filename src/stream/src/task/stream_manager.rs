@@ -28,7 +28,9 @@ use risingwave_hummock_sdk::LocalSstableInfo;
 use risingwave_pb::common::ActorInfo;
 use risingwave_pb::{stream_plan, stream_service};
 use risingwave_rpc_client::ComputeClientPool;
-use risingwave_storage::{dispatch_state_store, StateStore, StateStoreImpl};
+use risingwave_storage::{
+    dispatch_hummock_state_store, dispatch_state_store, StateStore, StateStoreImpl,
+};
 use tokio::sync::mpsc::{channel, Receiver};
 use tokio::task::JoinHandle;
 
@@ -63,8 +65,10 @@ pub struct LocalStreamManagerCore {
 
     /// Stores all actor information, taken after actor built.
     actors: HashMap<ActorId, stream_plan::StreamActor>,
-    /// Store all actor execution time montioring tasks.
+
+    /// Stores all actor tokio runtime montioring tasks.
     actor_monitor_tasks: HashMap<ActorId, JoinHandle<()>>,
+
     /// Mock source, `actor_id = 0`.
     /// TODO: remove this
     mock_source: ConsumableChannelPair,
@@ -307,7 +311,11 @@ impl LocalStreamManager {
 
     /// This function could only be called once during the lifecycle of `LocalStreamManager` for
     /// now.
-    pub fn build_actors(&self, actors: &[ActorId], env: StreamEnvironment) -> Result<()> {
+    pub async fn build_actors(&self, actors: &[ActorId], env: StreamEnvironment) -> Result<()> {
+        // Ensure compaction group mapping is available locally.
+        dispatch_hummock_state_store!(self.state_store(), store, {
+            store.update_compaction_group_cache().await?;
+        });
         let mut core = self.core.lock();
         core.build_actors(actors, env)
     }
@@ -409,7 +417,13 @@ impl LocalStreamManagerCore {
                 .iter()
                 .map(|down_id| {
                     let downstream_addr = self.get_actor_info(down_id)?.get_host()?.into();
-                    new_output(&self.context, downstream_addr, actor_id, *down_id)
+                    new_output(
+                        &self.context,
+                        downstream_addr,
+                        actor_id,
+                        *down_id,
+                        self.streaming_metrics.clone(),
+                    )
                 })
                 .collect::<Result<Vec<_>>>()?;
 

@@ -80,7 +80,7 @@ mod tests {
 
         let table = catalog_reader
             .read_guard()
-            .get_table_by_name(DEFAULT_DATABASE_NAME, DEFAULT_SCHEMA_NAME, "idx")
+            .get_table_by_name(DEFAULT_DATABASE_NAME, DEFAULT_SCHEMA_NAME, "mv")
             .ok()
             .cloned();
         assert!(table.is_none());

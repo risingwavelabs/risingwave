@@ -21,11 +21,10 @@ use std::time::Duration;
 use bytes::Bytes;
 use futures::future::{join_all, try_join_all};
 use itertools::Itertools;
-use parking_lot::RwLock;
+use parking_lot::{RwLock, RwLockUpgradableReadGuard, RwLockWriteGuard};
 use risingwave_common::config::StorageConfig;
-use risingwave_hummock_sdk::compaction_group::StaticCompactionGroupId;
 use risingwave_hummock_sdk::key::FullKey;
-use risingwave_hummock_sdk::LocalSstableInfo;
+use risingwave_hummock_sdk::{CompactionGroupId, LocalSstableInfo};
 use risingwave_pb::hummock::HummockVersion;
 use risingwave_rpc_client::HummockMetaClient;
 use tokio::sync::mpsc::error::TryRecvError;
@@ -221,16 +220,23 @@ impl LocalVersionManager {
                 return false;
             }
         }
-        let mut guard = self.local_version.write();
 
-        if guard.pinned_version().id() >= new_version_id {
+        let old_version = self.local_version.upgradable_read();
+        if old_version.pinned_version().id() >= new_version_id {
             return false;
         }
 
         if let Some(conflict_detector) = self.write_conflict_detector.as_ref() {
             conflict_detector.set_watermark(newly_pinned_version.max_committed_epoch);
         }
-        guard.set_pinned_version(newly_pinned_version);
+
+        let mut new_version = old_version.clone();
+        new_version.set_pinned_version(newly_pinned_version);
+        {
+            let mut guard = RwLockUpgradableReadGuard::upgrade(old_version);
+            *guard = new_version;
+            RwLockWriteGuard::unlock_fair(guard);
+        }
 
         self.worker_context
             .version_update_notifier_tx
@@ -282,17 +288,17 @@ impl LocalVersionManager {
     pub async fn write_shared_buffer(
         &self,
         epoch: HummockEpoch,
+        compaction_group_id: CompactionGroupId,
         kv_pairs: Vec<(Bytes, StorageValue)>,
         is_remote_batch: bool,
     ) -> HummockResult<usize> {
         let sorted_items = Self::build_shared_buffer_item_batches(kv_pairs, epoch);
 
-        // TODO #2065: use correct compaction group id
         let batch = SharedBufferBatch::new(
             sorted_items,
             epoch,
             self.buffer_tracker.buffer_event_sender.clone(),
-            StaticCompactionGroupId::StateDefault.into(),
+            compaction_group_id,
         );
         let batch_size = batch.size();
         if self.buffer_tracker.try_write(batch_size) {
@@ -874,7 +880,12 @@ mod tests {
         // Fill shared buffer with a dummy empty batch in epochs[0] and epochs[1]
         for i in 0..2 {
             local_version_manager
-                .write_shared_buffer(epochs[i], batches[i].clone(), false)
+                .write_shared_buffer(
+                    epochs[i],
+                    StaticCompactionGroupId::StateDefault.into(),
+                    batches[i].clone(),
+                    false,
+                )
                 .await
                 .unwrap();
             let local_version = local_version_manager.get_local_version();
@@ -957,7 +968,12 @@ mod tests {
         // Fill shared buffer with dummy batches
         for i in 0..2 {
             local_version_manager
-                .write_shared_buffer(epochs[i], kvs[i].clone(), false)
+                .write_shared_buffer(
+                    epochs[i],
+                    StaticCompactionGroupId::StateDefault.into(),
+                    kvs[i].clone(),
+                    false,
+                )
                 .await
                 .unwrap();
             let local_version = local_version_manager.get_local_version();
@@ -1157,7 +1173,12 @@ mod tests {
         // Fill shared buffer with a dummy empty batch in epochs[0] and epochs[1]
         for i in 0..2 {
             local_version_manager
-                .write_shared_buffer(epochs[i], batches[i].clone(), false)
+                .write_shared_buffer(
+                    epochs[i],
+                    StaticCompactionGroupId::StateDefault.into(),
+                    batches[i].clone(),
+                    false,
+                )
                 .await
                 .unwrap();
             let local_version = local_version_manager.get_local_version();

@@ -16,11 +16,11 @@ use futures::{pin_mut, StreamExt};
 use futures_async_stream::try_stream;
 use itertools::Itertools;
 use risingwave_common::array::{Row, RowRef};
-use risingwave_common::catalog::{ColumnDesc, Schema};
+use risingwave_common::catalog::{ColumnDesc, Schema, TableId};
 use risingwave_common::error::Result;
 use risingwave_common::util::sort_util::{OrderPair, OrderType};
 use risingwave_storage::table::state_table::StateTable;
-use risingwave_storage::{Keyspace, StateStore};
+use risingwave_storage::StateStore;
 
 use super::sides::{stream_lookup_arrange_prev_epoch, stream_lookup_arrange_this_epoch};
 use crate::common::StreamChunkBuilder;
@@ -40,10 +40,11 @@ pub struct LookupExecutorParams<S: StateStore> {
     /// `MaterializeExecutor`.
     pub stream: Box<dyn Executor>,
 
-    /// The keyspace for arrangement. [`LookupExecutor`] will use this keyspace to read the state
-    /// of arrangement side.
-    pub arrangement_keyspace: Keyspace<S>,
+    /// The state store and table id for arrangement. [`LookupExecutor`] will use these to
+    /// construct state table to read the state of arrangement side.
+    pub arrangement_store: S,
 
+    pub arrangement_table_id: TableId,
     /// Should be the same as [`ColumnDesc`] in the arrangement.
     ///
     /// From the perspective of arrangements, `arrangement_col_descs` include all columns of the
@@ -110,7 +111,8 @@ impl<S: StateStore> LookupExecutor<S> {
         let LookupExecutorParams {
             arrangement,
             stream,
-            arrangement_keyspace,
+            arrangement_store,
+            arrangement_table_id,
             arrangement_col_descs,
             arrangement_order_rules,
             pk_indices,
@@ -139,8 +141,8 @@ impl<S: StateStore> LookupExecutor<S> {
         let schema = Schema::new(schema_fields);
 
         let chunk_data_types = schema.data_types();
-        let arrangement_datatypes = arrangement.schema().data_types();
-        let stream_datatypes = stream.schema().data_types();
+        let arrangement_data_types = arrangement.schema().data_types();
+        let stream_data_types = stream.schema().data_types();
 
         let arrangement_pk_indices = arrangement.pk_indices().to_vec();
         let stream_pk_indices = stream.pk_indices().to_vec();
@@ -173,12 +175,7 @@ impl<S: StateStore> LookupExecutor<S> {
         let key_indices_mapping = arrangement_order_rules
             .iter()
             .map(|x| x.column_idx) // the required column idx in this position
-            .map(|x| {
-                arrange_join_key_indices
-                    .iter()
-                    .position(|y| *y == x)
-                    .unwrap()
-            }) // the position of the item in join keys
+            .filter_map(|x| arrange_join_key_indices.iter().position(|y| *y == x)) // the position of the item in join keys
             .map(|x| stream_join_key_indices[x]) // the actual column idx in stream
             .collect_vec();
 
@@ -215,17 +212,18 @@ impl<S: StateStore> LookupExecutor<S> {
             stream: StreamJoinSide {
                 key_indices: stream_join_key_indices,
                 pk_indices: stream_pk_indices,
-                col_types: stream_datatypes,
+                col_types: stream_data_types,
             },
             arrangement: ArrangeJoinSide {
                 pk_indices: arrangement_pk_indices.clone(),
-                col_types: arrangement_datatypes,
+                col_types: arrangement_data_types,
                 col_descs: arrangement_col_descs.clone(),
                 order_rules: arrangement_order_rules,
                 key_indices: arrange_join_key_indices,
                 use_current_epoch,
                 state_table: StateTable::new(
-                    arrangement_keyspace,
+                    arrangement_store,
+                    arrangement_table_id,
                     arrangement_col_descs,
                     vec![OrderType::Ascending; relational_pk_indices.len()],
                     Some(arrangement_pk_indices),
