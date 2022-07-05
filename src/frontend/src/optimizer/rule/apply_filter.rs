@@ -95,7 +95,7 @@ impl ExprRewriter for Rewriter {
         &mut self,
         correlated_input_ref: CorrelatedInputRef,
     ) -> ExprImpl {
-        // TODO: use LiftCorrelatedInputRef here.
+        // TODO: just decrease `correlated_input_ref`'s index by 1.
         self.has_correlated_input_ref = true;
         InputRef::new(
             self.index_mapping.map(correlated_input_ref.index()),
