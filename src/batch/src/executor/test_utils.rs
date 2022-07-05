@@ -33,7 +33,7 @@ use crate::task::BatchTaskContext;
 
 const SEED: u64 = 0xFF67FEABBAEF76FF;
 
-/// Generate [`batch_num`] data chunks, each data chunk has cardinality of [`batch_size`].
+/// Generate `batch_num` data chunks, each data chunk has cardinality of `batch_size`.
 pub fn gen_data(data_type: DataType, batch_size: usize, batch_num: usize) -> Vec<DataChunk> {
     let mut data_gen =
         FieldGeneratorImpl::with_random(data_type.clone(), None, None, None, None, SEED).unwrap();
