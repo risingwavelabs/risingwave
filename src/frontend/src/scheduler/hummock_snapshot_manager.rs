@@ -92,7 +92,7 @@ impl HummockSnapshotManager {
                 }
 
                 let need_unpin = last_unpin_time.elapsed().as_secs() >= UNPIN_INTERVAL_SECS;
-                if pin_batches.is_empty() || need_unpin {
+                if !pin_batches.is_empty() || need_unpin {
                     let epoch = manager.get_epoch_for_query(&mut pin_batches).await;
                     if need_unpin && epoch > 0 {
                         manager.unpin_snapshot_before(epoch);
