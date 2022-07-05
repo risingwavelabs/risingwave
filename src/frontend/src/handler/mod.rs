@@ -25,6 +25,7 @@ mod create_database;
 pub mod create_index;
 pub mod create_mv;
 mod create_schema;
+pub mod create_sink;
 pub mod create_source;
 pub mod create_table;
 pub mod create_user;
@@ -34,6 +35,7 @@ mod drop_database;
 mod drop_index;
 pub mod drop_mv;
 mod drop_schema;
+pub mod drop_sink;
 pub mod drop_source;
 pub mod drop_table;
 pub mod drop_user;
@@ -59,6 +61,7 @@ pub(super) async fn handle(
             is_materialized,
             stmt,
         } => create_source::handle_create_source(context, is_materialized, stmt).await,
+        Statement::CreateSink { stmt } => create_sink::handle_create_sink(context, stmt).await,
         Statement::CreateTable {
             name,
             columns,
@@ -90,6 +93,7 @@ pub(super) async fn handle(
             ObjectType::MaterializedView => drop_mv::handle_drop_mv(context, object_name).await,
             ObjectType::Index => drop_index::handle_drop_index(context, object_name).await,
             ObjectType::Source => drop_source::handle_drop_source(context, object_name).await,
+            ObjectType::Sink => drop_sink::handle_drop_sink(context, object_name).await,
             ObjectType::Database => {
                 drop_database::handle_drop_database(
                     context,

@@ -62,6 +62,9 @@ where
             .await
             .inspect_err(|e| error!("Failed in iter: {:?}", e))?;
 
+        // statistics of iter in process count to estimate the read ops in the same time
+        self.stats.iter_in_process_counts.inc();
+
         // create a monitored iterator to collect metrics
         let monitored = MonitoredStateStoreIter {
             inner: iter,
