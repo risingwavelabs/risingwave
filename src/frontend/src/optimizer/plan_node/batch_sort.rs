@@ -32,6 +32,7 @@ pub struct BatchSort {
 
 impl BatchSort {
     pub fn new(input: PlanRef, order: Order) -> Self {
+        assert!(!order.field_order.is_empty());
         let ctx = input.ctx();
         let schema = input.schema().clone();
         let dist = input.distribution().clone();

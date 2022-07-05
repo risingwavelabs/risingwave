@@ -175,6 +175,10 @@ impl LogicalScan {
             .collect()
     }
 
+    pub fn output_column_indices(&self) -> &[usize] {
+        self.output_col_idx.as_ref()
+    }
+
     /// Get all indexes on this table
     pub fn indexes(&self) -> &[(String, Rc<TableDesc>)] {
         &self.indexes

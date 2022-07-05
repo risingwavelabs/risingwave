@@ -18,6 +18,7 @@ use std::ops::Bound;
 use itertools::Itertools;
 use risingwave_common::error::Result;
 use risingwave_common::types::ScalarImpl;
+use risingwave_common::util::sort_util::OrderType;
 use risingwave_pb::batch_plan::plan_node::NodeBody;
 use risingwave_pb::batch_plan::{RowSeqScanNode, SysRowSeqScanNode};
 use risingwave_pb::plan_common::ColumnDesc as ProstColumnDesc;
@@ -25,8 +26,8 @@ use risingwave_pb::plan_common::ColumnDesc as ProstColumnDesc;
 use super::{PlanBase, PlanRef, ToBatchProst, ToDistributedBatch};
 use crate::catalog::ColumnId;
 use crate::optimizer::plan_node::{LogicalScan, ToLocalBatch};
-use crate::optimizer::property::{Distribution, Order};
-use crate::utils::{is_full_range, ScanRange};
+use crate::optimizer::property::{Direction, Distribution, FieldOrder, Order};
+use crate::utils::{is_full_range, ColIndexMapping, ScanRange};
 
 /// `BatchSeqScan` implements [`super::LogicalScan`] to scan from a row-oriented table
 #[derive(Debug, Clone)]
@@ -80,6 +81,31 @@ impl BatchSeqScan {
     #[must_use]
     pub fn logical(&self) -> &LogicalScan {
         &self.logical
+    }
+
+    fn enforce_order(&self) -> PlanRef {
+        let plan = self.clone().into();
+        if let Some(field_order) = &self.logical.table_desc().user_order_by && !field_order.is_empty() {
+            let mapping = ColIndexMapping::with_remaining_columns(
+                self.logical.output_column_indices(),
+                self.logical.table_desc().columns.len()
+            );
+            let order = Order {
+                field_order: field_order
+                    .iter()
+                    .map(|o| FieldOrder {
+                        index: mapping.map(o.column_idx),
+                        direct: match o.order_type {
+                            OrderType::Ascending => Direction::Asc,
+                            OrderType::Descending => Direction::Desc,
+                        },
+                    })
+                    .collect(),
+            };
+            order.enforce(plan)
+        } else {
+            plan
+        }
     }
 }
 
@@ -149,7 +175,7 @@ impl fmt::Display for BatchSeqScan {
 
 impl ToDistributedBatch for BatchSeqScan {
     fn to_distributed(&self) -> Result<PlanRef> {
-        Ok(self.clone_with_dist().into())
+        Ok(self.clone_with_dist().enforce_order())
     }
 }
 
@@ -186,6 +212,6 @@ impl ToBatchProst for BatchSeqScan {
 
 impl ToLocalBatch for BatchSeqScan {
     fn to_local(&self) -> Result<PlanRef> {
-        Ok(self.clone_with_dist().into())
+        Ok(self.clone_with_dist().enforce_order())
     }
 }
