@@ -18,12 +18,12 @@ use std::iter::Iterator;
 use std::sync::Arc;
 use std::vec::Vec;
 
+use anyhow::anyhow;
 use futures::StreamExt;
 use futures_async_stream::try_stream;
 use risingwave_common::array::column::Column;
 use risingwave_common::array::{Array, ArrayBuilder, ArrayBuilderImpl, ArrayImpl, DataChunk};
 use risingwave_common::catalog::Schema;
-use risingwave_common::error::ErrorCode::InternalError;
 use risingwave_common::error::{Result, RwError};
 use risingwave_common::util::chunk_coalesce::DEFAULT_CHUNK_BUFFER_SIZE;
 use risingwave_common::util::encoding_for_comparison::{encode_chunk, is_type_encodable};
@@ -31,7 +31,8 @@ use risingwave_common::util::sort_util::{compare_two_row, HeapElem, OrderPair};
 use risingwave_pb::batch_plan::plan_node::NodeBody;
 
 use crate::executor::{
-    BoxedDataChunkStream, BoxedExecutor, BoxedExecutorBuilder, Executor, ExecutorBuilder,
+    BatchExecutorError, BoxedDataChunkStream, BoxedExecutor, BoxedExecutorBuilder, Executor,
+    ExecutorBuilder,
 };
 use crate::task::BatchTaskContext;
 
@@ -233,7 +234,7 @@ impl OrderByExecutor {
                         ($b: ident, $a: ident, [$( $tt: ident), *]) => {
                             match ($b, $a) {
                                 $((ArrayBuilderImpl::$tt($b), ArrayImpl::$tt($a)) => Ok($b.append($a.value_at(top.elem_idx))),)*
-                                    _ => Err(InternalError(String::from("Unmatched array and array builder types"))),
+                                    _ => Err(BatchExecutorError::Internal(anyhow!("Unmatched array and array builder types"))),
                             }?
                         }
                     }
