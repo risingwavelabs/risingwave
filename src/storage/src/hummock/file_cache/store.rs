@@ -111,6 +111,22 @@ where
         self.block_size
     }
 
+    pub fn size(&self) -> usize {
+        self.cf.size() + self.mf.read().size()
+    }
+
+    pub fn meta_file_size(&self) -> usize {
+        self.mf.read().size()
+    }
+
+    pub fn cache_file_size(&self) -> usize {
+        self.cf.size()
+    }
+
+    pub fn cache_file_len(&self) -> usize {
+        self.cf.len()
+    }
+
     pub async fn restore(&self, _indices: &LruCache<K, SlotId>) -> Result<()> {
         // TODO: Impl me!!!
         Ok(())

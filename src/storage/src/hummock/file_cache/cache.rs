@@ -220,9 +220,11 @@ where
 #[cfg(test)]
 mod tests {
 
+    use std::collections::HashSet;
     use std::path::Path;
 
     use super::super::test_utils::{key, TestCacheKey};
+    use super::super::utils;
     use super::*;
     use crate::hummock::file_cache::test_utils::FlushHolder;
 
@@ -252,9 +254,9 @@ mod tests {
     ) -> FileCache<TestCacheKey> {
         let options = FileCacheOptions {
             dir: dir.as_ref().to_str().unwrap().to_string(),
-            capacity: 256 * 1024 * 1024,
-            total_buffer_capacity: 128 * 1024,
-            cache_file_fallocate_unit: 64 * 1024 * 1024,
+            capacity: 4 * 1024 * 1024,
+            total_buffer_capacity: 2 * 1024 * 1024,
+            cache_file_fallocate_unit: 512 * 1024,
             filters: vec![],
 
             flush_buffer_hooks,
@@ -263,10 +265,10 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn test_file_cache_manager() {
+    async fn test_cache_curd() {
         let dir = tempdir();
 
-        let holder = Arc::new(FlushHolder::new());
+        let holder = Arc::new(FlushHolder::default());
         let cache = create_file_cache_manager_for_test(dir.path(), vec![holder.clone()]).await;
 
         cache.insert(key(1), vec![b'1'; 1234]).unwrap();
@@ -285,5 +287,72 @@ mod tests {
 
         cache.earse(&key(1)).unwrap();
         assert_eq!(cache.get(&key(1)).await.unwrap(), None);
+    }
+
+    #[tokio::test]
+    async fn test_cache_grow() {
+        let dir = tempdir();
+
+        let holder = Arc::new(FlushHolder::default());
+        let cache = create_file_cache_manager_for_test(dir.path(), vec![holder.clone()]).await;
+        let bs = cache.store.block_size();
+
+        for i in 1..=512 {
+            cache.insert(key(i), vec![b'x'; bs]).unwrap();
+            assert_eq!(cache.get(&key(i)).await.unwrap(), Some(vec![b'x'; bs]));
+        }
+
+        let mut in_cache = HashSet::new();
+        for i in 1..=512 {
+            if let Some(_) = cache.get(&key(i)).await.unwrap() {
+                in_cache.insert(i);
+            }
+        }
+        assert!(in_cache.len() <= 256);
+
+        assert_eq!(cache.store.cache_file_len(), 0);
+
+        holder.trigger();
+        holder.wait().await;
+        cache.buffer_flusher_notifier.notify_one();
+        holder.trigger();
+        holder.wait().await;
+
+        assert_eq!(
+            cache.store.cache_file_len(),
+            utils::usize::align_up(cache.store.block_size(), in_cache.len() * bs)
+        );
+        for i in 1..=512 {
+            assert_eq!(
+                cache.get(&key(i)).await.unwrap(),
+                if in_cache.get(&i).is_some() {
+                    Some(vec![b'x'; bs])
+                } else {
+                    None
+                }
+            );
+        }
+
+        in_cache.clear();
+        for i in 513..=513 + 1024 * 2 {
+            cache.insert(key(i), vec![b'x'; bs]).unwrap();
+            assert_eq!(cache.get(&key(i)).await.unwrap(), Some(vec![b'x'; bs]));
+
+            holder.trigger();
+            holder.wait().await;
+            cache.buffer_flusher_notifier.notify_one();
+            holder.trigger();
+            holder.wait().await;
+        }
+
+        for i in 1..=512 {
+            assert_eq!(cache.get(&key(i)).await.unwrap(), None);
+        }
+        for i in 513..=513 + 1024 * 2 {
+            if let Some(_) = cache.get(&key(i)).await.unwrap() {
+                in_cache.insert(i);
+            }
+        }
+        assert!(in_cache.len() * bs <= 4 * 1024 * 1024);
     }
 }

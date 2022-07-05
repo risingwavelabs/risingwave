@@ -1,0 +1,14 @@
+
+running 3 tests
+test is runner,hummock::file_cache::cache::tests::ensure_send_sync_clone
+test is drop,hummock::file_cache::cache::tests::ensure_send_sync_clone
+test hummock::file_cache::cache::tests::ensure_send_sync_clone ... ok
+test is runner,hummock::file_cache::cache::tests::test_cache_curd
+test is runner,hummock::file_cache::cache::tests::test_cache_grow
+test is drop,hummock::file_cache::cache::tests::test_cache_curd
+test hummock::file_cache::cache::tests::test_cache_curd ... ok
+test is drop,hummock::file_cache::cache::tests::test_cache_grow
+test hummock::file_cache::cache::tests::test_cache_grow ... ok
+
+test result: ok. 3 passed; 0 failed; 0 ignored; 0 measured; 126 filtered out; finished in 10.80s
+

@@ -52,8 +52,8 @@ pub struct FlushHolder {
     post_receiver: Arc<Mutex<mpsc::UnboundedReceiver<()>>>,
 }
 
-impl FlushHolder {
-    pub fn new() -> Self {
+impl Default for FlushHolder {
+    fn default() -> Self {
         let (tx0, rx0) = mpsc::unbounded_channel();
         let (tx1, rx1) = mpsc::unbounded_channel();
         Self {
@@ -64,7 +64,9 @@ impl FlushHolder {
             post_receiver: Arc::new(Mutex::new(rx1)),
         }
     }
+}
 
+impl FlushHolder {
     pub fn trigger(&self) {
         self.pre_sender.send(()).unwrap();
     }
