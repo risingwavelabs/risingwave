@@ -51,7 +51,10 @@ message Table {
   string name = 4;
   repeated plan_common.ColumnCatalog columns = 5;
   repeated plan_common.ColumnOrder order_keys = 6;
-  repeated plan_common.ColumnOrder user_order_by = 7;
+  message Order {
+    repeated plan_common.ColumnOrder field_order = 1;
+  }
+  Order user_order_by = 7;
   repeated uint32 dependent_relations = 8;
   oneof optional_associated_source_id {
     uint32 associated_source_id = 9;

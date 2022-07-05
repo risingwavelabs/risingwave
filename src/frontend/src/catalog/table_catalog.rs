@@ -18,7 +18,7 @@ use itertools::Itertools;
 use risingwave_common::catalog::TableDesc;
 use risingwave_common::types::ParallelUnitId;
 use risingwave_common::util::compress::decompress_data;
-use risingwave_pb::catalog::table::OptionalAssociatedSourceId;
+use risingwave_pb::catalog::table::{OptionalAssociatedSourceId, Order};
 use risingwave_pb::catalog::Table as ProstTable;
 
 use super::column_catalog::ColumnCatalog;
@@ -126,11 +126,9 @@ impl TableCatalog {
             name: self.name.clone(),
             columns: self.columns().iter().map(|c| c.to_protobuf()).collect(),
             order_keys: self.order_keys.iter().map(|o| o.to_protobuf()).collect(),
-            user_order_by: self
-                .user_order_by
-                .as_ref()
-                .map(|vec| vec.iter().map(|o| o.to_protobuf()).collect())
-                .unwrap_or_default(),
+            user_order_by: self.user_order_by.as_ref().map(|vec| Order {
+                field_order: vec.iter().map(|o| o.to_protobuf()).collect(),
+            }),
             pk: self.pks.iter().map(|x| *x as _).collect(),
             dependent_relations: vec![],
             optional_associated_source_id: self
@@ -178,11 +176,12 @@ impl From<ProstTable> for TableCatalog {
             .iter()
             .map(FieldOrder::from_protobuf)
             .collect();
-        let user_order_by = tb
-            .user_order_by
-            .iter()
-            .map(FieldOrder::from_protobuf)
-            .collect();
+        let user_order_by = tb.user_order_by.as_ref().map(|o| {
+            o.field_order
+                .iter()
+                .map(FieldOrder::from_protobuf)
+                .collect()
+        });
 
         let vnode_mapping = if let Some(mapping) = tb.mapping.as_ref() {
             decompress_data(&mapping.original_indices, &mapping.data)
@@ -195,7 +194,7 @@ impl From<ProstTable> for TableCatalog {
             associated_source_id: associated_source_id.map(Into::into),
             name,
             order_keys,
-            user_order_by: Some(user_order_by),
+            user_order_by,
             columns,
             is_index_on: if tb.is_index {
                 Some(tb.index_on_id.into())
@@ -284,7 +283,7 @@ mod tests {
                 direct: Direction::Asc,
             }
             .to_protobuf()],
-            user_order_by: vec![],
+            user_order_by: None,
             pk: vec![0],
             dependent_relations: vec![],
             distribution_keys: vec![],
