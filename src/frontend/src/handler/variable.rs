@@ -36,11 +36,9 @@ pub(super) fn handle_set(
 pub(super) fn handle_show(context: OptimizerContext, variable: Vec<Ident>) -> Result<PgResponse> {
     let config_reader = context.session_ctx.config();
     if variable.len() != 1 {
-        return Err(ErrorCode::InvalidInputSyntax(format!(
-            "Invalid SHOW variable: {:?}",
-            variable
-        ))
-        .into());
+        return Err(
+            ErrorCode::InvalidInputSyntax("only one variable or ALL required".to_string()).into(),
+        );
     }
     // TODO: support SHOW ALL.
     let name = &variable[0].value;
