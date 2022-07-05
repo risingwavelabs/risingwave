@@ -15,7 +15,7 @@ insert into t2 values (1,5), (2,6), (3, 7);
 statement ok
 create materialized view mv1 as select t1.v1 as id, v2, v3 from t1 join t2 on t1.v1=t2.v1;
 
-query I
+query I rowsort
 select * from mv1;
 ----
 1 2 5
@@ -27,7 +27,7 @@ insert into t1 values (3,4), (7,7);
 statement ok
 flush;
 
-query II
+query II rowsort
 select * from mv1;
 ----
 1 2 5
@@ -45,7 +45,7 @@ insert into t4 values (1,1,4), (5,1,4), (1,9,1), (9,8,1), (0,2,3);
 statement ok
 create materialized view mv3 as select v3, sum(v1) as sum_v1, min(v1) as min_v1, max(v1) as max_v1 from t4 group by v3;
 
-query III
+query III nosort
 select sum_v1, min_v1, max_v1, v3 from mv3 order by sum_v1;
 ----
 0  0 0 3
@@ -57,7 +57,7 @@ select sum_v1, min_v1, max_v1, v3 from mv3 order by sum_v1;
 statement ok
 create materialized view mv4 as select v1, v3 from t4 order by v1 limit 3 offset 3;
 
-query IV
+query IV nosort
 select * from mv4;
 ----
 5 4
