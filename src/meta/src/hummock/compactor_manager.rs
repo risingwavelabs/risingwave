@@ -187,7 +187,7 @@ mod tests {
             sorted_output_ssts: vec![],
             task_id,
             target_level: 0,
-            is_target_ultimate_and_leveling: false,
+            gc_delete_keys: false,
             task_status: false,
             vnode_mappings: vec![],
             compaction_group_id: StaticCompactionGroupId::StateDefault.into(),
@@ -196,6 +196,7 @@ mod tests {
             target_file_size: 1,
             compaction_filter_mask: 0,
             table_options: HashMap::default(),
+            current_epoch_time: 0,
         }
     }
 
