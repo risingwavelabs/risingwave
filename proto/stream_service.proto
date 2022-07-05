@@ -122,6 +122,30 @@ message SyncSourcesResponse {
   common.Status status = 1;
 }
 
+message CreateSinkRequest {
+  catalog.Sink sink = 1;
+}
+
+message CreateSinkResponse {
+  common.Status status = 1;
+}
+
+message DropSinkRequest {
+  uint32 sink_id = 1;
+}
+
+message DropSinkResponse {
+  common.Status status = 1;
+}
+
+// message SyncSinksRequest {
+//   repeated catalog.Sink sinks = 1;
+// }
+
+// message SyncSinksResponse {
+//   common.Status status = 1;
+// }
+
 service StreamService {
   rpc UpdateActors(UpdateActorsRequest) returns (UpdateActorsResponse);
   rpc BuildActors(BuildActorsRequest) returns (BuildActorsResponse);
@@ -132,6 +156,9 @@ service StreamService {
   rpc CreateSource(CreateSourceRequest) returns (CreateSourceResponse);
   rpc SyncSources(SyncSourcesRequest) returns (SyncSourcesResponse);
   rpc DropSource(DropSourceRequest) returns (DropSourceResponse);
+  rpc CreateSink(CreateSinkRequest) returns (CreateSinkResponse);
+  // rpc SyncSinks(SyncSinksRequest) returns (SyncSinksResponse);
+  rpc DropSink(DropSinkRequest) returns (DropSinkResponse);
   rpc BarrierComplete(BarrierCompleteRequest) returns (BarrierCompleteResponse);
 }
 

@@ -34,7 +34,7 @@ use crate::model::{FragmentId, TableFragments};
 use crate::storage::MetaStore;
 use crate::stream::{
     ActorGraphBuilder, CreateMaterializedViewContext, FragmentManagerRef, GlobalStreamManagerRef,
-    SourceManagerRef,
+    SourceManagerRef, SinkManagerRef
 };
 
 #[derive(Clone)]
@@ -44,6 +44,7 @@ pub struct DdlServiceImpl<S: MetaStore> {
     catalog_manager: CatalogManagerRef<S>,
     stream_manager: GlobalStreamManagerRef<S>,
     source_manager: SourceManagerRef<S>,
+    sink_manager: SinkManagerRef<S>,
     cluster_manager: ClusterManagerRef<S>,
     fragment_manager: FragmentManagerRef<S>,
 }
@@ -57,6 +58,7 @@ where
         catalog_manager: CatalogManagerRef<S>,
         stream_manager: GlobalStreamManagerRef<S>,
         source_manager: SourceManagerRef<S>,
+        sink_manager: SinkManagerRef<S>,
         cluster_manager: ClusterManagerRef<S>,
         fragment_manager: FragmentManagerRef<S>,
     ) -> Self {
@@ -65,6 +67,7 @@ where
             catalog_manager,
             stream_manager,
             source_manager,
+            sink_manager,
             cluster_manager,
             fragment_manager,
         }

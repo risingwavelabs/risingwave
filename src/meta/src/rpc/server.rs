@@ -50,7 +50,7 @@ use crate::rpc::service::stream_service::StreamServiceImpl;
 use crate::rpc::service::user_service::UserServiceImpl;
 use crate::rpc::{META_CF_NAME, META_LEADER_KEY, META_LEASE_KEY};
 use crate::storage::{Error, EtcdMetaStore, MemStore, MetaStore, Transaction};
-use crate::stream::{FragmentManager, GlobalStreamManager, SourceManager};
+use crate::stream::{FragmentManager, GlobalStreamManager, SourceManager, SinkManager};
 
 #[derive(Debug)]
 pub enum MetaStoreBackend {
@@ -346,6 +346,15 @@ pub async fn rpc_serve_with_store<S: MetaStore>(
         .unwrap(),
     );
 
+    let sink_manager = Arc::new(
+        SinkManager::new(
+            env.clone(),
+            fragment_manager.clone(),
+        )
+        .await
+        .unwrap(),
+    );
+
     {
         let source_manager = source_manager.clone();
         tokio::spawn(async move {
@@ -400,6 +409,7 @@ pub async fn rpc_serve_with_store<S: MetaStore>(
         catalog_manager.clone(),
         stream_manager,
         source_manager,
+        sink_manager,
         cluster_manager.clone(),
         fragment_manager.clone(),
     );
