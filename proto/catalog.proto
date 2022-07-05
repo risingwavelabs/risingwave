@@ -50,8 +50,7 @@ message Table {
   uint32 database_id = 3;
   string name = 4;
   repeated plan_common.ColumnCatalog columns = 5;
-  repeated int32 order_column_ids = 6;
-  repeated plan_common.OrderType orders = 7;
+  repeated plan_common.ColumnOrder order_keys = 6;
   repeated uint32 dependent_relations = 8;
   oneof optional_associated_source_id {
     uint32 associated_source_id = 9;

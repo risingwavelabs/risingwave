@@ -2680,7 +2680,7 @@ checksum = "2dffe52ecf27772e601905b7522cb4ef790d2cc203488bbd0e2fe85fcb74566d"
 
 [[package]]
 name = "memcomparable"
-version = "0.1.9"
+version = "0.1.10"
 dependencies = [
  "bytes",
  "rand 0.8.5",
@@ -3268,7 +3268,7 @@ dependencies = [
 
 [[package]]
 name = "pgwire"
-version = "0.1.9"
+version = "0.1.10"
 dependencies = [
  "async-trait",
  "byteorder",
@@ -3881,7 +3881,7 @@ dependencies = [
 
 [[package]]
 name = "risedev"
-version = "0.1.9"
+version = "0.1.10"
 dependencies = [
  "anyhow",
  "bytes",
@@ -3905,7 +3905,7 @@ dependencies = [
 
 [[package]]
 name = "risingwave_batch"
-version = "0.1.9"
+version = "0.1.10"
 dependencies = [
  "anyhow",
  "assert_matches",
@@ -3960,7 +3960,7 @@ dependencies = [
 
 [[package]]
 name = "risingwave_bench"
-version = "0.1.9"
+version = "0.1.10"
 dependencies = [
  "bytes",
  "bytesize",
@@ -3987,7 +3987,7 @@ dependencies = [
 
 [[package]]
 name = "risingwave_cmd"
-version = "0.1.9"
+version = "0.1.10"
 dependencies = [
  "anyhow",
  "clap 3.1.18",
@@ -4009,7 +4009,7 @@ dependencies = [
 
 [[package]]
 name = "risingwave_cmd_all"
-version = "0.1.9"
+version = "0.1.10"
 dependencies = [
  "anyhow",
  "clap 3.1.18",
@@ -4031,7 +4031,7 @@ dependencies = [
 
 [[package]]
 name = "risingwave_common"
-version = "0.1.9"
+version = "0.1.10"
 dependencies = [
  "anyhow",
  "async-stream",
@@ -4045,6 +4045,7 @@ dependencies = [
  "crc32fast",
  "either",
  "futures",
+ "futures-async-stream",
  "humantime",
  "hyper",
  "itertools",
@@ -4084,7 +4085,7 @@ dependencies = [
 
 [[package]]
 name = "risingwave_compactor"
-version = "0.1.9"
+version = "0.1.10"
 dependencies = [
  "clap 3.1.18",
  "madsim",
@@ -4106,7 +4107,7 @@ dependencies = [
 
 [[package]]
 name = "risingwave_compute"
-version = "0.1.9"
+version = "0.1.10"
 dependencies = [
  "anyhow",
  "async-stream",
@@ -4162,7 +4163,7 @@ dependencies = [
 
 [[package]]
 name = "risingwave_connector"
-version = "0.1.9"
+version = "0.1.10"
 dependencies = [
  "anyhow",
  "async-stream",
@@ -4225,7 +4226,7 @@ dependencies = [
 
 [[package]]
 name = "risingwave_ctl"
-version = "0.1.9"
+version = "0.1.10"
 dependencies = [
  "anyhow",
  "bytes",
@@ -4246,7 +4247,7 @@ dependencies = [
 
 [[package]]
 name = "risingwave_expr"
-version = "0.1.9"
+version = "0.1.10"
 dependencies = [
  "aho-corasick",
  "anyhow",
@@ -4283,7 +4284,7 @@ dependencies = [
 
 [[package]]
 name = "risingwave_frontend"
-version = "0.1.9"
+version = "0.1.10"
 dependencies = [
  "anyhow",
  "arc-swap",
@@ -4336,7 +4337,7 @@ dependencies = [
 
 [[package]]
 name = "risingwave_frontend_test_runner"
-version = "0.1.9"
+version = "0.1.10"
 dependencies = [
  "anyhow",
  "console",
@@ -4357,7 +4358,7 @@ dependencies = [
 
 [[package]]
 name = "risingwave_hummock_sdk"
-version = "0.1.9"
+version = "0.1.10"
 dependencies = [
  "bytes",
  "hex",
@@ -4371,7 +4372,7 @@ dependencies = [
 
 [[package]]
 name = "risingwave_meta"
-version = "0.1.9"
+version = "0.1.10"
 dependencies = [
  "anyhow",
  "assert_matches",
@@ -4431,7 +4432,7 @@ dependencies = [
 
 [[package]]
 name = "risingwave_object_store"
-version = "0.1.9"
+version = "0.1.10"
 dependencies = [
  "async-trait",
  "aws-config",
@@ -4456,7 +4457,7 @@ dependencies = [
 
 [[package]]
 name = "risingwave_pb"
-version = "0.1.9"
+version = "0.1.10"
 dependencies = [
  "bytes",
  "madsim-tonic",
@@ -4487,7 +4488,7 @@ dependencies = [
 
 [[package]]
 name = "risingwave_rpc_client"
-version = "0.1.9"
+version = "0.1.10"
 dependencies = [
  "anyhow",
  "async-trait",
@@ -4509,7 +4510,7 @@ dependencies = [
 
 [[package]]
 name = "risingwave_rt"
-version = "0.1.9"
+version = "0.1.10"
 dependencies = [
  "async-trait",
  "console",
@@ -4531,7 +4532,7 @@ dependencies = [
 
 [[package]]
 name = "risingwave_source"
-version = "0.1.9"
+version = "0.1.10"
 dependencies = [
  "anyhow",
  "apache-avro",
@@ -4587,7 +4588,7 @@ dependencies = [
 
 [[package]]
 name = "risingwave_sqlparser"
-version = "0.1.9"
+version = "0.1.10"
 dependencies = [
  "itertools",
  "log",
@@ -4614,7 +4615,7 @@ dependencies = [
 
 [[package]]
 name = "risingwave_sqlsmith"
-version = "0.1.9"
+version = "0.1.10"
 dependencies = [
  "anyhow",
  "chrono",
@@ -4634,7 +4635,7 @@ dependencies = [
 
 [[package]]
 name = "risingwave_storage"
-version = "0.1.9"
+version = "0.1.10"
 dependencies = [
  "anyhow",
  "async-trait",
@@ -4700,7 +4701,7 @@ dependencies = [
 
 [[package]]
 name = "risingwave_stream"
-version = "0.1.9"
+version = "0.1.10"
 dependencies = [
  "anyhow",
  "assert_matches",
@@ -4761,7 +4762,7 @@ dependencies = [
 
 [[package]]
 name = "risingwave_test_runner"
-version = "0.1.8"
+version = "0.1.10"
 dependencies = [
  "fail",
 ]
@@ -5201,7 +5202,7 @@ checksum = "a2eb9349b6444b326872e140eb1cf5e7c522154d69e7a0ffb0fb81c06b37543f"
 
 [[package]]
 name = "stats_alloc"
-version = "0.1.9"
+version = "0.1.10"
 dependencies = [
  "workspace-hack",
 ]
@@ -5928,7 +5929,7 @@ checksum = "830b7e5d4d90034032940e4ace0d9a9a057e7a45cd94e6c007832e39edb82f6d"
 
 [[package]]
 name = "value-encoding"
-version = "0.1.9"
+version = "0.1.10"
 dependencies = [
  "bytes",
  "memcomparable",
@@ -6183,7 +6184,7 @@ dependencies = [
 
 [[package]]
 name = "workspace-hack"
-version = "0.1.9"
+version = "0.1.10"
 dependencies = [
  "anyhow",
  "auto_enums",
@@ -6251,7 +6252,7 @@ dependencies = [
 
 [[package]]
 name = "workspace-static-link"
-version = "0.1.9"
+version = "0.1.10"
 dependencies = [
  "isahc",
  "openssl",

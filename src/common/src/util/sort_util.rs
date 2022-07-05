@@ -67,6 +67,13 @@ impl OrderPair {
             column_idx: column_order.index as usize,
         }
     }
+
+    pub fn to_protobuf(&self) -> ColumnOrder {
+        ColumnOrder {
+            order_type: self.order_type.to_prost() as i32,
+            index: self.column_idx as u32,
+        }
+    }
 }
 
 #[derive(Clone, Debug)]

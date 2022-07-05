@@ -14,18 +14,56 @@
 
 use std::collections::VecDeque;
 use std::future::Future;
+use std::sync::Arc;
 
 use assert_matches::assert_matches;
 use futures_async_stream::{for_await, try_stream};
 use itertools::Itertools;
+use risingwave_common::array::column::Column;
 use risingwave_common::array::DataChunk;
 use risingwave_common::catalog::Schema;
 use risingwave_common::error::{Result, RwError};
+use risingwave_common::field_generator::FieldGeneratorImpl;
+use risingwave_common::types::{DataType, ScalarImpl};
 use risingwave_pb::batch_plan::ExchangeSource as ProstExchangeSource;
 
 use crate::exchange_source::{ExchangeSource, ExchangeSourceImpl};
 use crate::executor::{BoxedDataChunkStream, BoxedExecutor, CreateSource, Executor};
 use crate::task::BatchTaskContext;
+
+const SEED: u64 = 0xFF67FEABBAEF76FF;
+
+/// Generate `batch_num` data chunks, each data chunk has cardinality of `batch_size`.
+pub fn gen_data(data_type: DataType, batch_size: usize, batch_num: usize) -> Vec<DataChunk> {
+    let mut data_gen =
+        FieldGeneratorImpl::with_random(data_type.clone(), None, None, None, None, SEED).unwrap();
+    let mut ret = Vec::<DataChunk>::with_capacity(batch_num);
+
+    for i in 0..batch_num {
+        let mut array_builder = data_type.create_array_builder(batch_size);
+
+        for j in 0..batch_size {
+            array_builder
+                .append_datum(&Some(ScalarImpl::Int64(
+                    // TODO: We should remove this later when generator supports generate Datum,
+                    // see https://github.com/singularity-data/risingwave/issues/3519
+                    data_gen
+                        .generate(((i + 1) * (j + 1)) as u64)
+                        .as_i64()
+                        .unwrap(),
+                )))
+                .unwrap();
+        }
+
+        let array = array_builder.finish().unwrap();
+        ret.push(DataChunk::new(
+            vec![Column::new(Arc::new(array))],
+            batch_size,
+        ));
+    }
+
+    ret
+}
 
 /// Mock the input of executor.
 /// You can bind one or more `MockExecutor` as the children of the executor to test,
