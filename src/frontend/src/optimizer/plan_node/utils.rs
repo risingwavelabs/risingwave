@@ -112,6 +112,7 @@ impl TableCatalogBuilder {
             name: String::new(),
             columns: self.columns,
             order_keys: self.order_keys,
+            user_order_by: None,
             pks: self.pk_indices,
             is_index_on: None,
             distribution_keys,

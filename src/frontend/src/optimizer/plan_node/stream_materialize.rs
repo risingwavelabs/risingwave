@@ -153,6 +153,7 @@ impl StreamMaterialize {
             name: mv_name,
             columns,
             order_keys,
+            user_order_by: Some(user_order_by.field_order.clone()),
             pks: pk_indices.clone(),
             is_index_on,
             distribution_keys: base.dist.dist_column_indices().to_vec(),

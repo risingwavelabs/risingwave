@@ -39,6 +39,9 @@ pub struct TableCatalog {
 
     /// Keys used as materialize's storage key prefix, including MV order keys and pks.
     pub order_keys: Vec<FieldOrder>,
+    /// The ORDER BY specified by the user. Describes how the MV is logically ordered.
+    /// Only used for MV table.
+    pub user_order_by: Option<Vec<FieldOrder>>,
 
     /// Primary key columns indices.
     pub pks: Vec<usize>,
@@ -119,6 +122,11 @@ impl TableCatalog {
             name: self.name.clone(),
             columns: self.columns().iter().map(|c| c.to_protobuf()).collect(),
             order_keys: self.order_keys.iter().map(|o| o.to_protobuf()).collect(),
+            user_order_by: self
+                .user_order_by
+                .as_ref()
+                .map(|vec| vec.iter().map(|o| o.to_protobuf()).collect())
+                .unwrap_or_default(),
             pk: self.pks.iter().map(|x| *x as _).collect(),
             dependent_relations: vec![],
             optional_associated_source_id: self
@@ -166,6 +174,11 @@ impl From<ProstTable> for TableCatalog {
             .iter()
             .map(FieldOrder::from_protobuf)
             .collect();
+        let user_order_by = tb
+            .user_order_by
+            .iter()
+            .map(FieldOrder::from_protobuf)
+            .collect();
 
         let vnode_mapping = if let Some(mapping) = tb.mapping.as_ref() {
             decompress_data(&mapping.original_indices, &mapping.data)
@@ -178,6 +191,7 @@ impl From<ProstTable> for TableCatalog {
             associated_source_id: associated_source_id.map(Into::into),
             name,
             order_keys,
+            user_order_by: Some(user_order_by),
             columns,
             is_index_on: if tb.is_index {
                 Some(tb.index_on_id.into())
@@ -266,6 +280,7 @@ mod tests {
                 direct: Direction::Asc,
             }
             .to_protobuf()],
+            user_order_by: vec![],
             pk: vec![0],
             dependent_relations: vec![],
             distribution_keys: vec![],
@@ -324,6 +339,7 @@ mod tests {
                     index: 0,
                     direct: Direction::Asc,
                 }],
+                user_order_by: None,
                 distribution_keys: vec![],
                 appendonly: false,
                 owner: risingwave_common::catalog::DEFAULT_SUPPER_USER.to_string(),

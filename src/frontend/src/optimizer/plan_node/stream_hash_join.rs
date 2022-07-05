@@ -271,6 +271,7 @@ fn infer_internal_table_catalog(input: PlanRef) -> TableCatalog {
         name: String::new(),
         columns,
         order_keys: order_desc,
+        user_order_by: None,
         pks: pk_indices.clone(),
         distribution_keys: base.dist.dist_column_indices().to_vec(),
         is_index_on: None,
