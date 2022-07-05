@@ -31,13 +31,7 @@ start transaction;
 statement ok
 abort;
 
-statement ok
-SET QUERY_MODE TO local;
-
 query I
-show QUERY_MODE;
+show RW_IMPLICIT_FLUSH;
 ----
-local
-
-statement ok
-SET QUERY_MODE TO distributed;
+true

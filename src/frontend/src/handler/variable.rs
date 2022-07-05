@@ -40,8 +40,14 @@ pub(super) fn handle_show(context: OptimizerContext, variable: Vec<Ident>) -> Re
             ErrorCode::InvalidInputSyntax("only one variable or ALL required".to_string()).into(),
         );
     }
-    // TODO: support SHOW ALL.
     let name = &variable[0].value;
+    if name.eq_ignore_ascii_case("ALL") {
+        return Err(ErrorCode::NotImplemented(
+            "SHOW ALL is not supported".to_string(),
+            3665.into(),
+        )
+        .into());
+    }
     let row = Row::new(vec![Some(config_reader.get(name)?)]);
 
     Ok(PgResponse::new(
