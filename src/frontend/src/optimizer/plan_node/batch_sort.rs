@@ -20,7 +20,7 @@ use risingwave_pb::batch_plan::OrderByNode;
 
 use super::{PlanBase, PlanRef, PlanTreeNodeUnary, ToBatchProst, ToDistributedBatch};
 use crate::optimizer::plan_node::ToLocalBatch;
-use crate::optimizer::property::Order;
+use crate::optimizer::property::{Distribution, Order};
 
 /// `BatchSort` buffers all data from input and sort these rows by specified order, providing the
 /// collation required by user or parent plan node.
@@ -35,7 +35,7 @@ impl BatchSort {
         assert!(!order.field_order.is_empty());
         let ctx = input.ctx();
         let schema = input.schema().clone();
-        let dist = input.distribution().clone();
+        let dist = Distribution::Single;
         let base = PlanBase::new_batch(ctx, schema, dist, order);
         BatchSort { base, input }
     }
