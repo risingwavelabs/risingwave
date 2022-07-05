@@ -97,6 +97,10 @@ impl TableCatalog {
                 .iter()
                 .map(FieldOrder::to_order_pair)
                 .collect(),
+            user_order_by: self
+                .user_order_by
+                .as_ref()
+                .map(|vec| vec.iter().map(FieldOrder::to_order_pair).collect()),
             pks: self.pks.clone(),
             columns: self.columns.iter().map(|c| c.column_desc.clone()).collect(),
             distribution_keys: self.distribution_keys.clone(),

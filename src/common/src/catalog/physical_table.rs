@@ -26,6 +26,9 @@ pub struct TableDesc {
     pub table_id: TableId,
     /// The keys used to sort in storage.
     pub order_keys: Vec<OrderPair>,
+    /// The ORDER BY specified by the user. Describes how the MV is logically ordered.
+    /// Only used for MV table.
+    pub user_order_by: Option<Vec<OrderPair>>,
     /// All columns in the table, noticed it is NOT sorted by columnId in the vec.
     pub columns: Vec<ColumnDesc>,
     /// Distribution keys of this table, which corresponds to the corresponding column of the
