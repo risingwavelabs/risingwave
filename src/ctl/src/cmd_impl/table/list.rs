@@ -12,8 +12,16 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-mod scan;
-pub use scan::*;
+use anyhow::Result;
 
-mod list;
-pub use list::*;
+use crate::common::MetaServiceOpts;
+
+pub async fn list() -> Result<()> {
+    let meta_opts = MetaServiceOpts::from_env()?;
+    let meta = meta_opts.create_meta_client().await?;
+    let mvs = meta.risectl_list_state_tables().await?;
+    for mv in mvs {
+        println!("#{}: {}", mv.id, mv.name);
+    }
+    Ok(())
+}
