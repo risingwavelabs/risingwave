@@ -48,6 +48,10 @@ impl CorrelatedInputRef {
     pub fn depth(&self) -> usize {
         self.depth
     }
+
+    pub fn decompose(self) -> (usize, DataType, usize) {
+        (self.index, self.data_type, self.depth)
+    }
 }
 
 impl Expr for CorrelatedInputRef {
