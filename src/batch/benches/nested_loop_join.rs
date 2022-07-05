@@ -162,8 +162,8 @@ async fn execute_nested_loop_join_executor(executor: BoxedExecutor) {
 }
 
 fn bench_nested_loop_join(c: &mut Criterion) {
-    const LEFT_SIZE: usize = 1024;
-    const RIGHT_SIZE: usize = 1024;
+    const LEFT_SIZE: usize = 2 * 1024;
+    const RIGHT_SIZE: usize = 2 * 1024;
     let rt = Runtime::new().unwrap();
     for join_type in &[
         JoinType::Inner,
