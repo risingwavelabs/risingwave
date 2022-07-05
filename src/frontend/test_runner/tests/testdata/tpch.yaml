@@ -1295,7 +1295,7 @@
                             StreamTableScan { table: nation, columns: [n_nationkey, _row_id, n_name], pk_indices: [1] }
             StreamExchange { dist: Broadcast }
               StreamProject { exprs: [($1 * 0.0001000000:Decimal)] }
-                StreamSimpleAgg { aggs: [sum($0), sum($1)] }
+                StreamGlobalSimpleAgg { aggs: [sum($0), sum($1)] }
                   StreamExchange { dist: Single }
                     StreamLocalSimpleAgg { aggs: [count, sum($0)] }
                       StreamProject { exprs: [($1 * $0), $2, $3, $4] }
@@ -2375,7 +2375,7 @@
                     StreamTableScan { table: orders, columns: [o_custkey, _row_id], pk_indices: [1] }
               StreamExchange { dist: Broadcast }
                 StreamProject { exprs: [($1 / $2)] }
-                  StreamSimpleAgg { aggs: [sum($0), sum($1), sum($2)] }
+                  StreamGlobalSimpleAgg { aggs: [sum($0), sum($1), sum($2)] }
                     StreamExchange { dist: Single }
                       StreamLocalSimpleAgg { aggs: [count, sum($0), count($0)] }
                         StreamProject { exprs: [$0, $1] }
