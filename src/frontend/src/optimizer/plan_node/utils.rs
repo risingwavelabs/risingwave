@@ -14,18 +14,19 @@
 
 use std::collections::HashMap;
 
-use risingwave_common::catalog::{ColumnDesc, Field, OrderedColumnDesc};
+use risingwave_common::catalog::{ColumnDesc, Field};
 use risingwave_common::types::DataType;
 use risingwave_common::util::sort_util::OrderType;
 
 use crate::catalog::column_catalog::ColumnCatalog;
 use crate::catalog::{TableCatalog, TableId};
+use crate::optimizer::property::{Direction, FieldOrder};
 
 #[derive(Default)]
 pub struct TableCatalogBuilder {
     columns: Vec<ColumnCatalog>,
     column_names: HashMap<String, i32>,
-    order_descs: Vec<OrderedColumnDesc>,
+    order_keys: Vec<FieldOrder>,
     pk_indices: Vec<usize>,
 }
 
@@ -78,11 +79,16 @@ impl TableCatalogBuilder {
     /// Check whether need to add a ordered column. Different from value, order desc equal pk in
     /// semantics and they are encoded as storage key.
     fn add_order_column(&mut self, column_desc: ColumnDesc, order_type: Option<OrderType>) {
+        let index = i32::from(column_desc.column_id) as usize;
         if let Some(order) = order_type {
-            self.pk_indices
-                .push(i32::from(column_desc.column_id) as usize);
-            self.order_descs
-                .push(OrderedColumnDesc { column_desc, order });
+            self.pk_indices.push(index);
+            self.order_keys.push(FieldOrder {
+                index,
+                direct: match order {
+                    OrderType::Ascending => Direction::Asc,
+                    OrderType::Descending => Direction::Desc,
+                },
+            });
         }
     }
 
@@ -105,7 +111,7 @@ impl TableCatalogBuilder {
             associated_source_id: None,
             name: String::new(),
             columns: self.columns,
-            order_desc: self.order_descs,
+            order_keys: self.order_keys,
             pks: self.pk_indices,
             is_index_on: None,
             distribution_keys,
