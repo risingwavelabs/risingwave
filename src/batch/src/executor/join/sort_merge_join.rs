@@ -24,11 +24,11 @@ use risingwave_common::util::sort_util::OrderType;
 use risingwave_pb::batch_plan::plan_node::NodeBody;
 use risingwave_pb::plan_common::OrderType as OrderTypeProst;
 
+use crate::error::BatchError;
 use crate::executor::join::row_level_iter::RowLevelIter;
 use crate::executor::join::JoinType;
 use crate::executor::{
-    BatchExecutorError, BoxedDataChunkStream, BoxedExecutor, BoxedExecutorBuilder, Executor,
-    ExecutorBuilder,
+    BoxedDataChunkStream, BoxedExecutor, BoxedExecutorBuilder, Executor, ExecutorBuilder,
 };
 use crate::task::BatchTaskContext;
 
@@ -307,7 +307,7 @@ impl BoxedExecutorBuilder for SortMergeJoinExecutor {
                     "SortMergeJoinExecutor2".to_string(),
                 )))
             }
-            _ => Err(BatchExecutorError::UnsupportedFunction(format!(
+            _ => Err(BatchError::UnsupportedFunction(format!(
                 "Do not support {:?} join type now.",
                 join_type
             ))

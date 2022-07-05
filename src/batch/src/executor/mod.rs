@@ -13,7 +13,6 @@
 // limitations under the License.
 use anyhow::anyhow;
 mod delete;
-mod error;
 mod expand;
 mod filter;
 mod generic_exchange;
@@ -70,7 +69,6 @@ use crate::task::{BatchTaskContext, TaskId};
 pub type BoxedExecutor = Box<dyn Executor>;
 pub type BoxedDataChunkStream = BoxStream<'static, Result<DataChunk>>;
 
-use error::BatchExecutorError;
 pub struct ExecutorInfo {
     pub schema: Schema,
     pub id: String,

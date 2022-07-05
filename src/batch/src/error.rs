@@ -17,12 +17,12 @@ use risingwave_common::array::ArrayError;
 use risingwave_common::error::{ErrorCode, RwError};
 use thiserror::Error;
 
-pub type Result<T> = std::result::Result<T, BatchExecutorError>;
+pub type Result<T> = std::result::Result<T, BatchError>;
 
 pub trait Error = std::error::Error + Send + Sync + 'static;
 
 #[derive(Error, Debug)]
-pub enum BatchExecutorError {
+pub enum BatchError {
     #[error("Unsupported function: {0}")]
     UnsupportedFunction(String),
 
@@ -39,8 +39,8 @@ pub enum BatchExecutorError {
     Internal(#[from] anyhow::Error),
 }
 
-impl From<BatchExecutorError> for RwError {
-    fn from(s: BatchExecutorError) -> Self {
-        ErrorCode::BatchExecutorError(Box::new(s)).into()
+impl From<BatchError> for RwError {
+    fn from(s: BatchError) -> Self {
+        ErrorCode::BatchError(Box::new(s)).into()
     }
 }

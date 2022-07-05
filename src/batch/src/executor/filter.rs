@@ -22,7 +22,7 @@ use risingwave_common::util::chunk_coalesce::DataChunkBuilder;
 use risingwave_expr::expr::{build_from_prost, BoxedExpression};
 use risingwave_pb::batch_plan::plan_node::NodeBody;
 
-use crate::executor::error::BatchExecutorError;
+use crate::error::BatchError;
 use crate::executor::{
     BoxedDataChunkStream, BoxedExecutor, BoxedExecutorBuilder, Executor, ExecutorBuilder,
 };
@@ -67,7 +67,7 @@ impl FilterExecutor {
                     yield data_chunk?;
                 }
             } else {
-                return Err(BatchExecutorError::Internal(anyhow!(
+                return Err(BatchError::Internal(anyhow!(
                     "Filter can only receive bool array"
                 ))
                 .into());

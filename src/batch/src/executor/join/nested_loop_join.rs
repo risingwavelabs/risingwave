@@ -27,7 +27,7 @@ use risingwave_common::util::chunk_coalesce::{DataChunkBuilder, SlicedDataChunk}
 use risingwave_expr::expr::{build_from_prost as expr_build_from_prost, BoxedExpression};
 use risingwave_pb::batch_plan::plan_node::NodeBody;
 
-use crate::executor::error::BatchExecutorError;
+use crate::error::BatchError;
 use crate::executor::join::chunked_data::RowId;
 use crate::executor::join::row_level_iter::RowLevelIter;
 use crate::executor::join::JoinType;
@@ -253,7 +253,7 @@ impl BoxedExecutorBuilder for NestedLoopJoinExecutor {
                     "NestedLoopJoinExecutor2".to_string(),
                 )))
             }
-            _ => Err(BatchExecutorError::UnsupportedFunction(format!(
+            _ => Err(BatchError::UnsupportedFunction(format!(
                 "Do not support {:?} join type now.",
                 join_type
             ))
@@ -320,7 +320,7 @@ impl NestedLoopJoinExecutor {
                 JoinType::RightOuter => self.do_right_outer_join(),
                 JoinType::RightSemi => self.do_right_semi_join(),
                 JoinType::RightAnti => self.do_right_anti_join(),
-                _ => Err(BatchExecutorError::UnsupportedFunction(
+                _ => Err(BatchError::UnsupportedFunction(
                     "Do not support other join types!".to_string(),
                 )
                 .into()),
@@ -365,7 +365,7 @@ impl NestedLoopJoinExecutor {
         match self.join_type {
             JoinType::RightOuter => self.do_probe_remaining_right_outer(),
             JoinType::RightAnti => self.do_probe_remaining_right_anti(),
-            _ => Err(BatchExecutorError::UnsupportedFunction(
+            _ => Err(BatchError::UnsupportedFunction(
                 "unsupported type for probe_remaining".to_string(),
             )
             .into()),
@@ -585,7 +585,7 @@ impl NestedLoopJoinExecutor {
             (Vis::Compact(_), _) => right.vis().clone(),
             (_, Vis::Compact(_)) => left.vis().clone(),
             (Vis::Bitmap(_), Vis::Bitmap(_)) => {
-                return Err(BatchExecutorError::UnsupportedFunction(
+                return Err(BatchError::UnsupportedFunction(
                     "The concatenate behaviour of two chunk with visibility is undefined"
                         .to_string(),
                 )

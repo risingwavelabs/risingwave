@@ -22,7 +22,7 @@ use risingwave_common::types::DataType;
 use risingwave_pb::batch_plan::plan_node::NodeBody;
 use risingwave_source::SourceManagerRef;
 
-use crate::executor::error::BatchExecutorError;
+use crate::error::BatchError;
 use crate::executor::{
     BoxedDataChunkStream, BoxedExecutor, BoxedExecutorBuilder, Executor, ExecutorBuilder,
 };
@@ -92,7 +92,7 @@ impl DeleteExecutor {
         let rows_deleted = try_join_all(notifiers)
             .await
             .map_err(|_| {
-                BatchExecutorError::Internal(anyhow!("failed to wait chunks to be written"))
+                BatchError::Internal(anyhow!("failed to wait chunks to be written"))
             })?
             .into_iter()
             .sum::<usize>();
@@ -129,7 +129,7 @@ impl BoxedExecutorBuilder for DeleteExecutor {
             source
                 .context()
                 .source_manager_ref()
-                .ok_or_else(|| BatchExecutorError::from(anyhow!("Source manager not found")))?,
+                .ok_or_else(|| BatchError::from(anyhow!("Source manager not found")))?,
             inputs.remove(0),
         )))
     }

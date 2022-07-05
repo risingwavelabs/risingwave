@@ -43,6 +43,8 @@ pub mod execution;
 pub mod executor;
 pub mod rpc;
 pub mod task;
+mod error;
+
 #[macro_use]
 extern crate log;
 #[macro_use]

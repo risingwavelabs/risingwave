@@ -101,8 +101,8 @@ pub enum ErrorCode {
     ),
     #[error("Expr error: {0:?}")]
     ExprError(BoxedError),
-    #[error("BatchExecutorError: {0:?}")]
-    BatchExecutorError(BoxedError),
+    #[error("BatchError: {0:?}")]
+    BatchError(BoxedError),
     #[error("Array error: {0:?}")]
     ArrayError(ArrayError),
     #[error("Stream error: {0:?}")]
@@ -342,7 +342,7 @@ impl ErrorCode {
             ErrorCode::SchedulerError(_) => 30,
             ErrorCode::SinkError(_) => 31,
             ErrorCode::RpcError(_) => 32,
-            ErrorCode::BatchExecutorError(_) => 33,
+            ErrorCode::BatchError(_) => 33,
             ErrorCode::UnknownError(_) => 101,
         }
     }

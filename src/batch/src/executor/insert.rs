@@ -27,12 +27,11 @@ use risingwave_common::types::DataType;
 use risingwave_pb::batch_plan::plan_node::NodeBody;
 use risingwave_source::SourceManagerRef;
 
+use crate::error::BatchError;
 use crate::executor::{
-    BatchExecutorError, BoxedDataChunkStream, BoxedExecutor, BoxedExecutorBuilder, Executor,
-    ExecutorBuilder,
+    BoxedDataChunkStream, BoxedExecutor, BoxedExecutorBuilder, Executor, ExecutorBuilder,
 };
 use crate::task::BatchTaskContext;
-
 /// [`InsertExecutor`] implements table insertion with values from its child executor.
 pub struct InsertExecutor {
     /// Target table id.
@@ -109,7 +108,7 @@ impl InsertExecutor {
         let rows_inserted = try_join_all(notifiers)
             .await
             .map_err(|_| {
-                BatchExecutorError::Internal(anyhow!("failed to wait chunks to be written"))
+                BatchError::Internal(anyhow!("failed to wait chunks to be written"))
             })?
             .into_iter()
             .sum::<usize>();
@@ -146,7 +145,7 @@ impl BoxedExecutorBuilder for InsertExecutor {
             source
                 .context()
                 .source_manager_ref()
-                .ok_or_else(|| BatchExecutorError::Internal(anyhow!("Source manager not found")))?,
+                .ok_or_else(|| BatchError::Internal(anyhow!("Source manager not found")))?,
             inputs.remove(0),
         )))
     }

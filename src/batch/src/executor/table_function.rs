@@ -29,7 +29,7 @@ use risingwave_pb::batch_plan::table_function_node::Type::*;
 use risingwave_pb::expr::ExprNode;
 
 use super::{BoxedExecutor, BoxedExecutorBuilder};
-use crate::executor::error::BatchExecutorError;
+use crate::error::BatchError;
 use crate::executor::{BoxedDataChunkStream, Executor, ExecutorBuilder};
 use crate::task::BatchTaskContext;
 
@@ -73,7 +73,7 @@ where
                 builder.append(Some(cur.as_scalar_ref())).unwrap();
                 cur = cur
                     .checked_add(step.as_scalar_ref())
-                    .ok_or(BatchExecutorError::NumericOutOfRange)?;
+                    .ok_or(BatchError::NumericOutOfRange)?;
             }
 
             let arr = builder.finish()?;
@@ -145,7 +145,7 @@ impl TableFunctionExecutorBuilder {
         if let (Some(start), Some(stop), Some(step)) = (start, stop, step) {
             Ok(GenerateSeries::<NaiveDateTimeArray, IntervalArray> { start, stop, step })
         } else {
-            Err(BatchExecutorError::Internal(anyhow!(
+            Err(BatchError::Internal(anyhow!(
                 "the parameters of Generate Series Function are incorrect".to_string(),
             ))
             .into())
@@ -162,7 +162,7 @@ impl TableFunctionExecutorBuilder {
         if let (Some(start), Some(stop), Some(step)) = (start, stop, step) {
             Ok(GenerateSeries::<I32Array, I32Array> { start, stop, step })
         } else {
-            Err(BatchExecutorError::Internal(anyhow!(
+            Err(BatchError::Internal(anyhow!(
                 "the parameters of Generate Series Function are incorrect".to_string(),
             ))
             .into())
@@ -184,7 +184,7 @@ impl TableFunctionExecutorBuilder {
                 let func = TableFunctionExecutorBuilder::new_int_generate_series(array_refs)?;
                 Ok((schema, TableFunction::GenerateSeriesInt(func)))
             }
-            _ => Err(BatchExecutorError::Internal(anyhow!(
+            _ => Err(BatchError::Internal(anyhow!(
                 "the parameters of Generate Series Function are incorrect".to_string(),
             ))
             .into()),

@@ -30,12 +30,11 @@ use risingwave_common::util::encoding_for_comparison::{encode_chunk, is_type_enc
 use risingwave_common::util::sort_util::{compare_two_row, HeapElem, OrderPair};
 use risingwave_pb::batch_plan::plan_node::NodeBody;
 
+use crate::error::BatchError;
 use crate::executor::{
-    BatchExecutorError, BoxedDataChunkStream, BoxedExecutor, BoxedExecutorBuilder, Executor,
-    ExecutorBuilder,
+    BoxedDataChunkStream, BoxedExecutor, BoxedExecutorBuilder, Executor, ExecutorBuilder,
 };
 use crate::task::BatchTaskContext;
-
 pub struct OrderByExecutor {
     child: Option<BoxedExecutor>,
     sorted_indices: Vec<Vec<usize>>,
@@ -234,7 +233,7 @@ impl OrderByExecutor {
                         ($b: ident, $a: ident, [$( $tt: ident), *]) => {
                             match ($b, $a) {
                                 $((ArrayBuilderImpl::$tt($b), ArrayImpl::$tt($a)) => Ok($b.append($a.value_at(top.elem_idx))),)*
-                                    _ => Err(BatchExecutorError::Internal(anyhow!("Unmatched array and array builder types"))),
+                                    _ => Err(BatchError::Internal(anyhow!("Unmatched array and array builder types"))),
                             }?
                         }
                     }

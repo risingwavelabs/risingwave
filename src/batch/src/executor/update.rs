@@ -25,12 +25,11 @@ use risingwave_expr::expr::{build_from_prost, BoxedExpression};
 use risingwave_pb::batch_plan::plan_node::NodeBody;
 use risingwave_source::SourceManagerRef;
 
+use crate::error::BatchError;
 use crate::executor::{
-    BatchExecutorError, BoxedDataChunkStream, BoxedExecutor, BoxedExecutorBuilder, Executor,
-    ExecutorBuilder,
+    BoxedDataChunkStream, BoxedExecutor, BoxedExecutorBuilder, Executor, ExecutorBuilder,
 };
 use crate::task::BatchTaskContext;
-
 /// [`UpdateExecutor`] implements table updation with values from its child executor and given
 /// expressions.
 // TODO: multiple `UPDATE`s in a single epoch may cause problems. Need validation on materialize.
@@ -143,7 +142,7 @@ impl UpdateExecutor {
         let rows_updated = try_join_all(notifiers)
             .await
             .map_err(|_| {
-                BatchExecutorError::Internal(anyhow!(
+                BatchError::Internal(anyhow!(
                     "failed to wait chunks to be written".to_owned(),
                 ))
             })?
