@@ -12,8 +12,10 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+use pgwire::pg_field_descriptor::{PgFieldDescriptor, TypeOid};
 use pgwire::pg_response::{PgResponse, StatementType};
-use risingwave_common::error::Result;
+use pgwire::types::Row;
+use risingwave_common::error::{ErrorCode, Result};
 use risingwave_sqlparser::ast::{Ident, SetVariableValue};
 
 use crate::session::OptimizerContext;
@@ -29,6 +31,35 @@ pub(super) fn handle_set(
     context.session_ctx.set_config(&name.value, &string_val)?;
 
     Ok(PgResponse::empty_result(StatementType::SET_OPTION))
+}
+
+pub(super) fn handle_show(context: OptimizerContext, variable: Vec<Ident>) -> Result<PgResponse> {
+    let config_reader = context.session_ctx.config();
+    if variable.len() != 1 {
+        return Err(
+            ErrorCode::InvalidInputSyntax("only one variable or ALL required".to_string()).into(),
+        );
+    }
+    let name = &variable[0].value;
+    if name.eq_ignore_ascii_case("ALL") {
+        return Err(ErrorCode::NotImplemented(
+            "SHOW ALL is not supported".to_string(),
+            3665.into(),
+        )
+        .into());
+    }
+    let row = Row::new(vec![Some(config_reader.get(name)?)]);
+
+    Ok(PgResponse::new(
+        StatementType::SHOW_COMMAND,
+        1,
+        vec![row],
+        vec![PgFieldDescriptor::new(
+            name.to_ascii_lowercase(),
+            TypeOid::Varchar,
+        )],
+        true,
+    ))
 }
 
 /// Convert any set variable to String.

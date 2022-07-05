@@ -69,3 +69,8 @@ tikv-jemallocator = "0.5"
 [[bench]]
 name = "filter"
 harness = false
+
+[[bench]]
+name = "nested_loop_join"
+harness = false
+

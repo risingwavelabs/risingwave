@@ -228,6 +228,13 @@ message LookupUnionNode {
   repeated uint32 order = 1;
 }
 
+message ExpandNode {
+  message Subset {
+    repeated uint32 keys = 1;
+  }
+  repeated Subset column_subsets = 1;
+}
+
 message StreamNode {
   oneof node_body {
     SourceNode source = 100;
@@ -251,6 +258,7 @@ message StreamNode {
     UnionNode union = 118;
     DeltaIndexJoinNode delta_index_join = 119;
     SinkNode sink = 120;
+    ExpandNode expand = 121;
   }
   // The id for the operator.
   uint64 operator_id = 1;
