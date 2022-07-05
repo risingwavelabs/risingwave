@@ -22,7 +22,6 @@ tests: boolean
 
 * Install `psql` and ensure that it's in your path.
 * Start risingwave cluster.
-* Enter `rust` folder of your workspace.
 * Run 
 ```shell
 RUST_BACKTRACE=1 target/debug/risingwave_regress_test -h 127.0.0.1 \
