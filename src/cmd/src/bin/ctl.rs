@@ -27,9 +27,9 @@ async fn main() -> Result<()> {
 
     let opts = risingwave_ctl::CliOpts::parse();
 
-    risingwave_logging::oneshot_common();
-    risingwave_logging::init_risingwave_logger(false, true);
-    // console_subscriber::init();
+    risingwave_rt::oneshot_common();
+    risingwave_rt::init_risingwave_logger(risingwave_rt::LoggerSettings::new_default());
+    // console_subscriber::init();a
 
     risingwave_ctl::start(opts).await
 }

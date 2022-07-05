@@ -71,12 +71,14 @@ impl Vis {
         }
     }
 
-    pub fn is_set(&self, idx: usize) -> ArrayResult<bool> {
+    /// # Panics
+    /// Panics if `idx > len`.
+    pub fn is_set(&self, idx: usize) -> bool {
         match self {
-            Vis::Bitmap(b) => b.is_set(idx),
+            Vis::Bitmap(b) => b.is_set(idx).unwrap(),
             Vis::Compact(c) => {
-                ensure!(idx <= *c);
-                Ok(true)
+                assert!(idx <= *c);
+                true
             }
         }
     }
@@ -119,7 +121,7 @@ impl DataChunk {
         let mut array_builders = data_types
             .iter()
             .map(|data_type| data_type.create_array_builder(1))
-            .collect::<ArrayResult<Vec<_>>>()?;
+            .collect::<Vec<_>>();
 
         for row in rows {
             for (datum, builder) in row.0.iter().zip_eq(array_builders.iter_mut()) {
@@ -507,8 +509,7 @@ impl DataChunkTestExt for DataChunk {
                 _ => todo!("unsupported type: {c:?}"),
             })
             .map(|ty| ty.create_array_builder(1))
-            .collect::<ArrayResult<Vec<_>>>()
-            .unwrap();
+            .collect::<Vec<_>>();
         let mut visibility = vec![];
         for mut line in lines {
             line = line.trim();
@@ -629,7 +630,7 @@ mod tests {
         let test_case = |num_chunks: usize, chunk_size: usize, new_chunk_size: usize| {
             let mut chunks = vec![];
             for chunk_idx in 0..num_chunks {
-                let mut builder = PrimitiveArrayBuilder::<i32>::new(0).unwrap();
+                let mut builder = PrimitiveArrayBuilder::<i32>::new(0);
                 for i in chunk_size * chunk_idx..chunk_size * (chunk_idx + 1) {
                     builder.append(Some(i as i32)).unwrap();
                 }
@@ -691,7 +692,7 @@ mod tests {
         let length = 5;
         let mut columns = vec![];
         for i in 0..num_of_columns {
-            let mut builder = PrimitiveArrayBuilder::<i32>::new(length).unwrap();
+            let mut builder = PrimitiveArrayBuilder::<i32>::new(length);
             for _ in 0..length {
                 builder.append(Some(i as i32)).unwrap();
             }

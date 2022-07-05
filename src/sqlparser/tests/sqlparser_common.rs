@@ -377,6 +377,8 @@ fn parse_select_count_wildcard() {
             args: vec![FunctionArg::Unnamed(FunctionArgExpr::Wildcard)],
             over: None,
             distinct: false,
+            order_by: vec![],
+            filter: None
         }),
         expr_from_projection(only(&select.projection))
     );
@@ -395,6 +397,8 @@ fn parse_select_count_distinct() {
             }))],
             over: None,
             distinct: true,
+            order_by: vec![],
+            filter: None
         }),
         expr_from_projection(only(&select.projection))
     );
@@ -1090,9 +1094,11 @@ fn parse_select_having() {
                 args: vec![FunctionArg::Unnamed(FunctionArgExpr::Wildcard)],
                 over: None,
                 distinct: false,
+                order_by: vec![],
+                filter: None
             })),
             op: BinaryOperator::Gt,
-            right: Box::new(Expr::Value(number("1")))
+            right: Box::new(Expr::Value(number("1"))),
         }),
         select.having
     );
@@ -1782,6 +1788,8 @@ fn parse_named_argument_function() {
             ],
             over: None,
             distinct: false,
+            order_by: vec![],
+            filter: None,
         }),
         expr_from_projection(only(&select.projection))
     );
@@ -1815,6 +1823,8 @@ fn parse_window_functions() {
                 window_frame: None,
             }),
             distinct: false,
+            order_by: vec![],
+            filter: None,
         }),
         expr_from_projection(&select.projection[0])
     );
@@ -1825,6 +1835,66 @@ fn parse_aggregate_with_group_by() {
     let sql = "SELECT a, COUNT(1), MIN(b), MAX(b) FROM foo GROUP BY a";
     let _ast = verified_only_select(sql);
     // TODO: assertions
+}
+
+#[test]
+fn parse_aggregate_with_order_by() {
+    let sql = "SELECT STRING_AGG(a, b ORDER BY b ASC, a DESC) FROM foo";
+    let select = verified_only_select(sql);
+    assert_eq!(
+        &Expr::Function(Function {
+            name: ObjectName(vec![Ident::new("STRING_AGG")]),
+            args: vec![
+                FunctionArg::Unnamed(FunctionArgExpr::Expr(Expr::Identifier(Ident::new("a")))),
+                FunctionArg::Unnamed(FunctionArgExpr::Expr(Expr::Identifier(Ident::new("b")))),
+            ],
+            over: None,
+            distinct: false,
+            order_by: vec![
+                OrderByExpr {
+                    expr: Expr::Identifier(Ident::new("b")),
+                    asc: Some(true),
+                    nulls_first: None,
+                },
+                OrderByExpr {
+                    expr: Expr::Identifier(Ident::new("a")),
+                    asc: Some(false),
+                    nulls_first: None,
+                }
+            ],
+            filter: None,
+        }),
+        expr_from_projection(only(&select.projection))
+    );
+}
+
+#[test]
+fn parse_aggregate_with_filter() {
+    let sql = "SELECT sum(a) FILTER(WHERE (a > 0) AND (a IS NOT NULL)) FROM foo";
+    let select = verified_only_select(sql);
+    assert_eq!(
+        &Expr::Function(Function {
+            name: ObjectName(vec![Ident::new("sum")]),
+            args: vec![FunctionArg::Unnamed(FunctionArgExpr::Expr(
+                Expr::Identifier(Ident::new("a"))
+            )),],
+            over: None,
+            distinct: false,
+            order_by: vec![],
+            filter: Some(Box::new(Expr::BinaryOp {
+                left: Box::new(Expr::Nested(Box::new(Expr::BinaryOp {
+                    left: Box::new(Expr::Identifier(Ident::new("a"))),
+                    op: BinaryOperator::Gt,
+                    right: Box::new(Expr::Value(Value::Number("0".to_string(), false)))
+                }))),
+                op: BinaryOperator::And,
+                right: Box::new(Expr::Nested(Box::new(Expr::IsNotNull(Box::new(
+                    Expr::Identifier(Ident::new("a"))
+                )))))
+            })),
+        }),
+        expr_from_projection(only(&select.projection)),
+    );
 }
 
 #[test]
@@ -2059,6 +2129,8 @@ fn parse_delimited_identifiers() {
             args: vec![],
             over: None,
             distinct: false,
+            order_by: vec![],
+            filter: None,
         }),
         expr_from_projection(&select.projection[1]),
     );

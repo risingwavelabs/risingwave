@@ -81,7 +81,7 @@ macro_rules! impl_array_methods {
         }
 
         fn create_array_builder(capacity: usize) -> ArrayResult<ArrayBuilderImpl> {
-            let array_builder = PrimitiveArrayBuilder::<$scalar_type>::new(capacity)?;
+            let array_builder = PrimitiveArrayBuilder::<$scalar_type>::new(capacity);
             Ok(ArrayBuilderImpl::$array_impl_variant(array_builder))
         }
     };
@@ -142,7 +142,7 @@ pub struct PrimitiveArray<T: PrimitiveArrayItemType> {
 
 impl<T: PrimitiveArrayItemType> PrimitiveArray<T> {
     pub fn from_slice(data: &[Option<T>]) -> ArrayResult<Self> {
-        let mut builder = <Self as Array>::Builder::new(data.len())?;
+        let mut builder = <Self as Array>::Builder::new(data.len());
         for i in data {
             builder.append(*i)?;
         }
@@ -241,11 +241,11 @@ pub struct PrimitiveArrayBuilder<T: PrimitiveArrayItemType> {
 impl<T: PrimitiveArrayItemType> ArrayBuilder for PrimitiveArrayBuilder<T> {
     type ArrayType = PrimitiveArray<T>;
 
-    fn with_meta(capacity: usize, _meta: ArrayMeta) -> ArrayResult<Self> {
-        Ok(Self {
+    fn with_meta(capacity: usize, _meta: ArrayMeta) -> Self {
+        Self {
             bitmap: BitmapBuilder::with_capacity(capacity),
             data: Vec::with_capacity(capacity),
-        })
+        }
     }
 
     fn append(&mut self, value: Option<T>) -> ArrayResult<()> {
@@ -286,7 +286,7 @@ mod tests {
     fn helper_test_builder<T: PrimitiveArrayItemType>(
         data: Vec<Option<T>>,
     ) -> ArrayResult<PrimitiveArray<T>> {
-        let mut builder = PrimitiveArrayBuilder::<T>::new(data.len())?;
+        let mut builder = PrimitiveArrayBuilder::<T>::new(data.len());
         for d in data {
             builder.append(d)?;
         }

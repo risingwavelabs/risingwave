@@ -22,14 +22,15 @@ use parking_lot::Mutex;
 use risingwave_common::buffer::Bitmap;
 use risingwave_common::config::StreamingConfig;
 use risingwave_common::error::{ErrorCode, Result, RwError};
-use risingwave_common::try_match_expand;
 use risingwave_common::util::addr::{is_local_address, HostAddr};
 use risingwave_common::util::compress::decompress_data;
+use risingwave_hummock_sdk::LocalSstableInfo;
 use risingwave_pb::common::ActorInfo;
-use risingwave_pb::stream_plan::stream_node::NodeBody;
 use risingwave_pb::{stream_plan, stream_service};
 use risingwave_rpc_client::ComputeClientPool;
-use risingwave_storage::{dispatch_state_store, StateStore, StateStoreImpl};
+use risingwave_storage::{
+    dispatch_hummock_state_store, dispatch_state_store, StateStore, StateStoreImpl,
+};
 use tokio::sync::mpsc::{channel, Receiver};
 use tokio::task::JoinHandle;
 
@@ -64,8 +65,10 @@ pub struct LocalStreamManagerCore {
 
     /// Stores all actor information, taken after actor built.
     actors: HashMap<ActorId, stream_plan::StreamActor>,
-    /// Store all actor execution time montioring tasks.
+
+    /// Stores all actor tokio runtime montioring tasks.
     actor_monitor_tasks: HashMap<ActorId, JoinHandle<()>>,
+
     /// Mock source, `actor_id = 0`.
     /// TODO: remove this
     mock_source: ConsumableChannelPair,
@@ -181,40 +184,36 @@ impl LocalStreamManager {
         barrier_manager.drain_collect_rx(prev_epoch);
     }
 
-    /// Use `prev_epoch` to find collect rx. And wait for all actor to be collected before
+    /// Use `epoch` to find collect rx. And wait for all actor to be collected before
     /// returning.
-    pub async fn collect_barrier_and_sync(
-        &self,
-        prev_epoch: u64,
-        need_sync: bool,
-    ) -> CollectResult {
+    pub async fn collect_barrier(&self, epoch: u64) -> CollectResult {
         let rx = {
             let core = self.core.lock();
             let mut barrier_manager = core.context.lock_barrier_manager();
-            barrier_manager.remove_collect_rx(prev_epoch)
+            barrier_manager.remove_collect_rx(epoch)
         };
         // Wait for all actors finishing this barrier.
-        let mut collect_result = rx.await.unwrap();
+        rx.await.unwrap()
+    }
 
-        // Sync states from shared buffer to S3 before telling meta service we've done.
-        if need_sync {
-            dispatch_state_store!(self.state_store(), store, {
-                match store.sync(Some(prev_epoch)).await {
-                    Ok(_) => {
-                        collect_result.synced_sstables =
-                        store.get_uncommitted_ssts(prev_epoch);
-                    }
-                    // TODO: Handle sync failure by propagating it
-                    // back to global barrier manager
-                    Err(e) => panic!(
-                        "Failed to sync state store after receiving barrier prev_epoch {:?} due to {}",
-                        prev_epoch, e
-                    ),
-                }
-            });
-        }
+    pub async fn sync_epoch(&self, epoch: u64) -> Vec<LocalSstableInfo> {
+        dispatch_state_store!(self.state_store(), store, {
+            match store.sync(Some(epoch)).await {
+                Ok(_) => store.get_uncommitted_ssts(epoch),
+                // TODO: Handle sync failure by propagating it
+                // back to global barrier manager
+                Err(e) => panic!(
+                    "Failed to sync state store after receiving barrier prev_epoch {:?} due to {}",
+                    epoch, e
+                ),
+            }
+        })
+    }
 
-        collect_result
+    pub async fn clear_storage_buffer(&self) {
+        dispatch_state_store!(self.state_store(), store, {
+            store.clear_shared_buffer().await.unwrap();
+        });
     }
 
     /// Broadcast a barrier to all senders. Returns immediately, and caller won't be notified when
@@ -259,8 +258,9 @@ impl LocalStreamManager {
 
         self.drain_collect_rx(barrier.epoch.prev);
         self.send_barrier(barrier, actor_ids_to_send, actor_ids_to_collect)?;
-        self.collect_barrier_and_sync(barrier.epoch.prev, false)
-            .await;
+        self.collect_barrier(barrier.epoch.prev).await;
+        // Clear shared buffer in storage to release memory
+        self.clear_storage_buffer().await;
         self.core.lock().drop_all_actors();
 
         Ok(())
@@ -310,7 +310,11 @@ impl LocalStreamManager {
 
     /// This function could only be called once during the lifecycle of `LocalStreamManager` for
     /// now.
-    pub fn build_actors(&self, actors: &[ActorId], env: StreamEnvironment) -> Result<()> {
+    pub async fn build_actors(&self, actors: &[ActorId], env: StreamEnvironment) -> Result<()> {
+        // Ensure compaction group mapping is available locally.
+        dispatch_hummock_state_store!(self.state_store(), store, {
+            store.update_compaction_group_cache().await?;
+        });
         let mut core = self.core.lock();
         core.build_actors(actors, env)
     }
@@ -412,7 +416,13 @@ impl LocalStreamManagerCore {
                 .iter()
                 .map(|down_id| {
                     let downstream_addr = self.get_actor_info(down_id)?.get_host()?.into();
-                    new_output(&self.context, downstream_addr, actor_id, *down_id)
+                    new_output(
+                        &self.context,
+                        downstream_addr,
+                        actor_id,
+                        *down_id,
+                        self.streaming_metrics.clone(),
+                    )
                 })
                 .collect::<Result<Vec<_>>>()?;
 
@@ -788,45 +798,6 @@ impl LocalStreamManagerCore {
         self.actor_infos.clear();
     }
 
-    fn build_channel_for_chain_node(
-        &self,
-        actor_id: ActorId,
-        stream_node: &stream_plan::StreamNode,
-    ) -> Result<()> {
-        if let NodeBody::Chain(_) = stream_node.node_body.as_ref().unwrap() {
-            // Create channel based on upstream actor id for [`ChainNode`], check if upstream
-            // exists.
-            let merge = try_match_expand!(
-                stream_node
-                    .input
-                    .get(0)
-                    .unwrap()
-                    .node_body
-                    .as_ref()
-                    .unwrap(),
-                NodeBody::Merge,
-                "first input of chain node should be merge node"
-            )?;
-            for upstream_actor_id in &merge.upstream_actor_id {
-                if !self.actor_infos.contains_key(upstream_actor_id) {
-                    return Err(ErrorCode::InternalError(format!(
-                        "chain upstream actor {} not exists",
-                        upstream_actor_id
-                    ))
-                    .into());
-                }
-                let (tx, rx) = channel(LOCAL_OUTPUT_CHANNEL_SIZE);
-                let up_down_ids = (*upstream_actor_id, actor_id);
-                self.context
-                    .add_channel_pairs(up_down_ids, (Some(tx), Some(rx)));
-            }
-        }
-        for child in &stream_node.input {
-            self.build_channel_for_chain_node(actor_id, child)?;
-        }
-        Ok(())
-    }
-
     fn update_actors(
         &mut self,
         actors: &[stream_plan::StreamActor],
@@ -851,16 +822,14 @@ impl LocalStreamManagerCore {
             }
         }
 
-        for (current_id, actor) in &self.actors {
-            self.build_channel_for_chain_node(*current_id, actor.nodes.as_ref().unwrap())?;
-
+        for actor in actors {
             // At this time, the graph might not be complete, so we do not check if downstream
             // has `current_id` as upstream.
             let down_id = actor
                 .dispatcher
                 .iter()
                 .flat_map(|x| x.downstream_actor_id.iter())
-                .map(|id| (*current_id, *id))
+                .map(|id| (actor.actor_id, *id))
                 .collect_vec();
             update_upstreams(&self.context, &down_id);
 
@@ -868,7 +837,7 @@ impl LocalStreamManagerCore {
             let mut up_id = vec![];
             for upstream_id in actor.get_upstream_actor_id() {
                 if !local_actor_ids.contains(upstream_id) {
-                    up_id.push((*upstream_id, *current_id));
+                    up_id.push((*upstream_id, actor.actor_id));
                 }
             }
             update_upstreams(&self.context, &up_id);

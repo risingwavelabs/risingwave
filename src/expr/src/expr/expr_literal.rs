@@ -54,7 +54,7 @@ impl Expression for LiteralExpression {
     }
 
     fn eval(&self, input: &DataChunk) -> Result<ArrayRef> {
-        let mut array_builder = self.return_type.create_array_builder(input.capacity())?;
+        let mut array_builder = self.return_type.create_array_builder(input.capacity());
         let capacity = input.capacity();
         let builder = &mut array_builder;
         let literal = &self.literal;
