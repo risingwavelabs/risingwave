@@ -97,6 +97,12 @@ impl Binder {
                 substring_from,
                 substring_for,
             } => self.bind_substring(*expr, substring_from, substring_for),
+            Expr::Overlay {
+                expr,
+                new_substring,
+                start,
+                count,
+            } => self.bind_overlay(*expr, *new_substring, *start, count),
             _ => Err(ErrorCode::NotImplemented(
                 format!("unsupported expression {:?}", expr),
                 112.into(),
@@ -245,6 +251,24 @@ impl Binder {
             args.push(self.bind_expr(*expr)?);
         }
         FunctionCall::new(ExprType::Substr, args).map(|f| f.into())
+    }
+
+    fn bind_overlay(
+        &mut self,
+        expr: Expr,
+        new_substring: Expr,
+        start: Expr,
+        count: Option<Box<Expr>>,
+    ) -> Result<ExprImpl> {
+        let mut args = vec![
+            self.bind_expr(expr)?,
+            self.bind_expr(new_substring)?,
+            self.bind_expr(start)?,
+        ];
+        if let Some(count) = count {
+            args.push(self.bind_expr(*count)?);
+        }
+        FunctionCall::new(ExprType::Overlay, args).map(|f| f.into())
     }
 
     /// Bind `expr (not) between low and high`

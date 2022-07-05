@@ -130,6 +130,7 @@ fn make_general_expr(func: ExprType, exprs: Vec<Expr>) -> Option<Expr> {
         E::Replace => Some(Expr::Function(make_func("replace", &exprs))),
         E::Md5 => Some(Expr::Function(make_func("md5", &exprs))),
         E::ToChar => Some(Expr::Function(make_func("to_char", &exprs))),
+        E::Overlay => Some(Expr::Function(make_func("overlay", &exprs))),
         _ => None,
     }
 }
