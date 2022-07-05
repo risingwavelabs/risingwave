@@ -13,7 +13,7 @@
 // limitations under the License.
 
 use risingwave_common::catalog::{ColumnDesc, Field, Schema, TableId};
-use risingwave_common::util::sort_util::{OrderPair, OrderType};
+use risingwave_common::util::sort_util::{OrderPair};
 use risingwave_pb::stream_plan::lookup_node::ArrangementTableId;
 
 use super::*;
@@ -34,10 +34,10 @@ impl ExecutorBuilder for LookupExecutorBuilder {
         let stream = params.input.remove(0);
 
         let arrangement_order_rules = lookup
-            .arrange_key
+            .get_arrangement_table_info()?
+            .arrange_key_orders
             .iter()
-            // TODO: allow descending order
-            .map(|x| OrderPair::new(*x as usize, OrderType::Ascending))
+            .map(OrderPair::from_prost)
             .collect();
 
         let arrangement_table_id = match lookup.arrangement_table_id.as_ref().unwrap() {
