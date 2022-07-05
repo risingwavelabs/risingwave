@@ -253,9 +253,10 @@ impl BoxedExecutorBuilder for NestedLoopJoinExecutor {
                     "NestedLoopJoinExecutor2".to_string(),
                 )))
             }
-            _ => Err(BatchExecutorError::UnsupportedFunction(
-                format!("Do not support {:?} join type now.", join_type).into(),
-            )
+            _ => Err(BatchExecutorError::UnsupportedFunction(format!(
+                "Do not support {:?} join type now.",
+                join_type
+            ))
             .into()),
         }
     }

@@ -128,7 +128,7 @@ impl BoxedExecutorBuilder for HashAggExecutorBuilder {
 
         let identity = source.plan_node().get_identity().clone();
         Self::deserialize(
-            &hash_agg_node,
+            hash_agg_node,
             inputs.remove(0),
             source.task_id.clone(),
             identity,
