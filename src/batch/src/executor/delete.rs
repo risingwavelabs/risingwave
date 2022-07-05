@@ -12,16 +12,17 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+use anyhow::anyhow;
 use futures::future::try_join_all;
 use futures_async_stream::try_stream;
 use risingwave_common::array::{ArrayBuilder, DataChunk, Op, PrimitiveArrayBuilder, StreamChunk};
 use risingwave_common::catalog::{Field, Schema, TableId};
-use risingwave_common::error::ErrorCode::InternalError;
-use risingwave_common::error::{ErrorCode, Result, RwError};
+use risingwave_common::error::{Result, RwError};
 use risingwave_common::types::DataType;
 use risingwave_pb::batch_plan::plan_node::NodeBody;
 use risingwave_source::SourceManagerRef;
 
+use crate::executor::error::BatchExecutorError;
 use crate::executor::{
     BoxedDataChunkStream, BoxedExecutor, BoxedExecutorBuilder, Executor, ExecutorBuilder,
 };
@@ -91,9 +92,7 @@ impl DeleteExecutor {
         let rows_deleted = try_join_all(notifiers)
             .await
             .map_err(|_| {
-                RwError::from(ErrorCode::InternalError(
-                    "failed to wait chunks to be written".to_owned(),
-                ))
+                BatchExecutorError::Internal(anyhow!("failed to wait chunks to be written"))
             })?
             .into_iter()
             .sum::<usize>();
@@ -130,7 +129,7 @@ impl BoxedExecutorBuilder for DeleteExecutor {
             source
                 .context()
                 .source_manager_ref()
-                .ok_or_else(|| InternalError("Source manager not found".to_string()))?,
+                .ok_or_else(|| BatchExecutorError::from(anyhow!("Source manager not found")))?,
             inputs.remove(0),
         )))
     }
