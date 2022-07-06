@@ -202,11 +202,7 @@ impl DynamicFilterExecutor {
                                         })?
                                         .remove(&row.to_owned_row());
 
-                                    if !contains_element {
-                                        return Err(StreamExecutorError::from(anyhow!(
-                                            "Deleting non-existent element"
-                                        )));
-                                    }
+                                    ensure!(!contains_element, "Deleting non-existent element");
                                 }
                             }
                         }

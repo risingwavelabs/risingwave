@@ -803,7 +803,7 @@ impl ToStream for LogicalJoin {
 
             let (left_ref_index, new_expr) = if let Some(expr) = conj.first() && conj.len() == 1
             {
-                if let Some((left_ref, _, right_ref)) = expr.as_comparison_cond()
+                if let Some((left_ref, op, right_ref)) = expr.as_comparison_cond()
                     && left_ref.index < self.left().schema().len()
                     && right_ref.index >= self.left().schema().len()
                 {
