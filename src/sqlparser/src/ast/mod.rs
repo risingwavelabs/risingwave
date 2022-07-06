@@ -1540,6 +1540,7 @@ pub struct Function {
     pub distinct: bool,
     // string_agg and array_agg both support ORDER BY
     pub order_by: Vec<OrderByExpr>,
+    pub filter: Option<Box<Expr>>,
 }
 
 impl fmt::Display for Function {
@@ -1559,6 +1560,9 @@ impl fmt::Display for Function {
         )?;
         if let Some(o) = &self.over {
             write!(f, " OVER ({})", o)?;
+        }
+        if let Some(filter) = &self.filter {
+            write!(f, " FILTER(WHERE {})", filter)?;
         }
         Ok(())
     }

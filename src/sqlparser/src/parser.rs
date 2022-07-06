@@ -593,12 +593,23 @@ impl Parser {
             None
         };
 
+        let filter = if self.parse_keyword(Keyword::FILTER) {
+            self.expect_token(&Token::LParen)?;
+            self.expect_keyword(Keyword::WHERE)?;
+            let filter_expr = self.parse_expr()?;
+            self.expect_token(&Token::RParen)?;
+            Some(Box::new(filter_expr))
+        } else {
+            None
+        };
+
         Ok(Expr::Function(Function {
             name,
             args,
             over,
             distinct,
             order_by,
+            filter,
         }))
     }
 
@@ -2578,10 +2589,10 @@ impl Parser {
             })
         } else if variable.value == "TRANSACTION" && modifier.is_none() {
             if self.parse_keyword(Keyword::SNAPSHOT) {
-                let snaphot_id = self.parse_value()?;
+                let snapshot_id = self.parse_value()?;
                 return Ok(Statement::SetTransaction {
                     modes: vec![],
-                    snapshot: Some(snaphot_id),
+                    snapshot: Some(snapshot_id),
                     session: false,
                 });
             }

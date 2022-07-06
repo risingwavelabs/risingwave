@@ -21,7 +21,7 @@ use std::time::{Duration, Instant};
 
 use itertools::Itertools;
 use prost::Message;
-use risingwave_common::util::epoch::INVALID_EPOCH;
+use risingwave_common::util::epoch::{Epoch, INVALID_EPOCH};
 use risingwave_hummock_sdk::compact::compact_task_to_string;
 use risingwave_hummock_sdk::compaction_group::hummock_version_ext::HummockVersionExt;
 use risingwave_hummock_sdk::{
@@ -653,6 +653,7 @@ where
                     .filter(|id_to_option| compact_task.existing_table_ids.contains(id_to_option.0))
                     .map(|id_to_option| (*id_to_option.0, id_to_option.1.into()))
                     .collect();
+                compact_task.current_epoch_time = Epoch::now().0;
 
                 compact_task.compaction_filter_mask =
                     compact_status.compaction_config.compaction_filter_mask;

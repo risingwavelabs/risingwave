@@ -52,6 +52,10 @@ pub struct PlanAggCall {
     pub inputs: Vec<InputRef>,
 
     pub distinct: bool,
+    /// Selective aggregation: only the input rows for which
+    /// the filter_clause evaluates to true will be fed to aggregate function.
+    /// Other rows are discarded.
+    pub filter: Condition,
 }
 
 impl fmt::Debug for PlanAggCall {
@@ -69,6 +73,13 @@ impl fmt::Debug for PlanAggCall {
                 }
             }
             write!(f, ")")?;
+        }
+        if !self.filter.always_true() {
+            write!(
+                f,
+                " filter({:?})",
+                self.filter.as_expr_unless_true().unwrap()
+            )?;
         }
         Ok(())
     }
@@ -99,6 +110,7 @@ impl PlanAggCall {
         PlanAggCall {
             agg_kind: total_agg_kind,
             inputs: vec![InputRef::new(partial_output_idx, self.return_type.clone())],
+            filter: Condition::true_cond(),
             ..self.clone()
         }
     }
@@ -109,6 +121,7 @@ impl PlanAggCall {
             return_type: DataType::Int64,
             inputs: vec![],
             distinct: false,
+            filter: Condition::true_cond(),
         }
     }
 }
@@ -232,6 +245,12 @@ struct LogicalAggBuilder {
     agg_calls: Vec<PlanAggCall>,
     /// the error during the expression rewriting
     error: Option<ErrorCode>,
+    /// If `is_in_filter_clause` is true, it means that
+    /// we are processing a filter clause.
+    /// This field is needed because input refs in filter clause
+    /// are allowed to refer to any columns, while those not in filter
+    /// clause are only allowed to refer to group keys.
+    is_in_filter_clause: bool,
 }
 
 impl LogicalAggBuilder {
@@ -257,6 +276,7 @@ impl LogicalAggBuilder {
             agg_calls: vec![],
             error: None,
             input_proj_builder,
+            is_in_filter_clause: false,
         })
     }
 
@@ -300,14 +320,18 @@ impl ExprRewriter for LogicalAggBuilder {
     /// Note that the rewriter does not traverse into inputs of agg calls.
     fn rewrite_agg_call(&mut self, agg_call: AggCall) -> ExprImpl {
         let return_type = agg_call.return_type();
-        let (agg_kind, inputs, distinct) = agg_call.decompose();
-
+        let (agg_kind, inputs, distinct, filter) = agg_call.decompose();
+        self.is_in_filter_clause = true;
+        let filter = filter.rewrite_expr(self);
+        self.is_in_filter_clause = false;
         for i in &inputs {
             if i.has_agg_call() {
                 self.error = Some(ErrorCode::InvalidInputSyntax(
                     "Aggregation calls should not be nested".into(),
                 ));
-                return AggCall::new(agg_kind, inputs, distinct).unwrap().into();
+                return AggCall::new(agg_kind, inputs, distinct, filter)
+                    .unwrap()
+                    .into();
             }
         }
 
@@ -331,6 +355,7 @@ impl ExprRewriter for LogicalAggBuilder {
                 return_type: left_return_type.clone(),
                 inputs: inputs.clone(),
                 distinct,
+                filter: filter.clone(),
             });
             let left = ExprImpl::from(InputRef::new(
                 self.group_keys.len() + self.agg_calls.len() - 1,
@@ -347,6 +372,7 @@ impl ExprRewriter for LogicalAggBuilder {
                 return_type: right_return_type.clone(),
                 inputs,
                 distinct,
+                filter,
             });
 
             let right = InputRef::new(
@@ -361,6 +387,7 @@ impl ExprRewriter for LogicalAggBuilder {
                 return_type: return_type.clone(),
                 inputs,
                 distinct,
+                filter,
             });
             ExprImpl::from(InputRef::new(
                 self.group_keys.len() + self.agg_calls.len() - 1,
@@ -390,6 +417,8 @@ impl ExprRewriter for LogicalAggBuilder {
         let expr = input_ref.into();
         if let Some(group_key) = self.try_as_group_expr(&expr) {
             InputRef::new(group_key, expr.return_type()).into()
+        } else if self.is_in_filter_clause {
+            InputRef::new(self.input_proj_builder.add_expr(&expr), expr.return_type()).into()
         } else {
             self.error = Some(ErrorCode::InvalidInputSyntax(
                 "column must appear in the GROUP BY clause or be used in an aggregate function"
@@ -540,7 +569,7 @@ impl PlanTreeNodeUnary for LogicalAgg {
     fn rewrite_with_input(
         &self,
         input: PlanRef,
-        input_col_change: ColIndexMapping,
+        mut input_col_change: ColIndexMapping,
     ) -> (Self, ColIndexMapping) {
         let agg_calls = self
             .agg_calls
@@ -550,6 +579,7 @@ impl PlanTreeNodeUnary for LogicalAgg {
                 agg_call.inputs.iter_mut().for_each(|i| {
                     *i = InputRef::new(input_col_change.map(i.index()), i.return_type())
                 });
+                agg_call.filter = agg_call.filter.rewrite_expr(&mut input_col_change);
                 agg_call
             })
             .collect();
@@ -590,7 +620,8 @@ impl ColPrunable for LogicalAgg {
         let group_key_required_cols = FixedBitSet::from_iter(self.group_keys.iter().copied());
 
         let (agg_call_required_cols, agg_calls) = {
-            let mut tmp = FixedBitSet::with_capacity(self.input().schema().fields().len());
+            let input_cnt = self.input().schema().fields().len();
+            let mut tmp = FixedBitSet::with_capacity(input_cnt);
             let new_agg_calls = required_cols
                 .iter()
                 .filter(|&&index| index >= self.group_keys.len())
@@ -598,6 +629,10 @@ impl ColPrunable for LogicalAgg {
                     let index = index - self.group_keys.len();
                     let agg_call = self.agg_calls[index].clone();
                     tmp.extend(agg_call.inputs.iter().map(|x| x.index()));
+                    // collect columns used in aggregate filter expressions
+                    for i in &agg_call.filter.conjunctions {
+                        tmp.union_with(&i.collect_input_refs(input_cnt));
+                    }
                     agg_call
                 })
                 .collect_vec();
@@ -845,8 +880,13 @@ mod tests {
 
         // Test case: select v1, min(v2) from test group by v1;
         {
-            let min_v2 =
-                AggCall::new(AggKind::Min, vec![input_ref_2.clone().into()], false).unwrap();
+            let min_v2 = AggCall::new(
+                AggKind::Min,
+                vec![input_ref_2.clone().into()],
+                false,
+                Condition::true_cond(),
+            )
+            .unwrap();
             let select_exprs = vec![input_ref_1.clone().into(), min_v2.into()];
             let group_exprs = vec![input_ref_1.clone().into()];
 
@@ -864,10 +904,20 @@ mod tests {
 
         // Test case: select v1, min(v2) + max(v3) from t group by v1;
         {
-            let min_v2 =
-                AggCall::new(AggKind::Min, vec![input_ref_2.clone().into()], false).unwrap();
-            let max_v3 =
-                AggCall::new(AggKind::Max, vec![input_ref_3.clone().into()], false).unwrap();
+            let min_v2 = AggCall::new(
+                AggKind::Min,
+                vec![input_ref_2.clone().into()],
+                false,
+                Condition::true_cond(),
+            )
+            .unwrap();
+            let max_v3 = AggCall::new(
+                AggKind::Max,
+                vec![input_ref_3.clone().into()],
+                false,
+                Condition::true_cond(),
+            )
+            .unwrap();
             let func_call =
                 FunctionCall::new(ExprType::Add, vec![min_v2.into(), max_v3.into()]).unwrap();
             let select_exprs = vec![input_ref_1.clone().into(), ExprImpl::from(func_call)];
@@ -900,7 +950,13 @@ mod tests {
                 vec![input_ref_1.into(), input_ref_3.into()],
             )
             .unwrap();
-            let agg_call = AggCall::new(AggKind::Min, vec![v1_mult_v3.into()], false).unwrap();
+            let agg_call = AggCall::new(
+                AggKind::Min,
+                vec![v1_mult_v3.into()],
+                false,
+                Condition::true_cond(),
+            )
+            .unwrap();
             let select_exprs = vec![input_ref_2.clone().into(), agg_call.into()];
             let group_exprs = vec![input_ref_2.into()];
 
@@ -930,6 +986,7 @@ mod tests {
             return_type: ty.clone(),
             inputs: vec![InputRef::new(2, ty.clone())],
             distinct: false,
+            filter: Condition::true_cond(),
         };
         LogicalAgg::new(vec![agg_call], vec![1], values.into())
     }
@@ -1047,6 +1104,7 @@ mod tests {
             return_type: ty.clone(),
             inputs: vec![InputRef::new(2, ty.clone())],
             distinct: false,
+            filter: Condition::true_cond(),
         };
         let agg = LogicalAgg::new(vec![agg_call], vec![1], values.into());
 
@@ -1110,12 +1168,14 @@ mod tests {
                 return_type: ty.clone(),
                 inputs: vec![InputRef::new(2, ty.clone())],
                 distinct: false,
+                filter: Condition::true_cond(),
             },
             PlanAggCall {
                 agg_kind: AggKind::Max,
                 return_type: ty.clone(),
                 inputs: vec![InputRef::new(1, ty.clone())],
                 distinct: false,
+                filter: Condition::true_cond(),
             },
         ];
         let agg = LogicalAgg::new(agg_calls, vec![1, 2], values.into());
