@@ -45,7 +45,7 @@ impl BatchSeqScan {
         {
             // validate scan_range
             let scan_pk_prefix_len = scan_range.eq_conds.len();
-            let order_len = logical.table_desc().order_column_ids().len();
+            let order_len = logical.table_desc().order_column_indices().len();
             assert!(
                 scan_pk_prefix_len < order_len
                     || (scan_pk_prefix_len == order_len && is_full_range(&scan_range.range)),
@@ -177,6 +177,8 @@ impl ToBatchProst for BatchSeqScan {
                     .map(ColumnId::get_id)
                     .collect(),
                 scan_range: Some(self.scan_range.to_protobuf()),
+                // To be filled by the scheduler.
+                vnode_bitmap: None,
             })
         }
     }

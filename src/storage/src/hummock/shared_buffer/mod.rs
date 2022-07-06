@@ -192,6 +192,9 @@ pub enum SharedBufferEvent {
 
     /// An epoch has been synced.
     EpochSynced(HummockEpoch),
+
+    /// Clear shared buffer and reset all states
+    Clear(oneshot::Sender<()>),
 }
 
 impl SharedBuffer {

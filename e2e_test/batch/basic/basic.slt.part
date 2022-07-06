@@ -30,3 +30,8 @@ start transaction;
 
 statement ok
 abort;
+
+query I
+show RW_IMPLICIT_FLUSH;
+----
+true

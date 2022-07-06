@@ -14,6 +14,7 @@
 
 use std::iter::once;
 
+use anyhow::anyhow;
 use futures::future::try_join_all;
 use futures_async_stream::try_stream;
 use risingwave_common::array::column::Column;
@@ -21,17 +22,16 @@ use risingwave_common::array::{
     ArrayBuilder, DataChunk, I64ArrayBuilder, Op, PrimitiveArrayBuilder, StreamChunk,
 };
 use risingwave_common::catalog::{Field, Schema, TableId};
-use risingwave_common::error::ErrorCode::InternalError;
-use risingwave_common::error::{ErrorCode, Result, RwError};
+use risingwave_common::error::{Result, RwError};
 use risingwave_common::types::DataType;
 use risingwave_pb::batch_plan::plan_node::NodeBody;
 use risingwave_source::SourceManagerRef;
 
+use crate::error::BatchError;
 use crate::executor::{
     BoxedDataChunkStream, BoxedExecutor, BoxedExecutorBuilder, Executor, ExecutorBuilder,
 };
 use crate::task::BatchTaskContext;
-
 /// [`InsertExecutor`] implements table insertion with values from its child executor.
 pub struct InsertExecutor {
     /// Target table id.
@@ -86,10 +86,11 @@ impl InsertExecutor {
             assert!(data_chunk.visibility().is_none());
 
             // add row-id column as first column
+            let row_ids = source_desc.next_row_id_batch(len);
             let mut builder = I64ArrayBuilder::new(len);
-            for _ in 0..len {
-                builder.append(Some(source_desc.next_row_id())).unwrap();
-            }
+            row_ids
+                .into_iter()
+                .for_each(|row_id| builder.append(Some(row_id)).unwrap());
 
             let rowid_column = once(Column::from(builder.finish().unwrap()));
             let child_columns = data_chunk.into_parts().0.into_iter();
@@ -106,11 +107,7 @@ impl InsertExecutor {
         // Wait for all chunks to be taken / written.
         let rows_inserted = try_join_all(notifiers)
             .await
-            .map_err(|_| {
-                RwError::from(ErrorCode::InternalError(
-                    "failed to wait chunks to be written".to_owned(),
-                ))
-            })?
+            .map_err(|_| BatchError::Internal(anyhow!("failed to wait chunks to be written")))?
             .into_iter()
             .sum::<usize>();
 
@@ -146,7 +143,7 @@ impl BoxedExecutorBuilder for InsertExecutor {
             source
                 .context()
                 .source_manager_ref()
-                .ok_or_else(|| InternalError("Source manager not found".to_string()))?,
+                .ok_or_else(|| BatchError::Internal(anyhow!("Source manager not found")))?,
             inputs.remove(0),
         )))
     }

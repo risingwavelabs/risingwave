@@ -16,8 +16,7 @@ use std::collections::HashMap;
 use std::fmt;
 
 use itertools::Itertools;
-use risingwave_common::catalog::{ColumnDesc, DatabaseId, OrderedColumnDesc, SchemaId, TableId};
-use risingwave_common::util::sort_util::OrderType;
+use risingwave_common::catalog::{ColumnDesc, DatabaseId, SchemaId, TableId};
 use risingwave_pb::plan_common::JoinType;
 use risingwave_pb::stream_plan::stream_node::NodeBody;
 use risingwave_pb::stream_plan::HashJoinNode;
@@ -27,7 +26,7 @@ use crate::catalog::column_catalog::ColumnCatalog;
 use crate::catalog::table_catalog::TableCatalog;
 use crate::expr::Expr;
 use crate::optimizer::plan_node::EqJoinPredicate;
-use crate::optimizer::property::Distribution;
+use crate::optimizer::property::{Direction, Distribution, FieldOrder};
 use crate::utils::ColIndexMapping;
 
 /// [`StreamHashJoin`] implements [`super::LogicalJoin`] with hash table. It builds a hash table
@@ -237,19 +236,33 @@ fn infer_internal_table_catalog(input: PlanRef) -> TableCatalog {
     let base = input.plan_base();
     let schema = &base.schema;
     let pk_indices = &base.pk_indices;
+    let mut col_names = HashMap::new();
+    // FIXME: temp fix, use TableCatalogBuilder to avoid_duplicate_col_name in the future (https://github.com/singularity-data/risingwave/issues/3657)
     let columns = schema
         .fields()
         .iter()
-        .map(|field| ColumnCatalog {
-            column_desc: ColumnDesc::from_field_without_column_id(field),
-            is_hidden: false,
+        .enumerate()
+        .map(|(i, field)| {
+            let mut c = ColumnCatalog {
+                column_desc: ColumnDesc::from_field_with_column_id(field, i as i32),
+                is_hidden: false,
+            };
+            c.column_desc.name = match col_names.try_insert(field.name.clone(), 0) {
+                Ok(_) => field.name.clone(),
+                Err(mut err) => {
+                    let cnt = err.entry.get_mut();
+                    *cnt += 1;
+                    field.name.clone() + "#" + &cnt.to_string()
+                }
+            };
+            c
         })
         .collect_vec();
     let mut order_desc = vec![];
-    for &idx in pk_indices {
-        order_desc.push(OrderedColumnDesc {
-            column_desc: columns[idx].column_desc.clone(),
-            order: OrderType::Ascending,
+    for &index in pk_indices {
+        order_desc.push(FieldOrder {
+            index,
+            direct: Direction::Asc,
         });
     }
     TableCatalog {
@@ -257,7 +270,7 @@ fn infer_internal_table_catalog(input: PlanRef) -> TableCatalog {
         associated_source_id: None,
         name: String::new(),
         columns,
-        order_desc,
+        order_keys: order_desc,
         pks: pk_indices.clone(),
         distribution_keys: base.dist.dist_column_indices().to_vec(),
         is_index_on: None,

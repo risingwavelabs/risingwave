@@ -26,14 +26,7 @@
                         columnId: 1
                         name: v1
                     orderKey:
-                      - columnDesc:
-                          columnType:
-                            typeName: INT64
-                            isNullable: true
-                          name: _row_id
-                        order: ASCENDING
-                    pkIndices:
-                      - 0
+                      - orderType: ASCENDING
                     distKeyIndices:
                       - 0
                   columnIds:
@@ -109,11 +102,7 @@
     materialize:
       columnOrders:
         - orderType: ASCENDING
-          inputRef:
-            columnIdx: 1
-          returnType:
-            typeName: INT64
-            isNullable: true
+          index: 1
       columnIds:
         - 0
         - 1
@@ -136,10 +125,9 @@
           columnId: 1
           name: _row_id
         isHidden: true
-    orderColumnIds:
-      - 1
-    orders:
-      - ASCENDING
+    orderKeys:
+      - orderType: ASCENDING
+        index: 1
     distributionKeys:
       - 1
     pk:
@@ -171,14 +159,7 @@
                     columnId: 1
                     name: v1
                 orderKey:
-                  - columnDesc:
-                      columnType:
-                        typeName: INT64
-                        isNullable: true
-                      name: _row_id
-                    order: ASCENDING
-                pkIndices:
-                  - 0
+                  - orderType: ASCENDING
                 distKeyIndices:
                   - 0
               columnIds:
@@ -224,11 +205,7 @@
     materialize:
       columnOrders:
         - orderType: ASCENDING
-          inputRef:
-            columnIdx: 1
-          returnType:
-            typeName: INT64
-            isNullable: true
+          index: 1
       columnIds:
         - 0
         - 1
@@ -251,10 +228,9 @@
           columnId: 1
           name: _row_id
         isHidden: true
-    orderColumnIds:
-      - 1
-    orders:
-      - ASCENDING
+    orderKeys:
+      - orderType: ASCENDING
+        index: 1
     distributionKeys:
       - 1
     pk:
@@ -291,14 +267,7 @@
                     columnId: 2
                     name: v2
                 orderKey:
-                  - columnDesc:
-                      columnType:
-                        typeName: INT64
-                        isNullable: true
-                      name: _row_id
-                    order: ASCENDING
-                pkIndices:
-                  - 0
+                  - orderType: ASCENDING
                 distKeyIndices:
                   - 0
               columnIds:
@@ -348,11 +317,7 @@
     materialize:
       columnOrders:
         - orderType: ASCENDING
-          inputRef:
-            columnIdx: 1
-          returnType:
-            typeName: INT64
-            isNullable: true
+          index: 1
       columnIds:
         - 0
         - 1
@@ -375,10 +340,9 @@
           columnId: 1
           name: _row_id
         isHidden: true
-    orderColumnIds:
-      - 1
-    orders:
-      - ASCENDING
+    orderKeys:
+      - orderType: ASCENDING
+        index: 1
     distributionKeys:
       - 1
     pk:
@@ -413,14 +377,7 @@
                                 columnId: 1
                                 name: v1
                             orderKey:
-                              - columnDesc:
-                                  columnType:
-                                    typeName: INT64
-                                    isNullable: true
-                                  name: _row_id
-                                order: ASCENDING
-                            pkIndices:
-                              - 0
+                              - orderType: ASCENDING
                             distKeyIndices:
                               - 0
                           columnIds:
@@ -628,14 +585,7 @@
                                     columnId: 2
                                     name: v2
                                 orderKey:
-                                  - columnDesc:
-                                      columnType:
-                                        typeName: INT64
-                                        isNullable: true
-                                      name: _row_id
-                                    order: ASCENDING
-                                pkIndices:
-                                  - 0
+                                  - orderType: ASCENDING
                                 distKeyIndices:
                                   - 0
                               columnIds:
@@ -779,10 +729,8 @@
                           typeName: INT64
                           isNullable: true
                         columnId: 1
-                  orderColumnIds:
-                    - 0
-                  orders:
-                    - ASCENDING
+                  orderKeys:
+                    - orderType: ASCENDING
                   distributionKeys:
                     - 0
                   pk:
@@ -802,17 +750,13 @@
                           typeName: INT64
                           isNullable: true
                         columnId: 1
-                  orderColumnIds:
-                    - 0
-                  orders:
-                    - ASCENDING
+                  orderKeys:
+                    - orderType: ASCENDING
                   distributionKeys:
                     - 0
                   pk:
                     - 0
                   owner: root
-              columnMapping:
-                0: 0
         pkIndices:
           - 1
         fields:
@@ -851,11 +795,7 @@
     materialize:
       columnOrders:
         - orderType: ASCENDING
-          inputRef:
-            columnIdx: 1
-          returnType:
-            typeName: INT32
-            isNullable: true
+          index: 1
       columnIds:
         - 0
         - 1
@@ -878,10 +818,9 @@
           columnId: 1
           name: v2
         isHidden: true
-    orderColumnIds:
-      - 1
-    orders:
-      - ASCENDING
+    orderKeys:
+      - orderType: ASCENDING
+        index: 1
     distributionKeys:
       - 1
     pk:

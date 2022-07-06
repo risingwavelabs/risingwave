@@ -91,7 +91,9 @@ impl ExprImpl {
     /// A `count(*)` aggregate function.
     #[inline(always)]
     pub fn count_star() -> Self {
-        AggCall::new(AggKind::Count, vec![], false).unwrap().into()
+        AggCall::new(AggKind::Count, vec![], false, Condition::true_cond())
+            .unwrap()
+            .into()
     }
 
     /// Collect all `InputRef`s' indexes in the expression.
@@ -184,6 +186,7 @@ macro_rules! impl_has_variant {
 impl_has_variant! {InputRef, Literal, FunctionCall, AggCall, Subquery}
 
 impl ExprImpl {
+    /// Used to check whether the expression has [`CorrelatedInputRef`].
     // We need to traverse inside subqueries.
     pub fn has_correlated_input_ref(&self) -> bool {
         struct Has {
@@ -193,7 +196,7 @@ impl ExprImpl {
 
         impl ExprVisitor for Has {
             fn visit_correlated_input_ref(&mut self, correlated_input_ref: &CorrelatedInputRef) {
-                if correlated_input_ref.depth() >= self.depth {
+                if correlated_input_ref.depth() == self.depth {
                     self.has = true;
                 }
             }
@@ -221,6 +224,45 @@ impl ExprImpl {
         };
         visitor.visit_expr(self);
         visitor.has
+    }
+
+    /// Collect `CorrelatedInputRef`s in `ExprImpl` and return theirs indices.
+    pub fn collect_correlated_indices(&self) -> Vec<usize> {
+        struct Collector {
+            depth: usize,
+            correlated_indices: Vec<usize>,
+        }
+
+        impl ExprVisitor for Collector {
+            fn visit_correlated_input_ref(&mut self, correlated_input_ref: &CorrelatedInputRef) {
+                if correlated_input_ref.depth() == self.depth {
+                    self.correlated_indices.push(correlated_input_ref.index());
+                }
+            }
+
+            fn visit_subquery(&mut self, subquery: &Subquery) {
+                use crate::binder::BoundSetExpr;
+
+                self.depth += 1;
+                match &subquery.query.body {
+                    BoundSetExpr::Select(select) => select
+                        .select_items
+                        .iter()
+                        .chain(select.group_by.iter())
+                        .chain(select.where_clause.iter())
+                        .for_each(|expr| self.visit_expr(expr)),
+                    BoundSetExpr::Values(_) => {}
+                }
+                self.depth -= 1;
+            }
+        }
+
+        let mut collector = Collector {
+            depth: 1,
+            correlated_indices: vec![],
+        };
+        collector.visit_expr(self);
+        collector.correlated_indices
     }
 
     /// Checks whether this is a constant expr that can be evaluated over a dummy chunk.
@@ -255,6 +297,41 @@ impl ExprImpl {
                 Some((*x, *y))
             } else {
                 Some((*y, *x))
+            }
+        } else {
+            None
+        }
+    }
+
+    pub fn as_comparison_cond(&self) -> Option<(InputRef, ExprType, InputRef)> {
+        fn reverse_comparison(comparison: ExprType) -> ExprType {
+            match comparison {
+                ExprType::LessThan => ExprType::GreaterThan,
+                ExprType::LessThanOrEqual => ExprType::GreaterThanOrEqual,
+                ExprType::GreaterThan => ExprType::LessThan,
+                ExprType::GreaterThanOrEqual => ExprType::LessThanOrEqual,
+                _ => unreachable!(),
+            }
+        }
+
+        if let ExprImpl::FunctionCall(function_call) = self {
+            match function_call.get_expr_type() {
+                ty @ (ExprType::LessThan
+                | ExprType::LessThanOrEqual
+                | ExprType::GreaterThan
+                | ExprType::GreaterThanOrEqual) => {
+                    let (_, op1, op2) = function_call.clone().decompose_as_binary();
+                    if let (ExprImpl::InputRef(x), ExprImpl::InputRef(y)) = (op1, op2) {
+                        if x.index < y.index {
+                            Some((*x, ty, *y))
+                        } else {
+                            Some((*y, reverse_comparison(ty), *x))
+                        }
+                    } else {
+                        None
+                    }
+                }
+                _ => None,
             }
         } else {
             None
