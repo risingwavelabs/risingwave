@@ -394,8 +394,6 @@ impl BatchPlanFragmenter {
                 if let Some(scan_node) = node.as_batch_seq_scan() {
                     let table_desc = scan_node.logical().table_desc();
 
-                    let is_singleton = builder.parallelism == 1;
-
                     assert!(
                         builder.table_scan_info.is_none()
                             || builder
@@ -407,13 +405,10 @@ impl BatchPlanFragmenter {
                         "multiple table scan inside a stage"
                     );
                     builder.table_scan_info = Some(TableScanInfo {
-                        vnode_bitmaps: if is_singleton {
-                            None
-                        } else {
-                            Some(vnode_mapping_to_owner_mapping(
-                                table_desc.vnode_mapping.clone().unwrap(),
-                            ))
-                        },
+                        vnode_bitmaps: table_desc
+                            .vnode_mapping
+                            .clone()
+                            .map(|m| vnode_mapping_to_owner_mapping(m)),
                     });
                 }
             }

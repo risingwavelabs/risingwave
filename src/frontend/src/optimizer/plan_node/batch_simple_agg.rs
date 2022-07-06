@@ -34,13 +34,12 @@ impl BatchSimpleAgg {
         let ctx = logical.base.ctx.clone();
         let input = logical.input();
         let input_dist = input.distribution();
-        let dist = if logical.agg_calls().iter().any(|call| call.distinct) {
-            // TODO: MPP distinct aggregation
-            Distribution::Single
-        } else {
-            input_dist.clone()
-        };
-        let base = PlanBase::new_batch(ctx, logical.schema().clone(), dist, Order::any());
+        let base = PlanBase::new_batch(
+            ctx,
+            logical.schema().clone(),
+            input_dist.clone(),
+            Order::any(),
+        );
         BatchSimpleAgg { base, logical }
     }
 
@@ -74,7 +73,10 @@ impl ToDistributedBatch for BatchSimpleAgg {
         // (e.g. see distribution of BatchSeqScan::new vs BatchSeqScan::to_distributed)
         let dist_input = self.input().to_distributed()?;
 
-        if dist_input.distribution().satisfies(&RequiredDist::AnyShard) {
+        // TODO: distinct agg cannot use 2-phase agg yet.
+        if dist_input.distribution().satisfies(&RequiredDist::AnyShard)
+            && self.logical.agg_calls().iter().any(|call| !call.distinct)
+        {
             // partial agg
             let partial_agg = self.clone_with_input(dist_input).into();
 
