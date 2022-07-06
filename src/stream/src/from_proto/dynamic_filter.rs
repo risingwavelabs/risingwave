@@ -18,7 +18,7 @@ use std::sync::Arc;
 use risingwave_common::catalog::TableId;
 use risingwave_common::error::{internal_error, Result};
 use risingwave_common::hash::{calc_hash_key_kind, HashKey, HashKeyDispatcher};
-use risingwave_expr::expr::{build_from_prost, RowExpression};
+use risingwave_expr::expr::{build_from_prost, BoxedExpression};
 use risingwave_pb::expr::expr_node::Type as ExprNodeType;
 use risingwave_pb::expr::expr_node::Type::*;
 
@@ -42,7 +42,7 @@ impl ExecutorBuilder for DynamicFilterExecutorBuilder {
         let key_l = node.get_left_key() as usize;
 
         let prost_condition = node.get_condition()?;
-        let condition = RowExpression::new(build_from_prost(prost_condition)?);
+        let condition = build_from_prost(prost_condition)?;
         let comparator = prost_condition.get_expr_type()?;
         if !matches!(
             comparator,
@@ -86,7 +86,7 @@ struct DynamicFilterExecutorDispatcherArgs {
     key_l: usize,
     pk_indices: PkIndices,
     executor_id: u64,
-    cond: RowExpression,
+    cond: BoxedExpression,
     comparator: ExprNodeType,
     actor_id: u64,
     metrics: Arc<StreamingMetrics>,

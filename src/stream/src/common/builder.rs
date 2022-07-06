@@ -162,7 +162,7 @@ impl StreamChunkBuilder {
         self.inc_size()
     }
 
-    pub fn take(&mut self) -> Result<Option<StreamChunk>> {
+    pub fn take(&mut self) -> ArrayResult<Option<StreamChunk>> {
         if self.size == 0 {
             return Ok(None);
         }

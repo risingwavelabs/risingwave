@@ -24,7 +24,7 @@ use risingwave_common::array::{Op, Row, StreamChunk};
 use risingwave_common::buffer::BitmapBuilder;
 use risingwave_common::catalog::Schema;
 use risingwave_common::types::{Datum, ScalarImpl, ToOwnedDatum};
-use risingwave_expr::expr::RowExpression;
+use risingwave_expr::expr::BoxedExpression;
 use risingwave_pb::expr::expr_node::Type as ExprNodeType;
 use risingwave_pb::expr::expr_node::Type::*;
 
@@ -41,7 +41,7 @@ pub struct DynamicFilterExecutor {
     key_l: usize,
     pk_indices: PkIndices,
     identity: String,
-    cond: RowExpression,
+    cond: BoxedExpression,
     comparator: ExprNodeType,
     actor_id: u64,
     schema: Schema,
@@ -55,7 +55,7 @@ impl DynamicFilterExecutor {
         key_l: usize,
         pk_indices: PkIndices,
         executor_id: u64,
-        cond: RowExpression,
+        cond: BoxedExpression,
         comparator: ExprNodeType,
         actor_id: u64,
         metrics: Arc<StreamingMetrics>,
@@ -76,7 +76,7 @@ impl DynamicFilterExecutor {
     }
 
     #[try_stream(ok = Message, error = StreamExecutorError)]
-    async fn into_stream(mut self) {
+    async fn into_stream(self) {
         let mut prev_epoch_value: Option<Datum> = None;
         let mut current_epoch_value: Option<Datum> = None;
 
@@ -132,7 +132,7 @@ impl DynamicFilterExecutor {
                             // right side Datum
                             let res = self
                                 .cond
-                                .eval(&inputs)?
+                                .eval_row(&inputs)?
                                 .map(|r| *r.as_bool())
                                 .unwrap_or(false);
 

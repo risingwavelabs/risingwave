@@ -836,7 +836,13 @@ impl ToStream for LogicalJoin {
                 Distribution::Single
             );
 
-            let plan = StreamDynamicFilter::new(left_ref_index, predicate.other_cond().clone(), left, right).into();
+            let plan = StreamDynamicFilter::new(
+                left_ref_index,
+                predicate.other_cond().clone(),
+                left,
+                right,
+            )
+            .into();
 
             if self.output_indices != (0..self.internal_column_num()).collect::<Vec<_>>() {
                 let logical_project = LogicalProject::with_mapping(

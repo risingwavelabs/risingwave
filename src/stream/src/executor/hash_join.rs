@@ -603,7 +603,7 @@ impl<K: HashKey, S: StateStore, const T: JoinTypePrimitive> HashJoinExecutor<K, 
         Row(new_row)
     }
 
-    #[try_stream(ok = Message, error = RwError)]
+    #[try_stream(ok = Message, error = StreamExecutorError)]
     async fn eq_join_oneside<'a, const SIDE: SideTypePrimitive>(
         mut side_l: &'a mut JoinSide<K, S>,
         mut side_r: &'a mut JoinSide<K, S>,
