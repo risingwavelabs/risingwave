@@ -30,7 +30,9 @@ use super::{
     StreamLocalSimpleAgg, ToBatch, ToStream,
 };
 use crate::catalog::table_catalog::TableCatalog;
-use crate::expr::{AggCall, Expr, ExprImpl, ExprRewriter, ExprType, FunctionCall, InputRef};
+use crate::expr::{
+    AggCall, AggOrderBy, Expr, ExprImpl, ExprRewriter, ExprType, FunctionCall, InputRef,
+};
 use crate::optimizer::plan_node::utils::TableCatalogBuilder;
 use crate::optimizer::plan_node::{gen_filter_and_pushdown, LogicalProject};
 use crate::optimizer::property::{Order, RequiredDist};
@@ -326,7 +328,8 @@ impl ExprRewriter for LogicalAggBuilder {
                 self.error = Some(ErrorCode::InvalidInputSyntax(
                     "Aggregation calls should not be nested".into(),
                 ));
-                return AggCall::new(agg_kind, inputs, distinct, filter)
+                // TODO
+                return AggCall::new(agg_kind, inputs, distinct, filter, AggOrderBy::any())
                     .unwrap()
                     .into();
             }
@@ -804,7 +807,8 @@ mod tests {
 
     use super::*;
     use crate::expr::{
-        assert_eq_input_ref, input_ref_to_column_indices, AggCall, ExprType, FunctionCall,
+        assert_eq_input_ref, input_ref_to_column_indices, AggCall, AggOrderBy, ExprType,
+        FunctionCall,
     };
     use crate::optimizer::plan_node::LogicalValues;
     use crate::session::OptimizerContext;
@@ -858,6 +862,7 @@ mod tests {
                 vec![input_ref_2.clone().into()],
                 false,
                 Condition::true_cond(),
+                AggOrderBy::any(), // TODO
             )
             .unwrap();
             let select_exprs = vec![input_ref_1.clone().into(), min_v2.into()];
@@ -882,6 +887,7 @@ mod tests {
                 vec![input_ref_2.clone().into()],
                 false,
                 Condition::true_cond(),
+                AggOrderBy::any(), // TODO
             )
             .unwrap();
             let max_v3 = AggCall::new(
@@ -889,6 +895,7 @@ mod tests {
                 vec![input_ref_3.clone().into()],
                 false,
                 Condition::true_cond(),
+                AggOrderBy::any(), // TODO
             )
             .unwrap();
             let func_call =
@@ -928,6 +935,7 @@ mod tests {
                 vec![v1_mult_v3.into()],
                 false,
                 Condition::true_cond(),
+                AggOrderBy::any(), // TODO
             )
             .unwrap();
             let select_exprs = vec![input_ref_2.clone().into(), agg_call.into()];

@@ -20,6 +20,42 @@ use risingwave_expr::expr::AggKind;
 use super::{Expr, ExprImpl};
 use crate::utils::Condition;
 
+#[derive(Debug, Clone, Eq, PartialEq, Hash)]
+pub struct AggOrderByExpr {
+    expr: ExprImpl,
+    // `Some(true)` for ASC, `Some(false)` for DESC, `None` for default
+    asc: Option<bool>,
+    // `Some(true)` for `NULLS FIRST`, `Some(false)` for `NULLS LAST`, `None` for default
+    nulls_first: Option<bool>,
+}
+
+impl AggOrderByExpr {
+    pub fn new(expr: ExprImpl, asc: Option<bool>, nulls_first: Option<bool>) -> Self {
+        Self {
+            expr,
+            asc,
+            nulls_first,
+        }
+    }
+}
+
+#[derive(Debug, Clone, Eq, PartialEq, Hash)]
+pub struct AggOrderBy {
+    sort_exprs: Vec<AggOrderByExpr>,
+}
+
+impl AggOrderBy {
+    pub fn any() -> Self {
+        Self {
+            sort_exprs: Vec::new(),
+        }
+    }
+
+    pub fn new(sort_exprs: Vec<AggOrderByExpr>) -> Self {
+        Self { sort_exprs }
+    }
+}
+
 #[derive(Clone, Eq, PartialEq, Hash)]
 pub struct AggCall {
     agg_kind: AggKind,
@@ -27,6 +63,7 @@ pub struct AggCall {
     inputs: Vec<ExprImpl>,
     distinct: bool,
     filter: Condition,
+    order_by: AggOrderBy,
 }
 
 impl std::fmt::Debug for AggCall {
@@ -122,6 +159,7 @@ impl AggCall {
         inputs: Vec<ExprImpl>,
         distinct: bool,
         filter: Condition,
+        order_by: AggOrderBy,
     ) -> Result<Self> {
         let data_types = inputs.iter().map(ExprImpl::return_type).collect_vec();
         let return_type = Self::infer_return_type(&agg_kind, &data_types)?;
@@ -131,6 +169,7 @@ impl AggCall {
             inputs,
             distinct,
             filter,
+            order_by,
         })
     }
 

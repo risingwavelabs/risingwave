@@ -22,7 +22,9 @@ use risingwave_sqlparser::ast::{Function, FunctionArg, FunctionArgExpr};
 
 use crate::binder::bind_context::Clause;
 use crate::binder::Binder;
-use crate::expr::{AggCall, Expr, ExprImpl, ExprType, FunctionCall, Literal};
+use crate::expr::{
+    AggCall, AggOrderBy, AggOrderByExpr, Expr, ExprImpl, ExprType, FunctionCall, Literal,
+};
 use crate::utils::Condition;
 
 impl Binder {
@@ -77,8 +79,21 @@ impl Binder {
                     }
                     None => Condition::true_cond(),
                 };
+                let order_by = AggOrderBy::new(
+                    f.order_by
+                        .into_iter()
+                        .map(|e| -> Result<AggOrderByExpr> {
+                            Ok(AggOrderByExpr::new(
+                                self.bind_expr(e.expr)?,
+                                e.asc,
+                                e.nulls_first,
+                            ))
+                        })
+                        .try_collect()?,
+                );
+                log::warn!("[rc] order_by: {:?}", order_by);
                 return Ok(ExprImpl::AggCall(Box::new(AggCall::new(
-                    kind, inputs, f.distinct, filter,
+                    kind, inputs, f.distinct, filter, order_by,
                 )?)));
             } else if f.filter.is_some() {
                 return Err(ErrorCode::InvalidInputSyntax(format!(

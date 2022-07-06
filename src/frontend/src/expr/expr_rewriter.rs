@@ -12,7 +12,9 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use super::{AggCall, CorrelatedInputRef, ExprImpl, FunctionCall, InputRef, Literal, Subquery};
+use super::{
+    AggCall, AggOrderBy, CorrelatedInputRef, ExprImpl, FunctionCall, InputRef, Literal, Subquery,
+};
 
 /// By default, `ExprRewriter` simply traverses the expression tree and leaves nodes unchanged.
 /// Implementations can override a subset of methods and perform transformation on some particular
@@ -43,7 +45,8 @@ pub trait ExprRewriter {
             .map(|expr| self.rewrite_expr(expr))
             .collect();
         let filter = filter.rewrite_expr(self);
-        AggCall::new(func_type, inputs, distinct, filter)
+        // TODO
+        AggCall::new(func_type, inputs, distinct, filter, AggOrderBy::any())
             .unwrap()
             .into()
     }
