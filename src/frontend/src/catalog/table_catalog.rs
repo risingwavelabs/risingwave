@@ -30,8 +30,8 @@ use crate::optimizer::property::FieldOrder;
 ///
 /// # Column ID & Column Index
 ///
-/// [`ColumnId`] (with type `i32`) is the unique identifier of a column in a table. It is used to
-/// access storage.
+/// [`ColumnId`](risingwave_common::catalog::ColumnId) (with type `i32`) is the unique identifier of
+/// a column in a table. It is used to access storage.
 ///
 /// Column index, or idx, (with type `usize`) is the relative position inside the `Vec` of columns.
 ///
