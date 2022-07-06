@@ -12,7 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::collections::{BTreeMap, HashSet}; // todo: use madsim.
+use std::collections::BTreeMap;
 use std::ops::Bound::*;
 use std::sync::Arc;
 
@@ -20,6 +20,7 @@ use anyhow::anyhow;
 use futures::StreamExt;
 use futures_async_stream::try_stream;
 use itertools::Itertools;
+use madsim::collections::HashSet;
 use risingwave_common::array::{Op, Row, StreamChunk};
 use risingwave_common::buffer::BitmapBuilder;
 use risingwave_common::catalog::Schema;
