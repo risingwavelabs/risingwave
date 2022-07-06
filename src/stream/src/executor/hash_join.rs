@@ -783,7 +783,6 @@ mod tests {
     use risingwave_expr::expr::{InputRefExpression, RowExpression};
     use risingwave_pb::expr::expr_node::Type;
     use risingwave_storage::memory::MemoryStateStore;
-    use risingwave_storage::Keyspace;
 
     use super::*;
     use crate::executor::test_utils::{MessageSender, MockSource};
@@ -799,17 +798,19 @@ mod tests {
             .map(|(id, data_type)| ColumnDesc::unnamed(ColumnId::new(id as i32), data_type.clone()))
             .collect_vec();
         let state_table_l = StateTable::new(
-            Keyspace::table_root(mem_state.clone(), &TableId::new(0)),
+            mem_state.clone(),
+            TableId::new(0),
             column_descs.clone(),
             vec![OrderType::Ascending],
-            Some(vec![1]),
+            None,
             vec![0],
         );
         let state_table_r = StateTable::new(
-            Keyspace::table_root(mem_state.clone(), &TableId::new(0)),
+            mem_state.clone(), 
+            TableId::new(0),
             column_descs,
             vec![OrderType::Ascending],
-            Some(vec![1]),
+            None,
             vec![0],
         );
         (state_table_l, state_table_r)
@@ -841,7 +842,6 @@ mod tests {
         let params_l = JoinParams::new(vec![0], vec![]);
         let params_r = JoinParams::new(vec![0], vec![]);
         let cond = with_condition.then(create_cond);
-        let mem_state = MemoryStateStore::new();
 
         let (mem_state_l, mem_state_r) = create_in_memory_state_table();
         let schema_len = match T {
@@ -884,7 +884,7 @@ mod tests {
         let params_r = JoinParams::new(vec![0, 1], vec![]);
         let cond = with_condition.then(create_cond);
 
-        let (mem_state_l, mem_state_l) = create_in_memory_state_table();
+        let (mem_state_l, mem_state_r) = create_in_memory_state_table();
         let schema_len = match T {
             JoinType::LeftSemi | JoinType::LeftAnti => source_l.schema().len(),
             JoinType::RightSemi | JoinType::RightAnti => source_r.schema().len(),
