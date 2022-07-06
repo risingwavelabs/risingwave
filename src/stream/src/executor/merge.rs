@@ -66,7 +66,6 @@ impl RemoteInput {
 
         let up_fragment_id = self.up_down_frag.0.to_string();
         let down_fragment_id = self.up_down_frag.1.to_string();
-        println!("merge.rs {} {}", up_fragment_id, down_fragment_id );
         #[for_await]
         for data_res in self.stream {
             match data_res {

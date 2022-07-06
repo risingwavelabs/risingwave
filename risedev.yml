@@ -26,8 +26,8 @@ risedev:
     # - use: compactor
 
     # If you want to enable metrics, uncomment those two lines.
-    - use: prometheus
-    - use: grafana
+    # - use: prometheus
+    # - use: grafana
 
     # If you want to enable tracing, uncomment the following line.
     # - use: jaeger
@@ -258,8 +258,6 @@ risedev:
     - use: compactor
 
   ci-3cn-1fe:
-    - use: prometheus
-    - use: grafana
     - use: minio
     - use: etcd
       unsafe-no-fsync: true
