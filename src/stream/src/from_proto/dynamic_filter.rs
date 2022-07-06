@@ -12,10 +12,8 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::marker::PhantomData;
 use std::sync::Arc;
 
-use risingwave_common::catalog::TableId;
 use risingwave_common::error::{internal_error, Result};
 use risingwave_common::hash::{calc_hash_key_kind, HashKey, HashKeyDispatcher};
 use risingwave_expr::expr::{build_from_prost, BoxedExpression};
@@ -35,7 +33,6 @@ impl ExecutorBuilder for DynamicFilterExecutorBuilder {
         _store: impl StateStore,
         _stream: &mut LocalStreamManagerCore,
     ) -> Result<BoxedExecutor> {
-        // Get table id and used as keyspace prefix.
         let node = try_match_expand!(node.get_node_body().unwrap(), NodeBody::DynamicFilter)?;
         let source_r = params.input.remove(1);
         let source_l = params.input.remove(0);
@@ -57,6 +54,7 @@ impl ExecutorBuilder for DynamicFilterExecutorBuilder {
         let key = source_l.schema().fields[key_l as usize].data_type();
         let kind = calc_hash_key_kind(&[key]);
 
+        // TODO: add the tables and backing state store.
         // let left_table_id = TableId::from(node.left_table.as_ref().unwrap().id);
         // let right_table_id = TableId::from(node.right_table.as_ref().unwrap().id);
 

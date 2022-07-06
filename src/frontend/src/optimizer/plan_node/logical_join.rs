@@ -25,7 +25,7 @@ use super::{
     PlanTreeNodeBinary, PlanTreeNodeUnary, PredicatePushdown, StreamHashJoin, StreamProject,
     ToBatch, ToStream,
 };
-use crate::expr::{ExprImpl, ExprType, FunctionCall, InputRef};
+use crate::expr::{ExprImpl, ExprType};
 use crate::optimizer::plan_node::{
     BatchFilter, BatchHashJoin, BatchNestedLoopJoin, EqJoinPredicate, LogicalFilter,
     StreamDynamicFilter, StreamFilter,
@@ -844,6 +844,7 @@ impl ToStream for LogicalJoin {
             )
             .into();
 
+            // TODO: `DynamicFilterExecutor` should use `output_indices` in `ChunkBuilder`
             if self.output_indices != (0..self.internal_column_num()).collect::<Vec<_>>() {
                 let logical_project = LogicalProject::with_mapping(
                     plan,
