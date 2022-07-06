@@ -36,6 +36,7 @@ use uuid::Uuid;
 use crate::barrier::command::CommandContext;
 use crate::barrier::info::BarrierActorInfo;
 use crate::barrier::{Command, GlobalBarrierManager};
+use crate::cluster::WorkerId;
 use crate::model::ActorId;
 use crate::storage::MetaStore;
 
@@ -140,21 +141,11 @@ where
         )
     }
 
-    fn check_compute_node_alive(&self, info: &BarrierActorInfo) -> Vec<u32> {
-        let mut origin_ids = Vec::new();
-        for (key, value) in &info.actor_map {
-            if !value.is_empty() && !info.node_map.contains_key(key) {
-                origin_ids.push(*key);
-            }
-        }
-        origin_ids
-    }
-
-    async fn get_migrate_map(
+    async fn get_migrate_map_plan(
         &self,
         info: &BarrierActorInfo,
-        origin_ids: &Vec<u32>,
-    ) -> HashMap<u32, u32> {
+        origin_ids: &Vec<WorkerId>,
+    ) -> HashMap<WorkerId, WorkerId> {
         let mut n = origin_ids.len();
         let mut migrate_map = HashMap::new();
         let mut chosen_ids = HashSet::new();
@@ -182,8 +173,16 @@ where
     }
 
     async fn migrate_actors(&self, info: &BarrierActorInfo) -> Result<()> {
-        let origin_ids = self.check_compute_node_alive(info);
-        let migrate_map = self.get_migrate_map(info, &origin_ids).await;
+        let expired_workers = info
+            .actor_map
+            .iter()
+            .filter(|(&worker, actors)| !actors.is_empty() && info.node_map.contains_key(&worker))
+            .map(|(&worker, _)| worker)
+            .collect_vec();
+        if expired_workers.is_empty() {
+            return Ok(());
+        }
+        let migrate_map = self.get_migrate_map_plan(info, &expired_workers).await;
         self.fragment_manager.migrate_actors(&migrate_map).await
     }
 

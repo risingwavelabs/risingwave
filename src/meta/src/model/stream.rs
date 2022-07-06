@@ -240,7 +240,7 @@ impl TableFragments {
         map
     }
 
-    pub fn migrate_actors(&mut self, migrate_map: &HashMap<u32, u32>) {
+    pub fn migrate_actors(&mut self, migrate_map: &HashMap<WorkerId, WorkerId>) {
         for actor_status in self.actor_status.values_mut() {
             let node_id = actor_status.get_parallel_unit().unwrap().worker_node_id as WorkerId;
             if migrate_map.contains_key(&node_id) {
