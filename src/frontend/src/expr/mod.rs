@@ -95,8 +95,8 @@ impl ExprImpl {
             AggKind::Count,
             vec![],
             false,
-            Condition::true_cond(),
             AggOrderBy::any(),
+            Condition::true_cond(),
         )
         .unwrap()
         .into()

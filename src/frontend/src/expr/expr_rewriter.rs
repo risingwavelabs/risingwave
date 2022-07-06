@@ -12,9 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use super::{
-    AggCall, AggOrderBy, CorrelatedInputRef, ExprImpl, FunctionCall, InputRef, Literal, Subquery,
-};
+use super::{AggCall, CorrelatedInputRef, ExprImpl, FunctionCall, InputRef, Literal, Subquery};
 
 /// By default, `ExprRewriter` simply traverses the expression tree and leaves nodes unchanged.
 /// Implementations can override a subset of methods and perform transformation on some particular
@@ -39,14 +37,14 @@ pub trait ExprRewriter {
         FunctionCall::new_unchecked(func_type, inputs, ret).into()
     }
     fn rewrite_agg_call(&mut self, agg_call: AggCall) -> ExprImpl {
-        let (func_type, inputs, distinct, filter) = agg_call.decompose();
+        let (func_type, inputs, distinct, order_by, filter) = agg_call.decompose();
         let inputs = inputs
             .into_iter()
             .map(|expr| self.rewrite_expr(expr))
             .collect();
+        let order_by = order_by.rewrite_expr(self);
         let filter = filter.rewrite_expr(self);
-        // TODO
-        AggCall::new(func_type, inputs, distinct, filter, AggOrderBy::any())
+        AggCall::new(func_type, inputs, distinct, order_by, filter)
             .unwrap()
             .into()
     }

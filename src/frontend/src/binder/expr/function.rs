@@ -79,6 +79,7 @@ impl Binder {
                     }
                     None => Condition::true_cond(),
                 };
+                // TODO(yuchao): handle DISTINCT and ORDER BY appear at the same time
                 let order_by = AggOrderBy::new(
                     f.order_by
                         .into_iter()
@@ -93,7 +94,7 @@ impl Binder {
                 );
                 log::warn!("[rc] order_by: {:?}", order_by);
                 return Ok(ExprImpl::AggCall(Box::new(AggCall::new(
-                    kind, inputs, f.distinct, filter, order_by,
+                    kind, inputs, f.distinct, order_by, filter,
                 )?)));
             } else if f.filter.is_some() {
                 return Err(ErrorCode::InvalidInputSyntax(format!(

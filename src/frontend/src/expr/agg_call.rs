@@ -17,7 +17,7 @@ use risingwave_common::error::{ErrorCode, Result, RwError};
 use risingwave_common::types::DataType;
 use risingwave_expr::expr::AggKind;
 
-use super::{Expr, ExprImpl};
+use super::{Expr, ExprImpl, ExprRewriter};
 use crate::utils::Condition;
 
 #[derive(Debug, Clone, Eq, PartialEq, Hash)]
@@ -54,6 +54,16 @@ impl AggOrderBy {
     pub fn new(sort_exprs: Vec<AggOrderByExpr>) -> Self {
         Self { sort_exprs }
     }
+
+    pub fn rewrite_expr(self, rewriter: &mut (impl ExprRewriter + ?Sized)) -> Self {
+        Self {
+            sort_exprs: self
+                .sort_exprs
+                .into_iter()
+                .map(|e| AggOrderByExpr::new(rewriter.rewrite_expr(e.expr), e.asc, e.nulls_first))
+                .collect(),
+        }
+    }
 }
 
 #[derive(Clone, Eq, PartialEq, Hash)]
@@ -62,8 +72,8 @@ pub struct AggCall {
     return_type: DataType,
     inputs: Vec<ExprImpl>,
     distinct: bool,
-    filter: Condition,
     order_by: AggOrderBy,
+    filter: Condition,
 }
 
 impl std::fmt::Debug for AggCall {
@@ -158,8 +168,8 @@ impl AggCall {
         agg_kind: AggKind,
         inputs: Vec<ExprImpl>,
         distinct: bool,
-        filter: Condition,
         order_by: AggOrderBy,
+        filter: Condition,
     ) -> Result<Self> {
         let data_types = inputs.iter().map(ExprImpl::return_type).collect_vec();
         let return_type = Self::infer_return_type(&agg_kind, &data_types)?;
@@ -168,13 +178,19 @@ impl AggCall {
             return_type,
             inputs,
             distinct,
-            filter,
             order_by,
+            filter,
         })
     }
 
-    pub fn decompose(self) -> (AggKind, Vec<ExprImpl>, bool, Condition) {
-        (self.agg_kind, self.inputs, self.distinct, self.filter)
+    pub fn decompose(self) -> (AggKind, Vec<ExprImpl>, bool, AggOrderBy, Condition) {
+        (
+            self.agg_kind,
+            self.inputs,
+            self.distinct,
+            self.order_by,
+            self.filter,
+        )
     }
 
     pub fn agg_kind(&self) -> AggKind {
