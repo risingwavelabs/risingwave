@@ -512,7 +512,7 @@ impl StreamGraphBuilder {
             let mut upstream_fragments = builder
                 .upstreams
                 .iter()
-                .map(|(id, StreamActorUpstream { fragment_id, .. })| (*id, fragment_id.clone()))
+                .map(|(id, StreamActorUpstream { fragment_id, .. })| (*id, *fragment_id))
                 .collect();
             let stream_node = self.build_inner(
                 ctx,

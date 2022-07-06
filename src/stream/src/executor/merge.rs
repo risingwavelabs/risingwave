@@ -80,12 +80,12 @@ impl RemoteInput {
                     self.metrics
                         .exchange_recv_size
                         .with_label_values(&[&up_actor_id, &down_actor_id])
-                        .inc_by(bytes.clone() as u64);
+                        .inc_by(bytes as u64);
 
                     self.metrics
                         .exchange_frag_recv_size
                         .with_label_values(&[&up_fragment_id, &down_fragment_id])
-                        .inc_by(bytes.clone() as u64);
+                        .inc_by(bytes as u64);
 
                     // add deserialization duration metric with given sampling frequency
                     let msg_res = if rr % SAMPLING_FREQUENCY == 0 {
@@ -482,6 +482,7 @@ mod tests {
         let input_handle = tokio::spawn(async move {
             let remote_input = RemoteInput::create(
                 ComputeClient::new(addr.into()).await.unwrap(),
+                (0, 0),
                 (0, 0),
                 tx,
                 Arc::new(StreamingMetrics::unused()),
