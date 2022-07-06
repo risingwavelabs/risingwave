@@ -253,7 +253,7 @@ impl<P: 'static + ProbeSideSourceBuilder> LookupJoinExecutor<P> {
                     // Until we don't have any more last_chunks to append to the chunk builder,
                     // keep appending them to the chunk builder
                     while self.last_chunk.is_some() {
-                        let mut temp_chunk: Option<SlicedDataChunk> = std::mem::take(&mut self.last_chunk);
+                        let temp_chunk: Option<SlicedDataChunk> = std::mem::take(&mut self.last_chunk);
                         if let Some(inner_chunk) = self.append_chunk(temp_chunk.unwrap())? {
                             yield inner_chunk.reorder_columns(&self.output_indices);
                         }
