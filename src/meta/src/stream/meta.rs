@@ -90,21 +90,27 @@ where
         Ok(map.values().cloned().collect())
     }
 
-    pub async fn update_table_fragments(&self, table_fragment: TableFragments) -> Result<()> {
+    pub async fn batch_update_table_fragments(&self, table_fragments: &[TableFragments]) -> Result<()> {
         let map = &mut self.core.write().await.table_fragments;
 
-        match map.entry(table_fragment.table_id()) {
-            Entry::Occupied(mut entry) => {
-                table_fragment.insert(&*self.meta_store).await?;
-                entry.insert(table_fragment);
-
-                Ok(())
+        let mut transaction = Transaction::default();
+        for table_fragment in table_fragments {
+            if map.contains_key(&table_fragment.table_id()) {
+                table_fragment.upsert_in_transaction(&mut transaction)?;
+            } else {
+                return Err(RwError::from(InternalError(format!(
+                    "table_fragment not exist: id={}",
+                    table_fragment.table_id()
+                ))));
             }
-            Entry::Vacant(_) => Err(RwError::from(InternalError(format!(
-                "table_fragment not exist: id={}",
-                table_fragment.table_id()
-            )))),
         }
+
+        self.meta_store.txn(transaction).await?;
+        for table_fragment in table_fragments {
+            map.insert(table_fragment.table_id(), table_fragment.clone());
+        }
+
+        Ok(())
     }
 
     pub async fn select_table_fragments_by_table_id(
@@ -308,11 +314,14 @@ where
     /// Used in [`crate::barrier::GlobalBarrierManager`]
     pub async fn migrate_actors(&self, migrate_map: &HashMap<WorkerId, WorkerId>) -> Result<()> {
         let map = &mut self.core.write().await.table_fragments;
+        let mut new_fragments = Vec::new();
         for fragments in map.values() {
-            let mut new_fragments = fragments.clone();
-            new_fragments.migrate_actors(migrate_map);
-            self.update_table_fragments(new_fragments).await?;
+            let mut new_fragment = fragments.clone();
+            if new_fragment.migrate_actors(migrate_map) {
+                new_fragments.push(new_fragment);
+            }
         }
+        self.batch_update_table_fragments(&new_fragments).await?;
         Ok(())
     }
 
