@@ -58,37 +58,31 @@ pub(super) fn handle_show(context: OptimizerContext, variable: Vec<Ident>) -> Re
     ))
 }
 
-pub(super) fn handle_show_all(
-    context: &OptimizerContext
-) -> Result<PgResponse> {
+pub(super) fn handle_show_all(context: &OptimizerContext) -> Result<PgResponse> {
     let config_reader = context.session_ctx.config();
 
     let all_variables = config_reader.get_all();
 
     let rows = all_variables
         .iter()
-        .map(|info|
+        .map(|info| {
             Row::new(vec![
                 Some(info.name.to_string()),
                 Some(info.setting.to_string()),
-                Some(info.description.to_string())]
-            ))
+                Some(info.description.to_string()),
+            ])
+        })
         .collect();
 
     Ok(PgResponse::new(
         StatementType::SHOW_COMMAND,
         all_variables.len() as i32,
         rows,
-        vec![PgFieldDescriptor::new(
-            "name".to_ascii_lowercase(),
-            TypeOid::Varchar,
-        ), PgFieldDescriptor::new(
-            "setting".to_ascii_lowercase(),
-            TypeOid::Varchar,
-        ), PgFieldDescriptor::new(
-            "description".to_ascii_lowercase(),
-            TypeOid::Varchar,
-        )],
+        vec![
+            PgFieldDescriptor::new("name".to_ascii_lowercase(), TypeOid::Varchar),
+            PgFieldDescriptor::new("setting".to_ascii_lowercase(), TypeOid::Varchar),
+            PgFieldDescriptor::new("description".to_ascii_lowercase(), TypeOid::Varchar),
+        ],
         true,
     ))
 }
