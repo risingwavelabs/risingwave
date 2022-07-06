@@ -31,7 +31,7 @@ with cte as (select v3, v4 from t2) select t1.v1 from t1 inner join cte on t1.v2
 ----
 1
 
-query I
+query I rowsort
 with cte1 as (select v3, v4 from t2), cte2 as (select v3 from cte1) select v3 from cte2;
 ----
 3
