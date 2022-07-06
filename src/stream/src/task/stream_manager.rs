@@ -272,9 +272,9 @@ impl LocalStreamManager {
         core.context.take_receiver(&ids)
     }
 
-    pub fn get_fragment_id_from_actor_id(&self, actor_id:&ActorId) -> Result<FragmentId>{
+    pub fn get_actors(&self) -> (){
         let mut core = self.core.lock();
-        core.get_fragment_id_from_actor_id(actor_id)
+        core.get_actors();
     }
 
     pub fn update_actors(
@@ -583,12 +583,10 @@ impl LocalStreamManagerCore {
         .boxed()
     }
 
-    pub(crate) fn get_fragment_id_from_actor_id(&mut self, actor_id:&ActorId) -> Result<FragmentId>{
-        println!("actor id is {}",actor_id);
+    pub(crate) fn get_actors(&mut self) -> (){
         for(k,v) in self.actors.iter(){
             println!("Key = {}, value = {}", k,v.fragment_id);
         }
-        Ok(1)
         // Ok(self.actors.get(actor_id).unwrap().fragment_id)
     }
 
@@ -600,7 +598,7 @@ impl LocalStreamManagerCore {
         up_fragment_id : FragmentId,
     ) -> Result<Vec<Receiver<Message>>> {
         assert!(!upstreams.is_empty());
-
+        self.get_actors();
         let rxs = upstreams
             .iter()
             .map(|up_id| {
@@ -616,7 +614,9 @@ impl LocalStreamManagerCore {
                         let sender = self.context.take_sender(&(*up_id, actor_id))?;
                         // spawn the `RemoteInput`
                         let up_id = *up_id;
-                        
+                        println!("Up actor :{}, up fragment :{} \nDown actor:{}, Down Fragment:{}",
+                            up_id,up_fragment_id,actor_id,fragment_id,
+                        );
                         let pool = self.compute_client_pool.clone();
                         let metrics = self.streaming_metrics.clone();
                         tokio::spawn(async move {
@@ -746,6 +746,9 @@ impl LocalStreamManagerCore {
                 }
             });
             self.actor_monitor_tasks.insert(actor_id, task);
+        }
+        for(k,v) in self.actors.iter(){
+            println!("Key = {}, value = {}", k,v.fragment_id);
         }
 
         Ok(())
@@ -891,6 +894,7 @@ impl LocalStreamManagerCore {
                 }
             }
         }
+        
         Ok(())
     }
 }
