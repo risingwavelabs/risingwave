@@ -13,21 +13,20 @@
 // limitations under the License.
 
 use std::collections::HashMap;
-use std::sync::Arc;
 
-use aws_sdk_kinesis::model::record;
-use aws_sdk_s3::model::FilterRuleName;
-use rdkafka::config::RDKafkaLogLevel;
-use rdkafka::producer::{DefaultProducerContext, FutureProducer};
+
+
+
+
+use rdkafka::producer::{FutureProducer};
 use rdkafka::ClientConfig;
-use risingwave_common::array::{ArrayBuilder, StreamChunk, RowRef};
-use risingwave_common::catalog::{Schema, Field};
-use risingwave_common::error::{ErrorCode, RwError};
-use risingwave_common::types::DataType;
-use serde::Deserialize;
-use serde_json::{Value, Map, json};
+use risingwave_common::array::{ArrayBuilder, ArrayResult, RowRef, StreamChunk};
+use risingwave_common::catalog::{Field, Schema};
 
-use risingwave_common::types::{OrderedF32, OrderedF64};
+
+use risingwave_common::types::{DataType, DatumRef, OrderedF32, OrderedF64, ScalarRefImpl};
+use serde::Deserialize;
+use serde_json::{json, Map, Value};
 
 use super::{Sink, SinkError};
 use crate::sink::Result;
@@ -68,19 +67,110 @@ macro_rules! json_type_cast_impl {
     };
 }
 
+fn datum_to_json_object(datum: DatumRef, field: &Field) -> ArrayResult<Value> {
+    let scalar_ref = match datum {
+        None => return Ok(Value::Null),
+        Some(datum) => datum,
+    };
+
+    let data_type = field.data_type();
+
+    let value = match (data_type, scalar_ref) {
+        (DataType::Boolean, ScalarRefImpl::Bool(v)) => {
+            json!(v)
+        }
+        (DataType::Int16, ScalarRefImpl::Int16(v)) => {
+            json!(v)
+        }
+        (DataType::Int32, ScalarRefImpl::Int32(v)) => {
+            json!(v)
+        }
+        (DataType::Int64, ScalarRefImpl::Int64(v)) => {
+            json!(v)
+        }
+        (DataType::Float32, ScalarRefImpl::Float32(v)) => {
+            json!(f32::from(v))
+        }
+        (DataType::Float64, ScalarRefImpl::Float64(v)) => {
+            json!(f64::from(v))
+        }
+        (DataType::Varchar, ScalarRefImpl::Utf8(v)) => {
+            json!(v)
+        }
+        (DataType::Decimal, ScalarRefImpl::Decimal(v)) => {
+            // fixme
+            json!(v.to_string())
+        }
+        (DataType::Time, ScalarRefImpl::NaiveTime(_v)) => {
+            unimplemented!()
+        }
+        (DataType::List { .. }, ScalarRefImpl::List(list_ref)) => {
+            let mut vec = Vec::with_capacity(field.sub_fields.len());
+            for (sub_datum_ref, sub_field) in list_ref
+                .values_ref()
+                .into_iter()
+                .zip(field.sub_fields.iter())
+            {
+                let value = datum_to_json_object(sub_datum_ref, sub_field)?;
+                vec.push(value);
+            }
+            json!(vec)
+        }
+        (DataType::Struct { .. }, ScalarRefImpl::Struct(struct_ref)) => {
+            let mut map = Map::with_capacity(field.sub_fields.len());
+            for (sub_datum_ref, sub_field) in struct_ref
+                .fields_ref()
+                .into_iter()
+                .zip(field.sub_fields.iter())
+            {
+                let value = datum_to_json_object(sub_datum_ref, sub_field)?;
+                map.insert(sub_field.name.clone(), value);
+            }
+            json!(map)
+        }
+        _ => unimplemented!(),
+    };
+
+    Ok(value)
+}
+
 fn record_to_json(row: RowRef, schema: Vec<Field>) -> Result<Map<String, Value>> {
     let mut mappings = Map::with_capacity(schema.len());
     for (idx, field) in schema.iter().enumerate() {
         let key = field.name.clone();
 
         let value: Value = match field.data_type {
-            DataType::Boolean => { json!(bool::try_from(row.value_at(idx).unwrap()).map_err(|e| SinkError::JsonParse(e.to_string()))?) },
-            DataType::Int16 => { json!(i16::try_from(row.value_at(idx).unwrap()).map_err(|e| SinkError::JsonParse(e.to_string()))?) },
-            DataType::Int32 => { json!(i32::try_from(row.value_at(idx).unwrap()).map_err(|e| SinkError::JsonParse(e.to_string()))?) },
-            DataType::Int64 => { json!(i64::try_from(row.value_at(idx).unwrap()).map_err(|e| SinkError::JsonParse(e.to_string()))?) },
-            DataType::Float32 => { json!(f32::from(OrderedF32::try_from(row.value_at(idx).unwrap()).map_err(|e| SinkError::JsonParse(e.to_string()))?)) },
-            DataType::Float64 => { json!(f64::from(OrderedF64::try_from(row.value_at(idx).unwrap()).map_err(|e| SinkError::JsonParse(e.to_string()))?)) },
-            DataType::Varchar => { json!(row.value_at(idx).unwrap().into_scalar_impl().to_string()) }
+            DataType::Boolean => {
+                json!(bool::try_from(row.value_at(idx).unwrap())
+                    .map_err(|e| SinkError::JsonParse(e.to_string()))?)
+            }
+            DataType::Int16 => {
+                json!(i16::try_from(row.value_at(idx).unwrap())
+                    .map_err(|e| SinkError::JsonParse(e.to_string()))?)
+            }
+            DataType::Int32 => {
+                json!(i32::try_from(row.value_at(idx).unwrap())
+                    .map_err(|e| SinkError::JsonParse(e.to_string()))?)
+            }
+            DataType::Int64 => {
+                json!(i64::try_from(row.value_at(idx).unwrap())
+                    .map_err(|e| SinkError::JsonParse(e.to_string()))?)
+            }
+            DataType::Float32 => {
+                json!(f32::from(
+                    OrderedF32::try_from(row.value_at(idx).unwrap())
+                        .map_err(|e| SinkError::JsonParse(e.to_string()))?
+                ))
+            }
+            DataType::Float64 => {
+                json!(f64::from(
+                    OrderedF64::try_from(row.value_at(idx).unwrap())
+                        .map_err(|e| SinkError::JsonParse(e.to_string()))?
+                ))
+            }
+            DataType::Varchar => {
+                json!(row.value_at(idx).unwrap().into_scalar_impl().to_string())
+            }
             // DataType::List { datatype } => {}
             // DataType::Struct { fields: _ } => {
             //     let x = row.value_at(idx).unwrap().into_scalar_impl().to_string();
@@ -100,7 +190,7 @@ pub fn chunk_to_json(chunk: StreamChunk, schema: &Schema) -> Result<Vec<String>>
         let record = Value::Object(record_to_json(row, schema.fields.clone())?);
         records.push(record.to_string());
     }
-    
+
     Ok(records)
 }
 
@@ -125,22 +215,19 @@ impl KafkaSink {
 
 #[async_trait::async_trait]
 impl Sink for KafkaSink {
-    async fn write_batch(&mut self, chunk: StreamChunk, _schema: &Schema) -> Result<()> {
+    async fn write_batch(&mut self, _chunk: StreamChunk, _schema: &Schema) -> Result<()> {
         Ok(())
     }
 }
 
 mod test {
-    use rdkafka::producer::FutureRecord;
-    use risingwave_common::array;
-    use risingwave_common::array::column::Column;
-    use risingwave_common::array::{
-        ArrayImpl, ArrayMeta, DataChunk, F32Array, F32ArrayBuilder, I32Array, I32ArrayBuilder,
-        PrimitiveArrayBuilder, StructArray, StructArrayBuilder, Vis,
-    };
-    use risingwave_common::types::{DataType, OrderedF32};
+    
+    
+    
+    
+    
 
-    use super::*;
+    
 
     #[tokio::test]
     async fn test_kafka_producer() -> Result<()> {
@@ -182,32 +269,28 @@ mod test {
             ],
             vec![DataType::Int32, DataType::Float32],
         )
-        .unwrap())));
+            .unwrap())));
 
-        let chunk = DataChunk::new(
-            vec![column_i32, column_f32],
-            Vis::Compact(10),
-        );
+        let chunk = DataChunk::new(vec![column_i32, column_f32], Vis::Compact(10));
 
-        let chunk = StreamChunk {
-            
-        };
+        // let chunk = StreamChunk {};
 
         // let x = chunk.row_at(0).unwrap().0.value_at(2).unwrap().into_scalar_impl().into_struct();
         // println!("{:?}", x);
 
         let schema = Schema::new(vec![
             Field {
-                data_type: DataType::Int32, 
+                data_type: DataType::Int32,
                 name: "v1".into(),
                 sub_fields: vec![],
                 type_name: "".into(),
-            }, Field {
-                data_type: DataType::Float32, 
+            },
+            Field {
+                data_type: DataType::Float32,
                 name: "v2".into(),
                 sub_fields: vec![],
                 type_name: "".into(),
-            }
+            },
         ]);
 
         println!("{:?}", chunk_to_json(chunk, &schema));

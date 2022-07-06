@@ -12,21 +12,23 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+#![feature(box_patterns)]
+
 pub mod kafka;
 pub mod mysql;
 pub mod redis;
 
 use std::collections::HashMap;
-use std::hash::Hash;
+
 
 use async_trait::async_trait;
 use enum_as_inner::EnumAsInner;
-use risingwave_common::array::{StreamChunk, ArrayError};
+use risingwave_common::array::{StreamChunk};
 use risingwave_common::catalog::Schema;
 use risingwave_common::error::{ErrorCode, Result as RwResult, RwError};
 use thiserror::Error;
 
-use crate::sink::kafka::{KafkaConfig, KAFKA_SINK, KafkaSink};
+use crate::sink::kafka::{KafkaConfig, KafkaSink, KAFKA_SINK};
 use crate::sink::mysql::{MySQLConfig, MySQLSink};
 use crate::sink::redis::{RedisConfig, RedisSink};
 

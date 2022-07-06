@@ -15,7 +15,7 @@
 use std::fmt;
 
 use async_trait::async_trait;
-use enum_as_inner::EnumAsInner;
+
 use itertools::{join, Itertools};
 use mysql_async::prelude::*;
 use mysql_async::*;
