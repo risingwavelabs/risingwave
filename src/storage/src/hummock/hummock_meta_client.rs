@@ -57,18 +57,26 @@ impl HummockMetaClient for MonitoredHummockMetaClient {
         res
     }
 
-    async fn pin_snapshot(&self, last_pinned: HummockEpoch) -> Result<HummockEpoch> {
+    async fn pin_snapshot(&self) -> Result<HummockEpoch> {
         self.stats.pin_snapshot_counts.inc();
         let timer = self.stats.pin_snapshot_latency.start_timer();
-        let res = self.meta_client.pin_snapshot(last_pinned).await;
+        let res = self.meta_client.pin_snapshot().await;
         timer.observe_duration();
         res
     }
 
-    async fn unpin_snapshot(&self, pinned_epochs: &[HummockEpoch]) -> Result<()> {
+    async fn get_epoch(&self) -> Result<HummockEpoch> {
+        self.stats.pin_snapshot_counts.inc();
+        let timer = self.stats.pin_snapshot_latency.start_timer();
+        let res = self.meta_client.get_epoch().await;
+        timer.observe_duration();
+        res
+    }
+
+    async fn unpin_snapshot(&self) -> Result<()> {
         self.stats.unpin_snapshot_counts.inc();
         let timer = self.stats.unpin_snapshot_latency.start_timer();
-        let res = self.meta_client.unpin_snapshot(pinned_epochs).await;
+        let res = self.meta_client.unpin_snapshot().await;
         timer.observe_duration();
         res
     }

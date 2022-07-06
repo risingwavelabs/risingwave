@@ -4039,6 +4039,7 @@ dependencies = [
  "crc32fast",
  "either",
  "futures",
+ "futures-async-stream",
  "humantime",
  "hyper",
  "itertools",
@@ -4754,7 +4755,7 @@ dependencies = [
 
 [[package]]
 name = "risingwave_test_runner"
-version = "0.1.8"
+version = "0.1.10"
 dependencies = [
  "fail",
 ]
