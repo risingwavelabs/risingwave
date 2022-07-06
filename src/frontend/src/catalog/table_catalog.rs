@@ -63,14 +63,14 @@ pub struct TableCatalog {
     /// All columns in this table
     pub columns: Vec<ColumnCatalog>,
 
-    /// Keys used as materialize's storage key prefix, including MV order keys and pks.
-    pub order_keys: Vec<FieldOrder>,
+    /// Key used as materialize's storage key prefix, including MV order columns and pk.
+    pub order_key: Vec<FieldOrder>,
 
     /// Primary key columns indices.
-    pub pks: Vec<usize>,
+    pub pk: Vec<usize>,
 
     /// Distribution key column indices.
-    pub distribution_keys: Vec<usize>,
+    pub distribution_key: Vec<usize>,
 
     /// If set to Some(TableId), then this table is an index on another table.
     pub is_index_on: Option<TableId>,
@@ -107,22 +107,22 @@ impl TableCatalog {
     }
 
     /// Get a reference to the table catalog's pk desc.
-    pub fn order_keys(&self) -> &[FieldOrder] {
-        self.order_keys.as_ref()
+    pub fn order_key(&self) -> &[FieldOrder] {
+        self.order_key.as_ref()
     }
 
     /// Get a [`TableDesc`] of the table.
     pub fn table_desc(&self) -> TableDesc {
         TableDesc {
             table_id: self.id,
-            order_keys: self
-                .order_keys
+            order_key: self
+                .order_key
                 .iter()
                 .map(FieldOrder::to_order_pair)
                 .collect(),
-            pks: self.pks.clone(),
+            pk: self.pk.clone(),
             columns: self.columns.iter().map(|c| c.column_desc.clone()).collect(),
-            distribution_keys: self.distribution_keys.clone(),
+            distribution_key: self.distribution_key.clone(),
             appendonly: self.appendonly,
             vnode_mapping: self.vnode_mapping.clone(),
         }
@@ -133,8 +133,8 @@ impl TableCatalog {
         self.name.as_ref()
     }
 
-    pub fn distribution_keys(&self) -> &[usize] {
-        self.distribution_keys.as_ref()
+    pub fn distribution_key(&self) -> &[usize] {
+        self.distribution_key.as_ref()
     }
 
     pub fn to_prost(&self, schema_id: SchemaId, database_id: DatabaseId) -> ProstTable {
@@ -144,16 +144,16 @@ impl TableCatalog {
             database_id,
             name: self.name.clone(),
             columns: self.columns().iter().map(|c| c.to_protobuf()).collect(),
-            order_keys: self.order_keys.iter().map(|o| o.to_protobuf()).collect(),
-            pk: self.pks.iter().map(|x| *x as _).collect(),
+            order_key: self.order_key.iter().map(|o| o.to_protobuf()).collect(),
+            pk: self.pk.iter().map(|x| *x as _).collect(),
             dependent_relations: vec![],
             optional_associated_source_id: self
                 .associated_source_id
                 .map(|source_id| OptionalAssociatedSourceId::AssociatedSourceId(source_id.into())),
             is_index: self.is_index_on.is_some(),
             index_on_id: self.is_index_on.unwrap_or_default().table_id(),
-            distribution_keys: self
-                .distribution_keys
+            distribution_key: self
+                .distribution_key
                 .iter()
                 .map(|k| *k as i32)
                 .collect_vec(),
@@ -187,11 +187,7 @@ impl From<ProstTable> for TableCatalog {
             col_index.insert(col_id, idx);
         }
 
-        let order_keys = tb
-            .order_keys
-            .iter()
-            .map(FieldOrder::from_protobuf)
-            .collect();
+        let order_key = tb.order_key.iter().map(FieldOrder::from_protobuf).collect();
 
         let vnode_mapping = if let Some(mapping) = tb.mapping.as_ref() {
             decompress_data(&mapping.original_indices, &mapping.data)
@@ -203,19 +199,19 @@ impl From<ProstTable> for TableCatalog {
             id: id.into(),
             associated_source_id: associated_source_id.map(Into::into),
             name,
-            order_keys,
+            order_key,
             columns,
             is_index_on: if tb.is_index {
                 Some(tb.index_on_id.into())
             } else {
                 None
             },
-            distribution_keys: tb
-                .distribution_keys
+            distribution_key: tb
+                .distribution_key
                 .iter()
                 .map(|k| *k as usize)
                 .collect_vec(),
-            pks: tb.pk.iter().map(|x| *x as _).collect(),
+            pk: tb.pk.iter().map(|x| *x as _).collect(),
             appendonly: tb.appendonly,
             owner: tb.owner,
             vnode_mapping: Some(vnode_mapping),
@@ -287,14 +283,14 @@ mod tests {
                     is_hidden: false,
                 },
             ],
-            order_keys: vec![FieldOrder {
+            order_key: vec![FieldOrder {
                 index: 0,
                 direct: Direction::Asc,
             }
             .to_protobuf()],
             pk: vec![0],
             dependent_relations: vec![],
-            distribution_keys: vec![],
+            distribution_key: vec![],
             optional_associated_source_id: OptionalAssociatedSourceId::AssociatedSourceId(233)
                 .into(),
             appendonly: false,
@@ -345,12 +341,12 @@ mod tests {
                         is_hidden: false
                     }
                 ],
-                pks: vec![0],
-                order_keys: vec![FieldOrder {
+                pk: vec![0],
+                order_key: vec![FieldOrder {
                     index: 0,
                     direct: Direction::Asc,
                 }],
-                distribution_keys: vec![],
+                distribution_key: vec![],
                 appendonly: false,
                 owner: risingwave_common::catalog::DEFAULT_SUPPER_USER.to_string(),
                 vnode_mapping: Some(mapping),

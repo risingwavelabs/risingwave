@@ -80,7 +80,7 @@ impl LogicalScan {
             .collect();
 
         let pk_indices = table_desc
-            .pks
+            .pk
             .iter()
             .map(|&c| id_to_op_idx.get(&table_desc.columns[c].column_id).copied())
             .collect::<Option<Vec<_>>>()
@@ -190,7 +190,7 @@ impl LogicalScan {
             .map(|(op_idx, tb_idx)| (*tb_idx, op_idx))
             .collect::<HashMap<_, _>>();
         self.table_desc
-            .distribution_keys
+            .distribution_key
             .iter()
             .map(|&tb_idx| tb_idx_to_op_idx[&tb_idx])
             .collect()
@@ -406,7 +406,7 @@ impl ToStream for LogicalScan {
                 }
                 let col_need_to_add = self
                     .table_desc
-                    .order_keys
+                    .order_key
                     .iter()
                     .filter_map(|c| {
                         if !col_ids.contains(&self.table_desc().columns[c.column_idx].column_id) {

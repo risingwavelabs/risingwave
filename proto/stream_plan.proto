@@ -44,9 +44,9 @@ message FilterNode {
 // In addition, we also specify primary key to MV for efficient point lookup during update and deletion.
 //
 // The node will be used for both create mv and create index.
-// - When creating mv, `pk == distribution_keys == column_orders`.
+// - When creating mv, `pk == distribution_key == column_orders`.
 // - When creating index, `column_orders` will contain both
-//   arrange columns and pk columns, while distribution keys will be arrange columns.
+//   arrange columns and pk columns, while distribution key will be arrange columns.
 message MaterializeNode {
   plan_common.TableRefId table_ref_id = 1;
   plan_common.TableRefId associated_table_ref_id = 2;
@@ -180,7 +180,7 @@ message BatchPlanNode {
 }
 
 message ArrangementInfo {
-  // Order keys of the arrangement, including order by keys and pks from the materialize
+  // Order keys of the arrangement, including order by columns and pk from the materialize
   // executor.
   repeated plan_common.ColumnOrder arrange_key_orders = 1;
   // Column descs of the arrangement
