@@ -121,6 +121,7 @@ impl Binder {
                 "lower" => ExprType::Lower,
                 "trim" => ExprType::Trim,
                 "replace" => ExprType::Replace,
+                "overlay" => ExprType::Overlay,
                 "position" => ExprType::Position,
                 "ltrim" => ExprType::Ltrim,
                 "rtrim" => ExprType::Rtrim,

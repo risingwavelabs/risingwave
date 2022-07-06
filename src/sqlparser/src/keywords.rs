@@ -335,6 +335,7 @@ define_keywords!(
     PERCENTILE_DISC,
     PERCENT_RANK,
     PERIOD,
+    PLACING,
     PORTION,
     POSITION,
     POSITION_REGEX,

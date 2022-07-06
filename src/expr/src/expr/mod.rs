@@ -27,6 +27,7 @@ mod expr_input_ref;
 mod expr_is_null;
 mod expr_literal;
 mod expr_nested_construct;
+mod expr_quaternary_bytes;
 mod expr_ternary_bytes;
 pub mod expr_unary;
 mod template;
@@ -102,6 +103,7 @@ pub fn build_from_prost(prost: &ExprNode) -> Result<BoxedExpression> {
         Substr => build_substr_expr(prost),
         Length => build_length_expr(prost),
         Replace => build_replace_expr(prost),
+        Overlay => build_overlay_expr(prost),
         Like => build_like_expr(prost),
         Trim => build_trim_expr(prost),
         Ltrim => build_ltrim_expr(prost),

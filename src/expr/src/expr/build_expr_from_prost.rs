@@ -25,8 +25,10 @@ use crate::expr::expr_binary_nonnull::{new_binary_expr, new_like_default};
 use crate::expr::expr_binary_nullable::new_nullable_binary_expr;
 use crate::expr::expr_case::{CaseExpression, WhenClause};
 use crate::expr::expr_in::InExpression;
+use crate::expr::expr_quaternary_bytes::new_overlay_for_exp;
 use crate::expr::expr_ternary_bytes::{
-    new_replace_expr, new_split_part_expr, new_substr_start_end, new_translate_expr,
+    new_overlay_exp, new_replace_expr, new_split_part_expr, new_substr_start_end,
+    new_translate_expr,
 };
 use crate::expr::expr_unary::{
     new_length_default, new_ltrim_expr, new_rtrim_expr, new_trim_expr, new_unary_expr,
@@ -74,6 +76,24 @@ pub fn build_nullable_binary_expr_prost(prost: &ExprNode) -> Result<BoxedExpress
         left_expr,
         right_expr,
     ))
+}
+
+pub fn build_overlay_expr(prost: &ExprNode) -> Result<BoxedExpression> {
+    let (children, ret_type) = get_children_and_return_type(prost)?;
+    ensure!(children.len() == 3 || children.len() == 4);
+
+    let s = expr_build_from_prost(&children[0])?;
+    let new_sub_str = expr_build_from_prost(&children[1])?;
+    let start = expr_build_from_prost(&children[2])?;
+
+    if children.len() == 3 {
+        Ok(new_overlay_exp(s, new_sub_str, start, ret_type))
+    } else if children.len() == 4 {
+        let count = expr_build_from_prost(&children[3])?;
+        Ok(new_overlay_for_exp(s, new_sub_str, start, count, ret_type))
+    } else {
+        unreachable!()
+    }
 }
 
 pub fn build_repeat_expr(prost: &ExprNode) -> Result<BoxedExpression> {
