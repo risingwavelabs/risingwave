@@ -25,7 +25,9 @@ use risingwave_rpc_client::{HummockMetaClient, MetaClient};
 /// in this trait so that the mocking can be simplified.
 #[async_trait::async_trait]
 pub trait FrontendMetaClient: Send + Sync {
-    async fn pin_snapshot(&self, last_pinned: u64) -> Result<u64>;
+    async fn pin_snapshot(&self) -> Result<u64>;
+
+    async fn get_epoch(&self) -> Result<u64>;
 
     async fn flush(&self) -> Result<()>;
 
@@ -34,7 +36,7 @@ pub trait FrontendMetaClient: Send + Sync {
         table_ids: &[u32],
     ) -> Result<HashMap<u32, TableFragmentInfo>>;
 
-    async fn unpin_snapshot(&self, epoch: u64) -> Result<()>;
+    async fn unpin_snapshot(&self) -> Result<()>;
 
     async fn unpin_snapshot_before(&self, epoch: u64) -> Result<()>;
 }
@@ -43,8 +45,12 @@ pub struct FrontendMetaClientImpl(pub MetaClient);
 
 #[async_trait::async_trait]
 impl FrontendMetaClient for FrontendMetaClientImpl {
-    async fn pin_snapshot(&self, last_pinned: u64) -> Result<u64> {
-        self.0.pin_snapshot(last_pinned).await
+    async fn pin_snapshot(&self) -> Result<u64> {
+        self.0.pin_snapshot().await
+    }
+
+    async fn get_epoch(&self) -> Result<u64> {
+        self.0.get_epoch().await
     }
 
     async fn flush(&self) -> Result<()> {
@@ -58,8 +64,8 @@ impl FrontendMetaClient for FrontendMetaClientImpl {
         self.0.list_table_fragments(table_ids).await
     }
 
-    async fn unpin_snapshot(&self, epoch: u64) -> Result<()> {
-        self.0.unpin_snapshot(&[epoch]).await
+    async fn unpin_snapshot(&self) -> Result<()> {
+        self.0.unpin_snapshot().await
     }
 
     async fn unpin_snapshot_before(&self, epoch: u64) -> Result<()> {

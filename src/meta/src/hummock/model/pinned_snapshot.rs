@@ -13,7 +13,7 @@
 // limitations under the License.
 
 use prost::Message;
-use risingwave_hummock_sdk::{HummockContextId, HummockEpoch};
+use risingwave_hummock_sdk::HummockContextId;
 use risingwave_pb::hummock::HummockPinnedSnapshot;
 
 use crate::model::MetadataModel;
@@ -45,27 +45,5 @@ impl MetadataModel for HummockPinnedSnapshot {
 
     fn key(&self) -> risingwave_common::error::Result<Self::KeyType> {
         Ok(self.context_id)
-    }
-}
-
-pub trait HummockPinnedSnapshotExt {
-    fn pin_snapshot(&mut self, new_snapshot_id: HummockEpoch);
-
-    fn unpin_snapshot(&mut self, pinned_snapshot_id: HummockEpoch);
-}
-
-impl HummockPinnedSnapshotExt for HummockPinnedSnapshot {
-    fn pin_snapshot(&mut self, epoch: HummockEpoch) {
-        let found = self.snapshot_id.iter().position(|&v| v == epoch);
-        if found.is_none() {
-            self.snapshot_id.push(epoch);
-        }
-    }
-
-    fn unpin_snapshot(&mut self, epoch: HummockEpoch) {
-        let found = self.snapshot_id.iter().position(|&v| v == epoch);
-        if let Some(pos) = found {
-            self.snapshot_id.remove(pos);
-        }
     }
 }

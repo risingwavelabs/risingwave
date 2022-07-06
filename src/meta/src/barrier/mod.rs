@@ -26,7 +26,7 @@ use prometheus::HistogramTimer;
 use risingwave_common::catalog::TableId;
 use risingwave_common::error::{ErrorCode, Result, RwError};
 use risingwave_common::util::epoch::{Epoch, INVALID_EPOCH};
-use risingwave_hummock_sdk::{HummockEpoch, LocalSstableInfo};
+use risingwave_hummock_sdk::LocalSstableInfo;
 use risingwave_pb::common::worker_node::State::Running;
 use risingwave_pb::common::WorkerType;
 use risingwave_pb::data::Barrier;
@@ -786,14 +786,9 @@ where
         if is_create_mv {
             // The snapshot ingestion may last for several epochs, we should pin the epoch here.
             // TODO: this should be done in `post_collect`
-            let snapshot = self
-                .hummock_manager
-                .pin_snapshot(META_NODE_ID, HummockEpoch::MAX)
-                .await?;
+            let _snapshot = self.hummock_manager.pin_snapshot(META_NODE_ID).await?;
             finish_rx.await.unwrap(); // Wait for this command to be finished.
-            self.hummock_manager
-                .unpin_snapshot(META_NODE_ID, [snapshot])
-                .await?;
+            self.hummock_manager.unpin_snapshot(META_NODE_ID).await?;
         } else {
             finish_rx.await.unwrap(); // Wait for this command to be finished.
         }
