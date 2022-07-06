@@ -24,7 +24,7 @@ use risingwave_common::catalog::{Schema, TableId};
 use risingwave_common::hash::HashKey;
 use risingwave_common::types::{DataType, ToOwnedDatum};
 use risingwave_expr::expr::BoxedExpression;
-use risingwave_storage::{Keyspace, StateStore};
+use risingwave_storage::StateStore;
 
 use super::barrier_align::*;
 use super::error::{StreamExecutorError, StreamExecutorResult};
@@ -784,14 +784,6 @@ mod tests {
     use super::*;
     use crate::executor::test_utils::{MessageSender, MockSource};
     use crate::executor::{Barrier, Epoch, Message};
-
-    fn create_in_memory_keyspace() -> (Keyspace<MemoryStateStore>, Keyspace<MemoryStateStore>) {
-        let mem_state = MemoryStateStore::new();
-        (
-            Keyspace::table_root(mem_state.clone(), &TableId::new(0)),
-            Keyspace::table_root(mem_state, &TableId::new(1)),
-        )
-    }
 
     fn create_cond() -> BoxedExpression {
         let left_expr = InputRefExpression::new(DataType::Int64, 1);
