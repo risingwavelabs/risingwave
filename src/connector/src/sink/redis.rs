@@ -18,6 +18,7 @@ use risingwave_common::catalog::Schema;
 
 use crate::sink::{Result, Sink};
 
+#[derive(Clone, Debug)]
 pub struct RedisConfig;
 
 pub struct RedisSink;
