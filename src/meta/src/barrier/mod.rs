@@ -12,7 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::collections::{HashMap, VecDeque};
+use std::collections::{HashMap, HashSet, VecDeque};
 use std::iter::once;
 use std::mem::take;
 use std::sync::Arc;
@@ -26,10 +26,11 @@ use prometheus::HistogramTimer;
 use risingwave_common::catalog::TableId;
 use risingwave_common::error::{ErrorCode, Result, RwError};
 use risingwave_common::util::epoch::{Epoch, INVALID_EPOCH};
-use risingwave_hummock_sdk::{HummockEpoch, LocalSstableInfo};
+use risingwave_hummock_sdk::LocalSstableInfo;
 use risingwave_pb::common::worker_node::State::Running;
 use risingwave_pb::common::WorkerType;
 use risingwave_pb::data::Barrier;
+use risingwave_pb::meta::table_fragments::ActorState;
 use risingwave_pb::stream_service::{
     BarrierCompleteRequest, BarrierCompleteResponse, InjectBarrierRequest,
 };
@@ -46,6 +47,7 @@ use self::info::BarrierActorInfo;
 use self::notifier::Notifier;
 use crate::barrier::progress::CreateMviewProgressTracker;
 use crate::barrier::BarrierEpochState::{Complete, InFlight};
+use crate::barrier::ChangedTableState::{Create, Drop};
 use crate::cluster::{ClusterManagerRef, META_NODE_ID};
 use crate::hummock::HummockManagerRef;
 use crate::manager::{CatalogManagerRef, MetaSrvEnv};
@@ -68,6 +70,13 @@ struct ScheduledBarriers {
 
     /// When `buffer` is not empty anymore, all subscribers of this watcher will be notified.
     changed_tx: watch::Sender<()>,
+}
+/// The table state of command
+#[derive(Debug, Clone)]
+pub enum ChangedTableState {
+    Drop(TableId),
+    Create(TableId),
+    NoTable,
 }
 
 impl ScheduledBarriers {
@@ -174,10 +183,14 @@ pub struct GlobalBarrierManager<S: MetaStore> {
 }
 
 struct CheckpointControl<S: MetaStore> {
-    /// Signal whether the barrier with building actor is sent
-    is_build_actor: bool,
     /// Save the state and message of barrier in order
     command_ctx_queue: VecDeque<EpochNode<S>>,
+    /// In addition to the actors with status `Running`.The barrier needs to send or collect the
+    /// actors of these tables.
+    creating_table_ids: HashSet<TableId>,
+    /// The barrier does not send or collect the actors of these tables, even if they are
+    /// `Running`.
+    dropping_table_ids: HashSet<TableId>,
 }
 
 impl<S> CheckpointControl<S>
@@ -186,9 +199,25 @@ where
 {
     fn new() -> Self {
         Self {
-            is_build_actor: false,
             command_ctx_queue: VecDeque::default(),
+            creating_table_ids: HashSet::default(),
+            dropping_table_ids: HashSet::default(),
         }
+    }
+
+    /// Try to enxtend this command's `changed_table_id` in `creating_table_ids`.
+    fn pre_inject(&mut self, command: &Command) {
+        if let Create(table) = command.changed_table_id() {
+            self.creating_table_ids.insert(table);
+        }
+    }
+
+    /// Barrier can be sent to and collected from an actor if:
+    /// 1. The actor is Running and not being dropped.
+    /// 2. The actor is Inactive and belongs to a creating MV
+    fn can_actor_send_or_collect(&self, s: ActorState, table_id: &TableId) -> bool {
+        s == ActorState::Running && !self.dropping_table_ids.contains(table_id)
+            || s == ActorState::Inactive && self.creating_table_ids.contains(table_id)
     }
 
     /// Return the nums of barrier (the nums of in-flight-barrier , the nums of all-barrier)
@@ -209,16 +238,16 @@ where
         notifiers: SmallVec<[Notifier; 1]>,
         timer: HistogramTimer,
     ) {
+        if let Drop(table) = command_ctx.command.changed_table_id() {
+            self.dropping_table_ids.insert(table);
+        }
         self.command_ctx_queue.push_back(EpochNode {
             timer: Some(timer),
             result: None,
             state: InFlight,
-            command_ctx: command_ctx.clone(),
+            command_ctx,
             notifiers,
         });
-        if command_ctx.command.should_pause_inject_barrier() {
-            self.is_build_actor = true;
-        }
     }
 
     /// Change the state of this `prev_epoch` to `Complete`. Return continuous nodes
@@ -239,42 +268,52 @@ where
             node.result = Some(result);
         };
         // Find all continuous nodes with 'Complete' starting from first node
-        let index = match self.command_ctx_queue.iter().find_position(|x| {
-            if x.command_ctx.command.should_pause_inject_barrier() && matches!(x.state, Complete) {
-                self.is_build_actor = false;
-            };
-            !matches!(x.state, Complete)
-        }) {
-            Some((index, _)) => index,
-            None => self.command_ctx_queue.len(),
-        };
-        self.command_ctx_queue.drain(..index).collect()
+        let index = self
+            .command_ctx_queue
+            .iter()
+            .position(|x| !matches!(x.state, Complete))
+            .unwrap_or(self.command_ctx_queue.len());
+        let complete_nodes: VecDeque<EpochNode<S>> =
+            self.command_ctx_queue.drain(..index).collect();
+        complete_nodes.iter().for_each(|node| {
+            self.remove_changed_table_ids(node.command_ctx.command.changed_table_id())
+        });
+        complete_nodes
     }
 
     /// Remove all nodes from queue and return them.
-    fn fail(&mut self) -> impl Iterator<Item = EpochNode<S>> + '_ {
-        self.command_ctx_queue.iter().for_each(|node| {
-            if !matches!(node.command_ctx.command, Command::Plain(_)) {
-                self.is_build_actor = false;
-            }
+    fn fail(&mut self) -> VecDeque<EpochNode<S>> {
+        let complete_nodes: VecDeque<EpochNode<S>> = self.command_ctx_queue.drain(..).collect();
+        complete_nodes.iter().for_each(|node| {
+            self.remove_changed_table_ids(node.command_ctx.command.changed_table_id())
         });
-        self.command_ctx_queue.drain(..)
+        complete_nodes
     }
 
     /// Pause inject barrier until True
     fn can_inject_barrier(&self, in_flight_barrier_nums: usize) -> bool {
-        !(self.is_build_actor
-            || self
-                .command_ctx_queue
-                .iter()
-                .filter(|x| matches!(x.state, InFlight))
-                .count()
-                >= in_flight_barrier_nums)
+        self.command_ctx_queue
+            .iter()
+            .filter(|x| matches!(x.state, InFlight))
+            .count()
+            < in_flight_barrier_nums
+    }
+
+    pub fn remove_changed_table_ids(&mut self, remove_changed_table: ChangedTableState) {
+        match remove_changed_table {
+            Create(table_id) => {
+                self.creating_table_ids.remove(&table_id);
+            }
+            Drop(table_id) => {
+                self.dropping_table_ids.remove(&table_id);
+            }
+            _ => {}
+        }
     }
 }
 
 /// The state and message of this barrier
-struct EpochNode<S: MetaStore> {
+pub struct EpochNode<S: MetaStore> {
     timer: Option<HistogramTimer>,
     result: Option<Result<Vec<BarrierCompleteResponse>>>,
     state: BarrierEpochState,
@@ -411,9 +450,9 @@ where
                 barrier_timer.observe_duration();
             }
             barrier_timer = Some(self.metrics.barrier_send_latency.start_timer());
-
             let (command, notifiers) = self.scheduled_barriers.pop_or_default().await;
-            let info = self.resolve_actor_info(command.creating_table_id()).await;
+            checkpoint_control.pre_inject(&command);
+            let info = self.resolve_actor_info(&checkpoint_control).await;
             // When there's no actors exist in the cluster, we don't need to send the barrier. This
             // is an advance optimization. Besides if another barrier comes immediately,
             // it may send a same epoch and fail the epoch check.
@@ -595,7 +634,7 @@ where
             fail_point!("inject_barrier_err_success");
             let fail_nodes = complete_nodes
                 .drain(index..)
-                .chain(checkpoint_control.fail());
+                .chain(checkpoint_control.fail().into_iter());
             let mut new_epoch = Epoch::from(INVALID_EPOCH);
             for node in fail_nodes {
                 if let Some(timer) = node.timer {
@@ -678,16 +717,21 @@ where
         Ok(())
     }
 
-    /// Resolve actor information from cluster and fragment manager.
-    async fn resolve_actor_info(&self, creating_table_id: Option<TableId>) -> BarrierActorInfo {
+    /// Resolve actor information from cluster, fragment manager and `ChangedTableId`.
+    /// We use `changed_table_id` to modify the actors to be sent or collected. Because these actor
+    /// will create or drop before this barrier flow through them.
+    async fn resolve_actor_info(
+        &self,
+        checkpoint_control: &CheckpointControl<S>,
+    ) -> BarrierActorInfo {
+        let check_state = |s: ActorState, table_id: &TableId| {
+            checkpoint_control.can_actor_send_or_collect(s, table_id)
+        };
         let all_nodes = self
             .cluster_manager
             .list_worker_node(WorkerType::ComputeNode, Some(Running))
             .await;
-        let all_actor_infos = self
-            .fragment_manager
-            .load_all_actors(creating_table_id)
-            .await;
+        let all_actor_infos = self.fragment_manager.load_all_actors(check_state).await;
         BarrierActorInfo::resolve(all_nodes, all_actor_infos)
     }
 
@@ -742,14 +786,9 @@ where
         if is_create_mv {
             // The snapshot ingestion may last for several epochs, we should pin the epoch here.
             // TODO: this should be done in `post_collect`
-            let snapshot = self
-                .hummock_manager
-                .pin_snapshot(META_NODE_ID, HummockEpoch::MAX)
-                .await?;
+            let _snapshot = self.hummock_manager.pin_snapshot(META_NODE_ID).await?;
             finish_rx.await.unwrap(); // Wait for this command to be finished.
-            self.hummock_manager
-                .unpin_snapshot(META_NODE_ID, [snapshot])
-                .await?;
+            self.hummock_manager.unpin_snapshot(META_NODE_ID).await?;
         } else {
             finish_rx.await.unwrap(); // Wait for this command to be finished.
         }
