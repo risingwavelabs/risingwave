@@ -554,9 +554,6 @@ def section_hummock(panels):
                 "sum(rate(state_store_get_duration_count[1m])) by (job,instance)", "get - {{job}} @ {{instance}}"
             ),
             panels.target(
-                "sum(rate(state_store_iter_duration_count[1m])) by (job,instance)", "iter - {{job}} @ {{instance}}"
-            ),
-            panels.target(
                 "sum(rate(state_store_range_scan_duration_count[1m])) by (job,instance)", "range_scan - {{job}} @ {{instance}}"
             ),
             panels.target(
@@ -564,6 +561,9 @@ def section_hummock(panels):
             ),
             panels.target(
                 "sum(rate(state_store_get_shared_buffer_hit_counts[1m])) by (job,instance)", "shared_buffer hit - {{job}} @ {{instance}}"
+            ),
+            panels.target(
+                    "sum(rate(state_store_iter_in_process_counts[1m])) by(job,instance)", "iter_in_process_counts - {{instance}} "
             ),
         ]),
         panels.timeseries_latency("Read Duration - Get", [
@@ -617,10 +617,6 @@ def section_hummock(panels):
                       [90, 99, 999, "max"]),
             panels.target(
                 "sum by(le, job, instance)(rate(state_store_iter_duration_sum[1m])) / sum by(le, job,instance) (rate(state_store_iter_duration_count[1m]))", "avg - {{job}} @ {{instance}}"
-            ),
-
-            panels.target(
-                    "sum(rate(state_store_iter_in_process_counts[1m])) by(job,instance)", "iter_in_process_counts - {{instance}} "
             ),
         ]),
         panels.timeseries_latency("Read Duration - Iter Pure Scan", [
