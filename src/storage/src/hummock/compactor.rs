@@ -484,7 +484,7 @@ impl Compactor {
 
         // if disable_parallel_compact = true, use one splits to limit the parallelism of
         // compact_task
-        if !compact_task.vnode_mappings.is_empty() || context.options.disable_parallel_compact {
+        if !compact_task.vnode_mappings.is_empty() {
             compact_task.splits = vec![risingwave_pb::hummock::KeyRange {
                 left: vec![],
                 right: vec![],
