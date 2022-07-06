@@ -98,6 +98,9 @@ impl MetaClient {
         let resp = self.inner.add_worker_node(request).await?;
         let worker_node = resp.node.expect("AddWorkerNodeResponse::node is empty");
         self.set_worker_id(worker_node.id);
+        // unpin snapshot before MAX will create a new snapshot with last committed epoch and then
+        //  we do not create snapshot during every pin_snapshot.
+        self.pin_snapshot().await?;
         Ok(worker_node.id)
     }
 
@@ -384,24 +387,23 @@ impl HummockMetaClient for MetaClient {
         Ok(())
     }
 
-    async fn pin_snapshot(&self, last_pinned: HummockEpoch) -> Result<HummockEpoch> {
+    async fn pin_snapshot(&self) -> Result<HummockEpoch> {
         let req = PinSnapshotRequest {
             context_id: self.worker_id(),
-            last_pinned,
         };
         let resp = self.inner.pin_snapshot(req).await?;
         Ok(resp.snapshot.unwrap().epoch)
     }
 
-    async fn unpin_snapshot(&self, pinned_epochs: &[HummockEpoch]) -> Result<()> {
+    async fn get_epoch(&self) -> Result<HummockEpoch> {
+        let req = GetEpochRequest {};
+        let resp = self.inner.get_epoch(req).await?;
+        Ok(resp.snapshot.unwrap().epoch)
+    }
+
+    async fn unpin_snapshot(&self) -> Result<()> {
         let req = UnpinSnapshotRequest {
             context_id: self.worker_id(),
-            snapshots: pinned_epochs
-                .iter()
-                .map(|epoch| HummockSnapshot {
-                    epoch: epoch.to_owned(),
-                })
-                .collect(),
         };
         self.inner.unpin_snapshot(req).await?;
         Ok(())
@@ -590,6 +592,7 @@ macro_rules! for_all_meta_rpc {
             ,{ hummock_client, pin_version, PinVersionRequest, PinVersionResponse }
             ,{ hummock_client, unpin_version, UnpinVersionRequest, UnpinVersionResponse }
             ,{ hummock_client, pin_snapshot, PinSnapshotRequest, PinSnapshotResponse }
+            ,{ hummock_client, get_epoch, GetEpochRequest, GetEpochResponse }
             ,{ hummock_client, unpin_snapshot, UnpinSnapshotRequest, UnpinSnapshotResponse }
             ,{ hummock_client, unpin_snapshot_before, UnpinSnapshotBeforeRequest, UnpinSnapshotBeforeResponse }
             ,{ hummock_client, report_compaction_tasks, ReportCompactionTasksRequest, ReportCompactionTasksResponse }
