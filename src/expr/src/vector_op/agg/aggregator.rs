@@ -19,7 +19,7 @@ use risingwave_common::error::{ErrorCode, Result};
 use risingwave_common::types::*;
 use risingwave_pb::expr::AggCall;
 
-use crate::expr::{build_from_prost, AggKind, ExpressionRef};
+use crate::expr::{build_from_prost, AggKind, Expression, ExpressionRef, LiteralExpression};
 use crate::vector_op::agg::approx_count_distinct::ApproxCountDistinct;
 use crate::vector_op::agg::count_star::CountStar;
 use crate::vector_op::agg::functions::*;
@@ -66,7 +66,7 @@ pub struct AggStateFactory {
     agg_kind: AggKind,
     return_type: DataType,
     distinct: bool,
-    filter: Option<ExpressionRef>,
+    filter: ExpressionRef,
 }
 
 impl AggStateFactory {
@@ -74,9 +74,11 @@ impl AggStateFactory {
         let return_type = DataType::from(prost.get_return_type()?);
         let agg_kind = AggKind::try_from(prost.get_type()?)?;
         let distinct = prost.distinct;
-        let filter = match prost.filter {
-            Some(ref expr) => Some(Arc::from(build_from_prost(expr)?)),
-            None => None,
+        let filter: ExpressionRef = match prost.filter {
+            Some(ref expr) => Arc::from(build_from_prost(expr)?),
+            None => Arc::from(
+                LiteralExpression::new(DataType::Boolean, Some(ScalarImpl::Bool(true))).boxed(),
+            ),
         };
         match &prost.get_args()[..] {
             [ref arg] => {
