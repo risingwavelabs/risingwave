@@ -71,6 +71,7 @@ steps:
           config: ci/docker-compose.yml
           environment:
             - CODECOV_TOKEN
+            - RW_RANDOM_SEED_SQLSMITH: true
     timeout_in_minutes: 15
     retry: *auto-retry
 
