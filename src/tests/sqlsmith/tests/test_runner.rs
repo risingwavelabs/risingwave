@@ -71,11 +71,9 @@ mod tests {
         let frontend = LocalFrontend::new(FrontendOpts::default()).await;
         let session = frontend.session_ref();
         let tables = create_tables(session.clone()).await;
-        let mut rng = R: Rng;
-
+        let mut rng;
         if let Ok(x) = env::var("RW_RANDOM_SEED_SQLSMITH") && x == "true" {
-            log::info!("random seed");
-            rng = rand::thread_rng();
+            rng = rand::rngs::SmallRng::from_entropy();
         } else {
             rng = rand::rngs::SmallRng::seed_from_u64(seed);
         }
