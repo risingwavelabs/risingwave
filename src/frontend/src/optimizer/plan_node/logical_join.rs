@@ -25,7 +25,7 @@ use super::{
     PlanTreeNodeBinary, PlanTreeNodeUnary, PredicatePushdown, StreamHashJoin, StreamProject,
     ToBatch, ToStream,
 };
-use crate::expr::{ExprImpl, ExprType, InputRef, FunctionCall};
+use crate::expr::{ExprImpl, ExprType};
 use crate::optimizer::plan_node::{
     BatchFilter, BatchHashJoin, BatchNestedLoopJoin, EqJoinPredicate, LogicalFilter,
     StreamDynamicFilter, StreamFilter,
@@ -801,30 +801,13 @@ impl ToStream for LogicalJoin {
             // Check if the join condition is a correlated comparison
             let conj = &predicate.other_cond().conjunctions;
 
-            let (left_ref_index, new_expr) = if let Some(expr) = conj.first() && conj.len() == 1
+            let left_ref_index = if let Some(expr) = conj.first() && conj.len() == 1
             {
-                if let Some((left_ref, op, right_ref)) = expr.as_comparison_cond()
+                if let Some((left_ref, _, right_ref)) = expr.as_comparison_cond()
                     && left_ref.index < self.left().schema().len()
                     && right_ref.index >= self.left().schema().len()
                 {
-                    (
-                        left_ref.index,
-                        ExprImpl::FunctionCall(Box::new(
-                            FunctionCall::new(
-                                op,
-                                vec![
-                                    ExprImpl::InputRef(Box::new(InputRef {
-                                        index: 0,
-                                        data_type: left_ref.data_type
-                                    })),
-                                    ExprImpl::InputRef(Box::new(InputRef {
-                                        index: 1,
-                                        data_type: right_ref.data_type
-                                    }))
-                                ],
-                            )?
-                        ))
-                    )
+                    left_ref.index
                 } else {
                     return Err(nested_loop_join_error);
                 }
@@ -855,7 +838,7 @@ impl ToStream for LogicalJoin {
 
             let plan = StreamDynamicFilter::new(
                 left_ref_index,
-                Condition::with_expr(new_expr),
+                predicate.other_cond().clone(),
                 left,
                 right,
             )

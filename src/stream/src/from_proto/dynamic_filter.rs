@@ -16,7 +16,9 @@ use std::sync::Arc;
 
 use risingwave_common::error::{internal_error, Result};
 use risingwave_common::hash::{calc_hash_key_kind, HashKey, HashKeyDispatcher};
-use risingwave_expr::expr::{build_from_prost, BoxedExpression};
+use risingwave_common::types::DataType;
+use risingwave_expr::expr::expr_binary_nonnull::new_binary_expr;
+use risingwave_expr::expr::{BoxedExpression, InputRefExpression};
 use risingwave_pb::expr::expr_node::Type as ExprNodeType;
 use risingwave_pb::expr::expr_node::Type::*;
 
@@ -39,7 +41,6 @@ impl ExecutorBuilder for DynamicFilterExecutorBuilder {
         let key_l = node.get_left_key() as usize;
 
         let prost_condition = node.get_condition()?;
-        let condition = build_from_prost(prost_condition)?;
         let comparator = prost_condition.get_expr_type()?;
         if !matches!(
             comparator,
@@ -50,6 +51,19 @@ impl ExecutorBuilder for DynamicFilterExecutorBuilder {
                 GreaterThan | GreaterThanOrEqual | LessThan | LessThanOrEqual",
             ));
         }
+
+        let condition = new_binary_expr(
+            comparator,
+            DataType::Boolean,
+            Box::new(InputRefExpression::new(
+                source_l.schema().data_types()[key_l].clone(),
+                0,
+            )),
+            Box::new(InputRefExpression::new(
+                source_r.schema().data_types()[0].clone(),
+                1,
+            )),
+        );
 
         let key = source_l.schema().fields[key_l as usize].data_type();
         let kind = calc_hash_key_kind(&[key]);
