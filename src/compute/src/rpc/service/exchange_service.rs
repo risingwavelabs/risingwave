@@ -76,10 +76,9 @@ impl ExchangeService for ExchangeServiceImpl {
             .remote_addr()
             .ok_or_else(|| Status::unavailable("get_stream connection unestablished"))?;
         let req = request.into_inner();
-        println!("get_stream {} {}", req.up_actor_id, req.down_actor_id);
-        
         let up_down_actor_ids = (req.up_actor_id, req.down_actor_id);
-        let up_down_fragment_ids = (req.up_fragment_id, req.down_actor_id);
+        let up_down_fragment_ids = (req.up_fragment_id, req.down_fragment_id);
+        self.stream_mgr.get_actors();
         let receiver = self.stream_mgr.take_receiver(up_down_actor_ids)?;
         match self.get_stream_impl(peer_addr, receiver, up_down_actor_ids, up_down_fragment_ids).await {
             Ok(resp) => Ok(resp),
@@ -129,7 +128,6 @@ impl ExchangeServiceImpl {
             let down_actor_id = up_down_actor_ids.1.to_string();
             let up_fragment_id = up_down_fragment_ids.0.to_string();
             let down_fragment_id = up_down_fragment_ids.1.to_string();
->>>>>>> Edit implementation error
             loop {
                 let msg = receiver.recv().await;
                 match msg {
