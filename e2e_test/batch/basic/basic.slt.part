@@ -36,24 +36,4 @@ show RW_IMPLICIT_FLUSH;
 ----
 true
 
-statement ok
-SET rw_implicit_flush = true;
 
-statement ok
-SET rw_force_delta_join = false;
-
-statement ok
-SET extra_float_digits = 1;
-
-statement ok
-SET query_mode = distributed;
-
-query I
-show all;
-----
-rw_implicit_flush true If `RW_IMPLICIT_FLUSH` is on, then every INSERT/UPDATE/DELETE statement will block until the entire dataflow is refreshed.
-rw_force_delta_join false To force the usage of delta join in streaming execution.
-query_mode distributed A temporary config variable to force query running in either local or distributed mode.
-extra_float_digits 1 Sets the number of digits displayed for floating-point values.
-application_name (empty) Sets the application name to be reported in statistics and logs.
-date_style (empty) It is typically set by an application upon connection to the server.
