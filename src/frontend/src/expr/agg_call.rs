@@ -12,8 +12,6 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::fmt;
-
 use itertools::Itertools;
 use risingwave_common::error::{ErrorCode, Result, RwError};
 use risingwave_common::types::DataType;
@@ -22,26 +20,13 @@ use risingwave_expr::expr::AggKind;
 use super::{Expr, ExprImpl, ExprRewriter};
 use crate::utils::Condition;
 
-#[derive(Clone, Eq, PartialEq, Hash)]
+#[derive(Debug, Clone, Eq, PartialEq, Hash)]
 pub struct AggOrderByExpr {
     pub expr: ExprImpl,
     // `Some(true)` for ASC, `Some(false)` for DESC, `None` for default
     pub asc: Option<bool>,
     // `Some(true)` for `NULLS FIRST`, `Some(false)` for `NULLS LAST`, `None` for default
     pub nulls_first: Option<bool>,
-}
-
-impl fmt::Debug for AggOrderByExpr {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        write!(f, "{:?}", self.expr)?;
-        if let Some(asc) = self.asc {
-            write!(f, " {}", if asc { "ASC" } else { "DESC" })?;
-        }
-        if let Some(nulls_first) = self.nulls_first {
-            write!(f, " NULLS {}", if nulls_first { "FIRST" } else { "LAST" })?;
-        }
-        Ok(())
-    }
 }
 
 #[derive(Debug, Clone, Eq, PartialEq, Hash)]
