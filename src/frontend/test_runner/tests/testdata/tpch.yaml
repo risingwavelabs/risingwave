@@ -1272,7 +1272,7 @@
     StreamMaterialize { columns: [ps_partkey, value], pk_columns: [ps_partkey], order_descs: [value, ps_partkey] }
       StreamExchange { dist: HashShard([0]) }
         StreamProject { exprs: [$0, $2] }
-          StreamDynamicFilter { predicate: ($0 > $1) }
+          StreamDynamicFilter { predicate: ($3 > $4) }
             StreamExchange { dist: HashShard([3]) }
               StreamHashAgg { group_keys: [$0], aggs: [count, sum($1), sum($1)] }
                 StreamExchange { dist: HashShard([0]) }
@@ -2354,7 +2354,7 @@
       StreamHashAgg { group_keys: [$0], aggs: [count, count, sum($1)] }
         StreamExchange { dist: HashShard([0]) }
           StreamProject { exprs: [Substr($0, 1:Int32, 2:Int32), $1, $2] }
-            StreamDynamicFilter { predicate: ($0 > $1) }
+            StreamDynamicFilter { predicate: ($1 > $3) }
               StreamExchange { dist: HashShard([1]) }
                 StreamHashJoin { type: LeftAnti, predicate: $0 = $4, output_indices: [1, 2, 3] }
                   StreamExchange { dist: HashShard([0]) }
