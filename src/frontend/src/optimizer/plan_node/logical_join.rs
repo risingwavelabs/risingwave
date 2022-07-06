@@ -855,7 +855,7 @@ impl ToStream for LogicalJoin {
 
             let plan = StreamDynamicFilter::new(
                 left_ref_index,
-                new_expr,
+                Condition::with_expr(new_expr),
                 left,
                 right,
             )
