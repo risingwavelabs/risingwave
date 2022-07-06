@@ -14,9 +14,8 @@
 
 #![feature(let_chains)]
 
-use std::env;
-use std::panic;
 use std::sync::Arc;
+use std::{env, panic};
 
 use rand::SeedableRng;
 use risingwave_frontend::binder::Binder;
@@ -51,8 +50,8 @@ async fn create_tables(session: Arc<SessionImpl>) -> Vec<Table> {
                     columns.clone(),
                     with_options,
                 )
-                    .await
-                    .unwrap();
+                .await
+                .unwrap();
                 tables.push(Table {
                     name: name.0[0].value.clone(),
                     columns: columns.iter().map(|c| c.clone().into()).collect(),
@@ -114,15 +113,15 @@ async fn run_sqlsmith_with_seed(seed: u64) {
 }
 
 macro_rules! generate_sqlsmith_test {
-        ($seed:expr) => {
-            paste::paste! {
-                #[tokio::test]
-                async fn [<run_sqlsmith_on_frontend_ $seed>]() {
-                    run_sqlsmith_with_seed($seed).await;
-                }
+    ($seed:expr) => {
+        paste::paste! {
+            #[tokio::test]
+            async fn [<run_sqlsmith_on_frontend_ $seed>]() {
+                run_sqlsmith_with_seed($seed).await;
             }
-        };
-    }
+        }
+    };
+}
 
 generate_sqlsmith_test! { 0 }
 generate_sqlsmith_test! { 1 }
