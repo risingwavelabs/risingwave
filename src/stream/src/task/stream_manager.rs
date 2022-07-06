@@ -883,7 +883,6 @@ impl LocalStreamManagerCore {
                 }
             }
         }
-
         Ok(())
     }
 }
