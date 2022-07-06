@@ -32,7 +32,6 @@ pub mod expr_unary;
 mod template;
 
 use std::convert::TryFrom;
-use std::slice;
 use std::sync::Arc;
 
 pub use agg::AggKind;
@@ -122,27 +121,6 @@ pub fn build_from_prost(prost: &ExprNode) -> Result<BoxedExpression> {
             "{:?}",
             prost.get_expr_type()
         ))),
-    }
-}
-
-/// Simply wrap a row level expression as an array level expression
-#[derive(Debug)]
-pub struct RowExpression {
-    expr: BoxedExpression,
-}
-
-impl RowExpression {
-    pub fn new(expr: BoxedExpression) -> Self {
-        Self { expr }
-    }
-
-    pub fn eval(&mut self, row: &Row, data_types: &[DataType]) -> Result<ArrayRef> {
-        let input = DataChunk::from_rows(slice::from_ref(row), data_types)?;
-        self.expr.eval_checked(&input)
-    }
-
-    pub fn return_type(&self) -> DataType {
-        self.expr.return_type()
     }
 }
 
