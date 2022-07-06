@@ -16,6 +16,7 @@ use risingwave_common::array::*;
 use risingwave_common::error::{ErrorCode, Result};
 use risingwave_common::types::*;
 
+use crate::expr::ExpressionRef;
 use crate::vector_op::agg::aggregator::Aggregator;
 use crate::vector_op::agg::general_sorted_grouper::EqGroups;
 
@@ -23,14 +24,16 @@ pub struct CountStar {
     return_type: DataType,
     result: usize,
     reached_limit: bool,
+    filter: Option<ExpressionRef>,
 }
 
 impl CountStar {
-    pub fn new(return_type: DataType, result: usize) -> Self {
+    pub fn new(return_type: DataType, result: usize, filter: Option<ExpressionRef>) -> Self {
         Self {
             return_type,
             result,
             reached_limit: false,
+            filter,
         }
     }
 }
@@ -41,7 +44,19 @@ impl Aggregator for CountStar {
     }
 
     fn update(&mut self, input: &DataChunk) -> Result<()> {
-        self.result += input.cardinality();
+        if let Some(ref filter) = self.filter {
+            self.result += filter
+                .eval(input)?
+                .iter()
+                .filter(|res| match res {
+                    Some(scalar) => *scalar.into_scalar_impl().as_bool(),
+                    _ => false,
+                })
+                .count();
+        } else {
+            self.result += input.cardinality();
+        }
+
         Ok(())
     }
 
@@ -75,6 +90,18 @@ impl Aggregator for CountStar {
         // in the process of counting, we set the `reached_limit` flag and save the start
         // index of previous group to `self.result`.
         let mut groups_iter = groups.starting_indices().iter();
+        let filter_cnt = if let Some(ref filter) = self.filter {
+            filter
+                .eval(input)?
+                .iter()
+                .filter(|res| match res {
+                    Some(scalar) => *scalar.into_scalar_impl().as_bool(),
+                    _ => false,
+                })
+                .count()
+        } else {
+            input.cardinality()
+        };
         if let Some(first) = groups_iter.next() {
             let first_count = {
                 if self.reached_limit {
@@ -100,22 +127,28 @@ impl Aggregator for CountStar {
             }
             if group_cnt == groups.len() {
                 self.reached_limit = false;
-                self.result = input.cardinality() - prev;
+                self.result = filter_cnt - prev;
             }
         } else {
-            self.result += input.cardinality();
+            self.result += filter_cnt;
         }
 
         Ok(())
     }
 
     fn update_with_row(&mut self, input: &DataChunk, row_id: usize) -> Result<()> {
-        if let Some(visibility) = input.visibility() {
-            if visibility.is_set(row_id)? {
+        if let (row, true) = input.row_at(row_id)? {
+            let filter_res = if let Some(ref filter) = self.filter {
+                match filter.eval_row(&Row::from(row))? {
+                    Some(scalar) => *scalar.as_bool(),
+                    None => false,
+                }
+            } else {
+                true
+            };
+            if filter_res {
                 self.result += 1;
             }
-        } else {
-            self.result += 1;
         }
         Ok(())
     }

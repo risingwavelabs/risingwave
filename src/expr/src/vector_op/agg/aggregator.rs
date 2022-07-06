@@ -12,12 +12,14 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+use std::sync::Arc;
+
 use risingwave_common::array::*;
 use risingwave_common::error::{ErrorCode, Result};
 use risingwave_common::types::*;
 use risingwave_pb::expr::AggCall;
 
-use crate::expr::AggKind;
+use crate::expr::{build_from_prost, AggKind, ExpressionRef};
 use crate::vector_op::agg::approx_count_distinct::ApproxCountDistinct;
 use crate::vector_op::agg::count_star::CountStar;
 use crate::vector_op::agg::functions::*;
@@ -64,6 +66,7 @@ pub struct AggStateFactory {
     agg_kind: AggKind,
     return_type: DataType,
     distinct: bool,
+    filter: Option<ExpressionRef>,
 }
 
 impl AggStateFactory {
@@ -71,6 +74,10 @@ impl AggStateFactory {
         let return_type = DataType::from(prost.get_return_type()?);
         let agg_kind = AggKind::try_from(prost.get_type()?)?;
         let distinct = prost.distinct;
+        let filter = match prost.filter {
+            Some(ref expr) => Some(Arc::from(build_from_prost(expr)?)),
+            None => None,
+        };
         match &prost.get_args()[..] {
             [ref arg] => {
                 let input_type = DataType::from(arg.get_type()?);
@@ -81,6 +88,7 @@ impl AggStateFactory {
                     agg_kind,
                     return_type,
                     distinct,
+                    filter,
                 })
             }
             [] => match (&agg_kind, return_type.clone()) {
@@ -90,6 +98,7 @@ impl AggStateFactory {
                     agg_kind,
                     return_type,
                     distinct,
+                    filter,
                 }),
                 _ => Err(ErrorCode::InternalError(format!(
                     "Agg {:?} without args not supported",
@@ -120,7 +129,11 @@ impl AggStateFactory {
                 self.distinct,
             )
         } else {
-            Ok(Box::new(CountStar::new(self.return_type.clone(), 0)))
+            Ok(Box::new(CountStar::new(
+                self.return_type.clone(),
+                0,
+                self.filter.clone(),
+            )))
         }
     }
 

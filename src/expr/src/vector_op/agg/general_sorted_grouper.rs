@@ -411,6 +411,7 @@ mod tests {
                 ..Default::default()
             }),
             distinct: false,
+            filter: None,
         };
         let mut agg = AggStateFactory::new(&prost)
             .unwrap()

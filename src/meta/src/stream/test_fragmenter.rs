@@ -77,6 +77,7 @@ fn make_sum_aggcall(idx: i32) -> AggCall {
             ..Default::default()
         }),
         distinct: false,
+        filter: None,
     }
 }
 
