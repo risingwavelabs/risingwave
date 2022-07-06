@@ -18,13 +18,13 @@ use futures::StreamExt;
 use futures_async_stream::try_stream;
 use itertools::Itertools;
 use madsim::collections::HashSet;
-use risingwave_common::array::{Array, ArrayRef, Op, Row, RowRef, StreamChunk};
+use risingwave_common::array::{Op, Row, RowRef, StreamChunk};
 use risingwave_common::bail;
 use risingwave_common::catalog::Schema;
 use risingwave_common::hash::HashKey;
 use risingwave_common::types::{DataType, ToOwnedDatum};
-use risingwave_expr::expr::RowExpression;
 use risingwave_storage::table::state_table::StateTable;
+use risingwave_expr::expr::BoxedExpression;
 use risingwave_storage::StateStore;
 
 use super::barrier_align::*;
@@ -183,7 +183,7 @@ pub struct HashJoinExecutor<K: HashKey, S: StateStore, const T: JoinTypePrimitiv
     /// The parameters of the right join executor
     side_r: JoinSide<K, S>,
     /// Optional non-equi join conditions
-    cond: Option<RowExpression>,
+    cond: Option<BoxedExpression>,
     /// Identity string
     identity: String,
     /// Epoch
@@ -381,7 +381,7 @@ impl<K: HashKey, S: StateStore, const T: JoinTypePrimitive> HashJoinExecutor<K, 
         output_indices: Vec<usize>,
         actor_id: u64,
         executor_id: u64,
-        cond: Option<RowExpression>,
+        cond: Option<BoxedExpression>,
         op_info: String,
         state_table_l: StateTable<S>,
         state_table_r: StateTable<S>,
@@ -598,22 +598,12 @@ impl<K: HashKey, S: StateStore, const T: JoinTypePrimitive> HashJoinExecutor<K, 
         Row(new_row)
     }
 
-    fn bool_from_array_ref(array_ref: ArrayRef) -> bool {
-        let bool_array = array_ref.as_ref().as_bool();
-        bool_array.value_at(0).unwrap_or_else(|| {
-            panic!(
-                "Some thing wrong with the expression result. Bool array: {:?}",
-                bool_array
-            )
-        })
-    }
-
     #[try_stream(ok = Message, error = StreamExecutorError)]
     async fn eq_join_oneside<'a, const SIDE: SideTypePrimitive>(
         mut side_l: &'a mut JoinSide<K, S>,
         mut side_r: &'a mut JoinSide<K, S>,
         output_data_types: &'a [DataType],
-        cond: &'a mut Option<RowExpression>,
+        cond: &'a mut Option<BoxedExpression>,
         chunk: StreamChunk,
         append_only_optimize: bool,
     ) {
@@ -653,7 +643,10 @@ impl<K: HashKey, S: StateStore, const T: JoinTypePrimitive> HashJoinExecutor<K, 
                 let new_row =
                     Self::row_concat(row_update, update_start_pos, row_matched, matched_start_pos);
 
-                cond_match = Self::bool_from_array_ref(cond.eval(&new_row, output_data_types)?);
+                cond_match = cond
+                    .eval_row(&new_row)?
+                    .map(|s| *s.as_bool())
+                    .unwrap_or(false);
             }
             Ok(cond_match)
         };
@@ -780,7 +773,7 @@ mod tests {
     use risingwave_common::hash::{Key128, Key64};
     use risingwave_common::util::sort_util::OrderType;
     use risingwave_expr::expr::expr_binary_nonnull::new_binary_expr;
-    use risingwave_expr::expr::{InputRefExpression, RowExpression};
+    use risingwave_expr::expr::InputRefExpression;
     use risingwave_pb::expr::expr_node::Type;
     use risingwave_storage::memory::MemoryStateStore;
 
@@ -816,16 +809,15 @@ mod tests {
         (state_table_l, state_table_r)
     }
 
-    fn create_cond() -> RowExpression {
+    fn create_cond() -> BoxedExpression {
         let left_expr = InputRefExpression::new(DataType::Int64, 1);
         let right_expr = InputRefExpression::new(DataType::Int64, 3);
-        let cond = new_binary_expr(
+        new_binary_expr(
             Type::LessThan,
             DataType::Boolean,
             Box::new(left_expr),
             Box::new(right_expr),
-        );
-        RowExpression::new(cond)
+        )
     }
 
     fn create_executor<const T: JoinTypePrimitive>(

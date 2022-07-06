@@ -166,7 +166,7 @@ fn next_key_no_alloc(key: &[u8]) -> Option<(&[u8], u8)> {
 // End Copyright 2016 TiKV Project Authors. Licensed under Apache-2.0.
 
 /// Get the end bound of the given `prefix` when transforming it to a key range.
-fn end_bound_of_prefix(prefix: &[u8]) -> Bound<Vec<u8>> {
+pub fn end_bound_of_prefix(prefix: &[u8]) -> Bound<Vec<u8>> {
     if let Some((s, e)) = next_key_no_alloc(prefix) {
         let mut res = Vec::with_capacity(s.len() + 1);
         res.extend_from_slice(s);

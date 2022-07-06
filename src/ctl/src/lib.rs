@@ -74,11 +74,18 @@ enum HummockCommands {
 
 #[derive(Subcommand)]
 enum TableCommands {
-    /// benchmark state table
+    /// scan a state table with MV name
     Scan {
         /// name of the materialized view to operate on
         mv_name: String,
     },
+    /// scan a state table using Id
+    ScanById {
+        /// id of the state table to operate on
+        table_id: u32,
+    },
+    /// list all state tables
+    List,
 }
 
 pub async fn start(opts: CliOpts) -> Result<()> {
@@ -105,6 +112,10 @@ pub async fn start(opts: CliOpts) -> Result<()> {
         Commands::Table(TableCommands::Scan { mv_name }) => {
             tokio::spawn(cmd_impl::table::scan(mv_name)).await??
         }
+        Commands::Table(TableCommands::ScanById { table_id }) => {
+            tokio::spawn(cmd_impl::table::scan_id(table_id)).await??
+        }
+        Commands::Table(TableCommands::List) => tokio::spawn(cmd_impl::table::list()).await??,
         Commands::Bench(cmd) => tokio::spawn(cmd_impl::bench::do_bench(cmd)).await??,
     }
     Ok(())

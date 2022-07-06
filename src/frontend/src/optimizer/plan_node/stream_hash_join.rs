@@ -30,7 +30,7 @@ use crate::catalog::column_catalog::ColumnCatalog;
 use crate::catalog::table_catalog::TableCatalog;
 use crate::expr::Expr;
 use crate::optimizer::plan_node::EqJoinPredicate;
-use crate::optimizer::property::{Distribution, order};
+use crate::optimizer::property::{Direction, Distribution, FieldOrder};
 use crate::utils::ColIndexMapping;
 
 /// [`StreamHashJoin`] implements [`super::LogicalJoin`] with hash table. It builds a hash table

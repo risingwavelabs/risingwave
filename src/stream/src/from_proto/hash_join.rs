@@ -16,7 +16,7 @@ use std::marker::PhantomData;
 use std::sync::Arc;
 
 use risingwave_common::hash::{calc_hash_key_kind, HashKey, HashKeyDispatcher, HashKeyKind};
-use risingwave_expr::expr::{build_from_prost, RowExpression};
+use risingwave_expr::expr::{build_from_prost, BoxedExpression};
 use risingwave_pb::plan_common::JoinType as JoinTypeProto;
 use risingwave_storage::table::state_table::StateTable;
 
@@ -72,7 +72,7 @@ impl ExecutorBuilder for HashJoinExecutorBuilder {
             .collect_vec();
 
         let condition = match node.get_condition() {
-            Ok(cond_prost) => Some(RowExpression::new(build_from_prost(cond_prost)?)),
+            Ok(cond_prost) => Some(build_from_prost(cond_prost)?),
             Err(_) => None,
         };
         trace!("Join non-equi condition: {:?}", condition);
@@ -151,7 +151,7 @@ struct HashJoinExecutorDispatcherArgs<S: StateStore> {
     pk_indices: PkIndices,
     output_indices: Vec<usize>,
     executor_id: u64,
-    cond: Option<RowExpression>,
+    cond: Option<BoxedExpression>,
     op_info: String,
     state_table_l: StateTable<S>,
     state_table_r: StateTable<S>,
