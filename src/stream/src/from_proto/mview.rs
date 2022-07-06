@@ -32,7 +32,7 @@ impl ExecutorBuilder for MaterializeExecutorBuilder {
         let node = try_match_expand!(node.get_node_body().unwrap(), NodeBody::Materialize)?;
 
         let table_id = TableId::from(&node.table_ref_id);
-        let keys = node
+        let order_key = node
             .column_orders
             .iter()
             .map(OrderPair::from_prost)
@@ -53,7 +53,7 @@ impl ExecutorBuilder for MaterializeExecutorBuilder {
             params.input.remove(0),
             store,
             table_id,
-            keys,
+            order_key,
             column_ids,
             params.executor_id,
             distribution_key,

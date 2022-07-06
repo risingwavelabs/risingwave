@@ -26,7 +26,7 @@ use crate::optimizer::property::{Direction, FieldOrder};
 pub struct TableCatalogBuilder {
     columns: Vec<ColumnCatalog>,
     column_names: HashMap<String, i32>,
-    order_keys: Vec<FieldOrder>,
+    order_key: Vec<FieldOrder>,
     pk_indices: Vec<usize>,
 }
 
@@ -82,7 +82,7 @@ impl TableCatalogBuilder {
         let index = i32::from(column_desc.column_id) as usize;
         if let Some(order) = order_type {
             self.pk_indices.push(index);
-            self.order_keys.push(FieldOrder {
+            self.order_key.push(FieldOrder {
                 index,
                 direct: match order {
                     OrderType::Ascending => Direction::Asc,
@@ -111,7 +111,7 @@ impl TableCatalogBuilder {
             associated_source_id: None,
             name: String::new(),
             columns: self.columns,
-            order_key: self.order_keys,
+            order_key: self.order_key,
             pk: self.pk_indices,
             is_index_on: None,
             distribution_key,

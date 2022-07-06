@@ -140,7 +140,7 @@ impl BoxedExecutorBuilder for HashAggExecutorBuilder {
 pub(crate) struct HashAggExecutor<K> {
     /// factories to construct aggregator for each groups
     agg_factories: Vec<AggStateFactory>,
-    /// Column indexes of keys that specify a group
+    /// Column indexes that specify a group
     group_key_columns: Vec<usize>,
     /// child executor
     child: BoxedExecutor,

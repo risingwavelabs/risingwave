@@ -126,12 +126,12 @@ impl PlanAggCall {
     }
 }
 
-/// `LogicalAgg` groups input data by their group keys and computes aggregation functions.
+/// `LogicalAgg` groups input data by their group key and computes aggregation functions.
 ///
 /// It corresponds to the `GROUP BY` operator in a SQL query statement together with the aggregate
 /// functions in the `SELECT` clause.
 ///
-/// The output schema will first include the group keys and then the aggregation calls.
+/// The output schema will first include the group key and then the aggregation calls.
 #[derive(Clone, Debug)]
 pub struct LogicalAgg {
     pub base: PlanBase,
@@ -236,7 +236,7 @@ impl LogicalAgg {
 struct LogicalAggBuilder {
     /// the builder of the input Project
     input_proj_builder: LogicalProjectBuilder,
-    /// the group keys column indices in the project's output
+    /// the group key column indices in the project's output
     group_key: Vec<usize>,
     /// the agg calls
     agg_calls: Vec<PlanAggCall>,
@@ -246,7 +246,7 @@ struct LogicalAggBuilder {
     /// we are processing a filter clause.
     /// This field is needed because input refs in filter clause
     /// are allowed to refer to any columns, while those not in filter
-    /// clause are only allowed to refer to group keys.
+    /// clause are only allowed to refer to group key.
     is_in_filter_clause: bool,
 }
 
@@ -543,7 +543,7 @@ impl LogicalAgg {
         self.agg_calls.as_ref()
     }
 
-    /// Get a reference to the logical agg's group keys.
+    /// Get a reference to the logical agg's group key.
     pub fn group_key(&self) -> &[usize] {
         self.group_key.as_ref()
     }
@@ -671,7 +671,7 @@ impl ColPrunable for LogicalAgg {
             )
         };
         let new_output_cols = {
-            // group keys were never pruned or even re-ordered in current impl
+            // group key were never pruned or even re-ordered in current impl
             let mut tmp = (0..agg.group_key().len()).collect_vec();
             tmp.extend(
                 required_cols
@@ -800,7 +800,7 @@ impl ToStream for LogicalAgg {
         // 2. increment the index of agg_calls in `out_col_change` by 1 due to
         // the insertion of RowCount, and it will be used to rewrite LogicalProject above this
         // LogicalAgg.
-        // Please note that the index of group keys need not be changed.
+        // Please note that the index of group key need not be changed.
         let (mut agg_calls, group_key, input) = agg.decompose();
         agg_calls.insert(0, PlanAggCall::count_star());
 

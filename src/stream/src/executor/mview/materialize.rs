@@ -37,7 +37,7 @@ pub struct MaterializeExecutor<S: StateStore> {
 
     state_table: StateTable<S>,
 
-    /// Columns of arrange keys (including pk, group keys, join keys, etc.)
+    /// Columns of arrange keys (including pk, group key, join keys, etc.)
     arrange_columns: Vec<usize>,
 
     info: ExecutorInfo,
@@ -52,14 +52,14 @@ impl<S: StateStore> MaterializeExecutor<S> {
         input: BoxedExecutor,
         store: S,
         table_id: TableId,
-        keys: Vec<OrderPair>,
+        order_key: Vec<OrderPair>,
         column_ids: Vec<ColumnId>,
         executor_id: u64,
         distribution_key: Vec<usize>,
         vnodes: Option<Arc<Bitmap>>,
     ) -> Self {
-        let arrange_columns: Vec<usize> = keys.iter().map(|k| k.column_idx).collect();
-        let arrange_order_types = keys.iter().map(|k| k.order_type).collect();
+        let arrange_columns: Vec<usize> = order_key.iter().map(|k| k.column_idx).collect();
+        let arrange_order_types = order_key.iter().map(|k| k.order_type).collect();
 
         let schema = input.schema().clone();
         let columns = column_ids
