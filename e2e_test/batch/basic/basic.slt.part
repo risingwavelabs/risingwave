@@ -36,6 +36,18 @@ show RW_IMPLICIT_FLUSH;
 ----
 true
 
+statement ok
+SET rw_implicit_flush = true;
+
+statement ok
+SET rw_force_delta_join = false;
+
+statement ok
+SET extra_float_digits = 1;
+
+statement ok
+SET query_mode = distributed;
+
 query I
 show all;
 ----
