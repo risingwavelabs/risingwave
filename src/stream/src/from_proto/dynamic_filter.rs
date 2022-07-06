@@ -66,59 +66,23 @@ impl ExecutorBuilder for DynamicFilterExecutorBuilder {
         );
 
         let key = source_l.schema().fields[key_l as usize].data_type();
-        let kind = calc_hash_key_kind(&[key]);
 
         // TODO: add the tables and backing state store.
         // let left_table_id = TableId::from(node.left_table.as_ref().unwrap().id);
         // let right_table_id = TableId::from(node.right_table.as_ref().unwrap().id);
 
-        let args = DynamicFilterExecutorDispatcherArgs {
+        Ok(Box::new(DynamicFilterExecutor::new(
             source_l,
             source_r,
             key_l,
-            pk_indices: params.pk_indices,
-            executor_id: params.executor_id,
-            cond: condition,
+            params.pk_indices,
+            params.executor_id,
+            condition,
             comparator,
             // keyspace_l: Keyspace::table_root(store.clone(), &TableId { table_id: 0 }),
             // keyspace_r: Keyspace::table_root(store, &right_table_id),
-            actor_id: params.actor_id as u64,
-            metrics: params.executor_stats,
-        };
-
-        DynamicFilterExecutorDispatcher::dispatch_by_kind(kind, args)
-    }
-}
-
-struct DynamicFilterExecutorDispatcher; //<S: StateStore>(PhantomData<S>);
-
-struct DynamicFilterExecutorDispatcherArgs {
-    source_l: Box<dyn Executor>,
-    source_r: Box<dyn Executor>,
-    key_l: usize,
-    pk_indices: PkIndices,
-    executor_id: u64,
-    cond: BoxedExpression,
-    comparator: ExprNodeType,
-    actor_id: u64,
-    metrics: Arc<StreamingMetrics>,
-}
-
-impl HashKeyDispatcher for DynamicFilterExecutorDispatcher {
-    type Input = DynamicFilterExecutorDispatcherArgs;
-    type Output = Result<BoxedExecutor>;
-
-    fn dispatch<K: HashKey>(args: Self::Input) -> Self::Output {
-        Ok(Box::new(DynamicFilterExecutor::new(
-            args.source_l,
-            args.source_r,
-            args.key_l,
-            args.pk_indices,
-            args.executor_id,
-            args.cond,
-            args.comparator,
-            args.actor_id,
-            args.metrics,
+            params.actor_id as u64,
+            params.executor_stats,
         )))
     }
 }
