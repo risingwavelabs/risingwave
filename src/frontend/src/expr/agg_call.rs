@@ -31,7 +31,7 @@ pub struct AggOrderByExpr {
 
 #[derive(Debug, Clone, Eq, PartialEq, Hash)]
 pub struct AggOrderBy {
-    sort_exprs: Vec<AggOrderByExpr>,
+    pub sort_exprs: Vec<AggOrderByExpr>,
 }
 
 impl AggOrderBy {
@@ -43,14 +43,6 @@ impl AggOrderBy {
 
     pub fn new(sort_exprs: Vec<AggOrderByExpr>) -> Self {
         Self { sort_exprs }
-    }
-
-    pub fn is_any_order(&self) -> bool {
-        self.sort_exprs.is_empty()
-    }
-
-    pub fn get_sort_exprs(&self) -> &Vec<AggOrderByExpr> {
-        &self.sort_exprs
     }
 
     pub fn rewrite_expr(self, rewriter: &mut (impl ExprRewriter + ?Sized)) -> Self {

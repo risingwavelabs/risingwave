@@ -366,7 +366,7 @@ impl ExprRewriter for LogicalAggBuilder {
             .collect_vec();
 
         let order_by_fields = order_by
-            .get_sort_exprs()
+            .sort_exprs
             .iter()
             .map(|e| {
                 let index = self.input_proj_builder.add_expr(&e.expr);
