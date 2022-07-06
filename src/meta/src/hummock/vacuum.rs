@@ -22,7 +22,7 @@ use risingwave_hummock_sdk::HummockSSTableId;
 use risingwave_pb::hummock::VacuumTask;
 
 use crate::hummock::model::INVALID_TIMESTAMP;
-use crate::hummock::{CompactorManager, HummockManagerRef};
+use crate::hummock::{CompactorManager, HummockManager, HummockManagerRef};
 use crate::storage::MetaStore;
 
 /// A SST's lifecycle is tracked in `HummockManager::Versioning` via `SstableIdInfo`:
@@ -56,6 +56,10 @@ where
         }
     }
 
+    pub async fn vacuum_version_metadata(&self) -> risingwave_common::error::Result<u64> {
+        Self::vacuum_version_metadata_inner(&self.hummock_manager).await
+    }
+
     /// Qualified versions' metadata are deleted and related stale SSTs are marked for deletion.
     /// Return number of deleted versions.
     /// A version can be deleted when:
@@ -66,10 +70,12 @@ where
     /// version(only older version) can also be deleted, even if the version itself is NOT
     /// qualified to be deleted. If a version is not pinned and all of its stale ssts are
     /// qualified to be deleted, then this version can be deleted.
-    pub async fn vacuum_version_metadata(&self) -> risingwave_common::error::Result<u64> {
+    pub async fn vacuum_version_metadata_inner(
+        hummock_manager: &HummockManager<S>,
+    ) -> risingwave_common::error::Result<u64> {
         let batch_size = 16usize;
         let mut vacuum_count: usize = 0;
-        let version_ids = self.hummock_manager.list_version_ids_asc().await?;
+        let version_ids = hummock_manager.list_version_ids_asc().await?;
         if version_ids.is_empty() {
             return Ok(0);
         }
@@ -77,40 +83,32 @@ where
         let mut versions_to_delete = Vec::with_capacity(batch_size);
         // Iterate version ids in ascending order. Skip the greatest version id.
         for version_id in version_ids.iter().take(version_ids.len() - 1) {
-            let pin_count = self
-                .hummock_manager
-                .get_version_pin_count(*version_id)
-                .await?;
+            let pin_count = hummock_manager.get_version_pin_count(*version_id).await?;
             if pin_count > 0 {
                 // All the versions after this one must not be deleted.
-                let sstable_infos = self
-                    .hummock_manager
+                let sstable_infos = hummock_manager
                     .list_sstable_id_infos(Some(*version_id))
                     .await?;
                 ssts_in_use.extend(sstable_infos.iter().map(|info| info.id));
                 continue;
             } else {
-                self.hummock_manager
+                hummock_manager
                     .delete_will_not_be_used_ssts(*version_id, &ssts_in_use)
                     .await?;
-                let stale_ssts_left = self.hummock_manager.get_ssts_to_delete(*version_id).await?;
+                let stale_ssts_left = hummock_manager.get_ssts_to_delete(*version_id).await?;
                 if stale_ssts_left.is_empty() {
                     versions_to_delete.push(*version_id);
                 }
                 if versions_to_delete.len() >= batch_size {
                     vacuum_count += versions_to_delete.len();
-                    self.hummock_manager
-                        .delete_versions(&versions_to_delete)
-                        .await?;
+                    hummock_manager.delete_versions(&versions_to_delete).await?;
                     versions_to_delete.clear();
                 }
             }
         }
         if !versions_to_delete.is_empty() {
             vacuum_count += versions_to_delete.len();
-            self.hummock_manager
-                .delete_versions(&versions_to_delete)
-                .await?;
+            hummock_manager.delete_versions(&versions_to_delete).await?;
             versions_to_delete.clear();
         }
         Ok(vacuum_count as u64)

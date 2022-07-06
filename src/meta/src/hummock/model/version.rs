@@ -44,6 +44,6 @@ impl MetadataModel for HummockVersion {
     }
 
     fn key(&self) -> risingwave_common::error::Result<Self::KeyType> {
-        Ok(self.id)
+        Ok(0)
     }
 }
