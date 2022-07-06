@@ -39,8 +39,11 @@ fn pin_versions_sum(pin_versions: &[HummockPinnedVersion]) -> usize {
     pin_versions.iter().map(|p| p.version_id.len()).sum()
 }
 
-fn pin_snapshots_sum(pin_snapshots: &[HummockPinnedSnapshot]) -> usize {
-    pin_snapshots.iter().map(|p| p.snapshot_id.len()).sum()
+fn pin_snapshots_epoch(pin_snapshots: &[HummockPinnedSnapshot]) -> Vec<u64> {
+    pin_snapshots
+        .iter()
+        .map(|p| p.minimal_pinned_snapshot)
+        .collect_vec()
 }
 
 #[tokio::test]
@@ -85,33 +88,23 @@ async fn test_hummock_pin_unpin() {
         );
     }
 
-    assert_eq!(
-        pin_snapshots_sum(&HummockPinnedSnapshot::list(env.meta_store()).await.unwrap()),
-        0
-    );
+    assert!(HummockPinnedSnapshot::list(env.meta_store())
+        .await
+        .unwrap()
+        .is_empty());
     for _ in 0..2 {
-        let pin_result = hummock_manager
-            .pin_snapshot(context_id, u64::MAX)
-            .await
-            .unwrap();
+        let pin_result = hummock_manager.pin_snapshot(context_id).await.unwrap();
         assert_eq!(pin_result.epoch, epoch);
         let pinned_snapshots = HummockPinnedSnapshot::list(env.meta_store()).await.unwrap();
-        assert_eq!(pin_snapshots_sum(&pinned_snapshots), 1);
+        assert_eq!(pin_snapshots_epoch(&pinned_snapshots), vec![epoch]);
         assert_eq!(pinned_snapshots[0].context_id, context_id);
-        assert_eq!(pinned_snapshots[0].snapshot_id.len(), 1);
-        assert_eq!(pinned_snapshots[0].snapshot_id[0], pin_result.epoch);
     }
     // unpin nonexistent target will not return error
-    for _ in 0..3 {
-        hummock_manager
-            .unpin_snapshot(context_id, vec![HummockSnapshot { epoch }])
-            .await
-            .unwrap();
-        assert_eq!(
-            pin_snapshots_sum(&HummockPinnedSnapshot::list(env.meta_store()).await.unwrap()),
-            0
-        );
-    }
+    hummock_manager.unpin_snapshot(context_id).await.unwrap();
+    assert!(HummockPinnedSnapshot::list(env.meta_store())
+        .await
+        .unwrap()
+        .is_empty());
 }
 
 #[tokio::test]
@@ -121,16 +114,14 @@ async fn test_unpin_snapshot_before() {
     let epoch = 0;
 
     for _ in 0..2 {
-        let pin_result = hummock_manager
-            .pin_snapshot(context_id, u64::MAX)
-            .await
-            .unwrap();
+        let pin_result = hummock_manager.pin_snapshot(context_id).await.unwrap();
         assert_eq!(pin_result.epoch, epoch);
         let pinned_snapshots = HummockPinnedSnapshot::list(env.meta_store()).await.unwrap();
-        assert_eq!(pin_snapshots_sum(&pinned_snapshots), 1);
         assert_eq!(pinned_snapshots[0].context_id, context_id);
-        assert_eq!(pinned_snapshots[0].snapshot_id.len(), 1);
-        assert_eq!(pinned_snapshots[0].snapshot_id[0], pin_result.epoch);
+        assert_eq!(
+            pinned_snapshots[0].minimal_pinned_snapshot,
+            pin_result.epoch
+        );
     }
 
     // unpin nonexistent target will not return error
@@ -140,8 +131,8 @@ async fn test_unpin_snapshot_before() {
             .await
             .unwrap();
         assert_eq!(
-            pin_snapshots_sum(&HummockPinnedSnapshot::list(env.meta_store()).await.unwrap()),
-            1
+            pin_snapshots_epoch(&HummockPinnedSnapshot::list(env.meta_store()).await.unwrap()),
+            vec![epoch]
         );
     }
 
@@ -152,8 +143,8 @@ async fn test_unpin_snapshot_before() {
             .await
             .unwrap();
         assert_eq!(
-            pin_snapshots_sum(&HummockPinnedSnapshot::list(env.meta_store()).await.unwrap()),
-            0
+            pin_snapshots_epoch(&HummockPinnedSnapshot::list(env.meta_store()).await.unwrap()),
+            vec![epoch]
         );
     }
 }
@@ -467,10 +458,6 @@ async fn test_release_context_resource() {
         pin_versions_sum(&HummockPinnedVersion::list(env.meta_store()).await.unwrap()),
         0
     );
-    assert_eq!(
-        pin_snapshots_sum(&HummockPinnedSnapshot::list(env.meta_store()).await.unwrap()),
-        0
-    );
     hummock_manager
         .pin_version(context_id_1, u64::MAX)
         .await
@@ -479,20 +466,17 @@ async fn test_release_context_resource() {
         .pin_version(context_id_2, u64::MAX)
         .await
         .unwrap();
-    hummock_manager
-        .pin_snapshot(context_id_1, u64::MAX)
-        .await
-        .unwrap();
-    hummock_manager
-        .pin_snapshot(context_id_2, u64::MAX)
-        .await
-        .unwrap();
+    hummock_manager.pin_snapshot(context_id_1).await.unwrap();
+    hummock_manager.pin_snapshot(context_id_2).await.unwrap();
     assert_eq!(
         pin_versions_sum(&HummockPinnedVersion::list(env.meta_store()).await.unwrap()),
         2
     );
     assert_eq!(
-        pin_snapshots_sum(&HummockPinnedSnapshot::list(env.meta_store()).await.unwrap()),
+        HummockPinnedSnapshot::list(env.meta_store())
+            .await
+            .unwrap()
+            .len(),
         2
     );
     hummock_manager
@@ -503,7 +487,6 @@ async fn test_release_context_resource() {
     assert_eq!(pin_versions_sum(&pinned_versions), 1);
     assert_eq!(pinned_versions[0].context_id, context_id_2);
     let pinned_snapshots = HummockPinnedSnapshot::list(env.meta_store()).await.unwrap();
-    assert_eq!(pin_snapshots_sum(&pinned_snapshots), 1);
     assert_eq!(pinned_snapshots[0].context_id, context_id_2);
     // it's OK to call again
     hummock_manager
@@ -516,10 +499,6 @@ async fn test_release_context_resource() {
         .unwrap();
     assert_eq!(
         pin_versions_sum(&HummockPinnedVersion::list(env.meta_store()).await.unwrap()),
-        0
-    );
-    assert_eq!(
-        pin_snapshots_sum(&HummockPinnedSnapshot::list(env.meta_store()).await.unwrap()),
         0
     );
 }
@@ -763,7 +742,7 @@ async fn test_retryable_pin_version() {
 
 #[tokio::test]
 async fn test_pin_snapshot_response_lost() {
-    let (env, hummock_manager, _cluster_manager, worker_node) = setup_compute_env(80).await;
+    let (_env, hummock_manager, _cluster_manager, worker_node) = setup_compute_env(80).await;
     let context_id = worker_node.id;
 
     let mut epoch: u64 = 1;
@@ -790,15 +769,11 @@ async fn test_pin_snapshot_response_lost() {
     // Pin a snapshot with smallest last_pin
     // [ e0 ] -> [ e0:pinned ]
     let mut epoch_recorded_in_frontend = hummock_manager
-        .pin_snapshot(context_id, INVALID_EPOCH)
+        .pin_snapshot(context_id)
         .await
         .unwrap()
         .epoch;
     assert_eq!(epoch_recorded_in_frontend, epoch - 1);
-    assert_eq!(
-        pin_snapshots_sum(&HummockPinnedSnapshot::list(env.meta_store()).await.unwrap()),
-        1
-    );
 
     let test_tables = generate_test_tables(
         epoch,
@@ -823,20 +798,16 @@ async fn test_pin_snapshot_response_lost() {
     // Assume the response of the previous rpc is lost.
     // [ e0:pinned, e1 ] -> [ e0, e1:pinned ]
     epoch_recorded_in_frontend = hummock_manager
-        .pin_snapshot(context_id, INVALID_EPOCH)
+        .pin_snapshot(context_id)
         .await
         .unwrap()
         .epoch;
     assert_eq!(epoch_recorded_in_frontend, epoch - 1);
-    assert_eq!(
-        pin_snapshots_sum(&HummockPinnedSnapshot::list(env.meta_store()).await.unwrap()),
-        1
-    );
 
     // Assume the response of the previous rpc is lost.
     // [ e0, e1:pinned ] -> [ e0, e1:pinned ]
     epoch_recorded_in_frontend = hummock_manager
-        .pin_snapshot(context_id, INVALID_EPOCH)
+        .pin_snapshot(context_id)
         .await
         .unwrap()
         .epoch;
@@ -865,15 +836,11 @@ async fn test_pin_snapshot_response_lost() {
     // Use correct snapshot id.
     // [ e0, e1:pinned, e2 ] -> [ e0, e1:pinned, e2:pinned ]
     epoch_recorded_in_frontend = hummock_manager
-        .pin_snapshot(context_id, epoch_recorded_in_frontend)
+        .pin_snapshot(context_id)
         .await
         .unwrap()
         .epoch;
     assert_eq!(epoch_recorded_in_frontend, epoch - 1);
-    assert_eq!(
-        pin_snapshots_sum(&HummockPinnedSnapshot::list(env.meta_store()).await.unwrap()),
-        2
-    );
 
     let test_tables = generate_test_tables(
         epoch,
@@ -898,15 +865,11 @@ async fn test_pin_snapshot_response_lost() {
     // Use u64::MAX as epoch to pin greatest snapshot
     // [ e0, e1:pinned, e2:pinned, e3 ] -> [ e0, e1:pinned, e2:pinned, e3::pinned ]
     epoch_recorded_in_frontend = hummock_manager
-        .pin_snapshot(context_id, u64::MAX)
+        .pin_snapshot(context_id)
         .await
         .unwrap()
         .epoch;
     assert_eq!(epoch_recorded_in_frontend, epoch - 1);
-    assert_eq!(
-        pin_snapshots_sum(&HummockPinnedSnapshot::list(env.meta_store()).await.unwrap()),
-        3
-    );
 }
 
 #[tokio::test]
