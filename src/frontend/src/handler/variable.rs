@@ -79,9 +79,9 @@ pub(super) fn handle_show_all(context: &OptimizerContext) -> Result<PgResponse> 
         all_variables.len() as i32,
         rows,
         vec![
-            PgFieldDescriptor::new("name".to_ascii_lowercase(), TypeOid::Varchar),
-            PgFieldDescriptor::new("setting".to_ascii_lowercase(), TypeOid::Varchar),
-            PgFieldDescriptor::new("description".to_ascii_lowercase(), TypeOid::Varchar),
+            PgFieldDescriptor::new("name".to_string(), TypeOid::Varchar),
+            PgFieldDescriptor::new("setting".to_string(), TypeOid::Varchar),
+            PgFieldDescriptor::new("description".to_string(), TypeOid::Varchar),
         ],
         true,
     ))
