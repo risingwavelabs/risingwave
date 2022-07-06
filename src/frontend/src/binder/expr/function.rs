@@ -84,11 +84,11 @@ impl Binder {
                     f.order_by
                         .into_iter()
                         .map(|e| -> Result<AggOrderByExpr> {
-                            Ok(AggOrderByExpr::new(
-                                self.bind_expr(e.expr)?,
-                                e.asc,
-                                e.nulls_first,
-                            ))
+                            Ok(AggOrderByExpr {
+                                expr: self.bind_expr(e.expr)?,
+                                asc: e.asc,
+                                nulls_first: e.nulls_first,
+                            })
                         })
                         .try_collect()?,
                 );

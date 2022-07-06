@@ -77,6 +77,15 @@ impl fmt::Debug for PlanAggCall {
             }
             write!(f, ")")?;
         }
+        if !self.order_by.is_any_order() {
+            let clause_text = self
+                .order_by
+                .get_sort_exprs()
+                .iter()
+                .map(|e| format!("{:?}", e))
+                .join(", ");
+            write!(f, " order_by({})", clause_text)?;
+        }
         if !self.filter.always_true() {
             write!(
                 f,

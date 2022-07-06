@@ -12,6 +12,8 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+use std::fmt;
+
 use itertools::Itertools;
 use risingwave_common::error::{ErrorCode, Result, RwError};
 use risingwave_common::types::DataType;
@@ -20,22 +22,25 @@ use risingwave_expr::expr::AggKind;
 use super::{Expr, ExprImpl, ExprRewriter};
 use crate::utils::Condition;
 
-#[derive(Debug, Clone, Eq, PartialEq, Hash)]
+#[derive(Clone, Eq, PartialEq, Hash)]
 pub struct AggOrderByExpr {
-    expr: ExprImpl,
+    pub expr: ExprImpl,
     // `Some(true)` for ASC, `Some(false)` for DESC, `None` for default
-    asc: Option<bool>,
+    pub asc: Option<bool>,
     // `Some(true)` for `NULLS FIRST`, `Some(false)` for `NULLS LAST`, `None` for default
-    nulls_first: Option<bool>,
+    pub nulls_first: Option<bool>,
 }
 
-impl AggOrderByExpr {
-    pub fn new(expr: ExprImpl, asc: Option<bool>, nulls_first: Option<bool>) -> Self {
-        Self {
-            expr,
-            asc,
-            nulls_first,
+impl fmt::Debug for AggOrderByExpr {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(f, "{:?}", self.expr)?;
+        if let Some(asc) = self.asc {
+            write!(f, " {}", if asc { "ASC" } else { "DESC" })?;
         }
+        if let Some(nulls_first) = self.nulls_first {
+            write!(f, " NULLS {}", if nulls_first { "FIRST" } else { "LAST" })?;
+        }
+        Ok(())
     }
 }
 
@@ -55,12 +60,24 @@ impl AggOrderBy {
         Self { sort_exprs }
     }
 
+    pub fn is_any_order(&self) -> bool {
+        self.sort_exprs.is_empty()
+    }
+
+    pub fn get_sort_exprs(&self) -> &Vec<AggOrderByExpr> {
+        &self.sort_exprs
+    }
+
     pub fn rewrite_expr(self, rewriter: &mut (impl ExprRewriter + ?Sized)) -> Self {
         Self {
             sort_exprs: self
                 .sort_exprs
                 .into_iter()
-                .map(|e| AggOrderByExpr::new(rewriter.rewrite_expr(e.expr), e.asc, e.nulls_first))
+                .map(|e| AggOrderByExpr {
+                    expr: rewriter.rewrite_expr(e.expr),
+                    asc: e.asc,
+                    nulls_first: e.nulls_first,
+                })
                 .collect(),
         }
     }
