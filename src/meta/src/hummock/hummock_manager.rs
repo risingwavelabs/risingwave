@@ -134,6 +134,7 @@ macro_rules! commit_multi_var {
 
 #[derive(Default)]
 struct Versioning {
+    checkpoint_version_id: u64,
     current_version_id: CurrentHummockVersionId,
     hummock_versions: BTreeMap<HummockVersionId, HummockVersion>,
     hummock_version_deltas: BTreeMap<HummockVersionId, HummockVersionDelta>,
@@ -275,6 +276,7 @@ where
         } else {
             versions.first().unwrap().clone()
         };
+        versioning_guard.checkpoint_version_id = redo_state.id;
         versioning_guard
             .hummock_versions
             .insert(redo_state.id, redo_state.clone());
@@ -845,6 +847,9 @@ where
                 version_stale_sstables,
                 sstable_id_infos
             )?;
+            // commit_multi_var(hummock_versions) has 2 parts:
+            // store hummock_versions into etcd
+            // hummock_versions.commit();
             hummock_versions.commit();
         } else {
             // The compaction task is cancelled.
@@ -1153,7 +1158,7 @@ where
     }
 
     pub async fn proceed_version_checkpoint(&self) -> risingwave_common::error::Result<()> {
-        let versioning_guard = self.versioning.read().await;
+        let mut versioning_guard = self.versioning.write().await;
         let new_checkpoint = versioning_guard
             .hummock_versions
             .first_key_value()
@@ -1161,6 +1166,17 @@ where
             .1
             .clone();
         new_checkpoint.insert(self.env.meta_store()).await?;
+
+        versioning_guard.checkpoint_version_id = new_checkpoint.id;
+        loop {
+            let fst = versioning_guard.hummock_version_deltas.first_key_value();
+            if fst.is_some() && *fst.unwrap().0 <= versioning_guard.checkpoint_version_id {
+                HummockVersionDelta::delete(self.env.meta_store(), fst.unwrap().0).await?;
+                versioning_guard.hummock_version_deltas.pop_first();
+            } else {
+                break;
+            }
+        }
         Ok(())
     }
 
