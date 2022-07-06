@@ -21,7 +21,6 @@ use super::{
     ColPrunable, LogicalJoin, PlanBase, PlanRef, PlanTreeNodeBinary, PredicatePushdown, ToBatch,
     ToStream,
 };
-use crate::expr::ExprImpl;
 use crate::utils::{ColIndexMapping, Condition};
 
 /// `LogicalApply` represents a correlated join, where the right side may refer to columns from the
@@ -33,6 +32,9 @@ pub struct LogicalApply {
     right: PlanRef,
     on: Condition,
     join_type: JoinType,
+
+    /// The indices of `CorrelatedInputRef`s in `right`.
+    correlated_indices: Vec<usize>,
 }
 
 impl fmt::Display for LogicalApply {
@@ -46,15 +48,13 @@ impl fmt::Display for LogicalApply {
 }
 
 impl LogicalApply {
-    pub(crate) fn new(left: PlanRef, right: PlanRef, join_type: JoinType, on: Condition) -> Self {
-        assert!(
-            matches!(
-                join_type,
-                JoinType::LeftOuter | JoinType::LeftSemi | JoinType::LeftAnti
-            ),
-            "Invalid join type {:?} for LogicalApply",
-            join_type
-        );
+    pub(crate) fn new(
+        left: PlanRef,
+        right: PlanRef,
+        join_type: JoinType,
+        on: Condition,
+        correlated_indices: Vec<usize>,
+    ) -> Self {
         let ctx = left.ctx();
         let out_column_num =
             LogicalJoin::out_column_num(left.schema().len(), right.schema().len(), join_type);
@@ -76,6 +76,7 @@ impl LogicalApply {
             right,
             on,
             join_type,
+            correlated_indices,
         }
     }
 
@@ -83,9 +84,10 @@ impl LogicalApply {
         left: PlanRef,
         right: PlanRef,
         join_type: JoinType,
-        on_clause: ExprImpl,
+        on: Condition,
+        correlated_indices: Vec<usize>,
     ) -> PlanRef {
-        Self::new(left, right, join_type, Condition::with_expr(on_clause)).into()
+        Self::new(left, right, join_type, on, correlated_indices).into()
     }
 
     /// Get the join type of the logical apply.
@@ -93,8 +95,14 @@ impl LogicalApply {
         self.join_type
     }
 
-    pub fn decompose(self) -> (PlanRef, PlanRef, Condition, JoinType) {
-        (self.left, self.right, self.on, self.join_type)
+    pub fn decompose(self) -> (PlanRef, PlanRef, Condition, JoinType, Vec<usize>) {
+        (
+            self.left,
+            self.right,
+            self.on,
+            self.join_type,
+            self.correlated_indices,
+        )
     }
 }
 
@@ -108,7 +116,13 @@ impl PlanTreeNodeBinary for LogicalApply {
     }
 
     fn clone_with_left_right(&self, left: PlanRef, right: PlanRef) -> Self {
-        Self::new(left, right, self.join_type, self.on.clone())
+        Self::new(
+            left,
+            right,
+            self.join_type,
+            self.on.clone(),
+            self.correlated_indices.clone(),
+        )
     }
 }
 

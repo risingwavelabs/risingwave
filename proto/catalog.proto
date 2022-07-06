@@ -33,6 +33,16 @@ message Source {
   string owner = 7;
 }
 
+message Sink {
+  uint32 id = 1;
+  uint32 schema_id = 2;
+  uint32 database_id = 3;
+  string name = 4;
+  string mv_name = 5;
+  map<string, string> properties = 6;
+  string owner = 7;
+}
+
 /// See `TableCatalog` struct in frontend crate for more information.
 message Table {
   uint32 id = 1;
@@ -40,8 +50,7 @@ message Table {
   uint32 database_id = 3;
   string name = 4;
   repeated plan_common.ColumnCatalog columns = 5;
-  repeated int32 order_column_ids = 6;
-  repeated plan_common.OrderType orders = 7;
+  repeated plan_common.ColumnOrder order_keys = 6;
   repeated uint32 dependent_relations = 8;
   oneof optional_associated_source_id {
     uint32 associated_source_id = 9;

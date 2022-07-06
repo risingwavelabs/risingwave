@@ -19,13 +19,12 @@ use std::sync::{Arc, Weak};
 use std::time::Duration;
 
 use bytes::Bytes;
-use futures::future::join_all;
+use futures::future::{join_all, try_join_all};
 use itertools::Itertools;
-use parking_lot::RwLock;
+use parking_lot::{RwLock, RwLockUpgradableReadGuard, RwLockWriteGuard};
 use risingwave_common::config::StorageConfig;
-use risingwave_hummock_sdk::compaction_group::StaticCompactionGroupId;
 use risingwave_hummock_sdk::key::FullKey;
-use risingwave_hummock_sdk::LocalSstableInfo;
+use risingwave_hummock_sdk::{CompactionGroupId, LocalSstableInfo};
 use risingwave_pb::hummock::HummockVersion;
 use risingwave_rpc_client::HummockMetaClient;
 use tokio::sync::mpsc::error::TryRecvError;
@@ -221,16 +220,23 @@ impl LocalVersionManager {
                 return false;
             }
         }
-        let mut guard = self.local_version.write();
 
-        if guard.pinned_version().id() >= new_version_id {
+        let old_version = self.local_version.upgradable_read();
+        if old_version.pinned_version().id() >= new_version_id {
             return false;
         }
 
         if let Some(conflict_detector) = self.write_conflict_detector.as_ref() {
             conflict_detector.set_watermark(newly_pinned_version.max_committed_epoch);
         }
-        guard.set_pinned_version(newly_pinned_version);
+
+        let mut new_version = old_version.clone();
+        new_version.set_pinned_version(newly_pinned_version);
+        {
+            let mut guard = RwLockUpgradableReadGuard::upgrade(old_version);
+            *guard = new_version;
+            RwLockWriteGuard::unlock_fair(guard);
+        }
 
         self.worker_context
             .version_update_notifier_tx
@@ -282,17 +288,17 @@ impl LocalVersionManager {
     pub async fn write_shared_buffer(
         &self,
         epoch: HummockEpoch,
+        compaction_group_id: CompactionGroupId,
         kv_pairs: Vec<(Bytes, StorageValue)>,
         is_remote_batch: bool,
     ) -> HummockResult<usize> {
         let sorted_items = Self::build_shared_buffer_item_batches(kv_pairs, epoch);
 
-        // TODO #2065: use correct compaction group id
         let batch = SharedBufferBatch::new(
             sorted_items,
             epoch,
             self.buffer_tracker.buffer_event_sender.clone(),
-            StaticCompactionGroupId::StateDefault.into(),
+            compaction_group_id,
         );
         let batch_size = batch.size();
         if self.buffer_tracker.try_write(batch_size) {
@@ -764,11 +770,39 @@ impl LocalVersionManager {
                             epoch
                         );
                     }
+
+                    SharedBufferEvent::Clear(notifier) => {
+                        // Wait for all ongoing flush to finish.
+                        let ongoing_flush_handles: Vec<_> =
+                            epoch_join_handle.drain().flat_map(|e| e.1).collect();
+                        if let Err(e) = try_join_all(ongoing_flush_handles).await {
+                            error!("Failed to join flush handle {:?}", e)
+                        }
+
+                        // There cannot be any pending write requests since we should only clear
+                        // shared buffer after all actors stop processing data.
+                        assert!(pending_write_requests.is_empty());
+
+                        // Clear shared buffer
+                        local_version_manager
+                            .local_version
+                            .write()
+                            .clear_shared_buffer();
+
+                        // Notify completion of the Clear event.
+                        notifier.send(()).unwrap();
+                    }
                 };
             } else {
                 break;
             }
         }
+    }
+
+    pub async fn clear_shared_buffer(&self) {
+        let (tx, rx) = oneshot::channel();
+        self.buffer_tracker.send_event(SharedBufferEvent::Clear(tx));
+        rx.await.unwrap();
     }
 }
 
@@ -846,7 +880,12 @@ mod tests {
         // Fill shared buffer with a dummy empty batch in epochs[0] and epochs[1]
         for i in 0..2 {
             local_version_manager
-                .write_shared_buffer(epochs[i], batches[i].clone(), false)
+                .write_shared_buffer(
+                    epochs[i],
+                    StaticCompactionGroupId::StateDefault.into(),
+                    batches[i].clone(),
+                    false,
+                )
                 .await
                 .unwrap();
             let local_version = local_version_manager.get_local_version();
@@ -929,7 +968,12 @@ mod tests {
         // Fill shared buffer with dummy batches
         for i in 0..2 {
             local_version_manager
-                .write_shared_buffer(epochs[i], kvs[i].clone(), false)
+                .write_shared_buffer(
+                    epochs[i],
+                    StaticCompactionGroupId::StateDefault.into(),
+                    kvs[i].clone(),
+                    false,
+                )
                 .await
                 .unwrap();
             let local_version = local_version_manager.get_local_version();
@@ -1101,5 +1145,61 @@ mod tests {
         // Check uncommitted ssts
         assert!(local_version.get_shared_buffer(epochs[0]).is_none());
         assert!(local_version.get_shared_buffer(epochs[1]).is_none());
+    }
+
+    #[tokio::test]
+    async fn test_clear_shared_buffer() {
+        let opt = Arc::new(default_config_for_test());
+        let (_, hummock_manager_ref, _, worker_node) = setup_compute_env(8080).await;
+        let local_version_manager = LocalVersionManager::new(
+            opt.clone(),
+            mock_sstable_store(),
+            Arc::new(StateStoreMetrics::unused()),
+            Arc::new(MockHummockMetaClient::new(
+                hummock_manager_ref.clone(),
+                worker_node.id,
+            )),
+            ConflictDetector::new_from_config(opt),
+        )
+        .await;
+
+        let pinned_version = local_version_manager.get_pinned_version();
+        let initial_max_commit_epoch = pinned_version.max_committed_epoch();
+
+        let epochs: Vec<u64> = vec![initial_max_commit_epoch + 1, initial_max_commit_epoch + 2];
+        let batches: Vec<Vec<(Bytes, StorageValue)>> =
+            epochs.iter().map(|e| gen_dummy_batch(*e)).collect();
+
+        // Fill shared buffer with a dummy empty batch in epochs[0] and epochs[1]
+        for i in 0..2 {
+            local_version_manager
+                .write_shared_buffer(
+                    epochs[i],
+                    StaticCompactionGroupId::StateDefault.into(),
+                    batches[i].clone(),
+                    false,
+                )
+                .await
+                .unwrap();
+            let local_version = local_version_manager.get_local_version();
+            assert_eq!(
+                local_version
+                    .get_shared_buffer(epochs[i])
+                    .unwrap()
+                    .read()
+                    .size(),
+                SharedBufferBatch::measure_batch_size(
+                    &LocalVersionManager::build_shared_buffer_item_batches(
+                        batches[i].clone(),
+                        epochs[i]
+                    )
+                )
+            );
+        }
+
+        // Clear shared buffer and check
+        local_version_manager.clear_shared_buffer().await;
+        let local_version = local_version_manager.get_local_version();
+        assert_eq!(local_version.iter_shared_buffer().count(), 0)
     }
 }

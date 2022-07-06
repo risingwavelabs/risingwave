@@ -149,7 +149,7 @@ message CompactTask {
   uint64 task_id = 5;
   // compaction output will be added to [`target_level`] of LSM after compaction
   uint32 target_level = 6;
-  bool is_target_ultimate_and_leveling = 7;
+  bool gc_delete_keys = 7;
   bool task_status = 9;
   // Hash mapping from virtual node to parallel unit. Since one compactor might deal with SSTs
   // with data for more than one relational state tables, here a vector is required.
@@ -162,6 +162,7 @@ message CompactTask {
   uint64 target_file_size = 15;
   uint32 compaction_filter_mask = 16;
   map<uint32, TableOption> table_options = 17;
+  uint64 current_epoch_time = 18;
 }
 
 message LevelHandler {
@@ -182,7 +183,7 @@ message CompactStatus {
 
 message CompactionGroup {
   uint64 id = 1;
-  repeated bytes member_prefixes = 2;
+  repeated uint32 member_table_ids = 2;
   CompactionConfig compaction_config = 3;
   map<uint32, TableOption> table_id_to_options = 4;
 }

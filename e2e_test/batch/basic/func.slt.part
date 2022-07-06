@@ -229,3 +229,8 @@ query T
 select pg_typeof(array[array[1, 2], array[3, 4]]);
 ----
 integer[][]
+
+query I
+select count(current_database());
+----
+1

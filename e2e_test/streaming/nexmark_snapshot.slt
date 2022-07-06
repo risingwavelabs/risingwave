@@ -1,5 +1,3 @@
-control sortmode rowsort
-
 include ../nexmark/create_tables.slt.part
 
 include ../nexmark/insert_person.slt.part
