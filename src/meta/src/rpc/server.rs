@@ -27,6 +27,7 @@ use risingwave_pb::hummock::hummock_manager_service_server::HummockManagerServic
 use risingwave_pb::meta::cluster_service_server::ClusterServiceServer;
 use risingwave_pb::meta::heartbeat_service_server::HeartbeatServiceServer;
 use risingwave_pb::meta::notification_service_server::NotificationServiceServer;
+use risingwave_pb::meta::scale_service_server::ScaleServiceServer;
 use risingwave_pb::meta::stream_manager_service_server::StreamManagerServiceServer;
 use risingwave_pb::meta::{MetaLeaderInfo, MetaLeaseInfo};
 use risingwave_pb::user::user_service_server::UserServiceServer;
@@ -35,6 +36,7 @@ use tokio::task::JoinHandle;
 
 use super::intercept::MetricsMiddlewareLayer;
 use super::service::notification_service::NotificationServiceImpl;
+use super::service::scale_service::ScaleServiceImpl;
 use super::DdlServiceImpl;
 use crate::barrier::GlobalBarrierManager;
 use crate::cluster::ClusterManager;
@@ -406,6 +408,7 @@ pub async fn rpc_serve_with_store<S: MetaStore>(
         fragment_manager.clone(),
     );
     let user_srv = UserServiceImpl::<S>::new(catalog_manager.clone(), user_manager.clone());
+    let scale_srv = ScaleServiceImpl::<S>::new(barrier_manager.clone());
     let cluster_srv = ClusterServiceImpl::<S>::new(cluster_manager.clone());
     let stream_srv = StreamServiceImpl::<S>::new(
         env.clone(),
@@ -477,6 +480,7 @@ pub async fn rpc_serve_with_store<S: MetaStore>(
             .add_service(NotificationServiceServer::new(notification_srv))
             .add_service(DdlServiceServer::new(ddl_srv))
             .add_service(UserServiceServer::new(user_srv))
+            .add_service(ScaleServiceServer::new(scale_srv))
             .serve(address_info.listen_addr)
             .await
             .unwrap();
