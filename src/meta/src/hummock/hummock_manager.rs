@@ -473,16 +473,14 @@ where
             context_id,
             HummockPinnedSnapshot {
                 context_id,
-                minimal_pinned_snapshot: max_committed_epoch,
+                minimal_pinned_snapshot: 0,
             },
         );
-        if context_pinned_snapshot.minimal_pinned_snapshot == u64::MAX {
+        if context_pinned_snapshot.minimal_pinned_snapshot == 0 {
             context_pinned_snapshot.minimal_pinned_snapshot = max_committed_epoch;
-        }
-
-        if context_pinned_snapshot.minimal_pinned_snapshot == max_committed_epoch {
             commit_multi_var!(self, Some(context_id), context_pinned_snapshot)?;
         }
+
         Ok(HummockSnapshot {
             epoch: max_committed_epoch,
         })
@@ -534,6 +532,7 @@ where
         {
             assert!(hummock_snapshot.epoch <= max_committed_epoch);
         }
+        let last_read_epoch = std::cmp::min(hummock_snapshot.epoch, max_committed_epoch);
 
         let mut pinned_snapshots = VarTransaction::new(&mut versioning_guard.pinned_snapshots);
         let mut context_pinned_snapshot = pinned_snapshots.new_entry_txn_or_default(
@@ -544,11 +543,11 @@ where
             },
         );
 
-        let last_read_epoch = std::cmp::min(hummock_snapshot.epoch, max_committed_epoch);
-
         // Unpin the snapshots pinned by meta but frontend doesn't know. Also equal to unpin all
         // epochs below specific watermark.
-        if context_pinned_snapshot.minimal_pinned_snapshot < last_read_epoch {
+        if context_pinned_snapshot.minimal_pinned_snapshot < last_read_epoch
+            || context_pinned_snapshot.minimal_pinned_snapshot == 0
+        {
             context_pinned_snapshot.minimal_pinned_snapshot = last_read_epoch;
             commit_multi_var!(self, Some(context_id), context_pinned_snapshot)?;
         }
