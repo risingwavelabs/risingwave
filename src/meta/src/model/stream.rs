@@ -18,6 +18,7 @@ use itertools::Itertools;
 use risingwave_common::catalog::TableId;
 use risingwave_common::error::Result;
 use risingwave_common::types::ParallelUnitId;
+use risingwave_pb::common::ParallelUnit;
 use risingwave_pb::meta::table_fragments::{ActorState, ActorStatus, Fragment};
 use risingwave_pb::meta::TableFragments as ProstTableFragments;
 use risingwave_pb::stream_plan::source_node::SourceType;
@@ -245,8 +246,12 @@ impl TableFragments {
         for actor_status in self.actor_status.values_mut() {
             let node_id = actor_status.get_parallel_unit().unwrap().worker_node_id as WorkerId;
             if migrate_map.contains_key(&node_id) {
-                actor_status.parallel_unit.as_mut().unwrap().worker_node_id =
-                    *migrate_map.get(&node_id).unwrap();
+                let parallel_unit = ParallelUnit {
+                    id: actor_status.get_parallel_unit().unwrap().id,
+                    r#type: actor_status.get_parallel_unit().unwrap().r#type,
+                    worker_node_id: *migrate_map.get(&node_id).unwrap(),
+                };
+                actor_status.parallel_unit = Some(parallel_unit);
                 flag = true;
             }
         }
