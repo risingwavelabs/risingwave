@@ -25,33 +25,33 @@ create table t (v1 int);
 statement ok
 insert into t values (1), (2), (3);
 
-query T
+query T rowsort
 select ARRAY[1, v1*2] from t;
 ----
 [1,2]
 [1,4]
 [1,6]
 
-query I
+query I rowsort
 select * from t where Array[1,v1*2] < Array[1,6];
 ----
 1
 2
 
-query I
+query I rowsort
 select * from t where Array[1,v1*2] <= Array[1,6];
 ----
 1
 2
 3
 
-query I
+query I rowsort
 select * from t where Array[1,v1*2] > Array[1,2];
 ----
 2
 3
 
-query I
+query I rowsort
 select * from t where Array[1,v1*2] >= Array[1,2];
 ----
 1
@@ -63,7 +63,7 @@ select * from t where Array[1,v1*2] = Array[1,6];
 ----
 3
 
-query I
+query I rowsort
 select * from t where Array[1,v1*2] != Array[1,6];
 ----
 1

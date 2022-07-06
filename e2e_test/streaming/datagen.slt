@@ -7,7 +7,7 @@ create materialized source s1 (v1 int, v2 float) with ( 'connector' = 'datagen' 
 # Wait enough time to ensure Datagen connector generate data
 sleep 2s
 
-query II
+query II rowsort
 select v1, v2 from s1 limit 15;
 ----
 1 11
@@ -36,7 +36,7 @@ create materialized source s1 (v1 int)  with ( 'connector' = 'datagen' ,'fields.
 # Wait enough time to ensure Datagen connector generate data
 sleep 2s
 
-query II
+query II rowsort
 select v1 from s1 order by v1 limit 10;
 ----
 1

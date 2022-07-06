@@ -29,7 +29,7 @@ NULL
 NULL
 NULL
 
-query I
+query I rowsort
 select coalesce(v1,v2,v3) from t1;
 ----
 1
