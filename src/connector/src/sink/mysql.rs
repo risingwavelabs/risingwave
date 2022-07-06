@@ -25,6 +25,7 @@ use risingwave_common::types::{Datum, Decimal, ScalarImpl};
 
 use crate::sink::{Result, Sink, SinkError};
 
+#[derive(Clone, Debug)]
 pub struct MySQLConfig {
     pub endpoint: String,
     pub table: String,

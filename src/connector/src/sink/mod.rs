@@ -15,10 +15,14 @@
 pub mod mysql;
 pub mod redis;
 
+use std::collections::HashMap;
+use std::hash::Hash;
+
 use async_trait::async_trait;
-use risingwave_common::array::StreamChunk;
+use enum_as_inner::EnumAsInner;
+use risingwave_common::array::{StreamChunk, ArrayError};
 use risingwave_common::catalog::Schema;
-use risingwave_common::error::{ErrorCode, RwError};
+use risingwave_common::error::{ErrorCode, Result as RwResult, RwError};
 use thiserror::Error;
 
 use crate::sink::mysql::{MySQLConfig, MySQLSink};
@@ -29,9 +33,25 @@ pub trait Sink {
     async fn write_batch(&mut self, chunk: StreamChunk, schema: &Schema) -> Result<()>;
 }
 
+#[derive(Clone, Debug, EnumAsInner)]
 pub enum SinkConfig {
     Mysql(MySQLConfig),
     Redis(RedisConfig),
+}
+
+impl SinkConfig {
+    pub fn from_hashmap(properties: HashMap<String, String>) -> RwResult<Self> {
+        const SINK_TYPE_KEY: &str = "sink_type";
+        let sink_type = properties.get(SINK_TYPE_KEY).ok_or_else(|| {
+            RwError::from(ErrorCode::InvalidConfigValue {
+                config_entry: SINK_TYPE_KEY.to_string(),
+                config_value: "".to_string(),
+            })
+        })?;
+        match sink_type.to_lowercase().as_str() {
+            _ => unimplemented!(),
+        }
+    }
 }
 
 pub enum SinkImpl {
@@ -62,8 +82,12 @@ pub type Result<T> = std::result::Result<T, SinkError>;
 
 #[derive(Error, Debug)]
 pub enum SinkError {
-    #[error(transparent)]
+    #[error("MySQL error: {0}")]
     MySQL(#[from] mysql_async::Error),
+    #[error("Kafka error: {0}")]
+    Kafka(String),
+    #[error("Json parse error: {0}")]
+    JsonParse(String),
 }
 
 impl From<SinkError> for RwError {
