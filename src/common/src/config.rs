@@ -163,6 +163,9 @@ pub struct StorageConfig {
     /// Number of tasks shared buffer can upload in parallel.
     #[serde(default = "default::share_buffer_upload_concurrency")]
     pub share_buffer_upload_concurrency: usize,
+
+    #[serde(default = "default::disable_parallel_compact")]
+    pub disable_parallel_compact: bool,
 }
 
 impl Default for StorageConfig {
@@ -276,6 +279,10 @@ mod default {
     }
     pub fn share_buffer_upload_concurrency() -> usize {
         8
+    }
+
+    pub fn disable_parallel_compact() -> bool {
+        false
     }
 }
 
