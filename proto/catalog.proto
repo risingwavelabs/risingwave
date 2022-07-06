@@ -43,7 +43,7 @@ message Sink {
   string owner = 7;
 }
 
-/// See `TableCatalog` struct in frontend crate for more information.
+// See `TableCatalog` struct in frontend crate for more information.
 message Table {
   uint32 id = 1;
   uint32 schema_id = 2;
