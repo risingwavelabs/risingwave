@@ -94,11 +94,8 @@ impl ToDistributedBatch for BatchSimpleAgg {
                     agg_call.partial_to_total_agg_call(partial_output_idx)
                 })
                 .collect();
-            let total_agg_logical = LogicalAgg::new(
-                total_agg_types,
-                self.logical.group_keys().to_vec(),
-                exchange,
-            );
+            let total_agg_logical =
+                LogicalAgg::new(total_agg_types, self.logical.group_key().to_vec(), exchange);
             Ok(BatchSimpleAgg::new(total_agg_logical).into())
         } else {
             let new_input = self
@@ -118,7 +115,7 @@ impl ToBatchProst for BatchSimpleAgg {
                 .map(PlanAggCall::to_protobuf)
                 .collect(),
             // We treat simple agg as a special sort agg without group keys.
-            group_keys: vec![],
+            group_key: vec![],
         })
     }
 }

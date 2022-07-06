@@ -44,8 +44,8 @@ pub struct MaterializeExecutor<S: StateStore> {
 }
 
 impl<S: StateStore> MaterializeExecutor<S> {
-    /// Create a new `MaterializeExecutor` with distribution specified with `distribution_keys` and
-    /// `vnodes`. For singleton distribution, `distribution_keys` should be empty and `vnodes`
+    /// Create a new `MaterializeExecutor` with distribution specified with `distribution_key` and
+    /// `vnodes`. For singleton distribution, `distribution_key` should be empty and `vnodes`
     /// should be `None`.
     #[allow(clippy::too_many_arguments)]
     pub fn new(
@@ -55,7 +55,7 @@ impl<S: StateStore> MaterializeExecutor<S> {
         keys: Vec<OrderPair>,
         column_ids: Vec<ColumnId>,
         executor_id: u64,
-        distribution_keys: Vec<usize>,
+        distribution_key: Vec<usize>,
         vnodes: Option<Arc<Bitmap>>,
     ) -> Self {
         let arrange_columns: Vec<usize> = keys.iter().map(|k| k.column_idx).collect();
@@ -70,7 +70,7 @@ impl<S: StateStore> MaterializeExecutor<S> {
 
         let distribution = match vnodes {
             Some(vnodes) => Distribution {
-                dist_key_indices: distribution_keys,
+                dist_key_indices: distribution_key,
                 vnodes,
             },
             None => Distribution::fallback(),

@@ -61,8 +61,8 @@ pub enum Distribution {
     /// Records are sharded into partitions, and satisfy the `AnyShard` but without any guarantee
     /// about their placement rules.
     SomeShard,
-    /// Records are sharded into partitions based on the hash value of some keys, which means the
-    /// records with the same hash values must be on the same partition.
+    /// Records are sharded into partitions based on the hash value of some columns, which means
+    /// the records with the same hash values must be on the same partition.
     /// `usize` is the index of column used as the distribution key.
     HashShard(Vec<usize>),
     /// Records are available on all downstream shards
@@ -96,9 +96,9 @@ impl Distribution {
             } as i32,
             distribution: match self {
                 Distribution::Single => None,
-                Distribution::HashShard(keys) => Some(DistributionProst::HashInfo(HashInfo {
+                Distribution::HashShard(key) => Some(DistributionProst::HashInfo(HashInfo {
                     output_count,
-                    keys: keys.iter().map(|num| *num as u32).collect(),
+                    key: key.iter().map(|num| *num as u32).collect(),
                 })),
                 // TODO: add round robin distribution
                 Distribution::SomeShard => None,

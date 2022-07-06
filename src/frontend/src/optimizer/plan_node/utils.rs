@@ -105,7 +105,7 @@ impl TableCatalogBuilder {
     }
 
     /// Consume builder and create `TableCatalog` (for proto).
-    pub fn build(self, distribution_keys: Vec<usize>, append_only: bool) -> TableCatalog {
+    pub fn build(self, distribution_key: Vec<usize>, append_only: bool) -> TableCatalog {
         TableCatalog {
             id: TableId::placeholder(),
             associated_source_id: None,
@@ -114,7 +114,7 @@ impl TableCatalogBuilder {
             order_key: self.order_keys,
             pk: self.pk_indices,
             is_index_on: None,
-            distribution_key: distribution_keys,
+            distribution_key,
             appendonly: append_only,
             owner: risingwave_common::catalog::DEFAULT_SUPPER_USER.to_string(),
             vnode_mapping: None,

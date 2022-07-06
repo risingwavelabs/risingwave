@@ -30,7 +30,7 @@ pub struct TableDesc {
     /// All columns in the table, noticed it is NOT sorted by columnId in the vec.
     pub columns: Vec<ColumnDesc>,
     /// Distribution keys of this table, which corresponds to the corresponding column of the
-    /// index. e.g., if `distribution_keys = [1, 2]`, then `columns[1]` and `columns[2]` are used
+    /// index. e.g., if `distribution_key = [1, 2]`, then `columns[1]` and `columns[2]` are used
     /// as distribution key.
     pub distribution_key: Vec<usize>,
     /// Column indices for primary keys.
