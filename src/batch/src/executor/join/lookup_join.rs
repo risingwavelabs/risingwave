@@ -153,7 +153,7 @@ impl<C: BatchTaskContext> ProbeSideSourceBuilder for ProbeSideSource<C> {
 /// High-level idea:
 /// 1) Iterate through each row in the build side
 /// 2) For each row R, find the rows that match with R on the join conditions on the probe side by
-/// using the `GatherExecutor` to query the probe side
+/// using the `ExchangeExecutor` to query the probe side
 /// 3) Join R and the matching rows on the probe side together with either inner or left outer join
 /// 4) Repeat 2-3) for every row in the build side
 pub struct LookupJoinExecutor<P> {
@@ -225,6 +225,7 @@ impl<P: 'static + ProbeSideSourceBuilder> LookupJoinExecutor<P> {
                         JoinType::LeftOuter if !chunk_is_none => {
                             self.do_inner_join(&cur_row, probe_side_chunk)
                         }
+                        // TODO: Add support for LefSemi and LeftAnti joins
                         _ => Err(ErrorCode::NotImplemented(
                             format!(
                                 "Lookup Join does not support join type {:?}",
@@ -252,8 +253,7 @@ impl<P: 'static + ProbeSideSourceBuilder> LookupJoinExecutor<P> {
                     // Until we don't have any more last_chunks to append to the chunk builder,
                     // keep appending them to the chunk builder
                     while self.last_chunk.is_some() {
-                        let mut temp_chunk: Option<SlicedDataChunk> = None;
-                        std::mem::swap(&mut temp_chunk, &mut self.last_chunk);
+                        let mut temp_chunk: Option<SlicedDataChunk> = std::mem::take(&mut self.last_chunk);
                         if let Some(inner_chunk) = self.append_chunk(temp_chunk.unwrap())? {
                             yield inner_chunk.reorder_columns(&self.output_indices);
                         }
