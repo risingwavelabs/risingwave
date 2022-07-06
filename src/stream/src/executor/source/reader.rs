@@ -38,6 +38,7 @@ pub(super) struct SourceReaderStream {
     #[pin]
     inner: SourceReaderStreamInner,
 
+    /// When the source chunk reader stream is paused, it will be stored into this field.
     paused: Option<SourceReaderArm>,
 }
 
@@ -86,8 +87,7 @@ impl SourceReaderStream {
         }
     }
 
-    /// Replace the source chunk reader with a new one for given `stream`. Used for split
-    /// change.
+    /// Replace the source chunk reader with a new one for given `stream`. Used for split change.
     pub fn replace_source_chunk_reader(&mut self, reader: Box<SourceStreamReaderImpl>) {
         if self.paused.is_some() {
             panic!("should not replace source chunk reader when paused");
@@ -95,8 +95,9 @@ impl SourceReaderStream {
         *self.inner.get_mut().1 = Self::source_chunk_reader(reader).map(Either::Right).boxed();
     }
 
+    /// Pause the source stream.
     #[expect(dead_code)]
-    pub fn pause(&mut self) {
+    pub fn pause_source(&mut self) {
         if self.paused.is_some() {
             panic!("already paused");
         }
@@ -105,8 +106,9 @@ impl SourceReaderStream {
         let _ = self.paused.insert(source_chunk_reader);
     }
 
+    /// Resume the source stream, panic if the source is not paused before.
     #[expect(dead_code)]
-    pub fn resume(&mut self) {
+    pub fn resume_source(&mut self) {
         let source_chunk_reader = self.paused.take().expect("not paused");
         let _ = std::mem::replace(self.inner.get_mut().1, source_chunk_reader);
     }
