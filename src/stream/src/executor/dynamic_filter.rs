@@ -50,6 +50,7 @@ pub struct DynamicFilterExecutor {
 }
 
 impl DynamicFilterExecutor {
+    #[allow(clippy::too_many_arguments)]
     pub fn new(
         source_l: BoxedExecutor,
         source_r: BoxedExecutor,
@@ -194,7 +195,7 @@ impl DynamicFilterExecutor {
                                 Op::Delete | Op::UpdateDelete => {
                                     let contains_element = state
                                         .get_mut(&val)
-                                        .ok_or(StreamExecutorError::from(anyhow!(
+                                        .ok_or_else(|| StreamExecutorError::from(anyhow!(
                                             "Deleting non-existent element"
                                         )))?
                                         .remove(&row.to_owned_row());
