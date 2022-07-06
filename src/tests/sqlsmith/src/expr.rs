@@ -164,6 +164,8 @@ fn make_func(func_name: &str, exprs: &[Expr]) -> Function {
         args,
         over: None,
         distinct: false,
+        order_by: vec![],
+        filter: None,
     }
 }
 

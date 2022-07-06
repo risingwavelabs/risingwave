@@ -15,10 +15,12 @@
 use std::sync::Arc;
 
 use bytes::Bytes;
+use risingwave_hummock_sdk::compaction_group::StaticCompactionGroupId;
 use risingwave_meta::hummock::test_utils::setup_compute_env;
 use risingwave_meta::hummock::MockHummockMetaClient;
 use risingwave_rpc_client::HummockMetaClient;
 
+use crate::hummock::compaction_group_client::DummyCompactionGroupClient;
 use crate::hummock::iterator::test_utils::mock_sstable_store;
 use crate::hummock::test_utils::{count_iter, default_config_for_test};
 use crate::hummock::HummockStorage;
@@ -45,6 +47,9 @@ async fn test_failpoints_state_store_read_upload() {
         sstable_store.clone(),
         meta_client.clone(),
         Arc::new(crate::monitor::StateStoreMetrics::unused()),
+        Arc::new(DummyCompactionGroupClient::new(
+            StaticCompactionGroupId::StateDefault.into(),
+        )),
     )
     .await
     .unwrap();
@@ -82,6 +87,7 @@ async fn test_failpoints_state_store_read_upload() {
             ReadOptions {
                 epoch: 1,
                 table_id: Default::default(),
+                ttl: None,
             },
         )
         .await
@@ -124,6 +130,7 @@ async fn test_failpoints_state_store_read_upload() {
             ReadOptions {
                 epoch: 2,
                 table_id: Default::default(),
+                ttl: None,
             },
         )
         .await;
@@ -134,6 +141,7 @@ async fn test_failpoints_state_store_read_upload() {
             ReadOptions {
                 epoch: 2,
                 table_id: Default::default(),
+                ttl: None,
             },
         )
         .await;
@@ -145,6 +153,7 @@ async fn test_failpoints_state_store_read_upload() {
             ReadOptions {
                 epoch: 2,
                 table_id: Default::default(),
+                ttl: None,
             },
         )
         .await
@@ -176,6 +185,7 @@ async fn test_failpoints_state_store_read_upload() {
             ReadOptions {
                 epoch: 5,
                 table_id: Default::default(),
+                ttl: None,
             },
         )
         .await
@@ -188,6 +198,7 @@ async fn test_failpoints_state_store_read_upload() {
             ReadOptions {
                 epoch: 5,
                 table_id: Default::default(),
+                ttl: None,
             },
         )
         .await

@@ -17,8 +17,7 @@ use std::fmt;
 use itertools::Itertools;
 use risingwave_common::catalog::Schema;
 use risingwave_common::error::Result;
-use risingwave_common::util::sort_util::OrderType;
-use risingwave_pb::expr::InputRefExpr;
+use risingwave_common::util::sort_util::{OrderPair, OrderType};
 use risingwave_pb::plan_common::{ColumnOrder, OrderType as ProstOrderType};
 
 use super::super::plan_node::*;
@@ -35,18 +34,10 @@ impl Order {
     }
 
     /// Convert into protobuf.
-    pub fn to_protobuf(&self, schema: &Schema) -> Vec<ColumnOrder> {
+    pub fn to_protobuf(&self, _schema: &Schema) -> Vec<ColumnOrder> {
         self.field_order
             .iter()
-            .map(|f| {
-                let (input_ref, order_type) = f.to_protobuf();
-                let data_type = schema.fields[f.index].data_type.to_protobuf();
-                ColumnOrder {
-                    order_type: order_type as i32,
-                    input_ref: Some(input_ref),
-                    return_type: Some(data_type),
-                }
-            })
+            .map(FieldOrder::to_protobuf)
             .collect_vec()
     }
 }
@@ -64,7 +55,7 @@ impl fmt::Display for Order {
     }
 }
 
-#[derive(Clone)]
+#[derive(Clone, PartialEq)]
 pub struct FieldOrder {
     pub index: usize,
     pub direct: Direction,
@@ -91,12 +82,27 @@ impl FieldOrder {
         }
     }
 
-    pub fn to_protobuf(&self) -> (InputRefExpr, ProstOrderType) {
-        let input_ref_expr = InputRefExpr {
-            column_idx: self.index as i32,
-        };
-        let order_type = self.direct.to_protobuf();
-        (input_ref_expr, order_type)
+    pub fn to_protobuf(&self) -> ColumnOrder {
+        ColumnOrder {
+            order_type: self.direct.to_protobuf() as i32,
+            index: self.index as u32,
+        }
+    }
+
+    pub fn from_protobuf(column_order: &ColumnOrder) -> Self {
+        let order_type: ProstOrderType = ProstOrderType::from_i32(column_order.order_type).unwrap();
+        Self {
+            direct: Direction::from_protobuf(&order_type),
+            index: column_order.index as usize,
+        }
+    }
+
+    // TODO: unify them
+    pub fn to_order_pair(&self) -> OrderPair {
+        OrderPair {
+            column_idx: self.index,
+            order_type: self.direct.to_order(),
+        }
     }
 }
 
@@ -140,6 +146,23 @@ impl Direction {
             Self::Asc => ProstOrderType::Ascending,
             Self::Desc => ProstOrderType::Descending,
             _ => unimplemented!(),
+        }
+    }
+
+    pub fn from_protobuf(order_type: &ProstOrderType) -> Self {
+        match order_type {
+            ProstOrderType::Ascending => Self::Asc,
+            ProstOrderType::Descending => Self::Desc,
+            ProstOrderType::Invalid => unreachable!(),
+        }
+    }
+
+    // TODO: unify them
+    pub fn to_order(&self) -> OrderType {
+        match self {
+            Self::Asc => OrderType::Ascending,
+            Self::Desc => OrderType::Descending,
+            _ => unreachable!(),
         }
     }
 }

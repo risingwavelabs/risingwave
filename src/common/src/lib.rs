@@ -38,6 +38,7 @@
 #![feature(trusted_len)]
 #![feature(allocator_api)]
 #![feature(lint_reasons)]
+#![feature(generators)]
 
 #[macro_use]
 pub mod error;

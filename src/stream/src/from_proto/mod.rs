@@ -17,6 +17,7 @@
 mod batch_query;
 mod chain;
 mod dynamic_filter;
+mod expand;
 mod filter;
 mod global_simple_agg;
 mod hash_agg;
@@ -44,6 +45,7 @@ use risingwave_storage::{Keyspace, StateStore};
 use self::batch_query::*;
 use self::chain::*;
 use self::dynamic_filter::*;
+use self::expand::*;
 use self::filter::*;
 use self::global_simple_agg::*;
 use self::hash_agg::*;
@@ -98,28 +100,29 @@ pub fn create_executor(
     store: impl StateStore,
 ) -> Result<BoxedExecutor> {
     build_executor! {
-        params,
-        node,
-        store,
-        stream,
-        NodeBody::Source => SourceExecutorBuilder,
-        NodeBody::Project => ProjectExecutorBuilder,
-        NodeBody::TopN => TopNExecutorBuilder,
-        NodeBody::AppendOnlyTopN => AppendOnlyTopNExecutorBuilder,
-        NodeBody::LocalSimpleAgg => LocalSimpleAggExecutorBuilder,
-        NodeBody::GlobalSimpleAgg => SimpleAggExecutorBuilder,
-        NodeBody::HashAgg => HashAggExecutorBuilder,
-        NodeBody::HashJoin => HashJoinExecutorBuilder,
-        NodeBody::HopWindow => HopWindowExecutorBuilder,
-        NodeBody::Chain => ChainExecutorBuilder,
-        NodeBody::BatchPlan => BatchQueryExecutorBuilder,
-        NodeBody::Merge => MergeExecutorBuilder,
-        NodeBody::Materialize => MaterializeExecutorBuilder,
-        NodeBody::Filter => FilterExecutorBuilder,
-        NodeBody::Arrange => ArrangeExecutorBuilder,
-        NodeBody::Lookup => LookupExecutorBuilder,
-        NodeBody::Union => UnionExecutorBuilder,
-        NodeBody::LookupUnion => LookupUnionExecutorBuilder,
-        NodeBody::DynamicFilter => DynamicFilterExecutorBuilder,
-    }
+            params,
+            node,
+            store,
+            stream,
+            NodeBody::Source => SourceExecutorBuilder,
+            NodeBody::Project => ProjectExecutorBuilder,
+            NodeBody::TopN => TopNExecutorBuilder,
+            NodeBody::AppendOnlyTopN => AppendOnlyTopNExecutorBuilder,
+            NodeBody::LocalSimpleAgg => LocalSimpleAggExecutorBuilder,
+            NodeBody::GlobalSimpleAgg => GlobalSimpleAggExecutorBuilder,
+            NodeBody::HashAgg => HashAggExecutorBuilder,
+            NodeBody::HashJoin => HashJoinExecutorBuilder,
+            NodeBody::HopWindow => HopWindowExecutorBuilder,
+            NodeBody::Chain => ChainExecutorBuilder,
+            NodeBody::BatchPlan => BatchQueryExecutorBuilder,
+            NodeBody::Merge => MergeExecutorBuilder,
+            NodeBody::Materialize => MaterializeExecutorBuilder,
+            NodeBody::Filter => FilterExecutorBuilder,
+            NodeBody::Arrange => ArrangeExecutorBuilder,
+            NodeBody::Lookup => LookupExecutorBuilder,
+            NodeBody::Union => UnionExecutorBuilder,
+            NodeBody::LookupUnion => LookupUnionExecutorBuilder,
+            NodeBody::Expand => ExpandExecutorBuilder,
+            NodeBody::DynamicFilter => DynamicFilterExecutorBuilder,
+        }
 }

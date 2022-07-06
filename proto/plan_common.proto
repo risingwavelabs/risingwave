@@ -3,7 +3,6 @@ syntax = "proto3";
 package plan_common;
 
 import "data.proto";
-import "expr.proto";
 
 option optimize_for = SPEED;
 
@@ -40,11 +39,6 @@ message ColumnDesc {
   string type_name = 5;
 }
 
-message OrderedColumnDesc {
-  ColumnDesc column_desc = 1;
-  OrderType order = 2;
-}
-
 message ColumnCatalog {
   ColumnDesc column_desc = 1;
   bool is_hidden = 2;
@@ -53,7 +47,9 @@ message ColumnCatalog {
 message CellBasedTableDesc {
   uint32 table_id = 1;
   repeated ColumnDesc columns = 2;
-  repeated OrderedColumnDesc order_key = 3;
+  // TODO: may refactor primary key representations
+  repeated ColumnOrder order_key = 3;
+  repeated uint32 dist_key_indices = 5;
 }
 
 enum JoinType {
@@ -78,8 +74,7 @@ enum OrderType {
 message ColumnOrder {
   // maybe other name
   OrderType order_type = 1;
-  expr.InputRefExpr input_ref = 2;
-  data.DataType return_type = 3;
+  uint32 index = 2;
 }
 
 enum RowFormatType {
@@ -87,21 +82,4 @@ enum RowFormatType {
   PROTOBUF = 1;
   DEBEZIUM_JSON = 2;
   AVRO = 3;
-}
-
-message StreamSourceInfo {
-  bool append_only = 1;
-  map<string, string> properties = 2;
-  RowFormatType row_format = 3;
-  string row_schema_location = 4;
-  int32 row_id_index = 5;
-}
-
-message TableSourceInfo {}
-
-message MaterializedViewInfo {
-  TableRefId associated_table_ref_id = 1;
-  repeated ColumnOrder column_orders = 2;
-  repeated int32 pk_indices = 3;
-  repeated TableRefId dependent_tables = 4;
 }

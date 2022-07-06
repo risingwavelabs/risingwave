@@ -150,6 +150,41 @@ select char_length('abcdefghijklmnopqrstuvwxyz');
 26
 
 query I
+select length('hello world');
+----
+11
+
+query I
+select length('你好hhh');
+----
+5
+
+query I
+select octet_length('hello world');
+----
+11
+
+query I
+select octet_length('你好hhh');
+----
+9
+
+query I
+select bit_length('hello world') / octet_length('hello world');
+----
+8
+
+query I
+select bit_length('你好hhh') / octet_length('你好hhh');
+----
+8
+
+query I
+select ascii('abc');
+----
+97
+
+query I
 select repeat('hello', 3);
 ----
 hellohellohello
@@ -194,3 +229,8 @@ query T
 select pg_typeof(array[array[1, 2], array[3, 4]]);
 ----
 integer[][]
+
+query I
+select count(current_database());
+----
+1

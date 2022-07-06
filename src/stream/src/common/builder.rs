@@ -16,8 +16,9 @@ use std::sync::Arc;
 
 use itertools::Itertools;
 use risingwave_common::array::column::Column;
-use risingwave_common::array::{ArrayBuilderImpl, ArrayImpl, Op, Row, RowRef, StreamChunk};
-use risingwave_common::error::Result;
+use risingwave_common::array::{
+    ArrayBuilderImpl, ArrayImpl, ArrayResult, Op, Row, RowRef, StreamChunk,
+};
 use risingwave_common::types::DataType;
 
 /// Build a array and it's corresponding operations.
@@ -64,7 +65,7 @@ impl StreamChunkBuilder {
         data_types: &[DataType],
         update_start_pos: usize,
         matched_start_pos: usize,
-    ) -> Result<Self> {
+    ) -> ArrayResult<Self> {
         // Leave room for paired `UpdateDelete` and `UpdateInsert`. When there are `capacity - 1`
         // ops in current builder and the last op is `UpdateDelete`, we delay the chunk generation
         // until `UpdateInsert` comes. This means that the effective output message size will indeed
@@ -76,7 +77,7 @@ impl StreamChunkBuilder {
         let column_builders = data_types
             .iter()
             .map(|datatype| datatype.create_array_builder(reduced_capacity))
-            .try_collect()?;
+            .collect();
         Ok(Self {
             ops,
             column_builders,
@@ -91,7 +92,7 @@ impl StreamChunkBuilder {
     /// Increase chunk size
     ///
     /// A [`StreamChunk`] will be returned when `size == capacity`
-    fn inc_size(&mut self) -> Result<Option<StreamChunk>> {
+    fn inc_size(&mut self) -> ArrayResult<Option<StreamChunk>> {
         self.size += 1;
 
         // Take a chunk when capacity is exceeded, but splitting `UpdateDelete` and `UpdateInsert`
@@ -111,7 +112,7 @@ impl StreamChunkBuilder {
         op: Op,
         row_update: &RowRef<'_>,
         row_matched: &Row,
-    ) -> Result<Option<StreamChunk>> {
+    ) -> ArrayResult<Option<StreamChunk>> {
         self.ops.push(op);
         for (i, d) in row_update.values().enumerate() {
             self.column_builders[i + self.update_start_pos].append_datum_ref(d)?;
@@ -130,7 +131,7 @@ impl StreamChunkBuilder {
         &mut self,
         op: Op,
         row_update: &RowRef<'_>,
-    ) -> Result<Option<StreamChunk>> {
+    ) -> ArrayResult<Option<StreamChunk>> {
         self.ops.push(op);
         for (i, d) in row_update.values().enumerate() {
             self.column_builders[i + self.update_start_pos].append_datum_ref(d)?;
@@ -145,7 +146,11 @@ impl StreamChunkBuilder {
     /// append a row with matched value and fill the coming side with null.
     ///
     /// A [`StreamChunk`] will be returned when `size == capacity`
-    pub fn append_row_matched(&mut self, op: Op, row_matched: &Row) -> Result<Option<StreamChunk>> {
+    pub fn append_row_matched(
+        &mut self,
+        op: Op,
+        row_matched: &Row,
+    ) -> ArrayResult<Option<StreamChunk>> {
         self.ops.push(op);
         for i in 0..self.column_builders.len() - row_matched.size() {
             self.column_builders[i + self.update_start_pos].append_datum_ref(None)?;
@@ -167,7 +172,7 @@ impl StreamChunkBuilder {
             .iter_mut()
             .zip_eq(&self.data_types)
             .map(|(builder, datatype)| {
-                std::mem::replace(builder, datatype.create_array_builder(self.capacity)?).finish()
+                std::mem::replace(builder, datatype.create_array_builder(self.capacity)).finish()
             })
             .try_collect()?;
         let new_columns = new_arrays

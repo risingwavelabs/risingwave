@@ -14,11 +14,11 @@
 
 use futures_async_stream::try_stream;
 use risingwave_common::array::ArrayImpl::Bool;
-use risingwave_common::array::DataChunk;
+use risingwave_common::array::{Array, DataChunk};
 use risingwave_common::catalog::Schema;
 use risingwave_common::error::ErrorCode::InternalError;
 use risingwave_common::error::{Result, RwError};
-use risingwave_common::util::chunk_coalesce::{DataChunkBuilder, SlicedDataChunk};
+use risingwave_common::util::chunk_coalesce::DataChunkBuilder;
 use risingwave_expr::expr::{build_from_prost, BoxedExpression};
 use risingwave_pb::batch_plan::plan_node::NodeBody;
 
@@ -59,29 +59,11 @@ impl FilterExecutor {
             let vis_array = self.expr.eval(&data_chunk)?;
 
             if let Bool(vis) = vis_array.as_ref() {
-                let mut sliced_data_chunk =
-                    SlicedDataChunk::new_checked(data_chunk.with_visibility(vis.try_into()?))?;
-
-                loop {
-                    let (left_data, output) = data_chunk_builder.append_chunk(sliced_data_chunk)?;
-                    match (left_data, output) {
-                        (Some(left_data), Some(output)) => {
-                            sliced_data_chunk = left_data;
-                            yield output;
-                        }
-                        (None, Some(output)) => {
-                            yield output;
-                            break;
-                        }
-                        (None, None) => {
-                            break;
-                        }
-                        _ => {
-                            return Err(
-                                InternalError("Data chunk builder error".to_string()).into()
-                            );
-                        }
-                    }
+                #[for_await]
+                for data_chunk in data_chunk_builder
+                    .trunc_data_chunk(data_chunk.with_visibility(vis.iter().collect()))
+                {
+                    yield data_chunk?;
                 }
             } else {
                 return Err(InternalError("Filter can only receive bool array".to_string()).into());

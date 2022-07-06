@@ -30,9 +30,8 @@ use crate::executor::dispatch::*;
 use crate::executor::monitor::StreamingMetrics;
 use crate::executor::receiver::ReceiverExecutor;
 use crate::executor::test_utils::create_in_memory_keyspace_agg;
-use crate::executor::{
-    Executor, LocalSimpleAggExecutor, MergeExecutor, ProjectExecutor, SimpleAggExecutor,
-};
+use crate::executor::test_utils::global_simple_agg::new_boxed_simple_agg_executor;
+use crate::executor::{Executor, LocalSimpleAggExecutor, MergeExecutor, ProjectExecutor};
 use crate::task::SharedContext;
 
 /// This test creates a merger-dispatcher pair, and run a sum. Each chunk
@@ -53,7 +52,7 @@ async fn test_merger_sum_aggr() {
             ActorContext::create(),
             0,
             0,
-            metrics,
+            metrics.clone(),
         );
         let append_only = false;
         // for the local aggregator, we need two states: row count and sum
@@ -80,7 +79,7 @@ async fn test_merger_sum_aggr() {
         let (tx, rx) = channel(16);
         let consumer = SenderConsumer {
             input: aggregator.boxed(),
-            channel: Box::new(LocalOutput::new(233, tx)),
+            channel: Box::new(LocalOutput::new(233, tx, metrics)),
         };
         let context = SharedContext::for_test().into();
         let actor = Actor::new(
@@ -109,7 +108,7 @@ async fn test_merger_sum_aggr() {
         let (actor, channel) = make_actor(rx);
         outputs.push(channel);
         handles.push(tokio::spawn(actor.run()));
-        inputs.push(Box::new(LocalOutput::new(233, tx)) as Box<dyn Output>);
+        inputs.push(Box::new(LocalOutput::new(233, tx, metrics.clone())) as Box<dyn Output>);
     }
 
     // create a round robin dispatcher, which dispatches messages to the actors
@@ -159,7 +158,8 @@ async fn test_merger_sum_aggr() {
 
     // for global aggregator, we need to sum data and sum row count
     let append_only = false;
-    let aggregator = SimpleAggExecutor::new(
+    let aggregator = new_boxed_simple_agg_executor(
+        create_in_memory_keyspace_agg(2),
         merger.boxed(),
         vec![
             AggCall {
@@ -175,15 +175,13 @@ async fn test_merger_sum_aggr() {
                 append_only,
             },
         ],
-        create_in_memory_keyspace_agg(2),
         vec![],
         2,
         vec![],
-    )
-    .unwrap();
+    );
 
     let projection = ProjectExecutor::new(
-        aggregator.boxed(),
+        aggregator,
         vec![],
         vec![
             // TODO: use the new streaming_if_null expression here, and add `None` tests

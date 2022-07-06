@@ -174,7 +174,7 @@ impl<K: HashKey, S: StateStore> HashAggExecutor<K, S> {
                 (
                     key.clone(),
                     hash_code.clone(),
-                    key_to_vis_maps.remove(key).unwrap().try_into().unwrap(),
+                    key_to_vis_maps.remove(key).unwrap().into_iter().collect(),
                 )
             })
             .collect_vec();
@@ -200,8 +200,7 @@ impl<K: HashKey, S: StateStore> HashAggExecutor<K, S> {
 
         // Compute hash code here before serializing keys to avoid duplicate hash code computation.
         let hash_codes = data_chunk.get_hash_values(key_indices, CRC32FastBuilder)?;
-        let keys = K::build_from_hash_code(key_indices, &data_chunk, hash_codes.clone())
-            .map_err(StreamExecutorError::eval_error)?;
+        let keys = K::build_from_hash_code(key_indices, &data_chunk, hash_codes.clone());
         let (columns, vis) = data_chunk.into_parts();
         let visibility = match vis {
             Vis::Bitmap(b) => Some(b),
@@ -351,9 +350,7 @@ impl<K: HashKey, S: StateStore> HashAggExecutor<K, S> {
                 // --- Create array builders ---
                 // As the datatype is retrieved from schema, it contains both group key and
                 // aggregation state outputs.
-                let mut builders = schema
-                    .create_array_builders(dirty_cnt * 2)
-                    .map_err(StreamExecutorError::eval_error)?;
+                let mut builders = schema.create_array_builders(dirty_cnt * 2);
                 let mut new_ops = Vec::with_capacity(dirty_cnt);
 
                 // --- Retrieve modified states and put the changes into the builders ---
@@ -447,17 +444,17 @@ mod tests {
     use risingwave_common::array::data_chunk_iter::Row;
     use risingwave_common::array::stream_chunk::StreamChunkTestExt;
     use risingwave_common::array::{Op, StreamChunk};
-    use risingwave_common::catalog::{Field, Schema};
+    use risingwave_common::catalog::{Field, Schema, TableId};
     use risingwave_common::error::Result;
     use risingwave_common::hash::{calc_hash_key_kind, HashKey, HashKeyDispatcher};
     use risingwave_common::types::DataType;
     use risingwave_expr::expr::*;
+    use risingwave_storage::memory::MemoryStateStore;
     use risingwave_storage::table::state_table::StateTable;
-    use risingwave_storage::{Keyspace, StateStore};
+    use risingwave_storage::StateStore;
 
-    use crate::executor::aggregation::{
-        generate_agg_schema, generate_state_table, AggArgs, AggCall,
-    };
+    use crate::executor::aggregation::{generate_agg_schema, AggArgs, AggCall};
+    use crate::executor::test_utils::global_simple_agg::generate_state_table;
     use crate::executor::test_utils::*;
     use crate::executor::{Executor, HashAggExecutor, Message, PkIndices};
 
@@ -492,7 +489,7 @@ mod tests {
         input: Box<dyn Executor>,
         agg_calls: Vec<AggCall>,
         key_indices: Vec<usize>,
-        keyspace: Vec<Keyspace<impl StateStore>>,
+        keyspace_gen: Vec<(MemoryStateStore, TableId)>,
         pk_indices: PkIndices,
         executor_id: u64,
     ) -> Box<dyn Executor> {
@@ -501,12 +498,13 @@ mod tests {
             .map(|idx| input.schema().fields[*idx].data_type())
             .collect_vec();
         let agg_schema = generate_agg_schema(input.as_ref(), &agg_calls, Some(&key_indices));
-        let state_tables = keyspace
+        let state_tables = keyspace_gen
             .iter()
             .zip_eq(agg_calls.iter())
             .map(|(ks, agg_call)| {
                 generate_state_table(
-                    ks.clone(),
+                    ks.0.clone(),
+                    ks.1,
                     agg_call,
                     &key_indices,
                     &pk_indices,
@@ -549,7 +547,7 @@ mod tests {
         test_local_hash_aggregation_min_append_only(create_in_memory_keyspace_agg(2)).await
     }
 
-    async fn test_local_hash_aggregation_count(keyspace: Vec<Keyspace<impl StateStore>>) {
+    async fn test_local_hash_aggregation_count(keyspace: Vec<(MemoryStateStore, TableId)>) {
         let schema = Schema {
             fields: vec![Field::unnamed(DataType::Int64)],
         };
@@ -630,7 +628,7 @@ mod tests {
         );
     }
 
-    async fn test_global_hash_aggregation_count(keyspace: Vec<Keyspace<impl StateStore>>) {
+    async fn test_global_hash_aggregation_count(keyspace: Vec<(MemoryStateStore, TableId)>) {
         let schema = Schema {
             fields: vec![
                 Field::unnamed(DataType::Int64),
@@ -725,7 +723,7 @@ mod tests {
         );
     }
 
-    async fn test_local_hash_aggregation_min(keyspace: Vec<Keyspace<impl StateStore>>) {
+    async fn test_local_hash_aggregation_min(keyspace: Vec<(MemoryStateStore, TableId)>) {
         let schema = Schema {
             fields: vec![
                 // group key column
@@ -806,7 +804,9 @@ mod tests {
         );
     }
 
-    async fn test_local_hash_aggregation_min_append_only(keyspace: Vec<Keyspace<impl StateStore>>) {
+    async fn test_local_hash_aggregation_min_append_only(
+        keyspace: Vec<(MemoryStateStore, TableId)>,
+    ) {
         let schema = Schema {
             fields: vec![
                 // group key column

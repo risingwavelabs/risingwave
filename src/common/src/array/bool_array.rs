@@ -33,7 +33,7 @@ impl BoolArray {
     }
 
     pub fn from_slice(data: &[Option<bool>]) -> ArrayResult<Self> {
-        let mut builder = <Self as Array>::Builder::new(data.len())?;
+        let mut builder = <Self as Array>::Builder::new(data.len());
         for i in data {
             builder.append(*i)?;
         }
@@ -89,6 +89,10 @@ impl Array for BoolArray {
         &self.bitmap
     }
 
+    fn into_null_bitmap(self) -> Bitmap {
+        self.bitmap
+    }
+
     fn set_bitmap(&mut self, bitmap: Bitmap) {
         self.bitmap = bitmap;
     }
@@ -103,7 +107,7 @@ impl Array for BoolArray {
     }
 
     fn create_builder(&self, capacity: usize) -> ArrayResult<ArrayBuilderImpl> {
-        let array_builder = BoolArrayBuilder::new(capacity)?;
+        let array_builder = BoolArrayBuilder::new(capacity);
         Ok(ArrayBuilderImpl::Bool(array_builder))
     }
 }
@@ -118,11 +122,11 @@ pub struct BoolArrayBuilder {
 impl ArrayBuilder for BoolArrayBuilder {
     type ArrayType = BoolArray;
 
-    fn with_meta(capacity: usize, _meta: ArrayMeta) -> ArrayResult<Self> {
-        Ok(Self {
+    fn with_meta(capacity: usize, _meta: ArrayMeta) -> Self {
+        Self {
             bitmap: BitmapBuilder::with_capacity(capacity),
             data: BitmapBuilder::with_capacity(capacity),
-        })
+        }
     }
 
     fn append(&mut self, value: Option<bool>) -> ArrayResult<()> {
@@ -167,7 +171,7 @@ mod tests {
     use crate::array::read_bool_array;
 
     fn helper_test_builder(data: Vec<Option<bool>>) -> BoolArray {
-        let mut builder = BoolArrayBuilder::new(data.len()).unwrap();
+        let mut builder = BoolArrayBuilder::new(data.len());
         for d in data {
             builder.append(d).unwrap();
         }

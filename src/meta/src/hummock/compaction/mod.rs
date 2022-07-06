@@ -12,6 +12,8 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+use itertools::Itertools;
+
 pub mod compaction_config;
 mod level_selector;
 mod manual_compaction_picker;
@@ -144,8 +146,9 @@ impl CompactStatus {
             sorted_output_ssts: vec![],
             task_id,
             target_level: target_level_id,
-            is_target_ultimate_and_leveling: target_level_id as usize
-                == self.level_handlers.len() - 1
+            // only gc delete keys in last level because there may be older version in more bottom
+            // level.
+            gc_delete_keys: target_level_id as usize == self.level_handlers.len() - 1
                 && select_level_id > 0,
             task_status: false,
             vnode_mappings: vec![],
@@ -155,6 +158,7 @@ impl CompactStatus {
             target_file_size: ret.target_file_size,
             compaction_filter_mask: 0,
             table_options: HashMap::default(),
+            current_epoch_time: 0,
         };
         Some(compact_task)
     }
@@ -219,55 +223,19 @@ impl CompactStatus {
         }
         let new_version_levels =
             new_version.get_compaction_group_levels_mut(compact_task.compaction_group_id);
-        if compact_task.target_level == 0 {
-            assert_eq!(compact_task.input_ssts[0].level_idx, 0);
-            let mut new_table_infos = vec![];
-            let mut find_remove_position = false;
-            let mut new_total_file_size = 0;
-            for (idx, table) in new_version_levels[0].table_infos.iter().enumerate() {
-                if !removed_table.contains(&table.id) {
-                    new_table_infos.push(new_version_levels[0].table_infos[idx].clone());
-                    new_total_file_size += table.file_size;
-                } else if !find_remove_position {
-                    new_total_file_size += compact_task
-                        .sorted_output_ssts
-                        .iter()
-                        .map(|sst| sst.file_size)
-                        .sum::<u64>();
-                    new_table_infos.extend(compact_task.sorted_output_ssts.clone());
-                    find_remove_position = true;
-                }
-            }
-            new_version_levels[compact_task.target_level as usize].table_infos = new_table_infos;
-            new_version_levels[compact_task.target_level as usize].total_file_size =
-                new_total_file_size;
-        } else {
-            for input_level in &compact_task.input_ssts {
-                new_version_levels[input_level.level_idx as usize].total_file_size -= input_level
-                    .table_infos
-                    .iter()
-                    .map(|sst| sst.file_size)
-                    .sum::<u64>();
-                new_version_levels[input_level.level_idx as usize]
-                    .table_infos
-                    .retain(|sst| !removed_table.contains(&sst.id));
-            }
-            new_version_levels[compact_task.target_level as usize].total_file_size += compact_task
-                .sorted_output_ssts
+
+        HummockVersion::apply_compact_ssts(
+            new_version_levels,
+            &compact_task
+                .input_ssts
                 .iter()
-                .map(|sst| sst.file_size)
-                .sum::<u64>();
-            new_version_levels[compact_task.target_level as usize]
-                .table_infos
-                .extend(compact_task.sorted_output_ssts.clone());
-            new_version_levels[compact_task.target_level as usize]
-                .table_infos
-                .sort_by(|sst1, sst2| {
-                    let a = sst1.key_range.as_ref().unwrap();
-                    let b = sst2.key_range.as_ref().unwrap();
-                    a.compare(b)
-                });
-        }
+                .map(|level| level.level_idx)
+                .collect_vec(),
+            &removed_table,
+            compact_task.target_level,
+            compact_task.sorted_output_ssts.clone(),
+        );
+
         new_version
     }
 

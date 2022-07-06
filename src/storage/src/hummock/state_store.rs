@@ -81,6 +81,11 @@ impl HummockStorage {
         T: HummockIteratorType,
     {
         let epoch = read_options.epoch;
+        let compaction_group_id = read_options
+            .table_id
+            .as_ref()
+            .map(|table_id| self.get_compaction_group_id(*table_id));
+        let min_epoch = read_options.min_epoch();
         let iter_read_options = Arc::new(IterReadOptions::default());
         let mut overlapped_iters = vec![];
 
@@ -107,7 +112,18 @@ impl HummockStorage {
 
         // Generate iterators for versioned ssts by filter out ssts that do not overlap with given
         // `key_range`
-        for level in pinned_version.levels() {
+
+        // The correctness of using compaction_group_id in read path and write path holds only
+        // because we are currently:
+        //
+        // a) adopting static compaction group. It means a table_id->compaction_group mapping would
+        // never change since creation until the table is dropped.
+        //
+        // b) enforcing shared buffer to split output SSTs by compaction group. It means no SSTs
+        // would contain tables from different compaction_group, even for those in L0.
+        //
+        // When adopting dynamic compaction group in the future, be sure to revisit this assumption.
+        for level in pinned_version.levels(compaction_group_id) {
             let table_infos = prune_ssts(level.table_infos.iter(), &key_range);
             if table_infos.is_empty() {
                 continue;
@@ -170,6 +186,7 @@ impl HummockStorage {
             self.stats.clone(),
             key_range,
             epoch,
+            min_epoch,
             Some(pinned_version),
         );
 
@@ -191,6 +208,10 @@ impl HummockStorage {
         read_options: ReadOptions,
     ) -> StorageResult<Option<Bytes>> {
         let epoch = read_options.epoch;
+        let compaction_group_id = read_options
+            .table_id
+            .as_ref()
+            .map(|table_id| self.get_compaction_group_id(*table_id));
         let mut stats = StoreLocalStatistic::default();
         let (shared_buffer_data, pinned_version) = self.read_filter(read_options, &(key..=key))?;
 
@@ -247,7 +268,9 @@ impl HummockStorage {
             }
         }
 
-        for level in pinned_version.levels() {
+        // See comments in HummockStorage::iter_inner for details about using compaction_group_id in
+        // read/write path.
+        for level in pinned_version.levels(compaction_group_id) {
             if level.table_infos.is_empty() {
                 continue;
             }
@@ -372,9 +395,12 @@ impl StateStore for HummockStorage {
     ) -> Self::IngestBatchFuture<'_> {
         async move {
             let epoch = write_options.epoch;
+            let compaction_group_id = self.get_compaction_group_id(write_options.table_id);
+            // See comments in HummockStorage::iter_inner for details about using
+            // compaction_group_id in read/write path.
             let size = self
                 .local_version_manager
-                .write_shared_buffer(epoch, kv_pairs, false)
+                .write_shared_buffer(epoch, compaction_group_id, kv_pairs, false)
                 .await?;
             Ok(size)
         }
@@ -388,8 +414,11 @@ impl StateStore for HummockStorage {
     ) -> Self::ReplicateBatchFuture<'_> {
         async move {
             let epoch = write_options.epoch;
+            let compaction_group_id = self.get_compaction_group_id(write_options.table_id);
+            // See comments in HummockStorage::iter_inner for details about using
+            // compaction_group_id in read/write path.
             self.local_version_manager
-                .write_shared_buffer(epoch, kv_pairs, true)
+                .write_shared_buffer(epoch, compaction_group_id, kv_pairs, true)
                 .await?;
 
             Ok(())
@@ -439,6 +468,13 @@ impl StateStore for HummockStorage {
 
     fn get_uncommitted_ssts(&self, epoch: u64) -> Vec<LocalSstableInfo> {
         self.local_version_manager.get_uncommitted_ssts(epoch)
+    }
+
+    fn clear_shared_buffer(&self) -> Self::ClearSharedBufferFuture<'_> {
+        async move {
+            self.local_version_manager.clear_shared_buffer().await;
+            Ok(())
+        }
     }
 }
 
