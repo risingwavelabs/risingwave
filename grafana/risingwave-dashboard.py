@@ -196,6 +196,13 @@ def section_compaction(panels):
                 "storage_level_compact_frequency", "{{job}} @ {{instance}}"
             ),
         ]),
+
+        panels.timeseries_count("Compactor Task Splits Count", [
+            panels.target(
+                "sum(rate(storage_compact_parallelism[1m])) by(job,instance)", "compactor_task_split_count - {{job}} @ {{instance}}"
+            ),
+        ]),
+
         panels.timeseries_latency("Compaction Duration", [
             panels.target(
                 "histogram_quantile(0.5, sum(rate(state_store_compact_task_duration_bucket[1m])) by (le, job, instance))", "compact-task p50 - {{job}} @ {{instance}}"
@@ -573,7 +580,7 @@ def section_hummock(panels):
                 "sum(rate(state_store_get_shared_buffer_hit_counts[1m])) by (job,instance)", "shared_buffer hit - {{job}} @ {{instance}}"
             ),
             panels.target(
-                    "sum(rate(state_store_iter_in_process_counts[1m])) by(job,instance)", "iter_in_process_counts - {{instance}} "
+                "sum(rate(state_store_iter_in_process_counts[1m])) by(job,instance)", "iter_in_process_counts - {{job}} @ {{instance}}"
             ),
         ]),
         panels.timeseries_latency("Read Duration - Get", [

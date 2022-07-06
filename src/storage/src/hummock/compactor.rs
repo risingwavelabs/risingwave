@@ -482,6 +482,8 @@ impl Compactor {
             .with_label_values(&[compact_task.input_ssts[0].level_idx.to_string().as_str()])
             .start_timer();
 
+        // if disable_parallel_compact = true, use one splits to limit the parallelism of
+        // compact_task
         if !compact_task.vnode_mappings.is_empty() {
             compact_task.splits = vec![risingwave_pb::hummock::KeyRange {
                 left: vec![],
@@ -493,6 +495,7 @@ impl Compactor {
         // Number of splits (key ranges) is equal to number of compaction tasks
         let parallelism = compact_task.splits.len();
         assert_ne!(parallelism, 0, "splits cannot be empty");
+        context.stats.compact_parallelism.inc_by(parallelism as u64);
         let mut compact_success = true;
         let mut output_ssts = Vec::with_capacity(parallelism);
         let mut compaction_futures = vec![];
