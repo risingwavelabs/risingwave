@@ -12,19 +12,19 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::sync::Arc;
+
 
 use risingwave_common::error::{internal_error, Result};
-use risingwave_common::hash::{calc_hash_key_kind, HashKey, HashKeyDispatcher};
+
 use risingwave_common::types::DataType;
 use risingwave_expr::expr::expr_binary_nonnull::new_binary_expr;
-use risingwave_expr::expr::{BoxedExpression, InputRefExpression};
-use risingwave_pb::expr::expr_node::Type as ExprNodeType;
+use risingwave_expr::expr::{InputRefExpression};
+
 use risingwave_pb::expr::expr_node::Type::*;
 
 use super::*;
-use crate::executor::monitor::StreamingMetrics;
-use crate::executor::{DynamicFilterExecutor, PkIndices};
+
+use crate::executor::{DynamicFilterExecutor};
 
 pub struct DynamicFilterExecutorBuilder;
 
@@ -65,7 +65,7 @@ impl ExecutorBuilder for DynamicFilterExecutorBuilder {
             )),
         );
 
-        let key = source_l.schema().fields[key_l as usize].data_type();
+        let _key = source_l.schema().fields[key_l as usize].data_type();
 
         // TODO: add the tables and backing state store.
         // let left_table_id = TableId::from(node.left_table.as_ref().unwrap().id);
