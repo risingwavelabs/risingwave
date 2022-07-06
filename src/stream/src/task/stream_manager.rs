@@ -41,7 +41,7 @@ use crate::executor::monitor::StreamingMetrics;
 use crate::executor::*;
 use crate::from_proto::create_executor;
 use crate::task::{
-    ActorId, FragmentId, ConsumableChannelPair, SharedContext, StreamEnvironment, UpDownActorIds,
+    ActorId, ConsumableChannelPair, FragmentId, SharedContext, StreamEnvironment, UpDownActorIds,
     LOCAL_OUTPUT_CHANNEL_SIZE,
 };
 
@@ -592,14 +592,13 @@ impl LocalStreamManagerCore {
         actor_id: ActorId,
         fragment_id: FragmentId,
         upstreams: &[ActorId],
-        up_fragment_id : FragmentId,
+        up_fragment_id: FragmentId,
     ) -> Result<Vec<Receiver<Message>>> {
         assert!(!upstreams.is_empty());
         let rxs = upstreams
             .iter()
             .map(|up_id| {
                 if *up_id == 0 {
-
                     Ok(self.mock_source.1.take().unwrap())
                 } else {
                     let upstream_addr = self.get_actor_info(up_id)?.get_host()?.into();
@@ -884,7 +883,7 @@ impl LocalStreamManagerCore {
                 }
             }
         }
-        
+
         Ok(())
     }
 }

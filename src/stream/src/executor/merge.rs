@@ -30,7 +30,7 @@ use tonic::Streaming;
 use super::error::StreamExecutorError;
 use super::*;
 use crate::executor::monitor::StreamingMetrics;
-use crate::task::{UpDownActorIds,UpDownFragmentIds};
+use crate::task::{UpDownActorIds, UpDownFragmentIds};
 
 /// Receive data from `gRPC` and forwards to `MergerExecutor`/`ReceiverExecutor`
 pub struct RemoteInput {
@@ -51,7 +51,9 @@ impl RemoteInput {
         sender: Sender<Message>,
         metrics: Arc<StreamingMetrics>,
     ) -> Result<Self> {
-        let stream = client.get_stream(up_down_ids.0, up_down_ids.1,up_down_frag.0,up_down_frag.1).await?;
+        let stream = client
+            .get_stream(up_down_ids.0, up_down_ids.1, up_down_frag.0, up_down_frag.1)
+            .await?;
         Ok(Self {
             stream,
             sender,
@@ -84,7 +86,7 @@ impl RemoteInput {
                         .exchange_frag_recv_size
                         .with_label_values(&[&up_fragment_id, &down_fragment_id])
                         .inc_by(bytes.clone() as u64);
-                        
+
                     // add deserialization duration metric with given sampling frequency
                     let msg_res = if rr % SAMPLING_FREQUENCY == 0 {
                         let start_time = Instant::now();

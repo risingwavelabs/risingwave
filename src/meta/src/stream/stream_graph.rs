@@ -384,7 +384,7 @@ impl StreamGraphBuilder {
     /// Add dependency between two connected node in the graph.
     pub fn add_link(
         &mut self,
-        upstream_fragment_id: GlobalFragmentId, 
+        upstream_fragment_id: GlobalFragmentId,
         upstream_actor_ids: &[LocalActorId],
         downstream_actor_ids: &[LocalActorId],
         exchange_operator_id: u64,
@@ -506,15 +506,22 @@ impl StreamGraphBuilder {
             let mut actor = builder.build();
             let mut upstream_actors = builder
                 .upstreams
-                .iter() 
+                .iter()
                 .map(|(id, StreamActorUpstream { actors, .. })| (*id, actors.clone()))
                 .collect();
-            let (stream_node, mut inner_internal_tables) =
-                self.build_inner(ctx, actor.get_nodes()?, actor_id, &mut upstream_actors, &mut upstream_fragments)?;
-            if !is_filled {
-                internal_tables.append(&mut inner_internal_tables);
-                is_filled = true;
-            }
+            let mut upstream_fragments = builder
+                .upstreams
+                .iter()
+                .map(|(id, StreamActorUpstream { fragment_id, .. })| (*id, fragment_id.clone()))
+                .collect();
+            let stream_node = self.build_inner(
+                ctx,
+                actor.get_nodes()?,
+                actor_id,
+                &mut upstream_actors,
+                &mut upstream_fragments,
+            )?;
+
             actor.nodes = Some(stream_node);
             graph
                 .entry(builder.get_fragment_id())
@@ -537,7 +544,7 @@ impl StreamGraphBuilder {
         actor_id: LocalActorId,
         upstream_actor_id: &mut HashMap<u64, OrderedActorLink>,
         upstream_fragment_id: &mut HashMap<u64, GlobalFragmentId>,
-    ) -> Result<(StreamNode, Vec<Table>)> {
+    ) -> Result<StreamNode> {
         let table_id_offset = ctx.table_id_offset;
         let mut check_and_fill_internal_table = |table_id: u32, table: Option<Table>| {
             ctx.internal_table_id_map.entry(table_id).or_insert(table);
@@ -678,10 +685,13 @@ impl StreamGraphBuilder {
                             new_stream_node.input[idx] = self.resolve_chain_node(input)?;
                         }
                         _ => {
-                            let mut inner_internal_tables: Vec<Table>;
-                            (new_stream_node.input[idx], inner_internal_tables) =
-                                self.build_inner(ctx, input, actor_id, upstream_actor_id, upstream_fragment_id)?;
-                            internal_tables.append(&mut inner_internal_tables);
+                            new_stream_node.input[idx] = self.build_inner(
+                                ctx,
+                                input,
+                                actor_id,
+                                upstream_actor_id,
+                                upstream_fragment_id,
+                            )?;
                         }
                     }
                 }
@@ -959,7 +969,7 @@ impl ActorGraphBuilder {
             .into_iter()
             .map(LocalActorId::Local)
             .collect_vec();
-        
+
         for id in &actor_ids {
             state
                 .stream_graph_builder
