@@ -90,7 +90,10 @@ where
         Ok(map.values().cloned().collect())
     }
 
-    pub async fn batch_update_table_fragments(&self, table_fragments: &[TableFragments]) -> Result<()> {
+    pub async fn batch_update_table_fragments(
+        &self,
+        table_fragments: &[TableFragments],
+    ) -> Result<()> {
         let map = &mut self.core.write().await.table_fragments;
 
         let mut transaction = Transaction::default();
