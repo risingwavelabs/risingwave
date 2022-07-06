@@ -96,7 +96,7 @@ impl SourceReaderStream {
     }
 
     /// Pause the source stream.
-    #[expect(dead_code)]
+    #[allow(dead_code)]
     pub fn pause_source(&mut self) {
         if self.paused.is_some() {
             panic!("already paused");
@@ -107,7 +107,7 @@ impl SourceReaderStream {
     }
 
     /// Resume the source stream, panic if the source is not paused before.
-    #[expect(dead_code)]
+    #[allow(dead_code)]
     pub fn resume_source(&mut self) {
         let source_chunk_reader = self.paused.take().expect("not paused");
         let _ = std::mem::replace(self.inner.get_mut().1, source_chunk_reader);
@@ -122,5 +122,56 @@ impl Stream for SourceReaderStream {
         ctx: &mut std::task::Context<'_>,
     ) -> Poll<Option<Self::Item>> {
         self.project().inner.poll_next(ctx)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use std::time::Duration;
+
+    use assert_matches::assert_matches;
+    use futures::pin_mut;
+    use risingwave_common::array::StreamChunk;
+    use tokio::sync::mpsc;
+
+    use super::*;
+
+    #[madsim::test]
+    async fn test_pause_and_resume() {
+        let (barrier_tx, barrier_rx) = mpsc::unbounded_channel();
+
+        let table_source = TableSourceV2::new(vec![]);
+        let source_reader =
+            SourceStreamReaderImpl::TableV2(table_source.stream_reader(vec![]).await.unwrap());
+
+        let stream = SourceReaderStream::new(barrier_rx, Box::new(source_reader));
+        pin_mut!(stream);
+
+        // Write a chunk, and we should receive it.
+        table_source.write_chunk(StreamChunk::default()).unwrap();
+        assert_matches!(stream.next().await.unwrap(), Either::Right(_));
+        // Write a barrier, and we should receive it.
+        barrier_tx.send(Barrier::default()).unwrap();
+        assert_matches!(stream.next().await.unwrap(), Either::Left(_));
+
+        // Pause the stream.
+        stream.pause_source();
+
+        // Write a barrier.
+        barrier_tx.send(Barrier::default()).unwrap();
+        // Then write a chunk.
+        table_source.write_chunk(StreamChunk::default()).unwrap();
+
+        // We should receive the barrier.
+        assert_matches!(stream.next().await.unwrap(), Either::Left(_));
+        // We shouldn't receive the chunk.
+        madsim::time::timeout(Duration::from_millis(100), stream.next())
+            .await
+            .unwrap_err();
+
+        // Resume the stream.
+        stream.resume_source();
+        // Then we can receive the chunk sent when the stream is paused.
+        assert_matches!(stream.next().await.unwrap(), Either::Right(_));
     }
 }
