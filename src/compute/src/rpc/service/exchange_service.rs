@@ -169,11 +169,11 @@ impl ExchangeServiceImpl {
                                 metrics
                                     .stream_exchange_bytes
                                     .with_label_values(&[&up_actor_id, &down_actor_id])
-                                    .inc_by(bytes.clone() as u64);
+                                    .inc_by(bytes as u64);
                                 metrics
                                     .stream_fragment_exchange_bytes
                                     .with_label_values(&[&up_fragment_id, &down_fragment_id])
-                                    .inc_by(bytes.clone() as u64);
+                                    .inc_by(bytes as u64);
                                 Ok(())
                             }
                             Err(e) => tx.send(Err(e.into())).await,
