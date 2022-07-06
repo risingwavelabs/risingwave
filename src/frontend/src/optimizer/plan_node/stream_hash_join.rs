@@ -12,25 +12,25 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::collections::HashMap;
+
 use std::fmt;
 
 use itertools::Itertools;
-use risingwave_common::catalog::{ColumnDesc, DatabaseId, OrderedColumnDesc, SchemaId, TableId, ColumnId, Field};
+use risingwave_common::catalog::{DatabaseId, SchemaId, Field};
 use risingwave_common::types::DataType;
 use risingwave_common::util::sort_util::OrderType;
 use risingwave_pb::plan_common::JoinType;
 use risingwave_pb::stream_plan::stream_node::NodeBody;
 use risingwave_pb::stream_plan::HashJoinNode;
-use tracing::field;
+
 
 use super::utils::TableCatalogBuilder;
 use super::{LogicalJoin, PlanBase, PlanRef, PlanTreeNodeBinary, StreamDeltaJoin, ToStreamProst};
-use crate::catalog::column_catalog::ColumnCatalog;
+
 use crate::catalog::table_catalog::TableCatalog;
 use crate::expr::Expr;
 use crate::optimizer::plan_node::EqJoinPredicate;
-use crate::optimizer::property::{Direction, Distribution, FieldOrder};
+use crate::optimizer::property::Distribution;
 use crate::utils::ColIndexMapping;
 
 /// [`StreamHashJoin`] implements [`super::LogicalJoin`] with hash table. It builds a hash table

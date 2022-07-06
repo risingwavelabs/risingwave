@@ -15,7 +15,7 @@
 use std::borrow::Cow;
 use std::cmp::Ordering;
 use std::marker::PhantomData;
-use std::ops::{Index, RangeBounds};
+use std::ops::Index;
 use std::sync::Arc;
 
 use futures::{pin_mut, Stream, StreamExt};
