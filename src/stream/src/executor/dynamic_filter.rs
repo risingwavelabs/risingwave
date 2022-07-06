@@ -195,9 +195,11 @@ impl DynamicFilterExecutor {
                                 Op::Delete | Op::UpdateDelete => {
                                     let contains_element = state
                                         .get_mut(&val)
-                                        .ok_or_else(|| StreamExecutorError::from(anyhow!(
-                                            "Deleting non-existent element"
-                                        )))?
+                                        .ok_or_else(|| {
+                                            StreamExecutorError::from(anyhow!(
+                                                "Deleting non-existent element"
+                                            ))
+                                        })?
                                         .remove(&row.to_owned_row());
 
                                     if !contains_element {

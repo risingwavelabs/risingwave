@@ -43,7 +43,13 @@ impl StreamDynamicFilter {
             false, /* we can have a new abstraction for append only and monotonically increasing
                     * in the future */
         );
-        Self { base, predicate, left_index, left, right }
+        Self {
+            base,
+            predicate,
+            left_index,
+            left,
+            right,
+        }
     }
 }
 
