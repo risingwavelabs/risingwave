@@ -15,6 +15,7 @@
 use std::collections::{BTreeMap, HashSet, VecDeque};
 use std::future::Future;
 use std::ops::DerefMut;
+use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 
@@ -44,8 +45,7 @@ use crate::hummock::compaction_scheduler::CompactionRequestChannelRef;
 use crate::hummock::error::{Error, Result};
 use crate::hummock::metrics_utils::{trigger_commit_stat, trigger_sst_stat};
 use crate::hummock::model::{
-    sstable_id_info, CurrentHummockVersionId, HummockPinnedSnapshotExt, HummockPinnedVersionExt,
-    INVALID_TIMESTAMP,
+    sstable_id_info, CurrentHummockVersionId, HummockPinnedVersionExt, INVALID_TIMESTAMP,
 };
 use crate::hummock::CompactorManagerRef;
 use crate::manager::{IdCategory, MetaSrvEnv};
@@ -67,6 +67,7 @@ pub struct HummockManager<S: MetaStore> {
     // be requested before versioning lock.
     compaction: RwLock<Compaction>,
     versioning: RwLock<Versioning>,
+    max_committed_epoch: AtomicU64,
 
     metrics: Arc<MetaMetrics>,
 
@@ -173,6 +174,7 @@ where
             compaction_group_manager,
             compaction_scheduler: parking_lot::RwLock::new(None),
             compactor_manager,
+            max_committed_epoch: AtomicU64::new(0),
         };
 
         instance.load_meta_store_state().await?;
@@ -218,11 +220,7 @@ where
             .await?
             .unwrap_or_else(CurrentHummockVersionId::new);
 
-        let mut version_ids: HashSet<_> = HummockVersion::list(self.env.meta_store())
-            .await?
-            .into_iter()
-            .map(|version| version.id)
-            .collect();
+        let versions = HummockVersion::list(self.env.meta_store()).await?;
 
         let hummock_version_deltas: BTreeMap<_, _> =
             HummockVersionDelta::list(self.env.meta_store())
@@ -232,7 +230,7 @@ where
                 .collect();
 
         // Insert the initial version.
-        if versioning_guard.hummock_versions.is_empty() {
+        let mut redo_state = if versions.is_empty() {
             let mut init_version = HummockVersion {
                 id: FIRST_VERSION_ID,
                 levels: Default::default(),
@@ -259,18 +257,17 @@ where
                     .levels
                     .insert(compaction_group.group_id(), Levels { levels });
             }
-            if version_ids.is_empty() {
-                version_ids.insert(init_version.id);
-            }
-            let mut redo_state = init_version.clone();
-            if version_ids.contains(&init_version.id) {
-                init_version.insert(self.env.meta_store()).await?;
-                versioning_guard
-                    .hummock_versions
-                    .insert(init_version.id, init_version);
-            }
+            init_version.insert(self.env.meta_store()).await?;
+            init_version
+        } else {
+            versions.first().unwrap().clone()
+        };
+        versioning_guard
+            .hummock_versions
+            .insert(redo_state.id, redo_state.clone());
 
-            for (id, version_delta) in &hummock_version_deltas {
+        for (id, version_delta) in &hummock_version_deltas {
+            if version_delta.prev_id == redo_state.id {
                 for (compaction_group_id, level_deltas) in &version_delta.level_deltas {
                     let mut delete_sst_levels = Vec::with_capacity(level_deltas.level_deltas.len());
                     let mut delete_sst_ids_set = HashSet::new();
@@ -301,14 +298,19 @@ where
                 redo_state.max_committed_epoch = version_delta.max_committed_epoch;
                 redo_state.safe_epoch = version_delta.safe_epoch;
 
-                if version_ids.contains(&redo_state.id) {
-                    redo_state.insert(self.env.meta_store()).await?;
-                    versioning_guard
-                        .hummock_versions
-                        .insert(redo_state.id, redo_state.clone());
-                }
+                versioning_guard
+                    .hummock_versions
+                    .insert(redo_state.id, redo_state.clone());
             }
         }
+        self.max_committed_epoch.store(
+            versioning_guard
+                .hummock_versions
+                .get(&versioning_guard.current_version_id.id())
+                .unwrap()
+                .max_committed_epoch,
+            Ordering::Relaxed,
+        );
         versioning_guard.hummock_version_deltas = hummock_version_deltas;
 
         versioning_guard.pinned_versions = HummockPinnedVersion::list(self.env.meta_store())
@@ -455,63 +457,20 @@ where
     }
 
     /// Make sure `max_commited_epoch` is pinned and return it.
-    /// Assume that frontend will only pass the latest epoch value recorded by frontend to
-    /// `last_pinned`. Meta will unpin snapshots which are pinned and in (`last_pinned`,
-    /// `max_commited_epoch`).
-    pub async fn pin_snapshot(
-        &self,
-        context_id: HummockContextId,
-        last_pinned: HummockEpoch,
-    ) -> Result<HummockSnapshot> {
-        let mut versioning_guard = self.versioning.write().await;
-
-        // Use the max_committed_epoch in storage as the snapshot ts so only committed changes are
-        // visible in the snapshot.
-        let version_id = versioning_guard.current_version_id.id();
-
-        let max_committed_epoch = versioning_guard
-            .hummock_versions
-            .get(&version_id)
-            .unwrap()
-            .max_committed_epoch;
-
-        let mut pinned_snapshots = VarTransaction::new(&mut versioning_guard.pinned_snapshots);
+    pub async fn pin_snapshot(&self, context_id: HummockContextId) -> Result<HummockSnapshot> {
+        let max_committed_epoch = self.max_committed_epoch.load(Ordering::Relaxed);
+        let mut guard = self.versioning.write().await;
+        let mut pinned_snapshots = VarTransaction::new(&mut guard.pinned_snapshots);
         let mut context_pinned_snapshot = pinned_snapshots.new_entry_txn_or_default(
             context_id,
             HummockPinnedSnapshot {
                 context_id,
-                snapshot_id: vec![],
+                minimal_pinned_snapshot: 0,
             },
         );
-
-        // Unpin the snapshots pinned by meta but frontend doesn't know.
-        let to_unpin = context_pinned_snapshot
-            .snapshot_id
-            .iter()
-            .filter(|e| **e > last_pinned && **e < max_committed_epoch)
-            .cloned()
-            .collect_vec();
-        let mut snapshots_change = !to_unpin.is_empty();
-        for epoch in to_unpin {
-            context_pinned_snapshot.unpin_snapshot(epoch);
-        }
-
-        if !context_pinned_snapshot
-            .snapshot_id
-            .contains(&max_committed_epoch)
-        {
-            snapshots_change = true;
-            context_pinned_snapshot.pin_snapshot(max_committed_epoch);
-        }
-
-        if snapshots_change {
+        if context_pinned_snapshot.minimal_pinned_snapshot == 0 {
+            context_pinned_snapshot.minimal_pinned_snapshot = max_committed_epoch;
             commit_multi_var!(self, Some(context_id), context_pinned_snapshot)?;
-        }
-
-        #[cfg(test)]
-        {
-            drop(versioning_guard);
-            self.check_state_consistency().await;
         }
 
         Ok(HummockSnapshot {
@@ -519,24 +478,21 @@ where
         })
     }
 
-    pub async fn unpin_snapshot(
-        &self,
-        context_id: HummockContextId,
-        hummock_snapshots: impl AsRef<[HummockSnapshot]>,
-    ) -> Result<()> {
+    pub fn get_last_epoch(&self) -> Result<HummockSnapshot> {
+        let max_committed_epoch = self.max_committed_epoch.load(Ordering::Relaxed);
+        Ok(HummockSnapshot {
+            epoch: max_committed_epoch,
+        })
+    }
+
+    pub async fn unpin_snapshot(&self, context_id: HummockContextId) -> Result<()> {
         let mut versioning_guard = self.versioning.write().await;
         let mut pinned_snapshots = VarTransaction::new(&mut versioning_guard.pinned_snapshots);
+        let release_snapshot = pinned_snapshots.remove(&context_id);
 
-        let mut context_pinned_snapshot = match pinned_snapshots.new_entry_txn(context_id) {
-            None => {
-                return Ok(());
-            }
-            Some(context_pinned_snapshot) => context_pinned_snapshot,
-        };
-        for hummock_snapshot in hummock_snapshots.as_ref() {
-            context_pinned_snapshot.unpin_snapshot(hummock_snapshot.epoch);
+        if release_snapshot.is_some() {
+            commit_multi_var!(self, Some(context_id), pinned_snapshots)?;
         }
-        commit_multi_var!(self, Some(context_id), context_pinned_snapshot)?;
 
         #[cfg(test)]
         {
@@ -558,7 +514,7 @@ where
         // Use the max_committed_epoch in storage as the snapshot ts so only committed changes are
         // visible in the snapshot.
         let version_id = versioning_guard.current_version_id.id();
-        let _max_committed_epoch = versioning_guard
+        let max_committed_epoch = versioning_guard
             .hummock_versions
             .get(&version_id)
             .unwrap()
@@ -566,31 +522,25 @@ where
         // Ensure the unpin will not clean the latest one.
         #[cfg(not(test))]
         {
-            assert!(hummock_snapshot.epoch <= _max_committed_epoch);
+            assert!(hummock_snapshot.epoch <= max_committed_epoch);
         }
+        let last_read_epoch = std::cmp::min(hummock_snapshot.epoch, max_committed_epoch);
 
         let mut pinned_snapshots = VarTransaction::new(&mut versioning_guard.pinned_snapshots);
-        let mut context_pinned_snapshot = match pinned_snapshots.new_entry_txn(context_id) {
-            None => {
-                return Ok(());
-            }
-            Some(context_pinned_snapshot) => context_pinned_snapshot,
-        };
+        let mut context_pinned_snapshot = pinned_snapshots.new_entry_txn_or_default(
+            context_id,
+            HummockPinnedSnapshot {
+                context_id,
+                minimal_pinned_snapshot: 0,
+            },
+        );
 
-        let to_unpin = context_pinned_snapshot
-            .snapshot_id
-            .iter()
-            // hummock_snapshot.epoch should always <= max committed epoch.
-            .filter(|e| **e < hummock_snapshot.epoch)
-            .cloned()
-            .collect_vec();
         // Unpin the snapshots pinned by meta but frontend doesn't know. Also equal to unpin all
         // epochs below specific watermark.
-        for epoch in &to_unpin {
-            context_pinned_snapshot.unpin_snapshot(*epoch);
-        }
-
-        if !to_unpin.is_empty() {
+        if context_pinned_snapshot.minimal_pinned_snapshot < last_read_epoch
+            || context_pinned_snapshot.minimal_pinned_snapshot == 0
+        {
+            context_pinned_snapshot.minimal_pinned_snapshot = last_read_epoch;
             commit_multi_var!(self, Some(context_id), context_pinned_snapshot)?;
         }
 
@@ -659,7 +609,7 @@ where
                     versioning_guard
                         .pinned_snapshots
                         .values()
-                        .flat_map(|v| v.snapshot_id.clone())
+                        .map(|v| v.minimal_pinned_snapshot)
                         .fold(max_committed_epoch, std::cmp::min)
                 };
 
@@ -878,11 +828,11 @@ where
                 compact_status,
                 compact_task_assignment,
                 current_version_id,
-                hummock_versions,
                 hummock_version_deltas,
                 version_stale_sstables,
                 sstable_id_infos
             )?;
+            hummock_versions.commit();
         } else {
             // The compaction task is cancelled.
             commit_multi_var!(
@@ -1051,11 +1001,12 @@ where
         commit_multi_var!(
             self,
             None,
-            new_hummock_version,
             new_version_delta,
             current_version_id,
             sstable_id_infos
         )?;
+        new_hummock_version.commit();
+        self.max_committed_epoch.store(epoch, Ordering::Release);
 
         // Update metrics
         trigger_commit_stat(&self.metrics, versioning.current_version_ref());
@@ -1188,6 +1139,18 @@ where
         Ok(version_ids)
     }
 
+    pub async fn proceed_version_checkpoint(&self) -> risingwave_common::error::Result<()> {
+        let versioning_guard = self.versioning.read().await;
+        let new_checkpoint = versioning_guard
+            .hummock_versions
+            .first_key_value()
+            .unwrap()
+            .1
+            .clone();
+        new_checkpoint.insert(self.env.meta_store()).await?;
+        Ok(())
+    }
+
     /// Get the reference count of given version id
     pub async fn get_version_pin_count(
         &self,
@@ -1298,7 +1261,7 @@ where
             let compact_statuses_copy = compaction_guard.compaction_statuses.clone();
             let compact_task_assignment_copy = compaction_guard.compact_task_assignment.clone();
             let current_version_id_copy = versioning_guard.current_version_id.clone();
-            let hummmock_versions_copy = versioning_guard.hummock_versions.clone();
+            // let hummmock_versions_copy = versioning_guard.hummock_versions.clone();
             let pinned_versions_copy = versioning_guard.pinned_versions.clone();
             let pinned_snapshots_copy = versioning_guard.pinned_snapshots.clone();
             let stale_sstables_copy = versioning_guard.stale_sstables.clone();
@@ -1307,7 +1270,7 @@ where
                 compact_statuses_copy,
                 compact_task_assignment_copy,
                 current_version_id_copy,
-                hummmock_versions_copy,
+                // hummmock_versions_copy,
                 pinned_versions_copy,
                 pinned_snapshots_copy,
                 stale_sstables_copy,
@@ -1467,6 +1430,16 @@ where
     /// Gets current version without pinning it.
     pub async fn get_current_version(&self) -> HummockVersion {
         self.versioning.read().await.current_version()
+    }
+
+    pub async fn get_version(&self, version_id: HummockVersionId) -> HummockVersion {
+        self.versioning
+            .read()
+            .await
+            .hummock_versions
+            .get(&version_id)
+            .unwrap()
+            .clone()
     }
 
     pub fn set_compaction_scheduler(&self, sender: CompactionRequestChannelRef) {
