@@ -408,7 +408,7 @@ impl BatchPlanFragmenter {
                         vnode_bitmaps: table_desc
                             .vnode_mapping
                             .clone()
-                            .map(|m| vnode_mapping_to_owner_mapping(m)),
+                            .map(vnode_mapping_to_owner_mapping),
                     });
                 }
             }
