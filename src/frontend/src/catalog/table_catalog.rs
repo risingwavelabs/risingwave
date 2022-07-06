@@ -26,6 +26,32 @@ use super::{DatabaseId, SchemaId};
 use crate::catalog::TableId;
 use crate::optimizer::property::FieldOrder;
 
+/// Includes full information about a table.
+///
+/// # Column ID & Column Index
+///
+/// [`ColumnId`] (with type `i32`) is the unique identifier of a column in a table. It is used to
+/// access storage.
+///
+/// Column index, or idx, (with type `usize`) is the relative position inside the `Vec` of columns.
+///
+/// A tip to avoid making mistakes is never do casting - i32 as usize or vice versa.
+///
+/// # Keys
+///
+/// All the keys are represented as column indices.
+///
+/// - **Primary Key** (pk): unique identifier of a row.
+///
+/// - **Order Key**: the primary key for storage, used to sort and access data.
+///
+///   For an MV, the columns in `ORDER BY` clause will be put at the beginning of the order key. And
+/// the remaining columns in pk will follow behind.
+///
+///   If there's no `ORDER BY` clause, the order key will be the same as pk.
+///
+/// - **Distribution Key**: the columns used to partition the data. It must be a prefix of the order
+///   key.
 #[derive(Clone, Debug, PartialEq)]
 pub struct TableCatalog {
     pub id: TableId,

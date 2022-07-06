@@ -18,8 +18,9 @@ use super::{ColumnDesc, ColumnId, TableId};
 use crate::types::ParallelUnitId;
 use crate::util::sort_util::OrderPair;
 
-/// the table descriptor of table with cell based encoding in state store and include all
-/// information for compute node to access data of the table.
+/// Includes necessary information for compute node to access data of the table.
+///
+/// It's a subset of `TableCatalog` in frontend. Refer to `TableCatalog` for more details.
 #[derive(Debug, Clone, Default)]
 pub struct TableDesc {
     /// Id of the table, to find in storage.
