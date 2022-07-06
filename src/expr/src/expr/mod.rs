@@ -124,25 +124,5 @@ pub fn build_from_prost(prost: &ExprNode) -> Result<BoxedExpression> {
     }
 }
 
-/// Simply wrap a row level expression as an array level expression
-#[derive(Debug)]
-pub struct RowExpression {
-    expr: BoxedExpression,
-}
-
-impl RowExpression {
-    pub fn new(expr: BoxedExpression) -> Self {
-        Self { expr }
-    }
-
-    pub fn eval(&mut self, row: &Row) -> Result<Datum> {
-        self.expr.eval_row(row)
-    }
-
-    pub fn return_type(&self) -> DataType {
-        self.expr.return_type()
-    }
-}
-
 mod test_utils;
 pub use test_utils::*;
