@@ -91,6 +91,10 @@ impl DynamicFilterExecutor {
         //       It could be preferred to find a way to do prefix range scans on the left key and
         //       storing as `BTreeSet<(ScalarImpl, Row)>`.
         //       We could solve it if `ScalarImpl` had a successor/predecessor function.
+        //
+        //       Probably, using a custom comparator function on a custom datatype
+        //       that is equivalent in all `Row` can achieve this. We are completely agnostic
+        //       about the ordering of `Row`
         let mut state = BTreeMap::<ScalarImpl, HashSet<Row>>::new();
 
         let input_l = self.source_l;
