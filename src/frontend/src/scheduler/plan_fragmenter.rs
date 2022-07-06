@@ -409,18 +409,20 @@ impl BatchPlanFragmenter {
                     builder.table_scan_info = Some({
                         let table_desc = scan_node.logical().table_desc();
 
-                        match table_desc.vnode_mapping {
-                            Some(ref vnode_mapping) => {
+                        let vnode_bitmaps =
+                            table_desc.vnode_mapping.as_ref().map(|vnode_mapping| {
                                 let num_vnodes = vnode_mapping.len();
                                 let scan_range = scan_node.scan_range();
                                 // Try to derive the partition to read from the scan range.
                                 // It can be derived if the value of the distribution key is already
                                 // known.
-                                let vnode_bitmaps = match scan_range.try_compute_vnode(
+                                match scan_range.try_compute_vnode(
                                     &table_desc.distribution_keys,
                                     &table_desc.order_column_indices(),
                                 ) {
+                                    // scan all partitions
                                     None => vnode_mapping_to_owner_mapping(vnode_mapping.clone()),
+                                    // scan a single partition
                                     Some(vnode) => {
                                         let parallel_unit_id = vnode_mapping[vnode as usize];
                                         let mut vnode_bitmaps = HashMap::new();
@@ -431,16 +433,10 @@ impl BatchPlanFragmenter {
                                         );
                                         vnode_bitmaps
                                     }
-                                };
-                                TableScanInfo {
-                                    vnode_bitmaps: Some(vnode_bitmaps),
                                 }
-                            }
-                            // not partitioned table
-                            None => TableScanInfo {
-                                vnode_bitmaps: None,
-                            },
-                        }
+                            });
+
+                        TableScanInfo { vnode_bitmaps }
                     });
                 }
             }
