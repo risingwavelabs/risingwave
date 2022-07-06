@@ -68,7 +68,7 @@ CREATE TABLE TB1(v1 bool);
 statement ok
 INSERT INTO TB1(v1) VALUES (true), (false), (NULL);
 
-query BBBBBBB
+query BBBBBBB rowsort
 SELECT v1 is true,
        v1 is not true,
        v1 is false,

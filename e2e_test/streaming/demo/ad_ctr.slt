@@ -101,7 +101,7 @@ FROM
     ) AS ac ON ai.ad_id = ac.ad_id
     AND ai.window_end = ac.window_end;
 
-query TTT
+query TTT rowsort
 SELECT ad_id, ROUND(ctr, 2), window_end FROM ad_ctr_5min;
 ----
 7  0.33      2022-06-10 12:21:00
