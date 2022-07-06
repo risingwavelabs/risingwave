@@ -6,7 +6,7 @@ import "common.proto";
 
 option optimize_for = SPEED;
 
-/// AuthInfo is the information required to login to a server.
+// AuthInfo is the information required to login to a server.
 message AuthInfo {
   enum EncryptionType {
     UNKNOWN = 0;
@@ -18,7 +18,7 @@ message AuthInfo {
   bytes encrypted_value = 2;
 }
 
-/// User defines a user in the system.
+// User defines a user in the system.
 message UserInfo {
   string name = 1;
   bool is_supper = 2;
@@ -26,11 +26,11 @@ message UserInfo {
   bool can_login = 4;
   AuthInfo auth_info = 5;
 
-  /// Granted privileges will be only updated through the command of GRANT/REVOKE.
+  // Granted privileges will be only updated through the command of GRANT/REVOKE.
   repeated GrantPrivilege grant_privileges = 6;
 }
 
-/// GrantPrivilege defines a privilege granted to a user.
+// GrantPrivilege defines a privilege granted to a user.
 message GrantPrivilege {
   enum Action {
     UNKNOWN = 0;
@@ -109,8 +109,8 @@ service UserService {
   rpc CreateUser(CreateUserRequest) returns (CreateUserResponse);
   rpc DropUser(DropUserRequest) returns (DropUserResponse);
 
-  /// GrantPrivilege grants a privilege to a user.
+  // GrantPrivilege grants a privilege to a user.
   rpc GrantPrivilege(GrantPrivilegeRequest) returns (GrantPrivilegeResponse);
-  /// RevokePrivilege revokes a privilege from a user.
+  // RevokePrivilege revokes a privilege from a user.
   rpc RevokePrivilege(RevokePrivilegeRequest) returns (RevokePrivilegeResponse);
 }
