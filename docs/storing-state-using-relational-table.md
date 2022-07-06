@@ -40,18 +40,18 @@ We implement a relational table layer as the bridge between stateful executors a
 
 In this part, we will introduce how stateful executors interact with KV state store through the relational table layer.
 
-Relational table layer consists of State Table, Mem Table and Cell-based Table. The State Table provides the table operations by these APIs: `get_row`, `scan`, `insert_row`, `delete_row` and `update_row`, which are the read and write interfaces for executors. The Mem Table is an in-memory buffer for caching table operations during one epoch, and the Cell-based Table is responsible for performing serialization and deserialization between cell-based encoding and KV encoding.
+Relational table layer consists of State Table, Mem Table and Storage Table. The State Table provides the table operations by these APIs: `get_row`, `scan`, `insert_row`, `delete_row` and `update_row`, which are the read and write interfaces for executors. The Mem Table is an in-memory buffer for caching table operations during one epoch, and the Storage Table is responsible for writing row operations into kv pairs, which performs serialization and deserialization between cell-based encoding and KV encoding.
 
 
 ![Overview of Relational Table](images/relational-table-layer/relational-table-01.svg)
 ### Write Path
-To write into KV state store, executors first perform operations on State Table, and these operations will be cached in Mem Table. Once a barrier flows through one executor, executor will flush the cached operations into state store. At this moment, Cell-Based Table will covert these operations into kv pairs and write to state store with specific epoch. 
+To write into KV state store, executors first perform operations on State Table, and these operations will be cached in Mem Table. Once a barrier flows through one executor, executor will flush the cached operations into state store. At this moment, Storage Table will covert these operations into kv pairs and write to state store with specific epoch. 
 
 For example, an executor performs `insert(a, b, c)` and `delete(d, e, f)` through the State Table APIs, Mem Table first caches these two operations in memory. After receiving new barrier, Cell Based Table converts these two operations into KV operations by cell-based format, and write these KV operations into state store (Hummock).
 
 ![write example](images/relational-table-layer/relational-table-03.svg)
 ### Read Path
-Executors should be able to read the just written data, which means uncommited data is visible. The data in Mem Table (memory) is fresher than that in shared storage (state store). State Table provides both point-get and scan to read from state store by merging data from Mem Table and Cell-based Table. 
+Executors should be able to read the just written data, which means uncommited data is visible. The data in Mem Table (memory) is fresher than that in shared storage (state store). State Table provides both point-get and scan to read from state store by merging data from Mem Table and Storage Table. 
 #### Get
 For example, let's assume that the first column is the pk of relational table, and the following operations are performed.
 ```
@@ -73,6 +73,6 @@ Get(pk = 3): [3, 3333, 3333]
 ```
 
 #### Scan
-Scan on relational table is implemented by `StateTableIter`, which is a merge iterator of `MemTableIter` and `CellBasedTableIter`. If a pk exist in both KV state store  (CellBasedTable) and memory (MemTable), result of `MemTableIter` is returned. For example, in the  following figure, `StateTableIter` will generate `1->4->5->6` in order.
+Scan on relational table is implemented by `StateTableIter`, which is a merge iterator of `MemTableIter` and `StorageTableIter`. If a pk exist in both KV state store  (CellBasedTable) and memory (MemTable), result of `MemTableIter` is returned. For example, in the  following figure, `StateTableIter` will generate `1->4->5->6` in order.
 
 ![Scan example](images/relational-table-layer/relational-table-02.svg)
