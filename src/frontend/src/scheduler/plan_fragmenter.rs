@@ -166,7 +166,7 @@ impl Query {
 pub struct TableScanInfo {
     /// Indicates data distribution and partition of the table.
     ///
-    /// `None` if it's `Single` distributition (system table, distinct agg).
+    /// `None` if the table is not partitioned (system table).
     pub vnode_bitmaps: Option<HashMap<ParallelUnitId, Buffer>>,
 }
 
