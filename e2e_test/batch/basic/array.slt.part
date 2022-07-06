@@ -10,7 +10,7 @@ insert into lt values(Array[Array[1],Array[2,3]]);
 statement ok
 insert into lt values(Array[Array[1],Array[2,4]]);
 
-query I
+query I rowsort
 select * from lt;
 ----
 [[1],[2,3]]
