@@ -94,11 +94,7 @@ impl RowLevelIter {
     }
 
     pub fn get_current_chunk(&self) -> Option<&DataChunk> {
-        if self.chunk_idx < self.data.len() {
-            Some(&self.data[self.chunk_idx])
-        } else {
-            None
-        }
+        self.data.get(self.chunk_idx)
     }
 
     pub fn get_current_row_ref(&self) -> Option<RowRef<'_>> {
