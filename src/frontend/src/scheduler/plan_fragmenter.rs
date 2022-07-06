@@ -16,7 +16,7 @@ use std::collections::{HashMap, HashSet};
 use std::fmt::{Debug, Formatter};
 use std::sync::Arc;
 
-use risingwave_common::buffer::BitmapBuilder;
+use risingwave_common::buffer::{Bitmap, BitmapBuilder};
 use risingwave_common::types::ParallelUnitId;
 use risingwave_pb::batch_plan::plan_node::NodeBody;
 use risingwave_pb::batch_plan::ExchangeInfo;
@@ -24,7 +24,7 @@ use risingwave_pb::common::Buffer;
 use risingwave_pb::plan_common::Field as FieldProst;
 use uuid::Uuid;
 
-use crate::optimizer::plan_node::{PlanNodeId, PlanNodeType};
+use crate::optimizer::plan_node::{BatchSeqScan, PlanNodeId, PlanNodeType};
 use crate::optimizer::property::Distribution;
 use crate::optimizer::PlanRef;
 use crate::scheduler::worker_node_manager::WorkerNodeManagerRef;
@@ -164,7 +164,8 @@ impl Query {
 
 #[derive(Clone)]
 pub struct TableScanInfo {
-    /// Indicates data distribution and partition of the table.
+    /// Indicates the table partitions to be read by scan tasks. Unnecessary partitions are already
+    /// pruned.
     ///
     /// `None` if the table is not partitioned (system table).
     pub vnode_bitmaps: Option<HashMap<ParallelUnitId, Buffer>>,
@@ -391,9 +392,9 @@ impl BatchPlanFragmenter {
                     builder.root = Some(Arc::new(execution_plan_node));
                 }
                 // Check out the comments for `has_table_scan` in `QueryStage`.
-                if let Some(scan_node) = node.as_batch_seq_scan() {
-                    let table_desc = scan_node.logical().table_desc();
-
+                let scan_node: Option<&BatchSeqScan> = node.as_batch_seq_scan();
+                if let Some(scan_node) = scan_node {
+                    // TODO: handle multiple table scan inside a stage
                     assert!(
                         builder.table_scan_info.is_none()
                             || builder
@@ -404,11 +405,42 @@ impl BatchPlanFragmenter {
                                 .is_none(),
                         "multiple table scan inside a stage"
                     );
-                    builder.table_scan_info = Some(TableScanInfo {
-                        vnode_bitmaps: table_desc
-                            .vnode_mapping
-                            .clone()
-                            .map(vnode_mapping_to_owner_mapping),
+
+                    builder.table_scan_info = Some({
+                        let table_desc = scan_node.logical().table_desc();
+
+                        match table_desc.vnode_mapping {
+                            Some(ref vnode_mapping) => {
+                                let num_vnodes = vnode_mapping.len();
+                                let scan_range = scan_node.scan_range();
+                                // Try to derive the partition to read from the scan range.
+                                // It can be derived if the value of the distribution key is already
+                                // known.
+                                let vnode_bitmaps = match scan_range.try_compute_vnode(
+                                    &table_desc.distribution_keys,
+                                    &table_desc.order_column_indices(),
+                                ) {
+                                    None => vnode_mapping_to_owner_mapping(vnode_mapping.clone()),
+                                    Some(vnode) => {
+                                        let parallel_unit_id = vnode_mapping[vnode as usize];
+                                        let mut vnode_bitmaps = HashMap::new();
+                                        vnode_bitmaps.insert(
+                                            parallel_unit_id,
+                                            bitmap_with_single_vnode(vnode as usize, num_vnodes)
+                                                .to_protobuf(),
+                                        );
+                                        vnode_bitmaps
+                                    }
+                                };
+                                TableScanInfo {
+                                    vnode_bitmaps: Some(vnode_bitmaps),
+                                }
+                            }
+                            // not partitioned table
+                            None => TableScanInfo {
+                                vnode_bitmaps: None,
+                            },
+                        }
                     });
                 }
             }
@@ -453,6 +485,11 @@ fn vnode_mapping_to_owner_mapping(
         .collect()
 }
 
+fn bitmap_with_single_vnode(vnode: usize, num_vnodes: usize) -> Bitmap {
+    let mut bitmap = BitmapBuilder::zeroed(num_vnodes);
+    bitmap.set(vnode as usize, true);
+    bitmap.finish()
+}
 #[cfg(test)]
 mod tests {
     use std::collections::{HashMap, HashSet};

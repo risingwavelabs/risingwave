@@ -14,7 +14,10 @@
 
 use std::ops::{Bound, RangeBounds};
 
-use risingwave_common::types::ScalarImpl;
+use itertools::Itertools;
+use risingwave_common::array::Row;
+use risingwave_common::types::{ScalarImpl, VirtualNode};
+use risingwave_common::util::hash_util::CRC32FastBuilder;
 use risingwave_pb::batch_plan::scan_range::Bound as BoundProst;
 use risingwave_pb::batch_plan::ScanRange as ScanRangeProst;
 
@@ -57,6 +60,45 @@ impl ScanRange {
             eq_conds: vec![],
             range: full_range(),
         }
+    }
+
+    pub fn try_compute_vnode(
+        &self,
+        dist_key_indices: &[usize],
+        pk_indices: &[usize],
+    ) -> Option<VirtualNode> {
+        if dist_key_indices.is_empty() {
+            return None;
+        }
+
+        let dist_key_in_pk_indices = dist_key_indices
+            .iter()
+            .map(|&di| {
+                pk_indices
+                    .iter()
+                    .position(|&pi| di == pi)
+                    .unwrap_or_else(|| {
+                        panic!(
+                            "distribution keys {:?} must be a subset of primary keys {:?}",
+                            dist_key_indices, pk_indices
+                        )
+                    })
+            })
+            .collect_vec();
+        let pk_prefix_len = self.eq_conds.len();
+        if dist_key_in_pk_indices.iter().any(|&i| i >= pk_prefix_len) {
+            return None;
+        }
+
+        let pk_prefix_value = Row(self
+            .eq_conds
+            .iter()
+            .map(|scalar| Some(scalar.clone()))
+            .collect());
+        let vnode = pk_prefix_value
+            .hash_by_indices(&dist_key_in_pk_indices, &CRC32FastBuilder {})
+            .to_vnode();
+        Some(vnode)
     }
 }
 
