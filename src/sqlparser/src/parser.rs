@@ -2589,10 +2589,10 @@ impl Parser {
             })
         } else if variable.value == "TRANSACTION" && modifier.is_none() {
             if self.parse_keyword(Keyword::SNAPSHOT) {
-                let snaphot_id = self.parse_value()?;
+                let snapshot_id = self.parse_value()?;
                 return Ok(Statement::SetTransaction {
                     modes: vec![],
-                    snapshot: Some(snaphot_id),
+                    snapshot: Some(snapshot_id),
                     session: false,
                 });
             }

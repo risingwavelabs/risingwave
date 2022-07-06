@@ -18,12 +18,13 @@ use futures_async_stream::try_stream;
 use itertools::Itertools;
 use risingwave_common::array::{Array, DataChunk, Row};
 use risingwave_common::catalog::Schema;
-use risingwave_common::error::{ErrorCode, Result, RwError};
+use risingwave_common::error::{Result, RwError};
 use risingwave_common::types::DataType;
 use risingwave_common::util::chunk_coalesce::{DataChunkBuilder, SlicedDataChunk};
 use risingwave_expr::expr::{build_from_prost as expr_build_from_prost, BoxedExpression};
 use risingwave_pb::batch_plan::plan_node::NodeBody;
 
+use crate::error::BatchError;
 use crate::executor::join::chunked_data::RowId;
 use crate::executor::join::row_level_iter::RowLevelIter;
 use crate::executor::join::{
@@ -212,10 +213,10 @@ impl BoxedExecutorBuilder for NestedLoopJoinExecutor {
                     "NestedLoopJoinExecutor2".to_string(),
                 )))
             }
-            _ => Err(ErrorCode::NotImplemented(
-                format!("Do not support {:?} join type now.", join_type),
-                None.into(),
-            )
+            _ => Err(BatchError::UnsupportedFunction(format!(
+                "Do not support {:?} join type now.",
+                join_type
+            ))
             .into()),
         }
     }
@@ -279,9 +280,8 @@ impl NestedLoopJoinExecutor {
                 JoinType::RightOuter => self.do_right_outer_join(),
                 JoinType::RightSemi => self.do_right_semi_join(),
                 JoinType::RightAnti => self.do_right_anti_join(),
-                _ => Err(ErrorCode::NotImplemented(
+                _ => Err(BatchError::UnsupportedFunction(
                     "Do not support other join types!".to_string(),
-                    None.into(),
                 )
                 .into()),
             }?;
@@ -300,6 +300,7 @@ impl NestedLoopJoinExecutor {
                     let (mut left_data_chunk, return_data_chunk) = self
                         .chunk_builder
                         .append_chunk(SlicedDataChunk::new_checked(ret_chunk)?)?;
+
                     // Have checked last chunk is None in before. Now swap to buffer it.
                     std::mem::swap(&mut self.last_chunk, &mut left_data_chunk);
                     if let Some(inner_chunk) = return_data_chunk {
@@ -324,9 +325,8 @@ impl NestedLoopJoinExecutor {
         match self.join_type {
             JoinType::RightOuter => self.do_probe_remaining_right_outer(),
             JoinType::RightAnti => self.do_probe_remaining_right_anti(),
-            _ => Err(ErrorCode::NotImplemented(
+            _ => Err(BatchError::UnsupportedFunction(
                 "unsupported type for probe_remaining".to_string(),
-                None.into(),
             )
             .into()),
         }

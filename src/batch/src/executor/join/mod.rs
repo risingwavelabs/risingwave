@@ -29,11 +29,12 @@ pub use lookup_join::*;
 pub use nested_loop_join::*;
 use risingwave_common::array::column::Column;
 use risingwave_common::array::{DataChunk, RowRef, Vis};
-use risingwave_common::error::{ErrorCode, Result};
+use risingwave_common::error::Result;
 use risingwave_common::types::{DataType, DatumRef};
 use risingwave_pb::plan_common::JoinType as JoinTypeProst;
 pub use sort_merge_join::*;
 
+use crate::error::BatchError;
 use crate::executor::join::JoinType::Inner;
 #[derive(Copy, Clone, Debug, PartialEq)]
 pub enum JoinType {
@@ -132,9 +133,8 @@ fn concatenate(left: &DataChunk, right: &DataChunk) -> Result<DataChunk> {
         (Vis::Compact(_), _) => right.vis().clone(),
         (_, Vis::Compact(_)) => left.vis().clone(),
         (Vis::Bitmap(_), Vis::Bitmap(_)) => {
-            return Err(ErrorCode::NotImplemented(
+            return Err(BatchError::UnsupportedFunction(
                 "The concatenate behaviour of two chunk with visibility is undefined".to_string(),
-                None.into(),
             )
             .into())
         }
