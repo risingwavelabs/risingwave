@@ -103,6 +103,11 @@ class Panels:
         return TimeSeries(title=title, targets=targets, gridPos=gridPos, unit="row", fillOpacity=10,
                           legendDisplayMode="table", legendPlacement="right", legendCalcs=["max"])
 
+    def timeseries_ns(self, title, targets):
+        gridPos = self.layout.next_half_width_graph()
+        return TimeSeries(title=title, targets=targets, gridPos=gridPos, unit="ns", fillOpacity=10,
+                          legendDisplayMode="table", legendPlacement="right", legendCalcs=["max"])
+
     def timeseries_kilobytes(self, title, targets):
         gridPos = self.layout.next_half_width_graph()
         return TimeSeries(title=title, targets=targets, gridPos=gridPos, unit="deckbytes", fillOpacity=10,
@@ -385,6 +390,21 @@ def section_streaming_actors(outer_panels):
                     "rate(stream_executor_row_count[15s]) > 0", "{{actor_id}}->{{executor_id}}"
                 ),
             ]),
+            panels.timeseries_ns("Actor Sampled Deserialization Time", [
+                panels.target(
+                    "actor_sampled_deserialize_duration_ns", "{{actor_id}}"
+                ),
+            ]),
+            panels.timeseries_ns("Actor Sampled Serialization Time", [
+                panels.target(
+                    "actor_sampled_serialize_duration_ns", "{{actor_id}}"
+                ),
+            ]),
+            panels.timeseries_ns("Actor Backpressure Time Per Second", [
+                panels.target(
+                    "rate(stream_actor_output_buffer_blocking_duration[15s])", "{{actor_id}}"
+                ),
+            ]),
             panels.timeseries_actor_latency("Actor Barrier Latency", [
                 panels.target(
                     "rate(stream_actor_barrier_time[1m]) > 0", "{{actor_id}}"
@@ -534,9 +554,6 @@ def section_hummock(panels):
                 "sum(rate(state_store_get_duration_count[1m])) by (job,instance)", "get - {{job}} @ {{instance}}"
             ),
             panels.target(
-                "sum(rate(state_store_iter_duration_count[1m])) by (job,instance)", "iter - {{job}} @ {{instance}}"
-            ),
-            panels.target(
                 "sum(rate(state_store_range_scan_duration_count[1m])) by (job,instance)", "range_scan - {{job}} @ {{instance}}"
             ),
             panels.target(
@@ -544,6 +561,9 @@ def section_hummock(panels):
             ),
             panels.target(
                 "sum(rate(state_store_get_shared_buffer_hit_counts[1m])) by (job,instance)", "shared_buffer hit - {{job}} @ {{instance}}"
+            ),
+            panels.target(
+                    "sum(rate(state_store_iter_in_process_counts[1m])) by(job,instance)", "iter_in_process_counts - {{instance}} "
             ),
         ]),
         panels.timeseries_latency("Read Duration - Get", [
@@ -597,10 +617,6 @@ def section_hummock(panels):
                       [90, 99, 999, "max"]),
             panels.target(
                 "sum by(le, job, instance)(rate(state_store_iter_duration_sum[1m])) / sum by(le, job,instance) (rate(state_store_iter_duration_count[1m]))", "avg - {{job}} @ {{instance}}"
-            ),
-
-            panels.target(
-                    "sum(rate(state_store_iter_in_process_counts[1m])) by(job,instance)", "iter_in_process_counts - {{instance}} "
             ),
         ]),
         panels.timeseries_latency("Read Duration - Iter Pure Scan", [
