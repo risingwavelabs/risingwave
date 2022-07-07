@@ -206,7 +206,7 @@ pub struct DispatchExecutor {
 
 struct DispatchExecutorInner {
     dispatchers: Vec<DispatcherImpl>,
-    actor_id: ActorId,
+    actor_id: u32,
     actor_id_str: String,
     context: Arc<SharedContext>,
     metrics: Arc<StreamingMetrics>,
