@@ -238,7 +238,7 @@ select count(current_database());
 query T
 select regexp_match('abc', 'bc');
 ----
-[bc]
+{bc}
 
 query T
 select regexp_match('abc', 'd');
@@ -248,19 +248,19 @@ NULL
 query T
 select regexp_match('foobarbequebaz', '(bar)(beque)');
 ----
-[bar,beque]
+{bar,beque}
 
 query T
 select regexp_match('foobarbequebaz', 'bar(beque)');
 ----
-[beque]
+{beque}
 
 query T
 select regexp_match('foobarbequebaz', 'bar.*que');
 ----
-[barbeque]
+{barbeque}
 
 query T
 select regexp_match('abc01234xyz', '(?:(.*?)(\d+)(.*)){1,1}');
 ----
-[abc,01234,xyz]
+{abc,01234,xyz}
