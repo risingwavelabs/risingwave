@@ -255,7 +255,7 @@ impl<S: StateStore> StateTable<S> {
             .iter()
             .map(|col_order| col_order.index as usize)
             .collect();
-        let distribution = match vnodes.clone() {
+        let distribution = match vnodes {
             // Hash Agg
             Some(vnodes) => Distribution {
                 dist_key_indices,
@@ -265,7 +265,7 @@ impl<S: StateStore> StateTable<S> {
             None => Distribution::fallback(),
         };
         StateTable::new_with_distribution(
-            store.clone(),
+            store,
             TableId::new(table_catalog.id),
             table_columns,
             order_types,

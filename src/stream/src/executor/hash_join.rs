@@ -23,8 +23,8 @@ use risingwave_common::bail;
 use risingwave_common::catalog::Schema;
 use risingwave_common::hash::HashKey;
 use risingwave_common::types::{DataType, ToOwnedDatum};
-use risingwave_storage::table::state_table::StateTable;
 use risingwave_expr::expr::BoxedExpression;
+use risingwave_storage::table::state_table::StateTable;
 use risingwave_storage::StateStore;
 
 use super::barrier_align::*;
@@ -781,11 +781,15 @@ mod tests {
     use crate::executor::test_utils::{MessageSender, MockSource};
     use crate::executor::{Barrier, Epoch, Message};
 
-    fn create_in_memory_state_table() -> (StateTable<MemoryStateStore>, StateTable<MemoryStateStore>)
-    {
+    fn create_in_memory_state_table(
+        data_types: &[DataType],
+        order_types: &[OrderType],
+        pk_indices: &[usize],
+    ) -> (StateTable<MemoryStateStore>, StateTable<MemoryStateStore>) {
         let mem_state = MemoryStateStore::new();
 
-        let column_descs = [DataType::Int64, DataType::Int64]
+        // The last column is for degree.
+        let column_descs = data_types
             .iter()
             .enumerate()
             .map(|(id, data_type)| ColumnDesc::unnamed(ColumnId::new(id as i32), data_type.clone()))
@@ -794,17 +798,17 @@ mod tests {
             mem_state.clone(),
             TableId::new(0),
             column_descs.clone(),
-            vec![OrderType::Ascending],
+            order_types.to_vec(),
             None,
-            vec![0],
+            pk_indices.to_vec(),
         );
         let state_table_r = StateTable::new(
-            mem_state.clone(), 
+            mem_state,
             TableId::new(0),
             column_descs,
-            vec![OrderType::Ascending],
+            order_types.to_vec(),
             None,
-            vec![0],
+            pk_indices.to_vec(),
         );
         (state_table_l, state_table_r)
     }
@@ -835,7 +839,11 @@ mod tests {
         let params_r = JoinParams::new(vec![0], vec![]);
         let cond = with_condition.then(create_cond);
 
-        let (mem_state_l, mem_state_r) = create_in_memory_state_table();
+        let (mem_state_l, mem_state_r) = create_in_memory_state_table(
+            &[DataType::Int64, DataType::Int64, DataType::Int64],
+            &[OrderType::Ascending, OrderType::Ascending],
+            &[0, 1],
+        );
         let schema_len = match T {
             JoinType::LeftSemi | JoinType::LeftAnti => source_l.schema().len(),
             JoinType::RightSemi | JoinType::RightAnti => source_r.schema().len(),
@@ -876,7 +884,20 @@ mod tests {
         let params_r = JoinParams::new(vec![0, 1], vec![]);
         let cond = with_condition.then(create_cond);
 
-        let (mem_state_l, mem_state_r) = create_in_memory_state_table();
+        let (mem_state_l, mem_state_r) = create_in_memory_state_table(
+            &[
+                DataType::Int64,
+                DataType::Int64,
+                DataType::Int64,
+                DataType::Int64,
+            ],
+            &[
+                OrderType::Ascending,
+                OrderType::Ascending,
+                OrderType::Ascending,
+            ],
+            &[0, 1, 1],
+        );
         let schema_len = match T {
             JoinType::LeftSemi | JoinType::LeftAnti => source_l.schema().len(),
             JoinType::RightSemi | JoinType::RightAnti => source_r.schema().len(),

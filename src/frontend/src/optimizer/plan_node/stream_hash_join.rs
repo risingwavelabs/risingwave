@@ -12,21 +12,18 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-
 use std::fmt;
 
 use itertools::Itertools;
-use risingwave_common::catalog::{DatabaseId, SchemaId, Field};
+use risingwave_common::catalog::{DatabaseId, Field, SchemaId};
 use risingwave_common::types::DataType;
 use risingwave_common::util::sort_util::OrderType;
 use risingwave_pb::plan_common::JoinType;
 use risingwave_pb::stream_plan::stream_node::NodeBody;
 use risingwave_pb::stream_plan::HashJoinNode;
 
-
 use super::utils::TableCatalogBuilder;
 use super::{LogicalJoin, PlanBase, PlanRef, PlanTreeNodeBinary, StreamDeltaJoin, ToStreamProst};
-
 use crate::catalog::table_catalog::TableCatalog;
 use crate::expr::Expr;
 use crate::optimizer::plan_node::EqJoinPredicate;
@@ -179,19 +176,25 @@ impl_plan_tree_node_for_binary! { StreamHashJoin }
 impl ToStreamProst for StreamHashJoin {
     fn to_stream_prost_body(&self) -> NodeBody {
         let left_key_indices_prost = self
-        .eq_join_predicate
-        .left_eq_indexes()
-        .iter()
-        .map(|v| *v as i32)
-        .collect_vec();
+            .eq_join_predicate
+            .left_eq_indexes()
+            .iter()
+            .map(|v| *v as i32)
+            .collect_vec();
         let right_key_indices_prost = self
-        .eq_join_predicate
-        .right_eq_indexes()
-        .iter()
-        .map(|v| *v as i32)
-        .collect_vec();
-        let left_key_indices = left_key_indices_prost.iter().map(|idx| *idx as usize).collect_vec();
-        let right_key_indices = right_key_indices_prost.iter().map(|idx| *idx as usize).collect_vec();
+            .eq_join_predicate
+            .right_eq_indexes()
+            .iter()
+            .map(|v| *v as i32)
+            .collect_vec();
+        let left_key_indices = left_key_indices_prost
+            .iter()
+            .map(|idx| *idx as usize)
+            .collect_vec();
+        let right_key_indices = right_key_indices_prost
+            .iter()
+            .map(|idx| *idx as usize)
+            .collect_vec();
         NodeBody::HashJoin(HashJoinNode {
             join_type: self.logical.join_type() as i32,
             left_key: left_key_indices_prost,
@@ -202,14 +205,18 @@ impl ToStreamProst for StreamHashJoin {
                 .as_expr_unless_true()
                 .map(|x| x.to_expr_proto()),
             is_delta_join: self.is_delta,
-            left_table: Some(infer_internal_table_catalog(self.left(), left_key_indices).to_prost(
-                SchemaId::placeholder() as u32,
-                DatabaseId::placeholder() as u32,
-            )),
-            right_table: Some(infer_internal_table_catalog(self.right(), right_key_indices).to_prost(
-                SchemaId::placeholder() as u32,
-                DatabaseId::placeholder() as u32,
-            )),
+            left_table: Some(
+                infer_internal_table_catalog(self.left(), left_key_indices).to_prost(
+                    SchemaId::placeholder() as u32,
+                    DatabaseId::placeholder() as u32,
+                ),
+            ),
+            right_table: Some(
+                infer_internal_table_catalog(self.right(), right_key_indices).to_prost(
+                    SchemaId::placeholder() as u32,
+                    DatabaseId::placeholder() as u32,
+                ),
+            ),
             output_indices: self
                 .logical
                 .output_indices()
@@ -224,27 +231,34 @@ impl ToStreamProst for StreamHashJoin {
 fn infer_internal_table_catalog(input: PlanRef, join_key_indices: Vec<usize>) -> TableCatalog {
     let base = input.plan_base();
     let schema = &base.schema;
-    
+
     let append_only = input.append_only();
     let dist_keys = base.dist.dist_column_indices().to_vec();
 
     // The pk of hash join internal table shoule be join_key + input_pk.
     let mut pk_indices = join_key_indices;
     // TODO(yuhao): dedupe the dist key and pk.
-    pk_indices.extend(&base.pk_indices) ;
+    pk_indices.extend(&base.pk_indices);
 
     let mut columns_fields = schema.fields().to_vec();
-    
+
     // The join degree at the end of internal table.
     let degree_column_field = Field {
-        data_type: DataType::Int64, name: "_degree".to_string(), sub_fields: vec![], type_name: "".to_string() 
+        data_type: DataType::Int64,
+        name: "_degree".to_string(),
+        sub_fields: vec![],
+        type_name: "".to_string(),
     };
     columns_fields.push(degree_column_field);
 
     let mut internal_table_catalog_builder = TableCatalogBuilder::new();
 
     for (idx, field) in columns_fields.iter().enumerate() {
-        let order_type = if pk_indices.contains(&idx) {Some(OrderType::Ascending)} else {None};
+        let order_type = if pk_indices.contains(&idx) {
+            Some(OrderType::Ascending)
+        } else {
+            None
+        };
         internal_table_catalog_builder.add_column_desc_from_field(order_type, field)
     }
 
