@@ -50,7 +50,7 @@ use crate::optimizer::property::FieldOrder;
 ///
 ///   If there's no `ORDER BY` clause, the order key will be the same as pk.
 ///
-/// - **Distribution Key**: the columns used to partition the data. It must be a prefix of the order
+/// - **Distribution Key**: the columns used to partition the data. It must be a subset of the order
 ///   key.
 #[derive(Clone, Debug, PartialEq)]
 pub struct TableCatalog {

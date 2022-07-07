@@ -81,6 +81,10 @@ impl BatchSeqScan {
     pub fn logical(&self) -> &LogicalScan {
         &self.logical
     }
+
+    pub fn scan_range(&self) -> &ScanRange {
+        &self.scan_range
+    }
 }
 
 impl_plan_tree_node_for_leaf! { BatchSeqScan }
