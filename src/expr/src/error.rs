@@ -13,6 +13,7 @@
 // limitations under the License.
 
 pub use anyhow::anyhow;
+use regex;
 use risingwave_common::array::ArrayError;
 use risingwave_common::error::{ErrorCode, RwError};
 use risingwave_common::types::DataType;
@@ -49,5 +50,14 @@ pub enum ExprError {
 impl From<ExprError> for RwError {
     fn from(s: ExprError) -> Self {
         ErrorCode::ExprError(Box::new(s)).into()
+    }
+}
+
+impl From<regex::Error> for ExprError {
+    fn from(re: regex::Error) -> Self {
+        Self::InvalidParam {
+            name: "pattern",
+            reason: re.to_string(),
+        }
     }
 }

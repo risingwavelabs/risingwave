@@ -80,7 +80,7 @@ impl LogicalScan {
             .collect();
 
         let pk_indices = table_desc
-            .pks
+            .pk
             .iter()
             .map(|&c| id_to_op_idx.get(&table_desc.columns[c].column_id).copied())
             .collect::<Option<Vec<_>>>()
@@ -140,7 +140,7 @@ impl LogicalScan {
 
     pub(super) fn order_names(&self) -> Vec<String> {
         self.table_desc
-            .order_column_ids()
+            .order_column_indices()
             .iter()
             .map(|&i| self.table_desc.columns[i].name.clone())
             .collect()
@@ -182,7 +182,7 @@ impl LogicalScan {
 
     /// distribution keys stored in catalog only contains column index of the table (`table_idx`),
     /// so we need to convert it to `operator_idx` when filling distributions.
-    pub fn map_distribution_keys(&self) -> Vec<usize> {
+    pub fn map_distribution_key(&self) -> Vec<usize> {
         let tb_idx_to_op_idx = self
             .required_col_idx
             .iter()
@@ -190,7 +190,7 @@ impl LogicalScan {
             .map(|(op_idx, tb_idx)| (*tb_idx, op_idx))
             .collect::<HashMap<_, _>>();
         self.table_desc
-            .distribution_keys
+            .distribution_key
             .iter()
             .map(|&tb_idx| tb_idx_to_op_idx[&tb_idx])
             .collect()
@@ -276,7 +276,7 @@ impl LogicalScan {
         )
     }
 
-    fn clone_with_output_indices(&self, output_col_idx: Vec<usize>) -> Self {
+    pub fn clone_with_output_indices(&self, output_col_idx: Vec<usize>) -> Self {
         Self::new(
             self.table_name.clone(),
             self.is_sys_table,
@@ -350,7 +350,7 @@ impl ToBatch for LogicalScan {
             Ok(BatchSeqScan::new(self.clone(), ScanRange::full_table_scan()).into())
         } else {
             let (scan_range, predicate) = self.predicate.clone().split_to_scan_range(
-                &self.table_desc.order_column_ids(),
+                &self.table_desc.order_column_indices(),
                 self.table_desc.columns.len(),
             );
             let mut scan = self.clone();
@@ -404,16 +404,17 @@ impl ToStream for LogicalScan {
                 for idx in &self.output_col_idx {
                     col_ids.insert(self.table_desc.columns[*idx].column_id);
                 }
-                let mut col_id_to_tb_idx = HashMap::new();
-                for (tb_idx, c) in self.table_desc().columns.iter().enumerate() {
-                    col_id_to_tb_idx.insert(c.column_id, tb_idx);
-                }
                 let col_need_to_add = self
                     .table_desc
-                    .order_desc
+                    .order_key
                     .iter()
-                    .filter(|c| !col_ids.contains(&c.column_desc.column_id))
-                    .map(|c| col_id_to_tb_idx.get(&c.column_desc.column_id).unwrap())
+                    .filter_map(|c| {
+                        if !col_ids.contains(&self.table_desc().columns[c.column_idx].column_id) {
+                            Some(c.column_idx)
+                        } else {
+                            None
+                        }
+                    })
                     .collect_vec();
 
                 let mut output_col_idx = self.output_col_idx.clone();

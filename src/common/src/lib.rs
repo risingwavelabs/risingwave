@@ -38,6 +38,7 @@
 #![feature(trusted_len)]
 #![feature(allocator_api)]
 #![feature(lint_reasons)]
+#![feature(generators)]
 
 #[macro_use]
 pub mod error;
@@ -50,6 +51,7 @@ pub mod cache;
 pub mod catalog;
 pub mod collection;
 pub mod config;
+pub mod field_generator;
 pub mod hash;
 pub mod monitor;
 pub mod service;

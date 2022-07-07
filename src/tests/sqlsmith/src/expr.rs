@@ -16,7 +16,7 @@ use std::collections::HashMap;
 
 use rand::seq::SliceRandom;
 use rand::Rng;
-use risingwave_frontend::expr::{func_sig_map, DataTypeName, ExprType, FuncSign};
+use risingwave_frontend::expr::{func_sigs, DataTypeName, ExprType, FuncSign};
 use risingwave_sqlparser::ast::{
     BinaryOperator, Expr, Function, FunctionArg, FunctionArgExpr, Ident, ObjectName,
     TrimWhereField, UnaryOperator, Value,
@@ -32,9 +32,7 @@ lazy_static::lazy_static! {
 
 fn init_op_table() -> HashMap<DataTypeName, Vec<FuncSign>> {
     let mut funcs = HashMap::<DataTypeName, Vec<FuncSign>>::new();
-    func_sig_map()
-        .iter()
-        .for_each(|(func, ret)| funcs.entry(*ret).or_default().push(func.clone()));
+    func_sigs().for_each(|func| funcs.entry(func.ret_type).or_default().push(func.clone()));
     funcs
 }
 
@@ -132,6 +130,7 @@ fn make_general_expr(func: ExprType, exprs: Vec<Expr>) -> Option<Expr> {
         E::Replace => Some(Expr::Function(make_func("replace", &exprs))),
         E::Md5 => Some(Expr::Function(make_func("md5", &exprs))),
         E::ToChar => Some(Expr::Function(make_func("to_char", &exprs))),
+        E::Overlay => Some(make_overlay(exprs)),
         _ => None,
     }
 }
@@ -156,6 +155,24 @@ fn make_trim(func: ExprType, exprs: Vec<Expr>) -> Expr {
     }
 }
 
+fn make_overlay(exprs: Vec<Expr>) -> Expr {
+    if exprs.len() == 3 {
+        Expr::Overlay {
+            expr: Box::new(exprs[0].clone()),
+            new_substring: Box::new(exprs[1].clone()),
+            start: Box::new(exprs[2].clone()),
+            count: None,
+        }
+    } else {
+        Expr::Overlay {
+            expr: Box::new(exprs[0].clone()),
+            new_substring: Box::new(exprs[1].clone()),
+            start: Box::new(exprs[2].clone()),
+            count: Some(Box::new(exprs[3].clone())),
+        }
+    }
+}
+
 fn make_func(func_name: &str, exprs: &[Expr]) -> Function {
     let args = exprs
         .iter()
@@ -166,6 +183,8 @@ fn make_func(func_name: &str, exprs: &[Expr]) -> Function {
         args,
         over: None,
         distinct: false,
+        order_by: vec![],
+        filter: None,
     }
 }
 

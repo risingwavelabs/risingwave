@@ -577,10 +577,30 @@ where
 
     /// Broadcast the create source request to all compute nodes.
     pub async fn create_source(&self, source: &Source) -> Result<()> {
+        // This scope guard does clean up jobs ASYNCHRONOUSLY before Err returns.
+        // It MUST be cleared before Ok returns.
+        let mut revert_funcs = scopeguard::guard(
+            vec![],
+            |revert_funcs: Vec<futures::future::BoxFuture<()>>| {
+                tokio::spawn(async move {
+                    for revert_func in revert_funcs {
+                        revert_func.await;
+                    }
+                });
+            },
+        );
+
         // Register beforehand and is safeguarded by CompactionGroupManager::purge_stale_members.
-        self.compaction_group_manager
+        let registered_table_ids = self
+            .compaction_group_manager
             .register_source(source.id, &HashMap::new())
             .await?;
+        let compaction_group_manager_ref = self.compaction_group_manager.clone();
+        revert_funcs.push(Box::pin(async move {
+            if let Err(e) = compaction_group_manager_ref.unregister_table_ids(&registered_table_ids).await {
+                tracing::warn!("Failed to unregister_table_ids {:#?}.\nThey will be cleaned up on node restart.\n{:#?}", registered_table_ids, e);
+            }
+        }));
         let futures = self
             .all_stream_clients()
             .await?
@@ -598,6 +618,7 @@ where
         let mut core = self.core.lock().await;
         if core.managed_sources.contains_key(&source.get_id()) {
             log::warn!("source {} already registered", source.get_id());
+            revert_funcs.clear();
             return Ok(());
         }
 
@@ -605,6 +626,7 @@ where
             Self::create_source_worker(source, &mut core.managed_sources).await?;
         }
 
+        revert_funcs.clear();
         Ok(())
     }
 
@@ -652,19 +674,21 @@ where
                 "dropping source {}, but associated fragments still exists",
                 source_id
             );
-        }
-
-        // Unregister afterwards and is safeguarded by CompactionGroupManager::purge_stale_members.
-        if let Err(e) = self
-            .compaction_group_manager
-            .unregister_source(source_id)
-            .await
-        {
-            tracing::warn!(
-                "Failed to unregister source {}. It wll be unregistered eventually.\n{:#?}",
-                source_id,
-                e
-            );
+            core.source_fragments.remove(&source_id);
+        } else {
+            // Unregister afterwards and is safeguarded by
+            // CompactionGroupManager::purge_stale_members.
+            if let Err(e) = self
+                .compaction_group_manager
+                .unregister_source(source_id)
+                .await
+            {
+                tracing::warn!(
+                    "Failed to unregister source {}. It wll be unregistered eventually.\n{:#?}",
+                    source_id,
+                    e
+                );
+            }
         }
 
         Ok(())
@@ -690,7 +714,6 @@ where
                     })
                     .collect(),
             })));
-
             log::debug!("pushing down mutation {:#?}", command);
 
             tokio_retry::Retry::spawn(FixedInterval::new(Self::SOURCE_RETRY_INTERVAL), || async {
@@ -720,5 +743,15 @@ where
                 );
             }
         }
+    }
+
+    pub async fn get_source_ids_in_fragments(&self) -> Vec<SourceId> {
+        self.core
+            .lock()
+            .await
+            .source_fragments
+            .keys()
+            .cloned()
+            .collect_vec()
     }
 }

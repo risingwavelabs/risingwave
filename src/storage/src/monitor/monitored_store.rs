@@ -14,7 +14,6 @@
 
 use std::ops::RangeBounds;
 use std::sync::Arc;
-use std::time::Instant;
 
 use bytes::Bytes;
 use futures::Future;
@@ -22,7 +21,10 @@ use risingwave_hummock_sdk::LocalSstableInfo;
 use tracing::error;
 
 use super::StateStoreMetrics;
-use crate::error::StorageResult;
+use crate::error::{StorageError, StorageResult};
+use crate::hummock::local_version_manager::LocalVersionManager;
+use crate::hummock::sstable_store::SstableStoreRef;
+use crate::hummock::HummockStorage;
 use crate::storage_value::StorageValue;
 use crate::store::*;
 use crate::{define_state_store_associated_type, StateStore, StateStoreIter};
@@ -39,10 +41,6 @@ impl<S> MonitoredStateStore<S> {
     pub fn new(inner: S, stats: Arc<StateStoreMetrics>) -> Self {
         Self { inner, stats }
     }
-
-    pub fn inner(&self) -> &S {
-        &self.inner
-    }
 }
 
 impl<S> MonitoredStateStore<S>
@@ -56,15 +54,24 @@ where
     where
         I: Future<Output = StorageResult<S::Iter>>,
     {
+        // start time takes iterator build time into account
+        let start_time = minstant::Instant::now();
+
+        // wait for iterator creation (e.g. seek)
         let iter = iter
             .await
             .inspect_err(|e| error!("Failed in iter: {:?}", e))?;
 
+        // statistics of iter in process count to estimate the read ops in the same time
+        self.stats.iter_in_process_counts.inc();
+
+        // create a monitored iterator to collect metrics
         let monitored = MonitoredStateStoreIter {
             inner: iter,
             total_items: 0,
             total_size: 0,
-            start_time: Instant::now(),
+            start_time,
+            scan_time: minstant::Instant::now(),
             stats: self.stats.clone(),
         };
         Ok(monitored)
@@ -249,6 +256,33 @@ where
     fn get_uncommitted_ssts(&self, epoch: u64) -> Vec<LocalSstableInfo> {
         self.inner.get_uncommitted_ssts(epoch)
     }
+
+    fn clear_shared_buffer(&self) -> Self::ClearSharedBufferFuture<'_> {
+        async move {
+            self.inner
+                .clear_shared_buffer()
+                .await
+                .inspect_err(|e| error!("Failed in clear_shared_buffer: {:?}", e))
+        }
+    }
+}
+
+impl MonitoredStateStore<HummockStorage> {
+    pub fn sstable_store(&self) -> SstableStoreRef {
+        self.inner.sstable_store()
+    }
+
+    pub fn local_version_manager(&self) -> Arc<LocalVersionManager> {
+        self.inner.local_version_manager().clone()
+    }
+
+    // Note(bugen): should we use notification service for this?
+    pub async fn update_compaction_group_cache(&self) -> StorageResult<()> {
+        self.inner
+            .update_compaction_group_cache()
+            .await
+            .map_err(StorageError::Hummock)
+    }
 }
 
 /// A state store iterator wrapper for monitoring metrics.
@@ -256,7 +290,8 @@ pub struct MonitoredStateStoreIter<I> {
     inner: I,
     total_items: usize,
     total_size: usize,
-    start_time: Instant,
+    start_time: minstant::Instant,
+    scan_time: minstant::Instant,
     stats: Arc<StateStoreMetrics>,
 }
 
@@ -293,6 +328,9 @@ impl<I> Drop for MonitoredStateStoreIter<I> {
         self.stats
             .iter_duration
             .observe(self.start_time.elapsed().as_secs_f64());
+        self.stats
+            .iter_scan_duration
+            .observe(self.scan_time.elapsed().as_secs_f64());
         self.stats.iter_item.observe(self.total_items as f64);
         self.stats.iter_size.observe(self.total_size as f64);
     }

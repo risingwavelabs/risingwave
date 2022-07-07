@@ -69,7 +69,7 @@ impl HashAggExecutorBuilder {
         identity: String,
     ) -> Result<BoxedExecutor> {
         let group_key_columns = hash_agg_node
-            .get_group_keys()
+            .get_group_key()
             .iter()
             .map(|x| *x as usize)
             .collect_vec();
@@ -140,7 +140,7 @@ impl BoxedExecutorBuilder for HashAggExecutorBuilder {
 pub(crate) struct HashAggExecutor<K> {
     /// factories to construct aggregator for each groups
     agg_factories: Vec<AggStateFactory>,
-    /// Column indexes of keys that specify a group
+    /// Column indexes that specify a group
     group_key_columns: Vec<usize>,
     /// child executor
     child: BoxedExecutor,
@@ -219,7 +219,7 @@ impl<K: HashKey + Send + Sync> HashAggExecutor<K> {
                 .group_key_types
                 .iter()
                 .map(|datatype| datatype.create_array_builder(cardinality))
-                .try_collect()?;
+                .collect();
 
             let mut agg_builders: Vec<_> = self
                 .agg_factories
@@ -229,7 +229,7 @@ impl<K: HashKey + Send + Sync> HashAggExecutor<K> {
                         .get_return_type()
                         .create_array_builder(cardinality)
                 })
-                .try_collect()?;
+                .collect();
 
             let mut has_next = false;
             let mut array_len = 0;
@@ -313,7 +313,7 @@ mod tests {
         };
 
         let agg_prost = HashAggNode {
-            group_keys: vec![0, 1],
+            group_key: vec![0, 1],
             agg_calls: vec![agg_call],
         };
 
@@ -378,7 +378,7 @@ mod tests {
         };
 
         let agg_prost = HashAggNode {
-            group_keys: vec![],
+            group_key: vec![],
             agg_calls: vec![agg_call],
         };
 

@@ -16,7 +16,6 @@ use itertools::Itertools;
 use risingwave_common::catalog::{ColumnDesc, ColumnId, Field};
 use risingwave_common::error::Result;
 use risingwave_common::util::sort_util::{OrderPair, OrderType};
-use risingwave_pb::expr::InputRefExpr;
 use risingwave_pb::plan_common::{ColumnOrder, Field as ProstField};
 use risingwave_pb::stream_plan::lookup_node::ArrangementTableId;
 use risingwave_pb::stream_plan::stream_node::NodeBody;
@@ -126,10 +125,7 @@ impl StreamFragmenter {
             )
             .map(|x| ColumnOrder {
                 order_type: x.order_type.to_prost() as i32,
-                input_ref: Some(InputRefExpr {
-                    column_idx: x.column_idx as i32,
-                }),
-                return_type: None,
+                index: x.column_idx as u32,
             })
             .collect();
 
@@ -161,7 +157,7 @@ impl StreamFragmenter {
                 node_body: Some(NodeBody::Arrange(ArrangeNode {
                     table_info: Some(arrangement_info),
                     table_id,
-                    distribution_keys: exchange_node.pk_indices.clone(),
+                    distribution_key: exchange_node.pk_indices.clone(),
                 })),
                 input: vec![exchange_node.clone()],
                 append_only: exchange_node.append_only,

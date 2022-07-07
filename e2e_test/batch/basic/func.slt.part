@@ -29,7 +29,7 @@ NULL
 NULL
 NULL
 
-query I
+query I rowsort
 select coalesce(v1,v2,v3) from t1;
 ----
 1
@@ -150,6 +150,41 @@ select char_length('abcdefghijklmnopqrstuvwxyz');
 26
 
 query I
+select length('hello world');
+----
+11
+
+query I
+select length('你好hhh');
+----
+5
+
+query I
+select octet_length('hello world');
+----
+11
+
+query I
+select octet_length('你好hhh');
+----
+9
+
+query I
+select bit_length('hello world') / octet_length('hello world');
+----
+8
+
+query I
+select bit_length('你好hhh') / octet_length('你好hhh');
+----
+8
+
+query I
+select ascii('abc');
+----
+97
+
+query I
 select repeat('hello', 3);
 ----
 hellohellohello
@@ -158,3 +193,74 @@ query I
 select repeat('hello', -1);
 ----
 (empty)
+
+query T
+select substr('hello', NULL);
+----
+NULL
+
+query T
+select substr(NULL, 1);
+----
+NULL
+
+query T
+select pg_typeof('123');
+----
+unknown
+
+query T
+select pg_typeof(round(null));
+----
+double precision
+
+query T
+select pg_typeof(row(true, 1, 'hello'));
+----
+record
+
+query T
+select pg_typeof(array[1, 2]);
+----
+integer[]
+
+# Note that PostgreSQL still displays `integer[]` in this case.
+query T
+select pg_typeof(array[array[1, 2], array[3, 4]]);
+----
+integer[][]
+
+query I
+select count(current_database());
+----
+1
+
+query T
+select regexp_match('abc', 'bc');
+----
+{bc}
+
+query T
+select regexp_match('abc', 'd');
+----
+NULL
+
+query T
+select regexp_match('foobarbequebaz', '(bar)(beque)');
+----
+{bar,beque}
+
+query T
+select regexp_match('foobarbequebaz', 'bar(beque)');
+----
+{beque}
+
+query T
+select regexp_match('foobarbequebaz', 'bar.*que');
+----
+{barbeque}
+
+query T
+select regexp_match('abc01234xyz', '(?:(.*?)(\d+)(.*)){1,1}');
+----
+{abc,01234,xyz}

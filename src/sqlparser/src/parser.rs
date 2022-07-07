@@ -393,6 +393,7 @@ impl Parser {
                 Keyword::EXISTS => self.parse_exists_expr(),
                 Keyword::EXTRACT => self.parse_extract_expr(),
                 Keyword::SUBSTRING => self.parse_substring_expr(),
+                Keyword::OVERLAY => self.parse_overlay_expr(),
                 Keyword::TRIM => self.parse_trim_expr(),
                 Keyword::INTERVAL => self.parse_literal_interval(),
                 Keyword::NOT => Ok(Expr::UnaryOp {
@@ -561,7 +562,7 @@ impl Parser {
     pub fn parse_function(&mut self, name: ObjectName) -> Result<Expr, ParserError> {
         self.expect_token(&Token::LParen)?;
         let distinct = self.parse_all_or_distinct()?;
-        let args = self.parse_optional_args()?;
+        let (args, order_by) = self.parse_optional_args()?;
         let over = if self.parse_keyword(Keyword::OVER) {
             // TBD: support window names (`OVER mywin`) in place of inline specification
             self.expect_token(&Token::LParen)?;
@@ -571,7 +572,7 @@ impl Parser {
             } else {
                 vec![]
             };
-            let order_by = if self.parse_keywords(&[Keyword::ORDER, Keyword::BY]) {
+            let order_by_window = if self.parse_keywords(&[Keyword::ORDER, Keyword::BY]) {
                 self.parse_comma_separated(Parser::parse_order_by_expr)?
             } else {
                 vec![]
@@ -586,9 +587,19 @@ impl Parser {
 
             Some(WindowSpec {
                 partition_by,
-                order_by,
+                order_by: order_by_window,
                 window_frame,
             })
+        } else {
+            None
+        };
+
+        let filter = if self.parse_keyword(Keyword::FILTER) {
+            self.expect_token(&Token::LParen)?;
+            self.expect_keyword(Keyword::WHERE)?;
+            let filter_expr = self.parse_expr()?;
+            self.expect_token(&Token::RParen)?;
+            Some(Box::new(filter_expr))
         } else {
             None
         };
@@ -598,6 +609,8 @@ impl Parser {
             args,
             over,
             distinct,
+            order_by,
+            filter,
         }))
     }
 
@@ -802,6 +815,33 @@ impl Parser {
             expr: Box::new(expr),
             substring_from: from_expr.map(Box::new),
             substring_for: to_expr.map(Box::new),
+        })
+    }
+
+    /// OVERLAY(<expr> PLACING <expr> FROM <expr> [ FOR <expr> ])
+    pub fn parse_overlay_expr(&mut self) -> Result<Expr, ParserError> {
+        self.expect_token(&Token::LParen)?;
+
+        let expr = self.parse_expr()?;
+
+        self.expect_keyword(Keyword::PLACING)?;
+        let new_substring = self.parse_expr()?;
+
+        self.expect_keyword(Keyword::FROM)?;
+        let start = self.parse_expr()?;
+
+        let mut count = None;
+        if self.parse_keyword(Keyword::FOR) {
+            count = Some(self.parse_expr()?);
+        }
+
+        self.expect_token(&Token::RParen)?;
+
+        Ok(Expr::Overlay {
+            expr: Box::new(expr),
+            new_substring: Box::new(new_substring),
+            start: Box::new(start),
+            count: count.map(Box::new),
         })
     }
 
@@ -2577,10 +2617,10 @@ impl Parser {
             })
         } else if variable.value == "TRANSACTION" && modifier.is_none() {
             if self.parse_keyword(Keyword::SNAPSHOT) {
-                let snaphot_id = self.parse_value()?;
+                let snapshot_id = self.parse_value()?;
                 return Ok(Statement::SetTransaction {
                     modes: vec![],
-                    snapshot: Some(snaphot_id),
+                    snapshot: Some(snapshot_id),
                     session: false,
                 });
             }
@@ -2780,11 +2820,17 @@ impl Parser {
         } else {
             let name = self.parse_object_name()?;
             // Postgres,table-valued functions:
-            let args = if self.consume_token(&Token::LParen) {
+            let (args, order_by) = if self.consume_token(&Token::LParen) {
                 self.parse_optional_args()?
             } else {
-                vec![]
+                (vec![], vec![])
             };
+
+            // Table-valued functions do not support ORDER BY, should return error if it appears
+            if !order_by.is_empty() {
+                return parser_err!("Table-valued functions do not support ORDER BY clauses");
+            }
+
             let alias = self.parse_optional_table_alias(keywords::RESERVED_FOR_TABLE_ALIAS)?;
             Ok(TableFactor::Table { name, alias, args })
         }
@@ -3050,13 +3096,20 @@ impl Parser {
         }
     }
 
-    pub fn parse_optional_args(&mut self) -> Result<Vec<FunctionArg>, ParserError> {
+    pub fn parse_optional_args(
+        &mut self,
+    ) -> Result<(Vec<FunctionArg>, Vec<OrderByExpr>), ParserError> {
         if self.consume_token(&Token::RParen) {
-            Ok(vec![])
+            Ok((vec![], vec![]))
         } else {
             let args = self.parse_comma_separated(Parser::parse_function_args)?;
+            let order_by = if self.parse_keywords(&[Keyword::ORDER, Keyword::BY]) {
+                self.parse_comma_separated(Parser::parse_order_by_expr)?
+            } else {
+                vec![]
+            };
             self.expect_token(&Token::RParen)?;
-            Ok(args)
+            Ok((args, order_by))
         }
     }
 

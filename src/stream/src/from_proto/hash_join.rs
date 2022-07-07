@@ -17,7 +17,7 @@ use std::sync::Arc;
 
 use risingwave_common::catalog::TableId;
 use risingwave_common::hash::{calc_hash_key_kind, HashKey, HashKeyDispatcher, HashKeyKind};
-use risingwave_expr::expr::{build_from_prost, RowExpression};
+use risingwave_expr::expr::{build_from_prost, BoxedExpression};
 use risingwave_pb::plan_common::JoinType as JoinTypeProto;
 
 use super::*;
@@ -66,7 +66,7 @@ impl ExecutorBuilder for HashJoinExecutorBuilder {
             .collect_vec();
 
         let condition = match node.get_condition() {
-            Ok(cond_prost) => Some(RowExpression::new(build_from_prost(cond_prost)?)),
+            Ok(cond_prost) => Some(build_from_prost(cond_prost)?),
             Err(_) => None,
         };
         trace!("Join non-equi condition: {:?}", condition);
@@ -121,8 +121,10 @@ impl ExecutorBuilder for HashJoinExecutorBuilder {
             executor_id: params.executor_id,
             cond: condition,
             op_info: params.op_info,
-            keyspace_l: Keyspace::table_root(store.clone(), &left_table_id),
-            keyspace_r: Keyspace::table_root(store, &right_table_id),
+            store_l: store.clone(),
+            left_table_id,
+            store_r: store,
+            right_table_id,
             is_append_only,
             actor_id: params.actor_id as u64,
             metrics: params.executor_stats,
@@ -144,10 +146,12 @@ struct HashJoinExecutorDispatcherArgs<S: StateStore> {
     pk_indices: PkIndices,
     output_indices: Vec<usize>,
     executor_id: u64,
-    cond: Option<RowExpression>,
+    cond: Option<BoxedExpression>,
     op_info: String,
-    keyspace_l: Keyspace<S>,
-    keyspace_r: Keyspace<S>,
+    store_l: S,
+    left_table_id: TableId,
+    store_r: S,
+    right_table_id: TableId,
     is_append_only: bool,
     actor_id: u64,
     metrics: Arc<StreamingMetrics>,
@@ -171,8 +175,10 @@ impl<S: StateStore, const T: JoinTypePrimitive> HashKeyDispatcher
             args.executor_id,
             args.cond,
             args.op_info,
-            args.keyspace_l,
-            args.keyspace_r,
+            args.store_l,
+            args.left_table_id,
+            args.store_r,
+            args.right_table_id,
             args.is_append_only,
             args.metrics,
         )))

@@ -27,9 +27,11 @@ use risingwave_common::catalog::{
 use risingwave_common::error::Result;
 use risingwave_pb::catalog::table::OptionalAssociatedSourceId;
 use risingwave_pb::catalog::{
-    Database as ProstDatabase, Schema as ProstSchema, Source as ProstSource, Table as ProstTable,
+    Database as ProstDatabase, Schema as ProstSchema, Sink as ProstSink, Source as ProstSource,
+    Table as ProstTable,
 };
 use risingwave_pb::common::ParallelUnitMapping;
+use risingwave_pb::meta::list_table_fragments_response::TableFragmentInfo;
 use risingwave_pb::stream_plan::StreamFragmentGraph;
 use risingwave_pb::user::{GrantPrivilege, UserInfo};
 use risingwave_rpc_client::error::Result as RpcResult;
@@ -200,6 +202,10 @@ impl CatalogWriter for MockCatalogWriter {
         self.create_source_inner(source).map(|_| ())
     }
 
+    async fn create_sink(&self, sink: ProstSink) -> Result<()> {
+        self.create_sink_inner(sink).map(|_| ())
+    }
+
     async fn drop_materialized_source(&self, source_id: u32, table_id: TableId) -> Result<()> {
         let (database_id, schema_id) = self.drop_table_or_source_id(source_id);
         self.drop_table_or_source_id(table_id.table_id);
@@ -225,6 +231,14 @@ impl CatalogWriter for MockCatalogWriter {
         self.catalog
             .write()
             .drop_source(database_id, schema_id, source_id);
+        Ok(())
+    }
+
+    async fn drop_sink(&self, sink_id: u32) -> Result<()> {
+        let (database_id, schema_id) = self.drop_table_or_sink_id(sink_id);
+        self.catalog
+            .write()
+            .drop_sink(database_id, schema_id, sink_id);
         Ok(())
     }
 
@@ -290,6 +304,21 @@ impl MockCatalogWriter {
         (self.get_database_id_by_schema(schema_id), schema_id)
     }
 
+    fn add_table_or_sink_id(&self, table_id: u32, schema_id: SchemaId, _database_id: DatabaseId) {
+        self.table_id_to_schema_id
+            .write()
+            .insert(table_id, schema_id);
+    }
+
+    fn drop_table_or_sink_id(&self, table_id: u32) -> (DatabaseId, SchemaId) {
+        let schema_id = self
+            .table_id_to_schema_id
+            .write()
+            .remove(&table_id)
+            .unwrap();
+        (self.get_database_id_by_schema(schema_id), schema_id)
+    }
+
     fn add_schema_id(&self, schema_id: u32, database_id: DatabaseId) {
         self.schema_id_to_database_id
             .write()
@@ -308,6 +337,13 @@ impl MockCatalogWriter {
         self.catalog.write().create_source(source.clone());
         self.add_table_or_source_id(source.id, source.schema_id, source.database_id);
         Ok(source.id)
+    }
+
+    fn create_sink_inner(&self, mut sink: ProstSink) -> Result<()> {
+        sink.id = self.gen_id();
+        self.catalog.write().create_sink(sink.clone());
+        self.add_table_or_sink_id(sink.id, sink.schema_id, sink.database_id);
+        Ok(())
     }
 
     fn get_database_id_by_schema(&self, schema_id: u32) -> DatabaseId {
@@ -342,6 +378,7 @@ impl UserInfoWriter for MockUserInfoWriter {
         users: Vec<UserName>,
         privileges: Vec<GrantPrivilege>,
         with_grant_option: bool,
+        _grantor: UserName,
     ) -> Result<()> {
         let privileges = privileges
             .into_iter()
@@ -366,7 +403,10 @@ impl UserInfoWriter for MockUserInfoWriter {
         &self,
         users: Vec<UserName>,
         privileges: Vec<GrantPrivilege>,
+        _granted_by: Option<UserName>,
+        _revoke_by: UserName,
         revoke_grant_option: bool,
+        _cascade: bool,
     ) -> Result<()> {
         for user_name in users {
             if let Some(u) = self.user_info.write().get_user_mut(&user_name) {
@@ -419,7 +459,11 @@ pub struct MockFrontendMetaClient {}
 
 #[async_trait::async_trait]
 impl FrontendMetaClient for MockFrontendMetaClient {
-    async fn pin_snapshot(&self, _epoch: u64) -> RpcResult<u64> {
+    async fn pin_snapshot(&self) -> RpcResult<u64> {
+        Ok(0)
+    }
+
+    async fn get_epoch(&self) -> RpcResult<u64> {
         Ok(0)
     }
 
@@ -427,7 +471,14 @@ impl FrontendMetaClient for MockFrontendMetaClient {
         Ok(())
     }
 
-    async fn unpin_snapshot(&self, _epoch: u64) -> RpcResult<()> {
+    async fn list_table_fragments(
+        &self,
+        _table_ids: &[u32],
+    ) -> RpcResult<HashMap<u32, TableFragmentInfo>> {
+        Ok(HashMap::default())
+    }
+
+    async fn unpin_snapshot(&self) -> RpcResult<()> {
         Ok(())
     }
 

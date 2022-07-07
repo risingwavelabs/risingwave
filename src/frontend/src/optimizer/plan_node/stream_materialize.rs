@@ -17,12 +17,9 @@ use std::fmt;
 
 use fixedbitset::FixedBitSet;
 use itertools::Itertools;
-use risingwave_common::catalog::{ColumnDesc, OrderedColumnDesc, TableId};
+use risingwave_common::catalog::{ColumnDesc, TableId};
 use risingwave_common::error::ErrorCode::InternalError;
 use risingwave_common::error::Result;
-use risingwave_common::util::sort_util::OrderType;
-use risingwave_pb::expr::InputRefExpr;
-use risingwave_pb::plan_common::ColumnOrder;
 use risingwave_pb::stream_plan::stream_node::NodeBody as ProstStreamNode;
 
 use super::{PlanRef, PlanTreeNodeUnary, ToStreamProst};
@@ -30,7 +27,7 @@ use crate::catalog::column_catalog::ColumnCatalog;
 use crate::catalog::table_catalog::TableCatalog;
 use crate::catalog::ColumnId;
 use crate::optimizer::plan_node::{PlanBase, PlanNode};
-use crate::optimizer::property::{Distribution, Order, RequiredDist};
+use crate::optimizer::property::{Direction, Distribution, FieldOrder, Order, RequiredDist};
 
 /// Materializes a stream.
 #[derive(Debug, Clone)]
@@ -131,14 +128,11 @@ impl StreamMaterialize {
             .collect_vec();
 
         let mut in_order = FixedBitSet::with_capacity(schema.len());
-        let mut order_desc = vec![];
+        let mut order_keys = vec![];
 
         for field in &user_order_by.field_order {
             let idx = field.index;
-            order_desc.push(OrderedColumnDesc {
-                column_desc: columns[idx].column_desc.clone(),
-                order: field.direct.into(),
-            });
+            order_keys.push(field.clone());
             in_order.insert(idx);
         }
 
@@ -146,9 +140,9 @@ impl StreamMaterialize {
             if in_order.contains(idx) {
                 continue;
             }
-            order_desc.push(OrderedColumnDesc {
-                column_desc: columns[idx].column_desc.clone(),
-                order: OrderType::Ascending,
+            order_keys.push(FieldOrder {
+                index: idx,
+                direct: Direction::Asc,
             });
             in_order.insert(idx);
         }
@@ -158,10 +152,10 @@ impl StreamMaterialize {
             associated_source_id: None,
             name: mv_name,
             columns,
-            order_desc,
-            pks: pk_indices.clone(),
+            order_key: order_keys,
+            pk: pk_indices.clone(),
             is_index_on,
-            distribution_keys: base.dist.dist_column_indices().to_vec(),
+            distribution_key: base.dist.dist_column_indices().to_vec(),
             appendonly: input.append_only(),
             owner: risingwave_common::catalog::DEFAULT_SUPPER_USER.to_string(),
             vnode_mapping: None,
@@ -183,6 +177,7 @@ impl StreamMaterialize {
 
     /// XXX(st1page): this function is used for potential DDL demand in future, and please try your
     /// best not convert `ColumnId` to `usize(col_index`)
+    #[expect(dead_code)]
     fn col_id_to_idx(&self, id: ColumnId) -> usize {
         id.get_id() as usize
     }
@@ -199,15 +194,15 @@ impl fmt::Display for StreamMaterialize {
             .join(", ");
 
         let pk_column_names = table
-            .pks
+            .pk
             .iter()
             .map(|&pk| &table.columns[pk].column_desc.name)
             .join(", ");
 
         let order_descs = table
-            .order_desc
+            .order_key
             .iter()
-            .map(|order| &order.column_desc.name)
+            .map(|order| table.columns()[order.index].column_desc.name.clone())
             .join(", ");
 
         let mut builder = f.debug_struct("StreamMaterialize");
@@ -254,20 +249,11 @@ impl ToStreamProst for StreamMaterialize {
                 .collect(),
             column_orders: self
                 .table()
-                .order_desc()
+                .order_key()
                 .iter()
-                .map(|col| {
-                    let idx = self.col_id_to_idx(col.column_desc.column_id);
-                    ColumnOrder {
-                        order_type: col.order.to_prost() as i32,
-                        input_ref: Some(InputRefExpr {
-                            column_idx: idx as i32,
-                        }),
-                        return_type: Some(col.column_desc.data_type.to_protobuf()),
-                    }
-                })
+                .map(FieldOrder::to_protobuf)
                 .collect(),
-            distribution_keys: self
+            distribution_key: self
                 .base
                 .dist
                 .dist_column_indices()

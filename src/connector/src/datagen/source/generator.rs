@@ -15,11 +15,11 @@ use std::collections::HashMap;
 
 use anyhow::Result;
 use bytes::Bytes;
+use risingwave_common::field_generator::FieldGeneratorImpl;
 use serde_json::{Map, Value};
 use tokio::time::{sleep, Duration, Instant};
 
-use super::field_generator::FieldGeneratorImpl;
-use super::DEFUALT_DATAGEN_INTERVAL;
+use super::DEFAULT_DATAGEN_INTERVAL;
 use crate::SourceMessage;
 
 pub struct DatagenEventGenerator {
@@ -59,7 +59,7 @@ impl DatagenEventGenerator {
         let mut generated_count: u64 = 0;
         // if generating data time beyond 1s then just return the result
         for i in 0..self.partition_size {
-            if now.elapsed().as_millis() >= DEFUALT_DATAGEN_INTERVAL {
+            if now.elapsed().as_millis() >= DEFAULT_DATAGEN_INTERVAL {
                 break;
             }
             let offset = self.events_so_far + i;
@@ -82,9 +82,9 @@ impl DatagenEventGenerator {
         self.events_so_far += generated_count;
 
         // if left time < 1s then wait
-        if now.elapsed().as_millis() < DEFUALT_DATAGEN_INTERVAL {
+        if now.elapsed().as_millis() < DEFAULT_DATAGEN_INTERVAL {
             sleep(Duration::from_millis(
-                (DEFUALT_DATAGEN_INTERVAL - now.elapsed().as_millis()) as u64,
+                (DEFAULT_DATAGEN_INTERVAL - now.elapsed().as_millis()) as u64,
             ))
             .await;
         }

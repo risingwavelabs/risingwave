@@ -2,7 +2,7 @@
 
 ## Background
 
-The query engine of RisingWave supports two types of queries: highly concurrent point queries and ad-hoc queries. The characteristics of these two different kinds of queries are summarized as followings:
+The query engine of RisingWave supports two types of queries: highly concurrent point queries and ad-hoc queries. The characteristics of these two different kinds of queries are summarized as follows:
 
 | 	              | Point Queries	 | Adhoc Queries	        |
 |----------------|----------------|-----------------------|
@@ -12,7 +12,7 @@ The query engine of RisingWave supports two types of queries: highly concurrent 
 | Result Set	    | Small	         | Small, Medium, Large	 |
 | Use Scenarios	 | Dashboard	     | Adhoc analysis	       |
 
-Our distributed query processing engine is designed for complex adhoc queries, and it can’t meet the latency/qps 
+Our distributed query processing engine is designed for complex adhoc queries, and it can’t meet the latency/QPS 
 requirement of point queries, and in this article we introduce local execution mode for point queries.
 
 ## Design

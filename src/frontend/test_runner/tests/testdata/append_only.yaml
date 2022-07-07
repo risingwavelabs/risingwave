@@ -4,7 +4,7 @@
     select v1, max(v2) as mx2 from t1 group by v1;
   stream_plan: |
     StreamMaterialize { columns: [v1, agg#0(hidden), mx2], pk_columns: [v1] }
-      StreamAppendOnlyHashAgg { group_keys: [$0], aggs: [count, max($1)] }
+      StreamAppendOnlyHashAgg { group_key: [$0], aggs: [count, max($1)] }
         StreamExchange { dist: HashShard([0]) }
           StreamTableScan { table: t1, columns: [v1, v2, _row_id], pk_indices: [2] }
 - sql: |
@@ -32,6 +32,6 @@
     select max(v1) as max_v1 from t1;
   stream_plan: |
     StreamMaterialize { columns: [agg#0(hidden), max_v1], pk_columns: [] }
-      StreamAppendOnlySimpleAgg { aggs: [count, max($0)] }
+      StreamAppendOnlyGlobalSimpleAgg { aggs: [count, max($0)] }
         StreamExchange { dist: Single }
           StreamTableScan { table: t1, columns: [v1, _row_id], pk_indices: [1] }

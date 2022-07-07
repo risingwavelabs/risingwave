@@ -207,6 +207,7 @@ pub use predicate_pushdown::*;
 
 mod batch_delete;
 mod batch_exchange;
+mod batch_expand;
 mod batch_filter;
 mod batch_hash_agg;
 mod batch_hash_join;
@@ -225,6 +226,7 @@ mod batch_values;
 mod logical_agg;
 mod logical_apply;
 mod logical_delete;
+mod logical_expand;
 mod logical_filter;
 mod logical_hop_window;
 mod logical_insert;
@@ -239,8 +241,11 @@ mod logical_topn;
 mod logical_update;
 mod logical_values;
 mod stream_delta_join;
+mod stream_dynamic_filter;
 mod stream_exchange;
+mod stream_expand;
 mod stream_filter;
+mod stream_global_simple_agg;
 mod stream_hash_agg;
 mod stream_hash_join;
 mod stream_hop_window;
@@ -248,13 +253,15 @@ mod stream_index_scan;
 mod stream_local_simple_agg;
 mod stream_materialize;
 mod stream_project;
-mod stream_simple_agg;
 mod stream_source;
 mod stream_table_scan;
 mod stream_topn;
 
+mod utils;
+
 pub use batch_delete::BatchDelete;
 pub use batch_exchange::BatchExchange;
+pub use batch_expand::BatchExpand;
 pub use batch_filter::BatchFilter;
 pub use batch_hash_agg::BatchHashAgg;
 pub use batch_hash_join::BatchHashJoin;
@@ -273,13 +280,14 @@ pub use batch_values::BatchValues;
 pub use logical_agg::{LogicalAgg, PlanAggCall};
 pub use logical_apply::LogicalApply;
 pub use logical_delete::LogicalDelete;
+pub use logical_expand::LogicalExpand;
 pub use logical_filter::LogicalFilter;
 pub use logical_hop_window::LogicalHopWindow;
 pub use logical_insert::LogicalInsert;
 pub use logical_join::LogicalJoin;
 pub use logical_limit::LogicalLimit;
 pub use logical_multi_join::{LogicalMultiJoin, LogicalMultiJoinBuilder};
-pub use logical_project::LogicalProject;
+pub use logical_project::{LogicalProject, LogicalProjectBuilder};
 pub use logical_scan::LogicalScan;
 pub use logical_source::LogicalSource;
 pub use logical_table_function::LogicalTableFunction;
@@ -287,8 +295,11 @@ pub use logical_topn::LogicalTopN;
 pub use logical_update::LogicalUpdate;
 pub use logical_values::LogicalValues;
 pub use stream_delta_join::StreamDeltaJoin;
+pub use stream_dynamic_filter::StreamDynamicFilter;
 pub use stream_exchange::StreamExchange;
+pub use stream_expand::StreamExpand;
 pub use stream_filter::StreamFilter;
+pub use stream_global_simple_agg::StreamGlobalSimpleAgg;
 pub use stream_hash_agg::StreamHashAgg;
 pub use stream_hash_join::StreamHashJoin;
 pub use stream_hop_window::StreamHopWindow;
@@ -296,7 +307,6 @@ pub use stream_index_scan::StreamIndexScan;
 pub use stream_local_simple_agg::StreamLocalSimpleAgg;
 pub use stream_materialize::StreamMaterialize;
 pub use stream_project::StreamProject;
-pub use stream_simple_agg::StreamSimpleAgg;
 pub use stream_source::StreamSource;
 pub use stream_table_scan::StreamTableScan;
 pub use stream_topn::StreamTopN;
@@ -336,6 +346,7 @@ macro_rules! for_all_plan_nodes {
             , { Logical, HopWindow }
             , { Logical, TableFunction }
             , { Logical, MultiJoin }
+            , { Logical, Expand }
             // , { Logical, Sort } we don't need a LogicalSort, just require the Order
             , { Batch, SimpleAgg }
             , { Batch, HashAgg }
@@ -354,6 +365,7 @@ macro_rules! for_all_plan_nodes {
             , { Batch, TopN }
             , { Batch, HopWindow }
             , { Batch, TableFunction }
+            , { Batch, Expand }
             , { Stream, Project }
             , { Stream, Filter }
             , { Stream, TableScan }
@@ -362,12 +374,14 @@ macro_rules! for_all_plan_nodes {
             , { Stream, Exchange }
             , { Stream, HashAgg }
             , { Stream, LocalSimpleAgg }
-            , { Stream, SimpleAgg }
+            , { Stream, GlobalSimpleAgg }
             , { Stream, Materialize }
             , { Stream, TopN }
             , { Stream, HopWindow }
             , { Stream, DeltaJoin }
             , { Stream, IndexScan }
+            , { Stream, Expand }
+            , { Stream, DynamicFilter }
         }
     };
 }
@@ -394,8 +408,9 @@ macro_rules! for_logical_plan_nodes {
             , { Logical, HopWindow }
             , { Logical, TableFunction }
             , { Logical, MultiJoin }
+            , { Logical, Expand }
             // , { Logical, Sort} not sure if we will support Order by clause in subquery/view/MV
-            // if we dont support thatk, we don't need LogicalSort, just require the Order at the top of query
+            // if we dont support that, we don't need LogicalSort, just require the Order at the top of query
         }
     };
 }
@@ -423,6 +438,7 @@ macro_rules! for_batch_plan_nodes {
             , { Batch, Update }
             , { Batch, HopWindow }
             , { Batch, TableFunction }
+            , { Batch, Expand }
         }
     };
 }
@@ -441,12 +457,14 @@ macro_rules! for_stream_plan_nodes {
             , { Stream, Source }
             , { Stream, HashAgg }
             , { Stream, LocalSimpleAgg }
-            , { Stream, SimpleAgg }
+            , { Stream, GlobalSimpleAgg }
             , { Stream, Materialize }
             , { Stream, TopN }
             , { Stream, HopWindow }
             , { Stream, DeltaJoin }
             , { Stream, IndexScan }
+            , { Stream, Expand }
+            , { Stream, DynamicFilter }
         }
     };
 }

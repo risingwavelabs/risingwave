@@ -15,7 +15,6 @@
 use std::cmp::{Ord, Ordering};
 use std::sync::Arc;
 
-use risingwave_pb::expr::InputRefExpr;
 use risingwave_pb::plan_common::{ColumnOrder, OrderType as ProstOrderType};
 
 use crate::array::{Array, ArrayImpl, DataChunk};
@@ -63,10 +62,16 @@ impl OrderPair {
 
     pub fn from_prost(column_order: &ColumnOrder) -> Self {
         let order_type: ProstOrderType = ProstOrderType::from_i32(column_order.order_type).unwrap();
-        let input_ref: &InputRefExpr = column_order.get_input_ref().unwrap();
         OrderPair {
             order_type: OrderType::from_prost(&order_type),
-            column_idx: input_ref.column_idx as usize,
+            column_idx: column_order.index as usize,
+        }
+    }
+
+    pub fn to_protobuf(&self) -> ColumnOrder {
+        ColumnOrder {
+            order_type: self.order_type.to_prost() as i32,
+            index: self.column_idx as u32,
         }
     }
 }

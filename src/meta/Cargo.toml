@@ -1,6 +1,6 @@
 [package]
 name = "risingwave_meta"
-version = "0.1.9"
+version = "0.1.10"
 edition = "2021"
 
 [dependencies]
@@ -39,6 +39,7 @@ risingwave_connector = { path = "../connector" }
 risingwave_hummock_sdk = { path = "../storage/hummock_sdk" }
 risingwave_pb = { path = "../prost" }
 risingwave_rpc_client = { path = "../rpc_client" }
+scopeguard = "1"
 serde = { version = "1", features = ["derive"] }
 serde_derive = "1"
 serde_json = "1"
@@ -65,6 +66,7 @@ workspace-hack = { version = "0.1", path = "../workspace-hack" }
 assert_matches = "1"
 rand = "0.8"
 risingwave_test_runner = { path = "../test_runner" }
+static_assertions = "1"
 tempfile = "3"
 
 [target.'cfg(not(madsim))'.dev-dependencies]
