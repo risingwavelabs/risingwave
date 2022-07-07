@@ -78,7 +78,7 @@ We know that [Hummock](./state-store-overview.md#overview), our LSM-Tree-based s
 ```
 table_id | vnode | ...
 ```
-where `table_id` denotes the [state table](./storing-state-using-relational-table.md#relational-table-layer), and `vnode` is computed via $H$ on key of the data. 
+where `table_id` denotes the [state table](relational_table/storing-state-using-relational-table.md#relational-table-layer), and `vnode` is computed via $H$ on key of the data. 
 
 To illustrate this, let's revisit the [previous example](#streaming). Executors of an operator will share the same logical state table, just as is shown in the figure below:
 
