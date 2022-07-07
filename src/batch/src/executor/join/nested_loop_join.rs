@@ -13,16 +13,13 @@
 // limitations under the License.
 
 use std::option::Option::Some;
-use std::sync::Arc;
 
 use futures_async_stream::try_stream;
 use itertools::Itertools;
-use risingwave_common::array::column::Column;
-use risingwave_common::array::data_chunk_iter::RowRef;
-use risingwave_common::array::{Array, DataChunk, Row, Vis};
+use risingwave_common::array::{Array, DataChunk, Row};
 use risingwave_common::catalog::Schema;
 use risingwave_common::error::{Result, RwError};
-use risingwave_common::types::{DataType, DatumRef};
+use risingwave_common::types::DataType;
 use risingwave_common::util::chunk_coalesce::{DataChunkBuilder, SlicedDataChunk};
 use risingwave_expr::expr::{build_from_prost as expr_build_from_prost, BoxedExpression};
 use risingwave_pb::batch_plan::plan_node::NodeBody;
@@ -30,7 +27,9 @@ use risingwave_pb::batch_plan::plan_node::NodeBody;
 use crate::error::BatchError;
 use crate::executor::join::chunked_data::RowId;
 use crate::executor::join::row_level_iter::RowLevelIter;
-use crate::executor::join::JoinType;
+use crate::executor::join::{
+    concatenate, convert_datum_refs_to_chunk, convert_row_to_chunk, JoinType,
+};
 use crate::executor::{
     BoxedDataChunkStream, BoxedExecutor, BoxedExecutorBuilder, Executor, ExecutorBuilder,
 };
@@ -149,45 +148,6 @@ impl NestedLoopJoinExecutor {
                 }
             }
         }
-    }
-}
-
-impl NestedLoopJoinExecutor {
-    /// Create constant data chunk (one tuple repeat `num_tuples` times).
-    fn convert_datum_refs_to_chunk(
-        &self,
-        datum_refs: &[DatumRef<'_>],
-        num_tuples: usize,
-        data_types: &[DataType],
-    ) -> Result<DataChunk> {
-        let mut output_array_builders: Vec<_> = data_types
-            .iter()
-            .map(|data_type| data_type.create_array_builder(num_tuples))
-            .collect();
-        for _i in 0..num_tuples {
-            for (builder, datum_ref) in output_array_builders.iter_mut().zip_eq(datum_refs) {
-                builder.append_datum_ref(*datum_ref)?;
-            }
-        }
-
-        // Finish each array builder and get Column.
-        let result_columns = output_array_builders
-            .into_iter()
-            .map(|builder| builder.finish().map(|arr| Column::new(Arc::new(arr))))
-            .try_collect()?;
-
-        Ok(DataChunk::new(result_columns, num_tuples))
-    }
-
-    /// Create constant data chunk (one tuple repeat `num_tuples` times).
-    fn convert_row_to_chunk(
-        &self,
-        row_ref: &RowRef<'_>,
-        num_tuples: usize,
-        data_types: &[DataType],
-    ) -> Result<DataChunk> {
-        let datum_refs = row_ref.values().collect_vec();
-        self.convert_datum_refs_to_chunk(&datum_refs, num_tuples, data_types)
     }
 }
 
@@ -376,12 +336,12 @@ impl NestedLoopJoinExecutor {
         if let Some(build_side_chunk) = self.build_table.get_current_chunk() {
             // Checked the option before, so impossible to panic.
             let probe_row = self.probe_side_source.get_current_row_ref().unwrap();
-            let const_row_chunk = self.convert_row_to_chunk(
+            let const_row_chunk = convert_row_to_chunk(
                 &probe_row,
                 build_side_chunk.capacity(),
                 &self.probe_side_schema,
             )?;
-            let new_chunk = Self::concatenate(&const_row_chunk, build_side_chunk)?;
+            let new_chunk = concatenate(&const_row_chunk, build_side_chunk)?;
             // Join with current row.
             let sel_vector = self.join_expr.eval(&new_chunk)?;
             let ret_chunk = new_chunk.with_visibility(sel_vector.as_bool().iter().collect());
@@ -420,7 +380,7 @@ impl NestedLoopJoinExecutor {
                 probe_datum_refs.push(None);
             }
             let one_row_chunk =
-                self.convert_datum_refs_to_chunk(&probe_datum_refs, 1, &self.schema.data_types())?;
+                convert_datum_refs_to_chunk(&probe_datum_refs, 1, &self.schema.data_types())?;
             return Ok(ProbeResult {
                 cur_row_finished: true,
                 chunk: Some(one_row_chunk),
@@ -441,8 +401,7 @@ impl NestedLoopJoinExecutor {
         // find any match.
         if self.probe_side_source.get_cur_row_matched() {
             let probe_row = self.probe_side_source.get_current_row_ref().unwrap();
-            let one_row_chunk =
-                self.convert_row_to_chunk(&probe_row, 1, &self.probe_side_schema)?;
+            let one_row_chunk = convert_row_to_chunk(&probe_row, 1, &self.probe_side_schema)?;
             return Ok(ProbeResult {
                 cur_row_finished: true,
                 chunk: Some(one_row_chunk),
@@ -462,8 +421,7 @@ impl NestedLoopJoinExecutor {
         if ret.cur_row_finished && !self.probe_side_source.get_cur_row_matched() {
             assert!(ret.chunk.is_none());
             let probe_row = self.probe_side_source.get_current_row_ref().unwrap();
-            let one_row_chunk =
-                self.convert_row_to_chunk(&probe_row, 1, &self.probe_side_schema)?;
+            let one_row_chunk = convert_row_to_chunk(&probe_row, 1, &self.probe_side_schema)?;
             return Ok(ProbeResult {
                 cur_row_finished: true,
                 chunk: Some(one_row_chunk),
@@ -561,49 +519,12 @@ impl NestedLoopJoinExecutor {
         }
         Ok(None)
     }
-
-    /// The layout be like:
-    ///
-    /// [ `left` chunk     |  `right` chunk     ]
-    ///
-    /// # Arguments
-    ///
-    /// * `left` Data chunk padded to the left half of result data chunk..
-    /// * `right` Data chunk padded to the right half of result data chunk.
-    ///
-    /// Note: Use this function with careful: It is not designed to be a general concatenate of two
-    /// chunk: Usually one side should be const row chunk and the other side is normal chunk.
-    /// Currently only feasible to use in join executor.
-    /// If two normal chunk, the result is undefined.
-    fn concatenate(left: &DataChunk, right: &DataChunk) -> Result<DataChunk> {
-        assert_eq!(left.capacity(), right.capacity());
-        let mut concated_columns = Vec::with_capacity(left.columns().len() + right.columns().len());
-        concated_columns.extend_from_slice(left.columns());
-        concated_columns.extend_from_slice(right.columns());
-        // Only handle one side is constant row chunk: One of visibility must be None.
-        let vis = match (left.vis(), right.vis()) {
-            (Vis::Compact(_), _) => right.vis().clone(),
-            (_, Vis::Compact(_)) => left.vis().clone(),
-            (Vis::Bitmap(_), Vis::Bitmap(_)) => {
-                return Err(BatchError::UnsupportedFunction(
-                    "The concatenate behaviour of two chunk with visibility is undefined"
-                        .to_string(),
-                )
-                .into())
-            }
-        };
-        let data_chunk = DataChunk::new(concated_columns, vis);
-        Ok(data_chunk)
-    }
 }
 #[cfg(test)]
 mod tests {
-    use std::sync::Arc;
-
-    use risingwave_common::array::column::Column;
     use risingwave_common::array::*;
     use risingwave_common::catalog::{Field, Schema};
-    use risingwave_common::types::{DataType, ScalarRefImpl};
+    use risingwave_common::types::DataType;
     use risingwave_common::util::chunk_coalesce::DataChunkBuilder;
     use risingwave_expr::expr::expr_binary_nonnull::new_binary_expr;
     use risingwave_expr::expr::InputRefExpression;
@@ -613,71 +534,6 @@ mod tests {
     use crate::executor::join::JoinType;
     use crate::executor::test_utils::{diff_executor_output, MockExecutor};
     use crate::executor::BoxedExecutor;
-
-    /// Test combine two chunk into one.
-    #[test]
-    fn test_concatenate() {
-        let num_of_columns: usize = 2;
-        let length = 5;
-        let mut columns = vec![];
-        for i in 0..num_of_columns {
-            let mut builder = PrimitiveArrayBuilder::<i32>::new(length);
-            for _ in 0..length {
-                builder.append(Some(i as i32)).unwrap();
-            }
-            let arr = builder.finish().unwrap();
-            columns.push(Column::new(Arc::new(arr.into())))
-        }
-        let chunk1: DataChunk = DataChunk::new(columns.clone(), length);
-        let bool_vec = vec![true, false, true, false, false];
-        let chunk2: DataChunk = DataChunk::new(
-            columns.clone(),
-            Vis::Bitmap((bool_vec.clone()).into_iter().collect()),
-        );
-        let chunk = NestedLoopJoinExecutor::concatenate(&chunk1, &chunk2).unwrap();
-        assert_eq!(chunk.capacity(), chunk1.capacity());
-        assert_eq!(chunk.capacity(), chunk2.capacity());
-        assert_eq!(chunk.columns().len(), chunk1.columns().len() * 2);
-        assert_eq!(
-            chunk.visibility().cloned().unwrap(),
-            (bool_vec).into_iter().collect()
-        );
-    }
-
-    /// Test the function of convert row into constant row chunk (one row repeat multiple times).
-    #[test]
-    fn test_convert_row_to_chunk() {
-        let row = vec![Some(ScalarRefImpl::Int32(3))];
-        let probe_side_schema = Schema {
-            fields: vec![Field::unnamed(DataType::Int32)],
-        };
-        let probe_source = Box::new(MockExecutor::new(probe_side_schema.clone()));
-        let build_source = Box::new(MockExecutor::new(probe_side_schema.clone()));
-        // Note that only probe side schema of this executor is meaningful. All other fields are
-        // meaningless. They are just used to pass Rust checker.
-        let source = NestedLoopJoinExecutor {
-            join_expr: Box::new(InputRefExpression::new(DataType::Int32, 0)),
-            join_type: JoinType::Inner,
-            chunk_builder: DataChunkBuilder::with_default_size(probe_side_schema.data_types()),
-            schema: Schema { fields: vec![] },
-            last_chunk: None,
-            probe_side_schema: probe_side_schema.data_types(),
-            probe_side_source: RowLevelIter::new(probe_source),
-            build_table: RowLevelIter::new(build_source),
-            probe_remain_chunk_idx: 0,
-            probe_remain_row_idx: 0,
-            identity: "NestedLoopJoinExecutor2".to_string(),
-            output_indices: vec![0, 1],
-        };
-        let const_row_chunk = source
-            .convert_datum_refs_to_chunk(&row, 5, &probe_side_schema.data_types())
-            .unwrap();
-        assert_eq!(const_row_chunk.capacity(), 5);
-        assert_eq!(
-            const_row_chunk.row_at(2).unwrap().0.value_at(0),
-            Some(ScalarRefImpl::Int32(3))
-        );
-    }
 
     struct TestFixture {
         left_types: Vec<DataType>,
