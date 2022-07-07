@@ -12,19 +12,14 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-
-
 use risingwave_common::error::{internal_error, Result};
-
 use risingwave_common::types::DataType;
 use risingwave_expr::expr::expr_binary_nonnull::new_binary_expr;
-use risingwave_expr::expr::{InputRefExpression};
-
+use risingwave_expr::expr::InputRefExpression;
 use risingwave_pb::expr::expr_node::Type::*;
 
 use super::*;
-
-use crate::executor::{DynamicFilterExecutor};
+use crate::executor::DynamicFilterExecutor;
 
 pub struct DynamicFilterExecutorBuilder;
 

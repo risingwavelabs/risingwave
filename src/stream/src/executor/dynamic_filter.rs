@@ -13,6 +13,7 @@
 // limitations under the License.
 
 use std::collections::BTreeMap;
+use std::ops::Bound;
 use std::ops::Bound::*;
 use std::sync::Arc;
 
@@ -21,10 +22,11 @@ use futures::StreamExt;
 use futures_async_stream::try_stream;
 use itertools::Itertools;
 use madsim::collections::HashSet;
-use risingwave_common::array::{Op, Row, StreamChunk};
-use risingwave_common::buffer::BitmapBuilder;
+use risingwave_common::array::column::Column;
+use risingwave_common::array::{Array, ArrayImpl, DataChunk, Op, Row, StreamChunk, Vis};
+use risingwave_common::buffer::{Bitmap, BitmapBuilder};
 use risingwave_common::catalog::Schema;
-use risingwave_common::types::{Datum, ScalarImpl, ToOwnedDatum};
+use risingwave_common::types::{DataType, Datum, ScalarImpl, ToOwnedDatum};
 use risingwave_expr::expr::BoxedExpression;
 use risingwave_pb::expr::expr_node::Type as ExprNodeType;
 use risingwave_pb::expr::expr_node::Type::*;
@@ -37,8 +39,8 @@ use crate::common::StreamChunkBuilder;
 use crate::executor::PROCESSING_WINDOW_SIZE;
 
 pub struct DynamicFilterExecutor {
-    source_l: BoxedExecutor,
-    source_r: BoxedExecutor,
+    source_l: Option<BoxedExecutor>,
+    source_r: Option<BoxedExecutor>,
     key_l: usize,
     pk_indices: PkIndices,
     identity: String,
@@ -64,8 +66,8 @@ impl DynamicFilterExecutor {
     ) -> Self {
         let schema = source_l.schema().clone();
         Self {
-            source_l,
-            source_r,
+            source_l: Some(source_l),
+            source_r: Some(source_r),
             key_l,
             pk_indices,
             identity: format!("DynamicFilterExecutor {:X}", executor_id),
@@ -77,8 +79,170 @@ impl DynamicFilterExecutor {
         }
     }
 
+    fn apply_batch(
+        &self,
+        data_chunk: &DataChunk,
+        ops: Vec<Op>,
+        prev_epoch_value: &Option<ScalarImpl>,
+        right_data_type: &DataType,
+        state: &mut BTreeMap<ScalarImpl, HashSet<Row>>,
+    ) -> Result<(Vec<Op>, Bitmap), StreamExecutorError> {
+        debug_assert_eq!(ops.len(), data_chunk.cardinality());
+        let mut new_ops = Vec::with_capacity(ops.len());
+        let mut new_visibility = BitmapBuilder::with_capacity(ops.len());
+        let mut last_res = false;
+
+        let left_column = data_chunk.column_at(self.key_l);
+
+        let eval_results = if let Some(right_val) = &prev_epoch_value {
+            let mut eval_columns = Vec::with_capacity(2);
+            eval_columns.push(left_column.clone());
+
+            // TODO: could optimize this - creating a repeated array could be much cheaper.
+            let mut array_builder = right_data_type.create_array_builder(ops.len());
+            for _ in 0..ops.len() {
+                array_builder.append_datum(&Some(right_val.clone()))?;
+            }
+            let right_column = Column::new(Arc::new(array_builder.finish()?));
+            eval_columns.push(right_column);
+            let eval_data_chunk = DataChunk::new(eval_columns, Vis::Compact(ops.len()));
+            Some(self.cond.eval(&eval_data_chunk)?)
+        } else {
+            None
+        };
+
+        for (idx, (row, op)) in data_chunk.rows().zip_eq(ops.iter()).enumerate() {
+            // TODO: convert this to a batch operation?
+            let left_val = row.value_at(self.key_l).to_owned_datum();
+
+            // Evaluate the condition and determine if it should be forwarded
+            if let Some(array) = &eval_results {
+                if let ArrayImpl::Bool(results) = &**array {
+                    let res = results.value_at(idx).unwrap_or(false);
+
+                    match *op {
+                        Op::Insert | Op::Delete => {
+                            new_ops.push(*op);
+                            if res {
+                                new_visibility.append(true);
+                            } else {
+                                new_visibility.append(false);
+                            }
+                        }
+                        Op::UpdateDelete => {
+                            last_res = res;
+                        }
+                        Op::UpdateInsert => match (last_res, res) {
+                            (true, false) => {
+                                new_ops.push(Op::Delete);
+                                new_ops.push(Op::UpdateInsert);
+                                new_visibility.append(true);
+                                new_visibility.append(false);
+                            }
+                            (false, true) => {
+                                new_ops.push(Op::UpdateDelete);
+                                new_ops.push(Op::Insert);
+                                new_visibility.append(false);
+                                new_visibility.append(true);
+                            }
+                            (true, true) => {
+                                new_ops.push(Op::UpdateDelete);
+                                new_ops.push(Op::UpdateInsert);
+                                new_visibility.append(true);
+                                new_visibility.append(true);
+                            }
+                            (false, false) => {
+                                new_ops.push(Op::UpdateDelete);
+                                new_ops.push(Op::UpdateInsert);
+                                new_visibility.append(false);
+                                new_visibility.append(false);
+                            }
+                        },
+                    }
+
+                    // Store the rows without a null left key
+                    // null key in left side of predicate should never be stored
+                    // (it will never satisfy the filter condition)
+                    if let Some(val) = left_val {
+                        match *op {
+                            Op::Insert | Op::UpdateInsert => {
+                                let entry = state.entry(val).or_insert_with(HashSet::new);
+                                entry.insert(row.to_owned_row());
+                            }
+                            Op::Delete | Op::UpdateDelete => {
+                                let contains_element = state
+                                    .get_mut(&val)
+                                    .ok_or_else(|| {
+                                        StreamExecutorError::from(anyhow!(
+                                            "Deleting non-existent element"
+                                        ))
+                                    })?
+                                    .remove(&row.to_owned_row());
+
+                                if !contains_element {
+                                    return Err(StreamExecutorError::from(anyhow!(
+                                        "Deleting non-existent element"
+                                    )));
+                                };
+                            }
+                        }
+                    }
+                }
+            } else {
+                panic!("condition eval must return bool array")
+            }
+        }
+
+        let new_visibility = new_visibility.finish();
+
+        Ok((new_ops, new_visibility))
+    }
+
+    fn get_range(
+        &self,
+        curr: &Datum,
+        prev: Datum,
+    ) -> ((Bound<ScalarImpl>, Bound<ScalarImpl>), bool) {
+        debug_assert_ne!(curr, &prev);
+        let curr_is_some = curr.is_some();
+        match (curr.clone(), prev) {
+            (Some(c), None) | (None, Some(c)) => {
+                let range = match self.comparator {
+                    GreaterThan => (Excluded(c), Unbounded),
+                    GreaterThanOrEqual => (Included(c), Unbounded),
+                    LessThan => (Unbounded, Excluded(c)),
+                    LessThanOrEqual => (Unbounded, Included(c)),
+                    _ => unreachable!(),
+                };
+                let is_insert = curr_is_some;
+                (range, is_insert)
+            }
+            (Some(c), Some(p)) => {
+                if c < p {
+                    let range = match self.comparator {
+                        GreaterThan | LessThan => (Excluded(c), Excluded(p)),
+                        GreaterThanOrEqual | LessThanOrEqual => (Included(c), Included(p)),
+                        _ => unreachable!(),
+                    };
+                    let is_insert = matches!(self.comparator, GreaterThan | GreaterThanOrEqual);
+                    (range, is_insert)
+                } else {
+                    // p > c
+                    let range = match self.comparator {
+                        GreaterThan | LessThan => (Excluded(p), Excluded(c)),
+                        GreaterThanOrEqual | LessThanOrEqual => (Included(p), Included(c)),
+                        _ => unreachable!(),
+                    };
+                    let is_insert = matches!(self.comparator, LessThan | LessThanOrEqual);
+                    (range, is_insert)
+                }
+            }
+            (None, None) => unreachable!(), // prev != curr
+        }
+    }
+
     #[try_stream(ok = Message, error = StreamExecutorError)]
-    async fn into_stream(self) {
+    async fn into_stream(mut self) {
         let mut prev_epoch_value: Option<Datum> = None;
         let mut current_epoch_value: Option<Datum> = None;
 
@@ -87,20 +251,18 @@ impl DynamicFilterExecutor {
         // TODO: convert this into a `StateTable` compatible managed state
         //
         // TODO: It could be potentially expensive memory-wise to store `HashSet`.
-        //       If I'm not wrong, the memory overhead is a backing Vec of size 4
+        //       The memory overhead per single row is potentially a backing Vec of size 4
         //       (See: https://github.com/rust-lang/hashbrown/pull/162)
         //       + some byte-per-entry metadata. Well, `Row` is on heap anyway...
+        //
         //       It could be preferred to find a way to do prefix range scans on the left key and
         //       storing as `BTreeSet<(ScalarImpl, Row)>`.
         //       We could solve it if `ScalarImpl` had a successor/predecessor function.
-        //
-        //       Probably, using a custom comparator function on a custom datatype
-        //       that is equivalent in all `Row` can achieve this. We are completely agnostic
-        //       about the ordering of `Row`
         let mut state = BTreeMap::<ScalarImpl, HashSet<Row>>::new();
 
-        let input_l = self.source_l;
-        let input_r = self.source_r;
+        let input_l = self.source_l.take().unwrap();
+        let input_r = self.source_r.take().unwrap();
+        let right_data_type = input_r.schema().data_types()[0].clone();
         let aligned_stream = barrier_align(
             input_l.execute(),
             input_r.execute(),
@@ -116,102 +278,17 @@ impl DynamicFilterExecutor {
         for msg in aligned_stream {
             match msg? {
                 AlignedMessage::Left(chunk) => {
-                    // TODO: refactor into fn: `apply_batch`
                     // Reuse the logic from `FilterExecutor`
                     let chunk = chunk.compact()?; // Is this unnecessary work?
                     let (data_chunk, ops) = chunk.into_parts();
 
-                    let mut new_ops = Vec::with_capacity(ops.len());
-                    let mut new_visibility = BitmapBuilder::with_capacity(ops.len());
-                    let mut last_res = false;
-
-                    for (row, op) in data_chunk.rows().zip_eq(ops.iter()) {
-                        // TODO: convert this to a batch operation?
-                        let left_val = row.value_at(self.key_l).to_owned_datum();
-
-                        // Evaluate the condition and determine if it should be forwarded
-                        if let Some(right_val) = &prev_epoch_value {
-                            let inputs = Row::new(vec![left_val.clone(), right_val.clone()]);
-
-                            // If the condition evaluates to true, we forward it
-                            // TODO: optimization - allow eval on left side data chunk,
-                            // right side Datum
-                            let res = self
-                                .cond
-                                .eval_row(&inputs)?
-                                .map(|r| *r.as_bool())
-                                .unwrap_or(false);
-
-                            match *op {
-                                Op::Insert | Op::Delete => {
-                                    new_ops.push(*op);
-                                    if res {
-                                        new_visibility.append(true);
-                                    } else {
-                                        new_visibility.append(false);
-                                    }
-                                }
-                                Op::UpdateDelete => {
-                                    last_res = res;
-                                }
-                                Op::UpdateInsert => match (last_res, res) {
-                                    (true, false) => {
-                                        new_ops.push(Op::Delete);
-                                        new_ops.push(Op::UpdateInsert);
-                                        new_visibility.append(true);
-                                        new_visibility.append(false);
-                                    }
-                                    (false, true) => {
-                                        new_ops.push(Op::UpdateDelete);
-                                        new_ops.push(Op::Insert);
-                                        new_visibility.append(false);
-                                        new_visibility.append(true);
-                                    }
-                                    (true, true) => {
-                                        new_ops.push(Op::UpdateDelete);
-                                        new_ops.push(Op::UpdateInsert);
-                                        new_visibility.append(true);
-                                        new_visibility.append(true);
-                                    }
-                                    (false, false) => {
-                                        new_ops.push(Op::UpdateDelete);
-                                        new_ops.push(Op::UpdateInsert);
-                                        new_visibility.append(false);
-                                        new_visibility.append(false);
-                                    }
-                                },
-                            }
-                        }
-
-                        // Store the rows without a null left key
-                        // null key in left side of predicate should never be stored
-                        // (it will never satisfy the filter condition)
-                        if let Some(val) = left_val {
-                            match *op {
-                                Op::Insert | Op::UpdateInsert => {
-                                    let entry = state.entry(val).or_insert_with(HashSet::new);
-                                    entry.insert(row.to_owned_row());
-                                }
-                                Op::Delete | Op::UpdateDelete => {
-                                    let contains_element = state
-                                        .get_mut(&val)
-                                        .ok_or_else(|| {
-                                            StreamExecutorError::from(anyhow!(
-                                                "Deleting non-existent element"
-                                            ))
-                                        })?
-                                        .remove(&row.to_owned_row());
-
-                                    if !contains_element {
-                                        return Err(StreamExecutorError::from(anyhow!(
-                                            "Deleting non-existent element"
-                                        )));
-                                    };
-                                }
-                            }
-                        }
-                    }
-                    let new_visibility = new_visibility.finish();
+                    let (new_ops, new_visibility) = self.apply_batch(
+                        &data_chunk,
+                        ops,
+                        &prev_epoch_value.clone().flatten(),
+                        &right_data_type,
+                        &mut state,
+                    )?;
 
                     let (columns, _) = data_chunk.into_parts();
 
@@ -250,48 +327,7 @@ impl DynamicFilterExecutor {
                     let curr: Datum = current_epoch_value.clone().flatten();
                     let prev: Datum = prev_epoch_value.flatten();
                     if prev != curr {
-                        let curr_is_some = curr.is_some();
-                        let (range, is_insert) = match (curr.clone(), prev) {
-                            (Some(c), None) | (None, Some(c)) => {
-                                let range = match self.comparator {
-                                    GreaterThan => (Excluded(c), Unbounded),
-                                    GreaterThanOrEqual => (Included(c), Unbounded),
-                                    LessThan => (Unbounded, Excluded(c)),
-                                    LessThanOrEqual => (Unbounded, Included(c)),
-                                    _ => unreachable!(),
-                                };
-                                let is_insert = curr_is_some;
-                                (range, is_insert)
-                            }
-                            (Some(c), Some(p)) => {
-                                if c < p {
-                                    let range = match self.comparator {
-                                        GreaterThan | LessThan => (Excluded(c), Excluded(p)),
-                                        GreaterThanOrEqual | LessThanOrEqual => {
-                                            (Included(c), Included(p))
-                                        }
-                                        _ => unreachable!(),
-                                    };
-                                    let is_insert =
-                                        matches!(self.comparator, GreaterThan | GreaterThanOrEqual);
-                                    (range, is_insert)
-                                } else {
-                                    // p > c
-                                    let range = match self.comparator {
-                                        GreaterThan | LessThan => (Excluded(p), Excluded(c)),
-                                        GreaterThanOrEqual | LessThanOrEqual => {
-                                            (Included(p), Included(c))
-                                        }
-                                        _ => unreachable!(),
-                                    };
-                                    let is_insert =
-                                        matches!(self.comparator, LessThan | LessThanOrEqual);
-                                    (range, is_insert)
-                                }
-                            }
-                            (None, None) => unreachable!(), // prev != curr
-                        };
-
+                        let (range, is_insert) = self.get_range(&curr, prev);
                         for (_, rows) in state.range(range) {
                             for row in rows {
                                 if let Some(chunk) = stream_chunk_builder
