@@ -67,7 +67,12 @@ impl Debug for LocalOutput {
 }
 
 impl LocalOutput {
-    pub fn new(up_actod_id: ActorId, down_actor_id: ActorId, ch: Sender<Message>, metrics: Arc<StreamingMetrics>) -> Self {
+    pub fn new(
+        up_actod_id: ActorId,
+        down_actor_id: ActorId,
+        ch: Sender<Message>,
+        metrics: Arc<StreamingMetrics>,
+    ) -> Self {
         Self {
             up_actor_id_str: up_actod_id.to_string(),
             down_actor_id,
@@ -127,7 +132,12 @@ impl Debug for RemoteOutput {
 }
 
 impl RemoteOutput {
-    pub fn new(up_actor_id: ActorId, down_actor_id: ActorId, ch: Sender<Message>, metrics: Arc<StreamingMetrics>) -> Self {
+    pub fn new(
+        up_actor_id: ActorId,
+        down_actor_id: ActorId,
+        ch: Sender<Message>,
+        metrics: Arc<StreamingMetrics>,
+    ) -> Self {
         Self {
             up_actor_id_str: up_actor_id.to_string(),
             down_actor_id,
