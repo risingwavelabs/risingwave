@@ -4723,6 +4723,7 @@ dependencies = [
  "madsim-tonic",
  "maplit",
  "memcomparable",
+ "minstant",
  "num-traits",
  "parking_lot",
  "paste",

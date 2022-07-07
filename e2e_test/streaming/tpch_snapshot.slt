@@ -12,7 +12,7 @@ include ../tpch/insert_supplier.slt.part
 include ./tpch/views/q1.slt.part
 include ./tpch/views/q2.slt.part
 include ./tpch/views/q3.slt.part
-# include ./tpch/views/q4.slt.part
+include ./tpch/views/q4.slt.part
 include ./tpch/views/q5.slt.part
 include ./tpch/views/q6.slt.part
 include ./tpch/views/q7.slt.part
@@ -24,15 +24,15 @@ include ./tpch/views/q12.slt.part
 include ./tpch/views/q13.slt.part
 include ./tpch/views/q14.slt.part
 include ./tpch/views/q17.slt.part
-# include ./tpch/views/q18.slt.part
+include ./tpch/views/q18.slt.part
 include ./tpch/views/q19.slt.part
-# include ./tpch/views/q20.slt.part
+include ./tpch/views/q20.slt.part
 include ./tpch/views/q22.slt.part
 
 include ./tpch/q1.slt.part
 include ./tpch/q2.slt.part
 include ./tpch/q3.slt.part
-# include ./tpch/q4.slt.part
+include ./tpch/q4.slt.part
 include ./tpch/q5.slt.part
 include ./tpch/q6.slt.part
 include ./tpch/q7.slt.part
@@ -44,9 +44,9 @@ include ./tpch/q12.slt.part
 include ./tpch/q13.slt.part
 include ./tpch/q14.slt.part
 include ./tpch/q17.slt.part
-# include ./tpch/q18.slt.part
+include ./tpch/q18.slt.part
 include ./tpch/q19.slt.part
-# include ./tpch/q20.slt.part
+include ./tpch/q20.slt.part
 include ./tpch/q22.slt.part
 
 statement ok
@@ -57,6 +57,9 @@ drop materialized view tpch_q2;
 
 statement ok
 drop materialized view tpch_q3;
+
+statement ok
+drop materialized view tpch_q4;
 
 statement ok
 drop materialized view tpch_q5;
@@ -92,7 +95,13 @@ statement ok
 drop materialized view tpch_q17;
 
 statement ok
+drop materialized view tpch_q18;
+
+statement ok
 drop materialized view tpch_q19;
+
+statement ok
+drop materialized view tpch_q20;
 
 statement ok
 drop materialized view tpch_q22;
