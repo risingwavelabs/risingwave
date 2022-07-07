@@ -481,3 +481,18 @@
     create table t(a int, b int);
     select abs(a) FILTER (WHERE a > 0) AS avga from t;
   binder_error: 'Invalid input syntax: filter clause is only allowed in aggregation functions, but `abs` is not an aggregation function'
+- sql: |
+    /* prune column before filter */
+    create table t(v1 int, v2 int);
+    with sub(a, b) as (select min(v1), sum(v2) filter (where v2 < 5) from t) select b from sub;
+  batch_plan: |
+    BatchSimpleAgg { aggs: [sum($0)] }
+      BatchExchange { order: [], dist: Single }
+        BatchSimpleAgg { aggs: [sum($0) filter(($0 < 5:Int32))] }
+          BatchScan { table: t, columns: [v2] }
+  stream_plan: |
+    StreamMaterialize { columns: [agg#0(hidden), b], pk_columns: [] }
+      StreamGlobalSimpleAgg { aggs: [sum($0), sum($1)] }
+        StreamExchange { dist: Single }
+          StreamLocalSimpleAgg { aggs: [count, sum($0) filter(($0 < 5:Int32))] }
+            StreamTableScan { table: t, columns: [v2, _row_id], pk_indices: [1] }
