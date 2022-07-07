@@ -99,7 +99,6 @@ message UnpinVersionResponse {
 
 message PinSnapshotRequest {
   uint32 context_id = 1;
-  uint64 last_pinned = 2;
 }
 
 message PinSnapshotResponse {
@@ -107,9 +106,15 @@ message PinSnapshotResponse {
   HummockSnapshot snapshot = 2;
 }
 
+message GetEpochRequest {}
+
+message GetEpochResponse {
+  common.Status status = 1;
+  HummockSnapshot snapshot = 2;
+}
+
 message UnpinSnapshotRequest {
   uint32 context_id = 1;
-  repeated HummockSnapshot snapshots = 2;
 }
 
 message UnpinSnapshotResponse {
@@ -149,7 +154,7 @@ message CompactTask {
   uint64 task_id = 5;
   // compaction output will be added to [`target_level`] of LSM after compaction
   uint32 target_level = 6;
-  bool is_target_ultimate_and_leveling = 7;
+  bool gc_delete_keys = 7;
   bool task_status = 9;
   // Hash mapping from virtual node to parallel unit. Since one compactor might deal with SSTs
   // with data for more than one relational state tables, here a vector is required.
@@ -162,6 +167,7 @@ message CompactTask {
   uint64 target_file_size = 15;
   uint32 compaction_filter_mask = 16;
   map<uint32, TableOption> table_options = 17;
+  uint64 current_epoch_time = 18;
 }
 
 message LevelHandler {
@@ -214,7 +220,7 @@ message HummockPinnedVersion {
 
 message HummockPinnedSnapshot {
   uint32 context_id = 1;
-  repeated uint64 snapshot_id = 2;
+  uint64 minimal_pinned_snapshot = 2;
 }
 
 message HummockStaleSstables {
@@ -283,6 +289,7 @@ service HummockManagerService {
   rpc UnpinVersion(UnpinVersionRequest) returns (UnpinVersionResponse);
   rpc ReportCompactionTasks(ReportCompactionTasksRequest) returns (ReportCompactionTasksResponse);
   rpc PinSnapshot(PinSnapshotRequest) returns (PinSnapshotResponse);
+  rpc GetEpoch(GetEpochRequest) returns (GetEpochResponse);
   rpc UnpinSnapshot(UnpinSnapshotRequest) returns (UnpinSnapshotResponse);
   rpc UnpinSnapshotBefore(UnpinSnapshotBeforeRequest) returns (UnpinSnapshotBeforeResponse);
   rpc GetNewTableId(GetNewTableIdRequest) returns (GetNewTableIdResponse);

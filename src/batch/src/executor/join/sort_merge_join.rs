@@ -17,13 +17,14 @@ use std::cmp::Ordering;
 use futures_async_stream::try_stream;
 use risingwave_common::array::{DataChunk, Row, RowRef};
 use risingwave_common::catalog::Schema;
-use risingwave_common::error::{ErrorCode, RwError};
+use risingwave_common::error::RwError;
 use risingwave_common::types::to_datum_ref;
 use risingwave_common::util::chunk_coalesce::DataChunkBuilder;
 use risingwave_common::util::sort_util::OrderType;
 use risingwave_pb::batch_plan::plan_node::NodeBody;
 use risingwave_pb::plan_common::OrderType as OrderTypeProst;
 
+use crate::error::BatchError;
 use crate::executor::join::row_level_iter::RowLevelIter;
 use crate::executor::join::JoinType;
 use crate::executor::{
@@ -279,16 +280,16 @@ impl BoxedExecutorBuilder for SortMergeJoinExecutor {
             .iter()
             .map(|&idx| original_schema[idx].clone())
             .collect();
-        let left_keys = sort_merge_join_node.get_left_keys();
+        let left_key = sort_merge_join_node.get_left_key();
         let mut probe_key_idxs = vec![];
-        for key in left_keys {
-            probe_key_idxs.push(*key as usize);
+        for idx in left_key {
+            probe_key_idxs.push(*idx as usize);
         }
 
-        let right_keys = sort_merge_join_node.get_right_keys();
+        let right_key = sort_merge_join_node.get_right_key();
         let mut build_key_idxs = vec![];
-        for key in right_keys {
-            build_key_idxs.push(*key as usize);
+        for idx in right_key {
+            build_key_idxs.push(*idx as usize);
         }
         match join_type {
             JoinType::Inner => {
@@ -306,10 +307,10 @@ impl BoxedExecutorBuilder for SortMergeJoinExecutor {
                     "SortMergeJoinExecutor2".to_string(),
                 )))
             }
-            _ => Err(ErrorCode::NotImplemented(
-                format!("Do not support {:?} join type now.", join_type),
-                None.into(),
-            )
+            _ => Err(BatchError::UnsupportedFunction(format!(
+                "Do not support {:?} join type now.",
+                join_type
+            ))
             .into()),
         }
     }

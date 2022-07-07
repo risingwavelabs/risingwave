@@ -393,6 +393,7 @@ impl Parser {
                 Keyword::EXISTS => self.parse_exists_expr(),
                 Keyword::EXTRACT => self.parse_extract_expr(),
                 Keyword::SUBSTRING => self.parse_substring_expr(),
+                Keyword::OVERLAY => self.parse_overlay_expr(),
                 Keyword::TRIM => self.parse_trim_expr(),
                 Keyword::INTERVAL => self.parse_literal_interval(),
                 Keyword::NOT => Ok(Expr::UnaryOp {
@@ -593,12 +594,23 @@ impl Parser {
             None
         };
 
+        let filter = if self.parse_keyword(Keyword::FILTER) {
+            self.expect_token(&Token::LParen)?;
+            self.expect_keyword(Keyword::WHERE)?;
+            let filter_expr = self.parse_expr()?;
+            self.expect_token(&Token::RParen)?;
+            Some(Box::new(filter_expr))
+        } else {
+            None
+        };
+
         Ok(Expr::Function(Function {
             name,
             args,
             over,
             distinct,
             order_by,
+            filter,
         }))
     }
 
@@ -803,6 +815,33 @@ impl Parser {
             expr: Box::new(expr),
             substring_from: from_expr.map(Box::new),
             substring_for: to_expr.map(Box::new),
+        })
+    }
+
+    /// OVERLAY(<expr> PLACING <expr> FROM <expr> [ FOR <expr> ])
+    pub fn parse_overlay_expr(&mut self) -> Result<Expr, ParserError> {
+        self.expect_token(&Token::LParen)?;
+
+        let expr = self.parse_expr()?;
+
+        self.expect_keyword(Keyword::PLACING)?;
+        let new_substring = self.parse_expr()?;
+
+        self.expect_keyword(Keyword::FROM)?;
+        let start = self.parse_expr()?;
+
+        let mut count = None;
+        if self.parse_keyword(Keyword::FOR) {
+            count = Some(self.parse_expr()?);
+        }
+
+        self.expect_token(&Token::RParen)?;
+
+        Ok(Expr::Overlay {
+            expr: Box::new(expr),
+            new_substring: Box::new(new_substring),
+            start: Box::new(start),
+            count: count.map(Box::new),
         })
     }
 
@@ -2578,10 +2617,10 @@ impl Parser {
             })
         } else if variable.value == "TRANSACTION" && modifier.is_none() {
             if self.parse_keyword(Keyword::SNAPSHOT) {
-                let snaphot_id = self.parse_value()?;
+                let snapshot_id = self.parse_value()?;
                 return Ok(Statement::SetTransaction {
                     modes: vec![],
-                    snapshot: Some(snaphot_id),
+                    snapshot: Some(snapshot_id),
                     session: false,
                 });
             }

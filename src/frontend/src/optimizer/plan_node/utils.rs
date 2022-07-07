@@ -14,18 +14,19 @@
 
 use std::collections::HashMap;
 
-use risingwave_common::catalog::{ColumnDesc, Field, OrderedColumnDesc};
+use risingwave_common::catalog::{ColumnDesc, Field};
 use risingwave_common::types::DataType;
 use risingwave_common::util::sort_util::OrderType;
 
 use crate::catalog::column_catalog::ColumnCatalog;
 use crate::catalog::{TableCatalog, TableId};
+use crate::optimizer::property::{Direction, FieldOrder};
 
 #[derive(Default)]
 pub struct TableCatalogBuilder {
     columns: Vec<ColumnCatalog>,
     column_names: HashMap<String, i32>,
-    order_descs: Vec<OrderedColumnDesc>,
+    order_key: Vec<FieldOrder>,
     pk_indices: Vec<usize>,
 }
 
@@ -78,11 +79,16 @@ impl TableCatalogBuilder {
     /// Check whether need to add a ordered column. Different from value, order desc equal pk in
     /// semantics and they are encoded as storage key.
     fn add_order_column(&mut self, column_desc: ColumnDesc, order_type: Option<OrderType>) {
+        let index = i32::from(column_desc.column_id) as usize;
         if let Some(order) = order_type {
-            self.pk_indices
-                .push(i32::from(column_desc.column_id) as usize);
-            self.order_descs
-                .push(OrderedColumnDesc { column_desc, order });
+            self.pk_indices.push(index);
+            self.order_key.push(FieldOrder {
+                index,
+                direct: match order {
+                    OrderType::Ascending => Direction::Asc,
+                    OrderType::Descending => Direction::Desc,
+                },
+            });
         }
     }
 
@@ -99,16 +105,16 @@ impl TableCatalogBuilder {
     }
 
     /// Consume builder and create `TableCatalog` (for proto).
-    pub fn build(self, distribution_keys: Vec<usize>, append_only: bool) -> TableCatalog {
+    pub fn build(self, distribution_key: Vec<usize>, append_only: bool) -> TableCatalog {
         TableCatalog {
             id: TableId::placeholder(),
             associated_source_id: None,
             name: String::new(),
             columns: self.columns,
-            order_desc: self.order_descs,
-            pks: self.pk_indices,
+            order_key: self.order_key,
+            pk: self.pk_indices,
             is_index_on: None,
-            distribution_keys,
+            distribution_key,
             appendonly: append_only,
             owner: risingwave_common::catalog::DEFAULT_SUPPER_USER.to_string(),
             vnode_mapping: None,

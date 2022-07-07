@@ -15,18 +15,43 @@
 use std::collections::{HashMap, HashSet};
 
 use itertools::Itertools;
-use risingwave_common::catalog::{ColumnDesc, OrderedColumnDesc, TableDesc};
+use risingwave_common::catalog::TableDesc;
 use risingwave_common::types::ParallelUnitId;
 use risingwave_common::util::compress::decompress_data;
-use risingwave_common::util::sort_util::OrderType;
 use risingwave_pb::catalog::table::OptionalAssociatedSourceId;
 use risingwave_pb::catalog::Table as ProstTable;
-use risingwave_pb::plan_common::OrderType as ProstOrderType;
 
 use super::column_catalog::ColumnCatalog;
 use super::{DatabaseId, SchemaId};
 use crate::catalog::TableId;
+use crate::optimizer::property::FieldOrder;
 
+/// Includes full information about a table.
+///
+/// # Column ID & Column Index
+///
+/// [`ColumnId`](risingwave_common::catalog::ColumnId) (with type `i32`) is the unique identifier of
+/// a column in a table. It is used to access storage.
+///
+/// Column index, or idx, (with type `usize`) is the relative position inside the `Vec` of columns.
+///
+/// A tip to avoid making mistakes is never do casting - i32 as usize or vice versa.
+///
+/// # Keys
+///
+/// All the keys are represented as column indices.
+///
+/// - **Primary Key** (pk): unique identifier of a row.
+///
+/// - **Order Key**: the primary key for storage, used to sort and access data.
+///
+///   For an MV, the columns in `ORDER BY` clause will be put at the beginning of the order key. And
+/// the remaining columns in pk will follow behind.
+///
+///   If there's no `ORDER BY` clause, the order key will be the same as pk.
+///
+/// - **Distribution Key**: the columns used to partition the data. It must be a subset of the order
+///   key.
 #[derive(Clone, Debug, PartialEq)]
 pub struct TableCatalog {
     pub id: TableId,
@@ -38,14 +63,14 @@ pub struct TableCatalog {
     /// All columns in this table
     pub columns: Vec<ColumnCatalog>,
 
-    /// Keys used as materialize's storage key prefix, including MV order keys and pks.
-    pub order_desc: Vec<OrderedColumnDesc>,
+    /// Key used as materialize's storage key prefix, including MV order columns and pk.
+    pub order_key: Vec<FieldOrder>,
 
     /// Primary key columns indices.
-    pub pks: Vec<usize>,
+    pub pk: Vec<usize>,
 
     /// Distribution key column indices.
-    pub distribution_keys: Vec<usize>,
+    pub distribution_key: Vec<usize>,
 
     /// If set to Some(TableId), then this table is an index on another table.
     pub is_index_on: Option<TableId>,
@@ -82,18 +107,22 @@ impl TableCatalog {
     }
 
     /// Get a reference to the table catalog's pk desc.
-    pub fn order_desc(&self) -> &[OrderedColumnDesc] {
-        self.order_desc.as_ref()
+    pub fn order_key(&self) -> &[FieldOrder] {
+        self.order_key.as_ref()
     }
 
     /// Get a [`TableDesc`] of the table.
     pub fn table_desc(&self) -> TableDesc {
         TableDesc {
             table_id: self.id,
-            order_desc: self.order_desc.clone(),
-            pks: self.pks.clone(),
+            order_key: self
+                .order_key
+                .iter()
+                .map(FieldOrder::to_order_pair)
+                .collect(),
+            pk: self.pk.clone(),
             columns: self.columns.iter().map(|c| c.column_desc.clone()).collect(),
-            distribution_keys: self.distribution_keys.clone(),
+            distribution_key: self.distribution_key.clone(),
             appendonly: self.appendonly,
             vnode_mapping: self.vnode_mapping.clone(),
         }
@@ -104,39 +133,27 @@ impl TableCatalog {
         self.name.as_ref()
     }
 
-    pub fn distribution_keys(&self) -> &[usize] {
-        self.distribution_keys.as_ref()
+    pub fn distribution_key(&self) -> &[usize] {
+        self.distribution_key.as_ref()
     }
 
     pub fn to_prost(&self, schema_id: SchemaId, database_id: DatabaseId) -> ProstTable {
-        let (order_column_ids, orders) = self
-            .order_desc()
-            .iter()
-            .map(|col| {
-                (
-                    col.column_desc.column_id.get_id(),
-                    col.order.to_prost() as i32,
-                )
-            })
-            .unzip();
-
         ProstTable {
             id: self.id.table_id as u32,
             schema_id,
             database_id,
             name: self.name.clone(),
             columns: self.columns().iter().map(|c| c.to_protobuf()).collect(),
-            order_column_ids,
-            orders,
-            pk: self.pks.iter().map(|x| *x as _).collect(),
+            order_key: self.order_key.iter().map(|o| o.to_protobuf()).collect(),
+            pk: self.pk.iter().map(|x| *x as _).collect(),
             dependent_relations: vec![],
             optional_associated_source_id: self
                 .associated_source_id
                 .map(|source_id| OptionalAssociatedSourceId::AssociatedSourceId(source_id.into())),
             is_index: self.is_index_on.is_some(),
             index_on_id: self.is_index_on.unwrap_or_default().table_id(),
-            distribution_keys: self
-                .distribution_keys
+            distribution_key: self
+                .distribution_key
                 .iter()
                 .map(|k| *k as i32)
                 .collect_vec(),
@@ -156,33 +173,21 @@ impl From<ProstTable> for TableCatalog {
         });
         let name = tb.name.clone();
         let mut col_names = HashSet::new();
-        let mut col_descs: HashMap<i32, ColumnDesc> = HashMap::new();
+        let mut col_index: HashMap<i32, usize> = HashMap::new();
         let columns: Vec<ColumnCatalog> = tb.columns.into_iter().map(ColumnCatalog::from).collect();
-        for catalog in columns.clone() {
+        for (idx, catalog) in columns.clone().into_iter().enumerate() {
             for col_desc in catalog.column_desc.flatten() {
                 let col_name = col_desc.name.clone();
                 if !col_names.insert(col_name.clone()) {
                     panic!("duplicated column name {} in table {} ", col_name, tb.name)
                 }
-                let col_id = col_desc.column_id.get_id();
-                col_descs.insert(col_id, col_desc);
             }
+
+            let col_id = catalog.column_desc.column_id.get_id();
+            col_index.insert(col_id, idx);
         }
 
-        let order_desc = tb
-            .order_column_ids
-            .clone()
-            .into_iter()
-            .zip_eq(
-                tb.orders
-                    .into_iter()
-                    .map(|x| OrderType::from_prost(&ProstOrderType::from_i32(x).unwrap())),
-            )
-            .map(|(col_id, order)| OrderedColumnDesc {
-                column_desc: col_descs.get(&col_id).unwrap().clone(),
-                order,
-            })
-            .collect();
+        let order_key = tb.order_key.iter().map(FieldOrder::from_protobuf).collect();
 
         let vnode_mapping = if let Some(mapping) = tb.mapping.as_ref() {
             decompress_data(&mapping.original_indices, &mapping.data)
@@ -194,19 +199,19 @@ impl From<ProstTable> for TableCatalog {
             id: id.into(),
             associated_source_id: associated_source_id.map(Into::into),
             name,
-            order_desc,
+            order_key,
             columns,
             is_index_on: if tb.is_index {
                 Some(tb.index_on_id.into())
             } else {
                 None
             },
-            distribution_keys: tb
-                .distribution_keys
+            distribution_key: tb
+                .distribution_key
                 .iter()
                 .map(|k| *k as usize)
                 .collect_vec(),
-            pks: tb.pk.iter().map(|x| *x as _).collect(),
+            pk: tb.pk.iter().map(|x| *x as _).collect(),
             appendonly: tb.appendonly,
             owner: tb.owner,
             vnode_mapping: Some(vnode_mapping),
@@ -225,11 +230,10 @@ impl From<&ProstTable> for TableCatalog {
 mod tests {
     use std::collections::HashMap;
 
-    use risingwave_common::catalog::{ColumnDesc, ColumnId, OrderedColumnDesc, TableId};
+    use risingwave_common::catalog::{ColumnDesc, ColumnId, TableId};
     use risingwave_common::test_prelude::*;
     use risingwave_common::types::*;
     use risingwave_common::util::compress::compress_data;
-    use risingwave_common::util::sort_util::OrderType;
     use risingwave_pb::catalog::table::OptionalAssociatedSourceId;
     use risingwave_pb::catalog::Table as ProstTable;
     use risingwave_pb::common::ParallelUnitMapping;
@@ -240,6 +244,7 @@ mod tests {
     use crate::catalog::column_catalog::ColumnCatalog;
     use crate::catalog::row_id_column_desc;
     use crate::catalog::table_catalog::TableCatalog;
+    use crate::optimizer::property::{Direction, FieldOrder};
 
     #[test]
     fn test_into_table_catalog() {
@@ -278,11 +283,14 @@ mod tests {
                     is_hidden: false,
                 },
             ],
-            order_column_ids: vec![0],
+            order_key: vec![FieldOrder {
+                index: 0,
+                direct: Direction::Asc,
+            }
+            .to_protobuf()],
             pk: vec![0],
-            orders: vec![OrderType::Ascending.to_prost() as i32],
             dependent_relations: vec![],
-            distribution_keys: vec![],
+            distribution_key: vec![],
             optional_associated_source_id: OptionalAssociatedSourceId::AssociatedSourceId(233)
                 .into(),
             appendonly: false,
@@ -333,12 +341,12 @@ mod tests {
                         is_hidden: false
                     }
                 ],
-                pks: vec![0],
-                order_desc: vec![OrderedColumnDesc {
-                    column_desc: row_id_column_desc(),
-                    order: OrderType::Ascending
+                pk: vec![0],
+                order_key: vec![FieldOrder {
+                    index: 0,
+                    direct: Direction::Asc,
                 }],
-                distribution_keys: vec![],
+                distribution_key: vec![],
                 appendonly: false,
                 owner: risingwave_common::catalog::DEFAULT_SUPPER_USER.to_string(),
                 vnode_mapping: Some(mapping),

@@ -32,7 +32,7 @@ use risingwave_common::types::{Datum, VirtualNode};
 use risingwave_common::util::hash_util::CRC32FastBuilder;
 use risingwave_common::util::ordered::*;
 use risingwave_common::util::sort_util::OrderType;
-use risingwave_hummock_sdk::key::{next_key, prefixed_range, range_of_prefix};
+use risingwave_hummock_sdk::key::{end_bound_of_prefix, next_key, prefixed_range, range_of_prefix};
 
 use super::mem_table::RowOp;
 use super::{Distribution, TableIter};
@@ -275,25 +275,13 @@ impl<S: StateStore, E: Encoding, const T: AccessType> StorageTableBase<S, E, T> 
 /// Get
 impl<S: StateStore, E: Encoding, const T: AccessType> StorageTableBase<S, E, T> {
     /// Check whether the given `vnode` is set in the `vnodes` of this table.
-    ///
-    /// - For `READ_WRITE` or streaming usages, this will panic on `false` and always return `true`
-    ///   since the table should only be used to access entries with vnode specified in
-    ///   `self.vnodes`.
-    /// - For `READ_ONLY` or batch usages, this will return the result verbatim. The caller may
-    ///   filter out the scanned row according to the result.
-    fn check_vnode_is_set(&self, vnode: VirtualNode) -> bool {
+    fn check_vnode_is_set(&self, vnode: VirtualNode) {
         let is_set = self.vnodes.is_set(vnode as usize).unwrap();
-        match T {
-            READ_WRITE => {
-                assert!(
-                    is_set,
-                    "vnode {} should not be accessed by this table: {:#?}, dist key {:?}",
-                    vnode, self.table_columns, self.dist_key_indices
-                );
-            }
-            READ_ONLY => {}
-        }
-        is_set
+        assert!(
+            is_set,
+            "vnode {} should not be accessed by this table: {:#?}, dist key {:?}",
+            vnode, self.table_columns, self.dist_key_indices
+        );
     }
 
     /// Get vnode value with `indices` on the given `row`. Should not be used directly.
@@ -307,13 +295,22 @@ impl<S: StateStore, E: Encoding, const T: AccessType> StorageTableBase<S, E, T> 
 
         tracing::trace!(target: "events::storage::storage_table", "compute vnode: {:?} keys {:?} => {}", row, indices, vnode);
 
-        let _ = self.check_vnode_is_set(vnode);
+        self.check_vnode_is_set(vnode);
         vnode
     }
 
     /// Get vnode value with given primary key.
     fn compute_vnode_by_pk(&self, pk: &Row) -> VirtualNode {
         self.compute_vnode(pk, &self.dist_key_in_pk_indices)
+    }
+
+    /// Try getting vnode value with given primary key prefix, used for `vnode_hint` in iterators.
+    /// Return `None` if the provided columns are not enough.
+    fn try_compute_vnode_by_pk_prefix(&self, pk_prefix: &Row) -> Option<VirtualNode> {
+        self.dist_key_in_pk_indices
+            .iter()
+            .all(|&d| d < pk_prefix.0.len())
+            .then(|| self.compute_vnode(pk_prefix, &self.dist_key_in_pk_indices))
     }
 
     /// `vnode | pk`
@@ -346,7 +343,10 @@ impl<S: StateStore, E: Encoding, const T: AccessType> StorageTableBase<S, E, T> 
         }
 
         let result = deserializer.take();
-        Ok(result.and_then(|(vnode, _pk, row)| self.check_vnode_is_set(vnode).then_some(row)))
+        Ok(result.map(|(vnode, _pk, row)| {
+            self.check_vnode_is_set(vnode);
+            row
+        }))
     }
 
     /// Get a single row by range scan
@@ -365,7 +365,10 @@ impl<S: StateStore, E: Encoding, const T: AccessType> StorageTableBase<S, E, T> 
         }
 
         let result = deserializer.take();
-        Ok(result.and_then(|(vnode, _pk, row)| self.check_vnode_is_set(vnode).then_some(row)))
+        Ok(result.map(|(vnode, _pk, row)| {
+            self.check_vnode_is_set(vnode);
+            row
+        }))
     }
 }
 
@@ -471,12 +474,13 @@ impl<S: PkAndRowStream + Unpin> TableIter for S {
 
 /// Iterators
 impl<S: StateStore, E: Encoding, const T: AccessType> StorageTableBase<S, E, T> {
-    /// Get multiple [`StorageTableIter`] based on the specified vnodes, and merge or concat them by
-    /// given `ordered`.
+    /// Get multiple [`StorageTableIter`] based on the specified vnodes of this table with
+    /// `vnode_hint`, and merge or concat them by given `ordered`.
     async fn iter_with_encoded_key_range<R, B>(
         &self,
         encoded_key_range: R,
         epoch: u64,
+        vnode_hint: Option<VirtualNode>,
         wait_epoch: bool,
         ordered: bool,
     ) -> StorageResult<StorageTableIter<S>>
@@ -485,12 +489,18 @@ impl<S: StateStore, E: Encoding, const T: AccessType> StorageTableBase<S, E, T> 
         B: AsRef<[u8]> + Send,
     {
         // Vnodes that are set and should be accessed.
-        let vnodes = self
-            .vnodes
-            .iter()
-            .enumerate()
-            .filter(|&(_, set)| set)
-            .map(|(i, _)| i as VirtualNode);
+        #[auto_enum(Iterator)]
+        let vnodes = match vnode_hint {
+            // If `vnode_hint` is set, we can only access this single vnode.
+            Some(vnode) => std::iter::once(vnode),
+            // Otherwise, we need to access all vnodes of this table.
+            None => self
+                .vnodes
+                .iter()
+                .enumerate()
+                .filter(|&(_, set)| set)
+                .map(|(i, _)| i as VirtualNode),
+        };
 
         // For each vnode, construct an iterator.
         // TODO: if there're some vnodes continuously in the range and we don't care about order, we
@@ -525,66 +535,16 @@ impl<S: StateStore, E: Encoding, const T: AccessType> StorageTableBase<S, E, T> 
         Ok(iter)
     }
 
-    /// Get a [`StorageTableIter`] for streaming use with given `encoded_key_range`.
-    pub(super) async fn streaming_iter_with_encoded_key_range<R, B>(
-        &self,
-        encoded_key_range: R,
-        epoch: u64,
-    ) -> StorageResult<StorageTableIter<S>>
-    where
-        R: RangeBounds<B> + Send + Clone,
-        B: AsRef<[u8]> + Send,
-    {
-        self.iter_with_encoded_key_range(encoded_key_range, epoch, false, true)
-            .await
-    }
-
-    /// Get a [`StorageTableIter`] with given `encoded_key_range`.
-    /// Differs from the streaming one, this iterator will wait for the epoch before iteration.
-    pub(super) async fn batch_iter_with_encoded_key_range<R, B>(
-        &self,
-        encoded_key_range: R,
-        epoch: u64,
-    ) -> StorageResult<StorageTableIter<S>>
-    where
-        R: RangeBounds<B> + Send + Clone,
-        B: AsRef<[u8]> + Send,
-    {
-        // Currently batch does not expect scan order, so we just concat mutiple ranges.
-        // TODO: introduce unordered batch iterator
-        self.iter_with_encoded_key_range(encoded_key_range, epoch, true, true)
-            .await
-    }
-
-    // The returned iterator will iterate data from a snapshot corresponding to the given `epoch`
-    pub async fn batch_iter(&self, epoch: u64) -> StorageResult<StorageTableIter<S>> {
-        self.batch_iter_with_encoded_key_range::<_, &[u8]>(.., epoch)
-            .await
-    }
-
-    /// `dedup_pk_iter` should be used when pk is not persisted as value in storage.
-    /// It will attempt to decode pk from key instead of cell value.
-    /// Tracking issue: <https://github.com/singularity-data/risingwave/issues/588>
-    pub async fn batch_dedup_pk_iter(
+    /// Iterates on the table with the given prefix of the pk in `pk_prefix` and the range bounds of
+    /// the next primary key column in `next_col_bounds`.
+    // TODO: support multiple datums or `Row` for `next_col_bounds`.
+    async fn iter_with_pk_bounds(
         &self,
         epoch: u64,
-        // TODO: remove this parameter: https://github.com/singularity-data/risingwave/issues/3203
-        pk_descs: &[OrderedColumnDesc],
-    ) -> StorageResult<BatchDedupPkIter<S>> {
-        Ok(DedupPkCellBasedIter::new(
-            self.batch_iter(epoch).await?,
-            self.mapping.clone(),
-            pk_descs,
-        )
-        .await?
-        .into_stream())
-    }
-
-    pub async fn batch_iter_with_pk_bounds(
-        &self,
-        epoch: u64,
-        pk_prefix: Row,
+        pk_prefix: &Row,
         next_col_bounds: impl RangeBounds<Datum>,
+        wait_epoch: bool,
+        ordered: bool,
     ) -> StorageResult<StorageTableIter<S>> {
         fn serialize_pk_bound(
             pk_serializer: &OrderedRowSerializer,
@@ -603,7 +563,7 @@ impl<S: StateStore, E: Encoding, const T: AccessType> StorageTableBase<S, E, T> 
                     } else {
                         // Should use excluded next key for end bound.
                         // Otherwise keys starting with the bound is not included.
-                        Excluded(next_key(&serialized_key))
+                        end_bound_of_prefix(&serialized_key)
                     }
                 }
                 Excluded(k) => {
@@ -614,6 +574,8 @@ impl<S: StateStore, E: Encoding, const T: AccessType> StorageTableBase<S, E, T> 
                     if is_start_bound {
                         // storage doesn't support excluded begin key yet, so transform it to
                         // included
+                        // FIXME: What if `serialized_key` is `\xff\xff..`? Should the frontend
+                        // reject this?
                         Included(next_key(&serialized_key))
                     } else {
                         Excluded(serialized_key)
@@ -627,7 +589,7 @@ impl<S: StateStore, E: Encoding, const T: AccessType> StorageTableBase<S, E, T> 
                     } else if is_start_bound {
                         Included(serialized_pk_prefix)
                     } else {
-                        Excluded(next_key(&serialized_pk_prefix))
+                        end_bound_of_prefix(&serialized_pk_prefix)
                     }
                 }
             }
@@ -635,13 +597,13 @@ impl<S: StateStore, E: Encoding, const T: AccessType> StorageTableBase<S, E, T> 
 
         let start_key = serialize_pk_bound(
             &self.pk_serializer,
-            &pk_prefix,
+            pk_prefix,
             next_col_bounds.start_bound(),
             true,
         );
         let end_key = serialize_pk_bound(
             &self.pk_serializer,
-            &pk_prefix,
+            pk_prefix,
             next_col_bounds.end_bound(),
             false,
         );
@@ -652,27 +614,63 @@ impl<S: StateStore, E: Encoding, const T: AccessType> StorageTableBase<S, E, T> 
             end_key
         );
 
-        self.batch_iter_with_encoded_key_range((start_key, end_key), epoch)
+        self.iter_with_encoded_key_range(
+            (start_key, end_key),
+            epoch,
+            self.try_compute_vnode_by_pk_prefix(pk_prefix),
+            wait_epoch,
+            ordered,
+        )
+        .await
+    }
+
+    /// Construct a [`StorageTableIter`] for batch executors.
+    /// Differs from the streaming one, this iterator will wait for the epoch before iteration, and
+    /// the order of the rows among different virtual nodes is not guaranteed.
+    // TODO: introduce ordered batch iterator.
+    pub async fn batch_iter_with_pk_bounds(
+        &self,
+        epoch: u64,
+        pk_prefix: &Row,
+        next_col_bounds: impl RangeBounds<Datum>,
+    ) -> StorageResult<StorageTableIter<S>> {
+        self.iter_with_pk_bounds(epoch, pk_prefix, next_col_bounds, true, false)
             .await
     }
 
-    pub async fn batch_iter_with_pk_prefix(
+    /// Construct a [`StorageTableIter`] for streaming executors.
+    pub async fn streaming_iter_with_pk_bounds(
         &self,
         epoch: u64,
-        pk_prefix: Row,
+        pk_prefix: &Row,
+        next_col_bounds: impl RangeBounds<Datum>,
     ) -> StorageResult<StorageTableIter<S>> {
-        let prefix_serializer = self.pk_serializer.prefix(pk_prefix.size());
-        let serialized_pk_prefix = serialize_pk(&pk_prefix, &prefix_serializer);
-
-        let key_range = range_of_prefix(&serialized_pk_prefix);
-
-        trace!(
-            "iter_with_pk_prefix: key_range {:?}",
-            (key_range.start_bound(), key_range.end_bound())
-        );
-
-        self.batch_iter_with_encoded_key_range(key_range, epoch)
+        self.iter_with_pk_bounds(epoch, pk_prefix, next_col_bounds, false, true)
             .await
+    }
+
+    // The returned iterator will iterate data from a snapshot corresponding to the given `epoch`.
+    pub async fn batch_iter(&self, epoch: u64) -> StorageResult<StorageTableIter<S>> {
+        self.batch_iter_with_pk_bounds(epoch, Row::empty(), ..)
+            .await
+    }
+
+    /// `dedup_pk_iter` should be used when pk is not persisted as value in storage.
+    /// It will attempt to decode pk from key instead of cell value.
+    /// Tracking issue: <https://github.com/singularity-data/risingwave/issues/588>
+    pub async fn batch_dedup_pk_iter(
+        &self,
+        epoch: u64,
+        // TODO: remove this parameter: https://github.com/singularity-data/risingwave/issues/3203
+        pk_descs: &[OrderedColumnDesc],
+    ) -> StorageResult<BatchDedupPkIter<S>> {
+        Ok(DedupPkStorageTableIter::new(
+            self.batch_iter(epoch).await?,
+            self.mapping.clone(),
+            pk_descs,
+        )
+        .await?
+        .into_stream())
     }
 }
 
@@ -739,7 +737,7 @@ impl<S: StateStore> StorageTableIterInner<S> {
 /// we can decode pk -> `user_id, name`,
 /// and retrieve the row: `|_| age |_|`,
 /// then fill in empty spots with datum decoded from pk: `| user_id | age | name |`
-struct DedupPkCellBasedIter<I> {
+struct DedupPkStorageTableIter<I> {
     inner: I,
     pk_decoder: OrderedRowDeserializer,
 
@@ -749,7 +747,7 @@ struct DedupPkCellBasedIter<I> {
     pk_to_row_mapping: Vec<Option<usize>>,
 }
 
-impl<I> DedupPkCellBasedIter<I> {
+impl<I> DedupPkStorageTableIter<I> {
     async fn new(
         inner: I,
         mapping: Arc<ColumnDescMapping>,
@@ -786,7 +784,7 @@ impl<I> DedupPkCellBasedIter<I> {
     }
 }
 
-impl<I: PkAndRowStream> DedupPkCellBasedIter<I> {
+impl<I: PkAndRowStream> DedupPkStorageTableIter<I> {
     /// Yield a row with its primary key.
     #[try_stream(ok = (Vec<u8>, Row), error = StorageError)]
     async fn into_stream(self) {

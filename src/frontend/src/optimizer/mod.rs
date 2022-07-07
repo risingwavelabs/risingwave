@@ -33,7 +33,6 @@ use self::plan_node::{BatchProject, Convention, LogicalProject, StreamMaterializ
 use self::property::RequiredDist;
 use self::rule::*;
 use crate::catalog::TableId;
-use crate::expr::InputRef;
 use crate::optimizer::plan_node::BatchExchange;
 use crate::optimizer::property::Distribution;
 use crate::utils::Condition;
@@ -103,25 +102,35 @@ impl PlanRoot {
         if self.out_fields.count_ones(..) == self.out_fields.len() {
             return self.plan;
         }
-        let exprs = self
-            .out_fields
-            .ones()
-            .zip_eq(self.schema.fields)
-            .map(|(index, field)| InputRef::new(index, field.data_type).into())
-            .collect();
-        LogicalProject::create(self.plan, exprs)
+        LogicalProject::with_out_fields(self.plan, &self.out_fields).into()
     }
 
     /// Apply logical optimization to the plan.
     pub fn gen_optimized_logical_plan(&self) -> PlanRef {
         let mut plan = self.plan.clone();
 
-        // Subquery Unnesting.
+        // Simple Unnesting.
+        // Pull correlated predicates up the algebra tree to unnest simple subquery.
+        plan = {
+            let rules = vec![PullUpCorrelatedPredicate::create()];
+            let heuristic_optimizer = HeuristicOptimizer::new(ApplyOrder::TopDown, rules);
+            heuristic_optimizer.optimize(plan)
+        };
+
+        // General Unnesting.
+        // Translate Apply, push Apply down the plan and finally replace Apply with regular inner
+        // join.
+        plan = {
+            let rules = vec![TranslateApply::create()];
+            let heuristic_optimizer = HeuristicOptimizer::new(ApplyOrder::BottomUp, rules);
+            heuristic_optimizer.optimize(plan)
+        };
         plan = {
             let rules = vec![
-                // This rule should be applied first to pull up LogicalAgg.
-                UnnestAggForLOJ::create(),
-                PullUpCorrelatedPredicate::create(),
+                ApplyAgg::create(),
+                ApplyFilter::create(),
+                ApplyProj::create(),
+                ApplyScan::create(),
             ];
             let heuristic_optimizer = HeuristicOptimizer::new(ApplyOrder::TopDown, rules);
             heuristic_optimizer.optimize(plan)
@@ -185,13 +194,8 @@ impl PlanRoot {
 
         // Add Project if the any position of `self.out_fields` is set to zero.
         if self.out_fields.count_ones(..) != self.out_fields.len() {
-            let exprs = self
-                .out_fields
-                .ones()
-                .zip_eq(self.schema.fields.clone())
-                .map(|(index, field)| InputRef::new(index, field.data_type).into())
-                .collect();
-            plan = BatchProject::new(LogicalProject::new(plan, exprs)).into();
+            plan =
+                BatchProject::new(LogicalProject::with_out_fields(plan, &self.out_fields)).into();
         }
 
         Ok(plan)
@@ -217,13 +221,8 @@ impl PlanRoot {
 
         // Add Project if the any position of `self.out_fields` is set to zero.
         if self.out_fields.count_ones(..) != self.out_fields.len() {
-            let exprs = self
-                .out_fields
-                .ones()
-                .zip_eq(self.schema.fields.clone())
-                .map(|(index, field)| InputRef::new(index, field.data_type).into())
-                .collect();
-            plan = BatchProject::new(LogicalProject::new(plan, exprs)).into();
+            plan =
+                BatchProject::new(LogicalProject::with_out_fields(plan, &self.out_fields)).into();
         }
 
         Ok(plan)

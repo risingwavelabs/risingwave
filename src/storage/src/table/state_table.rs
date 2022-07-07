@@ -15,7 +15,7 @@
 use std::borrow::Cow;
 use std::cmp::Ordering;
 use std::marker::PhantomData;
-use std::ops::{Index, RangeBounds};
+use std::ops::Index;
 
 use futures::{pin_mut, Stream, StreamExt};
 use futures_async_stream::try_stream;
@@ -45,10 +45,10 @@ pub type StateTable<S> = StateTableBase<S, CellBasedRowSerializer>;
 /// encoding, using `RowSerializer` for row to cell serializing.
 #[derive(Clone)]
 pub struct StateTableBase<S: StateStore, E: Encoding> {
-    /// buffer key/values
+    /// buffer row operations.
     mem_table: MemTable,
 
-    /// Relation layer
+    /// write into state store.
     storage_table: StorageTableBase<S, E, READ_WRITE>,
 }
 
@@ -195,48 +195,9 @@ impl<S: StateStore, E: Encoding> StateTableBase<S, E> {
 
 /// Iterator functions.
 impl<S: StateStore> StateTable<S> {
-    async fn iter_with_encoded_key_range<'a, R>(
-        &'a self,
-        encoded_key_range: R,
-        epoch: u64,
-    ) -> StorageResult<RowStream<'a, S>>
-    where
-        R: RangeBounds<Vec<u8>> + Send + Clone + 'a,
-    {
-        let storage_table_iter = self
-            .storage_table
-            .streaming_iter_with_encoded_key_range(encoded_key_range.clone(), epoch)
-            .await?;
-        let mem_table_iter = self.mem_table.iter(encoded_key_range);
-
-        Ok(StateTableRowIter::new(mem_table_iter, storage_table_iter).into_stream())
-    }
-
     /// This function scans rows from the relational table.
     pub async fn iter(&self, epoch: u64) -> StorageResult<RowStream<'_, S>> {
-        self.iter_with_pk_bounds::<_, Row>(.., epoch).await
-    }
-
-    /// This function scans rows from the relational table with specific `pk_bounds`.
-    pub async fn iter_with_pk_bounds<R, B>(
-        &self,
-        pk_bounds: R,
-        epoch: u64,
-    ) -> StorageResult<RowStream<'_, S>>
-    where
-        R: RangeBounds<B> + Send + Clone + 'static,
-        B: AsRef<Row> + Send + Clone + 'static,
-    {
-        let encoded_start_key = pk_bounds
-            .start_bound()
-            .map(|pk| serialize_pk(pk.as_ref(), self.pk_serializer()));
-        let encoded_end_key = pk_bounds
-            .end_bound()
-            .map(|pk| serialize_pk(pk.as_ref(), self.pk_serializer()));
-        let encoded_key_range = (encoded_start_key, encoded_end_key);
-
-        self.iter_with_encoded_key_range(encoded_key_range, epoch)
-            .await
+        self.iter_with_pk_prefix(Row::empty(), epoch).await
     }
 
     /// This function scans rows from the relational table with specific `pk_prefix`.
@@ -245,12 +206,20 @@ impl<S: StateStore> StateTable<S> {
         pk_prefix: &'a Row,
         epoch: u64,
     ) -> StorageResult<RowStream<'a, S>> {
-        let prefix_serializer = self.pk_serializer().prefix(pk_prefix.size());
-        let encoded_prefix = serialize_pk(pk_prefix, &prefix_serializer);
-        let encoded_key_range = range_of_prefix(&encoded_prefix);
+        let storage_table_iter = self
+            .storage_table
+            .streaming_iter_with_pk_bounds(epoch, pk_prefix, ..)
+            .await?;
 
-        self.iter_with_encoded_key_range(encoded_key_range, epoch)
-            .await
+        let mem_table_iter = {
+            // TODO: reuse calculated serialized key from cell-based table.
+            let prefix_serializer = self.pk_serializer().prefix(pk_prefix.size());
+            let encoded_prefix = serialize_pk(pk_prefix, &prefix_serializer);
+            let encoded_key_range = range_of_prefix(&encoded_prefix);
+            self.mem_table.iter(encoded_key_range)
+        };
+
+        Ok(StateTableRowIter::new(mem_table_iter, storage_table_iter).into_stream())
     }
 }
 

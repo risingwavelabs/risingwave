@@ -109,12 +109,19 @@ message NestedLoopJoinNode {
 }
 
 message HashAggNode {
-  repeated uint32 group_keys = 1;
+  repeated uint32 group_key = 1;
   repeated expr.AggCall agg_calls = 2;
 }
 
+message ExpandNode {
+  message Subset {
+    repeated uint32 column_indices = 1;
+  }
+  repeated Subset column_subsets = 1;
+}
+
 message SortAggNode {
-  repeated expr.ExprNode group_keys = 1;
+  repeated expr.ExprNode group_key = 1;
   repeated expr.AggCall agg_calls = 2;
 }
 
@@ -128,8 +135,8 @@ message HashJoinNode {
 
 message SortMergeJoinNode {
   plan_common.JoinType join_type = 1;
-  repeated int32 left_keys = 2;
-  repeated int32 right_keys = 3;
+  repeated int32 left_key = 2;
+  repeated int32 right_key = 3;
   plan_common.OrderType direction = 4;
   repeated uint32 output_indices = 5;
 }
@@ -191,6 +198,15 @@ message MergeSortExchangeNode {
   repeated plan_common.ColumnOrder column_orders = 2;
 }
 
+message LookupJoinNode {
+  plan_common.JoinType join_type = 1;
+  expr.ExprNode condition = 2;
+  repeated int32 build_side_key = 3;
+  plan_common.CellBasedTableDesc probe_side_table_desc = 4;
+  repeated uint32 output_indices = 5;
+  repeated ExchangeSource sources = 6;
+}
+
 message PlanNode {
   repeated PlanNode children = 1;
   oneof node_body {
@@ -214,6 +230,8 @@ message PlanNode {
     HopWindowNode hop_window = 25;
     TableFunctionNode table_function = 26;
     SysRowSeqScanNode sys_row_seq_scan = 27;
+    ExpandNode expand = 28;
+    LookupJoinNode lookup_join = 29;
   }
   string identity = 24;
 }
@@ -234,7 +252,7 @@ message ExchangeInfo {
   }
   message HashInfo {
     uint32 output_count = 1;
-    repeated uint32 keys = 3;
+    repeated uint32 key = 3;
   }
   DistributionMode mode = 1;
   oneof distribution {

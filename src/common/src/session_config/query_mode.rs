@@ -14,6 +14,7 @@
 
 //! Contains configurations that could be accessed via "set" command.
 
+use std::fmt::Formatter;
 use std::str::FromStr;
 
 use super::{ConfigEntry, CONFIG_KEYS, QUERY_MODE};
@@ -47,6 +48,15 @@ impl FromStr for QueryMode {
                 config_entry: Self::entry_name().to_string(),
                 config_value: s.to_string(),
             })?
+        }
+    }
+}
+
+impl std::fmt::Display for QueryMode {
+    fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::Local => write!(f, "local"),
+            Self::Distributed => write!(f, "distributed"),
         }
     }
 }

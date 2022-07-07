@@ -22,13 +22,15 @@ use risingwave_pb::plan_common::JoinType;
 
 use super::{
     BatchProject, ColPrunable, CollectInputRef, LogicalProject, PlanBase, PlanRef,
-    PlanTreeNodeBinary, PredicatePushdown, StreamHashJoin, StreamProject, ToBatch, ToStream,
+    PlanTreeNodeBinary, PlanTreeNodeUnary, PredicatePushdown, StreamHashJoin, StreamProject,
+    ToBatch, ToStream,
 };
 use crate::expr::{ExprImpl, ExprType};
 use crate::optimizer::plan_node::{
-    BatchFilter, BatchHashJoin, BatchNestedLoopJoin, EqJoinPredicate, LogicalFilter, StreamFilter,
+    BatchFilter, BatchHashJoin, BatchNestedLoopJoin, EqJoinPredicate, LogicalFilter,
+    StreamDynamicFilter, StreamFilter,
 };
-use crate::optimizer::property::RequiredDist;
+use crate::optimizer::property::{Distribution, RequiredDist};
 use crate::utils::{ColIndexMapping, Condition};
 
 /// `LogicalJoin` combines two relations according to some condition.
@@ -292,7 +294,7 @@ impl LogicalJoin {
         &self.output_indices
     }
 
-    /// Clone with new `on` condition
+    /// Clone with new output indices
     pub fn clone_with_output_indices(&self, output_indices: Vec<usize>) -> Self {
         Self::new_with_output_indices(
             self.left.clone(),
@@ -719,31 +721,29 @@ impl ToStream for LogicalJoin {
             self.on.clone(),
         );
 
-        let right = self
-            .right()
-            .to_stream_with_dist_required(&RequiredDist::shard_by_key(
-                self.right().schema().len(),
-                &predicate.right_eq_indexes(),
-            ))?;
-
-        let r2l =
-            predicate.r2l_eq_columns_mapping(self.left().schema().len(), right.schema().len());
-
-        let left_dist = r2l.rewrite_required_distribution(&RequiredDist::PhysicalDist(
-            right.distribution().clone(),
-        ));
-
-        let left = self.left().to_stream_with_dist_required(&left_dist)?;
-        let logical_join = self.clone_with_left_right(left, right);
-
         if predicate.has_eq() {
+            let right = self
+                .right()
+                .to_stream_with_dist_required(&RequiredDist::shard_by_key(
+                    self.right().schema().len(),
+                    &predicate.right_eq_indexes(),
+                ))?;
+
+            let r2l =
+                predicate.r2l_eq_columns_mapping(self.left().schema().len(), right.schema().len());
+
+            let left_dist = r2l.rewrite_required_distribution(&RequiredDist::PhysicalDist(
+                right.distribution().clone(),
+            ));
+
+            let left = self.left().to_stream_with_dist_required(&left_dist)?;
+            let logical_join = self.clone_with_left_right(left, right);
+
             // Convert to Hash Join for equal joins
             // For inner joins, pull non-equal conditions to a filter operator on top of it
             let pull_filter = self.join_type == JoinType::Inner && predicate.has_non_eq();
             if pull_filter {
-                let new_output_indices = logical_join.output_indices.clone();
-                let new_internal_column_num = logical_join.internal_column_num();
-                let default_indices = (0..new_internal_column_num).collect::<Vec<_>>();
+                let default_indices = (0..self.internal_column_num()).collect::<Vec<_>>();
 
                 // Temporarily remove output indices.
                 let logical_join = logical_join.clone_with_output_indices(default_indices.clone());
@@ -760,8 +760,8 @@ impl ToStream for LogicalJoin {
                     let logical_project = LogicalProject::with_mapping(
                         plan,
                         ColIndexMapping::with_remaining_columns(
-                            &new_output_indices,
-                            new_internal_column_num,
+                            &self.output_indices,
+                            self.internal_column_num(),
                         ),
                     );
                     Ok(StreamProject::new(logical_project).into())
@@ -772,10 +772,84 @@ impl ToStream for LogicalJoin {
                 Ok(StreamHashJoin::new(logical_join, predicate).into())
             }
         } else {
-            Err(RwError::from(ErrorCode::NotImplemented(
+            let nested_loop_join_error = RwError::from(ErrorCode::NotImplemented(
                 "stream nested-loop join".to_string(),
                 None.into(),
-            )))
+            ));
+            // If there is exactly one predicate, it is a comparison (<, <=, >, >=), and the
+            // join is a `Inner` join, we can convert the scalar subquery into a
+            // `StreamDynamicFilter`
+
+            // Check if `Inner` subquery (no `IN` or `EXISTS` keywords)
+            if self.join_type != JoinType::Inner {
+                return Err(nested_loop_join_error);
+            }
+
+            // Check if right side is a scalar (for now, check if it is a simple agg)
+            let maybe_simple_agg = if let Some(proj) = self.right().as_logical_project() {
+                proj.input()
+            } else {
+                self.right()
+            };
+
+            if let Some(agg) = maybe_simple_agg.as_logical_agg() && agg.group_key().is_empty() {
+                /* do nothing */
+            } else {
+                return Err(nested_loop_join_error);
+            }
+
+            // Check if the join condition is a correlated comparison
+            let conj = &predicate.other_cond().conjunctions;
+
+            let left_ref_index = if let Some(expr) = conj.first() && conj.len() == 1
+            {
+                if let Some((left_ref, _, right_ref)) = expr.as_comparison_cond()
+                    && left_ref.index < self.left().schema().len()
+                    && right_ref.index >= self.left().schema().len()
+                {
+                    left_ref.index
+                } else {
+                    return Err(nested_loop_join_error);
+                }
+            } else {
+                return Err(nested_loop_join_error);
+            };
+
+            let left = self
+                .left()
+                .to_stream_with_dist_required(&RequiredDist::shard_by_key(
+                    self.left().schema().len(),
+                    &[left_ref_index],
+                ))?;
+
+            let right = self
+                .right()
+                .to_stream_with_dist_required(&RequiredDist::PhysicalDist(
+                    Distribution::Broadcast,
+                ))?;
+
+            assert!(right.as_stream_exchange().is_some());
+
+            assert_eq!(right.inputs().len(), 1);
+            assert_eq!(
+                *right.inputs().first().unwrap().distribution(),
+                Distribution::Single
+            );
+
+            let plan = StreamDynamicFilter::new(predicate.other_cond().clone(), left, right).into();
+
+            if self.output_indices != (0..self.internal_column_num()).collect::<Vec<_>>() {
+                let logical_project = LogicalProject::with_mapping(
+                    plan,
+                    ColIndexMapping::with_remaining_columns(
+                        &self.output_indices,
+                        self.internal_column_num(),
+                    ),
+                );
+                Ok(StreamProject::new(logical_project).into())
+            } else {
+                Ok(plan)
+            }
         }
     }
 

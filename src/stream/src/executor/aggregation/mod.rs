@@ -413,16 +413,17 @@ pub fn generate_state_tables_from_proto<S: StateStore>(
                 .map(|col| col.column_desc.as_ref().unwrap().into())
                 .collect();
             let order_types = table_catalog
-                .orders
+                .order_key
                 .iter()
-                .map(|order_type| {
+                .map(|order_key| {
                     OrderType::from_prost(
-                        &risingwave_pb::plan_common::OrderType::from_i32(*order_type).unwrap(),
+                        &risingwave_pb::plan_common::OrderType::from_i32(order_key.order_type)
+                            .unwrap(),
                     )
                 })
                 .collect();
             let dist_key_indices = table_catalog
-                .distribution_keys
+                .distribution_key
                 .iter()
                 .map(|dist_index| *dist_index as usize)
                 .collect();

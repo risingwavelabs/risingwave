@@ -99,8 +99,8 @@ pub struct CompactorContext {
 }
 
 trait CompactionFilter: Send + DynClone {
-    fn filter(&self, _: &[u8]) -> bool {
-        true
+    fn should_delete(&mut self, _: &[u8]) -> bool {
+        false
     }
 }
 
@@ -114,22 +114,33 @@ impl CompactionFilter for DummyCompactionFilter {}
 #[derive(Clone)]
 pub struct StateCleanUpCompactionFilter {
     existing_table_ids: HashSet<u32>,
+    last_table: Option<(u32, bool)>,
 }
 
 impl StateCleanUpCompactionFilter {
     fn new(table_id_set: HashSet<u32>) -> Self {
         StateCleanUpCompactionFilter {
             existing_table_ids: table_id_set,
+            last_table: None,
         }
     }
 }
 
 impl CompactionFilter for StateCleanUpCompactionFilter {
-    fn filter(&self, key: &[u8]) -> bool {
+    fn should_delete(&mut self, key: &[u8]) -> bool {
         let table_id_option = get_table_id(key);
         match table_id_option {
-            None => true,
-            Some(table_id) => self.existing_table_ids.contains(&table_id),
+            None => false,
+            Some(table_id) => {
+                if let Some((last_table_id, removed)) = self.last_table.as_ref() {
+                    if *last_table_id == table_id {
+                        return *removed;
+                    }
+                }
+                let removed = !self.existing_table_ids.contains(&table_id);
+                self.last_table = Some((table_id, removed));
+                removed
+            }
         }
     }
 }
@@ -137,24 +148,35 @@ impl CompactionFilter for StateCleanUpCompactionFilter {
 #[derive(Clone)]
 pub struct TTLCompactionFilter {
     table_id_to_ttl: HashMap<u32, u32>,
-    expire: u64,
+    expire_epoch: u64,
+    last_table_and_ttl: Option<(u32, u64)>,
 }
 
 impl CompactionFilter for TTLCompactionFilter {
-    fn filter(&self, key: &[u8]) -> bool {
+    fn should_delete(&mut self, key: &[u8]) -> bool {
         pub use risingwave_common::util::epoch::Epoch;
         let (table_id, epoch) = extract_table_id_and_epoch(key);
         match table_id {
-            Some(table_id) => match self.table_id_to_ttl.get(&table_id) {
-                Some(ttl_second_u32) => {
-                    assert!(*ttl_second_u32 != TABLE_OPTION_DUMMY_TTL);
-                    let min_epoch = Epoch(self.expire).subtract_ms((*ttl_second_u32 * 1000) as u64);
-                    Epoch(epoch) > min_epoch
+            Some(table_id) => {
+                if let Some((last_table_id, ttl_mill)) = self.last_table_and_ttl.as_ref() {
+                    if *last_table_id == table_id {
+                        let min_epoch = Epoch(self.expire_epoch).subtract_ms(*ttl_mill);
+                        return Epoch(epoch) <= min_epoch;
+                    }
                 }
-                None => true,
-            },
-
-            None => true,
+                match self.table_id_to_ttl.get(&table_id) {
+                    Some(ttl_second_u32) => {
+                        assert!(*ttl_second_u32 != TABLE_OPTION_DUMMY_TTL);
+                        // default to zero.
+                        let ttl_mill = (*ttl_second_u32 * 1000) as u64;
+                        let min_epoch = Epoch(self.expire_epoch).subtract_ms(ttl_mill);
+                        self.last_table_and_ttl = Some((table_id, ttl_mill));
+                        Epoch(epoch) <= min_epoch
+                    }
+                    None => false,
+                }
+            }
+            None => false,
         }
     }
 }
@@ -163,7 +185,8 @@ impl TTLCompactionFilter {
     fn new(table_id_to_ttl: HashMap<u32, u32>, expire: u64) -> Self {
         Self {
             table_id_to_ttl,
-            expire,
+            expire_epoch: expire,
+            last_table_and_ttl: None,
         }
     }
 }
@@ -174,8 +197,10 @@ struct MultiCompactionFilter {
 }
 
 impl CompactionFilter for MultiCompactionFilter {
-    fn filter(&self, key: &[u8]) -> bool {
-        !self.filter_vec.iter().any(|filter| !filter.filter(key))
+    fn should_delete(&mut self, key: &[u8]) -> bool {
+        self.filter_vec
+            .iter_mut()
+            .any(|filter| filter.should_delete(key))
     }
 }
 
@@ -295,7 +320,7 @@ impl Compactor {
             sorted_output_ssts: vec![],
             task_id: 0,
             target_level: 0,
-            is_target_ultimate_and_leveling: false,
+            gc_delete_keys: false,
             task_status: false,
             // VNode mappings are not required when compacting shared buffer to L0
             vnode_mappings: vec![],
@@ -305,6 +330,7 @@ impl Compactor {
             compression_algorithm: 0,
             compaction_filter_mask: 0,
             table_options: HashMap::default(),
+            current_epoch_time: 0,
         };
 
         let sstable_store = context.sstable_store.clone();
@@ -456,6 +482,8 @@ impl Compactor {
             .with_label_values(&[compact_task.input_ssts[0].level_idx.to_string().as_str()])
             .start_timer();
 
+        // if disable_parallel_compact = true, use one splits to limit the parallelism of
+        // compact_task
         if !compact_task.vnode_mappings.is_empty() {
             compact_task.splits = vec![risingwave_pb::hummock::KeyRange {
                 left: vec![],
@@ -467,6 +495,7 @@ impl Compactor {
         // Number of splits (key ranges) is equal to number of compaction tasks
         let parallelism = compact_task.splits.len();
         assert_ne!(parallelism, 0, "splits cannot be empty");
+        context.stats.compact_parallelism.inc_by(parallelism as u64);
         let mut compact_success = true;
         let mut output_ssts = Vec::with_capacity(parallelism);
         let mut compaction_futures = vec![];
@@ -507,7 +536,10 @@ impl Compactor {
                 })
                 .map(|id_to_option| (*id_to_option.0, id_to_option.1.ttl))
                 .collect();
-            let ttl_filter = Box::new(TTLCompactionFilter::new(id_to_ttl, compact_task.watermark));
+            let ttl_filter = Box::new(TTLCompactionFilter::new(
+                id_to_ttl,
+                compact_task.current_epoch_time,
+            ));
             multi_filter.register(ttl_filter);
         }
 
@@ -679,7 +711,7 @@ impl Compactor {
             &mut builder,
             kr,
             iter,
-            !self.compact_task.is_target_ultimate_and_leveling,
+            self.compact_task.gc_delete_keys,
             self.compact_task.watermark,
             compaction_filter,
         )
@@ -939,9 +971,9 @@ impl Compactor {
         sst_builder: &mut GroupedSstableBuilder<B, G>,
         kr: KeyRange,
         mut iter: BoxedForwardHummockIterator,
-        has_user_key_overlap: bool,
+        gc_delete_keys: bool,
         watermark: Epoch,
-        compaction_filter: impl CompactionFilter,
+        mut compaction_filter: impl CompactionFilter,
     ) -> HummockResult<()>
     where
         B: Clone + Fn() -> F,
@@ -954,24 +986,17 @@ impl Compactor {
             iter.rewind().await?;
         }
 
-        let mut skip_key = BytesMut::new();
         let mut last_key = BytesMut::new();
+        let mut watermark_can_see_last_key = false;
 
         while iter.is_valid() {
             let iter_key = iter.key();
 
-            if !skip_key.is_empty() {
-                if VersionedComparator::same_user_key(iter_key, &skip_key) {
-                    iter.next().await?;
-                    continue;
-                } else {
-                    skip_key.clear();
-                }
-            }
-
             let is_new_user_key =
                 last_key.is_empty() || !VersionedComparator::same_user_key(iter_key, &last_key);
 
+            let mut drop = false;
+            let epoch = get_epoch(iter_key);
             if is_new_user_key {
                 if !kr.right.is_empty()
                     && VersionedComparator::compare_key(iter_key, &kr.right)
@@ -982,24 +1007,27 @@ impl Compactor {
 
                 last_key.clear();
                 last_key.extend_from_slice(iter_key);
+                watermark_can_see_last_key = false;
             }
 
-            let epoch = get_epoch(iter_key);
-
-            // Among keys with same user key, only retain keys which satisfy `epoch` >= `watermark`,
-            // and the latest key which satisfies `epoch` < `watermark`
-            let mut drop = false;
-            if epoch < watermark {
-                skip_key = BytesMut::from(iter_key);
-                if iter.value().is_delete() && !has_user_key_overlap {
-                    drop = true;
-                }
-            }
-
-            // in our design, frontend avoid to access keys which had be deleted, so we dont need to
-            // consider the epoch when the compaction_filter match (it means that mv had drop)
-            if !drop && !compaction_filter.filter(iter_key) {
+            // Among keys with same user key, only retain keys which satisfy `epoch` >= `watermark`.
+            // If there is no keys whose epoch is equal than `watermark`, keep the latest key which
+            // satisfies `epoch` < `watermark`
+            // in our design, frontend avoid to access keys which had be deleted, so we dont
+            // need to consider the epoch when the compaction_filter match (it
+            // means that mv had drop)
+            if (epoch <= watermark && gc_delete_keys && iter.value().is_delete())
+                || (epoch < watermark && watermark_can_see_last_key)
+            {
                 drop = true;
+            }
+
+            if !drop && compaction_filter.should_delete(iter_key) {
+                drop = true;
+            }
+
+            if epoch <= watermark {
+                watermark_can_see_last_key = true;
             }
 
             if drop {
