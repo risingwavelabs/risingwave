@@ -69,7 +69,7 @@ pub fn handle_describe(context: OptimizerContext, table_name: ObjectName) -> Res
     // Convert all indexs to rows
     rows.extend(indices.iter().map(|i| {
         let s = i
-            .distribution_keys
+            .distribution_key
             .iter()
             .map(|c| i.columns[*c].name().to_string())
             .collect_vec();

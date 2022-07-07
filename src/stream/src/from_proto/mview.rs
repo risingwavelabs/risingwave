@@ -32,7 +32,7 @@ impl ExecutorBuilder for MaterializeExecutorBuilder {
         let node = try_match_expand!(node.get_node_body().unwrap(), NodeBody::Materialize)?;
 
         let table_id = TableId::from(&node.table_ref_id);
-        let keys = node
+        let order_key = node
             .column_orders
             .iter()
             .map(OrderPair::from_prost)
@@ -43,8 +43,8 @@ impl ExecutorBuilder for MaterializeExecutorBuilder {
             .map(|id| ColumnId::from(*id))
             .collect();
 
-        let distribution_keys = node
-            .distribution_keys
+        let distribution_key = node
+            .distribution_key
             .iter()
             .map(|key| *key as usize)
             .collect();
@@ -53,10 +53,10 @@ impl ExecutorBuilder for MaterializeExecutorBuilder {
             params.input.remove(0),
             store,
             table_id,
-            keys,
+            order_key,
             column_ids,
             params.executor_id,
-            distribution_keys,
+            distribution_key,
             params.vnode_bitmap.map(Arc::new),
         );
 
@@ -90,8 +90,8 @@ impl ExecutorBuilder for ArrangeExecutorBuilder {
             .map(|x| ColumnId::from(x.column_id))
             .collect();
 
-        let distribution_keys = arrange_node
-            .distribution_keys
+        let distribution_key = arrange_node
+            .distribution_key
             .iter()
             .map(|key| *key as usize)
             .collect();
@@ -108,7 +108,7 @@ impl ExecutorBuilder for ArrangeExecutorBuilder {
             keys,
             column_ids,
             params.executor_id,
-            distribution_keys,
+            distribution_key,
             vnodes,
         );
 

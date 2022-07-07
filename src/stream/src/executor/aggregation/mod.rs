@@ -413,7 +413,7 @@ pub fn generate_state_tables_from_proto<S: StateStore>(
                 .map(|col| col.column_desc.as_ref().unwrap().into())
                 .collect();
             let order_types = table_catalog
-                .order_keys
+                .order_key
                 .iter()
                 .map(|order_key| {
                     OrderType::from_prost(
@@ -423,7 +423,7 @@ pub fn generate_state_tables_from_proto<S: StateStore>(
                 })
                 .collect();
             let dist_key_indices = table_catalog
-                .distribution_keys
+                .distribution_key
                 .iter()
                 .map(|dist_index| *dist_index as usize)
                 .collect();

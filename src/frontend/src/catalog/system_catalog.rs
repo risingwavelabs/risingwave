@@ -27,7 +27,7 @@ pub struct SystemCatalog {
     pub columns: Vec<ColumnCatalog>,
 
     /// Primary key columns indices.
-    pub pks: Vec<usize>,
+    pub pk: Vec<usize>,
 
     // owner of table, should always be default super user, keep it for compatibility.
     pub owner: String,
@@ -49,7 +49,7 @@ impl SystemCatalog {
         TableDesc {
             table_id: self.id,
             columns: self.columns.iter().map(|c| c.column_desc.clone()).collect(),
-            pks: self.pks.clone(),
+            pk: self.pk.clone(),
             ..Default::default()
         }
     }

@@ -109,19 +109,19 @@ message NestedLoopJoinNode {
 }
 
 message HashAggNode {
-  repeated uint32 group_keys = 1;
+  repeated uint32 group_key = 1;
   repeated expr.AggCall agg_calls = 2;
 }
 
 message ExpandNode {
   message Subset {
-    repeated uint32 keys = 1;
+    repeated uint32 column_indices = 1;
   }
   repeated Subset column_subsets = 1;
 }
 
 message SortAggNode {
-  repeated expr.ExprNode group_keys = 1;
+  repeated expr.ExprNode group_key = 1;
   repeated expr.AggCall agg_calls = 2;
 }
 
@@ -135,8 +135,8 @@ message HashJoinNode {
 
 message SortMergeJoinNode {
   plan_common.JoinType join_type = 1;
-  repeated int32 left_keys = 2;
-  repeated int32 right_keys = 3;
+  repeated int32 left_key = 2;
+  repeated int32 right_key = 3;
   plan_common.OrderType direction = 4;
   repeated uint32 output_indices = 5;
 }
@@ -242,7 +242,7 @@ message ExchangeInfo {
   }
   message HashInfo {
     uint32 output_count = 1;
-    repeated uint32 keys = 3;
+    repeated uint32 key = 3;
   }
   DistributionMode mode = 1;
   oneof distribution {

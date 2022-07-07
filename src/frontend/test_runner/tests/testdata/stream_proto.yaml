@@ -106,7 +106,7 @@
       columnIds:
         - 0
         - 1
-      distributionKeys:
+      distributionKey:
         - 1
     ---
     id: 4294967294
@@ -125,10 +125,10 @@
           columnId: 1
           name: _row_id
         isHidden: true
-    orderKeys:
+    orderKey:
       - orderType: ASCENDING
         index: 1
-    distributionKeys:
+    distributionKey:
       - 1
     pk:
       - 1
@@ -209,7 +209,7 @@
       columnIds:
         - 0
         - 1
-      distributionKeys:
+      distributionKey:
         - 1
     ---
     id: 4294967294
@@ -228,10 +228,10 @@
           columnId: 1
           name: _row_id
         isHidden: true
-    orderKeys:
+    orderKey:
       - orderType: ASCENDING
         index: 1
-    distributionKeys:
+    distributionKey:
       - 1
     pk:
       - 1
@@ -321,7 +321,7 @@
       columnIds:
         - 0
         - 1
-      distributionKeys:
+      distributionKey:
         - 1
     ---
     id: 4294967294
@@ -340,10 +340,10 @@
           columnId: 1
           name: _row_id
         isHidden: true
-    orderKeys:
+    orderKey:
       - orderType: ASCENDING
         index: 1
-    distributionKeys:
+    distributionKey:
       - 1
     pk:
       - 1
@@ -433,7 +433,7 @@
                       returnType:
                         typeName: INT64
                         isNullable: true
-                  distributionKeys:
+                  distributionKey:
                     - 1
                   internalTables:
                     - id: 4294967294
@@ -444,7 +444,7 @@
                             columnType:
                               typeName: INT64
                               isNullable: true
-                      distributionKeys:
+                      distributionKey:
                         - 1
                       owner: root
                     - id: 4294967294
@@ -455,7 +455,7 @@
                             columnType:
                               typeName: INT64
                               isNullable: true
-                      distributionKeys:
+                      distributionKey:
                         - 1
                       owner: root
             fields:
@@ -697,7 +697,7 @@
                   isNullable: true
                 name: "agg#1"
             hashAgg:
-              groupKeys:
+              groupKey:
                 - 0
               aggCalls:
                 - type: COUNT
@@ -729,9 +729,9 @@
                           typeName: INT64
                           isNullable: true
                         columnId: 1
-                  orderKeys:
+                  orderKey:
                     - orderType: ASCENDING
-                  distributionKeys:
+                  distributionKey:
                     - 0
                   pk:
                     - 0
@@ -750,9 +750,9 @@
                           typeName: INT64
                           isNullable: true
                         columnId: 1
-                  orderKeys:
+                  orderKey:
                     - orderType: ASCENDING
-                  distributionKeys:
+                  distributionKey:
                     - 0
                   pk:
                     - 0
@@ -799,7 +799,7 @@
       columnIds:
         - 0
         - 1
-      distributionKeys:
+      distributionKey:
         - 1
     ---
     id: 4294967294
@@ -818,10 +818,10 @@
           columnId: 1
           name: v2
         isHidden: true
-    orderKeys:
+    orderKey:
       - orderType: ASCENDING
         index: 1
-    distributionKeys:
+    distributionKey:
       - 1
     pk:
       - 1

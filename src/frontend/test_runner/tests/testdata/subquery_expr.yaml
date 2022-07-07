@@ -128,7 +128,7 @@
             LogicalValues { rows: [[]], schema: Schema { fields: [] } }
             LogicalValues { rows: [[1:Int32]], schema: Schema { fields: [:Int32] } }
           LogicalProject { exprs: [($0 >= 1:Int32)] }
-            LogicalAgg { group_keys: [], agg_calls: [count] }
+            LogicalAgg { group_key: [], agg_calls: [count] }
               LogicalValues { rows: [[1:Int32]], schema: Schema { fields: [:Int32] } }
 - sql: |
     select 1 + (select 2 from t);

@@ -122,7 +122,7 @@ fn make_internal_table(is_agg_value: bool) -> ProstTable {
         database_id: DatabaseId::placeholder() as u32,
         name: String::new(),
         columns,
-        order_keys: vec![ColumnOrder {
+        order_key: vec![ColumnOrder {
             index: 0,
             order_type: 2,
         }],
@@ -196,7 +196,7 @@ fn make_stream_node() -> StreamNode {
     let simple_agg_node = StreamNode {
         node_body: Some(NodeBody::GlobalSimpleAgg(SimpleAggNode {
             agg_calls: vec![make_sum_aggcall(0), make_sum_aggcall(1)],
-            distribution_keys: Default::default(),
+            distribution_key: Default::default(),
             internal_tables: vec![make_internal_table(true), make_internal_table(false)],
             column_mapping: HashMap::new(),
             is_append_only: false,
@@ -229,7 +229,7 @@ fn make_stream_node() -> StreamNode {
     let simple_agg_node_1 = StreamNode {
         node_body: Some(NodeBody::GlobalSimpleAgg(SimpleAggNode {
             agg_calls: vec![make_sum_aggcall(0), make_sum_aggcall(1)],
-            distribution_keys: Default::default(),
+            distribution_key: Default::default(),
             internal_tables: vec![make_internal_table(true), make_internal_table(false)],
             column_mapping: HashMap::new(),
             is_append_only: false,
@@ -278,7 +278,7 @@ fn make_stream_node() -> StreamNode {
             associated_table_ref_id: None,
             column_ids: vec![0_i32, 1_i32],
             column_orders: vec![make_column_order(1), make_column_order(2)],
-            distribution_keys: Default::default(),
+            distribution_key: Default::default(),
         })),
         fields: vec![], // TODO: fill this later
         operator_id: 7,

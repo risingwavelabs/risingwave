@@ -29,9 +29,9 @@ impl Rule for ApplyAgg {
 
         // Insert all the columns of `LogicalApply`'s left at the beginning of `LogicalAgg`.
         let apply_left_len = apply.left().schema().len();
-        let mut group_keys: Vec<usize> = (0..apply_left_len).collect();
-        let (mut agg_calls, agg_group_keys, _) = agg.clone().decompose();
-        group_keys.extend(agg_group_keys.into_iter().map(|key| key + apply_left_len));
+        let mut group_key: Vec<usize> = (0..apply_left_len).collect();
+        let (mut agg_calls, agg_group_key, _) = agg.clone().decompose();
+        group_key.extend(agg_group_key.into_iter().map(|key| key + apply_left_len));
 
         // Shift index of agg_calls' `InputRef` with `apply_left_len`.
         agg_calls.iter_mut().for_each(|agg_call| {
@@ -41,7 +41,7 @@ impl Rule for ApplyAgg {
         });
 
         let new_apply = apply.clone_with_left_right(apply.left(), agg.input());
-        let new_agg = LogicalAgg::new(agg_calls, group_keys, new_apply.into());
+        let new_agg = LogicalAgg::new(agg_calls, group_key, new_apply.into());
         Some(new_agg.into())
     }
 }
