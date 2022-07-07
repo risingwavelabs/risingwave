@@ -1,7 +1,7 @@
 [package]
 edition = "2021"
 name = "risingwave_batch"
-version = "0.1.9"
+version = "0.1.10"
 
 [dependencies]
 anyhow = "1"
@@ -69,3 +69,8 @@ tikv-jemallocator = "0.5"
 [[bench]]
 name = "filter"
 harness = false
+
+[[bench]]
+name = "nested_loop_join"
+harness = false
+

@@ -19,14 +19,15 @@ use futures_async_stream::try_stream;
 use itertools::Itertools;
 use risingwave_common::array::column::Column;
 use risingwave_common::array::data_chunk_iter::RowRef;
-use risingwave_common::array::{DataChunk, Row, Vis};
+use risingwave_common::array::{Array, DataChunk, Row, Vis};
 use risingwave_common::catalog::Schema;
-use risingwave_common::error::{ErrorCode, Result, RwError};
+use risingwave_common::error::{Result, RwError};
 use risingwave_common::types::{DataType, DatumRef};
 use risingwave_common::util::chunk_coalesce::{DataChunkBuilder, SlicedDataChunk};
 use risingwave_expr::expr::{build_from_prost as expr_build_from_prost, BoxedExpression};
 use risingwave_pb::batch_plan::plan_node::NodeBody;
 
+use crate::error::BatchError;
 use crate::executor::join::chunked_data::RowId;
 use crate::executor::join::row_level_iter::RowLevelIter;
 use crate::executor::join::JoinType;
@@ -162,7 +163,7 @@ impl NestedLoopJoinExecutor {
         let mut output_array_builders: Vec<_> = data_types
             .iter()
             .map(|data_type| data_type.create_array_builder(num_tuples))
-            .try_collect()?;
+            .collect();
         for _i in 0..num_tuples {
             for (builder, datum_ref) in output_array_builders.iter_mut().zip_eq(datum_refs) {
                 builder.append_datum_ref(*datum_ref)?;
@@ -210,7 +211,6 @@ impl BoxedExecutorBuilder for NestedLoopJoinExecutor {
         let join_expr = expr_build_from_prost(nested_loop_join_node.get_join_cond()?)?;
 
         let left_child = inputs.remove(0);
-        let probe_side_schema = left_child.schema().data_types();
         let right_child = inputs.remove(0);
 
         // TODO(Bowen): Merge this with derive schema in Logical Join (#790).
@@ -233,10 +233,6 @@ impl BoxedExecutorBuilder for NestedLoopJoinExecutor {
             .map(|&x| x as usize)
             .collect();
         let original_schema = Schema { fields };
-        let actual_schema = output_indices
-            .iter()
-            .map(|&idx| original_schema[idx].clone())
-            .collect();
         match join_type {
             JoinType::Inner
             | JoinType::LeftOuter
@@ -246,34 +242,56 @@ impl BoxedExecutorBuilder for NestedLoopJoinExecutor {
             | JoinType::RightSemi
             | JoinType::RightAnti => {
                 // TODO: Support FULL OUTER.
-                let outer_table_source = RowLevelIter::new(left_child);
 
-                Ok(Box::new(Self {
+                Ok(Box::new(Self::new(
                     join_expr,
                     join_type,
-                    chunk_builder: DataChunkBuilder::with_default_size(
-                        original_schema.data_types(),
-                    ),
-                    schema: actual_schema,
+                    original_schema,
                     output_indices,
-                    last_chunk: None,
-                    probe_side_schema,
-                    probe_side_source: outer_table_source,
-                    build_table: RowLevelIter::new(right_child),
-                    probe_remain_chunk_idx: 0,
-                    probe_remain_row_idx: 0,
-                    identity: "NestedLoopJoinExecutor2".to_string(),
-                }))
+                    left_child,
+                    right_child,
+                    "NestedLoopJoinExecutor2".to_string(),
+                )))
             }
-            _ => Err(ErrorCode::NotImplemented(
-                format!("Do not support {:?} join type now.", join_type),
-                None.into(),
-            )
+            _ => Err(BatchError::UnsupportedFunction(format!(
+                "Do not support {:?} join type now.",
+                join_type
+            ))
             .into()),
         }
     }
 }
+
 impl NestedLoopJoinExecutor {
+    pub fn new(
+        join_expr: BoxedExpression,
+        join_type: JoinType,
+        original_schema: Schema,
+        output_indices: Vec<usize>,
+        left_child: BoxedExecutor,
+        right_child: BoxedExecutor,
+        identity: String,
+    ) -> Self {
+        let schema = output_indices
+            .iter()
+            .map(|&idx| original_schema[idx].clone())
+            .collect();
+        Self {
+            join_expr,
+            join_type,
+            schema,
+            output_indices,
+            chunk_builder: DataChunkBuilder::with_default_size(original_schema.data_types()),
+            last_chunk: None,
+            probe_side_schema: left_child.schema().data_types(),
+            probe_side_source: RowLevelIter::new(left_child),
+            build_table: RowLevelIter::new(right_child),
+            probe_remain_chunk_idx: 0,
+            probe_remain_row_idx: 0,
+            identity,
+        }
+    }
+
     /// Probe matched rows in `probe_table`.
     /// # Arguments
     /// * `first_probe`: whether the first probing. Init outer source if yes.
@@ -302,9 +320,8 @@ impl NestedLoopJoinExecutor {
                 JoinType::RightOuter => self.do_right_outer_join(),
                 JoinType::RightSemi => self.do_right_semi_join(),
                 JoinType::RightAnti => self.do_right_anti_join(),
-                _ => Err(ErrorCode::NotImplemented(
+                _ => Err(BatchError::UnsupportedFunction(
                     "Do not support other join types!".to_string(),
-                    None.into(),
                 )
                 .into()),
             }?;
@@ -323,6 +340,7 @@ impl NestedLoopJoinExecutor {
                     let (mut left_data_chunk, return_data_chunk) = self
                         .chunk_builder
                         .append_chunk(SlicedDataChunk::new_checked(ret_chunk)?)?;
+
                     // Have checked last chunk is None in before. Now swap to buffer it.
                     std::mem::swap(&mut self.last_chunk, &mut left_data_chunk);
                     if let Some(inner_chunk) = return_data_chunk {
@@ -347,9 +365,8 @@ impl NestedLoopJoinExecutor {
         match self.join_type {
             JoinType::RightOuter => self.do_probe_remaining_right_outer(),
             JoinType::RightAnti => self.do_probe_remaining_right_anti(),
-            _ => Err(ErrorCode::NotImplemented(
+            _ => Err(BatchError::UnsupportedFunction(
                 "unsupported type for probe_remaining".to_string(),
-                None.into(),
             )
             .into()),
         }
@@ -367,7 +384,7 @@ impl NestedLoopJoinExecutor {
             let new_chunk = Self::concatenate(&const_row_chunk, build_side_chunk)?;
             // Join with current row.
             let sel_vector = self.join_expr.eval(&new_chunk)?;
-            let ret_chunk = new_chunk.with_visibility(sel_vector.as_bool().try_into()?);
+            let ret_chunk = new_chunk.with_visibility(sel_vector.as_bool().iter().collect());
             self.build_table.advance_chunk();
             Ok(ProbeResult {
                 cur_row_finished: false,
@@ -568,10 +585,9 @@ impl NestedLoopJoinExecutor {
             (Vis::Compact(_), _) => right.vis().clone(),
             (_, Vis::Compact(_)) => left.vis().clone(),
             (Vis::Bitmap(_), Vis::Bitmap(_)) => {
-                return Err(ErrorCode::NotImplemented(
+                return Err(BatchError::UnsupportedFunction(
                     "The concatenate behaviour of two chunk with visibility is undefined"
                         .to_string(),
-                    None.into(),
                 )
                 .into())
             }
@@ -605,7 +621,7 @@ mod tests {
         let length = 5;
         let mut columns = vec![];
         for i in 0..num_of_columns {
-            let mut builder = PrimitiveArrayBuilder::<i32>::new(length).unwrap();
+            let mut builder = PrimitiveArrayBuilder::<i32>::new(length);
             for _ in 0..length {
                 builder.append(Some(i as i32)).unwrap();
             }
@@ -616,7 +632,7 @@ mod tests {
         let bool_vec = vec![true, false, true, false, false];
         let chunk2: DataChunk = DataChunk::new(
             columns.clone(),
-            Vis::Bitmap((bool_vec.clone()).try_into().unwrap()),
+            Vis::Bitmap((bool_vec.clone()).into_iter().collect()),
         );
         let chunk = NestedLoopJoinExecutor::concatenate(&chunk1, &chunk2).unwrap();
         assert_eq!(chunk.capacity(), chunk1.capacity());
@@ -624,7 +640,7 @@ mod tests {
         assert_eq!(chunk.columns().len(), chunk1.columns().len() * 2);
         assert_eq!(
             chunk.visibility().cloned().unwrap(),
-            (bool_vec).try_into().unwrap()
+            (bool_vec).into_iter().collect()
         );
     }
 

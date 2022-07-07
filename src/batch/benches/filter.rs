@@ -12,16 +12,11 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::sync::Arc;
-
 use criterion::{black_box, criterion_group, criterion_main, BatchSize, BenchmarkId, Criterion};
 use futures::StreamExt;
-use risingwave_batch::executor::test_utils::MockExecutor;
+use risingwave_batch::executor::test_utils::{gen_data, MockExecutor};
 use risingwave_batch::executor::{BoxedExecutor, FilterExecutor};
-use risingwave_common::array::column::Column;
-use risingwave_common::array::DataChunk;
 use risingwave_common::catalog::schema_test_utils::field_n;
-use risingwave_common::field_generator::FieldGeneratorImpl;
 use risingwave_common::types::{DataType, ScalarImpl};
 use risingwave_expr::expr::build_from_prost;
 use risingwave_pb::data::data_type::TypeName;
@@ -35,37 +30,6 @@ use tokio::runtime::Runtime;
 
 #[global_allocator]
 static GLOBAL: Jemalloc = Jemalloc;
-
-const SEED: u64 = 0xFF67FEABBAEF76FF;
-
-/// Generate [`batch_num`] data chunks, each data chunk has cardinality of [`batch_size`].
-fn gen_data(data_type: DataType, batch_size: usize, batch_num: usize) -> Vec<DataChunk> {
-    let mut data_gen =
-        FieldGeneratorImpl::with_random(data_type.clone(), None, None, None, None, SEED).unwrap();
-    let mut ret = Vec::<DataChunk>::with_capacity(batch_num);
-
-    for _ in 0..batch_num {
-        let mut array_builder = data_type.create_array_builder(batch_size).unwrap();
-
-        for _ in 0..batch_size {
-            array_builder
-                .append_datum(&Some(ScalarImpl::Int64(
-                    // TODO: We should remove this later when generator supports generate Datum,
-                    // see https://github.com/singularity-data/risingwave/issues/3519
-                    data_gen.generate(0).as_i64().unwrap(),
-                )))
-                .unwrap();
-        }
-
-        let array = array_builder.finish().unwrap();
-        ret.push(DataChunk::new(
-            vec![Column::new(Arc::new(array))],
-            batch_size,
-        ));
-    }
-
-    ret
-}
 
 fn create_filter_executor(chunk_size: usize, chunk_num: usize) -> BoxedExecutor {
     let input_data = gen_data(DataType::Int64, chunk_size, chunk_num);

@@ -130,6 +130,7 @@ fn make_general_expr(func: ExprType, exprs: Vec<Expr>) -> Option<Expr> {
         E::Replace => Some(Expr::Function(make_func("replace", &exprs))),
         E::Md5 => Some(Expr::Function(make_func("md5", &exprs))),
         E::ToChar => Some(Expr::Function(make_func("to_char", &exprs))),
+        E::Overlay => Some(make_overlay(exprs)),
         _ => None,
     }
 }
@@ -154,6 +155,24 @@ fn make_trim(func: ExprType, exprs: Vec<Expr>) -> Expr {
     }
 }
 
+fn make_overlay(exprs: Vec<Expr>) -> Expr {
+    if exprs.len() == 3 {
+        Expr::Overlay {
+            expr: Box::new(exprs[0].clone()),
+            new_substring: Box::new(exprs[1].clone()),
+            start: Box::new(exprs[2].clone()),
+            count: None,
+        }
+    } else {
+        Expr::Overlay {
+            expr: Box::new(exprs[0].clone()),
+            new_substring: Box::new(exprs[1].clone()),
+            start: Box::new(exprs[2].clone()),
+            count: Some(Box::new(exprs[3].clone())),
+        }
+    }
+}
+
 fn make_func(func_name: &str, exprs: &[Expr]) -> Function {
     let args = exprs
         .iter()
@@ -164,6 +183,8 @@ fn make_func(func_name: &str, exprs: &[Expr]) -> Function {
         args,
         over: None,
         distinct: false,
+        order_by: vec![],
+        filter: None,
     }
 }
 

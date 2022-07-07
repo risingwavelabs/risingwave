@@ -18,11 +18,12 @@ use itertools::Itertools;
 use risingwave_common::catalog::{CatalogVersion, TableId, PG_CATALOG_SCHEMA_NAME};
 use risingwave_common::error::Result;
 use risingwave_pb::catalog::{
-    Database as ProstDatabase, Schema as ProstSchema, Source as ProstSource, Table as ProstTable,
+    Database as ProstDatabase, Schema as ProstSchema, Sink as ProstSink, Source as ProstSource,
+    Table as ProstTable,
 };
 
 use super::source_catalog::SourceCatalog;
-use super::{CatalogError, SourceId};
+use super::{CatalogError, SinkId, SourceId};
 use crate::catalog::database_catalog::DatabaseCatalog;
 use crate::catalog::schema_catalog::SchemaCatalog;
 use crate::catalog::system_catalog::SystemCatalog;
@@ -111,6 +112,14 @@ impl Catalog {
             .create_source(proto);
     }
 
+    pub fn create_sink(&mut self, proto: ProstSink) {
+        self.get_database_mut(proto.database_id)
+            .unwrap()
+            .get_schema_mut(proto.schema_id)
+            .unwrap()
+            .create_sink(proto);
+    }
+
     pub fn drop_database(&mut self, db_id: DatabaseId) {
         let name = self.db_name_by_id.remove(&db_id).unwrap();
         let _database = self.database_by_name.remove(&name).unwrap();
@@ -134,6 +143,14 @@ impl Catalog {
             .get_schema_mut(schema_id)
             .unwrap()
             .drop_source(source_id);
+    }
+
+    pub fn drop_sink(&mut self, db_id: DatabaseId, schema_id: SchemaId, sink_id: SinkId) {
+        self.get_database_mut(db_id)
+            .unwrap()
+            .get_schema_mut(schema_id)
+            .unwrap()
+            .drop_sink(sink_id);
     }
 
     pub fn get_database_by_name(&self, db_name: &str) -> Result<&DatabaseCatalog> {
@@ -191,6 +208,17 @@ impl Catalog {
         self.get_schema_by_name(db_name, schema_name)?
             .get_source_by_name(source_name)
             .ok_or_else(|| CatalogError::NotFound("source", source_name.to_string()).into())
+    }
+
+    pub fn get_sink_id_by_name(
+        &self,
+        db_name: &str,
+        schema_name: &str,
+        sink_name: &str,
+    ) -> Result<u32> {
+        self.get_schema_by_name(db_name, schema_name)?
+            .get_sink_id_by_name(sink_name)
+            .ok_or_else(|| CatalogError::NotFound("sink", sink_name.to_string()).into())
     }
 
     /// Check the name if duplicated with existing table, materialized view or source.

@@ -34,9 +34,6 @@ impl BatchSimpleAgg {
         let ctx = logical.base.ctx.clone();
         let input = logical.input();
         let input_dist = input.distribution();
-        match input_dist {
-            Distribution::Single | Distribution::SomeShard | Distribution::HashShard(_) => {}
-        };
         let base = PlanBase::new_batch(
             ctx,
             logical.schema().clone(),
@@ -76,7 +73,10 @@ impl ToDistributedBatch for BatchSimpleAgg {
         // (e.g. see distribution of BatchSeqScan::new vs BatchSeqScan::to_distributed)
         let dist_input = self.input().to_distributed()?;
 
-        if dist_input.distribution().satisfies(&RequiredDist::AnyShard) {
+        // TODO: distinct agg cannot use 2-phase agg yet.
+        if dist_input.distribution().satisfies(&RequiredDist::AnyShard)
+            && self.logical.agg_calls().iter().any(|call| !call.distinct)
+        {
             // partial agg
             let partial_agg = self.clone_with_input(dist_input).into();
 

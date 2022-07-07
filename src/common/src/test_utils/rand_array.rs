@@ -121,7 +121,7 @@ where
     R: Rng,
     A::OwnedItem: RandValue,
 {
-    let mut builder = A::Builder::new(size).unwrap();
+    let mut builder = A::Builder::new(size);
     for _ in 0..size {
         let is_null = rand.gen::<bool>();
         if is_null {

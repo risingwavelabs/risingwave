@@ -28,7 +28,6 @@ mod progress;
 mod tests;
 
 pub use progress::CreateMviewProgress;
-use risingwave_hummock_sdk::LocalSstableInfo;
 
 /// If enabled, all actors will be grouped in the same tracing span within one epoch.
 /// Note that this option will significantly increase the overhead of tracing.
@@ -38,8 +37,6 @@ pub const ENABLE_BARRIER_AGGREGATION: bool = false;
 #[derive(Debug)]
 pub struct CollectResult {
     pub create_mview_progress: Vec<ProstCreateMviewProgress>,
-
-    pub synced_sstables: Vec<LocalSstableInfo>,
 }
 
 enum BarrierState {
@@ -178,7 +175,15 @@ impl LocalBarrierManager {
     /// remove all collect rx less than `prev_epoch`
     pub fn drain_collect_rx(&mut self, prev_epoch: u64) {
         self.collect_complete_receiver
-            .drain_filter(|x, _| x < &prev_epoch);
+            .drain_filter(|x, _| x <= &prev_epoch);
+        match &mut self.state {
+            #[cfg(test)]
+            BarrierState::Local => {}
+
+            BarrierState::Managed(managed_state) => {
+                managed_state.remove_stop_barrier(prev_epoch);
+            }
+        }
     }
 
     /// When a [`StreamConsumer`] (typically [`DispatchExecutor`]) get a barrier, it should report

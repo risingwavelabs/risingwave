@@ -34,7 +34,8 @@ use risingwave_common::util::sort_util::OrderType;
 use risingwave_expr::expr::AggKind;
 use risingwave_expr::*;
 use risingwave_storage::table::state_table::StateTable;
-use risingwave_storage::{Keyspace, StateStore};
+use risingwave_storage::table::Distribution;
+use risingwave_storage::StateStore;
 pub use row_count::*;
 use static_assertions::const_assert_eq;
 
@@ -412,11 +413,12 @@ pub fn generate_state_tables_from_proto<S: StateStore>(
                 .map(|col| col.column_desc.as_ref().unwrap().into())
                 .collect();
             let order_types = table_catalog
-                .orders
+                .order_keys
                 .iter()
-                .map(|order_type| {
+                .map(|order_key| {
                     OrderType::from_prost(
-                        &risingwave_pb::plan_common::OrderType::from_i32(*order_type).unwrap(),
+                        &risingwave_pb::plan_common::OrderType::from_i32(order_key.order_type)
+                            .unwrap(),
                     )
                 })
                 .collect();
@@ -430,28 +432,23 @@ pub fn generate_state_tables_from_proto<S: StateStore>(
                 .iter()
                 .map(|pk_index| *pk_index as usize)
                 .collect();
-
-            let keyspace = Keyspace::table_root(
-                store.clone(),
-                &risingwave_common::catalog::TableId::new(table_catalog.id),
-            );
-
-            match vnodes.clone() {
+            let distribution = match vnodes.clone() {
                 // Hash Agg
-                Some(vnodes) => StateTable::new_with_distribution(
-                    keyspace,
-                    columns,
-                    order_types,
-                    pk_indices,
+                Some(vnodes) => Distribution {
                     dist_key_indices,
                     vnodes,
-                ),
+                },
                 // Simple Agg
-                None => {
-                    assert!(dist_key_indices.is_empty());
-                    StateTable::new_without_distribution(keyspace, columns, order_types, pk_indices)
-                }
-            }
+                None => Distribution::fallback(),
+            };
+            StateTable::new_with_distribution(
+                store.clone(),
+                risingwave_common::catalog::TableId::new(table_catalog.id),
+                columns,
+                order_types,
+                pk_indices,
+                distribution,
+            )
         };
 
         state_tables.push(state_table)

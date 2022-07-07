@@ -1,6 +1,6 @@
 [package]
 name = "risingwave_common"
-version = "0.1.9"
+version = "0.1.10"
 edition = "2021"
 
 [dependencies]
@@ -16,6 +16,7 @@ comfy-table = "6"
 crc32fast = "1"
 either = "1"
 futures = { version = "0.3", default-features = false, features = ["alloc"] }
+futures-async-stream = "0.2"
 humantime = "2.1"
 hyper = "0.14"
 itertools = "0.10"
