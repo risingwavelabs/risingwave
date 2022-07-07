@@ -294,7 +294,7 @@ echo "Use \`./risedev d\` instead if you want to start a full cluster."
 
 set -ex
 
-RUST_BACKTRACE=1 RW_NODE=playground cargo run --bin risingwave --jobs 2 --profile "${RISINGWAVE_BUILD_PROFILE}"
+RUST_BACKTRACE=1 RW_NODE=playground cargo run --bin risingwave --profile "${RISINGWAVE_BUILD_PROFILE}"
 '''
 
 [tasks.ctl]
