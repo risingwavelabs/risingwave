@@ -155,6 +155,14 @@ pub fn interval_date_add<T1, T2, T3>(
 }
 
 #[inline(always)]
+pub fn interval_time_add<T1, T2, T3>(
+    l: IntervalUnit,
+    r: NaiveTimeWrapper,
+) -> Result<NaiveTimeWrapper> {
+    time_interval_add::<T2, T1, T3>(r, l)
+}
+
+#[inline(always)]
 pub fn date_interval_add<T2, T1, T3>(
     l: NaiveDateWrapper,
     r: IntervalUnit,
