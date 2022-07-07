@@ -438,7 +438,7 @@ impl Display for ListRef<'_> {
     // This function will be invoked when pgwire prints a list value in string.
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         let values = self.values_ref().iter().map(display_datum_ref).join(",");
-        write!(f, "[{}]", values)
+        write!(f, "{{{}}}", values)
     }
 }
 
@@ -703,6 +703,6 @@ mod tests {
     fn test_list_ref_display() {
         let v = ListValue::new(vec![Some(1.into()), None]);
         let r = ListRef::ValueRef { val: &v };
-        assert_eq!("[1,NULL]".to_string(), format!("{}", r));
+        assert_eq!("{1,NULL}".to_string(), format!("{}", r));
     }
 }
