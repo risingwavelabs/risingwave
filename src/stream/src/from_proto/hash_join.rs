@@ -40,7 +40,8 @@ impl ExecutorBuilder for HashJoinExecutorBuilder {
         let vnodes = Arc::new(params.vnode_bitmap.expect("vnodes not set for hash agg"));
 
         let source_l = params.input.remove(0);
-        let source_r = params.input.remove(1);
+        let source_r = params.input.remove(0);
+
         let table_l = node.get_left_table()?;
         let table_r = node.get_right_table()?;
         let params_l = JoinParams::new(
