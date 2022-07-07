@@ -270,7 +270,9 @@ impl DispatchExecutorInner {
                         // delete the old local connections in both local and remote pools;
                         self.context.retain(|&(up_actor_id, down_actor_id)| {
                             up_actor_id != actor_id
-                                || actor_infos.iter().any(|info| info.actor_id == down_actor_id)
+                                || actor_infos
+                                    .iter()
+                                    .any(|info| info.actor_id == down_actor_id)
                         });
 
                         for actor_info in actor_infos.iter() {
@@ -872,7 +874,10 @@ mod tests {
 
     impl MockOutput {
         pub fn new(down_actor_id: ActorId, data: Arc<Mutex<Vec<Message>>>) -> Self {
-            Self { down_actor_id, data }
+            Self {
+                down_actor_id,
+                data,
+            }
         }
     }
 
