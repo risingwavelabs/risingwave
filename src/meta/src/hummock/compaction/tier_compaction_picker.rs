@@ -149,6 +149,8 @@ impl CompactionPicker for TierCompactionPicker {
                 total_file_size: 0,
             },
             split_ranges: vec![],
+            compression_algorithm: "".to_string(),
+            target_file_size: 0,
         })
     }
 }
@@ -434,9 +436,8 @@ impl LevelCompactionPicker {
                         let inc_compaction_size =
                             target_level_ssts.calc_inc_compaction_size(&tables);
                         if select_compaction_bytes > self.config.max_bytes_for_level_base / 2
-                            && (target_level_ssts.compaction_bytes + inc_compaction_size)
-                                / (select_compaction_bytes + other.file_size)
-                                > target_level_ssts.compaction_bytes / select_compaction_bytes
+                            && (select_compaction_bytes + other.file_size) * 3
+                                < target_level_ssts.compaction_bytes + inc_compaction_size
                         {
                             select_level_ssts.pop().unwrap();
                             break;
