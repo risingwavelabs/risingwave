@@ -41,16 +41,17 @@ use crate::task::{ActorId, DispatcherId, SharedContext};
 pub trait Output: Debug + Send + Sync + 'static {
     async fn send(&mut self, message: Message) -> Result<()>;
 
-    fn actor_id(&self) -> ActorId;
+    fn down_actor_id(&self) -> ActorId;
 }
 
 type BoxedOutput = Box<dyn Output>;
 
 /// `LocalOutput` sends data to a local `mpsc::Channel`
 pub struct LocalOutput {
-    actor_id: ActorId,
+    /// For metrics tracking only
+    up_actor_id_str: String,
 
-    actor_id_str: String,
+    down_actor_id: ActorId,
 
     ch: Sender<Message>,
 
@@ -60,16 +61,16 @@ pub struct LocalOutput {
 impl Debug for LocalOutput {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.debug_struct("LocalOutput")
-            .field("actor_id", &self.actor_id)
+            .field("down_actor_id", &self.down_actor_id)
             .finish()
     }
 }
 
 impl LocalOutput {
-    pub fn new(actor_id: ActorId, ch: Sender<Message>, metrics: Arc<StreamingMetrics>) -> Self {
+    pub fn new(up_actod_id: ActorId, down_actor_id: ActorId, ch: Sender<Message>, metrics: Arc<StreamingMetrics>) -> Self {
         Self {
-            actor_id,
-            actor_id_str: actor_id.to_string(),
+            up_actor_id_str: up_actod_id.to_string(),
+            down_actor_id,
             ch,
             metrics,
         }
@@ -89,7 +90,7 @@ impl Output for LocalOutput {
                 .map_err(|_| internal_error("failed to send"))?;
             self.metrics
                 .actor_output_buffer_blocking_duration
-                .with_label_values(&[&self.actor_id_str])
+                .with_label_values(&[&self.up_actor_id_str])
                 .inc_by(start_time.elapsed().as_nanos() as u64);
         } else {
             self.ch
@@ -101,16 +102,16 @@ impl Output for LocalOutput {
         Ok(())
     }
 
-    fn actor_id(&self) -> ActorId {
-        self.actor_id
+    fn down_actor_id(&self) -> ActorId {
+        self.down_actor_id
     }
 }
 
 /// `RemoteOutput` forwards data to`ExchangeServiceImpl`
 pub struct RemoteOutput {
-    actor_id: ActorId,
+    up_actor_id_str: String,
 
-    actor_id_str: String,
+    down_actor_id: ActorId,
 
     ch: Sender<Message>,
 
@@ -120,16 +121,16 @@ pub struct RemoteOutput {
 impl Debug for RemoteOutput {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.debug_struct("RemoteOutput")
-            .field("actor_id", &self.actor_id)
+            .field("down_actor_id", &self.down_actor_id)
             .finish()
     }
 }
 
 impl RemoteOutput {
-    pub fn new(actor_id: ActorId, ch: Sender<Message>, metrics: Arc<StreamingMetrics>) -> Self {
+    pub fn new(up_actor_id: ActorId, down_actor_id: ActorId, ch: Sender<Message>, metrics: Arc<StreamingMetrics>) -> Self {
         Self {
-            actor_id,
-            actor_id_str: actor_id.to_string(),
+            up_actor_id_str: up_actor_id.to_string(),
+            down_actor_id,
             ch,
             metrics,
         }
@@ -153,7 +154,7 @@ impl Output for RemoteOutput {
                 .map_err(|_| internal_error("failed to send"))?;
             self.metrics
                 .actor_output_buffer_blocking_duration
-                .with_label_values(&[&self.actor_id_str])
+                .with_label_values(&[&self.up_actor_id_str])
                 .inc_by(start_time.elapsed().as_nanos() as u64);
         } else {
             self.ch
@@ -165,8 +166,8 @@ impl Output for RemoteOutput {
         Ok(())
     }
 
-    fn actor_id(&self) -> ActorId {
-        self.actor_id
+    fn down_actor_id(&self) -> ActorId {
+        self.down_actor_id
     }
 }
 
@@ -180,9 +181,9 @@ pub fn new_output(
     let tx = context.take_sender(&(actor_id, down_id))?;
     if is_local_address(&addr, &context.addr) {
         // if this is a local downstream actor
-        Ok(Box::new(LocalOutput::new(down_id, tx, metrics)) as Box<dyn Output>)
+        Ok(Box::new(LocalOutput::new(actor_id, down_id, tx, metrics)) as Box<dyn Output>)
     } else {
-        Ok(Box::new(RemoteOutput::new(down_id, tx, metrics)) as Box<dyn Output>)
+        Ok(Box::new(RemoteOutput::new(actor_id, down_id, tx, metrics)) as Box<dyn Output>)
     }
 }
 
@@ -197,7 +198,7 @@ pub struct DispatchExecutor {
 struct DispatchExecutorInner {
     dispatchers: Vec<DispatcherImpl>,
     actor_id: u32,
-    actor_id_str: String,
+    up_actor_id_str: String,
     context: Arc<SharedContext>,
     metrics: Arc<StreamingMetrics>,
 }
@@ -217,7 +218,7 @@ impl DispatchExecutorInner {
             Message::Chunk(chunk) => {
                 self.metrics
                     .actor_out_record_cnt
-                    .with_label_values(&[&self.actor_id_str])
+                    .with_label_values(&[&self.up_actor_id_str])
                     .inc_by(chunk.cardinality() as _);
 
                 if self.dispatchers.len() == 1 {
@@ -335,7 +336,7 @@ impl DispatchExecutor {
             inner: DispatchExecutorInner {
                 dispatchers,
                 actor_id,
-                actor_id_str: actor_id.to_string(),
+                up_actor_id_str: actor_id.to_string(),
                 context,
                 metrics,
             },
@@ -508,7 +509,7 @@ impl Dispatcher for RoundRobinDataDispatcher {
 
     fn remove_outputs(&mut self, actor_ids: &HashSet<ActorId>) {
         self.outputs
-            .drain_filter(|output| actor_ids.contains(&output.actor_id()))
+            .drain_filter(|output| actor_ids.contains(&output.down_actor_id()))
             .count();
     }
 
@@ -606,7 +607,7 @@ impl Dispatcher for HashDataDispatcher {
                     hash_values.iter().zip_eq(ops).for_each(|(hash, op)| {
                         // get visibility map for every output chunk
                         for (output, vis_map) in self.outputs.iter().zip_eq(vis_maps.iter_mut()) {
-                            vis_map.append(self.hash_mapping[*hash] == output.actor_id());
+                            vis_map.append(self.hash_mapping[*hash] == output.down_actor_id());
                         }
                         // The 'update' message, noted by an UpdateDelete and a successive
                         // UpdateInsert, need to be rewritten to common
@@ -636,7 +637,7 @@ impl Dispatcher for HashDataDispatcher {
                             for (output, vis_map) in self.outputs.iter().zip_eq(vis_maps.iter_mut())
                             {
                                 vis_map.append(
-                                    visible && self.hash_mapping[*hash] == output.actor_id(),
+                                    visible && self.hash_mapping[*hash] == output.down_actor_id(),
                                 );
                             }
                             if !visible {
@@ -689,7 +690,7 @@ impl Dispatcher for HashDataDispatcher {
 
     fn remove_outputs(&mut self, actor_ids: &HashSet<ActorId>) {
         self.outputs
-            .drain_filter(|output| actor_ids.contains(&output.actor_id()))
+            .drain_filter(|output| actor_ids.contains(&output.down_actor_id()))
             .count();
     }
 
@@ -728,7 +729,7 @@ impl BroadcastDispatcher {
     ) -> impl Iterator<Item = (ActorId, BoxedOutput)> {
         outputs
             .into_iter()
-            .map(|output| (output.actor_id(), output))
+            .map(|output| (output.down_actor_id(), output))
     }
 }
 
@@ -821,7 +822,7 @@ impl Dispatcher for SimpleDispatcher {
     }
 
     fn remove_outputs(&mut self, actor_ids: &HashSet<ActorId>) {
-        if actor_ids.contains(&self.output.actor_id()) {
+        if actor_ids.contains(&self.output.down_actor_id()) {
             panic!("cannot remove outputs from SimpleDispatcher");
         }
     }
@@ -872,7 +873,7 @@ mod tests {
             Ok(())
         }
 
-        fn actor_id(&self) -> ActorId {
+        fn down_actor_id(&self) -> ActorId {
             self.actor_id
         }
     }
