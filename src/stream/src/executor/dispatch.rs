@@ -207,8 +207,8 @@ pub struct DispatchExecutor {
 
 struct DispatchExecutorInner {
     dispatchers: Vec<DispatcherImpl>,
+    up_actor_id_str: String,
     down_actor_id: u32,
-    up_id_str: String,
     context: Arc<SharedContext>,
     metrics: Arc<StreamingMetrics>,
 }
@@ -228,7 +228,7 @@ impl DispatchExecutorInner {
             Message::Chunk(chunk) => {
                 self.metrics
                     .actor_out_record_cnt
-                    .with_label_values(&[&self.up_id_str])
+                    .with_label_values(&[&self.up_actor_id_str])
                     .inc_by(chunk.cardinality() as _);
 
                 if self.dispatchers.len() == 1 {
@@ -348,7 +348,7 @@ impl DispatchExecutor {
             inner: DispatchExecutorInner {
                 dispatchers,
                 down_actor_id: actor_id,
-                up_id_str: actor_id.to_string(),
+                up_actor_id_str: actor_id.to_string(),
                 context,
                 metrics,
             },
