@@ -20,7 +20,7 @@ use anyhow::anyhow;
 use futures::StreamExt;
 use futures_async_stream::try_stream;
 use itertools::Itertools;
-use madsim::collections::{HashSet, BTreeMap};
+use madsim::collections::{BTreeMap, HashSet};
 use risingwave_common::array::{Array, ArrayImpl, DataChunk, Op, Row, StreamChunk};
 use risingwave_common::buffer::{Bitmap, BitmapBuilder};
 use risingwave_common::catalog::Schema;
