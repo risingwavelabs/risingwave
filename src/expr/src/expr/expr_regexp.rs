@@ -97,7 +97,7 @@ impl RegexpMatchExpr {
                             false
                         }
                     })
-                    .filter_map(|m| m)
+                    .flatten()
                     .map(|mat| Some(mat.as_str().to_string().to_scalar_value()))
                     .collect_vec();
                 let list = ListValue::new(list);
