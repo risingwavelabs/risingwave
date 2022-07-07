@@ -114,79 +114,82 @@ impl DynamicFilterExecutor {
         for (idx, (row, op)) in data_chunk.rows().zip_eq(ops.iter()).enumerate() {
             let left_val = row.value_at(self.key_l).to_owned_datum();
 
-            if let Some(array) = &eval_results {
+            let res = if let Some(array) = &eval_results {
                 if let ArrayImpl::Bool(results) = &**array {
-                    let res = results.value_at(idx).unwrap_or(false);
-
-                    match *op {
-                        Op::Insert | Op::Delete => {
-                            new_ops.push(*op);
-                            if res {
-                                new_visibility.append(true);
-                            } else {
-                                new_visibility.append(false);
-                            }
-                        }
-                        Op::UpdateDelete => {
-                            last_res = res;
-                        }
-                        Op::UpdateInsert => match (last_res, res) {
-                            (true, false) => {
-                                new_ops.push(Op::Delete);
-                                new_ops.push(Op::UpdateInsert);
-                                new_visibility.append(true);
-                                new_visibility.append(false);
-                            }
-                            (false, true) => {
-                                new_ops.push(Op::UpdateDelete);
-                                new_ops.push(Op::Insert);
-                                new_visibility.append(false);
-                                new_visibility.append(true);
-                            }
-                            (true, true) => {
-                                new_ops.push(Op::UpdateDelete);
-                                new_ops.push(Op::UpdateInsert);
-                                new_visibility.append(true);
-                                new_visibility.append(true);
-                            }
-                            (false, false) => {
-                                new_ops.push(Op::UpdateDelete);
-                                new_ops.push(Op::UpdateInsert);
-                                new_visibility.append(false);
-                                new_visibility.append(false);
-                            }
-                        },
-                    }
-
-                    // Store the rows without a null left key
-                    // null key in left side of predicate should never be stored
-                    // (it will never satisfy the filter condition)
-                    if let Some(val) = left_val {
-                        match *op {
-                            Op::Insert | Op::UpdateInsert => {
-                                let entry = state.entry(val).or_insert_with(HashSet::new);
-                                entry.insert(row.to_owned_row());
-                            }
-                            Op::Delete | Op::UpdateDelete => {
-                                let contains_element = state
-                                    .get_mut(&val)
-                                    .ok_or_else(|| {
-                                        StreamExecutorError::from(anyhow!(
-                                            "Deleting non-existent element"
-                                        ))
-                                    })?
-                                    .remove(&row.to_owned_row());
-
-                                if !contains_element {
-                                    return Err(StreamExecutorError::from(anyhow!(
-                                        "Deleting non-existent element"
-                                    )));
-                                };
-                            }
-                        }
-                    }
+                    results.value_at(idx).unwrap_or(false)
                 } else {
                     panic!("condition eval must return bool array")
+                }
+            } else {
+                // A NULL right value implies a false evaluation for all rows
+                false
+            };
+
+            match *op {
+                Op::Insert | Op::Delete => {
+                    new_ops.push(*op);
+                    if res {
+                        new_visibility.append(true);
+                    } else {
+                        new_visibility.append(false);
+                    }
+                }
+                Op::UpdateDelete => {
+                    last_res = res;
+                }
+                Op::UpdateInsert => match (last_res, res) {
+                    (true, false) => {
+                        new_ops.push(Op::Delete);
+                        new_ops.push(Op::UpdateInsert);
+                        new_visibility.append(true);
+                        new_visibility.append(false);
+                    }
+                    (false, true) => {
+                        new_ops.push(Op::UpdateDelete);
+                        new_ops.push(Op::Insert);
+                        new_visibility.append(false);
+                        new_visibility.append(true);
+                    }
+                    (true, true) => {
+                        new_ops.push(Op::UpdateDelete);
+                        new_ops.push(Op::UpdateInsert);
+                        new_visibility.append(true);
+                        new_visibility.append(true);
+                    }
+                    (false, false) => {
+                        new_ops.push(Op::UpdateDelete);
+                        new_ops.push(Op::UpdateInsert);
+                        new_visibility.append(false);
+                        new_visibility.append(false);
+                    }
+                },
+            }
+
+            // Store the rows without a null left key
+            // null key in left side of predicate should never be stored
+            // (it will never satisfy the filter condition)
+            if let Some(val) = left_val {
+                match *op {
+                    Op::Insert | Op::UpdateInsert => {
+                        let entry = state.entry(val).or_insert_with(HashSet::new);
+                        entry.insert(row.to_owned_row());
+                    }
+                    Op::Delete | Op::UpdateDelete => {
+                        let contains_element = state
+                            .get_mut(&val)
+                            .ok_or_else(|| {
+                                StreamExecutorError::from(anyhow!(
+                                    "Deleting non-existent element"
+                                ))
+                            })?
+                            .remove(&row.to_owned_row());
+
+                        if !contains_element {
+                            return Err(StreamExecutorError::from(anyhow!(
+                                "Deleting non-existent element"
+                            )));
+                        };
+                    }
                 }
             }
         }

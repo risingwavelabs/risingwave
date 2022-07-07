@@ -1,4 +1,4 @@
-query IR
+query IR rowsort
 select * from tpch_q11;
 ----
 82   19919213.4
