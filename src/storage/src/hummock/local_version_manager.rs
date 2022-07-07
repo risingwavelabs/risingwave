@@ -417,7 +417,7 @@ impl LocalVersionManager {
     }
 
     pub async fn sync_shared_buffer_epoch(&self, epoch: HummockEpoch) -> HummockResult<()> {
-        info!("sync epoch {}", epoch);
+        tracing::trace!("sync epoch {}", epoch);
         let (tx, rx) = oneshot::channel();
         self.buffer_tracker
             .send_event(SharedBufferEvent::SyncEpoch(epoch, tx));
@@ -433,7 +433,7 @@ impl LocalVersionManager {
         {
             Some(task) => task,
             None => {
-                info!("sync epoch {} has no more task to do", epoch);
+                tracing::trace!("sync epoch {} has no more task to do", epoch);
                 return Ok(());
             }
         };
@@ -441,7 +441,7 @@ impl LocalVersionManager {
         let ret = self
             .run_upload_task(order_index, epoch, task_payload, false)
             .await;
-        info!(
+        tracing::trace!(
             "sync epoch {} finished. Task size {}",
             epoch, task_write_batch_size
         );
