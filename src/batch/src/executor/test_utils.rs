@@ -20,7 +20,7 @@ use assert_matches::assert_matches;
 use futures_async_stream::{for_await, try_stream};
 use itertools::Itertools;
 use risingwave_common::array::column::Column;
-use risingwave_common::array::DataChunk;
+use risingwave_common::array::{DataChunk, DataChunkTestExt, RowRef};
 use risingwave_common::catalog::Schema;
 use risingwave_common::error::{Result, RwError};
 use risingwave_common::field_generator::FieldGeneratorImpl;
@@ -28,7 +28,9 @@ use risingwave_common::types::{DataType, ScalarImpl};
 use risingwave_pb::batch_plan::ExchangeSource as ProstExchangeSource;
 
 use crate::exchange_source::{ExchangeSource, ExchangeSourceImpl};
-use crate::executor::{BoxedDataChunkStream, BoxedExecutor, CreateSource, Executor};
+use crate::executor::{
+    BoxedDataChunkStream, BoxedExecutor, CreateSource, Executor, ProbeSideSourceBuilder,
+};
 use crate::task::BatchTaskContext;
 
 const SEED: u64 = 0xFF67FEABBAEF76FF;
@@ -231,5 +233,44 @@ impl CreateSource for FakeCreateSource {
         _: &ProstExchangeSource,
     ) -> Result<ExchangeSourceImpl> {
         Ok(ExchangeSourceImpl::Fake(self.fake_exchange_source.clone()))
+    }
+}
+
+pub struct FakeProbeSideSourceBuilder {
+    schema: Schema,
+}
+
+impl FakeProbeSideSourceBuilder {
+    pub fn new(schema: Schema) -> Self {
+        Self { schema }
+    }
+}
+
+#[async_trait::async_trait]
+impl ProbeSideSourceBuilder for FakeProbeSideSourceBuilder {
+    async fn build_source(&self, cur_row: &RowRef) -> Result<BoxedExecutor> {
+        let mut mock_executor = MockExecutor::new(self.schema.clone());
+
+        let base_data_chunk = DataChunk::from_pretty(
+            "i f
+             1 9.2
+             2 4.4
+             2 5.5
+             4 6.8
+             5 3.7
+             5 2.3",
+        );
+
+        for idx in 0..base_data_chunk.capacity() {
+            let probe_row = base_data_chunk.row_at_unchecked_vis(idx);
+            if cur_row.value_at(0) == probe_row.value_at(0) {
+                let owned_row = probe_row.to_owned_row();
+                let chunk =
+                    DataChunk::from_rows(&[owned_row], &[DataType::Int32, DataType::Float32])?;
+                mock_executor.add(chunk);
+            }
+        }
+
+        Ok(Box::new(mock_executor))
     }
 }
