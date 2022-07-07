@@ -41,7 +41,7 @@ use crate::task::{ActorId, DispatcherId, SharedContext};
 pub trait Output: Debug + Send + Sync + 'static {
     async fn send(&mut self, message: Message) -> Result<()>;
 
-    fn down_actor_id(&self) -> ActorId;
+    fn down_id(&self) -> ActorId;
 }
 
 type BoxedOutput = Box<dyn Output>;
@@ -49,9 +49,9 @@ type BoxedOutput = Box<dyn Output>;
 /// `LocalOutput` sends data to a local `mpsc::Channel`
 pub struct LocalOutput {
     /// For metrics tracking only
-    up_actor_id_str: String,
+    up_id_str: String,
 
-    down_actor_id: ActorId,
+    down_id: ActorId,
 
     ch: Sender<Message>,
 
@@ -61,21 +61,21 @@ pub struct LocalOutput {
 impl Debug for LocalOutput {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.debug_struct("LocalOutput")
-            .field("down_actor_id", &self.down_actor_id)
+            .field("down_id", &self.down_id)
             .finish()
     }
 }
 
 impl LocalOutput {
     pub fn new(
-        up_actor_id: ActorId,
-        down_actor_id: ActorId,
+        up_id: ActorId,
+        down_id: ActorId,
         ch: Sender<Message>,
         metrics: Arc<StreamingMetrics>,
     ) -> Self {
         Self {
-            up_actor_id_str: up_actor_id.to_string(),
-            down_actor_id,
+            up_id_str: up_id.to_string(),
+            down_id,
             ch,
             metrics,
         }
@@ -95,7 +95,7 @@ impl Output for LocalOutput {
                 .map_err(|_| internal_error("failed to send"))?;
             self.metrics
                 .actor_output_buffer_blocking_duration
-                .with_label_values(&[&self.up_actor_id_str])
+                .with_label_values(&[&self.up_id_str])
                 .inc_by(start_time.elapsed().as_nanos() as u64);
         } else {
             self.ch
@@ -107,16 +107,16 @@ impl Output for LocalOutput {
         Ok(())
     }
 
-    fn down_actor_id(&self) -> ActorId {
-        self.down_actor_id
+    fn down_id(&self) -> ActorId {
+        self.down_id
     }
 }
 
 /// `RemoteOutput` forwards data to`ExchangeServiceImpl`
 pub struct RemoteOutput {
-    up_actor_id_str: String,
+    up_id_str: String,
 
-    down_actor_id: ActorId,
+    down_id: ActorId,
 
     ch: Sender<Message>,
 
@@ -126,21 +126,21 @@ pub struct RemoteOutput {
 impl Debug for RemoteOutput {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.debug_struct("RemoteOutput")
-            .field("down_actor_id", &self.down_actor_id)
+            .field("down_id", &self.down_id)
             .finish()
     }
 }
 
 impl RemoteOutput {
     pub fn new(
-        up_actor_id: ActorId,
-        down_actor_id: ActorId,
+        up_id: ActorId,
+        down_id: ActorId,
         ch: Sender<Message>,
         metrics: Arc<StreamingMetrics>,
     ) -> Self {
         Self {
-            up_actor_id_str: up_actor_id.to_string(),
-            down_actor_id,
+            up_id_str: up_id.to_string(),
+            down_id,
             ch,
             metrics,
         }
@@ -164,7 +164,7 @@ impl Output for RemoteOutput {
                 .map_err(|_| internal_error("failed to send"))?;
             self.metrics
                 .actor_output_buffer_blocking_duration
-                .with_label_values(&[&self.up_actor_id_str])
+                .with_label_values(&[&self.up_id_str])
                 .inc_by(start_time.elapsed().as_nanos() as u64);
         } else {
             self.ch
@@ -176,24 +176,24 @@ impl Output for RemoteOutput {
         Ok(())
     }
 
-    fn down_actor_id(&self) -> ActorId {
-        self.down_actor_id
+    fn down_id(&self) -> ActorId {
+        self.down_id
     }
 }
 
 pub fn new_output(
     context: &SharedContext,
     addr: HostAddr,
-    up_actor_id: ActorId,
-    down_actor_id: ActorId,
+    up_id: ActorId,
+    down_id: ActorId,
     metrics: Arc<StreamingMetrics>,
 ) -> Result<Box<dyn Output>> {
-    let tx = context.take_sender(&(up_actor_id, down_actor_id))?;
+    let tx = context.take_sender(&(up_id, down_id))?;
     if is_local_address(&addr, &context.addr) {
         // if this is a local downstream actor
-        Ok(Box::new(LocalOutput::new(up_actor_id, down_actor_id, tx, metrics)) as Box<dyn Output>)
+        Ok(Box::new(LocalOutput::new(up_id, down_id, tx, metrics)) as Box<dyn Output>)
     } else {
-        Ok(Box::new(RemoteOutput::new(up_actor_id, down_actor_id, tx, metrics)) as Box<dyn Output>)
+        Ok(Box::new(RemoteOutput::new(up_id, down_id, tx, metrics)) as Box<dyn Output>)
     }
 }
 
@@ -207,8 +207,8 @@ pub struct DispatchExecutor {
 
 struct DispatchExecutorInner {
     dispatchers: Vec<DispatcherImpl>,
-    up_actor_id_str: String,
-    down_actor_id: u32,
+    up_id_str: String,
+    down_id: u32,
     context: Arc<SharedContext>,
     metrics: Arc<StreamingMetrics>,
 }
@@ -228,7 +228,7 @@ impl DispatchExecutorInner {
             Message::Chunk(chunk) => {
                 self.metrics
                     .actor_out_record_cnt
-                    .with_label_values(&[&self.up_actor_id_str])
+                    .with_label_values(&[&self.up_id_str])
                     .inc_by(chunk.cardinality() as _);
 
                 if self.dispatchers.len() == 1 {
@@ -262,27 +262,25 @@ impl DispatchExecutorInner {
             Mutation::UpdateOutputs(updates) => {
                 for dispatcher in &mut self.dispatchers {
                     if let Some((_, actor_infos)) =
-                        updates.get_key_value(&(self.down_actor_id, dispatcher.get_dispatcher_id()))
+                        updates.get_key_value(&(self.down_id, dispatcher.get_dispatcher_id()))
                     {
                         let mut new_outputs = vec![];
 
-                        let actor_id = self.down_actor_id;
+                        let actor_id = self.down_id;
                         // delete the old local connections in both local and remote pools;
-                        self.context.retain(|&(up_actor_id, down_actor_id)| {
-                            up_actor_id != actor_id
-                                || actor_infos
-                                    .iter()
-                                    .any(|info| info.actor_id == down_actor_id)
+                        self.context.retain(|&(up_id, down_id)| {
+                            up_id != actor_id
+                                || actor_infos.iter().any(|info| info.actor_id == down_id)
                         });
 
                         for actor_info in actor_infos.iter() {
-                            let down_actor_id = actor_info.get_actor_id();
+                            let down_id = actor_info.get_actor_id();
                             let downstream_addr = actor_info.get_host()?.into();
                             new_outputs.push(new_output(
                                 &self.context,
                                 downstream_addr,
-                                self.down_actor_id,
-                                down_actor_id,
+                                self.down_id,
+                                down_id,
                                 self.metrics.clone(),
                             )?);
                         }
@@ -295,17 +293,17 @@ impl DispatchExecutorInner {
                 for dispatcher in &mut self.dispatchers {
                     if let Some(downstream_actor_infos) = adds
                         .map
-                        .get(&(self.down_actor_id, dispatcher.get_dispatcher_id()))
+                        .get(&(self.down_id, dispatcher.get_dispatcher_id()))
                     {
                         let mut outputs_to_add = Vec::with_capacity(downstream_actor_infos.len());
                         for downstream_actor_info in downstream_actor_infos {
-                            let down_actor_id = downstream_actor_info.get_actor_id();
+                            let down_id = downstream_actor_info.get_actor_id();
                             let downstream_addr = downstream_actor_info.get_host()?.into();
                             outputs_to_add.push(new_output(
                                 &self.context,
                                 downstream_addr,
-                                self.down_actor_id,
-                                down_actor_id,
+                                self.down_id,
+                                down_id,
                                 self.metrics.clone(),
                             )?);
                         }
@@ -324,7 +322,7 @@ impl DispatchExecutorInner {
     async fn post_mutate_outputs(&mut self, mutation: &Option<Arc<Mutation>>) -> Result<()> {
         if let Some(Mutation::Stop(stops)) = mutation.as_deref() {
             // Remove outputs only if this actor itself is not to be stopped.
-            if !stops.contains(&self.down_actor_id) {
+            if !stops.contains(&self.down_id) {
                 for dispatcher in &mut self.dispatchers {
                     dispatcher.remove_outputs(stops);
                 }
@@ -347,8 +345,8 @@ impl DispatchExecutor {
             input,
             inner: DispatchExecutorInner {
                 dispatchers,
-                down_actor_id: actor_id,
-                up_actor_id_str: actor_id.to_string(),
+                down_id: actor_id,
+                up_id_str: actor_id.to_string(),
                 context,
                 metrics,
             },
@@ -521,7 +519,7 @@ impl Dispatcher for RoundRobinDataDispatcher {
 
     fn remove_outputs(&mut self, actor_ids: &HashSet<ActorId>) {
         self.outputs
-            .drain_filter(|output| actor_ids.contains(&output.down_actor_id()))
+            .drain_filter(|output| actor_ids.contains(&output.down_id()))
             .count();
     }
 
@@ -619,7 +617,7 @@ impl Dispatcher for HashDataDispatcher {
                     hash_values.iter().zip_eq(ops).for_each(|(hash, op)| {
                         // get visibility map for every output chunk
                         for (output, vis_map) in self.outputs.iter().zip_eq(vis_maps.iter_mut()) {
-                            vis_map.append(self.hash_mapping[*hash] == output.down_actor_id());
+                            vis_map.append(self.hash_mapping[*hash] == output.down_id());
                         }
                         // The 'update' message, noted by an UpdateDelete and a successive
                         // UpdateInsert, need to be rewritten to common
@@ -649,7 +647,7 @@ impl Dispatcher for HashDataDispatcher {
                             for (output, vis_map) in self.outputs.iter().zip_eq(vis_maps.iter_mut())
                             {
                                 vis_map.append(
-                                    visible && self.hash_mapping[*hash] == output.down_actor_id(),
+                                    visible && self.hash_mapping[*hash] == output.down_id(),
                                 );
                             }
                             if !visible {
@@ -702,7 +700,7 @@ impl Dispatcher for HashDataDispatcher {
 
     fn remove_outputs(&mut self, actor_ids: &HashSet<ActorId>) {
         self.outputs
-            .drain_filter(|output| actor_ids.contains(&output.down_actor_id()))
+            .drain_filter(|output| actor_ids.contains(&output.down_id()))
             .count();
     }
 
@@ -739,9 +737,7 @@ impl BroadcastDispatcher {
     fn into_pairs(
         outputs: impl IntoIterator<Item = BoxedOutput>,
     ) -> impl Iterator<Item = (ActorId, BoxedOutput)> {
-        outputs
-            .into_iter()
-            .map(|output| (output.down_actor_id(), output))
+        outputs.into_iter().map(|output| (output.down_id(), output))
     }
 }
 
@@ -834,7 +830,7 @@ impl Dispatcher for SimpleDispatcher {
     }
 
     fn remove_outputs(&mut self, actor_ids: &HashSet<ActorId>) {
-        if actor_ids.contains(&self.output.down_actor_id()) {
+        if actor_ids.contains(&self.output.down_id()) {
             panic!("cannot remove outputs from SimpleDispatcher");
         }
     }
@@ -868,16 +864,13 @@ mod tests {
 
     #[derive(Debug)]
     pub struct MockOutput {
-        down_actor_id: ActorId,
+        down_id: ActorId,
         data: Arc<Mutex<Vec<Message>>>,
     }
 
     impl MockOutput {
-        pub fn new(down_actor_id: ActorId, data: Arc<Mutex<Vec<Message>>>) -> Self {
-            Self {
-                down_actor_id,
-                data,
-            }
+        pub fn new(down_id: ActorId, data: Arc<Mutex<Vec<Message>>>) -> Self {
+            Self { down_id, data }
         }
     }
 
@@ -888,8 +881,8 @@ mod tests {
             Ok(())
         }
 
-        fn down_actor_id(&self) -> ActorId {
-            self.down_actor_id
+        fn down_id(&self) -> ActorId {
+            self.down_id
         }
     }
 
@@ -976,10 +969,10 @@ mod tests {
         }
     }
 
-    fn add_remote_channels(ctx: Arc<SharedContext>, up_actor_id: u32, down_ids: Vec<u32>) {
-        for down_actor_id in down_ids {
+    fn add_remote_channels(ctx: Arc<SharedContext>, up_id: u32, down_ids: Vec<u32>) {
+        for down_id in down_ids {
             let (tx, rx) = channel(LOCAL_OUTPUT_CHANNEL_SIZE);
-            ctx.add_channel_pairs((up_actor_id, down_actor_id), (Some(tx), Some(rx)));
+            ctx.add_channel_pairs((up_id, down_id), (Some(tx), Some(rx)));
         }
     }
 
