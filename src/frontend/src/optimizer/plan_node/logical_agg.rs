@@ -480,11 +480,6 @@ impl LogicalAgg {
         self.o2i_col_mapping().inverse()
     }
 
-    /// get the Mapping of columnIndex from input column index to out column index
-    pub fn i2o_col_mapping_with_required_out(&self, required: &FixedBitSet) -> ColIndexMapping {
-        self.o2i_col_mapping().inverse_with_required(required)
-    }
-
     fn derive_schema(
         input: &Schema,
         group_key: &[usize],
@@ -551,25 +546,15 @@ impl LogicalAgg {
     pub fn decompose(self) -> (Vec<PlanAggCall>, Vec<usize>, PlanRef) {
         (self.agg_calls, self.group_key, self.input)
     }
-}
-
-impl PlanTreeNodeUnary for LogicalAgg {
-    fn input(&self) -> PlanRef {
-        self.input.clone()
-    }
-
-    fn clone_with_input(&self, input: PlanRef) -> Self {
-        Self::new(self.agg_calls().to_vec(), self.group_key().to_vec(), input)
-    }
 
     #[must_use]
-    fn rewrite_with_input(
+    fn rewrite_with_input_agg(
         &self,
         input: PlanRef,
+        agg_calls: &[PlanAggCall],
         mut input_col_change: ColIndexMapping,
-    ) -> (Self, ColIndexMapping) {
-        let agg_calls = self
-            .agg_calls
+    ) -> Self {
+        let agg_calls = agg_calls
             .iter()
             .cloned()
             .map(|mut agg_call| {
@@ -586,7 +571,26 @@ impl PlanTreeNodeUnary for LogicalAgg {
             .cloned()
             .map(|key| input_col_change.map(key))
             .collect();
-        let agg = Self::new(agg_calls, group_key, input);
+        Self::new(agg_calls, group_key, input)
+    }
+}
+
+impl PlanTreeNodeUnary for LogicalAgg {
+    fn input(&self) -> PlanRef {
+        self.input.clone()
+    }
+
+    fn clone_with_input(&self, input: PlanRef) -> Self {
+        Self::new(self.agg_calls().to_vec(), self.group_key().to_vec(), input)
+    }
+
+    #[must_use]
+    fn rewrite_with_input(
+        &self,
+        input: PlanRef,
+        input_col_change: ColIndexMapping,
+    ) -> (Self, ColIndexMapping) {
+        let agg = self.rewrite_with_input_agg(input, &self.agg_calls, input_col_change);
         // change the input columns index will not change the output column index
         let out_col_change = ColIndexMapping::identity(agg.schema().len());
         (agg, out_col_change)
@@ -606,14 +610,6 @@ impl fmt::Display for LogicalAgg {
 
 impl ColPrunable for LogicalAgg {
     fn prune_col(&self, required_cols: &[usize]) -> PlanRef {
-        let upstream_required_cols = {
-            let mapping = self.o2i_col_mapping();
-            FixedBitSet::from_iter(
-                required_cols
-                    .iter()
-                    .filter_map(|&output_idx| mapping.try_map(output_idx)),
-            )
-        };
         let group_key_required_cols = FixedBitSet::from_iter(self.group_key.iter().copied());
 
         let (agg_call_required_cols, agg_calls) = {
@@ -637,38 +633,18 @@ impl ColPrunable for LogicalAgg {
         };
 
         let input_required_cols = {
-            let mut tmp: FixedBitSet = upstream_required_cols;
+            let mut tmp = FixedBitSet::with_capacity(self.input.schema().len());
             tmp.union_with(&group_key_required_cols);
             tmp.union_with(&agg_call_required_cols);
             tmp.ones().collect_vec()
         };
-        let mapping = ColIndexMapping::with_remaining_columns(
+        let input_col_change = ColIndexMapping::with_remaining_columns(
             &input_required_cols,
             self.input().schema().len(),
         );
         let agg = {
-            let agg_calls = agg_calls
-                .iter()
-                .cloned()
-                .map(|mut agg_call| {
-                    agg_call
-                        .inputs
-                        .iter_mut()
-                        .for_each(|i| *i = InputRef::new(mapping.map(i.index()), i.return_type()));
-                    agg_call
-                })
-                .collect();
-            let group_key = self
-                .group_key
-                .iter()
-                .cloned()
-                .map(|key| mapping.map(key))
-                .collect();
-            LogicalAgg::new(
-                agg_calls,
-                group_key,
-                self.input.prune_col(&input_required_cols),
-            )
+            let input = self.input.prune_col(&input_required_cols);
+            self.rewrite_with_input_agg(input, &agg_calls, input_col_change)
         };
         let new_output_cols = {
             // group key were never pruned or even re-ordered in current impl

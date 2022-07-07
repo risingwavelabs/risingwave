@@ -218,21 +218,6 @@ impl ColIndexMapping {
         Self::with_target_size(map, self.source_size())
     }
 
-    /// inverse the mapping with required columns in the source, if a target corresponds more than
-    /// one source, it will choose the required columns.
-    #[must_use]
-    pub fn inverse_with_required(&self, required: &FixedBitSet) -> Self {
-        let mut map = vec![None; self.target_size()];
-        for (src, dst) in self.mapping_pairs() {
-            if let Some(other_src) = map[dst] && required.contains(other_src) {
-                // do nothing
-            } else {
-                map[dst] = Some(src);
-            }
-        }
-        Self::with_target_size(map, self.source_size())
-    }
-
     /// return iter of (src, dst) order by src
     pub fn mapping_pairs(&self) -> impl Iterator<Item = (usize, usize)> + '_ {
         self.map
