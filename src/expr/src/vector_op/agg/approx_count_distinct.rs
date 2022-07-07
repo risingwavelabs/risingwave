@@ -188,7 +188,7 @@ impl Aggregator for ApproxCountDistinct {
         let mut group_cnt = 0;
         let mut groups_iter = groups.starting_indices().iter().peekable();
         let chunk_offset = groups.chunk_offset();
-        for (row_id, (i, datum_ref)) in array.iter().enumerate().skip(chunk_offset).enumerate() {
+        for (i, (row_id, datum_ref)) in array.iter().enumerate().skip(chunk_offset).enumerate() {
             // reset state and output result when new group is found
             if groups_iter.peek() == Some(&&i) {
                 groups_iter.next();

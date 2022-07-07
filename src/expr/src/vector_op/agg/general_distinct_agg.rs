@@ -244,7 +244,7 @@ mod tests {
     use risingwave_common::types::Decimal;
 
     use super::*;
-    use crate::expr::AggKind;
+    use crate::expr::{AggKind, LiteralExpression, Expression};
     use crate::vector_op::agg::aggregator::create_agg_state_unary;
 
     fn eval_agg(
@@ -256,7 +256,16 @@ mod tests {
     ) -> Result<ArrayImpl> {
         let len = input.len();
         let input_chunk = DataChunk::new(vec![Column::new(input)], len);
-        let mut agg_state = create_agg_state_unary(input_type, 0, agg_type, return_type, true)?;
+        let mut agg_state = create_agg_state_unary(
+            input_type,
+            0,
+            agg_type,
+            return_type,
+            true,
+            Arc::from(
+                LiteralExpression::new(DataType::Boolean, Some(ScalarImpl::Bool(true))).boxed(),
+            ),
+        )?;
         agg_state.update(&input_chunk)?;
         agg_state.output(&mut builder)?;
         builder.finish().map_err(Into::into)

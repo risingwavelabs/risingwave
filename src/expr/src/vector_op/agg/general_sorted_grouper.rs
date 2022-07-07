@@ -313,6 +313,7 @@ mod tests {
     use risingwave_pb::expr::AggCall;
 
     use super::*;
+    use crate::expr::{LiteralExpression, Expression};
     use crate::vector_op::agg::functions::*;
     use crate::vector_op::agg::general_agg::GeneralAgg;
     use crate::vector_op::agg::AggStateFactory;
@@ -358,7 +359,15 @@ mod tests {
         let mut g0_builder = I32ArrayBuilder::new(0);
         let mut g1 = GeneralSortedGrouper::<I32Array>::new(false, None);
         let mut g1_builder = I32ArrayBuilder::new(0);
-        let mut a = GeneralAgg::<I32Array, _, I64Array>::new(DataType::Int64, 0, sum, None);
+        let mut a = GeneralAgg::<I32Array, _, I64Array>::new(
+            DataType::Int64,
+            0,
+            sum,
+            None,
+            Arc::from(
+                LiteralExpression::new(DataType::Boolean, Some(ScalarImpl::Bool(true))).boxed(),
+            ),
+        );
         let mut a_builder = I64ArrayBuilder::new(0);
 
         let g0_input = I32Array::from_slice(&[Some(1), Some(1), Some(3)]).unwrap();
@@ -369,7 +378,13 @@ mod tests {
         g0.update_and_output_with_sorted_groups_concrete(&g0_input, &mut g0_builder, &eq)?;
         g1.update_and_output_with_sorted_groups_concrete(&g1_input, &mut g1_builder, &eq)?;
         let a_input = I32Array::from_slice(&[Some(1), Some(2), Some(3)]).unwrap();
-        a.update_and_output_with_sorted_groups_concrete(&a_input, &mut a_builder, &eq)?;
+        let input_chunk = DataChunk::from_pretty("
+        i
+        1
+        2
+        3
+        ");
+        a.update_and_output_with_sorted_groups_concrete(&a_input, &mut a_builder, &eq, &input_chunk)?;
 
         let g0_input = I32Array::from_slice(&[Some(3), Some(4), Some(4)]).unwrap();
         let eq0 = g0.detect_groups_concrete(&g0_input)?;
@@ -379,7 +394,7 @@ mod tests {
         g0.update_and_output_with_sorted_groups_concrete(&g0_input, &mut g0_builder, &eq)?;
         g1.update_and_output_with_sorted_groups_concrete(&g1_input, &mut g1_builder, &eq)?;
         let a_input = I32Array::from_slice(&[Some(1), Some(2), Some(3)]).unwrap();
-        a.update_and_output_with_sorted_groups_concrete(&a_input, &mut a_builder, &eq)?;
+        a.update_and_output_with_sorted_groups_concrete(&a_input, &mut a_builder, &eq, &input_chunk)?;
 
         g0.output_concrete(&mut g0_builder)?;
         g1.output_concrete(&mut g1_builder)?;

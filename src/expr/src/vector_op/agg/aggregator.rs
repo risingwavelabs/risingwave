@@ -121,7 +121,7 @@ impl AggStateFactory {
             Ok(Box::new(ApproxCountDistinct::new(
                 self.return_type.clone(),
                 self.input_col_idx,
-                self.filter.clone()
+                self.filter.clone(),
             )))
         } else if let Some(input_type) = self.input_type.clone() {
             create_agg_state_unary(
@@ -130,6 +130,7 @@ impl AggStateFactory {
                 &self.agg_kind,
                 self.return_type.clone(),
                 self.distinct,
+                self.filter.clone(),
             )
         } else {
             Ok(Box::new(CountStar::new(
@@ -151,6 +152,7 @@ pub fn create_agg_state_unary(
     agg_type: &AggKind,
     return_type: DataType,
     distinct: bool,
+    filter: ExpressionRef,
 ) -> Result<Box<dyn Aggregator>> {
     use crate::expr::data_types::*;
 
@@ -169,6 +171,7 @@ pub fn create_agg_state_unary(
                             input_col_idx,
                             $fn,
                             $init_result,
+                            filter
                         ))
                     },
                     ($in! { type_match_pattern }, AggKind::$agg, $ret! { type_match_pattern }, true) => {
@@ -269,7 +272,9 @@ mod tests {
         let decimal_type = DataType::Decimal;
         let bool_type = DataType::Boolean;
         let char_type = DataType::Varchar;
-
+        let filter: ExpressionRef = Arc::from(
+            LiteralExpression::new(DataType::Boolean, Some(ScalarImpl::Bool(true))).boxed(),
+        );
         macro_rules! test_create {
             ($input_type:expr, $agg:ident, $return_type:expr, $expected:ident) => {
                 assert!(create_agg_state_unary(
@@ -278,6 +283,7 @@ mod tests {
                     &AggKind::$agg,
                     $return_type.clone(),
                     false,
+                    filter.clone(),
                 )
                 .$expected());
                 assert!(create_agg_state_unary(
@@ -286,6 +292,7 @@ mod tests {
                     &AggKind::$agg,
                     $return_type.clone(),
                     true,
+                    filter.clone(),
                 )
                 .$expected());
             };

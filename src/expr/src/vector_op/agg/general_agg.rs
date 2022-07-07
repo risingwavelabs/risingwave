@@ -18,6 +18,7 @@ use risingwave_common::array::*;
 use risingwave_common::error::{ErrorCode, Result};
 use risingwave_common::types::*;
 
+use crate::expr::ExpressionRef;
 use crate::vector_op::agg::aggregator::Aggregator;
 use crate::vector_op::agg::functions::RTFn;
 use crate::vector_op::agg::general_sorted_grouper::EqGroups;
@@ -32,6 +33,7 @@ where
     input_col_idx: usize,
     result: Option<R::OwnedItem>,
     f: F,
+    filter: ExpressionRef,
     _phantom: PhantomData<T>,
 }
 impl<T, F, R> GeneralAgg<T, F, R>
@@ -45,12 +47,14 @@ where
         input_col_idx: usize,
         f: F,
         init_result: Option<R::OwnedItem>,
+        filter: ExpressionRef,
     ) -> Self {
         Self {
             return_type,
             input_col_idx,
             result: init_result,
             f,
+            filter,
             _phantom: PhantomData,
         }
     }
@@ -67,10 +71,13 @@ where
         Ok(())
     }
 
-    pub(super) fn update_concrete(&mut self, input: &T) -> Result<()> {
+    pub(super) fn update_concrete(&mut self, array: &T, input: &DataChunk) -> Result<()> {
         let mut cur = self.result.as_ref().map(|x| x.as_scalar_ref());
-        for datum in input.iter() {
-            cur = self.f.eval(cur, datum)?;
+        for row_id in 0..array.len() {
+            let filter_res = self.apply_filter_on_row(input, row_id)?;
+            if filter_res {
+                cur = self.f.eval(cur, array.value_at(row_id))?;
+            }
         }
         let r = cur.map(|x| x.to_owned_scalar());
         self.result = r;
@@ -85,23 +92,26 @@ where
 
     pub(super) fn update_and_output_with_sorted_groups_concrete(
         &mut self,
-        input: &T,
+        array: &T,
         builder: &mut R::Builder,
         groups: &EqGroups,
+        input: &DataChunk,
     ) -> Result<()> {
         let mut group_cnt = 0;
         let mut groups_iter = groups.starting_indices().iter().peekable();
         let mut cur = self.result.as_ref().map(|x| x.as_scalar_ref());
         let chunk_offset = groups.chunk_offset();
-        for (i, v) in input.iter().skip(chunk_offset).enumerate() {
+        for (i, (row_id, v)) in array.iter().enumerate().skip(chunk_offset).enumerate() {
             if groups_iter.peek() == Some(&&(i + chunk_offset)) {
                 groups_iter.next();
                 group_cnt += 1;
                 builder.append(cur)?;
                 cur = None;
             }
-            cur = self.f.eval(cur, v)?;
-
+            let filter_res = self.apply_filter_on_row(input, row_id)?;
+            if filter_res {
+                cur = self.f.eval(cur, v)?;
+            }
             // reset state and exit when reach limit
             if groups.is_reach_limit(group_cnt) {
                 cur = None;
@@ -110,6 +120,19 @@ where
         }
         self.result = cur.map(|x| x.to_owned_scalar());
         Ok(())
+    }
+
+    fn apply_filter_on_row(&self, input: &DataChunk, row_id: usize) -> Result<bool> {
+        let (row, visible) = input.row_at(row_id)?;
+        // SAFETY: when performing agg, the data chunk should already be
+        // compacted.
+        assert!(visible);
+        let filter_res = if let Some(ScalarImpl::Bool(v)) = self.filter.eval_row(&Row::from(row))? {
+            v
+        } else {
+            false
+        };
+        Ok(filter_res)
     }
 }
 
@@ -127,7 +150,11 @@ macro_rules! impl_aggregator {
                 if let ArrayImpl::$input_variant(i) =
                     input.column_at(self.input_col_idx).array_ref()
                 {
-                    self.update_with_scalar_concrete(i, row_id)
+                    let filter_res = self.apply_filter_on_row(input, row_id)?;
+                    if filter_res {
+                        self.update_with_scalar_concrete(i, row_id)?;
+                    }
+                    Ok(())
                 } else {
                     Err(ErrorCode::InternalError(format!(
                         "Input fail to match {}.",
@@ -141,7 +168,7 @@ macro_rules! impl_aggregator {
                 if let ArrayImpl::$input_variant(i) =
                     input.column_at(self.input_col_idx).array_ref()
                 {
-                    self.update_concrete(i)
+                    self.update_concrete(i, input)
                 } else {
                     Err(ErrorCode::InternalError(format!(
                         "Input fail to match {}.",
@@ -172,7 +199,7 @@ macro_rules! impl_aggregator {
                 if let (ArrayImpl::$input_variant(i), ArrayBuilderImpl::$result_variant(b)) =
                     (input.column_at(self.input_col_idx).array_ref(), builder)
                 {
-                    self.update_and_output_with_sorted_groups_concrete(i, b, groups)
+                    self.update_and_output_with_sorted_groups_concrete(i, b, groups, input)
                 } else {
                     Err(ErrorCode::InternalError(format!(
                         "Input fail to match {} or builder fail to match {}.",
@@ -228,7 +255,7 @@ mod tests {
     use risingwave_common::types::Decimal;
 
     use super::*;
-    use crate::expr::AggKind;
+    use crate::expr::{AggKind, Expression, LiteralExpression};
     use crate::vector_op::agg::aggregator::create_agg_state_unary;
 
     fn eval_agg(
@@ -240,7 +267,16 @@ mod tests {
     ) -> Result<ArrayImpl> {
         let len = input.len();
         let input_chunk = DataChunk::new(vec![Column::new(input)], len);
-        let mut agg_state = create_agg_state_unary(input_type, 0, agg_type, return_type, false)?;
+        let mut agg_state = create_agg_state_unary(
+            input_type,
+            0,
+            agg_type,
+            return_type,
+            false,
+            Arc::from(
+                LiteralExpression::new(DataType::Boolean, Some(ScalarImpl::Bool(true))).boxed(),
+            ),
+        )?;
         agg_state.update(&input_chunk)?;
         agg_state.output(&mut builder)?;
         builder.finish().map_err(Into::into)
