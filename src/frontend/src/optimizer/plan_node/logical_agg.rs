@@ -107,7 +107,7 @@ impl fmt::Debug for PlanAggCall {
         if !self.filter_conjunctions.is_empty() {
             write!(
                 f,
-                " filter({:?})",
+                " filter({})",
                 self.filter_conjunctions
                     .iter()
                     .map(|x| format!("{:?}", x))
