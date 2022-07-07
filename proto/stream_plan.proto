@@ -113,6 +113,20 @@ message HashJoinNode {
   repeated uint32 output_indices = 9;
 }
 
+message DynamicFilterNode {
+  uint32 left_key = 1;
+  // Must be one of <, <=, >, >=
+  expr.ExprNode condition = 3;
+  // Used for internal table states.
+  // catalog.Table left_table = 4;
+  // uint32 dist_key_l = 8;
+  // It is true when the right side of the inequality predicate is monotonically:
+  // - decreasing for <, <=, increasing for >, >=
+  // bool is_monotonic = 10;
+  // the output indices of current node
+  // repeated uint32 output_indices = 11;
+}
+
 // Delta join with two indexes. This is a pseudo plan node generated on frontend. On meta
 // service, it will be rewritten into lookup joins.
 message DeltaIndexJoinNode {
@@ -257,6 +271,7 @@ message StreamNode {
     DeltaIndexJoinNode delta_index_join = 119;
     SinkNode sink = 120;
     ExpandNode expand = 121;
+    DynamicFilterNode dynamic_filter = 122;
   }
   // The id for the operator.
   uint64 operator_id = 1;

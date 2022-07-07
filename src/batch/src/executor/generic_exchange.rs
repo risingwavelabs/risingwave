@@ -172,6 +172,7 @@ async fn data_chunk_stream(mut source: ExchangeSourceImpl) {
         break;
     }
 }
+
 #[cfg(test)]
 mod tests {
     use std::sync::Arc;
