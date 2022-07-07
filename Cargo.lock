@@ -3949,6 +3949,7 @@ dependencies = [
  "tracing-futures",
  "twox-hash",
  "url",
+ "uuid 1.1.2",
  "workspace-hack",
 ]
 
