@@ -91,8 +91,12 @@ pub struct StreamingConfig {
     // pub chunk_size: u32,
     #[serde(default = "default::checkpoint_interval_ms")]
     pub checkpoint_interval_ms: u32,
+
     #[serde(default = "default::in_flight_barrier_nums")]
     pub in_flight_barrier_nums: usize,
+
+    #[serde(default = "default::unsafe_worker_node_parallel_degree")]
+    pub unsafe_worker_node_parallel_degree: usize,
 }
 
 impl Default for StreamingConfig {
@@ -271,11 +275,17 @@ mod default {
     pub fn checkpoint_interval_ms() -> u32 {
         250
     }
+
     pub fn in_flight_barrier_nums() -> usize {
         40
     }
+
     pub fn share_buffer_upload_concurrency() -> usize {
         8
+    }
+
+    pub fn unsafe_worker_node_parallel_degree() -> usize {
+        4
     }
 }
 
