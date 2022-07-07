@@ -804,7 +804,7 @@ mod tests {
         );
         let state_table_r = StateTable::new(
             mem_state,
-            TableId::new(0),
+            TableId::new(1),
             column_descs,
             order_types.to_vec(),
             None,

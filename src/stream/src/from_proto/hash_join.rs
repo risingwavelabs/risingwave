@@ -37,7 +37,7 @@ impl ExecutorBuilder for HashJoinExecutorBuilder {
         // Get table id and used as keyspace prefix.
         let node = try_match_expand!(node.get_node_body().unwrap(), NodeBody::HashJoin)?;
         let is_append_only = node.is_append_only;
-        let vnodes = Arc::new(params.vnode_bitmap.expect("vnodes not set for hash agg"));
+        let vnodes = Arc::new(params.vnode_bitmap.expect("vnodes not set for hash join"));
 
         let source_l = params.input.remove(0);
         let source_r = params.input.remove(0);

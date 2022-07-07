@@ -237,7 +237,7 @@ fn infer_internal_table_catalog(input: PlanRef, join_key_indices: Vec<usize>) ->
 
     // The pk of hash join internal table shoule be join_key + input_pk.
     let mut pk_indices = join_key_indices;
-    // TODO(yuhao): dedupe the dist key and pk.
+    // TODO(yuhao): dedup the dist key and pk.
     pk_indices.extend(&base.pk_indices);
 
     let mut columns_fields = schema.fields().to_vec();

@@ -256,12 +256,10 @@ impl<S: StateStore> StateTable<S> {
             .map(|col_order| col_order.index as usize)
             .collect();
         let distribution = match vnodes {
-            // Hash Agg
             Some(vnodes) => Distribution {
                 dist_key_indices,
                 vnodes,
             },
-            // Simple Agg
             None => Distribution::fallback(),
         };
         StateTable::new_with_distribution(
