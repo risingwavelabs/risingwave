@@ -14,7 +14,10 @@
 
 use std::ops::{Bound, RangeBounds};
 
-use risingwave_common::types::ScalarImpl;
+use itertools::Itertools;
+use risingwave_common::array::Row;
+use risingwave_common::types::{ScalarImpl, VirtualNode};
+use risingwave_common::util::hash_util::CRC32FastBuilder;
 use risingwave_pb::batch_plan::scan_range::Bound as BoundProst;
 use risingwave_pb::batch_plan::ScanRange as ScanRangeProst;
 
@@ -58,6 +61,45 @@ impl ScanRange {
             range: full_range(),
         }
     }
+
+    pub fn try_compute_vnode(
+        &self,
+        dist_key_indices: &[usize],
+        pk_indices: &[usize],
+    ) -> Option<VirtualNode> {
+        if dist_key_indices.is_empty() {
+            return None;
+        }
+
+        let dist_key_in_pk_indices = dist_key_indices
+            .iter()
+            .map(|&di| {
+                pk_indices
+                    .iter()
+                    .position(|&pi| di == pi)
+                    .unwrap_or_else(|| {
+                        panic!(
+                            "distribution keys {:?} must be a subset of primary keys {:?}",
+                            dist_key_indices, pk_indices
+                        )
+                    })
+            })
+            .collect_vec();
+        let pk_prefix_len = self.eq_conds.len();
+        if dist_key_in_pk_indices.iter().any(|&i| i >= pk_prefix_len) {
+            return None;
+        }
+
+        let pk_prefix_value = Row(self
+            .eq_conds
+            .iter()
+            .map(|scalar| Some(scalar.clone()))
+            .collect());
+        let vnode = pk_prefix_value
+            .hash_by_indices(&dist_key_in_pk_indices, &CRC32FastBuilder {})
+            .to_vnode();
+        Some(vnode)
+    }
 }
 
 pub const fn full_range<T>() -> (Bound<T>, Bound<T>) {
@@ -67,4 +109,57 @@ pub const fn full_range<T>() -> (Bound<T>, Bound<T>) {
 pub fn is_full_range<T>(bounds: &impl RangeBounds<T>) -> bool {
     matches!(bounds.start_bound(), Bound::Unbounded)
         && matches!(bounds.end_bound(), Bound::Unbounded)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    // dist_key is prefix of pk
+    #[test]
+    fn test_vnode_prefix() {
+        let dist_key = vec![1, 3];
+        let pk = vec![1, 3, 2];
+
+        let mut scan_range = ScanRange::full_table_scan();
+        assert!(scan_range.try_compute_vnode(&dist_key, &pk).is_none());
+
+        scan_range.eq_conds.push(ScalarImpl::from(114));
+        assert!(scan_range.try_compute_vnode(&dist_key, &pk).is_none());
+
+        scan_range.eq_conds.push(ScalarImpl::from(514));
+        let vnode = Row(vec![
+            Some(ScalarImpl::from(114)),
+            Some(ScalarImpl::from(514)),
+        ])
+        .hash_by_indices(&[0, 1], &CRC32FastBuilder {})
+        .to_vnode();
+        assert_eq!(scan_range.try_compute_vnode(&dist_key, &pk), Some(vnode));
+    }
+
+    // dist_key is not prefix of pk
+    #[test]
+    fn test_vnode_not_prefix() {
+        let dist_key = vec![2, 3];
+        let pk = vec![1, 3, 2];
+
+        let mut scan_range = ScanRange::full_table_scan();
+        assert!(scan_range.try_compute_vnode(&dist_key, &pk).is_none());
+
+        scan_range.eq_conds.push(ScalarImpl::from(114));
+        assert!(scan_range.try_compute_vnode(&dist_key, &pk).is_none());
+
+        scan_range.eq_conds.push(ScalarImpl::from(514));
+        assert!(scan_range.try_compute_vnode(&dist_key, &pk).is_none());
+
+        scan_range.eq_conds.push(ScalarImpl::from(114514));
+        let vnode = Row(vec![
+            Some(ScalarImpl::from(114)),
+            Some(ScalarImpl::from(514)),
+            Some(ScalarImpl::from(114514)),
+        ])
+        .hash_by_indices(&[2, 1], &CRC32FastBuilder {})
+        .to_vnode();
+        assert_eq!(scan_range.try_compute_vnode(&dist_key, &pk), Some(vnode));
+    }
 }
