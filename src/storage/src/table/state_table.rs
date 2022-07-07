@@ -21,13 +21,14 @@ use futures::{pin_mut, Stream, StreamExt};
 use futures_async_stream::try_stream;
 use risingwave_common::array::Row;
 use risingwave_common::catalog::{ColumnDesc, TableId};
-use risingwave_common::util::ordered::{serialize_pk, OrderedRowSerializer};
+use risingwave_common::util::ordered::OrderedRowSerializer;
 use risingwave_common::util::sort_util::OrderType;
 use risingwave_hummock_sdk::key::range_of_prefix;
 
 use super::mem_table::{MemTable, RowOp};
 use super::storage_table::{StorageTableBase, READ_WRITE};
 use super::Distribution;
+use crate::encoding::cell_based_encoding_util::serialize_pk;
 use crate::encoding::cell_based_row_serializer::CellBasedRowSerializer;
 use crate::encoding::dedup_pk_cell_based_row_serializer::DedupPkCellBasedRowSerializer;
 use crate::encoding::Encoding;

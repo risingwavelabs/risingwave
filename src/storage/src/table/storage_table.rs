@@ -36,6 +36,7 @@ use risingwave_hummock_sdk::key::{end_bound_of_prefix, next_key, prefixed_range,
 
 use super::mem_table::RowOp;
 use super::{Distribution, TableIter};
+use crate::encoding::cell_based_encoding_util::{serialize_pk, serialize_pk_and_column_id};
 use crate::encoding::cell_based_row_deserializer::{CellBasedRowDeserializer, ColumnDescMapping};
 use crate::encoding::cell_based_row_serializer::CellBasedRowSerializer;
 use crate::encoding::dedup_pk_cell_based_row_serializer::DedupPkCellBasedRowSerializer;

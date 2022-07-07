@@ -17,6 +17,7 @@ use risingwave_common::catalog::{ColumnDesc, ColumnId};
 use risingwave_common::error::Result;
 use risingwave_common::types::VirtualNode;
 
+pub mod cell_based_encoding_util;
 pub mod cell_based_row_deserializer;
 pub mod cell_based_row_serializer;
 pub mod dedup_pk_cell_based_row_deserializer;
