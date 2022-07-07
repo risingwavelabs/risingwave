@@ -185,9 +185,9 @@ impl DynamicFilterExecutor {
                             }
                         }
                     }
+                } else {
+                    panic!("condition eval must return bool array")
                 }
-            } else {
-                panic!("condition eval must return bool array")
             }
         }
 
