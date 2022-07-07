@@ -230,14 +230,23 @@ impl CompactionPicker for LevelCompactionPicker {
         let mut splits = Vec::with_capacity(target_level_inputs.len());
         splits.push(KeyRange::new(vec![], vec![]));
         if target_level_inputs.len() > 1 {
-            for table in &target_level_inputs[1..] {
+            let step = self.config.level0_tier_compact_file_number as usize / 2;
+            let mut table_index = 1;
+            while table_index < target_level_inputs.len() {
                 let key_before_last = FullKey::from_user_key_slice(
-                    user_key(&table.key_range.as_ref().unwrap().left),
+                    user_key(
+                        &target_level_inputs[table_index]
+                            .key_range
+                            .as_ref()
+                            .unwrap()
+                            .left,
+                    ),
                     HummockEpoch::MAX,
                 )
                 .into_inner();
                 splits.last_mut().unwrap().right = key_before_last.clone();
                 splits.push(KeyRange::new(key_before_last, vec![]));
+                table_index += step;
             }
         }
 
@@ -314,12 +323,22 @@ impl LevelCompactionPicker {
         let mut info = self.overlap_strategy.create_overlap_info();
         let mut select_level_ssts = vec![];
         let mut select_compaction_bytes = 0;
+        let max_compaction_bytes = std::cmp::min(
+            self.config.max_compaction_bytes,
+            target_level.total_file_size,
+        );
         for select_table in &select_level.table_infos {
             if select_level_handler.is_pending_compact(&select_table.id)
                 || info.check_overlap(select_table)
             {
                 info.update(select_table);
                 continue;
+            }
+            if select_compaction_bytes > max_compaction_bytes {
+                break;
+            }
+            if select_level_ssts.len() > self.config.level0_tier_compact_file_number as usize * 3 {
+                break;
             }
             select_level_ssts.push(select_table.clone());
             select_compaction_bytes += select_table.file_size;
@@ -341,8 +360,14 @@ impl LevelCompactionPicker {
                 }
             }
         }
-        if select_level_ssts.is_empty()
-            || select_compaction_bytes < self.config.max_bytes_for_level_base
+        if select_level_ssts.is_empty() {
+            return (vec![], vec![]);
+        }
+        if select_compaction_bytes * 3
+            < target_level_ssts
+                .iter()
+                .map(|table| table.file_size)
+                .sum::<u64>()
         {
             return (vec![], vec![]);
         }

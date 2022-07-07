@@ -206,13 +206,8 @@ impl DynamicLevelSelector {
             if level_idx == 0 {
                 // trigger intra-l0 compaction at first when the number of files is too large.
                 let l0_score = idle_file_count * SCORE_BASE
-                    / self.config.level0_tier_compact_file_number as u64;
-                if total_size < self.config.max_bytes_for_level_base {
-                    ctx.score_levels.push((l0_score, 0, 0));
-                } else {
-                    ctx.score_levels
-                        .push((std::cmp::min(SCORE_BASE + 1, l0_score), 0, 0));
-                };
+                    / (self.config.level0_tier_compact_file_number as u64 * 2);
+                ctx.score_levels.push((l0_score, 0, 0));
                 let score = total_size * SCORE_BASE / self.config.max_bytes_for_level_base;
                 ctx.score_levels.push((score, 0, ctx.base_level));
             } else {
