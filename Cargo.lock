@@ -4264,6 +4264,7 @@ dependencies = [
  "num-traits",
  "paste",
  "prost",
+ "regex",
  "risingwave_common",
  "risingwave_pb",
  "rust_decimal",
