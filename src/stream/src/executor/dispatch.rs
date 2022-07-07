@@ -48,7 +48,6 @@ type BoxedOutput = Box<dyn Output>;
 
 /// `LocalOutput` sends data to a local `mpsc::Channel`
 pub struct LocalOutput {
-    /// For metrics tracking only
     up_id_str: String,
 
     down_id: ActorId,
