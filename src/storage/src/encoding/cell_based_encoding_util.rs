@@ -20,8 +20,6 @@ use risingwave_common::error::Result;
 use risingwave_common::util::ordered::{OrderedRowSerializer, SENTINEL_CELL_ID};
 use risingwave_common::util::value_encoding::serialize_cell;
 
-/// The sentinel cell id is `-1_i32`, which is ensured to be the first kv pair in the row.
-
 type KeyBytes = Vec<u8>;
 type ValueBytes = Vec<u8>;
 
