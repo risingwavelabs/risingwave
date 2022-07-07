@@ -77,7 +77,7 @@ pub struct PlanAggCall {
     /// Selective aggregation: only the input rows for which
     /// the filter_clause evaluates to true will be fed to aggregate function.
     /// Other rows are discarded.
-    pub filter_conjunctions: Vec<InputRef>,
+    pub filter: Condition,
 }
 
 impl fmt::Debug for PlanAggCall {
@@ -104,14 +104,11 @@ impl fmt::Debug for PlanAggCall {
                 .join(", ");
             write!(f, " order_by({})", clause_text)?;
         }
-        if !self.filter_conjunctions.is_empty() {
+        if !self.filter.always_true() {
             write!(
                 f,
-                " filter({})",
-                self.filter_conjunctions
-                    .iter()
-                    .map(|x| format!("{:?}", x))
-                    .join(" AND ")
+                " filter({:?})",
+                self.filter.as_expr_unless_true().unwrap()
             )?;
         }
         Ok(())
@@ -143,7 +140,7 @@ impl PlanAggCall {
         PlanAggCall {
             agg_kind: total_agg_kind,
             inputs: vec![InputRef::new(partial_output_idx, self.return_type.clone())],
-            filter_conjunctions: vec![],
+            filter: Condition::true_cond(),
             ..self.clone()
         }
     }
@@ -155,7 +152,7 @@ impl PlanAggCall {
             inputs: vec![],
             distinct: false,
             order_by_fields: vec![],
-            filter_conjunctions: vec![],
+            filter: Condition::true_cond(),
         }
     }
 }
@@ -276,6 +273,12 @@ struct LogicalAggBuilder {
     agg_calls: Vec<PlanAggCall>,
     /// the error during the expression rewriting
     error: Option<ErrorCode>,
+    /// If `is_in_filter_clause` is true, it means that
+    /// we are processing filter clause.
+    /// This field is needed because input refs in these clauses
+    /// are allowed to refer to any columns, while those not in filter
+    /// clause are only allowed to refer to group keys.
+    is_in_filter_clause: bool,
 }
 
 impl LogicalAggBuilder {
@@ -301,6 +304,7 @@ impl LogicalAggBuilder {
             agg_calls: vec![],
             error: None,
             input_proj_builder,
+            is_in_filter_clause: false,
         })
     }
 
@@ -345,7 +349,9 @@ impl ExprRewriter for LogicalAggBuilder {
     fn rewrite_agg_call(&mut self, agg_call: AggCall) -> ExprImpl {
         let return_type = agg_call.return_type();
         let (agg_kind, inputs, distinct, order_by, filter) = agg_call.decompose();
-
+        self.is_in_filter_clause = true;
+        let filter = filter.rewrite_expr(self);
+        self.is_in_filter_clause = false;
         for i in &inputs {
             if i.has_agg_call() {
                 self.error = Some(ErrorCode::InvalidInputSyntax(
@@ -377,14 +383,6 @@ impl ExprRewriter for LogicalAggBuilder {
                 }
             })
             .collect_vec();
-        let filter_conjunctions = filter
-            .conjunctions
-            .iter()
-            .map(|expr| {
-                let index = self.input_proj_builder.add_expr(expr);
-                InputRef::new(index, expr.return_type())
-            })
-            .collect_vec();
 
         if agg_kind == AggKind::Avg {
             assert_eq!(inputs.len(), 1);
@@ -399,7 +397,7 @@ impl ExprRewriter for LogicalAggBuilder {
                 inputs: inputs.clone(),
                 distinct,
                 order_by_fields: order_by_fields.clone(),
-                filter_conjunctions: filter_conjunctions.clone(),
+                filter: filter.clone(),
             });
             let left = ExprImpl::from(InputRef::new(
                 self.group_key.len() + self.agg_calls.len() - 1,
@@ -417,7 +415,7 @@ impl ExprRewriter for LogicalAggBuilder {
                 inputs,
                 distinct,
                 order_by_fields,
-                filter_conjunctions,
+                filter,
             });
 
             let right = InputRef::new(
@@ -433,7 +431,7 @@ impl ExprRewriter for LogicalAggBuilder {
                 inputs,
                 distinct,
                 order_by_fields,
-                filter_conjunctions,
+                filter,
             });
             ExprImpl::from(InputRef::new(
                 self.group_key.len() + self.agg_calls.len() - 1,
@@ -463,6 +461,8 @@ impl ExprRewriter for LogicalAggBuilder {
         let expr = input_ref.into();
         if let Some(group_key) = self.try_as_group_expr(&expr) {
             InputRef::new(group_key, expr.return_type()).into()
+        } else if self.is_in_filter_clause {
+            InputRef::new(self.input_proj_builder.add_expr(&expr), expr.return_type()).into()
         } else {
             self.error = Some(ErrorCode::InvalidInputSyntax(
                 "column must appear in the GROUP BY clause or be used in an aggregate function"
@@ -599,7 +599,7 @@ impl LogicalAgg {
         &self,
         input: PlanRef,
         agg_calls: &[PlanAggCall],
-        input_col_change: ColIndexMapping,
+        mut input_col_change: ColIndexMapping,
     ) -> Self {
         let agg_calls = agg_calls
             .iter()
@@ -612,9 +612,7 @@ impl LogicalAgg {
                     let i = &mut field.input;
                     *i = InputRef::new(input_col_change.map(i.index()), i.return_type())
                 });
-                agg_call.filter_conjunctions.iter_mut().for_each(|i| {
-                    *i = InputRef::new(input_col_change.map(i.index()), i.return_type())
-                });
+                agg_call.filter = agg_call.filter.rewrite_expr(&mut input_col_change);
                 agg_call
             })
             .collect();
@@ -676,7 +674,10 @@ impl ColPrunable for LogicalAgg {
                     let agg_call = self.agg_calls[index].clone();
                     tmp.extend(agg_call.inputs.iter().map(|x| x.index()));
                     tmp.extend(agg_call.order_by_fields.iter().map(|x| x.input.index()));
-                    tmp.extend(agg_call.filter_conjunctions.iter().map(|x| x.index()));
+                    // collect columns used in aggregate filter expressions
+                    for i in &agg_call.filter.conjunctions {
+                        tmp.union_with(&i.collect_input_refs(input_cnt));
+                    }
                     agg_call
                 })
                 .collect_vec();
@@ -1016,7 +1017,7 @@ mod tests {
             inputs: vec![InputRef::new(2, ty.clone())],
             distinct: false,
             order_by_fields: vec![],
-            filter_conjunctions: vec![],
+            filter: Condition::true_cond(),
         };
         LogicalAgg::new(vec![agg_call], vec![1], values.into())
     }
@@ -1135,7 +1136,7 @@ mod tests {
             inputs: vec![InputRef::new(2, ty.clone())],
             distinct: false,
             order_by_fields: vec![],
-            filter_conjunctions: vec![],
+            filter: Condition::true_cond(),
         };
         let agg = LogicalAgg::new(vec![agg_call], vec![1], values.into());
 
@@ -1200,7 +1201,7 @@ mod tests {
                 inputs: vec![InputRef::new(2, ty.clone())],
                 distinct: false,
                 order_by_fields: vec![],
-                filter_conjunctions: vec![],
+                filter: Condition::true_cond(),
             },
             PlanAggCall {
                 agg_kind: AggKind::Max,
@@ -1208,7 +1209,7 @@ mod tests {
                 inputs: vec![InputRef::new(1, ty.clone())],
                 distinct: false,
                 order_by_fields: vec![],
-                filter_conjunctions: vec![],
+                filter: Condition::true_cond(),
             },
         ];
         let agg = LogicalAgg::new(agg_calls, vec![1, 2], values.into());
