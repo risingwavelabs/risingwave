@@ -1,10 +1,11 @@
 [package]
 edition = "2021"
 name = "risingwave_batch"
-version = "0.1.9"
+version = "0.1.10"
 
 [dependencies]
 anyhow = "1"
+assert_matches = "1"
 async-recursion = "1"
 async-stream = "0.3"
 async-trait = "0.1"
@@ -56,9 +57,20 @@ tracing = { version = "0.1" }
 tracing-futures = "0.2"
 twox-hash = "1"
 url = "2"
+uuid = "1"
 workspace-hack = { version = "0.1", path = "../workspace-hack" }
 
 [dev-dependencies]
-assert_matches = "1"
+criterion = { version = "0.3.5", features = ["async_tokio", "async"] }
 rand = "0.8"
 tempfile = "3"
+tikv-jemallocator = "0.5"
+
+[[bench]]
+name = "filter"
+harness = false
+
+[[bench]]
+name = "nested_loop_join"
+harness = false
+

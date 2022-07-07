@@ -377,6 +377,8 @@ fn parse_select_count_wildcard() {
             args: vec![FunctionArg::Unnamed(FunctionArgExpr::Wildcard)],
             over: None,
             distinct: false,
+            order_by: vec![],
+            filter: None
         }),
         expr_from_projection(only(&select.projection))
     );
@@ -395,6 +397,8 @@ fn parse_select_count_distinct() {
             }))],
             over: None,
             distinct: true,
+            order_by: vec![],
+            filter: None
         }),
         expr_from_projection(only(&select.projection))
     );
@@ -410,13 +414,6 @@ fn parse_select_count_distinct() {
         ParserError::ParserError("Cannot specify both ALL and DISTINCT".to_string()),
         res.unwrap_err()
     );
-}
-
-#[test]
-fn parse_not() {
-    let sql = "SELECT id FROM customer WHERE NOT salary = ''";
-    let _ast = verified_only_select(sql);
-    // TODO: add assertions
 }
 
 #[test]
@@ -538,6 +535,8 @@ fn parse_compound_expr_2() {
 fn parse_unary_math() {
     use self::Expr::*;
     let sql = "- a + - b";
+    let ast = run_parser_method(sql, |parser| parser.parse_expr()).unwrap();
+    assert_eq!("(- a) + (- b)", &ast.to_string());
     assert_eq!(
         BinaryOp {
             left: Box::new(UnaryOp {
@@ -550,7 +549,7 @@ fn parse_unary_math() {
                 expr: Box::new(Identifier(Ident::new("b"))),
             }),
         },
-        verified_expr(sql)
+        ast
     );
 }
 
@@ -603,8 +602,10 @@ fn parse_is_not_distinct_from() {
 fn parse_not_precedence() {
     // NOT has higher precedence than OR/AND, so the following must parse as (NOT true) OR true
     let sql = "NOT true OR true";
+    let ast = run_parser_method(sql, |parser| parser.parse_expr()).unwrap();
+    assert_eq!("(NOT true) OR true", &ast.to_string());
     assert_matches!(
-        verified_expr(sql),
+        ast,
         Expr::BinaryOp {
             op: BinaryOperator::Or,
             ..
@@ -614,8 +615,10 @@ fn parse_not_precedence() {
     // But NOT has lower precedence than comparison operators, so the following parses as NOT (a IS
     // NULL)
     let sql = "NOT a IS NULL";
+    let ast = run_parser_method(sql, |parser| parser.parse_expr()).unwrap();
+    assert_eq!("NOT (a IS NULL)", &ast.to_string());
     assert_matches!(
-        verified_expr(sql),
+        ast,
         Expr::UnaryOp {
             op: UnaryOperator::Not,
             ..
@@ -639,8 +642,10 @@ fn parse_not_precedence() {
 
     // NOT has lower precedence than LIKE, so the following parses as NOT ('a' NOT LIKE 'b')
     let sql = "NOT 'a' NOT LIKE 'b'";
+    let ast = run_parser_method(sql, |parser| parser.parse_expr()).unwrap();
+    assert_eq!("NOT ('a' NOT LIKE 'b')", &ast.to_string());
     assert_eq!(
-        verified_expr(sql),
+        ast,
         Expr::UnaryOp {
             op: UnaryOperator::Not,
             expr: Box::new(Expr::BinaryOp {
@@ -1089,9 +1094,11 @@ fn parse_select_having() {
                 args: vec![FunctionArg::Unnamed(FunctionArgExpr::Wildcard)],
                 over: None,
                 distinct: false,
+                order_by: vec![],
+                filter: None
             })),
             op: BinaryOperator::Gt,
-            right: Box::new(Expr::Value(number("1")))
+            right: Box::new(Expr::Value(number("1"))),
         }),
         select.having
     );
@@ -1554,7 +1561,7 @@ fn parse_alter_table_constraints() {
     check_one("PRIMARY KEY (foo, bar)");
     check_one("UNIQUE (id)");
     check_one("FOREIGN KEY (foo, bar) REFERENCES AnotherTable(foo, bar)");
-    check_one("CHECK ((end_date > start_date) OR end_date IS NULL)");
+    check_one("CHECK ((end_date > start_date) OR (end_date IS NULL))");
 
     fn check_one(constraint_text: &str) {
         match verified_stmt(&format!("ALTER TABLE tab ADD {}", constraint_text)) {
@@ -1781,6 +1788,8 @@ fn parse_named_argument_function() {
             ],
             over: None,
             distinct: false,
+            order_by: vec![],
+            filter: None,
         }),
         expr_from_projection(only(&select.projection))
     );
@@ -1814,6 +1823,8 @@ fn parse_window_functions() {
                 window_frame: None,
             }),
             distinct: false,
+            order_by: vec![],
+            filter: None,
         }),
         expr_from_projection(&select.projection[0])
     );
@@ -1824,6 +1835,66 @@ fn parse_aggregate_with_group_by() {
     let sql = "SELECT a, COUNT(1), MIN(b), MAX(b) FROM foo GROUP BY a";
     let _ast = verified_only_select(sql);
     // TODO: assertions
+}
+
+#[test]
+fn parse_aggregate_with_order_by() {
+    let sql = "SELECT STRING_AGG(a, b ORDER BY b ASC, a DESC) FROM foo";
+    let select = verified_only_select(sql);
+    assert_eq!(
+        &Expr::Function(Function {
+            name: ObjectName(vec![Ident::new("STRING_AGG")]),
+            args: vec![
+                FunctionArg::Unnamed(FunctionArgExpr::Expr(Expr::Identifier(Ident::new("a")))),
+                FunctionArg::Unnamed(FunctionArgExpr::Expr(Expr::Identifier(Ident::new("b")))),
+            ],
+            over: None,
+            distinct: false,
+            order_by: vec![
+                OrderByExpr {
+                    expr: Expr::Identifier(Ident::new("b")),
+                    asc: Some(true),
+                    nulls_first: None,
+                },
+                OrderByExpr {
+                    expr: Expr::Identifier(Ident::new("a")),
+                    asc: Some(false),
+                    nulls_first: None,
+                }
+            ],
+            filter: None,
+        }),
+        expr_from_projection(only(&select.projection))
+    );
+}
+
+#[test]
+fn parse_aggregate_with_filter() {
+    let sql = "SELECT sum(a) FILTER(WHERE (a > 0) AND (a IS NOT NULL)) FROM foo";
+    let select = verified_only_select(sql);
+    assert_eq!(
+        &Expr::Function(Function {
+            name: ObjectName(vec![Ident::new("sum")]),
+            args: vec![FunctionArg::Unnamed(FunctionArgExpr::Expr(
+                Expr::Identifier(Ident::new("a"))
+            )),],
+            over: None,
+            distinct: false,
+            order_by: vec![],
+            filter: Some(Box::new(Expr::BinaryOp {
+                left: Box::new(Expr::Nested(Box::new(Expr::BinaryOp {
+                    left: Box::new(Expr::Identifier(Ident::new("a"))),
+                    op: BinaryOperator::Gt,
+                    right: Box::new(Expr::Value(Value::Number("0".to_string(), false)))
+                }))),
+                op: BinaryOperator::And,
+                right: Box::new(Expr::Nested(Box::new(Expr::IsNotNull(Box::new(
+                    Expr::Identifier(Ident::new("a"))
+                )))))
+            })),
+        }),
+        expr_from_projection(only(&select.projection)),
+    );
 }
 
 #[test]
@@ -2058,6 +2129,8 @@ fn parse_delimited_identifiers() {
             args: vec![],
             over: None,
             distinct: false,
+            order_by: vec![],
+            filter: None,
         }),
         expr_from_projection(&select.projection[1]),
     );
@@ -2680,6 +2753,39 @@ fn parse_substring() {
     );
 
     one_statement_parses_to("SELECT SUBSTRING('1' FOR 3)", "SELECT SUBSTRING('1' FOR 3)");
+}
+
+#[test]
+fn parse_overlay() {
+    one_statement_parses_to(
+        "SELECT OVERLAY('abc' PLACING 'xyz' FROM 1)",
+        "SELECT OVERLAY('abc' PLACING 'xyz' FROM 1)",
+    );
+
+    one_statement_parses_to(
+        "SELECT OVERLAY('abc' PLACING 'xyz' FROM 1 FOR 2)",
+        "SELECT OVERLAY('abc' PLACING 'xyz' FROM 1 FOR 2)",
+    );
+
+    assert_eq!(
+        parse_sql_statements("SELECT OVERLAY('abc', 'xyz')").unwrap_err(),
+        ParserError::ParserError("Expected PLACING, found: ,".to_owned())
+    );
+
+    assert_eq!(
+        parse_sql_statements("SELECT OVERLAY('abc' PLACING 'xyz')").unwrap_err(),
+        ParserError::ParserError("Expected FROM, found: )".to_owned())
+    );
+
+    assert_eq!(
+        parse_sql_statements("SELECT OVERLAY('abc' PLACING 'xyz' FOR 2)").unwrap_err(),
+        ParserError::ParserError("Expected FROM, found: FOR".to_owned())
+    );
+
+    assert_eq!(
+        parse_sql_statements("SELECT OVERLAY('abc' PLACING 'xyz' FOR 2 FROM 1)").unwrap_err(),
+        ParserError::ParserError("Expected FROM, found: FOR".to_owned())
+    );
 }
 
 #[test]

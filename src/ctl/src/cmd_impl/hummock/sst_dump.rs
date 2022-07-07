@@ -14,8 +14,7 @@
 
 use bytes::Buf;
 use risingwave_hummock_sdk::compaction_group::hummock_version_ext::HummockVersionExt;
-use risingwave_hummock_sdk::compaction_group::StaticCompactionGroupId;
-use risingwave_object_store::object::BlockLocation;
+use risingwave_object_store::object::{BlockLocation, ObjectStore};
 use risingwave_rpc_client::HummockMetaClient;
 use risingwave_storage::hummock::CompressionAlgorithm;
 use risingwave_storage::monitor::StoreLocalStatistic;
@@ -24,9 +23,9 @@ use crate::common::HummockServiceOpts;
 
 pub async fn sst_dump() -> anyhow::Result<()> {
     // Retrieves the SSTable store so we can access the SSTableMeta
-    let hummock_opts = HummockServiceOpts::from_env()?;
+    let mut hummock_opts = HummockServiceOpts::from_env()?;
     let (meta_client, hummock) = hummock_opts.create_hummock_store().await?;
-    let sstable_store = &*hummock.inner().sstable_store();
+    let sstable_store = &*hummock.sstable_store();
 
     // Retrieves the latest HummockVersion from the meta client so we can access the SSTableInfo
     let version = meta_client.pin_version(u64::MAX).await?;
@@ -34,12 +33,8 @@ pub async fn sst_dump() -> anyhow::Result<()> {
     let sstable_id_infos = meta_client.list_sstable_id_infos(version.id).await?;
     let mut sstable_id_infos_iter = sstable_id_infos.iter();
 
-    // TODO #2065: iterate all compaction groups
-    for level in version
-        .get_compaction_group_levels(StaticCompactionGroupId::StateDefault.into())
-        .clone()
-    {
-        for sstable_info in level.table_infos {
+    for level in version.get_combined_levels() {
+        for sstable_info in level.table_infos.clone() {
             let id = sstable_info.id;
 
             let sstable_cache = sstable_store
@@ -108,5 +103,6 @@ pub async fn sst_dump() -> anyhow::Result<()> {
 
     meta_client.unpin_version(&[version.id]).await?;
 
+    hummock_opts.shutdown().await;
     Ok(())
 }

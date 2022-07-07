@@ -28,6 +28,7 @@ use risingwave_connector::ConnectorProperties;
 use risingwave_pb::catalog::StreamSourceInfo;
 use risingwave_pb::plan_common::RowFormatType;
 
+use crate::monitor::SourceMetrics;
 use crate::row_id::{RowId, RowIdGenerator};
 use crate::table_v2::TableSourceV2;
 use crate::{ConnectorSource, SourceFormat, SourceImpl, SourceParserImpl};
@@ -74,6 +75,7 @@ pub struct SourceDesc {
     pub source: SourceRef,
     pub format: SourceFormat,
     pub columns: Vec<SourceColumnDesc>,
+    pub metrics: Arc<SourceMetrics>,
 
     // The column index of row ID. By default it's 0, which means the first column is row ID.
     // TODO: change to Option<usize> when pk supported in the future.
@@ -88,11 +90,7 @@ impl SourceDesc {
 
     pub fn next_row_id_batch(&self, length: usize) -> Vec<RowId> {
         let mut guard = self.row_id_generator.as_ref().lock();
-        let mut result = Vec::with_capacity(length);
-        for _ in 0..length {
-            result.push(guard.next());
-        }
-        result
+        guard.next_batch(length)
     }
 }
 
@@ -103,6 +101,8 @@ pub struct MemSourceManager {
     sources: Mutex<HashMap<TableId, SourceDesc>>,
     /// Located worker id.
     worker_id: u32,
+    /// local source metrics
+    metrics: Arc<SourceMetrics>,
 }
 
 #[async_trait]
@@ -169,6 +169,7 @@ impl SourceManager for MemSourceManager {
                 self.worker_id,
                 *UNIX_SINGULARITY_DATE_EPOCH,
             ))),
+            metrics: self.metrics.clone(),
         };
 
         let mut tables = self.get_sources()?;
@@ -204,6 +205,7 @@ impl SourceManager for MemSourceManager {
                 self.worker_id,
                 *UNIX_SINGULARITY_DATE_EPOCH,
             ))),
+            metrics: self.metrics.clone(),
         };
 
         sources.insert(*table_id, desc);
@@ -236,10 +238,11 @@ impl SourceManager for MemSourceManager {
 }
 
 impl MemSourceManager {
-    pub fn new(worker_id: u32) -> Self {
+    pub fn new(worker_id: u32, metrics: Arc<SourceMetrics>) -> Self {
         MemSourceManager {
             sources: Mutex::new(HashMap::new()),
             worker_id,
+            metrics,
         }
     }
 

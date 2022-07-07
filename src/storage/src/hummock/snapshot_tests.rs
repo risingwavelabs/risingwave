@@ -12,22 +12,33 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-#[cfg(test)]
 use std::sync::Arc;
 
 use risingwave_meta::hummock::test_utils::setup_compute_env;
 use risingwave_meta::hummock::MockHummockMetaClient;
 
 use super::*;
+use crate::hummock::compaction_group::StaticCompactionGroupId;
+use crate::hummock::compaction_group_client::DummyCompactionGroupClient;
 use crate::hummock::iterator::test_utils::mock_sstable_store;
 use crate::hummock::test_utils::default_config_for_test;
 use crate::storage_value::StorageValue;
-use crate::store::StateStoreIter;
+use crate::store::{ReadOptions, StateStoreIter, WriteOptions};
 use crate::StateStore;
 
 macro_rules! assert_count_range_scan {
     ($storage:expr, $range:expr, $expect_count:expr, $epoch:expr) => {{
-        let mut it = $storage.iter::<_, Vec<u8>>($range, $epoch).await.unwrap();
+        let mut it = $storage
+            .iter::<_, Vec<u8>>(
+                $range,
+                ReadOptions {
+                    epoch: $epoch,
+                    table_id: Default::default(),
+                    ttl: None,
+                },
+            )
+            .await
+            .unwrap();
         let mut count = 0;
         loop {
             match it.next().await.unwrap() {
@@ -42,7 +53,14 @@ macro_rules! assert_count_range_scan {
 macro_rules! assert_count_backward_range_scan {
     ($storage:expr, $range:expr, $expect_count:expr, $epoch:expr) => {{
         let mut it = $storage
-            .backward_iter::<_, Vec<u8>>($range, $epoch)
+            .backward_iter::<_, Vec<u8>>(
+                $range,
+                ReadOptions {
+                    epoch: $epoch,
+                    table_id: Default::default(),
+                    ttl: None,
+                },
+            )
             .await
             .unwrap();
         let mut count = 0;
@@ -71,6 +89,9 @@ async fn test_snapshot_inner(enable_sync: bool, enable_commit: bool) {
         sstable_store,
         mock_hummock_meta_client.clone(),
         Arc::new(StateStoreMetrics::unused()),
+        Arc::new(DummyCompactionGroupClient::new(
+            StaticCompactionGroupId::StateDefault.into(),
+        )),
     )
     .await
     .unwrap();
@@ -83,7 +104,10 @@ async fn test_snapshot_inner(enable_sync: bool, enable_commit: bool) {
                 (Bytes::from("1"), StorageValue::new_default_put("test")),
                 (Bytes::from("2"), StorageValue::new_default_put("test")),
             ],
-            epoch1,
+            WriteOptions {
+                epoch: epoch1,
+                table_id: Default::default(),
+            },
         )
         .await
         .unwrap();
@@ -112,7 +136,10 @@ async fn test_snapshot_inner(enable_sync: bool, enable_commit: bool) {
                 (Bytes::from("3"), StorageValue::new_default_put("test")),
                 (Bytes::from("4"), StorageValue::new_default_put("test")),
             ],
-            epoch2,
+            WriteOptions {
+                epoch: epoch2,
+                table_id: Default::default(),
+            },
         )
         .await
         .unwrap();
@@ -142,7 +169,10 @@ async fn test_snapshot_inner(enable_sync: bool, enable_commit: bool) {
                 (Bytes::from("3"), StorageValue::new_default_delete()),
                 (Bytes::from("4"), StorageValue::new_default_delete()),
             ],
-            epoch3,
+            WriteOptions {
+                epoch: epoch3,
+                table_id: Default::default(),
+            },
         )
         .await
         .unwrap();
@@ -180,6 +210,9 @@ async fn test_snapshot_range_scan_inner(enable_sync: bool, enable_commit: bool) 
         sstable_store,
         mock_hummock_meta_client.clone(),
         Arc::new(StateStoreMetrics::unused()),
+        Arc::new(DummyCompactionGroupClient::new(
+            StaticCompactionGroupId::StateDefault.into(),
+        )),
     )
     .await
     .unwrap();
@@ -195,7 +228,10 @@ async fn test_snapshot_range_scan_inner(enable_sync: bool, enable_commit: bool) 
                 (Bytes::from("3"), StorageValue::new_default_put("test")),
                 (Bytes::from("4"), StorageValue::new_default_put("test")),
             ],
-            epoch,
+            WriteOptions {
+                epoch,
+                table_id: Default::default(),
+            },
         )
         .await
         .unwrap();
@@ -242,6 +278,9 @@ async fn test_snapshot_backward_range_scan_inner(enable_sync: bool, enable_commi
         sstable_store,
         mock_hummock_meta_client.clone(),
         Arc::new(StateStoreMetrics::unused()),
+        Arc::new(DummyCompactionGroupClient::new(
+            StaticCompactionGroupId::StateDefault.into(),
+        )),
     )
     .await
     .unwrap();
@@ -258,7 +297,10 @@ async fn test_snapshot_backward_range_scan_inner(enable_sync: bool, enable_commi
                 (Bytes::from("5"), StorageValue::new_default_put("test")),
                 (Bytes::from("6"), StorageValue::new_default_put("test")),
             ],
-            epoch,
+            WriteOptions {
+                epoch,
+                table_id: Default::default(),
+            },
         )
         .await
         .unwrap();
@@ -285,7 +327,10 @@ async fn test_snapshot_backward_range_scan_inner(enable_sync: bool, enable_commi
                 (Bytes::from("7"), StorageValue::new_default_put("test")),
                 (Bytes::from("8"), StorageValue::new_default_put("test")),
             ],
-            epoch + 1,
+            WriteOptions {
+                epoch: epoch + 1,
+                table_id: Default::default(),
+            },
         )
         .await
         .unwrap();

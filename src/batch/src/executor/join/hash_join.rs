@@ -42,16 +42,16 @@ use crate::task::{BatchTaskContext, TaskId};
 #[derive(Default)]
 pub(super) struct EquiJoinParams {
     join_type: JoinType,
-    /// Column indexes of left keys in equi join, e.g., the column indexes of `b1` and `b3` in `b`.
+    /// Column indexes of left key in equi join, e.g., the column indexes of `b1` and `b3` in `b`.
     left_key_columns: Vec<usize>,
-    /// Data types of left keys in equi join, e.g., the column types of `b1` and `b3` in `b`.
+    /// Data types of left key in equi join, e.g., the column types of `b1` and `b3` in `b`.
     left_key_types: Vec<DataType>,
     /// Data types of left columns in equi join, e.g., the column types of `b1` `b2` `b3` in `b`.
     left_col_len: usize,
-    /// Column indexes of right keys in equi join, e.g., the column indexes of `a1` and `a3` in
+    /// Column indexes of right key in equi join, e.g., the column indexes of `a1` and `a3` in
     /// `a`.
     right_key_columns: Vec<usize>,
-    /// Data types of right keys in equi join, e.g., the column types of `a1` and `a3` in `a`.
+    /// Data types of right key in equi join, e.g., the column types of `a1` and `a3` in `a`.
     right_key_types: Vec<DataType>,
     /// Data types of right columns in equi join, e.g., the column types of `a1` `a2` `a3` in `a`.
     right_col_len: usize,
@@ -425,7 +425,7 @@ mod tests {
             let array_builders = data_types
                 .iter()
                 .map(|data_type| data_type.create_array_builder(1024))
-                .try_collect()?;
+                .collect();
 
             Ok(Self {
                 data_types,

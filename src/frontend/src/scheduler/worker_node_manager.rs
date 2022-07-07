@@ -12,13 +12,13 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+use std::collections::HashMap;
 use std::sync::{Arc, RwLock};
 
 use rand::distributions::{Distribution as RandDistribution, Uniform};
 use risingwave_common::bail;
-use risingwave_common::error::Result;
-use risingwave_pb::common::{WorkerNode, WorkerType};
-use risingwave_rpc_client::MetaClient;
+use risingwave_common::types::ParallelUnitId;
+use risingwave_pb::common::WorkerNode;
 
 use crate::scheduler::SchedulerResult;
 
@@ -29,14 +29,16 @@ pub struct WorkerNodeManager {
 
 pub type WorkerNodeManagerRef = Arc<WorkerNodeManager>;
 
+impl Default for WorkerNodeManager {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl WorkerNodeManager {
-    pub async fn new(client: MetaClient) -> Result<Self> {
-        let worker_nodes = RwLock::new(
-            client
-                .list_all_nodes(WorkerType::ComputeNode, false)
-                .await?,
-        );
-        Ok(Self { worker_nodes })
+    pub fn new() -> Self {
+        let worker_nodes = RwLock::new(Vec::new());
+        Self { worker_nodes }
     }
 
     /// Used in tests.
@@ -78,13 +80,39 @@ impl WorkerNodeManager {
     pub fn worker_node_count(&self) -> usize {
         self.worker_nodes.read().unwrap().len()
     }
+
+    pub fn get_workers_by_parallel_unit_ids(
+        &self,
+        parallel_unit_ids: &[ParallelUnitId],
+    ) -> SchedulerResult<Vec<WorkerNode>> {
+        let current_nodes = self.worker_nodes.read().unwrap();
+        let mut pu_to_worker: HashMap<ParallelUnitId, WorkerNode> = HashMap::new();
+        for node in &*current_nodes {
+            for pu in &node.parallel_units {
+                let res = pu_to_worker.insert(pu.id, node.clone());
+                assert!(res.is_none(), "duplicate parallel unit id");
+            }
+        }
+
+        let mut workers = Vec::with_capacity(parallel_unit_ids.len());
+        for parallel_unit_id in parallel_unit_ids {
+            match pu_to_worker.get(parallel_unit_id) {
+                Some(worker) => workers.push(worker.clone()),
+                None => bail!(
+                    "No worker node found for parallel unit id: {}",
+                    parallel_unit_id
+                ),
+            }
+        }
+        Ok(workers)
+    }
 }
 
 #[cfg(test)]
 mod tests {
 
     use risingwave_common::util::addr::HostAddr;
-    use risingwave_pb::common::worker_node;
+    use risingwave_pb::common::{worker_node, WorkerType};
 
     #[test]
     fn test_worker_node_manager() {

@@ -259,6 +259,8 @@ impl CompactionPicker for LevelCompactionPicker {
                 table_infos: target_level_inputs,
             },
             split_ranges: splits,
+            target_file_size: self.config.target_file_size_base,
+            compression_algorithm: "".to_string(),
         })
     }
 }

@@ -16,13 +16,15 @@ use std::pin::Pin;
 use std::task::{Context, Poll};
 
 use async_trait::async_trait;
-use futures::channel::mpsc::{Receiver, Sender};
-use futures::{SinkExt, Stream, StreamExt};
-use futures_async_stream::{for_await, stream};
+use futures::{Stream, StreamExt};
+use futures_async_stream::for_await;
+use madsim::time::Instant;
 use risingwave_common::catalog::Schema;
 use risingwave_common::error::Result;
 use risingwave_pb::task_service::GetStreamResponse;
 use risingwave_rpc_client::ComputeClient;
+use tokio::sync::mpsc::{Receiver, Sender};
+use tokio_stream::wrappers::ReceiverStream;
 use tonic::Streaming;
 
 use super::error::StreamExecutorError;
@@ -56,23 +58,44 @@ impl RemoteInput {
         })
     }
 
-    pub async fn run(mut self) {
+    pub async fn run(self) {
         let up_actor_id = self.up_down_ids.0.to_string();
         let down_actor_id = self.up_down_ids.1.to_string();
+        let mut rr = 0;
+        const SAMPLING_FREQUENCY: u64 = 100;
+
         #[for_await]
         for data_res in self.stream {
             match data_res {
                 Ok(stream_msg) => {
                     let bytes = Message::get_encoded_len(&stream_msg);
-                    let msg_res = Message::from_protobuf(
-                        stream_msg
-                            .get_message()
-                            .expect("no message in stream response!"),
-                    );
                     self.metrics
                         .exchange_recv_size
                         .with_label_values(&[&up_actor_id, &down_actor_id])
                         .inc_by(bytes as u64);
+
+                    // add deserialization duration metric with given sampling frequency
+                    let msg_res = if rr % SAMPLING_FREQUENCY == 0 {
+                        let start_time = Instant::now();
+                        let msg_res = Message::from_protobuf(
+                            stream_msg
+                                .get_message()
+                                .expect("no message in stream response!"),
+                        );
+                        self.metrics
+                            .actor_sampled_deserialize_duration_ns
+                            .with_label_values(&[&down_actor_id])
+                            .inc_by(start_time.elapsed().as_nanos() as u64);
+                        msg_res
+                    } else {
+                        Message::from_protobuf(
+                            stream_msg
+                                .get_message()
+                                .expect("no message in stream response!"),
+                        )
+                    };
+                    rr += 1;
+
                     match msg_res {
                         Ok(msg) => {
                             self.sender.send(msg).await.unwrap();
@@ -105,6 +128,9 @@ pub struct MergeExecutor {
 
     /// Actor operator context
     status: OperatorInfoStatus,
+
+    /// Metrics
+    metrics: Arc<StreamingMetrics>,
 }
 
 impl MergeExecutor {
@@ -115,6 +141,7 @@ impl MergeExecutor {
         inputs: Vec<Receiver<Message>>,
         actor_context: ActorContextRef,
         receiver_id: u64,
+        metrics: Arc<StreamingMetrics>,
     ) -> Self {
         Self {
             upstreams: inputs,
@@ -125,18 +152,8 @@ impl MergeExecutor {
                 identity: "MergeExecutor".to_string(),
             },
             status: OperatorInfoStatus::new(actor_context, receiver_id),
+            metrics,
         }
-    }
-}
-
-/// Every time a stream receives an item, we yield the item and put this stream off CPU with
-/// `tokio::task::yield_now()`.
-#[stream(item = T)]
-pub async fn cooperative_scheduling<T>(stream: impl Stream<Item = T>) {
-    #[for_await]
-    for item in stream {
-        yield item;
-        tokio::task::yield_now().await;
     }
 }
 
@@ -147,8 +164,22 @@ impl Executor for MergeExecutor {
         // Futures of all active upstreams.
         let status = self.status;
         let select_all = SelectReceivers::new(self.actor_id, status, upstreams);
+        let actor_id_str = self.actor_id.to_string();
+        let metrics = self.metrics.clone();
+
         // Channels that're blocked by the barrier to align.
-        cooperative_scheduling(select_all).boxed()
+        select_all
+            .map(move |msg| {
+                if let Ok(Message::Chunk(chunk)) = &msg {
+                    metrics
+                        .actor_in_record_cnt
+                        .with_label_values(&[&actor_id_str])
+                        .inc_by(chunk.cardinality() as _);
+                }
+
+                msg
+            })
+            .boxed()
     }
 
     fn schema(&self) -> &Schema {
@@ -165,8 +196,8 @@ impl Executor for MergeExecutor {
 }
 
 pub struct SelectReceivers {
-    blocks: Vec<Receiver<Message>>,
-    upstreams: Vec<Receiver<Message>>,
+    blocks: Vec<ReceiverStream<Message>>,
+    upstreams: Vec<ReceiverStream<Message>>,
     barrier: Option<Barrier>,
     last_base: usize,
     status: OperatorInfoStatus,
@@ -177,7 +208,7 @@ impl SelectReceivers {
     fn new(actor_id: u32, status: OperatorInfoStatus, upstreams: Vec<Receiver<Message>>) -> Self {
         Self {
             blocks: Vec::with_capacity(upstreams.len()),
-            upstreams,
+            upstreams: upstreams.into_iter().map(ReceiverStream::new).collect(),
             last_base: 0,
             actor_id,
             status,
@@ -224,6 +255,7 @@ impl Stream for SelectReceivers {
                         }
                         Message::Chunk(chunk) => {
                             let message = Message::Chunk(chunk);
+
                             self.status.next_message(&message);
                             self.last_base = (idx + 1) % self.upstreams.len();
                             return Poll::Ready(Some(Ok(message)));
@@ -258,8 +290,6 @@ mod tests {
     use std::time::Duration;
 
     use assert_matches::assert_matches;
-    use futures::channel::mpsc::channel;
-    use futures::SinkExt;
     use itertools::Itertools;
     use madsim::collections::HashSet;
     use risingwave_common::array::{Op, StreamChunk};
@@ -271,6 +301,7 @@ mod tests {
         GetDataRequest, GetDataResponse, GetStreamRequest, GetStreamResponse,
     };
     use risingwave_rpc_client::ComputeClient;
+    use tokio::sync::mpsc::channel;
     use tokio::time::sleep;
     use tokio_stream::wrappers::ReceiverStream;
     use tonic::{Request, Response, Status};
@@ -291,17 +322,25 @@ mod tests {
         let mut txs = Vec::with_capacity(CHANNEL_NUMBER);
         let mut rxs = Vec::with_capacity(CHANNEL_NUMBER);
         for _i in 0..CHANNEL_NUMBER {
-            let (tx, rx) = futures::channel::mpsc::channel(16);
+            let (tx, rx) = tokio::sync::mpsc::channel(16);
             txs.push(tx);
             rxs.push(rx);
         }
-        let merger =
-            MergeExecutor::new(Schema::default(), vec![], 0, rxs, ActorContext::create(), 0);
+        let metrics = Arc::new(StreamingMetrics::unused());
+        let merger = MergeExecutor::new(
+            Schema::default(),
+            vec![],
+            0,
+            rxs,
+            ActorContext::create(),
+            0,
+            metrics,
+        );
         let mut handles = Vec::with_capacity(CHANNEL_NUMBER);
 
         let epochs = (10..1000u64).step_by(10).collect_vec();
 
-        for mut tx in txs {
+        for tx in txs {
             let epochs = epochs.clone();
             let handle = tokio::spawn(async move {
                 for epoch in epochs {
@@ -438,13 +477,13 @@ mod tests {
             .unwrap();
             remote_input.run().await
         });
-        assert_matches!(rx.next().await.unwrap(), Message::Chunk(chunk) => {
+        assert_matches!(rx.recv().await.unwrap(), Message::Chunk(chunk) => {
             let (ops, columns, visibility) = chunk.into_inner();
             assert_eq!(ops.len() as u64, 0);
             assert_eq!(columns.len() as u64, 0);
             assert_eq!(visibility, None);
         });
-        assert_matches!(rx.next().await.unwrap(), Message::Barrier(Barrier { epoch: barrier_epoch, mutation: _, .. }) => {
+        assert_matches!(rx.recv().await.unwrap(), Message::Barrier(Barrier { epoch: barrier_epoch, mutation: _, .. }) => {
             assert_eq!(barrier_epoch.curr, 12345);
         });
         assert!(rpc_called.load(Ordering::SeqCst));

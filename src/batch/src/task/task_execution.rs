@@ -116,13 +116,12 @@ impl TaskOutput {
             match self.receiver.recv().await {
                 // Received some data
                 Ok(Some(chunk)) => {
-                    let chunk = chunk.compact()?;
                     trace!(
                         "Task output id: {:?}, data len: {:?}",
                         self.output_id,
                         chunk.cardinality()
                     );
-                    let pb = chunk.to_protobuf();
+                    let pb = chunk.to_protobuf().await?;
                     let resp = GetDataResponse {
                         status: Default::default(),
                         record_batch: Some(pb),
@@ -151,7 +150,7 @@ impl TaskOutput {
 
     /// Directly takes data without serialization.
     pub async fn direct_take_data(&mut self) -> Result<Option<DataChunk>> {
-        self.receiver.recv().await
+        Ok(self.receiver.recv().await?.map(|c| c.into_data_chunk()))
     }
 
     pub fn id(&self) -> &TaskOutputId {
@@ -223,7 +222,7 @@ impl<C: BatchTaskContext> BatchTaskExecution<C> {
         *self.state.lock() = TaskStatus::Running;
         let exec = ExecutorBuilder::new(
             self.plan.root.as_ref().unwrap(),
-            &self.task_id.clone(),
+            &self.task_id,
             self.context.clone(),
             self.epoch,
         )

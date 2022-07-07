@@ -21,11 +21,11 @@ is_all_in_one_enabled = get_env ENABLE_ALL_IN_ONE
 if ${is_sanitizer_enabled}
   set_env RISEDEV_CARGO_BUILD_EXTRA_ARGS "-Zbuild-std --target ${CARGO_MAKE_RUST_TARGET_TRIPLE}"
   set_env RISEDEV_BUILD_TARGET_DIR "${CARGO_MAKE_RUST_TARGET_TRIPLE}/"
-  set_env RISEDEV_RUSTFLAGS "-Zsanitizer=thread"
+  set_env RISEDEV_RUSTFLAGS "--cfg tokio_unstable -Zsanitizer=thread"
 else
   set_env RISEDEV_CARGO_BUILD_EXTRA_ARGS ""
   set_env RISEDEV_BUILD_TARGET_DIR ""
-  set_env RISEDEV_RUSTFLAGS ""
+  set_env RISEDEV_RUSTFLAGS "--cfg tokio_unstable"
 end
 
 if ${is_all_in_one_enabled}
@@ -294,7 +294,7 @@ echo "Use \`./risedev d\` instead if you want to start a full cluster."
 
 set -ex
 
-RUST_BACKTRACE=1 RW_NODE=playground cargo run --bin risingwave --profile "${RISINGWAVE_BUILD_PROFILE}"
+RUST_BACKTRACE=1 RW_NODE=playground cargo run --bin risingwave --jobs 2 --profile "${RISINGWAVE_BUILD_PROFILE}"
 '''
 
 [tasks.ctl]
@@ -367,7 +367,7 @@ set -e
 for tool in cargo-llvm-cov cargo-nextest cargo-udeps cargo-hakari cargo-sort cargo-make
 do
   echo "install: $(tput setaf 4)$tool$(tput sgr0)"
-  cargo install $tool
+  cargo install $tool --locked
   echo
 done
 
@@ -606,4 +606,14 @@ echo
 echo "Deploy finished!"
 
 cat .risingwave/rw-docker/_message.partial.sh
+'''
+
+[tasks.apply-compose-docker]
+category = "RiseDev - Compose"
+description = "Run deploy.sh"
+script = '''
+#!@shell
+set -e
+
+cp -a .risingwave/rw-docker/* docker
 '''

@@ -18,12 +18,14 @@ use risingwave_common::types::DataType;
 
 mod cast;
 mod func;
-pub use cast::{align_types, cast_ok, least_restrictive, CastContext};
-pub use func::{func_sig_map, infer_type, FuncSign};
+pub use cast::{
+    align_types, cast_map_array, cast_ok, cast_ok_base, least_restrictive, CastContext,
+};
+pub use func::{func_sigs, infer_type, FuncSign};
 
 /// `DataTypeName` is designed for type derivation here. In other scenarios,
 /// use `DataType` instead.
-#[derive(Debug, Clone, PartialEq, Eq, Hash, Copy)]
+#[derive(Debug, Ord, PartialOrd, Clone, PartialEq, Eq, Hash, Copy)]
 pub enum DataTypeName {
     Boolean,
     Int16,
@@ -67,5 +69,28 @@ impl From<&DataType> for DataTypeName {
 impl From<DataType> for DataTypeName {
     fn from(ty: DataType) -> Self {
         (&ty).into()
+    }
+}
+
+impl From<DataTypeName> for DataType {
+    fn from(type_name: DataTypeName) -> Self {
+        match type_name {
+            DataTypeName::Boolean => DataType::Boolean,
+            DataTypeName::Int16 => DataType::Int16,
+            DataTypeName::Int32 => DataType::Int32,
+            DataTypeName::Int64 => DataType::Int64,
+            DataTypeName::Decimal => DataType::Decimal,
+            DataTypeName::Float32 => DataType::Float32,
+            DataTypeName::Float64 => DataType::Float64,
+            DataTypeName::Varchar => DataType::Varchar,
+            DataTypeName::Date => DataType::Date,
+            DataTypeName::Timestamp => DataType::Timestamp,
+            DataTypeName::Timestampz => DataType::Timestampz,
+            DataTypeName::Time => DataType::Time,
+            DataTypeName::Interval => DataType::Interval,
+            DataTypeName::Struct | DataTypeName::List => {
+                panic!("Functions returning struct or list can not be inferred. Please use `FunctionCall::new_unchecked`.")
+            }
+        }
     }
 }

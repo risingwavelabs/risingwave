@@ -48,6 +48,8 @@ macro_rules! for_all_metrics {
             iter_size: Histogram,
             iter_item: Histogram,
             iter_duration: Histogram,
+            iter_scan_duration: Histogram,
+            iter_in_process_counts: GenericCounter<AtomicU64>,
 
             write_batch_tuple_counts: GenericCounter<AtomicU64>,
             write_batch_duration: Histogram,
@@ -73,6 +75,7 @@ macro_rules! for_all_metrics {
             compact_write_sstn: GenericCounterVec<AtomicU64>,
             compact_sst_duration: Histogram,
             compact_task_duration: HistogramVec,
+            compact_parallelism: GenericCounter<AtomicU64>,
 
             get_table_id_total_time_duration: Histogram,
             remote_read_time: Histogram,
@@ -194,10 +197,24 @@ impl StateStoreMetrics {
 
         let opts = histogram_opts!(
             "state_store_iter_duration",
-            "Total time of scan that have been issued to state store",
+            "Histogram of iterator scan and initialization time that have been issued to state store",
             exponential_buckets(0.0001, 2.0, 21).unwrap() // max 104s
         );
         let iter_duration = register_histogram_with_registry!(opts, registry).unwrap();
+
+        let opts = histogram_opts!(
+            "state_store_iter_scan_duration",
+            "Histogram of iterator scan time that have been issued to state store",
+            exponential_buckets(0.0001, 2.0, 21).unwrap() // max 104s
+        );
+        let iter_scan_duration = register_histogram_with_registry!(opts, registry).unwrap();
+
+        let iter_in_process_counts = register_int_counter_with_registry!(
+            "state_store_iter_in_process_counts",
+            "Total number of iter_in_process that have been issued to state store",
+            registry
+        )
+        .unwrap();
 
         // ----- write_batch -----
         let write_batch_tuple_counts = register_int_counter_with_registry!(
@@ -364,6 +381,13 @@ impl StateStoreMetrics {
         )
         .unwrap();
 
+        let compact_parallelism = register_int_counter_with_registry!(
+            "storage_compact_parallelism",
+            "the num of storage compact parallelism",
+            registry
+        )
+        .unwrap();
+
         monitor_process(&registry).unwrap();
         Self {
             get_duration,
@@ -379,6 +403,8 @@ impl StateStoreMetrics {
             iter_size,
             iter_item,
             iter_duration,
+            iter_scan_duration,
+            iter_in_process_counts,
             write_batch_tuple_counts,
             write_batch_duration,
             write_batch_size,
@@ -400,6 +426,8 @@ impl StateStoreMetrics {
             compact_write_sstn,
             compact_sst_duration,
             compact_task_duration,
+            compact_parallelism,
+
             get_table_id_total_time_duration,
             remote_read_time,
         }

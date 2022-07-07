@@ -27,9 +27,9 @@ impl Binder {
             Value::Number(s, b) => self.bind_number(s, b),
             Value::SingleQuotedString(s) => self.bind_string(s),
             Value::Boolean(b) => self.bind_bool(b),
-            // We just bind a dummy type (Boolean) for null here, and its type will be changed
-            // according to its context later.
-            Value::Null => Ok(Literal::new(None, DataType::Boolean)),
+            // Both null and string literal will be treated as `unknown` during type inference.
+            // See [`ExprImpl::is_unknown`].
+            Value::Null => Ok(Literal::new(None, DataType::Varchar)),
             Value::Interval {
                 value,
                 leading_field,
@@ -38,7 +38,7 @@ impl Binder {
                 last_field: None,
                 fractional_seconds_precision: None,
             } => self.bind_interval(value, leading_field),
-            _ => Err(ErrorCode::NotImplemented(format!("{:?}", value), None.into()).into()),
+            _ => Err(ErrorCode::NotImplemented(format!("value: {:?}", value), None.into()).into()),
         }
     }
 

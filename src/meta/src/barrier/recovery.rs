@@ -14,6 +14,7 @@
 
 use std::collections::HashSet;
 use std::iter::Map;
+use std::sync::Arc;
 use std::time::Duration;
 
 use futures::future::try_join_all;
@@ -32,7 +33,7 @@ use uuid::Uuid;
 
 use crate::barrier::command::CommandContext;
 use crate::barrier::info::BarrierActorInfo;
-use crate::barrier::{Command, GlobalBarrierManager};
+use crate::barrier::{CheckpointControl, Command, GlobalBarrierManager};
 use crate::model::ActorId;
 use crate::storage::MetaStore;
 
@@ -63,9 +64,8 @@ where
         debug!("recovery start!");
         let retry_strategy = Self::get_retry_strategy();
         let (new_epoch, responses) = tokio_retry::Retry::spawn(retry_strategy, || async {
-            let info = self.resolve_actor_info(None).await;
+            let info = self.resolve_actor_info(&CheckpointControl::new()).await;
             let mut new_epoch = prev_epoch.next();
-
             // Reset all compute nodes, stop and drop existing actors.
             self.reset_compute_nodes(&info, &prev_epoch, &new_epoch)
                 .await;
@@ -89,24 +89,30 @@ where
             let prev_epoch = new_epoch;
             new_epoch = prev_epoch.next();
             // checkpoint, used as init barrier to initialize all executors.
-            let command_ctx = CommandContext::new(
+            let command_ctx = Arc::new(CommandContext::new(
                 self.fragment_manager.clone(),
                 self.env.stream_client_pool_ref(),
-                &info,
-                &prev_epoch,
-                &new_epoch,
+                info,
+                prev_epoch,
+                new_epoch,
                 Command::checkpoint(),
-            );
+            ));
 
-            match self.inject_barrier(&command_ctx).await {
-                Ok(response) => {
+            let command_ctx_clone = command_ctx.clone();
+            let (tx, mut rx) = tokio::sync::mpsc::unbounded_channel();
+            if let Err(err) = self.inject_barrier(command_ctx_clone, tx).await {
+                error!("inject_barrier failed: {}", err);
+                return Err(err);
+            }
+            match rx.recv().await.unwrap() {
+                (_, Ok(response)) => {
                     if let Err(err) = command_ctx.post_collect().await {
                         error!("post_collect failed: {}", err);
                         return Err(err);
                     }
                     Ok((new_epoch, response))
                 }
-                Err(err) => {
+                (_, Err(err)) => {
                     error!("inject_barrier failed: {}", err);
                     Err(err)
                 }

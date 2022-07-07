@@ -21,7 +21,7 @@ use futures::pin_mut;
 use futures::stream::StreamExt;
 use madsim::collections::BTreeMap;
 use risingwave_common::array::Row;
-use risingwave_common::catalog::{ColumnDesc, ColumnId};
+use risingwave_common::catalog::{ColumnDesc, ColumnId, TableId};
 use risingwave_common::types::DataType;
 use risingwave_common::util::ordered::*;
 use risingwave_storage::table::state_table::StateTable;
@@ -61,7 +61,8 @@ impl<S: StateStore> ManagedTopNBottomNState<S> {
     pub fn new(
         cache_size: Option<usize>,
         total_count: usize,
-        keyspace: Keyspace<S>,
+        store: S,
+        table_id: TableId,
         data_types: Vec<DataType>,
         ordered_row_deserializer: OrderedRowDeserializer,
         pk_indices: PkIndices,
@@ -74,8 +75,15 @@ impl<S: StateStore> ManagedTopNBottomNState<S> {
                 ColumnDesc::unnamed(ColumnId::from(id as i32), data_type.clone())
             })
             .collect::<Vec<_>>();
-        let state_table =
-            StateTable::new(keyspace.clone(), column_descs, order_type, None, pk_indices);
+        let state_table = StateTable::new(
+            store.clone(),
+            table_id,
+            column_descs,
+            order_type,
+            None,
+            pk_indices,
+        );
+        let keyspace = Keyspace::table_root(store, &table_id);
         Self {
             top_n: BTreeMap::new(),
             bottom_n: BTreeMap::new(),
@@ -231,8 +239,8 @@ impl<S: StateStore> ManagedTopNBottomNState<S> {
         while let Some(next_res) = state_table_iter.next().await {
             let row = next_res.unwrap().into_owned();
             let mut datums = vec![];
-            for pk_indice in self.state_table.get_pk_indices() {
-                datums.push(row.index(*pk_indice).clone());
+            for pk_index in self.state_table.pk_indices() {
+                datums.push(row.index(*pk_index).clone());
             }
             let pk = Row::new(datums);
             let pk_ordered = OrderedRow::new(pk, self.ordered_row_deserializer.get_order_types());
@@ -267,8 +275,8 @@ impl<S: StateStore> ManagedTopNBottomNState<S> {
         while let Some(res) = state_table_iter.next().await {
             let row = res.unwrap().into_owned();
             let mut datums = vec![];
-            for pk_indice in self.state_table.get_pk_indices() {
-                datums.push(row.index(*pk_indice).clone());
+            for pk_index in self.state_table.pk_indices() {
+                datums.push(row.index(*pk_index).clone());
             }
             let pk = Row::new(datums);
             let pk_ordered = OrderedRow::new(pk, self.ordered_row_deserializer.get_order_types());
@@ -318,7 +326,7 @@ mod tests {
     use risingwave_common::types::DataType;
     use risingwave_common::util::sort_util::OrderType;
     use risingwave_storage::memory::MemoryStateStore;
-    use risingwave_storage::{Keyspace, StateStore};
+    use risingwave_storage::StateStore;
 
     use super::*;
     use crate::row_nonnull;
@@ -334,7 +342,8 @@ mod tests {
         ManagedTopNBottomNState::new(
             Some(1),
             row_count,
-            Keyspace::table_root(store.clone(), &TableId::from(0x2333)),
+            store.clone(),
+            TableId::from(0x2333),
             data_types,
             ordered_row_deserializer,
             vec![0_usize, 1_usize],

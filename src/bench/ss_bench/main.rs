@@ -157,7 +157,6 @@ async fn main() {
         local_object_store: "memory".to_string(),
         share_buffer_compaction_worker_threads_number: 1,
         share_buffer_upload_concurrency: 4,
-        enable_compression: true,
     });
 
     let (_env, hummock_manager_ref, _cluster_manager_ref, worker_node) =
@@ -181,7 +180,7 @@ async fn main() {
             Arc::new(CompactorContext {
                 options: config.clone(),
                 hummock_meta_client: mock_hummock_meta_client.clone(),
-                sstable_store: hummock.inner().sstable_store(),
+                sstable_store: hummock.sstable_store(),
                 stats: state_store_stats.clone(),
                 is_share_buffer_compact: false,
                 sstable_id_generator: get_remote_sstable_id_generator(
@@ -191,7 +190,7 @@ async fn main() {
                     config.share_buffer_compaction_worker_threads_number as usize,
                 )))),
             }),
-            hummock.inner().local_version_manager().clone(),
+            hummock.local_version_manager(),
         ));
     }
 

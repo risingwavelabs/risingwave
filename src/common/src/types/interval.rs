@@ -13,7 +13,7 @@
 // limitations under the License.
 
 use std::cmp::Ordering;
-use std::fmt::{Display, Formatter};
+use std::fmt::{Display, Formatter, Write as _};
 use std::hash::{Hash, Hasher};
 use std::io::Write;
 use std::ops::{Add, Sub};
@@ -45,6 +45,7 @@ pub struct IntervalUnit {
 }
 
 const DAY_MS: i64 = 86400000;
+const MONTH_MS: i64 = 30 * DAY_MS;
 
 impl IntervalUnit {
     pub fn new(months: i32, days: i32, ms: i64) -> Self {
@@ -117,6 +118,20 @@ impl IntervalUnit {
     }
 
     #[must_use]
+    pub fn from_total_ms(ms: i64) -> Self {
+        let mut remaining_ms = ms;
+        let months = remaining_ms / MONTH_MS;
+        remaining_ms -= months * MONTH_MS;
+        let days = remaining_ms / DAY_MS;
+        remaining_ms -= days * DAY_MS;
+        IntervalUnit {
+            months: (months as i32),
+            days: (days as i32),
+            ms: (remaining_ms as i64),
+        }
+    }
+
+    #[must_use]
     pub fn from_ymd(year: i32, month: i32, days: i32) -> Self {
         let months = year * 12 + month;
         let days = days;
@@ -181,6 +196,38 @@ impl IntervalUnit {
         let ms = self.ms.checked_mul(rhs as i64)?;
 
         Some(IntervalUnit { months, days, ms })
+    }
+
+    /// Divides [`IntervalUnit`] by an integer/float with zero check.
+    pub fn div_float<I>(&self, rhs: I) -> Option<Self>
+    where
+        I: TryInto<OrderedF64>,
+    {
+        let rhs = rhs.try_into().ok()?;
+        let rhs = rhs.0;
+
+        if rhs == 0.0 {
+            return None;
+        }
+
+        let ms = self.as_ms_i64();
+        Some(IntervalUnit::from_total_ms((ms as f64 / rhs).round() as i64))
+    }
+
+    fn as_ms_i64(&self) -> i64 {
+        self.months as i64 * MONTH_MS + self.days as i64 * DAY_MS + self.ms
+    }
+
+    /// times [`IntervalUnit`] with an integer/float.
+    pub fn mul_float<I>(&self, rhs: I) -> Option<Self>
+    where
+        I: TryInto<OrderedF64>,
+    {
+        let rhs = rhs.try_into().ok()?;
+        let rhs = rhs.0;
+
+        let ms = self.as_ms_i64();
+        Some(IntervalUnit::from_total_ms((ms as f64 * rhs).round() as i64))
     }
 
     /// Performs an exact division, returns [`None`] if for any unit, lhs % rhs != 0.
@@ -324,7 +371,8 @@ impl Display for IntervalUnit {
         let days = self.days;
         let hours = self.ms / 1000 / 3600;
         let minutes = (self.ms / 1000 / 60) % 60;
-        let seconds = ((self.ms % 60000) as f64) / 1000.0;
+        let seconds = self.ms % 60000 / 1000;
+        let mut secs_fract = self.ms % 1000;
         let mut v = SmallVec::<[String; 4]>::new();
         if years == 1 {
             v.push(format!("{years} year"));
@@ -341,7 +389,15 @@ impl Display for IntervalUnit {
         } else if days != 0 {
             v.push(format!("{days} days"));
         }
-        v.push(format!("{hours:0>2}:{minutes:0>2}:{seconds:0>2}"));
+        let mut format_time = format!("{hours:0>2}:{minutes:0>2}:{seconds:0>2}");
+        if secs_fract != 0 {
+            write!(format_time, ".{:03}", secs_fract)?;
+            while secs_fract % 10 == 0 {
+                secs_fract /= 10;
+                format_time.pop();
+            }
+        }
+        v.push(format_time);
         Display::fmt(&v.join(" "), f)
     }
 }
@@ -349,6 +405,7 @@ impl Display for IntervalUnit {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::types::ordered_float::OrderedFloat;
 
     #[test]
     fn test_to_string() {
@@ -383,6 +440,48 @@ mod tests {
                 println!("Failed on {}.exact_div({})", lhs, rhs);
                 break;
             }
+        }
+    }
+
+    #[test]
+    fn test_div_float() {
+        let cases_int = [
+            ((10, 8, 6), 2, Some((5, 4, 3))),
+            ((1, 2, 33), 3, Some((0, 10, 57600011))),
+            ((1, 0, 11), 10, Some((0, 3, 1))),
+            ((5, 6, 7), 0, None),
+        ];
+
+        let cases_float = [
+            ((10, 8, 6), 2.0f32, Some((5, 4, 3))),
+            ((1, 2, 33), 3.0f32, Some((0, 10, 57600011))),
+            ((10, 15, 100), 2.5f32, Some((4, 6, 40))),
+            ((5, 6, 7), 0.0f32, None),
+        ];
+
+        for (lhs, rhs, expected) in cases_int {
+            let lhs = IntervalUnit::new(lhs.0 as i32, lhs.1 as i32, lhs.2 as i64);
+            let expected = expected.map(|x| IntervalUnit::new(x.0 as i32, x.1 as i32, x.2 as i64));
+
+            let actual = lhs.div_float(rhs as i16);
+            assert_eq!(actual, expected);
+
+            let actual = lhs.div_float(rhs as i32);
+            assert_eq!(actual, expected);
+
+            let actual = lhs.div_float(rhs as i64);
+            assert_eq!(actual, expected);
+        }
+
+        for (lhs, rhs, expected) in cases_float {
+            let lhs = IntervalUnit::new(lhs.0 as i32, lhs.1 as i32, lhs.2 as i64);
+            let expected = expected.map(|x| IntervalUnit::new(x.0 as i32, x.1 as i32, x.2 as i64));
+
+            let actual = lhs.div_float(OrderedFloat::<f32>(rhs));
+            assert_eq!(actual, expected);
+
+            let actual = lhs.div_float(OrderedFloat::<f64>(rhs as f64));
+            assert_eq!(actual, expected);
         }
     }
 }

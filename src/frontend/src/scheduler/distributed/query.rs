@@ -27,7 +27,6 @@ use tracing::{debug, error, info, warn};
 
 use super::{QueryResultFetcher, StageEvent};
 use crate::scheduler::distributed::query::QueryMessage::Stage;
-use crate::scheduler::distributed::query::QueryState::{Failed, Pending};
 use crate::scheduler::distributed::StageEvent::Scheduled;
 use crate::scheduler::distributed::StageExecution;
 use crate::scheduler::plan_fragmenter::{Query, StageId, ROOT_TASK_ID, ROOT_TASK_OUTPUT_ID};
@@ -145,7 +144,7 @@ impl QueryExecution {
             compute_client_pool,
         };
 
-        let state = Pending {
+        let state = QueryState::Pending {
             runner,
             root_stage_receiver,
         };
@@ -160,7 +159,7 @@ impl QueryExecution {
     /// Start execution of this query.
     pub async fn start(&self) -> SchedulerResult<QueryResultFetcher> {
         let mut state = self.state.write().await;
-        let cur_state = mem::replace(&mut *state, Failed);
+        let cur_state = mem::replace(&mut *state, QueryState::Failed);
 
         match cur_state {
             QueryState::Pending {
@@ -397,10 +396,11 @@ mod tests {
 
         let batch_plan_node: PlanRef = LogicalScan::create(
             "".to_string(),
+            false,
             Rc::new(TableDesc {
                 table_id: 0.into(),
-                pks: vec![],
-                order_desc: vec![],
+                pk: vec![],
+                order_key: vec![],
                 columns: vec![
                     ColumnDesc {
                         data_type: DataType::Int32,
@@ -417,8 +417,9 @@ mod tests {
                         field_descs: vec![],
                     },
                 ],
-                distribution_keys: vec![],
+                distribution_key: vec![],
                 appendonly: false,
+                vnode_mapping: Some(vec![]),
             }),
             vec![],
             ctx,

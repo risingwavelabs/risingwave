@@ -53,8 +53,11 @@ pub enum RisingWaveService {
 pub async fn playground() -> Result<()> {
     eprintln!("launching playground");
 
-    risingwave_logging::oneshot_common();
-    risingwave_logging::init_risingwave_logger(false, true);
+    risingwave_rt::oneshot_common();
+    risingwave_rt::init_risingwave_logger(risingwave_rt::LoggerSettings::new_default());
+
+    // Enable tokio console for `./risedev p` by replacing the above statement to:
+    // risingwave_rt::init_risingwave_logger(risingwave_rt::LoggerSettings::new(false, true));
 
     let profile = if let Ok(profile) = std::env::var("PLAYGROUND_PROFILE") {
         profile.to_string()
@@ -124,7 +127,12 @@ pub async fn playground() -> Result<()> {
                 tracing::info!("starting meta-node thread with cli args: {:?}", opts);
                 let opts = risingwave_meta::MetaNodeOpts::parse_from(opts);
                 tracing::info!("opts: {:#?}", opts);
-                let _meta_handle = tokio::spawn(async move { risingwave_meta::start(opts).await });
+                let _meta_handle = tokio::spawn(async move {
+                    risingwave_meta::start(opts).await;
+                    tracing::info!("meta is stopped, shutdown all nodes");
+                    // As a playground, it's fine to just kill everything.
+                    std::process::exit(0);
+                });
                 // wait for the service to be ready
                 tokio::time::sleep(std::time::Duration::from_secs(1)).await;
             }

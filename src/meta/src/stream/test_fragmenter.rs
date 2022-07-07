@@ -36,7 +36,6 @@ use risingwave_pb::stream_plan::{
     SimpleAggNode, SourceNode, StreamNode,
 };
 
-use crate::hummock::compaction_group::manager::CompactionGroupManager;
 use crate::manager::MetaSrvEnv;
 use crate::model::TableFragments;
 use crate::stream::stream_graph::ActorGraphBuilder;
@@ -91,14 +90,10 @@ fn make_field(type_name: TypeName) -> Field {
     }
 }
 
-fn make_column_order(idx: i32) -> ColumnOrder {
+fn make_column_order(index: u32) -> ColumnOrder {
     ColumnOrder {
         order_type: OrderType::Ascending as i32,
-        input_ref: Some(InputRefExpr { column_idx: idx }),
-        return_type: Some(DataType {
-            type_name: TypeName::Int64 as i32,
-            ..Default::default()
-        }),
+        index,
     }
 }
 
@@ -127,8 +122,10 @@ fn make_internal_table(is_agg_value: bool) -> ProstTable {
         database_id: DatabaseId::placeholder() as u32,
         name: String::new(),
         columns,
-        order_column_ids: vec![0],
-        orders: vec![2],
+        order_key: vec![ColumnOrder {
+            index: 0,
+            order_type: 2,
+        }],
         pk: vec![2],
         ..Default::default()
     }
@@ -199,7 +196,7 @@ fn make_stream_node() -> StreamNode {
     let simple_agg_node = StreamNode {
         node_body: Some(NodeBody::GlobalSimpleAgg(SimpleAggNode {
             agg_calls: vec![make_sum_aggcall(0), make_sum_aggcall(1)],
-            distribution_keys: Default::default(),
+            distribution_key: Default::default(),
             internal_tables: vec![make_internal_table(true), make_internal_table(false)],
             column_mapping: HashMap::new(),
             is_append_only: false,
@@ -232,7 +229,7 @@ fn make_stream_node() -> StreamNode {
     let simple_agg_node_1 = StreamNode {
         node_body: Some(NodeBody::GlobalSimpleAgg(SimpleAggNode {
             agg_calls: vec![make_sum_aggcall(0), make_sum_aggcall(1)],
-            distribution_keys: Default::default(),
+            distribution_key: Default::default(),
             internal_tables: vec![make_internal_table(true), make_internal_table(false)],
             column_mapping: HashMap::new(),
             is_append_only: false,
@@ -281,7 +278,7 @@ fn make_stream_node() -> StreamNode {
             associated_table_ref_id: None,
             column_ids: vec![0_i32, 1_i32],
             column_orders: vec![make_column_order(1), make_column_order(2)],
-            distribution_keys: Default::default(),
+            distribution_key: Default::default(),
         })),
         fields: vec![], // TODO: fill this later
         operator_id: 7,
@@ -301,9 +298,7 @@ async fn test_fragmenter() -> Result<()> {
 
     let env = MetaSrvEnv::for_test().await;
     let stream_node = make_stream_node();
-    let compaction_group_manager = Arc::new(CompactionGroupManager::new(env.clone()).await?);
-    let fragment_manager =
-        Arc::new(FragmentManager::new(env.clone(), compaction_group_manager).await?);
+    let fragment_manager = Arc::new(FragmentManager::new(env.clone()).await?);
     let parallel_degree = 4;
     let mut ctx = CreateMaterializedViewContext::default();
     let graph = StreamFragmenter::build_graph(stream_node);
@@ -332,19 +327,20 @@ async fn test_fragmenter() -> Result<()> {
         )
         .await?;
 
-    let table_fragments =
-        TableFragments::new(TableId::default(), graph, ctx.internal_table_id_set.clone());
+    let internal_table_id_set = ctx
+        .internal_table_id_map
+        .iter()
+        .map(|(table_id, _)| *table_id)
+        .collect::<HashSet<u32>>();
+    let table_fragments = TableFragments::new(TableId::default(), graph, internal_table_id_set);
     let actors = table_fragments.actors();
     let source_actor_ids = table_fragments.source_actor_ids();
     let sink_actor_ids = table_fragments.sink_actor_ids();
-    let mut internal_table_ids = table_fragments.internal_table_ids();
+    let internal_table_ids = table_fragments.internal_table_ids();
     assert_eq!(actors.len(), 9);
     assert_eq!(source_actor_ids, vec![6, 7, 8, 9]);
     assert_eq!(sink_actor_ids, vec![1]);
     assert_eq!(4, internal_table_ids.len());
-    internal_table_ids.sort();
-    let expected_internal_table_ids = vec![0, 1, 2, 3];
-    assert_eq!(expected_internal_table_ids, internal_table_ids);
 
     let mut expected_downstream = HashMap::new();
     expected_downstream.insert(1, vec![]);

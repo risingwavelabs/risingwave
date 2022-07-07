@@ -344,11 +344,15 @@ impl StreamFragmenter {
             }
 
             NodeBody::TopN(top_n_node) => {
-                top_n_node.table_id = state.gen_table_id();
+                top_n_node.table_id_l = state.gen_table_id();
+                top_n_node.table_id_m = state.gen_table_id();
+                top_n_node.table_id_h = state.gen_table_id();
             }
 
             NodeBody::AppendOnlyTopN(append_only_top_n_node) => {
-                append_only_top_n_node.table_id = state.gen_table_id();
+                append_only_top_n_node.table_id_l = state.gen_table_id();
+                append_only_top_n_node.table_id_m = state.gen_table_id();
+                append_only_top_n_node.table_id_h = state.gen_table_id();
             }
 
             _ => {}
@@ -363,7 +367,7 @@ mod tests {
     use risingwave_pb::data::DataType;
     use risingwave_pb::expr::agg_call::{Arg, Type};
     use risingwave_pb::expr::{AggCall, InputRefExpr};
-    use risingwave_pb::plan_common::{ColumnCatalog, ColumnDesc};
+    use risingwave_pb::plan_common::{ColumnCatalog, ColumnDesc, ColumnOrder};
     use risingwave_pb::stream_plan::*;
 
     use super::*;
@@ -409,8 +413,10 @@ mod tests {
             id: TableId::placeholder().table_id,
             name: String::new(),
             columns,
-            order_column_ids: vec![0],
-            orders: vec![2],
+            order_key: vec![ColumnOrder {
+                index: 0,
+                order_type: 2,
+            }],
             pk: vec![2],
             ..Default::default()
         }
@@ -534,8 +540,8 @@ mod tests {
             StreamFragmenter::assign_local_table_id_to_stream_node(&mut state, &mut stream_node);
 
             if let NodeBody::TopN(top_n_node) = stream_node.node_body.as_ref().unwrap() {
-                expect_table_id += 1;
-                assert_eq!(expect_table_id, top_n_node.table_id);
+                expect_table_id += 3;
+                assert_eq!(expect_table_id, top_n_node.table_id_h);
             }
         }
 
@@ -552,8 +558,8 @@ mod tests {
             if let NodeBody::AppendOnlyTopN(append_only_top_n_node) =
                 stream_node.node_body.as_ref().unwrap()
             {
-                expect_table_id += 1;
-                assert_eq!(expect_table_id, append_only_top_n_node.table_id);
+                expect_table_id += 3;
+                assert_eq!(expect_table_id, append_only_top_n_node.table_id_h);
             }
         }
     }

@@ -243,6 +243,13 @@ pub enum Expr {
         substring_from: Option<Box<Expr>>,
         substring_for: Option<Box<Expr>>,
     },
+    /// OVERLAY(<expr> PLACING <expr> FROM <expr> [ FOR <expr> ])
+    Overlay {
+        expr: Box<Expr>,
+        new_substring: Box<Expr>,
+        start: Box<Expr>,
+        count: Option<Box<Expr>>,
+    },
     /// TRIM([BOTH | LEADING | TRAILING] <expr> [FROM <expr>])\
     /// Or\
     /// TRIM(<expr>)
@@ -356,7 +363,7 @@ impl fmt::Display for Expr {
                 if op == &UnaryOperator::PGPostfixFactorial {
                     write!(f, "{}{}", expr, op)
                 } else {
-                    write!(f, "{} {}", op, expr)
+                    write!(f, "{} {}", op, fmt_expr_with_paren(expr))
                 }
             }
             Expr::Cast { expr, data_type } => write!(f, "CAST({} AS {})", expr, data_type),
@@ -444,6 +451,22 @@ impl fmt::Display for Expr {
 
                 write!(f, ")")
             }
+            Expr::Overlay {
+                expr,
+                new_substring,
+                start,
+                count,
+            } => {
+                write!(f, "OVERLAY({}", expr)?;
+                write!(f, " PLACING {}", new_substring)?;
+                write!(f, " FROM {}", start)?;
+
+                if let Some(count_expr) = count {
+                    write!(f, " FOR {}", count_expr)?;
+                }
+
+                write!(f, ")")
+            }
             Expr::IsDistinctFrom(a, b) => write!(f, "{} IS DISTINCT FROM {}", a, b),
             Expr::IsNotDistinctFrom(a, b) => write!(f, "{} IS NOT DISTINCT FROM {}", a, b),
             Expr::Trim { expr, trim_where } => {
@@ -487,32 +510,21 @@ impl fmt::Display for Expr {
     }
 }
 
-/// Wrap complex expressions with parentheses.
+/// Wrap complex expressions with necessary parentheses.
+/// For example, `a > b LIKE c` becomes `a > (b LIKE c)`.
 fn fmt_expr_with_paren(e: &Expr) -> String {
-    use BinaryOperator as B;
-    if let Expr::BinaryOp { op, .. } = e {
-        match op {
-            B::Plus
-            | B::Multiply
-            | B::Modulo
-            | B::Minus
-            | B::LtEq
-            | B::GtEq
-            | B::Eq
-            | B::Gt
-            | B::Lt
-            | B::Xor
-            | B::NotEq
-            | B::Divide
-            | B::BitwiseAnd
-            | B::BitwiseOr
-            | B::BitwiseXor
-            | B::PGBitwiseXor
-            | B::PGBitwiseShiftLeft
-            | B::PGBitwiseShiftRight => return format!("({})", e),
-            _ => {}
-        }
-    }
+    use Expr as E;
+    match e {
+        E::BinaryOp { .. }
+        | E::UnaryOp { .. }
+        | E::IsNull(_)
+        | E::IsNotNull(_)
+        | E::IsFalse(_)
+        | E::IsTrue(_)
+        | E::IsNotTrue(_)
+        | E::IsNotFalse(_) => return format!("({})", e),
+        _ => {}
+    };
     format!("{}", e)
 }
 
@@ -655,7 +667,7 @@ pub enum ShowObject {
     Schema,
     MaterializedView { schema: Option<Ident> },
     Source { schema: Option<Ident> },
-    Sink { _schema: Option<Ident> },
+    Sink { schema: Option<Ident> },
     MaterializedSource { schema: Option<Ident> },
     Columns { table: ObjectName },
 }
@@ -683,7 +695,7 @@ impl fmt::Display for ShowObject {
             ShowObject::MaterializedSource { schema } => {
                 write!(f, "MATERIALIZED SOURCES{}", fmt_schema(schema))
             }
-            ShowObject::Sink { _schema } => write!(f, "SINKS{}", fmt_schema(_schema)),
+            ShowObject::Sink { schema } => write!(f, "SINKS{}", fmt_schema(schema)),
             ShowObject::Columns { table } => write!(f, "COLUMNS FROM {}", table),
         }
     }
@@ -1549,19 +1561,31 @@ pub struct Function {
     pub over: Option<WindowSpec>,
     // aggregate functions may specify eg `COUNT(DISTINCT x)`
     pub distinct: bool,
+    // string_agg and array_agg both support ORDER BY
+    pub order_by: Vec<OrderByExpr>,
+    pub filter: Option<Box<Expr>>,
 }
 
 impl fmt::Display for Function {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         write!(
             f,
-            "{}({}{})",
+            "{}({}{}{}{})",
             self.name,
             if self.distinct { "DISTINCT " } else { "" },
             display_comma_separated(&self.args),
+            if !self.order_by.is_empty() {
+                " ORDER BY "
+            } else {
+                ""
+            },
+            display_comma_separated(&self.order_by),
         )?;
         if let Some(o) = &self.over {
             write!(f, " OVER ({})", o)?;
+        }
+        if let Some(filter) = &self.filter {
+            write!(f, " FILTER(WHERE {})", filter)?;
         }
         Ok(())
     }

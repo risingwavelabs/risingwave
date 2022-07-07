@@ -18,6 +18,7 @@ use bytes::Bytes;
 use itertools::Itertools;
 use rand::distributions::Uniform;
 use rand::prelude::Distribution;
+use risingwave_storage::store::ReadOptions;
 use risingwave_storage::StateStore;
 
 use super::{Operations, PerfMetrics};
@@ -100,7 +101,18 @@ impl Operations {
                 let mut sizes: Vec<usize> = vec![];
                 for key in keys {
                     let start = Instant::now();
-                    let val_size = match store.get(&key, u64::MAX).await.unwrap() {
+                    let val_size = match store
+                        .get(
+                            &key,
+                            ReadOptions {
+                                epoch: u64::MAX,
+                                table_id: None,
+                                ttl: None,
+                            },
+                        )
+                        .await
+                        .unwrap()
+                    {
                         Some(v) => v.len(),
                         None => 0,
                     };

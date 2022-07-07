@@ -280,15 +280,18 @@ impl<S: StateStore> ManagedStringAggState<S> {
 #[cfg(test)]
 mod tests {
     use risingwave_common::array::{I64Array, Op, Utf8Array};
+    use risingwave_common::catalog::TableId;
     use risingwave_common::types::ScalarImpl;
     use risingwave_common::util::sort_util::{OrderPair, OrderType};
-    use risingwave_storage::{Keyspace, StateStore};
+    use risingwave_storage::memory::MemoryStateStore;
+    use risingwave_storage::store::WriteOptions;
+    use risingwave_storage::StateStore;
 
     use super::*;
-    use crate::executor::test_utils::create_in_memory_keyspace;
 
     async fn create_managed_state<S: StateStore>(
-        keyspace: &Keyspace<S>,
+        store: S,
+        table_id: TableId,
         row_count: usize,
     ) -> ManagedStringAggState<S> {
         let sort_key_indices = vec![0, 1];
@@ -301,9 +304,9 @@ mod tests {
             .map(|(ord, idx)| OrderPair::new(idx, ord))
             .collect::<Vec<_>>();
         let sort_key_serializer = OrderedArraysSerializer::new(order_pairs);
-
+        let keyspace = Keyspace::table_root(store, &table_id);
         ManagedStringAggState::new(
-            keyspace.clone(),
+            keyspace,
             row_count,
             sort_key_indices,
             value_index,
@@ -314,18 +317,17 @@ mod tests {
         .unwrap()
     }
 
-    fn mock_state_table<S: StateStore>(keyspace: Keyspace<S>) -> StateTable<S> {
-        StateTable::new(keyspace, vec![], vec![], None, vec![])
+    fn mock_state_table<S: StateStore>(store: S, table_id: TableId) -> StateTable<S> {
+        StateTable::new(store, table_id, vec![], vec![], None, vec![])
     }
 
     #[tokio::test]
     async fn test_managed_string_agg_state() {
-        let keyspace = create_in_memory_keyspace();
-        let store = keyspace.state_store();
-        let mut managed_state = create_managed_state(&keyspace, 0).await;
+        let store = MemoryStateStore::new();
+        let mut managed_state = create_managed_state(store.clone(), TableId::from(0x2333), 0).await;
         assert!(!managed_state.is_dirty());
         let mut epoch: u64 = 0;
-        let mut state_table = mock_state_table(keyspace.clone());
+        let mut state_table = mock_state_table(MemoryStateStore::new(), TableId::from(0x2333));
 
         // Insert.
         managed_state
@@ -353,11 +355,14 @@ mod tests {
             Some(ScalarImpl::Utf8("ghi||def||abc".to_string()))
         );
 
-        let mut write_batch = store.start_write_batch();
+        let mut write_batch = store.start_write_batch(WriteOptions {
+            epoch,
+            table_id: Default::default(),
+        });
         managed_state
             .flush(&mut write_batch, &mut state_table)
             .unwrap();
-        write_batch.ingest(epoch).await.unwrap();
+        write_batch.ingest().await.unwrap();
         assert!(!managed_state.is_dirty());
 
         // Insert and delete.
@@ -387,11 +392,14 @@ mod tests {
         );
 
         epoch += 1;
-        let mut write_batch = store.start_write_batch();
+        let mut write_batch = store.start_write_batch(WriteOptions {
+            epoch,
+            table_id: Default::default(),
+        });
         managed_state
             .flush(&mut write_batch, &mut state_table)
             .unwrap();
-        write_batch.ingest(epoch).await.unwrap();
+        write_batch.ingest().await.unwrap();
         assert!(!managed_state.is_dirty());
 
         // Deletion.
@@ -422,11 +430,14 @@ mod tests {
         );
 
         epoch += 1;
-        let mut write_batch = store.start_write_batch();
+        let mut write_batch = store.start_write_batch(WriteOptions {
+            epoch,
+            table_id: Default::default(),
+        });
         managed_state
             .flush(&mut write_batch, &mut state_table)
             .unwrap();
-        write_batch.ingest(epoch).await.unwrap();
+        write_batch.ingest().await.unwrap();
         assert!(!managed_state.is_dirty());
 
         // Check output after flush.
@@ -440,7 +451,8 @@ mod tests {
         drop(managed_state);
 
         // Recover the state by `row_count`.
-        let mut managed_state = create_managed_state(&keyspace, row_count).await;
+        let mut managed_state =
+            create_managed_state(store.clone(), TableId::from(0x2333), row_count).await;
         assert!(!managed_state.is_dirty());
         // Get the output after recovery
         assert_eq!(
@@ -515,16 +527,20 @@ mod tests {
             .unwrap();
 
         epoch += 1;
-        let mut write_batch = store.start_write_batch();
+        let mut write_batch = store.start_write_batch(WriteOptions {
+            epoch,
+            table_id: Default::default(),
+        });
         managed_state
             .flush(&mut write_batch, &mut state_table)
             .unwrap();
-        write_batch.ingest(epoch).await.unwrap();
+        write_batch.ingest().await.unwrap();
         assert!(!managed_state.is_dirty());
         let row_count = managed_state.get_row_count();
 
         drop(managed_state);
-        let mut managed_state = create_managed_state(&keyspace, row_count).await;
+        let mut managed_state =
+            create_managed_state(store.clone(), TableId::from(0x2333), row_count).await;
         // Delete right after recovery.
         managed_state
             .apply_batch(
@@ -547,17 +563,21 @@ mod tests {
         );
 
         epoch += 1;
-        let mut write_batch = store.start_write_batch();
+        let mut write_batch = store.start_write_batch(WriteOptions {
+            epoch,
+            table_id: Default::default(),
+        });
         managed_state
             .flush(&mut write_batch, &mut state_table)
             .unwrap();
-        write_batch.ingest(epoch).await.unwrap();
+        write_batch.ingest().await.unwrap();
         assert!(!managed_state.is_dirty());
 
         let row_count = managed_state.get_row_count();
 
         drop(managed_state);
-        let mut managed_state = create_managed_state(&keyspace, row_count).await;
+        let mut managed_state =
+            create_managed_state(store.clone(), TableId::from(0x2333), row_count).await;
         assert_eq!(
             managed_state.get_output(epoch, &state_table).await.unwrap(),
             Some(ScalarImpl::Utf8("miko||miko".to_string()))
@@ -589,7 +609,8 @@ mod tests {
         let row_count = managed_state.get_row_count();
 
         drop(managed_state);
-        let mut managed_state = create_managed_state(&keyspace, row_count).await;
+        let mut managed_state =
+            create_managed_state(store.clone(), TableId::from(0x2333), row_count).await;
         // As we didn't flush the changes, the result should be the same as the result before last
         // changes.
         assert_eq!(

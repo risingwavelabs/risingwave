@@ -38,10 +38,13 @@
 #![feature(iterator_try_collect)]
 #![feature(lint_reasons)]
 
+mod error;
+pub mod exchange_source;
 pub mod execution;
 pub mod executor;
 pub mod rpc;
 pub mod task;
+
 #[macro_use]
 extern crate log;
 #[macro_use]

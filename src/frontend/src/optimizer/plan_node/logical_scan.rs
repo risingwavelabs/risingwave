@@ -19,12 +19,13 @@ use std::rc::Rc;
 use fixedbitset::FixedBitSet;
 use itertools::Itertools;
 use risingwave_common::catalog::{ColumnDesc, Schema, TableDesc};
-use risingwave_common::error::Result;
+use risingwave_common::error::{ErrorCode, Result, RwError};
 
 use super::{
     BatchFilter, BatchProject, ColPrunable, PlanBase, PlanRef, PredicatePushdown, StreamTableScan,
     ToBatch, ToStream,
 };
+use crate::catalog::ColumnId;
 use crate::expr::{CollectInputRef, ExprImpl, InputRef};
 use crate::optimizer::plan_node::{BatchSeqScan, LogicalFilter, LogicalProject};
 use crate::session::OptimizerContextRef;
@@ -34,7 +35,8 @@ use crate::utils::{ColIndexMapping, Condition, ScanRange};
 #[derive(Debug, Clone)]
 pub struct LogicalScan {
     pub base: PlanBase,
-    table_name: String, // explain-only
+    table_name: String,
+    is_sys_table: bool,
     /// Include `output_col_idx` and columns required in `predicate`
     required_col_idx: Vec<usize>,
     output_col_idx: Vec<usize>,
@@ -49,7 +51,8 @@ pub struct LogicalScan {
 impl LogicalScan {
     /// Create a `LogicalScan` node. Used internally by optimizer.
     fn new(
-        table_name: String,         // explain-only
+        table_name: String, // explain-only
+        is_sys_table: bool,
         output_col_idx: Vec<usize>, // the column index in the table
         table_desc: Rc<TableDesc>,
         indexes: Vec<(String, Rc<TableDesc>)>,
@@ -77,7 +80,7 @@ impl LogicalScan {
             .collect();
 
         let pk_indices = table_desc
-            .pks
+            .pk
             .iter()
             .map(|&c| id_to_op_idx.get(&table_desc.columns[c].column_id).copied())
             .collect::<Option<Vec<_>>>()
@@ -100,6 +103,7 @@ impl LogicalScan {
         Self {
             base,
             table_name,
+            is_sys_table,
             required_col_idx,
             output_col_idx,
             table_desc,
@@ -111,12 +115,14 @@ impl LogicalScan {
     /// Create a [`LogicalScan`] node. Used by planner.
     pub fn create(
         table_name: String, // explain-only
+        is_sys_table: bool,
         table_desc: Rc<TableDesc>,
         indexes: Vec<(String, Rc<TableDesc>)>,
         ctx: OptimizerContextRef,
     ) -> Self {
         Self::new(
             table_name,
+            is_sys_table,
             (0..table_desc.columns.len()).into_iter().collect(),
             table_desc,
             indexes,
@@ -134,7 +140,7 @@ impl LogicalScan {
 
     pub(super) fn order_names(&self) -> Vec<String> {
         self.table_desc
-            .order_column_ids()
+            .order_column_indices()
             .iter()
             .map(|&i| self.table_desc.columns[i].name.clone())
             .collect()
@@ -144,14 +150,16 @@ impl LogicalScan {
         &self.table_name
     }
 
+    pub fn is_sys_table(&self) -> bool {
+        self.is_sys_table
+    }
+
     /// Get a reference to the logical scan's table desc.
-    #[must_use]
     pub fn table_desc(&self) -> &TableDesc {
         self.table_desc.as_ref()
     }
 
-    /// Get a reference to the logical scan's table desc.
-    #[must_use]
+    /// Get the descs of the output columns.
     pub fn column_descs(&self) -> Vec<ColumnDesc> {
         self.output_col_idx
             .iter()
@@ -159,15 +167,22 @@ impl LogicalScan {
             .collect()
     }
 
+    /// Get the ids of the output columns.
+    pub fn output_column_ids(&self) -> Vec<ColumnId> {
+        self.output_col_idx
+            .iter()
+            .map(|i| self.table_desc.columns[*i].column_id)
+            .collect()
+    }
+
     /// Get all indexes on this table
-    #[must_use]
     pub fn indexes(&self) -> &[(String, Rc<TableDesc>)] {
         &self.indexes
     }
 
     /// distribution keys stored in catalog only contains column index of the table (`table_idx`),
     /// so we need to convert it to `operator_idx` when filling distributions.
-    pub fn map_distribution_keys(&self) -> Vec<usize> {
+    pub fn map_distribution_key(&self) -> Vec<usize> {
         let tb_idx_to_op_idx = self
             .required_col_idx
             .iter()
@@ -175,7 +190,7 @@ impl LogicalScan {
             .map(|(op_idx, tb_idx)| (*tb_idx, op_idx))
             .collect::<HashMap<_, _>>();
         self.table_desc
-            .distribution_keys
+            .distribution_key
             .iter()
             .map(|&tb_idx| tb_idx_to_op_idx[&tb_idx])
             .collect()
@@ -198,6 +213,7 @@ impl LogicalScan {
 
         Self::new(
             index_name.to_string(),
+            false,
             new_required_col_idx,
             index.clone(),
             vec![],
@@ -233,6 +249,7 @@ impl LogicalScan {
 
         let scan_without_predicate = Self::new(
             self.table_name.clone(),
+            self.is_sys_table,
             self.required_col_idx.clone(),
             self.table_desc.clone(),
             self.indexes.clone(),
@@ -250,6 +267,7 @@ impl LogicalScan {
     fn clone_with_predicate(&self, predicate: Condition) -> Self {
         Self::new(
             self.table_name.clone(),
+            self.is_sys_table,
             self.required_col_idx.clone(),
             self.table_desc.clone(),
             self.indexes.clone(),
@@ -258,9 +276,10 @@ impl LogicalScan {
         )
     }
 
-    fn clone_with_output_indices(&self, output_col_idx: Vec<usize>) -> Self {
+    pub fn clone_with_output_indices(&self, output_col_idx: Vec<usize>) -> Self {
         Self::new(
             self.table_name.clone(),
+            self.is_sys_table,
             output_col_idx,
             self.table_desc.clone(),
             self.indexes.clone(),
@@ -331,7 +350,7 @@ impl ToBatch for LogicalScan {
             Ok(BatchSeqScan::new(self.clone(), ScanRange::full_table_scan()).into())
         } else {
             let (scan_range, predicate) = self.predicate.clone().split_to_scan_range(
-                &self.table_desc.order_column_ids(),
+                &self.table_desc.order_column_indices(),
                 self.table_desc.columns.len(),
             );
             let mut scan = self.clone();
@@ -353,6 +372,12 @@ impl ToBatch for LogicalScan {
 
 impl ToStream for LogicalScan {
     fn to_stream(&self) -> Result<PlanRef> {
+        if self.is_sys_table {
+            return Err(RwError::from(ErrorCode::NotImplemented(
+                "streaming on system table is not allowed".to_string(),
+                None.into(),
+            )));
+        }
         if self.predicate.always_true() {
             Ok(StreamTableScan::new(self.clone()).into())
         } else {
@@ -366,6 +391,12 @@ impl ToStream for LogicalScan {
     }
 
     fn logical_rewrite_for_stream(&self) -> Result<(PlanRef, ColIndexMapping)> {
+        if self.is_sys_table {
+            return Err(RwError::from(ErrorCode::NotImplemented(
+                "streaming on system table is not allowed".to_string(),
+                None.into(),
+            )));
+        }
         match self.base.pk_indices.is_empty() {
             true => {
                 let mut col_ids = HashSet::new();
@@ -373,16 +404,17 @@ impl ToStream for LogicalScan {
                 for idx in &self.output_col_idx {
                     col_ids.insert(self.table_desc.columns[*idx].column_id);
                 }
-                let mut col_id_to_tb_idx = HashMap::new();
-                for (tb_idx, c) in self.table_desc().columns.iter().enumerate() {
-                    col_id_to_tb_idx.insert(c.column_id, tb_idx);
-                }
                 let col_need_to_add = self
                     .table_desc
-                    .order_desc
+                    .order_key
                     .iter()
-                    .filter(|c| !col_ids.contains(&c.column_desc.column_id))
-                    .map(|c| col_id_to_tb_idx.get(&c.column_desc.column_id).unwrap())
+                    .filter_map(|c| {
+                        if !col_ids.contains(&self.table_desc().columns[c.column_idx].column_id) {
+                            Some(c.column_idx)
+                        } else {
+                            None
+                        }
+                    })
                     .collect_vec();
 
                 let mut output_col_idx = self.output_col_idx.clone();

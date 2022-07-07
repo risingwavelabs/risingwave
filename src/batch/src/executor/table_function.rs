@@ -11,16 +11,16 @@
 // WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 // See the License for the specific language governing permissions and
 // limitations under the License.
-
 use std::sync::Arc;
 
+use anyhow::anyhow;
 use futures_async_stream::try_stream;
 use risingwave_common::array::column::Column;
 use risingwave_common::array::{
     Array, ArrayBuilder, ArrayRef, DataChunk, I32Array, IntervalArray, NaiveDateTimeArray,
 };
 use risingwave_common::catalog::{Field, Schema};
-use risingwave_common::error::{ErrorCode, Result, RwError};
+use risingwave_common::error::{Result, RwError};
 use risingwave_common::types::{CheckedAdd, DataType, Scalar};
 use risingwave_common::util::chunk_coalesce::DEFAULT_CHUNK_BUFFER_SIZE;
 use risingwave_expr::expr::build_from_prost;
@@ -29,6 +29,7 @@ use risingwave_pb::batch_plan::table_function_node::Type::*;
 use risingwave_pb::expr::ExprNode;
 
 use super::{BoxedExecutor, BoxedExecutorBuilder};
+use crate::error::BatchError;
 use crate::executor::{BoxedDataChunkStream, Executor, ExecutorBuilder};
 use crate::task::BatchTaskContext;
 
@@ -63,7 +64,7 @@ where
         // Simulate a do-while loop.
         while cur <= stop {
             let chunk_size = DEFAULT_CHUNK_BUFFER_SIZE;
-            let mut builder = T::Builder::new(chunk_size)?;
+            let mut builder = T::Builder::new(chunk_size);
 
             for _ in 0..chunk_size {
                 if cur > stop {
@@ -72,7 +73,7 @@ where
                 builder.append(Some(cur.as_scalar_ref())).unwrap();
                 cur = cur
                     .checked_add(step.as_scalar_ref())
-                    .ok_or(ErrorCode::NumericValueOutOfRange)?;
+                    .ok_or(BatchError::NumericOutOfRange)?;
             }
 
             let arr = builder.finish()?;
@@ -94,7 +95,7 @@ impl Unnest {
     #[try_stream(boxed, ok = DataChunk, error = RwError)]
     async fn eval(self) {
         let sum = self.array_refs.iter().map(|a| a.len()).sum();
-        let mut builder = self.return_type.create_array_builder(sum)?;
+        let mut builder = self.return_type.create_array_builder(sum);
         self.array_refs
             .iter()
             .try_for_each(|a| builder.append_array(a))?;
@@ -144,9 +145,9 @@ impl TableFunctionExecutorBuilder {
         if let (Some(start), Some(stop), Some(step)) = (start, stop, step) {
             Ok(GenerateSeries::<NaiveDateTimeArray, IntervalArray> { start, stop, step })
         } else {
-            Err(ErrorCode::InternalError(
+            Err(BatchError::Internal(anyhow!(
                 "the parameters of Generate Series Function are incorrect".to_string(),
-            )
+            ))
             .into())
         }
     }
@@ -161,9 +162,9 @@ impl TableFunctionExecutorBuilder {
         if let (Some(start), Some(stop), Some(step)) = (start, stop, step) {
             Ok(GenerateSeries::<I32Array, I32Array> { start, stop, step })
         } else {
-            Err(ErrorCode::InternalError(
+            Err(BatchError::Internal(anyhow!(
                 "the parameters of Generate Series Function are incorrect".to_string(),
-            )
+            ))
             .into())
         }
     }
@@ -183,9 +184,9 @@ impl TableFunctionExecutorBuilder {
                 let func = TableFunctionExecutorBuilder::new_int_generate_series(array_refs)?;
                 Ok((schema, TableFunction::GenerateSeriesInt(func)))
             }
-            _ => Err(ErrorCode::InternalError(
+            _ => Err(BatchError::Internal(anyhow!(
                 "the parameters of Generate Series Function are incorrect".to_string(),
-            )
+            ))
             .into()),
         }
     }

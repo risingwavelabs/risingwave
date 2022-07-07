@@ -26,6 +26,8 @@ use risingwave_meta::hummock::MockHummockMetaClient;
 use risingwave_pb::hummock::{KeyRange, SstableInfo};
 
 use super::{CompressionAlgorithm, SstableMeta, DEFAULT_RESTART_INTERVAL};
+use crate::hummock::compaction_group::StaticCompactionGroupId;
+use crate::hummock::compaction_group_client::DummyCompactionGroupClient;
 use crate::hummock::iterator::test_utils::{iterator_test_key_of_epoch, mock_sstable_store};
 use crate::hummock::shared_buffer::shared_buffer_batch::SharedBufferBatch;
 use crate::hummock::value::HummockValue;
@@ -53,7 +55,6 @@ pub fn default_config_for_test() -> StorageConfig {
         enable_local_spill: false,
         local_object_store: "memory".to_string(),
         share_buffer_upload_concurrency: 1,
-        enable_compression: true,
     }
 }
 
@@ -101,6 +102,9 @@ pub async fn mock_hummock_storage() -> HummockStorage {
         sstable_store.clone(),
         mock_hummock_meta_client,
         Arc::new(StateStoreMetrics::unused()),
+        Arc::new(DummyCompactionGroupClient::new(
+            StaticCompactionGroupId::StateDefault.into(),
+        )),
     )
     .await
     .unwrap()
@@ -141,8 +145,11 @@ pub async fn gen_test_sstable_inner(
     policy: CachePolicy,
 ) -> Sstable {
     let (data, meta, _) = gen_test_sstable_data(opts, kv_iter);
-    let sst = Sstable { id: sst_id, meta };
-    sstable_store.put(sst.clone(), data, policy).await.unwrap();
+    let sst = Sstable::new(sst_id, meta.clone());
+    sstable_store
+        .put(Sstable::new(sst_id, meta.clone()), data, policy)
+        .await
+        .unwrap();
     sst
 }
 

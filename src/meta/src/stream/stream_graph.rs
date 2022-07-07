@@ -19,8 +19,9 @@ use std::sync::Arc;
 
 use assert_matches::assert_matches;
 use itertools::Itertools;
-use risingwave_common::catalog::TableId;
+use risingwave_common::catalog::{generate_intertable_name_with_type, TableId};
 use risingwave_common::error::{ErrorCode, Result};
+use risingwave_pb::catalog::Table;
 use risingwave_pb::meta::table_fragments::fragment::FragmentDistributionType;
 use risingwave_pb::meta::table_fragments::Fragment;
 use risingwave_pb::stream_plan::lookup_node::ArrangementTableId;
@@ -481,6 +482,7 @@ impl StreamGraphBuilder {
     }
 
     /// Build final stream DAG with dependencies with current actor builders.
+    #[allow(clippy::type_complexity)]
     pub fn build(
         mut self,
         ctx: &mut CreateMaterializedViewContext,
@@ -502,19 +504,14 @@ impl StreamGraphBuilder {
                 .map(|(id, StreamActorUpstream { actors, .. })| (*id, actors.clone()))
                 .collect();
 
-            actor.nodes =
-                Some(self.build_inner(ctx, actor.get_nodes()?, actor_id, &mut upstream_actors)?);
-
+            let stream_node =
+                self.build_inner(ctx, actor.get_nodes()?, actor_id, &mut upstream_actors)?;
+            actor.nodes = Some(stream_node);
             graph
                 .entry(builder.get_fragment_id())
                 .or_insert(vec![])
                 .push(actor);
         }
-        for actor_ids in ctx.upstream_node_actors.values_mut() {
-            actor_ids.sort_unstable();
-            actor_ids.dedup();
-        }
-
         Ok(graph)
     }
 
@@ -532,11 +529,15 @@ impl StreamGraphBuilder {
         upstream_actor_id: &mut HashMap<u64, OrderedActorLink>,
     ) -> Result<StreamNode> {
         let table_id_offset = ctx.table_id_offset;
+        let mut check_and_fill_internal_table = |table_id: u32, table: Option<Table>| {
+            ctx.internal_table_id_map.entry(table_id).or_insert(table);
+        };
+
         match stream_node.get_node_body()? {
             NodeBody::Exchange(_) => {
                 panic!("ExchangeNode should be eliminated from the top of the plan node when converting fragments to actors: {:#?}", stream_node)
             }
-            NodeBody::Chain(_) => self.resolve_chain_node(stream_node),
+            NodeBody::Chain(_) => Ok(self.resolve_chain_node(stream_node)?),
             _ => {
                 let mut new_stream_node = stream_node.clone();
 
@@ -546,17 +547,31 @@ impl StreamGraphBuilder {
                         // The operator id must be assigned with table ids. Otherwise it is a logic
                         // error.
                         let mut left_table_id: u32 = 0;
-                        let mut right_table_id: u32 = 0;
+                        // let mut right_table_id: u32 = 0;
                         if let Some(table) = &mut node.left_table {
                             left_table_id = table.id + table_id_offset;
                             table.id = left_table_id;
+                            table.schema_id = ctx.schema_id;
+                            table.database_id = ctx.database_id;
+                            table.name = generate_intertable_name_with_type(
+                                &ctx.mview_name,
+                                left_table_id,
+                                "HashJoinLeft",
+                            );
+                            check_and_fill_internal_table(table.id, Some(table.clone()));
                         }
                         if let Some(table) = &mut node.right_table {
-                            right_table_id = left_table_id + 1;
+                            let right_table_id = left_table_id + 1;
                             table.id = right_table_id;
+                            table.schema_id = ctx.schema_id;
+                            table.database_id = ctx.database_id;
+                            table.name = generate_intertable_name_with_type(
+                                &ctx.mview_name,
+                                right_table_id,
+                                "HashJoinRight",
+                            );
+                            check_and_fill_internal_table(table.id, Some(table.clone()));
                         }
-                        ctx.internal_table_id_set.insert(left_table_id);
-                        ctx.internal_table_id_set.insert(right_table_id);
                     }
 
                     NodeBody::Lookup(node) => {
@@ -564,13 +579,13 @@ impl StreamGraphBuilder {
                             &mut node.arrangement_table_id
                         {
                             *table_id += table_id_offset;
-                            ctx.internal_table_id_set.insert(*table_id);
+                            check_and_fill_internal_table(*table_id, None);
                         }
                     }
 
                     NodeBody::Arrange(node) => {
                         node.table_id += table_id_offset;
-                        ctx.internal_table_id_set.insert(node.table_id);
+                        check_and_fill_internal_table(node.table_id, None);
                     }
 
                     NodeBody::HashAgg(node) => {
@@ -578,13 +593,37 @@ impl StreamGraphBuilder {
                         // In-place update the table id. Convert from local to global.
                         for table in &mut node.internal_tables {
                             table.id += table_id_offset;
-                            ctx.internal_table_id_set.insert(table.id);
+                            table.schema_id = ctx.schema_id;
+                            table.database_id = ctx.database_id;
+                            table.name = generate_intertable_name_with_type(
+                                &ctx.mview_name,
+                                table.id,
+                                "HashAgg",
+                            );
+                            check_and_fill_internal_table(table.id, Some(table.clone()));
                         }
                     }
 
-                    NodeBody::TopN(node) | NodeBody::AppendOnlyTopN(node) => {
-                        node.table_id += table_id_offset;
-                        ctx.internal_table_id_set.insert(node.table_id);
+                    NodeBody::TopN(node) => {
+                        node.table_id_l += table_id_offset;
+                        node.table_id_m += table_id_offset;
+                        node.table_id_h += table_id_offset;
+
+                        // TODO add catalog::Table to TopNNode
+                        check_and_fill_internal_table(node.table_id_l, None);
+                        check_and_fill_internal_table(node.table_id_m, None);
+                        check_and_fill_internal_table(node.table_id_h, None);
+                    }
+
+                    NodeBody::AppendOnlyTopN(node) => {
+                        node.table_id_l += table_id_offset;
+                        node.table_id_m += table_id_offset;
+                        node.table_id_h += table_id_offset;
+
+                        // TODO add catalog::Table to AppendOnlyTopN
+                        check_and_fill_internal_table(node.table_id_l, None);
+                        check_and_fill_internal_table(node.table_id_m, None);
+                        check_and_fill_internal_table(node.table_id_h, None);
                     }
 
                     NodeBody::GlobalSimpleAgg(node) | NodeBody::LocalSimpleAgg(node) => {
@@ -592,7 +631,14 @@ impl StreamGraphBuilder {
                         // In-place update the table id. Convert from local to global.
                         for table in &mut node.internal_tables {
                             table.id += table_id_offset;
-                            ctx.internal_table_id_set.insert(table.id);
+                            table.schema_id = ctx.schema_id;
+                            table.database_id = ctx.database_id;
+                            table.name = generate_intertable_name_with_type(
+                                &ctx.mview_name,
+                                table.id,
+                                "GlobalSimpleAgg",
+                            );
+                            check_and_fill_internal_table(table.id, Some(table.clone()));
                         }
                     }
                     _ => {}
@@ -771,8 +817,8 @@ impl ActorGraphBuilder {
         let stream_graph = {
             let BuildActorGraphState {
                 stream_graph_builder,
-                fragment_actors: _,
                 next_local_actor_id,
+                ..
             } = {
                 let mut state = BuildActorGraphState::default();
                 // resolve upstream table infos first
@@ -825,6 +871,7 @@ impl ActorGraphBuilder {
                 )
             })
             .collect();
+
         Ok(stream_graph)
     }
 

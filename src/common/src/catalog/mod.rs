@@ -13,20 +13,42 @@
 // limitations under the License.
 
 mod column;
+mod internal_table;
 mod physical_table;
 mod schema;
 pub mod test_utils;
-use core::fmt;
 
+use core::fmt;
+use std::collections::HashMap;
+use std::sync::Arc;
+
+use async_trait::async_trait;
 pub use column::*;
+pub use internal_table::*;
 pub use physical_table::*;
 pub use schema::{test_utils as schema_test_utils, Field, Schema};
 
+use crate::array::Row;
+pub use crate::config::constant::hummock;
+use crate::error::Result;
+
 pub const DEFAULT_DATABASE_NAME: &str = "dev";
 pub const DEFAULT_SCHEMA_NAME: &str = "public";
+pub const PG_CATALOG_SCHEMA_NAME: &str = "pg_catalog";
+pub const RESERVED_PG_SCHEMA_PREFIX: &str = "pg_";
 pub const DEFAULT_SUPPER_USER: &str = "root";
 // This is for compatibility with customized utils for PostgreSQL.
 pub const DEFAULT_SUPPER_USER_FOR_PG: &str = "postgres";
+
+pub const RESERVED_PG_CATALOG_TABLE_ID: i32 = 1000;
+
+/// The local system catalog reader in the frontend node.
+#[async_trait]
+pub trait SysCatalogReader: Sync + Send + 'static {
+    async fn read_table(&self, table_name: &str) -> Result<Vec<Row>>;
+}
+
+pub type SysCatalogReaderRef = Arc<dyn SysCatalogReader>;
 
 pub type CatalogVersion = u64;
 
@@ -187,6 +209,59 @@ impl From<&TableId> for risingwave_pb::plan_common::TableRefId {
             schema_ref_id: None,
             table_id: table_id.table_id as i32,
         }
+    }
+}
+
+// TODO: TableOption is deplicated with the properties in table catalog, We can refactor later to
+// directly fetch such options from catalog when creating compaction jobs.
+#[derive(Clone, Debug, PartialEq, Default, Copy)]
+pub struct TableOption {
+    pub ttl: Option<u32>, // second
+}
+
+impl From<&risingwave_pb::hummock::TableOption> for TableOption {
+    fn from(table_option: &risingwave_pb::hummock::TableOption) -> Self {
+        let ttl = if table_option.ttl == hummock::TABLE_OPTION_DUMMY_TTL {
+            None
+        } else {
+            Some(table_option.ttl)
+        };
+
+        Self { ttl }
+    }
+}
+
+impl From<&TableOption> for risingwave_pb::hummock::TableOption {
+    fn from(table_option: &TableOption) -> Self {
+        Self {
+            ttl: table_option.ttl.unwrap_or(hummock::TABLE_OPTION_DUMMY_TTL),
+        }
+    }
+}
+
+impl TableOption {
+    pub fn build_table_option(table_properties: &HashMap<String, String>) -> Self {
+        // now we only support ttl for TableOption
+        let mut result = TableOption::default();
+        match table_properties.get(hummock::PROPERTIES_TTL_KEY) {
+            Some(ttl_string) => {
+                match ttl_string.trim().parse::<u32>() {
+                    Ok(ttl_u32) => result.ttl = Some(ttl_u32),
+                    Err(e) => {
+                        tracing::info!(
+                            "build_table_option parse option ttl_string {} fail {}",
+                            ttl_string,
+                            e
+                        );
+                        result.ttl = None;
+                    }
+                };
+            }
+
+            None => {}
+        }
+
+        result
     }
 }
 

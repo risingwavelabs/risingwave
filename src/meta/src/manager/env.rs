@@ -25,7 +25,8 @@ use risingwave_rpc_client::{StreamClientPool, StreamClientPoolRef};
 
 use super::{HashMappingManager, HashMappingManagerRef};
 use crate::manager::{
-    IdGeneratorManager, IdGeneratorManagerRef, NotificationManager, NotificationManagerRef,
+    IdGeneratorManager, IdGeneratorManagerRef, IdleManager, IdleManagerRef, NotificationManager,
+    NotificationManagerRef,
 };
 #[cfg(any(test, feature = "test"))]
 use crate::rpc::{META_CF_NAME, META_LEADER_KEY, META_LEASE_KEY};
@@ -55,6 +56,9 @@ where
     /// stream client pool memorization.
     stream_client_pool: StreamClientPoolRef,
 
+    /// idle status manager.
+    idle_manager: IdleManagerRef,
+
     info: MetaLeaderInfo,
 
     /// options read by all services
@@ -65,21 +69,38 @@ where
 pub struct MetaOpts {
     pub enable_recovery: bool,
     pub checkpoint_interval: Duration,
+
+    /// After specified seconds of idle (no mview or flush), the process will be exited.
+    /// 0 for infinite, process will never be exited due to long idle time.
+    pub max_idle_ms: u64,
+    pub in_flight_barrier_nums: usize,
+
+    /// This is an unsafe parameter and should be removed later. It should not be modified during
+    /// the worker node is running.
+    pub unsafe_worker_node_parallel_degree: usize,
 }
 
 impl Default for MetaOpts {
     fn default() -> Self {
         Self {
             enable_recovery: false,
-            checkpoint_interval: Duration::from_millis(100),
+            checkpoint_interval: Duration::from_millis(250),
+            max_idle_ms: 0,
+            in_flight_barrier_nums: 40,
+            unsafe_worker_node_parallel_degree: 4,
         }
     }
 }
+
 impl MetaOpts {
-    pub fn for_test(enable_recovery: bool, checkpoint_interval: u64) -> Self {
+    /// some test need `enable_recovery=true`
+    pub fn test(enable_recovery: bool) -> Self {
         Self {
             enable_recovery,
-            checkpoint_interval: Duration::from_millis(checkpoint_interval),
+            checkpoint_interval: Duration::from_millis(250),
+            max_idle_ms: 0,
+            in_flight_barrier_nums: 40,
+            unsafe_worker_node_parallel_degree: 4,
         }
     }
 }
@@ -94,6 +115,7 @@ where
         let stream_client_pool = Arc::new(StreamClientPool::default());
         let notification_manager = Arc::new(NotificationManager::new());
         let hash_mapping_manager = Arc::new(HashMappingManager::new());
+        let idle_manager = Arc::new(IdleManager::new(opts.max_idle_ms));
 
         Self {
             id_gen_manager,
@@ -101,6 +123,7 @@ where
             notification_manager,
             hash_mapping_manager,
             stream_client_pool,
+            idle_manager,
             info,
             opts: opts.into(),
         }
@@ -136,6 +159,14 @@ where
 
     pub fn hash_mapping_manager(&self) -> &HashMappingManager {
         self.hash_mapping_manager.deref()
+    }
+
+    pub fn idle_manager_ref(&self) -> IdleManagerRef {
+        self.idle_manager.clone()
+    }
+
+    pub fn idle_manager(&self) -> &IdleManager {
+        self.idle_manager.deref()
     }
 
     pub fn stream_client_pool_ref(&self) -> StreamClientPoolRef {
@@ -190,6 +221,7 @@ impl MetaSrvEnv<MemStore> {
         let notification_manager = Arc::new(NotificationManager::new());
         let stream_client_pool = Arc::new(StreamClientPool::default());
         let hash_mapping_manager = Arc::new(HashMappingManager::new());
+        let idle_manager = Arc::new(IdleManager::disabled());
 
         Self {
             id_gen_manager,
@@ -197,6 +229,7 @@ impl MetaSrvEnv<MemStore> {
             notification_manager,
             hash_mapping_manager,
             stream_client_pool,
+            idle_manager,
             info: leader_info,
             opts,
         }

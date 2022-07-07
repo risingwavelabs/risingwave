@@ -27,6 +27,7 @@ pub mod like;
 pub mod lower;
 pub mod ltrim;
 pub mod md5;
+pub mod overlay;
 pub mod position;
 pub mod repeat;
 pub mod replace;
@@ -37,6 +38,7 @@ pub mod substr;
 pub mod to_char;
 pub mod translate;
 pub mod trim;
+pub mod trim_characters;
 pub mod tumble;
 pub mod upper;
 

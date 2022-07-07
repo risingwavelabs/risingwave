@@ -91,6 +91,12 @@ pub struct StreamingConfig {
     // pub chunk_size: u32,
     #[serde(default = "default::checkpoint_interval_ms")]
     pub checkpoint_interval_ms: u32,
+
+    #[serde(default = "default::in_flight_barrier_nums")]
+    pub in_flight_barrier_nums: usize,
+
+    #[serde(default = "default::unsafe_worker_node_parallel_degree")]
+    pub unsafe_worker_node_parallel_degree: usize,
 }
 
 impl Default for StreamingConfig {
@@ -161,10 +167,6 @@ pub struct StorageConfig {
     /// Number of tasks shared buffer can upload in parallel.
     #[serde(default = "default::share_buffer_upload_concurrency")]
     pub share_buffer_upload_concurrency: usize,
-
-    /// whether enable compression when building sstable.
-    #[serde(default = "default::enable_compression")]
-    pub enable_compression: bool,
 }
 
 impl Default for StorageConfig {
@@ -271,13 +273,42 @@ mod default {
     }
 
     pub fn checkpoint_interval_ms() -> u32 {
-        100
+        250
+    }
+
+    pub fn in_flight_barrier_nums() -> usize {
+        40
     }
 
     pub fn share_buffer_upload_concurrency() -> usize {
         8
     }
-    pub fn enable_compression() -> bool {
-        true
+
+    pub fn unsafe_worker_node_parallel_degree() -> usize {
+        4
+    }
+}
+
+pub mod constant {
+    pub mod hummock {
+        use bitflags::bitflags;
+        bitflags! {
+
+            #[derive(Default)]
+            pub struct CompactionFilterFlag: u32 {
+                const NONE = 0b00000000;
+                const STATE_CLEAN = 0b00000010;
+                const TTL = 0b00000100;
+            }
+        }
+
+        impl From<CompactionFilterFlag> for u32 {
+            fn from(flag: CompactionFilterFlag) -> Self {
+                flag.bits()
+            }
+        }
+
+        pub const TABLE_OPTION_DUMMY_TTL: u32 = 0;
+        pub const PROPERTIES_TTL_KEY: &str = "ttl";
     }
 }
