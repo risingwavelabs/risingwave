@@ -10,7 +10,7 @@ in_flight_barrier_nums = 40
 [storage]
 shared_buffer_capacity_mb = 4096
 sstable_size_mb = 256
-block_size_kb = 64
+block_size_kb = 1024
 bloom_false_positive = 0.01
 data_directory = "hummock_001"
 block_cache_capacity_mb = 4096

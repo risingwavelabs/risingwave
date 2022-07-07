@@ -38,7 +38,7 @@ pub(crate) struct Opts {
     #[clap(long, default_value_t = 256)]
     table_size_mb: u32,
 
-    #[clap(long, default_value_t = 64)]
+    #[clap(long, default_value_t = 1024)]
     block_size_kb: u32,
 
     #[clap(long, default_value_t = 256)]
