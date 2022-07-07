@@ -1,4 +1,5 @@
-query TIITRR
+# scan MV with ORDER BY isn't guaranteed to be ordered
+query TIITRR rowsort
 select * from tpch_q18;
 ----
 Customer#000000070 70 2567 1998-02-27 263411.29 266

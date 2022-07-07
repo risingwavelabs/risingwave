@@ -43,7 +43,7 @@ impl ExecutorBuilder for AppendOnlyTopNExecutorBuilder {
         let table_id_l = TableId::new(node.table_id_l);
         let table_id_h = TableId::new(node.table_id_h);
         let key_indices = node
-            .get_distribution_keys()
+            .get_distribution_key()
             .iter()
             .map(|key| *key as usize)
             .collect::<Vec<_>>();

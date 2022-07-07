@@ -22,27 +22,27 @@ insert into orders values
     (4, 43, 2222),
     (5, 42, 3333);
 
-query III
+query III rowsort
 SELECT * FROM orders_count_by_user WHERE user_id = 42;
 ----
 42 1111 1
 42 2222 2
 42 3333 1
 
-query III
+query III rowsort
 SELECT * FROM orders_count_by_user WHERE user_id < 43;
 ----
 42 1111 1
 42 2222 2
 42 3333 1
 
-query III
+query III rowsort
 SELECT * FROM orders_count_by_user WHERE user_id > 42;
 ----
 43 1111 1
 43 2222 1
 
-query III
+query III rowsort
 SELECT * FROM orders_count_by_user WHERE user_id >= 43;
 ----
 43 1111 1
@@ -53,7 +53,7 @@ SELECT * FROM orders_count_by_user WHERE user_id = 42 AND date = 2222;
 ----
 42 2222 2
 
-query III
+query III rowsort
 SELECT * FROM orders_count_by_user WHERE date > 1111 AND user_id = 42 AND 5<6 AND date <= 3333
 ----
 42 2222 2
@@ -69,7 +69,7 @@ CREATE MATERIALIZED VIEW orders_count_by_user AS
       GROUP BY user_id, date 
       ORDER BY orders_count;
 
-query III
+query III rowsort
 SELECT * FROM orders_count_by_user;
 ----
 42 1111 1
