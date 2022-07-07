@@ -20,6 +20,7 @@ use risingwave_pb::batch_plan::LimitNode;
 
 use super::{LogicalLimit, PlanBase, PlanRef, PlanTreeNodeUnary, ToBatchProst, ToDistributedBatch};
 use crate::optimizer::plan_node::ToLocalBatch;
+use crate::optimizer::property::Distribution;
 
 /// `BatchLimit` implements [`super::LogicalLimit`] to fetch specified rows from input
 #[derive(Debug, Clone)]
@@ -34,7 +35,7 @@ impl BatchLimit {
         let base = PlanBase::new_batch(
             ctx,
             logical.schema().clone(),
-            logical.input().distribution().clone(),
+            Distribution::Single,
             logical.input().order().clone(),
         );
         BatchLimit { base, logical }
