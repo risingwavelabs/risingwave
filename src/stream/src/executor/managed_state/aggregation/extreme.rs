@@ -83,7 +83,7 @@ where
     // TODO: Remove this phantom to get rid of S: StateStore.
     _phantom_data: PhantomData<S>,
 
-    /// The upstream pks. Assembled as pk of relational table.
+    /// The upstream pk. Assembled as pk of relational table.
     upstream_pk_len: usize,
 
     /// Primary key to look up in relational table. For value state, there is only one row.
@@ -316,16 +316,16 @@ where
                 if let Some(inner) = all_data_iter.next().await {
                     let row = inner?;
 
-                    // Get the agg call value.
-                    let value = row[row.0.len() - 1].clone();
+                    let group_key_len = self.group_key.as_ref().map_or(0, |row| row.size());
+                    // Get the agg call value. Same as sort key.
+                    let value = row[group_key_len].clone();
 
                     // Get sort key and extreme pk.
                     let sort_key = value.as_ref().map(|v| v.clone().try_into().unwrap());
                     let mut extreme_pk = ExtremePk::with_capacity(1);
-                    let group_key_len = self.group_key.as_ref().map_or(0, |row| row.size());
-                    // The layout is group_key/sort_key/extreme_pk/agg_call value. So the range
-                    // should be [group_key_len + 1, row.0.len() - 1).
-                    for extreme_pk_index in group_key_len + 1..row.0.len() - 1 {
+                    // The layout is group_key/sort_key/extreme_pk. So the range
+                    // should be [group_key_len + 1, row.0.len()).
+                    for extreme_pk_index in group_key_len + 1..row.0.len() {
                         extreme_pk.push(row[extreme_pk_index].clone());
                     }
 
@@ -358,9 +358,8 @@ where
         } else {
             vec![]
         };
-        sort_key_vec.push(sort_key.clone());
-        sort_key_vec.extend(extreme_pk.into_iter());
         sort_key_vec.push(sort_key);
+        sort_key_vec.extend(extreme_pk.into_iter());
         Row::new(sort_key_vec)
     }
 }
@@ -490,7 +489,7 @@ mod tests {
     async fn test_managed_extreme_state() {
         let store = MemoryStateStore::new();
         let mut state_table =
-            state_table_create_helper(store, TableId::from(0x2333), 2, OrderType::Ascending);
+            state_table_create_helper(store, TableId::from(0x2333), 1, OrderType::Ascending);
 
         let mut managed_state = ManagedMinState::<_, I64Array>::new(
             Some(5),
@@ -678,7 +677,7 @@ mod tests {
                 DataType::Int64,
             ));
         }
-        let relational_pk_len = column_descs.len() - 1;
+        let relational_pk_len = column_descs.len();
         StateTable::new(
             store,
             table_id,
@@ -697,7 +696,7 @@ mod tests {
             OrderType::Ascending
         };
         let mut state_table =
-            state_table_create_helper(store, TableId::from(0x2333), 3, order_type);
+            state_table_create_helper(store, TableId::from(0x2333), 2, order_type);
 
         let mut managed_state = GenericExtremeState::<_, I64Array, EXTREME_TYPE>::new(
             Some(3),
@@ -803,7 +802,7 @@ mod tests {
             OrderType::Ascending
         };
         let mut state_table =
-            state_table_create_helper(store, TableId::from(0x2333), 3, order_type);
+            state_table_create_helper(store, TableId::from(0x2333), 2, order_type);
 
         let mut managed_state = GenericExtremeState::<_, I64Array, EXTREME_TYPE>::new(
             Some(3),
@@ -931,7 +930,7 @@ mod tests {
         .await
         .unwrap();
         let mut state_table =
-            state_table_create_helper(store, TableId::from(0x2333), 2, OrderType::Ascending);
+            state_table_create_helper(store, TableId::from(0x2333), 1, OrderType::Ascending);
 
         assert!(!state_table.is_dirty());
 
@@ -1017,7 +1016,7 @@ mod tests {
             OrderType::Ascending
         };
         let mut state_table =
-            state_table_create_helper(store, TableId::from(0x2333), 2, order_type);
+            state_table_create_helper(store, TableId::from(0x2333), 1, order_type);
 
         let mut managed_state = GenericExtremeState::<_, I64Array, EXTREME_TYPE>::new(
             Some(3),
@@ -1122,7 +1121,7 @@ mod tests {
         .await
         .unwrap();
         let mut state_table =
-            state_table_create_helper(store, TableId::from(0x2333), 2, OrderType::Ascending);
+            state_table_create_helper(store, TableId::from(0x2333), 1, OrderType::Ascending);
 
         assert!(!state_table.is_dirty());
 

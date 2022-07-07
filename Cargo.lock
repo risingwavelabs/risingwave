@@ -3045,9 +3045,9 @@ checksum = "ff011a302c396a5197692431fc1948019154afc178baf7d8e37367442a4601cf"
 
 [[package]]
 name = "openssl-src"
-version = "111.20.0+1.1.1o"
+version = "111.22.0+1.1.1q"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "92892c4f87d56e376e469ace79f1128fdaded07646ddf73aa0be4706ff712dec"
+checksum = "8f31f0d509d1c1ae9cada2f9539ff8f37933831fd5098879e482aa687d659853"
 dependencies = [
  "cc",
 ]
@@ -3949,6 +3949,7 @@ dependencies = [
  "tracing-futures",
  "twox-hash",
  "url",
+ "uuid 1.1.2",
  "workspace-hack",
 ]
 
@@ -4044,6 +4045,7 @@ dependencies = [
  "hyper",
  "itertools",
  "lazy_static",
+ "libc",
  "log",
  "lru 0.7.6 (git+https://github.com/singularity-data/lru-rs.git?rev=e0e9ddaf8e4a51c244a03676734437e68a336b30)",
  "madsim",
@@ -4054,6 +4056,8 @@ dependencies = [
  "num-traits",
  "parking_lot",
  "paste",
+ "procfs",
+ "procinfo",
  "prometheus",
  "prost",
  "rand 0.8.5",
@@ -4264,6 +4268,7 @@ dependencies = [
  "num-traits",
  "paste",
  "prost",
+ "regex",
  "risingwave_common",
  "risingwave_pb",
  "rust_decimal",
@@ -4664,8 +4669,6 @@ dependencies = [
  "num-traits",
  "parking_lot",
  "paste",
- "procfs",
- "procinfo",
  "prometheus",
  "prost",
  "rand 0.8.5",
