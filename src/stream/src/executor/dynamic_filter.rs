@@ -236,10 +236,7 @@ impl DynamicFilterExecutor {
                     self.comparator,
                     DataType::Boolean,
                     Box::new(InputRefExpression::new(l_data_type.clone(), self.key_l)),
-                    Box::new(LiteralExpression::new(
-                        r_data_type.clone(),
-                        Some(scalar),
-                    )),
+                    Box::new(LiteralExpression::new(r_data_type.clone(), Some(scalar))),
                 )
             })
         };
