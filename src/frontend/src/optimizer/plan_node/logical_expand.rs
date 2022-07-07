@@ -88,7 +88,6 @@ impl PlanTreeNodeUnary for LogicalExpand {
         input: PlanRef,
         input_col_change: ColIndexMapping,
     ) -> (Self, ColIndexMapping) {
-        // FIXME: unknown bug.
         let mut column_subsets = self.column_subsets.clone();
         for key in column_subsets.iter_mut().flat_map(|r| r.iter_mut()) {
             *key = input_col_change.map(*key);

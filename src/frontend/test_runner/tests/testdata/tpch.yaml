@@ -1661,10 +1661,9 @@
                 LogicalFilter { predicate: Like($7, '%Customer%Complaints%':Varchar) }
                   LogicalScan { table: supplier, columns: [_row_id, s_suppkey, s_name, s_address, s_nationkey, s_phone, s_acctbal, s_comment] }
   optimized_logical_plan: |
-<<<<<<< HEAD
-    LogicalAgg { group_keys: [0, 1, 2], agg_calls: [sum($4) filter(($4 = 0:Int64))] }
+    LogicalAgg { group_key: [0, 1, 2], agg_calls: [sum($4) filter(($3 = 0:Int64))] }
       LogicalProject { exprs: [$0, $1, $2, $4, $5] }
-        LogicalAgg { group_keys: [0, 1, 2, 3, 4], agg_calls: [count($3)] }
+        LogicalAgg { group_key: [0, 1, 2, 3, 4], agg_calls: [count($3)] }
           LogicalExpand { column_subsets: [[0, 1, 2, 3]] }
             LogicalProject { exprs: [$1, $2, $3, $0] }
               LogicalJoin { type: LeftAnti, on: ($0 = $4), output_indices: all }
@@ -1675,23 +1674,10 @@
   batch_plan: |
     BatchExchange { order: [$3 DESC, $0 ASC, $1 ASC, $2 ASC], dist: Single }
       BatchSort { order: [$3 DESC, $0 ASC, $1 ASC, $2 ASC] }
-        BatchHashAgg { group_keys: [$0, $1, $2], aggs: [sum($4) filter(($4 = 0:Int64))] }
-=======
-    LogicalAgg { group_key: [0, 1, 2], agg_calls: [count(distinct $3)] }
-      LogicalProject { exprs: [$1, $2, $3, $0] }
-        LogicalJoin { type: LeftAnti, on: ($0 = $4), output_indices: all }
-          LogicalJoin { type: Inner, on: ($2 = $0), output_indices: [1, 3, 4, 5] }
-            LogicalScan { table: partsupp, columns: [ps_partkey, ps_suppkey] }
-            LogicalScan { table: part, output_columns: [p_partkey, p_brand, p_type, p_size], required_columns: [$1:p_partkey, $4:p_brand, $5:p_type, $6:p_size], predicate: ($4 <> 'Brand#45':Varchar) AND Not(Like($5, 'SMALL PLATED%':Varchar)) AND In($6, 19:Int32, 17:Int32, 16:Int32, 23:Int32, 10:Int32, 4:Int32, 38:Int32, 11:Int32) }
-          LogicalScan { table: supplier, output_columns: [s_suppkey], required_columns: [$1:s_suppkey, $7:s_comment], predicate: Like($7, '%Customer%Complaints%':Varchar) }
-  batch_plan: |
-    BatchExchange { order: [$3 DESC, $0 ASC, $1 ASC, $2 ASC], dist: Single }
-      BatchSort { order: [$3 DESC, $0 ASC, $1 ASC, $2 ASC] }
-        BatchHashAgg { group_key: [$0, $1, $2], aggs: [count(distinct $3)] }
->>>>>>> main
+        BatchHashAgg { group_key: [$0, $1, $2], aggs: [sum($4) filter(($3 = 0:Int64))] }
           BatchExchange { order: [], dist: HashShard([0, 1, 2]) }
             BatchProject { exprs: [$0, $1, $2, $4, $5] }
-              BatchHashAgg { group_keys: [$0, $1, $2, $3, $4], aggs: [count($3)] }
+              BatchHashAgg { group_key: [$0, $1, $2, $3, $4], aggs: [count($3)] }
                 BatchExchange { order: [], dist: HashShard([0, 1, 2, 3, 4]) }
                   BatchExpand { column_subsets: [[0, 1, 2, 3]] }
                     BatchProject { exprs: [$1, $2, $3, $0] }
@@ -1709,14 +1695,10 @@
                               BatchScan { table: supplier, columns: [s_suppkey, s_comment] }
   stream_plan: |
     StreamMaterialize { columns: [p_brand, p_type, p_size, agg#0(hidden), supplier_cnt], pk_columns: [p_brand, p_type, p_size], order_descs: [supplier_cnt, p_brand, p_type, p_size] }
-<<<<<<< HEAD
-      StreamHashAgg { group_keys: [$0, $1, $2], aggs: [count, sum($4) filter(($4 = 0:Int64))] }
-=======
-      StreamHashAgg { group_key: [$0, $1, $2], aggs: [count, count(distinct $3)] }
->>>>>>> main
+      StreamHashAgg { group_key: [$0, $1, $2], aggs: [count, sum($4) filter(($3 = 0:Int64))] }
         StreamExchange { dist: HashShard([0, 1, 2]) }
           StreamProject { exprs: [$0, $1, $2, $4, $6, $3] }
-            StreamHashAgg { group_keys: [$0, $1, $2, $3, $6], aggs: [count, count($3)] }
+            StreamHashAgg { group_key: [$0, $1, $2, $3, $6], aggs: [count, count($3)] }
               StreamExchange { dist: HashShard([0, 1, 2, 3, 6]) }
                 StreamExpand { column_subsets: [[0, 1, 2, 3]] }
                   StreamProject { exprs: [$1, $2, $3, $0, $4, $5] }

@@ -125,7 +125,7 @@ impl PlanAggCall {
         }
     }
 
-    pub fn input_indcies(&self) -> Vec<usize> {
+    pub fn input_indices(&self) -> Vec<usize> {
         self.inputs.iter().map(|input| input.index()).collect()
     }
 }

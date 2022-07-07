@@ -482,24 +482,6 @@
     select abs(a) FILTER (WHERE a > 0) AS avga from t;
   binder_error: 'Invalid input syntax: filter clause is only allowed in aggregation functions, but `abs` is not an aggregation function'
 - sql: |
-    create table t(a int, b int, c int);
-    select a, count(distinct b) as distinct_b_num, sum(c) as sum_c from t group by a;
-  optimized_logical_plan: |
-    LogicalAgg { group_keys: [0], agg_calls: [sum($2) filter(($2 = 0:Int64)), sum($3) filter(($2 = 1:Int64))] }
-      LogicalProject { exprs: [$0, $2, $3, $4] }
-        LogicalAgg { group_keys: [0, 1, 3], agg_calls: [count($1), sum($2)] }
-          LogicalExpand { column_subsets: [[0, 1], [0, 2]] }
-            LogicalScan { table: t, columns: [a, b, c] }
-  stream_plan: |
-    StreamMaterialize { columns: [a, agg#0(hidden), distinct_b_num, sum_c], pk_columns: [a] }
-      StreamHashAgg { group_keys: [$0], aggs: [count, sum($2) filter(($2 = 0:Int64)), sum($3) filter(($2 = 1:Int64))] }
-        StreamExchange { dist: HashShard([0]) }
-          StreamProject { exprs: [$0, $2, $4, $5, $1] }
-            StreamHashAgg { group_keys: [$0, $1, $4], aggs: [count, count($1), sum($2)] }
-              StreamExchange { dist: HashShard([0, 1, 4]) }
-                StreamExpand { column_subsets: [[0, 1], [0, 2]] }
-                  StreamTableScan { table: t, columns: [a, b, c, _row_id], pk_indices: [3] }
-- sql: |
     /* prune column before filter */
     create table t(v1 int, v2 int);
     with sub(a, b) as (select min(v1), sum(v2) filter (where v2 < 5) from t) select b from sub;
@@ -514,3 +496,42 @@
         StreamExchange { dist: Single }
           StreamLocalSimpleAgg { aggs: [count, sum($0) filter(($0 < 5:Int32))] }
             StreamTableScan { table: t, columns: [v2, _row_id], pk_indices: [1] }
+- sql: |
+    /* distinct agg and non-disintct agg */
+    create table t(a int, b int, c int);
+    select a, count(distinct b) as distinct_b_num, sum(c) as sum_c from t group by a;
+  optimized_logical_plan: |
+    LogicalAgg { group_key: [0], agg_calls: [sum($2) filter(($1 = 0:Int64)), sum($3) filter(($1 = 1:Int64))] }
+      LogicalProject { exprs: [$0, $2, $3, $4] }
+        LogicalAgg { group_key: [0, 1, 3], agg_calls: [count($1), sum($2)] }
+          LogicalExpand { column_subsets: [[0, 1], [0, 2]] }
+            LogicalScan { table: t, columns: [a, b, c] }
+  stream_plan: |
+    StreamMaterialize { columns: [a, agg#0(hidden), distinct_b_num, sum_c], pk_columns: [a] }
+      StreamHashAgg { group_key: [$0], aggs: [count, sum($2) filter(($1 = 0:Int64)), sum($3) filter(($1 = 1:Int64))] }
+        StreamExchange { dist: HashShard([0]) }
+          StreamProject { exprs: [$0, $2, $4, $5, $1] }
+            StreamHashAgg { group_key: [$0, $1, $4], aggs: [count, count($1), sum($2)] }
+              StreamExchange { dist: HashShard([0, 1, 4]) }
+                StreamExpand { column_subsets: [[0, 1], [0, 2]] }
+                  StreamTableScan { table: t, columns: [a, b, c, _row_id], pk_indices: [3] }
+- sql: |
+    /* distinct agg with filter */
+    create table t(a int, b int, c int);
+    select a, count(distinct b) filter(where b < 100), sum(c) from t group by a;
+  optimized_logical_plan: |
+    LogicalAgg { group_key: [0], agg_calls: [sum($2) filter(($1 = 0:Int64)), sum($3) filter(($1 = 1:Int64))] }
+      LogicalProject { exprs: [$0, $2, $3, $4] }
+        LogicalAgg { group_key: [0, 1, 3], agg_calls: [count($1) filter(($1 < 100:Int32)), sum($2)] }
+          LogicalExpand { column_subsets: [[0, 1, 1], [0, 2]] }
+            LogicalScan { table: t, columns: [a, b, c] }
+- sql: |
+    /* non-distinct agg with filter */
+    create table t(a int, b int, c int);
+    select a, count(distinct b), sum(c) filter(where b < 100) from t group by a;
+  optimized_logical_plan: |
+    LogicalAgg { group_key: [0], agg_calls: [sum($2) filter(($1 = 0:Int64)), sum($3) filter(($1 = 1:Int64))] }
+      LogicalProject { exprs: [$0, $2, $3, $4] }
+        LogicalAgg { group_key: [0, 1, 3], agg_calls: [count($1), sum($2) filter(($1 < 100:Int32))] }
+          LogicalExpand { column_subsets: [[0, 1], [0, 2, 1]] }
+            LogicalScan { table: t, columns: [a, b, c] }

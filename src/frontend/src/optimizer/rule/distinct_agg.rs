@@ -21,7 +21,7 @@ use crate::expr::{ExprType, ExprVisitor, FunctionCall, InputRef, Literal};
 use crate::optimizer::plan_node::{LogicalAgg, LogicalExpand};
 use crate::optimizer::PlanRef;
 
-/// Transform distinct aggregates to LogicalAgg -> LogicalAgg -> Expand -> Input.
+/// Transform distinct aggregates to `LogicalAgg` -> `LogicalAgg` -> `Expand` -> `Input`.
 ///
 /// Here is an example:
 ///
@@ -29,7 +29,7 @@ use crate::optimizer::PlanRef;
 ///
 /// -> `Input(len of schema: 4)`
 ///
-/// will be transform to
+/// will be transformed to
 ///
 /// `LogicalAgg(group by(0, 1), sum($4) filter(where $3 = 1), sum($5) filter(where $3 = 0))`
 ///
@@ -39,9 +39,9 @@ use crate::optimizer::PlanRef;
 pub struct DistinctAgg {}
 impl Rule for DistinctAgg {
     fn apply(&self, plan: PlanRef) -> Option<PlanRef> {
-        // FIXME: agg(distinct ..) filter(where ..)
         let agg: &LogicalAgg = plan.as_logical_agg()?;
         let (agg_calls, agg_group_keys, input) = agg.clone().decompose();
+        // The index of `flag` in schema of `Expand`.
         let pos_of_flag = input.schema().len();
         let (distinct_aggs, non_distinct_aggs): (Vec<_>, Vec<_>) = agg_calls
             .clone()
@@ -60,7 +60,7 @@ impl Rule for DistinctAgg {
                 assert!(collect_input_index.input_indices.is_empty());
                 agg_call.filter.visit_expr(&mut collect_input_index);
                 let mut subset = agg_group_keys.clone();
-                subset.extend(agg_call.input_indcies());
+                subset.extend(agg_call.input_indices());
                 subset.append(&mut collect_input_index.input_indices);
                 subset
             })
@@ -74,7 +74,7 @@ impl Rule for DistinctAgg {
                         .iter()
                         .flat_map(|agg_call| {
                             agg_call.filter.visit_expr(&mut collect_input_index);
-                            agg_call.input_indcies()
+                            agg_call.input_indices()
                         })
                         .collect_vec(),
                 );
@@ -86,10 +86,12 @@ impl Rule for DistinctAgg {
 
         let mut group_by_keys = agg_group_keys;
         let old_group_keys_len = group_by_keys.len();
+        // The middle `LogicalAgg` groups by (`agg_group_keys` + arguments of distinct aggregates +
+        // `flag`).
         group_by_keys.extend(
             distinct_aggs
                 .iter()
-                .flat_map(|agg_call| agg_call.input_indcies()),
+                .flat_map(|agg_call| agg_call.input_indices()),
         );
         group_by_keys.push(pos_of_flag);
         let new_group_keys_len = group_by_keys.len();
@@ -100,6 +102,7 @@ impl Rule for DistinctAgg {
         let group_by_agg = LogicalAgg::new(new_agg_calls, group_by_keys, expand);
 
         let mut distinct_agg_index = -1;
+        // The index of `flag` in schema of the middle `LogicalAgg`.
         let pos_of_flag = new_group_keys_len - 1;
         let mut selective_aggs = agg_calls;
         selective_aggs
@@ -115,8 +118,6 @@ impl Rule for DistinctAgg {
                     }
                     _ => {}
                 };
-                // TODO: rethink agg with multiple arguments.
-                // TODO: rethink the data_type.
                 agg_call.inputs = vec![InputRef::new(
                     new_group_keys_len + index,
                     agg_call.return_type.clone(),
@@ -128,6 +129,7 @@ impl Rule for DistinctAgg {
                 } else {
                     distinct_aggs.len() as i32
                 };
+                // `filter_expr` is used to pick up the rows that are really needed by aggregates.
                 let filter_expr = FunctionCall::new(
                     ExprType::Equal,
                     vec![
@@ -136,6 +138,9 @@ impl Rule for DistinctAgg {
                     ],
                 )
                 .unwrap();
+                // As we have offloaded the responsbility of filtering rows to the middle
+                // `LogicalAgg`, we just use the new filter condition to overwrite
+                // the orginal one.
                 agg_call.filter.conjunctions = vec![filter_expr.into()];
 
                 agg_call.distinct = false;
