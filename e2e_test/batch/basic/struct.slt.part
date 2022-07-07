@@ -10,19 +10,19 @@ insert into st values(1,(1,(1,2)));
 statement ok
 insert into st values(1,(1,(1,3)));
 
-query II
+query II rowsort
 select (v2).v2.* from st;
 ----
 1 2
 1 3
 
-query II
+query II rowsort
 select (v2).* from st;
 ----
 1 (1,2)
 1 (1,3)
 
-query II
+query II rowsort
 select * from st;
 ----
 1 (1,(1,2))
@@ -34,7 +34,7 @@ select (v2).v2.v1 from st;
 1
 1
 
-query I
+query I rowsort
 select (v2).v2 from st;
 ----
 (1,2)

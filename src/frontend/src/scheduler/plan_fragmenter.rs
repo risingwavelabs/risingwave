@@ -166,7 +166,7 @@ impl Query {
 pub struct TableScanInfo {
     /// Indicates data distribution and partition of the table.
     ///
-    /// `None` if it's `Single` distributition (system table, distinct agg).
+    /// `None` if the table is not partitioned (system table).
     pub vnode_bitmaps: Option<HashMap<ParallelUnitId, Buffer>>,
 }
 
@@ -394,12 +394,6 @@ impl BatchPlanFragmenter {
                 if let Some(scan_node) = node.as_batch_seq_scan() {
                     let table_desc = scan_node.logical().table_desc();
 
-                    // FIXME: workaround because batch parallel scan on ordered mv may have unorderd
-                    // results. should do a merge sort after parallel scan.
-                    // Tracking issue: <https://github.com/singularity-data/risingwave/issues/3583>
-                    let is_singleton = true;
-                    // let is_singleton = builder.parallelism == 1;
-
                     assert!(
                         builder.table_scan_info.is_none()
                             || builder
@@ -411,13 +405,10 @@ impl BatchPlanFragmenter {
                         "multiple table scan inside a stage"
                     );
                     builder.table_scan_info = Some(TableScanInfo {
-                        vnode_bitmaps: if is_singleton {
-                            None
-                        } else {
-                            Some(vnode_mapping_to_owner_mapping(
-                                table_desc.vnode_mapping.clone().unwrap(),
-                            ))
-                        },
+                        vnode_bitmaps: table_desc
+                            .vnode_mapping
+                            .clone()
+                            .map(vnode_mapping_to_owner_mapping),
                     });
                 }
             }
@@ -505,8 +496,8 @@ mod tests {
             false,
             Rc::new(TableDesc {
                 table_id: 0.into(),
-                pks: vec![],
-                order_keys: vec![],
+                pk: vec![],
+                order_key: vec![],
                 columns: vec![
                     ColumnDesc {
                         data_type: DataType::Int32,
@@ -523,7 +514,7 @@ mod tests {
                         field_descs: vec![],
                     },
                 ],
-                distribution_keys: vec![],
+                distribution_key: vec![],
                 appendonly: false,
                 vnode_mapping: Some(vec![]),
             }),

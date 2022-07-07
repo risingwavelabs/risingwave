@@ -82,7 +82,7 @@ pub(crate) fn gen_create_index_plan(
         .enumerate()
         .map(|(x, y)| (y.name.clone(), x))
         .collect::<HashMap<_, _>>();
-    let arrange_keys = columns
+    let arrange_key = columns
         .iter()
         .map(|x| {
             let x = x.to_string();
@@ -115,7 +115,7 @@ pub(crate) fn gen_create_index_plan(
             scan_node.into(),
             RequiredDist::AnyShard,
             Order::new(
-                arrange_keys
+                arrange_key
                     .iter()
                     .map(|id| FieldOrder::ascending(*id))
                     .collect(),

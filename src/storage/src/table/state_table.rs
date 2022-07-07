@@ -48,10 +48,10 @@ pub type StateTable<S> = StateTableBase<S, CellBasedRowSerializer>;
 /// encoding, using `RowSerializer` for row to cell serializing.
 #[derive(Clone)]
 pub struct StateTableBase<S: StateStore, E: Encoding> {
-    /// buffer key/values
+    /// buffer row operations.
     mem_table: MemTable,
 
-    /// Relation layer
+    /// write into state store.
     storage_table: StorageTableBase<S, E, READ_WRITE>,
 }
 

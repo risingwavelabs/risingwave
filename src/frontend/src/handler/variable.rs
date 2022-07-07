@@ -42,11 +42,7 @@ pub(super) fn handle_show(context: OptimizerContext, variable: Vec<Ident>) -> Re
     }
     let name = &variable[0].value;
     if name.eq_ignore_ascii_case("ALL") {
-        return Err(ErrorCode::NotImplemented(
-            "SHOW ALL is not supported".to_string(),
-            3665.into(),
-        )
-        .into());
+        return handle_show_all(&context);
     }
     let row = Row::new(vec![Some(config_reader.get(name)?)]);
 
@@ -58,6 +54,35 @@ pub(super) fn handle_show(context: OptimizerContext, variable: Vec<Ident>) -> Re
             name.to_ascii_lowercase(),
             TypeOid::Varchar,
         )],
+        true,
+    ))
+}
+
+pub(super) fn handle_show_all(context: &OptimizerContext) -> Result<PgResponse> {
+    let config_reader = context.session_ctx.config();
+
+    let all_variables = config_reader.get_all();
+
+    let rows = all_variables
+        .iter()
+        .map(|info| {
+            Row::new(vec![
+                Some(info.name.to_string()),
+                Some(info.setting.to_string()),
+                Some(info.description.to_string()),
+            ])
+        })
+        .collect();
+
+    Ok(PgResponse::new(
+        StatementType::SHOW_COMMAND,
+        all_variables.len() as i32,
+        rows,
+        vec![
+            PgFieldDescriptor::new("name".to_string(), TypeOid::Varchar),
+            PgFieldDescriptor::new("setting".to_string(), TypeOid::Varchar),
+            PgFieldDescriptor::new("description".to_string(), TypeOid::Varchar),
+        ],
         true,
     ))
 }

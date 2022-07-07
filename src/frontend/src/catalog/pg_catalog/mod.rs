@@ -168,7 +168,7 @@ macro_rules! def_sys_catalog {
                     is_hidden: false,
                 })
                 .collect::<Vec<_>>(),
-            pks: vec![0], // change this when multi pks needed in some system table.
+            pk: vec![0], // change this when multi-column pk is needed in some system table.
             owner: DEFAULT_SUPPER_USER.to_string(),
         }
     };
