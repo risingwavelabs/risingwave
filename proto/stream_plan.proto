@@ -115,7 +115,6 @@ message HashJoinNode {
   repeated uint32 output_indices = 11;
 }
 
-
 message DynamicFilterNode {
   uint32 left_key = 1;
   // Must be one of <, <=, >, >=
