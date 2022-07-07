@@ -155,6 +155,9 @@ impl FunctionCall {
                     .try_collect()?;
                 Ok(DataType::Varchar)
             }
+            ExprType::RegexpMatch => Ok(DataType::List {
+                datatype: Box::new(DataType::Varchar),
+            }),
 
             _ => {
                 // TODO(xiangjin): move variadic functions above as part of `infer_type`, as its
@@ -238,6 +241,7 @@ impl FunctionCall {
         self.inputs.as_ref()
     }
 }
+
 impl Expr for FunctionCall {
     fn return_type(&self) -> DataType {
         self.return_type.clone()

@@ -75,6 +75,7 @@ message ExprNode {
     OCTET_LENGTH = 229;
     BIT_LENGTH = 230;
     OVERLAY = 231;
+    REGEXP_MATCH = 232;
 
     // Boolean comparison
     IS_TRUE = 301;
