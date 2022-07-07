@@ -175,25 +175,12 @@ impl_plan_tree_node_for_binary! { StreamHashJoin }
 
 impl ToStreamProst for StreamHashJoin {
     fn to_stream_prost_body(&self) -> NodeBody {
-        let left_key_indices_prost = self
-            .eq_join_predicate
-            .left_eq_indexes()
+        let left_key_indices = self.eq_join_predicate.left_eq_indexes();
+        let right_key_indices = self.eq_join_predicate.right_eq_indexes();
+        let left_key_indices_prost = left_key_indices.iter().map(|idx| *idx as i32).collect_vec();
+        let right_key_indices_prost = right_key_indices
             .iter()
-            .map(|v| *v as i32)
-            .collect_vec();
-        let right_key_indices_prost = self
-            .eq_join_predicate
-            .right_eq_indexes()
-            .iter()
-            .map(|v| *v as i32)
-            .collect_vec();
-        let left_key_indices = left_key_indices_prost
-            .iter()
-            .map(|idx| *idx as usize)
-            .collect_vec();
-        let right_key_indices = right_key_indices_prost
-            .iter()
-            .map(|idx| *idx as usize)
+            .map(|idx| *idx as i32)
             .collect_vec();
         NodeBody::HashJoin(HashJoinNode {
             join_type: self.logical.join_type() as i32,
@@ -243,24 +230,18 @@ fn infer_internal_table_catalog(input: PlanRef, join_key_indices: Vec<usize>) ->
     let mut columns_fields = schema.fields().to_vec();
 
     // The join degree at the end of internal table.
-    let degree_column_field = Field {
-        data_type: DataType::Int64,
-        name: "_degree".to_string(),
-        sub_fields: vec![],
-        type_name: "".to_string(),
-    };
+    let degree_column_field = Field::with_name(DataType::Int64, "_degree");
     columns_fields.push(degree_column_field);
 
     let mut internal_table_catalog_builder = TableCatalogBuilder::new();
 
-    for (idx, field) in columns_fields.iter().enumerate() {
-        let order_type = if pk_indices.contains(&idx) {
-            Some(OrderType::Ascending)
-        } else {
-            None
-        };
-        internal_table_catalog_builder.add_column_desc_from_field(order_type, field)
-    }
+    columns_fields.iter().for_each(|field| {
+        internal_table_catalog_builder.add_column_desc_from_field_without_order_type(field)
+    });
+
+    pk_indices.iter().for_each(|idx| {
+        internal_table_catalog_builder.add_order_column(*idx, OrderType::Ascending)
+    });
 
     internal_table_catalog_builder.build(dist_keys, append_only)
 }
