@@ -13,9 +13,6 @@
 // limitations under the License.
 
 use risingwave_common::error::{internal_error, Result};
-use risingwave_common::types::DataType;
-use risingwave_expr::expr::expr_binary_nonnull::new_binary_expr;
-use risingwave_expr::expr::InputRefExpression;
 use risingwave_pb::expr::expr_node::Type::*;
 
 use super::*;
@@ -47,19 +44,6 @@ impl ExecutorBuilder for DynamicFilterExecutorBuilder {
             ));
         }
 
-        let condition = new_binary_expr(
-            comparator,
-            DataType::Boolean,
-            Box::new(InputRefExpression::new(
-                source_l.schema().data_types()[key_l].clone(),
-                0,
-            )),
-            Box::new(InputRefExpression::new(
-                source_r.schema().data_types()[0].clone(),
-                1,
-            )),
-        );
-
         let _key = source_l.schema().fields[key_l as usize].data_type();
 
         // TODO: add the tables and backing state store.
@@ -72,7 +56,6 @@ impl ExecutorBuilder for DynamicFilterExecutorBuilder {
             key_l,
             params.pk_indices,
             params.executor_id,
-            condition,
             comparator,
             // keyspace_l: Keyspace::table_root(store.clone(), &TableId { table_id: 0 }),
             // keyspace_r: Keyspace::table_root(store, &right_table_id),

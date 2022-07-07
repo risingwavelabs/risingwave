@@ -22,12 +22,12 @@ use futures::StreamExt;
 use futures_async_stream::try_stream;
 use itertools::Itertools;
 use madsim::collections::HashSet;
-use risingwave_common::array::column::Column;
-use risingwave_common::array::{Array, ArrayImpl, DataChunk, Op, Row, StreamChunk, Vis};
+use risingwave_common::array::{Array, ArrayImpl, DataChunk, Op, Row, StreamChunk};
 use risingwave_common::buffer::{Bitmap, BitmapBuilder};
 use risingwave_common::catalog::Schema;
 use risingwave_common::types::{DataType, Datum, ScalarImpl, ToOwnedDatum};
-use risingwave_expr::expr::BoxedExpression;
+use risingwave_expr::expr::expr_binary_nonnull::new_binary_expr;
+use risingwave_expr::expr::{BoxedExpression, InputRefExpression, LiteralExpression};
 use risingwave_pb::expr::expr_node::Type as ExprNodeType;
 use risingwave_pb::expr::expr_node::Type::*;
 
@@ -44,7 +44,6 @@ pub struct DynamicFilterExecutor {
     key_l: usize,
     pk_indices: PkIndices,
     identity: String,
-    cond: BoxedExpression,
     comparator: ExprNodeType,
     actor_id: u64,
     schema: Schema,
@@ -59,7 +58,6 @@ impl DynamicFilterExecutor {
         key_l: usize,
         pk_indices: PkIndices,
         executor_id: u64,
-        cond: BoxedExpression,
         comparator: ExprNodeType,
         actor_id: u64,
         metrics: Arc<StreamingMetrics>,
@@ -71,7 +69,6 @@ impl DynamicFilterExecutor {
             key_l,
             pk_indices,
             identity: format!("DynamicFilterExecutor {:X}", executor_id),
-            cond,
             comparator,
             actor_id,
             metrics,
@@ -83,8 +80,7 @@ impl DynamicFilterExecutor {
         &self,
         data_chunk: &DataChunk,
         ops: Vec<Op>,
-        prev_epoch_value: &Option<ScalarImpl>,
-        right_data_type: &DataType,
+        condition: Option<BoxedExpression>,
         state: &mut BTreeMap<ScalarImpl, HashSet<Row>>,
     ) -> Result<(Vec<Op>, Bitmap), StreamExecutorError> {
         debug_assert_eq!(ops.len(), data_chunk.cardinality());
@@ -92,21 +88,8 @@ impl DynamicFilterExecutor {
         let mut new_visibility = BitmapBuilder::with_capacity(ops.len());
         let mut last_res = false;
 
-        let left_column = data_chunk.column_at(self.key_l);
-
-        let eval_results = if let Some(right_val) = &prev_epoch_value {
-            let mut eval_columns = Vec::with_capacity(2);
-            eval_columns.push(left_column.clone());
-
-            // TODO: could optimize this - creating a repeated array could be much cheaper.
-            let mut array_builder = right_data_type.create_array_builder(ops.len());
-            for _ in 0..ops.len() {
-                array_builder.append_datum(&Some(right_val.clone()))?;
-            }
-            let right_column = Column::new(Arc::new(array_builder.finish()?));
-            eval_columns.push(right_column);
-            let eval_data_chunk = DataChunk::new(eval_columns, Vis::Compact(ops.len()));
-            Some(self.cond.eval(&eval_data_chunk)?)
+        let eval_results = if let Some(cond) = condition {
+            Some(cond.eval(&data_chunk)?)
         } else {
             None
         };
@@ -242,6 +225,25 @@ impl DynamicFilterExecutor {
 
     #[try_stream(ok = Message, error = StreamExecutorError)]
     async fn into_stream(mut self) {
+        let input_l = self.source_l.take().unwrap();
+        let input_r = self.source_r.take().unwrap();
+        // Derive the dynamic expression
+        let l_data_type = input_l.schema().data_types()[self.key_l].clone();
+        let r_data_type = input_r.schema().data_types()[0].clone();
+        let dynamic_cond = move |literal: Datum| -> Option<BoxedExpression> {
+            literal.map(|scalar| {
+                new_binary_expr(
+                    self.comparator,
+                    DataType::Boolean,
+                    Box::new(InputRefExpression::new(l_data_type.clone(), self.key_l)),
+                    Box::new(LiteralExpression::new(
+                        r_data_type.clone(),
+                        Some(scalar.clone()),
+                    )),
+                )
+            })
+        };
+
         let mut prev_epoch_value: Option<Datum> = None;
         let mut current_epoch_value: Option<Datum> = None;
 
@@ -259,9 +261,6 @@ impl DynamicFilterExecutor {
         //       We could solve it if `ScalarImpl` had a successor/predecessor function.
         let mut state = BTreeMap::<ScalarImpl, HashSet<Row>>::new();
 
-        let input_l = self.source_l.take().unwrap();
-        let input_r = self.source_r.take().unwrap();
-        let right_data_type = input_r.schema().data_types()[0].clone();
         let aligned_stream = barrier_align(
             input_l.execute(),
             input_r.execute(),
@@ -281,13 +280,14 @@ impl DynamicFilterExecutor {
                     let chunk = chunk.compact()?; // Is this unnecessary work?
                     let (data_chunk, ops) = chunk.into_parts();
 
-                    let (new_ops, new_visibility) = self.apply_batch(
-                        &data_chunk,
-                        ops,
-                        &prev_epoch_value.clone().flatten(),
-                        &right_data_type,
-                        &mut state,
-                    )?;
+                    let right_val = prev_epoch_value.clone().flatten();
+
+                    // The condition is `None` if it is always false by virtue of a NULL right
+                    // input, so we save evaluating it on the datachunk
+                    let condition = dynamic_cond(right_val);
+
+                    let (new_ops, new_visibility) =
+                        self.apply_batch(&data_chunk, ops, condition, &mut state)?;
 
                     let (columns, _) = data_chunk.into_parts();
 
