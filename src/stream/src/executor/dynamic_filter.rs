@@ -89,7 +89,7 @@ impl DynamicFilterExecutor {
         let mut last_res = false;
 
         let eval_results = if let Some(cond) = condition {
-            Some(cond.eval(&data_chunk)?)
+            Some(cond.eval(data_chunk)?)
         } else {
             None
         };
@@ -238,7 +238,7 @@ impl DynamicFilterExecutor {
                     Box::new(InputRefExpression::new(l_data_type.clone(), self.key_l)),
                     Box::new(LiteralExpression::new(
                         r_data_type.clone(),
-                        Some(scalar.clone()),
+                        Some(scalar),
                     )),
                 )
             })
