@@ -23,7 +23,6 @@ use prometheus::{
 use risingwave_common::monitor::Print;
 use risingwave_hummock_sdk::HummockSSTableId;
 
-use super::monitor_process;
 use crate::hummock::sstable_store::SstableStoreRef;
 use crate::hummock::{BlockCache, LruCache, Sstable};
 
@@ -380,7 +379,6 @@ impl StateStoreMetrics {
         )
         .unwrap();
 
-        monitor_process(&registry).unwrap();
         Self {
             get_duration,
             get_key_size,

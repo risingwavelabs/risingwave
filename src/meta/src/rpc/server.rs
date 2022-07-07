@@ -21,6 +21,7 @@ use itertools::Itertools;
 use prost::Message;
 use risingwave_common::error::ErrorCode::InternalError;
 use risingwave_common::error::{ErrorCode, Result, RwError};
+use risingwave_common::monitor::process_linux::monitor_process;
 use risingwave_pb::ddl_service::ddl_service_server::DdlServiceServer;
 use risingwave_pb::hummock::hummock_manager_service_server::HummockManagerServiceServer;
 use risingwave_pb::meta::cluster_service_server::ClusterServiceServer;
@@ -291,6 +292,7 @@ pub async fn rpc_serve_with_store<S: MetaStore>(
         Arc::new(CompactionGroupManager::new(env.clone()).await.unwrap());
     let fragment_manager = Arc::new(FragmentManager::new(env.clone()).await.unwrap());
     let meta_metrics = Arc::new(MetaMetrics::new());
+    monitor_process(meta_metrics.registry()).unwrap();
     let compactor_manager = Arc::new(hummock::CompactorManager::new());
 
     let cluster_manager = Arc::new(
