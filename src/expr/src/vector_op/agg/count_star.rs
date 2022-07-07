@@ -49,11 +49,8 @@ impl Aggregator for CountStar {
             .eval(input)?
             .iter()
             .filter(|res| {
-                if let Some(ScalarRefImpl::Bool(v)) = res {
-                    *v
-                } else {
-                    false
-                }
+                res.map(|x| *x.into_scalar_impl().as_bool())
+                    .unwrap_or(false)
             })
             .count();
 
@@ -83,7 +80,7 @@ impl Aggregator for CountStar {
         };
         // The first element continues the same group in `self.result`. The following
         // groups' sizes are simply distance between group start indices. The distance
-        // between last element and `input.cardinality()` is the ongoing group that
+        // between last element and `filter_cnt` is the ongoing group that
         // may continue in following chunks.
         //
         // Since the number of groups in an output chunk is limited, if we reach the limit
@@ -95,11 +92,8 @@ impl Aggregator for CountStar {
             .eval(input)?
             .iter()
             .filter(|res| {
-                if let Some(ScalarRefImpl::Bool(v)) = res {
-                    *v
-                } else {
-                    false
-                }
+                res.map(|x| *x.into_scalar_impl().as_bool())
+                    .unwrap_or(false)
             })
             .count();
         if let Some(first) = groups_iter.next() {

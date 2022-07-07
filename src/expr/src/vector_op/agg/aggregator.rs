@@ -121,6 +121,7 @@ impl AggStateFactory {
             Ok(Box::new(ApproxCountDistinct::new(
                 self.return_type.clone(),
                 self.input_col_idx,
+                self.filter.clone()
             )))
         } else if let Some(input_type) = self.input_type.clone() {
             create_agg_state_unary(

@@ -19,6 +19,7 @@ use risingwave_common::array::*;
 use risingwave_common::error::{ErrorCode, Result};
 use risingwave_common::types::*;
 
+use crate::expr::ExpressionRef;
 use crate::vector_op::agg::aggregator::Aggregator;
 use crate::vector_op::agg::general_sorted_grouper::EqGroups;
 
@@ -37,14 +38,16 @@ pub struct ApproxCountDistinct {
     return_type: DataType,
     input_col_idx: usize,
     registers: [u8; NUM_OF_REGISTERS],
+    filter: ExpressionRef,
 }
 
 impl ApproxCountDistinct {
-    pub fn new(return_type: DataType, input_col_idx: usize) -> Self {
+    pub fn new(return_type: DataType, input_col_idx: usize, filter: ExpressionRef) -> Self {
         Self {
             return_type,
             input_col_idx,
             registers: [0; NUM_OF_REGISTERS],
+            filter,
         }
     }
 
@@ -115,6 +118,19 @@ impl ApproxCountDistinct {
 
         answer as i64
     }
+
+    fn apply_filter_on_row(&self, input: &DataChunk, row_id: usize) -> Result<bool> {
+        let (row, visible) = input.row_at(row_id)?;
+        // SAFETY: when performing approx_count_distinct, the data chunk should already be
+        // compacted.
+        assert!(visible);
+        let filter_res = if let Some(ScalarImpl::Bool(v)) = self.filter.eval_row(&Row::from(row))? {
+            v
+        } else {
+            false
+        };
+        Ok(filter_res)
+    }
 }
 
 impl Aggregator for ApproxCountDistinct {
@@ -123,17 +139,23 @@ impl Aggregator for ApproxCountDistinct {
     }
 
     fn update_with_row(&mut self, input: &DataChunk, row_id: usize) -> Result<()> {
-        let array = input.column_at(self.input_col_idx).array_ref();
-        let datum_ref = array.value_at(row_id);
-        self.add_datum(datum_ref);
-
+        let filter_res = self.apply_filter_on_row(input, row_id)?;
+        if filter_res {
+            let array = input.column_at(self.input_col_idx).array_ref();
+            let datum_ref = array.value_at(row_id);
+            self.add_datum(datum_ref);
+        }
         Ok(())
     }
 
     fn update(&mut self, input: &DataChunk) -> Result<()> {
         let array = input.column_at(self.input_col_idx).array_ref();
-        for datum_ref in array.iter() {
-            self.add_datum(datum_ref);
+        for row_id in 0..array.len() {
+            let filter_res = self.apply_filter_on_row(input, row_id)?;
+            if filter_res {
+                let datum_ref = array.value_at(row_id);
+                self.add_datum(datum_ref);
+            }
         }
         Ok(())
     }
@@ -166,7 +188,7 @@ impl Aggregator for ApproxCountDistinct {
         let mut group_cnt = 0;
         let mut groups_iter = groups.starting_indices().iter().peekable();
         let chunk_offset = groups.chunk_offset();
-        for (i, datum_ref) in array.iter().skip(chunk_offset).enumerate() {
+        for (row_id, (i, datum_ref)) in array.iter().enumerate().skip(chunk_offset).enumerate() {
             // reset state and output result when new group is found
             if groups_iter.peek() == Some(&&i) {
                 groups_iter.next();
@@ -174,9 +196,10 @@ impl Aggregator for ApproxCountDistinct {
                 builder.append(Some(self.calculate_result()))?;
                 self.registers = [0; NUM_OF_REGISTERS];
             }
-
-            self.add_datum(datum_ref);
-
+            let filter_res = self.apply_filter_on_row(input, row_id)?;
+            if filter_res {
+                self.add_datum(datum_ref);
+            }
             // reset state and exit when reach limit
             if groups.is_reach_limit(group_cnt) {
                 self.registers = [0; NUM_OF_REGISTERS];
@@ -196,8 +219,9 @@ mod tests {
     use risingwave_common::array::{
         ArrayBuilder, ArrayBuilderImpl, DataChunk, I32Array, I64ArrayBuilder,
     };
-    use risingwave_common::types::DataType;
+    use risingwave_common::types::{DataType, ScalarImpl};
 
+    use crate::expr::{Expression, LiteralExpression};
     use crate::vector_op::agg::aggregator::Aggregator;
     use crate::vector_op::agg::approx_count_distinct::ApproxCountDistinct;
     use crate::vector_op::agg::EqGroups;
@@ -222,7 +246,13 @@ mod tests {
         let inputs_size: [usize; 3] = [20000, 10000, 5000];
         let inputs_start: [i32; 3] = [0, 20000, 30000];
 
-        let mut agg = ApproxCountDistinct::new(DataType::Int64, 0);
+        let mut agg = ApproxCountDistinct::new(
+            DataType::Int64,
+            0,
+            Arc::from(
+                LiteralExpression::new(DataType::Boolean, Some(ScalarImpl::Bool(true))).boxed(),
+            ),
+        );
         let mut builder = ArrayBuilderImpl::Int64(I64ArrayBuilder::new(3));
 
         for i in 0..3 {
@@ -237,7 +267,13 @@ mod tests {
 
     #[test]
     fn test_update_and_output_with_sorted_groups() {
-        let mut a = ApproxCountDistinct::new(DataType::Int64, 0);
+        let mut a = ApproxCountDistinct::new(
+            DataType::Int64,
+            0,
+            Arc::from(
+                LiteralExpression::new(DataType::Boolean, Some(ScalarImpl::Bool(true))).boxed(),
+            ),
+        );
 
         let data_chunk = generate_data_chunk(30001, 0);
         let mut builder = ArrayBuilderImpl::Int64(I64ArrayBuilder::new(5));
