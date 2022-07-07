@@ -12,6 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+use core::panic;
 use std::time::Duration;
 
 use clap::Parser as ClapParser;
@@ -99,6 +100,9 @@ async fn main() {
     for _ in 0..100 {
         let sql = sql_gen(&mut rng, tables.clone());
         log::info!("Executing: {}", sql);
-        let _ = client.query(sql.as_str(), &[]).await.unwrap();
+        let _ = client
+            .query(sql.as_str(), &[])
+            .await
+            .unwrap_or_else(|e| panic!("Failed to execute query: {}\n{}", e, sql));
     }
 }
