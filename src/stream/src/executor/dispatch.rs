@@ -40,65 +40,100 @@ use crate::task::{ActorId, DispatcherId, SharedContext};
 pub trait Output: Debug + Send + Sync + 'static {
     async fn send(&mut self, message: Message) -> Result<()>;
 
-    fn actor_id(&self) -> ActorId;
+    fn down_actor_id(&self) -> ActorId;
 }
 
 type BoxedOutput = Box<dyn Output>;
 
 /// `LocalOutput` sends data to a local `mpsc::Channel`
 pub struct LocalOutput {
-    actor_id: ActorId,
-
+    up_id_str: String,
+    down_id: ActorId,
     ch: Sender<Message>,
+    metrics: Arc<StreamingMetrics>,
 }
 
 impl Debug for LocalOutput {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.debug_struct("LocalOutput")
-            .field("actor_id", &self.actor_id)
+            .field("down_id", &self.down_id)
             .finish()
     }
 }
 
 impl LocalOutput {
-    pub fn new(actor_id: ActorId, ch: Sender<Message>) -> Self {
-        Self { actor_id, ch }
+    pub fn new(
+        up_id: ActorId,
+        down_id: ActorId,
+        ch: Sender<Message>,
+        metrics: Arc<StreamingMetrics>,
+    ) -> Self {
+        Self {
+            up_id_str: up_id.to_string(),
+            down_id,
+            ch,
+            metrics,
+        }
     }
 }
 
 #[async_trait]
 impl Output for LocalOutput {
     async fn send(&mut self, message: Message) -> Result<()> {
-        self.ch
-            .send(message)
-            .await
-            .map_err(|_| internal_error("failed to send"))?;
+        // if the buffer is full when sending, the sender is backpressured
+        if self.ch.capacity() == 0 {
+            let start_time = minstant::Instant::now();
+            self.ch
+                .send(message)
+                .await
+                .map_err(|_| internal_error("failed to send"))?;
+            self.metrics
+                .actor_output_buffer_blocking_duration_ns
+                .with_label_values(&[&self.up_id_str])
+                .inc_by(start_time.elapsed().as_nanos() as u64);
+        } else {
+            self.ch
+                .send(message)
+                .await
+                .map_err(|_| internal_error("failed to send"))?;
+        }
         Ok(())
     }
 
-    fn actor_id(&self) -> ActorId {
-        self.actor_id
+    fn down_actor_id(&self) -> ActorId {
+        self.down_id
     }
 }
 
 /// `RemoteOutput` forwards data to`ExchangeServiceImpl`
 pub struct RemoteOutput {
-    actor_id: ActorId,
-
+    up_id_str: String,
+    down_id: ActorId,
     ch: Sender<Message>,
+    metrics: Arc<StreamingMetrics>,
 }
 
 impl Debug for RemoteOutput {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.debug_struct("RemoteOutput")
-            .field("actor_id", &self.actor_id)
+            .field("down_id", &self.down_id)
             .finish()
     }
 }
 
 impl RemoteOutput {
-    pub fn new(actor_id: ActorId, ch: Sender<Message>) -> Self {
-        Self { actor_id, ch }
+    pub fn new(
+        up_id: ActorId,
+        down_id: ActorId,
+        ch: Sender<Message>,
+        metrics: Arc<StreamingMetrics>,
+    ) -> Self {
+        Self {
+            up_id_str: up_id.to_string(),
+            down_id,
+            ch,
+            metrics,
+        }
     }
 }
 
@@ -109,32 +144,44 @@ impl Output for RemoteOutput {
             Message::Chunk(chk) => Message::Chunk(chk.compact()?),
             _ => message,
         };
-
-        self.ch
-            .send(message)
-            .await
-            .map_err(|_| internal_error("failed to send"))?;
-
+        // if the buffer is full when sending, the sender is backpressured
+        if self.ch.capacity() == 0 {
+            let start_time = minstant::Instant::now();
+            self.ch
+                .send(message)
+                .await
+                .map_err(|_| internal_error("failed to send"))?;
+            self.metrics
+                .actor_output_buffer_blocking_duration_ns
+                .with_label_values(&[&self.up_id_str])
+                .inc_by(start_time.elapsed().as_nanos() as u64);
+        } else {
+            self.ch
+                .send(message)
+                .await
+                .map_err(|_| internal_error("failed to send"))?;
+        }
         Ok(())
     }
 
-    fn actor_id(&self) -> ActorId {
-        self.actor_id
+    fn down_actor_id(&self) -> ActorId {
+        self.down_id
     }
 }
 
 pub fn new_output(
     context: &SharedContext,
     addr: HostAddr,
-    actor_id: ActorId,
+    up_id: ActorId,
     down_id: ActorId,
+    metrics: Arc<StreamingMetrics>,
 ) -> Result<Box<dyn Output>> {
-    let tx = context.take_sender(&(actor_id, down_id))?;
+    let tx = context.take_sender(&(up_id, down_id))?;
     if is_local_address(&addr, &context.addr) {
         // if this is a local downstream actor
-        Ok(Box::new(LocalOutput::new(down_id, tx)) as Box<dyn Output>)
+        Ok(Box::new(LocalOutput::new(up_id, down_id, tx, metrics)) as Box<dyn Output>)
     } else {
-        Ok(Box::new(RemoteOutput::new(down_id, tx)) as Box<dyn Output>)
+        Ok(Box::new(RemoteOutput::new(up_id, down_id, tx, metrics)) as Box<dyn Output>)
     }
 }
 
@@ -171,7 +218,6 @@ impl DispatchExecutorInner {
                     .actor_out_record_cnt
                     .with_label_values(&[&self.actor_id_str])
                     .inc_by(chunk.cardinality() as _);
-                let start_time = minstant::Instant::now();
                 if self.dispatchers.len() == 1 {
                     // special clone optimization when there is only one downstream dispatcher
                     self.single_inner_mut().dispatch_data(chunk).await?;
@@ -180,23 +226,14 @@ impl DispatchExecutorInner {
                         dispatcher.dispatch_data(chunk.clone()).await?;
                     }
                 }
-                self.metrics
-                    .actor_output_buffer_blocking_duration_ns
-                    .with_label_values(&[&self.actor_id_str])
-                    .inc_by(start_time.elapsed().as_nanos() as u64);
             }
             Message::Barrier(barrier) => {
-                let start_time = minstant::Instant::now();
                 let mutation = barrier.mutation.clone();
                 self.pre_mutate_outputs(&mutation).await?;
                 for dispatcher in &mut self.dispatchers {
                     dispatcher.dispatch_barrier(barrier.clone()).await?;
                 }
                 self.post_mutate_outputs(&mutation).await?;
-                self.metrics
-                    .actor_output_buffer_blocking_duration_ns
-                    .with_label_values(&[&self.actor_id_str])
-                    .inc_by(start_time.elapsed().as_nanos() as u64);
             }
         };
         Ok(())
@@ -231,6 +268,7 @@ impl DispatchExecutorInner {
                                 downstream_addr,
                                 self.actor_id,
                                 down_id,
+                                self.metrics.clone(),
                             )?);
                         }
                         dispatcher.set_outputs(new_outputs)
@@ -253,6 +291,7 @@ impl DispatchExecutorInner {
                                 downstream_addr,
                                 self.actor_id,
                                 down_id,
+                                self.metrics.clone(),
                             )?);
                         }
                         dispatcher.add_outputs(outputs_to_add);
@@ -467,7 +506,7 @@ impl Dispatcher for RoundRobinDataDispatcher {
 
     fn remove_outputs(&mut self, actor_ids: &HashSet<ActorId>) {
         self.outputs
-            .drain_filter(|output| actor_ids.contains(&output.actor_id()))
+            .drain_filter(|output| actor_ids.contains(&output.down_actor_id()))
             .count();
     }
 
@@ -565,7 +604,7 @@ impl Dispatcher for HashDataDispatcher {
                     hash_values.iter().zip_eq(ops).for_each(|(hash, op)| {
                         // get visibility map for every output chunk
                         for (output, vis_map) in self.outputs.iter().zip_eq(vis_maps.iter_mut()) {
-                            vis_map.append(self.hash_mapping[*hash] == output.actor_id());
+                            vis_map.append(self.hash_mapping[*hash] == output.down_actor_id());
                         }
                         // The 'update' message, noted by an UpdateDelete and a successive
                         // UpdateInsert, need to be rewritten to common
@@ -595,7 +634,7 @@ impl Dispatcher for HashDataDispatcher {
                             for (output, vis_map) in self.outputs.iter().zip_eq(vis_maps.iter_mut())
                             {
                                 vis_map.append(
-                                    visible && self.hash_mapping[*hash] == output.actor_id(),
+                                    visible && self.hash_mapping[*hash] == output.down_actor_id(),
                                 );
                             }
                             if !visible {
@@ -648,7 +687,7 @@ impl Dispatcher for HashDataDispatcher {
 
     fn remove_outputs(&mut self, actor_ids: &HashSet<ActorId>) {
         self.outputs
-            .drain_filter(|output| actor_ids.contains(&output.actor_id()))
+            .drain_filter(|output| actor_ids.contains(&output.down_actor_id()))
             .count();
     }
 
@@ -687,7 +726,7 @@ impl BroadcastDispatcher {
     ) -> impl Iterator<Item = (ActorId, BoxedOutput)> {
         outputs
             .into_iter()
-            .map(|output| (output.actor_id(), output))
+            .map(|output| (output.down_actor_id(), output))
     }
 }
 
@@ -780,7 +819,7 @@ impl Dispatcher for SimpleDispatcher {
     }
 
     fn remove_outputs(&mut self, actor_ids: &HashSet<ActorId>) {
-        if actor_ids.contains(&self.output.actor_id()) {
+        if actor_ids.contains(&self.output.down_actor_id()) {
             panic!("cannot remove outputs from SimpleDispatcher");
         }
     }
@@ -831,7 +870,7 @@ mod tests {
             Ok(())
         }
 
-        fn actor_id(&self) -> ActorId {
+        fn down_actor_id(&self) -> ActorId {
             self.actor_id
         }
     }
