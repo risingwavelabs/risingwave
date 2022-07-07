@@ -119,7 +119,7 @@
   logical_plan: |
     LogicalProject { exprs: [Field($0, 1:Int32)] }
       LogicalProject { exprs: [$0] }
-        LogicalAgg { group_keys: [], agg_calls: [min($0)] }
+        LogicalAgg { group_key: [], agg_calls: [min($0)] }
           LogicalProject { exprs: [Field($1, 1:Int32)] }
             LogicalScan { table: t, columns: [id, country, zipcode, rate, _row_id] }
   create_source:
@@ -178,7 +178,7 @@
     select min((t.country).city.address) + max((t.country).city.address) * count(zipcode) from t;
   logical_plan: |
     LogicalProject { exprs: [($0 + ($1 * $2))] }
-      LogicalAgg { group_keys: [], agg_calls: [min($0), max($0), count($1)] }
+      LogicalAgg { group_key: [], agg_calls: [min($0), max($0), count($1)] }
         LogicalProject { exprs: [Field(Field($1, 1:Int32), 0:Int32), $2] }
           LogicalScan { table: t, columns: [id, country, zipcode, rate, _row_id] }
   create_source:
@@ -207,7 +207,7 @@
     select count(1), count((country).city.zipcode) from t where (country).city.address>1;
   logical_plan: |
     LogicalProject { exprs: [$0, $1] }
-      LogicalAgg { group_keys: [], agg_calls: [count($0), count($1)] }
+      LogicalAgg { group_key: [], agg_calls: [count($0), count($1)] }
         LogicalProject { exprs: [1:Int32, Field(Field($1, 1:Int32), 1:Int32)] }
           LogicalFilter { predicate: (Field(Field($1, 1:Int32), 0:Int32) > 1:Int32) }
             LogicalScan { table: t, columns: [id, country, zipcode, rate, _row_id] }

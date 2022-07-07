@@ -1,4 +1,5 @@
-query TTRRRRRRRI
+# scan MV with ORDER BY isn't guaranteed to be ordered
+query TTRRRRRRRI rowsort
 select * from tpch_q1;
 ----
 A F 37474 37569624.64 35676192.0970 37101416.222424 25.3545 25419.2318 0.0509 1478
