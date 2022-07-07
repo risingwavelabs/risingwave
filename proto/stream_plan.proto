@@ -118,7 +118,7 @@ message HashJoinNode {
 message DynamicFilterNode {
   uint32 left_key = 1;
   // Must be one of <, <=, >, >=
-  expr.ExprNode condition = 3;
+  expr.ExprNode condition = 2;
   // Used for internal table states.
   // catalog.Table left_table = 4;
   // uint32 dist_key_l = 8;
