@@ -33,6 +33,12 @@ pub struct ProcessCollector {
     rss: IntGauge,
 }
 
+impl Default for ProcessCollector {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl ProcessCollector {
     pub fn new() -> Self {
         let mut descs = Vec::new();
