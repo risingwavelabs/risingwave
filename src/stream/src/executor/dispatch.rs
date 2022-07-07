@@ -207,8 +207,8 @@ pub struct DispatchExecutor {
 
 struct DispatchExecutorInner {
     dispatchers: Vec<DispatcherImpl>,
-    up_id_str: String,
-    down_id: u32,
+    actor_id: ActorId,
+    actor_id_str: String,
     context: Arc<SharedContext>,
     metrics: Arc<StreamingMetrics>,
 }
@@ -228,7 +228,7 @@ impl DispatchExecutorInner {
             Message::Chunk(chunk) => {
                 self.metrics
                     .actor_out_record_cnt
-                    .with_label_values(&[&self.up_id_str])
+                    .with_label_values(&[&self.actor_id_str])
                     .inc_by(chunk.cardinality() as _);
 
                 if self.dispatchers.len() == 1 {
@@ -262,11 +262,11 @@ impl DispatchExecutorInner {
             Mutation::UpdateOutputs(updates) => {
                 for dispatcher in &mut self.dispatchers {
                     if let Some((_, actor_infos)) =
-                        updates.get_key_value(&(self.down_id, dispatcher.get_dispatcher_id()))
+                        updates.get_key_value(&(self.actor_id, dispatcher.get_dispatcher_id()))
                     {
                         let mut new_outputs = vec![];
 
-                        let actor_id = self.down_id;
+                        let actor_id = self.actor_id;
                         // delete the old local connections in both local and remote pools;
                         self.context.retain(|&(up_id, down_id)| {
                             up_id != actor_id
@@ -279,7 +279,7 @@ impl DispatchExecutorInner {
                             new_outputs.push(new_output(
                                 &self.context,
                                 downstream_addr,
-                                self.down_id,
+                                self.actor_id,
                                 down_id,
                                 self.metrics.clone(),
                             )?);
@@ -293,7 +293,7 @@ impl DispatchExecutorInner {
                 for dispatcher in &mut self.dispatchers {
                     if let Some(downstream_actor_infos) = adds
                         .map
-                        .get(&(self.down_id, dispatcher.get_dispatcher_id()))
+                        .get(&(self.actor_id, dispatcher.get_dispatcher_id()))
                     {
                         let mut outputs_to_add = Vec::with_capacity(downstream_actor_infos.len());
                         for downstream_actor_info in downstream_actor_infos {
@@ -302,7 +302,7 @@ impl DispatchExecutorInner {
                             outputs_to_add.push(new_output(
                                 &self.context,
                                 downstream_addr,
-                                self.down_id,
+                                self.actor_id,
                                 down_id,
                                 self.metrics.clone(),
                             )?);
@@ -322,7 +322,7 @@ impl DispatchExecutorInner {
     async fn post_mutate_outputs(&mut self, mutation: &Option<Arc<Mutation>>) -> Result<()> {
         if let Some(Mutation::Stop(stops)) = mutation.as_deref() {
             // Remove outputs only if this actor itself is not to be stopped.
-            if !stops.contains(&self.down_id) {
+            if !stops.contains(&self.actor_id) {
                 for dispatcher in &mut self.dispatchers {
                     dispatcher.remove_outputs(stops);
                 }
@@ -345,8 +345,8 @@ impl DispatchExecutor {
             input,
             inner: DispatchExecutorInner {
                 dispatchers,
-                down_id: actor_id,
-                up_id_str: actor_id.to_string(),
+                actor_id,
+                actor_id_str: actor_id.to_string(),
                 context,
                 metrics,
             },
