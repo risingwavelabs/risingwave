@@ -14,7 +14,6 @@
 
 use std::collections::HashMap;
 use std::future::Future;
-use std::sync::Arc;
 
 use itertools::Itertools;
 use risingwave_hummock_sdk::compaction_group::StateTableId;
@@ -28,10 +27,10 @@ use crate::hummock::{CachePolicy, HummockResult, SSTableBuilder};
 
 pub type KeyValueGroupId = u64;
 
+// TODO: decide whether we still need this.
 /// [`KeyValueGroupingImpl`] defines strategies to group key values
 #[derive(Clone)]
 pub enum KeyValueGroupingImpl {
-    VirtualNode(VirtualNodeGrouping),
     CompactionGroup(CompactionGroupGrouping),
 }
 
@@ -42,7 +41,6 @@ pub trait KeyValueGrouping {
 impl KeyValueGrouping for KeyValueGroupingImpl {
     fn group(&self, full_key: &FullKey<&[u8]>, value: &HummockValue<&[u8]>) -> KeyValueGroupId {
         match self {
-            KeyValueGroupingImpl::VirtualNode(grouping) => grouping.group(full_key, value),
             KeyValueGroupingImpl::CompactionGroup(grouping) => grouping.group(full_key, value),
         }
     }
@@ -72,35 +70,7 @@ impl KeyValueGrouping for CompactionGroupGrouping {
     }
 }
 
-/// Groups key value by virtual node
-#[derive(Clone)]
-pub struct VirtualNodeGrouping {
-    vnode2unit: Arc<HashMap<u32, Vec<u32>>>,
-}
-
-impl VirtualNodeGrouping {
-    pub fn new(vnode2unit: Arc<HashMap<u32, Vec<u32>>>) -> Self {
-        VirtualNodeGrouping { vnode2unit }
-    }
-}
-
-impl KeyValueGrouping for VirtualNodeGrouping {
-    fn group(&self, full_key: &FullKey<&[u8]>, value: &HummockValue<&[u8]>) -> KeyValueGroupId {
-        let group = if let Some(table_id) = get_table_id(full_key.inner()) {
-            self.vnode2unit.get(&table_id).map(|mapping| {
-                let idx = match value {
-                    HummockValue::Put(meta, _) => meta.vnode,
-                    HummockValue::Delete(meta) => meta.vnode,
-                };
-                mapping[idx as usize] as u64
-            })
-        } else {
-            None
-        };
-        group.unwrap_or(u64::MAX)
-    }
-}
-
+// TODO: decide whether we still need this.
 /// A wrapper for [`CapacitySplitTableBuilder`] which automatically split key-value pairs into
 /// multiple `SSTables`, based on [`KeyValueGroupingImpl`].
 pub struct GroupedSstableBuilder<B, G: KeyValueGrouping> {
@@ -183,13 +153,10 @@ mod tests {
     use std::sync::atomic::AtomicU64;
     use std::sync::atomic::Ordering::SeqCst;
 
-    use risingwave_common::types::VirtualNode;
-
     use super::*;
     use crate::hummock::iterator::test_utils::mock_sstable_store;
     use crate::hummock::sstable::utils::CompressionAlgorithm;
     use crate::hummock::{SSTableBuilderOptions, DEFAULT_RESTART_INTERVAL};
-    use crate::storage_value::ValueMeta;
 
     #[tokio::test]
     async fn test_compaction_group_grouping() {
@@ -252,119 +219,5 @@ mod tests {
         builder.seal_current();
         let results = builder.finish();
         assert_eq!(results.len(), 2);
-    }
-
-    #[tokio::test]
-    async fn test_virtual_node_grouping() {
-        let next_id = AtomicU64::new(1001);
-        let block_size = 1 << 10;
-        let table_capacity = 4 * block_size;
-        let get_id_and_builder = || async {
-            Ok(SSTableBuilder::new(
-                next_id.fetch_add(1, SeqCst),
-                SSTableBuilderOptions {
-                    capacity: table_capacity,
-                    block_capacity: block_size,
-                    restart_interval: DEFAULT_RESTART_INTERVAL,
-                    bloom_false_positive: 0.1,
-                    compression_algorithm: CompressionAlgorithm::None,
-                },
-            ))
-        };
-        let table_id = 1u32;
-        let vnode_number = 10u32;
-        let parallel_unit_number = 3u32;
-        // See Keyspace::table_root
-        let magic_prefix = b't';
-        let vnode2unit = Arc::new(HashMap::from([(
-            table_id,
-            { 0..vnode_number }
-                .into_iter()
-                .map(|i| i % parallel_unit_number)
-                .collect_vec(),
-        )]));
-
-        // Test < parallel_unit_number
-        let grouping = KeyValueGroupingImpl::VirtualNode(VirtualNodeGrouping::new(vnode2unit));
-        let mut builder = GroupedSstableBuilder::new(
-            get_id_and_builder,
-            grouping.clone(),
-            CachePolicy::Disable,
-            mock_sstable_store(),
-        );
-        for i in 0..2 {
-            // key value matches table and mapping
-            builder
-                .add_full_key(
-                    FullKey::from_user_key(
-                        [&[magic_prefix], table_id.to_be_bytes().as_slice()]
-                            .concat()
-                            .to_vec(),
-                        (table_capacity - i) as u64,
-                    )
-                    .as_slice(),
-                    HummockValue::Put(ValueMeta::with_vnode(i as VirtualNode), b"value"),
-                    false,
-                )
-                .await
-                .unwrap();
-        }
-        builder.seal_current();
-        let results = builder.finish();
-        assert_eq!(results.len(), 2);
-        assert!(results.len() < parallel_unit_number as usize);
-
-        // Test > parallel_unit_number
-        let mut builder = GroupedSstableBuilder::new(
-            get_id_and_builder,
-            grouping.clone(),
-            CachePolicy::Disable,
-            mock_sstable_store(),
-        );
-        for i in 0..10 {
-            // key value matches table and mapping
-            builder
-                .add_full_key(
-                    FullKey::from_user_key(
-                        [&[magic_prefix], table_id.to_be_bytes().as_slice()]
-                            .concat()
-                            .to_vec(),
-                        (table_capacity - i) as u64,
-                    )
-                    .as_slice(),
-                    HummockValue::Put(ValueMeta::with_vnode(i as VirtualNode), b"value"),
-                    false,
-                )
-                .await
-                .unwrap();
-        }
-        builder.seal_current();
-        let results = builder.finish();
-        assert_eq!(results.len(), parallel_unit_number as usize);
-
-        // Test no matching table id
-        let mut builder = GroupedSstableBuilder::new(
-            get_id_and_builder,
-            grouping.clone(),
-            CachePolicy::Disable,
-            mock_sstable_store(),
-        );
-        builder
-            .add_full_key(
-                FullKey::from_user_key(
-                    [&[magic_prefix], (2u32).to_be_bytes().as_slice()]
-                        .concat()
-                        .to_vec(),
-                    table_capacity as u64,
-                )
-                .as_slice(),
-                HummockValue::Put(ValueMeta::with_vnode(0 as VirtualNode), b"value"),
-                false,
-            )
-            .await
-            .unwrap();
-        builder.seal_current();
-        let results = builder.finish();
-        assert_eq!(results.len(), 1usize);
     }
 }

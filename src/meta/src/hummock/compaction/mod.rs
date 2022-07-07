@@ -151,7 +151,6 @@ impl CompactStatus {
             gc_delete_keys: target_level_id as usize == self.level_handlers.len() - 1
                 && select_level_id > 0,
             task_status: false,
-            vnode_mappings: vec![],
             compaction_group_id,
             existing_table_ids: vec![],
             compression_algorithm,
