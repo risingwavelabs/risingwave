@@ -529,8 +529,8 @@ mod tests {
             false,
             Rc::new(TableDesc {
                 table_id: 0.into(),
-                pks: vec![],
-                order_keys: vec![],
+                pk: vec![],
+                order_key: vec![],
                 columns: vec![
                     ColumnDesc {
                         data_type: DataType::Int32,
@@ -547,7 +547,7 @@ mod tests {
                         field_descs: vec![],
                     },
                 ],
-                distribution_keys: vec![],
+                distribution_key: vec![],
                 appendonly: false,
                 vnode_mapping: Some(vec![]),
             }),

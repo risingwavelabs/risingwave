@@ -84,7 +84,7 @@ impl ToStreamProst for StreamLocalSimpleAgg {
                 .iter()
                 .map(PlanAggCall::to_protobuf)
                 .collect(),
-            distribution_keys: self
+            distribution_key: self
                 .base
                 .dist
                 .dist_column_indices()

@@ -309,7 +309,7 @@ mod test {
     use risingwave_pb::stream_plan::{MaterializeNode, StreamActor, StreamNode, TopNNode};
 
     use super::*;
-    use crate::cluster::{ClusterManager, DEFAULT_WORK_NODE_PARALLEL_DEGREE};
+    use crate::cluster::ClusterManager;
     use crate::manager::MetaSrvEnv;
 
     #[tokio::test]
@@ -361,7 +361,7 @@ mod test {
             })
             .collect_vec();
 
-        let parallel_degree = DEFAULT_WORK_NODE_PARALLEL_DEGREE - 1;
+        let parallel_degree = env.opts.unsafe_worker_node_parallel_degree - 1;
         let mut normal_fragments = (6..8u32)
             .map(|fragment_id| {
                 let actors = (actor_id..actor_id + node_count * parallel_degree as u32)
