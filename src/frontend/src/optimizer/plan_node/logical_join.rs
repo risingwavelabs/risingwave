@@ -674,13 +674,19 @@ impl ToBatch for LogicalJoin {
         let right = self.right().to_batch()?;
         let logical_join = self.clone_with_left_right(left, right);
 
-        let lookup_join = false;
+        let use_lookup_join = self
+            .base
+            .ctx
+            .inner()
+            .session_ctx
+            .config()
+            .get_use_lookup_join();
 
         if predicate.has_eq() {
             // Convert to Hash Join for equal joins
             // For inner joins, pull non-equal conditions to a filter operator on top of it
             let pull_filter = self.join_type == JoinType::Inner && predicate.has_non_eq();
-            if lookup_join {
+            if use_lookup_join {
                 if self.right.as_ref().node_type() != PlanNodeType::LogicalScan {
                     return Err(RwError::from(ErrorCode::InternalError(
                         "LookupJoin only supports basic tables on the right hand side".to_string(),
