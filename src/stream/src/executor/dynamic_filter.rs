@@ -112,10 +112,8 @@ impl DynamicFilterExecutor {
         };
 
         for (idx, (row, op)) in data_chunk.rows().zip_eq(ops.iter()).enumerate() {
-            // TODO: convert this to a batch operation?
             let left_val = row.value_at(self.key_l).to_owned_datum();
 
-            // Evaluate the condition and determine if it should be forwarded
             if let Some(array) = &eval_results {
                 if let ArrayImpl::Bool(results) = &**array {
                     let res = results.value_at(idx).unwrap_or(false);
@@ -323,7 +321,6 @@ impl DynamicFilterExecutor {
                 }
                 AlignedMessage::Barrier(barrier) => {
                     // Flush the difference between the `prev_value` and `current_value`
-                    // TODO: refactor into fn `flush_range`
                     let curr: Datum = current_epoch_value.clone().flatten();
                     let prev: Datum = prev_epoch_value.flatten();
                     if prev != curr {
