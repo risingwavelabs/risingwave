@@ -443,7 +443,8 @@ impl LocalVersionManager {
             .await;
         tracing::trace!(
             "sync epoch {} finished. Task size {}",
-            epoch, task_write_batch_size
+            epoch,
+            task_write_batch_size
         );
         if let Some(conflict_detector) = self.write_conflict_detector.as_ref() {
             conflict_detector.archive_epoch(epoch);
