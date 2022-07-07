@@ -15,7 +15,6 @@
 use std::fmt;
 
 use async_trait::async_trait;
-
 use itertools::{join, Itertools};
 use mysql_async::prelude::*;
 use mysql_async::*;
@@ -178,6 +177,18 @@ impl Sink for MySQLSink {
         transaction.commit().await?;
         drop(conn);
         Ok(())
+    }
+
+    async fn begin_epoch(&mut self, epoch: u64) -> Result<()> {
+        todo!()
+    }
+
+    async fn commit(&mut self) -> Result<()> {
+        todo!()
+    }
+
+    async fn abort(&mut self) -> Result<()> {
+        todo!()
     }
 }
 

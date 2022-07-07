@@ -4236,6 +4236,7 @@ dependencies = [
  "static_assertions",
  "tempfile",
  "thiserror",
+ "tokio-retry",
  "tokio-stream",
  "tokio-util",
  "twox-hash",

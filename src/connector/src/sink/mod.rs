@@ -12,18 +12,15 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-#![feature(box_patterns)]
-
 pub mod kafka;
 pub mod mysql;
 pub mod redis;
 
 use std::collections::HashMap;
 
-
 use async_trait::async_trait;
 use enum_as_inner::EnumAsInner;
-use risingwave_common::array::{StreamChunk};
+use risingwave_common::array::StreamChunk;
 use risingwave_common::catalog::Schema;
 use risingwave_common::error::{ErrorCode, Result as RwResult, RwError};
 use thiserror::Error;
@@ -35,6 +32,9 @@ use crate::sink::redis::{RedisConfig, RedisSink};
 #[async_trait]
 pub trait Sink {
     async fn write_batch(&mut self, chunk: StreamChunk, schema: &Schema) -> Result<()>;
+    async fn begin_epoch(&mut self, epoch: u64) -> Result<()>;
+    async fn commit(&mut self) -> Result<()>;
+    async fn abort(&mut self) -> Result<()>;
 }
 
 #[derive(Clone, Debug, EnumAsInner)]
@@ -83,6 +83,30 @@ impl Sink for SinkImpl {
             SinkImpl::MySQL(sink) => sink.write_batch(chunk, schema).await,
             SinkImpl::Redis(sink) => sink.write_batch(chunk, schema).await,
             SinkImpl::Kafka(sink) => sink.write_batch(chunk, schema).await,
+        }
+    }
+
+    async fn begin_epoch(&mut self, epoch: u64) -> Result<()> {
+        match self {
+            SinkImpl::MySQL(sink) => sink.begin_epoch(epoch).await,
+            SinkImpl::Redis(sink) => sink.begin_epoch(epoch).await,
+            SinkImpl::Kafka(sink) => sink.begin_epoch(epoch).await,
+        }
+    }
+
+    async fn commit(&mut self) -> Result<()> {
+        match self {
+            SinkImpl::MySQL(sink) => sink.commit().await,
+            SinkImpl::Redis(sink) => sink.commit().await,
+            SinkImpl::Kafka(sink) => sink.commit().await,
+        }
+    }
+
+    async fn abort(&mut self) -> Result<()> {
+        match self {
+            SinkImpl::MySQL(sink) => sink.abort().await,
+            SinkImpl::Redis(sink) => sink.abort().await,
+            SinkImpl::Kafka(sink) => sink.abort().await,
         }
     }
 }

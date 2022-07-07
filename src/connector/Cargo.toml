@@ -53,6 +53,7 @@ static_assertions = "1"
 tempfile = "3"
 thiserror = "1"
 tokio = { version = "=0.2.0-alpha.3", package = "madsim-tokio", features = ["rt", "rt-multi-thread", "sync", "macros", "time", "signal", "fs"] }
+tokio-retry = "0.3"
 tokio-stream = "0.1"
 tokio-util = { version = "0.7", features = ["codec", "io"] }
 tonic = { version = "=0.2.0-alpha.3", package = "madsim-tonic" }

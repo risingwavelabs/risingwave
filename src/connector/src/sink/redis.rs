@@ -34,4 +34,16 @@ impl Sink for RedisSink {
     async fn write_batch(&mut self, _chunk: StreamChunk, _schema: &Schema) -> Result<()> {
         todo!();
     }
+
+    async fn begin_epoch(&mut self, epoch: u64) -> Result<()> {
+        todo!()
+    }
+
+    async fn commit(&mut self) -> Result<()> {
+        todo!()
+    }
+
+    async fn abort(&mut self) -> Result<()> {
+        todo!()
+    }
 }
