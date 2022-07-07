@@ -92,7 +92,6 @@ impl Binder {
                         })
                         .try_collect()?,
                 );
-                log::warn!("[rc] order_by: {:?}", order_by);
                 return Ok(ExprImpl::AggCall(Box::new(AggCall::new(
                     kind, inputs, f.distinct, order_by, filter,
                 )?)));
