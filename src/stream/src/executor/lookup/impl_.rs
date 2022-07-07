@@ -62,7 +62,7 @@ pub struct LookupExecutorParams<S: StateStore> {
     /// * The only element is the order rule for `a`, which is the join key. Join keys should
     ///   always come first.
     ///
-    /// For the MV pks, they will only be contained in `arrangement_col_descs`, without being part
+    /// For the MV pk, they will only be contained in `arrangement_col_descs`, without being part
     /// of this `arrangement_order_rules`.
     pub arrangement_order_rules: Vec<OrderPair>,
 

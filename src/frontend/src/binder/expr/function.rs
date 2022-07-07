@@ -121,6 +121,7 @@ impl Binder {
                 "lower" => ExprType::Lower,
                 "trim" => ExprType::Trim,
                 "replace" => ExprType::Replace,
+                "overlay" => ExprType::Overlay,
                 "position" => ExprType::Position,
                 "ltrim" => ExprType::Ltrim,
                 "rtrim" => ExprType::Rtrim,
@@ -138,6 +139,7 @@ impl Binder {
                 "ascii" => ExprType::Ascii,
                 "octet_length" => ExprType::OctetLength,
                 "bit_length" => ExprType::BitLength,
+                "regexp_match" => ExprType::RegexpMatch,
                 // special
                 "pg_typeof" if inputs.len() == 1 => {
                     let input = &inputs[0];
