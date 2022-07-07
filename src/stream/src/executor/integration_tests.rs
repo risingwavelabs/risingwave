@@ -52,7 +52,7 @@ async fn test_merger_sum_aggr() {
             ActorContext::create(),
             0,
             0,
-            metrics.clone(),
+            metrics,
         );
         let append_only = false;
         // for the local aggregator, we need two states: row count and sum
