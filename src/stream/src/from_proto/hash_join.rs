@@ -49,7 +49,7 @@ impl ExecutorBuilder for HashJoinExecutorBuilder {
                 .map(|key| *key as usize)
                 .collect::<Vec<_>>(),
             table_l
-                .distribution_keys
+                .distribution_key
                 .iter()
                 .map(|key| *key as usize)
                 .collect::<Vec<_>>(),
@@ -60,7 +60,7 @@ impl ExecutorBuilder for HashJoinExecutorBuilder {
                 .map(|key| *key as usize)
                 .collect::<Vec<_>>(),
             table_r
-                .distribution_keys
+                .distribution_key
                 .iter()
                 .map(|key| *key as usize)
                 .collect::<Vec<_>>(),

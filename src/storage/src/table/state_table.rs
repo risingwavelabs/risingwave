@@ -237,7 +237,7 @@ impl<S: StateStore> StateTable<S> {
             .map(|col| col.column_desc.as_ref().unwrap().into())
             .collect();
         let order_types = table_catalog
-            .order_keys
+            .order_key
             .iter()
             .map(|col_order| {
                 OrderType::from_prost(
@@ -246,12 +246,12 @@ impl<S: StateStore> StateTable<S> {
             })
             .collect();
         let dist_key_indices = table_catalog
-            .distribution_keys
+            .distribution_key
             .iter()
             .map(|dist_index| *dist_index as usize)
             .collect();
         let pk_indices = table_catalog
-            .order_keys
+            .order_key
             .iter()
             .map(|col_order| col_order.index as usize)
             .collect();
