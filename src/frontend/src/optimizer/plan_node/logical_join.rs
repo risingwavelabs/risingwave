@@ -21,14 +21,15 @@ use risingwave_common::error::{ErrorCode, Result, RwError};
 use risingwave_pb::plan_common::JoinType;
 
 use super::{
-    BatchProject, ColPrunable, CollectInputRef, LogicalProject, PlanBase, PlanRef,
+    BatchProject, ColPrunable, CollectInputRef, LogicalProject, PlanBase, PlanNodeType, PlanRef,
     PlanTreeNodeBinary, PlanTreeNodeUnary, PredicatePushdown, StreamHashJoin, StreamProject,
     ToBatch, ToStream,
 };
+use crate::catalog::ColumnId;
 use crate::expr::{ExprImpl, ExprType};
 use crate::optimizer::plan_node::{
-    BatchFilter, BatchHashJoin, BatchNestedLoopJoin, EqJoinPredicate, LogicalFilter,
-    StreamDynamicFilter, StreamFilter,
+    BatchFilter, BatchHashJoin, BatchLookupJoin, BatchNestedLoopJoin, EqJoinPredicate,
+    LogicalFilter, StreamDynamicFilter, StreamFilter,
 };
 use crate::optimizer::property::{Distribution, RequiredDist};
 use crate::utils::{ColIndexMapping, Condition};
@@ -673,11 +674,32 @@ impl ToBatch for LogicalJoin {
         let right = self.right().to_batch()?;
         let logical_join = self.clone_with_left_right(left, right);
 
+        let lookup_join = false;
+
         if predicate.has_eq() {
             // Convert to Hash Join for equal joins
             // For inner joins, pull non-equal conditions to a filter operator on top of it
             let pull_filter = self.join_type == JoinType::Inner && predicate.has_non_eq();
-            if pull_filter {
+            if lookup_join {
+                if self.right.as_ref().node_type() != PlanNodeType::LogicalScan {
+                    return Err(RwError::from(ErrorCode::InternalError(
+                        "LookupJoin only supports basic tables on the right hand side".to_string(),
+                    )));
+                }
+
+                let logical_scan = self.right.as_logical_scan().unwrap();
+                let table_desc = logical_scan.table_desc().clone();
+                let right_column_ids = logical_scan
+                    .output_column_ids()
+                    .iter()
+                    .map(ColumnId::get_id)
+                    .collect();
+
+                Ok(
+                    BatchLookupJoin::new(logical_join, predicate, table_desc, right_column_ids)
+                        .into(),
+                )
+            } else if pull_filter {
                 let new_output_indices = logical_join.output_indices.clone();
                 let new_internal_column_num = logical_join.internal_column_num();
                 let default_indices = (0..new_internal_column_num).collect::<Vec<_>>();
