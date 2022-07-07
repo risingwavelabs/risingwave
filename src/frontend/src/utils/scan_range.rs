@@ -132,7 +132,7 @@ mod tests {
             Some(ScalarImpl::from(114)),
             Some(ScalarImpl::from(514)),
         ])
-        .hash_by_indices(&vec![0, 1], &CRC32FastBuilder {})
+        .hash_by_indices(&[0, 1], &CRC32FastBuilder {})
         .to_vnode();
         assert_eq!(scan_range.try_compute_vnode(&dist_key, &pk), Some(vnode));
     }
@@ -158,7 +158,7 @@ mod tests {
             Some(ScalarImpl::from(514)),
             Some(ScalarImpl::from(114514)),
         ])
-        .hash_by_indices(&vec![2, 1], &CRC32FastBuilder {})
+        .hash_by_indices(&[2, 1], &CRC32FastBuilder {})
         .to_vnode();
         assert_eq!(scan_range.try_compute_vnode(&dist_key, &pk), Some(vnode));
     }

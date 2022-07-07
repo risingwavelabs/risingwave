@@ -417,7 +417,7 @@ impl BatchPlanFragmenter {
                                 // It can be derived if the value of the distribution key is already
                                 // known.
                                 match scan_range.try_compute_vnode(
-                                    &table_desc.distribution_keys,
+                                    &table_desc.distribution_key,
                                     &table_desc.order_column_indices(),
                                 ) {
                                     // scan all partitions
