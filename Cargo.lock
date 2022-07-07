@@ -4044,6 +4044,7 @@ dependencies = [
  "hyper",
  "itertools",
  "lazy_static",
+ "libc",
  "log",
  "lru 0.7.6 (git+https://github.com/singularity-data/lru-rs.git?rev=e0e9ddaf8e4a51c244a03676734437e68a336b30)",
  "madsim",
