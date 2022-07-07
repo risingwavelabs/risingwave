@@ -21,7 +21,21 @@ use crate::expr::{ExprType, ExprVisitor, FunctionCall, InputRef, Literal};
 use crate::optimizer::plan_node::{LogicalAgg, LogicalExpand};
 use crate::optimizer::PlanRef;
 
-/// Use `Expand` to transform distinct aggregates.
+/// Transform distinct aggregates to LogicalAgg -> LogicalAgg -> Expand -> Input.
+///
+/// Here is an example:
+///
+/// `LogicalAgg(group by(0, 1), count($2) filter(where $2 < 100), sum(distinct $3))`
+///
+/// -> `Input(len of schema: 4)`
+///
+/// will be transform to
+///
+/// `LogicalAgg(group by(0, 1), sum($4) filter(where $3 = 1), sum($5) filter(where $3 = 0))`
+///
+/// -> `LogicalAgg(group by(0, 1, 3, 4), count($2) filter(where $2 < 100), sum($3))`
+///
+/// -> `Expand(column_subsets: [[0, 1, 3], [0, 1, 2, 2]])` -> `Input(len of schema: 4)`
 pub struct DistinctAgg {}
 impl Rule for DistinctAgg {
     fn apply(&self, plan: PlanRef) -> Option<PlanRef> {
