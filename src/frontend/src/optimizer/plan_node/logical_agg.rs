@@ -124,6 +124,10 @@ impl PlanAggCall {
             filter: Condition::true_cond(),
         }
     }
+
+    pub fn input_indcies(&self) -> Vec<usize> {
+        self.inputs.iter().map(|input| input.index()).collect()
+    }
 }
 
 /// `LogicalAgg` groups input data by their group keys and computes aggregation functions.
