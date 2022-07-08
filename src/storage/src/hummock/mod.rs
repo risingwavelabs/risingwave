@@ -187,14 +187,10 @@ impl HummockStorage {
         &self.local_version_manager
     }
 
-    fn get_compaction_group_id(&self, table_id: TableId) -> CompactionGroupId {
+    async fn get_compaction_group_id(&self, table_id: TableId) -> HummockResult<CompactionGroupId> {
         self.compaction_group_client
             .get_compaction_group_id(table_id.table_id)
-            .unwrap_or_else(|| panic!("{} matches a compaction group", table_id.table_id))
-    }
-
-    pub async fn update_compaction_group_cache(&self) -> HummockResult<()> {
-        self.compaction_group_client.update().await
+            .await
     }
 }
 

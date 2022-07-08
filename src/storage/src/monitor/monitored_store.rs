@@ -21,7 +21,7 @@ use risingwave_hummock_sdk::LocalSstableInfo;
 use tracing::error;
 
 use super::StateStoreMetrics;
-use crate::error::{StorageError, StorageResult};
+use crate::error::StorageResult;
 use crate::hummock::local_version_manager::LocalVersionManager;
 use crate::hummock::sstable_store::SstableStoreRef;
 use crate::hummock::HummockStorage;
@@ -274,14 +274,6 @@ impl MonitoredStateStore<HummockStorage> {
 
     pub fn local_version_manager(&self) -> Arc<LocalVersionManager> {
         self.inner.local_version_manager().clone()
-    }
-
-    // Note(bugen): should we use notification service for this?
-    pub async fn update_compaction_group_cache(&self) -> StorageResult<()> {
-        self.inner
-            .update_compaction_group_cache()
-            .await
-            .map_err(StorageError::Hummock)
     }
 }
 
