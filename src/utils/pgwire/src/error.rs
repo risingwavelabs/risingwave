@@ -12,15 +12,32 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+use std::io::Error as IoError;
+
 use thiserror::Error;
+
+use crate::pg_server::BoxedError;
 
 /// Error type used in pgwire crates.
 #[derive(Error, Debug)]
 pub enum PsqlError {
     #[error("Encode error {0}.")]
     CancelError(String),
+
     #[error("{0}")]
     UnrecognizedParamError(String),
+
+    #[error("{0}")]
+    IoError(IoError),
+
+    // The difference between IoError and ReadMsgIoError is that ReadMsgIoError needed to report
+    // to users but IoError does not.
+    #[error("{0}")]
+    ReadMsgIoError(IoError),
+
+    // InternalError return from frontend(comes from internal syste)m, it's wrapper of RwError.
+    #[error("{0}")]
+    InternalError(BoxedError),
 }
 
 impl PsqlError {
