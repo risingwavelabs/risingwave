@@ -21,8 +21,8 @@ use risingwave_pb::batch_plan::LookupJoinNode;
 
 use crate::expr::Expr;
 use crate::optimizer::plan_node::{
-    EqJoinPredicate, LogicalJoin, PlanBase, PlanTreeNodeBinary, ToBatchProst, ToDistributedBatch,
-    ToLocalBatch,
+    EqJoinPredicate, LogicalJoin, PlanBase, PlanTreeNodeBinary, PlanTreeNodeUnary, ToBatchProst,
+    ToDistributedBatch, ToLocalBatch,
 };
 use crate::optimizer::property::{Distribution, Order, RequiredDist};
 use crate::optimizer::PlanRef;
@@ -96,19 +96,16 @@ impl fmt::Display for BatchLookupJoin {
     }
 }
 
-impl PlanTreeNodeBinary for BatchLookupJoin {
-    fn left(&self) -> PlanRef {
+impl PlanTreeNodeUnary for BatchLookupJoin {
+    fn input(&self) -> PlanRef {
         self.logical.left()
     }
 
-    fn right(&self) -> PlanRef {
-        self.logical.right()
-    }
-
     // Only change left side
-    fn clone_with_left_right(&self, left: PlanRef, right: PlanRef) -> Self {
+    fn clone_with_input(&self, input: PlanRef) -> Self {
         Self::new(
-            self.logical.clone_with_left_right(left, right),
+            self.logical
+                .clone_with_left_right(input, self.logical.right()),
             self.eq_join_predicate.clone(),
             self.table_desc.clone(),
             self.right_column_ids.clone(),
@@ -116,7 +113,7 @@ impl PlanTreeNodeBinary for BatchLookupJoin {
     }
 }
 
-impl_plan_tree_node_for_binary! { BatchLookupJoin }
+impl_plan_tree_node_for_unary! { BatchLookupJoin }
 
 impl ToDistributedBatch for BatchLookupJoin {
     fn to_distributed(&self) -> Result<PlanRef> {
@@ -153,11 +150,9 @@ impl ToBatchProst for BatchLookupJoin {
 
 impl ToLocalBatch for BatchLookupJoin {
     fn to_local(&self) -> Result<PlanRef> {
-        let left = RequiredDist::single()
-            .enforce_if_not_satisfies(self.left().to_local()?, &Order::any())?;
-        let right = RequiredDist::single()
-            .enforce_if_not_satisfies(self.right().to_local()?, &Order::any())?;
+        let input = RequiredDist::single()
+            .enforce_if_not_satisfies(self.input().to_local()?, &Order::any())?;
 
-        Ok(self.clone_with_left_right(left, right).into())
+        Ok(self.clone_with_input(input).into())
     }
 }
