@@ -238,17 +238,17 @@ where
                     > = HashMap::new();
                     for ((upstream_actor_id, dispatcher_id), downstream_actor_infos) in dispatches {
                         if actors.contains(upstream_actor_id) {
-                            let res = downstream_actors
+                            downstream_actors
                                 .entry(*upstream_actor_id)
                                 .or_default()
-                                .insert(
+                                .try_insert(
                                     *dispatcher_id,
                                     downstream_actor_infos
                                         .iter()
                                         .map(|info| info.actor_id)
                                         .collect(),
-                                );
-                            assert!(res.is_none());
+                                )
+                                .unwrap();
                         }
                     }
                     dependent_table_actors.push((*table_id, downstream_actors));

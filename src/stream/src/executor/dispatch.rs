@@ -28,8 +28,8 @@ use risingwave_common::error::{internal_error, Result};
 use risingwave_common::types::VIRTUAL_NODE_COUNT;
 use risingwave_common::util::addr::{is_local_address, HostAddr};
 use risingwave_common::util::hash_util::CRC32FastBuilder;
-use tokio::sync::mpsc::Sender;
 use risingwave_pb::common::ActorInfo;
+use tokio::sync::mpsc::Sender;
 use tracing::event;
 
 use crate::executor::monitor::StreamingMetrics;
