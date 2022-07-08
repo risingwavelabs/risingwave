@@ -179,9 +179,10 @@ impl QueryExecution {
                     .await
                     .map_err(|e| anyhow!("Starting query execution failed: {:?}", e))??;
 
-                info!(
+                tracing::trace!(
                     "Received root stage query result fetcher: {:?}, query id: {:?}",
-                    root_stage, self.query.query_id
+                    root_stage,
+                    self.query.query_id
                 );
 
                 *state = QueryState::Running {
@@ -211,17 +212,19 @@ impl QueryRunner {
         let leaf_stages = self.query.leaf_stages();
         for stage_id in &leaf_stages {
             // TODO: We should not return error here, we should abort query.
-            info!(
+            tracing::trace!(
                 "Starting query stage: {:?}-{:?}",
-                self.query.query_id, stage_id
+                self.query.query_id,
+                stage_id
             );
             self.stage_executions[stage_id].start().await.map_err(|e| {
                 error!("Failed to start stage: {}, reason: {:?}", stage_id, e);
                 e
             })?;
-            info!(
+            tracing::trace!(
                 "Query stage {:?}-{:?} started.",
-                self.query.query_id, stage_id
+                self.query.query_id,
+                stage_id
             );
         }
         let mut stages_with_table_scan = self.query.stages_with_table_scan();
@@ -230,9 +233,10 @@ impl QueryRunner {
         while let Some(msg) = self.msg_receiver.recv().await {
             match msg {
                 Stage(Scheduled(stage_id)) => {
-                    info!(
+                    tracing::trace!(
                         "Query stage {:?}-{:?} scheduled.",
-                        self.query.query_id, stage_id
+                        self.query.query_id,
+                        stage_id
                     );
                     self.scheduled_stages_count += 1;
                     stages_with_table_scan.remove(&stage_id);
@@ -240,7 +244,7 @@ impl QueryRunner {
                         // We can be sure here that all the Hummock iterators have been created,
                         // thus they all successfully pinned a HummockVersion.
                         // So we can now unpin their epoch.
-                        info!("Query {:?} has scheduled all of its stages that have table scan (iterator creation).", self.query.query_id);
+                        tracing::trace!("Query {:?} has scheduled all of its stages that have table scan (iterator creation).", self.query.query_id);
                         self.hummock_snapshot_manager
                             .unpin_snapshot(self.epoch, self.query.query_id())
                             .await?;

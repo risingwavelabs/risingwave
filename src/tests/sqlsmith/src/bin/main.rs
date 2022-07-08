@@ -18,14 +18,20 @@ use std::time::Duration;
 use clap::Parser as ClapParser;
 use risingwave_sqlparser::ast::Statement;
 use risingwave_sqlparser::parser::Parser;
-use risingwave_sqlsmith::{sql_gen, Table};
+use risingwave_sqlsmith::{print_function_table, sql_gen, Table};
 use tokio_postgres::NoTls;
 
 #[derive(ClapParser, Debug, Clone)]
 #[clap(about, version, author)]
 struct Opt {
+    #[clap(subcommand)]
+    command: Commands,
+}
+
+#[derive(clap::Args, Clone, Debug)]
+struct TestOptions {
     /// The database server host.
-    #[clap(short, long, default_value = "localhost")]
+    #[clap(long, default_value = "localhost")]
     host: String,
 
     /// The database server port.
@@ -47,9 +53,23 @@ struct Opt {
     /// Path to the testing data files.
     #[clap(short, long)]
     testdata: String,
+
+    /// The number of test cases to generate.
+    #[clap(long, default_value = "1000")]
+    count: usize,
 }
 
-async fn create_tables(opt: &Opt, client: &tokio_postgres::Client) -> Vec<Table> {
+#[derive(clap::Subcommand, Clone, Debug)]
+enum Commands {
+    /// Prints the currently supported function/operator table.
+    #[clap(name = "print-function-table")]
+    PrintFunctionTable,
+
+    /// Run testing.
+    Test(TestOptions),
+}
+
+async fn create_tables(opt: &TestOptions, client: &tokio_postgres::Client) -> Vec<Table> {
     log::info!("Preparing tables...");
 
     let sql = std::fs::read_to_string(format!("{}/tpch.sql", opt.testdata)).unwrap();
@@ -72,11 +92,26 @@ async fn create_tables(opt: &Opt, client: &tokio_postgres::Client) -> Vec<Table>
         .collect()
 }
 
+async fn drop_tables(opt: &TestOptions, client: &tokio_postgres::Client) {
+    log::info!("Cleaning tables...");
+    let sql = std::fs::read_to_string(format!("{}/drop_tpch.sql", opt.testdata)).unwrap();
+    for stmt in sql.lines() {
+        client.execute(stmt, &[]).await.unwrap();
+    }
+}
+
 #[tokio::main(flavor = "multi_thread", worker_threads = 5)]
 async fn main() {
     env_logger::init();
 
     let opt = Opt::parse();
+    let opt = match opt.command {
+        Commands::PrintFunctionTable => {
+            println!("{}", print_function_table());
+            return;
+        }
+        Commands::Test(test_opts) => test_opts,
+    };
     let (client, connection) = tokio_postgres::Config::new()
         .host(&opt.host)
         .port(opt.port)
@@ -96,8 +131,7 @@ async fn main() {
     let tables = create_tables(&opt, &client).await;
 
     let mut rng = rand::thread_rng();
-
-    for _ in 0..100 {
+    for _ in 0..opt.count {
         let sql = sql_gen(&mut rng, tables.clone());
         log::info!("Executing: {}", sql);
         let _ = client
@@ -105,4 +139,6 @@ async fn main() {
             .await
             .unwrap_or_else(|e| panic!("Failed to execute query: {}\n{}", e, sql));
     }
+
+    drop_tables(&opt, &client).await;
 }

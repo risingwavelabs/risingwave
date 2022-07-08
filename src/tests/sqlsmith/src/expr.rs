@@ -14,6 +14,7 @@
 
 use std::collections::HashMap;
 
+use itertools::Itertools;
 use rand::seq::SliceRandom;
 use rand::Rng;
 use risingwave_frontend::expr::{func_sigs, DataTypeName, ExprType, FuncSign};
@@ -221,4 +222,20 @@ fn make_bin_op(func: ExprType, exprs: &[Expr]) -> Option<Expr> {
 
 pub(crate) fn sql_null() -> Expr {
     Expr::Value(Value::Null)
+}
+
+pub fn print_function_table() -> String {
+    func_sigs()
+        .map(|sign| {
+            format!(
+                "{:?}({}) -> {:?}",
+                sign.func,
+                sign.inputs_type
+                    .iter()
+                    .map(|arg| format!("{:?}", arg))
+                    .join(", "),
+                sign.ret_type,
+            )
+        })
+        .join("\n")
 }

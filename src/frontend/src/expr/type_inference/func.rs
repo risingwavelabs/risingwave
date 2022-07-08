@@ -468,9 +468,13 @@ fn build_type_derive_map() -> FuncSigMap {
         E::IsDistinctFrom,
     ];
     build_binary_cmp_funcs(&mut map, cmp_exprs, &num_types);
-    build_binary_cmp_funcs(&mut map, cmp_exprs, &[T::Struct, T::List]);
+    build_binary_cmp_funcs(&mut map, cmp_exprs, &[T::Struct]);
+    build_binary_cmp_funcs(&mut map, cmp_exprs, &[T::List]);
     build_binary_cmp_funcs(&mut map, cmp_exprs, &[T::Date, T::Timestamp, T::Timestampz]);
-    build_binary_cmp_funcs(&mut map, cmp_exprs, &[T::Time, T::Interval]);
+    // TODO: add support for time-interval comparison
+    // build_binary_cmp_funcs(&mut map, cmp_exprs, &[T::Time, T::Interval]);
+    build_binary_cmp_funcs(&mut map, cmp_exprs, &[T::Time]);
+    build_binary_cmp_funcs(&mut map, cmp_exprs, &[T::Interval]);
     for e in cmp_exprs {
         for t in [T::Boolean, T::Varchar] {
             map.insert(*e, vec![t, t], T::Boolean);
