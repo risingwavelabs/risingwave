@@ -15,9 +15,8 @@
 use std::io::Error as IoError;
 
 use thiserror::Error;
-
+pub type Result<T> = std::result::Result<T, PsqlError>;
 use crate::pg_server::BoxedError;
-
 /// Error type used in pgwire crates.
 #[derive(Error, Debug)]
 pub enum PsqlError {
@@ -28,16 +27,27 @@ pub enum PsqlError {
     UnrecognizedParamError(String),
 
     #[error("{0}")]
-    IoError(IoError),
+    IoError(#[from] IoError),
+
+    #[error("Failed to handle ssl request: {0}")]
+    SslError(IoError),
+
+    #[error("Invaild sql: {0}")]
+    InvaildSQL(IoError),
+
+    #[error("Failed to get response from session: {0}")]
+    ReponseError(BoxedError),
 
     // The difference between IoError and ReadMsgIoError is that ReadMsgIoError needed to report
     // to users but IoError does not.
-    #[error("{0}")]
-    ReadMsgIoError(IoError),
+    #[error("Fail to read message: {0}")]
+    ReadMsgError(IoError),
 
-    // InternalError return from frontend(comes from internal syste)m, it's wrapper of RwError.
-    #[error("{0}")]
-    InternalError(BoxedError),
+    #[error("Fail to set up pg session: {0}")]
+    StartupError(IoError),
+
+    #[error("Failed to authenticate session: {0}.")]
+    AuthenticationError(IoError),
 }
 
 impl PsqlError {
