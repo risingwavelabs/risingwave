@@ -89,6 +89,8 @@ impl ToBatchProst for BatchLimit {
 impl ToLocalBatch for BatchLimit {
     fn to_local(&self) -> Result<PlanRef> {
         let new_input = self.input().to_local()?;
+        let new_input =
+            RequiredDist::single().enforce_if_not_satisfies(new_input, &Order::any())?;
         Ok(self.clone_with_input(new_input).into())
     }
 }
