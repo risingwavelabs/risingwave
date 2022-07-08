@@ -101,15 +101,15 @@ impl fmt::Debug for PlanAggCall {
                     write!(f, ",")?;
                 }
             }
+            if !self.order_by_fields.is_empty() {
+                let clause_text = self
+                    .order_by_fields
+                    .iter()
+                    .map(|e| format!("{:?}", e))
+                    .join(", ");
+                write!(f, " order_by({})", clause_text)?;
+            }
             write!(f, ")")?;
-        }
-        if !self.order_by_fields.is_empty() {
-            let clause_text = self
-                .order_by_fields
-                .iter()
-                .map(|e| format!("{:?}", e))
-                .join(", ");
-            write!(f, " order_by({})", clause_text)?;
         }
         if !self.filter.always_true() {
             write!(
