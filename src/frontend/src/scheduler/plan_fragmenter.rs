@@ -394,17 +394,13 @@ impl BatchPlanFragmenter {
                 // Check out the comments for `has_table_scan` in `QueryStage`.
                 let scan_node: Option<&BatchSeqScan> = node.as_batch_seq_scan();
                 if let Some(scan_node) = scan_node {
-                    // TODO: handle multiple table scan inside a stage
-                    assert!(
-                        builder.table_scan_info.is_none()
-                            || builder
-                                .table_scan_info
-                                .as_ref()
-                                .unwrap()
-                                .vnode_bitmaps
-                                .is_none(),
-                        "multiple table scan inside a stage"
-                    );
+                    if builder.table_scan_info.is_some() {
+                        // There is already a scan node in this stage.
+                        // The nodes have the same distribution, but maybe different vnodes
+                        // partition. We just use the same partition for all
+                        // the scan nodes.
+                        return;
+                    }
 
                     builder.table_scan_info = Some({
                         let table_desc = scan_node.logical().table_desc();
