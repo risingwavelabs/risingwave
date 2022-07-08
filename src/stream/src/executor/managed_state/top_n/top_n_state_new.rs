@@ -95,7 +95,7 @@ impl<S: StateStore> ManagedTopNStateNew<S> {
         value: Row,
         _epoch: u64,
     ) -> StreamExecutorResult<()> {
-        self.state_table.insert(value.clone())?;
+        self.state_table.insert(value)?;
         self.total_count += 1;
         Ok(())
     }

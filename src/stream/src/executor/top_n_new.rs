@@ -151,10 +151,10 @@ impl<S: StateStore> InnerTopNExecutorNew<S> {
         let managed_state = ManagedTopNStateNew::<S>::new(
             cache_size,
             total_count,
-            store.clone(),
+            store,
             table_id,
-            row_data_types.clone(),
-            ordered_row_deserializer.clone(),
+            row_data_types,
+            ordered_row_deserializer,
             internal_key_indices.clone(),
         );
 
@@ -272,26 +272,24 @@ impl<S: StateStore> TopNExecutorBase for InnerTopNExecutorNew<S> {
                                 new_ops.push(Op::Insert);
                                 new_rows.push(new_start_row.row.clone());
                             }
-                        } else {
-                            if !end_row.is_valid() {
-                                // no limit
+                        } else if !end_row.is_valid() {
+                            // no limit
+                            new_ops.push(Op::Insert);
+                            new_rows.push(row);
+                        } else if let Some(end_key) = end_row.ordered_key.as_ref() {
+                            if ordered_pk_row < *end_key {
                                 new_ops.push(Op::Insert);
                                 new_rows.push(row);
-                            } else if let Some(end_key) = end_row.ordered_key.as_ref() {
-                                if ordered_pk_row < *end_key {
-                                    new_ops.push(Op::Insert);
-                                    new_rows.push(row);
 
-                                    // handle limit
-                                    let (_, new_end_row) = self
-                                        .managed_state
-                                        .find_range(self.offset, num_limit, epoch)
-                                        .await?;
+                                // handle limit
+                                let (_, new_end_row) = self
+                                    .managed_state
+                                    .find_range(self.offset, num_limit, epoch)
+                                    .await?;
 
-                                    if end_row.ordered_key != new_end_row.ordered_key {
-                                        new_ops.push(Op::Delete);
-                                        new_rows.push(end_row.row);
-                                    }
+                                if end_row.ordered_key != new_end_row.ordered_key {
+                                    new_ops.push(Op::Delete);
+                                    new_rows.push(end_row.row);
                                 }
                             }
                         }
