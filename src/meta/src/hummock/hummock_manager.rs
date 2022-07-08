@@ -923,11 +923,11 @@ where
         let old_version = versioning_guard.current_version();
         let versioning = versioning_guard.deref_mut();
         let mut current_version_id = VarTransaction::new(&mut versioning.current_version_id);
-        let mut hummock_versions = VarTransaction::new(&mut versioning.hummock_versions);
         let mut hummock_version_deltas =
             VarTransaction::new(&mut versioning.hummock_version_deltas);
         let mut sstable_id_infos = VarTransaction::new(&mut versioning.sstable_id_infos);
         current_version_id.increase();
+        let new_version_id = current_version_id.id();
         let mut new_version_delta = hummock_version_deltas.new_entry_txn_or_default(
             current_version_id.id(),
             HummockVersionDelta {
@@ -936,8 +936,7 @@ where
                 ..Default::default()
             },
         );
-        let mut new_hummock_version =
-            hummock_versions.new_entry_txn_or_default(current_version_id.id(), old_version);
+        let mut new_hummock_version = old_version.clone();
         new_hummock_version.id = current_version_id.id();
         new_version_delta.id = current_version_id.id();
         if epoch <= new_hummock_version.max_committed_epoch {
@@ -1020,7 +1019,9 @@ where
             current_version_id,
             sstable_id_infos
         )?;
-        new_hummock_version.commit();
+        versioning
+            .hummock_versions
+            .insert(new_version_id, new_hummock_version);
         self.max_committed_epoch.store(epoch, Ordering::Release);
 
         // Update metrics
