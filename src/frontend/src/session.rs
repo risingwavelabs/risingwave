@@ -241,7 +241,7 @@ impl FrontendEnv {
             user_info_updated_rx,
         ));
 
-        let front_state = FrontendObserverNode::new(
+        let frontend_observer_node = FrontendObserverNode::new(
             worker_node_manager.clone(),
             catalog,
             catalog_updated_tx,
@@ -252,7 +252,7 @@ impl FrontendEnv {
         let observer_manager = ObserverManager::new(
             meta_client.clone(),
             frontend_address.clone(),
-            Box::new(front_state),
+            Box::new(frontend_observer_node),
             WorkerType::Frontend,
         )
         .await;
