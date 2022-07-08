@@ -40,15 +40,22 @@ use crate::utils::{ColIndexMapping, Condition, Substitute};
 #[derive(Clone)]
 pub struct PlanAggOrderByField {
     pub input: InputRef,
-    pub asc: Option<bool>,
+    pub order_type: Option<OrderType>,
     pub nulls_first: Option<bool>,
 }
 
 impl fmt::Debug for PlanAggOrderByField {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         write!(f, "{:?}", self.input)?;
-        if let Some(asc) = self.asc {
-            write!(f, " {}", if asc { "ASC" } else { "DESC" })?;
+        if let Some(order_type) = self.order_type {
+            write!(
+                f,
+                " {}",
+                match order_type {
+                    OrderType::Ascending => "ASC",
+                    OrderType::Descending => "DESC",
+                }
+            )?;
         }
         if let Some(nulls_first) = self.nulls_first {
             write!(f, " NULLS {}", if nulls_first { "FIRST" } else { "LAST" })?;
@@ -378,7 +385,7 @@ impl ExprRewriter for LogicalAggBuilder {
                 let index = self.input_proj_builder.add_expr(&e.expr);
                 PlanAggOrderByField {
                     input: InputRef::new(index, e.expr.return_type()),
-                    asc: e.asc,
+                    order_type: e.order_type,
                     nulls_first: e.nulls_first,
                 }
             })

@@ -15,6 +15,7 @@
 use itertools::Itertools;
 use risingwave_common::error::{ErrorCode, Result, RwError};
 use risingwave_common::types::DataType;
+use risingwave_common::util::sort_util::OrderType;
 use risingwave_expr::expr::AggKind;
 
 use super::{Expr, ExprImpl, ExprRewriter};
@@ -23,8 +24,8 @@ use crate::utils::Condition;
 #[derive(Debug, Clone, Eq, PartialEq, Hash)]
 pub struct AggOrderByExpr {
     pub expr: ExprImpl,
-    // `Some(true)` for ASC, `Some(false)` for DESC, `None` for default
-    pub asc: Option<bool>,
+    // `Some` for ASC or DESC, `None` for default
+    pub order_type: Option<OrderType>,
     // `Some(true)` for `NULLS FIRST`, `Some(false)` for `NULLS LAST`, `None` for default
     pub nulls_first: Option<bool>,
 }
@@ -52,7 +53,7 @@ impl AggOrderBy {
                 .into_iter()
                 .map(|e| AggOrderByExpr {
                     expr: rewriter.rewrite_expr(e.expr),
-                    asc: e.asc,
+                    order_type: e.order_type,
                     nulls_first: e.nulls_first,
                 })
                 .collect(),

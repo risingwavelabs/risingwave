@@ -17,6 +17,7 @@ use std::iter::once;
 use itertools::Itertools;
 use risingwave_common::error::{ErrorCode, Result};
 use risingwave_common::types::DataType;
+use risingwave_common::util::sort_util::OrderType;
 use risingwave_expr::expr::AggKind;
 use risingwave_sqlparser::ast::{Function, FunctionArg, FunctionArgExpr};
 
@@ -93,7 +94,13 @@ impl Binder {
                         .map(|e| -> Result<AggOrderByExpr> {
                             Ok(AggOrderByExpr {
                                 expr: self.bind_expr(e.expr)?,
-                                asc: e.asc,
+                                order_type: e.asc.map(|asc| {
+                                    if asc {
+                                        OrderType::Ascending
+                                    } else {
+                                        OrderType::Descending
+                                    }
+                                }),
                                 nulls_first: e.nulls_first,
                             })
                         })
