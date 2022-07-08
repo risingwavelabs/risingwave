@@ -106,13 +106,11 @@ message HashJoinNode {
   catalog.Table left_table = 6;
   // Used for internal table states.
   catalog.Table right_table = 7;
-  repeated uint32 dist_key_l = 8;
-  repeated uint32 dist_key_r = 9;
-  // It is true when the input is append-only
-  bool is_append_only = 10;
   // Whether to optimize for append only stream.
-  // the output indices of current node
-  repeated uint32 output_indices = 11;
+  // It is true when the input is append-only
+  bool is_append_only = 8;
+  // The output indices of current node
+  repeated uint32 output_indices = 9;
 }
 
 message DynamicFilterNode {
