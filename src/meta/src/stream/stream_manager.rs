@@ -298,8 +298,8 @@ where
             },
         );
 
-        // Schedule actors to parallel units. `locations` will records which parallel unit an actor
-        // will be scheduled to, and which worker node this parallel unit is on.
+        // Schedule actors to parallel units. `locations` will record the parallel unit that an
+        // actor is scheduled to, and the worker node this parallel unit is on.
         let locations = {
             // List all running worker nodes.
             let workers = self
@@ -340,7 +340,7 @@ where
         .await?;
 
         // Record vnode to parallel unit mapping for actors.
-        let actor_to_vnode_parallel_unit_mapping = {
+        let actor_to_vnode_mapping = {
             let mut mapping = HashMap::new();
             for fragment in table_fragments.fragments.values() {
                 for actor in &fragment.actors {
@@ -381,18 +381,15 @@ where
                     downstream_actors @ &[first_downstream_actor, ..] => {
                         // All actors in the downstream fragment should have the same parallel unit
                         // mapping, find it with the first downstream actor.
-                        let downstream_vnode_parallel_unit_mapping =
-                            actor_to_vnode_parallel_unit_mapping
-                                .get(&first_downstream_actor)
-                                .unwrap()
-                                .as_ref()
-                                .unwrap_or_else(|| {
-                                    panic!(
-                                        "no vnode mapping for actor {}",
-                                        &first_downstream_actor
-                                    );
-                                });
-                        // Map the parallel unit to downstream actors.
+                        let downstream_vnode_mapping = actor_to_vnode_mapping
+                            .get(&first_downstream_actor)
+                            .unwrap()
+                            .as_ref()
+                            .unwrap_or_else(|| {
+                                panic!("no vnode mapping for actor {}", &first_downstream_actor);
+                            });
+
+                        // Mapping from the parallel unit to downstream actors.
                         let parallel_unit_actor_map = downstream_actors
                             .iter()
                             .map(|actor_id| {
@@ -403,11 +400,12 @@ where
                             })
                             .collect::<HashMap<_, _>>();
 
+                        // Trasform the mapping of parallel unit to the mapping of actor.
                         let ParallelUnitMapping {
                             original_indices,
                             data,
                             ..
-                        } = downstream_vnode_parallel_unit_mapping;
+                        } = downstream_vnode_mapping;
                         let data = data
                             .iter()
                             .map(|parallel_unit_id| parallel_unit_actor_map[parallel_unit_id])
@@ -440,7 +438,7 @@ where
 
         // Actors on each stream node will need to know where their upstream lies. `actor_info`
         // includes such information. It contains:
-        // 1. actors in the current create materialized view request.
+        // 1. actors in the current create-materialized-view request.
         // 2. all upstream actors.
         let actor_infos_to_broadcast = {
             let current = locations.actor_infos();
