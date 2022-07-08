@@ -6,3 +6,4 @@ include ./views/q4.slt.part
 include ./views/q5.slt.part
 include ./views/q7.slt.part
 include ./views/q8.slt.part
+include ./views/q10.slt.part
