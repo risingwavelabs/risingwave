@@ -17,7 +17,6 @@ use std::iter::once;
 use itertools::Itertools;
 use risingwave_common::error::{ErrorCode, Result};
 use risingwave_common::types::DataType;
-use risingwave_common::util::sort_util::OrderType;
 use risingwave_expr::expr::AggKind;
 use risingwave_sqlparser::ast::{Function, FunctionArg, FunctionArgExpr};
 
@@ -26,6 +25,7 @@ use crate::binder::Binder;
 use crate::expr::{
     AggCall, AggOrderBy, AggOrderByExpr, Expr, ExprImpl, ExprType, FunctionCall, Literal,
 };
+use crate::optimizer::property::Direction;
 use crate::utils::Condition;
 
 impl Binder {
@@ -94,11 +94,11 @@ impl Binder {
                         .map(|e| -> Result<AggOrderByExpr> {
                             Ok(AggOrderByExpr {
                                 expr: self.bind_expr(e.expr)?,
-                                order_type: e.asc.map(|asc| {
+                                direction: e.asc.map_or(Direction::Any, |asc| {
                                     if asc {
-                                        OrderType::Ascending
+                                        Direction::Asc
                                     } else {
-                                        OrderType::Descending
+                                        Direction::Desc
                                     }
                                 }),
                                 nulls_first: e.nulls_first,

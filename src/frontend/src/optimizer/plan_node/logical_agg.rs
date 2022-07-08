@@ -33,29 +33,24 @@ use crate::catalog::table_catalog::TableCatalog;
 use crate::expr::{AggCall, Expr, ExprImpl, ExprRewriter, ExprType, FunctionCall, InputRef};
 use crate::optimizer::plan_node::utils::TableCatalogBuilder;
 use crate::optimizer::plan_node::{gen_filter_and_pushdown, LogicalProject};
-use crate::optimizer::property::{Order, RequiredDist};
+use crate::optimizer::property::{Direction, Order, RequiredDist};
 use crate::utils::{ColIndexMapping, Condition, Substitute};
 
 /// See also [`crate::expr::AggOrderByExpr`]
 #[derive(Clone)]
 pub struct PlanAggOrderByField {
     pub input: InputRef,
-    pub order_type: Option<OrderType>,
+    pub direction: Direction,
     pub nulls_first: Option<bool>,
 }
 
 impl fmt::Debug for PlanAggOrderByField {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         write!(f, "{:?}", self.input)?;
-        if let Some(order_type) = self.order_type {
-            write!(
-                f,
-                " {}",
-                match order_type {
-                    OrderType::Ascending => "ASC",
-                    OrderType::Descending => "DESC",
-                }
-            )?;
+        match self.direction {
+            Direction::Asc => write!(f, " ASC")?,
+            Direction::Desc => write!(f, " DESC")?,
+            _ => {}
         }
         if let Some(nulls_first) = self.nulls_first {
             write!(f, " NULLS {}", if nulls_first { "FIRST" } else { "LAST" })?;
@@ -385,7 +380,7 @@ impl ExprRewriter for LogicalAggBuilder {
                 let index = self.input_proj_builder.add_expr(&e.expr);
                 PlanAggOrderByField {
                     input: InputRef::new(index, e.expr.return_type()),
-                    order_type: e.order_type,
+                    direction: e.direction,
                     nulls_first: e.nulls_first,
                 }
             })
