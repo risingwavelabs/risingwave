@@ -23,12 +23,10 @@ use risingwave_common::util::chunk_coalesce::{DataChunkBuilder, SlicedDataChunk}
 use risingwave_expr::expr::{build_from_prost, BoxedExpression};
 use risingwave_pb::batch_plan::exchange_source::LocalExecutePlan::Plan;
 use risingwave_pb::batch_plan::plan_node::NodeBody;
-use risingwave_pb::batch_plan::{
-    ExchangeNode, ExchangeSource as ProstExchangeSource, LocalExecutePlan, PlanFragment, PlanNode,
-    RowSeqScanNode, ScanRange,
-};
+use risingwave_pb::batch_plan::{ExchangeInfo, ExchangeNode, ExchangeSource as ProstExchangeSource, LocalExecutePlan, PlanFragment, PlanNode, RowSeqScanNode, ScanRange};
 use risingwave_pb::plan_common::CellBasedTableDesc;
 use uuid::Uuid;
+use risingwave_pb::batch_plan::exchange_info::DistributionMode;
 
 use crate::executor::join::{
     concatenate, convert_datum_refs_to_chunk, convert_row_to_chunk, JoinType,
@@ -103,7 +101,10 @@ impl<C: BatchTaskContext> ProbeSideSource<C> {
                     identity: Uuid::new_v4().to_string(),
                     node_body: Some(self.create_row_seq_scan_node(cur_row)?),
                 }),
-                exchange_info: None,
+                exchange_info: Some(ExchangeInfo {
+                    mode: DistributionMode::Single as i32,
+                    ..Default::default()
+                 }),
             }),
             epoch: inner_template_plan.epoch,
         };

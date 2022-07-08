@@ -689,12 +689,29 @@ impl ToBatch for LogicalJoin {
             if use_lookup_join {
                 if self.right.as_ref().node_type() != PlanNodeType::LogicalScan {
                     return Err(RwError::from(ErrorCode::InternalError(
-                        "LookupJoin only supports basic tables on the right hand side".to_string(),
+                        "Lookup Join only supports basic tables on the right hand side".to_string(),
                     )));
                 }
 
                 let logical_scan = self.right.as_logical_scan().unwrap();
                 let table_desc = logical_scan.table_desc().clone();
+
+                // Verify that the right equality columns all match the order keys of the table
+                let eq_col_error = RwError::from(ErrorCode::InternalError(
+                    "In Lookup Join, equality columns on right table must be ordered".to_string(),
+                ));
+
+                let order_col_indices = table_desc.order_column_indices();
+                if order_col_indices.len() < predicate.right_eq_indexes().len() {
+                    return Err(eq_col_error);
+                }
+
+                for (i, eq_idx) in predicate.right_eq_indexes().into_iter().enumerate() {
+                    if order_col_indices[i] != eq_idx {
+                        return Err(eq_col_error);
+                    }
+                }
+
                 let right_column_ids = logical_scan
                     .output_column_ids()
                     .iter()
