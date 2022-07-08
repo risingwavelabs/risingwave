@@ -222,7 +222,7 @@ fn infer_internal_table_catalog(input: PlanRef, join_key_indices: Vec<usize>) ->
     let append_only = input.append_only();
     let dist_keys = base.dist.dist_column_indices().to_vec();
 
-    // The pk of hash join internal table shoule be join_key + input_pk.
+    // The pk of hash join internal table should be join_key + input_pk.
     let mut pk_indices = join_key_indices;
     // TODO(yuhao): dedup the dist key and pk.
     pk_indices.extend(&base.pk_indices);
