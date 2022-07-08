@@ -27,10 +27,7 @@ use risingwave_expr::expr::{
 };
 use risingwave_pb::batch_plan::plan_node::NodeBody;
 
-use crate::error::BatchError;
-use crate::executor::join::{
-    concatenate, convert_row_to_chunk, JoinType,
-};
+use crate::executor::join::{concatenate, convert_row_to_chunk, JoinType};
 use crate::executor::{
     BoxedDataChunkStream, BoxedExecutor, BoxedExecutorBuilder, Executor, ExecutorBuilder,
 };
@@ -420,7 +417,7 @@ impl NestedLoopJoinExecutor {
 mod tests {
     use risingwave_common::array::*;
     use risingwave_common::catalog::{Field, Schema};
-    use risingwave_common::types::{DataType, ScalarRefImpl};
+    use risingwave_common::types::DataType;
     use risingwave_expr::expr::expr_binary_nonnull::new_binary_expr;
     use risingwave_expr::expr::InputRefExpression;
     use risingwave_pb::expr::expr_node::Type;
