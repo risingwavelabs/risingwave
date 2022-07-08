@@ -16,11 +16,15 @@ script = '''
 #!/bin/bash
 set -e
 if [ -d "${PREFIX_BIN}/grafana" ]; then
-    exit 0
+    if [ -f "${PREFIX_BIN}/grafana/RISEDEV-VERSION-${GRAFANA_VERSION}" ]; then
+        exit 0
+    fi
 fi
 echo "Grafana not found, download ${GRAFANA_RELEASE}"
 curl -fL -o "${GRAFANA_DOWNLOAD_PATH}" "${GRAFANA_DOWNLOAD_TAR_GZ}"
 tar -xf "${GRAFANA_DOWNLOAD_PATH}" -C "${PREFIX_TMP}"
+rm -rf "${PREFIX_BIN}/grafana"
 mv "${PREFIX_TMP}/${GRAFANA_RELEASE}" "${PREFIX_BIN}/grafana"
 rm "${GRAFANA_DOWNLOAD_PATH}"
+touch "${PREFIX_BIN}/grafana/RISEDEV-VERSION-${GRAFANA_VERSION}"
 '''
