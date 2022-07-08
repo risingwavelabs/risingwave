@@ -216,9 +216,12 @@ where
     pub fn earse(&self, key: &K) -> Result<()> {
         let hash = self.hash_builder.hash_one(key);
         self.buffer.erase(hash, key);
-        // No need to manually remove data from store. `LruCacheEventListener` on `indices` will
-        // free the slot.
-        self.indices.erase(hash, key);
+
+        if let Some(entry) = self.indices.lookup(hash, key) {
+            let slot = *entry.value();
+            self.indices.erase(hash, key);
+            self.store.erase(slot).unwrap();
+        }
 
         Ok(())
     }

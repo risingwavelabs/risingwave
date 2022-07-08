@@ -205,13 +205,6 @@ where
         // TODO: Throw warning log instead?
         self.free(*slot).unwrap();
     }
-
-    fn on_erase(&self, _key: &Self::K, _slot: &Self::T) {
-        // TODO: Throw warning log instead?
-        // FIXME: unexpected earse hook call
-        // println!("indices erase");
-        // self.free(*slot).unwrap();
-    }
 }
 
 pub type StoreRef<K> = Arc<Store<K>>;

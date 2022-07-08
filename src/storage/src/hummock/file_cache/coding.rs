@@ -14,7 +14,7 @@
 
 use std::hash::{BuildHasher, Hash};
 
-pub trait CacheKey: Eq + Send + Sync + Hash + Clone + 'static {
+pub trait CacheKey: Eq + Send + Sync + Hash + Clone + 'static + std::fmt::Debug {
     fn encoded_len() -> usize;
 
     fn encode(&self, buf: &mut [u8]);
