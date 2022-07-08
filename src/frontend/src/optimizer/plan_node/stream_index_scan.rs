@@ -43,7 +43,7 @@ impl StreamIndexScan {
             ctx,
             logical.schema().clone(),
             logical.base.pk_indices.clone(),
-            Distribution::HashShard(logical.map_distribution_key()),
+            Distribution::HashShard(logical.distribution_key().unwrap()),
             false, // TODO: determine the `append-only` field of table scan
         );
         Self {
