@@ -60,12 +60,12 @@ pub fn make_state_table<S: StateStore>(hummock: S, table: &TableCatalog) -> Stat
             .map(|x| x.column_desc.clone())
             .collect(),
         table
-            .order_keys()
+            .order_key()
             .iter()
             .map(|x| x.direct.to_order())
             .collect(),
-        table.pks.clone(), // FIXME: should use order keys
-        Distribution::all_vnodes(table.distribution_keys().to_vec()), // scan all vnodes
+        table.pk.clone(), // FIXME: should use order keys
+        Distribution::all_vnodes(table.distribution_key().to_vec()), // scan all vnodes
     )
 }
 

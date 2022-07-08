@@ -73,7 +73,10 @@ impl ToDistributedBatch for BatchSimpleAgg {
         // (e.g. see distribution of BatchSeqScan::new vs BatchSeqScan::to_distributed)
         let dist_input = self.input().to_distributed()?;
 
-        if dist_input.distribution().satisfies(&RequiredDist::AnyShard) {
+        // TODO: distinct agg cannot use 2-phase agg yet.
+        if dist_input.distribution().satisfies(&RequiredDist::AnyShard)
+            && self.logical.agg_calls().iter().any(|call| !call.distinct)
+        {
             // partial agg
             let partial_agg = self.clone_with_input(dist_input).into();
 
@@ -91,11 +94,8 @@ impl ToDistributedBatch for BatchSimpleAgg {
                     agg_call.partial_to_total_agg_call(partial_output_idx)
                 })
                 .collect();
-            let total_agg_logical = LogicalAgg::new(
-                total_agg_types,
-                self.logical.group_keys().to_vec(),
-                exchange,
-            );
+            let total_agg_logical =
+                LogicalAgg::new(total_agg_types, self.logical.group_key().to_vec(), exchange);
             Ok(BatchSimpleAgg::new(total_agg_logical).into())
         } else {
             let new_input = self
@@ -114,8 +114,8 @@ impl ToBatchProst for BatchSimpleAgg {
                 .iter()
                 .map(PlanAggCall::to_protobuf)
                 .collect(),
-            // We treat simple agg as a special sort agg without group keys.
-            group_keys: vec![],
+            // We treat simple agg as a special sort agg without group key.
+            group_key: vec![],
         })
     }
 }

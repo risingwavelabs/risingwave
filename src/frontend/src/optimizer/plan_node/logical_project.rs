@@ -146,6 +146,16 @@ impl LogicalProject {
         LogicalProject::new(input, exprs)
     }
 
+    /// Creates a `LogicalProject` which select some columns from the input.
+    pub fn with_out_fields(input: PlanRef, out_fields: &FixedBitSet) -> Self {
+        let input_schema = input.schema().fields();
+        let exprs = out_fields
+            .ones()
+            .map(|index| InputRef::new(index, input_schema[index].data_type()).into())
+            .collect();
+        LogicalProject::new(input, exprs)
+    }
+
     fn derive_schema(exprs: &[ExprImpl], input_schema: &Schema) -> Schema {
         let o2i = Self::o2i_col_mapping_inner(input_schema.len(), exprs);
         let fields = exprs

@@ -70,7 +70,7 @@ impl Rule for IndexDeltaJoinRule {
                 // `Hash(A, B) == Hash(B, A)`, so we consider order of each item in distribution
                 // keys here.
                 if index
-                    .distribution_keys
+                    .distribution_key
                     .iter()
                     .map(|x| index.columns[*x].column_id)
                     .collect_vec()
