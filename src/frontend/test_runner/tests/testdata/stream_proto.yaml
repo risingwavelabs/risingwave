@@ -44,8 +44,7 @@
                   isNullable: true
                 name: _row_id
             chain:
-              tableRefId:
-                tableId: 4
+              tableId: 4
               upstreamFields:
                 - dataType:
                     typeName: INT64
@@ -177,8 +176,7 @@
               isNullable: true
             name: _row_id
         chain:
-          tableRefId:
-            tableId: 4
+          tableId: 4
           upstreamFields:
             - dataType:
                 typeName: INT64
@@ -285,8 +283,7 @@
               isNullable: true
             name: _row_id
         chain:
-          tableRefId:
-            tableId: 4
+          tableId: 4
           upstreamFields:
             - dataType:
                 typeName: INT64
@@ -395,8 +392,7 @@
                           isNullable: true
                         name: _row_id
                     chain:
-                      tableRefId:
-                        tableId: 4
+                      tableId: 4
                       upstreamFields:
                         - dataType:
                             typeName: INT64
@@ -608,8 +604,7 @@
                               isNullable: true
                             name: _row_id
                         chain:
-                          tableRefId:
-                            tableId: 4
+                          tableId: 4
                           upstreamFields:
                             - dataType:
                                 typeName: INT64

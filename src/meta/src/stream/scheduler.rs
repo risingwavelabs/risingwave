@@ -304,7 +304,6 @@ mod test {
     use risingwave_common::types::VIRTUAL_NODE_COUNT;
     use risingwave_pb::common::{HostAddress, WorkerType};
     use risingwave_pb::meta::table_fragments::fragment::FragmentDistributionType;
-    use risingwave_pb::plan_common::TableRefId;
     use risingwave_pb::stream_plan::stream_node::NodeBody;
     use risingwave_pb::stream_plan::{MaterializeNode, StreamActor, StreamNode, TopNNode};
 
@@ -370,10 +369,7 @@ mod test {
                         fragment_id,
                         nodes: Some(StreamNode {
                             node_body: Some(NodeBody::Materialize(MaterializeNode {
-                                table_ref_id: Some(TableRefId {
-                                    table_id: fragment_id as i32,
-                                    ..Default::default()
-                                }),
+                                table_id: fragment_id as u32,
                                 ..Default::default()
                             })),
                             ..Default::default()
