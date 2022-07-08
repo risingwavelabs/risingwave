@@ -102,7 +102,6 @@ impl<'a, R: Rng> SqlGenerator<'a, R> {
 
     fn gen_order_by(&mut self) -> Vec<OrderByExpr> {
         if self.bound_relations.is_empty() {
-            println!("no order by");
             return vec![];
         }
         let mut order_by = vec![];
