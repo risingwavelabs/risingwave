@@ -23,10 +23,11 @@ use risingwave_hummock_sdk::key::key_with_epoch;
 use risingwave_hummock_sdk::HummockSSTableId;
 use risingwave_meta::hummock::test_utils::setup_compute_env;
 use risingwave_meta::hummock::MockHummockMetaClient;
-use risingwave_pb::common::VNodeBitmap;
 use risingwave_pb::hummock::{KeyRange, SstableInfo};
 
 use super::{CompressionAlgorithm, SstableMeta, DEFAULT_RESTART_INTERVAL};
+use crate::hummock::compaction_group::StaticCompactionGroupId;
+use crate::hummock::compaction_group_client::DummyCompactionGroupClient;
 use crate::hummock::iterator::test_utils::{iterator_test_key_of_epoch, mock_sstable_store};
 use crate::hummock::shared_buffer::shared_buffer_batch::SharedBufferBatch;
 use crate::hummock::value::HummockValue;
@@ -83,7 +84,7 @@ pub fn gen_dummy_sst_info(id: HummockSSTableId, batches: Vec<SharedBufferBatch>)
             inf: false,
         }),
         file_size: batches.len() as u64,
-        vnode_bitmaps: vec![],
+        table_ids: vec![],
         unit_id: u64::MAX,
     }
 }
@@ -101,6 +102,9 @@ pub async fn mock_hummock_storage() -> HummockStorage {
         sstable_store.clone(),
         mock_hummock_meta_client,
         Arc::new(StateStoreMetrics::unused()),
+        Arc::new(DummyCompactionGroupClient::new(
+            StaticCompactionGroupId::StateDefault.into(),
+        )),
     )
     .await
     .unwrap()
@@ -123,13 +127,13 @@ pub fn default_builder_opt_for_test() -> SSTableBuilderOptions {
 pub fn gen_test_sstable_data(
     opts: SSTableBuilderOptions,
     kv_iter: impl Iterator<Item = (Vec<u8>, HummockValue<Vec<u8>>)>,
-) -> (Bytes, SstableMeta, Vec<VNodeBitmap>) {
+) -> (Bytes, SstableMeta, Vec<u32>) {
     let mut b = SSTableBuilder::new(0, opts);
     for (key, value) in kv_iter {
         b.add(&key, value.as_slice())
     }
-    let (_, data, meta, vnodes) = b.finish();
-    (data, meta, vnodes)
+    let (_, data, meta, table_ids) = b.finish();
+    (data, meta, table_ids)
 }
 
 /// Generates a test table from the given `kv_iter` and put the kv value to `sstable_store`
@@ -141,8 +145,11 @@ pub async fn gen_test_sstable_inner(
     policy: CachePolicy,
 ) -> Sstable {
     let (data, meta, _) = gen_test_sstable_data(opts, kv_iter);
-    let sst = Sstable { id: sst_id, meta };
-    sstable_store.put(sst.clone(), data, policy).await.unwrap();
+    let sst = Sstable::new(sst_id, meta.clone());
+    sstable_store
+        .put(Sstable::new(sst_id, meta.clone()), data, policy)
+        .await
+        .unwrap();
     sst
 }
 

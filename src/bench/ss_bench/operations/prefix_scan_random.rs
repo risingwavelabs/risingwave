@@ -19,6 +19,7 @@ use itertools::Itertools;
 use rand::distributions::Uniform;
 use rand::prelude::Distribution;
 use risingwave_hummock_sdk::key::next_key;
+use risingwave_storage::store::ReadOptions;
 use risingwave_storage::StateStore;
 
 use super::Operations;
@@ -63,7 +64,11 @@ impl Operations {
                         .scan(
                             prefix.chunk().to_vec()..next_key(prefix.chunk()),
                             None,
-                            u64::MAX,
+                            ReadOptions {
+                                epoch: u64::MAX,
+                                table_id: None,
+                                ttl: None,
+                            },
                         )
                         .await
                         .unwrap();

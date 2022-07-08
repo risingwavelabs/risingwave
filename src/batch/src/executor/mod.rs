@@ -11,8 +11,9 @@
 // WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 // See the License for the specific language governing permissions and
 // limitations under the License.
-
+use anyhow::anyhow;
 mod delete;
+mod expand;
 mod filter;
 mod generic_exchange;
 mod hash_agg;
@@ -26,8 +27,8 @@ mod order_by;
 mod project;
 mod row_seq_scan;
 mod sort_agg;
+mod sys_row_seq_scan;
 mod table_function;
-#[cfg(test)]
 pub mod test_utils;
 mod top_n;
 mod trace;
@@ -36,6 +37,7 @@ mod values;
 
 use async_recursion::async_recursion;
 pub use delete::*;
+pub use expand::*;
 pub use filter::*;
 use futures::stream::BoxStream;
 pub use generic_exchange::*;
@@ -50,7 +52,6 @@ pub use order_by::*;
 pub use project::*;
 use risingwave_common::array::DataChunk;
 use risingwave_common::catalog::Schema;
-use risingwave_common::error::ErrorCode::InternalError;
 use risingwave_common::error::Result;
 use risingwave_pb::batch_plan::plan_node::NodeBody;
 use risingwave_pb::batch_plan::PlanNode;
@@ -62,6 +63,7 @@ pub use trace::*;
 pub use update::*;
 pub use values::*;
 
+use crate::executor::sys_row_seq_scan::SysRowSeqScanExecutorBuilder;
 use crate::task::{BatchTaskContext, TaskId};
 
 pub type BoxedExecutor = Box<dyn Executor>;
@@ -148,7 +150,7 @@ impl<'a, C: Clone> ExecutorBuilder<'a, C> {
 impl<'a, C: BatchTaskContext> ExecutorBuilder<'a, C> {
     pub async fn build(&self) -> Result<BoxedExecutor> {
         self.try_build().await.map_err(|e| {
-            InternalError(format!(
+            anyhow!(format!(
                 "[PlanNode: {:?}] Failed to build executor: {}",
                 self.plan_node.get_node_body(),
                 e,
@@ -185,6 +187,9 @@ impl<'a, C: BatchTaskContext> ExecutorBuilder<'a, C> {
             NodeBody::MergeSortExchange => MergeSortExchangeExecutorBuilder,
             NodeBody::TableFunction => TableFunctionExecutorBuilder,
             NodeBody::HopWindow => HopWindowExecutor,
+            NodeBody::SysRowSeqScan => SysRowSeqScanExecutorBuilder,
+            NodeBody::Expand => ExpandExecutor,
+            NodeBody::LookupJoin => LookupJoinExecutorBuilder,
         }
         .await?;
         let input_desc = real_executor.identity().to_string();

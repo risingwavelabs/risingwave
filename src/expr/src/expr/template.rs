@@ -51,16 +51,17 @@ macro_rules! gen_eval {
         fn eval(&self, data_chunk: &DataChunk) -> $crate::Result<ArrayRef> {
             paste! {
                 $(
-                    let [<ret_ $arg:lower>] = self.[<expr_ $arg:lower>].eval(data_chunk)?;
+                    let [<ret_ $arg:lower>] = self.[<expr_ $arg:lower>].eval_checked(data_chunk)?;
                     let [<arr_ $arg:lower>]: &$arg = [<ret_ $arg:lower>].as_ref().into();
                 )*
 
                 let bitmap = data_chunk.get_visibility_ref();
-                let mut output_array = <$OA as Array>::Builder::new(data_chunk.capacity())?;
+                let mut output_array = <$OA as Array>::Builder::new(data_chunk.capacity());
                 Ok(Arc::new(match bitmap {
                     Some(bitmap) => {
                         for (($([<v_ $arg:lower>], )*), visible) in multizip(($([<arr_ $arg:lower>].iter(), )*)).zip_eq(bitmap.iter()) {
                             if !visible {
+                                output_array.append_null()?;
                                 continue;
                             }
                             $macro!(self, output_array, $([<v_ $arg:lower>],)*)
@@ -86,7 +87,7 @@ macro_rules! gen_eval {
                 $(
                     let [<datum_ $arg:lower>] = self.[<expr_ $arg:lower>].eval_row(row)?;
 
-                    let mut [<builder_ $arg:lower>] = self.[<expr_ $arg:lower>].return_type().create_array_builder(1)?;
+                    let mut [<builder_ $arg:lower>] = self.[<expr_ $arg:lower>].return_type().create_array_builder(1);
                     let [<ref_ $arg:lower>] = &mut [<builder_ $arg:lower>];
 
                     for_all_variants! {array_impl_add_datum, [<ref_ $arg:lower>], [<datum_ $arg:lower>]}
@@ -95,7 +96,7 @@ macro_rules! gen_eval {
                     let [<arr_ $arg:lower>]: &$arg = [<arr_ $arg:lower>].as_ref().into();
                 )*
 
-                let mut output_array = <$OA as Array>::Builder::new(1)?;
+                let mut output_array = <$OA as Array>::Builder::new(1);
                 for ($([<v_ $arg:lower>], )*) in multizip(($([<arr_ $arg:lower>].iter(), )*)) {
                     $macro!(self, output_array, $([<v_ $arg:lower>],)*)
                 }
@@ -334,6 +335,7 @@ gen_expr_normal!(TernaryExpression, { IA1, IA2, IA3 }, { 'ia1, 'ia2, 'ia3 });
 gen_expr_bytes!(UnaryBytesExpression, { IA1 }, { 'ia1 });
 gen_expr_bytes!(BinaryBytesExpression, { IA1, IA2 }, { 'ia1, 'ia2 });
 gen_expr_bytes!(TernaryBytesExpression, { IA1, IA2, IA3 }, { 'ia1, 'ia2, 'ia3 });
+gen_expr_bytes!(QuaternaryBytesExpression, { IA1, IA2, IA3, IA4 }, { 'ia1, 'ia2, 'ia3, 'ia4 });
 
 gen_expr_nullable!(UnaryNullableExpression, { IA1 }, { 'ia1 });
 gen_expr_nullable!(BinaryNullableExpression, { IA1, IA2 }, { 'ia1, 'ia2 });
@@ -382,6 +384,8 @@ macro_rules! for_all_cmp_variants {
             { float32, decimal, float64, $general_f },
             { float64, decimal, float64, $general_f },
             { timestamp, timestamp, timestamp, $general_f },
+            { interval, interval, interval, $general_f },
+            { time, time, time, $general_f },
             { date, date, date, $general_f },
             { boolean, boolean, boolean, $general_f },
             { timestamp, date, timestamp, $general_f },

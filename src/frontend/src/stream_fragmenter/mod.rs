@@ -191,7 +191,7 @@ impl StreamFragmenter {
                 // memorize table id for later use
                 state
                     .dependent_table_ids
-                    .insert(TableId::from(&node.table_ref_id));
+                    .insert(TableId::new(node.table_id));
             }
 
             _ => {}
@@ -322,29 +322,37 @@ impl StreamFragmenter {
             NodeBody::HashJoin(hash_join_node) => {
                 // Allocate local table id. It will be rewrite to global table id after get table id
                 // offset from id generator.
-                hash_join_node.left_table_id = state.gen_table_id();
-                hash_join_node.right_table_id = state.gen_table_id();
+                if let Some(left_table) = &mut hash_join_node.left_table {
+                    left_table.id = state.gen_table_id();
+                }
+                if let Some(right_table) = &mut hash_join_node.right_table {
+                    right_table.id = state.gen_table_id();
+                }
             }
 
             NodeBody::GlobalSimpleAgg(node) | NodeBody::LocalSimpleAgg(node) => {
-                for _ in &node.agg_calls {
-                    node.table_ids.push(state.gen_table_id());
+                for table in &mut node.internal_tables {
+                    table.id = state.gen_table_id();
                 }
             }
 
             // Rewrite hash agg. One agg call -> one table id.
             NodeBody::HashAgg(hash_agg_node) => {
-                for _ in &hash_agg_node.agg_calls {
-                    hash_agg_node.table_ids.push(state.gen_table_id());
+                for table in &mut hash_agg_node.internal_tables {
+                    table.id = state.gen_table_id();
                 }
             }
 
             NodeBody::TopN(top_n_node) => {
-                top_n_node.table_id = state.gen_table_id();
+                top_n_node.table_id_l = state.gen_table_id();
+                top_n_node.table_id_m = state.gen_table_id();
+                top_n_node.table_id_h = state.gen_table_id();
             }
 
             NodeBody::AppendOnlyTopN(append_only_top_n_node) => {
-                append_only_top_n_node.table_id = state.gen_table_id();
+                append_only_top_n_node.table_id_l = state.gen_table_id();
+                append_only_top_n_node.table_id_m = state.gen_table_id();
+                append_only_top_n_node.table_id_h = state.gen_table_id();
             }
 
             _ => {}
@@ -354,10 +362,12 @@ impl StreamFragmenter {
 
 #[cfg(test)]
 mod tests {
+    use risingwave_pb::catalog::{Table, Table as ProstTable};
     use risingwave_pb::data::data_type::TypeName;
     use risingwave_pb::data::DataType;
     use risingwave_pb::expr::agg_call::{Arg, Type};
     use risingwave_pb::expr::{AggCall, InputRefExpr};
+    use risingwave_pb::plan_common::{ColumnCatalog, ColumnDesc, ColumnOrder};
     use risingwave_pb::stream_plan::*;
 
     use super::*;
@@ -380,6 +390,38 @@ mod tests {
         }
     }
 
+    fn make_column(column_type: TypeName, column_id: i32) -> ColumnCatalog {
+        ColumnCatalog {
+            column_desc: Some(ColumnDesc {
+                column_type: Some(DataType {
+                    type_name: column_type as i32,
+                    ..Default::default()
+                }),
+                column_id,
+                ..Default::default()
+            }),
+            is_hidden: false,
+        }
+    }
+
+    fn make_internal_table(is_agg_value: bool) -> ProstTable {
+        let mut columns = vec![make_column(TypeName::Int64, 0)];
+        if !is_agg_value {
+            columns.push(make_column(TypeName::Int32, 1));
+        }
+        ProstTable {
+            id: TableId::placeholder().table_id,
+            name: String::new(),
+            columns,
+            order_key: vec![ColumnOrder {
+                index: 0,
+                order_type: 2,
+            }],
+            pk: vec![2],
+            ..Default::default()
+        }
+    }
+
     #[test]
     fn test_assign_local_table_id_to_stream_node() {
         // let fragmenter = StreamFragmenter {};
@@ -391,6 +433,14 @@ mod tests {
             // test HashJoin Type
             let mut stream_node = StreamNode {
                 node_body: Some(NodeBody::HashJoin(HashJoinNode {
+                    left_table: Some(Table {
+                        id: 0,
+                        ..Default::default()
+                    }),
+                    right_table: Some(Table {
+                        id: 0,
+                        ..Default::default()
+                    }),
                     ..Default::default()
                 })),
                 ..Default::default()
@@ -399,9 +449,15 @@ mod tests {
 
             if let NodeBody::HashJoin(hash_join_node) = stream_node.node_body.as_ref().unwrap() {
                 expect_table_id += 1;
-                assert_eq!(expect_table_id, hash_join_node.left_table_id);
+                assert_eq!(
+                    expect_table_id,
+                    hash_join_node.left_table.as_ref().unwrap().id
+                );
                 expect_table_id += 1;
-                assert_eq!(expect_table_id, hash_join_node.right_table_id);
+                assert_eq!(
+                    expect_table_id,
+                    hash_join_node.right_table.as_ref().unwrap().id
+                );
             }
         }
 
@@ -414,6 +470,11 @@ mod tests {
                         make_sum_aggcall(1),
                         make_sum_aggcall(2),
                     ],
+                    internal_tables: vec![
+                        make_internal_table(true),
+                        make_internal_table(false),
+                        make_internal_table(false),
+                    ],
                     ..Default::default()
                 })),
                 ..Default::default()
@@ -425,12 +486,11 @@ mod tests {
             {
                 assert_eq!(
                     global_simple_agg_node.agg_calls.len(),
-                    global_simple_agg_node.table_ids.len()
+                    global_simple_agg_node.internal_tables.len()
                 );
-
-                for table_id in &global_simple_agg_node.table_ids {
+                for table in &global_simple_agg_node.internal_tables {
                     expect_table_id += 1;
-                    assert_eq!(expect_table_id, *table_id);
+                    assert_eq!(expect_table_id, table.id);
                 }
             }
         }
@@ -445,6 +505,12 @@ mod tests {
                         make_sum_aggcall(2),
                         make_sum_aggcall(3),
                     ],
+                    internal_tables: vec![
+                        make_internal_table(true),
+                        make_internal_table(false),
+                        make_internal_table(false),
+                        make_internal_table(false),
+                    ],
                     ..Default::default()
                 })),
                 ..Default::default()
@@ -452,11 +518,13 @@ mod tests {
             StreamFragmenter::assign_local_table_id_to_stream_node(&mut state, &mut stream_node);
 
             if let NodeBody::HashAgg(hash_agg_node) = stream_node.node_body.as_ref().unwrap() {
-                assert_eq!(hash_agg_node.agg_calls.len(), hash_agg_node.table_ids.len());
-
-                for table_id in &hash_agg_node.table_ids {
+                assert_eq!(
+                    hash_agg_node.agg_calls.len(),
+                    hash_agg_node.internal_tables.len()
+                );
+                for table in &hash_agg_node.internal_tables {
                     expect_table_id += 1;
-                    assert_eq!(expect_table_id, *table_id);
+                    assert_eq!(expect_table_id, table.id);
                 }
             }
         }
@@ -472,8 +540,8 @@ mod tests {
             StreamFragmenter::assign_local_table_id_to_stream_node(&mut state, &mut stream_node);
 
             if let NodeBody::TopN(top_n_node) = stream_node.node_body.as_ref().unwrap() {
-                expect_table_id += 1;
-                assert_eq!(expect_table_id, top_n_node.table_id);
+                expect_table_id += 3;
+                assert_eq!(expect_table_id, top_n_node.table_id_h);
             }
         }
 
@@ -490,8 +558,8 @@ mod tests {
             if let NodeBody::AppendOnlyTopN(append_only_top_n_node) =
                 stream_node.node_body.as_ref().unwrap()
             {
-                expect_table_id += 1;
-                assert_eq!(expect_table_id, append_only_top_n_node.table_id);
+                expect_table_id += 3;
+                assert_eq!(expect_table_id, append_only_top_n_node.table_id_h);
             }
         }
     }

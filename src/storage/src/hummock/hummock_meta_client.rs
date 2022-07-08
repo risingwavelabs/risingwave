@@ -15,8 +15,9 @@
 use std::sync::Arc;
 
 use async_trait::async_trait;
+use risingwave_hummock_sdk::LocalSstableInfo;
 use risingwave_pb::hummock::{
-    CompactTask, CompactionGroup, HummockVersion, SstableInfo, SubscribeCompactTasksResponse,
+    CompactTask, CompactionGroup, HummockVersion, SstableIdInfo, SubscribeCompactTasksResponse,
     VacuumTask,
 };
 use risingwave_rpc_client::error::Result;
@@ -56,18 +57,26 @@ impl HummockMetaClient for MonitoredHummockMetaClient {
         res
     }
 
-    async fn pin_snapshot(&self, last_pinned: HummockEpoch) -> Result<HummockEpoch> {
+    async fn pin_snapshot(&self) -> Result<HummockEpoch> {
         self.stats.pin_snapshot_counts.inc();
         let timer = self.stats.pin_snapshot_latency.start_timer();
-        let res = self.meta_client.pin_snapshot(last_pinned).await;
+        let res = self.meta_client.pin_snapshot().await;
         timer.observe_duration();
         res
     }
 
-    async fn unpin_snapshot(&self, pinned_epochs: &[HummockEpoch]) -> Result<()> {
+    async fn get_epoch(&self) -> Result<HummockEpoch> {
+        self.stats.pin_snapshot_counts.inc();
+        let timer = self.stats.pin_snapshot_latency.start_timer();
+        let res = self.meta_client.get_epoch().await;
+        timer.observe_duration();
+        res
+    }
+
+    async fn unpin_snapshot(&self) -> Result<()> {
         self.stats.unpin_snapshot_counts.inc();
         let timer = self.stats.unpin_snapshot_latency.start_timer();
-        let res = self.meta_client.unpin_snapshot(pinned_epochs).await;
+        let res = self.meta_client.unpin_snapshot().await;
         timer.observe_duration();
         res
     }
@@ -92,7 +101,11 @@ impl HummockMetaClient for MonitoredHummockMetaClient {
         res
     }
 
-    async fn commit_epoch(&self, _epoch: HummockEpoch, _sstables: Vec<SstableInfo>) -> Result<()> {
+    async fn commit_epoch(
+        &self,
+        _epoch: HummockEpoch,
+        _sstables: Vec<LocalSstableInfo>,
+    ) -> Result<()> {
         panic!("Only meta service can commit_epoch in production.")
     }
 
@@ -108,9 +121,18 @@ impl HummockMetaClient for MonitoredHummockMetaClient {
         self.meta_client.get_compaction_groups().await
     }
 
-    async fn trigger_manual_compaction(&self, compaction_group_id: u64) -> Result<()> {
+    async fn trigger_manual_compaction(
+        &self,
+        compaction_group_id: u64,
+        table_id: u32,
+        level: u32,
+    ) -> Result<()> {
         self.meta_client
-            .trigger_manual_compaction(compaction_group_id)
+            .trigger_manual_compaction(compaction_group_id, table_id, level)
             .await
+    }
+
+    async fn list_sstable_id_infos(&self, _version_id: u64) -> Result<Vec<SstableIdInfo>> {
+        todo!()
     }
 }

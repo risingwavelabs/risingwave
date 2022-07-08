@@ -14,6 +14,7 @@
 
 use std::sync::Arc;
 
+use risingwave_common::catalog::SysCatalogReaderRef;
 use risingwave_common::error::ErrorCode::InternalError;
 use risingwave_common::error::Result;
 use risingwave_common::util::addr::{is_local_address, HostAddr};
@@ -31,6 +32,15 @@ pub trait BatchTaskContext: Clone + Send + Sync + 'static {
     ///
     /// Returns error if the task of `task_output_id` doesn't run in same worker as current task.
     fn get_task_output(&self, task_output_id: TaskOutputId) -> Result<TaskOutput>;
+
+    /// Get system catalog reader, used to read system table.
+    fn catalog_reader_ref(&self) -> Option<SysCatalogReaderRef>;
+
+    fn try_get_catalog_reader_ref(&self) -> Result<SysCatalogReaderRef> {
+        Ok(self
+            .catalog_reader_ref()
+            .ok_or_else(|| InternalError("Sys catalog reader not found".to_string()))?)
+    }
 
     /// Whether `peer_addr` is in same as current task.
     fn is_local_addr(&self, peer_addr: &HostAddr) -> bool;
@@ -65,6 +75,10 @@ impl BatchTaskContext for ComputeNodeContext {
         self.env
             .task_manager()
             .take_output(&task_output_id.to_prost())
+    }
+
+    fn catalog_reader_ref(&self) -> Option<SysCatalogReaderRef> {
+        None
     }
 
     fn is_local_addr(&self, peer_addr: &HostAddr) -> bool {

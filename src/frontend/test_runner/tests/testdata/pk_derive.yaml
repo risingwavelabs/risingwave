@@ -21,16 +21,15 @@
         Tone.id = Ttwo.id;
   stream_plan: |
     StreamMaterialize { columns: [max_v1, max_v2, id(hidden), id#1(hidden)], pk_columns: [id, id#1] }
-      StreamProject { exprs: [$0, $2, $1, $3] }
-        StreamHashJoin { type: Inner, predicate: $1 = $3 }
-          StreamProject { exprs: [$2, $0] }
-            StreamHashAgg { group_keys: [$0], aggs: [count, max($1)] }
-              StreamExchange { dist: HashShard([0]) }
-                StreamTableScan { table: t1, columns: [id, v1, _row_id], pk_indices: [2] }
-          StreamProject { exprs: [$2, $0] }
-            StreamHashAgg { group_keys: [$0], aggs: [count, max($1)] }
-              StreamExchange { dist: HashShard([0]) }
-                StreamTableScan { table: t2, columns: [id, v2, _row_id], pk_indices: [2] }
+      StreamHashJoin { type: Inner, predicate: $1 = $3, output_indices: [0, 2, 1, 3] }
+        StreamProject { exprs: [$2, $0] }
+          StreamHashAgg { group_key: [$0], aggs: [count, max($1)] }
+            StreamExchange { dist: HashShard([0]) }
+              StreamTableScan { table: t1, columns: [id, v1, _row_id], pk_indices: [2] }
+        StreamProject { exprs: [$2, $0] }
+          StreamHashAgg { group_key: [$0], aggs: [count, max($1)] }
+            StreamExchange { dist: HashShard([0]) }
+              StreamTableScan { table: t2, columns: [id, v2, _row_id], pk_indices: [2] }
 - sql: |
     create table t (id int, v int);
     SELECT Tone.max_v, Ttwo.min_v
@@ -52,16 +51,15 @@
         Tone.id = Ttwo.id;
   stream_plan: |
     StreamMaterialize { columns: [max_v, min_v, id(hidden), id#1(hidden)], pk_columns: [id, id#1] }
-      StreamProject { exprs: [$0, $2, $1, $3] }
-        StreamHashJoin { type: Inner, predicate: $1 = $3 }
-          StreamProject { exprs: [$2, $0] }
-            StreamHashAgg { group_keys: [$0], aggs: [count, max($1)] }
-              StreamExchange { dist: HashShard([0]) }
-                StreamTableScan { table: t, columns: [id, v, _row_id], pk_indices: [2] }
-          StreamProject { exprs: [$2, $0] }
-            StreamHashAgg { group_keys: [$0], aggs: [count, min($1)] }
-              StreamExchange { dist: HashShard([0]) }
-                StreamTableScan { table: t, columns: [id, v, _row_id], pk_indices: [2] }
+      StreamHashJoin { type: Inner, predicate: $1 = $3, output_indices: [0, 2, 1, 3] }
+        StreamProject { exprs: [$2, $0] }
+          StreamHashAgg { group_key: [$0], aggs: [count, max($1)] }
+            StreamExchange { dist: HashShard([0]) }
+              StreamTableScan { table: t, columns: [id, v, _row_id], pk_indices: [2] }
+        StreamProject { exprs: [$2, $0] }
+          StreamHashAgg { group_key: [$0], aggs: [count, min($1)] }
+            StreamExchange { dist: HashShard([0]) }
+              StreamTableScan { table: t, columns: [id, v, _row_id], pk_indices: [2] }
 - sql: |
     create table t (v1 varchar, v2 varchar, v3 varchar);
     select
@@ -73,11 +71,11 @@
         v2,
         v3;
   optimized_logical_plan: |
-    LogicalAgg { group_keys: [0, 1, 2], agg_calls: [] }
+    LogicalAgg { group_key: [0, 1, 2], agg_calls: [] }
       LogicalScan { table: t, columns: [v1, v2, v3] }
   stream_plan: |
     StreamMaterialize { columns: [v1, v2, v3, agg#0(hidden)], pk_columns: [v1, v2, v3] }
-      StreamHashAgg { group_keys: [$0, $1, $2], aggs: [count] }
+      StreamHashAgg { group_key: [$0, $1, $2], aggs: [count] }
         StreamExchange { dist: HashShard([0, 1, 2]) }
           StreamTableScan { table: t, columns: [v1, v2, v3, _row_id], pk_indices: [3] }
 - sql: |

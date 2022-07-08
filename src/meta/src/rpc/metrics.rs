@@ -34,6 +34,14 @@ pub struct MetaMetrics {
     /// latency of each barrier
     pub barrier_latency: Histogram,
 
+    /// latency between each barrier send
+    pub barrier_send_latency: Histogram,
+    /// the nums of all barrier. the it is the sum of in-flight and complete but waiting for other
+    /// barrier
+    pub all_barrier_nums: IntGauge,
+    /// the nums of in-flight barrier
+    pub in_flight_barrier_nums: IntGauge,
+
     /// max committed epoch
     pub max_committed_epoch: IntGauge,
     /// num of uncommitted SSTs,
@@ -65,6 +73,26 @@ impl MetaMetrics {
             exponential_buckets(0.1, 1.5, 16).unwrap() // max 43s
         );
         let barrier_latency = register_histogram_with_registry!(opts, registry).unwrap();
+
+        let opts = histogram_opts!(
+            "meta_barrier_send_duration_seconds",
+            "barrier send latency",
+            exponential_buckets(0.0001, 2.0, 20).unwrap() // max 52s
+        );
+        let barrier_send_latency = register_histogram_with_registry!(opts, registry).unwrap();
+
+        let all_barrier_nums = register_int_gauge_with_registry!(
+            "all_barrier_nums",
+            "num of of all_barrier",
+            registry
+        )
+        .unwrap();
+        let in_flight_barrier_nums = register_int_gauge_with_registry!(
+            "in_flight_barrier_nums",
+            "num of of in_flight_barrier",
+            registry
+        )
+        .unwrap();
 
         let max_committed_epoch = register_int_gauge_with_registry!(
             "storage_max_committed_epoch",
@@ -111,6 +139,9 @@ impl MetaMetrics {
 
             grpc_latency,
             barrier_latency,
+            barrier_send_latency,
+            all_barrier_nums,
+            in_flight_barrier_nums,
 
             max_committed_epoch,
             uncommitted_sst_num,
@@ -139,6 +170,10 @@ impl MetaMetrics {
                 eprintln!("server error: {}", err);
             }
         });
+    }
+
+    pub fn registry(&self) -> &Registry {
+        &self.registry
     }
 
     async fn metrics_service(req: Request<Body>) -> Result<Response<Body>, hyper::Error> {

@@ -23,16 +23,16 @@ use itertools::Itertools;
 use risingwave_common::catalog::TableId;
 use risingwave_common::error::{internal_error, Result, RwError, ToRwResult};
 use risingwave_common::try_match_expand;
-use risingwave_connector::{ConnectorProperties, SplitEnumeratorImpl, SplitImpl};
+use risingwave_connector::{ConnectorProperties, SplitEnumeratorImpl, SplitImpl, SplitMetaData};
 use risingwave_pb::catalog::source::Info;
 use risingwave_pb::catalog::source::Info::StreamSource;
 use risingwave_pb::catalog::Source;
 use risingwave_pb::common::worker_node::State::Running;
 use risingwave_pb::common::WorkerType;
 use risingwave_pb::data::barrier::Mutation;
-use risingwave_pb::data::{SourceChangeSplit, SourceChangeSplitMutation};
-use risingwave_pb::meta::{
-    SourceActorInfo as ProstSourceActorInfo, SourceActorSplit as ProstSourceActorSplit,
+use risingwave_pb::data::SourceChangeSplitMutation;
+use risingwave_pb::source::{
+    ConnectorSplit, ConnectorSplits, SourceActorInfo as ProstSourceActorInfo,
 };
 use risingwave_pb::stream_service::{
     CreateSourceRequest as ComputeNodeCreateSourceRequest,
@@ -48,6 +48,7 @@ use tokio_retry::strategy::FixedInterval;
 
 use crate::barrier::{BarrierManagerRef, Command};
 use crate::cluster::ClusterManagerRef;
+use crate::hummock::compaction_group::manager::CompactionGroupManagerRef;
 use crate::manager::{CatalogManagerRef, MetaSrvEnv, SourceId};
 use crate::model::{ActorId, FragmentId, MetadataModel, TableFragments, Transactional};
 use crate::storage::{MetaStore, Transaction};
@@ -63,6 +64,7 @@ pub struct SourceManager<S: MetaStore> {
     cluster_manager: ClusterManagerRef<S>,
     catalog_manager: CatalogManagerRef<S>,
     barrier_manager: BarrierManagerRef<S>,
+    compaction_group_manager: CompactionGroupManagerRef<S>,
     core: Arc<Mutex<SourceManagerCore<S>>>,
 }
 
@@ -97,14 +99,9 @@ impl MetadataModel for SourceActorInfo {
     fn to_protobuf(&self) -> Self::ProstType {
         Self::ProstType {
             actor_id: self.actor_id,
-            splits: self
-                .splits
-                .iter()
-                .map(|split| ProstSourceActorSplit {
-                    r#type: split.get_type(),
-                    split: split.to_json_bytes().to_vec(),
-                })
-                .collect(),
+            splits: Some(ConnectorSplits {
+                splits: self.splits.iter().map(ConnectorSplit::from).collect(),
+            }),
         }
     }
 
@@ -113,8 +110,10 @@ impl MetadataModel for SourceActorInfo {
             actor_id: prost.actor_id,
             splits: prost
                 .splits
+                .unwrap_or_default()
+                .splits
                 .into_iter()
-                .map(|split| SplitImpl::restore_from_bytes(split.r#type, &split.split).unwrap())
+                .map(|split| SplitImpl::try_from(&split).unwrap())
                 .collect(),
         }
     }
@@ -411,6 +410,7 @@ where
         barrier_manager: BarrierManagerRef<S>,
         catalog_manager: CatalogManagerRef<S>,
         fragment_manager: FragmentManagerRef<S>,
+        compaction_group_manager: CompactionGroupManagerRef<S>,
     ) -> Result<Self> {
         let mut managed_sources = HashMap::new();
         {
@@ -447,6 +447,7 @@ where
             cluster_manager,
             catalog_manager,
             barrier_manager,
+            compaction_group_manager,
             core,
         })
     }
@@ -576,6 +577,30 @@ where
 
     /// Broadcast the create source request to all compute nodes.
     pub async fn create_source(&self, source: &Source) -> Result<()> {
+        // This scope guard does clean up jobs ASYNCHRONOUSLY before Err returns.
+        // It MUST be cleared before Ok returns.
+        let mut revert_funcs = scopeguard::guard(
+            vec![],
+            |revert_funcs: Vec<futures::future::BoxFuture<()>>| {
+                tokio::spawn(async move {
+                    for revert_func in revert_funcs {
+                        revert_func.await;
+                    }
+                });
+            },
+        );
+
+        // Register beforehand and is safeguarded by CompactionGroupManager::purge_stale_members.
+        let registered_table_ids = self
+            .compaction_group_manager
+            .register_source(source.id, &HashMap::new())
+            .await?;
+        let compaction_group_manager_ref = self.compaction_group_manager.clone();
+        revert_funcs.push(Box::pin(async move {
+            if let Err(e) = compaction_group_manager_ref.unregister_table_ids(&registered_table_ids).await {
+                tracing::warn!("Failed to unregister_table_ids {:#?}.\nThey will be cleaned up on node restart.\n{:#?}", registered_table_ids, e);
+            }
+        }));
         let futures = self
             .all_stream_clients()
             .await?
@@ -593,6 +618,7 @@ where
         let mut core = self.core.lock().await;
         if core.managed_sources.contains_key(&source.get_id()) {
             log::warn!("source {} already registered", source.get_id());
+            revert_funcs.clear();
             return Ok(());
         }
 
@@ -600,6 +626,7 @@ where
             Self::create_source_worker(source, &mut core.managed_sources).await?;
         }
 
+        revert_funcs.clear();
         Ok(())
     }
 
@@ -647,6 +674,21 @@ where
                 "dropping source {}, but associated fragments still exists",
                 source_id
             );
+            core.source_fragments.remove(&source_id);
+        } else {
+            // Unregister afterwards and is safeguarded by
+            // CompactionGroupManager::purge_stale_members.
+            if let Err(e) = self
+                .compaction_group_manager
+                .unregister_source(source_id)
+                .await
+            {
+                tracing::warn!(
+                    "Failed to unregister source {}. It wll be unregistered eventually.\n{:#?}",
+                    source_id,
+                    e
+                );
+            }
         }
 
         Ok(())
@@ -659,21 +701,19 @@ where
         };
 
         if !diff.is_empty() {
-            let command = Command::Plain(Mutation::Splits(SourceChangeSplitMutation {
-                mutations: diff
+            let command = Command::Plain(Some(Mutation::Splits(SourceChangeSplitMutation {
+                actor_splits: diff
                     .iter()
-                    .filter(|(_, splits)| !splits.is_empty())
-                    .map(|(actor_id, splits)| SourceChangeSplit {
-                        actor_id: *actor_id,
-                        split_type: splits.first().unwrap().get_type(),
-                        source_splits: splits
-                            .iter()
-                            .map(|split| split.to_json_bytes().to_vec())
-                            .collect(),
+                    .map(|(&actor_id, splits)| {
+                        (
+                            actor_id,
+                            ConnectorSplits {
+                                splits: splits.iter().map(ConnectorSplit::from).collect(),
+                            },
+                        )
                     })
                     .collect(),
-            }));
-
+            })));
             log::debug!("pushing down mutation {:#?}", command);
 
             tokio_retry::Retry::spawn(FixedInterval::new(Self::SOURCE_RETRY_INTERVAL), || async {
@@ -703,5 +743,15 @@ where
                 );
             }
         }
+    }
+
+    pub async fn get_source_ids_in_fragments(&self) -> Vec<SourceId> {
+        self.core
+            .lock()
+            .await
+            .source_fragments
+            .keys()
+            .cloned()
+            .collect_vec()
     }
 }

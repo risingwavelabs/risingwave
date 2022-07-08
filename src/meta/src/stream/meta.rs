@@ -16,19 +16,17 @@ use std::collections::hash_map::Entry;
 use std::collections::{BTreeMap, HashMap, HashSet};
 use std::sync::Arc;
 
-use itertools::Itertools;
 use risingwave_common::catalog::TableId;
 use risingwave_common::error::ErrorCode::InternalError;
 use risingwave_common::error::{Result, RwError};
-use risingwave_common::hash::VIRTUAL_NODE_COUNT;
 use risingwave_common::try_match_expand;
+use risingwave_common::types::{ParallelUnitId, VIRTUAL_NODE_COUNT};
 use risingwave_common::util::compress::decompress_data;
 use risingwave_pb::meta::table_fragments::ActorState;
 use risingwave_pb::stream_plan::{Dispatcher, DispatcherType, FragmentType, StreamActor};
 use tokio::sync::RwLock;
 
-use crate::cluster::{ParallelUnitId, WorkerId};
-use crate::hummock::compaction_group::manager::CompactionGroupManagerRef;
+use crate::cluster::WorkerId;
 use crate::manager::{HashMappingManagerRef, MetaSrvEnv};
 use crate::model::{ActorId, DispatcherId, MetadataModel, TableFragments, Transactional};
 use crate::storage::{MetaStore, Transaction};
@@ -43,8 +41,6 @@ pub struct FragmentManager<S: MetaStore> {
     meta_store: Arc<S>,
 
     core: RwLock<FragmentManagerCore>,
-
-    compaction_group_manager: CompactionGroupManagerRef<S>,
 }
 
 pub struct ActorInfos {
@@ -67,10 +63,7 @@ impl<S: MetaStore> FragmentManager<S>
 where
     S: MetaStore,
 {
-    pub async fn new(
-        env: MetaSrvEnv<S>,
-        compaction_group_manager: CompactionGroupManagerRef<S>,
-    ) -> Result<Self> {
+    pub async fn new(env: MetaSrvEnv<S>) -> Result<Self> {
         let meta_store = env.meta_store_ref();
         let table_fragments = try_match_expand!(
             TableFragments::list(&*meta_store).await,
@@ -85,15 +78,9 @@ where
 
         Self::restore_vnode_mappings(env.hash_mapping_manager_ref(), &table_fragments)?;
 
-        let table_fragments_list = table_fragments.values().collect_vec();
-        compaction_group_manager
-            .purge_stale_members(&table_fragments_list)
-            .await?;
-
         Ok(Self {
             meta_store,
             core: RwLock::new(FragmentManagerCore { table_fragments }),
-            compaction_group_manager,
         })
     }
 
@@ -146,13 +133,6 @@ where
                 table_fragment.table_id()
             )))),
             Entry::Vacant(v) => {
-                // Register to compaction group beforehand.
-                // If any following operation fails, the registration will be eventually reverted by
-                // CompactionGroupManager::purge_stale_members.
-                self.compaction_group_manager
-                    .register_table_fragments(&table_fragment)
-                    .await?;
-
                 table_fragment.insert(&*self.meta_store).await?;
                 v.insert(table_fragment);
                 Ok(())
@@ -167,15 +147,7 @@ where
         match map.entry(*table_id) {
             Entry::Occupied(o) => {
                 TableFragments::delete(&*self.meta_store, &table_id.table_id).await?;
-                let table_fragments = o.remove();
-                // Unregister from compaction group afterwards.
-                if let Err(e) = self
-                    .compaction_group_manager
-                    .unregister_table_fragments(&table_fragments)
-                    .await
-                {
-                    tracing::warn!("Failed to unregister table {}. It wll be unregistered eventually by CompactionGroupManager::purge_stale_members.\n{:#?}", table_id, e);
-                }
+                o.remove();
                 Ok(())
             }
             Entry::Vacant(_) => Err(RwError::from(InternalError(format!(
@@ -298,17 +270,9 @@ where
             }
 
             self.meta_store.txn(transaction).await?;
-            let table_fragments = map.remove(table_id).unwrap();
+            map.remove(table_id).unwrap();
             for dependent_table in dependent_tables {
                 map.insert(dependent_table.table_id(), dependent_table);
-            }
-            // Unregister from compaction group afterwards.
-            if let Err(e) = self
-                .compaction_group_manager
-                .unregister_table_fragments(&table_fragments)
-                .await
-            {
-                tracing::warn!("Failed to unregister table {}. It wll be unregistered eventually by CompactionGroupManager::purge_stale_members.\n{:#?}", table_id, e);
             }
             Ok(())
         } else {
@@ -319,21 +283,20 @@ where
         }
     }
 
-    /// Used in [`crate::barrier::GlobalBarrierManager`]
-    pub async fn load_all_actors(&self, with_creating_table: Option<TableId>) -> ActorInfos {
+    /// Used in [`crate::barrier::GlobalBarrierManager`], load all actor that need to be sent or
+    /// collected
+    pub async fn load_all_actors(
+        &self,
+        check_state: impl Fn(ActorState, &TableId) -> bool,
+    ) -> ActorInfos {
         let mut actor_maps = HashMap::new();
         let mut source_actor_ids = HashMap::new();
 
         let map = &self.core.read().await.table_fragments;
         for fragments in map.values() {
-            let include_inactive = with_creating_table.contains(&fragments.table_id());
-            let check_state = |s: ActorState| {
-                s == ActorState::Running || include_inactive && s == ActorState::Inactive
-            };
-
             for (node_id, actor_states) in fragments.node_actor_states() {
                 for actor_state in actor_states {
-                    if check_state(actor_state.1) {
+                    if check_state(actor_state.1, &fragments.table_id()) {
                         actor_maps
                             .entry(node_id)
                             .or_insert_with(Vec::new)
@@ -345,7 +308,7 @@ where
             let source_actors = fragments.node_source_actor_states();
             for (&node_id, actor_states) in &source_actors {
                 for actor_state in actor_states {
-                    if check_state(actor_state.1) {
+                    if check_state(actor_state.1, &fragments.table_id()) {
                         source_actor_ids
                             .entry(node_id)
                             .or_insert_with(Vec::new)

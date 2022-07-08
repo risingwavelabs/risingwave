@@ -25,7 +25,7 @@ use crate::expr::{
     try_get_bool_constant, ExprImpl, ExprRewriter, ExprType, ExprVisitor, InputRef,
 };
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub struct Condition {
     /// Condition expressions in conjunction form (combined with `AND`)
     pub conjunctions: Vec<ExprImpl>,
@@ -278,6 +278,11 @@ impl Condition {
             for expr in group {
                 if let Some((input_ref, lit)) = expr.as_eq_const() {
                     assert_eq!(input_ref.index, order_column_ids[i]);
+                    if lit.is_null() {
+                        // Always false
+                        return (ScanRange::full_table_scan(), Self::false_cond());
+                    }
+                    let lit = lit.eval_as(input_ref.data_type);
                     if let Some(l) = eq_cond && l != lit {
                         // Always false
                         return (
@@ -288,6 +293,11 @@ impl Condition {
                     eq_cond = Some(lit);
                 } else if let Some((input_ref, op, lit)) = expr.as_comparison_const() {
                     assert_eq!(input_ref.index, order_column_ids[i]);
+                    if lit.is_null() {
+                        // Always false
+                        return (ScanRange::full_table_scan(), Self::false_cond());
+                    }
+                    let lit = lit.eval_as(input_ref.data_type);
                     match op {
                         ExprType::LessThan => {
                             ub.push((Bound::Excluded(lit), expr));
@@ -369,7 +379,7 @@ impl Condition {
     }
 
     #[must_use]
-    pub fn rewrite_expr(self, rewriter: &mut impl ExprRewriter) -> Self {
+    pub fn rewrite_expr(self, rewriter: &mut (impl ExprRewriter + ?Sized)) -> Self {
         Self {
             conjunctions: self
                 .conjunctions

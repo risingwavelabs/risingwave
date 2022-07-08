@@ -37,13 +37,12 @@ impl BatchHashAgg {
         let input = logical.input();
         let input_dist = input.distribution();
         let dist = match input_dist {
-            Distribution::Single => Distribution::Single,
             Distribution::HashShard(_) => logical
                 .i2o_col_mapping()
                 .rewrite_provided_distribution(input_dist),
-            Distribution::SomeShard => Distribution::SomeShard,
+            d => d.clone(),
         };
-        let base = PlanBase::new_batch(ctx, logical.schema().clone(), dist, Order::any().clone());
+        let base = PlanBase::new_batch(ctx, logical.schema().clone(), dist, Order::any());
         BatchHashAgg { base, logical }
     }
 
@@ -51,8 +50,8 @@ impl BatchHashAgg {
         self.logical.agg_calls()
     }
 
-    pub fn group_keys(&self) -> &[usize] {
-        self.logical.group_keys()
+    pub fn group_key(&self) -> &[usize] {
+        self.logical.group_key()
     }
 }
 
@@ -60,9 +59,9 @@ impl fmt::Display for BatchHashAgg {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         f.debug_struct("BatchHashAgg")
             .field(
-                "group_keys",
+                "group_key",
                 &self
-                    .group_keys()
+                    .group_key()
                     .iter()
                     .copied()
                     .map(InputRefDisplay)
@@ -86,8 +85,8 @@ impl_plan_tree_node_for_unary! { BatchHashAgg }
 impl ToDistributedBatch for BatchHashAgg {
     fn to_distributed(&self) -> Result<PlanRef> {
         let new_input = self.input().to_distributed_with_required(
-            Order::any(),
-            &RequiredDist::shard_by_key(self.input().schema().len(), self.group_keys()),
+            &Order::any(),
+            &RequiredDist::shard_by_key(self.input().schema().len(), self.group_key()),
         )?;
         Ok(self.clone_with_input(new_input).into())
     }
@@ -101,8 +100,8 @@ impl ToBatchProst for BatchHashAgg {
                 .iter()
                 .map(PlanAggCall::to_protobuf)
                 .collect(),
-            group_keys: self
-                .group_keys()
+            group_key: self
+                .group_key()
                 .iter()
                 .clone()
                 .map(|index| *index as u32)
@@ -115,7 +114,8 @@ impl ToLocalBatch for BatchHashAgg {
     fn to_local(&self) -> Result<PlanRef> {
         let new_input = self.input().to_local()?;
 
-        let new_input = RequiredDist::single().enforce_if_not_satisfies(new_input, Order::any())?;
+        let new_input =
+            RequiredDist::single().enforce_if_not_satisfies(new_input, &Order::any())?;
 
         Ok(self.clone_with_input(new_input).into())
     }

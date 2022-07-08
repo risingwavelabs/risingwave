@@ -34,14 +34,11 @@ impl BatchSimpleAgg {
         let ctx = logical.base.ctx.clone();
         let input = logical.input();
         let input_dist = input.distribution();
-        match input_dist {
-            Distribution::Single | Distribution::SomeShard | Distribution::HashShard(_) => {}
-        };
         let base = PlanBase::new_batch(
             ctx,
             logical.schema().clone(),
             input_dist.clone(),
-            Order::any().clone(),
+            Order::any(),
         );
         BatchSimpleAgg { base, logical }
     }
@@ -76,13 +73,16 @@ impl ToDistributedBatch for BatchSimpleAgg {
         // (e.g. see distribution of BatchSeqScan::new vs BatchSeqScan::to_distributed)
         let dist_input = self.input().to_distributed()?;
 
-        if dist_input.distribution().satisfies(&RequiredDist::AnyShard) {
+        // TODO: distinct agg cannot use 2-phase agg yet.
+        if dist_input.distribution().satisfies(&RequiredDist::AnyShard)
+            && self.logical.agg_calls().iter().any(|call| !call.distinct)
+        {
             // partial agg
             let partial_agg = self.clone_with_input(dist_input).into();
 
             // insert exchange
             let exchange =
-                BatchExchange::new(partial_agg, Order::any().clone(), Distribution::Single).into();
+                BatchExchange::new(partial_agg, Order::any(), Distribution::Single).into();
 
             // insert total agg
             let total_agg_types = self
@@ -94,16 +94,13 @@ impl ToDistributedBatch for BatchSimpleAgg {
                     agg_call.partial_to_total_agg_call(partial_output_idx)
                 })
                 .collect();
-            let total_agg_logical = LogicalAgg::new(
-                total_agg_types,
-                self.logical.group_keys().to_vec(),
-                exchange,
-            );
+            let total_agg_logical =
+                LogicalAgg::new(total_agg_types, self.logical.group_key().to_vec(), exchange);
             Ok(BatchSimpleAgg::new(total_agg_logical).into())
         } else {
             let new_input = self
                 .input()
-                .to_distributed_with_required(Order::any(), &RequiredDist::single())?;
+                .to_distributed_with_required(&Order::any(), &RequiredDist::single())?;
             Ok(self.clone_with_input(new_input).into())
         }
     }
@@ -117,8 +114,8 @@ impl ToBatchProst for BatchSimpleAgg {
                 .iter()
                 .map(PlanAggCall::to_protobuf)
                 .collect(),
-            // We treat simple agg as a special sort agg without group keys.
-            group_keys: vec![],
+            // We treat simple agg as a special sort agg without group key.
+            group_key: vec![],
         })
     }
 }
@@ -127,7 +124,8 @@ impl ToLocalBatch for BatchSimpleAgg {
     fn to_local(&self) -> Result<PlanRef> {
         let new_input = self.input().to_local()?;
 
-        let new_input = RequiredDist::single().enforce_if_not_satisfies(new_input, Order::any())?;
+        let new_input =
+            RequiredDist::single().enforce_if_not_satisfies(new_input, &Order::any())?;
 
         Ok(self.clone_with_input(new_input).into())
     }

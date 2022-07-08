@@ -1,17 +1,22 @@
 [package]
 name = "risingwave_storage"
-version = "0.1.9"
+version = "0.1.10"
 edition = "2021"
 
 [dependencies]
 anyhow = "1"
 async-trait = "0.1"
+auto_enums = { version = "0.7", features = ["futures"] }
 byteorder = "1"
 bytes = { version = "1", features = ["serde"] }
-chrono = { version = "0.4", default-features = false, features = ["clock", "std"] }
+chrono = { version = "0.4", default-features = false, features = [
+    "clock",
+    "std",
+] }
 crc32fast = "1"
 crossbeam = "0.8.1"
 dashmap = { version = "5", default-features = false }
+dyn-clone = "1.0.4"
 either = "1"
 enum-as-inner = "0.5"
 fail = "0.5"
@@ -26,7 +31,9 @@ log = "0.4"
 lz4 = "1.23.1"
 madsim = "=0.2.0-alpha.3"
 memcomparable = { path = "../utils/memcomparable" }
-moka = { version = "0.8", features = ["future"] }
+minstant = "0.1"
+moka = { version = "0.9", features = ["future"] }
+nix = { version = "0.24.1", features = ["fs"] }
 num-integer = "0.1"
 num-traits = "0.2"
 parking_lot = "0.12"
@@ -58,6 +65,7 @@ tokio = { version = "=0.2.0-alpha.3", package = "madsim-tokio", features = [
     "time",
     "signal",
 ] }
+tokio-metrics = "0.1.0"
 tokio-retry = "0.3"
 tokio-stream = "0.1"
 tonic = { version = "=0.2.0-alpha.3", package = "madsim-tonic" }
@@ -66,10 +74,6 @@ twox-hash = "1"
 value-encoding = { path = "../utils/value-encoding" }
 workspace-hack = { version = "0.1", path = "../workspace-hack" }
 zstd = "0.11.2"
-
-[target.'cfg(target_os = "linux")'.dependencies]
-procinfo = { git = "https://github.com/tikv/procinfo-rs", rev = "6599eb9dca74229b2c1fcc44118bef7eff127128" }
-procfs = { version = "0.12", default-features = false }
 
 [dev-dependencies]
 criterion = "0.3"

@@ -14,7 +14,6 @@
 
 use madsim::collections::{HashMap, HashSet};
 use risingwave_common::error::Result;
-use risingwave_pb::hummock::SstableInfo;
 use risingwave_pb::stream_service::barrier_complete_response::CreateMviewProgress as ProstCreateMviewProgress;
 use tokio::sync::mpsc::UnboundedSender;
 use tokio::sync::oneshot;
@@ -38,8 +37,6 @@ pub const ENABLE_BARRIER_AGGREGATION: bool = false;
 #[derive(Debug)]
 pub struct CollectResult {
     pub create_mview_progress: Vec<ProstCreateMviewProgress>,
-
-    pub synced_sstables: Vec<SstableInfo>,
 }
 
 enum BarrierState {
@@ -173,6 +170,20 @@ impl LocalBarrierManager {
                 )
             })
             .expect("no rx for local mode")
+    }
+
+    /// remove all collect rx less than `prev_epoch`
+    pub fn drain_collect_rx(&mut self, prev_epoch: u64) {
+        self.collect_complete_receiver
+            .drain_filter(|x, _| x <= &prev_epoch);
+        match &mut self.state {
+            #[cfg(test)]
+            BarrierState::Local => {}
+
+            BarrierState::Managed(managed_state) => {
+                managed_state.remove_stop_barrier(prev_epoch);
+            }
+        }
     }
 
     /// When a [`StreamConsumer`] (typically [`DispatchExecutor`]) get a barrier, it should report

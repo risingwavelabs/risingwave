@@ -105,7 +105,7 @@ impl StreamChunk {
         let mut array_builders = data_types
             .iter()
             .map(|data_type| data_type.create_array_builder(rows.len()))
-            .collect::<ArrayResult<Vec<_>>>()?;
+            .collect::<Vec<_>>();
         let mut ops = vec![];
 
         for (op, row) in rows {
@@ -269,13 +269,23 @@ impl StreamChunk {
         table.to_string()
     }
 
-    /// Reorder columns. e.g. if `column_mapping` is `[2, 1, 0]`, and
+    /// Reorder (and possibly remove) columns. e.g. if `column_mapping` is `[2, 1, 0]`, and
     /// the chunk contains column `[a, b, c]`, then the output will be
-    /// `[c, b, a]`.
+    /// `[c, b, a]`. If `column_mapping` is [2, 0], then the output will be `[c, a]`.
+    /// If the input mapping is identity mapping, no reorder will be performed.
     pub fn reorder_columns(self, column_mapping: &[usize]) -> Self {
-        Self {
-            ops: self.ops,
-            data: self.data.reorder_columns(column_mapping),
+        if column_mapping
+            .iter()
+            .copied()
+            .eq((0..self.data.columns().len()).into_iter())
+        {
+            // no reorder is needed
+            self
+        } else {
+            Self {
+                ops: self.ops,
+                data: self.data.reorder_columns(column_mapping),
+            }
         }
     }
 }
@@ -352,8 +362,7 @@ impl StreamChunkTestExt for StreamChunk {
                 _ => todo!("unsupported type: {c:?}"),
             })
             .map(|ty| ty.create_array_builder(1))
-            .collect::<ArrayResult<Vec<_>>>()
-            .unwrap();
+            .collect::<Vec<_>>();
         let mut visibility = vec![];
         for mut line in lines {
             line = line.trim();
@@ -418,7 +427,7 @@ impl StreamChunkTestExt for StreamChunk {
         let visibility = if visibility.iter().all(|b| *b) {
             None
         } else {
-            Some(Bitmap::try_from(visibility).unwrap())
+            Some(Bitmap::from_iter(visibility))
         };
         StreamChunk::new(ops, columns, visibility)
     }

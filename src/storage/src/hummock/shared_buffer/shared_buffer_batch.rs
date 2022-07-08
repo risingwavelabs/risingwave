@@ -15,16 +15,19 @@
 use std::fmt::Debug;
 use std::marker::PhantomData;
 use std::ops::Deref;
-use std::sync::atomic::AtomicUsize;
-use std::sync::atomic::Ordering::Relaxed;
 use std::sync::Arc;
 
 use async_trait::async_trait;
 use bytes::Bytes;
+use risingwave_hummock_sdk::CompactionGroupId;
+use tokio::sync::mpsc;
+use tracing::error;
 
 use crate::hummock::iterator::{
     Backward, DirectionEnum, Forward, HummockIterator, HummockIteratorDirection,
 };
+use crate::hummock::shared_buffer::SharedBufferEvent;
+use crate::hummock::shared_buffer::SharedBufferEvent::BufferRelease;
 use crate::hummock::value::HummockValue;
 use crate::hummock::{key, HummockEpoch, HummockResult};
 use crate::storage_value::VALUE_META_SIZE;
@@ -34,7 +37,7 @@ pub(crate) type SharedBufferItem = (Bytes, HummockValue<Bytes>);
 pub(crate) struct SharedBufferBatchInner {
     payload: Vec<SharedBufferItem>,
     size: usize,
-    buffer_size_tracker: Arc<AtomicUsize>,
+    buffer_release_notifier: mpsc::UnboundedSender<SharedBufferEvent>,
 }
 
 impl Deref for SharedBufferBatchInner {
@@ -47,7 +50,12 @@ impl Deref for SharedBufferBatchInner {
 
 impl Drop for SharedBufferBatchInner {
     fn drop(&mut self) {
-        self.buffer_size_tracker.fetch_sub(self.size, Relaxed);
+        let _ = self
+            .buffer_release_notifier
+            .send(BufferRelease(self.size))
+            .inspect_err(|e| {
+                error!("unable to notify buffer size change: {:?}", e);
+            });
     }
 }
 
@@ -72,33 +80,25 @@ impl PartialEq for SharedBufferBatchInner {
 pub struct SharedBufferBatch {
     inner: Arc<SharedBufferBatchInner>,
     epoch: HummockEpoch,
+    compaction_group_id: CompactionGroupId,
 }
 
 impl SharedBufferBatch {
     pub fn new(
         sorted_items: Vec<SharedBufferItem>,
         epoch: HummockEpoch,
-        buffer_size_tracker: Arc<AtomicUsize>,
+        buffer_release_notifier: mpsc::UnboundedSender<SharedBufferEvent>,
+        compaction_group_id: CompactionGroupId,
     ) -> Self {
         let size: usize = Self::measure_batch_size(&sorted_items);
-        Self::new_with_size(sorted_items, epoch, size, buffer_size_tracker)
-    }
-
-    pub fn new_with_size(
-        sorted_items: Vec<SharedBufferItem>,
-        epoch: HummockEpoch,
-        size: usize,
-        buffer_size_tracker: Arc<AtomicUsize>,
-    ) -> Self {
-        buffer_size_tracker.fetch_add(size, Relaxed);
-
         Self {
             inner: Arc::new(SharedBufferBatchInner {
                 payload: sorted_items,
                 size,
-                buffer_size_tracker,
+                buffer_release_notifier,
             }),
             epoch,
+            compaction_group_id,
         }
     }
 
@@ -167,6 +167,10 @@ impl SharedBufferBatch {
 
     pub fn size(&self) -> usize {
         self.inner.size
+    }
+
+    pub fn compaction_group_id(&self) -> CompactionGroupId {
+        self.compaction_group_id
     }
 }
 
@@ -273,6 +277,7 @@ impl<D: HummockIteratorDirection> HummockIterator for SharedBufferBatchIterator<
 mod tests {
 
     use itertools::Itertools;
+    use risingwave_hummock_sdk::compaction_group::StaticCompactionGroupId;
     use risingwave_hummock_sdk::key::user_key;
 
     use super::*;
@@ -304,11 +309,11 @@ mod tests {
                 HummockValue::put(b"value3".to_vec()),
             ),
         ];
-        let buffer_size_tracker = Arc::new(AtomicUsize::new(0));
         let shared_buffer_batch = SharedBufferBatch::new(
             transform_shared_buffer(shared_buffer_items.clone()),
             epoch,
-            buffer_size_tracker,
+            mpsc::unbounded_channel().0,
+            StaticCompactionGroupId::StateDefault.into(),
         );
 
         // Sketch
@@ -381,11 +386,11 @@ mod tests {
                 HummockValue::put(b"value3".to_vec()),
             ),
         ];
-        let buffer_size_tracker = Arc::new(AtomicUsize::new(0));
         let shared_buffer_batch = SharedBufferBatch::new(
             transform_shared_buffer(shared_buffer_items.clone()),
             epoch,
-            buffer_size_tracker,
+            mpsc::unbounded_channel().0,
+            StaticCompactionGroupId::StateDefault.into(),
         );
 
         // FORWARD: Seek to a key < 1st key, expect all three items to return

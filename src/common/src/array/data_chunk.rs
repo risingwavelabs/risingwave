@@ -12,7 +12,6 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::convert::TryFrom;
 use std::hash::BuildHasher;
 use std::sync::Arc;
 use std::{fmt, iter};
@@ -39,7 +38,7 @@ pub struct DataChunk {
 
 /// `Vis` is a visibility bitmap of rows. When all rows are visible, it is considered compact and
 /// is represented by a single cardinality number rather than that many of ones.
-#[derive(Clone, PartialEq)]
+#[derive(Clone, PartialEq, Debug)]
 pub enum Vis {
     Bitmap(Bitmap),
     Compact(usize), // equivalent to all ones of this size
@@ -72,12 +71,14 @@ impl Vis {
         }
     }
 
-    pub fn is_set(&self, idx: usize) -> ArrayResult<bool> {
+    /// # Panics
+    /// Panics if `idx > len`.
+    pub fn is_set(&self, idx: usize) -> bool {
         match self {
-            Vis::Bitmap(b) => b.is_set(idx),
+            Vis::Bitmap(b) => b.is_set(idx).unwrap(),
             Vis::Compact(c) => {
-                ensure!(idx <= *c);
-                Ok(true)
+                assert!(idx <= *c);
+                true
             }
         }
     }
@@ -97,7 +98,7 @@ impl DataChunk {
     pub fn new<V: Into<Vis>>(columns: Vec<Column>, vis: V) -> Self {
         let vis = vis.into();
         let capacity = match &vis {
-            Vis::Bitmap(b) => b.num_bits(),
+            Vis::Bitmap(b) => b.len(),
             Vis::Compact(c) => *c,
         };
         for column in &columns {
@@ -120,7 +121,7 @@ impl DataChunk {
         let mut array_builders = data_types
             .iter()
             .map(|data_type| data_type.create_array_builder(1))
-            .collect::<ArrayResult<Vec<_>>>()?;
+            .collect::<Vec<_>>();
 
         for row in rows {
             for (datum, builder) in row.0.iter().zip_eq(array_builders.iter_mut()) {
@@ -173,7 +174,7 @@ impl DataChunk {
     /// `capacity` returns physical length of any chunk column
     pub fn capacity(&self) -> usize {
         match &self.vis2 {
-            Vis::Bitmap(b) => b.num_bits(),
+            Vis::Bitmap(b) => b.len(),
             Vis::Compact(len) => *len,
         }
     }
@@ -412,10 +413,18 @@ impl DataChunk {
         table.to_string()
     }
 
-    /// Reorder columns. e.g. if `column_mapping` is `[2, 1, 0]`, and
+    /// Reorder (and possibly remove) columns. e.g. if `column_mapping` is `[2, 1, 0]`, and
     /// the chunk contains column `[a, b, c]`, then the output will be
-    /// `[c, b, a]`.
+    /// `[c, b, a]`. If `column_mapping` is [2, 0], then the output will be `[c, a]`
+    /// If the input mapping is identity mapping, no reorder will be performed.
     pub fn reorder_columns(self, column_mapping: &[usize]) -> Self {
+        if column_mapping
+            .iter()
+            .copied()
+            .eq((0..self.columns().len()).into_iter())
+        {
+            return self;
+        }
         let mut new_columns = Vec::with_capacity(column_mapping.len());
         for &idx in column_mapping {
             new_columns.push(self.columns[idx].clone());
@@ -500,8 +509,7 @@ impl DataChunkTestExt for DataChunk {
                 _ => todo!("unsupported type: {c:?}"),
             })
             .map(|ty| ty.create_array_builder(1))
-            .collect::<ArrayResult<Vec<_>>>()
-            .unwrap();
+            .collect::<Vec<_>>();
         let mut visibility = vec![];
         for mut line in lines {
             line = line.trim();
@@ -565,7 +573,7 @@ impl DataChunkTestExt for DataChunk {
         let vis = if visibility.iter().all(|b| *b) {
             Vis::Compact(visibility.len())
         } else {
-            Vis::Bitmap(Bitmap::try_from(visibility).unwrap())
+            Vis::Bitmap(Bitmap::from_iter(visibility))
         };
         let chunk = DataChunk::new(columns, vis);
         chunk.assert_valid();
@@ -622,7 +630,7 @@ mod tests {
         let test_case = |num_chunks: usize, chunk_size: usize, new_chunk_size: usize| {
             let mut chunks = vec![];
             for chunk_idx in 0..num_chunks {
-                let mut builder = PrimitiveArrayBuilder::<i32>::new(0).unwrap();
+                let mut builder = PrimitiveArrayBuilder::<i32>::new(0);
                 for i in chunk_size * chunk_idx..chunk_size * (chunk_idx + 1) {
                     builder.append(Some(i as i32)).unwrap();
                 }
@@ -684,7 +692,7 @@ mod tests {
         let length = 5;
         let mut columns = vec![];
         for i in 0..num_of_columns {
-            let mut builder = PrimitiveArrayBuilder::<i32>::new(length).unwrap();
+            let mut builder = PrimitiveArrayBuilder::<i32>::new(length);
             for _ in 0..length {
                 builder.append(Some(i as i32)).unwrap();
             }
@@ -729,5 +737,38 @@ mod tests {
         let chunk_after_serde = DataChunk::from_protobuf(&chunk.to_protobuf()).unwrap();
         assert_eq!(chunk_after_serde.rows().count(), 10);
         assert_eq!(chunk_after_serde.cardinality(), 10);
+    }
+    #[test]
+    fn reorder_columns() {
+        let chunk = DataChunk::from_pretty(
+            "I I I
+             2 5 1
+             4 9 2
+             6 9 3",
+        );
+        let reorder = chunk.clone().reorder_columns(&[2, 1, 0]);
+        assert_eq!(
+            reorder,
+            DataChunk::from_pretty(
+                "I I I
+             1 5 2
+             2 9 4
+             3 9 6",
+            )
+        );
+        let reorder = chunk.clone().reorder_columns(&[2, 0]);
+        assert_eq!(
+            reorder,
+            DataChunk::from_pretty(
+                "I I
+             1 2
+             2 4
+             3 6",
+            )
+        );
+        let reorder = chunk.clone().reorder_columns(&[0, 1, 2]);
+        assert_eq!(reorder, chunk);
+        let reorder = chunk.reorder_columns(&[]);
+        assert_eq!(reorder.cardinality(), 3);
     }
 }

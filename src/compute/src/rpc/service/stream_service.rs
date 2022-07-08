@@ -18,6 +18,7 @@ use itertools::Itertools;
 use risingwave_common::catalog::TableId;
 use risingwave_common::error::{tonic_err, Result as RwResult};
 use risingwave_pb::catalog::Source;
+use risingwave_pb::stream_service::barrier_complete_response::GroupedSstableInfo;
 use risingwave_pb::stream_service::stream_service_server::StreamService;
 use risingwave_pb::stream_service::*;
 use risingwave_stream::executor::{Barrier, Epoch};
@@ -62,7 +63,10 @@ impl StreamService for StreamServiceImpl {
         let req = request.into_inner();
 
         let actor_id = req.actor_id;
-        let res = self.mgr.build_actors(actor_id.as_slice(), self.env.clone());
+        let res = self
+            .mgr
+            .build_actors(actor_id.as_slice(), self.env.clone())
+            .await;
         match res {
             Err(e) => {
                 error!("failed to build actors {}", e);
@@ -151,16 +155,22 @@ impl StreamService for StreamServiceImpl {
         request: Request<BarrierCompleteRequest>,
     ) -> Result<Response<BarrierCompleteResponse>, Status> {
         let req = request.into_inner();
-        let collect_result = self
-            .mgr
-            .collect_barrier_and_sync(req.prev_epoch, true)
-            .await;
+        let collect_result = self.mgr.collect_barrier(req.prev_epoch).await;
+        // Must finish syncing data written in the epoch before respond back to ensure persistency
+        // of the state.
+        let synced_sstables = self.mgr.sync_epoch(req.prev_epoch).await;
 
         Ok(Response::new(BarrierCompleteResponse {
             request_id: req.request_id,
             status: None,
             create_mview_progress: collect_result.create_mview_progress,
-            sycned_sstables: collect_result.synced_sstables,
+            sycned_sstables: synced_sstables
+                .into_iter()
+                .map(|(compaction_group_id, sst)| GroupedSstableInfo {
+                    compaction_group_id,
+                    sst: Some(sst),
+                })
+                .collect_vec(),
         }))
     }
 

@@ -2,6 +2,7 @@ syntax = "proto3";
 
 package catalog;
 
+import "common.proto";
 import "plan_common.proto";
 
 option optimize_for = SPEED;
@@ -32,32 +33,36 @@ message Source {
   string owner = 7;
 }
 
-// VirtualTable defines a view in system catalogs, it can only be queried and not be treated as a source.
-message VirtualTable {
+message Sink {
   uint32 id = 1;
-  string name = 2;
-  repeated plan_common.ColumnCatalog columns = 3;
+  uint32 schema_id = 2;
+  uint32 database_id = 3;
+  string name = 4;
+  string mv_name = 5;
+  map<string, string> properties = 6;
+  string owner = 7;
 }
 
-/// See `TableCatalog` struct in frontend crate for more information.
+// See `TableCatalog` struct in frontend crate for more information.
 message Table {
   uint32 id = 1;
   uint32 schema_id = 2;
   uint32 database_id = 3;
   string name = 4;
   repeated plan_common.ColumnCatalog columns = 5;
-  repeated int32 order_column_ids = 6;
-  repeated plan_common.OrderType orders = 7;
+  repeated plan_common.ColumnOrder order_key = 6;
   repeated uint32 dependent_relations = 8;
   oneof optional_associated_source_id {
     uint32 associated_source_id = 9;
   }
   bool is_index = 10;
   uint32 index_on_id = 11;
-  repeated int32 distribution_keys = 12;
+  repeated int32 distribution_key = 12;
   repeated int32 pk = 13;
   bool appendonly = 14;
   string owner = 15;
+  common.ParallelUnitMapping mapping = 16;
+  map<string, string> properties = 17;
 }
 
 message Schema {

@@ -13,14 +13,16 @@
 // limitations under the License.
 
 use std::marker::PhantomData;
+use std::sync::Arc;
 
-use risingwave_common::catalog::TableId;
 use risingwave_common::hash::{calc_hash_key_kind, HashKey, HashKeyDispatcher, HashKeyKind};
-use risingwave_expr::expr::{build_from_prost, RowExpression};
+use risingwave_expr::expr::{build_from_prost, BoxedExpression};
 use risingwave_pb::plan_common::JoinType as JoinTypeProto;
+use risingwave_storage::table::state_table::StateTable;
 
 use super::*;
 use crate::executor::hash_join::*;
+use crate::executor::monitor::StreamingMetrics;
 use crate::executor::PkIndices;
 
 pub struct HashJoinExecutorBuilder;
@@ -35,10 +37,20 @@ impl ExecutorBuilder for HashJoinExecutorBuilder {
         // Get table id and used as keyspace prefix.
         let node = try_match_expand!(node.get_node_body().unwrap(), NodeBody::HashJoin)?;
         let is_append_only = node.is_append_only;
-        let source_r = params.input.remove(1);
+        let vnodes = Arc::new(params.vnode_bitmap.expect("vnodes not set for hash join"));
+
         let source_l = params.input.remove(0);
+        let source_r = params.input.remove(0);
+
+        let table_l = node.get_left_table()?;
+        let table_r = node.get_right_table()?;
         let params_l = JoinParams::new(
             node.get_left_key()
+                .iter()
+                .map(|key| *key as usize)
+                .collect::<Vec<_>>(),
+            table_l
+                .distribution_key
                 .iter()
                 .map(|key| *key as usize)
                 .collect::<Vec<_>>(),
@@ -48,19 +60,23 @@ impl ExecutorBuilder for HashJoinExecutorBuilder {
                 .iter()
                 .map(|key| *key as usize)
                 .collect::<Vec<_>>(),
+            table_r
+                .distribution_key
+                .iter()
+                .map(|key| *key as usize)
+                .collect::<Vec<_>>(),
         );
+        let output_indices = node
+            .get_output_indices()
+            .iter()
+            .map(|&x| x as usize)
+            .collect_vec();
 
         let condition = match node.get_condition() {
-            Ok(cond_prost) => Some(RowExpression::new(build_from_prost(cond_prost)?)),
+            Ok(cond_prost) => Some(build_from_prost(cond_prost)?),
             Err(_) => None,
         };
         trace!("Join non-equi condition: {:?}", condition);
-
-        let key_indices = node
-            .get_distribution_keys()
-            .iter()
-            .map(|key| *key as usize)
-            .collect::<Vec<_>>();
 
         macro_rules! impl_create_hash_join_executor {
             ([], $( { $join_type_proto:ident, $join_type:ident } ),*) => {
@@ -99,8 +115,9 @@ impl ExecutorBuilder for HashJoinExecutorBuilder {
             .collect_vec();
         let kind = calc_hash_key_kind(&keys);
 
-        let left_table_id = TableId::from(node.left_table_id);
-        let right_table_id = TableId::from(node.right_table_id);
+        let state_table_l =
+            StateTable::from_table_catalog(table_l, store.clone(), Some(vnodes.clone()));
+        let state_table_r = StateTable::from_table_catalog(table_r, store, Some(vnodes));
 
         let args = HashJoinExecutorDispatcherArgs {
             source_l,
@@ -108,13 +125,15 @@ impl ExecutorBuilder for HashJoinExecutorBuilder {
             params_l,
             params_r,
             pk_indices: params.pk_indices,
+            output_indices,
             executor_id: params.executor_id,
             cond: condition,
             op_info: params.op_info,
-            key_indices,
-            keyspace_l: Keyspace::table_root(store.clone(), &left_table_id),
-            keyspace_r: Keyspace::table_root(store, &right_table_id),
+            state_table_l,
+            state_table_r,
             is_append_only,
+            actor_id: params.actor_id as u64,
+            metrics: params.executor_stats,
         };
 
         for_all_join_types! { impl_create_hash_join_executor };
@@ -131,13 +150,15 @@ struct HashJoinExecutorDispatcherArgs<S: StateStore> {
     params_l: JoinParams,
     params_r: JoinParams,
     pk_indices: PkIndices,
+    output_indices: Vec<usize>,
     executor_id: u64,
-    cond: Option<RowExpression>,
+    cond: Option<BoxedExpression>,
     op_info: String,
-    key_indices: Vec<usize>,
-    keyspace_l: Keyspace<S>,
-    keyspace_r: Keyspace<S>,
+    state_table_l: StateTable<S>,
+    state_table_r: StateTable<S>,
     is_append_only: bool,
+    actor_id: u64,
+    metrics: Arc<StreamingMetrics>,
 }
 
 impl<S: StateStore, const T: JoinTypePrimitive> HashKeyDispatcher
@@ -153,13 +174,15 @@ impl<S: StateStore, const T: JoinTypePrimitive> HashKeyDispatcher
             args.params_l,
             args.params_r,
             args.pk_indices,
+            args.output_indices,
+            args.actor_id,
             args.executor_id,
             args.cond,
             args.op_info,
-            args.key_indices,
-            args.keyspace_l,
-            args.keyspace_r,
+            args.state_table_l,
+            args.state_table_r,
             args.is_append_only,
+            args.metrics,
         )))
     }
 }

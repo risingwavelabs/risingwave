@@ -22,8 +22,8 @@ use risingwave_common::util::select_all;
 use risingwave_pb::batch_plan::plan_node::NodeBody;
 use risingwave_pb::batch_plan::ExchangeSource as ProstExchangeSource;
 use risingwave_pb::plan_common::Field as NodeField;
-use risingwave_rpc_client::ExchangeSource;
 
+use crate::exchange_source::ExchangeSourceImpl;
 use crate::execution::grpc_exchange::GrpcExchangeSource;
 use crate::execution::local_exchange::LocalExchangeSource;
 use crate::executor::ExecutorBuilder;
@@ -31,13 +31,9 @@ use crate::task::{BatchTaskContext, TaskId};
 
 pub type ExchangeExecutor<C> = GenericExchangeExecutor<DefaultCreateSource, C>;
 use crate::executor::{BoxedDataChunkStream, BoxedExecutor, BoxedExecutorBuilder, Executor};
-
 pub struct GenericExchangeExecutor<CS, C> {
     sources: Vec<ProstExchangeSource>,
     context: C,
-
-    source_idx: usize,
-    current_source: Option<Box<dyn ExchangeSource>>,
 
     // Mock-able CreateSource.
     source_creators: Vec<CS>,
@@ -53,7 +49,7 @@ pub trait CreateSource: Send {
         &self,
         context: impl BatchTaskContext,
         prost_source: &ProstExchangeSource,
-    ) -> Result<Box<dyn ExchangeSource>>;
+    ) -> Result<ExchangeSourceImpl>;
 }
 
 #[derive(Clone)]
@@ -65,7 +61,7 @@ impl CreateSource for DefaultCreateSource {
         &self,
         context: impl BatchTaskContext,
         prost_source: &ProstExchangeSource,
-    ) -> Result<Box<dyn ExchangeSource>> {
+    ) -> Result<ExchangeSourceImpl> {
         let peer_addr = prost_source.get_host()?.into();
         let task_output_id = prost_source.get_task_output_id()?;
         let task_id = TaskId::from(task_output_id.get_task_id()?);
@@ -73,7 +69,7 @@ impl CreateSource for DefaultCreateSource {
         if context.is_local_addr(&peer_addr) {
             trace!("Exchange locally [{:?}]", task_output_id);
 
-            Ok(Box::new(LocalExchangeSource::create(
+            Ok(ExchangeSourceImpl::Local(LocalExchangeSource::create(
                 task_output_id.try_into()?,
                 context,
                 task_id,
@@ -85,7 +81,7 @@ impl CreateSource for DefaultCreateSource {
                 task_output_id,
             );
 
-            Ok(Box::new(
+            Ok(ExchangeSourceImpl::Grpc(
                 GrpcExchangeSource::create(prost_source.clone()).await?,
             ))
         }
@@ -119,8 +115,6 @@ impl BoxedExecutorBuilder for GenericExchangeExecutorBuilder {
                 sources,
                 context: source.context().clone(),
                 source_creators,
-                source_idx: 0,
-                current_source: None,
                 schema: Schema { fields },
                 task_id: source.task_id.clone(),
                 identity: source.plan_node().get_identity().clone(),
@@ -146,7 +140,7 @@ impl<CS: 'static + CreateSource, C: BatchTaskContext> Executor for GenericExchan
 impl<CS: 'static + CreateSource, C: BatchTaskContext> GenericExchangeExecutor<CS, C> {
     #[try_stream(boxed, ok = DataChunk, error = RwError)]
     async fn do_execute(self: Box<Self>) {
-        let mut sources: Vec<Box<dyn ExchangeSource>> = vec![];
+        let mut sources: Vec<ExchangeSourceImpl> = vec![];
 
         for (prost_source, source_creator) in self.sources.iter().zip_eq(self.source_creators) {
             let source = source_creator
@@ -166,7 +160,7 @@ impl<CS: 'static + CreateSource, C: BatchTaskContext> GenericExchangeExecutor<CS
 }
 
 #[try_stream(boxed, ok = DataChunk, error = RwError)]
-async fn data_chunk_stream(mut source: Box<dyn ExchangeSource>) {
+async fn data_chunk_stream(mut source: ExchangeSourceImpl) {
     loop {
         if let Some(res) = source.take_data().await? {
             if res.cardinality() == 0 {
@@ -178,6 +172,7 @@ async fn data_chunk_stream(mut source: Box<dyn ExchangeSource>) {
         break;
     }
 }
+
 #[cfg(test)]
 mod tests {
     use std::sync::Arc;
@@ -215,8 +210,6 @@ mod tests {
         let executor = Box::new(
             GenericExchangeExecutor::<FakeCreateSource, ComputeNodeContext> {
                 sources,
-                source_idx: 0,
-                current_source: None,
                 source_creators,
                 context: ComputeNodeContext::new_for_test(),
                 schema: Schema {

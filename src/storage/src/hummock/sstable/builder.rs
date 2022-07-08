@@ -12,13 +12,11 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::collections::BTreeMap;
+use std::collections::BTreeSet;
 
 use bytes::{BufMut, Bytes, BytesMut};
 use risingwave_common::config::StorageConfig;
-use risingwave_common::hash::{VNODE_BITMAP_LEN, VNODE_BITS};
 use risingwave_hummock_sdk::key::{get_table_id, user_key};
-use risingwave_pb::common::VNodeBitmap;
 
 use super::bloom::Bloom;
 use super::utils::CompressionAlgorithm;
@@ -52,7 +50,6 @@ impl From<&StorageConfig> for SSTableBuilderOptions {
             block_capacity: (options.block_size_kb as usize) * (1 << 10),
             restart_interval: DEFAULT_RESTART_INTERVAL,
             bloom_false_positive: options.bloom_false_positive,
-            // TODO: Make this configurable.
             compression_algorithm: CompressionAlgorithm::None,
         }
     }
@@ -79,8 +76,8 @@ pub struct SSTableBuilder {
     block_builder: Option<BlockBuilder>,
     /// Block metadata vec.
     block_metas: Vec<BlockMeta>,
-    /// `table_id` -> Bitmaps of value meta.
-    vnode_bitmaps: BTreeMap<u32, [u8; VNODE_BITMAP_LEN]>,
+    /// `table_id` of added keys.
+    table_ids: BTreeSet<u32>,
     /// Hashes of user keys.
     user_key_hashes: Vec<u32>,
     /// Last added full key.
@@ -96,7 +93,7 @@ impl SSTableBuilder {
             buf: BytesMut::with_capacity(options.capacity),
             block_builder: None,
             block_metas: Vec::with_capacity(options.capacity / options.block_capacity + 1),
-            vnode_bitmaps: BTreeMap::new(),
+            table_ids: BTreeSet::new(),
             user_key_hashes: Vec::with_capacity(options.capacity / DEFAULT_ENTRY_SIZE + 1),
             last_full_key: Bytes::default(),
             key_count: 0,
@@ -125,14 +122,9 @@ impl SSTableBuilder {
 
         // TODO: refine me
         let mut raw_value = BytesMut::default();
-        let value_meta = value.encode(&mut raw_value) & ((1 << VNODE_BITS) - 1);
+        value.encode(&mut raw_value);
         if let Some(table_id) = get_table_id(full_key) {
-            // We use 8 bit of bitmap[x] to indicate existence of virtual node x*8..(x+1)*8,
-            // respectively
-            self.vnode_bitmaps
-                .entry(table_id)
-                .or_insert([0; VNODE_BITMAP_LEN])[(value_meta >> 3) as usize] |=
-                1 << (value_meta & 0b111);
+            self.table_ids.insert(table_id);
         }
         let raw_value = raw_value.freeze();
 
@@ -164,7 +156,7 @@ impl SSTableBuilder {
     /// ```plain
     /// | Block 0 | ... | Block N-1 | N (4B) |
     /// ```
-    pub fn finish(mut self) -> (u64, Bytes, SstableMeta, Vec<VNodeBitmap>) {
+    pub fn finish(mut self) -> (u64, Bytes, SstableMeta, Vec<u32>) {
         let smallest_key = self.block_metas[0].smallest_key.clone();
         let largest_key = self.last_full_key.to_vec();
         self.build_block();
@@ -192,13 +184,7 @@ impl SSTableBuilder {
             self.sstable_id,
             self.buf.freeze(),
             meta,
-            self.vnode_bitmaps
-                .iter()
-                .map(|(table_id, vnode_bitmaps)| VNodeBitmap {
-                    table_id: *table_id,
-                    bitmap: ::prost::alloc::vec::Vec::from(*vnode_bitmaps),
-                })
-                .collect(),
+            self.table_ids.into_iter().collect(),
         )
     }
 

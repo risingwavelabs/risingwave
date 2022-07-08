@@ -13,7 +13,7 @@
 // limitations under the License.
 
 use bytes::{Buf, BufMut, Bytes};
-use risingwave_common::hash::VirtualNode;
+use risingwave_common::types::VirtualNode;
 
 /// Size of value meta in bytes. Since there might exist paddings between fields in `ValueMeta`, we
 /// can't simply use `size_of` to retrieve its size.
@@ -45,11 +45,11 @@ impl ValueMeta {
     }
 
     pub fn encode(&self, buf: &mut impl BufMut) {
-        buf.put_u16_le(self.vnode);
+        buf.put_u16_le(self.vnode as _);
     }
 
     pub fn decode(mut buf: impl Buf) -> Self {
-        let vnode = buf.get_u16_le();
+        let vnode = buf.get_u16_le() as _;
         Self { vnode }
     }
 }
@@ -122,7 +122,7 @@ mod tests {
     #[test]
     fn test_value_meta_decode_encode() {
         let mut result = vec![];
-        let value_meta = ValueMeta { vnode: 5678 };
+        let value_meta = ValueMeta { vnode: 233 };
         value_meta.encode(&mut result);
         assert_eq!(ValueMeta::decode(&mut &result[..]), value_meta);
     }

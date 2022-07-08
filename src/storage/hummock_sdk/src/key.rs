@@ -56,6 +56,7 @@ pub fn split_key_epoch(full_key: &[u8]) -> (&[u8], &[u8]) {
 }
 
 /// Extracts epoch part from key
+#[inline(always)]
 pub fn get_epoch(full_key: &[u8]) -> Epoch {
     let mut epoch: Epoch = 0;
 
@@ -73,12 +74,24 @@ pub fn user_key(full_key: &[u8]) -> &[u8] {
 }
 
 /// Extract table id in key prefix
+#[inline(always)]
 pub fn get_table_id(full_key: &[u8]) -> Option<u32> {
     if full_key[0] == b't' {
         let mut buf = &full_key[1..];
         Some(buf.get_u32())
     } else {
         None
+    }
+}
+
+pub fn extract_table_id_and_epoch(full_key: &[u8]) -> (Option<u32>, Epoch) {
+    match get_table_id(full_key) {
+        Some(table_id) => {
+            let epoch = get_epoch(full_key);
+            (Some(table_id), epoch)
+        }
+
+        None => (None, 0),
     }
 }
 
@@ -153,7 +166,7 @@ fn next_key_no_alloc(key: &[u8]) -> Option<(&[u8], u8)> {
 // End Copyright 2016 TiKV Project Authors. Licensed under Apache-2.0.
 
 /// Get the end bound of the given `prefix` when transforming it to a key range.
-fn end_bound_of_prefix(prefix: &[u8]) -> Bound<Vec<u8>> {
+pub fn end_bound_of_prefix(prefix: &[u8]) -> Bound<Vec<u8>> {
     if let Some((s, e)) = next_key_no_alloc(prefix) {
         let mut res = Vec::with_capacity(s.len() + 1);
         res.extend_from_slice(s);

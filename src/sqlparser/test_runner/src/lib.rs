@@ -18,12 +18,7 @@ use anyhow::{anyhow, Result};
 use risingwave_sqlparser::parser::Parser;
 use serde::Deserialize;
 
-// 1. The input sql.
-// 2. ---
-// 3. If sql parsing succeeds, the line is the formatted sql.
-//    Otherwise, it is the error message.
-// 4. => No exist if the parsing is expected to fail.
-// 5. The formatted ast.
+/// `TestCase` will be deserialized from yaml.
 #[derive(PartialEq, Eq, Debug, Deserialize)]
 struct TestCase {
     input: String,

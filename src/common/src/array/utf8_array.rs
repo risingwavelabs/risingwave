@@ -17,8 +17,9 @@ use std::iter;
 use std::mem::size_of;
 
 use itertools::Itertools;
-use risingwave_pb::data::buffer::CompressionType;
-use risingwave_pb::data::{Array as ProstArray, ArrayType, Buffer};
+use risingwave_pb::common::buffer::CompressionType;
+use risingwave_pb::common::Buffer;
+use risingwave_pb::data::{Array as ProstArray, ArrayType};
 
 use super::{Array, ArrayBuilder, ArrayIterator, ArrayMeta, ArrayResult, NULL_VAL_FOR_HASH};
 use crate::array::ArrayBuilderImpl;
@@ -112,6 +113,10 @@ impl Array for Utf8Array {
         &self.bitmap
     }
 
+    fn into_null_bitmap(self) -> Bitmap {
+        self.bitmap
+    }
+
     fn set_bitmap(&mut self, bitmap: Bitmap) {
         self.bitmap = bitmap;
     }
@@ -127,14 +132,14 @@ impl Array for Utf8Array {
     }
 
     fn create_builder(&self, capacity: usize) -> ArrayResult<ArrayBuilderImpl> {
-        let array_builder = Utf8ArrayBuilder::new(capacity)?;
+        let array_builder = Utf8ArrayBuilder::new(capacity);
         Ok(ArrayBuilderImpl::Utf8(array_builder))
     }
 }
 
 impl Utf8Array {
     pub fn from_slice(data: &[Option<&str>]) -> ArrayResult<Self> {
-        let mut builder = <Self as Array>::Builder::new(data.len())?;
+        let mut builder = <Self as Array>::Builder::new(data.len());
         for i in data {
             builder.append(*i)?;
         }
@@ -153,14 +158,14 @@ pub struct Utf8ArrayBuilder {
 impl ArrayBuilder for Utf8ArrayBuilder {
     type ArrayType = Utf8Array;
 
-    fn with_meta(capacity: usize, _meta: ArrayMeta) -> ArrayResult<Self> {
+    fn with_meta(capacity: usize, _meta: ArrayMeta) -> Self {
         let mut offset = Vec::with_capacity(capacity + 1);
         offset.push(0);
-        Ok(Self {
+        Self {
             offset,
             data: Vec::with_capacity(capacity),
             bitmap: BitmapBuilder::with_capacity(capacity),
-        })
+        }
     }
 
     fn append<'a>(&'a mut self, value: Option<&'a str>) -> ArrayResult<()> {
@@ -303,7 +308,7 @@ mod tests {
 
     #[test]
     fn test_utf8_builder() {
-        let mut builder = Utf8ArrayBuilder::new(0).unwrap();
+        let mut builder = Utf8ArrayBuilder::new(0);
         for i in 0..100 {
             if i % 2 == 0 {
                 builder.append(Some(&format!("{}", i))).unwrap();
@@ -316,7 +321,7 @@ mod tests {
 
     #[test]
     fn test_utf8_partial_writer() -> Result<()> {
-        let builder = Utf8ArrayBuilder::new(0)?;
+        let builder = Utf8ArrayBuilder::new(0);
         let writer = builder.writer();
         let mut partial_writer = writer.begin();
         for _ in 0..2 {

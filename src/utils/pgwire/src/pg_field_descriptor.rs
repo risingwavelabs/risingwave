@@ -43,7 +43,7 @@ impl PgFieldDescriptor {
             | TypeOid::Time
             | TypeOid::Timestampz => 8,
             TypeOid::SmallInt => 2,
-            TypeOid::CharArray | TypeOid::Varchar | TypeOid::Decimal => -1,
+            TypeOid::Varchar | TypeOid::Decimal | TypeOid::Interval => -1,
         };
 
         Self {
@@ -94,17 +94,17 @@ pub enum TypeOid {
     Int,
     Float4,
     Float8,
-    CharArray,
     Varchar,
     Date,
     Time,
     Timestamp,
     Timestampz,
     Decimal,
+    Interval,
 }
 
 impl TypeOid {
-    // Error handle need modify later!
+    // TODO: support more type.
     pub fn as_type(oid: i32) -> Result<TypeOid, String> {
         match oid {
             1043 => Ok(TypeOid::Varchar),
@@ -112,6 +112,12 @@ impl TypeOid {
         }
     }
 
+    // NOTE:
+    // Refer https://github.com/postgres/postgres/blob/master/src/include/catalog/pg_type.dat when add new TypeOid.
+    // Be careful to distinguish oid from array_type_oid.
+    // Such as:
+    //  https://github.com/postgres/postgres/blob/master/src/include/catalog/pg_type.dat#L347
+    //  For Numeric(aka Decimal): oid = 1700, array_type_oid = 1231
     pub fn as_number(&self) -> i32 {
         match self {
             TypeOid::Boolean => 16,
@@ -120,13 +126,13 @@ impl TypeOid {
             TypeOid::Int => 23,
             TypeOid::Float4 => 700,
             TypeOid::Float8 => 701,
-            TypeOid::CharArray => 1002,
             TypeOid::Varchar => 1043,
             TypeOid::Date => 1082,
             TypeOid::Time => 1083,
             TypeOid::Timestamp => 1114,
             TypeOid::Timestampz => 1184,
-            TypeOid::Decimal => 1231,
+            TypeOid::Decimal => 1700,
+            TypeOid::Interval => 1186,
         }
     }
 }

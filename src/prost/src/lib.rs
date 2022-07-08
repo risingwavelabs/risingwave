@@ -40,6 +40,10 @@ pub mod hummock;
 #[rustfmt::skip]
 #[cfg_attr(madsim, path = "sim/user.rs")]
 pub mod user;
+#[rustfmt::skip]
+#[cfg_attr(madsim, path = "sim/source.rs")]
+pub mod source;
+
 
 #[rustfmt::skip]
 #[path = "catalog.serde.rs"]
@@ -80,6 +84,9 @@ pub mod hummock_serde;
 #[rustfmt::skip]
 #[path = "user.serde.rs"]
 pub mod user_serde;
+#[rustfmt::skip]
+#[path = "source.serde.rs"]
+pub mod source_serde;
 
 
 #[derive(Clone, PartialEq, Eq, Debug)]
@@ -88,15 +95,17 @@ pub struct ProstFieldNotFound(pub &'static str);
 #[cfg(test)]
 mod tests {
     use crate::data::{data_type, DataType};
-    use crate::plan_common::{DatabaseRefId, SchemaRefId};
+    use crate::plan_common::Field;
 
     #[test]
     fn test_getter() {
-        let schema_id: SchemaRefId = SchemaRefId {
-            database_ref_id: Some(DatabaseRefId { database_id: 0 }),
-            schema_id: 0,
+        let mut data_type: DataType = DataType::default();
+        data_type.is_nullable = true;
+        let field = Field {
+            data_type: Some(data_type),
+            name: "".to_string(),
         };
-        assert_eq!(0, schema_id.get_database_ref_id().unwrap().database_id);
+        assert!(field.get_data_type().unwrap().is_nullable);
     }
 
     #[test]
@@ -111,10 +120,11 @@ mod tests {
 
     #[test]
     fn test_primitive_getter() {
-        let id: DatabaseRefId = DatabaseRefId::default();
-        let new_id = DatabaseRefId {
-            database_id: id.get_database_id(),
+        let data_type: DataType = DataType::default();
+        let new_data_type = DataType {
+            is_nullable: data_type.get_is_nullable(),
+            ..Default::default()
         };
-        assert_eq!(new_id.database_id, 0);
+        assert!(!new_data_type.is_nullable);
     }
 }

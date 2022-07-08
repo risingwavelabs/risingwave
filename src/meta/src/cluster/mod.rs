@@ -23,6 +23,7 @@ use std::time::{Duration, SystemTime};
 use itertools::Itertools;
 use risingwave_common::error::{internal_error, ErrorCode, Result};
 use risingwave_common::try_match_expand;
+use risingwave_common::types::ParallelUnitId;
 use risingwave_pb::common::worker_node::State;
 use risingwave_pb::common::{HostAddress, ParallelUnit, ParallelUnitType, WorkerNode, WorkerType};
 use risingwave_pb::meta::subscribe_response::{Info, Operation};
@@ -35,11 +36,8 @@ use crate::model::{MetadataModel, Worker, INVALID_EXPIRE_AT};
 use crate::storage::MetaStore;
 
 pub type WorkerId = u32;
-pub type ParallelUnitId = u32;
 pub type WorkerLocations = HashMap<WorkerId, WorkerNode>;
 pub type ClusterManagerRef<S> = Arc<ClusterManager<S>>;
-
-pub const DEFAULT_WORK_NODE_PARALLEL_DEGREE: usize = 4;
 
 #[derive(Debug)]
 pub struct WorkerKey(pub HostAddress);
@@ -113,8 +111,11 @@ where
 
                 // Generate parallel units.
                 let parallel_units = if r#type == WorkerType::ComputeNode {
-                    self.generate_cn_parallel_units(DEFAULT_WORK_NODE_PARALLEL_DEGREE, worker_id)
-                        .await?
+                    self.generate_cn_parallel_units(
+                        self.env.opts.unsafe_worker_node_parallel_degree,
+                        worker_id,
+                    )
+                    .await?
                 } else {
                     vec![]
                 };
@@ -218,7 +219,7 @@ where
                     _ = min_interval.tick() => {},
                     // Shutdown
                     _ = &mut shutdown_rx => {
-                        tracing::info!("Heartbeat checker is shutting down");
+                        tracing::info!("Heartbeat checker is stopped");
                         return;
                     }
                 }
@@ -526,7 +527,7 @@ mod tests {
         }
 
         let single_parallel_count = worker_count;
-        let hash_parallel_count = (DEFAULT_WORK_NODE_PARALLEL_DEGREE - 1) * worker_count;
+        let hash_parallel_count = (env.opts.unsafe_worker_node_parallel_degree - 1) * worker_count;
         assert_cluster_manager(&cluster_manager, single_parallel_count, hash_parallel_count).await;
 
         let worker_to_delete_count = 4usize;
@@ -540,7 +541,12 @@ mod tests {
                 .await
                 .unwrap();
         }
-        assert_cluster_manager(&cluster_manager, 1, DEFAULT_WORK_NODE_PARALLEL_DEGREE - 1).await;
+        assert_cluster_manager(
+            &cluster_manager,
+            1,
+            env.opts.unsafe_worker_node_parallel_degree - 1,
+        )
+        .await;
 
         Ok(())
     }

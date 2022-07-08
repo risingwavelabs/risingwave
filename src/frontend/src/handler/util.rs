@@ -12,13 +12,18 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+use std::collections::HashMap;
+
 use itertools::Itertools;
 use num_traits::Float;
 use pgwire::pg_field_descriptor::{PgFieldDescriptor, TypeOid};
 use pgwire::types::Row;
 use risingwave_common::array::DataChunk;
 use risingwave_common::catalog::{ColumnDesc, Field};
+use risingwave_common::error::ErrorCode::ProtocolError;
+use risingwave_common::error::{Result, RwError};
 use risingwave_common::types::{DataType, ScalarRefImpl};
+use risingwave_sqlparser::ast::{SqlOption, Value};
 
 /// Format scalars according to postgres convention.
 fn pg_value_format(d: ScalarRefImpl) -> String {
@@ -97,10 +102,28 @@ pub fn data_type_to_type_oid(data_type: DataType) -> TypeOid {
         DataType::Timestamp => TypeOid::Timestamp,
         DataType::Timestampz => TypeOid::Timestampz,
         DataType::Decimal => TypeOid::Decimal,
-        DataType::Interval => TypeOid::Varchar,
+        DataType::Interval => TypeOid::Interval,
         DataType::Struct { .. } => TypeOid::Varchar,
         DataType::List { .. } => TypeOid::Varchar,
     }
+}
+
+pub fn handle_with_properties(
+    ctx: &str,
+    options: Vec<SqlOption>,
+) -> Result<HashMap<String, String>> {
+    options
+        .into_iter()
+        .map(|x| match x.value {
+            Value::SingleQuotedString(s) => Ok((x.name.value, s)),
+            Value::Number(n, _) => Ok((x.name.value, n)),
+            Value::Boolean(b) => Ok((x.name.value, b.to_string())),
+            _ => Err(RwError::from(ProtocolError(format!(
+                "{} with properties only support single quoted string value",
+                ctx
+            )))),
+        })
+        .collect()
 }
 
 #[cfg(test)]

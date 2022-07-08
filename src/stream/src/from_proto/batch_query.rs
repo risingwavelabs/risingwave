@@ -13,11 +13,12 @@
 // limitations under the License.
 
 use itertools::Itertools;
-use risingwave_common::buffer::Bitmap;
-use risingwave_common::catalog::ColumnDesc;
-use risingwave_common::hash::VIRTUAL_NODE_COUNT;
-use risingwave_storage::table::cell_based_table::CellBasedTable;
-use risingwave_storage::{Keyspace, StateStore};
+use risingwave_common::catalog::{ColumnDesc, ColumnId, OrderedColumnDesc, TableId};
+use risingwave_common::util::sort_util::OrderType;
+use risingwave_pb::plan_common::{CellBasedTableDesc, OrderType as ProstOrderType};
+use risingwave_storage::table::storage_table::StorageTable;
+use risingwave_storage::table::Distribution;
+use risingwave_storage::StateStore;
 
 use super::*;
 use crate::executor::BatchQueryExecutor;
@@ -32,26 +33,68 @@ impl ExecutorBuilder for BatchQueryExecutorBuilder {
         _stream: &mut LocalStreamManagerCore,
     ) -> Result<BoxedExecutor> {
         let node = try_match_expand!(node.get_node_body().unwrap(), NodeBody::BatchPlan)?;
-        let table_id = node.table_desc.as_ref().unwrap().table_id.into();
 
-        let pk_descs_proto = &node.table_desc.as_ref().unwrap().order_key;
-        let pk_descs = pk_descs_proto.iter().map(|d| d.into()).collect();
+        let table_desc: &CellBasedTableDesc = node.get_table_desc()?;
+        let table_id = TableId {
+            table_id: table_desc.table_id,
+        };
 
-        let column_descs = node
-            .column_descs
+        let order_types = table_desc
+            .order_key
             .iter()
-            .map(|column_desc| ColumnDesc::from(column_desc.clone()))
-            .collect_vec();
-        let keyspace = Keyspace::table_root(state_store, &table_id);
-        let table = CellBasedTable::new(keyspace, column_descs, None, None);
-        let key_indices = node
-            .get_distribution_keys()
-            .iter()
-            .map(|key| *key as usize)
+            .map(|desc| OrderType::from_prost(&ProstOrderType::from_i32(desc.order_type).unwrap()))
             .collect_vec();
 
-        let mapping = (*params.vnode_bitmap).clone();
-        let hash_filter = Bitmap::from_bytes_with_num_bits(mapping.into(), VIRTUAL_NODE_COUNT);
+        let column_descs = table_desc
+            .columns
+            .iter()
+            .map(ColumnDesc::from)
+            .collect_vec();
+        // TODO: remove this
+        let pk_descs = table_desc
+            .order_key
+            .iter()
+            .map(|order| OrderedColumnDesc {
+                column_desc: column_descs[order.index as usize].clone(),
+                order: OrderType::from_prost(&ProstOrderType::from_i32(order.order_type).unwrap()),
+            })
+            .collect_vec();
+        let column_ids = node
+            .column_ids
+            .iter()
+            .copied()
+            .map(ColumnId::from)
+            .collect();
+
+        // Use indices based on full table instead of streaming executor output.
+        let pk_indices = table_desc
+            .order_key
+            .iter()
+            .map(|k| k.index as usize)
+            .collect_vec();
+
+        let dist_key_indices = table_desc
+            .dist_key_indices
+            .iter()
+            .map(|&k| k as usize)
+            .collect_vec();
+
+        let distribution = match params.vnode_bitmap {
+            Some(vnodes) => Distribution {
+                dist_key_indices,
+                vnodes: vnodes.into(),
+            },
+            None => Distribution::fallback(),
+        };
+        let table = StorageTable::new_partial(
+            state_store,
+            table_id,
+            column_descs,
+            column_ids,
+            order_types,
+            pk_indices,
+            distribution,
+        );
 
         let schema = table.schema().clone();
         let executor = BatchQueryExecutor::new(
@@ -62,8 +105,6 @@ impl ExecutorBuilder for BatchQueryExecutorBuilder {
                 pk_indices: params.pk_indices,
                 identity: "BatchQuery".to_owned(),
             },
-            key_indices,
-            hash_filter,
             pk_descs,
         );
 

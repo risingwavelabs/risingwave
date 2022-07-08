@@ -54,11 +54,13 @@ message WorkerNode {
   repeated ParallelUnit parallel_units = 5;
 }
 
-// A cluster can be either a set of OLAP compute nodes, or a set of streaming compute nodes.
-message Cluster {
-  uint32 id = 1;
-  repeated common.WorkerNode nodes = 2;
-  map<string, string> config = 3;
+message Buffer {
+  enum CompressionType {
+    INVALID = 0;
+    NONE = 1;
+  }
+  CompressionType compression = 1;
+  bytes body = 2;
 }
 
 // Vnode mapping for stream fragments / relational state tables. Stores mapping from virtual node to parallel unit id.
@@ -71,5 +73,5 @@ message ParallelUnitMapping {
 // Bitmap that records whether vnodes are present.
 message VNodeBitmap {
   uint32 table_id = 1;
-  bytes bitmap = 2;
+  Buffer bitmap = 2;
 }

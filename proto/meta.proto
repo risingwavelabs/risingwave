@@ -12,7 +12,6 @@ option optimize_for = SPEED;
 
 message HeartbeatRequest {
   uint32 node_id = 1;
-  common.WorkerType worker_type = 2;
 }
 
 message HeartbeatResponse {
@@ -69,8 +68,29 @@ message FlushResponse {
   common.Status status = 1;
 }
 
+message ListTableFragmentsRequest {
+  repeated uint32 table_ids = 1;
+}
+
+message ListTableFragmentsResponse {
+  message ActorInfo {
+    uint32 id = 1;
+    stream_plan.StreamNode node = 2;
+    repeated stream_plan.Dispatcher dispatcher = 3;
+  }
+  message FragmentInfo {
+    uint32 id = 1;
+    repeated ActorInfo actors = 4;
+  }
+  message TableFragmentInfo {
+    repeated FragmentInfo fragments = 1;
+  }
+  map<uint32, TableFragmentInfo> table_fragments = 1;
+}
+
 service StreamManagerService {
   rpc Flush(FlushRequest) returns (FlushResponse);
+  rpc ListTableFragments(ListTableFragmentsRequest) returns (ListTableFragmentsResponse);
 }
 
 // Below for cluster service.
@@ -131,7 +151,6 @@ message MetaSnapshot {
   repeated catalog.Schema schema = 3;
   repeated catalog.Source source = 4;
   repeated catalog.Table table = 5;
-  repeated catalog.VirtualTable view = 6;
   repeated user.UserInfo users = 7;
 }
 
@@ -152,6 +171,7 @@ message SubscribeResponse {
     catalog.Schema schema = 6;
     catalog.Table table = 7;
     catalog.Source source = 8;
+    catalog.Sink sink = 12;
     user.UserInfo user = 11;
     MetaSnapshot snapshot = 9;
     hummock.HummockSnapshot hummock_snapshot = 10;
@@ -171,14 +191,4 @@ message MetaLeaseInfo {
   MetaLeaderInfo leader = 1;
   uint64 lease_register_time = 2;
   uint64 lease_expire_time = 3;
-}
-
-message SourceActorSplit {
-  string type = 1;
-  bytes split = 2;
-}
-
-message SourceActorInfo {
-  uint32 actor_id = 1;
-  repeated SourceActorSplit splits = 2;
 }

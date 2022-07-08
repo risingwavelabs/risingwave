@@ -34,14 +34,13 @@ impl Planner {
         };
         let plan: PlanRef = LogicalUpdate::create(input, name, source_id, update.exprs)?.into();
 
-        let order = Order::any().clone();
         // For update, frontend will only schedule one task so do not need this to be single.
         let dist = RequiredDist::Any;
         let mut out_fields = FixedBitSet::with_capacity(plan.schema().len());
         out_fields.insert_range(..);
         let out_names = plan.schema().names();
 
-        let root = PlanRoot::new(plan, dist, order, out_fields, out_names);
+        let root = PlanRoot::new(plan, dist, Order::any(), out_fields, out_names);
         Ok(root)
     }
 }

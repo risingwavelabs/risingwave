@@ -17,7 +17,7 @@ use std::sync::Arc;
 use pgwire::pg_response::PgResponse;
 use pgwire::pg_response::StatementType::{ABORT, START_TRANSACTION};
 use risingwave_common::error::{ErrorCode, Result};
-use risingwave_sqlparser::ast::{DropStatement, ObjectType, Statement};
+use risingwave_sqlparser::ast::{DropStatement, ObjectType, Statement, WithProperties};
 
 use crate::session::{OptimizerContext, SessionImpl};
 
@@ -25,6 +25,7 @@ mod create_database;
 pub mod create_index;
 pub mod create_mv;
 mod create_schema;
+pub mod create_sink;
 pub mod create_source;
 pub mod create_table;
 pub mod create_user;
@@ -34,6 +35,7 @@ mod drop_database;
 mod drop_index;
 pub mod drop_mv;
 mod drop_schema;
+pub mod drop_sink;
 pub mod drop_source;
 pub mod drop_table;
 pub mod drop_user;
@@ -41,12 +43,16 @@ mod explain;
 mod flush;
 pub mod handle_privilege;
 pub mod query;
-mod set;
 mod show;
 pub mod util;
+mod variable;
 
-pub(super) async fn handle(session: Arc<SessionImpl>, stmt: Statement) -> Result<PgResponse> {
-    let context = OptimizerContext::new(session.clone());
+pub(super) async fn handle(
+    session: Arc<SessionImpl>,
+    stmt: Statement,
+    sql: &str,
+) -> Result<PgResponse> {
+    let context = OptimizerContext::new(session.clone(), Arc::from(sql));
     match stmt {
         Statement::Explain {
             statement, verbose, ..
@@ -55,6 +61,7 @@ pub(super) async fn handle(session: Arc<SessionImpl>, stmt: Statement) -> Result
             is_materialized,
             stmt,
         } => create_source::handle_create_source(context, is_materialized, stmt).await,
+        Statement::CreateSink { stmt } => create_sink::handle_create_sink(context, stmt).await,
         Statement::CreateTable {
             name,
             columns,
@@ -74,8 +81,8 @@ pub(super) async fn handle(session: Arc<SessionImpl>, stmt: Statement) -> Result
         Statement::CreateUser(stmt) => create_user::handle_create_user(context, stmt).await,
         Statement::Grant { .. } => handle_privilege::handle_grant_privilege(context, stmt).await,
         Statement::Revoke { .. } => handle_privilege::handle_revoke_privilege(context, stmt).await,
-        Statement::Describe { name } => describe::handle_describe(context, name).await,
-        Statement::ShowObjects(show_object) => show::handle_show_object(context, show_object).await,
+        Statement::Describe { name } => describe::handle_describe(context, name),
+        Statement::ShowObjects(show_object) => show::handle_show_object(context, show_object),
         Statement::Drop(DropStatement {
             object_type,
             object_name,
@@ -86,6 +93,7 @@ pub(super) async fn handle(session: Arc<SessionImpl>, stmt: Statement) -> Result
             ObjectType::MaterializedView => drop_mv::handle_drop_mv(context, object_name).await,
             ObjectType::Index => drop_index::handle_drop_index(context, object_name).await,
             ObjectType::Source => drop_source::handle_drop_source(context, object_name).await,
+            ObjectType::Sink => drop_sink::handle_drop_sink(context, object_name).await,
             ObjectType::Database => {
                 drop_database::handle_drop_database(
                     context,
@@ -116,14 +124,16 @@ pub(super) async fn handle(session: Arc<SessionImpl>, stmt: Statement) -> Result
             or_replace: false,
             name,
             query,
+            with_options,
             ..
-        } => create_mv::handle_create_mv(context, name, query).await,
+        } => create_mv::handle_create_mv(context, name, query, WithProperties(with_options)).await,
         Statement::Flush => flush::handle_flush(context).await,
         Statement::SetVariable {
             local: _,
             variable,
             value,
-        } => set::handle_set(context, variable, value),
+        } => variable::handle_set(context, variable, value),
+        Statement::ShowVariable { variable } => variable::handle_show(context, variable),
         Statement::CreateIndex {
             name,
             table_name,

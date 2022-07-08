@@ -28,7 +28,7 @@ RUN rustup component add rustfmt llvm-tools-preview clippy
 # install build tools
 RUN cargo install cargo-llvm-cov cargo-nextest cargo-udeps cargo-hakari cargo-sort cargo-make cargo-cache \
     && cargo install --git https://github.com/risinglightdb/sqllogictest-rs --features bin \
-    && cargo cache -a
-
-# pre-cache required crates
-RUN git clone https://github.com/singularity-data/risingwave && cd risingwave && cargo fetch && cd .. && rm -rf risingwave && cargo cache -g
+    && cargo cache -a \
+    && rm -rf "/root/.cargo/registry/index" \
+    && rm -rf "/root/.cargo/registry/cache" \
+    && rm -rf "/root/.cargo/git/db"

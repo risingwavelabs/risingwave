@@ -61,10 +61,12 @@ pub enum Distribution {
     /// Records are sharded into partitions, and satisfy the `AnyShard` but without any guarantee
     /// about their placement rules.
     SomeShard,
-    /// Records are sharded into partitions based on the hash value of some keys, which means the
-    /// records with the same hash values must be on the same partition.
+    /// Records are sharded into partitions based on the hash value of some columns, which means
+    /// the records with the same hash values must be on the same partition.
     /// `usize` is the index of column used as the distribution key.
     HashShard(Vec<usize>),
+    /// Records are available on all downstream shards
+    Broadcast,
 }
 
 /// the distribution property requirement.
@@ -90,15 +92,17 @@ impl Distribution {
                 Distribution::HashShard(_) => DistributionMode::Hash,
                 // TODO: add round robin DistributionMode
                 Distribution::SomeShard => DistributionMode::Single,
+                Distribution::Broadcast => DistributionMode::Broadcast,
             } as i32,
             distribution: match self {
                 Distribution::Single => None,
-                Distribution::HashShard(keys) => Some(DistributionProst::HashInfo(HashInfo {
+                Distribution::HashShard(key) => Some(DistributionProst::HashInfo(HashInfo {
                     output_count,
-                    keys: keys.iter().map(|num| *num as u32).collect(),
+                    key: key.iter().map(|num| *num as u32).collect(),
                 })),
                 // TODO: add round robin distribution
                 Distribution::SomeShard => None,
+                Distribution::Broadcast => None,
             },
         }
     }
@@ -108,12 +112,15 @@ impl Distribution {
         match required {
             RequiredDist::Any => true,
             RequiredDist::AnyShard => {
-                matches!(self, Distribution::SomeShard | Distribution::HashShard(_))
+                matches!(
+                    self,
+                    Distribution::SomeShard | Distribution::HashShard(_) | Distribution::Broadcast
+                )
             }
-            RequiredDist::ShardByKey(required_keys) => match self {
-                Distribution::HashShard(hash_keys) => hash_keys
-                    .iter()
-                    .all(|hash_key| required_keys.contains(*hash_key)),
+            RequiredDist::ShardByKey(required_key) => match self {
+                Distribution::HashShard(hash_key) => {
+                    hash_key.iter().all(|idx| required_key.contains(*idx))
+                }
                 _ => false,
             },
             RequiredDist::PhysicalDist(other) => self == other,
@@ -124,7 +131,9 @@ impl Distribution {
     /// valid.
     pub fn dist_column_indices(&self) -> &[usize] {
         match self {
-            Distribution::Single | Distribution::SomeShard => Default::default(),
+            Distribution::Single | Distribution::SomeShard | Distribution::Broadcast => {
+                Default::default()
+            }
             Distribution::HashShard(dists) => dists,
         }
     }
@@ -135,9 +144,9 @@ impl RequiredDist {
         Self::PhysicalDist(Distribution::Single)
     }
 
-    pub fn shard_by_key(tot_col_num: usize, keys: &[usize]) -> Self {
+    pub fn shard_by_key(tot_col_num: usize, key: &[usize]) -> Self {
         let mut cols = FixedBitSet::with_capacity(tot_col_num);
-        for i in keys {
+        for i in key {
             cols.insert(*i);
         }
         if cols.count_ones(..) == 0 {
@@ -166,9 +175,9 @@ impl RequiredDist {
             RequiredDist::AnyShard => {
                 matches!(required, RequiredDist::Any | RequiredDist::AnyShard)
             }
-            RequiredDist::ShardByKey(keys) => match required {
+            RequiredDist::ShardByKey(key) => match required {
                 RequiredDist::Any | RequiredDist::AnyShard => true,
-                RequiredDist::ShardByKey(required_keys) => keys.is_subset(required_keys),
+                RequiredDist::ShardByKey(required_key) => key.is_subset(required_key),
                 _ => false,
             },
             RequiredDist::PhysicalDist(dist) => dist.satisfies(required),

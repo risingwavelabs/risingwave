@@ -2,6 +2,8 @@ syntax = "proto3";
 
 package stream_plan;
 
+import "catalog.proto";
+import "common.proto";
 import "data.proto";
 import "expr.proto";
 import "plan_common.proto";
@@ -20,9 +22,14 @@ message SourceNode {
     TABLE = 0;
     SOURCE = 1;
   }
-  plan_common.TableRefId table_ref_id = 1;
+  uint32 table_id = 1;
   repeated int32 column_ids = 2;
   SourceType source_type = 3;
+}
+
+message SinkNode {
+  uint32 table_id = 1;
+  repeated int32 column_ids = 2;
 }
 
 message ProjectNode {
@@ -33,41 +40,42 @@ message FilterNode {
   expr.ExprNode search_condition = 1;
 }
 
-// A materialized view is regarded as a table,
-// hence we copy the CreateTableNode definition in OLAP PlanNode.
+// A materialized view is regarded as a table.
 // In addition, we also specify primary key to MV for efficient point lookup during update and deletion.
-// The node will be used for both create mv and create index. When creating mv,
-// `pk == distribution_keys == column_orders`. When creating index, `column_orders` will contain both
-// arrange columns and pk columns, while distribution keys will be arrange columns.
+//
+// The node will be used for both create mv and create index.
+// - When creating mv, `pk == distribution_key == column_orders`.
+// - When creating index, `column_orders` will contain both
+//   arrange columns and pk columns, while distribution key will be arrange columns.
 message MaterializeNode {
-  plan_common.TableRefId table_ref_id = 1;
-  plan_common.TableRefId associated_table_ref_id = 2;
+  uint32 table_id = 1;
   // Column indexes and orders of primary key
   repeated plan_common.ColumnOrder column_orders = 3;
-  // Column IDs of input schema
-  repeated int32 column_ids = 4;
-  // Hash keys of the materialize node, which is a subset of pk.
-  repeated uint32 distribution_keys = 5;
+  // Used for internal table states.
+  catalog.Table table = 4;
 }
 
 // Remark by Yanghao: for both local and global we use the same node in the protobuf.
 // Local and global aggregator distinguish with each other in PlanNode definition.
 message SimpleAggNode {
   repeated expr.AggCall agg_calls = 1;
-  repeated uint32 distribution_keys = 2;
-  repeated uint32 table_ids = 3;
+  // Only used for local simple agg, not used for global simple agg.
+  repeated uint32 distribution_key = 2;
+  repeated catalog.Table internal_tables = 3;
+  map<uint32, int32> column_mapping = 4;
   // Whether to optimize for append only stream.
   // It is true when the input is append-only
-  bool is_append_only = 4;
+  bool is_append_only = 5;
 }
 
 message HashAggNode {
-  repeated uint32 distribution_keys = 1;
+  repeated uint32 group_key = 1;
   repeated expr.AggCall agg_calls = 2;
-  repeated uint32 table_ids = 3;
+  repeated catalog.Table internal_tables = 3;
+  map<uint32, int32> column_mapping = 4;
   // Whether to optimize for append only stream.
   // It is true when the input is append-only
-  bool is_append_only = 4;
+  bool is_append_only = 5;
 }
 
 message TopNNode {
@@ -75,9 +83,11 @@ message TopNNode {
   // 0 means no limit as limit of 0 means this node should be optimized away
   uint64 limit = 2;
   uint64 offset = 3;
-  repeated uint32 distribution_keys = 4;
+  repeated uint32 distribution_key = 4;
   // Used for internal table states
-  uint32 table_id = 5;
+  uint32 table_id_l = 5;
+  uint32 table_id_m = 6;
+  uint32 table_id_h = 7;
 }
 
 message HashJoinNode {
@@ -85,18 +95,33 @@ message HashJoinNode {
   repeated int32 left_key = 2;
   repeated int32 right_key = 3;
   expr.ExprNode condition = 4;
-  repeated uint32 distribution_keys = 5;
   // Whether to use delta join for this hash join node. When enabled, arrangement will be created
   // on-the-fly within the plan.
   // TODO: remove this in the future when we have a separate DeltaHashJoin node.
-  bool is_delta_join = 6;
-  // Used for internal table states. Id of the left table.
-  uint32 left_table_id = 7;
-  // Used for internal table states. Id of the right table.
-  uint32 right_table_id = 8;
+  bool is_delta_join = 5;
+  // Used for internal table states.
+  catalog.Table left_table = 6;
+  // Used for internal table states.
+  catalog.Table right_table = 7;
   // Whether to optimize for append only stream.
   // It is true when the input is append-only
-  bool is_append_only = 9;
+  bool is_append_only = 8;
+  // The output indices of current node
+  repeated uint32 output_indices = 9;
+}
+
+message DynamicFilterNode {
+  uint32 left_key = 1;
+  // Must be one of <, <=, >, >=
+  expr.ExprNode condition = 3;
+  // Used for internal table states.
+  // catalog.Table left_table = 4;
+  // uint32 dist_key_l = 8;
+  // It is true when the right side of the inequality predicate is monotonically:
+  // - decreasing for <, <=, increasing for >, >=
+  // bool is_monotonic = 10;
+  // the output indices of current node
+  // repeated uint32 output_indices = 11;
 }
 
 // Delta join with two indexes. This is a pseudo plan node generated on frontend. On meta
@@ -114,6 +139,8 @@ message DeltaIndexJoinNode {
   ArrangementInfo left_info = 9;
   // Info about the right index
   ArrangementInfo right_info = 10;
+  // the output indices of current node
+  repeated uint32 output_indices = 11;
 }
 
 message HopWindowNode {
@@ -140,7 +167,7 @@ message ExchangeNode {
 //   1. MergeNode (as a placeholder) for streaming read.
 //   2. BatchPlanNode for snapshot read.
 message ChainNode {
-  plan_common.TableRefId table_ref_id = 1;
+  uint32 table_id = 1;
   // The schema of input stream, which will be used to build a MergeNode
   repeated plan_common.Field upstream_fields = 2;
   repeated int32 column_ids = 3;
@@ -158,12 +185,11 @@ message ChainNode {
 // Currently, streaming to batch push down is not yet supported, BatchPlanNode is simply a table scan.
 message BatchPlanNode {
   plan_common.CellBasedTableDesc table_desc = 1;
-  repeated plan_common.ColumnDesc column_descs = 2;
-  repeated uint32 distribution_keys = 3;
+  repeated int32 column_ids = 2;
 }
 
 message ArrangementInfo {
-  // Order keys of the arrangement, including order by keys and pks from the materialize
+  // Order key of the arrangement, including order by columns and pk from the materialize
   // executor.
   repeated plan_common.ColumnOrder arrange_key_orders = 1;
   // Column descs of the arrangement
@@ -177,15 +203,15 @@ message ArrangeNode {
   uint32 table_id = 2;
   // Info about the arrangement
   ArrangementInfo table_info = 3;
-  // Hash keys of the materialize node, which is a subset of pk.
-  repeated uint32 distribution_keys = 4;
+  // Hash key of the materialize node, which is a subset of pk.
+  repeated uint32 distribution_key = 4;
 }
 
 // Special node for shared state. LookupNode will join an arrangement with a stream.
 message LookupNode {
-  // Join keys of the arrangement side
+  // Join key of the arrangement side
   repeated int32 arrange_key = 1;
-  // Join keys of the stream side
+  // Join key of the stream side
   repeated int32 stream_key = 2;
   // Whether to join the current epoch of arrangement
   bool use_current_epoch = 3;
@@ -211,6 +237,13 @@ message LookupUnionNode {
   repeated uint32 order = 1;
 }
 
+message ExpandNode {
+  message Subset {
+    repeated uint32 column_indices = 1;
+  }
+  repeated Subset column_subsets = 1;
+}
+
 message StreamNode {
   oneof node_body {
     SourceNode source = 100;
@@ -233,6 +266,9 @@ message StreamNode {
     LookupUnionNode lookup_union = 117;
     UnionNode union = 118;
     DeltaIndexJoinNode delta_index_join = 119;
+    SinkNode sink = 120;
+    ExpandNode expand = 121;
+    DynamicFilterNode dynamic_filter = 122;
   }
   // The id for the operator.
   uint64 operator_id = 1;
@@ -296,7 +332,7 @@ message StreamActor {
   bool same_worker_node_as_upstream = 7;
   // Vnodes that the executors in this actor own. If this actor is the only actor in its fragment, `vnode_bitmap`
   // will be empty.
-  bytes vnode_bitmap = 8;
+  common.Buffer vnode_bitmap = 8;
 }
 
 enum FragmentType {

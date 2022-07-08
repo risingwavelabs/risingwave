@@ -16,7 +16,6 @@ use std::collections::BinaryHeap;
 use std::sync::Arc;
 
 use futures_async_stream::try_stream;
-use itertools::Itertools;
 use risingwave_common::array::column::Column;
 use risingwave_common::array::DataChunk;
 use risingwave_common::catalog::{Field, Schema};
@@ -25,8 +24,8 @@ use risingwave_common::types::ToOwnedDatum;
 use risingwave_common::util::sort_util::{HeapElem, OrderPair, K_PROCESSING_WINDOW_SIZE};
 use risingwave_pb::batch_plan::plan_node::NodeBody;
 use risingwave_pb::batch_plan::ExchangeSource as ProstExchangeSource;
-use risingwave_rpc_client::ExchangeSource;
 
+use crate::exchange_source::ExchangeSourceImpl;
 use crate::executor::{
     BoxedDataChunkStream, BoxedExecutor, BoxedExecutorBuilder, CreateSource, DefaultCreateSource,
     Executor, ExecutorBuilder,
@@ -46,11 +45,10 @@ pub struct MergeSortExchangeExecutorImpl<CS, C> {
     order_pairs: Arc<Vec<OrderPair>>,
     min_heap: BinaryHeap<HeapElem>,
     proto_sources: Vec<ProstExchangeSource>,
-    sources: Vec<Box<dyn ExchangeSource>>,
+    sources: Vec<ExchangeSourceImpl>, // impl
     /// Mock-able CreateSource.
     source_creators: Vec<CS>,
     schema: Schema,
-    first_execution: bool,
     task_id: TaskId,
     identity: String,
 }
@@ -109,24 +107,19 @@ impl<CS: 'static + Send + CreateSource, C: BatchTaskContext> Executor
 impl<CS: 'static + Send + CreateSource, C: BatchTaskContext> MergeSortExchangeExecutorImpl<CS, C> {
     #[try_stream(boxed, ok = DataChunk, error = RwError)]
     async fn do_execute(mut self: Box<Self>) {
-        // If this is the first time execution, we first get one chunk from each source
-        // and put one row of each chunk into the heap
-        if self.first_execution {
-            for source_idx in 0..self.proto_sources.len() {
-                let new_source = self.source_creators[source_idx]
-                    .create_source(self.context.clone(), &self.proto_sources[source_idx])
-                    .await?;
-                self.sources.push(new_source);
-                self.get_source_chunk(source_idx).await?;
-                if let Some(chunk) = &self.source_inputs[source_idx] {
-                    // We assume that we would always get a non-empty chunk from the upstream of
-                    // exchange, therefore we are sure that there is at least
-                    // one visible row.
-                    let next_row_idx = chunk.next_visible_row_idx(0);
-                    self.push_row_into_heap(source_idx, next_row_idx.unwrap());
-                }
+        for source_idx in 0..self.proto_sources.len() {
+            let new_source = self.source_creators[source_idx]
+                .create_source(self.context.clone(), &self.proto_sources[source_idx])
+                .await?;
+            self.sources.push(new_source);
+            self.get_source_chunk(source_idx).await?;
+            if let Some(chunk) = &self.source_inputs[source_idx] {
+                // We assume that we would always get a non-empty chunk from the upstream of
+                // exchange, therefore we are sure that there is at least
+                // one visible row.
+                let next_row_idx = chunk.next_visible_row_idx(0);
+                self.push_row_into_heap(source_idx, next_row_idx.unwrap());
             }
-            self.first_execution = false;
         }
 
         // If there is no rows in the heap,
@@ -145,7 +138,7 @@ impl<CS: 'static + Send + CreateSource, C: BatchTaskContext> MergeSortExchangeEx
                         .data_type
                         .create_array_builder(K_PROCESSING_WINDOW_SIZE)
                 })
-                .try_collect()?;
+                .collect();
             let mut array_len = 0;
             while want_to_produce > 0 && !self.min_heap.is_empty() {
                 let top_elem = self.min_heap.pop().unwrap();
@@ -230,7 +223,6 @@ impl BoxedExecutorBuilder for MergeSortExchangeExecutorBuilder {
             sources: vec![],
             source_creators,
             schema: Schema { fields },
-            first_execution: true,
             task_id: source.task_id.clone(),
             identity: source.plan_node().get_identity().clone(),
         }))
@@ -288,7 +280,6 @@ mod tests {
             schema: Schema {
                 fields: vec![Field::unnamed(DataType::Int32)],
             },
-            first_execution: true,
             task_id: TaskId::default(),
             identity: "MergeSortExchangeExecutor2".to_string(),
         });
@@ -308,6 +299,6 @@ mod tests {
             assert_eq!(col0.array().as_int32().value_at(5), Some(3));
         }
         let res = stream.next().await;
-        assert_eq!(res, None);
+        assert!(res.is_none());
     }
 }

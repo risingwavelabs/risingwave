@@ -11,8 +11,17 @@ option optimize_for = SPEED;
 
 message RowSeqScanNode {
   plan_common.CellBasedTableDesc table_desc = 1;
-  repeated plan_common.ColumnDesc column_descs = 2;
+  repeated int32 column_ids = 2;
   ScanRange scan_range = 3;
+  // The partition to read for scan tasks.
+  //
+  // Will be filled by the scheduler.
+  common.Buffer vnode_bitmap = 4;
+}
+
+message SysRowSeqScanNode {
+  string table_name = 1;
+  repeated plan_common.ColumnDesc column_descs = 2;
 }
 
 // The range to scan, which specifies a consecutive range of the PK
@@ -23,11 +32,11 @@ message RowSeqScanNode {
 // - index point get: `eq_conds` includes N values, and `lower_bound` & `upper_bound` are `None`
 message ScanRange {
   // The i-th element represents the value of the i-th PK column.
-  repeated expr.ExprNode eq_conds = 1;
+  repeated bytes eq_conds = 1;
 
   // `None` represent unbounded.
   message Bound {
-    expr.ExprNode value = 1;
+    bytes value = 1;
     bool inclusive = 2;
   }
   //  The lower bound of the next PK column subsequent to those in `eq_conds`.
@@ -37,7 +46,7 @@ message ScanRange {
 }
 
 message SourceScanNode {
-  plan_common.TableRefId table_ref_id = 1;
+  uint32 table_id = 1;
   // timestamp_ms is used for offset synchronization of high level consumer groups, this field will be deprecated if a more elegant approach is available in the future
   int64 timestamp_ms = 2;
   repeated int32 column_ids = 3;
@@ -52,21 +61,21 @@ message FilterNode {
 }
 
 message FilterScanNode {
-  plan_common.TableRefId table_ref_id = 1;
+  uint32 table_id = 1;
   repeated int32 column_ids = 2;
 }
 
 message InsertNode {
-  plan_common.TableRefId table_source_ref_id = 1;
+  uint32 table_source_id = 1;
   repeated int32 column_ids = 2;
 }
 
 message DeleteNode {
-  plan_common.TableRefId table_source_ref_id = 1;
+  uint32 table_source_id = 1;
 }
 
 message UpdateNode {
-  plan_common.TableRefId table_source_ref_id = 1;
+  uint32 table_source_id = 1;
   repeated expr.ExprNode exprs = 2;
 }
 
@@ -96,15 +105,23 @@ message LimitNode {
 message NestedLoopJoinNode {
   plan_common.JoinType join_type = 1;
   expr.ExprNode join_cond = 2;
+  repeated uint32 output_indices = 3;
 }
 
 message HashAggNode {
-  repeated uint32 group_keys = 1;
+  repeated uint32 group_key = 1;
   repeated expr.AggCall agg_calls = 2;
 }
 
+message ExpandNode {
+  message Subset {
+    repeated uint32 column_indices = 1;
+  }
+  repeated Subset column_subsets = 1;
+}
+
 message SortAggNode {
-  repeated expr.ExprNode group_keys = 1;
+  repeated expr.ExprNode group_key = 1;
   repeated expr.AggCall agg_calls = 2;
 }
 
@@ -113,13 +130,15 @@ message HashJoinNode {
   repeated int32 left_key = 2;
   repeated int32 right_key = 3;
   expr.ExprNode condition = 4;
+  repeated uint32 output_indices = 5;
 }
 
 message SortMergeJoinNode {
   plan_common.JoinType join_type = 1;
-  repeated int32 left_keys = 2;
-  repeated int32 right_keys = 3;
+  repeated int32 left_key = 2;
+  repeated int32 right_key = 3;
   plan_common.OrderType direction = 4;
+  repeated uint32 output_indices = 5;
 }
 
 message HopWindowNode {
@@ -179,6 +198,15 @@ message MergeSortExchangeNode {
   repeated plan_common.ColumnOrder column_orders = 2;
 }
 
+message LookupJoinNode {
+  plan_common.JoinType join_type = 1;
+  expr.ExprNode condition = 2;
+  repeated int32 build_side_key = 3;
+  plan_common.CellBasedTableDesc probe_side_table_desc = 4;
+  repeated uint32 output_indices = 5;
+  repeated ExchangeSource sources = 6;
+}
+
 message PlanNode {
   repeated PlanNode children = 1;
   oneof node_body {
@@ -201,6 +229,9 @@ message PlanNode {
     SortMergeJoinNode sort_merge_join = 22;
     HopWindowNode hop_window = 25;
     TableFunctionNode table_function = 26;
+    SysRowSeqScanNode sys_row_seq_scan = 27;
+    ExpandNode expand = 28;
+    LookupJoinNode lookup_join = 29;
   }
   string identity = 24;
 }
@@ -221,7 +252,7 @@ message ExchangeInfo {
   }
   message HashInfo {
     uint32 output_count = 1;
-    repeated uint32 keys = 3;
+    repeated uint32 key = 3;
   }
   DistributionMode mode = 1;
   oneof distribution {

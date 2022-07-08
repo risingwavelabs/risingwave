@@ -16,12 +16,14 @@ use std::collections::HashMap;
 
 use anyhow::Result;
 use async_trait::async_trait;
+use risingwave_common::field_generator::FieldGeneratorImpl;
 
-use super::field_generator::FieldGeneratorImpl;
 use super::generator::DatagenEventGenerator;
 use crate::datagen::source::SEQUENCE_FIELD_KIND;
 use crate::datagen::{DatagenProperties, DatagenSplit};
-use crate::{Column, ConnectorState, DataType, SourceMessage, SplitImpl, SplitReader};
+use crate::{
+    Column, ConnectorState, DataType, SourceMessage, SplitImpl, SplitMetaData, SplitReader,
+};
 
 const KAFKA_MAX_FETCH_MESSAGES: usize = 1024;
 
@@ -102,10 +104,20 @@ impl SplitReader for DatagenSplitReader {
                 .get(&random_seed_key)
                 .map(|s| s.to_string())
             {
-                Some(seed) => seed.parse::<u64>().unwrap_or(split_index),
+                Some(seed) => {
+                    match seed.parse::<u64>() {
+                        // we use given seed xor split_index to make sure every split has different
+                        // seed
+                        Ok(seed) => seed ^ split_index,
+                        Err(e) => {
+                            log::warn!("cannot parse {:?} to u64 due to {:?}, will use {:?} as random seed", seed, e, split_index);
+                            split_index
+                        }
+                    }
+                }
                 None => split_index,
             };
-            match column.data_type{
+            match column.data_type {
                 DataType::Timestamp => {
                 let max_past_key = format!("fields.{}.max_past", name);
                 let max_past_value =

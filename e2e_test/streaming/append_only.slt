@@ -1,0 +1,97 @@
+statement ok
+create table t1 (v1 int not null, v2 int not null) with ('appendonly' = true);
+
+statement ok
+create table t2 (v1 int not null, v3 int not null) with ('appendonly' = true);
+
+statement ok
+insert into t1 values (1,2), (2,3);
+
+statement ok
+insert into t2 values (1,5), (2,6), (3, 7);
+
+
+## Inner join
+statement ok
+create materialized view mv1 as select t1.v1 as id, v2, v3 from t1 join t2 on t1.v1=t2.v1;
+
+query I rowsort
+select * from mv1;
+----
+1 2 5
+2 3 6
+
+statement ok
+insert into t1 values (3,4), (7,7);
+
+statement ok
+flush;
+
+query II rowsort
+select * from mv1;
+----
+1 2 5
+2 3 6
+3 4 7
+
+
+## HashAgg
+statement ok
+create table t4 (v1 real not null, v2 int not null, v3 real not null) with ('appendonly' = true);
+
+statement ok
+insert into t4 values (1,1,4), (5,1,4), (1,9,1), (9,8,1), (0,2,3);
+
+statement ok
+create materialized view mv3 as select v3, sum(v1) as sum_v1, min(v1) as min_v1, max(v1) as max_v1 from t4 group by v3;
+
+query III
+select sum_v1, min_v1, max_v1, v3 from mv3 order by sum_v1;
+----
+0  0 0 3
+6  1 5 4
+10 1 9 1
+
+
+## TopN
+statement ok
+create materialized view mv4 as select v1, v3 from t4 order by v1 limit 3 offset 3;
+
+## scan MV with ORDER BY isn't guaranteed to be ordered
+query IV rowsort
+select * from mv4;
+----
+5 4
+9 1
+
+
+## SimpleAgg
+statement ok
+create materialized view mv5 as select sum(v1) as sum_v1, max(v2) as max_v2, min(v3) as min_v3 from t4;
+
+query V
+select * from mv5;
+----
+16 9 1
+
+
+statement ok
+drop materialized view mv5
+
+statement ok
+drop materialized view mv4
+
+statement ok
+drop materialized view mv3
+
+statement ok
+drop materialized view mv1
+
+statement ok
+drop table t4
+
+statement ok
+drop table t2
+
+statement ok
+drop table t1

@@ -16,6 +16,8 @@
 
 mod batch_query;
 mod chain;
+mod dynamic_filter;
+mod expand;
 mod filter;
 mod global_simple_agg;
 mod hash_agg;
@@ -42,6 +44,8 @@ use risingwave_storage::{Keyspace, StateStore};
 
 use self::batch_query::*;
 use self::chain::*;
+use self::dynamic_filter::*;
+use self::expand::*;
 use self::filter::*;
 use self::global_simple_agg::*;
 use self::hash_agg::*;
@@ -105,7 +109,7 @@ pub fn create_executor(
         NodeBody::TopN => TopNExecutorBuilder,
         NodeBody::AppendOnlyTopN => AppendOnlyTopNExecutorBuilder,
         NodeBody::LocalSimpleAgg => LocalSimpleAggExecutorBuilder,
-        NodeBody::GlobalSimpleAgg => SimpleAggExecutorBuilder,
+        NodeBody::GlobalSimpleAgg => GlobalSimpleAggExecutorBuilder,
         NodeBody::HashAgg => HashAggExecutorBuilder,
         NodeBody::HashJoin => HashJoinExecutorBuilder,
         NodeBody::HopWindow => HopWindowExecutorBuilder,
@@ -118,5 +122,7 @@ pub fn create_executor(
         NodeBody::Lookup => LookupExecutorBuilder,
         NodeBody::Union => UnionExecutorBuilder,
         NodeBody::LookupUnion => LookupUnionExecutorBuilder,
+        NodeBody::Expand => ExpandExecutorBuilder,
+        NodeBody::DynamicFilter => DynamicFilterExecutorBuilder,
     }
 }

@@ -14,15 +14,13 @@
 
 //! Streaming Aggregators
 
-use risingwave_common::catalog::TableId;
-
 use super::*;
-use crate::executor::aggregation::AggCall;
-use crate::executor::SimpleAggExecutor;
+use crate::executor::aggregation::{generate_state_tables_from_proto, AggCall};
+use crate::executor::GlobalSimpleAggExecutor;
 
-pub struct SimpleAggExecutorBuilder;
+pub struct GlobalSimpleAggExecutorBuilder;
 
-impl ExecutorBuilder for SimpleAggExecutorBuilder {
+impl ExecutorBuilder for GlobalSimpleAggExecutorBuilder {
     fn new_boxed_executor(
         mut params: ExecutorParams,
         node: &StreamNode,
@@ -35,26 +33,15 @@ impl ExecutorBuilder for SimpleAggExecutorBuilder {
             .iter()
             .map(|agg_call| build_agg_call_from_prost(node.is_append_only, agg_call))
             .try_collect()?;
-        // Build vector of keyspace via table ids.
-        // One keyspace for one agg call.
-        let keyspace = node
-            .get_table_ids()
-            .iter()
-            .map(|table_id| Keyspace::table_root(store.clone(), &TableId::new(*table_id)))
-            .collect();
-        let key_indices = node
-            .get_distribution_keys()
-            .iter()
-            .map(|key| *key as usize)
-            .collect::<Vec<_>>();
 
-        Ok(SimpleAggExecutor::new(
+        let state_tables = generate_state_tables_from_proto(store, &node.internal_tables, None);
+
+        Ok(GlobalSimpleAggExecutor::new(
             params.input.remove(0),
             agg_calls,
-            keyspace,
             params.pk_indices,
             params.executor_id,
-            key_indices,
+            state_tables,
         )?
         .boxed())
     }

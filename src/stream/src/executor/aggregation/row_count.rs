@@ -54,9 +54,7 @@ impl StreamingRowCountAgg {
     }
 
     pub fn create_array_builder(capacity: usize) -> StreamExecutorResult<ArrayBuilderImpl> {
-        I64ArrayBuilder::new(capacity)
-            .map(|builder| builder.into())
-            .map_err(Into::into)
+        Ok(I64ArrayBuilder::new(capacity).into())
     }
 
     pub fn return_type() -> DataType {
@@ -99,7 +97,7 @@ impl StreamingAggStateImpl for StreamingRowCountAgg {
     }
 
     fn new_builder(&self) -> ArrayBuilderImpl {
-        ArrayBuilderImpl::Int64(I64ArrayBuilder::new(0).unwrap())
+        ArrayBuilderImpl::Int64(I64ArrayBuilder::new(0))
     }
 
     fn reset(&mut self) {
@@ -140,7 +138,7 @@ mod tests {
         state
             .apply_batch(
                 &[Op::Delete, Op::Insert],
-                Some(&(vec![false, true]).try_into().unwrap()),
+                Some(&(vec![false, true]).into_iter().collect()),
                 &[],
             )
             .unwrap();
@@ -152,7 +150,7 @@ mod tests {
         state
             .apply_batch(
                 &[Op::Delete, Op::Insert],
-                Some(&(vec![true, false]).try_into().unwrap()),
+                Some(&(vec![true, false]).into_iter().collect()),
                 &[],
             )
             .unwrap();

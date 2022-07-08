@@ -20,8 +20,7 @@ use std::sync::Arc;
 use bytes::Bytes;
 use itertools::Itertools;
 use risingwave_hummock_sdk::key::key_with_epoch;
-use risingwave_hummock_sdk::HummockEpoch;
-use risingwave_pb::hummock::SstableInfo;
+use risingwave_hummock_sdk::LocalSstableInfo;
 
 use super::iterator::{
     BackwardUserIterator, ConcatIteratorInner, DirectedUserIterator, UserIterator,
@@ -31,7 +30,7 @@ use super::{BackwardSSTableIterator, HummockStorage, SSTableIterator, SSTableIte
 use crate::error::StorageResult;
 use crate::hummock::iterator::{
     Backward, BoxedHummockIterator, DirectedUserIteratorBuilder, DirectionEnum, Forward,
-    HummockIteratorDirection, ReadOptions,
+    HummockIteratorDirection, ReadOptions as IterReadOptions,
 };
 use crate::hummock::local_version::PinnedVersion;
 use crate::hummock::shared_buffer::shared_buffer_batch::SharedBufferBatch;
@@ -74,17 +73,23 @@ impl HummockStorage {
     async fn iter_inner<R, B, T>(
         &self,
         key_range: R,
-        epoch: u64,
+        read_options: ReadOptions,
     ) -> StorageResult<HummockStateStoreIter>
     where
         R: RangeBounds<B> + Send,
         B: AsRef<[u8]> + Send,
         T: HummockIteratorType,
     {
-        let read_options = Arc::new(ReadOptions::default());
+        let epoch = read_options.epoch;
+        let compaction_group_id = read_options
+            .table_id
+            .as_ref()
+            .map(|table_id| self.get_compaction_group_id(*table_id));
+        let min_epoch = read_options.min_epoch();
+        let iter_read_options = Arc::new(IterReadOptions::default());
         let mut overlapped_iters = vec![];
 
-        let (shared_buffer_data, pinned_version) = self.read_filter(epoch, &key_range)?;
+        let (shared_buffer_data, pinned_version) = self.read_filter(read_options, &key_range)?;
 
         let mut stats = StoreLocalStatistic::default();
 
@@ -99,7 +104,7 @@ impl HummockStorage {
                     self.sstable_store.clone(),
                     self.stats.clone(),
                     &mut stats,
-                    read_options.clone(),
+                    iter_read_options.clone(),
                 )
                 .await?,
             );
@@ -107,8 +112,19 @@ impl HummockStorage {
 
         // Generate iterators for versioned ssts by filter out ssts that do not overlap with given
         // `key_range`
-        for level in pinned_version.levels() {
-            let table_infos = prune_ssts(level.get_table_infos().iter(), &key_range);
+
+        // The correctness of using compaction_group_id in read path and write path holds only
+        // because we are currently:
+        //
+        // a) adopting static compaction group. It means a table_id->compaction_group mapping would
+        // never change since creation until the table is dropped.
+        //
+        // b) enforcing shared buffer to split output SSTs by compaction group. It means no SSTs
+        // would contain tables from different compaction_group, even for those in L0.
+        //
+        // When adopting dynamic compaction group in the future, be sure to revisit this assumption.
+        for level in pinned_version.levels(compaction_group_id) {
+            let table_infos = prune_ssts(level.table_infos.iter(), &key_range);
             if table_infos.is_empty() {
                 continue;
             }
@@ -139,7 +155,7 @@ impl HummockStorage {
                 overlapped_iters.push(Box::new(ConcatIteratorInner::<T::SstableIteratorType>::new(
                     tables,
                     self.sstable_store(),
-                    read_options.clone(),
+                    iter_read_options.clone(),
                 )) as BoxedHummockIterator<T::Direction>);
             } else {
                 for table_info in table_infos.into_iter().rev() {
@@ -150,7 +166,7 @@ impl HummockStorage {
                     overlapped_iters.push(Box::new(T::SstableIteratorType::create(
                         table,
                         self.sstable_store(),
-                        read_options.clone(),
+                        iter_read_options.clone(),
                     )));
                 }
             }
@@ -170,6 +186,7 @@ impl HummockStorage {
             self.stats.clone(),
             key_range,
             epoch,
+            min_epoch,
             Some(pinned_version),
         );
 
@@ -185,9 +202,18 @@ impl HummockStorage {
     /// If `Ok(Some())` is returned, the key is found. If `Ok(None)` is returned,
     /// the key is not found. If `Err()` is returned, the searching for the key
     /// failed due to other non-EOF errors.
-    pub async fn get<'a>(&'a self, key: &'a [u8], epoch: u64) -> StorageResult<Option<Bytes>> {
+    pub async fn get<'a>(
+        &'a self,
+        key: &'a [u8],
+        read_options: ReadOptions,
+    ) -> StorageResult<Option<Bytes>> {
+        let epoch = read_options.epoch;
+        let compaction_group_id = read_options
+            .table_id
+            .as_ref()
+            .map(|table_id| self.get_compaction_group_id(*table_id));
         let mut stats = StoreLocalStatistic::default();
-        let (shared_buffer_data, pinned_version) = self.read_filter(epoch, &(key..=key))?;
+        let (shared_buffer_data, pinned_version) = self.read_filter(read_options, &(key..=key))?;
 
         // Return `Some(None)` means the key is deleted.
         let get_from_batch = |batch: &SharedBufferBatch| -> Option<Option<Bytes>> {
@@ -200,7 +226,7 @@ impl HummockStorage {
         let mut table_counts = 0;
         let internal_key = key_with_epoch(key.to_vec(), epoch);
         // TODO: may want to avoid use Arc in read options
-        let read_options = Arc::new(ReadOptions::default());
+        let iter_read_options = Arc::new(IterReadOptions::default());
 
         // Query shared buffer. Return the value without iterating SSTs if found
         for (replicated_batches, uncommitted_data) in shared_buffer_data {
@@ -218,7 +244,7 @@ impl HummockStorage {
                                 return Ok(v);
                             }
                         }
-                        UncommittedData::Sst(table_info) => {
+                        UncommittedData::Sst((_, table_info)) => {
                             let table = self
                                 .sstable_store
                                 .sstable(table_info.id, &mut stats)
@@ -229,12 +255,12 @@ impl HummockStorage {
                                     table,
                                     &internal_key,
                                     key,
-                                    read_options.clone(),
+                                    iter_read_options.clone(),
                                     &mut stats,
                                 )
                                 .await?
                             {
-                                return Ok(Some(v));
+                                return Ok(v);
                             }
                         }
                     }
@@ -242,7 +268,9 @@ impl HummockStorage {
             }
         }
 
-        for level in pinned_version.levels() {
+        // See comments in HummockStorage::iter_inner for details about using compaction_group_id in
+        // read/write path.
+        for level in pinned_version.levels(compaction_group_id) {
             if level.table_infos.is_empty() {
                 continue;
             }
@@ -255,10 +283,16 @@ impl HummockStorage {
                         .await?;
                     table_counts += 1;
                     if let Some(v) = self
-                        .get_from_table(table, &internal_key, key, read_options.clone(), &mut stats)
+                        .get_from_table(
+                            table,
+                            &internal_key,
+                            key,
+                            iter_read_options.clone(),
+                            &mut stats,
+                        )
                         .await?
                     {
-                        return Ok(Some(v));
+                        return Ok(v);
                     }
                 }
             }
@@ -274,7 +308,7 @@ impl HummockStorage {
     #[expect(clippy::type_complexity)]
     fn read_filter<R, B>(
         &self,
-        epoch: HummockEpoch,
+        read_options: ReadOptions,
         key_range: &R,
     ) -> HummockResult<(
         Vec<(Vec<SharedBufferBatch>, OrderSortedUncommittedData)>,
@@ -284,6 +318,7 @@ impl HummockStorage {
         R: RangeBounds<B>,
         B: AsRef<[u8]>,
     {
+        let epoch = read_options.epoch;
         let read_version = self.local_version_manager.read_version(epoch);
 
         // Check epoch validity
@@ -304,35 +339,40 @@ impl StateStore for HummockStorage {
 
     define_state_store_associated_type!();
 
-    fn get<'a>(&'a self, key: &'a [u8], epoch: u64) -> Self::GetFuture<'_> {
-        async move { self.get(key, epoch).await }
+    fn get<'a>(&'a self, key: &'a [u8], read_options: ReadOptions) -> Self::GetFuture<'_> {
+        async move { self.get(key, read_options).await }
     }
 
     fn scan<R, B>(
         &self,
         key_range: R,
         limit: Option<usize>,
-        epoch: u64,
+        read_options: ReadOptions,
     ) -> Self::ScanFuture<'_, R, B>
     where
         R: RangeBounds<B> + Send,
         B: AsRef<[u8]> + Send,
     {
-        async move { self.iter(key_range, epoch).await?.collect(limit).await }
+        async move {
+            self.iter(key_range, read_options)
+                .await?
+                .collect(limit)
+                .await
+        }
     }
 
     fn backward_scan<R, B>(
         &self,
         key_range: R,
         limit: Option<usize>,
-        epoch: u64,
+        read_options: ReadOptions,
     ) -> Self::BackwardScanFuture<'_, R, B>
     where
         R: RangeBounds<B> + Send,
         B: AsRef<[u8]> + Send,
     {
         async move {
-            self.backward_iter(key_range, epoch)
+            self.backward_iter(key_range, read_options)
                 .await?
                 .collect(limit)
                 .await
@@ -351,12 +391,16 @@ impl StateStore for HummockStorage {
     fn ingest_batch(
         &self,
         kv_pairs: Vec<(Bytes, StorageValue)>,
-        epoch: u64,
+        write_options: WriteOptions,
     ) -> Self::IngestBatchFuture<'_> {
         async move {
+            let epoch = write_options.epoch;
+            let compaction_group_id = self.get_compaction_group_id(write_options.table_id);
+            // See comments in HummockStorage::iter_inner for details about using
+            // compaction_group_id in read/write path.
             let size = self
                 .local_version_manager
-                .write_shared_buffer(epoch, kv_pairs, false)
+                .write_shared_buffer(epoch, compaction_group_id, kv_pairs, false)
                 .await?;
             Ok(size)
         }
@@ -366,11 +410,15 @@ impl StateStore for HummockStorage {
     fn replicate_batch(
         &self,
         kv_pairs: Vec<(Bytes, StorageValue)>,
-        epoch: u64,
+        write_options: WriteOptions,
     ) -> Self::ReplicateBatchFuture<'_> {
         async move {
+            let epoch = write_options.epoch;
+            let compaction_group_id = self.get_compaction_group_id(write_options.table_id);
+            // See comments in HummockStorage::iter_inner for details about using
+            // compaction_group_id in read/write path.
             self.local_version_manager
-                .write_shared_buffer(epoch, kv_pairs, true)
+                .write_shared_buffer(epoch, compaction_group_id, kv_pairs, true)
                 .await?;
 
             Ok(())
@@ -379,17 +427,21 @@ impl StateStore for HummockStorage {
 
     /// Returns an iterator that scan from the begin key to the end key
     /// The result is based on a snapshot corresponding to the given `epoch`.
-    fn iter<R, B>(&self, key_range: R, epoch: u64) -> Self::IterFuture<'_, R, B>
+    fn iter<R, B>(&self, key_range: R, read_options: ReadOptions) -> Self::IterFuture<'_, R, B>
     where
         R: RangeBounds<B> + Send,
         B: AsRef<[u8]> + Send,
     {
-        self.iter_inner::<R, B, ForwardIter>(key_range, epoch)
+        self.iter_inner::<R, B, ForwardIter>(key_range, read_options)
     }
 
     /// Returns a backward iterator that scans from the end key to the begin key
     /// The result is based on a snapshot corresponding to the given `epoch`.
-    fn backward_iter<R, B>(&self, key_range: R, epoch: u64) -> Self::BackwardIterFuture<'_, R, B>
+    fn backward_iter<R, B>(
+        &self,
+        key_range: R,
+        read_options: ReadOptions,
+    ) -> Self::BackwardIterFuture<'_, R, B>
     where
         R: RangeBounds<B> + Send,
         B: AsRef<[u8]> + Send,
@@ -398,7 +450,7 @@ impl StateStore for HummockStorage {
             key_range.end_bound().map(|v| v.as_ref().to_vec()),
             key_range.start_bound().map(|v| v.as_ref().to_vec()),
         );
-        self.iter_inner::<_, _, BackwardIter>(key_range, epoch)
+        self.iter_inner::<_, _, BackwardIter>(key_range, read_options)
     }
 
     fn wait_epoch(&self, epoch: u64) -> Self::WaitEpochFuture<'_> {
@@ -414,8 +466,15 @@ impl StateStore for HummockStorage {
         }
     }
 
-    fn get_uncommitted_ssts(&self, epoch: u64) -> Vec<SstableInfo> {
+    fn get_uncommitted_ssts(&self, epoch: u64) -> Vec<LocalSstableInfo> {
         self.local_version_manager.get_uncommitted_ssts(epoch)
+    }
+
+    fn clear_shared_buffer(&self) -> Self::ClearSharedBufferFuture<'_> {
+        async move {
+            self.local_version_manager.clear_shared_buffer().await;
+            Ok(())
+        }
     }
 }
 

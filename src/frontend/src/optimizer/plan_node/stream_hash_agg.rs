@@ -15,6 +15,7 @@
 use std::fmt;
 
 use itertools::Itertools;
+use risingwave_common::catalog::{DatabaseId, SchemaId};
 use risingwave_pb::stream_plan::stream_node::NodeBody as ProstStreamNode;
 
 use super::logical_agg::PlanAggCall;
@@ -35,11 +36,10 @@ impl StreamHashAgg {
         let input = logical.input();
         let input_dist = input.distribution();
         let dist = match input_dist {
-            Distribution::Single => Distribution::Single,
             Distribution::HashShard(_) => logical
                 .i2o_col_mapping()
                 .rewrite_provided_distribution(input_dist),
-            Distribution::SomeShard => Distribution::SomeShard,
+            d => d.clone(),
         };
         // Hash agg executor might change the append-only behavior of the stream.
         let base = PlanBase::new_stream(ctx, logical.schema().clone(), pk_indices, dist, false);
@@ -50,8 +50,8 @@ impl StreamHashAgg {
         self.logical.agg_calls()
     }
 
-    pub fn distribution_keys(&self) -> &[usize] {
-        self.logical.group_keys()
+    pub fn group_key(&self) -> &[usize] {
+        self.logical.group_key()
     }
 }
 
@@ -64,9 +64,9 @@ impl fmt::Display for StreamHashAgg {
         };
         builder
             .field(
-                "group_keys",
+                "group_key",
                 &self
-                    .distribution_keys()
+                    .group_key()
                     .iter()
                     .copied()
                     .map(InputRefDisplay)
@@ -91,19 +91,27 @@ impl_plan_tree_node_for_unary! { StreamHashAgg }
 impl ToStreamProst for StreamHashAgg {
     fn to_stream_prost_body(&self) -> ProstStreamNode {
         use risingwave_pb::stream_plan::*;
-
+        let (internal_tables, column_mapping) = self.logical.infer_internal_table_catalog();
         ProstStreamNode::HashAgg(HashAggNode {
-            distribution_keys: self
-                .distribution_keys()
-                .iter()
-                .map(|idx| *idx as u32)
-                .collect_vec(),
+            group_key: self.group_key().iter().map(|idx| *idx as u32).collect_vec(),
             agg_calls: self
                 .agg_calls()
                 .iter()
                 .map(PlanAggCall::to_protobuf)
                 .collect_vec(),
-            table_ids: vec![],
+            internal_tables: internal_tables
+                .into_iter()
+                .map(|table_catalog| {
+                    table_catalog.to_prost(
+                        SchemaId::placeholder() as u32,
+                        DatabaseId::placeholder() as u32,
+                    )
+                })
+                .collect_vec(),
+            column_mapping: column_mapping
+                .into_iter()
+                .map(|(k, v)| (k as u32, v))
+                .collect(),
             is_append_only: self.input().append_only(),
         })
     }

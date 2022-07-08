@@ -14,18 +14,18 @@
 
 use std::collections::{HashMap, HashSet};
 use std::sync::Arc;
+use std::vec;
 
-use risingwave_common::catalog::TableId;
+use risingwave_common::catalog::{DatabaseId, SchemaId, TableId};
 use risingwave_common::error::Result;
+use risingwave_pb::catalog::Table as ProstTable;
 use risingwave_pb::data::data_type::TypeName;
 use risingwave_pb::data::DataType;
 use risingwave_pb::expr::agg_call::{Arg, Type};
 use risingwave_pb::expr::expr_node::RexNode;
 use risingwave_pb::expr::expr_node::Type::{Add, GreaterThan, InputRef};
 use risingwave_pb::expr::{AggCall, ExprNode, FunctionCall, InputRefExpr};
-use risingwave_pb::plan_common::{
-    ColumnOrder, DatabaseRefId, Field, OrderType, SchemaRefId, TableRefId,
-};
+use risingwave_pb::plan_common::{ColumnCatalog, ColumnDesc, ColumnOrder, Field, OrderType};
 use risingwave_pb::stream_plan::source_node::SourceType;
 use risingwave_pb::stream_plan::stream_node::NodeBody;
 use risingwave_pb::stream_plan::{
@@ -33,21 +33,10 @@ use risingwave_pb::stream_plan::{
     SimpleAggNode, SourceNode, StreamNode,
 };
 
-use crate::hummock::compaction_group::manager::CompactionGroupManager;
 use crate::manager::MetaSrvEnv;
 use crate::model::TableFragments;
 use crate::stream::stream_graph::ActorGraphBuilder;
 use crate::stream::{CreateMaterializedViewContext, FragmentManager};
-
-fn make_table_ref_id(id: i32) -> TableRefId {
-    TableRefId {
-        schema_ref_id: Some(SchemaRefId {
-            database_ref_id: Some(DatabaseRefId { database_id: 0 }),
-            schema_id: 0,
-        }),
-        table_id: id,
-    }
-}
 
 fn make_inputref(idx: i32) -> ExprNode {
     ExprNode {
@@ -88,14 +77,44 @@ fn make_field(type_name: TypeName) -> Field {
     }
 }
 
-fn make_column_order(idx: i32) -> ColumnOrder {
+fn make_column_order(index: u32) -> ColumnOrder {
     ColumnOrder {
         order_type: OrderType::Ascending as i32,
-        input_ref: Some(InputRefExpr { column_idx: idx }),
-        return_type: Some(DataType {
-            type_name: TypeName::Int64 as i32,
+        index,
+    }
+}
+
+fn make_column(column_type: TypeName, column_id: i32) -> ColumnCatalog {
+    ColumnCatalog {
+        column_desc: Some(ColumnDesc {
+            column_type: Some(DataType {
+                type_name: column_type as i32,
+                ..Default::default()
+            }),
+            column_id,
             ..Default::default()
         }),
+        is_hidden: false,
+    }
+}
+
+fn make_internal_table(is_agg_value: bool) -> ProstTable {
+    let mut columns = vec![make_column(TypeName::Int64, 0)];
+    if !is_agg_value {
+        columns.push(make_column(TypeName::Int32, 1));
+    }
+    ProstTable {
+        id: TableId::placeholder().table_id,
+        schema_id: SchemaId::placeholder() as u32,
+        database_id: DatabaseId::placeholder() as u32,
+        name: String::new(),
+        columns,
+        order_key: vec![ColumnOrder {
+            index: 0,
+            order_type: 2,
+        }],
+        pk: vec![2],
+        ..Default::default()
     }
 }
 
@@ -105,11 +124,10 @@ fn make_column_order(idx: i32) -> ColumnOrder {
 /// create materialized view T_distributed as select sum(v1)+1 as V from t where v1>v2;
 /// ```
 fn make_stream_node() -> StreamNode {
-    let table_ref_id = make_table_ref_id(1);
     // table source node
     let source_node = StreamNode {
         node_body: Some(NodeBody::Source(SourceNode {
-            table_ref_id: Some(table_ref_id),
+            table_id: 1,
             column_ids: vec![1, 2, 0],
             source_type: SourceType::Table as i32,
         })),
@@ -164,8 +182,9 @@ fn make_stream_node() -> StreamNode {
     let simple_agg_node = StreamNode {
         node_body: Some(NodeBody::GlobalSimpleAgg(SimpleAggNode {
             agg_calls: vec![make_sum_aggcall(0), make_sum_aggcall(1)],
-            distribution_keys: Default::default(),
-            table_ids: vec![],
+            distribution_key: Default::default(),
+            internal_tables: vec![make_internal_table(true), make_internal_table(false)],
+            column_mapping: HashMap::new(),
             is_append_only: false,
         })),
         input: vec![filter_node],
@@ -196,8 +215,9 @@ fn make_stream_node() -> StreamNode {
     let simple_agg_node_1 = StreamNode {
         node_body: Some(NodeBody::GlobalSimpleAgg(SimpleAggNode {
             agg_calls: vec![make_sum_aggcall(0), make_sum_aggcall(1)],
-            distribution_keys: Default::default(),
-            table_ids: vec![],
+            distribution_key: Default::default(),
+            internal_tables: vec![make_internal_table(true), make_internal_table(false)],
+            column_mapping: HashMap::new(),
             is_append_only: false,
         })),
         fields: vec![], // TODO: fill this later
@@ -240,11 +260,9 @@ fn make_stream_node() -> StreamNode {
         input: vec![project_node],
         pk_indices: vec![],
         node_body: Some(NodeBody::Materialize(MaterializeNode {
-            table_ref_id: Some(make_table_ref_id(1)),
-            associated_table_ref_id: None,
-            column_ids: vec![0_i32, 1_i32],
+            table_id: 1,
+            table: Some(make_internal_table(true)),
             column_orders: vec![make_column_order(1), make_column_order(2)],
-            distribution_keys: Default::default(),
         })),
         fields: vec![], // TODO: fill this later
         operator_id: 7,
@@ -260,35 +278,53 @@ fn make_stream_node() -> StreamNode {
 async fn test_fragmenter() -> Result<()> {
     use risingwave_frontend::stream_fragmenter::StreamFragmenter;
 
+    use crate::model::FragmentId;
+
     let env = MetaSrvEnv::for_test().await;
     let stream_node = make_stream_node();
-    let compaction_group_manager = Arc::new(CompactionGroupManager::new(env.clone()).await?);
-    let fragment_manager =
-        Arc::new(FragmentManager::new(env.clone(), compaction_group_manager).await?);
+    let fragment_manager = Arc::new(FragmentManager::new(env.clone()).await?);
     let parallel_degree = 4;
     let mut ctx = CreateMaterializedViewContext::default();
     let graph = StreamFragmenter::build_graph(stream_node);
-    let graph = ActorGraphBuilder::generate_graph(
-        env.id_gen_manager_ref(),
-        fragment_manager,
-        parallel_degree,
-        &graph,
-        &mut ctx,
-    )
-    .await?;
-    let table_fragments =
-        TableFragments::new(TableId::default(), graph, ctx.internal_table_id_set.clone());
+
+    let mut actor_graph_builder =
+        ActorGraphBuilder::new(env.id_gen_manager_ref(), &graph, &mut ctx).await?;
+
+    let parallelisms: HashMap<FragmentId, u32> = actor_graph_builder
+        .list_fragment_ids()
+        .into_iter()
+        .map(|(fragment_id, is_singleton)| {
+            if is_singleton {
+                (fragment_id, 1)
+            } else {
+                (fragment_id, parallel_degree as u32)
+            }
+        })
+        .collect();
+
+    let graph = actor_graph_builder
+        .generate_graph(
+            env.id_gen_manager_ref(),
+            fragment_manager,
+            parallelisms.clone(),
+            &mut ctx,
+        )
+        .await?;
+
+    let internal_table_id_set = ctx
+        .internal_table_id_map
+        .iter()
+        .map(|(table_id, _)| *table_id)
+        .collect::<HashSet<u32>>();
+    let table_fragments = TableFragments::new(TableId::default(), graph, internal_table_id_set);
     let actors = table_fragments.actors();
     let source_actor_ids = table_fragments.source_actor_ids();
     let sink_actor_ids = table_fragments.sink_actor_ids();
-    let mut internal_table_ids = table_fragments.internal_table_ids();
+    let internal_table_ids = table_fragments.internal_table_ids();
     assert_eq!(actors.len(), 9);
     assert_eq!(source_actor_ids, vec![6, 7, 8, 9]);
     assert_eq!(sink_actor_ids, vec![1]);
     assert_eq!(4, internal_table_ids.len());
-    internal_table_ids.sort();
-    let expected_internal_table_ids = vec![0, 1, 2, 3];
-    assert_eq!(expected_internal_table_ids, internal_table_ids);
 
     let mut expected_downstream = HashMap::new();
     expected_downstream.insert(2, vec![1]);

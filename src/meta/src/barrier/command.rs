@@ -13,6 +13,7 @@
 // limitations under the License.
 
 use std::collections::{HashMap, HashSet};
+use std::sync::Arc;
 
 use futures::future::try_join_all;
 use risingwave_common::catalog::TableId;
@@ -21,14 +22,15 @@ use risingwave_common::util::epoch::Epoch;
 use risingwave_connector::SplitImpl;
 use risingwave_pb::common::ActorInfo;
 use risingwave_pb::data::barrier::Mutation;
-use risingwave_pb::data::{
-    AddMutation, DispatcherMutation, NothingMutation, SourceChangeSplit, StopMutation,
-};
+use risingwave_pb::data::{AddMutation, DispatcherMutation, StopMutation};
+use risingwave_pb::source::{ConnectorSplit, ConnectorSplits};
 use risingwave_pb::stream_service::DropActorsRequest;
 use risingwave_rpc_client::StreamClientPoolRef;
 use uuid::Uuid;
 
 use super::info::BarrierActorInfo;
+use crate::barrier::ChangedTableState;
+use crate::barrier::ChangedTableState::{Create, Drop, NoTable};
 use crate::model::{ActorId, DispatcherId, TableFragments};
 use crate::storage::MetaStore;
 use crate::stream::FragmentManagerRef;
@@ -42,7 +44,7 @@ pub enum Command {
     ///
     /// Barriers from all actors marked as `Created` state will be collected.
     /// After the barrier is collected, it does nothing.
-    Plain(Mutation),
+    Plain(Option<Mutation>),
 
     /// `DropMaterializedView` command generates a `Stop` barrier by the given [`TableId`]. The
     /// catalog has ensured that this materialized view is safe to be dropped by reference counts
@@ -69,49 +71,56 @@ pub enum Command {
 
 impl Command {
     pub fn checkpoint() -> Self {
-        Self::Plain(Mutation::Nothing(NothingMutation {}))
+        Self::Plain(None)
     }
 
-    pub fn creating_table_id(&self) -> Option<TableId> {
+    pub fn changed_table_id(&self) -> ChangedTableState {
         match self {
             Command::CreateMaterializedView {
                 table_fragments, ..
-            } => Some(table_fragments.table_id()),
-            _ => None,
+            } => Create(table_fragments.table_id()),
+            Command::Plain(_) => NoTable,
+            Command::DropMaterializedView(table_id) => Drop(*table_id),
         }
+    }
+
+    /// If we need to send a barrier to modify actor configuration, we will pause the barrier
+    /// injection. return true
+    pub fn should_pause_inject_barrier(&self) -> bool {
+        !matches!(self, Command::Plain(_))
     }
 }
 
 /// [`CommandContext`] is used for generating barrier and doing post stuffs according to the given
 /// [`Command`].
-pub struct CommandContext<'a, S: MetaStore> {
+pub struct CommandContext<S: MetaStore> {
     fragment_manager: FragmentManagerRef<S>,
 
     client_pool: StreamClientPoolRef,
 
     /// Resolved info in this barrier loop.
     // TODO: this could be stale when we are calling `post_collect`, check if it matters
-    pub info: &'a BarrierActorInfo,
+    pub info: Arc<BarrierActorInfo>,
 
-    pub prev_epoch: &'a Epoch,
-    pub curr_epoch: &'a Epoch,
+    pub prev_epoch: Epoch,
+    pub curr_epoch: Epoch,
 
-    command: Command,
+    pub command: Command,
 }
 
-impl<'a, S: MetaStore> CommandContext<'a, S> {
+impl<S: MetaStore> CommandContext<S> {
     pub fn new(
         fragment_manager: FragmentManagerRef<S>,
         client_pool: StreamClientPoolRef,
-        info: &'a BarrierActorInfo,
-        prev_epoch: &'a Epoch,
-        curr_epoch: &'a Epoch,
+        info: BarrierActorInfo,
+        prev_epoch: Epoch,
+        curr_epoch: Epoch,
         command: Command,
     ) -> Self {
         Self {
             fragment_manager,
             client_pool,
-            info,
+            info: Arc::new(info),
             prev_epoch,
             curr_epoch,
             command,
@@ -119,18 +128,18 @@ impl<'a, S: MetaStore> CommandContext<'a, S> {
     }
 }
 
-impl<S> CommandContext<'_, S>
+impl<S> CommandContext<S>
 where
     S: MetaStore,
 {
     /// Generate a mutation for the given command.
-    pub async fn to_mutation(&self) -> Result<Mutation> {
+    pub async fn to_mutation(&self) -> Result<Option<Mutation>> {
         let mutation = match &self.command {
             Command::Plain(mutation) => mutation.clone(),
 
             Command::DropMaterializedView(table_id) => {
                 let actors = self.fragment_manager.get_table_actor_ids(table_id).await?;
-                Mutation::Stop(StopMutation { actors })
+                Some(Mutation::Stop(StopMutation { actors }))
             }
 
             Command::CreateMaterializedView {
@@ -149,23 +158,23 @@ where
                     )
                     .collect();
 
-                let splits = source_state
+                let actor_splits = source_state
                     .iter()
                     .filter(|(_, splits)| !splits.is_empty())
                     .map(|(actor_id, splits)| {
-                        let split_type = splits.iter().next().unwrap().get_type();
-                        SourceChangeSplit {
-                            actor_id: *actor_id,
-                            split_type,
-                            source_splits: splits
-                                .iter()
-                                .map(|split| split.to_json_bytes().to_vec())
-                                .collect(),
-                        }
+                        (
+                            *actor_id,
+                            ConnectorSplits {
+                                splits: splits.iter().map(ConnectorSplit::from).collect(),
+                            },
+                        )
                     })
                     .collect();
 
-                Mutation::Add(AddMutation { mutations, splits })
+                Some(Mutation::Add(AddMutation {
+                    mutations,
+                    actor_splits,
+                }))
             }
         };
 

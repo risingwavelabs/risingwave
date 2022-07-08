@@ -25,10 +25,7 @@ use crate::catalog::table_catalog::TableCatalog;
 use crate::handler::util::col_descs_to_rows;
 use crate::session::OptimizerContext;
 
-pub async fn handle_describe(
-    context: OptimizerContext,
-    table_name: ObjectName,
-) -> Result<PgResponse> {
+pub fn handle_describe(context: OptimizerContext, table_name: ObjectName) -> Result<PgResponse> {
     let session = context.session_ctx;
     let (schema_name, table_name) = Binder::resolve_table_name(table_name)?;
 
@@ -72,7 +69,7 @@ pub async fn handle_describe(
     // Convert all indexs to rows
     rows.extend(indices.iter().map(|i| {
         let s = i
-            .distribution_keys
+            .distribution_key
             .iter()
             .map(|c| i.columns[*c].name().to_string())
             .collect_vec();
@@ -91,6 +88,7 @@ pub async fn handle_describe(
             PgFieldDescriptor::new("Name".to_owned(), TypeOid::Varchar),
             PgFieldDescriptor::new("Type".to_owned(), TypeOid::Varchar),
         ],
+        true,
     ))
 }
 

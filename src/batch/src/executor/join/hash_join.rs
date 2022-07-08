@@ -42,16 +42,16 @@ use crate::task::{BatchTaskContext, TaskId};
 #[derive(Default)]
 pub(super) struct EquiJoinParams {
     join_type: JoinType,
-    /// Column indexes of left keys in equi join, e.g., the column indexes of `b1` and `b3` in `b`.
+    /// Column indexes of left key in equi join, e.g., the column indexes of `b1` and `b3` in `b`.
     left_key_columns: Vec<usize>,
-    /// Data types of left keys in equi join, e.g., the column types of `b1` and `b3` in `b`.
+    /// Data types of left key in equi join, e.g., the column types of `b1` and `b3` in `b`.
     left_key_types: Vec<DataType>,
     /// Data types of left columns in equi join, e.g., the column types of `b1` `b2` `b3` in `b`.
     left_col_len: usize,
-    /// Column indexes of right keys in equi join, e.g., the column indexes of `a1` and `a3` in
+    /// Column indexes of right key in equi join, e.g., the column indexes of `a1` and `a3` in
     /// `a`.
     right_key_columns: Vec<usize>,
-    /// Data types of right keys in equi join, e.g., the column types of `a1` and `a3` in `a`.
+    /// Data types of right key in equi join, e.g., the column types of `a1` and `a3` in `a`.
     right_key_types: Vec<DataType>,
     /// Data types of right columns in equi join, e.g., the column types of `a1` `a2` `a3` in `a`.
     right_col_len: usize,
@@ -71,6 +71,7 @@ pub(super) struct HashJoinExecutor<K> {
     right_child: Option<BoxedExecutor>,
     params: EquiJoinParams,
     schema: Schema,
+    output_indices: Vec<usize>,
     identity: String,
     _phantom: PhantomData<K>,
 }
@@ -173,7 +174,7 @@ impl<K: HashKey + Send + Sync> HashJoinExecutor<K> {
                 probe_table.reset_result_index();
 
                 if let Some(data_chunk) = output_data_chunk && data_chunk.cardinality() > 0 {
-                    yield data_chunk;
+                    yield data_chunk.reorder_columns(&self.output_indices);
                 }
             } else {
                 match left_child_stream.next().await {
@@ -201,7 +202,7 @@ impl<K: HashKey + Send + Sync> HashJoinExecutor<K> {
                             state = HashJoinState::Done;
                         }
                         if let Some(data_chunk) = output_data_chunk && data_chunk.cardinality() > 0 {
-                            yield data_chunk;
+                            yield data_chunk.reorder_columns(&self.output_indices);
                         }
                     }
                 }
@@ -225,7 +226,7 @@ impl<K: HashKey + Send + Sync> HashJoinExecutor<K> {
                         state = HashJoinState::Done;
                         output_data_chunk
                     };
-                yield output_data_chunk
+                yield output_data_chunk.reorder_columns(&self.output_indices)
             }
         }
     }
@@ -245,6 +246,7 @@ impl<K> HashJoinExecutor<K> {
         params: EquiJoinParams,
         schema: Schema,
         identity: String,
+        output_indices: Vec<usize>,
     ) -> Self {
         HashJoinExecutor {
             left_child: Some(left_child),
@@ -253,6 +255,7 @@ impl<K> HashJoinExecutor<K> {
             schema,
             identity,
             _phantom: PhantomData,
+            output_indices,
         }
     }
 }
@@ -261,6 +264,7 @@ pub struct HashJoinExecutorBuilder {
     params: EquiJoinParams,
     left_child: BoxedExecutor,
     right_child: BoxedExecutor,
+    output_indices: Vec<usize>,
     schema: Schema,
     task_id: TaskId,
 }
@@ -279,6 +283,7 @@ impl HashKeyDispatcher for HashJoinExecutorBuilderDispatcher {
             input.params,
             input.schema,
             format!("HashJoinExecutor{:?}", input.task_id),
+            input.output_indices,
         ))
     }
 }
@@ -360,15 +365,25 @@ impl BoxedExecutorBuilder for HashJoinExecutorBuilder {
         ensure!(params.left_key_columns.len() == params.right_key_columns.len());
 
         let hash_key_kind = calc_hash_key_kind(&params.right_key_types);
-
+        let output_indices: Vec<usize> = hash_join_node
+            .output_indices
+            .iter()
+            .map(|&x| x as usize)
+            .collect();
+        let original_schema = Schema {
+            fields: schema_fields,
+        };
+        let actual_schema = output_indices
+            .iter()
+            .map(|&idx| original_schema[idx].clone())
+            .collect();
         let builder = HashJoinExecutorBuilder {
             params,
             left_child,
             right_child,
-            schema: Schema {
-                fields: schema_fields,
-            },
+            schema: actual_schema,
             task_id: context.task_id.clone(),
+            output_indices,
         };
 
         Ok(HashJoinExecutorBuilderDispatcher::dispatch_by_kind(
@@ -410,7 +425,7 @@ mod tests {
             let array_builders = data_types
                 .iter()
                 .map(|data_type| data_type.create_array_builder(1024))
-                .try_collect()?;
+                .collect();
 
             Ok(Self {
                 data_types,
@@ -631,13 +646,14 @@ mod tests {
             let schema = Schema {
                 fields: schema_fields,
             };
-
+            let schema_len = schema.len();
             Box::new(HashJoinExecutor::<Key32>::new(
                 left_child,
                 right_child,
                 params,
                 schema,
                 "HashJoinExecutor2".to_string(),
+                (0..schema_len).into_iter().collect_vec(),
             )) as BoxedExecutor
         }
 

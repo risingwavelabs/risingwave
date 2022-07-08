@@ -1,0 +1,54 @@
+statement ok
+SET RW_IMPLICIT_FLUSH TO true;
+
+statement ok
+create table t1 (v1 int, v2 int);
+
+statement ok
+create table t2 (v3 int, v4 int, v5 int);
+
+statement ok
+insert into t1 values (1, 2);
+
+statement ok
+insert into t2 values (3, 4, 5);
+
+statement ok
+insert into t2 values (1, 2, 3);
+
+query I
+with cte as (select v1, v2 from t1) select v1 from cte;
+----
+1
+
+query I
+with cte as (select v3 v3a from t1 inner join t2 on t1.v1 = t2.v3) select v3a from cte;
+----
+1
+
+query I
+with cte as (select v3, v4 from t2) select t1.v1 from t1 inner join cte on t1.v2 = cte.v4;
+----
+1
+
+query I rowsort
+with cte1 as (select v3, v4 from t2), cte2 as (select v3 from cte1) select v3 from cte2;
+----
+3
+1
+
+query II
+with t1 as (values(100, 200)) select * from t1;
+----
+100 200
+
+query II
+with t1 as (values(100, 200)) select * from public.t1;
+----
+1 2
+
+statement ok
+drop table t1;
+
+statement ok
+drop table t2;
