@@ -52,7 +52,6 @@ message MaterializeNode {
   plan_common.TableRefId associated_table_ref_id = 2;
   // Column indexes and orders of primary key
   repeated plan_common.ColumnOrder column_orders = 3;
-  
   // Used for internal table states.
   catalog.Table table = 4;
 }
