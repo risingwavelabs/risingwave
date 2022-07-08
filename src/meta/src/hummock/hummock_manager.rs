@@ -134,7 +134,6 @@ macro_rules! commit_multi_var {
 
 #[derive(Default)]
 struct Versioning {
-    checkpoint_version_id: u64,
     current_version_id: CurrentHummockVersionId,
     hummock_versions: BTreeMap<HummockVersionId, HummockVersion>,
     hummock_version_deltas: BTreeMap<HummockVersionId, HummockVersionDelta>,
@@ -276,7 +275,6 @@ where
         } else {
             versions.first().unwrap().clone()
         };
-        versioning_guard.checkpoint_version_id = redo_state.id;
         versioning_guard
             .hummock_versions
             .insert(redo_state.id, redo_state.clone());
@@ -1168,11 +1166,9 @@ where
                 .clone();
             new_checkpoint.insert(self.env.meta_store()).await?;
 
-            versioning_guard.checkpoint_version_id = new_checkpoint.id;
-
             version_deltas_to_delete.append(&mut versioning_guard.hummock_version_deltas);
             versioning_guard.hummock_version_deltas =
-                version_deltas_to_delete.split_off(&(versioning_guard.checkpoint_version_id + 1));
+                version_deltas_to_delete.split_off(&(new_checkpoint.id + 1));
         }
 
         let mut trx = Transaction::default();
