@@ -25,7 +25,7 @@ use risingwave_meta::hummock::test_utils::setup_compute_env;
 use risingwave_meta::hummock::MockHummockMetaClient;
 use risingwave_storage::hummock::compaction_executor::CompactionExecutor;
 use risingwave_storage::hummock::compactor::{get_remote_sstable_id_generator, CompactorContext};
-use risingwave_storage::monitor::{ObjectStoreMetrics, StateStoreMetrics};
+use risingwave_storage::monitor::{ObjectStoreMetrics, StateStoreMetrics, StoreLocalStatistic};
 use risingwave_storage::{dispatch_state_store, StateStoreImpl};
 
 #[derive(Parser, Debug)]
@@ -177,7 +177,7 @@ async fn main() {
     let mut context = None;
     if let StateStoreImpl::HummockStateStore(hummock) = state_store.clone() {
         context = Some((
-            Arc::new(CompactorContext {
+            CompactorContext {
                 options: config.clone(),
                 hummock_meta_client: mock_hummock_meta_client.clone(),
                 sstable_store: hummock.sstable_store(),
@@ -189,7 +189,9 @@ async fn main() {
                 compaction_executor: Some(Arc::new(CompactionExecutor::new(Some(
                     config.share_buffer_compaction_worker_threads_number as usize,
                 )))),
-            }),
+                uncommitted_data: None,
+                local_stats: StoreLocalStatistic::default(),
+            },
             hummock.local_version_manager(),
         ));
     }

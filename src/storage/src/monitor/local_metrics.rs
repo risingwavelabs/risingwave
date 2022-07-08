@@ -14,7 +14,7 @@
 
 use crate::monitor::StateStoreMetrics;
 
-#[derive(Default)]
+#[derive(Default, Clone)]
 pub struct StoreLocalStatistic {
     pub cache_data_block_miss: u64,
     pub cache_data_block_total: u64,

@@ -121,6 +121,8 @@ mod tests {
             is_share_buffer_compact: false,
             sstable_id_generator: get_remote_sstable_id_generator(hummock_meta_client.clone()),
             compaction_executor: None,
+            uncommitted_data: None,
+            local_stats: StoreLocalStatistic::default(),
         }
     }
 
@@ -176,7 +178,7 @@ mod tests {
         );
 
         // 3. compact
-        Compactor::compact(Arc::new(compact_ctx), compact_task.clone()).await;
+        Compactor::compact(compact_ctx, compact_task.clone()).await;
 
         // 4. get the latest version and check
         let version = hummock_manager_ref.get_current_version().await;
@@ -274,7 +276,7 @@ mod tests {
         );
 
         // 3. compact
-        Compactor::compact(Arc::new(compact_ctx), compact_task.clone()).await;
+        Compactor::compact(compact_ctx, compact_task.clone()).await;
 
         // 4. get the latest version and check
         let version = hummock_manager_ref.get_current_version().await;
@@ -345,6 +347,8 @@ mod tests {
             is_share_buffer_compact: false,
             sstable_id_generator: get_remote_sstable_id_generator(hummock_meta_client.clone()),
             compaction_executor: None,
+            uncommitted_data: None,
+            local_stats: StoreLocalStatistic::default(),
         };
 
         // 1. add sstables
@@ -409,7 +413,7 @@ mod tests {
         );
 
         // 3. compact
-        Compactor::compact(Arc::new(compact_ctx), compact_task.clone()).await;
+        Compactor::compact(compact_ctx, compact_task.clone()).await;
 
         // 4. get the latest version and check
         let version = hummock_manager_ref.get_current_version().await;
@@ -445,6 +449,8 @@ mod tests {
             is_share_buffer_compact: false,
             sstable_id_generator: get_remote_sstable_id_generator(hummock_meta_client.clone()),
             compaction_executor: None,
+            uncommitted_data: None,
+            local_stats: StoreLocalStatistic::default(),
         };
 
         // 1. add sstables
@@ -525,7 +531,7 @@ mod tests {
         );
 
         // 3. compact
-        Compactor::compact(Arc::new(compact_ctx), compact_task.clone()).await;
+        Compactor::compact(compact_ctx, compact_task.clone()).await;
 
         // 4. get the latest version and check
         let version: HummockVersion = hummock_manager_ref.get_current_version().await;
@@ -601,6 +607,8 @@ mod tests {
             is_share_buffer_compact: false,
             sstable_id_generator: get_remote_sstable_id_generator(hummock_meta_client.clone()),
             compaction_executor: None,
+            uncommitted_data: None,
+            local_stats: StoreLocalStatistic::default(),
         };
 
         // 1. add sstables
@@ -683,7 +691,7 @@ mod tests {
         );
 
         // 3. compact
-        Compactor::compact(Arc::new(compact_ctx), compact_task.clone()).await;
+        Compactor::compact(compact_ctx, compact_task.clone()).await;
 
         // 4. get the latest version and check
         let version: HummockVersion = hummock_manager_ref.get_current_version().await;

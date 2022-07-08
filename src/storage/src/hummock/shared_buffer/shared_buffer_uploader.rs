@@ -27,7 +27,7 @@ use crate::hummock::compactor::{get_remote_sstable_id_generator, Compactor, Comp
 use crate::hummock::conflict_detector::ConflictDetector;
 use crate::hummock::shared_buffer::OrderSortedUncommittedData;
 use crate::hummock::{HummockResult, SstableStoreRef};
-use crate::monitor::StateStoreMetrics;
+use crate::monitor::{StateStoreMetrics, StoreLocalStatistic};
 
 pub(crate) type UploadTaskPayload = OrderSortedUncommittedData;
 pub(crate) type UploadTaskResult = HummockResult<Vec<LocalSstableInfo>>;
@@ -75,12 +75,11 @@ impl SharedBufferUploader {
         &self,
         _epoch: HummockEpoch,
         is_local: bool,
-        payload: UploadTaskPayload,
+        payload: OrderSortedUncommittedData,
     ) -> HummockResult<Vec<LocalSstableInfo>> {
         if payload.is_empty() {
             return Ok(vec![]);
         }
-
         // Compact buffers into SSTs
         let mem_compactor_ctx = CompactorContext {
             options: self.options.clone(),
@@ -101,13 +100,13 @@ impl SharedBufferUploader {
                 get_remote_sstable_id_generator(self.hummock_meta_client.clone())
             },
             compaction_executor: self.compaction_executor.as_ref().cloned(),
+            uncommitted_data: None,
+            local_stats: StoreLocalStatistic::default(),
         };
 
-        let tables = Compactor::compact_shared_buffer_by_compaction_group(
-            Arc::new(mem_compactor_ctx),
-            payload,
-        )
-        .await?;
+        let tables =
+            Compactor::compact_shared_buffer_by_compaction_group(mem_compactor_ctx, payload)
+                .await?;
 
         let uploaded_sst_info = tables
             .into_iter()
