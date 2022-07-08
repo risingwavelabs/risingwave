@@ -16,7 +16,7 @@ use std::env;
 use std::path::{Path, PathBuf};
 use std::process::Command;
 
-use anyhow::{anyhow, Ok, Result};
+use anyhow::{anyhow, Result};
 
 use super::{ExecuteContext, Task};
 use crate::{KafkaConfig, KafkaGen};
