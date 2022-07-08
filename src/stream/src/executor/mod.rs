@@ -66,9 +66,9 @@ pub mod receiver;
 mod simple;
 mod sink;
 mod source;
-mod top_n;
 mod top_n_appendonly;
 mod top_n_executor;
+mod top_n_new;
 mod union;
 
 #[cfg(test)]
@@ -96,8 +96,8 @@ pub use rearranged_chain::RearrangedChainExecutor;
 use risingwave_pb::source::{ConnectorSplit, ConnectorSplits};
 use simple::{SimpleExecutor, SimpleExecutorWrapper};
 pub use source::*;
-pub use top_n::TopNExecutor;
 pub use top_n_appendonly::AppendOnlyTopNExecutor;
+pub use top_n_new::TopNExecutorNew;
 pub use union::UnionExecutor;
 
 pub type BoxedExecutor = Box<dyn Executor>;
