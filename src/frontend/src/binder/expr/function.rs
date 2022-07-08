@@ -80,6 +80,13 @@ impl Binder {
                     None => Condition::true_cond(),
                 };
                 // TODO(yuchao): handle DISTINCT and ORDER BY appear at the same time
+                if f.distinct && !f.order_by.is_empty() {
+                    return Err(ErrorCode::InvalidInputSyntax(
+                        "DISTINCT and ORDER BY are not supported to appear at the same time now"
+                            .to_string(),
+                    )
+                    .into());
+                }
                 let order_by = AggOrderBy::new(
                     f.order_by
                         .into_iter()
@@ -95,9 +102,9 @@ impl Binder {
                 return Ok(ExprImpl::AggCall(Box::new(AggCall::new(
                     kind, inputs, f.distinct, order_by, filter,
                 )?)));
-            } else if f.filter.is_some() {
+            } else if f.distinct || !f.order_by.is_empty() || f.filter.is_some() {
                 return Err(ErrorCode::InvalidInputSyntax(format!(
-                    "filter clause is only allowed in aggregation functions, but `{}` is not an aggregation function", function_name
+                    "DISTINCT, ORDER BY or FILTER is only allowed in aggregation functions, but `{}` is not an aggregation function", function_name
                 )
                 )
                 .into());
