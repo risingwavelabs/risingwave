@@ -65,21 +65,21 @@ impl CompactionGroupClient for CompactionGroupClientImpl {
                     Some(notify) => (notify.clone(), false),
                 }
             };
-            if update {
-                // Update cache
-                match self.update().await {
-                    Ok(_) => {
-                        self.update_notifier.lock().take().unwrap().notify_one();
-                    }
-                    Err(err) => {
-                        self.update_notifier.lock().take().unwrap().notify_one();
-                        return Err(HummockError::meta_error(err));
-                    }
-                }
-            } else {
+            if !update {
                 // Wait for previous update
                 notify.notified().await;
                 notify.notify_one();
+                continue;
+            }
+            // Update cache
+            match self.update().await {
+                Ok(_) => {
+                    self.update_notifier.lock().take().unwrap().notify_one();
+                }
+                Err(err) => {
+                    self.update_notifier.lock().take().unwrap().notify_one();
+                    return Err(HummockError::meta_error(err));
+                }
             }
         }
     }
