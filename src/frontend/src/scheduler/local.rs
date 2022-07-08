@@ -30,11 +30,10 @@ use risingwave_pb::batch_plan::{
     ExchangeInfo, ExchangeSource, LocalExecutePlan, PlanFragment, PlanNode as PlanNodeProst,
     TaskId as ProstTaskId, TaskOutputId,
 };
-use risingwave_pb::common::Buffer;
 use tracing::debug;
 use uuid::Uuid;
 
-use super::plan_fragmenter::QueryStageRef;
+use super::plan_fragmenter::{PartitionInfo, QueryStageRef};
 use crate::optimizer::plan_node::PlanNodeType;
 use crate::scheduler::plan_fragmenter::{ExecutionPlanNode, Query, StageId};
 use crate::scheduler::task_context::FrontendBatchTaskContext;
@@ -159,7 +158,7 @@ impl LocalQueryExecution {
         &self,
         execution_plan_node: &ExecutionPlanNode,
         second_stages: &mut Option<HashMap<StageId, QueryStageRef>>,
-        vnode_bitmap: Option<Buffer>,
+        partition: Option<PartitionInfo>,
     ) -> SchedulerResult<PlanNodeProst> {
         match execution_plan_node.plan_node_type {
             PlanNodeType::BatchExchange => {
@@ -186,7 +185,7 @@ impl LocalQueryExecution {
                 };
                 assert!(sources.is_empty());
 
-                if let Some(table_scan_info) = second_stage.table_scan_info.clone() && let Some(vnode_bitmaps) = table_scan_info.vnode_bitmaps {
+                if let Some(table_scan_info) = second_stage.table_scan_info.clone() && let Some(vnode_bitmaps) = table_scan_info.partitions {
                     // Similar to the distributed case (StageRunner::schedule_tasks).
                     // Set `vnode_ranges` of the scan node in `local_execute_plan` of each
                     // `exchange_source`.
@@ -197,13 +196,13 @@ impl LocalQueryExecution {
                         .worker_node_manager()
                         .get_workers_by_parallel_unit_ids(&parallel_unit_ids)?;
 
-                    for (idx, (worker_node, vnode_bitmap)) in
+                    for (idx, (worker_node, partition)) in
                         (workers.into_iter().zip_eq(vnode_bitmaps.into_iter())).enumerate()
                     {
                         let second_stage_plan_node = self.convert_plan_node(
                             &*second_stage.root,
                             &mut None,
-                            Some(vnode_bitmap),
+                            Some(partition),
                         )?;
                         let second_stage_plan_fragment = PlanFragment {
                             root: Some(second_stage_plan_node),
@@ -288,7 +287,9 @@ impl LocalQueryExecution {
                 let mut node_body = execution_plan_node.node.clone();
                 match &mut node_body {
                     NodeBody::RowSeqScan(ref mut scan_node) => {
-                        scan_node.vnode_bitmap = vnode_bitmap;
+                        let partition = partition.unwrap();
+                        scan_node.vnode_bitmap = Some(partition.vnode_bitmap);
+                        scan_node.scan_ranges = partition.scan_ranges;
                     }
                     NodeBody::SysRowSeqScan(_) => {}
                     _ => unreachable!(),
@@ -305,7 +306,7 @@ impl LocalQueryExecution {
                 let children = execution_plan_node
                     .children
                     .iter()
-                    .map(|e| self.convert_plan_node(e, second_stages, vnode_bitmap.clone()))
+                    .map(|e| self.convert_plan_node(e, second_stages, partition.clone()))
                     .collect::<SchedulerResult<Vec<PlanNodeProst>>>()?;
 
                 Ok(PlanNodeProst {

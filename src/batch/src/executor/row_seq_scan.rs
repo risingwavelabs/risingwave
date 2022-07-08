@@ -14,6 +14,7 @@
 use std::ops::{Bound, RangeBounds};
 use std::sync::Arc;
 
+use futures::future::try_join_all;
 use futures::pin_mut;
 use futures_async_stream::try_stream;
 use itertools::Itertools;
@@ -42,7 +43,7 @@ pub struct RowSeqScanExecutor<S: StateStore> {
     schema: Schema,
     identity: String,
     stats: Arc<BatchMetrics>,
-    scan_type: ScanType<S>,
+    scan_types: Vec<ScanType<S>>,
 }
 
 pub enum ScanType<S: StateStore> {
@@ -54,7 +55,7 @@ pub enum ScanType<S: StateStore> {
 impl<S: StateStore> RowSeqScanExecutor<S> {
     pub fn new(
         schema: Schema,
-        scan_type: ScanType<S>,
+        scan_types: Vec<ScanType<S>>,
         chunk_size: usize,
         identity: String,
         stats: Arc<BatchMetrics>,
@@ -64,7 +65,7 @@ impl<S: StateStore> RowSeqScanExecutor<S> {
             schema,
             identity,
             stats,
-            scan_type,
+            scan_types,
         }
     }
 }
@@ -176,10 +177,6 @@ impl BoxedExecutorBuilder for RowSeqScanExecutorBuilder {
             })
             .collect();
 
-        let scan_range = seq_scan_node.scan_range.as_ref().unwrap();
-        let (pk_prefix_value, next_col_bounds) =
-            get_scan_bound(scan_range.clone(), pk_types.into_iter());
-
         let pk_indices = table_desc
             .order_key
             .iter()
@@ -214,26 +211,59 @@ impl BoxedExecutorBuilder for RowSeqScanExecutorBuilder {
                 distribution,
             );
             let keyspace = Keyspace::table_root(state_store.clone(), &table_id);
-            let scan_type = if pk_prefix_value.size() == 0 && is_full_range(&next_col_bounds) {
+
+            if seq_scan_node.scan_ranges.is_empty() {
                 let iter = table.batch_dedup_pk_iter(source.epoch, &pk_descs).await?;
-                ScanType::TableScan(iter)
-            } else if pk_prefix_value.size() == pk_len {
-                let row = {
-                    keyspace.state_store().wait_epoch(source.epoch).await?;
-                    table.get_row(&pk_prefix_value, source.epoch).await?
+                return Ok(Box::new(RowSeqScanExecutor::new(
+                    table.schema().clone(),
+                    vec![ScanType::TableScan(iter)],
+                    RowSeqScanExecutorBuilder::DEFAULT_CHUNK_SIZE,
+                    source.plan_node().get_identity().clone(),
+                    batch_stats,
+                )));
+            }
+
+            let mut futures = vec![];
+            for scan_range in &seq_scan_node.scan_ranges {
+                let pk_types = pk_types.clone();
+                let table = table.clone();
+                let keyspace = keyspace.clone();
+
+                let get_scan_type = async move || {
+                    let (pk_prefix_value, next_col_bounds) =
+                        get_scan_bound(scan_range.clone(), pk_types.into_iter());
+
+                    let scan_type =
+                        if pk_prefix_value.size() == 0 && is_full_range(&next_col_bounds) {
+                            unreachable!()
+                        } else if pk_prefix_value.size() == pk_len {
+                            let row = {
+                                keyspace.state_store().wait_epoch(source.epoch).await?;
+                                table.get_row(&pk_prefix_value, source.epoch).await?
+                            };
+                            ScanType::PointGet(row)
+                        } else {
+                            assert!(pk_prefix_value.size() < pk_len);
+                            let iter = table
+                                .batch_iter_with_pk_bounds(
+                                    source.epoch,
+                                    &pk_prefix_value,
+                                    next_col_bounds,
+                                )
+                                .await?;
+                            ScanType::RangeScan(iter)
+                        };
+
+                    Ok(scan_type)
                 };
-                ScanType::PointGet(row)
-            } else {
-                assert!(pk_prefix_value.size() < pk_len);
-                let iter = table
-                    .batch_iter_with_pk_bounds(source.epoch, &pk_prefix_value, next_col_bounds)
-                    .await?;
-                ScanType::RangeScan(iter)
-            };
+                futures.push(get_scan_type());
+            }
+
+            let scan_types: Result<Vec<ScanType<_>>> = try_join_all(futures).await;
 
             Ok(Box::new(RowSeqScanExecutor::new(
                 table.schema().clone(),
-                scan_type,
+                scan_types?,
                 RowSeqScanExecutorBuilder::DEFAULT_CHUNK_SIZE,
                 source.plan_node().get_identity().clone(),
                 batch_stats,
@@ -259,47 +289,49 @@ impl<S: StateStore> Executor for RowSeqScanExecutor<S> {
 impl<S: StateStore> RowSeqScanExecutor<S> {
     #[try_stream(boxed, ok = DataChunk, error = RwError)]
     async fn do_execute(self: Box<Self>) {
-        match self.scan_type {
-            ScanType::TableScan(iter) => {
-                pin_mut!(iter);
-                loop {
-                    let timer = self.stats.row_seq_scan_next_duration.start_timer();
+        for scan_type in self.scan_types {
+            match scan_type {
+                ScanType::TableScan(iter) => {
+                    pin_mut!(iter);
+                    loop {
+                        let timer = self.stats.row_seq_scan_next_duration.start_timer();
 
-                    let chunk = iter
-                        .collect_data_chunk(&self.schema, Some(self.chunk_size))
-                        .await
-                        .map_err(RwError::from)?;
-                    timer.observe_duration();
+                        let chunk = iter
+                            .collect_data_chunk(&self.schema, Some(self.chunk_size))
+                            .await
+                            .map_err(RwError::from)?;
+                        timer.observe_duration();
 
-                    if let Some(chunk) = chunk {
-                        yield chunk
-                    } else {
-                        break;
+                        if let Some(chunk) = chunk {
+                            yield chunk
+                        } else {
+                            break;
+                        }
                     }
                 }
-            }
-            ScanType::RangeScan(iter) => {
-                pin_mut!(iter);
-                loop {
-                    // TODO: same as TableScan except iter type
-                    let timer = self.stats.row_seq_scan_next_duration.start_timer();
+                ScanType::RangeScan(iter) => {
+                    pin_mut!(iter);
+                    loop {
+                        // TODO: same as TableScan except iter type
+                        let timer = self.stats.row_seq_scan_next_duration.start_timer();
 
-                    let chunk = iter
-                        .collect_data_chunk(&self.schema, Some(self.chunk_size))
-                        .await
-                        .map_err(RwError::from)?;
-                    timer.observe_duration();
+                        let chunk = iter
+                            .collect_data_chunk(&self.schema, Some(self.chunk_size))
+                            .await
+                            .map_err(RwError::from)?;
+                        timer.observe_duration();
 
-                    if let Some(chunk) = chunk {
-                        yield chunk
-                    } else {
-                        break;
+                        if let Some(chunk) = chunk {
+                            yield chunk
+                        } else {
+                            break;
+                        }
                     }
                 }
-            }
-            ScanType::PointGet(row) => {
-                if let Some(row) = row {
-                    yield DataChunk::from_rows(&[row], &self.schema.data_types())?;
+                ScanType::PointGet(row) => {
+                    if let Some(row) = row {
+                        yield DataChunk::from_rows(&[row], &self.schema.data_types())?;
+                    }
                 }
             }
         }

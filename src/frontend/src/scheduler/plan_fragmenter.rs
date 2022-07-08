@@ -17,9 +17,10 @@ use std::fmt::{Debug, Formatter};
 use std::sync::Arc;
 
 use risingwave_common::buffer::{Bitmap, BitmapBuilder};
+use risingwave_common::catalog::TableDesc;
 use risingwave_common::types::ParallelUnitId;
 use risingwave_pb::batch_plan::plan_node::NodeBody;
-use risingwave_pb::batch_plan::ExchangeInfo;
+use risingwave_pb::batch_plan::{ExchangeInfo, ScanRange as ScanRangeProto};
 use risingwave_pb::common::Buffer;
 use risingwave_pb::plan_common::Field as FieldProst;
 use uuid::Uuid;
@@ -29,6 +30,7 @@ use crate::optimizer::property::Distribution;
 use crate::optimizer::PlanRef;
 use crate::scheduler::worker_node_manager::WorkerNodeManagerRef;
 use crate::scheduler::SchedulerResult;
+use crate::utils::ScanRange;
 
 #[derive(Clone, Debug, Hash, Eq, PartialEq)]
 pub struct QueryId {
@@ -168,7 +170,13 @@ pub struct TableScanInfo {
     /// pruned.
     ///
     /// `None` if the table is not partitioned (system table).
-    pub vnode_bitmaps: Option<HashMap<ParallelUnitId, Buffer>>,
+    pub partitions: Option<HashMap<ParallelUnitId, PartitionInfo>>,
+}
+
+#[derive(Clone)]
+pub struct PartitionInfo {
+    pub vnode_bitmap: Buffer,
+    pub scan_ranges: Vec<ScanRangeProto>,
 }
 
 /// Fragment part of `Query`.
@@ -238,7 +246,7 @@ impl QueryStageBuilder {
             parallelism: match &self.table_scan_info {
                 None => self.parallelism,
                 Some(info) => info
-                    .vnode_bitmaps
+                    .partitions
                     .as_ref()
                     .map(|m| m.len() as u32)
                     .unwrap_or(1),
@@ -405,34 +413,11 @@ impl BatchPlanFragmenter {
                     builder.table_scan_info = Some({
                         let table_desc = scan_node.logical().table_desc();
 
-                        let vnode_bitmaps =
-                            table_desc.vnode_mapping.as_ref().map(|vnode_mapping| {
-                                let num_vnodes = vnode_mapping.len();
-                                let scan_range = scan_node.scan_range();
-                                // Try to derive the partition to read from the scan range.
-                                // It can be derived if the value of the distribution key is already
-                                // known.
-                                match scan_range.try_compute_vnode(
-                                    &table_desc.distribution_key,
-                                    &table_desc.order_column_indices(),
-                                ) {
-                                    // scan all partitions
-                                    None => vnode_mapping_to_owner_mapping(vnode_mapping.clone()),
-                                    // scan a single partition
-                                    Some(vnode) => {
-                                        let parallel_unit_id = vnode_mapping[vnode as usize];
-                                        let mut vnode_bitmaps = HashMap::new();
-                                        vnode_bitmaps.insert(
-                                            parallel_unit_id,
-                                            bitmap_with_single_vnode(vnode as usize, num_vnodes)
-                                                .to_protobuf(),
-                                        );
-                                        vnode_bitmaps
-                                    }
-                                }
-                            });
+                        let partitions = table_desc.vnode_mapping.as_ref().map(|vnode_mapping| {
+                            derive_partitions(scan_node.scan_ranges(), table_desc, vnode_mapping)
+                        });
 
-                        TableScanInfo { vnode_bitmaps }
+                        TableScanInfo { partitions }
                     });
                 }
             }
@@ -482,6 +467,73 @@ fn bitmap_with_single_vnode(vnode: usize, num_vnodes: usize) -> Bitmap {
     bitmap.set(vnode as usize, true);
     bitmap.finish()
 }
+
+/// Try to derive the partition to read from the scan range.
+/// It can be derived if the value of the distribution key is already
+/// known.
+fn derive_partitions(
+    scan_ranges: &[ScanRange],
+    table_desc: &TableDesc,
+    vnode_mapping: &Vec<u32>,
+) -> HashMap<ParallelUnitId, PartitionInfo> {
+    let all_partitions = || {
+        vnode_mapping_to_owner_mapping(vnode_mapping.clone())
+            .into_iter()
+            .map(|(k, vnode_bitmap)| {
+                (
+                    k,
+                    PartitionInfo {
+                        vnode_bitmap,
+                        scan_ranges: scan_ranges.iter().map(|r| r.to_protobuf()).collect(),
+                    },
+                )
+            })
+            .collect()
+    };
+
+    let num_vnodes = vnode_mapping.len();
+    let mut partitions: HashMap<u32, (BitmapBuilder, Vec<_>)> = HashMap::new();
+
+    if scan_ranges.is_empty() {
+        return all_partitions();
+    }
+
+    for scan_range in scan_ranges {
+        let vnode = scan_range.try_compute_vnode(
+            &table_desc.distribution_key,
+            &table_desc.order_column_indices(),
+        );
+        match vnode {
+            // scan all partitions, all partitions scan all ranges
+            None => {
+                return all_partitions();
+            }
+            // scan a single partition
+            Some(vnode) => {
+                let parallel_unit_id = vnode_mapping[vnode as usize];
+                let (bitmap, scan_ranges) = partitions
+                    .entry(parallel_unit_id)
+                    .or_insert_with(|| (BitmapBuilder::zeroed(num_vnodes), vec![]));
+                bitmap.set(vnode as usize, true);
+                scan_ranges.push(scan_range.to_protobuf());
+            }
+        }
+    }
+
+    partitions
+        .into_iter()
+        .map(|(k, (bitmap, scan_ranges))| {
+            (
+                k,
+                PartitionInfo {
+                    vnode_bitmap: bitmap.finish().to_protobuf(),
+                    scan_ranges,
+                },
+            )
+        })
+        .collect()
+}
+
 #[cfg(test)]
 mod tests {
     use std::collections::{HashMap, HashSet};

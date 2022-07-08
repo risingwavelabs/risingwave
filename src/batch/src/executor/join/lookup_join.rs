@@ -62,7 +62,7 @@ impl<C: BatchTaskContext> ProbeSideSource<C> {
     /// Creates the `RowSeqScanNode` that will be used for scanning the probe side table
     /// based on the passed `RowRef`.
     fn create_row_seq_scan_node(&self, cur_row: &RowRef) -> Result<NodeBody> {
-        let eq_conds = self
+        let eq_conds: Vec<_> = self
             .build_side_idxs
             .iter()
             .map(|&idx| {
@@ -74,11 +74,15 @@ impl<C: BatchTaskContext> ProbeSideSource<C> {
             })
             .collect();
 
-        let scan_range = Some(ScanRange {
-            eq_conds,
-            lower_bound: None,
-            upper_bound: None,
-        });
+        let scan_ranges = if eq_conds.is_empty() {
+            vec![]
+        } else {
+            vec![ScanRange {
+                eq_conds,
+                lower_bound: None,
+                upper_bound: None,
+            }]
+        };
 
         Ok(NodeBody::RowSeqScan(RowSeqScanNode {
             table_desc: Some(self.table_desc.clone()),
@@ -86,7 +90,7 @@ impl<C: BatchTaskContext> ProbeSideSource<C> {
                 .into_iter()
                 .map(|x| x as i32)
                 .collect(), // Scan all the columns
-            scan_range,
+            scan_ranges,
             vnode_bitmap: None,
         }))
     }

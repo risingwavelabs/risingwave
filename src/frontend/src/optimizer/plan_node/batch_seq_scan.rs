@@ -33,35 +33,42 @@ use crate::utils::{is_full_range, ScanRange};
 pub struct BatchSeqScan {
     pub base: PlanBase,
     logical: LogicalScan,
-    scan_range: ScanRange,
+    scan_ranges: Vec<ScanRange>,
 }
 
 impl BatchSeqScan {
-    pub fn new_inner(logical: LogicalScan, dist: Distribution, scan_range: ScanRange) -> Self {
+    pub fn new_inner(
+        logical: LogicalScan,
+        dist: Distribution,
+        scan_ranges: Vec<ScanRange>,
+    ) -> Self {
         let ctx = logical.base.ctx.clone();
         // TODO: derive from input
         let base = PlanBase::new_batch(ctx, logical.schema().clone(), dist, Order::any());
 
         {
             // validate scan_range
-            let scan_pk_prefix_len = scan_range.eq_conds.len();
-            let order_len = logical.table_desc().order_column_indices().len();
-            assert!(
-                scan_pk_prefix_len < order_len
-                    || (scan_pk_prefix_len == order_len && is_full_range(&scan_range.range)),
-                "invalid scan_range",
-            );
+            scan_ranges.iter().for_each(|scan_range| {
+                assert!(!scan_range.is_full_table_scan());
+                let scan_pk_prefix_len = scan_range.eq_conds.len();
+                let order_len = logical.table_desc().order_column_indices().len();
+                assert!(
+                    scan_pk_prefix_len < order_len
+                        || (scan_pk_prefix_len == order_len && is_full_range(&scan_range.range)),
+                    "invalid scan_range",
+                );
+            })
         }
 
         Self {
             base,
             logical,
-            scan_range,
+            scan_ranges,
         }
     }
 
-    pub fn new(logical: LogicalScan, scan_range: ScanRange) -> Self {
-        Self::new_inner(logical, Distribution::Single, scan_range)
+    pub fn new(logical: LogicalScan, scan_ranges: Vec<ScanRange>) -> Self {
+        Self::new_inner(logical, Distribution::Single, scan_ranges)
     }
 
     pub fn clone_with_dist(&self) -> Self {
@@ -75,7 +82,7 @@ impl BatchSeqScan {
                     None => Distribution::SomeShard,
                 }
             },
-            self.scan_range.clone(),
+            self.scan_ranges.clone(),
         )
     }
 
@@ -85,8 +92,8 @@ impl BatchSeqScan {
         &self.logical
     }
 
-    pub fn scan_range(&self) -> &ScanRange {
-        &self.scan_range
+    pub fn scan_ranges(&self) -> &[ScanRange] {
+        &self.scan_ranges
     }
 }
 
@@ -121,7 +128,7 @@ impl fmt::Display for BatchSeqScan {
             }
         }
 
-        if self.scan_range.is_full_table_scan() {
+        if self.scan_ranges.is_empty() {
             write!(
                 f,
                 "BatchScan {{ table: {}, columns: [{}] }}",
@@ -130,25 +137,27 @@ impl fmt::Display for BatchSeqScan {
             )
         } else {
             let order_names = self.logical.order_names();
-            #[expect(clippy::disallowed_methods)]
-            let mut range_str = self
-                .scan_range
-                .eq_conds
-                .iter()
-                .zip(order_names.iter())
-                .map(|(v, name)| format!("{} = {:?}", name, v))
-                .collect_vec();
-            if !is_full_range(&self.scan_range.range) {
-                let i = self.scan_range.eq_conds.len();
-                range_str.push(range_to_string(&order_names[i], &self.scan_range.range))
+            let mut range_strs = vec![];
+            for scan_range in &self.scan_ranges {
+                #[expect(clippy::disallowed_methods)]
+                let mut range_str = scan_range
+                    .eq_conds
+                    .iter()
+                    .zip(order_names.iter())
+                    .map(|(v, name)| format!("{} = {:?}", name, v))
+                    .collect_vec();
+                if !is_full_range(&scan_range.range) {
+                    let i = scan_range.eq_conds.len();
+                    range_str.push(range_to_string(&order_names[i], &scan_range.range))
+                }
+                range_strs.push(range_str.join(", "));
             }
-
             write!(
                 f,
-                "BatchScan {{ table: {}, columns: [{}], scan_range: [{}] }}",
+                "BatchScan {{ table: {}, columns: [{}], scan_ranges: [{}] }}",
                 self.logical.table_name(),
                 self.logical.column_names().join(", "),
-                range_str.join(", ")
+                range_strs.join(" OR ")
             )
         }
     }
@@ -183,7 +192,7 @@ impl ToBatchProst for BatchSeqScan {
                     .iter()
                     .map(ColumnId::get_id)
                     .collect(),
-                scan_range: Some(self.scan_range.to_protobuf()),
+                scan_ranges: self.scan_ranges.iter().map(|r| r.to_protobuf()).collect(),
                 // To be filled by the scheduler.
                 vnode_bitmap: None,
             })

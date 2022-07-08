@@ -219,11 +219,11 @@ async fn test_table_v2_materialize() -> Result<()> {
 
     let scan = Box::new(RowSeqScanExecutor::new(
         table.schema().clone(),
-        ScanType::TableScan(
+        vec![ScanType::TableScan(
             table
                 .batch_dedup_pk_iter(u64::MAX, &ordered_column_descs)
                 .await?,
-        ),
+        )],
         1024,
         "RowSeqExecutor2".to_string(),
         Arc::new(BatchMetrics::unused()),
@@ -281,11 +281,11 @@ async fn test_table_v2_materialize() -> Result<()> {
     // Scan the table again, we are able to get the data now!
     let scan = Box::new(RowSeqScanExecutor::new(
         table.schema().clone(),
-        ScanType::TableScan(
+        vec![ScanType::TableScan(
             table
                 .batch_dedup_pk_iter(u64::MAX, &ordered_column_descs)
                 .await?,
-        ),
+        )],
         1024,
         "RowSeqScanExecutor2".to_string(),
         Arc::new(BatchMetrics::unused()),
@@ -352,11 +352,11 @@ async fn test_table_v2_materialize() -> Result<()> {
     // Scan the table again, we are able to see the deletion now!
     let scan = Box::new(RowSeqScanExecutor::new(
         table.schema().clone(),
-        ScanType::TableScan(
+        vec![ScanType::TableScan(
             table
                 .batch_dedup_pk_iter(u64::MAX, &ordered_column_descs)
                 .await?,
-        ),
+        )],
         1024,
         "RowSeqScanExecutor2".to_string(),
         Arc::new(BatchMetrics::unused()),
@@ -428,12 +428,12 @@ async fn test_row_seq_scan() -> Result<()> {
 
     let executor = Box::new(RowSeqScanExecutor::new(
         table.schema().clone(),
-        ScanType::TableScan(
+        vec![ScanType::TableScan(
             table
                 .batch_dedup_pk_iter(u64::MAX, &pk_descs)
                 .await
                 .unwrap(),
-        ),
+        )],
         1,
         "RowSeqScanExecutor2".to_string(),
         Arc::new(BatchMetrics::unused()),

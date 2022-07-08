@@ -3,7 +3,7 @@
   sql: |
     CREATE TABLE orders (
             order_id BIGINT,
-            user_id INTEGER,
+            user_id BIGINT,
             date INTEGER);
     CREATE MATERIALIZED VIEW orders_count_by_user AS
       SELECT user_id, date, count(*) AS orders_count FROM orders GROUP BY user_id, date;
@@ -13,14 +13,14 @@
     SELECT * FROM orders_count_by_user WHERE user_id = 42
   batch_plan: |
     BatchExchange { order: [], dist: Single }
-      BatchScan { table: orders_count_by_user, columns: [user_id, date, orders_count], scan_range: [user_id = Int32(42)] }
+      BatchScan { table: orders_count_by_user, columns: [user_id, date, orders_count], scan_ranges: [user_id = Int64(42)] }
 - before:
     - create_table_and_mv
   sql: |
     SELECT * FROM orders_count_by_user WHERE user_id < 43
   batch_plan: |
     BatchExchange { order: [], dist: Single }
-      BatchScan { table: orders_count_by_user, columns: [user_id, date, orders_count], scan_range: [user_id < Int32(43)] }
+      BatchScan { table: orders_count_by_user, columns: [user_id, date, orders_count], scan_ranges: [user_id < Int64(43)] }
 - before:
     - create_table_and_mv
   sql: |
@@ -35,7 +35,7 @@
     SELECT * FROM orders_count_by_user WHERE user_id = 'a'
   batch_plan: |
     BatchExchange { order: [], dist: Single }
-      BatchFilter { predicate: ($0 = 'a':Varchar::Int32) }
+      BatchFilter { predicate: ($0 = 'a':Varchar::Int64) }
         BatchScan { table: orders_count_by_user, columns: [user_id, date, orders_count] }
 - before:
     - create_table_and_mv
@@ -67,7 +67,15 @@
     SELECT * FROM orders_count_by_user WHERE user_id = 42 AND date = 1111
   batch_plan: |
     BatchExchange { order: [], dist: Single }
-      BatchScan { table: orders_count_by_user, columns: [user_id, date, orders_count], scan_range: [user_id = Int32(42), date = Int32(1111)] }
+      BatchScan { table: orders_count_by_user, columns: [user_id, date, orders_count], scan_ranges: [user_id = Int64(42), date = Int32(1111)] }
+- before:
+    - create_table_and_mv
+  sql: |
+    SELECT * FROM orders_count_by_user WHERE user_id > 42 AND date = 1111 AND 2>1
+  batch_plan: |
+    BatchExchange { order: [], dist: Single }
+      BatchFilter { predicate: (2:Int32 > 1:Int32) AND ($1 = 1111:Int32) }
+        BatchScan { table: orders_count_by_user, columns: [user_id, date, orders_count], scan_ranges: [user_id > Int64(42)] }
 - before:
     - create_table_and_mv
   sql: |
@@ -75,7 +83,38 @@
   batch_plan: |
     BatchExchange { order: [], dist: Single }
       BatchFilter { predicate: (5:Int32 < 6:Int32) }
-        BatchScan { table: orders_count_by_user, columns: [user_id, date, orders_count], scan_range: [user_id = Int32(42), date > Int32(1111) AND date <= Int32(6666)] }
+        BatchScan { table: orders_count_by_user, columns: [user_id, date, orders_count], scan_ranges: [user_id = Int64(42), date > Int32(1111) AND date <= Int32(6666)] }
+- before:
+    - create_table_and_mv
+  sql: |
+    SELECT * FROM orders_count_by_user WHERE user_id in (42, 43)
+  batch_plan: |
+    BatchExchange { order: [], dist: Single }
+      BatchFilter { predicate: In($0, 42:Int32::Int64, 43:Int32::Int64) }
+        BatchScan { table: orders_count_by_user, columns: [user_id, date, orders_count] }
+- before:
+    - create_table_and_mv
+  sql: |
+    SELECT * FROM orders_count_by_user WHERE user_id in (2147483648, 2147483649) AND date = 6666
+  batch_plan: |
+    BatchExchange { order: [], dist: Single }
+      BatchFilter { predicate: ($1 = 6666:Int32) }
+        BatchScan { table: orders_count_by_user, columns: [user_id, date, orders_count], scan_ranges: [user_id = Int64(2147483648) OR user_id = Int64(2147483649)] }
+- before:
+    - create_table_and_mv
+  sql: |
+    SELECT * FROM orders_count_by_user WHERE user_id = 42 AND date in (2222, 3333)
+  batch_plan: |
+    BatchExchange { order: [], dist: Single }
+      BatchScan { table: orders_count_by_user, columns: [user_id, date, orders_count], scan_ranges: [user_id = Int64(42), date = Int32(2222) OR user_id = Int64(42), date = Int32(3333)] }
+- before:
+    - create_table_and_mv
+  sql: |
+    SELECT * FROM orders_count_by_user WHERE user_id in (2147483648, 2147483649) AND date in (2222, 3333)
+  batch_plan: |
+    BatchExchange { order: [], dist: Single }
+      BatchFilter { predicate: In($1, 2222:Int32, 3333:Int32) }
+        BatchScan { table: orders_count_by_user, columns: [user_id, date, orders_count], scan_ranges: [user_id = Int64(2147483648) OR user_id = Int64(2147483649)] }
 - id: create_table_and_mv_ordered
   sql: |
     CREATE TABLE orders (
@@ -100,11 +139,11 @@
     SELECT * FROM orders_count_by_user_ordered WHERE user_id > 42 AND orders_count = 10
   batch_plan: |
     BatchExchange { order: [], dist: Single }
-      BatchScan { table: orders_count_by_user_ordered, columns: [user_id, date, orders_count], scan_range: [orders_count = Int64(10), user_id > Int32(42)] }
+      BatchScan { table: orders_count_by_user_ordered, columns: [user_id, date, orders_count], scan_ranges: [orders_count = Int64(10), user_id > Int32(42)] }
 - before:
     - create_table_and_mv_ordered
   sql: |
     SELECT * FROM orders_count_by_user_ordered WHERE orders_count = 10
   batch_plan: |
     BatchExchange { order: [], dist: Single }
-      BatchScan { table: orders_count_by_user_ordered, columns: [user_id, date, orders_count], scan_range: [orders_count = Int64(10)] }
+      BatchScan { table: orders_count_by_user_ordered, columns: [user_id, date, orders_count], scan_ranges: [orders_count = Int64(10)] }
