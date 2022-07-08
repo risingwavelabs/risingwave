@@ -12,12 +12,9 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::sync::Arc;
-
 use futures::TryStreamExt;
 use futures_async_stream::try_stream;
 use itertools::{repeat_n, Itertools};
-use risingwave_common::array::column::Column;
 use risingwave_common::array::data_chunk_iter::RowRef;
 use risingwave_common::array::{Array, DataChunk};
 use risingwave_common::buffer::BitmapBuilder;
@@ -31,10 +28,8 @@ use risingwave_expr::expr::{
 use risingwave_pb::batch_plan::plan_node::NodeBody;
 
 use crate::error::BatchError;
-use crate::executor::join::chunked_data::RowId;
-use crate::executor::join::row_level_iter::RowLevelIter;
 use crate::executor::join::{
-    concatenate, convert_datum_refs_to_chunk, convert_row_to_chunk, JoinType,
+    concatenate, convert_row_to_chunk, JoinType,
 };
 use crate::executor::{
     BoxedDataChunkStream, BoxedExecutor, BoxedExecutorBuilder, Executor, ExecutorBuilder,
@@ -132,9 +127,8 @@ impl NestedLoopJoinExecutor {
         left_row: RowRef,
         right_chunk: &DataChunk,
     ) -> Result<DataChunk> {
-        let left_chunk =
-            Self::convert_row_to_chunk(&left_row, right_chunk.capacity(), left_row_types)?;
-        let mut chunk = Self::concatenate(&left_chunk, right_chunk);
+        let left_chunk = convert_row_to_chunk(&left_row, right_chunk.capacity(), left_row_types)?;
+        let mut chunk = concatenate(&left_chunk, right_chunk)?;
         chunk.set_visibility(expr.eval(&chunk)?.as_bool().iter().collect());
         Ok(chunk)
     }
