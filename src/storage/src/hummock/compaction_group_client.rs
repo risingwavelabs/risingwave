@@ -36,9 +36,10 @@ pub trait CompactionGroupClient: Send + Sync + 'static {
 
 /// `CompactionGroupClientImpl` maintains compaction group metadata cache.
 pub struct CompactionGroupClientImpl {
+    // Lock order: update_notifier before cache
+    update_notifier: parking_lot::Mutex<Option<Arc<Notify>>>,
     cache: RwLock<CompactionGroupClientInner>,
     hummock_meta_client: Arc<dyn HummockMetaClient>,
-    update_notifier: parking_lot::Mutex<Option<Arc<Notify>>>,
 }
 
 #[async_trait::async_trait]
@@ -56,6 +57,9 @@ impl CompactionGroupClient for CompactionGroupClientImpl {
             // 2. Otherwise either update cache, or wait for previous update if any.
             let (notify, update) = {
                 let mut guard = self.update_notifier.lock();
+                if let Some(id) = self.cache.read().get(&table_id) {
+                    return Ok(id);
+                }
                 match guard.deref() {
                     None => {
                         let notify = Arc::new(Notify::new());
