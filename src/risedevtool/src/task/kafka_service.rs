@@ -16,7 +16,7 @@ use std::env;
 use std::path::{Path, PathBuf};
 use std::process::Command;
 
-use anyhow::{anyhow, Result};
+use anyhow::{anyhow, Ok, Result};
 
 use super::{ExecuteContext, Task};
 use crate::{KafkaConfig, KafkaGen};
@@ -38,8 +38,31 @@ impl KafkaService {
             .join("kafka-server-start.sh"))
     }
 
+    fn kraft_uuid_cmd(&self) -> Result<Command> {
+        let prefix_bin = env::var("PREFIX_BIN")?;
+        let cmd_path = Path::new(&prefix_bin)
+            .join("kafka")
+            .join("bin")
+            .join("kafka-storage.sh");
+
+        Ok(Command::new(cmd_path))
+    }
+
     fn kafka(&self) -> Result<Command> {
         Ok(Command::new(self.kafka_path()?))
+    }
+
+    fn kraft_format_cmd(&self) -> Result<Command> {
+        let prefix_bin = env::var("PREFIX_BIN")?;
+        let cmd_path = Path::new(&prefix_bin)
+            .join("kafka")
+            .join("bin")
+            .join("kafka-storage.sh");
+        let mut cmd = Command::new(cmd_path);
+        // let uuid_str = uuid.to_vec();
+        cmd.args(["format", "-t", "`cat uuid`", "-c"]);
+
+        Ok(cmd)
     }
 }
 
@@ -70,9 +93,21 @@ impl Task for KafkaService {
             &KafkaGen.gen_server_properties(&self.config, &path.to_string_lossy()),
         )?;
 
-        let mut cmd = self.kafka()?;
+        let mut uuid_cmd = self.kraft_uuid_cmd()?;
+        uuid_cmd.arg("random-uuid > uuid");
+        ctx.run_command(uuid_cmd)?;
+        let mut kraft_format_cmd = self.kraft_format_cmd()?;
 
-        cmd.arg(config_path);
+        let kraft_config_path = Path::new(&prefix_config).join(format!("{}.properties", self.id()));
+        std::fs::write(
+            &kraft_config_path,
+            &KafkaGen.gen_kraft_server_properties(&self.config, &path.to_string_lossy()),
+        )?;
+        kraft_format_cmd.arg(&kraft_config_path);
+        ctx.run_command(kraft_format_cmd)?;
+
+        let mut cmd = self.kafka()?;
+        cmd.arg(&kraft_config_path);
 
         ctx.run_command(ctx.tmux_run(cmd)?)?;
 
