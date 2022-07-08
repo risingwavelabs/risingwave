@@ -22,13 +22,13 @@ message SourceNode {
     TABLE = 0;
     SOURCE = 1;
   }
-  plan_common.TableRefId table_ref_id = 1;
+  uint32 table_id = 1;
   repeated int32 column_ids = 2;
   SourceType source_type = 3;
 }
 
 message SinkNode {
-  plan_common.TableRefId table_ref_id = 1;
+  uint32 table_id = 1;
   repeated int32 column_ids = 2;
 }
 
@@ -48,8 +48,7 @@ message FilterNode {
 // - When creating index, `column_orders` will contain both
 //   arrange columns and pk columns, while distribution key will be arrange columns.
 message MaterializeNode {
-  plan_common.TableRefId table_ref_id = 1;
-  plan_common.TableRefId associated_table_ref_id = 2;
+  uint32 table_id = 1;
   // Column indexes and orders of primary key
   repeated plan_common.ColumnOrder column_orders = 3;
   // Used for internal table states.
@@ -104,13 +103,11 @@ message HashJoinNode {
   catalog.Table left_table = 6;
   // Used for internal table states.
   catalog.Table right_table = 7;
-  repeated uint32 dist_key_l = 8;
-  repeated uint32 dist_key_r = 9;
-  // It is true when the input is append-only
-  bool is_append_only = 10;
   // Whether to optimize for append only stream.
-  // the output indices of current node
-  repeated uint32 output_indices = 11;
+  // It is true when the input is append-only
+  bool is_append_only = 8;
+  // The output indices of current node
+  repeated uint32 output_indices = 9;
 }
 
 message DynamicFilterNode {
@@ -170,7 +167,7 @@ message ExchangeNode {
 //   1. MergeNode (as a placeholder) for streaming read.
 //   2. BatchPlanNode for snapshot read.
 message ChainNode {
-  plan_common.TableRefId table_ref_id = 1;
+  uint32 table_id = 1;
   // The schema of input stream, which will be used to build a MergeNode
   repeated plan_common.Field upstream_fields = 2;
   repeated int32 column_ids = 3;

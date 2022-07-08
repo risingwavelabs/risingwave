@@ -239,8 +239,7 @@ impl ToStreamProst for StreamMaterialize {
         ProstStreamNode::Materialize(MaterializeNode {
             // We don't need table id for materialize node in frontend. The id will be generated on
             // meta catalog service.
-            table_ref_id: None,
-            associated_table_ref_id: None,
+            table_id: 0,
             column_orders: self
                 .table()
                 .order_key()

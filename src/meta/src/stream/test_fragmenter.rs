@@ -25,10 +25,7 @@ use risingwave_pb::expr::agg_call::{Arg, Type};
 use risingwave_pb::expr::expr_node::RexNode;
 use risingwave_pb::expr::expr_node::Type::{Add, GreaterThan, InputRef};
 use risingwave_pb::expr::{AggCall, ExprNode, FunctionCall, InputRefExpr};
-use risingwave_pb::plan_common::{
-    ColumnCatalog, ColumnDesc, ColumnOrder, DatabaseRefId, Field, OrderType, SchemaRefId,
-    TableRefId,
-};
+use risingwave_pb::plan_common::{ColumnCatalog, ColumnDesc, ColumnOrder, Field, OrderType};
 use risingwave_pb::stream_plan::source_node::SourceType;
 use risingwave_pb::stream_plan::stream_node::NodeBody;
 use risingwave_pb::stream_plan::{
@@ -40,16 +37,6 @@ use crate::manager::MetaSrvEnv;
 use crate::model::TableFragments;
 use crate::stream::stream_graph::ActorGraphBuilder;
 use crate::stream::{CreateMaterializedViewContext, FragmentManager};
-
-fn make_table_ref_id(id: i32) -> TableRefId {
-    TableRefId {
-        schema_ref_id: Some(SchemaRefId {
-            database_ref_id: Some(DatabaseRefId { database_id: 0 }),
-            schema_id: 0,
-        }),
-        table_id: id,
-    }
-}
 
 fn make_inputref(idx: i32) -> ExprNode {
     ExprNode {
@@ -137,11 +124,10 @@ fn make_internal_table(is_agg_value: bool) -> ProstTable {
 /// create materialized view T_distributed as select sum(v1)+1 as V from t where v1>v2;
 /// ```
 fn make_stream_node() -> StreamNode {
-    let table_ref_id = make_table_ref_id(1);
     // table source node
     let source_node = StreamNode {
         node_body: Some(NodeBody::Source(SourceNode {
-            table_ref_id: Some(table_ref_id),
+            table_id: 1,
             column_ids: vec![1, 2, 0],
             source_type: SourceType::Table as i32,
         })),
@@ -274,8 +260,7 @@ fn make_stream_node() -> StreamNode {
         input: vec![project_node],
         pk_indices: vec![],
         node_body: Some(NodeBody::Materialize(MaterializeNode {
-            table_ref_id: Some(make_table_ref_id(1)),
-            associated_table_ref_id: None,
+            table_id: 1,
             table: Some(make_internal_table(true)),
             column_orders: vec![make_column_order(1), make_column_order(2)],
         })),

@@ -180,9 +180,12 @@ impl LogicalScan {
         &self.indexes
     }
 
-    /// distribution keys stored in catalog only contains column index of the table (`table_idx`),
-    /// so we need to convert it to `operator_idx` when filling distributions.
-    pub fn map_distribution_key(&self) -> Vec<usize> {
+    /// The mapped distribution key of the scan operator.
+    ///
+    /// The column indices in it is the position in the `required_col_idx`,
+    /// instead of the position in all the columns of the table
+    /// (which is the table's distribution key).
+    pub fn distribution_key(&self) -> Option<Vec<usize>> {
         let tb_idx_to_op_idx = self
             .required_col_idx
             .iter()
@@ -192,7 +195,7 @@ impl LogicalScan {
         self.table_desc
             .distribution_key
             .iter()
-            .map(|&tb_idx| tb_idx_to_op_idx[&tb_idx])
+            .map(|&tb_idx| tb_idx_to_op_idx.get(&tb_idx).cloned())
             .collect()
     }
 
