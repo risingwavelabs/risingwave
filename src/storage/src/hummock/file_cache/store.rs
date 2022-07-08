@@ -46,7 +46,7 @@ pub struct Store<K>
 where
     K: CacheKey,
 {
-    _dir: String,
+    dir: String,
     _capacity: usize,
 
     _fs_type: FsType,
@@ -93,7 +93,7 @@ where
         .await?;
 
         Ok(Self {
-            _dir: options.dir,
+            dir: options.dir,
             _capacity: options.capacity,
 
             _fs_type: fs_type,
@@ -125,6 +125,14 @@ where
 
     pub fn cache_file_len(&self) -> usize {
         self.cf.len()
+    }
+
+    pub fn meta_file_path(&self) -> PathBuf {
+        PathBuf::from(&self.dir).join(META_FILE_FILENAME)
+    }
+
+    pub fn cache_file_path(&self) -> PathBuf {
+        PathBuf::from(&self.dir).join(CACHE_FILE_FILENAME)
     }
 
     pub async fn restore(&self, _indices: &LruCache<K, SlotId>) -> Result<()> {
@@ -168,7 +176,7 @@ where
         let offset = bloc.bidx as u64 * self.block_size as u64;
         let blen = bloc.blen(self.block_size as u32) as usize;
         let buf = self.cf.read(offset, blen).await?;
-        Ok(buf.to_vec())
+        Ok(buf[..bloc.len as usize].to_vec())
     }
 
     pub fn erase(&self, slot: SlotId) -> Result<()> {
@@ -198,9 +206,11 @@ where
         self.free(*slot).unwrap();
     }
 
-    fn on_erase(&self, _key: &Self::K, slot: &Self::T) {
+    fn on_erase(&self, _key: &Self::K, _slot: &Self::T) {
         // TODO: Throw warning log instead?
-        self.free(*slot).unwrap();
+        // FIXME: unexpected earse hook call
+        // println!("indices erase");
+        // self.free(*slot).unwrap();
     }
 }
 

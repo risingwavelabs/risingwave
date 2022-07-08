@@ -18,8 +18,7 @@ use parking_lot::RwLock;
 use risingwave_common::cache::LruCache;
 
 use super::coding::CacheKey;
-
-const BUFFER_LRU_SHARD_BITS: usize = 5;
+use super::LRU_SHARD_BITS;
 
 pub type Buffer<K> = Arc<LruCache<K, Vec<u8>>>;
 
@@ -58,8 +57,8 @@ where
         Self {
             capacity,
             core: Arc::new(RwLock::new(TwoLevelBufferCore {
-                active_buffer: Arc::new(LruCache::new(BUFFER_LRU_SHARD_BITS, capacity)),
-                frozen_buffer: Arc::new(LruCache::new(BUFFER_LRU_SHARD_BITS, capacity)),
+                active_buffer: Arc::new(LruCache::new(LRU_SHARD_BITS, capacity)),
+                frozen_buffer: Arc::new(LruCache::new(LRU_SHARD_BITS, capacity)),
             })),
         }
     }
@@ -91,7 +90,7 @@ where
     }
 
     pub fn frozen(&self) -> Buffer<K> {
-        self.core.read().active_buffer.clone()
+        self.core.read().frozen_buffer.clone()
     }
 
     pub fn swap(&self) {
@@ -99,7 +98,7 @@ where
     }
 
     pub fn rotate(&self) -> Buffer<K> {
-        let mut buffer = Arc::new(LruCache::new(BUFFER_LRU_SHARD_BITS, self.capacity));
+        let mut buffer = Arc::new(LruCache::new(LRU_SHARD_BITS, self.capacity));
         let mut core = self.core.write();
         std::mem::swap(&mut buffer, &mut core.active_buffer);
         std::mem::swap(&mut buffer, &mut core.frozen_buffer);

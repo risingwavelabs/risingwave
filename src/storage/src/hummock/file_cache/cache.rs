@@ -12,8 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::collections::hash_map::DefaultHasher;
-use std::hash::Hasher;
+use std::collections::hash_map::RandomState;
 use std::sync::Arc;
 use std::u8;
 
@@ -23,13 +22,12 @@ use risingwave_common::cache::LruCache;
 use tokio::sync::Notify;
 
 use super::buffer::TwoLevelBuffer;
-use super::coding::CacheKey;
+use super::coding::{CacheKey, HashBuilder};
 use super::error::Result;
 use super::filter::Filter;
 use super::meta::SlotId;
 use super::store::{Store, StoreOptions, StoreRef};
-
-const INDICES_LRU_SHARD_BITS: usize = 6;
+use super::LRU_SHARD_BITS;
 
 pub struct FileCacheOptions {
     pub dir: String,
@@ -52,21 +50,25 @@ pub trait FlushBufferHook: Send + Sync + 'static {
     }
 }
 
-struct BufferFlusher<K>
+struct BufferFlusher<K, S>
 where
     K: CacheKey,
+    S: HashBuilder,
 {
     buffer: TwoLevelBuffer<K>,
     store: StoreRef<K>,
     indices: Arc<LruCache<K, SlotId>>,
     notifier: Arc<Notify>,
 
+    hash_builder: S,
+
     hooks: Vec<Arc<dyn FlushBufferHook>>,
 }
 
-impl<K> BufferFlusher<K>
+impl<K, S> BufferFlusher<K, S>
 where
     K: CacheKey,
+    S: HashBuilder,
 {
     async fn run(&self) -> Result<()> {
         loop {
@@ -87,12 +89,12 @@ where
                 self.buffer.swap();
             } else {
                 let slots = self.store.insert(&batch).await?;
+
                 for ((key, value), slot) in batch.into_iter().zip_eq(slots.into_iter()) {
-                    let mut hasher = DefaultHasher::new();
-                    key.hash(&mut hasher);
-                    let hash = hasher.finish();
+                    let hash = self.hash_builder.hash_one(&key);
                     self.indices.insert(key, hash, value.len(), slot);
                 }
+
                 self.buffer.rotate();
             }
 
@@ -104,10 +106,13 @@ where
 }
 
 #[derive(Clone)]
-pub struct FileCache<K>
+pub struct FileCache<K, S = RandomState>
 where
     K: CacheKey,
+    S: HashBuilder,
 {
+    hash_builder: S,
+
     _filters: Vec<Arc<dyn Filter>>,
 
     indices: Arc<LruCache<K, SlotId>>,
@@ -118,11 +123,22 @@ where
     buffer_flusher_notifier: Arc<Notify>,
 }
 
-impl<K> FileCache<K>
+impl<K> FileCache<K, RandomState>
 where
     K: CacheKey,
 {
     pub async fn open(options: FileCacheOptions) -> Result<Self> {
+        let hash_builder = RandomState::new();
+        Self::open_with_hasher(options, hash_builder).await
+    }
+}
+
+impl<K, S> FileCache<K, S>
+where
+    K: CacheKey,
+    S: HashBuilder,
+{
+    pub async fn open_with_hasher(options: FileCacheOptions, hash_builder: S) -> Result<Self> {
         let buffer_capacity = options.total_buffer_capacity / 2;
 
         let store = Store::open(StoreOptions {
@@ -135,11 +151,8 @@ where
         let store = Arc::new(store);
 
         // TODO: Restore indices.
-        let indices = LruCache::with_event_listeners(
-            INDICES_LRU_SHARD_BITS,
-            options.capacity,
-            vec![store.clone()],
-        );
+        let indices =
+            LruCache::with_event_listeners(LRU_SHARD_BITS, options.capacity, vec![store.clone()]);
         store.restore(&indices).await?;
         let indices = Arc::new(indices);
 
@@ -152,6 +165,8 @@ where
             indices: indices.clone(),
             notifier: buffer_flusher_notifier.clone(),
 
+            hash_builder: hash_builder.clone(),
+
             hooks: options.flush_buffer_hooks,
         };
         // TODO(MrCroxx): Graceful shutdown.
@@ -162,6 +177,8 @@ where
         });
 
         Ok(Self {
+            hash_builder,
+
             _filters: options.filters,
 
             indices,
@@ -174,22 +191,15 @@ where
     }
 
     pub fn insert(&self, key: K, value: Vec<u8>) -> Result<()> {
-        let mut hasher = DefaultHasher::new();
-        key.hash(&mut hasher);
-        let hash = hasher.finish();
-
+        let hash = self.hash_builder.hash_one(&key);
         self.buffer.insert(hash, key, value.len(), value);
 
         self.buffer_flusher_notifier.notify_one();
         Ok(())
     }
 
-    // TODO(MrCroxx): Return Arc<..> or ..? Based on use cases?
     pub async fn get(&self, key: &K) -> Result<Option<Vec<u8>>> {
-        let mut hasher = DefaultHasher::new();
-        key.hash(&mut hasher);
-        let hash = hasher.finish();
-
+        let hash = self.hash_builder.hash_one(key);
         if let Some(value) = self.buffer.get(hash, key) {
             return Ok(Some(value));
         }
@@ -204,10 +214,7 @@ where
     }
 
     pub fn earse(&self, key: &K) -> Result<()> {
-        let mut hasher = DefaultHasher::new();
-        key.hash(&mut hasher);
-        let hash = hasher.finish();
-
+        let hash = self.hash_builder.hash_one(key);
         self.buffer.erase(hash, key);
         // No need to manually remove data from store. `LruCacheEventListener` on `indices` will
         // free the slot.
@@ -220,13 +227,23 @@ where
 #[cfg(test)]
 mod tests {
 
-    use std::collections::HashSet;
     use std::path::Path;
 
     use super::super::test_utils::{key, TestCacheKey};
     use super::super::utils;
     use super::*;
-    use crate::hummock::file_cache::test_utils::FlushHolder;
+    use crate::hummock::file_cache::test_utils::{datasize, FlushHolder, ModuloHasherBuilder};
+
+    const SHARDS: usize = 1 << LRU_SHARD_BITS;
+    const SHARDSU8: u8 = SHARDS as u8;
+    const SHARDSU64: u64 = SHARDS as u64;
+
+    const BS: usize = 4096 * 4;
+    const CAPACITY: usize = 4 * SHARDS * BS;
+    const BUFFER_CAPACITY: usize = SHARDS * BS;
+    const FALLOCATE_UNIT: usize = 2 * SHARDS * BS;
+
+    const LOOPS: usize = 8;
 
     fn is_send_sync_clone<T: Send + Sync + Clone + 'static>() {}
 
@@ -251,17 +268,19 @@ mod tests {
     async fn create_file_cache_manager_for_test(
         dir: impl AsRef<Path>,
         flush_buffer_hooks: Vec<Arc<dyn FlushBufferHook>>,
-    ) -> FileCache<TestCacheKey> {
+    ) -> FileCache<TestCacheKey, ModuloHasherBuilder<SHARDSU8>> {
         let options = FileCacheOptions {
             dir: dir.as_ref().to_str().unwrap().to_string(),
-            capacity: 128 * 4 * 1024,
-            total_buffer_capacity: 32 * 2 * 4 * 1024,
-            cache_file_fallocate_unit: 64 * 4 * 1024,
+            capacity: CAPACITY,
+            total_buffer_capacity: 2 * BUFFER_CAPACITY,
+            cache_file_fallocate_unit: FALLOCATE_UNIT,
             filters: vec![],
 
             flush_buffer_hooks,
         };
-        FileCache::open(options).await.unwrap()
+        FileCache::open_with_hasher(options, ModuloHasherBuilder)
+            .await
+            .unwrap()
     }
 
     #[tokio::test]
@@ -295,20 +314,23 @@ mod tests {
 
         let holder = Arc::new(FlushHolder::default());
         let cache = create_file_cache_manager_for_test(dir.path(), vec![holder.clone()]).await;
-        let bs = cache.store.block_size();
 
-        for i in 1..=64 {
-            cache.insert(key(i), vec![b'x'; bs]).unwrap();
-            assert_eq!(cache.get(&key(i)).await.unwrap(), Some(vec![b'x'; bs]));
+        for i in 0..SHARDSU64 * 2 {
+            cache.insert(key(i), vec![b'x'; BS]).unwrap();
+            assert_eq!(cache.get(&key(i)).await.unwrap(), Some(vec![b'x'; BS]));
         }
 
-        let mut in_cache = HashSet::new();
-        for i in 1..=64 {
-            if cache.get(&key(i)).await.unwrap().is_some() {
-                in_cache.insert(i);
-            }
+        for i in 0..SHARDSU64 {
+            assert_eq!(cache.get(&key(i)).await.unwrap(), None, "i: {}", i);
         }
-        assert!(in_cache.len() <= 32);
+        for i in SHARDSU64..SHARDSU64 * 2 {
+            assert_eq!(
+                cache.get(&key(i)).await.unwrap(),
+                Some(vec![b'x'; BS]),
+                "i: {}",
+                i
+            );
+        }
 
         assert_eq!(cache.store.cache_file_len(), 0);
 
@@ -318,48 +340,50 @@ mod tests {
         holder.trigger();
         holder.wait().await;
 
+        assert_eq!(cache.store.cache_file_len(), SHARDS * BS);
         assert_eq!(
-            cache.store.cache_file_len(),
-            utils::usize::align_up(cache.store.block_size(), in_cache.len() * bs)
+            datasize(cache.store.cache_file_path()).unwrap(),
+            utils::usize::align_up(FALLOCATE_UNIT, SHARDS * BS)
         );
-        for i in 1..=64 {
-            assert_eq!(
-                cache.get(&key(i)).await.unwrap(),
-                if in_cache.get(&i).is_some() {
-                    Some(vec![b'x'; bs])
-                } else {
-                    None
-                }
-            );
+
+        for i in 0..SHARDSU64 {
+            assert_eq!(cache.get(&key(i)).await.unwrap(), None);
+        }
+        for i in SHARDSU64..SHARDSU64 * 2 {
+            assert_eq!(cache.get(&key(i)).await.unwrap(), Some(vec![b'x'; BS]));
         }
 
-        in_cache.clear();
-        // Insert 4 times of capacity data to make sure old data in all shards are evicted.
-        let mut buffer_len = 0;
-        for i in 65..=65 + 128 * 4 {
-            cache.insert(key(i), vec![b'x'; bs]).unwrap();
-            assert_eq!(cache.get(&key(i)).await.unwrap(), Some(vec![b'x'; bs]));
+        for l in 0..LOOPS as u64 {
+            for i in (l + 2) * SHARDSU64..(l + 3) * SHARDSU64 {
+                cache.insert(key(i), vec![b'x'; BS]).unwrap();
+                assert_eq!(cache.get(&key(i)).await.unwrap(), Some(vec![b'x'; BS]));
+            }
+            holder.trigger();
+            holder.wait().await;
+            cache.buffer_flusher_notifier.notify_one();
+            holder.trigger();
+            holder.wait().await;
+        }
 
-            buffer_len += 1;
+        assert_eq!(cache.store.cache_file_len(), 9 * SHARDS * BS);
+        assert_eq!(
+            datasize(cache.store.cache_file_path()).unwrap(),
+            // TODO(MrCroxx): For inserting performs "append -> insert indices & punch hole",
+            // the maximum file size may exceed the capacity by at most an alloc unit.
+            // May refactor it later.
+            utils::usize::align_up(FALLOCATE_UNIT, CAPACITY) + FALLOCATE_UNIT - BUFFER_CAPACITY
+        );
 
-            if buffer_len == 16 {
-                holder.trigger();
-                holder.wait().await;
-                cache.buffer_flusher_notifier.notify_one();
-                holder.trigger();
-                holder.wait().await;
-                buffer_len = 0;
+        for l in 0..2 + LOOPS as u64 - 4 {
+            for i in l * SHARDSU64..(l + 1) * SHARDSU64 {
+                assert_eq!(cache.get(&key(i)).await.unwrap(), None, "i: {}", i);
             }
         }
 
-        for i in 1..=64 {
-            assert_eq!(cache.get(&key(i)).await.unwrap(), None, "i: {}", i);
-        }
-        for i in 65..=65 + 128 * 4 {
-            if cache.get(&key(i)).await.unwrap().is_some() {
-                in_cache.insert(i);
+        for l in 2 + LOOPS as u64 - 4..2 + LOOPS as u64 {
+            for i in l * SHARDSU64..(l + 1) * SHARDSU64 {
+                assert_eq!(cache.get(&key(i)).await.unwrap(), Some(vec![b'x'; BS]));
             }
         }
-        assert!(in_cache.len() * bs <= 128 * 4 * 1024);
     }
 }

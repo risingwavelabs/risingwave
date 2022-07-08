@@ -50,6 +50,8 @@ const LOGICAL_BLOCK_SIZE: usize = 512;
 /// Size of `st_blocks` with `fstat(2)`.
 const ST_BLOCK_SIZE: usize = 512;
 
+const LRU_SHARD_BITS: usize = 5;
+
 type DioBuffer = Vec<u8, &'static alloc::AlignedAllocator<LOGICAL_BLOCK_SIZE>>;
 
 static DIO_BUFFER_ALLOCATOR: alloc::AlignedAllocator<LOGICAL_BLOCK_SIZE> =
