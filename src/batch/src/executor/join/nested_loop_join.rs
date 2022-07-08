@@ -14,13 +14,13 @@
 
 use std::sync::Arc;
 
-use futures::{StreamExt, TryStreamExt};
+use futures::TryStreamExt;
 use futures_async_stream::try_stream;
 use itertools::{repeat_n, Itertools};
 use risingwave_common::array::column::Column;
 use risingwave_common::array::data_chunk_iter::RowRef;
 use risingwave_common::array::{Array, DataChunk};
-use risingwave_common::buffer::{Bitmap, BitmapBuilder};
+use risingwave_common::buffer::BitmapBuilder;
 use risingwave_common::catalog::Schema;
 use risingwave_common::error::{Result, RwError};
 use risingwave_common::types::{DataType, DatumRef};
@@ -90,24 +90,30 @@ impl NestedLoopJoinExecutor {
 
         // Get the joined stream
         let stream = match self.join_type {
-            JoinType::Inner => Self::do_inner_join(
-                &mut chunk_builder,
-                left_data_types,
-                self.join_expr,
-                left,
-                self.right_child,
-            ),
-            _ => todo!(),
+            JoinType::Inner => Self::do_inner_join,
+            JoinType::LeftOuter => Self::do_left_outer_join,
+            JoinType::LeftSemi => Self::do_left_semi_anti_join::<false>,
+            JoinType::LeftAnti => Self::do_left_semi_anti_join::<true>,
+            JoinType::RightOuter => Self::do_right_outer_join,
+            JoinType::RightSemi => Self::do_right_semi_anti_join::<false>,
+            JoinType::RightAnti => Self::do_right_semi_anti_join::<true>,
+            JoinType::FullOuter => todo!(),
         };
 
         #[for_await]
-        for chunk in stream {
+        for chunk in stream(
+            &mut chunk_builder,
+            left_data_types,
+            self.join_expr,
+            left,
+            self.right_child,
+        ) {
             yield chunk?.reorder_columns(&self.output_indices)
         }
 
         // Handle remaining chunk
         if let Some(chunk) = chunk_builder.consume_all()? {
-            yield chunk
+            yield chunk.reorder_columns(&self.output_indices)
         }
     }
 }
@@ -171,7 +177,8 @@ impl NestedLoopJoinExecutor {
         DataChunk::new(concated_columns, left.capacity())
     }
 
-    /// Create a chunk by concatenating a row with a chunk and set its visibility according to the evaluation result of the expression.
+    /// Create a chunk by concatenating a row with a chunk and set its visibility according to the
+    /// evaluation result of the expression.
     fn concatenate_and_eval(
         expr: &dyn Expression,
         left_row_types: &[DataType],
@@ -180,13 +187,13 @@ impl NestedLoopJoinExecutor {
     ) -> Result<DataChunk> {
         let left_chunk =
             Self::convert_row_to_chunk(&left_row, right_chunk.capacity(), left_row_types)?;
-        let mut chunk = Self::concatenate(&left_chunk, &right_chunk);
+        let mut chunk = Self::concatenate(&left_chunk, right_chunk);
         chunk.set_visibility(expr.eval(&chunk)?.as_bool().iter().collect());
         Ok(chunk)
     }
 
     /// Append a chunk to the chunk builder and get a stream of the spilled chunks.
-    #[try_stream(ok = DataChunk, error = RwError)]
+    #[try_stream(boxed, ok = DataChunk, error = RwError)]
     async fn append_chunk(chunk_builder: &mut DataChunkBuilder, chunk: DataChunk) {
         let (mut remain, mut output) =
             chunk_builder.append_chunk(SlicedDataChunk::new_checked(chunk)?)?;
@@ -282,7 +289,7 @@ impl NestedLoopJoinExecutor {
 }
 
 impl NestedLoopJoinExecutor {
-    #[try_stream(ok = DataChunk, error = RwError)]
+    #[try_stream(boxed, ok = DataChunk, error = RwError)]
     async fn do_inner_join(
         chunk_builder: &mut DataChunkBuilder,
         left_data_types: Vec<DataType>,
@@ -294,7 +301,12 @@ impl NestedLoopJoinExecutor {
         for right_chunk in right.execute() {
             let right_chunk = right_chunk?;
             for left_row in left.iter().flat_map(|chunk| chunk.rows()) {
-                let chunk = Self::concatenate_and_eval(join_expr.as_ref(), &left_data_types, left_row, &right_chunk)?;
+                let chunk = Self::concatenate_and_eval(
+                    join_expr.as_ref(),
+                    &left_data_types,
+                    left_row,
+                    &right_chunk,
+                )?;
                 if chunk.cardinality() > 0 {
                     #[for_await]
                     for spilled in Self::append_chunk(chunk_builder, chunk) {
@@ -307,282 +319,159 @@ impl NestedLoopJoinExecutor {
 
     #[try_stream(boxed, ok = DataChunk, error = RwError)]
     async fn do_left_outer_join(
+        chunk_builder: &mut DataChunkBuilder,
         left_data_types: Vec<DataType>,
-        data_types: Vec<DataType>,
         join_expr: BoxedExpression,
         left: Vec<DataChunk>,
-        right: Vec<DataChunk>,
+        right: BoxedExecutor,
     ) {
-        let mut chunk_builder = DataChunkBuilder::with_default_size(data_types.clone());
-        for left_row in left.iter().flat_map(|chunk| chunk.rows()) {
-            let mut matched = false;
-            for right_chunk in right.iter() {
-                let left_chunk = Self::convert_row_to_chunk(
-                    &left_row,
-                    right_chunk.capacity(),
+        let mut matched = BitmapBuilder::zeroed(left.iter().map(|chunk| chunk.capacity()).sum());
+        let right_data_types = right.schema().data_types();
+        #[for_await]
+        for right_chunk in right.execute() {
+            let right_chunk = right_chunk?;
+            for (left_row_idx, left_row) in left.iter().flat_map(|chunk| chunk.rows()).enumerate() {
+                let chunk = Self::concatenate_and_eval(
+                    join_expr.as_ref(),
                     &left_data_types,
+                    left_row,
+                    &right_chunk,
                 )?;
-                let mut chunk = Self::concatenate(&left_chunk, right_chunk);
-                let vis = join_expr.eval(&chunk)?.as_bool().iter().collect();
-                chunk.set_visibility(vis);
                 if chunk.cardinality() > 0 {
-                    matched = true;
-                    let (mut remain, mut output) =
-                        chunk_builder.append_chunk(SlicedDataChunk::new_checked(chunk)?)?;
-                    if let Some(output_chunk) = output {
-                        yield output_chunk
+                    matched.set(left_row_idx, true);
+                    #[for_await]
+                    for spilled in Self::append_chunk(chunk_builder, chunk) {
+                        yield spilled?
                     }
-                    while let Some(remain_chunk) = remain {
-                        (remain, output) = chunk_builder.append_chunk(remain_chunk)?;
-                        if let Some(output_chunk) = output {
-                            yield output_chunk
-                        }
-                    }
-                }
-            }
-            if !matched {
-                let datum_refs = left_row
-                    .values()
-                    .chain(repeat_n(None, data_types.len() - left_data_types.len()));
-                if let Some(chunk) = chunk_builder.append_one_row_from_datum_refs(datum_refs)? {
-                    yield chunk
                 }
             }
         }
-        if let Some(chunk) = chunk_builder.consume_all()? {
-            yield chunk
+        for (left_row, _) in left
+            .iter()
+            .flat_map(|chunk| chunk.rows())
+            .zip_eq(matched.finish().iter())
+            .filter(|(_, matched)| !*matched)
+        {
+            let datum_refs = left_row
+                .values()
+                .chain(repeat_n(None, right_data_types.len()));
+            if let Some(chunk) = chunk_builder.append_one_row_from_datum_refs(datum_refs)? {
+                yield chunk
+            }
         }
     }
 
     #[try_stream(boxed, ok = DataChunk, error = RwError)]
-    async fn do_left_semi_join(
-        data_types: Vec<DataType>,
+    async fn do_left_semi_anti_join<const ANTI_JOIN: bool>(
+        chunk_builder: &mut DataChunkBuilder,
+        left_data_types: Vec<DataType>,
         join_expr: BoxedExpression,
         left: Vec<DataChunk>,
-        right: Vec<DataChunk>,
+        right: BoxedExecutor,
     ) {
-        let mut chunk_builder = DataChunkBuilder::with_default_size(data_types.clone());
-        for left_row in left.iter().flat_map(|chunk| chunk.rows()) {
-            let mut matched = false;
-            for right_chunk in right.iter() {
-                let left_chunk =
-                    Self::convert_row_to_chunk(&left_row, right_chunk.capacity(), &data_types)?;
-                let mut chunk = Self::concatenate(&left_chunk, right_chunk);
-                let vis = join_expr.eval(&chunk)?.as_bool().iter().collect();
-                chunk.set_visibility(vis);
+        let mut matched = BitmapBuilder::zeroed(left.iter().map(|chunk| chunk.capacity()).sum());
+        #[for_await]
+        for right_chunk in right.execute() {
+            let right_chunk = right_chunk?;
+            for (left_row_idx, left_row) in left.iter().flat_map(|chunk| chunk.rows()).enumerate() {
+                let chunk = Self::concatenate_and_eval(
+                    join_expr.as_ref(),
+                    &left_data_types,
+                    left_row,
+                    &right_chunk,
+                )?;
                 if chunk.cardinality() > 0 {
-                    matched = true;
-                    break;
-                }
-            }
-            if matched {
-                if let Some(chunk) = chunk_builder.append_one_row_ref(left_row)? {
-                    yield chunk
+                    matched.set(left_row_idx, true)
                 }
             }
         }
-        if let Some(chunk) = chunk_builder.consume_all()? {
-            yield chunk
-        }
-    }
-
-    #[try_stream(boxed, ok = DataChunk, error = RwError)]
-    async fn do_left_anti_join(
-        data_types: Vec<DataType>,
-        join_expr: BoxedExpression,
-        left: Vec<DataChunk>,
-        right: Vec<DataChunk>,
-    ) {
-        let mut chunk_builder = DataChunkBuilder::with_default_size(data_types.clone());
-        for left_row in left.iter().flat_map(|chunk| chunk.rows()) {
-            let mut matched = false;
-            for right_chunk in right.iter() {
-                let left_chunk =
-                    Self::convert_row_to_chunk(&left_row, right_chunk.capacity(), &data_types)?;
-                let mut chunk = Self::concatenate(&left_chunk, right_chunk);
-                let vis = join_expr.eval(&chunk)?.as_bool().iter().collect();
-                chunk.set_visibility(vis);
-                if chunk.cardinality() > 0 {
-                    matched = true;
-                    break;
-                }
+        for (left_row, _) in left
+            .iter()
+            .flat_map(|chunk| chunk.rows())
+            .zip_eq(matched.finish().iter())
+            .filter(|(_, matched)| if ANTI_JOIN { !*matched } else { *matched })
+        {
+            if let Some(chunk) = chunk_builder.append_one_row_ref(left_row)? {
+                yield chunk
             }
-            if !matched {
-                if let Some(chunk) = chunk_builder.append_one_row_ref(left_row)? {
-                    yield chunk
-                }
-            }
-        }
-        if let Some(chunk) = chunk_builder.consume_all()? {
-            yield chunk
         }
     }
 
     #[try_stream(boxed, ok = DataChunk, error = RwError)]
     async fn do_right_outer_join(
+        chunk_builder: &mut DataChunkBuilder,
         left_data_types: Vec<DataType>,
-        data_types: Vec<DataType>,
         join_expr: BoxedExpression,
         left: Vec<DataChunk>,
-        right: Vec<DataChunk>,
+        right: BoxedExecutor,
     ) {
-        let mut chunk_builder = DataChunkBuilder::with_default_size(data_types.clone());
-        let mut right_matched =
-            BitmapBuilder::zeroed(right.iter().map(|chunk| chunk.capacity()).sum());
-        for left_row in left.iter().flat_map(|chunk| chunk.rows()) {
-            let mut offset = 0;
-            for right_chunk in right.iter() {
-                let left_chunk = Self::convert_row_to_chunk(
-                    &left_row,
-                    right_chunk.capacity(),
+        #[for_await]
+        for right_chunk in right.execute() {
+            let right_chunk = right_chunk?;
+            let mut matched = BitmapBuilder::zeroed(right_chunk.capacity()).finish();
+            for left_row in left.iter().flat_map(|chunk| chunk.rows()) {
+                let chunk = Self::concatenate_and_eval(
+                    join_expr.as_ref(),
                     &left_data_types,
+                    left_row,
+                    &right_chunk,
                 )?;
-                let mut chunk = Self::concatenate(&left_chunk, right_chunk);
-                let vis = join_expr.eval(&chunk)?.as_bool().iter().collect();
-                chunk.set_visibility(vis);
                 if chunk.cardinality() > 0 {
-                    for (right_row_local_idx, _) in chunk
-                        .visibility()
-                        .unwrap()
-                        .iter()
-                        .enumerate()
-                        .filter(|(_, matched)| *matched)
-                    {
-                        right_matched.set(offset + right_row_local_idx, true);
-                    }
-                    let (mut remain, mut output) =
-                        chunk_builder.append_chunk(SlicedDataChunk::new_checked(chunk)?)?;
-                    if let Some(output_chunk) = output {
-                        yield output_chunk
-                    }
-                    while let Some(remain_chunk) = remain {
-                        (remain, output) = chunk_builder.append_chunk(remain_chunk)?;
-                        if let Some(output_chunk) = output {
-                            yield output_chunk
-                        }
+                    // chunk.visibility() must be Some(_)
+                    matched = &matched | chunk.visibility().unwrap();
+                    #[for_await]
+                    for spilled in Self::append_chunk(chunk_builder, chunk) {
+                        yield spilled?
                     }
                 }
-                offset += right_chunk.capacity()
             }
-        }
-        for (right_row, matched) in right
-            .iter()
-            .flat_map(|chunk| chunk.rows())
-            .zip_eq(right_matched.finish().iter())
-        {
-            if !matched {
+            for (right_row, _) in right_chunk
+                .rows()
+                .zip_eq(matched.iter())
+                .filter(|(_, matched)| !*matched)
+            {
                 let datum_refs = repeat_n(None, left_data_types.len()).chain(right_row.values());
                 if let Some(chunk) = chunk_builder.append_one_row_from_datum_refs(datum_refs)? {
                     yield chunk
                 }
             }
         }
-        if let Some(chunk) = chunk_builder.consume_all()? {
-            yield chunk
-        }
     }
 
     #[try_stream(boxed, ok = DataChunk, error = RwError)]
-    async fn do_right_semi_join(
+    async fn do_right_semi_anti_join<const ANTI_JOIN: bool>(
+        chunk_builder: &mut DataChunkBuilder,
         left_data_types: Vec<DataType>,
-        data_types: Vec<DataType>,
         join_expr: BoxedExpression,
         left: Vec<DataChunk>,
-        right: Vec<DataChunk>,
+        right: BoxedExecutor,
     ) {
-        let mut chunk_builder = DataChunkBuilder::with_default_size(data_types.clone());
-        let mut right_matched =
-            BitmapBuilder::zeroed(right.iter().map(|chunk| chunk.capacity()).sum());
-        for left_row in left.iter().flat_map(|chunk| chunk.rows()) {
-            let mut offset = 0;
-            for right_chunk in right.iter() {
-                let left_chunk = Self::convert_row_to_chunk(
-                    &left_row,
-                    right_chunk.capacity(),
+        #[for_await]
+        for right_chunk in right.execute() {
+            let mut right_chunk = right_chunk?;
+            let mut matched = BitmapBuilder::zeroed(right_chunk.capacity()).finish();
+            for left_row in left.iter().flat_map(|chunk| chunk.rows()) {
+                let chunk = Self::concatenate_and_eval(
+                    join_expr.as_ref(),
                     &left_data_types,
+                    left_row,
+                    &right_chunk,
                 )?;
-                let mut chunk = Self::concatenate(&left_chunk, right_chunk);
-                let vis = join_expr.eval(&chunk)?.as_bool().iter().collect();
-                chunk.set_visibility(vis);
                 if chunk.cardinality() > 0 {
-                    for (right_row_local_idx, _) in chunk
-                        .visibility()
-                        .unwrap()
-                        .iter()
-                        .enumerate()
-                        .filter(|(_, matched)| *matched)
-                    {
-                        right_matched.set(offset + right_row_local_idx, true);
-                    }
-                    offset += right_chunk.capacity()
+                    // chunk.visibility() must be Some(_)
+                    matched = &matched | chunk.visibility().unwrap();
                 }
             }
-        }
-        for (right_row, matched) in right
-            .iter()
-            .flat_map(|chunk| chunk.rows())
-            .zip_eq(right_matched.finish().iter())
-        {
-            if matched {
-                if let Some(chunk) = chunk_builder.append_one_row_ref(right_row)? {
-                    yield chunk
+            if ANTI_JOIN {
+                matched = !&matched;
+            }
+            right_chunk.set_visibility(matched);
+            if right_chunk.cardinality() > 0 {
+                #[for_await]
+                for spilled in Self::append_chunk(chunk_builder, right_chunk) {
+                    yield spilled?
                 }
             }
-        }
-        if let Some(chunk) = chunk_builder.consume_all()? {
-            yield chunk
-        }
-    }
-
-    #[try_stream(boxed, ok = DataChunk, error = RwError)]
-    async fn do_right_anti_join(
-        left_data_types: Vec<DataType>,
-        data_types: Vec<DataType>,
-        join_expr: BoxedExpression,
-        left: Vec<DataChunk>,
-        right: Vec<DataChunk>,
-    ) {
-        let mut chunk_builder = DataChunkBuilder::with_default_size(data_types.clone());
-        let mut right_matched =
-            BitmapBuilder::zeroed(right.iter().map(|chunk| chunk.capacity()).sum());
-        for left_row in left.iter().flat_map(|chunk| chunk.rows()) {
-            let mut offset = 0;
-            for right_chunk in right.iter() {
-                let left_chunk = Self::convert_row_to_chunk(
-                    &left_row,
-                    right_chunk.capacity(),
-                    &left_data_types,
-                )?;
-                let mut chunk = Self::concatenate(&left_chunk, right_chunk);
-                let vis = join_expr.eval(&chunk)?.as_bool().iter().collect();
-                chunk.set_visibility(vis);
-                if chunk.cardinality() > 0 {
-                    for (right_row_local_idx, _) in chunk
-                        .visibility()
-                        .unwrap()
-                        .iter()
-                        .enumerate()
-                        .filter(|(_, matched)| *matched)
-                    {
-                        right_matched.set(offset + right_row_local_idx, true);
-                    }
-                }
-                offset += right_chunk.capacity()
-            }
-        }
-        for (right_row, matched) in right
-            .iter()
-            .flat_map(|chunk| chunk.rows())
-            .zip_eq(right_matched.finish().iter())
-        {
-            if !matched {
-                if let Some(chunk) = chunk_builder.append_one_row_ref(right_row)? {
-                    yield chunk
-                }
-            }
-        }
-        if let Some(chunk) = chunk_builder.consume_all()? {
-            yield chunk
         }
     }
 }
