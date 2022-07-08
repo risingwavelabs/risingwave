@@ -50,7 +50,7 @@ use crate::hummock::model::{
 };
 use crate::hummock::CompactorManagerRef;
 use crate::manager::{IdCategory, MetaSrvEnv};
-use crate::model::{MetadataModel, ValTransaction, VarTransaction};
+use crate::model::{MetadataModel, Transactional, ValTransaction, VarTransaction};
 use crate::rpc::metrics::MetaMetrics;
 use crate::rpc::{META_CF_NAME, META_LEADER_KEY};
 use crate::storage::{MetaStore, Transaction};
@@ -1158,25 +1158,32 @@ where
     }
 
     pub async fn proceed_version_checkpoint(&self) -> risingwave_common::error::Result<()> {
-        let mut versioning_guard = self.versioning.write().await;
-        let new_checkpoint = versioning_guard
-            .hummock_versions
-            .first_key_value()
-            .unwrap()
-            .1
-            .clone();
-        new_checkpoint.insert(self.env.meta_store()).await?;
+        let mut version_deltas_to_delete = BTreeMap::new();
 
-        versioning_guard.checkpoint_version_id = new_checkpoint.id;
-        loop {
-            let fst = versioning_guard.hummock_version_deltas.first_key_value();
-            if fst.is_some() && *fst.unwrap().0 <= versioning_guard.checkpoint_version_id {
-                HummockVersionDelta::delete(self.env.meta_store(), fst.unwrap().0).await?;
-                versioning_guard.hummock_version_deltas.pop_first();
-            } else {
-                break;
-            }
+        {
+            let mut versioning_guard = self.versioning.write().await;
+            let new_checkpoint = versioning_guard
+                .hummock_versions
+                .first_key_value()
+                .unwrap()
+                .1
+                .clone();
+            new_checkpoint.insert(self.env.meta_store()).await?;
+
+            versioning_guard.checkpoint_version_id = new_checkpoint.id;
+
+            version_deltas_to_delete.append(&mut versioning_guard.hummock_version_deltas);
+            versioning_guard.hummock_version_deltas =
+                version_deltas_to_delete.split_off(&(versioning_guard.checkpoint_version_id + 1));
         }
+
+        let mut trx = Transaction::default();
+        for (_, version_delta_item) in version_deltas_to_delete {
+            version_delta_item.delete_in_transaction(&mut trx)?;
+        }
+        self.commit_trx(self.env.meta_store(), trx, None, self.env.get_leader_info())
+            .await?;
+
         Ok(())
     }
 
