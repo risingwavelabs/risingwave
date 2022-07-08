@@ -38,13 +38,15 @@ impl ExecutorBuilder for MaterializeExecutorBuilder {
             .map(OrderPair::from_prost)
             .collect();
         let column_ids = node
-            .column_ids
+            .get_table()?
+            .get_columns()
             .iter()
-            .map(|id| ColumnId::from(*id))
+            .map(|t| ColumnId::from(t.column_desc.as_ref().unwrap().column_id))
             .collect();
 
         let distribution_key = node
-            .distribution_key
+            .get_table()?
+            .get_distribution_key()
             .iter()
             .map(|key| *key as usize)
             .collect();

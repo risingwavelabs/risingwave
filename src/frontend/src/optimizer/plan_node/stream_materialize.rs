@@ -17,7 +17,7 @@ use std::fmt;
 
 use fixedbitset::FixedBitSet;
 use itertools::Itertools;
-use risingwave_common::catalog::{ColumnDesc, TableId};
+use risingwave_common::catalog::{ColumnDesc, DatabaseId, SchemaId, TableId};
 use risingwave_common::error::ErrorCode::InternalError;
 use risingwave_common::error::Result;
 use risingwave_pb::stream_plan::stream_node::NodeBody as ProstStreamNode;
@@ -240,25 +240,16 @@ impl ToStreamProst for StreamMaterialize {
             // We don't need table id for materialize node in frontend. The id will be generated on
             // meta catalog service.
             table_id: 0,
-            column_ids: self
-                .table()
-                .columns()
-                .iter()
-                .map(|col| ColumnId::get_id(&col.column_desc.column_id))
-                .collect(),
             column_orders: self
                 .table()
                 .order_key()
                 .iter()
                 .map(FieldOrder::to_protobuf)
                 .collect(),
-            distribution_key: self
-                .base
-                .dist
-                .dist_column_indices()
-                .iter()
-                .map(|idx| *idx as u32)
-                .collect_vec(),
+            table: Some(self.table().to_prost(
+                SchemaId::placeholder() as u32,
+                DatabaseId::placeholder() as u32,
+            )),
         })
     }
 }
