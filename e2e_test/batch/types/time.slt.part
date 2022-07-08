@@ -7,3 +7,13 @@ query TTTTT
 select timestamp '2001-03-16 23:38:45' - timestamp '2001-02-16 20:38:40';
 ----
 28 days 03:00:05
+
+query T
+select TIME '19:46:41' <= TIME '11:33:43';
+----
+f
+
+query T
+select TIME '19:46:41' >= TIME '11:33:43';
+----
+t
