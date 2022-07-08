@@ -14,6 +14,8 @@ include ./nexmark/q4.slt.part
 include ./nexmark/q5.slt.part
 include ./nexmark/q7.slt.part
 include ./nexmark/q8.slt.part
+include ./nexmark/q10.slt.part
+include ./nexmark/q14.slt.part
 
 include ./nexmark/drop_views.slt.part
 
