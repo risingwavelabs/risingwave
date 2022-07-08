@@ -14,17 +14,20 @@
 
 use std::sync::Arc;
 
+use futures::{StreamExt, TryStreamExt};
 use futures_async_stream::try_stream;
 use itertools::{repeat_n, Itertools};
 use risingwave_common::array::column::Column;
 use risingwave_common::array::data_chunk_iter::RowRef;
 use risingwave_common::array::{Array, DataChunk};
-use risingwave_common::buffer::BitmapBuilder;
+use risingwave_common::buffer::{Bitmap, BitmapBuilder};
 use risingwave_common::catalog::Schema;
 use risingwave_common::error::{Result, RwError};
 use risingwave_common::types::{DataType, DatumRef};
 use risingwave_common::util::chunk_coalesce::{DataChunkBuilder, SlicedDataChunk};
-use risingwave_expr::expr::{build_from_prost as expr_build_from_prost, BoxedExpression};
+use risingwave_expr::expr::{
+    build_from_prost as expr_build_from_prost, BoxedExpression, Expression,
+};
 use risingwave_pb::batch_plan::plan_node::NodeBody;
 
 use crate::executor::join::JoinType;
@@ -52,9 +55,9 @@ pub struct NestedLoopJoinExecutor {
     /// We may only need certain columns.
     /// output_indices are the indices of the columns that we needed.
     output_indices: Vec<usize>,
-    /// Left child executor (used in outer loop)
+    /// Left child executor
     left_child: BoxedExecutor,
-    /// Right child executor (used in inner loop)
+    /// Right child executor
     right_child: BoxedExecutor,
     /// Identity string of the executor
     identity: String,
@@ -79,38 +82,32 @@ impl NestedLoopJoinExecutor {
     async fn do_execute(self: Box<Self>) {
         let left_data_types = self.left_child.schema().data_types();
         let data_types = self.original_schema.data_types();
-        let mut left = Vec::new();
-        let mut right = Vec::new();
+
+        let mut chunk_builder = DataChunkBuilder::with_default_size(data_types);
+
+        // Cache the outputs of left child
+        let left = self.left_child.execute().try_collect().await?;
+
+        // Get the joined stream
+        let stream = match self.join_type {
+            JoinType::Inner => Self::do_inner_join(
+                &mut chunk_builder,
+                left_data_types,
+                self.join_expr,
+                left,
+                self.right_child,
+            ),
+            _ => todo!(),
+        };
+
         #[for_await]
-        for chunk in self.left_child.execute() {
-            left.push(chunk?.compact()?)
-        }
-        #[for_await]
-        for chunk in self.right_child.execute() {
-            right.push(chunk?.compact()?)
-        }
-        #[for_await]
-        for chunk in match self.join_type {
-            JoinType::Inner => {
-                Self::do_inner_join(left_data_types, data_types, self.join_expr, left, right)
-            }
-            JoinType::LeftOuter => {
-                Self::do_left_outer_join(left_data_types, data_types, self.join_expr, left, right)
-            }
-            JoinType::LeftSemi => Self::do_left_semi_join(data_types, self.join_expr, left, right),
-            JoinType::LeftAnti => Self::do_left_anti_join(data_types, self.join_expr, left, right),
-            JoinType::RightOuter => {
-                Self::do_right_outer_join(left_data_types, data_types, self.join_expr, left, right)
-            }
-            JoinType::RightSemi => {
-                Self::do_right_semi_join(left_data_types, data_types, self.join_expr, left, right)
-            }
-            JoinType::RightAnti => {
-                Self::do_right_anti_join(left_data_types, data_types, self.join_expr, left, right)
-            }
-            JoinType::FullOuter => todo!(),
-        } {
+        for chunk in stream {
             yield chunk?.reorder_columns(&self.output_indices)
+        }
+
+        // Handle remaining chunk
+        if let Some(chunk) = chunk_builder.consume_all()? {
+            yield chunk
         }
     }
 }
@@ -172,6 +169,36 @@ impl NestedLoopJoinExecutor {
         concated_columns.extend_from_slice(right.columns());
 
         DataChunk::new(concated_columns, left.capacity())
+    }
+
+    /// Create a chunk by concatenating a row with a chunk and set its visibility according to the evaluation result of the expression.
+    fn concatenate_and_eval(
+        expr: &dyn Expression,
+        left_row_types: &[DataType],
+        left_row: RowRef,
+        right_chunk: &DataChunk,
+    ) -> Result<DataChunk> {
+        let left_chunk =
+            Self::convert_row_to_chunk(&left_row, right_chunk.capacity(), left_row_types)?;
+        let mut chunk = Self::concatenate(&left_chunk, &right_chunk);
+        chunk.set_visibility(expr.eval(&chunk)?.as_bool().iter().collect());
+        Ok(chunk)
+    }
+
+    /// Append a chunk to the chunk builder and get a stream of the spilled chunks.
+    #[try_stream(ok = DataChunk, error = RwError)]
+    async fn append_chunk(chunk_builder: &mut DataChunkBuilder, chunk: DataChunk) {
+        let (mut remain, mut output) =
+            chunk_builder.append_chunk(SlicedDataChunk::new_checked(chunk)?)?;
+        if let Some(output_chunk) = output {
+            yield output_chunk
+        }
+        while let Some(remain_chunk) = remain {
+            (remain, output) = chunk_builder.append_chunk(remain_chunk)?;
+            if let Some(output_chunk) = output {
+                yield output_chunk
+            }
+        }
     }
 }
 
@@ -255,42 +282,26 @@ impl NestedLoopJoinExecutor {
 }
 
 impl NestedLoopJoinExecutor {
-    #[try_stream(boxed, ok = DataChunk, error = RwError)]
+    #[try_stream(ok = DataChunk, error = RwError)]
     async fn do_inner_join(
+        chunk_builder: &mut DataChunkBuilder,
         left_data_types: Vec<DataType>,
-        data_types: Vec<DataType>,
         join_expr: BoxedExpression,
         left: Vec<DataChunk>,
-        right: Vec<DataChunk>,
+        right: BoxedExecutor,
     ) {
-        let mut chunk_builder = DataChunkBuilder::with_default_size(data_types);
-        for left_row in left.iter().flat_map(|chunk| chunk.rows()) {
-            for right_chunk in right.iter() {
-                let left_chunk = Self::convert_row_to_chunk(
-                    &left_row,
-                    right_chunk.capacity(),
-                    &left_data_types,
-                )?;
-                let mut chunk = Self::concatenate(&left_chunk, right_chunk);
-                let vis = join_expr.eval(&chunk)?.as_bool().iter().collect();
-                chunk.set_visibility(vis);
+        #[for_await]
+        for right_chunk in right.execute() {
+            let right_chunk = right_chunk?;
+            for left_row in left.iter().flat_map(|chunk| chunk.rows()) {
+                let chunk = Self::concatenate_and_eval(join_expr.as_ref(), &left_data_types, left_row, &right_chunk)?;
                 if chunk.cardinality() > 0 {
-                    let (mut remain, mut output) =
-                        chunk_builder.append_chunk(SlicedDataChunk::new_checked(chunk)?)?;
-                    if let Some(output_chunk) = output {
-                        yield output_chunk
-                    }
-                    while let Some(remain_chunk) = remain {
-                        (remain, output) = chunk_builder.append_chunk(remain_chunk)?;
-                        if let Some(output_chunk) = output {
-                            yield output_chunk
-                        }
+                    #[for_await]
+                    for spilled in Self::append_chunk(chunk_builder, chunk) {
+                        yield spilled?
                     }
                 }
             }
-        }
-        if let Some(chunk) = chunk_builder.consume_all()? {
-            yield chunk
         }
     }
 
