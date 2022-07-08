@@ -88,16 +88,6 @@ impl HashMappingManager {
             .map(|info| info.vnode_mapping.clone())
     }
 
-    pub fn set_need_consolidation(&self, newflag: bool) {
-        let mut core = self.core.lock();
-        core.need_sst_consolidation = newflag;
-    }
-
-    pub fn get_need_consolidation(&self) -> bool {
-        let core = self.core.lock();
-        core.need_sst_consolidation
-    }
-
     /// For test.
     #[cfg(test)]
     fn get_fragment_mapping_info(&self, fragment_id: &FragmentId) -> Option<HashMappingInfo> {
@@ -121,7 +111,6 @@ struct HashMappingInfo {
 }
 
 struct HashMappingManagerCore {
-    need_sst_consolidation: bool,
     /// Mapping from fragment to hash mapping information. One fragment will have exactly one vnode
     /// mapping, which describes the data distribution of the fragment.
     hash_mapping_infos: HashMap<FragmentId, HashMappingInfo>,
@@ -132,12 +121,15 @@ struct HashMappingManagerCore {
 impl HashMappingManagerCore {
     fn new() -> Self {
         Self {
-            need_sst_consolidation: true,
             hash_mapping_infos: HashMap::new(),
             state_table_fragment_mapping: HashMap::new(),
         }
     }
 
+    /// Build a [`HashMappingInfo`] and record it for the fragment based on given `parallel_units`.
+    ///
+    /// For example, if `parallel_units` is `[0, 1, 2]`, and the total vnode count is 10, we'll
+    /// generate mapping like `[0, 0, 0, 0, 1, 1, 1, 2, 2, 2]`.
     fn build_fragment_hash_mapping(
         &mut self,
         fragment_id: FragmentId,
@@ -187,6 +179,7 @@ impl HashMappingManagerCore {
         vnode_mapping
     }
 
+    /// Construct a [`HashMappingInfo`] with given `vnode_mapping` and record it for the fragment.
     fn set_fragment_hash_mapping(
         &mut self,
         fragment_id: FragmentId,
