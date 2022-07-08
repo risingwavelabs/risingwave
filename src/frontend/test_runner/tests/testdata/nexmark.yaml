@@ -345,15 +345,14 @@
   before:
     - create_tables
   sql: |
-    SELECT auction, bidder, price, dateTime, TO_CHAR(dateTime, 'yyyy-MM-dd') as date, TO_CHAR(dateTime, 'HH:mm') as time
-    FROM bid;
+    SELECT auction, bidder, price, dateTime, TO_CHAR(dateTime, 'YYYY-MM-DD') as date, TO_CHAR(dateTime, 'HH:MI') as time FROM bid;
   batch_plan: |
     BatchExchange { order: [], dist: Single }
-      BatchProject { exprs: [$0, $1, $2, $3, ToChar($3, 'yyyy-MM-dd':Varchar), ToChar($3, 'HH:mm':Varchar)] }
+      BatchProject { exprs: [$0, $1, $2, $3, ToChar($3, 'YYYY-MM-DD':Varchar), ToChar($3, 'HH:MI':Varchar)] }
         BatchScan { table: bid, columns: [auction, bidder, price, dateTime] }
   stream_plan: |
     StreamMaterialize { columns: [auction, bidder, price, dateTime, date, time, _row_id(hidden)], pk_columns: [_row_id] }
-      StreamProject { exprs: [$0, $1, $2, $3, ToChar($3, 'yyyy-MM-dd':Varchar), ToChar($3, 'HH:mm':Varchar), $4] }
+      StreamProject { exprs: [$0, $1, $2, $3, ToChar($3, 'YYYY-MM-DD':Varchar), ToChar($3, 'HH:MI':Varchar), $4] }
         StreamTableScan { table: bid, columns: [auction, bidder, price, dateTime, _row_id], pk_indices: [4] }
 - id: nexmark_q11
   before:
