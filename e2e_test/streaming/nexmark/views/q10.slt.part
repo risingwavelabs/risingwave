@@ -1,0 +1,3 @@
+statement ok
+CREATE MATERIALIZED VIEW nexmark_q10 AS
+SELECT auction, bidder, price, dateTime, TO_CHAR(dateTime, 'YYYY-MM-DD') as date, TO_CHAR(dateTime, 'HH:MI') as time FROM bid;
