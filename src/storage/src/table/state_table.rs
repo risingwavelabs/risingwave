@@ -15,19 +15,23 @@
 use std::borrow::Cow;
 use std::cmp::Ordering;
 use std::marker::PhantomData;
-use std::ops::{Index, RangeBounds};
+use std::ops::Index;
+use std::sync::Arc;
 
 use futures::{pin_mut, Stream, StreamExt};
 use futures_async_stream::try_stream;
 use risingwave_common::array::Row;
+use risingwave_common::buffer::Bitmap;
 use risingwave_common::catalog::{ColumnDesc, TableId};
-use risingwave_common::util::ordered::{serialize_pk, OrderedRowSerializer};
+use risingwave_common::util::ordered::OrderedRowSerializer;
 use risingwave_common::util::sort_util::OrderType;
 use risingwave_hummock_sdk::key::range_of_prefix;
+use risingwave_pb::catalog::Table;
 
 use super::mem_table::{MemTable, RowOp};
 use super::storage_table::{StorageTableBase, READ_WRITE};
 use super::Distribution;
+use crate::encoding::cell_based_encoding_util::serialize_pk;
 use crate::encoding::cell_based_row_serializer::CellBasedRowSerializer;
 use crate::encoding::dedup_pk_cell_based_row_serializer::DedupPkCellBasedRowSerializer;
 use crate::encoding::Encoding;
@@ -45,10 +49,10 @@ pub type StateTable<S> = StateTableBase<S, CellBasedRowSerializer>;
 /// encoding, using `RowSerializer` for row to cell serializing.
 #[derive(Clone)]
 pub struct StateTableBase<S: StateStore, E: Encoding> {
-    /// buffer key/values
+    /// buffer row operations.
     mem_table: MemTable,
 
-    /// Relation layer
+    /// write into state store.
     storage_table: StorageTableBase<S, E, READ_WRITE>,
 }
 
@@ -195,48 +199,9 @@ impl<S: StateStore, E: Encoding> StateTableBase<S, E> {
 
 /// Iterator functions.
 impl<S: StateStore> StateTable<S> {
-    async fn iter_with_encoded_key_range<'a, R>(
-        &'a self,
-        encoded_key_range: R,
-        epoch: u64,
-    ) -> StorageResult<RowStream<'a, S>>
-    where
-        R: RangeBounds<Vec<u8>> + Send + Clone + 'a,
-    {
-        let storage_table_iter = self
-            .storage_table
-            .streaming_iter_with_encoded_key_range(encoded_key_range.clone(), epoch)
-            .await?;
-        let mem_table_iter = self.mem_table.iter(encoded_key_range);
-
-        Ok(StateTableRowIter::new(mem_table_iter, storage_table_iter).into_stream())
-    }
-
     /// This function scans rows from the relational table.
     pub async fn iter(&self, epoch: u64) -> StorageResult<RowStream<'_, S>> {
-        self.iter_with_pk_bounds::<_, Row>(.., epoch).await
-    }
-
-    /// This function scans rows from the relational table with specific `pk_bounds`.
-    pub async fn iter_with_pk_bounds<R, B>(
-        &self,
-        pk_bounds: R,
-        epoch: u64,
-    ) -> StorageResult<RowStream<'_, S>>
-    where
-        R: RangeBounds<B> + Send + Clone + 'static,
-        B: AsRef<Row> + Send + Clone + 'static,
-    {
-        let encoded_start_key = pk_bounds
-            .start_bound()
-            .map(|pk| serialize_pk(pk.as_ref(), self.pk_serializer()));
-        let encoded_end_key = pk_bounds
-            .end_bound()
-            .map(|pk| serialize_pk(pk.as_ref(), self.pk_serializer()));
-        let encoded_key_range = (encoded_start_key, encoded_end_key);
-
-        self.iter_with_encoded_key_range(encoded_key_range, epoch)
-            .await
+        self.iter_with_pk_prefix(Row::empty(), epoch).await
     }
 
     /// This function scans rows from the relational table with specific `pk_prefix`.
@@ -245,12 +210,67 @@ impl<S: StateStore> StateTable<S> {
         pk_prefix: &'a Row,
         epoch: u64,
     ) -> StorageResult<RowStream<'a, S>> {
-        let prefix_serializer = self.pk_serializer().prefix(pk_prefix.size());
-        let encoded_prefix = serialize_pk(pk_prefix, &prefix_serializer);
-        let encoded_key_range = range_of_prefix(&encoded_prefix);
+        let storage_table_iter = self
+            .storage_table
+            .streaming_iter_with_pk_bounds(epoch, pk_prefix, ..)
+            .await?;
 
-        self.iter_with_encoded_key_range(encoded_key_range, epoch)
-            .await
+        let mem_table_iter = {
+            // TODO: reuse calculated serialized key from cell-based table.
+            let prefix_serializer = self.pk_serializer().prefix(pk_prefix.size());
+            let encoded_prefix = serialize_pk(pk_prefix, &prefix_serializer);
+            let encoded_key_range = range_of_prefix(&encoded_prefix);
+            self.mem_table.iter(encoded_key_range)
+        };
+
+        Ok(StateTableRowIter::new(mem_table_iter, storage_table_iter).into_stream())
+    }
+
+    /// Create state table from table catalog and store.
+    pub fn from_table_catalog(
+        table_catalog: &Table,
+        store: S,
+        vnodes: Option<Arc<Bitmap>>,
+    ) -> Self {
+        let table_columns = table_catalog
+            .columns
+            .iter()
+            .map(|col| col.column_desc.as_ref().unwrap().into())
+            .collect();
+        let order_types = table_catalog
+            .order_key
+            .iter()
+            .map(|col_order| {
+                OrderType::from_prost(
+                    &risingwave_pb::plan_common::OrderType::from_i32(col_order.order_type).unwrap(),
+                )
+            })
+            .collect();
+        let dist_key_indices = table_catalog
+            .distribution_key
+            .iter()
+            .map(|dist_index| *dist_index as usize)
+            .collect();
+        let pk_indices = table_catalog
+            .order_key
+            .iter()
+            .map(|col_order| col_order.index as usize)
+            .collect();
+        let distribution = match vnodes {
+            Some(vnodes) => Distribution {
+                dist_key_indices,
+                vnodes,
+            },
+            None => Distribution::fallback(),
+        };
+        StateTable::new_with_distribution(
+            store,
+            TableId::new(table_catalog.id),
+            table_columns,
+            order_types,
+            pk_indices,
+            distribution,
+        )
     }
 }
 

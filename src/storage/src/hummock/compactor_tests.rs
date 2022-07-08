@@ -19,6 +19,7 @@ mod tests {
     use std::sync::Arc;
 
     use bytes::Bytes;
+    use itertools::Itertools;
     use rand::Rng;
     use risingwave_common::catalog::TableId;
     use risingwave_common::config::constant::hummock::CompactionFilterFlag;
@@ -72,41 +73,24 @@ mod tests {
         .unwrap()
     }
 
-    #[tokio::test]
-    #[ignore]
-    async fn test_compaction_basic() {
-        todo!()
-    }
-
-    #[tokio::test]
-    async fn test_compaction_same_key_not_split() {
-        let (_env, hummock_manager_ref, _cluster_manager_ref, worker_node) =
-            setup_compute_env(8080).await;
-        let hummock_meta_client = Arc::new(MockHummockMetaClient::new(
-            hummock_manager_ref.clone(),
-            worker_node.id,
-        ));
-        let storage = get_hummock_storage(hummock_meta_client.clone()).await;
-        let compact_ctx = CompactorContext {
-            options: storage.options().clone(),
-            sstable_store: storage.sstable_store(),
-            hummock_meta_client: hummock_meta_client.clone(),
-            stats: Arc::new(StateStoreMetrics::unused()),
-            is_share_buffer_compact: false,
-            sstable_id_generator: get_remote_sstable_id_generator(hummock_meta_client.clone()),
-            compaction_executor: None,
-        };
-
+    async fn prepare_test_put_data(
+        storage: &HummockStorage,
+        hummock_meta_client: &Arc<dyn HummockMetaClient>,
+        key: &Bytes,
+        value_size: usize,
+        epochs: Vec<u64>,
+    ) {
         // 1. add sstables
-        let key = Bytes::from(&b"same_key"[..]);
-        let val = Bytes::from(b"0"[..].repeat(1 << 20)); // 1MB value
-        let kv_count = 128;
-        let mut epoch: u64 = 1;
-        for _ in 0..kv_count {
-            epoch += 1;
+        let val = b"0"[..].repeat(value_size);
+        for epoch in epochs {
+            let mut new_val = val.clone();
+            new_val.extend_from_slice(&epoch.to_be_bytes());
             storage
                 .ingest_batch(
-                    vec![(key.clone(), StorageValue::new_default_put(val.clone()))],
+                    vec![(
+                        key.clone(),
+                        StorageValue::new_default_put(Bytes::from(new_val)),
+                    )],
                     WriteOptions {
                         epoch,
                         table_id: Default::default(),
@@ -123,6 +107,48 @@ mod tests {
                 .await
                 .unwrap();
         }
+    }
+
+    fn get_compactor_context(
+        storage: &HummockStorage,
+        hummock_meta_client: &Arc<dyn HummockMetaClient>,
+    ) -> CompactorContext {
+        CompactorContext {
+            options: storage.options().clone(),
+            sstable_store: storage.sstable_store(),
+            hummock_meta_client: hummock_meta_client.clone(),
+            stats: Arc::new(StateStoreMetrics::unused()),
+            is_share_buffer_compact: false,
+            sstable_id_generator: get_remote_sstable_id_generator(hummock_meta_client.clone()),
+            compaction_executor: None,
+        }
+    }
+
+    #[tokio::test]
+    async fn test_compaction_watermark() {
+        let (_env, hummock_manager_ref, _cluster_manager_ref, worker_node) =
+            setup_compute_env(8080).await;
+        let hummock_meta_client: Arc<dyn HummockMetaClient> = Arc::new(MockHummockMetaClient::new(
+            hummock_manager_ref.clone(),
+            worker_node.id,
+        ));
+        let storage = get_hummock_storage(hummock_meta_client.clone()).await;
+        let compact_ctx = get_compactor_context(&storage, &hummock_meta_client);
+
+        // 1. add sstables
+        let mut key = b"t".to_vec();
+        key.extend_from_slice(&1u32.to_be_bytes());
+        key.extend_from_slice(&0u64.to_be_bytes());
+        let key = Bytes::from(key);
+
+        prepare_test_put_data(
+            &storage,
+            &hummock_meta_client,
+            &key,
+            1 << 10,
+            (1..129).into_iter().map(|v| (v * 1000) << 16).collect_vec(),
+        )
+        .await;
 
         // 2. get compact task
         let mut compact_task = hummock_manager_ref
@@ -130,8 +156,13 @@ mod tests {
             .await
             .unwrap()
             .unwrap();
-        let compaction_filter_flag = CompactionFilterFlag::STATE_CLEAN | CompactionFilterFlag::TTL;
+        let compaction_filter_flag = CompactionFilterFlag::TTL;
+        compact_task.watermark = (32 * 1000) << 16;
         compact_task.compaction_filter_mask = compaction_filter_flag.bits();
+        compact_task.table_options = HashMap::from([(1, TableOption { ttl: 64 })]);
+        compact_task.current_epoch_time = 0;
+        let mut val = b"0"[..].repeat(1 << 10);
+        val.extend_from_slice(&compact_task.watermark.to_be_bytes());
 
         hummock_manager_ref
             .assign_compaction_task(&compact_task, worker_node.id, async { true })
@@ -141,7 +172,105 @@ mod tests {
         // assert compact_task
         assert_eq!(
             compact_task.input_ssts.first().unwrap().table_infos.len(),
-            kv_count
+            128
+        );
+
+        // 3. compact
+        Compactor::compact(Arc::new(compact_ctx), compact_task.clone()).await;
+
+        // 4. get the latest version and check
+        let version = hummock_manager_ref.get_current_version().await;
+        let output_table_id = version
+            .get_compaction_group_levels(StaticCompactionGroupId::StateDefault.into())
+            .last()
+            .unwrap()
+            .table_infos
+            .first()
+            .unwrap()
+            .id;
+        storage
+            .local_version_manager()
+            .try_update_pinned_version(version);
+        let table = storage
+            .sstable_store()
+            .sstable(output_table_id, &mut StoreLocalStatistic::default())
+            .await
+            .unwrap();
+
+        // we have removed these 31 keys before watermark 32.
+        assert_eq!(table.value().meta.key_count, 97);
+
+        let get_val = storage
+            .get(
+                &key,
+                ReadOptions {
+                    epoch: (32 * 1000) << 16,
+                    table_id: Default::default(),
+                    ttl: None,
+                },
+            )
+            .await
+            .unwrap()
+            .unwrap()
+            .to_vec();
+
+        assert_eq!(get_val, val);
+        let ret = storage
+            .get(
+                &key,
+                ReadOptions {
+                    epoch: (31 * 1000) << 16,
+                    table_id: Default::default(),
+                    ttl: None,
+                },
+            )
+            .await;
+        assert!(ret.is_err());
+    }
+
+    #[tokio::test]
+    async fn test_compaction_same_key_not_split() {
+        let (_env, hummock_manager_ref, _cluster_manager_ref, worker_node) =
+            setup_compute_env(8080).await;
+        let hummock_meta_client: Arc<dyn HummockMetaClient> = Arc::new(MockHummockMetaClient::new(
+            hummock_manager_ref.clone(),
+            worker_node.id,
+        ));
+        let storage = get_hummock_storage(hummock_meta_client.clone()).await;
+        let compact_ctx = get_compactor_context(&storage, &hummock_meta_client);
+
+        // 1. add sstables with 1MB value
+        let key = Bytes::from(&b"same_key"[..]);
+        let mut val = b"0"[..].repeat(1 << 20);
+        val.extend_from_slice(&128u64.to_be_bytes());
+        prepare_test_put_data(
+            &storage,
+            &hummock_meta_client,
+            &key,
+            1 << 20,
+            (1..129).into_iter().collect_vec(),
+        )
+        .await;
+
+        // 2. get compact task
+        let mut compact_task = hummock_manager_ref
+            .get_compact_task(StaticCompactionGroupId::StateDefault.into())
+            .await
+            .unwrap()
+            .unwrap();
+        let compaction_filter_flag = CompactionFilterFlag::STATE_CLEAN | CompactionFilterFlag::TTL;
+        compact_task.compaction_filter_mask = compaction_filter_flag.bits();
+        compact_task.current_epoch_time = 0;
+
+        hummock_manager_ref
+            .assign_compaction_task(&compact_task, worker_node.id, async { true })
+            .await
+            .unwrap();
+
+        // assert compact_task
+        assert_eq!(
+            compact_task.input_ssts.first().unwrap().table_infos.len(),
+            128
         );
 
         // 3. compact
@@ -179,14 +308,15 @@ mod tests {
             .get(
                 &key,
                 ReadOptions {
-                    epoch,
+                    epoch: 129,
                     table_id: Default::default(),
                     ttl: None,
                 },
             )
             .await
             .unwrap()
-            .unwrap();
+            .unwrap()
+            .to_vec();
         assert_eq!(get_val, val);
 
         // 6. get compact task and there should be none
@@ -539,6 +669,7 @@ mod tests {
                 ttl: ttl_expire_second,
             },
         )]);
+        compact_task.current_epoch_time = epoch;
 
         hummock_manager_ref
             .assign_compaction_task(&compact_task, worker_node.id, async { true })

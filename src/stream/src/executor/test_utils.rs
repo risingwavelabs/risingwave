@@ -163,12 +163,12 @@ pub mod global_simple_agg {
     /// different.
     pub fn generate_column_descs(
         agg_call: &AggCall,
-        group_keys: &[usize],
+        group_key: &[usize],
         pk_indices: &[usize],
         agg_schema: &Schema,
         input_ref: &dyn Executor,
     ) -> Vec<ColumnDesc> {
-        let mut column_descs = Vec::with_capacity(group_keys.len() + 1);
+        let mut column_descs = Vec::with_capacity(group_key.len() + 1);
         let mut next_column_id = 0;
 
         // Define a closure for DRY.
@@ -180,7 +180,7 @@ pub mod global_simple_agg {
             next_column_id += 1;
         };
 
-        for (idx, _) in group_keys.iter().enumerate() {
+        for (idx, _) in group_key.iter().enumerate() {
             add_column_desc(agg_schema.fields[idx].data_type.clone());
         }
 
@@ -194,37 +194,40 @@ pub mod global_simple_agg {
             for pk_idx in pk_indices {
                 add_column_desc(input_ref.schema().fields[*pk_idx].data_type.clone());
             }
+        } else {
+            // Agg value should also be part of state table.
+            add_column_desc(agg_call.return_type.clone());
         }
-
-        // Agg value should also be part of state table.
-        add_column_desc(agg_call.return_type.clone());
 
         column_descs
     }
 
     /// Generate state table for agg executor.
-    /// Relational pk = `table_desc.len` - 1.
-    /// it's test only.
+    /// it's test only. This is a version of infer compared to
+    /// `LogicalAgg::infer_internal_table_catalog`. Currently do not include append only flag,
+    /// if you add, make sure you consider the relational pk change.
     pub fn generate_state_table<S: StateStore>(
         store: S,
         table_id: TableId,
         agg_call: &AggCall,
-        group_keys: &[usize],
+        group_key: &[usize],
         pk_indices: &[usize],
         agg_schema: &Schema,
         input_ref: &dyn Executor,
     ) -> StateTable<S> {
         let table_desc =
-            generate_column_descs(agg_call, group_keys, pk_indices, agg_schema, input_ref);
-        // Always leave 1 space for agg call value.
-        let relational_pk_len = table_desc.len() - 1;
-        let dist_keys: Vec<usize> = (0..group_keys.len()).collect();
+            generate_column_descs(agg_call, group_key, pk_indices, agg_schema, input_ref);
+        let relational_pk_len = if agg_call.kind == AggKind::Max || agg_call.kind == AggKind::Min {
+            table_desc.len()
+        } else {
+            table_desc.len() - 1
+        };
+        let dist_keys: Vec<usize> = (0..group_key.len()).collect();
 
         StateTable::new(
             store,
             table_id,
             table_desc,
-            // Primary key do not includes group key.
             vec![
                 // Now we only infer order type for min/max in a naive way.
                 if agg_call.kind == AggKind::Max {

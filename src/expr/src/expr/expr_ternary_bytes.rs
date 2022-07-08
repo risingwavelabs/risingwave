@@ -19,6 +19,7 @@ use risingwave_common::types::DataType;
 
 use crate::expr::template::TernaryBytesExpression;
 use crate::expr::BoxedExpression;
+use crate::vector_op::overlay::overlay;
 use crate::vector_op::replace::replace;
 use crate::vector_op::split_part::split_part;
 use crate::vector_op::substr::substr_start_for;
@@ -88,6 +89,23 @@ pub fn new_split_part_expr(
             nth_expr,
             return_type,
             split_part,
+        ),
+    )
+}
+
+pub fn new_overlay_exp(
+    s: BoxedExpression,
+    new_sub_str: BoxedExpression,
+    start: BoxedExpression,
+    return_type: DataType,
+) -> BoxedExpression {
+    Box::new(
+        TernaryBytesExpression::<Utf8Array, Utf8Array, I32Array, _>::new(
+            s,
+            new_sub_str,
+            start,
+            return_type,
+            overlay,
         ),
     )
 }
@@ -201,6 +219,37 @@ mod tests {
                 Box::new(LiteralExpression::new(
                     DataType::Varchar,
                     Some(ScalarImpl::from(String::from(replacement))),
+                )),
+                DataType::Varchar,
+            );
+
+            test_evals_dummy(expr, Some(ScalarImpl::from(String::from(expected))), false);
+        }
+    }
+
+    #[test]
+    fn test_overlay() {
+        let cases = vec![
+            ("aaa__aaa", "XY", 4, "aaaXYaaa"),
+            ("aaa", "XY", 3, "aaXY"),
+            ("aaa", "XY", 4, "aaaXY"),
+            ("aaa", "XY", -123, "XYa"),
+            ("aaa", "XY", 123, "aaaXY"),
+        ];
+
+        for (s, new_sub_str, start, expected) in cases {
+            let expr = new_overlay_exp(
+                Box::new(LiteralExpression::new(
+                    DataType::Varchar,
+                    Some(ScalarImpl::from(String::from(s))),
+                )),
+                Box::new(LiteralExpression::new(
+                    DataType::Varchar,
+                    Some(ScalarImpl::from(String::from(new_sub_str))),
+                )),
+                Box::new(LiteralExpression::new(
+                    DataType::Int32,
+                    Some(ScalarImpl::from(start)),
                 )),
                 DataType::Varchar,
             );

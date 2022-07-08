@@ -256,11 +256,12 @@ impl LocalStreamManager {
             span: tracing::Span::none(),
         };
 
-        self.drain_collect_rx(barrier.epoch.prev);
         self.send_barrier(barrier, actor_ids_to_send, actor_ids_to_collect)?;
+
         self.collect_barrier(barrier.epoch.prev).await;
         // Clear shared buffer in storage to release memory
         self.clear_storage_buffer().await;
+        self.drain_collect_rx(barrier.epoch.prev);
         self.core.lock().drop_all_actors();
 
         Ok(())
@@ -416,13 +417,7 @@ impl LocalStreamManagerCore {
                 .iter()
                 .map(|down_id| {
                     let downstream_addr = self.get_actor_info(down_id)?.get_host()?.into();
-                    new_output(
-                        &self.context,
-                        downstream_addr,
-                        actor_id,
-                        *down_id,
-                        self.streaming_metrics.clone(),
-                    )
+                    new_output(&self.context, downstream_addr, actor_id, *down_id)
                 })
                 .collect::<Result<Vec<_>>>()?;
 

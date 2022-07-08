@@ -31,7 +31,6 @@ use crate::task::{BatchTaskContext, TaskId};
 
 pub type ExchangeExecutor<C> = GenericExchangeExecutor<DefaultCreateSource, C>;
 use crate::executor::{BoxedDataChunkStream, BoxedExecutor, BoxedExecutorBuilder, Executor};
-
 pub struct GenericExchangeExecutor<CS, C> {
     sources: Vec<ProstExchangeSource>,
     context: C,
@@ -173,6 +172,7 @@ async fn data_chunk_stream(mut source: ExchangeSourceImpl) {
         break;
     }
 }
+
 #[cfg(test)]
 mod tests {
     use std::sync::Arc;

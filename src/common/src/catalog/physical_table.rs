@@ -14,25 +14,27 @@
 
 use risingwave_pb::plan_common::{CellBasedTableDesc, ColumnOrder};
 
-use super::{ColumnDesc, OrderedColumnDesc, TableId};
+use super::{ColumnDesc, ColumnId, TableId};
 use crate::types::ParallelUnitId;
+use crate::util::sort_util::OrderPair;
 
-/// the table descriptor of table with cell based encoding in state store and include all
-/// information for compute node to access data of the table.
+/// Includes necessary information for compute node to access data of the table.
+///
+/// It's a subset of `TableCatalog` in frontend. Refer to `TableCatalog` for more details.
 #[derive(Debug, Clone, Default)]
 pub struct TableDesc {
     /// Id of the table, to find in storage.
     pub table_id: TableId,
-    /// The keys used to sort in storage.
-    pub order_desc: Vec<OrderedColumnDesc>,
+    /// The key used to sort in storage.
+    pub order_key: Vec<OrderPair>,
     /// All columns in the table, noticed it is NOT sorted by columnId in the vec.
     pub columns: Vec<ColumnDesc>,
     /// Distribution keys of this table, which corresponds to the corresponding column of the
-    /// index. e.g., if `distribution_keys = [1, 2]`, then `columns[1]` and `columns[2]` are used
+    /// index. e.g., if `distribution_key = [1, 2]`, then `columns[1]` and `columns[2]` are used
     /// as distribution key.
-    pub distribution_keys: Vec<usize>,
+    pub distribution_key: Vec<usize>,
     /// Column indices for primary keys.
-    pub pks: Vec<usize>,
+    pub pk: Vec<usize>,
 
     /// Whether the table source is append-only
     pub appendonly: bool,
@@ -45,19 +47,17 @@ pub struct TableDesc {
 impl TableDesc {
     pub fn arrange_key_orders_prost(&self) -> Vec<ColumnOrder> {
         // Set materialize key as arrange key + pk
-        self.order_desc
-            .iter()
-            .map(|x| ColumnOrder {
-                order_type: x.order.to_prost() as i32,
-                index: x.column_desc.column_id.get_id() as u32,
-            })
-            .collect()
+        self.order_key.iter().map(|x| x.to_protobuf()).collect()
     }
 
-    pub fn order_column_ids(&self) -> Vec<usize> {
-        self.order_desc
+    pub fn order_column_indices(&self) -> Vec<usize> {
+        self.order_key.iter().map(|col| (col.column_idx)).collect()
+    }
+
+    pub fn order_column_ids(&self) -> Vec<ColumnId> {
+        self.order_key
             .iter()
-            .map(|col| (col.column_desc.column_id.get_id() as usize))
+            .map(|col| self.columns[col.column_idx].column_id)
             .collect()
     }
 
@@ -65,9 +65,8 @@ impl TableDesc {
         CellBasedTableDesc {
             table_id: self.table_id.into(),
             columns: self.columns.iter().map(Into::into).collect(),
-            order_key: self.order_desc.iter().map(|v| v.into()).collect(),
-            pk_indices: self.pks.iter().map(|&k| k as u32).collect(),
-            dist_key_indices: self.distribution_keys.iter().map(|&k| k as u32).collect(),
+            order_key: self.order_key.iter().map(|v| v.to_protobuf()).collect(),
+            dist_key_indices: self.distribution_key.iter().map(|&k| k as u32).collect(),
         }
     }
 }

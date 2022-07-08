@@ -27,7 +27,6 @@ use tracing::{debug, error, info, warn};
 
 use super::{QueryResultFetcher, StageEvent};
 use crate::scheduler::distributed::query::QueryMessage::Stage;
-use crate::scheduler::distributed::query::QueryState::{Failed, Pending};
 use crate::scheduler::distributed::StageEvent::Scheduled;
 use crate::scheduler::distributed::StageExecution;
 use crate::scheduler::plan_fragmenter::{Query, StageId, ROOT_TASK_ID, ROOT_TASK_OUTPUT_ID};
@@ -145,7 +144,7 @@ impl QueryExecution {
             compute_client_pool,
         };
 
-        let state = Pending {
+        let state = QueryState::Pending {
             runner,
             root_stage_receiver,
         };
@@ -160,7 +159,7 @@ impl QueryExecution {
     /// Start execution of this query.
     pub async fn start(&self) -> SchedulerResult<QueryResultFetcher> {
         let mut state = self.state.write().await;
-        let cur_state = mem::replace(&mut *state, Failed);
+        let cur_state = mem::replace(&mut *state, QueryState::Failed);
 
         match cur_state {
             QueryState::Pending {
@@ -180,9 +179,10 @@ impl QueryExecution {
                     .await
                     .map_err(|e| anyhow!("Starting query execution failed: {:?}", e))??;
 
-                info!(
+                tracing::trace!(
                     "Received root stage query result fetcher: {:?}, query id: {:?}",
-                    root_stage, self.query.query_id
+                    root_stage,
+                    self.query.query_id
                 );
 
                 *state = QueryState::Running {
@@ -212,17 +212,19 @@ impl QueryRunner {
         let leaf_stages = self.query.leaf_stages();
         for stage_id in &leaf_stages {
             // TODO: We should not return error here, we should abort query.
-            info!(
+            tracing::trace!(
                 "Starting query stage: {:?}-{:?}",
-                self.query.query_id, stage_id
+                self.query.query_id,
+                stage_id
             );
             self.stage_executions[stage_id].start().await.map_err(|e| {
                 error!("Failed to start stage: {}, reason: {:?}", stage_id, e);
                 e
             })?;
-            info!(
+            tracing::trace!(
                 "Query stage {:?}-{:?} started.",
-                self.query.query_id, stage_id
+                self.query.query_id,
+                stage_id
             );
         }
         let mut stages_with_table_scan = self.query.stages_with_table_scan();
@@ -231,9 +233,10 @@ impl QueryRunner {
         while let Some(msg) = self.msg_receiver.recv().await {
             match msg {
                 Stage(Scheduled(stage_id)) => {
-                    info!(
+                    tracing::trace!(
                         "Query stage {:?}-{:?} scheduled.",
-                        self.query.query_id, stage_id
+                        self.query.query_id,
+                        stage_id
                     );
                     self.scheduled_stages_count += 1;
                     stages_with_table_scan.remove(&stage_id);
@@ -241,7 +244,7 @@ impl QueryRunner {
                         // We can be sure here that all the Hummock iterators have been created,
                         // thus they all successfully pinned a HummockVersion.
                         // So we can now unpin their epoch.
-                        info!("Query {:?} has scheduled all of its stages that have table scan (iterator creation).", self.query.query_id);
+                        tracing::trace!("Query {:?} has scheduled all of its stages that have table scan (iterator creation).", self.query.query_id);
                         self.hummock_snapshot_manager
                             .unpin_snapshot(self.epoch, self.query.query_id())
                             .await?;
@@ -400,8 +403,8 @@ mod tests {
             false,
             Rc::new(TableDesc {
                 table_id: 0.into(),
-                pks: vec![],
-                order_desc: vec![],
+                pk: vec![],
+                order_key: vec![],
                 columns: vec![
                     ColumnDesc {
                         data_type: DataType::Int32,
@@ -418,7 +421,7 @@ mod tests {
                         field_descs: vec![],
                     },
                 ],
-                distribution_keys: vec![],
+                distribution_key: vec![],
                 appendonly: false,
                 vnode_mapping: Some(vec![]),
             }),

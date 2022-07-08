@@ -104,20 +104,20 @@
       l_linestatus;
   logical_plan: |
     LogicalProject { exprs: [$0, $1, $2, $3, $4, $5, RoundDigit(($6 / $7), 4:Int32), RoundDigit(($8 / $9), 4:Int32), RoundDigit(($10 / $11), 4:Int32), $12] }
-      LogicalAgg { group_keys: [0, 1], agg_calls: [sum($2), sum($3), sum($4), sum($5), sum($2), count($2), sum($3), count($3), sum($6), count($6), count] }
+      LogicalAgg { group_key: [0, 1], agg_calls: [sum($2), sum($3), sum($4), sum($5), sum($2), count($2), sum($3), count($3), sum($6), count($6), count] }
         LogicalProject { exprs: [$9, $10, $5, $6, ($6 * (1:Int32 - $7)), (($6 * (1:Int32 - $7)) * (1:Int32 + $8)), $7] }
           LogicalFilter { predicate: ($11 <= ('1998-12-01':Varchar::Date - '71 days 00:00:00':Interval)) }
             LogicalScan { table: lineitem, columns: [_row_id, l_orderkey, l_partkey, l_suppkey, l_linenumber, l_quantity, l_extendedprice, l_discount, l_tax, l_returnflag, l_linestatus, l_shipdate, l_commitdate, l_receiptdate, l_shipinstruct, l_shipmode, l_comment] }
   optimized_logical_plan: |
     LogicalProject { exprs: [$0, $1, $2, $3, $4, $5, RoundDigit(($6 / $7), 4:Int32), RoundDigit(($8 / $9), 4:Int32), RoundDigit(($10 / $11), 4:Int32), $12] }
-      LogicalAgg { group_keys: [0, 1], agg_calls: [sum($2), sum($3), sum($4), sum($5), sum($2), count($2), sum($3), count($3), sum($6), count($6), count] }
+      LogicalAgg { group_key: [0, 1], agg_calls: [sum($2), sum($3), sum($4), sum($5), sum($2), count($2), sum($3), count($3), sum($6), count($6), count] }
         LogicalProject { exprs: [$4, $5, $0, $1, ($1 * (1:Int32 - $2)), (($1 * (1:Int32 - $2)) * (1:Int32 + $3)), $2] }
           LogicalScan { table: lineitem, output_columns: [l_quantity, l_extendedprice, l_discount, l_tax, l_returnflag, l_linestatus], required_columns: [$5:l_quantity, $6:l_extendedprice, $7:l_discount, $8:l_tax, $9:l_returnflag, $10:l_linestatus, $11:l_shipdate], predicate: ($11 <= ('1998-12-01':Varchar::Date - '71 days 00:00:00':Interval)) }
   batch_plan: |
     BatchExchange { order: [$0 ASC, $1 ASC], dist: Single }
       BatchSort { order: [$0 ASC, $1 ASC] }
         BatchProject { exprs: [$0, $1, $2, $3, $4, $5, RoundDigit(($6 / $7), 4:Int32), RoundDigit(($8 / $9), 4:Int32), RoundDigit(($10 / $11), 4:Int32), $12] }
-          BatchHashAgg { group_keys: [$0, $1], aggs: [sum($2), sum($3), sum($4), sum($5), sum($2), count($2), sum($3), count($3), sum($6), count($6), count] }
+          BatchHashAgg { group_key: [$0, $1], aggs: [sum($2), sum($3), sum($4), sum($5), sum($2), count($2), sum($3), count($3), sum($6), count($6), count] }
             BatchExchange { order: [], dist: HashShard([0, 1]) }
               BatchProject { exprs: [$4, $5, $0, $1, ($1 * (1:Int32 - $2)), (($1 * (1:Int32 - $2)) * (1:Int32 + $3)), $2] }
                 BatchFilter { predicate: ($6 <= ('1998-12-01':Varchar::Date - '71 days 00:00:00':Interval)) }
@@ -125,7 +125,7 @@
   stream_plan: |
     StreamMaterialize { columns: [l_returnflag, l_linestatus, sum_qty, sum_base_price, sum_disc_price, sum_charge, avg_qty, avg_price, avg_disc, count_order], pk_columns: [l_returnflag, l_linestatus] }
       StreamProject { exprs: [$0, $1, $3, $4, $5, $6, RoundDigit(($7 / $8), 4:Int32), RoundDigit(($9 / $10), 4:Int32), RoundDigit(($11 / $12), 4:Int32), $13] }
-        StreamHashAgg { group_keys: [$0, $1], aggs: [count, sum($2), sum($3), sum($4), sum($5), sum($2), count($2), sum($3), count($3), sum($6), count($6), count] }
+        StreamHashAgg { group_key: [$0, $1], aggs: [count, sum($2), sum($3), sum($4), sum($5), sum($2), count($2), sum($3), count($3), sum($6), count($6), count] }
           StreamExchange { dist: HashShard([0, 1]) }
             StreamProject { exprs: [$4, $5, $0, $1, ($1 * (1:Int32 - $2)), (($1 * (1:Int32 - $2)) * (1:Int32 + $3)), $2, $6] }
               StreamFilter { predicate: ($7 <= ('1998-12-01':Varchar::Date - '71 days 00:00:00':Interval)) }
@@ -195,7 +195,7 @@
                 LogicalScan { table: nation, columns: [_row_id, n_nationkey, n_name, n_regionkey, n_comment] }
               LogicalScan { table: region, columns: [_row_id, r_regionkey, r_name, r_comment] }
             LogicalProject { exprs: [$0] }
-              LogicalAgg { group_keys: [], agg_calls: [min($0)] }
+              LogicalAgg { group_key: [], agg_calls: [min($0)] }
                 LogicalProject { exprs: [$4] }
                   LogicalFilter { predicate: (CorrelatedInputRef { index: 7, depth: 1 } = $1) AND ($7 = $2) AND ($10 = $15) AND ($17 = $20) AND ($21 = 'AFRICA':Varchar) }
                     LogicalJoin { type: Inner, on: true, output_indices: all }
@@ -218,7 +218,7 @@
                 LogicalScan { table: supplier, columns: [s_suppkey, s_name, s_address, s_nationkey, s_phone, s_acctbal, s_comment] }
               LogicalScan { table: nation, columns: [n_nationkey, n_name, n_regionkey] }
             LogicalScan { table: region, output_columns: [r_regionkey], required_columns: [$1:r_regionkey, $2:r_name], predicate: ($2 = 'AFRICA':Varchar) }
-          LogicalAgg { group_keys: [0], agg_calls: [min($1)] }
+          LogicalAgg { group_key: [0], agg_calls: [min($1)] }
             LogicalJoin { type: Inner, on: ($2 = $3), output_indices: [0, 1] }
               LogicalJoin { type: Inner, on: ($2 = $3), output_indices: [0, 1, 4] }
                 LogicalJoin { type: Inner, on: ($3 = $1), output_indices: [0, 2, 4] }
@@ -253,7 +253,7 @@
                   BatchProject { exprs: [$0] }
                     BatchFilter { predicate: ($1 = 'AFRICA':Varchar) }
                       BatchScan { table: region, columns: [r_regionkey, r_name] }
-            BatchHashAgg { group_keys: [$0], aggs: [min($1)] }
+            BatchHashAgg { group_key: [$0], aggs: [min($1)] }
               BatchExchange { order: [], dist: HashShard([0]) }
                 BatchHashJoin { type: Inner, predicate: $2 = $3, output_indices: [0, 1] }
                   BatchExchange { order: [], dist: HashShard([2]) }
@@ -298,7 +298,7 @@
                     StreamProject { exprs: [$0, $1] }
                       StreamFilter { predicate: ($2 = 'AFRICA':Varchar) }
                         StreamTableScan { table: region, columns: [r_regionkey, _row_id, r_name], pk_indices: [1] }
-              StreamHashAgg { group_keys: [$0], aggs: [count, min($1)] }
+              StreamHashAgg { group_key: [$0], aggs: [count, min($1)] }
                 StreamExchange { dist: HashShard([0]) }
                   StreamHashJoin { type: Inner, predicate: $2 = $6, output_indices: [0, 1, 3, 4, 5, 7] }
                     StreamExchange { dist: HashShard([2]) }
@@ -345,7 +345,7 @@
   logical_plan: |
     LogicalTopN { order: [$1 DESC, $2 ASC], limit: 10, offset: 0 }
       LogicalProject { exprs: [$0, $3, $1, $2] }
-        LogicalAgg { group_keys: [0, 1, 2], agg_calls: [sum($3)] }
+        LogicalAgg { group_key: [0, 1, 2], agg_calls: [sum($3)] }
           LogicalProject { exprs: [$20, $14, $17, ($25 * (1:Int32 - $26))] }
             LogicalFilter { predicate: ($7 = 'FURNITURE':Varchar) AND ($1 = $11) AND ($20 = $10) AND ($14 < '1995-03-29':Varchar::Date) AND ($30 > '1995-03-29':Varchar::Date) }
               LogicalJoin { type: Inner, on: true, output_indices: all }
@@ -356,7 +356,7 @@
   optimized_logical_plan: |
     LogicalTopN { order: [$1 DESC, $2 ASC], limit: 10, offset: 0 }
       LogicalProject { exprs: [$0, $3, $1, $2] }
-        LogicalAgg { group_keys: [0, 1, 2], agg_calls: [sum($3)] }
+        LogicalAgg { group_key: [0, 1, 2], agg_calls: [sum($3)] }
           LogicalProject { exprs: [$2, $0, $1, ($3 * (1:Int32 - $4))] }
             LogicalJoin { type: Inner, on: ($3 = $0), output_indices: [1, 2, 3, 4, 5] }
               LogicalJoin { type: Inner, on: ($0 = $2), output_indices: [1, 3, 4] }
@@ -367,7 +367,7 @@
     BatchTopN { order: [$1 DESC, $2 ASC], limit: 10, offset: 0 }
       BatchExchange { order: [], dist: Single }
         BatchProject { exprs: [$0, $3, $1, $2] }
-          BatchHashAgg { group_keys: [$0, $1, $2], aggs: [sum($3)] }
+          BatchHashAgg { group_key: [$0, $1, $2], aggs: [sum($3)] }
             BatchExchange { order: [], dist: HashShard([0, 1, 2]) }
               BatchProject { exprs: [$2, $0, $1, ($3 * (1:Int32 - $4))] }
                 BatchHashJoin { type: Inner, predicate: $0 = $3, output_indices: [1, 2, 3, 4, 5] }
@@ -389,7 +389,7 @@
       StreamTopN { order: [$1 DESC, $2 ASC], limit: 10, offset: 0 }
         StreamExchange { dist: Single }
           StreamProject { exprs: [$0, $4, $1, $2] }
-            StreamHashAgg { group_keys: [$0, $1, $2], aggs: [count, sum($3)] }
+            StreamHashAgg { group_key: [$0, $1, $2], aggs: [count, sum($3)] }
               StreamExchange { dist: HashShard([0, 1, 2]) }
                 StreamProject { exprs: [$2, $0, $1, ($3 * (1:Int32 - $4)), $5, $6, $7] }
                   StreamHashJoin { type: Inner, predicate: $0 = $5, output_indices: [1, 2, 5, 6, 7, 3, 4, 8] }
@@ -433,7 +433,7 @@
       o_orderpriority;
   logical_plan: |
     LogicalProject { exprs: [$0, $1] }
-      LogicalAgg { group_keys: [0], agg_calls: [count] }
+      LogicalAgg { group_key: [0], agg_calls: [count] }
         LogicalProject { exprs: [$6] }
           LogicalFilter { predicate: ($5 >= '1997-07-01':Varchar::Date) AND ($5 < ('1997-07-01':Varchar::Date + '3 mons 00:00:00':Interval)) }
             LogicalApply { type: LeftSemi, on: true }
@@ -442,14 +442,14 @@
                 LogicalFilter { predicate: ($1 = CorrelatedInputRef { index: 1, depth: 1 }) AND ($12 < $13) }
                   LogicalScan { table: lineitem, columns: [_row_id, l_orderkey, l_partkey, l_suppkey, l_linenumber, l_quantity, l_extendedprice, l_discount, l_tax, l_returnflag, l_linestatus, l_shipdate, l_commitdate, l_receiptdate, l_shipinstruct, l_shipmode, l_comment] }
   optimized_logical_plan: |
-    LogicalAgg { group_keys: [0], agg_calls: [count] }
+    LogicalAgg { group_key: [0], agg_calls: [count] }
       LogicalJoin { type: LeftSemi, on: ($2 = $0), output_indices: [1] }
         LogicalScan { table: orders, output_columns: [o_orderkey, o_orderpriority], required_columns: [$1:o_orderkey, $6:o_orderpriority, $5:o_orderdate], predicate: ($5 >= '1997-07-01':Varchar::Date) AND ($5 < ('1997-07-01':Varchar::Date + '3 mons 00:00:00':Interval)) }
         LogicalScan { table: lineitem, output_columns: [l_orderkey], required_columns: [$1:l_orderkey, $12:l_commitdate, $13:l_receiptdate], predicate: ($12 < $13) }
   batch_plan: |
     BatchExchange { order: [$0 ASC], dist: Single }
       BatchSort { order: [$0 ASC] }
-        BatchHashAgg { group_keys: [$0], aggs: [count] }
+        BatchHashAgg { group_key: [$0], aggs: [count] }
           BatchExchange { order: [], dist: HashShard([0]) }
             BatchHashJoin { type: LeftSemi, predicate: $0 = $2, output_indices: [1] }
               BatchExchange { order: [], dist: HashShard([0]) }
@@ -462,7 +462,7 @@
                     BatchScan { table: lineitem, columns: [l_orderkey, l_commitdate, l_receiptdate] }
   stream_plan: |
     StreamMaterialize { columns: [o_orderpriority, agg#0(hidden), order_count], pk_columns: [o_orderpriority] }
-      StreamHashAgg { group_keys: [$0], aggs: [count, count] }
+      StreamHashAgg { group_key: [$0], aggs: [count, count] }
         StreamExchange { dist: HashShard([0]) }
           StreamHashJoin { type: LeftSemi, predicate: $0 = $3, output_indices: [1, 2] }
             StreamExchange { dist: HashShard([0]) }
@@ -503,7 +503,7 @@
       revenue desc;
   logical_plan: |
     LogicalProject { exprs: [$0, $1] }
-      LogicalAgg { group_keys: [0], agg_calls: [sum($1)] }
+      LogicalAgg { group_key: [0], agg_calls: [sum($1)] }
         LogicalProject { exprs: [$46, ($25 * (1:Int32 - $26))] }
           LogicalFilter { predicate: ($1 = $11) AND ($20 = $10) AND ($22 = $37) AND ($4 = $40) AND ($40 = $45) AND ($47 = $50) AND ($51 = 'MIDDLE EAST':Varchar) AND ($14 >= '1994-01-01':Varchar::Date) AND ($14 < ('1994-01-01':Varchar::Date + '1 year 00:00:00':Interval)) }
             LogicalJoin { type: Inner, on: true, output_indices: all }
@@ -518,7 +518,7 @@
                 LogicalScan { table: nation, columns: [_row_id, n_nationkey, n_name, n_regionkey, n_comment] }
               LogicalScan { table: region, columns: [_row_id, r_regionkey, r_name, r_comment] }
   optimized_logical_plan: |
-    LogicalAgg { group_keys: [0], agg_calls: [sum($1)] }
+    LogicalAgg { group_key: [0], agg_calls: [sum($1)] }
       LogicalProject { exprs: [$2, ($0 * (1:Int32 - $1))] }
         LogicalJoin { type: Inner, on: ($3 = $4), output_indices: [0, 1, 2] }
           LogicalJoin { type: Inner, on: ($2 = $3), output_indices: [0, 1, 4, 5] }
@@ -534,7 +534,7 @@
   batch_plan: |
     BatchExchange { order: [$1 DESC], dist: Single }
       BatchSort { order: [$1 DESC] }
-        BatchHashAgg { group_keys: [$0], aggs: [sum($1)] }
+        BatchHashAgg { group_key: [$0], aggs: [sum($1)] }
           BatchExchange { order: [], dist: HashShard([0]) }
             BatchProject { exprs: [$2, ($0 * (1:Int32 - $1))] }
               BatchHashJoin { type: Inner, predicate: $3 = $4, output_indices: [0, 1, 2] }
@@ -564,7 +564,7 @@
                       BatchScan { table: region, columns: [r_regionkey, r_name] }
   stream_plan: |
     StreamMaterialize { columns: [n_name, agg#0(hidden), revenue], pk_columns: [n_name], order_descs: [revenue, n_name] }
-      StreamHashAgg { group_keys: [$0], aggs: [count, sum($1)] }
+      StreamHashAgg { group_key: [$0], aggs: [count, sum($1)] }
         StreamExchange { dist: HashShard([0]) }
           StreamProject { exprs: [$2, ($0 * (1:Int32 - $1)), $3, $4, $5, $6, $7, $8] }
             StreamHashJoin { type: Inner, predicate: $3 = $9, output_indices: [0, 1, 2, 4, 5, 6, 7, 8, 10] }
@@ -607,12 +607,12 @@
       and l_quantity < 24;
   logical_plan: |
     LogicalProject { exprs: [$0] }
-      LogicalAgg { group_keys: [], agg_calls: [sum($0)] }
+      LogicalAgg { group_key: [], agg_calls: [sum($0)] }
         LogicalProject { exprs: [($6 * $7)] }
           LogicalFilter { predicate: ($11 >= '1994-01-01':Varchar::Date) AND ($11 < ('1994-01-01':Varchar::Date + '1 year 00:00:00':Interval)) AND ($7 >= (0.08:Decimal - 0.01:Decimal)) AND ($7 <= (0.08:Decimal + 0.01:Decimal)) AND ($5 < 24:Int32) }
             LogicalScan { table: lineitem, columns: [_row_id, l_orderkey, l_partkey, l_suppkey, l_linenumber, l_quantity, l_extendedprice, l_discount, l_tax, l_returnflag, l_linestatus, l_shipdate, l_commitdate, l_receiptdate, l_shipinstruct, l_shipmode, l_comment] }
   optimized_logical_plan: |
-    LogicalAgg { group_keys: [], agg_calls: [sum($0)] }
+    LogicalAgg { group_key: [], agg_calls: [sum($0)] }
       LogicalProject { exprs: [($0 * $1)] }
         LogicalScan { table: lineitem, output_columns: [l_extendedprice, l_discount], required_columns: [$6:l_extendedprice, $7:l_discount, $5:l_quantity, $11:l_shipdate], predicate: ($11 >= '1994-01-01':Varchar::Date) AND ($11 < ('1994-01-01':Varchar::Date + '1 year 00:00:00':Interval)) AND ($7 >= (0.08:Decimal - 0.01:Decimal)) AND ($7 <= (0.08:Decimal + 0.01:Decimal)) AND ($5 < 24:Int32) }
   batch_plan: |
@@ -675,7 +675,7 @@
       l_year;
   logical_plan: |
     LogicalProject { exprs: [$0, $1, $2, $3] }
-      LogicalAgg { group_keys: [0, 1, 2], agg_calls: [sum($3)] }
+      LogicalAgg { group_key: [0, 1, 2], agg_calls: [sum($3)] }
         LogicalProject { exprs: [$0, $1, $2, $3] }
           LogicalProject { exprs: [$46, $51, Extract('YEAR':Varchar, $19), ($14 * (1:Int32 - $15))] }
             LogicalFilter { predicate: ($1 = $11) AND ($26 = $9) AND ($36 = $27) AND ($4 = $45) AND ($39 = $50) AND ((($46 = 'ROMANIA':Varchar) AND ($51 = 'IRAN':Varchar)) OR (($46 = 'IRAN':Varchar) AND ($51 = 'ROMANIA':Varchar))) AND ($19 >= '1983-01-01':Varchar::Date) AND ($19 <= '2000-12-31':Varchar::Date) }
@@ -691,7 +691,7 @@
                   LogicalScan { table: nation, columns: [_row_id, n_nationkey, n_name, n_regionkey, n_comment] }
                 LogicalScan { table: nation, columns: [_row_id, n_nationkey, n_name, n_regionkey, n_comment] }
   optimized_logical_plan: |
-    LogicalAgg { group_keys: [0, 1, 2], agg_calls: [sum($3)] }
+    LogicalAgg { group_key: [0, 1, 2], agg_calls: [sum($3)] }
       LogicalProject { exprs: [$3, $4, Extract('YEAR':Varchar, $2), ($0 * (1:Int32 - $1))] }
         LogicalJoin { type: Inner, on: ($3 = $5) AND ((($4 = 'ROMANIA':Varchar) AND ($6 = 'IRAN':Varchar)) OR (($4 = 'IRAN':Varchar) AND ($6 = 'ROMANIA':Varchar))), output_indices: [0, 1, 2, 4, 6] }
           LogicalJoin { type: Inner, on: ($0 = $5), output_indices: [1, 2, 3, 4, 6] }
@@ -707,7 +707,7 @@
   batch_plan: |
     BatchExchange { order: [$0 ASC, $1 ASC, $2 ASC], dist: Single }
       BatchSort { order: [$0 ASC, $1 ASC, $2 ASC] }
-        BatchHashAgg { group_keys: [$0, $1, $2], aggs: [sum($3)] }
+        BatchHashAgg { group_key: [$0, $1, $2], aggs: [sum($3)] }
           BatchExchange { order: [], dist: HashShard([0, 1, 2]) }
             BatchProject { exprs: [$4, $6, Extract('YEAR':Varchar, $2), ($0 * (1:Int32 - $1))] }
               BatchFilter { predicate: ((($4 = 'ROMANIA':Varchar) AND ($6 = 'IRAN':Varchar)) OR (($4 = 'IRAN':Varchar) AND ($6 = 'ROMANIA':Varchar))) }
@@ -735,7 +735,7 @@
                     BatchScan { table: nation, columns: [n_nationkey, n_name] }
   stream_plan: |
     StreamMaterialize { columns: [supp_nation, cust_nation, l_year, agg#0(hidden), revenue], pk_columns: [supp_nation, cust_nation, l_year] }
-      StreamHashAgg { group_keys: [$0, $1, $2], aggs: [count, sum($3)] }
+      StreamHashAgg { group_key: [$0, $1, $2], aggs: [count, sum($3)] }
         StreamExchange { dist: HashShard([0, 1, 2]) }
           StreamProject { exprs: [$4, $11, Extract('YEAR':Varchar, $2), ($0 * (1:Int32 - $1)), $5, $6, $7, $8, $9, $12] }
             StreamFilter { predicate: ((($4 = 'ROMANIA':Varchar) AND ($11 = 'IRAN':Varchar)) OR (($4 = 'IRAN':Varchar) AND ($11 = 'ROMANIA':Varchar))) }
@@ -806,7 +806,7 @@
       o_year;
   logical_plan: |
     LogicalProject { exprs: [$0, RoundDigit(($1 / $2), 6:Int32)] }
-      LogicalAgg { group_keys: [0], agg_calls: [sum($1), sum($2)] }
+      LogicalAgg { group_key: [0], agg_calls: [sum($1), sum($2)] }
         LogicalProject { exprs: [$0, Case(($2 = 'IRAN':Varchar), $1, 0:Int32::Decimal), $1] }
           LogicalProject { exprs: [Extract('YEAR':Varchar, $40), ($6 * (1:Int32 - $7)), $61] }
             LogicalFilter { predicate: ($18 = $2) AND ($28 = $3) AND ($1 = $36) AND ($37 = $46) AND ($49 = $55) AND ($57 = $65) AND ($66 = 'ASIA':Varchar) AND ($31 = $60) AND ($40 >= '1995-01-01':Varchar::Date) AND ($40 <= '1996-12-31':Varchar::Date) AND ($22 = 'PROMO ANODIZED STEEL':Varchar) }
@@ -827,7 +827,7 @@
                 LogicalScan { table: region, columns: [_row_id, r_regionkey, r_name, r_comment] }
   optimized_logical_plan: |
     LogicalProject { exprs: [$0, RoundDigit(($1 / $2), 6:Int32)] }
-      LogicalAgg { group_keys: [0], agg_calls: [sum($1), sum($2)] }
+      LogicalAgg { group_key: [0], agg_calls: [sum($1), sum($2)] }
         LogicalProject { exprs: [Extract('YEAR':Varchar, $2), Case(($3 = 'IRAN':Varchar), ($0 * (1:Int32 - $1)), 0:Int32::Decimal), ($0 * (1:Int32 - $1))] }
           LogicalJoin { type: Inner, on: ($3 = $5), output_indices: [0, 1, 2, 4] }
             LogicalJoin { type: Inner, on: ($2 = $5), output_indices: [0, 1, 3, 4, 6] }
@@ -848,7 +848,7 @@
     BatchExchange { order: [$0 ASC], dist: Single }
       BatchSort { order: [$0 ASC] }
         BatchProject { exprs: [$0, RoundDigit(($1 / $2), 6:Int32)] }
-          BatchHashAgg { group_keys: [$0], aggs: [sum($1), sum($2)] }
+          BatchHashAgg { group_key: [$0], aggs: [sum($1), sum($2)] }
             BatchExchange { order: [], dist: HashShard([0]) }
               BatchProject { exprs: [Extract('YEAR':Varchar, $2), Case(($3 = 'IRAN':Varchar), ($0 * (1:Int32 - $1)), 0:Int32::Decimal), ($0 * (1:Int32 - $1))] }
                 BatchHashJoin { type: Inner, predicate: $3 = $5, output_indices: [0, 1, 2, 4] }
@@ -888,7 +888,7 @@
   stream_plan: |
     StreamMaterialize { columns: [o_year, mkt_share], pk_columns: [o_year] }
       StreamProject { exprs: [$0, RoundDigit(($2 / $3), 6:Int32)] }
-        StreamHashAgg { group_keys: [$0], aggs: [count, sum($1), sum($2)] }
+        StreamHashAgg { group_key: [$0], aggs: [count, sum($1), sum($2)] }
           StreamExchange { dist: HashShard([0]) }
             StreamProject { exprs: [Extract('YEAR':Varchar, $2), Case(($3 = 'IRAN':Varchar), ($0 * (1:Int32 - $1)), 0:Int32::Decimal), ($0 * (1:Int32 - $1)), $4, $5, $6, $7, $8, $9, $10, $11] }
               StreamHashJoin { type: Inner, predicate: $3 = $12, output_indices: [0, 1, 2, 4, 5, 6, 7, 8, 9, 10, 11, 13] }
@@ -965,7 +965,7 @@
       o_year desc;
   logical_plan: |
     LogicalProject { exprs: [$0, $1, RoundDigit($2, 2:Int32)] }
-      LogicalAgg { group_keys: [0, 1], agg_calls: [sum($2)] }
+      LogicalAgg { group_key: [0, 1], agg_calls: [sum($2)] }
         LogicalProject { exprs: [$0, $1, $2] }
           LogicalProject { exprs: [$53, Extract('YEAR':Varchar, $46), (($6 * (1:Int32 - $7)) - ($39 * $5))] }
             LogicalFilter { predicate: ($28 = $3) AND ($37 = $3) AND ($36 = $2) AND ($18 = $2) AND ($42 = $1) AND ($31 = $52) AND Like($19, '%yellow%':Varchar) }
@@ -982,7 +982,7 @@
                 LogicalScan { table: nation, columns: [_row_id, n_nationkey, n_name, n_regionkey, n_comment] }
   optimized_logical_plan: |
     LogicalProject { exprs: [$0, $1, RoundDigit($2, 2:Int32)] }
-      LogicalAgg { group_keys: [0, 1], agg_calls: [sum($2)] }
+      LogicalAgg { group_key: [0, 1], agg_calls: [sum($2)] }
         LogicalProject { exprs: [$5, Extract('YEAR':Varchar, $4), (($1 * (1:Int32 - $2)) - ($3 * $0))] }
           LogicalJoin { type: Inner, on: ($3 = $6), output_indices: [0, 1, 2, 4, 5, 7] }
             LogicalJoin { type: Inner, on: ($6 = $0), output_indices: [1, 2, 3, 4, 5, 7] }
@@ -999,7 +999,7 @@
     BatchExchange { order: [$0 ASC, $1 DESC], dist: Single }
       BatchSort { order: [$0 ASC, $1 DESC] }
         BatchProject { exprs: [$0, $1, RoundDigit($2, 2:Int32)] }
-          BatchHashAgg { group_keys: [$0, $1], aggs: [sum($2)] }
+          BatchHashAgg { group_key: [$0, $1], aggs: [sum($2)] }
             BatchExchange { order: [], dist: HashShard([0, 1]) }
               BatchProject { exprs: [$5, Extract('YEAR':Varchar, $4), (($1 * (1:Int32 - $2)) - ($3 * $0))] }
                 BatchHashJoin { type: Inner, predicate: $3 = $6, output_indices: [0, 1, 2, 4, 5, 7] }
@@ -1028,7 +1028,7 @@
   stream_plan: |
     StreamMaterialize { columns: [nation, o_year, sum_profit], pk_columns: [nation, o_year] }
       StreamProject { exprs: [$0, $1, RoundDigit($3, 2:Int32)] }
-        StreamHashAgg { group_keys: [$0, $1], aggs: [count, sum($2)] }
+        StreamHashAgg { group_key: [$0, $1], aggs: [count, sum($2)] }
           StreamExchange { dist: HashShard([0, 1]) }
             StreamProject { exprs: [$5, Extract('YEAR':Varchar, $4), (($1 * (1:Int32 - $2)) - ($3 * $0)), $6, $7, $8, $9, $10, $11] }
               StreamHashJoin { type: Inner, predicate: $3 = $11, output_indices: [0, 1, 2, 4, 5, 12, 6, 7, 8, 9, 10, 13] }
@@ -1093,7 +1093,7 @@
   logical_plan: |
     LogicalTopN { order: [$2 DESC], limit: 20, offset: 0 }
       LogicalProject { exprs: [$0, $1, $7, $2, $4, $5, $3, $6] }
-        LogicalAgg { group_keys: [0, 1, 2, 3, 4, 5, 6], agg_calls: [sum($7)] }
+        LogicalAgg { group_key: [0, 1, 2, 3, 4, 5, 6], agg_calls: [sum($7)] }
           LogicalProject { exprs: [$1, $2, $6, $5, $38, $3, $8, ($25 * (1.00:Decimal - $26))] }
             LogicalFilter { predicate: ($1 = $11) AND ($20 = $10) AND ($14 >= '1994-01-01':Varchar::Date) AND ($14 < ('1994-01-01':Varchar::Date + '3 mons 00:00:00':Interval)) AND ($28 = 'R':Varchar) AND ($4 = $37) }
               LogicalJoin { type: Inner, on: true, output_indices: all }
@@ -1106,7 +1106,7 @@
   optimized_logical_plan: |
     LogicalTopN { order: [$2 DESC], limit: 20, offset: 0 }
       LogicalProject { exprs: [$0, $1, $7, $2, $4, $5, $3, $6] }
-        LogicalAgg { group_keys: [0, 1, 2, 3, 4, 5, 6], agg_calls: [sum($7)] }
+        LogicalAgg { group_key: [0, 1, 2, 3, 4, 5, 6], agg_calls: [sum($7)] }
           LogicalProject { exprs: [$0, $1, $4, $3, $8, $2, $5, ($6 * (1.00:Decimal - $7))] }
             LogicalJoin { type: Inner, on: ($3 = $9), output_indices: [0, 1, 2, 4, 5, 6, 7, 8, 10] }
               LogicalJoin { type: Inner, on: ($8 = $7), output_indices: [0, 1, 2, 3, 4, 5, 6, 9, 10] }
@@ -1119,7 +1119,7 @@
     BatchTopN { order: [$2 DESC], limit: 20, offset: 0 }
       BatchExchange { order: [], dist: Single }
         BatchProject { exprs: [$0, $1, $7, $2, $4, $5, $3, $6] }
-          BatchHashAgg { group_keys: [$0, $1, $2, $3, $4, $5, $6], aggs: [sum($7)] }
+          BatchHashAgg { group_key: [$0, $1, $2, $3, $4, $5, $6], aggs: [sum($7)] }
             BatchExchange { order: [], dist: HashShard([0, 1, 2, 3, 4, 5, 6]) }
               BatchProject { exprs: [$0, $1, $4, $3, $8, $2, $5, ($6 * (1.00:Decimal - $7))] }
                 BatchHashJoin { type: Inner, predicate: $3 = $9, output_indices: [0, 1, 2, 4, 5, 6, 7, 8, 10] }
@@ -1144,7 +1144,7 @@
       StreamTopN { order: [$2 DESC], limit: 20, offset: 0 }
         StreamExchange { dist: Single }
           StreamProject { exprs: [$0, $1, $8, $2, $4, $5, $3, $6] }
-            StreamHashAgg { group_keys: [$0, $1, $2, $3, $4, $5, $6], aggs: [count, sum($7)] }
+            StreamHashAgg { group_key: [$0, $1, $2, $3, $4, $5, $6], aggs: [count, sum($7)] }
               StreamExchange { dist: HashShard([0, 1, 2, 3, 4, 5, 6]) }
                 StreamProject { exprs: [$0, $1, $4, $3, $8, $2, $5, ($6 * (1.00:Decimal - $7)), $9, $10, $11, $12] }
                   StreamHashJoin { type: Inner, predicate: $3 = $12, output_indices: [0, 1, 2, 4, 5, 6, 7, 8, 13, 9, 10, 11, 14] }
@@ -1200,7 +1200,7 @@
     LogicalProject { exprs: [$0, $1] }
       LogicalFilter { predicate: ($2 > $3) }
         LogicalJoin { type: LeftOuter, on: true, output_indices: all }
-          LogicalAgg { group_keys: [0], agg_calls: [sum($1), sum($1)] }
+          LogicalAgg { group_key: [0], agg_calls: [sum($1), sum($1)] }
             LogicalProject { exprs: [$1, ($4 * $3)] }
               LogicalFilter { predicate: ($2 = $7) AND ($10 = $15) AND ($16 = 'ARGENTINA':Varchar) }
                 LogicalJoin { type: Inner, on: true, output_indices: all }
@@ -1209,7 +1209,7 @@
                     LogicalScan { table: supplier, columns: [_row_id, s_suppkey, s_name, s_address, s_nationkey, s_phone, s_acctbal, s_comment] }
                   LogicalScan { table: nation, columns: [_row_id, n_nationkey, n_name, n_regionkey, n_comment] }
           LogicalProject { exprs: [($0 * 0.0001000000:Decimal)] }
-            LogicalAgg { group_keys: [], agg_calls: [sum($0)] }
+            LogicalAgg { group_key: [], agg_calls: [sum($0)] }
               LogicalProject { exprs: [($4 * $3)] }
                 LogicalFilter { predicate: ($2 = $7) AND ($10 = $15) AND ($16 = 'ARGENTINA':Varchar) }
                   LogicalJoin { type: Inner, on: true, output_indices: all }
@@ -1219,7 +1219,7 @@
                     LogicalScan { table: nation, columns: [_row_id, n_nationkey, n_name, n_regionkey, n_comment] }
   optimized_logical_plan: |
     LogicalJoin { type: Inner, on: ($2 > $3), output_indices: [0, 1] }
-      LogicalAgg { group_keys: [0], agg_calls: [sum($1), sum($1)] }
+      LogicalAgg { group_key: [0], agg_calls: [sum($1), sum($1)] }
         LogicalProject { exprs: [$0, ($2 * $1)] }
           LogicalJoin { type: Inner, on: ($3 = $4), output_indices: [0, 1, 2] }
             LogicalJoin { type: Inner, on: ($1 = $4), output_indices: [0, 2, 3, 5] }
@@ -1227,7 +1227,7 @@
               LogicalScan { table: supplier, columns: [s_suppkey, s_nationkey] }
             LogicalScan { table: nation, output_columns: [n_nationkey], required_columns: [$1:n_nationkey, $2:n_name], predicate: ($2 = 'ARGENTINA':Varchar) }
       LogicalProject { exprs: [($0 * 0.0001000000:Decimal)] }
-        LogicalAgg { group_keys: [], agg_calls: [sum($0)] }
+        LogicalAgg { group_key: [], agg_calls: [sum($0)] }
           LogicalProject { exprs: [($1 * $0)] }
             LogicalJoin { type: Inner, on: ($2 = $3), output_indices: [0, 1] }
               LogicalJoin { type: Inner, on: ($0 = $3), output_indices: [1, 2, 4] }
@@ -1238,7 +1238,7 @@
     BatchSort { order: [$1 DESC] }
       BatchNestedLoopJoin { type: Inner, predicate: ($2 > $3), output_indices: [0, 1] }
         BatchExchange { order: [], dist: Single }
-          BatchHashAgg { group_keys: [$0], aggs: [sum($1), sum($1)] }
+          BatchHashAgg { group_key: [$0], aggs: [sum($1), sum($1)] }
             BatchExchange { order: [], dist: HashShard([0]) }
               BatchProject { exprs: [$0, ($2 * $1)] }
                 BatchHashJoin { type: Inner, predicate: $3 = $4, output_indices: [0, 1, 2] }
@@ -1268,6 +1268,43 @@
                       BatchProject { exprs: [$0] }
                         BatchFilter { predicate: ($1 = 'ARGENTINA':Varchar) }
                           BatchScan { table: nation, columns: [n_nationkey, n_name] }
+  stream_plan: |
+    StreamMaterialize { columns: [ps_partkey, value], pk_columns: [ps_partkey], order_descs: [value, ps_partkey] }
+      StreamExchange { dist: HashShard([0]) }
+        StreamProject { exprs: [$0, $2] }
+          StreamDynamicFilter { predicate: ($3 > $4) }
+            StreamExchange { dist: HashShard([3]) }
+              StreamHashAgg { group_key: [$0], aggs: [count, sum($1), sum($1)] }
+                StreamExchange { dist: HashShard([0]) }
+                  StreamProject { exprs: [$0, ($2 * $1), $3, $4, $5] }
+                    StreamHashJoin { type: Inner, predicate: $3 = $6, output_indices: [0, 1, 2, 4, 5, 7] }
+                      StreamExchange { dist: HashShard([3]) }
+                        StreamHashJoin { type: Inner, predicate: $1 = $5, output_indices: [0, 2, 3, 6, 4, 7] }
+                          StreamExchange { dist: HashShard([1]) }
+                            StreamTableScan { table: partsupp, columns: [ps_partkey, ps_suppkey, ps_availqty, ps_supplycost, _row_id], pk_indices: [4] }
+                          StreamExchange { dist: HashShard([0]) }
+                            StreamTableScan { table: supplier, columns: [s_suppkey, s_nationkey, _row_id], pk_indices: [2] }
+                      StreamExchange { dist: HashShard([0]) }
+                        StreamProject { exprs: [$0, $1] }
+                          StreamFilter { predicate: ($2 = 'ARGENTINA':Varchar) }
+                            StreamTableScan { table: nation, columns: [n_nationkey, _row_id, n_name], pk_indices: [1] }
+            StreamExchange { dist: Broadcast }
+              StreamProject { exprs: [($1 * 0.0001000000:Decimal)] }
+                StreamGlobalSimpleAgg { aggs: [sum($0), sum($1)] }
+                  StreamExchange { dist: Single }
+                    StreamLocalSimpleAgg { aggs: [count, sum($0)] }
+                      StreamProject { exprs: [($1 * $0), $2, $3, $4] }
+                        StreamHashJoin { type: Inner, predicate: $2 = $5, output_indices: [0, 1, 3, 4, 6] }
+                          StreamExchange { dist: HashShard([2]) }
+                            StreamHashJoin { type: Inner, predicate: $0 = $4, output_indices: [1, 2, 5, 3, 6] }
+                              StreamExchange { dist: HashShard([0]) }
+                                StreamTableScan { table: partsupp, columns: [ps_suppkey, ps_availqty, ps_supplycost, _row_id], pk_indices: [3] }
+                              StreamExchange { dist: HashShard([0]) }
+                                StreamTableScan { table: supplier, columns: [s_suppkey, s_nationkey, _row_id], pk_indices: [2] }
+                          StreamExchange { dist: HashShard([0]) }
+                            StreamProject { exprs: [$0, $1] }
+                              StreamFilter { predicate: ($2 = 'ARGENTINA':Varchar) }
+                                StreamTableScan { table: nation, columns: [n_nationkey, _row_id, n_name], pk_indices: [1] }
 - id: tpch_q12
   before:
     - create_tables
@@ -1302,14 +1339,14 @@
         l_shipmode;
   logical_plan: |
     LogicalProject { exprs: [$0, $1, $2] }
-      LogicalAgg { group_keys: [0], agg_calls: [sum($1), sum($2)] }
+      LogicalAgg { group_key: [0], agg_calls: [sum($1), sum($2)] }
         LogicalProject { exprs: [$25, Case((($6 = '1-URGENT':Varchar) OR ($6 = '2-HIGH':Varchar)), 1:Int32, 0:Int32), Case((($6 <> '1-URGENT':Varchar) AND ($6 <> '2-HIGH':Varchar)), 1:Int32, 0:Int32)] }
           LogicalFilter { predicate: ($1 = $11) AND In($25, 'FOB':Varchar, 'SHIP':Varchar) AND ($22 < $23) AND ($21 < $22) AND ($23 >= '1994-01-01':Varchar::Date) AND ($23 < ('1994-01-01':Varchar::Date + '1 year 00:00:00':Interval)) }
             LogicalJoin { type: Inner, on: true, output_indices: all }
               LogicalScan { table: orders, columns: [_row_id, o_orderkey, o_custkey, o_orderstatus, o_totalprice, o_orderdate, o_orderpriority, o_clerk, o_shippriority, o_comment] }
               LogicalScan { table: lineitem, columns: [_row_id, l_orderkey, l_partkey, l_suppkey, l_linenumber, l_quantity, l_extendedprice, l_discount, l_tax, l_returnflag, l_linestatus, l_shipdate, l_commitdate, l_receiptdate, l_shipinstruct, l_shipmode, l_comment] }
   optimized_logical_plan: |
-    LogicalAgg { group_keys: [0], agg_calls: [sum($1), sum($2)] }
+    LogicalAgg { group_key: [0], agg_calls: [sum($1), sum($2)] }
       LogicalProject { exprs: [$1, Case((($0 = '1-URGENT':Varchar) OR ($0 = '2-HIGH':Varchar)), 1:Int32, 0:Int32), Case((($0 <> '1-URGENT':Varchar) AND ($0 <> '2-HIGH':Varchar)), 1:Int32, 0:Int32)] }
         LogicalJoin { type: Inner, on: ($0 = $2), output_indices: [1, 3] }
           LogicalScan { table: orders, columns: [o_orderkey, o_orderpriority] }
@@ -1317,7 +1354,7 @@
   batch_plan: |
     BatchExchange { order: [$0 ASC], dist: Single }
       BatchSort { order: [$0 ASC] }
-        BatchHashAgg { group_keys: [$0], aggs: [sum($1), sum($2)] }
+        BatchHashAgg { group_key: [$0], aggs: [sum($1), sum($2)] }
           BatchExchange { order: [], dist: HashShard([0]) }
             BatchProject { exprs: [$1, Case((($0 = '1-URGENT':Varchar) OR ($0 = '2-HIGH':Varchar)), 1:Int32, 0:Int32), Case((($0 <> '1-URGENT':Varchar) AND ($0 <> '2-HIGH':Varchar)), 1:Int32, 0:Int32)] }
               BatchHashJoin { type: Inner, predicate: $0 = $2, output_indices: [1, 3] }
@@ -1329,7 +1366,7 @@
                       BatchScan { table: lineitem, columns: [l_orderkey, l_shipmode, l_shipdate, l_commitdate, l_receiptdate] }
   stream_plan: |
     StreamMaterialize { columns: [l_shipmode, agg#0(hidden), high_line_count, low_line_count], pk_columns: [l_shipmode] }
-      StreamHashAgg { group_keys: [$0], aggs: [count, sum($1), sum($2)] }
+      StreamHashAgg { group_key: [$0], aggs: [count, sum($1), sum($2)] }
         StreamExchange { dist: HashShard([0]) }
           StreamProject { exprs: [$1, Case((($0 = '1-URGENT':Varchar) OR ($0 = '2-HIGH':Varchar)), 1:Int32, 0:Int32), Case((($0 <> '1-URGENT':Varchar) AND ($0 <> '2-HIGH':Varchar)), 1:Int32, 0:Int32), $2, $3] }
             StreamHashJoin { type: Inner, predicate: $0 = $3, output_indices: [1, 4, 2, 5] }
@@ -1365,28 +1402,28 @@
       c_count desc;
   logical_plan: |
     LogicalProject { exprs: [$0, $1] }
-      LogicalAgg { group_keys: [0], agg_calls: [count] }
+      LogicalAgg { group_key: [0], agg_calls: [count] }
         LogicalProject { exprs: [$1] }
           LogicalProject { exprs: [$0, $1] }
-            LogicalAgg { group_keys: [0], agg_calls: [count($1)] }
+            LogicalAgg { group_key: [0], agg_calls: [count($1)] }
               LogicalProject { exprs: [$1, $10] }
                 LogicalJoin { type: LeftOuter, on: ($1 = $11) AND Not(Like($18, '%:1%:2%':Varchar)), output_indices: all }
                   LogicalScan { table: customer, columns: [_row_id, c_custkey, c_name, c_address, c_nationkey, c_phone, c_acctbal, c_mktsegment, c_comment] }
                   LogicalScan { table: orders, columns: [_row_id, o_orderkey, o_custkey, o_orderstatus, o_totalprice, o_orderdate, o_orderpriority, o_clerk, o_shippriority, o_comment] }
   optimized_logical_plan: |
-    LogicalAgg { group_keys: [0], agg_calls: [count] }
+    LogicalAgg { group_key: [0], agg_calls: [count] }
       LogicalProject { exprs: [$1] }
-        LogicalAgg { group_keys: [0], agg_calls: [count($1)] }
+        LogicalAgg { group_key: [0], agg_calls: [count($1)] }
           LogicalJoin { type: LeftOuter, on: ($0 = $2), output_indices: [0, 1] }
             LogicalScan { table: customer, columns: [c_custkey] }
             LogicalScan { table: orders, output_columns: [o_orderkey, o_custkey], required_columns: [$1:o_orderkey, $2:o_custkey, $9:o_comment], predicate: Not(Like($9, '%:1%:2%':Varchar)) }
   batch_plan: |
     BatchExchange { order: [$1 DESC, $0 DESC], dist: Single }
       BatchSort { order: [$1 DESC, $0 DESC] }
-        BatchHashAgg { group_keys: [$0], aggs: [count] }
+        BatchHashAgg { group_key: [$0], aggs: [count] }
           BatchExchange { order: [], dist: HashShard([0]) }
             BatchProject { exprs: [$1] }
-              BatchHashAgg { group_keys: [$0], aggs: [count($1)] }
+              BatchHashAgg { group_key: [$0], aggs: [count($1)] }
                 BatchHashJoin { type: LeftOuter, predicate: $0 = $2, output_indices: [0, 1] }
                   BatchExchange { order: [], dist: HashShard([0]) }
                     BatchScan { table: customer, columns: [c_custkey] }
@@ -1396,10 +1433,10 @@
                         BatchScan { table: orders, columns: [o_orderkey, o_custkey, o_comment] }
   stream_plan: |
     StreamMaterialize { columns: [c_count, agg#0(hidden), custdist], pk_columns: [c_count], order_descs: [custdist, c_count] }
-      StreamHashAgg { group_keys: [$0], aggs: [count, count] }
+      StreamHashAgg { group_key: [$0], aggs: [count, count] }
         StreamExchange { dist: HashShard([0]) }
           StreamProject { exprs: [$2, $0] }
-            StreamHashAgg { group_keys: [$0], aggs: [count, count($1)] }
+            StreamHashAgg { group_key: [$0], aggs: [count, count($1)] }
               StreamHashJoin { type: LeftOuter, predicate: $0 = $3, output_indices: [0, 2, 1, 4] }
                 StreamExchange { dist: HashShard([0]) }
                   StreamTableScan { table: customer, columns: [c_custkey, _row_id], pk_indices: [1] }
@@ -1426,7 +1463,7 @@
       and l_shipdate < date '1995-09-01' + interval '1' month;
   logical_plan: |
     LogicalProject { exprs: [((100.00:Decimal * $0) / $1)] }
-      LogicalAgg { group_keys: [], agg_calls: [sum($0), sum($1)] }
+      LogicalAgg { group_key: [], agg_calls: [sum($0), sum($1)] }
         LogicalProject { exprs: [Case(Like($22, 'PROMO%':Varchar), ($6 * (1:Int32 - $7)), 0:Int32::Decimal), ($6 * (1:Int32 - $7))] }
           LogicalFilter { predicate: ($2 = $18) AND ($11 >= '1995-09-01':Varchar::Date) AND ($11 < ('1995-09-01':Varchar::Date + '1 mon 00:00:00':Interval)) }
             LogicalJoin { type: Inner, on: true, output_indices: all }
@@ -1434,7 +1471,7 @@
               LogicalScan { table: part, columns: [_row_id, p_partkey, p_name, p_mfgr, p_brand, p_type, p_size, p_container, p_retailprice, p_comment] }
   optimized_logical_plan: |
     LogicalProject { exprs: [((100.00:Decimal * $0) / $1)] }
-      LogicalAgg { group_keys: [], agg_calls: [sum($0), sum($1)] }
+      LogicalAgg { group_key: [], agg_calls: [sum($0), sum($1)] }
         LogicalProject { exprs: [Case(Like($2, 'PROMO%':Varchar), ($0 * (1:Int32 - $1)), 0:Int32::Decimal), ($0 * (1:Int32 - $1))] }
           LogicalJoin { type: Inner, on: ($0 = $3), output_indices: [1, 2, 4] }
             LogicalScan { table: lineitem, output_columns: [l_partkey, l_extendedprice, l_discount], required_columns: [$2:l_partkey, $6:l_extendedprice, $7:l_discount, $11:l_shipdate], predicate: ($11 >= '1995-09-01':Varchar::Date) AND ($11 < ('1995-09-01':Varchar::Date + '1 mon 00:00:00':Interval)) }
@@ -1508,15 +1545,15 @@
           LogicalJoin { type: Inner, on: true, output_indices: all }
             LogicalScan { table: supplier, columns: [_row_id, s_suppkey, s_name, s_address, s_nationkey, s_phone, s_acctbal, s_comment] }
             LogicalProject { exprs: [$0, $1] }
-              LogicalAgg { group_keys: [0], agg_calls: [sum($1)] }
+              LogicalAgg { group_key: [0], agg_calls: [sum($1)] }
                 LogicalProject { exprs: [$3, ($6 * (1:Int32 - $7))] }
                   LogicalFilter { predicate: ($11 >= '1993-01-01':Varchar::Date) AND ($11 < ('1993-01-01':Varchar::Date + '3 mons 00:00:00':Interval)) }
                     LogicalScan { table: lineitem, columns: [_row_id, l_orderkey, l_partkey, l_suppkey, l_linenumber, l_quantity, l_extendedprice, l_discount, l_tax, l_returnflag, l_linestatus, l_shipdate, l_commitdate, l_receiptdate, l_shipinstruct, l_shipmode, l_comment] }
           LogicalProject { exprs: [$0] }
-            LogicalAgg { group_keys: [], agg_calls: [max($0)] }
+            LogicalAgg { group_key: [], agg_calls: [max($0)] }
               LogicalProject { exprs: [$1] }
                 LogicalProject { exprs: [$0, $1] }
-                  LogicalAgg { group_keys: [0], agg_calls: [sum($1)] }
+                  LogicalAgg { group_key: [0], agg_calls: [sum($1)] }
                     LogicalProject { exprs: [$3, ($6 * (1:Int32 - $7))] }
                       LogicalFilter { predicate: ($11 >= '1993-01-01':Varchar::Date) AND ($11 < ('1993-01-01':Varchar::Date + '3 mons 00:00:00':Interval)) }
                         LogicalScan { table: lineitem, columns: [_row_id, l_orderkey, l_partkey, l_suppkey, l_linenumber, l_quantity, l_extendedprice, l_discount, l_tax, l_returnflag, l_linestatus, l_shipdate, l_commitdate, l_receiptdate, l_shipinstruct, l_shipmode, l_comment] }
@@ -1524,12 +1561,12 @@
     LogicalJoin { type: Inner, on: ($4 = $5), output_indices: [0, 1, 2, 3, 4] }
       LogicalJoin { type: Inner, on: ($0 = $4), output_indices: [0, 1, 2, 3, 5] }
         LogicalScan { table: supplier, columns: [s_suppkey, s_name, s_address, s_phone] }
-        LogicalAgg { group_keys: [0], agg_calls: [sum($1)] }
+        LogicalAgg { group_key: [0], agg_calls: [sum($1)] }
           LogicalProject { exprs: [$0, ($1 * (1:Int32 - $2))] }
             LogicalScan { table: lineitem, output_columns: [l_suppkey, l_extendedprice, l_discount], required_columns: [$3:l_suppkey, $6:l_extendedprice, $7:l_discount, $11:l_shipdate], predicate: ($11 >= '1993-01-01':Varchar::Date) AND ($11 < ('1993-01-01':Varchar::Date + '3 mons 00:00:00':Interval)) }
-      LogicalAgg { group_keys: [], agg_calls: [max($0)] }
+      LogicalAgg { group_key: [], agg_calls: [max($0)] }
         LogicalProject { exprs: [$1] }
-          LogicalAgg { group_keys: [0], agg_calls: [sum($1)] }
+          LogicalAgg { group_key: [0], agg_calls: [sum($1)] }
             LogicalProject { exprs: [$0, ($1 * (1:Int32 - $2))] }
               LogicalScan { table: lineitem, output_columns: [l_suppkey, l_extendedprice, l_discount], required_columns: [$3:l_suppkey, $6:l_extendedprice, $7:l_discount, $11:l_shipdate], predicate: ($11 >= '1993-01-01':Varchar::Date) AND ($11 < ('1993-01-01':Varchar::Date + '3 mons 00:00:00':Interval)) }
   batch_plan: |
@@ -1540,7 +1577,7 @@
             BatchHashJoin { type: Inner, predicate: $0 = $4, output_indices: [0, 1, 2, 3, 5] }
               BatchExchange { order: [], dist: HashShard([0]) }
                 BatchScan { table: supplier, columns: [s_suppkey, s_name, s_address, s_phone] }
-              BatchHashAgg { group_keys: [$0], aggs: [sum($1)] }
+              BatchHashAgg { group_key: [$0], aggs: [sum($1)] }
                 BatchExchange { order: [], dist: HashShard([0]) }
                   BatchProject { exprs: [$0, ($1 * (1:Int32 - $2))] }
                     BatchFilter { predicate: ($3 >= '1993-01-01':Varchar::Date) AND ($3 < ('1993-01-01':Varchar::Date + '3 mons 00:00:00':Interval)) }
@@ -1550,7 +1587,7 @@
               BatchExchange { order: [], dist: Single }
                 BatchSimpleAgg { aggs: [max($0)] }
                   BatchProject { exprs: [$1] }
-                    BatchHashAgg { group_keys: [$0], aggs: [sum($1)] }
+                    BatchHashAgg { group_key: [$0], aggs: [sum($1)] }
                       BatchExchange { order: [], dist: HashShard([0]) }
                         BatchProject { exprs: [$0, ($1 * (1:Int32 - $2))] }
                           BatchFilter { predicate: ($3 >= '1993-01-01':Varchar::Date) AND ($3 < ('1993-01-01':Varchar::Date + '3 mons 00:00:00':Interval)) }
@@ -1563,7 +1600,7 @@
             StreamHashJoin { type: Inner, predicate: $0 = $5, output_indices: [0, 1, 2, 3, 7, 4, 5] }
               StreamExchange { dist: HashShard([0]) }
                 StreamTableScan { table: supplier, columns: [s_suppkey, s_name, s_address, s_phone, _row_id], pk_indices: [4] }
-              StreamHashAgg { group_keys: [$0], aggs: [count, sum($1)] }
+              StreamHashAgg { group_key: [$0], aggs: [count, sum($1)] }
                 StreamExchange { dist: HashShard([0]) }
                   StreamProject { exprs: [$0, ($1 * (1:Int32 - $2)), $3] }
                     StreamFilter { predicate: ($4 >= '1993-01-01':Varchar::Date) AND ($4 < ('1993-01-01':Varchar::Date + '3 mons 00:00:00':Interval)) }
@@ -1572,7 +1609,7 @@
             StreamGlobalSimpleAgg { aggs: [count, max($0)] }
               StreamExchange { dist: Single }
                 StreamProject { exprs: [$2, $0] }
-                  StreamHashAgg { group_keys: [$0], aggs: [count, sum($1)] }
+                  StreamHashAgg { group_key: [$0], aggs: [count, sum($1)] }
                     StreamExchange { dist: HashShard([0]) }
                       StreamProject { exprs: [$0, ($1 * (1:Int32 - $2)), $3] }
                         StreamFilter { predicate: ($4 >= '1993-01-01':Varchar::Date) AND ($4 < ('1993-01-01':Varchar::Date + '3 mons 00:00:00':Interval)) }
@@ -1613,7 +1650,7 @@
       p_size;
   logical_plan: |
     LogicalProject { exprs: [$0, $1, $2, $3] }
-      LogicalAgg { group_keys: [0, 1, 2], agg_calls: [count(distinct $3)] }
+      LogicalAgg { group_key: [0, 1, 2], agg_calls: [count(distinct $3)] }
         LogicalProject { exprs: [$10, $11, $12, $2] }
           LogicalFilter { predicate: ($7 = $1) AND ($10 <> 'Brand#45':Varchar) AND Not(Like($11, 'SMALL PLATED%':Varchar)) AND In($12, 19:Int32, 17:Int32, 16:Int32, 23:Int32, 10:Int32, 4:Int32, 38:Int32, 11:Int32) }
             LogicalJoin { type: LeftAnti, on: ($2 = $16), output_indices: all }
@@ -1624,7 +1661,7 @@
                 LogicalFilter { predicate: Like($7, '%Customer%Complaints%':Varchar) }
                   LogicalScan { table: supplier, columns: [_row_id, s_suppkey, s_name, s_address, s_nationkey, s_phone, s_acctbal, s_comment] }
   optimized_logical_plan: |
-    LogicalAgg { group_keys: [0, 1, 2], agg_calls: [count(distinct $3)] }
+    LogicalAgg { group_key: [0, 1, 2], agg_calls: [count(distinct $3)] }
       LogicalProject { exprs: [$1, $2, $3, $0] }
         LogicalJoin { type: LeftAnti, on: ($0 = $4), output_indices: all }
           LogicalJoin { type: Inner, on: ($2 = $0), output_indices: [1, 3, 4, 5] }
@@ -1634,7 +1671,7 @@
   batch_plan: |
     BatchExchange { order: [$3 DESC, $0 ASC, $1 ASC, $2 ASC], dist: Single }
       BatchSort { order: [$3 DESC, $0 ASC, $1 ASC, $2 ASC] }
-        BatchHashAgg { group_keys: [$0, $1, $2], aggs: [count(distinct $3)] }
+        BatchHashAgg { group_key: [$0, $1, $2], aggs: [count(distinct $3)] }
           BatchExchange { order: [], dist: HashShard([0, 1, 2]) }
             BatchProject { exprs: [$1, $2, $3, $0] }
               BatchHashJoin { type: LeftAnti, predicate: $0 = $4, output_indices: all }
@@ -1651,7 +1688,7 @@
                       BatchScan { table: supplier, columns: [s_suppkey, s_comment] }
   stream_plan: |
     StreamMaterialize { columns: [p_brand, p_type, p_size, agg#0(hidden), supplier_cnt], pk_columns: [p_brand, p_type, p_size], order_descs: [supplier_cnt, p_brand, p_type, p_size] }
-      StreamHashAgg { group_keys: [$0, $1, $2], aggs: [count, count(distinct $3)] }
+      StreamHashAgg { group_key: [$0, $1, $2], aggs: [count, count(distinct $3)] }
         StreamExchange { dist: HashShard([0, 1, 2]) }
           StreamProject { exprs: [$1, $2, $3, $0, $4, $5] }
             StreamHashJoin { type: LeftAnti, predicate: $0 = $6, output_indices: all }
@@ -1689,7 +1726,7 @@
       );
   logical_plan: |
     LogicalProject { exprs: [RoundDigit(($0 / 7.0:Decimal), 16:Int32)] }
-      LogicalAgg { group_keys: [], agg_calls: [sum($0)] }
+      LogicalAgg { group_key: [], agg_calls: [sum($0)] }
         LogicalProject { exprs: [$6] }
           LogicalFilter { predicate: ($18 = $2) AND ($21 = 'Brand#13':Varchar) AND ($24 = 'JUMBO PKG':Varchar) AND ($5 < $27) }
             LogicalApply { type: LeftOuter, on: true }
@@ -1697,19 +1734,19 @@
                 LogicalScan { table: lineitem, columns: [_row_id, l_orderkey, l_partkey, l_suppkey, l_linenumber, l_quantity, l_extendedprice, l_discount, l_tax, l_returnflag, l_linestatus, l_shipdate, l_commitdate, l_receiptdate, l_shipinstruct, l_shipmode, l_comment] }
                 LogicalScan { table: part, columns: [_row_id, p_partkey, p_name, p_mfgr, p_brand, p_type, p_size, p_container, p_retailprice, p_comment] }
               LogicalProject { exprs: [(0.2:Decimal * ($0 / $1))] }
-                LogicalAgg { group_keys: [], agg_calls: [sum($0), count($0)] }
+                LogicalAgg { group_key: [], agg_calls: [sum($0), count($0)] }
                   LogicalProject { exprs: [$5] }
                     LogicalFilter { predicate: ($2 = CorrelatedInputRef { index: 18, depth: 1 }) }
                       LogicalScan { table: lineitem, columns: [_row_id, l_orderkey, l_partkey, l_suppkey, l_linenumber, l_quantity, l_extendedprice, l_discount, l_tax, l_returnflag, l_linestatus, l_shipdate, l_commitdate, l_receiptdate, l_shipinstruct, l_shipmode, l_comment] }
   optimized_logical_plan: |
     LogicalProject { exprs: [RoundDigit(($0 / 7.0:Decimal), 16:Int32)] }
-      LogicalAgg { group_keys: [], agg_calls: [sum($0)] }
+      LogicalAgg { group_key: [], agg_calls: [sum($0)] }
         LogicalJoin { type: Inner, on: ($2 = $3) AND ($0 < $4), output_indices: [1] }
           LogicalJoin { type: Inner, on: ($3 = $0), output_indices: [1, 2, 3] }
             LogicalScan { table: lineitem, columns: [l_partkey, l_quantity, l_extendedprice] }
             LogicalScan { table: part, output_columns: [p_partkey], required_columns: [$1:p_partkey, $4:p_brand, $7:p_container], predicate: ($4 = 'Brand#13':Varchar) AND ($7 = 'JUMBO PKG':Varchar) }
           LogicalProject { exprs: [$0, (0.2:Decimal * ($1 / $2))] }
-            LogicalAgg { group_keys: [0], agg_calls: [sum($1), count($1)] }
+            LogicalAgg { group_key: [0], agg_calls: [sum($1), count($1)] }
               LogicalScan { table: lineitem, columns: [l_partkey, l_quantity] }
   batch_plan: |
     BatchProject { exprs: [RoundDigit(($0 / 7.0:Decimal), 16:Int32)] }
@@ -1728,7 +1765,7 @@
                           BatchFilter { predicate: ($1 = 'Brand#13':Varchar) AND ($2 = 'JUMBO PKG':Varchar) }
                             BatchScan { table: part, columns: [p_partkey, p_brand, p_container] }
                   BatchProject { exprs: [$0, (0.2:Decimal * ($1 / $2))] }
-                    BatchHashAgg { group_keys: [$0], aggs: [sum($1), count($1)] }
+                    BatchHashAgg { group_key: [$0], aggs: [sum($1), count($1)] }
                       BatchExchange { order: [], dist: HashShard([0]) }
                         BatchScan { table: lineitem, columns: [l_partkey, l_quantity] }
   stream_plan: |
@@ -1749,7 +1786,7 @@
                             StreamFilter { predicate: ($2 = 'Brand#13':Varchar) AND ($3 = 'JUMBO PKG':Varchar) }
                               StreamTableScan { table: part, columns: [p_partkey, _row_id, p_brand, p_container], pk_indices: [1] }
                     StreamProject { exprs: [$0, (0.2:Decimal * ($2 / $3))] }
-                      StreamHashAgg { group_keys: [$0], aggs: [count, sum($1), count($1)] }
+                      StreamHashAgg { group_key: [$0], aggs: [count, sum($1), count($1)] }
                         StreamExchange { dist: HashShard([0]) }
                           StreamTableScan { table: lineitem, columns: [l_partkey, l_quantity, _row_id], pk_indices: [2] }
 - id: tpch_q18
@@ -1793,7 +1830,7 @@
   logical_plan: |
     LogicalTopN { order: [$4 DESC, $3 ASC], limit: 100, offset: 0 }
       LogicalProject { exprs: [$0, $1, $2, $3, $4, $5] }
-        LogicalAgg { group_keys: [0, 1, 2, 3, 4], agg_calls: [sum($5)] }
+        LogicalAgg { group_key: [0, 1, 2, 3, 4], agg_calls: [sum($5)] }
           LogicalProject { exprs: [$2, $1, $10, $14, $13, $24] }
             LogicalFilter { predicate: ($1 = $11) AND ($10 = $20) }
               LogicalJoin { type: LeftSemi, on: ($10 = $36), output_indices: all }
@@ -1804,12 +1841,12 @@
                   LogicalScan { table: lineitem, columns: [_row_id, l_orderkey, l_partkey, l_suppkey, l_linenumber, l_quantity, l_extendedprice, l_discount, l_tax, l_returnflag, l_linestatus, l_shipdate, l_commitdate, l_receiptdate, l_shipinstruct, l_shipmode, l_comment] }
                 LogicalProject { exprs: [$0] }
                   LogicalFilter { predicate: ($1 > 1:Int32) }
-                    LogicalAgg { group_keys: [0], agg_calls: [sum($1)] }
+                    LogicalAgg { group_key: [0], agg_calls: [sum($1)] }
                       LogicalProject { exprs: [$1, $5] }
                         LogicalScan { table: lineitem, columns: [_row_id, l_orderkey, l_partkey, l_suppkey, l_linenumber, l_quantity, l_extendedprice, l_discount, l_tax, l_returnflag, l_linestatus, l_shipdate, l_commitdate, l_receiptdate, l_shipinstruct, l_shipmode, l_comment] }
   optimized_logical_plan: |
     LogicalTopN { order: [$4 DESC, $3 ASC], limit: 100, offset: 0 }
-      LogicalAgg { group_keys: [0, 1, 2, 3, 4], agg_calls: [sum($5)] }
+      LogicalAgg { group_key: [0, 1, 2, 3, 4], agg_calls: [sum($5)] }
         LogicalProject { exprs: [$1, $0, $2, $4, $3, $5] }
           LogicalJoin { type: LeftSemi, on: ($2 = $6), output_indices: all }
             LogicalJoin { type: Inner, on: ($2 = $5), output_indices: [0, 1, 2, 3, 4, 6] }
@@ -1819,12 +1856,12 @@
               LogicalScan { table: lineitem, columns: [l_orderkey, l_quantity] }
             LogicalProject { exprs: [$0] }
               LogicalFilter { predicate: ($1 > 1:Int32) }
-                LogicalAgg { group_keys: [0], agg_calls: [sum($1)] }
+                LogicalAgg { group_key: [0], agg_calls: [sum($1)] }
                   LogicalScan { table: lineitem, columns: [l_orderkey, l_quantity] }
   batch_plan: |
     BatchTopN { order: [$4 DESC, $3 ASC], limit: 100, offset: 0 }
       BatchExchange { order: [], dist: Single }
-        BatchHashAgg { group_keys: [$0, $1, $2, $3, $4], aggs: [sum($5)] }
+        BatchHashAgg { group_key: [$0, $1, $2, $3, $4], aggs: [sum($5)] }
           BatchProject { exprs: [$1, $0, $2, $4, $3, $5] }
             BatchHashJoin { type: LeftSemi, predicate: $2 = $6, output_indices: all }
               BatchHashJoin { type: Inner, predicate: $2 = $5, output_indices: [0, 1, 2, 3, 4, 6] }
@@ -1838,14 +1875,14 @@
                   BatchScan { table: lineitem, columns: [l_orderkey, l_quantity] }
               BatchProject { exprs: [$0] }
                 BatchFilter { predicate: ($1 > 1:Int32) }
-                  BatchHashAgg { group_keys: [$0], aggs: [sum($1)] }
+                  BatchHashAgg { group_key: [$0], aggs: [sum($1)] }
                     BatchExchange { order: [], dist: HashShard([0]) }
                       BatchScan { table: lineitem, columns: [l_orderkey, l_quantity] }
   stream_plan: |
     StreamMaterialize { columns: [c_name, c_custkey, o_orderkey, o_orderdate, o_totalprice, agg#0(hidden), quantity], pk_columns: [c_name, c_custkey, o_orderkey, o_orderdate, o_totalprice], order_descs: [o_totalprice, o_orderdate, c_name, c_custkey, o_orderkey] }
       StreamTopN { order: [$4 DESC, $3 ASC], limit: 100, offset: 0 }
         StreamExchange { dist: Single }
-          StreamHashAgg { group_keys: [$0, $1, $2, $3, $4], aggs: [count, sum($5)] }
+          StreamHashAgg { group_key: [$0, $1, $2, $3, $4], aggs: [count, sum($5)] }
             StreamProject { exprs: [$1, $0, $2, $4, $3, $5, $6, $7, $8] }
               StreamHashJoin { type: LeftSemi, predicate: $2 = $9, output_indices: all }
                 StreamHashJoin { type: Inner, predicate: $2 = $7, output_indices: [0, 1, 2, 3, 4, 8, 5, 6, 9] }
@@ -1859,7 +1896,7 @@
                     StreamTableScan { table: lineitem, columns: [l_orderkey, l_quantity, _row_id], pk_indices: [2] }
                 StreamProject { exprs: [$0] }
                   StreamFilter { predicate: ($2 > 1:Int32) }
-                    StreamHashAgg { group_keys: [$0], aggs: [count, sum($1)] }
+                    StreamHashAgg { group_key: [$0], aggs: [count, sum($1)] }
                       StreamExchange { dist: HashShard([0]) }
                         StreamTableScan { table: lineitem, columns: [l_orderkey, l_quantity, _row_id], pk_indices: [2] }
 - id: tpch_q19
@@ -1903,14 +1940,14 @@
       );
   logical_plan: |
     LogicalProject { exprs: [$0] }
-      LogicalAgg { group_keys: [], agg_calls: [sum($0)] }
+      LogicalAgg { group_key: [], agg_calls: [sum($0)] }
         LogicalProject { exprs: [($6 * (1:Int32 - $7))] }
           LogicalFilter { predicate: ($18 = $2) AND ($23 >= 1:Int32) AND In($15, 'AIR':Varchar, 'AIR REG':Varchar) AND ($14 = 'DELIVER IN PERSON':Varchar) AND ((((((($21 = 'Brand#52':Varchar) AND In($24, 'SM CASE':Varchar, 'SM BOX':Varchar, 'SM PACK':Varchar, 'SM PKG':Varchar)) AND ($5 >= 1:Int32)) AND ($5 <= 11:Int32)) AND ($23 <= 5:Int32)) OR ((((($21 = 'Brand#24':Varchar) AND In($24, 'MED BAG':Varchar, 'MED BOX':Varchar, 'MED PKG':Varchar, 'MED PACK':Varchar)) AND ($5 >= 30:Int32)) AND ($5 <= 40:Int32)) AND ($23 <= 10:Int32))) OR ((((($21 = 'Brand#32':Varchar) AND In($24, 'LG CASE':Varchar, 'LG BOX':Varchar, 'LG PACK':Varchar, 'LG PKG':Varchar)) AND ($5 >= 10:Int32)) AND ($5 <= 20:Int32)) AND ($23 <= 15:Int32))) }
             LogicalJoin { type: Inner, on: true, output_indices: all }
               LogicalScan { table: lineitem, columns: [_row_id, l_orderkey, l_partkey, l_suppkey, l_linenumber, l_quantity, l_extendedprice, l_discount, l_tax, l_returnflag, l_linestatus, l_shipdate, l_commitdate, l_receiptdate, l_shipinstruct, l_shipmode, l_comment] }
               LogicalScan { table: part, columns: [_row_id, p_partkey, p_name, p_mfgr, p_brand, p_type, p_size, p_container, p_retailprice, p_comment] }
   optimized_logical_plan: |
-    LogicalAgg { group_keys: [], agg_calls: [sum($0)] }
+    LogicalAgg { group_key: [], agg_calls: [sum($0)] }
       LogicalProject { exprs: [($0 * (1:Int32 - $1))] }
         LogicalJoin { type: Inner, on: ($4 = $0) AND ((((((($5 = 'Brand#52':Varchar) AND In($7, 'SM CASE':Varchar, 'SM BOX':Varchar, 'SM PACK':Varchar, 'SM PKG':Varchar)) AND ($1 >= 1:Int32)) AND ($1 <= 11:Int32)) AND ($6 <= 5:Int32)) OR ((((($5 = 'Brand#24':Varchar) AND In($7, 'MED BAG':Varchar, 'MED BOX':Varchar, 'MED PKG':Varchar, 'MED PACK':Varchar)) AND ($1 >= 30:Int32)) AND ($1 <= 40:Int32)) AND ($6 <= 10:Int32))) OR ((((($5 = 'Brand#32':Varchar) AND In($7, 'LG CASE':Varchar, 'LG BOX':Varchar, 'LG PACK':Varchar, 'LG PKG':Varchar)) AND ($1 >= 10:Int32)) AND ($1 <= 20:Int32)) AND ($6 <= 15:Int32))), output_indices: [2, 3] }
           LogicalScan { table: lineitem, output_columns: [l_partkey, l_quantity, l_extendedprice, l_discount], required_columns: [$2:l_partkey, $5:l_quantity, $6:l_extendedprice, $7:l_discount, $14:l_shipinstruct, $15:l_shipmode], predicate: In($15, 'AIR':Varchar, 'AIR REG':Varchar) AND ($14 = 'DELIVER IN PERSON':Varchar) }
@@ -2001,7 +2038,7 @@
                     LogicalFilter { predicate: Like($2, 'forest%':Varchar) }
                       LogicalScan { table: part, columns: [_row_id, p_partkey, p_name, p_mfgr, p_brand, p_type, p_size, p_container, p_retailprice, p_comment] }
                 LogicalProject { exprs: [(0.5:Decimal * $0)] }
-                  LogicalAgg { group_keys: [], agg_calls: [sum($0)] }
+                  LogicalAgg { group_key: [], agg_calls: [sum($0)] }
                     LogicalProject { exprs: [$5] }
                       LogicalFilter { predicate: ($2 = CorrelatedInputRef { index: 1, depth: 1 }) AND ($3 = CorrelatedInputRef { index: 2, depth: 1 }) AND ($11 >= '1994-01-01':Varchar::Date) AND ($11 < ('1994-01-01':Varchar::Date + '1 year 00:00:00':Interval)) }
                         LogicalScan { table: lineitem, columns: [_row_id, l_orderkey, l_partkey, l_suppkey, l_linenumber, l_quantity, l_extendedprice, l_discount, l_tax, l_returnflag, l_linestatus, l_shipdate, l_commitdate, l_receiptdate, l_shipinstruct, l_shipmode, l_comment] }
@@ -2015,7 +2052,7 @@
           LogicalScan { table: partsupp, columns: [ps_partkey, ps_suppkey, ps_availqty] }
           LogicalScan { table: part, output_columns: [p_partkey], required_columns: [$1:p_partkey, $2:p_name], predicate: Like($2, 'forest%':Varchar) }
         LogicalProject { exprs: [$0, $1, (0.5:Decimal * $2)] }
-          LogicalAgg { group_keys: [0, 1], agg_calls: [sum($2)] }
+          LogicalAgg { group_key: [0, 1], agg_calls: [sum($2)] }
             LogicalScan { table: lineitem, output_columns: [l_partkey, l_suppkey, l_quantity], required_columns: [$2:l_partkey, $3:l_suppkey, $5:l_quantity, $11:l_shipdate], predicate: ($11 >= '1994-01-01':Varchar::Date) AND ($11 < ('1994-01-01':Varchar::Date + '1 year 00:00:00':Interval)) }
   batch_plan: |
     BatchExchange { order: [$0 ASC], dist: Single }
@@ -2042,7 +2079,7 @@
                           BatchFilter { predicate: Like($1, 'forest%':Varchar) }
                             BatchScan { table: part, columns: [p_partkey, p_name] }
                   BatchProject { exprs: [$0, $1, (0.5:Decimal * $2)] }
-                    BatchHashAgg { group_keys: [$0, $1], aggs: [sum($2)] }
+                    BatchHashAgg { group_key: [$0, $1], aggs: [sum($2)] }
                       BatchExchange { order: [], dist: HashShard([0, 1]) }
                         BatchProject { exprs: [$0, $1, $2] }
                           BatchFilter { predicate: ($3 >= '1994-01-01':Varchar::Date) AND ($3 < ('1994-01-01':Varchar::Date + '1 year 00:00:00':Interval)) }
@@ -2072,7 +2109,7 @@
                           StreamFilter { predicate: Like($2, 'forest%':Varchar) }
                             StreamTableScan { table: part, columns: [p_partkey, _row_id, p_name], pk_indices: [1] }
                   StreamProject { exprs: [$0, $1, (0.5:Decimal * $3)] }
-                    StreamHashAgg { group_keys: [$0, $1], aggs: [count, sum($2)] }
+                    StreamHashAgg { group_key: [$0, $1], aggs: [count, sum($2)] }
                       StreamExchange { dist: HashShard([0, 1]) }
                         StreamProject { exprs: [$0, $1, $2, $3] }
                           StreamFilter { predicate: ($4 >= '1994-01-01':Varchar::Date) AND ($4 < ('1994-01-01':Varchar::Date + '1 year 00:00:00':Interval)) }
@@ -2124,7 +2161,7 @@
   logical_plan: |
     LogicalTopN { order: [$1 DESC, $0 ASC], limit: 100, offset: 0 }
       LogicalProject { exprs: [$0, $1] }
-        LogicalAgg { group_keys: [0], agg_calls: [count] }
+        LogicalAgg { group_key: [0], agg_calls: [count] }
           LogicalProject { exprs: [$2] }
             LogicalFilter { predicate: ($1 = $11) AND ($26 = $9) AND ($28 = 'F':Varchar) AND ($21 > $20) AND ($4 = $36) AND ($37 = 'GERMANY':Varchar) }
               LogicalApply { type: LeftAnti, on: true }
@@ -2144,7 +2181,7 @@
                     LogicalScan { table: lineitem, columns: [_row_id, l_orderkey, l_partkey, l_suppkey, l_linenumber, l_quantity, l_extendedprice, l_discount, l_tax, l_returnflag, l_linestatus, l_shipdate, l_commitdate, l_receiptdate, l_shipinstruct, l_shipmode, l_comment] }
   optimized_logical_plan: |
     LogicalTopN { order: [$1 DESC, $0 ASC], limit: 100, offset: 0 }
-      LogicalAgg { group_keys: [0], agg_calls: [count] }
+      LogicalAgg { group_key: [0], agg_calls: [count] }
         LogicalJoin { type: LeftAnti, on: ($3 = $1) AND ($4 <> $2), output_indices: [0] }
           LogicalJoin { type: LeftSemi, on: ($3 = $1) AND ($4 <> $2), output_indices: all }
             LogicalJoin { type: Inner, on: ($1 = $4), output_indices: [0, 2, 3] }
@@ -2159,7 +2196,7 @@
   batch_plan: |
     BatchTopN { order: [$1 DESC, $0 ASC], limit: 100, offset: 0 }
       BatchExchange { order: [], dist: Single }
-        BatchHashAgg { group_keys: [$0], aggs: [count] }
+        BatchHashAgg { group_key: [$0], aggs: [count] }
           BatchExchange { order: [], dist: HashShard([0]) }
             BatchHashJoin { type: LeftAnti, predicate: $1 = $3 AND ($4 <> $2), output_indices: [0] }
               BatchHashJoin { type: LeftSemi, predicate: $1 = $3 AND ($4 <> $2), output_indices: all }
@@ -2193,7 +2230,7 @@
     StreamMaterialize { columns: [s_name, agg#0(hidden), numwait], pk_columns: [s_name], order_descs: [numwait, s_name] }
       StreamTopN { order: [$2 DESC, $0 ASC], limit: 100, offset: 0 }
         StreamExchange { dist: Single }
-          StreamHashAgg { group_keys: [$0], aggs: [count, count] }
+          StreamHashAgg { group_key: [$0], aggs: [count, count] }
             StreamExchange { dist: HashShard([0]) }
               StreamHashJoin { type: LeftAnti, predicate: $1 = $7 AND ($8 <> $2), output_indices: [0, 3, 4, 5, 6] }
                 StreamHashJoin { type: LeftSemi, predicate: $1 = $7 AND ($8 <> $2), output_indices: all }
@@ -2266,7 +2303,7 @@
       cntrycode;
   logical_plan: |
     LogicalProject { exprs: [$0, $1, $2] }
-      LogicalAgg { group_keys: [0], agg_calls: [count, sum($1)] }
+      LogicalAgg { group_key: [0], agg_calls: [count, sum($1)] }
         LogicalProject { exprs: [$0, $1] }
           LogicalProject { exprs: [Substr($5, 1:Int32, 2:Int32), $6] }
             LogicalFilter { predicate: In(Substr($5, 1:Int32, 2:Int32), '30':Varchar, '24':Varchar, '31':Varchar, '38':Varchar, '25':Varchar, '34':Varchar, '37':Varchar) AND ($6 > $9) }
@@ -2277,24 +2314,24 @@
                     LogicalFilter { predicate: ($2 = CorrelatedInputRef { index: 1, depth: 1 }) }
                       LogicalScan { table: orders, columns: [_row_id, o_orderkey, o_custkey, o_orderstatus, o_totalprice, o_orderdate, o_orderpriority, o_clerk, o_shippriority, o_comment] }
                 LogicalProject { exprs: [($0 / $1)] }
-                  LogicalAgg { group_keys: [], agg_calls: [sum($0), count($0)] }
+                  LogicalAgg { group_key: [], agg_calls: [sum($0), count($0)] }
                     LogicalProject { exprs: [$6] }
                       LogicalFilter { predicate: ($6 > 0.00:Decimal) AND In(Substr($5, 1:Int32, 2:Int32), '30':Varchar, '24':Varchar, '31':Varchar, '38':Varchar, '25':Varchar, '34':Varchar, '37':Varchar) }
                         LogicalScan { table: customer, columns: [_row_id, c_custkey, c_name, c_address, c_nationkey, c_phone, c_acctbal, c_mktsegment, c_comment] }
   optimized_logical_plan: |
-    LogicalAgg { group_keys: [0], agg_calls: [count, sum($1)] }
+    LogicalAgg { group_key: [0], agg_calls: [count, sum($1)] }
       LogicalProject { exprs: [Substr($0, 1:Int32, 2:Int32), $1] }
         LogicalJoin { type: Inner, on: ($1 > $2), output_indices: [0, 1] }
           LogicalJoin { type: LeftAnti, on: ($3 = $0), output_indices: [1, 2] }
             LogicalScan { table: customer, output_columns: [c_custkey, c_phone, c_acctbal], required_columns: [$1:c_custkey, $5:c_phone, $6:c_acctbal], predicate: In(Substr($5, 1:Int32, 2:Int32), '30':Varchar, '24':Varchar, '31':Varchar, '38':Varchar, '25':Varchar, '34':Varchar, '37':Varchar) }
             LogicalScan { table: orders, columns: [o_custkey] }
           LogicalProject { exprs: [($0 / $1)] }
-            LogicalAgg { group_keys: [], agg_calls: [sum($0), count($0)] }
+            LogicalAgg { group_key: [], agg_calls: [sum($0), count($0)] }
               LogicalScan { table: customer, output_columns: [c_acctbal], required_columns: [$6:c_acctbal, $5:c_phone], predicate: ($6 > 0.00:Decimal) AND In(Substr($5, 1:Int32, 2:Int32), '30':Varchar, '24':Varchar, '31':Varchar, '38':Varchar, '25':Varchar, '34':Varchar, '37':Varchar) }
   batch_plan: |
     BatchExchange { order: [$0 ASC], dist: Single }
       BatchSort { order: [$0 ASC] }
-        BatchHashAgg { group_keys: [$0], aggs: [count, sum($1)] }
+        BatchHashAgg { group_key: [$0], aggs: [count, sum($1)] }
           BatchExchange { order: [], dist: HashShard([0]) }
             BatchProject { exprs: [Substr($0, 1:Int32, 2:Int32), $1] }
               BatchNestedLoopJoin { type: Inner, predicate: ($1 > $2), output_indices: [0, 1] }
@@ -2312,3 +2349,24 @@
                         BatchProject { exprs: [$0] }
                           BatchFilter { predicate: ($0 > 0.00:Decimal) AND In(Substr($1, 1:Int32, 2:Int32), '30':Varchar, '24':Varchar, '31':Varchar, '38':Varchar, '25':Varchar, '34':Varchar, '37':Varchar) }
                             BatchScan { table: customer, columns: [c_acctbal, c_phone] }
+  stream_plan: |
+    StreamMaterialize { columns: [cntrycode, agg#0(hidden), numcust, totacctbal], pk_columns: [cntrycode] }
+      StreamHashAgg { group_key: [$0], aggs: [count, count, sum($1)] }
+        StreamExchange { dist: HashShard([0]) }
+          StreamProject { exprs: [Substr($0, 1:Int32, 2:Int32), $1, $2] }
+            StreamDynamicFilter { predicate: ($1 > $3) }
+              StreamExchange { dist: HashShard([1]) }
+                StreamHashJoin { type: LeftAnti, predicate: $0 = $4, output_indices: [1, 2, 3] }
+                  StreamExchange { dist: HashShard([0]) }
+                    StreamFilter { predicate: In(Substr($1, 1:Int32, 2:Int32), '30':Varchar, '24':Varchar, '31':Varchar, '38':Varchar, '25':Varchar, '34':Varchar, '37':Varchar) }
+                      StreamTableScan { table: customer, columns: [c_custkey, c_phone, c_acctbal, _row_id], pk_indices: [3] }
+                  StreamExchange { dist: HashShard([0]) }
+                    StreamTableScan { table: orders, columns: [o_custkey, _row_id], pk_indices: [1] }
+              StreamExchange { dist: Broadcast }
+                StreamProject { exprs: [($1 / $2)] }
+                  StreamGlobalSimpleAgg { aggs: [sum($0), sum($1), sum($2)] }
+                    StreamExchange { dist: Single }
+                      StreamLocalSimpleAgg { aggs: [count, sum($0), count($0)] }
+                        StreamProject { exprs: [$0, $1] }
+                          StreamFilter { predicate: ($0 > 0.00:Decimal) AND In(Substr($2, 1:Int32, 2:Int32), '30':Varchar, '24':Varchar, '31':Varchar, '38':Varchar, '25':Varchar, '34':Varchar, '37':Varchar) }
+                            StreamTableScan { table: customer, columns: [c_acctbal, _row_id, c_phone], pk_indices: [1] }

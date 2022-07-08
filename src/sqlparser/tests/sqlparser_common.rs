@@ -378,6 +378,7 @@ fn parse_select_count_wildcard() {
             over: None,
             distinct: false,
             order_by: vec![],
+            filter: None
         }),
         expr_from_projection(only(&select.projection))
     );
@@ -397,6 +398,7 @@ fn parse_select_count_distinct() {
             over: None,
             distinct: true,
             order_by: vec![],
+            filter: None
         }),
         expr_from_projection(only(&select.projection))
     );
@@ -798,7 +800,7 @@ fn parse_in_subquery() {
 }
 
 #[test]
-fn parse_string_agg() {
+fn parse_string_concat() {
     let sql = "SELECT a || b";
 
     let select = verified_only_select(sql);
@@ -1093,9 +1095,10 @@ fn parse_select_having() {
                 over: None,
                 distinct: false,
                 order_by: vec![],
+                filter: None
             })),
             op: BinaryOperator::Gt,
-            right: Box::new(Expr::Value(number("1")))
+            right: Box::new(Expr::Value(number("1"))),
         }),
         select.having
     );
@@ -1786,6 +1789,7 @@ fn parse_named_argument_function() {
             over: None,
             distinct: false,
             order_by: vec![],
+            filter: None,
         }),
         expr_from_projection(only(&select.projection))
     );
@@ -1820,6 +1824,7 @@ fn parse_window_functions() {
             }),
             distinct: false,
             order_by: vec![],
+            filter: None,
         }),
         expr_from_projection(&select.projection[0])
     );
@@ -1857,8 +1862,38 @@ fn parse_aggregate_with_order_by() {
                     nulls_first: None,
                 }
             ],
+            filter: None,
         }),
         expr_from_projection(only(&select.projection))
+    );
+}
+
+#[test]
+fn parse_aggregate_with_filter() {
+    let sql = "SELECT sum(a) FILTER(WHERE (a > 0) AND (a IS NOT NULL)) FROM foo";
+    let select = verified_only_select(sql);
+    assert_eq!(
+        &Expr::Function(Function {
+            name: ObjectName(vec![Ident::new("sum")]),
+            args: vec![FunctionArg::Unnamed(FunctionArgExpr::Expr(
+                Expr::Identifier(Ident::new("a"))
+            )),],
+            over: None,
+            distinct: false,
+            order_by: vec![],
+            filter: Some(Box::new(Expr::BinaryOp {
+                left: Box::new(Expr::Nested(Box::new(Expr::BinaryOp {
+                    left: Box::new(Expr::Identifier(Ident::new("a"))),
+                    op: BinaryOperator::Gt,
+                    right: Box::new(Expr::Value(Value::Number("0".to_string(), false)))
+                }))),
+                op: BinaryOperator::And,
+                right: Box::new(Expr::Nested(Box::new(Expr::IsNotNull(Box::new(
+                    Expr::Identifier(Ident::new("a"))
+                )))))
+            })),
+        }),
+        expr_from_projection(only(&select.projection)),
     );
 }
 
@@ -2095,6 +2130,7 @@ fn parse_delimited_identifiers() {
             over: None,
             distinct: false,
             order_by: vec![],
+            filter: None,
         }),
         expr_from_projection(&select.projection[1]),
     );
@@ -2717,6 +2753,39 @@ fn parse_substring() {
     );
 
     one_statement_parses_to("SELECT SUBSTRING('1' FOR 3)", "SELECT SUBSTRING('1' FOR 3)");
+}
+
+#[test]
+fn parse_overlay() {
+    one_statement_parses_to(
+        "SELECT OVERLAY('abc' PLACING 'xyz' FROM 1)",
+        "SELECT OVERLAY('abc' PLACING 'xyz' FROM 1)",
+    );
+
+    one_statement_parses_to(
+        "SELECT OVERLAY('abc' PLACING 'xyz' FROM 1 FOR 2)",
+        "SELECT OVERLAY('abc' PLACING 'xyz' FROM 1 FOR 2)",
+    );
+
+    assert_eq!(
+        parse_sql_statements("SELECT OVERLAY('abc', 'xyz')").unwrap_err(),
+        ParserError::ParserError("Expected PLACING, found: ,".to_owned())
+    );
+
+    assert_eq!(
+        parse_sql_statements("SELECT OVERLAY('abc' PLACING 'xyz')").unwrap_err(),
+        ParserError::ParserError("Expected FROM, found: )".to_owned())
+    );
+
+    assert_eq!(
+        parse_sql_statements("SELECT OVERLAY('abc' PLACING 'xyz' FOR 2)").unwrap_err(),
+        ParserError::ParserError("Expected FROM, found: FOR".to_owned())
+    );
+
+    assert_eq!(
+        parse_sql_statements("SELECT OVERLAY('abc' PLACING 'xyz' FOR 2 FROM 1)").unwrap_err(),
+        ParserError::ParserError("Expected FROM, found: FOR".to_owned())
+    );
 }
 
 #[test]
