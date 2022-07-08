@@ -179,6 +179,7 @@ pub fn create_agg_state_unary(
                             return_type,
                             input_col_idx,
                             $fn,
+                            filter,
                         ))
                     },
                 )*
