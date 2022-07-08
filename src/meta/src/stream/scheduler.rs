@@ -19,7 +19,6 @@ use std::sync::atomic::{AtomicUsize, Ordering};
 use anyhow::anyhow;
 use risingwave_common::bail;
 use risingwave_common::buffer::BitmapBuilder;
-use risingwave_common::error::ErrorCode::InternalError;
 use risingwave_common::error::Result;
 use risingwave_common::types::VIRTUAL_NODE_COUNT;
 use risingwave_common::util::compress::compress_data;
@@ -162,10 +161,8 @@ where
         locations: &mut ScheduledLocations,
     ) -> Result<()> {
         if fragment.actors.is_empty() {
-            return Err(InternalError("fragment has no actor".to_string()).into());
+            bail!("fragment has no actor");
         }
-
-        self.hash_mapping_manager.set_need_consolidation(true);
 
         if fragment.distribution_type == FragmentDistributionType::Single as i32 {
             // Singleton fragment
