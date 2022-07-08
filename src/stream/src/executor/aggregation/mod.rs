@@ -30,11 +30,9 @@ use risingwave_common::buffer::Bitmap;
 use risingwave_common::catalog::{Field, Schema};
 use risingwave_common::hash::HashCode;
 use risingwave_common::types::{DataType, Datum};
-use risingwave_common::util::sort_util::OrderType;
 use risingwave_expr::expr::AggKind;
 use risingwave_expr::*;
 use risingwave_storage::table::state_table::StateTable;
-use risingwave_storage::table::Distribution;
 use risingwave_storage::StateStore;
 pub use row_count::*;
 use static_assertions::const_assert_eq;
@@ -406,51 +404,8 @@ pub fn generate_state_tables_from_proto<S: StateStore>(
 
     for table_catalog in internal_tables {
         // Parse info from proto and create state table.
-        let state_table = {
-            let columns = table_catalog
-                .columns
-                .iter()
-                .map(|col| col.column_desc.as_ref().unwrap().into())
-                .collect();
-            let order_types = table_catalog
-                .order_key
-                .iter()
-                .map(|order_key| {
-                    OrderType::from_prost(
-                        &risingwave_pb::plan_common::OrderType::from_i32(order_key.order_type)
-                            .unwrap(),
-                    )
-                })
-                .collect();
-            let dist_key_indices = table_catalog
-                .distribution_key
-                .iter()
-                .map(|dist_index| *dist_index as usize)
-                .collect();
-            let pk_indices = table_catalog
-                .pk
-                .iter()
-                .map(|pk_index| *pk_index as usize)
-                .collect();
-            let distribution = match vnodes.clone() {
-                // Hash Agg
-                Some(vnodes) => Distribution {
-                    dist_key_indices,
-                    vnodes,
-                },
-                // Simple Agg
-                None => Distribution::fallback(),
-            };
-            StateTable::new_with_distribution(
-                store.clone(),
-                risingwave_common::catalog::TableId::new(table_catalog.id),
-                columns,
-                order_types,
-                pk_indices,
-                distribution,
-            )
-        };
-
+        let state_table =
+            StateTable::from_table_catalog(table_catalog, store.clone(), vnodes.clone());
         state_tables.push(state_table)
     }
     state_tables
