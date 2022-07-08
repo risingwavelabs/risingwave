@@ -12,6 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+use std::borrow::BorrowMut;
 use std::collections::{BTreeMap, HashSet, VecDeque};
 use std::future::Future;
 use std::ops::DerefMut;
@@ -36,7 +37,7 @@ use risingwave_pb::hummock::{
 };
 use risingwave_pb::meta::subscribe_response::{Info, Operation};
 use risingwave_pb::meta::MetaLeaderInfo;
-use tokio::sync::RwLock;
+use tokio::sync::{RwLock, RwLockWriteGuard};
 
 use crate::cluster::{ClusterManagerRef, META_NODE_ID};
 use crate::hummock::compaction::{CompactStatus, ManualCompactionOption};
@@ -185,9 +186,22 @@ where
         Ok(instance)
     }
 
-    /// Load state from meta store.
     async fn load_meta_store_state(&self) -> Result<()> {
         let mut compaction_guard = self.compaction.write().await;
+        let mut versioning_guard = self.versioning.write().await;
+        self.load_meta_store_state_impl(
+            compaction_guard.borrow_mut(),
+            versioning_guard.borrow_mut(),
+        )
+        .await
+    }
+
+    /// Load state from meta store.
+    async fn load_meta_store_state_impl(
+        &self,
+        compaction_guard: &mut RwLockWriteGuard<'_, Compaction>,
+        versioning_guard: &mut RwLockWriteGuard<'_, Versioning>,
+    ) -> Result<()> {
         let compaction_statuses = CompactStatus::list(self.env.meta_store())
             .await?
             .into_iter()
@@ -215,16 +229,11 @@ where
                 .map(|assigned| (assigned.key().unwrap(), assigned))
                 .collect();
 
-        let mut versioning_guard = self.versioning.write().await;
         versioning_guard.current_version_id = CurrentHummockVersionId::get(self.env.meta_store())
             .await?
             .unwrap_or_else(CurrentHummockVersionId::new);
 
-        let mut version_ids: HashSet<_> = HummockVersion::list(self.env.meta_store())
-            .await?
-            .into_iter()
-            .map(|version| version.id)
-            .collect();
+        let versions = HummockVersion::list(self.env.meta_store()).await?;
 
         let hummock_version_deltas: BTreeMap<_, _> =
             HummockVersionDelta::list(self.env.meta_store())
@@ -234,7 +243,7 @@ where
                 .collect();
 
         // Insert the initial version.
-        if versioning_guard.hummock_versions.is_empty() {
+        let mut redo_state = if versions.is_empty() {
             let mut init_version = HummockVersion {
                 id: FIRST_VERSION_ID,
                 levels: Default::default(),
@@ -261,18 +270,17 @@ where
                     .levels
                     .insert(compaction_group.group_id(), Levels { levels });
             }
-            if version_ids.is_empty() {
-                version_ids.insert(init_version.id);
-            }
-            let mut redo_state = init_version.clone();
-            if version_ids.contains(&init_version.id) {
-                init_version.insert(self.env.meta_store()).await?;
-                versioning_guard
-                    .hummock_versions
-                    .insert(init_version.id, init_version);
-            }
+            init_version.insert(self.env.meta_store()).await?;
+            init_version
+        } else {
+            versions.first().unwrap().clone()
+        };
+        versioning_guard
+            .hummock_versions
+            .insert(redo_state.id, redo_state.clone());
 
-            for (id, version_delta) in &hummock_version_deltas {
+        for (id, version_delta) in &hummock_version_deltas {
+            if version_delta.prev_id == redo_state.id {
                 for (compaction_group_id, level_deltas) in &version_delta.level_deltas {
                     let mut delete_sst_levels = Vec::with_capacity(level_deltas.level_deltas.len());
                     let mut delete_sst_ids_set = HashSet::new();
@@ -303,12 +311,9 @@ where
                 redo_state.max_committed_epoch = version_delta.max_committed_epoch;
                 redo_state.safe_epoch = version_delta.safe_epoch;
 
-                if version_ids.contains(&redo_state.id) {
-                    redo_state.insert(self.env.meta_store()).await?;
-                    versioning_guard
-                        .hummock_versions
-                        .insert(redo_state.id, redo_state.clone());
-                }
+                versioning_guard
+                    .hummock_versions
+                    .insert(redo_state.id, redo_state.clone());
             }
         }
         self.max_committed_epoch.store(
@@ -836,11 +841,11 @@ where
                 compact_status,
                 compact_task_assignment,
                 current_version_id,
-                hummock_versions,
                 hummock_version_deltas,
                 version_stale_sstables,
                 sstable_id_infos
             )?;
+            hummock_versions.commit();
         } else {
             // The compaction task is cancelled.
             commit_multi_var!(
@@ -1009,11 +1014,11 @@ where
         commit_multi_var!(
             self,
             None,
-            new_hummock_version,
             new_version_delta,
             current_version_id,
             sstable_id_infos
         )?;
+        new_hummock_version.commit();
         self.max_committed_epoch.store(epoch, Ordering::Release);
 
         // Update metrics
@@ -1147,6 +1152,18 @@ where
         Ok(version_ids)
     }
 
+    pub async fn proceed_version_checkpoint(&self) -> risingwave_common::error::Result<()> {
+        let versioning_guard = self.versioning.read().await;
+        let new_checkpoint = versioning_guard
+            .hummock_versions
+            .first_key_value()
+            .unwrap()
+            .1
+            .clone();
+        new_checkpoint.insert(self.env.meta_store()).await?;
+        Ok(())
+    }
+
     /// Get the reference count of given version id
     pub async fn get_version_pin_count(
         &self,
@@ -1251,33 +1268,39 @@ where
     // TODO: use proc macro to call check_state_consistency
     #[cfg(test)]
     pub async fn check_state_consistency(&self) {
-        let get_state = || async {
-            let compaction_guard = self.compaction.read().await;
-            let versioning_guard = self.versioning.read().await;
-            let compact_statuses_copy = compaction_guard.compaction_statuses.clone();
-            let compact_task_assignment_copy = compaction_guard.compact_task_assignment.clone();
-            let current_version_id_copy = versioning_guard.current_version_id.clone();
-            let hummmock_versions_copy = versioning_guard.hummock_versions.clone();
-            let pinned_versions_copy = versioning_guard.pinned_versions.clone();
-            let pinned_snapshots_copy = versioning_guard.pinned_snapshots.clone();
-            let stale_sstables_copy = versioning_guard.stale_sstables.clone();
-            let sst_id_infos_copy = versioning_guard.sstable_id_infos.clone();
-            (
-                compact_statuses_copy,
-                compact_task_assignment_copy,
-                current_version_id_copy,
-                hummmock_versions_copy,
-                pinned_versions_copy,
-                pinned_snapshots_copy,
-                stale_sstables_copy,
-                sst_id_infos_copy,
-            )
-        };
-        let mem_state = get_state().await;
-        self.load_meta_store_state()
-            .await
-            .expect("Failed to load state from meta store");
-        let loaded_state = get_state().await;
+        use std::borrow::Borrow;
+        let mut compaction_guard = self.compaction.write().await;
+        let mut versioning_guard = self.versioning.write().await;
+        let get_state =
+            |compaction_guard: &RwLockWriteGuard<'_, Compaction>,
+             versioning_guard: &RwLockWriteGuard<'_, Versioning>| {
+                let compact_statuses_copy = compaction_guard.compaction_statuses.clone();
+                let compact_task_assignment_copy = compaction_guard.compact_task_assignment.clone();
+                let current_version_id_copy = versioning_guard.current_version_id.clone();
+                // let hummmock_versions_copy = versioning_guard.hummock_versions.clone();
+                let pinned_versions_copy = versioning_guard.pinned_versions.clone();
+                let pinned_snapshots_copy = versioning_guard.pinned_snapshots.clone();
+                let stale_sstables_copy = versioning_guard.stale_sstables.clone();
+                let sst_id_infos_copy = versioning_guard.sstable_id_infos.clone();
+                (
+                    compact_statuses_copy,
+                    compact_task_assignment_copy,
+                    current_version_id_copy,
+                    // hummmock_versions_copy,
+                    pinned_versions_copy,
+                    pinned_snapshots_copy,
+                    stale_sstables_copy,
+                    sst_id_infos_copy,
+                )
+            };
+        let mem_state = get_state(compaction_guard.borrow(), versioning_guard.borrow());
+        self.load_meta_store_state_impl(
+            compaction_guard.borrow_mut(),
+            versioning_guard.borrow_mut(),
+        )
+        .await
+        .expect("Failed to load state from meta store");
+        let loaded_state = get_state(compaction_guard.borrow(), versioning_guard.borrow());
         assert_eq!(
             mem_state, loaded_state,
             "hummock in-mem state is inconsistent with meta store state",
@@ -1426,6 +1449,16 @@ where
     /// Gets current version without pinning it.
     pub async fn get_current_version(&self) -> HummockVersion {
         self.versioning.read().await.current_version()
+    }
+
+    pub async fn get_version(&self, version_id: HummockVersionId) -> HummockVersion {
+        self.versioning
+            .read()
+            .await
+            .hummock_versions
+            .get(&version_id)
+            .unwrap()
+            .clone()
     }
 
     pub fn set_compaction_scheduler(&self, sender: CompactionRequestChannelRef) {

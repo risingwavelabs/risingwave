@@ -31,7 +31,7 @@ use tokio::spawn;
 use tokio::sync::mpsc::{channel, Receiver, Sender};
 use tokio::sync::RwLock;
 use tokio::task::JoinHandle;
-use tracing::{error, info};
+use tracing::error;
 use uuid::Uuid;
 use StageEvent::Failed;
 
@@ -188,9 +188,10 @@ impl StageExecution {
             _ => {
                 // This is possible since we notify stage schedule event to query runner, which may
                 // receive multi events and start stage multi times.
-                info!(
+                tracing::trace!(
                     "Staged {:?}-{:?} already started, skipping.",
-                    &self.stage.query_id, &self.stage.id
+                    &self.stage.query_id,
+                    &self.stage.id
                 );
                 Ok(())
             }

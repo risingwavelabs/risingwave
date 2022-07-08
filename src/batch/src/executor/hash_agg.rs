@@ -69,7 +69,7 @@ impl HashAggExecutorBuilder {
         identity: String,
     ) -> Result<BoxedExecutor> {
         let group_key_columns = hash_agg_node
-            .get_group_keys()
+            .get_group_key()
             .iter()
             .map(|x| *x as usize)
             .collect_vec();
@@ -140,7 +140,7 @@ impl BoxedExecutorBuilder for HashAggExecutorBuilder {
 pub(crate) struct HashAggExecutor<K> {
     /// factories to construct aggregator for each groups
     agg_factories: Vec<AggStateFactory>,
-    /// Column indexes of keys that specify a group
+    /// Column indexes that specify a group
     group_key_columns: Vec<usize>,
     /// child executor
     child: BoxedExecutor,
@@ -314,7 +314,7 @@ mod tests {
         };
 
         let agg_prost = HashAggNode {
-            group_keys: vec![0, 1],
+            group_key: vec![0, 1],
             agg_calls: vec![agg_call],
         };
 
@@ -380,7 +380,7 @@ mod tests {
         };
 
         let agg_prost = HashAggNode {
-            group_keys: vec![],
+            group_key: vec![],
             agg_calls: vec![agg_call],
         };
 

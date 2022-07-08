@@ -414,7 +414,7 @@ mod tests {
             id: TableId::placeholder().table_id,
             name: String::new(),
             columns,
-            order_keys: vec![ColumnOrder {
+            order_key: vec![ColumnOrder {
                 index: 0,
                 order_type: 2,
             }],

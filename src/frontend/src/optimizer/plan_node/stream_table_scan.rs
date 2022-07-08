@@ -44,7 +44,7 @@ impl StreamTableScan {
             logical.schema().clone(),
             logical.base.pk_indices.clone(),
             // follows upstream distribution from TableCatalog
-            Distribution::HashShard(logical.map_distribution_keys()),
+            Distribution::HashShard(logical.distribution_key().unwrap()),
             logical.table_desc().appendonly,
         );
         Self {

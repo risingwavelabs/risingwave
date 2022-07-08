@@ -189,6 +189,7 @@ impl<'a, C: BatchTaskContext> ExecutorBuilder<'a, C> {
             NodeBody::HopWindow => HopWindowExecutor,
             NodeBody::SysRowSeqScan => SysRowSeqScanExecutorBuilder,
             NodeBody::Expand => ExpandExecutor,
+            NodeBody::LookupJoin => LookupJoinExecutorBuilder,
         }
         .await?;
         let input_desc = real_executor.identity().to_string();

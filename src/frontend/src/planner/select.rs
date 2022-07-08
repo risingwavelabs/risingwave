@@ -78,8 +78,8 @@ impl Planner {
         root = LogicalProject::create(root, select_items);
 
         if distinct {
-            let group_keys = (0..root.schema().fields().len()).collect();
-            root = LogicalAgg::new(vec![], group_keys, root).into();
+            let group_key = (0..root.schema().fields().len()).collect();
+            root = LogicalAgg::new(vec![], group_key, root).into();
         }
 
         Ok(root)

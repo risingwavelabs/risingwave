@@ -9,7 +9,7 @@
         LogicalApply { type: LeftOuter, on: true }
           LogicalScan { table: t1, columns: [_row_id, x, y] }
           LogicalProject { exprs: [(1.5:Decimal * $0)] }
-            LogicalAgg { group_keys: [], agg_calls: [min($0)] }
+            LogicalAgg { group_key: [], agg_calls: [min($0)] }
               LogicalProject { exprs: [$1] }
                 LogicalFilter { predicate: (CorrelatedInputRef { index: 2, depth: 1 } = $2) AND ($2 = 1000:Int32) }
                   LogicalScan { table: t2, columns: [_row_id, x, y] }
@@ -17,7 +17,7 @@
     LogicalJoin { type: Inner, on: ($1 = $2) AND ($0 > $3), output_indices: [0, 1] }
       LogicalScan { table: t1, columns: [x, y] }
       LogicalProject { exprs: [$0, (1.5:Decimal * $1)] }
-        LogicalAgg { group_keys: [0], agg_calls: [min($1)] }
+        LogicalAgg { group_key: [0], agg_calls: [min($1)] }
           LogicalProject { exprs: [$1, $0] }
             LogicalScan { table: t2, output_columns: [x, y], required_columns: [$1:x, $2:y], predicate: ($2 = 1000:Int32) }
 - sql: |
@@ -30,7 +30,7 @@
         LogicalApply { type: LeftOuter, on: true }
           LogicalScan { table: t1, columns: [_row_id, x, y] }
           LogicalProject { exprs: [$0] }
-            LogicalAgg { group_keys: [], agg_calls: [min($0)] }
+            LogicalAgg { group_key: [], agg_calls: [min($0)] }
               LogicalProject { exprs: [$1] }
                 LogicalFilter { predicate: ($2 = $3) }
                   LogicalJoin { type: LeftOuter, on: true, output_indices: all }
@@ -48,13 +48,13 @@
         LogicalApply { type: LeftOuter, on: true }
           LogicalScan { table: t1, columns: [_row_id, x, y] }
           LogicalProject { exprs: [$0] }
-            LogicalAgg { group_keys: [], agg_calls: [min($0)] }
+            LogicalAgg { group_key: [], agg_calls: [min($0)] }
               LogicalProject { exprs: [$1] }
                 LogicalFilter { predicate: (CorrelatedInputRef { index: 2, depth: 1 } = $2) AND (CorrelatedInputRef { index: 1, depth: 1 } = $3) }
                   LogicalJoin { type: LeftOuter, on: true, output_indices: all }
                     LogicalScan { table: t2, columns: [_row_id, x, y] }
                     LogicalProject { exprs: [$0] }
-                      LogicalAgg { group_keys: [], agg_calls: [max($0)] }
+                      LogicalAgg { group_key: [], agg_calls: [max($0)] }
                         LogicalProject { exprs: [$1] }
                           LogicalFilter { predicate: ($2 = CorrelatedInputRef { index: 2, depth: 2 }) }
                             LogicalJoin { type: Inner, on: true, output_indices: all }
@@ -86,7 +86,7 @@
         LogicalApply { type: LeftOuter, on: true }
           LogicalScan { table: t1, columns: [_row_id, x, y] }
           LogicalProject { exprs: [(1.5:Decimal * $0)] }
-            LogicalAgg { group_keys: [], agg_calls: [min($0)] }
+            LogicalAgg { group_key: [], agg_calls: [min($0)] }
               LogicalProject { exprs: [$1] }
                 LogicalFilter { predicate: (CorrelatedInputRef { index: 2, depth: 1 } = $2) }
                   LogicalScan { table: t2, columns: [_row_id, x, y] }
@@ -94,7 +94,7 @@
     LogicalJoin { type: Inner, on: ($1 = $2) AND ($0 > $3), output_indices: [0, 1] }
       LogicalScan { table: t1, columns: [x, y] }
       LogicalProject { exprs: [$0, (1.5:Decimal * $1)] }
-        LogicalAgg { group_keys: [0], agg_calls: [min($1)] }
+        LogicalAgg { group_key: [0], agg_calls: [min($1)] }
           LogicalProject { exprs: [$1, $0] }
             LogicalScan { table: t2, columns: [x, y] }
 - sql: |
@@ -107,14 +107,14 @@
         LogicalApply { type: LeftOuter, on: true }
           LogicalScan { table: t1, columns: [_row_id, x, y] }
           LogicalProject { exprs: [$0] }
-            LogicalAgg { group_keys: [], agg_calls: [count] }
+            LogicalAgg { group_key: [], agg_calls: [count] }
               LogicalProject { exprs: [] }
                 LogicalFilter { predicate: (CorrelatedInputRef { index: 2, depth: 1 } = $2) }
                   LogicalScan { table: t2, columns: [_row_id, x, y] }
   optimized_logical_plan: |
     LogicalJoin { type: Inner, on: ($1 = $2) AND ($0 > $3), output_indices: [0, 1] }
       LogicalScan { table: t1, columns: [x, y] }
-      LogicalAgg { group_keys: [0], agg_calls: [count] }
+      LogicalAgg { group_key: [0], agg_calls: [count] }
         LogicalScan { table: t2, columns: [y] }
 - sql: |
     create table t1(x int, y int);
@@ -126,7 +126,7 @@
         LogicalApply { type: LeftOuter, on: true }
           LogicalScan { table: t1, columns: [_row_id, x, y] }
           LogicalProject { exprs: [($0 + $1)] }
-            LogicalAgg { group_keys: [], agg_calls: [count, count] }
+            LogicalAgg { group_key: [], agg_calls: [count, count] }
               LogicalProject { exprs: [] }
                 LogicalFilter { predicate: (CorrelatedInputRef { index: 2, depth: 1 } = $2) }
                   LogicalScan { table: t2, columns: [_row_id, x, y] }
@@ -134,7 +134,7 @@
     LogicalJoin { type: Inner, on: ($1 = $2) AND ($0 > $3), output_indices: [0, 1] }
       LogicalScan { table: t1, columns: [x, y] }
       LogicalProject { exprs: [$0, ($1 + $2)] }
-        LogicalAgg { group_keys: [0], agg_calls: [count, count] }
+        LogicalAgg { group_key: [0], agg_calls: [count, count] }
           LogicalScan { table: t2, columns: [y] }
 - sql: |
     create table t1(x int, y int);
@@ -208,7 +208,7 @@
             LogicalJoin { type: LeftOuter, on: true, output_indices: all }
               LogicalScan { table: t2, columns: [_row_id, x, y] }
               LogicalProject { exprs: [$0] }
-                LogicalAgg { group_keys: [], agg_calls: [min($0)] }
+                LogicalAgg { group_key: [], agg_calls: [min($0)] }
                   LogicalProject { exprs: [$1] }
                     LogicalScan { table: t3, columns: [_row_id, x, y] }
   optimized_logical_plan: |
@@ -216,7 +216,7 @@
       LogicalScan { table: t1, columns: [x, y] }
       LogicalJoin { type: Inner, on: ($0 > $2), output_indices: [0, 1] }
         LogicalScan { table: t2, columns: [x, y] }
-        LogicalAgg { group_keys: [], agg_calls: [min($0)] }
+        LogicalAgg { group_key: [], agg_calls: [min($0)] }
           LogicalScan { table: t3, columns: [x] }
 - sql: |
     /* correlated inner subquery with depth = 2 */
@@ -366,14 +366,14 @@
     create table c(c1 int, c2 int, c3 int);
     select count(*) from a, b where a3 = b2 and 3 = (select count(*) from c where b2 = c2 and a3 = c3);
   optimized_logical_plan: |
-    LogicalAgg { group_keys: [], agg_calls: [count] }
+    LogicalAgg { group_key: [], agg_calls: [count] }
       LogicalJoin { type: Inner, on: ($0 = $2) AND ($1 = $3), output_indices: [] }
         LogicalJoin { type: Inner, on: ($0 = $1), output_indices: all }
           LogicalScan { table: a, columns: [a3] }
           LogicalScan { table: b, columns: [b2] }
         LogicalProject { exprs: [$0, $1] }
           LogicalFilter { predicate: (3:Int32 = $2) }
-            LogicalAgg { group_keys: [0, 1], agg_calls: [count] }
+            LogicalAgg { group_key: [0, 1], agg_calls: [count] }
               LogicalProject { exprs: [$1, $0] }
                 LogicalScan { table: c, columns: [c2, c3] }
 - sql: |
@@ -381,12 +381,12 @@
     create table b(x int, y int, z int);
     select count(*) from a where a.x=3 and a.y = (select count(*) from b where b.z = a.z and a.x = 3);
   optimized_logical_plan: |
-    LogicalAgg { group_keys: [], agg_calls: [count] }
+    LogicalAgg { group_key: [], agg_calls: [count] }
       LogicalJoin { type: Inner, on: ($0 = $3) AND ($2 = $4) AND ($1 = $5), output_indices: [] }
         LogicalScan { table: a, output_columns: [x, y, z], required_columns: [$1:x, $2:y, $3:z], predicate: ($1 = 3:Int32) }
-        LogicalAgg { group_keys: [0, 1], agg_calls: [count] }
+        LogicalAgg { group_key: [0, 1], agg_calls: [count] }
           LogicalJoin { type: Inner, on: ($2 = $1), output_indices: [0, 1] }
-            LogicalAgg { group_keys: [0, 1], agg_calls: [] }
+            LogicalAgg { group_key: [0, 1], agg_calls: [] }
               LogicalScan { table: a, output_columns: [x, z], required_columns: [$1:x, $3:z], predicate: ($1 = 3:Int32) }
             LogicalScan { table: b, columns: [z] }
 - sql: |
@@ -394,8 +394,8 @@
     create table b(x int, y int, z int);
     select count(*) from a where a.x=3 and a.y = (select count(*) from b where b.z = a.z);
   optimized_logical_plan: |
-    LogicalAgg { group_keys: [], agg_calls: [count] }
+    LogicalAgg { group_key: [], agg_calls: [count] }
       LogicalJoin { type: Inner, on: ($1 = $2) AND ($0 = $3), output_indices: [] }
         LogicalScan { table: a, output_columns: [y, z], required_columns: [$2:y, $3:z, $1:x], predicate: ($1 = 3:Int32) }
-        LogicalAgg { group_keys: [0], agg_calls: [count] }
+        LogicalAgg { group_key: [0], agg_calls: [count] }
           LogicalScan { table: b, columns: [z] }

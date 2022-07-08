@@ -800,7 +800,7 @@ fn parse_in_subquery() {
 }
 
 #[test]
-fn parse_string_agg() {
+fn parse_string_concat() {
     let sql = "SELECT a || b";
 
     let select = verified_only_select(sql);
@@ -2753,6 +2753,39 @@ fn parse_substring() {
     );
 
     one_statement_parses_to("SELECT SUBSTRING('1' FOR 3)", "SELECT SUBSTRING('1' FOR 3)");
+}
+
+#[test]
+fn parse_overlay() {
+    one_statement_parses_to(
+        "SELECT OVERLAY('abc' PLACING 'xyz' FROM 1)",
+        "SELECT OVERLAY('abc' PLACING 'xyz' FROM 1)",
+    );
+
+    one_statement_parses_to(
+        "SELECT OVERLAY('abc' PLACING 'xyz' FROM 1 FOR 2)",
+        "SELECT OVERLAY('abc' PLACING 'xyz' FROM 1 FOR 2)",
+    );
+
+    assert_eq!(
+        parse_sql_statements("SELECT OVERLAY('abc', 'xyz')").unwrap_err(),
+        ParserError::ParserError("Expected PLACING, found: ,".to_owned())
+    );
+
+    assert_eq!(
+        parse_sql_statements("SELECT OVERLAY('abc' PLACING 'xyz')").unwrap_err(),
+        ParserError::ParserError("Expected FROM, found: )".to_owned())
+    );
+
+    assert_eq!(
+        parse_sql_statements("SELECT OVERLAY('abc' PLACING 'xyz' FOR 2)").unwrap_err(),
+        ParserError::ParserError("Expected FROM, found: FOR".to_owned())
+    );
+
+    assert_eq!(
+        parse_sql_statements("SELECT OVERLAY('abc' PLACING 'xyz' FOR 2 FROM 1)").unwrap_err(),
+        ParserError::ParserError("Expected FROM, found: FOR".to_owned())
+    );
 }
 
 #[test]

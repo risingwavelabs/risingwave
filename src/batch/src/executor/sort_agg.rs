@@ -41,7 +41,7 @@ use crate::task::BatchTaskContext;
 /// automatically because all tuples should be aggregated together.
 pub struct SortAggExecutor {
     agg_states: Vec<BoxedAggState>,
-    group_keys: Vec<BoxedExpression>,
+    group_key: Vec<BoxedExpression>,
     sorted_groupers: Vec<BoxedSortedGrouper>,
     child: BoxedExecutor,
     schema: Schema,
@@ -70,18 +70,18 @@ impl BoxedExecutorBuilder for SortAggExecutor {
             .map(|x| AggStateFactory::new(x)?.create_agg_state())
             .try_collect()?;
 
-        let group_keys: Vec<_> = sort_agg_node
-            .get_group_keys()
+        let group_key: Vec<_> = sort_agg_node
+            .get_group_key()
             .iter()
             .map(build_from_prost)
             .try_collect()?;
 
-        let sorted_groupers: Vec<_> = group_keys
+        let sorted_groupers: Vec<_> = group_key
             .iter()
             .map(|e| create_sorted_grouper(e.return_type()))
             .try_collect()?;
 
-        let fields = group_keys
+        let fields = group_key
             .iter()
             .map(|e| e.return_type())
             .chain(agg_states.iter().map(|e| e.return_type()))
@@ -90,7 +90,7 @@ impl BoxedExecutorBuilder for SortAggExecutor {
 
         Ok(Box::new(Self {
             agg_states,
-            group_keys,
+            group_key,
             sorted_groupers,
             child: inputs.remove(0),
             schema: Schema { fields },
@@ -119,13 +119,13 @@ impl SortAggExecutor {
     async fn do_execute(mut self: Box<Self>) {
         let mut left_capacity = self.output_size_limit;
         let (mut group_builders, mut agg_builders) =
-            SortAggExecutor::create_builders(&self.group_keys, &self.agg_states);
+            SortAggExecutor::create_builders(&self.group_key, &self.agg_states);
 
         #[for_await]
         for child_chunk in self.child.execute() {
             let child_chunk = child_chunk?.compact()?;
             let group_columns: Vec<_> = self
-                .group_keys
+                .group_key
                 .iter_mut()
                 .map(|expr| expr.eval(&child_chunk))
                 .try_collect()?;
@@ -178,7 +178,7 @@ impl SortAggExecutor {
 
                     // reset builders and capactiy to build next output chunk
                     (group_builders, agg_builders) =
-                        SortAggExecutor::create_builders(&self.group_keys, &self.agg_states);
+                        SortAggExecutor::create_builders(&self.group_key, &self.agg_states);
 
                     left_capacity = self.output_size_limit;
                 }
@@ -242,10 +242,10 @@ impl SortAggExecutor {
     }
 
     fn create_builders(
-        group_keys: &[BoxedExpression],
+        group_key: &[BoxedExpression],
         agg_states: &[BoxedAggState],
     ) -> (Vec<ArrayBuilderImpl>, Vec<ArrayBuilderImpl>) {
-        let group_builders = group_keys
+        let group_builders = group_key
             .iter()
             .map(|e| e.return_type().create_array_builder(1))
             .collect();
@@ -337,7 +337,7 @@ mod tests {
 
         let executor = Box::new(SortAggExecutor {
             agg_states,
-            group_keys: group_exprs,
+            group_key: group_exprs,
             sorted_groupers,
             child: Box::new(child),
             schema: Schema { fields },
@@ -446,7 +446,7 @@ mod tests {
 
         let executor = Box::new(SortAggExecutor {
             agg_states,
-            group_keys: group_exprs,
+            group_key: group_exprs,
             sorted_groupers,
             child: Box::new(child),
             schema: Schema { fields },
@@ -555,7 +555,7 @@ mod tests {
             .collect::<Vec<Field>>();
         let executor = Box::new(SortAggExecutor {
             agg_states,
-            group_keys: vec![],
+            group_key: vec![],
             sorted_groupers: vec![],
             child: Box::new(child),
             schema: Schema { fields },
@@ -659,7 +659,7 @@ mod tests {
         let output_size_limit = 4;
         let executor = Box::new(SortAggExecutor {
             agg_states,
-            group_keys: group_exprs,
+            group_key: group_exprs,
             sorted_groupers,
             child: Box::new(child),
             schema: Schema { fields },
@@ -781,7 +781,7 @@ mod tests {
 
         let executor = Box::new(SortAggExecutor {
             agg_states,
-            group_keys: group_exprs,
+            group_key: group_exprs,
             sorted_groupers,
             child: Box::new(child),
             schema: Schema { fields },
