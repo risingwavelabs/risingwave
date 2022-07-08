@@ -86,6 +86,14 @@
           StreamTableScan { table: t, columns: [v1, v2, _row_id], pk_indices: [2] }
 - sql: |
     create table t (v1 bigint, v2 double precision);
+    select * from t limit 3 offset 4;
+  batch_plan: |
+    BatchLimit { limit: 3, offset: 4 }
+      BatchExchange { order: [], dist: Single }
+        BatchLimit { limit: 7, offset: 0 }
+          BatchScan { table: t, columns: [v1, v2] }
+- sql: |
+    create table t (v1 bigint, v2 double precision);
     select * from t limit 5;
   batch_plan: |
     BatchLimit { limit: 5, offset: 0 }
