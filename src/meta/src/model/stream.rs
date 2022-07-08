@@ -169,7 +169,7 @@ impl TableFragments {
     pub fn fetch_stream_source_id(stream_node: &StreamNode) -> Option<SourceId> {
         if let Some(NodeBody::Source(s)) = stream_node.node_body.as_ref() {
             if s.source_type == SourceType::Source as i32 {
-                return Some(s.table_ref_id.as_ref().unwrap().table_id as SourceId);
+                return Some(s.table_id);
             }
         }
 
@@ -199,7 +199,7 @@ impl TableFragments {
     /// Resolve dependent table
     fn resolve_dependent_table(stream_node: &StreamNode, table_ids: &mut HashSet<TableId>) {
         if let Some(NodeBody::Chain(chain)) = stream_node.node_body.as_ref() {
-            table_ids.insert(TableId::from(&chain.table_ref_id));
+            table_ids.insert(TableId::new(chain.table_id));
         }
 
         for child in &stream_node.input {

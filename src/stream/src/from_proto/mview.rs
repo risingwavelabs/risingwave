@@ -31,7 +31,7 @@ impl ExecutorBuilder for MaterializeExecutorBuilder {
     ) -> Result<BoxedExecutor> {
         let node = try_match_expand!(node.get_node_body().unwrap(), NodeBody::Materialize)?;
 
-        let table_id = TableId::from(&node.table_ref_id);
+        let table_id = TableId::new(node.table_id);
         let order_key = node
             .column_orders
             .iter()

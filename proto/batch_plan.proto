@@ -46,7 +46,7 @@ message ScanRange {
 }
 
 message SourceScanNode {
-  plan_common.TableRefId table_ref_id = 1;
+  uint32 table_id = 1;
   // timestamp_ms is used for offset synchronization of high level consumer groups, this field will be deprecated if a more elegant approach is available in the future
   int64 timestamp_ms = 2;
   repeated int32 column_ids = 3;
@@ -61,21 +61,21 @@ message FilterNode {
 }
 
 message FilterScanNode {
-  plan_common.TableRefId table_ref_id = 1;
+  uint32 table_id = 1;
   repeated int32 column_ids = 2;
 }
 
 message InsertNode {
-  plan_common.TableRefId table_source_ref_id = 1;
+  uint32 table_source_id = 1;
   repeated int32 column_ids = 2;
 }
 
 message DeleteNode {
-  plan_common.TableRefId table_source_ref_id = 1;
+  uint32 table_source_id = 1;
 }
 
 message UpdateNode {
-  plan_common.TableRefId table_source_ref_id = 1;
+  uint32 table_source_id = 1;
   repeated expr.ExprNode exprs = 2;
 }
 

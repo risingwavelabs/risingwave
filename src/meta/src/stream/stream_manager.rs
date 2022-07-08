@@ -155,7 +155,7 @@ where
                 // If node is chain node, we insert upstream ids into chain's input (merge)
 
                 // get upstream table id
-                let table_id = TableId::from(&chain.table_ref_id);
+                let table_id = TableId::new(chain.table_id);
 
                 let upstream_actor_id = {
                     // 1. use table id to get upstream parallel_unit -> actor_id mapping
@@ -679,7 +679,6 @@ mod tests {
     use risingwave_pb::common::{HostAddress, WorkerType};
     use risingwave_pb::meta::table_fragments::fragment::FragmentDistributionType;
     use risingwave_pb::meta::table_fragments::Fragment;
-    use risingwave_pb::plan_common::TableRefId;
     use risingwave_pb::stream_plan::*;
     use risingwave_pb::stream_service::stream_service_server::{
         StreamService, StreamServiceServer,
@@ -772,18 +771,18 @@ mod tests {
             Ok(Response::new(DropActorsResponse::default()))
         }
 
+        async fn force_stop_actors(
+            &self,
+            _request: Request<ForceStopActorsRequest>,
+        ) -> std::result::Result<Response<ForceStopActorsResponse>, Status> {
+            Ok(Response::new(ForceStopActorsResponse::default()))
+        }
+
         async fn inject_barrier(
             &self,
             _request: Request<InjectBarrierRequest>,
         ) -> std::result::Result<Response<InjectBarrierResponse>, Status> {
             Ok(Response::new(InjectBarrierResponse::default()))
-        }
-
-        async fn barrier_complete(
-            &self,
-            _request: Request<BarrierCompleteRequest>,
-        ) -> std::result::Result<Response<BarrierCompleteResponse>, Status> {
-            Ok(Response::new(BarrierCompleteResponse::default()))
         }
 
         async fn create_source(
@@ -793,6 +792,13 @@ mod tests {
             unimplemented!()
         }
 
+        async fn sync_sources(
+            &self,
+            _request: Request<SyncSourcesRequest>,
+        ) -> std::result::Result<Response<SyncSourcesResponse>, Status> {
+            Ok(Response::new(SyncSourcesResponse::default()))
+        }
+
         async fn drop_source(
             &self,
             _request: Request<DropSourceRequest>,
@@ -800,18 +806,11 @@ mod tests {
             unimplemented!()
         }
 
-        async fn force_stop_actors(
+        async fn barrier_complete(
             &self,
-            _request: Request<ForceStopActorsRequest>,
-        ) -> std::result::Result<Response<ForceStopActorsResponse>, Status> {
-            Ok(Response::new(ForceStopActorsResponse::default()))
-        }
-
-        async fn sync_sources(
-            &self,
-            _request: Request<SyncSourcesRequest>,
-        ) -> std::result::Result<Response<SyncSourcesResponse>, Status> {
-            Ok(Response::new(SyncSourcesResponse::default()))
+            _request: Request<BarrierCompleteRequest>,
+        ) -> std::result::Result<Response<BarrierCompleteResponse>, Status> {
+            Ok(Response::new(BarrierCompleteResponse::default()))
         }
     }
 
@@ -933,35 +932,30 @@ mod tests {
         }
     }
 
-    #[tokio::test(flavor = "multi_thread")]
-    async fn test_create_materialized_view() -> Result<()> {
-        let services = MockServices::start("127.0.0.1", 12333).await?;
-
-        let table_ref_id = TableRefId {
-            schema_ref_id: None,
-            table_id: 0,
-        };
-        let table_id = TableId::from(&Some(table_ref_id.clone()));
-
-        let actors = (0..5)
+    fn make_mview_stream_actors(table_id: &TableId, count: usize) -> Vec<StreamActor> {
+        (0..count)
             .map(|i| StreamActor {
-                actor_id: i,
+                actor_id: i as u32,
                 // A dummy node to avoid panic.
-                nodes: Some(risingwave_pb::stream_plan::StreamNode {
-                    node_body: Some(
-                        risingwave_pb::stream_plan::stream_node::NodeBody::Materialize(
-                            risingwave_pb::stream_plan::MaterializeNode {
-                                table_ref_id: Some(table_ref_id.clone()),
-                                ..Default::default()
-                            },
-                        ),
-                    ),
+                nodes: Some(StreamNode {
+                    node_body: Some(NodeBody::Materialize(MaterializeNode {
+                        table_id: table_id.table_id(),
+                        ..Default::default()
+                    })),
                     operator_id: 1,
                     ..Default::default()
                 }),
                 ..Default::default()
             })
-            .collect::<Vec<_>>();
+            .collect_vec()
+    }
+
+    #[tokio::test(flavor = "multi_thread")]
+    async fn test_create_materialized_view() -> Result<()> {
+        let services = MockServices::start("127.0.0.1", 12333).await?;
+
+        let table_id = TableId::new(0);
+        let actors = make_mview_stream_actors(&table_id, 5);
 
         let mut fragments = BTreeMap::default();
         fragments.insert(
@@ -1036,31 +1030,8 @@ mod tests {
     async fn test_drop_materialized_view() -> Result<()> {
         let services = MockServices::start("127.0.0.1", 12334).await?;
 
-        let table_ref_id = TableRefId {
-            schema_ref_id: None,
-            table_id: 0,
-        };
-        let table_id = TableId::from(&Some(table_ref_id.clone()));
-
-        let actors = (0..5)
-            .map(|i| StreamActor {
-                actor_id: i,
-                // A dummy node to avoid panic.
-                nodes: Some(risingwave_pb::stream_plan::StreamNode {
-                    node_body: Some(
-                        risingwave_pb::stream_plan::stream_node::NodeBody::Materialize(
-                            risingwave_pb::stream_plan::MaterializeNode {
-                                table_ref_id: Some(table_ref_id.clone()),
-                                ..Default::default()
-                            },
-                        ),
-                    ),
-                    operator_id: 1,
-                    ..Default::default()
-                }),
-                ..Default::default()
-            })
-            .collect::<Vec<_>>();
+        let table_id = TableId::new(0);
+        let actors = make_mview_stream_actors(&table_id, 5);
 
         let mut fragments = BTreeMap::default();
         fragments.insert(
@@ -1168,31 +1139,8 @@ mod tests {
         let inject_barrier_err_success = "inject_barrier_err_success";
         let services = MockServices::start("127.0.0.1", 12335).await.unwrap();
 
-        let table_ref_id = TableRefId {
-            schema_ref_id: None,
-            table_id: 0,
-        };
-        let table_id = TableId::from(&Some(table_ref_id.clone()));
-
-        let actors = (0..5)
-            .map(|i| StreamActor {
-                actor_id: i,
-                // A dummy node to avoid panic.
-                nodes: Some(risingwave_pb::stream_plan::StreamNode {
-                    node_body: Some(
-                        risingwave_pb::stream_plan::stream_node::NodeBody::Materialize(
-                            risingwave_pb::stream_plan::MaterializeNode {
-                                table_ref_id: Some(table_ref_id.clone()),
-                                ..Default::default()
-                            },
-                        ),
-                    ),
-                    operator_id: 1,
-                    ..Default::default()
-                }),
-                ..Default::default()
-            })
-            .collect::<Vec<_>>();
+        let table_id = TableId::new(0);
+        let actors = make_mview_stream_actors(&table_id, 5);
 
         let mut fragments = BTreeMap::default();
         fragments.insert(
