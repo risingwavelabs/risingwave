@@ -168,12 +168,7 @@ where
         self.seal_current();
         self.builders
             .into_iter()
-            .flat_map(|(k, v)| {
-                v.finish().into_iter().map(move |mut builder| {
-                    builder.unit_id = k;
-                    builder
-                })
-            })
+            .flat_map(|(_k, v)| v.finish())
             .collect_vec()
     }
 }

@@ -28,7 +28,6 @@ pub struct SealedSstableBuilder {
     pub table_ids: Vec<u32>,
     pub upload_join_handle: JoinHandle<HummockResult<()>>,
     pub data_len: usize,
-    pub unit_id: u64,
 }
 
 /// A wrapper for [`SSTableBuilder`] which automatically split key-value pairs into multiple tables,
@@ -151,7 +150,6 @@ where
                 table_ids,
                 upload_join_handle,
                 data_len: len,
-                unit_id: 0,
             })
         }
     }

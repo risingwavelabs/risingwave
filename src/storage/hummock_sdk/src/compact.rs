@@ -38,14 +38,7 @@ pub fn compact_task_to_string(compact_task: &CompactTask) -> String {
         let tables: Vec<String> = level_entry
             .table_infos
             .iter()
-            .map(|table| {
-                format!(
-                    "[id: {}, unit: {}, {}KB]",
-                    table.id,
-                    table.unit_id,
-                    table.file_size / 1024
-                )
-            })
+            .map(|table| format!("[id: {}, {}KB]", table.id, table.file_size / 1024))
             .collect();
         writeln!(s, "Level {:?} {:?} ", level_entry.level_idx, tables).unwrap();
     }
@@ -71,8 +64,8 @@ pub fn append_sstable_info_to_string(s: &mut String, sstable_info: &SstableInfo)
     };
     writeln!(
         s,
-        "SstableInfo: id={:?}, KeyRange={:?}, unit={:?}, size={:?}",
-        sstable_info.id, key_range_str, sstable_info.unit_id, sstable_info.file_size
+        "SstableInfo: id={:?}, KeyRange={:?}, size={:?}",
+        sstable_info.id, key_range_str, sstable_info.file_size
     )
     .unwrap();
 }

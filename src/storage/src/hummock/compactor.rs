@@ -222,7 +222,7 @@ pub struct Compactor {
     compact_task: CompactTask,
 }
 
-pub type CompactOutput = (usize, Vec<(Sstable, u64, Vec<u32>)>);
+pub type CompactOutput = (usize, Vec<(Sstable, Vec<u32>)>);
 
 impl Compactor {
     /// Create a new compactor.
@@ -237,7 +237,7 @@ impl Compactor {
     pub async fn compact_shared_buffer_by_compaction_group(
         context: Arc<CompactorContext>,
         payload: UploadTaskPayload,
-    ) -> HummockResult<Vec<(CompactionGroupId, Sstable, u64, Vec<u32>)>> {
+    ) -> HummockResult<Vec<(CompactionGroupId, Sstable, Vec<u32>)>> {
         let mut grouped_payload: HashMap<CompactionGroupId, UploadTaskPayload> = HashMap::new();
         for uncommitted_list in payload {
             let mut next_inner = HashSet::new();
@@ -265,7 +265,7 @@ impl Compactor {
                     move |results| {
                         results
                             .into_iter()
-                            .map(move |result| (id_copy, result.0, result.1, result.2))
+                            .map(move |result| (id_copy, result.0, result.1))
                             .collect_vec()
                     },
                 ),
@@ -284,7 +284,7 @@ impl Compactor {
     pub async fn compact_shared_buffer(
         context: Arc<CompactorContext>,
         payload: UploadTaskPayload,
-    ) -> HummockResult<Vec<(Sstable, u64, Vec<u32>)>> {
+    ) -> HummockResult<Vec<(Sstable, Vec<u32>)>> {
         let mut start_user_keys = payload
             .iter()
             .flat_map(|data_list| data_list.iter().map(UncommittedData::start_user_key))
@@ -390,7 +390,7 @@ impl Compactor {
             let mut level0 = Vec::with_capacity(parallelism);
 
             for (_, sst) in output_ssts {
-                for (table, _, _) in &sst {
+                for (table, _) in &sst {
                     compactor
                         .context
                         .stats
@@ -603,7 +603,7 @@ impl Compactor {
             .reserve(self.compact_task.splits.len());
         let mut compaction_write_bytes = 0;
         for (_, ssts) in output_ssts {
-            for (sst, unit_id, table_ids) in ssts {
+            for (sst, table_ids) in ssts {
                 let sst_info = SstableInfo {
                     id: sst.id,
                     key_range: Some(risingwave_pb::hummock::KeyRange {
@@ -613,7 +613,6 @@ impl Compactor {
                     }),
                     file_size: sst.meta.estimated_size as u64,
                     table_ids,
-                    unit_id,
                 };
                 compaction_write_bytes += sst_info.file_size;
                 self.compact_task.sorted_output_ssts.push(sst_info);
@@ -728,12 +727,11 @@ impl Compactor {
             table_ids,
             upload_join_handle,
             data_len,
-            unit_id,
         } in sealed_builders
         {
             let sst = Sstable::new(table_id, meta);
             let len = data_len;
-            ssts.push((sst, unit_id, table_ids));
+            ssts.push((sst, table_ids));
             upload_join_handles.push(upload_join_handle);
 
             if self.context.is_share_buffer_compact {
