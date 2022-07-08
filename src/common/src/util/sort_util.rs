@@ -23,7 +23,7 @@ use crate::error::Result;
 
 pub const K_PROCESSING_WINDOW_SIZE: usize = 1024;
 
-#[derive(PartialEq, Eq, Copy, Clone, Debug, Hash)]
+#[derive(PartialEq, Eq, Copy, Clone, Debug)]
 pub enum OrderType {
     Ascending,
     Descending,
