@@ -13,12 +13,12 @@ select count(*) filter (where v1 > 2) from t
 2
 
 query I
-select count(*) filter (where v1 <= v2 and v2 <= v3) from t;
+select count(*) filter (where v1 <= v2 and v2 <= v3) from t
 ----
 2
 
-query I
-select v2, count(*) filter (where v1 > 1) as cnt from t group by v2 order by v2 ;
+query II
+select v2, count(*) filter (where v1 > 1) as cnt from t group by v2 order by v2
 ----
 3 2
 4 1
