@@ -77,7 +77,8 @@
   batch_plan: |
     BatchTopN { order: [$0 DESC], limit: 5, offset: 0 }
       BatchExchange { order: [], dist: Single }
-        BatchScan { table: t, columns: [v1, v2] }
+        BatchTopN { order: [$0 DESC], limit: 5, offset: 0 }
+          BatchScan { table: t, columns: [v1, v2] }
   stream_plan: |
     StreamMaterialize { columns: [v1, v2, _row_id(hidden)], pk_columns: [_row_id], order_descs: [v1, _row_id] }
       StreamTopN { order: [$0 DESC], limit: 5, offset: 0 }
@@ -85,11 +86,28 @@
           StreamTableScan { table: t, columns: [v1, v2, _row_id], pk_indices: [2] }
 - sql: |
     create table t (v1 bigint, v2 double precision);
+    select * from t limit 3 offset 4;
+  batch_plan: |
+    BatchLimit { limit: 3, offset: 4 }
+      BatchExchange { order: [], dist: Single }
+        BatchLimit { limit: 7, offset: 0 }
+          BatchScan { table: t, columns: [v1, v2] }
+- sql: |
+    create table t (v1 bigint, v2 double precision);
+    select * from t limit 5;
+  batch_plan: |
+    BatchLimit { limit: 5, offset: 0 }
+      BatchExchange { order: [], dist: Single }
+        BatchLimit { limit: 5, offset: 0 }
+          BatchScan { table: t, columns: [v1, v2] }
+- sql: |
+    create table t (v1 bigint, v2 double precision);
     select * from t order by v1 desc limit 5 offset 7;
   batch_plan: |
     BatchTopN { order: [$0 DESC], limit: 5, offset: 7 }
       BatchExchange { order: [], dist: Single }
-        BatchScan { table: t, columns: [v1, v2] }
+        BatchTopN { order: [$0 DESC], limit: 12, offset: 0 }
+          BatchScan { table: t, columns: [v1, v2] }
   stream_plan: |
     StreamMaterialize { columns: [v1, v2, _row_id(hidden)], pk_columns: [_row_id], order_descs: [v1, _row_id] }
       StreamTopN { order: [$0 DESC], limit: 5, offset: 7 }
