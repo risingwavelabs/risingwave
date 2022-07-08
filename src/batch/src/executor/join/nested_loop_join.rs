@@ -687,14 +687,14 @@ mod tests {
 
         let expected_chunk = DataChunk::from_pretty(
             "i f   i F
-             1 6.1 . .
              2 8.4 2 6.1
              3 3.9 3 8.9
              3 6.6 3 8.9
-             4 0.7 . .
              6 5.5 6 3.4
              6 5.6 6 3.4
-             8 7.0 8 3.5",
+             8 7.0 8 3.5
+             1 6.1 . .
+             4 0.7 . .",
         );
 
         test_fixture.do_test(expected_chunk).await;
