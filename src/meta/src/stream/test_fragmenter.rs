@@ -261,9 +261,8 @@ fn make_stream_node() -> StreamNode {
         pk_indices: vec![],
         node_body: Some(NodeBody::Materialize(MaterializeNode {
             table_id: 1,
-            column_ids: vec![0_i32, 1_i32],
+            table: Some(make_internal_table(true)),
             column_orders: vec![make_column_order(1), make_column_order(2)],
-            distribution_key: Default::default(),
         })),
         fields: vec![], // TODO: fill this later
         operator_id: 7,
