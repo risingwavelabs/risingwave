@@ -16,8 +16,9 @@ use std::collections::{BTreeMap, HashMap, HashSet};
 use std::sync::Arc;
 
 use itertools::Itertools;
+use risingwave_common::bail;
 use risingwave_common::catalog::TableId;
-use risingwave_common::error::{internal_error, Result};
+use risingwave_common::error::Result;
 use risingwave_common::types::{ParallelUnitId, VIRTUAL_NODE_COUNT};
 use risingwave_pb::catalog::{Source, Table};
 use risingwave_pb::common::{ActorInfo, ParallelUnitMapping, WorkerType};
@@ -290,37 +291,43 @@ where
             vec![],
             |revert_funcs: Vec<futures::future::BoxFuture<()>>| {
                 tokio::spawn(async move {
-                    for revert_func in revert_funcs {
+                    for revert_func in revert_funcs.into_iter().rev() {
                         revert_func.await;
                     }
                 });
             },
         );
 
-        let nodes = self
-            .cluster_manager
-            .list_worker_node(
-                WorkerType::ComputeNode,
-                Some(risingwave_pb::common::worker_node::State::Running),
-            )
-            .await;
-        if nodes.is_empty() {
-            return Err(internal_error("no available compute node in the cluster"));
-        }
+        // Schedule actors to parallel units. `locations` will records which parallel unit an actor
+        // will be scheduled to, and which worker node this parallel unit is on.
+        let locations = {
+            // List all running worker nodes.
+            let workers = self
+                .cluster_manager
+                .list_worker_node(
+                    WorkerType::ComputeNode,
+                    Some(risingwave_pb::common::worker_node::State::Running),
+                )
+                .await;
+            if workers.is_empty() {
+                bail!("no available compute node in the cluster");
+            }
 
-        let mut locations = ScheduledLocations::new();
-        locations.node_locations = nodes.into_iter().map(|node| (node.id, node)).collect();
+            // Create empty locations.
+            let mut locations = ScheduledLocations::with_workers(workers);
 
-        let topological_order = table_fragments.generate_topological_order();
+            // Schedule each fragment(actors) to nodes, recorded in `locations`.
+            // Vnode mapping in fragment will be filled in as well.
+            let topological_order = table_fragments.generate_topological_order();
+            for fragment_id in topological_order {
+                let fragment = table_fragments.fragments.get_mut(&fragment_id).unwrap();
+                self.scheduler.schedule(fragment, &mut locations).await?;
+            }
 
-        // Schedule each fragment(actors) to nodes. Vnode mapping in fragment will be filled in
-        // as well.
-        for fragment_id in topological_order {
-            let fragment = table_fragments.fragments.get_mut(&fragment_id).unwrap();
-            self.scheduler.schedule(fragment, &mut locations).await?;
-        }
+            locations
+        };
 
-        // resolve chain node infos, including:
+        // Resolve chain node infos, including:
         // 1. insert upstream actor id in merge node
         // 2. insert parallel unit id in batch query node
         self.resolve_chain_node(
@@ -332,92 +339,89 @@ where
         )
         .await?;
 
-        // Verify whether all same_as_upstream constraints are satisfied.
-        //
-        // Currently, the scheduler (when there's no scale-in or scale-out) will always schedule
-        // chain node on the same node as upstreams. However, this constraint will easily be broken
-        // if parallel units are not aligned between upstream nodes.
-
-        // Record actor -> fragment mapping for finding out downstream fragments.
-        let mut actor_to_vnode_mapping = HashMap::new();
-        for fragment in table_fragments.fragments.values() {
-            for actor in &fragment.actors {
-                actor_to_vnode_mapping.insert(actor.actor_id, fragment.vnode_mapping.clone());
+        // Record vnode to parallel unit mapping for actors.
+        let actor_to_vnode_parallel_unit_mapping = {
+            let mut mapping = HashMap::new();
+            for fragment in table_fragments.fragments.values() {
+                for actor in &fragment.actors {
+                    mapping
+                        .try_insert(actor.actor_id, fragment.vnode_mapping.clone())
+                        .unwrap();
+                }
             }
-        }
+            mapping
+        };
 
         // Fill hash dispatcher's mapping with scheduled locations.
-        table_fragments
-            .fragments
-            .iter_mut()
-            .for_each(|(_, fragment)| {
-                fragment.actors.iter_mut().for_each(|actor| {
-                    actor.dispatcher.iter_mut().for_each(|dispatcher| {
-                        if dispatcher.get_type().unwrap() == DispatcherType::Hash {
-                            let downstream_actor_id =
-                                dispatcher.downstream_actor_id.first().unwrap_or_else(|| {
-                                    panic!(
-                                        "hash dispatcher should have at least one downstream actor"
-                                    );
-                                });
-                            let hash_mapping = actor_to_vnode_mapping
-                                .get(downstream_actor_id)
+        for fragment in table_fragments.fragments.values_mut() {
+            // Filter out hash dispatchers in this fragment.
+            let dispatchers = fragment
+                .actors
+                .iter_mut()
+                .flat_map(|actor| actor.dispatcher.iter_mut())
+                .filter(|d| d.get_type().unwrap() == DispatcherType::Hash);
+
+            for dispatcher in dispatchers {
+                match dispatcher.downstream_actor_id.as_slice() {
+                    [] => panic!("hash dispatcher should have at least one downstream actor"),
+
+                    // There exists some unoptimized situation where a hash dispatcher has ONLY ONE
+                    // downstream actor, which makes it behave like a simple dispatcher. As a
+                    // workaround, we specially compute the consistent hash mapping here.
+                    // This arm could be removed after the optimizer has been fully implemented.
+                    &[single_downstream_actor] => {
+                        dispatcher.hash_mapping = Some(ActorMapping {
+                            original_indices: vec![VIRTUAL_NODE_COUNT as u64 - 1],
+                            data: vec![single_downstream_actor],
+                        });
+                    }
+
+                    // For normal cases, we can simply transform the mapping from downstream actors
+                    // to current hash dispatchers.
+                    downstream_actors @ &[first_downstream_actor, ..] => {
+                        // All actors in the downstream fragment should have the same parallel unit
+                        // mapping, find it with the first downstream actor.
+                        let downstream_vnode_parallel_unit_mapping =
+                            actor_to_vnode_parallel_unit_mapping
+                                .get(&first_downstream_actor)
                                 .unwrap()
                                 .as_ref()
                                 .unwrap_or_else(|| {
                                     panic!(
-                                        "actor {} should have a vnode mapping",
-                                        downstream_actor_id
+                                        "no vnode mapping for actor {}",
+                                        &first_downstream_actor
                                     );
                                 });
+                        // Map the parallel unit to downstream actors.
+                        let parallel_unit_actor_map = downstream_actors
+                            .iter()
+                            .map(|actor_id| {
+                                (
+                                    locations.actor_locations.get(actor_id).unwrap().id,
+                                    *actor_id,
+                                )
+                            })
+                            .collect::<HashMap<_, _>>();
 
-                            let downstream_actors = &dispatcher.downstream_actor_id;
+                        let ParallelUnitMapping {
+                            original_indices,
+                            data,
+                            ..
+                        } = downstream_vnode_parallel_unit_mapping;
+                        let data = data
+                            .iter()
+                            .map(|parallel_unit_id| parallel_unit_actor_map[parallel_unit_id])
+                            .collect_vec();
+                        dispatcher.hash_mapping = Some(ActorMapping {
+                            original_indices: original_indices.clone(),
+                            data,
+                        });
+                    }
+                }
+            }
+        }
 
-                            // `self.hash_parallel_count` as the number of its downstream actors.
-                            // However, since the frontend optimizer is still WIP, there exists some
-                            // unoptimized situation where a hash dispatcher has ONLY ONE downstream
-                            // actor, which makes it behave like a simple dispatcher. As a
-                            // workaround, we specially compute the consistent hash mapping here.
-                            // The `if` branch could be removed after the optimizer has been fully
-                            // implemented.
-                            if downstream_actors.len() == 1 {
-                                dispatcher.hash_mapping = Some(ActorMapping {
-                                    original_indices: vec![VIRTUAL_NODE_COUNT as u64 - 1],
-                                    data: vec![downstream_actors[0]],
-                                });
-                            } else {
-                                // extract "parallel unit -> downstream actor" mapping from
-                                // locations.
-                                let parallel_unit_actor_map = downstream_actors
-                                    .iter()
-                                    .map(|actor_id| {
-                                        (
-                                            locations.actor_locations.get(actor_id).unwrap().id,
-                                            *actor_id,
-                                        )
-                                    })
-                                    .collect::<HashMap<_, _>>();
-                                let ParallelUnitMapping {
-                                    original_indices,
-                                    data,
-                                    ..
-                                } = hash_mapping;
-                                let data = data
-                                    .iter()
-                                    .map(|parallel_unit_id| {
-                                        parallel_unit_actor_map[parallel_unit_id]
-                                    })
-                                    .collect_vec();
-                                dispatcher.hash_mapping = Some(ActorMapping {
-                                    original_indices: original_indices.clone(),
-                                    data,
-                                });
-                            };
-                        }
-                    });
-                })
-            });
-
+        // Mark the actors to be built as `State::Building`.
         let actor_info = locations
             .actor_locations
             .iter()
@@ -431,27 +435,36 @@ where
                 )
             })
             .collect();
-
         table_fragments.set_actor_status(actor_info);
         let actor_map = table_fragments.actor_map();
 
         // Actors on each stream node will need to know where their upstream lies. `actor_info`
-        // includes such information. It contains: 1. actors in the current create
-        // materialized view request. 2. all upstream actors.
-        let mut actor_infos_to_broadcast = locations.actor_infos();
-        actor_infos_to_broadcast.extend(upstream_node_actors.iter().flat_map(
-            |(node_id, upstreams)| {
-                upstreams.iter().map(|up_id| ActorInfo {
-                    actor_id: *up_id,
-                    host: locations.node_locations.get(node_id).unwrap().host.clone(),
-                })
-            },
-        ));
+        // includes such information. It contains:
+        // 1. actors in the current create materialized view request.
+        // 2. all upstream actors.
+        let actor_infos_to_broadcast = {
+            let current = locations.actor_infos();
+            let upstream = upstream_node_actors
+                .iter()
+                .flat_map(|(node_id, upstreams)| {
+                    upstreams.iter().map(|up_id| ActorInfo {
+                        actor_id: *up_id,
+                        host: locations
+                            .worker_locations
+                            .get(node_id)
+                            .unwrap()
+                            .host
+                            .clone(),
+                    })
+                });
+            current.chain(upstream).collect_vec()
+        };
 
         let actor_host_infos = locations.actor_info_map();
 
-        let node_actors = locations.node_actors();
+        let node_actors = locations.worker_actors();
 
+        // (upstream_actor_id, dispatcher_id) -> Vec<downstream_actor_info>
         let dispatches = dispatches
             .iter()
             .map(|(up_id, down_ids)| {
@@ -470,42 +483,46 @@ where
             })
             .collect::<HashMap<_, _>>();
 
-        let up_id_to_down_info = dispatches
-            .iter()
-            .map(|((up_id, _dispatcher_id), down_info)| (*up_id, down_info.clone()))
-            .collect::<HashMap<_, _>>();
+        // Hanging channels for each worker node.
+        let mut node_hanging_channels = {
+            // upstream_actor_id -> Vec<downstream_actor_info>
+            let up_id_to_down_info = dispatches
+                .iter()
+                .map(|((up_id, _dispatcher_id), down_info)| (*up_id, down_info))
+                .collect::<HashMap<_, _>>();
 
-        let mut node_hanging_channels = upstream_node_actors
-            .iter()
-            .map(|(node_id, up_ids)| {
-                (
-                    *node_id,
-                    up_ids
-                        .iter()
-                        .flat_map(|up_id| {
-                            up_id_to_down_info
-                                .get(up_id)
-                                .expect("expected dispatches info")
-                                .iter()
-                                .map(|down_info| HangingChannel {
-                                    upstream: Some(ActorInfo {
-                                        actor_id: *up_id,
-                                        host: None,
-                                    }),
-                                    downstream: Some(down_info.clone()),
-                                })
-                        })
-                        .collect_vec(),
-                )
-            })
-            .collect::<HashMap<_, _>>();
+            upstream_node_actors
+                .iter()
+                .map(|(node_id, up_ids)| {
+                    (
+                        *node_id,
+                        up_ids
+                            .iter()
+                            .flat_map(|up_id| {
+                                up_id_to_down_info
+                                    .get(up_id)
+                                    .expect("expected dispatches info")
+                                    .iter()
+                                    .map(|down_info| HangingChannel {
+                                        upstream: Some(ActorInfo {
+                                            actor_id: *up_id,
+                                            host: None,
+                                        }),
+                                        downstream: Some(down_info.clone()),
+                                    })
+                            })
+                            .collect_vec(),
+                    )
+                })
+                .collect::<HashMap<_, _>>()
+        };
 
         // We send RPC request in two stages.
         // The first stage does 2 things: broadcast actor info, and send local actor ids to
         // different WorkerNodes. Such that each WorkerNode knows the overall actor
         // allocation, but not actually builds it. We initialize all channels in this stage.
         for (node_id, actors) in &node_actors {
-            let node = locations.node_locations.get(node_id).unwrap();
+            let node = locations.worker_locations.get(node_id).unwrap();
 
             let client = self.client_pool.get(node).await?;
 
@@ -533,8 +550,9 @@ where
                 .await?;
         }
 
+        // Build remaining hanging channels on compute nodes.
         for (node_id, hanging_channels) in node_hanging_channels {
-            let node = locations.node_locations.get(&node_id).unwrap();
+            let node = locations.worker_locations.get(&node_id).unwrap();
 
             let client = self.client_pool.get(node).await?;
             let request_id = Uuid::new_v4().to_string();
@@ -567,7 +585,7 @@ where
         // In the second stage, each [`WorkerNode`] builds local actors and connect them with
         // channels.
         for (node_id, actors) in node_actors {
-            let node = locations.node_locations.get(&node_id).unwrap();
+            let node = locations.worker_locations.get(&node_id).unwrap();
 
             let client = self.client_pool.get(node).await?;
 
@@ -582,8 +600,12 @@ where
                 .await?;
         }
 
-        let mut source_fragments = HashMap::new();
-        fetch_source_fragments(&mut source_fragments, &table_fragments);
+        // Extract the fragments that include source operators.
+        let source_fragments = {
+            let mut source_fragments = HashMap::new();
+            fetch_source_fragments(&mut source_fragments, &table_fragments);
+            source_fragments
+        };
 
         // Add table fragments to meta store with state: `State::Creating`.
         self.fragment_manager
@@ -610,11 +632,11 @@ where
                 .cancel_create_table_fragments(&table_id)
                 .await?;
             return Err(err);
-        } else {
-            self.source_manager
-                .patch_update(Some(source_fragments), Some(init_split_assignment))
-                .await?;
         }
+
+        self.source_manager
+            .patch_update(Some(source_fragments), Some(init_split_assignment))
+            .await?;
 
         revert_funcs.clear();
         Ok(())
@@ -628,8 +650,12 @@ where
             .select_table_fragments_by_table_id(table_id)
             .await?;
 
-        let mut source_fragments = HashMap::new();
-        fetch_source_fragments(&mut source_fragments, &table_fragments);
+        // Extract the fragments that include source operators.
+        let source_fragments = {
+            let mut source_fragments = HashMap::new();
+            fetch_source_fragments(&mut source_fragments, &table_fragments);
+            source_fragments
+        };
 
         self.barrier_manager
             .run_command(Command::DropMaterializedView(*table_id))
