@@ -106,10 +106,10 @@ message HashJoinNode {
   catalog.Table left_table = 6;
   // Used for internal table states.
   catalog.Table right_table = 7;
+  // Whether to optimize for append only stream.
   // It is true when the input is append-only
   bool is_append_only = 8;
-  // Whether to optimize for append only stream.
-  // the output indices of current node
+  // The output indices of current node
   repeated uint32 output_indices = 9;
 }
 

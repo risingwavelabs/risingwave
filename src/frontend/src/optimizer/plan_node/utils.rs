@@ -59,7 +59,9 @@ impl TableCatalogBuilder {
         }
     }
 
-    /// Add a column from Field info.
+    /// Add a column from Field info. Should use `add_order_column` to build order keys.
+    /// Note that we should make sure column_id of columns and order keys index are 1-1 mapping
+    /// (e.g. in hash join)
     pub fn add_column_desc_from_field_without_order_type(&mut self, field: &Field) {
         let column_id = self.cur_col_id();
         // Add column desc.
