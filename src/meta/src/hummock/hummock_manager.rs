@@ -775,7 +775,6 @@ where
             let old_version = versioning_guard.current_version();
             let versioning = versioning_guard.deref_mut();
             let mut current_version_id = VarTransaction::new(&mut versioning.current_version_id);
-            let mut hummock_versions = VarTransaction::new(&mut versioning.hummock_versions);
             let mut hummock_version_deltas =
                 VarTransaction::new(&mut versioning.hummock_version_deltas);
             let mut stale_sstables = VarTransaction::new(&mut versioning.stale_sstables);
@@ -820,7 +819,6 @@ where
             current_version_id.increase();
             new_version.id = current_version_id.id();
             version_delta.id = current_version_id.id();
-            hummock_versions.insert(new_version.id, new_version);
             hummock_version_deltas.insert(version_delta.id, version_delta);
 
             for SstableInfo { id: ref sst_id, .. } in &compact_task.sorted_output_ssts {
@@ -847,10 +845,9 @@ where
                 version_stale_sstables,
                 sstable_id_infos
             )?;
-            // commit_multi_var(hummock_versions) has 2 parts:
-            // store hummock_versions into etcd
-            // hummock_versions.commit();
-            hummock_versions.commit();
+            versioning
+                .hummock_versions
+                .insert(new_version.id, new_version);
         } else {
             // The compaction task is cancelled.
             commit_multi_var!(
