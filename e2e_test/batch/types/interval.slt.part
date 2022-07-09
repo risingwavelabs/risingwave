@@ -52,3 +52,13 @@ query T
 SELECT interval '1' day - interval '12' hour = interval '12' hour;
 ----
 t
+
+query T
+SELECT 1.5 * INTERVAL '3 mins';
+----
+00:04:30
+
+query T
+SELECT INTERVAL '3 mins' * 1.5;
+----
+00:04:30

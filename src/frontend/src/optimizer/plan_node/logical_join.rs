@@ -792,7 +792,7 @@ impl ToStream for LogicalJoin {
                 self.right()
             };
 
-            if let Some(agg) = maybe_simple_agg.as_logical_agg() && agg.group_keys().is_empty() {
+            if let Some(agg) = maybe_simple_agg.as_logical_agg() && agg.group_key().is_empty() {
                 /* do nothing */
             } else {
                 return Err(nested_loop_join_error);
@@ -836,8 +836,15 @@ impl ToStream for LogicalJoin {
                 Distribution::Single
             );
 
-            let plan = StreamDynamicFilter::new(predicate.other_cond().clone(), left, right).into();
+            let plan = StreamDynamicFilter::new(
+                left_ref_index,
+                predicate.other_cond().clone(),
+                left,
+                right,
+            )
+            .into();
 
+            // TODO: `DynamicFilterExecutor` should use `output_indices` in `ChunkBuilder`
             if self.output_indices != (0..self.internal_column_num()).collect::<Vec<_>>() {
                 let logical_project = LogicalProject::with_mapping(
                     plan,

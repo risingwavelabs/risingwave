@@ -191,7 +191,7 @@ impl StreamFragmenter {
                 // memorize table id for later use
                 state
                     .dependent_table_ids
-                    .insert(TableId::from(&node.table_ref_id));
+                    .insert(TableId::new(node.table_id));
             }
 
             _ => {}
@@ -413,7 +413,7 @@ mod tests {
             id: TableId::placeholder().table_id,
             name: String::new(),
             columns,
-            order_keys: vec![ColumnOrder {
+            order_key: vec![ColumnOrder {
                 index: 0,
                 order_type: 2,
             }],

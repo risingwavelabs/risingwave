@@ -17,7 +17,6 @@ use std::fmt;
 use risingwave_common::error::Result;
 use risingwave_pb::batch_plan::plan_node::NodeBody;
 use risingwave_pb::batch_plan::UpdateNode;
-use risingwave_pb::plan_common::TableRefId;
 
 use super::{
     LogicalUpdate, PlanBase, PlanRef, PlanTreeNodeUnary, ToBatchProst, ToDistributedBatch,
@@ -73,10 +72,6 @@ impl ToDistributedBatch for BatchUpdate {
 
 impl ToBatchProst for BatchUpdate {
     fn to_batch_prost_body(&self) -> NodeBody {
-        let table_id = TableRefId {
-            table_id: self.logical.source_id().table_id() as i32,
-            ..Default::default()
-        };
         let exprs = self
             .logical
             .exprs()
@@ -85,7 +80,7 @@ impl ToBatchProst for BatchUpdate {
             .collect();
 
         NodeBody::Update(UpdateNode {
-            table_source_ref_id: Some(table_id),
+            table_source_id: self.logical.source_id().table_id(),
             exprs,
         })
     }
