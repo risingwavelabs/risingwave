@@ -65,6 +65,7 @@ pub struct RangeCache<S: StateStore> {
 
 type ScalarRange = (Bound<ScalarImpl>, Bound<ScalarImpl>);
 
+// TODO: add rustdoc comments.
 impl<S: StateStore> RangeCache<S> {
     pub fn new(state_table: StateTable<S>, current_epoch: u64) -> Self {
         Self {
@@ -104,7 +105,11 @@ impl<S: StateStore> RangeCache<S> {
         Ok(())
     }
 
-    pub fn range(&self, range: ScalarRange, _latest_is_lower: bool) -> Range<ScalarImpl, HashSet<Row>> {
+    pub fn range(
+        &self,
+        range: ScalarRange,
+        _latest_is_lower: bool,
+    ) -> Range<ScalarImpl, HashSet<Row>> {
         // TODO (cache behaviour):
         // What we want: At the end of every epoch we will try to read
         // ranges based on the new value. The values in the range may not all be cached.
@@ -116,7 +121,7 @@ impl<S: StateStore> RangeCache<S> {
         // If the new range is non-overlapping, we will delete the old range, and store
         // `self.capacity` elements from the new range.
         //
-        // We will always prefer to cache values that are closer to the current value.
+        // We will always prefer to cache values that are closer to the latest value.
         //
         // If this requested range is too large, it will cause OOM.
         //
