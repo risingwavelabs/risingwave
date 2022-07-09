@@ -28,7 +28,7 @@ message SourceNode {
 }
 
 message SinkNode {
-  plan_common.TableRefId table_ref_id = 1;
+  uint32 table_id = 1;
   map<string, string> properties = 2;
 }
 
