@@ -116,24 +116,9 @@ message HashJoinNode {
 message DynamicFilterNode {
   uint32 left_key = 1;
   // Must be one of <, <=, >, >=
-  expr.ExprNode condition = 3;
-  // Used for internal table states.
-  // catalog.Table left_table = 4;
-  // uint32 dist_key_l = 8;
-  // It is true when the right side of the inequality predicate is monotonically:
-  // - decreasing for <, <=, increasing for >, >=
-  // bool is_monotonic = 10;
-  // the output indices of current node
-  // repeated uint32 output_indices = 11;
-}
-
-message DynamicFilterNode {
-  uint32 left_key = 1;
-  // Must be one of <, <=, >, >=
   expr.ExprNode condition = 2;
   // Used for internal table states.
-  // catalog.Table left_table = 4;
-  // uint32 dist_key_l = 8;
+  catalog.Table left_table = 3;
   // It is true when the right side of the inequality predicate is monotonically:
   // - decreasing for <, <=, increasing for >, >=
   // bool is_monotonic = 10;

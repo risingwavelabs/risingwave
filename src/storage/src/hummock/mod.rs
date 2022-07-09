@@ -190,7 +190,7 @@ impl HummockStorage {
     fn get_compaction_group_id(&self, table_id: TableId) -> CompactionGroupId {
         self.compaction_group_client
             .get_compaction_group_id(table_id.table_id)
-            .unwrap_or_else(|| panic!("{} matches a compaction group", table_id.table_id))
+            .unwrap_or_else(|| panic!("{} does not match a compaction group", table_id.table_id))
     }
 
     pub async fn update_compaction_group_cache(&self) -> HummockResult<()> {

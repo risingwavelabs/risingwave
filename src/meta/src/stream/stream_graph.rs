@@ -641,6 +641,20 @@ impl StreamGraphBuilder {
                             check_and_fill_internal_table(table.id, Some(table.clone()));
                         }
                     }
+
+                    NodeBody::DynamicFilter(node) => {
+                        if let Some(table) = &mut node.left_table {
+                            table.id += table_id_offset;
+                            table.schema_id = ctx.schema_id;
+                            table.database_id = ctx.database_id;
+                            table.name = generate_intertable_name_with_type(
+                                &ctx.mview_name,
+                                table.id,
+                                "DynamicFilterLeft",
+                            );
+                            check_and_fill_internal_table(table.id, Some(table.clone()));
+                        }
+                    }
                     _ => {}
                 }
 
