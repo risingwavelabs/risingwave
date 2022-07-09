@@ -29,9 +29,15 @@ impl ExecutorBuilder for MergeExecutorBuilder {
     ) -> Result<BoxedExecutor> {
         let node = try_match_expand!(x_node.get_node_body().unwrap(), NodeBody::Merge)?;
         let upstreams = node.get_upstream_actor_id();
+        let upstream_fragment_id = node.get_upstream_fragment_id();
         let fields = node.fields.iter().map(Field::from).collect();
         let schema = Schema::new(fields);
-        let mut rxs = stream.get_receive_message(params.actor_id, upstreams)?;
+        let mut rxs = stream.get_receive_message(
+            params.actor_id,
+            params.fragment_id,
+            upstreams,
+            upstream_fragment_id,
+        )?;
         let actor_context = params.actor_context;
 
         if upstreams.len() == 1 {

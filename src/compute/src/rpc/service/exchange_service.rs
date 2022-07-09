@@ -76,9 +76,13 @@ impl ExchangeService for ExchangeServiceImpl {
             .remote_addr()
             .ok_or_else(|| Status::unavailable("get_stream connection unestablished"))?;
         let req = request.into_inner();
-        let up_down_ids = (req.up_fragment_id, req.down_fragment_id);
-        let receiver = self.stream_mgr.take_receiver(up_down_ids)?;
-        match self.get_stream_impl(peer_addr, receiver, up_down_ids).await {
+        let up_down_actor_ids = (req.up_actor_id, req.down_actor_id);
+        let up_down_fragment_ids = (req.up_fragment_id, req.down_fragment_id);
+        let receiver = self.stream_mgr.take_receiver(up_down_actor_ids)?;
+        match self
+            .get_stream_impl(peer_addr, receiver, up_down_actor_ids, up_down_fragment_ids)
+            .await
+        {
             Ok(resp) => Ok(resp),
             Err(e) => {
                 error!(
@@ -108,14 +112,18 @@ impl ExchangeServiceImpl {
         &self,
         peer_addr: SocketAddr,
         mut receiver: Receiver<Message>,
-        up_down_ids: (u32, u32),
+        up_down_actor_ids: (u32, u32),
+        up_down_fragment_ids: (u32, u32),
     ) -> Result<Response<<Self as ExchangeService>::GetStreamStream>> {
         let (tx, rx) = tokio::sync::mpsc::channel(EXCHANGE_BUFFER_SIZE);
         let metrics = self.metrics.clone();
         tracing::trace!(target: "events::compute::exchange", peer_addr = %peer_addr, "serve stream exchange RPC");
         tokio::spawn(async move {
-            let up_actor_id = up_down_ids.0.to_string();
-            let down_actor_id = up_down_ids.1.to_string();
+            let up_actor_id = up_down_actor_ids.0.to_string();
+            let down_actor_id = up_down_actor_ids.1.to_string();
+            let up_fragment_id = up_down_fragment_ids.0.to_string();
+            let down_fragment_id = up_down_fragment_ids.1.to_string();
+
             let mut rr = 0;
             const SAMPLING_FREQUENCY: u64 = 100;
 
@@ -161,6 +169,10 @@ impl ExchangeServiceImpl {
                                 metrics
                                     .stream_exchange_bytes
                                     .with_label_values(&[&up_actor_id, &down_actor_id])
+                                    .inc_by(bytes as u64);
+                                metrics
+                                    .stream_fragment_exchange_bytes
+                                    .with_label_values(&[&up_fragment_id, &down_fragment_id])
                                     .inc_by(bytes as u64);
                                 Ok(())
                             }
