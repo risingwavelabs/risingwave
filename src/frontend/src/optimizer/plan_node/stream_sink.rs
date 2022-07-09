@@ -17,8 +17,6 @@ use std::collections::HashMap;
 
 use risingwave_common::error::Result;
 use risingwave_pb::stream_plan::stream_node::NodeBody as ProstStreamNode;
-use crate::optimizer::plan_node::PlanTreeNodeUnary;
-use crate::catalog::ColumnId;
 
 use super::{PlanBase, PlanRef, ToStreamProst};
 
@@ -27,6 +25,7 @@ use super::{PlanBase, PlanRef, ToStreamProst};
 pub struct StreamSink {
     pub base: PlanBase,
     input: PlanRef,
+    properties: HashMap<String, String>
 }
 
 impl StreamSink {
@@ -46,9 +45,9 @@ impl StreamSink {
     }
 
     #[must_use]
-    pub fn new(input: PlanRef) -> Self {
+    pub fn new(input: PlanRef, properties: HashMap<String, String>) -> Self {
         let base = Self::derive_plan_base(&input).unwrap();
-        Self { base, input }
+        Self { base, input, properties }
     }
 }
 
@@ -65,9 +64,13 @@ impl ToStreamProst for StreamSink {
     fn to_stream_prost_body(&self) -> ProstStreamNode {
         use risingwave_pb::stream_plan::*;
 
+        let input = self.input.clone();
+        let table = input.as_stream_table_scan().unwrap();
+        let table_desc = table.logical().table_desc();
+
         ProstStreamNode::Sink(SinkNode {
-            table_ref_id: None,
-            properties: HashMap::new()
+            table_id: table_desc.table_id.table_id(),
+            properties: self.properties.clone()
         })
     }
 }

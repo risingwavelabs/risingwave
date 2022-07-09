@@ -96,8 +96,6 @@ pub async fn handle_create_mv(
         (table, graph)
     };
 
-    dbg!(&graph);
-
     let catalog_writer = session.env().catalog_writer();
     catalog_writer
         .create_materialized_view(table, graph)
