@@ -45,8 +45,7 @@ pub struct KafkaConfig {
 
     // Optional. If not specified, the default value is None and messages are sent to random
     // partition. if we want to guarantee exactly once delivery, we need to specify the
-    // partition number.
-    // (the partition number should set by meta)
+    // partition number. The partition number should set by meta.
     pub partition: Option<i32>,
 
     #[serde(rename = "sink.type")]
@@ -130,7 +129,7 @@ impl KafkaSink {
         Err(err_placeholder)
     }
 
-    async fn send<'a, K, P>(&self, mut record: BaseRecord<'a, K, P>) -> KafkaResult<()>
+    async fn send<'a, K, P>(&'a self, mut record: BaseRecord<'a, K, P>) -> KafkaResult<()>
     where
         K: ToBytes + ?Sized,
         P: ToBytes + ?Sized,
@@ -160,18 +159,21 @@ impl KafkaSink {
         Err(err_placeholder)
     }
 
+    fn gen_message_key(&self) -> String {
+        format!(
+            "{}-{}",
+            self.config.identifier,
+            self.in_transaction_epoch.unwrap()
+        )
+    }
+
     async fn append_only(&self, chunk: StreamChunk, schema: &Schema) -> Result<()> {
         for (op, row) in chunk.rows() {
             if op == Op::Insert {
                 let record = Value::Object(record_to_json(row, schema.fields.clone())?).to_string();
-                let msg_key = format!(
-                    "{}-{}",
-                    self.config.identifier,
-                    self.in_transaction_epoch.unwrap()
-                );
                 self.send(
                     BaseRecord::to(self.config.topic.as_str())
-                        .key(msg_key.as_bytes())
+                        .key(self.gen_message_key().as_bytes())
                         .payload(record.as_bytes()),
                 )
                 .await?;
@@ -400,6 +402,8 @@ impl KafkaTransactionConductor {
 
 mod test {
     #[allow(unused_imports)]
+    use maplit::hashmap;
+    #[allow(unused_imports)]
     use risingwave_common::types::OrderedF32;
     #[allow(unused_imports)]
     use risingwave_common::{
@@ -413,21 +417,49 @@ mod test {
     #[allow(unused_imports)]
     use super::*;
 
-    // #[tokio::test]
-    // async fn test_kafka_producer() -> Result<()> {
-    //     let kafka_config = KafkaConfig {
-    //         brokers: "127.0.0.1:29092".to_string(),
-    //         topic: "test_producer".to_string(),
-    //     };
-    //     let sink = KafkaSink::new(kafka_config.clone()).await.unwrap();
-    //     let mut content = FutureRecord::to(kafka_config.topic.as_str());
+    #[ignore]
+    #[tokio::test]
+    async fn test_kafka_producer() -> Result<()> {
+        let properties = hashmap! {
+            "kafka.brokers".to_string() => "localhost:29092".to_string(),
+            "identifier".to_string() => "test_sink".to_string(),
+            "sink.type".to_string() => "append_only".to_string(),
+            "kafka.topic".to_string() => "test_topic".to_string(),
+        };
+        let kafka_config = KafkaConfig::from_hashmap(properties)?;
+        let mut sink = KafkaSink::new(kafka_config.clone()).await.unwrap();
 
-    //     for i in 0..10 {
-    //         content = content.payload(format!("{:?}", i).as_str());
-    //     }
+        for i in 0..3 {
+            let mut fail_flag = false;
+            sink.begin_epoch(i).await?;
+            println!("begin epoch success");
+            for i in 0..100 {
+                match sink
+                    .send(
+                        BaseRecord::to(kafka_config.topic.as_str())
+                            .payload(format!("value-{}", i).as_bytes())
+                            .key(sink.gen_message_key().as_bytes()),
+                    )
+                    .await
+                {
+                    Ok(_) => {}
+                    Err(e) => {
+                        fail_flag = true;
+                        println!("{:?}", e);
+                        sink.abort().await?;
+                    }
+                };
+            }
+            if !fail_flag {
+                sink.commit().await?;
+                println!("commit success");
+            }
 
-    //     Ok(())
-    // }
+            // tokio::time::sleep(Duration::from_secs(1)).await;
+        }
+
+        Ok(())
+    }
 
     #[test]
     fn test_chunk_to_json() -> Result<()> {
@@ -511,7 +543,10 @@ mod test {
         ]);
 
         let json_chunk = chunk_to_json(chunk, &schema).unwrap();
-        assert_eq!(json_chunk[0].as_str(), "{\"v1\":0,\"v2\":0.0,\"v3\":{\"v4\":1,\"v5\":1.0}}");
+        assert_eq!(
+            json_chunk[0].as_str(),
+            "{\"v1\":0,\"v2\":0.0,\"v3\":{\"v4\":1,\"v5\":1.0}}"
+        );
 
         Ok(())
     }
