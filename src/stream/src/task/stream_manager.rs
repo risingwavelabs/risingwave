@@ -60,9 +60,6 @@ pub struct LocalStreamManagerCore {
 
     pub(crate) context: Arc<SharedContext>,
 
-    /// Stores all actor information.
-    actor_infos: HashMap<ActorId, ActorInfo>,
-
     /// Stores all actor information, taken after actor built.
     actors: HashMap<ActorId, stream_plan::StreamActor>,
 
@@ -247,7 +244,13 @@ impl LocalStreamManager {
         let (actor_ids_to_send, actor_ids_to_collect) = {
             let core = self.core.lock();
             let actor_ids_to_send = core.context.lock_barrier_manager().all_senders();
-            let actor_ids_to_collect = core.actor_infos.keys().cloned().collect::<HashSet<_>>();
+            let actor_ids_to_collect = core
+                .context
+                .actor_infos
+                .read()
+                .keys()
+                .cloned()
+                .collect::<HashSet<_>>();
             (actor_ids_to_send, actor_ids_to_collect)
         };
         if actor_ids_to_send.is_empty() || actor_ids_to_collect.is_empty() {
@@ -371,7 +374,6 @@ impl LocalStreamManagerCore {
         Self {
             handles: HashMap::new(),
             context: Arc::new(context),
-            actor_infos: HashMap::new(),
             actors: HashMap::new(),
             actor_monitor_tasks: HashMap::new(),
             mock_source: (Some(tx), Some(rx)),
@@ -396,12 +398,17 @@ impl LocalStreamManagerCore {
         )
     }
 
-    fn get_actor_info(&self, actor_id: &ActorId) -> Result<&ActorInfo> {
-        self.actor_infos.get(actor_id).ok_or_else(|| {
-            RwError::from(ErrorCode::InternalError(
-                "actor not found in info table".into(),
-            ))
-        })
+    fn get_actor_info(&self, actor_id: &ActorId) -> Result<ActorInfo> {
+        self.context
+            .actor_infos
+            .read()
+            .get(actor_id)
+            .cloned()
+            .ok_or_else(|| {
+                RwError::from(ErrorCode::InternalError(
+                    "actor not found in info table".into(),
+                ))
+            })
     }
 
     /// Create dispatchers with downstream information registered before
@@ -760,7 +767,11 @@ impl LocalStreamManagerCore {
         req: stream_service::BroadcastActorInfoTableRequest,
     ) -> Result<()> {
         for actor in req.get_info() {
-            let ret = self.actor_infos.insert(actor.get_actor_id(), actor.clone());
+            let ret = self
+                .context
+                .actor_infos
+                .write()
+                .insert(actor.get_actor_id(), actor.clone());
             if let Some(prev_actor) = ret && actor != &prev_actor{
                 return Err(ErrorCode::InternalError(format!(
                     "actor info mismatch when broadcasting {}",
@@ -778,7 +789,7 @@ impl LocalStreamManagerCore {
         let handle = self.handles.remove(&actor_id).unwrap();
         self.context.retain(|&(up_id, _)| up_id != actor_id);
         self.actor_monitor_tasks.remove(&actor_id).unwrap().abort();
-        self.actor_infos.remove(&actor_id);
+        self.context.actor_infos.write().remove(&actor_id);
         self.actors.remove(&actor_id);
         // Task should have already stopped when this method is invoked.
         handle.abort();
@@ -794,7 +805,7 @@ impl LocalStreamManagerCore {
             // Task should have already stopped when this method is invoked.
             handle.abort();
         }
-        self.actor_infos.clear();
+        self.context.actor_infos.write().clear();
     }
 
     fn update_actors(
