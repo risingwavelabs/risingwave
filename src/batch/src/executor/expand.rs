@@ -92,7 +92,13 @@ impl BoxedExecutorBuilder for ExpandExecutor {
         let column_subsets = expand_node
             .column_subsets
             .iter()
-            .map(|subset| subset.keys.iter().map(|key| *key as usize).collect_vec())
+            .map(|subset| {
+                subset
+                    .column_indices
+                    .iter()
+                    .map(|idx| *idx as usize)
+                    .collect_vec()
+            })
             .collect_vec();
 
         let child = inputs.remove(0);

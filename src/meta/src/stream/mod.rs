@@ -45,7 +45,7 @@ pub fn record_table_vnode_mappings(
     // on vnode mappings.
     match stream_node.get_node_body()? {
         NodeBody::Materialize(node) => {
-            let table_id = node.get_table_ref_id()?.get_table_id() as u32;
+            let table_id = node.get_table_id();
             hash_mapping_manager.set_fragment_state_table(fragment_id, table_id);
         }
         NodeBody::Arrange(node) => {

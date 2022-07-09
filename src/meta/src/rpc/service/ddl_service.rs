@@ -23,7 +23,6 @@ use risingwave_pb::catalog::*;
 use risingwave_pb::common::{ParallelUnitMapping, ParallelUnitType};
 use risingwave_pb::ddl_service::ddl_service_server::DdlService;
 use risingwave_pb::ddl_service::*;
-use risingwave_pb::plan_common::TableRefId;
 use risingwave_pb::stream_plan::stream_node::NodeBody;
 use risingwave_pb::stream_plan::{StreamFragmentGraph, StreamNode};
 use tonic::{Request, Response, Status};
@@ -312,10 +311,10 @@ where
             ) -> RwResult<()> {
                 match stream_node.node_body.as_ref().unwrap() {
                     NodeBody::Source(source_node) => {
-                        dependent_relations.insert(source_node.get_table_ref_id()?.table_id as u32);
+                        dependent_relations.insert(source_node.get_table_id());
                     }
                     NodeBody::Chain(chain_node) => {
-                        dependent_relations.insert(chain_node.get_table_ref_id()?.table_id as u32);
+                        dependent_relations.insert(chain_node.get_table_id());
                     }
                     _ => {}
                 }
@@ -501,7 +500,7 @@ where
             let mut mview_count = 0;
             if let NodeBody::Materialize(materialize_node) = stream_node.node_body.as_mut().unwrap()
             {
-                materialize_node.table_ref_id = TableRefId::from(&mview_id).into();
+                materialize_node.table_id = mview_id.table_id();
                 mview_count += 1;
             }
             for input in &mut stream_node.input {
@@ -600,11 +599,10 @@ where
 
         // Fill in the correct source id for stream node.
         fn fill_source_id(stream_node: &mut StreamNode, source_id: u32) -> usize {
-            use risingwave_common::catalog::TableId;
             let mut source_count = 0;
             if let NodeBody::Source(source_node) = stream_node.node_body.as_mut().unwrap() {
                 // TODO: refactor using source id.
-                source_node.table_ref_id = TableRefId::from(&TableId::new(source_id)).into();
+                source_node.table_id = source_id;
                 source_count += 1;
             }
             for input in &mut stream_node.input {

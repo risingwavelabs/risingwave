@@ -88,7 +88,7 @@ impl ToStreamProst for StreamTopN {
             column_orders,
             limit: self.logical.limit() as u64,
             offset: self.logical.offset() as u64,
-            distribution_keys: vec![], // TODO: seems unnecessary
+            distribution_key: vec![], // TODO: seems unnecessary
             ..Default::default()
         };
 

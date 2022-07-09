@@ -115,10 +115,7 @@ impl MetaClient {
 
     /// Send heartbeat signal to meta service.
     pub async fn send_heartbeat(&self, node_id: u32) -> Result<()> {
-        let request = HeartbeatRequest {
-            node_id,
-            worker_type: WorkerType::ComputeNode as i32,
-        };
+        let request = HeartbeatRequest { node_id };
         self.inner.heartbeat(request).await?;
         Ok(())
     }

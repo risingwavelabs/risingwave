@@ -17,7 +17,7 @@ use std::fmt;
 
 use fixedbitset::FixedBitSet;
 use itertools::Itertools;
-use risingwave_common::catalog::{ColumnDesc, TableId};
+use risingwave_common::catalog::{ColumnDesc, DatabaseId, SchemaId, TableId};
 use risingwave_common::error::ErrorCode::InternalError;
 use risingwave_common::error::Result;
 use risingwave_pb::stream_plan::stream_node::NodeBody as ProstStreamNode;
@@ -152,10 +152,10 @@ impl StreamMaterialize {
             associated_source_id: None,
             name: mv_name,
             columns,
-            order_keys,
-            pks: pk_indices.clone(),
+            order_key: order_keys,
+            pk: pk_indices.clone(),
             is_index_on,
-            distribution_keys: base.dist.dist_column_indices().to_vec(),
+            distribution_key: base.dist.dist_column_indices().to_vec(),
             appendonly: input.append_only(),
             owner: risingwave_common::catalog::DEFAULT_SUPPER_USER.to_string(),
             vnode_mapping: None,
@@ -194,13 +194,13 @@ impl fmt::Display for StreamMaterialize {
             .join(", ");
 
         let pk_column_names = table
-            .pks
+            .pk
             .iter()
             .map(|&pk| &table.columns[pk].column_desc.name)
             .join(", ");
 
         let order_descs = table
-            .order_keys
+            .order_key
             .iter()
             .map(|order| table.columns()[order.index].column_desc.name.clone())
             .join(", ");
@@ -239,27 +239,17 @@ impl ToStreamProst for StreamMaterialize {
         ProstStreamNode::Materialize(MaterializeNode {
             // We don't need table id for materialize node in frontend. The id will be generated on
             // meta catalog service.
-            table_ref_id: None,
-            associated_table_ref_id: None,
-            column_ids: self
-                .table()
-                .columns()
-                .iter()
-                .map(|col| ColumnId::get_id(&col.column_desc.column_id))
-                .collect(),
+            table_id: 0,
             column_orders: self
                 .table()
-                .order_keys()
+                .order_key()
                 .iter()
                 .map(FieldOrder::to_protobuf)
                 .collect(),
-            distribution_keys: self
-                .base
-                .dist
-                .dist_column_indices()
-                .iter()
-                .map(|idx| *idx as u32)
-                .collect_vec(),
+            table: Some(self.table().to_prost(
+                SchemaId::placeholder() as u32,
+                DatabaseId::placeholder() as u32,
+            )),
         })
     }
 }
