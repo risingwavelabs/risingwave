@@ -13,9 +13,12 @@
 // limitations under the License.
 
 use std::fmt;
+use std::collections::HashMap;
 
 use risingwave_common::error::Result;
 use risingwave_pb::stream_plan::stream_node::NodeBody as ProstStreamNode;
+use crate::optimizer::plan_node::PlanTreeNodeUnary;
+use crate::catalog::ColumnId;
 
 use super::{PlanBase, PlanRef, ToStreamProst};
 
@@ -53,12 +56,18 @@ impl_plan_tree_node_for_leaf! { StreamSink }
 
 impl fmt::Display for StreamSink {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-        todo!();
+        let mut builder = f.debug_struct("StreamSink");
+        builder.finish()
     }
 }
 
 impl ToStreamProst for StreamSink {
     fn to_stream_prost_body(&self) -> ProstStreamNode {
-        todo!();
+        use risingwave_pb::stream_plan::*;
+
+        ProstStreamNode::Sink(SinkNode {
+            table_ref_id: None,
+            properties: HashMap::new()
+        })
     }
 }

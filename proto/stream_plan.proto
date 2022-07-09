@@ -28,9 +28,8 @@ message SourceNode {
 }
 
 message SinkNode {
-  uint32 table_id = 1;
-  repeated int32 column_ids = 2;
-  map<string, string> properties = 3;
+  plan_common.TableRefId table_ref_id = 1;
+  map<string, string> properties = 2;
 }
 
 message ProjectNode {

@@ -54,15 +54,26 @@ fn gen_sink_plan(
     associated_table_desc: TableDesc,
 ) -> Result<PlanRef> {
     let scan_node: PlanRef = StreamTableScan::new(LogicalScan::create(
-        associated_table_name,
+        "associated_table_name32463426234".into(),
         false,
         Rc::new(associated_table_desc),
         vec![],
         context,
     ))
     .into();
+    
+    use risingwave_pb::stream_plan::stream_node::NodeBody;
+    use risingwave_pb::stream_plan::ChainNode;
 
-    Ok(StreamSink::new(scan_node).into())
+    let chain_node = NodeBody::Chain(ChainNode {
+        same_worker_node: false,
+        disable_rearrange: false,
+        table_ref_id: None,
+        upstream_fields: vec![],
+        column_ids: vec![]
+    });
+
+    Ok(StreamSink::new(chain_node).into())
 }
 
 pub async fn handle_create_sink(
@@ -108,11 +119,21 @@ pub async fn handle_create_sink(
         StreamFragmenter::build_graph(plan)
     };
 
+    dbg!(&graph);
+
     let catalog_writer = session.env().catalog_writer();
     catalog_writer.create_sink(sink, graph).await?;
 
     Ok(PgResponse::empty_result(StatementType::CREATE_SINK))
 }
+
+pub static PROTO_FILE_DATA2: &str = r#"
+    syntax = "proto3";
+    package test;
+    message TestRecord {
+      string name = 1;
+    }"#;
+
 
 #[cfg(test)]
 pub mod tests {
@@ -122,7 +143,7 @@ pub mod tests {
 
     #[tokio::test]
     async fn test_create_sink_handler() {
-        let proto_file = create_proto_file(PROTO_FILE_DATA);
+        let proto_file = create_proto_file(super::PROTO_FILE_DATA2);
         let sql = format!(
             r#"CREATE SOURCE t1
     WITH ('kafka.topic' = 'abc', 'kafka.servers' = 'localhost:1001')
@@ -132,7 +153,7 @@ pub mod tests {
         let frontend = LocalFrontend::new(Default::default()).await;
         frontend.run_sql(sql).await.unwrap();
 
-        let sql = "create materialized view mv1 as select t1.country from t1;";
+        let sql = "create materialized view mv1 as select name from t1;";
         frontend.run_sql(sql).await.unwrap();
 
         let sql = r#"CREATE SINK snk1 FROM mv1
