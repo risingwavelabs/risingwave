@@ -25,7 +25,6 @@ if ${is_sanitizer_enabled}
 else
   set_env RISEDEV_CARGO_BUILD_EXTRA_ARGS ""
   set_env RISEDEV_BUILD_TARGET_DIR ""
-  set_env RISEDEV_RUSTFLAGS "--cfg tokio_unstable"
 end
 
 if ${is_all_in_one_enabled}
@@ -218,8 +217,8 @@ script = '''
 set -e
 echo "$(tput setaf 4)$(tput bold)[Reminder]$(tput sgr0) risedev will only build $(tput setaf 4)risingwave_cmd(_all) and risedev$(tput sgr0) crates."
 
-export RUSTFLAGS="${RISEDEV_RUSTFLAGS}"
-echo + RUSTFLAGS="$RUSTFLAGS"
+[[ -z "${RISEDEV_RUSTFLAGS}" ]] || export RUSTFLAGS="${RISEDEV_RUSTFLAGS}"
+echo + RUSTFLAGS="${RUSTFLAGS:-<not set>}"
 set -xe
 cargo build -p ${RISEDEV_CARGO_BUILD_CRATE} -p risedev \
             --profile "${RISINGWAVE_BUILD_PROFILE}" \
