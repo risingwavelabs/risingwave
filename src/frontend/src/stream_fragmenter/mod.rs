@@ -192,7 +192,7 @@ impl StreamFragmenter {
                 // memorize table id for later use
                 state
                     .dependent_table_ids
-                    .insert(TableId::from(&node.table_ref_id));
+                    .insert(TableId::new(node.table_id));
             }
 
             _ => {}
