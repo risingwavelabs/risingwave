@@ -399,6 +399,19 @@ impl KafkaTransactionConductor {
 }
 
 mod test {
+    #[allow(unused_imports)]
+    use risingwave_common::types::OrderedF32;
+    #[allow(unused_imports)]
+    use risingwave_common::{
+        array,
+        array::{
+            column::Column, ArrayBuilder, ArrayImpl, F32Array, F32ArrayBuilder, I32Array,
+            I32ArrayBuilder, StructArray,
+        },
+    };
+
+    #[allow(unused_imports)]
+    use super::*;
 
     // #[tokio::test]
     // async fn test_kafka_producer() -> Result<()> {
@@ -416,61 +429,90 @@ mod test {
     //     Ok(())
     // }
 
-    // #[test]
-    // fn test_chunk_to_json() -> Result<()> {
-    //     let mut column_i32_builder = I32ArrayBuilder::new(10);
-    //     for i in 0..10 {
-    //         column_i32_builder.append(Some(i)).unwrap();
-    //     }
-    //     let column_i32 = Column::new(Arc::new(ArrayImpl::from(
-    //         column_i32_builder.finish().unwrap(),
-    //     )));
-    //     let mut column_f32_builder = F32ArrayBuilder::new(10);
-    //     for i in 0..10 {
-    //         column_f32_builder
-    //             .append(Some(OrderedF32::from(i as f32)))
-    //             .unwrap();
-    //     }
-    //     let column_f32 = Column::new(Arc::new(ArrayImpl::from(
-    //         column_f32_builder.finish().unwrap(),
-    //     )));
+    #[test]
+    fn test_chunk_to_json() -> Result<()> {
+        let mut column_i32_builder = I32ArrayBuilder::new(10);
+        for i in 0..10 {
+            column_i32_builder.append(Some(i)).unwrap();
+        }
+        let column_i32 = Column::new(Arc::new(ArrayImpl::from(
+            column_i32_builder.finish().unwrap(),
+        )));
+        let mut column_f32_builder = F32ArrayBuilder::new(10);
+        for i in 0..10 {
+            column_f32_builder
+                .append(Some(OrderedF32::from(i as f32)))
+                .unwrap();
+        }
+        let column_f32 = Column::new(Arc::new(ArrayImpl::from(
+            column_f32_builder.finish().unwrap(),
+        )));
 
-    //     let column_struct = Column::new(Arc::new(ArrayImpl::from(StructArray::from_slices(
-    //         &[true, true, true, true, true, true, true, true, true, true],
-    //         vec![
-    //             array! { I32Array, [Some(1), Some(2), Some(3), Some(4), Some(5), Some(6),
-    // Some(7), Some(8), Some(9), Some(10)] }.into(),             array! { F32Array, [Some(1.0),
-    // Some(2.0), Some(3.0), Some(4.0), Some(5.0), Some(6.0), Some(7.0), Some(8.0), Some(9.0),
-    // Some(10.0)] }.into(),         ],
-    //         vec![DataType::Int32, DataType::Float32],
-    //     )
-    //         .unwrap())));
+        let column_struct = Column::new(Arc::new(ArrayImpl::from(
+            StructArray::from_slices(
+                &[true, true, true, true, true, true, true, true, true, true],
+                vec![
+                    array! { I32Array, [Some(1), Some(2), Some(3), Some(4), Some(5), Some(6), Some(7), Some(8), Some(9), Some(10)] }.into(),
+                    array! { F32Array, [Some(1.0), Some(2.0), Some(3.0), Some(4.0), Some(5.0), Some(6.0), Some(7.0), Some(8.0), Some(9.0),Some(10.0)] }.into(),
+                ],
+                vec![DataType::Int32, DataType::Float32],
+            )
+            .unwrap(),
+        )));
+        let ops = vec![
+            Op::Insert,
+            Op::Insert,
+            Op::Insert,
+            Op::Insert,
+            Op::Insert,
+            Op::Insert,
+            Op::Insert,
+            Op::Insert,
+            Op::Insert,
+            Op::Insert,
+        ];
 
-    //     let chunk = DataChunk::new(vec![column_i32, column_f32], Vis::Compact(10));
+        let chunk = StreamChunk::new(ops, vec![column_i32, column_f32, column_struct], None);
 
-    //     // let chunk = StreamChunk {};
+        let schema = Schema::new(vec![
+            Field {
+                data_type: DataType::Int32,
+                name: "v1".into(),
+                sub_fields: vec![],
+                type_name: "".into(),
+            },
+            Field {
+                data_type: DataType::Float32,
+                name: "v2".into(),
+                sub_fields: vec![],
+                type_name: "".into(),
+            },
+            Field {
+                data_type: DataType::Struct {
+                    fields: Arc::new([DataType::Int32, DataType::Float32]),
+                },
+                name: "v3".into(),
+                sub_fields: vec![
+                    Field {
+                        data_type: DataType::Int32,
+                        name: "v4".into(),
+                        sub_fields: vec![],
+                        type_name: "".into(),
+                    },
+                    Field {
+                        data_type: DataType::Float32,
+                        name: "v5".into(),
+                        sub_fields: vec![],
+                        type_name: "".into(),
+                    },
+                ],
+                type_name: "".into(),
+            },
+        ]);
 
-    //     // let x =
-    // chunk.row_at(0).unwrap().0.value_at(2).unwrap().into_scalar_impl().into_struct();     //
-    // println! ("{:?}", x);
+        let json_chunk = chunk_to_json(chunk, &schema).unwrap();
+        assert_eq!(json_chunk[0].as_str(), "{\"v1\":0,\"v2\":0.0,\"v3\":{\"v4\":1,\"v5\":1.0}}");
 
-    //     let schema = Schema::new(vec![
-    //         Field {
-    //             data_type: DataType::Int32,
-    //             name: "v1".into(),
-    //             sub_fields: vec![],
-    //             type_name: "".into(),
-    //         },
-    //         Field {
-    //             data_type: DataType::Float32,
-    //             name: "v2".into(),
-    //             sub_fields: vec![],
-    //             type_name: "".into(),
-    //         },
-    //     ]);
-
-    //     println!("{:?}", chunk_to_json(chunk, &schema));
-
-    //     Ok(())
-    // }
+        Ok(())
+    }
 }
