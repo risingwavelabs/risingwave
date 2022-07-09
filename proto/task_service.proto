@@ -3,6 +3,7 @@ syntax = "proto3";
 package task_service;
 
 import "batch_plan.proto";
+import "stream_plan.proto";
 import "common.proto";
 import "data.proto";
 
@@ -97,7 +98,7 @@ message GetDataRequest {
 }
 
 message GetStreamResponse {
-  data.StreamMessage message = 1;
+  stream_plan.StreamMessage message = 1;
 }
 
 service ExchangeService {

@@ -29,11 +29,12 @@ use risingwave_common::error::{Result, ToRwResult};
 use risingwave_common::types::DataType;
 use risingwave_connector::{ConnectorState, SplitImpl};
 use risingwave_pb::common::ActorInfo;
-use risingwave_pb::data::barrier::Mutation as ProstMutation;
-use risingwave_pb::data::stream_message::StreamMessage;
-use risingwave_pb::data::{
-    AddMutation, Barrier as ProstBarrier, DispatcherMutation, Epoch as ProstEpoch,
-    SourceChangeSplitMutation, StopMutation, StreamMessage as ProstStreamMessage, UpdateMutation,
+use risingwave_pb::data::Epoch as ProstEpoch;
+use risingwave_pb::stream_plan::barrier::Mutation as ProstMutation;
+use risingwave_pb::stream_plan::stream_message::StreamMessage;
+use risingwave_pb::stream_plan::{
+    AddMutation, Barrier as ProstBarrier, DispatcherMutation, SourceChangeSplitMutation,
+    StopMutation, StreamMessage as ProstStreamMessage, UpdateMutation,
 };
 use smallvec::SmallVec;
 use tracing::trace_span;
