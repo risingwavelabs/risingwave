@@ -77,12 +77,18 @@ pub enum SinkImpl {
 }
 
 impl SinkImpl {
-    fn new(cfg: SinkConfig) -> Self {
-        match cfg {
-            SinkConfig::Mysql(cfg) => SinkImpl::MySQL(Box::new(MySQLSink::new(cfg))),
-            SinkConfig::Redis(cfg) => SinkImpl::Redis(Box::new(RedisSink::new(cfg))),
-            SinkConfig::Kafka(_) => todo!(),
-        }
+    pub async fn new(cfg: SinkConfig) -> RwResult<Self> {
+        Ok(match cfg {
+            SinkConfig::Mysql(cfg) => {
+                SinkImpl::MySQL(Box::new(MySQLSink::new(cfg).map_err(RwError::from)?))
+            }
+            SinkConfig::Redis(cfg) => {
+                SinkImpl::Redis(Box::new(RedisSink::new(cfg).map_err(RwError::from)?))
+            }
+            SinkConfig::Kafka(cfg) => {
+                SinkImpl::Kafka(Box::new(KafkaSink::new(cfg).await.map_err(RwError::from)?))
+            }
+        })
     }
 }
 

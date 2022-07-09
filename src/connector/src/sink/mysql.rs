@@ -41,8 +41,8 @@ pub struct MySQLSink {
 }
 
 impl MySQLSink {
-    pub fn new(cfg: MySQLConfig) -> Self {
-        Self { cfg }
+    pub fn new(cfg: MySQLConfig) -> Result<Self> {
+        Ok(Self { cfg })
     }
 
     fn endpoint(&self) -> String {
@@ -179,7 +179,7 @@ impl Sink for MySQLSink {
         Ok(())
     }
 
-    async fn begin_epoch(&mut self, epoch: u64) -> Result<()> {
+    async fn begin_epoch(&mut self, _epoch: u64) -> Result<()> {
         todo!()
     }
 

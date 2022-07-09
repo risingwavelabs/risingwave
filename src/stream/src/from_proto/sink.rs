@@ -12,12 +12,10 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use risingwave_common::catalog::{ColumnId, Schema, TableId};
-use risingwave_pb::plan_common::Field;
-use tokio::sync::mpsc::unbounded_channel;
+use risingwave_common::catalog::{ColumnId, TableId};
 
 use super::*;
-use crate::executor::{Barrier, SinkExecutor};
+use crate::executor::SinkExecutor;
 
 pub struct SinkExecutorBuilder;
 
@@ -26,12 +24,12 @@ impl ExecutorBuilder for SinkExecutorBuilder {
         mut params: ExecutorParams,
         node: &StreamNode,
         store: impl StateStore,
-        stream: &mut LocalStreamManagerCore,
+        _stream: &mut LocalStreamManagerCore,
     ) -> Result<BoxedExecutor> {
         let node = try_match_expand!(node.get_node_body().unwrap(), NodeBody::Sink)?;
 
-        let sink_id = TableId::from(&node.table_ref_id);
-        let column_ids = node
+        let _sink_id = TableId::from(&node.table_ref_id);
+        let _column_ids = node
             .get_column_ids()
             .iter()
             .map(|i| ColumnId::from(*i))

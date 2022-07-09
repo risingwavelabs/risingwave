@@ -15,31 +15,30 @@
 use std::collections::HashMap;
 
 use futures::StreamExt;
-use futures_async_stream::{for_await, try_stream};
+use futures_async_stream::try_stream;
 use risingwave_common::catalog::Schema;
-use risingwave_connector::sink::{Sink, SinkConfig, SinkImpl};
-use risingwave_pb::common::worker_node::State;
+use risingwave_common::error::Result;
+use risingwave_connector::sink::{SinkConfig, SinkImpl};
 use risingwave_storage::StateStore;
 
 use super::error::StreamExecutorError;
 use super::{BoxedExecutor, Executor, Message};
-use crate::task::ActorId;
 
 pub struct SinkExecutor<S: StateStore> {
     input: BoxedExecutor,
-    store: S,
+    _store: S,
     properties: HashMap<String, String>,
     identity: String,
 }
 
-async fn build_sink(config: SinkConfig) -> Box<SinkImpl> {
-    todo!()
+async fn build_sink(config: SinkConfig) -> Result<Box<SinkImpl>> {
+    Ok(Box::new(SinkImpl::new(config).await?))
 }
 
 impl<S: StateStore> SinkExecutor<S> {
     pub fn new(
         materialize_executor: BoxedExecutor,
-        store: S,
+        _store: S,
         mut properties: HashMap<String, String>,
         executor_id: u64,
     ) -> Self {
@@ -48,7 +47,7 @@ impl<S: StateStore> SinkExecutor<S> {
         properties.insert("identifier".to_string(), format!("sink-{:?}", executor_id));
         Self {
             input: materialize_executor,
-            store,
+            _store,
             properties,
             identity: format!("SinkExecutor_{:?}", executor_id),
         }
@@ -56,13 +55,15 @@ impl<S: StateStore> SinkExecutor<S> {
 
     #[try_stream(ok = Message, error = StreamExecutorError)]
     async fn execute_inner(self) {
-        let sink_config = SinkConfig::from_hashmap(self.properties.clone());
+        let sink_config = SinkConfig::from_hashmap(self.properties.clone())
+            .map_err(StreamExecutorError::sink_error)?;
+        let _sink = build_sink(sink_config).await;
         let input = self.input.execute();
         #[for_await]
         for msg in input {
             match msg? {
                 Message::Chunk(chunk) => {
-                    let visible_chunk = chunk.clone().compact()?;
+                    let _visible_chunk = chunk.clone().compact()?;
 
                     yield Message::Chunk(chunk);
                 }
@@ -111,10 +112,10 @@ mod test {
             password: Some(String::from("<password>")),
         };
 
-        let mysql_sink = MySQLSink::new(cfg);
+        let _mysql_sink = MySQLSink::new(cfg);
 
         // Mock `child`
-        let mock = MockSource::with_messages(Schema::default(), PkIndices::new(), vec![]);
+        let _mock = MockSource::with_messages(Schema::default(), PkIndices::new(), vec![]);
 
         // let _sink_executor = SinkExecutor::_new(Box::new(mock), mysql_sink);
     }

@@ -24,7 +24,7 @@ pub struct RedisConfig;
 pub struct RedisSink;
 
 impl RedisSink {
-    pub fn new(_cfg: RedisConfig) -> Self {
+    pub fn new(_cfg: RedisConfig) -> Result<Self> {
         todo!()
     }
 }
@@ -35,7 +35,7 @@ impl Sink for RedisSink {
         todo!();
     }
 
-    async fn begin_epoch(&mut self, epoch: u64) -> Result<()> {
+    async fn begin_epoch(&mut self, _epoch: u64) -> Result<()> {
         todo!()
     }
 

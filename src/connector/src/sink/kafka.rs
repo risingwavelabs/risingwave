@@ -17,6 +17,7 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use futures::{Future, TryFutureExt};
+use itertools::Itertools;
 use rdkafka::error::{KafkaError, KafkaResult};
 use rdkafka::message::ToBytes;
 use rdkafka::producer::{BaseRecord, DefaultProducerContext, Producer, ThreadedProducer};
@@ -201,12 +202,12 @@ impl Sink for KafkaSink {
         if self.latest_success_epoch == 0 {
             self.do_with_retry(|conductor| conductor.init_transaction())
                 .await
-                .map_err(|e| SinkError::Kafka(e))?;
+                .map_err(SinkError::Kafka)?;
         }
 
         self.do_with_retry(|conductor| conductor.start_transaction())
             .await
-            .map_err(|e| SinkError::Kafka(e))?;
+            .map_err(SinkError::Kafka)?;
         tracing::debug!("begin epoch {:?}", epoch);
         Ok(())
     }
@@ -214,7 +215,7 @@ impl Sink for KafkaSink {
     async fn commit(&mut self) -> Result<()> {
         self.do_with_retry(|conductor| conductor.commit_transaction())
             .await
-            .map_err(|e| SinkError::Kafka(e))?;
+            .map_err(SinkError::Kafka)?;
         if let Some(epoch) = self.in_transaction_epoch.take() {
             self.latest_success_epoch = epoch;
         } else {
@@ -230,7 +231,7 @@ impl Sink for KafkaSink {
     async fn abort(&mut self) -> Result<()> {
         self.do_with_retry(|conductor| conductor.abort_transaction())
             .await
-            .map_err(|e| SinkError::Kafka(e))
+            .map_err(SinkError::Kafka)
     }
 
     async fn take_snapshot(&self) -> Result<SinkState> {
@@ -280,7 +281,7 @@ fn datum_to_json_object(field: &Field, datum: DatumRef) -> ArrayResult<Value> {
             for (sub_datum_ref, sub_field) in list_ref
                 .values_ref()
                 .into_iter()
-                .zip(field.sub_fields.iter())
+                .zip_eq(field.sub_fields.iter())
             {
                 let value = datum_to_json_object(sub_field, sub_datum_ref)?;
                 vec.push(value);
@@ -292,7 +293,7 @@ fn datum_to_json_object(field: &Field, datum: DatumRef) -> ArrayResult<Value> {
             for (sub_datum_ref, sub_field) in struct_ref
                 .fields_ref()
                 .into_iter()
-                .zip(field.sub_fields.iter())
+                .zip_eq(field.sub_fields.iter())
             {
                 let value = datum_to_json_object(sub_field, sub_datum_ref)?;
                 map.insert(sub_field.name.clone(), value);
@@ -307,7 +308,7 @@ fn datum_to_json_object(field: &Field, datum: DatumRef) -> ArrayResult<Value> {
 
 fn record_to_json(row: RowRef, schema: Vec<Field>) -> Result<Map<String, Value>> {
     let mut mappings = Map::with_capacity(schema.len());
-    for (field, datum_ref) in schema.iter().zip(row.values()) {
+    for (field, datum_ref) in schema.iter().zip_eq(row.values()) {
         let key = field.name.clone();
         let value = datum_to_json_object(field, datum_ref)
             .map_err(|e| SinkError::JsonParse(e.to_string()))?;
@@ -352,7 +353,7 @@ impl KafkaTransactionConductor {
 
     fn init_transaction(&self) -> impl Future<Output = KafkaResult<()>> {
         let inner = self.inner.clone();
-        let timeout = self.properties.timeout.clone();
+        let timeout = self.properties.timeout;
         task::spawn_blocking(move || inner.init_transactions(timeout))
             .unwrap_or_else(|_| Err(KafkaError::Canceled))
     }
@@ -365,28 +366,28 @@ impl KafkaTransactionConductor {
 
     fn commit_transaction(&self) -> impl Future<Output = KafkaResult<()>> {
         let inner = Arc::clone(&self.inner);
-        let timeout = self.properties.timeout.clone();
+        let timeout = self.properties.timeout;
         task::spawn_blocking(move || inner.commit_transaction(timeout))
             .unwrap_or_else(|_| Err(KafkaError::Canceled))
     }
 
     fn abort_transaction(&self) -> impl Future<Output = KafkaResult<()>> {
         let inner = Arc::clone(&self.inner);
-        let timeout = self.properties.timeout.clone();
+        let timeout = self.properties.timeout;
         task::spawn_blocking(move || inner.abort_transaction(timeout))
             .unwrap_or_else(|_| Err(KafkaError::Canceled))
     }
 
     async fn flush(&self) -> impl Future<Output = KafkaResult<()>> {
         let inner = Arc::clone(&self.inner);
-        let timeout = self.properties.timeout.clone();
+        let timeout = self.properties.timeout;
         task::spawn_blocking(move || inner.flush(timeout))
             .map_ok(|_| KafkaResult::Ok(()))
             .unwrap_or_else(|_| Err(KafkaError::Canceled))
     }
 
     async fn send<'a, K, P>(
-        &self,
+        &'a self,
         record: BaseRecord<'a, K, P>,
     ) -> core::result::Result<(), (KafkaError, BaseRecord<'a, K, P>)>
     where
@@ -398,7 +399,6 @@ impl KafkaTransactionConductor {
 }
 
 mod test {
-    use super::*;
 
     // #[tokio::test]
     // async fn test_kafka_producer() -> Result<()> {
