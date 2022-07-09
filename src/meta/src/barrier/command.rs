@@ -20,10 +20,10 @@ use risingwave_common::catalog::TableId;
 use risingwave_common::error::{Result, RwError};
 use risingwave_common::util::epoch::Epoch;
 use risingwave_connector::SplitImpl;
-use risingwave_pb::common::ActorInfo;
 use risingwave_pb::source::{ConnectorSplit, ConnectorSplits};
+use risingwave_pb::stream_plan::add_dispatcher_mutation::Dispatchers;
 use risingwave_pb::stream_plan::barrier::Mutation;
-use risingwave_pb::stream_plan::{AddMutation, DispatcherMutation, StopMutation};
+use risingwave_pb::stream_plan::{AddDispatcherMutation, Dispatcher, StopMutation};
 use risingwave_pb::stream_service::DropActorsRequest;
 use risingwave_rpc_client::StreamClientPoolRef;
 use uuid::Uuid;
@@ -31,7 +31,7 @@ use uuid::Uuid;
 use super::info::BarrierActorInfo;
 use crate::barrier::ChangedTableState;
 use crate::barrier::ChangedTableState::{Create, Drop, NoTable};
-use crate::model::{ActorId, DispatcherId, TableFragments};
+use crate::model::{ActorId, TableFragments};
 use crate::storage::MetaStore;
 use crate::stream::FragmentManagerRef;
 
@@ -64,7 +64,7 @@ pub enum Command {
     CreateMaterializedView {
         table_fragments: TableFragments,
         table_sink_map: HashMap<TableId, Vec<ActorId>>,
-        dispatches: HashMap<(ActorId, DispatcherId), Vec<ActorInfo>>,
+        dispatches: HashMap<ActorId, Vec<Dispatcher>>,
         source_state: HashMap<ActorId, Vec<SplitImpl>>,
     },
 }
@@ -147,17 +147,17 @@ where
                 source_state,
                 ..
             } => {
-                let mutations = dispatches
+                let actor_dispatchers = dispatches
                     .iter()
-                    .map(
-                        |(&(up_actor_id, dispatcher_id), down_actor_infos)| DispatcherMutation {
-                            actor_id: up_actor_id,
-                            dispatcher_id,
-                            info: down_actor_infos.to_vec(),
-                        },
-                    )
+                    .map(|(&actor_id, dispatchers)| {
+                        (
+                            actor_id,
+                            Dispatchers {
+                                dispatchers: dispatchers.clone(),
+                            },
+                        )
+                    })
                     .collect();
-
                 let actor_splits = source_state
                     .iter()
                     .filter(|(_, splits)| !splits.is_empty())
@@ -171,8 +171,8 @@ where
                     })
                     .collect();
 
-                Some(Mutation::Add(AddMutation {
-                    mutations,
+                Some(Mutation::AddDispatcher(AddDispatcherMutation {
+                    actor_dispatchers,
                     actor_splits,
                 }))
             }
@@ -186,8 +186,9 @@ where
     pub fn actors_to_track(&self) -> HashSet<ActorId> {
         match &self.command {
             Command::CreateMaterializedView { dispatches, .. } => dispatches
-                .iter()
-                .flat_map(|(_, down_actor_infos)| down_actor_infos.iter().map(|info| info.actor_id))
+                .values()
+                .flatten()
+                .flat_map(|dispatcher| dispatcher.downstream_actor_id.iter().copied())
                 .collect(),
 
             _ => Default::default(),
@@ -234,23 +235,15 @@ where
                 for (table_id, actors) in table_sink_map {
                     let downstream_actors = dispatches
                         .iter()
-                        .filter(|((upstream_actor_id, _), _)| actors.contains(upstream_actor_id))
-                        .map(|((upstream_actor_id, _), downstream_actor_infos)| {
-                            (
-                                *upstream_actor_id,
-                                downstream_actor_infos
-                                    .iter()
-                                    .map(|info| info.actor_id)
-                                    .collect(),
-                            )
-                        })
-                        .collect::<HashMap<ActorId, Vec<ActorId>>>();
+                        .filter(|(upstream_actor_id, _)| actors.contains(upstream_actor_id))
+                        .map(|(k, v)| (k.clone(), v.clone()))
+                        .collect();
                     dependent_table_actors.push((*table_id, downstream_actors));
                 }
                 self.fragment_manager
                     .finish_create_table_fragments(
                         &table_fragments.table_id(),
-                        &dependent_table_actors,
+                        dependent_table_actors,
                     )
                     .await?;
             }

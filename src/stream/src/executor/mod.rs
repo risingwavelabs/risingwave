@@ -389,6 +389,8 @@ impl Mutation {
                     })
                     .collect(),
             }),
+            ProstMutation::AddDispatcher(_) => todo!(),
+
             ProstMutation::Splits(s) => {
                 let mut change_splits: Vec<(ActorId, ConnectorState)> =
                     Vec::with_capacity(s.actor_splits.len());

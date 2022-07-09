@@ -34,12 +34,21 @@ message SourceChangeSplitMutation {
   map<uint32, source.ConnectorSplits> actor_splits = 2;
 }
 
+message AddDispatcherMutation {
+  message Dispatchers {
+    repeated Dispatcher dispatchers = 1;
+  }
+  map<uint32, Dispatchers> actor_dispatchers = 1;
+  map<uint32, source.ConnectorSplits> actor_splits = 2;
+}
+
 message Barrier {
   data.Epoch epoch = 1;
   oneof mutation {
     StopMutation stop = 3;
     UpdateMutation update = 4;
     AddMutation add = 5;
+    AddDispatcherMutation add_dispatcher = 8;
     SourceChangeSplitMutation splits = 7;
   }
   bytes span = 6;
