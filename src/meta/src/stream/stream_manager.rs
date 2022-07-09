@@ -466,27 +466,7 @@ where
         };
 
         let actor_host_infos = locations.actor_info_map();
-
         let node_actors = locations.worker_actors();
-
-        // (upstream_actor_id, dispatcher_id) -> Vec<downstream_actor_info>
-        // let dispatches = dispatches
-        //     .iter()
-        //     .map(|(up_id, down_ids)| {
-        //         (
-        //             *up_id,
-        //             down_ids
-        //                 .iter()
-        //                 .map(|down_id| {
-        //                     actor_host_infos
-        //                         .get(down_id)
-        //                         .expect("downstream actor info not exist")
-        //                         .clone()
-        //                 })
-        //                 .collect_vec(),
-        //         )
-        //     })
-        //     .collect::<HashMap<_, _>>();
 
         // Hanging channels for each worker node.
         let mut node_hanging_channels = {
