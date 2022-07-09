@@ -23,7 +23,6 @@ use risingwave_common::buffer::Bitmap;
 use risingwave_common::config::StreamingConfig;
 use risingwave_common::error::{ErrorCode, Result, RwError};
 use risingwave_common::util::addr::{is_local_address, HostAddr};
-use risingwave_common::util::compress::decompress_data;
 use risingwave_hummock_sdk::LocalSstableInfo;
 use risingwave_pb::common::ActorInfo;
 use risingwave_pb::{stream_plan, stream_service};
@@ -398,19 +397,6 @@ impl LocalStreamManagerCore {
         )
     }
 
-    fn get_actor_info(&self, actor_id: &ActorId) -> Result<ActorInfo> {
-        self.context
-            .actor_infos
-            .read()
-            .get(actor_id)
-            .cloned()
-            .ok_or_else(|| {
-                RwError::from(ErrorCode::InternalError(
-                    "actor not found in info table".into(),
-                ))
-            })
-    }
-
     /// Create dispatchers with downstream information registered before
     fn create_dispatcher(
         &mut self,
@@ -418,55 +404,10 @@ impl LocalStreamManagerCore {
         dispatchers: &[stream_plan::Dispatcher],
         actor_id: ActorId,
     ) -> Result<impl StreamConsumer> {
-        // create downstream receivers
-        let mut dispatcher_impls = Vec::with_capacity(dispatchers.len());
-
-        for dispatcher in dispatchers {
-            let outputs = dispatcher
-                .downstream_actor_id
-                .iter()
-                .map(|down_id| {
-                    let downstream_addr = self.get_actor_info(down_id)?.get_host()?.into();
-                    new_output(&self.context, downstream_addr, actor_id, *down_id)
-                })
-                .collect::<Result<Vec<_>>>()?;
-
-            use stream_plan::DispatcherType::*;
-            let dispatcher_impl = match dispatcher.get_type()? {
-                Hash => {
-                    assert!(!outputs.is_empty());
-                    let column_indices = dispatcher
-                        .column_indices
-                        .iter()
-                        .map(|i| *i as usize)
-                        .collect();
-                    let compressed_mapping = dispatcher.get_hash_mapping()?;
-                    let hash_mapping = decompress_data(
-                        &compressed_mapping.original_indices,
-                        &compressed_mapping.data,
-                    );
-
-                    DispatcherImpl::Hash(HashDataDispatcher::new(
-                        dispatcher.downstream_actor_id.to_vec(),
-                        outputs,
-                        column_indices,
-                        hash_mapping,
-                        dispatcher.dispatcher_id,
-                    ))
-                }
-                Broadcast => DispatcherImpl::Broadcast(BroadcastDispatcher::new(
-                    outputs,
-                    dispatcher.dispatcher_id,
-                )),
-                Simple | NoShuffle => {
-                    assert_eq!(outputs.len(), 1);
-                    let output = outputs.into_iter().next().unwrap();
-                    DispatcherImpl::Simple(SimpleDispatcher::new(output, dispatcher.dispatcher_id))
-                }
-                Invalid => unreachable!(),
-            };
-            dispatcher_impls.push(dispatcher_impl);
-        }
+        let dispatcher_impls = dispatchers
+            .iter()
+            .map(|dispatcher| DispatcherImpl::new(&self.context, actor_id, dispatcher))
+            .try_collect()?;
 
         Ok(DispatchExecutor::new(
             input,
@@ -602,7 +543,7 @@ impl LocalStreamManagerCore {
                 if *up_id == 0 {
                     Ok(self.mock_source.1.take().unwrap())
                 } else {
-                    let upstream_addr = self.get_actor_info(up_id)?.get_host()?.into();
+                    let upstream_addr = self.context.get_actor_info(up_id)?.get_host()?.into();
                     if !is_local_address(&upstream_addr, &self.context.addr) {
                         // Get the sender for `RemoteInput` to forward received messages to
                         // receivers in `ReceiverExecutor` or

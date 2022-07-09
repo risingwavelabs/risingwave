@@ -165,6 +165,18 @@ impl SharedContext {
             .retain(|up_down_ids, _| f(up_down_ids));
     }
 
+    pub fn get_actor_info(&self, actor_id: &ActorId) -> Result<ActorInfo> {
+        self.actor_infos
+            .read()
+            .get(actor_id)
+            .cloned()
+            .ok_or_else(|| {
+                RwError::from(ErrorCode::InternalError(
+                    "actor not found in info table".into(),
+                ))
+            })
+    }
+
     #[cfg(test)]
     pub fn get_channel_pair_number(&self) -> u32 {
         self.lock_channel_map().len() as u32

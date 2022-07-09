@@ -27,7 +27,9 @@ use risingwave_common::buffer::BitmapBuilder;
 use risingwave_common::error::{internal_error, Result};
 use risingwave_common::types::VIRTUAL_NODE_COUNT;
 use risingwave_common::util::addr::{is_local_address, HostAddr};
+use risingwave_common::util::compress::decompress_data;
 use risingwave_common::util::hash_util::CRC32FastBuilder;
+use risingwave_pb::stream_plan::Dispatcher as ProstDispatcher;
 use tokio::sync::mpsc::Sender;
 use tracing::event;
 
@@ -188,11 +190,11 @@ impl DispatchExecutorInner {
             Message::Barrier(barrier) => {
                 let start_time = minstant::Instant::now();
                 let mutation = barrier.mutation.clone();
-                self.pre_mutate_outputs(&mutation).await?;
+                self.pre_mutate_dispatchers(&mutation).await?;
                 for dispatcher in &mut self.dispatchers {
                     dispatcher.dispatch_barrier(barrier.clone()).await?;
                 }
-                self.post_mutate_outputs(&mutation).await?;
+                self.post_mutate_dispatchers(&mutation).await?;
                 self.metrics
                     .actor_output_buffer_blocking_duration_ns
                     .with_label_values(&[&self.actor_id_str])
@@ -203,12 +205,23 @@ impl DispatchExecutorInner {
     }
 
     /// For `Add` and `Update`, update the outputs before we dispatch the barrier.
-    async fn pre_mutate_outputs(&mut self, mutation: &Option<Arc<Mutation>>) -> Result<()> {
+    async fn pre_mutate_dispatchers(&mut self, mutation: &Option<Arc<Mutation>>) -> Result<()> {
         let Some(mutation) = mutation.as_deref() else {
             return Ok(())
         };
 
         match mutation {
+            Mutation::AddDispatcher(adds) => {
+                if let Some(new_dispatchers) = adds.map.get(&self.actor_id) {
+                    let new_dispatchers: Vec<_> = new_dispatchers
+                        .iter()
+                        .map(|d| DispatcherImpl::new(&self.context, self.actor_id, d))
+                        .try_collect()?;
+
+                    self.dispatchers.extend(new_dispatchers);
+                }
+            }
+
             Mutation::UpdateOutputs(updates) => {
                 for dispatcher in &mut self.dispatchers {
                     if let Some((_, actor_infos)) =
@@ -267,7 +280,7 @@ impl DispatchExecutorInner {
     }
 
     /// For `Stop`, update the outputs after we dispatch the barrier.
-    async fn post_mutate_outputs(&mut self, mutation: &Option<Arc<Mutation>>) -> Result<()> {
+    async fn post_mutate_dispatchers(&mut self, mutation: &Option<Arc<Mutation>>) -> Result<()> {
         if let Some(Mutation::Stop(stops)) = mutation.as_deref() {
             // Remove outputs only if this actor itself is not to be stopped.
             if !stops.contains(&self.actor_id) {
@@ -329,6 +342,60 @@ pub enum DispatcherImpl {
     Broadcast(BroadcastDispatcher),
     Simple(SimpleDispatcher),
     RoundRobin(RoundRobinDataDispatcher),
+}
+
+impl DispatcherImpl {
+    pub fn new(
+        context: &SharedContext,
+        actor_id: ActorId,
+        dispatcher: &ProstDispatcher,
+    ) -> Result<Self> {
+        let outputs = dispatcher
+            .downstream_actor_id
+            .iter()
+            .map(|down_id| {
+                let downstream_addr = context.get_actor_info(down_id)?.get_host()?.into();
+                new_output(context, downstream_addr, actor_id, *down_id)
+            })
+            .collect::<Result<Vec<_>>>()?;
+
+        use risingwave_pb::stream_plan::DispatcherType::*;
+        let dispatcher_impl = match dispatcher.get_type()? {
+            Hash => {
+                assert!(!outputs.is_empty());
+                let column_indices = dispatcher
+                    .column_indices
+                    .iter()
+                    .map(|i| *i as usize)
+                    .collect();
+                let compressed_mapping = dispatcher.get_hash_mapping()?;
+                let hash_mapping = decompress_data(
+                    &compressed_mapping.original_indices,
+                    &compressed_mapping.data,
+                );
+
+                DispatcherImpl::Hash(HashDataDispatcher::new(
+                    dispatcher.downstream_actor_id.to_vec(),
+                    outputs,
+                    column_indices,
+                    hash_mapping,
+                    dispatcher.dispatcher_id,
+                ))
+            }
+            Broadcast => DispatcherImpl::Broadcast(BroadcastDispatcher::new(
+                outputs,
+                dispatcher.dispatcher_id,
+            )),
+            Simple | NoShuffle => {
+                assert_eq!(outputs.len(), 1);
+                let output = outputs.into_iter().next().unwrap();
+                DispatcherImpl::Simple(SimpleDispatcher::new(output, dispatcher.dispatcher_id))
+            }
+            Invalid => unreachable!(),
+        };
+
+        Ok(dispatcher_impl)
+    }
 }
 
 macro_rules! impl_dispatcher {
