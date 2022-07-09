@@ -34,7 +34,11 @@ impl ExecutorBuilder for DynamicFilterExecutorBuilder {
         let source_l = params.input.remove(0);
         let key_l = node.get_left_key() as usize;
 
-        let vnodes = Arc::new(params.vnode_bitmap.expect("vnodes not set for dynamic filter"));
+        let vnodes = Arc::new(
+            params
+                .vnode_bitmap
+                .expect("vnodes not set for dynamic filter"),
+        );
 
         let prost_condition = node.get_condition()?;
         let comparator = prost_condition.get_expr_type()?;
@@ -52,11 +56,10 @@ impl ExecutorBuilder for DynamicFilterExecutorBuilder {
         // let right_table_id = TableId::from(node.right_table.as_ref().unwrap().id);
 
         let state_table_l = StateTable::from_table_catalog(
-            node.get_left_table()?, 
-            store.clone(), 
-            Some(vnodes.clone())
+            node.get_left_table()?,
+            store.clone(),
+            Some(vnodes.clone()),
         );
-
 
         Ok(Box::new(DynamicFilterExecutor::new(
             source_l,

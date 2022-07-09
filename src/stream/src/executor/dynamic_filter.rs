@@ -12,14 +12,16 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::ops::{RangeBounds, Bound::{self, *}};
+use std::ops::Bound::{self, *};
+use std::ops::RangeBounds;
 use std::sync::Arc;
 
 use anyhow::anyhow;
 use futures::StreamExt;
 use futures_async_stream::try_stream;
 use itertools::Itertools;
-use madsim::collections::{BTreeMap, HashSet, btree_map::Range};
+use madsim::collections::btree_map::Range;
+use madsim::collections::{BTreeMap, HashSet};
 use risingwave_common::array::{Array, ArrayImpl, DataChunk, Op, Row, StreamChunk};
 use risingwave_common::buffer::{Bitmap, BitmapBuilder};
 use risingwave_common::catalog::Schema;
@@ -47,7 +49,6 @@ pub struct RangeCache<S: StateStore> {
     //       It could be preferred to find a way to do prefix range scans on the left key and
     //       storing as `BTreeSet<(ScalarImpl, Row)>`.
     //       We could solve it if `ScalarImpl` had a successor/predecessor function.
-    
     cache: BTreeMap<ScalarImpl, HashSet<Row>>,
     state_table: StateTable<S>,
     /// The current range stored in the cache.
@@ -63,7 +64,6 @@ pub struct RangeCache<S: StateStore> {
 }
 
 type ScalarRange = (Bound<ScalarImpl>, Bound<ScalarImpl>);
-
 
 impl<S: StateStore> RangeCache<S> {
     pub fn new(state_table: StateTable<S>, current_epoch: u64) -> Self {
@@ -88,11 +88,10 @@ impl<S: StateStore> RangeCache<S> {
 
     pub fn delete(&mut self, k: &ScalarImpl, v: Row) -> StreamExecutorResult<()> {
         if self.range.contains(k) {
-            let contains_element = self.cache
+            let contains_element = self
+                .cache
                 .get_mut(k)
-                .ok_or_else(|| {
-                    StreamExecutorError::from(anyhow!("Deleting non-existent element"))
-                })?
+                .ok_or_else(|| StreamExecutorError::from(anyhow!("Deleting non-existent element")))?
                 .remove(&v);
 
             if !contains_element {
@@ -107,30 +106,30 @@ impl<S: StateStore> RangeCache<S> {
 
     pub fn range(&self, range: ScalarRange) -> Range<ScalarImpl, HashSet<Row>> {
         // What we want: At the end of every epoch we will try to read
-        // ranges based on the new value. The values in the range may not all be cached. 
-        // 
-        // If the new range is overlapping with the current range, we will keep the 
+        // ranges based on the new value. The values in the range may not all be cached.
+        //
+        // If the new range is overlapping with the current range, we will keep the
         // current range. We will then evict to capacity after the cache has been populated and
-        // the 
+        // the
         //
         // Actually, we don't really need to return `Range` as all we really need is an iterator
         // over rows.
         //
-        // Here is our strategy for populating the cache: 
+        // Here is our strategy for populating the cache:
         //
         // We will always cache towards the direction of the previous value's movement.
         //
         // Time | Scenario
-        // -----+--------------------------------------------- 
+        // -----+---------------------------------------------
         //   1  | [--cached range--]        *<--prev_value
         //      |                       [--requested range--]
-        //      | 
+        //      |
         //
         // If this requested range is too large, it will cause OOM.
         //
         // --------------------------------------------------------------------
-        // 
-        // For overlapping ranges, we will prevent double inserts, 
+        //
+        // For overlapping ranges, we will prevent double inserts,
         // preferring the fresher in-cache value
         //
         // let lower_fetch_range: Option<ScalarRange>) = match self.range.0 {
@@ -140,7 +139,7 @@ impl<S: StateStore> RangeCache<S> {
         //         bound @ Included(y) | Excluded(y) => if y
         //         Included(y) | Excluded(y) => x <= y,
         //     },
-        //     Excluded(x) => 
+        //     Excluded(x) =>
         // }
 
         self.cache.range(range)
@@ -352,7 +351,6 @@ impl<S: StateStore> DynamicFilterExecutor<S> {
 
         let mut prev_epoch_value: Option<Datum> = None;
         let mut current_epoch_value: Option<Datum> = None;
-
 
         let aligned_stream = barrier_align(
             input_l.execute(),

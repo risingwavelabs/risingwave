@@ -357,7 +357,7 @@ impl StreamFragmenter {
             }
 
             NodeBody::DynamicFilter(dynamic_filter_node) => {
-                if let Some(left_table) =  &mut dynamic_filter_node.left_table {
+                if let Some(left_table) = &mut dynamic_filter_node.left_table {
                     left_table.id = state.gen_table_id();
                 }
             }

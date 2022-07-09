@@ -18,12 +18,12 @@ use risingwave_common::util::sort_util::OrderType;
 use risingwave_pb::stream_plan::stream_node::NodeBody;
 use risingwave_pb::stream_plan::DynamicFilterNode;
 
+use super::utils::TableCatalogBuilder;
 use crate::catalog::TableCatalog;
 use crate::expr::Expr;
 use crate::optimizer::plan_node::{PlanBase, PlanTreeNodeBinary, ToStreamProst};
 use crate::optimizer::PlanRef;
 use crate::utils::Condition;
-use super::utils::TableCatalogBuilder;
 
 #[derive(Clone, Debug)]
 pub struct StreamDynamicFilter {
@@ -87,10 +87,12 @@ impl ToStreamProst for StreamDynamicFilter {
                 .predicate
                 .as_expr_unless_true()
                 .map(|x| x.to_expr_proto()),
-            left_table: Some(infer_internal_table_catalog(self.clone().into(), self.left_index).to_prost(
-                SchemaId::placeholder() as u32,
-                DatabaseId::placeholder() as u32,
-            ),),
+            left_table: Some(
+                infer_internal_table_catalog(self.clone().into(), self.left_index).to_prost(
+                    SchemaId::placeholder() as u32,
+                    DatabaseId::placeholder() as u32,
+                ),
+            ),
         })
     }
 }
