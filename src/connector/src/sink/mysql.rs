@@ -23,7 +23,7 @@ use risingwave_common::array::StreamChunk;
 use risingwave_common::catalog::Schema;
 use risingwave_common::types::{Datum, Decimal, ScalarImpl};
 
-use crate::sink::{Result, Sink, SinkError};
+use crate::sink::{Result, Sink, SinkError, SinkState};
 
 #[derive(Clone, Debug)]
 pub struct MySQLConfig {
@@ -188,6 +188,10 @@ impl Sink for MySQLSink {
     }
 
     async fn abort(&mut self) -> Result<()> {
+        todo!()
+    }
+
+    async fn take_snapshot(&self) -> Result<SinkState> {
         todo!()
     }
 }

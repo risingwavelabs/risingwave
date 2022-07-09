@@ -40,13 +40,16 @@ impl<S: StateStore> SinkExecutor<S> {
     pub fn new(
         materialize_executor: BoxedExecutor,
         store: S,
-        properties: HashMap<String, String>,
+        mut properties: HashMap<String, String>,
         executor_id: u64,
     ) -> Self {
+        // This field can be used to distinguish a specific actor in parallelism to prevent
+        // transaction execution errors
+        properties.insert("identifier".to_string(), format!("sink-{:?}", executor_id));
         Self {
             input: materialize_executor,
             store,
-            properties: HashMap::new(),
+            properties,
             identity: format!("SinkExecutor_{:?}", executor_id),
         }
     }

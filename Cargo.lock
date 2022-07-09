@@ -4239,6 +4239,7 @@ dependencies = [
  "tokio-retry",
  "tokio-stream",
  "tokio-util",
+ "tracing",
  "twox-hash",
  "url",
  "urlencoding",

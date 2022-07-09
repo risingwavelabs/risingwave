@@ -16,7 +16,7 @@ use async_trait::async_trait;
 use risingwave_common::array::StreamChunk;
 use risingwave_common::catalog::Schema;
 
-use crate::sink::{Result, Sink};
+use crate::sink::{Result, Sink, SinkState};
 
 #[derive(Clone, Debug)]
 pub struct RedisConfig;
@@ -44,6 +44,10 @@ impl Sink for RedisSink {
     }
 
     async fn abort(&mut self) -> Result<()> {
+        todo!()
+    }
+
+    async fn take_snapshot(&self) -> Result<SinkState> {
         todo!()
     }
 }

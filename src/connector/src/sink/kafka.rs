@@ -20,9 +20,9 @@ use futures::{Future, TryFutureExt};
 use rdkafka::error::{KafkaError, KafkaResult};
 use rdkafka::message::ToBytes;
 use rdkafka::producer::{BaseRecord, DefaultProducerContext, Producer, ThreadedProducer};
-use rdkafka::ClientConfig;
 use rdkafka::types::RDKafkaErrorCode;
-use risingwave_common::array::{ArrayResult, RowRef, StreamChunk};
+use rdkafka::ClientConfig;
+use risingwave_common::array::{ArrayResult, Op, RowRef, StreamChunk};
 use risingwave_common::catalog::{Field, Schema};
 use risingwave_common::types::{DataType, DatumRef, ScalarRefImpl};
 use serde::Deserialize;
@@ -30,7 +30,7 @@ use serde_json::{json, Map, Value};
 use tokio::task;
 
 use super::{Sink, SinkError};
-use crate::sink::Result;
+use crate::sink::{Result, SinkState};
 
 pub const KAFKA_SINK: &str = "kafka";
 
@@ -48,6 +48,11 @@ pub struct KafkaConfig {
     // (the partition number should set by meta)
     pub partition: Option<i32>,
 
+    #[serde(rename = "sink.type")]
+    pub sink_type: String, // accept "append_only" or "debezium"
+
+    pub identifier: String,
+
     pub timeout: Duration,
     pub max_retry_num: i32,
     pub retry_interval: Duration,
@@ -58,15 +63,27 @@ impl KafkaConfig {
         let brokers = values
             .get("kafka.brokers")
             .expect("kafka.brokers must be set");
+        let identifier = values
+            .get("identifier")
+            .expect("kafka.identifier must be set");
+        let sink_type = values.get("sink.type").expect("sink.type must be set");
+        if sink_type != "append_only" && sink_type != "debezium" {
+            return Err(SinkError::Config(
+                "sink.type must be set to \"append_only\" or \"debezium\"".to_string(),
+            ));
+        }
+
         let topic = values.get("kafka.topic").expect("kafka.topic must be set");
 
         Ok(KafkaConfig {
             brokers: brokers.to_string(),
             topic: topic.to_string(),
+            identifier: identifier.to_owned(),
             partition: None,
             timeout: Duration::from_secs(5), // default timeout is 5 seconds
             max_retry_num: 3,                // default max retry num is 3
             retry_interval: Duration::from_millis(100), // default retry interval is 100ms
+            sink_type: sink_type.to_string(),
         })
     }
 }
@@ -74,7 +91,8 @@ impl KafkaConfig {
 pub struct KafkaSink {
     pub config: KafkaConfig,
     pub conductor: KafkaTransactionConductor,
-    latest_epoch: u64,
+    latest_success_epoch: u64,
+    in_transaction_epoch: Option<u64>,
 }
 
 impl KafkaSink {
@@ -82,20 +100,21 @@ impl KafkaSink {
         Ok(KafkaSink {
             config: config.clone(),
             conductor: KafkaTransactionConductor::new(config).await?,
-            latest_epoch: 0,
+            in_transaction_epoch: None,
+            latest_success_epoch: 0,
         })
     }
 
     // any error should report to upper level and requires revert to previous epoch.
-    pub async fn do_with_retry<'a, F, FutKR, T>(&self, f: F) -> KafkaResult<T>
+    pub async fn do_with_retry<F, FutKR, T>(&self, f: F) -> KafkaResult<T>
     where
         F: Fn(KafkaTransactionConductor) -> FutKR,
         FutKR: Future<Output = KafkaResult<T>>,
     {
-        let producer = self.conductor.clone();
+        let conductor = self.conductor.clone();
         let mut err_placeholder = KafkaError::Canceled;
         for _ in 0..self.config.max_retry_num {
-            match f(producer.clone()).await {
+            match f(conductor.clone()).await {
                 Ok(res) => {
                     return Ok(res);
                 }
@@ -116,16 +135,18 @@ impl KafkaSink {
         P: ToBytes + ?Sized,
     {
         let mut err_placeholder = KafkaError::Canceled;
-        
+
         for _ in 0..self.config.max_retry_num {
-            match self.conductor.send(record) {
+            match self.conductor.send(record).await {
                 Ok(()) => {
                     return Ok(());
                 }
                 Err((e, rec)) => {
                     err_placeholder = e;
                     record = rec;
-                    if let KafkaError::MessageProduction(RDKafkaErrorCode::QueueFull) = err_placeholder {
+                    if let KafkaError::MessageProduction(RDKafkaErrorCode::QueueFull) =
+                        err_placeholder
+                    {
                         // if the queue is full, we need to wait for some time and retry.
                         tokio::time::sleep(self.config.retry_interval).await;
                         continue;
@@ -137,23 +158,82 @@ impl KafkaSink {
         }
         Err(err_placeholder)
     }
+
+    async fn append_only(&self, chunk: StreamChunk, schema: &Schema) -> Result<()> {
+        for (op, row) in chunk.rows() {
+            if op == Op::Insert {
+                let record = Value::Object(record_to_json(row, schema.fields.clone())?).to_string();
+                let msg_key = format!(
+                    "{}-{}",
+                    self.config.identifier,
+                    self.in_transaction_epoch.unwrap()
+                );
+                self.send(
+                    BaseRecord::to(self.config.topic.as_str())
+                        .key(msg_key.as_bytes())
+                        .payload(record.as_bytes()),
+                )
+                .await?;
+            }
+        }
+        Ok(())
+    }
 }
 
 #[async_trait::async_trait]
 impl Sink for KafkaSink {
-    async fn write_batch(&mut self, _chunk: StreamChunk, _schema: &Schema) -> Result<()> {
-        todo!()
+    async fn write_batch(&mut self, chunk: StreamChunk, schema: &Schema) -> Result<()> {
+        // when sinking the snapshot, it is required to begin epoch 0 for transaction
+        if self.in_transaction_epoch.unwrap() <= self.latest_success_epoch {
+            return Ok(());
+        }
+        if self.config.sink_type.as_str() == "append_only" {
+            self.append_only(chunk, schema).await
+        } else if self.config.sink_type.as_str() == "debezium" {
+            todo!()
+        } else {
+            unreachable!()
+        }
     }
 
     async fn begin_epoch(&mut self, epoch: u64) -> Result<()> {
-        todo!()
+        self.in_transaction_epoch = Some(epoch);
+        if self.latest_success_epoch == 0 {
+            self.do_with_retry(|conductor| conductor.init_transaction())
+                .await
+                .map_err(|e| SinkError::Kafka(e))?;
+        }
+
+        self.do_with_retry(|conductor| conductor.start_transaction())
+            .await
+            .map_err(|e| SinkError::Kafka(e))?;
+        tracing::debug!("begin epoch {:?}", epoch);
+        Ok(())
     }
 
     async fn commit(&mut self) -> Result<()> {
-        todo!()
+        self.do_with_retry(|conductor| conductor.commit_transaction())
+            .await
+            .map_err(|e| SinkError::Kafka(e))?;
+        if let Some(epoch) = self.in_transaction_epoch.take() {
+            self.latest_success_epoch = epoch;
+        } else {
+            tracing::error!(
+                "commit without begin_epoch, last success epoch {:?}",
+                self.latest_success_epoch
+            );
+            return Err(SinkError::Kafka(KafkaError::Canceled));
+        }
+        Ok(())
     }
 
     async fn abort(&mut self) -> Result<()> {
+        self.do_with_retry(|conductor| conductor.abort_transaction())
+            .await
+            .map_err(|e| SinkError::Kafka(e))
+    }
+
+    async fn take_snapshot(&self) -> Result<SinkState> {
         todo!()
     }
 }
@@ -259,6 +339,7 @@ impl KafkaTransactionConductor {
         let inner = ClientConfig::new()
             .set("bootstrap.servers", config.brokers.as_str())
             .set("message.timeout.ms", "5000")
+            .set("transactional.id", config.identifier.as_str()) // required by kafka transaction
             .create_with_context(DefaultProducerContext)
             .expect("Producer creation error");
 
@@ -269,27 +350,27 @@ impl KafkaTransactionConductor {
         })
     }
 
-    async fn init_transaction(&self) -> impl Future<Output = KafkaResult<()>> {
+    fn init_transaction(&self) -> impl Future<Output = KafkaResult<()>> {
         let inner = self.inner.clone();
         let timeout = self.properties.timeout.clone();
         task::spawn_blocking(move || inner.init_transactions(timeout))
             .unwrap_or_else(|_| Err(KafkaError::Canceled))
     }
 
-    async fn start_transaction(&self) -> impl Future<Output = KafkaResult<()>> {
+    fn start_transaction(&self) -> impl Future<Output = KafkaResult<()>> {
         let inner = Arc::clone(&self.inner);
         task::spawn_blocking(move || inner.begin_transaction())
             .unwrap_or_else(|_| Err(KafkaError::Canceled))
     }
 
-    async fn commit_transaction(&self) -> impl Future<Output = KafkaResult<()>> {
+    fn commit_transaction(&self) -> impl Future<Output = KafkaResult<()>> {
         let inner = Arc::clone(&self.inner);
         let timeout = self.properties.timeout.clone();
         task::spawn_blocking(move || inner.commit_transaction(timeout))
             .unwrap_or_else(|_| Err(KafkaError::Canceled))
     }
 
-    async fn abort_transaction(&self) -> impl Future<Output = KafkaResult<()>> {
+    fn abort_transaction(&self) -> impl Future<Output = KafkaResult<()>> {
         let inner = Arc::clone(&self.inner);
         let timeout = self.properties.timeout.clone();
         task::spawn_blocking(move || inner.abort_transaction(timeout))
@@ -304,7 +385,7 @@ impl KafkaTransactionConductor {
             .unwrap_or_else(|_| Err(KafkaError::Canceled))
     }
 
-    fn send<'a, K, P>(
+    async fn send<'a, K, P>(
         &self,
         record: BaseRecord<'a, K, P>,
     ) -> core::result::Result<(), (KafkaError, BaseRecord<'a, K, P>)>

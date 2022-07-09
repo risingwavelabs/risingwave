@@ -23,7 +23,9 @@ use enum_as_inner::EnumAsInner;
 use risingwave_common::array::StreamChunk;
 use risingwave_common::catalog::Schema;
 use risingwave_common::error::{ErrorCode, Result as RwResult, RwError};
+use serde::{Deserialize, Serialize};
 use thiserror::Error;
+pub use tracing;
 
 use crate::sink::kafka::{KafkaConfig, KafkaSink, KAFKA_SINK};
 use crate::sink::mysql::{MySQLConfig, MySQLSink};
@@ -35,6 +37,7 @@ pub trait Sink {
     async fn begin_epoch(&mut self, epoch: u64) -> Result<()>;
     async fn commit(&mut self) -> Result<()>;
     async fn abort(&mut self) -> Result<()>;
+    async fn take_snapshot(&self) -> Result<SinkState>;
 }
 
 #[derive(Clone, Debug, EnumAsInner)]
@@ -42,6 +45,13 @@ pub enum SinkConfig {
     Mysql(MySQLConfig),
     Redis(RedisConfig),
     Kafka(KafkaConfig),
+}
+
+#[derive(Clone, Debug, EnumAsInner, Serialize, Deserialize)]
+pub enum SinkState {
+    Kafka(),
+    Mysql(),
+    Redis(),
 }
 
 impl SinkConfig {
@@ -61,16 +71,16 @@ impl SinkConfig {
 }
 
 pub enum SinkImpl {
-    MySQL(MySQLSink),
-    Redis(RedisSink),
-    Kafka(KafkaSink),
+    MySQL(Box<MySQLSink>),
+    Redis(Box<RedisSink>),
+    Kafka(Box<KafkaSink>),
 }
 
 impl SinkImpl {
     fn new(cfg: SinkConfig) -> Self {
         match cfg {
-            SinkConfig::Mysql(cfg) => SinkImpl::MySQL(MySQLSink::new(cfg)),
-            SinkConfig::Redis(cfg) => SinkImpl::Redis(RedisSink::new(cfg)),
+            SinkConfig::Mysql(cfg) => SinkImpl::MySQL(Box::new(MySQLSink::new(cfg))),
+            SinkConfig::Redis(cfg) => SinkImpl::Redis(Box::new(RedisSink::new(cfg))),
             SinkConfig::Kafka(_) => todo!(),
         }
     }
@@ -109,6 +119,14 @@ impl Sink for SinkImpl {
             SinkImpl::Kafka(sink) => sink.abort().await,
         }
     }
+
+    async fn take_snapshot(&self) -> Result<SinkState> {
+        match self {
+            SinkImpl::MySQL(sink) => sink.take_snapshot().await,
+            SinkImpl::Redis(sink) => sink.take_snapshot().await,
+            SinkImpl::Kafka(sink) => sink.take_snapshot().await,
+        }
+    }
 }
 
 pub type Result<T> = std::result::Result<T, SinkError>;
@@ -118,9 +136,11 @@ pub enum SinkError {
     #[error("MySQL error: {0}")]
     MySQL(#[from] mysql_async::Error),
     #[error("Kafka error: {0}")]
-    Kafka(String),
+    Kafka(#[from] rdkafka::error::KafkaError),
     #[error("Json parse error: {0}")]
     JsonParse(String),
+    #[error("config error: {0}")]
+    Config(String),
 }
 
 impl From<SinkError> for RwError {

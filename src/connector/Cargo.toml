@@ -57,6 +57,7 @@ tokio-retry = "0.3"
 tokio-stream = "0.1"
 tokio-util = { version = "0.7", features = ["codec", "io"] }
 tonic = { version = "=0.2.0-alpha.3", package = "madsim-tonic" }
+tracing = { version = "0.1" }
 twox-hash = "1"
 url = "2"
 urlencoding = "2"
