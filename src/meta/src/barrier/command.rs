@@ -236,7 +236,7 @@ where
                     let downstream_actors = dispatches
                         .iter()
                         .filter(|(upstream_actor_id, _)| actors.contains(upstream_actor_id))
-                        .map(|(k, v)| (k.clone(), v.clone()))
+                        .map(|(&k, v)| (k, v.clone()))
                         .collect();
                     dependent_table_actors.push((*table_id, downstream_actors));
                 }
