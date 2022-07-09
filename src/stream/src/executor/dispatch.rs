@@ -290,6 +290,8 @@ impl DispatchExecutorInner {
             }
         }
 
+        self.dispatchers.drain_filter(|d| d.is_empty());
+
         Ok(())
     }
 }
@@ -436,6 +438,12 @@ macro_rules! impl_dispatcher {
                     $(Self::$variant_name(inner) => inner.get_dispatcher_id(), )*
                 }
             }
+
+            pub fn is_empty(&self) -> bool {
+                match self {
+                    $(Self::$variant_name(inner) => inner.is_empty(), )*
+                }
+            }
         }
     }
 }
@@ -475,6 +483,7 @@ pub trait Dispatcher: Debug + 'static {
     fn remove_outputs(&mut self, actor_ids: &HashSet<ActorId>);
 
     fn get_dispatcher_id(&self) -> DispatcherId;
+    fn is_empty(&self) -> bool;
 }
 
 pub struct RoundRobinDataDispatcher {
@@ -540,6 +549,10 @@ impl Dispatcher for RoundRobinDataDispatcher {
 
     fn get_dispatcher_id(&self) -> DispatcherId {
         self.dispatcher_id
+    }
+
+    fn is_empty(&self) -> bool {
+        self.outputs.is_empty()
     }
 }
 
@@ -722,6 +735,10 @@ impl Dispatcher for HashDataDispatcher {
     fn get_dispatcher_id(&self) -> DispatcherId {
         self.dispatcher_id
     }
+
+    fn is_empty(&self) -> bool {
+        self.outputs.is_empty()
+    }
 }
 
 /// `BroadcastDispatcher` dispatches message to all outputs.
@@ -796,11 +813,15 @@ impl Dispatcher for BroadcastDispatcher {
     fn get_dispatcher_id(&self) -> DispatcherId {
         self.dispatcher_id
     }
+
+    fn is_empty(&self) -> bool {
+        self.outputs.is_empty()
+    }
 }
 
 /// `SimpleDispatcher` dispatches message to a single output.
 pub struct SimpleDispatcher {
-    output: BoxedOutput,
+    output: Option<BoxedOutput>,
     dispatcher_id: DispatcherId,
 }
 
@@ -815,9 +836,13 @@ impl Debug for SimpleDispatcher {
 impl SimpleDispatcher {
     pub fn new(output: BoxedOutput, dispatcher_id: DispatcherId) -> Self {
         Self {
-            output,
+            output: Some(output),
             dispatcher_id,
         }
+    }
+
+    fn output(&mut self) -> &mut BoxedOutput {
+        self.output.as_mut().expect("no output")
     }
 }
 
@@ -825,35 +850,41 @@ impl Dispatcher for SimpleDispatcher {
     define_dispatcher_associated_types!();
 
     fn set_outputs(&mut self, outputs: impl IntoIterator<Item = BoxedOutput>) {
-        self.output = outputs.into_iter().next().unwrap();
+        self.output = Some(outputs.into_iter().next().unwrap());
     }
 
     fn add_outputs(&mut self, outputs: impl IntoIterator<Item = BoxedOutput>) {
-        self.output = outputs.into_iter().next().unwrap();
+        self.output = Some(outputs.into_iter().next().unwrap());
     }
 
     fn dispatch_barrier(&mut self, barrier: Barrier) -> Self::BarrierFuture<'_> {
         async move {
-            self.output.send(Message::Barrier(barrier.clone())).await?;
+            self.output()
+                .send(Message::Barrier(barrier.clone()))
+                .await?;
             Ok(())
         }
     }
 
     fn dispatch_data(&mut self, chunk: StreamChunk) -> Self::DataFuture<'_> {
         async move {
-            self.output.send(Message::Chunk(chunk)).await?;
+            self.output().send(Message::Chunk(chunk)).await?;
             Ok(())
         }
     }
 
     fn remove_outputs(&mut self, actor_ids: &HashSet<ActorId>) {
-        if actor_ids.contains(&self.output.actor_id()) {
-            panic!("cannot remove outputs from SimpleDispatcher");
+        if actor_ids.contains(&self.output().actor_id()) {
+            self.output = None;
         }
     }
 
     fn get_dispatcher_id(&self) -> DispatcherId {
         self.dispatcher_id
+    }
+
+    fn is_empty(&self) -> bool {
+        self.output.is_none()
     }
 }
 
