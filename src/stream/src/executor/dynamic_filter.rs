@@ -104,26 +104,19 @@ impl<S: StateStore> RangeCache<S> {
         Ok(())
     }
 
-    pub fn range(&self, range: ScalarRange) -> Range<ScalarImpl, HashSet<Row>> {
+    pub fn range(&self, range: ScalarRange, _latest_is_lower: bool) -> Range<ScalarImpl, HashSet<Row>> {
+        // TODO (cache behaviour):
         // What we want: At the end of every epoch we will try to read
         // ranges based on the new value. The values in the range may not all be cached.
         //
         // If the new range is overlapping with the current range, we will keep the
-        // current range. We will then evict to capacity after the cache has been populated and
-        // the
+        // current range. We will then evict to capacity after the cache has been populated
+        // with the new range.
         //
-        // Actually, we don't really need to return `Range` as all we really need is an iterator
-        // over rows.
+        // If the new range is non-overlapping, we will delete the old range, and store
+        // `self.capacity` elements from the new range.
         //
-        // Here is our strategy for populating the cache:
-        //
-        // We will always cache towards the direction of the previous value's movement.
-        //
-        // Time | Scenario
-        // -----+---------------------------------------------
-        //   1  | [--cached range--]        *<--prev_value
-        //      |                       [--requested range--]
-        //      |
+        // We will always prefer to cache values that are closer to the current value.
         //
         // If this requested range is too large, it will cause OOM.
         //
@@ -288,11 +281,13 @@ impl<S: StateStore> DynamicFilterExecutor<S> {
         Ok((new_ops, new_visibility))
     }
 
+    /// Returns the required range, whether the latest value is in lower bound (rather than upper)
+    /// and whether to insert or delete the range.
     fn get_range(
         &self,
         curr: &Datum,
         prev: Datum,
-    ) -> ((Bound<ScalarImpl>, Bound<ScalarImpl>), bool) {
+    ) -> ((Bound<ScalarImpl>, Bound<ScalarImpl>), bool, bool) {
         debug_assert_ne!(curr, &prev);
         let curr_is_some = curr.is_some();
         match (curr.clone(), prev) {
@@ -305,7 +300,9 @@ impl<S: StateStore> DynamicFilterExecutor<S> {
                     _ => unreachable!(),
                 };
                 let is_insert = curr_is_some;
-                (range, is_insert)
+                // The new bound is always towards the last known value
+                let is_lower = matches!(self.comparator, GreaterThan | GreaterThanOrEqual);
+                (range, is_lower, is_insert)
             }
             (Some(c), Some(p)) => {
                 if c < p {
@@ -315,7 +312,7 @@ impl<S: StateStore> DynamicFilterExecutor<S> {
                         _ => unreachable!(),
                     };
                     let is_insert = matches!(self.comparator, GreaterThan | GreaterThanOrEqual);
-                    (range, is_insert)
+                    (range, true, is_insert)
                 } else {
                     // p > c
                     let range = match self.comparator {
@@ -324,7 +321,7 @@ impl<S: StateStore> DynamicFilterExecutor<S> {
                         _ => unreachable!(),
                     };
                     let is_insert = matches!(self.comparator, LessThan | LessThanOrEqual);
-                    (range, is_insert)
+                    (range, false, is_insert)
                 }
             }
             (None, None) => unreachable!(), // prev != curr
@@ -416,8 +413,8 @@ impl<S: StateStore> DynamicFilterExecutor<S> {
                     let curr: Datum = current_epoch_value.clone().flatten();
                     let prev: Datum = prev_epoch_value.flatten();
                     if prev != curr {
-                        let (range, is_insert) = self.get_range(&curr, prev);
-                        for (_, rows) in self.range_cache.range(range) {
+                        let (range, latest_is_lower, is_insert) = self.get_range(&curr, prev);
+                        for (_, rows) in self.range_cache.range(range, latest_is_lower) {
                             for row in rows {
                                 if let Some(chunk) = stream_chunk_builder
                                     .append_row_matched(
