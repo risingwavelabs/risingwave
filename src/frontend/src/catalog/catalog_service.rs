@@ -181,12 +181,9 @@ impl CatalogWriter for CatalogWriterImpl {
         self.wait_version(version).await
     }
 
-    // async fn drop_sink(&self, sink_id: u32) -> Result<()> {
-    //     let version = self.meta_client.drop_sink(sink_id).await?;
-    //     self.wait_version(version).await
-    // }
-    async fn drop_sink(&self, _sink_id: u32) -> Result<()> {
-        todo!();
+    async fn drop_sink(&self, sink_id: u32) -> Result<()> {
+        let version = self.meta_client.drop_sink(sink_id).await?;
+        self.wait_version(version).await
     }
 
     async fn drop_schema(&self, schema_id: u32) -> Result<()> {

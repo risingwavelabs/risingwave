@@ -734,6 +734,8 @@ where
         fragment_graph: StreamFragmentGraph,
         id: SinkId,
     ) -> RwResult<()> {
-        todo!();
+        dbg!(fragment_graph);
+        dbg!(id);
+        Ok(())
     }
 }

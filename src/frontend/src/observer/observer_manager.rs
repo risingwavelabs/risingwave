@@ -144,6 +144,13 @@ impl ObserverManager {
                 }
                 _ => panic!("receive an unsupported notify {:?}", resp),
             },
+            Info::Sink(sink) => match resp.operation() {
+                Operation::Add => catalog_guard.create_sink(sink.clone()),
+                Operation::Delete => {
+                    catalog_guard.drop_sink(sink.database_id, sink.schema_id, sink.id)
+                }
+                _ => panic!("receive an unsupported notify {:?}", resp),
+            },
             _ => unreachable!(),
         }
         assert!(
