@@ -3,9 +3,9 @@ syntax = "proto3";
 package task_service;
 
 import "batch_plan.proto";
-import "stream_plan.proto";
 import "common.proto";
 import "data.proto";
+import "stream_plan.proto";
 
 option optimize_for = SPEED;
 
