@@ -181,6 +181,7 @@ pub struct AddOutput {
 #[derive(Debug, PartialEq, Clone, Default)]
 pub struct AddDispatcher {
     pub map: HashMap<ActorId, Vec<ProstDispatcher>>,
+    // TODO: remove this and use `SourceChangesSplit` after we support multiple mutations.
     pub splits: HashMap<ActorId, Vec<SplitImpl>>,
 }
 
@@ -279,6 +280,7 @@ impl Barrier {
     }
 
     pub fn is_to_add_output(&self, actor_id: ActorId) -> bool {
+        // TODO: remove `AddOutput`
         matches!(
             self.mutation.as_deref(),
             Some(Mutation::AddOutput(map)) if map.map
@@ -393,6 +395,7 @@ impl Mutation {
                     })
                     .collect::<HashMap<(ActorId, DispatcherId), Vec<ActorInfo>>>(),
             ),
+            // TODO: remove this
             ProstMutation::Add(adds) => Mutation::AddOutput(AddOutput {
                 map: adds
                     .mutations
@@ -425,6 +428,8 @@ impl Mutation {
                     .iter()
                     .map(|(&actor_id, dispatchers)| (actor_id, dispatchers.dispatchers.clone()))
                     .collect(),
+                // TODO: remove this and use `SourceChangesSplit` after we support multiple
+                // mutations.
                 splits: adds
                     .actor_splits
                     .iter()

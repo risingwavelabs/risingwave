@@ -204,7 +204,7 @@ impl DispatchExecutorInner {
         Ok(())
     }
 
-    /// For `Add` and `Update`, update the outputs before we dispatch the barrier.
+    /// For `Add` and `Update`, update the dispatchers before we dispatch the barrier.
     async fn pre_mutate_dispatchers(&mut self, mutation: &Option<Arc<Mutation>>) -> Result<()> {
         let Some(mutation) = mutation.as_deref() else {
             return Ok(())
@@ -219,6 +219,13 @@ impl DispatchExecutorInner {
                         .try_collect()?;
 
                     self.dispatchers.extend(new_dispatchers);
+                    assert!(
+                        self.dispatchers
+                            .iter()
+                            .map(|d| d.get_dispatcher_id())
+                            .all_unique(),
+                        "dispatcher ids must be unique"
+                    );
                 }
             }
 
@@ -279,7 +286,7 @@ impl DispatchExecutorInner {
         Ok(())
     }
 
-    /// For `Stop`, update the outputs after we dispatch the barrier.
+    /// For `Stop`, update the dispatchers after we dispatch the barrier.
     async fn post_mutate_dispatchers(&mut self, mutation: &Option<Arc<Mutation>>) -> Result<()> {
         if let Some(Mutation::Stop(stops)) = mutation.as_deref() {
             // Remove outputs only if this actor itself is not to be stopped.
@@ -290,6 +297,8 @@ impl DispatchExecutorInner {
             }
         }
 
+        // After stopping the downstream mview, the outputs of some dispatcher might be empty and we
+        // should clean up them.
         self.dispatchers.drain_filter(|d| d.is_empty());
 
         Ok(())
@@ -389,8 +398,7 @@ impl DispatcherImpl {
                 dispatcher.dispatcher_id,
             )),
             Simple | NoShuffle => {
-                assert_eq!(outputs.len(), 1);
-                let output = outputs.into_iter().next().unwrap();
+                let [output]: [_; 1] = outputs.try_into().unwrap();
                 DispatcherImpl::Simple(SimpleDispatcher::new(output, dispatcher.dispatcher_id))
             }
             Invalid => unreachable!(),
@@ -841,6 +849,9 @@ impl SimpleDispatcher {
         }
     }
 
+    /// Get the output of this dispatcher.
+    /// The field should always be `Some`. After `remove_output` is called, the field becomes `None`
+    /// and this dispatcher should be dropped immediately by checking `is_empty`.
     fn output(&mut self) -> &mut BoxedOutput {
         self.output.as_mut().expect("no output")
     }
@@ -853,8 +864,8 @@ impl Dispatcher for SimpleDispatcher {
         self.output = Some(outputs.into_iter().next().unwrap());
     }
 
-    fn add_outputs(&mut self, outputs: impl IntoIterator<Item = BoxedOutput>) {
-        self.output = Some(outputs.into_iter().next().unwrap());
+    fn add_outputs(&mut self, _outputs: impl IntoIterator<Item = BoxedOutput>) {
+        panic!("add_outputs is not supported");
     }
 
     fn dispatch_barrier(&mut self, barrier: Barrier) -> Self::BarrierFuture<'_> {

@@ -187,6 +187,7 @@ where
                     .clone();
                 for fragment in dependent_table.fragments.values_mut() {
                     for actor in &mut fragment.actors {
+                        // Extend new dispatchers to table fragments.
                         if let Some(new_dispatchers) = new_dispatchers.remove(&actor.actor_id) {
                             actor.dispatcher.extend(new_dispatchers);
                         }
@@ -236,9 +237,16 @@ where
                 for fragment in dependent_table.fragments.values_mut() {
                     if fragment.fragment_type == FragmentType::Sink as i32 {
                         for actor in &mut fragment.actors {
-                            actor.dispatcher[0]
-                                .downstream_actor_id
-                                .retain(|x| !chain_actor_ids.contains(x));
+                            // Remove these downstream actor ids from all dispatchers.
+                            for dispatcher in &mut actor.dispatcher {
+                                dispatcher
+                                    .downstream_actor_id
+                                    .retain(|x| !chain_actor_ids.contains(x));
+                            }
+                            // Remove empty dispatchers.
+                            actor
+                                .dispatcher
+                                .retain(|d| !d.downstream_actor_id.is_empty());
                         }
                     }
                 }

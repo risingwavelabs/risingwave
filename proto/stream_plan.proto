@@ -363,7 +363,6 @@ message Dispatcher {
   ActorMapping hash_mapping = 3;
   // Dispatcher can be uniquely identified by a combination of actor id and dispatcher id.
   // For dispatchers within actors, the id is the same as operator_id of the exchange plan node.
-  // For cross-MV dispatchers, there will only be one broadcast dispatcher of id 0.
   uint64 dispatcher_id = 4;
   // Number of downstreams decides how many endpoints a dispatcher should dispatch.
   repeated uint32 downstream_actor_id = 5;

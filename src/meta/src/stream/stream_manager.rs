@@ -222,11 +222,18 @@ where
                 merge.upstream_actor_id.push(upstream_actor_id);
 
                 // finally, we should also build dispatcher infos here.
+                //
+                // Note: currently we ensure that the downstream chain operator has the same
+                // parallel unit and distribution as the upstream mview, so we can simply use
+                // `NoShuffle` dispatcher here.
+                // TODO: support different parallel unit and distribution for new MV.
                 self.dispatchers
                     .entry(upstream_actor_id)
                     .or_default()
                     .push(Dispatcher {
                         r#type: DispatcherType::NoShuffle as _,
+                        // Use merge operator id as dispatcher id to avoid collision in this
+                        // Dispatch executor.
                         dispatcher_id: merge_stream_node.operator_id,
                         downstream_actor_id: vec![actor_id],
                         ..Default::default()
