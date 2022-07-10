@@ -33,11 +33,6 @@ impl ExecutorBuilder for TopNExecutorNewBuilder {
             .iter()
             .map(OrderPair::from_prost)
             .collect();
-        let limit = if node.limit == 0 {
-            None
-        } else {
-            Some(node.limit as usize)
-        };
         let cache_size = Some(1024);
         let total_count = 0;
         let table_id_l = TableId::new(node.get_table_id_l());
@@ -50,7 +45,7 @@ impl ExecutorBuilder for TopNExecutorNewBuilder {
         Ok(TopNExecutorNew::new(
             params.input.remove(0),
             order_pairs,
-            (node.offset as usize, limit),
+            (node.offset as usize, node.limit as usize),
             params.pk_indices,
             store,
             table_id_l,

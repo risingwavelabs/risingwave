@@ -34,7 +34,7 @@ impl<S: StateStore> TopNExecutorNew<S> {
     pub fn new(
         input: Box<dyn Executor>,
         order_pairs: Vec<OrderPair>,
-        offset_and_limit: (usize, Option<usize>),
+        offset_and_limit: (usize, usize),
         pk_indices: PkIndices,
         store: S,
         table_id: TableId,
@@ -71,8 +71,8 @@ pub struct InnerTopNExecutorNew<S: StateStore> {
     /// Schema of the executor.
     schema: Schema,
 
-    /// `LIMIT XXX`. `None` means no limit.
-    limit: Option<usize>,
+    /// `LIMIT XXX`. `0` means no limit.
+    limit: usize,
     /// `OFFSET XXX`. `0` means no offset.
     offset: usize,
 
@@ -127,7 +127,7 @@ impl<S: StateStore> InnerTopNExecutorNew<S> {
         input_info: ExecutorInfo,
         schema: Schema,
         order_pairs: Vec<OrderPair>,
-        offset_and_limit: (usize, Option<usize>),
+        offset_and_limit: (usize, usize),
         pk_indices: PkIndices,
         store: S,
         table_id: TableId,
@@ -207,7 +207,6 @@ impl<S: StateStore> TopNExecutorBase for InnerTopNExecutorNew<S> {
     ) -> StreamExecutorResult<StreamChunk> {
         let mut new_ops = vec![];
         let mut new_rows = vec![];
-        let num_limit = self.limit.unwrap_or(0);
 
         for (op, row_ref) in chunk.rows() {
             let pk_row = row_ref.row_by_indices(&self.internal_key_indices);
@@ -221,7 +220,7 @@ impl<S: StateStore> TopNExecutorBase for InnerTopNExecutorNew<S> {
                     // - if in the range of [offset + limit, Inf), emit nothing
                     let (start_row, end_row) = self
                         .managed_state
-                        .find_range(self.offset, num_limit, epoch)
+                        .find_range(self.offset, self.limit, epoch)
                         .await?;
 
                     self.managed_state
@@ -239,11 +238,11 @@ impl<S: StateStore> TopNExecutorBase for InnerTopNExecutorNew<S> {
 
                         // check whether new key in the [0, limit]
                         if let Some(end_key) = end_row.ordered_key.as_ref() {
-                            if ordered_pk_row < *end_key {
+                            if ordered_pk_row <= *end_key {
                                 // update boundary if needed
                                 let (_, new_end_row) = self
                                     .managed_state
-                                    .find_range(self.offset, num_limit, epoch)
+                                    .find_range(self.offset, self.limit, epoch)
                                     .await?;
 
                                 if end_row.ordered_key != new_end_row.ordered_key {
@@ -259,34 +258,47 @@ impl<S: StateStore> TopNExecutorBase for InnerTopNExecutorNew<S> {
                         // handle the boundary case
                         let (new_start_row, _) = self
                             .managed_state
-                            .find_range(self.offset, num_limit, epoch)
+                            .find_range(self.offset, self.limit, epoch)
                             .await?;
                         new_ops.push(Op::Insert);
                         new_rows.push(new_start_row.row);
                     } else if let Some(start_key) = start_row.ordered_key.as_ref() {
+                        // Insert into [0, offset), the topn range will move backward
                         if ordered_pk_row < *start_key {
-                            let (new_start_row, _) =
-                                self.managed_state.find_range(self.offset, 0, epoch).await?;
+                            let (new_start_row, new_end_row) = self
+                                .managed_state
+                                .find_range(self.offset, self.limit, epoch)
+                                .await?;
 
+                            // update boundary
                             if new_start_row.is_valid() {
                                 new_ops.push(Op::Insert);
                                 new_rows.push(new_start_row.row.clone());
+                            }
+                            if end_row.ordered_key != new_end_row.ordered_key && end_row.is_valid()
+                            {
+                                assert!(new_end_row.ordered_key <= end_row.ordered_key);
+                                new_ops.push(Op::Delete);
+                                new_rows.push(end_row.row);
                             }
                         } else if !end_row.is_valid() {
                             // no limit
                             new_ops.push(Op::Insert);
                             new_rows.push(row);
                         } else if let Some(end_key) = end_row.ordered_key.as_ref() {
-                            if ordered_pk_row < *end_key {
+                            // [offset, offset + limit]
+                            if ordered_pk_row <= *end_key {
                                 new_ops.push(Op::Insert);
                                 new_rows.push(row);
-
-                                // handle limit
-                                let (_, new_end_row) = self
+                                let (new_start_row, new_end_row) = self
                                     .managed_state
-                                    .find_range(self.offset, num_limit, epoch)
+                                    .find_range(self.offset, self.limit, epoch)
                                     .await?;
 
+                                if start_row.ordered_key != new_start_row.ordered_key {
+                                    new_ops.push(Op::Delete);
+                                    new_rows.push(start_row.row);
+                                }
                                 if end_row.ordered_key != new_end_row.ordered_key {
                                     new_ops.push(Op::Delete);
                                     new_rows.push(end_row.row);
@@ -302,7 +314,7 @@ impl<S: StateStore> TopNExecutorBase for InnerTopNExecutorNew<S> {
                     // - if in the range of [offset + limit, Inf), emit nothing
                     let (start_row, end_row) = self
                         .managed_state
-                        .find_range(self.offset, num_limit, epoch)
+                        .find_range(self.offset, self.limit, epoch)
                         .await?;
 
                     // delete the row
@@ -316,7 +328,7 @@ impl<S: StateStore> TopNExecutorBase for InnerTopNExecutorNew<S> {
                             // deleted row in [0, offset) the topn range will move forward
                             let (new_start_row, new_end_row) = self
                                 .managed_state
-                                .find_range(self.offset, num_limit, epoch)
+                                .find_range(self.offset, self.limit, epoch)
                                 .await?;
 
                             // update both ends
@@ -352,7 +364,7 @@ impl<S: StateStore> TopNExecutorBase for InnerTopNExecutorNew<S> {
 
                             let (_, new_end_row) = self
                                 .managed_state
-                                .find_range(self.offset, num_limit, epoch)
+                                .find_range(self.offset, self.limit, epoch)
                                 .await?;
 
                             // update high end if nedded
@@ -459,6 +471,49 @@ mod tests {
         ]
     }
 
+    fn create_source_new() -> Box<MockSource> {
+        let mut chunks = vec![
+            StreamChunk::from_pretty(
+                " I I I I
+            +  1 1 4 1001",
+            ),
+            StreamChunk::from_pretty(
+                " I I I I
+            +  5 1 4 1002 ",
+            ),
+            StreamChunk::from_pretty(
+                " I I I I
+            +  1 9 1 1003
+            +  9 8 1 1004
+            +  0 2 3 1005",
+            ),
+            StreamChunk::from_pretty(
+                " I I I I
+            +  1 0 2 1006",
+            ),
+        ];
+        let schema = Schema {
+            fields: vec![
+                Field::unnamed(DataType::Int64),
+                Field::unnamed(DataType::Int64),
+                Field::unnamed(DataType::Int64),
+                Field::unnamed(DataType::Int64),
+            ],
+        };
+        Box::new(MockSource::with_messages(
+            schema,
+            PkIndices::new(),
+            vec![
+                Message::Barrier(Barrier::new_test_barrier(1)),
+                Message::Chunk(std::mem::take(&mut chunks[0])),
+                Message::Chunk(std::mem::take(&mut chunks[1])),
+                Message::Chunk(std::mem::take(&mut chunks[2])),
+                Message::Chunk(std::mem::take(&mut chunks[3])),
+                Message::Barrier(Barrier::new_test_barrier(2)),
+            ],
+        ))
+    }
+
     fn create_source() -> Box<MockSource> {
         let mut chunks = create_stream_chunks();
         let schema = create_schema();
@@ -487,7 +542,7 @@ mod tests {
             TopNExecutorNew::new(
                 source as Box<dyn Executor>,
                 order_types,
-                (3, None),
+                (3, 0),
                 vec![0, 1],
                 MemoryStateStore::new(),
                 TableId::from(0x2333),
@@ -583,7 +638,7 @@ mod tests {
             TopNExecutorNew::new(
                 source as Box<dyn Executor>,
                 order_types,
-                (0, Some(4)),
+                (0, 4),
                 vec![0, 1],
                 MemoryStateStore::new(),
                 TableId::from(0x2333),
@@ -688,7 +743,7 @@ mod tests {
             TopNExecutorNew::new(
                 source as Box<dyn Executor>,
                 order_types,
-                (3, Some(4)),
+                (3, 4),
                 vec![0, 1],
                 MemoryStateStore::new(),
                 TableId::from(0x2333),
@@ -769,6 +824,77 @@ mod tests {
         );
 
         // (7, 8, 9) -> (10, 13, 14, _)
+        // barrier
+        assert_matches!(
+            top_n_executor.next().await.unwrap().unwrap(),
+            Message::Barrier(_)
+        );
+    }
+
+    #[tokio::test]
+    async fn test_top_n_executor_with_offset_and_limit_new() {
+        let order_types = vec![OrderPair::new(0, OrderType::Ascending)];
+
+        let source = create_source_new();
+        let top_n_executor = Box::new(
+            TopNExecutorNew::new(
+                source as Box<dyn Executor>,
+                order_types,
+                (1, 3),
+                vec![3],
+                MemoryStateStore::new(),
+                TableId::from(0x2333),
+                Some(2),
+                0,
+                1,
+                vec![],
+            )
+            .unwrap(),
+        );
+        let mut top_n_executor = top_n_executor.execute();
+
+        // consume the init barrier
+        top_n_executor.next().await.unwrap().unwrap();
+
+        let res = top_n_executor.next().await.unwrap().unwrap();
+        // should be empty
+        assert_eq!(
+            *res.as_chunk().unwrap(),
+            StreamChunk::from_pretty("  I I I I")
+        );
+
+        let res = top_n_executor.next().await.unwrap().unwrap();
+        assert_eq!(
+            *res.as_chunk().unwrap(),
+            StreamChunk::from_pretty(
+                "  I I I I
+                +  5 1 4 1002
+                "
+            )
+        );
+
+        let res = top_n_executor.next().await.unwrap().unwrap();
+        assert_eq!(
+            *res.as_chunk().unwrap(),
+            StreamChunk::from_pretty(
+                "  I I I I
+                +  1 9 1 1003
+                +  9 8 1 1004
+                +  1 1 4 1001
+                -  9 8 1 1004 ",
+            )
+        );
+
+        let res = top_n_executor.next().await.unwrap().unwrap();
+        assert_eq!(
+            *res.as_chunk().unwrap(),
+            StreamChunk::from_pretty(
+                "  I I I I
+                +  1 0 2 1006
+                -  5 1 4 1002 ",
+            )
+        );
+
         // barrier
         assert_matches!(
             top_n_executor.next().await.unwrap().unwrap(),

@@ -59,7 +59,6 @@ impl TopNStateRow {
     }
 }
 
-/// Test-related methods
 impl<S: StateStore> ManagedTopNStateNew<S> {
     pub fn new(
         top_n_count: Option<usize>,
@@ -126,8 +125,10 @@ impl<S: StateStore> ManagedTopNStateNew<S> {
         TopNStateRow::new(pk_ordered, row)
     }
 
-    /// When `offset` is 0 return the first row in state table;
-    /// When `limit` is 0 return None
+    /// This function will return the rows at the position of `offset` and (`offset` + `limit` - 1),
+    /// which forms the range `[start_row, end_row]` of the top-N range .
+    /// When `offset` is 0 the `start_row` will be the first row in state table;
+    /// When `limit` is 0 the `end_row` will be an invalid row.
     pub async fn find_range(
         &self,
         offset: usize,
