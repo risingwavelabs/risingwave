@@ -24,9 +24,6 @@ pub enum PsqlError {
     CancelError(String),
 
     #[error("{0}")]
-    UnrecognizedParamError(String),
-
-    #[error("{0}")]
     IoError(#[from] IoError),
 
     #[error("Failed to handle ssl request: {0}")]
@@ -54,9 +51,5 @@ impl PsqlError {
     /// Construct a Cancel error. Used when Ctrl-c a processing query. Similar to PG.
     pub fn cancel() -> Self {
         PsqlError::CancelError("ERROR:  canceling statement due to user request".to_string())
-    }
-
-    pub fn unrecognized_param(param: &str) -> Self {
-        PsqlError::UnrecognizedParamError(format!("ERROR: unrecognized parameter {}", param))
     }
 }
