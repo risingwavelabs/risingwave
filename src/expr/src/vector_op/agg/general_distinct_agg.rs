@@ -80,27 +80,15 @@ where
     }
 
     fn update_concrete(&mut self, array: &T, input: &DataChunk) -> Result<()> {
-        let filtered_data: Vec<_> = array
-            .iter()
-            .enumerate()
-            .filter_map(|(row_id, datum)| {
-                if self
-                    .apply_filter_on_row(input, row_id)
-                    .ok()
-                    .unwrap_or(false)
-                    && self.exists.insert(
-                        datum.map(|scalar_ref| scalar_ref.to_owned_scalar().to_scalar_value()),
-                    )
-                {
-                    return Some(row_id);
-                }
-                None
-            })
-            .collect();
         let mut cur = self.result.as_ref().map(|x| x.as_scalar_ref());
-        for row_id in filtered_data {
-            let datum = array.value_at(row_id);
-            cur = self.f.eval(cur, datum)?;
+        for (row_id, datum) in array.iter().enumerate() {
+            if self.apply_filter_on_row(input, row_id)?
+                && self
+                    .exists
+                    .insert(datum.map(|scalar_ref| scalar_ref.to_owned_scalar().to_scalar_value()))
+            {
+                cur = self.f.eval(cur, datum)?;
+            }
         }
         let r = cur.map(|x| x.to_owned_scalar());
         self.result = r;
