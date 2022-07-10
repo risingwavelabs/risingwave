@@ -162,7 +162,7 @@ where
                 }
             }
         };
-        return false;
+        false
     }
 
     async fn do_process(
@@ -176,7 +176,7 @@ where
         match msg {
             FeMessage::Ssl => {
                 self.write_message_no_flush(&BeMessage::EncryptionResponse)
-                    .map_err(|e| PsqlError::SslError(e))?;
+                    .map_err(PsqlError::SslError)?;
             }
             FeMessage::Startup(msg) => {
                 self.process_startup_msg(msg)?;
@@ -242,10 +242,10 @@ where
         match self.state {
             PgProtocolState::Startup => FeStartupMessage::read(&mut self.stream)
                 .await
-                .map_err(|e| PsqlError::ReadMsgError(e)),
+                .map_err(PsqlError::ReadMsgError),
             PgProtocolState::Regular => FeMessage::read(&mut self.stream)
                 .await
-                .map_err(|e| PsqlError::ReadMsgError(e)),
+                .map_err(PsqlError::ReadMsgError),
         }
     }
 
@@ -268,19 +268,19 @@ where
         match session.user_authenticator() {
             UserAuthenticator::None => {
                 self.write_message_no_flush(&BeMessage::AuthenticationOk)
-                    .map_err(|e| PsqlError::StartupError(e))?;
+                    .map_err(PsqlError::StartupError)?;
                 self.write_parameter_status_msg_no_flush()
-                    .map_err(|e| PsqlError::StartupError(e))?;
+                    .map_err(PsqlError::StartupError)?;
                 self.write_message_no_flush(&BeMessage::ReadyForQuery)
-                    .map_err(|e| PsqlError::StartupError(e))?;
+                    .map_err(PsqlError::StartupError)?;
             }
             UserAuthenticator::ClearText(_) => {
                 self.write_message_no_flush(&BeMessage::AuthenticationCleartextPassword)
-                    .map_err(|e| PsqlError::StartupError(e))?;
+                    .map_err(PsqlError::StartupError)?;
             }
             UserAuthenticator::MD5WithSalt { salt, .. } => {
                 self.write_message_no_flush(&BeMessage::AuthenticationMD5Password(salt))
-                    .map_err(|e| PsqlError::StartupError(e))?;
+                    .map_err(PsqlError::StartupError)?;
             }
         }
         self.session = Some(session);
@@ -296,11 +296,11 @@ where
             )));
         }
         self.write_message_no_flush(&BeMessage::AuthenticationOk)
-            .map_err(|e| PsqlError::AuthenticationError(e))?;
+            .map_err(PsqlError::AuthenticationError)?;
         self.write_parameter_status_msg_no_flush()
-            .map_err(|e| PsqlError::AuthenticationError(e))?;
+            .map_err(PsqlError::AuthenticationError)?;
         self.write_message_no_flush(&BeMessage::ReadyForQuery)
-            .map_err(|e| PsqlError::AuthenticationError(e))?;
+            .map_err(PsqlError::AuthenticationError)?;
         Ok(())
     }
 
