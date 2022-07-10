@@ -22,13 +22,13 @@ message SourceNode {
     TABLE = 0;
     SOURCE = 1;
   }
-  plan_common.TableRefId table_ref_id = 1;
+  uint32 table_id = 1;
   repeated int32 column_ids = 2;
   SourceType source_type = 3;
 }
 
 message SinkNode {
-  plan_common.TableRefId table_ref_id = 1;
+  uint32 table_id = 1;
   repeated int32 column_ids = 2;
 }
 
@@ -44,18 +44,15 @@ message FilterNode {
 // In addition, we also specify primary key to MV for efficient point lookup during update and deletion.
 //
 // The node will be used for both create mv and create index.
-// - When creating mv, `pk == distribution_keys == column_orders`.
+// - When creating mv, `pk == distribution_key == column_orders`.
 // - When creating index, `column_orders` will contain both
-//   arrange columns and pk columns, while distribution keys will be arrange columns.
+//   arrange columns and pk columns, while distribution key will be arrange columns.
 message MaterializeNode {
-  plan_common.TableRefId table_ref_id = 1;
-  plan_common.TableRefId associated_table_ref_id = 2;
+  uint32 table_id = 1;
   // Column indexes and orders of primary key
   repeated plan_common.ColumnOrder column_orders = 3;
-  // Column IDs of input schema
-  repeated int32 column_ids = 4;
-  // Hash keys of the materialize node, which is a subset of pk.
-  repeated uint32 distribution_keys = 5;
+  // Used for internal table states.
+  catalog.Table table = 4;
 }
 
 // Remark by Yanghao: for both local and global we use the same node in the protobuf.
@@ -63,7 +60,7 @@ message MaterializeNode {
 message SimpleAggNode {
   repeated expr.AggCall agg_calls = 1;
   // Only used for local simple agg, not used for global simple agg.
-  repeated uint32 distribution_keys = 2;
+  repeated uint32 distribution_key = 2;
   repeated catalog.Table internal_tables = 3;
   map<uint32, int32> column_mapping = 4;
   // Whether to optimize for append only stream.
@@ -72,7 +69,7 @@ message SimpleAggNode {
 }
 
 message HashAggNode {
-  repeated uint32 group_keys = 1;
+  repeated uint32 group_key = 1;
   repeated expr.AggCall agg_calls = 2;
   repeated catalog.Table internal_tables = 3;
   map<uint32, int32> column_mapping = 4;
@@ -86,7 +83,7 @@ message TopNNode {
   // 0 means no limit as limit of 0 means this node should be optimized away
   uint64 limit = 2;
   uint64 offset = 3;
-  repeated uint32 distribution_keys = 4;
+  repeated uint32 distribution_key = 4;
   // Used for internal table states
   uint32 table_id_l = 5;
   uint32 table_id_m = 6;
@@ -106,13 +103,25 @@ message HashJoinNode {
   catalog.Table left_table = 6;
   // Used for internal table states.
   catalog.Table right_table = 7;
-  repeated uint32 dist_key_l = 8;
-  repeated uint32 dist_key_r = 9;
-  // It is true when the input is append-only
-  bool is_append_only = 10;
   // Whether to optimize for append only stream.
+  // It is true when the input is append-only
+  bool is_append_only = 8;
+  // The output indices of current node
+  repeated uint32 output_indices = 9;
+}
+
+message DynamicFilterNode {
+  uint32 left_key = 1;
+  // Must be one of <, <=, >, >=
+  expr.ExprNode condition = 3;
+  // Used for internal table states.
+  // catalog.Table left_table = 4;
+  // uint32 dist_key_l = 8;
+  // It is true when the right side of the inequality predicate is monotonically:
+  // - decreasing for <, <=, increasing for >, >=
+  // bool is_monotonic = 10;
   // the output indices of current node
-  repeated uint32 output_indices = 11;
+  // repeated uint32 output_indices = 11;
 }
 
 // Delta join with two indexes. This is a pseudo plan node generated on frontend. On meta
@@ -143,8 +152,9 @@ message HopWindowNode {
 
 message MergeNode {
   repeated uint32 upstream_actor_id = 1;
+  uint32 upstream_fragment_id = 2;
   // The schema of input columns. TODO: remove this field.
-  repeated plan_common.Field fields = 2;
+  repeated plan_common.Field fields = 3;
 }
 
 // passed from frontend to meta, used by fragmenter to generate `MergeNode`
@@ -158,7 +168,7 @@ message ExchangeNode {
 //   1. MergeNode (as a placeholder) for streaming read.
 //   2. BatchPlanNode for snapshot read.
 message ChainNode {
-  plan_common.TableRefId table_ref_id = 1;
+  uint32 table_id = 1;
   // The schema of input stream, which will be used to build a MergeNode
   repeated plan_common.Field upstream_fields = 2;
   repeated int32 column_ids = 3;
@@ -180,7 +190,7 @@ message BatchPlanNode {
 }
 
 message ArrangementInfo {
-  // Order keys of the arrangement, including order by keys and pks from the materialize
+  // Order key of the arrangement, including order by columns and pk from the materialize
   // executor.
   repeated plan_common.ColumnOrder arrange_key_orders = 1;
   // Column descs of the arrangement
@@ -194,15 +204,15 @@ message ArrangeNode {
   uint32 table_id = 2;
   // Info about the arrangement
   ArrangementInfo table_info = 3;
-  // Hash keys of the materialize node, which is a subset of pk.
-  repeated uint32 distribution_keys = 4;
+  // Hash key of the materialize node, which is a subset of pk.
+  repeated uint32 distribution_key = 4;
 }
 
 // Special node for shared state. LookupNode will join an arrangement with a stream.
 message LookupNode {
-  // Join keys of the arrangement side
+  // Join key of the arrangement side
   repeated int32 arrange_key = 1;
-  // Join keys of the stream side
+  // Join key of the stream side
   repeated int32 stream_key = 2;
   // Whether to join the current epoch of arrangement
   bool use_current_epoch = 3;
@@ -230,7 +240,7 @@ message LookupUnionNode {
 
 message ExpandNode {
   message Subset {
-    repeated uint32 keys = 1;
+    repeated uint32 column_indices = 1;
   }
   repeated Subset column_subsets = 1;
 }
@@ -259,6 +269,7 @@ message StreamNode {
     DeltaIndexJoinNode delta_index_join = 119;
     SinkNode sink = 120;
     ExpandNode expand = 121;
+    DynamicFilterNode dynamic_filter = 122;
   }
   // The id for the operator.
   uint64 operator_id = 1;

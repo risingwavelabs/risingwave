@@ -12,7 +12,6 @@ option optimize_for = SPEED;
 
 message HeartbeatRequest {
   uint32 node_id = 1;
-  common.WorkerType worker_type = 2;
 }
 
 message HeartbeatResponse {
