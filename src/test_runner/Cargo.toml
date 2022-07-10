@@ -6,3 +6,4 @@ edition = "2021"
 
 [dependencies]
 fail = "0.5"
+workspace-hack = { version = "0.1", path = "../workspace-hack" }
