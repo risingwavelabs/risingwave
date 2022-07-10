@@ -15,12 +15,13 @@
 use std::sync::Arc;
 
 use itertools::Itertools;
+use risingwave_pb::hummock::hummock_version::Levels;
 use risingwave_pb::hummock::{Level, SstableInfo};
 
 use super::overlap_strategy::OverlapInfo;
 use super::CompactionPicker;
 use crate::hummock::compaction::overlap_strategy::{OverlapStrategy, RangeOverlapInfo};
-use crate::hummock::compaction::{ManualCompactionOption, SearchResult};
+use crate::hummock::compaction::{CompactionInput, ManualCompactionOption};
 use crate::hummock::level_handler::LevelHandler;
 
 pub struct ManualCompactionPicker {
@@ -49,9 +50,9 @@ impl ManualCompactionPicker {
 impl CompactionPicker for ManualCompactionPicker {
     fn pick_compaction(
         &self,
-        levels: &[Level],
+        levels: &Levels,
         level_handlers: &mut [LevelHandler],
-    ) -> Option<SearchResult> {
+    ) -> Option<CompactionInput> {
         let level = self.option.level;
         let target_level = self.target_level;
 
@@ -61,7 +62,7 @@ impl CompactionPicker for ManualCompactionPicker {
         tmp_sst_info.key_range = Some(self.option.key_range.clone());
         range_overlap_info.update(&tmp_sst_info);
 
-        let level_table_infos: Vec<SstableInfo> = levels[level]
+        let level_table_infos: Vec<SstableInfo> = levels.levels[level]
             .table_infos
             .iter()
             .filter(|sst_info| range_overlap_info.check_overlap(sst_info))
@@ -91,9 +92,10 @@ impl CompactionPicker for ManualCompactionPicker {
                 continue;
             }
 
-            let overlap_files = self
-                .overlap_strategy
-                .check_base_level_overlap(&[table.clone()], &levels[target_level].table_infos);
+            let overlap_files = self.overlap_strategy.check_base_level_overlap(
+                &[table.clone()],
+                &levels.levels[target_level].table_infos,
+            );
 
             if overlap_files
                 .iter()
@@ -111,7 +113,7 @@ impl CompactionPicker for ManualCompactionPicker {
 
         let target_input_ssts = self
             .overlap_strategy
-            .check_base_level_overlap(&select_input_ssts, &levels[target_level].table_infos);
+            .check_base_level_overlap(&select_input_ssts, &levels.levels[target_level].table_infos);
 
         if target_input_ssts
             .iter()
@@ -125,22 +127,23 @@ impl CompactionPicker for ManualCompactionPicker {
             level_handlers[target_level].add_pending_task(self.compact_task_id, &target_input_ssts);
         }
 
-        Some(SearchResult {
-            select_level: Level {
-                level_idx: level as u32,
-                level_type: levels[level].level_type,
-                total_file_size: select_input_ssts.iter().map(|table| table.file_size).sum(),
-                table_infos: select_input_ssts,
-            },
-            target_level: Level {
-                level_idx: target_level as u32,
-                level_type: levels[target_level].level_type,
-                total_file_size: target_input_ssts.iter().map(|table| table.file_size).sum(),
-                table_infos: target_input_ssts,
-            },
-            split_ranges: vec![],
-            target_file_size: 0,
-            compression_algorithm: "".to_string(),
+        Some(CompactionInput {
+            input_levels: vec![
+                Level {
+                    level_idx: level as u32,
+                    level_type: levels.levels[level].level_type,
+                    total_file_size: select_input_ssts.iter().map(|table| table.file_size).sum(),
+                    table_infos: select_input_ssts,
+                },
+                Level {
+                    level_idx: target_level as u32,
+                    level_type: levels.levels[target_level].level_type,
+                    total_file_size: target_input_ssts.iter().map(|table| table.file_size).sum(),
+                    table_infos: target_input_ssts,
+                },
+            ],
+            target_level,
+            target_sub_level: 0,
         })
     }
 }

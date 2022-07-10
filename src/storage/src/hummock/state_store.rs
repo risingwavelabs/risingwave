@@ -21,16 +21,17 @@ use bytes::Bytes;
 use itertools::Itertools;
 use risingwave_hummock_sdk::key::key_with_epoch;
 use risingwave_hummock_sdk::LocalSstableInfo;
+use risingwave_pb::hummock::LevelType;
 
 use super::iterator::{
     BackwardUserIterator, ConcatIteratorInner, DirectedUserIterator, UserIterator,
 };
-use super::utils::{can_concat, search_sst_idx, validate_epoch};
+use super::utils::{search_sst_idx, validate_epoch};
 use super::{BackwardSSTableIterator, HummockStorage, SSTableIterator, SSTableIteratorType};
 use crate::error::StorageResult;
 use crate::hummock::iterator::{
     Backward, BoxedHummockIterator, DirectedUserIteratorBuilder, DirectionEnum, Forward,
-    HummockIteratorDirection, ReadOptions as IterReadOptions,
+    HummockIteratorDirection, OrderedMergeIteratorInner, ReadOptions as IterReadOptions,
 };
 use crate::hummock::local_version::PinnedVersion;
 use crate::hummock::shared_buffer::shared_buffer_batch::SharedBufferBatch;
@@ -128,7 +129,7 @@ impl HummockStorage {
             if table_infos.is_empty() {
                 continue;
             }
-            if can_concat(&table_infos) {
+            if level.level_type == LevelType::Nonoverlapping as i32 {
                 let start_table_idx = match key_range.start_bound() {
                     Included(key) | Excluded(key) => search_sst_idx(&table_infos, key),
                     _ => 0,
@@ -158,16 +159,35 @@ impl HummockStorage {
                     iter_read_options.clone(),
                 )) as BoxedHummockIterator<T::Direction>);
             } else {
-                for table_info in table_infos.into_iter().rev() {
+                if table_infos.len() == 1 {
                     let table = self
                         .sstable_store
-                        .sstable(table_info.id, &mut stats)
+                        .sstable(table_infos[0].id, &mut stats)
                         .await?;
                     overlapped_iters.push(Box::new(T::SstableIteratorType::create(
                         table,
                         self.sstable_store(),
                         iter_read_options.clone(),
                     )));
+                } else {
+                    let mut iters = vec![];
+                    for table_info in table_infos.into_iter().rev() {
+                        let table = self
+                            .sstable_store
+                            .sstable(table_info.id, &mut stats)
+                            .await?;
+                        iters.push(Box::new(T::SstableIteratorType::create(
+                            table,
+                            self.sstable_store(),
+                            iter_read_options.clone(),
+                        ))
+                            as BoxedHummockIterator<T::Direction>);
+                    }
+                    overlapped_iters.push(Box::new(OrderedMergeIteratorInner::<T::Direction>::new(
+                        iters,
+                        self.stats.clone(),
+                    ))
+                        as BoxedHummockIterator<T::Direction>)
                 }
             }
         }
@@ -274,26 +294,24 @@ impl HummockStorage {
             if level.table_infos.is_empty() {
                 continue;
             }
-            {
-                let table_infos = prune_ssts(level.table_infos.iter(), &(key..=key));
-                for table_info in table_infos.into_iter().rev() {
-                    let table = self
-                        .sstable_store
-                        .sstable(table_info.id, &mut stats)
-                        .await?;
-                    table_counts += 1;
-                    if let Some(v) = self
-                        .get_from_table(
-                            table,
-                            &internal_key,
-                            key,
-                            iter_read_options.clone(),
-                            &mut stats,
-                        )
-                        .await?
-                    {
-                        return Ok(v);
-                    }
+            let table_infos = prune_ssts(level.table_infos.iter(), &(key..=key));
+            for table_info in table_infos.into_iter().rev() {
+                let table = self
+                    .sstable_store
+                    .sstable(table_info.id, &mut stats)
+                    .await?;
+                table_counts += 1;
+                if let Some(v) = self
+                    .get_from_table(
+                        table,
+                        &internal_key,
+                        key,
+                        iter_read_options.clone(),
+                        &mut stats,
+                    )
+                    .await?
+                {
+                    return Ok(v);
                 }
             }
         }

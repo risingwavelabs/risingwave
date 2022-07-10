@@ -206,10 +206,13 @@ pub fn get_sorted_sstable_ids(sstables: &[SstableInfo]) -> Vec<HummockSSTableId>
 }
 
 pub fn get_sorted_committed_sstable_ids(hummock_version: &HummockVersion) -> Vec<HummockSSTableId> {
-    hummock_version
-        .get_compaction_group_levels(StaticCompactionGroupId::StateDefault.into())
+    let levels =
+        hummock_version.get_compaction_group_levels(StaticCompactionGroupId::StateDefault.into());
+    levels
+        .levels
         .iter()
-        .flat_map(|level| level.table_infos.iter().map(|info| info.id))
+        .chain(levels.l0.as_ref().unwrap().sub_levels.iter())
+        .flat_map(|levels| levels.table_infos.iter().map(|info| info.id))
         .sorted()
         .collect_vec()
 }
@@ -231,7 +234,6 @@ pub async fn setup_compute_env(
 
     let config = CompactionConfigBuilder::new()
         .level0_tier_compact_file_number(1)
-        .min_compaction_bytes(1)
         .max_bytes_for_level_base(1)
         .build();
     let compaction_group_manager = Arc::new(

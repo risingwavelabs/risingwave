@@ -28,6 +28,11 @@ enum LevelType {
   OVERLAPPING = 1;
 }
 
+message OverlappingLevel {
+  repeated Level sub_levels = 1;
+  uint64 total_file_size = 2;
+}
+
 message Level {
   uint32 level_idx = 1;
   LevelType level_type = 2;
@@ -37,8 +42,9 @@ message Level {
 
 message LevelDelta {
   uint32 level_idx = 1;
-  repeated uint64 removed_table_ids = 2;
-  repeated SstableInfo inserted_table_infos = 3;
+  uint32 l0_sub_level_idx = 2;
+  repeated uint64 removed_table_ids = 3;
+  repeated SstableInfo inserted_table_infos = 4;
 }
 
 message UncommittedEpoch {
@@ -49,6 +55,7 @@ message UncommittedEpoch {
 message HummockVersion {
   message Levels {
     repeated Level levels = 1;
+    OverlappingLevel l0 = 2;
   }
   uint64 id = 1;
   // Levels of each compaction group
@@ -167,6 +174,7 @@ message CompactTask {
   uint32 compaction_filter_mask = 16;
   map<uint32, TableOption> table_options = 17;
   uint64 current_epoch_time = 18;
+  uint32 target_sub_level = 19;
 }
 
 message LevelHandler {
@@ -310,7 +318,7 @@ message CompactionConfig {
   uint64 max_level = 2;
   uint64 max_bytes_for_level_multiplier = 3;
   uint64 max_compaction_bytes = 4;
-  uint64 min_compaction_bytes = 5;
+  uint64 sub_level_max_compaction_bytes = 5;
   uint64 level0_tigger_file_numer = 6;
   uint64 level0_tier_compact_file_number = 7;
   CompactionMode compaction_mode = 8;

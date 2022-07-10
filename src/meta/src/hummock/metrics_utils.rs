@@ -40,9 +40,20 @@ pub fn trigger_sst_stat(
     compaction_group_id: CompactionGroupId,
 ) {
     // TODO #2065: fix grafana
-    let levels = current_version.get_compaction_group_levels(compaction_group_id);
-    let level_sst_cnt = |level_idx: usize| levels[level_idx].table_infos.len();
-    let level_sst_size = |level_idx: usize| levels[level_idx].total_file_size / 1024;
+    let level_sst_cnt = |level_idx: usize| {
+        let mut sst_num = 0;
+        current_version.iter_tables(compaction_group_id, level_idx, |_| {
+            sst_num += 1;
+        });
+        sst_num
+    };
+    let level_sst_size = |level_idx: usize| {
+        let mut level_sst_size = 0;
+        current_version.map_level(compaction_group_id, level_idx, |level| {
+            level_sst_size += level.total_file_size;
+        });
+        level_sst_size
+    };
     for (idx, level_handler) in enumerate(compact_status.level_handlers.iter()) {
         let sst_num = level_sst_cnt(idx);
         let compact_cnt = level_handler.get_pending_file_count();

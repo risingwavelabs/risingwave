@@ -20,7 +20,8 @@
 use std::sync::Arc;
 
 use risingwave_hummock_sdk::HummockCompactionTaskId;
-use risingwave_pb::hummock::{CompactionConfig, Level};
+use risingwave_pb::hummock::hummock_version::Levels;
+use risingwave_pb::hummock::CompactionConfig;
 
 use crate::hummock::compaction::compaction_config::CompactionConfigBuilder;
 use crate::hummock::compaction::manual_compaction_picker::ManualCompactionPicker;
@@ -30,29 +31,30 @@ use crate::hummock::compaction::tier_compaction_picker::{
     LevelCompactionPicker, TierCompactionPicker,
 };
 use crate::hummock::compaction::{
-    create_overlap_strategy, CompactionPicker, ManualCompactionOption, SearchResult,
+    create_overlap_strategy, CompactionInput, CompactionPicker, CompactionTask,
+    ManualCompactionOption,
 };
 use crate::hummock::level_handler::LevelHandler;
 
 const SCORE_BASE: u64 = 100;
 
 pub trait LevelSelector: Sync + Send {
-    fn need_compaction(&self, levels: &[Level], level_handlers: &mut [LevelHandler]) -> bool;
+    fn need_compaction(&self, levels: &Levels, level_handlers: &mut [LevelHandler]) -> bool;
 
     fn pick_compaction(
         &self,
         task_id: HummockCompactionTaskId,
-        levels: &[Level],
+        levels: &Levels,
         level_handlers: &mut [LevelHandler],
-    ) -> Option<SearchResult>;
+    ) -> Option<CompactionTask>;
 
     fn manual_pick_compaction(
         &self,
         task_id: HummockCompactionTaskId,
-        levels: &[Level],
+        levels: &Levels,
         level_handlers: &mut [LevelHandler],
         option: ManualCompactionOption,
-    ) -> Option<SearchResult>;
+    ) -> Option<CompactionTask>;
 
     fn name(&self) -> &'static str;
 }
@@ -116,6 +118,7 @@ impl DynamicLevelSelector {
             Box::new(MinOverlappingPicker::new(
                 task_id,
                 select_level,
+                select_level + 1,
                 self.overlap_strategy.clone(),
             ))
         }
@@ -125,21 +128,17 @@ impl DynamicLevelSelector {
     /// `calculate_level_base_size` calculate base level and the base size of LSM tree build for
     /// current dataset. In other words,  `level_max_bytes` is our compaction goal which shall
     /// reach. This algorithm refers to the implementation in  `</>https://github.com/facebook/rocksdb/blob/v7.2.2/db/version_set.cc#L3706</>`
-    fn calculate_level_base_size(&self, levels: &[Level]) -> SelectContext {
+    fn calculate_level_base_size(&self, levels: &Levels) -> SelectContext {
         let mut first_non_empty_level = 0;
         let mut max_level_size = 0;
         let mut ctx = SelectContext::default();
 
-        let mut l0_size = 0;
-        for level in levels.iter() {
-            if level.level_idx > 0 {
-                if level.total_file_size > 0 && first_non_empty_level == 0 {
-                    first_non_empty_level = level.level_idx as usize;
-                }
-                max_level_size = std::cmp::max(max_level_size, level.total_file_size);
-            } else {
-                l0_size = level.total_file_size;
+        let l0_size = levels.l0.as_ref().unwrap().total_file_size;
+        for level in levels.levels.iter() {
+            if level.total_file_size > 0 && first_non_empty_level == 0 {
+                first_non_empty_level = level.level_idx as usize;
             }
+            max_level_size = std::cmp::max(max_level_size, level.total_file_size);
         }
 
         ctx.level_max_bytes
@@ -187,36 +186,41 @@ impl DynamicLevelSelector {
         ctx
     }
 
-    fn get_priority_levels(
-        &self,
-        levels: &[Level],
-        handlers: &mut [LevelHandler],
-    ) -> SelectContext {
+    fn get_priority_levels(&self, levels: &Levels, handlers: &mut [LevelHandler]) -> SelectContext {
         let mut ctx = self.calculate_level_base_size(levels);
 
+        let l0_file_count = levels
+            .l0
+            .as_ref()
+            .unwrap()
+            .sub_levels
+            .iter()
+            .map(|level| level.table_infos.len())
+            .sum::<usize>();
+        let idle_file_count = l0_file_count - handlers[0].get_pending_file_count();
+        let total_size =
+            levels.l0.as_ref().unwrap().total_file_size - handlers[0].get_pending_file_size();
+        if total_size > 0 {
+            // trigger intra-l0 compaction at first when the number of files is too large.
+            let l0_score = idle_file_count as u64 * SCORE_BASE
+                / (self.config.level0_tier_compact_file_number as u64 * 2);
+            ctx.score_levels.push((l0_score, 0, 0));
+            let score = total_size * SCORE_BASE / self.config.max_bytes_for_level_base;
+            ctx.score_levels.push((score, 0, ctx.base_level));
+        }
+
         // The bottommost level can not be input level.
-        for level in &levels[..self.config.max_level as usize] {
+        for level in &levels.levels {
             let level_idx = level.level_idx as usize;
-            let idle_file_count =
-                (level.table_infos.len() - handlers[level_idx].get_pending_file_count()) as u64;
             let total_size = level.total_file_size - handlers[level_idx].get_pending_file_size();
             if total_size == 0 {
                 continue;
             }
-            if level_idx == 0 {
-                // trigger intra-l0 compaction at first when the number of files is too large.
-                let l0_score = idle_file_count * SCORE_BASE
-                    / (self.config.level0_tier_compact_file_number as u64 * 2);
-                ctx.score_levels.push((l0_score, 0, 0));
-                let score = total_size * SCORE_BASE / self.config.max_bytes_for_level_base;
-                ctx.score_levels.push((score, 0, ctx.base_level));
-            } else {
-                ctx.score_levels.push((
-                    total_size * SCORE_BASE / ctx.level_max_bytes[level_idx],
-                    level_idx,
-                    level_idx + 1,
-                ));
-            }
+            ctx.score_levels.push((
+                total_size * SCORE_BASE / ctx.level_max_bytes[level_idx],
+                level_idx,
+                level_idx + 1,
+            ));
         }
 
         // sort reverse to pick the largest one.
@@ -224,28 +228,33 @@ impl DynamicLevelSelector {
         ctx
     }
 
-    fn set_compaction_config_for_level(&self, input: &mut SearchResult, base_level: usize) {
-        if input.select_level.level_idx == 0 && input.target_level.level_idx == 0 {
-            // TODO: reduce `target_file_size` after we implement sub-level.
-            input.target_file_size = self.config.min_compaction_bytes;
-        } else if input.select_level.level_idx == 0 {
-            input.target_file_size = self.config.target_file_size_base;
+    fn generate_task_by_compaction_config(
+        &self,
+        input: CompactionInput,
+        base_level: usize,
+    ) -> CompactionTask {
+        let target_file_size = if input.input_levels[0].level_idx == 0 {
+            self.config.target_file_size_base
         } else {
-            assert!(input.target_level.level_idx as usize >= base_level);
-            input.target_file_size = self.config.target_file_size_base
-                << (input.target_level.level_idx as usize - base_level);
-        }
-        if input.target_level.level_idx == 0 {
-            input.compression_algorithm = self.config.compression_algorithm[0].clone();
+            assert!(input.target_level >= base_level);
+            self.config.target_file_size_base << (input.target_level - base_level)
+        };
+        let compression_algorithm = if input.target_level == 0 {
+            self.config.compression_algorithm[0].clone()
         } else {
-            let idx = input.target_level.level_idx as usize - base_level + 1;
-            input.compression_algorithm = self.config.compression_algorithm[idx].clone();
+            let idx = input.target_level - base_level + 1;
+            self.config.compression_algorithm[idx].clone()
+        };
+        CompactionTask {
+            input,
+            compression_algorithm,
+            target_file_size,
         }
     }
 }
 
 impl LevelSelector for DynamicLevelSelector {
-    fn need_compaction(&self, levels: &[Level], level_handlers: &mut [LevelHandler]) -> bool {
+    fn need_compaction(&self, levels: &Levels, level_handlers: &mut [LevelHandler]) -> bool {
         let ctx = self.get_priority_levels(levels, level_handlers);
         ctx.score_levels
             .first()
@@ -256,18 +265,17 @@ impl LevelSelector for DynamicLevelSelector {
     fn pick_compaction(
         &self,
         task_id: HummockCompactionTaskId,
-        levels: &[Level],
+        levels: &Levels,
         level_handlers: &mut [LevelHandler],
-    ) -> Option<SearchResult> {
+    ) -> Option<CompactionTask> {
         let ctx = self.get_priority_levels(levels, level_handlers);
         for (score, select_level, target_level) in ctx.score_levels {
             if score <= SCORE_BASE {
                 return None;
             }
             let picker = self.create_compaction_picker(select_level, target_level, task_id);
-            if let Some(mut ret) = picker.pick_compaction(levels, level_handlers) {
-                self.set_compaction_config_for_level(&mut ret, ctx.base_level);
-                return Some(ret);
+            if let Some(ret) = picker.pick_compaction(levels, level_handlers) {
+                return Some(self.generate_task_by_compaction_config(ret, ctx.base_level));
             }
         }
         None
@@ -276,10 +284,10 @@ impl LevelSelector for DynamicLevelSelector {
     fn manual_pick_compaction(
         &self,
         task_id: HummockCompactionTaskId,
-        levels: &[Level],
+        levels: &Levels,
         level_handlers: &mut [LevelHandler],
         option: ManualCompactionOption,
-    ) -> Option<SearchResult> {
+    ) -> Option<CompactionTask> {
         let ctx = self.get_priority_levels(levels, level_handlers);
         let target_level = if option.level == 0 {
             ctx.base_level
@@ -294,9 +302,8 @@ impl LevelSelector for DynamicLevelSelector {
             target_level,
         );
 
-        let mut ret = picker.pick_compaction(levels, level_handlers)?;
-        self.set_compaction_config_for_level(&mut ret, ctx.base_level);
-        Some(ret)
+        let ret = picker.pick_compaction(levels, level_handlers)?;
+        Some(self.generate_task_by_compaction_config(ret, ctx.base_level))
     }
 
     fn name(&self) -> &'static str {

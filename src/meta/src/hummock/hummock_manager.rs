@@ -32,7 +32,7 @@ use risingwave_pb::hummock::hummock_version::Levels;
 use risingwave_pb::hummock::{
     CompactTask, CompactTaskAssignment, HummockPinnedSnapshot, HummockPinnedVersion,
     HummockSnapshot, HummockStaleSstables, HummockVersion, HummockVersionDelta, Level, LevelDelta,
-    LevelType, SstableIdInfo, SstableInfo,
+    LevelType, OverlappingLevel, SstableIdInfo, SstableInfo,
 };
 use risingwave_pb::meta::subscribe_response::{Info, Operation};
 use risingwave_pb::meta::MetaLeaderInfo;
@@ -253,9 +253,16 @@ where
                         total_file_size: 0,
                     });
                 }
-                init_version
-                    .levels
-                    .insert(compaction_group.group_id(), Levels { levels });
+                init_version.levels.insert(
+                    compaction_group.group_id(),
+                    Levels {
+                        levels,
+                        l0: Some(OverlappingLevel {
+                            sub_levels: vec![],
+                            total_file_size: 0,
+                        }),
+                    },
+                );
             }
             init_version.insert(self.env.meta_store()).await?;
             init_version
@@ -271,26 +278,28 @@ where
                 for (compaction_group_id, level_deltas) in &version_delta.level_deltas {
                     let mut delete_sst_levels = Vec::with_capacity(level_deltas.level_deltas.len());
                     let mut delete_sst_ids_set = HashSet::new();
-                    let mut insert_sst_level = u32::MAX;
+                    let mut insert_sst_level = usize::MAX;
+                    let mut insert_sub_level = usize::MAX;
                     let mut insert_table_infos = vec![];
                     for level_delta in &level_deltas.level_deltas {
                         if !level_delta.removed_table_ids.is_empty() {
-                            delete_sst_levels.push(level_delta.level_idx);
+                            delete_sst_levels.push(level_delta.level_idx as usize);
                             delete_sst_ids_set.extend(level_delta.removed_table_ids.iter().clone());
                         }
                         if !level_delta.inserted_table_infos.is_empty() {
-                            insert_sst_level = level_delta.level_idx;
+                            insert_sst_level = level_delta.level_idx as usize;
+                            insert_sub_level = level_delta.l0_sub_level_idx as usize;
                             insert_table_infos
                                 .extend(level_delta.inserted_table_infos.iter().cloned());
                         }
                     }
-                    let operand = &mut redo_state
-                        .get_compaction_group_levels_mut(*compaction_group_id as CompactionGroupId);
-                    HummockVersion::apply_compact_ssts(
-                        operand,
+
+                    redo_state.apply_compact_ssts(
+                        *compaction_group_id as CompactionGroupId,
                         &delete_sst_levels,
                         &delete_sst_ids_set,
                         insert_sst_level,
+                        insert_sub_level,
                         insert_table_infos,
                     );
                 }
@@ -650,14 +659,27 @@ where
                     compact_status.compaction_config.compaction_filter_mask;
 
                 commit_multi_var!(self, None, compact_status)?;
+                current_version
+                    .get_compaction_group_levels(compaction_group_id)
+                    .levels[compact_task.input_ssts[0].level_idx as usize]
+                    .table_infos
+                    .len();
+                let mut total_table_count = 0;
+                for input_level in &compact_task.input_ssts {
+                    current_version.iter_tables(
+                        compaction_group_id,
+                        input_level.level_idx as usize,
+                        |_| {
+                            total_table_count += 1;
+                        },
+                    );
+                }
                 tracing::trace!(
-                    "For compaction group {}: pick up {} tables in level {} to compact, The number of total tables is {}. cost time: {:?}",
+                    "For compaction group {}: pick up {} tables in level {} to compact. The number of total tables of input level is {}. cost time: {:?}",
                     compaction_group_id,
                     compact_task.input_ssts[0].table_infos.len(),
                     compact_task.input_ssts[0].level_idx,
-                    current_version.get_compaction_group_levels(compaction_group_id)[compact_task.input_ssts[0].level_idx as usize]
-                        .table_infos
-                        .len(),
+                    total_table_count,
                     start_time.elapsed()
                 );
                 Ok(Some(compact_task))
@@ -936,7 +958,6 @@ where
         // the meta store transaction. To avoid etcd errors if the aforementioned case
         // happens, we temporarily set a large value for etcd's max-txn-ops. But we need to
         // formally fix this because the performance degradation is not acceptable anyway.
-        let mut total_files_size = 0;
         for sst in sstables.iter().map(|(_, sst)| sst) {
             match sstable_id_infos.get_mut(&sst.id) {
                 None => {
@@ -959,7 +980,6 @@ where
                         )));
                     }
                     sst_id_info.meta_create_timestamp = sstable_id_info::get_timestamp_now();
-                    total_files_size += sst.file_size;
                 }
             }
         }
@@ -974,24 +994,28 @@ where
                 .entry(compaction_group_id)
                 .or_default()
                 .level_deltas;
+            let version_l0 = new_hummock_version
+                .get_compaction_group_levels_mut(compaction_group_id)
+                .l0
+                .as_mut()
+                .expect("Expect level 0 is not empty");
             let level_delta = LevelDelta {
                 level_idx: 0,
                 inserted_table_infos: group_sstables.clone(),
+                l0_sub_level_idx: version_l0.sub_levels.len() as u32,
                 ..Default::default()
             };
-            level_deltas.push(level_delta);
 
-            let version_first_level = new_hummock_version
-                .get_compaction_group_levels_mut(compaction_group_id)
-                .first_mut()
-                .expect("Expect at least one level");
-            assert_eq!(version_first_level.level_idx, 0);
-            assert_eq!(
-                version_first_level.level_type,
-                LevelType::Overlapping as i32
-            );
-            version_first_level.table_infos.extend(group_sstables);
-            version_first_level.total_file_size += total_files_size;
+            version_l0.sub_levels.push(Level {
+                level_type: LevelType::Overlapping as i32,
+                level_idx: level_delta.l0_sub_level_idx,
+                total_file_size: group_sstables
+                    .iter()
+                    .map(|table| table.file_size)
+                    .sum::<u64>(),
+                table_infos: group_sstables,
+            });
+            level_deltas.push(level_delta);
         }
 
         // Create a new_version, possibly merely to bump up the version id and max_committed_epoch.
