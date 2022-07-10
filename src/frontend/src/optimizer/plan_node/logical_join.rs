@@ -25,7 +25,6 @@ use super::{
     PlanTreeNodeBinary, PlanTreeNodeUnary, PredicatePushdown, StreamHashJoin, StreamProject,
     ToBatch, ToStream,
 };
-use crate::catalog::ColumnId;
 use crate::expr::{ExprImpl, ExprType};
 use crate::optimizer::plan_node::{
     BatchFilter, BatchHashJoin, BatchLookupJoin, BatchNestedLoopJoin, EqJoinPredicate,
@@ -688,17 +687,18 @@ impl ToBatch for LogicalJoin {
             let pull_filter = self.join_type == JoinType::Inner && predicate.has_non_eq();
             if use_lookup_join {
                 if self.right.as_ref().node_type() != PlanNodeType::LogicalScan {
-                    return Err(RwError::from(ErrorCode::InternalError(
+                    return Err(ErrorCode::InternalError(
                         "Lookup Join only supports basic tables on the right hand side".to_string(),
-                    )));
+                    )
+                    .into());
                 }
 
                 let logical_scan = self.right.as_logical_scan().unwrap();
                 let table_desc = logical_scan.table_desc().clone();
 
-                // Verify that the right equality columns all match the order keys of the table
+                // Verify that the right equality columns are a prefix of the primary key
                 let eq_col_error = RwError::from(ErrorCode::InternalError(
-                    "In Lookup Join, equality columns on right table must be ordered".to_string(),
+                    "In Lookup Join, the right columns of the equality join predicates must be a prefix of the primary key".to_string(),
                 ));
 
                 let order_col_indices = table_desc.order_column_indices();
@@ -712,16 +712,7 @@ impl ToBatch for LogicalJoin {
                     }
                 }
 
-                let right_column_ids = logical_scan
-                    .output_column_ids()
-                    .iter()
-                    .map(ColumnId::get_id)
-                    .collect();
-
-                Ok(
-                    BatchLookupJoin::new(logical_join, predicate, table_desc, right_column_ids)
-                        .into(),
-                )
+                Ok(BatchLookupJoin::new(logical_join, predicate, table_desc).into())
             } else if pull_filter {
                 let new_output_indices = logical_join.output_indices.clone();
                 let new_internal_column_num = logical_join.internal_column_num();

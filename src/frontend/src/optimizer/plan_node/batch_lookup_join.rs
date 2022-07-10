@@ -37,7 +37,6 @@ pub struct BatchLookupJoin {
     eq_join_predicate: EqJoinPredicate,
 
     table_desc: TableDesc,
-    right_column_ids: Vec<i32>,
 }
 
 impl BatchLookupJoin {
@@ -45,7 +44,6 @@ impl BatchLookupJoin {
         logical: LogicalJoin,
         eq_join_predicate: EqJoinPredicate,
         table_desc: TableDesc,
-        right_column_ids: Vec<i32>,
     ) -> Self {
         let ctx = logical.base.ctx.clone();
         let dist = Self::derive_dist(
@@ -58,7 +56,6 @@ impl BatchLookupJoin {
             logical,
             eq_join_predicate,
             table_desc,
-            right_column_ids,
         }
     }
 
@@ -108,7 +105,6 @@ impl PlanTreeNodeUnary for BatchLookupJoin {
                 .clone_with_left_right(input, self.logical.right()),
             self.eq_join_predicate.clone(),
             self.table_desc.clone(),
-            self.right_column_ids.clone(),
         )
     }
 }
