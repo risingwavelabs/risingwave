@@ -202,6 +202,11 @@ impl<S: StateStore> SourceExecutor<S> {
         let barrier = barrier_receiver.recv().await.unwrap();
 
         if let Some(mutation) = barrier.mutation.as_ref() {
+            if let Mutation::AddDispatcher(add_dispatcher) = mutation.as_ref() {
+                if let Some(splits) = add_dispatcher.splits.get(&self.actor_id) {
+                    self.stream_source_splits = splits.clone();
+                }
+            }
             if let Mutation::AddOutput(add_output) = mutation.as_ref() {
                 if let Some(splits) = add_output.splits.get(&self.actor_id) {
                     self.stream_source_splits = splits.clone();
