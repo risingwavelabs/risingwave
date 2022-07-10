@@ -336,7 +336,7 @@ impl<P: 'static + ProbeSideSourceBuilder> LookupJoinExecutor<P> {
         }
 
         let one_row_chunk =
-            convert_datum_refs_to_chunk(&build_datum_refs, 1, &self.schema.data_types())?;
+            convert_datum_refs_to_chunk(&build_datum_refs, 1, &self.chunk_builder.data_types())?;
 
         Ok(Some(one_row_chunk))
     }

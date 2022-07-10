@@ -241,6 +241,10 @@ impl DataChunkBuilder {
         self.buffered_count
     }
 
+    pub fn data_types(&self) -> Vec<DataType> {
+        self.data_types.clone()
+    }
+
     #[try_stream(boxed, ok = DataChunk, error = RwError)]
     pub async fn trunc_data_chunk(&mut self, data_chunk: DataChunk) {
         let mut sliced_data_chunk = SlicedDataChunk::new_checked(data_chunk)?;
