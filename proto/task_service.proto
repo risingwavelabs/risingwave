@@ -72,8 +72,10 @@ message GetDataResponse {
 }
 
 message GetStreamRequest {
-  uint32 up_fragment_id = 1;
-  uint32 down_fragment_id = 2;
+  uint32 up_actor_id = 1;
+  uint32 down_actor_id = 2;
+  uint32 up_fragment_id = 3;
+  uint32 down_fragment_id = 4;
 }
 
 message ExecuteRequest {

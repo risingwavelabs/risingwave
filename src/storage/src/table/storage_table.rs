@@ -36,6 +36,7 @@ use risingwave_hummock_sdk::key::{end_bound_of_prefix, next_key, prefixed_range,
 
 use super::mem_table::RowOp;
 use super::{Distribution, TableIter};
+use crate::encoding::cell_based_encoding_util::{serialize_pk, serialize_pk_and_column_id};
 use crate::encoding::cell_based_row_deserializer::{CellBasedRowDeserializer, ColumnDescMapping};
 use crate::encoding::cell_based_row_serializer::CellBasedRowSerializer;
 use crate::encoding::dedup_pk_cell_based_row_serializer::DedupPkCellBasedRowSerializer;
@@ -275,25 +276,13 @@ impl<S: StateStore, E: Encoding, const T: AccessType> StorageTableBase<S, E, T> 
 /// Get
 impl<S: StateStore, E: Encoding, const T: AccessType> StorageTableBase<S, E, T> {
     /// Check whether the given `vnode` is set in the `vnodes` of this table.
-    ///
-    /// - For `READ_WRITE` or streaming usages, this will panic on `false` and always return `true`
-    ///   since the table should only be used to access entries with vnode specified in
-    ///   `self.vnodes`.
-    /// - For `READ_ONLY` or batch usages, this will return the result verbatim. The caller may
-    ///   filter out the scanned row according to the result.
-    fn check_vnode_is_set(&self, vnode: VirtualNode) -> bool {
+    fn check_vnode_is_set(&self, vnode: VirtualNode) {
         let is_set = self.vnodes.is_set(vnode as usize).unwrap();
-        match T {
-            READ_WRITE => {
-                assert!(
-                    is_set,
-                    "vnode {} should not be accessed by this table: {:#?}, dist key {:?}",
-                    vnode, self.table_columns, self.dist_key_indices
-                );
-            }
-            READ_ONLY => {}
-        }
-        is_set
+        assert!(
+            is_set,
+            "vnode {} should not be accessed by this table: {:#?}, dist key {:?}",
+            vnode, self.table_columns, self.dist_key_indices
+        );
     }
 
     /// Get vnode value with `indices` on the given `row`. Should not be used directly.
@@ -307,7 +296,7 @@ impl<S: StateStore, E: Encoding, const T: AccessType> StorageTableBase<S, E, T> 
 
         tracing::trace!(target: "events::storage::storage_table", "compute vnode: {:?} keys {:?} => {}", row, indices, vnode);
 
-        let _ = self.check_vnode_is_set(vnode);
+        self.check_vnode_is_set(vnode);
         vnode
     }
 
@@ -355,7 +344,10 @@ impl<S: StateStore, E: Encoding, const T: AccessType> StorageTableBase<S, E, T> 
         }
 
         let result = deserializer.take();
-        Ok(result.and_then(|(vnode, _pk, row)| self.check_vnode_is_set(vnode).then_some(row)))
+        Ok(result.map(|(vnode, _pk, row)| {
+            self.check_vnode_is_set(vnode);
+            row
+        }))
     }
 
     /// Get a single row by range scan
@@ -374,7 +366,10 @@ impl<S: StateStore, E: Encoding, const T: AccessType> StorageTableBase<S, E, T> 
         }
 
         let result = deserializer.take();
-        Ok(result.and_then(|(vnode, _pk, row)| self.check_vnode_is_set(vnode).then_some(row)))
+        Ok(result.map(|(vnode, _pk, row)| {
+            self.check_vnode_is_set(vnode);
+            row
+        }))
     }
 }
 

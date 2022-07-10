@@ -872,8 +872,15 @@ impl ToStream for LogicalJoin {
                 Distribution::Single
             );
 
-            let plan = StreamDynamicFilter::new(predicate.other_cond().clone(), left, right).into();
+            let plan = StreamDynamicFilter::new(
+                left_ref_index,
+                predicate.other_cond().clone(),
+                left,
+                right,
+            )
+            .into();
 
+            // TODO: `DynamicFilterExecutor` should use `output_indices` in `ChunkBuilder`
             if self.output_indices != (0..self.internal_column_num()).collect::<Vec<_>>() {
                 let logical_project = LogicalProject::with_mapping(
                     plan,

@@ -32,7 +32,7 @@ pub struct LogicalLimit {
 }
 
 impl LogicalLimit {
-    fn new(input: PlanRef, limit: usize, offset: usize) -> Self {
+    pub fn new(input: PlanRef, limit: usize, offset: usize) -> Self {
         let ctx = input.ctx();
         let schema = input.schema().clone();
         let pk_indices = input.pk_indices().to_vec();
