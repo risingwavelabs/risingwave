@@ -64,7 +64,7 @@ pub enum Command {
     CreateMaterializedView {
         table_fragments: TableFragments,
         table_sink_map: HashMap<TableId, Vec<ActorId>>,
-        dispatches: HashMap<ActorId, Vec<Dispatcher>>,
+        dispatchers: HashMap<ActorId, Vec<Dispatcher>>,
         source_state: HashMap<ActorId, Vec<SplitImpl>>,
     },
 }
@@ -143,11 +143,11 @@ where
             }
 
             Command::CreateMaterializedView {
-                dispatches,
+                dispatchers,
                 source_state,
                 ..
             } => {
-                let actor_dispatchers = dispatches
+                let actor_dispatchers = dispatchers
                     .iter()
                     .map(|(&actor_id, dispatchers)| {
                         (
@@ -185,7 +185,7 @@ where
     /// returns an empty set.
     pub fn actors_to_track(&self) -> HashSet<ActorId> {
         match &self.command {
-            Command::CreateMaterializedView { dispatches, .. } => dispatches
+            Command::CreateMaterializedView { dispatchers, .. } => dispatchers
                 .values()
                 .flatten()
                 .flat_map(|dispatcher| dispatcher.downstream_actor_id.iter().copied())
@@ -227,13 +227,13 @@ where
 
             Command::CreateMaterializedView {
                 table_fragments,
-                dispatches,
+                dispatchers,
                 table_sink_map,
                 source_state: _,
             } => {
                 let mut dependent_table_actors = Vec::with_capacity(table_sink_map.len());
                 for (table_id, actors) in table_sink_map {
-                    let downstream_actors = dispatches
+                    let downstream_actors = dispatchers
                         .iter()
                         .filter(|(upstream_actor_id, _)| actors.contains(upstream_actor_id))
                         .map(|(&k, v)| (k, v.clone()))

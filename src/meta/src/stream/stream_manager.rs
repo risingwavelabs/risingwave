@@ -45,8 +45,8 @@ pub type GlobalStreamManagerRef<S> = Arc<GlobalStreamManager<S>>;
 /// [`CreateMaterializedViewContext`] carries one-time infos.
 #[derive(Default)]
 pub struct CreateMaterializedViewContext {
-    /// New dispatches to add from upstream actors to downstream actors.
-    pub dispatches: HashMap<ActorId, Vec<Dispatcher>>,
+    /// New dispatchers to add from upstream actors to downstream actors.
+    pub dispatchers: HashMap<ActorId, Vec<Dispatcher>>,
     /// Upstream mview actor ids grouped by node id.
     pub upstream_node_actors: HashMap<WorkerId, HashSet<ActorId>>,
     /// Upstream mview actor ids grouped by table id.
@@ -122,7 +122,7 @@ where
         &self,
         table_fragments: &mut TableFragments,
         dependent_table_ids: &HashSet<TableId>,
-        dispatches: &mut HashMap<ActorId, Vec<Dispatcher>>,
+        dispatchers: &mut HashMap<ActorId, Vec<Dispatcher>>,
         upstream_node_actors: &mut HashMap<WorkerId, HashSet<ActorId>>,
         locations: &ScheduledLocations,
     ) -> Result<()> {
@@ -135,7 +135,7 @@ where
             /// Schedule information of all actors.
             locations: &'a ScheduledLocations,
 
-            dispatches: &'a mut HashMap<ActorId, Vec<Dispatcher>>,
+            dispatchers: &'a mut HashMap<ActorId, Vec<Dispatcher>>,
             upstream_node_actors: &'a mut HashMap<WorkerId, HashSet<ActorId>>,
         }
 
@@ -222,7 +222,7 @@ where
                 merge.upstream_actor_id.push(upstream_actor_id);
 
                 // finally, we should also build dispatcher infos here.
-                self.dispatches
+                self.dispatchers
                     .entry(upstream_actor_id)
                     .or_default()
                     .push(Dispatcher {
@@ -250,7 +250,7 @@ where
             upstream_parallel_unit_info,
             tables_node_actors,
             locations,
-            dispatches,
+            dispatchers,
             upstream_node_actors,
         };
 
@@ -282,7 +282,7 @@ where
         &self,
         mut table_fragments: TableFragments,
         CreateMaterializedViewContext {
-            dispatches,
+            dispatchers,
             upstream_node_actors,
             table_sink_map,
             dependent_table_ids,
@@ -338,13 +338,13 @@ where
         self.resolve_chain_node(
             &mut table_fragments,
             dependent_table_ids,
-            dispatches,
+            dispatchers,
             upstream_node_actors,
             &locations,
         )
         .await?;
 
-        let dispatches = &*dispatches;
+        let dispatchers = &*dispatchers;
 
         // Record vnode to parallel unit mapping for actors.
         let actor_to_vnode_mapping = {
@@ -471,10 +471,10 @@ where
         // Hanging channels for each worker node.
         let mut node_hanging_channels = {
             // upstream_actor_id -> Vec<downstream_actor_info>
-            let up_id_to_down_info = dispatches
+            let up_id_to_down_info = dispatchers
                 .iter()
-                .map(|(&up_id, dispatches)| {
-                    let down_infos = dispatches
+                .map(|(&up_id, dispatchers)| {
+                    let down_infos = dispatchers
                         .iter()
                         .flat_map(|d| d.downstream_actor_id.iter())
                         .map(|down_id| actor_host_infos[down_id].clone())
@@ -613,7 +613,7 @@ where
             .run_command(Command::CreateMaterializedView {
                 table_fragments,
                 table_sink_map: table_sink_map.clone(),
-                dispatches: dispatches.clone(),
+                dispatchers: dispatchers.clone(),
                 source_state: init_split_assignment.clone(),
             })
             .await
