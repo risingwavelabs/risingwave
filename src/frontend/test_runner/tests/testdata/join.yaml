@@ -198,3 +198,15 @@
       BatchHashJoin { type: Inner, predicate: $0 = $1, output_indices: all }
         BatchScan { table: i, columns: [x] }
         BatchScan { table: i, columns: [x] }
+- sql: |
+    /* Use lookup join */
+    create table t1 (v1 int, v2 int);
+    create table t2 (v1 int, v2 int);
+    create materialized view t3 as select v1, count(v2) as v2 from t2 group by v1;
+    select * from t1 join t3 where t1.v2 = t3.v1;
+  batch_local_plan: |
+    BatchLookupJoin { type: Inner, predicate: $1 = $2, output_indices: all }
+      BatchExchange { order: [], dist: Single }
+        BatchScan { table: t1, columns: [v1, v2] }
+  with_config_map:
+    USE_LOOKUP_JOIN: "true"
