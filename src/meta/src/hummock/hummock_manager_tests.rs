@@ -216,10 +216,6 @@ async fn test_hummock_compaction_task() {
         0
     );
     assert_eq!(compact_task.get_task_id(), 2);
-    // In the test case, we assume that each SST contains data of 2 relational tables, and
-    // one of them overlaps with the previous SST. So there will be one more relational tables
-    // (for vnode mapping) than SSTs. but we now remove vnode mapping in compact task
-    assert_eq!(compact_task.get_vnode_mappings().len(), 0);
 
     // Cancel the task and succeed.
     compact_task.task_status = false;
