@@ -856,8 +856,9 @@ impl Dispatcher for SimpleDispatcher {
         self.output = Some(outputs.into_iter().next().unwrap());
     }
 
-    fn add_outputs(&mut self, _outputs: impl IntoIterator<Item = BoxedOutput>) {
-        panic!("add_outputs is not supported");
+    fn add_outputs(&mut self, outputs: impl IntoIterator<Item = BoxedOutput>) {
+        // TODO: ban this after removing `AddOutputs` mutation.
+        self.output = Some(outputs.into_iter().next().unwrap());
     }
 
     fn dispatch_barrier(&mut self, barrier: Barrier) -> Self::BarrierFuture<'_> {
