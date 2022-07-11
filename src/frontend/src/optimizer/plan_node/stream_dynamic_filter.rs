@@ -130,7 +130,10 @@ fn infer_right_internal_table_catalog(input: PlanRef) -> TableCatalog {
     let schema = &base.schema;
 
     // We require that the right table has distribution `Single`
-    assert_eq!(base.dist.dist_column_indices().to_vec(), Vec::<usize>::new());
+    assert_eq!(
+        base.dist.dist_column_indices().to_vec(),
+        Vec::<usize>::new()
+    );
 
     let mut internal_table_catalog_builder = TableCatalogBuilder::new();
 
