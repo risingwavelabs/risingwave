@@ -12,5 +12,11 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-mod metrics_manager;
+// This is a stub lib.rs.
+
+#![feature(lint_reasons)]
+
+pub mod metrics_manager;
+pub mod observer_manager;
+
 pub use metrics_manager::MetricsManager;

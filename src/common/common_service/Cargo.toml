@@ -1,0 +1,17 @@
+[package]
+name = "risingwave_common_service"
+version = "0.1.10"
+edition = "2021"
+# See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
+
+[dependencies]
+hyper = "0.14"
+log = "0.4"
+prometheus = { version = "0.13" }
+risingwave_common = { path = "../" }
+risingwave_pb = { path = "../../prost" }
+risingwave_rpc_client = { path = "../../rpc_client" }
+tokio = { version = "=0.2.0-alpha.3", package = "madsim-tokio", features = ["rt", "rt-multi-thread", "sync", "macros", "time", "signal"] }
+tower = { version = "0.4", features = ["util", "load-shed"] }
+tower-http = { version = "0.2", features = ["add-extension", "cors"] }
+tracing = { version = "0.1" }

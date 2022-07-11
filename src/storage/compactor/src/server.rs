@@ -18,8 +18,8 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use risingwave_common::monitor::process_linux::monitor_process;
-use risingwave_common::service::MetricsManager;
 use risingwave_common::util::addr::HostAddr;
+use risingwave_common_service::metrics_manager::MetricsManager;
 use risingwave_object_store::object::parse_remote_object_store;
 use risingwave_pb::common::WorkerType;
 use risingwave_pb::hummock::compactor_service_server::CompactorServiceServer;

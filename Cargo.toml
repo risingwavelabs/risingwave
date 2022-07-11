@@ -5,6 +5,7 @@ members = [
   "src/cmd",
   "src/cmd_all",
   "src/common",
+  "src/common/common_service",
   "src/compute",
   "src/connector",
   "src/ctl",
