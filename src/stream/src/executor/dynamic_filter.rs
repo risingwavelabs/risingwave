@@ -330,9 +330,11 @@ impl<S: StateStore> DynamicFilterExecutor<S> {
                             yield Message::Chunk(chunk);
                         }
                     }
-                    if let Some(row) = current_epoch_row.take() {
-                        assert_eq!(epoch, barrier.epoch.prev);
-                        if let Some(table) = &mut self.right_table {
+
+                    assert_eq!(epoch, barrier.epoch.prev);
+
+                    if let Some(table) = &mut self.right_table {
+                        if let Some(row) = current_epoch_row.take() {
                             table.insert(row)?;
                             table.commit(epoch).await?;
                         }
