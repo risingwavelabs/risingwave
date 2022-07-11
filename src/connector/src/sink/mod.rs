@@ -132,14 +132,6 @@ impl Sink for SinkImpl {
             SinkImpl::Kafka(sink) => sink.abort().await,
         }
     }
-
-    async fn take_snapshot(&self) -> Result<SinkState> {
-        match self {
-            SinkImpl::MySQL(sink) => sink.take_snapshot().await,
-            SinkImpl::Redis(sink) => sink.take_snapshot().await,
-            SinkImpl::Kafka(sink) => sink.take_snapshot().await,
-        }
-    }
 }
 
 pub type Result<T> = std::result::Result<T, SinkError>;

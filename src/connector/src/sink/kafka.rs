@@ -31,7 +31,7 @@ use serde_json::{json, Map, Value};
 use tokio::task;
 
 use super::{Sink, SinkError};
-use crate::sink::{Result, SinkState};
+use crate::sink::Result;
 
 pub const KAFKA_SINK: &str = "kafka";
 

@@ -16,7 +16,7 @@ use async_trait::async_trait;
 use risingwave_common::array::StreamChunk;
 use risingwave_common::catalog::Schema;
 
-use crate::sink::{Result, Sink, SinkState};
+use crate::sink::{Result, Sink};
 
 #[derive(Clone, Debug)]
 pub struct RedisConfig;

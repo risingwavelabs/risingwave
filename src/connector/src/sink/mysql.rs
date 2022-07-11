@@ -23,7 +23,7 @@ use risingwave_common::array::StreamChunk;
 use risingwave_common::catalog::Schema;
 use risingwave_common::types::{Datum, Decimal, ScalarImpl};
 
-use crate::sink::{Result, Sink, SinkError, SinkState};
+use crate::sink::{Result, Sink, SinkError};
 
 #[derive(Clone, Debug)]
 pub struct MySQLConfig {
