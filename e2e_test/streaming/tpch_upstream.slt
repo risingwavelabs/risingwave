@@ -15,7 +15,7 @@ flush;
 include ./tpch/views/q1.slt.part
 include ./tpch/views/q2.slt.part
 include ./tpch/views/q3.slt.part
-include ./tpch/views/q4.slt.part
+# include ./tpch/views/q4.slt.part
 include ./tpch/views/q5.slt.part
 include ./tpch/views/q6.slt.part
 include ./tpch/views/q7.slt.part
@@ -35,7 +35,7 @@ include ./tpch/views/q22.slt.part
 include ./tpch/q1.slt.part
 include ./tpch/q2.slt.part
 include ./tpch/q3.slt.part
-include ./tpch/q4.slt.part
+# include ./tpch/q4.slt.part
 include ./tpch/q5.slt.part
 include ./tpch/q6.slt.part
 include ./tpch/q7.slt.part
@@ -61,8 +61,8 @@ drop materialized view tpch_q2;
 statement ok
 drop materialized view tpch_q3;
 
-statement ok
-drop materialized view tpch_q4;
+# statement ok
+# drop materialized view tpch_q4;
 
 statement ok
 drop materialized view tpch_q5;
