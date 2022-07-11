@@ -678,7 +678,7 @@ mod tests {
             ));
         }
         let relational_pk_len = column_descs.len();
-        StateTable::new(
+        StateTable::new_for_test(
             store,
             table_id,
             column_descs,

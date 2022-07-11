@@ -224,7 +224,7 @@ pub mod global_simple_agg {
         };
         let dist_keys: Vec<usize> = (0..group_key.len()).collect();
 
-        StateTable::new(
+        StateTable::new_for_test(
             store,
             table_id,
             table_desc,

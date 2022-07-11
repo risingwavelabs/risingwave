@@ -51,7 +51,7 @@ async fn test_state_table() -> StorageResult<()> {
     ];
     let order_types = vec![OrderType::Ascending];
     let pk_index = vec![0_usize];
-    let mut state_table = StateTable::new(
+    let mut state_table = StateTable::new_for_test(
         state_store.clone(),
         TableId::from(0x42),
         column_descs,
@@ -187,7 +187,7 @@ async fn test_state_table_update_insert() -> StorageResult<()> {
     ];
     let order_types = vec![OrderType::Ascending];
     let pk_index = vec![0_usize];
-    let mut state_table = StateTable::new(
+    let mut state_table = StateTable::new_for_test(
         state_store.clone(),
         TableId::from(0x42),
         column_descs,
@@ -369,7 +369,7 @@ async fn test_state_table_iter() {
         ColumnDesc::unnamed(column_ids[2], DataType::Int32),
     ];
     let pk_index = vec![0_usize, 1_usize];
-    let mut state = StateTable::new(
+    let mut state = StateTable::new_for_test(
         state_store.clone(),
         TableId::from(0x42),
         column_descs.clone(),
@@ -623,7 +623,7 @@ async fn test_multi_state_table_iter() {
         ColumnDesc::unnamed(column_ids[2], DataType::Varchar),
     ];
     let pk_index = vec![0_usize, 1_usize];
-    let mut state_1 = StateTable::new(
+    let mut state_1 = StateTable::new_for_test(
         state_store.clone(),
         TableId::from(0x1111),
         column_descs_1.clone(),
@@ -631,7 +631,7 @@ async fn test_multi_state_table_iter() {
         None,
         pk_index.clone(),
     );
-    let mut state_2 = StateTable::new(
+    let mut state_2 = StateTable::new_for_test(
         state_store.clone(),
         TableId::from(0x2222),
         column_descs_2.clone(),
@@ -730,7 +730,7 @@ async fn test_cell_based_get_row_by_scan() {
     ];
     let pk_indices = vec![0_usize, 1_usize];
     let order_types = vec![OrderType::Ascending, OrderType::Descending];
-    let mut state = StateTable::new(
+    let mut state = StateTable::new_for_test(
         state_store.clone(),
         TableId::from(0x42),
         column_descs.clone(),
@@ -801,7 +801,7 @@ async fn test_cell_based_get_row_by_multi_get() {
     ];
     let pk_indices = vec![0_usize, 1_usize];
     let order_types = vec![OrderType::Ascending, OrderType::Descending];
-    let mut state = StateTable::new(
+    let mut state = StateTable::new_for_test(
         state_store.clone(),
         TableId::from(0x42),
         column_descs.clone(),
@@ -871,7 +871,7 @@ async fn test_cell_based_get_row_for_string() {
         ColumnDesc::unnamed(column_ids[2], DataType::Varchar),
     ];
     let pk_indices = vec![0_usize, 1_usize];
-    let mut state = StateTable::new(
+    let mut state = StateTable::new_for_test(
         state_store.clone(),
         TableId::from(0x42),
         column_descs.clone(),
@@ -950,7 +950,7 @@ async fn test_shuffled_column_id_for_get_row() {
 
     let order_types = vec![OrderType::Ascending, OrderType::Descending];
     let pk_indices = vec![0_usize, 1_usize];
-    let mut state = StateTable::new(
+    let mut state = StateTable::new_for_test(
         state_store.clone(),
         TableId::from(0x42),
         column_descs.clone(),
@@ -1020,7 +1020,7 @@ async fn test_cell_based_table_iter() {
         ColumnDesc::unnamed(column_ids[2], DataType::Int32),
     ];
     let pk_indices = vec![0_usize, 1_usize];
-    let mut state = StateTable::new(
+    let mut state = StateTable::new_for_test(
         state_store.clone(),
         TableId::from(0x42),
         column_descs.clone(),
@@ -1092,7 +1092,7 @@ async fn test_multi_cell_based_table_iter() {
         ColumnDesc::unnamed(column_ids[2], DataType::Varchar),
     ];
     let pk_indices = vec![0_usize, 1_usize];
-    let mut state_1 = StateTable::new(
+    let mut state_1 = StateTable::new_for_test(
         state_store.clone(),
         TableId::from(0x1111),
         column_descs_1.clone(),
@@ -1100,7 +1100,7 @@ async fn test_multi_cell_based_table_iter() {
         None,
         pk_indices.clone(),
     );
-    let mut state_2 = StateTable::new(
+    let mut state_2 = StateTable::new_for_test(
         state_store.clone(),
         TableId::from(0x2222),
         column_descs_2.clone(),
@@ -1355,7 +1355,7 @@ async fn test_cell_based_scan_empty_column_ids_cardinality() {
     // let pk_columns = vec![0, 1]; leave a message to indicate pk columns
     let order_types = vec![OrderType::Ascending, OrderType::Descending];
     let pk_indices = vec![0_usize, 1_usize];
-    let mut state = StateTable::new(
+    let mut state = StateTable::new_for_test(
         state_store.clone(),
         TableId::from(0x42),
         column_descs.clone(),
@@ -1406,7 +1406,7 @@ async fn test_state_table_iter_with_prefix() {
         ColumnDesc::unnamed(column_ids[2], DataType::Int32),
     ];
     let pk_index = vec![0_usize, 1_usize];
-    let mut state = StateTable::new(
+    let mut state = StateTable::new_for_test(
         state_store.clone(),
         TableId::from(0x42),
         column_descs.clone(),
@@ -1543,7 +1543,7 @@ async fn test_dedup_pk_table_write_with_cell_based_read() {
     }];
 
     // ---------- Init state table interface
-    let mut state = DedupPkStateTable::new(
+    let mut state = DedupPkStateTable::new_for_test(
         state_store.clone(),
         TableId::from(0x42),
         actual_column_descs.clone(),

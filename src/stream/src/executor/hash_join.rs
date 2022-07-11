@@ -794,7 +794,7 @@ mod tests {
             .enumerate()
             .map(|(id, data_type)| ColumnDesc::unnamed(ColumnId::new(id as i32), data_type.clone()))
             .collect_vec();
-        let state_table_l = StateTable::new(
+        let state_table_l = StateTable::new_for_test(
             mem_state.clone(),
             TableId::new(0),
             column_descs.clone(),
@@ -802,7 +802,7 @@ mod tests {
             None,
             pk_indices.to_vec(),
         );
-        let state_table_r = StateTable::new(
+        let state_table_r = StateTable::new_for_test(
             mem_state,
             TableId::new(1),
             column_descs,

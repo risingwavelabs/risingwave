@@ -70,6 +70,17 @@ impl<S: StateStore, E: Encoding> StateTableBase<S, E> {
         Self::new_without_distribution(store, table_id, columns, order_types, pk_indices)
     }
 
+    pub fn new_for_test(
+        store: S,
+        table_id: TableId,
+        columns: Vec<ColumnDesc>,
+        order_types: Vec<OrderType>,
+        _dist_key_indices: Option<Vec<usize>>,
+        pk_indices: Vec<usize>,
+    ) -> Self {
+        Self::new_without_distribution(store, table_id, columns, order_types, pk_indices)
+    }
+
     /// Create a state table without distribution, used for singleton executors and tests.
     pub fn new_without_distribution(
         store: S,

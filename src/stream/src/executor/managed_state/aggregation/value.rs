@@ -145,7 +145,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_managed_value_state() {
-        let mut state_table = StateTable::new(
+        let mut state_table = StateTable::new_for_test(
             MemoryStateStore::new(),
             TableId::from(0x2333),
             vec![ColumnDesc::unnamed(ColumnId::new(0), DataType::Int64)],
@@ -206,7 +206,7 @@ mod tests {
     #[tokio::test]
     async fn test_managed_value_state_append_only() {
         let pk_index = vec![];
-        let mut state_table = StateTable::new(
+        let mut state_table = StateTable::new_for_test(
             MemoryStateStore::new(),
             TableId::from(0x2333),
             vec![ColumnDesc::unnamed(ColumnId::new(0), DataType::Int64)],
