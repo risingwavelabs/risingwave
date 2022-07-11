@@ -16,7 +16,7 @@ use bytes::Bytes;
 
 use crate::error::StorageResult;
 use crate::hummock::HummockError;
-use crate::storage_value::{StorageValue, ValueMeta};
+use crate::storage_value::StorageValue;
 use crate::store::WriteOptions;
 use crate::{Keyspace, StateStore};
 
@@ -153,11 +153,6 @@ impl<'a, S: StateStore> KeySpaceWriteBatch<'a, S> {
     /// key]`.
     pub fn delete(&mut self, key: impl AsRef<[u8]>) {
         self.do_push(Some(key.as_ref()), StorageValue::new_default_delete());
-    }
-
-    /// Same as `delete`, except that value meta is specified.
-    pub fn delete_with_value_meta(&mut self, key: impl AsRef<[u8]>, value_meta: ValueMeta) {
-        self.do_push(Some(key.as_ref()), StorageValue::new_delete(value_meta));
     }
 }
 
