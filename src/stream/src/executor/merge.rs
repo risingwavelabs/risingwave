@@ -30,13 +30,14 @@ use tonic::Streaming;
 use super::error::StreamExecutorError;
 use super::*;
 use crate::executor::monitor::StreamingMetrics;
-use crate::task::UpDownActorIds;
+use crate::task::{UpDownActorIds, UpDownFragmentIds};
 
 /// Receive data from `gRPC` and forwards to `MergerExecutor`/`ReceiverExecutor`
 pub struct RemoteInput {
     stream: Streaming<GetStreamResponse>,
     sender: Sender<Message>,
     up_down_ids: UpDownActorIds,
+    up_down_frag: UpDownFragmentIds,
     metrics: Arc<StreamingMetrics>,
 }
 
@@ -46,14 +47,18 @@ impl RemoteInput {
     pub async fn create(
         client: ComputeClient,
         up_down_ids: UpDownActorIds,
+        up_down_frag: UpDownFragmentIds,
         sender: Sender<Message>,
         metrics: Arc<StreamingMetrics>,
     ) -> Result<Self> {
-        let stream = client.get_stream(up_down_ids.0, up_down_ids.1).await?;
+        let stream = client
+            .get_stream(up_down_ids.0, up_down_ids.1, up_down_frag.0, up_down_frag.1)
+            .await?;
         Ok(Self {
             stream,
             sender,
             up_down_ids,
+            up_down_frag,
             metrics,
         })
     }
@@ -61,6 +66,9 @@ impl RemoteInput {
     pub async fn run(self) {
         let up_actor_id = self.up_down_ids.0.to_string();
         let down_actor_id = self.up_down_ids.1.to_string();
+        let up_fragment_id = self.up_down_frag.0.to_string();
+        let down_fragment_id = self.up_down_frag.1.to_string();
+
         let mut rr = 0;
         const SAMPLING_FREQUENCY: u64 = 100;
 
@@ -72,6 +80,11 @@ impl RemoteInput {
                     self.metrics
                         .exchange_recv_size
                         .with_label_values(&[&up_actor_id, &down_actor_id])
+                        .inc_by(bytes as u64);
+
+                    self.metrics
+                        .exchange_frag_recv_size
+                        .with_label_values(&[&up_fragment_id, &down_fragment_id])
                         .inc_by(bytes as u64);
 
                     // add deserialization duration metric with given sampling frequency
@@ -469,6 +482,7 @@ mod tests {
         let input_handle = tokio::spawn(async move {
             let remote_input = RemoteInput::create(
                 ComputeClient::new(addr.into()).await.unwrap(),
+                (0, 0),
                 (0, 0),
                 tx,
                 Arc::new(StreamingMetrics::unused()),
