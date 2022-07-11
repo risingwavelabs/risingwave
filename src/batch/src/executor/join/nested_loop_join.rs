@@ -12,24 +12,22 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::option::Option::Some;
-
+use futures::TryStreamExt;
 use futures_async_stream::try_stream;
-use itertools::Itertools;
-use risingwave_common::array::{Array, DataChunk, Row};
+use itertools::{repeat_n, Itertools};
+use risingwave_common::array::data_chunk_iter::RowRef;
+use risingwave_common::array::{Array, DataChunk};
+use risingwave_common::buffer::BitmapBuilder;
 use risingwave_common::catalog::Schema;
 use risingwave_common::error::{Result, RwError};
 use risingwave_common::types::DataType;
 use risingwave_common::util::chunk_coalesce::{DataChunkBuilder, SlicedDataChunk};
-use risingwave_expr::expr::{build_from_prost as expr_build_from_prost, BoxedExpression};
+use risingwave_expr::expr::{
+    build_from_prost as expr_build_from_prost, BoxedExpression, Expression,
+};
 use risingwave_pb::batch_plan::plan_node::NodeBody;
 
-use crate::error::BatchError;
-use crate::executor::join::chunked_data::RowId;
-use crate::executor::join::row_level_iter::RowLevelIter;
-use crate::executor::join::{
-    concatenate, convert_datum_refs_to_chunk, convert_row_to_chunk, JoinType,
-};
+use crate::executor::join::{concatenate, convert_row_to_chunk, JoinType};
 use crate::executor::{
     BoxedDataChunkStream, BoxedExecutor, BoxedExecutorBuilder, Executor, ExecutorBuilder,
 };
@@ -39,59 +37,27 @@ use crate::task::BatchTaskContext;
 ///
 ///
 /// High Level Idea:
-/// 1. Iterate tuple from probe table.
-/// 2. Concatenated with inner chunk, eval expression and get sel vector
-/// 3. Create new chunk with new sel vector and yield to upper.
+/// 1. Iterate tuple from left child.
+/// 2. Concatenated with right chunk, eval expression and get visibility bitmap
+/// 3. Create new chunk with visibility bitmap and yield to upper.
 pub struct NestedLoopJoinExecutor {
     /// Expression to eval join condition
     join_expr: BoxedExpression,
     /// Executor should handle different join type.
     join_type: JoinType,
+    /// Original output schema
+    original_schema: Schema,
+    /// Actual output schema
     schema: Schema,
     /// We may only need certain columns.
     /// output_indices are the indices of the columns that we needed.
     output_indices: Vec<usize>,
-    /// Return data chunk in batch.
-    chunk_builder: DataChunkBuilder,
-    /// Cache the chunk that has not been written into chunk builder
-    /// during join probing. Flush it in begin of execution.
-    last_chunk: Option<SlicedDataChunk>,
-    /// The data type of probe side. Cache to avoid copy too much.
-    probe_side_schema: Vec<DataType>,
-    /// Row-level iteration of probe side.
-    probe_side_source: RowLevelIter,
-    /// The table used for look up matched rows.
-    build_table: RowLevelIter,
-
-    /// Used in probe remaining iteration.
-    probe_remain_chunk_idx: usize,
-    probe_remain_row_idx: usize,
-
+    /// Left child executor
+    left_child: BoxedExecutor,
+    /// Right child executor
+    right_child: BoxedExecutor,
     /// Identity string of the executor
     identity: String,
-}
-
-/// If current row finished probe, executor will advance to next row.
-/// If there is batched chunk generated in probing, return it. Note that:
-/// `None` do not mean no matched row find (it is written in
-/// [`NestedLoopJoinExecutor::chunk_builder`])
-struct ProbeResult {
-    cur_row_finished: bool,
-    chunk: Option<DataChunk>,
-}
-
-#[derive(PartialEq)]
-enum NestedLoopJoinState {
-    /// [`Self::Build`] should load all inner table into memory.
-    Build,
-    /// One Difference between [`Self::FirstProbe`] and [`Self::Probe`]:
-    /// Only init the probe side source until [`Self::FirstProbe`] so that
-    /// avoid unnecessary init if build side fail.
-    FirstProbe,
-    /// [`Self::Probe`] finds matching rows for all outer table.
-    Probe,
-    ProbeRemaining,
-    Done,
 }
 
 impl Executor for NestedLoopJoinExecutor {
@@ -110,42 +76,72 @@ impl Executor for NestedLoopJoinExecutor {
 
 impl NestedLoopJoinExecutor {
     #[try_stream(boxed, ok = DataChunk, error = RwError)]
-    async fn do_execute(mut self: Box<Self>) {
-        let mut state = NestedLoopJoinState::Build;
-        loop {
-            match state {
-                NestedLoopJoinState::Build => {
-                    self.build_table.load_data().await?;
-                    state = NestedLoopJoinState::FirstProbe;
-                }
-                NestedLoopJoinState::FirstProbe => {
-                    let ret = self.probe(true, &mut state).await?;
-                    if let Some(data_chunk) = ret {
-                        yield data_chunk.reorder_columns(&self.output_indices);
-                    }
-                }
-                NestedLoopJoinState::Probe => {
-                    let ret = self.probe(false, &mut state).await?;
-                    if let Some(data_chunk) = ret {
-                        yield data_chunk.reorder_columns(&self.output_indices);
-                    }
-                }
+    async fn do_execute(self: Box<Self>) {
+        let left_data_types = self.left_child.schema().data_types();
+        let data_types = self.original_schema.data_types();
 
-                NestedLoopJoinState::ProbeRemaining => {
-                    let ret = self.probe_remaining()?;
-                    if let Some(data_chunk) = ret {
-                        yield data_chunk.reorder_columns(&self.output_indices);
-                    }
-                    state = NestedLoopJoinState::Done;
-                }
+        let mut chunk_builder = DataChunkBuilder::with_default_size(data_types);
 
-                NestedLoopJoinState::Done => {
-                    if let Some(data_chunk) = self.chunk_builder.consume_all()? {
-                        yield data_chunk.reorder_columns(&self.output_indices);
-                    } else {
-                        break;
-                    };
-                }
+        // Cache the outputs of left child
+        let left = self.left_child.execute().try_collect().await?;
+
+        // Get the joined stream
+        let stream = match self.join_type {
+            JoinType::Inner => Self::do_inner_join,
+            JoinType::LeftOuter => Self::do_left_outer_join,
+            JoinType::LeftSemi => Self::do_left_semi_anti_join::<false>,
+            JoinType::LeftAnti => Self::do_left_semi_anti_join::<true>,
+            JoinType::RightOuter => Self::do_right_outer_join,
+            JoinType::RightSemi => Self::do_right_semi_anti_join::<false>,
+            JoinType::RightAnti => Self::do_right_semi_anti_join::<true>,
+            JoinType::FullOuter => todo!(),
+        };
+
+        #[for_await]
+        for chunk in stream(
+            &mut chunk_builder,
+            left_data_types,
+            self.join_expr,
+            left,
+            self.right_child,
+        ) {
+            yield chunk?.reorder_columns(&self.output_indices)
+        }
+
+        // Handle remaining chunk
+        if let Some(chunk) = chunk_builder.consume_all()? {
+            yield chunk.reorder_columns(&self.output_indices)
+        }
+    }
+}
+
+impl NestedLoopJoinExecutor {
+    /// Create a chunk by concatenating a row with a chunk and set its visibility according to the
+    /// evaluation result of the expression.
+    fn concatenate_and_eval(
+        expr: &dyn Expression,
+        left_row_types: &[DataType],
+        left_row: RowRef,
+        right_chunk: &DataChunk,
+    ) -> Result<DataChunk> {
+        let left_chunk = convert_row_to_chunk(&left_row, right_chunk.capacity(), left_row_types)?;
+        let mut chunk = concatenate(&left_chunk, right_chunk)?;
+        chunk.set_visibility(expr.eval(&chunk)?.as_bool().iter().collect());
+        Ok(chunk)
+    }
+
+    /// Append a chunk to the chunk builder and get a stream of the spilled chunks.
+    #[try_stream(boxed, ok = DataChunk, error = RwError)]
+    async fn append_chunk(chunk_builder: &mut DataChunkBuilder, chunk: DataChunk) {
+        let (mut remain, mut output) =
+            chunk_builder.append_chunk(SlicedDataChunk::new_checked(chunk)?)?;
+        if let Some(output_chunk) = output {
+            yield output_chunk
+        }
+        while let Some(remain_chunk) = remain {
+            (remain, output) = chunk_builder.append_chunk(remain_chunk)?;
+            if let Some(output_chunk) = output {
+                yield output_chunk
             }
         }
     }
@@ -173,52 +169,20 @@ impl BoxedExecutorBuilder for NestedLoopJoinExecutor {
         let left_child = inputs.remove(0);
         let right_child = inputs.remove(0);
 
-        // TODO(Bowen): Merge this with derive schema in Logical Join (#790).
-        let fields = match join_type {
-            JoinType::LeftSemi => left_child.schema().fields.clone(),
-            JoinType::LeftAnti => left_child.schema().fields.clone(),
-            JoinType::RightSemi => right_child.schema().fields.clone(),
-            JoinType::RightAnti => right_child.schema().fields.clone(),
-            _ => left_child
-                .schema()
-                .fields
-                .iter()
-                .chain(right_child.schema().fields.iter())
-                .cloned()
-                .collect(),
-        };
-        let output_indices: Vec<usize> = nested_loop_join_node
+        let output_indices = nested_loop_join_node
             .output_indices
             .iter()
-            .map(|&x| x as usize)
+            .map(|&v| v as usize)
             .collect();
-        let original_schema = Schema { fields };
-        match join_type {
-            JoinType::Inner
-            | JoinType::LeftOuter
-            | JoinType::RightOuter
-            | JoinType::LeftSemi
-            | JoinType::LeftAnti
-            | JoinType::RightSemi
-            | JoinType::RightAnti => {
-                // TODO: Support FULL OUTER.
 
-                Ok(Box::new(Self::new(
-                    join_expr,
-                    join_type,
-                    original_schema,
-                    output_indices,
-                    left_child,
-                    right_child,
-                    "NestedLoopJoinExecutor2".to_string(),
-                )))
-            }
-            _ => Err(BatchError::UnsupportedFunction(format!(
-                "Do not support {:?} join type now.",
-                join_type
-            ))
-            .into()),
-        }
+        Ok(Box::new(NestedLoopJoinExecutor::new(
+            join_expr,
+            join_type,
+            output_indices,
+            left_child,
+            right_child,
+            "NestedLoopExecutor".into(),
+        )))
     }
 }
 
@@ -226,298 +190,237 @@ impl NestedLoopJoinExecutor {
     pub fn new(
         join_expr: BoxedExpression,
         join_type: JoinType,
-        original_schema: Schema,
         output_indices: Vec<usize>,
         left_child: BoxedExecutor,
         right_child: BoxedExecutor,
         identity: String,
     ) -> Self {
-        let schema = output_indices
-            .iter()
-            .map(|&idx| original_schema[idx].clone())
-            .collect();
+        // TODO(Bowen): Merge this with derive schema in Logical Join (#790).
+        let original_schema = match join_type {
+            JoinType::LeftSemi | JoinType::LeftAnti => left_child.schema().clone(),
+            JoinType::RightSemi | JoinType::RightAnti => right_child.schema().clone(),
+            _ => Schema::from_iter(
+                left_child
+                    .schema()
+                    .fields()
+                    .iter()
+                    .chain(right_child.schema().fields().iter())
+                    .cloned(),
+            ),
+        };
+        let schema = Schema::from_iter(
+            output_indices
+                .iter()
+                .map(|&idx| original_schema[idx].clone()),
+        );
         Self {
             join_expr,
             join_type,
+            original_schema,
             schema,
             output_indices,
-            chunk_builder: DataChunkBuilder::with_default_size(original_schema.data_types()),
-            last_chunk: None,
-            probe_side_schema: left_child.schema().data_types(),
-            probe_side_source: RowLevelIter::new(left_child),
-            build_table: RowLevelIter::new(right_child),
-            probe_remain_chunk_idx: 0,
-            probe_remain_row_idx: 0,
+            left_child,
+            right_child,
             identity,
         }
     }
+}
 
-    /// Probe matched rows in `probe_table`.
-    /// # Arguments
-    /// * `first_probe`: whether the first probing. Init outer source if yes.
-    /// * `probe_table`: Table to be probed.
-    /// If nothing gained from `probe_table.join()`, Advance to next row until all outer tuples are
-    /// exhausted.
-    async fn probe(
-        &mut self,
-        first_probe: bool,
-        state: &mut NestedLoopJoinState,
-    ) -> Result<Option<DataChunk>> {
-        if first_probe {
-            self.probe_side_source.load_data().await?;
-            *state = NestedLoopJoinState::Probe;
-        }
-        let cur_row = self.probe_side_source.get_current_row_ref();
-        // TODO(Bowen): If we assume the scanned chunk is always compact (no invisible tuples),
-        // remove this check.
-        if cur_row.is_some() {
-            // Dispatch to each kind of join type
-            let probe_result = match self.join_type {
-                JoinType::Inner => self.do_inner_join(),
-                JoinType::LeftOuter => self.do_left_outer_join(),
-                JoinType::LeftSemi => self.do_left_semi_join(),
-                JoinType::LeftAnti => self.do_left_anti_join(),
-                JoinType::RightOuter => self.do_right_outer_join(),
-                JoinType::RightSemi => self.do_right_semi_join(),
-                JoinType::RightAnti => self.do_right_anti_join(),
-                _ => Err(BatchError::UnsupportedFunction(
-                    "Do not support other join types!".to_string(),
-                )
-                .into()),
-            }?;
-
-            if probe_result.cur_row_finished {
-                self.probe_side_source.advance_row();
-                // Probe row is changed, scan from the starting point of build table again.
-                self.build_table.reset_chunk();
-            }
-
-            if let Some(ret_chunk) = probe_result.chunk {
-                // Note: we can avoid the append chunk in join -- Only do it in the begin of outer
-                // loop. But currently seems like it do not have too much gain. Will
-                // keep look on it.
-                if ret_chunk.capacity() > 0 {
-                    let (mut left_data_chunk, return_data_chunk) = self
-                        .chunk_builder
-                        .append_chunk(SlicedDataChunk::new_checked(ret_chunk)?)?;
-
-                    // Have checked last chunk is None in before. Now swap to buffer it.
-                    std::mem::swap(&mut self.last_chunk, &mut left_data_chunk);
-                    if let Some(inner_chunk) = return_data_chunk {
-                        return Ok(Some(inner_chunk));
+impl NestedLoopJoinExecutor {
+    #[try_stream(boxed, ok = DataChunk, error = RwError)]
+    async fn do_inner_join(
+        chunk_builder: &mut DataChunkBuilder,
+        left_data_types: Vec<DataType>,
+        join_expr: BoxedExpression,
+        left: Vec<DataChunk>,
+        right: BoxedExecutor,
+    ) {
+        // 1. Iterate over the right table by chunks.
+        #[for_await]
+        for right_chunk in right.execute() {
+            let right_chunk = right_chunk?;
+            // 2. Iterator over the left table by rows.
+            for left_row in left.iter().flat_map(|chunk| chunk.rows()) {
+                // 3. Concatenate the left row and right chunk into a single chunk and evaluate the
+                // expression on it.
+                let chunk = Self::concatenate_and_eval(
+                    join_expr.as_ref(),
+                    &left_data_types,
+                    left_row,
+                    &right_chunk,
+                )?;
+                // 4. Yield the concatenated chunk.
+                if chunk.cardinality() > 0 {
+                    #[for_await]
+                    for spilled in Self::append_chunk(chunk_builder, chunk) {
+                        yield spilled?
                     }
                 }
             }
-        } else {
-            *state = if self.join_type.need_join_remaining() {
-                NestedLoopJoinState::ProbeRemaining
-            } else {
-                NestedLoopJoinState::Done
-            };
-        }
-        Ok(None)
-    }
-
-    /// Similar to [`crate::executor::hash_join::HashJoinState::ProbeRemaining`]. For nested loop
-    /// join, iterate the build table and append row if not matched in
-    /// [`NestedLoopJoinState::Probe`].
-    fn probe_remaining(&mut self) -> Result<Option<DataChunk>> {
-        match self.join_type {
-            JoinType::RightOuter => self.do_probe_remaining_right_outer(),
-            JoinType::RightAnti => self.do_probe_remaining_right_anti(),
-            _ => Err(BatchError::UnsupportedFunction(
-                "unsupported type for probe_remaining".to_string(),
-            )
-            .into()),
         }
     }
 
-    fn do_inner_join(&mut self) -> Result<ProbeResult> {
-        if let Some(build_side_chunk) = self.build_table.get_current_chunk() {
-            // Checked the option before, so impossible to panic.
-            let probe_row = self.probe_side_source.get_current_row_ref().unwrap();
-            let const_row_chunk = convert_row_to_chunk(
-                &probe_row,
-                build_side_chunk.capacity(),
-                &self.probe_side_schema,
-            )?;
-            let new_chunk = concatenate(&const_row_chunk, build_side_chunk)?;
-            // Join with current row.
-            let sel_vector = self.join_expr.eval(&new_chunk)?;
-            let ret_chunk = new_chunk.with_visibility(sel_vector.as_bool().iter().collect());
-            self.build_table.advance_chunk();
-            Ok(ProbeResult {
-                cur_row_finished: false,
-                chunk: Some(ret_chunk),
-            })
-        } else {
-            self.build_table.reset_chunk();
-            Ok(ProbeResult {
-                cur_row_finished: true,
-                chunk: None,
-            })
-        }
-    }
-
-    fn do_left_outer_join(&mut self) -> Result<ProbeResult> {
-        let ret = self.do_inner_join()?;
-        if let Some(inner) = ret.chunk.as_ref() {
-            if inner.cardinality() > 0 {
-                self.probe_side_source.set_cur_row_matched(true);
+    #[try_stream(boxed, ok = DataChunk, error = RwError)]
+    async fn do_left_outer_join(
+        chunk_builder: &mut DataChunkBuilder,
+        left_data_types: Vec<DataType>,
+        join_expr: BoxedExpression,
+        left: Vec<DataChunk>,
+        right: BoxedExecutor,
+    ) {
+        let mut matched = BitmapBuilder::zeroed(left.iter().map(|chunk| chunk.capacity()).sum());
+        let right_data_types = right.schema().data_types();
+        // Same as inner join except that a bitmap is used to track which row of the left table is
+        // matched.
+        #[for_await]
+        for right_chunk in right.execute() {
+            let right_chunk = right_chunk?;
+            for (left_row_idx, left_row) in left.iter().flat_map(|chunk| chunk.rows()).enumerate() {
+                let chunk = Self::concatenate_and_eval(
+                    join_expr.as_ref(),
+                    &left_data_types,
+                    left_row,
+                    &right_chunk,
+                )?;
+                if chunk.cardinality() > 0 {
+                    matched.set(left_row_idx, true);
+                    #[for_await]
+                    for spilled in Self::append_chunk(chunk_builder, chunk) {
+                        yield spilled?
+                    }
+                }
             }
         }
-        // Append (probed_row, None) to chunk builder if current row finished probing and do not
-        // find any match.
-        if ret.cur_row_finished && !self.probe_side_source.get_cur_row_matched() {
-            assert!(ret.chunk.is_none());
-            let mut probe_datum_refs = self
-                .probe_side_source
-                .get_current_row_ref()
-                .unwrap()
+        // Yield unmatched rows in the left table.
+        for (left_row, _) in left
+            .iter()
+            .flat_map(|chunk| chunk.rows())
+            .zip_eq(matched.finish().iter())
+            .filter(|(_, matched)| !*matched)
+        {
+            let datum_refs = left_row
                 .values()
-                .collect_vec();
-            for _ in 0..self.build_table.get_schema().fields.len() {
-                probe_datum_refs.push(None);
-            }
-            let one_row_chunk =
-                convert_datum_refs_to_chunk(&probe_datum_refs, 1, &self.schema.data_types())?;
-            return Ok(ProbeResult {
-                cur_row_finished: true,
-                chunk: Some(one_row_chunk),
-            });
-        }
-        Ok(ret)
-    }
-
-    fn do_left_semi_join(&mut self) -> Result<ProbeResult> {
-        let mut ret = self.do_inner_join()?;
-        if let Some(inner) = ret.chunk.as_ref() {
-            if inner.cardinality() > 0 {
-                self.probe_side_source.set_cur_row_matched(true);
+                .chain(repeat_n(None, right_data_types.len()));
+            if let Some(chunk) = chunk_builder.append_one_row_from_datum_refs(datum_refs)? {
+                yield chunk
             }
         }
-        ret.chunk = None;
-        // Append (probed_row, None) to chunk builder if current row finished probing and do not
-        // find any match.
-        if self.probe_side_source.get_cur_row_matched() {
-            let probe_row = self.probe_side_source.get_current_row_ref().unwrap();
-            let one_row_chunk = convert_row_to_chunk(&probe_row, 1, &self.probe_side_schema)?;
-            return Ok(ProbeResult {
-                cur_row_finished: true,
-                chunk: Some(one_row_chunk),
-            });
-        }
-        Ok(ret)
     }
 
-    fn do_left_anti_join(&mut self) -> Result<ProbeResult> {
-        let mut ret = self.do_inner_join()?;
-        if let Some(inner) = ret.chunk.as_ref() {
-            if inner.cardinality() > 0 {
-                self.probe_side_source.set_cur_row_matched(true);
+    #[try_stream(boxed, ok = DataChunk, error = RwError)]
+    async fn do_left_semi_anti_join<const ANTI_JOIN: bool>(
+        chunk_builder: &mut DataChunkBuilder,
+        left_data_types: Vec<DataType>,
+        join_expr: BoxedExpression,
+        left: Vec<DataChunk>,
+        right: BoxedExecutor,
+    ) {
+        let mut matched = BitmapBuilder::zeroed(left.iter().map(|chunk| chunk.capacity()).sum());
+        #[for_await]
+        for right_chunk in right.execute() {
+            let right_chunk = right_chunk?;
+            for (left_row_idx, left_row) in left.iter().flat_map(|chunk| chunk.rows()).enumerate() {
+                // TODO: use first-match optimization
+                let chunk = Self::concatenate_and_eval(
+                    join_expr.as_ref(),
+                    &left_data_types,
+                    left_row,
+                    &right_chunk,
+                )?;
+                if chunk.cardinality() > 0 {
+                    matched.set(left_row_idx, true)
+                }
             }
         }
-        ret.chunk = None;
-        if ret.cur_row_finished && !self.probe_side_source.get_cur_row_matched() {
-            assert!(ret.chunk.is_none());
-            let probe_row = self.probe_side_source.get_current_row_ref().unwrap();
-            let one_row_chunk = convert_row_to_chunk(&probe_row, 1, &self.probe_side_schema)?;
-            return Ok(ProbeResult {
-                cur_row_finished: true,
-                chunk: Some(one_row_chunk),
-            });
+        for (left_row, _) in left
+            .iter()
+            .flat_map(|chunk| chunk.rows())
+            .zip_eq(matched.finish().iter())
+            .filter(|(_, matched)| if ANTI_JOIN { !*matched } else { *matched })
+        {
+            if let Some(chunk) = chunk_builder.append_one_row_ref(left_row)? {
+                yield chunk
+            }
         }
-        Ok(ret)
     }
 
-    fn do_right_outer_join(&mut self) -> Result<ProbeResult> {
-        let ret = self.do_inner_join()?;
-        // Mark matched rows to prepare for probe remaining.
-        self.mark_matched_rows(&ret)?;
-        Ok(ret)
-    }
-
-    /// Scan through probe results chunk and mark matched rows in build table. Therefore in probe
-    /// remaining, scan through build table and we can know each row whether has been matched in
-    /// probing. Used by `RIGHT_SEMI/ANTI/OUTER` Join.
-    fn mark_matched_rows<'a>(&'a mut self, ret: &'a ProbeResult) -> Result<Vec<Row>> {
-        let mut rows_ref = vec![];
-        if let Some(inner_chunk) = ret.chunk.as_ref() {
-            for row_idx in 0..inner_chunk.capacity() {
-                let (row_ref, vis) = inner_chunk.row_at(row_idx)?;
-                if vis {
-                    let row_id = RowId::new(self.build_table.get_chunk_idx() - 1, row_idx);
-                    // Only write this row if it have not been marked before.
-                    if !self.build_table.is_build_matched(row_id)?
-                        && self.join_type == JoinType::RightSemi
-                    {
-                        rows_ref.push(row_ref.row_by_indices(
-                            &(self.probe_side_schema.len()..row_ref.size()).collect::<Vec<usize>>(),
-                        ));
+    #[try_stream(boxed, ok = DataChunk, error = RwError)]
+    async fn do_right_outer_join(
+        chunk_builder: &mut DataChunkBuilder,
+        left_data_types: Vec<DataType>,
+        join_expr: BoxedExpression,
+        left: Vec<DataChunk>,
+        right: BoxedExecutor,
+    ) {
+        #[for_await]
+        for right_chunk in right.execute() {
+            let right_chunk = right_chunk?;
+            // Use a bitmap to track which row of the current right chunk is matched.
+            let mut matched = BitmapBuilder::zeroed(right_chunk.capacity()).finish();
+            for left_row in left.iter().flat_map(|chunk| chunk.rows()) {
+                let chunk = Self::concatenate_and_eval(
+                    join_expr.as_ref(),
+                    &left_data_types,
+                    left_row,
+                    &right_chunk,
+                )?;
+                if chunk.cardinality() > 0 {
+                    // chunk.visibility() must be Some(_)
+                    matched = &matched | chunk.visibility().unwrap();
+                    #[for_await]
+                    for spilled in Self::append_chunk(chunk_builder, chunk) {
+                        yield spilled?
                     }
-                    self.build_table.set_build_matched(row_id)?;
-                    self.probe_side_source.set_cur_row_matched(true);
                 }
             }
-        }
-        Ok(rows_ref)
-    }
-
-    fn do_right_semi_join(&mut self) -> Result<ProbeResult> {
-        let mut ret = self.do_inner_join()?;
-        let rows = self.mark_matched_rows(&ret)?;
-        ret.chunk = None;
-        if !rows.is_empty() {
-            let ret_chunk =
-                DataChunk::from_rows(&rows, &self.build_table.get_schema().data_types())?;
-            ret.chunk = Some(ret_chunk);
-        }
-        Ok(ret)
-    }
-
-    fn do_right_anti_join(&mut self) -> Result<ProbeResult> {
-        let mut ret = self.do_inner_join()?;
-        // Mark matched rows to prepare for probe remaining.
-        self.mark_matched_rows(&ret)?;
-        ret.chunk = None;
-        Ok(ret)
-    }
-
-    fn do_probe_remaining_right_outer(&mut self) -> Result<Option<DataChunk>> {
-        while let Some(cur_row) = self.build_table.get_current_row_ref() {
-            // If the build row has not been matched by probe row before.
-            if !self
-                .build_table
-                .is_build_matched(self.build_table.get_current_row_id())?
+            for (right_row, _) in right_chunk
+                .rows()
+                .zip_eq(matched.iter())
+                .filter(|(_, matched)| !*matched)
             {
-                let datum_refs = std::iter::repeat(None)
-                    .take(self.probe_side_source.get_schema().len())
-                    .chain(cur_row.values());
-                if let Some(ret_chunk) = self
-                    .chunk_builder
-                    .append_one_row_from_datum_refs(datum_refs)?
-                {
-                    return Ok(Some(ret_chunk));
+                let datum_refs = repeat_n(None, left_data_types.len()).chain(right_row.values());
+                if let Some(chunk) = chunk_builder.append_one_row_from_datum_refs(datum_refs)? {
+                    yield chunk
                 }
             }
-            self.build_table.advance_row();
         }
-        Ok(None)
     }
 
-    fn do_probe_remaining_right_anti(&mut self) -> Result<Option<DataChunk>> {
-        while let Some(cur_row) = self.build_table.get_current_row_ref() {
-            if !self
-                .build_table
-                .is_build_matched(self.build_table.get_current_row_id())?
-            {
-                if let Some(ret_chunk) = self.chunk_builder.append_one_row_ref(cur_row)? {
-                    return Ok(Some(ret_chunk));
+    #[try_stream(boxed, ok = DataChunk, error = RwError)]
+    async fn do_right_semi_anti_join<const ANTI_JOIN: bool>(
+        chunk_builder: &mut DataChunkBuilder,
+        left_data_types: Vec<DataType>,
+        join_expr: BoxedExpression,
+        left: Vec<DataChunk>,
+        right: BoxedExecutor,
+    ) {
+        #[for_await]
+        for right_chunk in right.execute() {
+            let mut right_chunk = right_chunk?;
+            let mut matched = BitmapBuilder::zeroed(right_chunk.capacity()).finish();
+            for left_row in left.iter().flat_map(|chunk| chunk.rows()) {
+                let chunk = Self::concatenate_and_eval(
+                    join_expr.as_ref(),
+                    &left_data_types,
+                    left_row,
+                    &right_chunk,
+                )?;
+                if chunk.cardinality() > 0 {
+                    // chunk.visibility() must be Some(_)
+                    matched = &matched | chunk.visibility().unwrap();
                 }
             }
-            self.build_table.advance_row();
+            if ANTI_JOIN {
+                matched = !&matched;
+            }
+            right_chunk.set_visibility(matched);
+            if right_chunk.cardinality() > 0 {
+                #[for_await]
+                for spilled in Self::append_chunk(chunk_builder, right_chunk) {
+                    yield spilled?
+                }
+            }
         }
-        Ok(None)
     }
 }
 #[cfg(test)]
@@ -525,12 +428,11 @@ mod tests {
     use risingwave_common::array::*;
     use risingwave_common::catalog::{Field, Schema};
     use risingwave_common::types::DataType;
-    use risingwave_common::util::chunk_coalesce::DataChunkBuilder;
     use risingwave_expr::expr::expr_binary_nonnull::new_binary_expr;
     use risingwave_expr::expr::InputRefExpression;
     use risingwave_pb::expr::expr_node::Type;
 
-    use crate::executor::join::nested_loop_join::{NestedLoopJoinExecutor, RowLevelIter};
+    use crate::executor::join::nested_loop_join::NestedLoopJoinExecutor;
     use crate::executor::join::JoinType;
     use crate::executor::test_utils::{diff_executor_output, MockExecutor};
     use crate::executor::BoxedExecutor;
@@ -635,43 +537,25 @@ mod tests {
             let left_child = self.create_left_executor();
             let right_child = self.create_right_executor();
 
-            // TODO(Bowen): Merge this with derive schema in Logical Join.
-            let fields = match self.join_type {
-                JoinType::LeftSemi => left_child.schema().fields.clone(),
-                JoinType::LeftAnti => left_child.schema().fields.clone(),
-                JoinType::RightSemi => right_child.schema().fields.clone(),
-                JoinType::RightAnti => right_child.schema().fields.clone(),
-                _ => left_child
-                    .schema()
-                    .fields
-                    .iter()
-                    .chain(right_child.schema().fields.iter())
-                    .cloned()
-                    .collect(),
+            let output_indices = match self.join_type {
+                JoinType::LeftSemi | JoinType::LeftAnti => vec![0, 1],
+                JoinType::RightSemi | JoinType::RightAnti => vec![0, 1],
+                _ => vec![0, 1, 2, 3],
             };
-            let schema = Schema { fields };
 
-            let probe_side_schema = left_child.schema().data_types();
-
-            Box::new(NestedLoopJoinExecutor {
-                join_expr: new_binary_expr(
+            Box::new(NestedLoopJoinExecutor::new(
+                new_binary_expr(
                     Type::Equal,
                     DataType::Boolean,
                     Box::new(InputRefExpression::new(DataType::Int32, 0)),
                     Box::new(InputRefExpression::new(DataType::Int32, 2)),
                 ),
                 join_type,
-                schema: schema.clone(),
-                chunk_builder: DataChunkBuilder::with_default_size(schema.data_types()),
-                last_chunk: None,
-                probe_side_schema,
-                probe_side_source: RowLevelIter::new(left_child),
-                build_table: RowLevelIter::new(right_child),
-                probe_remain_chunk_idx: 0,
-                probe_remain_row_idx: 0,
-                identity: "NestedLoopJoinExecutor2".to_string(),
-                output_indices: (0..schema.len()).into_iter().collect(),
-            })
+                output_indices,
+                left_child,
+                right_child,
+                "NestedLoopJoinExecutor".into(),
+            ))
         }
 
         async fn do_test(&self, expected: DataChunk) {
@@ -707,14 +591,14 @@ mod tests {
 
         let expected_chunk = DataChunk::from_pretty(
             "i f   i F
-             1 6.1 . .
              2 8.4 2 6.1
              3 3.9 3 8.9
              3 6.6 3 8.9
-             4 0.7 . .
              6 5.5 6 3.4
              6 5.6 6 3.4
-             8 7.0 8 3.5",
+             8 7.0 8 3.5
+             1 6.1 . .
+             4 0.7 . .",
         );
 
         test_fixture.do_test(expected_chunk).await;
@@ -745,6 +629,31 @@ mod tests {
             "i f
              1 6.1
              4 0.7",
+        );
+
+        test_fixture.do_test(expected_chunk).await;
+    }
+
+    #[tokio::test]
+    async fn test_right_outer_join() {
+        let test_fixture = TestFixture::with_join_type(JoinType::RightOuter);
+
+        let expected_chunk = DataChunk::from_pretty(
+            "i f   i F
+             2 8.4 2 6.1
+             3 3.9 3 8.9
+             3 6.6 3 8.9
+             6 5.5 6 3.4
+             6 5.6 6 3.4
+             8 7.0 8 3.5
+             . .   9 7.5
+             . .   10 .
+             . .   11 8
+             . .   12 .
+             . .   20 5.7
+             . .   30 9.6
+             . .   100 .
+             . .   200 8.18",
         );
 
         test_fixture.do_test(expected_chunk).await;
