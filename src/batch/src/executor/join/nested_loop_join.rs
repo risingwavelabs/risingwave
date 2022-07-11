@@ -320,7 +320,9 @@ impl NestedLoopJoinExecutor {
         for right_chunk in right.execute() {
             let right_chunk = right_chunk?;
             for (left_row_idx, left_row) in left.iter().flat_map(|chunk| chunk.rows()).enumerate() {
-                // TODO: use first-match optimization
+                if matched.is_set(left_row_idx) {
+                    continue;
+                }
                 let chunk = Self::concatenate_and_eval(
                     join_expr.as_ref(),
                     &left_data_types,
