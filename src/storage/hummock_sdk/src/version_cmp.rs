@@ -26,10 +26,11 @@ impl VersionedComparator {
     pub fn compare_key(lhs: &[u8], rhs: &[u8]) -> cmp::Ordering {
         let (l_p, l_s) = split_key_epoch(lhs);
         let (r_p, r_s) = split_key_epoch(rhs);
-        ret = l_p.cmp(r_p).then_with(|| l_s.cmp(r_s));
+        let ret = l_p.cmp(r_p).then_with(|| l_s.cmp(r_s));
         if ret == cmp::Ordering::Equal {
-            println!("ORDERING EQ: {:?}, EPOCH: {:?}", l_p, u64::MAX - u64::from_be(l_s));
+            println!("ORDERING EQ: {:?}, EPOCH: {:?}", l_p, get_epoch(l_s));
         }
+        ret
     }
 
     #[inline]
