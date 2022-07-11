@@ -78,17 +78,9 @@ impl<'a, R: Rng> SqlGenerator<'a, R> {
         (table_factor, columns)
     }
 
-    fn gen_nested_join_factor(&mut self) -> (TableFactor, Vec<Column>) {
-        let (relation, columns) = self.gen_from_relation_with_cols();
-        (TableFactor::NestedJoin(Box::new(relation)), columns)
-    }
-
     fn gen_table_factor(&mut self) -> (TableFactor, Vec<Column>) {
-        match self.rng.gen_range(0..3) {
-            0 => self.gen_simple_table_factor(),
-            // TODO: TableFactor::Derived, TableFactor::TableFunction
-            _ => self.gen_nested_join_factor(),
-        }
+        // TODO: TableFactor::Derived, TableFactor::TableFunction, TableFactor::NestedJoin
+        self.gen_simple_table_factor()
     }
 
     fn gen_equijoin_expr(&mut self) -> (TableWithJoins, Vec<Column>) {
