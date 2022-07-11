@@ -141,7 +141,7 @@ macro_rules! read_lock {
         async {
             $hummock_mgr
                 .$lock_name
-                .read(&[function_name!(), stringify!($lock_name)])
+                .read(&[function_name!(), stringify!($lock_name), "read"])
                 .await
         }
     };
@@ -156,7 +156,7 @@ macro_rules! write_lock {
         async {
             $hummock_mgr
                 .$lock_name
-                .write(&[function_name!(), stringify!($lock_name)])
+                .write(&[function_name!(), stringify!($lock_name), "write"])
                 .await
         }
     };
