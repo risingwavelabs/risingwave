@@ -27,7 +27,7 @@ use risingwave_expr::expr::BoxedExpression;
 use risingwave_storage::table::state_table::StateTable;
 use risingwave_storage::StateStore;
 
-use self::JoinType::{LeftSemi, LeftAnti, RightAnti, RightSemi};
+use self::JoinType::{LeftAnti, LeftSemi, RightAnti, RightSemi};
 use super::barrier_align::*;
 use super::error::{StreamExecutorError, StreamExecutorResult};
 use super::managed_state::join::*;
