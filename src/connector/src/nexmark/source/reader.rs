@@ -121,18 +121,18 @@ mod tests {
     use anyhow::Result;
 
     use super::*;
-    use crate::nexmark::NexmarkSplitEnumerator;
+    use crate::nexmark::{NexmarkPropertiesInner, NexmarkSplitEnumerator};
     use crate::{SplitEnumerator, SplitImpl};
 
     #[tokio::test]
     async fn test_nexmark_split_reader() -> Result<()> {
-        let props = NexmarkProperties {
+        let props = Box::new(NexmarkPropertiesInner {
             split_num: 2,
             min_event_gap_in_ns: 0,
             table_type: "Bid".to_string(),
             max_chunk_size: 5,
             ..Default::default()
-        };
+        });
 
         let mut enumerator = NexmarkSplitEnumerator::new(props.clone()).await?;
         let list_splits_resp = enumerator

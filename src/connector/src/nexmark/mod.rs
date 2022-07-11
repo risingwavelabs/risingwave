@@ -40,9 +40,11 @@ const fn none<T>() -> Option<T> {
     None
 }
 
+pub type NexmarkProperties = Box<NexmarkPropertiesInner>;
+
 #[serde_as]
 #[derive(Clone, Debug, Deserialize)]
-pub struct NexmarkProperties {
+pub struct NexmarkPropertiesInner {
     #[serde_as(as = "DisplayFromStr")]
     #[serde(rename = "nexmark.split.num", default = "identity_i32::<1>")]
     pub split_num: i32,
@@ -204,9 +206,9 @@ fn default_event_num() -> i64 {
     -1
 }
 
-impl Default for NexmarkProperties {
+impl Default for NexmarkPropertiesInner {
     fn default() -> Self {
         let v = serde_json::to_value(HashMap::<String, String>::new()).unwrap();
-        NexmarkProperties::deserialize(v).unwrap()
+        NexmarkPropertiesInner::deserialize(v).unwrap()
     }
 }
