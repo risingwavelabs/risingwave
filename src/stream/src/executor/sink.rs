@@ -58,6 +58,12 @@ impl<S: StateStore> SinkExecutor<S> {
         let sink_config = SinkConfig::from_hashmap(self.properties.clone())
             .map_err(StreamExecutorError::sink_error)?;
         let _sink = build_sink(sink_config).await;
+
+        // TODO(tabVersion): the flag is required because kafka transaction requires at least one
+        // message, so we should abort the transaction if the flag is true.
+        #[allow(clippy::no_effect_underscore_binding)]
+        let _empty_epoch_flag = true;
+
         let input = self.input.execute();
         #[for_await]
         for msg in input {
