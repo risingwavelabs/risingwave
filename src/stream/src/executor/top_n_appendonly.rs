@@ -24,7 +24,7 @@ use super::managed_state::top_n::variants::TOP_N_MAX;
 use super::managed_state::top_n::ManagedTopNState;
 use super::top_n_executor::{generate_output, TopNExecutorBase, TopNExecutorWrapper};
 use super::{Executor, ExecutorInfo, PkIndices, PkIndicesRef};
-use crate::executor::top_n::generate_internal_key;
+use crate::executor::top_n_new::generate_internal_key;
 
 /// If the input contains only append, `AppendOnlyTopNExecutor` does not need
 /// to keep all the data records/rows that have been seen. As long as a record
