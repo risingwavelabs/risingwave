@@ -19,7 +19,7 @@ use anyhow::anyhow;
 use futures::StreamExt;
 use futures_async_stream::try_stream;
 use itertools::Itertools;
-use risingwave_common::array::{Array, ArrayImpl, DataChunk, Op, Row, StreamChunk};
+use risingwave_common::array::{Array, ArrayImpl, DataChunk, Op, StreamChunk};
 use risingwave_common::buffer::{Bitmap, BitmapBuilder};
 use risingwave_common::catalog::Schema;
 use risingwave_common::types::{DataType, Datum, ScalarImpl, ToOwnedDatum};
@@ -238,8 +238,8 @@ impl<S: StateStore> DynamicFilterExecutor<S> {
             })
         };
 
-        let mut prev_epoch_row: Option<Row> = None;
-        let mut current_epoch_row: Option<Row> = None;
+        let mut prev_epoch_value: Option<Datum> = None;
+        let mut current_epoch_value: Option<Datum> = None;
         let mut epoch: u64 = 0;
 
         let aligned_stream = barrier_align(
@@ -261,7 +261,7 @@ impl<S: StateStore> DynamicFilterExecutor<S> {
                     let chunk = chunk.compact()?; // Is this unnecessary work?
                     let (data_chunk, ops) = chunk.into_parts();
 
-                    let right_val = prev_epoch_row.as_ref().and_then(|row| row.0[0].clone());
+                    let right_val = prev_epoch_value.clone().flatten();
 
                     // The condition is `None` if it is always false by virtue of a NULL right
                     // input, so we save evaluating it on the datachunk
@@ -287,9 +287,13 @@ impl<S: StateStore> DynamicFilterExecutor<S> {
                         match *op {
                             Op::UpdateInsert | Op::Insert => {
                                 last_is_insert = true;
-                                current_epoch_row = Some(row.to_owned_row());
+                                current_epoch_value = Some(row.value_at(0).to_owned_datum());
+                                self.right_table.insert(row.to_owned_row())?;
                             }
-                            _ => last_is_insert = false,
+                            Op::UpdateDelete | Op::Delete => {
+                                last_is_insert = false;
+                                self.right_table.delete(row.to_owned_row())?;
+                            }
                         }
                     }
 
@@ -301,8 +305,8 @@ impl<S: StateStore> DynamicFilterExecutor<S> {
                 }
                 AlignedMessage::Barrier(barrier) => {
                     // Flush the difference between the `prev_value` and `current_value`
-                    let curr: Datum = current_epoch_row.as_ref().and_then(|row| row.0[0].clone());
-                    let prev: Datum = prev_epoch_row.as_ref().and_then(|row| row.0[0].clone());
+                    let curr: Datum = current_epoch_value.clone().flatten();
+                    let prev: Datum = prev_epoch_value.flatten();
                     if prev != curr {
                         let (range, latest_is_lower, is_insert) = self.get_range(&curr, prev);
                         for (_, rows) in self.range_cache.range(range, latest_is_lower) {
@@ -326,17 +330,6 @@ impl<S: StateStore> DynamicFilterExecutor<S> {
                             yield Message::Chunk(chunk);
                         }
                     }
-                    if let Some(row) = &current_epoch_row {
-                        if let Some(prev_row) = &prev_epoch_row {
-                            // perform an update
-                            if prev_row != row {
-                                self.right_table.update(prev_row.clone(), row.clone())?;
-                            }
-                        } else {
-                            self.right_table.insert(row.clone())?;
-                        }
-                    }
-                    // Do we need to commit even if we did not perform any updates?
                     self.right_table.commit(epoch).await?;
 
                     self.range_cache.flush().await?;
@@ -346,7 +339,7 @@ impl<S: StateStore> DynamicFilterExecutor<S> {
                     epoch = barrier.epoch.curr;
                     self.range_cache.update_epoch(barrier.epoch.curr);
 
-                    prev_epoch_row = current_epoch_row.clone();
+                    prev_epoch_value = current_epoch_value.clone();
 
                     yield Message::Barrier(barrier);
                 }
