@@ -35,9 +35,6 @@ use crate::sink::redis::{RedisConfig, RedisSink};
 pub trait Sink {
     async fn write_batch(&mut self, chunk: StreamChunk, schema: &Schema) -> Result<()>;
 
-    // write execution status to state store
-    async fn take_snapshot(&self) -> Result<SinkState>;
-
     // the following interface is for transactions, if not supported, return Ok(())
     // start a transaction with epoch number. Note that epoch number should be increasing.
     async fn begin_epoch(&mut self, epoch: u64) -> Result<()>;

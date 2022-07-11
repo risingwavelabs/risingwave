@@ -46,8 +46,4 @@ impl Sink for RedisSink {
     async fn abort(&mut self) -> Result<()> {
         todo!()
     }
-
-    async fn take_snapshot(&self) -> Result<SinkState> {
-        todo!()
-    }
 }

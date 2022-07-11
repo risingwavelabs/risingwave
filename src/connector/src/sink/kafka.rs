@@ -241,10 +241,6 @@ impl Sink for KafkaSink {
             .await
             .map_err(SinkError::Kafka)
     }
-
-    async fn take_snapshot(&self) -> Result<SinkState> {
-        todo!()
-    }
 }
 
 fn datum_to_json_object(field: &Field, datum: DatumRef) -> ArrayResult<Value> {

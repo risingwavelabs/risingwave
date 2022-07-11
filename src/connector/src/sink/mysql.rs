@@ -190,10 +190,6 @@ impl Sink for MySQLSink {
     async fn abort(&mut self) -> Result<()> {
         todo!()
     }
-
-    async fn take_snapshot(&self) -> Result<SinkState> {
-        todo!()
-    }
 }
 
 #[cfg(test)]
