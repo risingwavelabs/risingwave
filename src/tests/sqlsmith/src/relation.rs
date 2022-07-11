@@ -114,7 +114,7 @@ impl<'a, R: Rng> SqlGenerator<'a, R> {
 
         let right_factor_with_join = Join {
             relation: right_factor,
-            join_operator: JoinOperator::FullOuter(JoinConstraint::On(join_on_expr)),
+            join_operator: JoinOperator::Inner(JoinConstraint::On(join_on_expr)),
         };
         let table = TableWithJoins {
             relation: left_factor,
