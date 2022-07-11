@@ -34,7 +34,7 @@ impl ExecutorBuilder for SourceExecutorBuilder {
             .lock_barrier_manager()
             .register_sender(params.actor_id, sender);
 
-        let source_id = TableId::from(&node.table_ref_id);
+        let source_id = TableId::new(node.table_id);
         let source_desc = params.env.source_manager().get_source(&source_id)?;
 
         let column_ids: Vec<_> = node

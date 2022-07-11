@@ -4784,6 +4784,7 @@ name = "risingwave_test_runner"
 version = "0.1.10"
 dependencies = [
  "fail",
+ "workspace-hack",
 ]
 
 [[package]]
@@ -6238,7 +6239,6 @@ dependencies = [
  "futures-sink",
  "futures-task",
  "futures-util",
- "hashbrown 0.11.2",
  "hyper",
  "indexmap",
  "isahc",

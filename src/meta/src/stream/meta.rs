@@ -76,6 +76,7 @@ where
             .map(|tf| (tf.table_id(), tf))
             .collect();
 
+        // Extract vnode mapping info from listed `table_fragments` to hash mapping manager.
         Self::restore_vnode_mappings(env.hash_mapping_manager_ref(), &table_fragments)?;
 
         Ok(Self {
