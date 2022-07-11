@@ -88,7 +88,7 @@ impl ToStreamProst for StreamDynamicFilter {
                 .as_expr_unless_true()
                 .map(|x| x.to_expr_proto()),
             left_table: Some(
-                infer_internal_table_catalog(self.clone().into(), self.left_index).to_prost(
+                infer_internal_table_catalog(self.clone().into()).to_prost(
                     SchemaId::placeholder() as u32,
                     DatabaseId::placeholder() as u32,
                 ),
@@ -97,7 +97,7 @@ impl ToStreamProst for StreamDynamicFilter {
     }
 }
 
-fn infer_internal_table_catalog(input: PlanRef, left_key_index: usize) -> TableCatalog {
+fn infer_internal_table_catalog(input: PlanRef) -> TableCatalog {
     let base = input.plan_base();
     let schema = &base.schema;
 
