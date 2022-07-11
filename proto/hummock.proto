@@ -85,7 +85,9 @@ message PinVersionRequest {
 
 message PinVersionResponse {
   common.Status status = 1;
-  HummockVersion pinned_version = 2;
+  bool is_delta_response = 2;
+  repeated HummockVersionDelta version_deltas = 3;
+  HummockVersion pinned_version = 4;
 }
 
 message UnpinVersionRequest {

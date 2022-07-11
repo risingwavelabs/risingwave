@@ -15,6 +15,7 @@
 use std::borrow::BorrowMut;
 use std::collections::{BTreeMap, HashSet, VecDeque};
 use std::future::Future;
+use std::ops::Bound::{Excluded, Included};
 use std::ops::DerefMut;
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::Arc;
@@ -279,37 +280,9 @@ where
             .hummock_versions
             .insert(redo_state.id, redo_state.clone());
 
-        for (id, version_delta) in &hummock_version_deltas {
+        for version_delta in hummock_version_deltas.values() {
             if version_delta.prev_id == redo_state.id {
-                for (compaction_group_id, level_deltas) in &version_delta.level_deltas {
-                    let mut delete_sst_levels = Vec::with_capacity(level_deltas.level_deltas.len());
-                    let mut delete_sst_ids_set = HashSet::new();
-                    let mut insert_sst_level = u32::MAX;
-                    let mut insert_table_infos = vec![];
-                    for level_delta in &level_deltas.level_deltas {
-                        if !level_delta.removed_table_ids.is_empty() {
-                            delete_sst_levels.push(level_delta.level_idx);
-                            delete_sst_ids_set.extend(level_delta.removed_table_ids.iter().clone());
-                        }
-                        if !level_delta.inserted_table_infos.is_empty() {
-                            insert_sst_level = level_delta.level_idx;
-                            insert_table_infos
-                                .extend(level_delta.inserted_table_infos.iter().cloned());
-                        }
-                    }
-                    let operand = &mut redo_state
-                        .get_compaction_group_levels_mut(*compaction_group_id as CompactionGroupId);
-                    HummockVersion::apply_compact_ssts(
-                        operand,
-                        &delete_sst_levels,
-                        &delete_sst_ids_set,
-                        insert_sst_level,
-                        insert_table_infos,
-                    );
-                }
-                redo_state.id = *id;
-                redo_state.max_committed_epoch = version_delta.max_committed_epoch;
-                redo_state.safe_epoch = version_delta.safe_epoch;
+                redo_state.apply_version_delta(version_delta);
 
                 versioning_guard
                     .hummock_versions
@@ -395,7 +368,7 @@ where
         &self,
         context_id: HummockContextId,
         last_pinned: HummockVersionId,
-    ) -> Result<HummockVersion> {
+    ) -> Result<(bool, Vec<HummockVersionDelta>, HummockVersion)> {
         let mut versioning_guard = self.versioning.write().await;
         let versioning = versioning_guard.deref_mut();
         let mut pinned_versions = VarTransaction::new(&mut versioning.pinned_versions);
@@ -410,7 +383,7 @@ where
         );
 
         let mut already_pinned = false;
-        let version_id = {
+        let (version_id, is_delta, ret_deltas) = {
             let partition_point = context_pinned_version
                 .version_id
                 .iter()
@@ -418,11 +391,24 @@ where
                 .cloned()
                 .collect_vec()
                 .partition_point(|p| *p <= last_pinned);
-            if partition_point < context_pinned_version.version_id.len() {
+            let new_pinned = if partition_point < context_pinned_version.version_id.len() {
                 already_pinned = true;
                 context_pinned_version.version_id[partition_point]
             } else {
                 current_version_id.id()
+            };
+            if partition_point > 0 {
+                (
+                    new_pinned,
+                    true,
+                    versioning
+                        .hummock_version_deltas
+                        .range((Excluded(last_pinned), Included(new_pinned)))
+                        .map(|(_, delta)| delta.clone())
+                        .collect_vec(),
+                )
+            } else {
+                (new_pinned, false, vec![])
             }
         };
 
@@ -431,7 +417,11 @@ where
             commit_multi_var!(self, Some(context_id), context_pinned_version)?;
         }
 
-        let ret = Ok(hummock_versions.get(&version_id).unwrap().clone());
+        let ret = Ok((
+            is_delta,
+            ret_deltas,
+            hummock_versions.get(&version_id).unwrap().clone(),
+        ));
 
         #[cfg(test)]
         {

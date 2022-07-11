@@ -61,7 +61,8 @@ async fn test_hummock_pin_unpin() {
         let hummock_version = hummock_manager
             .pin_version(context_id, u64::MAX)
             .await
-            .unwrap();
+            .unwrap()
+            .2;
         let levels = hummock_version
             .get_compaction_group_levels(StaticCompactionGroupId::StateDefault.into());
         assert_eq!(version_id, hummock_version.id);
@@ -297,7 +298,8 @@ async fn test_hummock_table() {
     let pinned_version = hummock_manager
         .pin_version(context_id, u64::MAX)
         .await
-        .unwrap();
+        .unwrap()
+        .2;
     assert_eq!(
         Ordering::Equal,
         pinned_version
@@ -339,7 +341,8 @@ async fn test_hummock_transaction() {
         let pinned_version = hummock_manager
             .pin_version(context_id, u64::MAX)
             .await
-            .unwrap();
+            .unwrap()
+            .2;
         assert_eq!(pinned_version.max_committed_epoch, INVALID_EPOCH);
         assert!(get_sorted_committed_sstable_ids(&pinned_version).is_empty());
 
@@ -359,7 +362,8 @@ async fn test_hummock_transaction() {
         let pinned_version = hummock_manager
             .pin_version(context_id, u64::MAX)
             .await
-            .unwrap();
+            .unwrap()
+            .2;
         assert_eq!(pinned_version.max_committed_epoch, epoch1);
         assert_eq!(
             get_sorted_sstable_ids(&committed_tables),
@@ -390,7 +394,8 @@ async fn test_hummock_transaction() {
         let pinned_version = hummock_manager
             .pin_version(context_id, u64::MAX)
             .await
-            .unwrap();
+            .unwrap()
+            .2;
         assert_eq!(pinned_version.max_committed_epoch, epoch1);
         assert_eq!(
             get_sorted_sstable_ids(&committed_tables),
@@ -413,7 +418,8 @@ async fn test_hummock_transaction() {
         let pinned_version = hummock_manager
             .pin_version(context_id, u64::MAX)
             .await
-            .unwrap();
+            .unwrap()
+            .2;
         assert_eq!(pinned_version.max_committed_epoch, epoch2);
         assert_eq!(
             get_sorted_sstable_ids(&committed_tables),
@@ -580,7 +586,8 @@ async fn test_hummock_manager_basic() {
         let version = hummock_manager
             .pin_version(context_id_1, u64::MAX)
             .await
-            .unwrap();
+            .unwrap()
+            .2;
         assert_eq!(version.id, FIRST_VERSION_ID + 1);
         assert_eq!(
             hummock_manager
@@ -595,7 +602,8 @@ async fn test_hummock_manager_basic() {
         let version = hummock_manager
             .pin_version(context_id_2, u64::MAX)
             .await
-            .unwrap();
+            .unwrap()
+            .2;
         assert_eq!(version.id, FIRST_VERSION_ID + 1);
         assert_eq!(
             hummock_manager
@@ -640,7 +648,8 @@ async fn test_retryable_pin_version() {
     let version = hummock_manager
         .pin_version(context_id, INVALID_VERSION_ID)
         .await
-        .unwrap();
+        .unwrap()
+        .2;
     assert_eq!(version.id, FIRST_VERSION_ID);
 
     let mut epoch: u64 = 1;
@@ -672,7 +681,8 @@ async fn test_retryable_pin_version() {
     let version_retry = hummock_manager
         .pin_version(context_id, INVALID_VERSION_ID)
         .await
-        .unwrap();
+        .unwrap()
+        .2;
     assert_eq!(version_retry.id, version.id);
 
     // Use correct last_pin to pin newer version.
@@ -680,7 +690,8 @@ async fn test_retryable_pin_version() {
     let version_2 = hummock_manager
         .pin_version(context_id, version.id)
         .await
-        .unwrap();
+        .unwrap()
+        .2;
     assert_eq!(version_2.id, version.id + 2);
 
     // [ v0:pinned, v1, v2:pinned ] -> [ v0:pinned, v1, v2:pinned, v3, v4 ]
@@ -711,7 +722,8 @@ async fn test_retryable_pin_version() {
     let version_2_retry = hummock_manager
         .pin_version(context_id, version.id)
         .await
-        .unwrap();
+        .unwrap()
+        .2;
     assert_eq!(version_2_retry.id, version_2.id);
 
     // Use None as last_pin to pin greatest version
@@ -719,7 +731,8 @@ async fn test_retryable_pin_version() {
     let version_3 = hummock_manager
         .pin_version(context_id, u64::MAX)
         .await
-        .unwrap();
+        .unwrap()
+        .2;
     assert_eq!(version_3.id, version.id + 4);
 }
 

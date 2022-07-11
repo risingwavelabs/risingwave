@@ -163,7 +163,6 @@ impl PinnedVersion {
         self.version.safe_epoch
     }
 
-    #[cfg(test)]
     pub fn version(&self) -> HummockVersion {
         self.version.clone()
     }

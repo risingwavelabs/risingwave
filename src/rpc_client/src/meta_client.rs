@@ -345,13 +345,20 @@ impl MetaClient {
 
 #[async_trait]
 impl HummockMetaClient for MetaClient {
-    async fn pin_version(&self, last_pinned: HummockVersionId) -> Result<HummockVersion> {
+    async fn pin_version(
+        &self,
+        last_pinned: HummockVersionId,
+    ) -> Result<(bool, Vec<HummockVersionDelta>, HummockVersion)> {
         let req = PinVersionRequest {
             context_id: self.worker_id(),
             last_pinned,
         };
         let resp = self.inner.pin_version(req).await?;
-        Ok(resp.pinned_version.unwrap())
+        Ok((
+            resp.is_delta_response,
+            resp.version_deltas,
+            resp.pinned_version.unwrap(),
+        ))
     }
 
     async fn unpin_version(&self, pinned_version_ids: &[HummockVersionId]) -> Result<()> {

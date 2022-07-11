@@ -19,7 +19,7 @@ use crate::common::MetaServiceOpts;
 pub async fn list_version() -> anyhow::Result<()> {
     let meta_opts = MetaServiceOpts::from_env()?;
     let meta_client = meta_opts.create_meta_client().await?;
-    let version = meta_client.pin_version(u64::MAX).await?;
+    let version = meta_client.pin_version(u64::MAX).await?.2;
     println!("{:#?}", version);
     meta_client.unpin_version(&[version.id]).await?;
     Ok(())

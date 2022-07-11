@@ -270,7 +270,8 @@ mod tests {
         let pinned_version = hummock_manager
             .pin_version(context_id, u64::MAX)
             .await
-            .unwrap();
+            .unwrap()
+            .2;
 
         // Vacuum no version because the smallest v0 is pinned.
         assert_eq!(

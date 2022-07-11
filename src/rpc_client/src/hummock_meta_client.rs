@@ -15,8 +15,8 @@
 use async_trait::async_trait;
 use risingwave_hummock_sdk::{HummockEpoch, HummockSSTableId, HummockVersionId, LocalSstableInfo};
 use risingwave_pb::hummock::{
-    CompactTask, CompactionGroup, HummockVersion, SstableIdInfo, SubscribeCompactTasksResponse,
-    VacuumTask,
+    CompactTask, CompactionGroup, HummockVersion, HummockVersionDelta, SstableIdInfo,
+    SubscribeCompactTasksResponse, VacuumTask,
 };
 use tonic::Streaming;
 
@@ -24,7 +24,10 @@ use crate::error::Result;
 
 #[async_trait]
 pub trait HummockMetaClient: Send + Sync + 'static {
-    async fn pin_version(&self, last_pinned: HummockVersionId) -> Result<HummockVersion>;
+    async fn pin_version(
+        &self,
+        last_pinned: HummockVersionId,
+    ) -> Result<(bool, Vec<HummockVersionDelta>, HummockVersion)>;
     async fn unpin_version(&self, pinned_version_ids: &[HummockVersionId]) -> Result<()>;
     async fn pin_snapshot(&self) -> Result<HummockEpoch>;
     async fn unpin_snapshot(&self) -> Result<()>;

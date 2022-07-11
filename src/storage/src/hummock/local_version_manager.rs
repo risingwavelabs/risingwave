@@ -23,9 +23,10 @@ use futures::future::{join_all, try_join_all};
 use itertools::Itertools;
 use parking_lot::{RwLock, RwLockUpgradableReadGuard, RwLockWriteGuard};
 use risingwave_common::config::StorageConfig;
+use risingwave_hummock_sdk::compaction_group::hummock_version_ext::HummockVersionExt;
 use risingwave_hummock_sdk::key::FullKey;
 use risingwave_hummock_sdk::{CompactionGroupId, LocalSstableInfo};
-use risingwave_pb::hummock::HummockVersion;
+use risingwave_pb::hummock::{HummockVersion, HummockVersionDelta};
 use risingwave_rpc_client::HummockMetaClient;
 use tokio::sync::mpsc::error::TryRecvError;
 use tokio::sync::mpsc::UnboundedReceiver;
@@ -160,7 +161,8 @@ impl LocalVersionManager {
         )
         .await
         .expect("should be `Some` since `break_condition` is always false")
-        .expect("should be able to pinned the first version");
+        .expect("should be able to pinned the first version")
+        .2;
 
         let (buffer_event_sender, buffer_event_receiver) = mpsc::unbounded_channel();
 
@@ -212,7 +214,26 @@ impl LocalVersionManager {
     /// Updates cached version if the new version is of greater id.
     /// You shouldn't unpin even the method returns false, as it is possible `hummock_version` is
     /// being referenced by some readers.
-    pub fn try_update_pinned_version(&self, newly_pinned_version: HummockVersion) -> bool {
+    pub fn try_update_pinned_version(
+        &self,
+        last_pinned: Option<u64>,
+        pin_resp: (bool, Vec<HummockVersionDelta>, HummockVersion),
+    ) -> bool {
+        let old_version = self.local_version.upgradable_read();
+        if let Some(last_pinned_id) = last_pinned {
+            if old_version.pinned_version().id() != last_pinned_id {
+                return false;
+            }
+        }
+        let newly_pinned_version = if pin_resp.0 {
+            let mut version_to_apply = old_version.pinned_version().version();
+            for version_delta in pin_resp.1 {
+                version_to_apply.apply_version_delta(&version_delta);
+            }
+            version_to_apply
+        } else {
+            pin_resp.2
+        };
         let new_version_id = newly_pinned_version.id;
         for levels in newly_pinned_version.levels.values() {
             if validate_table_key_range(&levels.levels).is_err() {
@@ -220,8 +241,6 @@ impl LocalVersionManager {
                 return false;
             }
         }
-
-        let old_version = self.local_version.upgradable_read();
         if old_version.pinned_version().id() >= new_version_id {
             return false;
         }
@@ -513,7 +532,7 @@ impl LocalVersionManager {
         last_pinned: HummockVersionId,
         max_retry: usize,
         break_condition: impl Fn() -> bool,
-    ) -> Option<HummockResult<HummockVersion>> {
+    ) -> Option<HummockResult<(bool, Vec<HummockVersionDelta>, HummockVersion)>> {
         let max_retry_interval = Duration::from_secs(10);
         let mut retry_backoff = tokio_retry::strategy::ExponentialBackoff::from_millis(10)
             .max_delay(max_retry_interval)
@@ -584,7 +603,8 @@ impl LocalVersionManager {
             .await
             {
                 Some(Ok(pinned_version)) => {
-                    local_version_manager.try_update_pinned_version(pinned_version);
+                    local_version_manager
+                        .try_update_pinned_version(Some(last_pinned), pinned_version);
                 }
                 Some(Err(_)) => {
                     unreachable!(
@@ -813,7 +833,7 @@ impl LocalVersionManager {
     pub async fn refresh_version(&self, hummock_meta_client: &dyn HummockMetaClient) -> bool {
         let last_pinned = self.get_pinned_version().id();
         let version = hummock_meta_client.pin_version(last_pinned).await.unwrap();
-        self.try_update_pinned_version(version)
+        self.try_update_pinned_version(Some(last_pinned), version)
     }
 
     pub fn get_local_version(&self) -> LocalVersion {
@@ -911,7 +931,7 @@ mod tests {
             max_committed_epoch: epochs[0],
             ..Default::default()
         };
-        local_version_manager.try_update_pinned_version(version);
+        local_version_manager.try_update_pinned_version(None, (false, vec![], version));
         let local_version = local_version_manager.get_local_version();
         assert!(local_version.get_shared_buffer(epochs[0]).is_none());
         assert_eq!(
@@ -934,7 +954,7 @@ mod tests {
             max_committed_epoch: epochs[1],
             ..Default::default()
         };
-        local_version_manager.try_update_pinned_version(version);
+        local_version_manager.try_update_pinned_version(None, (false, vec![], version));
         let local_version = local_version_manager.get_local_version();
         assert!(local_version.get_shared_buffer(epochs[0]).is_none());
         assert!(local_version.get_shared_buffer(epochs[1]).is_none());
@@ -1104,7 +1124,9 @@ mod tests {
             max_committed_epoch: epochs[0],
             ..Default::default()
         };
-        assert!(local_version_manager.try_update_pinned_version(version.clone()));
+        assert!(
+            local_version_manager.try_update_pinned_version(None, (false, vec![], version.clone()))
+        );
         let local_version = local_version_manager.get_local_version();
         // Check shared buffer
         assert!(local_version.get_shared_buffer(epochs[0]).is_none());
@@ -1137,7 +1159,7 @@ mod tests {
             max_committed_epoch: epochs[1],
             ..Default::default()
         };
-        local_version_manager.try_update_pinned_version(version.clone());
+        local_version_manager.try_update_pinned_version(None, (false, vec![], version.clone()));
         let local_version = local_version_manager.get_local_version();
         assert!(local_version.get_shared_buffer(epochs[0]).is_none());
         assert!(local_version.get_shared_buffer(epochs[1]).is_none());
