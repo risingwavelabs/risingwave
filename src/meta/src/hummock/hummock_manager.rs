@@ -19,8 +19,10 @@ use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 
+use function_name::named;
 use itertools::Itertools;
 use prost::Message;
+use risingwave_common::monitor::rwlock::MonitoredRwLock;
 use risingwave_common::util::epoch::{Epoch, INVALID_EPOCH};
 use risingwave_hummock_sdk::compact::compact_task_to_string;
 use risingwave_hummock_sdk::compaction_group::hummock_version_ext::HummockVersionExt;
@@ -36,7 +38,6 @@ use risingwave_pb::hummock::{
 };
 use risingwave_pb::meta::subscribe_response::{Info, Operation};
 use risingwave_pb::meta::MetaLeaderInfo;
-use tokio::sync::RwLock;
 
 use crate::cluster::{ClusterManagerRef, META_NODE_ID};
 use crate::hummock::compaction::{CompactStatus, ManualCompactionOption};
@@ -65,8 +66,8 @@ pub struct HummockManager<S: MetaStore> {
     compaction_group_manager: CompactionGroupManagerRef<S>,
     // When trying to locks compaction and versioning at the same time, compaction lock should
     // be requested before versioning lock.
-    compaction: RwLock<Compaction>,
-    versioning: RwLock<Versioning>,
+    compaction: MonitoredRwLock<Compaction>,
+    versioning: MonitoredRwLock<Versioning>,
     max_committed_epoch: AtomicU64,
 
     metrics: Arc<MetaMetrics>,
@@ -131,6 +132,46 @@ macro_rules! commit_multi_var {
     };
 }
 
+/// Acquire read lock of the lock with `lock_name`.
+/// The macro will use macro `function_name` to get the name of the function of method that calls
+/// the lock, and therefore, anyone to call this macro should ensured that the caller method has the
+/// macro #[named]
+macro_rules! read_lock {
+    ($hummock_mgr:expr, $lock_name:ident) => {
+        async {
+            $hummock_mgr
+                .$lock_name
+                .read(&[function_name!(), stringify!($lock_name)])
+                .await
+        }
+    };
+}
+
+/// Acquire write lock of the lock with `lock_name`.
+/// The macro will use macro `function_name` to get the name of the function of method that calls
+/// the lock, and therefore, anyone to call this macro should ensured that the caller method has the
+/// macro #[named]
+macro_rules! write_lock {
+    ($hummock_mgr:expr, $lock_name:ident) => {
+        async {
+            $hummock_mgr
+                .$lock_name
+                .write(&[function_name!(), stringify!($lock_name)])
+                .await
+        }
+    };
+}
+
+macro_rules! start_measure_real_process_timer {
+    ($hummock_mgr:expr) => {
+        $hummock_mgr
+            .metrics
+            .hummock_manager_real_process_time
+            .with_label_values(&[function_name!()])
+            .start_timer()
+    };
+}
+
 #[derive(Default)]
 struct Versioning {
     current_version_id: CurrentHummockVersionId,
@@ -167,8 +208,14 @@ where
     ) -> Result<HummockManager<S>> {
         let instance = HummockManager {
             env,
-            versioning: RwLock::new(Default::default()),
-            compaction: RwLock::new(Default::default()),
+            versioning: MonitoredRwLock::new(
+                metrics.hummock_manager_lock_time.clone(),
+                Default::default(),
+            ),
+            compaction: MonitoredRwLock::new(
+                metrics.hummock_manager_lock_time.clone(),
+                Default::default(),
+            ),
             metrics,
             cluster_manager,
             compaction_group_manager,
@@ -186,8 +233,9 @@ where
     }
 
     /// Load state from meta store.
+    #[named]
     async fn load_meta_store_state(&self) -> Result<()> {
-        let mut compaction_guard = self.compaction.write().await;
+        let mut compaction_guard = write_lock!(self, compaction).await;
         let compaction_statuses = CompactStatus::list(self.env.meta_store())
             .await?
             .into_iter()
@@ -215,7 +263,7 @@ where
                 .map(|assigned| (assigned.key().unwrap(), assigned))
                 .collect();
 
-        let mut versioning_guard = self.versioning.write().await;
+        let mut versioning_guard = write_lock!(self, versioning).await;
         versioning_guard.current_version_id = CurrentHummockVersionId::get(self.env.meta_store())
             .await?
             .unwrap_or_else(CurrentHummockVersionId::new);
@@ -378,12 +426,14 @@ where
     /// 1 Return the smallest already pinned version of `context_id` that is greater than
     /// `last_pinned`, if any.
     /// 2 Otherwise pin and return the current greatest version.
+    #[named]
     pub async fn pin_version(
         &self,
         context_id: HummockContextId,
         last_pinned: HummockVersionId,
     ) -> Result<HummockVersion> {
-        let mut versioning_guard = self.versioning.write().await;
+        let mut versioning_guard = write_lock!(self, versioning).await;
+        let _ = start_measure_real_process_timer!(self);
         let versioning = versioning_guard.deref_mut();
         let mut pinned_versions = VarTransaction::new(&mut versioning.pinned_versions);
         let hummock_versions = &versioning.hummock_versions;
@@ -429,12 +479,14 @@ where
         ret
     }
 
+    #[named]
     pub async fn unpin_version(
         &self,
         context_id: HummockContextId,
         pinned_version_ids: impl AsRef<[HummockVersionId]>,
     ) -> Result<()> {
-        let mut versioning_guard = self.versioning.write().await;
+        let mut versioning_guard = write_lock!(self, versioning).await;
+        let _ = start_measure_real_process_timer!(self);
         let mut pinned_versions = VarTransaction::new(&mut versioning_guard.pinned_versions);
         let mut context_pinned_version = match pinned_versions.new_entry_txn(context_id) {
             None => {
@@ -457,9 +509,11 @@ where
     }
 
     /// Make sure `max_commited_epoch` is pinned and return it.
+    #[named]
     pub async fn pin_snapshot(&self, context_id: HummockContextId) -> Result<HummockSnapshot> {
         let max_committed_epoch = self.max_committed_epoch.load(Ordering::Relaxed);
-        let mut guard = self.versioning.write().await;
+        let mut guard = write_lock!(self, versioning).await;
+        let _ = start_measure_real_process_timer!(self);
         let mut pinned_snapshots = VarTransaction::new(&mut guard.pinned_snapshots);
         let mut context_pinned_snapshot = pinned_snapshots.new_entry_txn_or_default(
             context_id,
@@ -485,8 +539,10 @@ where
         })
     }
 
+    #[named]
     pub async fn unpin_snapshot(&self, context_id: HummockContextId) -> Result<()> {
-        let mut versioning_guard = self.versioning.write().await;
+        let mut versioning_guard = write_lock!(self, versioning).await;
+        let _ = start_measure_real_process_timer!(self);
         let mut pinned_snapshots = VarTransaction::new(&mut versioning_guard.pinned_snapshots);
         let release_snapshot = pinned_snapshots.remove(&context_id);
 
@@ -504,13 +560,14 @@ where
     }
 
     /// Unpin all snapshots smaller than specified epoch for current context.
+    #[named]
     pub async fn unpin_snapshot_before(
         &self,
         context_id: HummockContextId,
         hummock_snapshot: HummockSnapshot,
     ) -> Result<()> {
-        let mut versioning_guard = self.versioning.write().await;
-
+        let mut versioning_guard = write_lock!(self, versioning).await;
+        let _ = start_measure_real_process_timer!(self);
         // Use the max_committed_epoch in storage as the snapshot ts so only committed changes are
         // visible in the snapshot.
         let version_id = versioning_guard.current_version_id.id();
@@ -553,13 +610,14 @@ where
         Ok(())
     }
 
+    #[named]
     pub async fn get_compact_task_impl(
         &self,
         compaction_group_id: CompactionGroupId,
         manual_compaction_option: Option<ManualCompactionOption>,
     ) -> Result<Option<CompactTask>> {
         let start_time = Instant::now();
-        let mut compaction_guard = self.compaction.write().await;
+        let mut compaction_guard = write_lock!(self, compaction).await;
         let compaction = compaction_guard.deref_mut();
         let task_id = compaction
             .get_next_task_id(async {
@@ -582,7 +640,7 @@ where
                 .get_mut(&compaction_group_id)
                 .ok_or(Error::InvalidCompactionGroup(compaction_group_id))?,
         );
-        let current_version = self.versioning.read().await.current_version();
+        let current_version = read_lock!(self, versioning).await.current_version();
         let compact_task = compact_status.get_compact_task(
             current_version.get_compaction_group_levels(compaction_group_id),
             task_id as HummockCompactionTaskId,
@@ -599,7 +657,7 @@ where
                     .await?;
 
                 compact_task.watermark = {
-                    let versioning_guard = self.versioning.read().await;
+                    let versioning_guard = read_lock!(self, versioning).await;
                     let current_version_id = versioning_guard.current_version_id.id();
                     let max_committed_epoch = versioning_guard
                         .hummock_versions
@@ -691,13 +749,15 @@ where
     }
 
     /// Assigns a compaction task to a compactor
+    #[named]
     pub async fn assign_compaction_task<T: Future<Output = bool>>(
         &self,
         compact_task: &CompactTask,
         assignee_context_id: HummockContextId,
         send_task: T,
     ) -> Result<()> {
-        let mut compaction_guard = self.compaction.write().await;
+        let mut compaction_guard = write_lock!(self, compaction).await;
+        let _ = start_measure_real_process_timer!(self);
         if !send_task.await {
             return Err(Error::CompactorUnreachable(assignee_context_id));
         }
@@ -732,8 +792,9 @@ where
     /// `report_compact_task` is retryable. `task_id` in `compact_task` parameter is used as the
     /// idempotency key. Return Ok(false) to indicate the `task_id` is not found, which may have
     /// been processed previously.
+    #[named]
     pub async fn report_compact_task(&self, compact_task: &CompactTask) -> Result<bool> {
-        let mut compaction_guard = self.compaction.write().await;
+        let mut compaction_guard = write_lock!(self, compaction).await;
         let start_time = Instant::now();
         let compaction = compaction_guard.deref_mut();
         let mut compact_status = VarTransaction::new(
@@ -756,7 +817,7 @@ where
         compact_status.report_compact_task(compact_task);
         if compact_task.task_status {
             // The compaction task is finished.
-            let mut versioning_guard = self.versioning.write().await;
+            let mut versioning_guard = write_lock!(self, versioning).await;
             let old_version = versioning_guard.current_version();
             let versioning = versioning_guard.deref_mut();
             let mut current_version_id = VarTransaction::new(&mut versioning.current_version_id);
@@ -857,7 +918,7 @@ where
                 .ok_or(Error::InvalidCompactionGroup(
                     compact_task.compaction_group_id,
                 ))?,
-            self.versioning.read().await.current_version_ref(),
+            read_lock!(self, versioning).await.current_version_ref(),
             compact_task.compaction_group_id,
         );
 
@@ -873,6 +934,7 @@ where
     }
 
     /// Caller should ensure `epoch` > `max_committed_epoch`
+    #[named]
     pub async fn commit_epoch(
         &self,
         epoch: HummockEpoch,
@@ -904,7 +966,8 @@ where
             }
         }
 
-        let mut versioning_guard = self.versioning.write().await;
+        let mut versioning_guard = write_lock!(self, versioning).await;
+        let _ = start_measure_real_process_timer!(self);
         let old_version = versioning_guard.current_version();
         let versioning = versioning_guard.deref_mut();
         let mut current_version_id = VarTransaction::new(&mut versioning.current_version_id);
@@ -1035,6 +1098,7 @@ where
         Ok(())
     }
 
+    #[named]
     pub async fn get_new_table_id(&self) -> Result<HummockSSTableId> {
         // TODO id_gen_manager generates u32, we need u64
         let sstable_id = get_remote_sst_id(
@@ -1045,7 +1109,8 @@ where
                 .map(|id| id as HummockSSTableId)?,
         );
 
-        let mut versioning_guard = self.versioning.write().await;
+        let mut versioning_guard = write_lock!(self, versioning).await;
+        let _ = start_measure_real_process_timer!(self);
         let new_sst_id_info = SstableIdInfo {
             id: sstable_id,
             id_create_timestamp: sstable_id_info::get_timestamp_now(),
@@ -1072,16 +1137,17 @@ where
     /// - Version
     /// - Snapshot
     /// - Compaction task
+    #[named]
     pub async fn release_contexts(
         &self,
         context_ids: impl AsRef<[HummockContextId]>,
     ) -> Result<()> {
-        let mut compaction_guard = self.compaction.write().await;
+        let mut compaction_guard = write_lock!(self, compaction).await;
         let compaction = compaction_guard.deref_mut();
         let mut compact_statuses = VarTransaction::new(&mut compaction.compaction_statuses);
         let mut compact_task_assignment =
             VarTransaction::new(&mut compaction.compact_task_assignment);
-        let mut versioning_guard = self.versioning.write().await;
+        let mut versioning_guard = write_lock!(self, versioning).await;
         let versioning = versioning_guard.deref_mut();
         let mut pinned_versions = VarTransaction::new(&mut versioning.pinned_versions);
         let mut pinned_snapshots = VarTransaction::new(&mut versioning.pinned_snapshots);
@@ -1129,8 +1195,10 @@ where
     }
 
     /// List version ids in ascending order.
+    #[named]
     pub async fn list_version_ids_asc(&self) -> Result<Vec<HummockVersionId>> {
-        let versioning_guard = self.versioning.read().await;
+        let versioning_guard = read_lock!(self, versioning).await;
+        let _ = start_measure_real_process_timer!(self);
         let version_ids = versioning_guard
             .hummock_versions
             .keys()
@@ -1139,8 +1207,10 @@ where
         Ok(version_ids)
     }
 
+    #[named]
     pub async fn proceed_version_checkpoint(&self) -> risingwave_common::error::Result<()> {
-        let versioning_guard = self.versioning.read().await;
+        let versioning_guard = read_lock!(self, versioning).await;
+        let _ = start_measure_real_process_timer!(self);
         let new_checkpoint = versioning_guard
             .hummock_versions
             .first_key_value()
@@ -1152,11 +1222,13 @@ where
     }
 
     /// Get the reference count of given version id
+    #[named]
     pub async fn get_version_pin_count(
         &self,
         version_id: HummockVersionId,
     ) -> Result<HummockRefCount> {
-        let versioning_guard = self.versioning.read().await;
+        let versioning_guard = read_lock!(self, versioning).await;
+        let _ = start_measure_real_process_timer!(self);
         let count = versioning_guard
             .pinned_versions
             .values()
@@ -1165,11 +1237,13 @@ where
         Ok(count as HummockRefCount)
     }
 
+    #[named]
     pub async fn get_ssts_to_delete(
         &self,
         version_id: HummockVersionId,
     ) -> Result<Vec<HummockSSTableId>> {
-        let versioning_guard = self.versioning.read().await;
+        let versioning_guard = read_lock!(self, versioning).await;
+        let _ = start_measure_real_process_timer!(self);
         Ok(versioning_guard
             .stale_sstables
             .get(&version_id)
@@ -1177,12 +1251,14 @@ where
             .unwrap_or_default())
     }
 
+    #[named]
     pub async fn delete_will_not_be_used_ssts(
         &self,
         version_id: HummockVersionId,
         ssts_in_use: &HashSet<HummockSSTableId>,
     ) -> Result<()> {
-        let mut versioning_guard = self.versioning.write().await;
+        let mut versioning_guard = write_lock!(self, versioning).await;
+        let _ = start_measure_real_process_timer!(self);
         let versioning = versioning_guard.deref_mut();
         let mut stale_sstables = VarTransaction::new(&mut versioning.stale_sstables);
         let mut sstable_id_infos = VarTransaction::new(&mut versioning.sstable_id_infos);
@@ -1214,8 +1290,10 @@ where
     }
 
     /// Delete metadata of the given `version_ids`
+    #[named]
     pub async fn delete_versions(&self, version_ids: &[HummockVersionId]) -> Result<()> {
-        let mut versioning_guard = self.versioning.write().await;
+        let mut versioning_guard = write_lock!(self, versioning).await;
+        let _ = start_measure_real_process_timer!(self);
         let versioning = versioning_guard.deref_mut();
         let pinned_versions_ref = &versioning.pinned_versions;
         let mut hummock_versions = VarTransaction::new(&mut versioning.hummock_versions);
@@ -1253,11 +1331,12 @@ where
     }
 
     // TODO: use proc macro to call check_state_consistency
+    #[named]
     #[cfg(test)]
     pub async fn check_state_consistency(&self) {
         let get_state = || async {
-            let compaction_guard = self.compaction.read().await;
-            let versioning_guard = self.versioning.read().await;
+            let compaction_guard = read_lock!(self, compaction).await;
+            let versioning_guard = read_lock!(self, versioning).await;
             let compact_statuses_copy = compaction_guard.compaction_statuses.clone();
             let compact_task_assignment_copy = compaction_guard.compact_task_assignment.clone();
             let current_version_id_copy = versioning_guard.current_version_id.clone();
@@ -1291,11 +1370,13 @@ where
     /// When `version_id` is `None`, this function returns all the `SstableIdInfo` across all the
     /// versions. With `version_id` being specified, this function returns all the
     /// `SstableIdInfo` of `version_id` Version.
+    #[named]
     pub async fn list_sstable_id_infos(
         &self,
         version_id: Option<HummockVersionId>,
     ) -> Result<Vec<SstableIdInfo>> {
-        let versioning_guard = self.versioning.read().await;
+        let versioning_guard = read_lock!(self, versioning).await;
+        let _ = start_measure_real_process_timer!(self);
         if version_id.is_none() {
             Ok(versioning_guard
                 .sstable_id_infos
@@ -1331,8 +1412,10 @@ where
         }
     }
 
+    #[named]
     pub async fn delete_sstable_ids(&self, sst_ids: impl AsRef<[HummockSSTableId]>) -> Result<()> {
-        let mut versioning_guard = self.versioning.write().await;
+        let mut versioning_guard = write_lock!(self, versioning).await;
+        let _ = start_measure_real_process_timer!(self);
         let mut sstable_id_infos = VarTransaction::new(&mut versioning_guard.sstable_id_infos);
 
         // Update in-mem state after transaction succeeds.
@@ -1352,10 +1435,12 @@ where
     }
 
     /// Release invalid contexts, aka worker node ids which are no longer valid in `ClusterManager`.
+    #[named]
     async fn release_invalid_contexts(&self) -> Result<Vec<HummockContextId>> {
         let active_context_ids = {
-            let compaction_guard = self.compaction.read().await;
-            let versioning_guard = self.versioning.read().await;
+            let compaction_guard = read_lock!(self, compaction).await;
+            let versioning_guard = read_lock!(self, versioning).await;
+            let _ = start_measure_real_process_timer!(self);
             let mut active_context_ids = HashSet::new();
             active_context_ids.extend(
                 compaction_guard
@@ -1390,11 +1475,13 @@ where
 
     /// Marks SSTs which haven't been added in meta (`meta_create_timestamp` is not set) for at
     /// least `sst_retention_interval` since `id_create_timestamp`
+    #[named]
     pub async fn mark_orphan_ssts(
         &self,
         sst_retention_interval: Duration,
     ) -> Result<Vec<SstableIdInfo>> {
-        let mut versioning_guard = self.versioning.write().await;
+        let mut versioning_guard = write_lock!(self, versioning).await;
+        let _ = start_measure_real_process_timer!(self);
         let mut sstable_id_infos = VarTransaction::new(&mut versioning_guard.sstable_id_infos);
 
         let now = sstable_id_info::get_timestamp_now();
@@ -1428,13 +1515,14 @@ where
     }
 
     /// Gets current version without pinning it.
+    #[named]
     pub async fn get_current_version(&self) -> HummockVersion {
-        self.versioning.read().await.current_version()
+        read_lock!(self, versioning).await.current_version()
     }
 
+    #[named]
     pub async fn get_version(&self, version_id: HummockVersionId) -> HummockVersion {
-        self.versioning
-            .read()
+        read_lock!(self, versioning)
             .await
             .hummock_versions
             .get(&version_id)
@@ -1447,8 +1535,9 @@ where
     }
 
     /// Cancels pending compaction tasks which are not yet assigned to any compactor.
+    #[named]
     async fn cancel_unassigned_compaction_task(&self) -> Result<()> {
-        let mut compaction_guard = self.compaction.write().await;
+        let mut compaction_guard = write_lock!(self, compaction).await;
         let compaction = compaction_guard.deref_mut();
         let mut compact_statuses = VarTransaction::new(&mut compaction.compaction_statuses);
         let mut cancelled_count = 0;
@@ -1478,6 +1567,7 @@ where
         false
     }
 
+    #[named]
     pub async fn trigger_manual_compaction(
         &self,
         compaction_group: CompactionGroupId,
@@ -1540,7 +1630,7 @@ where
 
             Err(error) => {
                 // cancel task in memory
-                let mut compaction_guard = self.compaction.write().await;
+                let mut compaction_guard = write_lock!(self, compaction).await;
                 let compaction = compaction_guard.deref_mut();
                 let compact_status = compaction
                     .compaction_statuses
@@ -1567,11 +1657,12 @@ where
         self.compactor_manager.clone()
     }
 
+    #[named]
     pub async fn compaction_task_from_assignment_for_test(
         &self,
         task_id: u64,
     ) -> Option<CompactTaskAssignment> {
-        let compaction_guard = self.compaction.read().await;
+        let compaction_guard = read_lock!(self, compaction).await;
         let assignment_ref = &compaction_guard.compact_task_assignment;
         assignment_ref.get(&task_id).cloned()
     }
