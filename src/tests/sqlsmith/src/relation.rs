@@ -45,7 +45,7 @@ impl<'a, R: Rng> SqlGenerator<'a, R> {
 
     fn gen_simple_table(&mut self) -> TableWithJoins {
         let (relation, _) = self.gen_simple_table_factor();
-        
+
         TableWithJoins {
             relation,
             joins: vec![],
@@ -102,7 +102,7 @@ impl<'a, R: Rng> SqlGenerator<'a, R> {
             relation: right_factor,
             join_operator: JoinOperator::Inner(JoinConstraint::On(join_on_expr)),
         };
-        
+
         TableWithJoins {
             relation: left_factor,
             joins: vec![right_factor_with_join],
