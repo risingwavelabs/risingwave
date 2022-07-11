@@ -227,10 +227,15 @@ impl<S: StateStore> TopNExecutorBase for InnerTopNExecutorNew<S> {
                         .insert(ordered_pk_row.clone(), row.clone(), epoch)
                         .await?;
 
+                    let (new_start_row, new_end_row) = self
+                        .managed_state
+                        .find_range(self.offset, self.limit, epoch)
+                        .await?;
+
                     // no offset
                     if self.offset == 0 {
                         if !end_row.is_valid() {
-                            // has no limit, emit to result set
+                            // no limit, emit to result set
                             new_ops.push(Op::Insert);
                             new_rows.push(row.clone());
                             continue;
@@ -240,11 +245,6 @@ impl<S: StateStore> TopNExecutorBase for InnerTopNExecutorNew<S> {
                         if let Some(end_key) = end_row.ordered_key.as_ref() {
                             if ordered_pk_row <= *end_key {
                                 // update boundary if needed
-                                let (_, new_end_row) = self
-                                    .managed_state
-                                    .find_range(self.offset, self.limit, epoch)
-                                    .await?;
-
                                 if end_row.ordered_key != new_end_row.ordered_key {
                                     new_ops.push(Op::Delete);
                                     new_rows.push(end_row.row);
@@ -254,22 +254,9 @@ impl<S: StateStore> TopNExecutorBase for InnerTopNExecutorNew<S> {
                                 new_rows.push(row.clone());
                             }
                         }
-                    } else if self.offset + 1 == self.managed_state.total_count() {
-                        // handle the boundary case
-                        let (new_start_row, _) = self
-                            .managed_state
-                            .find_range(self.offset, self.limit, epoch)
-                            .await?;
-                        new_ops.push(Op::Insert);
-                        new_rows.push(new_start_row.row);
                     } else if let Some(start_key) = start_row.ordered_key.as_ref() {
                         // Insert into [0, offset), the topn range will move backward
                         if ordered_pk_row < *start_key {
-                            let (new_start_row, new_end_row) = self
-                                .managed_state
-                                .find_range(self.offset, self.limit, epoch)
-                                .await?;
-
                             // update boundary
                             if new_start_row.is_valid() {
                                 new_ops.push(Op::Insert);
@@ -290,10 +277,6 @@ impl<S: StateStore> TopNExecutorBase for InnerTopNExecutorNew<S> {
                             if ordered_pk_row <= *end_key {
                                 new_ops.push(Op::Insert);
                                 new_rows.push(row);
-                                let (new_start_row, new_end_row) = self
-                                    .managed_state
-                                    .find_range(self.offset, self.limit, epoch)
-                                    .await?;
 
                                 if start_row.ordered_key != new_start_row.ordered_key {
                                     new_ops.push(Op::Delete);
@@ -305,6 +288,10 @@ impl<S: StateStore> TopNExecutorBase for InnerTopNExecutorNew<S> {
                                 }
                             }
                         }
+                    } else if new_start_row.is_valid() {
+                        // The newly inserted row is the first row in the topn range
+                        new_ops.push(Op::Insert);
+                        new_rows.push(new_start_row.row);
                     }
                 }
                 Op::Delete | Op::UpdateDelete => {
@@ -322,14 +309,15 @@ impl<S: StateStore> TopNExecutorBase for InnerTopNExecutorNew<S> {
                         .delete(&ordered_pk_row, row.clone(), epoch)
                         .await?;
 
+                    let (new_start_row, new_end_row) = self
+                        .managed_state
+                        .find_range(self.offset, self.limit, epoch)
+                        .await?;
+
                     // check start end first, since LIMIT may not specified
                     if let Some(start_key) = start_row.ordered_key.as_ref() {
                         if ordered_pk_row < *start_key {
                             // deleted row in [0, offset) the topn range will move forward
-                            let (new_start_row, new_end_row) = self
-                                .managed_state
-                                .find_range(self.offset, self.limit, epoch)
-                                .await?;
 
                             // update both ends
                             if start_row.ordered_key != new_start_row.ordered_key {
@@ -361,11 +349,6 @@ impl<S: StateStore> TopNExecutorBase for InnerTopNExecutorNew<S> {
                             // deleted row in [offset, offset+limit], emit change of result set
                             new_ops.push(Op::Delete);
                             new_rows.push(row);
-
-                            let (_, new_end_row) = self
-                                .managed_state
-                                .find_range(self.offset, self.limit, epoch)
-                                .await?;
 
                             // update high end if nedded
                             if new_end_row.is_valid()

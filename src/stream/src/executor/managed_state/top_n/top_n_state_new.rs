@@ -110,6 +110,7 @@ impl<S: StateStore> ManagedTopNStateNew<S> {
         Ok(())
     }
 
+    #[allow(dead_code)]
     pub fn total_count(&self) -> usize {
         self.total_count
     }
@@ -149,18 +150,16 @@ impl<S: StateStore> ManagedTopNStateNew<S> {
 
         // fetch start row
         let mut start_row = first_row;
-        if offset > 0 {
-            for i in 0..offset {
-                match state_table_iter.next().await {
-                    Some(next_res) => {
-                        if i == offset - 1 {
-                            start_row = self.get_topn_row(next_res);
-                        }
+        for i in 0..offset {
+            match state_table_iter.next().await {
+                Some(next_res) => {
+                    if i == offset - 1 {
+                        start_row = self.get_topn_row(next_res);
                     }
-                    None => {
-                        start_row = invalid_row.clone();
-                        break;
-                    }
+                }
+                None => {
+                    start_row = invalid_row.clone();
+                    break;
                 }
             }
         }
