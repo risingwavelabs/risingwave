@@ -122,18 +122,17 @@ macro_rules! impl_split_reader {
 
 #[macro_export]
 macro_rules! impl_connector_properties {
-    ([], $({ $variant_name:ident, $struct_name:ident, $connector_name:ident } ),*) => {
+    ([], $({ $variant_name:ident, $connector_name:ident } ),*) => {
         impl ConnectorProperties {
             pub fn extract(mut props: HashMap<String, String>) -> Result<Self> {
                 const UPSTREAM_SOURCE_KEY: &str = "connector";
                 let connector = props.remove(UPSTREAM_SOURCE_KEY).ok_or_else(|| anyhow!("Must specify 'connector' in WITH clause"))?;
+                let json_value = serde_json::to_value(props).map_err(|e| anyhow!(e))?;
                 match connector.to_lowercase().as_str() {
                     $(
-                    $connector_name => {
-                        $struct_name::deserialize(
-                            serde::de::value::MapDeserializer::<_, serde_json::Error>::new(props.into_iter()),
-                        ).map_err(|e| anyhow!(e.to_string())).map(Self::$variant_name)
-                    },
+                        $connector_name => {
+                            serde_json::from_value(json_value).map_err(|e| anyhow!(e.to_string())).map(Self::$variant_name)
+                        },
                     )*
                     _ => {
                         Err(anyhow!("connector '{}' is not supported", connector,))

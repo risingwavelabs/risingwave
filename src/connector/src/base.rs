@@ -109,12 +109,12 @@ pub enum ConnectorProperties {
 
 impl_connector_properties! {
     [ ] ,
-    { Kafka, KafkaProperties, KAFKA_CONNECTOR },
-    { Pulsar, PulsarProperties, PULSAR_CONNECTOR },
-    { Kinesis, KinesisProperties, KINESIS_CONNECTOR },
-    { Nexmark, NexmarkProperties, NEXMARK_CONNECTOR },
-    { Datagen, DatagenProperties, DATAGEN_CONNECTOR },
-    { S3, S3Properties, S3_CONNECTOR }
+    { Kafka, KAFKA_CONNECTOR },
+    { Pulsar, PULSAR_CONNECTOR },
+    { Kinesis, KINESIS_CONNECTOR },
+    { Nexmark, NEXMARK_CONNECTOR },
+    { Datagen, DATAGEN_CONNECTOR },
+    { S3, S3_CONNECTOR }
 }
 
 impl_split_enumerator! {
