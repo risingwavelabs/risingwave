@@ -238,8 +238,7 @@ impl<S: StateStore> DynamicFilterExecutor<S> {
             })
         };
 
-        let mut prev_epoch_value: Option<Datum> = None;
-        let mut current_epoch_value: Option<Datum> = None;
+        let mut prev_epoch_row: Option<Row> = None;
         let mut current_epoch_row: Option<Row> = None;
         let mut epoch: u64 = 0;
 
@@ -262,7 +261,10 @@ impl<S: StateStore> DynamicFilterExecutor<S> {
                     let chunk = chunk.compact()?; // Is this unnecessary work?
                     let (data_chunk, ops) = chunk.into_parts();
 
-                    let right_val = prev_epoch_value.clone().flatten();
+                    let right_val = prev_epoch_row
+                        .as_ref()
+                        .map(|row| row.0[0].clone())
+                        .flatten();
 
                     // The condition is `None` if it is always false by virtue of a NULL right
                     // input, so we save evaluating it on the datachunk
@@ -288,7 +290,6 @@ impl<S: StateStore> DynamicFilterExecutor<S> {
                         match *op {
                             Op::UpdateInsert | Op::Insert => {
                                 last_is_insert = true;
-                                current_epoch_value = Some(row.value_at(0).to_owned_datum());
                                 current_epoch_row = Some(row.to_owned_row());
                             }
                             _ => last_is_insert = false,
@@ -303,8 +304,14 @@ impl<S: StateStore> DynamicFilterExecutor<S> {
                 }
                 AlignedMessage::Barrier(barrier) => {
                     // Flush the difference between the `prev_value` and `current_value`
-                    let curr: Datum = current_epoch_value.clone().flatten();
-                    let prev: Datum = prev_epoch_value.flatten();
+                    let curr: Datum = current_epoch_row
+                        .as_ref()
+                        .map(|row| row.0[0].clone())
+                        .flatten();
+                    let prev: Datum = prev_epoch_row
+                        .as_ref()
+                        .map(|row| row.0[0].clone())
+                        .flatten();
                     if prev != curr {
                         let (range, latest_is_lower, is_insert) = self.get_range(&curr, prev);
                         for (_, rows) in self.range_cache.range(range, latest_is_lower) {
@@ -328,8 +335,10 @@ impl<S: StateStore> DynamicFilterExecutor<S> {
                             yield Message::Chunk(chunk);
                         }
                     }
-                    prev_epoch_value = Some(curr);
                     if let Some(row) = &current_epoch_row {
+                        if let Some(row) = &prev_epoch_row {
+                            self.right_table.delete(row.clone())?;
+                        }
                         self.right_table.insert(row.clone())?;
                         self.right_table.commit(epoch).await?;
                     }
@@ -340,6 +349,8 @@ impl<S: StateStore> DynamicFilterExecutor<S> {
                     // epochs.
                     epoch = barrier.epoch.curr;
                     self.range_cache.update_epoch(barrier.epoch.curr);
+
+                    prev_epoch_row = current_epoch_row.clone();
 
                     yield Message::Barrier(barrier);
                 }
