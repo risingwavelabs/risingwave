@@ -134,8 +134,9 @@ where
             tables_node_actors: &'a HashMap<TableId, BTreeMap<WorkerId, Vec<ActorId>>>,
             /// Schedule information of all actors.
             locations: &'a ScheduledLocations,
-
+            /// New dispatchers for this mview.
             dispatchers: &'a mut HashMap<ActorId, Vec<Dispatcher>>,
+            /// Upstream Materialize actor ids grouped by worker id.
             upstream_node_actors: &'a mut HashMap<WorkerId, HashSet<ActorId>>,
         }
 
@@ -232,9 +233,9 @@ where
                     .or_default()
                     .push(Dispatcher {
                         r#type: DispatcherType::NoShuffle as _,
-                        // Use merge operator id as dispatcher id to avoid collision in this
+                        // Use chain actor id as dispatcher id to avoid collision in this
                         // Dispatch executor.
-                        dispatcher_id: merge_stream_node.operator_id,
+                        dispatcher_id: actor_id as _,
                         downstream_actor_id: vec![actor_id],
                         ..Default::default()
                     });

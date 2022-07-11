@@ -322,7 +322,8 @@ message StreamNode {
     ExpandNode expand = 121;
     DynamicFilterNode dynamic_filter = 122;
   }
-  // The id for the operator.
+  // The id for the operator. This is local per mview.
+  // TODO: should better be a uint32.
   uint64 operator_id = 1;
   // Child node in plan aka. upstream nodes in the streaming DAG
   repeated StreamNode input = 3;
