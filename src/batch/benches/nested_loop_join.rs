@@ -15,9 +15,8 @@
 use criterion::{black_box, criterion_group, criterion_main, BatchSize, BenchmarkId, Criterion};
 use futures::StreamExt;
 use risingwave_batch::executor::test_utils::{gen_data, MockExecutor};
-use risingwave_batch::executor::{BoxedExecutor, Executor, JoinType, NestedLoopJoinExecutor};
+use risingwave_batch::executor::{BoxedExecutor, JoinType, NestedLoopJoinExecutor};
 use risingwave_common::catalog::schema_test_utils::field_n;
-use risingwave_common::catalog::Schema;
 use risingwave_common::types::{DataType, ScalarImpl};
 use risingwave_expr::expr::build_from_prost;
 use risingwave_pb::data::data_type::TypeName;
@@ -127,30 +126,19 @@ fn create_nested_loop_join_executor(
         }
     };
 
-    let schema = Schema::new(match join_type {
-        JoinType::LeftSemi => left_child.schema().fields.clone(),
-        JoinType::LeftAnti => left_child.schema().fields.clone(),
-        JoinType::RightSemi => right_child.schema().fields.clone(),
-        JoinType::RightAnti => right_child.schema().fields.clone(),
-        _ => left_child
-            .schema()
-            .fields
-            .iter()
-            .chain(right_child.schema().fields.iter())
-            .cloned()
-            .collect(),
-    });
-
-    let output_indices = (0..schema.fields().len()).collect();
+    let output_indices = match join_type {
+        JoinType::LeftSemi | JoinType::LeftAnti => vec![0],
+        JoinType::RightSemi | JoinType::RightAnti => vec![0],
+        _ => vec![0, 1],
+    };
 
     Box::new(NestedLoopJoinExecutor::new(
         build_from_prost(&join_expr).unwrap(),
         join_type,
-        schema,
         output_indices,
         left_child,
         right_child,
-        "NestedLoopJoinBenchmarkExecutor".into(),
+        "NestedLoopJoinExecutor".into(),
     ))
 }
 
