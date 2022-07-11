@@ -204,4 +204,10 @@
     create table t2(v2 varchar);
     create table t3(v3 varchar);
     SELECT * FROM t3, t1 JOIN t2 ON t1.v1 = t2.v2;
-  batch_plan: ''
+  logical_plan: |
+    LogicalProject { exprs: [$1, $3, $5] }
+      LogicalJoin { type: Inner, on: true, output_indices: all }
+        LogicalScan { table: t3, columns: [_row_id, v3] }
+        LogicalJoin { type: Inner, on: ($1 = $3), output_indices: all }
+          LogicalScan { table: t1, columns: [_row_id, v1] }
+          LogicalScan { table: t2, columns: [_row_id, v2] }
