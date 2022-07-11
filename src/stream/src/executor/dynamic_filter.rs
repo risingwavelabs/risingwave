@@ -46,7 +46,7 @@ pub struct DynamicFilterExecutor<S: StateStore> {
     identity: String,
     comparator: ExprNodeType,
     range_cache: RangeCache<S>,
-    right_table: StateTable<S>,
+    right_table: Option<StateTable<S>>,
     actor_id: u64,
     schema: Schema,
     metrics: Arc<StreamingMetrics>,
@@ -62,7 +62,7 @@ impl<S: StateStore> DynamicFilterExecutor<S> {
         executor_id: u64,
         comparator: ExprNodeType,
         state_table_l: StateTable<S>,
-        state_table_r: StateTable<S>,
+        state_table_r: Option<StateTable<S>>,
         actor_id: u64,
         metrics: Arc<StreamingMetrics>,
     ) -> Self {
@@ -289,12 +289,10 @@ impl<S: StateStore> DynamicFilterExecutor<S> {
                             Op::UpdateInsert | Op::Insert => {
                                 last_is_insert = true;
                                 current_epoch_value = Some(row.value_at(0).to_owned_datum());
-                                // self.right_table.insert(row.to_owned_row())?;
                                 current_epoch_row = Some(row.to_owned_row());
                             }
-                            Op::UpdateDelete | Op::Delete => {
+                            _ => {
                                 last_is_insert = false;
-                                // self.right_table.delete(row.to_owned_row())?;
                             }
                         }
                     }
@@ -333,11 +331,12 @@ impl<S: StateStore> DynamicFilterExecutor<S> {
                         }
                     }
                     if let Some(row) = current_epoch_row.take() {
-                        assert_ne!(epoch, barrier.epoch.curr);
                         assert_eq!(epoch, barrier.epoch.prev);
-                        self.right_table.insert(row)?;
+                        if let Some(table) = &mut self.right_table {
+                            table.insert(row)?;
+                            table.commit(epoch).await?;
+                        }
                     }
-                    self.right_table.commit(epoch).await?;
 
                     self.range_cache.flush().await?;
 
