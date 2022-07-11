@@ -14,7 +14,7 @@
 
 use std::cmp;
 
-use super::key::{split_key_epoch, user_key, get_epoch};
+use super::key::{get_epoch, split_key_epoch, user_key};
 
 /// Compares two full keys first by their user keys, then by their versions (epochs).
 pub struct VersionedComparator;
