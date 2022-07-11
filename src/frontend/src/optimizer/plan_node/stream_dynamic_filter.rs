@@ -103,8 +103,8 @@ fn infer_internal_table_catalog(input: PlanRef, left_key_index: usize) -> TableC
 
     let append_only = input.append_only();
     let dist_keys = base.dist.dist_column_indices().to_vec();
-    
-    pk_indices = base.pk_indices.to_vec();
+
+    let pk_indices = base.pk_indices.to_vec();
 
     let mut internal_table_catalog_builder = TableCatalogBuilder::new();
 
