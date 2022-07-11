@@ -11,7 +11,7 @@ In the second mode, it will test the entire query handling end-to-end. We provid
 
 ```sh
 cd risingwave
-./target/debug/sqlsmith --testdata ./src/tests/sqlsmith/tests/testdata
+./target/debug/sqlsmith test --testdata ./src/tests/sqlsmith/tests/testdata
 ```
 
 Additionally, in some cases where you may want to debug whether we have defined some function/operator incorrectly,

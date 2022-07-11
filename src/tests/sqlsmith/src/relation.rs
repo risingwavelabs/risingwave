@@ -20,7 +20,7 @@ use crate::{
     BinaryOperator, Column, Expr, Join, JoinConstraint, JoinOperator, SqlGenerator, Table,
 };
 
-fn create_join_on_expr(left: String, right: String) -> Expr {
+fn create_join_on_clause(left: String, right: String) -> Expr {
     let left = Box::new(Expr::Identifier(Ident::new(left)));
     let right = Box::new(Expr::Identifier(Ident::new(right)));
     Expr::BinaryOp {
@@ -31,34 +31,25 @@ fn create_join_on_expr(left: String, right: String) -> Expr {
 }
 
 impl<'a, R: Rng> SqlGenerator<'a, R> {
-    pub(crate) fn gen_from_relation(&mut self) -> TableWithJoins {
-        let (from_relation, _) = self.gen_from_relation_with_cols();
-        from_relation
-    }
-
     /// A relation specified in the FROM clause.
-    fn gen_from_relation_with_cols(&mut self) -> (TableWithJoins, Vec<Column>) {
-        if self.can_recurse() {
-            return match self.rng.gen_range(0..=9) {
-                0..=8 => self.gen_simple_table(),
-                9..=9 => self.gen_equijoin_expr(),
-                // TODO: unreachable, should change to 9..=9,
-                // but currently it will cause panic due to some wrong assertions.
-                10..=10 => self.gen_subquery(),
-                _ => unreachable!(),
-            };
+    pub(crate) fn gen_from_relation(&mut self) -> TableWithJoins {
+        match self.rng.gen_range(0..=9) {
+            0..=8 => self.gen_simple_table(),
+            9..=9 => self.gen_equijoin_clause(),
+            // TODO: unreachable, should change to 9..=9,
+            // but currently it will cause panic due to some wrong assertions.
+            10..=10 => self.gen_subquery(),
+            _ => unreachable!(),
         }
-
-        self.gen_simple_table()
     }
 
-    fn gen_simple_table(&mut self) -> (TableWithJoins, Vec<Column>) {
-        let (relation, columns) = self.gen_simple_table_factor();
-        let simple_table = TableWithJoins {
+    fn gen_simple_table(&mut self) -> TableWithJoins {
+        let (relation, _) = self.gen_simple_table_factor();
+        
+        TableWithJoins {
             relation,
             joins: vec![],
-        };
-        (simple_table, columns)
+        }
     }
 
     fn gen_simple_table_factor(&mut self) -> (TableFactor, Vec<Column>) {
@@ -85,8 +76,8 @@ impl<'a, R: Rng> SqlGenerator<'a, R> {
         self.gen_simple_table_factor()
     }
 
-    fn gen_equijoin_expr(&mut self) -> (TableWithJoins, Vec<Column>) {
-        let (left_factor, mut left_columns) = self.gen_table_factor();
+    fn gen_equijoin_clause(&mut self) -> TableWithJoins {
+        let (left_factor, left_columns) = self.gen_table_factor();
         let (right_factor, right_columns) = self.gen_table_factor();
 
         let mut available_join_on_columns = vec![];
@@ -104,26 +95,26 @@ impl<'a, R: Rng> SqlGenerator<'a, R> {
         }
         let i = self.rng.gen_range(0..available_join_on_columns.len());
         let (left_column, right_column) = available_join_on_columns[i];
-        let join_on_expr = create_join_on_expr(left_column.name.clone(), right_column.name.clone());
+        let join_on_expr =
+            create_join_on_clause(left_column.name.clone(), right_column.name.clone());
 
         let right_factor_with_join = Join {
             relation: right_factor,
             join_operator: JoinOperator::Inner(JoinConstraint::On(join_on_expr)),
         };
-        let table = TableWithJoins {
+        
+        TableWithJoins {
             relation: left_factor,
             joins: vec![right_factor_with_join],
-        };
-        left_columns.extend(right_columns);
-        (table, left_columns)
+        }
     }
 
-    fn gen_subquery(&mut self) -> (TableWithJoins, Vec<Column>) {
+    fn gen_subquery(&mut self) -> TableWithJoins {
         let (subquery, columns) = self.gen_query();
         let alias = format!("t{}", self.bound_relations.len());
         let table = Table {
             name: alias.clone(),
-            columns: columns.clone(),
+            columns,
         };
         let relation = TableWithJoins {
             relation: TableFactor::Derived {
@@ -137,6 +128,6 @@ impl<'a, R: Rng> SqlGenerator<'a, R> {
             joins: vec![],
         };
         self.bound_relations.push(table);
-        (relation, columns)
+        relation
     }
 }
