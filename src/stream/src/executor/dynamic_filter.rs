@@ -19,7 +19,7 @@ use anyhow::anyhow;
 use futures::StreamExt;
 use futures_async_stream::try_stream;
 use itertools::Itertools;
-use risingwave_common::array::{Array, ArrayImpl, DataChunk, Op, Row,  StreamChunk};
+use risingwave_common::array::{Array, ArrayImpl, DataChunk, Op, Row, StreamChunk};
 use risingwave_common::buffer::{Bitmap, BitmapBuilder};
 use risingwave_common::catalog::Schema;
 use risingwave_common::types::{DataType, Datum, ScalarImpl, ToOwnedDatum};
@@ -336,7 +336,8 @@ impl<S: StateStore> DynamicFilterExecutor<S> {
 
                     self.range_cache.flush().await?;
 
-                    // We have flushed all the state for the prev epoch. We can now update the epochs.
+                    // We have flushed all the state for the prev epoch. We can now update the
+                    // epochs.
                     epoch = barrier.epoch.curr;
                     self.range_cache.update_epoch(barrier.epoch.curr);
 
