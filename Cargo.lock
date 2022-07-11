@@ -4229,6 +4229,7 @@ dependencies = [
  "serde",
  "serde_derive",
  "serde_json",
+ "serde_with",
  "smallvec",
  "static_assertions",
  "tempfile",
