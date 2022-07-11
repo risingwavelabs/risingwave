@@ -185,7 +185,7 @@ impl UserIterator {
 
                 // handle delete operation
                 match self.iterator.value() {
-                    HummockValue::Put(_, val) => {
+                    HummockValue::Put(val) => {
                         self.last_val.clear();
                         self.last_val.extend_from_slice(val);
 
@@ -201,7 +201,7 @@ impl UserIterator {
                     // It means that the key is deleted from the storage.
                     // Deleted kv and the previous versions (if any) of the key should not be
                     // returned to user.
-                    HummockValue::Delete(_) => {}
+                    HummockValue::Delete() => {}
                 }
             }
 

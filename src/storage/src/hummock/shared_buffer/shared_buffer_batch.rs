@@ -30,7 +30,6 @@ use crate::hummock::shared_buffer::SharedBufferEvent;
 use crate::hummock::shared_buffer::SharedBufferEvent::BufferRelease;
 use crate::hummock::value::HummockValue;
 use crate::hummock::{key, HummockEpoch, HummockResult};
-use crate::storage_value::VALUE_META_SIZE;
 
 pub(crate) type SharedBufferItem = (Bytes, HummockValue<Bytes>);
 
@@ -109,8 +108,8 @@ impl SharedBufferBatch {
             .map(|(k, v)| {
                 k.len() + {
                     match v {
-                        HummockValue::Put(_, val) => VALUE_META_SIZE + val.len(),
-                        HummockValue::Delete(_) => VALUE_META_SIZE,
+                        HummockValue::Put(val) => val.len(),
+                        HummockValue::Delete() => 0,
                     }
                 }
             })

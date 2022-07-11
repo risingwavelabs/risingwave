@@ -179,12 +179,12 @@ impl BackwardUserIterator {
 
                 // 1 and 2(a)
                 match self.iterator.value() {
-                    HummockValue::Put(_, val) => {
+                    HummockValue::Put(val) => {
                         self.last_val.clear();
                         self.last_val.extend_from_slice(val);
                         self.last_delete = false;
                     }
-                    HummockValue::Delete(_) => {
+                    HummockValue::Delete() => {
                         self.last_delete = true;
                     }
                 }
@@ -878,8 +878,8 @@ mod tests {
                     return 0;
                 }
                 match inserts.first_key_value().unwrap().1 {
-                    HummockValue::Put(_, _) => 1,
-                    HummockValue::Delete(_) => 0,
+                    HummockValue::Put(_) => 1,
+                    HummockValue::Delete() => 0,
                 }
             })
             .reduce(|accum, item| accum + item)
@@ -891,13 +891,13 @@ mod tests {
                 continue;
             }
             let (time, value) = value.first_key_value().unwrap();
-            if let HummockValue::Delete(_) = value {
+            if let HummockValue::Delete() = value {
                 continue;
             }
             assert!(bui.is_valid(), "num_kvs:{}", num_kvs);
             let full_key = key_with_epoch(key.clone(), time.0);
             assert_eq!(bui.key(), user_key(&full_key), "num_kvs:{}", num_kvs);
-            if let HummockValue::Put(_, bytes) = &value {
+            if let HummockValue::Put(bytes) = &value {
                 assert_eq!(bui.value(), bytes, "num_kvs:{}", num_kvs);
             }
             bui.next().await.unwrap();
