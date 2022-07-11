@@ -34,10 +34,20 @@ use crate::sink::redis::{RedisConfig, RedisSink};
 #[async_trait]
 pub trait Sink {
     async fn write_batch(&mut self, chunk: StreamChunk, schema: &Schema) -> Result<()>;
-    async fn begin_epoch(&mut self, epoch: u64) -> Result<()>;
-    async fn commit(&mut self) -> Result<()>;
-    async fn abort(&mut self) -> Result<()>;
+
+    // write execution status to state store
     async fn take_snapshot(&self) -> Result<SinkState>;
+
+    // the following interface is for transactions, if not supported, return Ok(())
+    // start a transaction with epoch number. Note that epoch number should be increasing.
+    async fn begin_epoch(&mut self, epoch: u64) -> Result<()>;
+
+    // commits the current transaction and marks all messages in the transaction success.
+    async fn commit(&mut self) -> Result<()>;
+
+    // aborts the current transaction because some error happens. we should rollback to the last
+    // commit point.
+    async fn abort(&mut self) -> Result<()>;
 }
 
 #[derive(Clone, Debug, EnumAsInner)]

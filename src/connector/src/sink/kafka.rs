@@ -199,6 +199,8 @@ impl Sink for KafkaSink {
         }
     }
 
+    //  Note that epoch 0 is reserved for initializing, so we should not use epoch 0 for
+    // transaction.
     async fn begin_epoch(&mut self, epoch: u64) -> Result<()> {
         self.in_transaction_epoch = Some(epoch);
         if self.latest_success_epoch == 0 {
