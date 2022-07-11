@@ -212,7 +212,7 @@ impl<S: StateStore> LookupExecutor<S> {
 
         let distribution = match vnode_bitmap {
             Some(vnodes) => Distribution {
-                dist_key_indices: arrange_join_key_indices.clone(),
+                dist_key_indices: stream_join_key_indices.clone(),
                 vnodes,
             },
             None => Distribution::fallback(),
