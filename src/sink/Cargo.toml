@@ -1,0 +1,15 @@
+[package]
+edition = "2021"
+name = "risingwave_sink"
+version = "0.1.0"
+
+[dependencies]
+anyhow = "1"
+async-stream = "0.3"
+async-trait = "0.1"
+parking_lot = "0.12"
+risingwave_common = { path = "../common" }
+risingwave_connector = { path = "../connector" }
+risingwave_expr = { path = "../expr" }
+risingwave_pb = { path = "../prost" }
+risingwave_storage = { path = "../storage" }

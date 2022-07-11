@@ -436,6 +436,8 @@ where
         table_fragments.set_actor_status(actor_info);
         let actor_map = table_fragments.actor_map();
 
+        // dbg!(&actor_map);
+
         // Actors on each stream node will need to know where their upstream lies. `actor_info`
         // includes such information. It contains:
         // 1. actors in the current create-materialized-view request.
@@ -458,9 +460,13 @@ where
             current.chain(upstream).collect_vec()
         };
 
+        // dbg!(&actor_infos_to_broadcast);
+
         let actor_host_infos = locations.actor_info_map();
+        // dbg!(&actor_host_infos);
 
         let node_actors = locations.worker_actors();
+        // dbg!(&node_actors);
 
         // (upstream_actor_id, dispatcher_id) -> Vec<downstream_actor_info>
         let dispatches = dispatches
@@ -480,6 +486,7 @@ where
                 )
             })
             .collect::<HashMap<_, _>>();
+        // dbg!(&dispatches);
 
         // Hanging channels for each worker node.
         let mut node_hanging_channels = {
@@ -514,6 +521,7 @@ where
                 })
                 .collect::<HashMap<_, _>>()
         };
+        // dbg!(&node_hanging_channels);
 
         // We send RPC request in two stages.
         // The first stage does 2 things: broadcast actor info, and send local actor ids to
@@ -604,6 +612,7 @@ where
             fetch_source_fragments(&mut source_fragments, &table_fragments);
             source_fragments
         };
+        // dbg!(&source_fragments);
 
         // Add table fragments to meta store with state: `State::Creating`.
         self.fragment_manager
@@ -615,6 +624,7 @@ where
             .source_manager
             .pre_allocate_splits(&table_id, source_fragments.clone())
             .await?;
+        // dbg!(&init_split_assignment);
 
         if let Err(err) = self
             .barrier_manager

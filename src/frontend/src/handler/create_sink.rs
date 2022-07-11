@@ -52,7 +52,7 @@ fn gen_sink_plan(
     context: OptimizerContextRef,
     associated_table_name: String,
     associated_table_desc: TableDesc,
-    properties: HashMap<String, String>
+    properties: HashMap<String, String>,
 ) -> Result<PlanRef> {
     let scan_node = StreamTableScan::new(LogicalScan::create(
         associated_table_name.into(),
@@ -104,7 +104,12 @@ pub async fn handle_create_sink(
     )?;
 
     let graph = {
-        let plan = gen_sink_plan(context.into(), associated_table_name, associated_table_desc, with_properties.clone())?;
+        let plan = gen_sink_plan(
+            context.into(),
+            associated_table_name,
+            associated_table_desc,
+            with_properties.clone(),
+        )?;
         let plan = plan.to_stream_prost();
         StreamFragmenter::build_graph(plan)
     };

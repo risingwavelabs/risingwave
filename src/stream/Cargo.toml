@@ -41,6 +41,7 @@ risingwave_hummock_sdk = { path = "../storage/hummock_sdk" }
 risingwave_pb = { path = "../prost" }
 risingwave_rpc_client = { path = "../rpc_client" }
 risingwave_source = { path = "../source" }
+risingwave_sink = { path = "../sink" }
 risingwave_storage = { path = "../storage" }
 serde = { version = "1", features = ["derive"] }
 serde-value = "0.7"

@@ -735,7 +735,6 @@ where
         id: SinkId,
     ) -> RwResult<()> {
         dbg!(fragment_graph);
-        dbg!(id);
         Ok(())
     }
 }

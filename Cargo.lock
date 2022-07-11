@@ -4151,6 +4151,7 @@ dependencies = [
  "risingwave_connector",
  "risingwave_pb",
  "risingwave_rpc_client",
+ "risingwave_sink",
  "risingwave_source",
  "risingwave_storage",
  "risingwave_stream",
@@ -4541,6 +4542,21 @@ dependencies = [
 ]
 
 [[package]]
+name = "risingwave_sink"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "async-stream",
+ "async-trait",
+ "parking_lot",
+ "risingwave_common",
+ "risingwave_connector",
+ "risingwave_expr",
+ "risingwave_pb",
+ "risingwave_storage",
+]
+
+[[package]]
 name = "risingwave_source"
 version = "0.1.10"
 dependencies = [
@@ -4750,6 +4766,7 @@ dependencies = [
  "risingwave_hummock_sdk",
  "risingwave_pb",
  "risingwave_rpc_client",
+ "risingwave_sink",
  "risingwave_source",
  "risingwave_storage",
  "serde",

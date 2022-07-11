@@ -19,7 +19,7 @@ use std::collections::HashMap;
 
 use async_trait::async_trait;
 use enum_as_inner::EnumAsInner;
-use risingwave_common::array::{StreamChunk};
+use risingwave_common::array::StreamChunk;
 use risingwave_common::catalog::Schema;
 use risingwave_common::error::{ErrorCode, Result as RwResult, RwError};
 use thiserror::Error;

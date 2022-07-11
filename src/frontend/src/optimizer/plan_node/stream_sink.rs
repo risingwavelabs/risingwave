@@ -12,8 +12,8 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::fmt;
 use std::collections::HashMap;
+use std::fmt;
 
 use risingwave_common::error::Result;
 use risingwave_pb::stream_plan::stream_node::NodeBody as ProstStreamNode;
@@ -25,7 +25,7 @@ use super::{PlanBase, PlanRef, ToStreamProst};
 pub struct StreamSink {
     pub base: PlanBase,
     input: PlanRef,
-    properties: HashMap<String, String>
+    properties: HashMap<String, String>,
 }
 
 impl StreamSink {
@@ -47,7 +47,11 @@ impl StreamSink {
     #[must_use]
     pub fn new(input: PlanRef, properties: HashMap<String, String>) -> Self {
         let base = Self::derive_plan_base(&input).unwrap();
-        Self { base, input, properties }
+        Self {
+            base,
+            input,
+            properties,
+        }
     }
 }
 
@@ -70,7 +74,7 @@ impl ToStreamProst for StreamSink {
 
         ProstStreamNode::Sink(SinkNode {
             table_id: table_desc.table_id.table_id(),
-            properties: self.properties.clone()
+            properties: self.properties.clone(),
         })
     }
 }
