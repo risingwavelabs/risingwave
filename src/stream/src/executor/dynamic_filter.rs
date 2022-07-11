@@ -240,6 +240,7 @@ impl<S: StateStore> DynamicFilterExecutor<S> {
 
         let mut prev_epoch_value: Option<Datum> = None;
         let mut current_epoch_value: Option<Datum> = None;
+        let mut current_epoch_row = None;
         let mut epoch: u64 = 0;
 
         let aligned_stream = barrier_align(
@@ -288,7 +289,8 @@ impl<S: StateStore> DynamicFilterExecutor<S> {
                             Op::UpdateInsert | Op::Insert => {
                                 last_is_insert = true;
                                 current_epoch_value = Some(row.value_at(0).to_owned_datum());
-                                self.right_table.insert(row.to_owned_row())?;
+                                // self.right_table.insert(row.to_owned_row())?;
+                                current_epoch_row = Some(row.to_owned_row());
                             }
                             Op::UpdateDelete | Op::Delete => {
                                 last_is_insert = false;
@@ -329,6 +331,9 @@ impl<S: StateStore> DynamicFilterExecutor<S> {
                         {
                             yield Message::Chunk(chunk);
                         }
+                    }
+                    if let Some(row) = current_epoch_row.take() {
+                        self.right_table.insert(row)?;
                     }
                     self.right_table.commit(epoch).await?;
 
