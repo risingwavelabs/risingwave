@@ -235,16 +235,21 @@ impl NestedLoopJoinExecutor {
         left: Vec<DataChunk>,
         right: BoxedExecutor,
     ) {
+        // 1. Iterate over the right table by chunks.
         #[for_await]
         for right_chunk in right.execute() {
             let right_chunk = right_chunk?;
+            // 2. Iterator over the left table by rows.
             for left_row in left.iter().flat_map(|chunk| chunk.rows()) {
+                // 3. Concatenate the left row and right chunk into a single chunk and evaluate the
+                // expression on it.
                 let chunk = Self::concatenate_and_eval(
                     join_expr.as_ref(),
                     &left_data_types,
                     left_row,
                     &right_chunk,
                 )?;
+                // 4. Yield the concatenated chunk.
                 if chunk.cardinality() > 0 {
                     #[for_await]
                     for spilled in Self::append_chunk(chunk_builder, chunk) {
@@ -265,6 +270,7 @@ impl NestedLoopJoinExecutor {
     ) {
         let mut matched = BitmapBuilder::zeroed(left.iter().map(|chunk| chunk.capacity()).sum());
         let right_data_types = right.schema().data_types();
+        // Same as inner join except that a bitmap is used to track which row of the left table is matched.
         #[for_await]
         for right_chunk in right.execute() {
             let right_chunk = right_chunk?;
@@ -284,6 +290,7 @@ impl NestedLoopJoinExecutor {
                 }
             }
         }
+        // Yield unmatched rows in the left table.
         for (left_row, _) in left
             .iter()
             .flat_map(|chunk| chunk.rows())
@@ -312,6 +319,7 @@ impl NestedLoopJoinExecutor {
         for right_chunk in right.execute() {
             let right_chunk = right_chunk?;
             for (left_row_idx, left_row) in left.iter().flat_map(|chunk| chunk.rows()).enumerate() {
+                // TODO: use first-match optimization
                 let chunk = Self::concatenate_and_eval(
                     join_expr.as_ref(),
                     &left_data_types,
