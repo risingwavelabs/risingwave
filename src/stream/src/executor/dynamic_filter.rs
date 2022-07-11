@@ -288,11 +288,11 @@ impl<S: StateStore> DynamicFilterExecutor<S> {
                             Op::UpdateInsert | Op::Insert => {
                                 last_is_insert = true;
                                 current_epoch_value = Some(row.value_at(0).to_owned_datum());
-                                self.right_table.insert(row.to_owned_row())?;
+                                // self.right_table.insert(row.to_owned_row())?;
                             }
                             Op::UpdateDelete | Op::Delete => {
                                 last_is_insert = false;
-                                self.right_table.delete(row.to_owned_row())?;
+                                // self.right_table.delete(row.to_owned_row())?;
                             }
                         }
                     }
