@@ -327,10 +327,15 @@ impl<S: StateStore> DynamicFilterExecutor<S> {
                         }
                     }
                     if let Some(row) = &current_epoch_row {
-                        if let Some(row) = &prev_epoch_row {
-                            self.right_table.delete(row.clone())?;
+                        if let Some(prev_row) = &prev_epoch_row {
+                            // perform an update
+                            if prev_row != row {
+                                self.right_table.delete(prev_row.clone())?;
+                                self.right_table.insert(row.clone())?;
+                            }
+                        } else {
+                            self.right_table.insert(row.clone())?;
                         }
-                        self.right_table.insert(row.clone())?;
                         self.right_table.commit(epoch).await?;
                     }
 
