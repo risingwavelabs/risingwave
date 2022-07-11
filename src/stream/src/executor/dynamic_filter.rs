@@ -13,16 +13,13 @@
 // limitations under the License.
 
 use std::ops::Bound::{self, *};
-use std::ops::RangeBounds;
 use std::sync::Arc;
 
 use anyhow::anyhow;
 use futures::StreamExt;
 use futures_async_stream::try_stream;
 use itertools::Itertools;
-use madsim::collections::btree_map::Range;
-use madsim::collections::{BTreeMap, HashSet};
-use risingwave_common::array::{Array, ArrayImpl, DataChunk, Op, Row, StreamChunk};
+use risingwave_common::array::{Array, ArrayImpl, DataChunk, Op, StreamChunk};
 use risingwave_common::buffer::{Bitmap, BitmapBuilder};
 use risingwave_common::catalog::Schema;
 use risingwave_common::types::{DataType, Datum, ScalarImpl, ToOwnedDatum};
@@ -34,125 +31,12 @@ use risingwave_storage::table::state_table::StateTable;
 use risingwave_storage::StateStore;
 
 use super::barrier_align::*;
-use super::error::{StreamExecutorError, StreamExecutorResult};
+use super::error::StreamExecutorError;
 use super::monitor::StreamingMetrics;
 use super::{BoxedExecutor, BoxedMessageStream, Executor, Message, PkIndices, PkIndicesRef};
 use crate::common::StreamChunkBuilder;
 use crate::executor::PROCESSING_WINDOW_SIZE;
-
-pub struct RangeCache<S: StateStore> {
-    // TODO: It could be potentially expensive memory-wise to store `HashSet`.
-    //       The memory overhead per single row is potentially a backing Vec of size 4
-    //       (See: https://github.com/rust-lang/hashbrown/pull/162)
-    //       + some byte-per-entry metadata. Well, `Row` is on heap anyway...
-    //
-    //       It could be preferred to find a way to do prefix range scans on the left key and
-    //       storing as `BTreeSet<(ScalarImpl, Row)>`.
-    //       We could solve it if `ScalarImpl` had a successor/predecessor function.
-    cache: BTreeMap<ScalarImpl, HashSet<Row>>,
-    state_table: StateTable<S>,
-    /// The current range stored in the cache.
-    /// Any request for a set of values outside of this range will result in a scan
-    /// from storage
-    range: (Bound<ScalarImpl>, Bound<ScalarImpl>),
-
-    #[allow(unused)]
-    num_rows_stored: usize,
-    #[allow(unused)]
-    capacity: usize,
-    current_epoch: u64,
-}
-
-type ScalarRange = (Bound<ScalarImpl>, Bound<ScalarImpl>);
-
-// TODO: add rustdoc comments.
-impl<S: StateStore> RangeCache<S> {
-    pub fn new(state_table: StateTable<S>, current_epoch: u64) -> Self {
-        Self {
-            cache: BTreeMap::new(),
-            state_table,
-            range: (Unbounded, Unbounded),
-            num_rows_stored: 0,
-            capacity: usize::MAX,
-            current_epoch,
-        }
-    }
-
-    pub fn insert(&mut self, k: ScalarImpl, v: Row) -> StreamExecutorResult<()> {
-        if self.range.contains(&k) {
-            let entry = self.cache.entry(k).or_insert_with(HashSet::new);
-            entry.insert(v.clone());
-        }
-        self.state_table.insert(v)?;
-        Ok(())
-    }
-
-    pub fn delete(&mut self, k: &ScalarImpl, v: Row) -> StreamExecutorResult<()> {
-        if self.range.contains(k) {
-            let contains_element = self
-                .cache
-                .get_mut(k)
-                .ok_or_else(|| StreamExecutorError::from(anyhow!("Deleting non-existent element")))?
-                .remove(&v);
-
-            if !contains_element {
-                return Err(StreamExecutorError::from(anyhow!(
-                    "Deleting non-existent element"
-                )));
-            };
-        }
-        self.state_table.delete(v)?;
-        Ok(())
-    }
-
-    pub fn range(
-        &self,
-        range: ScalarRange,
-        _latest_is_lower: bool,
-    ) -> Range<ScalarImpl, HashSet<Row>> {
-        // TODO (cache behaviour):
-        // What we want: At the end of every epoch we will try to read
-        // ranges based on the new value. The values in the range may not all be cached.
-        //
-        // If the new range is overlapping with the current range, we will keep the
-        // current range. We will then evict to capacity after the cache has been populated
-        // with the new range.
-        //
-        // If the new range is non-overlapping, we will delete the old range, and store
-        // `self.capacity` elements from the new range.
-        //
-        // We will always prefer to cache values that are closer to the latest value.
-        //
-        // If this requested range is too large, it will cause OOM.
-        //
-        // --------------------------------------------------------------------
-        //
-        // For overlapping ranges, we will prevent double inserts,
-        // preferring the fresher in-cache value
-        //
-        // let lower_fetch_range: Option<ScalarRange>) = match self.range.0 {
-        //     Unbounded => None,
-        //     Included(x) | Excluded(x) => match range.0 {
-        //         Unbounded => (Unbounded, Included(x)),
-        //         bound @ Included(y) | Excluded(y) => if y
-        //         Included(y) | Excluded(y) => x <= y,
-        //     },
-        //     Excluded(x) =>
-        // }
-
-        self.cache.range(range)
-    }
-
-    pub async fn flush(&mut self) -> StreamExecutorResult<()> {
-        // self.metrics.flush();
-        self.state_table.commit(self.current_epoch).await?;
-        Ok(())
-    }
-
-    pub fn update_epoch(&mut self, epoch: u64) {
-        self.current_epoch = epoch;
-    }
-}
+use super::managed_state::dynamic_filter::RangeCache;
 
 pub struct DynamicFilterExecutor<S: StateStore> {
     source_l: Option<BoxedExecutor>,
@@ -188,7 +72,7 @@ impl<S: StateStore> DynamicFilterExecutor<S> {
             pk_indices,
             identity: format!("DynamicFilterExecutor {:X}", executor_id),
             comparator,
-            range_cache: RangeCache::new(state_table_l, 0),
+            range_cache: RangeCache::new(state_table_l, 0, usize::MAX),
             actor_id,
             metrics,
             schema,
