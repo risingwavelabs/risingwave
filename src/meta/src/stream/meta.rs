@@ -76,6 +76,7 @@ where
             .map(|tf| (tf.table_id(), tf))
             .collect();
 
+        // Extract vnode mapping info from listed `table_fragments` to hash mapping manager.
         Self::restore_vnode_mappings(env.hash_mapping_manager_ref(), &table_fragments)?;
 
         Ok(Self {
@@ -263,21 +264,20 @@ where
         }
     }
 
-    /// Used in [`crate::barrier::GlobalBarrierManager`]
-    pub async fn load_all_actors(&self, with_creating_table: Option<TableId>) -> ActorInfos {
+    /// Used in [`crate::barrier::GlobalBarrierManager`], load all actor that need to be sent or
+    /// collected
+    pub async fn load_all_actors(
+        &self,
+        check_state: impl Fn(ActorState, &TableId) -> bool,
+    ) -> ActorInfos {
         let mut actor_maps = HashMap::new();
         let mut source_actor_ids = HashMap::new();
 
         let map = &self.core.read().await.table_fragments;
         for fragments in map.values() {
-            let include_inactive = with_creating_table.contains(&fragments.table_id());
-            let check_state = |s: ActorState| {
-                s == ActorState::Running || include_inactive && s == ActorState::Inactive
-            };
-
             for (node_id, actor_states) in fragments.node_actor_states() {
                 for actor_state in actor_states {
-                    if check_state(actor_state.1) {
+                    if check_state(actor_state.1, &fragments.table_id()) {
                         actor_maps
                             .entry(node_id)
                             .or_insert_with(Vec::new)
@@ -289,7 +289,7 @@ where
             let source_actors = fragments.node_source_actor_states();
             for (&node_id, actor_states) in &source_actors {
                 for actor_state in actor_states {
-                    if check_state(actor_state.1) {
+                    if check_state(actor_state.1, &fragments.table_id()) {
                         source_actor_ids
                             .entry(node_id)
                             .or_insert_with(Vec::new)

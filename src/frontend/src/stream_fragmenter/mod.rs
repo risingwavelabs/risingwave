@@ -191,7 +191,7 @@ impl StreamFragmenter {
                 // memorize table id for later use
                 state
                     .dependent_table_ids
-                    .insert(TableId::from(&node.table_ref_id));
+                    .insert(TableId::new(node.table_id));
             }
 
             _ => {}
@@ -367,7 +367,7 @@ mod tests {
     use risingwave_pb::data::DataType;
     use risingwave_pb::expr::agg_call::{Arg, Type};
     use risingwave_pb::expr::{AggCall, InputRefExpr};
-    use risingwave_pb::plan_common::{ColumnCatalog, ColumnDesc};
+    use risingwave_pb::plan_common::{ColumnCatalog, ColumnDesc, ColumnOrder};
     use risingwave_pb::stream_plan::*;
 
     use super::*;
@@ -413,8 +413,10 @@ mod tests {
             id: TableId::placeholder().table_id,
             name: String::new(),
             columns,
-            order_column_ids: vec![0],
-            orders: vec![2],
+            order_key: vec![ColumnOrder {
+                index: 0,
+                order_type: 2,
+            }],
             pk: vec![2],
             ..Default::default()
         }

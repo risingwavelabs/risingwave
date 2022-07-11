@@ -1,6 +1,6 @@
 [package]
 name = "risingwave_sqlsmith"
-version = "0.1.9"
+version = "0.1.10"
 edition = "2021"
 
 [dependencies]
@@ -8,6 +8,7 @@ anyhow = { version = "1", features = ["backtrace"] }
 chrono = "0.4"
 clap = { version = "3", features = ["derive"] }
 env_logger = { version = "0.9" }
+itertools = "0.10"
 lazy_static = "1"
 log = "0.4"
 madsim = "=0.2.0-alpha.3"

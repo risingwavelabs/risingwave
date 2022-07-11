@@ -243,6 +243,13 @@ pub enum Expr {
         substring_from: Option<Box<Expr>>,
         substring_for: Option<Box<Expr>>,
     },
+    /// OVERLAY(<expr> PLACING <expr> FROM <expr> [ FOR <expr> ])
+    Overlay {
+        expr: Box<Expr>,
+        new_substring: Box<Expr>,
+        start: Box<Expr>,
+        count: Option<Box<Expr>>,
+    },
     /// TRIM([BOTH | LEADING | TRAILING] <expr> [FROM <expr>])\
     /// Or\
     /// TRIM(<expr>)
@@ -440,6 +447,22 @@ impl fmt::Display for Expr {
                 }
                 if let Some(from_part) = substring_for {
                     write!(f, " FOR {}", from_part)?;
+                }
+
+                write!(f, ")")
+            }
+            Expr::Overlay {
+                expr,
+                new_substring,
+                start,
+                count,
+            } => {
+                write!(f, "OVERLAY({}", expr)?;
+                write!(f, " PLACING {}", new_substring)?;
+                write!(f, " FROM {}", start)?;
+
+                if let Some(count_expr) = count {
+                    write!(f, " FOR {}", count_expr)?;
                 }
 
                 write!(f, ")")
@@ -644,7 +667,7 @@ pub enum ShowObject {
     Schema,
     MaterializedView { schema: Option<Ident> },
     Source { schema: Option<Ident> },
-    Sink { _schema: Option<Ident> },
+    Sink { schema: Option<Ident> },
     MaterializedSource { schema: Option<Ident> },
     Columns { table: ObjectName },
 }
@@ -672,7 +695,7 @@ impl fmt::Display for ShowObject {
             ShowObject::MaterializedSource { schema } => {
                 write!(f, "MATERIALIZED SOURCES{}", fmt_schema(schema))
             }
-            ShowObject::Sink { _schema } => write!(f, "SINKS{}", fmt_schema(_schema)),
+            ShowObject::Sink { schema } => write!(f, "SINKS{}", fmt_schema(schema)),
             ShowObject::Columns { table } => write!(f, "COLUMNS FROM {}", table),
         }
     }
@@ -1540,6 +1563,7 @@ pub struct Function {
     pub distinct: bool,
     // string_agg and array_agg both support ORDER BY
     pub order_by: Vec<OrderByExpr>,
+    pub filter: Option<Box<Expr>>,
 }
 
 impl fmt::Display for Function {
@@ -1559,6 +1583,9 @@ impl fmt::Display for Function {
         )?;
         if let Some(o) = &self.over {
             write!(f, " OVER ({})", o)?;
+        }
+        if let Some(filter) = &self.filter {
+            write!(f, " FILTER(WHERE {})", filter)?;
         }
         Ok(())
     }

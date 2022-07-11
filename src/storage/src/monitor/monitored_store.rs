@@ -62,6 +62,9 @@ where
             .await
             .inspect_err(|e| error!("Failed in iter: {:?}", e))?;
 
+        // statistics of iter in process count to estimate the read ops in the same time
+        self.stats.iter_in_process_counts.inc();
+
         // create a monitored iterator to collect metrics
         let monitored = MonitoredStateStoreIter {
             inner: iter,
@@ -273,6 +276,7 @@ impl MonitoredStateStore<HummockStorage> {
         self.inner.local_version_manager().clone()
     }
 
+    // Note(bugen): should we use notification service for this?
     pub async fn update_compaction_group_cache(&self) -> StorageResult<()> {
         self.inner
             .update_compaction_group_cache()

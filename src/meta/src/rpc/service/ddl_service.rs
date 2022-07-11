@@ -14,6 +14,7 @@
 
 use std::collections::{HashMap, HashSet};
 
+use itertools::Itertools;
 use risingwave_common::catalog::CatalogVersion;
 use risingwave_common::error::{tonic_err, ErrorCode, Result as RwResult};
 use risingwave_common::util::compress::compress_data;
@@ -22,7 +23,6 @@ use risingwave_pb::catalog::*;
 use risingwave_pb::common::{ParallelUnitMapping, ParallelUnitType};
 use risingwave_pb::ddl_service::ddl_service_server::DdlService;
 use risingwave_pb::ddl_service::*;
-use risingwave_pb::plan_common::TableRefId;
 use risingwave_pb::stream_plan::stream_node::NodeBody;
 use risingwave_pb::stream_plan::{StreamFragmentGraph, StreamNode};
 use tonic::{Request, Response, Status};
@@ -253,10 +253,10 @@ where
             ) -> RwResult<()> {
                 match stream_node.node_body.as_ref().unwrap() {
                     NodeBody::Source(source_node) => {
-                        dependent_relations.insert(source_node.get_table_ref_id()?.table_id as u32);
+                        dependent_relations.insert(source_node.get_table_id());
                     }
                     NodeBody::Chain(chain_node) => {
-                        dependent_relations.insert(chain_node.get_table_ref_id()?.table_id as u32);
+                        dependent_relations.insert(chain_node.get_table_id());
                     }
                     _ => {}
                 }
@@ -288,7 +288,7 @@ where
             .map_err(tonic_err)?;
 
         // 3. Create mview in stream manager. The id in stream node will be filled.
-        let ctx = CreateMaterializedViewContext {
+        let mut ctx = CreateMaterializedViewContext {
             schema_id: mview.schema_id,
             database_id: mview.database_id,
             mview_name: mview.name.clone(),
@@ -297,7 +297,7 @@ where
             ..Default::default()
         };
         let internal_tables = match self
-            .create_mview_on_compute_node(fragment_graph, id, ctx)
+            .create_mview_on_compute_node(fragment_graph, id, &mut ctx)
             .await
         {
             Err(e) => {
@@ -307,14 +307,29 @@ where
                     .map_err(tonic_err)?;
                 return Err(e.into());
             }
-            Ok(mut inner_internal_tables) => {
+            Ok(()) => {
                 self.set_table_mapping(&mut mview).map_err(tonic_err)?;
-                for inner_table in &mut inner_internal_tables {
+                let mut internal_table = ctx
+                    .internal_table_id_map
+                    .iter()
+                    .filter(|(_, table)| table.is_some())
+                    .map(|(_, table)| table.clone().unwrap())
+                    .collect_vec();
+
+                for inner_table in &mut internal_table {
                     self.set_table_mapping(inner_table).map_err(tonic_err)?;
                 }
-                inner_internal_tables
+                internal_table
             }
         };
+
+        // tracing for checking the diff of catalog::Table and internal_table_id count
+        tracing::info!(
+            "create_materialized_view internal_table_count {} internal_table_id_count {}",
+            internal_tables.len(),
+            ctx.internal_table_id_map.len()
+        );
+
         // 4. Finally, update the catalog.
         let version = self
             .catalog_manager
@@ -398,15 +413,15 @@ where
         }))
     }
 
-    async fn list_materialized_view(
+    async fn risectl_list_state_tables(
         &self,
-        _request: Request<ListMaterializedViewRequest>,
-    ) -> Result<Response<ListMaterializedViewResponse>, Status> {
+        _request: Request<RisectlListStateTablesRequest>,
+    ) -> Result<Response<RisectlListStateTablesResponse>, Status> {
         use crate::model::MetadataModel;
         let tables = Table::list(self.env.meta_store())
             .await
             .map_err(tonic_err)?;
-        Ok(Response::new(ListMaterializedViewResponse { tables }))
+        Ok(Response::new(RisectlListStateTablesResponse { tables }))
     }
 }
 
@@ -418,8 +433,8 @@ where
         &self,
         mut fragment_graph: StreamFragmentGraph,
         id: TableId,
-        mut ctx: CreateMaterializedViewContext,
-    ) -> RwResult<Vec<Table>> {
+        ctx: &mut CreateMaterializedViewContext,
+    ) -> RwResult<()> {
         use risingwave_common::catalog::TableId;
 
         // Fill in the correct mview id for stream node.
@@ -427,7 +442,7 @@ where
             let mut mview_count = 0;
             if let NodeBody::Materialize(materialize_node) = stream_node.node_body.as_mut().unwrap()
             {
-                materialize_node.table_ref_id = TableRefId::from(&mview_id).into();
+                materialize_node.table_id = mview_id.table_id();
                 mview_count += 1;
             }
             for input in &mut stream_node.input {
@@ -454,8 +469,7 @@ where
             .await;
 
         let mut actor_graph_builder =
-            ActorGraphBuilder::new(self.env.id_gen_manager_ref(), &fragment_graph, &mut ctx)
-                .await?;
+            ActorGraphBuilder::new(self.env.id_gen_manager_ref(), &fragment_graph, ctx).await?;
 
         // TODO(Kexiang): now simply use Count(ParallelUnit) - 1 as parallelism of each fragment
         let parallelisms: HashMap<FragmentId, u32> = actor_graph_builder
@@ -470,28 +484,33 @@ where
             })
             .collect();
 
-        let (graph, internal_tables) = actor_graph_builder
+        let graph = actor_graph_builder
             .generate_graph(
                 self.env.id_gen_manager_ref(),
                 self.fragment_manager.clone(),
                 parallelisms,
-                &mut ctx,
+                ctx,
             )
             .await?;
+
+        let internal_table_id_set = ctx
+            .internal_table_id_map
+            .iter()
+            .map(|(table_id, _)| *table_id)
+            .collect::<HashSet<u32>>();
+
         assert_eq!(
             fragment_graph.table_ids_cnt,
-            ctx.internal_table_id_set.len() as u32
+            internal_table_id_set.len() as u32
         );
 
-        let table_fragments =
-            TableFragments::new(mview_id, graph, ctx.internal_table_id_set.clone());
+        let table_fragments = TableFragments::new(mview_id, graph, internal_table_id_set);
 
         // Create on compute node.
         self.stream_manager
             .create_materialized_view(table_fragments, ctx)
             .await?;
-
-        Ok(internal_tables)
+        Ok(())
     }
 
     async fn create_materialized_source_inner(
@@ -522,11 +541,10 @@ where
 
         // Fill in the correct source id for stream node.
         fn fill_source_id(stream_node: &mut StreamNode, source_id: u32) -> usize {
-            use risingwave_common::catalog::TableId;
             let mut source_count = 0;
             if let NodeBody::Source(source_node) = stream_node.node_body.as_mut().unwrap() {
                 // TODO: refactor using source id.
-                source_node.table_ref_id = TableRefId::from(&TableId::new(source_id)).into();
+                source_node.table_id = source_id;
                 source_count += 1;
             }
             for input in &mut stream_node.input {
@@ -558,7 +576,7 @@ where
 
         // Create mview on compute node.
         // Noted that this progress relies on the source just created, so we pass it here.
-        let ctx = CreateMaterializedViewContext {
+        let mut ctx = CreateMaterializedViewContext {
             schema_id: source.schema_id,
             database_id: source.database_id,
             mview_name: source.name.clone(),
@@ -568,7 +586,7 @@ where
         };
 
         let internal_tables = match self
-            .create_mview_on_compute_node(fragment_graph, mview_id, ctx)
+            .create_mview_on_compute_node(fragment_graph, mview_id, &mut ctx)
             .await
         {
             Err(e) => {
@@ -579,12 +597,19 @@ where
                 self.source_manager.drop_source(source_id).await?;
                 return Err(e);
             }
-            Ok(mut inner_internal_tables) => {
+            Ok(()) => {
                 self.set_table_mapping(&mut mview).map_err(tonic_err)?;
-                for inner_table in &mut inner_internal_tables {
+                let mut internal_table = ctx
+                    .internal_table_id_map
+                    .iter()
+                    .filter(|(_, table)| table.is_some())
+                    .map(|(_, table)| table.clone().unwrap())
+                    .collect_vec();
+
+                for inner_table in &mut internal_table {
                     self.set_table_mapping(inner_table).map_err(tonic_err)?;
                 }
-                inner_internal_tables
+                internal_table
             }
         };
 

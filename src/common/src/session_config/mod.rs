@@ -32,7 +32,7 @@ const CONFIG_KEYS: [&str; 6] = [
 ];
 const IMPLICIT_FLUSH: usize = 0;
 const QUERY_MODE: usize = 1;
-const DELFA_JOIN: usize = 2;
+const DELTA_JOIN: usize = 2;
 const EXTRA_FLOAT_DIGITS: usize = 3;
 const APPLICATION_NAME: usize = 4;
 const DATE_STYLE: usize = 5;
@@ -142,8 +142,14 @@ impl<const NAME: usize, const DEFAULT: i32> FromStr for ConfigI32<NAME, DEFAULT>
     }
 }
 
+pub struct VariableInfo {
+    pub name: String,
+    pub setting: String,
+    pub description: String,
+}
+
 type ImplicitFlush = ConfigBool<IMPLICIT_FLUSH, false>;
-type DeltaJoin = ConfigBool<DELFA_JOIN, false>;
+type DeltaJoin = ConfigBool<DELTA_JOIN, false>;
 type ApplicationName = ConfigString<APPLICATION_NAME>;
 type ExtraFloatDigit = ConfigI32<EXTRA_FLOAT_DIGITS, 1>;
 // TODO: We should use more specified type here.
@@ -192,6 +198,59 @@ impl ConfigMap {
         }
 
         Ok(())
+    }
+
+    pub fn get(&self, key: &str) -> Result<String, RwError> {
+        if key.eq_ignore_ascii_case(ImplicitFlush::entry_name()) {
+            Ok(self.implicit_flush.to_string())
+        } else if key.eq_ignore_ascii_case(DeltaJoin::entry_name()) {
+            Ok(self.delta_join.to_string())
+        } else if key.eq_ignore_ascii_case(QueryMode::entry_name()) {
+            Ok(self.query_mode.to_string())
+        } else if key.eq_ignore_ascii_case(ExtraFloatDigit::entry_name()) {
+            Ok(self.extra_float_digit.to_string())
+        } else if key.eq_ignore_ascii_case(ApplicationName::entry_name()) {
+            Ok(self.application_name.to_string())
+        } else if key.eq_ignore_ascii_case(DateStyle::entry_name()) {
+            Ok(self.date_style.to_string())
+        } else {
+            Err(ErrorCode::UnrecognizedConfigurationParameter(key.to_string()).into())
+        }
+    }
+
+    pub fn get_all(&self) -> Vec<VariableInfo> {
+        vec![
+            VariableInfo{
+                name : ImplicitFlush::entry_name().to_lowercase(),
+                setting : self.implicit_flush.to_string(),
+                description : String::from("If `RW_IMPLICIT_FLUSH` is on, then every INSERT/UPDATE/DELETE statement will block until the entire dataflow is refreshed.")
+            },
+            VariableInfo{
+                name : DeltaJoin::entry_name().to_lowercase(),
+                setting : self.delta_join.to_string(),
+                description : String::from("To force the usage of delta join in streaming execution.")
+            },
+            VariableInfo{
+                name : QueryMode::entry_name().to_lowercase(),
+                setting : self.query_mode.to_string(),
+                description : String::from("A temporary config variable to force query running in either local or distributed mode.")
+            },
+            VariableInfo{
+                name : ExtraFloatDigit::entry_name().to_lowercase(),
+                setting : self.extra_float_digit.to_string(),
+                description : String::from("Sets the number of digits displayed for floating-point values.")
+            },
+            VariableInfo{
+                name : ApplicationName::entry_name().to_lowercase(),
+                setting : self.application_name.to_string(),
+                description : String::from("Sets the application name to be reported in statistics and logs.")
+            },
+            VariableInfo{
+                name : DateStyle::entry_name().to_lowercase(),
+                setting : self.date_style.to_string(),
+                description : String::from("It is typically set by an application upon connection to the server.")
+            },
+        ]
     }
 
     pub fn get_implicit_flush(&self) -> bool {

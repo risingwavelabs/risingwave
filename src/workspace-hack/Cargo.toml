@@ -4,7 +4,7 @@
 
 [package]
 name = "workspace-hack"
-version = "0.1.9"
+version = "0.1.10"
 description = "workspace-hack package, managed by hakari"
 # You can choose to publish this crate: see https://docs.rs/cargo-hakari/latest/cargo_hakari/publishing.
 publish = false
@@ -35,7 +35,6 @@ futures-io = { version = "0.3", features = ["std"] }
 futures-sink = { version = "0.3", features = ["alloc", "std"] }
 futures-task = { version = "0.3", default-features = false, features = ["alloc", "std"] }
 futures-util = { version = "0.3", features = ["alloc", "async-await", "async-await-macro", "channel", "futures-channel", "futures-io", "futures-macro", "futures-sink", "io", "memchr", "sink", "slab", "std"] }
-hashbrown = { version = "0.11", features = ["ahash", "inline-more", "nightly", "raw"] }
 hyper = { version = "0.14", features = ["client", "full", "h2", "http1", "http2", "runtime", "server", "socket2", "stream", "tcp"] }
 indexmap = { version = "1", default-features = false, features = ["std"] }
 isahc = { version = "1", default-features = false, features = ["encoding_rs", "mime", "text-decoding"] }
@@ -98,7 +97,6 @@ futures-io = { version = "0.3", features = ["std"] }
 futures-sink = { version = "0.3", features = ["alloc", "std"] }
 futures-task = { version = "0.3", default-features = false, features = ["alloc", "std"] }
 futures-util = { version = "0.3", features = ["alloc", "async-await", "async-await-macro", "channel", "futures-channel", "futures-io", "futures-macro", "futures-sink", "io", "memchr", "sink", "slab", "std"] }
-hashbrown = { version = "0.11", features = ["ahash", "inline-more", "nightly", "raw"] }
 hyper = { version = "0.14", features = ["client", "full", "h2", "http1", "http2", "runtime", "server", "socket2", "stream", "tcp"] }
 indexmap = { version = "1", default-features = false, features = ["std"] }
 isahc = { version = "1", default-features = false, features = ["encoding_rs", "mime", "text-decoding"] }

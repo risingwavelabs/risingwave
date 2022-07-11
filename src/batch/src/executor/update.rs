@@ -12,23 +12,24 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+use anyhow::anyhow;
 use futures::future::try_join_all;
 use futures_async_stream::try_stream;
 use itertools::Itertools;
 use risingwave_common::array::column::Column;
 use risingwave_common::array::{ArrayBuilder, DataChunk, Op, PrimitiveArrayBuilder, StreamChunk};
 use risingwave_common::catalog::{Field, Schema, TableId};
-use risingwave_common::error::{ErrorCode, Result, RwError};
+use risingwave_common::error::{Result, RwError};
 use risingwave_common::types::DataType;
 use risingwave_expr::expr::{build_from_prost, BoxedExpression};
 use risingwave_pb::batch_plan::plan_node::NodeBody;
 use risingwave_source::SourceManagerRef;
 
+use crate::error::BatchError;
 use crate::executor::{
     BoxedDataChunkStream, BoxedExecutor, BoxedExecutorBuilder, Executor, ExecutorBuilder,
 };
 use crate::task::BatchTaskContext;
-
 /// [`UpdateExecutor`] implements table updation with values from its child executor and given
 /// expressions.
 // TODO: multiple `UPDATE`s in a single epoch may cause problems. Need validation on materialize.
@@ -141,9 +142,7 @@ impl UpdateExecutor {
         let rows_updated = try_join_all(notifiers)
             .await
             .map_err(|_| {
-                RwError::from(ErrorCode::InternalError(
-                    "failed to wait chunks to be written".to_owned(),
-                ))
+                BatchError::Internal(anyhow!("failed to wait chunks to be written".to_owned(),))
             })?
             .into_iter()
             .sum::<usize>()
@@ -174,7 +173,7 @@ impl BoxedExecutorBuilder for UpdateExecutor {
             NodeBody::Update
         )?;
 
-        let table_id = TableId::from(&update_node.table_source_ref_id);
+        let table_id = TableId::new(update_node.table_source_id);
 
         let exprs: Vec<_> = update_node
             .get_exprs()

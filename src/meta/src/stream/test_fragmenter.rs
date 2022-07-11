@@ -25,10 +25,7 @@ use risingwave_pb::expr::agg_call::{Arg, Type};
 use risingwave_pb::expr::expr_node::RexNode;
 use risingwave_pb::expr::expr_node::Type::{Add, GreaterThan, InputRef};
 use risingwave_pb::expr::{AggCall, ExprNode, FunctionCall, InputRefExpr};
-use risingwave_pb::plan_common::{
-    ColumnCatalog, ColumnDesc, ColumnOrder, DatabaseRefId, Field, OrderType, SchemaRefId,
-    TableRefId,
-};
+use risingwave_pb::plan_common::{ColumnCatalog, ColumnDesc, ColumnOrder, Field, OrderType};
 use risingwave_pb::stream_plan::source_node::SourceType;
 use risingwave_pb::stream_plan::stream_node::NodeBody;
 use risingwave_pb::stream_plan::{
@@ -40,16 +37,6 @@ use crate::manager::MetaSrvEnv;
 use crate::model::TableFragments;
 use crate::stream::stream_graph::ActorGraphBuilder;
 use crate::stream::{CreateMaterializedViewContext, FragmentManager};
-
-fn make_table_ref_id(id: i32) -> TableRefId {
-    TableRefId {
-        schema_ref_id: Some(SchemaRefId {
-            database_ref_id: Some(DatabaseRefId { database_id: 0 }),
-            schema_id: 0,
-        }),
-        table_id: id,
-    }
-}
 
 fn make_inputref(idx: i32) -> ExprNode {
     ExprNode {
@@ -90,14 +77,10 @@ fn make_field(type_name: TypeName) -> Field {
     }
 }
 
-fn make_column_order(idx: i32) -> ColumnOrder {
+fn make_column_order(index: u32) -> ColumnOrder {
     ColumnOrder {
         order_type: OrderType::Ascending as i32,
-        input_ref: Some(InputRefExpr { column_idx: idx }),
-        return_type: Some(DataType {
-            type_name: TypeName::Int64 as i32,
-            ..Default::default()
-        }),
+        index,
     }
 }
 
@@ -126,8 +109,10 @@ fn make_internal_table(is_agg_value: bool) -> ProstTable {
         database_id: DatabaseId::placeholder() as u32,
         name: String::new(),
         columns,
-        order_column_ids: vec![0],
-        orders: vec![2],
+        order_key: vec![ColumnOrder {
+            index: 0,
+            order_type: 2,
+        }],
         pk: vec![2],
         ..Default::default()
     }
@@ -139,11 +124,10 @@ fn make_internal_table(is_agg_value: bool) -> ProstTable {
 /// create materialized view T_distributed as select sum(v1)+1 as V from t where v1>v2;
 /// ```
 fn make_stream_node() -> StreamNode {
-    let table_ref_id = make_table_ref_id(1);
     // table source node
     let source_node = StreamNode {
         node_body: Some(NodeBody::Source(SourceNode {
-            table_ref_id: Some(table_ref_id),
+            table_id: 1,
             column_ids: vec![1, 2, 0],
             source_type: SourceType::Table as i32,
         })),
@@ -198,7 +182,7 @@ fn make_stream_node() -> StreamNode {
     let simple_agg_node = StreamNode {
         node_body: Some(NodeBody::GlobalSimpleAgg(SimpleAggNode {
             agg_calls: vec![make_sum_aggcall(0), make_sum_aggcall(1)],
-            distribution_keys: Default::default(),
+            distribution_key: Default::default(),
             internal_tables: vec![make_internal_table(true), make_internal_table(false)],
             column_mapping: HashMap::new(),
             is_append_only: false,
@@ -231,7 +215,7 @@ fn make_stream_node() -> StreamNode {
     let simple_agg_node_1 = StreamNode {
         node_body: Some(NodeBody::GlobalSimpleAgg(SimpleAggNode {
             agg_calls: vec![make_sum_aggcall(0), make_sum_aggcall(1)],
-            distribution_keys: Default::default(),
+            distribution_key: Default::default(),
             internal_tables: vec![make_internal_table(true), make_internal_table(false)],
             column_mapping: HashMap::new(),
             is_append_only: false,
@@ -276,11 +260,9 @@ fn make_stream_node() -> StreamNode {
         input: vec![project_node],
         pk_indices: vec![],
         node_body: Some(NodeBody::Materialize(MaterializeNode {
-            table_ref_id: Some(make_table_ref_id(1)),
-            associated_table_ref_id: None,
-            column_ids: vec![0_i32, 1_i32],
+            table_id: 1,
+            table: Some(make_internal_table(true)),
             column_orders: vec![make_column_order(1), make_column_order(2)],
-            distribution_keys: Default::default(),
         })),
         fields: vec![], // TODO: fill this later
         operator_id: 7,
@@ -329,11 +311,12 @@ async fn test_fragmenter() -> Result<()> {
         )
         .await?;
 
-    let table_fragments = TableFragments::new(
-        TableId::default(),
-        graph.0,
-        ctx.internal_table_id_set.clone(),
-    );
+    let internal_table_id_set = ctx
+        .internal_table_id_map
+        .iter()
+        .map(|(table_id, _)| *table_id)
+        .collect::<HashSet<u32>>();
+    let table_fragments = TableFragments::new(TableId::default(), graph, internal_table_id_set);
     let actors = table_fragments.actors();
     let source_actor_ids = table_fragments.source_actor_ids();
     let sink_actor_ids = table_fragments.sink_actor_ids();

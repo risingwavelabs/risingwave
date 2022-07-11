@@ -21,10 +21,10 @@ use risingwave_common::array::Row;
 use risingwave_common::catalog::{ColumnDesc, ColumnId};
 use risingwave_common::error::{ErrorCode, Result};
 use risingwave_common::types::{Datum, VirtualNode, VIRTUAL_NODE_SIZE};
-use risingwave_common::util::ordered::deserialize_column_id;
 use risingwave_common::util::value_encoding::deserialize_cell;
 
-use crate::table::cell_based_table::DEFAULT_VNODE;
+use super::cell_based_encoding_util::deserialize_column_id;
+use crate::table::storage_table::DEFAULT_VNODE;
 
 /// Record mapping from [`ColumnDesc`], [`ColumnId`], and output index of columns in a table.
 pub struct ColumnDescMapping {
@@ -209,9 +209,9 @@ mod tests {
     use risingwave_common::array::Row;
     use risingwave_common::catalog::{ColumnDesc, ColumnId};
     use risingwave_common::types::{DataType, ScalarImpl};
-    use risingwave_common::util::ordered::serialize_pk_and_row_state;
 
     use super::make_cell_based_row_deserializer;
+    use crate::encoding::cell_based_encoding_util::serialize_pk_and_row_state;
 
     #[test]
     fn test_cell_based_deserializer() {

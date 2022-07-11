@@ -1,15 +1,15 @@
 [package]
 edition = "2021"
 name = "risingwave_source"
-version = "0.1.9"
+version = "0.1.10"
 
 [dependencies]
 anyhow = "1"
 apache-avro = { git = "https://github.com/singularity-data/avro", branch = "master", features = ["snappy", "zstandard", "bzip", "xz"] }
 async-stream = "0.3"
 async-trait = "0.1"
-aws-config = { version = "0.12", default-features = false, features = ["rt-tokio", "native-tls"] }
-aws-sdk-s3 = { version = "0.12", default-features = false, features = ["rt-tokio", "native-tls"] }
+aws-config = { version = "0.15", default-features = false, features = ["rt-tokio", "native-tls"] }
+aws-sdk-s3 = { version = "0.15", default-features = false, features = ["rt-tokio", "native-tls"] }
 byteorder = "1"
 bytes = "1"
 chrono = { version = "0.4", default-features = false, features = ["clock", "std"] }

@@ -13,7 +13,7 @@
 // limitations under the License.
 
 use std::cmp::Ordering;
-use std::fmt::{Display, Formatter};
+use std::fmt::{Display, Formatter, Write as _};
 use std::hash::{Hash, Hasher};
 use std::io::Write;
 use std::ops::{Add, Sub};
@@ -45,6 +45,7 @@ pub struct IntervalUnit {
 }
 
 const DAY_MS: i64 = 86400000;
+const MONTH_MS: i64 = 30 * DAY_MS;
 
 impl IntervalUnit {
     pub fn new(months: i32, days: i32, ms: i64) -> Self {
@@ -113,6 +114,20 @@ impl IntervalUnit {
             months: -self.months,
             days: -self.days,
             ms: -self.ms,
+        }
+    }
+
+    #[must_use]
+    pub fn from_total_ms(ms: i64) -> Self {
+        let mut remaining_ms = ms;
+        let months = remaining_ms / MONTH_MS;
+        remaining_ms -= months * MONTH_MS;
+        let days = remaining_ms / DAY_MS;
+        remaining_ms -= days * DAY_MS;
+        IntervalUnit {
+            months: (months as i32),
+            days: (days as i32),
+            ms: (remaining_ms as i64),
         }
     }
 
@@ -195,15 +210,24 @@ impl IntervalUnit {
             return None;
         }
 
-        let months = (self.months as f64) / rhs;
-        let days = (self.days as f64) / rhs + (months % 1.0) * 30.0;
-        let ms = ((self.ms as f64) / rhs + (days % 1.0) * 24.0 * 60.0 * 60.0 * 1000.0).round();
+        let ms = self.as_ms_i64();
+        Some(IntervalUnit::from_total_ms((ms as f64 / rhs).round() as i64))
+    }
 
-        Some(IntervalUnit {
-            months: (months as i32),
-            days: (days as i32),
-            ms: (ms as i64),
-        })
+    fn as_ms_i64(&self) -> i64 {
+        self.months as i64 * MONTH_MS + self.days as i64 * DAY_MS + self.ms
+    }
+
+    /// times [`IntervalUnit`] with an integer/float.
+    pub fn mul_float<I>(&self, rhs: I) -> Option<Self>
+    where
+        I: TryInto<OrderedF64>,
+    {
+        let rhs = rhs.try_into().ok()?;
+        let rhs = rhs.0;
+
+        let ms = self.as_ms_i64();
+        Some(IntervalUnit::from_total_ms((ms as f64 * rhs).round() as i64))
     }
 
     /// Performs an exact division, returns [`None`] if for any unit, lhs % rhs != 0.
@@ -347,7 +371,8 @@ impl Display for IntervalUnit {
         let days = self.days;
         let hours = self.ms / 1000 / 3600;
         let minutes = (self.ms / 1000 / 60) % 60;
-        let seconds = ((self.ms % 60000) as f64) / 1000.0;
+        let seconds = self.ms % 60000 / 1000;
+        let mut secs_fract = self.ms % 1000;
         let mut v = SmallVec::<[String; 4]>::new();
         if years == 1 {
             v.push(format!("{years} year"));
@@ -364,7 +389,15 @@ impl Display for IntervalUnit {
         } else if days != 0 {
             v.push(format!("{days} days"));
         }
-        v.push(format!("{hours:0>2}:{minutes:0>2}:{seconds:0>2}"));
+        let mut format_time = format!("{hours:0>2}:{minutes:0>2}:{seconds:0>2}");
+        if secs_fract != 0 {
+            write!(format_time, ".{:03}", secs_fract)?;
+            while secs_fract % 10 == 0 {
+                secs_fract /= 10;
+                format_time.pop();
+            }
+        }
+        v.push(format_time);
         Display::fmt(&v.join(" "), f)
     }
 }

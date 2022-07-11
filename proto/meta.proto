@@ -12,7 +12,6 @@ option optimize_for = SPEED;
 
 message HeartbeatRequest {
   uint32 node_id = 1;
-  common.WorkerType worker_type = 2;
 }
 
 message HeartbeatResponse {
@@ -172,6 +171,7 @@ message SubscribeResponse {
     catalog.Schema schema = 6;
     catalog.Table table = 7;
     catalog.Source source = 8;
+    catalog.Sink sink = 12;
     user.UserInfo user = 11;
     MetaSnapshot snapshot = 9;
     hummock.HummockSnapshot hummock_snapshot = 10;

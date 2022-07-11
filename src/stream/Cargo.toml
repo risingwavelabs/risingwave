@@ -1,6 +1,6 @@
 [package]
 name = "risingwave_stream"
-version = "0.1.9"
+version = "0.1.10"
 edition = "2021"
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
@@ -26,6 +26,7 @@ log = "0.4"
 madsim = "=0.2.0-alpha.3"
 maplit = "1.0.2"
 memcomparable = { path = "../utils/memcomparable" }
+minstant = "0.1"
 num-traits = "0.2"
 parking_lot = "0.12"
 paste = "1"

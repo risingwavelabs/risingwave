@@ -45,7 +45,7 @@ impl BatchSeqScan {
         {
             // validate scan_range
             let scan_pk_prefix_len = scan_range.eq_conds.len();
-            let order_len = logical.table_desc().order_column_ids().len();
+            let order_len = logical.table_desc().order_column_indices().len();
             assert!(
                 scan_pk_prefix_len < order_len
                     || (scan_pk_prefix_len == order_len && is_full_range(&scan_range.range)),
@@ -70,7 +70,10 @@ impl BatchSeqScan {
             if self.logical.is_sys_table() {
                 Distribution::Single
             } else {
-                Distribution::SomeShard
+                match self.logical.distribution_key() {
+                    Some(dist_key) => Distribution::HashShard(dist_key),
+                    None => Distribution::SomeShard,
+                }
             },
             self.scan_range.clone(),
         )
@@ -80,6 +83,10 @@ impl BatchSeqScan {
     #[must_use]
     pub fn logical(&self) -> &LogicalScan {
         &self.logical
+    }
+
+    pub fn scan_range(&self) -> &ScanRange {
+        &self.scan_range
     }
 }
 

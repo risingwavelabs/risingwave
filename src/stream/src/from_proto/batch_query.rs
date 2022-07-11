@@ -14,8 +14,9 @@
 
 use itertools::Itertools;
 use risingwave_common::catalog::{ColumnDesc, ColumnId, OrderedColumnDesc, TableId};
-use risingwave_pb::plan_common::CellBasedTableDesc;
-use risingwave_storage::table::cell_based_table::CellBasedTable;
+use risingwave_common::util::sort_util::OrderType;
+use risingwave_pb::plan_common::{CellBasedTableDesc, OrderType as ProstOrderType};
+use risingwave_storage::table::storage_table::StorageTable;
 use risingwave_storage::table::Distribution;
 use risingwave_storage::StateStore;
 
@@ -38,17 +39,25 @@ impl ExecutorBuilder for BatchQueryExecutorBuilder {
             table_id: table_desc.table_id,
         };
 
-        let pk_descs = table_desc
+        let order_types = table_desc
             .order_key
             .iter()
-            .map(OrderedColumnDesc::from)
+            .map(|desc| OrderType::from_prost(&ProstOrderType::from_i32(desc.order_type).unwrap()))
             .collect_vec();
-        let order_types = pk_descs.iter().map(|desc| desc.order).collect_vec();
 
         let column_descs = table_desc
             .columns
             .iter()
             .map(ColumnDesc::from)
+            .collect_vec();
+        // TODO: remove this
+        let pk_descs = table_desc
+            .order_key
+            .iter()
+            .map(|order| OrderedColumnDesc {
+                column_desc: column_descs[order.index as usize].clone(),
+                order: OrderType::from_prost(&ProstOrderType::from_i32(order.order_type).unwrap()),
+            })
             .collect_vec();
         let column_ids = node
             .column_ids
@@ -59,9 +68,9 @@ impl ExecutorBuilder for BatchQueryExecutorBuilder {
 
         // Use indices based on full table instead of streaming executor output.
         let pk_indices = table_desc
-            .pk_indices
+            .order_key
             .iter()
-            .map(|&k| k as usize)
+            .map(|k| k.index as usize)
             .collect_vec();
 
         let dist_key_indices = table_desc
@@ -77,7 +86,7 @@ impl ExecutorBuilder for BatchQueryExecutorBuilder {
             },
             None => Distribution::fallback(),
         };
-        let table = CellBasedTable::new_partial(
+        let table = StorageTable::new_partial(
             state_store,
             table_id,
             column_descs,

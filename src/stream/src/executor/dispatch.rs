@@ -69,7 +69,6 @@ impl LocalOutput {
 #[async_trait]
 impl Output for LocalOutput {
     async fn send(&mut self, message: Message) -> Result<()> {
-        // local channel should never fail
         self.ch
             .send(message)
             .await
@@ -110,11 +109,12 @@ impl Output for RemoteOutput {
             Message::Chunk(chk) => Message::Chunk(chk.compact()?),
             _ => message,
         };
-        // local channel should never fail
+
         self.ch
             .send(message)
             .await
             .map_err(|_| internal_error("failed to send"))?;
+
         Ok(())
     }
 
@@ -171,7 +171,7 @@ impl DispatchExecutorInner {
                     .actor_out_record_cnt
                     .with_label_values(&[&self.actor_id_str])
                     .inc_by(chunk.cardinality() as _);
-
+                let start_time = minstant::Instant::now();
                 if self.dispatchers.len() == 1 {
                     // special clone optimization when there is only one downstream dispatcher
                     self.single_inner_mut().dispatch_data(chunk).await?;
@@ -180,14 +180,23 @@ impl DispatchExecutorInner {
                         dispatcher.dispatch_data(chunk.clone()).await?;
                     }
                 }
+                self.metrics
+                    .actor_output_buffer_blocking_duration_ns
+                    .with_label_values(&[&self.actor_id_str])
+                    .inc_by(start_time.elapsed().as_nanos() as u64);
             }
             Message::Barrier(barrier) => {
+                let start_time = minstant::Instant::now();
                 let mutation = barrier.mutation.clone();
                 self.pre_mutate_outputs(&mutation).await?;
                 for dispatcher in &mut self.dispatchers {
                     dispatcher.dispatch_barrier(barrier.clone()).await?;
                 }
                 self.post_mutate_outputs(&mutation).await?;
+                self.metrics
+                    .actor_output_buffer_blocking_duration_ns
+                    .with_label_values(&[&self.actor_id_str])
+                    .inc_by(start_time.elapsed().as_nanos() as u64);
             }
         };
         Ok(())

@@ -18,6 +18,7 @@ use std::task::{Context, Poll};
 use async_trait::async_trait;
 use futures::{Stream, StreamExt};
 use futures_async_stream::for_await;
+use madsim::time::Instant;
 use risingwave_common::catalog::Schema;
 use risingwave_common::error::Result;
 use risingwave_pb::task_service::GetStreamResponse;
@@ -29,13 +30,14 @@ use tonic::Streaming;
 use super::error::StreamExecutorError;
 use super::*;
 use crate::executor::monitor::StreamingMetrics;
-use crate::task::UpDownActorIds;
+use crate::task::{UpDownActorIds, UpDownFragmentIds};
 
 /// Receive data from `gRPC` and forwards to `MergerExecutor`/`ReceiverExecutor`
 pub struct RemoteInput {
     stream: Streaming<GetStreamResponse>,
     sender: Sender<Message>,
     up_down_ids: UpDownActorIds,
+    up_down_frag: UpDownFragmentIds,
     metrics: Arc<StreamingMetrics>,
 }
 
@@ -45,14 +47,18 @@ impl RemoteInput {
     pub async fn create(
         client: ComputeClient,
         up_down_ids: UpDownActorIds,
+        up_down_frag: UpDownFragmentIds,
         sender: Sender<Message>,
         metrics: Arc<StreamingMetrics>,
     ) -> Result<Self> {
-        let stream = client.get_stream(up_down_ids.0, up_down_ids.1).await?;
+        let stream = client
+            .get_stream(up_down_ids.0, up_down_ids.1, up_down_frag.0, up_down_frag.1)
+            .await?;
         Ok(Self {
             stream,
             sender,
             up_down_ids,
+            up_down_frag,
             metrics,
         })
     }
@@ -60,20 +66,49 @@ impl RemoteInput {
     pub async fn run(self) {
         let up_actor_id = self.up_down_ids.0.to_string();
         let down_actor_id = self.up_down_ids.1.to_string();
+        let up_fragment_id = self.up_down_frag.0.to_string();
+        let down_fragment_id = self.up_down_frag.1.to_string();
+
+        let mut rr = 0;
+        const SAMPLING_FREQUENCY: u64 = 100;
+
         #[for_await]
         for data_res in self.stream {
             match data_res {
                 Ok(stream_msg) => {
                     let bytes = Message::get_encoded_len(&stream_msg);
-                    let msg_res = Message::from_protobuf(
-                        stream_msg
-                            .get_message()
-                            .expect("no message in stream response!"),
-                    );
                     self.metrics
                         .exchange_recv_size
                         .with_label_values(&[&up_actor_id, &down_actor_id])
                         .inc_by(bytes as u64);
+
+                    self.metrics
+                        .exchange_frag_recv_size
+                        .with_label_values(&[&up_fragment_id, &down_fragment_id])
+                        .inc_by(bytes as u64);
+
+                    // add deserialization duration metric with given sampling frequency
+                    let msg_res = if rr % SAMPLING_FREQUENCY == 0 {
+                        let start_time = Instant::now();
+                        let msg_res = Message::from_protobuf(
+                            stream_msg
+                                .get_message()
+                                .expect("no message in stream response!"),
+                        );
+                        self.metrics
+                            .actor_sampled_deserialize_duration_ns
+                            .with_label_values(&[&down_actor_id])
+                            .inc_by(start_time.elapsed().as_nanos() as u64);
+                        msg_res
+                    } else {
+                        Message::from_protobuf(
+                            stream_msg
+                                .get_message()
+                                .expect("no message in stream response!"),
+                        )
+                    };
+                    rr += 1;
+
                     match msg_res {
                         Ok(msg) => {
                             self.sender.send(msg).await.unwrap();
@@ -142,9 +177,10 @@ impl Executor for MergeExecutor {
         // Futures of all active upstreams.
         let status = self.status;
         let select_all = SelectReceivers::new(self.actor_id, status, upstreams);
-        // Channels that're blocked by the barrier to align.
         let actor_id_str = self.actor_id.to_string();
         let metrics = self.metrics.clone();
+
+        // Channels that're blocked by the barrier to align.
         select_all
             .map(move |msg| {
                 if let Ok(Message::Chunk(chunk)) = &msg {
@@ -446,6 +482,7 @@ mod tests {
         let input_handle = tokio::spawn(async move {
             let remote_input = RemoteInput::create(
                 ComputeClient::new(addr.into()).await.unwrap(),
+                (0, 0),
                 (0, 0),
                 tx,
                 Arc::new(StreamingMetrics::unused()),

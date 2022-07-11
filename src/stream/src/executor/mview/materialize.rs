@@ -52,14 +52,14 @@ impl<S: StateStore> MaterializeExecutor<S> {
         input: BoxedExecutor,
         store: S,
         table_id: TableId,
-        keys: Vec<OrderPair>,
+        key: Vec<OrderPair>,
         column_ids: Vec<ColumnId>,
         executor_id: u64,
-        distribution_keys: Vec<usize>,
+        distribution_key: Vec<usize>,
         vnodes: Option<Arc<Bitmap>>,
     ) -> Self {
-        let arrange_columns: Vec<usize> = keys.iter().map(|k| k.column_idx).collect();
-        let arrange_order_types = keys.iter().map(|k| k.order_type).collect();
+        let arrange_columns: Vec<usize> = key.iter().map(|k| k.column_idx).collect();
+        let arrange_order_types = key.iter().map(|k| k.order_type).collect();
 
         let schema = input.schema().clone();
         let columns = column_ids
@@ -70,7 +70,7 @@ impl<S: StateStore> MaterializeExecutor<S> {
 
         let distribution = match vnodes {
             Some(vnodes) => Distribution {
-                dist_key_indices: distribution_keys,
+                dist_key_indices: distribution_key,
                 vnodes,
             },
             None => Distribution::fallback(),
@@ -205,7 +205,7 @@ mod tests {
     use risingwave_common::types::DataType;
     use risingwave_common::util::sort_util::{OrderPair, OrderType};
     use risingwave_storage::memory::MemoryStateStore;
-    use risingwave_storage::table::cell_based_table::CellBasedTable;
+    use risingwave_storage::table::storage_table::StorageTable;
 
     use crate::executor::test_utils::*;
     use crate::executor::*;
@@ -253,7 +253,7 @@ mod tests {
             ColumnDesc::unnamed(column_ids[1], DataType::Int32),
         ];
 
-        let table = CellBasedTable::new_for_test(
+        let table = StorageTable::new_for_test(
             memory_state_store.clone(),
             table_id,
             column_descs,

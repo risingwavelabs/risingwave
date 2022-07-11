@@ -21,7 +21,7 @@ use std::time::Duration;
 use bytes::Bytes;
 use futures::future::{join_all, try_join_all};
 use itertools::Itertools;
-use parking_lot::RwLock;
+use parking_lot::{RwLock, RwLockUpgradableReadGuard, RwLockWriteGuard};
 use risingwave_common::config::StorageConfig;
 use risingwave_hummock_sdk::key::FullKey;
 use risingwave_hummock_sdk::{CompactionGroupId, LocalSstableInfo};
@@ -220,16 +220,23 @@ impl LocalVersionManager {
                 return false;
             }
         }
-        let mut guard = self.local_version.write();
 
-        if guard.pinned_version().id() >= new_version_id {
+        let old_version = self.local_version.upgradable_read();
+        if old_version.pinned_version().id() >= new_version_id {
             return false;
         }
 
         if let Some(conflict_detector) = self.write_conflict_detector.as_ref() {
             conflict_detector.set_watermark(newly_pinned_version.max_committed_epoch);
         }
-        guard.set_pinned_version(newly_pinned_version);
+
+        let mut new_version = old_version.clone();
+        new_version.set_pinned_version(newly_pinned_version);
+        {
+            let mut guard = RwLockUpgradableReadGuard::upgrade(old_version);
+            *guard = new_version;
+            RwLockWriteGuard::unlock_fair(guard);
+        }
 
         self.worker_context
             .version_update_notifier_tx
@@ -410,7 +417,7 @@ impl LocalVersionManager {
     }
 
     pub async fn sync_shared_buffer_epoch(&self, epoch: HummockEpoch) -> HummockResult<()> {
-        info!("sync epoch {}", epoch);
+        tracing::trace!("sync epoch {}", epoch);
         let (tx, rx) = oneshot::channel();
         self.buffer_tracker
             .send_event(SharedBufferEvent::SyncEpoch(epoch, tx));
@@ -426,7 +433,7 @@ impl LocalVersionManager {
         {
             Some(task) => task,
             None => {
-                info!("sync epoch {} has no more task to do", epoch);
+                tracing::trace!("sync epoch {} has no more task to do", epoch);
                 return Ok(());
             }
         };
@@ -434,9 +441,10 @@ impl LocalVersionManager {
         let ret = self
             .run_upload_task(order_index, epoch, task_payload, false)
             .await;
-        info!(
+        tracing::trace!(
             "sync epoch {} finished. Task size {}",
-            epoch, task_write_batch_size
+            epoch,
+            task_write_batch_size
         );
         if let Some(conflict_detector) = self.write_conflict_detector.as_ref() {
             conflict_detector.archive_epoch(epoch);
