@@ -18,6 +18,7 @@ use fixedbitset::FixedBitSet;
 use itertools::Itertools;
 use risingwave_common::catalog::Schema;
 use risingwave_common::error::{ErrorCode, Result, RwError};
+use risingwave_common::session_config::QueryMode;
 use risingwave_pb::plan_common::JoinType;
 
 use super::{
@@ -450,6 +451,42 @@ impl LogicalJoin {
             (false, false) => JoinType::Inner,
         }
     }
+
+    fn convert_to_lookup_join(
+        &self,
+        logical_join: LogicalJoin,
+        predicate: EqJoinPredicate,
+    ) -> Option<PlanRef> {
+        if self.right.as_ref().node_type() != PlanNodeType::LogicalScan {
+            log::warn!(
+                "Lookup Join only supports basic tables on the join's right side. A \
+            different join will be used instead."
+            );
+            return None;
+        }
+
+        let logical_scan = self.right.as_logical_scan().unwrap();
+        let table_desc = logical_scan.table_desc().clone();
+
+        // Verify that the right equality columns are a prefix of the primary key
+        let eq_col_warn_message = "In Lookup Join, the right columns of the equality join \
+        predicates must be a prefix of the primary key. A different join will be used instead.";
+
+        let order_col_indices = table_desc.order_column_indices();
+        if order_col_indices.len() < predicate.right_eq_indexes().len() {
+            log::warn!("{}", eq_col_warn_message);
+            return None;
+        }
+
+        for (i, eq_idx) in predicate.right_eq_indexes().into_iter().enumerate() {
+            if order_col_indices[i] != eq_idx {
+                log::warn!("{}", eq_col_warn_message);
+                return None;
+            }
+        }
+
+        Some(BatchLookupJoin::new(logical_join, predicate, table_desc).into())
+    }
 }
 
 impl PlanTreeNodeBinary for LogicalJoin {
@@ -673,47 +710,28 @@ impl ToBatch for LogicalJoin {
         let right = self.right().to_batch()?;
         let logical_join = self.clone_with_left_right(left, right);
 
-        let use_lookup_join = self
-            .base
-            .ctx
-            .inner()
-            .session_ctx
-            .config()
-            .get_use_lookup_join();
+        let config = self.base.ctx.inner().session_ctx.config();
 
         if predicate.has_eq() {
+            if config.get_use_lookup_join() {
+                if config.get_query_mode() == QueryMode::Local {
+                    if let Some(lookup_join) =
+                        self.convert_to_lookup_join(logical_join.clone(), predicate.clone())
+                    {
+                        return Ok(lookup_join);
+                    }
+                } else {
+                    log::warn!(
+                        "Lookup Join can only be done in local mode. A different join will \
+                    be used instead."
+                    );
+                }
+            }
+
             // Convert to Hash Join for equal joins
             // For inner joins, pull non-equal conditions to a filter operator on top of it
             let pull_filter = self.join_type == JoinType::Inner && predicate.has_non_eq();
-            if use_lookup_join {
-                if self.right.as_ref().node_type() != PlanNodeType::LogicalScan {
-                    return Err(ErrorCode::InternalError(
-                        "Lookup Join only supports basic tables on the right hand side".to_string(),
-                    )
-                    .into());
-                }
-
-                let logical_scan = self.right.as_logical_scan().unwrap();
-                let table_desc = logical_scan.table_desc().clone();
-
-                // Verify that the right equality columns are a prefix of the primary key
-                let eq_col_error = RwError::from(ErrorCode::InternalError(
-                    "In Lookup Join, the right columns of the equality join predicates must be a prefix of the primary key".to_string(),
-                ));
-
-                let order_col_indices = table_desc.order_column_indices();
-                if order_col_indices.len() < predicate.right_eq_indexes().len() {
-                    return Err(eq_col_error);
-                }
-
-                for (i, eq_idx) in predicate.right_eq_indexes().into_iter().enumerate() {
-                    if order_col_indices[i] != eq_idx {
-                        return Err(eq_col_error);
-                    }
-                }
-
-                Ok(BatchLookupJoin::new(logical_join, predicate, table_desc).into())
-            } else if pull_filter {
+            if pull_filter {
                 let new_output_indices = logical_join.output_indices.clone();
                 let new_internal_column_num = logical_join.internal_column_num();
                 let default_indices = (0..new_internal_column_num).collect::<Vec<_>>();
