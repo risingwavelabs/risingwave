@@ -36,12 +36,13 @@ pub struct Table {
 
 impl Table {
     pub fn get_qualified_columns(&self) -> Vec<Column> {
-        self.columns.iter().map(|c| {
-            Column {
+        self.columns
+            .iter()
+            .map(|c| Column {
                 name: format!("{}.{}", self.name, c.name),
                 data_type: c.data_type,
-            }
-        }).collect()
+            })
+            .collect()
     }
 }
 
