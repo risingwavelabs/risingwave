@@ -78,15 +78,13 @@ impl<C: BatchTaskContext> ProbeSideSource<C> {
             })
             .collect_vec();
 
-        for i in 0..self.build_side_eq_types.len() {
-            if i >= probe_side_eq_types.len()
-                || self.build_side_eq_types[i] != probe_side_eq_types[i]
-            {
-                return Err(ErrorCode::NotImplemented(
+        if !(0..self.build_side_eq_types.len()).all(|i| {
+            i < probe_side_eq_types.len() && self.build_side_eq_types[i] == probe_side_eq_types[i]
+        }) {
+            return Err(ErrorCode::NotImplemented(
                     "Lookup Joins where the two sides of an equality predicate have different data types".to_string(),
                     None.into()
-                ).into());
-            }
+            ).into());
         }
 
         let eq_conds = self

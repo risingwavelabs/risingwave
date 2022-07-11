@@ -46,10 +46,7 @@ impl BatchLookupJoin {
         table_desc: TableDesc,
     ) -> Self {
         let ctx = logical.base.ctx.clone();
-        let dist = Self::derive_dist(
-            logical.left().distribution(),
-            logical.right().distribution(),
-        );
+        let dist = Self::derive_dist(logical.left().distribution());
         let base = PlanBase::new_batch(ctx, logical.schema().clone(), dist, Order::any());
         Self {
             base,
@@ -59,10 +56,10 @@ impl BatchLookupJoin {
         }
     }
 
-    fn derive_dist(left: &Distribution, right: &Distribution) -> Distribution {
-        match (left, right) {
-            (Distribution::Single, Distribution::Single) => Distribution::Single,
-            (_, _) => unreachable!(),
+    fn derive_dist(left: &Distribution) -> Distribution {
+        match left {
+            Distribution::Single => Distribution::Single,
+            _ => unreachable!(),
         }
     }
 

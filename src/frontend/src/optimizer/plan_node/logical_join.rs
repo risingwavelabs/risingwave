@@ -719,7 +719,7 @@ impl ToBatch for LogicalJoin {
         let config = self.base.ctx.inner().session_ctx.config();
 
         if predicate.has_eq() {
-            if config.get_use_lookup_join() {
+            if config.get_enable_lookup_join() {
                 if config.get_query_mode() == QueryMode::Local {
                     if let Some(lookup_join) =
                         self.convert_to_lookup_join(logical_join.clone(), predicate.clone())
