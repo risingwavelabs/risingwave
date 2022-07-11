@@ -12,19 +12,21 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::collections::HashSet;
-use crate::{Column, Expr, Join, JoinOperator, JoinConstraint};
+use crate::{BinaryOperator, Column, Expr, Join, JoinOperator, JoinConstraint};
 use rand::prelude::SliceRandom;
 use rand::Rng;
 use risingwave_sqlparser::ast::{Ident, ObjectName, TableAlias, TableFactor, TableWithJoins};
 
 use crate::{SqlGenerator, Table};
 
-fn create_join_on_expr(left: &Column, right: &Column) -> Expr {
-                    // Expr::BinaryOp {
-                    //     left: Box::new()
-                    // }
-    todo!()
+fn create_join_on_expr(left: String, right: String) -> Expr {
+    let left = Box::new(Expr::Identifier(Ident::new(left)));
+    let right = Box::new(Expr::Identifier(Ident::new(right)));
+    Expr::BinaryOp {
+    left,
+    op: BinaryOperator::Eq,
+    right,
+    }
 }
 
 
@@ -110,7 +112,7 @@ impl<'a, R: Rng> SqlGenerator<'a, R> {
         }
         let i = self.rng.gen_range(0..available_join_on_columns.len());
         let (left_column, right_column) = available_join_on_columns[i];
-        let join_on_expr = create_join_on_expr(left_column, right_column);
+        let join_on_expr = create_join_on_expr(left_column.name.clone(), right_column.name.clone());
 
         let right_factor_with_join = Join {
             relation: right_factor,
