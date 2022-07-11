@@ -292,7 +292,9 @@ impl<S: StateStore> DynamicFilterExecutor<S> {
                             }
                             Op::UpdateDelete | Op::Delete => {
                                 last_is_insert = false;
-                                self.right_table.delete(row.to_owned_row())?;
+                                // We don't delete (for some reason, that's what we do with
+                                // `ManagedValueState`)
+                                // self.right_table.delete(row.to_owned_row())?;
                             }
                         }
                     }
