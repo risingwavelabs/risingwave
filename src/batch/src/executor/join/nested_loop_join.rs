@@ -270,7 +270,8 @@ impl NestedLoopJoinExecutor {
     ) {
         let mut matched = BitmapBuilder::zeroed(left.iter().map(|chunk| chunk.capacity()).sum());
         let right_data_types = right.schema().data_types();
-        // Same as inner join except that a bitmap is used to track which row of the left table is matched.
+        // Same as inner join except that a bitmap is used to track which row of the left table is
+        // matched.
         #[for_await]
         for right_chunk in right.execute() {
             let right_chunk = right_chunk?;
