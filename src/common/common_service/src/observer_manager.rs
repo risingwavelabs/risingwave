@@ -37,7 +37,7 @@ pub trait ObserverNodeImpl {
     fn handle_notification(&mut self, resp: SubscribeResponse);
 
     /// Initialize data from the meta. It will be called at start or resubscribe
-    fn handle_snapshot_notification(&mut self, resp: SubscribeResponse) -> Result<()>;
+    fn handle_initialization_notification(&mut self, resp: SubscribeResponse) -> Result<()>;
 }
 
 impl ObserverManager {
@@ -58,7 +58,7 @@ impl ObserverManager {
     }
 
     /// `start` is used to spawn a new asynchronous task which receives meta's notification and
-    /// call the `handle_snapshot_notification` and `handle_notification` to update node data.
+    /// call the `handle_initialization_notification` and `handle_notification` to update node data.
     pub async fn start(mut self) -> Result<JoinHandle<()>> {
         let first_resp = self.rx.next().await?.ok_or_else(|| {
             ErrorCode::InternalError(
@@ -67,7 +67,7 @@ impl ObserverManager {
             )
         })?;
         self.observer_states
-            .handle_snapshot_notification(first_resp)?;
+            .handle_initialization_notification(first_resp)?;
         let handle = tokio::spawn(async move {
             loop {
                 if let Ok(resp) = self.rx.next().await {
@@ -96,7 +96,7 @@ impl ObserverManager {
                     self.rx = rx;
                     if let Ok(Some(snapshot_resp)) = self.rx.next().await {
                         self.observer_states
-                            .handle_snapshot_notification(snapshot_resp)
+                            .handle_initialization_notification(snapshot_resp)
                             .expect("handle snapshot notification failed after re-subscribe");
                         break;
                     }

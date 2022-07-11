@@ -69,7 +69,7 @@ impl ObserverNodeImpl for FrontendObserverNode {
         }
     }
 
-    fn handle_snapshot_notification(&mut self, resp: SubscribeResponse) -> Result<()> {
+    fn handle_initialization_notification(&mut self, resp: SubscribeResponse) -> Result<()> {
         let mut catalog_guard = self.catalog.write();
         let mut user_guard = self.user_info_manager.write();
         catalog_guard.clear();
