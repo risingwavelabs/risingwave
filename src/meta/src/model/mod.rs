@@ -36,6 +36,7 @@ use crate::storage::{self, MetaStore, Transaction};
 pub type ActorId = u32;
 
 /// Should be used together with `ActorId` to uniquely identify a dispatcher
+#[expect(dead_code)]
 pub type DispatcherId = u64;
 
 /// A global, unique identifier of a fragment

@@ -288,7 +288,7 @@ impl StreamActorBuilder {
     pub fn build(&self) -> StreamActor {
         assert!(self.sealed);
 
-        let mut dispatcher = self
+        let dispatcher = self
             .downstreams
             .iter()
             .map(
@@ -308,18 +308,6 @@ impl StreamActorBuilder {
             )
             .collect_vec();
 
-        // If there's no dispatcher, add an empty broadcast. TODO: Can be removed later.
-        if dispatcher.is_empty() {
-            dispatcher = vec![Dispatcher {
-                r#type: DispatcherType::Broadcast.into(),
-                // Currently when create MV on MV, we will add outputs to this dispatcher with id 0
-                // (cross-MV dispatcher).
-                // See also the rustdoc of this field.
-                dispatcher_id: 0,
-                ..Default::default()
-            }]
-        }
-
         StreamActor {
             actor_id: self.actor_id.as_global_id(),
             fragment_id: self.fragment_id.as_global_id(),
@@ -332,14 +320,7 @@ impl StreamActorBuilder {
                 .map(|x| x.as_global_id())
                 .collect(), // TODO: store each upstream separately
             same_worker_node_as_upstream: self.chain_same_worker_node
-                || self.upstreams.iter().any(
-                    |(
-                        _,
-                        StreamActorUpstream {
-                            same_worker_node, ..
-                        },
-                    )| *same_worker_node,
-                ),
+                || self.upstreams.values().any(|u| u.same_worker_node),
             vnode_bitmap: None,
         }
     }

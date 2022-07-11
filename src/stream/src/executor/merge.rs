@@ -306,7 +306,7 @@ mod tests {
     use itertools::Itertools;
     use madsim::collections::HashSet;
     use risingwave_common::array::{Op, StreamChunk};
-    use risingwave_pb::data::StreamMessage;
+    use risingwave_pb::stream_plan::StreamMessage;
     use risingwave_pb::task_service::exchange_service_server::{
         ExchangeService, ExchangeServiceServer,
     };
@@ -428,7 +428,7 @@ mod tests {
             tx.send(Ok(GetStreamResponse {
                 message: Some(StreamMessage {
                     stream_message: Some(
-                        risingwave_pb::data::stream_message::StreamMessage::StreamChunk(
+                        risingwave_pb::stream_plan::stream_message::StreamMessage::StreamChunk(
                             stream_chunk,
                         ),
                     ),
@@ -441,7 +441,7 @@ mod tests {
             tx.send(Ok(GetStreamResponse {
                 message: Some(StreamMessage {
                     stream_message: Some(
-                        risingwave_pb::data::stream_message::StreamMessage::Barrier(
+                        risingwave_pb::stream_plan::stream_message::StreamMessage::Barrier(
                             barrier.to_protobuf(),
                         ),
                     ),

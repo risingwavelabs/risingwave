@@ -29,11 +29,11 @@ use risingwave_pb::catalog::source::Info::StreamSource;
 use risingwave_pb::catalog::Source;
 use risingwave_pb::common::worker_node::State::Running;
 use risingwave_pb::common::WorkerType;
-use risingwave_pb::data::barrier::Mutation;
-use risingwave_pb::data::SourceChangeSplitMutation;
 use risingwave_pb::source::{
     ConnectorSplit, ConnectorSplits, SourceActorInfo as ProstSourceActorInfo,
 };
+use risingwave_pb::stream_plan::barrier::Mutation;
+use risingwave_pb::stream_plan::SourceChangeSplitMutation;
 use risingwave_pb::stream_service::{
     CreateSourceRequest as ComputeNodeCreateSourceRequest,
     DropSourceRequest as ComputeNodeDropSourceRequest,

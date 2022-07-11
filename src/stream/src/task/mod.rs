@@ -15,9 +15,10 @@
 use std::sync::Arc;
 
 use madsim::collections::HashMap;
-use parking_lot::{Mutex, MutexGuard};
+use parking_lot::{Mutex, MutexGuard, RwLock};
 use risingwave_common::error::{ErrorCode, Result, RwError};
 use risingwave_common::util::addr::HostAddr;
+use risingwave_pb::common::ActorInfo;
 use tokio::sync::mpsc::{Receiver, Sender};
 
 use crate::executor::Message;
@@ -62,6 +63,9 @@ pub struct SharedContext {
     /// is on the server-side and we will also introduce backpressure.
     pub(crate) channel_map: Mutex<HashMap<UpDownActorIds, ConsumableChannelPair>>,
 
+    /// Stores all actor information.
+    pub(crate) actor_infos: RwLock<HashMap<ActorId, ActorInfo>>,
+
     /// Stores the local address.
     ///
     /// It is used to test whether an actor is local or not,
@@ -83,7 +87,8 @@ impl std::fmt::Debug for SharedContext {
 impl SharedContext {
     pub fn new(addr: HostAddr) -> Self {
         Self {
-            channel_map: Mutex::new(HashMap::new()),
+            channel_map: Default::default(),
+            actor_infos: Default::default(),
             addr,
             barrier_manager: Arc::new(Mutex::new(LocalBarrierManager::new())),
         }
@@ -91,11 +96,7 @@ impl SharedContext {
 
     #[cfg(test)]
     pub fn for_test() -> Self {
-        Self {
-            channel_map: Mutex::new(HashMap::new()),
-            addr: LOCAL_TEST_ADDR.clone(),
-            barrier_manager: Arc::new(Mutex::new(LocalBarrierManager::for_test())),
-        }
+        Self::new(LOCAL_TEST_ADDR.clone())
     }
 
     #[inline]
@@ -162,6 +163,18 @@ impl SharedContext {
     {
         self.lock_channel_map()
             .retain(|up_down_ids, _| f(up_down_ids));
+    }
+
+    pub fn get_actor_info(&self, actor_id: &ActorId) -> Result<ActorInfo> {
+        self.actor_infos
+            .read()
+            .get(actor_id)
+            .cloned()
+            .ok_or_else(|| {
+                RwError::from(ErrorCode::InternalError(
+                    "actor not found in info table".into(),
+                ))
+            })
     }
 
     #[cfg(test)]
