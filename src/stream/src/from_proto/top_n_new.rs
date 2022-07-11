@@ -37,7 +37,7 @@ impl ExecutorBuilder for TopNExecutorNewBuilder {
         let total_count = 0;
         let table_id_l = TableId::new(node.get_table_id_l());
         let key_indices = node
-            .get_distribution_keys()
+            .get_distribution_key()
             .iter()
             .map(|key| *key as usize)
             .collect::<Vec<_>>();
