@@ -565,9 +565,6 @@ where
         }
 
         // Register to compaction group beforehand.
-        //
-        // Note that this step must be before building actors, because we will explicitly sync this
-        // info in the beginning of actors.
         let registered_table_ids = self
             .compaction_group_manager
             .register_table_fragments(&table_fragments, table_properties)
