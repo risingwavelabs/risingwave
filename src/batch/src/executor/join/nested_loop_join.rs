@@ -354,6 +354,7 @@ impl NestedLoopJoinExecutor {
         #[for_await]
         for right_chunk in right.execute() {
             let right_chunk = right_chunk?;
+            // Use a bitmap to track which row of the current right chunk is matched.
             let mut matched = BitmapBuilder::zeroed(right_chunk.capacity()).finish();
             for left_row in left.iter().flat_map(|chunk| chunk.rows()) {
                 let chunk = Self::concatenate_and_eval(
