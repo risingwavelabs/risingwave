@@ -12,12 +12,21 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use crate::Column;
+use std::collections::HashSet;
+use crate::{Column, Expr, Join, JoinOperator, JoinConstraint};
 use rand::prelude::SliceRandom;
 use rand::Rng;
 use risingwave_sqlparser::ast::{Ident, ObjectName, TableAlias, TableFactor, TableWithJoins};
 
 use crate::{SqlGenerator, Table};
+
+fn create_join_on_expr(left: &Column, right: &Column) -> Expr {
+                    // Expr::BinaryOp {
+                    //     left: Box::new()
+                    // }
+    todo!()
+}
+
 
 impl<'a, R: Rng> SqlGenerator<'a, R> {
 
@@ -82,11 +91,37 @@ impl<'a, R: Rng> SqlGenerator<'a, R> {
     }
 
     fn gen_equijoin_expr(&mut self) -> (TableWithJoins, Vec<Column>) {
-        let left = self.gen_table_factor();
-        let right = self.gen_table_factor();
-        todo!()
-        // find available columns to join on.
-        // shuffle, pick columns to join on
+        let (left_factor, mut left_columns) = self.gen_table_factor();
+        let (right_factor, right_columns) = self.gen_table_factor();
+
+        let mut available_join_on_columns = vec![];
+        for left_column in &left_columns {
+            for right_column in &right_columns {
+                // NOTE: We can support some composite types if we wish to in the future.
+                // see: https://www.postgresql.org/docs/14/functions-comparison.html.
+                // For simplicity only support scalar types for now.
+                let left_ty = left_column.data_type;
+                let right_ty = right_column.data_type;
+                if left_ty.is_scalar() && right_ty.is_scalar()
+                    && (left_ty == right_ty) {
+                        available_join_on_columns.push((left_column, right_column))
+                    }
+            }
+        }
+        let i = self.rng.gen_range(0..available_join_on_columns.len());
+        let (left_column, right_column) = available_join_on_columns[i];
+        let join_on_expr = create_join_on_expr(left_column, right_column);
+
+        let right_factor_with_join = Join {
+            relation: right_factor,
+            join_operator: JoinOperator::FullOuter(JoinConstraint::On(join_on_expr))
+        };
+        let table = TableWithJoins {
+            relation: left_factor,
+            joins: vec![right_factor_with_join],
+        };
+        left_columns.extend(right_columns);
+        (table, left_columns)
     }
 
     fn gen_subquery(&mut self) -> (TableWithJoins, Vec<Column>) {

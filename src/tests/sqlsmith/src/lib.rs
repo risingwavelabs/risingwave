@@ -20,7 +20,7 @@ use risingwave_frontend::binder::bind_data_type;
 use risingwave_frontend::expr::DataTypeName;
 use risingwave_sqlparser::ast::{
     ColumnDef, Expr, Ident, OrderByExpr, Query, Select, SelectItem, SetExpr, Statement,
-    TableWithJoins, Value, With,
+    Join, JoinConstraint, JoinOperator, TableWithJoins, Value, With,
 };
 
 mod expr;
