@@ -29,12 +29,12 @@ impl<T> MonitoredRwLock<T> {
     }
 
     pub async fn read(&self, label_values: &[&str]) -> RwLockReadGuard<'_, T> {
-        let _ = self.metrics.with_label_values(label_values).start_timer();
+        let _timer = self.metrics.with_label_values(label_values).start_timer();
         self.inner.read().await
     }
 
     pub async fn write(&self, label_values: &[&str]) -> RwLockWriteGuard<'_, T> {
-        let _ = self.metrics.with_label_values(label_values).start_timer();
+        let _timer = self.metrics.with_label_values(label_values).start_timer();
         self.inner.write().await
     }
 }

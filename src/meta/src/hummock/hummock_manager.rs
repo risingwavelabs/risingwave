@@ -433,7 +433,7 @@ where
         last_pinned: HummockVersionId,
     ) -> Result<HummockVersion> {
         let mut versioning_guard = write_lock!(self, versioning).await;
-        let _ = start_measure_real_process_timer!(self);
+        let _timer = start_measure_real_process_timer!(self);
         let versioning = versioning_guard.deref_mut();
         let mut pinned_versions = VarTransaction::new(&mut versioning.pinned_versions);
         let hummock_versions = &versioning.hummock_versions;
@@ -486,7 +486,7 @@ where
         pinned_version_ids: impl AsRef<[HummockVersionId]>,
     ) -> Result<()> {
         let mut versioning_guard = write_lock!(self, versioning).await;
-        let _ = start_measure_real_process_timer!(self);
+        let _timer = start_measure_real_process_timer!(self);
         let mut pinned_versions = VarTransaction::new(&mut versioning_guard.pinned_versions);
         let mut context_pinned_version = match pinned_versions.new_entry_txn(context_id) {
             None => {
@@ -513,7 +513,7 @@ where
     pub async fn pin_snapshot(&self, context_id: HummockContextId) -> Result<HummockSnapshot> {
         let max_committed_epoch = self.max_committed_epoch.load(Ordering::Relaxed);
         let mut guard = write_lock!(self, versioning).await;
-        let _ = start_measure_real_process_timer!(self);
+        let _timer = start_measure_real_process_timer!(self);
         let mut pinned_snapshots = VarTransaction::new(&mut guard.pinned_snapshots);
         let mut context_pinned_snapshot = pinned_snapshots.new_entry_txn_or_default(
             context_id,
@@ -542,7 +542,7 @@ where
     #[named]
     pub async fn unpin_snapshot(&self, context_id: HummockContextId) -> Result<()> {
         let mut versioning_guard = write_lock!(self, versioning).await;
-        let _ = start_measure_real_process_timer!(self);
+        let _timer = start_measure_real_process_timer!(self);
         let mut pinned_snapshots = VarTransaction::new(&mut versioning_guard.pinned_snapshots);
         let release_snapshot = pinned_snapshots.remove(&context_id);
 
@@ -567,7 +567,7 @@ where
         hummock_snapshot: HummockSnapshot,
     ) -> Result<()> {
         let mut versioning_guard = write_lock!(self, versioning).await;
-        let _ = start_measure_real_process_timer!(self);
+        let _timer = start_measure_real_process_timer!(self);
         // Use the max_committed_epoch in storage as the snapshot ts so only committed changes are
         // visible in the snapshot.
         let version_id = versioning_guard.current_version_id.id();
@@ -757,7 +757,7 @@ where
         send_task: T,
     ) -> Result<()> {
         let mut compaction_guard = write_lock!(self, compaction).await;
-        let _ = start_measure_real_process_timer!(self);
+        let _timer = start_measure_real_process_timer!(self);
         if !send_task.await {
             return Err(Error::CompactorUnreachable(assignee_context_id));
         }
@@ -967,7 +967,7 @@ where
         }
 
         let mut versioning_guard = write_lock!(self, versioning).await;
-        let _ = start_measure_real_process_timer!(self);
+        let _timer = start_measure_real_process_timer!(self);
         let old_version = versioning_guard.current_version();
         let versioning = versioning_guard.deref_mut();
         let mut current_version_id = VarTransaction::new(&mut versioning.current_version_id);
@@ -1110,7 +1110,7 @@ where
         );
 
         let mut versioning_guard = write_lock!(self, versioning).await;
-        let _ = start_measure_real_process_timer!(self);
+        let _timer = start_measure_real_process_timer!(self);
         let new_sst_id_info = SstableIdInfo {
             id: sstable_id,
             id_create_timestamp: sstable_id_info::get_timestamp_now(),
@@ -1198,7 +1198,7 @@ where
     #[named]
     pub async fn list_version_ids_asc(&self) -> Result<Vec<HummockVersionId>> {
         let versioning_guard = read_lock!(self, versioning).await;
-        let _ = start_measure_real_process_timer!(self);
+        let _timer = start_measure_real_process_timer!(self);
         let version_ids = versioning_guard
             .hummock_versions
             .keys()
@@ -1210,7 +1210,7 @@ where
     #[named]
     pub async fn proceed_version_checkpoint(&self) -> risingwave_common::error::Result<()> {
         let versioning_guard = read_lock!(self, versioning).await;
-        let _ = start_measure_real_process_timer!(self);
+        let _timer = start_measure_real_process_timer!(self);
         let new_checkpoint = versioning_guard
             .hummock_versions
             .first_key_value()
@@ -1228,7 +1228,7 @@ where
         version_id: HummockVersionId,
     ) -> Result<HummockRefCount> {
         let versioning_guard = read_lock!(self, versioning).await;
-        let _ = start_measure_real_process_timer!(self);
+        let _timer = start_measure_real_process_timer!(self);
         let count = versioning_guard
             .pinned_versions
             .values()
@@ -1243,7 +1243,7 @@ where
         version_id: HummockVersionId,
     ) -> Result<Vec<HummockSSTableId>> {
         let versioning_guard = read_lock!(self, versioning).await;
-        let _ = start_measure_real_process_timer!(self);
+        let _timer = start_measure_real_process_timer!(self);
         Ok(versioning_guard
             .stale_sstables
             .get(&version_id)
@@ -1258,7 +1258,7 @@ where
         ssts_in_use: &HashSet<HummockSSTableId>,
     ) -> Result<()> {
         let mut versioning_guard = write_lock!(self, versioning).await;
-        let _ = start_measure_real_process_timer!(self);
+        let _timer = start_measure_real_process_timer!(self);
         let versioning = versioning_guard.deref_mut();
         let mut stale_sstables = VarTransaction::new(&mut versioning.stale_sstables);
         let mut sstable_id_infos = VarTransaction::new(&mut versioning.sstable_id_infos);
@@ -1293,7 +1293,7 @@ where
     #[named]
     pub async fn delete_versions(&self, version_ids: &[HummockVersionId]) -> Result<()> {
         let mut versioning_guard = write_lock!(self, versioning).await;
-        let _ = start_measure_real_process_timer!(self);
+        let _timer = start_measure_real_process_timer!(self);
         let versioning = versioning_guard.deref_mut();
         let pinned_versions_ref = &versioning.pinned_versions;
         let mut hummock_versions = VarTransaction::new(&mut versioning.hummock_versions);
@@ -1376,7 +1376,7 @@ where
         version_id: Option<HummockVersionId>,
     ) -> Result<Vec<SstableIdInfo>> {
         let versioning_guard = read_lock!(self, versioning).await;
-        let _ = start_measure_real_process_timer!(self);
+        let _timer = start_measure_real_process_timer!(self);
         if version_id.is_none() {
             Ok(versioning_guard
                 .sstable_id_infos
@@ -1415,7 +1415,7 @@ where
     #[named]
     pub async fn delete_sstable_ids(&self, sst_ids: impl AsRef<[HummockSSTableId]>) -> Result<()> {
         let mut versioning_guard = write_lock!(self, versioning).await;
-        let _ = start_measure_real_process_timer!(self);
+        let _timer = start_measure_real_process_timer!(self);
         let mut sstable_id_infos = VarTransaction::new(&mut versioning_guard.sstable_id_infos);
 
         // Update in-mem state after transaction succeeds.
@@ -1440,7 +1440,7 @@ where
         let active_context_ids = {
             let compaction_guard = read_lock!(self, compaction).await;
             let versioning_guard = read_lock!(self, versioning).await;
-            let _ = start_measure_real_process_timer!(self);
+            let _timer = start_measure_real_process_timer!(self);
             let mut active_context_ids = HashSet::new();
             active_context_ids.extend(
                 compaction_guard
@@ -1481,7 +1481,7 @@ where
         sst_retention_interval: Duration,
     ) -> Result<Vec<SstableIdInfo>> {
         let mut versioning_guard = write_lock!(self, versioning).await;
-        let _ = start_measure_real_process_timer!(self);
+        let _timer = start_measure_real_process_timer!(self);
         let mut sstable_id_infos = VarTransaction::new(&mut versioning_guard.sstable_id_infos);
 
         let now = sstable_id_info::get_timestamp_now();
