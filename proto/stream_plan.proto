@@ -151,8 +151,9 @@ message HopWindowNode {
 
 message MergeNode {
   repeated uint32 upstream_actor_id = 1;
+  uint32 upstream_fragment_id = 2;
   // The schema of input columns. TODO: remove this field.
-  repeated plan_common.Field fields = 2;
+  repeated plan_common.Field fields = 3;
 }
 
 // passed from frontend to meta, used by fragmenter to generate `MergeNode`

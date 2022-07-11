@@ -16,6 +16,7 @@
 
 use std::fmt;
 use std::sync::Arc;
+use std::time::Duration;
 
 use bytes::Bytes;
 use risingwave_common::config::StorageConfig;
@@ -187,14 +188,20 @@ impl HummockStorage {
         &self.local_version_manager
     }
 
-    fn get_compaction_group_id(&self, table_id: TableId) -> CompactionGroupId {
-        self.compaction_group_client
-            .get_compaction_group_id(table_id.table_id)
-            .unwrap_or_else(|| panic!("{} does not match a compaction group", table_id.table_id))
-    }
-
-    pub async fn update_compaction_group_cache(&self) -> HummockResult<()> {
-        self.compaction_group_client.update().await
+    async fn get_compaction_group_id(&self, table_id: TableId) -> HummockResult<CompactionGroupId> {
+        match tokio::time::timeout(
+            Duration::from_secs(10),
+            self.compaction_group_client
+                .get_compaction_group_id(table_id.table_id),
+        )
+        .await
+        {
+            Err(_) => Err(HummockError::other(format!(
+                "get_compaction_group_id {} timeout",
+                table_id
+            ))),
+            Ok(resp) => resp,
+        }
     }
 }
 
