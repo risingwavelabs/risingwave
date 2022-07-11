@@ -225,11 +225,11 @@ impl BoxedExecutorBuilder for RowSeqScanExecutorBuilder {
 
             let mut futures = vec![];
             for scan_range in &seq_scan_node.scan_ranges {
-                let pk_types = pk_types.clone();
-                let table = table.clone();
-                let keyspace = keyspace.clone();
+                let scan_type = async {
+                    let pk_types = pk_types.clone();
+                    let table = table.clone();
+                    let keyspace = keyspace.clone();
 
-                let get_scan_type = async move || {
                     let (pk_prefix_value, next_col_bounds) =
                         get_scan_bound(scan_range.clone(), pk_types.into_iter());
 
@@ -256,7 +256,7 @@ impl BoxedExecutorBuilder for RowSeqScanExecutorBuilder {
 
                     Ok(scan_type)
                 };
-                futures.push(get_scan_type());
+                futures.push(scan_type);
             }
 
             let scan_types: Result<Vec<ScanType<_>>> = try_join_all(futures).await;
