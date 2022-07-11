@@ -467,19 +467,25 @@ impl LogicalJoin {
 
         let logical_scan = self.right.as_logical_scan().unwrap();
         let table_desc = logical_scan.table_desc().clone();
+        let output_column_ids = logical_scan.output_column_ids();
 
         // Verify that the right equality columns are a prefix of the primary key
         let eq_col_warn_message = "In Lookup Join, the right columns of the equality join \
-        predicates must be a prefix of the primary key. A different join will be used instead.";
+        predicates must be the same as the primary key. A different join will be used instead.";
+
+        log::error!("{:#?}", table_desc);
+        log::error!("{:#?}", output_column_ids);
+        log::error!("{:#?}", predicate.right_eq_indexes());
 
         let order_col_indices = table_desc.order_column_indices();
-        if order_col_indices.len() < predicate.right_eq_indexes().len() {
+        if order_col_indices.len() != predicate.right_eq_indexes().len() {
             log::warn!("{}", eq_col_warn_message);
             return None;
         }
 
         for (i, eq_idx) in predicate.right_eq_indexes().into_iter().enumerate() {
-            if order_col_indices[i] != eq_idx {
+            log::error!("{} {}", eq_idx, order_col_indices[i]);
+            if order_col_indices[i] != output_column_ids[eq_idx].get_id() as usize {
                 log::warn!("{}", eq_col_warn_message);
                 return None;
             }
