@@ -52,9 +52,6 @@ impl ExecutorBuilder for DynamicFilterExecutorBuilder {
             ));
         }
 
-        // TODO: add the tables and backing state store.
-        // let right_table_id = TableId::from(node.right_table.as_ref().unwrap().id);
-
         let state_table_l =
             StateTable::from_table_catalog(node.get_left_table()?, store.clone(), Some(vnodes));
 

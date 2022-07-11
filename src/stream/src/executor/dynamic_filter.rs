@@ -279,9 +279,7 @@ impl<S: StateStore> DynamicFilterExecutor<S> {
                     }
                 }
                 AlignedMessage::Right(chunk) => {
-                    // Store the latest update to the right value
-                    // (This should eventually be persisted via `StateTable` as well - at the
-                    // barrier)
+                    // Record the latest update to the right value
                     let chunk = chunk.compact()?; // Is this unnecessary work?
                     let (data_chunk, ops) = chunk.into_parts();
 
@@ -338,7 +336,7 @@ impl<S: StateStore> DynamicFilterExecutor<S> {
 
                     self.range_cache.flush().await?;
 
-                    // We have flushed all the state for the prev epoch. We can now update the epochs/
+                    // We have flushed all the state for the prev epoch. We can now update the epochs.
                     epoch = barrier.epoch.curr;
                     self.range_cache.update_epoch(barrier.epoch.curr);
 
