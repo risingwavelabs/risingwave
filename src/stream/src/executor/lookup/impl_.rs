@@ -317,7 +317,6 @@ impl<S: StateStore> LookupExecutor<S> {
                         0..self.stream.col_types.len(),
                         self.stream.col_types.len()
                             ..(self.stream.col_types.len() + self.arrangement.col_types.len()),
-                        false,
                     )
                     .map_err(StreamExecutorError::eval_error)?;
 

@@ -32,8 +32,6 @@ pub struct StreamChunkBuilder {
 
     /// Data types of columns
     data_types: Vec<DataType>,
-    /// Whether it is a semi/anti join or not
-    is_semi_anti_join: bool,
     /// map indices in matched columns to output columns
     matched_indices_mapping: Vec<(usize, usize)>,
     /// map indices in update columns to output columns
@@ -59,7 +57,6 @@ impl StreamChunkBuilder {
         output_indices: &[usize],
         update_range: Range<usize>,
         matched_range: Range<usize>,
-        is_semi_anti_join: bool,
     ) -> ArrayResult<Self> {
         // Leave room for paired `UpdateDelete` and `UpdateInsert`. When there are `capacity - 1`
         // ops in current builder and the last op is `UpdateDelete`, we delay the chunk generation
@@ -98,7 +95,6 @@ impl StreamChunkBuilder {
             size: 0,
             matched_indices_mapping,
             update_indices_mapping,
-            is_semi_anti_join,
         })
     }
 
@@ -148,10 +144,8 @@ impl StreamChunkBuilder {
         for &(update_idx, output_idx) in &self.update_indices_mapping {
             self.column_builders[output_idx].append_datum_ref(row_update.value_at(update_idx))?;
         }
-        if !self.is_semi_anti_join {
-            for &(_matched_idx, output_idx) in &self.matched_indices_mapping {
-                self.column_builders[output_idx].append_datum(&None)?;
-            }
+        for &(_matched_idx, output_idx) in &self.matched_indices_mapping {
+            self.column_builders[output_idx].append_datum(&None)?;
         }
         self.inc_size()
     }
@@ -165,10 +159,8 @@ impl StreamChunkBuilder {
         row_matched: &Row,
     ) -> ArrayResult<Option<StreamChunk>> {
         self.ops.push(op);
-        if !self.is_semi_anti_join {
-            for &(_update_idx, output_idx) in &self.update_indices_mapping {
-                self.column_builders[output_idx].append_datum_ref(None)?;
-            }
+        for &(_update_idx, output_idx) in &self.update_indices_mapping {
+            self.column_builders[output_idx].append_datum_ref(None)?;
         }
         for &(matched_idx, output_idx) in &self.matched_indices_mapping {
             self.column_builders[output_idx].append_datum(&row_matched[matched_idx])?;

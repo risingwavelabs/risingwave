@@ -27,6 +27,7 @@ use risingwave_expr::expr::BoxedExpression;
 use risingwave_storage::table::state_table::StateTable;
 use risingwave_storage::StateStore;
 
+use self::JoinType::{LeftSemi, LeftAnti, RightAnti, RightSemi};
 use super::barrier_align::*;
 use super::error::{StreamExecutorError, StreamExecutorResult};
 use super::managed_state::join::*;
@@ -618,6 +619,22 @@ impl<K: HashKey, S: StateStore, const T: JoinTypePrimitive> HashJoinExecutor<K, 
         let update_range = update_start_pos..(update_start_pos + side_update.col_types.len());
         let matched_range = matched_start_pos..(side_match.col_types.len() + matched_start_pos);
 
+        let (update_range, matched_range) = if T == LeftAnti || T == LeftSemi {
+            if SIDE == SideType::Left {
+                (update_range, 0..0)
+            } else {
+                (0..0, matched_range)
+            }
+        } else if T == RightAnti || T == RightSemi {
+            if SIDE == SideType::Left {
+                (0..0, matched_range)
+            } else {
+                (update_range, 0..0)
+            }
+        } else {
+            (update_range, matched_range)
+        };
+
         let mut hashjoin_chunk_builder = HashJoinChunkBuilder::<T, SIDE> {
             stream_chunk_builder: StreamChunkBuilder::new(
                 PROCESSING_WINDOW_SIZE,
@@ -625,7 +642,6 @@ impl<K: HashKey, S: StateStore, const T: JoinTypePrimitive> HashJoinExecutor<K, 
                 output_indices,
                 update_range,
                 matched_range,
-                is_semi_or_anti(T),
             )?,
         };
 
