@@ -23,14 +23,11 @@ use risingwave_common::buffer::Bitmap;
 use risingwave_common::config::StreamingConfig;
 use risingwave_common::error::{ErrorCode, Result, RwError};
 use risingwave_common::util::addr::{is_local_address, HostAddr};
-use risingwave_common::util::compress::decompress_data;
 use risingwave_hummock_sdk::LocalSstableInfo;
 use risingwave_pb::common::ActorInfo;
 use risingwave_pb::{stream_plan, stream_service};
 use risingwave_rpc_client::ComputeClientPool;
-use risingwave_storage::{
-    dispatch_hummock_state_store, dispatch_state_store, StateStore, StateStoreImpl,
-};
+use risingwave_storage::{dispatch_state_store, StateStore, StateStoreImpl};
 use tokio::sync::mpsc::{channel, Receiver};
 use tokio::task::JoinHandle;
 
@@ -41,7 +38,7 @@ use crate::executor::monitor::StreamingMetrics;
 use crate::executor::*;
 use crate::from_proto::create_executor;
 use crate::task::{
-    ActorId, ConsumableChannelPair, SharedContext, StreamEnvironment, UpDownActorIds,
+    ActorId, ConsumableChannelPair, FragmentId, SharedContext, StreamEnvironment, UpDownActorIds,
     LOCAL_OUTPUT_CHANNEL_SIZE,
 };
 
@@ -59,9 +56,6 @@ pub struct LocalStreamManagerCore {
     handles: HashMap<ActorId, ActorHandle>,
 
     pub(crate) context: Arc<SharedContext>,
-
-    /// Stores all actor information.
-    actor_infos: HashMap<ActorId, ActorInfo>,
 
     /// Stores all actor information, taken after actor built.
     actors: HashMap<ActorId, stream_plan::StreamActor>,
@@ -114,6 +108,9 @@ pub struct ExecutorParams {
 
     /// Id of the actor.
     pub actor_id: ActorId,
+
+    /// FragmentId of the actor
+    pub fragment_id: FragmentId,
 
     /// Metrics
     pub executor_stats: Arc<StreamingMetrics>,
@@ -244,7 +241,13 @@ impl LocalStreamManager {
         let (actor_ids_to_send, actor_ids_to_collect) = {
             let core = self.core.lock();
             let actor_ids_to_send = core.context.lock_barrier_manager().all_senders();
-            let actor_ids_to_collect = core.actor_infos.keys().cloned().collect::<HashSet<_>>();
+            let actor_ids_to_collect = core
+                .context
+                .actor_infos
+                .read()
+                .keys()
+                .cloned()
+                .collect::<HashSet<_>>();
             (actor_ids_to_send, actor_ids_to_collect)
         };
         if actor_ids_to_send.is_empty() || actor_ids_to_collect.is_empty() {
@@ -311,11 +314,7 @@ impl LocalStreamManager {
 
     /// This function could only be called once during the lifecycle of `LocalStreamManager` for
     /// now.
-    pub async fn build_actors(&self, actors: &[ActorId], env: StreamEnvironment) -> Result<()> {
-        // Ensure compaction group mapping is available locally.
-        dispatch_hummock_state_store!(self.state_store(), store, {
-            store.update_compaction_group_cache().await?;
-        });
+    pub fn build_actors(&self, actors: &[ActorId], env: StreamEnvironment) -> Result<()> {
         let mut core = self.core.lock();
         core.build_actors(actors, env)
     }
@@ -368,7 +367,6 @@ impl LocalStreamManagerCore {
         Self {
             handles: HashMap::new(),
             context: Arc::new(context),
-            actor_infos: HashMap::new(),
             actors: HashMap::new(),
             actor_monitor_tasks: HashMap::new(),
             mock_source: (Some(tx), Some(rx)),
@@ -393,14 +391,6 @@ impl LocalStreamManagerCore {
         )
     }
 
-    fn get_actor_info(&self, actor_id: &ActorId) -> Result<&ActorInfo> {
-        self.actor_infos.get(actor_id).ok_or_else(|| {
-            RwError::from(ErrorCode::InternalError(
-                "actor not found in info table".into(),
-            ))
-        })
-    }
-
     /// Create dispatchers with downstream information registered before
     fn create_dispatcher(
         &mut self,
@@ -408,61 +398,17 @@ impl LocalStreamManagerCore {
         dispatchers: &[stream_plan::Dispatcher],
         actor_id: ActorId,
     ) -> Result<impl StreamConsumer> {
-        // create downstream receivers
-        let mut dispatcher_impls = Vec::with_capacity(dispatchers.len());
-
-        for dispatcher in dispatchers {
-            let outputs = dispatcher
-                .downstream_actor_id
-                .iter()
-                .map(|down_id| {
-                    let downstream_addr = self.get_actor_info(down_id)?.get_host()?.into();
-                    new_output(
-                        &self.context,
-                        downstream_addr,
-                        actor_id,
-                        *down_id,
-                        self.streaming_metrics.clone(),
-                    )
-                })
-                .collect::<Result<Vec<_>>>()?;
-
-            use stream_plan::DispatcherType::*;
-            let dispatcher_impl = match dispatcher.get_type()? {
-                Hash => {
-                    assert!(!outputs.is_empty());
-                    let column_indices = dispatcher
-                        .column_indices
-                        .iter()
-                        .map(|i| *i as usize)
-                        .collect();
-                    let compressed_mapping = dispatcher.get_hash_mapping()?;
-                    let hash_mapping = decompress_data(
-                        &compressed_mapping.original_indices,
-                        &compressed_mapping.data,
-                    );
-
-                    DispatcherImpl::Hash(HashDataDispatcher::new(
-                        dispatcher.downstream_actor_id.to_vec(),
-                        outputs,
-                        column_indices,
-                        hash_mapping,
-                        dispatcher.dispatcher_id,
-                    ))
-                }
-                Broadcast => DispatcherImpl::Broadcast(BroadcastDispatcher::new(
-                    outputs,
-                    dispatcher.dispatcher_id,
-                )),
-                Simple | NoShuffle => {
-                    assert_eq!(outputs.len(), 1);
-                    let output = outputs.into_iter().next().unwrap();
-                    DispatcherImpl::Simple(SimpleDispatcher::new(output, dispatcher.dispatcher_id))
-                }
-                Invalid => unreachable!(),
-            };
-            dispatcher_impls.push(dispatcher_impl);
-        }
+        let dispatcher_impls = dispatchers
+            .iter()
+            .map(|dispatcher| {
+                DispatcherImpl::new(
+                    &self.context,
+                    actor_id,
+                    dispatcher,
+                    self.streaming_metrics.clone(),
+                )
+            })
+            .try_collect()?;
 
         Ok(DispatchExecutor::new(
             input,
@@ -477,7 +423,7 @@ impl LocalStreamManagerCore {
     #[allow(clippy::too_many_arguments)]
     fn create_nodes_inner(
         &mut self,
-        fragment_id: u32,
+        fragment_id: FragmentId,
         actor_id: ActorId,
         node: &stream_plan::StreamNode,
         input_pos: usize,
@@ -488,7 +434,7 @@ impl LocalStreamManagerCore {
     ) -> Result<BoxedExecutor> {
         let op_info = node.get_identity().clone();
         // Create the input executor before creating itself
-        // The node with no input must be a `MergeNode`
+        // The node with no input must be a `get_receive_message`
         let input: Vec<_> = node
             .input
             .iter()
@@ -526,6 +472,7 @@ impl LocalStreamManagerCore {
             op_info,
             input,
             actor_id,
+            fragment_id,
             executor_stats: self.streaming_metrics.clone(),
             actor_context: actor_context.clone(),
             vnode_bitmap,
@@ -545,7 +492,7 @@ impl LocalStreamManagerCore {
     /// Create a chain(tree) of nodes and return the head executor.
     fn create_nodes(
         &mut self,
-        fragment_id: u32,
+        fragment_id: FragmentId,
         actor_id: ActorId,
         node: &stream_plan::StreamNode,
         env: StreamEnvironment,
@@ -586,17 +533,18 @@ impl LocalStreamManagerCore {
     pub(crate) fn get_receive_message(
         &mut self,
         actor_id: ActorId,
+        fragment_id: FragmentId,
         upstreams: &[ActorId],
+        up_fragment_id: FragmentId,
     ) -> Result<Vec<Receiver<Message>>> {
         assert!(!upstreams.is_empty());
-
         let rxs = upstreams
             .iter()
             .map(|up_id| {
                 if *up_id == 0 {
                     Ok(self.mock_source.1.take().unwrap())
                 } else {
-                    let upstream_addr = self.get_actor_info(up_id)?.get_host()?.into();
+                    let upstream_addr = self.context.get_actor_info(up_id)?.get_host()?.into();
                     if !is_local_address(&upstream_addr, &self.context.addr) {
                         // Get the sender for `RemoteInput` to forward received messages to
                         // receivers in `ReceiverExecutor` or
@@ -604,7 +552,6 @@ impl LocalStreamManagerCore {
                         let sender = self.context.take_sender(&(*up_id, actor_id))?;
                         // spawn the `RemoteInput`
                         let up_id = *up_id;
-
                         let pool = self.compute_client_pool.clone();
                         let metrics = self.streaming_metrics.clone();
                         tokio::spawn(async move {
@@ -612,6 +559,7 @@ impl LocalStreamManagerCore {
                                 let remote_input = RemoteInput::create(
                                     pool.get_client_for_addr(upstream_addr).await?,
                                     (up_id, actor_id),
+                                    (up_fragment_id, fragment_id),
                                     sender,
                                     metrics,
                                 )
@@ -653,7 +601,6 @@ impl LocalStreamManagerCore {
                 .ok()
                 .map(|b| b.try_into())
                 .transpose()?;
-
             let executor = self.create_nodes(
                 actor.fragment_id,
                 actor_id,
@@ -762,7 +709,11 @@ impl LocalStreamManagerCore {
         req: stream_service::BroadcastActorInfoTableRequest,
     ) -> Result<()> {
         for actor in req.get_info() {
-            let ret = self.actor_infos.insert(actor.get_actor_id(), actor.clone());
+            let ret = self
+                .context
+                .actor_infos
+                .write()
+                .insert(actor.get_actor_id(), actor.clone());
             if let Some(prev_actor) = ret && actor != &prev_actor{
                 return Err(ErrorCode::InternalError(format!(
                     "actor info mismatch when broadcasting {}",
@@ -780,7 +731,7 @@ impl LocalStreamManagerCore {
         let handle = self.handles.remove(&actor_id).unwrap();
         self.context.retain(|&(up_id, _)| up_id != actor_id);
         self.actor_monitor_tasks.remove(&actor_id).unwrap().abort();
-        self.actor_infos.remove(&actor_id);
+        self.context.actor_infos.write().remove(&actor_id);
         self.actors.remove(&actor_id);
         // Task should have already stopped when this method is invoked.
         handle.abort();
@@ -796,7 +747,7 @@ impl LocalStreamManagerCore {
             // Task should have already stopped when this method is invoked.
             handle.abort();
         }
-        self.actor_infos.clear();
+        self.context.actor_infos.write().clear();
     }
 
     fn update_actors(

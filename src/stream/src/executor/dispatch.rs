@@ -27,7 +27,9 @@ use risingwave_common::buffer::BitmapBuilder;
 use risingwave_common::error::{internal_error, Result};
 use risingwave_common::types::VIRTUAL_NODE_COUNT;
 use risingwave_common::util::addr::{is_local_address, HostAddr};
+use risingwave_common::util::compress::decompress_data;
 use risingwave_common::util::hash_util::CRC32FastBuilder;
+use risingwave_pb::stream_plan::Dispatcher as ProstDispatcher;
 use tokio::sync::mpsc::Sender;
 use tracing::event;
 
@@ -169,7 +171,7 @@ impl Output for RemoteOutput {
     }
 }
 
-pub fn new_output(
+fn new_output(
     context: &SharedContext,
     addr: HostAddr,
     up_id: ActorId,
@@ -229,27 +231,58 @@ impl DispatchExecutorInner {
             }
             Message::Barrier(barrier) => {
                 let mutation = barrier.mutation.clone();
-                self.pre_mutate_outputs(&mutation).await?;
+                self.pre_mutate_dispatchers(&mutation).await?;
                 for dispatcher in &mut self.dispatchers {
                     dispatcher.dispatch_barrier(barrier.clone()).await?;
                 }
-                self.post_mutate_outputs(&mutation).await?;
+
+                self.post_mutate_dispatchers(&mutation).await?;
             }
         };
         Ok(())
     }
 
-    /// For `Add` and `Update`, update the outputs before we dispatch the barrier.
-    async fn pre_mutate_outputs(&mut self, mutation: &Option<Arc<Mutation>>) -> Result<()> {
+    /// Add new dispatchers to the executor. Will check whether their ids are unique.
+    fn add_dispatchers<'a>(
+        &mut self,
+        new_dispatchers: impl IntoIterator<Item = &'a ProstDispatcher>,
+    ) -> Result<()> {
+        let new_dispatchers: Vec<_> = new_dispatchers
+            .into_iter()
+            .map(|d| DispatcherImpl::new(&self.context, self.actor_id, d, self.metrics.clone()))
+            .try_collect()?;
+
+        self.dispatchers.extend(new_dispatchers);
+
+        assert!(
+            self.dispatchers
+                .iter()
+                .map(|d| d.dispatcher_id())
+                .all_unique(),
+            "dispatcher ids must be unique: {:?}",
+            self.dispatchers
+        );
+
+        Ok(())
+    }
+
+    /// For `Add` and `Update`, update the dispatchers before we dispatch the barrier.
+    async fn pre_mutate_dispatchers(&mut self, mutation: &Option<Arc<Mutation>>) -> Result<()> {
         let Some(mutation) = mutation.as_deref() else {
             return Ok(())
         };
 
         match mutation {
+            Mutation::AddDispatcher(adds) => {
+                if let Some(new_dispatchers) = adds.map.get(&self.actor_id) {
+                    self.add_dispatchers(new_dispatchers)?;
+                }
+            }
+
             Mutation::UpdateOutputs(updates) => {
                 for dispatcher in &mut self.dispatchers {
                     if let Some((_, actor_infos)) =
-                        updates.get_key_value(&(self.actor_id, dispatcher.get_dispatcher_id()))
+                        updates.get_key_value(&(self.actor_id, dispatcher.dispatcher_id()))
                     {
                         let mut new_outputs = vec![];
 
@@ -278,9 +311,8 @@ impl DispatchExecutorInner {
 
             Mutation::AddOutput(adds) => {
                 for dispatcher in &mut self.dispatchers {
-                    if let Some(downstream_actor_infos) = adds
-                        .map
-                        .get(&(self.actor_id, dispatcher.get_dispatcher_id()))
+                    if let Some(downstream_actor_infos) =
+                        adds.map.get(&(self.actor_id, dispatcher.dispatcher_id()))
                     {
                         let mut outputs_to_add = Vec::with_capacity(downstream_actor_infos.len());
                         for downstream_actor_info in downstream_actor_infos {
@@ -305,8 +337,8 @@ impl DispatchExecutorInner {
         Ok(())
     }
 
-    /// For `Stop`, update the outputs after we dispatch the barrier.
-    async fn post_mutate_outputs(&mut self, mutation: &Option<Arc<Mutation>>) -> Result<()> {
+    /// For `Stop`, update the dispatchers after we dispatch the barrier.
+    async fn post_mutate_dispatchers(&mut self, mutation: &Option<Arc<Mutation>>) -> Result<()> {
         if let Some(Mutation::Stop(stops)) = mutation.as_deref() {
             // Remove outputs only if this actor itself is not to be stopped.
             if !stops.contains(&self.actor_id) {
@@ -315,6 +347,10 @@ impl DispatchExecutorInner {
                 }
             }
         }
+
+        // After stopping the downstream mview, the outputs of some dispatcher might be empty and we
+        // should clean up them.
+        self.dispatchers.drain_filter(|d| d.is_empty());
 
         Ok(())
     }
@@ -370,6 +406,66 @@ pub enum DispatcherImpl {
     RoundRobin(RoundRobinDataDispatcher),
 }
 
+impl DispatcherImpl {
+    pub fn new(
+        context: &SharedContext,
+        actor_id: ActorId,
+        dispatcher: &ProstDispatcher,
+        metrics: Arc<StreamingMetrics>,
+    ) -> Result<Self> {
+        let outputs = dispatcher
+            .downstream_actor_id
+            .iter()
+            .map(|down_id| {
+                let downstream_addr = context.get_actor_info(down_id)?.get_host()?.into();
+                new_output(
+                    context,
+                    downstream_addr,
+                    actor_id,
+                    *down_id,
+                    metrics.clone(),
+                )
+            })
+            .collect::<Result<Vec<_>>>()?;
+
+        use risingwave_pb::stream_plan::DispatcherType::*;
+        let dispatcher_impl = match dispatcher.get_type()? {
+            Hash => {
+                assert!(!outputs.is_empty());
+                let column_indices = dispatcher
+                    .column_indices
+                    .iter()
+                    .map(|i| *i as usize)
+                    .collect();
+                let compressed_mapping = dispatcher.get_hash_mapping()?;
+                let hash_mapping = decompress_data(
+                    &compressed_mapping.original_indices,
+                    &compressed_mapping.data,
+                );
+
+                DispatcherImpl::Hash(HashDataDispatcher::new(
+                    dispatcher.downstream_actor_id.to_vec(),
+                    outputs,
+                    column_indices,
+                    hash_mapping,
+                    dispatcher.dispatcher_id,
+                ))
+            }
+            Broadcast => DispatcherImpl::Broadcast(BroadcastDispatcher::new(
+                outputs,
+                dispatcher.dispatcher_id,
+            )),
+            Simple | NoShuffle => {
+                let [output]: [_; 1] = outputs.try_into().unwrap();
+                DispatcherImpl::Simple(SimpleDispatcher::new(output, dispatcher.dispatcher_id))
+            }
+            Invalid => unreachable!(),
+        };
+
+        Ok(dispatcher_impl)
+    }
+}
+
 macro_rules! impl_dispatcher {
     ([], $( { $variant_name:ident } ),*) => {
         impl DispatcherImpl {
@@ -403,9 +499,15 @@ macro_rules! impl_dispatcher {
                 }
             }
 
-            pub fn get_dispatcher_id(&self) -> DispatcherId {
+            pub fn dispatcher_id(&self) -> DispatcherId {
                 match self {
-                    $(Self::$variant_name(inner) => inner.get_dispatcher_id(), )*
+                    $(Self::$variant_name(inner) => inner.dispatcher_id(), )*
+                }
+            }
+
+            pub fn is_empty(&self) -> bool {
+                match self {
+                    $(Self::$variant_name(inner) => inner.is_empty(), )*
                 }
             }
         }
@@ -446,21 +548,15 @@ pub trait Dispatcher: Debug + 'static {
     fn add_outputs(&mut self, outputs: impl IntoIterator<Item = BoxedOutput>);
     fn remove_outputs(&mut self, actor_ids: &HashSet<ActorId>);
 
-    fn get_dispatcher_id(&self) -> DispatcherId;
+    fn dispatcher_id(&self) -> DispatcherId;
+    fn is_empty(&self) -> bool;
 }
 
+#[derive(Debug)]
 pub struct RoundRobinDataDispatcher {
     outputs: Vec<BoxedOutput>,
     cur: usize,
     dispatcher_id: DispatcherId,
-}
-
-impl Debug for RoundRobinDataDispatcher {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        f.debug_struct("RoundRobinDataDispatcher")
-            .field("outputs", &self.outputs)
-            .finish()
-    }
 }
 
 impl RoundRobinDataDispatcher {
@@ -510,8 +606,12 @@ impl Dispatcher for RoundRobinDataDispatcher {
             .count();
     }
 
-    fn get_dispatcher_id(&self) -> DispatcherId {
+    fn dispatcher_id(&self) -> DispatcherId {
         self.dispatcher_id
+    }
+
+    fn is_empty(&self) -> bool {
+        self.outputs.is_empty()
     }
 }
 
@@ -528,9 +628,11 @@ pub struct HashDataDispatcher {
 impl Debug for HashDataDispatcher {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.debug_struct("HashDataDispatcher")
+            .field("fragment_ids", &self.fragment_ids)
             .field("outputs", &self.outputs)
             .field("keys", &self.keys)
-            .finish()
+            .field("dispatcher_id", &self.dispatcher_id)
+            .finish_non_exhaustive()
     }
 }
 
@@ -691,23 +793,20 @@ impl Dispatcher for HashDataDispatcher {
             .count();
     }
 
-    fn get_dispatcher_id(&self) -> DispatcherId {
+    fn dispatcher_id(&self) -> DispatcherId {
         self.dispatcher_id
+    }
+
+    fn is_empty(&self) -> bool {
+        self.outputs.is_empty()
     }
 }
 
 /// `BroadcastDispatcher` dispatches message to all outputs.
+#[derive(Debug)]
 pub struct BroadcastDispatcher {
     outputs: HashMap<ActorId, BoxedOutput>,
     dispatcher_id: DispatcherId,
-}
-
-impl Debug for BroadcastDispatcher {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        f.debug_struct("BroadcastDispatcher")
-            .field("outputs", &self.outputs)
-            .finish()
-    }
 }
 
 impl BroadcastDispatcher {
@@ -765,31 +864,35 @@ impl Dispatcher for BroadcastDispatcher {
             .count();
     }
 
-    fn get_dispatcher_id(&self) -> DispatcherId {
+    fn dispatcher_id(&self) -> DispatcherId {
         self.dispatcher_id
+    }
+
+    fn is_empty(&self) -> bool {
+        self.outputs.is_empty()
     }
 }
 
 /// `SimpleDispatcher` dispatches message to a single output.
+#[derive(Debug)]
 pub struct SimpleDispatcher {
-    output: BoxedOutput,
+    output: Option<BoxedOutput>,
     dispatcher_id: DispatcherId,
-}
-
-impl Debug for SimpleDispatcher {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        f.debug_struct("SimpleDispatcher")
-            .field("output", &self.output)
-            .finish()
-    }
 }
 
 impl SimpleDispatcher {
     pub fn new(output: BoxedOutput, dispatcher_id: DispatcherId) -> Self {
         Self {
-            output,
+            output: Some(output),
             dispatcher_id,
         }
+    }
+
+    /// Get the output of this dispatcher.
+    /// The field should always be `Some`. After `remove_output` is called, the field becomes `None`
+    /// and this dispatcher should be dropped immediately by checking `is_empty`.
+    fn output(&mut self) -> &mut BoxedOutput {
+        self.output.as_mut().expect("no output")
     }
 }
 
@@ -797,35 +900,42 @@ impl Dispatcher for SimpleDispatcher {
     define_dispatcher_associated_types!();
 
     fn set_outputs(&mut self, outputs: impl IntoIterator<Item = BoxedOutput>) {
-        self.output = outputs.into_iter().next().unwrap();
+        self.output = Some(outputs.into_iter().next().unwrap());
     }
 
     fn add_outputs(&mut self, outputs: impl IntoIterator<Item = BoxedOutput>) {
-        self.output = outputs.into_iter().next().unwrap();
+        // TODO: ban this after removing `AddOutputs` mutation.
+        self.output = Some(outputs.into_iter().next().unwrap());
     }
 
     fn dispatch_barrier(&mut self, barrier: Barrier) -> Self::BarrierFuture<'_> {
         async move {
-            self.output.send(Message::Barrier(barrier.clone())).await?;
+            self.output()
+                .send(Message::Barrier(barrier.clone()))
+                .await?;
             Ok(())
         }
     }
 
     fn dispatch_data(&mut self, chunk: StreamChunk) -> Self::DataFuture<'_> {
         async move {
-            self.output.send(Message::Chunk(chunk)).await?;
+            self.output().send(Message::Chunk(chunk)).await?;
             Ok(())
         }
     }
 
     fn remove_outputs(&mut self, actor_ids: &HashSet<ActorId>) {
-        if actor_ids.contains(&self.output.down_actor_id()) {
-            panic!("cannot remove outputs from SimpleDispatcher");
+        if actor_ids.contains(&self.output().down_actor_id()) {
+            self.output = None;
         }
     }
 
-    fn get_dispatcher_id(&self) -> DispatcherId {
+    fn dispatcher_id(&self) -> DispatcherId {
         self.dispatcher_id
+    }
+
+    fn is_empty(&self) -> bool {
+        self.output.is_none()
     }
 }
 

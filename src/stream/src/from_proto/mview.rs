@@ -31,20 +31,22 @@ impl ExecutorBuilder for MaterializeExecutorBuilder {
     ) -> Result<BoxedExecutor> {
         let node = try_match_expand!(node.get_node_body().unwrap(), NodeBody::Materialize)?;
 
-        let table_id = TableId::from(&node.table_ref_id);
+        let table_id = TableId::new(node.table_id);
         let order_key = node
             .column_orders
             .iter()
             .map(OrderPair::from_prost)
             .collect();
         let column_ids = node
-            .column_ids
+            .get_table()?
+            .get_columns()
             .iter()
-            .map(|id| ColumnId::from(*id))
+            .map(|t| ColumnId::from(t.column_desc.as_ref().unwrap().column_id))
             .collect();
 
         let distribution_key = node
-            .distribution_key
+            .get_table()?
+            .get_distribution_key()
             .iter()
             .map(|key| *key as usize)
             .collect();
