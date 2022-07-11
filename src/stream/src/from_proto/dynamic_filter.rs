@@ -58,15 +58,7 @@ impl ExecutorBuilder for DynamicFilterExecutorBuilder {
         let state_table_l =
             StateTable::from_table_catalog(node.get_left_table()?, store.clone(), Some(vnodes));
 
-        let state_table_r = if is_right_table_writer {
-            Some(StateTable::from_table_catalog(
-                node.get_right_table()?,
-                store,
-                None,
-            ))
-        } else {
-            None
-        };
+        let state_table_r = StateTable::from_table_catalog(node.get_right_table()?, store, None);
 
         Ok(Box::new(DynamicFilterExecutor::new(
             source_l,
@@ -77,6 +69,7 @@ impl ExecutorBuilder for DynamicFilterExecutorBuilder {
             comparator,
             state_table_l,
             state_table_r,
+            is_right_table_writer,
             params.actor_id as u64,
             params.executor_stats,
         )))

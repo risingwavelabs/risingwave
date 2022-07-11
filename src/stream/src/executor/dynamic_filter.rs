@@ -46,7 +46,8 @@ pub struct DynamicFilterExecutor<S: StateStore> {
     identity: String,
     comparator: ExprNodeType,
     range_cache: RangeCache<S>,
-    right_table: Option<StateTable<S>>,
+    right_table: StateTable<S>,
+    is_right_table_writer: bool,
     actor_id: u64,
     schema: Schema,
     metrics: Arc<StreamingMetrics>,
@@ -62,7 +63,8 @@ impl<S: StateStore> DynamicFilterExecutor<S> {
         executor_id: u64,
         comparator: ExprNodeType,
         state_table_l: StateTable<S>,
-        state_table_r: Option<StateTable<S>>,
+        state_table_r: StateTable<S>,
+        is_right_table_writer: bool,
         actor_id: u64,
         metrics: Arc<StreamingMetrics>,
     ) -> Self {
@@ -76,6 +78,7 @@ impl<S: StateStore> DynamicFilterExecutor<S> {
             comparator,
             range_cache: RangeCache::new(state_table_l, 0, usize::MAX),
             right_table: state_table_r,
+            is_right_table_writer,
             actor_id,
             metrics,
             schema,
@@ -331,12 +334,11 @@ impl<S: StateStore> DynamicFilterExecutor<S> {
                         }
                     }
 
-                    assert_eq!(epoch, barrier.epoch.prev);
-
-                    if let Some(table) = &mut self.right_table {
+                    if self.is_right_table_writer {
                         if let Some(row) = current_epoch_row.take() {
-                            table.insert(row)?;
-                            table.commit(epoch).await?;
+                            assert_eq!(epoch, barrier.epoch.prev);
+                            self.right_table.insert(row)?;
+                            self.right_table.commit(epoch).await?;
                         }
                     }
 
