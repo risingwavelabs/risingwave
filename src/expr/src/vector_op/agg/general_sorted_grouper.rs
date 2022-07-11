@@ -29,7 +29,7 @@ use risingwave_common::types::*;
 /// group compared to (the last tuple of) the previous chunk, and there is no leading
 /// `0` when it continues the same group or there is no previous chunk.
 // pub struct EqGroups(Vec<usize>);
-#[derive(Default)]
+#[derive(Default, Debug)]
 pub struct EqGroups {
     indices: Vec<usize>,
     offset: usize, // offset to next index waiting for processing
@@ -152,9 +152,11 @@ pub trait SortedGrouper: Send + 'static {
         groups: &EqGroups,
     ) -> Result<()>;
 
+    fn update(&mut self, input: &ArrayImpl, start_idx: usize, end_idx: usize) -> Result<()>;
+
     /// `output` the state to the `builder`. Expected to be called once to obtain
     /// the last group, when there are no more upstream data.
-    fn output(&self, builder: &mut ArrayBuilderImpl) -> Result<()>;
+    fn output_and_reset(&mut self, builder: &mut ArrayBuilderImpl) -> Result<()>;
 }
 pub type BoxedSortedGrouper = Box<dyn SortedGrouper>;
 
@@ -243,10 +245,25 @@ where
         Ok(())
     }
 
-    pub fn output_concrete(&self, builder: &mut T::Builder) -> Result<()> {
-        builder
-            .append(self.group_value.as_ref().map(|x| x.as_scalar_ref()))
-            .map_err(Into::into)
+    pub fn update_concrete(
+        &mut self,
+        input: &T,
+        start_row_id: usize,
+        end_row_id: usize,
+    ) -> Result<()> {
+        println!(
+            "[rc] GeneralSortedGrouper::update_concrete, input: {:?}, start_row_id: {}, end_row_id: {}",
+            input, start_row_id, end_row_id
+        );
+        self.group_value = input.value_at(start_row_id).map(|x| x.to_owned_scalar());
+        Ok(())
+    }
+
+    pub fn output_and_reset_concrete(&mut self, builder: &mut T::Builder) -> Result<()> {
+        builder.append(self.group_value.as_ref().map(|x| x.as_scalar_ref()))?;
+        self.ongoing = false;
+        self.group_value = None;
+        Ok(())
     }
 }
 
@@ -265,9 +282,26 @@ macro_rules! impl_sorted_grouper {
                 }
             }
 
-            fn output(&self, builder: &mut ArrayBuilderImpl) -> Result<()> {
+            fn update(
+                &mut self,
+                input: &ArrayImpl,
+                start_idx: usize,
+                end_idx: usize,
+            ) -> Result<()> {
+                if let ArrayImpl::$input_variant(i) = input {
+                    self.update_concrete(i, start_idx, end_idx)
+                } else {
+                    Err(ErrorCode::InternalError(format!(
+                        "Input fail to match {}.",
+                        stringify!($input_variant)
+                    ))
+                    .into())
+                }
+            }
+
+            fn output_and_reset(&mut self, builder: &mut ArrayBuilderImpl) -> Result<()> {
                 if let ArrayBuilderImpl::$input_variant(b) = builder {
-                    self.output_concrete(b)
+                    self.output_and_reset_concrete(b)
                 } else {
                     Err(ErrorCode::InternalError(format!(
                         "Builder fail to match {}.",
@@ -335,7 +369,7 @@ mod tests {
         g.update_and_output_with_sorted_groups_concrete(&input, &mut builder, &eq)?;
         assert_eq!(eq.starting_indices(), &vec![1]);
 
-        g.output_concrete(&mut builder)?;
+        g.output_and_reset_concrete(&mut builder)?;
         assert_eq!(
             builder.finish().unwrap().iter().collect::<Vec<_>>(),
             vec![Some(1), Some(3), Some(4)]
@@ -381,8 +415,8 @@ mod tests {
         let a_input = I32Array::from_slice(&[Some(1), Some(2), Some(3)]).unwrap();
         a.update_and_output_with_sorted_groups_concrete(&a_input, &mut a_builder, &eq)?;
 
-        g0.output_concrete(&mut g0_builder)?;
-        g1.output_concrete(&mut g1_builder)?;
+        g0.output_and_reset_concrete(&mut g0_builder)?;
+        g1.output_and_reset_concrete(&mut g1_builder)?;
         a.output_concrete(&mut a_builder)?;
         assert_eq!(
             g0_builder.finish().unwrap().iter().collect::<Vec<_>>(),
@@ -451,7 +485,7 @@ mod tests {
         )
         .unwrap();
 
-        g0.output_concrete(&mut g0_builder).unwrap();
+        g0.output_and_reset_concrete(&mut g0_builder).unwrap();
         agg.output(&mut a_builder).unwrap();
         assert_eq!(
             g0_builder.finish().unwrap().iter().collect::<Vec<_>>(),

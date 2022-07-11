@@ -53,6 +53,19 @@ pub trait Aggregator: Send + 'static {
         builder: &mut ArrayBuilderImpl,
         groups: &EqGroups,
     ) -> Result<()>;
+
+    fn update_chunk(
+        &mut self,
+        input: &DataChunk,
+        start_row_id: usize,
+        end_row_id: usize,
+    ) -> Result<()> {
+        todo!()
+    }
+
+    fn output_and_reset(&mut self, builder: &mut ArrayBuilderImpl) -> Result<()> {
+        todo!()
+    }
 }
 
 pub type BoxedAggState = Box<dyn Aggregator>;

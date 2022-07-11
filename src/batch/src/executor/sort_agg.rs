@@ -121,14 +121,17 @@ impl SortAggExecutor {
         let (mut group_builders, mut agg_builders) =
             SortAggExecutor::create_builders(&self.group_key, &self.agg_states);
 
+        println!("[rc] group_key: {:?}", self.group_key);
         #[for_await]
         for child_chunk in self.child.execute() {
             let child_chunk = child_chunk?.compact()?;
+            println!("[rc] child_chunk: {:?}", child_chunk);
             let group_columns: Vec<_> = self
                 .group_key
                 .iter_mut()
                 .map(|expr| expr.eval(&child_chunk))
                 .try_collect()?;
+            println!("[rc] group_columns: {:?}", group_columns);
 
             let groups = self
                 .sorted_groupers
@@ -136,37 +139,35 @@ impl SortAggExecutor {
                 .zip_eq(&group_columns)
                 .map(|(grouper, array)| grouper.detect_groups(array))
                 .collect::<Result<Vec<EqGroups>>>()?;
+            println!("[rc] groups: {:?}", groups);
 
-            let mut groups = EqGroups::intersect(&groups);
-            loop {
-                let limit = {
-                    if left_capacity >= groups.len() {
-                        left_capacity -= groups.len();
-                        0
-                    } else {
-                        let old = left_capacity;
-                        left_capacity = 0;
-                        old
-                    }
-                };
-                groups.set_limit(limit);
+            let groups = EqGroups::intersect(&groups);
+            println!("[rc] groups intersect: {:?}", groups);
 
-                SortAggExecutor::build_sorted_groups(
-                    &mut self.sorted_groupers,
-                    &group_columns,
-                    &mut group_builders,
-                    &groups,
-                )?;
+            let mut start_row_idx = 0;
+            for i in groups.starting_indices() {
+                let end_row_idx = *i;
+                if start_row_idx < end_row_idx {
+                    Self::update_sorted_groupers(
+                        &mut self.sorted_groupers,
+                        &group_columns,
+                        start_row_idx,
+                        end_row_idx,
+                    )?;
+                    Self::update_agg_states(
+                        &mut self.agg_states,
+                        &child_chunk,
+                        start_row_idx,
+                        end_row_idx,
+                    )?;
+                }
+                Self::output_sorted_groupers(&mut self.sorted_groupers, &mut group_builders)?;
+                Self::output_agg_states(&mut self.agg_states, &mut agg_builders)?;
+                start_row_idx = end_row_idx;
 
-                SortAggExecutor::build_agg_states(
-                    &mut self.agg_states,
-                    &child_chunk,
-                    &mut agg_builders,
-                    &groups,
-                )?;
-
+                left_capacity -= 1;
                 if left_capacity == 0 {
-                    // yield output chunk
+                    // output chunk reaches its limit size, yield it
                     let columns = group_builders
                         .into_iter()
                         .chain(agg_builders)
@@ -182,24 +183,27 @@ impl SortAggExecutor {
 
                     left_capacity = self.output_size_limit;
                 }
-
-                groups.advance_offset();
-                if groups.is_empty() {
-                    break;
-                }
+            }
+            let row_cnt = child_chunk.cardinality();
+            if start_row_idx < row_cnt {
+                Self::update_sorted_groupers(
+                    &mut self.sorted_groupers,
+                    &group_columns,
+                    start_row_idx,
+                    row_cnt,
+                )?;
+                Self::update_agg_states(
+                    &mut self.agg_states,
+                    &child_chunk,
+                    start_row_idx,
+                    row_cnt,
+                )?;
             }
         }
 
         assert!(left_capacity > 0);
-        // process the last group
-        self.sorted_groupers
-            .iter()
-            .zip_eq(&mut group_builders)
-            .try_for_each(|(grouper, builder)| grouper.output(builder))?;
-        self.agg_states
-            .iter()
-            .zip_eq(&mut agg_builders)
-            .try_for_each(|(state, builder)| state.output(builder))?;
+        Self::output_sorted_groupers(&mut self.sorted_groupers, &mut group_builders)?;
+        Self::output_agg_states(&mut self.agg_states, &mut agg_builders)?;
 
         let columns = group_builders
             .into_iter()
@@ -212,33 +216,47 @@ impl SortAggExecutor {
         yield output;
     }
 
-    fn build_sorted_groups(
+    fn update_sorted_groupers(
         sorted_groupers: &mut [BoxedSortedGrouper],
         group_columns: &[ArrayRef],
-        group_builders: &mut [ArrayBuilderImpl],
-        groups: &EqGroups,
+        start_row_idx: usize,
+        end_row_idx: usize,
     ) -> Result<()> {
         sorted_groupers
             .iter_mut()
             .zip_eq(group_columns)
-            .zip_eq(group_builders)
-            .try_for_each(|((grouper, column), builder)| {
-                grouper.update_and_output_with_sorted_groups(column, builder, groups)
-            })
+            .try_for_each(|(grouper, column)| grouper.update(column, start_row_idx, end_row_idx))
     }
 
-    fn build_agg_states(
+    fn update_agg_states(
         agg_states: &mut [BoxedAggState],
         child_chunk: &DataChunk,
+        start_row_idx: usize,
+        end_row_idx: usize,
+    ) -> Result<()> {
+        agg_states
+            .iter_mut()
+            .try_for_each(|state| state.update_chunk(&child_chunk, start_row_idx, end_row_idx))
+    }
+
+    fn output_sorted_groupers(
+        sorted_groupers: &mut [BoxedSortedGrouper],
+        group_builders: &mut [ArrayBuilderImpl],
+    ) -> Result<()> {
+        sorted_groupers
+            .iter_mut()
+            .zip_eq(group_builders)
+            .try_for_each(|(grouper, builder)| grouper.output_and_reset(builder))
+    }
+
+    fn output_agg_states(
+        agg_states: &mut [BoxedAggState],
         agg_builders: &mut [ArrayBuilderImpl],
-        groups: &EqGroups,
     ) -> Result<()> {
         agg_states
             .iter_mut()
             .zip_eq(agg_builders)
-            .try_for_each(|(state, builder)| {
-                state.update_and_output_with_sorted_groups(child_chunk, builder, groups)
-            })
+            .try_for_each(|(state, builder)| state.output_and_reset(builder))
     }
 
     fn create_builders(

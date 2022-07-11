@@ -45,6 +45,34 @@ impl Aggregator for CountStar {
         Ok(())
     }
 
+    fn update_chunk(
+        &mut self,
+        input: &DataChunk,
+        start_row_id: usize,
+        end_row_id: usize,
+    ) -> Result<()> {
+        println!(
+            "[rc] CountStar::update_chunk, input: {:?}, start_row_id: {}, end_row_id: {}",
+            input, start_row_id, end_row_id
+        );
+        if let Some(visibility) = input.visibility() {
+            for row_id in start_row_id..end_row_id {
+                if visibility.is_set(row_id)? {
+                    self.result += 1;
+                }
+            }
+        } else {
+            self.result += end_row_id - start_row_id;
+        }
+        Ok(())
+    }
+
+    fn output_and_reset(&mut self, builder: &mut ArrayBuilderImpl) -> Result<()> {
+        let res = self.output(builder);
+        self.result = 0;
+        res
+    }
+
     fn output(&self, builder: &mut ArrayBuilderImpl) -> Result<()> {
         match builder {
             ArrayBuilderImpl::Int64(b) => b.append(Some(self.result as i64)).map_err(Into::into),
@@ -58,6 +86,7 @@ impl Aggregator for CountStar {
         builder: &mut ArrayBuilderImpl,
         groups: &EqGroups,
     ) -> Result<()> {
+        todo!();
         let builder = match builder {
             ArrayBuilderImpl::Int64(b) => b,
             _ => {
