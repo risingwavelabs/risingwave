@@ -144,10 +144,11 @@ mod tests {
     use risingwave_common::array::Row;
     use risingwave_common::catalog::{ColumnDesc, ColumnId, OrderedColumnDesc};
     use risingwave_common::types::{DataType, ScalarImpl, VIRTUAL_NODE_SIZE};
-    use risingwave_common::util::ordered::{serialize_pk_and_row, OrderedRowSerializer};
+    use risingwave_common::util::ordered::OrderedRowSerializer;
     use risingwave_common::util::sort_util::OrderType;
 
     use super::DedupPkCellBasedRowDeserializer;
+    use crate::encoding::cell_based_encoding_util::serialize_pk_and_row;
     use crate::encoding::cell_based_row_deserializer::ColumnDescMapping;
 
     #[test]

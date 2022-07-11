@@ -75,16 +75,12 @@ impl DatabaseId {
 
 #[derive(Clone, Debug, Default, Hash, PartialOrd, PartialEq, Eq)]
 pub struct SchemaId {
-    database_ref_id: DatabaseId,
     schema_id: i32,
 }
 
 impl SchemaId {
-    pub fn new(database_ref_id: DatabaseId, schema_id: i32) -> Self {
-        SchemaId {
-            database_ref_id,
-            schema_id,
-        }
+    pub fn new(schema_id: i32) -> Self {
+        SchemaId { schema_id }
     }
 
     pub fn placeholder() -> i32 {
@@ -131,88 +127,7 @@ impl fmt::Display for TableId {
     }
 }
 
-// TODO: replace boilerplate code
-impl From<&Option<risingwave_pb::plan_common::DatabaseRefId>> for DatabaseId {
-    fn from(option: &Option<risingwave_pb::plan_common::DatabaseRefId>) -> Self {
-        match option {
-            Some(pb) => DatabaseId {
-                database_id: pb.database_id,
-            },
-            None => DatabaseId {
-                database_id: Default::default(),
-            },
-        }
-    }
-}
-
-// TODO: replace boilerplate code
-impl From<&Option<risingwave_pb::plan_common::SchemaRefId>> for SchemaId {
-    fn from(option: &Option<risingwave_pb::plan_common::SchemaRefId>) -> Self {
-        match option {
-            Some(pb) => SchemaId {
-                database_ref_id: DatabaseId::from(&pb.database_ref_id),
-                schema_id: pb.schema_id,
-            },
-            None => {
-                let pb = risingwave_pb::plan_common::SchemaRefId::default();
-                SchemaId {
-                    database_ref_id: DatabaseId::from(&pb.database_ref_id),
-                    schema_id: pb.schema_id,
-                }
-            }
-        }
-    }
-}
-
-// TODO: replace boilerplate code
-impl From<&Option<risingwave_pb::plan_common::TableRefId>> for TableId {
-    fn from(option: &Option<risingwave_pb::plan_common::TableRefId>) -> Self {
-        match option {
-            Some(pb) => TableId {
-                table_id: pb.table_id as u32,
-            },
-            None => {
-                let pb = risingwave_pb::plan_common::TableRefId::default();
-                TableId {
-                    table_id: pb.table_id as u32,
-                }
-            }
-        }
-    }
-}
-
-// TODO: replace boilerplate code
-impl From<&DatabaseId> for risingwave_pb::plan_common::DatabaseRefId {
-    fn from(database_id: &DatabaseId) -> Self {
-        risingwave_pb::plan_common::DatabaseRefId {
-            database_id: database_id.database_id,
-        }
-    }
-}
-
-// TODO: replace boilerplate code
-impl From<&SchemaId> for risingwave_pb::plan_common::SchemaRefId {
-    fn from(schema_id: &SchemaId) -> Self {
-        risingwave_pb::plan_common::SchemaRefId {
-            database_ref_id: Some(risingwave_pb::plan_common::DatabaseRefId::from(
-                &schema_id.database_ref_id,
-            )),
-            schema_id: schema_id.schema_id,
-        }
-    }
-}
-
-// TODO: replace boilerplate code
-impl From<&TableId> for risingwave_pb::plan_common::TableRefId {
-    fn from(table_id: &TableId) -> Self {
-        risingwave_pb::plan_common::TableRefId {
-            schema_ref_id: None,
-            table_id: table_id.table_id as i32,
-        }
-    }
-}
-
-// TODO: TableOption is deplicated with the properties in table catalog, We can refactor later to
+// TODO: TableOption is duplicated with the properties in table catalog, We can refactor later to
 // directly fetch such options from catalog when creating compaction jobs.
 #[derive(Clone, Debug, PartialEq, Default, Copy)]
 pub struct TableOption {
@@ -262,64 +177,5 @@ impl TableOption {
         }
 
         result
-    }
-}
-
-#[cfg(test)]
-mod tests {
-    use risingwave_pb::plan_common::{DatabaseRefId, SchemaRefId, TableRefId};
-
-    use crate::catalog::{DatabaseId, SchemaId, TableId};
-
-    fn generate_database_id_pb() -> DatabaseRefId {
-        DatabaseRefId { database_id: 32 }
-    }
-
-    fn generate_schema_id_pb() -> SchemaRefId {
-        SchemaRefId {
-            schema_id: 48,
-            ..Default::default()
-        }
-    }
-
-    fn generate_table_id_pb() -> TableRefId {
-        TableRefId {
-            schema_ref_id: None,
-            table_id: 67,
-        }
-    }
-
-    #[test]
-    fn test_database_id_from_pb() {
-        let database_id = generate_database_id_pb();
-        assert_eq!(32, database_id.database_id);
-    }
-
-    #[test]
-    fn test_schema_id_from_pb() {
-        let schema_id = SchemaId {
-            database_ref_id: DatabaseId {
-                database_id: generate_database_id_pb().database_id,
-            },
-            schema_id: generate_schema_id_pb().schema_id,
-        };
-
-        let expected_schema_id = SchemaId {
-            database_ref_id: DatabaseId { database_id: 32 },
-            schema_id: 48,
-        };
-
-        assert_eq!(expected_schema_id, schema_id);
-    }
-
-    #[test]
-    fn test_table_id_from_pb() {
-        let table_id: TableId = TableId {
-            table_id: generate_table_id_pb().table_id as u32,
-        };
-
-        let expected_table_id = TableId { table_id: 67 };
-
-        assert_eq!(expected_table_id, table_id);
     }
 }
