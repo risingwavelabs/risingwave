@@ -87,12 +87,10 @@ impl ToStreamProst for StreamDynamicFilter {
                 .predicate
                 .as_expr_unless_true()
                 .map(|x| x.to_expr_proto()),
-            left_table: Some(
-                infer_internal_table_catalog(self.clone().into()).to_prost(
-                    SchemaId::placeholder() as u32,
-                    DatabaseId::placeholder() as u32,
-                ),
-            ),
+            left_table: Some(infer_internal_table_catalog(self.clone().into()).to_prost(
+                SchemaId::placeholder() as u32,
+                DatabaseId::placeholder() as u32,
+            )),
         })
     }
 }

@@ -12,21 +12,22 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-
 use std::ops::Bound::{self, *};
 use std::ops::RangeBounds;
-use anyhow::anyhow;
 
-use madsim::collections::{BTreeMap, HashSet};
+use anyhow::anyhow;
 use madsim::collections::btree_map::Range;
-use risingwave_storage::StateStore;
-use risingwave_storage::table::state_table::StateTable;
-use risingwave_common::types::ScalarImpl;
+use madsim::collections::{BTreeMap, HashSet};
 use risingwave_common::array::Row;
-use crate::executor::{StreamExecutorResult, error::StreamExecutorError};
+use risingwave_common::types::ScalarImpl;
+use risingwave_storage::table::state_table::StateTable;
+use risingwave_storage::StateStore;
+
+use crate::executor::error::StreamExecutorError;
+use crate::executor::StreamExecutorResult;
 
 /// The `RangeCache` caches a given range of `ScalarImpl` keys and corresponding rows.
-/// It will evict keys from memory if it is above capacity and shrink its range. 
+/// It will evict keys from memory if it is above capacity and shrink its range.
 /// Values not in range will have to be retrieved from storage.
 pub struct RangeCache<S: StateStore> {
     // TODO: It could be potentially expensive memory-wise to store `HashSet`.
@@ -64,7 +65,8 @@ impl<S: StateStore> RangeCache<S> {
         }
     }
 
-    /// Insert a row and corresponding scalar value key into cache (if within range) and `StateTable`.
+    /// Insert a row and corresponding scalar value key into cache (if within range) and
+    /// `StateTable`.
     pub fn insert(&mut self, k: ScalarImpl, v: Row) -> StreamExecutorResult<()> {
         if self.range.contains(&k) {
             let entry = self.cache.entry(k).or_insert_with(HashSet::new);
@@ -74,7 +76,8 @@ impl<S: StateStore> RangeCache<S> {
         Ok(())
     }
 
-    /// Delete a row and corresponding scalar value key from cache (if within range) and `StateTable`.
+    /// Delete a row and corresponding scalar value key from cache (if within range) and
+    /// `StateTable`.
     pub fn delete(&mut self, k: &ScalarImpl, v: Row) -> StreamExecutorResult<()> {
         if self.range.contains(k) {
             let contains_element = self
@@ -93,8 +96,9 @@ impl<S: StateStore> RangeCache<S> {
         Ok(())
     }
 
-    /// Return an iterator over sets of rows that satisfy the given range. Evicts entries if exceeding capacity based on
-    /// whether the latest RHS value is the lower or upper bound of the range.
+    /// Return an iterator over sets of rows that satisfy the given range. Evicts entries if
+    /// exceeding capacity based on whether the latest RHS value is the lower or upper bound of
+    /// the range.
     pub fn range(
         &self,
         range: (Bound<ScalarImpl>, Bound<ScalarImpl>),
@@ -135,7 +139,7 @@ impl<S: StateStore> RangeCache<S> {
         self.cache.range(range)
     }
 
-    /// Flush writes to the `StateTable` from the in-memory buffer. 
+    /// Flush writes to the `StateTable` from the in-memory buffer.
     pub async fn flush(&mut self) -> StreamExecutorResult<()> {
         // self.metrics.flush();
         self.state_table.commit(self.current_epoch).await?;

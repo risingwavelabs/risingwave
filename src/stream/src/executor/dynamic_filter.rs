@@ -32,11 +32,11 @@ use risingwave_storage::StateStore;
 
 use super::barrier_align::*;
 use super::error::StreamExecutorError;
+use super::managed_state::dynamic_filter::RangeCache;
 use super::monitor::StreamingMetrics;
 use super::{BoxedExecutor, BoxedMessageStream, Executor, Message, PkIndices, PkIndicesRef};
 use crate::common::StreamChunkBuilder;
 use crate::executor::PROCESSING_WINDOW_SIZE;
-use super::managed_state::dynamic_filter::RangeCache;
 
 pub struct DynamicFilterExecutor<S: StateStore> {
     source_l: Option<BoxedExecutor>,
