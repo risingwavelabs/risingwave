@@ -360,6 +360,9 @@ impl StreamFragmenter {
                 if let Some(left_table) = &mut dynamic_filter_node.left_table {
                     left_table.id = state.gen_table_id();
                 }
+                if let Some(right_table) = &mut dynamic_filter_node.right_table {
+                    right_table.id = state.gen_table_id();
+                }
             }
 
             _ => {}

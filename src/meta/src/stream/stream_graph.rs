@@ -561,30 +561,24 @@ impl StreamGraphBuilder {
                 // Table id rewrite done below.
                 match new_stream_node.node_body.as_mut().unwrap() {
                     NodeBody::HashJoin(node) => {
-                        // The operator id must be assigned with table ids. Otherwise it is a logic
-                        // error.
-                        let mut left_table_id: u32 = 0;
-                        // let mut right_table_id: u32 = 0;
                         if let Some(table) = &mut node.left_table {
-                            left_table_id = table.id + table_id_offset;
-                            table.id = left_table_id;
+                            table.id += table_id_offset;
                             table.schema_id = ctx.schema_id;
                             table.database_id = ctx.database_id;
                             table.name = generate_intertable_name_with_type(
                                 &ctx.mview_name,
-                                left_table_id,
+                                table.id,
                                 "HashJoinLeft",
                             );
                             check_and_fill_internal_table(table.id, Some(table.clone()));
                         }
                         if let Some(table) = &mut node.right_table {
-                            let right_table_id = left_table_id + 1;
-                            table.id = right_table_id;
+                            table.id += table_id_offset;
                             table.schema_id = ctx.schema_id;
                             table.database_id = ctx.database_id;
                             table.name = generate_intertable_name_with_type(
                                 &ctx.mview_name,
-                                right_table_id,
+                                table.id,
                                 "HashJoinRight",
                             );
                             check_and_fill_internal_table(table.id, Some(table.clone()));
@@ -668,6 +662,17 @@ impl StreamGraphBuilder {
                                 &ctx.mview_name,
                                 table.id,
                                 "DynamicFilterLeft",
+                            );
+                            check_and_fill_internal_table(table.id, Some(table.clone()));
+                        }
+                        if let Some(table) = &mut node.right_table {
+                            table.id += table_id_offset;
+                            table.schema_id = ctx.schema_id;
+                            table.database_id = ctx.database_id;
+                            table.name = generate_intertable_name_with_type(
+                                &ctx.mview_name,
+                                table.id,
+                                "DynamicFilterRight",
                             );
                             check_and_fill_internal_table(table.id, Some(table.clone()));
                         }

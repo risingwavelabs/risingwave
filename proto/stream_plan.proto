@@ -114,8 +114,10 @@ message DynamicFilterNode {
   uint32 left_key = 1;
   // Must be one of <, <=, >, >=
   expr.ExprNode condition = 2;
-  // Used for internal table states.
+  // Left table stores all states with predicate possibly not NULL.
   catalog.Table left_table = 3;
+  // Right table stores single value from RHS of predicate.
+  catalog.Table right_table = 4;
   // It is true when the right side of the inequality predicate is monotonically:
   // - decreasing for <, <=, increasing for >, >=
   // bool is_monotonic = 10;

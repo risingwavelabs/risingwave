@@ -87,7 +87,11 @@ impl ToStreamProst for StreamDynamicFilter {
                 .predicate
                 .as_expr_unless_true()
                 .map(|x| x.to_expr_proto()),
-            left_table: Some(infer_internal_table_catalog(self.clone().into()).to_prost(
+            left_table: Some(infer_left_internal_table_catalog(self.clone().into()).to_prost(
+                SchemaId::placeholder() as u32,
+                DatabaseId::placeholder() as u32,
+            )),
+            right_table: Some(infer_right_internal_table_catalog(self.right.clone()).to_prost(
                 SchemaId::placeholder() as u32,
                 DatabaseId::placeholder() as u32,
             )),
@@ -95,7 +99,7 @@ impl ToStreamProst for StreamDynamicFilter {
     }
 }
 
-fn infer_internal_table_catalog(input: PlanRef) -> TableCatalog {
+fn infer_left_internal_table_catalog(input: PlanRef) -> TableCatalog {
     let base = input.plan_base();
     let schema = &base.schema;
 
@@ -115,4 +119,21 @@ fn infer_internal_table_catalog(input: PlanRef) -> TableCatalog {
     });
 
     internal_table_catalog_builder.build(dist_keys, append_only)
+}
+
+fn infer_right_internal_table_catalog(input: PlanRef) -> TableCatalog {
+    let base = input.plan_base();
+    let schema = &base.schema;
+
+    // We require that the right table has distribution `Single`
+    assert_eq!(base.dist.dist_column_indices().to_vec(), vec![]);
+
+    let mut internal_table_catalog_builder = TableCatalogBuilder::new();
+
+    schema.fields().iter().for_each(|field| {
+        internal_table_catalog_builder.add_column_desc_from_field_without_order_type(field)
+    });
+
+    // No distribution keys
+    internal_table_catalog_builder.build(vec![], false)
 }
