@@ -229,47 +229,48 @@
   batch_plan: |
     BatchTopN { order: [$0 DESC, $2 ASC, $1 ASC, $3 ASC], limit: 100, offset: 0 }
       BatchExchange { order: [], dist: Single }
-        BatchProject { exprs: [$5, $2, $7, $0, $1, $3, $4, $6] }
-          BatchHashJoin { type: Inner, predicate: $1 = $9 AND $0 = $10, output_indices: [1, 2, 3, 4, 5, 6, 7, 8] }
-            BatchExchange { order: [], dist: HashShard([1]) }
-              BatchHashJoin { type: Inner, predicate: $9 = $10, output_indices: [0, 1, 2, 3, 4, 5, 6, 7, 8] }
-                BatchExchange { order: [], dist: HashShard([9]) }
-                  BatchHashJoin { type: Inner, predicate: $5 = $9, output_indices: [0, 1, 2, 3, 4, 6, 7, 8, 10, 11] }
-                    BatchExchange { order: [], dist: HashShard([5]) }
-                      BatchHashJoin { type: Inner, predicate: $0 = $4, output_indices: [1, 2, 3, 5, 6, 7, 8, 9, 10] }
-                        BatchExchange { order: [], dist: HashShard([0]) }
-                          BatchHashJoin { type: Inner, predicate: $0 = $3, output_indices: [1, 2, 3, 4] }
-                            BatchExchange { order: [], dist: HashShard([0]) }
-                              BatchScan { table: partsupp, columns: [ps_partkey, ps_suppkey, ps_supplycost] }
-                            BatchExchange { order: [], dist: HashShard([0]) }
-                              BatchProject { exprs: [$0, $1] }
-                                BatchFilter { predicate: ($3 = 4:Int32) AND Like($2, '%TIN':Varchar) }
-                                  BatchScan { table: part, columns: [p_partkey, p_mfgr, p_type, p_size] }
-                        BatchExchange { order: [], dist: HashShard([0]) }
-                          BatchScan { table: supplier, columns: [s_suppkey, s_name, s_address, s_nationkey, s_phone, s_acctbal, s_comment] }
-                    BatchExchange { order: [], dist: HashShard([0]) }
-                      BatchScan { table: nation, columns: [n_nationkey, n_name, n_regionkey] }
-                BatchExchange { order: [], dist: HashShard([0]) }
-                  BatchProject { exprs: [$0] }
-                    BatchFilter { predicate: ($1 = 'AFRICA':Varchar) }
-                      BatchScan { table: region, columns: [r_regionkey, r_name] }
-            BatchHashAgg { group_key: [$0], aggs: [min($1)] }
-              BatchExchange { order: [], dist: HashShard([0]) }
-                BatchHashJoin { type: Inner, predicate: $2 = $3, output_indices: [0, 1] }
-                  BatchExchange { order: [], dist: HashShard([2]) }
-                    BatchHashJoin { type: Inner, predicate: $2 = $3, output_indices: [0, 1, 4] }
-                      BatchExchange { order: [], dist: HashShard([2]) }
-                        BatchHashJoin { type: Inner, predicate: $1 = $3, output_indices: [0, 2, 4] }
-                          BatchExchange { order: [], dist: HashShard([1]) }
-                            BatchScan { table: partsupp, columns: [ps_partkey, ps_suppkey, ps_supplycost] }
+        BatchTopN { order: [$0 DESC, $2 ASC, $1 ASC, $3 ASC], limit: 100, offset: 0 }
+          BatchProject { exprs: [$5, $2, $7, $0, $1, $3, $4, $6] }
+            BatchHashJoin { type: Inner, predicate: $1 = $9 AND $0 = $10, output_indices: [1, 2, 3, 4, 5, 6, 7, 8] }
+              BatchExchange { order: [], dist: HashShard([1]) }
+                BatchHashJoin { type: Inner, predicate: $9 = $10, output_indices: [0, 1, 2, 3, 4, 5, 6, 7, 8] }
+                  BatchExchange { order: [], dist: HashShard([9]) }
+                    BatchHashJoin { type: Inner, predicate: $5 = $9, output_indices: [0, 1, 2, 3, 4, 6, 7, 8, 10, 11] }
+                      BatchExchange { order: [], dist: HashShard([5]) }
+                        BatchHashJoin { type: Inner, predicate: $0 = $4, output_indices: [1, 2, 3, 5, 6, 7, 8, 9, 10] }
                           BatchExchange { order: [], dist: HashShard([0]) }
-                            BatchScan { table: supplier, columns: [s_suppkey, s_nationkey] }
+                            BatchHashJoin { type: Inner, predicate: $0 = $3, output_indices: [1, 2, 3, 4] }
+                              BatchExchange { order: [], dist: HashShard([0]) }
+                                BatchScan { table: partsupp, columns: [ps_partkey, ps_suppkey, ps_supplycost] }
+                              BatchExchange { order: [], dist: HashShard([0]) }
+                                BatchProject { exprs: [$0, $1] }
+                                  BatchFilter { predicate: ($3 = 4:Int32) AND Like($2, '%TIN':Varchar) }
+                                    BatchScan { table: part, columns: [p_partkey, p_mfgr, p_type, p_size] }
+                          BatchExchange { order: [], dist: HashShard([0]) }
+                            BatchScan { table: supplier, columns: [s_suppkey, s_name, s_address, s_nationkey, s_phone, s_acctbal, s_comment] }
                       BatchExchange { order: [], dist: HashShard([0]) }
-                        BatchScan { table: nation, columns: [n_nationkey, n_regionkey] }
+                        BatchScan { table: nation, columns: [n_nationkey, n_name, n_regionkey] }
                   BatchExchange { order: [], dist: HashShard([0]) }
                     BatchProject { exprs: [$0] }
                       BatchFilter { predicate: ($1 = 'AFRICA':Varchar) }
                         BatchScan { table: region, columns: [r_regionkey, r_name] }
+              BatchHashAgg { group_key: [$0], aggs: [min($1)] }
+                BatchExchange { order: [], dist: HashShard([0]) }
+                  BatchHashJoin { type: Inner, predicate: $2 = $3, output_indices: [0, 1] }
+                    BatchExchange { order: [], dist: HashShard([2]) }
+                      BatchHashJoin { type: Inner, predicate: $2 = $3, output_indices: [0, 1, 4] }
+                        BatchExchange { order: [], dist: HashShard([2]) }
+                          BatchHashJoin { type: Inner, predicate: $1 = $3, output_indices: [0, 2, 4] }
+                            BatchExchange { order: [], dist: HashShard([1]) }
+                              BatchScan { table: partsupp, columns: [ps_partkey, ps_suppkey, ps_supplycost] }
+                            BatchExchange { order: [], dist: HashShard([0]) }
+                              BatchScan { table: supplier, columns: [s_suppkey, s_nationkey] }
+                        BatchExchange { order: [], dist: HashShard([0]) }
+                          BatchScan { table: nation, columns: [n_nationkey, n_regionkey] }
+                    BatchExchange { order: [], dist: HashShard([0]) }
+                      BatchProject { exprs: [$0] }
+                        BatchFilter { predicate: ($1 = 'AFRICA':Varchar) }
+                          BatchScan { table: region, columns: [r_regionkey, r_name] }
   stream_plan: |
     StreamMaterialize { columns: [s_acctbal, s_name, n_name, p_partkey, p_mfgr, s_address, s_phone, s_comment, _row_id(hidden), _row_id#1(hidden), _row_id#2(hidden), _row_id#3(hidden), _row_id#4(hidden), ps_partkey(hidden)], pk_columns: [_row_id, _row_id#1, _row_id#2, _row_id#3, _row_id#4, ps_partkey], order_descs: [s_acctbal, n_name, s_name, p_partkey, _row_id, _row_id#1, _row_id#2, _row_id#3, _row_id#4, ps_partkey] }
       StreamTopN { order: [$0 DESC, $2 ASC, $1 ASC, $3 ASC], limit: 100, offset: 0 }
@@ -366,24 +367,25 @@
   batch_plan: |
     BatchTopN { order: [$1 DESC, $2 ASC], limit: 10, offset: 0 }
       BatchExchange { order: [], dist: Single }
-        BatchProject { exprs: [$0, $3, $1, $2] }
-          BatchHashAgg { group_key: [$0, $1, $2], aggs: [sum($3)] }
-            BatchExchange { order: [], dist: HashShard([0, 1, 2]) }
-              BatchProject { exprs: [$2, $0, $1, ($3 * (1:Int32 - $4))] }
-                BatchHashJoin { type: Inner, predicate: $0 = $3, output_indices: [1, 2, 3, 4, 5] }
-                  BatchExchange { order: [], dist: HashShard([0]) }
-                    BatchHashJoin { type: Inner, predicate: $0 = $2, output_indices: [1, 3, 4] }
-                      BatchExchange { order: [], dist: HashShard([0]) }
-                        BatchProject { exprs: [$0] }
-                          BatchFilter { predicate: ($1 = 'FURNITURE':Varchar) }
-                            BatchScan { table: customer, columns: [c_custkey, c_mktsegment] }
-                      BatchExchange { order: [], dist: HashShard([1]) }
-                        BatchFilter { predicate: ($2 < '1995-03-29':Varchar::Date) }
-                          BatchScan { table: orders, columns: [o_orderkey, o_custkey, o_orderdate, o_shippriority] }
-                  BatchExchange { order: [], dist: HashShard([0]) }
-                    BatchProject { exprs: [$0, $1, $2] }
-                      BatchFilter { predicate: ($3 > '1995-03-29':Varchar::Date) }
-                        BatchScan { table: lineitem, columns: [l_orderkey, l_extendedprice, l_discount, l_shipdate] }
+        BatchTopN { order: [$1 DESC, $2 ASC], limit: 10, offset: 0 }
+          BatchProject { exprs: [$0, $3, $1, $2] }
+            BatchHashAgg { group_key: [$0, $1, $2], aggs: [sum($3)] }
+              BatchExchange { order: [], dist: HashShard([0, 1, 2]) }
+                BatchProject { exprs: [$2, $0, $1, ($3 * (1:Int32 - $4))] }
+                  BatchHashJoin { type: Inner, predicate: $0 = $3, output_indices: [1, 2, 3, 4, 5] }
+                    BatchExchange { order: [], dist: HashShard([0]) }
+                      BatchHashJoin { type: Inner, predicate: $0 = $2, output_indices: [1, 3, 4] }
+                        BatchExchange { order: [], dist: HashShard([0]) }
+                          BatchProject { exprs: [$0] }
+                            BatchFilter { predicate: ($1 = 'FURNITURE':Varchar) }
+                              BatchScan { table: customer, columns: [c_custkey, c_mktsegment] }
+                        BatchExchange { order: [], dist: HashShard([1]) }
+                          BatchFilter { predicate: ($2 < '1995-03-29':Varchar::Date) }
+                            BatchScan { table: orders, columns: [o_orderkey, o_custkey, o_orderdate, o_shippriority] }
+                    BatchExchange { order: [], dist: HashShard([0]) }
+                      BatchProject { exprs: [$0, $1, $2] }
+                        BatchFilter { predicate: ($3 > '1995-03-29':Varchar::Date) }
+                          BatchScan { table: lineitem, columns: [l_orderkey, l_extendedprice, l_discount, l_shipdate] }
   stream_plan: |
     StreamMaterialize { columns: [l_orderkey, revenue, o_orderdate, o_shippriority], pk_columns: [l_orderkey, o_orderdate, o_shippriority], order_descs: [revenue, o_orderdate, l_orderkey, o_shippriority] }
       StreamTopN { order: [$1 DESC, $2 ASC], limit: 10, offset: 0 }
@@ -1118,27 +1120,28 @@
   batch_plan: |
     BatchTopN { order: [$2 DESC], limit: 20, offset: 0 }
       BatchExchange { order: [], dist: Single }
-        BatchProject { exprs: [$0, $1, $7, $2, $4, $5, $3, $6] }
-          BatchHashAgg { group_key: [$0, $1, $2, $3, $4, $5, $6], aggs: [sum($7)] }
-            BatchExchange { order: [], dist: HashShard([0, 1, 2, 3, 4, 5, 6]) }
-              BatchProject { exprs: [$0, $1, $4, $3, $8, $2, $5, ($6 * (1.00:Decimal - $7))] }
-                BatchHashJoin { type: Inner, predicate: $3 = $9, output_indices: [0, 1, 2, 4, 5, 6, 7, 8, 10] }
-                  BatchExchange { order: [], dist: HashShard([3]) }
-                    BatchHashJoin { type: Inner, predicate: $7 = $8, output_indices: [0, 1, 2, 3, 4, 5, 6, 9, 10] }
-                      BatchExchange { order: [], dist: HashShard([7]) }
-                        BatchHashJoin { type: Inner, predicate: $0 = $8, output_indices: [0, 1, 2, 3, 4, 5, 6, 7] }
-                          BatchExchange { order: [], dist: HashShard([0]) }
-                            BatchScan { table: customer, columns: [c_custkey, c_name, c_address, c_nationkey, c_phone, c_acctbal, c_comment] }
-                          BatchExchange { order: [], dist: HashShard([1]) }
-                            BatchProject { exprs: [$0, $1] }
-                              BatchFilter { predicate: ($2 >= '1994-01-01':Varchar::Date) AND ($2 < ('1994-01-01':Varchar::Date + '3 mons 00:00:00':Interval)) }
-                                BatchScan { table: orders, columns: [o_orderkey, o_custkey, o_orderdate] }
-                      BatchExchange { order: [], dist: HashShard([0]) }
-                        BatchProject { exprs: [$0, $1, $2] }
-                          BatchFilter { predicate: ($3 = 'R':Varchar) }
-                            BatchScan { table: lineitem, columns: [l_orderkey, l_extendedprice, l_discount, l_returnflag] }
-                  BatchExchange { order: [], dist: HashShard([0]) }
-                    BatchScan { table: nation, columns: [n_nationkey, n_name] }
+        BatchTopN { order: [$2 DESC], limit: 20, offset: 0 }
+          BatchProject { exprs: [$0, $1, $7, $2, $4, $5, $3, $6] }
+            BatchHashAgg { group_key: [$0, $1, $2, $3, $4, $5, $6], aggs: [sum($7)] }
+              BatchExchange { order: [], dist: HashShard([0, 1, 2, 3, 4, 5, 6]) }
+                BatchProject { exprs: [$0, $1, $4, $3, $8, $2, $5, ($6 * (1.00:Decimal - $7))] }
+                  BatchHashJoin { type: Inner, predicate: $3 = $9, output_indices: [0, 1, 2, 4, 5, 6, 7, 8, 10] }
+                    BatchExchange { order: [], dist: HashShard([3]) }
+                      BatchHashJoin { type: Inner, predicate: $7 = $8, output_indices: [0, 1, 2, 3, 4, 5, 6, 9, 10] }
+                        BatchExchange { order: [], dist: HashShard([7]) }
+                          BatchHashJoin { type: Inner, predicate: $0 = $8, output_indices: [0, 1, 2, 3, 4, 5, 6, 7] }
+                            BatchExchange { order: [], dist: HashShard([0]) }
+                              BatchScan { table: customer, columns: [c_custkey, c_name, c_address, c_nationkey, c_phone, c_acctbal, c_comment] }
+                            BatchExchange { order: [], dist: HashShard([1]) }
+                              BatchProject { exprs: [$0, $1] }
+                                BatchFilter { predicate: ($2 >= '1994-01-01':Varchar::Date) AND ($2 < ('1994-01-01':Varchar::Date + '3 mons 00:00:00':Interval)) }
+                                  BatchScan { table: orders, columns: [o_orderkey, o_custkey, o_orderdate] }
+                        BatchExchange { order: [], dist: HashShard([0]) }
+                          BatchProject { exprs: [$0, $1, $2] }
+                            BatchFilter { predicate: ($3 = 'R':Varchar) }
+                              BatchScan { table: lineitem, columns: [l_orderkey, l_extendedprice, l_discount, l_returnflag] }
+                    BatchExchange { order: [], dist: HashShard([0]) }
+                      BatchScan { table: nation, columns: [n_nationkey, n_name] }
   stream_plan: |
     StreamMaterialize { columns: [c_custkey, c_name, revenue, c_acctbal, n_name, c_address, c_phone, c_comment], pk_columns: [c_custkey, c_name, c_acctbal, c_phone, n_name, c_address, c_comment], order_descs: [revenue, c_custkey, c_name, c_acctbal, c_phone, n_name, c_address, c_comment] }
       StreamTopN { order: [$2 DESC], limit: 20, offset: 0 }
@@ -1861,23 +1864,24 @@
   batch_plan: |
     BatchTopN { order: [$4 DESC, $3 ASC], limit: 100, offset: 0 }
       BatchExchange { order: [], dist: Single }
-        BatchHashAgg { group_key: [$0, $1, $2, $3, $4], aggs: [sum($5)] }
-          BatchProject { exprs: [$1, $0, $2, $4, $3, $5] }
-            BatchHashJoin { type: LeftSemi, predicate: $2 = $6, output_indices: all }
-              BatchHashJoin { type: Inner, predicate: $2 = $5, output_indices: [0, 1, 2, 3, 4, 6] }
-                BatchExchange { order: [], dist: HashShard([2]) }
-                  BatchHashJoin { type: Inner, predicate: $0 = $3, output_indices: [0, 1, 2, 4, 5] }
-                    BatchExchange { order: [], dist: HashShard([0]) }
-                      BatchScan { table: customer, columns: [c_custkey, c_name] }
-                    BatchExchange { order: [], dist: HashShard([1]) }
-                      BatchScan { table: orders, columns: [o_orderkey, o_custkey, o_totalprice, o_orderdate] }
-                BatchExchange { order: [], dist: HashShard([0]) }
-                  BatchScan { table: lineitem, columns: [l_orderkey, l_quantity] }
-              BatchProject { exprs: [$0] }
-                BatchFilter { predicate: ($1 > 1:Int32) }
-                  BatchHashAgg { group_key: [$0], aggs: [sum($1)] }
-                    BatchExchange { order: [], dist: HashShard([0]) }
-                      BatchScan { table: lineitem, columns: [l_orderkey, l_quantity] }
+        BatchTopN { order: [$4 DESC, $3 ASC], limit: 100, offset: 0 }
+          BatchHashAgg { group_key: [$0, $1, $2, $3, $4], aggs: [sum($5)] }
+            BatchProject { exprs: [$1, $0, $2, $4, $3, $5] }
+              BatchHashJoin { type: LeftSemi, predicate: $2 = $6, output_indices: all }
+                BatchHashJoin { type: Inner, predicate: $2 = $5, output_indices: [0, 1, 2, 3, 4, 6] }
+                  BatchExchange { order: [], dist: HashShard([2]) }
+                    BatchHashJoin { type: Inner, predicate: $0 = $3, output_indices: [0, 1, 2, 4, 5] }
+                      BatchExchange { order: [], dist: HashShard([0]) }
+                        BatchScan { table: customer, columns: [c_custkey, c_name] }
+                      BatchExchange { order: [], dist: HashShard([1]) }
+                        BatchScan { table: orders, columns: [o_orderkey, o_custkey, o_totalprice, o_orderdate] }
+                  BatchExchange { order: [], dist: HashShard([0]) }
+                    BatchScan { table: lineitem, columns: [l_orderkey, l_quantity] }
+                BatchProject { exprs: [$0] }
+                  BatchFilter { predicate: ($1 > 1:Int32) }
+                    BatchHashAgg { group_key: [$0], aggs: [sum($1)] }
+                      BatchExchange { order: [], dist: HashShard([0]) }
+                        BatchScan { table: lineitem, columns: [l_orderkey, l_quantity] }
   stream_plan: |
     StreamMaterialize { columns: [c_name, c_custkey, o_orderkey, o_orderdate, o_totalprice, agg#0(hidden), quantity], pk_columns: [c_name, c_custkey, o_orderkey, o_orderdate, o_totalprice], order_descs: [o_totalprice, o_orderdate, c_name, c_custkey, o_orderkey] }
       StreamTopN { order: [$4 DESC, $3 ASC], limit: 100, offset: 0 }
@@ -2196,36 +2200,37 @@
   batch_plan: |
     BatchTopN { order: [$1 DESC, $0 ASC], limit: 100, offset: 0 }
       BatchExchange { order: [], dist: Single }
-        BatchHashAgg { group_key: [$0], aggs: [count] }
-          BatchExchange { order: [], dist: HashShard([0]) }
-            BatchHashJoin { type: LeftAnti, predicate: $1 = $3 AND ($4 <> $2), output_indices: [0] }
-              BatchHashJoin { type: LeftSemi, predicate: $1 = $3 AND ($4 <> $2), output_indices: all }
-                BatchExchange { order: [], dist: HashShard([1]) }
-                  BatchHashJoin { type: Inner, predicate: $1 = $4, output_indices: [0, 2, 3] }
-                    BatchExchange { order: [], dist: HashShard([1]) }
-                      BatchHashJoin { type: Inner, predicate: $2 = $4, output_indices: [0, 1, 2, 3] }
-                        BatchExchange { order: [], dist: HashShard([2]) }
-                          BatchHashJoin { type: Inner, predicate: $0 = $4, output_indices: [1, 2, 3, 4] }
-                            BatchExchange { order: [], dist: HashShard([0]) }
-                              BatchScan { table: supplier, columns: [s_suppkey, s_name, s_nationkey] }
-                            BatchExchange { order: [], dist: HashShard([1]) }
-                              BatchProject { exprs: [$0, $1] }
-                                BatchFilter { predicate: ($3 > $2) }
-                                  BatchScan { table: lineitem, columns: [l_orderkey, l_suppkey, l_commitdate, l_receiptdate] }
-                        BatchExchange { order: [], dist: HashShard([0]) }
-                          BatchProject { exprs: [$0] }
-                            BatchFilter { predicate: ($1 = 'F':Varchar) }
-                              BatchScan { table: orders, columns: [o_orderkey, o_orderstatus] }
-                    BatchExchange { order: [], dist: HashShard([0]) }
-                      BatchProject { exprs: [$0] }
-                        BatchFilter { predicate: ($1 = 'GERMANY':Varchar) }
-                          BatchScan { table: nation, columns: [n_nationkey, n_name] }
+        BatchTopN { order: [$1 DESC, $0 ASC], limit: 100, offset: 0 }
+          BatchHashAgg { group_key: [$0], aggs: [count] }
+            BatchExchange { order: [], dist: HashShard([0]) }
+              BatchHashJoin { type: LeftAnti, predicate: $1 = $3 AND ($4 <> $2), output_indices: [0] }
+                BatchHashJoin { type: LeftSemi, predicate: $1 = $3 AND ($4 <> $2), output_indices: all }
+                  BatchExchange { order: [], dist: HashShard([1]) }
+                    BatchHashJoin { type: Inner, predicate: $1 = $4, output_indices: [0, 2, 3] }
+                      BatchExchange { order: [], dist: HashShard([1]) }
+                        BatchHashJoin { type: Inner, predicate: $2 = $4, output_indices: [0, 1, 2, 3] }
+                          BatchExchange { order: [], dist: HashShard([2]) }
+                            BatchHashJoin { type: Inner, predicate: $0 = $4, output_indices: [1, 2, 3, 4] }
+                              BatchExchange { order: [], dist: HashShard([0]) }
+                                BatchScan { table: supplier, columns: [s_suppkey, s_name, s_nationkey] }
+                              BatchExchange { order: [], dist: HashShard([1]) }
+                                BatchProject { exprs: [$0, $1] }
+                                  BatchFilter { predicate: ($3 > $2) }
+                                    BatchScan { table: lineitem, columns: [l_orderkey, l_suppkey, l_commitdate, l_receiptdate] }
+                          BatchExchange { order: [], dist: HashShard([0]) }
+                            BatchProject { exprs: [$0] }
+                              BatchFilter { predicate: ($1 = 'F':Varchar) }
+                                BatchScan { table: orders, columns: [o_orderkey, o_orderstatus] }
+                      BatchExchange { order: [], dist: HashShard([0]) }
+                        BatchProject { exprs: [$0] }
+                          BatchFilter { predicate: ($1 = 'GERMANY':Varchar) }
+                            BatchScan { table: nation, columns: [n_nationkey, n_name] }
+                  BatchExchange { order: [], dist: HashShard([0]) }
+                    BatchScan { table: lineitem, columns: [l_orderkey, l_suppkey] }
                 BatchExchange { order: [], dist: HashShard([0]) }
-                  BatchScan { table: lineitem, columns: [l_orderkey, l_suppkey] }
-              BatchExchange { order: [], dist: HashShard([0]) }
-                BatchProject { exprs: [$0, $1] }
-                  BatchFilter { predicate: ($3 > $2) }
-                    BatchScan { table: lineitem, columns: [l_orderkey, l_suppkey, l_commitdate, l_receiptdate] }
+                  BatchProject { exprs: [$0, $1] }
+                    BatchFilter { predicate: ($3 > $2) }
+                      BatchScan { table: lineitem, columns: [l_orderkey, l_suppkey, l_commitdate, l_receiptdate] }
   stream_plan: |
     StreamMaterialize { columns: [s_name, agg#0(hidden), numwait], pk_columns: [s_name], order_descs: [numwait, s_name] }
       StreamTopN { order: [$2 DESC, $0 ASC], limit: 100, offset: 0 }

@@ -39,7 +39,7 @@ use crate::executor::monitor::StreamingMetrics;
 use crate::executor::*;
 use crate::from_proto::create_executor;
 use crate::task::{
-    ActorId, ConsumableChannelPair, SharedContext, StreamEnvironment, UpDownActorIds,
+    ActorId, ConsumableChannelPair, FragmentId, SharedContext, StreamEnvironment, UpDownActorIds,
     LOCAL_OUTPUT_CHANNEL_SIZE,
 };
 
@@ -112,6 +112,9 @@ pub struct ExecutorParams {
 
     /// Id of the actor.
     pub actor_id: ActorId,
+
+    /// FragmentId of the actor
+    pub fragment_id: FragmentId,
 
     /// Metrics
     pub executor_stats: Arc<StreamingMetrics>,
@@ -465,7 +468,7 @@ impl LocalStreamManagerCore {
     #[allow(clippy::too_many_arguments)]
     fn create_nodes_inner(
         &mut self,
-        fragment_id: u32,
+        fragment_id: FragmentId,
         actor_id: ActorId,
         node: &stream_plan::StreamNode,
         input_pos: usize,
@@ -476,7 +479,7 @@ impl LocalStreamManagerCore {
     ) -> Result<BoxedExecutor> {
         let op_info = node.get_identity().clone();
         // Create the input executor before creating itself
-        // The node with no input must be a `MergeNode`
+        // The node with no input must be a `get_receive_message`
         let input: Vec<_> = node
             .input
             .iter()
@@ -514,6 +517,7 @@ impl LocalStreamManagerCore {
             op_info,
             input,
             actor_id,
+            fragment_id,
             executor_stats: self.streaming_metrics.clone(),
             actor_context: actor_context.clone(),
             vnode_bitmap,
@@ -533,7 +537,7 @@ impl LocalStreamManagerCore {
     /// Create a chain(tree) of nodes and return the head executor.
     fn create_nodes(
         &mut self,
-        fragment_id: u32,
+        fragment_id: FragmentId,
         actor_id: ActorId,
         node: &stream_plan::StreamNode,
         env: StreamEnvironment,
@@ -574,10 +578,11 @@ impl LocalStreamManagerCore {
     pub(crate) fn get_receive_message(
         &mut self,
         actor_id: ActorId,
+        fragment_id: FragmentId,
         upstreams: &[ActorId],
+        up_fragment_id: FragmentId,
     ) -> Result<Vec<Receiver<Message>>> {
         assert!(!upstreams.is_empty());
-
         let rxs = upstreams
             .iter()
             .map(|up_id| {
@@ -592,7 +597,6 @@ impl LocalStreamManagerCore {
                         let sender = self.context.take_sender(&(*up_id, actor_id))?;
                         // spawn the `RemoteInput`
                         let up_id = *up_id;
-
                         let pool = self.compute_client_pool.clone();
                         let metrics = self.streaming_metrics.clone();
                         tokio::spawn(async move {
@@ -600,6 +604,7 @@ impl LocalStreamManagerCore {
                                 let remote_input = RemoteInput::create(
                                     pool.get_client_for_addr(upstream_addr).await?,
                                     (up_id, actor_id),
+                                    (up_fragment_id, fragment_id),
                                     sender,
                                     metrics,
                                 )
@@ -641,7 +646,6 @@ impl LocalStreamManagerCore {
                 .ok()
                 .map(|b| b.try_into())
                 .transpose()?;
-
             let executor = self.create_nodes(
                 actor.fragment_id,
                 actor_id,
