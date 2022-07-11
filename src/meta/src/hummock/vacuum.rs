@@ -111,6 +111,7 @@ where
             hummock_manager.delete_versions(&versions_to_delete).await?;
             versions_to_delete.clear();
         }
+        hummock_manager.proceed_version_checkpoint().await.unwrap();
         Ok(vacuum_count as u64)
     }
 
