@@ -19,8 +19,8 @@ use rand::Rng;
 use risingwave_frontend::binder::bind_data_type;
 use risingwave_frontend::expr::DataTypeName;
 use risingwave_sqlparser::ast::{
-    BinaryOperator, ColumnDef, Expr, Ident, OrderByExpr, Query, Select, SelectItem, SetExpr, Statement,
-    Join, JoinConstraint, JoinOperator, TableWithJoins, Value, With,
+    BinaryOperator, ColumnDef, Expr, Ident, Join, JoinConstraint, JoinOperator, OrderByExpr, Query,
+    Select, SelectItem, SetExpr, Statement, TableWithJoins, Value, With,
 };
 
 mod expr;

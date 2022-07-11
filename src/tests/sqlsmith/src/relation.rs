@@ -12,26 +12,25 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use crate::{BinaryOperator, Column, Expr, Join, JoinOperator, JoinConstraint};
 use rand::prelude::SliceRandom;
 use rand::Rng;
 use risingwave_sqlparser::ast::{Ident, ObjectName, TableAlias, TableFactor, TableWithJoins};
 
-use crate::{SqlGenerator, Table};
+use crate::{
+    BinaryOperator, Column, Expr, Join, JoinConstraint, JoinOperator, SqlGenerator, Table,
+};
 
 fn create_join_on_expr(left: String, right: String) -> Expr {
     let left = Box::new(Expr::Identifier(Ident::new(left)));
     let right = Box::new(Expr::Identifier(Ident::new(right)));
     Expr::BinaryOp {
-    left,
-    op: BinaryOperator::Eq,
-    right,
+        left,
+        op: BinaryOperator::Eq,
+        right,
     }
 }
 
-
 impl<'a, R: Rng> SqlGenerator<'a, R> {
-
     pub(crate) fn gen_from_relation(&mut self) -> TableWithJoins {
         let (from_relation, _) = self.gen_from_relation_with_cols();
         from_relation
@@ -104,10 +103,9 @@ impl<'a, R: Rng> SqlGenerator<'a, R> {
                 // For simplicity only support scalar types for now.
                 let left_ty = left_column.data_type;
                 let right_ty = right_column.data_type;
-                if left_ty.is_scalar() && right_ty.is_scalar()
-                    && (left_ty == right_ty) {
-                        available_join_on_columns.push((left_column, right_column))
-                    }
+                if left_ty.is_scalar() && right_ty.is_scalar() && (left_ty == right_ty) {
+                    available_join_on_columns.push((left_column, right_column))
+                }
             }
         }
         let i = self.rng.gen_range(0..available_join_on_columns.len());
@@ -116,7 +114,7 @@ impl<'a, R: Rng> SqlGenerator<'a, R> {
 
         let right_factor_with_join = Join {
             relation: right_factor,
-            join_operator: JoinOperator::FullOuter(JoinConstraint::On(join_on_expr))
+            join_operator: JoinOperator::FullOuter(JoinConstraint::On(join_on_expr)),
         };
         let table = TableWithJoins {
             relation: left_factor,
