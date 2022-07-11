@@ -14,7 +14,7 @@
 
 use std::cmp;
 
-use super::key::{split_key_epoch, user_key};
+use super::key::{split_key_epoch, user_key, get_epoch};
 
 /// Compares two full keys first by their user keys, then by their versions (epochs).
 pub struct VersionedComparator;
@@ -26,7 +26,10 @@ impl VersionedComparator {
     pub fn compare_key(lhs: &[u8], rhs: &[u8]) -> cmp::Ordering {
         let (l_p, l_s) = split_key_epoch(lhs);
         let (r_p, r_s) = split_key_epoch(rhs);
-        l_p.cmp(r_p).then_with(|| l_s.cmp(r_s))
+        ret = l_p.cmp(r_p).then_with(|| l_s.cmp(r_s));
+        if ret == cmp::Ordering::Equal {
+            println!("ORDERING EQ: {:?}, EPOCH: {:?}", l_p, u64::MAX - u64::from_be(l_s));
+        }
     }
 
     #[inline]
