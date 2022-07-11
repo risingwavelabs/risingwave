@@ -56,7 +56,11 @@ impl ExecutorBuilder for DynamicFilterExecutorBuilder {
         // let right_table_id = TableId::from(node.right_table.as_ref().unwrap().id);
 
         let state_table_l =
-            StateTable::from_table_catalog(node.get_left_table()?, store, Some(vnodes));
+            StateTable::from_table_catalog(node.get_left_table()?, store.clone(), Some(vnodes));
+
+        let state_table_r =
+            StateTable::from_table_catalog(node.get_right_table()?, store, None);
+    
 
         Ok(Box::new(DynamicFilterExecutor::new(
             source_l,
@@ -66,7 +70,7 @@ impl ExecutorBuilder for DynamicFilterExecutorBuilder {
             params.executor_id,
             comparator,
             state_table_l,
-            // keyspace_r: Keyspace::table_root(store, &right_table_id),
+            state_table_r, 
             params.actor_id as u64,
             params.executor_stats,
         )))

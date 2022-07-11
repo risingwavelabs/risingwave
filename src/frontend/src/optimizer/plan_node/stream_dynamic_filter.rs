@@ -88,7 +88,7 @@ impl ToStreamProst for StreamDynamicFilter {
                 .as_expr_unless_true()
                 .map(|x| x.to_expr_proto()),
             left_table: Some(
-                infer_left_internal_table_catalog(self.clone().into()).to_prost(
+                infer_left_internal_table_catalog(self.clone().into(), self.left_index).to_prost(
                     SchemaId::placeholder() as u32,
                     DatabaseId::placeholder() as u32,
                 ),
@@ -103,14 +103,17 @@ impl ToStreamProst for StreamDynamicFilter {
     }
 }
 
-fn infer_left_internal_table_catalog(input: PlanRef) -> TableCatalog {
+fn infer_left_internal_table_catalog(input: PlanRef, left_key_index: usize) -> TableCatalog {
     let base = input.plan_base();
     let schema = &base.schema;
 
     let append_only = input.append_only();
     let dist_keys = base.dist.dist_column_indices().to_vec();
 
-    let pk_indices = base.pk_indices.to_vec();
+    // The pk of dynamic filter internal table should be left_key + input_pk.
+    let mut pk_indices = vec![left_key_index];
+    // TODO(yuhao): dedup the dist key and pk.
+    pk_indices.extend(&base.pk_indices);
 
     let mut internal_table_catalog_builder = TableCatalogBuilder::new();
 

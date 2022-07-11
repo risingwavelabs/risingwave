@@ -19,7 +19,7 @@ use anyhow::anyhow;
 use futures::StreamExt;
 use futures_async_stream::try_stream;
 use itertools::Itertools;
-use risingwave_common::array::{Array, ArrayImpl, DataChunk, Op, StreamChunk};
+use risingwave_common::array::{Array, ArrayImpl, DataChunk, Op, Row,  StreamChunk};
 use risingwave_common::buffer::{Bitmap, BitmapBuilder};
 use risingwave_common::catalog::Schema;
 use risingwave_common::types::{DataType, Datum, ScalarImpl, ToOwnedDatum};
@@ -46,6 +46,7 @@ pub struct DynamicFilterExecutor<S: StateStore> {
     identity: String,
     comparator: ExprNodeType,
     range_cache: RangeCache<S>,
+    right_table: StateTable<S>,
     actor_id: u64,
     schema: Schema,
     metrics: Arc<StreamingMetrics>,
@@ -61,6 +62,7 @@ impl<S: StateStore> DynamicFilterExecutor<S> {
         executor_id: u64,
         comparator: ExprNodeType,
         state_table_l: StateTable<S>,
+        state_table_r: StateTable<S>,
         actor_id: u64,
         metrics: Arc<StreamingMetrics>,
     ) -> Self {
@@ -73,6 +75,7 @@ impl<S: StateStore> DynamicFilterExecutor<S> {
             identity: format!("DynamicFilterExecutor {:X}", executor_id),
             comparator,
             range_cache: RangeCache::new(state_table_l, 0, usize::MAX),
+            right_table: state_table_r,
             actor_id,
             metrics,
             schema,
@@ -237,6 +240,8 @@ impl<S: StateStore> DynamicFilterExecutor<S> {
 
         let mut prev_epoch_value: Option<Datum> = None;
         let mut current_epoch_value: Option<Datum> = None;
+        let mut current_epoch_row: Option<Row> = None;
+        let mut epoch: u64 = 0;
 
         let aligned_stream = barrier_align(
             input_l.execute(),
@@ -286,6 +291,7 @@ impl<S: StateStore> DynamicFilterExecutor<S> {
                             Op::UpdateInsert | Op::Insert => {
                                 last_is_insert = true;
                                 current_epoch_value = Some(row.value_at(0).to_owned_datum());
+                                current_epoch_row = Some(row.to_owned_row());
                             }
                             _ => last_is_insert = false,
                         }
@@ -324,10 +330,16 @@ impl<S: StateStore> DynamicFilterExecutor<S> {
                             yield Message::Chunk(chunk);
                         }
                     }
-                    // TODO: We will persist `prev_epoch_value` to the `StateTable` as well
                     prev_epoch_value = Some(curr);
+                    if let Some(row) = &current_epoch_row {
+                        self.right_table.insert(row.clone())?;
+                        self.right_table.commit(epoch).await?;
+                    }
 
                     self.range_cache.flush().await?;
+
+                    // We have flushed all the state for the prev epoch. We can now update the epochs/
+                    epoch = barrier.epoch.curr;
                     self.range_cache.update_epoch(barrier.epoch.curr);
 
                     yield Message::Barrier(barrier);
