@@ -34,6 +34,17 @@ pub struct Table {
     pub columns: Vec<Column>,
 }
 
+impl Table {
+    pub fn get_qualified_columns(&self) -> Vec<Column> {
+        self.columns.iter().map(|c| {
+            Column {
+                name: format!("{}.{}", self.name, c.name),
+                data_type: c.data_type,
+            }
+        }).collect()
+    }
+}
+
 #[derive(Clone)]
 pub struct Column {
     name: String,

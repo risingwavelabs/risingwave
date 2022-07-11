@@ -73,11 +73,13 @@ impl<'a, R: Rng> SqlGenerator<'a, R> {
             args: vec![],
         };
         table.name = alias; // Rename the table.
-        let columns = table.columns.clone();
+        let columns = table.get_qualified_columns();
         self.bound_relations.push(table);
         (table_factor, columns)
     }
 
+    /// Generates a table factor, and provides bound columns.
+    /// Generated column names should be qualified by table name.
     fn gen_table_factor(&mut self) -> (TableFactor, Vec<Column>) {
         // TODO: TableFactor::Derived, TableFactor::TableFunction, TableFactor::NestedJoin
         self.gen_simple_table_factor()
