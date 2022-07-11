@@ -21,8 +21,8 @@ use risingwave_hummock_sdk::{
     HummockContextId, HummockEpoch, HummockSSTableId, HummockVersionId, LocalSstableInfo,
 };
 use risingwave_pb::hummock::{
-    CompactTask, CompactionGroup, HummockSnapshot, HummockVersion, SstableIdInfo,
-    SubscribeCompactTasksResponse, VacuumTask,
+    CompactTask, CompactionGroup, HummockSnapshot, HummockVersion, HummockVersionDelta,
+    SstableIdInfo, SubscribeCompactTasksResponse, VacuumTask,
 };
 use risingwave_rpc_client::error::{Result, RpcError};
 use risingwave_rpc_client::HummockMetaClient;
@@ -61,7 +61,10 @@ fn mock_err(error: super::error::Error) -> RpcError {
 
 #[async_trait]
 impl HummockMetaClient for MockHummockMetaClient {
-    async fn pin_version(&self, last_pinned: HummockVersionId) -> Result<HummockVersion> {
+    async fn pin_version(
+        &self,
+        last_pinned: HummockVersionId,
+    ) -> Result<(bool, Vec<HummockVersionDelta>, HummockVersion)> {
         self.hummock_manager
             .pin_version(self.context_id, last_pinned)
             .await

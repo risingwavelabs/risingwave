@@ -95,7 +95,7 @@ async fn test_update_pinned_version() {
         max_committed_epoch: epochs[0],
         ..Default::default()
     };
-    local_version_manager.try_update_pinned_version(version);
+    local_version_manager.try_update_pinned_version(None, (false, vec![], version));
     let local_version = local_version_manager.get_local_version();
     assert!(local_version.get_shared_buffer(epochs[0]).is_none());
     assert_eq!(
@@ -115,7 +115,7 @@ async fn test_update_pinned_version() {
         max_committed_epoch: epochs[1],
         ..Default::default()
     };
-    local_version_manager.try_update_pinned_version(version);
+    local_version_manager.try_update_pinned_version(None, (false, vec![], version));
     let local_version = local_version_manager.get_local_version();
     assert!(local_version.get_shared_buffer(epochs[0]).is_none());
     assert!(local_version.get_shared_buffer(epochs[1]).is_none());
@@ -282,7 +282,7 @@ async fn test_update_uncommitted_ssts() {
         max_committed_epoch: epochs[0],
         ..Default::default()
     };
-    assert!(local_version_manager.try_update_pinned_version(version.clone()));
+    assert!(local_version_manager.try_update_pinned_version(None, (false, vec![], version.clone())));
     let local_version = local_version_manager.get_local_version();
     // Check shared buffer
     assert!(local_version.get_shared_buffer(epochs[0]).is_none());
@@ -315,7 +315,7 @@ async fn test_update_uncommitted_ssts() {
         max_committed_epoch: epochs[1],
         ..Default::default()
     };
-    local_version_manager.try_update_pinned_version(version.clone());
+    local_version_manager.try_update_pinned_version(None, (false, vec![], version.clone()));
     let local_version = local_version_manager.get_local_version();
     assert!(local_version.get_shared_buffer(epochs[0]).is_none());
     assert!(local_version.get_shared_buffer(epochs[1]).is_none());

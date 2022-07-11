@@ -77,10 +77,14 @@ where
             .pin_version(req.context_id, req.last_pinned)
             .await;
         match result {
-            Ok(pinned_version) => Ok(Response::new(PinVersionResponse {
-                status: None,
-                pinned_version: Some(pinned_version),
-            })),
+            Ok((is_delta_response, version_deltas, pinned_version)) => {
+                Ok(Response::new(PinVersionResponse {
+                    status: None,
+                    is_delta_response,
+                    version_deltas,
+                    pinned_version: Some(pinned_version),
+                }))
+            }
             Err(e) => Err(tonic_err(e)),
         }
     }
