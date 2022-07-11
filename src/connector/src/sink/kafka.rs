@@ -215,6 +215,10 @@ impl Sink for KafkaSink {
     }
 
     async fn commit(&mut self) -> Result<()> {
+        self.do_with_retry(|conductor| conductor.flush()) // flush before commit
+            .await
+            .map_err(SinkError::Kafka)?;
+
         self.do_with_retry(|conductor| conductor.commit_transaction())
             .await
             .map_err(SinkError::Kafka)?;
@@ -380,7 +384,7 @@ impl KafkaTransactionConductor {
             .unwrap_or_else(|_| Err(KafkaError::Canceled))
     }
 
-    async fn flush(&self) -> impl Future<Output = KafkaResult<()>> {
+    fn flush(&self) -> impl Future<Output = KafkaResult<()>> {
         let inner = Arc::clone(&self.inner);
         let timeout = self.properties.timeout;
         task::spawn_blocking(move || inner.flush(timeout))
@@ -422,14 +426,14 @@ mod test {
     async fn test_kafka_producer() -> Result<()> {
         let properties = hashmap! {
             "kafka.brokers".to_string() => "localhost:29092".to_string(),
-            "identifier".to_string() => "test_sink".to_string(),
+            "identifier".to_string() => "test_sink_1".to_string(),
             "sink.type".to_string() => "append_only".to_string(),
             "kafka.topic".to_string() => "test_topic".to_string(),
         };
         let kafka_config = KafkaConfig::from_hashmap(properties)?;
         let mut sink = KafkaSink::new(kafka_config.clone()).await.unwrap();
 
-        for i in 0..3 {
+        for i in 1..4 {
             let mut fail_flag = false;
             sink.begin_epoch(i).await?;
             println!("begin epoch success");
