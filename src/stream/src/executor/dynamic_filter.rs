@@ -263,8 +263,7 @@ impl<S: StateStore> DynamicFilterExecutor<S> {
 
                     let right_val = prev_epoch_row
                         .as_ref()
-                        .map(|row| row.0[0].clone())
-                        .flatten();
+                        .and_then(|row| row.0[0].clone());
 
                     // The condition is `None` if it is always false by virtue of a NULL right
                     // input, so we save evaluating it on the datachunk
@@ -306,12 +305,10 @@ impl<S: StateStore> DynamicFilterExecutor<S> {
                     // Flush the difference between the `prev_value` and `current_value`
                     let curr: Datum = current_epoch_row
                         .as_ref()
-                        .map(|row| row.0[0].clone())
-                        .flatten();
+                        .and_then(|row| row.0[0].clone());
                     let prev: Datum = prev_epoch_row
                         .as_ref()
-                        .map(|row| row.0[0].clone())
-                        .flatten();
+                        .and_then(|row| row.0[0].clone());
                     if prev != curr {
                         let (range, latest_is_lower, is_insert) = self.get_range(&curr, prev);
                         for (_, rows) in self.range_cache.range(range, latest_is_lower) {
