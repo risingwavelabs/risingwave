@@ -31,18 +31,16 @@ pub struct NexmarkSplitReader {
 
 #[async_trait]
 impl SplitReader for NexmarkSplitReader {
-    type Properties = Box<NexmarkProperties>;
+    type Properties = NexmarkProperties;
 
     async fn new(
-        properties: Box<NexmarkProperties>,
+        properties: NexmarkProperties,
         state: ConnectorState,
         _columns: Option<Vec<Column>>,
     ) -> Result<Self>
     where
         Self: Sized,
     {
-        let properties = *properties;
-
         let wall_clock_base_time = SystemTime::now()
             .duration_since(UNIX_EPOCH)
             .unwrap()
@@ -67,7 +65,7 @@ impl SplitReader for NexmarkSplitReader {
         let event_num = properties.event_num;
 
         let mut generator = NexmarkEventGenerator {
-            config: Box::new(NexmarkConfig::from(properties)?),
+            config: NexmarkConfig::from(properties)?,
             wall_clock_base_time,
             events_so_far: 0,
             event_num,
@@ -129,14 +127,14 @@ mod tests {
     #[tokio::test]
     async fn test_nexmark_split_reader() -> Result<()> {
         let props = NexmarkProperties {
-            split_num: Some(2),
+            split_num: 2,
             min_event_gap_in_ns: 0,
             table_type: "Bid".to_string(),
             max_chunk_size: 5,
             ..Default::default()
         };
 
-        let mut enumerator = NexmarkSplitEnumerator::new(Box::new(props.clone())).await?;
+        let mut enumerator = NexmarkSplitEnumerator::new(props.clone()).await?;
         let list_splits_resp = enumerator
             .list_splits()
             .await?
@@ -145,7 +143,7 @@ mod tests {
             .collect();
 
         let state = Some(list_splits_resp);
-        let mut reader = NexmarkSplitReader::new(Box::new(props), state, None).await?;
+        let mut reader = NexmarkSplitReader::new(props, state, None).await?;
         let chunk = reader.next().await?.unwrap();
         assert_eq!(chunk.len(), 5);
 

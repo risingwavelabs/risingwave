@@ -66,6 +66,7 @@ pub trait SplitReader: Sized {
         state: ConnectorState,
         columns: Option<Vec<Column>>,
     ) -> Result<Self>;
+
     async fn next(&mut self) -> Result<Option<Vec<SourceMessage>>>;
 }
 
@@ -100,7 +101,7 @@ pub enum ConnectorProperties {
     Kafka(KafkaProperties),
     Pulsar(PulsarProperties),
     Kinesis(KinesisProperties),
-    Nexmark(Box<NexmarkProperties>),
+    Nexmark(NexmarkProperties),
     Datagen(DatagenProperties),
     S3(S3Properties),
     Dummy(()),
@@ -108,12 +109,12 @@ pub enum ConnectorProperties {
 
 impl_connector_properties! {
     [ ] ,
-    { Kafka, KAFKA_CONNECTOR },
-    { Pulsar, PULSAR_CONNECTOR },
-    { Kinesis, KINESIS_CONNECTOR },
-    { Nexmark, NEXMARK_CONNECTOR },
-    { Datagen, DATAGEN_CONNECTOR },
-    { S3, S3_CONNECTOR }
+    { Kafka, KafkaProperties, KAFKA_CONNECTOR },
+    { Pulsar, PulsarProperties, PULSAR_CONNECTOR },
+    { Kinesis, KinesisProperties, KINESIS_CONNECTOR },
+    { Nexmark, NexmarkProperties, NEXMARK_CONNECTOR },
+    { Datagen, DatagenProperties, DATAGEN_CONNECTOR },
+    { S3, S3Properties, S3_CONNECTOR }
 }
 
 impl_split_enumerator! {
@@ -176,6 +177,8 @@ pub type ConnectorState = Option<Vec<SplitImpl>>;
 
 #[cfg(test)]
 mod tests {
+    use maplit::*;
+
     use super::*;
 
     #[test]
@@ -187,5 +190,23 @@ mod tests {
         assert_eq!(split.encode_to_bytes(), get_value.encode_to_bytes());
 
         Ok(())
+    }
+
+    #[test]
+    fn test_extract_nexmark_config() {
+        let props: HashMap<String, String> = convert_args!(hashmap!(
+            "connector" => "nexmark",
+            "nexmark.table.type" => "Person",
+            "nexmark.split.num" => "1",
+        ));
+
+        let props = ConnectorProperties::extract(props).unwrap();
+
+        if let ConnectorProperties::Nexmark(props) = props {
+            assert_eq!(props.table_type, "Person");
+            assert_eq!(props.split_num, 1);
+        } else {
+            panic!("extract nexmark config failed");
+        }
     }
 }
