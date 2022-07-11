@@ -87,14 +87,18 @@ impl ToStreamProst for StreamDynamicFilter {
                 .predicate
                 .as_expr_unless_true()
                 .map(|x| x.to_expr_proto()),
-            left_table: Some(infer_left_internal_table_catalog(self.clone().into()).to_prost(
-                SchemaId::placeholder() as u32,
-                DatabaseId::placeholder() as u32,
-            )),
-            right_table: Some(infer_right_internal_table_catalog(self.right.clone()).to_prost(
-                SchemaId::placeholder() as u32,
-                DatabaseId::placeholder() as u32,
-            )),
+            left_table: Some(
+                infer_left_internal_table_catalog(self.clone().into()).to_prost(
+                    SchemaId::placeholder() as u32,
+                    DatabaseId::placeholder() as u32,
+                ),
+            ),
+            right_table: Some(
+                infer_right_internal_table_catalog(self.right.clone()).to_prost(
+                    SchemaId::placeholder() as u32,
+                    DatabaseId::placeholder() as u32,
+                ),
+            ),
         })
     }
 }
@@ -126,7 +130,7 @@ fn infer_right_internal_table_catalog(input: PlanRef) -> TableCatalog {
     let schema = &base.schema;
 
     // We require that the right table has distribution `Single`
-    assert_eq!(base.dist.dist_column_indices().to_vec(), vec![]);
+    assert_eq!(base.dist.dist_column_indices().to_vec(), Vec::<usize>::new());
 
     let mut internal_table_catalog_builder = TableCatalogBuilder::new();
 
