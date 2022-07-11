@@ -341,7 +341,7 @@ impl<S: StateStore> DynamicFilterExecutor<S> {
                     epoch = barrier.epoch.curr;
                     self.range_cache.update_epoch(barrier.epoch.curr);
 
-                    prev_epoch_value = current_epoch_value.clone();
+                    prev_epoch_value = Some(curr);
 
                     yield Message::Barrier(barrier);
                 }
