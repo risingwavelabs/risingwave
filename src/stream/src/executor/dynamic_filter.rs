@@ -333,6 +333,8 @@ impl<S: StateStore> DynamicFilterExecutor<S> {
                         }
                     }
                     if let Some(row) = current_epoch_row.take() {
+                        assert_ne!(epoch, barrier.epoch.curr);
+                        assert_eq!(epoch, barrier.epoch.prev);
                         self.right_table.insert(row)?;
                     }
                     self.right_table.commit(epoch).await?;
