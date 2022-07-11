@@ -268,8 +268,8 @@ impl DynamicFilterExecutor {
             PROCESSING_WINDOW_SIZE,
             &self.schema.data_types(),
             &output_indices,
-            0..self.schema.data_types().len(),
             0..0,
+            0..self.schema.data_types().len(),
         )
         .map_err(StreamExecutorError::eval_error)?;
 
