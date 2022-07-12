@@ -36,6 +36,7 @@ use crate::model::{MetadataModel, Worker, INVALID_EXPIRE_AT};
 use crate::storage::MetaStore;
 
 pub type WorkerId = u32;
+pub type ParallelId = u32;
 pub type WorkerLocations = HashMap<WorkerId, WorkerNode>;
 pub type ClusterManagerRef<S> = Arc<ClusterManager<S>>;
 

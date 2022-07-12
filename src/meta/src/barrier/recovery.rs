@@ -21,6 +21,7 @@ use futures::future::try_join_all;
 use itertools::Itertools;
 use log::{debug, error};
 use risingwave_common::error::{ErrorCode, Result, RwError};
+use risingwave_common::types::ParallelUnitId;
 use risingwave_common::util::epoch::Epoch;
 use risingwave_pb::common::worker_node::State;
 use risingwave_pb::common::{ActorInfo, WorkerType};
@@ -36,7 +37,6 @@ use uuid::Uuid;
 use crate::barrier::command::CommandContext;
 use crate::barrier::info::BarrierActorInfo;
 use crate::barrier::{CheckpointControl, Command, GlobalBarrierManager};
-use crate::cluster::WorkerId;
 use crate::model::ActorId;
 use crate::storage::MetaStore;
 
@@ -144,12 +144,13 @@ where
     async fn get_migrate_map_plan(
         &self,
         info: &BarrierActorInfo,
-        origin_ids: &Vec<WorkerId>,
-    ) -> HashMap<WorkerId, WorkerId> {
-        let mut n = origin_ids.len();
+        expired_workers: &Vec<ActorId>,
+    ) -> HashMap<ActorId, ParallelUnitId> {
+        let workers_size = expired_workers.len();
+        let mut cur = 0;
         let mut migrate_map = HashMap::new();
         let mut chosen_ids = HashSet::new();
-        while n > 0 {
+        while cur < workers_size {
             let current_nodes = self
                 .cluster_manager
                 .list_worker_node(WorkerType::ComputeNode, Some(State::Running))
@@ -157,14 +158,23 @@ where
             let new_nodes = current_nodes
                 .iter()
                 .filter(|&node| {
-                    !info.node_map.contains_key(&node.id) && !chosen_ids.contains(&node.id)
+                    !info.node_map.contains_key(&node.id)
+                        && !chosen_ids.contains(&node.id)
+                        && info.actor_map.get(&expired_workers[cur]).unwrap().len()
+                            <= node.parallel_units.len()
                 })
                 .collect_vec();
             for new_node in new_nodes {
-                if n > 0 {
-                    chosen_ids.insert(new_node.id);
-                    migrate_map.insert(origin_ids[n], new_node.id);
-                    n -= 1;
+                chosen_ids.insert(new_node.id);
+                let actors = info.actor_map.get(&expired_workers[cur]).unwrap();
+                let parallel_units = &new_node.parallel_units;
+                let actors_len = actors.len();
+                for idx in 0..actors_len {
+                    if cur == workers_size {
+                        break;
+                    }
+                    migrate_map.insert(actors[idx], parallel_units[idx].id);
+                    cur += 1;
                 }
             }
             tokio::time::sleep(std::time::Duration::from_millis(100)).await;
@@ -183,7 +193,16 @@ where
             return Ok(());
         }
         let migrate_map = self.get_migrate_map_plan(info, &expired_workers).await;
-        self.fragment_manager.migrate_actors(&migrate_map).await
+        let res = self.fragment_manager.migrate_actors(&migrate_map).await;
+        match res {
+            Ok((fragments, migrate_map)) => {
+                return self
+                    .catalog_manager
+                    .update_table_mapping(&fragments, &migrate_map)
+                    .await;
+            }
+            Err(e) => return Err(e),
+        }
     }
 
     /// Sync all sources in compute nodes, the local source manager in compute nodes may be dirty

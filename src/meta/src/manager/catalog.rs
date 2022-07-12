@@ -25,6 +25,7 @@ use risingwave_common::catalog::{
 use risingwave_common::ensure;
 use risingwave_common::error::ErrorCode::{CatalogError, InternalError};
 use risingwave_common::error::{Result, RwError};
+use risingwave_common::types::ParallelUnitId;
 use risingwave_pb::catalog::table::OptionalAssociatedSourceId;
 use risingwave_pb::catalog::{Database, Schema, Source, Table};
 use risingwave_pb::meta::subscribe_response::{Info, Operation};
@@ -32,7 +33,7 @@ use tokio::sync::{Mutex, MutexGuard};
 
 use super::IdCategory;
 use crate::manager::{MetaSrvEnv, NotificationVersion};
-use crate::model::{MetadataModel, Transactional};
+use crate::model::{MetadataModel, TableFragments, Transactional};
 use crate::storage::{MetaStore, Transaction};
 
 pub type DatabaseId = u32;
@@ -432,6 +433,46 @@ where
                 "source already exists".to_string(),
             )))
         }
+    }
+
+    pub async fn update_table_mapping(
+        &self,
+        fragments: &Vec<TableFragments>,
+        migrate_map: &HashMap<ParallelUnitId, ParallelUnitId>,
+    ) -> Result<()> {
+        let mut core = self.core.lock().await;
+        let mut transaction = Transaction::default();
+        let mut tables = Vec::new();
+        for fragment in fragments {
+            let table_id = fragment.table_id().table_id();
+            let table = Table::select(self.env.meta_store(), &table_id).await?;
+            if let Some(mut table) = table {
+                if table.mapping.is_some() {
+                    let mapping = table.mapping.as_mut().unwrap();
+                    let flag = mapping.data.iter().any(|id| migrate_map.contains_key(id));
+                    if flag {
+                        mapping.data = mapping
+                            .data
+                            .iter_mut()
+                            .map(|id| {
+                                if migrate_map.contains_key(id) {
+                                    *migrate_map.get(id).unwrap()
+                                } else {
+                                    *id
+                                }
+                            })
+                            .collect_vec();
+                        table.upsert_in_transaction(&mut transaction)?;
+                        tables.push(table)
+                    }
+                }
+            }
+        }
+        core.env.meta_store().txn(transaction).await?;
+        for table in &tables {
+            core.add_table(table);
+        }
+        Ok(())
     }
 
     pub async fn drop_source(&self, source_id: SourceId) -> Result<NotificationVersion> {

@@ -167,6 +167,26 @@ impl TableFragments {
         false
     }
 
+    pub fn fetch_parallel_unit_by_actor(&self, actor_id: &ActorId) -> Option<ParallelUnit> {
+        if let Some(status) = self.actor_status.get(actor_id) {
+            return status.parallel_unit.clone();
+        } else {
+            return None;
+        }
+    }
+
+    pub fn fetch_parallel_unit_by_id(
+        &self,
+        parallel_unit_id: &ParallelUnitId,
+    ) -> Option<ParallelUnit> {
+        for (_, status) in &self.actor_status {
+            if &status.get_parallel_unit().unwrap().id == parallel_unit_id {
+                return status.parallel_unit.clone();
+            }
+        }
+        None
+    }
+
     pub fn fetch_stream_source_id(stream_node: &StreamNode) -> Option<SourceId> {
         if let Some(NodeBody::Source(s)) = stream_node.node_body.as_ref() {
             if s.source_type == SourceType::Source as i32 {
@@ -241,18 +261,39 @@ impl TableFragments {
         map
     }
 
-    pub fn migrate_actors(&mut self, migrate_map: &HashMap<WorkerId, WorkerId>) -> bool {
+    pub fn migrate_parallel_units(
+        &mut self,
+        migrate_map: &HashMap<ParallelUnitId, ParallelUnitId>,
+        parallel_unit_buf: &HashMap<ParallelUnitId, ParallelUnit>,
+    ) -> bool {
         let mut flag = false;
         for actor_status in self.actor_status.values_mut() {
-            let node_id = actor_status.get_parallel_unit().unwrap().worker_node_id as WorkerId;
-            if migrate_map.contains_key(&node_id) {
-                let parallel_unit = ParallelUnit {
-                    id: actor_status.get_parallel_unit().unwrap().id,
-                    r#type: actor_status.get_parallel_unit().unwrap().r#type,
-                    worker_node_id: *migrate_map.get(&node_id).unwrap(),
-                };
-                actor_status.parallel_unit = Some(parallel_unit);
+            let parallel_id = actor_status.get_parallel_unit().unwrap().id;
+            if migrate_map.contains_key(&parallel_id) {
+                actor_status.parallel_unit =
+                    Some(parallel_unit_buf.get(&parallel_id).unwrap().clone());
                 flag = true;
+            }
+        }
+        if flag {
+            for (_, fragment) in &mut self.fragments {
+                if fragment.vnode_mapping.is_some() {
+                    let mapping = fragment.vnode_mapping.as_mut().unwrap();
+                    let has_key = mapping.data.iter().any(|id| migrate_map.contains_key(id));
+                    if has_key {
+                        mapping.data = mapping
+                            .data
+                            .iter_mut()
+                            .map(|id| {
+                                if migrate_map.contains_key(id) {
+                                    *migrate_map.get(id).unwrap()
+                                } else {
+                                    *id
+                                }
+                            })
+                            .collect_vec();
+                    }
+                }
             }
         }
         flag
