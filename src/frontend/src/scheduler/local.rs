@@ -334,14 +334,14 @@ impl LocalQueryExecution {
                 assert!(sources.is_empty());
                 *sources = vec![exchange_source];
 
-                let children = execution_plan_node
-                    .children
-                    .iter()
-                    .map(|e| self.convert_plan_node(e, second_stages, vnode_bitmap.clone()))
-                    .collect::<SchedulerResult<Vec<PlanNodeProst>>>()?;
+                let left_child = self.convert_plan_node(
+                    &execution_plan_node.children[0],
+                    second_stages,
+                    vnode_bitmap.clone()
+                )?;
 
                 Ok(PlanNodeProst {
-                    children,
+                    children: vec![left_child],
                     identity: Uuid::new_v4().to_string(),
                     node_body: Some(node_body),
                 })

@@ -707,6 +707,8 @@ impl ToBatch for LogicalJoin {
             self.on.clone(),
         );
 
+        log::error!("{:?}", self.join_type);
+
         let left = self.left().to_batch()?;
         let right = self.right().to_batch()?;
         let logical_join = self.clone_with_left_right(left, right);
@@ -714,7 +716,7 @@ impl ToBatch for LogicalJoin {
         let config = self.base.ctx.inner().session_ctx.config();
 
         if predicate.has_eq() {
-            if config.get_enable_lookup_join() {
+            if config.get_batch_enable_lookup_join() {
                 if config.get_query_mode() == QueryMode::Local {
                     if let Some(lookup_join) =
                         self.convert_to_lookup_join(logical_join.clone(), predicate.clone())
