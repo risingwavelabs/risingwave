@@ -18,7 +18,7 @@ include ../streaming/tpch/views/q5.slt.part
 include ../streaming/tpch/views/q6.slt.part
 include ../streaming/tpch/views/q7.slt.part
 include ../streaming/tpch/views/q8.slt.part
-include ../streaming/tpch/views/q9.slt.part
+# include ../streaming/tpch/views/q9.slt.part
 include ../streaming/tpch/views/q10.slt.part
 include ../streaming/tpch/views/q12.slt.part
 include ../streaming/tpch/views/q14.slt.part
@@ -30,7 +30,7 @@ include ../streaming/tpch/q5.slt.part
 include ../streaming/tpch/q6.slt.part
 include ../streaming/tpch/q7.slt.part
 include ../streaming/tpch/q8.slt.part
-include ../streaming/tpch/q9.slt.part
+# include ../streaming/tpch/q9.slt.part
 include ../streaming/tpch/q10.slt.part
 include ../streaming/tpch/q12.slt.part
 include ../streaming/tpch/q14.slt.part
@@ -54,8 +54,8 @@ drop materialized view tpch_q7;
 statement ok
 drop materialized view tpch_q8;
 
-statement ok
-drop materialized view tpch_q9;
+# statement ok
+# drop materialized view tpch_q9;
 
 statement ok
 drop materialized view tpch_q10;

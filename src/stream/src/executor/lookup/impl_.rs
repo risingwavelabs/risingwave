@@ -49,6 +49,7 @@ pub struct LookupExecutorParams<S: StateStore> {
     pub arrangement_store: S,
 
     pub arrangement_table_id: TableId,
+
     /// Should be the same as [`ColumnDesc`] in the arrangement.
     ///
     /// From the perspective of arrangements, `arrangement_col_descs` include all columns of the
@@ -212,7 +213,7 @@ impl<S: StateStore> LookupExecutor<S> {
 
         let distribution = match vnode_bitmap {
             Some(vnodes) => Distribution {
-                dist_key_indices: stream_join_key_indices.clone(),
+                dist_key_indices: arrange_join_key_indices.clone(),
                 vnodes,
             },
             None => Distribution::fallback(),
