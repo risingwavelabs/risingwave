@@ -12,12 +12,17 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+use std::collections::HashSet;
 use std::fmt::Debug;
 use std::sync::Arc;
 
+use parking_lot::{Mutex, MutexGuard};
 use async_trait::async_trait;
 use risingwave_common::catalog::TableId;
 use risingwave_common::error::Result;
+use risingwave_common::ensure;
+
+use crate::monitor::SinkMetrics;
 
 /// The local sink manager on the compute node.
 #[async_trait]
@@ -32,9 +37,9 @@ pub trait SinkManager: Debug + Sync + Send {
 
 pub type SinkManagerRef = Arc<dyn SinkManager>;
 
-#[derive(Debug, Default)]
+#[derive(Debug)]
 pub struct MemSinkManager {
-    // sinks: Mutex<HashMap<TableId, SinkDesc>>,
+    sinks: Mutex<HashSet<TableId>>,
     /// Located worker id.
     worker_id: u32,
 }
@@ -42,23 +47,46 @@ pub struct MemSinkManager {
 #[async_trait]
 impl SinkManager for MemSinkManager {
     async fn create_sink(&self, sink_id: &TableId) -> Result<()> {
-        todo!();
+        //TODO(nanderstabel): Actually implement create_sink.
+        
+        let mut sinks = self.get_sinks()?;
+        ensure!(
+            !sinks.contains(sink_id),
+            "Sink id already exists: {:?}",
+            sink_id
+        );
+        sinks.insert(*sink_id);
+
+        Ok(())
     }
 
     fn drop_sink(&self, table_id: &TableId) -> Result<()> {
-        todo!();
+        let mut sinks = self.get_sinks()?;
+        ensure!(
+            sinks.contains(table_id),
+            "Sink does not exist: {:?}",
+            table_id
+        );
+        sinks.remove(table_id);
+        Ok(())
     }
 
     fn clear_sinks(&self) -> Result<()> {
-        todo!();
+        let mut sinks = self.get_sinks()?;
+        sinks.clear();
+        Ok(())
     }
 }
 
 impl MemSinkManager {
-    pub fn new(worker_id: u32) -> Self {
+    pub fn new(worker_id: u32, metrics: Arc<SinkMetrics>) -> Self {
         MemSinkManager {
-            // sinks: Mutex::new(HashMap::new()),
+            sinks: Mutex::new(HashSet::new()),
             worker_id,
         }
+    }
+
+    fn get_sinks(&self) -> Result<MutexGuard<HashSet<TableId>>> {
+        Ok(self.sinks.lock())
     }
 }

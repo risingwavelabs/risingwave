@@ -12,7 +12,24 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-pub use manager::*;
+use prometheus::Registry;
+#[derive(Debug)]
+pub struct SinkMetrics {
+    pub registry: Registry,
+}
 
-mod manager;
-pub mod monitor;
+impl SinkMetrics {
+    pub fn new(registry: Registry) -> Self {
+        SinkMetrics { registry }
+    }
+
+    pub fn unused() -> Self {
+        Self::new(Registry::new())
+    }
+}
+
+impl Default for SinkMetrics {
+    fn default() -> Self {
+        SinkMetrics::new(Registry::new())
+    }
+}

@@ -13,11 +13,25 @@
 // limitations under the License.
 
 use std::sync::Arc;
+use std::time::Duration;
+use std::collections::{BTreeMap, BTreeSet, HashMap, HashSet};
 
-use risingwave_common::error::Result;
+use futures::future::try_join_all;
+use risingwave_common::error::{internal_error, Result, RwError, ToRwResult};
 use risingwave_pb::catalog::Sink;
+use risingwave_pb::common::worker_node::State::Running;
+use risingwave_pb::common::WorkerType;
+use risingwave_pb::stream_plan::StreamFragmentGraph;
+use risingwave_pb::stream_service::{
+    CreateSinkRequest as ComputeNodeCreateSinkRequest,
+    DropSinkRequest as ComputeNodeDropSinkRequest,
+};
+use risingwave_rpc_client::StreamClient;
 use tokio::sync::Mutex;
+use tokio::time::MissedTickBehavior;
+use tokio::{select, time};
 
+use crate::cluster::ClusterManagerRef;
 use crate::manager::{MetaSrvEnv, SinkId};
 use crate::storage::MetaStore;
 use crate::stream::FragmentManagerRef;
@@ -27,19 +41,22 @@ pub type SinkManagerRef<S> = Arc<SinkManager<S>>;
 #[allow(dead_code)]
 pub struct SinkManager<S: MetaStore> {
     env: MetaSrvEnv<S>,
+    cluster_manager: ClusterManagerRef<S>,
     core: Arc<Mutex<SinkManagerCore<S>>>,
 }
 
 pub struct SinkManagerCore<S: MetaStore> {
     pub fragment_manager: FragmentManagerRef<S>,
+    pub managed_sinks: HashMap<SinkId, String>,
 }
 
 impl<S> SinkManagerCore<S>
 where
     S: MetaStore,
 {
-    fn new(fragment_manager: FragmentManagerRef<S>) -> Self {
-        Self { fragment_manager }
+    fn new(fragment_manager: FragmentManagerRef<S>, 
+        managed_sinks: HashMap<SinkId, String>,) -> Self {
+        Self { fragment_manager, managed_sinks }
     }
 }
 
@@ -47,26 +64,119 @@ impl<S> SinkManager<S>
 where
     S: MetaStore,
 {
-    pub async fn new(env: MetaSrvEnv<S>, fragment_manager: FragmentManagerRef<S>) -> Result<Self> {
-        let core = Arc::new(Mutex::new(SinkManagerCore::new(fragment_manager)));
+    const SINK_TICK_INTERVAL: Duration = Duration::from_secs(10);
 
-        Ok(Self { env, core })
+    pub async fn new(
+        env: MetaSrvEnv<S>,
+        cluster_manager: ClusterManagerRef<S>,
+        fragment_manager: FragmentManagerRef<S>,
+    ) -> Result<Self> {
+        let managed_sinks = HashMap::new();
+        let core = Arc::new(Mutex::new(SinkManagerCore::new(fragment_manager, managed_sinks)));
+
+        Ok(Self {
+            env,
+            cluster_manager,
+            core,
+        })
+    }
+
+    async fn all_stream_clients(&self) -> Result<impl Iterator<Item = StreamClient>> {
+
+        let all_compute_nodes = self
+            .cluster_manager
+            .list_worker_node(WorkerType::ComputeNode, Some(Running))
+            .await;
+
+        let all_stream_clients = try_join_all(
+            all_compute_nodes
+                .iter()
+                .map(|worker| self.env.stream_client_pool().get(worker)),
+        )
+        .await?
+        .into_iter();
+
+        Ok(all_stream_clients)
     }
 
     /// Broadcast the create sink request to all compute nodes.
     pub async fn create_sink(&self, sink: &Sink) -> Result<()> {
-        todo!();
-    }
+        // This scope guard does clean up jobs ASYNCHRONOUSLY before Err returns.
+        // It MUST be cleared before Ok returns.
+        let mut revert_funcs = scopeguard::guard(
+            vec![],
+            |revert_funcs: Vec<futures::future::BoxFuture<()>>| {
+                tokio::spawn(async move {
+                    for revert_func in revert_funcs {
+                        revert_func.await;
+                    }
+                });
+            },
+        );
 
-    pub async fn drop_sink(&self, sink_id: SinkId) -> Result<()> {
-        todo!();
-    }
+        let futures = self
+            .all_stream_clients()
+            .await?
+            .into_iter()
+            .map(|mut client| {
+                let request = ComputeNodeCreateSinkRequest {
+                    sink: Some(sink.clone()),
+                };
+                async move { client.create_sink(request).await.map_err(RwError::from) }
+            });
 
-    async fn tick(&self) -> Result<()> {
+        // ignore response body, always none
+        let _ = try_join_all(futures).await?;
+
+        let mut core = self.core.lock().await;
+        if core.managed_sinks.contains_key(&sink.get_id()) {
+            log::warn!("sink {} already registered", sink.get_id());
+            revert_funcs.clear();
+            return Ok(());
+        }
+
+        Self::create_sink_worker(sink, &mut core.managed_sinks).await?;
+
+        revert_funcs.clear();
+        Ok(())
+    }
+    
+    async fn create_sink_worker(
+        sink: &Sink,
+        managed_sinks: &mut HashMap<SinkId, String>,
+    ) -> Result<()> {
         Ok(())
     }
 
+    pub async fn drop_sink(&self, sink_id: SinkId) -> Result<()> {
+        let futures = self
+            .all_stream_clients()
+            .await?
+            .into_iter()
+            .map(|mut client| {
+                let request = ComputeNodeDropSinkRequest { sink_id };
+                async move { client.drop_sink(request).await.map_err(RwError::from) }
+            });
+        let _responses: Vec<_> = try_join_all(futures).await?;
+
+        Ok(())
+    }
+
+    async fn tick(&self) -> Result<()> {
+        Ok(()) //TODO(nanderstabel): Actually implement tick method
+    }
+
     pub async fn run(&self) -> Result<()> {
-        todo!();
+        let mut ticker = time::interval(Self::SINK_TICK_INTERVAL);
+        ticker.set_missed_tick_behavior(MissedTickBehavior::Skip);
+        loop {
+            ticker.tick().await;
+            if let Err(e) = self.tick().await {
+                log::error!(
+                    "error happened while running sink manager tick: {}",
+                    e.to_string()
+                );
+            }
+        }
     }
 }

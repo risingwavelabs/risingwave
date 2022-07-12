@@ -356,11 +356,15 @@ pub async fn rpc_serve_with_store<S: MetaStore>(
     }
 
     let sink_manager = Arc::new(
-        SinkManager::new(env.clone(), fragment_manager.clone())
-            .await
-            .unwrap(),
+        SinkManager::new(
+            env.clone(),
+            cluster_manager.clone(),
+            fragment_manager.clone(),
+        )
+        .await
+        .unwrap(),
     );
-    
+
     {
         let sink_manager = sink_manager.clone();
         tokio::spawn(async move {

@@ -4549,6 +4549,7 @@ dependencies = [
  "async-stream",
  "async-trait",
  "parking_lot",
+ "prometheus",
  "risingwave_common",
  "risingwave_connector",
  "risingwave_expr",

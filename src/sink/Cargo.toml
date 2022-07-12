@@ -8,6 +8,7 @@ anyhow = "1"
 async-stream = "0.3"
 async-trait = "0.1"
 parking_lot = "0.12"
+prometheus = { version = "0.13", features = ["process"] }
 risingwave_common = { path = "../common" }
 risingwave_connector = { path = "../connector" }
 risingwave_expr = { path = "../expr" }

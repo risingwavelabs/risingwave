@@ -16,6 +16,7 @@ use std::sync::Arc;
 
 use risingwave_common::config::StreamingConfig;
 use risingwave_common::util::addr::HostAddr;
+use risingwave_sink::{SinkManager, SinkManagerRef};
 use risingwave_source::{SourceManager, SourceManagerRef};
 use risingwave_storage::StateStoreImpl;
 
@@ -31,6 +32,9 @@ pub struct StreamEnvironment {
     /// Reference to the source manager.
     source_manager: SourceManagerRef,
 
+    /// Reference to the sink manager.
+    sink_manager: SinkManagerRef,
+
     /// Streaming related configurations.
     config: Arc<StreamingConfig>,
 
@@ -44,6 +48,7 @@ pub struct StreamEnvironment {
 impl StreamEnvironment {
     pub fn new(
         source_manager: SourceManagerRef,
+        sink_manager: SinkManagerRef,
         server_addr: HostAddr,
         config: Arc<StreamingConfig>,
         worker_id: WorkerNodeId,
@@ -52,6 +57,7 @@ impl StreamEnvironment {
         StreamEnvironment {
             server_addr,
             source_manager,
+            sink_manager,
             config,
             worker_id,
             state_store,
@@ -61,11 +67,13 @@ impl StreamEnvironment {
     // Create an instance for testing purpose.
     #[cfg(test)]
     pub fn for_test() -> Self {
+        use risingwave_sink::MemSinkManager;
         use risingwave_source::MemSourceManager;
         use risingwave_storage::monitor::StateStoreMetrics;
         StreamEnvironment {
             server_addr: "127.0.0.1:5688".parse().unwrap(),
             source_manager: Arc::new(MemSourceManager::default()),
+            sink_manager: Arc::new(MemSinkManager::default()),
             config: Arc::new(StreamingConfig::default()),
             worker_id: WorkerNodeId::default(),
             state_store: StateStoreImpl::shared_in_memory_store(Arc::new(
@@ -84,6 +92,14 @@ impl StreamEnvironment {
 
     pub fn source_manager_ref(&self) -> SourceManagerRef {
         self.source_manager.clone()
+    }
+
+    pub fn sink_manager(&self) -> &dyn SinkManager {
+        &*self.sink_manager
+    }
+
+    pub fn sink_manager_ref(&self) -> SinkManagerRef {
+        self.sink_manager.clone()
     }
 
     pub fn config(&self) -> &StreamingConfig {
