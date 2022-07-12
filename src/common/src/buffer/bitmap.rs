@@ -91,6 +91,14 @@ impl BitmapBuilder {
         }
     }
 
+    pub fn is_set(&self, n: usize) -> bool {
+        assert!(n < self.len);
+
+        let byte = self.data.get(n / 8).unwrap_or(&self.head);
+        let mask = 1 << (n % 8);
+        *byte & mask != 0
+    }
+
     pub fn append(&mut self, bit_set: bool) -> &mut Self {
         self.head |= (bit_set as u8) << (self.len % 8);
         self.num_high_bits += bit_set as usize;
@@ -384,23 +392,16 @@ mod tests {
     fn test_bitmap_builder() {
         let bitmap1 = {
             let mut builder = BitmapBuilder::default();
-            builder
-                .append(false)
-                .append(true)
-                .append(true)
-                .append(false)
-                .append(true)
-                .append(false)
-                .append(true)
-                .append(false)
-                .append(true)
-                .append(false)
-                .append(true)
-                .append(true)
-                .append(false)
-                .append(true)
-                .append(false)
-                .append(true);
+            let bits = [
+                false, true, true, false, true, false, true, false, true, false, true, true, false,
+                true, false, true,
+            ];
+            for bit in bits {
+                builder.append(bit);
+            }
+            for (idx, bit) in bits.iter().enumerate() {
+                assert_eq!(builder.is_set(idx), *bit);
+            }
             builder.finish()
         };
         let byte1 = 0b0101_0110_u8;
@@ -414,15 +415,13 @@ mod tests {
 
         let bitmap2 = {
             let mut builder = BitmapBuilder::default();
-            builder
-                .append(false)
-                .append(true)
-                .append(true)
-                .append(false)
-                .append(true)
-                .append(false)
-                .append(true)
-                .append(false);
+            let bits = [false, true, true, false, true, false, true, false];
+            for bit in bits {
+                builder.append(bit);
+            }
+            for (idx, bit) in bits.iter().enumerate() {
+                assert_eq!(builder.is_set(idx), *bit);
+            }
             builder.finish()
         };
         let byte1 = 0b0101_0110_u8;

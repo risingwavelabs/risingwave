@@ -70,7 +70,10 @@ impl BatchSeqScan {
             if self.logical.is_sys_table() {
                 Distribution::Single
             } else {
-                Distribution::SomeShard
+                match self.logical.distribution_key() {
+                    Some(dist_key) => Distribution::HashShard(dist_key),
+                    None => Distribution::SomeShard,
+                }
             },
             self.scan_range.clone(),
         )
@@ -80,6 +83,10 @@ impl BatchSeqScan {
     #[must_use]
     pub fn logical(&self) -> &LogicalScan {
         &self.logical
+    }
+
+    pub fn scan_range(&self) -> &ScanRange {
+        &self.scan_range
     }
 }
 

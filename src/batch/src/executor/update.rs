@@ -173,7 +173,7 @@ impl BoxedExecutorBuilder for UpdateExecutor {
             NodeBody::Update
         )?;
 
-        let table_id = TableId::from(&update_node.table_source_ref_id);
+        let table_id = TableId::new(update_node.table_source_id);
 
         let exprs: Vec<_> = update_node
             .get_exprs()

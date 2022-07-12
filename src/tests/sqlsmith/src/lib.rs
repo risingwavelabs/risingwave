@@ -24,6 +24,7 @@ use risingwave_sqlparser::ast::{
 };
 
 mod expr;
+pub use expr::print_function_table;
 mod relation;
 mod scalar;
 
@@ -130,7 +131,6 @@ impl<'a, R: Rng> SqlGenerator<'a, R> {
     fn gen_select_stmt(&mut self) -> (Select, Vec<Column>) {
         // Generate random tables/relations first so that select items can refer to them.
         let from = self.gen_from();
-        let rel_num = from.len();
         let (select_list, schema) = self.gen_select_list();
         let select = Select {
             distinct: false,
@@ -141,11 +141,6 @@ impl<'a, R: Rng> SqlGenerator<'a, R> {
             group_by: self.gen_group_by(),
             having: self.gen_having(),
         };
-        // The relations used in the inner query can not be used in the outer query.
-        (0..rel_num).for_each(|_| {
-            let rel = self.bound_relations.pop();
-            assert!(rel.is_some());
-        });
         (select, schema)
     }
 

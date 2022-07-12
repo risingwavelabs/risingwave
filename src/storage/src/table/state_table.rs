@@ -16,18 +16,22 @@ use std::borrow::Cow;
 use std::cmp::Ordering;
 use std::marker::PhantomData;
 use std::ops::Index;
+use std::sync::Arc;
 
 use futures::{pin_mut, Stream, StreamExt};
 use futures_async_stream::try_stream;
 use risingwave_common::array::Row;
+use risingwave_common::buffer::Bitmap;
 use risingwave_common::catalog::{ColumnDesc, TableId};
-use risingwave_common::util::ordered::{serialize_pk, OrderedRowSerializer};
+use risingwave_common::util::ordered::OrderedRowSerializer;
 use risingwave_common::util::sort_util::OrderType;
 use risingwave_hummock_sdk::key::range_of_prefix;
+use risingwave_pb::catalog::Table;
 
 use super::mem_table::{MemTable, RowOp};
 use super::storage_table::{StorageTableBase, READ_WRITE};
 use super::Distribution;
+use crate::encoding::cell_based_encoding_util::serialize_pk;
 use crate::encoding::cell_based_row_serializer::CellBasedRowSerializer;
 use crate::encoding::dedup_pk_cell_based_row_serializer::DedupPkCellBasedRowSerializer;
 use crate::encoding::Encoding;
@@ -162,7 +166,7 @@ impl<S: StateStore, E: Encoding> StateTableBase<S, E> {
         Ok(())
     }
 
-    /// Insert a row into state table. Must provide a full row of old value corresponding to the
+    /// Delete a row from state table. Must provide a full row of old value corresponding to the
     /// column desc of the table.
     pub fn delete(&mut self, old_value: Row) -> StorageResult<()> {
         let mut datums = vec![];
@@ -220,6 +224,53 @@ impl<S: StateStore> StateTable<S> {
         };
 
         Ok(StateTableRowIter::new(mem_table_iter, storage_table_iter).into_stream())
+    }
+
+    /// Create state table from table catalog and store.
+    pub fn from_table_catalog(
+        table_catalog: &Table,
+        store: S,
+        vnodes: Option<Arc<Bitmap>>,
+    ) -> Self {
+        let table_columns = table_catalog
+            .columns
+            .iter()
+            .map(|col| col.column_desc.as_ref().unwrap().into())
+            .collect();
+        let order_types = table_catalog
+            .order_key
+            .iter()
+            .map(|col_order| {
+                OrderType::from_prost(
+                    &risingwave_pb::plan_common::OrderType::from_i32(col_order.order_type).unwrap(),
+                )
+            })
+            .collect();
+        let dist_key_indices = table_catalog
+            .distribution_key
+            .iter()
+            .map(|dist_index| *dist_index as usize)
+            .collect();
+        let pk_indices = table_catalog
+            .order_key
+            .iter()
+            .map(|col_order| col_order.index as usize)
+            .collect();
+        let distribution = match vnodes {
+            Some(vnodes) => Distribution {
+                dist_key_indices,
+                vnodes,
+            },
+            None => Distribution::fallback(),
+        };
+        StateTable::new_with_distribution(
+            store,
+            TableId::new(table_catalog.id),
+            table_columns,
+            order_types,
+            pk_indices,
+            distribution,
+        )
     }
 }
 
