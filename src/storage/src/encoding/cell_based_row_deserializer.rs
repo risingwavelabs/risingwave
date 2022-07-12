@@ -22,16 +22,9 @@ use risingwave_common::catalog::{ColumnDesc, ColumnId};
 use risingwave_common::error::{ErrorCode, Result};
 use risingwave_common::types::{Datum, VirtualNode, VIRTUAL_NODE_SIZE};
 use risingwave_common::util::value_encoding::deserialize_cell;
-
 use super::cell_based_encoding_util::deserialize_column_id;
+use crate::encoding::ColumnDescMapping;
 use crate::table::storage_table::DEFAULT_VNODE;
-
-/// Record mapping from [`ColumnDesc`], [`ColumnId`], and output index of columns in a table.
-pub struct ColumnDescMapping {
-    pub output_columns: Vec<ColumnDesc>,
-
-    pub id_to_column_index: HashMap<ColumnId, usize>,
-}
 
 #[allow(clippy::len_without_is_empty)]
 impl ColumnDescMapping {

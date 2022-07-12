@@ -20,7 +20,8 @@ use risingwave_common::error::Result;
 use risingwave_common::types::{Datum, VirtualNode};
 use risingwave_common::util::ordered::OrderedRowDeserializer;
 
-use super::cell_based_row_deserializer::{CellBasedRowDeserializer, ColumnDescMapping};
+use super::cell_based_row_deserializer::CellBasedRowDeserializer;
+use crate::encoding::ColumnDescMapping;
 
 /// Similar to [`CellBasedRowDeserializer`], but for dedup pk cell encoding.
 #[derive(Clone)]
