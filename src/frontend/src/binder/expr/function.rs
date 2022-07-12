@@ -94,13 +94,10 @@ impl Binder {
                         .map(|e| -> Result<AggOrderByExpr> {
                             Ok(AggOrderByExpr {
                                 expr: self.bind_expr(e.expr)?,
-                                direction: e.asc.map_or(Direction::Any, |asc| {
-                                    if asc {
-                                        Direction::Asc
-                                    } else {
-                                        Direction::Desc
-                                    }
-                                }),
+                                direction: match e.asc {
+                                    None | Some(true) => Direction::Asc,
+                                    Some(false) => Direction::Desc,
+                                },
                                 nulls_first: e.nulls_first,
                             })
                         })
