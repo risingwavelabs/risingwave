@@ -86,9 +86,9 @@ impl Output for LocalOutput {
         if self.ch.capacity() == 0 {
             let start_time = minstant::Instant::now();
             let mut timeout_times = 0;
-            // the default pull time of Prometheus is 15s, so we set timeout to 10s
+            // the default pull time of Prometheus is 15s
             while (tokio::time::timeout(
-                std::time::Duration::from_secs(10),
+                std::time::Duration::from_secs(15),
                 self.ch.send(message.clone()),
             ))
             .await
@@ -162,9 +162,9 @@ impl Output for RemoteOutput {
         if self.ch.capacity() == 0 {
             let start_time = minstant::Instant::now();
             let mut timeout_times = 0;
-            // the default pull time of Prometheus is 15s, so we set timeout to 10s
+            // the default pull time of Prometheus is 15s
             while (tokio::time::timeout(
-                std::time::Duration::from_secs(10),
+                std::time::Duration::from_secs(15),
                 self.ch.send(message.clone()),
             ))
             .await
