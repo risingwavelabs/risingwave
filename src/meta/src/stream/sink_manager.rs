@@ -12,24 +12,23 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+use std::collections::HashMap;
 use std::sync::Arc;
 use std::time::Duration;
-use std::collections::{BTreeMap, BTreeSet, HashMap, HashSet};
 
 use futures::future::try_join_all;
-use risingwave_common::error::{internal_error, Result, RwError, ToRwResult};
+use risingwave_common::error::{Result, RwError};
 use risingwave_pb::catalog::Sink;
 use risingwave_pb::common::worker_node::State::Running;
 use risingwave_pb::common::WorkerType;
-use risingwave_pb::stream_plan::StreamFragmentGraph;
 use risingwave_pb::stream_service::{
     CreateSinkRequest as ComputeNodeCreateSinkRequest,
     DropSinkRequest as ComputeNodeDropSinkRequest,
 };
 use risingwave_rpc_client::StreamClient;
 use tokio::sync::Mutex;
+use tokio::time;
 use tokio::time::MissedTickBehavior;
-use tokio::{select, time};
 
 use crate::cluster::ClusterManagerRef;
 use crate::manager::{MetaSrvEnv, SinkId};
@@ -54,9 +53,14 @@ impl<S> SinkManagerCore<S>
 where
     S: MetaStore,
 {
-    fn new(fragment_manager: FragmentManagerRef<S>, 
-        managed_sinks: HashMap<SinkId, String>,) -> Self {
-        Self { fragment_manager, managed_sinks }
+    fn new(
+        fragment_manager: FragmentManagerRef<S>,
+        managed_sinks: HashMap<SinkId, String>,
+    ) -> Self {
+        Self {
+            fragment_manager,
+            managed_sinks,
+        }
     }
 }
 
@@ -72,7 +76,10 @@ where
         fragment_manager: FragmentManagerRef<S>,
     ) -> Result<Self> {
         let managed_sinks = HashMap::new();
-        let core = Arc::new(Mutex::new(SinkManagerCore::new(fragment_manager, managed_sinks)));
+        let core = Arc::new(Mutex::new(SinkManagerCore::new(
+            fragment_manager,
+            managed_sinks,
+        )));
 
         Ok(Self {
             env,
@@ -82,7 +89,6 @@ where
     }
 
     async fn all_stream_clients(&self) -> Result<impl Iterator<Item = StreamClient>> {
-
         let all_compute_nodes = self
             .cluster_manager
             .list_worker_node(WorkerType::ComputeNode, Some(Running))
@@ -140,10 +146,10 @@ where
         revert_funcs.clear();
         Ok(())
     }
-    
+
     async fn create_sink_worker(
-        sink: &Sink,
-        managed_sinks: &mut HashMap<SinkId, String>,
+        _sink: &Sink,
+        _managed_sinks: &mut HashMap<SinkId, String>,
     ) -> Result<()> {
         Ok(())
     }
@@ -163,7 +169,7 @@ where
     }
 
     async fn tick(&self) -> Result<()> {
-        Ok(()) //TODO(nanderstabel): Actually implement tick method
+        Ok(()) // TODO(nanderstabel): Actually implement tick method
     }
 
     pub async fn run(&self) -> Result<()> {

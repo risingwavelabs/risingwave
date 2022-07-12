@@ -234,12 +234,10 @@ where
         request: Request<CreateSinkRequest>,
     ) -> Result<Response<CreateSinkResponse>, Status> {
         let req = request.into_inner();
-        
-        let mut sink = req.sink.unwrap();
+
+        let sink = req.sink.unwrap();
         let fragment_graph = req.fragment_graph.unwrap();
 
-        
-        
         let (sink_id, version) = self
             .create_sink_inner(sink, fragment_graph)
             .await
@@ -264,7 +262,7 @@ where
             .drop_sink(sink_id)
             .await
             .map_err(tonic_err)?;
-            
+
         // 2. Drop sink on compute nodes.
         self.sink_manager
             .drop_sink(sink_id)
@@ -727,7 +725,6 @@ where
         mut sink: Sink,
         _fragment_graph: StreamFragmentGraph,
     ) -> RwResult<(SinkId, u64)> {
-        
         let sink_id = self
             .env
             .id_gen_manager()
@@ -746,7 +743,7 @@ where
                 .await?;
             return Err(e);
         }
-        
+
         let version = self
             .catalog_manager
             .finish_create_sink_procedure(&sink)

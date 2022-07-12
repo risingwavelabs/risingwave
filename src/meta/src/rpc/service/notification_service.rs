@@ -79,7 +79,7 @@ where
             }
             WorkerType::Frontend => {
                 let catalog_guard = self.catalog_manager.get_catalog_core_guard().await;
-                let (database, schema, table, source, sink) = catalog_guard.get_catalog().await?;
+                let (database, schema, table, source, _sink) = catalog_guard.get_catalog().await?;
 
                 let cluster_guard = self.cluster_manager.get_cluster_core_guard().await;
                 let nodes = cluster_guard.list_worker_node(WorkerType::ComputeNode, Some(Running));

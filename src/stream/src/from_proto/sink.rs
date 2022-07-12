@@ -12,7 +12,6 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use risingwave_common::catalog::{ColumnId, Field, Schema, TableId};
 use tokio::sync::mpsc::unbounded_channel;
 
 use super::*;
@@ -24,11 +23,11 @@ impl ExecutorBuilder for SinkExecutorBuilder {
     fn new_boxed_executor(
         params: ExecutorParams,
         node: &StreamNode,
-        store: impl StateStore,
+        _store: impl StateStore,
         stream: &mut LocalStreamManagerCore,
     ) -> Result<BoxedExecutor> {
-        let node = try_match_expand!(node.get_node_body().unwrap(), NodeBody::Sink)?;
-        let (sender, barrier_receiver) = unbounded_channel();
+        let _node = try_match_expand!(node.get_node_body().unwrap(), NodeBody::Sink)?;
+        let (sender, _barrier_receiver) = unbounded_channel();
         stream
             .context
             .lock_barrier_manager()

@@ -230,10 +230,7 @@ impl StreamService for StreamServiceImpl {
 
         let id = TableId::new(sink.id); // TODO: use SinkId instead
 
-        self.env
-            .sink_manager()
-            .create_sink(&id)
-            .await?;
+        self.env.sink_manager().create_sink(&id).await?;
 
         tracing::debug!(id = %sink.id, "create sink");
 
@@ -248,10 +245,7 @@ impl StreamService for StreamServiceImpl {
         let id = request.into_inner().sink_id;
         let id = TableId::new(id); // TODO: use SinkId instead
 
-        self.env
-            .sink_manager()
-            .drop_sink(&id)
-            .map_err(tonic_err)?;
+        self.env.sink_manager().drop_sink(&id).map_err(tonic_err)?;
 
         tracing::debug!(id = %id, "drop sink");
 

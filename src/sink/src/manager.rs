@@ -16,11 +16,11 @@ use std::collections::HashSet;
 use std::fmt::Debug;
 use std::sync::Arc;
 
-use parking_lot::{Mutex, MutexGuard};
 use async_trait::async_trait;
+use parking_lot::{Mutex, MutexGuard};
 use risingwave_common::catalog::TableId;
-use risingwave_common::error::Result;
 use risingwave_common::ensure;
+use risingwave_common::error::Result;
 
 use crate::monitor::SinkMetrics;
 
@@ -47,8 +47,8 @@ pub struct MemSinkManager {
 #[async_trait]
 impl SinkManager for MemSinkManager {
     async fn create_sink(&self, sink_id: &TableId) -> Result<()> {
-        //TODO(nanderstabel): Actually implement create_sink.
-        
+        // TODO(nanderstabel): Actually implement create_sink.
+
         let mut sinks = self.get_sinks()?;
         ensure!(
             !sinks.contains(sink_id),
@@ -79,7 +79,7 @@ impl SinkManager for MemSinkManager {
 }
 
 impl MemSinkManager {
-    pub fn new(worker_id: u32, metrics: Arc<SinkMetrics>) -> Self {
+    pub fn new(worker_id: u32, _metrics: Arc<SinkMetrics>) -> Self {
         MemSinkManager {
             sinks: Mutex::new(HashSet::new()),
             worker_id,
