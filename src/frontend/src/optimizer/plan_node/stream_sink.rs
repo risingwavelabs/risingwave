@@ -74,6 +74,7 @@ impl ToStreamProst for StreamSink {
 
         ProstStreamNode::Sink(SinkNode {
             table_id: table_desc.table_id.table_id(),
+            column_ids: vec![], //TODO(nanderstabel): fix empty Vector
             properties: self.properties.clone(),
         })
     }

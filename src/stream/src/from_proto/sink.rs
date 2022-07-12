@@ -21,12 +21,12 @@ pub struct SinkExecutorBuilder;
 
 impl ExecutorBuilder for SinkExecutorBuilder {
     fn new_boxed_executor(
-        params: ExecutorParams,
+        mut params: ExecutorParams,
         node: &StreamNode,
-        _store: impl StateStore,
-        stream: &mut LocalStreamManagerCore,
+        store: impl StateStore,
+        _stream: &mut LocalStreamManagerCore,
     ) -> Result<BoxedExecutor> {
-        let _node = try_match_expand!(node.get_node_body().unwrap(), NodeBody::Sink)?;
+        let node = try_match_expand!(node.get_node_body().unwrap(), NodeBody::Sink)?;
         let _sink_id = TableId::from(node.table_id);
         let _column_ids = node
             .get_column_ids()
