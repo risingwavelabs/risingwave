@@ -74,7 +74,7 @@ impl EqGroups {
 
 /// `SortedGrouper` contains the state of a group column in the sort aggregate
 /// algorithm, just like `Aggregator` contains the state of an aggregate column.
-/// TODO(rc): This can be deprecated and the logic can be moved to SortAggExecutor.
+/// TODO(rc): This can be deprecated and the logic can be moved to `SortAggExecutor`.
 pub trait SortedGrouper: Send + 'static {
     /// `detect_groups` detects the `EqGroups` from the `input` array if appended
     /// to current state. See the documentation of `EqGroups` to learn more.
@@ -227,16 +227,16 @@ mod tests {
         let input = I32Array::from_slice(&[Some(1), Some(1), Some(3)]).unwrap();
         let eq = g.detect_groups_concrete(&input)?;
         assert_eq!(eq.indices, vec![2]);
-        g.update_concrete(&input, 0, *eq.indices.get(0).unwrap())?;
+        g.update_concrete(&input, 0, *eq.indices.first().unwrap())?;
         g.output_and_reset_concrete(&mut builder)?;
-        g.update_concrete(&input, *eq.indices.get(0).unwrap(), input.len())?;
+        g.update_concrete(&input, *eq.indices.first().unwrap(), input.len())?;
 
         let input = I32Array::from_slice(&[Some(3), Some(4), Some(4)]).unwrap();
         let eq = g.detect_groups_concrete(&input)?;
         assert_eq!(eq.indices, vec![1]);
-        g.update_concrete(&input, 0, *eq.indices.get(0).unwrap())?;
+        g.update_concrete(&input, 0, *eq.indices.first().unwrap())?;
         g.output_and_reset_concrete(&mut builder)?;
-        g.update_concrete(&input, *eq.indices.get(0).unwrap(), input.len())?;
+        g.update_concrete(&input, *eq.indices.first().unwrap(), input.len())?;
         g.output_and_reset_concrete(&mut builder)?;
 
         assert_eq!(

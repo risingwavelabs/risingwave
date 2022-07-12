@@ -231,7 +231,7 @@ impl SortAggExecutor {
     ) -> Result<()> {
         agg_states
             .iter_mut()
-            .try_for_each(|state| state.update_multi(&child_chunk, start_row_idx, end_row_idx))
+            .try_for_each(|state| state.update_multi(child_chunk, start_row_idx, end_row_idx))
     }
 
     fn output_sorted_groupers(
