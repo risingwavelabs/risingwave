@@ -28,7 +28,7 @@ impl ExecutorBuilder for SinkExecutorBuilder {
     ) -> Result<BoxedExecutor> {
         let node = try_match_expand!(node.get_node_body().unwrap(), NodeBody::Sink)?;
 
-        let _sink_id = TableId::from(&node.table_ref_id);
+        let _sink_id = TableId::from(node.table_id);
         let _column_ids = node
             .get_column_ids()
             .iter()
