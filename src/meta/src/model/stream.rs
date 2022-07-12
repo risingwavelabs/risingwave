@@ -46,7 +46,7 @@ pub struct TableFragments {
     pub(crate) fragments: BTreeMap<FragmentId, Fragment>,
 
     /// The status of actors
-    actor_status: BTreeMap<ActorId, ActorStatus>,
+    pub(crate) actor_status: BTreeMap<ActorId, ActorStatus>,
 
     /// Internal TableIds from all Fragment
     internal_table_ids: Vec<u32>,
@@ -175,18 +175,6 @@ impl TableFragments {
         }
     }
 
-    pub fn fetch_parallel_unit_by_id(
-        &self,
-        parallel_unit_id: &ParallelUnitId,
-    ) -> Option<ParallelUnit> {
-        for status in self.actor_status.values() {
-            if &status.get_parallel_unit().unwrap().id == parallel_unit_id {
-                return status.parallel_unit.clone();
-            }
-        }
-        None
-    }
-
     pub fn fetch_stream_source_id(stream_node: &StreamNode) -> Option<SourceId> {
         if let Some(NodeBody::Source(s)) = stream_node.node_body.as_ref() {
             if s.source_type == SourceType::Source as i32 {
@@ -261,42 +249,18 @@ impl TableFragments {
         map
     }
 
-    pub fn migrate_parallel_units(
-        &mut self,
-        migrate_map: &HashMap<ParallelUnitId, ParallelUnitId>,
-        parallel_unit_buf: &HashMap<ParallelUnitId, ParallelUnit>,
-    ) -> bool {
-        let mut flag = false;
-        for actor_status in self.actor_status.values_mut() {
-            let parallel_id = actor_status.get_parallel_unit().unwrap().id;
-            if migrate_map.contains_key(&parallel_id) {
-                actor_status.parallel_unit =
-                    Some(parallel_unit_buf.get(&parallel_id).unwrap().clone());
-                flag = true;
-            }
-        }
-        if flag {
-            for fragment in self.fragments.values_mut() {
-                if fragment.vnode_mapping.is_some() {
-                    let mapping = fragment.vnode_mapping.as_mut().unwrap();
-                    let has_key = mapping.data.iter().any(|id| migrate_map.contains_key(id));
-                    if has_key {
-                        mapping.data = mapping
-                            .data
-                            .iter_mut()
-                            .map(|id| {
-                                if migrate_map.contains_key(id) {
-                                    *migrate_map.get(id).unwrap()
-                                } else {
-                                    *id
-                                }
-                            })
-                            .collect_vec();
-                    }
+    pub fn update_vnode_mapping(&mut self, migrate_map: &HashMap<ParallelUnitId, ParallelUnit>) {
+        for fragment in self.fragments.values_mut() {
+            if fragment.vnode_mapping.is_some() {
+                if let Some(ref mut mapping) = fragment.vnode_mapping {
+                    mapping.data.iter_mut().for_each(|id| {
+                        if migrate_map.contains_key(id) {
+                            *id = migrate_map.get(id).unwrap().id;
+                        }
+                    });
                 }
             }
         }
-        flag
     }
 
     /// Returns the status of actors group by node id.

@@ -21,10 +21,9 @@ use futures::future::try_join_all;
 use itertools::Itertools;
 use log::{debug, error};
 use risingwave_common::error::{ErrorCode, Result, RwError};
-use risingwave_common::types::ParallelUnitId;
 use risingwave_common::util::epoch::Epoch;
 use risingwave_pb::common::worker_node::State;
-use risingwave_pb::common::{ActorInfo, WorkerType};
+use risingwave_pb::common::{ActorInfo, ParallelUnit, WorkerType};
 use risingwave_pb::data::Epoch as ProstEpoch;
 use risingwave_pb::stream_service::barrier_complete_response::CreateMviewProgress;
 use risingwave_pb::stream_service::{
@@ -145,7 +144,7 @@ where
         &self,
         info: &BarrierActorInfo,
         expired_workers: &Vec<ActorId>,
-    ) -> HashMap<ActorId, ParallelUnitId> {
+    ) -> HashMap<ActorId, ParallelUnit> {
         let workers_size = expired_workers.len();
         let mut cur = 0;
         let mut migrate_map = HashMap::new();
@@ -173,7 +172,7 @@ where
                     if cur == workers_size {
                         break;
                     }
-                    migrate_map.insert(actors[idx], parallel_units[idx].id);
+                    migrate_map.insert(actors[idx], parallel_units[idx].clone());
                     cur += 1;
                 }
             }
@@ -193,16 +192,11 @@ where
             return Ok(());
         }
         let migrate_map = self.get_migrate_map_plan(info, &expired_workers).await;
-        let res = self.fragment_manager.migrate_actors(&migrate_map).await;
-        match res {
-            Ok((fragments, migrate_map)) => {
-                self
-                    .catalog_manager
-                    .update_table_mapping(&fragments, &migrate_map)
-                    .await
-            }
-            Err(e) => Err(e)
-        }
+        let (new_fragments, migrate_map) =
+            self.fragment_manager.migrate_actors(&migrate_map).await?;
+        self.catalog_manager
+            .update_table_mapping(&new_fragments, &migrate_map)
+            .await
     }
 
     /// Sync all sources in compute nodes, the local source manager in compute nodes may be dirty

@@ -28,6 +28,7 @@ use risingwave_common::error::{Result, RwError};
 use risingwave_common::types::ParallelUnitId;
 use risingwave_pb::catalog::table::OptionalAssociatedSourceId;
 use risingwave_pb::catalog::{Database, Schema, Source, Table};
+use risingwave_pb::common::ParallelUnit;
 use risingwave_pb::meta::subscribe_response::{Info, Operation};
 use tokio::sync::{Mutex, MutexGuard};
 
@@ -438,7 +439,7 @@ where
     pub async fn update_table_mapping(
         &self,
         fragments: &Vec<TableFragments>,
-        migrate_map: &HashMap<ParallelUnitId, ParallelUnitId>,
+        migrate_map: &HashMap<ParallelUnitId, ParallelUnit>,
     ) -> Result<()> {
         let mut core = self.core.lock().await;
         let mut transaction = Transaction::default();
@@ -447,23 +448,17 @@ where
             let table_id = fragment.table_id().table_id();
             let table = Table::select(self.env.meta_store(), &table_id).await?;
             if let Some(mut table) = table {
-                if table.mapping.is_some() {
-                    let mapping = table.mapping.as_mut().unwrap();
-                    let flag = mapping.data.iter().any(|id| migrate_map.contains_key(id));
-                    if flag {
-                        mapping.data = mapping
-                            .data
-                            .iter_mut()
-                            .map(|id| {
-                                if migrate_map.contains_key(id) {
-                                    *migrate_map.get(id).unwrap()
-                                } else {
-                                    *id
-                                }
-                            })
-                            .collect_vec();
+                if let Some(ref mut mapping) = table.mapping {
+                    let mut migrated = false;
+                    mapping.data.iter_mut().for_each(|id| {
+                        if migrate_map.contains_key(id) {
+                            migrated = true;
+                            *id = migrate_map.get(id).unwrap().id;
+                        }
+                    });
+                    if migrated {
                         table.upsert_in_transaction(&mut transaction)?;
-                        tables.push(table)
+                        tables.push(table);
                     }
                 }
             }

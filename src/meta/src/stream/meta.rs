@@ -22,6 +22,7 @@ use risingwave_common::error::{Result, RwError};
 use risingwave_common::try_match_expand;
 use risingwave_common::types::{ParallelUnitId, VIRTUAL_NODE_COUNT};
 use risingwave_common::util::compress::decompress_data;
+use risingwave_pb::common::ParallelUnit;
 use risingwave_pb::meta::table_fragments::ActorState;
 use risingwave_pb::stream_plan::{FragmentType, StreamActor};
 use tokio::sync::RwLock;
@@ -316,30 +317,32 @@ where
     /// Used in [`crate::barrier::GlobalBarrierManager`]
     pub async fn migrate_actors(
         &self,
-        migrate_map: &HashMap<ActorId, ParallelUnitId>,
-    ) -> Result<(Vec<TableFragments>, HashMap<ParallelUnitId, ParallelUnitId>)> {
-        let map = &mut self.core.write().await.table_fragments;
+        migrate_map: &HashMap<ActorId, ParallelUnit>,
+    ) -> Result<(Vec<TableFragments>, HashMap<ParallelUnitId, ParallelUnit>)> {
         let mut parallel_unit_migrate_map = HashMap::new();
-        let mut parallel_unit_buf = HashMap::new();
-        for (&actor_id, &target_id) in migrate_map {
-            if let Some((_, fragments)) = (*map).iter().next() {
-                if let Some(parallel_unit) = fragments.fetch_parallel_unit_by_actor(&actor_id) {
-                    parallel_unit_migrate_map.insert(parallel_unit.id, target_id);
-                }
-            }
-            if let Some((_, fragments)) = (*map).iter().next() {
-                if let Some(parallel_unit) = fragments.fetch_parallel_unit_by_id(&target_id) {
-                    parallel_unit_buf.insert(parallel_unit.id, parallel_unit);
-                }
-            }
-        }
+
+        let mut table_fragments = self.list_table_fragments().await?;
         let mut new_fragments = Vec::new();
-        for fragments in map.values_mut() {
-            let mut new_fragment = fragments.clone();
-            if new_fragment.migrate_parallel_units(&parallel_unit_migrate_map, &parallel_unit_buf) {
-                new_fragments.push(new_fragment);
+        table_fragments.iter_mut().for_each(|fragment| {
+            let mut flag = false;
+            fragment
+                .actor_status
+                .iter_mut()
+                .for_each(|(actor_id, status)| {
+                    if let Some(pu) = migrate_map.get(actor_id) {
+                        if let Some(ref old_parallel_unit) = status.parallel_unit {
+                            parallel_unit_migrate_map.insert(old_parallel_unit.id, pu.clone());
+                            status.parallel_unit = Some(pu.clone());
+                            flag = true;
+                        }
+                    };
+                });
+            if flag {
+                fragment.update_vnode_mapping(migrate_map);
+                new_fragments.push(fragment.clone());
             }
-        }
+        });
+
         self.batch_update_table_fragments(&new_fragments).await?;
         Ok((new_fragments, parallel_unit_migrate_map))
     }
