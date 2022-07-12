@@ -12,8 +12,6 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-#![expect(dead_code)]
-
 use std::sync::Arc;
 
 use bytes::Bytes;
@@ -21,21 +19,16 @@ use itertools::Itertools;
 use risingwave_common::config::StorageConfig;
 use risingwave_hummock_sdk::key::key_with_epoch;
 use risingwave_hummock_sdk::HummockSSTableId;
-use risingwave_meta::hummock::test_utils::setup_compute_env;
-use risingwave_meta::hummock::MockHummockMetaClient;
 use risingwave_pb::hummock::{KeyRange, SstableInfo};
 
 use super::{CompressionAlgorithm, SstableMeta, DEFAULT_RESTART_INTERVAL};
-use crate::hummock::compaction_group::StaticCompactionGroupId;
-use crate::hummock::compaction_group_client::DummyCompactionGroupClient;
-use crate::hummock::iterator::test_utils::{iterator_test_key_of_epoch, mock_sstable_store};
+use crate::hummock::iterator::test_utils::iterator_test_key_of_epoch;
 use crate::hummock::shared_buffer::shared_buffer_batch::SharedBufferBatch;
 use crate::hummock::value::HummockValue;
 use crate::hummock::{
-    CachePolicy, HummockStateStoreIter, HummockStorage, LruCache, SSTableBuilder,
-    SSTableBuilderOptions, Sstable, SstableStoreRef,
+    CachePolicy, HummockStateStoreIter, LruCache, SSTableBuilder, SSTableBuilderOptions, Sstable,
+    SstableStoreRef,
 };
-use crate::monitor::StateStoreMetrics;
 use crate::storage_value::{StorageValue, ValueMeta};
 use crate::store::StateStoreIter;
 
@@ -87,27 +80,6 @@ pub fn gen_dummy_sst_info(id: HummockSSTableId, batches: Vec<SharedBufferBatch>)
         table_ids: vec![],
         unit_id: u64::MAX,
     }
-}
-
-pub async fn mock_hummock_storage() -> HummockStorage {
-    let (_env, hummock_manager_ref, _cluster_manager_ref, worker_node) =
-        setup_compute_env(8080).await;
-    let mock_hummock_meta_client = Arc::new(MockHummockMetaClient::new(
-        hummock_manager_ref.clone(),
-        worker_node.id,
-    ));
-    let sstable_store = mock_sstable_store();
-    HummockStorage::with_default_stats(
-        Arc::new(StorageConfig::default()),
-        sstable_store.clone(),
-        mock_hummock_meta_client,
-        Arc::new(StateStoreMetrics::unused()),
-        Arc::new(DummyCompactionGroupClient::new(
-            StaticCompactionGroupId::StateDefault.into(),
-        )),
-    )
-    .await
-    .unwrap()
 }
 
 /// Number of keys in table generated in `generate_table`.

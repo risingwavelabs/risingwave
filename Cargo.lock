@@ -4390,6 +4390,23 @@ dependencies = [
 ]
 
 [[package]]
+name = "risingwave_hummock_test"
+version = "0.1.10"
+dependencies = [
+ "bytes",
+ "futures",
+ "itertools",
+ "madsim-tokio",
+ "rand 0.8.5",
+ "risingwave_common",
+ "risingwave_hummock_sdk",
+ "risingwave_meta",
+ "risingwave_pb",
+ "risingwave_rpc_client",
+ "risingwave_storage",
+]
+
+[[package]]
 name = "risingwave_meta"
 version = "0.1.10"
 dependencies = [
@@ -4696,7 +4713,6 @@ dependencies = [
  "rand 0.8.5",
  "risingwave_common",
  "risingwave_hummock_sdk",
- "risingwave_meta",
  "risingwave_object_store",
  "risingwave_pb",
  "risingwave_rpc_client",
