@@ -115,7 +115,7 @@ impl DistinctAgg {
                         return None;
                     }
                     // convert distinct agg with real filter to count(*) with orginal filter.
-                    agg_call = PlanAggCall::count_star(agg_call.filter);
+                    agg_call = PlanAggCall::with_condition(agg_call.filter);
                 }
                 Some(agg_call)
             })
@@ -132,7 +132,16 @@ impl DistinctAgg {
     ) -> PlanRef {
         // The index of `flag` in schema of the middle `LogicalAgg`.
         let pos_of_flag = input.group_key().len() - 1;
+
+        // ```ignore
+        // the input(middle agg) has the following schema:
+        // original group columns | distinct agg arguments | flag | count_star_with_filter or non-distinct agg
+        // <-                group                              -> <-             agg calls                 ->
+        // ```
+
+        // scan through `distinct agg arguments`.
         let mut index_of_distinct_agg_argument = old_group_keys_len;
+        // scan through `count_star_with_filter` or `non-distinct agg`.
         let mut index_of_middle_agg = input.group_key().len();
         agg_calls.iter_mut().for_each(|agg_call| {
             let flag_value;
@@ -175,10 +184,7 @@ impl DistinctAgg {
 
                 // change final agg's agg_kind just like two-phase agg.
                 match agg_call.agg_kind {
-                    AggKind::Count
-                    | AggKind::RowCount
-                    | AggKind::Sum
-                    | AggKind::ApproxCountDistinct => {
+                    AggKind::Count | AggKind::ApproxCountDistinct => {
                         agg_call.agg_kind = AggKind::Sum;
                     }
                     _ => {}

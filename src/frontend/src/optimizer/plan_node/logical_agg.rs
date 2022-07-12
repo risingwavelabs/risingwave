@@ -113,7 +113,17 @@ impl PlanAggCall {
         }
     }
 
-    pub fn count_star(filter: Condition) -> Self {
+    pub fn count_star() -> Self {
+        PlanAggCall {
+            agg_kind: AggKind::Count,
+            return_type: DataType::Int64,
+            inputs: vec![],
+            distinct: false,
+            filter: Condition::true_cond(),
+        }
+    }
+
+    pub fn with_condition(filter: Condition) -> Self {
         PlanAggCall {
             agg_kind: AggKind::Count,
             return_type: DataType::Int64,
@@ -779,7 +789,7 @@ impl ToStream for LogicalAgg {
         // LogicalAgg.
         // Please note that the index of group key need not be changed.
         let (mut agg_calls, group_key, input) = agg.decompose();
-        agg_calls.insert(0, PlanAggCall::count_star(Condition::true_cond()));
+        agg_calls.insert(0, PlanAggCall::count_star());
 
         let (mut map, _) = out_col_change.into_parts();
         map.iter_mut().skip(group_key.len()).for_each(|index| {

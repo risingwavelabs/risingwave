@@ -531,7 +531,10 @@
       LogicalAgg { group_key: [0, 1, 3], agg_calls: [sum($2) filter(($1 < 100:Int32))] }
         LogicalExpand { column_subsets: [[0, 1, 2], [0, 1]] }
           LogicalScan { table: t, columns: [a, b, c] }
-- sql: "/* only distinct agg */ \ncreate table t(a int, b int, c int); \nselect a, count(distinct b) as distinct_b_num, sum(distinct c) filter(where c < 100) as distinct_c_sum from t group by a;\n"
+- sql: |
+    /* only distinct agg */
+    create table t(a int, b int, c int);
+    select a, count(distinct b) as distinct_b_num, sum(distinct c) filter(where c < 100) as distinct_c_sum from t group by a;
   optimized_logical_plan: |
     LogicalAgg { group_key: [0], agg_calls: [count($1) filter(($3 = 0:Int64)), sum($2) filter((($4 > 0:Int64) AND ($3 = 1:Int64)))] }
       LogicalAgg { group_key: [0, 1, 2, 3], agg_calls: [count filter(($2 < 100:Int32))] }
