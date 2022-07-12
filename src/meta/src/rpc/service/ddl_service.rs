@@ -327,6 +327,8 @@ where
                 !dependent_relations.is_empty(),
                 "there should be at lease 1 dependent relation when creating materialized view"
             );
+            dbg!(&mview.id);
+            dbg!(&dependent_relations);
             mview.dependent_relations = dependent_relations.into_iter().collect();
         }
 
@@ -723,14 +725,50 @@ where
     async fn create_sink_inner(
         &self,
         mut sink: Sink,
-        _fragment_graph: StreamFragmentGraph,
+        fragment_graph: StreamFragmentGraph,
     ) -> RwResult<(SinkId, u64)> {
         let sink_id = self
             .env
             .id_gen_manager()
-            .generate::<{ IdCategory::Sink }>()
+            .generate::<{ IdCategory::Table }>()
             .await? as u32;
         sink.id = sink_id;
+        
+        // TODO(nanderstabel): Resolve code duplication (in fn create_materialized_view).
+        // 1. Resolve the dependent relations.
+        {
+            fn resolve_dependent_relations(
+                stream_node: &StreamNode,
+                dependent_relations: &mut HashSet<TableId>,
+            ) -> RwResult<()> {
+                match stream_node.node_body.as_ref().unwrap() {
+                    NodeBody::Source(source_node) => {
+                        dependent_relations.insert(source_node.get_table_id());
+                    }
+                    NodeBody::Chain(chain_node) => {
+                        dependent_relations.insert(chain_node.get_table_id());
+                    }
+                    _ => {}
+                }
+                for child in &stream_node.input {
+                    resolve_dependent_relations(child, dependent_relations)?;
+                }
+                Ok(())
+            }
+
+            let mut dependent_relations = Default::default();
+            for fragment in fragment_graph.fragments.values() {
+                resolve_dependent_relations(
+                    fragment.node.as_ref().unwrap(),
+                    &mut dependent_relations,
+                )
+                .map_err(tonic_err)?;
+            }
+            assert!(
+                !dependent_relations.is_empty(),
+                "there should be at lease 1 dependent relation when creating sink"
+            );
+        }
 
         self.catalog_manager
             .start_create_sink_procedure(&sink)
