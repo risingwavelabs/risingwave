@@ -12,6 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+use std::collections::HashMap;
 use std::ops::Deref;
 
 use risingwave_common::array::Row;
@@ -70,7 +71,16 @@ pub struct ColumnDescMapping {
 /// `Decoding` defines an interface for decoding a key row from kv storage.
 pub trait Decoding<Desc: Deref<Target = ColumnDescMapping>> {
     /// Constructs a new serializer.
-    fn create_cell_based_deserializer(
-        column_mapping: Desc,
-    ) -> Self;
+    fn create_cell_based_deserializer(column_mapping: Desc) -> Self;
+
+    /// When we encounter a new key, we can be sure that the previous row has been fully
+    /// deserialized. Then we return the key and the value of the previous row.
+    fn deserialize(
+        &mut self,
+        raw_key: impl AsRef<[u8]>,
+        cell: impl AsRef<[u8]>,
+    ) -> Result<Option<(VirtualNode, Vec<u8>, Row)>>;
+
+    /// Take the remaining data out of the deserializer.
+    fn take(&mut self) -> Option<(VirtualNode, Vec<u8>, Row)>;
 }

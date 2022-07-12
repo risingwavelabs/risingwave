@@ -37,10 +37,12 @@ use risingwave_hummock_sdk::key::{end_bound_of_prefix, next_key, prefixed_range,
 use super::mem_table::RowOp;
 use super::{Distribution, TableIter};
 use crate::encoding::cell_based_encoding_util::{serialize_pk, serialize_pk_and_column_id};
-use crate::encoding::cell_based_row_deserializer::{CellBasedRowDeserializer};
+use crate::encoding::cell_based_row_deserializer::{
+    CellBasedRowDeserializer, GeneralCellBasedRowDeserializer,
+};
 use crate::encoding::cell_based_row_serializer::CellBasedRowSerializer;
 use crate::encoding::dedup_pk_cell_based_row_serializer::DedupPkCellBasedRowSerializer;
-use crate::encoding::{Decoding, Encoding, ColumnDescMapping};
+use crate::encoding::{ColumnDescMapping, Decoding, Encoding};
 use crate::error::{StorageError, StorageResult};
 use crate::keyspace::StripPrefixIterator;
 use crate::storage_value::StorageValue;
@@ -509,7 +511,7 @@ impl<S: StateStore, E: Encoding, const T: AccessType> StorageTableBase<S, E, T> 
         let iterators: Vec<_> = try_join_all(vnodes.map(|vnode| {
             let raw_key_range = prefixed_range(encoded_key_range.clone(), &vnode.to_be_bytes());
             async move {
-                let iter = StorageTableIterInner::new(
+                let iter = StorageTableIterInner::<S, GeneralCellBasedRowDeserializer>::new(
                     &self.keyspace,
                     self.mapping.clone(),
                     raw_key_range,

@@ -22,8 +22,9 @@ use risingwave_common::catalog::{ColumnDesc, ColumnId};
 use risingwave_common::error::{ErrorCode, Result};
 use risingwave_common::types::{Datum, VirtualNode, VIRTUAL_NODE_SIZE};
 use risingwave_common::util::value_encoding::deserialize_cell;
+
 use super::cell_based_encoding_util::deserialize_column_id;
-use crate::encoding::ColumnDescMapping;
+use crate::encoding::{ColumnDescMapping, Decoding};
 use crate::table::storage_table::DEFAULT_VNODE;
 
 #[allow(clippy::len_without_is_empty)]
@@ -156,16 +157,6 @@ impl<Desc: Deref<Target = ColumnDescMapping>> CellBasedRowDeserializer<Desc> {
         Ok(result)
     }
 
-    /// When we encounter a new key, we can be sure that the previous row has been fully
-    /// deserialized. Then we return the key and the value of the previous row.
-    pub fn deserialize(
-        &mut self,
-        raw_key: impl AsRef<[u8]>,
-        cell: impl AsRef<[u8]>,
-    ) -> Result<Option<(VirtualNode, Vec<u8>, Row)>> {
-        self.deserialize_inner::<true>(raw_key, cell)
-    }
-
     // TODO: remove this once we refactored lookup in delta join with cell-based table
     pub fn deserialize_without_vnode(
         &mut self,
@@ -175,16 +166,6 @@ impl<Desc: Deref<Target = ColumnDescMapping>> CellBasedRowDeserializer<Desc> {
         self.deserialize_inner::<false>(raw_key, cell)
     }
 
-    /// Take the remaining data out of the deserializer.
-    pub fn take(&mut self) -> Option<(VirtualNode, Vec<u8>, Row)> {
-        let (vnode, cur_pk_bytes) = self.current_key.take()?;
-        let row = Row(std::mem::replace(
-            &mut self.data,
-            vec![None; self.columns.len()],
-        ));
-        Some((vnode, cur_pk_bytes, row))
-    }
-
     /// Since [`CellBasedRowDeserializer`] can be repetitively used with different inputs,
     /// it needs to be reset so that pk and data are both cleared for the next use.
     pub fn reset(&mut self) {
@@ -192,6 +173,33 @@ impl<Desc: Deref<Target = ColumnDescMapping>> CellBasedRowDeserializer<Desc> {
             datum.take();
         });
         self.current_key.take();
+    }
+}
+
+impl<Desc: Deref<Target = ColumnDescMapping>> Decoding<Desc> for CellBasedRowDeserializer<Desc> {
+    /// Constructs a new serializer.
+    fn create_cell_based_deserializer(column_mapping: Desc) -> Self {
+        Self::new(column_mapping)
+    }
+
+    /// When we encounter a new key, we can be sure that the previous row has been fully
+    /// deserialized. Then we return the key and the value of the previous row.
+    fn deserialize(
+        &mut self,
+        raw_key: impl AsRef<[u8]>,
+        cell: impl AsRef<[u8]>,
+    ) -> Result<Option<(VirtualNode, Vec<u8>, Row)>> {
+        self.deserialize_inner::<true>(raw_key, cell)
+    }
+
+    /// Take the remaining data out of the deserializer.
+    fn take(&mut self) -> Option<(VirtualNode, Vec<u8>, Row)> {
+        let (vnode, cur_pk_bytes) = self.current_key.take()?;
+        let row = Row(std::mem::replace(
+            &mut self.data,
+            vec![None; self.columns.len()],
+        ));
+        Some((vnode, cur_pk_bytes, row))
     }
 }
 
@@ -205,6 +213,7 @@ mod tests {
 
     use super::make_cell_based_row_deserializer;
     use crate::encoding::cell_based_encoding_util::serialize_pk_and_row_state;
+    use crate::encoding::Decoding;
 
     #[test]
     fn test_cell_based_deserializer() {
