@@ -145,12 +145,11 @@ mod tests {
 
     #[tokio::test]
     async fn test_managed_value_state() {
-        let mut state_table = StateTable::new_for_test(
+        let mut state_table = StateTable::new_without_distribution(
             MemoryStateStore::new(),
             TableId::from(0x2333),
             vec![ColumnDesc::unnamed(ColumnId::new(0), DataType::Int64)],
             vec![],
-            None,
             vec![],
         );
         let mut managed_state =
@@ -206,12 +205,11 @@ mod tests {
     #[tokio::test]
     async fn test_managed_value_state_append_only() {
         let pk_index = vec![];
-        let mut state_table = StateTable::new_for_test(
+        let mut state_table = StateTable::new_without_distribution(
             MemoryStateStore::new(),
             TableId::from(0x2333),
             vec![ColumnDesc::unnamed(ColumnId::new(0), DataType::Int64)],
             vec![],
-            None,
             pk_index,
         );
         let mut managed_state = ManagedValueState::new(

@@ -318,7 +318,7 @@ mod tests {
     }
 
     fn mock_state_table<S: StateStore>(store: S, table_id: TableId) -> StateTable<S> {
-        StateTable::new_for_test(store, table_id, vec![], vec![], None, vec![])
+        StateTable::new_without_distribution(store, table_id, vec![], vec![], vec![])
     }
 
     #[tokio::test]

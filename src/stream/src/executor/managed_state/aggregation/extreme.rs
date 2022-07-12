@@ -678,12 +678,11 @@ mod tests {
             ));
         }
         let relational_pk_len = column_descs.len();
-        StateTable::new_for_test(
+        StateTable::new_without_distribution(
             store,
             table_id,
             column_descs,
             vec![order_type; relational_pk_len],
-            None,
             (0..relational_pk_len).collect(),
         )
     }

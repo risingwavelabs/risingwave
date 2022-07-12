@@ -794,20 +794,18 @@ mod tests {
             .enumerate()
             .map(|(id, data_type)| ColumnDesc::unnamed(ColumnId::new(id as i32), data_type.clone()))
             .collect_vec();
-        let state_table_l = StateTable::new_for_test(
+        let state_table_l = StateTable::new_without_distribution(
             mem_state.clone(),
             TableId::new(0),
             column_descs.clone(),
             order_types.to_vec(),
-            None,
             pk_indices.to_vec(),
         );
-        let state_table_r = StateTable::new_for_test(
+        let state_table_r = StateTable::new_without_distribution(
             mem_state,
             TableId::new(1),
             column_descs,
             order_types.to_vec(),
-            None,
             pk_indices.to_vec(),
         );
         (state_table_l, state_table_r)
