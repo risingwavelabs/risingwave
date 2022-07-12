@@ -17,6 +17,7 @@ risingwave_pb = { path = "../../prost" }
 risingwave_rpc_client = { path = "../../rpc_client" }
 risingwave_storage = { path = "..", features = ["test"] }
 tokio = { version = "=0.2.0-alpha.3", package = "madsim-tokio" }
+workspace-hack = { version = "0.1", path = "../../workspace-hack" }
 
 [features]
 failpoints = ["risingwave_storage/failpoints"]
