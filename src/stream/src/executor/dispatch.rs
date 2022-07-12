@@ -1060,6 +1060,7 @@ mod tests {
         let dispatcher_id = 666;
         let metrics = Arc::new(StreamingMetrics::unused());
 
+        // 1. Register info and channels in context.
         {
             let mut actor_infos = ctx.actor_infos.write();
 
@@ -1096,20 +1097,54 @@ mod tests {
         .execute();
         pin_mut!(executor);
 
+        // 2. Take downstream receivers.
+        let mut rxs = [234, 235, 238]
+            .into_iter()
+            .map(|id| (id, ctx.take_receiver(&(233, id)).unwrap()))
+            .collect::<HashMap<_, _>>();
+        macro_rules! try_recv {
+            ($down_id:expr) => {
+                rxs.get_mut(&$down_id).unwrap().try_recv()
+            };
+        }
+
+        // 3. Send a chunk.
+        tx.send(Message::Chunk(StreamChunk::default()))
+            .await
+            .unwrap();
+
+        // 4. Send a configuration change barrier.
         let updates1 = maplit::hashmap! {
             actor_id => ProstDispatcherUpdate {
-                dispatcher_id: 0,
+                dispatcher_id,
                 added_downstream_actor_id: vec![238],
                 removed_downstream_actor_id: vec![235],
                 ..Default::default()
             }
         };
-
         let b1 = Barrier::new_test_barrier(1).with_mutation(Mutation::Update(updates1));
         tx.send(Message::Barrier(b1)).await.unwrap();
         executor.next().await.unwrap().unwrap();
 
-        assert_eq!(ctx.get_channel_pair_number(), 0);
+        // 5. Check downstream.
+        try_recv!(234).unwrap().as_chunk().unwrap();
+        try_recv!(234).unwrap().as_barrier().unwrap();
+
+        try_recv!(235).unwrap().as_chunk().unwrap();
+        try_recv!(235).unwrap().as_barrier().unwrap();
+
+        try_recv!(238).unwrap().as_barrier().unwrap(); // Since it's just added, it won't receive the chunk.
+
+        // 6. Send another barrier.
+        tx.send(Message::Barrier(Barrier::new_test_barrier(2)))
+            .await
+            .unwrap();
+        executor.next().await.unwrap().unwrap();
+
+        // 7. Check downstream.
+        try_recv!(234).unwrap().as_barrier().unwrap();
+        try_recv!(235).unwrap_err(); // Since it's stopped, we can't receive the new messages.
+        try_recv!(238).unwrap().as_barrier().unwrap();
     }
 
     #[tokio::test]

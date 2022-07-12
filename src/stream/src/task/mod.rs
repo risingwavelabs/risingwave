@@ -176,11 +176,6 @@ impl SharedContext {
                 ))
             })
     }
-
-    #[cfg(test)]
-    pub fn get_channel_pair_number(&self) -> u32 {
-        self.lock_channel_map().len() as u32
-    }
 }
 
 /// Generate a globally unique executor id. Useful when constructing per-actor keyspace
