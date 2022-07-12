@@ -164,12 +164,6 @@ impl<S: StateStore> ManagedStateImpl<S> {
                     ManagedValueState::new(agg_call, row_count, pk, state_table).await?,
                 ))
             }
-            AggKind::RowCount => {
-                assert!(is_row_count);
-                Ok(Self::Value(
-                    ManagedValueState::new(agg_call, row_count, pk, state_table).await?,
-                ))
-            }
             AggKind::SingleValue => Ok(Self::Value(
                 ManagedValueState::new(agg_call, row_count, pk, state_table).await?,
             )),

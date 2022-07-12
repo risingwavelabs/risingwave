@@ -13,9 +13,13 @@
 // limitations under the License.
 use std::fmt;
 
+use risingwave_common::catalog::{DatabaseId, SchemaId};
+use risingwave_common::util::sort_util::OrderType;
 use risingwave_pb::stream_plan::stream_node::NodeBody;
 use risingwave_pb::stream_plan::DynamicFilterNode;
 
+use super::utils::TableCatalogBuilder;
+use crate::catalog::TableCatalog;
 use crate::expr::Expr;
 use crate::optimizer::plan_node::{PlanBase, PlanTreeNodeBinary, ToStreamProst};
 use crate::optimizer::PlanRef;
@@ -83,6 +87,63 @@ impl ToStreamProst for StreamDynamicFilter {
                 .predicate
                 .as_expr_unless_true()
                 .map(|x| x.to_expr_proto()),
+            left_table: Some(
+                infer_left_internal_table_catalog(self.clone().into(), self.left_index).to_prost(
+                    SchemaId::placeholder() as u32,
+                    DatabaseId::placeholder() as u32,
+                ),
+            ),
+            right_table: Some(
+                infer_right_internal_table_catalog(self.right.clone()).to_prost(
+                    SchemaId::placeholder() as u32,
+                    DatabaseId::placeholder() as u32,
+                ),
+            ),
         })
     }
+}
+
+fn infer_left_internal_table_catalog(input: PlanRef, left_key_index: usize) -> TableCatalog {
+    let base = input.plan_base();
+    let schema = &base.schema;
+
+    let append_only = input.append_only();
+    let dist_keys = base.dist.dist_column_indices().to_vec();
+
+    // The pk of dynamic filter internal table should be left_key + input_pk.
+    let mut pk_indices = vec![left_key_index];
+    // TODO(yuhao): dedup the dist key and pk.
+    pk_indices.extend(&base.pk_indices);
+
+    let mut internal_table_catalog_builder = TableCatalogBuilder::new();
+
+    schema.fields().iter().for_each(|field| {
+        internal_table_catalog_builder.add_column_desc_from_field_without_order_type(field)
+    });
+
+    pk_indices.iter().for_each(|idx| {
+        internal_table_catalog_builder.add_order_column(*idx, OrderType::Ascending)
+    });
+
+    internal_table_catalog_builder.build(dist_keys, append_only)
+}
+
+fn infer_right_internal_table_catalog(input: PlanRef) -> TableCatalog {
+    let base = input.plan_base();
+    let schema = &base.schema;
+
+    // We require that the right table has distribution `Single`
+    assert_eq!(
+        base.dist.dist_column_indices().to_vec(),
+        Vec::<usize>::new()
+    );
+
+    let mut internal_table_catalog_builder = TableCatalogBuilder::new();
+
+    schema.fields().iter().for_each(|field| {
+        internal_table_catalog_builder.add_column_desc_from_field_without_order_type(field)
+    });
+
+    // No distribution keys
+    internal_table_catalog_builder.build(vec![], false)
 }
