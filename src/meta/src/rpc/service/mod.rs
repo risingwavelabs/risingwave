@@ -17,6 +17,7 @@ pub mod ddl_service;
 pub mod heartbeat_service;
 pub mod hummock_service;
 pub mod notification_service;
+pub mod scale_service;
 pub mod stream_service;
 pub mod user_service;
 

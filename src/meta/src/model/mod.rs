@@ -15,6 +15,7 @@
 mod barrier;
 mod catalog;
 mod cluster;
+mod scale;
 mod stream;
 mod user;
 
@@ -27,6 +28,7 @@ pub use catalog::*;
 pub use cluster::*;
 use prost::Message;
 use risingwave_common::error::Result;
+pub use scale::*;
 pub use stream::*;
 pub use user::*;
 

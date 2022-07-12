@@ -192,3 +192,68 @@ message MetaLeaseInfo {
   uint64 lease_register_time = 2;
   uint64 lease_expire_time = 3;
 }
+
+// Below for scale service.
+enum TaskStatus {
+  NOT_FOUND = 0;
+  PENDING = 1;
+  BUILDING = 2;
+  CANCELLED = 3;
+  FINISHED = 4;
+  FAILED = 5;
+}
+
+message ScaleTask {
+  enum TaskType {
+    INVALID = 0;
+    SCALE_IN = 1;
+    SCALE_OUT = 2;
+  }
+  uint32 task_id = 1;
+  TaskStatus task_status = 2;
+  TaskType task_type = 3;
+  repeated common.HostAddress hosts = 4;
+  // pass the fragment parallelism change here, this could be refactored when more scale strategy supported.
+  map<uint32, uint32> fragment_parallelism = 5;
+}
+
+message ScaleTaskRequest {
+  ScaleTask task = 1;
+}
+
+message ScaleTaskResponse {
+  common.Status status = 1;
+  uint32 task_id = 2;
+}
+
+message GetTaskStatusRequest {
+  uint32 task_id = 1;
+}
+
+message GetTaskStatusResponse {
+  common.Status status = 1;
+  TaskStatus task_status = 2;
+}
+
+message AbortTaskRequest {
+  uint32 task_id = 1;
+}
+
+message AbortTaskResponse {
+  common.Status status = 1;
+}
+
+message RemoveTaskRequest {
+  uint32 task_id = 1;
+}
+
+message RemoveTaskResponse {
+  common.Status status = 1;
+}
+
+service ScaleService {
+  rpc ScaleTask(ScaleTaskRequest) returns (ScaleTaskResponse);
+  rpc GetTaskStatus(GetTaskStatusRequest) returns (GetTaskStatusResponse);
+  rpc AbortTask(AbortTaskRequest) returns (AbortTaskResponse);
+  rpc RemoveTask(RemoveTaskRequest) returns (RemoveTaskResponse);
+}

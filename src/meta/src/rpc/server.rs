@@ -27,6 +27,7 @@ use risingwave_pb::hummock::hummock_manager_service_server::HummockManagerServic
 use risingwave_pb::meta::cluster_service_server::ClusterServiceServer;
 use risingwave_pb::meta::heartbeat_service_server::HeartbeatServiceServer;
 use risingwave_pb::meta::notification_service_server::NotificationServiceServer;
+use risingwave_pb::meta::scale_service_server::ScaleServiceServer;
 use risingwave_pb::meta::stream_manager_service_server::StreamManagerServiceServer;
 use risingwave_pb::meta::{MetaLeaderInfo, MetaLeaseInfo};
 use risingwave_pb::user::user_service_server::UserServiceServer;
@@ -35,6 +36,7 @@ use tokio::task::JoinHandle;
 
 use super::intercept::MetricsMiddlewareLayer;
 use super::service::notification_service::NotificationServiceImpl;
+use super::service::scale_service::ScaleServiceImpl;
 use super::DdlServiceImpl;
 use crate::barrier::GlobalBarrierManager;
 use crate::cluster::ClusterManager;
@@ -42,7 +44,9 @@ use crate::dashboard::DashboardService;
 use crate::hummock;
 use crate::hummock::compaction_group::manager::CompactionGroupManager;
 use crate::hummock::CompactionScheduler;
-use crate::manager::{CatalogManager, IdleManager, MetaOpts, MetaSrvEnv, UserManager};
+use crate::manager::{
+    CatalogManager, IdleManager, MetaOpts, MetaSrvEnv, ScaleManager, UserManager,
+};
 use crate::rpc::metrics::MetaMetrics;
 use crate::rpc::service::cluster_service::ClusterServiceImpl;
 use crate::rpc::service::heartbeat_service::HeartbeatServiceImpl;
@@ -426,6 +430,8 @@ pub async fn rpc_serve_with_store<S: MetaStore>(
         cluster_manager.clone(),
         user_manager,
     );
+    let scale_manager = Arc::new(ScaleManager::new(env.meta_store_ref()));
+    let scale_srv = ScaleServiceImpl::new(scale_manager);
 
     if let Some(prometheus_addr) = address_info.prometheus_addr {
         meta_metrics.boot_metrics_service(prometheus_addr);
@@ -477,6 +483,7 @@ pub async fn rpc_serve_with_store<S: MetaStore>(
             .add_service(NotificationServiceServer::new(notification_srv))
             .add_service(DdlServiceServer::new(ddl_srv))
             .add_service(UserServiceServer::new(user_srv))
+            .add_service(ScaleServiceServer::new(scale_srv))
             .serve(address_info.listen_addr)
             .await
             .unwrap();

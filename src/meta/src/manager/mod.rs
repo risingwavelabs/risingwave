@@ -18,6 +18,7 @@ mod hash_mapping;
 mod id;
 mod idle;
 mod notification;
+mod scale;
 mod user;
 
 pub use catalog::*;
@@ -26,4 +27,5 @@ pub use hash_mapping::*;
 pub use id::*;
 pub use idle::*;
 pub use notification::*;
+pub use scale::*;
 pub use user::*;
