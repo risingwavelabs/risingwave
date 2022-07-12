@@ -19,8 +19,8 @@ use rand::Rng;
 use risingwave_frontend::binder::bind_data_type;
 use risingwave_frontend::expr::DataTypeName;
 use risingwave_sqlparser::ast::{
-    ColumnDef, Expr, Ident, OrderByExpr, Query, Select, SelectItem, SetExpr, Statement,
-    TableWithJoins, Value, With,
+    BinaryOperator, ColumnDef, Expr, Ident, Join, JoinConstraint, JoinOperator, OrderByExpr, Query,
+    Select, SelectItem, SetExpr, Statement, TableWithJoins, Value, With,
 };
 
 mod expr;
@@ -32,6 +32,18 @@ mod scalar;
 pub struct Table {
     pub name: String,
     pub columns: Vec<Column>,
+}
+
+impl Table {
+    pub fn get_qualified_columns(&self) -> Vec<Column> {
+        self.columns
+            .iter()
+            .map(|c| Column {
+                name: format!("{}.{}", self.name, c.name),
+                data_type: c.data_type,
+            })
+            .collect()
+    }
 }
 
 #[derive(Clone)]
@@ -53,6 +65,8 @@ struct SqlGenerator<'a, R: Rng> {
     tables: Vec<Table>,
     rng: &'a mut R,
 
+    /// Relations bound in generated query.
+    /// We might not read from all tables.
     bound_relations: Vec<Table>,
 }
 
@@ -212,6 +226,11 @@ impl<'a, R: Rng> SqlGenerator<'a, R> {
     /// 50/50 chance to be true/false.
     fn flip_coin(&mut self) -> bool {
         self.rng.gen_bool(0.5)
+    }
+
+    /// Provide recursion bounds.
+    pub(crate) fn can_recurse(&mut self) -> bool {
+        self.rng.gen_bool(0.3)
     }
 }
 
