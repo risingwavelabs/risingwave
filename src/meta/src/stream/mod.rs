@@ -72,6 +72,12 @@ pub fn record_table_vnode_mappings(
             hash_mapping_manager
                 .set_fragment_state_table(fragment_id, node.right_table.as_ref().unwrap().id);
         }
+        NodeBody::DynamicFilter(node) => {
+            hash_mapping_manager
+                .set_fragment_state_table(fragment_id, node.left_table.as_ref().unwrap().id);
+            hash_mapping_manager
+                .set_fragment_state_table(fragment_id, node.right_table.as_ref().unwrap().id);
+        }
         _ => {}
     }
     let input_nodes = stream_node.get_input();

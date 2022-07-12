@@ -63,10 +63,7 @@ impl StreamService for StreamServiceImpl {
         let req = request.into_inner();
 
         let actor_id = req.actor_id;
-        let res = self
-            .mgr
-            .build_actors(actor_id.as_slice(), self.env.clone())
-            .await;
+        let res = self.mgr.build_actors(actor_id.as_slice(), self.env.clone());
         match res {
             Err(e) => {
                 error!("failed to build actors {}", e);

@@ -31,6 +31,7 @@ use risingwave_common::config::FrontendConfig;
 use risingwave_common::error::Result;
 use risingwave_common::session_config::ConfigMap;
 use risingwave_common::util::addr::HostAddr;
+use risingwave_common_service::observer_manager::ObserverManager;
 use risingwave_pb::common::WorkerType;
 use risingwave_pb::user::auth_info::EncryptionType;
 use risingwave_rpc_client::{ComputeClientPool, MetaClient};
@@ -46,7 +47,7 @@ use crate::catalog::root_catalog::Catalog;
 use crate::handler::handle;
 use crate::handler::util::to_pg_field;
 use crate::meta_client::{FrontendMetaClient, FrontendMetaClientImpl};
-use crate::observer::observer_manager::ObserverManager;
+use crate::observer::observer_manager::FrontendObserverNode;
 use crate::optimizer::plan_node::PlanNodeId;
 use crate::planner::Planner;
 use crate::scheduler::worker_node_manager::{WorkerNodeManager, WorkerNodeManagerRef};
@@ -240,15 +241,19 @@ impl FrontendEnv {
             user_info_updated_rx,
         ));
 
-        let observer_manager = ObserverManager::new(
-            meta_client.clone(),
-            frontend_address.clone(),
+        let frontend_observer_node = FrontendObserverNode::new(
             worker_node_manager.clone(),
             catalog,
             catalog_updated_tx,
             user_info_manager,
             user_info_updated_tx,
             hummock_snapshot_manager.clone(),
+        );
+        let observer_manager = ObserverManager::new(
+            meta_client.clone(),
+            frontend_address.clone(),
+            Box::new(frontend_observer_node),
+            WorkerType::Frontend,
         )
         .await;
         let observer_join_handle = observer_manager.start().await?;

@@ -35,6 +35,7 @@ prost = "0.10"
 rand = "0.8"
 risingwave_batch = { path = "../batch" }
 risingwave_common = { path = "../common" }
+risingwave_common_service = { path = "../common/common_service" }
 risingwave_expr = { path = "../expr" }
 risingwave_pb = { path = "../prost" }
 risingwave_rpc_client = { path = "../rpc_client" }

@@ -13,18 +13,15 @@
 // limitations under the License.
 
 use std::sync::Arc;
-use std::time::Duration;
 
 use parking_lot::RwLock;
 use risingwave_common::catalog::CatalogVersion;
 use risingwave_common::error::{ErrorCode, Result};
-use risingwave_common::util::addr::HostAddr;
-use risingwave_pb::common::{WorkerNode, WorkerType};
+use risingwave_common_service::observer_manager::ObserverNodeImpl;
+use risingwave_pb::common::WorkerNode;
 use risingwave_pb::meta::subscribe_response::{Info, Operation};
 use risingwave_pb::meta::SubscribeResponse;
-use risingwave_rpc_client::{MetaClient, NotificationStream};
 use tokio::sync::watch::Sender;
-use tokio::task::JoinHandle;
 
 use crate::catalog::root_catalog::Catalog;
 use crate::scheduler::worker_node_manager::WorkerNodeManagerRef;
@@ -32,13 +29,7 @@ use crate::scheduler::HummockSnapshotManagerRef;
 use crate::user::user_manager::UserInfoManager;
 use crate::user::UserInfoVersion;
 
-/// `ObserverManager` is used to update data based on notification from meta.
-/// Call `start` to spawn a new asynchronous task
-/// which receives meta's notification and update frontend data.
-pub(crate) struct ObserverManager {
-    rx: Box<dyn NotificationStream>,
-    meta_client: MetaClient,
-    addr: HostAddr,
+pub(crate) struct FrontendObserverNode {
     worker_node_manager: WorkerNodeManagerRef,
     catalog: Arc<RwLock<Catalog>>,
     catalog_updated_tx: Sender<CatalogVersion>,
@@ -46,37 +37,39 @@ pub(crate) struct ObserverManager {
     user_info_updated_tx: Sender<UserInfoVersion>,
 }
 
-const RE_SUBSCRIBE_RETRY_INTERVAL: Duration = Duration::from_millis(100);
+impl ObserverNodeImpl for FrontendObserverNode {
+    fn handle_notification(&mut self, resp: SubscribeResponse) {
+        let Some(info) = resp.info.as_ref() else {
+            return;
+        };
 
-impl ObserverManager {
-    #[expect(clippy::too_many_arguments)]
-    pub async fn new(
-        meta_client: MetaClient,
-        addr: HostAddr,
-        worker_node_manager: WorkerNodeManagerRef,
-        catalog: Arc<RwLock<Catalog>>,
-        catalog_updated_tx: Sender<CatalogVersion>,
-        user_info_manager: Arc<RwLock<UserInfoManager>>,
-        user_info_updated_tx: Sender<UserInfoVersion>,
-        _hummock_snapshot_manager: HummockSnapshotManagerRef,
-    ) -> Self {
-        let rx = meta_client
-            .subscribe(&addr, WorkerType::Frontend)
-            .await
-            .unwrap();
-        Self {
-            rx,
-            meta_client,
-            addr,
-            worker_node_manager,
-            catalog,
-            catalog_updated_tx,
-            user_info_manager,
-            user_info_updated_tx,
+        match info {
+            Info::Database(_)
+            | Info::Schema(_)
+            | Info::Table(_)
+            | Info::Source(_)
+            | Info::Sink(_) => {
+                self.handle_catalog_notification(resp);
+            }
+            Info::Node(node) => {
+                self.update_worker_node_manager(resp.operation(), node.clone());
+            }
+            Info::User(_) => {
+                self.handle_user_notification(resp);
+            }
+            Info::Snapshot(_) => {
+                panic!(
+                    "receiving a snapshot in the middle is unsupported now {:?}",
+                    resp
+                )
+            }
+            Info::HummockSnapshot(_) => {
+                // TODO: remove snapshot notify
+            }
         }
     }
 
-    pub fn handle_snapshot_notification(&mut self, resp: SubscribeResponse) -> Result<()> {
+    fn handle_initialization_notification(&mut self, resp: SubscribeResponse) -> Result<()> {
         let mut catalog_guard = self.catalog.write();
         let mut user_guard = self.user_info_manager.write();
         catalog_guard.clear();
@@ -111,6 +104,24 @@ impl ObserverManager {
         catalog_guard.set_version(resp.version);
         self.catalog_updated_tx.send(resp.version).unwrap();
         Ok(())
+    }
+}
+impl FrontendObserverNode {
+    pub fn new(
+        worker_node_manager: WorkerNodeManagerRef,
+        catalog: Arc<RwLock<Catalog>>,
+        catalog_updated_tx: Sender<CatalogVersion>,
+        user_info_manager: Arc<RwLock<UserInfoManager>>,
+        user_info_updated_tx: Sender<UserInfoVersion>,
+        _hummock_snapshot_manager: HummockSnapshotManagerRef,
+    ) -> Self {
+        Self {
+            worker_node_manager,
+            catalog,
+            catalog_updated_tx,
+            user_info_manager,
+            user_info_updated_tx,
+        }
     }
 
     fn handle_catalog_notification(&mut self, resp: SubscribeResponse) {
@@ -186,86 +197,6 @@ impl ObserverManager {
         );
         user_guard.set_version(resp.version);
         self.user_info_updated_tx.send(resp.version).unwrap();
-    }
-
-    pub async fn handle_notification(&mut self, resp: SubscribeResponse) {
-        let Some(info) = resp.info.as_ref() else {
-            return;
-        };
-
-        match info {
-            Info::Database(_)
-            | Info::Schema(_)
-            | Info::Table(_)
-            | Info::Source(_)
-            | Info::Sink(_) => {
-                self.handle_catalog_notification(resp);
-            }
-            Info::Node(node) => {
-                self.update_worker_node_manager(resp.operation(), node.clone());
-            }
-            Info::User(_) => {
-                self.handle_user_notification(resp);
-            }
-            Info::Snapshot(_) => {
-                panic!(
-                    "receiving a snapshot in the middle is unsupported now {:?}",
-                    resp
-                )
-            }
-            Info::HummockSnapshot(_) => {
-                // TODO: remove snapshot notify
-            }
-        }
-    }
-
-    /// `start` is used to spawn a new asynchronous task which receives meta's notification and
-    /// update frontend data.
-    pub async fn start(mut self) -> Result<JoinHandle<()>> {
-        let first_resp = self.rx.next().await?.ok_or_else(|| {
-            ErrorCode::InternalError(
-                "ObserverManager start failed, Stream of notification terminated at the start."
-                    .to_string(),
-            )
-        })?;
-        self.handle_snapshot_notification(first_resp)?;
-        let handle = tokio::spawn(async move {
-            loop {
-                if let Ok(resp) = self.rx.next().await {
-                    if resp.is_none() {
-                        tracing::error!("Stream of notification terminated.");
-                        self.re_subscribe().await;
-                        continue;
-                    }
-                    self.handle_notification(resp.unwrap()).await;
-                }
-            }
-        });
-        Ok(handle)
-    }
-
-    /// `re_subscribe` is used to re-subscribe to the meta's notification.
-    async fn re_subscribe(&mut self) {
-        loop {
-            match self
-                .meta_client
-                .subscribe(&self.addr, WorkerType::Frontend)
-                .await
-            {
-                Ok(rx) => {
-                    tracing::debug!("re-subscribe success");
-                    self.rx = rx;
-                    if let Ok(Some(snapshot_resp)) = self.rx.next().await {
-                        self.handle_snapshot_notification(snapshot_resp)
-                            .expect("handle snapshot notification failed after re-subscribe");
-                        break;
-                    }
-                }
-                Err(_) => {
-                    tokio::time::sleep(RE_SUBSCRIBE_RETRY_INTERVAL).await;
-                }
-            }
-        }
     }
 
     /// `update_worker_node_manager` is called in `start` method.

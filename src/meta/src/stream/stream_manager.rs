@@ -24,7 +24,7 @@ use risingwave_pb::catalog::{Source, Table};
 use risingwave_pb::common::{ActorInfo, ParallelUnitMapping, WorkerType};
 use risingwave_pb::meta::table_fragments::{ActorState, ActorStatus};
 use risingwave_pb::stream_plan::stream_node::NodeBody;
-use risingwave_pb::stream_plan::{ActorMapping, DispatcherType, StreamNode};
+use risingwave_pb::stream_plan::{ActorMapping, Dispatcher, DispatcherType, StreamNode};
 use risingwave_pb::stream_service::{
     BroadcastActorInfoTableRequest, BuildActorsRequest, HangingChannel, UpdateActorsRequest,
 };
@@ -36,7 +36,7 @@ use crate::barrier::{BarrierManagerRef, Command};
 use crate::cluster::{ClusterManagerRef, WorkerId};
 use crate::hummock::compaction_group::manager::CompactionGroupManagerRef;
 use crate::manager::{DatabaseId, HashMappingManagerRef, MetaSrvEnv, SchemaId};
-use crate::model::{ActorId, DispatcherId, TableFragments};
+use crate::model::{ActorId, TableFragments};
 use crate::storage::MetaStore;
 use crate::stream::{fetch_source_fragments, FragmentManagerRef, Scheduler, SourceManagerRef};
 
@@ -45,8 +45,8 @@ pub type GlobalStreamManagerRef<S> = Arc<GlobalStreamManager<S>>;
 /// [`CreateMaterializedViewContext`] carries one-time infos.
 #[derive(Default)]
 pub struct CreateMaterializedViewContext {
-    /// New dispatches to add from upstream actors to downstream actors.
-    pub dispatches: HashMap<(ActorId, DispatcherId), Vec<ActorId>>,
+    /// New dispatchers to add from upstream actors to downstream actors.
+    pub dispatchers: HashMap<ActorId, Vec<Dispatcher>>,
     /// Upstream mview actor ids grouped by node id.
     pub upstream_node_actors: HashMap<WorkerId, HashSet<ActorId>>,
     /// Upstream mview actor ids grouped by table id.
@@ -122,7 +122,7 @@ where
         &self,
         table_fragments: &mut TableFragments,
         dependent_table_ids: &HashSet<TableId>,
-        dispatches: &mut HashMap<(ActorId, DispatcherId), Vec<ActorId>>,
+        dispatchers: &mut HashMap<ActorId, Vec<Dispatcher>>,
         upstream_node_actors: &mut HashMap<WorkerId, HashSet<ActorId>>,
         locations: &ScheduledLocations,
     ) -> Result<()> {
@@ -134,8 +134,9 @@ where
             tables_node_actors: &'a HashMap<TableId, BTreeMap<WorkerId, Vec<ActorId>>>,
             /// Schedule information of all actors.
             locations: &'a ScheduledLocations,
-
-            dispatches: &'a mut HashMap<(ActorId, DispatcherId), Vec<ActorId>>,
+            /// New dispatchers for this mview.
+            dispatchers: &'a mut HashMap<ActorId, Vec<Dispatcher>>,
+            /// Upstream Materialize actor ids grouped by worker id.
             upstream_node_actors: &'a mut HashMap<WorkerId, HashSet<ActorId>>,
         }
 
@@ -209,23 +210,35 @@ where
                 }
 
                 // deal with merge and batch query node, setting upstream infos.
-                let merge_stream_node = &mut stream_node.input[0];
-                if let Some(NodeBody::Merge(ref mut merge)) = merge_stream_node.node_body {
-                    merge.upstream_actor_id.push(upstream_actor_id);
-                } else {
-                    unreachable!("chain's input[0] should always be merge");
-                }
-                let batch_stream_node = &mut stream_node.input[1];
+                let batch_stream_node = &stream_node.input[1];
                 assert!(
                     matches!(batch_stream_node.node_body, Some(NodeBody::BatchPlan(_))),
                     "chain's input[1] should always be batch query"
                 );
 
+                let merge_stream_node = &mut stream_node.input[0];
+                let Some(NodeBody::Merge(ref mut merge)) = merge_stream_node.node_body else {
+                    unreachable!("chain's input[0] should always be merge");
+                };
+                merge.upstream_actor_id.push(upstream_actor_id);
+
                 // finally, we should also build dispatcher infos here.
-                self.dispatches
-                    .entry((upstream_actor_id, 0))
+                //
+                // Note: currently we ensure that the downstream chain operator has the same
+                // parallel unit and distribution as the upstream mview, so we can simply use
+                // `NoShuffle` dispatcher here.
+                // TODO: support different parallel unit and distribution for new MV.
+                self.dispatchers
+                    .entry(upstream_actor_id)
                     .or_default()
-                    .push(actor_id);
+                    .push(Dispatcher {
+                        r#type: DispatcherType::NoShuffle as _,
+                        // Use chain actor id as dispatcher id to avoid collision in this
+                        // Dispatch executor.
+                        dispatcher_id: actor_id as _,
+                        downstream_actor_id: vec![actor_id],
+                        ..Default::default()
+                    });
 
                 Ok(())
             }
@@ -245,7 +258,7 @@ where
             upstream_parallel_unit_info,
             tables_node_actors,
             locations,
-            dispatches,
+            dispatchers,
             upstream_node_actors,
         };
 
@@ -277,7 +290,7 @@ where
         &self,
         mut table_fragments: TableFragments,
         CreateMaterializedViewContext {
-            dispatches,
+            dispatchers,
             upstream_node_actors,
             table_sink_map,
             dependent_table_ids,
@@ -333,11 +346,13 @@ where
         self.resolve_chain_node(
             &mut table_fragments,
             dependent_table_ids,
-            dispatches,
+            dispatchers,
             upstream_node_actors,
             &locations,
         )
         .await?;
+
+        let dispatchers = &*dispatchers;
 
         // Record vnode to parallel unit mapping for actors.
         let actor_to_vnode_mapping = {
@@ -459,34 +474,21 @@ where
         };
 
         let actor_host_infos = locations.actor_info_map();
-
         let node_actors = locations.worker_actors();
-
-        // (upstream_actor_id, dispatcher_id) -> Vec<downstream_actor_info>
-        let dispatches = dispatches
-            .iter()
-            .map(|(up_id, down_ids)| {
-                (
-                    *up_id,
-                    down_ids
-                        .iter()
-                        .map(|down_id| {
-                            actor_host_infos
-                                .get(down_id)
-                                .expect("downstream actor info not exist")
-                                .clone()
-                        })
-                        .collect_vec(),
-                )
-            })
-            .collect::<HashMap<_, _>>();
 
         // Hanging channels for each worker node.
         let mut node_hanging_channels = {
             // upstream_actor_id -> Vec<downstream_actor_info>
-            let up_id_to_down_info = dispatches
+            let up_id_to_down_info = dispatchers
                 .iter()
-                .map(|((up_id, _dispatcher_id), down_info)| (*up_id, down_info))
+                .map(|(&up_id, dispatchers)| {
+                    let down_infos = dispatchers
+                        .iter()
+                        .flat_map(|d| d.downstream_actor_id.iter())
+                        .map(|down_id| actor_host_infos[down_id].clone())
+                        .collect_vec();
+                    (up_id, down_infos)
+                })
                 .collect::<HashMap<_, _>>();
 
             upstream_node_actors
@@ -497,9 +499,7 @@ where
                         up_ids
                             .iter()
                             .flat_map(|up_id| {
-                                up_id_to_down_info
-                                    .get(up_id)
-                                    .expect("expected dispatches info")
+                                up_id_to_down_info[up_id]
                                     .iter()
                                     .map(|down_info| HangingChannel {
                                         upstream: Some(ActorInfo {
@@ -566,9 +566,6 @@ where
         }
 
         // Register to compaction group beforehand.
-        //
-        // Note that this step must be before building actors, because we will explicitly sync this
-        // info in the beginning of actors.
         let registered_table_ids = self
             .compaction_group_manager
             .register_table_fragments(&table_fragments, table_properties)
@@ -621,7 +618,7 @@ where
             .run_command(Command::CreateMaterializedView {
                 table_fragments,
                 table_sink_map: table_sink_map.clone(),
-                dispatches,
+                dispatchers: dispatchers.clone(),
                 source_state: init_split_assignment.clone(),
             })
             .await
