@@ -48,6 +48,7 @@ pub struct ProbeSideSource<C> {
     build_side_idxs: Vec<usize>,
     table_desc: CellBasedTableDesc,
     probe_side_schema: Schema,
+    probe_side_column_ids: Vec<i32>,
     source_templates: Vec<ProstExchangeSource>,
     context: C,
     task_id: TaskId,
@@ -107,10 +108,7 @@ impl<C: BatchTaskContext> ProbeSideSource<C> {
 
         Ok(NodeBody::RowSeqScan(RowSeqScanNode {
             table_desc: Some(self.table_desc.clone()),
-            column_ids: (0..self.table_desc.columns.len())
-                .into_iter()
-                .map(|x| x as i32)
-                .collect(), // Scan all the columns
+            column_ids: self.probe_side_column_ids.clone(),
             scan_range,
             vnode_bitmap: None,
         }))
@@ -387,11 +385,15 @@ impl BoxedExecutorBuilder for LookupJoinExecutorBuilder {
                 .map(|column_desc| Field::from(&ColumnDesc::from(column_desc)))
                 .collect_vec(),
         };
-        let probe_side_len = probe_side_schema.len();
+        let probe_side_column_ids = lookup_join_node.get_probe_side_column_ids().to_vec();
+        let probe_side_len = probe_side_column_ids.len();
 
         let fields = [
             build_child.schema().fields.clone(),
-            probe_side_schema.fields.clone(),
+            probe_side_column_ids
+                .iter()
+                .map(|&i| probe_side_schema.fields[i as usize].clone())
+                .collect(),
         ]
         .concat();
         let original_schema = Schema { fields };
@@ -417,6 +419,7 @@ impl BoxedExecutorBuilder for LookupJoinExecutorBuilder {
             build_side_idxs,
             table_desc: probe_side_table_desc.clone(),
             probe_side_schema,
+            probe_side_column_ids,
             source_templates: lookup_join_node.get_sources().to_vec(),
             context: source.context().clone(),
             task_id: source.task_id.clone(),

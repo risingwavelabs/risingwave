@@ -14,7 +14,7 @@
 
 use std::fmt;
 
-use risingwave_common::catalog::TableDesc;
+use risingwave_common::catalog::{ColumnId, TableDesc};
 use risingwave_common::error::{ErrorCode, Result};
 use risingwave_pb::batch_plan::plan_node::NodeBody;
 use risingwave_pb::batch_plan::LookupJoinNode;
@@ -36,14 +36,19 @@ pub struct BatchLookupJoin {
     /// non-equal parts to facilitate execution later
     eq_join_predicate: EqJoinPredicate,
 
-    table_desc: TableDesc,
+    /// Table description of the right side table
+    right_table_desc: TableDesc,
+
+    /// Output column ids of the right side table
+    right_output_column_ids: Vec<ColumnId>,
 }
 
 impl BatchLookupJoin {
     pub fn new(
         logical: LogicalJoin,
         eq_join_predicate: EqJoinPredicate,
-        table_desc: TableDesc,
+        right_table_desc: TableDesc,
+        right_output_column_ids: Vec<ColumnId>,
     ) -> Self {
         let ctx = logical.base.ctx.clone();
         let dist = Self::derive_dist(logical.left().distribution());
@@ -52,7 +57,8 @@ impl BatchLookupJoin {
             base,
             logical,
             eq_join_predicate,
-            table_desc,
+            right_table_desc,
+            right_output_column_ids,
         }
     }
 
@@ -101,7 +107,8 @@ impl PlanTreeNodeUnary for BatchLookupJoin {
             self.logical
                 .clone_with_left_right(input, self.logical.right()),
             self.eq_join_predicate.clone(),
-            self.table_desc.clone(),
+            self.right_table_desc.clone(),
+            self.right_output_column_ids.clone(),
         )
     }
 }
@@ -129,7 +136,12 @@ impl ToBatchProst for BatchLookupJoin {
                 .into_iter()
                 .map(|a| a as i32)
                 .collect(),
-            probe_side_table_desc: Some(self.table_desc.to_protobuf()),
+            probe_side_table_desc: Some(self.right_table_desc.to_protobuf()),
+            probe_side_column_ids: self
+                .right_output_column_ids
+                .iter()
+                .map(ColumnId::get_id)
+                .collect(),
             output_indices: self
                 .logical
                 .output_indices()

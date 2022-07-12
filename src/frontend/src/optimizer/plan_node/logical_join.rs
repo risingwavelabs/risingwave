@@ -473,10 +473,6 @@ impl LogicalJoin {
         let eq_col_warn_message = "In Lookup Join, the right columns of the equality join \
         predicates must be the same as the primary key. A different join will be used instead.";
 
-        log::error!("{:#?}", table_desc);
-        log::error!("{:#?}", output_column_ids);
-        log::error!("{:#?}", predicate.right_eq_indexes());
-
         let order_col_indices = table_desc.order_column_indices();
         if order_col_indices.len() != predicate.right_eq_indexes().len() {
             log::warn!("{}", eq_col_warn_message);
@@ -484,14 +480,13 @@ impl LogicalJoin {
         }
 
         for (i, eq_idx) in predicate.right_eq_indexes().into_iter().enumerate() {
-            log::error!("{} {}", eq_idx, order_col_indices[i]);
             if order_col_indices[i] != output_column_ids[eq_idx].get_id() as usize {
                 log::warn!("{}", eq_col_warn_message);
                 return None;
             }
         }
 
-        Some(BatchLookupJoin::new(logical_join, predicate, table_desc).into())
+        Some(BatchLookupJoin::new(logical_join, predicate, table_desc, output_column_ids).into())
     }
 }
 
