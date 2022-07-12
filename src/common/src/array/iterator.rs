@@ -76,6 +76,16 @@ impl<'a> Iterator for ArrayImplIterator<'a> {
         }
     }
 
+    fn nth(&mut self, n: usize) -> Option<Self::Item> {
+        if self.pos + n >= self.data.len() {
+            None
+        } else {
+            let item = self.data.value_at(self.pos + n);
+            self.pos += n + 1;
+            Some(item)
+        }
+    }
+
     fn size_hint(&self) -> (usize, Option<usize>) {
         let size = self.data.len() - self.pos;
         (size, Some(size))
