@@ -49,7 +49,7 @@ message TableFragments {
     FragmentDistributionType distribution_type = 3;
     repeated stream_plan.StreamActor actors = 4;
     // Vnode mapping (which should be set in upstream dispatcher) of the fragment.
-    common.ParallelUnitMapping vnode_mapping = 5; //TODO
+    common.ParallelUnitMapping vnode_mapping = 5;
   }
   uint32 table_id = 1;
   map<uint32, Fragment> fragments = 2;
