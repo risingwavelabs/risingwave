@@ -60,7 +60,7 @@ async fn test_merger_sum_aggr() {
             input.boxed(),
             vec![
                 AggCall {
-                    kind: AggKind::RowCount,
+                    kind: AggKind::Count,
                     args: AggArgs::None,
                     return_type: DataType::Int64,
                     append_only,

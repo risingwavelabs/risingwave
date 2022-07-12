@@ -20,7 +20,7 @@ use risingwave_expr::expr::AggKind;
 /// An aggregation function may accept 0, 1 or 2 arguments.
 #[derive(Clone, Debug)]
 pub enum AggArgs {
-    /// `None` is used for aggregation function accepts 0 arguments, such as [`AggKind::RowCount`].
+    /// `None` is used for aggregation function accepts 0 arguments, such as `count(*)`.
     None,
     /// `Unary` is used for aggregation function accepts 1 argument, such as [`AggKind::Sum`].
     Unary(DataType, usize),
