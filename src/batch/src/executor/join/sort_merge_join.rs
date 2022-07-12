@@ -202,7 +202,7 @@ impl SortMergeJoinExecutor {
 
 impl SortMergeJoinExecutor {
     #[allow(clippy::too_many_arguments)]
-    pub(super) fn new(
+    pub fn new(
         join_type: JoinType,
         schema: Schema,
         output_indices: Vec<usize>,

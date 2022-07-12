@@ -23,7 +23,7 @@ use crate::executor::BoxedExecutor;
 
 /// `inner_table` is a buffer for all data. For all probe key, directly fetch data in `inner_table`
 /// without call executor. The executor is only called when building `inner_table`.
-pub(crate) struct RowLevelIter {
+pub struct RowLevelIter {
     data_source: Option<BoxedExecutor>,
     /// Buffering of inner table. TODO: Spill to disk or more fine-grained memory management to
     /// avoid OOM.
