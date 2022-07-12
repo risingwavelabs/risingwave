@@ -54,9 +54,17 @@ pub struct Binder {
     db_name: String,
     context: BindContext,
     /// A stack holding contexts of outer queries when binding a subquery.
+    /// It also holds all of the outer table contexts for each respective
+    /// subquery.
     ///
     /// See [`Binder::bind_subquery_expr`] for details.
-    upper_contexts: Vec<BindContext>,
+    upper_subquery_contexts: Vec<(BindContext, Vec<BindContext>)>,
+
+    /// A stack holding contexts of parent joins when binding joins.
+    ///
+    /// We need a separate stack as `CorrelatedInputRef` depth is
+    /// determined by the upper subquery contexts, not the table contexts.
+    upper_table_contexts: Vec<BindContext>,
 
     next_subquery_id: usize,
     /// Map the cte's name to its Relation::Subquery.
@@ -69,7 +77,8 @@ impl Binder {
             catalog,
             db_name,
             context: BindContext::new(),
-            upper_contexts: vec![],
+            upper_subquery_contexts: vec![],
+            upper_table_contexts: vec![],
             next_subquery_id: 0,
             cte_to_relation: HashMap::new(),
         }
@@ -82,12 +91,28 @@ impl Binder {
 
     fn push_context(&mut self) {
         let new_context = std::mem::take(&mut self.context);
-        self.upper_contexts.push(new_context);
+        let new_table_contexts = std::mem::take(&mut self.upper_table_contexts);
+        self.upper_subquery_contexts
+            .push((new_context, new_table_contexts));
     }
 
     fn pop_context(&mut self) {
-        let old_context = self.upper_contexts.pop();
-        self.context = old_context.unwrap();
+        let (old_context, old_table_contexts) = self.upper_subquery_contexts.pop().unwrap();
+        self.context = old_context;
+        self.upper_table_contexts = old_table_contexts;
+    }
+
+    fn push_table_context(&mut self) {
+        let new_context = std::mem::take(&mut self.context);
+        self.upper_table_contexts.push(new_context);
+    }
+
+    fn pop_and_merge_table_context(&mut self) {
+        let mut old_context = self.upper_table_contexts.pop().unwrap();
+        old_context
+            .merge_context(self.context.clone())
+            .expect("could not merge contexts");
+        self.context = old_context;
     }
 
     fn next_subquery_id(&mut self) -> usize {

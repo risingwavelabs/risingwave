@@ -198,3 +198,62 @@
       BatchHashJoin { type: Inner, predicate: $0 = $1, output_indices: all }
         BatchScan { table: i, columns: [x] }
         BatchScan { table: i, columns: [x] }
+- sql: |
+    /* Ensure correct binding with USING clause */
+    create table t1(v1 varchar);
+    create table t2(v1 varchar);
+    create table t3(v2 varchar);
+    select * from t3, t1 join t2 using (v1);
+  logical_plan: |
+    LogicalProject { exprs: [$1, $3, $5] }
+      LogicalJoin { type: Inner, on: true, output_indices: all }
+        LogicalScan { table: t3, columns: [_row_id, v2] }
+        LogicalJoin { type: Inner, on: ($1 = $3), output_indices: all }
+          LogicalScan { table: t1, columns: [_row_id, v1] }
+          LogicalScan { table: t2, columns: [_row_id, v1] }
+- sql: |
+    /* Ensure correct binding with ON clause */
+    create table t1(v1 varchar);
+    create table t2(v2 varchar);
+    create table t3(v3 varchar);
+    select * from t3, t1 join t2 on v1 = v2;
+  logical_plan: |
+    LogicalProject { exprs: [$1, $3, $5] }
+      LogicalJoin { type: Inner, on: true, output_indices: all }
+        LogicalScan { table: t3, columns: [_row_id, v3] }
+        LogicalJoin { type: Inner, on: ($1 = $3), output_indices: all }
+          LogicalScan { table: t1, columns: [_row_id, v1] }
+          LogicalScan { table: t2, columns: [_row_id, v2] }
+- sql: |
+    /* Ensure correct binding with USING clause with left outer join */
+    create table t1(v1 varchar);
+    create table t2(v1 varchar);
+    create table t3(v2 varchar);
+    select * from t3, t1 left join t2 using (v1);
+  logical_plan: |
+    LogicalProject { exprs: [$1, $3, $5] }
+      LogicalJoin { type: Inner, on: true, output_indices: all }
+        LogicalScan { table: t3, columns: [_row_id, v2] }
+        LogicalJoin { type: LeftOuter, on: ($1 = $3), output_indices: all }
+          LogicalScan { table: t1, columns: [_row_id, v1] }
+          LogicalScan { table: t2, columns: [_row_id, v1] }
+- sql: |
+    /* Ensure correct binding with ON clause with left outer join */
+    create table t1(v1 varchar);
+    create table t2(v2 varchar);
+    create table t3(v3 varchar);
+    select * from t3, t1 left join t2 on v1 = v2;
+  logical_plan: |
+    LogicalProject { exprs: [$1, $3, $5] }
+      LogicalJoin { type: Inner, on: true, output_indices: all }
+        LogicalScan { table: t3, columns: [_row_id, v3] }
+        LogicalJoin { type: LeftOuter, on: ($1 = $3), output_indices: all }
+          LogicalScan { table: t1, columns: [_row_id, v1] }
+          LogicalScan { table: t2, columns: [_row_id, v2] }
+- sql: |
+    /* Ensure that ON clause cannot reference correlated columns */
+    create table a(a1 int);
+    create table b(b1 int);
+    create table c(c1 int);
+    select * from a, b join c on a1 + b1 = c1;
+  binder_error: 'Item not found: Invalid column: a1'

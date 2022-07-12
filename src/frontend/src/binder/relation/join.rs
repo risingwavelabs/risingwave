@@ -40,9 +40,13 @@ impl Binder {
             Some(t) => t,
             None => return Ok(None),
         };
+        self.push_table_context();
         let mut root = self.bind_table_with_joins(first)?;
+        self.pop_and_merge_table_context();
         for t in from_iter {
+            self.push_table_context();
             let right = self.bind_table_with_joins(t.clone())?;
+            self.pop_and_merge_table_context();
             if let Relation::Subquery(subquery) = &right {
                 if subquery.query.is_correlated() {
                     return Err(ErrorCode::BindError(format!(
