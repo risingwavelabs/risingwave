@@ -16,6 +16,7 @@
 
 mod batch_query;
 mod chain;
+mod dynamic_filter;
 mod expand;
 mod filter;
 mod global_simple_agg;
@@ -29,8 +30,8 @@ mod merge;
 mod mview;
 mod project;
 mod source;
-mod top_n;
 mod top_n_appendonly;
+mod top_n_new;
 mod union;
 
 // import for submodules
@@ -43,6 +44,7 @@ use risingwave_storage::{Keyspace, StateStore};
 
 use self::batch_query::*;
 use self::chain::*;
+use self::dynamic_filter::*;
 use self::expand::*;
 use self::filter::*;
 use self::global_simple_agg::*;
@@ -56,8 +58,8 @@ use self::merge::*;
 use self::mview::*;
 use self::project::*;
 use self::source::*;
-use self::top_n::*;
 use self::top_n_appendonly::*;
+use self::top_n_new::*;
 use self::union::*;
 use crate::executor::{BoxedExecutor, Executor, ExecutorInfo};
 use crate::task::{ExecutorParams, LocalStreamManagerCore};
@@ -104,7 +106,7 @@ pub fn create_executor(
         stream,
         NodeBody::Source => SourceExecutorBuilder,
         NodeBody::Project => ProjectExecutorBuilder,
-        NodeBody::TopN => TopNExecutorBuilder,
+        NodeBody::TopN => TopNExecutorNewBuilder,
         NodeBody::AppendOnlyTopN => AppendOnlyTopNExecutorBuilder,
         NodeBody::LocalSimpleAgg => LocalSimpleAggExecutorBuilder,
         NodeBody::GlobalSimpleAgg => GlobalSimpleAggExecutorBuilder,
@@ -121,5 +123,6 @@ pub fn create_executor(
         NodeBody::Union => UnionExecutorBuilder,
         NodeBody::LookupUnion => LookupUnionExecutorBuilder,
         NodeBody::Expand => ExpandExecutorBuilder,
+        NodeBody::DynamicFilter => DynamicFilterExecutorBuilder,
     }
 }

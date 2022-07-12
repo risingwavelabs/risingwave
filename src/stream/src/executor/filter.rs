@@ -95,7 +95,6 @@ impl SimpleExecutor for SimpleFilterExecutor {
             Vis::Compact(c) => c == n,
             Vis::Bitmap(ref m) => m.len() == n,
         });
-        assert!(matches!(&*pred_output, ArrayImpl::Bool(_)));
 
         if let ArrayImpl::Bool(bool_array) = &*pred_output {
             for (op, res) in ops.into_iter().zip_eq(bool_array.iter()) {

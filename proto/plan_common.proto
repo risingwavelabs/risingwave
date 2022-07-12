@@ -12,20 +12,6 @@ message Field {
   string name = 2;
 }
 
-message DatabaseRefId {
-  int32 database_id = 1;
-}
-
-message SchemaRefId {
-  DatabaseRefId database_ref_id = 1;
-  int32 schema_id = 2;
-}
-
-message TableRefId {
-  SchemaRefId schema_ref_id = 1;
-  int32 table_id = 2;
-}
-
 message ColumnDesc {
   data.DataType column_type = 1;
   int32 column_id = 2;

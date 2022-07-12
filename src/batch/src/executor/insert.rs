@@ -136,7 +136,7 @@ impl BoxedExecutorBuilder for InsertExecutor {
             NodeBody::Insert
         )?;
 
-        let table_id = TableId::from(&insert_node.table_source_ref_id);
+        let table_id = TableId::new(insert_node.table_source_id);
 
         Ok(Box::new(Self::new(
             table_id,

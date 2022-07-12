@@ -7,13 +7,13 @@ version = "0.1.10"
 anyhow = "1"
 async-stream = "0.3"
 async-trait = "0.1"
-aws-config = { version = "0.12", default-features = false, features = ["rt-tokio", "native-tls"] }
-aws-sdk-kinesis = { version = "0.12", default-features = false, features = ["rt-tokio", "native-tls"] }
-aws-sdk-s3 = { version = "0.12", default-features = false, features = ["rt-tokio","native-tls"] }
-aws-sdk-sqs = { version = "0.12", default-features = false, features = ["rt-tokio", "native-tls"] }
-aws-smithy-http = "0.42"
-aws-smithy-types = "0.42"
-aws-types = { version = "0.12", features = ["hardcoded-credentials"] }
+aws-config = { version = "0.15", default-features = false, features = ["rt-tokio", "native-tls"] }
+aws-sdk-kinesis = { version = "0.15", default-features = false, features = ["rt-tokio", "native-tls"] }
+aws-sdk-s3 = { version = "0.15", default-features = false, features = ["rt-tokio","native-tls"] }
+aws-sdk-sqs = { version = "0.15", default-features = false, features = ["rt-tokio", "native-tls"] }
+aws-smithy-http = "0.45"
+aws-smithy-types = "0.45"
+aws-types = { version = "0.15", features = ["hardcoded-credentials"] }
 byteorder = "1"
 bytes = { version = "1", features = ["serde"] }
 chrono = { version = "0.4", default-features = false, features = ["clock", "std"] }
@@ -38,7 +38,7 @@ mysql_async = "0.30"
 num-traits = "0.2"
 paste = "1"
 prost = "0.10"
-pulsar = { git = "https://github.com/singularity-data/pulsar-rs.git", rev = "8d4789eea780d520136e1cc2535a1fec9385c53d", default-features = false, features = ["tokio-runtime"] }
+pulsar = { version = "4", default-features = false, features = ["tokio-runtime"] }
 rand = "0.8"
 rdkafka = { version = "0.28", features = ["cmake-build"] }
 risingwave_common = { path = "../common" }
@@ -47,6 +47,7 @@ risingwave_storage = { path = "../storage" }
 serde = { version = "1", features = ["derive"] }
 serde_derive = "1"
 serde_json = "1"
+serde_with = "1"
 smallvec = "1"
 static_assertions = "1"
 tempfile = "3"

@@ -23,7 +23,6 @@ use prometheus::{
 use risingwave_common::monitor::Print;
 use risingwave_hummock_sdk::HummockSSTableId;
 
-use super::monitor_process;
 use crate::hummock::sstable_store::SstableStoreRef;
 use crate::hummock::{BlockCache, LruCache, Sstable};
 
@@ -75,6 +74,7 @@ macro_rules! for_all_metrics {
             compact_write_sstn: GenericCounterVec<AtomicU64>,
             compact_sst_duration: Histogram,
             compact_task_duration: HistogramVec,
+            compact_parallelism: GenericCounter<AtomicU64>,
 
             get_table_id_total_time_duration: Histogram,
             remote_read_time: Histogram,
@@ -380,7 +380,13 @@ impl StateStoreMetrics {
         )
         .unwrap();
 
-        monitor_process(&registry).unwrap();
+        let compact_parallelism = register_int_counter_with_registry!(
+            "storage_compact_parallelism",
+            "the num of storage compact parallelism",
+            registry
+        )
+        .unwrap();
+
         Self {
             get_duration,
             get_key_size,
@@ -418,6 +424,8 @@ impl StateStoreMetrics {
             compact_write_sstn,
             compact_sst_duration,
             compact_task_duration,
+            compact_parallelism,
+
             get_table_id_total_time_duration,
             remote_read_time,
         }
