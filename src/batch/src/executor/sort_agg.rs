@@ -121,17 +121,14 @@ impl SortAggExecutor {
         let (mut group_builders, mut agg_builders) =
             SortAggExecutor::create_builders(&self.group_key, &self.agg_states);
 
-        println!("[rc] group_key: {:?}", self.group_key);
         #[for_await]
         for child_chunk in self.child.execute() {
             let child_chunk = child_chunk?.compact()?;
-            println!("[rc] child_chunk: {:?}", child_chunk);
             let group_columns: Vec<_> = self
                 .group_key
                 .iter_mut()
                 .map(|expr| expr.eval(&child_chunk))
                 .try_collect()?;
-            println!("[rc] group_columns: {:?}", group_columns);
 
             let groups = self
                 .sorted_groupers
@@ -139,14 +136,12 @@ impl SortAggExecutor {
                 .zip_eq(&group_columns)
                 .map(|(grouper, array)| grouper.detect_groups(array))
                 .collect::<Result<Vec<EqGroups>>>()?;
-            println!("[rc] groups: {:?}", groups);
 
             let groups = EqGroups::intersect(&groups);
-            println!("[rc] groups intersect: {:?}", groups);
 
             let mut start_row_idx = 0;
-            for i in groups.starting_indices() {
-                let end_row_idx = *i;
+            for i in groups.indices {
+                let end_row_idx = i;
                 if start_row_idx < end_row_idx {
                     Self::update_sorted_groupers(
                         &mut self.sorted_groupers,
@@ -236,7 +231,7 @@ impl SortAggExecutor {
     ) -> Result<()> {
         agg_states
             .iter_mut()
-            .try_for_each(|state| state.update_chunk(&child_chunk, start_row_idx, end_row_idx))
+            .try_for_each(|state| state.update_multi(&child_chunk, start_row_idx, end_row_idx))
     }
 
     fn output_sorted_groupers(
