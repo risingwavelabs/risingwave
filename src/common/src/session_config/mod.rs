@@ -22,13 +22,14 @@ use crate::error::{ErrorCode, RwError};
 
 // This is a hack, &'static str is not allowed as a const generics argument.
 // TODO: refine this using the adt_const_params feature.
-const CONFIG_KEYS: [&str; 6] = [
+const CONFIG_KEYS: [&str; 7] = [
     "RW_IMPLICIT_FLUSH",
     "QUERY_MODE",
     "RW_FORCE_DELTA_JOIN",
     "EXTRA_FLOAT_DIGITS",
     "APPLICATION_NAME",
     "DATE_STYLE",
+    "EXPLAIN_VERBOSE",
 ];
 const IMPLICIT_FLUSH: usize = 0;
 const QUERY_MODE: usize = 1;
@@ -36,6 +37,7 @@ const DELTA_JOIN: usize = 2;
 const EXTRA_FLOAT_DIGITS: usize = 3;
 const APPLICATION_NAME: usize = 4;
 const DATE_STYLE: usize = 5;
+const EXPLAIN_VERBOSE: usize = 6;
 
 trait ConfigEntry: Default + FromStr<Err = RwError> {
     fn entry_name() -> &'static str;
@@ -154,6 +156,7 @@ type ApplicationName = ConfigString<APPLICATION_NAME>;
 type ExtraFloatDigit = ConfigI32<EXTRA_FLOAT_DIGITS, 1>;
 // TODO: We should use more specified type here.
 type DateStyle = ConfigString<DATE_STYLE>;
+type ExplainVerbose = ConfigBool<EXPLAIN_VERBOSE, false>;
 
 #[derive(Default)]
 pub struct ConfigMap {
@@ -177,6 +180,9 @@ pub struct ConfigMap {
 
     /// see https://www.postgresql.org/docs/current/runtime-config-client.html#GUC-DATESTYLE
     date_style: DateStyle,
+
+    /// Sets the default explain mode to verbose.
+    explain_verbose: ExplainVerbose,
 }
 
 impl ConfigMap {
@@ -193,6 +199,8 @@ impl ConfigMap {
             self.application_name = val.parse()?;
         } else if key.eq_ignore_ascii_case(DateStyle::entry_name()) {
             self.date_style = val.parse()?;
+        } else if key.eq_ignore_ascii_case(ExplainVerbose::entry_name()) {
+            self.explain_verbose = val.parse()?;
         } else {
             return Err(ErrorCode::UnrecognizedConfigurationParameter(key.to_string()).into());
         }
@@ -213,6 +221,8 @@ impl ConfigMap {
             Ok(self.application_name.to_string())
         } else if key.eq_ignore_ascii_case(DateStyle::entry_name()) {
             Ok(self.date_style.to_string())
+        } else if key.eq_ignore_ascii_case(ExplainVerbose::entry_name()) {
+            Ok(self.explain_verbose.to_string())
         } else {
             Err(ErrorCode::UnrecognizedConfigurationParameter(key.to_string()).into())
         }
@@ -250,6 +260,11 @@ impl ConfigMap {
                 setting : self.date_style.to_string(),
                 description : String::from("It is typically set by an application upon connection to the server.")
             },
+            VariableInfo{
+                name : ExplainVerbose::entry_name().to_lowercase(),
+                setting : self.explain_verbose.to_string(),
+                description : String::from("Sets the default explain mode to verbose.")
+            },
         ]
     }
 
@@ -275,5 +290,9 @@ impl ConfigMap {
 
     pub fn get_date_style(&self) -> &str {
         &self.date_style
+    }
+
+    pub fn get_explain_verbose(&self) -> bool {
+        *self.explain_verbose
     }
 }

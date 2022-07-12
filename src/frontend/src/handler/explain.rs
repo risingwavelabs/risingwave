@@ -29,9 +29,12 @@ use crate::session::OptimizerContext;
 pub(super) fn handle_explain(
     context: OptimizerContext,
     stmt: Statement,
-    _verbose: bool,
+    verbose: bool,
 ) -> Result<PgResponse> {
     let session = context.session_ctx.clone();
+    session
+        .set_config("explain_verbose", &verbose.to_string())
+        .unwrap();
     // bind, plan, optimize, and serialize here
     let mut planner = Planner::new(context.into());
 

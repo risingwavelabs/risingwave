@@ -67,6 +67,20 @@ impl Field {
     }
 }
 
+pub struct FieldVerboseDisplay<'a>(pub &'a Field);
+
+impl std::fmt::Debug for FieldVerboseDisplay<'_> {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "{}", self.0.name)
+    }
+}
+
+impl std::fmt::Display for FieldVerboseDisplay<'_> {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "{}", self.0.name)
+    }
+}
+
 /// `schema_unnamed` builds a `Schema` with the given types, but without names.
 #[macro_export]
 macro_rules! schema_unnamed {

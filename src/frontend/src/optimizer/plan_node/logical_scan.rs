@@ -138,11 +138,38 @@ impl LogicalScan {
             .collect()
     }
 
+    pub(super) fn column_names_with_table_prefix(&self) -> Vec<String> {
+        self.output_col_idx
+            .iter()
+            .map(|i| {
+                format!(
+                    "{}.{}",
+                    self.table_name.clone(),
+                    self.table_desc.columns[*i].name
+                )
+            })
+            .collect()
+    }
+
     pub(super) fn order_names(&self) -> Vec<String> {
         self.table_desc
             .order_column_indices()
             .iter()
             .map(|&i| self.table_desc.columns[i].name.clone())
+            .collect()
+    }
+
+    pub(super) fn order_names_with_table_prefix(&self) -> Vec<String> {
+        self.table_desc
+            .order_column_indices()
+            .iter()
+            .map(|&i| {
+                format!(
+                    "{}.{}",
+                    self.table_name.clone(),
+                    self.table_desc.columns[i].name
+                )
+            })
             .collect()
     }
 

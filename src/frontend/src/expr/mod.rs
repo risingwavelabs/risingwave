@@ -34,8 +34,11 @@ mod utils;
 
 pub use agg_call::AggCall;
 pub use correlated_input_ref::CorrelatedInputRef;
-pub use function_call::FunctionCall;
-pub use input_ref::{as_alias_display, input_ref_to_column_indices, InputRef, InputRefDisplay};
+pub use function_call::{FunctionCall, FunctionCallVerboseDisplay};
+pub use input_ref::{
+    as_alias_display, input_ref_to_column_indices, InputRef, InputRefDisplay,
+    InputRefVerboseDisplay,
+};
 pub use literal::Literal;
 pub use subquery::{Subquery, SubqueryKind};
 
@@ -483,6 +486,39 @@ impl std::fmt::Debug for ExprImpl {
     }
 }
 
+pub struct ExprVerboseDisplay<'a> {
+    pub expr: &'a ExprImpl,
+    pub input_schema: &'a Schema,
+}
+
+impl std::fmt::Debug for ExprVerboseDisplay<'_> {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        let that = self.expr;
+        match that {
+            ExprImpl::InputRef(x) => write!(
+                f,
+                "{:?}",
+                InputRefVerboseDisplay {
+                    input_ref: x,
+                    input_schema: self.input_schema
+                }
+            ),
+            ExprImpl::Literal(x) => write!(f, "{:?}", x),
+            ExprImpl::FunctionCall(x) => write!(
+                f,
+                "{:?}",
+                FunctionCallVerboseDisplay {
+                    function_call: x,
+                    input_schema: self.input_schema
+                }
+            ),
+            ExprImpl::AggCall(x) => write!(f, "{:?}", x),
+            ExprImpl::Subquery(x) => write!(f, "{:?}", x),
+            ExprImpl::CorrelatedInputRef(x) => write!(f, "{:?}", x),
+        }
+    }
+}
+
 #[cfg(test)]
 /// Asserts that the expression is an [`InputRef`] with the given index.
 macro_rules! assert_eq_input_ref {
@@ -496,6 +532,7 @@ macro_rules! assert_eq_input_ref {
 
 #[cfg(test)]
 pub(crate) use assert_eq_input_ref;
+use risingwave_common::catalog::Schema;
 
 use crate::utils::Condition;
 

@@ -20,7 +20,7 @@ use risingwave_pb::batch_plan::TopNNode;
 
 use super::{LogicalTopN, PlanBase, PlanRef, PlanTreeNodeUnary, ToBatchProst, ToDistributedBatch};
 use crate::optimizer::plan_node::ToLocalBatch;
-use crate::optimizer::property::{Order, RequiredDist};
+use crate::optimizer::property::{Order, OrderVerboseDisplay, RequiredDist};
 
 /// `BatchTopN` implements [`super::LogicalTopN`] to find the top N elements with a heap
 #[derive(Debug, Clone)]
@@ -45,10 +45,23 @@ impl BatchTopN {
 
 impl fmt::Display for BatchTopN {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        let verbose = self.base.ctx.is_explain_verbose();
         write!(
             f,
             "BatchTopN {{ order: {}, limit: {}, offset: {} }}",
-            self.logical.topn_order(),
+            if verbose {
+                let input = self.input();
+                let input_schema = input.schema();
+                format!(
+                    "{}",
+                    OrderVerboseDisplay {
+                        order: self.logical.topn_order(),
+                        input_schema
+                    }
+                )
+            } else {
+                format!("{}", self.logical.topn_order())
+            },
             self.logical.limit(),
             self.logical.offset(),
         )

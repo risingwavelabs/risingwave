@@ -91,6 +91,10 @@ impl OptimizerContextRef {
         let next_id = self.inner.next_id.fetch_add(1, Ordering::Relaxed);
         PlanNodeId(next_id)
     }
+
+    pub fn is_explain_verbose(&self) -> bool {
+        self.inner.session_ctx.config().get_explain_verbose()
+    }
 }
 
 impl OptimizerContext {

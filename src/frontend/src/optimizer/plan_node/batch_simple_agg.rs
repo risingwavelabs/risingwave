@@ -20,7 +20,7 @@ use risingwave_pb::batch_plan::SortAggNode;
 
 use super::logical_agg::PlanAggCall;
 use super::{LogicalAgg, PlanBase, PlanRef, PlanTreeNodeUnary, ToBatchProst, ToDistributedBatch};
-use crate::optimizer::plan_node::{BatchExchange, ToLocalBatch};
+use crate::optimizer::plan_node::{BatchExchange, PlanAggCallVerboseDisplay, ToLocalBatch};
 use crate::optimizer::property::{Distribution, Order, RequiredDist};
 
 #[derive(Debug, Clone)]
@@ -46,13 +46,22 @@ impl BatchSimpleAgg {
     pub fn agg_calls(&self) -> &[PlanAggCall] {
         self.logical.agg_calls()
     }
+
+    pub fn agg_calls_verbose_display(&self) -> Vec<PlanAggCallVerboseDisplay> {
+        self.logical.agg_calls_verbose_display()
+    }
 }
 
 impl fmt::Display for BatchSimpleAgg {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-        f.debug_struct("BatchSimpleAgg")
-            .field("aggs", &self.agg_calls())
-            .finish()
+        let verbose = self.base.ctx.is_explain_verbose();
+        let mut builder = f.debug_struct("BatchSimpleAgg");
+        if verbose {
+            builder.field("aggs", &self.agg_calls_verbose_display());
+        } else {
+            builder.field("aggs", &self.agg_calls());
+        }
+        builder.finish()
     }
 }
 
