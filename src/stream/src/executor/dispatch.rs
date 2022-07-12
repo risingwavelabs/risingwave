@@ -229,6 +229,7 @@ impl DispatchExecutorInner {
         Ok(())
     }
 
+    /// Update the dispatcher in this executor with `update`.
     fn update_dispatchers<const PRE: bool>(
         &mut self,
         update: &ProstDispatcherUpdate,

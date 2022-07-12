@@ -15,6 +15,7 @@ message AddMutation {
   message Dispatchers {
     repeated Dispatcher dispatchers = 1;
   }
+  // New dispatchers for each actor.
   map<uint32, Dispatchers> actor_dispatchers = 1;
   // We may embed a source change split mutation here.
   // TODO: we may allow multiple mutations in a single barrier.
@@ -27,15 +28,16 @@ message StopMutation {
 
 message UpdateMutation {
   message DispatcherUpdate {
-    // The hash mapping for consistent hash.
-    ActorMapping hash_mapping = 1;
     // Dispatcher can be uniquely identified by a combination of actor id and dispatcher id.
-    uint64 dispatcher_id = 2;
+    uint64 dispatcher_id = 1;
+    // The hash mapping for consistent hash.
+    ActorMapping hash_mapping = 2;
     // Added downstream actors.
     repeated uint32 added_downstream_actor_id = 3;
     // Removed downstream actors.
     repeated uint32 removed_downstream_actor_id = 4;
   }
+  // Dispatcher updates for each actor.
   map<uint32, DispatcherUpdate> actor_dispatcher_update = 1;
 }
 
@@ -46,11 +48,17 @@ message SourceChangeSplitMutation {
 message Barrier {
   data.Epoch epoch = 1;
   oneof mutation {
+    // Add a new dispatcher to some actors, used for creating materialized views.
     AddMutation add = 3;
+    // Stop a set of actors, used for dropping materialized views. Empty dispatchers will be
+    // automatically removed.
     StopMutation stop = 4;
+    // Update outputs and hash mappings for some dispatchers, used for scaling.
     UpdateMutation update = 5;
+    // Change the split of some sources.
     SourceChangeSplitMutation splits = 6;
   }
+  // Used for tracing.
   bytes span = 2;
 }
 
