@@ -73,9 +73,10 @@ struct SqlGenerator<'a, R: Rng> {
 /// Utilities
 impl<'a, R: Rng> SqlGenerator<'a, R> {
     fn get_bound_columns(&self) -> Vec<Column> {
-        self.bound_relations.iter().map(|t| {
-            t.get_qualified_columns()
-        }).flatten().collect()
+        self.bound_relations
+            .iter()
+            .flat_map(|t| t.get_qualified_columns())
+            .collect()
     }
 }
 
@@ -231,10 +232,10 @@ impl<'a, R: Rng> SqlGenerator<'a, R> {
         available.shuffle(self.rng);
         let n_group_cols = self.rng.gen_range(1..=available.len());
         let group_cols = available.drain(0..n_group_cols);
-        let group_by_clause = group_cols.map(|c| {
-            Expr::Identifier(Ident::new(c.name))
-        }).collect();
-        group_by_clause
+
+        group_cols
+            .map(|c| Expr::Identifier(Ident::new(c.name)))
+            .collect()
     }
 
     fn gen_having(&self) -> Option<Expr> {
