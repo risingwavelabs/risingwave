@@ -70,6 +70,16 @@ struct SqlGenerator<'a, R: Rng> {
     bound_relations: Vec<Table>,
 }
 
+/// Utilities
+impl<'a, R: Rng> SqlGenerator<'a, R> {
+    fn get_bound_columns(&self) -> Vec<Column> {
+        self.bound_relations.iter().map(|t| {
+            t.get_qualified_columns()
+        }).flatten().collect()
+    }
+}
+
+/// Generators
 impl<'a, R: Rng> SqlGenerator<'a, R> {
     fn new(rng: &'a mut R, tables: Vec<Table>) -> Self {
         SqlGenerator {
@@ -215,8 +225,16 @@ impl<'a, R: Rng> SqlGenerator<'a, R> {
         }
     }
 
-    fn gen_group_by(&self) -> Vec<Expr> {
-        vec![]
+    fn gen_group_by(&mut self) -> Vec<Expr> {
+        // get all from refs
+        let mut available = self.get_bound_columns();
+        available.shuffle(self.rng);
+        let n_group_cols = self.rng.gen_range(1..=available.len());
+        let group_cols = available.drain(0..n_group_cols);
+        let group_by_clause = group_cols.map(|c| {
+            Expr::Identifier(Ident::new(c.name))
+        }).collect();
+        group_by_clause
     }
 
     fn gen_having(&self) -> Option<Expr> {
