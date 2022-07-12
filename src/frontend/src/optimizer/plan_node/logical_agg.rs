@@ -42,7 +42,7 @@ use crate::utils::{ColIndexMapping, Condition, Substitute};
 pub struct PlanAggOrderByField {
     pub input: InputRef,
     pub direction: Direction,
-    pub nulls_first: Option<bool>,
+    pub nulls_first: bool,
 }
 
 impl fmt::Debug for PlanAggOrderByField {
@@ -53,9 +53,11 @@ impl fmt::Debug for PlanAggOrderByField {
             Direction::Desc => write!(f, " DESC")?,
             _ => {}
         }
-        if let Some(nulls_first) = self.nulls_first {
-            write!(f, " NULLS {}", if nulls_first { "FIRST" } else { "LAST" })?;
-        }
+        write!(
+            f,
+            " NULLS {}",
+            if self.nulls_first { "FIRST" } else { "LAST" }
+        )?;
         Ok(())
     }
 }

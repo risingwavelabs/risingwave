@@ -25,8 +25,7 @@ use crate::utils::Condition;
 pub struct AggOrderByExpr {
     pub expr: ExprImpl,
     pub direction: Direction,
-    // `Some(true)` for `NULLS FIRST`, `Some(false)` for `NULLS LAST`, `None` for default
-    pub nulls_first: Option<bool>,
+    pub nulls_first: bool,
 }
 
 #[derive(Debug, Clone, Eq, PartialEq, Hash)]

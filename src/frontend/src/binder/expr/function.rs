@@ -92,13 +92,22 @@ impl Binder {
                     f.order_by
                         .into_iter()
                         .map(|e| -> Result<AggOrderByExpr> {
-                            Ok(AggOrderByExpr {
-                                expr: self.bind_expr(e.expr)?,
-                                direction: match e.asc {
-                                    None | Some(true) => Direction::Asc,
-                                    Some(false) => Direction::Desc,
-                                },
-                                nulls_first: e.nulls_first,
+                            Ok({
+                                let mut expr = AggOrderByExpr {
+                                    expr: self.bind_expr(e.expr)?,
+                                    direction: match e.asc {
+                                        None | Some(true) => Direction::Asc,
+                                        Some(false) => Direction::Desc,
+                                    },
+                                    nulls_first: Default::default(),
+                                };
+                                expr.nulls_first =
+                                    e.nulls_first.unwrap_or_else(|| match expr.direction {
+                                        Direction::Asc => false,
+                                        Direction::Desc => true,
+                                        Direction::Any => unreachable!(),
+                                    });
+                                expr
                             })
                         })
                         .try_collect()?,
