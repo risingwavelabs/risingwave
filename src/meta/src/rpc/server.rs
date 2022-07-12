@@ -32,6 +32,7 @@ use risingwave_pb::meta::stream_manager_service_server::StreamManagerServiceServ
 use risingwave_pb::meta::{MetaLeaderInfo, MetaLeaseInfo};
 use risingwave_pb::user::user_service_server::UserServiceServer;
 use tokio::sync::oneshot::Sender;
+use tokio::sync::RwLock;
 use tokio::task::JoinHandle;
 
 use super::intercept::MetricsMiddlewareLayer;
@@ -397,6 +398,7 @@ pub async fn rpc_serve_with_store<S: MetaStore>(
         hummock_manager.clone(),
         compactor_manager.clone(),
     ));
+    let ddl_lock = Arc::new(RwLock::new(()));
 
     let heartbeat_srv = HeartbeatServiceImpl::new(cluster_manager.clone());
     let ddl_srv = DdlServiceImpl::<S>::new(
@@ -406,9 +408,10 @@ pub async fn rpc_serve_with_store<S: MetaStore>(
         source_manager,
         cluster_manager.clone(),
         fragment_manager.clone(),
+        ddl_lock.clone(),
     );
     let user_srv = UserServiceImpl::<S>::new(catalog_manager.clone(), user_manager.clone());
-    let scale_srv = ScaleServiceImpl::<S>::new(barrier_manager.clone());
+    let scale_srv = ScaleServiceImpl::<S>::new(barrier_manager.clone(), ddl_lock);
     let cluster_srv = ClusterServiceImpl::<S>::new(cluster_manager.clone());
     let stream_srv = StreamServiceImpl::<S>::new(
         env.clone(),
