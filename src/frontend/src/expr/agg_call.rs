@@ -52,13 +52,6 @@ impl AggCall {
     /// Infer the return type for the given agg call.
     /// Returns error if not supported or the arguments are invalid.
     pub fn infer_return_type(agg_kind: &AggKind, inputs: &[DataType]) -> Result<DataType> {
-        let unsupported = || {
-            let args = inputs.iter().map(|t| format!("{:?}", t)).join(", ");
-            Err(RwError::from(ErrorCode::NotImplemented(
-                format!("Unsupported aggregation: {}({})", agg_kind, args),
-                112.into(),
-            )))
-        };
         let invalid = || {
             let args = inputs.iter().map(|t| format!("{:?}", t)).join(", ");
             Err(RwError::from(ErrorCode::InvalidInputSyntax(format!(
@@ -107,9 +100,6 @@ impl AggCall {
             // SingleValue
             (AggKind::SingleValue, [input]) => input.clone(),
             (AggKind::SingleValue, _) => return invalid(),
-
-            // Others
-            _ => return unsupported(),
         };
 
         Ok(return_type)
