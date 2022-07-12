@@ -16,6 +16,7 @@ use pgwire::pg_field_descriptor::{PgFieldDescriptor, TypeOid};
 use pgwire::pg_response::{PgResponse, StatementType};
 use pgwire::types::Row;
 use risingwave_common::error::Result;
+use risingwave_common::session_config::EXPLAIN_VERBOSE_STRING;
 use risingwave_sqlparser::ast::Statement;
 
 use super::create_index::gen_create_index_plan;
@@ -33,7 +34,7 @@ pub(super) fn handle_explain(
 ) -> Result<PgResponse> {
     let session = context.session_ctx.clone();
     session
-        .set_config("explain_verbose", &verbose.to_string())
+        .set_config(EXPLAIN_VERBOSE_STRING, &verbose.to_string())
         .unwrap();
     // bind, plan, optimize, and serialize here
     let mut planner = Planner::new(context.into());

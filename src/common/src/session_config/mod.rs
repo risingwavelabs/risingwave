@@ -29,7 +29,7 @@ const CONFIG_KEYS: [&str; 7] = [
     "EXTRA_FLOAT_DIGITS",
     "APPLICATION_NAME",
     "DATE_STYLE",
-    "EXPLAIN_VERBOSE",
+    EXPLAIN_VERBOSE_STRING,
 ];
 const IMPLICIT_FLUSH: usize = 0;
 const QUERY_MODE: usize = 1;
@@ -38,6 +38,8 @@ const EXTRA_FLOAT_DIGITS: usize = 3;
 const APPLICATION_NAME: usize = 4;
 const DATE_STYLE: usize = 5;
 const EXPLAIN_VERBOSE: usize = 6;
+
+pub const EXPLAIN_VERBOSE_STRING: &str = "EXPLAIN_VERBOSE";
 
 trait ConfigEntry: Default + FromStr<Err = RwError> {
     fn entry_name() -> &'static str;

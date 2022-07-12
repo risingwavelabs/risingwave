@@ -197,23 +197,23 @@ impl LogicalProject {
 
     pub(super) fn fmt_with_name(&self, f: &mut fmt::Formatter, name: &str) -> fmt::Result {
         let verbose = self.base.ctx.is_explain_verbose();
+        let mut builder = f.debug_struct(name);
         if verbose {
-            f.debug_struct(name)
-                .field(
-                    "exprs",
-                    &self
-                        .exprs()
-                        .iter()
-                        .map(|expr| ExprVerboseDisplay {
-                            expr,
-                            input_schema: self.input.schema(),
-                        })
-                        .collect_vec(),
-                )
-                .finish()
+            builder.field(
+                "exprs",
+                &self
+                    .exprs()
+                    .iter()
+                    .map(|expr| ExprVerboseDisplay {
+                        expr,
+                        input_schema: self.input.schema(),
+                    })
+                    .collect_vec(),
+            );
         } else {
-            f.debug_struct(name).field("exprs", self.exprs()).finish()
+            builder.field("exprs", self.exprs());
         }
+        builder.finish()
     }
 
     pub fn is_identity(&self) -> bool {
