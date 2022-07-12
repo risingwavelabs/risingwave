@@ -37,7 +37,7 @@ pub trait SinkManager: Debug + Sync + Send {
 
 pub type SinkManagerRef = Arc<dyn SinkManager>;
 
-#[derive(Debug)]
+#[derive(Debug, Default)]
 pub struct MemSinkManager {
     sinks: Mutex<HashSet<TableId>>,
     /// Located worker id.

@@ -1,0 +1,11 @@
+statement ok
+CREATE TABLE t (v1 int);
+
+statement ok
+CREATE MATERIALIZED VIEW mv1 AS SELECT * FROM t;
+
+statement ok
+DROP MATERIALIZED VIEW mv1;
+
+statement ok
+DROP TABLE t;

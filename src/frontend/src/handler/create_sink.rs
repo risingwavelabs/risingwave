@@ -55,7 +55,7 @@ fn gen_sink_plan(
     properties: HashMap<String, String>,
 ) -> Result<PlanRef> {
     let scan_node = StreamTableScan::new(LogicalScan::create(
-        associated_table_name.into(),
+        associated_table_name,
         false,
         Rc::new(associated_table_desc),
         vec![],
@@ -110,8 +110,9 @@ pub async fn handle_create_sink(
             associated_table_desc,
             with_properties.clone(),
         )?;
-        let plan = plan.to_stream_prost();
-        StreamFragmenter::build_graph(plan)
+        let stream_plan = plan.to_stream_prost();
+
+        StreamFragmenter::build_graph(stream_plan)
     };
 
     let catalog_writer = session.env().catalog_writer();
