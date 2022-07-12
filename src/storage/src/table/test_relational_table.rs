@@ -27,7 +27,7 @@ use crate::encoding::cell_based_row_serializer::CellBasedRowSerializer;
 use crate::encoding::Encoding;
 use crate::error::StorageResult;
 use crate::memory::MemoryStateStore;
-use crate::storage_value::{StorageValue, ValueMeta};
+use crate::storage_value::StorageValue;
 use crate::store::{StateStore, WriteOptions};
 use crate::table::state_table::{DedupPkStateTable, StateTable};
 use crate::table::storage_table::{StorageTable, DEFAULT_VNODE};
@@ -1264,7 +1264,7 @@ async fn test_dedup_cell_based_table_iter_with(
 
         // ---------- Batch-write
         for (key, value) in bytes {
-            local.put(key, StorageValue::new_put(ValueMeta::default(), value))
+            local.put(key, StorageValue::new_put(value))
         }
     }
 
