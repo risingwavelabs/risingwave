@@ -18,7 +18,7 @@ use std::rc::Rc;
 
 use fixedbitset::FixedBitSet;
 use itertools::Itertools;
-use risingwave_common::catalog::{ColumnDesc, Schema, TableDesc};
+use risingwave_common::catalog::{ColumnDesc, Field, Schema, TableDesc};
 use risingwave_common::error::{ErrorCode, Result, RwError};
 
 use super::{
@@ -75,7 +75,7 @@ impl LogicalScan {
             .map(|(op_idx, tb_idx)| {
                 let col = &table_desc.columns[*tb_idx];
                 id_to_op_idx.insert(col.column_id, op_idx);
-                col.into()
+                Field::from_with_table_name_prefix(col, &table_name)
             })
             .collect();
 

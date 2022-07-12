@@ -190,6 +190,15 @@ impl Field {
     pub fn data_type(&self) -> DataType {
         self.data_type.clone()
     }
+
+    pub fn from_with_table_name_prefix(desc: &ColumnDesc, table_name: &str) -> Self {
+        Self {
+            data_type: desc.data_type.clone(),
+            name: format!("{}.{}", table_name, desc.name),
+            sub_fields: desc.field_descs.iter().map(|d| d.into()).collect_vec(),
+            type_name: desc.type_name.clone(),
+        }
+    }
 }
 
 impl From<&ProstField> for Field {
