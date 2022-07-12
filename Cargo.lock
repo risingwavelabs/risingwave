@@ -4397,6 +4397,7 @@ name = "risingwave_hummock_test"
 version = "0.1.10"
 dependencies = [
  "bytes",
+ "fail",
  "futures",
  "itertools",
  "madsim-tokio",

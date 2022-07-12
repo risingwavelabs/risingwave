@@ -6,6 +6,7 @@ edition = "2021"
 
 [dependencies]
 bytes = { version = "1" }
+fail = "0.5"
 futures = { version = "0.3" }
 itertools = "0.10"
 rand = "0.8"
@@ -16,3 +17,6 @@ risingwave_pb = { path = "../../prost" }
 risingwave_rpc_client = { path = "../../rpc_client" }
 risingwave_storage = { path = "..", features = ["test"] }
 tokio = { version = "=0.2.0-alpha.3", package = "madsim-tokio" }
+
+[features]
+failpoints = ["risingwave_storage/failpoints"]
