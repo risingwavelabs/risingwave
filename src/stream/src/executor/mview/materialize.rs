@@ -37,29 +37,29 @@ pub struct MaterializeExecutor<S: StateStore> {
 
     state_table: StateTable<S>,
 
-    /// Columns of arrange keys (including pk, group key, join keys, etc.)
+    /// Columns of arrange keys (including pk, group keys, join keys, etc.)
     arrange_columns: Vec<usize>,
 
     info: ExecutorInfo,
 }
 
 impl<S: StateStore> MaterializeExecutor<S> {
-    /// Create a new `MaterializeExecutor` with distribution specified with `distribution_key` and
-    /// `vnodes`. For singleton distribution, `distribution_key` should be empty and `vnodes`
+    /// Create a new `MaterializeExecutor` with distribution specified with `distribution_keys` and
+    /// `vnodes`. For singleton distribution, `distribution_keys` should be empty and `vnodes`
     /// should be `None`.
     #[allow(clippy::too_many_arguments)]
     pub fn new(
         input: BoxedExecutor,
         store: S,
         table_id: TableId,
-        order_key: Vec<OrderPair>,
+        key: Vec<OrderPair>,
         column_ids: Vec<ColumnId>,
         executor_id: u64,
         distribution_key: Vec<usize>,
         vnodes: Option<Arc<Bitmap>>,
     ) -> Self {
-        let arrange_columns: Vec<usize> = order_key.iter().map(|k| k.column_idx).collect();
-        let arrange_order_types = order_key.iter().map(|k| k.order_type).collect();
+        let arrange_columns: Vec<usize> = key.iter().map(|k| k.column_idx).collect();
+        let arrange_order_types = key.iter().map(|k| k.order_type).collect();
 
         let schema = input.schema().clone();
         let columns = column_ids

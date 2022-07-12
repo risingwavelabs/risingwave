@@ -73,6 +73,10 @@ impl TopNHeap {
             .collect::<Vec<_>>();
         chunks.reverse();
 
+        if offset >= chunks.len() {
+            return None;
+        }
+
         // Skip the first `offset` elements
         if let Ok(mut res) = DataChunk::rechunk(&chunks[offset..], self.size - offset) {
             assert_eq!(res.len(), 1);
