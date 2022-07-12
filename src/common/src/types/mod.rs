@@ -740,6 +740,47 @@ impl ScalarImpl {
         })
     }
 
+    pub fn encoding_data_size(
+        data_type: &DataType,
+        deserializer: &mut memcomparable::Deserializer<impl Buf>,
+    ) -> memcomparable::Result<usize> {
+        let null_tag = u8::deserialize(&mut *deserializer)?;
+        let base_position = deserializer.position();
+        match null_tag {
+            0 => Ok(0),
+            1 => {
+                use std::mem::size_of;
+                let len = match data_type {
+                    DataType::Int16 => size_of::<i16>(),
+                    DataType::Int32 => size_of::<i32>(),
+                    DataType::Int64 => size_of::<i64>(),
+                    DataType::Float32 => size_of::<OrderedF32>(),
+                    DataType::Float64 => size_of::<OrderedF64>(),
+                    DataType::Date => size_of::<NaiveDateWrapper>(),
+                    DataType::Time => size_of::<NaiveTimeWrapper>(),
+                    DataType::Timestamp => size_of::<NaiveDateTimeWrapper>(),
+                    DataType::Timestampz => size_of::<NaiveDateTimeWrapper>(),
+                    DataType::Boolean => size_of::<u8>(),
+                    DataType::Interval => size_of::<IntervalUnit>(),
+
+                    DataType::Decimal => deserializer.read_decimal_len()?,
+                    DataType::List { .. } | DataType::Struct { .. } => {
+                        deserializer.read_struct_and_list_len()?
+                    }
+                    DataType::Varchar => deserializer.read_bytes_len()?,
+                };
+
+                // consume offset of fixed_type
+                if deserializer.position() == base_position {
+                    // fixed type
+                    deserializer.advance(len);
+                }
+                Ok(len)
+            }
+            _ => Err(memcomparable::Error::InvalidTagEncoding(null_tag as _)),
+        }
+    }
+
     pub fn to_protobuf(&self) -> Vec<u8> {
         let body = match self {
             ScalarImpl::Int16(v) => v.to_be_bytes().to_vec(),

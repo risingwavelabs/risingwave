@@ -102,7 +102,9 @@ impl OrderedRowSerializer {
             let mut serializer = memcomparable::Serializer::new(vec![]);
             serializer.set_reverse(*order_type == OrderType::Descending);
             serialize_datum_into(datum, &mut serializer).unwrap();
-            append_to.extend(serializer.into_inner());
+
+            let extra = serializer.into_inner();
+            append_to.extend(extra);
         }
     }
 
@@ -154,14 +156,39 @@ impl OrderedRowDeserializer {
     pub fn get_order_types(&self) -> &[OrderType] {
         &self.order_types
     }
+
+    pub fn deserialize_prefix_len_with_column_indices(
+        &self,
+        key: &[u8],
+        column_indices: Vec<usize>,
+    ) -> memcomparable::Result<usize> {
+        use crate::types::ScalarImpl;
+        let mut len: usize = 0;
+        for index in column_indices {
+            let data_type = &self.data_types[index];
+            let order_type = &self.order_types[index];
+            let data = &key[len..];
+            let mut deserializer = memcomparable::Deserializer::new(data);
+            deserializer.set_reverse(*order_type == OrderType::Descending);
+
+            let _data_size = ScalarImpl::encoding_data_size(data_type, &mut deserializer)?;
+            len += deserializer.position();
+        }
+
+        Ok(len)
+    }
 }
 
 #[cfg(test)]
 mod tests {
+    use std::str::FromStr;
+
     use super::*;
     use crate::array::{I16Array, Utf8Array};
     use crate::array_nonnull;
-    use crate::types::ScalarImpl::{Int16, Utf8};
+    use crate::types::chrono_wrapper::*;
+    use crate::types::interval;
+    use crate::types::ScalarImpl::{self, *};
 
     #[test]
     fn test_ordered_row_serializer() {
@@ -315,6 +342,225 @@ mod tests {
                 deserializer.deserialize(&array[2]).unwrap(),
                 OrderedRow::new(row3, &order_types)
             );
+        }
+    }
+
+    #[test]
+    fn test_deserialize_with_column_indices() {
+        let order_types = vec![OrderType::Descending, OrderType::Ascending];
+        let serializer = OrderedRowSerializer::new(order_types.clone());
+        let schema = vec![DataType::Varchar, DataType::Int16];
+        let row1 = Row(vec![Some(Utf8("abc".to_string())), Some(Int16(5))]);
+        let row2 = Row(vec![Some(Utf8("abd".to_string())), Some(Int16(5))]);
+        let row3 = Row(vec![Some(Utf8("abc".to_string())), Some(Int16(6))]);
+        let rows = vec![row1, row2, row3];
+        let deserializer = OrderedRowDeserializer::new(schema, order_types);
+        let mut array = vec![];
+        for row in &rows {
+            let mut row_bytes = vec![];
+            serializer.serialize(row, &mut row_bytes);
+            array.push(row_bytes);
+        }
+
+        let row_len = array[0].len();
+        let row_0_idx_0_len = deserializer
+            .deserialize_prefix_len_with_column_indices(&array[0], vec![0])
+            .unwrap();
+        assert_eq!(11, row_0_idx_0_len);
+        let row_0_idx_1_len = deserializer
+            .deserialize_prefix_len_with_column_indices(&array[0], vec![0, 1])
+            .unwrap();
+        assert_eq!(14, row_0_idx_1_len);
+
+        assert_eq!(row_len, row_0_idx_1_len);
+    }
+
+    #[test]
+    fn test_encoding_data_size() {
+        let order_types = vec![OrderType::Ascending];
+        let serializer = OrderedRowSerializer::new(order_types);
+
+        // test fixed_size
+        {
+            {
+                // test None
+                let row = Row(vec![None]);
+                let mut row_bytes = vec![];
+                serializer.serialize(&row, &mut row_bytes);
+                let mut deserializer = memcomparable::Deserializer::new(&row_bytes[..]);
+                let data_size =
+                    ScalarImpl::encoding_data_size(&DataType::Int16, &mut deserializer).unwrap();
+                assert_eq!(0, data_size);
+                assert_eq!(1, deserializer.position());
+            }
+
+            {
+                // float64
+                let row = Row(vec![Some(ScalarImpl::Float64(6.4.into()))]);
+                let mut row_bytes = vec![];
+                serializer.serialize(&row, &mut row_bytes);
+                let mut deserializer = memcomparable::Deserializer::new(&row_bytes[..]);
+                let data_size =
+                    ScalarImpl::encoding_data_size(&DataType::Float64, &mut deserializer).unwrap();
+                assert_eq!(8, data_size);
+                assert_eq!(9, deserializer.position());
+            }
+
+            {
+                // bool
+                let row = Row(vec![Some(ScalarImpl::Bool(false))]);
+                let mut row_bytes = vec![];
+                serializer.serialize(&row, &mut row_bytes);
+                let mut deserializer = memcomparable::Deserializer::new(&row_bytes[..]);
+                let data_size =
+                    ScalarImpl::encoding_data_size(&DataType::Boolean, &mut deserializer).unwrap();
+                assert_eq!(1, data_size);
+                assert_eq!(2, deserializer.position());
+            }
+
+            {
+                // ts
+                let row = Row(vec![Some(ScalarImpl::NaiveDateTime(
+                    NaiveDateTimeWrapper::default(),
+                ))]);
+                let mut row_bytes = vec![];
+                serializer.serialize(&row, &mut row_bytes);
+                let mut deserializer = memcomparable::Deserializer::new(&row_bytes[..]);
+                let data_size =
+                    ScalarImpl::encoding_data_size(&DataType::Timestamp, &mut deserializer)
+                        .unwrap();
+                assert_eq!(12, data_size);
+                assert_eq!(13, deserializer.position());
+            }
+
+            {
+                // interval
+                let row = Row(vec![Some(ScalarImpl::Interval(
+                    interval::IntervalUnit::default(),
+                ))]);
+                let mut row_bytes = vec![];
+                serializer.serialize(&row, &mut row_bytes);
+                let mut deserializer = memcomparable::Deserializer::new(&row_bytes[..]);
+                let data_size =
+                    ScalarImpl::encoding_data_size(&DataType::Interval, &mut deserializer).unwrap();
+                assert_eq!(16, data_size);
+                assert_eq!(17, deserializer.position());
+            }
+
+            {
+                // interval
+                let row = Row(vec![Some(ScalarImpl::Interval(
+                    interval::IntervalUnit::default(),
+                ))]);
+                let mut row_bytes = vec![];
+                serializer.serialize(&row, &mut row_bytes);
+                let mut deserializer = memcomparable::Deserializer::new(&row_bytes[..]);
+                let data_size =
+                    ScalarImpl::encoding_data_size(&DataType::Interval, &mut deserializer).unwrap();
+                assert_eq!(16, data_size);
+                assert_eq!(17, deserializer.position());
+            }
+        }
+
+        {
+            // test dynamic_size
+            {
+                // test decimal
+                pub use crate::types::decimal::Decimal;
+
+                {
+                    let d = Decimal::from_str("41721.900909090909090909090909").unwrap();
+                    let row = Row(vec![Some(ScalarImpl::Decimal(d))]);
+                    let mut row_bytes = vec![];
+                    serializer.serialize(&row, &mut row_bytes);
+                    let mut deserializer = memcomparable::Deserializer::new(&row_bytes[..]);
+                    let data_size =
+                        ScalarImpl::encoding_data_size(&DataType::Decimal, &mut deserializer)
+                            .unwrap();
+                    assert_eq!(15, data_size);
+                    assert_eq!(18, deserializer.position());
+                }
+
+                {
+                    let d = Decimal::from_str("1").unwrap();
+                    let row = Row(vec![Some(ScalarImpl::Decimal(d))]);
+                    let mut row_bytes = vec![];
+                    serializer.serialize(&row, &mut row_bytes);
+                    let mut deserializer = memcomparable::Deserializer::new(&row_bytes[..]);
+                    let data_size =
+                        ScalarImpl::encoding_data_size(&DataType::Decimal, &mut deserializer)
+                            .unwrap();
+                    assert_eq!(1, data_size);
+                    assert_eq!(4, deserializer.position());
+                }
+
+                {
+                    let d = Decimal::from_str("inf").unwrap();
+                    let row = Row(vec![Some(ScalarImpl::Decimal(d))]);
+                    let mut row_bytes = vec![];
+                    serializer.serialize(&row, &mut row_bytes);
+                    let mut deserializer = memcomparable::Deserializer::new(&row_bytes[..]);
+                    let data_size =
+                        ScalarImpl::encoding_data_size(&DataType::Decimal, &mut deserializer)
+                            .unwrap();
+                    assert_eq!(0, data_size);
+                    assert_eq!(3, deserializer.position()); // [1, 35, 0]
+                }
+
+                {
+                    let d = Decimal::from_str("nan").unwrap();
+                    let row = Row(vec![Some(ScalarImpl::Decimal(d))]);
+                    let mut row_bytes = vec![];
+                    serializer.serialize(&row, &mut row_bytes);
+                    let mut deserializer = memcomparable::Deserializer::new(&row_bytes[..]);
+                    let data_size =
+                        ScalarImpl::encoding_data_size(&DataType::Decimal, &mut deserializer)
+                            .unwrap();
+                    assert_eq!(0, data_size);
+                    assert_eq!(3, deserializer.position()); // [1, 6, 0]
+                }
+
+                {
+                    // TODO(test list / struct)
+                }
+
+                {
+                    // test varchar
+
+                    let row = Row(vec![Some(Utf8("abcdefghijklmn".to_string()))]);
+                    let mut row_bytes = vec![];
+                    serializer.serialize(&row, &mut row_bytes);
+                    let mut deserializer = memcomparable::Deserializer::new(&row_bytes[..]);
+                    let data_size =
+                        ScalarImpl::encoding_data_size(&DataType::Varchar, &mut deserializer)
+                            .unwrap();
+                    assert_eq!(14, data_size);
+                    // [1, 1, 97, 98, 99, 100, 101, 102, 103, 104, 9, 105, 106, 107, 108, 109, 110,
+                    // 0, 0, 6]
+                    assert_eq!(6 + data_size, deserializer.position());
+                }
+
+                {
+                    {
+                        // test varchar Descending
+                        let order_types = vec![OrderType::Descending];
+                        let serializer = OrderedRowSerializer::new(order_types);
+                        let row = Row(vec![Some(Utf8("abcdefghijklmnopq".to_string()))]);
+                        let mut row_bytes = vec![];
+                        serializer.serialize(&row, &mut row_bytes);
+                        let mut deserializer = memcomparable::Deserializer::new(&row_bytes[..]);
+                        deserializer.set_reverse(true);
+                        let data_size =
+                            ScalarImpl::encoding_data_size(&DataType::Varchar, &mut deserializer)
+                                .unwrap();
+                        assert_eq!(17, data_size);
+                        // [254, 254, 158, 157, 156, 155, 154, 153, 152, 151, 246, 150, 149, 148,
+                        // 147, 146, 145, 144, 143, 246, 142, 255, 255, 255, 255, 255, 255, 255,
+                        // 254]
+                        assert_eq!(12 + data_size, deserializer.position());
+                    }
+                }
+            }
         }
     }
 }

@@ -21,16 +21,20 @@ use crate::error::{Error, Result};
 
 const DECIMAL_FLAG_LOW_BOUND: u8 = 0x6;
 const DECIMAL_FLAG_UP_BOUND: u8 = 0x23;
+const BYTES_CHUNK_SIZE: usize = 8;
+const BYTES_CHUNK_UNIT_SIZE: usize = BYTES_CHUNK_SIZE + 1;
 
 /// A structure that deserializes memcomparable bytes into Rust values.
 pub struct Deserializer<B: Buf> {
     input: MaybeFlip<B>,
+    input_len: usize,
 }
 
 impl<B: Buf> Deserializer<B> {
     /// Creates a deserializer from a buffer.
     pub fn new(input: B) -> Self {
         Deserializer {
+            input_len: input.remaining(),
             input: MaybeFlip { input, flip: false },
         }
     }
@@ -43,6 +47,16 @@ impl<B: Buf> Deserializer<B> {
     /// Unwrap the inner buffer from the `Deserializer`.
     pub fn into_inner(self) -> B {
         self.input.input
+    }
+
+    /// Return the position of inner buffer from the `Deserializer`.
+    pub fn position(&self) -> usize {
+        self.input_len - self.input.input.remaining()
+    }
+
+    /// Advance the position of inner buffer from the `Deserializer`.
+    pub fn advance(&mut self, cnt: usize) {
+        self.input.input.advance(cnt)
     }
 }
 
@@ -112,7 +126,7 @@ impl<B: Buf> Deserializer<B> {
             v => return Err(Error::InvalidBytesEncoding(v)),
         }
         let mut bytes = vec![];
-        let mut chunk = [0u8; 9];
+        let mut chunk = [0u8; BYTES_CHUNK_UNIT_SIZE]; // chunk + chunk_len
         loop {
             self.input.copy_to_slice(&mut chunk);
             match chunk[8] {
@@ -156,6 +170,77 @@ impl<B: Buf> Deserializer<B> {
             byte_array.push(byte);
         }
         Ok(byte_array)
+    }
+
+    /// Read bytes_len without copy, it will consume offset
+    pub fn read_bytes_len(&mut self) -> Result<usize> {
+        use core::cmp;
+        let mut result: usize = 0;
+
+        match self.input.get_u8() {
+            0 => return Ok(0), // empty slice
+            1 => {}            // non-empty slice
+            v => return Err(Error::InvalidBytesEncoding(v)),
+        }
+
+        loop {
+            {
+                // calc advance
+                let mut offset = 0;
+                while offset < BYTES_CHUNK_SIZE {
+                    let src = self.input.input.chunk();
+                    let cnt = cmp::min(src.len(), BYTES_CHUNK_SIZE - offset);
+                    offset += cnt;
+                    self.advance(cnt);
+                }
+            }
+
+            let chunk_len = if self.input.flip {
+                !self.input.input.chunk()[0]
+            } else {
+                self.input.input.chunk()[0]
+            };
+            self.advance(1);
+
+            match chunk_len {
+                len @ 1..=8 => {
+                    result += len as usize;
+                    // self.advance(len as usize);
+                    return Ok(result);
+                }
+                9 => {
+                    result += 8;
+                }
+                v => return Err(Error::InvalidBytesEncoding(v)),
+            }
+        }
+    }
+
+    /// Read decimal_len without copy, it will consume offset
+    pub fn read_decimal_len(&mut self) -> Result<usize> {
+        let mut len: usize = 0;
+
+        let flag = self.input.get_u8();
+        if !(0x6..=0x23).contains(&flag) {
+            return Err(Error::InvalidBytesEncoding(flag));
+        }
+        loop {
+            let byte = self.input.get_u8();
+            if byte == 0 {
+                break;
+            }
+
+            len += 1;
+        }
+
+        Ok(len)
+    }
+
+    /// Read struct_and_list without copy, it will consume offset
+    pub fn read_struct_and_list_len(&mut self) -> Result<usize> {
+        let len = self.input.get_u32() as usize;
+        self.advance(len);
+        Ok(len)
     }
 }
 
