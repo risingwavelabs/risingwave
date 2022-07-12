@@ -47,6 +47,7 @@ pub struct DynamicFilterExecutor<S: StateStore> {
     comparator: ExprNodeType,
     range_cache: RangeCache<S>,
     right_table: StateTable<S>,
+    is_right_table_writer: bool,
     actor_id: u64,
     schema: Schema,
     metrics: Arc<StreamingMetrics>,
@@ -63,6 +64,7 @@ impl<S: StateStore> DynamicFilterExecutor<S> {
         comparator: ExprNodeType,
         state_table_l: StateTable<S>,
         state_table_r: StateTable<S>,
+        is_right_table_writer: bool,
         actor_id: u64,
         metrics: Arc<StreamingMetrics>,
     ) -> Self {
@@ -76,6 +78,7 @@ impl<S: StateStore> DynamicFilterExecutor<S> {
             comparator,
             range_cache: RangeCache::new(state_table_l, 0, usize::MAX),
             right_table: state_table_r,
+            is_right_table_writer,
             actor_id,
             metrics,
             schema,
@@ -240,6 +243,7 @@ impl<S: StateStore> DynamicFilterExecutor<S> {
 
         let mut prev_epoch_value: Option<Datum> = None;
         let mut current_epoch_value: Option<Datum> = None;
+        let mut current_epoch_row = None;
         let mut epoch: u64 = 0;
 
         let aligned_stream = barrier_align(
@@ -288,11 +292,10 @@ impl<S: StateStore> DynamicFilterExecutor<S> {
                             Op::UpdateInsert | Op::Insert => {
                                 last_is_insert = true;
                                 current_epoch_value = Some(row.value_at(0).to_owned_datum());
-                                // self.right_table.insert(row.to_owned_row())?;
+                                current_epoch_row = Some(row.to_owned_row());
                             }
-                            Op::UpdateDelete | Op::Delete => {
+                            _ => {
                                 last_is_insert = false;
-                                // self.right_table.delete(row.to_owned_row())?;
                             }
                         }
                     }
@@ -330,7 +333,14 @@ impl<S: StateStore> DynamicFilterExecutor<S> {
                             yield Message::Chunk(chunk);
                         }
                     }
-                    self.right_table.commit(epoch).await?;
+
+                    if self.is_right_table_writer {
+                        if let Some(row) = current_epoch_row.take() {
+                            assert_eq!(epoch, barrier.epoch.prev);
+                            self.right_table.insert(row)?;
+                            self.right_table.commit(epoch).await?;
+                        }
+                    }
 
                     self.range_cache.flush().await?;
 

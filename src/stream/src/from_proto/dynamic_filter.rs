@@ -52,6 +52,9 @@ impl ExecutorBuilder for DynamicFilterExecutorBuilder {
             ));
         }
 
+        // Only write the RHS value if this actor is in charge of vnode 0
+        let is_right_table_writer = vnodes.is_set(0)?;
+
         let state_table_l =
             StateTable::from_table_catalog(node.get_left_table()?, store.clone(), Some(vnodes));
 
@@ -66,6 +69,7 @@ impl ExecutorBuilder for DynamicFilterExecutorBuilder {
             comparator,
             state_table_l,
             state_table_r,
+            is_right_table_writer,
             params.actor_id as u64,
             params.executor_stats,
         )))
