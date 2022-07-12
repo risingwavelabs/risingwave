@@ -29,7 +29,7 @@ use crate::hummock::{
     CachePolicy, HummockStateStoreIter, LruCache, SSTableBuilder, SSTableBuilderOptions, Sstable,
     SstableStoreRef,
 };
-use crate::storage_value::{StorageValue, ValueMeta};
+use crate::storage_value::StorageValue;
 use crate::store::StateStoreIter;
 
 pub fn default_config_for_test() -> StorageConfig {
@@ -54,7 +54,7 @@ pub fn default_config_for_test() -> StorageConfig {
 pub fn gen_dummy_batch(epoch: u64) -> Vec<(Bytes, StorageValue)> {
     vec![(
         iterator_test_key_of_epoch(0, epoch).into(),
-        StorageValue::new_put(ValueMeta::default(), b"value1".to_vec()),
+        StorageValue::new_put(b"value1".to_vec()),
     )]
 }
 

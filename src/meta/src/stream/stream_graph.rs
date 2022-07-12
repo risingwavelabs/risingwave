@@ -288,7 +288,7 @@ impl StreamActorBuilder {
     pub fn build(&self) -> StreamActor {
         assert!(self.sealed);
 
-        let mut dispatcher = self
+        let dispatcher = self
             .downstreams
             .iter()
             .map(
@@ -308,18 +308,6 @@ impl StreamActorBuilder {
             )
             .collect_vec();
 
-        // If there's no dispatcher, add an empty broadcast. TODO: Can be removed later.
-        if dispatcher.is_empty() {
-            dispatcher = vec![Dispatcher {
-                r#type: DispatcherType::Broadcast.into(),
-                // Currently when create MV on MV, we will add outputs to this dispatcher with id 0
-                // (cross-MV dispatcher).
-                // See also the rustdoc of this field.
-                dispatcher_id: 0,
-                ..Default::default()
-            }]
-        }
-
         StreamActor {
             actor_id: self.actor_id.as_global_id(),
             fragment_id: self.fragment_id.as_global_id(),
@@ -332,14 +320,7 @@ impl StreamActorBuilder {
                 .map(|x| x.as_global_id())
                 .collect(), // TODO: store each upstream separately
             same_worker_node_as_upstream: self.chain_same_worker_node
-                || self.upstreams.iter().any(
-                    |(
-                        _,
-                        StreamActorUpstream {
-                            same_worker_node, ..
-                        },
-                    )| *same_worker_node,
-                ),
+                || self.upstreams.values().any(|u| u.same_worker_node),
             vnode_bitmap: None,
         }
     }
@@ -561,30 +542,24 @@ impl StreamGraphBuilder {
                 // Table id rewrite done below.
                 match new_stream_node.node_body.as_mut().unwrap() {
                     NodeBody::HashJoin(node) => {
-                        // The operator id must be assigned with table ids. Otherwise it is a logic
-                        // error.
-                        let mut left_table_id: u32 = 0;
-                        // let mut right_table_id: u32 = 0;
                         if let Some(table) = &mut node.left_table {
-                            left_table_id = table.id + table_id_offset;
-                            table.id = left_table_id;
+                            table.id += table_id_offset;
                             table.schema_id = ctx.schema_id;
                             table.database_id = ctx.database_id;
                             table.name = generate_intertable_name_with_type(
                                 &ctx.mview_name,
-                                left_table_id,
+                                table.id,
                                 "HashJoinLeft",
                             );
                             check_and_fill_internal_table(table.id, Some(table.clone()));
                         }
                         if let Some(table) = &mut node.right_table {
-                            let right_table_id = left_table_id + 1;
-                            table.id = right_table_id;
+                            table.id += table_id_offset;
                             table.schema_id = ctx.schema_id;
                             table.database_id = ctx.database_id;
                             table.name = generate_intertable_name_with_type(
                                 &ctx.mview_name,
-                                right_table_id,
+                                table.id,
                                 "HashJoinRight",
                             );
                             check_and_fill_internal_table(table.id, Some(table.clone()));
@@ -654,6 +629,31 @@ impl StreamGraphBuilder {
                                 &ctx.mview_name,
                                 table.id,
                                 "GlobalSimpleAgg",
+                            );
+                            check_and_fill_internal_table(table.id, Some(table.clone()));
+                        }
+                    }
+
+                    NodeBody::DynamicFilter(node) => {
+                        if let Some(table) = &mut node.left_table {
+                            table.id += table_id_offset;
+                            table.schema_id = ctx.schema_id;
+                            table.database_id = ctx.database_id;
+                            table.name = generate_intertable_name_with_type(
+                                &ctx.mview_name,
+                                table.id,
+                                "DynamicFilterLeft",
+                            );
+                            check_and_fill_internal_table(table.id, Some(table.clone()));
+                        }
+                        if let Some(table) = &mut node.right_table {
+                            table.id += table_id_offset;
+                            table.schema_id = ctx.schema_id;
+                            table.database_id = ctx.database_id;
+                            table.name = generate_intertable_name_with_type(
+                                &ctx.mview_name,
+                                table.id,
+                                "DynamicFilterRight",
                             );
                             check_and_fill_internal_table(table.id, Some(table.clone()));
                         }

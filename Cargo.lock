@@ -3617,9 +3617,11 @@ dependencies = [
 
 [[package]]
 name = "pulsar"
-version = "4.1.1"
-source = "git+https://github.com/singularity-data/pulsar-rs.git?rev=8d4789eea780d520136e1cc2535a1fec9385c53d#8d4789eea780d520136e1cc2535a1fec9385c53d"
+version = "4.1.2"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "31a5a4fbe9363c113b7e25ae76dd2d6455411c815d688977be6f0b68ae5e73b8"
 dependencies = [
+ "async-trait",
  "bit-vec",
  "bytes",
  "chrono",
@@ -4229,6 +4231,7 @@ dependencies = [
  "serde",
  "serde_derive",
  "serde_json",
+ "serde_with",
  "smallvec",
  "static_assertions",
  "tempfile",
