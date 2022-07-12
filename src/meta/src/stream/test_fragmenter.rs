@@ -351,7 +351,10 @@ async fn test_fragmenter() -> Result<()> {
     for actor in actors {
         assert_eq!(
             expected_downstream.get(&actor.get_actor_id()).unwrap(),
-            actor.dispatcher[0].get_downstream_actor_id(),
+            actor
+                .dispatcher
+                .first()
+                .map_or(&vec![], |d| d.get_downstream_actor_id()),
         );
         let mut node = actor.get_nodes().unwrap();
         while !node.get_input().is_empty() {
