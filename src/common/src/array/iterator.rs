@@ -107,24 +107,26 @@ mod tests {
                     #[test]
                     fn [<test_trusted_len_for_ $suffix_name _array>]() {
                         use crate::array::$builder;
-                        let mut builder = $builder::new(3);
-                        for _ in 0..3 {
+                        let mut builder = $builder::new(5);
+                        for _ in 0..5 {
                             builder.append_null().unwrap();
                         }
                         let array = builder.finish().unwrap();
                         let mut iter = array.iter();
 
-                        assert_eq!(iter.size_hint(), (3, Some(3))); iter.next();
-                        assert_eq!(iter.size_hint(), (2, Some(2))); iter.next();
-                        assert_eq!(iter.size_hint(), (1, Some(1))); iter.next();
+                        assert_eq!(iter.size_hint(), (5, Some(5))); iter.next();
+                        assert_eq!(iter.size_hint(), (4, Some(4))); iter.next();
+                        assert_eq!(iter.size_hint(), (3, Some(3))); iter.nth(0);
+                        assert_eq!(iter.size_hint(), (2, Some(2))); iter.nth(1);
                         assert_eq!(iter.size_hint(), (0, Some(0)));
 
                         let array_impl = ArrayImpl::from(array);
                         let mut iter = array_impl.iter();
 
-                        assert_eq!(iter.size_hint(), (3, Some(3))); iter.next();
-                        assert_eq!(iter.size_hint(), (2, Some(2))); iter.next();
-                        assert_eq!(iter.size_hint(), (1, Some(1))); iter.next();
+                        assert_eq!(iter.size_hint(), (5, Some(5))); iter.next();
+                        assert_eq!(iter.size_hint(), (4, Some(4))); iter.next();
+                        assert_eq!(iter.size_hint(), (3, Some(3))); iter.nth(0);
+                        assert_eq!(iter.size_hint(), (2, Some(2))); iter.nth(1);
                         assert_eq!(iter.size_hint(), (0, Some(0)));
                     }
                 }
