@@ -67,6 +67,40 @@ pub fn gen_data(data_type: DataType, batch_size: usize, batch_num: usize) -> Vec
     ret
 }
 
+/// Generate `batch_num` sorted data chunks, each data chunk has cardinality of `batch_size`.
+pub fn gen_sorted_data(
+    data_type: DataType,
+    batch_size: usize,
+    batch_num: usize,
+    start: String,
+    step: u64,
+) -> Vec<DataChunk> {
+    let mut data_gen =
+        FieldGeneratorImpl::with_sequence(data_type.clone(), Some(start), None, 0, step).unwrap();
+    let mut ret = Vec::<DataChunk>::with_capacity(batch_num);
+
+    for _ in 0..batch_num {
+        let mut array_builder = data_type.create_array_builder(batch_size);
+
+        for _ in 0..batch_size {
+            array_builder
+                .append_datum(&Some(ScalarImpl::Int64(
+                    data_gen.generate(0).as_i64().unwrap(),
+                )))
+                .unwrap();
+        }
+
+        let array = array_builder.finish().unwrap();
+        ret.push(DataChunk::new(
+            vec![Column::new(Arc::new(array))],
+            batch_size,
+        ));
+    }
+    println!("{ret:#?}");
+
+    ret
+}
+
 /// Mock the input of executor.
 /// You can bind one or more `MockExecutor` as the children of the executor to test,
 /// (`HashAgg`, e.g), so that allow testing without instantiating real `SeqScan`s and real storage.
