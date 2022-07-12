@@ -15,7 +15,6 @@
 use std::pin::Pin;
 use std::task::{Context, Poll};
 
-use async_trait::async_trait;
 use futures::{Stream, StreamExt};
 use futures_async_stream::for_await;
 use madsim::time::Instant;
@@ -170,7 +169,6 @@ impl MergeExecutor {
     }
 }
 
-#[async_trait]
 impl Executor for MergeExecutor {
     fn execute(self: Box<Self>) -> BoxedMessageStream {
         let upstreams = self.upstreams;

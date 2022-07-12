@@ -11,40 +11,35 @@ import "source.proto";
 
 option optimize_for = SPEED;
 
-message StopMutation {
-  repeated uint32 actors = 1;
+message Dispatchers {
+  repeated Dispatcher dispatchers = 1;
 }
 
-message DispatcherMutation {
-  uint32 actor_id = 1;
-  uint64 dispatcher_id = 2;
-  repeated common.ActorInfo info = 3;
-}
-
-message UpdateMutation {
-  repeated DispatcherMutation mutations = 1;
-}
-
-message SourceChangeSplitMutation {
-  map<uint32, source.ConnectorSplits> actor_splits = 2;
-}
-
-message AddDispatcherMutation {
-  message Dispatchers {
-    repeated Dispatcher dispatchers = 1;
-  }
+message AddMutation {
   map<uint32, Dispatchers> actor_dispatchers = 1;
   // We may embed a source change split mutation here.
   // TODO: we may allow multiple mutations in a single barrier.
   map<uint32, source.ConnectorSplits> actor_splits = 2;
 }
 
+message StopMutation {
+  repeated uint32 actors = 1;
+}
+
+message UpdateMutation {
+  map<uint32, Dispatchers> actor_dispatchers = 1;
+}
+
+message SourceChangeSplitMutation {
+  map<uint32, source.ConnectorSplits> actor_splits = 2;
+}
+
 message Barrier {
   data.Epoch epoch = 1;
   oneof mutation {
-    StopMutation stop = 3;
-    UpdateMutation update = 4;
-    AddDispatcherMutation add_dispatcher = 5;
+    AddMutation add = 3;
+    StopMutation stop = 4;
+    UpdateMutation update = 5;
     SourceChangeSplitMutation splits = 6;
   }
   bytes span = 2;
@@ -356,11 +351,13 @@ message DispatchStrategy {
 // We encode both the type and other usage information in the proto.
 message Dispatcher {
   DispatcherType type = 1;
+  // Indices of the columns to be used for hashing.
   repeated uint32 column_indices = 2;
   // The hash mapping for consistent hash.
   ActorMapping hash_mapping = 3;
   // Dispatcher can be uniquely identified by a combination of actor id and dispatcher id.
-  // For dispatchers within actors, the id is the same as operator_id of the exchange plan node.
+  // - For dispatchers within actors, the id is the same as operator_id of the exchange plan node.
+  // - For MV on MV, the id is the same as the actor id of chain node in the downstream MV.
   uint64 dispatcher_id = 4;
   // Number of downstreams decides how many endpoints a dispatcher should dispatch.
   repeated uint32 downstream_actor_id = 5;

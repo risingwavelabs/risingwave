@@ -16,6 +16,7 @@ use core::time::Duration;
 use std::fmt::Debug;
 use std::sync::Arc;
 
+use anyhow::anyhow;
 use itertools::Itertools;
 use madsim::collections::{HashMap, HashSet};
 use parking_lot::Mutex;
@@ -757,14 +758,9 @@ impl LocalStreamManagerCore {
         );
 
         for actor in actors {
-            let ret = self.actors.insert(actor.get_actor_id(), actor.clone());
-            if ret.is_some() {
-                return Err(ErrorCode::InternalError(format!(
-                    "duplicated actor {}",
-                    actor.get_actor_id()
-                ))
-                .into());
-            }
+            self.actors
+                .try_insert(actor.get_actor_id(), actor.clone())
+                .map_err(|_| anyhow!("duplicated actor {}", actor.get_actor_id()))?;
         }
 
         for actor in actors {

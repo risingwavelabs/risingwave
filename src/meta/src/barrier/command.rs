@@ -21,9 +21,8 @@ use risingwave_common::error::{Result, RwError};
 use risingwave_common::util::epoch::Epoch;
 use risingwave_connector::SplitImpl;
 use risingwave_pb::source::{ConnectorSplit, ConnectorSplits};
-use risingwave_pb::stream_plan::add_dispatcher_mutation::Dispatchers;
 use risingwave_pb::stream_plan::barrier::Mutation;
-use risingwave_pb::stream_plan::{AddDispatcherMutation, Dispatcher, StopMutation};
+use risingwave_pb::stream_plan::{AddMutation, Dispatcher, Dispatchers, StopMutation};
 use risingwave_pb::stream_service::DropActorsRequest;
 use risingwave_rpc_client::StreamClientPoolRef;
 use uuid::Uuid;
@@ -171,7 +170,7 @@ where
                     })
                     .collect();
 
-                Some(Mutation::AddDispatcher(AddDispatcherMutation {
+                Some(Mutation::Add(AddMutation {
                     actor_dispatchers,
                     actor_splits,
                 }))

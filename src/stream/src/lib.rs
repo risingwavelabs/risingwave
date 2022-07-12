@@ -44,6 +44,7 @@
 #![feature(stmt_expr_attributes)]
 #![feature(unzip_option)]
 #![feature(allocator_api)]
+#![feature(map_try_insert)]
 
 #[macro_use]
 extern crate log;

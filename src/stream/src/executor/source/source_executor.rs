@@ -202,8 +202,8 @@ impl<S: StateStore> SourceExecutor<S> {
         let barrier = barrier_receiver.recv().await.unwrap();
 
         if let Some(mutation) = barrier.mutation.as_ref() {
-            if let Mutation::AddDispatcher(add_dispatcher) = mutation.as_ref() {
-                if let Some(splits) = add_dispatcher.splits.get(&self.actor_id) {
+            if let Mutation::Add { splits, .. } = mutation.as_ref() {
+                if let Some(splits) = splits.get(&self.actor_id) {
                     self.stream_source_splits = splits.clone();
                 }
             }
@@ -703,21 +703,19 @@ mod tests {
         .execute();
 
         let curr_epoch = 1919;
-        let init_barrier = Barrier::new_test_barrier(curr_epoch).with_mutation(
-            Mutation::AddDispatcher(AddDispatcher {
-                map: HashMap::new(),
-                splits: hashmap! {
-                    ActorId::default() => vec![
-                        SplitImpl::Datagen(
-                        DatagenSplit {
-                            split_index: 0,
-                            split_num: 3,
-                            start_offset: None,
-                        }),
-                    ],
-                },
-            }),
-        );
+        let init_barrier = Barrier::new_test_barrier(curr_epoch).with_mutation(Mutation::Add {
+            adds: HashMap::new(),
+            splits: hashmap! {
+                ActorId::default() => vec![
+                    SplitImpl::Datagen(
+                    DatagenSplit {
+                        split_index: 0,
+                        split_num: 3,
+                        start_offset: None,
+                    }),
+                ],
+            },
+        });
         barrier_tx.send(init_barrier).unwrap();
 
         let _ = materialize.next().await.unwrap(); // barrier
