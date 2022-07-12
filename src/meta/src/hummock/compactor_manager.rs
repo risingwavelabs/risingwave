@@ -189,7 +189,6 @@ mod tests {
             target_level: 0,
             gc_delete_keys: false,
             task_status: false,
-            vnode_mappings: vec![],
             compaction_group_id: StaticCompactionGroupId::StateDefault.into(),
             existing_table_ids: vec![],
             compression_algorithm: 0,

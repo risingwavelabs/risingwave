@@ -554,6 +554,16 @@ def section_streaming_exchange(outer_panels):
                     "rate(stream_exchange_recv_size[$__rate_interval])", "{{up_actor_id}}->{{down_actor_id}}"
                 ),
             ]),
+            panels.timeseries_bytes_per_sec("Fragment Exchange Send Throughput",[
+                panels.target(
+                    "rate(stream_exchange_frag_send_size[$__rate_interval])","{{up_fragment_id}}->{{down_fragment_id}}"
+                ),
+            ]),
+            panels.timeseries_bytes_per_sec("Fragment Exchange Recv Throughput", [
+                panels.target(
+                    "rate(stream_exchange_frag_recv_size[$__rate_interval])", "{{up_fragment_id}}->{{down_fragment_id}}"
+                ),
+            ]),
         ]),
     ]
 

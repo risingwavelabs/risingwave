@@ -29,9 +29,10 @@ mod lookup_union;
 mod merge;
 mod mview;
 mod project;
+mod sink;
 mod source;
-mod top_n;
 mod top_n_appendonly;
+mod top_n_new;
 mod union;
 
 // import for submodules
@@ -57,9 +58,10 @@ use self::lookup_union::*;
 use self::merge::*;
 use self::mview::*;
 use self::project::*;
+use self::sink::*;
 use self::source::*;
-use self::top_n::*;
 use self::top_n_appendonly::*;
+use self::top_n_new::*;
 use self::union::*;
 use crate::executor::{BoxedExecutor, Executor, ExecutorInfo};
 use crate::task::{ExecutorParams, LocalStreamManagerCore};
@@ -105,8 +107,9 @@ pub fn create_executor(
         store,
         stream,
         NodeBody::Source => SourceExecutorBuilder,
+        NodeBody::Sink => SinkExecutorBuilder,
         NodeBody::Project => ProjectExecutorBuilder,
-        NodeBody::TopN => TopNExecutorBuilder,
+        NodeBody::TopN => TopNExecutorNewBuilder,
         NodeBody::AppendOnlyTopN => AppendOnlyTopNExecutorBuilder,
         NodeBody::LocalSimpleAgg => LocalSimpleAggExecutorBuilder,
         NodeBody::GlobalSimpleAgg => GlobalSimpleAggExecutorBuilder,
