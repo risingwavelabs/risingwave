@@ -209,4 +209,4 @@
       BatchExchange { order: [], dist: Single }
         BatchScan { table: t1, columns: [v1, v2] }
   with_config_map:
-    USE_LOOKUP_JOIN: "true"
+    RW_BATCH_ENABLE_LOOKUP_JOIN: "true"
