@@ -66,7 +66,7 @@ struct SqlGenerator<'a, R: Rng> {
     rng: &'a mut R,
 
     /// Relations bound in generated query.
-    /// We might not read from all `tables.
+    /// We might not read from all tables.
     bound_relations: Vec<Table>,
 }
 
