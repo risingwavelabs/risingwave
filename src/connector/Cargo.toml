@@ -38,7 +38,7 @@ mysql_async = "0.30"
 num-traits = "0.2"
 paste = "1"
 prost = "0.10"
-pulsar = { git = "https://github.com/singularity-data/pulsar-rs.git", rev = "8d4789eea780d520136e1cc2535a1fec9385c53d", default-features = false, features = ["tokio-runtime"] }
+pulsar = { version = "4", default-features = false, features = ["tokio-runtime"] }
 rand = "0.8"
 rdkafka = { version = "0.28", features = ["cmake-build"] }
 risingwave_common = { path = "../common" }
@@ -53,9 +53,11 @@ static_assertions = "1"
 tempfile = "3"
 thiserror = "1"
 tokio = { version = "=0.2.0-alpha.3", package = "madsim-tokio", features = ["rt", "rt-multi-thread", "sync", "macros", "time", "signal", "fs"] }
+tokio-retry = "0.3"
 tokio-stream = "0.1"
 tokio-util = { version = "0.7", features = ["codec", "io"] }
 tonic = { version = "=0.2.0-alpha.3", package = "madsim-tonic" }
+tracing = { version = "0.1" }
 twox-hash = "1"
 url = "2"
 urlencoding = "2"

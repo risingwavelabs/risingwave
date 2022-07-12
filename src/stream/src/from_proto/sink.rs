@@ -12,10 +12,10 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use tokio::sync::mpsc::unbounded_channel;
+use risingwave_common::catalog::{ColumnId, TableId};
 
 use super::*;
-// use crate::executor::SinkExecutor;
+use crate::executor::SinkExecutor;
 
 pub struct SinkExecutorBuilder;
 
@@ -27,16 +27,18 @@ impl ExecutorBuilder for SinkExecutorBuilder {
         stream: &mut LocalStreamManagerCore,
     ) -> Result<BoxedExecutor> {
         let _node = try_match_expand!(node.get_node_body().unwrap(), NodeBody::Sink)?;
-        let (sender, _barrier_receiver) = unbounded_channel();
-        stream
-            .context
-            .lock_barrier_manager()
-            .register_sender(params.actor_id, sender);
+        let _sink_id = TableId::from(node.table_id);
+        let _column_ids = node
+            .get_column_ids()
+            .iter()
+            .map(|i| ColumnId::from(*i))
+            .collect::<Vec<ColumnId>>();
 
-        todo!();
-        // Ok(Box::new(SinkExecutor::new(
-        //         child, //materialize_executor
-        //         params.executor_id,
-        //     )?))
+        Ok(Box::new(SinkExecutor::new(
+            params.input.remove(0),
+            store,
+            node.properties.clone(),
+            params.executor_id,
+        )))
     }
 }
