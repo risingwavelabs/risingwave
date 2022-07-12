@@ -322,21 +322,19 @@ where
         let mut parallel_unit_migrate_map = HashMap::new();
         let mut parallel_unit_buf = HashMap::new();
         for (&actor_id, &target_id) in migrate_map {
-            for (_, fragments) in &*map {
+            if let Some((_, fragments)) = (*map).iter().next() {
                 if let Some(parallel_unit) = fragments.fetch_parallel_unit_by_actor(&actor_id) {
                     parallel_unit_migrate_map.insert(parallel_unit.id, target_id);
                 }
-                break;
             }
-            for (_, fragments) in &*map {
+            if let Some((_, fragments)) = (*map).iter().next() {
                 if let Some(parallel_unit) = fragments.fetch_parallel_unit_by_id(&target_id) {
                     parallel_unit_buf.insert(parallel_unit.id, parallel_unit);
                 }
-                break;
             }
         }
         let mut new_fragments = Vec::new();
-        for (_, fragments) in map {
+        for fragments in map.values_mut() {
             let mut new_fragment = fragments.clone();
             if new_fragment.migrate_parallel_units(&parallel_unit_migrate_map, &parallel_unit_buf) {
                 new_fragments.push(new_fragment);

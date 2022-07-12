@@ -196,12 +196,12 @@ where
         let res = self.fragment_manager.migrate_actors(&migrate_map).await;
         match res {
             Ok((fragments, migrate_map)) => {
-                return self
+                self
                     .catalog_manager
                     .update_table_mapping(&fragments, &migrate_map)
-                    .await;
+                    .await
             }
-            Err(e) => return Err(e),
+            Err(e) => Err(e)
         }
     }
 

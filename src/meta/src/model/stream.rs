@@ -169,9 +169,9 @@ impl TableFragments {
 
     pub fn fetch_parallel_unit_by_actor(&self, actor_id: &ActorId) -> Option<ParallelUnit> {
         if let Some(status) = self.actor_status.get(actor_id) {
-            return status.parallel_unit.clone();
+            status.parallel_unit.clone()
         } else {
-            return None;
+            None
         }
     }
 
@@ -179,7 +179,7 @@ impl TableFragments {
         &self,
         parallel_unit_id: &ParallelUnitId,
     ) -> Option<ParallelUnit> {
-        for (_, status) in &self.actor_status {
+        for status in self.actor_status.values() {
             if &status.get_parallel_unit().unwrap().id == parallel_unit_id {
                 return status.parallel_unit.clone();
             }
@@ -276,7 +276,7 @@ impl TableFragments {
             }
         }
         if flag {
-            for (_, fragment) in &mut self.fragments {
+            for fragment in self.fragments.values_mut() {
                 if fragment.vnode_mapping.is_some() {
                     let mapping = fragment.vnode_mapping.as_mut().unwrap();
                     let has_key = mapping.data.iter().any(|id| migrate_map.contains_key(id));
