@@ -11,11 +11,10 @@ import "source.proto";
 
 option optimize_for = SPEED;
 
-message Dispatchers {
-  repeated Dispatcher dispatchers = 1;
-}
-
 message AddMutation {
+  message Dispatchers {
+    repeated Dispatcher dispatchers = 1;
+  }
   map<uint32, Dispatchers> actor_dispatchers = 1;
   // We may embed a source change split mutation here.
   // TODO: we may allow multiple mutations in a single barrier.
@@ -27,7 +26,17 @@ message StopMutation {
 }
 
 message UpdateMutation {
-  map<uint32, Dispatchers> actor_dispatchers = 1;
+  message DispatcherUpdate {
+    // The hash mapping for consistent hash.
+    ActorMapping hash_mapping = 1;
+    // Dispatcher can be uniquely identified by a combination of actor id and dispatcher id.
+    uint64 dispatcher_id = 2;
+    // Added downstream actors.
+    repeated uint32 added_downstream_actor_id = 3;
+    // Removed downstream actors.
+    repeated uint32 removed_downstream_actor_id = 4;
+  }
+  map<uint32, DispatcherUpdate> actor_dispatcher_update = 1;
 }
 
 message SourceChangeSplitMutation {

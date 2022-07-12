@@ -28,19 +28,19 @@ use risingwave_common::catalog::Schema;
 use risingwave_common::error::{Result, ToRwResult};
 use risingwave_common::types::DataType;
 use risingwave_connector::{ConnectorState, SplitImpl};
-use risingwave_pb::common::ActorInfo;
 use risingwave_pb::data::Epoch as ProstEpoch;
+use risingwave_pb::stream_plan::add_mutation::Dispatchers;
 use risingwave_pb::stream_plan::barrier::Mutation as ProstMutation;
 use risingwave_pb::stream_plan::stream_message::StreamMessage;
+use risingwave_pb::stream_plan::update_mutation::DispatcherUpdate;
 use risingwave_pb::stream_plan::{
-    AddMutation, Barrier as ProstBarrier, Dispatcher as ProstDispatcher,
-    Dispatchers as ProstDispatchers, SourceChangeSplitMutation, StopMutation,
-    StreamMessage as ProstStreamMessage, UpdateMutation,
+    AddMutation, Barrier as ProstBarrier, Dispatcher as ProstDispatcher, SourceChangeSplitMutation,
+    StopMutation, StreamMessage as ProstStreamMessage, UpdateMutation,
 };
 use smallvec::SmallVec;
 use tracing::trace_span;
 
-use crate::task::{ActorId, DispatcherId, ENABLE_BARRIER_AGGREGATION};
+use crate::task::{ActorId, ENABLE_BARRIER_AGGREGATION};
 
 mod actor;
 pub mod aggregation;
@@ -174,7 +174,7 @@ pub trait ExprFn = Fn(&DataChunk) -> Result<Bitmap> + Send + Sync + 'static;
 #[derive(Debug, Clone, PartialEq)]
 pub enum Mutation {
     Stop(HashSet<ActorId>),
-    Update(HashMap<ActorId, Vec<ProstDispatcher>>),
+    Update(HashMap<ActorId, DispatcherUpdate>),
     Add {
         adds: HashMap<ActorId, Vec<ProstDispatcher>>,
         // TODO: remove this and use `SourceChangesSplit` after we support multiple mutations.
@@ -297,20 +297,10 @@ impl Mutation {
     fn to_protobuf(&self) -> ProstMutation {
         match self {
             Mutation::Stop(actors) => ProstMutation::Stop(StopMutation {
-                actors: actors.iter().cloned().collect::<Vec<_>>(),
+                actors: actors.iter().copied().collect::<Vec<_>>(),
             }),
             Mutation::Update(updates) => ProstMutation::Update(UpdateMutation {
-                actor_dispatchers: updates
-                    .iter()
-                    .map(|(&actor_id, dispatchers)| {
-                        (
-                            actor_id,
-                            ProstDispatchers {
-                                dispatchers: dispatchers.clone(),
-                            },
-                        )
-                    })
-                    .collect(),
+                actor_dispatcher_update: updates.clone(),
             }),
             Mutation::Add { adds, .. } => ProstMutation::Add(AddMutation {
                 actor_dispatchers: adds
@@ -318,7 +308,7 @@ impl Mutation {
                     .map(|(&actor_id, dispatchers)| {
                         (
                             actor_id,
-                            ProstDispatchers {
+                            Dispatchers {
                                 dispatchers: dispatchers.clone(),
                             },
                         )
@@ -355,13 +345,9 @@ impl Mutation {
                 Mutation::Stop(HashSet::from_iter(stop.get_actors().clone()))
             }
 
-            ProstMutation::Update(update) => Mutation::Update(
-                update
-                    .actor_dispatchers
-                    .iter()
-                    .map(|(&actor_id, dispatchers)| (actor_id, dispatchers.dispatchers.clone()))
-                    .collect(),
-            ),
+            ProstMutation::Update(update) => {
+                Mutation::Update(update.actor_dispatcher_update.clone())
+            }
 
             ProstMutation::Add(add) => Mutation::Add {
                 adds: add
