@@ -31,25 +31,19 @@ pub use sstable::*;
 pub mod compaction_executor;
 pub mod compaction_group_client;
 pub mod compactor;
-#[cfg(test)]
-mod compactor_tests;
-mod conflict_detector;
+pub mod conflict_detector;
 mod error;
 pub mod hummock_meta_client;
 pub mod iterator;
 mod local_version;
 pub mod local_version_manager;
 pub mod shared_buffer;
-#[cfg(test)]
-mod snapshot_tests;
 pub mod sstable_store;
 mod state_store;
-#[cfg(test)]
-mod state_store_tests;
-#[cfg(test)]
-pub(crate) mod test_utils;
+#[cfg(any(test, feature = "test"))]
+pub mod test_utils;
 mod utils;
-mod vacuum;
+pub mod vacuum;
 pub mod value;
 
 #[cfg(target_os = "linux")]

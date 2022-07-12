@@ -77,13 +77,13 @@ zstd = "0.11.2"
 
 [dev-dependencies]
 criterion = "0.3"
-risingwave_meta = { path = "../meta", features = ["test"] }
 risingwave_test_runner = { path = "../test_runner" }
 uuid = { version = "1", features = ["v4"] }
 
 [features]
 # rocksdb-local = ["rocksdb"]
 # tikv = ["tikv-client"]
+test = []
 failpoints = ["fail/failpoints"]
 
 [[bench]]

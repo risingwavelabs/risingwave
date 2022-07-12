@@ -31,8 +31,8 @@ mod merge_inner;
 pub use forward_user::*;
 pub use merge_inner::{OrderedMergeIteratorInner, UnorderedMergeIteratorInner};
 
-#[cfg(test)]
-pub(crate) mod test_utils;
+#[cfg(any(test, feature = "test"))]
+pub mod test_utils;
 
 use async_trait::async_trait;
 

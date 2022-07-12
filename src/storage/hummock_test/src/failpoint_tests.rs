@@ -19,14 +19,14 @@ use risingwave_hummock_sdk::compaction_group::StaticCompactionGroupId;
 use risingwave_meta::hummock::test_utils::setup_compute_env;
 use risingwave_meta::hummock::MockHummockMetaClient;
 use risingwave_rpc_client::HummockMetaClient;
-
-use crate::hummock::compaction_group_client::DummyCompactionGroupClient;
-use crate::hummock::iterator::test_utils::mock_sstable_store;
-use crate::hummock::test_utils::{count_iter, default_config_for_test};
-use crate::hummock::HummockStorage;
-use crate::storage_value::StorageValue;
-use crate::store::{ReadOptions, WriteOptions};
-use crate::StateStore;
+use risingwave_storage::hummock::compaction_group_client::DummyCompactionGroupClient;
+use risingwave_storage::hummock::iterator::test_utils::mock_sstable_store;
+use risingwave_storage::hummock::test_utils::{count_iter, default_config_for_test};
+use risingwave_storage::hummock::HummockStorage;
+use risingwave_storage::monitor::StateStoreMetrics;
+use risingwave_storage::storage_value::StorageValue;
+use risingwave_storage::store::{ReadOptions, WriteOptions};
+use risingwave_storage::StateStore;
 
 #[tokio::test]
 #[cfg(all(test, feature = "failpoints"))]
@@ -46,7 +46,7 @@ async fn test_failpoints_state_store_read_upload() {
         hummock_options,
         sstable_store.clone(),
         meta_client.clone(),
-        Arc::new(crate::monitor::StateStoreMetrics::unused()),
+        Arc::new(StateStoreMetrics::unused()),
         Arc::new(DummyCompactionGroupClient::new(
             StaticCompactionGroupId::StateDefault.into(),
         )),
