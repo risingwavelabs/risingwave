@@ -25,11 +25,6 @@ message UpdateMutation {
   repeated DispatcherMutation mutations = 1;
 }
 
-message AddMutation {
-  repeated DispatcherMutation mutations = 1;
-  map<uint32, source.ConnectorSplits> actor_splits = 2;
-}
-
 message SourceChangeSplitMutation {
   map<uint32, source.ConnectorSplits> actor_splits = 2;
 }
@@ -39,6 +34,8 @@ message AddDispatcherMutation {
     repeated Dispatcher dispatchers = 1;
   }
   map<uint32, Dispatchers> actor_dispatchers = 1;
+  // We may embed a source change split mutation here.
+  // TODO: we may allow multiple mutations in a single barrier.
   map<uint32, source.ConnectorSplits> actor_splits = 2;
 }
 
@@ -47,11 +44,10 @@ message Barrier {
   oneof mutation {
     StopMutation stop = 3;
     UpdateMutation update = 4;
-    AddMutation add = 5;
-    AddDispatcherMutation add_dispatcher = 8;
-    SourceChangeSplitMutation splits = 7;
+    AddDispatcherMutation add_dispatcher = 5;
+    SourceChangeSplitMutation splits = 6;
   }
-  bytes span = 6;
+  bytes span = 2;
 }
 
 message StreamMessage {

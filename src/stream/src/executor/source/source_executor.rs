@@ -207,12 +207,6 @@ impl<S: StateStore> SourceExecutor<S> {
                     self.stream_source_splits = splits.clone();
                 }
             }
-            // TODO: remove this
-            if let Mutation::AddOutput(add_output) = mutation.as_ref() {
-                if let Some(splits) = add_output.splits.get(&self.actor_id) {
-                    self.stream_source_splits = splits.clone();
-                }
-            }
         }
 
         let epoch = barrier.epoch.prev;
@@ -709,8 +703,8 @@ mod tests {
         .execute();
 
         let curr_epoch = 1919;
-        let init_barrier =
-            Barrier::new_test_barrier(curr_epoch).with_mutation(Mutation::AddOutput(AddOutput {
+        let init_barrier = Barrier::new_test_barrier(curr_epoch).with_mutation(
+            Mutation::AddDispatcher(AddDispatcher {
                 map: HashMap::new(),
                 splits: hashmap! {
                     ActorId::default() => vec![
@@ -722,7 +716,8 @@ mod tests {
                         }),
                     ],
                 },
-            }));
+            }),
+        );
         barrier_tx.send(init_barrier).unwrap();
 
         let _ = materialize.next().await.unwrap(); // barrier

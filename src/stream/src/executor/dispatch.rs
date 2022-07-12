@@ -270,27 +270,6 @@ impl DispatchExecutorInner {
                 }
             }
 
-            Mutation::AddOutput(adds) => {
-                for dispatcher in &mut self.dispatchers {
-                    if let Some(downstream_actor_infos) =
-                        adds.map.get(&(self.actor_id, dispatcher.dispatcher_id()))
-                    {
-                        let mut outputs_to_add = Vec::with_capacity(downstream_actor_infos.len());
-                        for downstream_actor_info in downstream_actor_infos {
-                            let down_id = downstream_actor_info.get_actor_id();
-                            let downstream_addr = downstream_actor_info.get_host()?.into();
-                            outputs_to_add.push(new_output(
-                                &self.context,
-                                downstream_addr,
-                                self.actor_id,
-                                down_id,
-                            )?);
-                        }
-                        dispatcher.add_outputs(outputs_to_add);
-                    }
-                }
-            }
-
             _ => {}
         };
 
@@ -911,7 +890,7 @@ mod tests {
 
     use super::*;
     use crate::executor::receiver::ReceiverExecutor;
-    use crate::executor::{ActorContext, AddOutput};
+    use crate::executor::ActorContext;
     use crate::task::{LOCAL_OUTPUT_CHANNEL_SIZE, LOCAL_TEST_ADDR};
 
     #[derive(Debug)]
@@ -1114,29 +1093,6 @@ mod tests {
         let tctx = ctx.clone();
         {
             assert_eq!(tctx.get_channel_pair_number(), 1);
-        }
-
-        add_local_channels(ctx.clone(), vec![(233, 245)]);
-        add_remote_channels(ctx.clone(), 233, vec![246]);
-        tx.send(Message::Barrier(
-            Barrier::new_test_barrier(1).with_mutation(Mutation::AddOutput(AddOutput {
-                map: {
-                    let mut actors = HashMap::default();
-                    actors.insert(
-                        (233, 666),
-                        vec![helper_make_local_actor(245), helper_make_remote_actor(246)],
-                    );
-                    actors
-                },
-                ..Default::default()
-            })),
-        ))
-        .await
-        .unwrap();
-        executor.next().await.unwrap().unwrap();
-        let tctx = ctx.clone();
-        {
-            assert_eq!(tctx.get_channel_pair_number(), 3);
         }
     }
 

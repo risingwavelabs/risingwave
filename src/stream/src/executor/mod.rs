@@ -34,7 +34,7 @@ use risingwave_pb::stream_plan::add_dispatcher_mutation::Dispatchers;
 use risingwave_pb::stream_plan::barrier::Mutation as ProstMutation;
 use risingwave_pb::stream_plan::stream_message::StreamMessage;
 use risingwave_pb::stream_plan::{
-    AddDispatcherMutation, AddMutation, Barrier as ProstBarrier, Dispatcher as ProstDispatcher,
+    AddDispatcherMutation, Barrier as ProstBarrier, Dispatcher as ProstDispatcher,
     DispatcherMutation, SourceChangeSplitMutation, StopMutation,
     StreamMessage as ProstStreamMessage, UpdateMutation,
 };
@@ -173,12 +173,6 @@ pub const INVALID_EPOCH: u64 = 0;
 pub trait ExprFn = Fn(&DataChunk) -> Result<Bitmap> + Send + Sync + 'static;
 
 #[derive(Debug, PartialEq, Clone, Default)]
-pub struct AddOutput {
-    pub map: HashMap<(ActorId, DispatcherId), Vec<ActorInfo>>,
-    pub splits: HashMap<ActorId, Vec<SplitImpl>>,
-}
-
-#[derive(Debug, PartialEq, Clone, Default)]
 pub struct AddDispatcher {
     pub map: HashMap<ActorId, Vec<ProstDispatcher>>,
     // TODO: remove this and use `SourceChangesSplit` after we support multiple mutations.
@@ -189,7 +183,6 @@ pub struct AddDispatcher {
 pub enum Mutation {
     Stop(HashSet<ActorId>),
     UpdateOutputs(HashMap<(ActorId, DispatcherId), Vec<ActorInfo>>),
-    AddOutput(AddOutput),
     AddDispatcher(AddDispatcher),
     SourceChangeSplit(HashMap<ActorId, ConnectorState>),
 }
@@ -279,15 +272,8 @@ impl Barrier {
         matches!(self.mutation.as_deref(), Some(Mutation::Stop(actors)) if actors.contains(&actor_id))
     }
 
-    pub fn is_to_add_output(&self, actor_id: ActorId) -> bool {
-        // TODO: remove `AddOutput`
+    pub fn is_to_add_dispatcher(&self, actor_id: ActorId) -> bool {
         matches!(
-            self.mutation.as_deref(),
-            Some(Mutation::AddOutput(map)) if map.map
-                .values()
-                .flatten()
-                .any(|info| info.actor_id == actor_id)
-        ) || matches!(
             self.mutation.as_deref(),
             Some(Mutation::AddDispatcher(map)) if map.map
                 .values()
@@ -326,18 +312,6 @@ impl Mutation {
                         info: actors.clone(),
                     })
                     .collect(),
-            }),
-            Mutation::AddOutput(adds) => ProstMutation::Add(AddMutation {
-                mutations: adds
-                    .map
-                    .iter()
-                    .map(|(&(actor_id, dispatcher_id), actors)| DispatcherMutation {
-                        actor_id,
-                        dispatcher_id,
-                        info: actors.clone(),
-                    })
-                    .collect(),
-                ..Default::default()
             }),
             Mutation::AddDispatcher(adds) => ProstMutation::AddDispatcher(AddDispatcherMutation {
                 actor_dispatchers: adds
@@ -395,33 +369,7 @@ impl Mutation {
                     })
                     .collect::<HashMap<(ActorId, DispatcherId), Vec<ActorInfo>>>(),
             ),
-            // TODO: remove this
-            ProstMutation::Add(adds) => Mutation::AddOutput(AddOutput {
-                map: adds
-                    .mutations
-                    .iter()
-                    .map(|mutation| {
-                        (
-                            (mutation.actor_id, mutation.dispatcher_id),
-                            mutation.get_info().clone(),
-                        )
-                    })
-                    .collect::<HashMap<(ActorId, DispatcherId), Vec<ActorInfo>>>(),
-                splits: adds
-                    .actor_splits
-                    .iter()
-                    .map(|(&actor_id, splits)| {
-                        (
-                            actor_id,
-                            splits
-                                .splits
-                                .iter()
-                                .map(|split| split.try_into().unwrap())
-                                .collect(),
-                        )
-                    })
-                    .collect(),
-            }),
+
             ProstMutation::AddDispatcher(adds) => Mutation::AddDispatcher(AddDispatcher {
                 map: adds
                     .actor_dispatchers
