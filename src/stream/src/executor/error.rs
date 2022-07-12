@@ -40,6 +40,9 @@ enum StreamExecutorErrorInner {
     #[error("Serialize/deserialize error: {0}")]
     SerdeError(BoxedError),
 
+    #[error("Sink error: {0}")]
+    SinkError(RwError),
+
     #[error("Channel `{0}` closed")]
     ChannelClosed(String),
 
@@ -64,6 +67,10 @@ impl StreamExecutorError {
 
     pub fn serde_error(error: impl Error) -> Self {
         StreamExecutorErrorInner::SerdeError(error.into()).into()
+    }
+
+    pub fn sink_error(error: impl Into<RwError>) -> Self {
+        StreamExecutorErrorInner::SinkError(error.into()).into()
     }
 
     pub fn channel_closed(name: impl Into<String>) -> Self {

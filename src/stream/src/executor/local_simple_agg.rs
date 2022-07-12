@@ -183,7 +183,7 @@ mod tests {
         tx.push_barrier(3, false);
 
         let agg_calls = vec![AggCall {
-            kind: AggKind::RowCount,
+            kind: AggKind::Count,
             args: AggArgs::None,
             return_type: DataType::Int64,
             append_only: false,
@@ -237,7 +237,7 @@ mod tests {
         // This is local simple aggregation, so we add another row count state
         let agg_calls = vec![
             AggCall {
-                kind: AggKind::RowCount,
+                kind: AggKind::Count,
                 args: AggArgs::None,
                 return_type: DataType::Int64,
                 append_only: false,
