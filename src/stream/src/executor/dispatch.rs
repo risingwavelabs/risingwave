@@ -18,7 +18,6 @@ use std::iter::repeat_with;
 use std::sync::Arc;
 
 use async_trait::async_trait;
-use enum_as_inner::EnumAsInner;
 use futures::Stream;
 use futures_async_stream::try_stream;
 use itertools::Itertools;
@@ -251,6 +250,7 @@ impl DispatchExecutorInner {
             let ids = update.removed_downstream_actor_id.iter().copied().collect();
             dispatcher.remove_outputs(&ids);
 
+            #[expect(clippy::single_match)]
             match dispatcher {
                 DispatcherImpl::Hash(dispatcher) => {
                     dispatcher.hash_mapping = {
@@ -365,7 +365,7 @@ impl StreamConsumer for DispatchExecutor {
     }
 }
 
-#[derive(Debug, EnumAsInner)]
+#[derive(Debug)]
 pub enum DispatcherImpl {
     Hash(HashDataDispatcher),
     Broadcast(BroadcastDispatcher),
@@ -1066,6 +1066,7 @@ mod tests {
             for local_actor_id in [233, 234, 235] {
                 actor_infos.insert(local_actor_id, helper_make_local_actor(local_actor_id));
             }
+            #[expect(clippy::single_element_loop)]
             for remote_actor_id in [238] {
                 actor_infos.insert(remote_actor_id, helper_make_remote_actor(remote_actor_id));
             }
