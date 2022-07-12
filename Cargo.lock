@@ -629,7 +629,7 @@ dependencies = [
  "sync_wrapper",
  "tokio",
  "tower",
- "tower-http",
+ "tower-http 0.3.4",
  "tower-layer",
  "tower-service",
 ]
@@ -3626,9 +3626,11 @@ dependencies = [
 
 [[package]]
 name = "pulsar"
-version = "4.1.1"
-source = "git+https://github.com/singularity-data/pulsar-rs.git?rev=8d4789eea780d520136e1cc2535a1fec9385c53d#8d4789eea780d520136e1cc2535a1fec9385c53d"
+version = "4.1.2"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "31a5a4fbe9363c113b7e25ae76dd2d6455411c815d688977be6f0b68ae5e73b8"
 dependencies = [
+ "async-trait",
  "bit-vec",
  "bytes",
  "chrono",
@@ -4056,7 +4058,6 @@ dependencies = [
  "futures",
  "futures-async-stream",
  "humantime",
- "hyper",
  "itertools",
  "lazy_static",
  "libc",
@@ -4086,13 +4087,27 @@ dependencies = [
  "thiserror",
  "tokio-stream",
  "toml",
- "tower",
- "tower-http",
  "tracing",
  "twox-hash",
  "url",
  "value-encoding",
  "workspace-hack",
+]
+
+[[package]]
+name = "risingwave_common_service"
+version = "0.1.10"
+dependencies = [
+ "hyper",
+ "log",
+ "madsim-tokio",
+ "prometheus",
+ "risingwave_common",
+ "risingwave_pb",
+ "risingwave_rpc_client",
+ "tower",
+ "tower-http 0.2.5",
+ "tracing",
 ]
 
 [[package]]
@@ -4105,6 +4120,7 @@ dependencies = [
  "madsim-tonic",
  "prometheus",
  "risingwave_common",
+ "risingwave_common_service",
  "risingwave_object_store",
  "risingwave_pb",
  "risingwave_rpc_client",
@@ -4151,6 +4167,7 @@ dependencies = [
  "rdkafka",
  "risingwave_batch",
  "risingwave_common",
+ "risingwave_common_service",
  "risingwave_connector",
  "risingwave_pb",
  "risingwave_rpc_client",
@@ -4166,7 +4183,7 @@ dependencies = [
  "thiserror",
  "tokio-stream",
  "tower",
- "tower-http",
+ "tower-http 0.3.4",
  "tracing",
  "twox-hash",
  "url",
@@ -4223,6 +4240,7 @@ dependencies = [
  "serde",
  "serde_derive",
  "serde_json",
+ "serde_with",
  "smallvec",
  "static_assertions",
  "tempfile",
@@ -4331,6 +4349,7 @@ dependencies = [
  "rand 0.8.5",
  "risingwave_batch",
  "risingwave_common",
+ "risingwave_common_service",
  "risingwave_expr",
  "risingwave_pb",
  "risingwave_rpc_client",
@@ -4436,7 +4455,7 @@ dependencies = [
  "tokio-retry",
  "tokio-stream",
  "tower",
- "tower-http",
+ "tower-http 0.3.4",
  "tracing",
  "uuid",
  "workspace-hack",
@@ -4780,6 +4799,7 @@ name = "risingwave_test_runner"
 version = "0.1.10"
 dependencies = [
  "fail",
+ "workspace-hack",
 ]
 
 [[package]]
@@ -5687,6 +5707,24 @@ dependencies = [
 
 [[package]]
 name = "tower-http"
+version = "0.2.5"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "aba3f3efabf7fb41fae8534fc20a817013dd1c12cb45441efb6c82e6556b4cd8"
+dependencies = [
+ "bitflags",
+ "bytes",
+ "futures-core",
+ "futures-util",
+ "http",
+ "http-body",
+ "http-range-header",
+ "pin-project-lite",
+ "tower-layer",
+ "tower-service",
+]
+
+[[package]]
+name = "tower-http"
 version = "0.3.4"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "3c530c8675c1dbf98facee631536fa116b5fb6382d7dd6dc1b118d970eafe3ba"
@@ -6216,7 +6254,6 @@ dependencies = [
  "futures-sink",
  "futures-task",
  "futures-util",
- "hashbrown 0.11.2",
  "hyper",
  "indexmap",
  "isahc",
@@ -6248,7 +6285,7 @@ dependencies = [
  "tokio-stream",
  "tokio-util",
  "tower",
- "tower-http",
+ "tower-http 0.3.4",
  "tracing",
  "tracing-core",
  "tracing-futures",
