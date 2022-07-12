@@ -37,6 +37,7 @@
 
 pub mod error;
 pub mod expr;
+pub mod table_function;
 pub mod vector_op;
 
 pub use error::ExprError;

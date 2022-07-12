@@ -149,14 +149,7 @@ message HopWindowNode {
 }
 
 message TableFunctionNode {
-  enum Type {
-    GENERATE = 0;
-    UNNEST = 1;
-  }
-  Type function_type = 1;
-  repeated expr.ExprNode args = 2;
-  // The element type of the return set.
-  data.DataType return_type = 3;
+  expr.TableFunction table_function = 1;
 }
 
 // Task is a running instance of Stage.

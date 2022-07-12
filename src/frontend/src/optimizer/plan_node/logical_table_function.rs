@@ -14,13 +14,13 @@
 
 use std::fmt;
 
-use risingwave_common::catalog::Schema;
+use risingwave_common::catalog::{Field, Schema};
 use risingwave_common::error::{ErrorCode, Result};
 use risingwave_common::types::DataType;
 
 use super::{ColPrunable, LogicalFilter, PlanBase, PlanRef, PredicatePushdown, ToBatch, ToStream};
 use crate::binder::FunctionType;
-use crate::expr::{Expr, ExprImpl};
+use crate::expr::ExprImpl;
 use crate::optimizer::plan_node::BatchTableFunction;
 use crate::session::OptimizerContextRef;
 use crate::utils::Condition;
@@ -30,7 +30,7 @@ use crate::utils::Condition;
 pub struct LogicalTableFunction {
     pub base: PlanBase,
     pub(super) args: Vec<ExprImpl>,
-    pub series_type: FunctionType,
+    pub function_type: FunctionType,
     pub data_type: DataType,
 }
 
@@ -38,49 +38,24 @@ impl LogicalTableFunction {
     /// Create a [`LogicalTableFunction`] node. Used internally by optimizer.
     pub fn new(
         args: Vec<ExprImpl>,
-        schema: Schema,
-        series_type: FunctionType,
+        function_type: FunctionType,
         data_type: DataType,
         ctx: OptimizerContextRef,
     ) -> Self {
+        let schema = Schema {
+            fields: vec![Field::with_name(data_type.clone(), function_type.name())],
+        };
         let base = PlanBase::new_logical(ctx, schema, vec![]);
-
         Self {
             base,
             args,
-            series_type,
+            function_type,
             data_type,
         }
     }
 
-    /// Create a [`LogicalTableFunction`] node. Used by planner.
-    pub fn create_generate_series(
-        start: ExprImpl,
-        stop: ExprImpl,
-        step: ExprImpl,
-        schema: Schema,
-        ctx: OptimizerContextRef,
-    ) -> PlanRef {
-        // No additional checks after binder.
-        let data_type = start.return_type();
-        Self::new(
-            vec![start, stop, step],
-            schema,
-            FunctionType::Generate,
-            data_type,
-            ctx,
-        )
-        .into()
-    }
-
-    pub fn create_unnest(args: Vec<ExprImpl>, schema: Schema, ctx: OptimizerContextRef) -> PlanRef {
-        // No additional checks after binder.
-        let data_type = args[0].return_type();
-        Self::new(args, schema, FunctionType::Unnest, data_type, ctx).into()
-    }
-
     pub fn fmt_with_name(&self, f: &mut fmt::Formatter, name: &str) -> fmt::Result {
-        match self.series_type {
+        match self.function_type {
             FunctionType::Generate => {
                 write!(
                     f,

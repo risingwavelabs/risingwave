@@ -90,6 +90,13 @@ pub enum DataType {
     List { datatype: Box<DataType> },
 }
 
+pub fn unnested_list_type(datatype: DataType) -> DataType {
+    match datatype {
+        DataType::List { datatype } => unnested_list_type(*datatype),
+        _ => datatype,
+    }
+}
+
 const DECIMAL_DEFAULT_PRECISION: u32 = 20;
 const DECIMAL_DEFAULT_SCALE: u32 = 6;
 

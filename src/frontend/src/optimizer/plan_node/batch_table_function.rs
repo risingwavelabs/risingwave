@@ -18,6 +18,7 @@ use itertools::Itertools;
 use risingwave_common::error::Result;
 use risingwave_pb::batch_plan::plan_node::NodeBody;
 use risingwave_pb::batch_plan::TableFunctionNode;
+use risingwave_pb::expr::TableFunction;
 
 use super::{PlanBase, PlanRef, PlanTreeNodeLeaf, ToBatchProst, ToDistributedBatch};
 use crate::expr::Expr;
@@ -66,14 +67,16 @@ impl ToDistributedBatch for BatchTableFunction {
 impl ToBatchProst for BatchTableFunction {
     fn to_batch_prost_body(&self) -> NodeBody {
         NodeBody::TableFunction(TableFunctionNode {
-            function_type: self.logical.series_type.clone() as i32,
-            args: self
-                .logical
-                .args
-                .iter()
-                .map(|c| c.to_expr_proto())
-                .collect_vec(),
-            return_type: Some(self.logical.data_type.to_protobuf()),
+            table_function: Some(TableFunction {
+                function_type: self.logical.function_type.clone() as i32,
+                args: self
+                    .logical
+                    .args
+                    .iter()
+                    .map(|c| c.to_expr_proto())
+                    .collect_vec(),
+                return_type: Some(self.logical.data_type.to_protobuf()),
+            }),
         })
     }
 }

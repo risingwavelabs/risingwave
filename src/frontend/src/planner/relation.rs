@@ -15,13 +15,12 @@
 use std::rc::Rc;
 
 use itertools::Itertools;
-use risingwave_common::catalog::{Field, Schema};
 use risingwave_common::error::{ErrorCode, Result};
 use risingwave_common::types::ScalarImpl;
 
 use crate::binder::{
     BoundBaseTable, BoundJoin, BoundSource, BoundSystemTable, BoundTableFunction,
-    BoundWindowTableFunction, FunctionType, Relation, WindowTableFunctionKind,
+    BoundWindowTableFunction, Relation, WindowTableFunctionKind,
 };
 use crate::expr::{ExprImpl, ExprType, FunctionCall, InputRef};
 use crate::optimizer::plan_node::{
@@ -40,10 +39,7 @@ impl Planner {
             Relation::Join(join) => self.plan_join(*join),
             Relation::WindowTableFunction(tf) => self.plan_window_table_function(*tf),
             Relation::Source(s) => self.plan_source(*s),
-            Relation::TableFunction(gs) => match gs.func_type {
-                FunctionType::Generate => self.plan_generate_series_function(*gs),
-                FunctionType::Unnest => self.plan_unnest_function(*gs),
-            },
+            Relation::TableFunction(tf) => self.plan_table_function(*tf),
         }
     }
 
@@ -104,41 +100,17 @@ impl Planner {
         }
     }
 
-    pub(super) fn plan_generate_series_function(
+    pub(super) fn plan_table_function(
         &mut self,
         table_function: BoundTableFunction,
     ) -> Result<PlanRef> {
-        let schema = Schema::new(vec![Field::with_name(
-            table_function.data_type,
-            "generate_series",
-        )]);
-
-        let mut args = table_function.args.into_iter();
-
-        let Some((start,stop,step)) = args.next_tuple() else {
-            return Err(ErrorCode::BindError("Invalid arguments for Generate series function".to_string()).into());
-        };
-
-        Ok(LogicalTableFunction::create_generate_series(
-            start,
-            stop,
-            step,
-            schema,
-            self.ctx(),
-        ))
-    }
-
-    pub(super) fn plan_unnest_function(
-        &mut self,
-        table_function: BoundTableFunction,
-    ) -> Result<PlanRef> {
-        let schema = Schema::new(vec![Field::with_name(table_function.data_type, "unnest")]);
-
-        Ok(LogicalTableFunction::create_unnest(
+        Ok(LogicalTableFunction::new(
             table_function.args,
-            schema,
+            table_function.func_type,
+            table_function.data_type,
             self.ctx(),
-        ))
+        )
+        .into())
     }
 
     fn plan_tumble_window(
