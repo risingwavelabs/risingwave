@@ -29,12 +29,6 @@ select * from t1 join t3 on t1.v1 = t3.v1;
 ----
 1 2 1 2
 
-statement error
-select * from t1 join t3 on t1.v2 = t3.v2;
-
-statement error
-select * from t1 join t2 on t1.v2 = t2.v1;
-
 statement ok
 drop materialized view t3;
 
