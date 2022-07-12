@@ -54,16 +54,17 @@ pub struct Binder {
     db_name: String,
     context: BindContext,
     /// A stack holding contexts of outer queries when binding a subquery.
-    /// It also holds all of the outer table contexts for each respective
+    /// It also holds all of the stashed table contexts for each respective
     /// subquery.
     ///
     /// See [`Binder::bind_subquery_expr`] for details.
     upper_subquery_contexts: Vec<(BindContext, Vec<BindContext>)>,
 
-    /// A stack holding contexts of parent joins when binding joins.
+    /// A stack holding stashed contexts of non-child `TableFactor`s when binding
+    /// column expressions in a join.
     ///
     /// We need a separate stack as `CorrelatedInputRef` depth is
-    /// determined by the upper subquery contexts, not the table contexts.
+    /// determined by the upper subquery context depth, not the table context stack depth.
     upper_table_contexts: Vec<BindContext>,
 
     next_subquery_id: usize,

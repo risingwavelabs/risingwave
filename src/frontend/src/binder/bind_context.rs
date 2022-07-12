@@ -111,8 +111,8 @@ impl BindContext {
         }
     }
 
-    /// Merges two `BindContext`s which are adjacent. For instance, the `BindContext` of two adjacent
-    /// cross-joined tables.
+    /// Merges two `BindContext`s which are adjacent. For instance, the `BindContext` of two
+    /// adjacent cross-joined tables.
     pub fn merge_context(&mut self, other: Self) -> Result<()> {
         let begin = self.columns.len();
         self.columns.extend(other.columns.into_iter().map(|mut c| {
