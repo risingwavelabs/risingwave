@@ -152,6 +152,11 @@ mod test {
 
     #[tokio::test]
     async fn test_basic() {
+        let barrier_manager = LocalBarrierManager::for_test();
+        let progress =
+            CreateMviewProgress::for_test(Arc::new(parking_lot::Mutex::new(barrier_manager)));
+        let actor_id = progress.actor_id();
+
         let schema = Schema::new(vec![Field::unnamed(DataType::Int64)]);
         let first = Box::new(
             MockSource::with_chunks(
@@ -171,7 +176,10 @@ mod test {
             vec![
                 Message::Barrier(Barrier::new_test_barrier(1).with_mutation(Mutation::Add {
                     adds: maplit::hashmap! {
-                        0 => vec![Dispatcher::default()],
+                        0 => vec![Dispatcher {
+                            downstream_actor_id: vec![actor_id],
+                            ..Default::default()
+                        }],
                     },
                     splits: Default::default(),
                 })),
@@ -179,10 +187,6 @@ mod test {
                 Message::Chunk(StreamChunk::from_pretty("I\n + 4")),
             ],
         ));
-
-        let barrier_manager = LocalBarrierManager::for_test();
-        let progress =
-            CreateMviewProgress::for_test(Arc::new(parking_lot::Mutex::new(barrier_manager)));
 
         let chain = ChainExecutor::new(first, second, vec![0], progress, schema);
 
