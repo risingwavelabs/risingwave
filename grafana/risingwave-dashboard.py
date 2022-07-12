@@ -816,20 +816,30 @@ def section_hummock(panels):
     ]
 
 
-def section_hummock_table_comparison(outer_panels):
-    panels = outer_panels.sub_panel()
+def section_hummock_manager(panels):
     return [
-        outer_panels.row_collapsed("Streaming Exchange", [
-            panels.timeseries("Exchange Send Throughput", [
-                panels.target(
-                    "rate(stream_exchange_send_size[$__rate_interval]) / 1024", "{{up_actor_id}}->{{down_actor_id}}"
-                ),
-            ]),
-            panels.timeseries("Exchange Recv Throughput", [
-                panels.target(
-                    "rate(stream_exchange_recv_size[$__rate_interval]) / 1024", "{{up_actor_id}}->{{down_actor_id}}"
-                ),
-            ]),
+        panels.row("Hummock Manager"),
+        panels.timeseries_latency("Lock Time", [
+            panels.target(
+                "histogram_quantile(0.50, sum(rate(hummock_manager_lock_time_bucket[$__rate_interval])) by (le, lock_name, lock_type))", "Lock Time p50 - {{lock_type}} {{lock_name}}"
+            ),
+            panels.target(
+                "histogram_quantile(0.99, sum(rate(hummock_manager_lock_time_bucket[$__rate_interval])) by (le, lock_name, lock_type))", "Lock Time p99 - {{lock_type}} {{lock_name}}"
+            ),
+            panels.target(
+                "histogram_quantile(0.999, sum(rate(hummock_manager_lock_time_bucket[$__rate_interval])) by (le, lock_name, lock_type))", "Lock Time p999 - {{lock_type}} {{lock_name}}"
+            ),
+        ]),
+        panels.timeseries_latency("Real Process Time", [
+            panels.target(
+                "histogram_quantile(0.50, sum(rate(meta_hummock_manager_real_process_time_bucket[$__rate_interval])) by (le, method))", "Real Process Time P50 - {{method}}"
+            ),
+            panels.target(
+                "histogram_quantile(0.99, sum(rate(meta_hummock_manager_real_process_time_bucket[$__rate_interval])) by (le, method))", "Real Process Time P99 - {{method}}"
+            ),
+            panels.target(
+                "histogram_quantile(0.999, sum(rate(meta_hummock_manager_real_process_time_bucket[$__rate_interval])) by (le, method))", "Real Process Time P999 - {{method}}"
+            ),
         ]),
     ]
 
@@ -1347,6 +1357,7 @@ dashboard = Dashboard(
         *section_streaming_actors(panels),
         *section_streaming_exchange(panels),
         *section_hummock(panels),
+        *section_hummock_manager(panels),
         *section_hummock_table_comparison(panels),
         *section_hummock_compaction_comparison(panels),
         *section_grpc_hummock_version_comparison(panels),
