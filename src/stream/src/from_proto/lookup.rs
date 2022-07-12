@@ -12,6 +12,8 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+use std::sync::Arc;
+
 use risingwave_common::catalog::{ColumnDesc, Field, Schema, TableId};
 use risingwave_common::util::sort_util::OrderPair;
 use risingwave_pb::stream_plan::lookup_node::ArrangementTableId;
@@ -65,6 +67,7 @@ impl ExecutorBuilder for LookupExecutorBuilder {
             stream_join_key_indices: lookup.stream_key.iter().map(|x| *x as usize).collect(),
             arrange_join_key_indices: lookup.arrange_key.iter().map(|x| *x as usize).collect(),
             column_mapping: lookup.column_mapping.iter().map(|x| *x as usize).collect(),
+            vnode_bitmap: params.vnode_bitmap.map(Arc::new),
         })))
     }
 }

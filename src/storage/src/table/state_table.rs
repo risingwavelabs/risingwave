@@ -57,20 +57,7 @@ pub struct StateTableBase<S: StateStore, E: Encoding> {
 }
 
 impl<S: StateStore, E: Encoding> StateTableBase<S, E> {
-    /// Note: `dist_key_indices` is ignored, use `new_with[out]_distribution` instead.
-    // TODO: remove this after all state table usages are replaced by `new_with[out]_distribution`.
-    pub fn new(
-        store: S,
-        table_id: TableId,
-        columns: Vec<ColumnDesc>,
-        order_types: Vec<OrderType>,
-        _dist_key_indices: Option<Vec<usize>>,
-        pk_indices: Vec<usize>,
-    ) -> Self {
-        Self::new_without_distribution(store, table_id, columns, order_types, pk_indices)
-    }
-
-    /// Create a state table without distribution, used for singleton executors and tests.
+    /// Create a state table without distribution, used for singleton executors and unit tests.
     pub fn new_without_distribution(
         store: S,
         table_id: TableId,

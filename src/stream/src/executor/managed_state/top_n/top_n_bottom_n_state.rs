@@ -67,7 +67,7 @@ impl<S: StateStore> ManagedTopNBottomNState<S> {
         ordered_row_deserializer: OrderedRowDeserializer,
         pk_indices: PkIndices,
     ) -> Self {
-        let order_type = ordered_row_deserializer.get_order_types().to_vec();
+        let order_types = ordered_row_deserializer.get_order_types().to_vec();
         let column_descs = data_types
             .iter()
             .enumerate()
@@ -75,12 +75,11 @@ impl<S: StateStore> ManagedTopNBottomNState<S> {
                 ColumnDesc::unnamed(ColumnId::from(id as i32), data_type.clone())
             })
             .collect::<Vec<_>>();
-        let state_table = StateTable::new(
+        let state_table = StateTable::new_without_distribution(
             store.clone(),
             table_id,
             column_descs,
-            order_type,
-            None,
+            order_types,
             pk_indices,
         );
         let keyspace = Keyspace::table_root(store, &table_id);

@@ -12,14 +12,18 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+use std::sync::Arc;
+
 use futures::{pin_mut, StreamExt};
 use futures_async_stream::try_stream;
 use itertools::Itertools;
 use risingwave_common::array::{Row, RowRef};
+use risingwave_common::buffer::Bitmap;
 use risingwave_common::catalog::{ColumnDesc, Schema, TableId};
 use risingwave_common::error::Result;
 use risingwave_common::util::sort_util::{OrderPair, OrderType};
 use risingwave_storage::table::state_table::StateTable;
+use risingwave_storage::table::Distribution;
 use risingwave_storage::StateStore;
 
 use super::sides::{stream_lookup_arrange_prev_epoch, stream_lookup_arrange_this_epoch};
@@ -45,6 +49,7 @@ pub struct LookupExecutorParams<S: StateStore> {
     pub arrangement_store: S,
 
     pub arrangement_table_id: TableId,
+
     /// Should be the same as [`ColumnDesc`] in the arrangement.
     ///
     /// From the perspective of arrangements, `arrangement_col_descs` include all columns of the
@@ -104,6 +109,8 @@ pub struct LookupExecutorParams<S: StateStore> {
 
     /// The join keys on the arrangement side.
     pub arrange_join_key_indices: Vec<usize>,
+
+    pub vnode_bitmap: Option<Arc<Bitmap>>,
 }
 
 impl<S: StateStore> LookupExecutor<S> {
@@ -121,6 +128,7 @@ impl<S: StateStore> LookupExecutor<S> {
             arrange_join_key_indices,
             schema: output_schema,
             column_mapping,
+            vnode_bitmap,
         } = params;
 
         let output_column_length = stream.schema().len() + arrangement.schema().len();
@@ -202,6 +210,15 @@ impl<S: StateStore> LookupExecutor<S> {
             .into_iter()
             .chain(arrangement_pk_indices.clone().into_iter())
             .collect_vec();
+
+        let distribution = match vnode_bitmap {
+            Some(vnodes) => Distribution {
+                dist_key_indices: arrange_join_key_indices.clone(),
+                vnodes,
+            },
+            None => Distribution::fallback(),
+        };
+
         Self {
             chunk_data_types,
             schema: output_schema,
@@ -215,19 +232,19 @@ impl<S: StateStore> LookupExecutor<S> {
                 col_types: stream_data_types,
             },
             arrangement: ArrangeJoinSide {
-                pk_indices: arrangement_pk_indices.clone(),
+                pk_indices: arrangement_pk_indices,
                 col_types: arrangement_data_types,
                 col_descs: arrangement_col_descs.clone(),
                 order_rules: arrangement_order_rules,
                 key_indices: arrange_join_key_indices,
                 use_current_epoch,
-                state_table: StateTable::new(
+                state_table: StateTable::new_with_distribution(
                     arrangement_store,
                     arrangement_table_id,
                     arrangement_col_descs,
                     vec![OrderType::Ascending; relational_pk_indices.len()],
-                    Some(arrangement_pk_indices),
                     relational_pk_indices,
+                    distribution,
                 ),
             },
             column_mapping,

@@ -231,6 +231,7 @@ async fn test_lookup_this_epoch() {
             Field::with_name(DataType::Int64, "rowid_column"),
             Field::with_name(DataType::Int64, "join_column"),
         ]),
+        vnode_bitmap: None,
     }));
     let mut lookup_executor = lookup_executor.execute();
 
@@ -312,6 +313,7 @@ async fn test_lookup_last_epoch() {
             Field::with_name(DataType::Int64, "join_column"),
             Field::with_name(DataType::Int64, "rowid_column"),
         ]),
+        vnode_bitmap: None,
     }));
     let mut lookup_executor = lookup_executor.execute();
 
