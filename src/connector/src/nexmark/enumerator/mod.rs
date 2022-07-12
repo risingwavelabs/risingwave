@@ -26,11 +26,11 @@ impl NexmarkSplitEnumerator {}
 
 #[async_trait]
 impl SplitEnumerator for NexmarkSplitEnumerator {
-    type Properties = Box<NexmarkProperties>;
+    type Properties = NexmarkProperties;
     type Split = NexmarkSplit;
 
-    async fn new(properties: Box<NexmarkProperties>) -> anyhow::Result<NexmarkSplitEnumerator> {
-        let split_num = properties.split_num.unwrap_or(1);
+    async fn new(properties: NexmarkProperties) -> anyhow::Result<NexmarkSplitEnumerator> {
+        let split_num = properties.split_num;
         Ok(Self { split_num })
     }
 
@@ -53,6 +53,7 @@ mod tests {
 
     use super::*;
     use crate::SplitMetaData;
+
     #[tokio::test]
     async fn test_nexmark_split_enumerator() -> Result<()> {
         let mut enumerator = NexmarkSplitEnumerator { split_num: 4 };

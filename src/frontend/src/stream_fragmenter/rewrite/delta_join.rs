@@ -157,7 +157,9 @@ impl StreamFragmenter {
                 node_body: Some(NodeBody::Arrange(ArrangeNode {
                     table_info: Some(arrangement_info),
                     table_id,
-                    distribution_keys: exchange_node.pk_indices.clone(),
+                    // Requires arrange key at the first few columns. This is always true for delta
+                    // join.
+                    distribution_key: arrange_key_indexes.iter().map(|x| *x as _).collect(),
                 })),
                 input: vec![exchange_node.clone()],
                 append_only: exchange_node.append_only,

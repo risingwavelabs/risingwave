@@ -25,6 +25,7 @@ use risingwave_common::types::{Datum, Decimal, ScalarImpl};
 
 use crate::sink::{Result, Sink, SinkError};
 
+#[derive(Clone, Debug)]
 pub struct MySQLConfig {
     pub endpoint: String,
     pub table: String,
@@ -40,8 +41,8 @@ pub struct MySQLSink {
 }
 
 impl MySQLSink {
-    pub fn new(cfg: MySQLConfig) -> Self {
-        Self { cfg }
+    pub fn new(cfg: MySQLConfig) -> Result<Self> {
+        Ok(Self { cfg })
     }
 
     fn endpoint(&self) -> String {
@@ -176,6 +177,18 @@ impl Sink for MySQLSink {
         transaction.commit().await?;
         drop(conn);
         Ok(())
+    }
+
+    async fn begin_epoch(&mut self, _epoch: u64) -> Result<()> {
+        todo!()
+    }
+
+    async fn commit(&mut self) -> Result<()> {
+        todo!()
+    }
+
+    async fn abort(&mut self) -> Result<()> {
+        todo!()
     }
 }
 

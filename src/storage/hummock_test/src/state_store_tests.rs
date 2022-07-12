@@ -16,20 +16,19 @@ use std::sync::Arc;
 
 use bytes::Bytes;
 use futures::executor::block_on;
+use risingwave_hummock_sdk::compaction_group::StaticCompactionGroupId;
 use risingwave_hummock_sdk::HummockEpoch;
 use risingwave_meta::hummock::test_utils::setup_compute_env;
 use risingwave_meta::hummock::MockHummockMetaClient;
 use risingwave_rpc_client::HummockMetaClient;
-
-use super::HummockStorage;
-use crate::hummock::compaction_group::StaticCompactionGroupId;
-use crate::hummock::compaction_group_client::DummyCompactionGroupClient;
-use crate::hummock::iterator::test_utils::mock_sstable_store;
-use crate::hummock::test_utils::{count_iter, default_config_for_test};
-use crate::monitor::StateStoreMetrics;
-use crate::storage_value::{StorageValue, VALUE_META_SIZE};
-use crate::store::{ReadOptions, StateStore, WriteOptions};
-use crate::StateStoreIter;
+use risingwave_storage::hummock::compaction_group_client::DummyCompactionGroupClient;
+use risingwave_storage::hummock::iterator::test_utils::mock_sstable_store;
+use risingwave_storage::hummock::test_utils::{count_iter, default_config_for_test};
+use risingwave_storage::hummock::HummockStorage;
+use risingwave_storage::monitor::StateStoreMetrics;
+use risingwave_storage::storage_value::StorageValue;
+use risingwave_storage::store::{ReadOptions, StateStore, WriteOptions};
+use risingwave_storage::StateStoreIter;
 
 #[tokio::test]
 async fn test_basic() {
@@ -286,7 +285,7 @@ async fn test_basic() {
         .commit_epoch(
             epoch1,
             hummock_storage
-                .local_version_manager
+                .local_version_manager()
                 .get_uncommitted_ssts(epoch1),
         )
         .await
@@ -347,7 +346,7 @@ async fn test_state_store_sync() {
     .unwrap();
 
     let mut epoch: HummockEpoch = hummock_storage
-        .local_version_manager
+        .local_version_manager()
         .get_pinned_version()
         .max_committed_epoch()
         + 1;
@@ -372,9 +371,9 @@ async fn test_state_store_sync() {
         .unwrap();
 
     // check sync state store metrics
-    // Note: epoch(8B) and ValueMeta(2B) will be appended to each kv pair
+    // Note: epoch(8B) will be appended to each kv pair
     assert_eq!(
-        (16 + (8 + VALUE_META_SIZE) * 2) as usize,
+        (16 + (8) * 2) as usize,
         hummock_storage
             .local_version_manager()
             .get_shared_buffer_size()
@@ -403,7 +402,7 @@ async fn test_state_store_sync() {
     // shared buffer threshold size should have been reached and will trigger a flush
     // then ingest the batch
     // assert_eq!(
-    //     (24 + (8 + VALUE_META_SIZE) * 3) as u64,
+    //     (24 + 8 * 3) as u64,
     //     hummock_storage.shared_buffer_manager().size() as u64
     // );
 
@@ -427,7 +426,7 @@ async fn test_state_store_sync() {
     // FYI: https://github.com/singularity-data/risingwave/pull/1928#discussion_r852698719
     // 16B in total with 8B epoch appended to the key
     // assert_eq!(
-    //     (16 + VALUE_META_SIZE) as u64,
+    //     16 as u64,
     //     hummock_storage.shared_buffer_manager().size() as u64
     // );
 
@@ -652,7 +651,7 @@ async fn test_write_anytime() {
     .unwrap();
 
     let initial_epoch = hummock_storage
-        .local_version_manager
+        .local_version_manager()
         .get_local_version()
         .pinned_version()
         .max_committed_epoch();
@@ -874,7 +873,7 @@ async fn test_delete_get() {
     .unwrap();
 
     let initial_epoch = hummock_storage
-        .local_version_manager
+        .local_version_manager()
         .get_pinned_version()
         .max_committed_epoch();
     let epoch1 = initial_epoch + 1;

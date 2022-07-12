@@ -83,7 +83,7 @@ where
     // TODO: Remove this phantom to get rid of S: StateStore.
     _phantom_data: PhantomData<S>,
 
-    /// The upstream pks. Assembled as pk of relational table.
+    /// The upstream pk. Assembled as pk of relational table.
     upstream_pk_len: usize,
 
     /// Primary key to look up in relational table. For value state, there is only one row.
@@ -678,12 +678,11 @@ mod tests {
             ));
         }
         let relational_pk_len = column_descs.len();
-        StateTable::new(
+        StateTable::new_without_distribution(
             store,
             table_id,
             column_descs,
             vec![order_type; relational_pk_len],
-            None,
             (0..relational_pk_len).collect(),
         )
     }

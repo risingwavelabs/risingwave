@@ -202,7 +202,7 @@ impl SortMergeJoinExecutor {
 
 impl SortMergeJoinExecutor {
     #[allow(clippy::too_many_arguments)]
-    pub(super) fn new(
+    pub fn new(
         join_type: JoinType,
         schema: Schema,
         output_indices: Vec<usize>,
@@ -280,16 +280,16 @@ impl BoxedExecutorBuilder for SortMergeJoinExecutor {
             .iter()
             .map(|&idx| original_schema[idx].clone())
             .collect();
-        let left_keys = sort_merge_join_node.get_left_keys();
+        let left_key = sort_merge_join_node.get_left_key();
         let mut probe_key_idxs = vec![];
-        for key in left_keys {
-            probe_key_idxs.push(*key as usize);
+        for idx in left_key {
+            probe_key_idxs.push(*idx as usize);
         }
 
-        let right_keys = sort_merge_join_node.get_right_keys();
+        let right_key = sort_merge_join_node.get_right_key();
         let mut build_key_idxs = vec![];
-        for key in right_keys {
-            build_key_idxs.push(*key as usize);
+        for idx in right_key {
+            build_key_idxs.push(*idx as usize);
         }
         match join_type {
             JoinType::Inner => {

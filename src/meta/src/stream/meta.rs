@@ -24,7 +24,7 @@ use risingwave_common::types::{ParallelUnitId, VIRTUAL_NODE_COUNT};
 use risingwave_common::util::compress::decompress_data;
 use risingwave_pb::common::ParallelUnit;
 use risingwave_pb::meta::table_fragments::ActorState;
-use risingwave_pb::stream_plan::{FragmentType, StreamActor};
+use risingwave_pb::stream_plan::{Dispatcher, FragmentType, StreamActor};
 use tokio::sync::RwLock;
 
 use crate::cluster::WorkerId;
@@ -77,6 +77,7 @@ where
             .map(|tf| (tf.table_id(), tf))
             .collect();
 
+        // Extract vnode mapping info from listed `table_fragments` to hash mapping manager.
         Self::restore_vnode_mappings(env.hash_mapping_manager_ref(), &table_fragments)?;
 
         Ok(Self {
@@ -172,7 +173,7 @@ where
     pub async fn finish_create_table_fragments(
         &self,
         table_id: &TableId,
-        dependent_table_actors: &[(TableId, HashMap<ActorId, Vec<ActorId>>)],
+        dependent_table_actors: Vec<(TableId, HashMap<ActorId, Vec<Dispatcher>>)>,
     ) -> Result<()> {
         let map = &mut self.core.write().await.table_fragments;
 
@@ -184,9 +185,9 @@ where
             table_fragments.upsert_in_transaction(&mut transaction)?;
 
             let mut dependent_tables = Vec::with_capacity(dependent_table_actors.len());
-            for (dependent_table_id, extra_downstream_actors) in dependent_table_actors {
+            for (dependent_table_id, mut new_dispatchers) in dependent_table_actors {
                 let mut dependent_table = map
-                    .get(dependent_table_id)
+                    .get(&dependent_table_id)
                     .ok_or_else(|| {
                         RwError::from(InternalError(format!(
                             "table_fragment not exist: id={}",
@@ -196,12 +197,9 @@ where
                     .clone();
                 for fragment in dependent_table.fragments.values_mut() {
                     for actor in &mut fragment.actors {
-                        if let Some(downstream_actors) =
-                            extra_downstream_actors.get(&actor.actor_id)
-                        {
-                            actor.dispatcher[0]
-                                .downstream_actor_id
-                                .extend(downstream_actors.iter().cloned());
+                        // Extend new dispatchers to table fragments.
+                        if let Some(new_dispatchers) = new_dispatchers.remove(&actor.actor_id) {
+                            actor.dispatcher.extend(new_dispatchers);
                         }
                     }
                 }
@@ -249,9 +247,16 @@ where
                 for fragment in dependent_table.fragments.values_mut() {
                     if fragment.fragment_type == FragmentType::Sink as i32 {
                         for actor in &mut fragment.actors {
-                            actor.dispatcher[0]
-                                .downstream_actor_id
-                                .retain(|x| !chain_actor_ids.contains(x));
+                            // Remove these downstream actor ids from all dispatchers.
+                            for dispatcher in &mut actor.dispatcher {
+                                dispatcher
+                                    .downstream_actor_id
+                                    .retain(|x| !chain_actor_ids.contains(x));
+                            }
+                            // Remove empty dispatchers.
+                            actor
+                                .dispatcher
+                                .retain(|d| !d.downstream_actor_id.is_empty());
                         }
                     }
                 }

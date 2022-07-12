@@ -75,6 +75,10 @@ pub struct MetaOpts {
     /// 0 for infinite, process will never be exited due to long idle time.
     pub max_idle_ms: u64,
     pub in_flight_barrier_nums: usize,
+
+    /// This is an unsafe parameter and should be removed later. It should not be modified during
+    /// the worker node is running.
+    pub unsafe_worker_node_parallel_degree: usize,
 }
 
 impl Default for MetaOpts {
@@ -85,6 +89,7 @@ impl Default for MetaOpts {
             checkpoint_interval: Duration::from_millis(250),
             max_idle_ms: 0,
             in_flight_barrier_nums: 40,
+            unsafe_worker_node_parallel_degree: 4,
         }
     }
 }
@@ -98,6 +103,7 @@ impl MetaOpts {
             checkpoint_interval: Duration::from_millis(250),
             max_idle_ms: 0,
             in_flight_barrier_nums: 40,
+            unsafe_worker_node_parallel_degree: 4,
         }
     }
 }

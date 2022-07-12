@@ -163,12 +163,12 @@ pub mod global_simple_agg {
     /// different.
     pub fn generate_column_descs(
         agg_call: &AggCall,
-        group_keys: &[usize],
+        group_key: &[usize],
         pk_indices: &[usize],
         agg_schema: &Schema,
         input_ref: &dyn Executor,
     ) -> Vec<ColumnDesc> {
-        let mut column_descs = Vec::with_capacity(group_keys.len() + 1);
+        let mut column_descs = Vec::with_capacity(group_key.len() + 1);
         let mut next_column_id = 0;
 
         // Define a closure for DRY.
@@ -180,7 +180,7 @@ pub mod global_simple_agg {
             next_column_id += 1;
         };
 
-        for (idx, _) in group_keys.iter().enumerate() {
+        for (idx, _) in group_key.iter().enumerate() {
             add_column_desc(agg_schema.fields[idx].data_type.clone());
         }
 
@@ -210,21 +210,20 @@ pub mod global_simple_agg {
         store: S,
         table_id: TableId,
         agg_call: &AggCall,
-        group_keys: &[usize],
+        group_key: &[usize],
         pk_indices: &[usize],
         agg_schema: &Schema,
         input_ref: &dyn Executor,
     ) -> StateTable<S> {
         let table_desc =
-            generate_column_descs(agg_call, group_keys, pk_indices, agg_schema, input_ref);
+            generate_column_descs(agg_call, group_key, pk_indices, agg_schema, input_ref);
         let relational_pk_len = if agg_call.kind == AggKind::Max || agg_call.kind == AggKind::Min {
             table_desc.len()
         } else {
             table_desc.len() - 1
         };
-        let dist_keys: Vec<usize> = (0..group_keys.len()).collect();
 
-        StateTable::new(
+        StateTable::new_without_distribution(
             store,
             table_id,
             table_desc,
@@ -237,11 +236,6 @@ pub mod global_simple_agg {
                 };
                 relational_pk_len
             ],
-            if dist_keys.is_empty() {
-                None
-            } else {
-                Some(dist_keys)
-            },
             (0..relational_pk_len).collect(),
         )
     }

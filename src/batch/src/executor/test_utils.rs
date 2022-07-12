@@ -20,7 +20,7 @@ use assert_matches::assert_matches;
 use futures_async_stream::{for_await, try_stream};
 use itertools::Itertools;
 use risingwave_common::array::column::Column;
-use risingwave_common::array::DataChunk;
+use risingwave_common::array::{DataChunk, DataChunkTestExt, RowRef};
 use risingwave_common::catalog::Schema;
 use risingwave_common::error::{Result, RwError};
 use risingwave_common::field_generator::FieldGeneratorImpl;
@@ -28,19 +28,22 @@ use risingwave_common::types::{DataType, ScalarImpl};
 use risingwave_pb::batch_plan::ExchangeSource as ProstExchangeSource;
 
 use crate::exchange_source::{ExchangeSource, ExchangeSourceImpl};
-use crate::executor::{BoxedDataChunkStream, BoxedExecutor, CreateSource, Executor};
+use crate::executor::{
+    BoxedDataChunkStream, BoxedExecutor, CreateSource, Executor, ProbeSideSourceBuilder,
+};
 use crate::task::BatchTaskContext;
 
 const SEED: u64 = 0xFF67FEABBAEF76FF;
 
-/// Generate `batch_num` data chunks, each data chunk has cardinality of `batch_size`.
-pub fn gen_data(data_type: DataType, batch_size: usize, batch_num: usize) -> Vec<DataChunk> {
+/// Generate `batch_num` data chunks with type `Int64`, each data chunk has cardinality of
+/// `batch_size`.
+pub fn gen_data(batch_size: usize, batch_num: usize) -> Vec<DataChunk> {
     let mut data_gen =
-        FieldGeneratorImpl::with_random(data_type.clone(), None, None, None, None, SEED).unwrap();
+        FieldGeneratorImpl::with_random(DataType::Int64, None, None, None, None, SEED).unwrap();
     let mut ret = Vec::<DataChunk>::with_capacity(batch_num);
 
     for i in 0..batch_num {
-        let mut array_builder = data_type.create_array_builder(batch_size);
+        let mut array_builder = DataType::Int64.create_array_builder(batch_size);
 
         for j in 0..batch_size {
             array_builder
@@ -51,6 +54,45 @@ pub fn gen_data(data_type: DataType, batch_size: usize, batch_num: usize) -> Vec
                         .generate(((i + 1) * (j + 1)) as u64)
                         .as_i64()
                         .unwrap(),
+                )))
+                .unwrap();
+        }
+
+        let array = array_builder.finish().unwrap();
+        ret.push(DataChunk::new(
+            vec![Column::new(Arc::new(array))],
+            batch_size,
+        ));
+    }
+
+    ret
+}
+
+/// Generate `batch_num` sorted data chunks with type `Int64`, each data chunk has cardinality of
+/// `batch_size`.
+pub fn gen_sorted_data(
+    batch_size: usize,
+    batch_num: usize,
+    start: String,
+    step: u64,
+) -> Vec<DataChunk> {
+    let mut data_gen = FieldGeneratorImpl::with_sequence(
+        DataType::Int64,
+        Some(start),
+        Some(i64::MAX.to_string()),
+        0,
+        step,
+    )
+    .unwrap();
+    let mut ret = Vec::<DataChunk>::with_capacity(batch_num);
+
+    for _ in 0..batch_num {
+        let mut array_builder = DataType::Int64.create_array_builder(batch_size);
+
+        for _ in 0..batch_size {
+            array_builder
+                .append_datum(&Some(ScalarImpl::Int64(
+                    data_gen.generate(0).as_i64().unwrap(),
                 )))
                 .unwrap();
         }
@@ -231,5 +273,44 @@ impl CreateSource for FakeCreateSource {
         _: &ProstExchangeSource,
     ) -> Result<ExchangeSourceImpl> {
         Ok(ExchangeSourceImpl::Fake(self.fake_exchange_source.clone()))
+    }
+}
+
+pub struct FakeProbeSideSourceBuilder {
+    schema: Schema,
+}
+
+impl FakeProbeSideSourceBuilder {
+    pub fn new(schema: Schema) -> Self {
+        Self { schema }
+    }
+}
+
+#[async_trait::async_trait]
+impl ProbeSideSourceBuilder for FakeProbeSideSourceBuilder {
+    async fn build_source(&self, cur_row: &RowRef) -> Result<BoxedExecutor> {
+        let mut mock_executor = MockExecutor::new(self.schema.clone());
+
+        let base_data_chunk = DataChunk::from_pretty(
+            "i f
+             1 9.2
+             2 4.4
+             2 5.5
+             4 6.8
+             5 3.7
+             5 2.3",
+        );
+
+        for idx in 0..base_data_chunk.capacity() {
+            let probe_row = base_data_chunk.row_at_unchecked_vis(idx);
+            if cur_row.value_at(0) == probe_row.value_at(0) {
+                let owned_row = probe_row.to_owned_row();
+                let chunk =
+                    DataChunk::from_rows(&[owned_row], &[DataType::Int32, DataType::Float32])?;
+                mock_executor.add(chunk);
+            }
+        }
+
+        Ok(Box::new(mock_executor))
     }
 }

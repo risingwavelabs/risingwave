@@ -19,9 +19,10 @@ use risingwave_common::array::stream_chunk::StreamChunkTestExt;
 use risingwave_common::array::StreamChunk;
 use risingwave_common::catalog::{ColumnDesc, ColumnId, Field, Schema, TableId};
 use risingwave_common::types::DataType;
-use risingwave_common::util::ordered::{deserialize_column_id, SENTINEL_CELL_ID};
+use risingwave_common::util::ordered::SENTINEL_CELL_ID;
 use risingwave_common::util::sort_util::{OrderPair, OrderType};
 use risingwave_common::util::value_encoding::deserialize_cell;
+use risingwave_storage::encoding::cell_based_encoding_util::deserialize_column_id;
 use risingwave_storage::memory::MemoryStateStore;
 use risingwave_storage::store::ReadOptions;
 use risingwave_storage::StateStore;
@@ -230,6 +231,7 @@ async fn test_lookup_this_epoch() {
             Field::with_name(DataType::Int64, "rowid_column"),
             Field::with_name(DataType::Int64, "join_column"),
         ]),
+        vnode_bitmap: None,
     }));
     let mut lookup_executor = lookup_executor.execute();
 
@@ -311,6 +313,7 @@ async fn test_lookup_last_epoch() {
             Field::with_name(DataType::Int64, "join_column"),
             Field::with_name(DataType::Int64, "rowid_column"),
         ]),
+        vnode_bitmap: None,
     }));
     let mut lookup_executor = lookup_executor.execute();
 

@@ -14,6 +14,7 @@
 
 use std::collections::HashMap;
 
+use itertools::Itertools;
 use rand::seq::SliceRandom;
 use rand::Rng;
 use risingwave_frontend::expr::{func_sigs, DataTypeName, ExprType, FuncSign};
@@ -88,10 +89,6 @@ impl<'a, R: Rng> SqlGenerator<'a, R> {
         expr.or_else(|| make_general_expr(func.func, exprs))
             .unwrap_or_else(|| self.gen_simple_scalar(ret))
     }
-
-    fn can_recurse(&mut self) -> bool {
-        self.rng.gen_bool(0.3)
-    }
 }
 
 fn make_unary_op(func: ExprType, expr: &Expr) -> Option<Expr> {
@@ -130,6 +127,7 @@ fn make_general_expr(func: ExprType, exprs: Vec<Expr>) -> Option<Expr> {
         E::Replace => Some(Expr::Function(make_func("replace", &exprs))),
         E::Md5 => Some(Expr::Function(make_func("md5", &exprs))),
         E::ToChar => Some(Expr::Function(make_func("to_char", &exprs))),
+        E::Overlay => Some(make_overlay(exprs)),
         _ => None,
     }
 }
@@ -151,6 +149,24 @@ fn make_trim(func: ExprType, exprs: Vec<Expr>) -> Expr {
     Expr::Trim {
         expr: Box::new(exprs[0].clone()),
         trim_where,
+    }
+}
+
+fn make_overlay(exprs: Vec<Expr>) -> Expr {
+    if exprs.len() == 3 {
+        Expr::Overlay {
+            expr: Box::new(exprs[0].clone()),
+            new_substring: Box::new(exprs[1].clone()),
+            start: Box::new(exprs[2].clone()),
+            count: None,
+        }
+    } else {
+        Expr::Overlay {
+            expr: Box::new(exprs[0].clone()),
+            new_substring: Box::new(exprs[1].clone()),
+            start: Box::new(exprs[2].clone()),
+            count: Some(Box::new(exprs[3].clone())),
+        }
     }
 }
 
@@ -202,4 +218,20 @@ fn make_bin_op(func: ExprType, exprs: &[Expr]) -> Option<Expr> {
 
 pub(crate) fn sql_null() -> Expr {
     Expr::Value(Value::Null)
+}
+
+pub fn print_function_table() -> String {
+    func_sigs()
+        .map(|sign| {
+            format!(
+                "{:?}({}) -> {:?}",
+                sign.func,
+                sign.inputs_type
+                    .iter()
+                    .map(|arg| format!("{:?}", arg))
+                    .join(", "),
+                sign.ret_type,
+            )
+        })
+        .join("\n")
 }

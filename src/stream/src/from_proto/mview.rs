@@ -31,20 +31,22 @@ impl ExecutorBuilder for MaterializeExecutorBuilder {
     ) -> Result<BoxedExecutor> {
         let node = try_match_expand!(node.get_node_body().unwrap(), NodeBody::Materialize)?;
 
-        let table_id = TableId::from(&node.table_ref_id);
-        let keys = node
+        let table_id = TableId::new(node.table_id);
+        let order_key = node
             .column_orders
             .iter()
             .map(OrderPair::from_prost)
             .collect();
         let column_ids = node
-            .column_ids
+            .get_table()?
+            .get_columns()
             .iter()
-            .map(|id| ColumnId::from(*id))
+            .map(|t| ColumnId::from(t.column_desc.as_ref().unwrap().column_id))
             .collect();
 
-        let distribution_keys = node
-            .distribution_keys
+        let distribution_key = node
+            .get_table()?
+            .get_distribution_key()
             .iter()
             .map(|key| *key as usize)
             .collect();
@@ -53,10 +55,10 @@ impl ExecutorBuilder for MaterializeExecutorBuilder {
             params.input.remove(0),
             store,
             table_id,
-            keys,
+            order_key,
             column_ids,
             params.executor_id,
-            distribution_keys,
+            distribution_key,
             params.vnode_bitmap.map(Arc::new),
         );
 
@@ -90,16 +92,15 @@ impl ExecutorBuilder for ArrangeExecutorBuilder {
             .map(|x| ColumnId::from(x.column_id))
             .collect();
 
-        let distribution_keys = arrange_node
-            .distribution_keys
+        let distribution_key = arrange_node
+            .distribution_key
             .iter()
             .map(|key| *key as usize)
             .collect();
 
         // FIXME: Lookup is now implemented without cell-based table API and relies on all vnodes
         // being `DEFAULT_VNODE`, so we need to make the Arrange a singleton.
-        let vnodes = None;
-        // let vnodes = params.vnode_bitmap.map(Arc::new);
+        let vnodes = params.vnode_bitmap.map(Arc::new);
 
         let executor = MaterializeExecutor::new(
             params.input.remove(0),
@@ -108,7 +109,7 @@ impl ExecutorBuilder for ArrangeExecutorBuilder {
             keys,
             column_ids,
             params.executor_id,
-            distribution_keys,
+            distribution_key,
             vnodes,
         );
 

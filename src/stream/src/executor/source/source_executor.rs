@@ -16,7 +16,6 @@ use std::fmt::{Debug, Formatter};
 use std::sync::Arc;
 
 use either::Either;
-use futures::stream::{select_with_strategy, PollNext, SelectWithStrategy};
 use futures::StreamExt;
 use futures_async_stream::try_stream;
 use risingwave_common::array::column::Column;
@@ -30,6 +29,7 @@ use risingwave_source::*;
 use risingwave_storage::{Keyspace, StateStore};
 use tokio::sync::mpsc::UnboundedReceiver;
 
+use super::reader::SourceReaderStream;
 use crate::executor::error::StreamExecutorError;
 use crate::executor::monitor::StreamingMetrics;
 use crate::executor::source::state::SourceStateHandler;
@@ -133,69 +133,6 @@ impl<S: StateStore> SourceExecutor<S> {
     }
 }
 
-type SourceReaderMessage =
-    Either<StreamExecutorResult<Barrier>, StreamExecutorResult<StreamChunkWithState>>;
-type SourceReaderArm = BoxStream<'static, SourceReaderMessage>;
-type SourceReaderStream =
-    SelectWithStrategy<SourceReaderArm, SourceReaderArm, fn(&mut ()) -> PollNext, ()>;
-
-struct SourceReader {
-    /// The reader for barrier.
-    barrier_receiver: UnboundedReceiver<Barrier>,
-
-    /// The reader for stream source.
-    source_chunk_reader: Box<SourceStreamReaderImpl>,
-}
-
-impl SourceReader {
-    /// Receive barriers from barrier manager with the channel, error on channel close.
-    #[try_stream(ok = Barrier, error = StreamExecutorError)]
-    async fn barrier_receiver(mut rx: UnboundedReceiver<Barrier>) {
-        while let Some(barrier) = rx.recv().await {
-            yield barrier;
-        }
-        bail!("barrier reader closed unexpectedly");
-    }
-
-    /// Receive chunks and states from the source reader, hang up on error.
-    #[try_stream(ok = StreamChunkWithState, error = StreamExecutorError)]
-    async fn source_chunk_reader(mut reader: Box<SourceStreamReaderImpl>) {
-        loop {
-            match reader.next().await {
-                Ok(chunk) => yield chunk,
-                Err(err) => {
-                    error!("hang up stream reader due to polling error: {}", err);
-                    futures::future::pending().await
-                }
-            }
-        }
-    }
-
-    /// We prefer barrier on the left hand side over source chunks.
-    fn prefer_barrier_strategy(_: &mut ()) -> PollNext {
-        PollNext::Left
-    }
-
-    /// Convert this reader to a stream.
-    fn into_stream(self) -> SourceReaderStream {
-        let barrier_receiver = Self::barrier_receiver(self.barrier_receiver);
-        let source_chunk_reader = Self::source_chunk_reader(self.source_chunk_reader);
-        select_with_strategy(
-            barrier_receiver.map(Either::Left).boxed(),
-            source_chunk_reader.map(Either::Right).boxed(),
-            Self::prefer_barrier_strategy,
-        )
-    }
-
-    /// Replace the source chunk reader with a new one for given `stream`. Used for split change.
-    fn replace_source_chunk_reader(
-        stream: &mut SourceReaderStream,
-        reader: Box<SourceStreamReaderImpl>,
-    ) {
-        *stream.get_mut().1 = Self::source_chunk_reader(reader).map(Either::Right).boxed();
-    }
-}
-
 impl<S: StateStore> SourceExecutor<S> {
     fn get_diff(&self, rhs: ConnectorState) -> ConnectorState {
         // rhs can not be None because we do not support split number reduction
@@ -265,6 +202,12 @@ impl<S: StateStore> SourceExecutor<S> {
         let barrier = barrier_receiver.recv().await.unwrap();
 
         if let Some(mutation) = barrier.mutation.as_ref() {
+            if let Mutation::AddDispatcher(add_dispatcher) = mutation.as_ref() {
+                if let Some(splits) = add_dispatcher.splits.get(&self.actor_id) {
+                    self.stream_source_splits = splits.clone();
+                }
+            }
+            // TODO: remove this
             if let Mutation::AddOutput(add_output) = mutation.as_ref() {
                 if let Some(splits) = add_output.splits.get(&self.actor_id) {
                     self.stream_source_splits = splits.clone();
@@ -292,11 +235,7 @@ impl<S: StateStore> SourceExecutor<S> {
         let source_chunk_reader = self.build_stream_source_reader(recover_state).await?;
 
         // Merge the chunks from source and the barriers into a single stream.
-        let mut stream = SourceReader {
-            barrier_receiver,
-            source_chunk_reader,
-        }
-        .into_stream();
+        let mut stream = SourceReaderStream::new(barrier_receiver, source_chunk_reader);
 
         yield Message::Barrier(barrier);
 
@@ -322,7 +261,7 @@ impl<S: StateStore> SourceExecutor<S> {
                                 let reader = self
                                     .build_stream_source_reader(Some(target_state.clone()))
                                     .await?;
-                                SourceReader::replace_source_chunk_reader(&mut stream, reader);
+                                stream.replace_source_chunk_reader(reader);
 
                                 self.stream_source_splits = target_state;
                             }
