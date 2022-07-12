@@ -12,8 +12,15 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-pub mod aggregation;
-pub mod dynamic_filter;
-pub mod flush_status;
-pub mod join;
-pub mod top_n;
+#[cfg(test)]
+mod compactor_tests;
+#[cfg(all(test, feature = "failpoints"))]
+mod failpoint_tests;
+#[cfg(test)]
+mod local_version_manager_tests;
+#[cfg(test)]
+mod snapshot_tests;
+#[cfg(test)]
+mod state_store_tests;
+#[cfg(test)]
+mod vacuum_tests;

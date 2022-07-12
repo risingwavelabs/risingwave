@@ -14,17 +14,19 @@
 
 use std::sync::Arc;
 
+use bytes::Bytes;
+use risingwave_hummock_sdk::compaction_group::StaticCompactionGroupId;
 use risingwave_meta::hummock::test_utils::setup_compute_env;
 use risingwave_meta::hummock::MockHummockMetaClient;
-
-use super::*;
-use crate::hummock::compaction_group::StaticCompactionGroupId;
-use crate::hummock::compaction_group_client::DummyCompactionGroupClient;
-use crate::hummock::iterator::test_utils::mock_sstable_store;
-use crate::hummock::test_utils::default_config_for_test;
-use crate::storage_value::StorageValue;
-use crate::store::{ReadOptions, StateStoreIter, WriteOptions};
-use crate::StateStore;
+use risingwave_rpc_client::HummockMetaClient;
+use risingwave_storage::hummock::compaction_group_client::DummyCompactionGroupClient;
+use risingwave_storage::hummock::iterator::test_utils::mock_sstable_store;
+use risingwave_storage::hummock::test_utils::default_config_for_test;
+use risingwave_storage::hummock::*;
+use risingwave_storage::monitor::StateStoreMetrics;
+use risingwave_storage::storage_value::StorageValue;
+use risingwave_storage::store::{ReadOptions, StateStoreIter, WriteOptions};
+use risingwave_storage::StateStore;
 
 macro_rules! assert_count_range_scan {
     ($storage:expr, $range:expr, $expect_count:expr, $epoch:expr) => {{
@@ -118,7 +120,7 @@ async fn test_snapshot_inner(enable_sync: bool, enable_commit: bool) {
                 .commit_epoch(
                     epoch1,
                     hummock_storage
-                        .local_version_manager
+                        .local_version_manager()
                         .get_uncommitted_ssts(epoch1),
                 )
                 .await
@@ -150,7 +152,7 @@ async fn test_snapshot_inner(enable_sync: bool, enable_commit: bool) {
                 .commit_epoch(
                     epoch2,
                     hummock_storage
-                        .local_version_manager
+                        .local_version_manager()
                         .get_uncommitted_ssts(epoch2),
                 )
                 .await
@@ -183,7 +185,7 @@ async fn test_snapshot_inner(enable_sync: bool, enable_commit: bool) {
                 .commit_epoch(
                     epoch3,
                     hummock_storage
-                        .local_version_manager
+                        .local_version_manager()
                         .get_uncommitted_ssts(epoch3),
                 )
                 .await
@@ -242,7 +244,7 @@ async fn test_snapshot_range_scan_inner(enable_sync: bool, enable_commit: bool) 
                 .commit_epoch(
                     epoch,
                     hummock_storage
-                        .local_version_manager
+                        .local_version_manager()
                         .get_uncommitted_ssts(epoch),
                 )
                 .await
@@ -311,7 +313,7 @@ async fn test_snapshot_backward_range_scan_inner(enable_sync: bool, enable_commi
                 .commit_epoch(
                     epoch,
                     hummock_storage
-                        .local_version_manager
+                        .local_version_manager()
                         .get_uncommitted_ssts(epoch),
                 )
                 .await
@@ -341,7 +343,7 @@ async fn test_snapshot_backward_range_scan_inner(enable_sync: bool, enable_commi
                 .commit_epoch(
                     epoch + 1,
                     hummock_storage
-                        .local_version_manager
+                        .local_version_manager()
                         .get_uncommitted_ssts(epoch + 1),
                 )
                 .await

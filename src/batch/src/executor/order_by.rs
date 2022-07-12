@@ -252,7 +252,8 @@ impl OrderByExecutor {
                             Interval,
                             NaiveDate,
                             NaiveTime,
-                            NaiveDateTime
+                            NaiveDateTime,
+                            Struct
                         ]
                     );
                 }
