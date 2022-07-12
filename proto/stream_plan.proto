@@ -81,6 +81,7 @@ message SourceNode {
 message SinkNode {
   uint32 table_id = 1;
   repeated int32 column_ids = 2;
+  map<string, string> properties = 3;
 }
 
 message ProjectNode {

@@ -44,6 +44,9 @@ enum StreamExecutorErrorInner {
     #[error("Source error: {0}")]
     SourceError(RwError),
 
+    #[error("Sink error: {0}")]
+    SinkError(RwError),
+
     #[error("Channel `{0}` closed")]
     ChannelClosed(String),
 
@@ -72,6 +75,10 @@ impl StreamExecutorError {
 
     pub fn source_error(error: impl Into<RwError>) -> Self {
         StreamExecutorErrorInner::SourceError(error.into()).into()
+    }
+
+    pub fn sink_error(error: impl Into<RwError>) -> Self {
+        StreamExecutorErrorInner::SinkError(error.into()).into()
     }
 
     pub fn channel_closed(name: impl Into<String>) -> Self {
