@@ -17,10 +17,11 @@ use std::sync::Arc;
 use anyhow::anyhow;
 use itertools::multizip;
 use risingwave_common::array::{
-    Array, ArrayBuilder, ArrayRef, DataChunk, I32Array, IntervalArray, NaiveDateTimeArray,
+    Array, ArrayBuilder, ArrayImpl, ArrayRef, DataChunk, I32Array, IntervalArray,
+    NaiveDateTimeArray,
 };
 use risingwave_common::ensure;
-use risingwave_common::types::{CheckedAdd, Scalar};
+use risingwave_common::types::{CheckedAdd, Scalar, ScalarRef};
 use risingwave_common::util::chunk_coalesce::DEFAULT_CHUNK_BUFFER_SIZE;
 
 use super::*;
@@ -34,17 +35,20 @@ pub struct GenerateSeries<T: Array, S: Array> {
     _phantom: std::marker::PhantomData<(T, S)>,
 }
 
-// TODO: use type exercise to do a generic impl..
-impl GenerateSeries<NaiveDateTimeArray, IntervalArray> {
+impl<T: Array, S: Array> GenerateSeries<T, S>
+where
+    T::OwnedItem: for<'a> PartialOrd<T::RefItem<'a>>,
+    T::OwnedItem: for<'a> CheckedAdd<S::RefItem<'a>, Output = T::OwnedItem>,
+{
     fn eval_row(
         &self,
-        start: <NaiveDateTimeArray as Array>::RefItem<'_>,
-        stop: <NaiveDateTimeArray as Array>::RefItem<'_>,
-        step: <IntervalArray as Array>::RefItem<'_>,
+        start: T::RefItem<'_>,
+        stop: T::RefItem<'_>,
+        step: S::RefItem<'_>,
     ) -> Result<ArrayRef> {
-        let mut builder = <NaiveDateTimeArray as Array>::Builder::new(DEFAULT_CHUNK_BUFFER_SIZE);
+        let mut builder = T::Builder::new(DEFAULT_CHUNK_BUFFER_SIZE);
 
-        let mut cur = start;
+        let mut cur: T::OwnedItem = start.to_owned_scalar();
 
         // Simulate a do-while loop.
         while cur <= stop {
@@ -52,106 +56,32 @@ impl GenerateSeries<NaiveDateTimeArray, IntervalArray> {
                 break;
             }
             builder.append(Some(cur.as_scalar_ref())).unwrap();
-            cur = cur
-                .checked_add(step.as_scalar_ref())
-                .ok_or(ExprError::NumericOutOfRange)?;
+            cur = cur.checked_add(step).ok_or(ExprError::NumericOutOfRange)?;
         }
 
         Ok(Arc::new(builder.finish()?.into()))
     }
 }
 
-impl TableFunction for GenerateSeries<NaiveDateTimeArray, IntervalArray> {
+impl<T: Array, S: Array> TableFunction for GenerateSeries<T, S>
+where
+    T::OwnedItem: for<'a> PartialOrd<T::RefItem<'a>>,
+    T::OwnedItem: for<'a> CheckedAdd<S::RefItem<'a>, Output = T::OwnedItem>,
+    for<'a> &'a T: From<&'a ArrayImpl>,
+    for<'a> &'a S: From<&'a ArrayImpl>,
+{
     fn return_type(&self) -> DataType {
         self.start.return_type()
     }
 
     fn eval(&self, input: &DataChunk) -> Result<Vec<ArrayRef>> {
         let ret_start = self.start.eval_checked(input)?;
-        let arr_start: &NaiveDateTimeArray = ret_start.as_ref().into();
+        let arr_start: &T = ret_start.as_ref().into();
         let ret_stop = self.stop.eval_checked(input)?;
-        let arr_stop: &NaiveDateTimeArray = ret_stop.as_ref().into();
+        let arr_stop: &T = ret_stop.as_ref().into();
 
         let ret_step = self.step.eval_checked(input)?;
-        let arr_step: &IntervalArray = ret_step.as_ref().into();
-
-        let bitmap = input.get_visibility_ref();
-        let mut output_arrays: Vec<ArrayRef> = vec![];
-
-        match bitmap {
-            Some(bitmap) => {
-                for ((start, stop, step), visible) in
-                    multizip((arr_start.iter(), arr_stop.iter(), arr_step.iter()))
-                        .zip_eq(bitmap.iter())
-                {
-                    let array = if !visible {
-                        empty_array(self.return_type())
-                    } else if let (Some(start), Some(stop), Some(step)) = (start, stop, step) {
-                        self.eval_row(start, stop, step)?
-                    } else {
-                        empty_array(self.return_type())
-                    };
-                    output_arrays.push(array);
-                }
-            }
-            None => {
-                for (start, stop, step) in
-                    multizip((arr_start.iter(), arr_stop.iter(), arr_step.iter()))
-                {
-                    let array = if let (Some(start), Some(stop), Some(step)) = (start, stop, step) {
-                        self.eval_row(start, stop, step)?
-                    } else {
-                        empty_array(self.return_type())
-                    };
-                    output_arrays.push(array);
-                }
-            }
-        }
-
-        Ok(output_arrays)
-    }
-}
-
-// TODO: use type exercise to do a generic impl..
-impl GenerateSeries<I32Array, I32Array> {
-    fn eval_row(
-        &self,
-        start: <I32Array as Array>::RefItem<'_>,
-        stop: <I32Array as Array>::RefItem<'_>,
-        step: <I32Array as Array>::RefItem<'_>,
-    ) -> Result<ArrayRef> {
-        let mut builder = <I32Array as Array>::Builder::new(DEFAULT_CHUNK_BUFFER_SIZE);
-
-        let mut cur = start;
-
-        // Simulate a do-while loop.
-        while cur <= stop {
-            if cur > stop {
-                break;
-            }
-            builder.append(Some(cur.as_scalar_ref())).unwrap();
-            cur = cur
-                .checked_add(step.as_scalar_ref())
-                .ok_or(ExprError::NumericOutOfRange)?;
-        }
-
-        Ok(Arc::new(builder.finish()?.into()))
-    }
-}
-
-impl TableFunction for GenerateSeries<I32Array, I32Array> {
-    fn return_type(&self) -> DataType {
-        self.start.return_type()
-    }
-
-    fn eval(&self, input: &DataChunk) -> Result<Vec<ArrayRef>> {
-        let ret_start = self.start.eval_checked(input)?;
-        let arr_start: &I32Array = ret_start.as_ref().into();
-        let ret_stop = self.stop.eval_checked(input)?;
-        let arr_stop: &I32Array = ret_stop.as_ref().into();
-
-        let ret_step = self.step.eval_checked(input)?;
-        let arr_step: &I32Array = ret_step.as_ref().into();
+        let arr_step: &S = ret_step.as_ref().into();
 
         let bitmap = input.get_visibility_ref();
         let mut output_arrays: Vec<ArrayRef> = vec![];
