@@ -330,7 +330,7 @@ pub enum TableFactor {
         alias: Option<TableAlias>,
     },
     /// Represents a parenthesized table factor. The SQL spec only allows a
-    /// join expression (`(foo <JOIN> [ bar <JOIN> baz ... ])`) to be nested,
+    /// join expression (`(foo <JOIN> bar [ <JOIN> baz ... ])`) to be nested,
     /// possibly several times.
     ///
     /// The parser may also accept non-standard nesting of bare tables for some
