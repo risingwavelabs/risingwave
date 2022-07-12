@@ -37,10 +37,12 @@ use risingwave_hummock_sdk::key::{end_bound_of_prefix, next_key, prefixed_range,
 use super::mem_table::RowOp;
 use super::{Distribution, TableIter};
 use crate::encoding::cell_based_encoding_util::{serialize_pk, serialize_pk_and_column_id};
-use crate::encoding::cell_based_row_deserializer::{CellBasedRowDeserializer, ColumnDescMapping};
+use crate::encoding::cell_based_row_deserializer::{
+    CellBasedRowDeserializer, GeneralCellBasedRowDeserializer,
+};
 use crate::encoding::cell_based_row_serializer::CellBasedRowSerializer;
 use crate::encoding::dedup_pk_cell_based_row_serializer::DedupPkCellBasedRowSerializer;
-use crate::encoding::Encoding;
+use crate::encoding::{ColumnDescMapping, Decoding, Encoding};
 use crate::error::{StorageError, StorageResult};
 use crate::keyspace::StripPrefixIterator;
 use crate::storage_value::StorageValue;
@@ -509,7 +511,7 @@ impl<S: StateStore, E: Encoding, const T: AccessType> StorageTableBase<S, E, T> 
         let iterators: Vec<_> = try_join_all(vnodes.map(|vnode| {
             let raw_key_range = prefixed_range(encoded_key_range.clone(), &vnode.to_be_bytes());
             async move {
-                let iter = StorageTableIterInner::new(
+                let iter = StorageTableIterInner::<S, GeneralCellBasedRowDeserializer>::new(
                     &self.keyspace,
                     self.mapping.clone(),
                     raw_key_range,
@@ -676,15 +678,15 @@ impl<S: StateStore, E: Encoding, const T: AccessType> StorageTableBase<S, E, T> 
 }
 
 /// [`StorageTableIterInner`] iterates on the storage table.
-struct StorageTableIterInner<S: StateStore> {
+struct StorageTableIterInner<S: StateStore, D: Decoding<Arc<ColumnDescMapping>>> {
     /// An iterator that returns raw bytes from storage.
     iter: StripPrefixIterator<S::Iter>,
 
     /// Cell-based row deserializer
-    cell_based_row_deserializer: CellBasedRowDeserializer<Arc<ColumnDescMapping>>,
+    cell_based_row_deserializer: D, // CellBasedRowDeserializer<Arc<ColumnDescMapping>>,
 }
 
-impl<S: StateStore> StorageTableIterInner<S> {
+impl<S: StateStore, D: Decoding<Arc<ColumnDescMapping>>> StorageTableIterInner<S, D> {
     /// If `wait_epoch` is true, it will wait for the given epoch to be committed before iteration.
     async fn new<R, B>(
         keyspace: &Keyspace<S>,
@@ -701,7 +703,7 @@ impl<S: StateStore> StorageTableIterInner<S> {
             keyspace.state_store().wait_epoch(epoch).await?;
         }
 
-        let cell_based_row_deserializer = CellBasedRowDeserializer::new(table_descs);
+        let cell_based_row_deserializer = D::create_cell_based_deserializer(table_descs);
 
         let iter = keyspace.iter_with_range(raw_key_range, epoch).await?;
         let iter = Self {
