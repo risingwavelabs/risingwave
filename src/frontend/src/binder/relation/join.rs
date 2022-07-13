@@ -122,6 +122,7 @@ impl Binder {
                     self.context
                         .indexs_of
                         .keys()
+                        .filter(|s| *s != "_row_id") // filter out `_row_id`
                         .map(|s| Ident::new(s.to_owned())),
                 );
 
