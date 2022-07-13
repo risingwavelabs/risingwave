@@ -541,8 +541,8 @@ impl FromStr for Decimal {
     fn from_str(s: &str) -> Result<Self, Self::Err> {
         match s {
             "nan" | "NaN" | "NAN" => Ok(Decimal::NaN),
-            "inf" | "INF" | "+inf" | "+INF" => Ok(Decimal::PositiveINF),
-            "-inf" | "-INF" => Ok(Decimal::NegativeINF),
+            "inf" | "INF" | "+inf" | "+INF" | "+Inf" => Ok(Decimal::PositiveINF),
+            "-inf" | "-INF" | "-Inf" => Ok(Decimal::NegativeINF),
             s => RustDecimal::from_str(s).map(Decimal::Normalized),
         }
     }

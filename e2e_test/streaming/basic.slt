@@ -26,10 +26,10 @@ statement ok
 insert into t5 values ('NaN'::decimal);
 
 statement ok
-insert into t5 values ('Infinity'::decimal);
+insert into t5 values ('+inf');
 
 statement ok
-insert into t5 values ('-Infinity'::decimal);
+insert into t5 values ('-inf');
 
 statement ok
 create materialized view mv1 as select * from t1;
@@ -84,8 +84,8 @@ query IR rowsort
 select * from mv4
 ----
 1 NaN
-1 Infinity
-1 -Infinity
+1 +Inf
+1 -Inf
 
 statement ok
 drop materialized view mv1
