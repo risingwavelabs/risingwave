@@ -44,7 +44,7 @@ impl<'a, R: Rng> SqlGenerator<'a, R> {
     }
 
     /// Generate `Expr` with constraints on generated column `Expr`s.
-    pub(crate) fn gen_expr_with_cols(&mut self, typ: DataTypeName, valid_cols: Option<Vec<Expr>>) -> Expr {
+    pub(crate) fn gen_expr_with_cols(&mut self, typ: DataTypeName, valid_cols: Option<&[Expr]>) -> Expr {
         if !self.can_recurse() {
             // Stop recursion with a simple scalar or column.
             return match self.rng.gen_bool(0.5) {

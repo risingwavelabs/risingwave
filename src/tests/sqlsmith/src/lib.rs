@@ -158,7 +158,7 @@ impl<'a, R: Rng> SqlGenerator<'a, R> {
         // Generate random tables/relations first so that select items can refer to them.
         let from = self.gen_from();
         let group_by = self.gen_group_by();
-        let (select_list, schema) = self.gen_select_list();
+        let (select_list, schema) = self.gen_select_list(&group_by);
         let select = Select {
             distinct: false,
             projection: select_list,
@@ -171,14 +171,14 @@ impl<'a, R: Rng> SqlGenerator<'a, R> {
         (select, schema)
     }
 
-    fn gen_select_list(&mut self) -> (Vec<SelectItem>, Vec<Column>) {
+    fn gen_select_list(&mut self, group_by_cols: &Vec<Expr>) -> (Vec<SelectItem>, Vec<Column>) {
         let items_num = self.rng.gen_range(1..=4);
-        (0..items_num).map(|i| self.gen_select_item(i)).unzip()
+        (0..items_num).map(|i| self.gen_select_item(i, group_by_cols)).unzip()
     }
 
     /// Generates a selected item.
     /// `group_by_cols` provides columns bound by GROUP BY Clause (if any).
-    fn gen_select_item(&mut self, i: i32) -> (SelectItem, Column) {
+    fn gen_select_item(&mut self, i: i32, group_by_cols: &Vec<Expr>) -> (SelectItem, Column) {
         use DataTypeName as T;
         let ret_type = *[
             T::Boolean,
@@ -200,7 +200,7 @@ impl<'a, R: Rng> SqlGenerator<'a, R> {
         let alias = format!("col_{}", i);
         (
             SelectItem::ExprWithAlias {
-                expr: self.gen_expr(ret_type),
+                expr: self.gen_expr_with_cols(ret_type, Some(group_by_cols)),
                 alias: Ident::new(alias.clone()),
             },
             Column {
