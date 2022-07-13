@@ -29,7 +29,7 @@ pub use expr::print_function_table;
 mod relation;
 mod scalar;
 
-#[derive(Clone, Debug)]
+#[derive(Clone)]
 pub struct Table {
     pub name: String,
     pub columns: Vec<Column>,
@@ -47,7 +47,7 @@ impl Table {
     }
 }
 
-#[derive(Clone, Debug)]
+#[derive(Clone)]
 pub struct Column {
     name: String,
     data_type: DataTypeName,
@@ -71,8 +71,8 @@ struct SqlGenerator<'a, R: Rng> {
     bound_relations: Vec<Table>,
 
     /// Columns bound in generated query.
-    /// May not contain all columns in bound relation,
-    /// for instance GROUP BY clause will constrain bound_columns.
+    /// May not contain all columns from Self::bound_relations.
+    /// e.g. GROUP BY clause will constrain bound_columns.
     bound_columns: Vec<Column>,
 }
 

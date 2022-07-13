@@ -38,7 +38,6 @@ fn init_op_table() -> HashMap<DataTypeName, Vec<FuncSign>> {
 }
 
 impl<'a, R: Rng> SqlGenerator<'a, R> {
-    /// Generate `Expr`.
     pub(crate) fn gen_expr(&mut self, typ: DataTypeName) -> Expr {
         if !self.can_recurse() {
             // Stop recursion with a simple scalar or column.
@@ -68,7 +67,7 @@ impl<'a, R: Rng> SqlGenerator<'a, R> {
             self.gen_simple_scalar(typ)
         } else {
             let col_def = matched_cols.choose(&mut self.rng).unwrap();
-            Expr::Identifier(Ident::new(col_def.name.clone()))
+            Expr::Identifier(Ident::new(&col_def.name))
         }
     }
 
