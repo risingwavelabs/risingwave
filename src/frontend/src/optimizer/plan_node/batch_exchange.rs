@@ -20,7 +20,9 @@ use risingwave_pb::batch_plan::{ExchangeNode, MergeSortExchangeNode};
 
 use super::{PlanBase, PlanRef, PlanTreeNodeUnary, ToBatchProst, ToDistributedBatch};
 use crate::optimizer::plan_node::ToLocalBatch;
-use crate::optimizer::property::{Distribution, Order};
+use crate::optimizer::property::{
+    Distribution, DistributionVerboseDisplay, Order, OrderVerboseDisplay,
+};
 
 /// `BatchExchange` imposes a particular distribution on its input
 /// without changing its content.
@@ -42,11 +44,27 @@ impl BatchExchange {
 
 impl fmt::Display for BatchExchange {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-        write!(
-            f,
-            "BatchExchange {{ order: {}, dist: {:?} }}",
-            self.base.order, self.base.dist
-        )
+        let verbose = self.base.ctx.is_explain_verbose();
+        if verbose {
+            write!(
+                f,
+                "BatchExchange {{ order: {}, dist: {} }}",
+                OrderVerboseDisplay {
+                    order: &self.base.order,
+                    input_schema: self.input.schema()
+                },
+                DistributionVerboseDisplay {
+                    distribution: &self.base.dist,
+                    input_schema: self.input.schema()
+                }
+            )
+        } else {
+            write!(
+                f,
+                "BatchExchange {{ order: {}, dist: {:?} }}",
+                self.base.order, self.base.dist
+            )
+        }
     }
 }
 
