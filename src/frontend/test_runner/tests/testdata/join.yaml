@@ -275,3 +275,18 @@
     create table b(b1 int);
     select * from a join lateral (select * from b where a1 = b1);
   binder_error: 'Feature is not yet implemented: lateral subqueries are not yet supported, No tracking issue'
+- sql: |
+    create table a(a1 int);
+    create table b(b1 int);
+    create table c(c1 int);
+    create table d(d1 int);
+    select * from (a join b on a1 = b1) full join (c join d on c1 = d1) on a1 = c1;
+  logical_plan: |
+    LogicalProject { exprs: [$1, $3, $5, $7] }
+      LogicalJoin { type: FullOuter, on: ($1 = $5), output_indices: all }
+        LogicalJoin { type: Inner, on: ($1 = $3), output_indices: all }
+          LogicalScan { table: a, columns: [_row_id, a1] }
+          LogicalScan { table: b, columns: [_row_id, b1] }
+        LogicalJoin { type: Inner, on: ($1 = $3), output_indices: all }
+          LogicalScan { table: c, columns: [_row_id, c1] }
+          LogicalScan { table: d, columns: [_row_id, d1] }

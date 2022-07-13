@@ -59,7 +59,7 @@ impl Binder {
         Ok(Some(root))
     }
 
-    fn bind_table_with_joins(&mut self, table: TableWithJoins) -> Result<Relation> {
+    pub(crate) fn bind_table_with_joins(&mut self, table: TableWithJoins) -> Result<Relation> {
         if let TableFactor::Derived { lateral: true, .. } = &table.relation && !table.joins.is_empty() {
             return Err(ErrorCode::InternalError(
                 "Lateral subquery must be the sole factor in table".to_string()

@@ -253,11 +253,12 @@ impl Binder {
                     Ok(Relation::Subquery(Box::new(bound_subquery)))
                 }
             }
-
-            // TODO: if and when we allow nested joins (binding table factors which are themselves
-            // joins), We need to `self.push_table_context()` prior to binding the join and
-            // `self.pop_and_merge_table_context()` after. This ensures that the nested join's
-            // `BindContext` references only the columns that are visible to it.
+            TableFactor::NestedJoin(table_with_joins) => {
+                self.push_lateral_context();
+                let bound_join = self.bind_table_with_joins(*table_with_joins)?;
+                self.pop_and_merge_lateral_context()?;
+                Ok(bound_join)
+            }
             _ => Err(ErrorCode::NotImplemented(
                 format!("unsupported table factor {:?}", table_factor),
                 None.into(),
