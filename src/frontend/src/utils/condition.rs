@@ -18,8 +18,8 @@ use std::ops::Bound;
 
 use fixedbitset::FixedBitSet;
 use itertools::Itertools;
-use risingwave_common::types::ScalarImpl;
 use risingwave_common::catalog::Schema;
+use risingwave_common::types::ScalarImpl;
 
 use super::ScanRange;
 use crate::expr::{
