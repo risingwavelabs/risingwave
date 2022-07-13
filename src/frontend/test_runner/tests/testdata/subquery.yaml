@@ -137,7 +137,7 @@
           select * from t where v1 = a and v2 = c
       ) as t0
     );
-  binder_error: 'Feature is not yet implemented: lateral joins are not yet supported, No tracking issue'
+  binder_error: 'Feature is not yet implemented: lateral subqueries are not yet supported, No tracking issue'
 - sql: |
     /* We need to ensure doubly nested reference to a left table is not permitted */
     create table ab (a int, b int);
@@ -159,4 +159,4 @@
           select * from t where v1 = a
       ) as t0
     );
-  binder_error: 'Feature is not yet implemented: lateral joins are not yet supported, No tracking issue'
+  binder_error: 'Feature is not yet implemented: lateral subqueries are not yet supported, No tracking issue'

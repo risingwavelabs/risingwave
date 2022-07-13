@@ -209,8 +209,8 @@
       BatchExchange { order: [], dist: Single }
         BatchScan { table: t1, columns: [v1, v2] }
   with_config_map:
+    QUERY_MODE: local
     RW_BATCH_ENABLE_LOOKUP_JOIN: "true"
-    QUERY_MODE: "local"
 - sql: |
     /* Ensure correct binding of join with USING clause */
     create table t1(v1 varchar);
@@ -270,3 +270,8 @@
     create table c(c1 int);
     select * from a, b join c on a1 + b1 = c1;
   binder_error: 'Item not found: Invalid column: a1'
+- sql: |
+    create table a(a1 int);
+    create table b(b1 int);
+    select * from a join lateral (select * from b where a1 = b1);
+  binder_error: 'Feature is not yet implemented: lateral subqueries are not yet supported, No tracking issue'

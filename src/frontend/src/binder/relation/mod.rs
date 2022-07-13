@@ -241,7 +241,7 @@ impl Binder {
                     // Mark the lateral context as invisible once again.
                     self.try_mark_lateral_as_invisible();
                     Err(ErrorCode::NotImplemented(
-                        "lateral joins are not yet supported".into(),
+                        "lateral subqueries are not yet supported".into(),
                         None.into(),
                     )
                     .into())
