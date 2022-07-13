@@ -894,10 +894,9 @@ impl ToStream for LogicalAgg {
         // simple-agg
         if self.group_key().is_empty() {
             // TODO: Other agg calls will be supported by stateful local agg eventually.
-            let agg_calls_can_use_two_phase = self
-                .agg_calls
-                .iter()
-                .all(|c| matches!(c.agg_kind, AggKind::Count | AggKind::Sum));
+            let agg_calls_can_use_two_phase = self.agg_calls.iter().all(|c| {
+                matches!(c.agg_kind, AggKind::Count | AggKind::Sum) && c.order_by_fields.is_empty()
+            });
 
             let input_stream = input.to_stream()?;
             let input_distribution = input_stream.distribution();

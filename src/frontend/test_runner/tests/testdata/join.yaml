@@ -209,5 +209,5 @@
       BatchExchange { order: [], dist: Single }
         BatchScan { table: t1, columns: [v1, v2] }
   with_config_map:
+    QUERY_MODE: local
     RW_BATCH_ENABLE_LOOKUP_JOIN: "true"
-    QUERY_MODE: "local"
