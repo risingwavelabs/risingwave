@@ -13,6 +13,7 @@
 // limitations under the License.
 
 use std::sync::atomic::Ordering;
+
 use pgwire::pg_field_descriptor::{PgFieldDescriptor, TypeOid};
 use pgwire::pg_response::{PgResponse, StatementType};
 use pgwire::types::Row;

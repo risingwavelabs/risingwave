@@ -107,7 +107,7 @@ impl OptimizerContext {
             session_ctx,
             next_id: AtomicI32::new(0),
             sql,
-            explain_verbose: AtomicBool::new(false)
+            explain_verbose: AtomicBool::new(false),
         }
     }
 
@@ -118,7 +118,7 @@ impl OptimizerContext {
             session_ctx: Arc::new(SessionImpl::mock()),
             next_id: AtomicI32::new(0),
             sql: Arc::from(""),
-            explain_verbose: AtomicBool::new(false)
+            explain_verbose: AtomicBool::new(false),
         }
         .into()
     }
