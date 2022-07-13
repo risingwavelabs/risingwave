@@ -25,6 +25,8 @@ pub mod cell_based_row_deserializer;
 pub mod cell_based_row_serializer;
 pub mod dedup_pk_cell_based_row_deserializer;
 pub mod dedup_pk_cell_based_row_serializer;
+pub mod row_based_deserializer;
+pub mod row_based_serializer;
 
 pub type KeyBytes = Vec<u8>;
 pub type ValueBytes = Vec<u8>;
