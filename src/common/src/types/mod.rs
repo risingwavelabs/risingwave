@@ -93,14 +93,6 @@ pub enum DataType {
 const DECIMAL_DEFAULT_PRECISION: u32 = 20;
 const DECIMAL_DEFAULT_SCALE: u32 = 6;
 
-/// Number of bytes of one element in array of [`DataType`].
-pub enum DataSize {
-    /// For types with fixed size, e.g. int, float.
-    Fixed(usize),
-    /// For types with variable size, e.g. string.
-    Variable,
-}
-
 impl From<&ProstDataType> for DataType {
     fn from(proto: &ProstDataType) -> DataType {
         match proto.get_type_name().expect("missing type field") {
@@ -218,27 +210,6 @@ impl DataType {
             is_nullable: true,
             field_type,
             ..Default::default()
-        }
-    }
-
-    pub fn data_size(&self) -> DataSize {
-        use std::mem::size_of;
-        match self {
-            DataType::Boolean => DataSize::Variable,
-            DataType::Int16 => DataSize::Fixed(size_of::<i16>()),
-            DataType::Int32 => DataSize::Fixed(size_of::<i32>()),
-            DataType::Int64 => DataSize::Fixed(size_of::<i64>()),
-            DataType::Float32 => DataSize::Fixed(size_of::<OrderedF32>()),
-            DataType::Float64 => DataSize::Fixed(size_of::<OrderedF64>()),
-            DataType::Decimal => DataSize::Fixed(size_of::<Decimal>()),
-            DataType::Varchar => DataSize::Variable,
-            DataType::Date => DataSize::Fixed(size_of::<NaiveDateWrapper>()),
-            DataType::Time => DataSize::Fixed(size_of::<NaiveTimeWrapper>()),
-            DataType::Timestamp => DataSize::Fixed(size_of::<NaiveDateTimeWrapper>()),
-            DataType::Timestampz => DataSize::Fixed(size_of::<NaiveDateTimeWrapper>()),
-            DataType::Interval => DataSize::Variable,
-            DataType::Struct { .. } => DataSize::Variable,
-            DataType::List { .. } => DataSize::Variable,
         }
     }
 
