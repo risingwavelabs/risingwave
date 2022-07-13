@@ -47,8 +47,8 @@ impl Binder {
             self.push_lateral_context();
             let right = self.bind_table_with_joins(t.clone())?;
             self.pop_and_merge_lateral_context()?;
-            // Any FROM subquery, not having access to the lateral context, cannot be correlated at this
-            // depth unless it is lateral
+            // Any FROM subquery, not having access to the lateral context, cannot be correlated at
+            // this depth unless it is lateral
             root = Relation::Join(Box::new(BoundJoin {
                 join_type: JoinType::Inner,
                 left: root,
@@ -60,7 +60,7 @@ impl Binder {
     }
 
     fn bind_table_with_joins(&mut self, table: TableWithJoins) -> Result<Relation> {
-        if let TableFactor::Derived { lateral: true, .. } = &table.relation && table.joins.len() != 0 {
+        if let TableFactor::Derived { lateral: true, .. } = &table.relation && !table.joins.is_empty() {
             return Err(ErrorCode::InternalError(
                 "Lateral subquery must be the sole factor in table".to_string()
             ).into());
@@ -83,8 +83,8 @@ impl Binder {
                 right = option_rel.unwrap();
             } else {
                 right = self.bind_table_factor(join.relation.clone())?;
-                // Any FROM subquery, not having access to the lateral context, cannot be correlated at
-                // this depth unless it is lateral
+                // Any FROM subquery, not having access to the lateral context, cannot be correlated
+                // at this depth unless it is lateral
                 (cond, _) = self.bind_join_constraint(constraint, None)?;
             }
             let join = BoundJoin {
