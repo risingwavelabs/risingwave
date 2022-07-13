@@ -45,6 +45,11 @@ pub async fn epoch_check(info: Arc<ExecutorInfo>, input: impl MessageStream) {
                     b
                 );
             }
+
+            if let Some(last_epoch) = last_epoch {
+                assert!(b.epoch.prev == last_epoch, "missing barrier: last barrier's epoch = {}, while current barrier prev={} curr={}", last_epoch, b.epoch.prev, b.epoch.curr);
+            }
+
             last_epoch = Some(new_epoch);
         } else if last_epoch.is_none() && !info.identity.contains("BatchQuery") {
             panic!(
