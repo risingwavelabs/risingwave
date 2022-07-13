@@ -1561,7 +1561,7 @@ pub struct Function {
     pub over: Option<WindowSpec>,
     // aggregate functions may specify eg `COUNT(DISTINCT x)`
     pub distinct: bool,
-    // string_agg and array_agg both support ORDER BY
+    // aggregate functions may contain order_by_clause
     pub order_by: Vec<OrderByExpr>,
     pub filter: Option<Box<Expr>>,
 }
