@@ -159,15 +159,9 @@ impl PlanAggCall {
         }
     }
 
-    pub fn with_condition(self, filter: Condition) -> Self {
-        PlanAggCall {
-            agg_kind: self.agg_kind,
-            return_type: self.return_type,
-            inputs: self.inputs,
-            distinct: self.distinct,
-            order_by_fields: self.order_by_fields,
-            filter,
-        }
+    pub fn with_condition(mut self, filter: Condition) -> Self {
+        self.filter = filter;
+        self
     }
 
     pub fn input_indices(&self) -> Vec<usize> {
