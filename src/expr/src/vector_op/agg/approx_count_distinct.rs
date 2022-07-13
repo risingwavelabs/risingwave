@@ -20,7 +20,6 @@ use risingwave_common::error::{ErrorCode, Result};
 use risingwave_common::types::*;
 
 use crate::vector_op::agg::aggregator::Aggregator;
-use crate::vector_op::agg::general_sorted_grouper::EqGroups;
 
 const INDEX_BITS: u8 = 14; // number of bits used for finding the index of each 64-bit hash
 const NUM_OF_REGISTERS: usize = 1 << INDEX_BITS; // number of indices available
@@ -122,17 +121,25 @@ impl Aggregator for ApproxCountDistinct {
         self.return_type.clone()
     }
 
-    fn update_with_row(&mut self, input: &DataChunk, row_id: usize) -> Result<()> {
+    fn update_single(&mut self, input: &DataChunk, row_id: usize) -> Result<()> {
         let array = input.column_at(self.input_col_idx).array_ref();
         let datum_ref = array.value_at(row_id);
         self.add_datum(datum_ref);
-
         Ok(())
     }
 
-    fn update(&mut self, input: &DataChunk) -> Result<()> {
+    fn update_multi(
+        &mut self,
+        input: &DataChunk,
+        start_row_id: usize,
+        end_row_id: usize,
+    ) -> Result<()> {
         let array = input.column_at(self.input_col_idx).array_ref();
-        for datum_ref in array.iter() {
+        for datum_ref in array
+            .iter()
+            .skip(start_row_id)
+            .take(end_row_id - start_row_id)
+        {
             self.add_datum(datum_ref);
         }
         Ok(())
@@ -146,45 +153,10 @@ impl Aggregator for ApproxCountDistinct {
         }
     }
 
-    fn update_and_output_with_sorted_groups(
-        &mut self,
-        input: &DataChunk,
-        builder: &mut ArrayBuilderImpl,
-        groups: &EqGroups,
-    ) -> Result<()> {
-        let builder = match builder {
-            ArrayBuilderImpl::Int64(b) => b,
-            _ => {
-                return Err(ErrorCode::InternalError(
-                    "Unexpected builder for approx_distinct_count().".into(),
-                )
-                .into())
-            }
-        };
-
-        let array = input.column_at(self.input_col_idx).array_ref();
-        let mut group_cnt = 0;
-        let mut groups_iter = groups.starting_indices().iter().peekable();
-        let chunk_offset = groups.chunk_offset();
-        for (i, datum_ref) in array.iter().skip(chunk_offset).enumerate() {
-            // reset state and output result when new group is found
-            if groups_iter.peek() == Some(&&i) {
-                groups_iter.next();
-                group_cnt += 1;
-                builder.append(Some(self.calculate_result()))?;
-                self.registers = [0; NUM_OF_REGISTERS];
-            }
-
-            self.add_datum(datum_ref);
-
-            // reset state and exit when reach limit
-            if groups.is_reach_limit(group_cnt) {
-                self.registers = [0; NUM_OF_REGISTERS];
-                break;
-            }
-        }
-
-        Ok(())
+    fn output_and_reset(&mut self, builder: &mut ArrayBuilderImpl) -> Result<()> {
+        let res = self.output(builder);
+        self.registers = [0; NUM_OF_REGISTERS];
+        res
     }
 }
 
@@ -200,7 +172,6 @@ mod tests {
 
     use crate::vector_op::agg::aggregator::Aggregator;
     use crate::vector_op::agg::approx_count_distinct::ApproxCountDistinct;
-    use crate::vector_op::agg::EqGroups;
 
     fn generate_data_chunk(size: usize, start: i32) -> DataChunk {
         let mut lhs = vec![];
@@ -218,7 +189,7 @@ mod tests {
     }
 
     #[test]
-    fn test_update_and_output() {
+    fn test_update_single() {
         let inputs_size: [usize; 3] = [20000, 10000, 5000];
         let inputs_start: [i32; 3] = [0, 20000, 30000];
 
@@ -227,8 +198,10 @@ mod tests {
 
         for i in 0..3 {
             let data_chunk = generate_data_chunk(inputs_size[i], inputs_start[i]);
-            agg.update(&data_chunk).unwrap();
-            agg.output(&mut builder).unwrap();
+            for row_id in 0..data_chunk.cardinality() {
+                agg.update_single(&data_chunk, row_id).unwrap();
+            }
+            agg.output_and_reset(&mut builder).unwrap();
         }
 
         let array = builder.finish().unwrap();
@@ -236,16 +209,21 @@ mod tests {
     }
 
     #[test]
-    fn test_update_and_output_with_sorted_groups() {
-        let mut a = ApproxCountDistinct::new(DataType::Int64, 0);
+    fn test_update_multi() {
+        let inputs_size: [usize; 3] = [20000, 10000, 5000];
+        let inputs_start: [i32; 3] = [0, 20000, 30000];
 
-        let data_chunk = generate_data_chunk(30001, 0);
-        let mut builder = ArrayBuilderImpl::Int64(I64ArrayBuilder::new(5));
-        let mut group = EqGroups::new(vec![5000, 10000, 14000, 20000, 30000]);
-        group.set_limit(5);
+        let mut agg = ApproxCountDistinct::new(DataType::Int64, 0);
+        let mut builder = ArrayBuilderImpl::Int64(I64ArrayBuilder::new(3));
 
-        let _ = a.update_and_output_with_sorted_groups(&data_chunk, &mut builder, &group);
+        for i in 0..3 {
+            let data_chunk = generate_data_chunk(inputs_size[i], inputs_start[i]);
+            agg.update_multi(&data_chunk, 0, data_chunk.cardinality())
+                .unwrap();
+            agg.output_and_reset(&mut builder).unwrap();
+        }
+
         let array = builder.finish().unwrap();
-        assert_eq!(array.len(), 5);
+        assert_eq!(array.len(), 3);
     }
 }
