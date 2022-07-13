@@ -192,6 +192,15 @@ impl PlanAggCall {
             filter: Condition::true_cond(),
         }
     }
+
+    pub fn with_condition(mut self, filter: Condition) -> Self {
+        self.filter = filter;
+        self
+    }
+
+    pub fn input_indices(&self) -> Vec<usize> {
+        self.inputs.iter().map(|input| input.index()).collect()
+    }
 }
 
 pub struct PlanAggCallVerboseDisplay<'a> {

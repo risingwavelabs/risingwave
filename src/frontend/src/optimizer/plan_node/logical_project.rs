@@ -410,6 +410,9 @@ impl ToStream for LogicalProject {
                 .collect();
         let proj = Self::new(input, exprs);
         // the added columns is at the end, so it will not change the exists column index
+        // but the target size of `out_col_change` should be the same as the length of schema.
+        let (map, _) = out_col_change.into_parts();
+        let out_col_change = ColIndexMapping::with_target_size(map, proj.base.schema.len());
         Ok((proj.into(), out_col_change))
     }
 }
