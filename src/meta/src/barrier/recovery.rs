@@ -66,17 +66,23 @@ where
         debug!("recovery start!");
         let retry_strategy = Self::get_retry_strategy();
         let (new_epoch, responses) = tokio_retry::Retry::spawn(retry_strategy, || async {
-            let info = self.resolve_actor_info(&CheckpointControl::new()).await;
+            let mut info = self.resolve_actor_info(&CheckpointControl::new()).await;
             let mut new_epoch = prev_epoch.next();
 
             if self.enable_migrate {
                 // Migrate expired actors to newly joined node by changing actor_map
                 self.migrate_actors(&info).await?;
+                info = self.resolve_actor_info(&CheckpointControl::new()).await;
             }
 
             // Reset all compute nodes, stop and drop existing actors.
-            self.reset_compute_nodes(&info, &prev_epoch, &new_epoch)
-                .await;
+            if let Err(err) = self
+                .reset_compute_nodes(&info, &prev_epoch, &new_epoch)
+                .await
+            {
+                error!("reset compute nodes failed: {}", err);
+                return Err(err);
+            }
 
             // Refresh sources in local source manger of compute node.
             if let Err(err) = self.sync_sources(&info).await {
@@ -295,34 +301,26 @@ where
         info: &BarrierActorInfo,
         prev_epoch: &Epoch,
         new_epoch: &Epoch,
-    ) {
-        let futures = info.node_map.iter().map(|(_, worker_node)| {
-            let retry_strategy = Self::get_retry_strategy();
-
-            async move {
-                tokio_retry::Retry::spawn(retry_strategy, || async {
-                    let client = self.env.stream_client_pool().get(worker_node).await?;
-                    debug!("force stop actors: {}", worker_node.id);
-                    client
-                        .to_owned()
-                        .force_stop_actors(ForceStopActorsRequest {
-                            request_id: Uuid::new_v4().to_string(),
-                            epoch: Some(ProstEpoch {
-                                curr: new_epoch.0,
-                                prev: prev_epoch.0,
-                            }),
-                        })
-                        .await
-                        .map_err(RwError::from)
+    ) -> Result<()> {
+        let futures = info.node_map.iter().map(|(_, worker_node)| async move {
+            let client = self.env.stream_client_pool().get(worker_node).await?;
+            debug!("force stop actors: {}", worker_node.id);
+            client
+                .to_owned()
+                .force_stop_actors(ForceStopActorsRequest {
+                    request_id: Uuid::new_v4().to_string(),
+                    epoch: Some(ProstEpoch {
+                        curr: new_epoch.0,
+                        prev: prev_epoch.0,
+                    }),
                 })
                 .await
-                .expect("Force stop actors until success");
-
-                Ok::<_, RwError>(())
-            }
+                .map_err(RwError::from)
         });
 
-        try_join_all(futures).await.unwrap();
+        try_join_all(futures).await?;
         debug!("all compute nodes have been reset.");
+
+        Ok(())
     }
 }

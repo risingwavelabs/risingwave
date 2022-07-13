@@ -702,6 +702,7 @@ where
                         node.command_ctx.prev_epoch.0,
                         err
                     );
+                    return Err(err.clone());
                 }
             };
         }
