@@ -73,7 +73,7 @@ impl PrometheusGen {
 
         let now = Local::now().format("%Y%m%d-%H%M%S");
 
-        let mut remote_write= String::from("");
+        let mut remote_write = String::from("");
         if let Ok(x) = std::env::var("PROMETHEUS_REMOTE_WRITE") && x == "true" {
             remote_write = format!("
 remote_write:
