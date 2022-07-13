@@ -11,6 +11,7 @@
 // WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 // See the License for the specific language governing permissions and
 // limitations under the License.
+use std::collections::HashSet;
 
 use risingwave_common::error::{ErrorCode, Result};
 use risingwave_common::types::DataType;
@@ -77,7 +78,10 @@ impl Binder {
             };
             let right: Relation;
             let cond: ExprImpl;
-            if let JoinConstraint::Using(_col) = constraint.clone() {
+            if matches!(
+                constraint,
+                JoinConstraint::Using(_) | JoinConstraint::Natural
+            ) {
                 let option_rel: Option<Relation>;
                 (cond, option_rel) = self.bind_join_constraint(constraint, Some(join.relation))?;
                 right = option_rel.unwrap();
@@ -107,7 +111,52 @@ impl Binder {
         Ok(match constraint {
             JoinConstraint::None => (ExprImpl::literal_bool(true), None),
             JoinConstraint::Natural => {
-                return Err(ErrorCode::NotImplemented("Natural join".into(), 1633.into()).into())
+                // First, we identify columns with the same name.
+                let old_context = self.context.clone();
+                self.push_lateral_context();
+                // Bind this table factor to an empty context
+                let table_factor = table_factor.unwrap();
+                let right_table = get_table_name(&table_factor);
+                let relation = self.bind_table_factor(table_factor)?;
+                let columns = HashSet::<_>::from_iter(
+                    self.context
+                        .indexs_of
+                        .keys()
+                        .map(|s| Ident::new(s.to_owned())),
+                );
+
+                let mut binary_expr = Expr::Value(Value::Boolean(true));
+                for column in columns {
+                    let left_col_index = match old_context.get_index(&column.value) {
+                        Err(e) => {
+                            if let ErrorCode::ItemNotFound(_) = e.inner() {
+                                continue;
+                            } else {
+                                return Err(e);
+                            }
+                        }
+                        Ok(idx) => idx,
+                    };
+                    let left_table = old_context.columns[left_col_index].table_name.clone();
+                    binary_expr = Expr::BinaryOp {
+                        left: Box::new(binary_expr),
+                        op: BinaryOperator::And,
+                        right: Box::new(Expr::BinaryOp {
+                            left: Box::new(Expr::CompoundIdentifier(vec![
+                                Ident::new(left_table.clone()),
+                                column.clone(),
+                            ])),
+                            op: BinaryOperator::Eq,
+                            right: Box::new(Expr::CompoundIdentifier({
+                                let mut right_table_clone = right_table.clone().unwrap();
+                                right_table_clone.push(column.clone());
+                                right_table_clone
+                            })),
+                        }),
+                    }
+                }
+                self.pop_and_merge_lateral_context()?;
+                (self.bind_expr(binary_expr)?, Some(relation))
             }
             JoinConstraint::On(expr) => {
                 let bound_expr = self.bind_expr(expr)?;
