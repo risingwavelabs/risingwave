@@ -21,6 +21,7 @@ use risingwave_common::util::sort_util::{OrderPair, OrderType};
 use risingwave_pb::expr::AggCall;
 use risingwave_pb::plan_common::OrderType as ProstOrderType;
 
+use super::string_agg::StringAgg;
 use crate::expr::{build_from_prost, AggKind, Expression, ExpressionRef, LiteralExpression};
 use crate::vector_op::agg::approx_count_distinct::ApproxCountDistinct;
 use crate::vector_op::agg::count_star::CountStar;
@@ -132,6 +133,17 @@ impl AggStateFactory {
                 self.return_type.clone(),
                 self.input_col_idx,
                 self.filter.clone(),
+            )))
+        } else if let AggKind::StringAgg = self.agg_kind {
+            Ok(Box::new(StringAgg::new(
+                self.input_col_idx,
+                self.order_by_fields
+                    .iter()
+                    .map(|(col_idx, _, direction, _)| OrderPair {
+                        column_idx: *col_idx,
+                        order_type: *direction,
+                    })
+                    .collect(),
             )))
         } else if let Some(input_type) = self.input_type.clone() {
             create_agg_state_unary(
