@@ -306,7 +306,7 @@ impl<K: LruKey, T: LruValue> LruHandleTable<K, T> {
         self.list = new_list;
     }
 
-    unsafe fn fill_with<F>(&self, f: &mut F)
+    unsafe fn for_all<F>(&self, f: &mut F)
     where
         F: FnMut(&K, &T),
     {
@@ -554,11 +554,11 @@ impl<K: LruKey, T: LruValue> LruCacheShard<K, T> {
         }
     }
 
-    fn fill_with<F>(&self, f: &mut F)
+    fn for_all<F>(&self, f: &mut F)
     where
         F: FnMut(&K, &T),
     {
-        unsafe { self.table.fill_with(f) };
+        unsafe { self.table.for_all(f) };
     }
 }
 
@@ -732,17 +732,17 @@ impl<K: LruKey, T: LruValue> LruCache<K, T> {
     /// # Safety
     ///
     /// This method is used for read-only [`LruCache`]. It locks one shard per loop to prevent the
-    /// filling progress from blocking reads among all shards.
+    /// iterating progress from blocking reads among all shards.
     ///
     /// If there is another thread inserting entries at the same time, there will be data
     /// inconsistency.
-    pub fn fill_with<F>(&self, mut f: F)
+    pub fn for_all<F>(&self, mut f: F)
     where
         F: FnMut(&K, &T),
     {
         for shard in &self.shards {
             let shard = shard.lock();
-            shard.fill_with(&mut f);
+            shard.for_all(&mut f);
         }
     }
 

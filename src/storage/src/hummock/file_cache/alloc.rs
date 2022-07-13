@@ -26,7 +26,7 @@ unsafe impl<const ALIGN: usize> Allocator for AlignedAllocator<ALIGN> {
     ) -> Result<std::ptr::NonNull<[u8]>, std::alloc::AllocError> {
         let layout = std::alloc::Layout::from_size_align(
             layout.size(),
-            utils::usize::align_up(ALIGN, layout.align()),
+            utils::align_up(ALIGN, layout.align()),
         )
         .unwrap();
         Global.allocate(layout)
@@ -35,7 +35,7 @@ unsafe impl<const ALIGN: usize> Allocator for AlignedAllocator<ALIGN> {
     unsafe fn deallocate(&self, ptr: std::ptr::NonNull<u8>, layout: std::alloc::Layout) {
         let layout = std::alloc::Layout::from_size_align(
             layout.size(),
-            utils::usize::align_up(ALIGN, layout.align()),
+            utils::align_up(ALIGN, layout.align()),
         )
         .unwrap();
         Global.deallocate(ptr, layout)
@@ -52,14 +52,14 @@ mod tests {
         let allocator = AlignedAllocator::<ALIGN>;
 
         let mut buf: Vec<u8, _> = Vec::with_capacity_in(ALIGN * 8, &allocator);
-        utils::usize::assert_aligned(ALIGN, buf.as_ptr().addr());
+        utils::assert_aligned(ALIGN, buf.as_ptr().addr());
 
         buf.extend_from_slice(&[b'x'; ALIGN * 8]);
-        utils::usize::assert_aligned(ALIGN, buf.as_ptr().addr());
+        utils::assert_aligned(ALIGN, buf.as_ptr().addr());
         assert_eq!(buf, [b'x'; ALIGN * 8]);
 
         buf.extend_from_slice(&[b'x'; ALIGN * 8]);
-        utils::usize::assert_aligned(ALIGN, buf.as_ptr().addr());
+        utils::assert_aligned(ALIGN, buf.as_ptr().addr());
         assert_eq!(buf, [b'x'; ALIGN * 16])
     }
 }

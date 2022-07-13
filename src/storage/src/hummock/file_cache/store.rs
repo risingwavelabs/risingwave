@@ -154,7 +154,7 @@ where
             };
             blocs.push(bloc);
             buf.extend_from_slice(value);
-            buf.resize(utils::usize::align_up(self.block_size, buf.len()), 0);
+            buf.resize(utils::align_up(self.block_size, buf.len()), 0);
         }
 
         let boff = self.cf.append(buf).await? as u32 / self.block_size as u32;

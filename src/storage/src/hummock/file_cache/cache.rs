@@ -82,7 +82,7 @@ where
 
             let mut batch = Vec::new();
             // TODO(MrCroxx): Avoid clone here?
-            frozen.fill_with(|key, value| batch.push((key.clone(), value.clone())));
+            frozen.for_all(|key, value| batch.push((key.clone(), value.clone())));
 
             if batch.is_empty() {
                 // Avoid allocate a new buffer.
@@ -346,7 +346,7 @@ mod tests {
         assert_eq!(cache.store.cache_file_len(), SHARDS * BS);
         assert_eq!(
             datasize(cache.store.cache_file_path()).unwrap(),
-            utils::usize::align_up(FALLOCATE_UNIT, SHARDS * BS)
+            utils::align_up(FALLOCATE_UNIT, SHARDS * BS)
         );
 
         for i in 0..SHARDSU64 {
@@ -374,7 +374,7 @@ mod tests {
             // TODO(MrCroxx): For inserting performs "append -> insert indices & punch hole",
             // the maximum file size may exceed the capacity by at most an alloc unit.
             // May refactor it later.
-            utils::usize::align_up(FALLOCATE_UNIT, CAPACITY) + FALLOCATE_UNIT - BUFFER_CAPACITY
+            utils::align_up(FALLOCATE_UNIT, CAPACITY) + FALLOCATE_UNIT - BUFFER_CAPACITY
         );
 
         for l in 0..2 + LOOPS as u64 - 4 {

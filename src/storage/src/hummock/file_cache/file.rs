@@ -34,9 +34,9 @@ pub struct CacheFileOptions {
 
 impl CacheFileOptions {
     fn assert(&self) {
-        utils::usize::assert_pow2(LOGICAL_BLOCK_SIZE);
-        utils::usize::assert_aligned(LOGICAL_BLOCK_SIZE, self.fs_block_size);
-        utils::usize::assert_aligned(self.fs_block_size, self.block_size);
+        utils::assert_pow2(LOGICAL_BLOCK_SIZE);
+        utils::assert_aligned(LOGICAL_BLOCK_SIZE, self.fs_block_size);
+        utils::assert_aligned(self.fs_block_size, self.block_size);
     }
 }
 
@@ -126,7 +126,7 @@ impl CacheFile {
     }
 
     pub async fn append(&self, buf: DioBuffer) -> Result<u64> {
-        utils::usize::debug_assert_aligned(self.block_size, buf.len());
+        utils::debug_assert_aligned(self.block_size, buf.len());
 
         let core = self.core.clone();
         let fallocate_unit = self.fallocate_unit;
@@ -179,7 +179,7 @@ impl CacheFile {
     }
 
     pub async fn read(&self, offset: u64, len: usize) -> Result<DioBuffer> {
-        utils::usize::debug_assert_aligned(self.block_size, len);
+        utils::debug_assert_aligned(self.block_size, len);
         let core = self.core.clone();
         asyncify(move || {
             let mut buf = DioBuffer::with_capacity_in(len, &DIO_BUFFER_ALLOCATOR);
@@ -192,8 +192,8 @@ impl CacheFile {
 
     // TODO(MrCroxx): Should be async (likely not)?
     pub fn punch_hole(&self, offset: u64, len: usize) -> Result<()> {
-        utils::u64::debug_assert_aligned(self.block_size as u64, offset);
-        utils::usize::debug_assert_aligned(self.block_size, len);
+        utils::debug_assert_aligned(self.block_size as u64, offset);
+        utils::debug_assert_aligned(self.block_size, len);
         fallocate(
             self.fd(),
             FallocateFlags::FALLOC_FL_PUNCH_HOLE | FallocateFlags::FALLOC_FL_KEEP_SIZE,

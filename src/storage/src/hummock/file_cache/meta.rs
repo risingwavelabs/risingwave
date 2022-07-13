@@ -46,7 +46,7 @@ impl BlockLoc {
     /// block count in cache file
     #[inline(always)]
     pub fn blen(&self, bsz: u32) -> u32 {
-        utils::u32::align_up(bsz, self.len)
+        utils::align_up(bsz, self.len)
     }
 
     #[inline(always)]
