@@ -56,7 +56,7 @@ impl<'a, R: Rng> SqlGenerator<'a, R> {
     }
 
     fn gen_col(&mut self, typ: DataTypeName) -> Expr {
-        if self.bound_relations.is_empty() {
+        if self.bound_columns.is_empty() {
             return self.gen_simple_scalar(typ);
         }
         let matched_cols = self

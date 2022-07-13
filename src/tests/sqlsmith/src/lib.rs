@@ -29,7 +29,7 @@ pub use expr::print_function_table;
 mod relation;
 mod scalar;
 
-#[derive(Clone)]
+#[derive(Clone, Debug)]
 pub struct Table {
     pub name: String,
     pub columns: Vec<Column>,
@@ -47,7 +47,7 @@ impl Table {
     }
 }
 
-#[derive(Clone)]
+#[derive(Clone, Debug)]
 pub struct Column {
     name: String,
     data_type: DataTypeName,
@@ -129,7 +129,7 @@ impl<'a, R: Rng> SqlGenerator<'a, R> {
     }
 
     fn gen_order_by(&mut self) -> Vec<OrderByExpr> {
-        if self.bound_relations.is_empty() {
+        if self.bound_columns.is_empty() {
             return vec![];
         }
         let mut order_by = vec![];
@@ -177,8 +177,6 @@ impl<'a, R: Rng> SqlGenerator<'a, R> {
         (0..items_num).map(|i| self.gen_select_item(i)).unzip()
     }
 
-    /// Generates a selected item.
-    /// `group_by_cols` provides columns bound by GROUP BY Clause (if any).
     fn gen_select_item(&mut self, i: i32) -> (SelectItem, Column) {
         use DataTypeName as T;
         let ret_type = *[
@@ -231,22 +229,20 @@ impl<'a, R: Rng> SqlGenerator<'a, R> {
         }
     }
 
-    /// TODO: Once there is group by / aggregation,
-    /// SELECT list expressions can only refer to grouped columns.
-    /// TODO: gen_group by should happen BEFORE gen select stmt,
-    /// but after gen from.
-    /// Reference <https://www.postgresql.org/docs/current/sql-select.html#SQL-GROUPBY>
     fn gen_group_by(&mut self) -> Vec<Expr> {
-        // get all from refs
-        let mut available = self.bound_columns.to_vec();
-        available.shuffle(self.rng);
-        let n_group_by_cols = self.rng.gen_range(1..=available.len());
-        let group_by_cols = available.drain(0..n_group_by_cols).collect_vec();
-        self.bound_columns = group_by_cols.clone();
-        group_by_cols
-            .into_iter()
-            .map(|c| Expr::Identifier(Ident::new(c.name)))
-            .collect_vec()
+        let mut available = self.bound_columns.to_vec().clone();
+        if available.len() > 0 {
+            available.shuffle(self.rng);
+            let n_group_by_cols = self.rng.gen_range(1..=available.len());
+            let group_by_cols = available.drain(0..n_group_by_cols).collect_vec();
+            self.bound_columns = group_by_cols.clone();
+            group_by_cols
+                .into_iter()
+                .map(|c| Expr::Identifier(Ident::new(c.name)))
+                .collect_vec()
+        } else {
+            vec![]
+        }
     }
 
     fn gen_having(&self) -> Option<Expr> {
