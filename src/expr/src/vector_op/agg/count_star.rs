@@ -71,12 +71,12 @@ impl Aggregator for CountStar {
                 .filter
                 .eval(input)?
                 .iter()
+                .skip(start_row_id)
+                .take(end_row_id - start_row_id)
                 .filter(|res| {
                     res.map(|x| *x.into_scalar_impl().as_bool())
                         .unwrap_or(false)
                 })
-                .skip(start_row_id)
-                .take(end_row_id - start_row_id)
                 .count();
         }
         Ok(())
