@@ -54,6 +54,12 @@ pub struct MetaMetrics {
     pub level_file_size: IntGaugeVec,
     /// hummock version size
     pub version_size: IntGauge,
+
+    /// Latency for hummock manager to acquire lock
+    pub hummock_manager_lock_time: HistogramVec,
+
+    /// Latency for hummock manager to really process a request after acquire the lock
+    pub hummock_manager_real_process_time: HistogramVec,
 }
 
 impl MetaMetrics {
@@ -134,6 +140,22 @@ impl MetaMetrics {
         )
         .unwrap();
 
+        let hummock_manager_lock_time = register_histogram_vec_with_registry!(
+            "hummock_manager_lock_time",
+            "latency for hummock manager to acquire the rwlock",
+            &["method", "lock_name", "lock_type"],
+            registry
+        )
+        .unwrap();
+
+        let hummock_manager_real_process_time = register_histogram_vec_with_registry!(
+            "meta_hummock_manager_real_process_time",
+            "latency for hummock manager to really process the request",
+            &["method"],
+            registry
+        )
+        .unwrap();
+
         Self {
             registry,
 
@@ -149,6 +171,8 @@ impl MetaMetrics {
             level_compact_cnt,
             level_file_size,
             version_size,
+            hummock_manager_lock_time,
+            hummock_manager_real_process_time,
         }
     }
 

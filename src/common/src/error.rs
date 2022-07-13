@@ -144,7 +144,7 @@ pub enum ErrorCode {
     },
     #[error("Invalid Parameter Value: {0}")]
     InvalidParameterValue(String),
-    #[error("MySQL error: {0}")]
+    #[error("Sink error: {0}")]
     SinkError(BoxedError),
 
     /// This error occurs when the meta node receives heartbeat from a previous removed worker

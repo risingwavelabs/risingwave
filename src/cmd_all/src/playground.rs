@@ -53,12 +53,6 @@ pub enum RisingWaveService {
 pub async fn playground() -> Result<()> {
     eprintln!("launching playground");
 
-    risingwave_rt::oneshot_common();
-    risingwave_rt::init_risingwave_logger(risingwave_rt::LoggerSettings::new_default());
-
-    // Enable tokio console for `./risedev p` by replacing the above statement to:
-    // risingwave_rt::init_risingwave_logger(risingwave_rt::LoggerSettings::new(false, true));
-
     let profile = if let Ok(profile) = std::env::var("PLAYGROUND_PROFILE") {
         profile.to_string()
     } else {

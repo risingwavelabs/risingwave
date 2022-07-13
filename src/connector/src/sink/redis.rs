@@ -18,12 +18,13 @@ use risingwave_common::catalog::Schema;
 
 use crate::sink::{Result, Sink};
 
+#[derive(Clone, Debug)]
 pub struct RedisConfig;
 
 pub struct RedisSink;
 
 impl RedisSink {
-    pub fn new(_cfg: RedisConfig) -> Self {
+    pub fn new(_cfg: RedisConfig) -> Result<Self> {
         todo!()
     }
 }
@@ -32,5 +33,17 @@ impl RedisSink {
 impl Sink for RedisSink {
     async fn write_batch(&mut self, _chunk: StreamChunk, _schema: &Schema) -> Result<()> {
         todo!();
+    }
+
+    async fn begin_epoch(&mut self, _epoch: u64) -> Result<()> {
+        todo!()
+    }
+
+    async fn commit(&mut self) -> Result<()> {
+        todo!()
+    }
+
+    async fn abort(&mut self) -> Result<()> {
+        todo!()
     }
 }

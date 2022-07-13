@@ -301,6 +301,51 @@ impl LocalQueryExecution {
                     node_body: Some(node_body),
                 })
             }
+            PlanNodeType::BatchLookupJoin => {
+                // Need to set up source templates for LookupJoinExecutor
+                let local_execute_plan = LocalExecutePlan {
+                    plan: None,
+                    epoch: self.epoch.expect(
+                        "Local execution mode has not acquired the epoch when generating the plan.",
+                    ),
+                };
+
+                // Only 1 worker is used since distribution of BatchLookupJoin is always single
+                let worker = self.front_env.worker_node_manager().next_random()?;
+
+                let exchange_source = ExchangeSource {
+                    task_output_id: Some(TaskOutputId {
+                        task_id: Some(ProstTaskId {
+                            task_id: 0,
+                            stage_id: 0, // this value doesn't matter
+                            query_id: self.query.query_id.id.clone(),
+                        }),
+                        output_id: 0,
+                    }),
+                    host: Some(worker.host.as_ref().unwrap().clone()),
+                    local_execute_plan: Some(Plan(local_execute_plan)),
+                };
+
+                let mut node_body = execution_plan_node.node.clone();
+                let sources = match &mut node_body {
+                    NodeBody::LookupJoin(node) => &mut node.sources,
+                    _ => unreachable!(),
+                };
+                assert!(sources.is_empty());
+                *sources = vec![exchange_source];
+
+                let left_child = self.convert_plan_node(
+                    &execution_plan_node.children[0],
+                    second_stages,
+                    vnode_bitmap,
+                )?;
+
+                Ok(PlanNodeProst {
+                    children: vec![left_child],
+                    identity: Uuid::new_v4().to_string(),
+                    node_body: Some(node_body),
+                })
+            }
             _ => {
                 let children = execution_plan_node
                     .children

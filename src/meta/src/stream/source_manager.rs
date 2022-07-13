@@ -23,7 +23,9 @@ use itertools::Itertools;
 use risingwave_common::catalog::TableId;
 use risingwave_common::error::{internal_error, Result, RwError, ToRwResult};
 use risingwave_common::try_match_expand;
-use risingwave_connector::{ConnectorProperties, SplitEnumeratorImpl, SplitImpl, SplitMetaData};
+use risingwave_connector::source::{
+    ConnectorProperties, SplitEnumeratorImpl, SplitImpl, SplitMetaData,
+};
 use risingwave_pb::catalog::source::Info;
 use risingwave_pb::catalog::source::Info::StreamSource;
 use risingwave_pb::catalog::Source;
