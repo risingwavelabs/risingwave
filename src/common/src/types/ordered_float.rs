@@ -106,6 +106,16 @@ impl<T: Float> OrderedFloat<T> {
     }
 }
 
+impl OrderedFloat<f32> {
+    pub const MAX: Self = Self(f32::MAX);
+    pub const MIN: Self = Self(f32::MIN);
+}
+
+impl OrderedFloat<f64> {
+    pub const MAX: Self = Self(f64::MAX);
+    pub const MIN: Self = Self(f64::MIN);
+}
+
 impl<T: Float> AsRef<T> for OrderedFloat<T> {
     #[inline]
     fn as_ref(&self) -> &T {
