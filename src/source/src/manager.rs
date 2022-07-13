@@ -24,7 +24,7 @@ use risingwave_common::error::ErrorCode::{ConnectorError, InternalError, Protoco
 use risingwave_common::error::{Result, RwError};
 use risingwave_common::types::DataType;
 use risingwave_common::util::epoch::UNIX_SINGULARITY_DATE_EPOCH;
-use risingwave_connector::ConnectorProperties;
+use risingwave_connector::source::ConnectorProperties;
 use risingwave_pb::catalog::StreamSourceInfo;
 use risingwave_pb::plan_common::RowFormatType;
 
@@ -256,7 +256,7 @@ mod tests {
     use risingwave_common::catalog::{ColumnDesc, ColumnId, Field, Schema, TableId};
     use risingwave_common::error::Result;
     use risingwave_common::types::DataType;
-    use risingwave_connector::kinesis::config::kinesis_demo_properties;
+    use risingwave_connector::source::kinesis::config::kinesis_demo_properties;
     use risingwave_pb::catalog::StreamSourceInfo;
     use risingwave_pb::plan_common::ColumnCatalog;
     use risingwave_storage::memory::MemoryStateStore;
