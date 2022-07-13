@@ -213,7 +213,7 @@ where
         Ok(None)
     }
 
-    pub fn earse(&self, key: &K) -> Result<()> {
+    pub fn erase(&self, key: &K) -> Result<()> {
         let hash = self.hash_builder.hash_one(key);
         self.buffer.erase(hash, key);
 
@@ -307,7 +307,7 @@ mod tests {
         holder.wait().await;
         assert_eq!(cache.get(&key(1)).await.unwrap(), Some(vec![b'1'; 1234]));
 
-        cache.earse(&key(1)).unwrap();
+        cache.erase(&key(1)).unwrap();
         assert_eq!(cache.get(&key(1)).await.unwrap(), None);
     }
 

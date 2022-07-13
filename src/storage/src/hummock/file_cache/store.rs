@@ -54,8 +54,8 @@ where
     block_size: usize,
     buffer_capacity: usize,
 
-    mf: Arc<RwLock<MetaFile<K>>>,
-    cf: CacheFile,
+    meta_file: Arc<RwLock<MetaFile<K>>>,
+    cache_file: CacheFile,
 }
 
 impl<K> Store<K>
@@ -102,8 +102,8 @@ where
             block_size: fs_block_size,
             buffer_capacity: options.buffer_capacity,
 
-            mf: Arc::new(RwLock::new(mf)),
-            cf,
+            meta_file: Arc::new(RwLock::new(mf)),
+            cache_file: cf,
         })
     }
 
@@ -112,19 +112,19 @@ where
     }
 
     pub fn size(&self) -> usize {
-        self.cf.size() + self.mf.read().size()
+        self.cache_file.size() + self.meta_file.read().size()
     }
 
     pub fn meta_file_size(&self) -> usize {
-        self.mf.read().size()
+        self.meta_file.read().size()
     }
 
     pub fn cache_file_size(&self) -> usize {
-        self.cf.size()
+        self.cache_file.size()
     }
 
     pub fn cache_file_len(&self) -> usize {
-        self.cf.len()
+        self.cache_file.len()
     }
 
     pub fn meta_file_path(&self) -> PathBuf {
@@ -157,13 +157,13 @@ where
             buf.resize(utils::align_up(self.block_size, buf.len()), 0);
         }
 
-        let boff = self.cf.append(buf).await? as u32 / self.block_size as u32;
+        let boff = self.cache_file.append(buf).await? as u32 / self.block_size as u32;
 
         for bloc in &mut blocs {
             bloc.bidx += boff;
         }
 
-        let mut mf = self.mf.write();
+        let mut mf = self.meta_file.write();
         for ((key, _value), bloc) in batch.iter().zip_eq(blocs.iter()) {
             slots.push(mf.insert(key, bloc)?);
         }
@@ -172,10 +172,14 @@ where
     }
 
     pub async fn get(&self, slot: SlotId) -> Result<Vec<u8>> {
-        let (bloc, _key) = self.mf.read().get(slot).ok_or(Error::InvalidSlot(slot))?;
+        let (bloc, _key) = self
+            .meta_file
+            .read()
+            .get(slot)
+            .ok_or(Error::InvalidSlot(slot))?;
         let offset = bloc.bidx as u64 * self.block_size as u64;
         let blen = bloc.blen(self.block_size as u32) as usize;
-        let buf = self.cf.read(offset, blen).await?;
+        let buf = self.cache_file.read(offset, blen).await?;
         Ok(buf[..bloc.len as usize].to_vec())
     }
 
@@ -184,13 +188,13 @@ where
     }
 
     fn free(&self, slot: SlotId) -> Result<()> {
-        let bloc = match self.mf.write().free(slot) {
+        let bloc = match self.meta_file.write().free(slot) {
             None => return Ok(()),
             Some(bloc) => bloc,
         };
         let offset = bloc.bidx as u64 * self.block_size as u64;
         let len = bloc.blen(self.block_size as u32) as usize;
-        self.cf.punch_hole(offset, len)
+        self.cache_file.punch_hole(offset, len)
     }
 }
 
