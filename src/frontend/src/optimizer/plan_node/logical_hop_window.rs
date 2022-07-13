@@ -24,7 +24,7 @@ use super::{
     gen_filter_and_pushdown, BatchHopWindow, ColPrunable, PlanBase, PlanRef, PlanTreeNodeUnary,
     PredicatePushdown, StreamHopWindow, ToBatch, ToStream,
 };
-use crate::expr::{InputRef, InputRefDisplay};
+use crate::expr::{InputRef, InputRefDisplay, InputRefVerboseDisplay};
 use crate::utils::{ColIndexMapping, Condition};
 
 /// `LogicalHopWindow` implements Hop Table Function.
@@ -170,11 +170,22 @@ impl LogicalHopWindow {
     }
 
     pub fn fmt_with_name(&self, f: &mut fmt::Formatter, name: &str) -> fmt::Result {
+        let verbose = self.base.ctx.is_explain_verbose();
         write!(
             f,
             "{} {{ time_col: {}, slide: {}, size: {}, output_indices: {} }}",
             name,
-            InputRefDisplay(self.time_col.index),
+            if verbose {
+                format!(
+                    "{}",
+                    InputRefVerboseDisplay {
+                        input_ref: &self.time_col,
+                        input_schema: self.input.schema()
+                    }
+                )
+            } else {
+                format!("{}", InputRefDisplay(self.time_col.index))
+            },
             self.window_slide,
             self.window_size,
             if self

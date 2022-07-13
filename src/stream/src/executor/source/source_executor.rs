@@ -23,7 +23,7 @@ use risingwave_common::array::{ArrayBuilder, I64ArrayBuilder, StreamChunk};
 use risingwave_common::bail;
 use risingwave_common::catalog::{ColumnId, Schema, TableId};
 use risingwave_common::error::Result;
-use risingwave_connector::{ConnectorState, SplitImpl, SplitMetaData};
+use risingwave_connector::source::{ConnectorState, SplitImpl, SplitMetaData};
 use risingwave_source::connector_source::SourceContext;
 use risingwave_source::*;
 use risingwave_storage::{Keyspace, StateStore};
@@ -361,7 +361,7 @@ mod tests {
     use risingwave_common::catalog::{ColumnDesc, Field, Schema};
     use risingwave_common::types::DataType;
     use risingwave_common::util::sort_util::{OrderPair, OrderType};
-    use risingwave_connector::datagen::DatagenSplit;
+    use risingwave_connector::source::datagen::DatagenSplit;
     use risingwave_pb::catalog::StreamSourceInfo;
     use risingwave_pb::data::data_type::TypeName;
     use risingwave_pb::data::DataType as ProstDataType;
