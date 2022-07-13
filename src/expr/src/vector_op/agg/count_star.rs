@@ -18,12 +18,10 @@ use risingwave_common::types::*;
 
 use crate::expr::ExpressionRef;
 use crate::vector_op::agg::aggregator::Aggregator;
-use crate::vector_op::agg::general_sorted_grouper::EqGroups;
 
 pub struct CountStar {
     return_type: DataType,
     result: usize,
-    reached_limit: bool,
     filter: ExpressionRef,
 }
 
@@ -32,9 +30,22 @@ impl CountStar {
         Self {
             return_type,
             result,
-            reached_limit: false,
             filter,
         }
+    }
+
+    /// `apply_filter_on_row` apply a filter on the given row, and return if the row satisfies the
+    /// filter or not # SAFETY
+    /// the given row must be visible
+    fn apply_filter_on_row(&self, input: &DataChunk, row_id: usize) -> Result<bool> {
+        let (row, visible) = input.row_at(row_id)?;
+        assert!(visible);
+        let filter_res = if let Some(ScalarImpl::Bool(v)) = self.filter.eval_row(&Row::from(row))? {
+            v
+        } else {
+            false
+        };
+        Ok(filter_res)
     }
 }
 
@@ -43,17 +54,31 @@ impl Aggregator for CountStar {
         self.return_type.clone()
     }
 
-    fn update(&mut self, input: &DataChunk) -> Result<()> {
-        self.result += self
-            .filter
-            .eval(input)?
-            .iter()
-            .filter(|res| {
-                res.map(|x| *x.into_scalar_impl().as_bool())
-                    .unwrap_or(false)
-            })
-            .count();
-
+    fn update_multi(
+        &mut self,
+        input: &DataChunk,
+        start_row_id: usize,
+        end_row_id: usize,
+    ) -> Result<()> {
+        if let Some(visibility) = input.visibility() {
+            for row_id in start_row_id..end_row_id {
+                if visibility.is_set(row_id)? && self.apply_filter_on_row(input, row_id)? {
+                    self.result += 1;
+                }
+            }
+        } else {
+            self.result += self
+                .filter
+                .eval(input)?
+                .iter()
+                .filter(|res| {
+                    res.map(|x| *x.into_scalar_impl().as_bool())
+                        .unwrap_or(false)
+                })
+                .skip(start_row_id)
+                .take(end_row_id - start_row_id)
+                .count();
+        }
         Ok(())
     }
 
@@ -64,73 +89,7 @@ impl Aggregator for CountStar {
         }
     }
 
-    fn update_and_output_with_sorted_groups(
-        &mut self,
-        input: &DataChunk,
-        builder: &mut ArrayBuilderImpl,
-        groups: &EqGroups,
-    ) -> Result<()> {
-        let builder = match builder {
-            ArrayBuilderImpl::Int64(b) => b,
-            _ => {
-                return Err(
-                    ErrorCode::InternalError("Unexpected builder for count(*).".into()).into(),
-                )
-            }
-        };
-        // The first element continues the same group in `self.result`. The following
-        // groups' sizes are simply distance between group start indices. The distance
-        // between last element and `filter_cnt` is the ongoing group that
-        // may continue in following chunks.
-        //
-        // Since the number of groups in an output chunk is limited, if we reach the limit
-        // in the process of counting, we set the `reached_limit` flag and save the start
-        // index of previous group to `self.result`.
-        let mut groups_iter = groups.starting_indices().iter();
-        let filter_cnt = self
-            .filter
-            .eval(input)?
-            .iter()
-            .filter(|res| {
-                res.map(|x| *x.into_scalar_impl().as_bool())
-                    .unwrap_or(false)
-            })
-            .count();
-        if let Some(first) = groups_iter.next() {
-            let first_count = {
-                if self.reached_limit {
-                    first - self.result
-                } else {
-                    first + self.result
-                }
-            };
-            builder.append(Some(first_count as i64))?;
-            let mut group_cnt = 1;
-            let mut prev = first;
-            for g in groups_iter {
-                builder.append(Some((g - prev) as i64))?;
-                prev = g;
-                group_cnt += 1;
-
-                // stop and save state if we reach limit
-                if groups.is_reach_limit(group_cnt) {
-                    self.reached_limit = true;
-                    self.result = *prev;
-                    break;
-                }
-            }
-            if group_cnt == groups.len() {
-                self.reached_limit = false;
-                self.result = filter_cnt - prev;
-            }
-        } else {
-            self.result += filter_cnt;
-        }
-
-        Ok(())
-    }
-
-    fn update_with_row(&mut self, input: &DataChunk, row_id: usize) -> Result<()> {
+    fn update_single(&mut self, input: &DataChunk, row_id: usize) -> Result<()> {
         if let (row, true) = input.row_at(row_id)? {
             let filter_res =
                 if let Some(ScalarImpl::Bool(v)) = self.filter.eval_row(&Row::from(row))? {
@@ -144,5 +103,11 @@ impl Aggregator for CountStar {
             }
         }
         Ok(())
+    }
+
+    fn output_and_reset(&mut self, builder: &mut ArrayBuilderImpl) -> Result<()> {
+        let res = self.output(builder);
+        self.result = 0;
+        res
     }
 }

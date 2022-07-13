@@ -25,36 +25,27 @@ use crate::vector_op::agg::count_star::CountStar;
 use crate::vector_op::agg::functions::*;
 use crate::vector_op::agg::general_agg::*;
 use crate::vector_op::agg::general_distinct_agg::*;
-use crate::vector_op::agg::general_sorted_grouper::EqGroups;
 
 /// An `Aggregator` supports `update` data and `output` result.
 pub trait Aggregator: Send + 'static {
     fn return_type(&self) -> DataType;
 
-    /// `update` the aggregator with a row with type checked at runtime.
-    fn update_with_row(&mut self, input: &DataChunk, row_id: usize) -> Result<()>;
-    /// `update` the aggregator with `Array` with input with type checked at runtime.
-    ///
-    /// This may be deprecated as it consumes whole array without sort or hash group info.
-    fn update(&mut self, input: &DataChunk) -> Result<()>;
+    /// `update_single` update the aggregator with a single row with type checked at runtime.
+    fn update_single(&mut self, input: &DataChunk, row_id: usize) -> Result<()>;
+
+    /// `update_multi` update the aggregator with multiple rows with type checked at runtime.
+    fn update_multi(
+        &mut self,
+        input: &DataChunk,
+        start_row_id: usize,
+        end_row_id: usize,
+    ) -> Result<()>;
 
     /// `output` the aggregator to `ArrayBuilder` with input with type checked at runtime.
     fn output(&self, builder: &mut ArrayBuilderImpl) -> Result<()>;
 
-    /// `update_and_output_with_sorted_groups` supersede `update` when grouping with the sort
-    /// aggregate algorithm.
-    ///
-    /// Rather than updating with the whole `input` array all at once, it updates with each
-    /// subslice of the `input` array according to the `EqGroups`. Finished groups are outputted
-    /// to `builder` immediately along the way. After this call, the internal state is about
-    /// the last group which may continue in the next chunk. It can be obtained with `output` when
-    /// there are no more upstream data.
-    fn update_and_output_with_sorted_groups(
-        &mut self,
-        input: &DataChunk,
-        builder: &mut ArrayBuilderImpl,
-        groups: &EqGroups,
-    ) -> Result<()>;
+    /// `output_and_reset` output the aggregator to `ArrayBuilder` and reset the internal state.
+    fn output_and_reset(&mut self, builder: &mut ArrayBuilderImpl) -> Result<()>;
 }
 
 pub type BoxedAggState = Box<dyn Aggregator>;

@@ -21,7 +21,6 @@ use risingwave_common::types::*;
 use crate::expr::ExpressionRef;
 use crate::vector_op::agg::aggregator::Aggregator;
 use crate::vector_op::agg::functions::RTFn;
-use crate::vector_op::agg::general_sorted_grouper::EqGroups;
 
 pub struct GeneralAgg<T, F, R>
 where
@@ -31,6 +30,7 @@ where
 {
     return_type: DataType,
     input_col_idx: usize,
+    init_result: Option<R::OwnedItem>,
     result: Option<R::OwnedItem>,
     f: F,
     filter: ExpressionRef,
@@ -52,6 +52,7 @@ where
         Self {
             return_type,
             input_col_idx,
+            init_result: init_result.clone(),
             result: init_result,
             f,
             filter,
@@ -59,73 +60,62 @@ where
         }
     }
 
-    pub(super) fn update_with_scalar_concrete(&mut self, input: &T, row_id: usize) -> Result<()> {
-        let datum = self
-            .f
-            .eval(
-                self.result.as_ref().map(|x| x.as_scalar_ref()),
-                input.value_at(row_id),
-            )?
-            .map(|x| x.to_owned_scalar());
-        self.result = datum;
-        Ok(())
-    }
-
-    pub(super) fn update_concrete(&mut self, array: &T, input: &DataChunk) -> Result<()> {
-        let mut cur = self.result.as_ref().map(|x| x.as_scalar_ref());
-        for row_id in 0..array.len() {
-            let filter_res = self.apply_filter_on_row(input, row_id)?;
-            if filter_res {
-                cur = self.f.eval(cur, array.value_at(row_id))?;
-            }
-        }
-        let r = cur.map(|x| x.to_owned_scalar());
-        self.result = r;
-        Ok(())
-    }
-
-    pub(super) fn output_concrete(&self, builder: &mut R::Builder) -> Result<()> {
-        builder
-            .append(self.result.as_ref().map(|x| x.as_scalar_ref()))
-            .map_err(Into::into)
-    }
-
-    pub(super) fn update_and_output_with_sorted_groups_concrete(
+    pub(super) fn update_single_concrete(
         &mut self,
         array: &T,
-        builder: &mut R::Builder,
-        groups: &EqGroups,
         input: &DataChunk,
+        row_id: usize,
     ) -> Result<()> {
-        let mut group_cnt = 0;
-        let mut groups_iter = groups.starting_indices().iter().peekable();
+        let filter_res = self.apply_filter_on_row(input, row_id)?;
+        if filter_res {
+            let tmp = self
+                .f
+                .eval(
+                    self.result.as_ref().map(|x| x.as_scalar_ref()),
+                    array.value_at(row_id),
+                )?
+                .map(|x| x.to_owned_scalar());
+            self.result = tmp;
+        }
+        Ok(())
+    }
+
+    pub(super) fn update_multi_concrete(
+        &mut self,
+        array: &T,
+        input: &DataChunk,
+        start_row_id: usize,
+        end_row_id: usize,
+    ) -> Result<()> {
         let mut cur = self.result.as_ref().map(|x| x.as_scalar_ref());
-        let chunk_offset = groups.chunk_offset();
-        for (i, (row_id, v)) in array.iter().enumerate().skip(chunk_offset).enumerate() {
-            if groups_iter.peek() == Some(&&(i + chunk_offset)) {
-                groups_iter.next();
-                group_cnt += 1;
-                builder.append(cur)?;
-                cur = None;
-            }
+        for row_id in start_row_id..end_row_id {
             let filter_res = self.apply_filter_on_row(input, row_id)?;
             if filter_res {
-                cur = self.f.eval(cur, v)?;
-            }
-            // reset state and exit when reach limit
-            if groups.is_reach_limit(group_cnt) {
-                cur = None;
-                break;
+                let datum_ref = array.value_at(row_id);
+                cur = self.f.eval(cur, datum_ref)?;
             }
         }
         self.result = cur.map(|x| x.to_owned_scalar());
         Ok(())
     }
 
+    pub(super) fn output_concrete(&self, builder: &mut R::Builder) -> Result<()> {
+        builder.append(self.result.as_ref().map(|x| x.as_scalar_ref()))?;
+        Ok(())
+    }
+
+    pub(super) fn output_and_reset_concrete(&mut self, builder: &mut R::Builder) -> Result<()> {
+        let res = self.output_concrete(builder);
+        self.result = self.init_result.clone();
+        res
+    }
+
+    /// `apply_filter_on_row` apply a filter on the given row, and return if the row satisfies the
+    /// filter or not 
+    /// # SAFETY
+    /// the given row must be visible
     fn apply_filter_on_row(&self, input: &DataChunk, row_id: usize) -> Result<bool> {
         let (row, visible) = input.row_at(row_id)?;
-        // SAFETY: when performing agg, the data chunk should already be
-        // compacted.
         assert!(visible);
         let filter_res = if let Some(ScalarImpl::Bool(v)) = self.filter.eval_row(&Row::from(row))? {
             v
@@ -146,15 +136,11 @@ macro_rules! impl_aggregator {
                 self.return_type.clone()
             }
 
-            fn update_with_row(&mut self, input: &DataChunk, row_id: usize) -> Result<()> {
+            fn update_single(&mut self, input: &DataChunk, row_id: usize) -> Result<()> {
                 if let ArrayImpl::$input_variant(i) =
                     input.column_at(self.input_col_idx).array_ref()
                 {
-                    let filter_res = self.apply_filter_on_row(input, row_id)?;
-                    if filter_res {
-                        self.update_with_scalar_concrete(i, row_id)?;
-                    }
-                    Ok(())
+                    self.update_single_concrete(i, input, row_id)
                 } else {
                     Err(ErrorCode::InternalError(format!(
                         "Input fail to match {}.",
@@ -164,15 +150,21 @@ macro_rules! impl_aggregator {
                 }
             }
 
-            fn update(&mut self, input: &DataChunk) -> Result<()> {
+            fn update_multi(
+                &mut self,
+                input: &DataChunk,
+                start_row_id: usize,
+                end_row_id: usize,
+            ) -> Result<()> {
                 if let ArrayImpl::$input_variant(i) =
                     input.column_at(self.input_col_idx).array_ref()
                 {
-                    self.update_concrete(i, input)
+                    self.update_multi_concrete(i, input, start_row_id, end_row_id)
                 } else {
                     Err(ErrorCode::InternalError(format!(
-                        "Input fail to match {}.",
-                        stringify!($input_variant)
+                        "Input fail to match {} or builder fail to match {}.",
+                        stringify!($input_variant),
+                        stringify!($result_variant)
                     ))
                     .into())
                 }
@@ -190,20 +182,12 @@ macro_rules! impl_aggregator {
                 }
             }
 
-            fn update_and_output_with_sorted_groups(
-                &mut self,
-                input: &DataChunk,
-                builder: &mut ArrayBuilderImpl,
-                groups: &EqGroups,
-            ) -> Result<()> {
-                if let (ArrayImpl::$input_variant(i), ArrayBuilderImpl::$result_variant(b)) =
-                    (input.column_at(self.input_col_idx).array_ref(), builder)
-                {
-                    self.update_and_output_with_sorted_groups_concrete(i, b, groups, input)
+            fn output_and_reset(&mut self, builder: &mut ArrayBuilderImpl) -> Result<()> {
+                if let ArrayBuilderImpl::$result_variant(b) = builder {
+                    self.output_and_reset_concrete(b)
                 } else {
                     Err(ErrorCode::InternalError(format!(
-                        "Input fail to match {} or builder fail to match {}.",
-                        stringify!($input_variant),
+                        "Builder fail to match {}.",
                         stringify!($result_variant)
                     ))
                     .into())
@@ -267,17 +251,12 @@ mod tests {
     ) -> Result<ArrayImpl> {
         let len = input.len();
         let input_chunk = DataChunk::new(vec![Column::new(input)], len);
-        let mut agg_state = create_agg_state_unary(
-            input_type,
-            0,
-            agg_type,
-            return_type,
-            false,
-            Arc::from(
-                LiteralExpression::new(DataType::Boolean, Some(ScalarImpl::Bool(true))).boxed(),
-            ),
-        )?;
-        agg_state.update(&input_chunk)?;
+        let filter: ExpressionRef = Arc::from(
+            LiteralExpression::new(DataType::Boolean, Some(ScalarImpl::Bool(true))).boxed(),
+        );
+        let mut agg_state =
+            create_agg_state_unary(input_type, 0, agg_type, return_type, false, filter)?;
+        agg_state.update_multi(&input_chunk, 0, input_chunk.cardinality())?;
         agg_state.output(&mut builder)?;
         builder.finish().map_err(Into::into)
     }
