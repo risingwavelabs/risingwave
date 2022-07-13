@@ -170,7 +170,7 @@ impl fmt::Display for FieldOrder {
     }
 }
 
-#[derive(Debug, Clone, PartialEq, Copy)]
+#[derive(Debug, Clone, Eq, PartialEq, Copy, Hash)]
 pub enum Direction {
     Asc,
     Desc,

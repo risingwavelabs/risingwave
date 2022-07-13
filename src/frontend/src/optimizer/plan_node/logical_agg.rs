@@ -32,11 +32,69 @@ use super::{
 use crate::catalog::table_catalog::TableCatalog;
 use crate::expr::{
     AggCall, Expr, ExprImpl, ExprRewriter, ExprType, FunctionCall, InputRef, InputRefDisplay,
+    InputRefVerboseDisplay,
 };
 use crate::optimizer::plan_node::utils::TableCatalogBuilder;
 use crate::optimizer::plan_node::{gen_filter_and_pushdown, LogicalProject};
-use crate::optimizer::property::{Order, RequiredDist};
+use crate::optimizer::property::{Direction, Order, RequiredDist};
 use crate::utils::{ColIndexMapping, Condition, ConditionVerboseDisplay, Substitute};
+
+/// See also [`crate::expr::AggOrderByExpr`]
+/// TODO(yuchao): replace `PlanAggOrderByField` with enhanced `FieldOrder`
+#[derive(Clone)]
+pub struct PlanAggOrderByField {
+    pub input: InputRef,
+    pub direction: Direction,
+    pub nulls_first: bool,
+}
+
+impl fmt::Debug for PlanAggOrderByField {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(f, "{:?}", self.input)?;
+        match self.direction {
+            Direction::Asc => write!(f, " ASC")?,
+            Direction::Desc => write!(f, " DESC")?,
+            _ => {}
+        }
+        write!(
+            f,
+            " NULLS {}",
+            if self.nulls_first { "FIRST" } else { "LAST" }
+        )?;
+        Ok(())
+    }
+}
+
+#[derive(Clone)]
+pub struct PlanAggOrderByFieldVerboseDisplay<'a> {
+    pub plan_agg_order_by_field: &'a PlanAggOrderByField,
+    pub input_schema: &'a Schema,
+}
+
+impl fmt::Debug for PlanAggOrderByFieldVerboseDisplay<'_> {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        let that = self.plan_agg_order_by_field;
+        write!(
+            f,
+            "{:?}",
+            InputRefVerboseDisplay {
+                input_ref: &that.input,
+                input_schema: self.input_schema
+            }
+        )?;
+        match that.direction {
+            Direction::Asc => write!(f, " ASC")?,
+            Direction::Desc => write!(f, " DESC")?,
+            _ => {}
+        }
+        write!(
+            f,
+            " NULLS {}",
+            if that.nulls_first { "FIRST" } else { "LAST" }
+        )?;
+        Ok(())
+    }
+}
 
 /// Aggregation Call
 #[derive(Clone)]
@@ -54,6 +112,7 @@ pub struct PlanAggCall {
     pub inputs: Vec<InputRef>,
 
     pub distinct: bool,
+    pub order_by_fields: Vec<PlanAggOrderByField>,
     /// Selective aggregation: only the input rows for which
     /// the filter_clause evaluates to true will be fed to aggregate function.
     /// Other rows are discarded.
@@ -73,6 +132,14 @@ impl fmt::Debug for PlanAggCall {
                 if idx != (self.inputs.len() - 1) {
                     write!(f, ",")?;
                 }
+            }
+            if !self.order_by_fields.is_empty() {
+                let clause_text = self
+                    .order_by_fields
+                    .iter()
+                    .map(|e| format!("{:?}", e))
+                    .join(", ");
+                write!(f, " order_by({})", clause_text)?;
             }
             write!(f, ")")?;
         }
@@ -121,6 +188,7 @@ impl PlanAggCall {
             return_type: DataType::Int64,
             inputs: vec![],
             distinct: false,
+            order_by_fields: vec![],
             filter: Condition::true_cond(),
         }
     }
@@ -150,6 +218,22 @@ impl fmt::Debug for PlanAggCallVerboseDisplay<'_> {
                     write!(f, ",")?;
                 }
             }
+            if !that.order_by_fields.is_empty() {
+                let clause_text = that
+                    .order_by_fields
+                    .iter()
+                    .map(|e| {
+                        format!(
+                            "{:?}",
+                            PlanAggOrderByFieldVerboseDisplay {
+                                plan_agg_order_by_field: e,
+                                input_schema: self.input_schema,
+                            }
+                        )
+                    })
+                    .join(", ");
+                write!(f, " order_by({})", clause_text)?;
+            }
             write!(f, ")")?;
         }
 
@@ -159,7 +243,7 @@ impl fmt::Debug for PlanAggCallVerboseDisplay<'_> {
                 " filter({:?})",
                 ConditionVerboseDisplay {
                     condition: &that.filter,
-                    input_schema: self.input_schema
+                    input_schema: self.input_schema,
                 }
             )?;
         }
@@ -283,10 +367,10 @@ struct LogicalAggBuilder {
     /// the error during the expression rewriting
     error: Option<ErrorCode>,
     /// If `is_in_filter_clause` is true, it means that
-    /// we are processing a filter clause.
-    /// This field is needed because input refs in filter clause
+    /// we are processing filter clause.
+    /// This field is needed because input refs in these clauses
     /// are allowed to refer to any columns, while those not in filter
-    /// clause are only allowed to refer to group key.
+    /// clause are only allowed to refer to group keys.
     is_in_filter_clause: bool,
 }
 
@@ -357,7 +441,7 @@ impl ExprRewriter for LogicalAggBuilder {
     /// Note that the rewriter does not traverse into inputs of agg calls.
     fn rewrite_agg_call(&mut self, agg_call: AggCall) -> ExprImpl {
         let return_type = agg_call.return_type();
-        let (agg_kind, inputs, distinct, filter) = agg_call.decompose();
+        let (agg_kind, inputs, distinct, order_by, filter) = agg_call.decompose();
         self.is_in_filter_clause = true;
         let filter = filter.rewrite_expr(self);
         self.is_in_filter_clause = false;
@@ -366,7 +450,7 @@ impl ExprRewriter for LogicalAggBuilder {
                 self.error = Some(ErrorCode::InvalidInputSyntax(
                     "Aggregation calls should not be nested".into(),
                 ));
-                return AggCall::new(agg_kind, inputs, distinct, filter)
+                return AggCall::new(agg_kind, inputs, distinct, order_by, filter)
                     .unwrap()
                     .into();
             }
@@ -377,6 +461,19 @@ impl ExprRewriter for LogicalAggBuilder {
             .map(|expr| {
                 let index = self.input_proj_builder.add_expr(expr);
                 InputRef::new(index, expr.return_type())
+            })
+            .collect_vec();
+
+        let order_by_fields = order_by
+            .sort_exprs
+            .iter()
+            .map(|e| {
+                let index = self.input_proj_builder.add_expr(&e.expr);
+                PlanAggOrderByField {
+                    input: InputRef::new(index, e.expr.return_type()),
+                    direction: e.direction,
+                    nulls_first: e.nulls_first,
+                }
             })
             .collect_vec();
 
@@ -392,6 +489,7 @@ impl ExprRewriter for LogicalAggBuilder {
                 return_type: left_return_type.clone(),
                 inputs: inputs.clone(),
                 distinct,
+                order_by_fields: order_by_fields.clone(),
                 filter: filter.clone(),
             });
             let left = ExprImpl::from(InputRef::new(
@@ -409,6 +507,7 @@ impl ExprRewriter for LogicalAggBuilder {
                 return_type: right_return_type.clone(),
                 inputs,
                 distinct,
+                order_by_fields,
                 filter,
             });
 
@@ -424,6 +523,7 @@ impl ExprRewriter for LogicalAggBuilder {
                 return_type: return_type.clone(),
                 inputs,
                 distinct,
+                order_by_fields,
                 filter,
             });
             ExprImpl::from(InputRef::new(
@@ -615,6 +715,10 @@ impl LogicalAgg {
                 agg_call.inputs.iter_mut().for_each(|i| {
                     *i = InputRef::new(input_col_change.map(i.index()), i.return_type())
                 });
+                agg_call.order_by_fields.iter_mut().for_each(|field| {
+                    let i = &mut field.input;
+                    *i = InputRef::new(input_col_change.map(i.index()), i.return_type())
+                });
                 agg_call.filter = agg_call.filter.rewrite_expr(&mut input_col_change);
                 agg_call
             })
@@ -676,6 +780,7 @@ impl ColPrunable for LogicalAgg {
                     let index = index - self.group_key.len();
                     let agg_call = self.agg_calls[index].clone();
                     tmp.extend(agg_call.inputs.iter().map(|x| x.index()));
+                    tmp.extend(agg_call.order_by_fields.iter().map(|x| x.input.index()));
                     // collect columns used in aggregate filter expressions
                     for i in &agg_call.filter.conjunctions {
                         tmp.union_with(&i.collect_input_refs(input_cnt));
@@ -857,7 +962,8 @@ mod tests {
 
     use super::*;
     use crate::expr::{
-        assert_eq_input_ref, input_ref_to_column_indices, AggCall, ExprType, FunctionCall,
+        assert_eq_input_ref, input_ref_to_column_indices, AggCall, AggOrderBy, ExprType,
+        FunctionCall,
     };
     use crate::optimizer::plan_node::LogicalValues;
     use crate::session::OptimizerContext;
@@ -910,6 +1016,7 @@ mod tests {
                 AggKind::Min,
                 vec![input_ref_2.clone().into()],
                 false,
+                AggOrderBy::any(),
                 Condition::true_cond(),
             )
             .unwrap();
@@ -934,6 +1041,7 @@ mod tests {
                 AggKind::Min,
                 vec![input_ref_2.clone().into()],
                 false,
+                AggOrderBy::any(),
                 Condition::true_cond(),
             )
             .unwrap();
@@ -941,6 +1049,7 @@ mod tests {
                 AggKind::Max,
                 vec![input_ref_3.clone().into()],
                 false,
+                AggOrderBy::any(),
                 Condition::true_cond(),
             )
             .unwrap();
@@ -980,6 +1089,7 @@ mod tests {
                 AggKind::Min,
                 vec![v1_mult_v3.into()],
                 false,
+                AggOrderBy::any(),
                 Condition::true_cond(),
             )
             .unwrap();
@@ -1013,6 +1123,7 @@ mod tests {
             return_type: ty.clone(),
             inputs: vec![InputRef::new(2, ty.clone())],
             distinct: false,
+            order_by_fields: vec![],
             filter: Condition::true_cond(),
         };
         LogicalAgg::new(vec![agg_call], vec![1], values.into())
@@ -1131,6 +1242,7 @@ mod tests {
             return_type: ty.clone(),
             inputs: vec![InputRef::new(2, ty.clone())],
             distinct: false,
+            order_by_fields: vec![],
             filter: Condition::true_cond(),
         };
         let agg = LogicalAgg::new(vec![agg_call], vec![1], values.into());
@@ -1195,6 +1307,7 @@ mod tests {
                 return_type: ty.clone(),
                 inputs: vec![InputRef::new(2, ty.clone())],
                 distinct: false,
+                order_by_fields: vec![],
                 filter: Condition::true_cond(),
             },
             PlanAggCall {
@@ -1202,6 +1315,7 @@ mod tests {
                 return_type: ty.clone(),
                 inputs: vec![InputRef::new(1, ty.clone())],
                 distinct: false,
+                order_by_fields: vec![],
                 filter: Condition::true_cond(),
             },
         ];

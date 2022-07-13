@@ -32,7 +32,7 @@ mod expr_visitor;
 mod type_inference;
 mod utils;
 
-pub use agg_call::AggCall;
+pub use agg_call::{AggCall, AggOrderBy, AggOrderByExpr};
 pub use correlated_input_ref::CorrelatedInputRef;
 pub use function_call::{FunctionCall, FunctionCallVerboseDisplay};
 pub use input_ref::{
@@ -94,9 +94,15 @@ impl ExprImpl {
     /// A `count(*)` aggregate function.
     #[inline(always)]
     pub fn count_star() -> Self {
-        AggCall::new(AggKind::Count, vec![], false, Condition::true_cond())
-            .unwrap()
-            .into()
+        AggCall::new(
+            AggKind::Count,
+            vec![],
+            false,
+            AggOrderBy::any(),
+            Condition::true_cond(),
+        )
+        .unwrap()
+        .into()
     }
 
     /// Collect all `InputRef`s' indexes in the expression.

@@ -89,10 +89,6 @@ impl<'a, R: Rng> SqlGenerator<'a, R> {
         expr.or_else(|| make_general_expr(func.func, exprs))
             .unwrap_or_else(|| self.gen_simple_scalar(ret))
     }
-
-    fn can_recurse(&mut self) -> bool {
-        self.rng.gen_bool(0.3)
-    }
 }
 
 fn make_unary_op(func: ExprType, expr: &Expr) -> Option<Expr> {
