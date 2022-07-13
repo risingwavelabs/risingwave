@@ -65,7 +65,7 @@ impl<'a, R: Rng> SqlGenerator<'a, R> {
         };
         table.name = alias; // Rename the table.
         let columns = table.get_qualified_columns();
-        self.bound_relations.push(table);
+        self.add_relation_to_context(table);
         (table_factor, columns)
     }
 
@@ -127,7 +127,7 @@ impl<'a, R: Rng> SqlGenerator<'a, R> {
             },
             joins: vec![],
         };
-        self.bound_relations.push(table);
+        self.add_relation_to_context(table);
         relation
     }
 }

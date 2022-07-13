@@ -69,15 +69,17 @@ struct SqlGenerator<'a, R: Rng> {
     /// Relations bound in generated query.
     /// We might not read from all tables.
     bound_relations: Vec<Table>,
+
+    /// Columns bound in generated query.
+    /// May not contain all columns in bound relation,
+    /// for instance GROUP BY clause will constrain bound_columns.
+    bound_columns: Vec<Column>,
 }
 
 /// Utilities
 impl<'a, R: Rng> SqlGenerator<'a, R> {
-    fn get_bound_columns(&self) -> Vec<Column> {
-        self.bound_relations
-            .iter()
-            .flat_map(|t| t.get_qualified_columns())
-            .collect()
+    fn get_bound_columns(&self) -> &[Column] {
+        &self.bound_columns
     }
 }
 
@@ -88,7 +90,14 @@ impl<'a, R: Rng> SqlGenerator<'a, R> {
             tables,
             rng,
             bound_relations: vec![],
+            bound_columns: vec![],
         }
+    }
+
+    fn add_relation_to_context(&mut self, table: Table) {
+        let mut bound_columns = table.get_qualified_columns();
+        self.bound_columns.append(&mut bound_columns);
+        self.bound_relations.push(table);
     }
 
     fn gen_stmt(&mut self) -> Statement {
@@ -237,10 +246,13 @@ impl<'a, R: Rng> SqlGenerator<'a, R> {
     /// Reference <https://www.postgresql.org/docs/current/sql-select.html#SQL-GROUPBY>
     fn gen_group_by(&mut self) -> Vec<Expr> {
         // get all from refs
-        let mut available = self.get_bound_columns();
+        let mut available = self.get_bound_columns().to_vec();
         available.shuffle(self.rng);
         let n_group_by_cols = self.rng.gen_range(1..=available.len());
-        available.drain(0..n_group_by_cols)
+        let group_by_cols = available.drain(0..n_group_by_cols).collect_vec();
+        self.bound_columns = group_by_cols.clone();
+        group_by_cols
+            .into_iter()
             .map(|c| Expr::Identifier(Ident::new(c.name)))
             .collect_vec()
     }
