@@ -22,7 +22,10 @@ use risingwave_sqlparser::ast::{Function, FunctionArg, FunctionArgExpr};
 
 use crate::binder::bind_context::Clause;
 use crate::binder::Binder;
-use crate::expr::{AggCall, Expr, ExprImpl, ExprType, FunctionCall, Literal};
+use crate::expr::{
+    AggCall, AggOrderBy, AggOrderByExpr, Expr, ExprImpl, ExprType, FunctionCall, Literal,
+};
+use crate::optimizer::property::Direction;
 use crate::utils::Condition;
 
 impl Binder {
@@ -77,12 +80,44 @@ impl Binder {
                     }
                     None => Condition::true_cond(),
                 };
+                // TODO(yuchao): handle DISTINCT and ORDER BY appear at the same time
+                if f.distinct && !f.order_by.is_empty() {
+                    return Err(ErrorCode::InvalidInputSyntax(
+                        "DISTINCT and ORDER BY are not supported to appear at the same time now"
+                            .to_string(),
+                    )
+                    .into());
+                }
+                let order_by = AggOrderBy::new(
+                    f.order_by
+                        .into_iter()
+                        .map(|e| -> Result<AggOrderByExpr> {
+                            Ok({
+                                let mut expr = AggOrderByExpr {
+                                    expr: self.bind_expr(e.expr)?,
+                                    direction: match e.asc {
+                                        None | Some(true) => Direction::Asc,
+                                        Some(false) => Direction::Desc,
+                                    },
+                                    nulls_first: Default::default(),
+                                };
+                                expr.nulls_first =
+                                    e.nulls_first.unwrap_or_else(|| match expr.direction {
+                                        Direction::Asc => false,
+                                        Direction::Desc => true,
+                                        Direction::Any => unreachable!(),
+                                    });
+                                expr
+                            })
+                        })
+                        .try_collect()?,
+                );
                 return Ok(ExprImpl::AggCall(Box::new(AggCall::new(
-                    kind, inputs, f.distinct, filter,
+                    kind, inputs, f.distinct, order_by, filter,
                 )?)));
-            } else if f.filter.is_some() {
+            } else if f.distinct || !f.order_by.is_empty() || f.filter.is_some() {
                 return Err(ErrorCode::InvalidInputSyntax(format!(
-                    "filter clause is only allowed in aggregation functions, but `{}` is not an aggregation function", function_name
+                    "DISTINCT, ORDER BY or FILTER is only allowed in aggregation functions, but `{}` is not an aggregation function", function_name
                 )
                 )
                 .into());

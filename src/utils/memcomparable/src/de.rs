@@ -19,6 +19,9 @@ use serde::de::{
 
 use crate::error::{Error, Result};
 
+const DECIMAL_FLAG_LOW_BOUND: u8 = 0x6;
+const DECIMAL_FLAG_UP_BOUND: u8 = 0x23;
+
 /// A structure that deserializes memcomparable bytes into Rust values.
 pub struct Deserializer<B: Buf> {
     input: MaybeFlip<B>,
@@ -125,7 +128,7 @@ impl<B: Buf> Deserializer<B> {
 
     fn read_decimal(&mut self) -> Result<Vec<u8>> {
         let flag = self.input.get_u8();
-        if !(0x8..=0x22).contains(&flag) {
+        if !(DECIMAL_FLAG_LOW_BOUND..=DECIMAL_FLAG_UP_BOUND).contains(&flag) {
             return Err(Error::InvalidBytesEncoding(flag));
         }
         let mut byte_array = vec![flag];
@@ -517,7 +520,7 @@ impl<B: Buf> Deserializer<B> {
         // whether the decimal is negative or not.
         let mut neg: bool = false;
         let exponent = match byte_array[0] {
-            0x06 => {
+            DECIMAL_FLAG_LOW_BOUND => {
                 // NaN
                 return Ok((0, 31));
             }
@@ -547,7 +550,7 @@ impl<B: Buf> Deserializer<B> {
                 (byte_array[0] - 0x17) as i8
             }
             0x22 => byte_array[1] as i8,
-            0x23 => {
+            DECIMAL_FLAG_UP_BOUND => {
                 // Positive INF
                 return Ok((0, 30));
             }
