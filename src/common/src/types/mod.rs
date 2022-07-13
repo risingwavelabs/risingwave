@@ -740,6 +740,11 @@ impl ScalarImpl {
         })
     }
 
+    /// Deserialize the `data_size` of `input_data_type` in `storage_encoding`. This function will
+    /// consume the offset of deserializer then return the length (without memcopy, only length
+    /// calculation). The difference between `encoding_data_size` and `ScalarImpl::data_size` is
+    /// that `ScalarImpl::data_size` calculates the `memory_length` of type instead of
+    /// `storage_encoding`
     pub fn encoding_data_size(
         data_type: &DataType,
         deserializer: &mut memcomparable::Deserializer<impl Buf>,
@@ -765,6 +770,8 @@ impl ScalarImpl {
 
                     DataType::Decimal => deserializer.read_decimal_len()?,
                     DataType::List { .. } | DataType::Struct { .. } => {
+                        // these two types is var-length and should only be determine at runtime.
+                        // TODO: need some test for this case (e.g. e2e test)
                         deserializer.read_struct_and_list_len()?
                     }
                     DataType::Varchar => deserializer.read_bytes_len()?,

@@ -102,9 +102,7 @@ impl OrderedRowSerializer {
             let mut serializer = memcomparable::Serializer::new(vec![]);
             serializer.set_reverse(*order_type == OrderType::Descending);
             serialize_datum_into(datum, &mut serializer).unwrap();
-
-            let extra = serializer.into_inner();
-            append_to.extend(extra);
+            append_to.extend(serializer.into_inner());
         }
     }
 
