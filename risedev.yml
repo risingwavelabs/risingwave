@@ -83,6 +83,23 @@ risedev:
     - use: kafka
       persist-data: true
 
+  full-benchmark:
+    - use: minio
+    - use: etcd
+    - use: meta-node
+    - use: compute-node
+    - use: frontend
+    - use: compactor
+    - use: prometheus
+      remote_write: true
+      remote_write_regin: "ap-southeast-1"
+      remote_write_url: "https://aps-workspaces.ap-southeast-1.amazonaws.com/workspaces/ws-f3841dad-6a5c-420f-8f62-8f66487f512a/api/v1/remote_write"
+    - use: grafana
+    - use: zookeeper
+      persist-data: true
+    - use: kafka
+      persist-data: true
+
   ##########################################
   ### Configuration used for ./risedev p ###
   ##########################################
@@ -432,6 +449,15 @@ template:
 
     # Id of this instance
     id: prometheus
+
+    # If `remote_write` is true, this Prometheus instance will push metrics to remote instance
+    remote_write: false
+
+    # AWS region of remote write
+    remote_write_regin: ""
+
+    # Remote write url of this instance
+    remote_write_url: ""
 
     # Compute-nodes used by this Prometheus instance
     provide-compute-node: "compute-node*"
