@@ -351,9 +351,7 @@ mod tests {
         let serializer = OrderedRowSerializer::new(order_types.clone());
         let schema = vec![DataType::Varchar, DataType::Int16];
         let row1 = Row(vec![Some(Utf8("abc".to_string())), Some(Int16(5))]);
-        let row2 = Row(vec![Some(Utf8("abd".to_string())), Some(Int16(5))]);
-        let row3 = Row(vec![Some(Utf8("abc".to_string())), Some(Int16(6))]);
-        let rows = vec![row1, row2, row3];
+        let rows = vec![row1.clone()];
         let deserializer = OrderedRowDeserializer::new(schema, order_types);
         let mut array = vec![];
         for row in &rows {
@@ -362,17 +360,35 @@ mod tests {
             array.push(row_bytes);
         }
 
-        let row_len = array[0].len();
-        let row_0_idx_0_len = deserializer
-            .deserialize_prefix_len_with_column_indices(&array[0], vec![0])
-            .unwrap();
-        assert_eq!(11, row_0_idx_0_len);
-        let row_0_idx_1_len = deserializer
-            .deserialize_prefix_len_with_column_indices(&array[0], vec![0, 1])
-            .unwrap();
-        assert_eq!(14, row_0_idx_1_len);
+        {
+            let row_0_idx_0_len = deserializer
+                .deserialize_prefix_len_with_column_indices(&array[0], vec![0])
+                .unwrap();
 
-        assert_eq!(row_len, row_0_idx_1_len);
+            let schema = vec![DataType::Varchar];
+            let order_types = vec![OrderType::Descending];
+            let deserializer = OrderedRowDeserializer::new(schema, order_types.clone());
+            let prefix_slice = &array[0][0..row_0_idx_0_len];
+            assert_eq!(
+                deserializer.deserialize(prefix_slice).unwrap(),
+                OrderedRow::new(Row(vec![Some(Utf8("abc".to_string()))]), &order_types)
+            );
+        }
+
+        {
+            let row_0_idx_1_len = deserializer
+                .deserialize_prefix_len_with_column_indices(&array[0], vec![0, 1])
+                .unwrap();
+
+            let order_types = vec![OrderType::Descending, OrderType::Ascending];
+            let schema = vec![DataType::Varchar, DataType::Int16];
+            let deserializer = OrderedRowDeserializer::new(schema, order_types.clone());
+            let prefix_slice = &array[0][0..row_0_idx_1_len];
+            assert_eq!(
+                deserializer.deserialize(prefix_slice).unwrap(),
+                OrderedRow::new(row1, &order_types)
+            );
+        }
     }
 
     #[test]
