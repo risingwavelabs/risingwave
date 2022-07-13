@@ -93,16 +93,6 @@ pub enum DataType {
 const DECIMAL_DEFAULT_PRECISION: u32 = 20;
 const DECIMAL_DEFAULT_SCALE: u32 = 6;
 
-/// Number of bytes of one element in array of [`DataType`].
-pub enum DataSize {
-    /// For types with fixed bit size, e.g. bool
-    FixedBits(usize),
-    /// For types with fixed size, e.g. int, float.
-    Fixed(usize),
-    /// For types with variable size, e.g. string.
-    Variable,
-}
-
 impl From<&ProstDataType> for DataType {
     fn from(proto: &ProstDataType) -> DataType {
         match proto.get_type_name().expect("missing type field") {
