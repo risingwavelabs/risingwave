@@ -198,6 +198,7 @@ impl PlanAggCall {
         PlanAggCall {
             agg_kind: total_agg_kind,
             inputs: vec![InputRef::new(partial_output_idx, self.return_type.clone())],
+            order_by_fields: vec![], // order must make no difference when we use 2-phase agg
             filter: Condition::true_cond(),
             ..self.clone()
         }
@@ -409,6 +410,14 @@ impl LogicalAgg {
         let total_agg_logical_plan =
             LogicalAgg::new(total_agg_types, self.group_key().to_vec(), input);
         Ok(StreamGlobalSimpleAgg::new(total_agg_logical_plan).into())
+    }
+
+    /// Check if the aggregation result will be affected by order by clause, if any.
+    pub(crate) fn is_agg_result_affected_by_order(&self) -> bool {
+        self.agg_calls.iter().any(|call| match call.agg_kind {
+            AggKind::StringAgg => call.order_by_fields.len() > 0,
+            _ => false,
+        })
     }
 }
 
