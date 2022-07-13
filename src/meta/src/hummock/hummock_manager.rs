@@ -47,9 +47,7 @@ use crate::hummock::compaction_group::manager::CompactionGroupManagerRef;
 use crate::hummock::compaction_scheduler::CompactionRequestChannelRef;
 use crate::hummock::error::{Error, Result};
 use crate::hummock::metrics_utils::{trigger_commit_stat, trigger_sst_stat};
-use crate::hummock::model::{
-    sstable_id_info, CurrentHummockVersionId, HummockPinnedVersionExt, INVALID_TIMESTAMP,
-};
+use crate::hummock::model::{sstable_id_info, CurrentHummockVersionId, INVALID_TIMESTAMP};
 use crate::hummock::CompactorManagerRef;
 use crate::manager::{IdCategory, MetaSrvEnv};
 use crate::model::{
@@ -447,7 +445,7 @@ where
     pub async fn pin_version(
         &self,
         context_id: HummockContextId,
-        last_pinned: HummockVersionId,
+        _last_pinned: HummockVersionId,
     ) -> Result<HummockVersion> {
         let mut versioning_guard = write_lock!(self, versioning).await;
         let _timer = start_measure_real_process_timer!(self);
@@ -463,25 +461,10 @@ where
             },
         );
 
-        let mut already_pinned = false;
-        let version_id = {
-            let partition_point = context_pinned_version
-                .version_id
-                .iter()
-                .sorted()
-                .cloned()
-                .collect_vec()
-                .partition_point(|p| *p <= last_pinned);
-            if partition_point < context_pinned_version.version_id.len() {
-                already_pinned = true;
-                context_pinned_version.version_id[partition_point]
-            } else {
-                current_version_id.id()
-            }
-        };
+        let version_id = current_version_id.id();
 
-        if !already_pinned {
-            context_pinned_version.pin_version(version_id);
+        if context_pinned_version.version_id.is_empty() {
+            context_pinned_version.version_id.push(0);
             commit_multi_var!(self, Some(context_id), context_pinned_version)?;
         }
 
@@ -497,24 +480,44 @@ where
     }
 
     #[named]
-    pub async fn unpin_version(
+    pub async fn unpin_version_before(
         &self,
         context_id: HummockContextId,
-        pinned_version_ids: impl AsRef<[HummockVersionId]>,
+        unpin_before: HummockVersionId,
     ) -> Result<()> {
         let mut versioning_guard = write_lock!(self, versioning).await;
         let _timer = start_measure_real_process_timer!(self);
-        let mut pinned_versions = BTreeMapTransaction::new(&mut versioning_guard.pinned_versions);
-        let mut context_pinned_version = match pinned_versions.new_entry_txn(context_id) {
-            None => {
-                return Ok(());
-            }
-            Some(context_pinned_version) => context_pinned_version,
-        };
-        for pinned_version_id in pinned_version_ids.as_ref() {
-            context_pinned_version.unpin_version(*pinned_version_id);
-        }
+        let versioning = versioning_guard.deref_mut();
+        let mut pinned_versions = BTreeMapTransaction::new(&mut versioning.pinned_versions);
+        let mut context_pinned_version = pinned_versions.new_entry_txn_or_default(
+            context_id,
+            HummockPinnedVersion {
+                context_id,
+                version_id: vec![0],
+            },
+        );
+
+        *context_pinned_version.version_id.first_mut().unwrap() = unpin_before;
         commit_multi_var!(self, Some(context_id), context_pinned_version)?;
+
+        #[cfg(test)]
+        {
+            drop(versioning_guard);
+            self.check_state_consistency().await;
+        }
+
+        Ok(())
+    }
+
+    #[named]
+    pub async fn unpin_version(&self, context_id: HummockContextId) -> Result<()> {
+        let mut versioning_guard = write_lock!(self, versioning).await;
+        let _timer = start_measure_real_process_timer!(self);
+        let mut pinned_versions = BTreeMapTransaction::new(&mut versioning_guard.pinned_versions);
+        let release_version = pinned_versions.remove(context_id);
+        if release_version.is_some() {
+            commit_multi_var!(self, Some(context_id), pinned_versions)?;
+        }
 
         #[cfg(test)]
         {
@@ -1278,7 +1281,7 @@ where
         let count = versioning_guard
             .pinned_versions
             .values()
-            .filter(|version_pin| version_pin.version_id.contains(&version_id))
+            .filter(|version_pin| version_pin.version_id.first().unwrap() <= &version_id)
             .count();
         Ok(count as HummockRefCount)
     }
