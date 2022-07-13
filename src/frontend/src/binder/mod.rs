@@ -55,7 +55,7 @@ pub struct Binder {
     db_name: String,
     context: BindContext,
     /// A stack holding contexts of outer queries when binding a subquery.
-    /// It also holds all of the stashed table contexts for each respective
+    /// It also holds all of the lateral contexts for each respective
     /// subquery.
     ///
     /// See [`Binder::bind_subquery_expr`] for details.
@@ -92,18 +92,18 @@ impl Binder {
 
     fn push_context(&mut self) {
         let new_context = std::mem::take(&mut self.context);
-        let new_table_contexts = std::mem::take(&mut self.lateral_contexts);
+        let new_lateral_contexts = std::mem::take(&mut self.lateral_contexts);
         self.upper_subquery_contexts
-            .push((new_context, new_table_contexts));
+            .push((new_context, new_lateral_contexts));
     }
 
     fn pop_context(&mut self) -> Result<()> {
-        let (old_context, old_table_contexts) = self
+        let (old_context, old_lateral_contexts) = self
             .upper_subquery_contexts
             .pop()
             .ok_or_else(|| ErrorCode::InternalError("Popping non-existent context".to_string()))?;
         self.context = old_context;
-        self.lateral_contexts = old_table_contexts;
+        self.lateral_contexts = old_lateral_contexts;
         Ok(())
     }
 
