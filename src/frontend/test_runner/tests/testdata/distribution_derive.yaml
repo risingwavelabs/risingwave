@@ -46,7 +46,7 @@
             BatchProject { exprs: [($0 + $1), $0] }
               BatchScan { table: t, columns: [a, b] }
   stream_plan: |
-    StreamMaterialize { columns: [max_a, expr#0(hidden)], pk_columns: [expr#0] }
+    StreamMaterialize { columns: [max_a, (t.a + t.b)(hidden)], pk_columns: [(t.a + t.b)] }
       StreamProject { exprs: [$2, $0] }
         StreamHashAgg { group_key: [$0], aggs: [count, max($1)] }
           StreamExchange { dist: HashShard([0]) }
@@ -67,6 +67,6 @@
       BatchExchange { order: [], dist: Single }
         BatchScan { table: t1, columns: [row_id, uid, v, created_at] }
   stream_plan: |
-    StreamMaterialize { columns: [row_id, uid, v, created_at, window_start, window_end, _row_id(hidden)], pk_columns: [_row_id, window_start] }
+    StreamMaterialize { columns: [row_id, uid, v, created_at, window_start, window_end, t1._row_id(hidden)], pk_columns: [t1._row_id, window_start] }
       StreamHopWindow { time_col: $3, slide: 00:15:00, size: 00:30:00, output_indices: [0, 1, 2, 3, 5, 6, 4] }
         StreamTableScan { table: t1, columns: [row_id, uid, v, created_at, _row_id], pk_indices: [4] }
