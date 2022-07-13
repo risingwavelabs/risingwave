@@ -13,6 +13,7 @@
 // limitations under the License.
 
 use std::collections::HashMap;
+use std::fmt::{Debug, Formatter};
 use std::sync::Arc;
 use std::time::Duration;
 
@@ -240,6 +241,12 @@ impl Sink for KafkaSink {
         self.do_with_retry(|conductor| conductor.abort_transaction())
             .await
             .map_err(SinkError::Kafka)
+    }
+}
+
+impl Debug for KafkaSink {
+    fn fmt(&self, _f: &mut Formatter<'_>) -> std::fmt::Result {
+        unimplemented!();
     }
 }
 

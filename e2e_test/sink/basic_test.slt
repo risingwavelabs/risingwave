@@ -5,10 +5,7 @@ statement ok
 CREATE MATERIALIZED VIEW mv AS SELECT * FROM t;
 
 statement ok
-CREATE SINK snk FROM mv
-    WITH ('sink' = 'mysql', 'mysql.endpoint' = '127.0.0.1:3306', 'mysql.table' =
-        '<table_name>', 'mysql.database' = '<database_name>', 'mysql.user' = '<user_name>',
-        'mysql.password' = '<password>');
+CREATE SINK snk FROM mv WITH ( 'sink_type' = 'kafka', 'sink.type' = 'append_only', 'identifier' = 'identifier', 'kafka.topic' = 'topic', 'kafka.brokers' = '127.0.0.1:29092', 'kafka.scan.startup.mode' = 'earliest' );
 
 statement ok
 DROP SINK snk;

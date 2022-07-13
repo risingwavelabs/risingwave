@@ -36,6 +36,7 @@ pub struct MySQLConfig {
 
 // Primitive design of MySQLSink
 #[allow(dead_code)]
+#[derive(Debug)]
 pub struct MySQLSink {
     cfg: MySQLConfig,
 }

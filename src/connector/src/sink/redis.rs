@@ -21,6 +21,7 @@ use crate::sink::{Result, Sink};
 #[derive(Clone, Debug)]
 pub struct RedisConfig;
 
+#[derive(Debug)]
 pub struct RedisSink;
 
 impl RedisSink {

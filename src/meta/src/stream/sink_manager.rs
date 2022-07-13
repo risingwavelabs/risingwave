@@ -134,23 +134,14 @@ where
         // ignore response body, always none
         let _ = try_join_all(futures).await?;
 
-        let mut core = self.core.lock().await;
+        let core = self.core.lock().await;
         if core.managed_sinks.contains_key(&sink.get_id()) {
             log::warn!("sink {} already registered", sink.get_id());
             revert_funcs.clear();
             return Ok(());
         }
 
-        Self::create_sink_worker(sink, &mut core.managed_sinks).await?;
-
         revert_funcs.clear();
-        Ok(())
-    }
-
-    async fn create_sink_worker(
-        _sink: &Sink,
-        _managed_sinks: &mut HashMap<SinkId, String>,
-    ) -> Result<()> {
         Ok(())
     }
 

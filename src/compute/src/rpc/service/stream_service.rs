@@ -226,8 +226,12 @@ impl StreamService for StreamServiceImpl {
         let sink = request.into_inner().sink.unwrap();
 
         let id = TableId::new(sink.id); // TODO: use SinkId instead
+        let properties = sink.get_properties();
 
-        self.env.sink_manager().create_sink(&id).await?;
+        self.env
+            .sink_manager()
+            .create_sink(&id, properties.clone())
+            .await?;
 
         tracing::debug!(id = %sink.id, "create sink");
 
