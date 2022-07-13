@@ -94,7 +94,7 @@ const CANONICAL_ZERO_BITS: u64 = 0x0u64;
 /// s.insert(OrderedFloat(NAN));
 /// assert!(s.contains(&OrderedFloat(NAN)));
 /// ```
-#[derive(Debug, Default, Clone, Copy)]
+#[derive(Debug, Default, Clone, Copy, Serialize)]
 #[repr(transparent)]
 pub struct OrderedFloat<T>(pub T);
 
@@ -104,6 +104,16 @@ impl<T: Float> OrderedFloat<T> {
     pub fn into_inner(self) -> T {
         self.0
     }
+}
+
+impl OrderedFloat<f32> {
+    pub const MAX: Self = Self(f32::MAX);
+    pub const MIN: Self = Self(f32::MIN);
+}
+
+impl OrderedFloat<f64> {
+    pub const MAX: Self = Self(f64::MAX);
+    pub const MIN: Self = Self(f64::MIN);
 }
 
 impl<T: Float> AsRef<T> for OrderedFloat<T> {
@@ -938,8 +948,6 @@ fn raw_double_bits<F: Float>(f: &F) -> u64 {
     (man & MAN_MASK) | ((exp_u64 << 52) & EXP_MASK) | ((sign_u64 << 63) & SIGN_MASK)
 }
 
-// Currently we only introduce `rand` as a dev dependency.
-#[cfg(test)]
 mod impl_rand {
     use rand::distributions::uniform::*;
     use rand::distributions::{Distribution, Open01, OpenClosed01, Standard};
@@ -989,7 +997,10 @@ mod impl_rand {
                     B1: SampleBorrow<Self::X> + Sized,
                     B2: SampleBorrow<Self::X> + Sized,
                 {
-                    UniformSampler::new(low, high)
+                    UniformOrdered(UniformFloat::<$f>::new_inclusive(
+                        low.borrow().0,
+                        high.borrow().0,
+                    ))
                 }
 
                 fn sample<R: Rng + ?Sized>(&self, rng: &mut R) -> Self::X {
@@ -1155,6 +1166,7 @@ mod impl_into_ordered {
 }
 
 pub use impl_into_ordered::IntoOrdered;
+use serde::Serialize;
 
 #[cfg(test)]
 mod tests {
