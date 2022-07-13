@@ -602,8 +602,39 @@ mod tests {
     #[test]
     fn basic_test() {
         assert_eq!(Decimal::from_str("nan").unwrap(), Decimal::NaN,);
+        assert_eq!(Decimal::from_str("NaN").unwrap(), Decimal::NaN,);
+        assert_eq!(Decimal::from_str("NAN").unwrap(), Decimal::NaN,);
+
         assert_eq!(Decimal::from_str("inf").unwrap(), Decimal::PositiveINF,);
+        assert_eq!(Decimal::from_str("INF").unwrap(), Decimal::PositiveINF,);
+        assert_eq!(Decimal::from_str("+inf").unwrap(), Decimal::PositiveINF,);
+        assert_eq!(Decimal::from_str("+INF").unwrap(), Decimal::PositiveINF,);
+        assert_eq!(Decimal::from_str("+Inf").unwrap(), Decimal::PositiveINF,);
+
         assert_eq!(Decimal::from_str("-inf").unwrap(), Decimal::NegativeINF,);
+        assert_eq!(Decimal::from_str("-INF").unwrap(), Decimal::NegativeINF,);
+        assert_eq!(Decimal::from_str("-Inf").unwrap(), Decimal::NegativeINF,);
+
+        assert!(Decimal::from_str("nAn").is_err());
+        assert!(Decimal::from_str("nAN").is_err());
+        assert!(Decimal::from_str("Nan").is_err());
+        assert!(Decimal::from_str("NAn").is_err());
+
+        assert!(Decimal::from_str("iNF").is_err());
+        assert!(Decimal::from_str("inF").is_err());
+        assert!(Decimal::from_str("InF").is_err());
+        assert!(Decimal::from_str("INf").is_err());
+
+        assert!(Decimal::from_str("+iNF").is_err());
+        assert!(Decimal::from_str("+inF").is_err());
+        assert!(Decimal::from_str("+InF").is_err());
+        assert!(Decimal::from_str("+INf").is_err());
+
+        assert!(Decimal::from_str("-iNF").is_err());
+        assert!(Decimal::from_str("-inF").is_err());
+        assert!(Decimal::from_str("-InF").is_err());
+        assert!(Decimal::from_str("-INf").is_err());
+
         assert_eq!(
             Decimal::from_f32(10.0).unwrap() / Decimal::PositiveINF,
             Decimal::from_f32(0.0).unwrap(),
