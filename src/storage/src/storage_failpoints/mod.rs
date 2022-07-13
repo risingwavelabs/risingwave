@@ -12,6 +12,5 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-mod test_hummock;
 mod test_iterator;
 mod test_sstable;
