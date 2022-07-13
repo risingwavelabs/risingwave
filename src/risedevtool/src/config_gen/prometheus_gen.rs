@@ -94,7 +94,8 @@ remote_write:
 global:
   scrape_interval: 1s
   evaluation_interval: 5s
-  rw_cluster: {now}
+  external_labels:
+    rw_cluster: {now}
 {remote_write}
 
 scrape_configs:
