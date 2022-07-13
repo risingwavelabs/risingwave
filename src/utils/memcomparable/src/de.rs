@@ -221,7 +221,7 @@ impl<B: Buf> Deserializer<B> {
         let mut len: usize = 0;
 
         let flag = self.input.get_u8();
-        if !(0x6..=0x23).contains(&flag) {
+        if !(DECIMAL_FLAG_LOW_BOUND..=DECIMAL_FLAG_UP_BOUND).contains(&flag) {
             return Err(Error::InvalidBytesEncoding(flag));
         }
         loop {

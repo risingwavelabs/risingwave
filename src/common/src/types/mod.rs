@@ -749,10 +749,10 @@ impl ScalarImpl {
         data_type: &DataType,
         deserializer: &mut memcomparable::Deserializer<impl Buf>,
     ) -> memcomparable::Result<usize> {
-        let null_tag = u8::deserialize(&mut *deserializer)?;
         let base_position = deserializer.position();
+        let null_tag = u8::deserialize(&mut *deserializer)?;
         match null_tag {
-            0 => Ok(0),
+            0 => {}
             1 => {
                 use std::mem::size_of;
                 let len = match data_type {
@@ -778,14 +778,15 @@ impl ScalarImpl {
                 };
 
                 // consume offset of fixed_type
-                if deserializer.position() == base_position {
+                if deserializer.position() == base_position + 1 {
                     // fixed type
                     deserializer.advance(len);
                 }
-                Ok(len)
             }
-            _ => Err(memcomparable::Error::InvalidTagEncoding(null_tag as _)),
+            _ => return Err(memcomparable::Error::InvalidTagEncoding(null_tag as _)),
         }
+
+        Ok(deserializer.position() - base_position)
     }
 
     pub fn to_protobuf(&self) -> Vec<u8> {
