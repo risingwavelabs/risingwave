@@ -17,7 +17,7 @@ use std::fmt;
 
 use fixedbitset::FixedBitSet;
 use itertools::Itertools;
-use risingwave_common::catalog::{Field, Schema};
+use risingwave_common::catalog::{Field, FieldVerboseDisplay, Schema};
 use risingwave_common::error::{ErrorCode, Result};
 use risingwave_common::types::DataType;
 use risingwave_common::util::sort_util::OrderType;
@@ -30,11 +30,14 @@ use super::{
     StreamLocalSimpleAgg, ToBatch, ToStream,
 };
 use crate::catalog::table_catalog::TableCatalog;
-use crate::expr::{AggCall, Expr, ExprImpl, ExprRewriter, ExprType, FunctionCall, InputRef};
+use crate::expr::{
+    AggCall, Expr, ExprImpl, ExprRewriter, ExprType, FunctionCall, InputRef, InputRefDisplay,
+    InputRefVerboseDisplay,
+};
 use crate::optimizer::plan_node::utils::TableCatalogBuilder;
 use crate::optimizer::plan_node::{gen_filter_and_pushdown, LogicalProject};
 use crate::optimizer::property::{Direction, Order, RequiredDist};
-use crate::utils::{ColIndexMapping, Condition, Substitute};
+use crate::utils::{ColIndexMapping, Condition, ConditionVerboseDisplay, Substitute};
 
 /// See also [`crate::expr::AggOrderByExpr`]
 /// TODO(yuchao): replace `PlanAggOrderByField` with enhanced `FieldOrder`
@@ -57,6 +60,37 @@ impl fmt::Debug for PlanAggOrderByField {
             f,
             " NULLS {}",
             if self.nulls_first { "FIRST" } else { "LAST" }
+        )?;
+        Ok(())
+    }
+}
+
+#[derive(Clone)]
+pub struct PlanAggOrderByFieldVerboseDisplay<'a> {
+    pub plan_agg_order_by_field: &'a PlanAggOrderByField,
+    pub input_schema: &'a Schema,
+}
+
+impl fmt::Debug for PlanAggOrderByFieldVerboseDisplay<'_> {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        let that = self.plan_agg_order_by_field;
+        write!(
+            f,
+            "{:?}",
+            InputRefVerboseDisplay {
+                input_ref: &that.input,
+                input_schema: self.input_schema
+            }
+        )?;
+        match that.direction {
+            Direction::Asc => write!(f, " ASC")?,
+            Direction::Desc => write!(f, " DESC")?,
+            _ => {}
+        }
+        write!(
+            f,
+            " NULLS {}",
+            if that.nulls_first { "FIRST" } else { "LAST" }
         )?;
         Ok(())
     }
@@ -161,6 +195,72 @@ impl PlanAggCall {
             order_by_fields: vec![],
             filter: Condition::true_cond(),
         }
+    }
+
+    pub fn with_condition(mut self, filter: Condition) -> Self {
+        self.filter = filter;
+        self
+    }
+
+    pub fn input_indices(&self) -> Vec<usize> {
+        self.inputs.iter().map(|input| input.index()).collect()
+    }
+}
+
+pub struct PlanAggCallVerboseDisplay<'a> {
+    pub plan_agg_call: &'a PlanAggCall,
+    pub input_schema: &'a Schema,
+}
+
+impl fmt::Debug for PlanAggCallVerboseDisplay<'_> {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        let that = self.plan_agg_call;
+        write!(f, "{}", that.agg_kind)?;
+        if !that.inputs.is_empty() {
+            write!(f, "(")?;
+            for (idx, input) in that.inputs.iter().enumerate() {
+                if idx == 0 && that.distinct {
+                    write!(f, "distinct ")?;
+                }
+                write!(
+                    f,
+                    "{}",
+                    self.input_schema.fields.get(input.index).unwrap().name
+                )?;
+                if idx != (that.inputs.len() - 1) {
+                    write!(f, ",")?;
+                }
+            }
+            if !that.order_by_fields.is_empty() {
+                let clause_text = that
+                    .order_by_fields
+                    .iter()
+                    .map(|e| {
+                        format!(
+                            "{:?}",
+                            PlanAggOrderByFieldVerboseDisplay {
+                                plan_agg_order_by_field: e,
+                                input_schema: self.input_schema,
+                            }
+                        )
+                    })
+                    .join(", ");
+                write!(f, " order_by({})", clause_text)?;
+            }
+            write!(f, ")")?;
+        }
+
+        if !that.filter.always_true() {
+            write!(
+                f,
+                " filter({:?})",
+                ConditionVerboseDisplay {
+                    condition: &that.filter,
+                    input_schema: self.input_schema,
+                }
+            )?;
+        }
+        Ok(())
     }
 }
 
@@ -492,14 +592,7 @@ impl ExprRewriter for LogicalAggBuilder {
 impl LogicalAgg {
     pub fn new(agg_calls: Vec<PlanAggCall>, group_key: Vec<usize>, input: PlanRef) -> Self {
         let ctx = input.ctx();
-        let schema = Self::derive_schema(
-            input.schema(),
-            &group_key,
-            agg_calls
-                .iter()
-                .map(|agg_call| agg_call.return_type.clone())
-                .collect(),
-        );
+        let schema = Self::derive_schema(input.schema(), &group_key, &agg_calls);
         let pk_indices = match group_key.is_empty() {
             // simple agg
             true => vec![],
@@ -533,24 +626,19 @@ impl LogicalAgg {
         self.o2i_col_mapping().inverse()
     }
 
-    fn derive_schema(
-        input: &Schema,
-        group_key: &[usize],
-        agg_call_data_types: Vec<DataType>,
-    ) -> Schema {
+    fn derive_schema(input: &Schema, group_key: &[usize], agg_calls: &[PlanAggCall]) -> Schema {
         let fields = group_key
             .iter()
             .cloned()
             .map(|i| input.fields()[i].clone())
-            .chain(
-                agg_call_data_types
-                    .into_iter()
-                    .enumerate()
-                    .map(|(id, data_type)| {
-                        let name = format!("agg#{}", id);
-                        Field::with_name(data_type, name)
-                    }),
-            )
+            .chain(agg_calls.iter().map(|agg_call| {
+                let plan_agg_call_display = PlanAggCallVerboseDisplay {
+                    plan_agg_call: agg_call,
+                    input_schema: input,
+                };
+                let name = format!("{:?}", plan_agg_call_display);
+                Field::with_name(agg_call.return_type.clone(), name)
+            }))
             .collect();
         Schema { fields }
     }
@@ -589,6 +677,32 @@ impl LogicalAgg {
     /// Get a reference to the logical agg's agg calls.
     pub fn agg_calls(&self) -> &[PlanAggCall] {
         self.agg_calls.as_ref()
+    }
+
+    pub fn agg_calls_verbose_display(&self) -> Vec<PlanAggCallVerboseDisplay> {
+        self.agg_calls()
+            .iter()
+            .map(|plan_agg_call| PlanAggCallVerboseDisplay {
+                plan_agg_call,
+                input_schema: self.input.schema(),
+            })
+            .collect_vec()
+    }
+
+    pub fn group_key_display(&self) -> Vec<InputRefDisplay> {
+        self.group_key()
+            .iter()
+            .copied()
+            .map(InputRefDisplay)
+            .collect_vec()
+    }
+
+    pub fn group_key_verbose_display(&self) -> Vec<FieldVerboseDisplay> {
+        self.group_key()
+            .iter()
+            .copied()
+            .map(|i| FieldVerboseDisplay(self.input.schema().fields.get(i).unwrap()))
+            .collect_vec()
     }
 
     /// Get a reference to the logical agg's group key.
@@ -793,10 +907,9 @@ impl ToStream for LogicalAgg {
         // simple-agg
         if self.group_key().is_empty() {
             // TODO: Other agg calls will be supported by stateful local agg eventually.
-            let agg_calls_can_use_two_phase = self
-                .agg_calls
-                .iter()
-                .all(|c| matches!(c.agg_kind, AggKind::Count | AggKind::Sum));
+            let agg_calls_can_use_two_phase = self.agg_calls.iter().all(|c| {
+                matches!(c.agg_kind, AggKind::Count | AggKind::Sum) && c.order_by_fields.is_empty()
+            });
 
             let input_stream = input.to_stream()?;
             let input_distribution = input_stream.distribution();
@@ -805,7 +918,7 @@ impl ToStream for LogicalAgg {
             if input_distribution.satisfies(&RequiredDist::AnyShard) && agg_calls_can_use_two_phase
             {
                 self.gen_two_phase_streaming_agg_plan(input_stream)
-            // simple 1-phase-agg
+                // simple 1-phase-agg
             } else {
                 Ok(StreamGlobalSimpleAgg::new(self.clone_with_input(
                     input.to_stream_with_dist_required(&RequiredDist::single())?,
@@ -813,7 +926,7 @@ impl ToStream for LogicalAgg {
                 .into())
             }
 
-        // hash-agg
+            // hash-agg
         } else {
             Ok(
                 StreamHashAgg::new(self.clone_with_input(input.to_stream_with_dist_required(
@@ -854,7 +967,6 @@ impl ToStream for LogicalAgg {
 
 #[cfg(test)]
 mod tests {
-
     use std::rc::Rc;
 
     use risingwave_common::catalog::Field;
@@ -1007,6 +1119,7 @@ mod tests {
             assert_eq!(group_key, vec![0]);
         }
     }
+
     /// Generate a agg call node with given [`DataType`] and fields.
     /// For example, `generate_agg_call(Int32, [v1, v2, v3])` will result in:
     /// ```text

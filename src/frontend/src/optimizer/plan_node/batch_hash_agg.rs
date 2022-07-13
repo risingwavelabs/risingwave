@@ -14,7 +14,7 @@
 
 use std::fmt;
 
-use itertools::Itertools;
+use risingwave_common::catalog::FieldVerboseDisplay;
 use risingwave_common::error::Result;
 use risingwave_pb::batch_plan::plan_node::NodeBody;
 use risingwave_pb::batch_plan::HashAggNode;
@@ -22,6 +22,7 @@ use risingwave_pb::batch_plan::HashAggNode;
 use super::logical_agg::PlanAggCall;
 use super::{LogicalAgg, PlanBase, PlanRef, PlanTreeNodeUnary, ToBatchProst, ToDistributedBatch};
 use crate::expr::InputRefDisplay;
+use crate::optimizer::plan_node::logical_agg::PlanAggCallVerboseDisplay;
 use crate::optimizer::plan_node::ToLocalBatch;
 use crate::optimizer::property::{Distribution, Order, RequiredDist};
 
@@ -53,22 +54,34 @@ impl BatchHashAgg {
     pub fn group_key(&self) -> &[usize] {
         self.logical.group_key()
     }
+
+    pub fn agg_calls_verbose_display(&self) -> Vec<PlanAggCallVerboseDisplay> {
+        self.logical.agg_calls_verbose_display()
+    }
+
+    pub fn group_key_display(&self) -> Vec<InputRefDisplay> {
+        self.logical.group_key_display()
+    }
+
+    pub fn group_key_verbose_display(&self) -> Vec<FieldVerboseDisplay> {
+        self.logical.group_key_verbose_display()
+    }
 }
 
 impl fmt::Display for BatchHashAgg {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-        f.debug_struct("BatchHashAgg")
-            .field(
-                "group_key",
-                &self
-                    .group_key()
-                    .iter()
-                    .copied()
-                    .map(InputRefDisplay)
-                    .collect_vec(),
-            )
-            .field("aggs", &self.agg_calls())
-            .finish()
+        let verbose = self.base.ctx.is_explain_verbose();
+        let mut builder = f.debug_struct("BatchHashAgg");
+        if verbose {
+            builder
+                .field("group_key", &self.group_key_verbose_display())
+                .field("aggs", &self.agg_calls_verbose_display());
+        } else {
+            builder
+                .field("group_key", &self.group_key_display())
+                .field("aggs", &self.agg_calls());
+        }
+        builder.finish()
     }
 }
 
