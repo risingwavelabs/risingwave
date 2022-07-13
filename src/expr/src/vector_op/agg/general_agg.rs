@@ -111,7 +111,7 @@ where
     }
 
     /// `apply_filter_on_row` apply a filter on the given row, and return if the row satisfies the
-    /// filter or not 
+    /// filter or not
     /// # SAFETY
     /// the given row must be visible
     fn apply_filter_on_row(&self, input: &DataChunk, row_id: usize) -> Result<bool> {
