@@ -15,7 +15,7 @@
 use std::fmt;
 
 use itertools::Itertools;
-use risingwave_common::catalog::{Field, Schema};
+use risingwave_common::catalog::{Field, FieldVerboseDisplay, Schema};
 use risingwave_common::types::DataType;
 
 use super::{
@@ -70,6 +70,18 @@ impl LogicalExpand {
 
     pub fn column_subsets(&self) -> &Vec<Vec<usize>> {
         &self.column_subsets
+    }
+
+    pub fn column_subsets_verbose_display(&self) -> Vec<Vec<FieldVerboseDisplay>> {
+        self.column_subsets()
+            .iter()
+            .map(|subset| {
+                subset
+                    .iter()
+                    .map(|&i| FieldVerboseDisplay(self.input.schema().fields.get(i).unwrap()))
+                    .collect_vec()
+            })
+            .collect_vec()
     }
 }
 

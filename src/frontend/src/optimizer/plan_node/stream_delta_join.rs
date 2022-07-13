@@ -14,14 +14,14 @@
 
 use std::fmt;
 
-use risingwave_common::catalog::ColumnDesc;
+use risingwave_common::catalog::{ColumnDesc, Schema};
 use risingwave_pb::plan_common::JoinType;
 use risingwave_pb::stream_plan::stream_node::NodeBody;
 use risingwave_pb::stream_plan::{ArrangementInfo, DeltaIndexJoinNode};
 
 use super::{LogicalJoin, PlanBase, PlanRef, PlanTreeNodeBinary, StreamHashJoin, ToStreamProst};
 use crate::expr::Expr;
-use crate::optimizer::plan_node::EqJoinPredicate;
+use crate::optimizer::plan_node::{EqJoinPredicate, EqJoinPredicateVerboseDisplay};
 
 /// [`StreamDeltaJoin`] implements [`super::LogicalJoin`] with delta join. It requires its two
 /// inputs to be indexes.
@@ -78,11 +78,25 @@ impl StreamDeltaJoin {
 
 impl fmt::Display for StreamDeltaJoin {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        let verbose = self.base.ctx.is_explain_verbose();
         write!(
             f,
             "StreamDeltaJoin {{ type: {:?}, predicate: {}, output_indices: {} }}",
             self.logical.join_type(),
-            self.eq_join_predicate(),
+            if verbose {
+                let mut concat_schema = self.left().schema().fields.clone();
+                concat_schema.extend(self.right().schema().fields.clone());
+                let concat_schema = Schema::new(concat_schema);
+                format!(
+                    "{}",
+                    EqJoinPredicateVerboseDisplay {
+                        eq_join_predicate: self.eq_join_predicate(),
+                        input_schema: &concat_schema
+                    }
+                )
+            } else {
+                format!("{}", self.eq_join_predicate())
+            },
             if self
                 .logical
                 .output_indices()
