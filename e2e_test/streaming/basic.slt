@@ -11,6 +11,9 @@ statement ok
 create table t4 (v1 real not null, v2 int not null, v3 real not null);
 
 statement ok
+create table t5 (d decimal);
+
+statement ok
 insert into t1 values (1,4,2), (2,3,3);
 
 statement ok
@@ -20,6 +23,15 @@ statement ok
 insert into t4 values (1,1,4), (5,1,4), (1,9,1), (9,8,1), (0,2,3);
 
 statement ok
+insert into t5 values ('NaN'::decimal);
+
+statement ok
+insert into t5 values ('Infinity'::decimal);
+
+statement ok
+insert into t5 values ('-Infinity'::decimal);
+
+statement ok
 create materialized view mv1 as select * from t1;
 
 statement ok
@@ -27,6 +39,9 @@ create materialized view mv2 as select round(avg(v1), 1) as avg_v1, sum(v2) as s
 
 statement ok
 create materialized view mv3 as select v3, sum(v1) as sum_v1, min(v1) as min_v1, max(v1) as max_v1 from t4 group by v3;
+
+statement ok
+create materialized view mv4 as select count(*) as count, d from t5 group by d;
 
 query III rowsort
 select v1, v2, v3 from mv1;
@@ -65,6 +80,13 @@ select sum_v1, min_v1, max_v1, v3 from mv3 order by sum_v1;
 6  1 5 4
 10 1 9 1
 
+query IR rowsort
+select * from mv4
+----
+1 NaN
+1 Infinity
+1 -Infinity
+
 statement ok
 drop materialized view mv1
 
@@ -73,6 +95,9 @@ drop materialized view mv2
 
 statement ok
 drop materialized view mv3
+
+statement ok
+drop materialized view mv4
 
 statement ok
 drop table t1
@@ -85,3 +110,6 @@ drop table t3
 
 statement ok
 drop table t4
+
+statement ok
+drop table t5
