@@ -115,7 +115,7 @@ impl DistinctAgg {
                         return None;
                     }
                     // convert distinct agg with real filter to count(*) with orginal filter.
-                    agg_call = PlanAggCall::with_condition(agg_call.filter);
+                    agg_call = PlanAggCall::count_star().with_condition(agg_call.filter);
                 }
                 Some(agg_call)
             })
@@ -128,7 +128,7 @@ impl DistinctAgg {
         input: LogicalAgg,
         old_group_keys_len: usize,
         mut agg_calls: Vec<PlanAggCall>,
-        mut flag_value_of_distinct_agg: i32,
+        mut flag_value_of_distinct_agg: i64,
     ) -> PlanRef {
         // The index of `flag` in schema of the middle `LogicalAgg`.
         let pos_of_flag = input.group_key().len() - 1;

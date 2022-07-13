@@ -133,6 +133,7 @@ mod tests {
 
     use super::*;
     use crate::encoding::cell_based_row_deserializer::make_cell_based_row_deserializer;
+    use crate::encoding::Decoding;
     use crate::table::storage_table::DEFAULT_VNODE;
 
     #[test]
