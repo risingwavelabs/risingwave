@@ -19,11 +19,13 @@ use std::ops::Bound;
 use fixedbitset::FixedBitSet;
 use itertools::Itertools;
 use risingwave_common::types::ScalarImpl;
+use risingwave_common::catalog::Schema;
 
 use super::ScanRange;
 use crate::expr::{
     factorization_expr, fold_boolean_constant, push_down_not, to_conjunctions,
-    try_get_bool_constant, ExprImpl, ExprRewriter, ExprType, ExprVisitor, InputRef,
+    try_get_bool_constant, ExprImpl, ExprRewriter, ExprType, ExprVerboseDisplay, ExprVisitor,
+    InputRef,
 };
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
@@ -500,6 +502,55 @@ impl Condition {
             }
         }
         Self { conjunctions: res }
+    }
+}
+
+pub struct ConditionVerboseDisplay<'a> {
+    pub condition: &'a Condition,
+    pub input_schema: &'a Schema,
+}
+
+impl ConditionVerboseDisplay<'_> {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        let that = self.condition;
+        let mut conjunctions = that.conjunctions.iter();
+        if let Some(expr) = conjunctions.next() {
+            write!(
+                f,
+                "{:?}",
+                ExprVerboseDisplay {
+                    expr,
+                    input_schema: self.input_schema
+                }
+            )?;
+        }
+        if that.always_true() {
+            write!(f, "true")?;
+        } else {
+            for expr in conjunctions {
+                write!(
+                    f,
+                    " AND {:?}",
+                    ExprVerboseDisplay {
+                        expr,
+                        input_schema: self.input_schema
+                    }
+                )?;
+            }
+        }
+        Ok(())
+    }
+}
+
+impl fmt::Display for ConditionVerboseDisplay<'_> {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        self.fmt(f)
+    }
+}
+
+impl fmt::Debug for ConditionVerboseDisplay<'_> {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        self.fmt(f)
     }
 }
 

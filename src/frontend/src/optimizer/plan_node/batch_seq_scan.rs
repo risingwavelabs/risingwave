@@ -128,15 +128,24 @@ impl fmt::Display for BatchSeqScan {
             }
         }
 
+        let verbose = self.base.ctx.is_explain_verbose();
+
         if self.scan_ranges.is_empty() {
             write!(
                 f,
                 "BatchScan {{ table: {}, columns: [{}] }}",
                 self.logical.table_name(),
-                self.logical.column_names().join(", ")
+                match verbose {
+                    true => self.logical.column_names_with_table_prefix(),
+                    false => self.logical.column_names(),
+                }
+                .join(", ")
             )
         } else {
-            let order_names = self.logical.order_names();
+            let order_names = match verbose {
+                true => self.logical.order_names_with_table_prefix(),
+                false => self.logical.order_names(),
+            };
             let mut range_strs = vec![];
             for scan_range in &self.scan_ranges {
                 #[expect(clippy::disallowed_methods)]
@@ -156,7 +165,11 @@ impl fmt::Display for BatchSeqScan {
                 f,
                 "BatchScan {{ table: {}, columns: [{}], scan_ranges: [{}] }}",
                 self.logical.table_name(),
-                self.logical.column_names().join(", "),
+                match verbose {
+                    true => self.logical.column_names_with_table_prefix(),
+                    false => self.logical.column_names(),
+                }
+                .join(", "),
                 range_strs.join(" OR ")
             )
         }
