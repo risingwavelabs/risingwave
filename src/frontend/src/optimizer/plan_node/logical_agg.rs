@@ -161,6 +161,10 @@ impl PlanAggCall {
             return_type: Some(self.return_type.to_protobuf()),
             args: self.inputs.iter().map(InputRef::to_agg_arg_proto).collect(),
             distinct: self.distinct,
+            filter: self
+                .filter
+                .as_expr_unless_true()
+                .map(|expr| expr.to_expr_proto()),
         }
     }
 
