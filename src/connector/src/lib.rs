@@ -17,6 +17,7 @@
 #![feature(generators)]
 #![feature(proc_macro_hygiene)]
 #![feature(stmt_expr_attributes)]
+#![feature(box_patterns)]
 #![warn(clippy::dbg_macro)]
 #![warn(clippy::disallowed_methods)]
 #![warn(clippy::doc_markdown)]
@@ -36,25 +37,7 @@
 
 extern crate core;
 
-pub mod base;
-pub mod datagen;
-mod filesystem;
-pub mod kafka;
-pub mod kinesis;
-mod nexmark;
-mod pulsar;
-
-pub use base::*;
-
 pub mod aws_utils;
-pub mod dummy_connector;
 mod macros;
 pub mod sink;
-
-pub use base::ConnectorState;
-pub use datagen::DATAGEN_CONNECTOR;
-pub use kafka::KAFKA_CONNECTOR;
-pub use kinesis::KINESIS_CONNECTOR;
-pub use nexmark::NEXMARK_CONNECTOR;
-
-pub use crate::pulsar::PULSAR_CONNECTOR;
+pub mod source;

@@ -21,11 +21,12 @@ use risingwave_common::error::{ErrorCode, Result, RwError};
 use risingwave_common::types::{DataType, ToOwnedDatum};
 use risingwave_common::util::chunk_coalesce::{DataChunkBuilder, SlicedDataChunk};
 use risingwave_expr::expr::{build_from_prost, BoxedExpression};
+use risingwave_pb::batch_plan::exchange_info::DistributionMode;
 use risingwave_pb::batch_plan::exchange_source::LocalExecutePlan::Plan;
 use risingwave_pb::batch_plan::plan_node::NodeBody;
 use risingwave_pb::batch_plan::{
-    ExchangeNode, ExchangeSource as ProstExchangeSource, LocalExecutePlan, PlanFragment, PlanNode,
-    RowSeqScanNode, ScanRange,
+    ExchangeInfo, ExchangeNode, ExchangeSource as ProstExchangeSource, LocalExecutePlan,
+    PlanFragment, PlanNode, RowSeqScanNode, ScanRange,
 };
 use risingwave_pb::plan_common::CellBasedTableDesc;
 use uuid::Uuid;
@@ -43,9 +44,11 @@ use crate::task::{BatchTaskContext, TaskId};
 
 /// Probe side source for the `LookupJoinExecutor`
 pub struct ProbeSideSource<C> {
+    build_side_eq_types: Vec<DataType>,
+    build_side_idxs: Vec<usize>,
     table_desc: CellBasedTableDesc,
     probe_side_schema: Schema,
-    build_side_idxs: Vec<usize>,
+    probe_side_column_ids: Vec<i32>,
     source_templates: Vec<ProstExchangeSource>,
     context: C,
     task_id: TaskId,
@@ -62,6 +65,29 @@ impl<C: BatchTaskContext> ProbeSideSource<C> {
     /// Creates the `RowSeqScanNode` that will be used for scanning the probe side table
     /// based on the passed `RowRef`.
     fn create_row_seq_scan_node(&self, cur_row: &RowRef) -> Result<NodeBody> {
+        // Check that the data types of both sides of the equality predicate are the same
+        // TODO: Handle the cases where the data types of both sides are different but castable
+        // (e.g. int32 and int64)
+        let probe_side_eq_types = self
+            .table_desc
+            .order_key
+            .iter()
+            .map(|order| {
+                self.probe_side_schema.fields[order.index as usize]
+                    .data_type
+                    .clone()
+            })
+            .collect_vec();
+
+        if !(0..self.build_side_eq_types.len()).all(|i| {
+            i < probe_side_eq_types.len() && self.build_side_eq_types[i] == probe_side_eq_types[i]
+        }) {
+            return Err(ErrorCode::NotImplemented(
+                    "Lookup Joins where the two sides of an equality predicate have different data types".to_string(),
+                    None.into()
+            ).into());
+        }
+
         let eq_conds: Vec<_> = self
             .build_side_idxs
             .iter()
@@ -86,10 +112,7 @@ impl<C: BatchTaskContext> ProbeSideSource<C> {
 
         Ok(NodeBody::RowSeqScan(RowSeqScanNode {
             table_desc: Some(self.table_desc.clone()),
-            column_ids: (0..self.table_desc.columns.len())
-                .into_iter()
-                .map(|x| x as i32)
-                .collect(), // Scan all the columns
+            column_ids: self.probe_side_column_ids.clone(),
             scan_ranges,
             vnode_bitmap: None,
         }))
@@ -107,7 +130,10 @@ impl<C: BatchTaskContext> ProbeSideSource<C> {
                     identity: Uuid::new_v4().to_string(),
                     node_body: Some(self.create_row_seq_scan_node(cur_row)?),
                 }),
-                exchange_info: None,
+                exchange_info: Some(ExchangeInfo {
+                    mode: DistributionMode::Single as i32,
+                    ..Default::default()
+                }),
             }),
             epoch: inner_template_plan.epoch,
         };
@@ -310,7 +336,7 @@ impl<P: 'static + ProbeSideSourceBuilder> LookupJoinExecutor<P> {
         }
 
         let one_row_chunk =
-            convert_datum_refs_to_chunk(&build_datum_refs, 1, &self.schema.data_types())?;
+            convert_datum_refs_to_chunk(&build_datum_refs, 1, &self.chunk_builder.data_types())?;
 
         Ok(Some(one_row_chunk))
     }
@@ -363,11 +389,15 @@ impl BoxedExecutorBuilder for LookupJoinExecutorBuilder {
                 .map(|column_desc| Field::from(&ColumnDesc::from(column_desc)))
                 .collect_vec(),
         };
-        let probe_side_len = probe_side_schema.len();
+        let probe_side_column_ids = lookup_join_node.get_probe_side_column_ids().to_vec();
+        let probe_side_len = probe_side_column_ids.len();
 
         let fields = [
             build_child.schema().fields.clone(),
-            probe_side_schema.fields.clone(),
+            probe_side_column_ids
+                .iter()
+                .map(|&i| probe_side_schema.fields[i as usize].clone())
+                .collect(),
         ]
         .concat();
         let original_schema = Schema { fields };
@@ -382,11 +412,18 @@ impl BoxedExecutorBuilder for LookupJoinExecutorBuilder {
             build_side_idxs.push(*build_side_key as usize)
         }
 
+        let build_side_eq_types = build_side_idxs
+            .iter()
+            .map(|&idx| build_side_data_types[idx].clone())
+            .collect_vec();
+
         ensure!(!lookup_join_node.get_sources().is_empty());
         let probe_side_source = ProbeSideSource {
+            build_side_eq_types,
+            build_side_idxs,
             table_desc: probe_side_table_desc.clone(),
             probe_side_schema,
-            build_side_idxs,
+            probe_side_column_ids,
             source_templates: lookup_join_node.get_sources().to_vec(),
             context: source.context().clone(),
             task_id: source.task_id.clone(),

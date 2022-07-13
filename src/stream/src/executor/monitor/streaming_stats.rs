@@ -41,6 +41,7 @@ pub struct StreamingMetrics {
     pub actor_sampled_deserialize_duration_ns: GenericCounterVec<AtomicU64>,
     pub source_output_row_count: GenericCounterVec<AtomicU64>,
     pub exchange_recv_size: GenericCounterVec<AtomicU64>,
+    pub exchange_frag_recv_size: GenericCounterVec<AtomicU64>,
     pub join_lookup_miss_count: GenericCounterVec<AtomicU64>,
     pub join_total_lookup_count: GenericCounterVec<AtomicU64>,
     pub join_barrier_align_duration: HistogramVec,
@@ -100,6 +101,14 @@ impl StreamingMetrics {
             "stream_exchange_recv_size",
             "Total size of messages that have been received from upstream Actor",
             &["up_actor_id", "down_actor_id"],
+            registry
+        )
+        .unwrap();
+
+        let exchange_frag_recv_size = register_int_counter_vec_with_registry!(
+            "stream_exchange_frag_recv_size",
+            "Total size of messages that have been received from upstream Fragment",
+            &["up_fragment_id", "down_fragment_id"],
             registry
         )
         .unwrap();
@@ -255,6 +264,7 @@ impl StreamingMetrics {
             actor_sampled_deserialize_duration_ns,
             source_output_row_count,
             exchange_recv_size,
+            exchange_frag_recv_size,
             join_lookup_miss_count,
             join_total_lookup_count,
             join_barrier_align_duration,

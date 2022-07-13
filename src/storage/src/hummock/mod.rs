@@ -16,6 +16,7 @@
 
 use std::fmt;
 use std::sync::Arc;
+use std::time::Duration;
 
 use bytes::Bytes;
 use risingwave_common::config::StorageConfig;
@@ -30,25 +31,19 @@ pub use sstable::*;
 pub mod compaction_executor;
 pub mod compaction_group_client;
 pub mod compactor;
-#[cfg(test)]
-mod compactor_tests;
-mod conflict_detector;
+pub mod conflict_detector;
 mod error;
 pub mod hummock_meta_client;
 pub mod iterator;
 mod local_version;
 pub mod local_version_manager;
 pub mod shared_buffer;
-#[cfg(test)]
-mod snapshot_tests;
 pub mod sstable_store;
 mod state_store;
-#[cfg(test)]
-mod state_store_tests;
-#[cfg(test)]
-pub(crate) mod test_utils;
+#[cfg(any(test, feature = "test"))]
+pub mod test_utils;
 mod utils;
-mod vacuum;
+pub mod vacuum;
 pub mod value;
 
 #[cfg(target_os = "linux")]
@@ -187,14 +182,20 @@ impl HummockStorage {
         &self.local_version_manager
     }
 
-    fn get_compaction_group_id(&self, table_id: TableId) -> CompactionGroupId {
-        self.compaction_group_client
-            .get_compaction_group_id(table_id.table_id)
-            .unwrap_or_else(|| panic!("{} matches a compaction group", table_id.table_id))
-    }
-
-    pub async fn update_compaction_group_cache(&self) -> HummockResult<()> {
-        self.compaction_group_client.update().await
+    async fn get_compaction_group_id(&self, table_id: TableId) -> HummockResult<CompactionGroupId> {
+        match tokio::time::timeout(
+            Duration::from_secs(10),
+            self.compaction_group_client
+                .get_compaction_group_id(table_id.table_id),
+        )
+        .await
+        {
+            Err(_) => Err(HummockError::other(format!(
+                "get_compaction_group_id {} timeout",
+                table_id
+            ))),
+            Ok(resp) => resp,
+        }
     }
 }
 

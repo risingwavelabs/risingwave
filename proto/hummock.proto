@@ -156,9 +156,6 @@ message CompactTask {
   uint32 target_level = 6;
   bool gc_delete_keys = 7;
   bool task_status = 9;
-  // Hash mapping from virtual node to parallel unit. Since one compactor might deal with SSTs
-  // with data for more than one relational state tables, here a vector is required.
-  repeated common.ParallelUnitMapping vnode_mappings = 11;
   // compaction group the task belongs to
   uint64 compaction_group_id = 12;
   // existing_table_ids for compaction drop key
