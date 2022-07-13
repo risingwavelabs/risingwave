@@ -49,3 +49,5 @@ mod translate_apply;
 pub use translate_apply::*;
 mod merge_multijoin;
 pub use merge_multijoin::*;
+mod distinct_agg;
+pub use distinct_agg::*;
