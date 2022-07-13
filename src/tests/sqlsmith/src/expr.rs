@@ -40,16 +40,11 @@ fn init_op_table() -> HashMap<DataTypeName, Vec<FuncSign>> {
 impl<'a, R: Rng> SqlGenerator<'a, R> {
     /// Generate `Expr`.
     pub(crate) fn gen_expr(&mut self, typ: DataTypeName) -> Expr {
-        self.gen_expr_with_cols(typ, None)
-    }
-
-    /// Generate `Expr` with constraints on generated column `Expr`s.
-    pub(crate) fn gen_expr_with_cols(&mut self, typ: DataTypeName, valid_cols: Option<&[Expr]>) -> Expr {
         if !self.can_recurse() {
             // Stop recursion with a simple scalar or column.
             return match self.rng.gen_bool(0.5) {
                 true => self.gen_simple_scalar(typ),
-                false => self.gen_col_with_cols(typ, valid_cols),
+                false => self.gen_col(typ),
             };
         }
         match self.rng.gen_range(0..=99) {
@@ -60,16 +55,12 @@ impl<'a, R: Rng> SqlGenerator<'a, R> {
         }
     }
 
-    fn gen_col_with_cols(&mut self, typ: DataTypeName, valid_cols: Option<&[Expr]>) -> Expr {
+    fn gen_col(&mut self, typ: DataTypeName) -> Expr {
         if self.bound_relations.is_empty() {
             return self.gen_simple_scalar(typ);
         }
-        if let Some(valid_cols) = valid_cols {
-            return valid_cols.choose(&mut self.rng).unwrap().clone();
-        }
-        let rel = self.bound_relations.choose(&mut self.rng).unwrap();
-        let matched_cols = rel
-            .columns
+        let matched_cols = self
+            .bound_columns
             .iter()
             .filter(|col| col.data_type == typ)
             .collect::<Vec<_>>();
@@ -77,7 +68,7 @@ impl<'a, R: Rng> SqlGenerator<'a, R> {
             self.gen_simple_scalar(typ)
         } else {
             let col_def = matched_cols.choose(&mut self.rng).unwrap();
-            Expr::Identifier(Ident::new(format!("{}.{}", rel.name, col_def.name)))
+            Expr::Identifier(Ident::new(col_def.name.clone()))
         }
     }
 

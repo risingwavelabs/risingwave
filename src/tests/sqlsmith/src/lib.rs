@@ -76,13 +76,6 @@ struct SqlGenerator<'a, R: Rng> {
     bound_columns: Vec<Column>,
 }
 
-/// Utilities
-impl<'a, R: Rng> SqlGenerator<'a, R> {
-    fn get_bound_columns(&self) -> &[Column] {
-        &self.bound_columns
-    }
-}
-
 /// Generators
 impl<'a, R: Rng> SqlGenerator<'a, R> {
     fn new(rng: &'a mut R, tables: Vec<Table>) -> Self {
@@ -141,10 +134,9 @@ impl<'a, R: Rng> SqlGenerator<'a, R> {
         }
         let mut order_by = vec![];
         while self.flip_coin() {
-            let table = self.bound_relations.choose(&mut self.rng).unwrap();
-            let column = table.columns.choose(&mut self.rng).unwrap();
+            let column = self.bound_columns.choose(&mut self.rng).unwrap();
             order_by.push(OrderByExpr {
-                expr: Expr::Identifier(Ident::new(format!("{}.{}", table.name, column.name))),
+                expr: Expr::Identifier(Ident::new(&column.name)),
                 asc: Some(self.rng.gen_bool(0.5)),
                 nulls_first: None,
             })
@@ -167,7 +159,7 @@ impl<'a, R: Rng> SqlGenerator<'a, R> {
         // Generate random tables/relations first so that select items can refer to them.
         let from = self.gen_from();
         let group_by = self.gen_group_by();
-        let (select_list, schema) = self.gen_select_list(&group_by);
+        let (select_list, schema) = self.gen_select_list();
         let select = Select {
             distinct: false,
             projection: select_list,
@@ -180,14 +172,14 @@ impl<'a, R: Rng> SqlGenerator<'a, R> {
         (select, schema)
     }
 
-    fn gen_select_list(&mut self, group_by_cols: &Vec<Expr>) -> (Vec<SelectItem>, Vec<Column>) {
+    fn gen_select_list(&mut self) -> (Vec<SelectItem>, Vec<Column>) {
         let items_num = self.rng.gen_range(1..=4);
-        (0..items_num).map(|i| self.gen_select_item(i, group_by_cols)).unzip()
+        (0..items_num).map(|i| self.gen_select_item(i)).unzip()
     }
 
     /// Generates a selected item.
     /// `group_by_cols` provides columns bound by GROUP BY Clause (if any).
-    fn gen_select_item(&mut self, i: i32, group_by_cols: &Vec<Expr>) -> (SelectItem, Column) {
+    fn gen_select_item(&mut self, i: i32) -> (SelectItem, Column) {
         use DataTypeName as T;
         let ret_type = *[
             T::Boolean,
@@ -209,7 +201,7 @@ impl<'a, R: Rng> SqlGenerator<'a, R> {
         let alias = format!("col_{}", i);
         (
             SelectItem::ExprWithAlias {
-                expr: self.gen_expr_with_cols(ret_type, Some(group_by_cols)),
+                expr: self.gen_expr(ret_type),
                 alias: Ident::new(alias.clone()),
             },
             Column {
@@ -246,7 +238,7 @@ impl<'a, R: Rng> SqlGenerator<'a, R> {
     /// Reference <https://www.postgresql.org/docs/current/sql-select.html#SQL-GROUPBY>
     fn gen_group_by(&mut self) -> Vec<Expr> {
         // get all from refs
-        let mut available = self.get_bound_columns().to_vec();
+        let mut available = self.bound_columns.to_vec();
         available.shuffle(self.rng);
         let n_group_by_cols = self.rng.gen_range(1..=available.len());
         let group_by_cols = available.drain(0..n_group_by_cols).collect_vec();
