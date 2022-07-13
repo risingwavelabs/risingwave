@@ -230,10 +230,7 @@ impl DispatchExecutorInner {
     }
 
     /// Update the dispatcher in this executor with `update`.
-    fn update_dispatchers<const PRE: bool>(
-        &mut self,
-        update: &ProstDispatcherUpdate,
-    ) -> Result<()> {
+    fn update_dispatcher<const PRE: bool>(&mut self, update: &ProstDispatcherUpdate) -> Result<()> {
         let dispatcher = self
             .dispatchers
             .iter_mut()
@@ -241,6 +238,8 @@ impl DispatchExecutorInner {
             .unwrap_or_else(|| panic!("dispatcher {} not found", update.dispatcher_id));
 
         if PRE {
+            // Update the dispatcher BEFORE we actually dispatch this barrier. We'll only add the
+            // new outputs.
             let outputs: Vec<_> = update
                 .added_downstream_actor_id
                 .iter()
@@ -248,6 +247,8 @@ impl DispatchExecutorInner {
                 .try_collect()?;
             dispatcher.add_outputs(outputs);
         } else {
+            // Update the dispatcher AFTER we dispatch this barrier. We'll remove some outputs and
+            // finally update the hash mapping.
             let ids = update.removed_downstream_actor_id.iter().copied().collect();
             dispatcher.remove_outputs(&ids);
 
@@ -269,7 +270,15 @@ impl DispatchExecutorInner {
         Ok(())
     }
 
-    /// For `Add` and `UpdateAdd`, update the dispatchers before we dispatch the barrier.
+    fn pre_update_dispatcher(&mut self, update: &ProstDispatcherUpdate) -> Result<()> {
+        self.update_dispatcher::<true>(update)
+    }
+
+    fn post_update_dispatcher(&mut self, update: &ProstDispatcherUpdate) -> Result<()> {
+        self.update_dispatcher::<false>(update)
+    }
+
+    /// For `Add` and `Update(Add)`, update the dispatchers before we dispatch the barrier.
     async fn pre_mutate_dispatchers(&mut self, mutation: &Option<Arc<Mutation>>) -> Result<()> {
         let Some(mutation) = mutation.as_deref() else {
             return Ok(())
@@ -283,7 +292,7 @@ impl DispatchExecutorInner {
             }
             Mutation::Update(updates) => {
                 if let Some(update) = updates.get(&self.actor_id) {
-                    self.update_dispatchers::<true>(update)?;
+                    self.pre_update_dispatcher(update)?;
                 }
             }
             _ => {}
@@ -292,7 +301,7 @@ impl DispatchExecutorInner {
         Ok(())
     }
 
-    /// For `Stop` and `UpdateRemove`, update the dispatchers after we dispatch the barrier.
+    /// For `Stop` and `Update(Remove)`, update the dispatchers after we dispatch the barrier.
     async fn post_mutate_dispatchers(&mut self, mutation: &Option<Arc<Mutation>>) -> Result<()> {
         let Some(mutation) = mutation.as_deref() else {
             return Ok(())
@@ -309,7 +318,7 @@ impl DispatchExecutorInner {
             }
             Mutation::Update(updates) => {
                 if let Some(update) = updates.get(&self.actor_id) {
-                    self.update_dispatchers::<false>(update)?;
+                    self.post_update_dispatcher(update)?;
                 }
             }
 

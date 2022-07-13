@@ -31,6 +31,7 @@ message UpdateMutation {
     // Dispatcher can be uniquely identified by a combination of actor id and dispatcher id.
     uint64 dispatcher_id = 1;
     // The hash mapping for consistent hash.
+    // For dispatcher types other than HASH, this is ignored.
     ActorMapping hash_mapping = 2;
     // Added downstream actors.
     repeated uint32 added_downstream_actor_id = 3;
@@ -369,8 +370,10 @@ message DispatchStrategy {
 message Dispatcher {
   DispatcherType type = 1;
   // Indices of the columns to be used for hashing.
+  // For dispatcher types other than HASH, this is ignored.
   repeated uint32 column_indices = 2;
   // The hash mapping for consistent hash.
+  // For dispatcher types other than HASH, this is ignored.
   ActorMapping hash_mapping = 3;
   // Dispatcher can be uniquely identified by a combination of actor id and dispatcher id.
   // - For dispatchers within actors, the id is the same as operator_id of the exchange plan node.

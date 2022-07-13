@@ -171,6 +171,7 @@ pub const INVALID_EPOCH: u64 = 0;
 
 pub trait ExprFn = Fn(&DataChunk) -> Result<Bitmap> + Send + Sync + 'static;
 
+/// See [`risingwave_pb::stream_plan::barrier::Mutation`] for the semantics of each mutation.
 #[derive(Debug, Clone, PartialEq)]
 pub enum Mutation {
     Stop(HashSet<ActorId>),
