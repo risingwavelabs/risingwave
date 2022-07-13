@@ -22,13 +22,14 @@ use crate::error::{ErrorCode, RwError};
 
 // This is a hack, &'static str is not allowed as a const generics argument.
 // TODO: refine this using the adt_const_params feature.
-const CONFIG_KEYS: [&str; 6] = [
+const CONFIG_KEYS: [&str; 7] = [
     "RW_IMPLICIT_FLUSH",
     "QUERY_MODE",
     "RW_FORCE_DELTA_JOIN",
     "EXTRA_FLOAT_DIGITS",
     "APPLICATION_NAME",
     "DATE_STYLE",
+    "RW_BATCH_ENABLE_LOOKUP_JOIN",
 ];
 const IMPLICIT_FLUSH: usize = 0;
 const QUERY_MODE: usize = 1;
@@ -36,6 +37,7 @@ const DELTA_JOIN: usize = 2;
 const EXTRA_FLOAT_DIGITS: usize = 3;
 const APPLICATION_NAME: usize = 4;
 const DATE_STYLE: usize = 5;
+const BATCH_ENABLE_LOOKUP_JOIN: usize = 6;
 
 trait ConfigEntry: Default + FromStr<Err = RwError> {
     fn entry_name() -> &'static str;
@@ -154,6 +156,7 @@ type ApplicationName = ConfigString<APPLICATION_NAME>;
 type ExtraFloatDigit = ConfigI32<EXTRA_FLOAT_DIGITS, 1>;
 // TODO: We should use more specified type here.
 type DateStyle = ConfigString<DATE_STYLE>;
+type BatchEnableLookupJoin = ConfigBool<BATCH_ENABLE_LOOKUP_JOIN, false>;
 
 #[derive(Default)]
 pub struct ConfigMap {
@@ -177,6 +180,9 @@ pub struct ConfigMap {
 
     /// see https://www.postgresql.org/docs/current/runtime-config-client.html#GUC-DATESTYLE
     date_style: DateStyle,
+
+    /// To force the usage of lookup join instead of hash join in batch execution
+    batch_enable_lookup_join: BatchEnableLookupJoin,
 }
 
 impl ConfigMap {
@@ -193,6 +199,8 @@ impl ConfigMap {
             self.application_name = val.parse()?;
         } else if key.eq_ignore_ascii_case(DateStyle::entry_name()) {
             self.date_style = val.parse()?;
+        } else if key.eq_ignore_ascii_case(BatchEnableLookupJoin::entry_name()) {
+            self.batch_enable_lookup_join = val.parse()?;
         } else {
             return Err(ErrorCode::UnrecognizedConfigurationParameter(key.to_string()).into());
         }
@@ -213,6 +221,8 @@ impl ConfigMap {
             Ok(self.application_name.to_string())
         } else if key.eq_ignore_ascii_case(DateStyle::entry_name()) {
             Ok(self.date_style.to_string())
+        } else if key.eq_ignore_ascii_case(BatchEnableLookupJoin::entry_name()) {
+            Ok(self.batch_enable_lookup_join.to_string())
         } else {
             Err(ErrorCode::UnrecognizedConfigurationParameter(key.to_string()).into())
         }
@@ -250,6 +260,11 @@ impl ConfigMap {
                 setting : self.date_style.to_string(),
                 description : String::from("It is typically set by an application upon connection to the server.")
             },
+            VariableInfo{
+                name : BatchEnableLookupJoin::entry_name().to_lowercase(),
+                setting : self.batch_enable_lookup_join.to_string(),
+                description : String::from("To enable the usage of lookup join instead of hash join when possible for local batch execution")
+            },
         ]
     }
 
@@ -275,5 +290,9 @@ impl ConfigMap {
 
     pub fn get_date_style(&self) -> &str {
         &self.date_style
+    }
+
+    pub fn get_batch_enable_lookup_join(&self) -> bool {
+        *self.batch_enable_lookup_join
     }
 }

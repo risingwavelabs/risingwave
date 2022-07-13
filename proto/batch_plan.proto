@@ -203,8 +203,9 @@ message LookupJoinNode {
   expr.ExprNode condition = 2;
   repeated int32 build_side_key = 3;
   plan_common.CellBasedTableDesc probe_side_table_desc = 4;
-  repeated uint32 output_indices = 5;
-  repeated ExchangeSource sources = 6;
+  repeated int32 probe_side_column_ids = 5;
+  repeated uint32 output_indices = 6;
+  repeated ExchangeSource sources = 7;
 }
 
 message PlanNode {

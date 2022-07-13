@@ -214,6 +214,7 @@ mod batch_hash_join;
 mod batch_hop_window;
 mod batch_insert;
 mod batch_limit;
+mod batch_lookup_join;
 mod batch_nested_loop_join;
 mod batch_project;
 mod batch_seq_scan;
@@ -268,6 +269,7 @@ pub use batch_hash_join::BatchHashJoin;
 pub use batch_hop_window::BatchHopWindow;
 pub use batch_insert::BatchInsert;
 pub use batch_limit::BatchLimit;
+pub use batch_lookup_join::BatchLookupJoin;
 pub use batch_nested_loop_join::BatchNestedLoopJoin;
 pub use batch_project::BatchProject;
 pub use batch_seq_scan::BatchSeqScan;
@@ -366,6 +368,7 @@ macro_rules! for_all_plan_nodes {
             , { Batch, HopWindow }
             , { Batch, TableFunction }
             , { Batch, Expand }
+            , { Batch, LookupJoin }
             , { Stream, Project }
             , { Stream, Filter }
             , { Stream, TableScan }
@@ -439,6 +442,7 @@ macro_rules! for_batch_plan_nodes {
             , { Batch, HopWindow }
             , { Batch, TableFunction }
             , { Batch, Expand }
+            , { Batch, LookupJoin }
         }
     };
 }
