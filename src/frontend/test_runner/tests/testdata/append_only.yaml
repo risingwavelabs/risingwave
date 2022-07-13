@@ -3,7 +3,7 @@
     create table t1 (v1 int, v2 int) with ('appendonly' = true);
     select v1, max(v2) as mx2 from t1 group by v1;
   stream_plan: |
-    StreamMaterialize { columns: [v1, agg#0(hidden), mx2], pk_columns: [v1] }
+    StreamMaterialize { columns: [v1, count(hidden), mx2], pk_columns: [v1] }
       StreamAppendOnlyHashAgg { group_key: [$0], aggs: [count, max($1)] }
         StreamExchange { dist: HashShard([0]) }
           StreamTableScan { table: t1, columns: [v1, v2, _row_id], pk_indices: [2] }
@@ -12,7 +12,7 @@
     create table t2 (v1 int, v3 int) with ('appendonly' = true);
     select t1.v1 as id, v2, v3 from t1 join t2 on t1.v1=t2.v1;
   stream_plan: |
-    StreamMaterialize { columns: [id, v2, v3, _row_id(hidden), _row_id#1(hidden)], pk_columns: [_row_id, _row_id#1] }
+    StreamMaterialize { columns: [id, v2, v3, t1._row_id(hidden), t2._row_id(hidden)], pk_columns: [t1._row_id, t2._row_id] }
       StreamExchange { dist: HashShard([3, 4]) }
         StreamAppendOnlyHashJoin { type: Inner, predicate: $0 = $3, append_only: true, output_indices: [0, 1, 4, 2, 5] }
           StreamExchange { dist: HashShard([0]) }
@@ -23,15 +23,15 @@
     create table t1 (v1 int, v2 int) with ('appendonly' = true);
     select v1 from t1 order by v1 limit 3 offset 3;
   stream_plan: |
-    StreamMaterialize { columns: [v1, _row_id(hidden)], pk_columns: [_row_id], order_descs: [v1, _row_id] }
-      StreamAppendOnlyTopN { order: [$0 ASC], limit: 3, offset: 3 }
+    StreamMaterialize { columns: [v1, t1._row_id(hidden)], pk_columns: [t1._row_id], order_descs: [v1, t1._row_id] }
+      StreamAppendOnlyTopN { order: "[$0 ASC]", limit: 3, offset: 3 }
         StreamExchange { dist: Single }
           StreamTableScan { table: t1, columns: [v1, _row_id], pk_indices: [1] }
 - sql: |
     create table t1 (v1 int, v2 int) with ('appendonly' = true);
     select max(v1) as max_v1 from t1;
   stream_plan: |
-    StreamMaterialize { columns: [agg#0(hidden), max_v1], pk_columns: [] }
+    StreamMaterialize { columns: [count(hidden), max_v1], pk_columns: [] }
       StreamAppendOnlyGlobalSimpleAgg { aggs: [count, max($0)] }
         StreamExchange { dist: Single }
           StreamTableScan { table: t1, columns: [v1, _row_id], pk_indices: [1] }
