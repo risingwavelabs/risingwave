@@ -338,7 +338,7 @@ impl LocalQueryExecution {
                 let left_child = self.convert_plan_node(
                     &execution_plan_node.children[0],
                     second_stages,
-                    vnode_bitmap,
+                    partition,
                 )?;
 
                 Ok(PlanNodeProst {
