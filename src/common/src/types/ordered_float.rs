@@ -94,7 +94,7 @@ const CANONICAL_ZERO_BITS: u64 = 0x0u64;
 /// s.insert(OrderedFloat(NAN));
 /// assert!(s.contains(&OrderedFloat(NAN)));
 /// ```
-#[derive(Debug, Default, Clone, Copy)]
+#[derive(Debug, Default, Clone, Copy, Serialize)]
 #[repr(transparent)]
 pub struct OrderedFloat<T>(pub T);
 
@@ -948,8 +948,6 @@ fn raw_double_bits<F: Float>(f: &F) -> u64 {
     (man & MAN_MASK) | ((exp_u64 << 52) & EXP_MASK) | ((sign_u64 << 63) & SIGN_MASK)
 }
 
-// Currently we only introduce `rand` as a dev dependency.
-#[cfg(test)]
 mod impl_rand {
     use rand::distributions::uniform::*;
     use rand::distributions::{Distribution, Open01, OpenClosed01, Standard};
@@ -1165,6 +1163,7 @@ mod impl_into_ordered {
 }
 
 pub use impl_into_ordered::IntoOrdered;
+use serde::Serialize;
 
 #[cfg(test)]
 mod tests {
