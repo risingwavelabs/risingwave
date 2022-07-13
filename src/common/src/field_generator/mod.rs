@@ -191,8 +191,8 @@ impl FieldGeneratorImpl {
             FieldGeneratorImpl::F32Random(f) => f.generate_datum(offset),
             FieldGeneratorImpl::F64Random(f) => f.generate_datum(offset),
             // TODO: add generate_datum in VarcharField and TimestampField
-            FieldGeneratorImpl::Varchar(f) => todo!(),
-            FieldGeneratorImpl::Timestamp(f) => todo!(),
+            FieldGeneratorImpl::Varchar(_) => todo!(),
+            FieldGeneratorImpl::Timestamp(_) => todo!(),
         }
     }
 }
