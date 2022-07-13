@@ -12,11 +12,11 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+use std::sync::atomic::Ordering;
 use pgwire::pg_field_descriptor::{PgFieldDescriptor, TypeOid};
 use pgwire::pg_response::{PgResponse, StatementType};
 use pgwire::types::Row;
 use risingwave_common::error::Result;
-use risingwave_common::session_config::EXPLAIN_VERBOSE_STRING;
 use risingwave_sqlparser::ast::Statement;
 
 use super::create_index::gen_create_index_plan;
@@ -33,12 +33,9 @@ pub(super) fn handle_explain(
     verbose: bool,
 ) -> Result<PgResponse> {
     let session = context.session_ctx.clone();
-    session
-        .set_config(EXPLAIN_VERBOSE_STRING, &verbose.to_string())
-        .unwrap();
+    context.explain_verbose.store(verbose, Ordering::Release);
     // bind, plan, optimize, and serialize here
     let mut planner = Planner::new(context.into());
-
     let plan = match stmt {
         Statement::CreateView {
             or_replace: false,

@@ -16,7 +16,7 @@ use std::fmt::Formatter;
 use std::io::{Error, ErrorKind};
 use std::marker::Sync;
 use std::path::PathBuf;
-use std::sync::atomic::{AtomicI32, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicI32, Ordering};
 use std::sync::Arc;
 use std::time::Duration;
 
@@ -64,6 +64,9 @@ pub struct OptimizerContext {
     pub next_id: AtomicI32,
     /// For debugging purposes, store the SQL string in Context
     pub sql: Arc<str>,
+
+    /// it indicates whether the explain mode is verbose for explain statement
+    pub explain_verbose: AtomicBool,
 }
 
 #[derive(Clone, Debug)]
@@ -94,7 +97,7 @@ impl OptimizerContextRef {
     }
 
     pub fn is_explain_verbose(&self) -> bool {
-        self.inner.session_ctx.config().get_explain_verbose()
+        self.inner.explain_verbose.load(Ordering::Acquire)
     }
 }
 
@@ -104,6 +107,7 @@ impl OptimizerContext {
             session_ctx,
             next_id: AtomicI32::new(0),
             sql,
+            explain_verbose: AtomicBool::new(false)
         }
     }
 
@@ -114,6 +118,7 @@ impl OptimizerContext {
             session_ctx: Arc::new(SessionImpl::mock()),
             next_id: AtomicI32::new(0),
             sql: Arc::from(""),
+            explain_verbose: AtomicBool::new(false)
         }
         .into()
     }

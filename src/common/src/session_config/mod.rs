@@ -22,7 +22,7 @@ use crate::error::{ErrorCode, RwError};
 
 // This is a hack, &'static str is not allowed as a const generics argument.
 // TODO: refine this using the adt_const_params feature.
-const CONFIG_KEYS: [&str; 8] = [
+const CONFIG_KEYS: [&str; 7] = [
     "RW_IMPLICIT_FLUSH",
     "QUERY_MODE",
     "RW_FORCE_DELTA_JOIN",
@@ -30,7 +30,6 @@ const CONFIG_KEYS: [&str; 8] = [
     "APPLICATION_NAME",
     "DATE_STYLE",
     "RW_BATCH_ENABLE_LOOKUP_JOIN",
-    EXPLAIN_VERBOSE_STRING,
 ];
 const IMPLICIT_FLUSH: usize = 0;
 const QUERY_MODE: usize = 1;
@@ -39,9 +38,6 @@ const EXTRA_FLOAT_DIGITS: usize = 3;
 const APPLICATION_NAME: usize = 4;
 const DATE_STYLE: usize = 5;
 const BATCH_ENABLE_LOOKUP_JOIN: usize = 6;
-const EXPLAIN_VERBOSE: usize = 7;
-
-pub const EXPLAIN_VERBOSE_STRING: &str = "EXPLAIN_VERBOSE";
 
 trait ConfigEntry: Default + FromStr<Err = RwError> {
     fn entry_name() -> &'static str;
@@ -161,7 +157,6 @@ type ExtraFloatDigit = ConfigI32<EXTRA_FLOAT_DIGITS, 1>;
 // TODO: We should use more specified type here.
 type DateStyle = ConfigString<DATE_STYLE>;
 type BatchEnableLookupJoin = ConfigBool<BATCH_ENABLE_LOOKUP_JOIN, false>;
-type ExplainVerbose = ConfigBool<EXPLAIN_VERBOSE, false>;
 
 #[derive(Default)]
 pub struct ConfigMap {
@@ -188,9 +183,6 @@ pub struct ConfigMap {
 
     /// To force the usage of lookup join instead of hash join in batch execution
     batch_enable_lookup_join: BatchEnableLookupJoin,
-
-    /// Sets the default explain mode to verbose.
-    explain_verbose: ExplainVerbose,
 }
 
 impl ConfigMap {
@@ -209,8 +201,6 @@ impl ConfigMap {
             self.date_style = val.parse()?;
         } else if key.eq_ignore_ascii_case(BatchEnableLookupJoin::entry_name()) {
             self.batch_enable_lookup_join = val.parse()?;
-        } else if key.eq_ignore_ascii_case(ExplainVerbose::entry_name()) {
-            self.explain_verbose = val.parse()?;
         } else {
             return Err(ErrorCode::UnrecognizedConfigurationParameter(key.to_string()).into());
         }
@@ -233,8 +223,6 @@ impl ConfigMap {
             Ok(self.date_style.to_string())
         } else if key.eq_ignore_ascii_case(BatchEnableLookupJoin::entry_name()) {
             Ok(self.batch_enable_lookup_join.to_string())
-        } else if key.eq_ignore_ascii_case(ExplainVerbose::entry_name()) {
-            Ok(self.explain_verbose.to_string())
         } else {
             Err(ErrorCode::UnrecognizedConfigurationParameter(key.to_string()).into())
         }
@@ -277,11 +265,6 @@ impl ConfigMap {
                 setting : self.batch_enable_lookup_join.to_string(),
                 description : String::from("To enable the usage of lookup join instead of hash join when possible for local batch execution")
             },
-            VariableInfo{
-                name : ExplainVerbose::entry_name().to_lowercase(),
-                setting : self.explain_verbose.to_string(),
-                description : String::from("Sets the default explain mode to verbose.")
-            },
         ]
     }
 
@@ -311,9 +294,5 @@ impl ConfigMap {
 
     pub fn get_batch_enable_lookup_join(&self) -> bool {
         *self.batch_enable_lookup_join
-    }
-
-    pub fn get_explain_verbose(&self) -> bool {
-        *self.explain_verbose
     }
 }
