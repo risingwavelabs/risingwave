@@ -75,7 +75,7 @@ impl PrometheusGen {
 
         let mut remote_write = String::from("");
         if let Ok(x) = std::env::var("PROMETHEUS_REMOTE_WRITE") && x == "true" {
-            remote_write = format!("
+            remote_write = "
 remote_write:
   -
     url: https://aps-workspaces.ap-southeast-1.amazonaws.com/workspaces/ws-f3841dad-6a5c-420f-8f62-8f66487f512a/api/v1/remote_write
@@ -85,8 +85,7 @@ remote_write:
         capacity: 2500
     sigv4:
          region: ap-southeast-1
-",
-            )
+".to_string()
         }
 
         format!(
