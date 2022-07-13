@@ -40,6 +40,15 @@ where
     T::OwnedItem: for<'a> PartialOrd<T::RefItem<'a>>,
     T::OwnedItem: for<'a> CheckedAdd<S::RefItem<'a>, Output = T::OwnedItem>,
 {
+    fn new(start: BoxedExpression, stop: BoxedExpression, step: BoxedExpression) -> Self {
+        Self {
+            start,
+            stop,
+            step,
+            _phantom: Default::default(),
+        }
+    }
+
     fn eval_row(
         &self,
         start: T::RefItem<'_>,
@@ -50,11 +59,7 @@ where
 
         let mut cur: T::OwnedItem = start.to_owned_scalar();
 
-        // Simulate a do-while loop.
         while cur <= stop {
-            if cur > stop {
-                break;
-            }
             builder.append(Some(cur.as_scalar_ref())).unwrap();
             cur = cur.checked_add(step).ok_or(ExprError::NumericOutOfRange)?;
         }
@@ -128,20 +133,10 @@ pub fn new_generate_series(
     let (start, stop, step) = args.into_iter().collect_tuple().unwrap();
 
     match return_type {
-        DataType::Timestamp => Ok(GenerateSeries::<NaiveDateTimeArray, IntervalArray> {
-            start,
-            stop,
-            step,
-            _phantom: Default::default(),
+        DataType::Timestamp => {
+            Ok(GenerateSeries::<NaiveDateTimeArray, IntervalArray>::new(start, stop, step).boxed())
         }
-        .boxed()),
-        DataType::Int32 => Ok(GenerateSeries::<I32Array, I32Array> {
-            start,
-            stop,
-            step,
-            _phantom: Default::default(),
-        }
-        .boxed()),
+        DataType::Int32 => Ok(GenerateSeries::<I32Array, I32Array>::new(start, stop, step).boxed()),
         _ => Err(ExprError::Internal(anyhow!(
             "the return type of Generate Series Function is incorrect".to_string(),
         ))),

@@ -23,7 +23,6 @@ use super::*;
 #[derive(Debug)]
 pub struct Unnest {
     return_type: DataType,
-
     list: BoxedExpression,
 }
 
