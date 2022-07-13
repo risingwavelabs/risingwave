@@ -5,6 +5,7 @@ statement ok
 SET QUERY_MODE TO local;
 
 include ./basic/*.slt.part
+include ./basic/local/*.slt.part
 include ./aggregate/*.slt.part
 include ./types/*.slt.part
 include ./catalog/*.slt.part

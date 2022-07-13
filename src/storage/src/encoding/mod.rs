@@ -12,11 +12,15 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+use std::collections::HashMap;
+use std::ops::Deref;
+
 use risingwave_common::array::Row;
 use risingwave_common::catalog::{ColumnDesc, ColumnId};
 use risingwave_common::error::Result;
 use risingwave_common::types::VirtualNode;
 
+pub mod cell_based_encoding_util;
 pub mod cell_based_row_deserializer;
 pub mod cell_based_row_serializer;
 pub mod dedup_pk_cell_based_row_deserializer;
@@ -24,6 +28,8 @@ pub mod dedup_pk_cell_based_row_serializer;
 
 pub type KeyBytes = Vec<u8>;
 pub type ValueBytes = Vec<u8>;
+
+/// `Encoding` defines an interface for encoding a key row into kv storage.
 pub trait Encoding {
     /// Constructs a new serializer.
     fn create_cell_based_serializer(
@@ -53,4 +59,28 @@ pub trait Encoding {
     /// Get column ids used by cell serializer to serialize.
     /// TODO: This should probably not be exposed to user.
     fn column_ids(&self) -> &[ColumnId];
+}
+
+/// Record mapping from [`ColumnDesc`], [`ColumnId`], and output index of columns in a table.
+pub struct ColumnDescMapping {
+    pub output_columns: Vec<ColumnDesc>,
+
+    pub id_to_column_index: HashMap<ColumnId, usize>,
+}
+
+/// `Decoding` defines an interface for decoding a key row from kv storage.
+pub trait Decoding<Desc: Deref<Target = ColumnDescMapping>> {
+    /// Constructs a new serializer.
+    fn create_cell_based_deserializer(column_mapping: Desc) -> Self;
+
+    /// When we encounter a new key, we can be sure that the previous row has been fully
+    /// deserialized. Then we return the key and the value of the previous row.
+    fn deserialize(
+        &mut self,
+        raw_key: impl AsRef<[u8]>,
+        cell: impl AsRef<[u8]>,
+    ) -> Result<Option<(VirtualNode, Vec<u8>, Row)>>;
+
+    /// Take the remaining data out of the deserializer.
+    fn take(&mut self) -> Option<(VirtualNode, Vec<u8>, Row)>;
 }

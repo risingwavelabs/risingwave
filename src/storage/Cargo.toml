@@ -32,7 +32,7 @@ lz4 = "1.23.1"
 madsim = "=0.2.0-alpha.3"
 memcomparable = { path = "../utils/memcomparable" }
 minstant = "0.1"
-moka = { version = "0.8", features = ["future"] }
+moka = { version = "0.9", features = ["future"] }
 nix = { version = "0.24.1", features = ["fs"] }
 num-integer = "0.1"
 num-traits = "0.2"
@@ -77,13 +77,13 @@ zstd = "0.11.2"
 
 [dev-dependencies]
 criterion = "0.3"
-risingwave_meta = { path = "../meta", features = ["test"] }
 risingwave_test_runner = { path = "../test_runner" }
 uuid = { version = "1", features = ["v4"] }
 
 [features]
 # rocksdb-local = ["rocksdb"]
 # tikv = ["tikv-client"]
+test = []
 failpoints = ["fail/failpoints"]
 
 [[bench]]

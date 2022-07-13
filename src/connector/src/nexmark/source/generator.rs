@@ -25,7 +25,7 @@ use crate::SourceMessage;
 pub struct NexmarkEventGenerator {
     pub events_so_far: u64,
     pub event_num: i64,
-    pub config: Box<NexmarkConfig>,
+    pub config: NexmarkConfig,
     pub wall_clock_base_time: usize,
     pub split_index: i32,
     pub split_num: i32,

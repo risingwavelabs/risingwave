@@ -19,11 +19,12 @@ use rand::Rng;
 use risingwave_frontend::binder::bind_data_type;
 use risingwave_frontend::expr::DataTypeName;
 use risingwave_sqlparser::ast::{
-    ColumnDef, Expr, Ident, OrderByExpr, Query, Select, SelectItem, SetExpr, Statement,
-    TableWithJoins, Value, With,
+    BinaryOperator, ColumnDef, Expr, Ident, Join, JoinConstraint, JoinOperator, OrderByExpr, Query,
+    Select, SelectItem, SetExpr, Statement, TableWithJoins, Value, With,
 };
 
 mod expr;
+pub use expr::print_function_table;
 mod relation;
 mod scalar;
 
@@ -31,6 +32,18 @@ mod scalar;
 pub struct Table {
     pub name: String,
     pub columns: Vec<Column>,
+}
+
+impl Table {
+    pub fn get_qualified_columns(&self) -> Vec<Column> {
+        self.columns
+            .iter()
+            .map(|c| Column {
+                name: format!("{}.{}", self.name, c.name),
+                data_type: c.data_type,
+            })
+            .collect()
+    }
 }
 
 #[derive(Clone)]
@@ -52,6 +65,8 @@ struct SqlGenerator<'a, R: Rng> {
     tables: Vec<Table>,
     rng: &'a mut R,
 
+    /// Relations bound in generated query.
+    /// We might not read from all tables.
     bound_relations: Vec<Table>,
 }
 
@@ -130,7 +145,6 @@ impl<'a, R: Rng> SqlGenerator<'a, R> {
     fn gen_select_stmt(&mut self) -> (Select, Vec<Column>) {
         // Generate random tables/relations first so that select items can refer to them.
         let from = self.gen_from();
-        let rel_num = from.len();
         let (select_list, schema) = self.gen_select_list();
         let select = Select {
             distinct: false,
@@ -141,11 +155,6 @@ impl<'a, R: Rng> SqlGenerator<'a, R> {
             group_by: self.gen_group_by(),
             having: self.gen_having(),
         };
-        // The relations used in the inner query can not be used in the outer query.
-        (0..rel_num).for_each(|_| {
-            let rel = self.bound_relations.pop();
-            assert!(rel.is_some());
-        });
         (select, schema)
     }
 
@@ -217,6 +226,11 @@ impl<'a, R: Rng> SqlGenerator<'a, R> {
     /// 50/50 chance to be true/false.
     fn flip_coin(&mut self) -> bool {
         self.rng.gen_bool(0.5)
+    }
+
+    /// Provide recursion bounds.
+    pub(crate) fn can_recurse(&mut self) -> bool {
+        self.rng.gen_bool(0.3)
     }
 }
 

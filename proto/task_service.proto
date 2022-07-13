@@ -5,6 +5,7 @@ package task_service;
 import "batch_plan.proto";
 import "common.proto";
 import "data.proto";
+import "stream_plan.proto";
 
 option optimize_for = SPEED;
 
@@ -72,8 +73,10 @@ message GetDataResponse {
 }
 
 message GetStreamRequest {
-  uint32 up_fragment_id = 1;
-  uint32 down_fragment_id = 2;
+  uint32 up_actor_id = 1;
+  uint32 down_actor_id = 2;
+  uint32 up_fragment_id = 3;
+  uint32 down_fragment_id = 4;
 }
 
 message ExecuteRequest {
@@ -95,7 +98,7 @@ message GetDataRequest {
 }
 
 message GetStreamResponse {
-  data.StreamMessage message = 1;
+  stream_plan.StreamMessage message = 1;
 }
 
 service ExchangeService {

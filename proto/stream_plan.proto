@@ -7,8 +7,59 @@ import "common.proto";
 import "data.proto";
 import "expr.proto";
 import "plan_common.proto";
+import "source.proto";
 
 option optimize_for = SPEED;
+
+message StopMutation {
+  repeated uint32 actors = 1;
+}
+
+message DispatcherMutation {
+  uint32 actor_id = 1;
+  uint64 dispatcher_id = 2;
+  repeated common.ActorInfo info = 3;
+}
+
+message UpdateMutation {
+  repeated DispatcherMutation mutations = 1;
+}
+
+message AddMutation {
+  repeated DispatcherMutation mutations = 1;
+  map<uint32, source.ConnectorSplits> actor_splits = 2;
+}
+
+message SourceChangeSplitMutation {
+  map<uint32, source.ConnectorSplits> actor_splits = 2;
+}
+
+message AddDispatcherMutation {
+  message Dispatchers {
+    repeated Dispatcher dispatchers = 1;
+  }
+  map<uint32, Dispatchers> actor_dispatchers = 1;
+  map<uint32, source.ConnectorSplits> actor_splits = 2;
+}
+
+message Barrier {
+  data.Epoch epoch = 1;
+  oneof mutation {
+    StopMutation stop = 3;
+    UpdateMutation update = 4;
+    AddMutation add = 5;
+    AddDispatcherMutation add_dispatcher = 8;
+    SourceChangeSplitMutation splits = 7;
+  }
+  bytes span = 6;
+}
+
+message StreamMessage {
+  oneof stream_message {
+    data.StreamChunk stream_chunk = 1;
+    Barrier barrier = 2;
+  }
+}
 
 // Hash mapping for compute node. Stores mapping from virtual node to actor id.
 message ActorMapping {
@@ -22,14 +73,15 @@ message SourceNode {
     TABLE = 0;
     SOURCE = 1;
   }
-  plan_common.TableRefId table_ref_id = 1;
+  uint32 table_id = 1;
   repeated int32 column_ids = 2;
   SourceType source_type = 3;
 }
 
 message SinkNode {
-  plan_common.TableRefId table_ref_id = 1;
+  uint32 table_id = 1;
   repeated int32 column_ids = 2;
+  map<string, string> properties = 3;
 }
 
 message ProjectNode {
@@ -48,14 +100,11 @@ message FilterNode {
 // - When creating index, `column_orders` will contain both
 //   arrange columns and pk columns, while distribution key will be arrange columns.
 message MaterializeNode {
-  plan_common.TableRefId table_ref_id = 1;
-  plan_common.TableRefId associated_table_ref_id = 2;
+  uint32 table_id = 1;
   // Column indexes and orders of primary key
   repeated plan_common.ColumnOrder column_orders = 3;
-  // Column IDs of input schema
-  repeated int32 column_ids = 4;
-  // Hash key of the materialize node, which is a subset of pk.
-  repeated uint32 distribution_key = 5;
+  // Used for internal table states.
+  catalog.Table table = 4;
 }
 
 // Remark by Yanghao: for both local and global we use the same node in the protobuf.
@@ -106,13 +155,26 @@ message HashJoinNode {
   catalog.Table left_table = 6;
   // Used for internal table states.
   catalog.Table right_table = 7;
-  repeated uint32 dist_key_l = 8;
-  repeated uint32 dist_key_r = 9;
-  // It is true when the input is append-only
-  bool is_append_only = 10;
   // Whether to optimize for append only stream.
+  // It is true when the input is append-only
+  bool is_append_only = 8;
+  // The output indices of current node
+  repeated uint32 output_indices = 9;
+}
+
+message DynamicFilterNode {
+  uint32 left_key = 1;
+  // Must be one of <, <=, >, >=
+  expr.ExprNode condition = 2;
+  // Left table stores all states with predicate possibly not NULL.
+  catalog.Table left_table = 3;
+  // Right table stores single value from RHS of predicate.
+  catalog.Table right_table = 4;
+  // It is true when the right side of the inequality predicate is monotonically:
+  // - decreasing for <, <=, increasing for >, >=
+  // bool is_monotonic = 10;
   // the output indices of current node
-  repeated uint32 output_indices = 11;
+  // repeated uint32 output_indices = 11;
 }
 
 // Delta join with two indexes. This is a pseudo plan node generated on frontend. On meta
@@ -143,8 +205,9 @@ message HopWindowNode {
 
 message MergeNode {
   repeated uint32 upstream_actor_id = 1;
+  uint32 upstream_fragment_id = 2;
   // The schema of input columns. TODO: remove this field.
-  repeated plan_common.Field fields = 2;
+  repeated plan_common.Field fields = 3;
 }
 
 // passed from frontend to meta, used by fragmenter to generate `MergeNode`
@@ -158,7 +221,7 @@ message ExchangeNode {
 //   1. MergeNode (as a placeholder) for streaming read.
 //   2. BatchPlanNode for snapshot read.
 message ChainNode {
-  plan_common.TableRefId table_ref_id = 1;
+  uint32 table_id = 1;
   // The schema of input stream, which will be used to build a MergeNode
   repeated plan_common.Field upstream_fields = 2;
   repeated int32 column_ids = 3;
@@ -259,8 +322,10 @@ message StreamNode {
     DeltaIndexJoinNode delta_index_join = 119;
     SinkNode sink = 120;
     ExpandNode expand = 121;
+    DynamicFilterNode dynamic_filter = 122;
   }
-  // The id for the operator.
+  // The id for the operator. This is local per mview.
+  // TODO: should better be a uint32.
   uint64 operator_id = 1;
   // Child node in plan aka. upstream nodes in the streaming DAG
   repeated StreamNode input = 3;
@@ -301,7 +366,6 @@ message Dispatcher {
   ActorMapping hash_mapping = 3;
   // Dispatcher can be uniquely identified by a combination of actor id and dispatcher id.
   // For dispatchers within actors, the id is the same as operator_id of the exchange plan node.
-  // For cross-MV dispatchers, there will only be one broadcast dispatcher of id 0.
   uint64 dispatcher_id = 4;
   // Number of downstreams decides how many endpoints a dispatcher should dispatch.
   repeated uint32 downstream_actor_id = 5;

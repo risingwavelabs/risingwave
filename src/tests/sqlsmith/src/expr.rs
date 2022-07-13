@@ -14,6 +14,7 @@
 
 use std::collections::HashMap;
 
+use itertools::Itertools;
 use rand::seq::SliceRandom;
 use rand::Rng;
 use risingwave_frontend::expr::{func_sigs, DataTypeName, ExprType, FuncSign};
@@ -87,10 +88,6 @@ impl<'a, R: Rng> SqlGenerator<'a, R> {
         };
         expr.or_else(|| make_general_expr(func.func, exprs))
             .unwrap_or_else(|| self.gen_simple_scalar(ret))
-    }
-
-    fn can_recurse(&mut self) -> bool {
-        self.rng.gen_bool(0.3)
     }
 }
 
@@ -221,4 +218,20 @@ fn make_bin_op(func: ExprType, exprs: &[Expr]) -> Option<Expr> {
 
 pub(crate) fn sql_null() -> Expr {
     Expr::Value(Value::Null)
+}
+
+pub fn print_function_table() -> String {
+    func_sigs()
+        .map(|sign| {
+            format!(
+                "{:?}({}) -> {:?}",
+                sign.func,
+                sign.inputs_type
+                    .iter()
+                    .map(|arg| format!("{:?}", arg))
+                    .join(", "),
+                sign.ret_type,
+            )
+        })
+        .join("\n")
 }

@@ -141,7 +141,8 @@ struct StreamActorDownstream {
 struct StreamActorUpstream {
     /// Upstream actors
     actors: OrderedActorLink,
-
+    /// associate fragment id
+    fragment_id: GlobalFragmentId,
     /// Whether to place the upstream actors on the same node
     same_worker_node: bool,
 }
@@ -266,6 +267,7 @@ impl StreamActorBuilder {
                     StreamActorUpstream {
                         actors,
                         same_worker_node,
+                        fragment_id,
                     },
                 )| {
                     (
@@ -273,6 +275,7 @@ impl StreamActorBuilder {
                         StreamActorUpstream {
                             actors: actors.to_global_ids(actor_id_offset, actor_id_len),
                             same_worker_node,
+                            fragment_id,
                         },
                     )
                 },
@@ -285,7 +288,7 @@ impl StreamActorBuilder {
     pub fn build(&self) -> StreamActor {
         assert!(self.sealed);
 
-        let mut dispatcher = self
+        let dispatcher = self
             .downstreams
             .iter()
             .map(
@@ -305,18 +308,6 @@ impl StreamActorBuilder {
             )
             .collect_vec();
 
-        // If there's no dispatcher, add an empty broadcast. TODO: Can be removed later.
-        if dispatcher.is_empty() {
-            dispatcher = vec![Dispatcher {
-                r#type: DispatcherType::Broadcast.into(),
-                // Currently when create MV on MV, we will add outputs to this dispatcher with id 0
-                // (cross-MV dispatcher).
-                // See also the rustdoc of this field.
-                dispatcher_id: 0,
-                ..Default::default()
-            }]
-        }
-
         StreamActor {
             actor_id: self.actor_id.as_global_id(),
             fragment_id: self.fragment_id.as_global_id(),
@@ -329,14 +320,7 @@ impl StreamActorBuilder {
                 .map(|x| x.as_global_id())
                 .collect(), // TODO: store each upstream separately
             same_worker_node_as_upstream: self.chain_same_worker_node
-                || self.upstreams.iter().any(
-                    |(
-                        _,
-                        StreamActorUpstream {
-                            same_worker_node, ..
-                        },
-                    )| *same_worker_node,
-                ),
+                || self.upstreams.values().any(|u| u.same_worker_node),
             vnode_bitmap: None,
         }
     }
@@ -381,6 +365,7 @@ impl StreamGraphBuilder {
     /// Add dependency between two connected node in the graph.
     pub fn add_link(
         &mut self,
+        upstream_fragment_id: GlobalFragmentId,
         upstream_actor_ids: &[LocalActorId],
         downstream_actor_ids: &[LocalActorId],
         exchange_operator_id: u64,
@@ -421,6 +406,7 @@ impl StreamGraphBuilder {
                             exchange_operator_id,
                             StreamActorUpstream {
                                 actors: OrderedActorLink(vec![*upstream_id]),
+                                fragment_id: upstream_fragment_id,
                                 same_worker_node,
                             },
                         );
@@ -468,6 +454,7 @@ impl StreamGraphBuilder {
                     exchange_operator_id,
                     StreamActorUpstream {
                         actors: OrderedActorLink(upstream_actor_ids.to_vec()),
+                        fragment_id: upstream_fragment_id,
                         same_worker_node,
                     },
                 );
@@ -503,9 +490,19 @@ impl StreamGraphBuilder {
                 .iter()
                 .map(|(id, StreamActorUpstream { actors, .. })| (*id, actors.clone()))
                 .collect();
+            let mut upstream_fragments = builder
+                .upstreams
+                .iter()
+                .map(|(id, StreamActorUpstream { fragment_id, .. })| (*id, *fragment_id))
+                .collect();
+            let stream_node = self.build_inner(
+                ctx,
+                actor.get_nodes()?,
+                actor_id,
+                &mut upstream_actors,
+                &mut upstream_fragments,
+            )?;
 
-            let stream_node =
-                self.build_inner(ctx, actor.get_nodes()?, actor_id, &mut upstream_actors)?;
             actor.nodes = Some(stream_node);
             graph
                 .entry(builder.get_fragment_id())
@@ -527,6 +524,7 @@ impl StreamGraphBuilder {
         stream_node: &StreamNode,
         actor_id: LocalActorId,
         upstream_actor_id: &mut HashMap<u64, OrderedActorLink>,
+        upstream_fragment_id: &mut HashMap<u64, GlobalFragmentId>,
     ) -> Result<StreamNode> {
         let table_id_offset = ctx.table_id_offset;
         let mut check_and_fill_internal_table = |table_id: u32, table: Option<Table>| {
@@ -544,30 +542,24 @@ impl StreamGraphBuilder {
                 // Table id rewrite done below.
                 match new_stream_node.node_body.as_mut().unwrap() {
                     NodeBody::HashJoin(node) => {
-                        // The operator id must be assigned with table ids. Otherwise it is a logic
-                        // error.
-                        let mut left_table_id: u32 = 0;
-                        // let mut right_table_id: u32 = 0;
                         if let Some(table) = &mut node.left_table {
-                            left_table_id = table.id + table_id_offset;
-                            table.id = left_table_id;
+                            table.id += table_id_offset;
                             table.schema_id = ctx.schema_id;
                             table.database_id = ctx.database_id;
                             table.name = generate_intertable_name_with_type(
                                 &ctx.mview_name,
-                                left_table_id,
+                                table.id,
                                 "HashJoinLeft",
                             );
                             check_and_fill_internal_table(table.id, Some(table.clone()));
                         }
                         if let Some(table) = &mut node.right_table {
-                            let right_table_id = left_table_id + 1;
-                            table.id = right_table_id;
+                            table.id += table_id_offset;
                             table.schema_id = ctx.schema_id;
                             table.database_id = ctx.database_id;
                             table.name = generate_intertable_name_with_type(
                                 &ctx.mview_name,
-                                right_table_id,
+                                table.id,
                                 "HashJoinRight",
                             );
                             check_and_fill_internal_table(table.id, Some(table.clone()));
@@ -641,6 +633,31 @@ impl StreamGraphBuilder {
                             check_and_fill_internal_table(table.id, Some(table.clone()));
                         }
                     }
+
+                    NodeBody::DynamicFilter(node) => {
+                        if let Some(table) = &mut node.left_table {
+                            table.id += table_id_offset;
+                            table.schema_id = ctx.schema_id;
+                            table.database_id = ctx.database_id;
+                            table.name = generate_intertable_name_with_type(
+                                &ctx.mview_name,
+                                table.id,
+                                "DynamicFilterLeft",
+                            );
+                            check_and_fill_internal_table(table.id, Some(table.clone()));
+                        }
+                        if let Some(table) = &mut node.right_table {
+                            table.id += table_id_offset;
+                            table.schema_id = ctx.schema_id;
+                            table.database_id = ctx.database_id;
+                            table.name = generate_intertable_name_with_type(
+                                &ctx.mview_name,
+                                table.id,
+                                "DynamicFilterRight",
+                            );
+                            check_and_fill_internal_table(table.id, Some(table.clone()));
+                        }
+                    }
                     _ => {}
                 }
 
@@ -655,6 +672,7 @@ impl StreamGraphBuilder {
                                     upstream_actor_id: upstream_actor_id
                                         .remove(&input.get_operator_id())
                                         .expect("failed to find upstream actor id for given exchange node").as_global_ids(),
+                                    upstream_fragment_id: upstream_fragment_id.get(&input.get_operator_id()).unwrap().as_global_id(),
                                     fields: input.get_fields().clone(),
                                 })),
                                 fields: input.get_fields().clone(),
@@ -667,8 +685,13 @@ impl StreamGraphBuilder {
                             new_stream_node.input[idx] = self.resolve_chain_node(input)?;
                         }
                         _ => {
-                            new_stream_node.input[idx] =
-                                self.build_inner(ctx, input, actor_id, upstream_actor_id)?;
+                            new_stream_node.input[idx] = self.build_inner(
+                                ctx,
+                                input,
+                                actor_id,
+                                upstream_actor_id,
+                                upstream_fragment_id,
+                            )?;
                         }
                     }
                 }
@@ -696,6 +719,7 @@ impl StreamGraphBuilder {
                 pk_indices: stream_node.pk_indices.clone(),
                 node_body: Some(NodeBody::Merge(MergeNode {
                     upstream_actor_id: vec![],
+                    upstream_fragment_id: 0,
                     fields: chain_node.upstream_fields.clone(),
                 })),
                 fields: chain_node.upstream_fields.clone(),
@@ -965,6 +989,7 @@ impl ActorGraphBuilder {
                 | DispatcherType::Broadcast
                 | DispatcherType::NoShuffle => {
                     state.stream_graph_builder.add_link(
+                        fragment_id,
                         &actor_ids,
                         downstream_actors,
                         dispatch_edge.link_id,

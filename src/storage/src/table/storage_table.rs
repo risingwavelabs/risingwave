@@ -36,10 +36,13 @@ use risingwave_hummock_sdk::key::{end_bound_of_prefix, next_key, prefixed_range,
 
 use super::mem_table::RowOp;
 use super::{Distribution, TableIter};
-use crate::encoding::cell_based_row_deserializer::{CellBasedRowDeserializer, ColumnDescMapping};
+use crate::encoding::cell_based_encoding_util::{serialize_pk, serialize_pk_and_column_id};
+use crate::encoding::cell_based_row_deserializer::{
+    CellBasedRowDeserializer, GeneralCellBasedRowDeserializer,
+};
 use crate::encoding::cell_based_row_serializer::CellBasedRowSerializer;
 use crate::encoding::dedup_pk_cell_based_row_serializer::DedupPkCellBasedRowSerializer;
-use crate::encoding::Encoding;
+use crate::encoding::{ColumnDescMapping, Decoding, Encoding};
 use crate::error::{StorageError, StorageResult};
 use crate::keyspace::StripPrefixIterator;
 use crate::storage_value::StorageValue;
@@ -275,25 +278,13 @@ impl<S: StateStore, E: Encoding, const T: AccessType> StorageTableBase<S, E, T> 
 /// Get
 impl<S: StateStore, E: Encoding, const T: AccessType> StorageTableBase<S, E, T> {
     /// Check whether the given `vnode` is set in the `vnodes` of this table.
-    ///
-    /// - For `READ_WRITE` or streaming usages, this will panic on `false` and always return `true`
-    ///   since the table should only be used to access entries with vnode specified in
-    ///   `self.vnodes`.
-    /// - For `READ_ONLY` or batch usages, this will return the result verbatim. The caller may
-    ///   filter out the scanned row according to the result.
-    fn check_vnode_is_set(&self, vnode: VirtualNode) -> bool {
+    fn check_vnode_is_set(&self, vnode: VirtualNode) {
         let is_set = self.vnodes.is_set(vnode as usize).unwrap();
-        match T {
-            READ_WRITE => {
-                assert!(
-                    is_set,
-                    "vnode {} should not be accessed by this table: {:#?}, dist key {:?}",
-                    vnode, self.table_columns, self.dist_key_indices
-                );
-            }
-            READ_ONLY => {}
-        }
-        is_set
+        assert!(
+            is_set,
+            "vnode {} should not be accessed by this table: {:#?}, dist key {:?}",
+            vnode, self.table_columns, self.dist_key_indices
+        );
     }
 
     /// Get vnode value with `indices` on the given `row`. Should not be used directly.
@@ -307,7 +298,7 @@ impl<S: StateStore, E: Encoding, const T: AccessType> StorageTableBase<S, E, T> 
 
         tracing::trace!(target: "events::storage::storage_table", "compute vnode: {:?} keys {:?} => {}", row, indices, vnode);
 
-        let _ = self.check_vnode_is_set(vnode);
+        self.check_vnode_is_set(vnode);
         vnode
     }
 
@@ -355,7 +346,10 @@ impl<S: StateStore, E: Encoding, const T: AccessType> StorageTableBase<S, E, T> 
         }
 
         let result = deserializer.take();
-        Ok(result.and_then(|(vnode, _pk, row)| self.check_vnode_is_set(vnode).then_some(row)))
+        Ok(result.map(|(vnode, _pk, row)| {
+            self.check_vnode_is_set(vnode);
+            row
+        }))
     }
 
     /// Get a single row by range scan
@@ -374,7 +368,10 @@ impl<S: StateStore, E: Encoding, const T: AccessType> StorageTableBase<S, E, T> 
         }
 
         let result = deserializer.take();
-        Ok(result.and_then(|(vnode, _pk, row)| self.check_vnode_is_set(vnode).then_some(row)))
+        Ok(result.map(|(vnode, _pk, row)| {
+            self.check_vnode_is_set(vnode);
+            row
+        }))
     }
 }
 
@@ -514,7 +511,7 @@ impl<S: StateStore, E: Encoding, const T: AccessType> StorageTableBase<S, E, T> 
         let iterators: Vec<_> = try_join_all(vnodes.map(|vnode| {
             let raw_key_range = prefixed_range(encoded_key_range.clone(), &vnode.to_be_bytes());
             async move {
-                let iter = StorageTableIterInner::new(
+                let iter = StorageTableIterInner::<S, GeneralCellBasedRowDeserializer>::new(
                     &self.keyspace,
                     self.mapping.clone(),
                     raw_key_range,
@@ -681,15 +678,15 @@ impl<S: StateStore, E: Encoding, const T: AccessType> StorageTableBase<S, E, T> 
 }
 
 /// [`StorageTableIterInner`] iterates on the storage table.
-struct StorageTableIterInner<S: StateStore> {
+struct StorageTableIterInner<S: StateStore, D: Decoding<Arc<ColumnDescMapping>>> {
     /// An iterator that returns raw bytes from storage.
     iter: StripPrefixIterator<S::Iter>,
 
     /// Cell-based row deserializer
-    cell_based_row_deserializer: CellBasedRowDeserializer<Arc<ColumnDescMapping>>,
+    cell_based_row_deserializer: D, // CellBasedRowDeserializer<Arc<ColumnDescMapping>>,
 }
 
-impl<S: StateStore> StorageTableIterInner<S> {
+impl<S: StateStore, D: Decoding<Arc<ColumnDescMapping>>> StorageTableIterInner<S, D> {
     /// If `wait_epoch` is true, it will wait for the given epoch to be committed before iteration.
     async fn new<R, B>(
         keyspace: &Keyspace<S>,
@@ -706,7 +703,7 @@ impl<S: StateStore> StorageTableIterInner<S> {
             keyspace.state_store().wait_epoch(epoch).await?;
         }
 
-        let cell_based_row_deserializer = CellBasedRowDeserializer::new(table_descs);
+        let cell_based_row_deserializer = D::create_cell_based_deserializer(table_descs);
 
         let iter = keyspace.iter_with_range(raw_key_range, epoch).await?;
         let iter = Self {
