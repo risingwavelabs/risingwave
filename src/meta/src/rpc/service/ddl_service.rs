@@ -327,8 +327,6 @@ where
                 !dependent_relations.is_empty(),
                 "there should be at lease 1 dependent relation when creating materialized view"
             );
-            dbg!(&mview.id);
-            dbg!(&dependent_relations);
             mview.dependent_relations = dependent_relations.into_iter().collect();
         }
 
@@ -733,7 +731,7 @@ where
             .generate::<{ IdCategory::Table }>()
             .await? as u32;
         sink.id = sink_id;
-        
+
         // TODO(nanderstabel): Resolve code duplication (in fn create_materialized_view).
         // 1. Resolve the dependent relations.
         {

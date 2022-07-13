@@ -41,7 +41,7 @@ pub type SinkManagerRef = Arc<dyn SinkManager>;
 pub struct MemSinkManager {
     sinks: Mutex<HashSet<TableId>>,
     /// Located worker id.
-    worker_id: u32,
+    _worker_id: u32,
 }
 
 #[async_trait]
@@ -79,10 +79,10 @@ impl SinkManager for MemSinkManager {
 }
 
 impl MemSinkManager {
-    pub fn new(worker_id: u32, _metrics: Arc<SinkMetrics>) -> Self {
+    pub fn new(_worker_id: u32, _metrics: Arc<SinkMetrics>) -> Self {
         MemSinkManager {
             sinks: Mutex::new(HashSet::new()),
-            worker_id,
+            _worker_id,
         }
     }
 
