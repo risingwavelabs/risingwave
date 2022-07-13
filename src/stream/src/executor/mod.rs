@@ -27,7 +27,7 @@ use risingwave_common::buffer::Bitmap;
 use risingwave_common::catalog::Schema;
 use risingwave_common::error::{Result, ToRwResult};
 use risingwave_common::types::DataType;
-use risingwave_connector::{ConnectorState, SplitImpl};
+use risingwave_connector::source::{ConnectorState, SplitImpl};
 use risingwave_pb::common::ActorInfo;
 use risingwave_pb::data::Epoch as ProstEpoch;
 use risingwave_pb::stream_plan::add_dispatcher_mutation::Dispatchers;
