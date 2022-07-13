@@ -230,7 +230,7 @@ impl<'a, R: Rng> SqlGenerator<'a, R> {
     }
 
     fn gen_group_by(&mut self) -> Vec<Expr> {
-        let mut available = self.bound_columns.to_vec();
+        let mut available = self.bound_columns.clone();
         if !available.is_empty() {
             available.shuffle(self.rng);
             let n_group_by_cols = self.rng.gen_range(1..=available.len());
