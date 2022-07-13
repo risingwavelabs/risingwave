@@ -17,6 +17,7 @@ use std::fmt::{Display, Formatter};
 use std::hash::{Hash, Hasher};
 use std::io::Write;
 
+use bytes::{BufMut, BytesMut};
 use chrono::{Datelike, Duration, NaiveDate, NaiveDateTime, NaiveTime, Timelike};
 
 use super::{CheckedAdd, IntervalUnit};
@@ -115,6 +116,10 @@ impl NaiveDateWrapper {
             .map_err(Into::into)
     }
 
+    pub fn to_protobuf_owned(&self) -> Vec<u8> {
+        self.0.num_days_from_ce().to_be_bytes().to_vec()
+    }
+
     pub fn from_protobuf(days: i32) -> ArrayResult<Self> {
         Self::with_days(days).map_err(Into::into)
     }
@@ -133,6 +138,13 @@ impl NaiveTimeWrapper {
             NaiveTime::from_num_seconds_from_midnight_opt(secs, nano)
                 .ok_or(ValueEncodingError::InvalidNaiveTimeEncoding(secs, nano))?,
         ))
+    }
+
+    pub fn to_protobuf_owned(&self) -> Vec<u8> {
+        let buf = BytesMut::with_capacity(8);
+        let mut writer = buf.writer();
+        self.to_protobuf(&mut writer).unwrap();
+        writer.into_inner().to_vec()
     }
 
     pub fn to_protobuf<T: Write>(self, output: &mut T) -> ArrayResult<usize> {
@@ -175,6 +187,10 @@ impl NaiveDateTimeWrapper {
         output
             .write(&(self.0.timestamp_nanos()).to_be_bytes())
             .map_err(Into::into)
+    }
+
+    pub fn to_protobuf_owned(&self) -> Vec<u8> {
+        self.0.timestamp_nanos().to_be_bytes().to_vec()
     }
 
     pub fn from_protobuf(timestamp_nanos: i64) -> ArrayResult<Self> {
