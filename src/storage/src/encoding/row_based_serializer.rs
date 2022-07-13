@@ -25,12 +25,12 @@ impl RowBasedSerializer {
         Self {}
     }
 
-    /// Serialize key and value. The `row` must be in the same order with the column ids in this
-    /// serializer.
+    /// Serialize the row into a value encode bytes.
+    /// All values are nullable. Each value will have 1 extra byte to indicate whether it is null.
     pub fn serialize(&mut self, row: &Row) -> Result<ValueBytes> {
         let mut res = vec![];
-        for cell in row.0.clone() {
-            res.extend(serialize_datum(&cell)?);
+        for cell in &row.0 {
+            res.extend(serialize_datum(cell)?);
         }
         Ok(res)
     }
