@@ -49,7 +49,7 @@ impl<'a, R: Rng> SqlGenerator<'a, R> {
             // Stop recursion with a simple scalar or column.
             return match self.rng.gen_bool(0.5) {
                 true => self.gen_simple_scalar(typ),
-                false => self.gen_col(typ),
+                false => self.gen_col_with_cols(typ, valid_cols),
             };
         }
         match self.rng.gen_range(0..=99) {
@@ -60,9 +60,12 @@ impl<'a, R: Rng> SqlGenerator<'a, R> {
         }
     }
 
-    fn gen_col(&mut self, typ: DataTypeName) -> Expr {
+    fn gen_col_with_cols(&mut self, typ: DataTypeName, valid_cols: Option<&[Expr]>) -> Expr {
         if self.bound_relations.is_empty() {
             return self.gen_simple_scalar(typ);
+        }
+        if let Some(valid_cols) = valid_cols {
+            return valid_cols.choose(&mut self.rng).unwrap().clone();
         }
         let rel = self.bound_relations.choose(&mut self.rng).unwrap();
         let matched_cols = rel
