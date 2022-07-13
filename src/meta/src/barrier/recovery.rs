@@ -191,7 +191,7 @@ where
         let expired_workers = info
             .actor_map
             .iter()
-            .filter(|(&worker, actors)| !actors.is_empty() && info.node_map.contains_key(&worker))
+            .filter(|(&worker, actors)| !actors.is_empty() && !info.node_map.contains_key(&worker))
             .map(|(&worker, _)| worker)
             .collect_vec();
         if expired_workers.is_empty() {
