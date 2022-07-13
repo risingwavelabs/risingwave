@@ -30,7 +30,7 @@ mod struct_field;
 mod update;
 mod values;
 
-pub use bind_context::BindContext;
+pub use bind_context::{BindContext, LateralBindContext};
 pub use delete::BoundDelete;
 pub use expr::bind_data_type;
 pub use insert::BoundInsert;
@@ -39,6 +39,7 @@ pub use relation::{
     BoundBaseTable, BoundJoin, BoundSource, BoundSystemTable, BoundTableFunction, BoundTableSource,
     BoundWindowTableFunction, FunctionType, Relation, WindowTableFunctionKind,
 };
+use risingwave_common::error::ErrorCode;
 pub use select::BoundSelect;
 pub use set_expr::BoundSetExpr;
 pub use statement::BoundStatement;
@@ -58,14 +59,13 @@ pub struct Binder {
     /// subquery.
     ///
     /// See [`Binder::bind_subquery_expr`] for details.
-    upper_subquery_contexts: Vec<(BindContext, Vec<BindContext>)>,
+    upper_subquery_contexts: Vec<(BindContext, Vec<LateralBindContext>)>,
 
-    /// A stack holding stashed contexts of non-child `TableFactor`s when binding
-    /// column expressions in a join.
+    /// A stack holding contexts of left-lateral `TableFactor`s.
     ///
     /// We need a separate stack as `CorrelatedInputRef` depth is
     /// determined by the upper subquery context depth, not the table context stack depth.
-    upper_table_contexts: Vec<BindContext>,
+    lateral_contexts: Vec<LateralBindContext>,
 
     next_subquery_id: usize,
     /// Map the cte's name to its Relation::Subquery.
@@ -79,7 +79,7 @@ impl Binder {
             db_name,
             context: BindContext::new(),
             upper_subquery_contexts: vec![],
-            upper_table_contexts: vec![],
+            lateral_contexts: vec![],
             next_subquery_id: 0,
             cte_to_relation: HashMap::new(),
         }
@@ -92,28 +92,52 @@ impl Binder {
 
     fn push_context(&mut self) {
         let new_context = std::mem::take(&mut self.context);
-        let new_table_contexts = std::mem::take(&mut self.upper_table_contexts);
+        let new_table_contexts = std::mem::take(&mut self.lateral_contexts);
         self.upper_subquery_contexts
             .push((new_context, new_table_contexts));
     }
 
-    fn pop_context(&mut self) {
-        let (old_context, old_table_contexts) = self.upper_subquery_contexts.pop().unwrap();
+    fn pop_context(&mut self) -> Result<()> {
+        let (old_context, old_table_contexts) = self
+            .upper_subquery_contexts
+            .pop()
+            .ok_or_else(|| ErrorCode::InternalError("Popping non-existent context".to_string()))?;
         self.context = old_context;
-        self.upper_table_contexts = old_table_contexts;
+        self.lateral_contexts = old_table_contexts;
+        Ok(())
     }
 
-    fn push_table_context(&mut self) {
+    fn push_lateral_context(&mut self) {
         let new_context = std::mem::take(&mut self.context);
-        self.upper_table_contexts.push(new_context);
+        self.lateral_contexts.push(LateralBindContext {
+            is_visible: false,
+            context: new_context,
+        });
     }
 
-    fn pop_and_merge_table_context(&mut self) {
-        let mut old_context = self.upper_table_contexts.pop().unwrap();
-        old_context
-            .merge_context(self.context.clone())
-            .expect("could not merge contexts");
+    fn pop_and_merge_lateral_context(&mut self) -> Result<()> {
+        let mut old_context = self
+            .lateral_contexts
+            .pop()
+            .ok_or_else(|| ErrorCode::InternalError("Popping non-existent context".to_string()))?
+            .context;
+        old_context.merge_context(self.context.clone())?;
         self.context = old_context;
+        Ok(())
+    }
+
+    fn try_mark_lateral_as_visible(&mut self) {
+        if let Some(mut ctx) = self.lateral_contexts.pop() {
+            ctx.is_visible = true;
+            self.lateral_contexts.push(ctx);
+        }
+    }
+
+    fn try_mark_lateral_as_invisible(&mut self) {
+        if let Some(mut ctx) = self.lateral_contexts.pop() {
+            ctx.is_visible = false;
+            self.lateral_contexts.push(ctx);
+        }
     }
 
     fn next_subquery_id(&mut self) -> usize {

@@ -40,22 +40,15 @@ impl Binder {
             Some(t) => t,
             None => return Ok(None),
         };
-        self.push_table_context();
+        self.push_lateral_context();
         let mut root = self.bind_table_with_joins(first)?;
-        self.pop_and_merge_table_context();
+        self.pop_and_merge_lateral_context()?;
         for t in from_iter {
-            self.push_table_context();
+            self.push_lateral_context();
             let right = self.bind_table_with_joins(t.clone())?;
-            self.pop_and_merge_table_context();
-            if let Relation::Subquery(subquery) = &right {
-                if subquery.query.is_correlated() {
-                    return Err(ErrorCode::BindError(format!(
-                        "Join table \"{}\" has correlated input reference",
-                        t
-                    ))
-                    .into());
-                }
-            }
+            self.pop_and_merge_lateral_context()?;
+            // Any subquery, not having access to the lateral context, cannot be correlated at this
+            // depth unless it is lateral
             root = Relation::Join(Box::new(BoundJoin {
                 join_type: JoinType::Inner,
                 left: root,
@@ -85,15 +78,8 @@ impl Binder {
                 right = option_rel.unwrap();
             } else {
                 right = self.bind_table_factor(join.relation.clone())?;
-                if let Relation::Subquery(subquery) = &right {
-                    if subquery.query.is_correlated() {
-                        return Err(ErrorCode::BindError(format!(
-                            "Join table \"{}\" has correlated input reference",
-                            join.relation
-                        ))
-                        .into());
-                    }
-                }
+                // Any subquery, not having access to the lateral context, cannot be correlated at
+                // this depth unless it is lateral
                 (cond, _) = self.bind_join_constraint(constraint, None)?;
             }
             let join = BoundJoin {

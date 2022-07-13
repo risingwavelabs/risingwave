@@ -53,6 +53,13 @@ impl Display for Clause {
     }
 }
 
+/// A `BindContext` that is only visible if the `LATERAL` keyword
+/// is provided.
+pub struct LateralBindContext {
+    pub is_visible: bool,
+    pub context: BindContext,
+}
+
 #[derive(Default, Debug, Clone)]
 pub struct BindContext {
     // Columns of all tables.

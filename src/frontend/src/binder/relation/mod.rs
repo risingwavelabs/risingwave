@@ -233,15 +233,24 @@ impl Binder {
                 alias,
             } => {
                 if lateral {
+                    // If we detect a lateral, we mark the lateral context as visible.
+                    self.try_mark_lateral_as_visible();
+
+                    // Bind lateral subquery here.
+
+                    // Mark the lateral context as invisible once again.
+                    self.try_mark_lateral_as_invisible();
                     Err(ErrorCode::NotImplemented(
                         "lateral joins are not yet supported".into(),
                         None.into(),
                     )
                     .into())
                 } else {
-                    Ok(Relation::Subquery(Box::new(
-                        self.bind_subquery_relation(*subquery, alias)?,
-                    )))
+                    // Non-lateral subqueries to not have access to the lateral context.
+                    self.push_lateral_context();
+                    let bound_subquery = self.bind_subquery_relation(*subquery, alias)?;
+                    self.pop_and_merge_lateral_context()?;
+                    Ok(Relation::Subquery(Box::new(bound_subquery)))
                 }
             }
 

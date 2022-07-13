@@ -94,7 +94,7 @@ impl Binder {
 
         let base_columns = std::mem::take(&mut self.context.columns);
 
-        self.pop_context();
+        self.pop_context()?;
 
         let columns = base_columns
             .into_iter()
