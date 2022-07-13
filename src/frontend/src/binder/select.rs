@@ -44,23 +44,40 @@ impl BoundSelect {
         &self.schema
     }
 
-    pub fn is_correlated(&self) -> bool {
-        self.select_items
+    pub fn is_correlated(&self, starting_depth: usize) -> bool {
+        let correlated = self
+            .select_items
             .iter()
             .chain(self.group_by.iter())
             .chain(self.where_clause.iter())
-            .any(|expr| expr.has_correlated_input_ref())
+            .any(|expr| expr.has_correlated_input_ref(starting_depth));
+
+        if correlated {
+            true
+        } else if let Some(from) = &self.from {
+            from.child_subqueries()
+                .into_iter()
+                .any(|s| s.query.body.is_correlated(starting_depth + 1))
+        } else {
+            false
+        }
     }
 
-    pub fn collect_correlated_indices(&self) -> Vec<usize> {
+    pub fn collect_correlated_indices(&self, starting_depth: usize) -> Vec<usize> {
         let mut correlated_indices = vec![];
         self.select_items
             .iter()
             .chain(self.group_by.iter())
             .chain(self.where_clause.iter())
             .for_each(|expr| {
-                correlated_indices.extend(expr.collect_correlated_indices());
+                correlated_indices.extend(expr.collect_correlated_indices(starting_depth));
             });
+        if let Some(from) = &self.from {
+            from.child_subqueries().into_iter().for_each(|s| {
+                correlated_indices
+                    .extend(s.query.body.collect_correlated_indices(starting_depth + 1))
+            })
+        }
         correlated_indices
     }
 }

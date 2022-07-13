@@ -48,7 +48,7 @@ impl Rule for PullUpCorrelatedPredicate {
                 .clone()
                 .into_iter()
                 .partition_map(|expr| {
-                    if expr.has_correlated_input_ref() {
+                    if expr.has_correlated_input_ref(1) {
                         Either::Left(rewriter.rewrite_expr(expr))
                     } else {
                         Either::Right(expr)

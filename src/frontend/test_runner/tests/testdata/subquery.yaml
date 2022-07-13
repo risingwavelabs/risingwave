@@ -98,6 +98,7 @@
   binder_error: 'Item not found: Invalid column: x'
 - sql: |
     /* We should be able to handle nested correlated subquery */
+    /* Our optimizer cannot unnest `CorrelatedInputRef` at depth >= 2 */
     create table ab (a int, b int);
     create table bc (b int, c int);
     create table t (v1 int, v2 varchar);
@@ -108,7 +109,7 @@
     );
   logical_plan: |
     LogicalProject { exprs: [$1, $2] }
-      LogicalJoin { type: LeftSemi, on: true, output_indices: all }
+      LogicalApply { type: LeftSemi, on: true }
         LogicalScan { table: ab, columns: [_row_id, a, b] }
         LogicalProject { exprs: [$1, $2, $3, $4] }
           LogicalJoin { type: Inner, on: true, output_indices: all }
@@ -117,27 +118,22 @@
               LogicalFilter { predicate: ($1 = CorrelatedInputRef { index: 1, depth: 2 }) }
                 LogicalScan { table: t, columns: [_row_id, v1, v2] }
 - sql: |
-    /* We cannot reference columns in left table if not lateral */
-    create table ab (a int, b int);
-    create table bc (b int, c int);
-    create table t (v1 int, v2 varchar);
-    select * from ab where exists (
-      select * from bc, (
-          select * from t where v1 = c
-      ) as t0
-    );
-  binder_error: 'Item not found: Invalid column: c'
-- sql: |
     /* Reference to left table should be permitted with lateral */
-    create table ab (a int, b int);
-    create table bc (b int, c int);
-    create table t (v1 int, v2 int);
-    select * from ab where exists (
-      select * from bc, lateral (
-          select * from t where v1 = a and v2 = c
-      ) as t0
-    );
-  binder_error: 'Feature is not yet implemented: lateral subqueries are not yet supported, No tracking issue'
+    create table a (x int);
+    create table b (y int);
+    select * from a, lateral (select * from b where x = y);
+  logical_plan: |
+    LogicalProject { exprs: [$1, $2] }
+      LogicalApply { type: Inner, on: true }
+        LogicalScan { table: a, columns: [_row_id, x] }
+        LogicalProject { exprs: [$1] }
+          LogicalFilter { predicate: (CorrelatedInputRef { index: 1, depth: 1 } = $1) }
+            LogicalScan { table: b, columns: [_row_id, y] }
+  optimized_logical_plan: |
+    LogicalJoin { type: Inner, on: ($0 = $2), output_indices: [0, 1] }
+      LogicalScan { table: a, columns: [x] }
+      LogicalProject { exprs: [$0, $0] }
+        LogicalScan { table: b, columns: [y] }
 - sql: |
     /* We need to ensure doubly nested reference to a left table is not permitted */
     create table ab (a int, b int);
@@ -151,6 +147,7 @@
   binder_error: 'Item not found: Invalid column: a'
 - sql: |
     /* Doubly nested reference to a left table with lateral is permitted */
+    /* Our optimizer cannot unnest `CorrelatedInputRef` at depth >= 2 */
     create table ab (a int, b int);
     create table bc (b int, c int);
     create table t (v1 int, v2 int);
@@ -159,4 +156,23 @@
           select * from t where v1 = a
       ) as t0
     );
-  binder_error: 'Feature is not yet implemented: lateral subqueries are not yet supported, No tracking issue'
+  logical_plan: |
+    LogicalProject { exprs: [$1, $2, $3, $4, $5, $6] }
+      LogicalApply { type: Inner, on: true }
+        LogicalScan { table: ab, columns: [_row_id, a, b] }
+        LogicalProject { exprs: [$1, $2, $3, $4] }
+          LogicalJoin { type: Inner, on: true, output_indices: all }
+            LogicalScan { table: bc, columns: [_row_id, b, c] }
+            LogicalProject { exprs: [$1, $2] }
+              LogicalFilter { predicate: ($1 = CorrelatedInputRef { index: 1, depth: 2 }) }
+                LogicalScan { table: t, columns: [_row_id, v1, v2] }
+  optimized_logical_plan: |
+    LogicalJoin { type: Inner, on: ($0 = $2), output_indices: [0, 1, 3, 4, 5, 6] }
+      LogicalScan { table: ab, columns: [a, b] }
+      LogicalProject { exprs: [$0, $1, $2, $3, $4] }
+        LogicalJoin { type: Inner, on: true, output_indices: all }
+          LogicalJoin { type: Inner, on: true, output_indices: all }
+            LogicalAgg { group_key: [0], agg_calls: [] }
+              LogicalScan { table: ab, columns: [a] }
+            LogicalScan { table: bc, columns: [b, c] }
+          LogicalScan { table: t, output_columns: [_row_id, v1], required_columns: [$0:_row_id, $1:v1], predicate: ($1 = CorrelatedInputRef { index: 1, depth: 2 }) }

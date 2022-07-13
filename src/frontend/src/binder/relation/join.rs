@@ -60,13 +60,20 @@ impl Binder {
     }
 
     fn bind_table_with_joins(&mut self, table: TableWithJoins) -> Result<Relation> {
-        if let TableFactor::Derived { lateral: true, .. } = &table.relation && !table.joins.is_empty() {
+        if table.relation.is_lateral_table_factor() && !table.joins.is_empty() {
             return Err(ErrorCode::InternalError(
-                "Lateral subquery must be the sole factor in table".to_string()
-            ).into());
+                "Lateral subquery must be the sole factor in table".to_string(),
+            )
+            .into());
         }
         let mut root = self.bind_table_factor(table.relation)?;
         for join in table.joins {
+            if join.relation.is_lateral_table_factor() {
+                return Err(ErrorCode::InternalError(
+                    "Lateral subquery must be the sole factor in table".to_string(),
+                )
+                .into());
+            }
             let (constraint, join_type) = match join.join_operator {
                 JoinOperator::Inner(constraint) => (constraint, JoinType::Inner),
                 JoinOperator::LeftOuter(constraint) => (constraint, JoinType::LeftOuter),

@@ -53,6 +53,21 @@ pub enum FunctionType {
     Unnest,
 }
 
+impl Relation {
+    /// Collects subqueries that are direct children of this relation
+    pub fn child_subqueries(&self) -> Vec<Box<BoundSubquery>> {
+        match self {
+            Self::Subquery(s) => vec![s.clone()],
+            Self::Join(j) => {
+                let mut children = j.left.child_subqueries();
+                children.extend(j.right.child_subqueries());
+                children
+            }
+            _ => vec![], // TODO: handle more cases - subqueries in table functions?
+        }
+    }
+}
+
 impl Binder {
     /// return first and second name in identifiers,
     /// must have one name and can use default name as other one.
@@ -235,16 +250,10 @@ impl Binder {
                 if lateral {
                     // If we detect a lateral, we mark the lateral context as visible.
                     self.try_mark_lateral_as_visible();
-
-                    // Bind lateral subquery here.
-
+                    let bound_subquery = self.bind_subquery_relation(*subquery, alias)?;
                     // Mark the lateral context as invisible once again.
                     self.try_mark_lateral_as_invisible();
-                    Err(ErrorCode::NotImplemented(
-                        "lateral subqueries are not yet supported".into(),
-                        None.into(),
-                    )
-                    .into())
+                    Ok(Relation::Subquery(Box::new(bound_subquery)))
                 } else {
                     // Non-lateral subqueries to not have access to the lateral context.
                     self.push_lateral_context();

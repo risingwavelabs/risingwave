@@ -338,6 +338,12 @@ pub enum TableFactor {
     NestedJoin(Box<TableWithJoins>),
 }
 
+impl TableFactor {
+    pub fn is_lateral_table_factor(&self) -> bool {
+        matches!(self, Self::Derived { lateral: true, .. })
+    }
+}
+
 impl fmt::Display for TableFactor {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         match self {

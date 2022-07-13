@@ -36,16 +36,16 @@ impl BoundSetExpr {
         }
     }
 
-    pub fn is_correlated(&self) -> bool {
+    pub fn is_correlated(&self, starting_depth: usize) -> bool {
         match self {
-            BoundSetExpr::Select(s) => s.is_correlated(),
+            BoundSetExpr::Select(s) => s.is_correlated(starting_depth),
             BoundSetExpr::Values(_) => false,
         }
     }
 
-    pub fn collect_correlated_indices(&self) -> Vec<usize> {
+    pub fn collect_correlated_indices(&self, starting_depth: usize) -> Vec<usize> {
         match self {
-            BoundSetExpr::Select(s) => s.collect_correlated_indices(),
+            BoundSetExpr::Select(s) => s.collect_correlated_indices(starting_depth),
             BoundSetExpr::Values(_) => vec![],
         }
     }

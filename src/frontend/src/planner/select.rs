@@ -266,7 +266,7 @@ impl Planner {
         Ok((root, exprs))
     }
 
-    fn create_join(
+    pub(crate) fn create_join(
         correlated_indices: Vec<usize>,
         left: PlanRef,
         right: PlanRef,

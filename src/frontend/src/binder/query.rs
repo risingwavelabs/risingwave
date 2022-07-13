@@ -46,16 +46,16 @@ impl BoundQuery {
     }
 
     pub fn is_correlated(&self) -> bool {
-        self.body.is_correlated()
+        self.body.is_correlated(1)
             || self
                 .extra_order_exprs
                 .iter()
-                .any(|e| e.has_correlated_input_ref())
+                .any(|e| e.has_correlated_input_ref(1))
     }
 
     pub fn collect_correlated_indices(&self) -> Vec<usize> {
         // TODO: collect `correlated_input_ref` in `extra_order_exprs`.
-        self.body.collect_correlated_indices()
+        self.body.collect_correlated_indices(1)
     }
 }
 

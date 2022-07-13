@@ -79,10 +79,28 @@ impl Planner {
 
     pub(super) fn plan_join(&mut self, join: BoundJoin) -> Result<PlanRef> {
         let left = self.plan_relation(join.left)?;
+        let correlated_columns = if let Relation::Subquery(subquery) = &join.right {
+            Some(subquery.query.collect_correlated_indices())
+        } else {
+            None
+        };
         let right = self.plan_relation(join.right)?;
         let join_type = join.join_type;
         let on_clause = join.cond;
-        Ok(LogicalJoin::create(left, right, join_type, on_clause))
+        let plan = if let Some(columns) = correlated_columns {
+            // if there are correlated columns, we are in a lateral subquery. Thus, the `on_clause`
+            // must be literal true
+            if !columns.is_empty() && on_clause != ExprImpl::literal_bool(true) {
+                return Err(ErrorCode::BindError(
+                    "FROM subquery with correlated columns must be lateral subquery, cross-joined to left"
+                    .to_string()
+                ).into());
+            }
+            Self::create_join(columns, left, right, on_clause, join_type)
+        } else {
+            LogicalJoin::create(left, right, join_type, on_clause)
+        };
+        Ok(plan)
     }
 
     pub(super) fn plan_window_table_function(

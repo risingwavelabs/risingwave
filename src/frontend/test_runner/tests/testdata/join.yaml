@@ -274,4 +274,4 @@
     create table a(a1 int);
     create table b(b1 int);
     select * from a join lateral (select * from b where a1 = b1);
-  binder_error: 'Feature is not yet implemented: lateral subqueries are not yet supported, No tracking issue'
+  binder_error: 'internal error: Lateral subquery must be the sole factor in table'
