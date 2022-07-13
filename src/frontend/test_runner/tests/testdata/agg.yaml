@@ -602,7 +602,7 @@
         LogicalExpand { column_subsets: [[0, 2], [0, 1]] }
           LogicalScan { table: t, columns: [a, b, c] }
   stream_plan: |
-    StreamMaterialize { columns: [a, agg#0(hidden), distinct_b_num, sum_c], pk_columns: [a] }
+    StreamMaterialize { columns: [a, count(hidden), distinct_b_num, sum_c], pk_columns: [a] }
       StreamHashAgg { group_key: [$0], aggs: [count, count($1) filter(($2 = 1:Int64)), sum($4) filter(($2 = 0:Int64))] }
         StreamExchange { dist: HashShard([0]) }
           StreamHashAgg { group_key: [$0, $1, $4], aggs: [count, sum($2)] }
