@@ -58,6 +58,34 @@ pub trait HashKeyDispatcher {
     }
 }
 
+pub fn hash_key_data_size(data_type: &DataType) -> DataSize {
+    use std::mem::size_of;
+
+    use crate::types::{
+        Decimal, IntervalUnit, NaiveDateTimeWrapper, NaiveDateWrapper, NaiveTimeWrapper,
+        OrderedF32, OrderedF64,
+    };
+
+    match data_type {
+        DataType::Boolean => DataSize::FixedBits(1),
+        DataType::Int16 => DataSize::Fixed(size_of::<i16>()),
+        DataType::Int32 => DataSize::Fixed(size_of::<i32>()),
+        DataType::Int64 => DataSize::Fixed(size_of::<i64>()),
+        DataType::Float32 => DataSize::Fixed(size_of::<OrderedF32>()),
+        DataType::Float64 => DataSize::Fixed(size_of::<OrderedF64>()),
+        DataType::Decimal => DataSize::Fixed(size_of::<Decimal>()),
+        DataType::Date => DataSize::Fixed(size_of::<NaiveDateWrapper>()),
+        DataType::Time => DataSize::Fixed(size_of::<NaiveTimeWrapper>()),
+        DataType::Timestamp => DataSize::Fixed(size_of::<NaiveDateTimeWrapper>()),
+        DataType::Timestampz => DataSize::Fixed(size_of::<NaiveDateTimeWrapper>()),
+        DataType::Interval => DataSize::Fixed(size_of::<IntervalUnit>()),
+
+        DataType::Varchar => DataSize::Variable,
+        DataType::Struct { .. } => DataSize::Variable,
+        DataType::List { .. } => DataSize::Variable,
+    }
+}
+
 pub const MAX_FIXED_SIZE_KEY_ELEMENTS: usize = 8;
 /// Calculate what kind of hash key should be used given the key data types.
 ///
@@ -75,11 +103,11 @@ pub fn calc_hash_key_kind(data_types: &[DataType]) -> HashKeyKind {
 
     let mut total_data_size: usize = 0;
     for data_type in data_types {
-        match data_type.data_size() {
+        match hash_key_data_size(data_type) {
             DataSize::Fixed(size) => {
                 total_data_size += size;
             }
-            DataSize::Variable => {
+            DataSize::Variable | DataSize::FixedBits(_) => {
                 return HashKeyKind::KeySerialized;
             }
         }
