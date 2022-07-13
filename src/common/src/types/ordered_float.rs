@@ -997,7 +997,10 @@ mod impl_rand {
                     B1: SampleBorrow<Self::X> + Sized,
                     B2: SampleBorrow<Self::X> + Sized,
                 {
-                    UniformSampler::new(low, high)
+                    UniformOrdered(UniformFloat::<$f>::new_inclusive(
+                        low.borrow().0,
+                        high.borrow().0,
+                    ))
                 }
 
                 fn sample<R: Rng + ?Sized>(&self, rng: &mut R) -> Self::X {
