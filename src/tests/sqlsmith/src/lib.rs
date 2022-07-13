@@ -14,6 +14,7 @@
 
 use std::vec;
 
+use itertools::Itertools;
 use rand::prelude::SliceRandom;
 use rand::Rng;
 use risingwave_frontend::binder::bind_data_type;
@@ -156,6 +157,7 @@ impl<'a, R: Rng> SqlGenerator<'a, R> {
     fn gen_select_stmt(&mut self) -> (Select, Vec<Column>) {
         // Generate random tables/relations first so that select items can refer to them.
         let from = self.gen_from();
+        let group_by = self.gen_group_by();
         let (select_list, schema) = self.gen_select_list();
         let select = Select {
             distinct: false,
@@ -163,7 +165,7 @@ impl<'a, R: Rng> SqlGenerator<'a, R> {
             from,
             lateral_views: vec![],
             selection: self.gen_where(),
-            group_by: self.gen_group_by(),
+            group_by,
             having: self.gen_having(),
         };
         (select, schema)
@@ -174,6 +176,8 @@ impl<'a, R: Rng> SqlGenerator<'a, R> {
         (0..items_num).map(|i| self.gen_select_item(i)).unzip()
     }
 
+    /// Generates a selected item.
+    /// `group_by_cols` provides columns bound by GROUP BY Clause (if any).
     fn gen_select_item(&mut self, i: i32) -> (SelectItem, Column) {
         use DataTypeName as T;
         let ret_type = *[
@@ -226,16 +230,19 @@ impl<'a, R: Rng> SqlGenerator<'a, R> {
         }
     }
 
+    /// TODO: Once there is group by / aggregation,
+    /// SELECT list expressions can only refer to grouped columns.
+    /// TODO: gen_group by should happen BEFORE gen select stmt,
+    /// but after gen from.
+    /// Reference <https://www.postgresql.org/docs/current/sql-select.html#SQL-GROUPBY>
     fn gen_group_by(&mut self) -> Vec<Expr> {
         // get all from refs
         let mut available = self.get_bound_columns();
         available.shuffle(self.rng);
-        let n_group_cols = self.rng.gen_range(1..=available.len());
-        let group_cols = available.drain(0..n_group_cols);
-
-        group_cols
+        let n_group_by_cols = self.rng.gen_range(1..=available.len());
+        available.drain(0..n_group_by_cols)
             .map(|c| Expr::Identifier(Ident::new(c.name)))
-            .collect()
+            .collect_vec()
     }
 
     fn gen_having(&self) -> Option<Expr> {

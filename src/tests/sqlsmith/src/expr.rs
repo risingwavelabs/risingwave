@@ -38,7 +38,13 @@ fn init_op_table() -> HashMap<DataTypeName, Vec<FuncSign>> {
 }
 
 impl<'a, R: Rng> SqlGenerator<'a, R> {
+    /// Generate `Expr`.
     pub(crate) fn gen_expr(&mut self, typ: DataTypeName) -> Expr {
+        self.gen_expr_with_cols(typ, None)
+    }
+
+    /// Generate `Expr` with constraints on generated column `Expr`s.
+    pub(crate) fn gen_expr_with_cols(&mut self, typ: DataTypeName, valid_cols: Option<Vec<Expr>>) -> Expr {
         if !self.can_recurse() {
             // Stop recursion with a simple scalar or column.
             return match self.rng.gen_bool(0.5) {
