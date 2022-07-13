@@ -100,7 +100,7 @@ impl<S: StateStore> SourceStateHandler<S> {
         self.keyspace
             .get(state_identifier, epoch)
             .await
-            .map_err(StreamExecutorError::storage)
+            .map_err(Into::into)
     }
 
     pub async fn try_recover_from_state_store(
