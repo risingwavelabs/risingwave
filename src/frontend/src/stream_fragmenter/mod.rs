@@ -76,16 +76,14 @@ pub struct StreamFragmenter {}
 
 impl StreamFragmenter {
     fn is_stateful_executor(stream_node: &StreamNode) -> bool {
-        match stream_node.get_node_body().unwrap() {
-            // For stateful operators, set `exchange_flag = true`. If it's already true, force
-            // add an exchange.
+        matches!(
+            stream_node.get_node_body().unwrap(),
             NodeBody::HashAgg(_)
-            | NodeBody::HashJoin(_)
-            | NodeBody::DeltaIndexJoin(_)
-            | NodeBody::Chain(_)
-            | NodeBody::DynamicFilter(_) => true,
-            _ => false,
-        }
+                | NodeBody::HashJoin(_)
+                | NodeBody::DeltaIndexJoin(_)
+                | NodeBody::Chain(_)
+                | NodeBody::DynamicFilter(_)
+        )
     }
 
     /// Do some dirty rewrites on meta. Currently, it will split stateful operators into two
