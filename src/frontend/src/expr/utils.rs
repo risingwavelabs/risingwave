@@ -347,6 +347,7 @@ pub(crate) use assert_input_ref;
 ///
 /// # Panics
 /// Panics if an `InputRef`'s index is out of bounds of the [`FixedBitSet`].
+#[derive(Clone)]
 pub struct CollectInputRef {
     /// All `InputRef`s' indexes are inserted into the [`FixedBitSet`].
     input_bits: FixedBitSet,
@@ -377,6 +378,12 @@ impl CollectInputRef {
 impl From<CollectInputRef> for FixedBitSet {
     fn from(s: CollectInputRef) -> Self {
         s.input_bits
+    }
+}
+
+impl Extend<usize> for CollectInputRef {
+    fn extend<T: IntoIterator<Item = usize>>(&mut self, iter: T) {
+        self.input_bits.extend(iter);
     }
 }
 
