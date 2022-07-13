@@ -88,7 +88,7 @@ impl<S: StateStore> ManagedTopNStateNew<S> {
         }
     }
 
-    pub async fn insert(
+    pub fn insert(
         &mut self,
         _key: OrderedRow,
         value: Row,
@@ -99,7 +99,7 @@ impl<S: StateStore> ManagedTopNStateNew<S> {
         Ok(())
     }
 
-    pub async fn delete(
+    pub fn delete(
         &mut self,
         _key: &OrderedRow,
         value: Row,
@@ -133,9 +133,9 @@ impl<S: StateStore> ManagedTopNStateNew<S> {
     pub async fn find_range(
         &self,
         offset: usize,
-        limit: usize,
+        num_limit: usize,
         epoch: u64,
-    ) -> StreamExecutorResult<(TopNStateRow, TopNStateRow)> {
+    ) -> StreamExecutorResult<Vec<TopNStateRow>> {
         let state_table_iter = self.state_table.iter(epoch).await?;
         pin_mut!(state_table_iter);
 
@@ -148,7 +148,7 @@ impl<S: StateStore> ManagedTopNStateNew<S> {
             first_row = self.get_topn_row(next_res);
         }
 
-        // fetch start row
+        // fetch the row at position offset
         let mut start_row = first_row;
         for i in 0..offset {
             match state_table_iter.next().await {
@@ -164,27 +164,26 @@ impl<S: StateStore> ManagedTopNStateNew<S> {
             }
         }
 
-        // fetch end row
-        if limit == 0 {
-            return Ok((start_row, invalid_row.clone()));
+        let mut valid_rows = vec![];
+        if start_row.is_valid() {
+            valid_rows.push(start_row.clone());
         }
-        let mut end_row = start_row.clone();
-        let num_limit = limit - 1;
-        for i in 0..num_limit {
+
+        // scan to the row at offset + limit
+        for _ in 0..(num_limit - 1) {
             match state_table_iter.next().await {
                 Some(next_res) => {
-                    if i == num_limit - 1 {
-                        end_row = self.get_topn_row(next_res);
+                    let row = self.get_topn_row(next_res);
+                    if row.is_valid() {
+                        valid_rows.push(row.clone());
                     }
                 }
                 None => {
-                    end_row = invalid_row.clone();
                     break;
                 }
             }
         }
-
-        Ok((start_row, end_row))
+        Ok(valid_rows)
     }
 
     pub async fn flush(&mut self, epoch: u64) -> StreamExecutorResult<()> {
@@ -232,96 +231,114 @@ mod tests {
         let epoch = 1;
         managed_state
             .insert(ordered_rows[3].clone(), rows[3].clone(), epoch)
-            .await
             .unwrap();
 
         // now ("ab", 4)
-        let range = managed_state.find_range(0, 1, epoch).await.unwrap();
+        let valid_rows = managed_state.find_range(0, 1, epoch).await.unwrap();
 
+        // assert_eq!(
+        //     (start, end),
+        //     (
+        //         TopNStateRow {
+        //             ordered_key: Some(ordered_rows[3].clone()),
+        //             row: rows[3].clone()
+        //         },
+        //         TopNStateRow {
+        //             ordered_key: Some(ordered_rows[3].clone()),
+        //             row: rows[3].clone()
+        //         },
+        //     )
+        // );
+
+        assert_eq!(valid_rows.len(), 1);
         assert_eq!(
-            range,
-            (
-                TopNStateRow {
-                    ordered_key: Some(ordered_rows[3].clone()),
-                    row: rows[3].clone()
-                },
-                TopNStateRow {
-                    ordered_key: Some(ordered_rows[3].clone()),
-                    row: rows[3].clone()
-                },
-            )
+            valid_rows.first().unwrap().ordered_key,
+            Some(ordered_rows[3].clone())
         );
 
         managed_state
             .insert(ordered_rows[2].clone(), rows[2].clone(), epoch)
-            .await
             .unwrap();
-        let range = managed_state.find_range(1, 1, epoch).await.unwrap();
+        let valid_rows = managed_state.find_range(1, 1, epoch).await.unwrap();
         // now ("ab", 4) -> ("abd", 3)
+        // assert_eq!(
+        //     (start, end),
+        //     (
+        //         TopNStateRow {
+        //             ordered_key: Some(ordered_rows[2].clone()),
+        //             row: rows[2].clone()
+        //         },
+        //         TopNStateRow {
+        //             ordered_key: Some(ordered_rows[2].clone()),
+        //             row: rows[2].clone()
+        //         },
+        //     )
+        // );
+        assert_eq!(valid_rows.len(), 1);
         assert_eq!(
-            range,
-            (
-                TopNStateRow {
-                    ordered_key: Some(ordered_rows[2].clone()),
-                    row: rows[2].clone()
-                },
-                TopNStateRow {
-                    ordered_key: Some(ordered_rows[2].clone()),
-                    row: rows[2].clone()
-                },
-            )
+            valid_rows.first().unwrap().ordered_key,
+            Some(ordered_rows[2].clone())
         );
 
         managed_state
             .insert(ordered_rows[1].clone(), rows[1].clone(), epoch)
-            .await
             .unwrap();
-
         assert_eq!(3, managed_state.total_count());
 
-        // managed_state.flush(epoch).await.unwrap();
-        let range = managed_state.find_range(1, 2, epoch).await.unwrap();
+        let valid_rows = managed_state.find_range(1, 2, epoch).await.unwrap();
         // now ("ab", 4) -> ("abc", 3) -> ("abd", 3)
+        // assert_eq!(
+        //     (start, end),
+        //     (
+        //         TopNStateRow {
+        //             ordered_key: Some(ordered_rows[1].clone()),
+        //             row: rows[1].clone()
+        //         },
+        //         TopNStateRow {
+        //             ordered_key: Some(ordered_rows[2].clone()),
+        //             row: rows[2].clone()
+        //         }
+        //     )
+        // );
+        assert_eq!(valid_rows.len(), 2);
         assert_eq!(
-            range,
-            (
-                TopNStateRow {
-                    ordered_key: Some(ordered_rows[1].clone()),
-                    row: rows[1].clone()
-                },
-                TopNStateRow {
-                    ordered_key: Some(ordered_rows[2].clone()),
-                    row: rows[2].clone()
-                }
-            )
+            valid_rows.first().unwrap().ordered_key,
+            Some(ordered_rows[1].clone())
+        );
+        assert_eq!(
+            valid_rows.last().unwrap().ordered_key,
+            Some(ordered_rows[2].clone())
         );
 
         // delete ("abc", 3)
         managed_state
             .delete(&ordered_rows[1].clone(), rows[1].clone(), epoch)
-            .await
             .unwrap();
 
         // insert ("abc", 2)
         managed_state
             .insert(ordered_rows[0].clone(), rows[0].clone(), epoch)
-            .await
             .unwrap();
 
-        let range = managed_state.find_range(1, 3, epoch).await.unwrap();
+        let valid_rows = managed_state.find_range(0, 3, epoch).await.unwrap();
         // now ("ab", 4) -> ("abc", 2) -> ("abd", 3)
-        assert_eq!(
-            range,
-            (
-                TopNStateRow {
-                    ordered_key: Some(ordered_rows[0].clone()),
-                    row: rows[0].clone()
-                },
-                TopNStateRow {
-                    ordered_key: None,
-                    row: Row::default(),
-                }
-            )
-        );
+        // assert_eq!(
+        //     (start, end),
+        //     (
+        //         TopNStateRow {
+        //             ordered_key: Some(ordered_rows[3].clone()),
+        //             row: rows[3].clone()
+        //         },
+        //         TopNStateRow {
+        //             ordered_key: Some(ordered_rows[2].clone()),
+        //             row: rows[2].clone()
+        //         }
+        //     )
+        // );
+
+        assert_eq!(valid_rows.len(), 3);
+        assert_eq!(valid_rows[0].ordered_key, Some(ordered_rows[3].clone()));
+        assert_eq!(valid_rows[1].ordered_key, Some(ordered_rows[0].clone()));
+        assert_eq!(valid_rows[2].ordered_key, Some(ordered_rows[2].clone()));
     }
 }
