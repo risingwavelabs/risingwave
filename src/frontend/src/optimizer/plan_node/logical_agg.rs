@@ -22,6 +22,7 @@ use risingwave_common::error::{ErrorCode, Result};
 use risingwave_common::types::DataType;
 use risingwave_common::util::sort_util::OrderType;
 use risingwave_expr::expr::AggKind;
+use risingwave_pb::expr::agg_call::OrderByField as ProstAggOrderByField;
 use risingwave_pb::expr::AggCall as ProstAggCall;
 
 use super::{
@@ -96,6 +97,17 @@ impl fmt::Debug for PlanAggOrderByFieldVerboseDisplay<'_> {
     }
 }
 
+impl PlanAggOrderByField {
+    fn to_protobuf(&self) -> ProstAggOrderByField {
+        ProstAggOrderByField {
+            input: Some(self.input.to_proto()),
+            r#type: Some(self.input.data_type.to_protobuf()),
+            direction: self.direction.to_protobuf() as i32,
+            nulls_first: self.nulls_first,
+        }
+    }
+}
+
 /// Aggregation Call
 #[derive(Clone)]
 pub struct PlanAggCall {
@@ -161,6 +173,11 @@ impl PlanAggCall {
             return_type: Some(self.return_type.to_protobuf()),
             args: self.inputs.iter().map(InputRef::to_agg_arg_proto).collect(),
             distinct: self.distinct,
+            order_by_fields: self
+                .order_by_fields
+                .iter()
+                .map(PlanAggOrderByField::to_protobuf)
+                .collect(),
             filter: self
                 .filter
                 .as_expr_unless_true()

@@ -332,6 +332,7 @@ mod tests {
                 ..Default::default()
             }),
             distinct: false,
+            order_by_fields: vec![],
             filter: None,
         };
 
@@ -425,6 +426,7 @@ mod tests {
                 ..Default::default()
             }),
             distinct: false,
+            order_by_fields: vec![],
             filter: None,
         };
 
@@ -553,6 +555,7 @@ mod tests {
                 ..Default::default()
             }),
             distinct: false,
+            order_by_fields: vec![],
             filter: None,
         };
 
@@ -637,6 +640,7 @@ mod tests {
                 ..Default::default()
             }),
             distinct: false,
+            order_by_fields: vec![],
             filter: None,
         };
 
@@ -760,6 +764,7 @@ mod tests {
                 ..Default::default()
             }),
             distinct: false,
+            order_by_fields: vec![],
             filter: None,
         };
 

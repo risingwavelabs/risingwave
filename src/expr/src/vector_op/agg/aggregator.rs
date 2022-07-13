@@ -17,7 +17,9 @@ use std::sync::Arc;
 use risingwave_common::array::*;
 use risingwave_common::error::{ErrorCode, Result};
 use risingwave_common::types::*;
+use risingwave_common::util::sort_util::{OrderPair, OrderType};
 use risingwave_pb::expr::AggCall;
+use risingwave_pb::plan_common::OrderType as ProstOrderType;
 
 use crate::expr::{build_from_prost, AggKind, Expression, ExpressionRef, LiteralExpression};
 use crate::vector_op::agg::approx_count_distinct::ApproxCountDistinct;
@@ -57,6 +59,9 @@ pub struct AggStateFactory {
     agg_kind: AggKind,
     return_type: DataType,
     distinct: bool,
+    // TODO(rc): change to Vec<OrderPair> to match `create_agg_state`
+    // (col_idx, col_type, direction, nulls_first)
+    order_by_fields: Vec<(usize, DataType, OrderType, bool)>,
     filter: ExpressionRef,
 }
 
@@ -65,6 +70,18 @@ impl AggStateFactory {
         let return_type = DataType::from(prost.get_return_type()?);
         let agg_kind = AggKind::try_from(prost.get_type()?)?;
         let distinct = prost.distinct;
+        let order_by_fields = prost
+            .get_order_by_fields()
+            .iter()
+            .map(|field| {
+                let col_idx = field.get_input().unwrap().get_column_idx() as usize;
+                let col_type = DataType::from(field.get_type().unwrap());
+                let order_type =
+                    OrderType::from_prost(&ProstOrderType::from_i32(field.direction).unwrap());
+                let nulls_first = field.nulls_first;
+                (col_idx, col_type, order_type, nulls_first)
+            })
+            .collect::<Vec<_>>();
         let filter: ExpressionRef = match prost.filter {
             Some(ref expr) => Arc::from(build_from_prost(expr)?),
             None => Arc::from(
@@ -81,6 +98,7 @@ impl AggStateFactory {
                     agg_kind,
                     return_type,
                     distinct,
+                    order_by_fields,
                     filter,
                 })
             }
@@ -91,6 +109,7 @@ impl AggStateFactory {
                     agg_kind,
                     return_type,
                     distinct,
+                    order_by_fields,
                     filter,
                 }),
                 _ => Err(ErrorCode::InternalError(format!(
