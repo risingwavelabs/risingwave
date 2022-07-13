@@ -26,7 +26,7 @@ use crate::hummock::compaction::compaction_config::CompactionConfigBuilder;
 use crate::hummock::compaction_group::CompactionGroup;
 use crate::hummock::error::{Error, Result};
 use crate::manager::{MetaSrvEnv, SourceId};
-use crate::model::{MetadataModel, TableFragments, ValTransaction, VarTransaction};
+use crate::model::{BTreeMapTransaction, MetadataModel, TableFragments, ValTransaction};
 use crate::storage::{MetaStore, Transaction};
 
 pub type CompactionGroupManagerRef<S> = Arc<CompactionGroupManager<S>>;
@@ -251,7 +251,7 @@ impl CompactionGroupManagerInner {
             self.compaction_groups = loaded_compaction_groups;
         } else {
             let compaction_groups = &mut self.compaction_groups;
-            let mut new_compaction_groups = VarTransaction::new(compaction_groups);
+            let mut new_compaction_groups = BTreeMapTransaction::new(compaction_groups);
             let static_compaction_groups = vec![
                 CompactionGroup::new(StaticCompactionGroupId::StateDefault.into(), config.clone()),
                 CompactionGroup::new(
@@ -284,10 +284,10 @@ impl CompactionGroupManagerInner {
         pairs: &[(StateTableId, CompactionGroupId, TableOption)],
         meta_store: &S,
     ) -> Result<Vec<StateTableId>> {
-        let mut compaction_groups = VarTransaction::new(&mut self.compaction_groups);
+        let mut compaction_groups = BTreeMapTransaction::new(&mut self.compaction_groups);
         for (table_id, compaction_group_id, table_option) in pairs {
-            let compaction_group = compaction_groups
-                .get_mut(compaction_group_id)
+            let mut compaction_group = compaction_groups
+                .get_mut(*compaction_group_id)
                 .ok_or(Error::InvalidCompactionGroup(*compaction_group_id))?;
             compaction_group.member_table_ids.insert(*table_id);
             compaction_group
@@ -311,15 +311,15 @@ impl CompactionGroupManagerInner {
         table_ids: &[StateTableId],
         meta_store: &S,
     ) -> Result<()> {
-        let mut compaction_groups = VarTransaction::new(&mut self.compaction_groups);
+        let mut compaction_groups = BTreeMapTransaction::new(&mut self.compaction_groups);
         for table_id in table_ids {
             let compaction_group_id = self
                 .index
                 .get(table_id)
                 .cloned()
                 .ok_or(Error::InvalidCompactionGroupMember(*table_id))?;
-            let compaction_group = compaction_groups
-                .get_mut(&compaction_group_id)
+            let mut compaction_group = compaction_groups
+                .get_mut(compaction_group_id)
                 .ok_or(Error::InvalidCompactionGroup(compaction_group_id))?;
             compaction_group.member_table_ids.remove(table_id);
             compaction_group.table_id_to_options.remove(table_id);
