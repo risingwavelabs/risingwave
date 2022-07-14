@@ -85,7 +85,7 @@ impl FlushBufferHook for FlushHolder {
         Ok(())
     }
 
-    async fn post_flush(&self) -> Result<()> {
+    async fn post_flush(&self, _bytes: usize) -> Result<()> {
         self.post_sender.send(()).unwrap();
         Ok(())
     }

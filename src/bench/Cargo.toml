@@ -4,6 +4,7 @@ version = "0.1.10"
 edition = "2021"
 
 [dependencies]
+async-trait = "0.1"
 bytes = "1"
 bytesize = { version = "1", features = ["serde"] }
 clap = { version = "3", features = ["derive"] }

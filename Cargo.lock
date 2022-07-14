@@ -4116,6 +4116,7 @@ dependencies = [
 name = "risingwave_bench"
 version = "0.1.10"
 dependencies = [
+ "async-trait",
  "bytes",
  "bytesize",
  "clap 3.2.8",
