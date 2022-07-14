@@ -42,8 +42,8 @@ pub fn trigger_sst_stat(
     // TODO #2065: fix grafana
     let level_sst_cnt = |level_idx: usize| {
         let mut sst_num = 0;
-        current_version.iter_tables(compaction_group_id, level_idx, |_| {
-            sst_num += 1;
+        current_version.map_level(compaction_group_id, level_idx, |level| {
+            sst_num += level.table_infos.len();
         });
         sst_num
     };
@@ -52,7 +52,7 @@ pub fn trigger_sst_stat(
         current_version.map_level(compaction_group_id, level_idx, |level| {
             level_sst_size += level.total_file_size;
         });
-        level_sst_size
+        level_sst_size / 1024
     };
     for (idx, level_handler) in enumerate(compact_status.level_handlers.iter()) {
         let sst_num = level_sst_cnt(idx);

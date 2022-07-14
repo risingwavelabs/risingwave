@@ -33,7 +33,9 @@ use risingwave_hummock_sdk::key::{
 };
 use risingwave_hummock_sdk::key_range::KeyRange;
 use risingwave_hummock_sdk::{CompactionGroupId, HummockSSTableId, VersionedComparator};
-use risingwave_pb::hummock::{CompactTask, SstableInfo, SubscribeCompactTasksResponse, VacuumTask};
+use risingwave_pb::hummock::{
+    CompactTask, LevelType, SstableInfo, SubscribeCompactTasksResponse, VacuumTask,
+};
 use risingwave_rpc_client::HummockMetaClient;
 use tokio::sync::oneshot::Sender;
 use tokio::task::JoinHandle;
@@ -46,13 +48,12 @@ use super::{
 };
 use crate::hummock::compaction_executor::CompactionExecutor;
 use crate::hummock::group_builder::KeyValueGrouping;
-use crate::hummock::iterator::ReadOptions;
+use crate::hummock::iterator::{Forward, OrderedMergeIteratorInner, ReadOptions};
 use crate::hummock::multi_builder::SealedSstableBuilder;
 use crate::hummock::shared_buffer::shared_buffer_uploader::UploadTaskPayload;
 use crate::hummock::shared_buffer::{build_ordered_merge_iter, UncommittedData};
 use crate::hummock::sstable_store::SstableStoreRef;
 use crate::hummock::state_store::ForwardIter;
-use crate::hummock::utils::can_concat;
 use crate::hummock::vacuum::Vacuum;
 use crate::hummock::{CachePolicy, HummockError};
 use crate::monitor::{StateStoreMetrics, StoreLocalStatistic};
@@ -331,7 +332,7 @@ impl Compactor {
             compaction_filter_mask: 0,
             table_options: HashMap::default(),
             current_epoch_time: 0,
-            target_sub_level: 0,
+            target_sub_level_id: 0,
         };
 
         let sstable_store = context.sstable_store.clone();
@@ -809,23 +810,35 @@ impl Compactor {
             // 1024) as f64;     read_statistics.cnt += 1;
             // }
 
-            if can_concat(&level.table_infos.iter().collect_vec()) {
+            if level.level_type == LevelType::Nonoverlapping as i32 {
                 table_iters.push(Box::new(ConcatIterator::new(
                     level.table_infos.clone(),
                     self.context.sstable_store.clone(),
                     read_options.clone(),
                 )) as BoxedForwardHummockIterator);
             } else {
+                let mut data_iters = vec![];
                 for table_info in &level.table_infos {
                     let table = self
                         .context
                         .sstable_store
                         .load_table(table_info.id, true, &mut stats)
                         .await?;
-                    table_iters.push(Box::new(SSTableIterator::create(
+                    let iter = Box::new(SSTableIterator::create(
                         table,
                         self.context.sstable_store.clone(),
                         read_options.clone(),
+                    )) as BoxedForwardHummockIterator;
+                    if level.table_infos.len() == 1 {
+                        table_iters.push(iter);
+                    } else {
+                        data_iters.push(iter);
+                    }
+                }
+                if !data_iters.is_empty() {
+                    table_iters.push(Box::new(OrderedMergeIteratorInner::<Forward>::new(
+                        data_iters,
+                        self.context.stats.clone(),
                     )));
                 }
             }

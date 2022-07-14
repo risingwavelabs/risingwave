@@ -38,11 +38,18 @@ message Level {
   LevelType level_type = 2;
   repeated SstableInfo table_infos = 3;
   uint64 total_file_size = 4;
+  uint64 sub_level_id = 5;
+}
+
+message InputLevel {
+  uint32 level_idx = 1;
+  LevelType level_type = 2;
+  repeated SstableInfo table_infos = 3;
 }
 
 message LevelDelta {
   uint32 level_idx = 1;
-  uint32 l0_sub_level_idx = 2;
+  uint64 l0_sub_level_id = 2;
   repeated uint64 removed_table_ids = 3;
   repeated SstableInfo inserted_table_infos = 4;
 }
@@ -148,7 +155,7 @@ message TableOption {
 
 message CompactTask {
   // SSTs to be compacted, which will be removed from LSM after compaction
-  repeated Level input_ssts = 1;
+  repeated InputLevel input_ssts = 1;
   // In ideal case, the compaction will generate `splits.len()` tables which have key range
   // corresponding to that in [`splits`], respectively
   repeated KeyRange splits = 2;
@@ -174,17 +181,18 @@ message CompactTask {
   uint32 compaction_filter_mask = 16;
   map<uint32, TableOption> table_options = 17;
   uint64 current_epoch_time = 18;
-  uint32 target_sub_level = 19;
+  uint64 target_sub_level_id = 19;
 }
 
 message LevelHandler {
-  message SstTask {
+  message RunningCompactTask {
     uint64 task_id = 1;
     repeated uint64 ssts = 2;
     uint64 total_file_size = 3;
+    uint32 target_level = 4;
   }
   uint32 level = 1;
-  repeated SstTask tasks = 3;
+  repeated RunningCompactTask tasks = 3;
 }
 
 message CompactStatus {

@@ -19,9 +19,10 @@
 
 use std::sync::Arc;
 
+use itertools::Itertools;
 use risingwave_hummock_sdk::HummockCompactionTaskId;
 use risingwave_pb::hummock::hummock_version::Levels;
-use risingwave_pb::hummock::CompactionConfig;
+use risingwave_pb::hummock::{CompactionConfig, LevelType};
 
 use crate::hummock::compaction::compaction_config::CompactionConfigBuilder;
 use crate::hummock::compaction::manual_compaction_picker::ManualCompactionPicker;
@@ -110,8 +111,8 @@ impl DynamicLevelSelector {
                 Box::new(LevelCompactionPicker::new(
                     task_id,
                     target_level,
-                    self.config.clone(),
                     self.overlap_strategy.clone(),
+                    self.config.clone(),
                 ))
             }
         } else {
@@ -133,7 +134,6 @@ impl DynamicLevelSelector {
         let mut max_level_size = 0;
         let mut ctx = SelectContext::default();
 
-        let l0_size = levels.l0.as_ref().unwrap().total_file_size;
         for level in levels.levels.iter() {
             if level.total_file_size > 0 && first_non_empty_level == 0 {
                 first_non_empty_level = level.level_idx as usize;
@@ -150,7 +150,7 @@ impl DynamicLevelSelector {
             return ctx;
         }
 
-        let base_bytes_max = std::cmp::max(self.config.max_bytes_for_level_base, l0_size);
+        let base_bytes_max = self.config.max_bytes_for_level_base;
         let base_bytes_min = base_bytes_max / self.config.max_bytes_for_level_multiplier;
 
         let mut cur_level_size = max_level_size;
@@ -189,30 +189,58 @@ impl DynamicLevelSelector {
     fn get_priority_levels(&self, levels: &Levels, handlers: &mut [LevelHandler]) -> SelectContext {
         let mut ctx = self.calculate_level_base_size(levels);
 
-        let l0_file_count = levels
+        let idle_file_count = levels
             .l0
             .as_ref()
             .unwrap()
             .sub_levels
             .iter()
-            .map(|level| level.table_infos.len())
+            .map(|level| {
+                if level.level_type == LevelType::Nonoverlapping as i32 {
+                    if level
+                        .table_infos
+                        .iter()
+                        .any(|table| handlers[0].is_pending_compact(&table.id))
+                    {
+                        0
+                    } else {
+                        1
+                    }
+                } else {
+                    level
+                        .table_infos
+                        .iter()
+                        .filter(|table| !handlers[0].is_pending_compact(&table.id))
+                        .count()
+                }
+            })
             .sum::<usize>();
-        let idle_file_count = l0_file_count - handlers[0].get_pending_file_count();
         let total_size =
             levels.l0.as_ref().unwrap().total_file_size - handlers[0].get_pending_file_size();
         if total_size > 0 {
             // trigger intra-l0 compaction at first when the number of files is too large.
-            let l0_score = idle_file_count as u64 * SCORE_BASE
-                / (self.config.level0_tier_compact_file_number as u64 * 2);
+            let l0_score =
+                idle_file_count as u64 * SCORE_BASE / self.config.level0_tier_compact_file_number;
             ctx.score_levels.push((l0_score, 0, 0));
             let score = total_size * SCORE_BASE / self.config.max_bytes_for_level_base;
-            ctx.score_levels.push((score, 0, ctx.base_level));
+            ctx.score_levels
+                .push((std::cmp::min(score, 500), 0, ctx.base_level));
         }
 
         // The bottommost level can not be input level.
         for level in &levels.levels {
             let level_idx = level.level_idx as usize;
-            let total_size = level.total_file_size - handlers[level_idx].get_pending_file_size();
+            if level_idx < ctx.base_level || level_idx >= self.config.max_level as usize {
+                continue;
+            }
+            let upper_level = if level_idx == ctx.base_level {
+                0
+            } else {
+                level_idx - 1
+            };
+            let total_size = level.total_file_size
+                + handlers[upper_level].get_pending_output_file_size(level.level_idx)
+                - handlers[level_idx].get_pending_output_file_size(level.level_idx + 1);
             if total_size == 0 {
                 continue;
             }
@@ -269,6 +297,44 @@ impl LevelSelector for DynamicLevelSelector {
         level_handlers: &mut [LevelHandler],
     ) -> Option<CompactionTask> {
         let ctx = self.get_priority_levels(levels, level_handlers);
+        if !ctx.score_levels.is_empty() && ctx.score_levels[0].0 > SCORE_BASE {
+            let mut log_data = levels
+                .levels
+                .iter()
+                .filter(|level| !level.table_infos.is_empty())
+                .map(|level| {
+                    format!(
+                        "level[{}].total_file_size={}, pending: {}",
+                        level.level_idx,
+                        level.total_file_size,
+                        level_handlers[level.level_idx as usize].get_pending_file_size()
+                    )
+                })
+                .collect_vec();
+            log_data.extend(
+                levels
+                    .l0
+                    .as_ref()
+                    .unwrap()
+                    .sub_levels
+                    .iter()
+                    .filter(|level| !level.table_infos.is_empty())
+                    .map(|level| {
+                        format!(
+                            "level0-sub.total_file_size={},count={}",
+                            level.total_file_size,
+                            level.table_infos.len(),
+                        )
+                    }),
+            );
+            tracing::info!(
+                "{:?}. base_level: {}, scores: {:?}, level_max_bytes: {:?}",
+                log_data,
+                ctx.base_level,
+                ctx.score_levels,
+                ctx.level_max_bytes,
+            );
+        }
         for (score, select_level, target_level) in ctx.score_levels {
             if score <= SCORE_BASE {
                 return None;

@@ -16,7 +16,7 @@ use std::sync::Arc;
 
 use itertools::Itertools;
 use risingwave_pb::hummock::hummock_version::Levels;
-use risingwave_pb::hummock::{Level, SstableInfo};
+use risingwave_pb::hummock::{InputLevel, SstableInfo};
 
 use super::overlap_strategy::OverlapInfo;
 use super::CompactionPicker;
@@ -62,7 +62,7 @@ impl CompactionPicker for ManualCompactionPicker {
         tmp_sst_info.key_range = Some(self.option.key_range.clone());
         range_overlap_info.update(&tmp_sst_info);
 
-        let level_table_infos: Vec<SstableInfo> = levels.levels[level]
+        let level_table_infos: Vec<SstableInfo> = levels.levels[level - 1]
             .table_infos
             .iter()
             .filter(|sst_info| range_overlap_info.check_overlap(sst_info))
@@ -94,7 +94,7 @@ impl CompactionPicker for ManualCompactionPicker {
 
             let overlap_files = self.overlap_strategy.check_base_level_overlap(
                 &[table.clone()],
-                &levels.levels[target_level].table_infos,
+                &levels.levels[target_level - 1].table_infos,
             );
 
             if overlap_files
@@ -111,9 +111,10 @@ impl CompactionPicker for ManualCompactionPicker {
             return None;
         }
 
-        let target_input_ssts = self
-            .overlap_strategy
-            .check_base_level_overlap(&select_input_ssts, &levels.levels[target_level].table_infos);
+        let target_input_ssts = self.overlap_strategy.check_base_level_overlap(
+            &select_input_ssts,
+            &levels.levels[target_level - 1].table_infos,
+        );
 
         if target_input_ssts
             .iter()
@@ -122,28 +123,34 @@ impl CompactionPicker for ManualCompactionPicker {
             return None;
         }
 
-        level_handlers[level].add_pending_task(self.compact_task_id, &select_input_ssts);
+        level_handlers[level].add_pending_task(
+            self.compact_task_id,
+            target_level,
+            &select_input_ssts,
+        );
         if !target_input_ssts.is_empty() {
-            level_handlers[target_level].add_pending_task(self.compact_task_id, &target_input_ssts);
+            level_handlers[target_level].add_pending_task(
+                self.compact_task_id,
+                target_level,
+                &target_input_ssts,
+            );
         }
 
         Some(CompactionInput {
             input_levels: vec![
-                Level {
+                InputLevel {
                     level_idx: level as u32,
-                    level_type: levels.levels[level].level_type,
-                    total_file_size: select_input_ssts.iter().map(|table| table.file_size).sum(),
+                    level_type: levels.levels[level - 1].level_type,
                     table_infos: select_input_ssts,
                 },
-                Level {
+                InputLevel {
                     level_idx: target_level as u32,
-                    level_type: levels.levels[target_level].level_type,
-                    total_file_size: target_input_ssts.iter().map(|table| table.file_size).sum(),
+                    level_type: levels.levels[target_level - 1].level_type,
                     table_infos: target_input_ssts,
                 },
             ],
             target_level,
-            target_sub_level: 0,
+            target_sub_level_id: 0,
         })
     }
 }

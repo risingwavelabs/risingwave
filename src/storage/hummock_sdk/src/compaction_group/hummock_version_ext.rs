@@ -51,7 +51,7 @@ pub trait HummockVersionExt {
         delete_sst_levels: &[usize],
         delete_sst_ids_set: &HashSet<u64>,
         insert_sst_level: usize,
-        insert_sub_level: usize,
+        insert_sub_level: u64,
         insert_table_infos: Vec<SstableInfo>,
     );
 }
@@ -144,38 +144,47 @@ impl HummockVersionExt for HummockVersion {
         delete_sst_levels: &[usize],
         delete_sst_ids_set: &HashSet<u64>,
         insert_sst_level: usize,
-        insert_sub_level: usize,
+        insert_sub_level_id: u64,
         insert_table_infos: Vec<SstableInfo>,
     ) {
         if let Some(levels) = self.levels.get_mut(&compaction_group_id) {
             for level_idx in delete_sst_levels {
                 if *level_idx == 0 {
-                    let mut total_file_size = 0;
                     for level in &mut levels.l0.as_mut().unwrap().sub_levels {
                         level_delete_ssts(level, delete_sst_ids_set);
-                        total_file_size += level.total_file_size;
                     }
-                    levels.l0.as_mut().unwrap().total_file_size = total_file_size;
                 } else {
                     level_delete_ssts(&mut levels.levels[*level_idx - 1], delete_sst_ids_set);
                 }
             }
             if !insert_table_infos.is_empty() {
                 if insert_sst_level == 0 {
-                    level_insert_ssts(
-                        &mut levels.l0.as_mut().unwrap().sub_levels[insert_sub_level],
-                        insert_table_infos,
-                    );
+                    for level in &mut levels.l0.as_mut().unwrap().sub_levels {
+                        if level.sub_level_id == insert_sub_level_id {
+                            level_insert_ssts(level, insert_table_infos);
+                            break;
+                        }
+                    }
                 } else {
                     level_insert_ssts(&mut levels.levels[insert_sst_level - 1], insert_table_infos);
                 }
             }
-            levels
-                .l0
-                .as_mut()
-                .unwrap()
-                .sub_levels
-                .retain(|level| !level.table_infos.is_empty());
+            if delete_sst_levels.iter().any(|level_id| *level_id == 0) {
+                levels
+                    .l0
+                    .as_mut()
+                    .unwrap()
+                    .sub_levels
+                    .retain(|level| !level.table_infos.is_empty());
+                levels.l0.as_mut().unwrap().total_file_size = levels
+                    .l0
+                    .as_mut()
+                    .unwrap()
+                    .sub_levels
+                    .iter()
+                    .map(|level| level.total_file_size)
+                    .sum::<u64>();
+            }
         }
     }
 }

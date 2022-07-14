@@ -12,8 +12,6 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use itertools::Itertools;
-
 pub mod compaction_config;
 mod level_selector;
 mod manual_compaction_picker;
@@ -30,7 +28,7 @@ use risingwave_hummock_sdk::prost_key_range::KeyRangeExt;
 use risingwave_hummock_sdk::{CompactionGroupId, HummockCompactionTaskId, HummockEpoch};
 use risingwave_pb::hummock::compaction_config::CompactionMode;
 use risingwave_pb::hummock::hummock_version::Levels;
-use risingwave_pb::hummock::{CompactTask, CompactionConfig, HummockVersion, KeyRange, Level};
+use risingwave_pb::hummock::{CompactTask, CompactionConfig, HummockVersion, InputLevel, KeyRange};
 
 use crate::hummock::compaction::level_selector::{DynamicLevelSelector, LevelSelector};
 use crate::hummock::compaction::overlap_strategy::{
@@ -146,9 +144,26 @@ impl CompactStatus {
             compaction_filter_mask: 0,
             table_options: HashMap::default(),
             current_epoch_time: 0,
-            target_sub_level: ret.input.target_sub_level as u32,
+            target_sub_level_id: ret.input.target_sub_level_id,
         };
         Some(compact_task)
+    }
+
+    pub fn is_trival_move_task(task: &CompactTask) -> bool {
+        if task.input_ssts.len() <= 1 {
+            return true;
+        }
+        if task.input_ssts.len() > 2 {
+            return false;
+        }
+
+        if task.input_ssts[1].level_idx == task.target_level
+            && task.input_ssts[1].table_infos.is_empty()
+        {
+            return true;
+        }
+
+        false
     }
 
     fn pick_compaction(
@@ -204,22 +219,22 @@ impl CompactStatus {
         let mut new_version = based_hummock_version;
         new_version.safe_epoch = std::cmp::max(new_version.safe_epoch, compact_task.watermark);
         let mut removed_table: HashSet<u64> = HashSet::default();
+        let mut removed_levels: Vec<usize> = vec![];
         for input_level in &compact_task.input_ssts {
             for table in &input_level.table_infos {
                 removed_table.insert(table.id);
             }
+            removed_levels.push(input_level.level_idx as usize);
         }
 
+        removed_levels.sort();
+        removed_levels.dedup();
         new_version.apply_compact_ssts(
             compact_task.compaction_group_id,
-            &compact_task
-                .input_ssts
-                .iter()
-                .map(|level| level.level_idx as usize)
-                .collect_vec(),
+            removed_levels.as_slice(),
             &removed_table,
             compact_task.target_level as usize,
-            compact_task.target_sub_level as usize,
+            compact_task.target_sub_level_id,
             compact_task.sorted_output_ssts.clone(),
         );
 
@@ -257,9 +272,9 @@ impl Default for ManualCompactionOption {
 }
 
 pub struct CompactionInput {
-    pub input_levels: Vec<Level>,
+    pub input_levels: Vec<InputLevel>,
     pub target_level: usize,
-    pub target_sub_level: usize,
+    pub target_sub_level_id: u64,
 }
 
 pub struct CompactionTask {

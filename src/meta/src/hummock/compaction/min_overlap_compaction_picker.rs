@@ -16,7 +16,7 @@ use std::collections::HashSet;
 use std::sync::Arc;
 
 use risingwave_pb::hummock::hummock_version::Levels;
-use risingwave_pb::hummock::{Level, LevelType, SstableInfo};
+use risingwave_pb::hummock::{InputLevel, LevelType, SstableInfo};
 
 use super::CompactionPicker;
 use crate::hummock::compaction::overlap_strategy::OverlapStrategy;
@@ -51,7 +51,7 @@ impl MinOverlappingPicker {
     // If we only choose file (k0, k4), (k0, k1), (k2, k6), the file (k5, k7) will compact with the
     // result of their compaction task again. So a better strategy is choosing (k0, k4), (k0, k1),
     // (k2, k6), (k5, k7) all in one task.
-    fn try_expand_input(
+    pub fn try_expand_input(
         &self,
         select_tables: &[SstableInfo],
         target_tables: &[SstableInfo],
@@ -170,32 +170,40 @@ impl CompactionPicker for MinOverlappingPicker {
         level_handlers: &mut [LevelHandler],
     ) -> Option<CompactionInput> {
         let (select_input_ssts, target_input_ssts) = self.pick_tables(
+            &levels.levels[self.level - 1].table_infos,
             &levels.levels[self.level].table_infos,
-            &levels.levels[self.level + 1].table_infos,
             level_handlers,
         );
-        level_handlers[self.level].add_pending_task(self.compact_task_id, &select_input_ssts);
+        if select_input_ssts.is_empty() {
+            return None;
+        }
+        level_handlers[self.level].add_pending_task(
+            self.compact_task_id,
+            self.target_level,
+            &select_input_ssts,
+        );
         if !target_input_ssts.is_empty() {
-            level_handlers[self.target_level]
-                .add_pending_task(self.compact_task_id, &target_input_ssts);
+            level_handlers[self.target_level].add_pending_task(
+                self.compact_task_id,
+                self.target_level,
+                &target_input_ssts,
+            );
         }
         Some(CompactionInput {
             input_levels: vec![
-                Level {
+                InputLevel {
                     level_idx: self.level as u32,
                     level_type: LevelType::Nonoverlapping as i32,
-                    total_file_size: select_input_ssts.iter().map(|table| table.file_size).sum(),
                     table_infos: select_input_ssts,
                 },
-                Level {
+                InputLevel {
                     level_idx: self.target_level as u32,
                     level_type: LevelType::Nonoverlapping as i32,
-                    total_file_size: target_input_ssts.iter().map(|table| table.file_size).sum(),
                     table_infos: target_input_ssts,
                 },
             ],
             target_level: self.target_level,
-            target_sub_level: 0,
+            target_sub_level_id: 0,
         })
     }
 }

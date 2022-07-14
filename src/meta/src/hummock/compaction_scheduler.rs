@@ -47,14 +47,14 @@ impl CompactionRequestChannel {
     /// Enqueues only if the target is not yet in queue.
     pub fn try_send(&self, compaction_group: CompactionGroupId) -> bool {
         let mut guard = self.scheduled.lock();
-        if guard.get(&compaction_group).is_some() {
+        if guard.contains(&compaction_group) {
             return false;
         }
-        if self.request_tx.send(compaction_group).is_ok() {
-            guard.insert(compaction_group);
-            return true;
+        if self.request_tx.send(compaction_group).is_err() {
+            return false;
         }
-        false
+        guard.insert(compaction_group);
+        true
     }
 
     fn unschedule(&self, compaction_group: CompactionGroupId) {
@@ -107,8 +107,15 @@ where
                     break 'compaction_trigger;
                 }
             };
-            self.pick_and_assign(compaction_group, request_channel.clone())
-                .await;
+            const SCHEDULE_COMPACTION_COUNT: usize = 4;
+            for _ in 0..SCHEDULE_COMPACTION_COUNT {
+                if !self
+                    .pick_and_assign(compaction_group, request_channel.clone())
+                    .await
+                {
+                    break;
+                }
+            }
         }
         tracing::info!("Compaction scheduler is stopped");
     }
