@@ -856,7 +856,8 @@ where
                     compact_task.compaction_group_id,
                 ))?,
         );
-        let mut compact_task_assignment = BTreeMapTransaction::new(&mut compaction.compact_task_assignment);
+        let mut compact_task_assignment =
+            BTreeMapTransaction::new(&mut compaction.compact_task_assignment);
         let assignee_context_id = compact_task_assignment
             .remove(compact_task.task_id)
             .map(|assignment| assignment.context_id);
