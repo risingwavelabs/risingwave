@@ -122,6 +122,14 @@ impl Encoding for DedupPkCellBasedRowSerializer {
     fn column_ids(&self) -> &[ColumnId] {
         self.inner.column_ids()
     }
+
+    fn create_row_based_serializer() -> Self {
+        unimplemented!()
+    }
+
+    fn row_based_serialize(&mut self, _row: &Row) -> Result<ValueBytes> {
+        unimplemented!()
+    }
 }
 
 #[cfg(test)]

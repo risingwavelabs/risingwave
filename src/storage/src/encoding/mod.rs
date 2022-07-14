@@ -15,10 +15,11 @@
 use std::collections::HashMap;
 use std::sync::Arc;
 
+use bytes::Buf;
 use risingwave_common::array::Row;
 use risingwave_common::catalog::{ColumnDesc, ColumnId};
 use risingwave_common::error::Result;
-use risingwave_common::types::VirtualNode;
+use risingwave_common::types::{DataType, VirtualNode};
 
 pub mod cell_based_encoding_util;
 pub mod cell_based_row_deserializer;
@@ -61,6 +62,9 @@ pub trait Encoding {
     /// Get column ids used by cell serializer to serialize.
     /// TODO: This should probably not be exposed to user.
     fn column_ids(&self) -> &[ColumnId];
+
+    fn create_row_based_serializer() -> Self;
+    fn row_based_serialize(&mut self, row: &Row) -> Result<ValueBytes>;
 }
 
 /// Record mapping from [`ColumnDesc`], [`ColumnId`], and output index of columns in a table.
@@ -86,4 +90,8 @@ pub trait Decoding {
 
     /// Take the remaining data out of the deserializer.
     fn take(&mut self) -> Option<(VirtualNode, Vec<u8>, Row)>;
+
+    fn create_row_based_deserializer(data_types: Vec<DataType>) -> Self;
+
+    fn row_based_deserialize(&self, row: impl Buf) -> Result<Row>;
 }

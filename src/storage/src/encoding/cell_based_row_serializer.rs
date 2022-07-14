@@ -80,4 +80,12 @@ impl Encoding for CellBasedRowSerializer {
     fn column_ids(&self) -> &[ColumnId] {
         &self.column_ids
     }
+
+    fn create_row_based_serializer() -> Self {
+        unimplemented!()
+    }
+
+    fn row_based_serialize(&mut self, _row: &Row) -> Result<ValueBytes> {
+        unimplemented!()
+    }
 }

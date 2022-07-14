@@ -200,6 +200,14 @@ impl Decoding for CellBasedRowDeserializer {
         ));
         Some((vnode, cur_pk_bytes, row))
     }
+
+    fn create_row_based_deserializer(_data_types: Vec<risingwave_common::types::DataType>) -> Self {
+        unimplemented!()
+    }
+
+    fn row_based_deserialize(&self, _row: impl bytes::Buf) -> Result<Row> {
+        unimplemented!()
+    }
 }
 
 #[cfg(test)]
