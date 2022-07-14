@@ -257,23 +257,51 @@ impl TestCase {
             );
         }
 
-        let expected_output =
-            std::fs::read_to_string(&expected_output_file).with_context(|| {
-                format!(
-                    "Failed to read expected output file: {:?}",
-                    expected_output_file
-                )
-            })?;
+        let expected_output = read_lines(&expected_output_file).with_context(|| {
+            format!(
+                "Failed to read expected output file: {:?}",
+                expected_output_file
+            )
+        })?;
 
-        let actual_output = std::fs::read_to_string(&output_path)
+        let actual_output = read_lines(&output_path)
             .with_context(|| format!("Failed to read actual output file: {:?}", output_path))?;
 
         if expected_output == actual_output {
             Ok(Same)
         } else {
+            let diff_path = self.file_manager.diff_of(&self.test_name)?;
+            let mut diff_file = File::options()
+                .create_new(true)
+                .write(true)
+                .open(&diff_path)
+                .with_context(|| format!("Failed to create {:?} for writing diff.", diff_path))?;
+            use std::io::Write;
+            write!(
+                diff_file,
+                "{}",
+                format_diff(&expected_output, &actual_output)
+            )?;
             Ok(Different)
         }
     }
+}
+
+fn read_lines<P>(filename: P) -> std::io::Result<String>
+where
+    P: AsRef<Path>,
+{
+    let file = File::open(filename)?;
+    let lines = std::io::BufReader::new(file).lines();
+    let mut res: String = String::new();
+    for line in lines {
+        let line = line?;
+        if !line.starts_with("--") && !line.is_empty() {
+            res.push_str(&line);
+            res.push('\n');
+        }
+    }
+    Ok(res)
 }
 
 fn format_diff(expected_output: &String, actual_output: &String) -> String {
