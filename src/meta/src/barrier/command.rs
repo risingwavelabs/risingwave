@@ -23,7 +23,9 @@ use risingwave_connector::source::SplitImpl;
 use risingwave_pb::source::{ConnectorSplit, ConnectorSplits};
 use risingwave_pb::stream_plan::add_dispatcher_mutation::Dispatchers;
 use risingwave_pb::stream_plan::barrier::Mutation;
-use risingwave_pb::stream_plan::{AddDispatcherMutation, Dispatcher, StopMutation};
+use risingwave_pb::stream_plan::{
+    AddDispatcherMutation, Dispatcher, PauseMutation, ResumeMutation, StopMutation,
+};
 use risingwave_pb::stream_service::DropActorsRequest;
 use risingwave_rpc_client::StreamClientPoolRef;
 use uuid::Uuid;
@@ -72,6 +74,14 @@ pub enum Command {
 impl Command {
     pub fn checkpoint() -> Self {
         Self::Plain(None)
+    }
+
+    pub fn pause() -> Self {
+        Self::Plain(Some(Mutation::Pause(PauseMutation {})))
+    }
+
+    pub fn resume() -> Self {
+        Self::Plain(Some(Mutation::Resume(ResumeMutation {})))
     }
 
     pub fn changed_table_id(&self) -> ChangedTableState {
