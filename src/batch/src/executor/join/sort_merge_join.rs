@@ -14,7 +14,7 @@
 
 use futures::TryStreamExt;
 use futures_async_stream::try_stream;
-use risingwave_common::array::{DataChunk, Row, RowRef};
+use risingwave_common::array::{DataChunk, RowRef};
 use risingwave_common::catalog::Schema;
 use risingwave_common::error::RwError;
 use risingwave_common::util::chunk_coalesce::DataChunkBuilder;
