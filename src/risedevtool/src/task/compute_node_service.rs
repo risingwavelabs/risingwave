@@ -104,7 +104,10 @@ impl Task for ComputeNodeService {
 
         let mut cmd = self.compute_node()?;
 
-        cmd.env("RUST_BACKTRACE", "1").env("TOKIO_CONSOLE_BIND", format!("127.0.0.1:{}", self.config.port + 1000));
+        cmd.env("RUST_BACKTRACE", "1").env(
+            "TOKIO_CONSOLE_BIND",
+            format!("127.0.0.1:{}", self.config.port + 1000),
+        );
         cmd.arg("--config-path")
             .arg(Path::new(&prefix_config).join("risingwave.toml"));
         Self::apply_command_args(&mut cmd, &self.config)?;

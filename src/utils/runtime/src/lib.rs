@@ -196,9 +196,15 @@ pub fn init_risingwave_logger(settings: LoggerSettings) {
                 .with(fmt_layer)
                 .with(tokio_console_layer)
                 .init();
-            tokio::spawn(async move {
-                tracing::info!("serving console subscriber");
-                server.serve().await.unwrap();
+            std::thread::spawn(|| {
+                tokio::runtime::Builder::new_current_thread()
+                    .enable_all()
+                    .build()
+                    .unwrap()
+                    .block_on(async move {
+                        tracing::info!("serving console subscriber");
+                        server.serve().await.unwrap();
+                    });
             });
         }
         (None, None) => {
