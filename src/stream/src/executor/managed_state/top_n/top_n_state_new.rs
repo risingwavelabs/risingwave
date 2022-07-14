@@ -21,7 +21,6 @@ use risingwave_common::array::Row;
 use risingwave_common::catalog::{ColumnDesc, ColumnId, TableId};
 use risingwave_common::types::DataType;
 use risingwave_common::util::ordered::*;
-use risingwave_storage::error::StorageResult;
 use risingwave_storage::table::state_table::StateTable;
 use risingwave_storage::StateStore;
 
@@ -103,13 +102,13 @@ impl<S: StateStore> ManagedTopNStateNew<S> {
         Ok(())
     }
 
-    #[allow(dead_code)]
+    #[cfg(test)]
     pub fn total_count(&self) -> usize {
         self.total_count
     }
 
-    fn get_topn_row(&self, iter_res: StorageResult<Cow<Row>>) -> TopNStateRow {
-        let row = iter_res.unwrap().into_owned();
+    fn get_topn_row(&self, iter_res: Cow<Row>) -> TopNStateRow {
+        let row = iter_res.into_owned();
         let mut datums = vec![];
         for pk_index in self.state_table.pk_indices() {
             datums.push(row.index(*pk_index).clone());
@@ -128,12 +127,13 @@ impl<S: StateStore> ManagedTopNStateNew<S> {
     ) -> StreamExecutorResult<Vec<TopNStateRow>> {
         let state_table_iter = self.state_table.iter(epoch).await?;
         pin_mut!(state_table_iter);
-        let rows = state_table_iter
-            .skip(offset)
-            .take(num_limit)
-            .map(|x| self.get_topn_row(x))
-            .collect::<Vec<_>>()
-            .await;
+
+        let mut rows = vec![];
+        // here we don't expect users to have large OFFSET.
+        let mut stream = state_table_iter.skip(offset).take(num_limit);
+        while let Some(item) = stream.next().await {
+            rows.push(self.get_topn_row(item?));
+        }
         Ok(rows)
     }
 

@@ -222,13 +222,11 @@ impl<S: StateStore> TopNExecutorBase for InnerTopNExecutorNew<S> {
             let row = row_ref.to_owned_row();
             match op {
                 Op::Insert | Op::UpdateInsert => {
-                    self.managed_state
-                        .insert(ordered_pk_row.clone(), row.clone(), epoch)?;
+                    self.managed_state.insert(ordered_pk_row, row, epoch)?;
                 }
 
                 Op::Delete | Op::UpdateDelete => {
-                    self.managed_state
-                        .delete(&ordered_pk_row, row.clone(), epoch)?;
+                    self.managed_state.delete(&ordered_pk_row, row, epoch)?;
                 }
             }
         }
@@ -239,6 +237,7 @@ impl<S: StateStore> TopNExecutorBase for InnerTopNExecutorNew<S> {
             .find_range(self.offset, num_limit, epoch)
             .await?;
 
+        // TODO: only emit the difference instead of emitting the full contents.
         // delete previous result set
         emit_multi_rows(&mut res_ops, &mut res_rows, Op::Delete, old_rows);
         // emit new result set
