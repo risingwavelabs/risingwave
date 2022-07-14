@@ -15,9 +15,9 @@
     create table t (v1 bigint, v2 double precision);
     select t.* from t order by v1;
   batch_plan: |
-    BatchExchange { order: [$1 ASC], dist: Single }
-      BatchSort { order: [$1 ASC] }
-        BatchScan { table: t, columns: [_row_id, v1, v2] }
+    BatchExchange { order: [$0 ASC], dist: Single }
+      BatchSort { order: [$0 ASC] }
+        BatchScan { table: t, columns: [v1, v2] }
 - sql: |
     create table t (v1 bigint, v2 double precision);
     select v1, v1+1 from t order by v1;
