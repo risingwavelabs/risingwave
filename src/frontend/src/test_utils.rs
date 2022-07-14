@@ -203,7 +203,7 @@ impl CatalogWriter for MockCatalogWriter {
     }
 
     async fn create_sink(&self, sink: ProstSink, graph: StreamFragmentGraph) -> Result<()> {
-        self.create_sink_inner(sink, graph).map(|_| ())
+        self.create_sink_inner(sink, graph)
     }
 
     async fn drop_materialized_source(&self, source_id: u32, table_id: TableId) -> Result<()> {
