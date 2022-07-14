@@ -292,7 +292,7 @@ where
         }
     } else {
         // In case the env variable is not set
-        if cfg!(debug_assertion) {
+        if cfg!(debug_assertions) {
             enable_parking_lot_deadlock_detection();
         }
     }
