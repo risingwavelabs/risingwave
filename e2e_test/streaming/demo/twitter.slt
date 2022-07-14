@@ -1,0 +1,33 @@
+statement ok
+CREATE TABLE twitter (
+    data STRUCT < created_at TIMESTAMP,
+    id VARCHAR,
+    text VARCHAR,
+    lang VARCHAR >,
+    author STRUCT < created_at TIMESTAMP,
+    id VARCHAR,
+    name VARCHAR,
+    username VARCHAR >,
+);
+
+statement ok
+INSERT INTO
+    twitter (data, author)
+values
+    (
+        (
+            '2022-07-13 21:01:03.07' :: TIMESTAMP,
+            '3022452243950244764',
+            'These himself then those had out here several secondly weakly Turkishish of which doctor smell should.',
+            'English'
+        ),
+        (
+            '2019-10-08 10:13:36.07' :: TIMESTAMP,
+            '9102642719',
+            'Maia Bradtke early',
+            'Effertz8562'
+        )
+    );
+
+statement ok
+DROP TABLE twitter;

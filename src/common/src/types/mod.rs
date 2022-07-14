@@ -800,9 +800,9 @@ impl ScalarImpl {
             ScalarImpl::Bool(v) => (*v as i8).to_be_bytes().to_vec(),
             ScalarImpl::Decimal(v) => v.to_string().as_bytes().to_vec(),
             ScalarImpl::Interval(v) => v.to_protobuf_owned(),
-            ScalarImpl::NaiveDate(_) => todo!(),
-            ScalarImpl::NaiveDateTime(_) => todo!(),
-            ScalarImpl::NaiveTime(_) => todo!(),
+            ScalarImpl::NaiveDate(v) => v.to_protobuf_owned(),
+            ScalarImpl::NaiveDateTime(v) => v.to_protobuf_owned(),
+            ScalarImpl::NaiveTime(v) => v.to_protobuf_owned(),
             ScalarImpl::Struct(v) => v.to_protobuf_owned(),
             ScalarImpl::List(v) => v.to_protobuf_owned(),
         };
