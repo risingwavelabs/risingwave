@@ -253,6 +253,7 @@ impl<P: 'static + ProbeSideSourceBuilder> LookupJoinExecutor<P> {
                 // TODO: Simplify the logic of handling the different join types
                 loop {
                     let probe_side_chunk = probe_side_stream.next().await;
+                    let chunk_is_some = probe_side_chunk.is_some();
 
                     let join_result = if let Some(chunk) = probe_side_chunk {
                         let chunk = chunk?;
@@ -287,13 +288,16 @@ impl<P: 'static + ProbeSideSourceBuilder> LookupJoinExecutor<P> {
                         if return_chunk.cardinality() > 0 {
                             chunk_added = true;
 
-                            // Don't join if it's a LeftAnti Join
-                            if self.join_type != JoinType::LeftAnti {
-                                let append_result =
-                                    self.append_chunk(SlicedDataChunk::new_checked(return_chunk)?)?;
-                                if let Some(inner_chunk) = append_result {
-                                    yield inner_chunk.reorder_columns(&self.output_indices);
-                                }
+                            // Skip adding if it's a Left Anti Join and there is a match between
+                            // cur_row and probe side source
+                            if self.join_type == JoinType::LeftAnti && chunk_is_some {
+                                continue;
+                            }
+
+                            let append_result =
+                                self.append_chunk(SlicedDataChunk::new_checked(return_chunk)?)?;
+                            if let Some(inner_chunk) = append_result {
+                                yield inner_chunk.reorder_columns(&self.output_indices);
                             }
                         }
                     }
@@ -612,6 +616,29 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn test_left_semi_join() {
+        let expected = DataChunk::from_pretty(
+            "i f
+             1 6.1
+             2 8.4
+             2 5.5
+             5 9.1",
+        );
+
+        do_test(JoinType::LeftSemi, None, expected).await;
+    }
+
+    #[tokio::test]
+    async fn test_left_anti_join() {
+        let expected = DataChunk::from_pretty(
+            "i f
+             3 3.9",
+        );
+
+        do_test(JoinType::LeftAnti, None, expected).await;
+    }
+
+    #[tokio::test]
     async fn test_inner_join_with_condition() {
         let expected = DataChunk::from_pretty(
             "i f   i f
@@ -620,20 +647,17 @@ mod tests {
              2 5.5 2 5.5",
         );
 
-        do_test(
-            JoinType::Inner,
-            Some(new_binary_expr(
-                Type::LessThan,
-                DataType::Boolean,
-                Box::new(LiteralExpression::new(
-                    DataType::Int32,
-                    Some(ScalarImpl::Int32(5)),
-                )),
-                Box::new(InputRefExpression::new(DataType::Float32, 3)),
+        let condition = Some(new_binary_expr(
+            Type::LessThan,
+            DataType::Boolean,
+            Box::new(LiteralExpression::new(
+                DataType::Int32,
+                Some(ScalarImpl::Int32(5)),
             )),
-            expected,
-        )
-        .await;
+            Box::new(InputRefExpression::new(DataType::Float32, 3)),
+        ));
+
+        do_test(JoinType::Inner, condition, expected).await;
     }
 
     #[tokio::test]
@@ -647,19 +671,59 @@ mod tests {
              5 9.1 . .",
         );
 
-        do_test(
-            JoinType::LeftOuter,
-            Some(new_binary_expr(
-                Type::LessThan,
-                DataType::Boolean,
-                Box::new(LiteralExpression::new(
-                    DataType::Int32,
-                    Some(ScalarImpl::Int32(5)),
-                )),
-                Box::new(InputRefExpression::new(DataType::Float32, 3)),
+        let condition = Some(new_binary_expr(
+            Type::LessThan,
+            DataType::Boolean,
+            Box::new(LiteralExpression::new(
+                DataType::Int32,
+                Some(ScalarImpl::Int32(5)),
             )),
-            expected,
-        )
-        .await;
+            Box::new(InputRefExpression::new(DataType::Float32, 3)),
+        ));
+
+        do_test(JoinType::LeftOuter, condition, expected).await;
+    }
+
+    #[tokio::test]
+    async fn test_left_semi_join_with_condition() {
+        let expected = DataChunk::from_pretty(
+            "i f
+             1 6.1
+             2 8.4
+             2 5.5",
+        );
+
+        let condition = Some(new_binary_expr(
+            Type::LessThan,
+            DataType::Boolean,
+            Box::new(LiteralExpression::new(
+                DataType::Int32,
+                Some(ScalarImpl::Int32(5)),
+            )),
+            Box::new(InputRefExpression::new(DataType::Float32, 3)),
+        ));
+
+        do_test(JoinType::LeftSemi, condition, expected).await;
+    }
+
+    #[tokio::test]
+    async fn test_left_anti_join_with_condition() {
+        let expected = DataChunk::from_pretty(
+            "i f
+            3 3.9
+            5 9.1",
+        );
+
+        let condition = Some(new_binary_expr(
+            Type::LessThan,
+            DataType::Boolean,
+            Box::new(LiteralExpression::new(
+                DataType::Int32,
+                Some(ScalarImpl::Int32(5)),
+            )),
+            Box::new(InputRefExpression::new(DataType::Float32, 3)),
+        ));
+
+        do_test(JoinType::LeftAnti, condition, expected).await;
     }
 }
