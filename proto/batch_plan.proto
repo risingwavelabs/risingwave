@@ -60,11 +60,6 @@ message FilterNode {
   expr.ExprNode search_condition = 1;
 }
 
-message FilterScanNode {
-  uint32 table_id = 1;
-  repeated int32 column_ids = 2;
-}
-
 message InsertNode {
   uint32 table_source_id = 1;
   repeated int32 column_ids = 2;

@@ -63,6 +63,8 @@ message Table {
   string owner = 15;
   common.ParallelUnitMapping mapping = 16;
   map<string, string> properties = 17;
+  // the count of column for prefix in storage_pk
+  uint32 read_pattern_prefix_column = 18;
 }
 
 message Schema {

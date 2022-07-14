@@ -66,11 +66,17 @@ impl_plan_tree_node_for_leaf! { StreamIndexScan }
 
 impl fmt::Display for StreamIndexScan {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        let verbose = self.base.ctx.is_explain_verbose();
         write!(
             f,
             "StreamIndexScan {{ index: {}, columns: [{}], pk_indices: {:?} }}",
             self.logical.table_name(),
-            self.logical.column_names().join(", "),
+            if verbose {
+                self.logical.column_names_with_table_prefix()
+            } else {
+                self.logical.column_names()
+            }
+            .join(", "),
             self.base.pk_indices
         )
     }

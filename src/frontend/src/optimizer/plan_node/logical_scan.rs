@@ -18,7 +18,7 @@ use std::rc::Rc;
 
 use fixedbitset::FixedBitSet;
 use itertools::Itertools;
-use risingwave_common::catalog::{ColumnDesc, Schema, TableDesc};
+use risingwave_common::catalog::{ColumnDesc, Field, Schema, TableDesc};
 use risingwave_common::error::{ErrorCode, Result, RwError};
 
 use super::{
@@ -75,7 +75,7 @@ impl LogicalScan {
             .map(|(op_idx, tb_idx)| {
                 let col = &table_desc.columns[*tb_idx];
                 id_to_op_idx.insert(col.column_id, op_idx);
-                col.into()
+                Field::from_with_table_name_prefix(col, &table_name)
             })
             .collect();
 
@@ -138,11 +138,38 @@ impl LogicalScan {
             .collect()
     }
 
+    pub(super) fn column_names_with_table_prefix(&self) -> Vec<String> {
+        self.output_col_idx
+            .iter()
+            .map(|i| {
+                format!(
+                    "{}.{}",
+                    self.table_name.clone(),
+                    self.table_desc.columns[*i].name
+                )
+            })
+            .collect()
+    }
+
     pub(super) fn order_names(&self) -> Vec<String> {
         self.table_desc
             .order_column_indices()
             .iter()
             .map(|&i| self.table_desc.columns[i].name.clone())
+            .collect()
+    }
+
+    pub(super) fn order_names_with_table_prefix(&self) -> Vec<String> {
+        self.table_desc
+            .order_column_indices()
+            .iter()
+            .map(|&i| {
+                format!(
+                    "{}.{}",
+                    self.table_name.clone(),
+                    self.table_desc.columns[i].name
+                )
+            })
             .collect()
     }
 
