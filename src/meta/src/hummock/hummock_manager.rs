@@ -25,7 +25,7 @@ use itertools::Itertools;
 use prost::Message;
 use risingwave_common::monitor::rwlock::MonitoredRwLock;
 use risingwave_common::util::epoch::{Epoch, INVALID_EPOCH};
-use risingwave_hummock_sdk::compact::compact_task_to_string;
+use risingwave_hummock_sdk::compact::{compact_task_to_string, compact_task_to_string_short};
 use risingwave_hummock_sdk::compaction_group::hummock_version_ext::HummockVersionExt;
 use risingwave_hummock_sdk::{
     get_remote_sst_id, CompactionGroupId, HummockCompactionTaskId, HummockContextId, HummockEpoch,
@@ -772,7 +772,7 @@ where
                 let ret = self.report_compact_task_impl(&task, true).await?;
                 tracing::info!(
                     "finished trival move task: {}",
-                    compact_task_to_string(&task)
+                    compact_task_to_string_short(&task)
                 );
                 assert!(ret);
             } else {

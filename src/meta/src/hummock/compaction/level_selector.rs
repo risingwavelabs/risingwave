@@ -197,11 +197,7 @@ impl DynamicLevelSelector {
             .iter()
             .map(|level| {
                 if level.level_type == LevelType::Nonoverlapping as i32 {
-                    if level
-                        .table_infos
-                        .iter()
-                        .any(|table| handlers[0].is_pending_compact(&table.id))
-                    {
+                    if level.total_file_size > self.config.sub_level_max_compaction_bytes {
                         0
                     } else {
                         1

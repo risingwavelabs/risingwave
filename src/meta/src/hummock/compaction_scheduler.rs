@@ -17,7 +17,7 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use parking_lot::Mutex;
-use risingwave_hummock_sdk::compact::compact_task_to_string;
+use risingwave_hummock_sdk::compact::{compact_task_to_string, compact_task_to_string_short};
 use risingwave_hummock_sdk::CompactionGroupId;
 use tokio::sync::mpsc::UnboundedSender;
 use tokio::sync::oneshot::Receiver;
@@ -108,11 +108,9 @@ where
                 }
             };
             const SCHEDULE_COMPACTION_COUNT: usize = 4;
+            request_channel.unschedule(compaction_group);
             for _ in 0..SCHEDULE_COMPACTION_COUNT {
-                if !self
-                    .pick_and_assign(compaction_group, request_channel.clone())
-                    .await
-                {
+                if !self.pick_and_assign(compaction_group).await {
                     break;
                 }
             }
@@ -120,17 +118,12 @@ where
         tracing::info!("Compaction scheduler is stopped");
     }
 
-    async fn pick_and_assign(
-        &self,
-        compaction_group: CompactionGroupId,
-        request_channel: Arc<CompactionRequestChannel>,
-    ) -> bool {
+    async fn pick_and_assign(&self, compaction_group: CompactionGroupId) -> bool {
         // 1. Pick a compaction task.
         let compact_task = self
             .hummock_manager
             .get_compact_task(compaction_group)
             .await;
-        request_channel.unschedule(compaction_group);
         let compact_task = match compact_task {
             Ok(Some(compact_task)) => compact_task,
             Ok(None) => {
@@ -179,12 +172,11 @@ where
                 Ok(_) => {
                     // TODO: timeout assigned compaction task and move send_task after
                     // assign_compaction_task
-                    tracing::trace!(
+                    tracing::info!(
                         "Assigned compaction task. {}",
-                        compact_task_to_string(&compact_task)
+                        compact_task_to_string_short(&compact_task)
                     );
                     // Reschedule it in case there are more tasks from this compaction group.
-                    request_channel.try_send(compaction_group);
                     return true;
                 }
                 Err(err) => {

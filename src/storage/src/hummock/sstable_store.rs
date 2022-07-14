@@ -14,6 +14,7 @@
 
 use std::clone::Clone;
 use std::sync::Arc;
+use std::time::Instant;
 
 use bytes::Bytes;
 use fail::fail_point;
@@ -158,11 +159,13 @@ impl SstableStore {
                 size: block_meta.len as usize,
             };
             let data_path = self.get_sst_data_path(sst.id);
+            let remote_io_time = Instant::now();
             let block_data = self
                 .store
                 .read(&data_path, Some(block_loc))
                 .await
                 .map_err(HummockError::object_io_error)?;
+            stats.remote_io_time += remote_io_time.elapsed().as_secs_f64();
             let block = Block::decode(block_data)?;
             Ok(Box::new(block))
         };
@@ -238,6 +241,7 @@ impl SstableStore {
                 .meta_cache
                 .lookup_with_request_dedup::<_, HummockError, _>(sst_id, sst_id, || async {
                     stats.cache_meta_block_miss += 1;
+                    let remote_io_time = Instant::now();
                     let meta = match meta_data {
                         Some(data) => data,
                         None => {
@@ -263,6 +267,7 @@ impl SstableStore {
                     } else {
                         Sstable::new(sst_id, meta)
                     };
+                    stats.remote_io_time += remote_io_time.elapsed().as_secs_f64();
                     Ok((Box::new(sst), size))
                 })
                 .await

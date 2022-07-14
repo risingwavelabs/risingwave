@@ -351,7 +351,7 @@ impl CompactionPicker for LevelCompactionPicker {
             }
             let mut l0_total_file_size = l0.sub_levels[0].total_file_size;
             for level in l0.sub_levels[1..].iter() {
-                if l0_total_file_size > self.config.max_compaction_bytes {
+                if l0_total_file_size > self.config.max_bytes_for_level_base {
                     break;
                 }
                 if level_handlers[0].is_level_pending_compact(level) {
