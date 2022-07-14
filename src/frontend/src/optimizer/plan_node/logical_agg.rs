@@ -141,43 +141,78 @@ pub struct LogicalAgg {
 impl LogicalAgg {
     pub fn infer_internal_table_catalog(&self) -> (Vec<TableCatalog>, HashMap<usize, i32>) {
         let mut table_catalogs = vec![];
-        let base = self.input.plan_base();
-        let schema = &base.schema;
-        let fields = schema.fields();
-        let append_only = self.input.append_only();
-        for agg_call in &self.agg_calls {
+        let out_fields = self.base.schema.fields();
+        let in_fields = self.input().schema().fields().to_vec();
+        let in_pks = self.input().pk_indices().to_vec();
+        let in_append_only = self.input.append_only();
+        let in_dist_key = self.input().distribution().dist_column_indices().to_vec();
+        let get_sorted_input_state_table =
+            |sort_keys: Vec<(OrderType, usize)>, include_keys: Vec<usize>| -> TableCatalog {
+                let mut internal_table_catalog_builder = TableCatalogBuilder::new();
+                for &idx in &self.group_key {
+                    let tb_column_idx = internal_table_catalog_builder.add_column(&in_fields[idx]);
+                    internal_table_catalog_builder
+                        .add_order_column(tb_column_idx, OrderType::Ascending);
+                }
+                for (order_type, idx) in sort_keys {
+                    let tb_column_idx = internal_table_catalog_builder.add_column(&in_fields[idx]);
+                    internal_table_catalog_builder.add_order_column(tb_column_idx, order_type);
+                }
+
+                // Add upstream pk.
+                for pk_index in &in_pks {
+                    let tb_column_idx =
+                        internal_table_catalog_builder.add_column(&in_fields[*pk_index]);
+                    internal_table_catalog_builder
+                        .add_order_column(tb_column_idx, OrderType::Ascending);
+                }
+
+                for inclued_key in include_keys {
+                    internal_table_catalog_builder.add_column(&in_fields[inclued_key]);
+                }
+                internal_table_catalog_builder.build(in_dist_key.clone(), in_append_only)
+            };
+
+        let get_value_state_table = |value_key: usize| -> TableCatalog {
             let mut internal_table_catalog_builder = TableCatalogBuilder::new();
             for &idx in &self.group_key {
-                internal_table_catalog_builder
-                    .add_column_desc_from_field(Some(OrderType::Ascending), &fields[idx]);
+                let column_idx = internal_table_catalog_builder.add_column(&in_fields[idx]);
+                internal_table_catalog_builder.add_order_column(column_idx, OrderType::Ascending);
             }
-            match agg_call.agg_kind {
+            internal_table_catalog_builder.add_column(&out_fields[value_key]);
+            internal_table_catalog_builder.build(in_dist_key.clone(), in_append_only)
+        };
+
+        for (agg_idx, agg_call) in self.agg_calls.iter().enumerate() {
+            let state_table = match agg_call.agg_kind {
                 AggKind::Min | AggKind::Max | AggKind::StringAgg => {
-                    // Assume the first input must be the aggregated column at least for these 3
-                    // kind of AggCall.
-                    let agg_column_idx = agg_call.inputs[0].index;
-
-                    if !append_only {
-                        // Add sort key as part of pk.
-                        let order_type = if agg_call.agg_kind == AggKind::Min {
-                            OrderType::Ascending
-                        } else {
-                            OrderType::Descending
+                    if !in_append_only {
+                        let sort_keys = {
+                            match agg_call.agg_kind {
+                                AggKind::Min => {
+                                    vec![(OrderType::Ascending, agg_call.inputs[0].index)]
+                                }
+                                AggKind::Max => {
+                                    vec![(OrderType::Descending, agg_call.inputs[0].index)]
+                                }
+                                AggKind::StringAgg => {
+                                    // TODO: string agg order by
+                                    todo!();
+                                }
+                                _ => unreachable!(),
+                            }
                         };
-                        internal_table_catalog_builder
-                            .add_column_desc_from_field(Some(order_type), &fields[agg_column_idx]);
 
-                        // Add upstream pk.
-                        for pk_index in &base.pk_indices {
-                            internal_table_catalog_builder.add_column_desc_from_field(
-                                Some(OrderType::Ascending),
-                                &fields[*pk_index],
-                            );
-                        }
+                        let include_keys = match agg_call.agg_kind {
+                            AggKind::StringAgg => {
+                                vec![agg_call.inputs[0].index]
+                            }
+                            _ => vec![],
+                        };
+
+                        get_sorted_input_state_table(sort_keys, include_keys)
                     } else {
-                        // We still need at least one value cell for append only max/min.
-                        internal_table_catalog_builder
-                            .add_column_desc_from_field(None, &fields[agg_column_idx]);
+                        get_value_state_table(self.group_key.len() + agg_idx)
                     }
                 }
                 AggKind::Sum
@@ -185,16 +220,10 @@ impl LogicalAgg {
                 | AggKind::Avg
                 | AggKind::SingleValue
                 | AggKind::ApproxCountDistinct => {
-                    // Here we do not use add column from field cuz for `RowCount`, it's input is
-                    // empty vector, means do not derives from any data in upstream fields.
-                    internal_table_catalog_builder
-                        .add_unnamed_column(None, agg_call.return_type.clone());
+                    get_value_state_table(self.group_key.len() + agg_idx)
                 }
-            }
-            table_catalogs.push(
-                internal_table_catalog_builder
-                    .build(base.dist.dist_column_indices().to_vec(), append_only),
-            );
+            };
+            table_catalogs.push(state_table);
         }
         // TODO: fill column mapping later (#3485).
         (table_catalogs, HashMap::new())

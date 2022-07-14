@@ -503,6 +503,7 @@
                             columnType:
                               typeName: INT64
                               isNullable: true
+                            name: "agg#0"
                       distributionKey:
                         - 1
                       owner: root
@@ -514,6 +515,7 @@
                             columnType:
                               typeName: INT64
                               isNullable: true
+                            name: "agg#1"
                       distributionKey:
                         - 1
                       owner: root
@@ -568,6 +570,7 @@
                     columnType:
                       typeName: INT64
                       isNullable: true
+                    name: "agg#0"
               owner: root
             - id: 4294967294
               schemaId: 2147483646
@@ -577,6 +580,7 @@
                     columnType:
                       typeName: INT64
                       isNullable: true
+                    name: "agg#1"
               owner: root
     fields:
       - dataType:
@@ -803,6 +807,7 @@
                           typeName: INT64
                           isNullable: true
                         columnId: 1
+                        name: "agg#0"
                   orderKey:
                     - orderType: ASCENDING
                   distributionKey:
@@ -824,6 +829,7 @@
                           typeName: INT64
                           isNullable: true
                         columnId: 1
+                        name: "agg#1"
                   orderKey:
                     - orderType: ASCENDING
                   distributionKey:
