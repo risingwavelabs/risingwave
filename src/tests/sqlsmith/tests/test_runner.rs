@@ -62,17 +62,15 @@ async fn create_tables(session: Arc<SessionImpl>) -> Vec<Table> {
     // Generate Materialized Views 1:1 with tables, so they have equal weight
     // of being queried.
     for i in 0..n_statements {
-        let stmt = sql_generator.gen_mview(&format!("m{}", i));
+        let (stmt, columns) = sql_generator.gen_mview(&format!("m{}", i));
         match stmt {
             Statement::CreateView {
                 ref name,
-                ref query,
                 ..
             } => {
                 let stmt_str = format!("{}", stmt);
                 let name = format!("{}", name);
                 handler::handle(session.clone(), stmt, &stmt_str).await.unwrap();
-                let columns = vec![];
                 tables.push(Table {
                     name,
                     columns,
