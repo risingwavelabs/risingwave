@@ -456,9 +456,7 @@ mod tests {
 
             {
                 // tz
-                let row = Row(vec![Some(ScalarImpl::Int64(
-                    1111111111
-                ))]);
+                let row = Row(vec![Some(ScalarImpl::Int64(1111111111))]);
                 let mut row_bytes = vec![];
                 serializer.serialize(&row, &mut row_bytes);
                 let mut deserializer = memcomparable::Deserializer::new(&row_bytes[..]);
