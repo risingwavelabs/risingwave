@@ -456,6 +456,46 @@ impl<S: StateStore, E: Encoding> StorageTableBase<S, E, READ_WRITE> {
         batch.ingest().await?;
         Ok(())
     }
+
+    /// Write to state store.
+    pub async fn batch_write_rows_with_row_based_encoding(
+        &mut self,
+        buffer: BTreeMap<Vec<u8>, RowOp>,
+        epoch: u64,
+    ) -> StorageResult<()> {
+        let mut batch = self.keyspace.state_store().start_write_batch(WriteOptions {
+            epoch,
+            table_id: self.keyspace.table_id(),
+        });
+        let mut local = batch.prefixify(&self.keyspace);
+
+        for (pk, row_op) in buffer {
+            match row_op {
+                RowOp::Insert(row) => {
+                    let value = self.row_serializer.row_based_serialize(&row).map_err(err)?;
+                    local.put(pk, StorageValue::new_default_put(value));
+                }
+                RowOp::Delete(_) => {
+                    // TODO(wcy-fdu): only serialize key on deletion
+                    local.delete(pk);
+                }
+                RowOp::Update((old_row, new_row)) => {
+                    // The row to update should keep the same primary key, so distribution key as
+                    // well.
+                    let vnode = self.compute_vnode_by_row(&new_row);
+                    debug_assert_eq!(self.compute_vnode_by_row(&old_row), vnode);
+
+                    let insert_value = self
+                        .row_serializer
+                        .row_based_serialize(&new_row)
+                        .map_err(err)?;
+                    local.put(pk, StorageValue::new_default_put(insert_value));
+                }
+            }
+        }
+        batch.ingest().await?;
+        Ok(())
+    }
 }
 
 pub trait PkAndRowStream = Stream<Item = StorageResult<(Vec<u8>, Row)>> + Send;
