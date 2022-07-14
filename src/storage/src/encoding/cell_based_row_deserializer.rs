@@ -13,7 +13,6 @@
 // limitations under the License.
 
 use std::collections::HashMap;
-use std::ops::Deref;
 use std::sync::Arc;
 
 use bytes::Bytes;
@@ -72,12 +71,12 @@ impl ColumnDescMapping {
     }
 }
 
-pub type GeneralCellBasedRowDeserializer = CellBasedRowDeserializer<Arc<ColumnDescMapping>>;
+pub type GeneralCellBasedRowDeserializer = CellBasedRowDeserializer;
 
 #[derive(Clone)]
-pub struct CellBasedRowDeserializer<Desc: Deref<Target = ColumnDescMapping>> {
+pub struct CellBasedRowDeserializer {
     /// A mapping from column id to its desc and the index in the row.
-    columns: Desc,
+    columns: Arc<ColumnDescMapping>,
 
     data: Vec<Datum>,
 
@@ -93,8 +92,8 @@ pub fn make_cell_based_row_deserializer(
     GeneralCellBasedRowDeserializer::new(ColumnDescMapping::new(output_columns))
 }
 
-impl<Desc: Deref<Target = ColumnDescMapping>> CellBasedRowDeserializer<Desc> {
-    pub fn new(column_mapping: Desc) -> Self {
+impl CellBasedRowDeserializer {
+    pub fn new(column_mapping: Arc<ColumnDescMapping>) -> Self {
         let num_cells = column_mapping.len();
         Self {
             columns: column_mapping,
@@ -176,9 +175,9 @@ impl<Desc: Deref<Target = ColumnDescMapping>> CellBasedRowDeserializer<Desc> {
     }
 }
 
-impl<Desc: Deref<Target = ColumnDescMapping>> Decoding<Desc> for CellBasedRowDeserializer<Desc> {
+impl Decoding for CellBasedRowDeserializer {
     /// Constructs a new serializer.
-    fn create_cell_based_deserializer(column_mapping: Desc) -> Self {
+    fn create_cell_based_deserializer(column_mapping: Arc<ColumnDescMapping>) -> Self {
         Self::new(column_mapping)
     }
 
