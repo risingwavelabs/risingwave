@@ -120,6 +120,13 @@ message InputRefExpr {
   int32 column_idx = 1;
 }
 
+message ProjectSetSelectItem {
+  oneof select_item {
+    expr.ExprNode expr = 1;
+    expr.TableFunction table_function = 2;
+  }
+}
+
 message ConstantValue {
   // bool array/bitmap: one byte, 0 for false (null), non-zero for true (non-null)
   // integer, float,  double: big-endianness

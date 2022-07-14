@@ -4433,6 +4433,7 @@ dependencies = [
  "chrono",
  "crc32fast",
  "either",
+ "futures-async-stream",
  "itertools",
  "lazy_static",
  "log",

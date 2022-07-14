@@ -1,0 +1,238 @@
+// Copyright 2022 Singularity Data
+//
+// Licensed under the Apache License, Version 2.0 (the "License");
+// you may not use this file except in compliance with the License.
+// You may obtain a copy of the License at
+//
+// http://www.apache.org/licenses/LICENSE-2.0
+//
+// Unless required by applicable law or agreed to in writing, software
+// distributed under the License is distributed on an "AS IS" BASIS,
+// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+// See the License for the specific language governing permissions and
+// limitations under the License.
+
+use std::sync::Arc;
+
+use futures_async_stream::try_stream;
+use itertools::Itertools;
+use risingwave_common::array::DataChunk;
+use risingwave_common::catalog::{Field, Schema};
+use risingwave_common::error::{Result, RwError};
+use risingwave_expr::table_function::ProjectSetSelectItem;
+use risingwave_pb::batch_plan::plan_node::NodeBody;
+
+use crate::executor::{
+    BoxedDataChunkStream, BoxedExecutor, BoxedExecutorBuilder, Executor, ExecutorBuilder,
+};
+use crate::task::BatchTaskContext;
+
+pub struct ProjectSetExecutor {
+    select_list: Vec<ProjectSetSelectItem>,
+    child: BoxedExecutor,
+    schema: Schema,
+    identity: String,
+}
+
+impl Executor for ProjectSetExecutor {
+    fn schema(&self) -> &Schema {
+        &self.schema
+    }
+
+    fn identity(&self) -> &str {
+        &self.identity
+    }
+
+    fn execute(self: Box<Self>) -> BoxedDataChunkStream {
+        self.do_execute()
+    }
+}
+
+impl ProjectSetExecutor {
+    #[try_stream(boxed, ok = DataChunk, error = RwError)]
+    async fn do_execute(self: Box<Self>) {
+        let data_types = self.schema().data_types();
+        let select_list = Arc::new(self.select_list);
+        #[for_await]
+        for data_chunk in self.child.execute() {
+            let data_chunk = data_chunk?;
+
+            #[for_await]
+            for ret in
+                ProjectSetSelectItem::execute(select_list.clone(), data_types.clone(), &data_chunk)
+            {
+                yield ret?;
+            }
+        }
+    }
+}
+
+#[async_trait::async_trait]
+impl BoxedExecutorBuilder for ProjectSetExecutor {
+    async fn new_boxed_executor<C: BatchTaskContext>(
+        source: &ExecutorBuilder<C>,
+        mut inputs: Vec<BoxedExecutor>,
+    ) -> Result<BoxedExecutor> {
+        ensure!(
+            inputs.len() == 1,
+            "ProjectSet executor should have only 1 child!"
+        );
+
+        let project_set_node = try_match_expand!(
+            source.plan_node().get_node_body().unwrap(),
+            NodeBody::ProjectSet
+        )?;
+
+        let select_list: Vec<_> = project_set_node
+            .get_select_list()
+            .iter()
+            .map(ProjectSetSelectItem::from_prost)
+            .try_collect()?;
+
+        let fields = select_list
+            .iter()
+            .map(|expr| Field::unnamed(expr.return_type()))
+            .collect::<Vec<Field>>();
+
+        Ok(Box::new(Self {
+            select_list,
+            child: inputs.remove(0),
+            schema: Schema { fields },
+            identity: source.plan_node().get_identity().clone(),
+        }))
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use futures::stream::StreamExt;
+    use futures_async_stream::for_await;
+    use risingwave_common::catalog::{Field, Schema};
+    use risingwave_common::test_prelude::*;
+    use risingwave_common::types::DataType;
+    use risingwave_expr::expr::{Expression, InputRefExpression, LiteralExpression};
+    use risingwave_expr::table_function::repeat_tf;
+
+    use super::*;
+    use crate::executor::test_utils::MockExecutor;
+    use crate::executor::{Executor, ValuesExecutor};
+    use crate::*;
+
+    #[tokio::test]
+    async fn test_project_set_executor() -> Result<()> {
+        let chunk = DataChunk::from_pretty(
+            "i     i
+             1     7
+             2     8
+             33333 66666
+             4     4
+             5     3",
+        );
+
+        let expr1 = InputRefExpression::new(DataType::Int32, 0);
+        let expr2 = repeat_tf(
+            LiteralExpression::new(DataType::Int32, Some(1_i32.into())).boxed(),
+            2,
+        );
+        let expr3 = repeat_tf(
+            LiteralExpression::new(DataType::Int32, Some(2_i32.into())).boxed(),
+            3,
+        );
+        let select_list: Vec<ProjectSetSelectItem> =
+            vec![expr1.boxed().into(), expr2.into(), expr3.into()];
+
+        let schema = schema_unnamed! { DataType::Int32, DataType::Int32 };
+        let mut mock_executor = MockExecutor::new(schema);
+        mock_executor.add(chunk);
+
+        let fields = select_list
+            .iter()
+            .map(|expr| Field::unnamed(expr.return_type()))
+            .collect::<Vec<Field>>();
+
+        let proj_executor = Box::new(ProjectSetExecutor {
+            select_list,
+            child: Box::new(mock_executor),
+            schema: Schema { fields },
+            identity: "ProjectSetExecutor".to_string(),
+        });
+
+        let fields = &proj_executor.schema().fields;
+        assert_eq!(fields[0].data_type, DataType::Int32);
+
+        let expected = vec![
+            DataChunk::from_pretty(
+                "i     i     i
+                 1     1     2
+                 1     1     2
+                 1     .     2",
+            ),
+            DataChunk::from_pretty(
+                "i     i     i
+                 2     1     2
+                 2     1     2
+                 2     .     2",
+            ),
+            DataChunk::from_pretty(
+                "i     i     i
+                 33333 1     2
+                 33333 1     2
+                 33333 .     2",
+            ),
+            DataChunk::from_pretty(
+                "i     i     i
+                 4     1     2
+                 4     1     2
+                 4     .     2",
+            ),
+            DataChunk::from_pretty(
+                "i     i     i
+                 5     1     2
+                 5     1     2
+                 5     .     2",
+            ),
+        ];
+
+        #[for_await]
+        for (i, result_chunk) in proj_executor.execute().enumerate() {
+            let result_chunk = result_chunk?;
+            assert_eq!(result_chunk, expected[i]);
+        }
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn test_project_set_dummy_chunk() {
+        let literal = LiteralExpression::new(DataType::Int32, Some(1_i32.into()));
+        let tf = repeat_tf(
+            LiteralExpression::new(DataType::Int32, Some(2_i32.into())).boxed(),
+            2,
+        );
+
+        let values_executor2: Box<dyn Executor> = Box::new(ValuesExecutor::new(
+            vec![vec![]], // One single row with no column.
+            Schema::default(),
+            "ValuesExecutor".to_string(),
+            1024,
+        ));
+
+        let proj_executor = Box::new(ProjectSetExecutor {
+            select_list: vec![literal.boxed().into(), tf.into()],
+            child: values_executor2,
+            schema: schema_unnamed!(DataType::Int32, DataType::Int32),
+            identity: "ProjectSetExecutor2".to_string(),
+        });
+        let mut stream = proj_executor.execute();
+        let chunk = stream.next().await.unwrap().unwrap();
+        assert_eq!(
+            chunk,
+            DataChunk::from_pretty(
+                "
+                    i     i
+                    1     2
+                    1     2
+                ",
+            ),
+        );
+    }
+}
