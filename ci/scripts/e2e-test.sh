@@ -39,7 +39,7 @@ echo "--- Prepare RiseDev playground"
 cargo make pre-start-playground
 cargo make link-all-in-one-binaries
 
-ehoc "--- Start cluster"
+echo "--- Start cluster"
 cargo make ci-start ci-3cn-1fe
 
 echo "--- e2e, ci-3cn-1fe, streaming"
