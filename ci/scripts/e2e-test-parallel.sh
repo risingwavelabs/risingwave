@@ -49,7 +49,6 @@ echo "--- e2e, ci-3cn-1fe, delta join"
 timeout 3m sqllogictest -p 4566 -d dev  './e2e_test/streaming_delta_join/**/*.slt' --junit "parallel-streaming-delta-join-${profile}"
 
 echo "--- e2e, ci-3cn-1fe, batch distributed"
-timeout 2m sqllogictest -p 4566 -d dev  './e2e_test/ddl/**/*.slt' --junit "parallel-batch-ddl-${profile}"
 timeout 2m sqllogictest -p 4566 -d dev  './e2e_test/batch/**/*.slt' -j 16 --junit "parallel-batch-${profile}"
 
 echo "--- Kill cluster"
