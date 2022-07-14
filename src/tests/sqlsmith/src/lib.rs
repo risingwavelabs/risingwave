@@ -158,6 +158,7 @@ impl<'a, R: Rng> SqlGenerator<'a, R> {
     fn gen_select_stmt(&mut self) -> (Select, Vec<Column>) {
         // Generate random tables/relations first so that select items can refer to them.
         let from = self.gen_from();
+        let selection = self.gen_where();
         let group_by = self.gen_group_by();
         let (select_list, schema) = self.gen_select_list();
         let select = Select {
@@ -165,7 +166,7 @@ impl<'a, R: Rng> SqlGenerator<'a, R> {
             projection: select_list,
             from,
             lateral_views: vec![],
-            selection: self.gen_where(),
+            selection,
             group_by,
             having: self.gen_having(),
         };
@@ -245,8 +246,12 @@ impl<'a, R: Rng> SqlGenerator<'a, R> {
         }
     }
 
-    fn gen_having(&self) -> Option<Expr> {
-        None
+    fn gen_having(&mut self) -> Option<Expr> {
+        if self.flip_coin() {
+            Some(self.gen_expr(DataTypeName::Boolean))
+        } else {
+            None
+        }
     }
 
     /// 50/50 chance to be true/false.
