@@ -455,6 +455,22 @@ mod tests {
             }
 
             {
+                // tz
+                let row = Row(vec![Some(ScalarImpl::Int64(
+                    1111111111
+                ))]);
+                let mut row_bytes = vec![];
+                serializer.serialize(&row, &mut row_bytes);
+                let mut deserializer = memcomparable::Deserializer::new(&row_bytes[..]);
+                let encoding_data_size =
+                    ScalarImpl::encoding_data_size(&DataType::Timestampz, &mut deserializer)
+                        .unwrap();
+                let data_size = size_of::<i64>();
+                assert_eq!(8, data_size);
+                assert_eq!(1 + data_size, encoding_data_size);
+            }
+
+            {
                 // interval
                 let row = Row(vec![Some(ScalarImpl::Interval(
                     interval::IntervalUnit::default(),
