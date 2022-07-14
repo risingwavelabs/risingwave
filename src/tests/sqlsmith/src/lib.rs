@@ -20,8 +20,8 @@ use rand::Rng;
 use risingwave_frontend::binder::bind_data_type;
 use risingwave_frontend::expr::DataTypeName;
 use risingwave_sqlparser::ast::{
-    BinaryOperator, ColumnDef, Expr, Ident, Join, JoinConstraint, JoinOperator, OrderByExpr, Query,
-    Select, SelectItem, SetExpr, Statement, TableWithJoins, Value, With, ObjectName,
+    BinaryOperator, ColumnDef, Expr, Ident, Join, JoinConstraint, JoinOperator, ObjectName,
+    OrderByExpr, Query, Select, SelectItem, SetExpr, Statement, TableWithJoins, Value, With,
 };
 
 mod expr;
@@ -105,7 +105,6 @@ impl<'a, R: Rng> SqlGenerator<'a, R> {
         }
     }
 
-
     fn add_relation_to_context(&mut self, table: Table) {
         let mut bound_columns = table.get_qualified_columns();
         self.bound_columns.append(&mut bound_columns);
@@ -129,7 +128,6 @@ impl<'a, R: Rng> SqlGenerator<'a, R> {
             query,
             with_options: vec![],
         };
-        let schema = vec![];
         (mview, schema)
     }
 
@@ -247,7 +245,7 @@ impl<'a, R: Rng> SqlGenerator<'a, R> {
     fn gen_from(&mut self) -> Vec<TableWithJoins> {
         let mut from = vec![];
         if self.is_mview {
-            assert!(self.tables.len() > 0);
+            assert!(!self.tables.is_empty());
             from.push(self.gen_from_relation());
         }
         for _ in 1..self.tables.len() {

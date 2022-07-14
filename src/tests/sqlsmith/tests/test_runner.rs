@@ -19,15 +19,13 @@ use std::{env, panic};
 
 use rand::SeedableRng;
 use risingwave_frontend::binder::Binder;
-use risingwave_frontend::handler;
 use risingwave_frontend::planner::Planner;
 use risingwave_frontend::session::{OptimizerContext, OptimizerContextRef, SessionImpl};
 use risingwave_frontend::test_utils::LocalFrontend;
-use risingwave_frontend::FrontendOpts;
+use risingwave_frontend::{handler, FrontendOpts};
 use risingwave_sqlparser::ast::Statement;
 use risingwave_sqlparser::parser::Parser;
-use risingwave_sqlsmith::{sql_gen, Table};
-use risingwave_sqlsmith::create_mview_sql_gen;
+use risingwave_sqlsmith::{create_mview_sql_gen, sql_gen, Table};
 
 /// Create the tables defined in testdata.
 async fn create_tables(session: Arc<SessionImpl>) -> Vec<Table> {
@@ -47,10 +45,7 @@ async fn create_tables(session: Arc<SessionImpl>) -> Vec<Table> {
                 let name = name.0[0].value.clone();
                 let columns = columns.iter().map(|c| c.clone().into()).collect();
                 handler::handle(session.clone(), s, &sql).await.unwrap();
-                tables.push(Table {
-                    name,
-                    columns,
-                })
+                tables.push(Table { name, columns })
             }
             _ => panic!("Unexpected statement: {}", s),
         }
@@ -64,18 +59,14 @@ async fn create_tables(session: Arc<SessionImpl>) -> Vec<Table> {
     for i in 0..n_statements {
         let (stmt, columns) = sql_generator.gen_mview(&format!("m{}", i));
         match stmt {
-            Statement::CreateView {
-                ref name,
-                ..
-            } => {
+            Statement::CreateView { ref name, .. } => {
                 let stmt_str = format!("{}", stmt);
                 let name = format!("{}", name);
-                handler::handle(session.clone(), stmt, &stmt_str).await.unwrap();
-                tables.push(Table {
-                    name,
-                    columns,
-                })
-            },
+                handler::handle(session.clone(), stmt, &stmt_str)
+                    .await
+                    .unwrap();
+                tables.push(Table { name, columns })
+            }
             _ => panic!("Unexpected statement: {}", stmt),
         }
     }

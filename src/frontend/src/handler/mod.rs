@@ -47,11 +47,7 @@ mod show;
 pub mod util;
 mod variable;
 
-pub async fn handle(
-    session: Arc<SessionImpl>,
-    stmt: Statement,
-    sql: &str,
-) -> Result<PgResponse> {
+pub async fn handle(session: Arc<SessionImpl>, stmt: Statement, sql: &str) -> Result<PgResponse> {
     let context = OptimizerContext::new(session.clone(), Arc::from(sql));
     match stmt {
         Statement::Explain {
