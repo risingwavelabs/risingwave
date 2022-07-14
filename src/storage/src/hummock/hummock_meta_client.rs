@@ -58,9 +58,14 @@ impl HummockMetaClient for MonitoredHummockMetaClient {
     }
 
     async fn unpin_version_before(&self, unpin_version_before: HummockVersionId) -> Result<()> {
-        self.meta_client
+        self.stats.unpin_version_before_counts.inc();
+        let timer = self.stats.unpin_version_before_latency.start_timer();
+        let res = self
+            .meta_client
             .unpin_version_before(unpin_version_before)
-            .await
+            .await;
+        timer.observe_duration();
+        res
     }
 
     async fn pin_snapshot(&self) -> Result<HummockEpoch> {
