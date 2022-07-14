@@ -40,7 +40,7 @@ pub async fn sst_dump() -> anyhow::Result<()> {
     });
 
     for level in version.get_combined_levels() {
-        for sstable_info in level.table_infos.clone() {
+        for sstable_info in &level.table_infos {
             let id = sstable_info.id;
 
             let sstable_cache = sstable_store
@@ -53,6 +53,7 @@ pub async fn sst_dump() -> anyhow::Result<()> {
 
             println!("SST id: {}", id);
             println!("-------------------------------------");
+            println!("Level: {}", level.level_type);
             println!(
                 "Creation Timestamp: {}",
                 sstable_id_info.id_create_timestamp
@@ -67,7 +68,7 @@ pub async fn sst_dump() -> anyhow::Result<()> {
             );
             println!("File Size: {}", sstable_info.file_size);
 
-            if let Some(key_range) = sstable_info.key_range {
+            if let Some(key_range) = sstable_info.key_range.as_ref() {
                 println!("Key Range:");
                 println!(
                     "\tleft:\t{:?}\n\tright:\t{:?}\n\tinf:\t{:?}",
