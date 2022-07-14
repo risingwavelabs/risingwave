@@ -273,7 +273,6 @@ fn emit_multi_rows(
 ) {
     rows.into_iter().for_each(|topn_row| {
         res_ops.push(op);
-        assert!(topn_row.is_valid());
         res_rows.push(topn_row.row);
     })
 }

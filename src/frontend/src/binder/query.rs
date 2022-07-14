@@ -15,7 +15,6 @@
 use std::collections::HashMap;
 
 use risingwave_common::catalog::Schema;
-use risingwave_common::error::ErrorCode::BindError;
 use risingwave_common::error::{ErrorCode, Result};
 use risingwave_common::types::DataType;
 use risingwave_sqlparser::ast::{Cte, Expr, OrderByExpr, Query, Value, With};
@@ -78,9 +77,6 @@ impl Binder {
     pub(super) fn bind_query_inner(&mut self, query: Query) -> Result<BoundQuery> {
         let limit = query.get_limit_value();
         let offset = query.get_offset_value();
-        if offset.is_some() && limit.is_none() {
-            return Err(BindError("LIMIT should be specified with OFFSET".to_string()).into());
-        }
         if let Some(with) = query.with {
             self.bind_with(with)?;
         }

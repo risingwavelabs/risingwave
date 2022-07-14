@@ -42,20 +42,13 @@ pub struct ManagedTopNStateNew<S: StateStore> {
 
 #[derive(Clone, PartialEq, Debug)]
 pub struct TopNStateRow {
-    pub ordered_key: Option<OrderedRow>,
+    pub ordered_key: OrderedRow,
     pub row: Row,
 }
 
 impl TopNStateRow {
     pub fn new(ordered_key: OrderedRow, row: Row) -> Self {
-        Self {
-            ordered_key: Some(ordered_key),
-            row,
-        }
-    }
-
-    pub fn is_valid(&self) -> bool {
-        self.ordered_key.is_some()
+        Self { ordered_key, row }
     }
 }
 
@@ -126,10 +119,7 @@ impl<S: StateStore> ManagedTopNStateNew<S> {
         TopNStateRow::new(pk_ordered, row)
     }
 
-    /// This function will return the rows at the position of `offset` and (`offset` + `limit` - 1),
-    /// which forms the range `[start_row, end_row]` of the top-N range .
-    /// When `offset` is 0 the `start_row` will be the first row in state table;
-    /// When `limit` is 0 the `end_row` will be an invalid row.
+    /// This function will return the rows in the range of [`offset`, `offset` + `limit`),
     pub async fn find_range(
         &self,
         offset: usize,
@@ -138,52 +128,13 @@ impl<S: StateStore> ManagedTopNStateNew<S> {
     ) -> StreamExecutorResult<Vec<TopNStateRow>> {
         let state_table_iter = self.state_table.iter(epoch).await?;
         pin_mut!(state_table_iter);
-
-        let invalid_row = TopNStateRow {
-            ordered_key: None,
-            row: Row::default(),
-        };
-        let mut first_row = invalid_row.clone();
-        if let Some(next_res) = state_table_iter.next().await {
-            first_row = self.get_topn_row(next_res);
-        }
-
-        // fetch the row at position offset
-        let mut start_row = first_row;
-        for i in 0..offset {
-            match state_table_iter.next().await {
-                Some(next_res) => {
-                    if i == offset - 1 {
-                        start_row = self.get_topn_row(next_res);
-                    }
-                }
-                None => {
-                    start_row = invalid_row.clone();
-                    break;
-                }
-            }
-        }
-
-        let mut valid_rows = vec![];
-        if start_row.is_valid() {
-            valid_rows.push(start_row.clone());
-        }
-
-        // scan to the row at offset + limit
-        for _ in 0..(num_limit - 1) {
-            match state_table_iter.next().await {
-                Some(next_res) => {
-                    let row = self.get_topn_row(next_res);
-                    if row.is_valid() {
-                        valid_rows.push(row.clone());
-                    }
-                }
-                None => {
-                    break;
-                }
-            }
-        }
-        Ok(valid_rows)
+        let rows = state_table_iter
+            .skip(offset)
+            .take(num_limit)
+            .map(|x| self.get_topn_row(x))
+            .collect::<Vec<_>>()
+            .await;
+        Ok(rows)
     }
 
     pub async fn flush(&mut self, epoch: u64) -> StreamExecutorResult<()> {
@@ -237,20 +188,14 @@ mod tests {
         let valid_rows = managed_state.find_range(0, 1, epoch).await.unwrap();
 
         assert_eq!(valid_rows.len(), 1);
-        assert_eq!(
-            valid_rows.first().unwrap().ordered_key,
-            Some(ordered_rows[3].clone())
-        );
+        assert_eq!(valid_rows[0].ordered_key, ordered_rows[3].clone());
 
         managed_state
             .insert(ordered_rows[2].clone(), rows[2].clone(), epoch)
             .unwrap();
         let valid_rows = managed_state.find_range(1, 1, epoch).await.unwrap();
         assert_eq!(valid_rows.len(), 1);
-        assert_eq!(
-            valid_rows.first().unwrap().ordered_key,
-            Some(ordered_rows[2].clone())
-        );
+        assert_eq!(valid_rows[0].ordered_key, ordered_rows[2].clone());
 
         managed_state
             .insert(ordered_rows[1].clone(), rows[1].clone(), epoch)
@@ -261,11 +206,11 @@ mod tests {
         assert_eq!(valid_rows.len(), 2);
         assert_eq!(
             valid_rows.first().unwrap().ordered_key,
-            Some(ordered_rows[1].clone())
+            ordered_rows[1].clone()
         );
         assert_eq!(
             valid_rows.last().unwrap().ordered_key,
-            Some(ordered_rows[2].clone())
+            ordered_rows[2].clone()
         );
 
         // delete ("abc", 3)
@@ -281,8 +226,8 @@ mod tests {
         let valid_rows = managed_state.find_range(0, 3, epoch).await.unwrap();
 
         assert_eq!(valid_rows.len(), 3);
-        assert_eq!(valid_rows[0].ordered_key, Some(ordered_rows[3].clone()));
-        assert_eq!(valid_rows[1].ordered_key, Some(ordered_rows[0].clone()));
-        assert_eq!(valid_rows[2].ordered_key, Some(ordered_rows[2].clone()));
+        assert_eq!(valid_rows[0].ordered_key, ordered_rows[3].clone());
+        assert_eq!(valid_rows[1].ordered_key, ordered_rows[0].clone());
+        assert_eq!(valid_rows[2].ordered_key, ordered_rows[2].clone());
     }
 }
