@@ -29,12 +29,19 @@ pub struct DedupPkCellBasedRowDeserializer<'a, Desc: Deref<Target = ColumnDescMa
     pk_deserializer: &'a OrderedRowDeserializer,
     inner: CellBasedRowDeserializer<Desc>,
 
-    // Maps pk fields with:
+    // Maps pk datums to corresponding row positions.
+    // Pk datums must satisfy the following criteria:
     // 1. same value and memcomparable encoding,
     // 2. corresponding row positions.
     pk_to_row_mapping: Vec<Option<usize>>,
 }
 
+/// Creates `pk_deserializer`.
+/// `pk_deserializer` is used by `DedupPkCellBasedRowDeserializer`
+/// to deserialize raw pk into pk datums.
+/// `pk_deserializer` should be shared by all `DedupPkCellBasedRowDeserializer`
+/// to reduce instantiation overhead for `DedupPkCellBasedRowDeserializer`.
+/// Hence we have this function to instantiate `pk_deserializer` separately.
 pub fn create_pk_deserializer_from_pk_descs(
     pk_descs: &[OrderedColumnDesc],
 ) -> OrderedRowDeserializer {
@@ -50,6 +57,12 @@ pub fn create_pk_deserializer_from_pk_descs(
     OrderedRowDeserializer::new(pk_data_types, pk_order_types)
 }
 
+/// Creates `pk_to_row_mapping`.
+/// `pk_to_row_mapping` is used by `DedupPkCellBasedRowDeserializer`
+/// to map dedupped pk datums to their positions in output row.
+/// `pk_to_row_mapping` should be shared by all `DedupPkCellBasedRowDeserializer`
+/// to reduce instantiation overhead for `DedupPkCellBasedRowDeserializer`.
+/// Hence we have this function to instantiate `pk_to_row_mapping` separately.
 pub fn create_pk_to_row_mapping(
     pk_descs: &[OrderedColumnDesc],
     column_mapping: impl Deref<Target = ColumnDescMapping>,
