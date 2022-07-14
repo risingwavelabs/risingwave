@@ -34,7 +34,7 @@ use crate::hummock::test_utils::*;
 use crate::model::MetadataModel;
 
 fn pin_versions_sum(pin_versions: &[HummockPinnedVersion]) -> usize {
-    pin_versions.iter().map(|p| p.version_id.len()).sum()
+    pin_versions.iter().len()
 }
 
 fn pin_snapshots_epoch(pin_snapshots: &[HummockPinnedSnapshot]) -> Vec<u64> {
@@ -70,7 +70,6 @@ async fn test_hummock_pin_unpin() {
         let pinned_versions = HummockPinnedVersion::list(env.meta_store()).await.unwrap();
         assert_eq!(pin_versions_sum(&pinned_versions), 1);
         assert_eq!(pinned_versions[0].context_id, context_id);
-        assert_eq!(pinned_versions[0].version_id.len(), 1);
     }
 
     // unpin nonexistent target will not return error

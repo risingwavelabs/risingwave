@@ -457,14 +457,14 @@ where
             context_id,
             HummockPinnedVersion {
                 context_id,
-                version_id: vec![],
+                min_pinned_id: 0,
             },
         );
 
         let version_id = current_version_id.id();
 
-        if context_pinned_version.version_id.is_empty() {
-            context_pinned_version.version_id.push(0);
+        if context_pinned_version.min_pinned_id == 0 {
+            context_pinned_version.min_pinned_id = version_id;
             commit_multi_var!(self, Some(context_id), context_pinned_version)?;
         }
 
@@ -493,11 +493,11 @@ where
             context_id,
             HummockPinnedVersion {
                 context_id,
-                version_id: vec![0],
+                min_pinned_id: 0,
             },
         );
 
-        *context_pinned_version.version_id.first_mut().unwrap() = unpin_before;
+        context_pinned_version.min_pinned_id = unpin_before;
         commit_multi_var!(self, Some(context_id), context_pinned_version)?;
 
         #[cfg(test)]
@@ -1281,7 +1281,7 @@ where
         let count = versioning_guard
             .pinned_versions
             .values()
-            .filter(|version_pin| version_pin.version_id.first().unwrap() <= &version_id)
+            .filter(|version_pin| version_pin.min_pinned_id <= version_id)
             .count();
         Ok(count as HummockRefCount)
     }
@@ -1363,7 +1363,7 @@ where
 
             for version_pin in pinned_versions_ref.values() {
                 assert!(
-                    !version_pin.version_id.contains(version_id),
+                    version_pin.min_pinned_id > *version_id,
                     "version still referenced shouldn't be deleted."
                 );
             }

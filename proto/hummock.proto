@@ -220,7 +220,7 @@ message ReportCompactionTasksResponse {
 
 message HummockPinnedVersion {
   uint32 context_id = 1;
-  repeated uint64 version_id = 2;
+  uint64 min_pinned_id = 2;
 }
 
 message HummockPinnedSnapshot {
