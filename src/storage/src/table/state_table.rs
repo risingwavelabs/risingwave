@@ -314,8 +314,7 @@ impl<S: StateStore> StateTable<S> {
 impl<S: StateStore> RowBasedStateTable<S> {
     /// This function scans rows from the relational table.
     pub async fn iter(&self, epoch: u64) -> StorageResult<RowBasedStream<'_, S>> {
-        self.iter_with_pk_prefix(Row::empty(), epoch)
-            .await
+        self.iter_with_pk_prefix(Row::empty(), epoch).await
     }
 
     /// This function scans rows from the relational table with specific `pk_prefix`.

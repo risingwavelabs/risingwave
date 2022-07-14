@@ -87,6 +87,8 @@ pub struct TableCatalog {
     pub vnode_mapping: Option<Vec<ParallelUnitId>>,
 
     pub properties: HashMap<String, String>,
+
+    pub read_pattern_prefix_column: u32,
 }
 
 impl TableCatalog {
@@ -161,6 +163,7 @@ impl TableCatalog {
             owner: self.owner.clone(),
             mapping: None,
             properties: HashMap::default(),
+            read_pattern_prefix_column: self.read_pattern_prefix_column,
         }
     }
 }
@@ -216,6 +219,7 @@ impl From<ProstTable> for TableCatalog {
             owner: tb.owner,
             vnode_mapping: Some(vnode_mapping),
             properties: tb.properties,
+            read_pattern_prefix_column: tb.read_pattern_prefix_column,
         }
     }
 }
@@ -301,6 +305,7 @@ mod tests {
                 data,
             }),
             properties: HashMap::from([(String::from("ttl"), String::from("300"))]),
+            read_pattern_prefix_column: 0,
         }
         .into();
 
@@ -351,6 +356,7 @@ mod tests {
                 owner: risingwave_common::catalog::DEFAULT_SUPPER_USER.to_string(),
                 vnode_mapping: Some(mapping),
                 properties: HashMap::from([(String::from("ttl"), String::from("300"))]),
+                read_pattern_prefix_column: 0,
             }
         );
     }

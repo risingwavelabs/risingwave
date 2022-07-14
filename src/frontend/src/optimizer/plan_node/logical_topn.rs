@@ -16,7 +16,8 @@ use std::fmt;
 
 use fixedbitset::FixedBitSet;
 use itertools::Itertools;
-use risingwave_common::error::Result;
+use risingwave_common::error::ErrorCode::InternalError;
+use risingwave_common::error::{Result, RwError};
 
 use super::{
     gen_filter_and_pushdown, ColPrunable, PlanBase, PlanRef, PlanTreeNodeUnary, PredicatePushdown,
@@ -24,6 +25,7 @@ use super::{
 };
 use crate::optimizer::plan_node::{BatchTopN, LogicalProject, StreamTopN};
 use crate::optimizer::property::{FieldOrder, Order, RequiredDist};
+use crate::planner::LIMIT_ALL_COUNT;
 use crate::utils::{ColIndexMapping, Condition};
 
 /// `LogicalTopN` sorts the input data and fetches up to `limit` rows from `offset`
@@ -192,6 +194,12 @@ impl ToStream for LogicalTopN {
         let input = self
             .input()
             .to_stream_with_dist_required(&RequiredDist::single())?;
+
+        if self.offset() != 0 && self.limit == LIMIT_ALL_COUNT {
+            return Err(RwError::from(InternalError(
+                "Doesn't support OFFSET without LIMIT".to_string(),
+            )));
+        }
         Ok(StreamTopN::new(self.clone_with_input(input)).into())
     }
 
