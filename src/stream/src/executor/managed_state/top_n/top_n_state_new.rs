@@ -236,20 +236,6 @@ mod tests {
         // now ("ab", 4)
         let valid_rows = managed_state.find_range(0, 1, epoch).await.unwrap();
 
-        // assert_eq!(
-        //     (start, end),
-        //     (
-        //         TopNStateRow {
-        //             ordered_key: Some(ordered_rows[3].clone()),
-        //             row: rows[3].clone()
-        //         },
-        //         TopNStateRow {
-        //             ordered_key: Some(ordered_rows[3].clone()),
-        //             row: rows[3].clone()
-        //         },
-        //     )
-        // );
-
         assert_eq!(valid_rows.len(), 1);
         assert_eq!(
             valid_rows.first().unwrap().ordered_key,
@@ -260,20 +246,6 @@ mod tests {
             .insert(ordered_rows[2].clone(), rows[2].clone(), epoch)
             .unwrap();
         let valid_rows = managed_state.find_range(1, 1, epoch).await.unwrap();
-        // now ("ab", 4) -> ("abd", 3)
-        // assert_eq!(
-        //     (start, end),
-        //     (
-        //         TopNStateRow {
-        //             ordered_key: Some(ordered_rows[2].clone()),
-        //             row: rows[2].clone()
-        //         },
-        //         TopNStateRow {
-        //             ordered_key: Some(ordered_rows[2].clone()),
-        //             row: rows[2].clone()
-        //         },
-        //     )
-        // );
         assert_eq!(valid_rows.len(), 1);
         assert_eq!(
             valid_rows.first().unwrap().ordered_key,
@@ -286,20 +258,6 @@ mod tests {
         assert_eq!(3, managed_state.total_count());
 
         let valid_rows = managed_state.find_range(1, 2, epoch).await.unwrap();
-        // now ("ab", 4) -> ("abc", 3) -> ("abd", 3)
-        // assert_eq!(
-        //     (start, end),
-        //     (
-        //         TopNStateRow {
-        //             ordered_key: Some(ordered_rows[1].clone()),
-        //             row: rows[1].clone()
-        //         },
-        //         TopNStateRow {
-        //             ordered_key: Some(ordered_rows[2].clone()),
-        //             row: rows[2].clone()
-        //         }
-        //     )
-        // );
         assert_eq!(valid_rows.len(), 2);
         assert_eq!(
             valid_rows.first().unwrap().ordered_key,
@@ -321,20 +279,6 @@ mod tests {
             .unwrap();
 
         let valid_rows = managed_state.find_range(0, 3, epoch).await.unwrap();
-        // now ("ab", 4) -> ("abc", 2) -> ("abd", 3)
-        // assert_eq!(
-        //     (start, end),
-        //     (
-        //         TopNStateRow {
-        //             ordered_key: Some(ordered_rows[3].clone()),
-        //             row: rows[3].clone()
-        //         },
-        //         TopNStateRow {
-        //             ordered_key: Some(ordered_rows[2].clone()),
-        //             row: rows[2].clone()
-        //         }
-        //     )
-        // );
 
         assert_eq!(valid_rows.len(), 3);
         assert_eq!(valid_rows[0].ordered_key, Some(ordered_rows[3].clone()));

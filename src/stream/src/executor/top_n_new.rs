@@ -205,10 +205,6 @@ impl<S: StateStore> TopNExecutorBase for InnerTopNExecutorNew<S> {
         chunk: StreamChunk,
         epoch: u64,
     ) -> StreamExecutorResult<StreamChunk> {
-        if self.limit.is_none() {
-            log::warn!("TopN: no LIMIT in the query");
-        }
-
         let mut res_ops = vec![];
         let mut res_rows = vec![];
         let num_limit = self.limit.unwrap_or(usize::MAX);
@@ -244,9 +240,9 @@ impl<S: StateStore> TopNExecutorBase for InnerTopNExecutorNew<S> {
             .await?;
 
         // delete previous result set
-        emit_multi_rows(&mut res_ops, &mut res_rows, Op::Delete, &old_rows);
+        emit_multi_rows(&mut res_ops, &mut res_rows, Op::Delete, old_rows);
         // emit new result set
-        emit_multi_rows(&mut res_ops, &mut res_rows, Op::Insert, &new_rows);
+        emit_multi_rows(&mut res_ops, &mut res_rows, Op::Insert, new_rows);
 
         // compare the those two ranges and emit the differantial result
         generate_output(res_rows, res_ops, &self.schema)
@@ -273,12 +269,12 @@ fn emit_multi_rows(
     res_ops: &mut Vec<Op>,
     res_rows: &mut Vec<Row>,
     op: Op,
-    rows: &Vec<TopNStateRow>,
+    rows: Vec<TopNStateRow>,
 ) {
     rows.into_iter().for_each(|topn_row| {
         res_ops.push(op);
         assert!(topn_row.is_valid());
-        res_rows.push(topn_row.row.clone());
+        res_rows.push(topn_row.row);
     })
 }
 
