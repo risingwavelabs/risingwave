@@ -13,7 +13,7 @@
 // limitations under the License.
 
 use std::collections::HashMap;
-use std::ops::Deref;
+use std::sync::Arc;
 
 use risingwave_common::array::Row;
 use risingwave_common::catalog::{ColumnDesc, ColumnId};
@@ -62,6 +62,7 @@ pub trait Encoding {
 }
 
 /// Record mapping from [`ColumnDesc`], [`ColumnId`], and output index of columns in a table.
+#[derive(Clone)]
 pub struct ColumnDescMapping {
     pub output_columns: Vec<ColumnDesc>,
 
@@ -69,9 +70,9 @@ pub struct ColumnDescMapping {
 }
 
 /// `Decoding` defines an interface for decoding a key row from kv storage.
-pub trait Decoding<Desc: Deref<Target = ColumnDescMapping>> {
+pub trait Decoding {
     /// Constructs a new serializer.
-    fn create_cell_based_deserializer(column_mapping: Desc) -> Self;
+    fn create_cell_based_deserializer(column_mapping: Arc<ColumnDescMapping>) -> Self;
 
     /// When we encounter a new key, we can be sure that the previous row has been fully
     /// deserialized. Then we return the key and the value of the previous row.

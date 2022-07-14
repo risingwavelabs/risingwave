@@ -12,7 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::ops::Deref;
+use std::sync::Arc;
 
 use risingwave_common::array::Row;
 use risingwave_common::catalog::OrderedColumnDesc;
@@ -25,9 +25,9 @@ use crate::encoding::{ColumnDescMapping, Decoding};
 
 /// Similar to [`CellBasedRowDeserializer`], but for dedup pk cell encoding.
 #[derive(Clone)]
-pub struct DedupPkCellBasedRowDeserializer<Desc: Deref<Target = ColumnDescMapping>> {
+pub struct DedupPkCellBasedRowDeserializer {
     pk_deserializer: OrderedRowDeserializer,
-    inner: CellBasedRowDeserializer<Desc>,
+    inner: CellBasedRowDeserializer,
 
     // Maps pk fields with:
     // 1. same value and memcomparable encoding,
@@ -35,11 +35,11 @@ pub struct DedupPkCellBasedRowDeserializer<Desc: Deref<Target = ColumnDescMappin
     pk_to_row_mapping: Vec<Option<usize>>,
 }
 
-impl<Desc: Deref<Target = ColumnDescMapping>> DedupPkCellBasedRowDeserializer<Desc> {
+impl DedupPkCellBasedRowDeserializer {
     /// Create a [`DedupPkCellBasedRowDeserializer`]
     /// to decode cell based row with dedup pk encoding.
     /// TODO: Refactor args. Creating `DedupPkCellBasedRowDeserializer` should not have overhead.
-    pub fn new(column_mapping: Desc, pk_descs: &[OrderedColumnDesc]) -> Self {
+    pub fn new(column_mapping: Arc<ColumnDescMapping>, pk_descs: &[OrderedColumnDesc]) -> Self {
         let (pk_data_types, pk_order_types) = pk_descs
             .iter()
             .map(|ordered_desc| {
