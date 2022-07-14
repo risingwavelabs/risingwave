@@ -764,7 +764,7 @@ impl ScalarImpl {
                     DataType::Date => size_of::<NaiveDateWrapper>(),
                     DataType::Time => size_of::<NaiveTimeWrapper>(),
                     DataType::Timestamp => size_of::<NaiveDateTimeWrapper>(),
-                    DataType::Timestampz => size_of::<NaiveDateTimeWrapper>(),
+                    DataType::Timestampz => size_of::<i64>(),
                     DataType::Boolean => size_of::<u8>(),
                     DataType::Interval => size_of::<IntervalUnit>(),
 
