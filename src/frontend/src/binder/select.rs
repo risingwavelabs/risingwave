@@ -151,11 +151,17 @@ impl Binder {
                 }
                 SelectItem::QualifiedWildcard(obj_name) => {
                     let table_name = &obj_name.0.last().unwrap().value;
-                    let (begin, end) = self.context.range_of.get(table_name).ok_or_else(|| {
-                        ErrorCode::ItemNotFound(format!("relation \"{}\"", table_name))
-                    })?;
+                    let (mut begin, end) =
+                        self.context.range_of.get(table_name).ok_or_else(|| {
+                            ErrorCode::ItemNotFound(format!("relation \"{}\"", table_name))
+                        })?;
+                    // Here we make the assumption that the hidden columns are always at the
+                    // beginning.
+                    while begin < *end && self.context.columns[begin].is_hidden {
+                        begin += 1;
+                    }
                     let (exprs, names) =
-                        Self::iter_bound_columns(self.context.columns[*begin..*end].iter());
+                        Self::iter_bound_columns(self.context.columns[begin..*end].iter());
                     select_list.extend(exprs);
                     aliases.extend(names);
                 }
