@@ -120,7 +120,10 @@ impl SortMergeJoinExecutor {
         build_key_idxs: Vec<usize>,
     ) {
         // Row-level iterator of the build side table.
-        let mut build_row_iter = build_side.iter().flat_map(|build_chunk| build_chunk.rows());
+        let mut build_row_iter = build_side
+            .iter()
+            .flat_map(|build_chunk| build_chunk.rows())
+            .fuse();
         let mut last_probe_key = None;
         let mut last_matched_build_rows: Vec<RowRef> = Vec::new();
         // Current row of the build side. This is a workaround due to the weird issue of calling
