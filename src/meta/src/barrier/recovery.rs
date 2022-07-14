@@ -31,7 +31,6 @@ use risingwave_pb::stream_service::{
     UpdateActorsRequest,
 };
 use tokio_retry::strategy::{jitter, ExponentialBackoff};
-use tracing::warn;
 use uuid::Uuid;
 
 use crate::barrier::command::CommandContext;
