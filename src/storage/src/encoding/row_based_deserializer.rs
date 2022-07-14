@@ -37,6 +37,7 @@ impl Decoding for RowBasedDeserializer {
         for ty in &self.data_types {
             values.push(deserialize_datum(&mut row, ty)?);
         }
+
         Ok(Row(values))
     }
 
