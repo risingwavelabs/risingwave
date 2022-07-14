@@ -12,20 +12,16 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::cmp::Ordering;
-
+use futures::TryStreamExt;
 use futures_async_stream::try_stream;
 use risingwave_common::array::{DataChunk, Row, RowRef};
 use risingwave_common::catalog::Schema;
 use risingwave_common::error::RwError;
-use risingwave_common::types::to_datum_ref;
 use risingwave_common::util::chunk_coalesce::DataChunkBuilder;
 use risingwave_common::util::sort_util::OrderType;
 use risingwave_pb::batch_plan::plan_node::NodeBody;
 use risingwave_pb::plan_common::OrderType as OrderTypeProst;
 
-use crate::error::BatchError;
-use crate::executor::join::row_level_iter::RowLevelIter;
 use crate::executor::join::JoinType;
 use crate::executor::{
     BoxedDataChunkStream, BoxedExecutor, BoxedExecutorBuilder, Executor, ExecutorBuilder,
@@ -38,18 +34,11 @@ pub struct SortMergeJoinExecutor {
     /// Ascending or descending. Note that currently the sort order of probe side and build side
     /// should be the same.
     sort_order: OrderType,
+    /// Currently only inner join is supported.
     join_type: JoinType,
-    /// Row-level iteration of probe side.
-    probe_side_source: RowLevelIter,
-    /// Row-level iteration of build side.
-    build_side_source: RowLevelIter,
-    /// Return data chunk in batch.
-    chunk_builder: DataChunkBuilder,
-    /// Join result of last row. It only contains the build side. Should concatenate with probe row
-    /// when write into chunk builder.
-    last_join_results: Vec<Row>,
-    /// Last probe row key (Part of probe row). None for the first probe.
-    last_probe_key: Option<Row>,
+    /// Original output schema
+    original_schema: Schema,
+    /// Actual output schema
     schema: Schema,
     /// We may only need certain columns.
     /// output_indices are the indices of the columns that we needed.
@@ -58,8 +47,10 @@ pub struct SortMergeJoinExecutor {
     /// They should have the same length and be one-to-one mapping.
     probe_key_idxs: Vec<usize>,
     build_key_idxs: Vec<usize>,
-    /// Record the index that have been written into chunk builder.
-    last_join_results_write_idx: usize,
+    /// Probe side source (left table).
+    probe_side_source: BoxedExecutor,
+    /// Build side source (right table).
+    build_side_source: BoxedExecutor,
     /// Identity string of the executor
     identity: String,
 }
@@ -88,112 +79,85 @@ impl SortMergeJoinExecutor {
     ///
     /// The complexity is hard to avoid. May need more tests to ensure the correctness.
     #[try_stream(boxed, ok = DataChunk, error = RwError)]
-    async fn do_execute(mut self: Box<Self>) {
+    async fn do_execute(self: Box<Self>) {
+        let data_types = self.original_schema.data_types();
+
         // Init data source.
-        self.probe_side_source.load_data().await?;
-        self.build_side_source.load_data().await?;
+        let build_side: Vec<_> = self.build_side_source.execute().try_collect().await?;
 
-        loop {
-            // If current row is the same with last row. Directly append cached join results.
-            if self.compare_with_last_row(self.probe_side_source.get_current_row_ref()) {
-                let current_row_ref = self.probe_side_source.get_current_row_ref();
-                if let Some(cur_probe_row) = current_row_ref {
-                    while self.last_join_results_write_idx < self.last_join_results.len() {
-                        let build_row = &self.last_join_results[self.last_join_results_write_idx];
-                        self.last_join_results_write_idx += 1;
-                        // Concatenate to get the final join results.
-                        let datum_refs = cur_probe_row
-                            .values()
-                            .chain(build_row.0.iter().map(to_datum_ref));
-                        if let Some(ret_chunk) = self
-                            .chunk_builder
-                            .append_one_row_from_datum_refs(datum_refs)?
-                        {
-                            yield ret_chunk.reorder_columns(&self.output_indices);
+        let mut chunk_builder = DataChunkBuilder::with_default_size(data_types);
+
+        // TODO: support more join types
+        let stream = match (self.sort_order, self.join_type) {
+            (OrderType::Ascending, JoinType::Inner) => Self::do_inner_join::<true>,
+            (OrderType::Descending, JoinType::Inner) => Self::do_inner_join::<false>,
+            _ => todo!(),
+        };
+
+        #[for_await]
+        for chunk in stream(
+            &mut chunk_builder,
+            self.probe_side_source,
+            build_side,
+            self.probe_key_idxs,
+            self.build_key_idxs,
+        ) {
+            yield chunk?.reorder_columns(&self.output_indices)
+        }
+
+        // Handle remaining chunk
+        if let Some(chunk) = chunk_builder.consume_all()? {
+            yield chunk.reorder_columns(&self.output_indices)
+        }
+    }
+
+    #[try_stream(boxed, ok = DataChunk, error = RwError)]
+    async fn do_inner_join<const ASCENDING: bool>(
+        chunk_builder: &mut DataChunkBuilder,
+        probe_side: BoxedExecutor,
+        build_side: Vec<DataChunk>,
+        probe_key_idxs: Vec<usize>,
+        build_key_idxs: Vec<usize>,
+    ) {
+        // Row-level iterator of the build side table.
+        let mut build_row_iter = build_side.iter().flat_map(|build_chunk| build_chunk.rows());
+        let mut last_probe_key: Option<Row> = None;
+        let mut last_matched_build_rows: Vec<RowRef> = Vec::new();
+        // Current row of the build side. This is a workaround due to the weird issue of calling
+        // `peekable()` on `build_row_iter`.
+        let mut current_build_row = None;
+
+        #[for_await]
+        for probe_chunk in probe_side.execute() {
+            let probe_chunk = probe_chunk?;
+            for probe_row in probe_chunk.rows() {
+                let probe_key = probe_row.row_by_indices(&probe_key_idxs);
+                if let Some(last_probe_key) = &last_probe_key && *last_probe_key == probe_key {
+                    for build_row in &last_matched_build_rows {
+                        if let Some(spilled) = chunk_builder.append_one_row_from_datum_refs(probe_row.values().chain(build_row.values()))? {
+                            yield spilled
                         }
                     }
-                }
-                self.last_join_results_write_idx = 0;
-                self.probe_side_source.advance_row();
-                if self.compare_with_last_row(self.probe_side_source.get_current_row_ref()) {
-                    continue;
                 } else {
-                    // Clear last_join result if not equal occur.
-                    self.last_join_results.clear();
-                }
-            }
+                    last_matched_build_rows.clear();
 
-            // Do not care the vis.
-            let cur_probe_row_opt = self.probe_side_source.get_current_row_ref();
-            let cur_build_row_opt = self.build_side_source.get_current_row_ref();
-
-            match (cur_probe_row_opt, cur_build_row_opt) {
-                (Some(cur_probe_row_ref), Some(cur_build_row_ref)) => {
-                    let probe_key = cur_probe_row_ref.row_by_indices(&self.probe_key_idxs);
-                    let build_key = cur_build_row_ref.row_by_indices(&self.build_key_idxs);
-
-                    // TODO: [`Row`] may not be PartialOrd. May use some trait like
-                    // [`ScalarPartialOrd`].
-                    match probe_key.cmp(&build_key) {
-                        Ordering::Greater => {
-                            if self.sort_order == OrderType::Descending {
-                                // Before advance to next row, record last probe key.
-                                self.last_probe_key = Some(probe_key);
-                                self.probe_side_source.advance_row();
-                                if !self.compare_with_last_row(
-                                    self.probe_side_source.get_current_row_ref(),
-                                ) {
-                                    self.last_join_results.clear();
-                                }
-                            } else {
-                                self.build_side_source.advance_row();
+                    while let Some(build_row) = current_build_row.get_or_insert_with(||build_row_iter.next()) {
+                        let build_key = build_row.row_by_indices(&build_key_idxs);
+                        // TODO: [`Row`] may not be PartialOrd. May use some trait like
+                        // [`ScalarPartialOrd`].
+                        if probe_key == build_key {
+                            last_matched_build_rows.push(build_row.clone());
+                            if let Some(spilled) = chunk_builder.append_one_row_from_datum_refs(probe_row.values().chain(build_row.values()))? {
+                                yield spilled
                             }
+                        } else if (ASCENDING && probe_key < build_key)
+                            || (!ASCENDING && probe_key > build_key)
+                        {
+                            last_probe_key = Some(probe_key);
+                            break;
                         }
-
-                        Ordering::Less => {
-                            if self.sort_order == OrderType::Descending {
-                                self.build_side_source.advance_row();
-                            } else {
-                                self.last_probe_key = Some(probe_key);
-                                self.probe_side_source.advance_row();
-                                if !self.compare_with_last_row(
-                                    self.probe_side_source.get_current_row_ref(),
-                                ) {
-                                    self.last_join_results.clear();
-                                }
-                            }
-                        }
-
-                        Ordering::Equal => {
-                            // Matched rows. Write into chunk builder and maintain last join
-                            // results.
-                            self.last_join_results
-                                .push(cur_build_row_ref.to_owned_row());
-                            let join_datum_refs =
-                                cur_probe_row_ref.values().chain(cur_build_row_ref.values());
-                            let ret = self
-                                .chunk_builder
-                                .append_one_row_from_datum_refs(join_datum_refs)?;
-                            self.build_side_source.advance_row();
-                            if let Some(ret_chunk) = ret {
-                                yield ret_chunk.reorder_columns(&self.output_indices);
-                            }
-                        }
+                        current_build_row = None;
                     }
-                }
-
-                (Some(cur_probe_row_ref), None) => {
-                    self.last_probe_key =
-                        Some(cur_probe_row_ref.row_by_indices(&self.probe_key_idxs));
-                    self.probe_side_source.advance_row();
-                }
-                // Once probe row is None, consume all results or terminate.
-                (_, _) => {
-                    if let Some(ret) = self.chunk_builder.consume_all()? {
-                        yield ret.reorder_columns(&self.output_indices)
-                    } else {
-                        break;
-                    };
                 }
             }
         }
@@ -203,39 +167,43 @@ impl SortMergeJoinExecutor {
 impl SortMergeJoinExecutor {
     #[allow(clippy::too_many_arguments)]
     pub fn new(
+        sort_order: OrderType,
         join_type: JoinType,
-        schema: Schema,
         output_indices: Vec<usize>,
-        probe_side_source: RowLevelIter,
-        build_side_source: RowLevelIter,
         probe_key_idxs: Vec<usize>,
         build_key_idxs: Vec<usize>,
+        probe_side_source: BoxedExecutor,
+        build_side_source: BoxedExecutor,
         identity: String,
     ) -> Self {
+        let original_schema = match join_type {
+            JoinType::Inner => Schema::from_iter(
+                probe_side_source
+                    .schema()
+                    .fields()
+                    .iter()
+                    .chain(build_side_source.schema().fields().iter())
+                    .cloned(),
+            ),
+            _ => todo!(),
+        };
+        let schema = Schema::from_iter(
+            output_indices
+                .iter()
+                .map(|&idx| original_schema[idx].clone()),
+        );
         Self {
+            sort_order,
             join_type,
-            chunk_builder: DataChunkBuilder::with_default_size(schema.data_types()),
+            original_schema,
             schema,
-            probe_side_source,
-            build_side_source,
+            output_indices,
             probe_key_idxs,
             build_key_idxs,
-            last_join_results_write_idx: 0,
-            last_join_results: vec![],
-            last_probe_key: None,
-            sort_order: OrderType::Ascending,
+            probe_side_source,
+            build_side_source,
             identity,
-            output_indices,
         }
-    }
-
-    fn compare_with_last_row(&self, cur_row: Option<RowRef>) -> bool {
-        self.last_probe_key
-            .clone()
-            .zip(cur_row)
-            .map_or(false, |(row1, row2)| {
-                row1 == row2.row_by_indices(&self.probe_key_idxs)
-            })
     }
 }
 
@@ -258,61 +226,38 @@ impl BoxedExecutorBuilder for SortMergeJoinExecutor {
         let sort_order = sort_merge_join_node.get_direction()?;
         // Only allow it in ascending order.
         ensure!(sort_order == OrderTypeProst::Ascending);
+        let sort_order = OrderType::Ascending;
         let join_type = JoinType::from_prost(sort_merge_join_node.get_join_type()?);
 
         let left_child = inputs.remove(0);
         let right_child = inputs.remove(0);
 
-        let fields = left_child
-            .schema()
-            .fields
-            .iter()
-            .chain(right_child.schema().fields.iter())
-            .cloned()
-            .collect();
         let output_indices: Vec<usize> = sort_merge_join_node
             .output_indices
             .iter()
             .map(|&x| x as usize)
             .collect();
-        let original_schema = Schema { fields };
-        let actual_schema = output_indices
+        let probe_key_idxs = sort_merge_join_node
+            .get_left_key()
             .iter()
-            .map(|&idx| original_schema[idx].clone())
+            .map(|&idx| idx as usize)
             .collect();
-        let left_key = sort_merge_join_node.get_left_key();
-        let mut probe_key_idxs = vec![];
-        for idx in left_key {
-            probe_key_idxs.push(*idx as usize);
-        }
+        let build_key_idxs = sort_merge_join_node
+            .get_right_key()
+            .iter()
+            .map(|&idx| idx as usize)
+            .collect();
 
-        let right_key = sort_merge_join_node.get_right_key();
-        let mut build_key_idxs = vec![];
-        for idx in right_key {
-            build_key_idxs.push(*idx as usize);
-        }
-        match join_type {
-            JoinType::Inner => {
-                // TODO: Support more join type.
-                let probe_table_source = RowLevelIter::new(left_child);
-                let build_table_source = RowLevelIter::new(right_child);
-                Ok(Box::new(Self::new(
-                    join_type,
-                    actual_schema,
-                    output_indices,
-                    probe_table_source,
-                    build_table_source,
-                    probe_key_idxs,
-                    build_key_idxs,
-                    "SortMergeJoinExecutor2".to_string(),
-                )))
-            }
-            _ => Err(BatchError::UnsupportedFunction(format!(
-                "Do not support {:?} join type now.",
-                join_type
-            ))
-            .into()),
-        }
+        Ok(Box::new(Self::new(
+            sort_order,
+            join_type,
+            output_indices,
+            probe_key_idxs,
+            build_key_idxs,
+            left_child,
+            right_child,
+            "SortMergeJoinExecutor".into(),
+        )))
     }
 }
 
@@ -322,8 +267,9 @@ mod tests {
     use risingwave_common::catalog::{Field, Schema};
     use risingwave_common::test_prelude::DataChunkTestExt;
     use risingwave_common::types::DataType;
+    use risingwave_common::util::sort_util::OrderType;
 
-    use crate::executor::join::sort_merge_join::{RowLevelIter, SortMergeJoinExecutor};
+    use crate::executor::join::sort_merge_join::SortMergeJoinExecutor;
     use crate::executor::join::JoinType;
     use crate::executor::test_utils::{diff_executor_output, MockExecutor};
     use crate::executor::BoxedExecutor;
@@ -438,13 +384,13 @@ mod tests {
             let schema = Schema { fields };
             let schema_len = schema.len();
             Box::new(SortMergeJoinExecutor::new(
+                OrderType::Ascending,
                 join_type,
-                schema,
                 (0..schema_len).into_iter().collect(),
-                RowLevelIter::new(left_child),
-                RowLevelIter::new(right_child),
                 vec![0],
                 vec![0],
+                left_child,
+                right_child,
                 "SortMergeJoinExecutor2".to_string(),
             ))
         }
