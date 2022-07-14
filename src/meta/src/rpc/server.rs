@@ -430,7 +430,9 @@ pub async fn rpc_serve_with_store<S: MetaStore>(
         cluster_manager.clone(),
         user_manager,
     );
-    let scale_manager = Arc::new(ScaleManager::new(env.meta_store_ref()));
+    let (scale_manager, scale_handle, scale_shutdown) =
+        ScaleManager::new(env.meta_store_ref()).await.unwrap();
+    let scale_manager = Arc::new(scale_manager);
     let scale_srv = ScaleServiceImpl::new(scale_manager);
 
     if let Some(prometheus_addr) = address_info.prometheus_addr {
@@ -446,6 +448,7 @@ pub async fn rpc_serve_with_store<S: MetaStore>(
     )
     .await;
     sub_tasks.push((lease_handle, lease_shutdown));
+    sub_tasks.push((scale_handle, scale_shutdown));
     #[cfg(not(test))]
     {
         sub_tasks.push(
