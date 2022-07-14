@@ -862,6 +862,11 @@ impl ScalarImpl {
                 b,
                 data_type.get_interval_type()?,
             )?),
+            TypeName::Timestamp => {
+                ScalarImpl::NaiveDateTime(NaiveDateTimeWrapper::from_protobuf_bytes(b)?)
+            }
+            TypeName::Time => ScalarImpl::NaiveTime(NaiveTimeWrapper::from_protobuf_bytes(b)?),
+            TypeName::Date => ScalarImpl::NaiveDate(NaiveDateWrapper::from_protobuf_bytes(b)?),
             TypeName::Struct => {
                 let struct_value: ProstStructValue = Message::decode(b.as_slice())?;
                 let fields: Vec<Datum> = struct_value
