@@ -254,7 +254,7 @@ fn infer_internal_table_catalog(input: PlanRef, join_key_indices: Vec<usize>) ->
     let mut internal_table_catalog_builder = TableCatalogBuilder::new();
 
     columns_fields.iter().for_each(|field| {
-        internal_table_catalog_builder.add_column_desc_from_field_without_order_type(field)
+        internal_table_catalog_builder.add_column(field);
     });
 
     pk_indices.iter().for_each(|idx| {

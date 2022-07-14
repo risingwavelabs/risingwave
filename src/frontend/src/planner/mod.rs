@@ -27,6 +27,7 @@ mod set_expr;
 mod statement;
 mod update;
 mod values;
+pub use query::LIMIT_ALL_COUNT;
 
 /// `Planner` converts a bound statement to a [`crate::optimizer::plan_node::PlanNode`] tree
 pub struct Planner {

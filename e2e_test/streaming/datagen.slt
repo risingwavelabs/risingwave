@@ -32,8 +32,8 @@ create materialized source s1 (v1 int)  with ( 'connector' = 'datagen' ,'fields.
 # Wait enough time to ensure Datagen connector generate data
 sleep 2s
 
-query II rowsort
-select v1 from s1 where v1 is not null limit 10;
+query I
+select v1 from s1 order by v1 limit 10;
 ----
 1
 2
