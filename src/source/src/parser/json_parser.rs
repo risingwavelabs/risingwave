@@ -36,19 +36,28 @@ impl SourceParser for JSONParser {
                 .iter()
                 .map(|column| {
                     if column.skip_parse {
-                        None
+                        Ok(None)
                     } else {
-                        json_parse_value(column, value.get(&column.name)).ok()
+                        json_parse_value(&column.into(), value.get(&column.name)).map_err(|e| {
+                            tracing::error!(
+                                "failed to process value ({}): {}",
+                                String::from_utf8_lossy(payload),
+                                e
+                            );
+                            e.into()
+                        })
                     }
                 })
-                .collect::<Vec<Datum>>()],
+                .collect::<Result<Vec<Datum>>>()?],
         })
     }
 }
 
 #[cfg(test)]
 mod tests {
-    use risingwave_common::catalog::ColumnId;
+    use itertools::Itertools;
+    use risingwave_common::array::StructValue;
+    use risingwave_common::catalog::{ColumnDesc, ColumnId};
     use risingwave_common::types::{DataType, ScalarImpl};
     use risingwave_expr::vector_op::cast::{str_to_date, str_to_timestamp};
 
@@ -64,60 +73,67 @@ mod tests {
                 data_type: DataType::Int32,
                 column_id: ColumnId::from(0),
                 skip_parse: false,
+                fields: vec![],
             },
             SourceColumnDesc {
                 name: "bool".to_string(),
                 data_type: DataType::Boolean,
                 column_id: ColumnId::from(2),
                 skip_parse: false,
+                fields: vec![],
             },
             SourceColumnDesc {
                 name: "i16".to_string(),
                 data_type: DataType::Int16,
                 column_id: ColumnId::from(3),
                 skip_parse: false,
+                fields: vec![],
             },
             SourceColumnDesc {
                 name: "i64".to_string(),
                 data_type: DataType::Int64,
                 column_id: ColumnId::from(4),
                 skip_parse: false,
+                fields: vec![],
             },
             SourceColumnDesc {
                 name: "f32".to_string(),
                 data_type: DataType::Float32,
                 column_id: ColumnId::from(5),
                 skip_parse: false,
+                fields: vec![],
             },
             SourceColumnDesc {
                 name: "f64".to_string(),
                 data_type: DataType::Float64,
                 column_id: ColumnId::from(6),
                 skip_parse: false,
+                fields: vec![],
             },
             SourceColumnDesc {
                 name: "varchar".to_string(),
                 data_type: DataType::Varchar,
                 column_id: ColumnId::from(7),
                 skip_parse: false,
+                fields: vec![],
             },
             SourceColumnDesc {
                 name: "date".to_string(),
                 data_type: DataType::Date,
                 column_id: ColumnId::from(8),
                 skip_parse: false,
+                fields: vec![],
             },
             SourceColumnDesc {
                 name: "timestamp".to_string(),
                 data_type: DataType::Timestamp,
                 column_id: ColumnId::from(9),
                 skip_parse: false,
+                fields: vec![],
             },
         ];
 
-        let result = parser.parse(payload, &descs);
-        assert!(result.is_ok());
-        let event = result.unwrap();
+        let event = parser.parse(payload, &descs).unwrap();
         let row = event.rows.first().unwrap();
         assert_eq!(row.len(), descs.len());
         assert!(row[0].eq(&Some(ScalarImpl::Int32(1))));
@@ -146,5 +162,77 @@ mod tests {
         let payload = r#"{"i32:1}"#.as_bytes();
         let result = parser.parse(payload, &descs);
         assert!(result.is_err());
+    }
+
+    #[test]
+    fn test_json_parse_struct() {
+        let parser = JSONParser {};
+
+        let descs = vec![
+            ColumnDesc::new_struct(
+                "data",
+                0,
+                "",
+                vec![
+                    ColumnDesc::new_atomic(DataType::Timestamp, "created_at", 1),
+                    ColumnDesc::new_atomic(DataType::Varchar, "id", 2),
+                    ColumnDesc::new_atomic(DataType::Varchar, "text", 3),
+                    ColumnDesc::new_atomic(DataType::Varchar, "lang", 4),
+                ],
+            ),
+            ColumnDesc::new_struct(
+                "author",
+                5,
+                "",
+                vec![
+                    ColumnDesc::new_atomic(DataType::Timestamp, "created_at", 6),
+                    ColumnDesc::new_atomic(DataType::Varchar, "id", 7),
+                    ColumnDesc::new_atomic(DataType::Varchar, "name", 8),
+                    ColumnDesc::new_atomic(DataType::Varchar, "username", 9),
+                ],
+            ),
+        ]
+        .iter()
+        .map(SourceColumnDesc::from)
+        .collect_vec();
+        let payload = r#"
+        {
+            "data": {
+              "created_at": "2022-07-13 20:48:37.07",
+              "id": "1732524418112319151",
+              "text": "Here man favor ourselves mysteriously most her sigh in straightaway for afterwards.",           
+              "lang": "English"
+            },
+            "author": {
+              "created_at": "2018-01-29 12:19:11.07",
+              "id": "7772634297",
+              "name": "Lily Frami yet",
+              "username": "Dooley5659"
+            }
+          }
+        "#
+        .as_bytes();
+        let event = parser.parse(payload, &descs).unwrap();
+        let row = event.rows[0].clone();
+
+        let expected = vec![
+            Some(ScalarImpl::Struct(StructValue::new(vec![
+                Some(ScalarImpl::NaiveDateTime(
+                    str_to_timestamp("2022-07-13 20:48:37.07").unwrap()
+                )),
+                Some(ScalarImpl::Utf8("1732524418112319151".to_string())),
+                Some(ScalarImpl::Utf8("Here man favor ourselves mysteriously most her sigh in straightaway for afterwards.".to_string())),
+                Some(ScalarImpl::Utf8("English".to_string())),
+            ]))),
+            Some(ScalarImpl::Struct(StructValue::new(vec![
+                Some(ScalarImpl::NaiveDateTime(
+                    str_to_timestamp("2018-01-29 12:19:11.07").unwrap()
+                )),
+                Some(ScalarImpl::Utf8("7772634297".to_string())),
+                Some(ScalarImpl::Utf8("Lily Frami yet".to_string())),
+                Some(ScalarImpl::Utf8("Dooley5659".to_string())),
+            ]) ))
+        ];
+        assert_eq!(row, expected);
     }
 }
