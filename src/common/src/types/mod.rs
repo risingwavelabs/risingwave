@@ -995,4 +995,23 @@ mod tests {
         assert_eq!(std::mem::size_of::<ScalarImpl>(), 32);
         assert_eq!(std::mem::size_of::<Datum>(), 32);
     }
+
+    #[test]
+    fn test_protobuf_conversion() {
+        let v = ScalarImpl::NaiveDateTime(NaiveDateTimeWrapper::default());
+        let actual =
+            ScalarImpl::bytes_to_scalar(&v.to_protobuf(), &DataType::Timestamp.to_protobuf())
+                .unwrap();
+        assert_eq!(v, actual);
+
+        let v = ScalarImpl::NaiveDate(NaiveDateWrapper::default());
+        let actual =
+            ScalarImpl::bytes_to_scalar(&v.to_protobuf(), &DataType::Date.to_protobuf()).unwrap();
+        assert_eq!(v, actual);
+
+        let v = ScalarImpl::NaiveTime(NaiveTimeWrapper::default());
+        let actual =
+            ScalarImpl::bytes_to_scalar(&v.to_protobuf(), &DataType::Time.to_protobuf()).unwrap();
+        assert_eq!(v, actual);
+    }
 }
