@@ -42,6 +42,10 @@ message AddDispatcherMutation {
   map<uint32, source.ConnectorSplits> actor_splits = 2;
 }
 
+message PauseMutation {}
+
+message ResumeMutation {}
+
 message Barrier {
   data.Epoch epoch = 1;
   oneof mutation {
@@ -50,6 +54,8 @@ message Barrier {
     AddMutation add = 5;
     AddDispatcherMutation add_dispatcher = 8;
     SourceChangeSplitMutation splits = 7;
+    PauseMutation pause = 9;
+    ResumeMutation resume = 10;
   }
   bytes span = 6;
 }

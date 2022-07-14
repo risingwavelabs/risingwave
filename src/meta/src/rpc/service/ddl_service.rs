@@ -13,6 +13,7 @@
 // limitations under the License.
 
 use std::collections::{HashMap, HashSet};
+use std::sync::Arc;
 
 use itertools::Itertools;
 use risingwave_common::catalog::CatalogVersion;
@@ -25,6 +26,7 @@ use risingwave_pb::ddl_service::ddl_service_server::DdlService;
 use risingwave_pb::ddl_service::*;
 use risingwave_pb::stream_plan::stream_node::NodeBody;
 use risingwave_pb::stream_plan::{StreamFragmentGraph, StreamNode};
+use tokio::sync::RwLock;
 use tonic::{Request, Response, Status};
 
 use crate::cluster::ClusterManagerRef;
@@ -46,6 +48,7 @@ pub struct DdlServiceImpl<S: MetaStore> {
     sink_manager: SinkManagerRef<S>,
     cluster_manager: ClusterManagerRef<S>,
     fragment_manager: FragmentManagerRef<S>,
+    ddl_lock: Arc<RwLock<()>>,
 }
 
 impl<S> DdlServiceImpl<S>
@@ -60,6 +63,7 @@ where
         sink_manager: SinkManagerRef<S>,
         cluster_manager: ClusterManagerRef<S>,
         fragment_manager: FragmentManagerRef<S>,
+        ddl_lock: Arc<RwLock<()>>,
     ) -> Self {
         Self {
             env,
@@ -69,6 +73,7 @@ where
             sink_manager,
             cluster_manager,
             fragment_manager,
+            ddl_lock,
         }
     }
 }
@@ -168,6 +173,7 @@ where
         &self,
         request: Request<CreateSourceRequest>,
     ) -> Result<Response<CreateSourceResponse>, Status> {
+        self.ddl_lock.read().await;
         let mut source = request.into_inner().source.unwrap();
 
         let id = self
@@ -208,6 +214,7 @@ where
         &self,
         request: Request<DropSourceRequest>,
     ) -> Result<Response<DropSourceResponse>, Status> {
+        self.ddl_lock.read().await;
         let source_id = request.into_inner().source_id;
 
         // 1. Drop source in catalog. Ref count will be checked.
@@ -279,6 +286,7 @@ where
         &self,
         request: Request<CreateMaterializedViewRequest>,
     ) -> Result<Response<CreateMaterializedViewResponse>, Status> {
+        self.ddl_lock.read().await;
         self.env.idle_manager().record_activity();
 
         let req = request.into_inner();
@@ -397,6 +405,7 @@ where
         &self,
         request: Request<DropMaterializedViewRequest>,
     ) -> Result<Response<DropMaterializedViewResponse>, Status> {
+        self.ddl_lock.read().await;
         use risingwave_common::catalog::TableId;
 
         self.env.idle_manager().record_activity();
@@ -425,6 +434,7 @@ where
         &self,
         request: Request<CreateMaterializedSourceRequest>,
     ) -> Result<Response<CreateMaterializedSourceResponse>, Status> {
+        self.ddl_lock.read().await;
         let request = request.into_inner();
         let source = request.source.unwrap();
         let mview = request.materialized_view.unwrap();
@@ -447,6 +457,7 @@ where
         &self,
         request: Request<DropMaterializedSourceRequest>,
     ) -> Result<Response<DropMaterializedSourceResponse>, Status> {
+        self.ddl_lock.read().await;
         let request = request.into_inner();
         let source_id = request.source_id;
         let table_id = request.table_id;
