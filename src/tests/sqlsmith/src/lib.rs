@@ -121,7 +121,7 @@ impl<'a, R: Rng> SqlGenerator<'a, R> {
         let query = Box::new(query);
         let name = ObjectName(vec![Ident::new(name)]);
         let mview = Statement::CreateView {
-            or_replace: true,
+            or_replace: false,
             materialized: true,
             name,
             columns: vec![],
