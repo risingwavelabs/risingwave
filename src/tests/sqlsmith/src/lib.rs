@@ -75,11 +75,11 @@ struct SqlGenerator<'a, R: Rng> {
     /// e.g. GROUP BY clause will constrain bound_columns.
     bound_columns: Vec<Column>,
 
-    /// SqlGenerator can be used in two contexts:
+    /// SqlGenerator can be used in two execution modes:
     /// 1. Generating Query Statements.
     /// 2. Generating queries for CREATE MATERIALIZED VIEW.
-    ///    In this context, FROM clause is populated with
-    ///    TableFactor.
+    ///    Under this mode certain restrictions and workarounds are applied
+    ///    for unsupported stream executors.
     is_mview: bool,
 }
 
@@ -247,12 +247,12 @@ impl<'a, R: Rng> SqlGenerator<'a, R> {
     }
 
     fn gen_from(&mut self) -> Vec<TableWithJoins> {
-        let mut from = vec![];
         if self.is_mview {
             assert!(!self.tables.is_empty());
             return vec![self.gen_from_relation()];
         }
-        for _ in 1..self.tables.len() {
+        let mut from = vec![];
+        for _ in 0..self.tables.len() {
             if self.flip_coin() {
                 from.push(self.gen_from_relation());
             }
@@ -305,7 +305,8 @@ pub fn sql_gen(rng: &mut impl Rng, tables: Vec<Table>) -> String {
     format!("{}", gen.gen_stmt())
 }
 
-/// Generate a random MVIEW string.
+/// Generate a random CREATE MATERIALIZED VIEW sql string.
+/// These are derived queries on `tables`.
 pub fn mview_sql_gen<R: Rng>(rng: &mut R, tables: Vec<Table>, name: &str) -> (String, Table) {
     let mut gen = SqlGenerator::new_for_mview(rng, tables);
     let (mview, table) = gen.gen_mview(name);
