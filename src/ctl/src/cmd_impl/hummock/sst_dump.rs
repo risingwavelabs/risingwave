@@ -12,6 +12,8 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+use std::collections::HashMap;
+
 use bytes::Buf;
 use risingwave_hummock_sdk::compaction_group::hummock_version_ext::HummockVersionExt;
 use risingwave_object_store::object::{BlockLocation, ObjectStore};
@@ -30,8 +32,12 @@ pub async fn sst_dump() -> anyhow::Result<()> {
     // Retrieves the latest HummockVersion from the meta client so we can access the SSTableInfo
     let version = meta_client.pin_version(u64::MAX).await?;
 
+    // Collect all SstableIdInfos. We need them for time stamps.
+    let mut id_info_map = HashMap::new();
     let sstable_id_infos = meta_client.list_sstable_id_infos(version.id).await?;
-    let mut sstable_id_infos_iter = sstable_id_infos.iter();
+    sstable_id_infos.iter().for_each(|id_info| {
+        id_info_map.insert(id_info.id, id_info);
+    });
 
     for level in version.get_combined_levels() {
         for sstable_info in level.table_infos.clone() {
@@ -43,7 +49,7 @@ pub async fn sst_dump() -> anyhow::Result<()> {
             let sstable = sstable_cache.value().as_ref();
             let sstable_meta = &sstable.meta;
 
-            let sstable_id_info = sstable_id_infos_iter.next().unwrap();
+            let sstable_id_info = id_info_map[&id];
 
             println!("SST id: {}", id);
             println!("-------------------------------------");
