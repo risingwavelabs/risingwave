@@ -939,7 +939,10 @@ mod tests {
         }
     }
 
+    // TODO: this test contains update being shuffled to different partitions, which is not
+    // supported for now.
     #[tokio::test]
+    #[ignore]
     async fn test_hash_dispatcher_complex() {
         test_hash_dispatcher_complex_inner().await
     }
