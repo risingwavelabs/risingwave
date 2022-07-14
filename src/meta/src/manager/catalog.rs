@@ -446,19 +446,24 @@ where
         let mut tables = Vec::new();
         for fragment in fragments {
             let table_id = fragment.table_id().table_id();
-            let table = Table::select(self.env.meta_store(), &table_id).await?;
-            if let Some(mut table) = table {
-                if let Some(ref mut mapping) = table.mapping {
-                    let mut migrated = false;
-                    mapping.data.iter_mut().for_each(|id| {
-                        if migrate_map.contains_key(id) {
-                            migrated = true;
-                            *id = migrate_map.get(id).unwrap().id;
+            let internal_tables = fragment.internal_table_ids();
+            let mut table_to_updates = vec![table_id];
+            table_to_updates.extend(internal_tables);
+            for table_id in table_to_updates {
+                let table = Table::select(self.env.meta_store(), &table_id).await?;
+                if let Some(mut table) = table {
+                    if let Some(ref mut mapping) = table.mapping {
+                        let mut migrated = false;
+                        mapping.data.iter_mut().for_each(|id| {
+                            if migrate_map.contains_key(id) {
+                                migrated = true;
+                                *id = migrate_map.get(id).unwrap().id;
+                            }
+                        });
+                        if migrated {
+                            table.upsert_in_transaction(&mut transaction)?;
+                            tables.push(table);
                         }
-                    });
-                    if migrated {
-                        table.upsert_in_transaction(&mut transaction)?;
-                        tables.push(table);
                     }
                 }
             }
