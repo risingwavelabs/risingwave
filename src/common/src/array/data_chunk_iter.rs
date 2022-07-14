@@ -340,6 +340,10 @@ impl Row {
     pub fn by_indices(&self, indices: &[usize]) -> Row {
         Row(indices.iter().map(|&idx| self.0[idx].clone()).collect_vec())
     }
+
+    pub fn into_value_at(self, idx: usize) -> Datum {
+        self.0.into_iter().nth(idx).unwrap()
+    }
 }
 
 /// Deserializer of the `Row`.
