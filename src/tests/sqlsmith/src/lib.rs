@@ -29,7 +29,7 @@ pub use expr::print_function_table;
 mod relation;
 mod scalar;
 
-#[derive(Clone)]
+#[derive(Clone, Debug)]
 pub struct Table {
     pub name: String,
     pub columns: Vec<Column>,
@@ -62,7 +62,7 @@ impl From<ColumnDef> for Column {
     }
 }
 
-pub struct SqlGenerator<'a, R: Rng> {
+struct SqlGenerator<'a, R: Rng> {
     tables: Vec<Table>,
     rng: &'a mut R,
 
@@ -116,21 +116,20 @@ impl<'a, R: Rng> SqlGenerator<'a, R> {
         Statement::Query(Box::new(query))
     }
 
-    pub fn gen_mview(&mut self, name: &str) -> (Statement, Vec<Column>) {
+    pub fn gen_mview(&mut self, name: &str) -> (Statement, Table) {
         let (query, schema) = self.gen_query();
         let query = Box::new(query);
+        let table = Table { name: name.to_string(), columns: schema };
         let name = ObjectName(vec![Ident::new(name)]);
         let mview = Statement::CreateView {
             or_replace: false,
             materialized: true,
-            name,
+            name: name.clone(),
             columns: vec![],
             query,
             with_options: vec![],
         };
-        println!("created mview: {}", mview);
-        println!("schema: {:#?}", schema);
-        (mview, schema)
+        (mview, table)
     }
 
     fn gen_query(&mut self) -> (Query, Vec<Column>) {
@@ -303,7 +302,9 @@ pub fn sql_gen(rng: &mut impl Rng, tables: Vec<Table>) -> String {
     format!("{}", gen.gen_stmt())
 }
 
-/// Generate a random SQL string.
-pub fn create_mview_sql_gen<R: Rng>(rng: &mut R, tables: Vec<Table>) -> SqlGenerator<R> {
-    SqlGenerator::new_for_mview(rng, tables)
+/// Generate a random MVIEW string.
+pub fn mview_sql_gen<R: Rng>(rng: &mut R, tables: Vec<Table>, name: &str) -> (String, Table) {
+    let mut gen = SqlGenerator::new_for_mview(rng, tables);
+    let (mview, table) = gen.gen_mview(name);
+    (mview.to_string(), table)
 }

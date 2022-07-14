@@ -17,7 +17,7 @@
 use std::sync::Arc;
 use std::{env, panic};
 
-use rand::SeedableRng;
+use rand::{Rng, SeedableRng};
 use risingwave_frontend::binder::Binder;
 use risingwave_frontend::planner::Planner;
 use risingwave_frontend::session::{OptimizerContext, OptimizerContextRef, SessionImpl};
@@ -25,10 +25,10 @@ use risingwave_frontend::test_utils::LocalFrontend;
 use risingwave_frontend::{handler, FrontendOpts};
 use risingwave_sqlparser::ast::Statement;
 use risingwave_sqlparser::parser::Parser;
-use risingwave_sqlsmith::{create_mview_sql_gen, sql_gen, Table};
+use risingwave_sqlsmith::{mview_sql_gen, sql_gen, Table};
 
 /// Create the tables defined in testdata.
-async fn create_tables(session: Arc<SessionImpl>) -> Vec<Table> {
+async fn create_tables(session: Arc<SessionImpl>, rng: &mut impl Rng) -> Vec<Table> {
     let sql = std::fs::read_to_string("tests/testdata/tpch.sql").unwrap();
     let statements =
         Parser::parse_sql(&sql).unwrap_or_else(|_| panic!("Failed to parse SQL: {}", sql));
@@ -54,33 +54,25 @@ async fn create_tables(session: Arc<SessionImpl>) -> Vec<Table> {
     // ensure tables are instantiated
     handler::handle(session.clone(), Statement::Flush, "").await.unwrap();
 
-    let mut rng = rand::thread_rng();
-    let mut sql_generator = create_mview_sql_gen(&mut rng, tables.clone());
-
     // Generate Materialized Views 1:1 with tables, so they have equal weight
     // of being queried.
-    // for i in 0..n_statements {
-        // let (stmt, columns) = sql_generator.gen_mview(&format!("m{}", i));
-        let (stmt, columns) = sql_generator.gen_mview(&format!("m{}", 0));
-        match stmt {
-            Statement::CreateView { ref name, .. } => {
-                let stmt_str = format!("{}", stmt);
-                let name = format!("{}", name);
-                handler::handle(session.clone(), stmt, &stmt_str)
-                    .await
-                    .unwrap();
-                tables.push(Table { name, columns })
-            }
-            _ => panic!("Unexpected statement: {}", stmt),
-        }
-    // }
+    for i in 0..n_statements {
+        let (sql, table) = mview_sql_gen(rng, tables.clone(), &format!("m{}", i));
+        let stmts = Parser::parse_sql(&sql).unwrap_or_else(|_| panic!("Failed to parse SQL: {}", sql));
+        let stmt = stmts[0].clone();
+        println!("stmt: {}", stmt);
+        println!("table schema: {:#?}", table);
+        handler::handle(session.clone(), stmt, &sql)
+            .await
+            .unwrap();
+        tables.push(table);
+    }
     tables
 }
 
 async fn run_sqlsmith_with_seed(seed: u64) {
     let frontend = LocalFrontend::new(FrontendOpts::default()).await;
     let session = frontend.session_ref();
-    let tables = create_tables(session.clone()).await;
 
     let mut rng;
     if let Ok(x) = env::var("RW_RANDOM_SEED_SQLSMITH") && x == "true" {
@@ -88,6 +80,8 @@ async fn run_sqlsmith_with_seed(seed: u64) {
     } else {
         rng = rand::rngs::SmallRng::seed_from_u64(seed);
     }
+
+    let tables = create_tables(session.clone(), &mut rng).await;
 
     for _ in 0..512 {
         let sql = sql_gen(&mut rng, tables.clone());
