@@ -16,9 +16,11 @@ use std::collections::HashMap;
 
 use bytes::Buf;
 use risingwave_hummock_sdk::compaction_group::hummock_version_ext::HummockVersionExt;
+use risingwave_hummock_sdk::key::{get_epoch, get_table_id, user_key};
 use risingwave_object_store::object::{BlockLocation, ObjectStore};
 use risingwave_rpc_client::HummockMetaClient;
-use risingwave_storage::hummock::CompressionAlgorithm;
+use risingwave_storage::hummock::value::HummockValue;
+use risingwave_storage::hummock::{Block, BlockHolder, BlockIterator, CompressionAlgorithm};
 use risingwave_storage::monitor::StoreLocalStatistic;
 
 use crate::common::HummockServiceOpts;
@@ -79,8 +81,11 @@ pub async fn sst_dump() -> anyhow::Result<()> {
             }
 
             let data_path = sstable_store.get_sst_data_path(id);
-            println!("Block Metadata:");
+            println!("Blocks:");
             for (i, block_meta) in sstable_meta.block_metas.iter().enumerate() {
+                println!("\tBlock {}", i);
+                println!("\t-----------");
+
                 // Retrieve encoded block data in bytes
                 let store = sstable_store.store();
                 let block_loc = BlockLocation {
@@ -95,9 +100,43 @@ pub async fn sst_dump() -> anyhow::Result<()> {
                 let compression = CompressionAlgorithm::decode(&mut &block_data[len - 9..len - 8])?;
 
                 println!(
-                    "\tBlock {}, Offset: {}, Size: {}, Checksum: {}, Compression Algorithm: {:?}",
-                    i, block_meta.offset, block_meta.len, checksum, compression
+                    "\tOffset: {}, Size: {}, Checksum: {}, Compression Algorithm: {:?}",
+                    block_meta.offset, block_meta.len, checksum, compression
                 );
+
+                println!("\tKV-Pairs:");
+
+                let block = Box::new(Block::decode(block_data).unwrap());
+                let holder = BlockHolder::from_owned_block(block);
+                let mut block_iter = BlockIterator::new(holder);
+                block_iter.seek_to_first();
+
+                while block_iter.is_valid() {
+                    let full_key = block_iter.key();
+                    let user_key = user_key(full_key);
+
+                    let full_val = block_iter.value();
+                    let humm_val = HummockValue::from_slice(block_iter.value())?;
+                    let (val_type, val_meta, user_val) = match humm_val {
+                        HummockValue::Put(meta, uval) => ("Put", meta.vnode, uval),
+                        HummockValue::Delete(meta) => ("Delete", meta.vnode, &[] as &[u8]),
+                    };
+
+                    let epoch = get_epoch(full_key);
+                    let table_id = get_table_id(full_key).unwrap();
+
+                    println!("\t\t  full key: {:02x?}", full_key);
+                    println!("\t\tfull value: {:02x?}", full_val);
+                    println!("\t\t  user key: {:02x?}", user_key);
+                    println!("\t\tuser value: {:02x?}", user_val);
+                    println!("\t\tvalue-meta: {}", val_meta);
+                    println!("\t\t     epoch: {}", epoch);
+                    println!("\t\t  table ID: {}", table_id);
+                    println!("\t\t      type: {}", val_type);
+                    println!();
+
+                    block_iter.next();
+                }
             }
 
             println!("Estimated Table Size: {}", sstable_meta.estimated_size);
