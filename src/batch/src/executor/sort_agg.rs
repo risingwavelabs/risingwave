@@ -332,6 +332,7 @@ mod tests {
                 ..Default::default()
             }),
             distinct: false,
+            filter: None,
         };
 
         let count_star = AggStateFactory::new(&prost)?.create_agg_state()?;
@@ -424,6 +425,7 @@ mod tests {
                 ..Default::default()
             }),
             distinct: false,
+            filter: None,
         };
 
         let count_star = AggStateFactory::new(&prost)?.create_agg_state()?;
@@ -551,6 +553,7 @@ mod tests {
                 ..Default::default()
             }),
             distinct: false,
+            filter: None,
         };
 
         let sum_agg = AggStateFactory::new(&prost)?.create_agg_state()?;
@@ -634,6 +637,7 @@ mod tests {
                 ..Default::default()
             }),
             distinct: false,
+            filter: None,
         };
 
         let sum_agg = AggStateFactory::new(&prost)?.create_agg_state()?;
@@ -756,6 +760,7 @@ mod tests {
                 ..Default::default()
             }),
             distinct: false,
+            filter: None,
         };
 
         let sum_agg = AggStateFactory::new(&prost)?.create_agg_state()?;

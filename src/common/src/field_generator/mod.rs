@@ -24,7 +24,7 @@ use serde_json::Value;
 pub use timestamp::*;
 pub use varchar::*;
 
-use crate::types::DataType;
+use crate::types::{DataType, Datum};
 
 pub const DEFAULT_MIN: i16 = i16::MIN;
 pub const DEFAULT_MAX: i16 = i16::MAX;
@@ -44,6 +44,8 @@ pub trait NumericFieldRandomGenerator {
         Self: Sized;
 
     fn generate(&mut self, offset: u64) -> Value;
+
+    fn generate_datum(&mut self, offset: u64) -> Datum;
 }
 
 /// fields that can be continuously generated impl this trait
@@ -53,6 +55,8 @@ pub trait NumericFieldSequenceGenerator {
         Self: Sized;
 
     fn generate(&mut self) -> Value;
+
+    fn generate_datum(&mut self) -> Datum;
 }
 
 /// the way that datagen create the field data. such as 'sequence' or 'random'.
@@ -171,6 +175,24 @@ impl FieldGeneratorImpl {
             FieldGeneratorImpl::F64Random(f) => f.generate(offset),
             FieldGeneratorImpl::Varchar(f) => f.generate(),
             FieldGeneratorImpl::Timestamp(f) => f.generate(),
+        }
+    }
+
+    pub fn generate_datum(&mut self, offset: u64) -> Datum {
+        match self {
+            FieldGeneratorImpl::I16Sequence(f) => f.generate_datum(),
+            FieldGeneratorImpl::I32Sequence(f) => f.generate_datum(),
+            FieldGeneratorImpl::I64Sequence(f) => f.generate_datum(),
+            FieldGeneratorImpl::F32Sequence(f) => f.generate_datum(),
+            FieldGeneratorImpl::F64Sequence(f) => f.generate_datum(),
+            FieldGeneratorImpl::I16Random(f) => f.generate_datum(offset),
+            FieldGeneratorImpl::I32Random(f) => f.generate_datum(offset),
+            FieldGeneratorImpl::I64Random(f) => f.generate_datum(offset),
+            FieldGeneratorImpl::F32Random(f) => f.generate_datum(offset),
+            FieldGeneratorImpl::F64Random(f) => f.generate_datum(offset),
+            // TODO: add generate_datum in VarcharField and TimestampField
+            FieldGeneratorImpl::Varchar(_) => todo!(),
+            FieldGeneratorImpl::Timestamp(_) => todo!(),
         }
     }
 }
