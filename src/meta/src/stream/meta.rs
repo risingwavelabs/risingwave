@@ -343,7 +343,7 @@ where
                     };
                 });
             if flag {
-                fragment.update_vnode_mapping(migrate_map);
+                fragment.update_vnode_mapping(&parallel_unit_migrate_map);
                 new_fragments.push(fragment.clone());
             }
         });
