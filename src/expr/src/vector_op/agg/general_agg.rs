@@ -18,6 +18,7 @@ use risingwave_common::array::*;
 use risingwave_common::error::{ErrorCode, Result};
 use risingwave_common::types::*;
 
+use crate::expr::ExpressionRef;
 use crate::vector_op::agg::aggregator::Aggregator;
 use crate::vector_op::agg::functions::RTFn;
 
@@ -32,6 +33,7 @@ where
     init_result: Option<R::OwnedItem>,
     result: Option<R::OwnedItem>,
     f: F,
+    filter: ExpressionRef,
     _phantom: PhantomData<T>,
 }
 impl<T, F, R> GeneralAgg<T, F, R>
@@ -45,6 +47,7 @@ where
         input_col_idx: usize,
         f: F,
         init_result: Option<R::OwnedItem>,
+        filter: ExpressionRef,
     ) -> Self {
         Self {
             return_type,
@@ -52,35 +55,45 @@ where
             init_result: init_result.clone(),
             result: init_result,
             f,
+            filter,
             _phantom: PhantomData,
         }
     }
 
-    pub(super) fn update_single_concrete(&mut self, input: &T, row_id: usize) -> Result<()> {
-        let datum = self
-            .f
-            .eval(
-                self.result.as_ref().map(|x| x.as_scalar_ref()),
-                input.value_at(row_id),
-            )?
-            .map(|x| x.to_owned_scalar());
-        self.result = datum;
+    pub(super) fn update_single_concrete(
+        &mut self,
+        array: &T,
+        input: &DataChunk,
+        row_id: usize,
+    ) -> Result<()> {
+        let filter_res = self.apply_filter_on_row(input, row_id)?;
+        if filter_res {
+            let tmp = self
+                .f
+                .eval(
+                    self.result.as_ref().map(|x| x.as_scalar_ref()),
+                    array.value_at(row_id),
+                )?
+                .map(|x| x.to_owned_scalar());
+            self.result = tmp;
+        }
         Ok(())
     }
 
     pub(super) fn update_multi_concrete(
         &mut self,
-        input: &T,
+        array: &T,
+        input: &DataChunk,
         start_row_id: usize,
         end_row_id: usize,
     ) -> Result<()> {
         let mut cur = self.result.as_ref().map(|x| x.as_scalar_ref());
-        for i in input
-            .iter()
-            .skip(start_row_id)
-            .take(end_row_id - start_row_id)
-        {
-            cur = self.f.eval(cur, i)?;
+        for row_id in start_row_id..end_row_id {
+            let filter_res = self.apply_filter_on_row(input, row_id)?;
+            if filter_res {
+                let datum_ref = array.value_at(row_id);
+                cur = self.f.eval(cur, datum_ref)?;
+            }
         }
         self.result = cur.map(|x| x.to_owned_scalar());
         Ok(())
@@ -95,6 +108,21 @@ where
         let res = self.output_concrete(builder);
         self.result = self.init_result.clone();
         res
+    }
+
+    /// `apply_filter_on_row` apply a filter on the given row, and return if the row satisfies the
+    /// filter or not
+    /// # SAFETY
+    /// the given row must be visible
+    fn apply_filter_on_row(&self, input: &DataChunk, row_id: usize) -> Result<bool> {
+        let (row, visible) = input.row_at(row_id)?;
+        assert!(visible);
+        let filter_res = if let Some(ScalarImpl::Bool(v)) = self.filter.eval_row(&Row::from(row))? {
+            v
+        } else {
+            false
+        };
+        Ok(filter_res)
     }
 }
 
@@ -112,7 +140,7 @@ macro_rules! impl_aggregator {
                 if let ArrayImpl::$input_variant(i) =
                     input.column_at(self.input_col_idx).array_ref()
                 {
-                    self.update_single_concrete(i, row_id)
+                    self.update_single_concrete(i, input, row_id)
                 } else {
                     Err(ErrorCode::InternalError(format!(
                         "Input fail to match {}.",
@@ -131,7 +159,7 @@ macro_rules! impl_aggregator {
                 if let ArrayImpl::$input_variant(i) =
                     input.column_at(self.input_col_idx).array_ref()
                 {
-                    self.update_multi_concrete(i, start_row_id, end_row_id)
+                    self.update_multi_concrete(i, input, start_row_id, end_row_id)
                 } else {
                     Err(ErrorCode::InternalError(format!(
                         "Input fail to match {} or builder fail to match {}.",
@@ -211,7 +239,7 @@ mod tests {
     use risingwave_common::types::Decimal;
 
     use super::*;
-    use crate::expr::AggKind;
+    use crate::expr::{AggKind, Expression, LiteralExpression};
     use crate::vector_op::agg::aggregator::create_agg_state_unary;
 
     fn eval_agg(
@@ -223,7 +251,11 @@ mod tests {
     ) -> Result<ArrayImpl> {
         let len = input.len();
         let input_chunk = DataChunk::new(vec![Column::new(input)], len);
-        let mut agg_state = create_agg_state_unary(input_type, 0, agg_type, return_type, false)?;
+        let filter: ExpressionRef = Arc::from(
+            LiteralExpression::new(DataType::Boolean, Some(ScalarImpl::Bool(true))).boxed(),
+        );
+        let mut agg_state =
+            create_agg_state_unary(input_type, 0, agg_type, return_type, false, filter)?;
         agg_state.update_multi(&input_chunk, 0, input_chunk.cardinality())?;
         agg_state.output(&mut builder)?;
         builder.finish().map_err(Into::into)

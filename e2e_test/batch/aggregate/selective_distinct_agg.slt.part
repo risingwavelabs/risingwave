@@ -1,0 +1,22 @@
+statement ok
+SET RW_IMPLICIT_FLUSH TO true;
+
+statement ok
+create table t(v1 int, v2 int, v3 int)
+
+statement ok
+insert into t values (2, 200, -1), (1, 200, -2), (3, 100, -2), (3, 300, -1), (2, 100, -1), (1, 500, -2), (6, 500, -1)
+
+query I
+select sum(distinct v1) filter (where v1 * 100 >= v2) from t
+----
+11
+
+query II
+select v3, sum(distinct v1) filter(where v1 * 100 >= v2) from t group by v3 order by v3
+----
+-2 3
+-1 11
+
+statement ok
+drop table t
