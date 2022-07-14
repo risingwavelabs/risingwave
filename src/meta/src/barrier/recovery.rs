@@ -31,6 +31,7 @@ use risingwave_pb::stream_service::{
     UpdateActorsRequest,
 };
 use tokio_retry::strategy::{jitter, ExponentialBackoff};
+use tracing::warn;
 use uuid::Uuid;
 
 use crate::barrier::command::CommandContext;
@@ -163,10 +164,7 @@ where
             let new_nodes = current_nodes
                 .iter()
                 .filter(|&node| {
-                    !info.node_map.contains_key(&node.id)
-                        && !chosen_ids.contains(&node.id)
-                        && info.actor_map.get(&expired_workers[cur]).unwrap().len()
-                            <= node.parallel_units.len()
+                    !info.node_map.contains_key(&node.id) && !chosen_ids.contains(&node.id)
                 })
                 .collect_vec();
             for new_node in new_nodes {
@@ -174,13 +172,15 @@ where
                 let actors = info.actor_map.get(&expired_workers[cur]).unwrap();
                 let parallel_units = &new_node.parallel_units;
                 let actors_len = actors.len();
+                let pu_len = parallel_units.len();
                 for idx in 0..actors_len {
-                    if cur == workers_size {
-                        break;
-                    }
-                    migrate_map.insert(actors[idx], parallel_units[idx].clone());
-                    cur += 1;
+                    migrate_map.insert(actors[idx], parallel_units[idx % pu_len].clone());
                 }
+                cur += 1;
+                debug!(
+                    "got new worker {} , migrate process ({}/{})",
+                    new_node.id, cur, workers_size
+                );
             }
             tokio::time::sleep(std::time::Duration::from_millis(100)).await;
         }
@@ -188,6 +188,7 @@ where
     }
 
     async fn migrate_actors(&self, info: &BarrierActorInfo) -> Result<()> {
+        debug!("start migrate actors.");
         let expired_workers = info
             .actor_map
             .iter()
@@ -195,14 +196,21 @@ where
             .map(|(&worker, _)| worker)
             .collect_vec();
         if expired_workers.is_empty() {
+            debug!("no expired workers, skipping.");
             return Ok(());
         }
+        debug!("got expired workers {:#?}", expired_workers);
         let migrate_map = self.get_migrate_map_plan(info, &expired_workers).await;
+        debug!("got actor migrate plan {:#?}", migrate_map);
         let (new_fragments, migrate_map) =
             self.fragment_manager.migrate_actors(&migrate_map).await?;
-        self.catalog_manager
+        debug!("got parallel unit migrate plan {:#?}", migrate_map);
+        let res = self
+            .catalog_manager
             .update_table_mapping(&new_fragments, &migrate_map)
-            .await
+            .await;
+        debug!("migrate actors succeed.");
+        res
     }
 
     /// Sync all sources in compute nodes, the local source manager in compute nodes may be dirty
