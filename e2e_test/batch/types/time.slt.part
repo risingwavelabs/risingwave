@@ -27,11 +27,11 @@ insert into t values ('20:55:12', '2022-07-12 20:55:12', '2022-07-12');
 statement ok
 insert into t values ('10:13:36.07'::TIME, '2019-10-08 10:13:36.07'::TIMESTAMP, '2019-10-08'::DATE);
 
-query TTT
+query TTT rowsort
 select * from t;
 ----
-20:55:12 2022-07-12 20:55:12 2022-07-12
 10:13:36.070 2019-10-08 10:13:36.070 2019-10-08
+20:55:12 2022-07-12 20:55:12 2022-07-12
 
 query T
 select v3 from t where v3 > '2022-01-01'::DATE;
