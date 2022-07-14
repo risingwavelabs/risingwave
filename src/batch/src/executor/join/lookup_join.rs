@@ -188,7 +188,6 @@ pub struct LookupJoinExecutor<P> {
     build_child: Option<BoxedExecutor>,
     build_side_data_types: Vec<DataType>,
     probe_side_source: P,
-    probe_side_len: usize,
     chunk_builder: DataChunkBuilder,
     schema: Schema,
     output_indices: Vec<usize>,
@@ -215,6 +214,14 @@ impl<P: 'static + ProbeSideSourceBuilder> LookupJoinExecutor<P> {
     async fn do_execute(mut self: Box<Self>) {
         let mut build_side_stream = self.build_child.take().unwrap().execute();
 
+        let invalid_join_error = RwError::from(ErrorCode::NotImplemented(
+            format!(
+                "Lookup Join does not support join type {:?}",
+                self.join_type
+            ),
+            None.into(),
+        ));
+
         while let Some(data_chunk) = build_side_stream.next().await {
             let data_chunk = data_chunk?;
 
@@ -229,49 +236,64 @@ impl<P: 'static + ProbeSideSourceBuilder> LookupJoinExecutor<P> {
 
                 let mut chunk_added = false;
 
+                // The handling of the different join types and which operation they should perform
+                // under each condition is very complex. The gist of it is:
+                //
+                // Inner Join: Always do_inner_join until probe_side_chunk is none.
+                //
+                // Left Outer Join: Always do_inner_join until probe_side_chunk is None. If this
+                //      occurs and no chunk has been added yet, null-pad the current row and add it.
+                //
+                // Left Semi Join: Always do_left_semi_anti_join until probe_side_chunk is None or
+                //      a chunk has been added, whichever is first.
+                //
+                // Left Anti Join: Always do_left_semi_anti_join until probe_side_chunk is None or
+                //      current row has a match on probe side, whichever is first. If the former
+                //      occurs and no match has been found yet, then add current row.
+                // TODO: Simplify the logic of handling the different join types
                 loop {
                     let probe_side_chunk = probe_side_stream.next().await;
-                    let chunk_is_none = probe_side_chunk.is_none();
 
-                    // If None is received for the first time on the probe_side_stream AND it's a
-                    // Left Outer Join AND no chunks have been added for the
-                    // current row, don't break yet as we need to add
-                    // NULL-padded values
-                    if chunk_is_none && (self.join_type == JoinType::Inner || chunk_added) {
-                        break;
-                    }
+                    let join_result = if let Some(chunk) = probe_side_chunk {
+                        let chunk = chunk?;
 
-                    // Join the cur_row and the probe_side_chunk depending on the given join type
-                    // Currently, Lookup Join only supports Inner and Left Outer Join
-                    let join_result = match self.join_type {
-                        JoinType::Inner => self.do_inner_join(&cur_row, probe_side_chunk),
-                        // Only perform a Left Outer Join if chunk_is_none (and by extension no
-                        // chunk has been added yet for the current row)
-                        JoinType::LeftOuter if chunk_is_none => self.do_left_outer_join(&cur_row),
-                        JoinType::LeftOuter if !chunk_is_none => {
-                            self.do_inner_join(&cur_row, probe_side_chunk)
+                        match self.join_type {
+                            JoinType::Inner | JoinType::LeftOuter => {
+                                self.do_inner_join(&cur_row, chunk)
+                            }
+                            JoinType::LeftSemi | JoinType::LeftAnti if !chunk_added => {
+                                self.do_left_semi_anti_join(&cur_row, chunk)
+                            }
+                            JoinType::LeftSemi | JoinType::LeftAnti if chunk_added => {
+                                break;
+                            }
+                            _ => Err(invalid_join_error.clone()),
                         }
-                        // TODO: Add support for LefSemi and LeftAnti joins
-                        _ => Err(ErrorCode::NotImplemented(
-                            format!(
-                                "Lookup Join does not support join type {:?}",
-                                self.join_type
-                            ),
-                            None.into(),
-                        )
-                        .into()),
+                    } else if !chunk_added {
+                        match self.join_type {
+                            JoinType::Inner | JoinType::LeftSemi => {
+                                break;
+                            }
+                            JoinType::LeftOuter => self.do_left_outer_join(&cur_row),
+                            JoinType::LeftAnti => self.convert_row_for_builder(&cur_row),
+                            _ => Err(invalid_join_error.clone()),
+                        }
+                    } else {
+                        break;
                     }?;
 
                     // Append chunk from the join result to the chunk builder if it exists
                     if let Some(return_chunk) = join_result {
                         if return_chunk.cardinality() > 0 {
-                            // println!{"{:?}", return_chunk}
                             chunk_added = true;
 
-                            if let Some(inner_chunk) =
-                                self.append_chunk(SlicedDataChunk::new_checked(return_chunk)?)?
-                            {
-                                yield inner_chunk.reorder_columns(&self.output_indices);
+                            // Don't join if it's a LeftAnti Join
+                            if self.join_type != JoinType::LeftAnti {
+                                let append_result =
+                                    self.append_chunk(SlicedDataChunk::new_checked(return_chunk)?)?;
+                                if let Some(inner_chunk) = append_result {
+                                    yield inner_chunk.reorder_columns(&self.output_indices);
+                                }
                             }
                         }
                     }
@@ -300,26 +322,22 @@ impl<P: 'static + ProbeSideSourceBuilder> LookupJoinExecutor<P> {
     fn do_inner_join(
         &self,
         cur_row: &RowRef,
-        probe_side_chunk: Option<Result<DataChunk>>,
+        probe_side_chunk: DataChunk,
     ) -> Result<Option<DataChunk>> {
-        if let Some(probe_chunk) = probe_side_chunk {
-            let probe_chunk = probe_chunk?.compact()?;
+        let probe_chunk = probe_side_chunk.compact()?;
 
-            let const_row_chunk =
-                convert_row_to_chunk(cur_row, probe_chunk.capacity(), &self.build_side_data_types)?;
+        let const_row_chunk =
+            convert_row_to_chunk(cur_row, probe_chunk.capacity(), &self.build_side_data_types)?;
 
-            let new_chunk = concatenate(&const_row_chunk, &probe_chunk)?;
+        let new_chunk = concatenate(&const_row_chunk, &probe_chunk)?;
 
-            if let Some(cond) = self.condition.as_ref() {
-                let visibility = cond.eval(&new_chunk)?;
-                Ok(Some(
-                    new_chunk.with_visibility(visibility.as_bool().iter().collect()),
-                ))
-            } else {
-                Ok(Some(new_chunk))
-            }
+        if let Some(cond) = self.condition.as_ref() {
+            let visibility = cond.eval(&new_chunk)?;
+            Ok(Some(
+                new_chunk.with_visibility(visibility.as_bool().iter().collect()),
+            ))
         } else {
-            Ok(None)
+            Ok(Some(new_chunk))
         }
     }
 
@@ -327,14 +345,42 @@ impl<P: 'static + ProbeSideSourceBuilder> LookupJoinExecutor<P> {
     fn do_left_outer_join(&self, cur_row: &RowRef) -> Result<Option<DataChunk>> {
         let mut build_datum_refs = cur_row.values().collect_vec();
 
-        for _ in 0..self.probe_side_len {
+        let builder_data_types = self.chunk_builder.data_types();
+        let difference = builder_data_types.len() - build_datum_refs.len();
+
+        for _ in 0..difference {
             build_datum_refs.push(None);
         }
 
-        let one_row_chunk =
-            convert_datum_refs_to_chunk(&build_datum_refs, 1, &self.chunk_builder.data_types())?;
+        let one_row_chunk = convert_datum_refs_to_chunk(&build_datum_refs, 1, &builder_data_types)?;
 
         Ok(Some(one_row_chunk))
+    }
+
+    /// If the inner join of `cur_row` and `probe_side_chunk` has a non-zero cardinality, convert
+    /// `cur_row` to chunk and return it. Otherwise, return None.
+    fn do_left_semi_anti_join(
+        &self,
+        cur_row: &RowRef,
+        probe_side_chunk: DataChunk,
+    ) -> Result<Option<DataChunk>> {
+        let chunk = self.do_inner_join(cur_row, probe_side_chunk)?;
+        let match_exists = chunk.unwrap().cardinality() > 0; // Inner Join always returns Some(chunk)
+
+        if match_exists {
+            let return_chunk = self.convert_row_for_builder(cur_row)?;
+            Ok(return_chunk)
+        } else {
+            Ok(None)
+        }
+    }
+
+    fn convert_row_for_builder(&self, cur_row: &RowRef) -> Result<Option<DataChunk>> {
+        Ok(Some(convert_row_to_chunk(
+            cur_row,
+            1,
+            &self.chunk_builder.data_types(),
+        )?))
     }
 
     /// Appends `input_chunk` to the `self.chunk_builder`. If there is a leftover chunk, assign it
@@ -386,16 +432,20 @@ impl BoxedExecutorBuilder for LookupJoinExecutorBuilder {
                 .collect_vec(),
         };
         let probe_side_column_ids = lookup_join_node.get_probe_side_column_ids().to_vec();
-        let probe_side_len = probe_side_column_ids.len();
 
-        let fields = [
-            build_child.schema().fields.clone(),
-            probe_side_column_ids
-                .iter()
-                .map(|&i| probe_side_schema.fields[i as usize].clone())
-                .collect(),
-        ]
-        .concat();
+        let fields = if join_type == JoinType::LeftSemi || join_type == JoinType::LeftAnti {
+            build_child.schema().fields.clone()
+        } else {
+            [
+                build_child.schema().fields.clone(),
+                probe_side_column_ids
+                    .iter()
+                    .map(|&i| probe_side_schema.fields[i as usize].clone())
+                    .collect(),
+            ]
+            .concat()
+        };
+
         let original_schema = Schema { fields };
         let actual_schema = output_indices
             .iter()
@@ -432,7 +482,6 @@ impl BoxedExecutorBuilder for LookupJoinExecutorBuilder {
             build_child: Some(build_child),
             build_side_data_types,
             probe_side_source,
-            probe_side_len,
             chunk_builder: DataChunkBuilder::with_default_size(original_schema.data_types()),
             schema: actual_schema,
             output_indices,
@@ -493,17 +542,20 @@ mod tests {
     ) -> BoxedExecutor {
         let build_child = create_build_child();
 
-        let fields = [
-            build_child.schema().fields.clone(),
-            build_child.schema().fields.clone(),
-        ]
-        .concat();
+        let fields = if join_type == JoinType::LeftSemi || join_type == JoinType::LeftAnti {
+            build_child.schema().fields.clone()
+        } else {
+            [
+                build_child.schema().fields.clone(),
+                build_child.schema().fields.clone(),
+            ]
+            .concat()
+        };
         let original_schema = Schema { fields };
 
         let probe_side_schema = Schema {
             fields: build_child.schema().fields.clone(),
         };
-        let probe_side_len = build_child.schema().len();
 
         Box::new(LookupJoinExecutor {
             join_type,
@@ -511,7 +563,6 @@ mod tests {
             build_side_data_types: build_child.schema().data_types(),
             build_child: Some(build_child),
             probe_side_source: FakeProbeSideSourceBuilder::new(probe_side_schema),
-            probe_side_len,
             chunk_builder: DataChunkBuilder::with_default_size(original_schema.data_types()),
             schema: original_schema.clone(),
             output_indices: (0..original_schema.len()).into_iter().collect(),
