@@ -12,86 +12,75 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+use anyhow::{anyhow, Result};
 use num_traits::FromPrimitive;
-use risingwave_common::error::ErrorCode::{self, InternalError};
-use risingwave_common::error::{Result, RwError};
-use risingwave_common::types::{DataType, Decimal, ScalarImpl, ScalarRef};
-use risingwave_expr::vector_op::cast::{str_to_date, str_to_timestamp};
+use risingwave_common::array::StructValue;
+use risingwave_common::catalog::ColumnDesc;
+use risingwave_common::types::{DataType, Datum, Decimal, ScalarImpl};
+use risingwave_expr::vector_op::cast::{str_to_date, str_to_time, str_to_timestamp};
 use serde_json::Value;
 
-use crate::SourceColumnDesc;
-
-macro_rules! make_ScalarImpl {
-    ($x:expr, $y:expr) => {
-        match $x {
-            Some(v) => return Ok($y(v)),
-            None => return Err(RwError::from(InternalError("json parse error".to_string()))),
-        }
+macro_rules! ensure_float {
+    ($v:ident, $t:ty) => {
+        $v.as_f64()
+            .ok_or_else(|| anyhow!(concat!("expect ", stringify!($t))))?
     };
 }
 
-pub(crate) fn json_parse_value(
-    column: &SourceColumnDesc,
-    value: Option<&Value>,
-) -> Result<ScalarImpl> {
-    match column.data_type {
-        DataType::Boolean => {
-            make_ScalarImpl!(value.and_then(|v| v.as_bool()), |x| ScalarImpl::Bool(
-                x as bool
-            ))
+macro_rules! ensure_int {
+    ($v:ident, $t:ty) => {
+        $v.as_i64()
+            .ok_or_else(|| anyhow!(concat!("expect ", stringify!($t))))?
+    };
+}
+
+macro_rules! ensure_str {
+    ($v:ident, $t:literal) => {
+        $v.as_str().ok_or_else(|| anyhow!(concat!("expect ", $t)))?
+    };
+}
+
+fn do_parse_json_value(column: &ColumnDesc, v: &Value) -> Result<ScalarImpl> {
+    let v = match column.data_type.clone() {
+        DataType::Boolean => v.as_bool().ok_or_else(|| anyhow!("expect bool"))?.into(),
+        DataType::Int16 => ScalarImpl::Int16(
+            ensure_int!(v, i16)
+                .try_into()
+                .map_err(|e| anyhow!("expect i16: {}", e))?,
+        ),
+        DataType::Int32 => ScalarImpl::Int32(
+            ensure_int!(v, i32)
+                .try_into()
+                .map_err(|e| anyhow!("expect i32: {}", e))?,
+        ),
+        DataType::Int64 => ensure_int!(v, i64).into(),
+        DataType::Float32 => ScalarImpl::Float32((ensure_float!(v, f32) as f32).into()),
+        DataType::Float64 => ScalarImpl::Float64((ensure_float!(v, f64) as f64).into()),
+        DataType::Decimal => Decimal::from_f64(ensure_float!(v, Decimal))
+            .ok_or_else(|| anyhow!("expect decimal"))?
+            .into(),
+        DataType::Varchar => ensure_str!(v, "varchar").to_string().into(),
+        DataType::Date => str_to_date(ensure_str!(v, "date"))?.into(),
+        DataType::Time => str_to_time(ensure_str!(v, "time"))?.into(),
+        DataType::Timestamp => str_to_timestamp(ensure_str!(v, "timestamp"))?.into(),
+        DataType::Timestampz => unimplemented!(),
+        DataType::Interval => unimplemented!(),
+        DataType::List { .. } => unimplemented!(),
+        DataType::Struct { .. } => {
+            let fields = column
+                .field_descs
+                .iter()
+                .map(|field| json_parse_value(field, v.get(&field.name)))
+                .collect::<Result<Vec<Datum>>>()?;
+            ScalarImpl::Struct(StructValue::new(fields))
         }
-        DataType::Int16 => {
-            make_ScalarImpl!(value.and_then(|v| v.as_i64()), |x| ScalarImpl::Int16(
-                x as i16
-            ))
-        }
-        DataType::Int32 => {
-            make_ScalarImpl!(value.and_then(|v| v.as_i64()), |x| ScalarImpl::Int32(
-                x as i32
-            ))
-        }
-        DataType::Int64 => {
-            make_ScalarImpl!(value.and_then(|v| v.as_i64()), |x| ScalarImpl::Int64(
-                x as i64
-            ))
-        }
-        DataType::Float32 => {
-            make_ScalarImpl!(value.and_then(|v| v.as_f64()), |v| ScalarImpl::Float32(
-                (v as f32).into()
-            ))
-        }
-        DataType::Float64 => {
-            make_ScalarImpl!(
-                value.and_then(|v| v.as_f64()),
-                |v: f64| ScalarImpl::Float64(v.into())
-            )
-        }
-        DataType::Decimal => match value.and_then(|v| v.as_f64()) {
-            Some(v) => match Decimal::from_f64(v) {
-                Some(v) => Ok(ScalarImpl::Decimal(v)),
-                None => Err(RwError::from(InternalError(
-                    "decimal parse error".to_string(),
-                ))),
-            },
-            None => Err(RwError::from(InternalError("json parse error".to_string()))),
-        },
-        DataType::Varchar => {
-            make_ScalarImpl!(value.and_then(|v| v.as_str()), |v: &str| ScalarImpl::Utf8(
-                v.to_owned_scalar()
-            ))
-        }
-        DataType::Date => match value.and_then(|v| v.as_str()) {
-            None => Err(RwError::from(InternalError("parse error".to_string()))),
-            Some(date_str) => Ok(ScalarImpl::NaiveDate(str_to_date(date_str)?)),
-        },
-        DataType::Timestamp => match value.and_then(|v| v.as_str()) {
-            None => Err(RwError::from(InternalError("parse error".to_string()))),
-            Some(date_str) => Ok(ScalarImpl::NaiveDateTime(str_to_timestamp(date_str)?)),
-        },
-        _ => Err(ErrorCode::NotImplemented(
-            "unsupported type for json_parse_value".to_string(),
-            None.into(),
-        )
-        .into()),
+    };
+    Ok(v)
+}
+
+pub(crate) fn json_parse_value(column: &ColumnDesc, value: Option<&Value>) -> Result<Datum> {
+    match value {
+        None | Some(Value::Null) => Ok(None),
+        Some(v) => Ok(Some(do_parse_json_value(column, v)?)),
     }
 }
