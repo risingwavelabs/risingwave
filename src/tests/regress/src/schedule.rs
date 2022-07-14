@@ -184,21 +184,26 @@ impl Schedule {
 impl TestCase {
     async fn run(self) -> anyhow::Result<TestResult> {
         let mut command = Command::new("psql");
-        command.args([
+        let args = [
             "-X",
             "-a",
             "-q",
             "-h",
-            self.opts.host().as_str(),
+            &self.opts.host().to_string(),
             "-p",
-            format!("{}", self.opts.port()).as_str(),
+            &self.opts.port().to_string(),
             "-d",
             self.opts.database_name(),
+            "-U",
+            self.opts.pg_user_name(),
             "-v",
             "HIDE_TABLEAM=on",
             "-v",
             "HIDE_TOAST_COMPRESSION=on",
-        ]);
+        ];
+        command.args(args);
+
+        println!("Ready to run command:\npsql {}", args.join(" "));
 
         let input_path = self.file_manager.source_of(&self.test_name)?;
         let input_file = File::options()
@@ -266,11 +271,6 @@ impl TestCase {
         if expected_output == actual_output {
             Ok(Same)
         } else {
-            error!(
-                "Expected output of [{}] is different from actual output.\n{}",
-                self.test_name,
-                format_diff(&expected_output, &actual_output)
-            );
             Ok(Different)
         }
     }
