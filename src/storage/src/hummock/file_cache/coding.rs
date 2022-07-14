@@ -12,18 +12,14 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-#[derive(thiserror::Error, Debug)]
-pub enum Error {
-    #[error("io error: {0}")]
-    IoError(#[from] std::io::Error),
-    #[error("nix error: {0}")]
-    NixError(#[from] nix::errno::Errno),
-    #[error("unsupported file system, super block magic: {0}")]
-    UnsupportedFilesystem(i64),
-    #[error("invalid slot: {0}")]
-    InvalidSlot(usize),
-    #[error("other error: {0}")]
-    Other(String),
+use std::hash::{BuildHasher, Hash};
+
+pub trait CacheKey: Eq + Send + Sync + Hash + Clone + 'static + std::fmt::Debug {
+    fn encoded_len() -> usize;
+
+    fn encode(&self, buf: &mut [u8]);
+
+    fn decode(buf: &[u8]) -> Self;
 }
 
-pub type Result<T> = core::result::Result<T, Error>;
+pub trait HashBuilder = BuildHasher + Clone + Send + Sync + 'static;
