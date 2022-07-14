@@ -160,6 +160,7 @@ impl<'a, R: Rng> SqlGenerator<'a, R> {
         let from = self.gen_from();
         let selection = self.gen_where();
         let group_by = self.gen_group_by();
+        let having = self.gen_having(!group_by.is_empty());
         let (select_list, schema) = self.gen_select_list();
         let select = Select {
             distinct: false,
@@ -168,7 +169,7 @@ impl<'a, R: Rng> SqlGenerator<'a, R> {
             lateral_views: vec![],
             selection,
             group_by,
-            having: self.gen_having(),
+            having,
         };
         (select, schema)
     }
@@ -246,8 +247,8 @@ impl<'a, R: Rng> SqlGenerator<'a, R> {
         }
     }
 
-    fn gen_having(&mut self) -> Option<Expr> {
-        if self.flip_coin() {
+    fn gen_having(&mut self, have_group_by: bool) -> Option<Expr> {
+        if have_group_by & self.flip_coin() {
             Some(self.gen_expr(DataTypeName::Boolean))
         } else {
             None
