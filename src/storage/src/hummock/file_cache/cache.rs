@@ -172,7 +172,7 @@ where
         // TODO(MrCroxx): Graceful shutdown.
         let _handle = tokio::task::spawn(async move {
             if let Err(e) = buffer_flusher.run().await {
-                tracing::error!("error raised within file cache buffer flusher: {}", e);
+                panic!("error raised within file cache buffer flusher: {}", e);
             }
         });
 
