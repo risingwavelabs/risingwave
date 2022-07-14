@@ -336,7 +336,7 @@ impl<S: StateStore, E: Encoding, const T: AccessType> StorageTableBase<S, E, T> 
             return Ok(None);
         };
 
-        let mut deserializer = CellBasedRowDeserializer::new(&*self.mapping);
+        let mut deserializer = CellBasedRowDeserializer::new(self.mapping.clone());
         for column_id in self.column_ids() {
             let key = serialize_pk_and_column_id(&serialized_pk, column_id).map_err(err)?;
             if let Some(value) = self.keyspace.get(&key, epoch).await? {
@@ -362,7 +362,7 @@ impl<S: StateStore, E: Encoding, const T: AccessType> StorageTableBase<S, E, T> 
             .scan_with_range(key_range, None, epoch)
             .await?;
 
-        let mut deserializer = CellBasedRowDeserializer::new(&*self.mapping);
+        let mut deserializer = CellBasedRowDeserializer::new(self.mapping.clone());
         for (key, value) in kv_pairs {
             deserializer.deserialize(&key, &value).map_err(err)?;
         }
@@ -678,7 +678,7 @@ impl<S: StateStore, E: Encoding, const T: AccessType> StorageTableBase<S, E, T> 
 }
 
 /// [`StorageTableIterInner`] iterates on the storage table.
-struct StorageTableIterInner<S: StateStore, D: Decoding<Arc<ColumnDescMapping>>> {
+struct StorageTableIterInner<S: StateStore, D: Decoding> {
     /// An iterator that returns raw bytes from storage.
     iter: StripPrefixIterator<S::Iter>,
 
@@ -686,7 +686,7 @@ struct StorageTableIterInner<S: StateStore, D: Decoding<Arc<ColumnDescMapping>>>
     cell_based_row_deserializer: D, // CellBasedRowDeserializer<Arc<ColumnDescMapping>>,
 }
 
-impl<S: StateStore, D: Decoding<Arc<ColumnDescMapping>>> StorageTableIterInner<S, D> {
+impl<S: StateStore, D: Decoding> StorageTableIterInner<S, D> {
     /// If `wait_epoch` is true, it will wait for the given epoch to be committed before iteration.
     async fn new<R, B>(
         keyspace: &Keyspace<S>,

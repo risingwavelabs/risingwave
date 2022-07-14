@@ -12,7 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::ops::Deref;
+use std::sync::Arc;
 
 use risingwave_common::array::Row;
 use risingwave_common::catalog::OrderedColumnDesc;
@@ -25,10 +25,9 @@ use crate::encoding::{ColumnDescMapping, Decoding};
 
 /// Similar to [`CellBasedRowDeserializer`], but for dedup pk cell encoding.
 #[derive(Clone)]
-pub struct DedupPkCellBasedRowDeserializer<'a, Desc: Deref<Target = ColumnDescMapping>> {
-    pk_deserializer: &'a OrderedRowDeserializer,
-    inner: CellBasedRowDeserializer<Desc>,
-
+pub struct DedupPkCellBasedRowDeserializer {
+    pk_deserializer: OrderedRowDeserializer,
+    inner: CellBasedRowDeserializer,
     // Maps pk datums to corresponding row positions.
     // Pk datums must satisfy the following criteria:
     // 1. same value and memcomparable encoding,
@@ -65,7 +64,7 @@ pub fn create_pk_deserializer_from_pk_descs(
 /// Hence we have this function to instantiate `pk_to_row_mapping` separately.
 pub fn create_pk_to_row_mapping(
     pk_descs: &[OrderedColumnDesc],
-    column_mapping: impl Deref<Target = ColumnDescMapping>,
+    column_mapping: Arc<ColumnDescMapping>,
 ) -> Vec<Option<usize>> {
     pk_descs
         .iter()
@@ -82,11 +81,11 @@ pub fn create_pk_to_row_mapping(
         .collect()
 }
 
-impl<'a, Desc: Deref<Target = ColumnDescMapping>> DedupPkCellBasedRowDeserializer<'a, Desc> {
+impl DedupPkCellBasedRowDeserializer {
     /// Create a [`DedupPkCellBasedRowDeserializer`].
     pub fn new(
-        pk_deserializer: &'a OrderedRowDeserializer,
-        column_mapping: Desc,
+        pk_deserializer: OrderedRowDeserializer,
+        column_mapping: Arc<ColumnDescMapping>,
         pk_to_row_mapping: Vec<Option<usize>>,
     ) -> Self {
         let inner = CellBasedRowDeserializer::new(column_mapping);
@@ -259,7 +258,7 @@ mod tests {
         let pk_to_row_mapping = create_pk_to_row_mapping(&pk_descs, column_mapping.clone());
 
         let mut deserializer = DedupPkCellBasedRowDeserializer::new(
-            &pk_deserializer,
+            pk_deserializer,
             column_mapping,
             pk_to_row_mapping,
         );
