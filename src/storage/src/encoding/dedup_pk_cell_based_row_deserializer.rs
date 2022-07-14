@@ -35,7 +35,9 @@ pub struct DedupPkCellBasedRowDeserializer<'a, Desc: Deref<Target = ColumnDescMa
     pk_to_row_mapping: Vec<Option<usize>>,
 }
 
-pub fn create_pk_deserializer_from_pk_descs(pk_descs: &[OrderedColumnDesc]) -> OrderedRowDeserializer {
+pub fn create_pk_deserializer_from_pk_descs(
+    pk_descs: &[OrderedColumnDesc],
+) -> OrderedRowDeserializer {
     let (pk_data_types, pk_order_types) = pk_descs
         .iter()
         .map(|ordered_desc| {
@@ -48,7 +50,10 @@ pub fn create_pk_deserializer_from_pk_descs(pk_descs: &[OrderedColumnDesc]) -> O
     OrderedRowDeserializer::new(pk_data_types, pk_order_types)
 }
 
-pub fn create_pk_to_row_mapping(pk_descs: &[OrderedColumnDesc], column_mapping: impl Deref<Target = ColumnDescMapping>) -> Vec<Option<usize>> {
+pub fn create_pk_to_row_mapping(
+    pk_descs: &[OrderedColumnDesc],
+    column_mapping: impl Deref<Target = ColumnDescMapping>,
+) -> Vec<Option<usize>> {
     pk_descs
         .iter()
         .map(|d| {
@@ -69,7 +74,7 @@ impl<'a, Desc: Deref<Target = ColumnDescMapping>> DedupPkCellBasedRowDeserialize
     pub fn new(
         pk_deserializer: &'a OrderedRowDeserializer,
         column_mapping: Desc,
-        pk_to_row_mapping: Vec<Option<usize>>
+        pk_to_row_mapping: Vec<Option<usize>>,
     ) -> Self {
         let inner = CellBasedRowDeserializer::new(column_mapping);
         Self {
@@ -240,7 +245,11 @@ mod tests {
 
         let pk_to_row_mapping = create_pk_to_row_mapping(&pk_descs, column_mapping.clone());
 
-        let mut deserializer = DedupPkCellBasedRowDeserializer::new(&pk_deserializer, column_mapping, pk_to_row_mapping);
+        let mut deserializer = DedupPkCellBasedRowDeserializer::new(
+            &pk_deserializer,
+            column_mapping,
+            pk_to_row_mapping,
+        );
 
         // ----------- deserialize pk and row
         let mut actual = vec![];
