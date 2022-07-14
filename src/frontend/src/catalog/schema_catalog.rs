@@ -63,6 +63,15 @@ impl SchemaCatalog {
             .unwrap();
     }
 
+    pub fn update_table(&mut self, prost: &ProstTable) {
+        let name = prost.name.clone();
+        let id = prost.id.into();
+        let table: TableCatalog = prost.into();
+
+        self.table_by_name.insert(name.clone(), table);
+        self.table_name_by_id.insert(id, name);
+    }
+
     pub fn drop_table(&mut self, id: TableId) {
         let name = self.table_name_by_id.remove(&id).unwrap();
         self.table_by_name.remove(&name).unwrap();

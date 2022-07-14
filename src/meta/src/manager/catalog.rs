@@ -465,6 +465,10 @@ where
         }
         core.env.meta_store().txn(transaction).await?;
         for table in &tables {
+            self.env
+                .notification_manager()
+                .notify_frontend(Operation::Update, Info::Table(table.to_owned()))
+                .await;
             core.add_table(table);
         }
         Ok(())
