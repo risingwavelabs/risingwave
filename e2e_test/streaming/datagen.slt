@@ -34,7 +34,6 @@ sleep 2s
 
 query I
 select v1 from s1 order by v1 limit 10;
-
 ----
 1
 2

@@ -49,13 +49,6 @@ include ./tpch/q19.slt.part
 # include ./tpch/q20.slt.part
 include ./tpch/q22.slt.part
 
-
 include ./tpch/drop_views.slt.part
-
-# statement ok
-# drop materialized view tpch_q20;
-
-statement ok
-drop materialized view tpch_q22;
 
 include ../tpch/drop_tables.slt.part
