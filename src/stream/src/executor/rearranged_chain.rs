@@ -156,11 +156,10 @@ impl RearrangedChainExecutor {
 
             // 3. Rearrange stream, will yield the barriers polled from upstream to rearrange.
             let upstream = Arc::new(Mutex::new(upstream));
-            let rearranged_barrier = Box::pin(Self::rearrange_barrier(
-                upstream.clone(),
-                upstream_tx,
-                stop_rearrange_rx,
-            ));
+            let rearranged_barrier = Box::pin(
+                Self::rearrange_barrier(upstream.clone(), upstream_tx, stop_rearrange_rx)
+                    .map(|result| result.map(RearrangedMessage::RearrangedBarrier)),
+            );
 
             // 4. Init the snapshot with reading epoch.
             let snapshot = self.snapshot.execute_with_epoch(create_epoch.prev);
@@ -172,7 +171,7 @@ impl RearrangedChainExecutor {
 
             // 5. Merge the rearranged barriers with chunks, with the priority of barrier.
             let mut rearranged =
-                select_with_strategy(rearranged_barrier, rearranged_chunks, |_state: &mut ()| {
+                select_with_strategy(rearranged_barrier, rearranged_chunks, |_: &mut ()| {
                     stream::PollNext::Left
                 });
 
@@ -264,7 +263,7 @@ impl RearrangedChainExecutor {
     /// after stopped.
     ///
     /// Check `execute_inner` for more details.
-    #[try_stream(ok = RearrangedMessage, error = StreamExecutorError)]
+    #[try_stream(ok = Barrier, error = StreamExecutorError)]
     async fn rearrange_barrier<U>(
         upstream: Arc<Mutex<U>>,
         upstream_tx: mpsc::UnboundedSender<RearrangedMessage>,
@@ -292,7 +291,7 @@ impl RearrangedChainExecutor {
                     // with `RearrangedMessage::phantom_from` in-place.
                     // If we polled a chunk, simply put it to the `upstream_tx`.
                     if let Some(barrier) = msg.as_barrier().cloned() {
-                        yield RearrangedMessage::RearrangedBarrier(barrier);
+                        yield barrier;
                     }
                     upstream_tx
                         .unbounded_send(RearrangedMessage::phantom_from(msg))
