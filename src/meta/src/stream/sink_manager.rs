@@ -14,7 +14,6 @@
 
 use std::collections::HashMap;
 use std::sync::Arc;
-use std::time::Duration;
 
 use futures::future::try_join_all;
 use risingwave_common::error::{Result, RwError};
@@ -27,8 +26,6 @@ use risingwave_pb::stream_service::{
 };
 use risingwave_rpc_client::StreamClient;
 use tokio::sync::Mutex;
-use tokio::time;
-use tokio::time::MissedTickBehavior;
 
 use crate::cluster::ClusterManagerRef;
 use crate::manager::{MetaSrvEnv, SinkId};
@@ -68,8 +65,6 @@ impl<S> SinkManager<S>
 where
     S: MetaStore,
 {
-    const SINK_TICK_INTERVAL: Duration = Duration::from_secs(10);
-
     pub async fn new(
         env: MetaSrvEnv<S>,
         cluster_manager: ClusterManagerRef<S>,
@@ -157,23 +152,5 @@ where
         let _responses: Vec<_> = try_join_all(futures).await?;
 
         Ok(())
-    }
-
-    async fn tick(&self) -> Result<()> {
-        Ok(()) // TODO(nanderstabel): Actually implement tick method
-    }
-
-    pub async fn run(&self) -> Result<()> {
-        let mut ticker = time::interval(Self::SINK_TICK_INTERVAL);
-        ticker.set_missed_tick_behavior(MissedTickBehavior::Skip);
-        loop {
-            ticker.tick().await;
-            if let Err(e) = self.tick().await {
-                log::error!(
-                    "error happened while running sink manager tick: {}",
-                    e.to_string()
-                );
-            }
-        }
     }
 }
