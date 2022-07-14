@@ -25,8 +25,8 @@ use crate::encoding::{ColumnDescMapping, Decoding};
 
 /// Similar to [`CellBasedRowDeserializer`], but for dedup pk cell encoding.
 #[derive(Clone)]
-pub struct DedupPkCellBasedRowDeserializer<Desc: Deref<Target = ColumnDescMapping>> {
-    pk_deserializer: OrderedRowDeserializer,
+pub struct DedupPkCellBasedRowDeserializer<'a, Desc: Deref<Target = ColumnDescMapping>> {
+    pk_deserializer: &'a OrderedRowDeserializer,
     inner: CellBasedRowDeserializer<Desc>,
 
     // Maps pk fields with:
@@ -35,36 +35,42 @@ pub struct DedupPkCellBasedRowDeserializer<Desc: Deref<Target = ColumnDescMappin
     pk_to_row_mapping: Vec<Option<usize>>,
 }
 
-impl<Desc: Deref<Target = ColumnDescMapping>> DedupPkCellBasedRowDeserializer<Desc> {
-    /// Create a [`DedupPkCellBasedRowDeserializer`]
-    /// to decode cell based row with dedup pk encoding.
-    /// TODO: Refactor args. Creating `DedupPkCellBasedRowDeserializer` should not have overhead.
-    pub fn new(column_mapping: Desc, pk_descs: &[OrderedColumnDesc]) -> Self {
-        let (pk_data_types, pk_order_types) = pk_descs
-            .iter()
-            .map(|ordered_desc| {
-                (
-                    ordered_desc.column_desc.data_type.clone(),
-                    ordered_desc.order,
-                )
-            })
-            .unzip();
-        let pk_deserializer = OrderedRowDeserializer::new(pk_data_types, pk_order_types);
+pub fn create_pk_deserializer_from_pk_descs(pk_descs: &[OrderedColumnDesc]) -> OrderedRowDeserializer {
+    let (pk_data_types, pk_order_types) = pk_descs
+        .iter()
+        .map(|ordered_desc| {
+            (
+                ordered_desc.column_desc.data_type.clone(),
+                ordered_desc.order,
+            )
+        })
+        .unzip();
+    OrderedRowDeserializer::new(pk_data_types, pk_order_types)
+}
 
-        let pk_to_row_mapping = pk_descs
-            .iter()
-            .map(|d| {
-                let column_desc = &d.column_desc;
-                if column_desc.data_type.mem_cmp_eq_value_enc() {
-                    column_mapping
-                        .get(column_desc.column_id)
-                        .map(|(_, index)| index)
-                } else {
-                    None
-                }
-            })
-            .collect();
+pub fn create_pk_to_row_mapping(pk_descs: &[OrderedColumnDesc], column_mapping: impl Deref<Target = ColumnDescMapping>) -> Vec<Option<usize>> {
+    pk_descs
+        .iter()
+        .map(|d| {
+            let column_desc = &d.column_desc;
+            if column_desc.data_type.mem_cmp_eq_value_enc() {
+                column_mapping
+                    .get(column_desc.column_id)
+                    .map(|(_, index)| index)
+            } else {
+                None
+            }
+        })
+        .collect()
+}
 
+impl<'a, Desc: Deref<Target = ColumnDescMapping>> DedupPkCellBasedRowDeserializer<'a, Desc> {
+    /// Create a [`DedupPkCellBasedRowDeserializer`].
+    pub fn new(
+        pk_deserializer: &'a OrderedRowDeserializer,
+        column_mapping: Desc,
+        pk_to_row_mapping: Vec<Option<usize>>
+    ) -> Self {
         let inner = CellBasedRowDeserializer::new(column_mapping);
         Self {
             pk_deserializer,
@@ -148,7 +154,7 @@ mod tests {
     use risingwave_common::util::ordered::OrderedRowSerializer;
     use risingwave_common::util::sort_util::OrderType;
 
-    use super::DedupPkCellBasedRowDeserializer;
+    use super::*;
     use crate::encoding::cell_based_encoding_util::serialize_pk_and_row;
     use crate::encoding::ColumnDescMapping;
 
@@ -230,7 +236,11 @@ mod tests {
             order: order_types[0],
         }];
 
-        let mut deserializer = DedupPkCellBasedRowDeserializer::new(column_mapping, &pk_descs);
+        let pk_deserializer = create_pk_deserializer_from_pk_descs(&pk_descs);
+
+        let pk_to_row_mapping = create_pk_to_row_mapping(&pk_descs, column_mapping.clone());
+
+        let mut deserializer = DedupPkCellBasedRowDeserializer::new(&pk_deserializer, column_mapping, pk_to_row_mapping);
 
         // ----------- deserialize pk and row
         let mut actual = vec![];
