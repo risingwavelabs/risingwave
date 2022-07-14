@@ -17,8 +17,47 @@ use risingwave_common::error::{ErrorCode, Result, RwError};
 use risingwave_common::types::DataType;
 use risingwave_expr::expr::AggKind;
 
-use super::{Expr, ExprImpl};
+use super::{Expr, ExprImpl, ExprRewriter};
+use crate::optimizer::property::Direction;
 use crate::utils::Condition;
+
+#[derive(Debug, Clone, Eq, PartialEq, Hash)]
+pub struct AggOrderByExpr {
+    pub expr: ExprImpl,
+    pub direction: Direction,
+    pub nulls_first: bool,
+}
+
+#[derive(Debug, Clone, Eq, PartialEq, Hash)]
+pub struct AggOrderBy {
+    pub sort_exprs: Vec<AggOrderByExpr>,
+}
+
+impl AggOrderBy {
+    pub fn any() -> Self {
+        Self {
+            sort_exprs: Vec::new(),
+        }
+    }
+
+    pub fn new(sort_exprs: Vec<AggOrderByExpr>) -> Self {
+        Self { sort_exprs }
+    }
+
+    pub fn rewrite_expr(self, rewriter: &mut (impl ExprRewriter + ?Sized)) -> Self {
+        Self {
+            sort_exprs: self
+                .sort_exprs
+                .into_iter()
+                .map(|e| AggOrderByExpr {
+                    expr: rewriter.rewrite_expr(e.expr),
+                    direction: e.direction,
+                    nulls_first: e.nulls_first,
+                })
+                .collect(),
+        }
+    }
+}
 
 #[derive(Clone, Eq, PartialEq, Hash)]
 pub struct AggCall {
@@ -26,6 +65,7 @@ pub struct AggCall {
     return_type: DataType,
     inputs: Vec<ExprImpl>,
     distinct: bool,
+    order_by: AggOrderBy,
     filter: Condition,
 }
 
@@ -111,6 +151,7 @@ impl AggCall {
         agg_kind: AggKind,
         inputs: Vec<ExprImpl>,
         distinct: bool,
+        order_by: AggOrderBy,
         filter: Condition,
     ) -> Result<Self> {
         let data_types = inputs.iter().map(ExprImpl::return_type).collect_vec();
@@ -120,12 +161,19 @@ impl AggCall {
             return_type,
             inputs,
             distinct,
+            order_by,
             filter,
         })
     }
 
-    pub fn decompose(self) -> (AggKind, Vec<ExprImpl>, bool, Condition) {
-        (self.agg_kind, self.inputs, self.distinct, self.filter)
+    pub fn decompose(self) -> (AggKind, Vec<ExprImpl>, bool, AggOrderBy, Condition) {
+        (
+            self.agg_kind,
+            self.inputs,
+            self.distinct,
+            self.order_by,
+            self.filter,
+        )
     }
 
     pub fn agg_kind(&self) -> AggKind {
