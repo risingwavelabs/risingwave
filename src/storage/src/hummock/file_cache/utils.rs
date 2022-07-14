@@ -55,25 +55,13 @@ pub fn is_aligned<U: Unsigned>(align: U, v: U) -> bool {
 #[inline(always)]
 pub fn assert_aligned<U: Unsigned>(align: U, v: U) {
     debug_assert_pow2(align);
-    assert_eq!(
-        v & (align - U::from(1)),
-        U::from(0),
-        "align: {}, v: {}",
-        align,
-        v
-    );
+    assert!(is_aligned(align, v), "align: {}, v: {}", align, v);
 }
 
 #[inline(always)]
 pub fn debug_assert_aligned<U: Unsigned>(align: U, v: U) {
     debug_assert_pow2(align);
-    debug_assert_eq!(
-        v & (align - U::from(1)),
-        U::from(0),
-        "align: {}, v: {}",
-        align,
-        v
-    );
+    debug_assert!(is_aligned(align, v), "align: {}, v: {}", align, v);
 }
 
 #[inline(always)]
