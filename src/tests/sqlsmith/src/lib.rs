@@ -312,7 +312,7 @@ pub fn sql_gen(rng: &mut impl Rng, tables: Vec<Table>) -> String {
 }
 
 /// Generate a random CREATE MATERIALIZED VIEW sql string.
-/// These are derived queries on `tables`.
+/// These are derived from `tables`.
 pub fn mview_sql_gen<R: Rng>(rng: &mut R, tables: Vec<Table>, name: &str) -> (String, Table) {
     let mut gen = SqlGenerator::new_for_mview(rng, tables);
     let (mview, table) = gen.gen_mview(name);
