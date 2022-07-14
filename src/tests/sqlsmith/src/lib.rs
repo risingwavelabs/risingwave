@@ -47,7 +47,7 @@ impl Table {
     }
 }
 
-#[derive(Clone)]
+#[derive(Clone, Debug)]
 pub struct Column {
     name: String,
     data_type: DataTypeName,
@@ -128,6 +128,8 @@ impl<'a, R: Rng> SqlGenerator<'a, R> {
             query,
             with_options: vec![],
         };
+        println!("created mview: {}", mview);
+        println!("schema: {:#?}", schema);
         (mview, schema)
     }
 
@@ -246,7 +248,7 @@ impl<'a, R: Rng> SqlGenerator<'a, R> {
         let mut from = vec![];
         if self.is_mview {
             assert!(!self.tables.is_empty());
-            from.push(self.gen_from_relation());
+            return vec![self.gen_from_relation()];
         }
         for _ in 1..self.tables.len() {
             if self.flip_coin() {

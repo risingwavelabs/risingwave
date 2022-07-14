@@ -51,13 +51,17 @@ async fn create_tables(session: Arc<SessionImpl>) -> Vec<Table> {
         }
     }
 
+    // ensure tables are instantiated
+    handler::handle(session.clone(), Statement::Flush, "").await.unwrap();
+
     let mut rng = rand::thread_rng();
     let mut sql_generator = create_mview_sql_gen(&mut rng, tables.clone());
 
     // Generate Materialized Views 1:1 with tables, so they have equal weight
     // of being queried.
-    for i in 0..n_statements {
-        let (stmt, columns) = sql_generator.gen_mview(&format!("m{}", i));
+    // for i in 0..n_statements {
+        // let (stmt, columns) = sql_generator.gen_mview(&format!("m{}", i));
+        let (stmt, columns) = sql_generator.gen_mview(&format!("m{}", 0));
         match stmt {
             Statement::CreateView { ref name, .. } => {
                 let stmt_str = format!("{}", stmt);
@@ -69,7 +73,7 @@ async fn create_tables(session: Arc<SessionImpl>) -> Vec<Table> {
             }
             _ => panic!("Unexpected statement: {}", stmt),
         }
-    }
+    // }
     tables
 }
 
