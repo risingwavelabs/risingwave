@@ -119,12 +119,15 @@ impl<'a, R: Rng> SqlGenerator<'a, R> {
     pub fn gen_mview(&mut self, name: &str) -> (Statement, Table) {
         let (query, schema) = self.gen_query();
         let query = Box::new(query);
-        let table = Table { name: name.to_string(), columns: schema };
+        let table = Table {
+            name: name.to_string(),
+            columns: schema,
+        };
         let name = ObjectName(vec![Ident::new(name)]);
         let mview = Statement::CreateView {
             or_replace: false,
             materialized: true,
-            name: name.clone(),
+            name,
             columns: vec![],
             query,
             with_options: vec![],

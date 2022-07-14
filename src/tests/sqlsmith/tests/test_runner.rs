@@ -52,19 +52,20 @@ async fn create_tables(session: Arc<SessionImpl>, rng: &mut impl Rng) -> Vec<Tab
     }
 
     // ensure tables are instantiated
-    handler::handle(session.clone(), Statement::Flush, "").await.unwrap();
+    handler::handle(session.clone(), Statement::Flush, "")
+        .await
+        .unwrap();
 
     // Generate Materialized Views 1:1 with tables, so they have equal weight
     // of being queried.
     for i in 0..n_statements {
         let (sql, table) = mview_sql_gen(rng, tables.clone(), &format!("m{}", i));
-        let stmts = Parser::parse_sql(&sql).unwrap_or_else(|_| panic!("Failed to parse SQL: {}", sql));
+        let stmts =
+            Parser::parse_sql(&sql).unwrap_or_else(|_| panic!("Failed to parse SQL: {}", sql));
         let stmt = stmts[0].clone();
         println!("stmt: {}", stmt);
         println!("table schema: {:#?}", table);
-        handler::handle(session.clone(), stmt, &sql)
-            .await
-            .unwrap();
+        handler::handle(session.clone(), stmt, &sql).await.unwrap();
         tables.push(table);
     }
     tables
