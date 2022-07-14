@@ -363,7 +363,7 @@ impl TestCase {
                             &batch_plan.to_batch_prost_identity(false),
                         )?);
                     }
-                },
+                }
                 Err(err) => {
                     if self.batch_plan.is_some() {
                         ret.batch_plan = Some(err.to_string());
@@ -411,7 +411,7 @@ impl TestCase {
                                 + &serde_yaml::to_string(&table)?,
                         );
                     }
-                },
+                }
                 Err(err) => {
                     if self.stream_plan.is_some() {
                         ret.stream_plan = Some(err.to_string());
@@ -421,7 +421,6 @@ impl TestCase {
                     }
                 }
             }
-
         }
 
         Ok(ret)
