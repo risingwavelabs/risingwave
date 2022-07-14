@@ -89,6 +89,11 @@ where
                     Self::solve_task(meta_store.clone(), task_cache.clone(), task_id).await
                 {
                     error!("Failed to solve scale task: {}", err);
+                    let mut task_cache_guard = task_cache.lock().await;
+                    if let Some(mut task) = task_cache_guard.get_mut(&task_id) {
+                        task.task_status = TaskStatus::Failed as i32;
+                        task.insert(&*meta_store).await.ok();
+                    }
                 }
             }
         });
