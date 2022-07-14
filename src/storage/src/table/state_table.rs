@@ -98,6 +98,11 @@ impl<S: StateStore, E: Encoding> StateTableBase<S, E> {
         }
     }
 
+    /// Disable sanity check in this state table. Need revisit and fix behavior for all tables.
+    pub fn disable_sanity_check(&mut self) {
+        self.storage_table.disable_sanity_check();
+    }
+
     /// Get the underlying [` StorageTableBase`]. Should only be used for tests.
     pub fn storage_table(&self) -> &StorageTableBase<S, E, READ_WRITE> {
         &self.storage_table

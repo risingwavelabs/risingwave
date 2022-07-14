@@ -116,6 +116,9 @@ pub struct StorageTableBase<S: StateStore, E: Encoding, const T: AccessType> {
     /// executor. For READ_WRITE instances, the table will also check whether the writed rows
     /// confirm to this partition.
     vnodes: Arc<Bitmap>,
+
+    /// If true, sanity check is disabled on this table.
+    disable_sanity_check: bool,
 }
 
 impl<S: StateStore, E: Encoding, const T: AccessType> std::fmt::Debug
@@ -256,7 +259,13 @@ impl<S: StateStore, E: Encoding, const T: AccessType> StorageTableBase<S, E, T> 
             dist_key_indices,
             dist_key_in_pk_indices,
             vnodes,
+            disable_sanity_check: false,
         }
+    }
+
+    /// Disable sanity check on this storage table.
+    pub fn disable_sanity_check(&mut self) {
+        self.disable_sanity_check = true;
     }
 
     pub fn schema(&self) -> &Schema {
@@ -407,14 +416,20 @@ impl<S: StateStore, E: Encoding> StorageTableBase<S, E, READ_WRITE> {
         for (pk, row_op) in buffer {
             match row_op {
                 RowOp::Insert(row) => {
-                    if ENABLE_STATE_TABLE_SANITY_CHECK && let Some(sanity_check_epoch) = sanity_check_epoch {
-                        // If we want to insert a row, it should not exist in storage.
-                        assert!(
-                            self.get_row(&row.by_indices(&self.pk_indices), sanity_check_epoch)
-                                .await?
-                                .is_none(),
-                            "overwriting an existing row"
+                    if ENABLE_STATE_TABLE_SANITY_CHECK && !self.disable_sanity_check {
+                        if let Some(sanity_check_epoch) = sanity_check_epoch {
+                            // If we want to insert a row, it should not exist in storage.
+                            let storage_row = self
+                                .get_row(&row.by_indices(&self.pk_indices), sanity_check_epoch)
+                                .await?;
+
+                            // It's normal for some executors to fail this assert, you can use
+                            // `.disable_sanity_check()` on state table to disable this check.
+                            assert!(
+                            storage_row.is_none(),
+                            "overwriting an existing row:\nin-storage: {:?}\nto-be-written: {:?}", storage_row.unwrap(), row 
                         );
+                        }
                     }
 
                     let vnode = self.compute_vnode_by_row(&row);
@@ -427,14 +442,24 @@ impl<S: StateStore, E: Encoding> StorageTableBase<S, E, READ_WRITE> {
                     }
                 }
                 RowOp::Delete(old_row) => {
-                    if ENABLE_STATE_TABLE_SANITY_CHECK && let Some(sanity_check_epoch) = sanity_check_epoch {
-                        // If we want to delete a row, it should exist in storage, and should have
-                        // the same old_value as recorded.
-                        let row = self
-                            .get_row(&old_row.by_indices(&self.pk_indices), sanity_check_epoch)
-                            .await?;
-                        assert!(row.is_some());
-                        assert!(row.unwrap() == old_row);
+                    if ENABLE_STATE_TABLE_SANITY_CHECK && !self.disable_sanity_check {
+                        if let Some(sanity_check_epoch) = sanity_check_epoch {
+                            // If we want to delete a row, it should exist in storage, and should
+                            // have the same old_value as recorded.
+                            let storage_row = self
+                                .get_row(&old_row.by_indices(&self.pk_indices), sanity_check_epoch)
+                                .await?;
+
+                            // It's normal for some executors to fail this assert, you can use
+                            // `.disable_sanity_check()` on state table to disable this check.
+                            assert!(storage_row.is_some(), "deleting an non-existing row");
+                            assert!(
+                                storage_row.as_ref().unwrap() == &old_row,
+                                "inconsistent deletion:\nin-storage: {:?}\nold-value: {:?}",
+                                storage_row.as_ref().unwrap(),
+                                old_row
+                            );
+                        }
                     }
 
                     let vnode = self.compute_vnode_by_row(&old_row);
@@ -448,14 +473,28 @@ impl<S: StateStore, E: Encoding> StorageTableBase<S, E, READ_WRITE> {
                     }
                 }
                 RowOp::Update((old_row, new_row)) => {
-                    if ENABLE_STATE_TABLE_SANITY_CHECK && let Some(sanity_check_epoch) = sanity_check_epoch {
-                        // If we want to update a row, it should exist in storage, and should have
-                        // the same old_value as recorded.
-                        let row = self
-                            .get_row(&old_row.by_indices(&self.pk_indices), sanity_check_epoch)
-                            .await?;
-                        assert!(row.is_some(), "update a non-existing row");
-                        assert!(row.unwrap() == old_row, "value mismatch when updating row");
+                    if ENABLE_STATE_TABLE_SANITY_CHECK && !self.disable_sanity_check {
+                        if let Some(sanity_check_epoch) = sanity_check_epoch {
+                            // If we want to update a row, it should exist in storage, and should
+                            // have the same old_value as recorded.
+                            let storage_row = self
+                                .get_row(&old_row.by_indices(&self.pk_indices), sanity_check_epoch)
+                                .await?;
+
+                            // It's normal for some executors to fail this assert, you can use
+                            // `.disable_sanity_check()` on state table to disable this check.
+                            assert!(
+                                storage_row.is_some(),
+                                "update a non-existing row: {:?}",
+                                old_row
+                            );
+                            assert!(
+                                storage_row.as_ref().unwrap() == &old_row,
+                                "value mismatch when updating row: {:?} != {:?}",
+                                storage_row,
+                                old_row
+                            );
+                        }
                     }
 
                     // The row to update should keep the same primary key, so distribution key as
