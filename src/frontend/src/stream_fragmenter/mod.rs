@@ -397,6 +397,7 @@ mod tests {
                 ..Default::default()
             }),
             distinct: false,
+            filter: None,
         }
     }
 

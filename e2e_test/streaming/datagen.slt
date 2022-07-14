@@ -7,8 +7,9 @@ create materialized source s1 (v1 int, v2 float) with ( 'connector' = 'datagen' 
 # Wait enough time to ensure Datagen connector generate data
 sleep 2s
 
+# Will only generate 10 records since `fields.v1.end` is 10
 query II rowsort
-select v1, v2 from s1 limit 15;
+select v1, v2 from s1 where v1 is not null limit 15;
 ----
 1 11
 2 12
@@ -20,11 +21,6 @@ select v1, v2 from s1 limit 15;
 8 18
 9 19
 10 20
-NULL NULL 
-NULL NULL 
-NULL NULL 
-NULL NULL 
-NULL NULL 
 
 statement ok
 drop source s1;
@@ -36,17 +32,17 @@ create materialized source s1 (v1 int)  with ( 'connector' = 'datagen' ,'fields.
 # Wait enough time to ensure Datagen connector generate data
 sleep 2s
 
-query II rowsort
+query I
 select v1 from s1 order by v1 limit 10;
 ----
 1
-2 
-3 
-4 
-5 
-6 
+2
+3
+4
+5
+6
 7
-8 
+8
 9
 10
 
