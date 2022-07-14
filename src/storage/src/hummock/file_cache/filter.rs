@@ -12,15 +12,16 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-mod top_n_bottom_n_state;
-mod top_n_state;
-mod top_n_state_new;
+use super::error::Result;
 
-pub use top_n_bottom_n_state::ManagedTopNBottomNState;
-pub use top_n_state::ManagedTopNState;
-pub use top_n_state_new::{ManagedTopNStateNew, TopNStateRow};
+pub trait Filter: Send + Sync + 'static {
+    fn filter(&self) -> Result<bool>;
+}
 
-pub mod variants {
-    pub const TOP_N_MIN: usize = 0;
-    pub const TOP_N_MAX: usize = 1;
+pub struct DefaultFilter {}
+
+impl Filter for DefaultFilter {
+    fn filter(&self) -> Result<bool> {
+        todo!()
+    }
 }

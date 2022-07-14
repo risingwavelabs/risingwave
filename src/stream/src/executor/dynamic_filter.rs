@@ -62,12 +62,16 @@ impl<S: StateStore> DynamicFilterExecutor<S> {
         pk_indices: PkIndices,
         executor_id: u64,
         comparator: ExprNodeType,
-        state_table_l: StateTable<S>,
-        state_table_r: StateTable<S>,
+        mut state_table_l: StateTable<S>,
+        mut state_table_r: StateTable<S>,
         is_right_table_writer: bool,
         actor_id: u64,
         metrics: Arc<StreamingMetrics>,
     ) -> Self {
+        // TODO: enable sanity check for dynamic filter <https://github.com/singularity-data/risingwave/issues/3893>
+        state_table_l.disable_sanity_check();
+        state_table_r.disable_sanity_check();
+
         let schema = source_l.schema().clone();
         Self {
             source_l: Some(source_l),
