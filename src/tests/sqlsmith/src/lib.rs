@@ -21,7 +21,7 @@ use risingwave_frontend::binder::bind_data_type;
 use risingwave_frontend::expr::DataTypeName;
 use risingwave_sqlparser::ast::{
     BinaryOperator, ColumnDef, Expr, Ident, Join, JoinConstraint, JoinOperator, OrderByExpr, Query,
-    Select, SelectItem, SetExpr, Statement, TableWithJoins, Value, With,
+    Select, SelectItem, SetExpr, Statement, TableWithJoins, Value, With, ObjectName,
 };
 
 mod expr;
@@ -62,7 +62,7 @@ impl From<ColumnDef> for Column {
     }
 }
 
-struct SqlGenerator<'a, R: Rng> {
+pub struct SqlGenerator<'a, R: Rng> {
     tables: Vec<Table>,
     rng: &'a mut R,
 
@@ -115,6 +115,20 @@ impl<'a, R: Rng> SqlGenerator<'a, R> {
     fn gen_stmt(&mut self) -> Statement {
         let (query, _) = self.gen_query();
         Statement::Query(Box::new(query))
+    }
+
+    pub fn gen_mview(&mut self, name: &str) -> Statement {
+        let (query, _schema) = self.gen_query();
+        let query = Box::new(query);
+        let name = ObjectName(vec![Ident::new(name)]);
+        Statement::CreateView {
+            or_replace: true,
+            materialized: true,
+            name,
+            columns: vec![],
+            query,
+            with_options: vec![],
+        }
     }
 
     fn gen_query(&mut self) -> (Query, Vec<Column>) {
@@ -285,4 +299,9 @@ impl<'a, R: Rng> SqlGenerator<'a, R> {
 pub fn sql_gen(rng: &mut impl Rng, tables: Vec<Table>) -> String {
     let mut gen = SqlGenerator::new(rng, tables);
     format!("{}", gen.gen_stmt())
+}
+
+/// Generate a random SQL string.
+pub fn create_mview_sql_gen<R: Rng>(rng: &mut R, tables: Vec<Table>) -> SqlGenerator<R> {
+    SqlGenerator::new_for_mview(rng, tables)
 }
