@@ -375,6 +375,8 @@ impl<S: StateStore, E: Encoding, const T: AccessType> StorageTableBase<S, E, T> 
     }
 }
 
+const ENABLE_STATE_TABLE_SANITY_CHECK: bool = cfg!(debug_assertions);
+
 /// Write
 impl<S: StateStore, E: Encoding> StorageTableBase<S, E, READ_WRITE> {
     /// Get vnode value with full row.
@@ -399,16 +401,34 @@ impl<S: StateStore, E: Encoding> StorageTableBase<S, E, READ_WRITE> {
         for (pk, row_op) in buffer {
             match row_op {
                 RowOp::Insert(row) => {
+                    if ENABLE_STATE_TABLE_SANITY_CHECK {
+                        // If we want to insert a row, it should not exist in storage.
+                        assert!(self
+                            .get_row(&row.by_indices(&self.pk_indices), epoch)
+                            .await?
+                            .is_none());
+                    }
+
                     let vnode = self.compute_vnode_by_row(&row);
                     let bytes = self
                         .row_serializer
                         .cell_based_serialize(vnode, &pk, row)
                         .map_err(err)?;
                     for (key, value) in bytes {
-                        local.put(key, StorageValue::new_default_put(value))
+                        local.put(key, StorageValue::new_default_put(value));
                     }
                 }
                 RowOp::Delete(old_row) => {
+                    if ENABLE_STATE_TABLE_SANITY_CHECK {
+                        // If we want to delete a row, it should exist in storage, and should have
+                        // the same old_value as recorded.
+                        let row = self
+                            .get_row(&old_row.by_indices(&self.pk_indices), epoch)
+                            .await?;
+                        assert!(row.is_some());
+                        assert!(row.unwrap() == old_row);
+                    }
+
                     let vnode = self.compute_vnode_by_row(&old_row);
                     // TODO(wcy-fdu): only serialize key on deletion
                     let bytes = self
@@ -420,6 +440,16 @@ impl<S: StateStore, E: Encoding> StorageTableBase<S, E, READ_WRITE> {
                     }
                 }
                 RowOp::Update((old_row, new_row)) => {
+                    if ENABLE_STATE_TABLE_SANITY_CHECK {
+                        // If we want to update a row, it should exist in storage, and should have
+                        // the same old_value as recorded.
+                        let row = self
+                            .get_row(&old_row.by_indices(&self.pk_indices), epoch)
+                            .await?;
+                        assert!(row.is_some());
+                        assert!(row.unwrap() == old_row);
+                    }
+
                     // The row to update should keep the same primary key, so distribution key as
                     // well.
                     let vnode = self.compute_vnode_by_row(&new_row);
