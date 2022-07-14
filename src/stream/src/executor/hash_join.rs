@@ -388,7 +388,7 @@ impl<K: HashKey, S: StateStore, const T: JoinTypePrimitive> HashJoinExecutor<K, 
         is_append_only: bool,
         metrics: Arc<StreamingMetrics>,
     ) -> Self {
-        // TODO: enable sanity check for globle simple agg executor.
+        // TODO: enable sanity check for hash join executor.
         state_table_l.disable_sanity_check();
         state_table_r.disable_sanity_check();
 

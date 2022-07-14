@@ -115,7 +115,7 @@ impl<K: HashKey, S: StateStore> HashAggExecutor<K, S> {
         let input_info = input.info();
         let schema = generate_agg_schema(input.as_ref(), &agg_calls, Some(&key_indices));
 
-        // TODO: enable sanity check for globle simple agg executor.
+        // TODO: enable sanity check for hash agg executor.
         for state_table in &mut state_tables {
             state_table.disable_sanity_check();
         }
