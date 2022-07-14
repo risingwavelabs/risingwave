@@ -25,12 +25,6 @@ pub fn compact_task_to_string(compact_task: &CompactTask) -> String {
     )
     .unwrap();
     writeln!(s, "Compaction watermark: {:?} ", compact_task.watermark).unwrap();
-    writeln!(
-        s,
-        "Compaction vnodemap size: {:?} ",
-        compact_task.vnode_mappings.len()
-    )
-    .unwrap();
     writeln!(s, "Compaction # splits: {:?} ", compact_task.splits.len()).unwrap();
     writeln!(s, "Compaction task status: {:?} ", compact_task.task_status).unwrap();
     s.push_str("Compaction SSTables structure: \n");

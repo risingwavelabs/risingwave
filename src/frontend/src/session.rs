@@ -16,7 +16,7 @@ use std::fmt::Formatter;
 use std::io::{Error, ErrorKind};
 use std::marker::Sync;
 use std::path::PathBuf;
-use std::sync::atomic::{AtomicI32, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicI32, Ordering};
 use std::sync::Arc;
 use std::time::Duration;
 
@@ -31,6 +31,7 @@ use risingwave_common::config::FrontendConfig;
 use risingwave_common::error::Result;
 use risingwave_common::session_config::ConfigMap;
 use risingwave_common::util::addr::HostAddr;
+use risingwave_common_service::observer_manager::ObserverManager;
 use risingwave_pb::common::WorkerType;
 use risingwave_pb::user::auth_info::EncryptionType;
 use risingwave_rpc_client::{ComputeClientPool, MetaClient};
@@ -46,7 +47,7 @@ use crate::catalog::root_catalog::Catalog;
 use crate::handler::handle;
 use crate::handler::util::to_pg_field;
 use crate::meta_client::{FrontendMetaClient, FrontendMetaClientImpl};
-use crate::observer::observer_manager::ObserverManager;
+use crate::observer::observer_manager::FrontendObserverNode;
 use crate::optimizer::plan_node::PlanNodeId;
 use crate::planner::Planner;
 use crate::scheduler::worker_node_manager::{WorkerNodeManager, WorkerNodeManagerRef};
@@ -63,6 +64,9 @@ pub struct OptimizerContext {
     pub next_id: AtomicI32,
     /// For debugging purposes, store the SQL string in Context
     pub sql: Arc<str>,
+
+    /// it indicates whether the explain mode is verbose for explain statement
+    pub explain_verbose: AtomicBool,
 }
 
 #[derive(Clone, Debug)]
@@ -91,6 +95,10 @@ impl OptimizerContextRef {
         let next_id = self.inner.next_id.fetch_add(1, Ordering::Relaxed);
         PlanNodeId(next_id)
     }
+
+    pub fn is_explain_verbose(&self) -> bool {
+        self.inner.explain_verbose.load(Ordering::Acquire)
+    }
 }
 
 impl OptimizerContext {
@@ -99,6 +107,7 @@ impl OptimizerContext {
             session_ctx,
             next_id: AtomicI32::new(0),
             sql,
+            explain_verbose: AtomicBool::new(false),
         }
     }
 
@@ -109,6 +118,7 @@ impl OptimizerContext {
             session_ctx: Arc::new(SessionImpl::mock()),
             next_id: AtomicI32::new(0),
             sql: Arc::from(""),
+            explain_verbose: AtomicBool::new(false),
         }
         .into()
     }
@@ -240,15 +250,19 @@ impl FrontendEnv {
             user_info_updated_rx,
         ));
 
-        let observer_manager = ObserverManager::new(
-            meta_client.clone(),
-            frontend_address.clone(),
+        let frontend_observer_node = FrontendObserverNode::new(
             worker_node_manager.clone(),
             catalog,
             catalog_updated_tx,
             user_info_manager,
             user_info_updated_tx,
             hummock_snapshot_manager.clone(),
+        );
+        let observer_manager = ObserverManager::new(
+            meta_client.clone(),
+            frontend_address.clone(),
+            Box::new(frontend_observer_node),
+            WorkerType::Frontend,
         )
         .await;
         let observer_join_handle = observer_manager.start().await?;

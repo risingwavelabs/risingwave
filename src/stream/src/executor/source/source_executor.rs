@@ -23,7 +23,7 @@ use risingwave_common::array::{ArrayBuilder, I64ArrayBuilder, StreamChunk};
 use risingwave_common::bail;
 use risingwave_common::catalog::{ColumnId, Schema, TableId};
 use risingwave_common::error::Result;
-use risingwave_connector::{ConnectorState, SplitImpl, SplitMetaData};
+use risingwave_connector::source::{ConnectorState, SplitImpl, SplitMetaData};
 use risingwave_source::connector_source::SourceContext;
 use risingwave_source::*;
 use risingwave_storage::{Keyspace, StateStore};
@@ -202,6 +202,12 @@ impl<S: StateStore> SourceExecutor<S> {
         let barrier = barrier_receiver.recv().await.unwrap();
 
         if let Some(mutation) = barrier.mutation.as_ref() {
+            if let Mutation::AddDispatcher(add_dispatcher) = mutation.as_ref() {
+                if let Some(splits) = add_dispatcher.splits.get(&self.actor_id) {
+                    self.stream_source_splits = splits.clone();
+                }
+            }
+            // TODO: remove this
             if let Mutation::AddOutput(add_output) = mutation.as_ref() {
                 if let Some(splits) = add_output.splits.get(&self.actor_id) {
                     self.stream_source_splits = splits.clone();
@@ -355,7 +361,7 @@ mod tests {
     use risingwave_common::catalog::{ColumnDesc, Field, Schema};
     use risingwave_common::types::DataType;
     use risingwave_common::util::sort_util::{OrderPair, OrderType};
-    use risingwave_connector::datagen::DatagenSplit;
+    use risingwave_connector::source::datagen::DatagenSplit;
     use risingwave_pb::catalog::StreamSourceInfo;
     use risingwave_pb::data::data_type::TypeName;
     use risingwave_pb::data::DataType as ProstDataType;

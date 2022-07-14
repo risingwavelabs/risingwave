@@ -17,7 +17,7 @@ pub mod hash_join;
 mod hash_join_state;
 pub mod lookup_join;
 pub mod nested_loop_join;
-mod row_level_iter;
+pub mod row_level_iter;
 mod sort_merge_join;
 
 use std::sync::Arc;

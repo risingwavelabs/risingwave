@@ -17,8 +17,9 @@ use std::path::PathBuf;
 use std::sync::Arc;
 use std::time::Duration;
 
-use risingwave_common::service::MetricsManager;
+use risingwave_common::monitor::process_linux::monitor_process;
 use risingwave_common::util::addr::HostAddr;
+use risingwave_common_service::metrics_manager::MetricsManager;
 use risingwave_object_store::object::parse_remote_object_store;
 use risingwave_pb::common::WorkerType;
 use risingwave_pb::hummock::compactor_service_server::CompactorServiceServer;
@@ -62,6 +63,7 @@ pub async fn compactor_serve(
 
     // Boot compactor
     let registry = prometheus::Registry::new();
+    monitor_process(&registry).unwrap();
     let hummock_metrics = Arc::new(HummockMetrics::new(registry.clone()));
     let object_metrics = Arc::new(ObjectStoreMetrics::new(registry.clone()));
     let hummock_meta_client = Arc::new(MonitoredHummockMetaClient::new(

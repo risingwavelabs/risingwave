@@ -100,7 +100,8 @@ impl StreamFragmenter {
                 NodeBody::HashAgg(_)
                 | NodeBody::HashJoin(_)
                 | NodeBody::DeltaIndexJoin(_)
-                | NodeBody::Chain(_) => {
+                | NodeBody::Chain(_)
+                | NodeBody::DynamicFilter(_) => {
                     if insert_exchange_flag {
                         let child_node =
                             self.rewrite_stream_node_inner(state, child_node, false)?;
@@ -191,7 +192,7 @@ impl StreamFragmenter {
                 // memorize table id for later use
                 state
                     .dependent_table_ids
-                    .insert(TableId::from(&node.table_ref_id));
+                    .insert(TableId::new(node.table_id));
             }
 
             _ => {}
@@ -355,6 +356,15 @@ impl StreamFragmenter {
                 append_only_top_n_node.table_id_h = state.gen_table_id();
             }
 
+            NodeBody::DynamicFilter(dynamic_filter_node) => {
+                if let Some(left_table) = &mut dynamic_filter_node.left_table {
+                    left_table.id = state.gen_table_id();
+                }
+                if let Some(right_table) = &mut dynamic_filter_node.right_table {
+                    right_table.id = state.gen_table_id();
+                }
+            }
+
             _ => {}
         }
     }
@@ -387,6 +397,7 @@ mod tests {
                 ..Default::default()
             }),
             distinct: false,
+            filter: None,
         }
     }
 

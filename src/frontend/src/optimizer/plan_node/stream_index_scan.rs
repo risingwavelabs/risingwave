@@ -43,7 +43,7 @@ impl StreamIndexScan {
             ctx,
             logical.schema().clone(),
             logical.base.pk_indices.clone(),
-            Distribution::HashShard(logical.map_distribution_key()),
+            Distribution::HashShard(logical.distribution_key().unwrap()),
             false, // TODO: determine the `append-only` field of table scan
         );
         Self {
@@ -66,11 +66,17 @@ impl_plan_tree_node_for_leaf! { StreamIndexScan }
 
 impl fmt::Display for StreamIndexScan {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        let verbose = self.base.ctx.is_explain_verbose();
         write!(
             f,
             "StreamIndexScan {{ index: {}, columns: [{}], pk_indices: {:?} }}",
             self.logical.table_name(),
-            self.logical.column_names().join(", "),
+            if verbose {
+                self.logical.column_names_with_table_prefix()
+            } else {
+                self.logical.column_names()
+            }
+            .join(", "),
             self.base.pk_indices
         )
     }
@@ -122,12 +128,9 @@ impl StreamIndexScan {
                 },
             ],
             node_body: Some(ProstStreamNode::Chain(ChainNode {
+                table_id: self.logical.table_desc().table_id.table_id,
                 same_worker_node: true,
                 disable_rearrange: true,
-                table_ref_id: Some(TableRefId {
-                    table_id: self.logical.table_desc().table_id.table_id as i32,
-                    schema_ref_id: None, // TODO: fill schema ref id
-                }),
                 // The fields from upstream
                 upstream_fields: self
                     .logical

@@ -14,11 +14,12 @@
 
 use super::HashKey;
 use crate::hash;
-use crate::types::{DataSize, DataType};
+use crate::types::DataType;
 
 /// An enum to help to dynamically dispatch [`HashKey`] template.
 #[derive(Copy, Clone, Debug, Eq, PartialEq)]
 pub enum HashKeyKind {
+    Key8,
     Key16,
     Key32,
     Key64,
@@ -31,6 +32,7 @@ impl HashKeyKind {
     fn order_by_key_size() -> impl IntoIterator<Item = (HashKeyKind, usize)> {
         use HashKeyKind::*;
         [
+            (Key8, 1),
             (Key16, 2),
             (Key32, 4),
             (Key64, 8),
@@ -38,6 +40,14 @@ impl HashKeyKind {
             (Key256, 32),
         ]
     }
+}
+
+/// Number of bytes of one element in `HashKey` serialization of [`DataType`].
+pub enum HashKeySize {
+    /// For types with fixed size, e.g. int, float.
+    Fixed(usize),
+    /// For types with variable size, e.g. string.
+    Variable,
 }
 
 pub trait HashKeyDispatcher {
@@ -48,6 +58,7 @@ pub trait HashKeyDispatcher {
 
     fn dispatch_by_kind(kind: HashKeyKind, input: Self::Input) -> Self::Output {
         match kind {
+            HashKeyKind::Key8 => Self::dispatch::<hash::Key8>(input),
             HashKeyKind::Key16 => Self::dispatch::<hash::Key16>(input),
             HashKeyKind::Key32 => Self::dispatch::<hash::Key32>(input),
             HashKeyKind::Key64 => Self::dispatch::<hash::Key64>(input),
@@ -55,6 +66,35 @@ pub trait HashKeyDispatcher {
             HashKeyKind::Key256 => Self::dispatch::<hash::Key256>(input),
             HashKeyKind::KeySerialized => Self::dispatch::<hash::KeySerialized>(input),
         }
+    }
+}
+
+pub fn hash_key_size(data_type: &DataType) -> HashKeySize {
+    use std::mem::size_of;
+
+    use crate::types::{
+        Decimal, IntervalUnit, NaiveDateTimeWrapper, NaiveDateWrapper, NaiveTimeWrapper,
+        OrderedF32, OrderedF64,
+    };
+
+    match data_type {
+        // for `Boolean` in `HashKey` use 1 FixedBytes , but in `Array` use 1 FixedBits
+        DataType::Boolean => HashKeySize::Fixed(size_of::<bool>()), //
+        DataType::Int16 => HashKeySize::Fixed(size_of::<i16>()),
+        DataType::Int32 => HashKeySize::Fixed(size_of::<i32>()),
+        DataType::Int64 => HashKeySize::Fixed(size_of::<i64>()),
+        DataType::Float32 => HashKeySize::Fixed(size_of::<OrderedF32>()),
+        DataType::Float64 => HashKeySize::Fixed(size_of::<OrderedF64>()),
+        DataType::Decimal => HashKeySize::Fixed(size_of::<Decimal>()),
+        DataType::Date => HashKeySize::Fixed(size_of::<NaiveDateWrapper>()),
+        DataType::Time => HashKeySize::Fixed(size_of::<NaiveTimeWrapper>()),
+        DataType::Timestamp => HashKeySize::Fixed(size_of::<NaiveDateTimeWrapper>()),
+        DataType::Timestampz => HashKeySize::Fixed(size_of::<NaiveDateTimeWrapper>()),
+        DataType::Interval => HashKeySize::Fixed(size_of::<IntervalUnit>()),
+
+        DataType::Varchar => HashKeySize::Variable,
+        DataType::Struct { .. } => HashKeySize::Variable,
+        DataType::List { .. } => HashKeySize::Variable,
     }
 }
 
@@ -75,11 +115,11 @@ pub fn calc_hash_key_kind(data_types: &[DataType]) -> HashKeyKind {
 
     let mut total_data_size: usize = 0;
     for data_type in data_types {
-        match data_type.data_size() {
-            DataSize::Fixed(size) => {
+        match hash_key_size(data_type) {
+            HashKeySize::Fixed(size) => {
                 total_data_size += size;
             }
-            DataSize::Variable => {
+            HashKeySize::Variable => {
                 return HashKeyKind::KeySerialized;
             }
         }
@@ -128,7 +168,7 @@ mod tests {
 
     #[test]
     fn test_calc_hash_key_kind() {
-        compare_key_kinds(&[0], HashKeyKind::KeySerialized);
+        compare_key_kinds(&[0], HashKeyKind::Key8);
         compare_key_kinds(&[1], HashKeyKind::Key16);
         compare_key_kinds(&[2], HashKeyKind::Key32);
         compare_key_kinds(&[3], HashKeyKind::Key64);

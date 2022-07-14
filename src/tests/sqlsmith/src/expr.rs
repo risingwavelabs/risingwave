@@ -14,6 +14,7 @@
 
 use std::collections::HashMap;
 
+use itertools::Itertools;
 use rand::seq::SliceRandom;
 use rand::Rng;
 use risingwave_frontend::expr::{func_sigs, DataTypeName, ExprType, FuncSign};
@@ -54,12 +55,11 @@ impl<'a, R: Rng> SqlGenerator<'a, R> {
     }
 
     fn gen_col(&mut self, typ: DataTypeName) -> Expr {
-        if self.bound_relations.is_empty() {
+        if self.bound_columns.is_empty() {
             return self.gen_simple_scalar(typ);
         }
-        let rel = self.bound_relations.choose(&mut self.rng).unwrap();
-        let matched_cols = rel
-            .columns
+        let matched_cols = self
+            .bound_columns
             .iter()
             .filter(|col| col.data_type == typ)
             .collect::<Vec<_>>();
@@ -67,7 +67,7 @@ impl<'a, R: Rng> SqlGenerator<'a, R> {
             self.gen_simple_scalar(typ)
         } else {
             let col_def = matched_cols.choose(&mut self.rng).unwrap();
-            Expr::Identifier(Ident::new(format!("{}.{}", rel.name, col_def.name)))
+            Expr::Identifier(Ident::new(&col_def.name))
         }
     }
 
@@ -87,10 +87,6 @@ impl<'a, R: Rng> SqlGenerator<'a, R> {
         };
         expr.or_else(|| make_general_expr(func.func, exprs))
             .unwrap_or_else(|| self.gen_simple_scalar(ret))
-    }
-
-    fn can_recurse(&mut self) -> bool {
-        self.rng.gen_bool(0.3)
     }
 }
 
@@ -221,4 +217,20 @@ fn make_bin_op(func: ExprType, exprs: &[Expr]) -> Option<Expr> {
 
 pub(crate) fn sql_null() -> Expr {
     Expr::Value(Value::Null)
+}
+
+pub fn print_function_table() -> String {
+    func_sigs()
+        .map(|sign| {
+            format!(
+                "{:?}({}) -> {:?}",
+                sign.func,
+                sign.inputs_type
+                    .iter()
+                    .map(|arg| format!("{:?}", arg))
+                    .join(", "),
+                sign.ret_type,
+            )
+        })
+        .join("\n")
 }

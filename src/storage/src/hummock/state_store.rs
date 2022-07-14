@@ -82,10 +82,10 @@ impl HummockStorage {
         T: HummockIteratorType,
     {
         let epoch = read_options.epoch;
-        let compaction_group_id = read_options
-            .table_id
-            .as_ref()
-            .map(|table_id| self.get_compaction_group_id(*table_id));
+        let compaction_group_id = match read_options.table_id.as_ref() {
+            None => None,
+            Some(table_id) => Some(self.get_compaction_group_id(*table_id).await?),
+        };
         let min_epoch = read_options.min_epoch();
         let iter_read_options = Arc::new(IterReadOptions::default());
         let mut overlapped_iters = vec![];
@@ -228,10 +228,10 @@ impl HummockStorage {
         read_options: ReadOptions,
     ) -> StorageResult<Option<Bytes>> {
         let epoch = read_options.epoch;
-        let compaction_group_id = read_options
-            .table_id
-            .as_ref()
-            .map(|table_id| self.get_compaction_group_id(*table_id));
+        let compaction_group_id = match read_options.table_id.as_ref() {
+            None => None,
+            Some(table_id) => Some(self.get_compaction_group_id(*table_id).await?),
+        };
         let mut stats = StoreLocalStatistic::default();
         let (shared_buffer_data, pinned_version) = self.read_filter(read_options, &(key..=key))?;
 
@@ -413,7 +413,7 @@ impl StateStore for HummockStorage {
     ) -> Self::IngestBatchFuture<'_> {
         async move {
             let epoch = write_options.epoch;
-            let compaction_group_id = self.get_compaction_group_id(write_options.table_id);
+            let compaction_group_id = self.get_compaction_group_id(write_options.table_id).await?;
             // See comments in HummockStorage::iter_inner for details about using
             // compaction_group_id in read/write path.
             let size = self
@@ -432,7 +432,7 @@ impl StateStore for HummockStorage {
     ) -> Self::ReplicateBatchFuture<'_> {
         async move {
             let epoch = write_options.epoch;
-            let compaction_group_id = self.get_compaction_group_id(write_options.table_id);
+            let compaction_group_id = self.get_compaction_group_id(write_options.table_id).await?;
             // See comments in HummockStorage::iter_inner for details about using
             // compaction_group_id in read/write path.
             self.local_version_manager

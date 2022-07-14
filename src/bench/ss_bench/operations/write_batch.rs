@@ -187,7 +187,7 @@ impl Operations {
                     let start = Instant::now();
                     let batch = batch
                         .into_iter()
-                        .map(|(k, v)| (k, StorageValue::new(Default::default(), v)))
+                        .map(|(k, v)| (k, StorageValue::new(v)))
                         .collect_vec();
                     let epoch = ctx.epoch.load(Ordering::Acquire);
                     store

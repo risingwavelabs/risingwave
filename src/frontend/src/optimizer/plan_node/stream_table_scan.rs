@@ -44,7 +44,7 @@ impl StreamTableScan {
             logical.schema().clone(),
             logical.base.pk_indices.clone(),
             // follows upstream distribution from TableCatalog
-            Distribution::HashShard(logical.map_distribution_key()),
+            Distribution::HashShard(logical.distribution_key().unwrap()),
             logical.table_desc().appendonly,
         );
         Self {
@@ -71,12 +71,20 @@ impl_plan_tree_node_for_leaf! { StreamTableScan }
 
 impl fmt::Display for StreamTableScan {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        let verbose = self.base.ctx.is_explain_verbose();
         let mut builder = f.debug_struct("StreamTableScan");
         builder
             .field("table", &format_args!("{}", self.logical.table_name()))
             .field(
                 "columns",
-                &format_args!("[{}]", self.logical.column_names().join(", ")),
+                &format_args!(
+                    "[{}]",
+                    match verbose {
+                        false => self.logical.column_names(),
+                        true => self.logical.column_names_with_table_prefix(),
+                    }
+                    .join(", ")
+                ),
             )
             .field("pk_indices", &format_args!("{:?}", self.base.pk_indices))
             .finish()
@@ -129,12 +137,9 @@ impl StreamTableScan {
                 },
             ],
             node_body: Some(ProstStreamNode::Chain(ChainNode {
+                table_id: self.logical.table_desc().table_id.table_id,
                 same_worker_node: false,
                 disable_rearrange: false,
-                table_ref_id: Some(TableRefId {
-                    table_id: self.logical.table_desc().table_id.table_id as i32,
-                    schema_ref_id: None, // TODO: fill schema ref id
-                }),
                 // The fields from upstream
                 upstream_fields: self
                     .logical

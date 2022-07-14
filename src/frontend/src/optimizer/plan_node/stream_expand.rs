@@ -15,6 +15,7 @@
 use std::fmt;
 
 use itertools::Itertools;
+use risingwave_common::catalog::FieldVerboseDisplay;
 use risingwave_pb::stream_plan::expand_node::Subset;
 use risingwave_pb::stream_plan::stream_node::NodeBody as ProstStreamNode;
 use risingwave_pb::stream_plan::ExpandNode;
@@ -43,15 +44,28 @@ impl StreamExpand {
     pub fn column_subsets(&self) -> &Vec<Vec<usize>> {
         self.logical.column_subsets()
     }
+
+    pub fn column_subsets_verbose_display(&self) -> Vec<Vec<FieldVerboseDisplay>> {
+        self.logical.column_subsets_verbose_display()
+    }
 }
 
 impl fmt::Display for StreamExpand {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        write!(
-            f,
-            "StreamExpand {{ column_subsets: {:?} }}",
-            self.logical.column_subsets()
-        )
+        let verbose = self.base.ctx.is_explain_verbose();
+        if verbose {
+            write!(
+                f,
+                "StreamExpand {{ column_subsets: {:?} }}",
+                self.column_subsets_verbose_display()
+            )
+        } else {
+            write!(
+                f,
+                "StreamExpand {{ column_subsets: {:?} }}",
+                self.column_subsets()
+            )
+        }
     }
 }
 

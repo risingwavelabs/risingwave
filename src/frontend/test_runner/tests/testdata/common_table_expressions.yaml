@@ -7,7 +7,7 @@
       LogicalProject { exprs: [$1, $2] }
         LogicalScan { table: t1, columns: [_row_id, v1, v2] }
   stream_plan: |
-    StreamMaterialize { columns: [v1, _row_id(hidden)], pk_columns: [_row_id] }
+    StreamMaterialize { columns: [v1, t1._row_id(hidden)], pk_columns: [t1._row_id] }
       StreamTableScan { table: t1, columns: [v1, _row_id], pk_indices: [1] }
 - sql: |
     create table t1 (v1 int, v2 int);
@@ -20,7 +20,7 @@
         LogicalProject { exprs: [$1] }
           LogicalScan { table: t1, columns: [_row_id, v1, v2] }
   stream_plan: |
-    StreamMaterialize { columns: [v3, v4, v1, _row_id(hidden), _row_id#1(hidden)], pk_columns: [_row_id, _row_id#1] }
+    StreamMaterialize { columns: [v3, v4, v1, t2._row_id(hidden), t1._row_id(hidden)], pk_columns: [t2._row_id, t1._row_id] }
       StreamExchange { dist: HashShard([3, 4]) }
         StreamHashJoin { type: Inner, predicate: $0 = $3, output_indices: [0, 1, 3, 2, 4] }
           StreamExchange { dist: HashShard([0]) }
@@ -37,5 +37,5 @@
         LogicalProject { exprs: [$1, $2] }
           LogicalScan { table: t1, columns: [_row_id, v1, v2] }
   stream_plan: |
-    StreamMaterialize { columns: [v1, _row_id(hidden)], pk_columns: [_row_id] }
+    StreamMaterialize { columns: [v1, t1._row_id(hidden)], pk_columns: [t1._row_id] }
       StreamTableScan { table: t1, columns: [v1, _row_id], pk_indices: [1] }

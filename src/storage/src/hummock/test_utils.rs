@@ -12,8 +12,6 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-#![expect(dead_code)]
-
 use std::sync::Arc;
 
 use bytes::Bytes;
@@ -21,22 +19,17 @@ use itertools::Itertools;
 use risingwave_common::config::StorageConfig;
 use risingwave_hummock_sdk::key::key_with_epoch;
 use risingwave_hummock_sdk::HummockSSTableId;
-use risingwave_meta::hummock::test_utils::setup_compute_env;
-use risingwave_meta::hummock::MockHummockMetaClient;
 use risingwave_pb::hummock::{KeyRange, SstableInfo};
 
 use super::{CompressionAlgorithm, SstableMeta, DEFAULT_RESTART_INTERVAL};
-use crate::hummock::compaction_group::StaticCompactionGroupId;
-use crate::hummock::compaction_group_client::DummyCompactionGroupClient;
-use crate::hummock::iterator::test_utils::{iterator_test_key_of_epoch, mock_sstable_store};
+use crate::hummock::iterator::test_utils::iterator_test_key_of_epoch;
 use crate::hummock::shared_buffer::shared_buffer_batch::SharedBufferBatch;
 use crate::hummock::value::HummockValue;
 use crate::hummock::{
-    CachePolicy, HummockStateStoreIter, HummockStorage, LruCache, SSTableBuilder,
-    SSTableBuilderOptions, Sstable, SstableStoreRef,
+    CachePolicy, HummockStateStoreIter, LruCache, SSTableBuilder, SSTableBuilderOptions, Sstable,
+    SstableStoreRef,
 };
-use crate::monitor::StateStoreMetrics;
-use crate::storage_value::{StorageValue, ValueMeta};
+use crate::storage_value::StorageValue;
 use crate::store::StateStoreIter;
 
 pub fn default_config_for_test() -> StorageConfig {
@@ -61,7 +54,7 @@ pub fn default_config_for_test() -> StorageConfig {
 pub fn gen_dummy_batch(epoch: u64) -> Vec<(Bytes, StorageValue)> {
     vec![(
         iterator_test_key_of_epoch(0, epoch).into(),
-        StorageValue::new_put(ValueMeta::default(), b"value1".to_vec()),
+        StorageValue::new_put(b"value1".to_vec()),
     )]
 }
 
@@ -86,27 +79,6 @@ pub fn gen_dummy_sst_info(id: HummockSSTableId, batches: Vec<SharedBufferBatch>)
         file_size: batches.len() as u64,
         table_ids: vec![],
     }
-}
-
-pub async fn mock_hummock_storage() -> HummockStorage {
-    let (_env, hummock_manager_ref, _cluster_manager_ref, worker_node) =
-        setup_compute_env(8080).await;
-    let mock_hummock_meta_client = Arc::new(MockHummockMetaClient::new(
-        hummock_manager_ref.clone(),
-        worker_node.id,
-    ));
-    let sstable_store = mock_sstable_store();
-    HummockStorage::with_default_stats(
-        Arc::new(StorageConfig::default()),
-        sstable_store.clone(),
-        mock_hummock_meta_client,
-        Arc::new(StateStoreMetrics::unused()),
-        Arc::new(DummyCompactionGroupClient::new(
-            StaticCompactionGroupId::StateDefault.into(),
-        )),
-    )
-    .await
-    .unwrap()
 }
 
 /// Number of keys in table generated in `generate_table`.

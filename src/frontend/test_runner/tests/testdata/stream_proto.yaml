@@ -38,14 +38,13 @@
               - dataType:
                   typeName: INT32
                   isNullable: true
-                name: v1
+                name: t.v1
               - dataType:
                   typeName: INT64
                   isNullable: true
-                name: _row_id
+                name: t._row_id
             chain:
-              tableRefId:
-                tableId: 4
+              tableId: 4
               upstreamFields:
                 - dataType:
                     typeName: INT64
@@ -64,11 +63,11 @@
           - dataType:
               typeName: INT32
               isNullable: true
-            name: v1
+            name: t.v1
           - dataType:
               typeName: INT64
               isNullable: true
-            name: _row_id
+            name: t._row_id
         filter:
           searchCondition:
             exprType: LESS_THAN
@@ -94,20 +93,41 @@
       - dataType:
           typeName: INT32
           isNullable: true
-        name: v1
+        name: t.v1
       - dataType:
           typeName: INT64
           isNullable: true
-        name: _row_id
+        name: t._row_id
     materialize:
       columnOrders:
         - orderType: ASCENDING
           index: 1
-      columnIds:
-        - 0
-        - 1
-      distributionKey:
-        - 1
+      table:
+        id: 4294967294
+        schemaId: 2147483646
+        databaseId: 2147483646
+        name: test
+        columns:
+          - columnDesc:
+              columnType:
+                typeName: INT32
+                isNullable: true
+              name: v1
+          - columnDesc:
+              columnType:
+                typeName: INT64
+                isNullable: true
+              columnId: 1
+              name: t._row_id
+            isHidden: true
+        orderKey:
+          - orderType: ASCENDING
+            index: 1
+        distributionKey:
+          - 1
+        pk:
+          - 1
+        owner: root
     ---
     id: 4294967294
     schemaId: 1
@@ -123,7 +143,7 @@
             typeName: INT64
             isNullable: true
           columnId: 1
-          name: _row_id
+          name: t._row_id
         isHidden: true
     orderKey:
       - orderType: ASCENDING
@@ -171,14 +191,13 @@
           - dataType:
               typeName: INT32
               isNullable: true
-            name: v1
+            name: t.v1
           - dataType:
               typeName: INT64
               isNullable: true
-            name: _row_id
+            name: t._row_id
         chain:
-          tableRefId:
-            tableId: 4
+          tableId: 4
           upstreamFields:
             - dataType:
                 typeName: INT64
@@ -197,20 +216,41 @@
       - dataType:
           typeName: INT32
           isNullable: true
-        name: v1
+        name: t.v1
       - dataType:
           typeName: INT64
           isNullable: true
-        name: _row_id
+        name: t._row_id
     materialize:
       columnOrders:
         - orderType: ASCENDING
           index: 1
-      columnIds:
-        - 0
-        - 1
-      distributionKey:
-        - 1
+      table:
+        id: 4294967294
+        schemaId: 2147483646
+        databaseId: 2147483646
+        name: test
+        columns:
+          - columnDesc:
+              columnType:
+                typeName: INT32
+                isNullable: true
+              name: v1
+          - columnDesc:
+              columnType:
+                typeName: INT64
+                isNullable: true
+              columnId: 1
+              name: t._row_id
+            isHidden: true
+        orderKey:
+          - orderType: ASCENDING
+            index: 1
+        distributionKey:
+          - 1
+        pk:
+          - 1
+        owner: root
     ---
     id: 4294967294
     schemaId: 1
@@ -226,7 +266,7 @@
             typeName: INT64
             isNullable: true
           columnId: 1
-          name: _row_id
+          name: t._row_id
         isHidden: true
     orderKey:
       - orderType: ASCENDING
@@ -279,14 +319,13 @@
           - dataType:
               typeName: INT32
               isNullable: true
-            name: v1
+            name: t.v1
           - dataType:
               typeName: INT64
               isNullable: true
-            name: _row_id
+            name: t._row_id
         chain:
-          tableRefId:
-            tableId: 4
+          tableId: 4
           upstreamFields:
             - dataType:
                 typeName: INT64
@@ -309,20 +348,41 @@
       - dataType:
           typeName: INT32
           isNullable: true
-        name: v1
+        name: t.v1
       - dataType:
           typeName: INT64
           isNullable: true
-        name: _row_id
+        name: t._row_id
     materialize:
       columnOrders:
         - orderType: ASCENDING
           index: 1
-      columnIds:
-        - 0
-        - 1
-      distributionKey:
-        - 1
+      table:
+        id: 4294967294
+        schemaId: 2147483646
+        databaseId: 2147483646
+        name: test
+        columns:
+          - columnDesc:
+              columnType:
+                typeName: INT32
+                isNullable: true
+              name: v1
+          - columnDesc:
+              columnType:
+                typeName: INT64
+                isNullable: true
+              columnId: 1
+              name: t._row_id
+            isHidden: true
+        orderKey:
+          - orderType: ASCENDING
+            index: 1
+        distributionKey:
+          - 1
+        pk:
+          - 1
+        owner: root
     ---
     id: 4294967294
     schemaId: 1
@@ -338,7 +398,7 @@
             typeName: INT64
             isNullable: true
           columnId: 1
-          name: _row_id
+          name: t._row_id
         isHidden: true
     orderKey:
       - orderType: ASCENDING
@@ -389,14 +449,13 @@
                       - dataType:
                           typeName: INT32
                           isNullable: true
-                        name: v1
+                        name: t.v1
                       - dataType:
                           typeName: INT64
                           isNullable: true
-                        name: _row_id
+                        name: t._row_id
                     chain:
-                      tableRefId:
-                        tableId: 4
+                      tableId: 4
                       upstreamFields:
                         - dataType:
                             typeName: INT64
@@ -413,11 +472,11 @@
                   - dataType:
                       typeName: INT64
                       isNullable: true
-                    name: "agg#0"
+                    name: count
                   - dataType:
                       typeName: INT64
                       isNullable: true
-                    name: "agg#1"
+                    name: sum(t.v1)
                 localSimpleAgg:
                   aggCalls:
                     - type: COUNT
@@ -462,11 +521,11 @@
               - dataType:
                   typeName: INT64
                   isNullable: true
-                name: "agg#0"
+                name: count
               - dataType:
                   typeName: INT64
                   isNullable: true
-                name: "agg#1"
+                name: sum(t.v1)
             exchange:
               strategy:
                 type: SIMPLE
@@ -474,11 +533,11 @@
           - dataType:
               typeName: INT64
               isNullable: true
-            name: "agg#0"
+            name: sum(count)
           - dataType:
               typeName: INT64
               isNullable: true
-            name: "agg#1"
+            name: sum(sum(t.v1))
         globalSimpleAgg:
           aggCalls:
             - type: SUM
@@ -523,15 +582,31 @@
       - dataType:
           typeName: INT64
           isNullable: true
-        name: "agg#0"
+        name: sum(count)
       - dataType:
           typeName: INT64
           isNullable: true
-        name: "agg#1"
+        name: sum(sum(t.v1))
     materialize:
-      columnIds:
-        - 0
-        - 1
+      table:
+        id: 4294967294
+        schemaId: 2147483646
+        databaseId: 2147483646
+        name: test
+        columns:
+          - columnDesc:
+              columnType:
+                typeName: INT64
+                isNullable: true
+              name: sum(count)
+            isHidden: true
+          - columnDesc:
+              columnType:
+                typeName: INT64
+                isNullable: true
+              columnId: 1
+              name: sum
+        owner: root
     ---
     id: 4294967294
     schemaId: 1
@@ -541,7 +616,7 @@
           columnType:
             typeName: INT64
             isNullable: true
-          name: "agg#0"
+          name: sum(count)
         isHidden: true
       - columnDesc:
           columnType:
@@ -598,18 +673,17 @@
                           - dataType:
                               typeName: INT32
                               isNullable: true
-                            name: v1
+                            name: t.v1
                           - dataType:
                               typeName: INT32
                               isNullable: true
-                            name: v2
+                            name: t.v2
                           - dataType:
                               typeName: INT64
                               isNullable: true
-                            name: _row_id
+                            name: t._row_id
                         chain:
-                          tableRefId:
-                            tableId: 4
+                          tableId: 4
                           upstreamFields:
                             - dataType:
                                 typeName: INT64
@@ -633,15 +707,15 @@
                       - dataType:
                           typeName: INT32
                           isNullable: true
-                        name: v2
+                        name: t.v2
                       - dataType:
                           typeName: INT32
                           isNullable: true
-                        name: v1
+                        name: t.v1
                       - dataType:
                           typeName: INT64
                           isNullable: true
-                        name: _row_id
+                        name: t._row_id
                     project:
                       selectList:
                         - exprType: INPUT_REF
@@ -667,15 +741,15 @@
                   - dataType:
                       typeName: INT32
                       isNullable: true
-                    name: v2
+                    name: t.v2
                   - dataType:
                       typeName: INT32
                       isNullable: true
-                    name: v1
+                    name: t.v1
                   - dataType:
                       typeName: INT64
                       isNullable: true
-                    name: _row_id
+                    name: t._row_id
                 exchange:
                   strategy:
                     type: HASH
@@ -687,15 +761,15 @@
               - dataType:
                   typeName: INT32
                   isNullable: true
-                name: v2
+                name: t.v2
               - dataType:
                   typeName: INT64
                   isNullable: true
-                name: "agg#0"
+                name: count
               - dataType:
                   typeName: INT64
                   isNullable: true
-                name: "agg#1"
+                name: sum(t.v1)
             hashAgg:
               groupKey:
                 - 0
@@ -723,7 +797,7 @@
                         columnType:
                           typeName: INT32
                           isNullable: true
-                        name: v2
+                        name: t.v2
                     - columnDesc:
                         columnType:
                           typeName: INT64
@@ -744,7 +818,7 @@
                         columnType:
                           typeName: INT32
                           isNullable: true
-                        name: v2
+                        name: t.v2
                     - columnDesc:
                         columnType:
                           typeName: INT64
@@ -763,11 +837,11 @@
           - dataType:
               typeName: INT64
               isNullable: true
-            name: "agg#1"
+            name: sum(t.v1)
           - dataType:
               typeName: INT32
               isNullable: true
-            name: v2
+            name: t.v2
         project:
           selectList:
             - exprType: INPUT_REF
@@ -787,20 +861,41 @@
       - dataType:
           typeName: INT64
           isNullable: true
-        name: "agg#1"
+        name: sum(t.v1)
       - dataType:
           typeName: INT32
           isNullable: true
-        name: v2
+        name: t.v2
     materialize:
       columnOrders:
         - orderType: ASCENDING
           index: 1
-      columnIds:
-        - 0
-        - 1
-      distributionKey:
-        - 1
+      table:
+        id: 4294967294
+        schemaId: 2147483646
+        databaseId: 2147483646
+        name: test
+        columns:
+          - columnDesc:
+              columnType:
+                typeName: INT64
+                isNullable: true
+              name: sum_v1
+          - columnDesc:
+              columnType:
+                typeName: INT32
+                isNullable: true
+              columnId: 1
+              name: t.v2
+            isHidden: true
+        orderKey:
+          - orderType: ASCENDING
+            index: 1
+        distributionKey:
+          - 1
+        pk:
+          - 1
+        owner: root
     ---
     id: 4294967294
     schemaId: 1
@@ -816,7 +911,7 @@
             typeName: INT32
             isNullable: true
           columnId: 1
-          name: v2
+          name: t.v2
         isHidden: true
     orderKey:
       - orderType: ASCENDING

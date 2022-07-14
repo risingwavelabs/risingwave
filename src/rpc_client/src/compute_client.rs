@@ -63,6 +63,8 @@ impl ComputeClient {
 
     pub async fn get_stream(
         &self,
+        up_actor_id: u32,
+        down_actor_id: u32,
         up_fragment_id: u32,
         down_fragment_id: u32,
     ) -> Result<Streaming<GetStreamResponse>> {
@@ -70,6 +72,8 @@ impl ComputeClient {
             .exchange_client
             .to_owned()
             .get_stream(GetStreamRequest {
+                up_actor_id,
+                down_actor_id,
                 up_fragment_id,
                 down_fragment_id,
             })
@@ -78,8 +82,8 @@ impl ComputeClient {
                 tracing::error!(
                     "failed to create stream from remote_input {} from fragment {} to fragment {}",
                     self.addr,
-                    up_fragment_id,
-                    down_fragment_id
+                    up_actor_id,
+                    down_actor_id
                 )
             })?
             .into_inner())

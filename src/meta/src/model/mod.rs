@@ -18,7 +18,9 @@ mod cluster;
 mod stream;
 mod user;
 
+use std::collections::btree_map::{Entry, VacantEntry};
 use std::collections::BTreeMap;
+use std::fmt::Debug;
 use std::ops::{Deref, DerefMut};
 
 use async_trait::async_trait;
@@ -36,6 +38,7 @@ use crate::storage::{self, MetaStore, Transaction};
 pub type ActorId = u32;
 
 /// Should be used together with `ActorId` to uniquely identify a dispatcher
+#[expect(dead_code)]
 pub type DispatcherId = u64;
 
 /// A global, unique identifier of a fragment
@@ -170,14 +173,14 @@ pub trait ValTransaction: Sized {
 /// When `commit` is called, the change to `new_value` will be applied to the `orig_value_ref`
 /// When `abort` is called, the `VarTransaction` is dropped and the local memory value is
 /// untouched.
-pub struct VarTransaction<'a, T> {
+pub struct VarTransaction<'a, T: Transactional> {
     orig_value_ref: &'a mut T,
     new_value: Option<T>,
 }
 
 impl<'a, T> VarTransaction<'a, T>
 where
-    T: Clone,
+    T: Transactional,
 {
     /// Create a `VarTransaction` that wraps a raw variable
     pub fn new(val_ref: &'a mut T) -> VarTransaction<'a, T> {
@@ -189,7 +192,7 @@ where
     }
 }
 
-impl<'a, T> Deref for VarTransaction<'a, T> {
+impl<'a, T: Transactional> Deref for VarTransaction<'a, T> {
     type Target = T;
 
     fn deref(&self) -> &Self::Target {
@@ -202,7 +205,7 @@ impl<'a, T> Deref for VarTransaction<'a, T> {
 
 impl<'a, T> DerefMut for VarTransaction<'a, T>
 where
-    T: Clone,
+    T: Clone + Transactional,
 {
     fn deref_mut(&mut self) -> &mut Self::Target {
         if self.new_value.is_none() {
@@ -236,33 +239,250 @@ where
     }
 }
 
-impl<'a, K, V> ValTransaction for VarTransaction<'a, BTreeMap<K, V>>
-where
-    K: Ord,
-    V: Transactional + PartialEq,
-{
-    fn commit(self) {
-        if let Some(new_value) = self.new_value {
-            *self.orig_value_ref = new_value;
+/// Represent the entry of the `staging` field of a `BTreeMapTransaction`
+enum BTreeMapTransactionStagingEntry<'a, K: Ord, V> {
+    /// The entry of a key does not exist in the `staging` field yet.
+    Vacant(VacantEntry<'a, K, BTreeMapOp<V>>),
+    /// The entry of a key exists in the `staging` field. A mutable reference to the value of the
+    /// staging entry is provided for mutable access.
+    Occupied(&'a mut V),
+}
+
+/// A mutable guard to the value of the corresponding key of a `BTreeMapTransaction`.
+/// The staging value is initialized in a lazy manner, that is, the staging value is only cloned
+/// from the original value only when it's being mutably deref.
+pub struct BTreeMapTransactionValueGuard<'a, K: Ord, V: Clone> {
+    // `staging_entry` is always `Some` so it's always safe to unwrap it. We make it `Option` so
+    // that we can take a `Vacant` out, take its ownership, insert value into `VacantEntry` and
+    // insert an `Occupied` back to the `Option`.
+    // If `staging_entry` is `Vacant`, `orig_value` must be Some
+    staging_entry: Option<BTreeMapTransactionStagingEntry<'a, K, V>>,
+    // If the `orig_value` is None, the `staging_entry` must be `Occupied`
+    orig_value: Option<&'a V>,
+}
+
+impl<'a, K: Ord, V: Clone> BTreeMapTransactionValueGuard<'a, K, V> {
+    fn new(
+        staging_entry: BTreeMapTransactionStagingEntry<'a, K, V>,
+        orig_value: Option<&'a V>,
+    ) -> Self {
+        let is_entry_occupied =
+            matches!(staging_entry, BTreeMapTransactionStagingEntry::Occupied(_));
+        assert!(
+            is_entry_occupied || orig_value.is_some(),
+            "one of staging_entry and orig_value must be non-empty"
+        );
+        Self {
+            staging_entry: Some(staging_entry),
+            orig_value,
+        }
+    }
+}
+
+impl<'a, K: Ord, V: Clone> Deref for BTreeMapTransactionValueGuard<'a, K, V> {
+    type Target = V;
+
+    fn deref(&self) -> &Self::Target {
+        // Read the staging entry first. If the staging entry is vacant, read the original value
+        match &self.staging_entry.as_ref().unwrap() {
+            BTreeMapTransactionStagingEntry::Vacant(_) => self
+                .orig_value
+                .expect("staging is vacant, so orig_value must be some"),
+            BTreeMapTransactionStagingEntry::Occupied(v) => *v,
+        }
+    }
+}
+
+impl<'a, K: Ord, V: Clone> DerefMut for BTreeMapTransactionValueGuard<'a, K, V> {
+    fn deref_mut(&mut self) -> &mut Self::Target {
+        let is_occupied = matches!(
+            self.staging_entry.as_ref().unwrap(),
+            BTreeMapTransactionStagingEntry::Occupied(_)
+        );
+
+        // When the staging entry is vacant, take a copy of the original value and insert an entry
+        // into the staging.
+        if !is_occupied {
+            let vacant_entry = match self.staging_entry.take().unwrap() {
+                BTreeMapTransactionStagingEntry::Vacant(entry) => entry,
+                BTreeMapTransactionStagingEntry::Occupied(_) => {
+                    unreachable!("we have previously check that the entry is not occupied")
+                }
+            };
+
+            // Insert a cloned original value to staging through `vacant_entry`
+            let new_value_mut_ref = match vacant_entry.insert(BTreeMapOp::Insert(
+                self.orig_value
+                    .expect("self.staging_entry was vacant, so orig_value must be some")
+                    .clone(),
+            )) {
+                BTreeMapOp::Insert(v) => v,
+                BTreeMapOp::Delete => {
+                    unreachable!(
+                        "the previous inserted op is `Inserted`, so it's not possible to reach Delete"
+                    )
+                }
+            };
+            // Set the staging entry to `Occupied`.
+            let _ = self
+                .staging_entry
+                .insert(BTreeMapTransactionStagingEntry::Occupied(new_value_mut_ref));
+        }
+
+        match self.staging_entry.as_mut().unwrap() {
+            BTreeMapTransactionStagingEntry::Vacant(_) => {
+                unreachable!("we have inserted a cloned original value in case of vacant")
+            }
+            BTreeMapTransactionStagingEntry::Occupied(v) => *v,
+        }
+    }
+}
+
+enum BTreeMapOp<V> {
+    Insert(V),
+    Delete,
+}
+
+/// A `ValTransaction` that wraps a `BTreeMap`. It supports basic `BTreeMap` operations like `get`,
+/// `get_mut`, `insert` and `remove`. Incremental modification of `insert`, `remove` and `get_mut`
+/// are stored in `staging`. On `commit`, it will apply the changes stored in `staging` to the in
+/// memory btree map. When serve `get` and `get_mut`, it merges the value stored in `staging` and
+/// `tree_ref`.
+pub struct BTreeMapTransaction<'a, K: Ord, V> {
+    /// A reference to the original `BTreeMap`. All access to this field should be immutable,
+    /// except when we commit the staging changes to the original map.
+    tree_ref: &'a mut BTreeMap<K, V>,
+    /// Store all the staging changes that will be applied to the original map on commit
+    staging: BTreeMap<K, BTreeMapOp<V>>,
+}
+
+impl<'a, K: Ord + Debug, V: Clone> BTreeMapTransaction<'a, K, V> {
+    pub fn new(tree_ref: &'a mut BTreeMap<K, V>) -> BTreeMapTransaction<'a, K, V> {
+        Self {
+            tree_ref,
+            staging: BTreeMap::default(),
         }
     }
 
-    /// For keys only in `self.orig_value`, call `delete_in_transaction` for the corresponding
-    /// value. For keys only in `self.new_value` or in both `self.new_value` and
-    /// `self.orig_value` but different in the value, call `upsert_in_transaction` for the
-    /// corresponding value.
-    fn apply_to_txn(&self, txn: &mut Transaction) -> Result<()> {
-        if let Some(new_value) = &self.new_value {
-            for (k, v) in self.orig_value_ref.iter() {
-                if !new_value.contains_key(k) {
-                    v.delete_in_transaction(txn)?;
+    /// Start a `BTreeMapEntryTransaction` when the `key` exists
+    pub fn new_entry_txn(&mut self, key: K) -> Option<BTreeMapEntryTransaction<K, V>> {
+        BTreeMapEntryTransaction::new(self.tree_ref, key, None)
+    }
+
+    /// Start a `BTreeMapEntryTransaction`. If the `key` does not exist, the the `default_val` will
+    /// be taken as the initial value of the transaction and will be applied to the original
+    /// `BTreeMap` on commit.
+    pub fn new_entry_txn_or_default(
+        &mut self,
+        key: K,
+        default_val: V,
+    ) -> BTreeMapEntryTransaction<K, V> {
+        BTreeMapEntryTransaction::new(self.tree_ref, key, Some(default_val))
+            .expect("default value is provided and should return `Some`")
+    }
+
+    /// Start a `BTreeMapEntryTransaction` that inserts the `val` into `key`.
+    pub fn new_entry_insert_txn(&mut self, key: K, val: V) -> BTreeMapEntryTransaction<K, V> {
+        BTreeMapEntryTransaction::new_insert(self.tree_ref, key, val)
+    }
+
+    pub fn tree_ref(&self) -> &BTreeMap<K, V> {
+        self.tree_ref
+    }
+
+    /// Get the value of the provided key by merging the staging value and the original value
+    pub fn get(&self, key: &K) -> Option<&V> {
+        self.staging
+            .get(key)
+            .and_then(|op| match op {
+                BTreeMapOp::Insert(v) => Some(v),
+                BTreeMapOp::Delete => None,
+            })
+            .or_else(|| self.tree_ref.get(key))
+    }
+
+    /// This method serves the same semantic to the `get_mut` of `BTreeMap`.
+    ///
+    /// It return a `BTreeMapTransactionValueGuard` of the corresponding key for mutable access to
+    /// guarded staging value.
+    ///
+    /// When the value does not exist in the staging (either key not exist or with a Delete record)
+    /// and the value does not exist in the original `BTreeMap`, return None.
+    pub fn get_mut(&mut self, key: K) -> Option<BTreeMapTransactionValueGuard<'_, K, V>> {
+        let orig_contains_key = self.tree_ref.contains_key(&key);
+        let orig_value = self.tree_ref.get(&key);
+
+        let staging_entry = match self.staging.entry(key) {
+            Entry::Occupied(entry) => match entry.into_mut() {
+                BTreeMapOp::Insert(v) => BTreeMapTransactionStagingEntry::Occupied(v),
+                BTreeMapOp::Delete => return None,
+            },
+            Entry::Vacant(vacant_entry) => {
+                if !orig_contains_key {
+                    return None;
+                } else {
+                    BTreeMapTransactionStagingEntry::Vacant(vacant_entry)
                 }
             }
-            for (k, v) in new_value {
-                let orig_value = self.orig_value_ref.get(k);
-                if orig_value.is_none() || orig_value.unwrap() != v {
-                    v.upsert_in_transaction(txn)?;
+        };
+        Some(BTreeMapTransactionValueGuard::new(
+            staging_entry,
+            orig_value,
+        ))
+    }
+
+    pub fn insert(&mut self, key: K, value: V) {
+        self.staging.insert(key, BTreeMapOp::Insert(value));
+    }
+
+    pub fn remove(&mut self, key: K) -> Option<V> {
+        if let Some(op) = self.staging.get(&key) {
+            return match op {
+                BTreeMapOp::Delete => None,
+                BTreeMapOp::Insert(_) => match self.staging.remove(&key).unwrap() {
+                    BTreeMapOp::Insert(v) => Some(v),
+                    BTreeMapOp::Delete => {
+                        unreachable!("we have checked that the op of the key is `Insert`, so it's impossible to be Delete")
+                    }
+                },
+            };
+        }
+        match self.tree_ref.get(&key) {
+            Some(orig_value) => {
+                self.staging.insert(key, BTreeMapOp::Delete);
+                Some(orig_value.clone())
+            }
+            None => None,
+        }
+    }
+}
+
+impl<'a, K: Ord, V: Transactional> ValTransaction for BTreeMapTransaction<'a, K, V> {
+    fn commit(self) {
+        // Apply each op stored in the staging to original tree.
+        for (k, op) in self.staging {
+            match op {
+                BTreeMapOp::Insert(v) => {
+                    self.tree_ref.insert(k, v);
                 }
+                BTreeMapOp::Delete => {
+                    self.tree_ref.remove(&k);
+                }
+            }
+        }
+    }
+
+    fn apply_to_txn(&self, txn: &mut Transaction) -> Result<()> {
+        // Add the staging operation to txn
+        for (k, op) in &self.staging {
+            match op {
+                BTreeMapOp::Insert(v) => v.upsert_in_transaction(txn)?,
+                BTreeMapOp::Delete => match self.tree_ref.get(k) {
+                    Some(v) => {
+                        v.delete_in_transaction(txn)?;
+                    }
+                    None => {}
+                },
             }
         }
         Ok(())
@@ -276,33 +496,36 @@ pub struct BTreeMapEntryTransaction<'a, K, V> {
     new_value: V,
 }
 
-impl<'a, K: Ord, V: Clone> BTreeMapEntryTransaction<'a, K, V> {
+impl<'a, K: Ord + Debug, V: Clone> BTreeMapEntryTransaction<'a, K, V> {
     /// Create a `ValTransaction` that wraps a `BTreeMap` entry of the given `key`.
     /// If the tree does not contain `key`, the `default_val` will be used as the initial value
-    pub fn new_or_default(
+    pub fn new_insert(
         tree_ref: &'a mut BTreeMap<K, V>,
         key: K,
-        default_val: V,
+        value: V,
     ) -> BTreeMapEntryTransaction<'a, K, V> {
-        let init_value = tree_ref.get(&key).cloned().unwrap_or(default_val);
         BTreeMapEntryTransaction {
-            new_value: init_value,
+            new_value: value,
             tree_ref,
             key,
         }
     }
 
-    /// Create a `ValTransaction` that wraps a `BTreeMap` entry of the given `key`.
-    /// If the `key` exists in the tree, return `Some` of a `VarTransaction` wrapped for the
-    /// of the given `key`.
+    /// Create a `BTreeMapEntryTransaction` that wraps a `BTreeMap` entry of the given `key`.
+    /// If the `key` exists in the tree, return `Some` of a `BTreeMapEntryTransaction` wrapped for
+    /// the of the given `key`.
+    /// If the `key` does not exist in the tree but `default_val` is provided as `Some`, a
+    /// `BTreeMapEntryTransaction` that wraps the given `key` and default value is returned
     /// Otherwise return `None`.
     pub fn new(
         tree_ref: &'a mut BTreeMap<K, V>,
         key: K,
+        default_val: Option<V>,
     ) -> Option<BTreeMapEntryTransaction<'a, K, V>> {
         tree_ref
             .get(&key)
             .cloned()
+            .or(default_val)
             .map(|orig_value| BTreeMapEntryTransaction {
                 new_value: orig_value,
                 tree_ref,
@@ -339,20 +562,6 @@ impl<'a, K: Ord, V: PartialEq + Transactional> ValTransaction
             self.new_value.upsert_in_transaction(txn)?
         }
         Ok(())
-    }
-}
-
-impl<'a, K: Ord, V: Clone> VarTransaction<'a, BTreeMap<K, V>> {
-    pub fn new_entry_txn(&mut self, key: K) -> Option<BTreeMapEntryTransaction<K, V>> {
-        BTreeMapEntryTransaction::new(self.orig_value_ref, key)
-    }
-
-    pub fn new_entry_txn_or_default(
-        &mut self,
-        key: K,
-        default_val: V,
-    ) -> BTreeMapEntryTransaction<K, V> {
-        BTreeMapEntryTransaction::new_or_default(self.orig_value_ref, key, default_val)
     }
 }
 
@@ -444,8 +653,8 @@ mod tests {
         );
 
         let mut map_copy = map.clone();
-        let mut map_txn = VarTransaction::new(&mut map);
-        map_txn.remove("to-remove").unwrap();
+        let mut map_txn = BTreeMapTransaction::new(&mut map);
+        map_txn.remove("to-remove".to_string());
         map_txn.insert(
             "first".to_string(),
             TestTransactional {
@@ -460,11 +669,42 @@ mod tests {
                 value: "second-value",
             },
         );
+        assert_eq!(
+            &TestTransactional {
+                key: "second",
+                value: "second-value",
+            },
+            map_txn.get(&"second".to_string()).unwrap()
+        );
+        map_txn.insert(
+            "third".to_string(),
+            TestTransactional {
+                key: "third",
+                value: "third-value",
+            },
+        );
+        assert_eq!(
+            &TestTransactional {
+                key: "third",
+                value: "third-value",
+            },
+            map_txn.get(&"third".to_string()).unwrap()
+        );
+
+        let mut third_entry = map_txn.get_mut("third".to_string()).unwrap();
+        third_entry.value = "third-value-updated";
+        assert_eq!(
+            &TestTransactional {
+                key: "third",
+                value: "third-value-updated",
+            },
+            map_txn.get(&"third".to_string()).unwrap()
+        );
 
         let mut txn = Transaction::default();
         map_txn.apply_to_txn(&mut txn).unwrap();
         let txn_ops = txn.get_operations();
-        assert_eq!(3, txn_ops.len());
+        assert_eq!(4, txn_ops.len());
         for op in txn_ops {
             match op {
                 Operation::Put { cf, key, value }
@@ -475,6 +715,10 @@ mod tests {
                     if cf == TEST_CF
                         && key == "second".as_bytes()
                         && value == "second-value".as_bytes() => {}
+                Operation::Put { cf, key, value }
+                    if cf == TEST_CF
+                        && key == "third".as_bytes()
+                        && value == "third-value-updated".as_bytes() => {}
                 Operation::Delete { cf, key } if cf == TEST_CF && key == "to-remove".as_bytes() => {
                 }
                 _ => unreachable!("invalid operation"),
@@ -498,6 +742,13 @@ mod tests {
                 value: "second-value",
             },
         );
+        map_copy.insert(
+            "third".to_string(),
+            TestTransactional {
+                key: "third",
+                value: "third-value-updated",
+            },
+        );
         assert_eq!(map_copy, map);
     }
 
@@ -512,7 +763,7 @@ mod tests {
             },
         );
 
-        let mut map_txn = VarTransaction::new(&mut map);
+        let mut map_txn = BTreeMapTransaction::new(&mut map);
         let mut first_entry_txn = map_txn.new_entry_txn("first".to_string()).unwrap();
         first_entry_txn.value = "first-value";
         let mut txn = Transaction::default();
@@ -530,8 +781,8 @@ mod tests {
     fn test_tree_map_entry_insert_transaction_commit() {
         let mut map: BTreeMap<String, TestTransactional> = BTreeMap::new();
 
-        let mut map_txn = VarTransaction::new(&mut map);
-        let first_entry_txn = map_txn.new_entry_txn_or_default(
+        let mut map_txn = BTreeMapTransaction::new(&mut map);
+        let first_entry_txn = map_txn.new_entry_insert_txn(
             "first".to_string(),
             TestTransactional {
                 key: "first",
