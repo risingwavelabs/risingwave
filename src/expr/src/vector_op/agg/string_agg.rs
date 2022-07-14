@@ -43,74 +43,116 @@ impl PartialOrd for OrderableRow {
     }
 }
 
+enum StringAggState {
+    WithoutOrder {
+        result: Option<String>,
+    },
+    WithOrder {
+        order_pairs: Arc<Vec<OrderPair>>,
+        min_heap: BinaryHeap<OrderableRow>,
+    },
+}
+
+// TODO(yuchao): support delimiter
 pub struct StringAgg {
     agg_col_idx: usize,
-    order_pairs: Arc<Vec<OrderPair>>,
-    min_heap: BinaryHeap<OrderableRow>,
-    all_nulls: bool,
+    state: StringAggState,
 }
 
 impl StringAgg {
     pub fn new(agg_col_idx: usize, order_pairs: Vec<OrderPair>) -> Self {
         StringAgg {
             agg_col_idx,
-            order_pairs: Arc::new(order_pairs),
-            min_heap: BinaryHeap::new(),
-            all_nulls: true,
+            state: if order_pairs.is_empty() {
+                StringAggState::WithoutOrder { result: None }
+            } else {
+                StringAggState::WithOrder {
+                    order_pairs: Arc::new(order_pairs),
+                    min_heap: BinaryHeap::new(),
+                }
+            },
         }
     }
 
     fn push_row(&mut self, s: &str, chunk: &DataChunk, row_id: usize) -> Result<()> {
-        // TODO(rc): for agg w/o order by clause, just aggregate the string on the fly
-        let (row_ref, vis) = chunk.row_at(row_id)?;
-        assert!(vis);
-        let row = row_ref.to_owned_row();
-        // TODO(rc): save string instead of ScalarImpl
-        self.min_heap.push(OrderableRow {
-            row,
-            order_pairs: self.order_pairs.clone(),
-        });
-        self.all_nulls = false; // once a `s: &str` is given, we know that not all rows are nulls
+        match &mut self.state {
+            StringAggState::WithoutOrder { result } => match result {
+                Some(result) => result.push_str(s),
+                None => {
+                    *result = Some(s.to_string());
+                }
+            },
+            StringAggState::WithOrder {
+                order_pairs,
+                min_heap,
+            } => {
+                let (row_ref, vis) = chunk.row_at(row_id)?;
+                assert!(vis);
+                let row = row_ref.to_owned_row();
+                // TODO(rc): save string instead of ScalarImpl
+                min_heap.push(OrderableRow {
+                    row,
+                    order_pairs: order_pairs.clone(),
+                });
+            }
+        }
         Ok(())
     }
 
     fn get_result(&self) -> Option<String> {
-        if self.all_nulls {
-            None
-        } else {
-            // TODO(yuchao): support delimiter
-            Some(
-                self.min_heap
-                    .clone()
-                    .into_iter_sorted()
-                    .map(
-                        |orow| match orow.row.into_value_at(self.agg_col_idx).unwrap() {
-                            ScalarImpl::Utf8(s) => s,
-                            _ => panic!("Expected Utf8"),
-                        },
+        match &self.state {
+            StringAggState::WithoutOrder { result } => result.clone(),
+            StringAggState::WithOrder {
+                order_pairs: _,
+                min_heap,
+            } => {
+                if min_heap.is_empty() {
+                    None
+                } else {
+                    Some(
+                        min_heap
+                            .clone()
+                            .into_iter_sorted()
+                            .map(
+                                |orow| match orow.row.into_value_at(self.agg_col_idx).unwrap() {
+                                    ScalarImpl::Utf8(s) => s,
+                                    _ => panic!("Expected Utf8"),
+                                },
+                            )
+                            .join(""),
                     )
-                    .join(""),
-            )
+                }
+            }
         }
     }
 
     fn get_result_and_reset(&mut self) -> Option<String> {
-        if self.all_nulls {
-            None
-        } else {
-            self.all_nulls = true;
-            // TODO(yuchao): support delimiter
-            Some(
-                self.min_heap
-                    .drain_sorted()
-                    .map(
-                        |orow| match orow.row.into_value_at(self.agg_col_idx).unwrap() {
-                            ScalarImpl::Utf8(s) => s,
-                            _ => panic!("Expected Utf8"),
-                        },
+        match &mut self.state {
+            StringAggState::WithoutOrder { result } => {
+                let res = result.clone();
+                *result = None;
+                res
+            }
+            StringAggState::WithOrder {
+                order_pairs: _,
+                min_heap,
+            } => {
+                if min_heap.is_empty() {
+                    None
+                } else {
+                    Some(
+                        min_heap
+                            .drain_sorted()
+                            .map(
+                                |orow| match orow.row.into_value_at(self.agg_col_idx).unwrap() {
+                                    ScalarImpl::Utf8(s) => s,
+                                    _ => panic!("Expected Utf8"),
+                                },
+                            )
+                            .join(""),
                     )
-                    .join(""),
-            )
+                }
+            }
         }
     }
 }
