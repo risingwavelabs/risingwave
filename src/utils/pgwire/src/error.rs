@@ -15,46 +15,46 @@
 use std::io::Error as IoError;
 
 use thiserror::Error;
-pub type PsqlResult<T> = std::result::Result<T, PsqlError>;
+
 use crate::pg_server::BoxedError;
+pub type PsqlResult<T> = std::result::Result<T, PsqlError>;
 
 /// Error type used in pgwire crates.
 #[derive(Error, Debug)]
 pub enum PsqlError {
     #[error("SslError: {0}.")]
-    SslError(#[from] SslError),
+    SslError(IoError),
 
     #[error("StartupError: {0}.")]
-    StartupError(#[from] StartupError),
+    StartupError(BoxedError),
 
     #[error("PasswordError: {0}.")]
-    PasswordError(#[from] PasswordError),
+    PasswordError(IoError),
 
     #[error("QueryError: {0}.")]
-    QueryError(#[from] QueryError),
+    QueryError(BoxedError),
 
-    #[error("CancelError: {0}.")]
-    CancelError(#[from] CancelError),
+    #[error("Encode error {0}.")]
+    CancelMsg(String),
 
     #[error("ParseError: {0}.")]
-    ParseError(#[from] ParseError),
+    ParseError(BoxedError),
 
     #[error("BindError: {0}.")]
-    BindError(#[from] BindError),
+    BindError(IoError),
 
     #[error("ExecuteError: {0}.")]
-    ExecuteError(#[from] ExecuteError),
+    ExecuteError(BoxedError),
 
     #[error("DescribeErrro: {0}.")]
-    DescribeError(#[from] DescribeError),
+    DescribeError(IoError),
 
     #[error("CloseError: {0}.")]
-    CloseError(#[from] CloseError),
+    CloseError(IoError),
 
     #[error("ReadMsgError: {0}.")]
     ReadMsgError(IoError),
 
-    // Use for error occurs when sending error msg.
     #[error("{0}")]
     IoError(#[from] IoError),
 }
@@ -62,86 +62,6 @@ pub enum PsqlError {
 impl PsqlError {
     /// Construct a Cancel error. Used when Ctrl-c a processing query. Similar to PG.
     pub fn cancel() -> Self {
-        PsqlError::CancelError(CancelError::Content(
-            "ERROR:  canceling statement due to user request".to_string(),
-        ))
+        PsqlError::CancelMsg("ERROR:  canceling statement due to user request".to_string())
     }
-}
-
-#[derive(Error, Debug)]
-pub enum SslError {
-    #[error("{0}")]
-    IoError(#[from] IoError),
-}
-
-#[derive(Error, Debug)]
-pub enum StartupError {
-    #[error("{0}")]
-    IoError(#[from] IoError),
-
-    #[error("connect error:{0}")]
-    ConnectError(BoxedError),
-}
-
-#[derive(Error, Debug)]
-pub enum PasswordError {
-    #[error("{0}")]
-    IoError(#[from] IoError),
-
-    #[error("Invalid password")]
-    InvalidPassword,
-}
-
-#[derive(Error, Debug)]
-pub enum CancelError {
-    #[error("{0}")]
-    Content(String),
-
-    #[error("{0}")]
-    IoError(#[from] IoError),
-}
-
-#[derive(Error, Debug)]
-pub enum QueryError {
-    #[error("{0}")]
-    IoError(#[from] IoError),
-
-    #[error("Response error from frontend: {0}")]
-    ResponseError(BoxedError),
-}
-
-#[derive(Error, Debug)]
-pub enum ParseError {
-    #[error("{0}")]
-    IoError(#[from] IoError),
-
-    #[error("Response error from frontend: {0}")]
-    ResponseError(BoxedError),
-}
-
-#[derive(Error, Debug)]
-pub enum BindError {
-    #[error("{0}")]
-    IoError(#[from] IoError),
-}
-
-#[derive(Error, Debug)]
-pub enum ExecuteError {
-    #[error("{0}")]
-    IoError(#[from] IoError),
-
-    #[error("Response error from frontend: {0}")]
-    ResponseError(BoxedError),
-}
-
-#[derive(Error, Debug)]
-pub enum DescribeError {
-    #[error("{0}")]
-    IoError(#[from] IoError),
-}
-
-#[derive(Error, Debug)]
-pub enum CloseError {
-    #[error("{0}")]
-    IoError(#[from] IoError),
 }
