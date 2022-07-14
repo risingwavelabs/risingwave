@@ -84,10 +84,6 @@ impl MetaNodeService {
             cmd.arg("--disable-recovery");
         }
 
-        if config.enable_migrate {
-            cmd.arg("--enable-migrate");
-        }
-
         if let Some(sec) = config.max_idle_secs_to_exit {
             if sec > 0 {
                 cmd.arg("--dangerous-max-idle-secs").arg(format!("{}", sec));
