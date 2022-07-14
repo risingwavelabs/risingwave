@@ -702,6 +702,7 @@ impl Dispatcher for HashDataDispatcher {
                                 if *hash != last_hash_value_when_update_delete {
                                     new_ops.push(Op::Delete);
                                     new_ops.push(Op::Insert);
+                                    panic!("Update of the same pk is shuffled to different partitions, which might cause problems. We forbid this for now.");
                                 } else {
                                     new_ops.push(Op::UpdateDelete);
                                     new_ops.push(Op::UpdateInsert);
@@ -938,7 +939,10 @@ mod tests {
         }
     }
 
+    // TODO: this test contains update being shuffled to different partitions, which is not
+    // supported for now.
     #[tokio::test]
+    #[ignore]
     async fn test_hash_dispatcher_complex() {
         test_hash_dispatcher_complex_inner().await
     }

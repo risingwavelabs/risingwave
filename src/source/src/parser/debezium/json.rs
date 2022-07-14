@@ -52,17 +52,20 @@ pub struct Payload {
 pub struct DebeziumJsonParser {}
 
 impl DebeziumJsonParser {
-    fn value_to_datums(columns: &[SourceColumnDesc], map: &BTreeMap<String, Value>) -> Vec<Datum> {
+    fn value_to_datums(
+        columns: &[SourceColumnDesc],
+        map: &BTreeMap<String, Value>,
+    ) -> Result<Vec<Datum>> {
         columns
             .iter()
             .map(|column| {
                 if column.skip_parse {
-                    None
+                    Ok(None)
                 } else {
-                    json_parse_value(column, map.get(&column.name)).ok()
+                    json_parse_value(&column.into(), map.get(&column.name)).map_err(|e| e.into())
                 }
             })
-            .collect::<Vec<Datum>>()
+            .collect::<Result<Vec<Datum>>>()
     }
 }
 
@@ -114,8 +117,8 @@ impl SourceParser for DebeziumJsonParser {
                 Ok(Event {
                     ops: vec![UpdateDelete, UpdateInsert],
                     rows: vec![
-                        Self::value_to_datums(columns, &filtered_before),
-                        Self::value_to_datums(columns, &filtered_after),
+                        Self::value_to_datums(columns, &filtered_before)?,
+                        Self::value_to_datums(columns, &filtered_after)?,
                     ],
                 })
             }
@@ -128,7 +131,7 @@ impl SourceParser for DebeziumJsonParser {
                             "after is missing for creating event".to_string(),
                         ))
                     })?,
-                )],
+                )?],
             }),
             DEBEZIUM_DELETE_OP => Ok(Event {
                 ops: vec![Op::Delete],
@@ -139,7 +142,7 @@ impl SourceParser for DebeziumJsonParser {
                             "before is missing for deleting event".to_string(),
                         ))
                     })?,
-                )],
+                )?],
             }),
             _ => Err(RwError::from(ProtocolError(format!(
                 "unknown debezium op: {}",
@@ -165,24 +168,28 @@ mod test {
                 data_type: DataType::Int32,
                 column_id: ColumnId::from(0),
                 skip_parse: false,
+                fields: vec![],
             },
             SourceColumnDesc {
                 name: "name".to_string(),
                 data_type: DataType::Varchar,
                 column_id: ColumnId::from(1),
                 skip_parse: false,
+                fields: vec![],
             },
             SourceColumnDesc {
                 name: "description".to_string(),
                 data_type: DataType::Varchar,
                 column_id: ColumnId::from(2),
                 skip_parse: false,
+                fields: vec![],
             },
             SourceColumnDesc {
                 name: "weight".to_string(),
                 data_type: DataType::Float64,
                 column_id: ColumnId::from(3),
                 skip_parse: false,
+                fields: vec![],
             },
         ];
 

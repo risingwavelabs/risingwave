@@ -429,6 +429,13 @@ pub fn bind_data_type(data_type: &AstDataType) -> Result<DataType> {
                 .collect::<Result<Vec<_>>>()?
                 .into(),
         },
+        AstDataType::Text => {
+            return Err(ErrorCode::NotImplemented(
+                format!("unsupported data type: {:?}", data_type),
+                2535.into(),
+            )
+            .into())
+        }
         _ => {
             return Err(ErrorCode::NotImplemented(
                 format!("unsupported data type: {:?}", data_type),
