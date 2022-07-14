@@ -147,7 +147,7 @@
         BatchProject { exprs: [($0 + $1)] }
           BatchScan { table: t, columns: [v1, v2] }
   stream_plan: |
-    StreamMaterialize { columns: [agg#0(hidden), cnt, sum], pk_columns: [] }
+    StreamMaterialize { columns: [sum(count)(hidden), cnt, sum], pk_columns: [] }
       StreamGlobalSimpleAgg { aggs: [sum($0), sum($1), sum($2)] }
         StreamExchange { dist: Single }
           StreamLocalSimpleAgg { aggs: [count, count($0), sum($0)] }
@@ -269,7 +269,7 @@
           BatchSimpleAgg { aggs: [sum($0)] }
             BatchScan { table: t, columns: [v1] }
   stream_plan: |
-    StreamMaterialize { columns: [agg#0(hidden), s1], pk_columns: [] }
+    StreamMaterialize { columns: [count(hidden), s1], pk_columns: [] }
       StreamGlobalSimpleAgg { aggs: [count, sum($1)] }
         StreamGlobalSimpleAgg { aggs: [sum($0), sum($1)] }
           StreamExchange { dist: Single }
@@ -285,7 +285,7 @@
         BatchSimpleAgg { aggs: [sum($0)] }
           BatchScan { table: t, columns: [v1] }
   stream_plan: |
-    StreamMaterialize { columns: [agg#0(hidden), s1], pk_columns: [] }
+    StreamMaterialize { columns: [sum(count)(hidden), s1], pk_columns: [] }
       StreamGlobalSimpleAgg { aggs: [sum($0), sum($1)] }
         StreamExchange { dist: Single }
           StreamLocalSimpleAgg { aggs: [count, sum($0)] }
@@ -303,7 +303,7 @@
               BatchExchange { order: [], dist: HashShard([0]) }
                 BatchScan { table: t, columns: [v1, v2] }
   stream_plan: |
-    StreamMaterialize { columns: [agg#0(hidden), s1], pk_columns: [] }
+    StreamMaterialize { columns: [sum(count)(hidden), s1], pk_columns: [] }
       StreamGlobalSimpleAgg { aggs: [sum($0), sum($1)] }
         StreamExchange { dist: Single }
           StreamLocalSimpleAgg { aggs: [count, sum($0)] }
@@ -316,7 +316,7 @@
     create table t(v1 int, v2 int) with ('appendonly' = true);
     select min(v1) as a1, max(v2) as a2 from t;
   stream_plan: |
-    StreamMaterialize { columns: [agg#0(hidden), a1, a2], pk_columns: [] }
+    StreamMaterialize { columns: [count(hidden), a1, a2], pk_columns: [] }
       StreamAppendOnlyGlobalSimpleAgg { aggs: [count, min($0), max($1)] }
         StreamExchange { dist: Single }
           StreamTableScan { table: t, columns: [v1, v2, _row_id], pk_indices: [2] }
@@ -325,7 +325,7 @@
     create table t(v1 int, v2 int) with ('appendonly' = false);
     select sum(v1) as s1, min(v1) as a1, max(v2) as a2 from t;
   stream_plan: |
-    StreamMaterialize { columns: [agg#0(hidden), s1, a1, a2], pk_columns: [] }
+    StreamMaterialize { columns: [count(hidden), s1, a1, a2], pk_columns: [] }
       StreamGlobalSimpleAgg { aggs: [count, sum($0), min($0), max($1)] }
         StreamExchange { dist: Single }
           StreamTableScan { table: t, columns: [v1, v2, _row_id], pk_indices: [2] }
@@ -372,6 +372,93 @@
               StreamProject { exprs: [$2, $1, $0, $3] }
                 StreamTableScan { table: t, columns: [v1, v2, v3, _row_id], pk_indices: [3] }
 - sql: |
+    /* order by agg input */
+    create table t(v1 int);
+    select sum(v1 order by v1) as s1 from t;
+  logical_plan: |
+    LogicalProject { exprs: [$0] }
+      LogicalAgg { group_key: [], agg_calls: [sum($0 order_by($0 ASC NULLS LAST))] }
+        LogicalProject { exprs: [$1] }
+          LogicalScan { table: t, columns: [_row_id, v1] }
+  optimized_logical_plan: |
+    LogicalAgg { group_key: [], agg_calls: [sum($0 order_by($0 ASC NULLS LAST))] }
+      LogicalScan { table: t, columns: [v1] }
+  stream_plan: |
+    StreamMaterialize { columns: [count(hidden), s1], pk_columns: [] }
+      StreamGlobalSimpleAgg { aggs: [count, sum($0 order_by($0 ASC NULLS LAST))] }
+        StreamExchange { dist: Single }
+          StreamTableScan { table: t, columns: [v1, _row_id], pk_indices: [1] }
+- sql: |
+    /* order by other columns */
+    create table t(v1 int, v2 varchar);
+    select sum(v1 order by v2) as s1 from t;
+  logical_plan: |
+    LogicalProject { exprs: [$0] }
+      LogicalAgg { group_key: [], agg_calls: [sum($0 order_by($1 ASC NULLS LAST))] }
+        LogicalProject { exprs: [$1, $2] }
+          LogicalScan { table: t, columns: [_row_id, v1, v2] }
+  optimized_logical_plan: |
+    LogicalAgg { group_key: [], agg_calls: [sum($0 order_by($1 ASC NULLS LAST))] }
+      LogicalScan { table: t, columns: [v1, v2] }
+  stream_plan: |
+    StreamMaterialize { columns: [count(hidden), s1], pk_columns: [] }
+      StreamGlobalSimpleAgg { aggs: [count, sum($0 order_by($1 ASC NULLS LAST))] }
+        StreamExchange { dist: Single }
+          StreamTableScan { table: t, columns: [v1, v2, _row_id], pk_indices: [2] }
+- sql: |
+    /* order by ASC/DESC and default */
+    create table t(v1 int, v2 varchar, v3 int);
+    select sum(v1 order by v1, v2 ASC, v3 DESC) as s1 from t;
+  logical_plan: |
+    LogicalProject { exprs: [$0] }
+      LogicalAgg { group_key: [], agg_calls: [sum($0 order_by($0 ASC NULLS LAST, $1 ASC NULLS LAST, $2 DESC NULLS FIRST))] }
+        LogicalProject { exprs: [$1, $2, $3] }
+          LogicalScan { table: t, columns: [_row_id, v1, v2, v3] }
+  optimized_logical_plan: |
+    LogicalAgg { group_key: [], agg_calls: [sum($0 order_by($0 ASC NULLS LAST, $1 ASC NULLS LAST, $2 DESC NULLS FIRST))] }
+      LogicalScan { table: t, columns: [v1, v2, v3] }
+  stream_plan: |
+    StreamMaterialize { columns: [count(hidden), s1], pk_columns: [] }
+      StreamGlobalSimpleAgg { aggs: [count, sum($0 order_by($0 ASC NULLS LAST, $1 ASC NULLS LAST, $2 DESC NULLS FIRST))] }
+        StreamExchange { dist: Single }
+          StreamTableScan { table: t, columns: [v1, v2, v3, _row_id], pk_indices: [3] }
+- sql: |
+    /* order by NULLS FIRST/LAST and default */
+    create table t(v1 int, v2 varchar, v3 int);
+    select sum(v1 order by v1, v2 NULLS FIRST, v3 NULLS LAST) as s1 from t;
+  logical_plan: |
+    LogicalProject { exprs: [$0] }
+      LogicalAgg { group_key: [], agg_calls: [sum($0 order_by($0 ASC NULLS LAST, $1 ASC NULLS FIRST, $2 ASC NULLS LAST))] }
+        LogicalProject { exprs: [$1, $2, $3] }
+          LogicalScan { table: t, columns: [_row_id, v1, v2, v3] }
+  optimized_logical_plan: |
+    LogicalAgg { group_key: [], agg_calls: [sum($0 order_by($0 ASC NULLS LAST, $1 ASC NULLS FIRST, $2 ASC NULLS LAST))] }
+      LogicalScan { table: t, columns: [v1, v2, v3] }
+  stream_plan: |
+    StreamMaterialize { columns: [count(hidden), s1], pk_columns: [] }
+      StreamGlobalSimpleAgg { aggs: [count, sum($0 order_by($0 ASC NULLS LAST, $1 ASC NULLS FIRST, $2 ASC NULLS LAST))] }
+        StreamExchange { dist: Single }
+          StreamTableScan { table: t, columns: [v1, v2, v3, _row_id], pk_indices: [3] }
+- sql: |
+    /* order by complex expressions */
+    create table t(v1 int, v2 varchar, v3 int);
+    select sum(v1 order by v1 + v3 ASC, length(v2) * v3 DESC NULLS FIRST) as s1 from t;
+  logical_plan: |
+    LogicalProject { exprs: [$0] }
+      LogicalAgg { group_key: [], agg_calls: [sum($0 order_by($1 ASC NULLS LAST, $2 DESC NULLS FIRST))] }
+        LogicalProject { exprs: [$1, ($1 + $3), (Length($2) * $3)] }
+          LogicalScan { table: t, columns: [_row_id, v1, v2, v3] }
+  optimized_logical_plan: |
+    LogicalAgg { group_key: [], agg_calls: [sum($0 order_by($1 ASC NULLS LAST, $2 DESC NULLS FIRST))] }
+      LogicalProject { exprs: [$0, ($0 + $2), (Length($1) * $2)] }
+        LogicalScan { table: t, columns: [v1, v2, v3] }
+  stream_plan: |
+    StreamMaterialize { columns: [count(hidden), s1], pk_columns: [] }
+      StreamGlobalSimpleAgg { aggs: [count, sum($0 order_by($1 ASC NULLS LAST, $2 DESC NULLS FIRST))] }
+        StreamExchange { dist: Single }
+          StreamProject { exprs: [$0, ($0 + $2), (Length($1) * $2), $3] }
+            StreamTableScan { table: t, columns: [v1, v2, v3, _row_id], pk_indices: [3] }
+- sql: |
     /* filter clause */
     create table t(v1 int);
     select sum(v1) FILTER (WHERE v1 > 0) AS sa from t;
@@ -384,7 +471,7 @@
     LogicalAgg { group_key: [], agg_calls: [sum($0) filter(($0 > 0:Int32))] }
       LogicalScan { table: t, columns: [v1] }
   stream_plan: |
-    StreamMaterialize { columns: [agg#0(hidden), sa], pk_columns: [] }
+    StreamMaterialize { columns: [sum(count)(hidden), sa], pk_columns: [] }
       StreamGlobalSimpleAgg { aggs: [sum($0), sum($1)] }
         StreamExchange { dist: Single }
           StreamLocalSimpleAgg { aggs: [count, sum($0) filter(($0 > 0:Int32))] }
@@ -417,7 +504,7 @@
       LogicalProject { exprs: [$0, $1, ($0 * $1)] }
         LogicalScan { table: t, columns: [a, b] }
   stream_plan: |
-    StreamMaterialize { columns: [agg#0(hidden), sab], pk_columns: [] }
+    StreamMaterialize { columns: [count(hidden), sab], pk_columns: [] }
       StreamGlobalSimpleAgg { aggs: [count, max($2) filter(((($0 < $1) AND (($0 + $1) < 100:Int32)) AND (($0 * $1) <> (($0 + $1) - 1:Int32))))] }
         StreamExchange { dist: Single }
           StreamProject { exprs: [$0, $1, ($0 * $1), $2] }
@@ -437,7 +524,7 @@
         LogicalProject { exprs: [$1, $0] }
           LogicalScan { table: t, columns: [a, b] }
   stream_plan: |
-    StreamMaterialize { columns: [avga, b(hidden)], pk_columns: [b] }
+    StreamMaterialize { columns: [avga, t.b(hidden)], pk_columns: [t.b] }
       StreamProject { exprs: [($2::Decimal / $3), $0] }
         StreamHashAgg { group_key: [$0], aggs: [count, sum($1) filter(($1 > $0)), count($1) filter(($1 > $0))] }
           StreamExchange { dist: HashShard([0]) }
@@ -456,7 +543,7 @@
     LogicalAgg { group_key: [], agg_calls: [count filter(($0 > $1))] }
       LogicalScan { table: t, columns: [a, b] }
   stream_plan: |
-    StreamMaterialize { columns: [agg#0(hidden), cnt_agb], pk_columns: [] }
+    StreamMaterialize { columns: [sum(count)(hidden), cnt_agb], pk_columns: [] }
       StreamGlobalSimpleAgg { aggs: [sum($0), sum($1)] }
         StreamExchange { dist: Single }
           StreamLocalSimpleAgg { aggs: [count, count filter(($0 > $1))] }
@@ -480,7 +567,7 @@
     /* filter clause + non-boolean function */
     create table t(a int, b int);
     select abs(a) FILTER (WHERE a > 0) AS avga from t;
-  binder_error: 'Invalid input syntax: filter clause is only allowed in aggregation functions, but `abs` is not an aggregation function'
+  binder_error: 'Invalid input syntax: DISTINCT, ORDER BY or FILTER is only allowed in aggregation functions, but `abs` is not an aggregation function'
 - sql: |
     /* prune column before filter */
     create table t(v1 int, v2 int);
@@ -491,8 +578,71 @@
         BatchSimpleAgg { aggs: [sum($0) filter(($0 < 5:Int32))] }
           BatchScan { table: t, columns: [v2] }
   stream_plan: |
-    StreamMaterialize { columns: [agg#0(hidden), b], pk_columns: [] }
+    StreamMaterialize { columns: [sum(count)(hidden), b], pk_columns: [] }
       StreamGlobalSimpleAgg { aggs: [sum($0), sum($1)] }
         StreamExchange { dist: Single }
           StreamLocalSimpleAgg { aggs: [count, sum($0) filter(($0 < 5:Int32))] }
             StreamTableScan { table: t, columns: [v2, _row_id], pk_indices: [1] }
+- sql: |
+    /* only distinct agg */
+    create table t(a int, b int, c int);
+    select a, count(distinct b) as distinct_b_num, sum(distinct c) filter(where c < 100) as distinct_c_sum from t group by a;
+  optimized_logical_plan: |
+    LogicalAgg { group_key: [0], agg_calls: [count($1) filter(($3 = 0:Int64)), sum($2) filter((($4 > 0:Int64) AND ($3 = 1:Int64)))] }
+      LogicalAgg { group_key: [0, 1, 2, 3], agg_calls: [count filter(($2 < 100:Int32))] }
+        LogicalExpand { column_subsets: [[0, 1], [0, 2]] }
+          LogicalScan { table: t, columns: [a, b, c] }
+- sql: |
+    /* distinct agg and non-disintct agg */
+    create table t(a int, b int, c int);
+    select a, count(distinct b) as distinct_b_num, sum(c) as sum_c from t group by a;
+  optimized_logical_plan: |
+    LogicalAgg { group_key: [0], agg_calls: [count($1) filter(($2 = 1:Int64)), sum($3) filter(($2 = 0:Int64))] }
+      LogicalAgg { group_key: [0, 1, 3], agg_calls: [sum($2)] }
+        LogicalExpand { column_subsets: [[0, 2], [0, 1]] }
+          LogicalScan { table: t, columns: [a, b, c] }
+  stream_plan: |
+    StreamMaterialize { columns: [a, count(hidden), distinct_b_num, sum_c], pk_columns: [a] }
+      StreamHashAgg { group_key: [$0], aggs: [count, count($1) filter(($2 = 1:Int64)), sum($4) filter(($2 = 0:Int64))] }
+        StreamExchange { dist: HashShard([0]) }
+          StreamHashAgg { group_key: [$0, $1, $4], aggs: [count, sum($2)] }
+            StreamExchange { dist: HashShard([0, 1, 4]) }
+              StreamExpand { column_subsets: [[0, 2], [0, 1]] }
+                StreamTableScan { table: t, columns: [a, b, c, _row_id], pk_indices: [3] }
+- sql: |
+    /* distinct agg with filter */
+    create table t(a int, b int, c int);
+    select a, count(distinct b) filter(where b < 100), sum(c) from t group by a;
+  optimized_logical_plan: |
+    LogicalAgg { group_key: [0], agg_calls: [count($1) filter((($3 > 0:Int64) AND ($2 = 1:Int64))), sum($4) filter(($2 = 0:Int64))] }
+      LogicalAgg { group_key: [0, 1, 3], agg_calls: [count filter(($1 < 100:Int32)), sum($2)] }
+        LogicalExpand { column_subsets: [[0, 2], [0, 1]] }
+          LogicalScan { table: t, columns: [a, b, c] }
+- sql: |
+    /* non-distinct agg with filter */
+    create table t(a int, b int, c int);
+    select a, count(distinct b), sum(c) filter(where b < 100) from t group by a;
+  optimized_logical_plan: |
+    LogicalAgg { group_key: [0], agg_calls: [count($1) filter(($2 = 1:Int64)), sum($3) filter(($2 = 0:Int64))] }
+      LogicalAgg { group_key: [0, 1, 3], agg_calls: [sum($2) filter(($1 < 100:Int32))] }
+        LogicalExpand { column_subsets: [[0, 1, 2], [0, 1]] }
+          LogicalScan { table: t, columns: [a, b, c] }
+- sql: |
+    /* combined order by & filter clauses */
+    create table t(a varchar, b int);
+    select sum(length(a) * b order by length(a) + b) filter (where b < 100 AND b * 2 > 10) as s1 from t;
+  logical_plan: |
+    LogicalProject { exprs: [$0] }
+      LogicalAgg { group_key: [], agg_calls: [sum($1 order_by($2 ASC NULLS LAST)) filter((($0 < 100:Int32) AND (($0 * 2:Int32) > 10:Int32)))] }
+        LogicalProject { exprs: [$2, (Length($1) * $2), (Length($1) + $2)] }
+          LogicalScan { table: t, columns: [_row_id, a, b] }
+  optimized_logical_plan: |
+    LogicalAgg { group_key: [], agg_calls: [sum($1 order_by($2 ASC NULLS LAST)) filter((($0 < 100:Int32) AND (($0 * 2:Int32) > 10:Int32)))] }
+      LogicalProject { exprs: [$1, (Length($0) * $1), (Length($0) + $1)] }
+        LogicalScan { table: t, columns: [a, b] }
+  stream_plan: |
+    StreamMaterialize { columns: [count(hidden), s1], pk_columns: [] }
+      StreamGlobalSimpleAgg { aggs: [count, sum($1 order_by($2 ASC NULLS LAST)) filter((($0 < 100:Int32) AND (($0 * 2:Int32) > 10:Int32)))] }
+        StreamExchange { dist: Single }
+          StreamProject { exprs: [$1, (Length($0) * $1), (Length($0) + $1), $2] }
+            StreamTableScan { table: t, columns: [a, b, _row_id], pk_indices: [2] }

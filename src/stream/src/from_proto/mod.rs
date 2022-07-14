@@ -29,6 +29,7 @@ mod lookup_union;
 mod merge;
 mod mview;
 mod project;
+mod sink;
 mod source;
 mod top_n_appendonly;
 mod top_n_new;
@@ -57,6 +58,7 @@ use self::lookup_union::*;
 use self::merge::*;
 use self::mview::*;
 use self::project::*;
+use self::sink::*;
 use self::source::*;
 use self::top_n_appendonly::*;
 use self::top_n_new::*;
@@ -82,12 +84,7 @@ macro_rules! build_executor {
                     <$data_type>::new_boxed_executor($source, $node, $store, $stream)
                 },
             )*
-            _ => Err(RwError::from(
-                ErrorCode::InternalError(format!(
-                    "unsupported node: {:?}",
-                    $node.get_node_body().unwrap()
-                )),
-            )),
+            NodeBody::Exchange(_) | NodeBody::DeltaIndexJoin(_) => unreachable!()
         }
     }
 }
@@ -105,6 +102,7 @@ pub fn create_executor(
         store,
         stream,
         NodeBody::Source => SourceExecutorBuilder,
+        NodeBody::Sink => SinkExecutorBuilder,
         NodeBody::Project => ProjectExecutorBuilder,
         NodeBody::TopN => TopNExecutorNewBuilder,
         NodeBody::AppendOnlyTopN => AppendOnlyTopNExecutorBuilder,

@@ -19,7 +19,7 @@ use futures::future::try_join_all;
 use risingwave_common::catalog::TableId;
 use risingwave_common::error::{Result, RwError};
 use risingwave_common::util::epoch::Epoch;
-use risingwave_connector::SplitImpl;
+use risingwave_connector::source::SplitImpl;
 use risingwave_pb::source::{ConnectorSplit, ConnectorSplits};
 use risingwave_pb::stream_plan::add_mutation::Dispatchers;
 use risingwave_pb::stream_plan::barrier::Mutation;
