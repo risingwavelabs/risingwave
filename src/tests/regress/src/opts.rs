@@ -52,6 +52,10 @@ impl Opts {
         SocketAddrV4::new(self.pg_server_host, self.pg_server_port)
     }
 
+    pub(crate) fn pg_user_name(&self) -> &str {
+        &self.pg_user_name
+    }
+
     pub(crate) fn log4rs_config_path(&self) -> &Path {
         self.log4rs_config.as_path()
     }
