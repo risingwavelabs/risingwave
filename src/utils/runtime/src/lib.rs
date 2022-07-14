@@ -18,8 +18,10 @@
 
 mod trace_runtime;
 
+use std::path::PathBuf;
 use std::time::Duration;
 
+use futures::Future;
 use tracing::Level;
 use tracing_subscriber::filter;
 use tracing_subscriber::layer::SubscriberExt;
@@ -209,6 +211,7 @@ pub fn init_risingwave_logger(settings: LoggerSettings) {
 
 /// Enable parking lot's deadlock detection.
 pub fn enable_parking_lot_deadlock_detection() {
+    tracing::info!("parking lot deadlock detection enabled");
     // TODO: deadlock detection as a feature instead of always enabling
     std::thread::spawn(move || loop {
         std::thread::sleep(Duration::from_secs(3));
@@ -228,13 +231,75 @@ pub fn enable_parking_lot_deadlock_detection() {
     });
 }
 
-/// Common set-up for all RisingWave binaries. Currently, this includes:
+fn spawn_prof_thread(profile_path: String) -> std::thread::JoinHandle<()> {
+    tracing::info!("writing prof data to directory {}", profile_path);
+    let profile_path = PathBuf::from(profile_path);
+
+    std::fs::create_dir_all(&profile_path).unwrap();
+
+    std::thread::spawn(move || {
+        let mut cnt = 0;
+        loop {
+            let guard = pprof::ProfilerGuardBuilder::default()
+                .blocklist(&["libc", "libgcc", "pthread", "vdso"])
+                .build()
+                .unwrap();
+            std::thread::sleep(Duration::from_secs(60));
+            match guard.report().build() {
+                Ok(report) => {
+                    let profile_svg = profile_path.join(format!("{}.svg", cnt));
+                    let file = std::fs::File::create(&profile_svg).unwrap();
+                    report.flamegraph(file).unwrap();
+                    tracing::info!("produced {:?}", profile_svg);
+                }
+                Err(err) => {
+                    tracing::warn!("failed to generate flamegraph: {}", err);
+                }
+            }
+            cnt += 1;
+        }
+    })
+}
+
+/// Start RisingWave components with configs from environment variable.
 ///
-/// * Set panic hook to abort the whole process.
-pub fn oneshot_common() {
+/// Currently, the following env variables will be read:
+///
+/// * `RW_WORKER_THREADS`: number of tokio worker threads. If not set, it will use tokio's default
+///   config (equivalent to CPU cores).
+/// * `RW_DEADLOCK_DETECTION`: whether to enable deadlock detection. If not set, will enable in
+///   debug mode, and disable in release mode.
+/// * `RW_PROFILE_PATH`: the path to generate flamegraph. If set, then profiling is automatically
+///   enabled.
+pub fn main_okk<F>(f: F) -> F::Output
+where
+    F: Future + Send + 'static,
+{
     set_panic_abort();
 
-    if cfg!(debug_assertion) {
-        enable_parking_lot_deadlock_detection();
+    let mut builder = tokio::runtime::Builder::new_multi_thread();
+
+    if let Ok(worker_threads) = std::env::var("RW_WORKER_THREADS") {
+        let worker_threads = worker_threads.parse().unwrap();
+        tracing::info!("setting tokio worker threads to {}", worker_threads);
+        builder.worker_threads(worker_threads);
     }
+
+    if let Ok(enable_deadlock_detection) = std::env::var("RW_DEADLOCK_DETECTION") {
+        let enable_deadlock_detection = enable_deadlock_detection.parse().unwrap();
+        if enable_deadlock_detection {
+            enable_parking_lot_deadlock_detection();
+        }
+    } else {
+        // In case the env variable is not set
+        if cfg!(debug_assertions) {
+            enable_parking_lot_deadlock_detection();
+        }
+    }
+
+    if let Ok(profile_path) = std::env::var("RW_PROFILE_PATH") {
+        spawn_prof_thread(profile_path);
+    }
+
+    builder.enable_all().build().unwrap().block_on(f)
 }

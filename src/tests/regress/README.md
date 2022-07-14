@@ -25,11 +25,13 @@ tests: boolean
 * Run 
 ```shell
 RUST_BACKTRACE=1 target/debug/risingwave_regress_test -h 127.0.0.1 \
-  -p 4567 \
+  -p 4566 \
+  -u root \
   --input `pwd`/src/tests/regress/data \
   --output `pwd`/src/tests/regress/output \
   --schedule `pwd`/src/tests/regress/data/schedule
 ```
+Please remove the `output` directory before running the test again.
 
 # Reference
 

@@ -28,43 +28,66 @@ use crate::encoding::{ColumnDescMapping, Decoding};
 pub struct DedupPkCellBasedRowDeserializer {
     pk_deserializer: OrderedRowDeserializer,
     inner: CellBasedRowDeserializer,
-
-    // Maps pk fields with:
+    // Maps pk datums to corresponding row positions.
+    // Pk datums must satisfy the following criteria:
     // 1. same value and memcomparable encoding,
     // 2. corresponding row positions.
     pk_to_row_mapping: Vec<Option<usize>>,
 }
 
+/// Creates `pk_deserializer`.
+/// `pk_deserializer` is used by `DedupPkCellBasedRowDeserializer`
+/// to deserialize raw pk into pk datums.
+/// `pk_deserializer` should be shared by all `DedupPkCellBasedRowDeserializer`
+/// to reduce instantiation overhead for `DedupPkCellBasedRowDeserializer`.
+/// Hence we have this function to instantiate `pk_deserializer` separately.
+pub fn create_pk_deserializer_from_pk_descs(
+    pk_descs: &[OrderedColumnDesc],
+) -> OrderedRowDeserializer {
+    let (pk_data_types, pk_order_types) = pk_descs
+        .iter()
+        .map(|ordered_desc| {
+            (
+                ordered_desc.column_desc.data_type.clone(),
+                ordered_desc.order,
+            )
+        })
+        .unzip();
+    OrderedRowDeserializer::new(pk_data_types, pk_order_types)
+}
+
+/// Creates `pk_to_row_mapping`.
+/// `pk_to_row_mapping` is used by `DedupPkCellBasedRowDeserializer`
+/// to map dedupped pk datums to their positions in output row.
+/// `pk_to_row_mapping` should be shared by all `DedupPkCellBasedRowDeserializer`
+/// to reduce instantiation overhead for `DedupPkCellBasedRowDeserializer`.
+/// Hence we have this function to instantiate `pk_to_row_mapping` separately.
+pub fn create_pk_to_row_mapping(
+    pk_descs: &[OrderedColumnDesc],
+    column_mapping: Arc<ColumnDescMapping>,
+) -> Vec<Option<usize>> {
+    pk_descs
+        .iter()
+        .map(|d| {
+            let column_desc = &d.column_desc;
+            if column_desc.data_type.mem_cmp_eq_value_enc() {
+                column_mapping
+                    .get(column_desc.column_id)
+                    .map(|(_, index)| index)
+            } else {
+                None
+            }
+        })
+        .collect()
+}
+
 impl DedupPkCellBasedRowDeserializer {
-    /// Create a [`DedupPkCellBasedRowDeserializer`]
-    /// to decode cell based row with dedup pk encoding.
-    /// TODO: Refactor args. Creating `DedupPkCellBasedRowDeserializer` should not have overhead.
-    pub fn new(column_mapping: Arc<ColumnDescMapping>, pk_descs: &[OrderedColumnDesc]) -> Self {
-        let (pk_data_types, pk_order_types) = pk_descs
-            .iter()
-            .map(|ordered_desc| {
-                (
-                    ordered_desc.column_desc.data_type.clone(),
-                    ordered_desc.order,
-                )
-            })
-            .unzip();
-        let pk_deserializer = OrderedRowDeserializer::new(pk_data_types, pk_order_types);
-
-        let pk_to_row_mapping = pk_descs
-            .iter()
-            .map(|d| {
-                let column_desc = &d.column_desc;
-                if column_desc.data_type.mem_cmp_eq_value_enc() {
-                    column_mapping
-                        .get(column_desc.column_id)
-                        .map(|(_, index)| index)
-                } else {
-                    None
-                }
-            })
-            .collect();
-
+    /// Create a [`DedupPkCellBasedRowDeserializer`].
+    pub fn new(
+        pk_deserializer: OrderedRowDeserializer,
+        column_mapping: Arc<ColumnDescMapping>,
+        pk_to_row_mapping: Vec<Option<usize>>,
+    ) -> Self {
         let inner = CellBasedRowDeserializer::new(column_mapping);
         Self {
             pk_deserializer,
@@ -148,7 +171,7 @@ mod tests {
     use risingwave_common::util::ordered::OrderedRowSerializer;
     use risingwave_common::util::sort_util::OrderType;
 
-    use super::DedupPkCellBasedRowDeserializer;
+    use super::*;
     use crate::encoding::cell_based_encoding_util::serialize_pk_and_row;
     use crate::encoding::ColumnDescMapping;
 
@@ -230,7 +253,15 @@ mod tests {
             order: order_types[0],
         }];
 
-        let mut deserializer = DedupPkCellBasedRowDeserializer::new(column_mapping, &pk_descs);
+        let pk_deserializer = create_pk_deserializer_from_pk_descs(&pk_descs);
+
+        let pk_to_row_mapping = create_pk_to_row_mapping(&pk_descs, column_mapping.clone());
+
+        let mut deserializer = DedupPkCellBasedRowDeserializer::new(
+            pk_deserializer,
+            column_mapping,
+            pk_to_row_mapping,
+        );
 
         // ----------- deserialize pk and row
         let mut actual = vec![];

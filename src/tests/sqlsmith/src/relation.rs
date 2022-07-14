@@ -56,7 +56,7 @@ impl<'a, R: Rng> SqlGenerator<'a, R> {
         let alias = format!("t{}", self.bound_relations.len());
         let mut table = self.tables.choose(&mut self.rng).unwrap().clone();
         let table_factor = TableFactor::Table {
-            name: ObjectName(vec![Ident::new(table.name.clone())]),
+            name: ObjectName(vec![Ident::new(&table.name)]),
             alias: Some(TableAlias {
                 name: Ident::new(alias.clone()),
                 columns: vec![],
@@ -65,7 +65,7 @@ impl<'a, R: Rng> SqlGenerator<'a, R> {
         };
         table.name = alias; // Rename the table.
         let columns = table.get_qualified_columns();
-        self.bound_relations.push(table);
+        self.add_relation_to_context(table);
         (table_factor, columns)
     }
 
@@ -127,7 +127,7 @@ impl<'a, R: Rng> SqlGenerator<'a, R> {
             },
             joins: vec![],
         };
-        self.bound_relations.push(table);
+        self.add_relation_to_context(table);
         relation
     }
 }

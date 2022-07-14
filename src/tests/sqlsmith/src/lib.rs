@@ -14,6 +14,7 @@
 
 use std::vec;
 
+use itertools::Itertools;
 use rand::prelude::SliceRandom;
 use rand::Rng;
 use risingwave_frontend::binder::bind_data_type;
@@ -68,15 +69,28 @@ struct SqlGenerator<'a, R: Rng> {
     /// Relations bound in generated query.
     /// We might not read from all tables.
     bound_relations: Vec<Table>,
+
+    /// Columns bound in generated query.
+    /// May not contain all columns from Self::bound_relations.
+    /// e.g. GROUP BY clause will constrain bound_columns.
+    bound_columns: Vec<Column>,
 }
 
+/// Generators
 impl<'a, R: Rng> SqlGenerator<'a, R> {
     fn new(rng: &'a mut R, tables: Vec<Table>) -> Self {
         SqlGenerator {
             tables,
             rng,
             bound_relations: vec![],
+            bound_columns: vec![],
         }
+    }
+
+    fn add_relation_to_context(&mut self, table: Table) {
+        let mut bound_columns = table.get_qualified_columns();
+        self.bound_columns.append(&mut bound_columns);
+        self.bound_relations.push(table);
     }
 
     fn gen_stmt(&mut self) -> Statement {
@@ -115,15 +129,14 @@ impl<'a, R: Rng> SqlGenerator<'a, R> {
     }
 
     fn gen_order_by(&mut self) -> Vec<OrderByExpr> {
-        if self.bound_relations.is_empty() {
+        if self.bound_columns.is_empty() {
             return vec![];
         }
         let mut order_by = vec![];
         while self.flip_coin() {
-            let table = self.bound_relations.choose(&mut self.rng).unwrap();
-            let column = table.columns.choose(&mut self.rng).unwrap();
+            let column = self.bound_columns.choose(&mut self.rng).unwrap();
             order_by.push(OrderByExpr {
-                expr: Expr::Identifier(Ident::new(format!("{}.{}", table.name, column.name))),
+                expr: Expr::Identifier(Ident::new(&column.name)),
                 asc: Some(self.rng.gen_bool(0.5)),
                 nulls_first: None,
             })
@@ -145,6 +158,7 @@ impl<'a, R: Rng> SqlGenerator<'a, R> {
     fn gen_select_stmt(&mut self) -> (Select, Vec<Column>) {
         // Generate random tables/relations first so that select items can refer to them.
         let from = self.gen_from();
+        let group_by = self.gen_group_by();
         let (select_list, schema) = self.gen_select_list();
         let select = Select {
             distinct: false,
@@ -152,7 +166,7 @@ impl<'a, R: Rng> SqlGenerator<'a, R> {
             from,
             lateral_views: vec![],
             selection: self.gen_where(),
-            group_by: self.gen_group_by(),
+            group_by,
             having: self.gen_having(),
         };
         (select, schema)
@@ -215,8 +229,20 @@ impl<'a, R: Rng> SqlGenerator<'a, R> {
         }
     }
 
-    fn gen_group_by(&self) -> Vec<Expr> {
-        vec![]
+    fn gen_group_by(&mut self) -> Vec<Expr> {
+        let mut available = self.bound_columns.clone();
+        if !available.is_empty() {
+            available.shuffle(self.rng);
+            let n_group_by_cols = self.rng.gen_range(1..=available.len());
+            let group_by_cols = available.drain(0..n_group_by_cols).collect_vec();
+            self.bound_columns = group_by_cols.clone();
+            group_by_cols
+                .into_iter()
+                .map(|c| Expr::Identifier(Ident::new(c.name)))
+                .collect_vec()
+        } else {
+            vec![]
+        }
     }
 
     fn gen_having(&self) -> Option<Expr> {
