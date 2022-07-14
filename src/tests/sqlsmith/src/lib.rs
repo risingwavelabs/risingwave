@@ -74,6 +74,13 @@ struct SqlGenerator<'a, R: Rng> {
     /// May not contain all columns from Self::bound_relations.
     /// e.g. GROUP BY clause will constrain bound_columns.
     bound_columns: Vec<Column>,
+
+    /// SqlGenerator can be used in two contexts:
+    /// 1. Generating Query Statements.
+    /// 2. Generating queries for CREATE MATERIALIZED VIEW.
+    ///    In this context, FROM clause is populated with
+    ///    TableFactor.
+    is_mview: bool,
 }
 
 /// Generators
@@ -84,8 +91,20 @@ impl<'a, R: Rng> SqlGenerator<'a, R> {
             rng,
             bound_relations: vec![],
             bound_columns: vec![],
+            is_mview: false,
         }
     }
+
+    fn new_for_mview(rng: &'a mut R, tables: Vec<Table>) -> Self {
+        SqlGenerator {
+            tables,
+            rng,
+            bound_relations: vec![],
+            bound_columns: vec![],
+            is_mview: true,
+        }
+    }
+
 
     fn add_relation_to_context(&mut self, table: Table) {
         let mut bound_columns = table.get_qualified_columns();
@@ -210,15 +229,17 @@ impl<'a, R: Rng> SqlGenerator<'a, R> {
     }
 
     fn gen_from(&mut self) -> Vec<TableWithJoins> {
-        (0..self.tables.len())
-            .filter_map(|_| {
-                if self.flip_coin() {
-                    Some(self.gen_from_relation())
-                } else {
-                    None
-                }
-            })
-            .collect()
+        let mut from = vec![];
+        if self.is_mview {
+            assert!(self.tables.len() > 0);
+            from.push(self.gen_from_relation());
+        }
+        for _ in 1..self.tables.len() {
+            if self.flip_coin() {
+                from.push(self.gen_from_relation());
+            }
+        }
+        from
     }
 
     fn gen_where(&mut self) -> Option<Expr> {
