@@ -17,7 +17,7 @@ use std::fmt;
 use risingwave_pb::stream_plan::stream_node::NodeBody as ProstStreamNode;
 
 use super::{LogicalTopN, PlanBase, PlanRef, PlanTreeNodeUnary, ToStreamProst};
-use crate::optimizer::property::{Distribution, FieldOrder};
+use crate::optimizer::property::{Distribution, FieldOrder, OrderVerboseDisplay};
 
 /// `StreamTopN` implements [`super::LogicalTopN`] to find the top N elements with a heap
 #[derive(Debug, Clone)]
@@ -53,8 +53,25 @@ impl fmt::Display for StreamTopN {
             f.debug_struct("StreamTopN")
         };
 
+        let verbose = self.base.ctx.is_explain_verbose();
+        if verbose {
+            let input = self.input();
+            let input_schema = input.schema();
+            builder.field(
+                "order",
+                &format!(
+                    "{}",
+                    OrderVerboseDisplay {
+                        order: self.logical.topn_order(),
+                        input_schema
+                    }
+                ),
+            );
+        } else {
+            builder.field("order", &format!("{}", self.logical.topn_order()));
+        }
+
         builder
-            .field("order", &format_args!("{}", self.logical.topn_order()))
             .field("limit", &format_args!("{}", self.logical.limit()))
             .field("offset", &format_args!("{}", self.logical.offset()))
             .finish()
