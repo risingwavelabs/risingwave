@@ -313,13 +313,13 @@ impl<S: StateStore> StateTable<S> {
 /// Iterator functions.
 impl<S: StateStore> RowBasedStateTable<S> {
     /// This function scans rows from the relational table.
-    pub async fn iter_with_row_based(&self, epoch: u64) -> StorageResult<RowBasedStream<'_, S>> {
-        self.row_based_iter_with_pk_prefix(Row::empty(), epoch)
+    pub async fn iter(&self, epoch: u64) -> StorageResult<RowBasedStream<'_, S>> {
+        self.iter_with_pk_prefix(Row::empty(), epoch)
             .await
     }
 
     /// This function scans rows from the relational table with specific `pk_prefix`.
-    pub async fn row_based_iter_with_pk_prefix<'a>(
+    pub async fn iter_with_pk_prefix<'a>(
         &'a self,
         pk_prefix: &'a Row,
         epoch: u64,

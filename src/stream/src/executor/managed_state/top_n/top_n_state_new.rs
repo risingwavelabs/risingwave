@@ -141,7 +141,7 @@ impl<S: StateStore> ManagedTopNStateNew<S> {
         limit: usize,
         epoch: u64,
     ) -> StreamExecutorResult<(TopNStateRow, TopNStateRow)> {
-        let state_table_iter = self.state_table.iter_with_row_based(epoch).await?;
+        let state_table_iter = self.state_table.iter(epoch).await?;
         pin_mut!(state_table_iter);
 
         let invalid_row = TopNStateRow {
