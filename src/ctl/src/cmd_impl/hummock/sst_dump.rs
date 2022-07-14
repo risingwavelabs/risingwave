@@ -14,18 +14,24 @@
 
 use std::collections::HashMap;
 
-use bytes::Buf;
+use bytes::{Buf, Bytes};
+use risingwave_common::types::DataType;
 use risingwave_common::util::value_encoding::deserialize_cell;
 use risingwave_frontend::catalog::TableCatalog;
 use risingwave_hummock_sdk::compaction_group::hummock_version_ext::HummockVersionExt;
 use risingwave_hummock_sdk::key::{get_epoch, get_table_id, user_key};
+use risingwave_hummock_sdk::HummockSSTableId;
 use risingwave_object_store::object::{BlockLocation, ObjectStore};
-use risingwave_rpc_client::HummockMetaClient;
+use risingwave_rpc_client::{HummockMetaClient, MetaClient};
 use risingwave_storage::hummock::value::HummockValue;
-use risingwave_storage::hummock::{Block, BlockHolder, BlockIterator, CompressionAlgorithm};
+use risingwave_storage::hummock::{
+    Block, BlockHolder, BlockIterator, CompressionAlgorithm, SstableMeta, SstableStore,
+};
 use risingwave_storage::monitor::StoreLocalStatistic;
 
-use crate::common::{HummockServiceOpts, MetaServiceOpts};
+use crate::common::HummockServiceOpts;
+
+type TableData = HashMap<u32, (String, Vec<(DataType, String, bool)>)>;
 
 pub async fn sst_dump() -> anyhow::Result<()> {
     // Retrieves the SSTable store so we can access the SSTableMeta
@@ -43,24 +49,7 @@ pub async fn sst_dump() -> anyhow::Result<()> {
         id_info_map.insert(id_info.id, id_info);
     });
 
-    // Determine all database tables ...
-    let meta_opts = MetaServiceOpts::from_env()?;
-    let meta = meta_opts.create_meta_client().await?;
-    let mvs = meta.risectl_list_state_tables().await?;
-
-    // ... and add a list of their types into a hash table.
-    let mut column_table = HashMap::new();
-    mvs.iter().for_each(|tbl| {
-        let mut col_list = vec![];
-        TableCatalog::from(tbl).columns.iter().for_each(|clm| {
-            col_list.push((
-                clm.data_type().clone(),
-                String::from(clm.name()),
-                clm.is_hidden().clone(),
-            ));
-        });
-        column_table.insert(tbl.id, (tbl.name.clone(), col_list));
-    });
+    let table_data = load_table_schemas(&meta_client).await?;
 
     for level in version.get_combined_levels() {
         for sstable_info in &level.table_infos {
@@ -101,100 +90,139 @@ pub async fn sst_dump() -> anyhow::Result<()> {
                 println!("Key Range: None");
             }
 
-            let data_path = sstable_store.get_sst_data_path(id);
-            println!("Blocks:");
-            for (i, block_meta) in sstable_meta.block_metas.iter().enumerate() {
-                println!("\tBlock {}", i);
-                println!("\t-----------");
-
-                // Retrieve encoded block data in bytes
-                let store = sstable_store.store();
-                let block_loc = BlockLocation {
-                    offset: block_meta.offset as usize,
-                    size: block_meta.len as usize,
-                };
-                let block_data = store.read(&data_path, Some(block_loc)).await?;
-
-                // Retrieve checksum and compression algorithm used from the encoded block data
-                let len = block_data.len();
-                let checksum = (&block_data[len - 8..]).get_u64_le();
-                let compression = CompressionAlgorithm::decode(&mut &block_data[len - 9..len - 8])?;
-
-                println!(
-                    "\tOffset: {}, Size: {}, Checksum: {}, Compression Algorithm: {:?}",
-                    block_meta.offset, block_meta.len, checksum, compression
-                );
-
-                println!("\tKV-Pairs:");
-
-                let block = Box::new(Block::decode(block_data).unwrap());
-                let holder = BlockHolder::from_owned_block(block);
-                let mut block_iter = BlockIterator::new(holder);
-                block_iter.seek_to_first();
-
-                let mut column_idx: usize = 0;
-                while block_iter.is_valid() {
-                    let full_key = block_iter.key();
-                    let user_key = user_key(full_key);
-
-                    let full_val = block_iter.value();
-                    let humm_val = HummockValue::from_slice(block_iter.value())?;
-                    let (isPut, val_meta, user_val) = match humm_val {
-                        HummockValue::Put(meta, uval) => (true, meta.vnode, uval),
-                        HummockValue::Delete(meta) => (false, meta.vnode, &[] as &[u8]),
-                    };
-
-                    let epoch = get_epoch(full_key);
-
-                    println!("\t\t  full key: {:02x?}", full_key);
-                    println!("\t\tfull value: {:02x?}", full_val);
-                    println!("\t\t  user key: {:02x?}", user_key);
-                    println!("\t\tuser value: {:02x?}", user_val);
-                    println!("\t\t     epoch: {}", epoch);
-                    println!("\t\t      type: {}", if isPut { "Put" } else { "Delete" });
-                    println!("\t\tvalue-meta: {}", val_meta);
-
-                    if let Some(table_id) = get_table_id(full_key) {
-                        let (table_name, columns) = &column_table.get(&table_id).unwrap();
-                        println!("\t\t     table: {} - {}", table_id, table_name);
-
-                        // Check if new row.
-                        if isPut {
-                            if user_val.len() == 0
-                                && (&user_key[user_key.len() - 4..]).get_i32() == 0x7fffffff
-                            {
-                                // New row. Reset column index.
-                                column_idx = 0;
-                            } else {
-                                let (data_type, name, is_hidden) = &columns[column_idx];
-                                let datum = deserialize_cell(user_val, data_type).unwrap().unwrap();
-                                println!(
-                                    "\t\t    column: {} {}",
-                                    name,
-                                    if is_hidden.clone() { "(hidden)" } else { "" }
-                                );
-                                println!("\t\t     datum: {:?}", datum);
-                                column_idx += 1;
-                            }
-                        }
-                    }
-
-                    println!();
-
-                    block_iter.next();
-                }
-            }
-
             println!("Estimated Table Size: {}", sstable_meta.estimated_size);
             println!("Bloom Filter Size: {}", sstable_meta.bloom_filter.len());
             println!("Key Count: {}", sstable_meta.key_count);
             println!("Version: {}", sstable_meta.version);
-            println!();
+
+            print_blocks(id, &table_data, sstable_store, sstable_meta).await?;
         }
     }
 
     meta_client.unpin_version(&[version.id]).await?;
 
     hummock_opts.shutdown().await;
+    Ok(())
+}
+
+/// Determine all database tables and adds their information into a hash table with the table-ID as
+/// key.
+async fn load_table_schemas(meta_client: &MetaClient) -> anyhow::Result<TableData> {
+    let mut column_table = HashMap::new();
+
+    let mvs = meta_client.risectl_list_state_tables().await?;
+    mvs.iter().for_each(|tbl| {
+        let mut col_list = vec![];
+        TableCatalog::from(tbl).columns.iter().for_each(|clm| {
+            col_list.push((
+                clm.data_type().clone(),
+                String::from(clm.name()),
+                clm.is_hidden().clone(),
+            ));
+        });
+        column_table.insert(tbl.id, (tbl.name.clone(), col_list));
+    });
+
+    Ok(column_table)
+}
+
+/// Prints all blocks of a given SST including all contained KV-pairs.
+async fn print_blocks(
+    id: HummockSSTableId,
+    table_data: &TableData,
+    sstable_store: &SstableStore,
+    sstable_meta: &SstableMeta,
+) -> anyhow::Result<()> {
+    let data_path = sstable_store.get_sst_data_path(id);
+
+    println!("Blocks:");
+    for (i, block_meta) in sstable_meta.block_metas.iter().enumerate() {
+        println!("\tBlock {}", i);
+        println!("\t-----------");
+
+        // Retrieve encoded block data in bytes
+        let store = sstable_store.store();
+        let block_loc = BlockLocation {
+            offset: block_meta.offset as usize,
+            size: block_meta.len as usize,
+        };
+        let block_data = store.read(&data_path, Some(block_loc)).await?;
+
+        // Retrieve checksum and compression algorithm used from the encoded block data
+        let len = block_data.len();
+        let checksum = (&block_data[len - 8..]).get_u64_le();
+        let compression = CompressionAlgorithm::decode(&mut &block_data[len - 9..len - 8])?;
+
+        println!(
+            "\tOffset: {}, Size: {}, Checksum: {}, Compression Algorithm: {:?}",
+            block_meta.offset, block_meta.len, checksum, compression
+        );
+
+        print_kv_pairs(block_data, table_data)?;
+    }
+
+    Ok(())
+}
+
+/// Prints the data of KV-Pairs of a given block out to the terminal.
+fn print_kv_pairs(block_data: Bytes, table_data: &TableData) -> anyhow::Result<()> {
+    println!("\tKV-Pairs:");
+
+    let block = Box::new(Block::decode(block_data).unwrap());
+    let holder = BlockHolder::from_owned_block(block);
+    let mut block_iter = BlockIterator::new(holder);
+    block_iter.seek_to_first();
+
+    let mut column_idx: usize = 0;
+    while block_iter.is_valid() {
+        let full_key = block_iter.key();
+        let user_key = user_key(full_key);
+
+        let full_val = block_iter.value();
+        let humm_val = HummockValue::from_slice(block_iter.value())?;
+        let (is_put, val_meta, user_val) = match humm_val {
+            HummockValue::Put(meta, uval) => (true, meta.vnode, uval),
+            HummockValue::Delete(meta) => (false, meta.vnode, &[] as &[u8]),
+        };
+
+        let epoch = get_epoch(full_key);
+
+        println!("\t\t  full key: {:02x?}", full_key);
+        println!("\t\tfull value: {:02x?}", full_val);
+        println!("\t\t  user key: {:02x?}", user_key);
+        println!("\t\tuser value: {:02x?}", user_val);
+        println!("\t\t     epoch: {}", epoch);
+        println!("\t\t      type: {}", if is_put { "Put" } else { "Delete" });
+        println!("\t\tvalue-meta: {}", val_meta);
+
+        if let Some(table_id) = get_table_id(full_key) {
+            let (table_name, columns) = table_data.get(&table_id).unwrap();
+            println!("\t\t     table: {} - {}", table_id, table_name);
+
+            // Check if new row.
+            if is_put {
+                if user_val.len() == 0 && (&user_key[user_key.len() - 4..]).get_i32() == 0x7fffffff
+                {
+                    // New row. Reset column index.
+                    column_idx = 0;
+                } else {
+                    let (data_type, name, is_hidden) = &columns[column_idx];
+                    let datum = deserialize_cell(user_val, data_type).unwrap().unwrap();
+                    println!(
+                        "\t\t    column: {} {}",
+                        name,
+                        if is_hidden.clone() { "(hidden)" } else { "" }
+                    );
+                    println!("\t\t     datum: {:?}", datum);
+                    column_idx += 1;
+                }
+            }
+        }
+
+        println!();
+
+        block_iter.next();
+    }
+
     Ok(())
 }
