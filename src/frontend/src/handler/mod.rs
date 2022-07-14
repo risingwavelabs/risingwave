@@ -47,7 +47,7 @@ mod show;
 pub mod util;
 mod variable;
 
-pub(super) async fn handle(
+pub async fn handle(
     session: Arc<SessionImpl>,
     stmt: Statement,
     sql: &str,

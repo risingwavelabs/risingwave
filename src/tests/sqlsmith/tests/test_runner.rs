@@ -19,7 +19,7 @@ use std::{env, panic};
 
 use rand::SeedableRng;
 use risingwave_frontend::binder::Binder;
-use risingwave_frontend::handler::create_table;
+use risingwave_frontend::handler;
 use risingwave_frontend::planner::Planner;
 use risingwave_frontend::session::{OptimizerContext, OptimizerContextRef, SessionImpl};
 use risingwave_frontend::test_utils::LocalFrontend;
@@ -38,23 +38,16 @@ async fn create_tables(session: Arc<SessionImpl>) -> Vec<Table> {
     for s in statements.into_iter() {
         match s {
             Statement::CreateTable {
-                name,
-                columns,
-                with_options,
+                ref name,
+                ref columns,
                 ..
             } => {
-                let context = OptimizerContext::new(session.clone(), Arc::from(sql.clone()));
-                create_table::handle_create_table(
-                    context,
-                    name.clone(),
-                    columns.clone(),
-                    with_options,
-                )
-                .await
-                .unwrap();
+                let name = name.0[0].value.clone();
+                let columns = columns.iter().map(|c| c.clone().into()).collect();
+                handler::handle(session.clone(), s, &sql).await.unwrap();
                 tables.push(Table {
-                    name: name.0[0].value.clone(),
-                    columns: columns.iter().map(|c| c.clone().into()).collect(),
+                    name,
+                    columns,
                 })
             }
             _ => panic!("Unexpected statement: {}", s),
