@@ -21,6 +21,8 @@ use futures::future::try_join_all;
 use itertools::Itertools;
 use log::{debug, error};
 use risingwave_common::error::{ErrorCode, Result, RwError};
+use risingwave_common::types::VIRTUAL_NODE_COUNT;
+use risingwave_common::util::compress::decompress_data;
 use risingwave_common::util::epoch::Epoch;
 use risingwave_pb::common::worker_node::State;
 use risingwave_pb::common::{ActorInfo, ParallelUnit, WorkerType};
@@ -208,6 +210,16 @@ where
             .catalog_manager
             .update_table_mapping(&new_fragments, &migrate_map)
             .await;
+        for fragments in new_fragments {
+            for (fragment_id, fragment) in fragments.fragments {
+                let mapping = fragment.vnode_mapping.as_ref().unwrap();
+                let vnode_mapping = decompress_data(&mapping.original_indices, &mapping.data);
+                assert_eq!(vnode_mapping.len(), VIRTUAL_NODE_COUNT);
+                self.env
+                    .hash_mapping_manager()
+                    .set_fragment_hash_mapping(fragment_id, vnode_mapping);
+            }
+        }
         debug!("migrate actors succeed.");
         res
     }
