@@ -95,6 +95,7 @@ impl TableCatalogBuilder {
             owner: risingwave_common::catalog::DEFAULT_SUPPER_USER.to_string(),
             vnode_mapping: None,
             properties: HashMap::default(),
+            read_pattern_prefix_column: 0,
         }
     }
 }
