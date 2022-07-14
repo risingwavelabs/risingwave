@@ -14,8 +14,10 @@
 
 use std::fmt;
 
-use crate::expr::{ExprType, FunctionCall, InputRef};
-use crate::utils::{ColIndexMapping, Condition};
+use risingwave_common::catalog::Schema;
+
+use crate::expr::{ExprType, FunctionCall, InputRef, InputRefVerboseDisplay};
+use crate::utils::{ColIndexMapping, Condition, ConditionVerboseDisplay};
 
 /// The join predicate used in optimizer
 #[derive(Debug, Clone)]
@@ -155,5 +157,69 @@ impl EqJoinPredicate {
             map[right.index - left_cols_num] = Some(left.index);
         }
         ColIndexMapping::new(map)
+    }
+}
+
+pub struct EqJoinPredicateVerboseDisplay<'a> {
+    pub eq_join_predicate: &'a EqJoinPredicate,
+    pub input_schema: &'a Schema,
+}
+
+impl EqJoinPredicateVerboseDisplay<'_> {
+    fn fmt(&self, f: &mut fmt::Formatter) -> std::fmt::Result {
+        let that = self.eq_join_predicate;
+        let mut eq_keys = that.eq_keys().iter();
+        if let Some((k1, k2)) = eq_keys.next() {
+            write!(
+                f,
+                "{} = {}",
+                InputRefVerboseDisplay {
+                    input_ref: k1,
+                    input_schema: self.input_schema
+                },
+                InputRefVerboseDisplay {
+                    input_ref: k2,
+                    input_schema: self.input_schema
+                }
+            )?;
+        }
+        for (k1, k2) in eq_keys {
+            write!(
+                f,
+                " AND {} = {}",
+                InputRefVerboseDisplay {
+                    input_ref: k1,
+                    input_schema: self.input_schema
+                },
+                InputRefVerboseDisplay {
+                    input_ref: k2,
+                    input_schema: self.input_schema
+                }
+            )?;
+        }
+        if !that.other_cond.always_true() {
+            write!(
+                f,
+                " AND {}",
+                ConditionVerboseDisplay {
+                    condition: &that.other_cond,
+                    input_schema: self.input_schema
+                }
+            )?;
+        }
+
+        Ok(())
+    }
+}
+
+impl fmt::Display for EqJoinPredicateVerboseDisplay<'_> {
+    fn fmt(&self, f: &mut fmt::Formatter) -> std::fmt::Result {
+        self.fmt(f)
+    }
+}
+
+impl fmt::Debug for EqJoinPredicateVerboseDisplay<'_> {
+    fn fmt(&self, f: &mut fmt::Formatter) -> std::fmt::Result {
+        self.fmt(f)
     }
 }

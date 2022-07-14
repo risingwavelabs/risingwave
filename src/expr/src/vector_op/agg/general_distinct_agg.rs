@@ -19,6 +19,7 @@ use risingwave_common::array::*;
 use risingwave_common::error::{ErrorCode, Result};
 use risingwave_common::types::*;
 
+use crate::expr::ExpressionRef;
 use crate::vector_op::agg::aggregator::Aggregator;
 use crate::vector_op::agg::functions::RTFn;
 
@@ -39,6 +40,7 @@ where
     result: Option<R::OwnedItem>,
     f: F,
     exists: HashSet<Datum>,
+    filter: ExpressionRef,
     _phantom: PhantomData<T>,
 }
 impl<T, F, R> GeneralDistinctAgg<T, F, R>
@@ -47,7 +49,7 @@ where
     F: for<'a> RTFn<'a, T, R>,
     R: Array,
 {
-    pub fn new(return_type: DataType, input_col_idx: usize, f: F) -> Self {
+    pub fn new(return_type: DataType, input_col_idx: usize, f: F, filter: ExpressionRef) -> Self {
         Self {
             return_type,
             input_col_idx,
@@ -55,6 +57,7 @@ where
             f,
             exists: HashSet::new(),
             _phantom: PhantomData,
+            filter,
         }
     }
 
@@ -77,22 +80,22 @@ where
 
     fn update_multi_concrete(
         &mut self,
-        input: &T,
+        array: &T,
+        input: &DataChunk,
         start_row_id: usize,
         end_row_id: usize,
     ) -> Result<()> {
-        let input = input
-            .iter()
-            .skip(start_row_id)
-            .take(end_row_id - start_row_id)
-            .filter(|scalar_ref| {
-                self.exists.insert(
-                    scalar_ref.map(|scalar_ref| scalar_ref.to_owned_scalar().to_scalar_value()),
-                )
-            });
         let mut cur = self.result.as_ref().map(|x| x.as_scalar_ref());
-        for datum in input {
-            cur = self.f.eval(cur, datum)?;
+        for row_id in start_row_id..end_row_id {
+            if self.apply_filter_on_row(input, row_id)? {
+                let datum = array.value_at(row_id);
+                if self
+                    .exists
+                    .insert(datum.map(|scalar_ref| scalar_ref.to_owned_scalar().to_scalar_value()))
+                {
+                    cur = self.f.eval(cur, datum)?;
+                }
+            }
         }
         let r = cur.map(|x| x.to_owned_scalar());
         self.result = r;
@@ -110,6 +113,19 @@ where
         self.result = None;
         res
     }
+
+    fn apply_filter_on_row(&self, input: &DataChunk, row_id: usize) -> Result<bool> {
+        let (row, visible) = input.row_at(row_id)?;
+        // SAFETY: when performing agg, the data chunk should already be
+        // compacted.
+        assert!(visible);
+        let filter_res = if let Some(ScalarImpl::Bool(v)) = self.filter.eval_row(&Row::from(row))? {
+            v
+        } else {
+            false
+        };
+        Ok(filter_res)
+    }
 }
 
 macro_rules! impl_aggregator {
@@ -126,7 +142,11 @@ macro_rules! impl_aggregator {
                 if let ArrayImpl::$input_variant(i) =
                     input.column_at(self.input_col_idx).array_ref()
                 {
-                    self.update_single_concrete(i, row_id)
+                    let filter_res = self.apply_filter_on_row(input, row_id)?;
+                    if filter_res {
+                        self.update_single_concrete(i, row_id)?;
+                    }
+                    Ok(())
                 } else {
                     Err(ErrorCode::InternalError(format!(
                         "Input fail to match {}.",
@@ -145,7 +165,7 @@ macro_rules! impl_aggregator {
                 if let ArrayImpl::$input_variant(i) =
                     input.column_at(self.input_col_idx).array_ref()
                 {
-                    self.update_multi_concrete(i, start_row_id, end_row_id)
+                    self.update_multi_concrete(i, input, start_row_id, end_row_id)
                 } else {
                     Err(ErrorCode::InternalError(format!(
                         "Input fail to match {}.",
@@ -224,7 +244,7 @@ mod tests {
     use risingwave_common::types::Decimal;
 
     use super::*;
-    use crate::expr::AggKind;
+    use crate::expr::{AggKind, Expression, LiteralExpression};
     use crate::vector_op::agg::aggregator::create_agg_state_unary;
 
     fn eval_agg(
@@ -236,7 +256,16 @@ mod tests {
     ) -> Result<ArrayImpl> {
         let len = input.len();
         let input_chunk = DataChunk::new(vec![Column::new(input)], len);
-        let mut agg_state = create_agg_state_unary(input_type, 0, agg_type, return_type, true)?;
+        let mut agg_state = create_agg_state_unary(
+            input_type,
+            0,
+            agg_type,
+            return_type,
+            true,
+            Arc::from(
+                LiteralExpression::new(DataType::Boolean, Some(ScalarImpl::Bool(true))).boxed(),
+            ),
+        )?;
         agg_state.update_multi(&input_chunk, 0, input_chunk.cardinality())?;
         agg_state.output(&mut builder)?;
         builder.finish().map_err(Into::into)

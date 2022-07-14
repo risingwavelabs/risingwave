@@ -15,6 +15,7 @@
 use std::fmt;
 
 use itertools::Itertools;
+use risingwave_common::catalog::Schema;
 use risingwave_common::types::DataType;
 use risingwave_pb::expr::agg_call::Arg as ProstAggCallArg;
 use risingwave_pb::expr::InputRefExpr;
@@ -50,6 +51,40 @@ impl fmt::Display for InputRefDisplay {
 impl fmt::Debug for InputRefDisplay {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         write!(f, "${}", self.0)
+    }
+}
+
+#[derive(Clone, Copy)]
+pub struct InputRefVerboseDisplay<'a> {
+    pub input_ref: &'a InputRef,
+    pub input_schema: &'a Schema,
+}
+
+impl fmt::Display for InputRefVerboseDisplay<'_> {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(
+            f,
+            "{}",
+            self.input_schema
+                .fields
+                .get(self.input_ref.index)
+                .unwrap()
+                .name
+        )
+    }
+}
+
+impl fmt::Debug for InputRefVerboseDisplay<'_> {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(
+            f,
+            "{}",
+            self.input_schema
+                .fields
+                .get(self.input_ref.index)
+                .unwrap()
+                .name
+        )
     }
 }
 

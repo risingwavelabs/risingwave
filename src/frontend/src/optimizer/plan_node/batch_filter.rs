@@ -21,7 +21,7 @@ use risingwave_pb::batch_plan::FilterNode;
 use super::{LogicalFilter, PlanRef, PlanTreeNodeUnary, ToBatchProst, ToDistributedBatch};
 use crate::expr::{Expr, ExprImpl};
 use crate::optimizer::plan_node::{PlanBase, ToLocalBatch};
-use crate::utils::Condition;
+use crate::utils::{Condition, ConditionVerboseDisplay};
 
 /// `BatchFilter` implements [`super::LogicalFilter`]
 #[derive(Debug, Clone)]
@@ -50,7 +50,21 @@ impl BatchFilter {
 
 impl fmt::Display for BatchFilter {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-        write!(f, "BatchFilter {{ predicate: {} }}", self.predicate())
+        let verbose = self.base.ctx.is_explain_verbose();
+        if verbose {
+            let input = self.input();
+            let input_schema = input.schema();
+            write!(
+                f,
+                "BatchFilter {{ predicate: {} }}",
+                ConditionVerboseDisplay {
+                    condition: self.logical.predicate(),
+                    input_schema
+                }
+            )
+        } else {
+            write!(f, "BatchFilter {{ predicate: {} }}", self.predicate())
+        }
     }
 }
 

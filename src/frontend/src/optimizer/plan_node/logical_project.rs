@@ -25,7 +25,9 @@ use super::{
     gen_filter_and_pushdown, BatchProject, ColPrunable, PlanBase, PlanRef, PlanTreeNodeUnary,
     PredicatePushdown, StreamProject, ToBatch, ToStream,
 };
-use crate::expr::{assert_input_ref, Expr, ExprImpl, ExprRewriter, ExprVisitor, InputRef};
+use crate::expr::{
+    assert_input_ref, Expr, ExprImpl, ExprRewriter, ExprVerboseDisplay, ExprVisitor, InputRef,
+};
 use crate::optimizer::plan_node::CollectInputRef;
 use crate::optimizer::property::{Distribution, Order, RequiredDist};
 use crate::utils::{ColIndexMapping, Condition, Substitute};
@@ -168,7 +170,11 @@ impl LogicalProject {
                         let field = input_schema.fields()[input_idx].clone();
                         (field.name, field.sub_fields, field.type_name)
                     }
-                    None => (format!("expr#{}", id), vec![], String::new()),
+                    None => (
+                        format!("{:?}", ExprVerboseDisplay { expr, input_schema }),
+                        vec![],
+                        String::new(),
+                    ),
                 };
                 Field::with_struct(expr.return_type(), name, sub_fields, type_name)
             })
@@ -190,7 +196,24 @@ impl LogicalProject {
     }
 
     pub(super) fn fmt_with_name(&self, f: &mut fmt::Formatter, name: &str) -> fmt::Result {
-        f.debug_struct(name).field("exprs", self.exprs()).finish()
+        let verbose = self.base.ctx.is_explain_verbose();
+        let mut builder = f.debug_struct(name);
+        if verbose {
+            builder.field(
+                "exprs",
+                &self
+                    .exprs()
+                    .iter()
+                    .map(|expr| ExprVerboseDisplay {
+                        expr,
+                        input_schema: self.input.schema(),
+                    })
+                    .collect_vec(),
+            );
+        } else {
+            builder.field("exprs", self.exprs());
+        }
+        builder.finish()
     }
 
     pub fn is_identity(&self) -> bool {

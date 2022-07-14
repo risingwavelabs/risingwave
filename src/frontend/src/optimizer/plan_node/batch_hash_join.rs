@@ -14,6 +14,7 @@
 
 use std::fmt;
 
+use risingwave_common::catalog::Schema;
 use risingwave_common::error::Result;
 use risingwave_pb::batch_plan::plan_node::NodeBody;
 use risingwave_pb::batch_plan::HashJoinNode;
@@ -23,7 +24,7 @@ use super::{
     ToDistributedBatch,
 };
 use crate::expr::Expr;
-use crate::optimizer::plan_node::ToLocalBatch;
+use crate::optimizer::plan_node::{EqJoinPredicateVerboseDisplay, ToLocalBatch};
 use crate::optimizer::property::{Distribution, Order, RequiredDist};
 use crate::utils::ColIndexMapping;
 
@@ -81,11 +82,25 @@ impl BatchHashJoin {
 
 impl fmt::Display for BatchHashJoin {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        let verbose = self.base.ctx.is_explain_verbose();
         write!(
             f,
             "BatchHashJoin {{ type: {:?}, predicate: {}, output_indices: {} }}",
             self.logical.join_type(),
-            self.eq_join_predicate(),
+            if verbose {
+                let mut concat_schema = self.left().schema().fields.clone();
+                concat_schema.extend(self.right().schema().fields.clone());
+                let concat_schema = Schema::new(concat_schema);
+                format!(
+                    "{}",
+                    EqJoinPredicateVerboseDisplay {
+                        eq_join_predicate: self.eq_join_predicate(),
+                        input_schema: &concat_schema
+                    }
+                )
+            } else {
+                format!("{}", self.eq_join_predicate())
+            },
             if self
                 .logical
                 .output_indices()
