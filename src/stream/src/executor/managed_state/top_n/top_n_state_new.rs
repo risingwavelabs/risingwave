@@ -114,7 +114,7 @@ impl<S: StateStore> ManagedTopNStateNew<S> {
 
     fn get_topn_row(&self, iter_res: Cow<Row>) -> TopNStateRow {
         let row = iter_res.into_owned();
-        let mut datums = vec![];
+        let mut datums = Vec::with_capacity(self.state_table.pk_indices().len());
         for pk_index in self.state_table.pk_indices() {
             datums.push(row.index(*pk_index).clone());
         }
@@ -133,7 +133,7 @@ impl<S: StateStore> ManagedTopNStateNew<S> {
         let state_table_iter = self.state_table.iter(epoch).await?;
         pin_mut!(state_table_iter);
 
-        let mut rows = vec![];
+        let mut rows = Vec::with_capacity(num_limit.min(1024));
         // here we don't expect users to have large OFFSET.
         let mut stream = state_table_iter.skip(offset).take(num_limit);
         while let Some(item) = stream.next().await {

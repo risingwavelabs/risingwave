@@ -205,8 +205,8 @@ impl<S: StateStore> TopNExecutorBase for InnerTopNExecutorNew<S> {
         chunk: StreamChunk,
         epoch: u64,
     ) -> StreamExecutorResult<StreamChunk> {
-        let mut res_ops = vec![];
-        let mut res_rows = vec![];
+        let mut res_ops = Vec::with_capacity(self.limit.unwrap_or_default());
+        let mut res_rows = Vec::with_capacity(self.limit.unwrap_or_default());
         let num_limit = self.limit.unwrap_or(usize::MAX);
 
         // find the top-n range before modification
