@@ -87,3 +87,23 @@ pub trait Decoding {
     /// Take the remaining data out of the deserializer.
     fn take(&mut self) -> Option<(VirtualNode, Vec<u8>, Row)>;
 }
+
+/// `RowExchange` provides the ability to convert between Row and KV entry.
+pub trait Exchange {
+    type Serializer: Encoding;
+    type Deserializer: Decoding;
+
+    fn create_serializer(
+        pk_indices: &[usize],
+        column_descs: &[ColumnDesc],
+        column_ids: &[ColumnId],
+    ) -> Self::Serializer {
+        Encoding::create_row_serializer(pk_indices, column_descs, column_ids)
+    }
+    fn create_deserializer(
+        column_mapping: Arc<ColumnDescMapping>,
+        data_types: Vec<DataType>,
+    ) -> Self::Deserializer {
+        Decoding::create_row_deserializer(column_mapping, data_types)
+    }
+}
