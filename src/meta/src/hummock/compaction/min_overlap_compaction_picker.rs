@@ -210,22 +210,18 @@ impl CompactionPicker for MinOverlappingPicker {
 
 #[cfg(test)]
 pub mod tests {
-    pub use risingwave_pb::hummock::{KeyRange, LevelType};
+    pub use risingwave_pb::hummock::{KeyRange, Level, LevelType};
 
     use super::*;
+    use crate::hummock::compaction::level_selector::tests::{
+        generate_l0_with_overlap, generate_table,
+    };
     use crate::hummock::compaction::overlap_strategy::RangeOverlapStrategy;
-    use crate::hummock::compaction::tier_compaction_picker::tests::generate_table;
 
     #[test]
     fn test_compact_l1() {
-        let picker = MinOverlappingPicker::new(0, 1, Arc::new(RangeOverlapStrategy::default()));
+        let picker = MinOverlappingPicker::new(0, 0, 1, Arc::new(RangeOverlapStrategy::default()));
         let levels = vec![
-            Level {
-                level_idx: 0,
-                level_type: LevelType::Overlapping as i32,
-                table_infos: vec![],
-                total_file_size: 0,
-            },
             Level {
                 level_idx: 1,
                 level_type: LevelType::Nonoverlapping as i32,
@@ -235,6 +231,7 @@ pub mod tests {
                     generate_table(2, 1, 222, 300, 1),
                 ],
                 total_file_size: 0,
+                sub_level_id: 0,
             },
             Level {
                 level_idx: 2,
@@ -247,8 +244,13 @@ pub mod tests {
                     generate_table(8, 2, 301, 400, 1),
                 ],
                 total_file_size: 0,
+                sub_level_id: 0,
             },
         ];
+        let levels = Levels {
+            levels,
+            l0: Some(generate_l0_with_overlap(vec![])),
+        };
         let mut levels_handler = vec![
             LevelHandler::new(0),
             LevelHandler::new(1),
@@ -259,44 +261,38 @@ pub mod tests {
         let ret = picker
             .pick_compaction(&levels, &mut levels_handler)
             .unwrap();
-        assert_eq!(ret.select_level.level_idx, 1);
-        assert_eq!(ret.target_level.level_idx, 2);
-        assert_eq!(ret.select_level.table_infos.len(), 1);
-        assert_eq!(ret.select_level.table_infos[0].id, 2);
-        assert_eq!(ret.target_level.table_infos.len(), 0);
+        assert_eq!(ret.input_levels[0].level_idx, 1);
+        assert_eq!(ret.target_level, 2);
+        assert_eq!(ret.input_levels[0].table_infos.len(), 1);
+        assert_eq!(ret.input_levels[0].table_infos[0].id, 2);
+        assert_eq!(ret.input_levels[1].table_infos.len(), 0);
 
         let ret = picker
             .pick_compaction(&levels, &mut levels_handler)
             .unwrap();
-        assert_eq!(ret.select_level.level_idx, 1);
-        assert_eq!(ret.target_level.level_idx, 2);
-        assert_eq!(ret.select_level.table_infos.len(), 1);
-        assert_eq!(ret.target_level.table_infos.len(), 1);
-        assert_eq!(ret.select_level.table_infos[0].id, 0);
-        assert_eq!(ret.target_level.table_infos[0].id, 4);
+        assert_eq!(ret.input_levels[0].level_idx, 1);
+        assert_eq!(ret.target_level, 2);
+        assert_eq!(ret.input_levels[0].table_infos.len(), 1);
+        assert_eq!(ret.input_levels[1].table_infos.len(), 1);
+        assert_eq!(ret.input_levels[0].table_infos[0].id, 0);
+        assert_eq!(ret.input_levels[1].table_infos[0].id, 4);
 
         let ret = picker
             .pick_compaction(&levels, &mut levels_handler)
             .unwrap();
-        assert_eq!(ret.select_level.level_idx, 1);
-        assert_eq!(ret.target_level.level_idx, 2);
-        assert_eq!(ret.select_level.table_infos.len(), 1);
-        assert_eq!(ret.target_level.table_infos.len(), 2);
-        assert_eq!(ret.select_level.table_infos[0].id, 1);
-        assert_eq!(ret.target_level.table_infos[0].id, 5);
-        assert_eq!(ret.target_level.table_infos[1].id, 6);
+        assert_eq!(ret.input_levels[0].level_idx, 1);
+        assert_eq!(ret.target_level, 2);
+        assert_eq!(ret.input_levels[0].table_infos.len(), 1);
+        assert_eq!(ret.input_levels[1].table_infos.len(), 2);
+        assert_eq!(ret.input_levels[0].table_infos[0].id, 1);
+        assert_eq!(ret.input_levels[1].table_infos[0].id, 5);
+        assert_eq!(ret.input_levels[1].table_infos[1].id, 6);
     }
 
     #[test]
     fn test_expand_l1_files() {
-        let picker = MinOverlappingPicker::new(0, 1, Arc::new(RangeOverlapStrategy::default()));
+        let picker = MinOverlappingPicker::new(0, 0, 1, Arc::new(RangeOverlapStrategy::default()));
         let levels = vec![
-            Level {
-                level_idx: 0,
-                level_type: LevelType::Overlapping as i32,
-                table_infos: vec![],
-                total_file_size: 0,
-            },
             Level {
                 level_idx: 1,
                 level_type: LevelType::Nonoverlapping as i32,
@@ -306,6 +302,7 @@ pub mod tests {
                     generate_table(2, 1, 150, 249, 2),
                 ],
                 total_file_size: 0,
+                sub_level_id: 0,
             },
             Level {
                 level_idx: 2,
@@ -315,8 +312,13 @@ pub mod tests {
                     generate_table(5, 1, 200, 399, 1),
                 ],
                 total_file_size: 0,
+                sub_level_id: 0,
             },
         ];
+        let levels = Levels {
+            levels,
+            l0: Some(generate_l0_with_overlap(vec![])),
+        };
         let mut levels_handler = vec![
             LevelHandler::new(0),
             LevelHandler::new(1),
@@ -327,14 +329,14 @@ pub mod tests {
         let ret = picker
             .pick_compaction(&levels, &mut levels_handler)
             .unwrap();
-        assert_eq!(ret.select_level.level_idx, 1);
-        assert_eq!(ret.target_level.level_idx, 2);
+        assert_eq!(ret.input_levels[0].level_idx, 1);
+        assert_eq!(ret.input_levels[1].level_idx, 2);
 
-        assert_eq!(ret.select_level.table_infos.len(), 2);
-        assert_eq!(ret.select_level.table_infos[0].id, 0);
-        assert_eq!(ret.select_level.table_infos[1].id, 1);
+        assert_eq!(ret.input_levels[0].table_infos.len(), 2);
+        assert_eq!(ret.input_levels[0].table_infos[0].id, 0);
+        assert_eq!(ret.input_levels[0].table_infos[1].id, 1);
 
-        assert_eq!(ret.target_level.table_infos.len(), 1);
-        assert_eq!(ret.target_level.table_infos[0].id, 4);
+        assert_eq!(ret.input_levels[1].table_infos.len(), 1);
+        assert_eq!(ret.input_levels[1].table_infos[0].id, 4);
     }
 }

@@ -159,22 +159,18 @@ impl CompactionPicker for ManualCompactionPicker {
 pub mod tests {
     use std::collections::HashSet;
 
-    pub use risingwave_pb::hummock::{KeyRange, LevelType};
+    pub use risingwave_pb::hummock::{KeyRange, Level, LevelType};
 
     use super::*;
+    use crate::hummock::compaction::level_selector::tests::{
+        generate_l0_with_overlap, generate_table,
+    };
     use crate::hummock::compaction::overlap_strategy::RangeOverlapStrategy;
-    use crate::hummock::compaction::tier_compaction_picker::tests::generate_table;
     use crate::hummock::test_utils::iterator_test_key_of_epoch;
 
     #[test]
     fn test_manaul_compaction_picker() {
-        let mut levels = vec![
-            Level {
-                level_idx: 0,
-                level_type: LevelType::Overlapping as i32,
-                table_infos: vec![],
-                total_file_size: 0,
-            },
+        let levels = vec![
             Level {
                 level_idx: 1,
                 level_type: LevelType::Nonoverlapping as i32,
@@ -184,6 +180,7 @@ pub mod tests {
                     generate_table(2, 1, 222, 300, 1),
                 ],
                 total_file_size: 0,
+                sub_level_id: 0,
             },
             Level {
                 level_idx: 2,
@@ -196,8 +193,13 @@ pub mod tests {
                     generate_table(8, 2, 301, 400, 1),
                 ],
                 total_file_size: 0,
+                sub_level_id: 0,
             },
         ];
+        let mut levels = Levels {
+            levels,
+            l0: Some(generate_l0_with_overlap(vec![])),
+        };
         let mut levels_handler = vec![
             LevelHandler::new(0),
             LevelHandler::new(1),
@@ -233,8 +235,8 @@ pub mod tests {
                 .pick_compaction(&levels, &mut levels_handler)
                 .unwrap();
 
-            assert_eq!(2, result.select_level.table_infos.len());
-            assert_eq!(3, result.target_level.table_infos.len());
+            assert_eq!(2, result.input_levels[0].table_infos.len());
+            assert_eq!(3, result.input_levels[1].table_infos.len());
         }
 
         {
@@ -254,15 +256,15 @@ pub mod tests {
                 .pick_compaction(&levels, &mut levels_handler)
                 .unwrap();
 
-            assert_eq!(3, result.select_level.table_infos.len());
-            assert_eq!(3, result.target_level.table_infos.len());
+            assert_eq!(3, result.input_levels[0].table_infos.len());
+            assert_eq!(3, result.input_levels[1].table_infos.len());
         }
 
         {
             clean_task_state(&mut levels_handler[1]);
             clean_task_state(&mut levels_handler[2]);
 
-            let level_table_info = &mut levels[1].table_infos;
+            let level_table_info = &mut levels.levels[0].table_infos;
             let table_info_1 = &mut level_table_info[1];
             table_info_1.table_ids.resize(2, 0);
             table_info_1.table_ids[0] = 1;
@@ -287,8 +289,8 @@ pub mod tests {
                 .pick_compaction(&levels, &mut levels_handler)
                 .unwrap();
 
-            assert_eq!(1, result.select_level.table_infos.len());
-            assert_eq!(2, result.target_level.table_infos.len());
+            assert_eq!(1, result.input_levels[0].table_infos.len());
+            assert_eq!(2, result.input_levels[1].table_infos.len());
         }
 
         {
@@ -296,7 +298,7 @@ pub mod tests {
             clean_task_state(&mut levels_handler[2]);
 
             // include all table_info
-            let level_table_info = &mut levels[1].table_infos;
+            let level_table_info = &mut levels.levels[0].table_infos;
             for table_info in level_table_info {
                 table_info.table_ids.resize(2, 0);
                 table_info.table_ids[0] = 1;
@@ -326,8 +328,8 @@ pub mod tests {
                 .pick_compaction(&levels, &mut levels_handler)
                 .unwrap();
 
-            assert_eq!(1, result.select_level.table_infos.len());
-            assert_eq!(2, result.target_level.table_infos.len());
+            assert_eq!(1, result.input_levels[0].table_infos.len());
+            assert_eq!(2, result.input_levels[1].table_infos.len());
         }
     }
 }

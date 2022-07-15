@@ -65,9 +65,8 @@ async fn test_hummock_pin_unpin() {
         let levels = hummock_version
             .get_compaction_group_levels(StaticCompactionGroupId::StateDefault.into());
         assert_eq!(version_id, hummock_version.id);
-        assert_eq!(7, levels.len());
-        assert_eq!(0, levels[0].table_infos.len());
-        assert_eq!(0, levels[1].table_infos.len());
+        assert_eq!(6, levels.levels.len());
+        assert_eq!(0, levels.levels[0].table_infos.len());
 
         let pinned_versions = HummockPinnedVersion::list(env.meta_store()).await.unwrap();
         assert_eq!(pin_versions_sum(&pinned_versions), 1);

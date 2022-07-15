@@ -96,8 +96,12 @@ impl SstableStore {
         }
 
         if let CachePolicy::Fill = policy {
-            self.meta_cache
-                .insert(sst.id, sst.id, sst.encoded_size(), Box::new(sst));
+            self.meta_cache.insert(
+                sst.id,
+                sst.id,
+                sst.meta.estimated_size as usize,
+                Box::new(sst),
+            );
         }
 
         Ok(())
