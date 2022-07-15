@@ -28,7 +28,7 @@ use risingwave_common::array::Row;
 use risingwave_common::buffer::Bitmap;
 use risingwave_common::catalog::{ColumnDesc, ColumnId, OrderedColumnDesc, Schema, TableId};
 use risingwave_common::error::RwError;
-use risingwave_common::types::{Datum, VirtualNode};
+use risingwave_common::types::{DataType, Datum, VirtualNode};
 use risingwave_common::util::hash_util::CRC32FastBuilder;
 use risingwave_common::util::ordered::*;
 use risingwave_common::util::sort_util::OrderType;
@@ -225,8 +225,7 @@ impl<S: StateStore, E: Encoding, const T: AccessType> StorageTableBase<S, E, T> 
             vnodes,
         }: Distribution,
     ) -> Self {
-        let row_serializer =
-            E::create_cell_based_serializer(&pk_indices, &table_columns, &column_ids);
+        let row_serializer = E::create_row_serializer(&pk_indices, &table_columns, &column_ids);
 
         assert_eq!(order_types.len(), pk_indices.len());
         let mapping = ColumnDescMapping::new_partial(&table_columns, &column_ids);
@@ -430,7 +429,7 @@ impl<S: StateStore, E: Encoding> StorageTableBase<S, E, READ_WRITE> {
                     let vnode = self.compute_vnode_by_row(&row);
                     let bytes = self
                         .row_serializer
-                        .cell_based_serialize(vnode, &pk, row)
+                        .serialize(vnode, &pk, row)
                         .map_err(err)?;
                     for (key, value) in bytes {
                         local.put(key, StorageValue::new_default_put(value));
@@ -459,7 +458,7 @@ impl<S: StateStore, E: Encoding> StorageTableBase<S, E, READ_WRITE> {
                     // TODO(wcy-fdu): only serialize key on deletion
                     let bytes = self
                         .row_serializer
-                        .cell_based_serialize(vnode, &pk, old_row)
+                        .serialize(vnode, &pk, old_row)
                         .map_err(err)?;
                     for (key, _) in bytes {
                         local.delete(key);
@@ -578,10 +577,17 @@ impl<S: StateStore, E: Encoding, const T: AccessType> StorageTableBase<S, E, T> 
         // can use a single iterator.
         let iterators: Vec<_> = try_join_all(vnodes.map(|vnode| {
             let raw_key_range = prefixed_range(encoded_key_range.clone(), &vnode.to_be_bytes());
+            let data_types = self
+                .table_columns
+                .clone()
+                .into_iter()
+                .map(|t| t.data_type)
+                .collect_vec();
             async move {
                 let iter = StorageTableIterInner::<S, GeneralCellBasedRowDeserializer>::new(
                     &self.keyspace,
                     self.mapping.clone(),
+                    data_types,
                     raw_key_range,
                     epoch,
                     wait_epoch,
@@ -759,6 +765,7 @@ impl<S: StateStore, D: Decoding> StorageTableIterInner<S, D> {
     async fn new<R, B>(
         keyspace: &Keyspace<S>,
         table_descs: Arc<ColumnDescMapping>,
+        data_types: Vec<DataType>,
         raw_key_range: R,
         epoch: u64,
         wait_epoch: bool,
@@ -771,7 +778,7 @@ impl<S: StateStore, D: Decoding> StorageTableIterInner<S, D> {
             keyspace.state_store().wait_epoch(epoch).await?;
         }
 
-        let cell_based_row_deserializer = D::create_cell_based_deserializer(table_descs);
+        let cell_based_row_deserializer = D::create_row_deserializer(table_descs, data_types);
 
         let iter = keyspace.iter_with_range(raw_key_range, epoch).await?;
         let iter = Self {

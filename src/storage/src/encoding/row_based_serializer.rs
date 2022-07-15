@@ -14,30 +14,51 @@
 
 use risingwave_common::array::Row;
 use risingwave_common::error::Result;
+use risingwave_common::types::VirtualNode;
 use risingwave_common::util::value_encoding::serialize_datum;
-type ValueBytes = Vec<u8>;
+
+use super::Encoding;
 
 #[derive(Clone)]
 pub struct RowBasedSerializer {}
 
-impl RowBasedSerializer {
-    pub fn new() -> Self {
+impl Encoding for RowBasedSerializer {
+    /// Serialize the row into a value encode bytes.
+    /// All values are nullable. Each value will have 1 extra byte to indicate whether it is null.
+    fn serialize(
+        &mut self,
+        _vnode: VirtualNode,
+        _pk: &[u8],
+        row: Row,
+    ) -> Result<Vec<(Vec<u8>, Vec<u8>)>> {
+        let mut value_bytes = vec![];
+        for cell in &row.0 {
+            value_bytes.extend(serialize_datum(cell)?);
+        }
+        let key_bytes: Vec<u8> = vec![];
+        let res = vec![(key_bytes, value_bytes)];
+        Ok(res)
+    }
+
+    fn create_row_serializer(
+        _pk_indices: &[usize],
+        _column_descs: &[risingwave_common::catalog::ColumnDesc],
+        _column_ids: &[risingwave_common::catalog::ColumnId],
+    ) -> Self {
+        // todo: Change row-based serializer with dedup pk
         Self {}
     }
 
-    /// Serialize the row into a value encode bytes.
-    /// All values are nullable. Each value will have 1 extra byte to indicate whether it is null.
-    pub fn serialize(&mut self, row: &Row) -> Result<ValueBytes> {
-        let mut res = vec![];
-        for cell in &row.0 {
-            res.extend(serialize_datum(cell)?);
-        }
-        Ok(res)
+    fn cell_based_serialize_without_filter(
+        &mut self,
+        _vnode: risingwave_common::types::VirtualNode,
+        _pk: &[u8],
+        _row: Row,
+    ) -> Result<Vec<Option<(super::KeyBytes, super::ValueBytes)>>> {
+        unreachable!();
     }
-}
 
-impl Default for RowBasedSerializer {
-    fn default() -> Self {
-        Self::new()
+    fn column_ids(&self) -> &[risingwave_common::catalog::ColumnId] {
+        unreachable!()
     }
 }
