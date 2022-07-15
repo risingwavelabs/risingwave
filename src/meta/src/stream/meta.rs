@@ -355,18 +355,18 @@ where
                 .for_each(|(actor_id, status)| {
                     if let Some(new_node_id) = migrate_map.get(actor_id) {
                         if let Some(ref old_parallel_unit) = status.parallel_unit {
-                            if !parallel_unit_migrate_map.contains_key(&old_parallel_unit.id) {
+                            if let std::collections::hash_map::Entry::Vacant(e) =
+                                parallel_unit_migrate_map.entry(old_parallel_unit.id)
+                            {
                                 if old_parallel_unit.r#type == ParallelUnitType::Hash as i32 {
                                     let new_parallel_unit =
                                         pu_hash_map.get_mut(new_node_id).unwrap().pop().unwrap();
-                                    parallel_unit_migrate_map
-                                        .insert(old_parallel_unit.id, new_parallel_unit.clone());
+                                    e.insert(new_parallel_unit.clone());
                                     status.parallel_unit = Some(new_parallel_unit.clone());
                                 } else {
                                     let new_parallel_unit =
                                         pu_single_map.get_mut(new_node_id).unwrap().pop().unwrap();
-                                    parallel_unit_migrate_map
-                                        .insert(old_parallel_unit.id, new_parallel_unit.clone());
+                                    e.insert(new_parallel_unit.clone());
                                     status.parallel_unit = Some(new_parallel_unit.clone());
                                 }
                                 flag = true;

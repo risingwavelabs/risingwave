@@ -175,8 +175,8 @@ where
             for new_node in new_nodes {
                 let actors = info.actor_map.get(&expired_workers[cur]).unwrap();
                 let actors_len = actors.len();
-                for idx in 0..actors_len {
-                    migrate_map.insert(actors[idx], new_node.id);
+                for actor in actors.iter().take(actors_len) {
+                    migrate_map.insert(*actor, new_node.id);
                 }
                 node_map.insert(new_node.id, new_node.clone());
                 cur += 1;
