@@ -174,12 +174,15 @@ impl<'a, R: Rng> SqlGenerator<'a, R> {
         (select, schema)
     }
 
+    // Case 1: Apply Non-Agg functions to bounded Columns
+    // Case 2: Apply Agg functions to bounded Columns
     fn gen_select_list(&mut self) -> (Vec<SelectItem>, Vec<Column>) {
         let items_num = self.rng.gen_range(1..=4);
-        (0..items_num).map(|i| self.gen_select_item(i)).unzip()
+        let choice = self.flip_coin();
+        (0..items_num).map(|i| self.gen_select_item(i, choice)).unzip()
     }
 
-    fn gen_select_item(&mut self, i: i32) -> (SelectItem, Column) {
+    fn gen_select_item(&mut self, i: i32, choice:bool) -> (SelectItem, Column) {
         use DataTypeName as T;
         let ret_type = *[
             T::Boolean,
@@ -198,10 +201,18 @@ impl<'a, R: Rng> SqlGenerator<'a, R> {
         ]
         .choose(&mut self.rng)
         .unwrap();
+        let expr;
+        if choice{
+            expr = self.gen_expr(ret_type, false);
+        }
+        else{
+            expr = self.gen_agg(ret_type);
+        }
+
         let alias = format!("col_{}", i);
         (
             SelectItem::ExprWithAlias {
-                expr: self.gen_expr(ret_type, false),
+                expr: expr,
                 alias: Ident::new(alias.clone()),
             },
             Column {

@@ -17,7 +17,7 @@ use std::collections::HashMap;
 use itertools::Itertools;
 use rand::seq::SliceRandom;
 use rand::Rng;
-use risingwave_frontend::expr::{func_sigs, DataTypeName, ExprType, FuncSign, AggCall};
+use risingwave_frontend::expr::{func_sigs, agg_func_sigs, DataTypeName, ExprType, FuncSign, AggFuncSign};
 use risingwave_sqlparser::ast::{
     BinaryOperator, Expr, Function, FunctionArg, FunctionArgExpr, Ident, ObjectName,
     TrimWhereField, UnaryOperator, Value,
@@ -33,21 +33,6 @@ lazy_static::lazy_static! {
     };
 }
 
-pub struct AggFuncSign {
-    pub func: AggKind,
-    pub inputs_type: Vec<DataTypeName>,
-    pub ret_type: DataTypeName,
-}
-
-impl AggFuncSign{
-    pub fn new(func: AggKind, inputs_type: Vec<DataTypeName>, ret_type: DataTypeName) -> Self{
-        Self {
-            func,
-            inputs_type,
-            ret_type,
-        }
-    }
-}
 lazy_static::lazy_static! {
     static ref AGG_FUNC_TABLE: HashMap<DataTypeName, Vec<AggFuncSign>> = {
         init_agg_table()
@@ -57,46 +42,14 @@ lazy_static::lazy_static! {
 fn init_op_table() -> HashMap<DataTypeName, Vec<FuncSign>> {
     let mut funcs = HashMap::<DataTypeName, Vec<FuncSign>>::new();
     func_sigs().for_each(|func| funcs.entry(func.ret_type).or_default().push(func.clone()));
-    //println!("{:#?}", funcs);
     funcs
 }
 
 
 fn init_agg_table() -> HashMap<DataTypeName, Vec<AggFuncSign>>{
-    let mut funcs = HashMap::<DataTypeName, Vec<FuncSign>>::new();
-    build_agg_map()
-}
-
-fn build_agg_map() -> HashMap<DataTypeName, Vec<AggFuncSign>> {
-    use {DataTypeName as T, AggKind as A};
-    let mut map = HashMap::<DataTypeName, Vec<AggFuncSign>>::new();
-    
-    let all_types = [
-        T::Boolean,
-        T::Int16,
-        T::Int32,
-        T::Int64,
-        T::Decimal,
-        T::Float32,
-        T::Float64,
-        T::Varchar,
-        T::Date,
-        T::Timestamp,
-        T::Timestampz,
-        T::Time,
-        T::Interval,
-    ];
-
-    for agg in [A::Sum, A::Min, A::Max, A::Count, A::Avg, A::StringAgg, A::SingleValue, A::ApproxCountDistinct] {
-        for input in all_types{
-            match AggCall::infer_return_type(&agg, [input] ){
-                Ok(v) => map.entry(v.clone()).or_default().push(AggFuncSign::new(agg,vec![input],v)),
-                Err(e)=> continue,
-            }
-        }
-        
-    }
-    map
+    let mut funcs = HashMap::<DataTypeName, Vec<AggFuncSign>>::new();
+    agg_func_sigs().for_each(|func| funcs.entry(func.ret_type).or_default().push(func.clone()));
+    funcs
 }
 
 impl<'a, R: Rng> SqlGenerator<'a, R> {
@@ -164,7 +117,7 @@ impl<'a, R: Rng> SqlGenerator<'a, R> {
             .unwrap_or_else(|| self.gen_simple_scalar(ret))
     }
 
-    fn gen_agg(&mut self, ret: DataTypeName) -> Expr{
+    pub(crate)fn gen_agg(&mut self, ret: DataTypeName) -> Expr{
         let funcs = match AGG_FUNC_TABLE.get(&ret) {
             None => return self.gen_simple_scalar(ret),
             Some(funcs) => funcs,
@@ -173,12 +126,7 @@ impl<'a, R: Rng> SqlGenerator<'a, R> {
         let expr: Vec<Expr> = func.inputs_type.iter().map(|t| self.gen_expr(*t, true)).collect();
         assert!(expr.len()==1);
         
-        make_agg_expr(func.func, expr[0], self.flip_coin()).unwrap_or_else(|| self.gen_simple_scalar(ret))
-        
-
-
-        //gen_expr(typ, true);
-
+        make_agg_expr(func.func.clone(), expr[0].clone(), self.flip_coin()).unwrap_or_else(|| self.gen_simple_scalar(ret))
     }
 
 }
@@ -234,10 +182,9 @@ fn make_agg_expr(func: AggKind, expr: Expr, distinct:bool) -> Option<Expr> {
         A::Max => Some(Expr::Function(make_func("max", &[expr], distinct))),
         A::Count => Some(Expr::Function(make_func("count", &[expr], distinct))),
         A::Avg => Some(Expr::Function(make_func("avg", &[expr], distinct))),
-        A::StringAgg => Some(Expr::Function(make_func("stringAgg", &[expr], distinct))),
-        A::SingleValue => Some(Expr::Function(make_func("singleValue", &[expr], distinct))),
-        A::ApproxCountDistinct => Some(Expr::Function(make_func("approxCountDistinct", &[expr], distinct))),
-        _ => None,
+        A::StringAgg => Some(Expr::Function(make_func("string_agg", &[expr], distinct))),
+        A::SingleValue => Some(Expr::Function(make_func("single_value", &[expr], distinct))),
+        A::ApproxCountDistinct => Some(Expr::Function(make_func("approx_count_distinct", &[expr], false))),
     }
 }
 
