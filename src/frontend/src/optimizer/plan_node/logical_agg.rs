@@ -31,8 +31,8 @@ use super::{
 };
 use crate::catalog::table_catalog::TableCatalog;
 use crate::expr::{
-    AggCall, Expr, ExprImpl, ExprRewriter, ExprType, FunctionCall, InputRef, InputRefDisplay,
-    InputRefVerboseDisplay,
+    AggCall, AggOrderBy, Expr, ExprImpl, ExprRewriter, ExprType, FunctionCall, InputRef,
+    InputRefDisplay, InputRefVerboseDisplay,
 };
 use crate::optimizer::plan_node::utils::TableCatalogBuilder;
 use crate::optimizer::plan_node::{gen_filter_and_pushdown, LogicalProject};
@@ -473,22 +473,44 @@ impl LogicalAggBuilder {
         None
     }
 
-    pub fn check_approx_count_distinct(&self) -> Result<()> {
+    pub fn syntax_check(&self) -> Result<()> {
         let mut has_distinct = false;
         let mut has_approx_count_distinct = false;
+        let mut has_order_by = false;
+        let mut signle_value_has_disintct = false;
         self.agg_calls.iter().for_each(|agg_call| {
             if agg_call.distinct {
                 has_distinct = true;
             }
-            if agg_call.agg_kind == AggKind::ApproxCountDistinct {
-                has_approx_count_distinct = true;
+            match agg_call.agg_kind {
+                AggKind::ApproxCountDistinct => {
+                    has_approx_count_distinct = true;
+                }
+                AggKind::SingleValue if agg_call.distinct => {
+                    signle_value_has_disintct = true;
+                }
+                _ => {}
+            }
+            if !agg_call.order_by_fields.is_empty() {
+                has_order_by = true;
             }
         });
-        if has_approx_count_distinct && has_distinct {
+        if has_distinct && has_approx_count_distinct {
             return Err(ErrorCode::InvalidInputSyntax(
-                "The APPROXIMATE_COUNT_DISTINCT function cannot appear in the same query block as DISTINCT aggregates.".into(),
+                "The APPROXIMATE_COUNT_DISTINCT function cannot appear in the same query block as distinct aggregates.".into(),
             )
             .into());
+        }
+        if has_distinct && has_order_by {
+            return Err(ErrorCode::InvalidInputSyntax(
+                "Order by aggregates are disallowed to occur with distinct aggregates".into(),
+            )
+            .into());
+        }
+        if signle_value_has_disintct {
+            return Err(
+                ErrorCode::InvalidInputSyntax("Single value can't have distinct".into()).into(),
+            );
         }
         Ok(())
     }
@@ -503,7 +525,12 @@ impl ExprRewriter for LogicalAggBuilder {
     /// Note that the rewriter does not traverse into inputs of agg calls.
     fn rewrite_agg_call(&mut self, agg_call: AggCall) -> ExprImpl {
         let return_type = agg_call.return_type();
-        let (agg_kind, inputs, distinct, order_by, filter) = agg_call.decompose();
+        let (agg_kind, inputs, distinct, mut order_by, filter) = agg_call.decompose();
+        if agg_kind != AggKind::StringAgg {
+            // this order by is unnecessary.
+            order_by = AggOrderBy::new(vec![]);
+        }
+
         self.is_in_filter_clause = true;
         let filter = filter.rewrite_expr(self);
         self.is_in_filter_clause = false;
@@ -716,7 +743,7 @@ impl LogicalAgg {
             .map(|expr| agg_builder.rewrite_with_error(expr))
             .transpose()?;
 
-        agg_builder.check_approx_count_distinct()?;
+        agg_builder.syntax_check()?;
 
         Ok((
             agg_builder.build(input).into(),
