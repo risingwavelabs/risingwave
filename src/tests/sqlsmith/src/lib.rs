@@ -179,10 +179,12 @@ impl<'a, R: Rng> SqlGenerator<'a, R> {
     fn gen_select_list(&mut self) -> (Vec<SelectItem>, Vec<Column>) {
         let items_num = self.rng.gen_range(1..=4);
         let choice = self.flip_coin();
-        (0..items_num).map(|i| self.gen_select_item(i, choice)).unzip()
+        (0..items_num)
+            .map(|i| self.gen_select_item(i, choice))
+            .unzip()
     }
 
-    fn gen_select_item(&mut self, i: i32, choice:bool) -> (SelectItem, Column) {
+    fn gen_select_item(&mut self, i: i32, choice: bool) -> (SelectItem, Column) {
         use DataTypeName as T;
         let ret_type = *[
             T::Boolean,
@@ -201,13 +203,11 @@ impl<'a, R: Rng> SqlGenerator<'a, R> {
         ]
         .choose(&mut self.rng)
         .unwrap();
-        let expr;
-        if choice{
-            expr = self.gen_expr(ret_type, false);
-        }
-        else{
-            expr = self.gen_agg(ret_type);
-        }
+        let expr = if choice {
+            self.gen_expr(ret_type, true)
+        } else {
+            self.gen_agg(ret_type)
+        };
 
         let alias = format!("col_{}", i);
         (
@@ -260,7 +260,7 @@ impl<'a, R: Rng> SqlGenerator<'a, R> {
 
     fn gen_having(&mut self, have_group_by: bool) -> Option<Expr> {
         if have_group_by & self.flip_coin() {
-            Some(self.gen_expr(DataTypeName::Boolean, false))
+            Some(self.gen_expr(DataTypeName::Boolean, true))
         } else {
             None
         }

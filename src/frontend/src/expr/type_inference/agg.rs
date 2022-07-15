@@ -16,6 +16,7 @@ use std::collections::HashMap;
 
 use risingwave_common::types::DataType;
 use risingwave_expr::expr::AggKind;
+
 use super::super::AggCall;
 use super::DataTypeName;
 
@@ -33,7 +34,7 @@ impl AggFuncSigMap {
         let arity = param_types.len();
         let inputs_type = param_types.into_iter().map(Into::into).collect();
         let sig = AggFuncSign {
-            func : func.clone(),
+            func: func.clone(),
             inputs_type,
             ret_type,
         };
@@ -47,9 +48,9 @@ impl AggFuncSigMap {
 /// Type signatures and arities of variadic functions are checked
 /// [elsewhere](crate::expr::FunctionCall::new).
 fn build_type_derive_map() -> AggFuncSigMap {
-    use {DataTypeName as T, AggKind as A};
+    use {AggKind as A, DataTypeName as T};
     let mut map = AggFuncSigMap::default();
-  
+
     let all_types = [
         T::Boolean,
         T::Int16,
@@ -66,14 +67,24 @@ fn build_type_derive_map() -> AggFuncSigMap {
         T::Interval,
     ];
 
-    // Call infer_return_type to check the return type. If it throw error shows that the type is not inferred.
-    for agg in [A::Sum, A::Min, A::Max, A::Count, A::Avg, A::StringAgg, A::SingleValue, A::ApproxCountDistinct] {
-        for input in all_types{
-            match AggCall::infer_return_type(&agg, &[DataType::from(input)] ){
-                Ok(v) => map.insert(agg.clone(),vec![input],DataTypeName::from(v)),
-                Err(_e)=> continue,
+    // Call infer_return_type to check the return type. If it throw error shows that the type is not
+    // inferred.
+    for agg in [
+        A::Sum,
+        A::Min,
+        A::Max,
+        A::Count,
+        A::Avg,
+        A::StringAgg,
+        A::SingleValue,
+        A::ApproxCountDistinct,
+    ] {
+        for input in all_types {
+            match AggCall::infer_return_type(&agg, &[DataType::from(input)]) {
+                Ok(v) => map.insert(agg.clone(), vec![input], DataTypeName::from(v)),
+                Err(_e) => continue,
             }
-        }  
+        }
     }
     map
 }
@@ -289,8 +300,8 @@ pub fn agg_func_sigs() -> impl Iterator<Item = &'static AggFuncSign> {
 //                 Ok(&[T::Int32, T::Int32, T::Float64] as &[_]),
 //             ),
 //             (
-//                 "Without binary special rule, Rule 4f treats exact-match and cast-match equally.",
-//                 vec![
+//                 "Without binary special rule, Rule 4f treats exact-match and cast-match
+// equally.",                 vec![
 //                     vec![T::Int32, T::Int32, T::Int32],
 //                     vec![T::Int32, T::Int32, T::Float32],
 //                 ],
@@ -300,13 +311,13 @@ pub fn agg_func_sigs() -> impl Iterator<Item = &'static AggFuncSign> {
 //             (
 //                 "`top_matches` ranks by exact count then preferred count",
 //                 vec![
-//                     vec![T::Float64, T::Float64, T::Float64, T::Timestampz], // 0 exact 3 preferred
-//                     vec![T::Float64, T::Int32, T::Float32, T::Timestamp],    // 1 exact 1 preferred
-//                     vec![T::Float32, T::Float32, T::Int32, T::Timestampz],   // 1 exact 0 preferred
-//                     vec![T::Int32, T::Float64, T::Float32, T::Timestampz],   // 1 exact 1 preferred
-//                     vec![T::Int32, T::Int16, T::Int32, T::Timestampz], // 2 exact 1 non-castable
-//                     vec![T::Int32, T::Float64, T::Float32, T::Date],   // 1 exact 1 preferred
-//                 ],
+//                     vec![T::Float64, T::Float64, T::Float64, T::Timestampz], // 0 exact 3
+// preferred                     vec![T::Float64, T::Int32, T::Float32, T::Timestamp],    // 1 exact
+// 1 preferred                     vec![T::Float32, T::Float32, T::Int32, T::Timestampz],   // 1
+// exact 0 preferred                     vec![T::Int32, T::Float64, T::Float32, T::Timestampz],   //
+// 1 exact 1 preferred                     vec![T::Int32, T::Int16, T::Int32, T::Timestampz], // 2
+// exact 1 non-castable                     vec![T::Int32, T::Float64, T::Float32, T::Date],   // 1
+// exact 1 preferred                 ],
 //                 &[Some(T::Int32), Some(T::Int32), Some(T::Int32), None] as &[_],
 //                 Ok(&[T::Int32, T::Float64, T::Float32, T::Timestampz] as &[_]),
 //             ),
