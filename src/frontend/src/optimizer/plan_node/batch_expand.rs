@@ -15,6 +15,7 @@
 use std::fmt;
 
 use itertools::Itertools;
+use risingwave_common::catalog::FieldVerboseDisplay;
 use risingwave_common::error::Result;
 use risingwave_pb::batch_plan::expand_node::Subset;
 use risingwave_pb::batch_plan::plan_node::NodeBody;
@@ -47,15 +48,28 @@ impl BatchExpand {
     pub fn column_subsets(&self) -> &Vec<Vec<usize>> {
         self.logical.column_subsets()
     }
+
+    pub fn column_subsets_verbose_display(&self) -> Vec<Vec<FieldVerboseDisplay>> {
+        self.logical.column_subsets_verbose_display()
+    }
 }
 
 impl fmt::Display for BatchExpand {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        write!(
-            f,
-            "BatchExpand {{ column_subsets: {:?} }}",
-            self.column_subsets()
-        )
+        let verbose = self.base.ctx.is_explain_verbose();
+        if verbose {
+            write!(
+                f,
+                "BatchExpand {{ column_subsets: {:?} }}",
+                self.column_subsets_verbose_display()
+            )
+        } else {
+            write!(
+                f,
+                "BatchExpand {{ column_subsets: {:?} }}",
+                self.column_subsets()
+            )
+        }
     }
 }
 

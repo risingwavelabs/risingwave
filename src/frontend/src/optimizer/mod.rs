@@ -159,6 +159,13 @@ impl PlanRoot {
         // conditions into a filter above the multijoin.
         plan = plan.predicate_pushdown(Condition::true_cond());
 
+        // Convert distinct aggregates.
+        plan = {
+            let rules = vec![DistinctAgg::create()];
+            let heuristic_optimizer = HeuristicOptimizer::new(ApplyOrder::TopDown, rules);
+            heuristic_optimizer.optimize(plan)
+        };
+
         // Prune Columns
         //
         // Currently, the expressions in ORDER BY will be merged into the expressions in SELECT and
