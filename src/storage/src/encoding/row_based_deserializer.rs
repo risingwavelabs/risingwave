@@ -34,7 +34,7 @@ impl Decoding for RowBasedDeserializer {
     }
 
     fn take(&mut self) -> Option<(risingwave_common::types::VirtualNode, Vec<u8>, Row)> {
-        unreachable!()
+        None
     }
 
     fn deserialize(
@@ -42,7 +42,7 @@ impl Decoding for RowBasedDeserializer {
         raw_key: impl AsRef<[u8]>,
         value: impl AsRef<[u8]>,
     ) -> Result<Option<(risingwave_common::types::VirtualNode, Vec<u8>, Row)>> {
-        //todo: raw_key will be used in row-based pk dudup later.
+        // todo: raw_key will be used in row-based pk dudup later.
         Ok(Some((
             0,
             raw_key.as_ref().to_vec(),
@@ -51,7 +51,7 @@ impl Decoding for RowBasedDeserializer {
     }
 }
 
-pub fn row_based_deserialize_inner(data_types: Vec<DataType>, mut row: impl Buf) -> Result<Row> {
+fn row_based_deserialize_inner(data_types: Vec<DataType>, mut row: impl Buf) -> Result<Row> {
     // value encoding
     let mut values = Vec::with_capacity(data_types.len());
     for ty in &data_types {

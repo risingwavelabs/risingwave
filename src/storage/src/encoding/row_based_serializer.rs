@@ -28,15 +28,14 @@ impl Encoding for RowBasedSerializer {
     fn serialize(
         &mut self,
         _vnode: VirtualNode,
-        _pk: &[u8],
+        pk: &[u8],
         row: Row,
     ) -> Result<Vec<(Vec<u8>, Vec<u8>)>> {
         let mut value_bytes = vec![];
         for cell in &row.0 {
             value_bytes.extend(serialize_datum(cell)?);
         }
-        let key_bytes: Vec<u8> = vec![];
-        let res = vec![(key_bytes, value_bytes)];
+        let res = vec![(pk.to_vec(), value_bytes)];
         Ok(res)
     }
 
@@ -49,7 +48,7 @@ impl Encoding for RowBasedSerializer {
         Self {}
     }
 
-    fn cell_based_serialize_without_filter(
+    fn serialize_without_filter(
         &mut self,
         _vnode: risingwave_common::types::VirtualNode,
         _pk: &[u8],
