@@ -311,6 +311,7 @@ where
         core.get_parallel_unit_count(parallel_unit_type)
     }
 
+    /// Generate `parallel_degree` hash parallel units and 1 single parallel unit.
     async fn generate_cn_parallel_units(
         &self,
         parallel_degree: usize,
@@ -319,9 +320,9 @@ where
         let start_id = self
             .env
             .id_gen_manager()
-            .generate_interval::<{ IdCategory::ParallelUnit }>(parallel_degree as i32)
+            .generate_interval::<{ IdCategory::ParallelUnit }>((parallel_degree + 1) as i32)
             .await? as ParallelUnitId;
-        let mut parallel_units = Vec::with_capacity(parallel_degree);
+        let mut parallel_units = Vec::with_capacity(parallel_degree + 1);
         let single_parallel_unit = ParallelUnit {
             id: start_id,
             r#type: ParallelUnitType::Single as i32,
