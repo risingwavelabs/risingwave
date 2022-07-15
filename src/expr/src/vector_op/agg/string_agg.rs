@@ -188,7 +188,6 @@ impl Aggregator for StringAgg {
     }
 
     fn update_single(&mut self, input: &DataChunk, row_id: usize) -> Result<()> {
-        log::warn!("[rc] update_single, input: {:?} row_id: {}", input, row_id);
         if let ArrayImpl::Utf8(col) = input.column_at(self.agg_col_idx).array_ref() {
             if let Some(s) = col.value_at(row_id) {
                 // only need to save rows with non-empty string value to aggregate
@@ -209,12 +208,6 @@ impl Aggregator for StringAgg {
         start_row_id: usize,
         end_row_id: usize,
     ) -> Result<()> {
-        log::warn!(
-            "[rc] update_multi, input: {:?}, start_row_id: {}, end_row_id: {}",
-            input,
-            start_row_id,
-            end_row_id
-        );
         if let ArrayImpl::Utf8(col) = input.column_at(self.agg_col_idx).array_ref() {
             for (i, s) in col
                 .iter()
