@@ -45,7 +45,7 @@ pub fn bind_sql_columns(columns: Vec<ColumnDef>) -> Result<Vec<ColumnCatalog>> {
         column_descs.push(row_id_column_desc());
         // Then user columns.
         for (i, column) in columns.into_iter().enumerate() {
-            check_valid_column_name(&column.name.value)?;
+            check_valid_column_name(&column.name.real_value())?;
             let field_descs = if let AstDataType::Struct(fields) = &column.data_type {
                 fields
                     .iter()
@@ -57,7 +57,7 @@ pub fn bind_sql_columns(columns: Vec<ColumnDef>) -> Result<Vec<ColumnCatalog>> {
             column_descs.push(ColumnDesc {
                 data_type: bind_data_type(&column.data_type)?,
                 column_id: ColumnId::new((i + 1) as i32),
-                name: column.name.value,
+                name: column.name.real_value(),
                 field_descs,
                 type_name: "".to_string(),
             });

@@ -46,6 +46,7 @@ use std::fmt;
 use std::fmt::Debug;
 
 use fixedbitset::FixedBitSet;
+use itertools::Itertools;
 use risingwave_common::catalog::{FieldVerboseDisplay, Schema};
 use risingwave_common::error::Result;
 use risingwave_pb::batch_plan::exchange_info::{
@@ -174,11 +175,19 @@ impl DistributionVerboseDisplay<'_> {
             Distribution::SomeShard => f.write_str("SomeShard")?,
             Distribution::Broadcast => f.write_str("Broadcast")?,
             Distribution::HashShard(vec) => {
-                for &key in vec {
+                for key in vec.iter().copied().with_position() {
                     std::fmt::Debug::fmt(
-                        &FieldVerboseDisplay(self.input_schema.fields.get(key).unwrap()),
+                        &FieldVerboseDisplay(
+                            self.input_schema.fields.get(key.into_inner()).unwrap(),
+                        ),
                         f,
                     )?;
+                    match key {
+                        itertools::Position::First(_) | itertools::Position::Middle(_) => {
+                            f.write_str(", ")?;
+                        }
+                        _ => {}
+                    }
                 }
             }
         }

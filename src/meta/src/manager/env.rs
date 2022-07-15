@@ -68,6 +68,7 @@ where
 /// Options shared by all meta service instances
 pub struct MetaOpts {
     pub enable_recovery: bool,
+    pub enable_migrate: bool,
     pub checkpoint_interval: Duration,
 
     /// After specified seconds of idle (no mview or flush), the process will be exited.
@@ -84,6 +85,7 @@ impl Default for MetaOpts {
     fn default() -> Self {
         Self {
             enable_recovery: false,
+            enable_migrate: false,
             checkpoint_interval: Duration::from_millis(250),
             max_idle_ms: 0,
             in_flight_barrier_nums: 40,
@@ -94,9 +96,10 @@ impl Default for MetaOpts {
 
 impl MetaOpts {
     /// some test need `enable_recovery=true`
-    pub fn test(enable_recovery: bool) -> Self {
+    pub fn test(enable_recovery: bool, enable_migrate: bool) -> Self {
         Self {
             enable_recovery,
+            enable_migrate,
             checkpoint_interval: Duration::from_millis(250),
             max_idle_ms: 0,
             in_flight_barrier_nums: 40,
