@@ -328,7 +328,7 @@ where
             worker_node_id: worker_id,
         };
         parallel_units.push(single_parallel_unit);
-        (start_id + 1..start_id + parallel_degree as ParallelUnitId).for_each(|id| {
+        (start_id + 1..start_id + 1 + parallel_degree as ParallelUnitId).for_each(|id| {
             let hash_parallel_unit = ParallelUnit {
                 id,
                 r#type: ParallelUnitType::Hash as i32,
@@ -527,7 +527,7 @@ mod tests {
         }
 
         let single_parallel_count = worker_count;
-        let hash_parallel_count = (env.opts.unsafe_worker_node_parallel_degree - 1) * worker_count;
+        let hash_parallel_count = env.opts.unsafe_worker_node_parallel_degree * worker_count;
         assert_cluster_manager(&cluster_manager, single_parallel_count, hash_parallel_count).await;
 
         let worker_to_delete_count = 4usize;
@@ -544,7 +544,7 @@ mod tests {
         assert_cluster_manager(
             &cluster_manager,
             1,
-            env.opts.unsafe_worker_node_parallel_degree - 1,
+            env.opts.unsafe_worker_node_parallel_degree,
         )
         .await;
 
