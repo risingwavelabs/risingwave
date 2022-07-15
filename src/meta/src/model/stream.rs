@@ -18,6 +18,7 @@ use itertools::Itertools;
 use risingwave_common::catalog::TableId;
 use risingwave_common::error::Result;
 use risingwave_common::types::ParallelUnitId;
+use risingwave_pb::common::ParallelUnit;
 use risingwave_pb::meta::table_fragments::{ActorState, ActorStatus, Fragment};
 use risingwave_pb::meta::TableFragments as ProstTableFragments;
 use risingwave_pb::stream_plan::source_node::SourceType;
@@ -45,7 +46,7 @@ pub struct TableFragments {
     pub(crate) fragments: BTreeMap<FragmentId, Fragment>,
 
     /// The status of actors
-    actor_status: BTreeMap<ActorId, ActorStatus>,
+    pub(crate) actor_status: BTreeMap<ActorId, ActorStatus>,
 
     /// Internal TableIds from all Fragment
     internal_table_ids: Vec<u32>,
@@ -166,6 +167,14 @@ impl TableFragments {
         false
     }
 
+    pub fn fetch_parallel_unit_by_actor(&self, actor_id: &ActorId) -> Option<ParallelUnit> {
+        if let Some(status) = self.actor_status.get(actor_id) {
+            status.parallel_unit.clone()
+        } else {
+            None
+        }
+    }
+
     pub fn fetch_stream_source_id(stream_node: &StreamNode) -> Option<SourceId> {
         if let Some(NodeBody::Source(s)) = stream_node.node_body.as_ref() {
             if s.source_type == SourceType::Source as i32 {
@@ -238,6 +247,20 @@ impl TableFragments {
             map.entry(node_id).or_insert_with(Vec::new).push(actor_id);
         }
         map
+    }
+
+    pub fn update_vnode_mapping(&mut self, migrate_map: &HashMap<ParallelUnitId, ParallelUnit>) {
+        for fragment in self.fragments.values_mut() {
+            if fragment.vnode_mapping.is_some() {
+                if let Some(ref mut mapping) = fragment.vnode_mapping {
+                    mapping.data.iter_mut().for_each(|id| {
+                        if migrate_map.contains_key(id) {
+                            *id = migrate_map.get(id).unwrap().id;
+                        }
+                    });
+                }
+            }
+        }
     }
 
     /// Returns the status of actors group by node id.
