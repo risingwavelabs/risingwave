@@ -180,9 +180,9 @@ fn print_kv_pairs(block_data: Bytes, table_data: &TableData) -> anyhow::Result<(
 
         let full_val = block_iter.value();
         let humm_val = HummockValue::from_slice(block_iter.value())?;
-        let (is_put, val_meta, user_val) = match humm_val {
-            HummockValue::Put(meta, uval) => (true, meta.vnode, uval),
-            HummockValue::Delete(meta) => (false, meta.vnode, &[] as &[u8]),
+        let (is_put, user_val) = match humm_val {
+            HummockValue::Put(uval) => (true, uval),
+            HummockValue::Delete() => (false, &[] as &[u8]),
         };
 
         let epoch = get_epoch(full_key);
@@ -193,7 +193,6 @@ fn print_kv_pairs(block_data: Bytes, table_data: &TableData) -> anyhow::Result<(
         println!("\t\tuser value: {:02x?}", user_val);
         println!("\t\t     epoch: {}", epoch);
         println!("\t\t      type: {}", if is_put { "Put" } else { "Delete" });
-        println!("\t\tvalue-meta: {}", val_meta);
 
         if let Some(table_id) = get_table_id(full_key) {
             let (table_name, columns) = table_data.get(&table_id).unwrap();
