@@ -27,7 +27,7 @@ pub trait HummockMetaClient: Send + Sync + 'static {
     async fn pin_version(
         &self,
         last_pinned: HummockVersionId,
-    ) -> Result<(bool, Vec<HummockVersionDelta>, HummockVersion)>;
+    ) -> Result<(bool, Vec<HummockVersionDelta>, Option<HummockVersion>)>;
     async fn unpin_version(&self) -> Result<()>;
     async fn unpin_version_before(&self, unpin_version_before: HummockVersionId) -> Result<()>;
     async fn pin_snapshot(&self) -> Result<HummockEpoch>;

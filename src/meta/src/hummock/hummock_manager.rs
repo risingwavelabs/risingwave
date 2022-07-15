@@ -415,7 +415,7 @@ where
         &self,
         context_id: HummockContextId,
         last_pinned: HummockVersionId,
-    ) -> Result<(bool, Vec<HummockVersionDelta>, HummockVersion)> {
+    ) -> Result<(bool, Vec<HummockVersionDelta>, Option<HummockVersion>)> {
         let mut versioning_guard = write_lock!(self, versioning).await;
         let _timer = start_measure_real_process_timer!(self);
         let versioning = versioning_guard.deref_mut();
@@ -457,7 +457,11 @@ where
         let ret = Ok((
             is_delta,
             ret_deltas,
-            hummock_versions.get(&version_id).unwrap().clone(),
+            if is_delta {
+                None
+            } else {
+                Some(hummock_versions.get(&version_id).unwrap().clone())
+            },
         ));
 
         #[cfg(test)]

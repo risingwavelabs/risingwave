@@ -348,7 +348,7 @@ impl HummockMetaClient for MetaClient {
     async fn pin_version(
         &self,
         last_pinned: HummockVersionId,
-    ) -> Result<(bool, Vec<HummockVersionDelta>, HummockVersion)> {
+    ) -> Result<(bool, Vec<HummockVersionDelta>, Option<HummockVersion>)> {
         let req = PinVersionRequest {
             context_id: self.worker_id(),
             last_pinned,
@@ -357,7 +357,7 @@ impl HummockMetaClient for MetaClient {
         Ok((
             resp.is_delta_response,
             resp.version_deltas,
-            resp.pinned_version.unwrap(),
+            resp.pinned_version,
         ))
     }
 

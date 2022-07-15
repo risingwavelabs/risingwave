@@ -44,7 +44,7 @@ impl HummockMetaClient for MonitoredHummockMetaClient {
     async fn pin_version(
         &self,
         last_pinned: HummockVersionId,
-    ) -> Result<(bool, Vec<HummockVersionDelta>, HummockVersion)> {
+    ) -> Result<(bool, Vec<HummockVersionDelta>, Option<HummockVersion>)> {
         self.stats.pin_version_counts.inc();
         let timer = self.stats.pin_version_latency.start_timer();
         let res = self.meta_client.pin_version(last_pinned).await;

@@ -82,7 +82,7 @@ where
                     status: None,
                     is_delta_response,
                     version_deltas,
-                    pinned_version: Some(pinned_version),
+                    pinned_version,
                 }))
             }
             Err(e) => Err(tonic_err(e)),

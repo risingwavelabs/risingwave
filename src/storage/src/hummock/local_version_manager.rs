@@ -162,7 +162,8 @@ impl LocalVersionManager {
         .await
         .expect("should be `Some` since `break_condition` is always false")
         .expect("should be able to pinned the first version")
-        .2;
+        .2
+        .unwrap();
 
         let (buffer_event_sender, buffer_event_receiver) = mpsc::unbounded_channel();
 
@@ -218,7 +219,7 @@ impl LocalVersionManager {
     pub fn try_update_pinned_version(
         &self,
         last_pinned: Option<u64>,
-        pin_resp: (bool, Vec<HummockVersionDelta>, HummockVersion),
+        pin_resp: (bool, Vec<HummockVersionDelta>, Option<HummockVersion>),
     ) -> bool {
         let old_version = self.local_version.upgradable_read();
         if let Some(last_pinned_id) = last_pinned {
@@ -233,7 +234,7 @@ impl LocalVersionManager {
             }
             version_to_apply
         } else {
-            pin_resp.2
+            pin_resp.2.unwrap()
         };
         let new_version_id = newly_pinned_version.id;
         for levels in newly_pinned_version.levels.values() {
@@ -533,7 +534,7 @@ impl LocalVersionManager {
         last_pinned: HummockVersionId,
         max_retry: usize,
         break_condition: impl Fn() -> bool,
-    ) -> Option<HummockResult<(bool, Vec<HummockVersionDelta>, HummockVersion)>> {
+    ) -> Option<HummockResult<(bool, Vec<HummockVersionDelta>, Option<HummockVersion>)>> {
         let max_retry_interval = Duration::from_secs(10);
         let mut retry_backoff = tokio_retry::strategy::ExponentialBackoff::from_millis(10)
             .max_delay(max_retry_interval)
