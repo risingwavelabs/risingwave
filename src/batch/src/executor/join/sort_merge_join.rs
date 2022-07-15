@@ -13,9 +13,9 @@
 // limitations under the License.
 use std::sync::Arc;
 
-use futures::{TryStreamExt};
+use futures::TryStreamExt;
 use futures_async_stream::try_stream;
-use risingwave_common::array::{DataChunk};
+use risingwave_common::array::DataChunk;
 use risingwave_common::catalog::Schema;
 use risingwave_common::error::RwError;
 use risingwave_common::util::chunk_coalesce::DataChunkBuilder;
@@ -136,8 +136,8 @@ impl SortMergeJoinExecutor {
                         if let Some(spilled) = chunk_builder.append_one_row_from_datum_refs(probe_row.values().chain(build_row.values()))? {
                             yield spilled
                         }
-                    } 
-                } 
+                    }
+                }
                 // Otherwise, do merge join from scratch.
                 else {
                     last_matched_build_rows.clear();
@@ -157,12 +157,12 @@ impl SortMergeJoinExecutor {
                                 break;
                             }
                             build_row_idx = next_build_row_idx + 1;
-                        } 
+                        }
                         // Current build side chunk is drained, fetch the next chunk.
                         else if let Some(next_build_chunk) = build_chunk_iter.try_next().await? {
                             build_chunk = Arc::new(next_build_chunk);
                             build_row_idx = 0;
-                        } 
+                        }
                         // Now all build side chunks are fetched.
                         else {
                             break
