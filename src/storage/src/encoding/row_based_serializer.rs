@@ -48,7 +48,7 @@ impl Encoding for RowBasedSerializer {
         Self {}
     }
 
-    fn serialize_without_filter(
+    fn serialize_for_update(
         &mut self,
         _vnode: risingwave_common::types::VirtualNode,
         _pk: &[u8],

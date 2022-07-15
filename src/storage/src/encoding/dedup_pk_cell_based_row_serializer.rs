@@ -106,14 +106,14 @@ impl Encoding for DedupPkCellBasedRowSerializer {
     }
 
     /// Remove dup pk datums + `serialize_without_filter`
-    fn serialize_without_filter(
+    fn serialize_for_update(
         &mut self,
         vnode: VirtualNode,
         pk: &[u8],
         row: Row,
     ) -> Result<Vec<Option<(KeyBytes, ValueBytes)>>> {
         let row = self.remove_dup_pk_datums(row);
-        self.inner.serialize_without_filter(vnode, pk, row)
+        self.inner.serialize_for_update(vnode, pk, row)
     }
 
     fn column_ids(&self) -> &[ColumnId] {

@@ -51,7 +51,7 @@ pub trait Encoding {
     /// Serialize key and value. Each column id will occupy a position in Vec. For `column_ids` that
     /// doesn't correspond to a cell, the position will be None. Aparts from user-specified
     /// `column_ids`, there will also be a `SENTINEL_CELL_ID` at the end.
-    fn serialize_without_filter(
+    fn serialize_for_update(
         &mut self,
         vnode: VirtualNode,
         pk: &[u8],

@@ -494,11 +494,11 @@ impl<S: StateStore, E: Encoding> StorageTableBase<S, E, READ_WRITE> {
 
                     let delete_bytes = self
                         .row_serializer
-                        .serialize_without_filter(vnode, &pk, old_row)
+                        .serialize_for_update(vnode, &pk, old_row)
                         .map_err(err)?;
                     let insert_bytes = self
                         .row_serializer
-                        .serialize_without_filter(vnode, &pk, new_row)
+                        .serialize_for_update(vnode, &pk, new_row)
                         .map_err(err)?;
                     for (delete, insert) in
                         delete_bytes.into_iter().zip_eq(insert_bytes.into_iter())
