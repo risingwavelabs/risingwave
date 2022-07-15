@@ -288,7 +288,7 @@ impl FakeProbeSideSourceBuilder {
 
 #[async_trait::async_trait]
 impl ProbeSideSourceBuilder for FakeProbeSideSourceBuilder {
-    async fn build_source(&self, key_datums: Vec<ScalarImpl>) -> Result<BoxedExecutor> {
+    async fn build_source(&self, key_scalar_impls: Vec<ScalarImpl>) -> Result<BoxedExecutor> {
         let mut mock_executor = MockExecutor::new(self.schema.clone());
 
         let base_data_chunk = DataChunk::from_pretty(
@@ -303,7 +303,7 @@ impl ProbeSideSourceBuilder for FakeProbeSideSourceBuilder {
 
         for idx in 0..base_data_chunk.capacity() {
             let probe_row = base_data_chunk.row_at_unchecked_vis(idx);
-            if key_datums[0] == probe_row.value_at(0).to_owned_datum().unwrap() {
+            if key_scalar_impls[0] == probe_row.value_at(0).to_owned_datum().unwrap() {
                 let owned_row = probe_row.to_owned_row();
                 let chunk =
                     DataChunk::from_rows(&[owned_row], &[DataType::Int32, DataType::Float32])?;

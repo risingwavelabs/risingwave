@@ -62,13 +62,13 @@ pub struct ProbeSideSource<C> {
 /// Used to build the executor for the probe side
 #[async_trait::async_trait]
 pub trait ProbeSideSourceBuilder: Send {
-    async fn build_source(&self, key_datum_refs: Vec<ScalarImpl>) -> Result<BoxedExecutor>;
+    async fn build_source(&self, key_scalar_impls: Vec<ScalarImpl>) -> Result<BoxedExecutor>;
 }
 
 impl<C: BatchTaskContext> ProbeSideSource<C> {
     /// Creates the `RowSeqScanNode` that will be used for scanning the probe side table
     /// based on the passed `RowRef`.
-    fn create_row_seq_scan_node(&self, key_datum_refs: Vec<ScalarImpl>) -> Result<NodeBody> {
+    fn create_row_seq_scan_node(&self, key_scalar_impls: Vec<ScalarImpl>) -> Result<NodeBody> {
         // Check that the data types of both sides of the equality predicate are the same
         // TODO: Handle the cases where the data types of both sides are different but castable
         // (e.g. int32 and int64)
@@ -93,7 +93,7 @@ impl<C: BatchTaskContext> ProbeSideSource<C> {
             ).into());
         }
 
-        let eq_conds = key_datum_refs
+        let eq_conds = key_scalar_impls
             .iter()
             .map(|scalar_impl| scalar_impl.to_protobuf())
             .collect_vec();
@@ -116,7 +116,7 @@ impl<C: BatchTaskContext> ProbeSideSource<C> {
     /// the source templates.
     fn build_prost_exchange_sources(
         &self,
-        key_datum_refs: Vec<ScalarImpl>,
+        key_scalar_impls: Vec<ScalarImpl>,
     ) -> Result<Vec<ProstExchangeSource>> {
         let Plan(inner_template_plan) = self.source_templates[0].get_local_execute_plan().unwrap();
 
@@ -125,7 +125,7 @@ impl<C: BatchTaskContext> ProbeSideSource<C> {
                 root: Some(PlanNode {
                     children: vec![],
                     identity: Uuid::new_v4().to_string(),
-                    node_body: Some(self.create_row_seq_scan_node(key_datum_refs)?),
+                    node_body: Some(self.create_row_seq_scan_node(key_scalar_impls)?),
                 }),
                 exchange_info: Some(ExchangeInfo {
                     mode: DistributionMode::Single as i32,
@@ -153,8 +153,8 @@ impl<C: BatchTaskContext> ProbeSideSource<C> {
 impl<C: BatchTaskContext> ProbeSideSourceBuilder for ProbeSideSource<C> {
     /// Builds and returns the `ExchangeExecutor` used for the probe side of the
     /// `LookupJoinExecutor`.
-    async fn build_source(&self, key_datum_refs: Vec<ScalarImpl>) -> Result<BoxedExecutor> {
-        let sources = self.build_prost_exchange_sources(key_datum_refs)?;
+    async fn build_source(&self, key_scalar_impls: Vec<ScalarImpl>) -> Result<BoxedExecutor> {
+        let sources = self.build_prost_exchange_sources(key_scalar_impls)?;
 
         let exchange_node = NodeBody::Exchange(ExchangeNode {
             sources,
