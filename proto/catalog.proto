@@ -41,6 +41,7 @@ message Sink {
   uint32 associated_table_id = 5;
   map<string, string> properties = 6;
   string owner = 7;
+  repeated uint32 dependent_relations = 8;
 }
 
 // See `TableCatalog` struct in frontend crate for more information.

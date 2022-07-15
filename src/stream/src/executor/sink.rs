@@ -20,15 +20,18 @@ use risingwave_common::catalog::Schema;
 use risingwave_common::error::Result;
 use risingwave_connector::sink::{SinkConfig, SinkImpl};
 use risingwave_storage::StateStore;
+use crate::executor::PkIndices;
 
 use super::error::StreamExecutorError;
 use super::{BoxedExecutor, Executor, Message};
+use core::default::Default;
 
 pub struct SinkExecutor<S: StateStore> {
     input: BoxedExecutor,
     _store: S,
     properties: HashMap<String, String>,
     identity: String,
+    pk_indices: PkIndices,
 }
 
 async fn build_sink(config: SinkConfig) -> Result<Box<SinkImpl>> {
@@ -50,6 +53,7 @@ impl<S: StateStore> SinkExecutor<S> {
             _store,
             properties,
             identity: format!("SinkExecutor_{:?}", executor_id),
+            pk_indices: Default::default(), // todo
         }
     }
 
@@ -91,7 +95,7 @@ impl<S: StateStore> Executor for SinkExecutor<S> {
     }
 
     fn pk_indices(&self) -> super::PkIndicesRef {
-        todo!();
+        &self.pk_indices
     }
 
     fn identity(&self) -> &str {

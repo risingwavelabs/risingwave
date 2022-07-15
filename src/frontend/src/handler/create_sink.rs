@@ -45,6 +45,7 @@ pub(crate) fn make_prost_sink(
         associated_table_id,
         properties,
         owner,
+        dependent_relations: vec![],
     })
 }
 
