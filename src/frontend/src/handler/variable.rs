@@ -28,7 +28,10 @@ pub(super) fn handle_set(
     let string_val = to_string(&value[0]);
     // Currently store the config variable simply as String -> ConfigEntry(String).
     // In future we can add converter/parser to make the API more robust.
-    context.session_ctx.set_config(&name.value, &string_val)?;
+    // We remark that the name of session parameter is always case-insensitive.
+    context
+        .session_ctx
+        .set_config(&name.value.to_lowercase(), &string_val)?;
 
     Ok(PgResponse::empty_result(StatementType::SET_OPTION))
 }
@@ -40,7 +43,8 @@ pub(super) fn handle_show(context: OptimizerContext, variable: Vec<Ident>) -> Re
             ErrorCode::InvalidInputSyntax("only one variable or ALL required".to_string()).into(),
         );
     }
-    let name = &variable[0].value;
+    // TODO: Verify that the name used in `show` command is indeed always case-insensitive.
+    let name = &variable[0].value.to_lowercase();
     if name.eq_ignore_ascii_case("ALL") {
         return handle_show_all(&context);
     }

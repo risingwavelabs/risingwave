@@ -118,6 +118,16 @@ impl Ident {
             quote_style: Some(quote),
         }
     }
+
+    /// Value after considering quote style
+    /// In certain places, double quotes can force case-sensitive, but not always
+    /// e.g. session variables.
+    pub fn real_value(&self) -> String {
+        match self.quote_style {
+            Some('"') => self.value.clone(),
+            _ => self.value.to_lowercase(),
+        }
+    }
 }
 
 impl From<&str> for Ident {
