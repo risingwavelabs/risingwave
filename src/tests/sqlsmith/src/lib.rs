@@ -201,7 +201,7 @@ impl<'a, R: Rng> SqlGenerator<'a, R> {
         let alias = format!("col_{}", i);
         (
             SelectItem::ExprWithAlias {
-                expr: self.gen_expr(ret_type),
+                expr: self.gen_expr(ret_type, false),
                 alias: Ident::new(alias.clone()),
             },
             Column {
@@ -225,7 +225,7 @@ impl<'a, R: Rng> SqlGenerator<'a, R> {
 
     fn gen_where(&mut self) -> Option<Expr> {
         if self.flip_coin() {
-            Some(self.gen_expr(DataTypeName::Boolean))
+            Some(self.gen_expr(DataTypeName::Boolean, false))
         } else {
             None
         }
@@ -249,7 +249,7 @@ impl<'a, R: Rng> SqlGenerator<'a, R> {
 
     fn gen_having(&mut self, have_group_by: bool) -> Option<Expr> {
         if have_group_by & self.flip_coin() {
-            Some(self.gen_expr(DataTypeName::Boolean))
+            Some(self.gen_expr(DataTypeName::Boolean, false))
         } else {
             None
         }

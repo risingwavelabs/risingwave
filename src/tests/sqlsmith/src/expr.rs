@@ -17,13 +17,15 @@ use std::collections::HashMap;
 use itertools::Itertools;
 use rand::seq::SliceRandom;
 use rand::Rng;
-use risingwave_frontend::expr::{func_sigs, DataTypeName, ExprType, FuncSign};
+use risingwave_frontend::expr::{func_sigs, DataTypeName, ExprType, FuncSign, AggCall};
 use risingwave_sqlparser::ast::{
     BinaryOperator, Expr, Function, FunctionArg, FunctionArgExpr, Ident, ObjectName,
     TrimWhereField, UnaryOperator, Value,
 };
 
 use crate::SqlGenerator;
+use risingwave_expr::expr::AggKind;
+// use risingwave_pb::expr::agg_call::Type as AggType;
 
 lazy_static::lazy_static! {
     static ref FUNC_TABLE: HashMap<DataTypeName, Vec<FuncSign>> = {
@@ -31,35 +33,108 @@ lazy_static::lazy_static! {
     };
 }
 
+pub struct AggFuncSign {
+    pub func: AggKind,
+    pub inputs_type: Vec<DataTypeName>,
+    pub ret_type: DataTypeName,
+}
+
+impl AggFuncSign{
+    pub fn new(func: AggKind, inputs_type: Vec<DataTypeName>, ret_type: DataTypeName) -> Self{
+        Self {
+            func,
+            inputs_type,
+            ret_type,
+        }
+    }
+}
+lazy_static::lazy_static! {
+    static ref AGG_FUNC_TABLE: HashMap<DataTypeName, Vec<AggFuncSign>> = {
+        init_agg_table()
+    };
+}
+
 fn init_op_table() -> HashMap<DataTypeName, Vec<FuncSign>> {
     let mut funcs = HashMap::<DataTypeName, Vec<FuncSign>>::new();
     func_sigs().for_each(|func| funcs.entry(func.ret_type).or_default().push(func.clone()));
+    //println!("{:#?}", funcs);
     funcs
 }
 
+
+fn init_agg_table() -> HashMap<DataTypeName, Vec<AggFuncSign>>{
+    let mut funcs = HashMap::<DataTypeName, Vec<FuncSign>>::new();
+    build_agg_map()
+}
+
+fn build_agg_map() -> HashMap<DataTypeName, Vec<AggFuncSign>> {
+    use {DataTypeName as T, AggKind as A};
+    let mut map = HashMap::<DataTypeName, Vec<AggFuncSign>>::new();
+    
+    let all_types = [
+        T::Boolean,
+        T::Int16,
+        T::Int32,
+        T::Int64,
+        T::Decimal,
+        T::Float32,
+        T::Float64,
+        T::Varchar,
+        T::Date,
+        T::Timestamp,
+        T::Timestampz,
+        T::Time,
+        T::Interval,
+    ];
+
+    for agg in [A::Sum, A::Min, A::Max, A::Count, A::Avg, A::StringAgg, A::SingleValue, A::ApproxCountDistinct] {
+        for input in all_types{
+            match AggCall::infer_return_type(&agg, [input] ){
+                Ok(v) => map.entry(v.clone()).or_default().push(AggFuncSign::new(agg,vec![input],v)),
+                Err(e)=> continue,
+            }
+        }
+        
+    }
+    map
+}
+
 impl<'a, R: Rng> SqlGenerator<'a, R> {
-    pub(crate) fn gen_expr(&mut self, typ: DataTypeName) -> Expr {
+ 
+    pub(crate) fn gen_expr(&mut self, typ: DataTypeName, agg: bool) -> Expr {
         if !self.can_recurse() {
             // Stop recursion with a simple scalar or column.
             return match self.rng.gen_bool(0.5) {
                 true => self.gen_simple_scalar(typ),
-                false => self.gen_col(typ),
+                false => self.gen_col(typ, agg),
             };
         }
-        match self.rng.gen_range(0..=99) {
-            0..=99 => self.gen_func(typ),
+        
+        let mut range = 99;
+        if agg{
+            range = 90;
+        }
+        
+
+        match self.rng.gen_range(0..=range) {
+            0..=90 => self.gen_func(typ),
+            91..=99 => self.gen_agg(typ),
             // TODO: There are more that are not in the functions table, e.g. CAST.
             // We will separately generate them.
             _ => unreachable!(),
         }
     }
 
-    fn gen_col(&mut self, typ: DataTypeName) -> Expr {
-        if self.bound_columns.is_empty() {
+    fn gen_col(&mut self, typ: DataTypeName, agg: bool) -> Expr {
+        let mut columns =  &self.bound_columns; 
+        if agg{
+            columns = &self.bound_relations.choose(&mut self.rng).unwrap().columns;
+        }
+
+        if columns.is_empty() {
             return self.gen_simple_scalar(typ);
         }
-        let matched_cols = self
-            .bound_columns
+        let matched_cols = columns
             .iter()
             .filter(|col| col.data_type == typ)
             .collect::<Vec<_>>();
@@ -77,7 +152,7 @@ impl<'a, R: Rng> SqlGenerator<'a, R> {
             Some(funcs) => funcs,
         };
         let func = funcs.choose(&mut self.rng).unwrap();
-        let exprs: Vec<Expr> = func.inputs_type.iter().map(|t| self.gen_expr(*t)).collect();
+        let exprs: Vec<Expr> = func.inputs_type.iter().map(|t| self.gen_expr(*t, false)).collect();
         let expr = if exprs.len() == 1 {
             make_unary_op(func.func, &exprs[0])
         } else if exprs.len() == 2 {
@@ -88,6 +163,24 @@ impl<'a, R: Rng> SqlGenerator<'a, R> {
         expr.or_else(|| make_general_expr(func.func, exprs))
             .unwrap_or_else(|| self.gen_simple_scalar(ret))
     }
+
+    fn gen_agg(&mut self, ret: DataTypeName) -> Expr{
+        let funcs = match AGG_FUNC_TABLE.get(&ret) {
+            None => return self.gen_simple_scalar(ret),
+            Some(funcs) => funcs,
+        };
+        let func = funcs.choose(&mut self.rng).unwrap();
+        let expr: Vec<Expr> = func.inputs_type.iter().map(|t| self.gen_expr(*t, true)).collect();
+        assert!(expr.len()==1);
+        
+        make_agg_expr(func.func, expr[0], self.flip_coin()).unwrap_or_else(|| self.gen_simple_scalar(ret))
+        
+
+
+        //gen_expr(typ, true);
+
+    }
+
 }
 
 fn make_unary_op(func: ExprType, expr: &Expr) -> Option<Expr> {
@@ -115,18 +208,35 @@ fn make_general_expr(func: ExprType, exprs: Vec<Expr>) -> Option<Expr> {
         E::IsNotTrue => Some(Expr::IsNotTrue(Box::new(exprs[0].clone()))),
         E::IsFalse => Some(Expr::IsFalse(Box::new(exprs[0].clone()))),
         E::IsNotFalse => Some(Expr::IsNotFalse(Box::new(exprs[0].clone()))),
-        E::Position => Some(Expr::Function(make_func("position", &exprs))),
-        E::RoundDigit => Some(Expr::Function(make_func("round", &exprs))),
-        E::Repeat => Some(Expr::Function(make_func("repeat", &exprs))),
-        E::CharLength => Some(Expr::Function(make_func("char_length", &exprs))),
-        E::Substr => Some(Expr::Function(make_func("substr", &exprs))),
-        E::Length => Some(Expr::Function(make_func("length", &exprs))),
-        E::Upper => Some(Expr::Function(make_func("upper", &exprs))),
-        E::Lower => Some(Expr::Function(make_func("lower", &exprs))),
-        E::Replace => Some(Expr::Function(make_func("replace", &exprs))),
-        E::Md5 => Some(Expr::Function(make_func("md5", &exprs))),
-        E::ToChar => Some(Expr::Function(make_func("to_char", &exprs))),
+        E::Position => Some(Expr::Function(make_func("position", &exprs, false))),
+        E::RoundDigit => Some(Expr::Function(make_func("round", &exprs, false))),
+        E::Repeat => Some(Expr::Function(make_func("repeat", &exprs, false))),
+        E::CharLength => Some(Expr::Function(make_func("char_length", &exprs, false))),
+        E::Substr => Some(Expr::Function(make_func("substr", &exprs, false))),
+        E::Length => Some(Expr::Function(make_func("length", &exprs, false))),
+        E::Upper => Some(Expr::Function(make_func("upper", &exprs, false))),
+        E::Lower => Some(Expr::Function(make_func("lower", &exprs, false))),
+        E::Replace => Some(Expr::Function(make_func("replace", &exprs, false))),
+        E::Md5 => Some(Expr::Function(make_func("md5", &exprs, false))),
+        E::ToChar => Some(Expr::Function(make_func("to_char", &exprs, false))),
         E::Overlay => Some(make_overlay(exprs)),
+        _ => None,
+    }
+}
+
+
+fn make_agg_expr(func: AggKind, expr: Expr, distinct:bool) -> Option<Expr> {
+    use AggKind as A;
+    
+    match func {
+        A::Sum => Some(Expr::Function(make_func("sum", &[expr], distinct))),
+        A::Min => Some(Expr::Function(make_func("min", &[expr], distinct))),
+        A::Max => Some(Expr::Function(make_func("max", &[expr], distinct))),
+        A::Count => Some(Expr::Function(make_func("count", &[expr], distinct))),
+        A::Avg => Some(Expr::Function(make_func("avg", &[expr], distinct))),
+        A::StringAgg => Some(Expr::Function(make_func("stringAgg", &[expr], distinct))),
+        A::SingleValue => Some(Expr::Function(make_func("singleValue", &[expr], distinct))),
+        A::ApproxCountDistinct => Some(Expr::Function(make_func("approxCountDistinct", &[expr], distinct))),
         _ => None,
     }
 }
@@ -169,16 +279,18 @@ fn make_overlay(exprs: Vec<Expr>) -> Expr {
     }
 }
 
-fn make_func(func_name: &str, exprs: &[Expr]) -> Function {
+// DINSTINCT , ORDER BY or FILTER is allowed in aggregation functions, 
+fn make_func(func_name: &str, exprs: &[Expr], distinct:bool) -> Function {
     let args = exprs
         .iter()
         .map(|e| FunctionArg::Unnamed(FunctionArgExpr::Expr(e.clone())))
         .collect();
+
     Function {
         name: ObjectName(vec![Ident::new(func_name)]),
         args,
         over: None,
-        distinct: false,
+        distinct: distinct,
         order_by: vec![],
         filter: None,
     }
