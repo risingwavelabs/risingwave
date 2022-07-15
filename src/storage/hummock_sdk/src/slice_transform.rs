@@ -25,35 +25,40 @@ use risingwave_pb::catalog::Table;
 use crate::key::{get_table_id, TABLE_PREFIX_LEN};
 
 trait SliceTransform {
-    fn transfer<'a>(&self, full_key: &'a [u8]) -> &'a [u8];
+    fn transform<'a>(&self, full_key: &'a [u8]) -> &'a [u8];
 }
 
 #[derive(Default)]
 pub struct FullKeySliceTransform;
 
+// Slice Transform generally used to transform key which will store in BloomFilter
 impl SliceTransform for FullKeySliceTransform {
-    fn transfer<'a>(&self, full_key: &'a [u8]) -> &'a [u8] {
+    fn transform<'a>(&self, full_key: &'a [u8]) -> &'a [u8] {
         full_key
     }
 }
 
 #[derive(Default)]
 pub struct DummySliceTransform;
-
 impl SliceTransform for DummySliceTransform {
-    fn transfer<'a>(&self, full_key: &'a [u8]) -> &'a [u8] {
+    fn transform<'a>(&self, full_key: &'a [u8]) -> &'a [u8] {
         &full_key[0..0]
     }
 }
 
+// SchemaSliceTransform build from table_catalog and transform a full_key to prefix for
+// prefix_bloom_filter
 pub struct SchemaSliceTransform {
-    // table_catalog: Table,
+    // Each stateful operator has its own read pattern, partly using `Prefix Scan`.
+    // `PrefixKeyLength` can be decoded through its `DataType` and `OrderType` which obtained from
+    // `TableCatalog`. `read_pattern_prefix_column` means the count of column to decode prefix from
+    // `StorageKey`
     read_pattern_prefix_column: u32,
     deserializer: OrderedRowDeserializer,
 }
 
 impl SliceTransform for SchemaSliceTransform {
-    fn transfer<'a>(&self, full_key: &'a [u8]) -> &'a [u8] {
+    fn transform<'a>(&self, full_key: &'a [u8]) -> &'a [u8] {
         let (_table_prefix, key) = full_key.split_at(TABLE_PREFIX_LEN);
         let (_vnode_prefix, pk) = key.split_at(VIRTUAL_NODE_SIZE);
 
@@ -129,8 +134,9 @@ impl MultiSliceTransForm {
         }
     }
 
-    fn transfer<'a>(&mut self, full_key: &'a [u8]) -> &'a [u8] {
+    fn transform<'a>(&mut self, full_key: &'a [u8]) -> &'a [u8] {
         assert!(full_key.len() > TABLE_PREFIX_LEN + VIRTUAL_NODE_SIZE);
+
         let table_id = get_table_id(full_key).unwrap();
         match self.last_slice_transform_state.as_ref() {
             Some(last_slice_transform_state) => {
@@ -148,7 +154,7 @@ impl MultiSliceTransForm {
             .as_ref()
             .unwrap()
             .1
-            .transfer(full_key)
+            .transform(full_key)
     }
 }
 
@@ -176,12 +182,12 @@ mod tests {
     fn test_default_slice_transform() {
         let dummy_slice_transform = DummySliceTransform::default();
         let full_key = "full_key".as_bytes();
-        let output_key = dummy_slice_transform.transfer(full_key);
+        let output_key = dummy_slice_transform.transform(full_key);
 
         assert_eq!("".as_bytes(), output_key);
 
         let full_key_slice_transform = FullKeySliceTransform::default();
-        let output_key = full_key_slice_transform.transfer(full_key);
+        let output_key = full_key_slice_transform.transform(full_key);
 
         assert_eq!(full_key, output_key);
     }
@@ -296,7 +302,7 @@ mod tests {
         assert_eq!(VIRTUAL_NODE_SIZE, vnode_prefix.len());
 
         let full_key = [&table_prefix, vnode_prefix, &row_bytes].concat();
-        let output_key = schema_slice_transform.transfer(&full_key);
+        let output_key = schema_slice_transform.transform(&full_key);
         assert_eq!(
             TABLE_PREFIX_LEN + VIRTUAL_NODE_SIZE + 1 + mem::size_of::<i64>(),
             output_key.len()
@@ -333,7 +339,7 @@ mod tests {
             assert_eq!(VIRTUAL_NODE_SIZE, vnode_prefix.len());
 
             let full_key = [&table_prefix, vnode_prefix, &row_bytes].concat();
-            let output_key = multi_slice_transform.transfer(&full_key);
+            let output_key = multi_slice_transform.transform(&full_key);
 
             let data_types = vec![DataType::Int64];
             let order_types = vec![OrderType::Ascending];
@@ -374,7 +380,7 @@ mod tests {
             assert_eq!(VIRTUAL_NODE_SIZE, vnode_prefix.len());
 
             let full_key = [&table_prefix, vnode_prefix, &row_bytes].concat();
-            let output_key = multi_slice_transform.transfer(&full_key);
+            let output_key = multi_slice_transform.transform(&full_key);
 
             let data_types = vec![DataType::Int64, DataType::Varchar];
             let order_types = vec![OrderType::Ascending, OrderType::Ascending];
@@ -407,7 +413,7 @@ mod tests {
             let row_bytes = "full_key".as_bytes();
 
             let full_key = [&table_prefix, vnode_prefix, row_bytes].concat();
-            let output_key = multi_slice_transform.transfer(&full_key);
+            let output_key = multi_slice_transform.transform(&full_key);
             assert_eq!(
                 TABLE_PREFIX_LEN + VIRTUAL_NODE_SIZE + row_bytes.len(),
                 output_key.len()
