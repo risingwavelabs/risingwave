@@ -50,14 +50,6 @@ message AbortTaskResponse {
   common.Status status = 1;
 }
 
-message RemoveTaskRequest {
-  batch_plan.TaskId task_id = 1;
-}
-
-message RemoveTaskResponse {
-  common.Status status = 1;
-}
-
 message GetTaskInfoRequest {
   batch_plan.TaskId task_id = 1;
 }
@@ -89,7 +81,6 @@ service TaskService {
   rpc CreateTask(CreateTaskRequest) returns (CreateTaskResponse);
   rpc GetTaskInfo(GetTaskInfoRequest) returns (GetTaskInfoResponse);
   rpc AbortTask(AbortTaskRequest) returns (AbortTaskResponse);
-  rpc RemoveTask(RemoveTaskRequest) returns (RemoveTaskResponse);
   rpc Execute(ExecuteRequest) returns (stream GetDataResponse);
 }
 

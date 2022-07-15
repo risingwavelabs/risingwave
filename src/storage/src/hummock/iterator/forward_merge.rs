@@ -39,11 +39,11 @@ mod test {
     #[tokio::test]
     async fn test_merge_basic() {
         let mut unordered_iter = MergeIterator::new(
-            gen_merge_iterator_interleave_test_sstable_iters(TEST_KEYS_COUNT, 3),
+            gen_merge_iterator_interleave_test_sstable_iters(TEST_KEYS_COUNT, 3).await,
             Arc::new(StateStoreMetrics::unused()),
         );
         let mut ordered_iter = OrderedAwareMergeIterator::new(
-            gen_merge_iterator_interleave_test_sstable_iters(TEST_KEYS_COUNT, 3),
+            gen_merge_iterator_interleave_test_sstable_iters(TEST_KEYS_COUNT, 3).await,
             Arc::new(StateStoreMetrics::unused()),
         );
 
@@ -75,11 +75,11 @@ mod test {
     #[tokio::test]
     async fn test_merge_seek() {
         let mut unordered_iter = MergeIterator::new(
-            gen_merge_iterator_interleave_test_sstable_iters(TEST_KEYS_COUNT, 3),
+            gen_merge_iterator_interleave_test_sstable_iters(TEST_KEYS_COUNT, 3).await,
             Arc::new(StateStoreMetrics::unused()),
         );
         let mut ordered_iter = OrderedAwareMergeIterator::new(
-            gen_merge_iterator_interleave_test_sstable_iters(TEST_KEYS_COUNT, 3),
+            gen_merge_iterator_interleave_test_sstable_iters(TEST_KEYS_COUNT, 3).await,
             Arc::new(StateStoreMetrics::unused()),
         );
 

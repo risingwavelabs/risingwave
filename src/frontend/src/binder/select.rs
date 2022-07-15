@@ -127,15 +127,15 @@ impl Binder {
                 SelectItem::UnnamedExpr(expr) => {
                     let (select_expr, alias) = match &expr.clone() {
                         Expr::Identifier(ident) => {
-                            (self.bind_expr(expr)?, Some(ident.value.clone()))
+                            (self.bind_expr(expr)?, Some(ident.real_value()))
                         }
                         Expr::CompoundIdentifier(idents) => (
                             self.bind_expr(expr)?,
-                            idents.last().map(|ident| ident.value.clone()),
+                            idents.last().map(|ident| ident.real_value()),
                         ),
                         Expr::FieldIdentifier(field_expr, idents) => (
                             self.bind_single_field_column(*field_expr.clone(), idents)?,
-                            idents.last().map(|ident| ident.value.clone()),
+                            idents.last().map(|ident| ident.real_value()),
                         ),
                         _ => (self.bind_expr(expr)?, None),
                     };
@@ -143,11 +143,11 @@ impl Binder {
                     aliases.push(alias);
                 }
                 SelectItem::ExprWithAlias { expr, alias } => {
-                    check_valid_column_name(&alias.value)?;
+                    check_valid_column_name(&alias.real_value())?;
 
                     let expr = self.bind_expr(expr)?;
                     select_list.push(expr);
-                    aliases.push(Some(alias.value));
+                    aliases.push(Some(alias.real_value()));
                 }
                 SelectItem::QualifiedWildcard(obj_name) => {
                     let table_name = &obj_name.0.last().unwrap().value;
