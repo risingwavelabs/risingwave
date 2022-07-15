@@ -175,7 +175,7 @@ async fn test_failpoints_merge_invalid_key() {
     let mut mi = MergeIterator::new(
         {
             let mut iters = vec![];
-            for table in tables.iter() {
+            for table in &tables {
                 iters.push(Box::new(SSTableIterator::new(
                     sstable_store
                         .sstable(table.id, &mut StoreLocalStatistic::default())
@@ -231,7 +231,7 @@ async fn test_failpoints_backward_merge_invalid_key() {
     let mut mi = BackwardMergeIterator::new(
         {
             let mut iters = vec![];
-            for table in tables.iter() {
+            for table in &tables {
                 iters.push(Box::new(BackwardSSTableIterator::new(
                     sstable_store
                         .sstable(table.id, &mut StoreLocalStatistic::default())
