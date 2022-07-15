@@ -11,10 +11,11 @@
 // WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 // See the License for the specific language governing permissions and
 // limitations under the License.
+use std::sync::Arc;
 
-use futures::TryStreamExt;
+use futures::{TryStreamExt};
 use futures_async_stream::try_stream;
-use risingwave_common::array::{DataChunk, RowRef};
+use risingwave_common::array::{DataChunk};
 use risingwave_common::catalog::Schema;
 use risingwave_common::error::RwError;
 use risingwave_common::util::chunk_coalesce::DataChunkBuilder;
@@ -82,9 +83,6 @@ impl SortMergeJoinExecutor {
     async fn do_execute(self: Box<Self>) {
         let data_types = self.original_schema.data_types();
 
-        // Init data source.
-        let build_side: Vec<_> = self.build_side_source.execute().try_collect().await?;
-
         let mut chunk_builder = DataChunkBuilder::with_default_size(data_types);
 
         // TODO: support more join types
@@ -98,7 +96,7 @@ impl SortMergeJoinExecutor {
         for chunk in stream(
             &mut chunk_builder,
             self.probe_side_source,
-            build_side,
+            self.build_side_source,
             self.probe_key_idxs,
             self.build_key_idxs,
         ) {
@@ -115,52 +113,61 @@ impl SortMergeJoinExecutor {
     async fn do_inner_join<const ASCENDING: bool>(
         chunk_builder: &mut DataChunkBuilder,
         probe_side: BoxedExecutor,
-        build_side: Vec<DataChunk>,
+        build_side: BoxedExecutor,
         probe_key_idxs: Vec<usize>,
         build_key_idxs: Vec<usize>,
     ) {
-        // Row-level iterator of the build side table.
-        let mut build_row_iter = build_side
-            .iter()
-            .flat_map(|build_chunk| build_chunk.rows())
-            .fuse();
+        let mut build_chunk_iter = build_side.execute();
         let mut last_probe_key = None;
-        let mut last_matched_build_rows: Vec<RowRef> = Vec::new();
-        // Current row of the build side. This is a workaround due to the weird issue of calling
-        // `peekable()` on `build_row_iter`.
-        let mut current_build_row = None;
+        let mut last_matched_build_rows: Vec<(Arc<DataChunk>, usize)> = Vec::new();
+        // Dummy first build side chunk
+        let mut build_chunk = Arc::new(DataChunk::new(Vec::new(), 0));
+        let mut build_row_idx = 0;
 
         #[for_await]
         for probe_chunk in probe_side.execute() {
             let probe_chunk = probe_chunk?;
             for probe_row in probe_chunk.rows() {
                 let probe_key = probe_row.row_by_indices(&probe_key_idxs);
+                // If current probe key equals to last probe key, reuse join results.
                 if let Some(last_probe_key) = &last_probe_key && *last_probe_key == probe_key {
-                    for build_row in &last_matched_build_rows {
+                    for (chunk, row_idx) in &last_matched_build_rows {
+                        let build_row = chunk.row_at_unchecked_vis(*row_idx);
                         if let Some(spilled) = chunk_builder.append_one_row_from_datum_refs(probe_row.values().chain(build_row.values()))? {
                             yield spilled
                         }
-                    }
-                } else {
+                    } 
+                } 
+                // Otherwise, do merge join from scratch.
+                else {
                     last_matched_build_rows.clear();
-
-                    while let Some(build_row) = current_build_row.get_or_insert_with(||build_row_iter.next()) {
-                        let build_key = build_row.row_by_indices(&build_key_idxs);
-                        // TODO: [`Row`] may not be PartialOrd. May use some trait like
-                        // [`ScalarPartialOrd`].
-                        if probe_key == build_key {
-                            last_matched_build_rows.push(build_row.clone());
-                            if let Some(spilled) = chunk_builder.append_one_row_from_datum_refs(probe_row.values().chain(build_row.values()))? {
-                                yield spilled
+                    // Iterate over build side table by rows.
+                    loop {
+                        if let Some(next_build_row_idx) = build_chunk.next_visible_row_idx(build_row_idx) {
+                            let build_row = build_chunk.row_at_unchecked_vis(next_build_row_idx);
+                            let build_key = build_row.row_by_indices(&build_key_idxs);
+                            // TODO: [`Row`] may not be PartialOrd. May use some trait like
+                            // [`ScalarPartialOrd`].
+                            if probe_key == build_key {
+                                last_matched_build_rows.push((build_chunk.clone(), next_build_row_idx));
+                                if let Some(spilled) = chunk_builder.append_one_row_from_datum_refs(probe_row.values().chain(build_row.values()))? {
+                                    yield spilled
+                                }
+                            } else if ASCENDING && probe_key < build_key || !ASCENDING && probe_key > build_key {
+                                break;
                             }
-                        } else if (ASCENDING && probe_key < build_key)
-                            || (!ASCENDING && probe_key > build_key)
-                        {
-                            break;
+                            build_row_idx = next_build_row_idx + 1;
+                        } 
+                        // Current build side chunk is drained, fetch the next chunk.
+                        else if let Some(next_build_chunk) = build_chunk_iter.try_next().await? {
+                            build_chunk = Arc::new(next_build_chunk);
+                            build_row_idx = 0;
+                        } 
+                        // Now all build side chunks are fetched.
+                        else {
+                            break
                         }
-                        current_build_row = None;
                     }
-
                     last_probe_key = Some(probe_key);
                 }
             }
