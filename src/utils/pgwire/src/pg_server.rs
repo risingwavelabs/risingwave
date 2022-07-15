@@ -13,7 +13,6 @@
 // limitations under the License.
 
 use std::io;
-use std::io::ErrorKind;
 use std::result::Result;
 use std::sync::Arc;
 
@@ -112,20 +111,8 @@ async fn pg_serve_conn(socket: TcpStream, session_mgr: Arc<impl SessionManager>)
                 &mut named_portals,
             )
             .await;
-        match terminate {
-            Ok(is_ter) => {
-                if is_ter {
-                    break;
-                }
-            }
-            Err(e) => {
-                if e.kind() == ErrorKind::UnexpectedEof {
-                    break;
-                }
-                // Execution error should not break current connection.
-                // For unexpected eof, just break and not print to log.
-                tracing::error!("Error {:?}!", e);
-            }
+        if terminate {
+            break;
         }
     }
 }
