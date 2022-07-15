@@ -27,8 +27,7 @@ use risingwave_common::error::ErrorCode::{CatalogError, InternalError};
 use risingwave_common::error::{Result, RwError};
 use risingwave_common::types::ParallelUnitId;
 use risingwave_pb::catalog::table::OptionalAssociatedSourceId;
-
-use risingwave_pb::catalog::{Database, Schema, Source, Table, Sink};
+use risingwave_pb::catalog::{Database, Schema, Sink, Source, Table};
 use risingwave_pb::common::ParallelUnit;
 use risingwave_pb::meta::subscribe_response::{Info, Operation};
 use tokio::sync::{Mutex, MutexGuard};

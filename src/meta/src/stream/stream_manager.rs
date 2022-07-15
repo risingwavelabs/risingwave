@@ -686,7 +686,6 @@ where
         Ok(())
     }
 
-
     pub async fn create_sink(
         &self,
         mut table_fragments: TableFragments,
@@ -751,7 +750,7 @@ where
             upstream_node_actors,
             &locations,
         )
-            .await?;
+        .await?;
 
         let dispatchers = &*dispatchers;
 

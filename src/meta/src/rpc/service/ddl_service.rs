@@ -30,7 +30,7 @@ use tokio::sync::RwLock;
 use tonic::{Request, Response, Status};
 
 use crate::cluster::ClusterManagerRef;
-use crate::manager::{CatalogManagerRef, IdCategory, MetaSrvEnv, SinkId, SourceId, TableId};
+use crate::manager::{CatalogManagerRef, IdCategory, MetaSrvEnv, SourceId, TableId};
 use crate::model::{FragmentId, TableFragments};
 use crate::storage::MetaStore;
 use crate::stream::{
@@ -52,8 +52,8 @@ pub struct DdlServiceImpl<S: MetaStore> {
 }
 
 impl<S> DdlServiceImpl<S>
-    where
-        S: MetaStore,
+where
+    S: MetaStore,
 {
     pub fn new(
         env: MetaSrvEnv<S>,
@@ -80,8 +80,8 @@ impl<S> DdlServiceImpl<S>
 
 #[async_trait::async_trait]
 impl<S> DdlService for DdlServiceImpl<S>
-    where
-        S: MetaStore,
+where
+    S: MetaStore,
 {
     async fn create_database(
         &self,
@@ -236,7 +236,10 @@ impl<S> DdlService for DdlServiceImpl<S>
         }))
     }
 
-    async fn create_sink(&self, request: Request<CreateSinkRequest>) -> Result<Response<CreateSinkResponse>, Status> {
+    async fn create_sink(
+        &self,
+        request: Request<CreateSinkRequest>,
+    ) -> Result<Response<CreateSinkResponse>, Status> {
         self.ddl_lock.read().await;
         self.env.idle_manager().record_activity();
 
@@ -280,7 +283,7 @@ impl<S> DdlService for DdlServiceImpl<S>
                     fragment.node.as_ref().unwrap(),
                     &mut dependent_relations,
                 )
-                    .map_err(tonic_err)?;
+                .map_err(tonic_err)?;
             }
             assert!(
                 !dependent_relations.is_empty(),
@@ -430,7 +433,7 @@ impl<S> DdlService for DdlServiceImpl<S>
                     fragment.node.as_ref().unwrap(),
                     &mut dependent_relations,
                 )
-                    .map_err(tonic_err)?;
+                .map_err(tonic_err)?;
             }
             assert!(
                 !dependent_relations.is_empty(),
@@ -587,8 +590,8 @@ impl<S> DdlService for DdlServiceImpl<S>
 }
 
 impl<S> DdlServiceImpl<S>
-    where
-        S: MetaStore,
+where
+    S: MetaStore,
 {
     async fn create_mview_on_compute_node(
         &self,
@@ -828,13 +831,13 @@ impl<S> DdlServiceImpl<S>
             None => Err(ErrorCode::InternalError(
                 "no data distribution found for materialized view".to_string(),
             )
-                .into()),
+            .into()),
         }
     }
 
     async fn create_sink_on_compute_node(
         &self,
-        mut fragment_graph: StreamFragmentGraph,
+        fragment_graph: StreamFragmentGraph,
         id: TableId,
         ctx: &mut CreateMaterializedViewContext,
     ) -> RwResult<()> {

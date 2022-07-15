@@ -12,6 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+use core::default::Default;
 use std::collections::HashMap;
 
 use futures::StreamExt;
@@ -20,11 +21,10 @@ use risingwave_common::catalog::Schema;
 use risingwave_common::error::Result;
 use risingwave_connector::sink::{SinkConfig, SinkImpl};
 use risingwave_storage::StateStore;
-use crate::executor::PkIndices;
 
 use super::error::StreamExecutorError;
 use super::{BoxedExecutor, Executor, Message};
-use core::default::Default;
+use crate::executor::PkIndices;
 
 pub struct SinkExecutor<S: StateStore> {
     input: BoxedExecutor,

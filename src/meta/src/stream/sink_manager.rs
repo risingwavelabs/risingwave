@@ -12,42 +12,27 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::collections::{BTreeMap, HashMap, HashSet};
+use std::collections::HashMap;
 use std::sync::Arc;
 
-use crate::stream::CreateMaterializedViewContext;
 use futures::future::try_join_all;
+use risingwave_common::error::{Result, RwError};
+use risingwave_pb::catalog::Sink;
 use risingwave_pb::common::worker_node::State::Running;
-use itertools::Itertools;
-use tokio::sync::Mutex;
-use risingwave_common::bail;
-use risingwave_common::catalog::TableId;
-use risingwave_common::error::Result;
-use risingwave_common::error::RwError;
-use risingwave_common::types::{ParallelUnitId, VIRTUAL_NODE_COUNT};
-use risingwave_pb::catalog::{Sink};
-use risingwave_pb::common::{ActorInfo, ParallelUnitMapping, WorkerType};
-use risingwave_pb::meta::table_fragments::{ActorState, ActorStatus};
-use risingwave_pb::stream_plan::stream_node::NodeBody;
-use risingwave_pb::stream_plan::{ActorMapping, Dispatcher, DispatcherType, StreamNode};
-use risingwave_pb::stream_service::{
-    BroadcastActorInfoTableRequest, BuildActorsRequest, HangingChannel, UpdateActorsRequest,
-};
-use risingwave_rpc_client::StreamClientPoolRef;
-use uuid::Uuid;
+use risingwave_pb::common::WorkerType;
 use risingwave_pb::stream_service::{
     CreateSinkRequest as ComputeNodeCreateSinkRequest,
     DropSinkRequest as ComputeNodeDropSinkRequest,
 };
+use risingwave_rpc_client::{StreamClient, StreamClientPoolRef};
+use tokio::sync::Mutex;
 
-use risingwave_rpc_client::StreamClient;
-use super::ScheduledLocations;
-use crate::barrier::{BarrierManagerRef, Command};
-use crate::cluster::{ClusterManagerRef, WorkerId};
+use crate::barrier::BarrierManagerRef;
+use crate::cluster::ClusterManagerRef;
 use crate::manager::{MetaSrvEnv, SinkId};
-use crate::model::{ActorId, TableFragments};
+use crate::model::TableFragments;
 use crate::storage::MetaStore;
-use crate::stream::{fetch_source_fragments, FragmentManagerRef, Scheduler};
+use crate::stream::{FragmentManagerRef, Scheduler};
 
 pub type SinkManagerRef<S> = Arc<SinkManager<S>>;
 
@@ -76,8 +61,8 @@ pub struct SinkManagerCore<S: MetaStore> {
 }
 
 impl<S> SinkManagerCore<S>
-    where
-        S: MetaStore,
+where
+    S: MetaStore,
 {
     fn new(
         fragment_manager: FragmentManagerRef<S>,
@@ -91,8 +76,8 @@ impl<S> SinkManagerCore<S>
 }
 
 impl<S> SinkManager<S>
-    where
-        S: MetaStore,
+where
+    S: MetaStore,
 {
     pub async fn new(
         env: MetaSrvEnv<S>,
@@ -117,8 +102,7 @@ impl<S> SinkManager<S>
         })
     }
 
-
-    async fn all_stream_clients(&self) -> Result<impl Iterator<Item=StreamClient>> {
+    async fn all_stream_clients(&self) -> Result<impl Iterator<Item = StreamClient>> {
         let all_compute_nodes = self
             .cluster_manager
             .list_worker_node(WorkerType::ComputeNode, Some(Running))
@@ -129,8 +113,8 @@ impl<S> SinkManager<S>
                 .iter()
                 .map(|worker| self.env.stream_client_pool().get(worker)),
         )
-            .await?
-            .into_iter();
+        .await?
+        .into_iter();
 
         Ok(all_stream_clients)
     }
@@ -170,7 +154,6 @@ impl<S> SinkManager<S>
             revert_funcs.clear();
             return Ok(());
         }
-
 
         revert_funcs.clear();
         Ok(())
