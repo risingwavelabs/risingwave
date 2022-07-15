@@ -101,7 +101,7 @@ pub async fn sst_dump() -> anyhow::Result<()> {
         }
     }
 
-    meta_client.unpin_version(&[version.id]).await?;
+    meta_client.unpin_version().await?;
 
     hummock_opts.shutdown().await;
     Ok(())
