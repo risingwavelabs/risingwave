@@ -53,6 +53,15 @@ pub enum FunctionType {
     Unnest,
 }
 
+impl FunctionType {
+    pub fn name(&self) -> &str {
+        match self {
+            FunctionType::Generate => "generate_series",
+            FunctionType::Unnest => "unnest",
+        }
+    }
+}
+
 impl Binder {
     /// return first and second name in identifiers,
     /// must have one name and can use default name as other one.
