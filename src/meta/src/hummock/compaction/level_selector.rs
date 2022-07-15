@@ -22,7 +22,7 @@ use std::sync::Arc;
 use itertools::Itertools;
 use risingwave_hummock_sdk::HummockCompactionTaskId;
 use risingwave_pb::hummock::hummock_version::Levels;
-use risingwave_pb::hummock::{CompactionConfig, LevelType};
+use risingwave_pb::hummock::CompactionConfig;
 
 use crate::hummock::compaction::compaction_config::CompactionConfigBuilder;
 use crate::hummock::compaction::manual_compaction_picker::ManualCompactionPicker;
@@ -195,32 +195,26 @@ impl DynamicLevelSelector {
             .unwrap()
             .sub_levels
             .iter()
-            .map(|level| {
-                if level.level_type == LevelType::Nonoverlapping as i32 {
-                    if level.total_file_size > self.config.sub_level_max_compaction_bytes {
-                        0
-                    } else {
-                        1
-                    }
-                } else {
-                    level
-                        .table_infos
-                        .iter()
-                        .filter(|table| !handlers[0].is_pending_compact(&table.id))
-                        .count()
-                }
-            })
-            .sum::<usize>();
+            .map(|level| level.table_infos.len())
+            .sum::<usize>()
+            - handlers[0].get_pending_file_count();
+        let max_l0_score = std::cmp::max(
+            SCORE_BASE * 2,
+            levels.l0.as_ref().unwrap().sub_levels.len() as u64 * SCORE_BASE
+                / self.config.level0_tier_compact_file_number,
+        );
+
         let total_size =
             levels.l0.as_ref().unwrap().total_file_size - handlers[0].get_pending_file_size();
         if total_size > 0 {
             // trigger intra-l0 compaction at first when the number of files is too large.
             let l0_score =
                 idle_file_count as u64 * SCORE_BASE / self.config.level0_tier_compact_file_number;
-            ctx.score_levels.push((l0_score, 0, 0));
+            ctx.score_levels
+                .push((std::cmp::min(l0_score, max_l0_score), 0, 0));
             let score = total_size * SCORE_BASE / self.config.max_bytes_for_level_base;
             ctx.score_levels
-                .push((std::cmp::min(score, 500), 0, ctx.base_level));
+                .push((std::cmp::min(score, max_l0_score), 0, ctx.base_level));
         }
 
         // The bottommost level can not be input level.
@@ -257,8 +251,8 @@ impl DynamicLevelSelector {
         input: CompactionInput,
         base_level: usize,
     ) -> CompactionTask {
-        let target_file_size = if input.input_levels[0].level_idx == 0 {
-            self.config.target_file_size_base
+        let target_file_size = if input.target_level == 0 {
+            self.config.target_file_size_base * 2
         } else {
             assert!(input.target_level >= base_level);
             self.config.target_file_size_base << (input.target_level - base_level)

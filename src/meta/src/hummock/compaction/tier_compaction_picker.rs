@@ -109,7 +109,6 @@ impl TierCompactionPicker {
 
             for input_level in &mut select_level_inputs {
                 level_handler.add_pending_task(self.compact_task_id, 0, &input_level.table_infos);
-                input_level.level_idx = 0;
             }
 
             return Some(CompactionInput {
@@ -129,7 +128,7 @@ impl TierCompactionPicker {
         // do not pick the first sub-level because we do not want to block the level compaction.
         for (idx, level) in l0.sub_levels.iter().enumerate() {
             if level.level_type == LevelType::Overlapping as i32
-                || level.total_file_size > self.config.max_bytes_for_level_base
+                || level.total_file_size > self.config.sub_level_max_compaction_bytes
             {
                 continue;
             }
@@ -158,7 +157,7 @@ impl TierCompactionPicker {
                     break;
                 }
 
-                if level.total_file_size > self.config.max_bytes_for_level_base {
+                if level.total_file_size > self.config.sub_level_max_compaction_bytes {
                     break;
                 }
 
@@ -270,11 +269,11 @@ impl CompactionPicker for TierCompactionPicker {
             return None;
         }
 
-        if let Some(input) = self.pick_overlapping_level(l0, &mut level_handlers[0]) {
+        if let Some(input) = self.pick_one_table(l0, level_handlers) {
             return Some(input);
         }
 
-        if let Some(input) = self.pick_one_table(l0, level_handlers) {
+        if let Some(input) = self.pick_overlapping_level(l0, &mut level_handlers[0]) {
             return Some(input);
         }
 
@@ -296,7 +295,7 @@ impl CompactionPicker for LevelCompactionPicker {
         level_handlers: &mut [LevelHandler],
     ) -> Option<CompactionInput> {
         let select_level = 0;
-        let target_level = self.target_level;
+        let target_level = self.target_level as u32;
         let next_task_id = self.compact_task_id;
 
         let l0 = levels.l0.as_ref().unwrap();
@@ -306,14 +305,12 @@ impl CompactionPicker for LevelCompactionPicker {
             return None;
         }
 
-        if level_handlers[select_level].is_level_pending_compact(&l0.sub_levels[0]) {
-            return None;
-        }
+        let is_l0_pending_compact = level_handlers[0].is_level_pending_compact(&l0.sub_levels[0]);
 
-        if levels.levels[target_level - 1].table_infos.is_empty() {
+        if !is_l0_pending_compact && levels.levels[self.target_level - 1].table_infos.is_empty() {
             level_handlers[select_level].add_pending_task(
                 next_task_id,
-                target_level,
+                self.target_level,
                 &l0.sub_levels[0].table_infos,
             );
             return Some(CompactionInput {
@@ -340,61 +337,57 @@ impl CompactionPicker for LevelCompactionPicker {
             return None;
         }
 
-        if input_levels[0].table_infos.len() == l0.sub_levels[0].table_infos.len()
-            && !input_levels[1].table_infos.is_empty()
+        const MAX_WRITE_AMPLIFICATION: u64 = 150;
+
+        let write_amplification = cal_file_size(&input_levels[1].table_infos) * 100
+            / cal_file_size(&input_levels[0].table_infos);
+
+        if write_amplification >= MAX_WRITE_AMPLIFICATION
+            && !is_l0_pending_compact
+            && level_handlers[self.target_level].get_pending_file_count() == 0
         {
-            let mut min_write_amplification = cal_file_size(&input_levels[1].table_infos) * 100
-                / cal_file_size(&input_levels[0].table_infos);
-            let mut info = self.overlap_strategy.create_overlap_info();
-            for table in input_levels[0].table_infos.iter() {
-                info.update(table);
-            }
+            input_levels.clear();
+            input_levels.push(InputLevel {
+                level_idx: 0,
+                level_type: LevelType::Nonoverlapping as i32,
+                table_infos: l0.sub_levels[0].table_infos.clone(),
+            });
+
             let mut l0_total_file_size = l0.sub_levels[0].total_file_size;
             for level in l0.sub_levels[1..].iter() {
-                if l0_total_file_size > self.config.max_bytes_for_level_base {
+                if l0_total_file_size >= self.config.max_bytes_for_level_base {
                     break;
                 }
                 if level_handlers[0].is_level_pending_compact(level) {
                     break;
                 }
-                for table in level.table_infos.iter() {
-                    info.update(table);
-                }
                 l0_total_file_size += level.total_file_size;
-                let target_overlap_files =
-                    info.check_multiple_overlap(&levels.levels[target_level - 1].table_infos);
-                if target_overlap_files
-                    .iter()
-                    .any(|table| level_handlers[target_level].is_pending_compact(&table.id))
-                {
-                    break;
-                }
-                let target_file_size = cal_file_size(&target_overlap_files);
-                let write_amplification = target_file_size * 100 / l0_total_file_size;
-                if write_amplification < min_write_amplification {
-                    min_write_amplification = write_amplification;
-                    // pop target level
-                    input_levels.pop().unwrap();
-                    input_levels.push(InputLevel {
-                        level_idx: 0,
-                        level_type: LevelType::Nonoverlapping as i32,
-                        table_infos: level.table_infos.to_vec(),
-                    });
-                    input_levels.push(InputLevel {
-                        level_idx: target_level as u32,
-                        level_type: LevelType::Nonoverlapping as i32,
-                        table_infos: target_overlap_files,
-                    });
-                } else {
-                    break;
-                }
+                input_levels.push(InputLevel {
+                    level_idx: 0,
+                    level_type: LevelType::Nonoverlapping as i32,
+                    table_infos: level.table_infos.clone(),
+                });
             }
+
+            let all_level_amplification =
+                cal_file_size(&levels.levels[self.target_level - 1].table_infos) * 100
+                    / l0_total_file_size;
+            if write_amplification < all_level_amplification {
+                return None;
+            }
+            input_levels.push(InputLevel {
+                level_idx: target_level as u32,
+                level_type: LevelType::Nonoverlapping as i32,
+                table_infos: levels.levels[self.target_level - 1].table_infos.clone(),
+            });
+        } else if write_amplification >= MAX_WRITE_AMPLIFICATION {
+            return None;
         }
 
         for input_level in &input_levels {
             level_handlers[input_level.level_idx as usize].add_pending_task(
                 self.compact_task_id,
-                target_level,
+                self.target_level,
                 &input_level.table_infos,
             );
         }
@@ -428,68 +421,33 @@ impl LevelCompactionPicker {
         levels: &[Level],
         level_handlers: &mut [LevelHandler],
     ) -> Vec<InputLevel> {
-        let mut input_levels = vec![];
-        if levels[self.target_level - 1].total_file_size < self.config.max_bytes_for_level_base
-            && !level_handlers[self.target_level]
-                .is_level_pending_compact(&levels[self.target_level - 1])
-        {
-            input_levels.push(InputLevel {
+        let min_overlap_picker = MinOverlappingPicker::new(
+            self.compact_task_id,
+            0,
+            self.target_level,
+            self.overlap_strategy.clone(),
+        );
+
+        let (select_tables, target_tables) = min_overlap_picker.pick_tables(
+            &l0.sub_levels[0].table_infos,
+            &levels[self.target_level - 1].table_infos,
+            level_handlers,
+        );
+        if select_tables.is_empty() {
+            return vec![];
+        }
+        vec![
+            InputLevel {
                 level_idx: 0,
-                level_type: LevelType::Nonoverlapping as i32,
-                table_infos: l0.sub_levels[0].table_infos.clone(),
-            });
-            input_levels.push(InputLevel {
+                level_type: l0.sub_levels[0].level_type,
+                table_infos: select_tables,
+            },
+            InputLevel {
                 level_idx: self.target_level as u32,
-                level_type: LevelType::Nonoverlapping as i32,
-                table_infos: levels[self.target_level - 1].table_infos.clone(),
-            });
-            return input_levels;
-        }
-        let mut l0_total_file_size = 0;
-        let mut min_write_amplification = 0;
-        for (idx, table) in l0.sub_levels[0].table_infos.iter().enumerate() {
-            l0_total_file_size += table.file_size;
-            let target_overlap_files = self.overlap_strategy.check_base_level_overlap(
-                &l0.sub_levels[0].table_infos[..(idx + 1)],
-                &levels[self.target_level - 1].table_infos,
-            );
-            if target_overlap_files.is_empty() {
-                input_levels.push(InputLevel {
-                    level_idx: 0,
-                    level_type: LevelType::Nonoverlapping as i32,
-                    table_infos: l0.sub_levels[0].table_infos.clone(),
-                });
-                input_levels.push(InputLevel {
-                    level_idx: self.target_level as u32,
-                    level_type: LevelType::Nonoverlapping as i32,
-                    table_infos: vec![],
-                });
-                break;
-            }
-            if target_overlap_files
-                .iter()
-                .any(|table| level_handlers[self.target_level].is_pending_compact(&table.id))
-            {
-                break;
-            }
-            let target_file_size = cal_file_size(&target_overlap_files);
-            let write_amplification = target_file_size * 100 / l0_total_file_size;
-            if input_levels.is_empty() || write_amplification < min_write_amplification {
-                min_write_amplification = write_amplification;
-                input_levels.clear();
-                input_levels.push(InputLevel {
-                    level_idx: 0,
-                    level_type: LevelType::Nonoverlapping as i32,
-                    table_infos: l0.sub_levels[0].table_infos[..(idx + 1)].to_vec(),
-                });
-                input_levels.push(InputLevel {
-                    level_idx: self.target_level as u32,
-                    level_type: LevelType::Nonoverlapping as i32,
-                    table_infos: target_overlap_files,
-                });
-            }
-        }
-        input_levels
+                level_type: levels[self.target_level - 1].level_type,
+                table_infos: target_tables,
+            },
+        ]
     }
 }
 
