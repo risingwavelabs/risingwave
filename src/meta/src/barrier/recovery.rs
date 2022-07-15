@@ -151,8 +151,8 @@ where
 
     /// map expired CNs to newly joined CNs, so we can migrate actors later
     /// wait until get a sufficient amount of new CNs
-    /// return "map of `parallelUnitId` in expired CN to new CN id" and "map of `WorkerId` to `WorkerNode`
-    /// struct in new CNs"
+    /// return "map of `parallelUnitId` in expired CN to new CN id" and "map of `WorkerId` to
+    /// `WorkerNode` struct in new CNs"
     async fn get_migrate_map_plan(
         &self,
         info: &BarrierActorInfo,
