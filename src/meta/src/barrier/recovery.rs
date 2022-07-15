@@ -149,6 +149,10 @@ where
         )
     }
 
+    /// map expired CNs to newly joined CNs, so we can migrate actors later
+    /// wait until get a sufficient amount of new CNs
+    /// return "map of parallelUnitId in expired CN to new CN id" and "map of WorkerId to WorkerNode
+    /// struct in new CNs"
     async fn get_migrate_map_plan(
         &self,
         info: &BarrierActorInfo,
@@ -185,6 +189,7 @@ where
                     new_node.id, cur, workers_size
                 );
             }
+            // wait to get newly joined CN
             tokio::time::sleep(std::time::Duration::from_millis(100)).await;
         }
         (migrate_map, node_map)
@@ -192,6 +197,7 @@ where
 
     async fn migrate_actors(&self, info: &BarrierActorInfo) -> Result<()> {
         debug!("start migrate actors.");
+        // get expired workers
         let expired_workers = info
             .actor_map
             .iter()
@@ -204,15 +210,18 @@ where
         }
         debug!("got expired workers {:#?}", expired_workers);
         let (migrate_map, node_map) = self.get_migrate_map_plan(info, &expired_workers).await;
+        // migrate actors in fragments, return updated fragments and pu to pu migrate plan
         let (new_fragments, migrate_map) = self
             .fragment_manager
             .migrate_actors(&migrate_map, &node_map)
             .await?;
         debug!("got parallel unit migrate plan {:#?}", migrate_map);
+        // update mapping in table and notify frontends
         let res = self
             .catalog_manager
             .update_table_mapping(&new_fragments, &migrate_map)
             .await;
+        // update hash mapping
         for fragments in new_fragments {
             for (fragment_id, fragment) in fragments.fragments {
                 let mapping = fragment.vnode_mapping.as_ref().unwrap();

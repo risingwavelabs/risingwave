@@ -321,6 +321,7 @@ where
     }
 
     /// Used in [`crate::barrier::GlobalBarrierManager`]
+    /// migrate actors and update fragments, generate migrate info
     pub async fn migrate_actors(
         &self,
         migrate_map: &HashMap<ParallelUnitId, WorkerId>,
@@ -344,7 +345,7 @@ where
                 .collect_vec();
             pu_single_map.insert(*node_id, pu_single);
         }
-
+        // update actor status and generate pu to pu migrate info
         let mut table_fragments = self.list_table_fragments().await?;
         let mut new_fragments = Vec::new();
         table_fragments.iter_mut().for_each(|fragment| {
@@ -382,11 +383,12 @@ where
                     };
                 });
             if flag {
+                // update vnode mapping of updated fragments
                 fragment.update_vnode_mapping(&parallel_unit_migrate_map);
                 new_fragments.push(fragment.clone());
             }
         });
-
+        // update fragments
         self.batch_update_table_fragments(&new_fragments).await?;
         Ok((new_fragments, parallel_unit_migrate_map))
     }
