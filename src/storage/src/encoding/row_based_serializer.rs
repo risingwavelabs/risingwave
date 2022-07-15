@@ -45,7 +45,7 @@ impl Encoding for RowBasedSerializer {
         _column_descs: &[risingwave_common::catalog::ColumnDesc],
         _column_ids: &[risingwave_common::catalog::ColumnId],
     ) -> Self {
-        // todo: Change row-based serializer with dedup pk
+        // todo: these parameters may be used in row-based pk dudup later.
         Self {}
     }
 
