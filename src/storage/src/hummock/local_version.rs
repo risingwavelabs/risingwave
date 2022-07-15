@@ -12,7 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, BTreeSet};
 use std::sync::atomic::AtomicUsize;
 use std::sync::Arc;
 
@@ -30,6 +30,7 @@ use super::shared_buffer::SharedBuffer;
 pub struct LocalVersion {
     shared_buffer: BTreeMap<HummockEpoch, Arc<RwLock<SharedBuffer>>>,
     pinned_version: Arc<PinnedVersion>,
+    pub version_ids_in_use: BTreeSet<HummockVersionId>,
 }
 
 impl LocalVersion {
@@ -37,9 +38,12 @@ impl LocalVersion {
         version: HummockVersion,
         unpin_worker_tx: UnboundedSender<HummockVersionId>,
     ) -> Self {
+        let mut version_ids_in_use = BTreeSet::new();
+        version_ids_in_use.insert(version.id);
         Self {
             shared_buffer: BTreeMap::default(),
             pinned_version: Arc::new(PinnedVersion::new(version, unpin_worker_tx)),
+            version_ids_in_use,
         }
     }
 
@@ -74,6 +78,8 @@ impl LocalVersion {
             self.shared_buffer
                 .retain(|epoch, _| epoch > &new_pinned_version.max_committed_epoch);
         }
+
+        self.version_ids_in_use.insert(new_pinned_version.id);
 
         // update pinned version
         self.pinned_version = Arc::new(PinnedVersion {

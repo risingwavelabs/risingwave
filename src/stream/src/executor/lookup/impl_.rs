@@ -12,18 +12,14 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::sync::Arc;
-
 use futures::{pin_mut, StreamExt};
 use futures_async_stream::try_stream;
 use itertools::Itertools;
 use risingwave_common::array::{Row, RowRef};
-use risingwave_common::buffer::Bitmap;
-use risingwave_common::catalog::{ColumnDesc, Schema, TableId};
+use risingwave_common::catalog::{ColumnDesc, Schema};
 use risingwave_common::error::Result;
-use risingwave_common::util::sort_util::{OrderPair, OrderType};
+use risingwave_common::util::sort_util::OrderPair;
 use risingwave_storage::table::state_table::StateTable;
-use risingwave_storage::table::Distribution;
 use risingwave_storage::StateStore;
 
 use super::sides::{stream_lookup_arrange_prev_epoch, stream_lookup_arrange_this_epoch};
@@ -43,12 +39,6 @@ pub struct LookupExecutorParams<S: StateStore> {
     /// The side for stream. It can be any stream, but it will generally be a
     /// `MaterializeExecutor`.
     pub stream: Box<dyn Executor>,
-
-    /// The state store and table id for arrangement. [`LookupExecutor`] will use these to
-    /// construct state table to read the state of arrangement side.
-    pub arrangement_store: S,
-
-    pub arrangement_table_id: TableId,
 
     /// Should be the same as [`ColumnDesc`] in the arrangement.
     ///
@@ -110,7 +100,7 @@ pub struct LookupExecutorParams<S: StateStore> {
     /// The join keys on the arrangement side.
     pub arrange_join_key_indices: Vec<usize>,
 
-    pub vnode_bitmap: Option<Arc<Bitmap>>,
+    pub state_table: StateTable<S>,
 }
 
 impl<S: StateStore> LookupExecutor<S> {
@@ -118,8 +108,6 @@ impl<S: StateStore> LookupExecutor<S> {
         let LookupExecutorParams {
             arrangement,
             stream,
-            arrangement_store,
-            arrangement_table_id,
             arrangement_col_descs,
             arrangement_order_rules,
             pk_indices,
@@ -128,7 +116,7 @@ impl<S: StateStore> LookupExecutor<S> {
             arrange_join_key_indices,
             schema: output_schema,
             column_mapping,
-            vnode_bitmap,
+            state_table,
         } = params;
 
         let output_column_length = stream.schema().len() + arrangement.schema().len();
@@ -201,24 +189,6 @@ impl<S: StateStore> LookupExecutor<S> {
             "mismatched output schema"
         );
 
-        // `arrangement_pk_indices` indicates the primary key in arrangement, usually row_id. Chain
-        // with join key to get relational pk. arrangement: [ a (join key/sort key) | b
-        // (value) | row_id]. The arrangement pk_indices is [2], arrange_join_key_indices will be
-        // [0], so relational pk will be [0, 2].
-        let relational_pk_indices = arrange_join_key_indices
-            .clone()
-            .into_iter()
-            .chain(arrangement_pk_indices.clone().into_iter())
-            .collect_vec();
-
-        let distribution = match vnode_bitmap {
-            Some(vnodes) => Distribution {
-                dist_key_indices: arrange_join_key_indices.clone(),
-                vnodes,
-            },
-            None => Distribution::fallback(),
-        };
-
         Self {
             chunk_data_types,
             schema: output_schema,
@@ -234,18 +204,11 @@ impl<S: StateStore> LookupExecutor<S> {
             arrangement: ArrangeJoinSide {
                 pk_indices: arrangement_pk_indices,
                 col_types: arrangement_data_types,
-                col_descs: arrangement_col_descs.clone(),
+                col_descs: arrangement_col_descs,
                 order_rules: arrangement_order_rules,
                 key_indices: arrange_join_key_indices,
                 use_current_epoch,
-                state_table: StateTable::new_with_distribution(
-                    arrangement_store,
-                    arrangement_table_id,
-                    arrangement_col_descs,
-                    vec![OrderType::Ascending; relational_pk_indices.len()],
-                    relational_pk_indices,
-                    distribution,
-                ),
+                state_table,
             },
             column_mapping,
             key_indices_mapping,
