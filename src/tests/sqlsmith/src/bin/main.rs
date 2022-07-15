@@ -132,7 +132,8 @@ async fn main() {
 
     let mut rng = rand::thread_rng();
     for _ in 0..opt.count {
-        let sql = sql_gen(&mut rng, tables.clone());
+        // let sql = sql_gen(&mut rng, tables.clone());
+        let sql = String::from("SELECT (1<<1000);"); // test numeric error handling
         log::info!("Executing: {}", sql);
         let _ = client
             .query(sql.as_str(), &[])
