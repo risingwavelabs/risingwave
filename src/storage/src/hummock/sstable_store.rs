@@ -146,25 +146,29 @@ impl SstableStore {
         stats: &mut StoreLocalStatistic,
     ) -> HummockResult<BlockHolder> {
         stats.cache_data_block_total += 1;
-        let fetch_block = async {
+        let mut fetch_block = || {
             stats.cache_data_block_miss += 1;
             let block_meta = sst
                 .meta
                 .block_metas
                 .get(block_index as usize)
-                .ok_or_else(HummockError::invalid_block)?;
+                .ok_or_else(HummockError::invalid_block)
+                .unwrap(); // FIXME: don't unwrap here.
             let block_loc = BlockLocation {
                 offset: block_meta.offset as usize,
                 size: block_meta.len as usize,
             };
             let data_path = self.get_sst_data_path(sst.id);
-            let block_data = self
-                .store
-                .read(&data_path, Some(block_loc))
-                .await
-                .map_err(HummockError::object_io_error)?;
-            let block = Block::decode(block_data)?;
-            Ok(Box::new(block))
+            let store = self.store.clone();
+
+            async move {
+                let block_data = store
+                    .read(&data_path, Some(block_loc))
+                    .await
+                    .map_err(HummockError::object_io_error)?;
+                let block = Block::decode(block_data)?;
+                Ok(Box::new(block))
+            }
         };
 
         let disable_cache: fn() -> bool = || {
@@ -186,9 +190,9 @@ impl SstableStore {
             }
             CachePolicy::NotFill => match self.block_cache.get(sst.id, block_index) {
                 Some(block) => Ok(block),
-                None => fetch_block.await.map(BlockHolder::from_owned_block),
+                None => fetch_block().await.map(BlockHolder::from_owned_block),
             },
-            CachePolicy::Disable => fetch_block.await.map(BlockHolder::from_owned_block),
+            CachePolicy::Disable => fetch_block().await.map(BlockHolder::from_owned_block),
         }
     }
 
@@ -236,34 +240,37 @@ impl SstableStore {
             stats.cache_meta_block_total += 1;
             let entry = self
                 .meta_cache
-                .lookup_with_request_dedup::<_, HummockError, _>(sst_id, sst_id, || async {
+                .lookup_with_request_dedup::<_, HummockError, _>(sst_id, sst_id, || {
+                    let store = self.store.clone();
+                    let meta_path = self.get_sst_meta_path(sst_id);
+                    let data_path = self.get_sst_data_path(sst_id);
                     stats.cache_meta_block_miss += 1;
-                    let meta = match meta_data {
-                        Some(data) => data,
-                        None => {
-                            let path = self.get_sst_meta_path(sst_id);
-                            let buf = self
-                                .store
-                                .read(&path, None)
+
+                    async move {
+                        let meta = match meta_data {
+                            Some(data) => data,
+                            None => {
+                                let buf = store
+                                    .read(&meta_path, None)
+                                    .await
+                                    .map_err(HummockError::object_io_error)?;
+                                SstableMeta::decode(&mut &buf[..])?
+                            }
+                        };
+                        let mut size = meta.encoded_size();
+                        let sst = if load_data {
+                            size = meta.estimated_size as usize;
+
+                            let block_data = store
+                                .read(&data_path, None)
                                 .await
                                 .map_err(HummockError::object_io_error)?;
-                            SstableMeta::decode(&mut &buf[..])?
-                        }
-                    };
-                    let mut size = meta.encoded_size();
-                    let sst = if load_data {
-                        size = meta.estimated_size as usize;
-                        let data_path = self.get_sst_data_path(sst_id);
-                        let block_data = self
-                            .store
-                            .read(&data_path, None)
-                            .await
-                            .map_err(HummockError::object_io_error)?;
-                        Sstable::new_with_data(sst_id, meta, block_data)?
-                    } else {
-                        Sstable::new(sst_id, meta)
-                    };
-                    Ok((Box::new(sst), size))
+                            Sstable::new_with_data(sst_id, meta, block_data)?
+                        } else {
+                            Sstable::new(sst_id, meta)
+                        };
+                        Ok((Box::new(sst), size))
+                    }
                 })
                 .await
                 .map_err(|e| {

@@ -14,7 +14,6 @@
 
 use std::sync::Arc;
 
-use futures::executor::block_on;
 use risingwave_hummock_sdk::key::key_with_epoch;
 
 use crate::assert_bytes_eq;
@@ -51,7 +50,7 @@ async fn test_failpoints_table_read() {
 
     let mut stats = StoreLocalStatistic::default();
     let mut sstable_iter = SSTableIterator::create(
-        block_on(sstable_store.sstable(0, &mut stats)).unwrap(),
+        sstable_store.sstable(0, &mut stats).await.unwrap(),
         sstable_store,
         Arc::new(ReadOptions::default()),
     );
@@ -122,7 +121,7 @@ async fn test_failpoints_vacuum_and_metadata() {
     let mut stats = StoreLocalStatistic::default();
 
     let mut sstable_iter = SSTableIterator::create(
-        block_on(sstable_store.sstable(table_id, &mut stats)).unwrap(),
+        sstable_store.sstable(table_id, &mut stats).await.unwrap(),
         sstable_store,
         Arc::new(ReadOptions::default()),
     );
