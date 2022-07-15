@@ -54,19 +54,20 @@ fn init_agg_table() -> HashMap<DataTypeName, Vec<AggFuncSign>> {
 }
 
 impl<'a, R: Rng> SqlGenerator<'a, R> {
-    pub(crate) fn gen_expr(&mut self, typ: DataTypeName, can_agg: bool) -> Expr {
+    pub(crate) fn gen_expr(&mut self, typ: DataTypeName, can_agg: bool, inside_agg: bool) -> Expr {
         if !self.can_recurse() {
             // Stop recursion with a simple scalar or column.
             return match self.rng.gen_bool(0.5) {
                 true => self.gen_simple_scalar(typ),
-                false => self.gen_col(typ, can_agg),
+                false => self.gen_col(typ, inside_agg),
             };
         }
+        assert!(!(!can_agg & inside_agg));
 
-        let range = if !can_agg { 90 } else { 99 };
+        let range = if can_agg & !inside_agg { 99 } else { 90 };
 
         match self.rng.gen_range(0..=range) {
-            0..=90 => self.gen_func(typ, can_agg),
+            0..=90 => self.gen_func(typ, can_agg, inside_agg),
             91..=99 => self.gen_agg(typ),
             // TODO: There are more that are not in the functions table, e.g. CAST.
             // We will separately generate them.
@@ -74,8 +75,8 @@ impl<'a, R: Rng> SqlGenerator<'a, R> {
         }
     }
 
-    fn gen_col(&mut self, typ: DataTypeName, can_agg: bool) -> Expr {
-        let columns = if !can_agg {
+    fn gen_col(&mut self, typ: DataTypeName, inside_agg: bool) -> Expr {
+        let columns = if inside_agg {
             if self.bound_relations.is_empty() {
                 return self.gen_simple_scalar(typ);
             }
@@ -102,7 +103,7 @@ impl<'a, R: Rng> SqlGenerator<'a, R> {
         }
     }
 
-    fn gen_func(&mut self, ret: DataTypeName, can_agg: bool) -> Expr {
+    fn gen_func(&mut self, ret: DataTypeName, can_agg: bool, inside_agg: bool) -> Expr {
         let funcs = match FUNC_TABLE.get(&ret) {
             None => return self.gen_simple_scalar(ret),
             Some(funcs) => funcs,
@@ -111,7 +112,7 @@ impl<'a, R: Rng> SqlGenerator<'a, R> {
         let exprs: Vec<Expr> = func
             .inputs_type
             .iter()
-            .map(|t| self.gen_expr(*t, can_agg))
+            .map(|t| self.gen_expr(*t, can_agg, inside_agg))
             .collect();
         let expr = if exprs.len() == 1 {
             make_unary_op(func.func, &exprs[0])
@@ -124,7 +125,7 @@ impl<'a, R: Rng> SqlGenerator<'a, R> {
             .unwrap_or_else(|| self.gen_simple_scalar(ret))
     }
 
-    pub(crate) fn gen_agg(&mut self, ret: DataTypeName) -> Expr {
+    fn gen_agg(&mut self, ret: DataTypeName) -> Expr {
         let funcs = match AGG_FUNC_TABLE.get(&ret) {
             None => return self.gen_simple_scalar(ret),
             Some(funcs) => funcs,
@@ -133,7 +134,7 @@ impl<'a, R: Rng> SqlGenerator<'a, R> {
         let expr: Vec<Expr> = func
             .inputs_type
             .iter()
-            .map(|t| self.gen_expr(*t, false))
+            .map(|t| self.gen_expr(*t, true, true))
             .collect();
         assert!(expr.len() == 1);
 
