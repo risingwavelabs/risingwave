@@ -12,14 +12,18 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+use std::collections::BinaryHeap;
+use std::sync::Arc;
+
 use futures::StreamExt;
 use futures_async_stream::try_stream;
 use itertools::Itertools;
 use risingwave_common::array::{Array, DataChunk, RowRef};
 use risingwave_common::catalog::{ColumnDesc, Field, Schema};
 use risingwave_common::error::{ErrorCode, Result, RwError};
-use risingwave_common::types::{DataType, ToOwnedDatum};
+use risingwave_common::types::{DataType, ScalarImpl, ToOwnedDatum};
 use risingwave_common::util::chunk_coalesce::{DataChunkBuilder, SlicedDataChunk};
+use risingwave_common::util::sort_util::{HeapElem, OrderPair, OrderType};
 use risingwave_expr::expr::{build_from_prost, BoxedExpression};
 use risingwave_pb::batch_plan::exchange_info::DistributionMode;
 use risingwave_pb::batch_plan::exchange_source::LocalExecutePlan::Plan;
@@ -34,6 +38,7 @@ use uuid::Uuid;
 use crate::executor::join::{
     concatenate, convert_datum_refs_to_chunk, convert_row_to_chunk, JoinType,
 };
+use crate::executor::row_level_iter::RowLevelIter;
 use crate::executor::{
     BoxedDataChunkStream, BoxedExecutor, BoxedExecutorBuilder, Executor, ExecutorBuilder,
 };
@@ -44,8 +49,7 @@ use crate::task::{BatchTaskContext, TaskId};
 
 /// Probe side source for the `LookupJoinExecutor`
 pub struct ProbeSideSource<C> {
-    build_side_eq_types: Vec<DataType>,
-    build_side_idxs: Vec<usize>,
+    build_side_key_types: Vec<DataType>,
     table_desc: CellBasedTableDesc,
     probe_side_schema: Schema,
     probe_side_column_ids: Vec<i32>,
@@ -58,17 +62,17 @@ pub struct ProbeSideSource<C> {
 /// Used to build the executor for the probe side
 #[async_trait::async_trait]
 pub trait ProbeSideSourceBuilder: Send {
-    async fn build_source(&self, cur_row: &RowRef) -> Result<BoxedExecutor>;
+    async fn build_source(&self, key_datum_refs: Vec<ScalarImpl>) -> Result<BoxedExecutor>;
 }
 
 impl<C: BatchTaskContext> ProbeSideSource<C> {
     /// Creates the `RowSeqScanNode` that will be used for scanning the probe side table
     /// based on the passed `RowRef`.
-    fn create_row_seq_scan_node(&self, cur_row: &RowRef) -> Result<NodeBody> {
+    fn create_row_seq_scan_node(&self, key_datum_refs: Vec<ScalarImpl>) -> Result<NodeBody> {
         // Check that the data types of both sides of the equality predicate are the same
         // TODO: Handle the cases where the data types of both sides are different but castable
         // (e.g. int32 and int64)
-        let probe_side_eq_types = self
+        let probe_side_key_types = self
             .table_desc
             .order_key
             .iter()
@@ -79,8 +83,9 @@ impl<C: BatchTaskContext> ProbeSideSource<C> {
             })
             .collect_vec();
 
-        if !(0..self.build_side_eq_types.len()).all(|i| {
-            i < probe_side_eq_types.len() && self.build_side_eq_types[i] == probe_side_eq_types[i]
+        if !(0..self.build_side_key_types.len()).all(|i| {
+            i < probe_side_key_types.len()
+                && self.build_side_key_types[i] == probe_side_key_types[i]
         }) {
             return Err(ErrorCode::NotImplemented(
                     "Lookup Joins where the two sides of an equality predicate have different data types".to_string(),
@@ -88,17 +93,10 @@ impl<C: BatchTaskContext> ProbeSideSource<C> {
             ).into());
         }
 
-        let eq_conds = self
-            .build_side_idxs
+        let eq_conds = key_datum_refs
             .iter()
-            .map(|&idx| {
-                cur_row
-                    .value_at(idx)
-                    .to_owned_datum()
-                    .unwrap()
-                    .to_protobuf()
-            })
-            .collect();
+            .map(|scalar_impl| scalar_impl.to_protobuf())
+            .collect_vec();
 
         let scan_range = Some(ScanRange {
             eq_conds,
@@ -116,7 +114,10 @@ impl<C: BatchTaskContext> ProbeSideSource<C> {
 
     /// Creates all the `ProstExchangeSource` that will be sent to the `ExchangeExecutor` using
     /// the source templates.
-    fn build_prost_exchange_sources(&self, cur_row: &RowRef) -> Result<Vec<ProstExchangeSource>> {
+    fn build_prost_exchange_sources(
+        &self,
+        key_datum_refs: Vec<ScalarImpl>,
+    ) -> Result<Vec<ProstExchangeSource>> {
         let Plan(inner_template_plan) = self.source_templates[0].get_local_execute_plan().unwrap();
 
         let local_execute_plan = LocalExecutePlan {
@@ -124,7 +125,7 @@ impl<C: BatchTaskContext> ProbeSideSource<C> {
                 root: Some(PlanNode {
                     children: vec![],
                     identity: Uuid::new_v4().to_string(),
-                    node_body: Some(self.create_row_seq_scan_node(cur_row)?),
+                    node_body: Some(self.create_row_seq_scan_node(key_datum_refs)?),
                 }),
                 exchange_info: Some(ExchangeInfo {
                     mode: DistributionMode::Single as i32,
@@ -152,8 +153,8 @@ impl<C: BatchTaskContext> ProbeSideSource<C> {
 impl<C: BatchTaskContext> ProbeSideSourceBuilder for ProbeSideSource<C> {
     /// Builds and returns the `ExchangeExecutor` used for the probe side of the
     /// `LookupJoinExecutor`.
-    async fn build_source(&self, cur_row: &RowRef) -> Result<BoxedExecutor> {
-        let sources = self.build_prost_exchange_sources(cur_row)?;
+    async fn build_source(&self, key_datum_refs: Vec<ScalarImpl>) -> Result<BoxedExecutor> {
+        let sources = self.build_prost_exchange_sources(key_datum_refs)?;
 
         let exchange_node = NodeBody::Exchange(ExchangeNode {
             sources,
@@ -187,6 +188,7 @@ pub struct LookupJoinExecutor<P> {
     condition: Option<BoxedExpression>,
     build_child: Option<BoxedExecutor>,
     build_side_data_types: Vec<DataType>,
+    build_side_key_idxs: Vec<usize>,
     probe_side_source: P,
     chunk_builder: DataChunkBuilder,
     schema: Schema,
@@ -222,94 +224,128 @@ impl<P: 'static + ProbeSideSourceBuilder> LookupJoinExecutor<P> {
             None.into(),
         ));
 
-        while let Some(data_chunk) = build_side_stream.next().await {
-            let data_chunk = data_chunk?;
+        while let Some(build_chunk) = build_side_stream.next().await {
+            let build_chunk = build_chunk?.compact()?;
 
-            for row_idx in 0..data_chunk.capacity() {
-                let (cur_row, is_visible) = data_chunk.row_at(row_idx)?;
-                if !is_visible {
-                    continue;
-                }
+            let mut min_heap = self.build_min_heap(&build_chunk)?;
 
-                let probe_child = self.probe_side_source.build_source(&cur_row).await?;
-                let mut probe_side_stream = probe_child.execute();
+            while min_heap.peek().is_some() {
+                let mut row_idxs = vec![];
+                let mut prev_keys: Vec<ScalarImpl> = vec![];
 
-                let mut chunk_added = false;
+                // Build the list of rows which are equal on the build side key indices
+                while min_heap.peek().is_some() {
+                    let heap_elem = min_heap.peek().unwrap();
+                    // Data chunk was compacted so this is always visible
+                    let cur_row = heap_elem.chunk.row_at_unchecked_vis(heap_elem.elem_idx);
+                    let cur_keys = self
+                        .build_side_key_idxs
+                        .iter()
+                        .map(|&idx| cur_row.value_at(idx).to_owned_datum().unwrap())
+                        .collect_vec();
 
-                // The handling of the different join types and which operation they should perform
-                // under each condition is very complex. The gist of it is:
-                //
-                // Inner Join: Always do_inner_join until probe_side_chunk is none.
-                //
-                // Left Outer Join: Always do_inner_join until probe_side_chunk is None. If this
-                //      occurs and no chunk has been added yet, null-pad the current row and add it.
-                //
-                // Left Semi Join: Always do_left_semi_anti_join until probe_side_chunk is None or
-                //      a chunk has been added, whichever is first.
-                //
-                // Left Anti Join: Always do_left_semi_anti_join until probe_side_chunk is None or
-                //      current row has a match on probe side, whichever is first. If the former
-                //      occurs and no match has been found yet, then add current row.
-                // TODO: Simplify the logic of handling the different join types
-                loop {
-                    let probe_side_chunk = probe_side_stream.next().await;
-                    let chunk_is_some = probe_side_chunk.is_some();
-
-                    let join_result = if let Some(chunk) = probe_side_chunk {
-                        let chunk = chunk?;
-
-                        match self.join_type {
-                            JoinType::Inner | JoinType::LeftOuter => {
-                                self.do_inner_join(&cur_row, chunk)
-                            }
-                            JoinType::LeftSemi | JoinType::LeftAnti if !chunk_added => {
-                                self.do_left_semi_anti_join(&cur_row, chunk)
-                            }
-                            JoinType::LeftSemi | JoinType::LeftAnti if chunk_added => {
-                                break;
-                            }
-                            _ => Err(invalid_join_error.clone()),
-                        }
-                    } else if !chunk_added {
-                        match self.join_type {
-                            JoinType::Inner | JoinType::LeftSemi => {
-                                break;
-                            }
-                            JoinType::LeftOuter => self.do_left_outer_join(&cur_row),
-                            JoinType::LeftAnti => self.convert_row_for_builder(&cur_row),
-                            _ => Err(invalid_join_error.clone()),
+                    if !prev_keys.is_empty() {
+                        let keys_match = prev_keys.iter().zip_eq(&cur_keys).all(|(a, b)| a == b);
+                        if !keys_match {
+                            break;
                         }
                     } else {
-                        break;
-                    }?;
+                        prev_keys = cur_keys.clone();
+                    }
 
-                    // Append chunk from the join result to the chunk builder if it exists
-                    if let Some(return_chunk) = join_result {
-                        if return_chunk.cardinality() > 0 {
-                            chunk_added = true;
+                    let heap_elem = min_heap.pop().unwrap();
+                    row_idxs.push(heap_elem.elem_idx);
+                }
 
-                            // Skip adding if it's a Left Anti Join and there is a match between
-                            // cur_row and probe side source
-                            if self.join_type == JoinType::LeftAnti && chunk_is_some {
-                                continue;
+                let probe_child = self.probe_side_source.build_source(prev_keys).await?;
+                let mut probe_side_result = RowLevelIter::new(probe_child);
+                probe_side_result.load_data().await?;
+
+                for idx in row_idxs {
+                    let cur_row = build_chunk.row_at_unchecked_vis(idx);
+                    probe_side_result.reset_chunk();
+                    let mut chunk_added = false;
+
+                    // The handling of the different join types and which operation they should
+                    // perform under each condition is very complex. The gist of
+                    // it is:
+                    //
+                    // Inner Join: Always do_inner_join until probe_side_chunk is none.
+                    //
+                    // Left Outer Join: Always do_inner_join until probe_side_chunk is None. If this
+                    //      occurs and no chunk has been added yet, null-pad the current row and add
+                    //      it.
+                    //
+                    // Left Semi Join: Always do_left_semi_anti_join until probe_side_chunk is None
+                    //      or a chunk has been added, whichever is first.
+                    //
+                    // Left Anti Join: Always do_left_semi_anti_join until probe_side_chunk is None
+                    //      or current row has a match on probe side, whichever is first. If the
+                    //      former occurs and no match has been found yet, then add current row.
+
+                    // TODO: Simplify the logic of handling the different join types
+                    loop {
+                        let probe_side_chunk = probe_side_result.get_current_chunk();
+                        let chunk_is_some = probe_side_chunk.is_some();
+
+                        let join_result = if let Some(chunk) = probe_side_chunk {
+                            let chunk = chunk.clone().compact()?;
+
+                            match self.join_type {
+                                JoinType::Inner | JoinType::LeftOuter => {
+                                    self.do_inner_join(&cur_row, chunk)
+                                }
+                                JoinType::LeftSemi | JoinType::LeftAnti if !chunk_added => {
+                                    self.do_left_semi_anti_join(&cur_row, chunk)
+                                }
+                                JoinType::LeftSemi | JoinType::LeftAnti if chunk_added => {
+                                    break;
+                                }
+                                _ => Err(invalid_join_error.clone()),
                             }
+                        } else if !chunk_added {
+                            match self.join_type {
+                                JoinType::Inner | JoinType::LeftSemi => {
+                                    break;
+                                }
+                                JoinType::LeftOuter => self.do_left_outer_join(&cur_row),
+                                JoinType::LeftAnti => self.convert_row_for_builder(&cur_row),
+                                _ => Err(invalid_join_error.clone()),
+                            }
+                        } else {
+                            break;
+                        }?;
 
-                            let append_result =
-                                self.append_chunk(SlicedDataChunk::new_checked(return_chunk)?)?;
-                            if let Some(inner_chunk) = append_result {
+                        // Append chunk from the join result to the chunk builder if it exists
+                        if let Some(return_chunk) = join_result {
+                            if return_chunk.cardinality() > 0 {
+                                chunk_added = true;
+
+                                // Skip adding if it's a Left Anti Join and there is a match between
+                                // cur_row and probe side source
+                                if self.join_type == JoinType::LeftAnti && chunk_is_some {
+                                    continue;
+                                }
+
+                                let append_result =
+                                    self.append_chunk(SlicedDataChunk::new_checked(return_chunk)?)?;
+                                if let Some(inner_chunk) = append_result {
+                                    yield inner_chunk.reorder_columns(&self.output_indices);
+                                }
+                            }
+                        }
+
+                        // Until we don't have any more last_chunks to append to the chunk builder,
+                        // keep appending them to the chunk builder
+                        while self.last_chunk.is_some() {
+                            let temp_chunk: Option<SlicedDataChunk> =
+                                std::mem::take(&mut self.last_chunk);
+                            if let Some(inner_chunk) = self.append_chunk(temp_chunk.unwrap())? {
                                 yield inner_chunk.reorder_columns(&self.output_indices);
                             }
                         }
-                    }
 
-                    // Until we don't have any more last_chunks to append to the chunk builder,
-                    // keep appending them to the chunk builder
-                    while self.last_chunk.is_some() {
-                        let temp_chunk: Option<SlicedDataChunk> =
-                            std::mem::take(&mut self.last_chunk);
-                        if let Some(inner_chunk) = self.append_chunk(temp_chunk.unwrap())? {
-                            yield inner_chunk.reorder_columns(&self.output_indices);
-                        }
+                        probe_side_result.advance_chunk();
                     }
                 }
             }
@@ -321,6 +357,31 @@ impl<P: 'static + ProbeSideSourceBuilder> LookupJoinExecutor<P> {
         }
     }
 
+    fn build_min_heap(&self, data_chunk: &DataChunk) -> Result<BinaryHeap<HeapElem>> {
+        let mut min_heap = BinaryHeap::new();
+
+        let order_pairs = Arc::new(
+            self.build_side_key_idxs
+                .iter()
+                .map(|&idx| OrderPair::new(idx, OrderType::Ascending))
+                .collect_vec(),
+        );
+
+        for row_idx in 0..data_chunk.capacity() {
+            let heap_elem = HeapElem {
+                order_pairs: order_pairs.clone(),
+                chunk: data_chunk.clone(),
+                chunk_idx: 0,
+                elem_idx: row_idx,
+                encoded_chunk: None,
+            };
+
+            min_heap.push(heap_elem);
+        }
+
+        Ok(min_heap)
+    }
+
     /// Inner Joins the `cur_row` with the `probe_side_chunk`. The non-equi condition is also
     /// evaluated to hide the rows in the join result that don't match the condition.
     fn do_inner_join(
@@ -328,12 +389,13 @@ impl<P: 'static + ProbeSideSourceBuilder> LookupJoinExecutor<P> {
         cur_row: &RowRef,
         probe_side_chunk: DataChunk,
     ) -> Result<Option<DataChunk>> {
-        let probe_chunk = probe_side_chunk.compact()?;
+        let build_side_chunk = convert_row_to_chunk(
+            cur_row,
+            probe_side_chunk.capacity(),
+            &self.build_side_data_types,
+        )?;
 
-        let const_row_chunk =
-            convert_row_to_chunk(cur_row, probe_chunk.capacity(), &self.build_side_data_types)?;
-
-        let new_chunk = concatenate(&const_row_chunk, &probe_chunk)?;
+        let new_chunk = concatenate(&build_side_chunk, &probe_side_chunk)?;
 
         if let Some(cond) = self.condition.as_ref() {
             let visibility = cond.eval(&new_chunk)?;
@@ -456,21 +518,19 @@ impl BoxedExecutorBuilder for LookupJoinExecutorBuilder {
             .map(|&idx| original_schema[idx].clone())
             .collect();
 
-        // Initialize parameters for creating the probe side source
-        let mut build_side_idxs = vec![];
+        let mut build_side_key_idxs = vec![];
         for build_side_key in lookup_join_node.get_build_side_key() {
-            build_side_idxs.push(*build_side_key as usize)
+            build_side_key_idxs.push(*build_side_key as usize)
         }
 
-        let build_side_eq_types = build_side_idxs
+        let build_side_key_types: Vec<DataType> = build_side_key_idxs
             .iter()
             .map(|&idx| build_side_data_types[idx].clone())
             .collect_vec();
 
         ensure!(!lookup_join_node.get_sources().is_empty());
         let probe_side_source = ProbeSideSource {
-            build_side_eq_types,
-            build_side_idxs,
+            build_side_key_types,
             table_desc: probe_side_table_desc.clone(),
             probe_side_schema,
             probe_side_column_ids,
@@ -485,6 +545,7 @@ impl BoxedExecutorBuilder for LookupJoinExecutorBuilder {
             condition,
             build_child: Some(build_child),
             build_side_data_types,
+            build_side_key_idxs,
             probe_side_source,
             chunk_builder: DataChunkBuilder::with_default_size(original_schema.data_types()),
             schema: actual_schema,
@@ -566,6 +627,7 @@ mod tests {
             condition,
             build_side_data_types: build_child.schema().data_types(),
             build_child: Some(build_child),
+            build_side_key_idxs: vec![0],
             probe_side_source: FakeProbeSideSourceBuilder::new(probe_side_schema),
             chunk_builder: DataChunkBuilder::with_default_size(original_schema.data_types()),
             schema: original_schema.clone(),
