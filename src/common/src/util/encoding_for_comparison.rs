@@ -12,8 +12,6 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::sync::Arc;
-
 use itertools::Itertools;
 
 use crate::array::{ArrayImpl, DataChunk};
@@ -56,7 +54,7 @@ fn encode_array(array: &ArrayImpl, order: &OrderType) -> Result<EncodedColumn> {
 /// the datachunk.
 ///
 /// TODO: specify the order for `NULL`.
-pub fn encode_chunk(chunk: &DataChunk, order_pairs: &[OrderPair]) -> Arc<Vec<Vec<u8>>> {
+pub fn encode_chunk(chunk: &DataChunk, order_pairs: &[OrderPair]) -> Vec<Vec<u8>> {
     let encoded_columns = order_pairs
         .iter()
         .map(|o| encode_array(chunk.column_at(o.column_idx).array_ref(), &o.order_type).unwrap())
@@ -69,5 +67,5 @@ pub fn encode_chunk(chunk: &DataChunk, order_pairs: &[OrderPair]) -> Arc<Vec<Vec
         }
     }
 
-    Arc::new(encoded_chunk)
+    encoded_chunk
 }

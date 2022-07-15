@@ -178,7 +178,7 @@ impl OrderByExecutor {
             let chunk = chunk?;
             if !self.disable_encoding && self.encodable {
                 self.encoded_keys
-                    .push(encode_chunk(&chunk, &self.order_pairs));
+                    .push(Arc::new(encode_chunk(&chunk, &self.order_pairs)));
             }
             self.chunks.push(chunk);
             self.sorted_indices
