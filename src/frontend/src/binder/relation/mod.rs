@@ -64,11 +64,11 @@ impl Binder {
         let second_name = identifiers
             .pop()
             .ok_or_else(|| ErrorCode::InternalError(err_str.into()))?
-            .value;
+            .real_value();
 
         let first_name = identifiers
             .pop()
-            .map(|ident| ident.value)
+            .map(|ident| ident.real_value())
             .unwrap_or_else(|| default_name.into());
 
         Ok((first_name, second_name))
@@ -85,7 +85,7 @@ impl Binder {
         let name = identifiers
             .pop()
             .ok_or_else(|| ErrorCode::InternalError(format!("empty {}", ident_desc)))?
-            .value;
+            .real_value();
 
         Ok(name)
     }
@@ -122,7 +122,7 @@ impl Binder {
     ) -> Result<()> {
         let (table_name, column_aliases) = match alias {
             None => (table_name, vec![]),
-            Some(TableAlias { name, columns }) => (name.value, columns),
+            Some(TableAlias { name, columns }) => (name.real_value(), columns),
         };
 
         let begin = self.context.columns.len();
