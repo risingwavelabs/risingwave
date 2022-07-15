@@ -571,7 +571,9 @@ impl StreamGraphBuilder {
                             &mut node.arrangement_table_id
                         {
                             *table_id += table_id_offset;
-                            check_and_fill_internal_table(*table_id, None);
+                            node.arrangement_table.as_mut().unwrap().id = *table_id;
+                            // We do not need check and fill internal table for Lookup, cuz it's
+                            // already been set by ArrangeNode.
                         }
                     }
 
