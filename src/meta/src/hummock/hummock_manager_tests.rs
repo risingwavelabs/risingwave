@@ -72,7 +72,7 @@ async fn test_hummock_pin_unpin() {
         assert_eq!(pinned_versions[0].context_id, context_id);
     }
 
-    // unpin nonexistent target will not return error
+    // unpin one context will delete the whole version info of the context
     for _ in 0..3 {
         hummock_manager.unpin_version(context_id).await.unwrap();
     }

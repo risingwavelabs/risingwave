@@ -435,12 +435,8 @@ where
         meta_store.txn(trx).await.map_err(Into::into)
     }
 
-    /// Pin a hummock version that is greater than `last_pinned`. The pin belongs to `context_id`
+    /// Pin the current greatest hummock version. The pin belongs to `context_id`
     /// and will be unpinned when `context_id` is invalidated.
-    /// `last_pinned` helps to make `pin_version` retryable:
-    /// 1 Return the smallest already pinned version of `context_id` that is greater than
-    /// `last_pinned`, if any.
-    /// 2 Otherwise pin and return the current greatest version.
     #[named]
     pub async fn pin_version(
         &self,
@@ -479,6 +475,9 @@ where
         ret
     }
 
+    /// Unpin all pins which belongs to `context_id` and has an id which is older than
+    /// `unpin_before`. All versions >= `unpin_before` will be treated as if they are all pinned by
+    /// this `context_id` so they will not be vacummed.
     #[named]
     pub async fn unpin_version_before(
         &self,
@@ -509,6 +508,7 @@ where
         Ok(())
     }
 
+    /// Remove this context from context pin info.
     #[named]
     pub async fn unpin_version(&self, context_id: HummockContextId) -> Result<()> {
         let mut versioning_guard = write_lock!(self, versioning).await;
