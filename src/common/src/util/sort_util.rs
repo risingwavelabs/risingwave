@@ -252,3 +252,5 @@ pub fn compare_rows_in_chunk(
     }
     Ok(Ordering::Equal)
 }
+
+// TODO(rc): add tests

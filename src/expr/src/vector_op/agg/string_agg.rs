@@ -20,6 +20,7 @@ use itertools::Itertools;
 use risingwave_common::array::{Array, ArrayBuilder, ArrayBuilderImpl, ArrayImpl, DataChunk, Row};
 use risingwave_common::error::{ErrorCode, Result};
 use risingwave_common::types::{DataType, ScalarImpl};
+use risingwave_common::util::encoding_for_comparison::{encode_row, is_type_encodable};
 use risingwave_common::util::sort_util::{compare_rows, OrderPair};
 
 use crate::vector_op::agg::aggregator::Aggregator;
@@ -27,12 +28,19 @@ use crate::vector_op::agg::aggregator::Aggregator;
 #[derive(Debug, Clone, PartialEq, Eq)]
 struct OrderableRow {
     row: Row,
+    encoded_row: Option<Vec<u8>>,
     order_pairs: Arc<Vec<OrderPair>>,
 }
 
 impl Ord for OrderableRow {
     fn cmp(&self, other: &Self) -> Ordering {
-        let ord = compare_rows(&self.order_pairs, &self.row, &other.row).unwrap();
+        let ord = if let (Some(encoded_lhs), Some(encoded_rhs)) =
+            (self.encoded_row.as_ref(), other.encoded_row.as_ref())
+        {
+            encoded_lhs.as_slice().cmp(encoded_rhs.as_slice())
+        } else {
+            compare_rows(&self.order_pairs, &self.row, &other.row).unwrap()
+        };
         ord.reverse() // we have to reverse the order because BinaryHeap is a max-heap
     }
 }
@@ -50,6 +58,7 @@ enum StringAggState {
     WithOrder {
         order_pairs: Arc<Vec<OrderPair>>,
         min_heap: BinaryHeap<OrderableRow>,
+        encodable: bool,
     },
 }
 
@@ -60,7 +69,11 @@ pub struct StringAgg {
 }
 
 impl StringAgg {
-    pub fn new(agg_col_idx: usize, order_pairs: Vec<OrderPair>) -> Self {
+    pub fn new(
+        agg_col_idx: usize,
+        order_pairs: Vec<OrderPair>,
+        order_col_types: Vec<DataType>,
+    ) -> Self {
         StringAgg {
             agg_col_idx,
             state: if order_pairs.is_empty() {
@@ -69,6 +82,10 @@ impl StringAgg {
                 StringAggState::WithOrder {
                     order_pairs: Arc::new(order_pairs),
                     min_heap: BinaryHeap::new(),
+                    encodable: order_col_types
+                        .iter()
+                        .map(Clone::clone)
+                        .all(is_type_encodable),
                 }
             },
         }
@@ -85,13 +102,19 @@ impl StringAgg {
             StringAggState::WithOrder {
                 order_pairs,
                 min_heap,
+                encodable,
             } => {
                 let (row_ref, vis) = chunk.row_at(row_id)?;
                 assert!(vis);
                 let row = row_ref.to_owned_row();
-                // TODO(rc): save string instead of ScalarImpl
+                let encoded_row = if *encodable {
+                    Some(encode_row(&row, order_pairs))
+                } else {
+                    None
+                };
                 min_heap.push(OrderableRow {
                     row,
+                    encoded_row,
                     order_pairs: order_pairs.clone(),
                 });
             }
@@ -105,6 +128,7 @@ impl StringAgg {
             StringAggState::WithOrder {
                 order_pairs: _,
                 min_heap,
+                encodable: _,
             } => {
                 if min_heap.is_empty() {
                     None
@@ -136,6 +160,7 @@ impl StringAgg {
             StringAggState::WithOrder {
                 order_pairs: _,
                 min_heap,
+                encodable: _,
             } => {
                 if min_heap.is_empty() {
                     None

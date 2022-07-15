@@ -14,9 +14,9 @@
 
 use itertools::Itertools;
 
-use crate::array::{ArrayImpl, DataChunk};
+use crate::array::{ArrayImpl, DataChunk, Row};
 use crate::error::Result;
-use crate::types::{serialize_datum_ref_into, DataType};
+use crate::types::{serialize_datum_ref_into, DataType, ScalarRefImpl};
 use crate::util::sort_util::{OrderPair, OrderType};
 
 struct EncodedColumn(pub Vec<Vec<u8>>);
@@ -36,14 +36,18 @@ pub fn is_type_encodable(t: DataType) -> bool {
     )
 }
 
+fn encode_value(value: Option<ScalarRefImpl>, order: &OrderType) -> Result<Vec<u8>> {
+    let mut serializer = memcomparable::Serializer::new(vec![]);
+    serializer.set_reverse(order == &OrderType::Descending);
+    serialize_datum_ref_into(&value, &mut serializer)?;
+    Ok(serializer.into_inner())
+}
+
 fn encode_array(array: &ArrayImpl, order: &OrderType) -> Result<EncodedColumn> {
     let mut data = Vec::with_capacity(array.len());
 
     for datum in array.iter() {
-        let mut serializer = memcomparable::Serializer::new(vec![]);
-        serializer.set_reverse(order == &OrderType::Descending);
-        serialize_datum_ref_into(&datum, &mut serializer)?;
-        data.push(serializer.into_inner());
+        data.push(encode_value(datum, order)?);
     }
 
     Ok(EncodedColumn(data))
@@ -69,3 +73,15 @@ pub fn encode_chunk(chunk: &DataChunk, order_pairs: &[OrderPair]) -> Vec<Vec<u8>
 
     encoded_chunk
 }
+
+pub fn encode_row(row: &Row, order_pairs: &[OrderPair]) -> Vec<u8> {
+    let mut encoded_row = vec![];
+    order_pairs.iter().for_each(|o| {
+        let value = row[o.column_idx].as_ref();
+        encoded_row
+            .extend(encode_value(value.map(|x| x.as_scalar_ref_impl()), &o.order_type).unwrap());
+    });
+    encoded_row
+}
+
+// TODO(rc): add tests

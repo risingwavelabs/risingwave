@@ -61,6 +61,7 @@ pub struct AggStateFactory {
     return_type: DataType,
     distinct: bool,
     order_pairs: Vec<OrderPair>,
+    order_col_types: Vec<DataType>,
     filter: ExpressionRef,
 }
 
@@ -69,18 +70,18 @@ impl AggStateFactory {
         let return_type = DataType::from(prost.get_return_type()?);
         let agg_kind = AggKind::try_from(prost.get_type()?)?;
         let distinct = prost.distinct;
-        let order_pairs = prost
-            .get_order_by_fields()
-            .iter()
-            .map(|field| {
-                let col_idx = field.get_input().unwrap().get_column_idx() as usize;
-                let order_type =
-                    OrderType::from_prost(&ProstOrderType::from_i32(field.direction).unwrap());
-                // TODO(yuchao): `nulls first/last` is not supported yet, so it's ignore here,
-                // see also `risingwave_common::util::sort_util::compare_values`
-                OrderPair::new(col_idx, order_type)
-            })
-            .collect::<Vec<_>>();
+        let mut order_pairs = vec![];
+        let mut order_col_types = vec![];
+        prost.get_order_by_fields().iter().for_each(|field| {
+            let col_idx = field.get_input().unwrap().get_column_idx() as usize;
+            let col_type = DataType::from(field.get_type().unwrap());
+            let order_type =
+                OrderType::from_prost(&ProstOrderType::from_i32(field.direction).unwrap());
+            // TODO(yuchao): `nulls first/last` is not supported yet, so it's ignore here,
+            // see also `risingwave_common::util::sort_util::compare_values`
+            order_pairs.push(OrderPair::new(col_idx, order_type));
+            order_col_types.push(col_type);
+        });
         let filter: ExpressionRef = match prost.filter {
             Some(ref expr) => Arc::from(build_from_prost(expr)?),
             None => Arc::from(
@@ -98,6 +99,7 @@ impl AggStateFactory {
                     return_type,
                     distinct,
                     order_pairs,
+                    order_col_types,
                     filter,
                 })
             }
@@ -109,6 +111,7 @@ impl AggStateFactory {
                     return_type,
                     distinct,
                     order_pairs,
+                    order_col_types,
                     filter,
                 }),
                 _ => Err(ErrorCode::InternalError(format!(
@@ -136,6 +139,7 @@ impl AggStateFactory {
             Ok(Box::new(StringAgg::new(
                 self.input_col_idx,
                 self.order_pairs.clone(),
+                self.order_col_types.clone(),
             )))
         } else if let Some(input_type) = self.input_type.clone() {
             create_agg_state_unary(
