@@ -299,6 +299,7 @@ impl DynamicLevelSelector {
             input,
             compression_algorithm,
             target_file_size,
+            splits,
         }
     }
 }
