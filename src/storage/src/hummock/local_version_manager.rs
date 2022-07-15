@@ -227,6 +227,19 @@ impl LocalVersionManager {
                 return false;
             }
         }
+
+        let new_version_id = if pin_resp.0 {
+            match pin_resp.1.last() {
+                Some(version_delta) => version_delta.id,
+                None => old_version.pinned_version().id(),
+            }
+        } else {
+            pin_resp.2.as_ref().unwrap().id
+        };
+        if old_version.pinned_version().id() >= new_version_id {
+            return false;
+        }
+
         let newly_pinned_version = if pin_resp.0 {
             let mut version_to_apply = old_version.pinned_version().version();
             for version_delta in pin_resp.1 {
@@ -236,15 +249,11 @@ impl LocalVersionManager {
         } else {
             pin_resp.2.unwrap()
         };
-        let new_version_id = newly_pinned_version.id;
         for levels in newly_pinned_version.levels.values() {
             if validate_table_key_range(&levels.levels).is_err() {
                 error!("invalid table key range: {:?}", levels.levels);
                 return false;
             }
-        }
-        if old_version.pinned_version().id() >= new_version_id {
-            return false;
         }
 
         if let Some(conflict_detector) = self.write_conflict_detector.as_ref() {
