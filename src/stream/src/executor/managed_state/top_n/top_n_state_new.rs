@@ -21,7 +21,6 @@ use risingwave_common::array::Row;
 use risingwave_common::catalog::{ColumnDesc, ColumnId, TableId};
 use risingwave_common::types::DataType;
 use risingwave_common::util::ordered::*;
-use risingwave_storage::error::StorageResult;
 use risingwave_storage::table::state_table::StateTable;
 use risingwave_storage::StateStore;
 
@@ -42,20 +41,13 @@ pub struct ManagedTopNStateNew<S: StateStore> {
 
 #[derive(Clone, PartialEq, Debug)]
 pub struct TopNStateRow {
-    pub ordered_key: Option<OrderedRow>,
+    pub ordered_key: OrderedRow,
     pub row: Row,
 }
 
 impl TopNStateRow {
     pub fn new(ordered_key: OrderedRow, row: Row) -> Self {
-        Self {
-            ordered_key: Some(ordered_key),
-            row,
-        }
-    }
-
-    pub fn is_valid(&self) -> bool {
-        self.ordered_key.is_some()
+        Self { ordered_key, row }
     }
 }
 
@@ -93,7 +85,7 @@ impl<S: StateStore> ManagedTopNStateNew<S> {
         }
     }
 
-    pub async fn insert(
+    pub fn insert(
         &mut self,
         _key: OrderedRow,
         value: Row,
@@ -104,7 +96,7 @@ impl<S: StateStore> ManagedTopNStateNew<S> {
         Ok(())
     }
 
-    pub async fn delete(
+    pub fn delete(
         &mut self,
         _key: &OrderedRow,
         value: Row,
@@ -115,14 +107,14 @@ impl<S: StateStore> ManagedTopNStateNew<S> {
         Ok(())
     }
 
-    #[allow(dead_code)]
+    #[cfg(test)]
     pub fn total_count(&self) -> usize {
         self.total_count
     }
 
-    fn get_topn_row(&self, iter_res: StorageResult<Cow<Row>>) -> TopNStateRow {
-        let row = iter_res.unwrap().into_owned();
-        let mut datums = vec![];
+    fn get_topn_row(&self, iter_res: Cow<Row>) -> TopNStateRow {
+        let row = iter_res.into_owned();
+        let mut datums = Vec::with_capacity(self.state_table.pk_indices().len());
         for pk_index in self.state_table.pk_indices() {
             datums.push(row.index(*pk_index).clone());
         }
@@ -131,65 +123,23 @@ impl<S: StateStore> ManagedTopNStateNew<S> {
         TopNStateRow::new(pk_ordered, row)
     }
 
-    /// This function will return the rows at the position of `offset` and (`offset` + `limit` - 1),
-    /// which forms the range `[start_row, end_row]` of the top-N range .
-    /// When `offset` is 0 the `start_row` will be the first row in state table;
-    /// When `limit` is 0 the `end_row` will be an invalid row.
+    /// This function will return the rows in the range of [`offset`, `offset` + `limit`),
     pub async fn find_range(
         &self,
         offset: usize,
-        limit: usize,
+        num_limit: usize,
         epoch: u64,
-    ) -> StreamExecutorResult<(TopNStateRow, TopNStateRow)> {
+    ) -> StreamExecutorResult<Vec<TopNStateRow>> {
         let state_table_iter = self.state_table.iter(epoch).await?;
         pin_mut!(state_table_iter);
 
-        let invalid_row = TopNStateRow {
-            ordered_key: None,
-            row: Row::default(),
-        };
-        let mut first_row = invalid_row.clone();
-        if let Some(next_res) = state_table_iter.next().await {
-            first_row = self.get_topn_row(next_res);
+        let mut rows = Vec::with_capacity(num_limit.min(1024));
+        // here we don't expect users to have large OFFSET.
+        let mut stream = state_table_iter.skip(offset).take(num_limit);
+        while let Some(item) = stream.next().await {
+            rows.push(self.get_topn_row(item?));
         }
-
-        // fetch start row
-        let mut start_row = first_row;
-        for i in 0..offset {
-            match state_table_iter.next().await {
-                Some(next_res) => {
-                    if i == offset - 1 {
-                        start_row = self.get_topn_row(next_res);
-                    }
-                }
-                None => {
-                    start_row = invalid_row.clone();
-                    break;
-                }
-            }
-        }
-
-        // fetch end row
-        if limit == 0 {
-            return Ok((start_row, invalid_row.clone()));
-        }
-        let mut end_row = start_row.clone();
-        let num_limit = limit - 1;
-        for i in 0..num_limit {
-            match state_table_iter.next().await {
-                Some(next_res) => {
-                    if i == num_limit - 1 {
-                        end_row = self.get_topn_row(next_res);
-                    }
-                }
-                None => {
-                    end_row = invalid_row.clone();
-                    break;
-                }
-            }
-        }
-
-        Ok((start_row, end_row))
+        Ok(rows)
     }
 
     pub async fn flush(&mut self, epoch: u64) -> StreamExecutorResult<()> {
@@ -237,96 +187,52 @@ mod tests {
         let epoch = 1;
         managed_state
             .insert(ordered_rows[3].clone(), rows[3].clone(), epoch)
-            .await
             .unwrap();
 
         // now ("ab", 4)
-        let range = managed_state.find_range(0, 1, epoch).await.unwrap();
+        let valid_rows = managed_state.find_range(0, 1, epoch).await.unwrap();
 
-        assert_eq!(
-            range,
-            (
-                TopNStateRow {
-                    ordered_key: Some(ordered_rows[3].clone()),
-                    row: rows[3].clone()
-                },
-                TopNStateRow {
-                    ordered_key: Some(ordered_rows[3].clone()),
-                    row: rows[3].clone()
-                },
-            )
-        );
+        assert_eq!(valid_rows.len(), 1);
+        assert_eq!(valid_rows[0].ordered_key, ordered_rows[3].clone());
 
         managed_state
             .insert(ordered_rows[2].clone(), rows[2].clone(), epoch)
-            .await
             .unwrap();
-        let range = managed_state.find_range(1, 1, epoch).await.unwrap();
-        // now ("ab", 4) -> ("abd", 3)
-        assert_eq!(
-            range,
-            (
-                TopNStateRow {
-                    ordered_key: Some(ordered_rows[2].clone()),
-                    row: rows[2].clone()
-                },
-                TopNStateRow {
-                    ordered_key: Some(ordered_rows[2].clone()),
-                    row: rows[2].clone()
-                },
-            )
-        );
+        let valid_rows = managed_state.find_range(1, 1, epoch).await.unwrap();
+        assert_eq!(valid_rows.len(), 1);
+        assert_eq!(valid_rows[0].ordered_key, ordered_rows[2].clone());
 
         managed_state
             .insert(ordered_rows[1].clone(), rows[1].clone(), epoch)
-            .await
             .unwrap();
-
         assert_eq!(3, managed_state.total_count());
 
-        // managed_state.flush(epoch).await.unwrap();
-        let range = managed_state.find_range(1, 2, epoch).await.unwrap();
-        // now ("ab", 4) -> ("abc", 3) -> ("abd", 3)
+        let valid_rows = managed_state.find_range(1, 2, epoch).await.unwrap();
+        assert_eq!(valid_rows.len(), 2);
         assert_eq!(
-            range,
-            (
-                TopNStateRow {
-                    ordered_key: Some(ordered_rows[1].clone()),
-                    row: rows[1].clone()
-                },
-                TopNStateRow {
-                    ordered_key: Some(ordered_rows[2].clone()),
-                    row: rows[2].clone()
-                }
-            )
+            valid_rows.first().unwrap().ordered_key,
+            ordered_rows[1].clone()
+        );
+        assert_eq!(
+            valid_rows.last().unwrap().ordered_key,
+            ordered_rows[2].clone()
         );
 
         // delete ("abc", 3)
         managed_state
             .delete(&ordered_rows[1].clone(), rows[1].clone(), epoch)
-            .await
             .unwrap();
 
         // insert ("abc", 2)
         managed_state
             .insert(ordered_rows[0].clone(), rows[0].clone(), epoch)
-            .await
             .unwrap();
 
-        let range = managed_state.find_range(1, 3, epoch).await.unwrap();
-        // now ("ab", 4) -> ("abc", 2) -> ("abd", 3)
-        assert_eq!(
-            range,
-            (
-                TopNStateRow {
-                    ordered_key: Some(ordered_rows[0].clone()),
-                    row: rows[0].clone()
-                },
-                TopNStateRow {
-                    ordered_key: None,
-                    row: Row::default(),
-                }
-            )
-        );
+        let valid_rows = managed_state.find_range(0, 3, epoch).await.unwrap();
+
+        assert_eq!(valid_rows.len(), 3);
+        assert_eq!(valid_rows[0].ordered_key, ordered_rows[3].clone());
+        assert_eq!(valid_rows[1].ordered_key, ordered_rows[0].clone());
+        assert_eq!(valid_rows[2].ordered_key, ordered_rows[2].clone());
     }
 }

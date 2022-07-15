@@ -46,6 +46,10 @@ message SourceChangeSplitMutation {
   map<uint32, source.ConnectorSplits> actor_splits = 2;
 }
 
+message PauseMutation {}
+
+message ResumeMutation {}
+
 message Barrier {
   data.Epoch epoch = 1;
   oneof mutation {
@@ -58,6 +62,10 @@ message Barrier {
     UpdateMutation update = 5;
     // Change the split of some sources.
     SourceChangeSplitMutation splits = 6;
+    // Pause the dataflow of the whole streaming graph.
+    PauseMutation pause = 7;
+    // Resume the dataflow of the whole streaming graph.
+    ResumeMutation resume = 8;
   }
   // Used for tracing.
   bytes span = 2;

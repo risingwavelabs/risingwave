@@ -14,87 +14,50 @@
 
 use std::fs::{File, OpenOptions};
 use std::os::unix::prelude::{AsRawFd, FileExt, OpenOptionsExt, RawFd};
-use std::path::PathBuf;
+use std::path::Path;
 use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::Arc;
 
-use bytes::Buf;
 use nix::fcntl::{fallocate, FallocateFlags};
 use nix::sys::stat::fstat;
-use nix::unistd::ftruncate;
 
-use super::error::{Error, Result};
-use super::{asyncify, DioBuffer, DIO_BUFFER_ALLOCATOR, LOGICAL_BLOCK_SIZE};
-
-const ST_BLOCK_SIZE: usize = 512;
-
-const MAGIC: &[u8] = b"hummock-cache-file";
-const VERSION: u32 = 1;
+use super::error::Result;
+use super::{asyncify, utils, DioBuffer, DIO_BUFFER_ALLOCATOR, LOGICAL_BLOCK_SIZE, ST_BLOCK_SIZE};
 
 #[derive(Clone, Debug)]
 pub struct CacheFileOptions {
-    pub dir: String,
-    pub id: u64,
-
     pub fs_block_size: usize,
     /// NOTE: `block_size` must be a multiple of `fs_block_size`.
     pub block_size: usize,
-    pub meta_blocks: usize,
     pub fallocate_unit: usize,
 }
 
 impl CacheFileOptions {
     fn assert(&self) {
-        assert_pow2(LOGICAL_BLOCK_SIZE);
-        assert_alignment(LOGICAL_BLOCK_SIZE, self.fs_block_size);
-        assert_alignment(self.fs_block_size, self.block_size);
+        utils::assert_pow2(LOGICAL_BLOCK_SIZE);
+        utils::assert_aligned(LOGICAL_BLOCK_SIZE, self.fs_block_size);
+        utils::assert_aligned(self.fs_block_size, self.block_size);
     }
 }
 
 struct CacheFileCore {
-    file: std::fs::File,
+    file: File,
     len: AtomicUsize,
     capacity: AtomicUsize,
 }
 
-/// # Format
-///
-/// ```plain
-/// header block (1 bs, < logical block size used)
-///
-/// | MAGIC | version | block size | meta blocks |
-///
-/// meta blocks ({meta blocks} bs)
-///
-/// | slot 0 index | slot 1 index |   ...   | padding | (1 bs)
-/// | slot i index | slot i + 1 index | ... | padding | (1 bs)
-/// ...
-///
-/// data blocks
-///
-/// | slot 0 data | slot 1 data | ... |
-/// ```
 #[derive(Clone)]
 pub struct CacheFile {
-    dir: String,
-    id: u64,
-
-    pub fs_block_size: usize,
-    pub block_size: usize,
-    pub meta_blocks: usize,
-    pub fallocate_unit: usize,
+    _fs_block_size: usize,
+    block_size: usize,
+    fallocate_unit: usize,
 
     core: Arc<CacheFileCore>,
 }
 
 impl std::fmt::Debug for CacheFile {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        f.debug_struct("CacheFile")
-            .field(
-                "path",
-                &PathBuf::from(self.dir.as_str()).join(filename(self.id)),
-            )
-            .finish()
+        f.debug_struct("CacheFile").finish()
     }
 }
 
@@ -106,62 +69,32 @@ impl CacheFile {
     /// `options.block_size` (which is required to be a multipler of the file system block size).
     /// With this restriction, blocks can be directly reclaimed by the file system after hole
     /// punching.
-    ///
-    /// Steps:
-    ///
-    /// 1. open the underlying file
-    /// 2. (a) write header block if newly created
-    ///    (b) read header block if exists
-    /// 3. read meta blocks to [`DioBuffer`] (TODO)
-    /// 4. pre-allocate space
-    pub async fn open(options: CacheFileOptions) -> Result<Self> {
+    pub async fn open(path: impl AsRef<Path>, options: CacheFileOptions) -> Result<Self> {
         options.assert();
 
-        // 1.
-        let path = PathBuf::from(options.dir.as_str()).join(filename(options.id));
+        let path = path.as_ref().to_owned();
+
         let mut oopts = OpenOptions::new();
         oopts.create(true);
         oopts.read(true);
         oopts.write(true);
         oopts.custom_flags(libc::O_DIRECT);
 
-        let (file, block_size, meta_blocks, len, capacity, _buffer) = asyncify(move || {
+        let (file, len, capacity) = asyncify(move || {
             let file = oopts.open(path)?;
             let fd = file.as_raw_fd();
             let stat = fstat(fd)?;
             if stat.st_blocks == 0 {
-                // 2a.
-                write_header(&file, options.block_size, options.meta_blocks)?;
-                // 3.
-                let meta_len = options.block_size * options.meta_blocks;
-                let mut buffer = DioBuffer::with_capacity_in(meta_len, &DIO_BUFFER_ALLOCATOR);
-                buffer.resize(meta_len, 0);
-                ftruncate(fd, (options.block_size * (1 + options.meta_blocks)) as i64)?;
-                // 4.
+                // newly created
                 fallocate(
                     fd,
                     FallocateFlags::FALLOC_FL_KEEP_SIZE,
                     0,
                     options.fallocate_unit as i64,
                 )?;
-                Ok((
-                    file,
-                    options.block_size,
-                    options.meta_blocks,
-                    (options.block_size * (1 + options.meta_blocks)) as usize,
-                    options.fallocate_unit,
-                    buffer,
-                ))
+                Ok((file, 0, options.fallocate_unit))
             } else {
-                // 2b.
-                let (block_size, meta_blocks) = read_header(&file)?;
-                // 3.
-                let meta_len = options.block_size * options.meta_blocks;
-                let mut buffer =
-                    DioBuffer::with_capacity_in(block_size * meta_blocks, &DIO_BUFFER_ALLOCATOR);
-                buffer.resize(meta_len, 0);
-                file.read_exact_at(&mut buffer, block_size as u64)?;
-                // 4.
+                // existed
                 fallocate(
                     fd,
                     FallocateFlags::FALLOC_FL_KEEP_SIZE,
@@ -170,23 +103,16 @@ impl CacheFile {
                 )?;
                 Ok((
                     file,
-                    block_size,
-                    meta_blocks,
                     stat.st_size as usize,
                     stat.st_size as usize + options.fallocate_unit,
-                    buffer,
                 ))
             }
         })
         .await?;
 
-        Ok(Self {
-            dir: options.dir,
-            id: options.id,
-
-            fs_block_size: options.fs_block_size,
-            block_size,
-            meta_blocks,
+        let cache_file = Self {
+            _fs_block_size: options.fs_block_size,
+            block_size: options.block_size,
             fallocate_unit: options.fallocate_unit,
 
             core: Arc::new(CacheFileCore {
@@ -194,23 +120,105 @@ impl CacheFile {
                 len: AtomicUsize::new(len),
                 capacity: AtomicUsize::new(capacity),
             }),
+        };
+
+        Ok(cache_file)
+    }
+
+    pub async fn append(&self, buf: DioBuffer) -> Result<u64> {
+        utils::debug_assert_aligned(self.block_size, buf.len());
+
+        let core = self.core.clone();
+        let fallocate_unit = self.fallocate_unit;
+
+        let offset = core.len.fetch_add(buf.len(), Ordering::SeqCst);
+
+        asyncify(move || {
+            let mut capacity = core.capacity.load(Ordering::Acquire);
+
+            // Append the buffer will exceed the cache file allocated capacity, pre-allocate some
+            // space for the cache file.
+            if offset + buf.len() > capacity {
+                loop {
+                    match core.capacity.compare_exchange_weak(
+                        capacity,
+                        capacity + fallocate_unit,
+                        Ordering::SeqCst,
+                        Ordering::Acquire,
+                    ) {
+                        // Pre-allocate space in this thread.
+                        Ok(_) => {
+                            fallocate(
+                                core.file.as_raw_fd(),
+                                FallocateFlags::FALLOC_FL_KEEP_SIZE,
+                                capacity as i64,
+                                fallocate_unit as i64,
+                            )?;
+                            break;
+                        }
+                        Err(c) => {
+                            // The cache file has been pre-allocated by another thread, skip if
+                            // pre-allocated space is enough.
+                            if offset + buf.len() > c {
+                                break;
+                            } else {
+                                capacity = c;
+                            }
+                        }
+                    }
+                }
+            }
+
+            core.file.write_all_at(&buf, offset as u64)?;
+
+            Ok(())
         })
+        .await?;
+
+        Ok(offset as u64)
     }
 
-    pub async fn append(&self) -> Result<()> {
-        todo!()
+    pub async fn read(&self, offset: u64, len: usize) -> Result<DioBuffer> {
+        utils::debug_assert_aligned(self.block_size, len);
+        let core = self.core.clone();
+        asyncify(move || {
+            let mut buf = DioBuffer::with_capacity_in(len, &DIO_BUFFER_ALLOCATOR);
+            buf.resize(len, 0);
+            core.file.read_exact_at(&mut buf, offset)?;
+            Ok(buf)
+        })
+        .await
     }
 
-    pub async fn write(&self) -> Result<()> {
-        todo!()
+    // TODO(MrCroxx): Should be async (likely not)?
+    pub fn punch_hole(&self, offset: u64, len: usize) -> Result<()> {
+        utils::debug_assert_aligned(self.block_size as u64, offset);
+        utils::debug_assert_aligned(self.block_size, len);
+        fallocate(
+            self.fd(),
+            FallocateFlags::FALLOC_FL_PUNCH_HOLE | FallocateFlags::FALLOC_FL_KEEP_SIZE,
+            offset as i64,
+            len as i64,
+        )?;
+        Ok(())
     }
 
-    pub async fn read(&self) -> Result<()> {
-        todo!()
+    pub async fn sync_all(&self) -> Result<()> {
+        let core = self.core.clone();
+        asyncify(move || {
+            core.file.sync_all()?;
+            Ok(())
+        })
+        .await
     }
 
-    pub async fn flush(&self) -> Result<()> {
-        todo!()
+    pub async fn sync_data(&self) -> Result<()> {
+        let core = self.core.clone();
+        asyncify(move || {
+            core.file.sync_data()?;
+            Ok(())
+        })
+        .await
     }
 
     pub fn is_empty(&self) -> bool {
@@ -244,84 +252,10 @@ impl CacheFile {
         self.block_size
     }
 
-    pub fn meta_blocks(&self) -> usize {
-        self.meta_blocks
-    }
-}
-
-impl CacheFile {
     #[inline(always)]
     fn fd(&self) -> RawFd {
         self.core.file.as_raw_fd()
     }
-}
-
-#[inline(always)]
-fn filename(id: u64) -> String {
-    format!("cf-{:020}", id)
-}
-
-fn write_header(file: &File, block_size: usize, meta_blocks: usize) -> Result<()> {
-    let mut buf: DioBuffer = Vec::with_capacity_in(LOGICAL_BLOCK_SIZE, &DIO_BUFFER_ALLOCATOR);
-
-    buf.extend_from_slice(MAGIC);
-    buf.extend_from_slice(&VERSION.to_be_bytes());
-    buf.extend_from_slice(&block_size.to_be_bytes());
-    buf.extend_from_slice(&meta_blocks.to_be_bytes());
-    buf.resize(LOGICAL_BLOCK_SIZE, 0);
-
-    file.write_all_at(&buf, 0)?;
-    Ok(())
-}
-
-fn read_header(file: &File) -> Result<(usize, usize)> {
-    let mut buf: DioBuffer = Vec::with_capacity_in(LOGICAL_BLOCK_SIZE, &DIO_BUFFER_ALLOCATOR);
-    buf.resize(LOGICAL_BLOCK_SIZE, 0);
-    file.read_exact_at(&mut buf, 0)?;
-    let mut cursor = 0;
-
-    cursor += MAGIC.len();
-    let magic = &buf[cursor - MAGIC.len()..cursor];
-    if magic != MAGIC {
-        return Err(Error::Other(format!(
-            "magic mismatch, expected: {:?}, got: {:?}",
-            MAGIC, magic
-        )));
-    }
-
-    cursor += 4;
-    let version = (&buf[cursor - 4..cursor]).get_u32();
-    if version != VERSION {
-        return Err(Error::Other(format!("unsupported version: {}", version)));
-    }
-
-    cursor += 8;
-    let block_size = (&buf[cursor - 8..cursor]).get_u64() as usize;
-
-    cursor += 8;
-    let meta_blocks = (&buf[cursor - 8..cursor]).get_u64() as usize;
-
-    Ok((block_size, meta_blocks))
-}
-
-#[inline(always)]
-fn assert_pow2(v: usize) {
-    assert_eq!(v & (v - 1), 0);
-}
-
-#[inline(always)]
-fn assert_alignment(align: usize, v: usize) {
-    assert_eq!(v & (align - 1), 0, "align: {}, v: {}", align, v);
-}
-
-#[inline(always)]
-fn _align_up(align: usize, v: usize) -> usize {
-    (v + align - 1) & !(align - 1)
-}
-
-#[inline(always)]
-fn _align_down(align: usize, v: usize) -> usize {
-    v & !(align - 1)
 }
 
 #[cfg(test)]
@@ -338,26 +272,39 @@ mod tests {
     #[tokio::test]
     async fn test_file_cache() {
         let tempdir = tempfile::tempdir().unwrap();
+        let path = tempdir.path().join("test-cache-file");
         let options = CacheFileOptions {
-            dir: tempdir.path().to_str().unwrap().to_string(),
-            id: 1,
-
             fs_block_size: 4096,
             block_size: 4096,
-            meta_blocks: 64,
-            fallocate_unit: 64 * 1024 * 1024,
+            fallocate_unit: 4 * 4096,
         };
-        let cf = CacheFile::open(options.clone()).await.unwrap();
+        let cf = CacheFile::open(&path, options.clone()).await.unwrap();
         assert_eq!(cf.block_size, 4096);
-        assert_eq!(cf.meta_blocks, 64);
-        assert_eq!(cf.len(), 4096 * 65);
-        assert_eq!(cf.size(), 64 * 1024 * 1024);
+        assert_eq!(cf.len(), 0);
+        assert_eq!(cf.size(), 4 * 4096);
+
+        let mut wbuf = DioBuffer::with_capacity_in(4096, &DIO_BUFFER_ALLOCATOR);
+        wbuf.extend_from_slice(&[b'x'; 4096]);
+
+        cf.append(wbuf.clone()).await.unwrap();
+        assert_eq!(cf.len(), 4096);
+        assert_eq!(cf.size(), 4 * 4096);
+
+        let rbuf = cf.read(0, 4096).await.unwrap();
+        assert_eq!(rbuf, wbuf);
+
+        cf.append(wbuf.clone()).await.unwrap();
+        cf.append(wbuf.clone()).await.unwrap();
+        cf.append(wbuf.clone()).await.unwrap();
+        cf.append(wbuf.clone()).await.unwrap();
+        assert_eq!(cf.len(), 5 * 4096);
+        assert_eq!(cf.size(), 8 * 4096);
+
         drop(cf);
 
-        let cf = CacheFile::open(options).await.unwrap();
+        let cf = CacheFile::open(&path, options).await.unwrap();
         assert_eq!(cf.block_size, 4096);
-        assert_eq!(cf.meta_blocks, 64);
-        assert_eq!(cf.len(), 4096 * 65);
-        assert_eq!(cf.size(), 64 * 1024 * 1024 + 4096 * 65);
+        assert_eq!(cf.len(), 5 * 4096);
+        assert_eq!(cf.size(), 9 * 4096);
     }
 }

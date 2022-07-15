@@ -13,9 +13,18 @@
 // limitations under the License.
 
 pub mod alloc;
+pub mod buffer;
+pub mod cache;
+pub mod coding;
 pub mod error;
 pub mod file;
-pub mod manager;
+pub mod filter;
+pub mod meta;
+pub mod store;
+pub mod utils;
+
+#[cfg(test)]
+pub mod test_utils;
 
 async fn asyncify<F, T>(f: F) -> error::Result<T>
 where
@@ -38,6 +47,12 @@ where
 ///
 /// For more details, see man open(2) NOTES section.
 const LOGICAL_BLOCK_SIZE: usize = 512;
+/// Size of `st_blocks` with `fstat(2)`.
+const ST_BLOCK_SIZE: usize = 512;
+
+const LRU_SHARD_BITS: usize = 5;
+
 type DioBuffer = Vec<u8, &'static alloc::AlignedAllocator<LOGICAL_BLOCK_SIZE>>;
+
 static DIO_BUFFER_ALLOCATOR: alloc::AlignedAllocator<LOGICAL_BLOCK_SIZE> =
     alloc::AlignedAllocator::<LOGICAL_BLOCK_SIZE>;

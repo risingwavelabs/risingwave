@@ -12,15 +12,14 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-mod top_n_bottom_n_state;
-mod top_n_state;
-mod top_n_state_new;
+use std::hash::{BuildHasher, Hash};
 
-pub use top_n_bottom_n_state::ManagedTopNBottomNState;
-pub use top_n_state::ManagedTopNState;
-pub use top_n_state_new::{ManagedTopNStateNew, TopNStateRow};
+pub trait CacheKey: Eq + Send + Sync + Hash + Clone + 'static + std::fmt::Debug {
+    fn encoded_len() -> usize;
 
-pub mod variants {
-    pub const TOP_N_MIN: usize = 0;
-    pub const TOP_N_MAX: usize = 1;
+    fn encode(&self, buf: &mut [u8]);
+
+    fn decode(buf: &[u8]) -> Self;
 }
+
+pub trait HashBuilder = BuildHasher + Clone + Send + Sync + 'static;

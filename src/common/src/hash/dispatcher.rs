@@ -89,7 +89,7 @@ pub fn hash_key_size(data_type: &DataType) -> HashKeySize {
         DataType::Date => HashKeySize::Fixed(size_of::<NaiveDateWrapper>()),
         DataType::Time => HashKeySize::Fixed(size_of::<NaiveTimeWrapper>()),
         DataType::Timestamp => HashKeySize::Fixed(size_of::<NaiveDateTimeWrapper>()),
-        DataType::Timestampz => HashKeySize::Fixed(size_of::<NaiveDateTimeWrapper>()),
+        DataType::Timestampz => HashKeySize::Fixed(size_of::<i64>()),
         DataType::Interval => HashKeySize::Fixed(size_of::<IntervalUnit>()),
 
         DataType::Varchar => HashKeySize::Variable,
