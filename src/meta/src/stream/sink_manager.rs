@@ -12,25 +12,42 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::collections::HashMap;
+use std::collections::{BTreeMap, HashMap, HashSet};
 use std::sync::Arc;
 
+use crate::stream::CreateMaterializedViewContext;
 use futures::future::try_join_all;
-use risingwave_common::error::{Result, RwError};
-use risingwave_pb::catalog::Sink;
 use risingwave_pb::common::worker_node::State::Running;
-use risingwave_pb::common::WorkerType;
+use itertools::Itertools;
+use tokio::sync::Mutex;
+use risingwave_common::bail;
+use risingwave_common::catalog::TableId;
+use risingwave_common::error::Result;
+use risingwave_common::error::RwError;
+use risingwave_common::types::{ParallelUnitId, VIRTUAL_NODE_COUNT};
+use risingwave_pb::catalog::{Sink};
+use risingwave_pb::common::{ActorInfo, ParallelUnitMapping, WorkerType};
+use risingwave_pb::meta::table_fragments::{ActorState, ActorStatus};
+use risingwave_pb::stream_plan::stream_node::NodeBody;
+use risingwave_pb::stream_plan::{ActorMapping, Dispatcher, DispatcherType, StreamNode};
+use risingwave_pb::stream_service::{
+    BroadcastActorInfoTableRequest, BuildActorsRequest, HangingChannel, UpdateActorsRequest,
+};
+use risingwave_rpc_client::StreamClientPoolRef;
+use uuid::Uuid;
 use risingwave_pb::stream_service::{
     CreateSinkRequest as ComputeNodeCreateSinkRequest,
     DropSinkRequest as ComputeNodeDropSinkRequest,
 };
-use risingwave_rpc_client::StreamClient;
-use tokio::sync::Mutex;
 
-use crate::cluster::ClusterManagerRef;
+use risingwave_rpc_client::StreamClient;
+use super::ScheduledLocations;
+use crate::barrier::{BarrierManagerRef, Command};
+use crate::cluster::{ClusterManagerRef, WorkerId};
 use crate::manager::{MetaSrvEnv, SinkId};
+use crate::model::{ActorId, TableFragments};
 use crate::storage::MetaStore;
-use crate::stream::FragmentManagerRef;
+use crate::stream::{fetch_source_fragments, FragmentManagerRef, Scheduler};
 
 pub type SinkManagerRef<S> = Arc<SinkManager<S>>;
 
@@ -38,6 +55,18 @@ pub type SinkManagerRef<S> = Arc<SinkManager<S>>;
 pub struct SinkManager<S: MetaStore> {
     env: MetaSrvEnv<S>,
     cluster_manager: ClusterManagerRef<S>,
+    /// Manages definition and status of fragments and actors
+    fragment_manager: FragmentManagerRef<S>,
+
+    /// Broadcasts and collect barriers
+    barrier_manager: BarrierManagerRef<S>,
+
+    /// Schedules streaming actors into compute nodes
+    scheduler: Scheduler<S>,
+
+    /// Client Pool to stream service on compute nodes
+    client_pool: StreamClientPoolRef,
+
     core: Arc<Mutex<SinkManagerCore<S>>>,
 }
 
@@ -47,8 +76,8 @@ pub struct SinkManagerCore<S: MetaStore> {
 }
 
 impl<S> SinkManagerCore<S>
-where
-    S: MetaStore,
+    where
+        S: MetaStore,
 {
     fn new(
         fragment_manager: FragmentManagerRef<S>,
@@ -62,28 +91,34 @@ where
 }
 
 impl<S> SinkManager<S>
-where
-    S: MetaStore,
+    where
+        S: MetaStore,
 {
     pub async fn new(
         env: MetaSrvEnv<S>,
         cluster_manager: ClusterManagerRef<S>,
         fragment_manager: FragmentManagerRef<S>,
+        barrier_manager: BarrierManagerRef<S>,
     ) -> Result<Self> {
         let managed_sinks = HashMap::new();
         let core = Arc::new(Mutex::new(SinkManagerCore::new(
-            fragment_manager,
+            fragment_manager.clone(),
             managed_sinks,
         )));
 
         Ok(Self {
-            env,
-            cluster_manager,
+            env: env.clone(),
+            cluster_manager: cluster_manager.clone(),
+            fragment_manager,
+            barrier_manager,
+            scheduler: Scheduler::new(cluster_manager, env.hash_mapping_manager_ref()),
+            client_pool: env.stream_client_pool_ref(),
             core,
         })
     }
 
-    async fn all_stream_clients(&self) -> Result<impl Iterator<Item = StreamClient>> {
+
+    async fn all_stream_clients(&self) -> Result<impl Iterator<Item=StreamClient>> {
         let all_compute_nodes = self
             .cluster_manager
             .list_worker_node(WorkerType::ComputeNode, Some(Running))
@@ -94,14 +129,14 @@ where
                 .iter()
                 .map(|worker| self.env.stream_client_pool().get(worker)),
         )
-        .await?
-        .into_iter();
+            .await?
+            .into_iter();
 
         Ok(all_stream_clients)
     }
 
     /// Broadcast the create sink request to all compute nodes.
-    pub async fn create_sink(&self, sink: &Sink) -> Result<()> {
+    pub async fn create_sink(&self, sink: &Sink, _table_fragments: TableFragments) -> Result<()> {
         // This scope guard does clean up jobs ASYNCHRONOUSLY before Err returns.
         // It MUST be cleared before Ok returns.
         let mut revert_funcs = scopeguard::guard(
@@ -135,6 +170,7 @@ where
             revert_funcs.clear();
             return Ok(());
         }
+
 
         revert_funcs.clear();
         Ok(())
