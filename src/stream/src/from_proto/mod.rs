@@ -84,12 +84,7 @@ macro_rules! build_executor {
                     <$data_type>::new_boxed_executor($source, $node, $store, $stream)
                 },
             )*
-            _ => Err(RwError::from(
-                ErrorCode::InternalError(format!(
-                    "unsupported node: {:?}",
-                    $node.get_node_body().unwrap()
-                )),
-            )),
+            NodeBody::Exchange(_) | NodeBody::DeltaIndexJoin(_) => unreachable!()
         }
     }
 }

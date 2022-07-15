@@ -93,14 +93,6 @@ pub enum DataType {
 const DECIMAL_DEFAULT_PRECISION: u32 = 20;
 const DECIMAL_DEFAULT_SCALE: u32 = 6;
 
-/// Number of bytes of one element in array of [`DataType`].
-pub enum DataSize {
-    /// For types with fixed size, e.g. int, float.
-    Fixed(usize),
-    /// For types with variable size, e.g. string.
-    Variable,
-}
-
 impl From<&ProstDataType> for DataType {
     fn from(proto: &ProstDataType) -> DataType {
         match proto.get_type_name().expect("missing type field") {
@@ -218,27 +210,6 @@ impl DataType {
             is_nullable: true,
             field_type,
             ..Default::default()
-        }
-    }
-
-    pub fn data_size(&self) -> DataSize {
-        use std::mem::size_of;
-        match self {
-            DataType::Boolean => DataSize::Variable,
-            DataType::Int16 => DataSize::Fixed(size_of::<i16>()),
-            DataType::Int32 => DataSize::Fixed(size_of::<i32>()),
-            DataType::Int64 => DataSize::Fixed(size_of::<i64>()),
-            DataType::Float32 => DataSize::Fixed(size_of::<OrderedF32>()),
-            DataType::Float64 => DataSize::Fixed(size_of::<OrderedF64>()),
-            DataType::Decimal => DataSize::Fixed(size_of::<Decimal>()),
-            DataType::Varchar => DataSize::Variable,
-            DataType::Date => DataSize::Fixed(size_of::<NaiveDateWrapper>()),
-            DataType::Time => DataSize::Fixed(size_of::<NaiveTimeWrapper>()),
-            DataType::Timestamp => DataSize::Fixed(size_of::<NaiveDateTimeWrapper>()),
-            DataType::Timestampz => DataSize::Fixed(size_of::<NaiveDateTimeWrapper>()),
-            DataType::Interval => DataSize::Variable,
-            DataType::Struct { .. } => DataSize::Variable,
-            DataType::List { .. } => DataSize::Variable,
         }
     }
 
@@ -769,6 +740,55 @@ impl ScalarImpl {
         })
     }
 
+    /// Deserialize the `data_size` of `input_data_type` in `storage_encoding`. This function will
+    /// consume the offset of deserializer then return the length (without memcopy, only length
+    /// calculation). The difference between `encoding_data_size` and `ScalarImpl::data_size` is
+    /// that `ScalarImpl::data_size` calculates the `memory_length` of type instead of
+    /// `storage_encoding`
+    pub fn encoding_data_size(
+        data_type: &DataType,
+        deserializer: &mut memcomparable::Deserializer<impl Buf>,
+    ) -> memcomparable::Result<usize> {
+        let base_position = deserializer.position();
+        let null_tag = u8::deserialize(&mut *deserializer)?;
+        match null_tag {
+            0 => {}
+            1 => {
+                use std::mem::size_of;
+                let len = match data_type {
+                    DataType::Int16 => size_of::<i16>(),
+                    DataType::Int32 => size_of::<i32>(),
+                    DataType::Int64 => size_of::<i64>(),
+                    DataType::Float32 => size_of::<OrderedF32>(),
+                    DataType::Float64 => size_of::<OrderedF64>(),
+                    DataType::Date => size_of::<NaiveDateWrapper>(),
+                    DataType::Time => size_of::<NaiveTimeWrapper>(),
+                    DataType::Timestamp => size_of::<NaiveDateTimeWrapper>(),
+                    DataType::Timestampz => size_of::<i64>(),
+                    DataType::Boolean => size_of::<u8>(),
+                    DataType::Interval => size_of::<IntervalUnit>(),
+
+                    DataType::Decimal => deserializer.read_decimal_len()?,
+                    DataType::List { .. } | DataType::Struct { .. } => {
+                        // these two types is var-length and should only be determine at runtime.
+                        // TODO: need some test for this case (e.g. e2e test)
+                        deserializer.read_struct_and_list_len()?
+                    }
+                    DataType::Varchar => deserializer.read_bytes_len()?,
+                };
+
+                // consume offset of fixed_type
+                if deserializer.position() == base_position + 1 {
+                    // fixed type
+                    deserializer.advance(len);
+                }
+            }
+            _ => return Err(memcomparable::Error::InvalidTagEncoding(null_tag as _)),
+        }
+
+        Ok(deserializer.position() - base_position)
+    }
+
     pub fn to_protobuf(&self) -> Vec<u8> {
         let body = match self {
             ScalarImpl::Int16(v) => v.to_be_bytes().to_vec(),
@@ -780,9 +800,9 @@ impl ScalarImpl {
             ScalarImpl::Bool(v) => (*v as i8).to_be_bytes().to_vec(),
             ScalarImpl::Decimal(v) => v.to_string().as_bytes().to_vec(),
             ScalarImpl::Interval(v) => v.to_protobuf_owned(),
-            ScalarImpl::NaiveDate(_) => todo!(),
-            ScalarImpl::NaiveDateTime(_) => todo!(),
-            ScalarImpl::NaiveTime(_) => todo!(),
+            ScalarImpl::NaiveDate(v) => v.to_protobuf_owned(),
+            ScalarImpl::NaiveDateTime(v) => v.to_protobuf_owned(),
+            ScalarImpl::NaiveTime(v) => v.to_protobuf_owned(),
             ScalarImpl::Struct(v) => v.to_protobuf_owned(),
             ScalarImpl::List(v) => v.to_protobuf_owned(),
         };
@@ -842,6 +862,11 @@ impl ScalarImpl {
                 b,
                 data_type.get_interval_type()?,
             )?),
+            TypeName::Timestamp => {
+                ScalarImpl::NaiveDateTime(NaiveDateTimeWrapper::from_protobuf_bytes(b)?)
+            }
+            TypeName::Time => ScalarImpl::NaiveTime(NaiveTimeWrapper::from_protobuf_bytes(b)?),
+            TypeName::Date => ScalarImpl::NaiveDate(NaiveDateWrapper::from_protobuf_bytes(b)?),
             TypeName::Struct => {
                 let struct_value: ProstStructValue = Message::decode(b.as_slice())?;
                 let fields: Vec<Datum> = struct_value
@@ -969,5 +994,24 @@ mod tests {
         assert_eq!(std::mem::size_of::<Decimal>(), 20);
         assert_eq!(std::mem::size_of::<ScalarImpl>(), 32);
         assert_eq!(std::mem::size_of::<Datum>(), 32);
+    }
+
+    #[test]
+    fn test_protobuf_conversion() {
+        let v = ScalarImpl::NaiveDateTime(NaiveDateTimeWrapper::default());
+        let actual =
+            ScalarImpl::bytes_to_scalar(&v.to_protobuf(), &DataType::Timestamp.to_protobuf())
+                .unwrap();
+        assert_eq!(v, actual);
+
+        let v = ScalarImpl::NaiveDate(NaiveDateWrapper::default());
+        let actual =
+            ScalarImpl::bytes_to_scalar(&v.to_protobuf(), &DataType::Date.to_protobuf()).unwrap();
+        assert_eq!(v, actual);
+
+        let v = ScalarImpl::NaiveTime(NaiveTimeWrapper::default());
+        let actual =
+            ScalarImpl::bytes_to_scalar(&v.to_protobuf(), &DataType::Time.to_protobuf()).unwrap();
+        assert_eq!(v, actual);
     }
 }

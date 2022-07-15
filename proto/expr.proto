@@ -153,4 +153,5 @@ message AggCall {
   repeated Arg args = 2;
   data.DataType return_type = 3;
   bool distinct = 4;
+  ExprNode filter = 5;
 }

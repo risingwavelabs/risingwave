@@ -225,6 +225,7 @@ impl BuildHasher for PrecomputedBuildHasher {
     }
 }
 
+pub type Key8 = FixedSizeKey<1>;
 pub type Key16 = FixedSizeKey<2>;
 pub type Key32 = FixedSizeKey<4>;
 pub type Key64 = FixedSizeKey<8>;

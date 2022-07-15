@@ -346,6 +346,8 @@ async fn test_state_table_update_insert() -> StorageResult<()> {
         .await
         .unwrap();
     assert_eq!(row1, None);
+
+    epoch += 1;
     state_table.commit(epoch).await.unwrap();
 
     let row1_commit = state_table

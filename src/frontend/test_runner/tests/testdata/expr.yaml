@@ -162,7 +162,7 @@
       BatchProject { exprs: [Case(($0 = 1:Int32), 1:Int32::Decimal, ($0 = 2:Int32), 2:Int32::Decimal, 0.0:Decimal)] }
         BatchScan { table: t, columns: [v1] }
   stream_plan: |
-    StreamMaterialize { columns: [expr, _row_id(hidden)], pk_columns: [_row_id] }
+    StreamMaterialize { columns: [expr, t._row_id(hidden)], pk_columns: [t._row_id] }
       StreamProject { exprs: [Case(($0 = 1:Int32), 1:Int32::Decimal, ($0 = 2:Int32), 2:Int32::Decimal, 0.0:Decimal), $1] }
         StreamTableScan { table: t, columns: [v1, _row_id], pk_indices: [1] }
 - sql: |
@@ -199,7 +199,7 @@
       BatchProject { exprs: [Case(($0 = 1:Int32), null:Int32, $0)] }
         BatchScan { table: t, columns: [v1] }
   stream_plan: |
-    StreamMaterialize { columns: [expr, _row_id(hidden)], pk_columns: [_row_id] }
+    StreamMaterialize { columns: [expr, t._row_id(hidden)], pk_columns: [t._row_id] }
       StreamProject { exprs: [Case(($0 = 1:Int32), null:Int32, $0), $1] }
         StreamTableScan { table: t, columns: [v1, _row_id], pk_indices: [1] }
 - sql: |
@@ -218,7 +218,7 @@
       BatchProject { exprs: [Coalesce($0, 1:Int32)] }
         BatchScan { table: t, columns: [v1] }
   stream_plan: |
-    StreamMaterialize { columns: [expr, _row_id(hidden)], pk_columns: [_row_id] }
+    StreamMaterialize { columns: [expr, t._row_id(hidden)], pk_columns: [t._row_id] }
       StreamProject { exprs: [Coalesce($0, 1:Int32), $1] }
         StreamTableScan { table: t, columns: [v1, _row_id], pk_indices: [1] }
 - sql: |
@@ -244,7 +244,7 @@
       BatchProject { exprs: [ConcatWs($0, 1:Int32::Varchar)] }
         BatchScan { table: t, columns: [v1] }
   stream_plan: |
-    StreamMaterialize { columns: [expr, _row_id(hidden)], pk_columns: [_row_id] }
+    StreamMaterialize { columns: [expr, t._row_id(hidden)], pk_columns: [t._row_id] }
       StreamProject { exprs: [ConcatWs($0, 1:Int32::Varchar), $1] }
         StreamTableScan { table: t, columns: [v1, _row_id], pk_indices: [1] }
 - sql: |
@@ -270,7 +270,7 @@
       BatchProject { exprs: [ConcatWs('':Varchar, $0, $1::Varchar, $2::Varchar, 1:Int32::Varchar)] }
         BatchScan { table: t, columns: [v1, v2, v3] }
   stream_plan: |
-    StreamMaterialize { columns: [expr, _row_id(hidden)], pk_columns: [_row_id] }
+    StreamMaterialize { columns: [expr, t._row_id(hidden)], pk_columns: [t._row_id] }
       StreamProject { exprs: [ConcatWs('':Varchar, $0, $1::Varchar, $2::Varchar, 1:Int32::Varchar), $3] }
         StreamTableScan { table: t, columns: [v1, v2, v3, _row_id], pk_indices: [3] }
 - sql: |

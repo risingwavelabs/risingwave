@@ -26,7 +26,7 @@ use async_trait::async_trait;
 pub use column::*;
 pub use internal_table::*;
 pub use physical_table::*;
-pub use schema::{test_utils as schema_test_utils, Field, Schema};
+pub use schema::{test_utils as schema_test_utils, Field, FieldVerboseDisplay, Schema};
 
 use crate::array::Row;
 pub use crate::config::constant::hummock;
