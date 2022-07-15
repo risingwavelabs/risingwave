@@ -472,6 +472,26 @@ impl LogicalAggBuilder {
         }
         None
     }
+
+    pub fn check_approx_count_distinct(&self) -> Result<()> {
+        let mut has_distinct = false;
+        let mut has_approx_count_distinct = false;
+        self.agg_calls.iter().for_each(|agg_call| {
+            if agg_call.distinct {
+                has_distinct = true;
+            }
+            if agg_call.agg_kind == AggKind::ApproxCountDistinct {
+                has_approx_count_distinct = true;
+            }
+        });
+        if has_approx_count_distinct && has_distinct {
+            return Err(ErrorCode::InvalidInputSyntax(
+                "The APPROXIMATE_COUNT_DISTINCT function cannot appear in the same query block as DISTINCT aggregates.".into(),
+            )
+            .into());
+        }
+        Ok(())
+    }
 }
 
 impl ExprRewriter for LogicalAggBuilder {
@@ -695,6 +715,8 @@ impl LogicalAgg {
         let rewritten_having = having
             .map(|expr| agg_builder.rewrite_with_error(expr))
             .transpose()?;
+
+        agg_builder.check_approx_count_distinct()?;
 
         Ok((
             agg_builder.build(input).into(),

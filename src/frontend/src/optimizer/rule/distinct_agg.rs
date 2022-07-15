@@ -186,15 +186,9 @@ impl DistinctAgg {
                 agg_call.filter = Condition::true_cond();
 
                 // change final agg's agg_kind just like two-phase agg.
-                match agg_call.agg_kind {
-                    AggKind::Count => {
-                        indices_of_count.push(i);
-                        agg_call.agg_kind = AggKind::Sum;
-                    }, 
-                    AggKind::ApproxCountDistinct => {
-                        panic!("The APPROXIMATE_COUNT_DISTINCT function cannot appear in the same query block as DISTINCT aggregates.");
-                    },
-                    _ => {}
+                if agg_call.agg_kind == AggKind::Count {
+                    indices_of_count.push(i);
+                    agg_call.agg_kind = AggKind::Sum;
                 };
 
                 // the index of non-distinct aggs' subset in `column_subsets` is always 0 if it
