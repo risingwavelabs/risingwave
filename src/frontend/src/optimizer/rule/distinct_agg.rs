@@ -161,7 +161,7 @@ impl DistinctAgg {
                         ExprType::GreaterThan,
                         vec![
                             InputRef::new(index_of_middle_agg, DataType::Int64).into(),
-                            Literal::new(Some(0.into()), DataType::Int64).into(),
+                            Literal::new(Some(0_i64.into()), DataType::Int64).into(),
                         ],
                     )
                     .unwrap();

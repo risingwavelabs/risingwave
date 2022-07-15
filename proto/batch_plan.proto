@@ -63,11 +63,6 @@ message FilterNode {
   expr.ExprNode search_condition = 1;
 }
 
-message FilterScanNode {
-  uint32 table_id = 1;
-  repeated int32 column_ids = 2;
-}
-
 message InsertNode {
   uint32 table_source_id = 1;
   repeated int32 column_ids = 2;
@@ -152,14 +147,7 @@ message HopWindowNode {
 }
 
 message TableFunctionNode {
-  enum Type {
-    GENERATE = 0;
-    UNNEST = 1;
-  }
-  Type function_type = 1;
-  repeated expr.ExprNode args = 2;
-  // The element type of the return set.
-  data.DataType return_type = 3;
+  expr.TableFunction table_function = 1;
 }
 
 // Task is a running instance of Stage.

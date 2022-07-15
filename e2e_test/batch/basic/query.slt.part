@@ -16,6 +16,16 @@ select v1, v2, v3 from t3;
 1 2 NULL
 
 query III
+select * from t3;
+----
+1 2 NULL
+
+query III
+select t3.* from t3;
+----
+1 2 NULL
+
+query III
 select count(*) from t3;
 ----
 1

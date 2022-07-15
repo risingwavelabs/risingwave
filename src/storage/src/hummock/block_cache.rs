@@ -113,23 +113,27 @@ impl BlockCache {
         ))
     }
 
-    pub async fn get_or_insert_with<F>(
+    pub async fn get_or_insert_with<F, Fut>(
         &self,
         sst_id: HummockSSTableId,
         block_idx: u64,
         f: F,
     ) -> HummockResult<BlockHolder>
     where
-        F: Future<Output = HummockResult<Box<Block>>>,
+        F: FnOnce() -> Fut,
+        Fut: Future<Output = HummockResult<Box<Block>>> + Send + 'static,
     {
         let h = Self::hash(sst_id, block_idx);
         let key = (sst_id, block_idx);
         let entry = self
             .inner
-            .lookup_with_request_dedup::<_, HummockError, _>(h, key, || async {
-                let block = f.await?;
-                let len = block.len();
-                Ok((block, len))
+            .lookup_with_request_dedup::<_, HummockError, _>(h, key, || {
+                let f = f();
+                async move {
+                    let block = f.await?;
+                    let len = block.len();
+                    Ok((block, len))
+                }
             })
             .await
             .map_err(|e| {

@@ -17,27 +17,27 @@ pub struct AlignedAllocator<const ALIGN: usize>;
 extern crate alloc;
 use alloc::alloc::{Allocator, Global};
 
-#[inline(always)]
-fn align_up(align: usize, v: usize) -> usize {
-    debug_assert_eq!(align & (align - 1), 0);
-    (v + align - 1) & !(align - 1)
-}
+use super::utils;
 
 unsafe impl<const ALIGN: usize> Allocator for AlignedAllocator<ALIGN> {
     fn allocate(
         &self,
         layout: std::alloc::Layout,
     ) -> Result<std::ptr::NonNull<[u8]>, std::alloc::AllocError> {
-        let layout =
-            std::alloc::Layout::from_size_align(layout.size(), align_up(ALIGN, layout.align()))
-                .unwrap();
+        let layout = std::alloc::Layout::from_size_align(
+            layout.size(),
+            utils::align_up(ALIGN, layout.align()),
+        )
+        .unwrap();
         Global.allocate(layout)
     }
 
     unsafe fn deallocate(&self, ptr: std::ptr::NonNull<u8>, layout: std::alloc::Layout) {
-        let layout =
-            std::alloc::Layout::from_size_align(layout.size(), align_up(ALIGN, layout.align()))
-                .unwrap();
+        let layout = std::alloc::Layout::from_size_align(
+            layout.size(),
+            utils::align_up(ALIGN, layout.align()),
+        )
+        .unwrap();
         Global.deallocate(ptr, layout)
     }
 }
@@ -46,25 +46,20 @@ unsafe impl<const ALIGN: usize> Allocator for AlignedAllocator<ALIGN> {
 mod tests {
     use super::*;
 
-    fn assert_alignment(align: usize, v: usize) {
-        assert_eq!(align & (align - 1), 0);
-        assert_eq!(v & (align - 1), 0);
-    }
-
     #[test]
     fn test_aligned_buffer() {
         const ALIGN: usize = 512;
         let allocator = AlignedAllocator::<ALIGN>;
 
         let mut buf: Vec<u8, _> = Vec::with_capacity_in(ALIGN * 8, &allocator);
-        assert_alignment(ALIGN, buf.as_ptr().addr());
+        utils::assert_aligned(ALIGN, buf.as_ptr().addr());
 
         buf.extend_from_slice(&[b'x'; ALIGN * 8]);
-        assert_alignment(ALIGN, buf.as_ptr().addr());
+        utils::assert_aligned(ALIGN, buf.as_ptr().addr());
         assert_eq!(buf, [b'x'; ALIGN * 8]);
 
         buf.extend_from_slice(&[b'x'; ALIGN * 8]);
-        assert_alignment(ALIGN, buf.as_ptr().addr());
+        utils::assert_aligned(ALIGN, buf.as_ptr().addr());
         assert_eq!(buf, [b'x'; ALIGN * 16])
     }
 }
