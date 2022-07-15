@@ -15,7 +15,7 @@ use std::ops::{Bound, RangeBounds};
 use std::sync::Arc;
 
 use futures::future::try_join_all;
-use futures::pin_mut;
+use futures::{pin_mut, StreamExt};
 use futures_async_stream::try_stream;
 use itertools::Itertools;
 use risingwave_common::array::{DataChunk, Row};
@@ -23,6 +23,7 @@ use risingwave_common::buffer::Bitmap;
 use risingwave_common::catalog::{ColumnDesc, ColumnId, OrderedColumnDesc, Schema, TableId};
 use risingwave_common::error::{Result, RwError};
 use risingwave_common::types::{DataType, Datum, ScalarImpl};
+use risingwave_common::util::select_all;
 use risingwave_common::util::sort_util::OrderType;
 use risingwave_pb::batch_plan::plan_node::NodeBody;
 use risingwave_pb::batch_plan::{scan_range, ScanRange};
@@ -282,56 +283,70 @@ impl<S: StateStore> Executor for RowSeqScanExecutor<S> {
     }
 
     fn execute(self: Box<Self>) -> BoxedDataChunkStream {
-        self.do_execute()
+        let Self {
+            chunk_size,
+            schema,
+            identity: _,
+            stats,
+            scan_types,
+        } = *self;
+        let streams = scan_types
+            .into_iter()
+            .map(|scan_type| Self::do_execute(scan_type, stats.clone(), schema.clone(), chunk_size))
+            .collect();
+        select_all(streams).boxed()
     }
 }
 
 impl<S: StateStore> RowSeqScanExecutor<S> {
     #[try_stream(boxed, ok = DataChunk, error = RwError)]
-    async fn do_execute(self: Box<Self>) {
-        for scan_type in self.scan_types {
-            match scan_type {
-                ScanType::TableScan(iter) => {
-                    pin_mut!(iter);
-                    loop {
-                        let timer = self.stats.row_seq_scan_next_duration.start_timer();
+    async fn do_execute(
+        scan_type: ScanType<S>,
+        stats: Arc<BatchMetrics>,
+        schema: Schema,
+        chunk_size: usize,
+    ) {
+        match scan_type {
+            ScanType::TableScan(iter) => {
+                pin_mut!(iter);
+                loop {
+                    let timer = stats.row_seq_scan_next_duration.start_timer();
 
-                        let chunk = iter
-                            .collect_data_chunk(&self.schema, Some(self.chunk_size))
-                            .await
-                            .map_err(RwError::from)?;
-                        timer.observe_duration();
+                    let chunk = iter
+                        .collect_data_chunk(&schema, Some(chunk_size))
+                        .await
+                        .map_err(RwError::from)?;
+                    timer.observe_duration();
 
-                        if let Some(chunk) = chunk {
-                            yield chunk
-                        } else {
-                            break;
-                        }
+                    if let Some(chunk) = chunk {
+                        yield chunk
+                    } else {
+                        break;
                     }
                 }
-                ScanType::RangeScan(iter) => {
-                    pin_mut!(iter);
-                    loop {
-                        // TODO: same as TableScan except iter type
-                        let timer = self.stats.row_seq_scan_next_duration.start_timer();
+            }
+            ScanType::RangeScan(iter) => {
+                pin_mut!(iter);
+                loop {
+                    // TODO: same as TableScan except iter type
+                    let timer = stats.row_seq_scan_next_duration.start_timer();
 
-                        let chunk = iter
-                            .collect_data_chunk(&self.schema, Some(self.chunk_size))
-                            .await
-                            .map_err(RwError::from)?;
-                        timer.observe_duration();
+                    let chunk = iter
+                        .collect_data_chunk(&schema, Some(chunk_size))
+                        .await
+                        .map_err(RwError::from)?;
+                    timer.observe_duration();
 
-                        if let Some(chunk) = chunk {
-                            yield chunk
-                        } else {
-                            break;
-                        }
+                    if let Some(chunk) = chunk {
+                        yield chunk
+                    } else {
+                        break;
                     }
                 }
-                ScanType::PointGet(row) => {
-                    if let Some(row) = row {
-                        yield DataChunk::from_rows(&[row], &self.schema.data_types())?;
-                    }
+            }
+            ScanType::PointGet(row) => {
+                if let Some(row) = row {
+                    yield DataChunk::from_rows(&[row], &schema.data_types())?;
                 }
             }
         }
