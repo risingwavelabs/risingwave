@@ -229,56 +229,54 @@ impl DispatchExecutorInner {
         Ok(())
     }
 
-    /// Update the dispatcher in this executor with `update`.
-    fn update_dispatcher<const PRE: bool>(&mut self, update: &ProstDispatcherUpdate) -> Result<()> {
-        let dispatcher = self
-            .dispatchers
+    fn find_dispatcher(&mut self, dispatcher_id: DispatcherId) -> &mut DispatcherImpl {
+        self.dispatchers
             .iter_mut()
-            .find(|d| d.dispatcher_id() == update.dispatcher_id)
-            .unwrap_or_else(|| panic!("dispatcher {} not found", update.dispatcher_id));
+            .find(|d| d.dispatcher_id() == dispatcher_id)
+            .unwrap_or_else(|| panic!("dispatcher {}:{} not found", self.actor_id, dispatcher_id))
+    }
 
-        if PRE {
-            // Update the dispatcher BEFORE we actually dispatch this barrier. We'll only add the
-            // new outputs.
-            let outputs: Vec<_> = update
-                .added_downstream_actor_id
-                .iter()
-                .map(|&id| new_output(&self.context, self.actor_id, id))
-                .try_collect()?;
-            dispatcher.add_outputs(outputs);
-        } else {
-            // Update the dispatcher AFTER we dispatch this barrier. We'll remove some outputs and
-            // finally update the hash mapping.
-            let ids = update.removed_downstream_actor_id.iter().copied().collect();
-            dispatcher.remove_outputs(&ids);
+    /// Update the dispatcher BEFORE we actually dispatch this barrier. We'll only add the new
+    /// outputs.
+    fn pre_update_dispatcher(&mut self, update: &ProstDispatcherUpdate) -> Result<()> {
+        let outputs: Vec<_> = update
+            .added_downstream_actor_id
+            .iter()
+            .map(|&id| new_output(&self.context, self.actor_id, id))
+            .try_collect()?;
 
-            #[expect(clippy::single_match)]
-            match dispatcher {
-                DispatcherImpl::Hash(dispatcher) => {
-                    dispatcher.hash_mapping = {
-                        let compressed_mapping = update.get_hash_mapping()?;
-                        decompress_data(
-                            &compressed_mapping.original_indices,
-                            &compressed_mapping.data,
-                        )
-                    }
+        let dispatcher = self.find_dispatcher(update.dispatcher_id);
+        dispatcher.add_outputs(outputs);
+
+        Ok(())
+    }
+
+    /// Update the dispatcher AFTER we dispatch this barrier. We'll remove some outputs and finally
+    /// update the hash mapping.
+    fn post_update_dispatcher(&mut self, update: &ProstDispatcherUpdate) -> Result<()> {
+        let ids = update.removed_downstream_actor_id.iter().copied().collect();
+
+        let dispatcher = self.find_dispatcher(update.dispatcher_id);
+        dispatcher.remove_outputs(&ids);
+
+        #[expect(clippy::single_match)]
+        match dispatcher {
+            DispatcherImpl::Hash(dispatcher) => {
+                dispatcher.hash_mapping = {
+                    let compressed_mapping = update.get_hash_mapping()?;
+                    decompress_data(
+                        &compressed_mapping.original_indices,
+                        &compressed_mapping.data,
+                    )
                 }
-                _ => {}
             }
+            _ => {}
         }
 
         Ok(())
     }
 
-    fn pre_update_dispatcher(&mut self, update: &ProstDispatcherUpdate) -> Result<()> {
-        self.update_dispatcher::<true>(update)
-    }
-
-    fn post_update_dispatcher(&mut self, update: &ProstDispatcherUpdate) -> Result<()> {
-        self.update_dispatcher::<false>(update)
-    }
-
-    /// For `Add` and `Update(Add)`, update the dispatchers before we dispatch the barrier.
+    /// For `Add` and `Update`, update the dispatchers before we dispatch the barrier.
     async fn pre_mutate_dispatchers(&mut self, mutation: &Option<Arc<Mutation>>) -> Result<()> {
         let Some(mutation) = mutation.as_deref() else {
             return Ok(())
@@ -301,7 +299,7 @@ impl DispatchExecutorInner {
         Ok(())
     }
 
-    /// For `Stop` and `Update(Remove)`, update the dispatchers after we dispatch the barrier.
+    /// For `Stop` and `Update`, update the dispatchers after we dispatch the barrier.
     async fn post_mutate_dispatchers(&mut self, mutation: &Option<Arc<Mutation>>) -> Result<()> {
         let Some(mutation) = mutation.as_deref() else {
             return Ok(())
@@ -450,12 +448,6 @@ macro_rules! impl_dispatcher {
                 }
             }
 
-            pub fn set_outputs(&mut self, outputs: impl IntoIterator<Item = BoxedOutput>) {
-                match self {
-                    $( Self::$variant_name(inner) => inner.set_outputs(outputs), )*
-                }
-            }
-
             pub fn add_outputs(&mut self, outputs: impl IntoIterator<Item = BoxedOutput>) {
                 match self {
                     $(Self::$variant_name(inner) => inner.add_outputs(outputs), )*
@@ -513,7 +505,6 @@ pub trait Dispatcher: Debug + 'static {
     fn dispatch_data(&mut self, chunk: StreamChunk) -> Self::DataFuture<'_>;
     fn dispatch_barrier(&mut self, barrier: Barrier) -> Self::BarrierFuture<'_>;
 
-    fn set_outputs(&mut self, outputs: impl IntoIterator<Item = BoxedOutput>);
     fn add_outputs(&mut self, outputs: impl IntoIterator<Item = BoxedOutput>);
     fn remove_outputs(&mut self, actor_ids: &HashSet<ActorId>);
 
@@ -558,11 +549,6 @@ impl Dispatcher for RoundRobinDataDispatcher {
             }
             Ok(())
         }
-    }
-
-    fn set_outputs(&mut self, outputs: impl IntoIterator<Item = BoxedOutput>) {
-        self.outputs = outputs.into_iter().collect();
-        self.cur = self.cur.min(self.outputs.len() - 1);
     }
 
     fn add_outputs(&mut self, outputs: impl IntoIterator<Item = BoxedOutput>) {
@@ -622,10 +608,6 @@ impl HashDataDispatcher {
 
 impl Dispatcher for HashDataDispatcher {
     define_dispatcher_associated_types!();
-
-    fn set_outputs(&mut self, outputs: impl IntoIterator<Item = BoxedOutput>) {
-        self.outputs = outputs.into_iter().collect()
-    }
 
     fn add_outputs(&mut self, outputs: impl IntoIterator<Item = BoxedOutput>) {
         self.outputs.extend(outputs.into_iter());
@@ -812,10 +794,6 @@ impl Dispatcher for BroadcastDispatcher {
         }
     }
 
-    fn set_outputs(&mut self, outputs: impl IntoIterator<Item = BoxedOutput>) {
-        self.outputs = Self::into_pairs(outputs).collect()
-    }
-
     fn add_outputs(&mut self, outputs: impl IntoIterator<Item = BoxedOutput>) {
         self.outputs.extend(Self::into_pairs(outputs));
     }
@@ -861,13 +839,8 @@ impl SimpleDispatcher {
 impl Dispatcher for SimpleDispatcher {
     define_dispatcher_associated_types!();
 
-    fn set_outputs(&mut self, outputs: impl IntoIterator<Item = BoxedOutput>) {
-        self.output = Some(outputs.into_iter().next().unwrap());
-    }
-
-    fn add_outputs(&mut self, outputs: impl IntoIterator<Item = BoxedOutput>) {
-        // TODO: ban this after removing `AddOutputs` mutation.
-        self.output = Some(outputs.into_iter().next().unwrap());
+    fn add_outputs(&mut self, _outputs: impl IntoIterator<Item = BoxedOutput>) {
+        panic!("simple dispatcher does not support add_outputs");
     }
 
     fn dispatch_barrier(&mut self, barrier: Barrier) -> Self::BarrierFuture<'_> {
