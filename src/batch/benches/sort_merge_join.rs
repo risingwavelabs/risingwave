@@ -43,8 +43,11 @@ fn create_sort_merge_join_executor(
     Box::new(SortMergeJoinExecutor::new(
         OrderType::Ascending,
         JoinType::Inner,
+        // [field[0] of the left schema, field[0] of the right schema]
         vec![0, 1],
+        // field[0] of the left schema
         vec![0],
+        // field[0] of the right schema
         vec![0],
         left_child,
         right_child,
