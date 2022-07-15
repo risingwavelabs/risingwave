@@ -16,13 +16,14 @@ use std::collections::hash_map::Entry;
 use std::collections::{BTreeMap, HashMap, HashSet};
 use std::sync::Arc;
 
+use itertools::Itertools;
 use risingwave_common::catalog::TableId;
 use risingwave_common::error::ErrorCode::InternalError;
 use risingwave_common::error::{Result, RwError};
 use risingwave_common::try_match_expand;
 use risingwave_common::types::{ParallelUnitId, VIRTUAL_NODE_COUNT};
 use risingwave_common::util::compress::decompress_data;
-use risingwave_pb::common::ParallelUnit;
+use risingwave_pb::common::{ParallelUnit, ParallelUnitType, WorkerNode};
 use risingwave_pb::meta::table_fragments::ActorState;
 use risingwave_pb::stream_plan::{Dispatcher, FragmentType, StreamActor};
 use tokio::sync::RwLock;
@@ -322,9 +323,27 @@ where
     /// Used in [`crate::barrier::GlobalBarrierManager`]
     pub async fn migrate_actors(
         &self,
-        migrate_map: &HashMap<ActorId, ParallelUnit>,
+        migrate_map: &HashMap<ParallelUnitId, WorkerId>,
+        node_map: &HashMap<WorkerId, WorkerNode>,
     ) -> Result<(Vec<TableFragments>, HashMap<ParallelUnitId, ParallelUnit>)> {
         let mut parallel_unit_migrate_map = HashMap::new();
+        let mut pu_hash_map: HashMap<WorkerId, Vec<&ParallelUnit>> = HashMap::new();
+        let mut pu_single_map: HashMap<WorkerId, Vec<&ParallelUnit>> = HashMap::new();
+        // split parallelunits of node into types, map them with WorkerId
+        for (node_id, node) in node_map {
+            let pu_hash = node
+                .parallel_units
+                .iter()
+                .filter(|pu| pu.r#type == ParallelUnitType::Hash as i32)
+                .collect_vec();
+            pu_hash_map.insert(*node_id, pu_hash);
+            let pu_single = node
+                .parallel_units
+                .iter()
+                .filter(|pu| pu.r#type == ParallelUnitType::Single as i32)
+                .collect_vec();
+            pu_single_map.insert(*node_id, pu_single);
+        }
 
         let mut table_fragments = self.list_table_fragments().await?;
         let mut new_fragments = Vec::new();
@@ -334,11 +353,31 @@ where
                 .actor_status
                 .iter_mut()
                 .for_each(|(actor_id, status)| {
-                    if let Some(pu) = migrate_map.get(actor_id) {
+                    if let Some(new_node_id) = migrate_map.get(actor_id) {
                         if let Some(ref old_parallel_unit) = status.parallel_unit {
-                            parallel_unit_migrate_map.insert(old_parallel_unit.id, pu.clone());
-                            status.parallel_unit = Some(pu.clone());
-                            flag = true;
+                            if !parallel_unit_migrate_map.contains_key(&old_parallel_unit.id) {
+                                if old_parallel_unit.r#type == ParallelUnitType::Hash as i32 {
+                                    let new_parallel_unit =
+                                        pu_hash_map.get_mut(new_node_id).unwrap().pop().unwrap();
+                                    parallel_unit_migrate_map
+                                        .insert(old_parallel_unit.id, new_parallel_unit.clone());
+                                    status.parallel_unit = Some(new_parallel_unit.clone());
+                                } else {
+                                    let new_parallel_unit =
+                                        pu_single_map.get_mut(new_node_id).unwrap().pop().unwrap();
+                                    parallel_unit_migrate_map
+                                        .insert(old_parallel_unit.id, new_parallel_unit.clone());
+                                    status.parallel_unit = Some(new_parallel_unit.clone());
+                                }
+                                flag = true;
+                            } else {
+                                status.parallel_unit = Some(
+                                    parallel_unit_migrate_map
+                                        .get(&old_parallel_unit.id)
+                                        .unwrap()
+                                        .clone(),
+                                );
+                            }
                         }
                     };
                 });

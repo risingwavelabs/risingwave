@@ -21,11 +21,11 @@ use futures::future::try_join_all;
 use itertools::Itertools;
 use log::{debug, error};
 use risingwave_common::error::{ErrorCode, Result, RwError};
-use risingwave_common::types::VIRTUAL_NODE_COUNT;
+use risingwave_common::types::{ParallelUnitId, VIRTUAL_NODE_COUNT};
 use risingwave_common::util::compress::decompress_data;
 use risingwave_common::util::epoch::Epoch;
 use risingwave_pb::common::worker_node::State;
-use risingwave_pb::common::{ActorInfo, ParallelUnit, WorkerType};
+use risingwave_pb::common::{ActorInfo, WorkerNode, WorkerType};
 use risingwave_pb::data::Epoch as ProstEpoch;
 use risingwave_pb::stream_service::barrier_complete_response::CreateMviewProgress;
 use risingwave_pb::stream_service::{
@@ -38,6 +38,7 @@ use uuid::Uuid;
 use crate::barrier::command::CommandContext;
 use crate::barrier::info::BarrierActorInfo;
 use crate::barrier::{CheckpointControl, Command, GlobalBarrierManager};
+use crate::cluster::WorkerId;
 use crate::model::ActorId;
 use crate::storage::MetaStore;
 
@@ -151,12 +152,15 @@ where
     async fn get_migrate_map_plan(
         &self,
         info: &BarrierActorInfo,
-        expired_workers: &Vec<ActorId>,
-    ) -> HashMap<ActorId, ParallelUnit> {
+        expired_workers: &Vec<WorkerId>,
+    ) -> (
+        HashMap<ParallelUnitId, WorkerId>,
+        HashMap<WorkerId, WorkerNode>,
+    ) {
         let workers_size = expired_workers.len();
         let mut cur = 0;
         let mut migrate_map = HashMap::new();
-        let mut chosen_ids = HashSet::new();
+        let mut node_map = HashMap::new();
         while cur < workers_size {
             let current_nodes = self
                 .cluster_manager
@@ -165,18 +169,16 @@ where
             let new_nodes = current_nodes
                 .iter()
                 .filter(|&node| {
-                    !info.node_map.contains_key(&node.id) && !chosen_ids.contains(&node.id)
+                    !info.node_map.contains_key(&node.id) && !node_map.contains_key(&node.id)
                 })
                 .collect_vec();
             for new_node in new_nodes {
-                chosen_ids.insert(new_node.id);
                 let actors = info.actor_map.get(&expired_workers[cur]).unwrap();
-                let parallel_units = &new_node.parallel_units;
                 let actors_len = actors.len();
-                let pu_len = parallel_units.len();
                 for idx in 0..actors_len {
-                    migrate_map.insert(actors[idx], parallel_units[idx % pu_len].clone());
+                    migrate_map.insert(actors[idx], new_node.id);
                 }
+                node_map.insert(new_node.id, new_node.clone());
                 cur += 1;
                 debug!(
                     "got new worker {} , migrate process ({}/{})",
@@ -185,7 +187,7 @@ where
             }
             tokio::time::sleep(std::time::Duration::from_millis(100)).await;
         }
-        migrate_map
+        (migrate_map, node_map)
     }
 
     async fn migrate_actors(&self, info: &BarrierActorInfo) -> Result<()> {
@@ -201,10 +203,11 @@ where
             return Ok(());
         }
         debug!("got expired workers {:#?}", expired_workers);
-        let migrate_map = self.get_migrate_map_plan(info, &expired_workers).await;
-        debug!("got actor migrate plan {:#?}", migrate_map);
-        let (new_fragments, migrate_map) =
-            self.fragment_manager.migrate_actors(&migrate_map).await?;
+        let (migrate_map, node_map) = self.get_migrate_map_plan(info, &expired_workers).await;
+        let (new_fragments, migrate_map) = self
+            .fragment_manager
+            .migrate_actors(&migrate_map, &node_map)
+            .await?;
         debug!("got parallel unit migrate plan {:#?}", migrate_map);
         let res = self
             .catalog_manager
