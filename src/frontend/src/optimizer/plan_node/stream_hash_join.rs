@@ -15,7 +15,7 @@
 use std::fmt;
 
 use itertools::Itertools;
-use risingwave_common::catalog::{DatabaseId, Field, SchemaId};
+use risingwave_common::catalog::{DatabaseId, Field, Schema, SchemaId};
 use risingwave_common::types::DataType;
 use risingwave_common::util::sort_util::OrderType;
 use risingwave_pb::plan_common::JoinType;
@@ -26,7 +26,7 @@ use super::utils::TableCatalogBuilder;
 use super::{LogicalJoin, PlanBase, PlanRef, PlanTreeNodeBinary, StreamDeltaJoin, ToStreamProst};
 use crate::catalog::table_catalog::TableCatalog;
 use crate::expr::Expr;
-use crate::optimizer::plan_node::EqJoinPredicate;
+use crate::optimizer::plan_node::{EqJoinPredicate, EqJoinPredicateVerboseDisplay};
 use crate::optimizer::property::Distribution;
 use crate::utils::ColIndexMapping;
 
@@ -128,9 +128,27 @@ impl fmt::Display for StreamHashJoin {
         } else {
             f.debug_struct("StreamHashJoin")
         };
-        builder
-            .field("type", &format_args!("{:?}", self.logical.join_type()))
-            .field("predicate", &format_args!("{}", self.eq_join_predicate()));
+
+        let verbose = self.base.ctx.is_explain_verbose();
+        builder.field("type", &format_args!("{:?}", self.logical.join_type()));
+
+        if verbose {
+            let mut concat_schema = self.left().schema().fields.clone();
+            concat_schema.extend(self.right().schema().fields.clone());
+            let concat_schema = Schema::new(concat_schema);
+            builder.field(
+                "predicate",
+                &format_args!(
+                    "{}",
+                    EqJoinPredicateVerboseDisplay {
+                        eq_join_predicate: self.eq_join_predicate(),
+                        input_schema: &concat_schema
+                    }
+                ),
+            );
+        } else {
+            builder.field("predicate", &format_args!("{}", self.eq_join_predicate()));
+        }
 
         if self.append_only() {
             builder.field("append_only", &format_args!("{}", true));
@@ -236,7 +254,7 @@ fn infer_internal_table_catalog(input: PlanRef, join_key_indices: Vec<usize>) ->
     let mut internal_table_catalog_builder = TableCatalogBuilder::new();
 
     columns_fields.iter().for_each(|field| {
-        internal_table_catalog_builder.add_column_desc_from_field_without_order_type(field)
+        internal_table_catalog_builder.add_column(field);
     });
 
     pk_indices.iter().for_each(|idx| {

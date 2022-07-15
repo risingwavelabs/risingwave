@@ -13,7 +13,7 @@
 // limitations under the License.
 
 use async_trait::async_trait;
-use risingwave_common::array::{Op, StreamChunk};
+use risingwave_common::array::{Op, Row, StreamChunk};
 use risingwave_common::catalog::{Schema, TableId};
 use risingwave_common::types::DataType;
 use risingwave_common::util::ordered::{OrderedRow, OrderedRowDeserializer};
@@ -21,7 +21,7 @@ use risingwave_common::util::sort_util::{OrderPair, OrderType};
 use risingwave_storage::StateStore;
 
 use super::error::StreamExecutorResult;
-use super::managed_state::top_n::ManagedTopNStateNew;
+use super::managed_state::top_n::{ManagedTopNStateNew, TopNStateRow};
 use super::top_n_executor::{generate_output, TopNExecutorBase, TopNExecutorWrapper};
 use super::{BoxedMessageStream, Executor, ExecutorInfo, PkIndices, PkIndicesRef};
 
@@ -34,7 +34,7 @@ impl<S: StateStore> TopNExecutorNew<S> {
     pub fn new(
         input: Box<dyn Executor>,
         order_pairs: Vec<OrderPair>,
-        offset_and_limit: (usize, usize),
+        offset_and_limit: (usize, Option<usize>),
         pk_indices: PkIndices,
         store: S,
         table_id: TableId,
@@ -71,8 +71,8 @@ pub struct InnerTopNExecutorNew<S: StateStore> {
     /// Schema of the executor.
     schema: Schema,
 
-    /// `LIMIT XXX`. `0` means no limit.
-    limit: usize,
+    /// `LIMIT XXX`. None means no limit.
+    limit: Option<usize>,
     /// `OFFSET XXX`. `0` means no offset.
     offset: usize,
 
@@ -127,7 +127,7 @@ impl<S: StateStore> InnerTopNExecutorNew<S> {
         input_info: ExecutorInfo,
         schema: Schema,
         order_pairs: Vec<OrderPair>,
-        offset_and_limit: (usize, usize),
+        offset_and_limit: (usize, Option<usize>),
         pk_indices: PkIndices,
         store: S,
         table_id: TableId,
@@ -205,171 +205,46 @@ impl<S: StateStore> TopNExecutorBase for InnerTopNExecutorNew<S> {
         chunk: StreamChunk,
         epoch: u64,
     ) -> StreamExecutorResult<StreamChunk> {
-        let mut new_ops = vec![];
-        let mut new_rows = vec![];
+        let mut res_ops = Vec::with_capacity(self.limit.unwrap_or_default());
+        let mut res_rows = Vec::with_capacity(self.limit.unwrap_or_default());
+        let num_limit = self.limit.unwrap_or(usize::MAX);
 
+        // find the top-n range before modification
+        let old_rows = self
+            .managed_state
+            .find_range(self.offset, num_limit, epoch)
+            .await?;
+
+        // apply the chunk to state table
         for (op, row_ref) in chunk.rows() {
             let pk_row = row_ref.row_by_indices(&self.internal_key_indices);
             let ordered_pk_row = OrderedRow::new(pk_row, &self.internal_key_order_types);
             let row = row_ref.to_owned_row();
             match op {
                 Op::Insert | Op::UpdateInsert => {
-                    // Compare the boundary keys before and after insertion:
-                    // - if the inserted key in the range of [0, offset), emit nothing
-                    // - if in the range of [offset, offset + limit), emit diff of result set
-                    // - if in the range of [offset + limit, Inf), emit nothing
-                    let (start_row, end_row) = self
-                        .managed_state
-                        .find_range(self.offset, self.limit, epoch)
-                        .await?;
-
-                    self.managed_state
-                        .insert(ordered_pk_row.clone(), row.clone(), epoch)
-                        .await?;
-
-                    let (new_start_row, new_end_row) = self
-                        .managed_state
-                        .find_range(self.offset, self.limit, epoch)
-                        .await?;
-
-                    // no offset
-                    if self.offset == 0 {
-                        if !end_row.is_valid() {
-                            // no limit, emit to result set
-                            new_ops.push(Op::Insert);
-                            new_rows.push(row.clone());
-                            continue;
-                        }
-
-                        // check whether new key in the [0, limit]
-                        if let Some(end_key) = end_row.ordered_key.as_ref() {
-                            if ordered_pk_row <= *end_key {
-                                // update boundary if needed
-                                if end_row.ordered_key != new_end_row.ordered_key {
-                                    new_ops.push(Op::Delete);
-                                    new_rows.push(end_row.row);
-                                }
-
-                                new_ops.push(Op::Insert);
-                                new_rows.push(row.clone());
-                            }
-                        }
-                    } else if let Some(start_key) = start_row.ordered_key.as_ref() {
-                        // Insert into [0, offset), the topn range will move backward
-                        if ordered_pk_row < *start_key {
-                            // update boundary
-                            if new_start_row.is_valid() {
-                                new_ops.push(Op::Insert);
-                                new_rows.push(new_start_row.row.clone());
-                            }
-                            if end_row.ordered_key != new_end_row.ordered_key && end_row.is_valid()
-                            {
-                                assert!(new_end_row.ordered_key <= end_row.ordered_key);
-                                new_ops.push(Op::Delete);
-                                new_rows.push(end_row.row);
-                            }
-                        } else if !end_row.is_valid() {
-                            // no limit
-                            new_ops.push(Op::Insert);
-                            new_rows.push(row);
-                        } else if let Some(end_key) = end_row.ordered_key.as_ref() {
-                            // [offset, offset + limit]
-                            if ordered_pk_row <= *end_key {
-                                new_ops.push(Op::Insert);
-                                new_rows.push(row);
-
-                                if start_row.ordered_key != new_start_row.ordered_key {
-                                    new_ops.push(Op::Delete);
-                                    new_rows.push(start_row.row);
-                                }
-                                if end_row.ordered_key != new_end_row.ordered_key {
-                                    new_ops.push(Op::Delete);
-                                    new_rows.push(end_row.row);
-                                }
-                            }
-                        }
-                    } else if new_start_row.is_valid() {
-                        // The newly inserted row is the first row in the topn range
-                        new_ops.push(Op::Insert);
-                        new_rows.push(new_start_row.row);
-                    }
+                    self.managed_state.insert(ordered_pk_row, row, epoch)?;
                 }
+
                 Op::Delete | Op::UpdateDelete => {
-                    // Compare the boundary keys before and after deletion:
-                    // - if the deleted key in the range of [0, offset), emit diff of result set
-                    // - if in the range of [offset, offset + limit), emit diff of result set
-                    // - if in the range of [offset + limit, Inf), emit nothing
-                    let (start_row, end_row) = self
-                        .managed_state
-                        .find_range(self.offset, self.limit, epoch)
-                        .await?;
-
-                    // delete the row
-                    self.managed_state
-                        .delete(&ordered_pk_row, row.clone(), epoch)
-                        .await?;
-
-                    let (new_start_row, new_end_row) = self
-                        .managed_state
-                        .find_range(self.offset, self.limit, epoch)
-                        .await?;
-
-                    // check start end first, since LIMIT may not specified
-                    if let Some(start_key) = start_row.ordered_key.as_ref() {
-                        if ordered_pk_row < *start_key {
-                            // deleted row in [0, offset) the topn range will move forward
-
-                            // update both ends
-                            if start_row.ordered_key != new_start_row.ordered_key {
-                                new_ops.push(Op::Delete);
-                                new_rows.push(start_row.row);
-                            }
-
-                            if new_end_row.is_valid()
-                                && end_row.ordered_key != new_end_row.ordered_key
-                            {
-                                new_ops.push(Op::Insert);
-                                new_rows.push(new_end_row.row);
-
-                                if new_end_row.ordered_key < end_row.ordered_key {
-                                    new_ops.push(Op::Delete);
-                                    new_rows.push(end_row.row);
-                                }
-                            }
-                        } else {
-                            let mut is_contained = end_row.ordered_key.is_none();
-                            if let Some(end_key) = end_row.ordered_key.as_ref() {
-                                is_contained = ordered_pk_row <= *end_key;
-                            }
-                            // deleted row in (offset+limit, Inf)
-                            if !is_contained {
-                                continue;
-                            }
-
-                            // deleted row in [offset, offset+limit], emit change of result set
-                            new_ops.push(Op::Delete);
-                            new_rows.push(row);
-
-                            // update high end if nedded
-                            if new_end_row.is_valid()
-                                && new_end_row.ordered_key != end_row.ordered_key
-                            {
-                                new_ops.push(Op::Insert);
-                                new_rows.push(new_end_row.row);
-                                if end_row.is_valid()
-                                    && new_end_row.ordered_key < end_row.ordered_key
-                                {
-                                    new_ops.push(Op::Delete);
-                                    new_rows.push(end_row.row);
-                                    assert!(end_row.ordered_key.is_some());
-                                }
-                            }
-                        }
-                    }
+                    self.managed_state.delete(&ordered_pk_row, row, epoch)?;
                 }
             }
         }
-        generate_output(new_rows, new_ops, &self.schema)
+
+        // find the top-n range after modification
+        let new_rows = self
+            .managed_state
+            .find_range(self.offset, num_limit, epoch)
+            .await?;
+
+        // TODO: only emit the difference instead of emitting the full contents.
+        // delete previous result set
+        emit_multi_rows(&mut res_ops, &mut res_rows, Op::Delete, old_rows);
+        // emit new result set
+        emit_multi_rows(&mut res_ops, &mut res_rows, Op::Insert, new_rows);
+
+        // compare the those two ranges and emit the differantial result
+        generate_output(res_rows, res_ops, &self.schema)
     }
 
     async fn flush_data(&mut self, epoch: u64) -> StreamExecutorResult<()> {
@@ -387,6 +262,18 @@ impl<S: StateStore> TopNExecutorBase for InnerTopNExecutorNew<S> {
     fn identity(&self) -> &str {
         &self.info.identity
     }
+}
+
+fn emit_multi_rows(
+    res_ops: &mut Vec<Op>,
+    res_rows: &mut Vec<Row>,
+    op: Op,
+    rows: Vec<TopNStateRow>,
+) {
+    rows.into_iter().for_each(|topn_row| {
+        res_ops.push(op);
+        res_rows.push(topn_row.row);
+    })
 }
 
 #[cfg(test)]
@@ -525,7 +412,7 @@ mod tests {
             TopNExecutorNew::new(
                 source as Box<dyn Executor>,
                 order_types,
-                (3, 0),
+                (3, None),
                 vec![0, 1],
                 MemoryStateStore::new(),
                 TableId::from(0x2333),
@@ -545,12 +432,11 @@ mod tests {
             *res.as_chunk().unwrap(),
             StreamChunk::from_pretty(
                 "  I I
-                + 10 3
+                +  8 5
                 +  9 4
-                +  8 5"
+                + 10 3"
             )
         );
-        // Now (1, 2, 3) -> (8, 9, 10)
         // Barrier
         assert_matches!(
             top_n_executor.next().await.unwrap().unwrap(),
@@ -561,16 +447,15 @@ mod tests {
             *res.as_chunk().unwrap(),
             StreamChunk::from_pretty(
                 "  I I
-                +  7 6
-                -  7 6
                 -  8 5
-                +  8 5
-                -  8 5
+                -  9 4
+                - 10 3
+                +  9 4
+                + 10 3
                 + 11 8"
             )
         );
 
-        // (5, 7, 8) -> (9, 10, 11)
         // barrier
         assert_matches!(
             top_n_executor.next().await.unwrap().unwrap(),
@@ -578,34 +463,48 @@ mod tests {
         );
 
         let res = top_n_executor.next().await.unwrap().unwrap();
+        // (8, 9, 10, 11, 12, 13, 14)
         assert_eq!(
             *res.as_chunk().unwrap(),
             StreamChunk::from_pretty(
                 "  I  I
+                -  9 4
+                - 10 3
+                - 11 8
                 +  8  5
+                +  9 4
+                + 10 3
+                + 11 8
                 + 12 10
                 + 13 11
                 + 14 12"
             )
         );
-        // (5, 6, 7) -> (8, 9, 10, 11, 12, 13, 14)
         // barrier
         assert_matches!(
             top_n_executor.next().await.unwrap().unwrap(),
             Message::Barrier(_)
         );
 
+        // (10, 12, 13, 14)
         let res = top_n_executor.next().await.unwrap().unwrap();
         assert_eq!(
             *res.as_chunk().unwrap(),
             StreamChunk::from_pretty(
                 "  I I
-                -  8 5
+                -  8  5
                 -  9 4
-                - 11 8"
+                - 10 3
+                - 11 8
+                - 12 10
+                - 13 11
+                - 14 12
+                + 10 3
+                + 12 10
+                + 13 11
+                + 14 12"
             )
         );
-        // (7, 8, 9) -> (10, 13, 14, _)
         // barrier
         assert_matches!(
             top_n_executor.next().await.unwrap().unwrap(),
@@ -621,7 +520,7 @@ mod tests {
             TopNExecutorNew::new(
                 source as Box<dyn Executor>,
                 order_types,
-                (0, 4),
+                (0, Some(4)),
                 vec![0, 1],
                 MemoryStateStore::new(),
                 TableId::from(0x2333),
@@ -644,14 +543,10 @@ mod tests {
                 +  1 0
                 +  2 1
                 +  3 2
-                + 10 3
-                - 10 3
-                +  9 4
-                -  9 4
                 +  8 5"
             )
         );
-        // now () -> (1, 2, 3, 8) -> (9, 10)
+        // now () -> (1, 2, 3, 8)
 
         // barrier
         assert_matches!(
@@ -663,36 +558,18 @@ mod tests {
             *res.as_chunk().unwrap(),
             StreamChunk::from_pretty(
                 "  I I
-                -  8 5
-                +  7 6
-                -  3 2
-                +  8 5
                 -  1 0
-                +  9 4
-                -  9 4
-                +  5 7
                 -  2 1
+                -  3 2
+                -  8 5
+                +  5 7
+                +  7 6
+                +  8 5
                 +  9 4"
             )
         );
 
-        // () -> (5, 7, 8, 9) -> (10, 11)
-        // barrier
-        assert_matches!(
-            top_n_executor.next().await.unwrap().unwrap(),
-            Message::Barrier(_)
-        );
-
-        let res = top_n_executor.next().await.unwrap().unwrap();
-        assert_eq!(
-            *res.as_chunk().unwrap(),
-            StreamChunk::from_pretty(
-                "  I I
-                -  9 4
-                +  6 9"
-            )
-        );
-        // () -> (5, 6, 7, 8) -> (9, 10, 11, 12, 13, 14)
+        // (5, 7, 8, 9)
         // barrier
         assert_matches!(
             top_n_executor.next().await.unwrap().unwrap(),
@@ -705,12 +582,38 @@ mod tests {
             StreamChunk::from_pretty(
                 "  I I
                 -  5 7
-                +  9 4
+                -  7 6
+                -  8 5
+                -  9 4
+                +  5 7
+                +  6 9
+                +  7 6
+                +  8 5"
+            )
+        );
+        // (5, 6, 7, 8)
+        // barrier
+        assert_matches!(
+            top_n_executor.next().await.unwrap().unwrap(),
+            Message::Barrier(_)
+        );
+
+        let res = top_n_executor.next().await.unwrap().unwrap();
+        assert_eq!(
+            *res.as_chunk().unwrap(),
+            StreamChunk::from_pretty(
+                "  I I
+                -  5 7
                 -  6 9
+                -  7 6
+                -  8 5
+                +  7 6
+                +  8 5
+                +  9 4
                 + 10 3"
             )
         );
-        // () -> (7, 8, 9, 10) -> (13, 14)
+        // (7, 8, 9, 10)
         // barrier
         assert_matches!(
             top_n_executor.next().await.unwrap().unwrap(),
@@ -726,7 +629,7 @@ mod tests {
             TopNExecutorNew::new(
                 source as Box<dyn Executor>,
                 order_types,
-                (3, 4),
+                (3, Some(4)),
                 vec![0, 1],
                 MemoryStateStore::new(),
                 TableId::from(0x2333),
@@ -746,13 +649,11 @@ mod tests {
             *res.as_chunk().unwrap(),
             StreamChunk::from_pretty(
                 "  I I
-                + 10 3
+                +  8 5
                 +  9 4
-                +  8 5"
+                + 10 3"
             )
         );
-        // now (1, 2, 3) -> (8, 9, 10, _) -> ()
-
         // barrier
         assert_matches!(
             top_n_executor.next().await.unwrap().unwrap(),
@@ -763,15 +664,14 @@ mod tests {
             *res.as_chunk().unwrap(),
             StreamChunk::from_pretty(
                 "  I I
-                +  7 6
-                -  7 6
                 -  8 5
-                +  8 5
-                -  8 5
+                -  9 4
+                - 10 3
+                +  9 4
+                + 10 3
                 + 11 8"
             )
         );
-        // (5, 7, 8) -> (9, 10, 11, _) -> ()
         // barrier
         assert_matches!(
             top_n_executor.next().await.unwrap().unwrap(),
@@ -783,10 +683,15 @@ mod tests {
             *res.as_chunk().unwrap(),
             StreamChunk::from_pretty(
                 "  I I
-                +  8 5"
+                -  9 4
+                - 10 3
+                - 11 8
+                +  8 5
+                +  9 4
+                + 10 3
+                + 11 8"
             )
         );
-        // (5, 6, 7) -> (8, 9, 10, 11) -> (12, 13, 14)
         // barrier
         assert_matches!(
             top_n_executor.next().await.unwrap().unwrap(),
@@ -798,15 +703,15 @@ mod tests {
             StreamChunk::from_pretty(
                 "  I  I
                 -  8  5 
-                + 12 10
                 -  9  4 
-                + 13 11
+                - 10  3
                 - 11  8 
+                + 10  3
+                + 12 10
+                + 13 11
                 + 14 12"
             )
         );
-
-        // (7, 8, 9) -> (10, 13, 14, _)
         // barrier
         assert_matches!(
             top_n_executor.next().await.unwrap().unwrap(),
@@ -823,7 +728,7 @@ mod tests {
             TopNExecutorNew::new(
                 source as Box<dyn Executor>,
                 order_types,
-                (1, 3),
+                (1, Some(3)),
                 vec![3],
                 MemoryStateStore::new(),
                 TableId::from(0x2333),
@@ -861,10 +766,10 @@ mod tests {
             *res.as_chunk().unwrap(),
             StreamChunk::from_pretty(
                 "  I I I I
-                +  1 9 1 1003
-                +  9 8 1 1004
+                -  5 1 4 1002
                 +  1 1 4 1001
-                -  9 8 1 1004 ",
+                +  1 9 1 1003
+                +  5 1 4 1002",
             )
         );
 
@@ -873,8 +778,12 @@ mod tests {
             *res.as_chunk().unwrap(),
             StreamChunk::from_pretty(
                 "  I I I I
-                +  1 0 2 1006
-                -  5 1 4 1002 ",
+                -  1 1 4 1001
+                -  1 9 1 1003
+                -  5 1 4 1002
+                +  1 1 4 1001
+                +  1 9 1 1003
+                +  1 0 2 1006",
             )
         );
 

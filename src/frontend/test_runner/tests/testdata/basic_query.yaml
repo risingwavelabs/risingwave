@@ -11,7 +11,7 @@
     BatchExchange { order: [], dist: Single }
       BatchScan { table: t, columns: [v1, v2] }
   stream_plan: |
-    StreamMaterialize { columns: [v1, v2, _row_id(hidden)], pk_columns: [_row_id] }
+    StreamMaterialize { columns: [v1, v2, t._row_id(hidden)], pk_columns: [t._row_id] }
       StreamTableScan { table: t, columns: [v1, v2, _row_id], pk_indices: [2] }
 - sql: |
     create table t (v1 bigint, v2 double precision);
@@ -25,7 +25,7 @@
       BatchFilter { predicate: (1:Int32 = 1:Int32) AND ((((1:Int32 > 2:Int32) AND (3:Int32 < 1:Int32)) AND (4:Int32 <> 1:Int32)) OR ((2:Int32 >= 1:Int32) AND (1:Int32 <= 2:Int32))) }
         BatchScan { table: t, columns: [] }
   stream_plan: |
-    StreamMaterialize { columns: [_row_id(hidden)], pk_columns: [_row_id] }
+    StreamMaterialize { columns: [t._row_id(hidden)], pk_columns: [t._row_id] }
       StreamFilter { predicate: (1:Int32 = 1:Int32) AND ((((1:Int32 > 2:Int32) AND (3:Int32 < 1:Int32)) AND (4:Int32 <> 1:Int32)) OR ((2:Int32 >= 1:Int32) AND (1:Int32 <= 2:Int32))) }
         StreamTableScan { table: t, columns: [_row_id], pk_indices: [0] }
 - sql: |
@@ -36,7 +36,7 @@
       BatchFilter { predicate: ($0 < 1:Int32) }
         BatchScan { table: t, columns: [v1] }
   stream_plan: |
-    StreamMaterialize { columns: [v1, _row_id(hidden)], pk_columns: [_row_id] }
+    StreamMaterialize { columns: [v1, t._row_id(hidden)], pk_columns: [t._row_id] }
       StreamFilter { predicate: ($0 < 1:Int32) }
         StreamTableScan { table: t, columns: [v1, _row_id], pk_indices: [1] }
 - sql: |
@@ -94,7 +94,7 @@
     BatchExchange { order: [], dist: Single }
       BatchScan { table: t, columns: [v1] }
   stream_plan: |
-    StreamMaterialize { columns: [v1, _row_id(hidden)], pk_columns: [_row_id] }
+    StreamMaterialize { columns: [v1, t._row_id(hidden)], pk_columns: [t._row_id] }
       StreamTableScan { table: t, columns: [v1, _row_id], pk_indices: [1] }
 - sql: select 1
   batch_plan: |

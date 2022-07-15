@@ -17,7 +17,7 @@ use std::fmt;
 
 use fixedbitset::FixedBitSet;
 use itertools::Itertools;
-use risingwave_common::catalog::{Field, Schema};
+use risingwave_common::catalog::{Field, FieldVerboseDisplay, Schema};
 use risingwave_common::error::{ErrorCode, Result};
 use risingwave_common::types::DataType;
 use risingwave_common::util::sort_util::OrderType;
@@ -30,11 +30,14 @@ use super::{
     StreamLocalSimpleAgg, ToBatch, ToStream,
 };
 use crate::catalog::table_catalog::TableCatalog;
-use crate::expr::{AggCall, Expr, ExprImpl, ExprRewriter, ExprType, FunctionCall, InputRef};
+use crate::expr::{
+    AggCall, Expr, ExprImpl, ExprRewriter, ExprType, FunctionCall, InputRef, InputRefDisplay,
+    InputRefVerboseDisplay,
+};
 use crate::optimizer::plan_node::utils::TableCatalogBuilder;
 use crate::optimizer::plan_node::{gen_filter_and_pushdown, LogicalProject};
 use crate::optimizer::property::{Direction, Order, RequiredDist};
-use crate::utils::{ColIndexMapping, Condition, Substitute};
+use crate::utils::{ColIndexMapping, Condition, ConditionVerboseDisplay, Substitute};
 
 /// See also [`crate::expr::AggOrderByExpr`]
 /// TODO(yuchao): replace `PlanAggOrderByField` with enhanced `FieldOrder`
@@ -57,6 +60,37 @@ impl fmt::Debug for PlanAggOrderByField {
             f,
             " NULLS {}",
             if self.nulls_first { "FIRST" } else { "LAST" }
+        )?;
+        Ok(())
+    }
+}
+
+#[derive(Clone)]
+pub struct PlanAggOrderByFieldVerboseDisplay<'a> {
+    pub plan_agg_order_by_field: &'a PlanAggOrderByField,
+    pub input_schema: &'a Schema,
+}
+
+impl fmt::Debug for PlanAggOrderByFieldVerboseDisplay<'_> {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        let that = self.plan_agg_order_by_field;
+        write!(
+            f,
+            "{:?}",
+            InputRefVerboseDisplay {
+                input_ref: &that.input,
+                input_schema: self.input_schema
+            }
+        )?;
+        match that.direction {
+            Direction::Asc => write!(f, " ASC")?,
+            Direction::Desc => write!(f, " DESC")?,
+            _ => {}
+        }
+        write!(
+            f,
+            " NULLS {}",
+            if that.nulls_first { "FIRST" } else { "LAST" }
         )?;
         Ok(())
     }
@@ -127,6 +161,10 @@ impl PlanAggCall {
             return_type: Some(self.return_type.to_protobuf()),
             args: self.inputs.iter().map(InputRef::to_agg_arg_proto).collect(),
             distinct: self.distinct,
+            filter: self
+                .filter
+                .as_expr_unless_true()
+                .map(|expr| expr.to_expr_proto()),
         }
     }
 
@@ -169,6 +207,63 @@ impl PlanAggCall {
     }
 }
 
+pub struct PlanAggCallVerboseDisplay<'a> {
+    pub plan_agg_call: &'a PlanAggCall,
+    pub input_schema: &'a Schema,
+}
+
+impl fmt::Debug for PlanAggCallVerboseDisplay<'_> {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        let that = self.plan_agg_call;
+        write!(f, "{}", that.agg_kind)?;
+        if !that.inputs.is_empty() {
+            write!(f, "(")?;
+            for (idx, input) in that.inputs.iter().enumerate() {
+                if idx == 0 && that.distinct {
+                    write!(f, "distinct ")?;
+                }
+                write!(
+                    f,
+                    "{}",
+                    self.input_schema.fields.get(input.index).unwrap().name
+                )?;
+                if idx != (that.inputs.len() - 1) {
+                    write!(f, ",")?;
+                }
+            }
+            if !that.order_by_fields.is_empty() {
+                let clause_text = that
+                    .order_by_fields
+                    .iter()
+                    .map(|e| {
+                        format!(
+                            "{:?}",
+                            PlanAggOrderByFieldVerboseDisplay {
+                                plan_agg_order_by_field: e,
+                                input_schema: self.input_schema,
+                            }
+                        )
+                    })
+                    .join(", ");
+                write!(f, " order_by({})", clause_text)?;
+            }
+            write!(f, ")")?;
+        }
+
+        if !that.filter.always_true() {
+            write!(
+                f,
+                " filter({:?})",
+                ConditionVerboseDisplay {
+                    condition: &that.filter,
+                    input_schema: self.input_schema,
+                }
+            )?;
+        }
+        Ok(())
+    }
+}
+
 /// `LogicalAgg` groups input data by their group key and computes aggregation functions.
 ///
 /// It corresponds to the `GROUP BY` operator in a SQL query statement together with the aggregate
@@ -186,43 +281,78 @@ pub struct LogicalAgg {
 impl LogicalAgg {
     pub fn infer_internal_table_catalog(&self) -> (Vec<TableCatalog>, HashMap<usize, i32>) {
         let mut table_catalogs = vec![];
-        let base = self.input.plan_base();
-        let schema = &base.schema;
-        let fields = schema.fields();
-        let append_only = self.input.append_only();
-        for agg_call in &self.agg_calls {
+        let out_fields = self.base.schema.fields();
+        let in_fields = self.input().schema().fields().to_vec();
+        let in_pks = self.input().pk_indices().to_vec();
+        let in_append_only = self.input.append_only();
+        let in_dist_key = self.input().distribution().dist_column_indices().to_vec();
+        let get_sorted_input_state_table =
+            |sort_keys: Vec<(OrderType, usize)>, include_keys: Vec<usize>| -> TableCatalog {
+                let mut internal_table_catalog_builder = TableCatalogBuilder::new();
+                for &idx in &self.group_key {
+                    let tb_column_idx = internal_table_catalog_builder.add_column(&in_fields[idx]);
+                    internal_table_catalog_builder
+                        .add_order_column(tb_column_idx, OrderType::Ascending);
+                }
+                for (order_type, idx) in sort_keys {
+                    let tb_column_idx = internal_table_catalog_builder.add_column(&in_fields[idx]);
+                    internal_table_catalog_builder.add_order_column(tb_column_idx, order_type);
+                }
+
+                // Add upstream pk.
+                for pk_index in &in_pks {
+                    let tb_column_idx =
+                        internal_table_catalog_builder.add_column(&in_fields[*pk_index]);
+                    internal_table_catalog_builder
+                        .add_order_column(tb_column_idx, OrderType::Ascending);
+                }
+
+                for inclued_key in include_keys {
+                    internal_table_catalog_builder.add_column(&in_fields[inclued_key]);
+                }
+                internal_table_catalog_builder.build(in_dist_key.clone(), in_append_only)
+            };
+
+        let get_value_state_table = |value_key: usize| -> TableCatalog {
             let mut internal_table_catalog_builder = TableCatalogBuilder::new();
             for &idx in &self.group_key {
-                internal_table_catalog_builder
-                    .add_column_desc_from_field(Some(OrderType::Ascending), &fields[idx]);
+                let column_idx = internal_table_catalog_builder.add_column(&in_fields[idx]);
+                internal_table_catalog_builder.add_order_column(column_idx, OrderType::Ascending);
             }
-            match agg_call.agg_kind {
+            internal_table_catalog_builder.add_column(&out_fields[value_key]);
+            internal_table_catalog_builder.build(in_dist_key.clone(), in_append_only)
+        };
+
+        for (agg_idx, agg_call) in self.agg_calls.iter().enumerate() {
+            let state_table = match agg_call.agg_kind {
                 AggKind::Min | AggKind::Max | AggKind::StringAgg => {
-                    // Assume the first input must be the aggregated column at least for these 3
-                    // kind of AggCall.
-                    let agg_column_idx = agg_call.inputs[0].index;
-
-                    if !append_only {
-                        // Add sort key as part of pk.
-                        let order_type = if agg_call.agg_kind == AggKind::Min {
-                            OrderType::Ascending
-                        } else {
-                            OrderType::Descending
+                    if !in_append_only {
+                        let sort_keys = {
+                            match agg_call.agg_kind {
+                                AggKind::Min => {
+                                    vec![(OrderType::Ascending, agg_call.inputs[0].index)]
+                                }
+                                AggKind::Max => {
+                                    vec![(OrderType::Descending, agg_call.inputs[0].index)]
+                                }
+                                AggKind::StringAgg => {
+                                    // TODO: string agg order by
+                                    todo!();
+                                }
+                                _ => unreachable!(),
+                            }
                         };
-                        internal_table_catalog_builder
-                            .add_column_desc_from_field(Some(order_type), &fields[agg_column_idx]);
 
-                        // Add upstream pk.
-                        for pk_index in &base.pk_indices {
-                            internal_table_catalog_builder.add_column_desc_from_field(
-                                Some(OrderType::Ascending),
-                                &fields[*pk_index],
-                            );
-                        }
+                        let include_keys = match agg_call.agg_kind {
+                            AggKind::StringAgg => {
+                                vec![agg_call.inputs[0].index]
+                            }
+                            _ => vec![],
+                        };
+
+                        get_sorted_input_state_table(sort_keys, include_keys)
                     } else {
-                        // We still need at least one value cell for append only max/min.
-                        internal_table_catalog_builder
-                            .add_column_desc_from_field(None, &fields[agg_column_idx]);
+                        get_value_state_table(self.group_key.len() + agg_idx)
                     }
                 }
                 AggKind::Sum
@@ -230,16 +360,10 @@ impl LogicalAgg {
                 | AggKind::Avg
                 | AggKind::SingleValue
                 | AggKind::ApproxCountDistinct => {
-                    // Here we do not use add column from field cuz for `RowCount`, it's input is
-                    // empty vector, means do not derives from any data in upstream fields.
-                    internal_table_catalog_builder
-                        .add_unnamed_column(None, agg_call.return_type.clone());
+                    get_value_state_table(self.group_key.len() + agg_idx)
                 }
-            }
-            table_catalogs.push(
-                internal_table_catalog_builder
-                    .build(base.dist.dist_column_indices().to_vec(), append_only),
-            );
+            };
+            table_catalogs.push(state_table);
         }
         // TODO: fill column mapping later (#3485).
         (table_catalogs, HashMap::new())
@@ -497,14 +621,7 @@ impl ExprRewriter for LogicalAggBuilder {
 impl LogicalAgg {
     pub fn new(agg_calls: Vec<PlanAggCall>, group_key: Vec<usize>, input: PlanRef) -> Self {
         let ctx = input.ctx();
-        let schema = Self::derive_schema(
-            input.schema(),
-            &group_key,
-            agg_calls
-                .iter()
-                .map(|agg_call| agg_call.return_type.clone())
-                .collect(),
-        );
+        let schema = Self::derive_schema(input.schema(), &group_key, &agg_calls);
         let pk_indices = match group_key.is_empty() {
             // simple agg
             true => vec![],
@@ -538,24 +655,19 @@ impl LogicalAgg {
         self.o2i_col_mapping().inverse()
     }
 
-    fn derive_schema(
-        input: &Schema,
-        group_key: &[usize],
-        agg_call_data_types: Vec<DataType>,
-    ) -> Schema {
+    fn derive_schema(input: &Schema, group_key: &[usize], agg_calls: &[PlanAggCall]) -> Schema {
         let fields = group_key
             .iter()
             .cloned()
             .map(|i| input.fields()[i].clone())
-            .chain(
-                agg_call_data_types
-                    .into_iter()
-                    .enumerate()
-                    .map(|(id, data_type)| {
-                        let name = format!("agg#{}", id);
-                        Field::with_name(data_type, name)
-                    }),
-            )
+            .chain(agg_calls.iter().map(|agg_call| {
+                let plan_agg_call_display = PlanAggCallVerboseDisplay {
+                    plan_agg_call: agg_call,
+                    input_schema: input,
+                };
+                let name = format!("{:?}", plan_agg_call_display);
+                Field::with_name(agg_call.return_type.clone(), name)
+            }))
             .collect();
         Schema { fields }
     }
@@ -594,6 +706,32 @@ impl LogicalAgg {
     /// Get a reference to the logical agg's agg calls.
     pub fn agg_calls(&self) -> &[PlanAggCall] {
         self.agg_calls.as_ref()
+    }
+
+    pub fn agg_calls_verbose_display(&self) -> Vec<PlanAggCallVerboseDisplay> {
+        self.agg_calls()
+            .iter()
+            .map(|plan_agg_call| PlanAggCallVerboseDisplay {
+                plan_agg_call,
+                input_schema: self.input.schema(),
+            })
+            .collect_vec()
+    }
+
+    pub fn group_key_display(&self) -> Vec<InputRefDisplay> {
+        self.group_key()
+            .iter()
+            .copied()
+            .map(InputRefDisplay)
+            .collect_vec()
+    }
+
+    pub fn group_key_verbose_display(&self) -> Vec<FieldVerboseDisplay> {
+        self.group_key()
+            .iter()
+            .copied()
+            .map(|i| FieldVerboseDisplay(self.input.schema().fields.get(i).unwrap()))
+            .collect_vec()
     }
 
     /// Get a reference to the logical agg's group key.
@@ -798,10 +936,9 @@ impl ToStream for LogicalAgg {
         // simple-agg
         if self.group_key().is_empty() {
             // TODO: Other agg calls will be supported by stateful local agg eventually.
-            let agg_calls_can_use_two_phase = self
-                .agg_calls
-                .iter()
-                .all(|c| matches!(c.agg_kind, AggKind::Count | AggKind::Sum));
+            let agg_calls_can_use_two_phase = self.agg_calls.iter().all(|c| {
+                matches!(c.agg_kind, AggKind::Count | AggKind::Sum) && c.order_by_fields.is_empty()
+            });
 
             let input_stream = input.to_stream()?;
             let input_distribution = input_stream.distribution();
@@ -810,7 +947,7 @@ impl ToStream for LogicalAgg {
             if input_distribution.satisfies(&RequiredDist::AnyShard) && agg_calls_can_use_two_phase
             {
                 self.gen_two_phase_streaming_agg_plan(input_stream)
-            // simple 1-phase-agg
+                // simple 1-phase-agg
             } else {
                 Ok(StreamGlobalSimpleAgg::new(self.clone_with_input(
                     input.to_stream_with_dist_required(&RequiredDist::single())?,
@@ -818,7 +955,7 @@ impl ToStream for LogicalAgg {
                 .into())
             }
 
-        // hash-agg
+            // hash-agg
         } else {
             Ok(
                 StreamHashAgg::new(self.clone_with_input(input.to_stream_with_dist_required(
@@ -859,7 +996,6 @@ impl ToStream for LogicalAgg {
 
 #[cfg(test)]
 mod tests {
-
     use std::rc::Rc;
 
     use risingwave_common::catalog::Field;
@@ -1012,6 +1148,7 @@ mod tests {
             assert_eq!(group_key, vec![0]);
         }
     }
+
     /// Generate a agg call node with given [`DataType`] and fields.
     /// For example, `generate_agg_call(Int32, [v1, v2, v3])` will result in:
     /// ```text
