@@ -766,8 +766,8 @@ impl<K: LruKey + Clone, T: LruValue> LruCache<K, T> {
     ) -> Result<Result<CachableEntry<K, T>, E>, RecvError>
     where
         F: FnOnce() -> VC,
-        E: Error,
-        VC: Future<Output = Result<(T, usize), E>>,
+        E: Error + Send,
+        VC: Future<Output = Result<(T, usize), E>> + Send,
     {
         match self.lookup_for_request(hash, key.clone()) {
             LookupResult::Cached(entry) => Ok(Ok(entry)),
@@ -823,12 +823,17 @@ mod tests {
     use std::hash::{Hash, Hasher};
     use std::sync::atomic::Ordering::Relaxed;
     use std::sync::Arc;
+    use std::task::{Context, Poll};
 
+    use futures::future::try_join_all;
+    use futures::task::noop_waker;
+    use futures::{FutureExt, StreamExt};
     use rand::rngs::SmallRng;
     use rand::{RngCore, SeedableRng};
     use tokio::sync::oneshot::error::TryRecvError;
 
     use super::*;
+    use crate::error::RwError;
 
     pub struct Block {
         pub offset: u64,
@@ -1218,6 +1223,54 @@ mod tests {
             cache.release(h3);
             assert_eq!(cache.usage.load(Ordering::Relaxed), 2);
             assert!(listener.evicted.lock().is_empty());
+        }
+    }
+
+    #[test]
+    fn test_write_request_pending_drop_future() {
+        let cache = Arc::new(LruCache::<&'static str, ()>::new(0, 5));
+
+        let mut txs = vec![];
+        let mut futures = vec![];
+        let io_count = Arc::new(AtomicUsize::new(0));
+
+        for _ in 0..256 {
+            let (tx, mut rx) = futures::channel::mpsc::unbounded();
+            let io_count = io_count.clone();
+            txs.push(tx);
+            futures.push(cache.lookup_with_request_dedup(0, "a", || async move {
+                io_count.fetch_add(1, Ordering::Relaxed);
+                Ok::<_, RwError>((rx.next().await.unwrap(), 1))
+            }));
+        }
+
+        let mut first_in_flight = futures.remove(0).boxed();
+        let waker = noop_waker();
+        let mut cx = Context::from_waker(&waker);
+
+        assert!(matches!(first_in_flight.poll_unpin(&mut cx), Poll::Pending));
+        drop(first_in_flight);
+
+        let mut future = try_join_all(futures);
+        assert!(matches!(future.poll_unpin(&mut cx), Poll::Pending));
+
+        for tx in txs {
+            tx.unbounded_send(()).ok(); // ignore send error
+        }
+
+        let result = future.poll_unpin(&mut cx);
+        if let Poll::Ready(x) = result {
+            let x = x.unwrap();
+            println!("{}", x.len());
+        } else {
+            panic!("future is not ready");
+        }
+        let result = future.poll_unpin(&mut cx);
+        if let Poll::Ready(x) = result {
+            let x = x.unwrap();
+            println!("{}", x.len());
+        } else {
+            panic!("future is not ready");
         }
     }
 }

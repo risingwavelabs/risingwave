@@ -120,7 +120,7 @@ impl BlockCache {
         f: F,
     ) -> HummockResult<BlockHolder>
     where
-        F: Future<Output = HummockResult<Box<Block>>>,
+        F: Future<Output = HummockResult<Box<Block>>> + Send,
     {
         let h = Self::hash(sst_id, block_idx);
         let key = (sst_id, block_idx);
