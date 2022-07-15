@@ -15,8 +15,6 @@
 use std::iter::Iterator;
 use std::sync::Arc;
 
-use futures::executor::block_on;
-use itertools::Itertools;
 use risingwave_hummock_sdk::key::{key_with_epoch, Epoch};
 use risingwave_hummock_sdk::HummockSSTableId;
 use risingwave_object_store::object::{
@@ -119,29 +117,30 @@ pub async fn gen_iterator_test_sstable_from_kv_pair(
     .await
 }
 
-pub fn gen_merge_iterator_interleave_test_sstable_iters(
+pub async fn gen_merge_iterator_interleave_test_sstable_iters(
     key_count: usize,
     count: usize,
 ) -> Vec<BoxedForwardHummockIterator> {
     let sstable_store = mock_sstable_store();
     let cache = create_small_table_cache();
-    (0..count)
-        .map(|i: usize| {
-            let table = block_on(gen_iterator_test_sstable_base(
-                i as HummockSSTableId,
-                default_builder_opt_for_test(),
-                |x| x * count + i,
-                sstable_store.clone(),
-                key_count,
-            ));
-            let handle = cache.insert(table.id, table.id, 1, Box::new(table));
-            Box::new(SSTableIterator::create(
-                handle,
-                sstable_store.clone(),
-                Arc::new(ReadOptions::default()),
-            )) as BoxedForwardHummockIterator
-        })
-        .collect_vec()
+    let mut result = vec![];
+    for i in 0..count {
+        let table = gen_iterator_test_sstable_base(
+            i as HummockSSTableId,
+            default_builder_opt_for_test(),
+            |x| x * count + i,
+            sstable_store.clone(),
+            key_count,
+        )
+        .await;
+        let handle = cache.insert(table.id, table.id, 1, Box::new(table));
+        result.push(Box::new(SSTableIterator::create(
+            handle,
+            sstable_store.clone(),
+            Arc::new(ReadOptions::default()),
+        )) as BoxedForwardHummockIterator);
+    }
+    result
 }
 
 pub async fn gen_iterator_test_sstable_with_incr_epoch(

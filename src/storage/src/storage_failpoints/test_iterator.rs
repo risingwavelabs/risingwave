@@ -15,7 +15,6 @@
 use std::ops::Bound::Unbounded;
 use std::sync::Arc;
 
-use futures::executor::block_on;
 use risingwave_hummock_sdk::key::user_key;
 
 use crate::hummock::iterator::test_utils::{
@@ -177,12 +176,15 @@ async fn test_failpoints_merge_invalid_key() {
         tables
             .iter()
             .map(|table| -> Box<dyn HummockIterator<Direction = Forward>> {
-                Box::new(SSTableIterator::new(
-                    block_on(sstable_store.sstable(table.id, &mut StoreLocalStatistic::default()))
-                        .unwrap(),
+                Box::new(
+                    SSTableIterator::new(
+                        sstable_store.sstable(table.id, &mut StoreLocalStatistic::default()),
+                    )
+                    .unwrap(),
                     sstable_store.clone(),
                     Arc::new(ReadOptions::default()),
-                ))
+                )
+                .await
             }),
         Arc::new(StateStoreMetrics::unused()),
     );
@@ -229,7 +231,9 @@ async fn test_failpoints_backward_merge_invalid_key() {
             .iter()
             .map(|table| -> Box<dyn HummockIterator<Direction = Backward>> {
                 Box::new(BackwardSSTableIterator::new(
-                    block_on(sstable_store.sstable(table.id, &mut StoreLocalStatistic::default()))
+                    sstable_store
+                        .sstable(table.id, &mut StoreLocalStatistic::default())
+                        .await
                         .unwrap(),
                     sstable_store.clone(),
                 ))
@@ -275,16 +279,18 @@ async fn test_failpoints_user_read_err() {
     .await;
     let mut stats = StoreLocalStatistic::default();
     let iters: Vec<BoxedForwardHummockIterator> = vec![
-        Box::new(SSTableIterator::new(
-            block_on(sstable_store.sstable(table0.id, &mut stats)).unwrap(),
+        Box::new(
+            SSTableIterator::new(sstable_store.sstable(table0.id, &mut stats)).unwrap(),
             sstable_store.clone(),
             Arc::new(ReadOptions::default()),
-        )),
-        Box::new(SSTableIterator::new(
-            block_on(sstable_store.sstable(table1.id, &mut stats)).unwrap(),
+        )
+        .await,
+        Box::new(
+            SSTableIterator::new(sstable_store.sstable(table1.id, &mut stats)).unwrap(),
             sstable_store.clone(),
             Arc::new(ReadOptions::default()),
-        )),
+        )
+        .await,
     ];
 
     let mi = MergeIterator::new(iters, Arc::new(StateStoreMetrics::unused()));
@@ -337,14 +343,16 @@ async fn test_failpoints_backward_user_read_err() {
     .await;
     let mut stats = StoreLocalStatistic::default();
     let iters: Vec<BoxedBackwardHummockIterator> = vec![
-        Box::new(BackwardSSTableIterator::new(
-            block_on(sstable_store.sstable(table0.id, &mut stats)).unwrap(),
+        Box::new(
+            BackwardSSTableIterator::new(sstable_store.sstable(table0.id, &mut stats)).unwrap(),
             sstable_store.clone(),
-        )),
-        Box::new(BackwardSSTableIterator::new(
-            block_on(sstable_store.sstable(table1.id, &mut stats)).unwrap(),
+        )
+        .await,
+        Box::new(
+            BackwardSSTableIterator::new(sstable_store.sstable(table1.id, &mut stats)).unwrap(),
             sstable_store.clone(),
-        )),
+        )
+        .await,
     ];
 
     let mi = BackwardMergeIterator::new(iters, Arc::new(StateStoreMetrics::unused()));
