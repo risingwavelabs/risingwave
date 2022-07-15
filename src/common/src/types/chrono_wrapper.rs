@@ -123,6 +123,14 @@ impl NaiveDateWrapper {
     pub fn from_protobuf(days: i32) -> ArrayResult<Self> {
         Self::with_days(days).map_err(Into::into)
     }
+
+    pub fn from_protobuf_bytes(b: &[u8]) -> ArrayResult<Self> {
+        let days = i32::from_be_bytes(
+            b.try_into()
+                .map_err(|e| anyhow::anyhow!("Failed to deserialize date, reason: {:?}", e))?,
+        );
+        Self::from_protobuf(days)
+    }
 }
 
 impl NaiveTimeWrapper {
@@ -162,6 +170,14 @@ impl NaiveTimeWrapper {
         let nano = (nano % 1_000_000_000) as u32;
         Self::with_secs_nano(secs, nano).map_err(Into::into)
     }
+
+    pub fn from_protobuf_bytes(b: &[u8]) -> ArrayResult<Self> {
+        let nanos = u64::from_be_bytes(
+            b.try_into()
+                .map_err(|e| anyhow::anyhow!("Failed to deserialize time, reason: {:?}", e))?,
+        );
+        Self::from_protobuf(nanos)
+    }
 }
 
 impl NaiveDateTimeWrapper {
@@ -197,6 +213,14 @@ impl NaiveDateTimeWrapper {
         let secs = timestamp_nanos / 1_000_000_000;
         let nsecs = (timestamp_nanos % 1_000_000_000) as u32;
         Self::with_secs_nsecs(secs, nsecs).map_err(Into::into)
+    }
+
+    pub fn from_protobuf_bytes(b: &[u8]) -> ArrayResult<Self> {
+        let nanos =
+            i64::from_be_bytes(b.try_into().map_err(|e| {
+                anyhow::anyhow!("Failed to deserialize date time, reason: {:?}", e)
+            })?);
+        Self::from_protobuf(nanos)
     }
 }
 
