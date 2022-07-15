@@ -21,10 +21,10 @@ use risingwave_common::error::{Result, RwError};
 use risingwave_common::util::epoch::Epoch;
 use risingwave_connector::source::SplitImpl;
 use risingwave_pb::source::{ConnectorSplit, ConnectorSplits};
-use risingwave_pb::stream_plan::add_dispatcher_mutation::Dispatchers;
+use risingwave_pb::stream_plan::add_mutation::Dispatchers;
 use risingwave_pb::stream_plan::barrier::Mutation;
 use risingwave_pb::stream_plan::{
-    AddDispatcherMutation, Dispatcher, PauseMutation, ResumeMutation, StopMutation,
+    AddMutation, Dispatcher, PauseMutation, ResumeMutation, StopMutation,
 };
 use risingwave_pb::stream_service::DropActorsRequest;
 use risingwave_rpc_client::StreamClientPoolRef;
@@ -181,7 +181,7 @@ where
                     })
                     .collect();
 
-                Some(Mutation::AddDispatcher(AddDispatcherMutation {
+                Some(Mutation::Add(AddMutation {
                     actor_dispatchers,
                     actor_splits,
                 }))

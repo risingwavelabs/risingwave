@@ -11,34 +11,38 @@ import "source.proto";
 
 option optimize_for = SPEED;
 
+message AddMutation {
+  message Dispatchers {
+    repeated Dispatcher dispatchers = 1;
+  }
+  // New dispatchers for each actor.
+  map<uint32, Dispatchers> actor_dispatchers = 1;
+  // We may embed a source change split mutation here.
+  // TODO: we may allow multiple mutations in a single barrier.
+  map<uint32, source.ConnectorSplits> actor_splits = 2;
+}
+
 message StopMutation {
   repeated uint32 actors = 1;
 }
 
-message DispatcherMutation {
-  uint32 actor_id = 1;
-  uint64 dispatcher_id = 2;
-  repeated common.ActorInfo info = 3;
-}
-
 message UpdateMutation {
-  repeated DispatcherMutation mutations = 1;
-}
-
-message AddMutation {
-  repeated DispatcherMutation mutations = 1;
-  map<uint32, source.ConnectorSplits> actor_splits = 2;
+  message DispatcherUpdate {
+    // Dispatcher can be uniquely identified by a combination of actor id and dispatcher id.
+    uint64 dispatcher_id = 1;
+    // The hash mapping for consistent hash.
+    // For dispatcher types other than HASH, this is ignored.
+    ActorMapping hash_mapping = 2;
+    // Added downstream actors.
+    repeated uint32 added_downstream_actor_id = 3;
+    // Removed downstream actors.
+    repeated uint32 removed_downstream_actor_id = 4;
+  }
+  // Dispatcher updates for each actor.
+  map<uint32, DispatcherUpdate> actor_dispatcher_update = 1;
 }
 
 message SourceChangeSplitMutation {
-  map<uint32, source.ConnectorSplits> actor_splits = 2;
-}
-
-message AddDispatcherMutation {
-  message Dispatchers {
-    repeated Dispatcher dispatchers = 1;
-  }
-  map<uint32, Dispatchers> actor_dispatchers = 1;
   map<uint32, source.ConnectorSplits> actor_splits = 2;
 }
 
@@ -49,15 +53,22 @@ message ResumeMutation {}
 message Barrier {
   data.Epoch epoch = 1;
   oneof mutation {
-    StopMutation stop = 3;
-    UpdateMutation update = 4;
-    AddMutation add = 5;
-    AddDispatcherMutation add_dispatcher = 8;
-    SourceChangeSplitMutation splits = 7;
-    PauseMutation pause = 9;
-    ResumeMutation resume = 10;
+    // Add new dispatchers to some actors, used for creating materialized views.
+    AddMutation add = 3;
+    // Stop a set of actors, used for dropping materialized views. Empty dispatchers will be
+    // automatically removed.
+    StopMutation stop = 4;
+    // Update outputs and hash mappings for some dispatchers, used for scaling.
+    UpdateMutation update = 5;
+    // Change the split of some sources.
+    SourceChangeSplitMutation splits = 6;
+    // Pause the dataflow of the whole streaming graph.
+    PauseMutation pause = 7;
+    // Resume the dataflow of the whole streaming graph.
+    ResumeMutation resume = 8;
   }
-  bytes span = 6;
+  // Used for tracing.
+  bytes span = 2;
 }
 
 message StreamMessage {
@@ -287,6 +298,8 @@ message LookupNode {
   }
   // Info about the arrangement
   ArrangementInfo arrangement_table_info = 7;
+  // Internal table of arrangement.
+  catalog.Table arrangement_table = 8;
 }
 
 // Acts like a merger, but on different inputs.
@@ -367,11 +380,15 @@ message DispatchStrategy {
 // We encode both the type and other usage information in the proto.
 message Dispatcher {
   DispatcherType type = 1;
+  // Indices of the columns to be used for hashing.
+  // For dispatcher types other than HASH, this is ignored.
   repeated uint32 column_indices = 2;
   // The hash mapping for consistent hash.
+  // For dispatcher types other than HASH, this is ignored.
   ActorMapping hash_mapping = 3;
   // Dispatcher can be uniquely identified by a combination of actor id and dispatcher id.
-  // For dispatchers within actors, the id is the same as operator_id of the exchange plan node.
+  // - For dispatchers within actors, the id is the same as operator_id of the exchange plan node.
+  // - For MV on MV, the id is the same as the actor id of chain node in the downstream MV.
   uint64 dispatcher_id = 4;
   // Number of downstreams decides how many endpoints a dispatcher should dispatch.
   repeated uint32 downstream_actor_id = 5;

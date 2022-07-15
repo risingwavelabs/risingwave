@@ -68,9 +68,16 @@ impl HummockMetaClient for MockHummockMetaClient {
             .map_err(mock_err)
     }
 
-    async fn unpin_version(&self, pinned_version_id: &[HummockVersionId]) -> Result<()> {
+    async fn unpin_version(&self) -> Result<()> {
         self.hummock_manager
-            .unpin_version(self.context_id, pinned_version_id)
+            .unpin_version(self.context_id)
+            .await
+            .map_err(mock_err)
+    }
+
+    async fn unpin_version_before(&self, unpin_version_before: HummockVersionId) -> Result<()> {
+        self.hummock_manager
+            .unpin_version_before(self.context_id, unpin_version_before)
             .await
             .map_err(mock_err)
     }
