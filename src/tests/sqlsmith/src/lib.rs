@@ -206,7 +206,7 @@ impl<'a, R: Rng> SqlGenerator<'a, R> {
         let alias = format!("col_{}", i);
         (
             SelectItem::ExprWithAlias {
-                expr: expr,
+                expr,
                 alias: Ident::new(alias.clone()),
             },
             Column {
