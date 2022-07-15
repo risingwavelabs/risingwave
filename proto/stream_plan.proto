@@ -53,7 +53,7 @@ message ResumeMutation {}
 message Barrier {
   data.Epoch epoch = 1;
   oneof mutation {
-    // Add a new dispatcher to some actors, used for creating materialized views.
+    // Add new dispatchers to some actors, used for creating materialized views.
     AddMutation add = 3;
     // Stop a set of actors, used for dropping materialized views. Empty dispatchers will be
     // automatically removed.
