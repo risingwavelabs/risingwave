@@ -27,7 +27,6 @@ use risingwave_sqlparser::ast::{
 };
 
 use crate::SqlGenerator;
-// use risingwave_pb::expr::agg_call::Type as AggType;
 
 lazy_static::lazy_static! {
     static ref FUNC_TABLE: HashMap<DataTypeName, Vec<FuncSign>> = {
