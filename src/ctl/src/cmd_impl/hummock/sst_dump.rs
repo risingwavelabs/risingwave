@@ -23,6 +23,7 @@ use risingwave_hummock_sdk::key::{get_epoch, get_table_id, user_key};
 use risingwave_hummock_sdk::HummockSSTableId;
 use risingwave_object_store::object::{BlockLocation, ObjectStore};
 use risingwave_rpc_client::{HummockMetaClient, MetaClient};
+use risingwave_storage::encoding::cell_based_encoding_util::deserialize_column_id;
 use risingwave_storage::hummock::value::HummockValue;
 use risingwave_storage::hummock::{
     Block, BlockHolder, BlockIterator, CompressionAlgorithm, SstableMeta, SstableStore,
@@ -117,7 +118,7 @@ async fn load_table_schemas(meta_client: &MetaClient) -> anyhow::Result<TableDat
             col_list.push((
                 clm.data_type().clone(),
                 String::from(clm.name()),
-                clm.is_hidden().clone(),
+                clm.is_hidden(),
             ));
         });
         column_table.insert(tbl.id, (tbl.name.clone(), col_list));
@@ -173,7 +174,6 @@ fn print_kv_pairs(block_data: Bytes, table_data: &TableData) -> anyhow::Result<(
     let mut block_iter = BlockIterator::new(holder);
     block_iter.seek_to_first();
 
-    let mut column_idx: usize = 0;
     while block_iter.is_valid() {
         let full_key = block_iter.key();
         let user_key = user_key(full_key);
@@ -199,23 +199,17 @@ fn print_kv_pairs(block_data: Bytes, table_data: &TableData) -> anyhow::Result<(
             let (table_name, columns) = table_data.get(&table_id).unwrap();
             println!("\t\t     table: {} - {}", table_id, table_name);
 
-            // Check if new row.
-            if is_put {
-                if user_val.len() == 0 && (&user_key[user_key.len() - 4..]).get_i32() == 0x7fffffff
-                {
-                    // New row. Reset column index.
-                    column_idx = 0;
-                } else {
-                    let (data_type, name, is_hidden) = &columns[column_idx];
-                    let datum = deserialize_cell(user_val, data_type).unwrap().unwrap();
-                    println!(
-                        "\t\t    column: {} {}",
-                        name,
-                        if is_hidden.clone() { "(hidden)" } else { "" }
-                    );
-                    println!("\t\t     datum: {:?}", datum);
-                    column_idx += 1;
-                }
+            // Print stored value.
+            let column_idx = deserialize_column_id(&user_key[user_key.len() - 4..])?.get_id();
+            if is_put && !user_val.is_empty() && column_idx >= 0 {
+                let (data_type, name, is_hidden) = &columns[column_idx as usize];
+                let datum = deserialize_cell(user_val, data_type).unwrap().unwrap();
+                println!(
+                    "\t\t    column: {} {}",
+                    name,
+                    if *is_hidden { "(hidden)" } else { "" }
+                );
+                println!("\t\t     datum: {:?}", datum);
             }
         }
 
