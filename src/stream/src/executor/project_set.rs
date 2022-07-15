@@ -184,29 +184,29 @@ mod tests {
 
         let expected = vec![
             StreamChunk::from_pretty(
-                " I i i
-                + 5 1 2
-                + 5 . 2",
+                " I I i i
+                + 0 5 1 2
+                + 1 5 . 2",
             ),
             StreamChunk::from_pretty(
-                " I i i
-                + 7 1 2
-                + 7 . 2",
+                " I I i i
+                + 0 7 1 2
+                + 1 7 . 2",
             ),
             StreamChunk::from_pretty(
-                " I i i
-                + 9 1 2
-                + 9 . 2",
+                " I I i i
+                + 0 9 1 2
+                + 1 9 . 2",
             ),
             StreamChunk::from_pretty(
-                " I  i i
-                + 15 1 2
-                + 15 . 2",
+                " I I  i i
+                + 0 15 1 2
+                + 1 15 . 2",
             ),
             StreamChunk::from_pretty(
-                " I i i
-                - 9 1 2
-                - 9 . 2",
+                " I I i i
+                - 0 9 1 2
+                - 1 9 . 2",
             ),
         ];
 

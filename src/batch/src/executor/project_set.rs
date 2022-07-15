@@ -162,34 +162,34 @@ mod tests {
 
         let expected = vec![
             DataChunk::from_pretty(
-                "i     i     i
-                 1     1     2
-                 1     1     2
-                 1     .     2",
+                "I i i i
+                 0 1 1 2
+                 1 1 1 2
+                 2 1 . 2",
             ),
             DataChunk::from_pretty(
-                "i     i     i
-                 2     1     2
-                 2     1     2
-                 2     .     2",
+                "I i i i
+                 0 2 1 2
+                 1 2 1 2
+                 2 2 . 2",
             ),
             DataChunk::from_pretty(
-                "i     i     i
-                 33333 1     2
-                 33333 1     2
-                 33333 .     2",
+                "I i     i i
+                 0 33333 1 2
+                 1 33333 1 2
+                 2 33333 . 2",
             ),
             DataChunk::from_pretty(
-                "i     i     i
-                 4     1     2
-                 4     1     2
-                 4     .     2",
+                "I i i i
+                 0 4 1 2
+                 1 4 1 2
+                 2 4 . 2",
             ),
             DataChunk::from_pretty(
-                "i     i     i
-                 5     1     2
-                 5     1     2
-                 5     .     2",
+                "I i i i
+                 0 5 1 2
+                 1 5 1 2
+                 2 5 . 2",
             ),
         ];
 
@@ -227,11 +227,9 @@ mod tests {
         assert_eq!(
             chunk,
             DataChunk::from_pretty(
-                "
-                    i     i
-                    1     2
-                    1     2
-                ",
+                "I i i
+                 0 1 2
+                 1 1 2",
             ),
         );
     }

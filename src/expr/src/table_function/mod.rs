@@ -20,7 +20,9 @@ use either::Either;
 use futures_async_stream::try_stream;
 use itertools::Itertools;
 use risingwave_common::array::column::Column;
-use risingwave_common::array::{ArrayImplIterator, ArrayRef, DataChunk};
+use risingwave_common::array::{
+    ArrayBuilder, ArrayImplIterator, ArrayRef, DataChunk, I64ArrayBuilder,
+};
 use risingwave_common::error::RwError;
 use risingwave_common::types::{DataType, DatumRef};
 use risingwave_pb::expr::project_set_select_item::SelectItem::*;
@@ -123,6 +125,16 @@ impl From<BoxedExpression> for ProjectSetSelectItem {
     }
 }
 
+/// A column corresponds to the range `0..len`
+fn index_array_column(len: usize) -> Column {
+    let mut builder = I64ArrayBuilder::new(len);
+    for value in 0..len {
+        builder.append(Some(value as i64)).unwrap();
+    }
+    let array = builder.finish().unwrap();
+    Column::new(Arc::new(array.into()))
+}
+
 impl ProjectSetSelectItem {
     pub fn from_prost(prost: &SelectItemProst) -> Result<Self> {
         match prost.select_item.as_ref().unwrap() {
@@ -149,6 +161,7 @@ impl ProjectSetSelectItem {
         }
     }
 
+    /// First column will be `projected_row_id`, which represents the index in the output table
     #[try_stream(boxed, ok = DataChunk, error = RwError)]
     pub async fn execute(
         select_list: Arc<Vec<Self>>,
@@ -185,7 +198,8 @@ impl ProjectSetSelectItem {
                 .into_iter()
                 .map(|ty| ty.create_array_builder(max_tf_len));
 
-            let mut columns = vec![];
+            let mut columns = vec![index_array_column(max_tf_len)];
+
             for (item, mut builder) in items.into_iter().zip_eq(builders) {
                 match item {
                     Either::Left(array_ref) => {
