@@ -15,7 +15,6 @@
 use std::collections::HashMap;
 
 use risingwave_common::catalog::{ColumnDesc, Field};
-use risingwave_common::types::DataType;
 use risingwave_common::util::sort_util::OrderType;
 
 use crate::catalog::column_catalog::ColumnCatalog;
@@ -38,9 +37,10 @@ impl TableCatalogBuilder {
         Self::default()
     }
 
-    /// Add a column from Field info.
-    pub fn add_column_desc_from_field(&mut self, order_type: Option<OrderType>, field: &Field) {
-        let column_id = self.cur_col_id();
+    /// Add a column from Field info, return the column index of the table
+    pub fn add_column(&mut self, field: &Field) -> usize {
+        let column_idx = self.columns.len();
+        let column_id = column_idx as i32;
         // Add column desc.
         let mut column_desc = ColumnDesc::from_field_with_column_id(field, column_id);
 
@@ -52,56 +52,11 @@ impl TableCatalogBuilder {
             // All columns in internal table are invisible to batch query.
             is_hidden: false,
         });
-
-        // Ordered column desc must be a pk.
-        if let Some(order) = order_type {
-            self.add_order_column(i32::from(column_desc.column_id) as usize, order);
-        }
-    }
-
-    /// Add a column from Field info. Should use `add_order_column` to build order keys.
-    /// Note that we should make sure `column_id` of columns and order keys index are 1-1 mapping
-    /// (e.g. in hash join)
-    pub fn add_column_desc_from_field_without_order_type(&mut self, field: &Field) {
-        let column_id = self.cur_col_id();
-        // Add column desc.
-        let mut column_desc = ColumnDesc::from_field_with_column_id(field, column_id);
-
-        // Avoid column name duplicate.
-        self.avoid_duplicate_col_name(&mut column_desc);
-
-        self.columns.push(ColumnCatalog {
-            column_desc: column_desc.clone(),
-            // All columns in internal table are invisible to batch query.
-            is_hidden: false,
-        });
-    }
-
-    /// Add a unnamed column.
-    pub fn add_unnamed_column(&mut self, order_type: Option<OrderType>, data_type: DataType) {
-        let column_id = self.cur_col_id();
-
-        // Add column desc.
-        let mut column_desc = ColumnDesc::unnamed(column_id.into(), data_type);
-
-        // Avoid column name duplicate.
-        self.avoid_duplicate_col_name(&mut column_desc);
-
-        self.columns.push(ColumnCatalog {
-            column_desc: column_desc.clone(),
-            // All columns in internal table are invisible to batch query.
-            is_hidden: false,
-        });
-
-        if let Some(order) = order_type {
-            self.add_order_column(i32::from(column_desc.column_id) as usize, order);
-        }
+        column_idx
     }
 
     /// Check whether need to add a ordered column. Different from value, order desc equal pk in
     /// semantics and they are encoded as storage key.
-    /// WARNING: This should only be called by user when building internal table of hash join (after
-    /// `add_column_desc_from_field_without_order_type`).
     pub fn add_order_column(&mut self, index: usize, order_type: OrderType) {
         self.pk_indices.push(index);
         self.order_key.push(FieldOrder {
@@ -142,10 +97,5 @@ impl TableCatalogBuilder {
             properties: HashMap::default(),
             read_pattern_prefix_column: 0,
         }
-    }
-
-    /// Allocate column id for next column. Column id allocation is always start from 0.
-    pub fn cur_col_id(&self) -> i32 {
-        self.columns.len() as i32
     }
 }
