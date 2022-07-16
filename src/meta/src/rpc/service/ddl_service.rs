@@ -55,6 +55,7 @@ impl<S> DdlServiceImpl<S>
 where
     S: MetaStore,
 {
+    #[allow(clippy::too_many_arguments)]
     pub fn new(
         env: MetaSrvEnv<S>,
         catalog_manager: CatalogManagerRef<S>,

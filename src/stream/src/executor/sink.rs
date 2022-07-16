@@ -110,7 +110,6 @@ mod test {
 
     use super::*;
     use crate::executor::test_utils::*;
-    use crate::executor::*;
 
     #[test]
     fn test_mysqlsink() {
