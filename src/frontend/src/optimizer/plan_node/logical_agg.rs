@@ -778,13 +778,15 @@ impl LogicalAgg {
         let verbose = self.base.ctx.is_explain_verbose();
         let mut builder = f.debug_struct(name);
         if verbose {
-            builder
-                .field("group_key", &self.group_key_verbose_display())
-                .field("aggs", &self.agg_calls_verbose_display());
+            if !self.group_key.is_empty() {
+                builder.field("group_key", &self.group_key_verbose_display());
+            }
+            builder.field("aggs", &self.agg_calls_verbose_display());
         } else {
-            builder
-                .field("group_key", &self.group_key_display())
-                .field("aggs", &self.agg_calls());
+            if !self.group_key.is_empty() {
+                builder.field("group_key", &self.group_key_display());
+            }
+            builder.field("aggs", &self.agg_calls());
         }
         builder.finish()
     }
