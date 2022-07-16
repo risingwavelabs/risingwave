@@ -287,20 +287,7 @@ where
                     .map_err(tonic_err)?;
                 return Err(e.into());
             }
-            Ok(()) => {
-                // self.set_table_mapping(&mut sink).map_err(tonic_err)?;
-                let mut internal_table = ctx
-                    .internal_table_id_map
-                    .iter()
-                    .filter(|(_, table)| table.is_some())
-                    .map(|(_, table)| table.clone().unwrap())
-                    .collect_vec();
-
-                for inner_table in &mut internal_table {
-                    self.set_table_mapping(inner_table).map_err(tonic_err)?;
-                }
-                internal_table
-            }
+            Ok(()) => self.get_internal_table(&ctx)?,
         };
 
         // tracing for checking the diff of catalog::Table and internal_table_id count
@@ -397,17 +384,7 @@ where
             }
             Ok(()) => {
                 self.set_table_mapping(&mut mview).map_err(tonic_err)?;
-                let mut internal_table = ctx
-                    .internal_table_id_map
-                    .iter()
-                    .filter(|(_, table)| table.is_some())
-                    .map(|(_, table)| table.clone().unwrap())
-                    .collect_vec();
-
-                for inner_table in &mut internal_table {
-                    self.set_table_mapping(inner_table).map_err(tonic_err)?;
-                }
-                internal_table
+                self.get_internal_table(&ctx)?
             }
         };
 
@@ -547,6 +524,20 @@ where
                 .map_err(tonic_err)?;
         }
         Ok(dependent_relations.into_iter().collect())
+    }
+
+    fn get_internal_table(&self, ctx: &CreateMaterializedViewContext) -> RwResult<Vec<Table>> {
+        let mut internal_table = ctx
+            .internal_table_id_map
+            .iter()
+            .filter(|(_, table)| table.is_some())
+            .map(|(_, table)| table.clone().unwrap())
+            .collect_vec();
+
+        for inner_table in &mut internal_table {
+            self.set_table_mapping(inner_table).map_err(tonic_err)?;
+        }
+        Ok(internal_table)
     }
 
     async fn create_mview_on_compute_node(
@@ -713,23 +704,12 @@ where
                 self.catalog_manager
                     .cancel_create_materialized_source_procedure(&source, &mview)
                     .await?;
-                // drop previously created source
                 self.source_manager.drop_source(source_id).await?;
                 return Err(e);
             }
             Ok(()) => {
                 self.set_table_mapping(&mut mview).map_err(tonic_err)?;
-                let mut internal_table = ctx
-                    .internal_table_id_map
-                    .iter()
-                    .filter(|(_, table)| table.is_some())
-                    .map(|(_, table)| table.clone().unwrap())
-                    .collect_vec();
-
-                for inner_table in &mut internal_table {
-                    self.set_table_mapping(inner_table).map_err(tonic_err)?;
-                }
-                internal_table
+                self.get_internal_table(&ctx)?
             }
         };
 
