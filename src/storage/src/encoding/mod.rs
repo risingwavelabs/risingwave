@@ -32,7 +32,7 @@ pub type KeyBytes = Vec<u8>;
 pub type ValueBytes = Vec<u8>;
 
 /// `Encoding` defines an interface for encoding a key row into kv storage.
-pub trait Encoding {
+pub trait Encoding: Clone {
     /// Constructs a new serializer.
     fn create_row_serializer(
         pk_indices: &[usize],
@@ -88,8 +88,8 @@ pub trait Decoding {
     fn take(&mut self) -> Option<(VirtualNode, Vec<u8>, Row)>;
 }
 
-/// `RowExchange` provides the ability to convert between Row and KV entry.
-pub trait Exchange {
+/// `Exchanger` provides the ability to convert between Row and KV entry.
+pub trait Exchanger: Send + Sync + Clone {
     type Serializer: Encoding;
     type Deserializer: Decoding;
 

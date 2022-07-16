@@ -22,7 +22,6 @@ use bytes::BufMut;
 use futures::future::try_join_all;
 use futures::{Stream, StreamExt};
 use futures_async_stream::try_stream;
-use crate::encoding::Exchange;
 use itertools::Itertools;
 use log::trace;
 use risingwave_common::array::Row;
@@ -43,7 +42,7 @@ use crate::encoding::cell_based_row_deserializer::{
 };
 use crate::encoding::cell_based_row_serializer::CellBasedRowSerializer;
 use crate::encoding::dedup_pk_cell_based_row_serializer::DedupPkCellBasedRowSerializer;
-use crate::encoding::{ColumnDescMapping, Decoding, Encoding};
+use crate::encoding::{ColumnDescMapping, Decoding, Encoding, Exchanger};
 use crate::error::{StorageError, StorageResult};
 use crate::keyspace::StripPrefixIterator;
 use crate::storage_value::StorageValue;
@@ -75,7 +74,7 @@ pub type StorageTable<S, const T: AccessType> = StorageTableBase<S, CellBasedRow
 /// It is parameterized by its encoding, by specifying cell serializer and deserializers.
 /// TODO: Parameterize on `CellDeserializer`.
 #[derive(Clone)]
-pub struct StorageTableBase<S: StateStore, E: Exchange, const T: AccessType> {
+pub struct StorageTableBase<S: StateStore, E: Exchanger, const T: AccessType> {
     /// The keyspace that the pk and value of the original table has.
     keyspace: Keyspace<S>,
 
@@ -92,7 +91,7 @@ pub struct StorageTableBase<S: StateStore, E: Exchange, const T: AccessType> {
     pk_serializer: OrderedRowSerializer,
 
     /// Used for serializing the row.
-    row_serializer: E,
+    row_serializer: E::Serializer,
 
     /// Mapping from column id to column index. Used for deserializing the row.
     mapping: Arc<ColumnDescMapping>,
@@ -122,7 +121,7 @@ pub struct StorageTableBase<S: StateStore, E: Exchange, const T: AccessType> {
     disable_sanity_check: bool,
 }
 
-impl<S: StateStore, E: Exchange, const T: AccessType> std::fmt::Debug
+impl<S: StateStore, E: Exchanger, const T: AccessType> std::fmt::Debug
     for StorageTableBase<S, E, T>
 {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
@@ -134,7 +133,7 @@ fn err(rw: impl Into<RwError>) -> StorageError {
     StorageError::StorageTable(rw.into())
 }
 
-impl<S: StateStore, E: Exchange> StorageTableBase<S, E, READ_ONLY> {
+impl<S: StateStore, E: Exchanger> StorageTableBase<S, E, READ_ONLY> {
     /// Create a read-only [`StorageTableBase`] given a complete set of `columns` and a partial
     /// set of `column_ids`. The output will only contains columns with the given ids in the same
     /// order.
@@ -160,7 +159,7 @@ impl<S: StateStore, E: Exchange> StorageTableBase<S, E, READ_ONLY> {
     }
 }
 
-impl<S: StateStore, E: Exchange> StorageTableBase<S, E, READ_WRITE> {
+impl<S: StateStore, E: Exchanger> StorageTableBase<S, E, READ_WRITE> {
     /// Create a read-write [`StorageTableBase`] given a complete set of `columns`.
     /// This is parameterized on cell based row serializer.
     pub fn new(
@@ -203,7 +202,7 @@ impl<S: StateStore, E: Exchange> StorageTableBase<S, E, READ_WRITE> {
 }
 
 /// Allow transforming a `READ_WRITE` instance to a `READ_ONLY` one.
-impl<S: StateStore, E: Exchange> From<StorageTableBase<S, E, READ_WRITE>>
+impl<S: StateStore, E: Exchanger> From<StorageTableBase<S, E, READ_WRITE>>
     for StorageTableBase<S, E, READ_ONLY>
 {
     fn from(rw: StorageTableBase<S, E, READ_WRITE>) -> Self {
@@ -211,7 +210,7 @@ impl<S: StateStore, E: Exchange> From<StorageTableBase<S, E, READ_WRITE>>
     }
 }
 
-impl<S: StateStore, E: Exchange, const T: AccessType> StorageTableBase<S, E, T> {
+impl<S: StateStore, E: Exchanger, const T: AccessType> StorageTableBase<S, E, T> {
     #[allow(clippy::too_many_arguments)]
 
     fn new_inner(
@@ -286,7 +285,7 @@ impl<S: StateStore, E: Exchange, const T: AccessType> StorageTableBase<S, E, T> 
 }
 
 /// Get
-impl<S: StateStore, E: Exchange, const T: AccessType> StorageTableBase<S, E, T> {
+impl<S: StateStore, E: Exchanger, const T: AccessType> StorageTableBase<S, E, T> {
     /// Check whether the given `vnode` is set in the `vnodes` of this table.
     fn check_vnode_is_set(&self, vnode: VirtualNode) {
         let is_set = self.vnodes.is_set(vnode as usize).unwrap();
@@ -388,7 +387,7 @@ impl<S: StateStore, E: Exchange, const T: AccessType> StorageTableBase<S, E, T> 
 const ENABLE_STATE_TABLE_SANITY_CHECK: bool = cfg!(debug_assertions);
 
 /// Write
-impl<S: StateStore, E: Exchange> StorageTableBase<S, E, READ_WRITE> {
+impl<S: StateStore, E: Exchanger> StorageTableBase<S, E, READ_WRITE> {
     /// Get vnode value with full row.
     fn compute_vnode_by_row(&self, row: &Row) -> VirtualNode {
         // With `READ_WRITE`, the output columns should be exactly same with the table columns, so
@@ -544,7 +543,7 @@ impl<S: PkAndRowStream + Unpin> TableIter for S {
 }
 
 /// Iterators
-impl<S: StateStore, E: Exchange, const T: AccessType> StorageTableBase<S, E, T> {
+impl<S: StateStore, E: Exchanger, const T: AccessType> StorageTableBase<S, E, T> {
     /// Get multiple [`StorageTableIter`] based on the specified vnodes of this table with
     /// `vnode_hint`, and merge or concat them by given `ordered`.
     async fn iter_with_encoded_key_range<R, B>(
