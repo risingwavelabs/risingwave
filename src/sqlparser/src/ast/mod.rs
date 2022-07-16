@@ -906,6 +906,8 @@ pub enum Statement {
         analyze: bool,
         // Display additional information regarding the plan.
         verbose: bool,
+        // Trace plan transformation of the optimizer step by step
+        trace: bool,
         /// A SQL query that specifies what to explain
         statement: Box<Statement>,
     },
@@ -927,6 +929,7 @@ impl fmt::Display for Statement {
                 describe_alias,
                 verbose,
                 analyze,
+                trace,
                 statement,
             } => {
                 if *describe_alias {
@@ -941,6 +944,10 @@ impl fmt::Display for Statement {
 
                 if *verbose {
                     write!(f, "VERBOSE ")?;
+                }
+
+                if *trace {
+                    write!(f, "TRACE ")?;
                 }
 
                 write!(f, "{}", statement)
