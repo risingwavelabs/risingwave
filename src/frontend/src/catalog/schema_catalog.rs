@@ -169,7 +169,8 @@ impl SchemaCatalog {
     }
 
     pub fn get_sink_id_by_name(&self, sink_name: &str) -> Option<SinkId> {
-        self.sink_bimap.get_by_right(sink_name).cloned()
+        let ret = self.sink_bimap.get_by_right(sink_name).cloned();
+        ret
     }
 
     pub fn get_system_table_by_name(&self, table_name: &str) -> Option<&SystemCatalog> {
