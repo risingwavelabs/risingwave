@@ -44,3 +44,22 @@ drop table ddl_table;
 # Drop it again with if exists.
 statement ok
 drop schema if exists ddl_schema;
+
+# We test the case sensitivity of schema name.
+statement ok
+create schema Myschema;
+
+statement ok
+drop schema myschema;
+
+statement ok
+create schema "Myschema";
+
+statement error
+drop schema myschema;
+
+statement error
+drop schema Myschema;
+
+statement ok
+drop schema "Myschema";

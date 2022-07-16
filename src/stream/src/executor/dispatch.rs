@@ -26,9 +26,10 @@ use risingwave_common::array::{Op, StreamChunk};
 use risingwave_common::buffer::BitmapBuilder;
 use risingwave_common::error::{internal_error, Result};
 use risingwave_common::types::VIRTUAL_NODE_COUNT;
-use risingwave_common::util::addr::{is_local_address, HostAddr};
+use risingwave_common::util::addr::is_local_address;
 use risingwave_common::util::compress::decompress_data;
 use risingwave_common::util::hash_util::CRC32FastBuilder;
+use risingwave_pb::stream_plan::update_mutation::DispatcherUpdate as ProstDispatcherUpdate;
 use risingwave_pb::stream_plan::Dispatcher as ProstDispatcher;
 use tokio::sync::mpsc::Sender;
 use tracing::event;
@@ -127,12 +128,12 @@ impl Output for RemoteOutput {
 
 fn new_output(
     context: &SharedContext,
-    addr: HostAddr,
     actor_id: ActorId,
     down_id: ActorId,
 ) -> Result<Box<dyn Output>> {
+    let downstream_addr = context.get_actor_info(&down_id)?.get_host()?.into();
     let tx = context.take_sender(&(actor_id, down_id))?;
-    if is_local_address(&addr, &context.addr) {
+    if is_local_address(&downstream_addr, &context.addr) {
         // if this is a local downstream actor
         Ok(Box::new(LocalOutput::new(down_id, tx)) as Box<dyn Output>)
     } else {
@@ -228,6 +229,53 @@ impl DispatchExecutorInner {
         Ok(())
     }
 
+    fn find_dispatcher(&mut self, dispatcher_id: DispatcherId) -> &mut DispatcherImpl {
+        self.dispatchers
+            .iter_mut()
+            .find(|d| d.dispatcher_id() == dispatcher_id)
+            .unwrap_or_else(|| panic!("dispatcher {}:{} not found", self.actor_id, dispatcher_id))
+    }
+
+    /// Update the dispatcher BEFORE we actually dispatch this barrier. We'll only add the new
+    /// outputs.
+    fn pre_update_dispatcher(&mut self, update: &ProstDispatcherUpdate) -> Result<()> {
+        let outputs: Vec<_> = update
+            .added_downstream_actor_id
+            .iter()
+            .map(|&id| new_output(&self.context, self.actor_id, id))
+            .try_collect()?;
+
+        let dispatcher = self.find_dispatcher(update.dispatcher_id);
+        dispatcher.add_outputs(outputs);
+
+        Ok(())
+    }
+
+    /// Update the dispatcher AFTER we dispatch this barrier. We'll remove some outputs and finally
+    /// update the hash mapping.
+    fn post_update_dispatcher(&mut self, update: &ProstDispatcherUpdate) -> Result<()> {
+        let ids = update.removed_downstream_actor_id.iter().copied().collect();
+
+        let dispatcher = self.find_dispatcher(update.dispatcher_id);
+        dispatcher.remove_outputs(&ids);
+
+        #[expect(clippy::single_match)]
+        match dispatcher {
+            DispatcherImpl::Hash(dispatcher) => {
+                dispatcher.hash_mapping = {
+                    let compressed_mapping = update.get_hash_mapping()?;
+                    decompress_data(
+                        &compressed_mapping.original_indices,
+                        &compressed_mapping.data,
+                    )
+                }
+            }
+            _ => {}
+        }
+
+        Ok(())
+    }
+
     /// For `Add` and `Update`, update the dispatchers before we dispatch the barrier.
     async fn pre_mutate_dispatchers(&mut self, mutation: &Option<Arc<Mutation>>) -> Result<()> {
         let Some(mutation) = mutation.as_deref() else {
@@ -235,78 +283,45 @@ impl DispatchExecutorInner {
         };
 
         match mutation {
-            Mutation::AddDispatcher(adds) => {
-                if let Some(new_dispatchers) = adds.map.get(&self.actor_id) {
+            Mutation::Add { adds, .. } => {
+                if let Some(new_dispatchers) = adds.get(&self.actor_id) {
                     self.add_dispatchers(new_dispatchers)?;
                 }
             }
-
-            Mutation::UpdateOutputs(updates) => {
-                for dispatcher in &mut self.dispatchers {
-                    if let Some((_, actor_infos)) =
-                        updates.get_key_value(&(self.actor_id, dispatcher.dispatcher_id()))
-                    {
-                        let mut new_outputs = vec![];
-
-                        let actor_id = self.actor_id;
-                        // delete the old local connections in both local and remote pools;
-                        self.context.retain(|&(up_id, down_id)| {
-                            up_id != actor_id
-                                || actor_infos.iter().any(|info| info.actor_id == down_id)
-                        });
-
-                        for actor_info in actor_infos.iter() {
-                            let down_id = actor_info.get_actor_id();
-                            let downstream_addr = actor_info.get_host()?.into();
-                            new_outputs.push(new_output(
-                                &self.context,
-                                downstream_addr,
-                                self.actor_id,
-                                down_id,
-                            )?);
-                        }
-                        dispatcher.set_outputs(new_outputs)
-                    }
+            Mutation::Update(updates) => {
+                if let Some(update) = updates.get(&self.actor_id) {
+                    self.pre_update_dispatcher(update)?;
                 }
             }
-
-            Mutation::AddOutput(adds) => {
-                for dispatcher in &mut self.dispatchers {
-                    if let Some(downstream_actor_infos) =
-                        adds.map.get(&(self.actor_id, dispatcher.dispatcher_id()))
-                    {
-                        let mut outputs_to_add = Vec::with_capacity(downstream_actor_infos.len());
-                        for downstream_actor_info in downstream_actor_infos {
-                            let down_id = downstream_actor_info.get_actor_id();
-                            let downstream_addr = downstream_actor_info.get_host()?.into();
-                            outputs_to_add.push(new_output(
-                                &self.context,
-                                downstream_addr,
-                                self.actor_id,
-                                down_id,
-                            )?);
-                        }
-                        dispatcher.add_outputs(outputs_to_add);
-                    }
-                }
-            }
-
             _ => {}
         };
 
         Ok(())
     }
 
-    /// For `Stop`, update the dispatchers after we dispatch the barrier.
+    /// For `Stop` and `Update`, update the dispatchers after we dispatch the barrier.
     async fn post_mutate_dispatchers(&mut self, mutation: &Option<Arc<Mutation>>) -> Result<()> {
-        if let Some(Mutation::Stop(stops)) = mutation.as_deref() {
-            // Remove outputs only if this actor itself is not to be stopped.
-            if !stops.contains(&self.actor_id) {
-                for dispatcher in &mut self.dispatchers {
-                    dispatcher.remove_outputs(stops);
+        let Some(mutation) = mutation.as_deref() else {
+            return Ok(())
+        };
+
+        match mutation {
+            Mutation::Stop(stops) => {
+                // Remove outputs only if this actor itself is not to be stopped.
+                if !stops.contains(&self.actor_id) {
+                    for dispatcher in &mut self.dispatchers {
+                        dispatcher.remove_outputs(stops);
+                    }
                 }
             }
-        }
+            Mutation::Update(updates) => {
+                if let Some(update) = updates.get(&self.actor_id) {
+                    self.post_update_dispatcher(update)?;
+                }
+            }
+
+            _ => {}
+        };
 
         // After stopping the downstream mview, the outputs of some dispatcher might be empty and we
         // should clean up them.
@@ -375,10 +390,7 @@ impl DispatcherImpl {
         let outputs = dispatcher
             .downstream_actor_id
             .iter()
-            .map(|down_id| {
-                let downstream_addr = context.get_actor_info(down_id)?.get_host()?.into();
-                new_output(context, downstream_addr, actor_id, *down_id)
-            })
+            .map(|&down_id| new_output(context, actor_id, down_id))
             .collect::<Result<Vec<_>>>()?;
 
         use risingwave_pb::stream_plan::DispatcherType::*;
@@ -390,14 +402,16 @@ impl DispatcherImpl {
                     .iter()
                     .map(|i| *i as usize)
                     .collect();
-                let compressed_mapping = dispatcher.get_hash_mapping()?;
-                let hash_mapping = decompress_data(
-                    &compressed_mapping.original_indices,
-                    &compressed_mapping.data,
-                );
+
+                let hash_mapping = {
+                    let compressed_mapping = dispatcher.get_hash_mapping()?;
+                    decompress_data(
+                        &compressed_mapping.original_indices,
+                        &compressed_mapping.data,
+                    )
+                };
 
                 DispatcherImpl::Hash(HashDataDispatcher::new(
-                    dispatcher.downstream_actor_id.to_vec(),
                     outputs,
                     column_indices,
                     hash_mapping,
@@ -431,12 +445,6 @@ macro_rules! impl_dispatcher {
             pub async fn dispatch_barrier(&mut self, barrier: Barrier) -> Result<()> {
                 match self {
                     $( Self::$variant_name(inner) => inner.dispatch_barrier(barrier).await, )*
-                }
-            }
-
-            pub fn set_outputs(&mut self, outputs: impl IntoIterator<Item = BoxedOutput>) {
-                match self {
-                    $( Self::$variant_name(inner) => inner.set_outputs(outputs), )*
                 }
             }
 
@@ -497,7 +505,6 @@ pub trait Dispatcher: Debug + 'static {
     fn dispatch_data(&mut self, chunk: StreamChunk) -> Self::DataFuture<'_>;
     fn dispatch_barrier(&mut self, barrier: Barrier) -> Self::BarrierFuture<'_>;
 
-    fn set_outputs(&mut self, outputs: impl IntoIterator<Item = BoxedOutput>);
     fn add_outputs(&mut self, outputs: impl IntoIterator<Item = BoxedOutput>);
     fn remove_outputs(&mut self, actor_ids: &HashSet<ActorId>);
 
@@ -544,11 +551,6 @@ impl Dispatcher for RoundRobinDataDispatcher {
         }
     }
 
-    fn set_outputs(&mut self, outputs: impl IntoIterator<Item = BoxedOutput>) {
-        self.outputs = outputs.into_iter().collect();
-        self.cur = self.cur.min(self.outputs.len() - 1);
-    }
-
     fn add_outputs(&mut self, outputs: impl IntoIterator<Item = BoxedOutput>) {
         self.outputs.extend(outputs.into_iter());
     }
@@ -557,6 +559,7 @@ impl Dispatcher for RoundRobinDataDispatcher {
         self.outputs
             .drain_filter(|output| actor_ids.contains(&output.actor_id()))
             .count();
+        self.cur = self.cur.min(self.outputs.len() - 1);
     }
 
     fn dispatcher_id(&self) -> DispatcherId {
@@ -569,7 +572,6 @@ impl Dispatcher for RoundRobinDataDispatcher {
 }
 
 pub struct HashDataDispatcher {
-    fragment_ids: Vec<u32>,
     outputs: Vec<BoxedOutput>,
     keys: Vec<usize>,
     /// Mapping from virtual node to actor id, used for hash data dispatcher to dispatch tasks to
@@ -581,7 +583,6 @@ pub struct HashDataDispatcher {
 impl Debug for HashDataDispatcher {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.debug_struct("HashDataDispatcher")
-            .field("fragment_ids", &self.fragment_ids)
             .field("outputs", &self.outputs)
             .field("keys", &self.keys)
             .field("dispatcher_id", &self.dispatcher_id)
@@ -591,14 +592,12 @@ impl Debug for HashDataDispatcher {
 
 impl HashDataDispatcher {
     pub fn new(
-        fragment_ids: Vec<u32>,
         outputs: Vec<BoxedOutput>,
         keys: Vec<usize>,
         hash_mapping: Vec<ActorId>,
         dispatcher_id: DispatcherId,
     ) -> Self {
         Self {
-            fragment_ids,
             outputs,
             keys,
             hash_mapping,
@@ -609,10 +608,6 @@ impl HashDataDispatcher {
 
 impl Dispatcher for HashDataDispatcher {
     define_dispatcher_associated_types!();
-
-    fn set_outputs(&mut self, outputs: impl IntoIterator<Item = BoxedOutput>) {
-        self.outputs = outputs.into_iter().collect()
-    }
 
     fn add_outputs(&mut self, outputs: impl IntoIterator<Item = BoxedOutput>) {
         self.outputs.extend(outputs.into_iter());
@@ -717,11 +712,7 @@ impl Dispatcher for HashDataDispatcher {
             let ops = new_ops;
 
             // individually output StreamChunk integrated with vis_map
-            for ((vis_map, output), downstream) in vis_maps
-                .into_iter()
-                .zip_eq(self.outputs.iter_mut())
-                .zip_eq(self.fragment_ids.iter())
-            {
+            for (vis_map, output) in vis_maps.into_iter().zip_eq(self.outputs.iter_mut()) {
                 let vis_map = vis_map.finish();
                 // columns is not changed in this function
                 let new_stream_chunk =
@@ -730,7 +721,7 @@ impl Dispatcher for HashDataDispatcher {
                     event!(
                         tracing::Level::TRACE,
                         msg = "chunk",
-                        downstream = downstream,
+                        downstream = output.actor_id(),
                         "send = \n{:#?}",
                         new_stream_chunk
                     );
@@ -804,10 +795,6 @@ impl Dispatcher for BroadcastDispatcher {
         }
     }
 
-    fn set_outputs(&mut self, outputs: impl IntoIterator<Item = BoxedOutput>) {
-        self.outputs = Self::into_pairs(outputs).collect()
-    }
-
     fn add_outputs(&mut self, outputs: impl IntoIterator<Item = BoxedOutput>) {
         self.outputs.extend(Self::into_pairs(outputs));
     }
@@ -853,13 +840,8 @@ impl SimpleDispatcher {
 impl Dispatcher for SimpleDispatcher {
     define_dispatcher_associated_types!();
 
-    fn set_outputs(&mut self, outputs: impl IntoIterator<Item = BoxedOutput>) {
-        self.output = Some(outputs.into_iter().next().unwrap());
-    }
-
-    fn add_outputs(&mut self, outputs: impl IntoIterator<Item = BoxedOutput>) {
-        // TODO: ban this after removing `AddOutputs` mutation.
-        self.output = Some(outputs.into_iter().next().unwrap());
+    fn add_outputs(&mut self, _outputs: impl IntoIterator<Item = BoxedOutput>) {
+        panic!("simple dispatcher does not support add_outputs");
     }
 
     fn dispatch_barrier(&mut self, barrier: Barrier) -> Self::BarrierFuture<'_> {
@@ -900,19 +882,19 @@ mod tests {
 
     use futures::{pin_mut, StreamExt};
     use itertools::Itertools;
-    use madsim::collections::HashMap;
     use risingwave_common::array::column::Column;
     use risingwave_common::array::stream_chunk::StreamChunkTestExt;
     use risingwave_common::array::{Array, ArrayBuilder, I32ArrayBuilder, Op};
     use risingwave_common::catalog::Schema;
     use risingwave_common::types::VIRTUAL_NODE_COUNT;
     use risingwave_pb::common::{ActorInfo, HostAddress};
+    use risingwave_pb::stream_plan::DispatcherType;
     use static_assertions::const_assert_eq;
     use tokio::sync::mpsc::channel;
 
     use super::*;
     use crate::executor::receiver::ReceiverExecutor;
-    use crate::executor::{ActorContext, AddOutput};
+    use crate::executor::ActorContext;
     use crate::task::{LOCAL_OUTPUT_CHANNEL_SIZE, LOCAL_TEST_ADDR};
 
     #[derive(Debug)]
@@ -967,13 +949,8 @@ mod tests {
             .flat_map(|id| vec![id as ActorId; VIRTUAL_NODE_COUNT / num_outputs])
             .collect_vec();
         hash_mapping.resize(VIRTUAL_NODE_COUNT, num_outputs as u32);
-        let mut hash_dispatcher = HashDataDispatcher::new(
-            (0..outputs.len() as u32).collect(),
-            outputs,
-            key_indices.to_vec(),
-            hash_mapping,
-            0,
-        );
+        let mut hash_dispatcher =
+            HashDataDispatcher::new(outputs, key_indices.to_vec(), hash_mapping, 0);
 
         let chunk = StreamChunk::from_pretty(
             "  I I I
@@ -1065,19 +1042,41 @@ mod tests {
             0,
             Arc::new(StreamingMetrics::unused()),
         ));
-        let data_sink = Arc::new(Mutex::new(vec![]));
         let actor_id = 233;
-        let output = Box::new(MockOutput::new(actor_id, data_sink));
         let ctx = Arc::new(SharedContext::for_test());
         let dispatcher_id = 666;
         let metrics = Arc::new(StreamingMetrics::unused());
 
+        // 1. Register info and channels in context.
+        {
+            let mut actor_infos = ctx.actor_infos.write();
+
+            for local_actor_id in [233, 234, 235] {
+                actor_infos.insert(local_actor_id, helper_make_local_actor(local_actor_id));
+            }
+            #[expect(clippy::single_element_loop)]
+            for remote_actor_id in [238] {
+                actor_infos.insert(remote_actor_id, helper_make_remote_actor(remote_actor_id));
+            }
+        }
+        add_local_channels(ctx.clone(), vec![(233, 234), (233, 235)]);
+        add_remote_channels(ctx.clone(), 233, vec![238]);
+
+        let dispatcher = DispatcherImpl::new(
+            &ctx,
+            actor_id,
+            &ProstDispatcher {
+                r#type: DispatcherType::Broadcast as _,
+                dispatcher_id,
+                downstream_actor_id: vec![234, 235],
+                ..Default::default()
+            },
+        )
+        .unwrap();
+
         let executor = Box::new(DispatchExecutor::new(
             input,
-            vec![DispatcherImpl::Simple(SimpleDispatcher::new(
-                output,
-                dispatcher_id,
-            ))],
+            vec![dispatcher],
             actor_id,
             ctx.clone(),
             metrics,
@@ -1085,63 +1084,54 @@ mod tests {
         .execute();
         pin_mut!(executor);
 
-        let mut updates1: HashMap<(u32, u64), Vec<ActorInfo>> = HashMap::new();
+        // 2. Take downstream receivers.
+        let mut rxs = [234, 235, 238]
+            .into_iter()
+            .map(|id| (id, ctx.take_receiver(&(233, id)).unwrap()))
+            .collect::<HashMap<_, _>>();
+        macro_rules! try_recv {
+            ($down_id:expr) => {
+                rxs.get_mut(&$down_id).unwrap().try_recv()
+            };
+        }
 
-        updates1.insert(
-            (actor_id, 0),
-            vec![
-                helper_make_local_actor(234),
-                helper_make_local_actor(235),
-                helper_make_remote_actor(238),
-            ],
-        );
-        add_local_channels(ctx.clone(), vec![(233, 234), (233, 235)]);
-        add_remote_channels(ctx.clone(), 233, vec![238]);
+        // 3. Send a chunk.
+        tx.send(Message::Chunk(StreamChunk::default()))
+            .await
+            .unwrap();
 
-        let b1 = Barrier::new_test_barrier(1).with_mutation(Mutation::UpdateOutputs(updates1));
+        // 4. Send a configuration change barrier.
+        let updates1 = maplit::hashmap! {
+            actor_id => ProstDispatcherUpdate {
+                dispatcher_id,
+                added_downstream_actor_id: vec![238],
+                removed_downstream_actor_id: vec![235],
+                ..Default::default()
+            }
+        };
+        let b1 = Barrier::new_test_barrier(1).with_mutation(Mutation::Update(updates1));
         tx.send(Message::Barrier(b1)).await.unwrap();
         executor.next().await.unwrap().unwrap();
-        let tctx = ctx.clone();
-        {
-            assert_eq!(tctx.get_channel_pair_number(), 3);
-        }
 
-        let mut updates2: HashMap<(u32, u64), Vec<ActorInfo>> = HashMap::new();
-        updates2.insert(
-            (actor_id, dispatcher_id),
-            vec![helper_make_local_actor(235)],
-        );
-        let b2 = Barrier::new_test_barrier(1).with_mutation(Mutation::UpdateOutputs(updates2));
+        // 5. Check downstream.
+        try_recv!(234).unwrap().as_chunk().unwrap();
+        try_recv!(234).unwrap().as_barrier().unwrap();
 
-        tx.send(Message::Barrier(b2)).await.unwrap();
+        try_recv!(235).unwrap().as_chunk().unwrap();
+        try_recv!(235).unwrap().as_barrier().unwrap();
+
+        try_recv!(238).unwrap().as_barrier().unwrap(); // Since it's just added, it won't receive the chunk.
+
+        // 6. Send another barrier.
+        tx.send(Message::Barrier(Barrier::new_test_barrier(2)))
+            .await
+            .unwrap();
         executor.next().await.unwrap().unwrap();
-        let tctx = ctx.clone();
-        {
-            assert_eq!(tctx.get_channel_pair_number(), 1);
-        }
 
-        add_local_channels(ctx.clone(), vec![(233, 245)]);
-        add_remote_channels(ctx.clone(), 233, vec![246]);
-        tx.send(Message::Barrier(
-            Barrier::new_test_barrier(1).with_mutation(Mutation::AddOutput(AddOutput {
-                map: {
-                    let mut actors = HashMap::default();
-                    actors.insert(
-                        (233, 666),
-                        vec![helper_make_local_actor(245), helper_make_remote_actor(246)],
-                    );
-                    actors
-                },
-                ..Default::default()
-            })),
-        ))
-        .await
-        .unwrap();
-        executor.next().await.unwrap().unwrap();
-        let tctx = ctx.clone();
-        {
-            assert_eq!(tctx.get_channel_pair_number(), 3);
-        }
+        // 7. Check downstream.
+        try_recv!(234).unwrap().as_barrier().unwrap();
+        try_recv!(235).unwrap_err(); // Since it's stopped, we can't receive the new messages.
+        try_recv!(238).unwrap().as_barrier().unwrap();
     }
 
     #[tokio::test]
@@ -1164,13 +1154,8 @@ mod tests {
             .flat_map(|id| vec![id as ActorId; VIRTUAL_NODE_COUNT / num_outputs])
             .collect_vec();
         hash_mapping.resize(VIRTUAL_NODE_COUNT, num_outputs as u32);
-        let mut hash_dispatcher = HashDataDispatcher::new(
-            (0..outputs.len() as u32).collect(),
-            outputs,
-            key_indices.to_vec(),
-            hash_mapping.clone(),
-            0,
-        );
+        let mut hash_dispatcher =
+            HashDataDispatcher::new(outputs, key_indices.to_vec(), hash_mapping.clone(), 0);
 
         let mut ops = Vec::new();
         for idx in 0..cardinality {

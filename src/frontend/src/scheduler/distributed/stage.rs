@@ -355,7 +355,7 @@ impl StageRunner {
 
         let t_id = task_id.task_id;
         compute_client
-            .create_task2(task_id, plan_fragment, self.epoch)
+            .create_task(task_id, plan_fragment, self.epoch)
             .await
             .map_err(|e| anyhow!(e))?;
 
