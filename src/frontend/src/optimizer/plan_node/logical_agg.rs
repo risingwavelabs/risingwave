@@ -773,6 +773,21 @@ impl LogicalAgg {
             .collect();
         Self::new(agg_calls, group_key, input)
     }
+
+    pub(super) fn fmt_with_name(&self, f: &mut fmt::Formatter, name: &str) -> fmt::Result {
+        let verbose = self.base.ctx.is_explain_verbose();
+        let mut builder = f.debug_struct(name);
+        if verbose {
+            builder
+                .field("group_key", &self.group_key_verbose_display())
+                .field("aggs", &self.agg_calls_verbose_display());
+        } else {
+            builder
+                .field("group_key", &self.group_key_display())
+                .field("aggs", &self.agg_calls());
+        }
+        builder.finish()
+    }
 }
 
 impl PlanTreeNodeUnary for LogicalAgg {
@@ -801,10 +816,7 @@ impl_plan_tree_node_for_unary! {LogicalAgg}
 
 impl fmt::Display for LogicalAgg {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-        f.debug_struct("LogicalAgg")
-            .field("group_key", &self.group_key)
-            .field("agg_calls", &self.agg_calls)
-            .finish()
+        self.fmt_with_name(f, "LogicalAgg")
     }
 }
 
