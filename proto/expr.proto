@@ -106,6 +106,16 @@ message ExprNode {
   }
 }
 
+message TableFunction {
+  enum Type {
+    GENERATE = 0;
+    UNNEST = 1;
+  }
+  Type function_type = 1;
+  repeated expr.ExprNode args = 2;
+  data.DataType return_type = 3;
+}
+
 message InputRefExpr {
   int32 column_idx = 1;
 }
