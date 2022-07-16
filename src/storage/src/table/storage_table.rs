@@ -752,15 +752,15 @@ impl<S: StateStore, E: Exchanger, const T: AccessType> StorageTableBase<S, E, T>
 }
 
 /// [`StorageTableIterInner`] iterates on the storage table.
-struct StorageTableIterInner<S: StateStore, D: Decoding> {
+struct StorageTableIterInner<S: StateStore, E: Exchanger> {
     /// An iterator that returns raw bytes from storage.
     iter: StripPrefixIterator<S::Iter>,
 
     /// Cell-based row deserializer
-    cell_based_row_deserializer: D, // CellBasedRowDeserializer<Arc<ColumnDescMapping>>,
+    cell_based_row_deserializer: E::Deserializer, /* CellBasedRowDeserializer<Arc<ColumnDescMapping>>, */
 }
 
-impl<S: StateStore, D: Decoding> StorageTableIterInner<S, D> {
+impl<S: StateStore, E: Exchanger> StorageTableIterInner<S, E> {
     /// If `wait_epoch` is true, it will wait for the given epoch to be committed before iteration.
     async fn new<R, B>(
         keyspace: &Keyspace<S>,
@@ -778,7 +778,7 @@ impl<S: StateStore, D: Decoding> StorageTableIterInner<S, D> {
             keyspace.state_store().wait_epoch(epoch).await?;
         }
 
-        let cell_based_row_deserializer = D::create_row_deserializer(table_descs, data_types);
+        let cell_based_row_deserializer = E::create_deserializer(table_descs, data_types);
 
         let iter = keyspace.iter_with_range(raw_key_range, epoch).await?;
         let iter = Self {
