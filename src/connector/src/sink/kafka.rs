@@ -89,10 +89,16 @@ impl KafkaConfig {
     }
 }
 
+#[derive(Debug, Clone, PartialEq, enum_as_inner::EnumAsInner)]
+enum KafkaSinkState {
+    Init,
+    Running(u64),
+}
+
 pub struct KafkaSink {
     pub config: KafkaConfig,
     pub conductor: KafkaTransactionConductor,
-    latest_success_epoch: u64,
+    latest_success_epoch: KafkaSinkState,
     in_transaction_epoch: Option<u64>,
 }
 
@@ -102,7 +108,7 @@ impl KafkaSink {
             config: config.clone(),
             conductor: KafkaTransactionConductor::new(config).await?,
             in_transaction_epoch: None,
-            latest_success_epoch: 0,
+            latest_success_epoch: KafkaSinkState::Init,
         })
     }
 
@@ -188,10 +194,11 @@ impl KafkaSink {
 impl Sink for KafkaSink {
     async fn write_batch(&mut self, chunk: StreamChunk, schema: &Schema) -> Result<()> {
         // when sinking the snapshot, it is required to begin epoch 0 for transaction
-        if self.in_transaction_epoch.unwrap() <= self.latest_success_epoch {
-            return Ok(());
+        if let (KafkaSinkState::Running(epoch), in_txn_epoch) = (&self.latest_success_epoch, &self.in_transaction_epoch.unwrap()) && in_txn_epoch <= epoch {
+            return Ok(())
         }
         if self.config.sink_type.as_str() == "append_only" {
+            println!("append only");
             self.append_only(chunk, schema).await
         } else if self.config.sink_type.as_str() == "debezium" {
             todo!()
@@ -204,10 +211,12 @@ impl Sink for KafkaSink {
     // transaction.
     async fn begin_epoch(&mut self, epoch: u64) -> Result<()> {
         self.in_transaction_epoch = Some(epoch);
-        if self.latest_success_epoch == 0 {
+        if self.latest_success_epoch == KafkaSinkState::Init {
+            println!("init");
             self.do_with_retry(|conductor| conductor.init_transaction())
                 .await
                 .map_err(SinkError::Kafka)?;
+            tracing::debug!("init transaction");
         }
 
         self.do_with_retry(|conductor| conductor.start_transaction())
@@ -226,7 +235,7 @@ impl Sink for KafkaSink {
             .await
             .map_err(SinkError::Kafka)?;
         if let Some(epoch) = self.in_transaction_epoch.take() {
-            self.latest_success_epoch = epoch;
+            self.latest_success_epoch = KafkaSinkState::Running(epoch);
         } else {
             tracing::error!(
                 "commit without begin_epoch, last success epoch {:?}",
@@ -234,13 +243,17 @@ impl Sink for KafkaSink {
             );
             return Err(SinkError::Kafka(KafkaError::Canceled));
         }
+        tracing::debug!("commit epoch {:?}", self.latest_success_epoch);
         Ok(())
     }
 
     async fn abort(&mut self) -> Result<()> {
         self.do_with_retry(|conductor| conductor.abort_transaction())
             .await
-            .map_err(SinkError::Kafka)
+            .map_err(SinkError::Kafka)?;
+        tracing::debug!("abort epoch {:?}", self.in_transaction_epoch);
+        self.in_transaction_epoch = None;
+        Ok(())
     }
 }
 
@@ -438,7 +451,7 @@ mod test {
         let kafka_config = KafkaConfig::from_hashmap(properties)?;
         let mut sink = KafkaSink::new(kafka_config.clone()).await.unwrap();
 
-        for i in 1..4 {
+        for i in 0..10 {
             let mut fail_flag = false;
             sink.begin_epoch(i).await?;
             println!("begin epoch success");
