@@ -19,11 +19,12 @@ use bytes::Bytes;
 use risingwave_common::array::Row;
 use risingwave_common::catalog::{ColumnDesc, ColumnId};
 use risingwave_common::error::{ErrorCode, Result};
-use risingwave_common::types::{Datum, VirtualNode, VIRTUAL_NODE_SIZE};
+use risingwave_common::types::{DataType, Datum, VirtualNode, VIRTUAL_NODE_SIZE};
 use risingwave_common::util::value_encoding::deserialize_cell;
 
 use super::cell_based_encoding_util::deserialize_column_id;
-use crate::encoding::{ColumnDescMapping, Decoding};
+use super::Decoding;
+use crate::encoding::ColumnDescMapping;
 use crate::table::storage_table::DEFAULT_VNODE;
 
 #[allow(clippy::len_without_is_empty)]
@@ -177,7 +178,10 @@ impl CellBasedRowDeserializer {
 
 impl Decoding for CellBasedRowDeserializer {
     /// Constructs a new serializer.
-    fn create_cell_based_deserializer(column_mapping: Arc<ColumnDescMapping>) -> Self {
+    fn create_row_deserializer(
+        column_mapping: Arc<ColumnDescMapping>,
+        _data_types: Vec<DataType>,
+    ) -> Self {
         Self::new(column_mapping)
     }
 
@@ -213,7 +217,6 @@ mod tests {
     use super::make_cell_based_row_deserializer;
     use crate::encoding::cell_based_encoding_util::serialize_pk_and_row_state;
     use crate::encoding::Decoding;
-
     #[test]
     fn test_cell_based_deserializer() {
         let column_ids = vec![

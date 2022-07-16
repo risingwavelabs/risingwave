@@ -33,7 +33,7 @@ impl CellBasedRowSerializer {
 }
 
 impl Encoding for CellBasedRowSerializer {
-    fn create_cell_based_serializer(
+    fn create_row_serializer(
         _pk_indices: &[usize],
         _column_descs: &[ColumnDesc],
         column_ids: &[ColumnId],
@@ -45,7 +45,7 @@ impl Encoding for CellBasedRowSerializer {
 
     /// Serialize key and value. The `row` must be in the same order with the column ids in this
     /// serializer.
-    fn cell_based_serialize(
+    fn serialize(
         &mut self,
         vnode: VirtualNode,
         pk: &[u8],
@@ -63,7 +63,7 @@ impl Encoding for CellBasedRowSerializer {
     /// Serialize key and value. Each column id will occupy a position in Vec. For `column_ids` that
     /// doesn't correspond to a cell, the position will be None. Aparts from user-specified
     /// `column_ids`, there will also be a `SENTINEL_CELL_ID` at the end.
-    fn cell_based_serialize_without_filter(
+    fn serialize_for_update(
         &mut self,
         vnode: VirtualNode,
         pk: &[u8],
@@ -75,8 +75,6 @@ impl Encoding for CellBasedRowSerializer {
         Ok(res)
     }
 
-    /// Get column ids used by cell serializer to serialize.
-    /// TODO: This should probably not be exposed to user.
     fn column_ids(&self) -> &[ColumnId] {
         &self.column_ids
     }

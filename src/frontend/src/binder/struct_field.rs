@@ -38,8 +38,8 @@ impl Binder {
             // For CompoundIdentifier, we will use first ident as table name and second ident as
             // column name to get `column_desc`.
             Expr::CompoundIdentifier(idents) => {
-                let (table_name, column): (&String, &String) = match &idents[..] {
-                    [table, column] => (&table.value, &column.value),
+                let (table_name, column): (String, String) = match &idents[..] {
+                    [table, column] => (table.real_value(), column.real_value()),
                     _ => {
                         return Err(ErrorCode::InternalError(format!(
                             "Too many idents: {:?}",
@@ -50,7 +50,7 @@ impl Binder {
                 };
                 let index = self
                     .context
-                    .get_column_binding_index(Some(table_name), column)?;
+                    .get_column_binding_index(&Some(table_name), &column)?;
                 Ok((&self.context.columns[index], ids))
             }
             // For Identifier, we will first use the ident as
@@ -59,24 +59,26 @@ impl Binder {
             // The reason is that in pgsql, for table name v3 have a column name v3 which
             // have a field name v3. Select (v3).v3 from v3 will return the field value instead
             // of column value.
-            Expr::Identifier(ident) => match self.context.indexs_of.get(&ident.value) {
+            Expr::Identifier(ident) => match self.context.indexs_of.get(&ident.real_value()) {
                 Some(indexs) => {
                     if indexs.len() == 1 {
-                        let index = self.context.get_column_binding_index(None, &ident.value)?;
-                        Ok((&self.context.columns[index], ids))
-                    } else {
-                        let column = &ids[0].value;
                         let index = self
                             .context
-                            .get_column_binding_index(Some(&ident.value), column)?;
+                            .get_column_binding_index(&None, &ident.real_value())?;
+                        Ok((&self.context.columns[index], ids))
+                    } else {
+                        let column_name = ids[0].real_value();
+                        let index = self
+                            .context
+                            .get_column_binding_index(&Some(ident.real_value()), &column_name)?;
                         Ok((&self.context.columns[index], ids[1..].to_vec()))
                     }
                 }
                 None => {
-                    let column = &ids[0].value;
+                    let column_name = ids[0].real_value();
                     let index = self
                         .context
-                        .get_column_binding_index(Some(&ident.value), column)?;
+                        .get_column_binding_index(&Some(ident.real_value()), &column_name)?;
                     Ok((&self.context.columns[index], ids[1..].to_vec()))
                 }
             },
@@ -134,7 +136,7 @@ impl Binder {
     ) -> Result<(Vec<ExprImpl>, Field)> {
         match idents.get(0) {
             Some(ident) => {
-                let (field, field_index) = field.sub_field(&ident.value)?;
+                let (field, field_index) = field.sub_field(&ident.real_value())?;
                 let expr = FunctionCall::new_unchecked(
                     ExprType::Field,
                     vec![

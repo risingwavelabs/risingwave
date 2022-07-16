@@ -379,7 +379,7 @@ pub fn bind_struct_field(column_def: &StructField) -> Result<ColumnDesc> {
                     data_type: bind_data_type(&f.data_type)?,
                     // Literals don't have `column_id`.
                     column_id: ColumnId::new(0),
-                    name: f.name.value.clone(),
+                    name: f.name.real_value(),
                     field_descs: vec![],
                     type_name: "".to_string(),
                 })
@@ -391,7 +391,7 @@ pub fn bind_struct_field(column_def: &StructField) -> Result<ColumnDesc> {
     Ok(ColumnDesc {
         data_type: bind_data_type(&column_def.data_type)?,
         column_id: ColumnId::new(0),
-        name: column_def.name.value.clone(),
+        name: column_def.name.real_value(),
         field_descs,
         type_name: "".to_string(),
     })
