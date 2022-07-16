@@ -528,7 +528,7 @@ mod tests {
             r#type: ParallelUnitType::Single as i32,
             worker_node_id: node_id,
         }];
-        for id in start_id + 1..start_id + parallel_degree {
+        for id in start_id + 1..start_id + 1 + parallel_degree {
             parallel_units.push(ParallelUnit {
                 id,
                 r#type: ParallelUnitType::Hash as i32,
