@@ -80,9 +80,10 @@ impl<S: StateStore> SinkExecutor<S> {
 
         #[for_await]
         for msg in input {
+            println!("msg: {:?}", msg);
             match msg? {
                 Message::Chunk(chunk) => {
-                    println!("{:?}", chunk);
+                    println!("chunk {:?}", chunk);
                     if !in_transaction {
                         println!("start transaction");
                         sink.begin_epoch(epoch)
@@ -109,15 +110,20 @@ impl<S: StateStore> SinkExecutor<S> {
                     yield Message::Chunk(chunk);
                 }
                 Message::Barrier(barrier) => {
-                    if empty_epoch_flag {
-                        sink.abort()
-                            .await
-                            .map_err(StreamExecutorError::sink_error)?;
-                        tracing::debug!("transaction abort due to empty epoch, epoch: {:?}", epoch);
-                    } else {
-                        sink.commit()
-                            .await
-                            .map_err(StreamExecutorError::sink_error)?;
+                    if in_transaction {
+                        if empty_epoch_flag {
+                            sink.abort()
+                                .await
+                                .map_err(StreamExecutorError::sink_error)?;
+                            tracing::debug!(
+                                "transaction abort due to empty epoch, epoch: {:?}",
+                                epoch
+                            );
+                        } else {
+                            sink.commit()
+                                .await
+                                .map_err(StreamExecutorError::sink_error)?;
+                        }
                     }
                     in_transaction = false;
                     empty_epoch_flag = true;
