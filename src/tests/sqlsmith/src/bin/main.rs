@@ -12,6 +12,8 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+#![feature(let_chains)]
+
 use core::panic;
 use std::time::Duration;
 
@@ -20,7 +22,8 @@ use risingwave_sqlparser::ast::Statement;
 use risingwave_sqlparser::parser::Parser;
 use risingwave_sqlsmith::{print_function_table, sql_gen, Table};
 use tokio_postgres::NoTls;
-use tokio_postgres::error::Error as PgError;
+use tokio_postgres::error::{Error as PgError, DbError, SqlState};
+use risingwave_expr::ExprError;
 
 #[derive(ClapParser, Debug, Clone)]
 #[clap(about, version, author)]
@@ -101,12 +104,27 @@ async fn drop_tables(opt: &TestOptions, client: &tokio_postgres::Client) {
     }
 }
 
+/// We diverge from PostgreSQL, instead of having undefined behaviour for overflows,
+/// See: <https://github.com/singularity-data/risingwave/blob/b4eb1107bc16f8d583563f776f748632ddcaa0cb/src/expr/src/vector_op/bitwise_op.rs#L24>
+/// FIXME: This approach is brittle and should change in the future,
+/// when we have a better way of handling overflows.
+/// Tracked here: <https://github.com/singularity-data/risingwave/issues/3900>
+fn is_numeric_out_of_range_err(db_error: &DbError) -> bool {
+    let is_internal_error = *db_error.code() == SqlState::INTERNAL_ERROR;
+    let is_numeric_error = db_error.message().contains("Expr error: NumericOutOfRange");
+    is_internal_error && is_numeric_error
+}
+
 /// Validate client responses
 fn validate_response<_Row>(response: Result<_Row, PgError>) {
     match response {
         Ok(_) => {},
         Err(e) => {
-            panic!("{:?}", e);
+            // Permit runtime errors conservatively.
+            if let Some(e) = e.as_db_error() && is_numeric_out_of_range_err(e) {
+                return;
+            }
+            panic!("{}", e);
         }
     }
 }
