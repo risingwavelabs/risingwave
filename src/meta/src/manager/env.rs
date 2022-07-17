@@ -96,6 +96,7 @@ impl Default for MetaOpts {
 
 impl MetaOpts {
     /// some test need `enable_recovery=true`
+    #[cfg(test)]
     pub fn test(enable_recovery: bool, enable_migrate: bool) -> Self {
         Self {
             enable_recovery,
