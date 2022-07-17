@@ -117,7 +117,7 @@ pub async fn rpc_serve(
                 lease_interval_secs,
                 opts,
             )
-            .await
+                .await
         }
         MetaStoreBackend::Mem => {
             let meta_store = Arc::new(MemStore::default());
@@ -128,7 +128,7 @@ pub async fn rpc_serve(
                 lease_interval_secs,
                 opts,
             )
-            .await
+                .await
         }
     }
 }
@@ -306,7 +306,7 @@ pub async fn rpc_serve_with_store<S: MetaStore>(
         meta_store.clone(),
         lease_interval_secs,
     )
-    .await?;
+        .await?;
     let env = MetaSrvEnv::<S>::new(opts, meta_store.clone(), info).await;
     let compaction_group_manager =
         Arc::new(CompactionGroupManager::new(env.clone()).await.unwrap());
@@ -328,8 +328,8 @@ pub async fn rpc_serve_with_store<S: MetaStore>(
             compaction_group_manager.clone(),
             compactor_manager.clone(),
         )
-        .await
-        .unwrap(),
+            .await
+            .unwrap(),
     );
 
     if let Some(dashboard_addr) = address_info.dashboard_addr.take() {
@@ -364,8 +364,8 @@ pub async fn rpc_serve_with_store<S: MetaStore>(
             fragment_manager.clone(),
             compaction_group_manager.clone(),
         )
-        .await
-        .unwrap(),
+            .await
+            .unwrap(),
     );
 
     {
@@ -384,7 +384,7 @@ pub async fn rpc_serve_with_store<S: MetaStore>(
             source_manager.clone(),
             compaction_group_manager.clone(),
         )
-        .unwrap(),
+            .unwrap(),
     );
 
     compaction_group_manager
@@ -420,7 +420,7 @@ pub async fn rpc_serve_with_store<S: MetaStore>(
     let ddl_srv = DdlServiceImpl::<S>::new(
         env.clone(),
         catalog_manager.clone(),
-        stream_manager,
+        stream_manager.clone(),
         source_manager,
         cluster_manager.clone(),
         fragment_manager.clone(),
@@ -429,12 +429,16 @@ pub async fn rpc_serve_with_store<S: MetaStore>(
 
     let user_srv =
         UserServiceImpl::<S>::new(env.clone(), catalog_manager.clone(), user_manager.clone());
+
     let scale_srv = ScaleServiceImpl::<S>::new(
         barrier_manager.clone(),
         fragment_manager.clone(),
         cluster_manager.clone(),
+        stream_manager.clone(),
         ddl_lock,
     );
+
+
     let cluster_srv = ClusterServiceImpl::<S>::new(cluster_manager.clone());
     let stream_srv = StreamServiceImpl::<S>::new(
         env.clone(),
@@ -470,7 +474,7 @@ pub async fn rpc_serve_with_store<S: MetaStore>(
         notification_manager,
         compaction_scheduler,
     )
-    .await;
+        .await;
     sub_tasks.push((lease_handle, lease_shutdown));
     #[cfg(not(test))]
     {
@@ -553,8 +557,8 @@ mod tests {
             2,
             MetaOpts::default(),
         )
-        .await
-        .unwrap();
+            .await
+            .unwrap();
         sleep(Duration::from_secs(4)).await;
         let info2 = AddressInfo {
             addr: "node2".to_string(),
@@ -567,7 +571,7 @@ mod tests {
             2,
             MetaOpts::default(),
         )
-        .await;
+            .await;
         assert!(ret.is_err());
         closer.send(()).unwrap();
         handle.await.unwrap();
@@ -579,7 +583,7 @@ mod tests {
             2,
             MetaOpts::default(),
         )
-        .await
-        .unwrap();
+            .await
+            .unwrap();
     }
 }

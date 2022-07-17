@@ -329,6 +329,7 @@ fn update_upstreams(context: &SharedContext, ids: &[UpDownActorIds]) {
     ids.iter()
         .map(|id| {
             let (tx, rx) = channel(LOCAL_OUTPUT_CHANNEL_SIZE);
+            println!("add 3 {:?}", id);
             context.add_channel_pairs(*id, (Some(tx), Some(rx)));
         })
         .count();
@@ -690,13 +691,13 @@ impl LocalStreamManagerCore {
             match (&hanging_channel.upstream, &hanging_channel.downstream) {
                 (
                     Some(ActorInfo {
-                        actor_id: up_id,
-                        host: None, // local
-                    }),
+                             actor_id: up_id,
+                             host: None, // local
+                         }),
                     Some(ActorInfo {
-                        actor_id: down_id,
-                        host: Some(_), // remote
-                    }),
+                             actor_id: down_id,
+                             host: Some(_), // remote
+                         }),
                 ) => {
                     let up_down_ids = (*up_id, *down_id);
                     let (tx, rx) = channel(LOCAL_OUTPUT_CHANNEL_SIZE);
@@ -708,7 +709,7 @@ impl LocalStreamManagerCore {
                         "hanging channel must be from local to remote: {:?}",
                         hanging_channel,
                     ))
-                    .into())
+                        .into())
                 }
             }
         }
