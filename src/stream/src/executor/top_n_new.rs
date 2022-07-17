@@ -88,7 +88,7 @@ pub struct InnerTopNExecutorNew<S: StateStore> {
     /// We are interested in which element is in the range of [offset, offset+limit).
     managed_state: ManagedTopNStateNew<S>,
 
-    #[allow(dead_code)]
+    #[expect(dead_code)]
     /// Indices of the columns on which key distribution depends.
     key_indices: Vec<usize>,
 }
