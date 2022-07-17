@@ -716,12 +716,12 @@ impl<K: HashKey, S: StateStore, const T: JoinTypePrimitive> HashJoinExecutor<K, 
                         } else {
                             side_update
                                 .ht
-                                .insert(key, pk, JoinRow::new(value, degree))?;
+                                .insert(key, pk, JoinRow::new(value, degree)).await?;
                         }
                     } else {
                         side_update
                             .ht
-                            .insert(key, pk, JoinRow::new(value, degree))?;
+                            .insert(key, pk, JoinRow::new(value, degree)).await?;
                     }
                 }
                 Op::Delete | Op::UpdateDelete => {

@@ -113,6 +113,17 @@ pub type HashValueType = JoinEntryState;
 type JoinHashMapInner<K> =
     EvictableHashMap<K, HashValueType, PrecomputedBuildHasher, SharedStatsAlloc<Global>>;
 
+// TODO: Use enum to replace this once [feature(adt_const_params)](https://github.com/rust-lang/rust/issues/95174) get completed.
+pub type JoinCachePolicyPrimitive = u8;
+#[allow(non_snake_case, non_upper_case_globals)]
+pub mod JoinCachePolicy {
+    use super::JoinCachePolicyPrimitive;
+    /// Populate the cache when read a join key
+    pub const OnRead: JoinCachePolicyPrimitive = 0;
+    /// Populate the cache when read or write a join key
+    pub const OnReadWrite: JoinCachePolicyPrimitive = 1;
+}
+
 pub struct JoinHashMapMetrics {
     /// Metrics used by join executor
     metrics: Arc<StreamingMetrics>,
@@ -165,6 +176,8 @@ pub struct JoinHashMap<K: HashKey, S: StateStore> {
     current_epoch: u64,
     /// State table
     state_table: StateTable<S>,
+    /// Cache policy
+    cache_policy: JoinCachePolicyPrimitive,
     /// Metrics of the hash map
     metrics: JoinHashMapMetrics,
 }
@@ -202,6 +215,7 @@ impl<K: HashKey, S: StateStore> JoinHashMap<K, S> {
             current_epoch: 0,
             state_table,
             alloc,
+            cache_policy: JoinCachePolicy::OnReadWrite,
             metrics: JoinHashMapMetrics::new(metrics, actor_id, side),
         }
     }
@@ -307,10 +321,21 @@ impl<K: HashKey, S: StateStore> JoinHashMap<K, S> {
     }
 
     /// Insert a key
-    pub fn insert(&mut self, join_key: &K, pk: Row, value: JoinRow) -> StreamExecutorResult<()> {
-        if let Some(entry) = self.inner.get_mut(join_key) {
-            entry.insert(pk, value.clone());
-        }
+    pub async fn insert(&mut self, join_key: &K, pk: Row, value: JoinRow) -> StreamExecutorResult<()> {
+        match self.cache_policy {
+            JoinCachePolicy::OnRead => {
+                if let Some(entry) = self.inner.get_mut(join_key) {
+                    entry.insert(pk, value.clone());
+                }
+            },
+            JoinCachePolicy::OnReadWrite => {
+                let mut state = self.fetch_cached_state(join_key).await?;
+                state.insert(pk, value.clone());
+                self.inner.put(join_key.clone(), state);
+            },
+            _ => bail!("Hash join cache policy not implemented")
+        };
+        
 
         // If no cache maintained, only update the flush buffer.
         self.state_table.insert(value.into_row())?;
