@@ -16,11 +16,14 @@
 
 use core::panic;
 use std::time::Duration;
+use rand::Rng;
+
+use itertools::Itertools;
 
 use clap::Parser as ClapParser;
 use risingwave_sqlparser::ast::Statement;
 use risingwave_sqlparser::parser::Parser;
-use risingwave_sqlsmith::{print_function_table, sql_gen, Table};
+use risingwave_sqlsmith::{print_function_table, mview_sql_gen, sql_gen, Table};
 use tokio_postgres::error::{DbError, Error as PgError, SqlState};
 use tokio_postgres::NoTls;
 
@@ -72,18 +75,20 @@ enum Commands {
     Test(TestOptions),
 }
 
-async fn create_tables(opt: &TestOptions, client: &tokio_postgres::Client) -> Vec<Table> {
+async fn create_tables(rng: &mut impl Rng, opt: &TestOptions, client: &tokio_postgres::Client) -> Vec<Table> {
     log::info!("Preparing tables...");
 
     let sql = std::fs::read_to_string(format!("{}/tpch.sql", opt.testdata)).unwrap();
 
     let statements =
         Parser::parse_sql(&sql).unwrap_or_else(|_| panic!("Failed to parse SQL: {}", sql));
+    let n_statements = statements.len();
+
     for stmt in statements.iter() {
         let create_sql = format!("{}", stmt);
         client.execute(&create_sql, &[]).await.unwrap();
     }
-    statements
+    let mut tables = statements
         .into_iter()
         .map(|s| match s {
             Statement::CreateTable { name, columns, .. } => Table {
@@ -92,7 +97,16 @@ async fn create_tables(opt: &TestOptions, client: &tokio_postgres::Client) -> Ve
             },
             _ => panic!("Unexpected statement: {}", s),
         })
-        .collect()
+        .collect_vec();
+
+    // Generate Materialized Views 1:1 with tables, so they have equal weight
+    // of being queried.
+    for i in 0..n_statements {
+        let (create_sql, table) = mview_sql_gen(rng, tables.clone(), &format!("m{}", i));
+        client.execute(&create_sql, &[]).await.unwrap();
+        tables.push(table);
+    }
+    tables
 }
 
 async fn drop_tables(opt: &TestOptions, client: &tokio_postgres::Client) {
@@ -156,9 +170,10 @@ async fn main() {
         }
     });
 
-    let tables = create_tables(&opt, &client).await;
-
     let mut rng = rand::thread_rng();
+
+    let tables = create_tables(&mut rng, &opt, &client).await;
+
     for _ in 0..opt.count {
         let sql = sql_gen(&mut rng, tables.clone());
         log::info!("Executing: {}", sql);
