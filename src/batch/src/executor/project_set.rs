@@ -58,9 +58,7 @@ impl ProjectSetExecutor {
             let data_chunk = data_chunk?;
 
             #[for_await]
-            for ret in
-                ProjectSetSelectItem::execute(select_list.clone(), data_types.clone(), &data_chunk)
-            {
+            for ret in ProjectSetSelectItem::execute(&select_list, &data_types, &data_chunk) {
                 yield ret?;
             }
         }

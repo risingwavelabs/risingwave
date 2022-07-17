@@ -163,10 +163,10 @@ impl ProjectSetSelectItem {
 
     /// First column will be `projected_row_id`, which represents the index in the output table
     #[try_stream(boxed, ok = DataChunk, error = RwError)]
-    pub async fn execute(
-        select_list: Arc<Vec<Self>>,
-        data_types: Vec<DataType>,
-        input: &DataChunk,
+    pub async fn execute<'a>(
+        select_list: &'a [Self],
+        data_types: &'a [DataType],
+        input: &'a DataChunk,
     ) {
         assert!(!select_list.is_empty());
 
@@ -182,7 +182,11 @@ impl ProjectSetSelectItem {
             let items = iters.iter_mut().map(|iter| iter.next()).collect_vec();
 
             if items[0].is_none() {
-                assert!(items.iter().all(|i| i.is_none()));
+                // All the iterators should reach the end at the same time.
+                assert!(
+                    items.iter().all(|i| i.is_none()),
+                    "unexpected finished iterator from table functions"
+                );
                 break;
             }
             let items = items.into_iter().map(|i| i.unwrap()).collect_vec();
@@ -194,11 +198,11 @@ impl ProjectSetSelectItem {
                 .max()
                 .unwrap();
             let builders = data_types
-                .clone()
-                .into_iter()
+                .iter()
                 .map(|ty| ty.create_array_builder(max_tf_len));
 
-            let mut columns = vec![index_array_column(max_tf_len)];
+            let mut columns = Vec::with_capacity(select_list.len() + 1);
+            columns.push(index_array_column(max_tf_len));
 
             for (item, mut builder) in items.into_iter().zip_eq(builders) {
                 match item {

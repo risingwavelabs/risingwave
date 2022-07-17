@@ -29,7 +29,7 @@ impl ProjectSetExecutor {
         input: Box<dyn Executor>,
         pk_indices: PkIndices,
         select_list: Vec<ProjectSetSelectItem>,
-        _execuotr_id: u64,
+        executor_id: u64,
     ) -> Self {
         let fields = select_list
             .iter()
@@ -39,7 +39,7 @@ impl ProjectSetExecutor {
         let info = ExecutorInfo {
             schema: Schema { fields },
             pk_indices,
-            identity: "ProjectSet".to_owned(),
+            identity: format!("ProjectSet {:X}", executor_id),
         };
         Self {
             input,
@@ -102,12 +102,9 @@ impl ProjectSetExecutor {
                     let (data_chunk, ops) = chunk.into_parts();
 
                     #[for_await]
-                    for (i, ret) in ProjectSetSelectItem::execute(
-                        select_list.clone(),
-                        data_types.clone(),
-                        &data_chunk,
-                    )
-                    .enumerate()
+                    for (i, ret) in
+                        ProjectSetSelectItem::execute(&select_list, &data_types, &data_chunk)
+                            .enumerate()
                     {
                         let ret = ret.map_err(StreamExecutorError::eval_error)?;
                         let new_chunk =
