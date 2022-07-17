@@ -33,10 +33,11 @@ use risingwave_pb::stream_plan::{
 use risingwave_pb::stream_service::DropActorsRequest;
 use risingwave_rpc_client::StreamClientPoolRef;
 use uuid::Uuid;
+use risingwave_common::types::ParallelUnitId;
 
 use super::info::BarrierActorInfo;
 use crate::barrier::CommandChanges;
-use crate::manager::FragmentManagerRef;
+use crate::manager::{FragmentManagerRef, WorkerId};
 use crate::model::{ActorId, DispatcherId, FragmentId, TableFragments};
 use crate::storage::MetaStore;
 use crate::{MetaError, MetaResult};
@@ -49,6 +50,12 @@ pub struct Reschedule {
     pub added_actors: Vec<ActorId>,
     /// Removed actors in this fragment.
     pub removed_actors: Vec<ActorId>,
+
+    /// Added parallel units in this fragment.
+    pub added_parallel_units: Vec<ParallelUnitId>,
+    /// Removed parallel units in this fragment.
+    pub removed_parallel_units: Vec<ParallelUnitId>,
+
     /// Vnode bitmap updates for some actors in this fragment.
     pub vnode_bitmap_updates: HashMap<ActorId, Bitmap>,
 
@@ -408,11 +415,50 @@ where
             }
 
             Command::RescheduleFragment(reschedules) => {
-                // TODO: drop actors on worker nodes.
+                let mut node_dropped_actors = HashMap::new();
+                for table_fragments in self.fragment_manager.list_table_fragments().await? {
+                    for fragment_id in table_fragments.fragments.keys() {
+                        if let Some(reschedule) = reschedules.get(fragment_id) {
+                            for actor_id in &reschedule.removed_actors {
+                                let node_id = table_fragments
+                                    .actor_status
+                                    .get(actor_id)
+                                    .unwrap()
+                                    .parallel_unit
+                                    .as_ref()
+                                    .unwrap()
+                                    .worker_node_id;
+                                node_dropped_actors
+                                    .entry(node_id as WorkerId)
+                                    .or_insert(vec![])
+                                    .push(*actor_id as ActorId);
+                            }
+                        }
+                    }
+                }
+
+                let drop_actor_futures =
+                    node_dropped_actors.into_iter().map(|(node_id, actors)| {
+                        let node = self.info.node_map.get(&node_id).unwrap();
+                        let request_id = Uuid::new_v4().to_string();
+
+                        async move {
+                            let client = self.client_pool.get(node).await?;
+                            let request = DropActorsRequest {
+                                request_id,
+                                actor_ids: actors.to_owned(),
+                            };
+                            client.drop_actors(request).await?;
+
+                            Ok::<_, MetaError>(())
+                        }
+                    });
+
+                try_join_all(drop_actor_futures).await?;
 
                 // Update fragment info after rescheduling in meta store.
                 self.fragment_manager
-                    .apply_reschedules(reschedules.clone())
+                    .post_apply_reschedules(reschedules.clone())
                     .await?;
             }
         }
