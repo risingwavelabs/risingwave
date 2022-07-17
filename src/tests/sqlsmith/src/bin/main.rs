@@ -20,6 +20,7 @@ use risingwave_sqlparser::ast::Statement;
 use risingwave_sqlparser::parser::Parser;
 use risingwave_sqlsmith::{print_function_table, sql_gen, Table};
 use tokio_postgres::NoTls;
+use tokio_postgres::error::Error as PgError;
 
 #[derive(ClapParser, Debug, Clone)]
 #[clap(about, version, author)]
@@ -100,6 +101,16 @@ async fn drop_tables(opt: &TestOptions, client: &tokio_postgres::Client) {
     }
 }
 
+/// Validate client responses
+fn validate_response<_Row>(response: Result<_Row, PgError>) {
+    match response {
+        Ok(_) => {},
+        Err(e) => {
+            panic!("{:?}", e);
+        }
+    }
+}
+
 #[tokio::main(flavor = "multi_thread", worker_threads = 5)]
 async fn main() {
     env_logger::init();
@@ -135,10 +146,10 @@ async fn main() {
         // let sql = sql_gen(&mut rng, tables.clone());
         let sql = String::from("SELECT (1<<1000);"); // test numeric error handling
         log::info!("Executing: {}", sql);
-        let _ = client
+        let response = client
             .query(sql.as_str(), &[])
-            .await
-            .unwrap_or_else(|e| panic!("Failed to execute query: {}\n{}", e, sql));
+            .await;
+        validate_response(response);
     }
 
     drop_tables(&opt, &client).await;
