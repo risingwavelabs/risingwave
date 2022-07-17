@@ -114,12 +114,20 @@
     SELECT * FROM orders_count_by_user WHERE user_id = 42 AND date in (2222, 2222)
   batch_plan: |
     BatchExchange { order: [], dist: Single }
-      BatchScan { table: orders_count_by_user, columns: [user_id, date, orders_count], scan_ranges: [user_id = Int64(42), date = Int32(2222) OR user_id = Int64(42), date = Int32(2222)] }
+      BatchScan { table: orders_count_by_user, columns: [user_id, date, orders_count], scan_ranges: [user_id = Int64(42), date = Int32(2222)] }
 - before:
     - create_table_and_mv
   sql: |
     /* test NULL in in-list */
     SELECT * FROM orders_count_by_user WHERE user_id = 42 AND date in (2222, NULL)
+  batch_plan: |
+    BatchExchange { order: [], dist: Single }
+      BatchScan { table: orders_count_by_user, columns: [user_id, date, orders_count], scan_ranges: [user_id = Int64(42), date = Int32(2222)] }
+- before:
+    - create_table_and_mv
+  sql: |
+    /* test NULL in in-list */
+    SELECT * FROM orders_count_by_user WHERE user_id = 42 AND date in (NULL)
   batch_plan: |
     BatchExchange { order: [], dist: Single }
       BatchFilter { predicate: false:Boolean }

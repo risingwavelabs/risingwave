@@ -303,12 +303,15 @@ impl Condition {
                 } else if let Some((input_ref, in_lit_list)) = expr.as_in_literal_list() {
                     assert_eq!(input_ref.index, order_column_ids[i]);
                     let mut scalars = vec![];
-                    for lit in in_lit_list {
+                    for lit in in_lit_list.into_iter().unique() {
                         if lit.is_null() {
-                            return always_false();
+                            continue;
                         }
-
                         scalars.push(lit.eval_as(input_ref.data_type.clone()));
+                    }
+                    if scalars.is_empty() {
+                        // There're only NULLs in the in-list
+                        return always_false();
                     }
                     if !eq_conds.is_empty() {
                         let old: HashSet<ScalarImpl> = HashSet::from_iter(eq_conds);
