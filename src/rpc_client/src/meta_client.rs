@@ -354,12 +354,20 @@ impl HummockMetaClient for MetaClient {
         Ok(resp.pinned_version.unwrap())
     }
 
-    async fn unpin_version(&self, pinned_version_ids: &[HummockVersionId]) -> Result<()> {
+    async fn unpin_version(&self) -> Result<()> {
         let req = UnpinVersionRequest {
             context_id: self.worker_id(),
-            pinned_version_ids: pinned_version_ids.to_owned(),
         };
         self.inner.unpin_version(req).await?;
+        Ok(())
+    }
+
+    async fn unpin_version_before(&self, unpin_version_before: HummockVersionId) -> Result<()> {
+        let req = UnpinVersionBeforeRequest {
+            context_id: self.worker_id(),
+            unpin_version_before,
+        };
+        self.inner.unpin_version_before(req).await?;
         Ok(())
     }
 
@@ -565,6 +573,7 @@ macro_rules! for_all_meta_rpc {
             ,{ ddl_client, risectl_list_state_tables, RisectlListStateTablesRequest, RisectlListStateTablesResponse }
             ,{ hummock_client, pin_version, PinVersionRequest, PinVersionResponse }
             ,{ hummock_client, unpin_version, UnpinVersionRequest, UnpinVersionResponse }
+            ,{ hummock_client, unpin_version_before, UnpinVersionBeforeRequest, UnpinVersionBeforeResponse }
             ,{ hummock_client, pin_snapshot, PinSnapshotRequest, PinSnapshotResponse }
             ,{ hummock_client, get_epoch, GetEpochRequest, GetEpochResponse }
             ,{ hummock_client, unpin_snapshot, UnpinSnapshotRequest, UnpinSnapshotResponse }

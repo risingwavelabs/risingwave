@@ -28,7 +28,7 @@ use risingwave_common::array::Row;
 use risingwave_common::buffer::Bitmap;
 use risingwave_common::catalog::{ColumnDesc, ColumnId, OrderedColumnDesc, Schema, TableId};
 use risingwave_common::error::RwError;
-use risingwave_common::types::{Datum, VirtualNode};
+use risingwave_common::types::{DataType, Datum, VirtualNode};
 use risingwave_common::util::hash_util::CRC32FastBuilder;
 use risingwave_common::util::ordered::*;
 use risingwave_common::util::sort_util::OrderType;
@@ -116,6 +116,9 @@ pub struct StorageTableBase<S: StateStore, E: Encoding, const T: AccessType> {
     /// executor. For READ_WRITE instances, the table will also check whether the writed rows
     /// confirm to this partition.
     vnodes: Arc<Bitmap>,
+
+    /// If true, sanity check is disabled on this table.
+    disable_sanity_check: bool,
 }
 
 impl<S: StateStore, E: Encoding, const T: AccessType> std::fmt::Debug
@@ -222,9 +225,9 @@ impl<S: StateStore, E: Encoding, const T: AccessType> StorageTableBase<S, E, T> 
             vnodes,
         }: Distribution,
     ) -> Self {
-        let row_serializer =
-            E::create_cell_based_serializer(&pk_indices, &table_columns, &column_ids);
+        let row_serializer = E::create_row_serializer(&pk_indices, &table_columns, &column_ids);
 
+        assert_eq!(order_types.len(), pk_indices.len());
         let mapping = ColumnDescMapping::new_partial(&table_columns, &column_ids);
         let schema = Schema::new(mapping.output_columns.iter().map(Into::into).collect());
         let pk_serializer = OrderedRowSerializer::new(order_types);
@@ -255,7 +258,13 @@ impl<S: StateStore, E: Encoding, const T: AccessType> StorageTableBase<S, E, T> 
             dist_key_indices,
             dist_key_in_pk_indices,
             vnodes,
+            disable_sanity_check: false,
         }
+    }
+
+    /// Disable sanity check on this storage table.
+    pub fn disable_sanity_check(&mut self) {
+        self.disable_sanity_check = true;
     }
 
     pub fn schema(&self) -> &Schema {
@@ -336,7 +345,7 @@ impl<S: StateStore, E: Encoding, const T: AccessType> StorageTableBase<S, E, T> 
             return Ok(None);
         };
 
-        let mut deserializer = CellBasedRowDeserializer::new(&*self.mapping);
+        let mut deserializer = CellBasedRowDeserializer::new(self.mapping.clone());
         for column_id in self.column_ids() {
             let key = serialize_pk_and_column_id(&serialized_pk, column_id).map_err(err)?;
             if let Some(value) = self.keyspace.get(&key, epoch).await? {
@@ -362,7 +371,7 @@ impl<S: StateStore, E: Encoding, const T: AccessType> StorageTableBase<S, E, T> 
             .scan_with_range(key_range, None, epoch)
             .await?;
 
-        let mut deserializer = CellBasedRowDeserializer::new(&*self.mapping);
+        let mut deserializer = CellBasedRowDeserializer::new(self.mapping.clone());
         for (key, value) in kv_pairs {
             deserializer.deserialize(&key, &value).map_err(err)?;
         }
@@ -374,6 +383,8 @@ impl<S: StateStore, E: Encoding, const T: AccessType> StorageTableBase<S, E, T> 
         }))
     }
 }
+
+const ENABLE_STATE_TABLE_SANITY_CHECK: bool = cfg!(debug_assertions);
 
 /// Write
 impl<S: StateStore, E: Encoding> StorageTableBase<S, E, READ_WRITE> {
@@ -399,27 +410,83 @@ impl<S: StateStore, E: Encoding> StorageTableBase<S, E, READ_WRITE> {
         for (pk, row_op) in buffer {
             match row_op {
                 RowOp::Insert(row) => {
+                    if ENABLE_STATE_TABLE_SANITY_CHECK && !self.disable_sanity_check {
+                        // If we want to insert a row, it should not exist in storage.
+                        let storage_row = self
+                            .get_row(&row.by_indices(&self.pk_indices), epoch)
+                            .await?;
+
+                        // It's normal for some executors to fail this assert, you can use
+                        // `.disable_sanity_check()` on state table to disable this check.
+                        assert!(
+                            storage_row.is_none(),
+                            "overwriting an existing row:\nin-storage: {:?}\nto-be-written: {:?}",
+                            storage_row.unwrap(),
+                            row
+                        );
+                    }
+
                     let vnode = self.compute_vnode_by_row(&row);
                     let bytes = self
                         .row_serializer
-                        .cell_based_serialize(vnode, &pk, row)
+                        .serialize(vnode, &pk, row)
                         .map_err(err)?;
                     for (key, value) in bytes {
-                        local.put(key, StorageValue::new_default_put(value))
+                        local.put(key, StorageValue::new_default_put(value));
                     }
                 }
                 RowOp::Delete(old_row) => {
+                    if ENABLE_STATE_TABLE_SANITY_CHECK && !self.disable_sanity_check {
+                        // If we want to delete a row, it should exist in storage, and should
+                        // have the same old_value as recorded.
+                        let storage_row = self
+                            .get_row(&old_row.by_indices(&self.pk_indices), epoch)
+                            .await?;
+
+                        // It's normal for some executors to fail this assert, you can use
+                        // `.disable_sanity_check()` on state table to disable this check.
+                        assert!(storage_row.is_some(), "deleting an non-existing row");
+                        assert!(
+                            storage_row.as_ref().unwrap() == &old_row,
+                            "inconsistent deletion:\nin-storage: {:?}\nold-value: {:?}",
+                            storage_row.as_ref().unwrap(),
+                            old_row
+                        );
+                    }
+
                     let vnode = self.compute_vnode_by_row(&old_row);
                     // TODO(wcy-fdu): only serialize key on deletion
                     let bytes = self
                         .row_serializer
-                        .cell_based_serialize(vnode, &pk, old_row)
+                        .serialize(vnode, &pk, old_row)
                         .map_err(err)?;
                     for (key, _) in bytes {
                         local.delete(key);
                     }
                 }
                 RowOp::Update((old_row, new_row)) => {
+                    if ENABLE_STATE_TABLE_SANITY_CHECK && !self.disable_sanity_check {
+                        // If we want to update a row, it should exist in storage, and should
+                        // have the same old_value as recorded.
+                        let storage_row = self
+                            .get_row(&old_row.by_indices(&self.pk_indices), epoch)
+                            .await?;
+
+                        // It's normal for some executors to fail this assert, you can use
+                        // `.disable_sanity_check()` on state table to disable this check.
+                        assert!(
+                            storage_row.is_some(),
+                            "update a non-existing row: {:?}",
+                            old_row
+                        );
+                        assert!(
+                            storage_row.as_ref().unwrap() == &old_row,
+                            "value mismatch when updating row: {:?} != {:?}",
+                            storage_row,
+                            old_row
+                        );
+                    }
+
                     // The row to update should keep the same primary key, so distribution key as
                     // well.
                     let vnode = self.compute_vnode_by_row(&new_row);
@@ -427,11 +494,11 @@ impl<S: StateStore, E: Encoding> StorageTableBase<S, E, READ_WRITE> {
 
                     let delete_bytes = self
                         .row_serializer
-                        .cell_based_serialize_without_filter(vnode, &pk, old_row)
+                        .serialize_for_update(vnode, &pk, old_row)
                         .map_err(err)?;
                     let insert_bytes = self
                         .row_serializer
-                        .cell_based_serialize_without_filter(vnode, &pk, new_row)
+                        .serialize_for_update(vnode, &pk, new_row)
                         .map_err(err)?;
                     for (delete, insert) in
                         delete_bytes.into_iter().zip_eq(insert_bytes.into_iter())
@@ -510,10 +577,17 @@ impl<S: StateStore, E: Encoding, const T: AccessType> StorageTableBase<S, E, T> 
         // can use a single iterator.
         let iterators: Vec<_> = try_join_all(vnodes.map(|vnode| {
             let raw_key_range = prefixed_range(encoded_key_range.clone(), &vnode.to_be_bytes());
+            let data_types = self
+                .table_columns
+                .clone()
+                .into_iter()
+                .map(|t| t.data_type)
+                .collect_vec();
             async move {
                 let iter = StorageTableIterInner::<S, GeneralCellBasedRowDeserializer>::new(
                     &self.keyspace,
                     self.mapping.clone(),
+                    data_types,
                     raw_key_range,
                     epoch,
                     wait_epoch,
@@ -678,7 +752,7 @@ impl<S: StateStore, E: Encoding, const T: AccessType> StorageTableBase<S, E, T> 
 }
 
 /// [`StorageTableIterInner`] iterates on the storage table.
-struct StorageTableIterInner<S: StateStore, D: Decoding<Arc<ColumnDescMapping>>> {
+struct StorageTableIterInner<S: StateStore, D: Decoding> {
     /// An iterator that returns raw bytes from storage.
     iter: StripPrefixIterator<S::Iter>,
 
@@ -686,11 +760,12 @@ struct StorageTableIterInner<S: StateStore, D: Decoding<Arc<ColumnDescMapping>>>
     cell_based_row_deserializer: D, // CellBasedRowDeserializer<Arc<ColumnDescMapping>>,
 }
 
-impl<S: StateStore, D: Decoding<Arc<ColumnDescMapping>>> StorageTableIterInner<S, D> {
+impl<S: StateStore, D: Decoding> StorageTableIterInner<S, D> {
     /// If `wait_epoch` is true, it will wait for the given epoch to be committed before iteration.
     async fn new<R, B>(
         keyspace: &Keyspace<S>,
         table_descs: Arc<ColumnDescMapping>,
+        data_types: Vec<DataType>,
         raw_key_range: R,
         epoch: u64,
         wait_epoch: bool,
@@ -703,7 +778,7 @@ impl<S: StateStore, D: Decoding<Arc<ColumnDescMapping>>> StorageTableIterInner<S
             keyspace.state_store().wait_epoch(epoch).await?;
         }
 
-        let cell_based_row_deserializer = D::create_cell_based_deserializer(table_descs);
+        let cell_based_row_deserializer = D::create_row_deserializer(table_descs, data_types);
 
         let iter = keyspace.iter_with_range(raw_key_range, epoch).await?;
         let iter = Self {

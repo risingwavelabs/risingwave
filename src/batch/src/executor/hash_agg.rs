@@ -310,6 +310,7 @@ mod tests {
                 ..Default::default()
             }),
             distinct: false,
+            filter: None,
         };
 
         let agg_prost = HashAggNode {
@@ -375,6 +376,7 @@ mod tests {
                 ..Default::default()
             }),
             distinct: false,
+            filter: None,
         };
 
         let agg_prost = HashAggNode {
