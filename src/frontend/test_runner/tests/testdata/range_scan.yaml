@@ -110,6 +110,48 @@
 - before:
     - create_table_and_mv
   sql: |
+    /* test duplicate value in in-list */
+    SELECT * FROM orders_count_by_user WHERE user_id = 42 AND date in (2222, 2222)
+  batch_plan: |
+    BatchExchange { order: [], dist: Single }
+      BatchScan { table: orders_count_by_user, columns: [user_id, date, orders_count], scan_ranges: [user_id = Int64(42), date = Int32(2222) OR user_id = Int64(42), date = Int32(2222)] }
+- before:
+    - create_table_and_mv
+  sql: |
+    /* test NULL in in-list */
+    SELECT * FROM orders_count_by_user WHERE user_id = 42 AND date in (2222, NULL)
+  batch_plan: |
+    BatchExchange { order: [], dist: Single }
+      BatchFilter { predicate: false:Boolean }
+        BatchScan { table: orders_count_by_user, columns: [user_id, date, orders_count] }
+- before:
+    - create_table_and_mv
+  sql: |
+    /* test multiple in-list */
+    SELECT * FROM orders_count_by_user WHERE user_id = 42 AND date in (2222, 3333) AND date in (4444, 3333)
+  batch_plan: |
+    BatchExchange { order: [], dist: Single }
+      BatchScan { table: orders_count_by_user, columns: [user_id, date, orders_count], scan_ranges: [user_id = Int64(42), date = Int32(3333)] }
+- before:
+    - create_table_and_mv
+  sql: |
+    /* test eq & in-list */
+    SELECT * FROM orders_count_by_user WHERE user_id = 42 AND date in (2222, 3333) AND date = 3333
+  batch_plan: |
+    BatchExchange { order: [], dist: Single }
+      BatchScan { table: orders_count_by_user, columns: [user_id, date, orders_count], scan_ranges: [user_id = Int64(42), date = Int32(3333)] }
+- before:
+    - create_table_and_mv
+  sql: |
+    /* test eq & in-list */
+    SELECT * FROM orders_count_by_user WHERE user_id = 42 AND date in (2222, 3333) AND date = 4444
+  batch_plan: |
+    BatchExchange { order: [], dist: Single }
+      BatchFilter { predicate: false:Boolean }
+        BatchScan { table: orders_count_by_user, columns: [user_id, date, orders_count] }
+- before:
+    - create_table_and_mv
+  sql: |
     SELECT * FROM orders_count_by_user WHERE user_id in (2147483648, 2147483649) AND date in (2222, 3333)
   batch_plan: |
     BatchExchange { order: [], dist: Single }
