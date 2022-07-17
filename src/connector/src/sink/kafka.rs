@@ -198,7 +198,6 @@ impl Sink for KafkaSink {
             return Ok(())
         }
         if self.config.sink_type.as_str() == "append_only" {
-            println!("append only");
             self.append_only(chunk, schema).await
         } else if self.config.sink_type.as_str() == "debezium" {
             todo!()
@@ -212,7 +211,6 @@ impl Sink for KafkaSink {
     async fn begin_epoch(&mut self, epoch: u64) -> Result<()> {
         self.in_transaction_epoch = Some(epoch);
         if self.latest_success_epoch == KafkaSinkState::Init {
-            println!("init");
             self.do_with_retry(|conductor| conductor.init_transaction())
                 .await
                 .map_err(SinkError::Kafka)?;
@@ -454,7 +452,6 @@ mod test {
         for i in 0..10 {
             let mut fail_flag = false;
             sink.begin_epoch(i).await?;
-            println!("begin epoch success");
             for i in 0..100 {
                 match sink
                     .send(
@@ -476,8 +473,6 @@ mod test {
                 sink.commit().await?;
                 println!("commit success");
             }
-
-            // tokio::time::sleep(Duration::from_secs(1)).await;
         }
 
         Ok(())

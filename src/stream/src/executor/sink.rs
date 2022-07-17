@@ -61,7 +61,7 @@ impl<S: StateStore> SinkExecutor<S> {
     async fn execute_inner(self) {
         let sink_config = SinkConfig::from_hashmap(self.properties.clone())
             .map_err(StreamExecutorError::sink_error)?;
-        println!("SinkConfig: {:?}", sink_config);
+
         let mut sink = build_sink(sink_config)
             .await
             .map_err(StreamExecutorError::sink_error)?;
@@ -76,23 +76,16 @@ impl<S: StateStore> SinkExecutor<S> {
 
         let input = self.input.execute();
 
-        println!("ready to start sink");
-
         #[for_await]
         for msg in input {
-            println!("msg: {:?}", msg);
             match msg? {
                 Message::Chunk(chunk) => {
-                    println!("chunk {:?}", chunk);
                     if !in_transaction {
-                        println!("start transaction");
                         sink.begin_epoch(epoch)
                             .await
                             .map_err(StreamExecutorError::sink_error)?;
                         in_transaction = true;
                     }
-
-                    println!("begin epoch");
 
                     let visible_chunk = chunk.clone().compact()?;
                     if let Err(e) = sink
