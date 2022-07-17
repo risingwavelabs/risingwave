@@ -21,9 +21,8 @@ use clap::Parser as ClapParser;
 use risingwave_sqlparser::ast::Statement;
 use risingwave_sqlparser::parser::Parser;
 use risingwave_sqlsmith::{print_function_table, sql_gen, Table};
+use tokio_postgres::error::{DbError, Error as PgError, SqlState};
 use tokio_postgres::NoTls;
-use tokio_postgres::error::{Error as PgError, DbError, SqlState};
-use risingwave_expr::ExprError;
 
 #[derive(ClapParser, Debug, Clone)]
 #[clap(about, version, author)]
@@ -118,7 +117,7 @@ fn is_numeric_out_of_range_err(db_error: &DbError) -> bool {
 /// Validate client responses
 fn validate_response<_Row>(response: Result<_Row, PgError>) {
     match response {
-        Ok(_) => {},
+        Ok(_) => {}
         Err(e) => {
             // Permit runtime errors conservatively.
             if let Some(e) = e.as_db_error() && is_numeric_out_of_range_err(e) {
@@ -163,9 +162,7 @@ async fn main() {
     for _ in 0..opt.count {
         let sql = sql_gen(&mut rng, tables.clone());
         log::info!("Executing: {}", sql);
-        let response = client
-            .query(sql.as_str(), &[])
-            .await;
+        let response = client.query(sql.as_str(), &[]).await;
         validate_response(response);
     }
 
