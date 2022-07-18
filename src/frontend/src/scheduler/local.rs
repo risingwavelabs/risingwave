@@ -23,6 +23,7 @@ use risingwave_batch::task::TaskId;
 use risingwave_common::array::DataChunk;
 use risingwave_common::bail;
 use risingwave_common::error::RwError;
+use risingwave_common::util::worker_util::get_workers_by_parallel_unit_ids;
 use risingwave_pb::batch_plan::exchange_info::DistributionMode;
 use risingwave_pb::batch_plan::exchange_source::LocalExecutePlan::Plan;
 use risingwave_pb::batch_plan::plan_node::NodeBody;
@@ -192,10 +193,11 @@ impl LocalQueryExecution {
                     // `exchange_source`.
                     let (parallel_unit_ids, vnode_bitmaps): (Vec<_>, Vec<_>) =
                         vnode_bitmaps.into_iter().unzip();
-                    let workers = self
-                        .front_env
-                        .worker_node_manager()
-                        .get_workers_by_parallel_unit_ids(&parallel_unit_ids)?;
+                    let all_workers = self.front_env.worker_node_manager().list_worker_nodes();
+                    let workers = match get_workers_by_parallel_unit_ids(&all_workers, &parallel_unit_ids) {
+                        Ok(workers) => workers,
+                        Err(e) => bail!("{}", e)
+                    };
 
                     for (idx, (worker_node, vnode_bitmap)) in
                         (workers.into_iter().zip_eq(vnode_bitmaps.into_iter())).enumerate()

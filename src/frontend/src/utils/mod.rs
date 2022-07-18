@@ -18,8 +18,7 @@ mod condition;
 pub use condition::*;
 mod connected_components;
 pub(crate) use connected_components::*;
-mod scan_range;
-pub use scan_range::*;
+pub use risingwave_common::util::scan_range::*;
 
 use crate::expr::{Expr, ExprImpl, ExprRewriter, InputRef};
 
