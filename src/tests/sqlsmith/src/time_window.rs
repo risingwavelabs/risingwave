@@ -50,7 +50,7 @@ impl<'a, R: Rng> SqlGenerator<'a, R> {
         let args = create_args(vec![name, time_col, size]);
         let relation = create_tvf("tumble", alias, args);
 
-        let table = create_sqlsmith_table(table_name, schema.clone());
+        let table = Table::new(table_name, schema.clone());
         self.add_relation_to_context(table);
 
         relation
@@ -82,7 +82,7 @@ impl<'a, R: Rng> SqlGenerator<'a, R> {
 
         let relation = create_tvf("hop", alias, args);
 
-        let table = create_sqlsmith_table(table_name, schema.clone());
+        let table = Table::new(table_name, schema.clone());
         self.add_relation_to_context(table);
 
         relation
@@ -118,10 +118,6 @@ fn create_tvf(name: &str, alias: TableAlias, args: Vec<FunctionArg>) -> TableWit
         relation: factor,
         joins: vec![],
     }
-}
-
-fn create_sqlsmith_table(name: String, columns: Vec<Column>) -> Table {
-    Table { name, columns }
 }
 
 /// Create `FunctionArg` from an `Expr`.
