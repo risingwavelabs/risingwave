@@ -702,6 +702,9 @@ where
         let key = (sink.database_id, sink.schema_id, sink.name.clone());
         if !core.has_sink(sink) && !core.has_in_progress_creation(&key) {
             core.mark_creating(&key);
+            for &dependent_relation_id in &sink.dependent_relations {
+                core.increase_ref_count(dependent_relation_id);
+            }
             Ok(())
         } else {
             Err(RwError::from(InternalError(
