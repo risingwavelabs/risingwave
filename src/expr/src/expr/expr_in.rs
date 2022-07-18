@@ -99,48 +99,91 @@ mod tests {
 
     #[test]
     fn test_eval_search_expr() {
-        let input_ref = Box::new(InputRefExpression::new(DataType::Varchar, 0));
-        let data = vec![
-            Some(ScalarImpl::Utf8("abc".to_string())),
-            Some(ScalarImpl::Utf8("def".to_string())),
+        let input_refs = [
+            Box::new(InputRefExpression::new(DataType::Varchar, 0)),
+            Box::new(InputRefExpression::new(DataType::Varchar, 0)),
         ];
-        let search_expr = InExpression::new(input_ref, data.into_iter(), DataType::Boolean);
-        let data_chunk = DataChunk::from_pretty(
-            "T
-             abc
-             a
-             def
-             abc",
-        )
-        .with_invisible_holes();
-        let vis = data_chunk.get_visibility_ref();
-        let res = search_expr
-            .eval(&data_chunk)
-            .unwrap()
-            .compact(vis.unwrap(), 4)
-            .unwrap();
-        assert_eq!(res.datum_at(0), Some(ScalarImpl::Bool(true)));
-        assert_eq!(res.datum_at(1), Some(ScalarImpl::Bool(false)));
-        assert_eq!(res.datum_at(2), Some(ScalarImpl::Bool(true)));
-        assert_eq!(res.datum_at(3), Some(ScalarImpl::Bool(true)));
+        let data = [
+            vec![
+                Some(ScalarImpl::Utf8("abc".to_string())),
+                Some(ScalarImpl::Utf8("def".to_string())),
+            ],
+            vec![None, Some(ScalarImpl::Utf8("abc".to_string()))],
+        ];
+
+        let data_chunks = [
+            DataChunk::from_pretty(
+                "T
+                 abc
+                 a
+                 def
+                 abc
+                 .",
+            ).with_invisible_holes(),
+            DataChunk::from_pretty(
+                "T
+                abc
+                a
+                .",
+            ).with_invisible_holes(),
+        ];
+
+        let expected = vec![
+            vec![Some(true), Some(false), Some(true), Some(true), None],
+            vec![Some(true), None, None],
+        ];
+
+        for (i, input_ref) in input_refs.into_iter().enumerate() {
+            let search_expr =
+                InExpression::new(input_ref, data[i].clone().into_iter(), DataType::Boolean);
+            let vis = data_chunks[i].get_visibility_ref();
+            let res = search_expr
+                .eval(&data_chunks[i])
+                .unwrap()
+                .compact(vis.unwrap(), expected[i].len())
+                .unwrap();
+
+            for (i, expect) in expected[i].iter().enumerate() {
+                assert_eq!(res.datum_at(i), expect.map(ScalarImpl::Bool));
+            }
+        }
     }
 
     #[test]
     fn test_eval_row_search_expr() {
-        let input_ref = Box::new(InputRefExpression::new(DataType::Varchar, 0));
-        let data = vec![
-            Some(ScalarImpl::Utf8("abc".to_string())),
-            Some(ScalarImpl::Utf8("def".to_string())),
+        let input_refs = [
+            Box::new(InputRefExpression::new(DataType::Varchar, 0)),
+            Box::new(InputRefExpression::new(DataType::Varchar, 0)),
         ];
-        let search_expr = InExpression::new(input_ref, data.into_iter(), DataType::Boolean);
 
-        let row_inputs = vec!["abc", "a", "def"];
-        let expected = vec![true, false, true];
+        let data = [
+            vec![
+                Some(ScalarImpl::Utf8("abc".to_string())),
+                Some(ScalarImpl::Utf8("def".to_string())),
+            ],
+            vec![None, Some(ScalarImpl::Utf8("abc".to_string()))],
+        ];
 
-        for (i, row_input) in row_inputs.iter().enumerate() {
-            let row = Row::new(vec![Some(row_input.to_string().to_scalar_value())]);
-            let result = search_expr.eval_row(&row).unwrap().unwrap().into_bool();
-            assert_eq!(result, expected[i]);
+        let row_inputs = vec![
+            vec![Some("abc"), Some("a"), Some("def"), None],
+            vec![Some("abc"), Some("a"), None],
+        ];
+
+        let expected = [
+            vec![Some(true), Some(false), Some(true), None],
+            vec![Some(true), None, None],
+        ];
+
+        for (i, input_ref) in input_refs.into_iter().enumerate() {
+            let search_expr =
+                InExpression::new(input_ref, data[i].clone().into_iter(), DataType::Boolean);
+
+            for (j, row_input) in row_inputs[i].iter().enumerate() {
+                let row_input = vec![row_input.map(|s| s.to_string().to_scalar_value())];
+                let row = Row::new(row_input);
+                let result = search_expr.eval_row(&row).unwrap();
+                assert_eq!(result, expected[i][j].map(ScalarImpl::Bool));
+            }
         }
     }
 }
