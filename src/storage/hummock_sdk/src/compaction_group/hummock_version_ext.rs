@@ -194,11 +194,28 @@ impl HummockVersionExt for HummockVersion {
             }
             if !insert_table_infos.is_empty() {
                 if insert_sst_level == 0 {
-                    for level in &mut levels.l0.as_mut().unwrap().sub_levels {
+                    let mut found = false;
+                    let l0 = levels.l0.as_mut().unwrap();
+                    for level in &mut l0.sub_levels {
                         if level.sub_level_id == insert_sub_level_id {
-                            level_insert_ssts(level, insert_table_infos);
+                            level_insert_ssts(level, insert_table_infos.clone());
+                            found = true;
                             break;
                         }
+                    }
+                    if !found {
+                        let total_file_size = insert_table_infos
+                            .iter()
+                            .map(|table| table.file_size)
+                            .sum::<u64>();
+                        l0.sub_levels.push(Level {
+                            level_idx: 0,
+                            level_type: LevelType::Overlapping as i32,
+                            table_infos: insert_table_infos,
+                            total_file_size,
+                            sub_level_id: insert_sub_level_id,
+                        });
+                        l0.total_file_size += total_file_size;
                     }
                 } else {
                     let idx = insert_sst_level as usize - 1;

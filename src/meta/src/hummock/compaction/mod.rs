@@ -28,7 +28,9 @@ use risingwave_hummock_sdk::prost_key_range::KeyRangeExt;
 use risingwave_hummock_sdk::{CompactionGroupId, HummockCompactionTaskId, HummockEpoch};
 use risingwave_pb::hummock::compaction_config::CompactionMode;
 use risingwave_pb::hummock::hummock_version::Levels;
-use risingwave_pb::hummock::{CompactTask, CompactionConfig, HummockVersion, InputLevel, KeyRange};
+use risingwave_pb::hummock::{
+    CompactTask, CompactionConfig, HummockVersion, InputLevel, KeyRange, LevelType,
+};
 
 use crate::hummock::compaction::level_selector::{DynamicLevelSelector, LevelSelector};
 use crate::hummock::compaction::overlap_strategy::{
@@ -153,10 +155,9 @@ impl CompactStatus {
     }
 
     pub fn is_trivial_move_task(task: &CompactTask) -> bool {
-        if task.input_ssts.len() <= 1 {
-            return true;
-        }
-        if task.input_ssts.len() > 2 {
+        if task.input_ssts.len() != 2
+            || task.input_ssts[0].level_type == LevelType::Nonoverlapping as i32
+        {
             return false;
         }
 
