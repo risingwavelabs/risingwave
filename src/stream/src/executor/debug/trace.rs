@@ -54,7 +54,7 @@ pub async fn trace(
     };
     let debug_context = || DebugContext::StreamExecutor {
         actor_id,
-        executor_id,
+        executor_id: executor_id as u32, // Use the lower 32 bit to match the dashboard.
         identity: info.identity.clone(),
     };
 
