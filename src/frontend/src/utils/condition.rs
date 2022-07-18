@@ -20,8 +20,8 @@ use fixedbitset::FixedBitSet;
 use itertools::Itertools;
 use risingwave_common::catalog::Schema;
 use risingwave_common::types::ScalarImpl;
+use risingwave_common::util::scan_range::ScanRange;
 
-use super::ScanRange;
 use crate::expr::{
     factorization_expr, fold_boolean_constant, push_down_not, to_conjunctions,
     try_get_bool_constant, ExprImpl, ExprRewriter, ExprType, ExprVerboseDisplay, ExprVisitor,
