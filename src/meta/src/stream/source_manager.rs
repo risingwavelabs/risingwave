@@ -60,7 +60,7 @@ pub type SourceManagerRef<S> = Arc<SourceManager<S>>;
 
 const SOURCE_CF_NAME: &str = "cf/source";
 
-#[allow(dead_code)]
+#[expect(dead_code)]
 pub struct SourceManager<S: MetaStore> {
     env: MetaSrvEnv<S>,
     cluster_manager: ClusterManagerRef<S>,
@@ -76,7 +76,7 @@ pub struct SharedSplitMap {
 
 type SharedSplitMapRef = Arc<Mutex<SharedSplitMap>>;
 
-#[allow(dead_code)]
+#[expect(dead_code)]
 pub struct ConnectorSourceWorker {
     source_id: SourceId,
     current_splits: SharedSplitMapRef,
@@ -277,7 +277,7 @@ where
         Ok(changed_actors)
     }
 
-    pub async fn patch_diff(
+    pub fn patch_diff(
         &mut self,
         source_fragments: Option<HashMap<SourceId, BTreeSet<FragmentId>>>,
         actor_splits: Option<HashMap<ActorId, Vec<SplitImpl>>>,
@@ -298,7 +298,7 @@ where
         }
     }
 
-    pub async fn drop_diff(
+    pub fn drop_diff(
         &mut self,
         source_fragments: Option<HashMap<SourceId, BTreeSet<FragmentId>>>,
         actor_splits: Option<HashSet<ActorId>>,
@@ -461,7 +461,7 @@ where
     ) -> Result<()> {
         {
             let mut core = self.core.lock().await;
-            core.drop_diff(source_fragments, actor_splits.clone()).await;
+            core.drop_diff(source_fragments, actor_splits.clone());
         }
 
         let mut trx = Transaction::default();
@@ -502,7 +502,7 @@ where
             .map_err(|e| internal_error(e.to_string()))?;
 
         let mut core = self.core.lock().await;
-        core.patch_diff(source_fragments, actor_splits).await;
+        core.patch_diff(source_fragments, actor_splits);
 
         Ok(())
     }

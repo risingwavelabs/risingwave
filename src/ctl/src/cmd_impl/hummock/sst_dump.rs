@@ -41,7 +41,7 @@ pub async fn sst_dump() -> anyhow::Result<()> {
     let sstable_store = &*hummock.sstable_store();
 
     // Retrieves the latest HummockVersion from the meta client so we can access the SSTableInfo
-    let version = meta_client.pin_version(u64::MAX).await?;
+    let version = meta_client.pin_version(u64::MAX).await?.2.unwrap();
 
     // Collect all SstableIdInfos. We need them for time stamps.
     let mut id_info_map = HashMap::new();

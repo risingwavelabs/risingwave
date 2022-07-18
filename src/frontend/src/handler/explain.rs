@@ -49,7 +49,7 @@ pub(super) fn handle_explain(
             ..
         } => {
             gen_create_mv_plan(
-                &*session,
+                &session,
                 planner.ctx(),
                 query,
                 name,
@@ -65,7 +65,7 @@ pub(super) fn handle_explain(
             ..
         } => {
             gen_create_table_plan(
-                &*session,
+                &session,
                 planner.ctx(),
                 name,
                 columns,
@@ -79,7 +79,7 @@ pub(super) fn handle_explain(
             table_name,
             columns,
             ..
-        } => gen_create_index_plan(&*session, planner.ctx(), name, table_name, columns)?.0,
+        } => gen_create_index_plan(&session, planner.ctx(), name, table_name, columns)?.0,
 
         stmt => {
             let bound = {
