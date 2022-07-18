@@ -141,6 +141,7 @@ impl StreamSourceReader for TableV2StreamReader {
 
 impl TableSourceV2 {
     /// Create a new stream reader.
+    #[expect(clippy::unused_async)]
     pub async fn stream_reader(&self, column_ids: Vec<ColumnId>) -> Result<TableV2StreamReader> {
         let column_indices = column_ids
             .into_iter()

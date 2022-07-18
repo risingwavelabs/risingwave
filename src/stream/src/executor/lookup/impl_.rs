@@ -325,6 +325,7 @@ impl<S: StateStore> LookupExecutor<S> {
     }
 
     /// Store the barrier.
+    #[expect(clippy::unused_async)]
     async fn process_barrier(&mut self, barrier: Barrier) -> Result<()> {
         if self.last_barrier.is_none() {
             assert_ne!(barrier.epoch.prev, 0, "lookup requires prev epoch != 0");

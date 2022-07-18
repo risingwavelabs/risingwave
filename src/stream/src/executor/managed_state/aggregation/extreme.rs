@@ -12,12 +12,12 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+use std::collections::BTreeMap;
 use std::marker::PhantomData;
 
 use async_trait::async_trait;
 use futures::{pin_mut, StreamExt};
 use itertools::Itertools;
-use madsim::collections::BTreeMap;
 use risingwave_common::array::stream_chunk::{Op, Ops};
 use risingwave_common::array::{Array, ArrayImpl, Row};
 use risingwave_common::buffer::Bitmap;
@@ -130,7 +130,7 @@ where
     /// Create a managed min state. When `top_n_count` is `None`, the cache will
     /// always be retained when flushing the managed state. Otherwise, we will only retain n entries
     /// after each flush.
-    pub async fn new(
+    pub fn new(
         top_n_count: Option<usize>,
         row_count: usize,
         pk_data_types: PkDataTypes,
@@ -172,7 +172,7 @@ where
     }
 
     /// Apply a batch of data to the state.
-    async fn apply_batch_inner(
+    fn apply_batch_inner(
         &mut self,
         ops: Ops<'_>,
         visibility: Option<&Bitmap>,
@@ -380,7 +380,6 @@ where
         state_table: &mut StateTable<S>,
     ) -> StreamExecutorResult<()> {
         self.apply_batch_inner(ops, visibility, data, state_table)
-            .await
     }
 
     async fn get_output(
@@ -402,7 +401,7 @@ where
     }
 }
 
-pub async fn create_streaming_extreme_state<S: StateStore>(
+pub fn create_streaming_extreme_state<S: StateStore>(
     agg_call: AggCall,
     row_count: usize,
     top_n_count: Option<usize>,
@@ -436,7 +435,7 @@ pub async fn create_streaming_extreme_state<S: StateStore>(
                             pk_data_types,
                             key_hash_code.unwrap_or_default(),
                             pk
-                        ).await?,
+                        )?,
                     )),
                     (AggKind::Min, $( $kind )|+) => Ok(Box::new(
                         ManagedMinState::<_, $array>::new(
@@ -445,7 +444,7 @@ pub async fn create_streaming_extreme_state<S: StateStore>(
                             pk_data_types,
                             key_hash_code.unwrap_or_default(),
                             pk
-                        ).await?,
+                        )?,
                     )),
                 )*
                 (kind, return_type) => unimplemented!("unsupported extreme agg, kind: {:?}, return type: {:?}", kind, return_type),
@@ -473,8 +472,9 @@ pub async fn create_streaming_extreme_state<S: StateStore>(
 
 #[cfg(test)]
 mod tests {
+    use std::collections::{BTreeSet, HashSet};
+
     use itertools::Itertools;
-    use madsim::collections::{BTreeSet, HashSet};
     use madsim::rand::prelude::*;
     use risingwave_common::array::{I64Array, Op};
     use risingwave_common::catalog::{ColumnDesc, ColumnId, TableId};
@@ -498,7 +498,6 @@ mod tests {
             HashCode(567),
             None,
         )
-        .await
         .unwrap();
         assert!(!state_table.is_dirty());
 
@@ -634,7 +633,6 @@ mod tests {
             HashCode(567),
             None,
         )
-        .await
         .unwrap();
 
         // The minimum should still be 30
@@ -704,7 +702,6 @@ mod tests {
             HashCode(567),
             None,
         )
-        .await
         .unwrap();
         assert!(!state_table.is_dirty());
 
@@ -810,7 +807,6 @@ mod tests {
             HashCode(567),
             None,
         )
-        .await
         .unwrap();
         assert!(!state_table.is_dirty());
 
@@ -926,7 +922,6 @@ mod tests {
             HashCode(567),
             None,
         )
-        .await
         .unwrap();
         let mut state_table =
             state_table_create_helper(store, TableId::from(0x2333), 1, OrderType::Ascending);
@@ -1024,7 +1019,6 @@ mod tests {
             HashCode(567),
             None,
         )
-        .await
         .unwrap();
 
         let mut heap = BTreeSet::new();
@@ -1117,7 +1111,6 @@ mod tests {
             HashCode(567),
             None,
         )
-        .await
         .unwrap();
         let mut state_table =
             state_table_create_helper(store, TableId::from(0x2333), 1, OrderType::Ascending);

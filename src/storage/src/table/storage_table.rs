@@ -795,8 +795,7 @@ impl<S: StateStore, RS: RowSerde, const T: AccessType> StorageTableBase<S, RS, T
             self.batch_iter(epoch).await?,
             self.mapping.clone(),
             pk_descs,
-        )
-        .await?
+        )?
         .into_stream())
     }
 }
@@ -876,7 +875,7 @@ struct DedupPkStorageTableIter<I> {
 }
 
 impl<I> DedupPkStorageTableIter<I> {
-    async fn new(
+    fn new(
         inner: I,
         mapping: Arc<ColumnDescMapping>,
         pk_descs: &[OrderedColumnDesc],
