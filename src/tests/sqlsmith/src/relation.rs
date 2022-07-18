@@ -15,10 +15,11 @@
 use rand::prelude::SliceRandom;
 use rand::Rng;
 use risingwave_frontend::expr::DataTypeName;
-use risingwave_sqlparser::ast::{Ident, ObjectName, TableAlias, TableFactor, TableWithJoins};
+use risingwave_sqlparser::ast::{Function, FunctionArg, FunctionArgExpr, Ident, ObjectName, TableAlias, TableFactor, TableWithJoins};
 use crate::{
     BinaryOperator, Column, Expr, Join, JoinConstraint, JoinOperator, SqlGenerator, Table,
 };
+use itertools::Itertools;
 
 fn create_join_on_clause(left: String, right: String) -> Expr {
     let left = Box::new(Expr::Identifier(Ident::new(left)));
@@ -35,7 +36,7 @@ impl<'a, R: Rng> SqlGenerator<'a, R> {
     pub(crate) fn gen_from_relation(&mut self) -> TableWithJoins {
         match self.rng.gen_range(0..=9) {
             0..=8 => self.gen_simple_table(),
-            9..=9 => self.gen_tumble(),
+            9..=9 => self.gen_time_window_func(),
             // TODO: Enable after resolving: <https://github.com/singularity-data/risingwave/issues/2771>.
             10..=10 => self.gen_equijoin_clause(),
             // TODO: Currently `gen_subquery` will cause panic due to some wrong assertions.
@@ -140,18 +141,18 @@ impl<'a, R: Rng> SqlGenerator<'a, R> {
     /// Generates `TUMBLE`.
     /// TUMBLE(data: TABLE, timecol: COLUMN, size: INTERVAL, offset?: INTERVAL)
     fn gen_tumble(&mut self) -> TableWithJoins {
-        let tables = find_tables_with_timestamp_cols(&self.tables);
-        let (table, time_cols) = tables.choose(&mut self.rng).expect("seeded tables all do not have timestamp");
+        let tables = find_tables_with_timestamp_cols(self.tables.clone());
+        let (name, time_cols) = tables.choose(&mut self.rng).expect("seeded tables all do not have timestamp");
         let time_col = time_cols.choose(&mut self.rng).unwrap();
         let interval = self.gen_expr(DataTypeName::Interval);
 
-        let alias = format!("tumble_{}", &table.name);
+        let alias = format!("tumble_{}", &name);
         let alias = TableAlias {
             name: Ident::new(alias),
             columns: vec![],
         };
 
-        let tumble_expr = make_tumble_expr(&table, &time_col, &interval);
+        let tumble_expr = make_tumble_expr(&name, &time_col, &interval);
         let factor = TableFactor::TableFunction {
             expr: tumble_expr,
             alias: Some(alias),
@@ -163,10 +164,42 @@ impl<'a, R: Rng> SqlGenerator<'a, R> {
     }
 }
 
-fn make_tumble_expr(table: &Table, time_col: &Column, size: &Expr) -> Expr {
-    todo!()
+/// Create an expression from a `Column`.
+fn create_expr_from_col(col: &Column) -> Expr {
+    Expr::Identifier(Ident::new(&col.name))
 }
 
-fn find_tables_with_timestamp_cols(tables: &[Table]) -> Vec<(Table, Vec<Column>)> {
-    todo!()
+/// Create `FunctionArg` from an `Expr`.
+fn create_function_arg_from_expr(expr: Expr) -> FunctionArg {
+    FunctionArg::Unnamed(FunctionArgExpr::Expr(expr))
+}
+
+/// Make `TUMBLE` expression.
+fn make_tumble_expr(name: &str, time_col: &Column, size: &Expr) -> Expr {
+    let name = ObjectName(vec![Ident::new(name)]);
+    let time_col = create_expr_from_col(time_col);
+    Expr::Function(Function {
+        name,
+        args: [time_col, size.clone()].into_iter().map(|e| create_function_arg_from_expr(e)).collect_vec(),
+        over: None,
+        distinct: false,
+        order_by: vec![],
+        filter: None,
+    })
+}
+
+fn find_tables_with_timestamp_cols(tables: Vec<Table>) -> Vec<(String, Vec<Column>)> {
+    tables
+        .into_iter()
+        .map(|t| {
+            let name = t.name;
+             let cols_with_timestamp = t.columns
+                .into_iter()
+                .filter(|c| c.data_type == DataTypeName::Timestamp
+                        || c.data_type == DataTypeName::Timestampz)
+                .collect_vec();
+            (name, cols_with_timestamp)
+        })
+        .filter(|(_, c)| !c.is_empty())
+        .collect()
 }
