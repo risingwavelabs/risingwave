@@ -367,7 +367,7 @@
       WHERE A.id = B.auction AND B.dateTime BETWEEN A.dateTime AND A.expires
     )
     WHERE rownum <= 1;
-  binder_error: 'Item not found: relation "A"'
+  binder_error: 'Feature is not yet implemented: unsupported function: "row_number", Tracking issue: https://github.com/singularity-data/risingwave/issues/112'
 - id: nexmark_q10
   before:
     - create_tables
