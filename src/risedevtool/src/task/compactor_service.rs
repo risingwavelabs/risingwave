@@ -73,6 +73,7 @@ impl Task for CompactorService {
 
         let mut cmd = self.compactor()?;
 
+        cmd.env("RUST_BACKTRACE", "1");
         if crate::util::is_env_set("RISEDEV_ENABLE_PROFILE") {
             cmd.env(
                 "RW_PROFILE_PATH",
