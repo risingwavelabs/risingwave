@@ -74,7 +74,7 @@ impl EqGroups {
 
 /// `SortedGrouper` contains the state of a group column in the sort aggregate
 /// algorithm, just like `Aggregator` contains the state of an aggregate column.
-/// TODO(rc): This can be deprecated and the logic can be moved to `SortAggExecutor`.
+/// TODO(yuchao): This can be deprecated and the logic can be moved to `SortAggExecutor`.
 pub trait SortedGrouper: Send + 'static {
     /// `detect_groups` detects the `EqGroups` from the `input` array if appended
     /// to current state. See the documentation of `EqGroups` to learn more.
