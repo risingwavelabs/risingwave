@@ -12,7 +12,10 @@ option optimize_for = SPEED;
 message RowSeqScanNode {
   plan_common.CellBasedTableDesc table_desc = 1;
   repeated int32 column_ids = 2;
-  ScanRange scan_range = 3;
+  // All the ranges need to be read. i.e., they are OR'ed.
+  //
+  // Empty `scan_ranges` means full table scan.
+  repeated ScanRange scan_ranges = 3;
   // The partition to read for scan tasks.
   //
   // Will be filled by the scheduler.
@@ -26,7 +29,7 @@ message SysRowSeqScanNode {
 
 // The range to scan, which specifies a consecutive range of the PK
 // and can represent: (Suppose there are N columns in the PK)
-// - full table scan: `eq_conds` is empty, and `lower_bound` & `upper_bound` are `None`
+// - full table scan: Should not occur. Use an empty `Vec<ScanRange>` instead.
 // - index range scan: `eq_conds` includes i (between 0 and N-1, inclusive) values,
 //     and `lower_bound` & `upper_bound` is the range for the (i+1)th column
 // - index point get: `eq_conds` includes N values, and `lower_bound` & `upper_bound` are `None`

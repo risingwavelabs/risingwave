@@ -277,6 +277,7 @@ impl DispatchExecutorInner {
     }
 
     /// For `Add` and `Update`, update the dispatchers before we dispatch the barrier.
+    #[expect(clippy::unused_async)]
     async fn pre_mutate_dispatchers(&mut self, mutation: &Option<Arc<Mutation>>) -> Result<()> {
         let Some(mutation) = mutation.as_deref() else {
             return Ok(())
@@ -300,6 +301,7 @@ impl DispatchExecutorInner {
     }
 
     /// For `Stop` and `Update`, update the dispatchers after we dispatch the barrier.
+    #[expect(clippy::unused_async)]
     async fn post_mutate_dispatchers(&mut self, mutation: &Option<Arc<Mutation>>) -> Result<()> {
         let Some(mutation) = mutation.as_deref() else {
             return Ok(())
