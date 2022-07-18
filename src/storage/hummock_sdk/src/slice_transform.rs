@@ -171,6 +171,7 @@ impl MultiSliceTransForm {
 }
 
 #[cfg(test)]
+#[expect(clippy::needless_borrow)]
 mod tests {
     use std::collections::HashMap;
     use std::mem;
