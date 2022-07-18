@@ -155,56 +155,6 @@ impl<S: StateStore, RS: RowSerde> StorageTableBase<S, RS, READ_ONLY> {
             distribution,
         )
     }
-
-    pub fn from_table_catalog(
-        table_catalog: &Table,
-        store: S,
-        vnodes: Option<Arc<Bitmap>>,
-    ) -> Self {
-        let table_columns: Vec<ColumnDesc> = table_catalog
-            .columns
-            .iter()
-            .map(|col| col.column_desc.as_ref().unwrap().into())
-            .collect();
-        let order_types = table_catalog
-            .order_key
-            .iter()
-            .map(|col_order| {
-                OrderType::from_prost(
-                    &risingwave_pb::plan_common::OrderType::from_i32(col_order.order_type).unwrap(),
-                )
-            })
-            .collect();
-        let dist_key_indices = table_catalog
-            .distribution_key
-            .iter()
-            .map(|dist_index| *dist_index as usize)
-            .collect();
-        let pk_indices = table_catalog
-            .order_key
-            .iter()
-            .map(|col_order| col_order.index as usize)
-            .collect();
-        let distribution = match vnodes {
-            Some(vnodes) => Distribution {
-                dist_key_indices,
-                vnodes,
-            },
-            None => Distribution::fallback(),
-        };
-        Self::new_partial(
-            store,
-            TableId::new(table_catalog.id),
-            table_columns.clone(),
-            table_columns
-                .iter()
-                .map(|table_column| table_column.column_id)
-                .collect(),
-            order_types,
-            pk_indices,
-            distribution,
-        )
-    }
 }
 
 impl<S: StateStore, RS: RowSerde> StorageTableBase<S, RS, READ_WRITE> {
@@ -259,8 +209,58 @@ impl<S: StateStore, RS: RowSerde> From<StorageTableBase<S, RS, READ_WRITE>>
 }
 
 impl<S: StateStore, RS: RowSerde, const T: AccessType> StorageTableBase<S, RS, T> {
-    #[allow(clippy::too_many_arguments)]
+    /// Create storage table from table catalog and store.
+    pub fn from_table_catalog(
+        table_catalog: &Table,
+        store: S,
+        vnodes: Option<Arc<Bitmap>>,
+    ) -> Self {
+        let table_columns: Vec<ColumnDesc> = table_catalog
+            .columns
+            .iter()
+            .map(|col| col.column_desc.as_ref().unwrap().into())
+            .collect();
+        let order_types = table_catalog
+            .order_key
+            .iter()
+            .map(|col_order| {
+                OrderType::from_prost(
+                    &risingwave_pb::plan_common::OrderType::from_i32(col_order.order_type).unwrap(),
+                )
+            })
+            .collect();
+        let dist_key_indices = table_catalog
+            .distribution_key
+            .iter()
+            .map(|dist_index| *dist_index as usize)
+            .collect();
+        let pk_indices = table_catalog
+            .order_key
+            .iter()
+            .map(|col_order| col_order.index as usize)
+            .collect();
+        let distribution = match vnodes {
+            Some(vnodes) => Distribution {
+                dist_key_indices,
+                vnodes,
+            },
+            None => Distribution::fallback(),
+        };
+        Self::new_inner(
+            store,
+            TableId::new(table_catalog.id),
+            table_columns.clone(),
+            table_columns
+                .iter()
+                .map(|table_column| table_column.column_id)
+                .collect(),
+            order_types,
+            pk_indices,
+            distribution,
+        )
+    }
 
+    #[allow(clippy::too_many_arguments)]
     fn new_inner(
         store: S,
         table_id: TableId,
