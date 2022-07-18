@@ -27,7 +27,7 @@ use risingwave_storage::StateStore;
 use crate::executor::error::StreamExecutorResult;
 use crate::executor::PkIndices;
 
-#[allow(dead_code)]
+#[expect(dead_code)]
 pub struct ManagedTopNStateNew<S: StateStore> {
     /// Relational table.
     state_table: StateTable<S>,

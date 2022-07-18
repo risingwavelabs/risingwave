@@ -67,7 +67,6 @@ pub(crate) struct ArrangeJoinSide<S: StateStore> {
     ///
     /// The key indices of the arrange side won't be used for the lookup process, but we still
     /// record it here in case anyone would use it in the future.
-    #[allow(dead_code)]
     pub key_indices: Vec<usize>,
 
     /// Whether to join with the arrangement of the current epoch
