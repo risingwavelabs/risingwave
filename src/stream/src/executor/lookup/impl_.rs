@@ -19,7 +19,8 @@ use risingwave_common::array::{Row, RowRef};
 use risingwave_common::catalog::{ColumnDesc, Schema};
 use risingwave_common::error::Result;
 use risingwave_common::util::sort_util::OrderPair;
-use risingwave_storage::table::storage_table::StorageTable;
+use risingwave_storage::table::storage_table::{StorageTable, READ_ONLY};
+use risingwave_storage::table::TableIter;
 use risingwave_storage::StateStore;
 
 use super::sides::{stream_lookup_arrange_prev_epoch, stream_lookup_arrange_this_epoch};
@@ -29,7 +30,6 @@ use crate::executor::lookup::cache::LookupCache;
 use crate::executor::lookup::sides::{ArrangeJoinSide, ArrangeMessage, StreamJoinSide};
 use crate::executor::lookup::LookupExecutor;
 use crate::executor::{Barrier, Epoch, Executor, Message, PkIndices, PROCESSING_WINDOW_SIZE};
-
 /// Parameters for [`LookupExecutor`].
 pub struct LookupExecutorParams<S: StateStore> {
     /// The side for arrangement. Currently, it should be a
@@ -100,8 +100,7 @@ pub struct LookupExecutorParams<S: StateStore> {
     /// The join keys on the arrangement side.
     pub arrange_join_key_indices: Vec<usize>,
 
-    // pub state_table: StateTable<S>,
-    pub storage_table: StorageTable<S, false>,
+    pub storage_table: StorageTable<S, READ_ONLY>,
 }
 
 impl<S: StateStore> LookupExecutor<S> {
@@ -386,10 +385,9 @@ impl<S: StateStore> LookupExecutor<S> {
                 .streaming_iter_with_pk_bounds(lookup_epoch, &lookup_row, ..)
                 .await?;
             pin_mut!(all_data_iter);
-            while let Some(inner) = all_data_iter.next().await {
-                let ret = inner?;
+            while let Some(inner) = all_data_iter.next_row().await? {
                 // Only need value (include storage pk).
-                all_rows.push(ret.1.clone());
+                all_rows.push(inner);
             }
         }
 

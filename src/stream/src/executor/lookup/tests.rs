@@ -25,7 +25,7 @@ use risingwave_common::util::value_encoding::deserialize_cell;
 use risingwave_storage::encoding::cell_based_encoding_util::deserialize_column_id;
 use risingwave_storage::memory::MemoryStateStore;
 use risingwave_storage::store::ReadOptions;
-use risingwave_storage::table::storage_table::StorageTable;
+use risingwave_storage::table::storage_table::{StorageTable, READ_ONLY};
 use risingwave_storage::table::Distribution;
 use risingwave_storage::StateStore;
 
@@ -213,7 +213,7 @@ fn build_state_table_helper<S: StateStore>(
     columns: Vec<ColumnDesc>,
     order_types: Vec<OrderPair>,
     pk_indices: Vec<usize>,
-) -> StorageTable<S, false> {
+) -> StorageTable<S, READ_ONLY> {
     StorageTable::new_partial(
         s,
         table_id,
