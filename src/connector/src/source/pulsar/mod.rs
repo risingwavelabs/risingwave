@@ -24,7 +24,7 @@ pub use split::*;
 
 pub const PULSAR_CONNECTOR: &str = "pulsar";
 
-#[derive(Clone, Debug, Deserialize, Default)]
+#[derive(Clone, Debug, Deserialize)]
 pub struct PulsarProperties {
     #[serde(rename = "pulsar.topic")]
     pub topic: String,

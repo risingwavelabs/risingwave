@@ -12,7 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use anyhow::{anyhow, Result};
+use anyhow::{anyhow, bail, Result};
 use async_trait::async_trait;
 use itertools::Itertools;
 use serde::{Deserialize, Serialize};
@@ -56,9 +56,7 @@ impl SplitEnumerator for PulsarSplitEnumerator {
             Some("latest") => PulsarEnumeratorOffset::Latest,
             None => PulsarEnumeratorOffset::Earliest,
             _ => {
-                return Err(anyhow!(
-                    "properties `startup_mode` only support earliest and latest or leave it empty"
-                ));
+                bail!("properties `startup_mode` only support earliest and latest or leave it empty");
             }
         };
 
@@ -82,11 +80,7 @@ impl SplitEnumerator for PulsarSplitEnumerator {
         let topic_metadata = self.admin_client.get_topic_metadata(&self.topic).await?;
         // note: may check topic exists by get stats
         if topic_metadata.partitions < 0 {
-            return Err(anyhow!(
-                "illegal metadata {:?} for pulsar topic {}",
-                topic_metadata.partitions,
-                self.topic.to_string()
-            ));
+            bail!("illegal metadata {:?} for pulsar topic {}",topic_metadata.partitions,self.topic.to_string());
         }
 
         let splits = if topic_metadata.partitions > 0 {
@@ -112,8 +106,6 @@ impl SplitEnumerator for PulsarSplitEnumerator {
 
 #[cfg(test)]
 mod test {
-    use std::default::Default;
-
     use wiremock::{Mock, MockServer, ResponseTemplate};
 
     use crate::source::pulsar::{PulsarEnumeratorOffset, PulsarProperties, PulsarSplitEnumerator};
@@ -145,7 +137,9 @@ mod test {
         let prop = PulsarProperties {
             topic: "t".to_string(),
             admin_url: "http://test_illegal_url:8000".to_string(),
-            ..Default::default()
+            service_url: "pulsar://localhost:6650".to_string(),
+            scan_startup_mode: Some("earliest".to_string()),
+            time_offset: None,
         };
         let mut enumerator = PulsarSplitEnumerator::new(prop).await.unwrap();
         assert!(enumerator.list_splits().await.is_err());
@@ -158,7 +152,9 @@ mod test {
         let prop = PulsarProperties {
             topic: "t".to_string(),
             admin_url: server.uri(),
-            ..Default::default()
+            service_url: "pulsar://localhost:6650".to_string(),
+            scan_startup_mode: Some("earliest".to_string()),
+            time_offset: None,
         };
         let mut enumerator = PulsarSplitEnumerator::new(prop).await.unwrap();
         assert!(enumerator.list_splits().await.is_err());
@@ -170,12 +166,14 @@ mod test {
             "/admin/v2/persistent/public/default/t/partitions",
             "{\"partitions\":3}",
         )
-        .await;
+            .await;
 
         let prop = PulsarProperties {
             topic: "t".to_string(),
             admin_url: server.uri(),
-            ..Default::default()
+            service_url: "pulsar://localhost:6650".to_string(),
+            scan_startup_mode: Some("earliest".to_string()),
+            time_offset: None,
         };
         let mut enumerator = PulsarSplitEnumerator::new(prop).await.unwrap();
 
@@ -194,12 +192,14 @@ mod test {
             "/admin/v2/persistent/public/default/t/partitions",
             "{\"partitions\":0}",
         )
-        .await;
+            .await;
 
         let prop = PulsarProperties {
             topic: "t".to_string(),
             admin_url: server.uri(),
-            ..Default::default()
+            service_url: "pulsar://localhost:6650".to_string(),
+            scan_startup_mode: Some("earliest".to_string()),
+            time_offset: None,
         };
         let mut enumerator = PulsarSplitEnumerator::new(prop).await.unwrap();
 
