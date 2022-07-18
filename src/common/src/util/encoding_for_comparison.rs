@@ -80,4 +80,76 @@ pub fn encode_row(row: &Row, order_pairs: &[OrderPair]) -> Vec<u8> {
     encoded_row
 }
 
-// TODO(rc): add tests
+#[cfg(test)]
+mod tests {
+    use itertools::Itertools;
+
+    use super::{encode_chunk, encode_row, encode_value};
+    use crate::array::{DataChunk, Row};
+    use crate::types::{DataType, ScalarImpl};
+    use crate::util::sort_util::{OrderPair, OrderType};
+
+    #[test]
+    fn test_encode_row() {
+        let v10 = Some(ScalarImpl::Int32(42));
+        let v11 = Some(ScalarImpl::Utf8("hello".to_string()));
+        let v12 = Some(ScalarImpl::Float32(4.0.into()));
+        let v20 = Some(ScalarImpl::Int32(42));
+        let v21 = Some(ScalarImpl::Utf8("hell".to_string()));
+        let v22 = Some(ScalarImpl::Float32(3.0.into()));
+
+        let row1 = Row::new(vec![v10.clone(), v11.clone(), v12.clone()]);
+        let row2 = Row::new(vec![v20.clone(), v21.clone(), v22.clone()]);
+        let order_pairs = vec![
+            OrderPair::new(0, OrderType::Ascending),
+            OrderPair::new(1, OrderType::Descending),
+        ];
+
+        let encoded_row1 = encode_row(&row1, &order_pairs);
+        let encoded_v10 = encode_value(
+            v10.as_ref().map(|x| x.as_scalar_ref_impl()),
+            &OrderType::Ascending,
+        )
+        .unwrap();
+        let encoded_v11 = encode_value(
+            v11.as_ref().map(|x| x.as_scalar_ref_impl()),
+            &OrderType::Descending,
+        )
+        .unwrap();
+        let concated_encoded_row1 = encoded_v10
+            .into_iter()
+            .chain(encoded_v11.into_iter())
+            .collect_vec();
+        assert_eq!(encoded_row1, concated_encoded_row1);
+
+        let encoded_row2 = encode_row(&row2, &order_pairs);
+        assert!(encoded_row1 < encoded_row2);
+    }
+
+    #[test]
+    fn test_encode_chunk() {
+        let v10 = Some(ScalarImpl::Int32(42));
+        let v11 = Some(ScalarImpl::Utf8("hello".to_string()));
+        let v12 = Some(ScalarImpl::Float32(4.0.into()));
+        let v20 = Some(ScalarImpl::Int32(42));
+        let v21 = Some(ScalarImpl::Utf8("hell".to_string()));
+        let v22 = Some(ScalarImpl::Float32(3.0.into()));
+
+        let row1 = Row::new(vec![v10.clone(), v11.clone(), v12.clone()]);
+        let row2 = Row::new(vec![v20.clone(), v21.clone(), v22.clone()]);
+        let chunk = DataChunk::from_rows(
+            &[row1.clone(), row2.clone()],
+            &[DataType::Int32, DataType::Varchar, DataType::Float32],
+        )
+        .unwrap();
+        let order_pairs = vec![
+            OrderPair::new(0, OrderType::Ascending),
+            OrderPair::new(1, OrderType::Descending),
+        ];
+
+        let encoded_row1 = encode_row(&row1, &order_pairs);
+        let encoded_row2 = encode_row(&row2, &order_pairs);
+        let encoded_chunk = encode_chunk(&chunk, &order_pairs);
+        assert_eq!(&encoded_chunk, &[encoded_row1, encoded_row2]);
+    }
+}
