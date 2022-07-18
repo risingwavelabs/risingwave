@@ -13,6 +13,7 @@
 // limitations under the License.
 
 use itertools::Itertools;
+use itertools::zip_eq;
 use rand::prelude::SliceRandom;
 use rand::Rng;
 use risingwave_frontend::expr::DataTypeName;
@@ -145,41 +146,52 @@ impl<'a, R: Rng> SqlGenerator<'a, R> {
     /// TUMBLE(data: TABLE, timecol: COLUMN, size: INTERVAL, offset?: INTERVAL)
     fn gen_tumble(&mut self) -> TableWithJoins {
         let tables = find_tables_with_timestamp_cols(self.tables.clone());
-        let (name, time_cols) = tables
+        let (source_table_name, time_cols, schema) = tables
             .choose(&mut self.rng)
             .expect("seeded tables all do not have timestamp");
+        let table_name = format!("tumble_{}", &self.tables.len());
+        let column_aliases = schema
+            .iter()
+            .map(|c|
+            format!("{}.{}", table_name, c.name)
+        ).collect_vec();
         let alias = TableAlias {
-            name: Ident::new(format!("tumble_{}", &name)),
-            columns: vec![],
+            name: Ident::new(table_name.clone()),
+            columns: column_aliases.iter().cloned().map(|s| s.as_str().into()).collect_vec(),
         };
-        let time_col = time_cols.choose(&mut self.rng).unwrap();
-        let size = self.gen_expr(DataTypeName::Interval);
 
-        let time_col = create_expr_from_col(time_col);
-        let args = [time_col, size]
+        let column_types = schema
+            .iter()
+            .map(|c| c.data_type)
+            .collect_vec();
+        let columns = zip_eq(column_aliases, column_types).map( |(name, data_type)| Column {name, data_type}).collect_vec();
+        let table = Table {
+            name: table_name,
+            columns,
+        };
+        self.add_relation_to_context(table);
+
+        let time_col = time_cols.choose(&mut self.rng).unwrap();
+
+        let name = Expr::Identifier(source_table_name.as_str().into());
+        let size = self.gen_expr(DataTypeName::Interval);
+        let time_col = Expr::Identifier(time_col.name.as_str().into());
+        let args = [name, time_col, size]
             .into_iter()
             .map(create_function_arg_from_expr)
             .collect_vec();
 
         let factor = TableFactor::Table {
-            name: create_object_name_from_str("tumble"),
+            name: ObjectName(vec!["tumble".into()]),
             alias: Some(alias),
             args,
         };
-        TableWithJoins {
+        let relation = TableWithJoins {
             relation: factor,
             joins: vec![],
-        }
+        };
+        relation
     }
-}
-
-fn create_object_name_from_str(name: &str) -> ObjectName {
-    ObjectName(vec![Ident::new(name)])
-}
-
-/// Create an expression from a `Column`.
-fn create_expr_from_col(col: &Column) -> Expr {
-    Expr::Identifier(Ident::new(&col.name))
 }
 
 /// Create `FunctionArg` from an `Expr`.
@@ -191,20 +203,21 @@ fn is_timestamp_col(c: &Column) -> bool {
     c.data_type == DataTypeName::Timestamp || c.data_type == DataTypeName::Timestampz
 }
 
-fn get_table_name_and_cols_with_timestamp(table: Table) -> (String, Vec<Column>) {
+fn get_table_name_and_cols_with_timestamp(table: Table) -> (String, Vec<Column>, Vec<Column>) {
     let name = table.name;
     let cols_with_timestamp = table
         .columns
-        .into_iter()
+        .iter()
+        .cloned()
         .filter(is_timestamp_col)
         .collect_vec();
-    (name, cols_with_timestamp)
+    (name, cols_with_timestamp, table.columns)
 }
 
-fn find_tables_with_timestamp_cols(tables: Vec<Table>) -> Vec<(String, Vec<Column>)> {
+fn find_tables_with_timestamp_cols(tables: Vec<Table>) -> Vec<(String, Vec<Column>, Vec<Column>)> {
     tables
         .into_iter()
         .map(get_table_name_and_cols_with_timestamp)
-        .filter(|(_name, timestamp_cols)| !timestamp_cols.is_empty())
+        .filter(|(_name, timestamp_cols, _schema)| !timestamp_cols.is_empty())
         .collect()
 }
