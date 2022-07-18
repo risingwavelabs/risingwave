@@ -137,12 +137,10 @@ impl StringAgg {
                         min_heap
                             .clone()
                             .into_iter_sorted()
-                            .map(
-                                |orow| match orow.row.into_value_at(self.agg_col_idx).unwrap() {
-                                    ScalarImpl::Utf8(s) => s,
-                                    _ => panic!("Expected Utf8"),
-                                },
-                            )
+                            .map(|mut orow| match orow.row.0[self.agg_col_idx] {
+                                Some(ScalarImpl::Utf8(ref mut s)) => std::mem::take(s),
+                                _ => panic!("Expected Utf8"),
+                            })
                             .join(""),
                     )
                 }
@@ -168,12 +166,10 @@ impl StringAgg {
                     Some(
                         min_heap
                             .drain_sorted()
-                            .map(
-                                |orow| match orow.row.into_value_at(self.agg_col_idx).unwrap() {
-                                    ScalarImpl::Utf8(s) => s,
-                                    _ => panic!("Expected Utf8"),
-                                },
-                            )
+                            .map(|mut orow| match orow.row.0[self.agg_col_idx] {
+                                Some(ScalarImpl::Utf8(ref mut s)) => std::mem::take(s),
+                                _ => panic!("Expected Utf8"),
+                            })
                             .join(""),
                     )
                 }
