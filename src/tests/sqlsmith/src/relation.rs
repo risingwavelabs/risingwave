@@ -197,21 +197,24 @@ fn make_tumble_expr(name: &str, time_col: &Column, size: &Expr) -> Expr {
     })
 }
 
+fn is_timestamp_col(c: &Column) -> bool {
+    c.data_type == DataTypeName::Timestamp || c.data_type == DataTypeName::Timestampz
+}
+
+fn get_table_name_and_cols_with_timestamp(table: Table) -> (String, Vec<Column>) {
+    let name = table.name;
+    let cols_with_timestamp = table
+        .columns
+        .into_iter()
+        .filter(is_timestamp_col)
+        .collect_vec();
+    (name, cols_with_timestamp)
+}
+
 fn find_tables_with_timestamp_cols(tables: Vec<Table>) -> Vec<(String, Vec<Column>)> {
     tables
         .into_iter()
-        .map(|t| {
-            let name = t.name;
-            let cols_with_timestamp = t
-                .columns
-                .into_iter()
-                .filter(|c| {
-                    c.data_type == DataTypeName::Timestamp
-                        || c.data_type == DataTypeName::Timestampz
-                })
-                .collect_vec();
-            (name, cols_with_timestamp)
-        })
-        .filter(|(_, c)| !c.is_empty())
+        .map(get_table_name_and_cols_with_timestamp)
+        .filter(|(_name, timestamp_cols)| !timestamp_cols.is_empty())
         .collect()
 }
