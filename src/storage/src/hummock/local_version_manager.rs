@@ -196,6 +196,7 @@ impl LocalVersionManager {
 
         // Unpin unused version.
         tokio::spawn(LocalVersionManager::start_unpin_worker(
+            Arc::downgrade(&local_version_manager),
             version_unpin_worker_rx,
             hummock_meta_client,
         ));
@@ -603,6 +604,7 @@ impl LocalVersionManager {
 // concurrent worker thread of `LocalVersionManager`
 impl LocalVersionManager {
     async fn start_unpin_worker(
+        local_version_manager_weak: Weak<LocalVersionManager>,
         mut rx: UnboundedReceiver<HummockVersionId>,
         hummock_meta_client: Arc<dyn HummockMetaClient>,
     ) {
@@ -616,11 +618,12 @@ impl LocalVersionManager {
         let mut retry_backoff = get_backoff_strategy();
         let mut min_execute_interval_tick = tokio::time::interval(min_execute_interval);
         min_execute_interval_tick.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Delay);
-        let mut versions_to_unpin = vec![];
+        let mut need_unpin = false;
         // For each run in the loop, accumulate versions to unpin and call unpin RPC once.
         loop {
             min_execute_interval_tick.tick().await;
             // 1. Collect new versions to unpin.
+            let mut versions_to_unpin = vec![];
             'collect: loop {
                 match rx.try_recv() {
                     Ok(version) => {
@@ -637,13 +640,32 @@ impl LocalVersionManager {
                     },
                 }
             }
-            if versions_to_unpin.is_empty() {
+            if !versions_to_unpin.is_empty() {
+                need_unpin = true;
+            }
+            if !need_unpin {
                 continue;
             }
+            let local_version_manager = match local_version_manager_weak.upgrade() {
+                None => {
+                    tracing::info!("Shutdown hummock unpin worker");
+                    return;
+                }
+                Some(local_version_manager) => local_version_manager,
+            };
+            let unpin_before = {
+                let mut local_version = local_version_manager.local_version.write();
+                for version in &versions_to_unpin {
+                    local_version.version_ids_in_use.remove(version);
+                }
+                *local_version.version_ids_in_use.first().unwrap()
+            };
+
             // 2. Call unpin RPC, including versions failed to unpin in previous RPC calls.
-            match hummock_meta_client.unpin_version(&versions_to_unpin).await {
+            match hummock_meta_client.unpin_version_before(unpin_before).await {
                 Ok(_) => {
                     versions_to_unpin.clear();
+                    need_unpin = false;
                     retry_backoff = get_backoff_strategy();
                 }
                 Err(err) => {

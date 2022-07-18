@@ -4,8 +4,10 @@ heartbeat_interval_ms = 1000
 [batch]
 
 [streaming]
-in_flight_barrier_nums = 40
 checkpoint_interval_ms = 250
+in_flight_barrier_nums = 40
+# FIXME
+unsafe_worker_node_parallel_degree = 3
 
 [storage]
 shared_buffer_capacity_mb = 4096

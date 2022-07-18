@@ -137,6 +137,14 @@ impl Catalog {
             .drop_table(tb_id);
     }
 
+    pub fn update_table(&mut self, proto: &ProstTable) {
+        self.get_database_mut(proto.database_id)
+            .unwrap()
+            .get_schema_mut(proto.schema_id)
+            .unwrap()
+            .update_table(proto);
+    }
+
     pub fn drop_source(&mut self, db_id: DatabaseId, schema_id: SchemaId, source_id: SourceId) {
         self.get_database_mut(db_id)
             .unwrap()

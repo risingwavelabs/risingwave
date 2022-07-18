@@ -31,7 +31,6 @@ use crate::executor::PkDataTypes;
 
 mod extreme;
 
-#[allow(dead_code)]
 mod string_agg;
 mod value;
 
