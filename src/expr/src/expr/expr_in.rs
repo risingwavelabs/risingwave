@@ -47,8 +47,18 @@ impl InExpression {
         }
     }
 
-    fn exists(&self, datum: &Datum) -> bool {
-        self.set.contains(datum)
+    // Returns true if datum exists in set, unknown if datum is null or datum does not exist in set
+    // but null does, and false if neither datum nor null exists in set.
+    fn exists(&self, datum: &Datum) -> Option<bool> {
+        if datum.is_none() {
+            None
+        } else if self.set.contains(datum) {
+            Some(true)
+        } else if self.set.contains(&None) {
+            None
+        } else {
+            Some(false)
+        }
     }
 }
 
@@ -63,7 +73,7 @@ impl Expression for InExpression {
         for (data, vis) in input_array.iter().zip_eq(input.vis().iter()) {
             if vis {
                 let ret = self.exists(&data.to_owned_datum());
-                output_array.append(Some(ret))?;
+                output_array.append(ret)?;
             } else {
                 output_array.append(None)?;
             }
@@ -74,7 +84,7 @@ impl Expression for InExpression {
     fn eval_row(&self, input: &Row) -> Result<Datum> {
         let data = self.left.eval_row(input)?;
         let ret = self.exists(&data);
-        Ok(Some(ret.to_scalar_value()))
+        Ok(ret.map(|b| b.to_scalar_value()))
     }
 }
 
