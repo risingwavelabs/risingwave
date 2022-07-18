@@ -19,6 +19,8 @@ use risingwave_common::error::Result;
 use risingwave_common::types::VirtualNode;
 
 use super::cell_based_encoding_util::serialize_pk_and_row;
+use super::cell_based_row_deserializer::CellBasedRowDeserializer;
+use super::RowSerde;
 use crate::encoding::{Encoding, KeyBytes, ValueBytes};
 
 #[derive(Clone)]
@@ -77,5 +79,25 @@ impl Encoding for CellBasedRowSerializer {
 
     fn column_ids(&self) -> &[ColumnId] {
         &self.column_ids
+    }
+}
+
+impl RowSerde for CellBasedRowSerializer {
+    type Deserializer = CellBasedRowDeserializer;
+    type Serializer = CellBasedRowSerializer;
+
+    fn create_serializer(
+        pk_indices: &[usize],
+        column_descs: &[ColumnDesc],
+        column_ids: &[ColumnId],
+    ) -> Self::Serializer {
+        Encoding::create_row_serializer(pk_indices, column_descs, column_ids)
+    }
+
+    fn create_deserializer(
+        column_mapping: std::sync::Arc<super::ColumnDescMapping>,
+        data_types: Vec<risingwave_common::types::DataType>,
+    ) -> Self::Deserializer {
+        super::Decoding::create_row_deserializer(column_mapping, data_types)
     }
 }
