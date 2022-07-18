@@ -342,6 +342,7 @@ impl Row {
     }
 
     pub fn into_value_at(self, idx: usize) -> Datum {
+        debug_assert!(idx < self.0.len());
         self.0.into_iter().nth(idx).unwrap()
     }
 }
