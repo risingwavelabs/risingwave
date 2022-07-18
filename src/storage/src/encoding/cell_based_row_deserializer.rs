@@ -23,7 +23,8 @@ use risingwave_common::types::{DataType, Datum, VirtualNode, VIRTUAL_NODE_SIZE};
 use risingwave_common::util::value_encoding::deserialize_cell;
 
 use super::cell_based_encoding_util::deserialize_column_id;
-use super::Decoding;
+use super::cell_based_row_serializer::CellBasedRowSerializer;
+use super::{Decoding, RowSerde};
 use crate::encoding::ColumnDescMapping;
 use crate::table::storage_table::DEFAULT_VNODE;
 
@@ -206,6 +207,10 @@ impl Decoding for CellBasedRowDeserializer {
     }
 }
 
+impl RowSerde for CellBasedRowDeserializer {
+    type Deserializer = CellBasedRowDeserializer;
+    type Serializer = CellBasedRowSerializer;
+}
 #[cfg(test)]
 mod tests {
     use bytes::Bytes;
