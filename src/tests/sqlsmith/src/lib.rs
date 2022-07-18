@@ -66,6 +66,12 @@ struct SqlGenerator<'a, R: Rng> {
     tables: Vec<Table>,
     rng: &'a mut R,
 
+    /// is_distinct_allowed - Distinct and Orderby/Approx.. cannot be generated together among agg
+    ///                       having and 
+    /// When this variable is true, it means distinct only
+    /// When this variable is false, it means orderby and approx only. 
+    is_distinct_allowed: bool,
+    
     /// Relations bound in generated query.
     /// We might not read from all tables.
     bound_relations: Vec<Table>,
@@ -79,9 +85,12 @@ struct SqlGenerator<'a, R: Rng> {
 /// Generators
 impl<'a, R: Rng> SqlGenerator<'a, R> {
     fn new(rng: &'a mut R, tables: Vec<Table>) -> Self {
+        let is_distinct_allowed = rng.gen_bool(0.5);
+
         SqlGenerator {
             tables,
             rng,
+            is_distinct_allowed,
             bound_relations: vec![],
             bound_columns: vec![],
         }
@@ -129,7 +138,7 @@ impl<'a, R: Rng> SqlGenerator<'a, R> {
     }
 
     fn gen_order_by(&mut self) -> Vec<OrderByExpr> {
-        if self.bound_columns.is_empty() {
+        if self.bound_columns.is_empty() || !self.is_distinct_allowed {
             return vec![];
         }
         let mut order_by = vec![];
