@@ -131,7 +131,7 @@ where
     T: Ord,
 {
     let ord = match (lhs, rhs) {
-        (Some(l), Some(r)) => l.cmp(&r),
+        (Some(l), Some(r)) => l.cmp(r),
         (None, None) => Ordering::Equal,
         // TODO(yuchao): `null first` / `null last` is not supported yet.
         // To be consistent with memcomparable (#116) encoding, `null` is treated as less than any
@@ -271,8 +271,8 @@ mod tests {
         let v21 = Some(ScalarImpl::Utf8("hell".to_string()));
         let v22 = Some(ScalarImpl::Float32(3.0.into()));
 
-        let row1 = Row::new(vec![v10.clone(), v11.clone(), v12.clone()]);
-        let row2 = Row::new(vec![v20.clone(), v21.clone(), v22.clone()]);
+        let row1 = Row::new(vec![v10, v11, v12]);
+        let row2 = Row::new(vec![v20, v21, v22]);
         let order_pairs = vec![
             OrderPair::new(0, OrderType::Ascending),
             OrderPair::new(1, OrderType::Descending),
@@ -297,10 +297,10 @@ mod tests {
         let v21 = Some(ScalarImpl::Utf8("hell".to_string()));
         let v22 = Some(ScalarImpl::Float32(3.0.into()));
 
-        let row1 = Row::new(vec![v10.clone(), v11.clone(), v12.clone()]);
-        let row2 = Row::new(vec![v20.clone(), v21.clone(), v22.clone()]);
+        let row1 = Row::new(vec![v10, v11, v12]);
+        let row2 = Row::new(vec![v20, v21, v22]);
         let chunk = DataChunk::from_rows(
-            &[row1.clone(), row2.clone()],
+            &[row1, row2],
             &[DataType::Int32, DataType::Varchar, DataType::Float32],
         )
         .unwrap();

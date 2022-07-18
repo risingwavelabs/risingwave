@@ -92,14 +92,16 @@ mod tests {
     #[test]
     fn test_encode_row() {
         let v10 = Some(ScalarImpl::Int32(42));
+        let v10_cloned = v10.clone();
         let v11 = Some(ScalarImpl::Utf8("hello".to_string()));
+        let v11_cloned = v11.clone();
         let v12 = Some(ScalarImpl::Float32(4.0.into()));
         let v20 = Some(ScalarImpl::Int32(42));
         let v21 = Some(ScalarImpl::Utf8("hell".to_string()));
         let v22 = Some(ScalarImpl::Float32(3.0.into()));
 
-        let row1 = Row::new(vec![v10.clone(), v11.clone(), v12.clone()]);
-        let row2 = Row::new(vec![v20.clone(), v21.clone(), v22.clone()]);
+        let row1 = Row::new(vec![v10, v11, v12]);
+        let row2 = Row::new(vec![v20, v21, v22]);
         let order_pairs = vec![
             OrderPair::new(0, OrderType::Ascending),
             OrderPair::new(1, OrderType::Descending),
@@ -107,12 +109,12 @@ mod tests {
 
         let encoded_row1 = encode_row(&row1, &order_pairs);
         let encoded_v10 = encode_value(
-            v10.as_ref().map(|x| x.as_scalar_ref_impl()),
+            v10_cloned.as_ref().map(|x| x.as_scalar_ref_impl()),
             &OrderType::Ascending,
         )
         .unwrap();
         let encoded_v11 = encode_value(
-            v11.as_ref().map(|x| x.as_scalar_ref_impl()),
+            v11_cloned.as_ref().map(|x| x.as_scalar_ref_impl()),
             &OrderType::Descending,
         )
         .unwrap();
@@ -135,8 +137,8 @@ mod tests {
         let v21 = Some(ScalarImpl::Utf8("hell".to_string()));
         let v22 = Some(ScalarImpl::Float32(3.0.into()));
 
-        let row1 = Row::new(vec![v10.clone(), v11.clone(), v12.clone()]);
-        let row2 = Row::new(vec![v20.clone(), v21.clone(), v22.clone()]);
+        let row1 = Row::new(vec![v10, v11, v12]);
+        let row2 = Row::new(vec![v20, v21, v22]);
         let chunk = DataChunk::from_rows(
             &[row1.clone(), row2.clone()],
             &[DataType::Int32, DataType::Varchar, DataType::Float32],
