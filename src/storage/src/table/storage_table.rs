@@ -37,9 +37,7 @@ use risingwave_hummock_sdk::key::{end_bound_of_prefix, next_key, prefixed_range,
 use super::mem_table::RowOp;
 use super::{Distribution, TableIter};
 use crate::encoding::cell_based_encoding_util::{serialize_pk, serialize_pk_and_column_id};
-use crate::encoding::cell_based_row_deserializer::{
-    CellBasedRowDeserializer, GeneralCellBasedRowDeserializer,
-};
+use crate::encoding::cell_based_row_deserializer::GeneralCellBasedRowDeserializer;
 use crate::encoding::cell_based_row_serializer::CellBasedRowSerializer;
 use crate::encoding::dedup_pk_cell_based_row_serializer::DedupPkCellBasedRowSerializer;
 use crate::encoding::{ColumnDescMapping, Decoding, Encoding, Exchanger};
@@ -345,7 +343,8 @@ impl<S: StateStore, E: Exchanger, const T: AccessType> StorageTableBase<S, E, T>
             return Ok(None);
         };
 
-        let mut deserializer = CellBasedRowDeserializer::new(self.mapping.clone());
+        let data_types = self.schema().data_types();
+        let mut deserializer = E::create_deserializer(self.mapping.clone(), data_types);
         for column_id in self.column_ids() {
             let key = serialize_pk_and_column_id(&serialized_pk, column_id).map_err(err)?;
             if let Some(value) = self.keyspace.get(&key, epoch).await? {
@@ -371,7 +370,8 @@ impl<S: StateStore, E: Exchanger, const T: AccessType> StorageTableBase<S, E, T>
             .scan_with_range(key_range, None, epoch)
             .await?;
 
-        let mut deserializer = CellBasedRowDeserializer::new(self.mapping.clone());
+        let data_types = self.schema().data_types();
+        let mut deserializer = E::create_deserializer(self.mapping.clone(), data_types);
         for (key, value) in kv_pairs {
             deserializer.deserialize(&key, &value).map_err(err)?;
         }
