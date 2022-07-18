@@ -34,7 +34,7 @@ use super::Distribution;
 use crate::encoding::cell_based_encoding_util::serialize_pk;
 use crate::encoding::cell_based_row_serializer::CellBasedRowSerializer;
 use crate::encoding::dedup_pk_cell_based_row_serializer::DedupPkCellBasedRowSerializer;
-use crate::encoding::Exchanger;
+use crate::encoding::RowSerde;
 use crate::error::{StorageError, StorageResult};
 use crate::StateStore;
 
@@ -48,7 +48,7 @@ pub type StateTable<S> = StateTableBase<S, CellBasedRowSerializer>;
 /// `StateTableBase` is the interface accessing relational data in KV(`StateStore`) with
 /// encoding, using `RowSerializer` for row to cell serializing.
 #[derive(Clone)]
-pub struct StateTableBase<S: StateStore, E: Exchanger> {
+pub struct StateTableBase<S: StateStore, E: RowSerde> {
     /// buffer row operations.
     mem_table: MemTable,
 
@@ -56,7 +56,7 @@ pub struct StateTableBase<S: StateStore, E: Exchanger> {
     storage_table: StorageTableBase<S, E, READ_WRITE>,
 }
 
-impl<S: StateStore, E: Exchanger> StateTableBase<S, E> {
+impl<S: StateStore, E: RowSerde> StateTableBase<S, E> {
     /// Create a state table without distribution, used for singleton executors and unit tests.
     pub fn new_without_distribution(
         store: S,

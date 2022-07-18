@@ -88,11 +88,12 @@ pub trait Decoding {
     fn take(&mut self) -> Option<(VirtualNode, Vec<u8>, Row)>;
 }
 
-/// `Exchanger` provides the ability to convert between Row and KV entry.
-pub trait Exchanger: Send + Sync + Clone {
+/// `RowSerde` provides the ability to convert between Row and KV entry.
+pub trait RowSerde: Send + Sync + Clone {
     type Serializer: Encoding;
     type Deserializer: Decoding;
 
+    /// `create_serializer` will create a row serializer to convert row into KV pairs.
     fn create_serializer(
         pk_indices: &[usize],
         column_descs: &[ColumnDesc],
@@ -100,6 +101,8 @@ pub trait Exchanger: Send + Sync + Clone {
     ) -> Self::Serializer {
         Encoding::create_row_serializer(pk_indices, column_descs, column_ids)
     }
+
+    /// `create_deserializer` will create a row deserializer to convert KV pairs into row.
     fn create_deserializer(
         column_mapping: Arc<ColumnDescMapping>,
         data_types: Vec<DataType>,

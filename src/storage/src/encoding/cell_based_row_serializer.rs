@@ -20,7 +20,7 @@ use risingwave_common::types::VirtualNode;
 
 use super::cell_based_encoding_util::serialize_pk_and_row;
 use super::cell_based_row_deserializer::CellBasedRowDeserializer;
-use super::Exchanger;
+use super::RowSerde;
 use crate::encoding::{Encoding, KeyBytes, ValueBytes};
 
 #[derive(Clone)]
@@ -82,7 +82,7 @@ impl Encoding for CellBasedRowSerializer {
     }
 }
 
-impl Exchanger for CellBasedRowSerializer {
+impl RowSerde for CellBasedRowSerializer {
     type Deserializer = CellBasedRowDeserializer;
     type Serializer = CellBasedRowSerializer;
 

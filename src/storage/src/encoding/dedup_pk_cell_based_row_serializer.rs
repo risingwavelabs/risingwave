@@ -22,7 +22,7 @@ use risingwave_common::types::VirtualNode;
 
 use super::cell_based_row_deserializer::CellBasedRowDeserializer;
 use super::cell_based_row_serializer::CellBasedRowSerializer;
-use super::{Encoding, Exchanger, KeyBytes, ValueBytes};
+use super::{Encoding, KeyBytes, RowSerde, ValueBytes};
 #[derive(Clone)]
 /// [`DedupPkCellBasedRowSerializer`] is identical to [`CellBasedRowSerializer`].
 /// Difference is that before serializing a row, pk datums are filtered out.
@@ -122,7 +122,7 @@ impl Encoding for DedupPkCellBasedRowSerializer {
     }
 }
 
-impl Exchanger for DedupPkCellBasedRowSerializer {
+impl RowSerde for DedupPkCellBasedRowSerializer {
     type Deserializer = CellBasedRowDeserializer;
     type Serializer = DedupPkCellBasedRowSerializer;
 

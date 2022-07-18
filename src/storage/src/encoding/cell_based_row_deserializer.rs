@@ -24,7 +24,7 @@ use risingwave_common::util::value_encoding::deserialize_cell;
 
 use super::cell_based_encoding_util::deserialize_column_id;
 use super::cell_based_row_serializer::CellBasedRowSerializer;
-use super::{Decoding, Exchanger};
+use super::{Decoding, RowSerde};
 use crate::encoding::ColumnDescMapping;
 use crate::table::storage_table::DEFAULT_VNODE;
 
@@ -207,7 +207,7 @@ impl Decoding for CellBasedRowDeserializer {
     }
 }
 
-impl Exchanger for CellBasedRowDeserializer {
+impl RowSerde for CellBasedRowDeserializer {
     type Deserializer = CellBasedRowDeserializer;
     type Serializer = CellBasedRowSerializer;
 }
