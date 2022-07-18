@@ -64,6 +64,7 @@ fn make_sum_aggcall(idx: i32) -> AggCall {
             ..Default::default()
         }),
         distinct: false,
+        order_by_fields: vec![],
         filter: None,
     }
 }
