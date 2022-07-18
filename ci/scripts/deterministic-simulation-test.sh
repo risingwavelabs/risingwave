@@ -9,7 +9,7 @@ echo "+++ Running deterministic simulation test"
 echo "$(tput setaf 3)This test won't compile because madsim doesn't support tokio::net yet. Tracking issue: https://github.com/singularity-data/risingwave/issues/3467$(tput sgr0)"
 
 echo "--- Generate RiseDev CI config"
-cp risedev-components.ci.env risedev-components.user.env
+cp ci/risedev-components.ci.env risedev-components.user.env
 
 echo "--- Run unit tests in deterministic simulation mode"
 cargo make stest \
