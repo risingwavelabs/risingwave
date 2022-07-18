@@ -39,6 +39,8 @@ echo "--- Prepare RiseDev playground"
 cargo make pre-start-playground
 cargo make link-all-in-one-binaries
 
+export RW_WORKER_THREADS=4
+
 echo "--- e2e, ci-3cn-1fe, streaming"
 cargo make ci-start ci-3cn-1fe
 timeout 5m sqllogictest -p 4566 -d dev './e2e_test/streaming/**/*.slt' --junit "streaming-${profile}"
