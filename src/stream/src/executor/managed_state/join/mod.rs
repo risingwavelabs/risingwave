@@ -117,11 +117,23 @@ type JoinHashMapInner<K> =
 pub type JoinCachePolicyPrimitive = u8;
 #[allow(non_snake_case, non_upper_case_globals)]
 pub mod JoinCachePolicy {
+    use risingwave_common::bail;
+
     use super::JoinCachePolicyPrimitive;
+    use crate::executor::error::StreamExecutorResult;
+
     /// Populate the cache when read a join key
     pub const OnRead: JoinCachePolicyPrimitive = 0;
     /// Populate the cache when read or write a join key
     pub const OnReadWrite: JoinCachePolicyPrimitive = 1;
+
+    pub fn from_prost(policy_prost: &str) -> StreamExecutorResult<JoinCachePolicyPrimitive> {
+        match policy_prost {
+            "OnRead" => Ok(OnRead),
+            "OnReadWrite" => Ok(OnReadWrite),
+            policy => bail!("Hash join cache policy {} not implemented", policy),
+        }
+    }
 }
 
 pub struct JoinHashMapMetrics {
@@ -194,6 +206,7 @@ impl<K: HashKey, S: StateStore> JoinHashMap<K, S> {
         metrics: Arc<StreamingMetrics>,
         actor_id: u64,
         side: &'static str,
+        cache_policy: JoinCachePolicyPrimitive,
     ) -> Self {
         let join_key_data_types = join_key_indices
             .iter()
@@ -215,7 +228,7 @@ impl<K: HashKey, S: StateStore> JoinHashMap<K, S> {
             current_epoch: 0,
             state_table,
             alloc,
-            cache_policy: JoinCachePolicy::OnReadWrite,
+            cache_policy,
             metrics: JoinHashMapMetrics::new(metrics, actor_id, side),
         }
     }
@@ -321,21 +334,25 @@ impl<K: HashKey, S: StateStore> JoinHashMap<K, S> {
     }
 
     /// Insert a key
-    pub async fn insert(&mut self, join_key: &K, pk: Row, value: JoinRow) -> StreamExecutorResult<()> {
+    pub async fn insert(
+        &mut self,
+        join_key: &K,
+        pk: Row,
+        value: JoinRow,
+    ) -> StreamExecutorResult<()> {
         match self.cache_policy {
             JoinCachePolicy::OnRead => {
                 if let Some(entry) = self.inner.get_mut(join_key) {
                     entry.insert(pk, value.clone());
                 }
-            },
+            }
             JoinCachePolicy::OnReadWrite => {
                 let mut state = self.fetch_cached_state(join_key).await?;
                 state.insert(pk, value.clone());
                 self.inner.put(join_key.clone(), state);
-            },
-            _ => bail!("Hash join cache policy not implemented")
+            }
+            _ => bail!("Hash join cache policy not implemented"),
         };
-        
 
         // If no cache maintained, only update the flush buffer.
         self.state_table.insert(value.into_row())?;

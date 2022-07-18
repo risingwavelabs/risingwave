@@ -17,8 +17,8 @@
 use std::fmt::Formatter;
 use std::str::FromStr;
 
-use super::{ConfigEntry, CONFIG_KEYS, QUERY_MODE};
-use crate::error::ErrorCode::InvalidConfigValue;
+use super::{ConfigEntry, CONFIG_KEYS, QUERY_MODE, STREAMING_HASH_JOIN_CACHE_POLICY};
+use crate::error::ErrorCode::{self, InvalidConfigValue};
 use crate::error::RwError;
 
 #[derive(Copy, Default, Debug, Clone, PartialEq, Eq)]
@@ -61,6 +61,55 @@ impl std::fmt::Display for QueryMode {
     }
 }
 
+#[derive(Copy, Default, Debug, Clone, PartialEq, Eq)]
+pub enum StreamingHashJoinCachePolicy {
+    #[default]
+    OnRead,
+
+    OnReadWrite,
+}
+
+impl ConfigEntry for StreamingHashJoinCachePolicy {
+    fn entry_name() -> &'static str {
+        CONFIG_KEYS[STREAMING_HASH_JOIN_CACHE_POLICY]
+    }
+}
+
+impl FromStr for StreamingHashJoinCachePolicy {
+    type Err = RwError;
+
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
+        match s.to_ascii_lowercase().as_str() {
+            "onread" => Ok(Self::OnRead),
+            "onreadwrite" => Ok(Self::OnReadWrite),
+            policy => Err(ErrorCode::InvalidConfigValue {
+                config_entry: Self::entry_name().to_string(),
+                config_value: policy.to_string(),
+            }
+            .into()),
+        }
+    }
+}
+
+impl std::fmt::Display for StreamingHashJoinCachePolicy {
+    fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::OnRead => write!(f, "OnRead"),
+            Self::OnReadWrite => write!(f, "OnReadWrite"),
+        }
+    }
+}
+
+impl StreamingHashJoinCachePolicy {
+    pub fn to_prost(&self) -> String {
+        self.to_string()
+    }
+
+    pub fn from_prost(s: &str) -> Result<Self, RwError> {
+        Self::from_str(s)
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -78,5 +127,26 @@ mod tests {
             QueryMode::Distributed
         );
         assert!("ab".parse::<QueryMode>().is_err());
+    }
+
+    #[test]
+    fn parse_cache_policy() {
+        assert_eq!(
+            "OnRead".parse::<StreamingHashJoinCachePolicy>().unwrap(),
+            StreamingHashJoinCachePolicy::OnRead
+        );
+        assert_eq!(
+            "onReadwrite"
+                .parse::<StreamingHashJoinCachePolicy>()
+                .unwrap(),
+            StreamingHashJoinCachePolicy::OnReadWrite
+        );
+        assert_eq!(StreamingHashJoinCachePolicy::OnRead.to_string(), "OnRead");
+        assert_eq!(
+            StreamingHashJoinCachePolicy::OnReadWrite.to_string(),
+            "OnReadWrite"
+        );
+
+        assert!("ab".parse::<StreamingHashJoinCachePolicy>().is_err());
     }
 }
