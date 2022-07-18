@@ -80,6 +80,9 @@ impl SplitEnumerator for PulsarSplitEnumerator {
         let offset = self.start_offset.clone();
         // MessageId is only used when recovering from a State
         assert!(!matches!(offset, PulsarEnumeratorOffset::MessageId(_)));
+
+        let topic_metadata = self.admin_client.get_topic_metadata(&self.topic).await?;
+
         match self.topic.partition_index {
             // partitioned topic
             None => self
@@ -129,6 +132,10 @@ mod test {
     use crate::source::pulsar::{PulsarEnumeratorOffset, PulsarProperties, PulsarSplitEnumerator};
     use crate::source::SplitEnumerator;
 
+    async fn empty_mock_server() -> MockServer {
+        MockServer::start().await
+    }
+
     async fn mock_server(web_path: &str, body: &str) -> MockServer {
         let mock_server = MockServer::start().await;
         use wiremock::matchers::{method, path};
@@ -144,6 +151,32 @@ mod test {
             .await;
 
         mock_server
+    }
+
+    #[tokio::test]
+    async fn test_list_splits_on_no_existing_pulsar() {
+        let prop = PulsarProperties {
+            topic: "t".to_string(),
+            admin_url: "http://test_illegal_url:8000".to_string(),
+            scan_startup_mode: Some("earliest".to_string()),
+            ..Default::default()
+        };
+        let mut enumerator = PulsarSplitEnumerator::new(prop).await.unwrap();
+        assert!(enumerator.list_splits().await.is_err());
+    }
+
+    #[tokio::test]
+    async fn test_list_on_no_existing_topic() {
+        let server = empty_mock_server().await;
+
+        let prop = PulsarProperties {
+            topic: "t".to_string(),
+            admin_url: server.uri(),
+            scan_startup_mode: Some("earliest".to_string()),
+            ..Default::default()
+        };
+        let mut enumerator = PulsarSplitEnumerator::new(prop).await.unwrap();
+        assert!(enumerator.list_splits().await.is_err());
     }
 
     #[tokio::test]
