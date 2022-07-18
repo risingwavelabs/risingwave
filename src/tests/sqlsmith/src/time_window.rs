@@ -17,7 +17,7 @@ use rand::prelude::SliceRandom;
 use rand::Rng;
 use risingwave_frontend::expr::DataTypeName;
 use risingwave_sqlparser::ast::{
-    FunctionArg, FunctionArgExpr, ObjectName, TableAlias, TableFactor, TableWithJoins,
+    DataType, FunctionArg, FunctionArgExpr, ObjectName, TableAlias, TableFactor, TableWithJoins,
 };
 
 use crate::{Column, Expr, SqlGenerator, Table};
@@ -26,8 +26,8 @@ impl<'a, R: Rng> SqlGenerator<'a, R> {
     /// Generates time window functions.
     pub(crate) fn gen_time_window_func(&mut self) -> TableWithJoins {
         match self.flip_coin() {
-            _ => self.gen_hop(),
-            // _ => self.gen_tumble(),
+            true => self.gen_hop(),
+            false => self.gen_tumble(),
         }
     }
 
@@ -71,7 +71,10 @@ impl<'a, R: Rng> SqlGenerator<'a, R> {
         let name = Expr::Identifier(source_table_name.as_str().into());
         // TODO: Currently only literal slide/size expr supported.
         // Tracked in: <https://github.com/singularity-data/risingwave/issues/3896>
-        let slide = self.gen_simple_scalar(DataTypeName::Interval);
+        let slide = Expr::TypedString {
+            data_type: DataType::Interval,
+            value: "1".to_string(),
+        };
         let size = self.gen_simple_scalar(DataTypeName::Interval);
         let time_col = Expr::Identifier(time_col.name.as_str().into());
         let args = create_args(vec![name, time_col, slide, size]);
