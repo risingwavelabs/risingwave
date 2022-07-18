@@ -380,8 +380,6 @@ impl<S: StateStore> Executor for DynamicFilterExecutor<S> {
     }
 }
 
-// TODO: unit tests - test each comparator. With inserts and deletes. With updates on RHS.
-
 #[cfg(test)]
 mod tests {
     // TODO: create cond - for each of 4 types
