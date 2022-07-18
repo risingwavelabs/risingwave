@@ -21,15 +21,12 @@ use tikv_jemallocator::Jemalloc;
 static GLOBAL: Jemalloc = Jemalloc;
 
 #[cfg_attr(coverage, no_coverage)]
-#[tokio::main]
-async fn main() -> Result<()> {
+fn main() -> Result<()> {
     use clap::StructOpt;
 
     let opts = risingwave_ctl::CliOpts::parse();
 
-    risingwave_rt::oneshot_common();
     risingwave_rt::init_risingwave_logger(risingwave_rt::LoggerSettings::new_default());
-    // console_subscriber::init();a
 
-    risingwave_ctl::start(opts).await
+    risingwave_rt::main_okk(risingwave_ctl::start(opts))
 }

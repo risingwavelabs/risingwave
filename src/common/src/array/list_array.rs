@@ -349,6 +349,20 @@ pub enum ListRef<'a> {
 }
 
 impl<'a> ListRef<'a> {
+    pub fn flatten(&self) -> Vec<DatumRef<'a>> {
+        self.values_ref()
+            .into_iter()
+            .flat_map(|datum_ref| {
+                if let Some(ScalarRefImpl::List(list_ref)) = datum_ref {
+                    list_ref.flatten()
+                } else {
+                    vec![datum_ref]
+                }
+                .into_iter()
+            })
+            .collect()
+    }
+
     pub fn values_ref(&self) -> Vec<DatumRef<'a>> {
         match self {
             ListRef::Indexed { arr, idx } => (arr.offsets[*idx]..arr.offsets[*idx + 1])

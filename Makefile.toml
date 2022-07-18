@@ -278,6 +278,19 @@ dependencies = [
   "prepare-config",
 ]
 
+[tasks.pre-start-benchmark]
+category = "RiseDev - Prepare"
+description = "Download necessary tools to deploy a benchmark env"
+dependencies = [
+  "download-minio",
+  "download-mcli",
+  "download-etcd",
+  "download-grafana",
+  "download-prometheus",
+  "download-jaeger",
+  "download-kafka",
+]
+
 [tasks.p]
 alias = "playground"
 

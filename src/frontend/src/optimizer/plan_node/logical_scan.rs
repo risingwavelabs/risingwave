@@ -18,7 +18,7 @@ use std::rc::Rc;
 
 use fixedbitset::FixedBitSet;
 use itertools::Itertools;
-use risingwave_common::catalog::{ColumnDesc, Schema, TableDesc};
+use risingwave_common::catalog::{ColumnDesc, Field, Schema, TableDesc};
 use risingwave_common::error::{ErrorCode, Result, RwError};
 
 use super::{
@@ -29,7 +29,7 @@ use crate::catalog::ColumnId;
 use crate::expr::{CollectInputRef, ExprImpl, InputRef};
 use crate::optimizer::plan_node::{BatchSeqScan, LogicalFilter, LogicalProject};
 use crate::session::OptimizerContextRef;
-use crate::utils::{ColIndexMapping, Condition, ScanRange};
+use crate::utils::{ColIndexMapping, Condition};
 
 /// `LogicalScan` returns contents of a table or other equivalent object
 #[derive(Debug, Clone)]
@@ -75,7 +75,7 @@ impl LogicalScan {
             .map(|(op_idx, tb_idx)| {
                 let col = &table_desc.columns[*tb_idx];
                 id_to_op_idx.insert(col.column_id, op_idx);
-                col.into()
+                Field::from_with_table_name_prefix(col, &table_name)
             })
             .collect();
 
@@ -138,11 +138,38 @@ impl LogicalScan {
             .collect()
     }
 
+    pub(super) fn column_names_with_table_prefix(&self) -> Vec<String> {
+        self.output_col_idx
+            .iter()
+            .map(|i| {
+                format!(
+                    "{}.{}",
+                    self.table_name.clone(),
+                    self.table_desc.columns[*i].name
+                )
+            })
+            .collect()
+    }
+
     pub(super) fn order_names(&self) -> Vec<String> {
         self.table_desc
             .order_column_indices()
             .iter()
             .map(|&i| self.table_desc.columns[i].name.clone())
+            .collect()
+    }
+
+    pub(super) fn order_names_with_table_prefix(&self) -> Vec<String> {
+        self.table_desc
+            .order_column_indices()
+            .iter()
+            .map(|&i| {
+                format!(
+                    "{}.{}",
+                    self.table_name.clone(),
+                    self.table_desc.columns[i].name
+                )
+            })
             .collect()
     }
 
@@ -350,9 +377,9 @@ impl PredicatePushdown for LogicalScan {
 impl ToBatch for LogicalScan {
     fn to_batch(&self) -> Result<PlanRef> {
         if self.predicate.always_true() {
-            Ok(BatchSeqScan::new(self.clone(), ScanRange::full_table_scan()).into())
+            Ok(BatchSeqScan::new(self.clone(), vec![]).into())
         } else {
-            let (scan_range, predicate) = self.predicate.clone().split_to_scan_range(
+            let (scan_ranges, predicate) = self.predicate.clone().split_to_scan_ranges(
                 &self.table_desc.order_column_indices(),
                 self.table_desc.columns.len(),
             );
@@ -360,7 +387,7 @@ impl ToBatch for LogicalScan {
             scan.predicate = predicate; // We want to keep `required_col_idx` unchanged, so do not call `clone_with_predicate`.
             let (scan, predicate, project_expr) = scan.predicate_pull_up();
 
-            let mut plan: PlanRef = BatchSeqScan::new(scan, scan_range).into();
+            let mut plan: PlanRef = BatchSeqScan::new(scan, scan_ranges).into();
             if !predicate.always_true() {
                 plan = BatchFilter::new(LogicalFilter::new(plan, predicate)).into();
             }

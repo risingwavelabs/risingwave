@@ -81,7 +81,7 @@ impl ChainExecutor {
         // If the barrier is a conf change of creating this mview, init snapshot from its epoch
         // and begin to consume the snapshot.
         // Otherwise, it means we've recovered and the snapshot is already consumed.
-        let to_consume_snapshot = barrier.is_to_add_output(self.actor_id);
+        let to_consume_snapshot = barrier.is_to_add_dispatcher(self.actor_id);
 
         // The first barrier message should be propagated.
         yield Message::Barrier(barrier);
@@ -135,7 +135,6 @@ impl Executor for ChainExecutor {
 
 #[cfg(test)]
 mod test {
-    use std::collections::HashMap;
     use std::default::Default;
     use std::sync::Arc;
 
@@ -144,14 +143,20 @@ mod test {
     use risingwave_common::array::StreamChunk;
     use risingwave_common::catalog::{Field, Schema};
     use risingwave_common::types::DataType;
+    use risingwave_pb::stream_plan::Dispatcher;
 
     use super::ChainExecutor;
     use crate::executor::test_utils::MockSource;
-    use crate::executor::{ActorInfo, AddOutput, Barrier, Executor, Message, Mutation, PkIndices};
+    use crate::executor::{Barrier, Executor, Message, Mutation, PkIndices};
     use crate::task::{CreateMviewProgress, LocalBarrierManager};
 
     #[tokio::test]
     async fn test_basic() {
+        let barrier_manager = LocalBarrierManager::for_test();
+        let progress =
+            CreateMviewProgress::for_test(Arc::new(parking_lot::Mutex::new(barrier_manager)));
+        let actor_id = progress.actor_id();
+
         let schema = Schema::new(vec![Field::unnamed(DataType::Int64)]);
         let first = Box::new(
             MockSource::with_chunks(
@@ -169,30 +174,19 @@ mod test {
             schema.clone(),
             PkIndices::new(),
             vec![
-                Message::Barrier(
-                    Barrier::new_test_barrier(1).with_mutation(Mutation::AddOutput(AddOutput {
-                        map: {
-                            let mut actors = HashMap::default();
-                            actors.insert(
-                                (0, 233),
-                                vec![ActorInfo {
-                                    actor_id: 0,
-                                    host: None,
-                                }],
-                            );
-                            actors
-                        },
-                        ..Default::default()
-                    })),
-                ),
+                Message::Barrier(Barrier::new_test_barrier(1).with_mutation(Mutation::Add {
+                    adds: maplit::hashmap! {
+                        0 => vec![Dispatcher {
+                            downstream_actor_id: vec![actor_id],
+                            ..Default::default()
+                        }],
+                    },
+                    splits: Default::default(),
+                })),
                 Message::Chunk(StreamChunk::from_pretty("I\n + 3")),
                 Message::Chunk(StreamChunk::from_pretty("I\n + 4")),
             ],
         ));
-
-        let barrier_manager = LocalBarrierManager::for_test();
-        let progress =
-            CreateMviewProgress::for_test(Arc::new(parking_lot::Mutex::new(barrier_manager)));
 
         let chain = ChainExecutor::new(first, second, vec![0], progress, schema);
 

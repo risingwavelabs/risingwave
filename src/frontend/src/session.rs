@@ -16,7 +16,7 @@ use std::fmt::Formatter;
 use std::io::{Error, ErrorKind};
 use std::marker::Sync;
 use std::path::PathBuf;
-use std::sync::atomic::{AtomicI32, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicI32, Ordering};
 use std::sync::Arc;
 use std::time::Duration;
 
@@ -64,6 +64,9 @@ pub struct OptimizerContext {
     pub next_id: AtomicI32,
     /// For debugging purposes, store the SQL string in Context
     pub sql: Arc<str>,
+
+    /// it indicates whether the explain mode is verbose for explain statement
+    pub explain_verbose: AtomicBool,
 }
 
 #[derive(Clone, Debug)]
@@ -92,6 +95,10 @@ impl OptimizerContextRef {
         let next_id = self.inner.next_id.fetch_add(1, Ordering::Relaxed);
         PlanNodeId(next_id)
     }
+
+    pub fn is_explain_verbose(&self) -> bool {
+        self.inner.explain_verbose.load(Ordering::Acquire)
+    }
 }
 
 impl OptimizerContext {
@@ -100,16 +107,19 @@ impl OptimizerContext {
             session_ctx,
             next_id: AtomicI32::new(0),
             sql,
+            explain_verbose: AtomicBool::new(false),
         }
     }
 
     // TODO(TaoWu): Remove the async.
     #[cfg(test)]
+    #[expect(clippy::unused_async)]
     pub async fn mock() -> OptimizerContextRef {
         Self {
             session_ctx: Arc::new(SessionImpl::mock()),
             next_id: AtomicI32::new(0),
             sql: Arc::from(""),
+            explain_verbose: AtomicBool::new(false),
         }
         .into()
     }
@@ -279,6 +289,7 @@ impl FrontendEnv {
     }
 
     /// Get a reference to the frontend env's catalog writer.
+    #[expect(clippy::explicit_auto_deref)]
     pub fn catalog_writer(&self) -> &dyn CatalogWriter {
         &*self.catalog_writer
     }
@@ -289,6 +300,7 @@ impl FrontendEnv {
     }
 
     /// Get a reference to the frontend env's user info writer.
+    #[expect(clippy::explicit_auto_deref)]
     pub fn user_info_writer(&self) -> &dyn UserInfoWriter {
         &*self.user_info_writer
     }
@@ -298,6 +310,7 @@ impl FrontendEnv {
         &self.user_info_reader
     }
 
+    #[expect(clippy::explicit_auto_deref)]
     pub fn worker_node_manager(&self) -> &WorkerNodeManager {
         &*self.worker_node_manager
     }
@@ -306,6 +319,7 @@ impl FrontendEnv {
         self.worker_node_manager.clone()
     }
 
+    #[expect(clippy::explicit_auto_deref)]
     pub fn meta_client(&self) -> &dyn FrontendMetaClient {
         &*self.meta_client
     }

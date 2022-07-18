@@ -72,6 +72,7 @@ impl Catalog {
         let name = db.name.clone();
         let id = db.id;
 
+        #[expect(clippy::needless_borrow)]
         self.database_by_name
             .try_insert(name.clone(), (&db).into())
             .unwrap();
@@ -135,6 +136,14 @@ impl Catalog {
             .get_schema_mut(schema_id)
             .unwrap()
             .drop_table(tb_id);
+    }
+
+    pub fn update_table(&mut self, proto: &ProstTable) {
+        self.get_database_mut(proto.database_id)
+            .unwrap()
+            .get_schema_mut(proto.schema_id)
+            .unwrap()
+            .update_table(proto);
     }
 
     pub fn drop_source(&mut self, db_id: DatabaseId, schema_id: SchemaId, source_id: SourceId) {

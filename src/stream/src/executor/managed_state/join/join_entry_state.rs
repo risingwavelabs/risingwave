@@ -16,10 +16,13 @@ use madsim::collections::{btree_map, BTreeMap};
 
 use super::*;
 
+#[allow(dead_code)]
 type JoinEntryStateIter<'a> = btree_map::Iter<'a, PkType, StateValueType>;
 
+#[allow(dead_code)]
 type JoinEntryStateValues<'a> = btree_map::Values<'a, PkType, StateValueType>;
 
+#[allow(dead_code)]
 type JoinEntryStateValuesMut<'a> = btree_map::ValuesMut<'a, PkType, StateValueType>;
 
 /// We manages a `BTreeMap` in memory for all entries belonging to a join key.

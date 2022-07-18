@@ -20,6 +20,7 @@ use risingwave_pb::stream_plan::stream_node::NodeBody as ProstStreamNode;
 
 use super::logical_agg::PlanAggCall;
 use super::{LogicalAgg, PlanBase, PlanRef, PlanTreeNodeUnary, ToStreamProst};
+use crate::optimizer::plan_node::PlanAggCallVerboseDisplay;
 use crate::optimizer::property::RequiredDist;
 
 #[derive(Debug, Clone)]
@@ -53,12 +54,21 @@ impl StreamLocalSimpleAgg {
     pub fn agg_calls(&self) -> &[PlanAggCall] {
         self.logical.agg_calls()
     }
+
+    pub fn agg_calls_verbose_display(&self) -> Vec<PlanAggCallVerboseDisplay> {
+        self.logical.agg_calls_verbose_display()
+    }
 }
 
 impl fmt::Display for StreamLocalSimpleAgg {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        let verbose = self.base.ctx.is_explain_verbose();
         let mut builder = f.debug_struct("StreamLocalSimpleAgg");
-        builder.field("aggs", &self.agg_calls());
+        if verbose {
+            builder.field("aggs", &self.agg_calls_verbose_display());
+        } else {
+            builder.field("aggs", &self.agg_calls());
+        }
         builder.finish()
     }
 }

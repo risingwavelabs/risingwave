@@ -204,6 +204,7 @@ pub async fn handle_grant_privilege(
             return Err(ErrorCode::BindError("Grantee does not exist".to_string()).into());
         }
         if let Some(granted_by) = &granted_by {
+            // We remark that the user name is always case-sensitive.
             let user = reader.get_user_by_name(&granted_by.value);
             if user.is_none() {
                 return Err(ErrorCode::BindError("Grantor does not exist".to_string()).into());

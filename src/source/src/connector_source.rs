@@ -22,7 +22,7 @@ use madsim::collections::HashMap;
 use risingwave_common::array::StreamChunk;
 use risingwave_common::catalog::{ColumnId, TableId};
 use risingwave_common::error::{internal_error, Result, RwError, ToRwResult};
-use risingwave_connector::{
+use risingwave_connector::source::{
     Column, ConnectorProperties, ConnectorState, SourceMessage, SplitMetaData, SplitReaderImpl,
 };
 use tokio::sync::mpsc::{Receiver, Sender};

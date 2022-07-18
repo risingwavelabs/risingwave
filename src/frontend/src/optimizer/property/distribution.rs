@@ -42,7 +42,12 @@
 //!             └─────────────┘     x└────────────┘
 //!                                 x
 //!                                 x
+use std::fmt;
+use std::fmt::Debug;
+
 use fixedbitset::FixedBitSet;
+use itertools::Itertools;
+use risingwave_common::catalog::{FieldVerboseDisplay, Schema};
 use risingwave_common::error::Result;
 use risingwave_pb::batch_plan::exchange_info::{
     Distribution as DistributionProst, DistributionMode, HashInfo,
@@ -136,6 +141,69 @@ impl Distribution {
             }
             Distribution::HashShard(dists) => dists,
         }
+    }
+}
+
+impl fmt::Display for Distribution {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.write_str("[")?;
+        match self {
+            Self::Single => f.write_str("Single")?,
+            Self::SomeShard => f.write_str("SomeShard")?,
+            Self::Broadcast => f.write_str("Broadcast")?,
+            Self::HashShard(vec) => {
+                for key in vec {
+                    std::fmt::Debug::fmt(&key, f)?;
+                }
+            }
+        }
+        f.write_str("]")
+    }
+}
+
+pub struct DistributionVerboseDisplay<'a> {
+    pub distribution: &'a Distribution,
+    pub input_schema: &'a Schema,
+}
+
+impl DistributionVerboseDisplay<'_> {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        let that = self.distribution;
+        f.write_str("[")?;
+        match that {
+            Distribution::Single => f.write_str("Single")?,
+            Distribution::SomeShard => f.write_str("SomeShard")?,
+            Distribution::Broadcast => f.write_str("Broadcast")?,
+            Distribution::HashShard(vec) => {
+                for key in vec.iter().copied().with_position() {
+                    std::fmt::Debug::fmt(
+                        &FieldVerboseDisplay(
+                            self.input_schema.fields.get(key.into_inner()).unwrap(),
+                        ),
+                        f,
+                    )?;
+                    match key {
+                        itertools::Position::First(_) | itertools::Position::Middle(_) => {
+                            f.write_str(", ")?;
+                        }
+                        _ => {}
+                    }
+                }
+            }
+        }
+        f.write_str("]")
+    }
+}
+
+impl fmt::Debug for DistributionVerboseDisplay<'_> {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        self.fmt(f)
+    }
+}
+
+impl fmt::Display for DistributionVerboseDisplay<'_> {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        self.fmt(f)
     }
 }
 

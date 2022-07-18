@@ -181,7 +181,6 @@ impl SSTableIteratorType for SSTableIterator {
 
 #[cfg(test)]
 mod tests {
-    use futures::executor::block_on;
     use itertools::Itertools;
     use rand::prelude::*;
     use risingwave_hummock_sdk::key::key_with_epoch;
@@ -327,7 +326,7 @@ mod tests {
 
         let mut stats = StoreLocalStatistic::default();
         let mut sstable_iter = SSTableIterator::create(
-            block_on(sstable_store.sstable(0, &mut stats)).unwrap(),
+            sstable_store.sstable(0, &mut stats).await.unwrap(),
             sstable_store,
             Arc::new(ReadOptions { prefetch: true }),
         );

@@ -13,7 +13,7 @@
 // limitations under the License.
 use std::fmt;
 
-use risingwave_common::catalog::{DatabaseId, SchemaId};
+use risingwave_common::catalog::{DatabaseId, Schema, SchemaId};
 use risingwave_common::util::sort_util::OrderType;
 use risingwave_pb::stream_plan::stream_node::NodeBody;
 use risingwave_pb::stream_plan::DynamicFilterNode;
@@ -23,7 +23,7 @@ use crate::catalog::TableCatalog;
 use crate::expr::Expr;
 use crate::optimizer::plan_node::{PlanBase, PlanTreeNodeBinary, ToStreamProst};
 use crate::optimizer::PlanRef;
-use crate::utils::Condition;
+use crate::utils::{Condition, ConditionVerboseDisplay};
 
 #[derive(Clone, Debug)]
 pub struct StreamDynamicFilter {
@@ -59,7 +59,22 @@ impl StreamDynamicFilter {
 
 impl fmt::Display for StreamDynamicFilter {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-        write!(f, "StreamDynamicFilter {{ predicate: {} }}", self.predicate)
+        let verbose = self.base.ctx.is_explain_verbose();
+        if verbose {
+            let mut concat_schema = self.left().schema().fields.clone();
+            concat_schema.extend(self.right().schema().fields.clone());
+            let concat_schema = Schema::new(concat_schema);
+            write!(
+                f,
+                "StreamDynamicFilter {{ predicate: {} }}",
+                ConditionVerboseDisplay {
+                    condition: &self.predicate,
+                    input_schema: &concat_schema
+                }
+            )
+        } else {
+            write!(f, "StreamDynamicFilter {{ predicate: {} }}", self.predicate)
+        }
     }
 }
 
@@ -118,7 +133,7 @@ fn infer_left_internal_table_catalog(input: PlanRef, left_key_index: usize) -> T
     let mut internal_table_catalog_builder = TableCatalogBuilder::new();
 
     schema.fields().iter().for_each(|field| {
-        internal_table_catalog_builder.add_column_desc_from_field_without_order_type(field)
+        internal_table_catalog_builder.add_column(field);
     });
 
     pk_indices.iter().for_each(|idx| {
@@ -141,7 +156,7 @@ fn infer_right_internal_table_catalog(input: PlanRef) -> TableCatalog {
     let mut internal_table_catalog_builder = TableCatalogBuilder::new();
 
     schema.fields().iter().for_each(|field| {
-        internal_table_catalog_builder.add_column_desc_from_field_without_order_type(field)
+        internal_table_catalog_builder.add_column(field);
     });
 
     // No distribution keys

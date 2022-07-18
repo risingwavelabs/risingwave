@@ -251,9 +251,20 @@ message RemoveTaskResponse {
   common.Status status = 1;
 }
 
+message PauseRequest {}
+
+message PauseResponse {}
+
+message ResumeRequest {}
+
+message ResumeResponse {}
+
 service ScaleService {
   rpc ScaleTask(ScaleTaskRequest) returns (ScaleTaskResponse);
   rpc GetTaskStatus(GetTaskStatusRequest) returns (GetTaskStatusResponse);
   rpc AbortTask(AbortTaskRequest) returns (AbortTaskResponse);
   rpc RemoveTask(RemoveTaskRequest) returns (RemoveTaskResponse);
+  // TODO(Kexiang): delete them when config change interface is finished
+  rpc Pause(PauseRequest) returns (PauseResponse);
+  rpc Resume(ResumeRequest) returns (ResumeResponse);
 }

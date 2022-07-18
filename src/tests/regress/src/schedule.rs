@@ -184,21 +184,26 @@ impl Schedule {
 impl TestCase {
     async fn run(self) -> anyhow::Result<TestResult> {
         let mut command = Command::new("psql");
-        command.args([
+        let args = [
             "-X",
             "-a",
             "-q",
             "-h",
-            self.opts.host().as_str(),
+            &self.opts.host().to_string(),
             "-p",
-            format!("{}", self.opts.port()).as_str(),
+            &self.opts.port().to_string(),
             "-d",
             self.opts.database_name(),
+            "-U",
+            self.opts.pg_user_name(),
             "-v",
             "HIDE_TABLEAM=on",
             "-v",
             "HIDE_TOAST_COMPRESSION=on",
-        ]);
+        ];
+        command.args(args);
+
+        println!("Ready to run command:\npsql {}", args.join(" "));
 
         let input_path = self.file_manager.source_of(&self.test_name)?;
         let input_file = File::options()
@@ -252,28 +257,53 @@ impl TestCase {
             );
         }
 
-        let expected_output =
-            std::fs::read_to_string(&expected_output_file).with_context(|| {
-                format!(
-                    "Failed to read expected output file: {:?}",
-                    expected_output_file
-                )
-            })?;
+        let expected_output = read_lines(&expected_output_file).with_context(|| {
+            format!(
+                "Failed to read expected output file: {:?}",
+                expected_output_file
+            )
+        })?;
 
-        let actual_output = std::fs::read_to_string(&output_path)
+        let actual_output = read_lines(&output_path)
             .with_context(|| format!("Failed to read actual output file: {:?}", output_path))?;
 
         if expected_output == actual_output {
             Ok(Same)
         } else {
-            error!(
-                "Expected output of [{}] is different from actual output.\n{}",
-                self.test_name,
+            let diff_path = self.file_manager.diff_of(&self.test_name)?;
+            let mut diff_file = File::options()
+                .create_new(true)
+                .write(true)
+                .open(&diff_path)
+                .with_context(|| format!("Failed to create {:?} for writing diff.", diff_path))?;
+            use std::io::Write;
+            write!(
+                diff_file,
+                "{}",
                 format_diff(&expected_output, &actual_output)
-            );
+            )?;
             Ok(Different)
         }
     }
+}
+
+/// This function ignores the comments and empty lines. They are not compared between
+/// expected output file and actual output file.
+fn read_lines<P>(filename: P) -> std::io::Result<String>
+where
+    P: AsRef<Path>,
+{
+    let file = File::open(filename)?;
+    let lines = std::io::BufReader::new(file).lines();
+    let mut res: String = String::new();
+    for line in lines {
+        let line = line?;
+        if !line.starts_with("--") && !line.is_empty() {
+            res.push_str(&line);
+            res.push('\n');
+        }
+    }
+    Ok(res)
 }
 
 fn format_diff(expected_output: &String, actual_output: &String) -> String {

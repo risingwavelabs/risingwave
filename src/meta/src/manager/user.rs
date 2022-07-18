@@ -211,7 +211,7 @@ impl<S: MetaStore> UserManager<S> {
         );
         for nao in &new_privilege.action_with_opts {
             if let Some(o) = action_map.get_mut(&nao.action) {
-                (*o).0 |= nao.with_grant_option;
+                o.0 |= nao.with_grant_option;
             } else {
                 action_map.insert(nao.action, (nao.with_grant_option, nao.granted_by.clone()));
             }

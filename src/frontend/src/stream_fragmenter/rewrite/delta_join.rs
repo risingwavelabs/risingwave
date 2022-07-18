@@ -13,10 +13,11 @@
 // limitations under the License.
 
 use itertools::Itertools;
-use risingwave_common::catalog::{ColumnDesc, ColumnId, Field};
+use risingwave_common::catalog::{ColumnDesc, ColumnId, DatabaseId, Field, SchemaId};
 use risingwave_common::error::Result;
+use risingwave_common::try_match_expand;
 use risingwave_common::util::sort_util::{OrderPair, OrderType};
-use risingwave_pb::plan_common::{ColumnOrder, Field as ProstField};
+use risingwave_pb::plan_common::{ColumnOrder, Field as ProstField, OrderType as ProstOrderType};
 use risingwave_pb::stream_plan::lookup_node::ArrangementTableId;
 use risingwave_pb::stream_plan::stream_node::NodeBody;
 use risingwave_pb::stream_plan::{
@@ -25,6 +26,8 @@ use risingwave_pb::stream_plan::{
 };
 
 use super::super::{BuildFragmentGraphState, StreamFragment, StreamFragmentEdge, StreamFragmenter};
+use crate::catalog::TableCatalog;
+use crate::optimizer::plan_node::utils::TableCatalogBuilder;
 
 impl StreamFragmenter {
     /// All exchanges inside delta join is one-to-one exchange.
@@ -247,6 +250,23 @@ impl StreamFragmenter {
                 },
                 column_mapping: lookup_0_column_reordering,
                 arrangement_table_info: delta_join_node.left_info.clone(),
+                arrangement_table: Some(
+                    Self::infer_internal_table_catalog(
+                        delta_join_node.left_info.as_ref(),
+                        // Use Arrange node's dist key.
+                        try_match_expand!(arrange_0.get_node_body().unwrap(), NodeBody::Arrange)?
+                            .distribution_key
+                            .clone()
+                            .iter()
+                            .map(|x| *x as usize)
+                            .collect(),
+                        exchange_a0l0.append_only,
+                    )
+                    .to_prost(
+                        SchemaId::placeholder() as u32,
+                        DatabaseId::placeholder() as u32,
+                    ),
+                ),
             },
         );
         let lookup_1_column_reordering = {
@@ -276,6 +296,23 @@ impl StreamFragmenter {
                 },
                 column_mapping: lookup_1_column_reordering,
                 arrangement_table_info: delta_join_node.right_info.clone(),
+                arrangement_table: Some(
+                    Self::infer_internal_table_catalog(
+                        delta_join_node.right_info.as_ref(),
+                        // Use Arrange node's dist key.
+                        try_match_expand!(arrange_1.get_node_body().unwrap(), NodeBody::Arrange)?
+                            .distribution_key
+                            .clone()
+                            .iter()
+                            .map(|x| *x as usize)
+                            .collect(),
+                        exchange_a1l1.append_only,
+                    )
+                    .to_prost(
+                        SchemaId::placeholder() as u32,
+                        DatabaseId::placeholder() as u32,
+                    ),
+                ),
             },
         );
 
@@ -500,5 +537,26 @@ impl StreamFragmenter {
         )?;
 
         Ok(union)
+    }
+
+    fn infer_internal_table_catalog(
+        arrangement_info: Option<&ArrangementInfo>,
+        distribution_key: Vec<usize>,
+        append_only: bool,
+    ) -> TableCatalog {
+        let arrangement_info = arrangement_info.unwrap();
+        let mut internal_table_catalog_builder = TableCatalogBuilder::new();
+        for column_desc in &arrangement_info.column_descs {
+            internal_table_catalog_builder.add_column(&Field::from(&ColumnDesc::from(column_desc)));
+        }
+
+        for order in &arrangement_info.arrange_key_orders {
+            internal_table_catalog_builder.add_order_column(
+                order.index as usize,
+                OrderType::from_prost(&ProstOrderType::from_i32(order.order_type).unwrap()),
+            );
+        }
+
+        internal_table_catalog_builder.build(distribution_key, append_only)
     }
 }
