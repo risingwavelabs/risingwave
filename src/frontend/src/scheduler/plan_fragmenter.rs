@@ -19,6 +19,7 @@ use std::sync::Arc;
 use risingwave_common::buffer::{Bitmap, BitmapBuilder};
 use risingwave_common::catalog::TableDesc;
 use risingwave_common::types::ParallelUnitId;
+use risingwave_common::util::scan_range::ScanRange;
 use risingwave_pb::batch_plan::plan_node::NodeBody;
 use risingwave_pb::batch_plan::{ExchangeInfo, ScanRange as ScanRangeProto};
 use risingwave_pb::common::Buffer;
@@ -30,7 +31,6 @@ use crate::optimizer::property::Distribution;
 use crate::optimizer::PlanRef;
 use crate::scheduler::worker_node_manager::WorkerNodeManagerRef;
 use crate::scheduler::SchedulerResult;
-use crate::utils::ScanRange;
 
 #[derive(Clone, Debug, Hash, Eq, PartialEq)]
 pub struct QueryId {
