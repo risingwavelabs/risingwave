@@ -1715,6 +1715,15 @@ dependencies = [
 ]
 
 [[package]]
+name = "float_extras"
+version = "0.1.6"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "b22b70f8649ea2315955f1a36d964b0e4da482dfaa5f0d04df0d1fb7c338ab7a"
+dependencies = [
+ "libc",
+]
+
+[[package]]
 name = "fnv"
 version = "1.0.7"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -3794,6 +3803,16 @@ dependencies = [
 ]
 
 [[package]]
+name = "quantogram"
+version = "0.4.4"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "77d61f6f89661d840abdcae69a8b2d9c8ce20e9e7dd2c52a78ab4377b435b343"
+dependencies = [
+ "float_extras",
+ "skiplist",
+]
+
+[[package]]
 name = "quick-xml"
 version = "0.23.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -4130,6 +4149,7 @@ dependencies = [
  "moka",
  "nix",
  "prometheus",
+ "quantogram",
  "rand 0.8.5",
  "risingwave_common",
  "risingwave_hummock_sdk",
@@ -5338,6 +5358,15 @@ dependencies = [
  "pulldown-cmark",
  "tempfile",
  "walkdir",
+]
+
+[[package]]
+name = "skiplist"
+version = "0.4.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "fa37347a2b4609765d113afe55f16636ccd42dadc1ad0d29030908d1bac4c95b"
+dependencies = [
+ "rand 0.8.5",
 ]
 
 [[package]]

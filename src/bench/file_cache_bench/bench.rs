@@ -19,7 +19,6 @@ use std::time::{Duration, Instant};
 use bytes::{Buf, BufMut};
 use clap::Parser;
 use itertools::Itertools;
-use rand::prelude::SliceRandom;
 use rand::{Rng, SeedableRng};
 use risingwave_storage::hummock::file_cache::cache::{FileCache, FileCacheOptions};
 use risingwave_storage::hummock::file_cache::coding::CacheKey;
@@ -47,12 +46,12 @@ struct Args {
     throughput: usize,
     #[clap(long, default_value = "600")] // 600s
     time: u64,
-    #[clap(long, default_value = "2")]
+    #[clap(long, default_value = "1")]
     read: usize,
     #[clap(long, default_value = "1")]
     write: usize,
-    #[clap(long, default_value = "0.5")]
-    miss: f64,
+    #[clap(long, default_value = "10000")]
+    look_up_range: u32,
 
     #[clap(long, default_value = "1")] // (s)
     report_interval: u64,
@@ -179,11 +178,6 @@ async fn bench(
     let sst = id as u32;
     let mut idx = 0;
 
-    let nkey = Index {
-        sst: u32::MAX,
-        idx: u32::MAX,
-    };
-
     loop {
         match stop.try_recv() {
             Err(oneshot::error::TryRecvError::Empty) => {}
@@ -193,26 +187,24 @@ async fn bench(
             return;
         }
 
-        let mut keys = Vec::with_capacity(args.write);
         for _ in 0..args.write {
             idx += 1;
             let key = Index { sst, idx };
             let value = vec![b'x'; args.bs];
-            cache.insert(key.clone(), value).unwrap();
-            keys.push(key);
 
-            metrics.foreground_write_ios.fetch_add(1, Ordering::Relaxed);
-            metrics
-                .foreground_write_bytes
-                .fetch_add(args.bs, Ordering::Relaxed);
+            cache.insert(key, value).unwrap();
+
+            metrics.insert_ios.fetch_add(1, Ordering::Relaxed);
+            metrics.insert_bytes.fetch_add(args.bs, Ordering::Relaxed);
         }
         for _ in 0..args.read {
-            let key = if rng.gen_range(0f64..1f64) < args.miss {
-                &nkey
-            } else {
-                keys.choose(&mut rng).unwrap()
+            let key = Index {
+                sst,
+                idx: rng.gen_range(
+                    std::cmp::max(idx, args.look_up_range + 1) - args.look_up_range..=idx,
+                ),
             };
-            cache.get(key).await.unwrap();
+            cache.get(&key).await.unwrap();
         }
 
         tokio::task::yield_now().await;
