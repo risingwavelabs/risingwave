@@ -119,13 +119,15 @@ mod tests {
                  def
                  abc
                  .",
-            ).with_invisible_holes(),
+            )
+            .with_invisible_holes(),
             DataChunk::from_pretty(
                 "T
                 abc
                 a
                 .",
-            ).with_invisible_holes(),
+            )
+            .with_invisible_holes(),
         ];
 
         let expected = vec![
