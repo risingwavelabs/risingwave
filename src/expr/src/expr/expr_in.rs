@@ -47,7 +47,7 @@ impl InExpression {
         }
     }
 
-    // Returns true if datum exists in set, unknown if datum is null or datum does not exist in set
+    // Returns true if datum exists in set, null if datum is null or datum does not exist in set
     // but null does, and false if neither datum nor null exists in set.
     fn exists(&self, datum: &Datum) -> Option<bool> {
         if datum.is_none() {
