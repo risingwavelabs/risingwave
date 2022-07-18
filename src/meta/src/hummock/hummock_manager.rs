@@ -1259,11 +1259,20 @@ where
         }
 
         let mut trx = Transaction::default();
-        for (_, version_delta_item) in version_deltas_to_delete {
+        for version_delta_item in version_deltas_to_delete.values() {
             version_delta_item.delete_in_transaction(&mut trx)?;
         }
-        self.commit_trx(self.env.meta_store(), trx, None, self.env.get_leader_info())
-            .await?;
+        let ret = self
+            .commit_trx(self.env.meta_store(), trx, None, self.env.get_leader_info())
+            .await;
+
+        if ret.is_err() {
+            let mut versioning_guard = write_lock!(self, versioning).await;
+            versioning_guard
+                .hummock_version_deltas
+                .append(&mut version_deltas_to_delete);
+            return Err(ret.unwrap_err().into());
+        }
 
         Ok(())
     }
@@ -1366,7 +1375,11 @@ where
                 );
             }
         }
-        commit_multi_var!(self, None, hummock_versions, stale_sstables)?;
+        // We do not call `commit_multi_var!(hummock_versions)` because meta store does not store
+        // multiple `HummockVersion`s. Currently only memory stores multiple `HummockVersion`s, so
+        // we only need to commit in memory.
+        commit_multi_var!(self, None, stale_sstables)?;
+        hummock_versions.commit();
 
         #[cfg(test)]
         {
