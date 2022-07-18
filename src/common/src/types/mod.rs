@@ -101,6 +101,7 @@ const DECIMAL_DEFAULT_PRECISION: u32 = 20;
 const DECIMAL_DEFAULT_SCALE: u32 = 6;
 
 impl From<&ProstDataType> for DataType {
+    #[expect(clippy::needless_borrow)]
     fn from(proto: &ProstDataType) -> DataType {
         match proto.get_type_name().expect("missing type field") {
             TypeName::Int16 => DataType::Int16,
@@ -124,7 +125,6 @@ impl From<&ProstDataType> for DataType {
             }
             TypeName::List => DataType::List {
                 // The first (and only) item is the list element type.
-                #[expect(clippy::needless_borrow)]
                 datatype: Box::new((&proto.field_type[0]).into()),
             },
         }
