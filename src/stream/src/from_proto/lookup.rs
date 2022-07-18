@@ -14,9 +14,9 @@
 
 use std::sync::Arc;
 
-use risingwave_common::catalog::{ColumnDesc, Field, Schema, TableId};
+use risingwave_common::catalog::{ColumnDesc, Field, Schema};
 use risingwave_common::util::sort_util::OrderPair;
-use risingwave_pb::stream_plan::lookup_node::ArrangementTableId;
+use risingwave_storage::table::state_table::StateTable;
 
 use super::*;
 use crate::executor::{LookupExecutor, LookupExecutorParams};
@@ -42,24 +42,22 @@ impl ExecutorBuilder for LookupExecutorBuilder {
             .map(OrderPair::from_prost)
             .collect();
 
-        let arrangement_table_id = match lookup.arrangement_table_id.as_ref().unwrap() {
-            ArrangementTableId::IndexId(x) => *x,
-            ArrangementTableId::TableId(x) => *x,
-        };
-
         let arrangement_col_descs = lookup
             .get_arrangement_table_info()?
             .column_descs
             .iter()
             .map(ColumnDesc::from)
             .collect();
+        let state_table = StateTable::from_table_catalog(
+            lookup.arrangement_table.as_ref().unwrap(),
+            store,
+            params.vnode_bitmap.map(Arc::new),
+        );
 
         Ok(Box::new(LookupExecutor::new(LookupExecutorParams {
             schema: Schema::new(node.fields.iter().map(Field::from).collect()),
             arrangement,
             stream,
-            arrangement_store: store,
-            arrangement_table_id: TableId::from(arrangement_table_id),
             arrangement_col_descs,
             arrangement_order_rules,
             pk_indices: params.pk_indices,
@@ -67,7 +65,7 @@ impl ExecutorBuilder for LookupExecutorBuilder {
             stream_join_key_indices: lookup.stream_key.iter().map(|x| *x as usize).collect(),
             arrange_join_key_indices: lookup.arrange_key.iter().map(|x| *x as usize).collect(),
             column_mapping: lookup.column_mapping.iter().map(|x| *x as usize).collect(),
-            vnode_bitmap: params.vnode_bitmap.map(Arc::new),
+            state_table,
         })))
     }
 }

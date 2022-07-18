@@ -146,6 +146,7 @@ impl FrontendObserverNode {
                 Operation::Delete => {
                     catalog_guard.drop_table(table.database_id, table.schema_id, table.id.into())
                 }
+                Operation::Update => catalog_guard.update_table(table),
                 _ => panic!("receive an unsupported notify {:?}", resp),
             },
             Info::Source(source) => match resp.operation() {

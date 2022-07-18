@@ -146,12 +146,13 @@ impl<K: HashKey, S: StateStore> std::fmt::Debug for JoinSide<K, S> {
 }
 
 impl<K: HashKey, S: StateStore> JoinSide<K, S> {
-    // WARNING: Please do not call this until we implement it.
+    // WARNING: Please do not call this until we implement it.、
+    #[expect(dead_code)]
     fn is_dirty(&self) -> bool {
         unimplemented!()
     }
 
-    #[allow(dead_code)]
+    #[expect(dead_code)]
     fn clear_cache(&mut self) {
         assert!(
             !self.is_dirty(),
@@ -189,7 +190,7 @@ pub struct HashJoinExecutor<K: HashKey, S: StateStore, const T: JoinTypePrimitiv
     /// Epoch
     epoch: u64,
 
-    #[allow(dead_code)]
+    #[expect(dead_code)]
     /// Logical Operator Info
     op_info: String,
 
@@ -383,11 +384,15 @@ impl<K: HashKey, S: StateStore, const T: JoinTypePrimitive> HashJoinExecutor<K, 
         executor_id: u64,
         cond: Option<BoxedExpression>,
         op_info: String,
-        state_table_l: StateTable<S>,
-        state_table_r: StateTable<S>,
+        mut state_table_l: StateTable<S>,
+        mut state_table_r: StateTable<S>,
         is_append_only: bool,
         metrics: Arc<StreamingMetrics>,
     ) -> Self {
+        // TODO: enable sanity check for hash join executor <https://github.com/singularity-data/risingwave/issues/3887>
+        state_table_l.disable_sanity_check();
+        state_table_r.disable_sanity_check();
+
         let side_l_column_n = input_l.schema().len();
 
         let schema_fields = match T {

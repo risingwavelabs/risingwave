@@ -67,12 +67,12 @@ impl LocalActorId {
         }
     }
 
-    #[allow(dead_code)]
+    #[expect(dead_code)]
     pub fn is_global(&self) -> bool {
         matches!(self, Self::Global(_))
     }
 
-    #[allow(dead_code)]
+    #[expect(dead_code)]
     pub fn is_local(&self) -> bool {
         matches!(self, Self::Local(_))
     }
@@ -571,7 +571,9 @@ impl StreamGraphBuilder {
                             &mut node.arrangement_table_id
                         {
                             *table_id += table_id_offset;
-                            check_and_fill_internal_table(*table_id, None);
+                            node.arrangement_table.as_mut().unwrap().id = *table_id;
+                            // We do not need check and fill internal table for Lookup, cuz it's
+                            // already been set by ArrangeNode.
                         }
                     }
 

@@ -14,30 +14,50 @@
 
 use risingwave_common::array::Row;
 use risingwave_common::error::Result;
+use risingwave_common::types::VirtualNode;
 use risingwave_common::util::value_encoding::serialize_datum;
-type ValueBytes = Vec<u8>;
+
+use super::Encoding;
 
 #[derive(Clone)]
 pub struct RowBasedSerializer {}
 
-impl RowBasedSerializer {
-    pub fn new() -> Self {
+impl Encoding for RowBasedSerializer {
+    /// Serialize the row into a value encode bytes.
+    /// All values are nullable. Each value will have 1 extra byte to indicate whether it is null.
+    fn serialize(
+        &mut self,
+        _vnode: VirtualNode,
+        pk: &[u8],
+        row: Row,
+    ) -> Result<Vec<(Vec<u8>, Vec<u8>)>> {
+        let mut value_bytes = vec![];
+        for cell in &row.0 {
+            value_bytes.extend(serialize_datum(cell)?);
+        }
+        let res = vec![(pk.to_vec(), value_bytes)];
+        Ok(res)
+    }
+
+    fn create_row_serializer(
+        _pk_indices: &[usize],
+        _column_descs: &[risingwave_common::catalog::ColumnDesc],
+        _column_ids: &[risingwave_common::catalog::ColumnId],
+    ) -> Self {
+        // todo: these parameters may be used in row-based pk dudup later.
         Self {}
     }
 
-    /// Serialize the row into a value encode bytes.
-    /// All values are nullable. Each value will have 1 extra byte to indicate whether it is null.
-    pub fn serialize(&mut self, row: &Row) -> Result<ValueBytes> {
-        let mut res = vec![];
-        for cell in &row.0 {
-            res.extend(serialize_datum(cell)?);
-        }
-        Ok(res)
+    fn serialize_for_update(
+        &mut self,
+        _vnode: risingwave_common::types::VirtualNode,
+        _pk: &[u8],
+        _row: Row,
+    ) -> Result<Vec<Option<(super::KeyBytes, super::ValueBytes)>>> {
+        unreachable!();
     }
-}
 
-impl Default for RowBasedSerializer {
-    fn default() -> Self {
-        Self::new()
+    fn column_ids(&self) -> &[risingwave_common::catalog::ColumnId] {
+        unreachable!()
     }
 }

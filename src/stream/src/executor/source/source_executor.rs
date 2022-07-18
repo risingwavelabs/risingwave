@@ -202,14 +202,8 @@ impl<S: StateStore> SourceExecutor<S> {
         let barrier = barrier_receiver.recv().await.unwrap();
 
         if let Some(mutation) = barrier.mutation.as_ref() {
-            if let Mutation::AddDispatcher(add_dispatcher) = mutation.as_ref() {
-                if let Some(splits) = add_dispatcher.splits.get(&self.actor_id) {
-                    self.stream_source_splits = splits.clone();
-                }
-            }
-            // TODO: remove this
-            if let Mutation::AddOutput(add_output) = mutation.as_ref() {
-                if let Some(splits) = add_output.splits.get(&self.actor_id) {
+            if let Mutation::Add { splits, .. } = mutation.as_ref() {
+                if let Some(splits) = splits.get(&self.actor_id) {
                     self.stream_source_splits = splits.clone();
                 }
             }
@@ -247,24 +241,31 @@ impl<S: StateStore> SourceExecutor<S> {
                     let epoch = barrier.epoch.prev;
                     self.take_snapshot(epoch).await?;
 
-                    if let Some(Mutation::SourceChangeSplit(mapping)) = barrier.mutation.as_deref()
-                    {
-                        if let Some(target_splits) = mapping.get(&self.actor_id).cloned() {
-                            if let Some(target_state) = self.get_diff(target_splits) {
-                                log::info!(
-                                    "actor {:?} apply source split change to {:?}",
-                                    self.actor_id,
-                                    target_state
-                                );
+                    if let Some(mutation) = barrier.mutation.as_deref() {
+                        match mutation {
+                            Mutation::SourceChangeSplit(mapping) => {
+                                if let Some(target_splits) = mapping.get(&self.actor_id).cloned() {
+                                    if let Some(target_state) = self.get_diff(target_splits) {
+                                        log::info!(
+                                            "actor {:?} apply source split change to {:?}",
+                                            self.actor_id,
+                                            target_state
+                                        );
 
-                                // Replace the source reader with a new one of the new state.
-                                let reader = self
-                                    .build_stream_source_reader(Some(target_state.clone()))
-                                    .await?;
-                                stream.replace_source_chunk_reader(reader);
+                                        // Replace the source reader with a new one of the new
+                                        // state.
+                                        let reader = self
+                                            .build_stream_source_reader(Some(target_state.clone()))
+                                            .await?;
+                                        stream.replace_source_chunk_reader(reader);
 
-                                self.stream_source_splits = target_state;
+                                        self.stream_source_splits = target_state;
+                                    }
+                                }
                             }
+                            Mutation::Pause => stream.pause_source(),
+                            Mutation::Resume => stream.resume_source(),
+                            _ => {}
                         }
                     }
                     self.state_cache.clear();
@@ -709,20 +710,19 @@ mod tests {
         .execute();
 
         let curr_epoch = 1919;
-        let init_barrier =
-            Barrier::new_test_barrier(curr_epoch).with_mutation(Mutation::AddOutput(AddOutput {
-                map: HashMap::new(),
-                splits: hashmap! {
-                    ActorId::default() => vec![
-                        SplitImpl::Datagen(
-                        DatagenSplit {
-                            split_index: 0,
-                            split_num: 3,
-                            start_offset: None,
-                        }),
-                    ],
-                },
-            }));
+        let init_barrier = Barrier::new_test_barrier(curr_epoch).with_mutation(Mutation::Add {
+            adds: HashMap::new(),
+            splits: hashmap! {
+                ActorId::default() => vec![
+                    SplitImpl::Datagen(
+                    DatagenSplit {
+                        split_index: 0,
+                        split_num: 3,
+                        start_offset: None,
+                    }),
+                ],
+            },
+        });
         barrier_tx.send(init_barrier).unwrap();
 
         let _ = materialize.next().await.unwrap(); // barrier
@@ -783,6 +783,13 @@ mod tests {
         );
         assert_eq!(drop_row_id(chunk_3.unwrap()), drop_row_id(chunk_3_truth));
 
+        let pause_barrier =
+            Barrier::new_test_barrier(curr_epoch + 2).with_mutation(Mutation::Pause);
+        barrier_tx.send(pause_barrier).unwrap();
+
+        let pause_barrier =
+            Barrier::new_test_barrier(curr_epoch + 3).with_mutation(Mutation::Resume);
+        barrier_tx.send(pause_barrier).unwrap();
         Ok(())
     }
 }
