@@ -69,6 +69,7 @@ message Barrier {
   }
   // Used for tracing.
   bytes span = 2;
+  
 }
 
 message StreamMessage {

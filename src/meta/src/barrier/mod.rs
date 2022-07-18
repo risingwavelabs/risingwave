@@ -246,6 +246,7 @@ where
         }
         self.command_ctx_queue.push_back(EpochNode {
             timer: Some(timer),
+            wait_commit_timer: None,
             result: None,
             state: InFlight,
             command_ctx,
@@ -259,6 +260,7 @@ where
         &mut self,
         prev_epoch: u64,
         result: Result<Vec<BarrierCompleteResponse>>,
+        wait_commit_timer: HistogramTimer,
     ) -> VecDeque<EpochNode<S>> {
         // change state to complete, and wait for nodes with the smaller epoch to commit
         if let Some(node) = self
@@ -269,6 +271,7 @@ where
             assert!(matches!(node.state, InFlight));
             node.state = Complete;
             node.result = Some(result);
+            node.wait_commit_timer = Some(wait_commit_timer);
         };
         // Find all continuous nodes with 'Complete' starting from first node
         let index = self
@@ -318,6 +321,7 @@ where
 /// The state and message of this barrier
 pub struct EpochNode<S: MetaStore> {
     timer: Option<HistogramTimer>,
+    wait_commit_timer: Option<HistogramTimer>,
     result: Option<Result<Vec<BarrierCompleteResponse>>>,
     state: BarrierEpochState,
     command_ctx: Arc<CommandContext<S>>,
@@ -622,8 +626,9 @@ where
         tracker: &mut CreateMviewProgressTracker,
         checkpoint_control: &mut CheckpointControl<S>,
     ) {
+        let wait_commit_timer = self.metrics.barrier_wait_commit_latency.start_timer();
         // change the state is Complete
-        let mut complete_nodes = checkpoint_control.complete(prev_epoch, result);
+        let mut complete_nodes = checkpoint_control.complete(prev_epoch, result, wait_commit_timer);
         // try commit complete nodes
         let (mut index, mut err_msg) = (0, None);
         for (i, node) in complete_nodes.iter_mut().enumerate() {
@@ -644,6 +649,9 @@ where
             for node in fail_nodes {
                 if let Some(timer) = node.timer {
                     timer.observe_duration();
+                }
+                if let Some(wait_commit_timer) = node.wait_commit_timer {
+                    wait_commit_timer.observe_duration();
                 }
                 node.notifiers
                     .into_iter()
@@ -708,6 +716,7 @@ where
         }
 
         node.timer.take().unwrap().observe_duration();
+        node.wait_commit_timer.take().unwrap().observe_duration();
         let responses = node.result.take().unwrap()?;
         node.command_ctx.post_collect().await?;
 

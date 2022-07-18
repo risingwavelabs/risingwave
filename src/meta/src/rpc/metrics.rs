@@ -34,6 +34,8 @@ pub struct MetaMetrics {
     /// latency of each barrier
     pub barrier_latency: Histogram,
 
+    pub barrier_wait_commit_latency: Histogram,
+
     /// latency between each barrier send
     pub barrier_send_latency: Histogram,
     /// the nums of all barrier. the it is the sum of in-flight and complete but waiting for other
@@ -79,6 +81,14 @@ impl MetaMetrics {
             exponential_buckets(0.1, 1.5, 16).unwrap() // max 43s
         );
         let barrier_latency = register_histogram_with_registry!(opts, registry).unwrap();
+
+        let opts = histogram_opts!(
+            "meta_barrier_wait_commit_duration_seconds",
+            "barrier_wait_commit_latency",
+            exponential_buckets(0.1, 1.5, 16).unwrap() // max 43s
+        );
+        let barrier_wait_commit_latency =
+            register_histogram_with_registry!(opts, registry).unwrap();
 
         let opts = histogram_opts!(
             "meta_barrier_send_duration_seconds",
@@ -161,6 +171,7 @@ impl MetaMetrics {
 
             grpc_latency,
             barrier_latency,
+            barrier_wait_commit_latency,
             barrier_send_latency,
             all_barrier_nums,
             in_flight_barrier_nums,
