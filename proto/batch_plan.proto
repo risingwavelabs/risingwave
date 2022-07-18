@@ -118,6 +118,10 @@ message ExpandNode {
   repeated Subset column_subsets = 1;
 }
 
+message ProjectSetNode {
+  repeated expr.ProjectSetSelectItem select_list = 1;
+}
+
 message SortAggNode {
   repeated expr.ExprNode group_key = 1;
   repeated expr.AggCall agg_calls = 2;
@@ -224,6 +228,7 @@ message PlanNode {
     SysRowSeqScanNode sys_row_seq_scan = 27;
     ExpandNode expand = 28;
     LookupJoinNode lookup_join = 29;
+    ProjectSetNode project_set = 30;
   }
   string identity = 24;
 }
