@@ -17,7 +17,7 @@ use rand::prelude::SliceRandom;
 use rand::Rng;
 use risingwave_frontend::expr::DataTypeName;
 use risingwave_sqlparser::ast::{
-    FunctionArg, FunctionArgExpr, Ident, ObjectName, TableAlias, TableFactor, TableWithJoins,
+    FunctionArg, FunctionArgExpr, ObjectName, TableAlias, TableFactor, TableWithJoins,
 };
 
 use crate::{Column, Expr, SqlGenerator, Table};
@@ -38,38 +38,19 @@ impl<'a, R: Rng> SqlGenerator<'a, R> {
         let (source_table_name, time_cols, schema) = tables
             .choose(&mut self.rng)
             .expect("seeded tables all do not have timestamp");
-        let table_name = format!("tumble_{}", &self.bound_relations.len());
-        let alias = TableAlias {
-            name: Ident::new(table_name.clone()),
-            columns: vec![],
-        };
-
-        let time_col = time_cols.choose(&mut self.rng).unwrap();
+        let table_name = self.create_table_name_with_prefix("tumble");
+        let alias = create_alias(&table_name);
 
         let name = Expr::Identifier(source_table_name.as_str().into());
         // TODO: Currently only literal size expr supported.
         // Tracked in: <https://github.com/singularity-data/risingwave/issues/3896>
         let size = self.gen_simple_scalar(DataTypeName::Interval);
+        let time_col = time_cols.choose(&mut self.rng).unwrap();
         let time_col = Expr::Identifier(time_col.name.as_str().into());
-        let args = [name, time_col, size]
-            .into_iter()
-            .map(create_function_arg_from_expr)
-            .collect_vec();
+        let args = create_args(vec![name, time_col, size]);
+        let relation = create_tvf("tumble", alias, args);
 
-        let factor = TableFactor::Table {
-            name: ObjectName(vec!["tumble".into()]),
-            alias: Some(alias),
-            args,
-        };
-        let relation = TableWithJoins {
-            relation: factor,
-            joins: vec![],
-        };
-
-        let table = Table {
-            name: table_name,
-            columns: schema.clone(),
-        };
+        let table = create_sqlsmith_table(table_name, schema.clone());
         self.add_relation_to_context(table);
 
         relation
@@ -82,11 +63,8 @@ impl<'a, R: Rng> SqlGenerator<'a, R> {
         let (source_table_name, time_cols, schema) = tables
             .choose(&mut self.rng)
             .expect("seeded tables all do not have timestamp");
-        let table_name = format!("hop_{}", &self.bound_relations.len());
-        let alias = TableAlias {
-            name: Ident::new(table_name.clone()),
-            columns: vec![],
-        };
+        let table_name = self.create_table_name_with_prefix("hop");
+        let alias = create_alias(&table_name);
 
         let time_col = time_cols.choose(&mut self.rng).unwrap();
 
@@ -96,29 +74,49 @@ impl<'a, R: Rng> SqlGenerator<'a, R> {
         let slide = self.gen_simple_scalar(DataTypeName::Interval);
         let size = self.gen_simple_scalar(DataTypeName::Interval);
         let time_col = Expr::Identifier(time_col.name.as_str().into());
-        let args = [name, time_col, slide, size]
-            .into_iter()
-            .map(create_function_arg_from_expr)
-            .collect_vec();
+        let args = create_args(vec![name, time_col, slide, size]);
 
-        let factor = TableFactor::Table {
-            name: ObjectName(vec!["hop".into()]),
-            alias: Some(alias),
-            args,
-        };
-        let relation = TableWithJoins {
-            relation: factor,
-            joins: vec![],
-        };
+        let relation = create_tvf("hop", alias, args);
 
-        let table = Table {
-            name: table_name,
-            columns: schema.clone(),
-        };
+        let table = create_sqlsmith_table(table_name, schema.clone());
         self.add_relation_to_context(table);
 
         relation
     }
+
+    fn create_table_name_with_prefix(&self, prefix: &str) -> String {
+        format!("{}_{}", prefix, &self.bound_relations.len())
+    }
+}
+
+fn create_args(arg_exprs: Vec<Expr>) -> Vec<FunctionArg> {
+    arg_exprs
+        .into_iter()
+        .map(create_function_arg_from_expr)
+        .collect()
+}
+
+fn create_alias(table_name: &str) -> TableAlias {
+    TableAlias {
+        name: table_name.into(),
+        columns: vec![],
+    }
+}
+
+fn create_tvf(name: &str, alias: TableAlias, args: Vec<FunctionArg>) -> TableWithJoins {
+    let factor = TableFactor::Table {
+        name: ObjectName(vec![name.into()]),
+        alias: Some(alias),
+        args,
+    };
+    TableWithJoins {
+        relation: factor,
+        joins: vec![],
+    }
+}
+
+fn create_sqlsmith_table(name: String, columns: Vec<Column>) -> Table {
+    Table { name, columns }
 }
 
 /// Create `FunctionArg` from an `Expr`.
