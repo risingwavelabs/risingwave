@@ -25,28 +25,32 @@ pub trait PredicatePushdown {
     /// There are three kinds of predicates:
     ///
     /// 1. those can't be pushed down. We just create a `LogicalFilter` for them above the current
-    /// `PlanNode`.
+    /// `PlanNode`. i.e.,
+    ///   
+    ///     ```ignore
+    ///     LogicalFilter::create(self.clone().into(), predicate)
+    ///     ```
     ///
-    /// 2. those can be merged with current `PlanNode`(e.g. `LogicalJoin`). We just merge
+    /// 2. those can be merged with current `PlanNode` (e.g. `LogicalJoin`). We just merge
     /// the predicates with the `Condition` of it.
     ///
     /// 3. those can be pushed down. We pass them to current `PlanNode`'s input.
     fn predicate_pushdown(&self, predicate: Condition) -> PlanRef;
 }
 
-macro_rules! impl_predicate_pushdown {
+macro_rules! ban_predicate_pushdown {
     ([], $( { $convention:ident, $name:ident }),*) => {
         paste!{
             $(impl PredicatePushdown for [<$convention $name>] {
                 fn predicate_pushdown(&self, _predicate: Condition) -> PlanRef {
-                    panic!("predicate pushdown is only allowed on logical plan")
+                    unreachable!("predicate pushdown is only allowed on logical plan")
                 }
             })*
         }
     }
 }
-for_batch_plan_nodes! {impl_predicate_pushdown}
-for_stream_plan_nodes! {impl_predicate_pushdown}
+for_batch_plan_nodes! {ban_predicate_pushdown}
+for_stream_plan_nodes! {ban_predicate_pushdown}
 
 #[inline]
 pub fn gen_filter_and_pushdown<T: PlanTreeNodeUnary + PlanNode>(
