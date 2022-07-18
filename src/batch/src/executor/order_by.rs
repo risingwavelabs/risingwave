@@ -156,11 +156,11 @@ impl OrderByExecutor {
         index.sort_by(|ia, ib| {
             if self.disable_encoding || !self.encodable {
                 compare_rows_in_chunk(
-                    self.order_pairs.as_ref(),
                     &self.chunks[idx],
                     *ia,
                     &self.chunks[idx],
                     *ib,
+                    self.order_pairs.as_ref(),
                 )
                 .unwrap_or(Ordering::Equal)
             } else {

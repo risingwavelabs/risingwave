@@ -39,7 +39,7 @@ impl Ord for OrderableRow {
         {
             encoded_lhs.as_slice().cmp(encoded_rhs.as_slice())
         } else {
-            compare_rows(&self.order_pairs, &self.row, &other.row).unwrap()
+            compare_rows(&self.row, &other.row, &self.order_pairs).unwrap()
         };
         ord.reverse() // we have to reverse the order because BinaryHeap is a max-heap
     }

@@ -100,11 +100,11 @@ impl Ord for HeapElem {
                 .cmp(rhs_encoded_chunk[other.elem_idx].as_slice())
         } else {
             compare_rows_in_chunk(
-                self.order_pairs.as_ref(),
                 &self.chunk,
                 self.elem_idx,
                 &other.chunk,
                 other.elem_idx,
+                self.order_pairs.as_ref(),
             )
             .unwrap()
         };
@@ -147,7 +147,7 @@ where
     }
 }
 
-pub fn compare_rows(order_pairs: &[OrderPair], lhs: &Row, rhs: &Row) -> Result<Ordering> {
+pub fn compare_rows(lhs: &Row, rhs: &Row, order_pairs: &[OrderPair]) -> Result<Ordering> {
     for order_pair in order_pairs.iter() {
         let lhs = lhs[order_pair.column_idx].as_ref();
         let rhs = rhs[order_pair.column_idx].as_ref();
@@ -210,11 +210,11 @@ where
 }
 
 pub fn compare_rows_in_chunk(
-    order_pairs: &[OrderPair],
     lhs_data_chunk: &DataChunk,
     lhs_idx: usize,
     rhs_data_chunk: &DataChunk,
     rhs_idx: usize,
+    order_pairs: &[OrderPair],
 ) -> Result<Ordering> {
     for order_pair in order_pairs.iter() {
         let lhs_array = lhs_data_chunk.column_at(order_pair.column_idx).array();
