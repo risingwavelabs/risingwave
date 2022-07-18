@@ -15,7 +15,7 @@
 use std::collections::HashSet;
 
 use risingwave_pb::hummock::hummock_version::Levels;
-use risingwave_pb::hummock::{HummockVersion, Level, LevelType, SstableInfo};
+use risingwave_pb::hummock::{HummockVersion, HummockVersionDelta, Level, LevelType, SstableInfo};
 
 use crate::prost_key_range::KeyRangeExt;
 use crate::CompactionGroupId;
@@ -54,6 +54,7 @@ pub trait HummockVersionExt {
         insert_sub_level: u64,
         insert_table_infos: Vec<SstableInfo>,
     );
+    fn apply_version_delta(&mut self, version_delta: &HummockVersionDelta);
 }
 
 impl HummockVersionExt for HummockVersion {
@@ -136,6 +137,40 @@ impl HummockVersionExt for HummockVersion {
                 f(&levels.levels[level_idx - 1]);
             }
         }
+    }
+
+    fn apply_version_delta(&mut self, version_delta: &HummockVersionDelta) {
+        for (compaction_group_id, level_deltas) in &version_delta.level_deltas {
+            let mut delete_sst_levels = Vec::with_capacity(level_deltas.level_deltas.len());
+            let mut delete_sst_ids_set = HashSet::new();
+            let mut insert_sst_level = u32::MAX;
+            let mut insert_sub_level = u64::MAX;
+            let mut insert_table_infos = vec![];
+            for level_delta in &level_deltas.level_deltas {
+                if !level_delta.removed_table_ids.is_empty() {
+                    delete_sst_levels.push(level_delta.level_idx);
+                    delete_sst_ids_set.extend(level_delta.removed_table_ids.iter().clone());
+                }
+                if !level_delta.inserted_table_infos.is_empty() {
+                    insert_sst_level = level_delta.level_idx;
+                    insert_sub_level = level_delta.l0_sub_level_id;
+                    insert_table_infos.extend(level_delta.inserted_table_infos.iter().cloned());
+                }
+            }
+            let operand = &mut self
+                .get_compaction_group_levels_mut(*compaction_group_id as CompactionGroupId);
+            HummockVersion::apply_compact_ssts(
+                operand,
+                &delete_sst_levels,
+                &delete_sst_ids_set,
+                insert_sst_level,
+                insert_sub_level,
+                insert_table_infos,
+            );
+        }
+        self.id = version_delta.id;
+        self.max_committed_epoch = version_delta.max_committed_epoch;
+        self.safe_epoch = version_delta.safe_epoch;
     }
 
     fn apply_compact_ssts(

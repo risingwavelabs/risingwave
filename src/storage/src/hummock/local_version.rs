@@ -172,7 +172,7 @@ impl PinnedVersion {
         self.version.safe_epoch
     }
 
-    #[cfg(any(test, feature = "test"))]
+    /// ret value can't be used as `HummockVersion`. it must be modified with delta
     pub fn version(&self) -> HummockVersion {
         self.version.clone()
     }

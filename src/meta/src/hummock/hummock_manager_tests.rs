@@ -59,6 +59,8 @@ async fn test_hummock_pin_unpin() {
         let hummock_version = hummock_manager
             .pin_version(context_id, u64::MAX)
             .await
+            .unwrap()
+            .2
             .unwrap();
         let levels = hummock_version
             .get_compaction_group_levels(StaticCompactionGroupId::StateDefault.into());
@@ -285,6 +287,8 @@ async fn test_hummock_table() {
     let pinned_version = hummock_manager
         .pin_version(context_id, u64::MAX)
         .await
+        .unwrap()
+        .2
         .unwrap();
     let levels =
         pinned_version.get_compaction_group_levels(StaticCompactionGroupId::StateDefault.into());
@@ -333,6 +337,8 @@ async fn test_hummock_transaction() {
         let pinned_version = hummock_manager
             .pin_version(context_id, u64::MAX)
             .await
+            .unwrap()
+            .2
             .unwrap();
         assert_eq!(pinned_version.max_committed_epoch, INVALID_EPOCH);
         assert!(get_sorted_committed_sstable_ids(&pinned_version).is_empty());
@@ -350,6 +356,8 @@ async fn test_hummock_transaction() {
         let pinned_version = hummock_manager
             .pin_version(context_id, u64::MAX)
             .await
+            .unwrap()
+            .2
             .unwrap();
         assert_eq!(pinned_version.max_committed_epoch, epoch1);
         assert_eq!(
@@ -378,6 +386,8 @@ async fn test_hummock_transaction() {
         let pinned_version = hummock_manager
             .pin_version(context_id, u64::MAX)
             .await
+            .unwrap()
+            .2
             .unwrap();
         assert_eq!(pinned_version.max_committed_epoch, epoch1);
         assert_eq!(
@@ -398,6 +408,8 @@ async fn test_hummock_transaction() {
         let pinned_version = hummock_manager
             .pin_version(context_id, u64::MAX)
             .await
+            .unwrap()
+            .2
             .unwrap();
         assert_eq!(pinned_version.max_committed_epoch, epoch2);
         assert_eq!(
@@ -556,6 +568,8 @@ async fn test_hummock_manager_basic() {
         let version = hummock_manager
             .pin_version(context_id_1, u64::MAX)
             .await
+            .unwrap()
+            .2
             .unwrap();
         assert_eq!(version.id, FIRST_VERSION_ID + 1);
         assert_eq!(
@@ -571,6 +585,8 @@ async fn test_hummock_manager_basic() {
         let version = hummock_manager
             .pin_version(context_id_2, u64::MAX)
             .await
+            .unwrap()
+            .2
             .unwrap();
         assert_eq!(version.id, FIRST_VERSION_ID + 1);
         assert_eq!(

@@ -192,7 +192,7 @@ mod tests {
             .id;
         storage
             .local_version_manager()
-            .try_update_pinned_version(version);
+            .try_update_pinned_version(None, (false, vec![], Some(version)));
         let table = storage
             .sstable_store()
             .sstable(output_table_id, &mut StoreLocalStatistic::default())
@@ -306,7 +306,7 @@ mod tests {
         // 5. storage get back the correct kv after compaction
         storage
             .local_version_manager()
-            .try_update_pinned_version(version);
+            .try_update_pinned_version(None, (false, vec![], Some(version)));
         let get_val = storage
             .get(
                 &key,
@@ -563,7 +563,7 @@ mod tests {
         // to update version for hummock_storage
         storage
             .local_version_manager()
-            .try_update_pinned_version(version);
+            .try_update_pinned_version(None, (false, vec![], Some(version)));
 
         // 6. scan kv to check key table_id
         let scan_result = storage
@@ -721,7 +721,7 @@ mod tests {
         // to update version for hummock_storage
         storage
             .local_version_manager()
-            .try_update_pinned_version(version);
+            .try_update_pinned_version(None, (false, vec![], Some(version)));
 
         // 6. scan kv to check key table_id
         let scan_result = storage
