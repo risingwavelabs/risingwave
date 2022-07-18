@@ -100,6 +100,7 @@ pub fn repeat_tf(expr: BoxedExpression, n: usize) -> BoxedTableFunction {
     Mock { expr, n }.boxed()
 }
 
+/// See also [`SelectItemProst`]
 #[derive(Debug)]
 pub enum ProjectSetSelectItem {
     TableFunction(BoxedTableFunction),
