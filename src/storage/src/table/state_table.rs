@@ -293,7 +293,7 @@ impl<S: StateStore> RowBasedStateTable<S> {
     ) -> StorageResult<RowBasedStream<'a, S>> {
         let storage_table_iter = self
             .storage_table
-            .row_based_streaming_iter_with_pk_bounds(epoch, pk_prefix, ..)
+            .streaming_iter_with_pk_bounds(epoch, pk_prefix, ..)
             .await?;
 
         let mem_table_iter = {

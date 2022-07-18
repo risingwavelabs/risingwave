@@ -579,8 +579,9 @@ pub trait PkAndRowStream = Stream<Item = StorageResult<(Vec<u8>, Row)>> + Send;
 /// The row iterator of the storage table.
 pub type StorageTableIter<S: StateStore> = impl PkAndRowStream;
 pub type RowBasedStorageTableIter<S: StateStore> = impl PkAndRowStream;
-/// The wrapper of [`StorageTableIter`] if pk is not persisted.
+
 pub type BatchDedupPkIter<S: StateStore> = impl PkAndRowStream;
+// pub type BatchDedupPkIter<S: StateStore> = impl PkAndRowStream;
 
 #[async_trait::async_trait]
 impl<S: PkAndRowStream + Unpin> TableIter for S {
@@ -593,8 +594,11 @@ impl<S: PkAndRowStream + Unpin> TableIter for S {
 }
 
 /// Iterators
-impl<S: StateStore, RS: RowSerde, const T: AccessType> StorageTableBase<S, RS, T> {
-    /// Get multiple [`StorageTableIter`] based on the specified vnodes of this table with
+impl<S: StateStore, RS: RowSerde, const T: AccessType> StorageTableBase<S, RS, T> {}
+
+/// Cell-based Iterators
+impl<S: StateStore, const T: AccessType> StorageTable<S, T> {
+    // Get multiple [`StorageTableIter`] based on the specified vnodes of this table with
     /// `vnode_hint`, and merge or concat them by given `ordered`.
     async fn iter_with_encoded_key_range<R, B>(
         &self,
@@ -776,15 +780,13 @@ impl<S: StateStore, RS: RowSerde, const T: AccessType> StorageTableBase<S, RS, T
             .await
     }
 
-    // The returned iterator will iterate data from a snapshot corresponding to the given `epoch`.
+    // // The returned iterator will iterate data from a snapshot corresponding to the given
+    // `epoch`.
     pub async fn batch_iter(&self, epoch: u64) -> StorageResult<StorageTableIter<S>> {
         self.batch_iter_with_pk_bounds(epoch, Row::empty(), ..)
             .await
     }
 
-    /// `dedup_pk_iter` should be used when pk is not persisted as value in storage.
-    /// It will attempt to decode pk from key instead of cell value.
-    /// Tracking issue: <https://github.com/singularity-data/risingwave/issues/588>
     pub async fn batch_dedup_pk_iter(
         &self,
         epoch: u64,
@@ -799,19 +801,21 @@ impl<S: StateStore, RS: RowSerde, const T: AccessType> StorageTableBase<S, RS, T
         .await?
         .into_stream())
     }
-
+}
+/// Row-based Iterators
+impl<S: StateStore, const T: AccessType> RowBasedStorageTable<S, T> {
     /// Construct a [`StorageTableIter`] for streaming executors with `row-based` encoding.
-    pub async fn row_based_streaming_iter_with_pk_bounds(
+    pub async fn streaming_iter_with_pk_bounds(
         &self,
         epoch: u64,
         pk_prefix: &Row,
         next_col_bounds: impl RangeBounds<Datum>,
     ) -> StorageResult<RowBasedStorageTableIter<S>> {
-        self.row_based_iter_with_pk_bounds(epoch, pk_prefix, next_col_bounds, false, true)
+        self.iter_with_pk_bounds(epoch, pk_prefix, next_col_bounds, false, true)
             .await
     }
 
-    async fn row_based_iter_with_pk_bounds(
+    async fn iter_with_pk_bounds(
         &self,
         epoch: u64,
         pk_prefix: &Row,
@@ -887,7 +891,7 @@ impl<S: StateStore, RS: RowSerde, const T: AccessType> StorageTableBase<S, RS, T
             end_key
         );
 
-        self.row_based_iter_with_encoded_key_range(
+        self.iter_with_encoded_key_range(
             (start_key, end_key),
             epoch,
             self.try_compute_vnode_by_pk_prefix(pk_prefix),
@@ -897,7 +901,7 @@ impl<S: StateStore, RS: RowSerde, const T: AccessType> StorageTableBase<S, RS, T
         .await
     }
 
-    async fn row_based_iter_with_encoded_key_range<R, B>(
+    async fn iter_with_encoded_key_range<R, B>(
         &self,
         encoded_key_range: R,
         epoch: u64,
@@ -965,9 +969,6 @@ impl<S: StateStore, RS: RowSerde, const T: AccessType> StorageTableBase<S, RS, T
     }
 }
 
-// pub type CellBasedStorageTableIterInner<S> = StorageTableIterInner<S, CellBasedRowDeserializer>;
-
-// pub type RowBasedStorageTableIterInner<S> = StorageTableIterInner<S, RowBasedDeserializer>;
 /// [`StorageTableIterInner`] iterates on the storage table.
 struct StorageTableIterInner<S: StateStore, RS: RowSerde> {
     /// An iterator that returns raw bytes from storage.
