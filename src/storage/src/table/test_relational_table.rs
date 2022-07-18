@@ -705,7 +705,7 @@ async fn test_row_based_state_table_iter() {
         );
     }
 
-    state.commit_with_row_based(epoch).await.unwrap();
+    state.commit(epoch).await.unwrap();
 
     let epoch = u64::MAX;
 

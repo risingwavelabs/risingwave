@@ -181,23 +181,6 @@ impl<S: StateStore, RS: RowSerde> StateTableBase<S, RS> {
         self.mem_table.update(pk_bytes, old_value, new_value);
         Ok(())
     }
-
-    pub async fn commit(&mut self, new_epoch: u64) -> StorageResult<()> {
-        let mem_table = std::mem::take(&mut self.mem_table).into_parts();
-        self.storage_table
-            .batch_write_rows(mem_table, new_epoch)
-            .await?;
-        Ok(())
-    }
-
-    // write with row-based encoding.
-    pub async fn commit_with_row_based(&mut self, new_epoch: u64) -> StorageResult<()> {
-        let mem_table = std::mem::take(&mut self.mem_table).into_parts();
-        self.storage_table
-            .batch_write_rows_with_row_based_encoding(mem_table, new_epoch)
-            .await?;
-        Ok(())
-    }
 }
 
 /// Iterator functions with cell-based encoding.
@@ -275,6 +258,24 @@ impl<S: StateStore> StateTable<S> {
             distribution,
         )
     }
+
+    pub async fn commit(&mut self, new_epoch: u64) -> StorageResult<()> {
+        let mem_table = std::mem::take(&mut self.mem_table).into_parts();
+        self.storage_table
+            .batch_write_rows(mem_table, new_epoch)
+            .await?;
+        Ok(())
+    }
+}
+
+impl<S: StateStore> DedupPkStateTable<S> {
+    pub async fn commit(&mut self, new_epoch: u64) -> StorageResult<()> {
+        let mem_table = std::mem::take(&mut self.mem_table).into_parts();
+        self.storage_table
+            .batch_write_rows(mem_table, new_epoch)
+            .await?;
+        Ok(())
+    }
 }
 
 /// Iterator functions.
@@ -304,6 +305,15 @@ impl<S: StateStore> RowBasedStateTable<S> {
         };
 
         Ok(StateTableRowIter::new(mem_table_iter, storage_table_iter).into_stream())
+    }
+
+    // write with row-based encoding.
+    pub async fn commit(&mut self, new_epoch: u64) -> StorageResult<()> {
+        let mem_table = std::mem::take(&mut self.mem_table).into_parts();
+        self.storage_table
+            .batch_write_rows_with_row_based_encoding(mem_table, new_epoch)
+            .await?;
+        Ok(())
     }
 }
 
