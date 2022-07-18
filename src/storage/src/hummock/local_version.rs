@@ -157,7 +157,7 @@ impl PinnedVersion {
                     .version
                     .get_compaction_group_levels(compaction_group_id);
                 let mut ret = vec![];
-                ret.extend(levels.l0.as_ref().unwrap().sub_levels.iter());
+                ret.extend(levels.l0.as_ref().unwrap().sub_levels.iter().rev());
                 ret.extend(levels.levels.iter());
                 ret
             }

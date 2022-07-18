@@ -220,7 +220,7 @@ pub mod tests {
 
     #[test]
     fn test_compact_l1() {
-        let picker = MinOverlappingPicker::new(0, 0, 1, Arc::new(RangeOverlapStrategy::default()));
+        let picker = MinOverlappingPicker::new(0, 1, 2, Arc::new(RangeOverlapStrategy::default()));
         let levels = vec![
             Level {
                 level_idx: 1,
@@ -291,7 +291,7 @@ pub mod tests {
 
     #[test]
     fn test_expand_l1_files() {
-        let picker = MinOverlappingPicker::new(0, 0, 1, Arc::new(RangeOverlapStrategy::default()));
+        let picker = MinOverlappingPicker::new(0, 1, 2, Arc::new(RangeOverlapStrategy::default()));
         let levels = vec![
             Level {
                 level_idx: 1,

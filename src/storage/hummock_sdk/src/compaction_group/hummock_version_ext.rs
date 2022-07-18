@@ -76,7 +76,7 @@ impl HummockVersionExt for HummockVersion {
     fn get_combined_levels(&self) -> Vec<&Level> {
         let mut combined_levels = vec![];
         for level in self.levels.values() {
-            combined_levels.extend(level.l0.as_ref().unwrap().sub_levels.iter());
+            combined_levels.extend(level.l0.as_ref().unwrap().sub_levels.iter().rev());
             combined_levels.extend(level.levels.iter());
         }
         combined_levels

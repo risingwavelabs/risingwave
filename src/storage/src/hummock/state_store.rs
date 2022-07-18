@@ -291,7 +291,7 @@ impl HummockStorage {
                 continue;
             }
             let table_infos = prune_ssts(level.table_infos.iter(), &(key..=key));
-            for table_info in table_infos.into_iter().rev() {
+            for table_info in table_infos {
                 let table = self
                     .sstable_store
                     .sstable(table_info.id, &mut stats)
