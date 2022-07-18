@@ -81,8 +81,6 @@ pub struct SSTableBuilder {
     last_table_id: u32,
     /// Hashes of user keys.
     user_key_hashes: Vec<u32>,
-    /// Last added full key.
-    last_full_key: Bytes,
     key_count: usize,
     sstable_id: u64,
     raw_value: BytesMut,
@@ -100,7 +98,6 @@ impl SSTableBuilder {
             block_metas: Vec::with_capacity(options.capacity / options.block_capacity + 1),
             table_ids: BTreeSet::new(),
             user_key_hashes: Vec::with_capacity(options.capacity / DEFAULT_ENTRY_SIZE + 1),
-            last_full_key: Bytes::default(),
             last_table_id: 0,
             options,
             key_count: 0,
@@ -116,10 +113,9 @@ impl SSTableBuilder {
             self.block_metas.push(BlockMeta {
                 offset: self.buf.len() as u32,
                 len: 0,
-                smallest_key: vec![],
+                smallest_key: full_key.to_vec(),
             })
         }
-
 
         // TODO: refine me
         value.encode(&mut self.raw_value);
@@ -134,10 +130,6 @@ impl SSTableBuilder {
 
         let user_key = user_key(full_key);
         self.user_key_hashes.push(farmhash::fingerprint32(user_key));
-
-        if self.last_full_key.is_empty() {
-            self.block_metas.last_mut().unwrap().smallest_key = full_key.to_vec();
-        }
 
         if self.block_builder.approximate_len() >= self.options.block_capacity {
             self.build_block();
@@ -159,7 +151,7 @@ impl SSTableBuilder {
     /// ```
     pub fn finish(mut self) -> (u64, Bytes, SstableMeta, Vec<u32>) {
         let smallest_key = self.block_metas[0].smallest_key.clone();
-        let largest_key = self.last_full_key.to_vec();
+        let largest_key = self.block_builder.get_last_key().to_vec();
         self.build_block();
         self.buf.put_u32_le(self.block_metas.len() as u32);
 
@@ -202,6 +194,7 @@ impl SSTableBuilder {
         let block = self.block_builder.build();
         self.buf.put_slice(&block);
         block_meta.len = self.buf.len() as u32 - block_meta.offset;
+        self.block_builder.clear();
     }
 
     pub fn len(&self) -> usize {

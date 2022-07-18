@@ -315,8 +315,7 @@ impl BlockBuilder {
                     .unwrap();
                 let (writer, result) = encoder.finish();
                 result.map_err(HummockError::encode_error).unwrap();
-                let tmp = writer.into_inner();
-                self.buf = tmp;
+                self.buf =  writer.into_inner();
             }
             CompressionAlgorithm::Zstd => {
                 let mut encoder =
@@ -331,8 +330,7 @@ impl BlockBuilder {
                     .finish()
                     .map_err(HummockError::encode_error)
                     .unwrap();
-                let tmp = writer.into_inner();
-                self.buf = tmp;
+                self.buf = writer.into_inner();
             }
         };
         self.compression_algorithm.encode(&mut self.buf);
@@ -360,8 +358,8 @@ mod tests {
         builder.add(&full_key(b"k2", 2), b"v02");
         builder.add(&full_key(b"k3", 3), b"v03");
         builder.add(&full_key(b"k4", 4), b"v04");
-        let buf = builder.build();
-        let block = Box::new(Block::decode(buf).unwrap());
+        let buf = builder.build().to_vec();
+        let block = Box::new(Block::decode(Bytes::from(buf)).unwrap());
         let mut bi = BlockIterator::new(BlockHolder::from_owned_block(block));
 
         bi.seek_to_first();
@@ -404,8 +402,8 @@ mod tests {
         builder.add(&full_key(b"k2", 2), b"v02");
         builder.add(&full_key(b"k3", 3), b"v03");
         builder.add(&full_key(b"k4", 4), b"v04");
-        let buf = builder.build();
-        let block = Box::new(Block::decode(buf).unwrap());
+        let buf = builder.build().to_vec();
+        let block = Box::new(Block::decode(Bytes::from(buf)).unwrap());
         let mut bi = BlockIterator::new(BlockHolder::from_owned_block(block));
 
         bi.seek_to_first();
