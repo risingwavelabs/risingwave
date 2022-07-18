@@ -33,6 +33,7 @@ use risingwave_common::util::hash_util::CRC32FastBuilder;
 use risingwave_common::util::ordered::*;
 use risingwave_common::util::sort_util::OrderType;
 use risingwave_hummock_sdk::key::{end_bound_of_prefix, next_key, prefixed_range, range_of_prefix};
+use risingwave_pb::catalog::Table;
 
 use super::mem_table::RowOp;
 use super::{Distribution, TableIter};
@@ -149,6 +150,56 @@ impl<S: StateStore, RS: RowSerde> StorageTableBase<S, RS, READ_ONLY> {
             table_id,
             table_columns,
             column_ids,
+            order_types,
+            pk_indices,
+            distribution,
+        )
+    }
+
+    pub fn from_table_catalog(
+        table_catalog: &Table,
+        store: S,
+        vnodes: Option<Arc<Bitmap>>,
+    ) -> Self {
+        let table_columns: Vec<ColumnDesc> = table_catalog
+            .columns
+            .iter()
+            .map(|col| col.column_desc.as_ref().unwrap().into())
+            .collect();
+        let order_types = table_catalog
+            .order_key
+            .iter()
+            .map(|col_order| {
+                OrderType::from_prost(
+                    &risingwave_pb::plan_common::OrderType::from_i32(col_order.order_type).unwrap(),
+                )
+            })
+            .collect();
+        let dist_key_indices = table_catalog
+            .distribution_key
+            .iter()
+            .map(|dist_index| *dist_index as usize)
+            .collect();
+        let pk_indices = table_catalog
+            .order_key
+            .iter()
+            .map(|col_order| col_order.index as usize)
+            .collect();
+        let distribution = match vnodes {
+            Some(vnodes) => Distribution {
+                dist_key_indices,
+                vnodes,
+            },
+            None => Distribution::fallback(),
+        };
+        Self::new_partial(
+            store,
+            TableId::new(table_catalog.id),
+            table_columns.clone(),
+            table_columns
+                .iter()
+                .map(|table_column| table_column.column_id)
+                .collect(),
             order_types,
             pk_indices,
             distribution,

@@ -19,7 +19,7 @@ use risingwave_common::array::{Row, RowRef};
 use risingwave_common::catalog::{ColumnDesc, Schema};
 use risingwave_common::error::Result;
 use risingwave_common::util::sort_util::OrderPair;
-use risingwave_storage::table::state_table::StateTable;
+use risingwave_storage::table::storage_table::StorageTable;
 use risingwave_storage::StateStore;
 
 use super::sides::{stream_lookup_arrange_prev_epoch, stream_lookup_arrange_this_epoch};
@@ -100,7 +100,8 @@ pub struct LookupExecutorParams<S: StateStore> {
     /// The join keys on the arrangement side.
     pub arrange_join_key_indices: Vec<usize>,
 
-    pub state_table: StateTable<S>,
+    // pub state_table: StateTable<S>,
+    pub storage_table: StorageTable<S, false>,
 }
 
 impl<S: StateStore> LookupExecutor<S> {
@@ -116,7 +117,7 @@ impl<S: StateStore> LookupExecutor<S> {
             arrange_join_key_indices,
             schema: output_schema,
             column_mapping,
-            state_table,
+            storage_table,
         } = params;
 
         let output_column_length = stream.schema().len() + arrangement.schema().len();
@@ -208,7 +209,7 @@ impl<S: StateStore> LookupExecutor<S> {
                 order_rules: arrangement_order_rules,
                 key_indices: arrange_join_key_indices,
                 use_current_epoch,
-                state_table,
+                storage_table,
             },
             column_mapping,
             key_indices_mapping,
@@ -381,14 +382,14 @@ impl<S: StateStore> LookupExecutor<S> {
         {
             let all_data_iter = self
                 .arrangement
-                .state_table
-                .iter_with_pk_prefix(&lookup_row, lookup_epoch)
-                .await?
-                .fuse();
+                .storage_table
+                .streaming_iter_with_pk_bounds(lookup_epoch, &lookup_row, ..)
+                .await?;
             pin_mut!(all_data_iter);
             while let Some(inner) = all_data_iter.next().await {
                 let ret = inner?;
-                all_rows.push(ret.into_owned());
+                // Only need value (include storage pk).
+                all_rows.push(ret.1.clone());
             }
         }
 
