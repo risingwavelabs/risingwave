@@ -37,6 +37,10 @@ pub struct Table {
 }
 
 impl Table {
+    pub fn new(name: String, columns: Vec<Column>) -> Self {
+        Self { name, columns }
+    }
+
     pub fn get_qualified_columns(&self) -> Vec<Column> {
         self.columns
             .iter()
