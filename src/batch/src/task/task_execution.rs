@@ -221,14 +221,19 @@ impl<C: BatchTaskContext> BatchTaskExecution<C> {
             serde_json::to_string_pretty(self.plan.get_root()?).unwrap()
         );
         *self.state.lock() = TaskStatus::Running;
-        let exec = ExecutorBuilder::new(
-            self.plan.root.as_ref().unwrap(),
-            &self.task_id,
-            self.context.clone(),
-            self.epoch,
-        )
-        .build()
-        .await?;
+
+        let exec = DEBUG_CONTEXT
+            .scope(
+                DebugContext::BatchQuery,
+                ExecutorBuilder::new(
+                    self.plan.root.as_ref().unwrap(),
+                    &self.task_id,
+                    self.context.clone(),
+                    self.epoch,
+                )
+                .build(),
+            )
+            .await?;
 
         let (sender, receivers) = create_output_channel(self.plan.get_exchange_info()?)?;
         let (shutdown_tx, shutdown_rx) = tokio::sync::oneshot::channel::<u64>();
