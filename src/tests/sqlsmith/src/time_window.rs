@@ -31,7 +31,7 @@ impl<'a, R: Rng> SqlGenerator<'a, R> {
 
         let name = Expr::Identifier(source_table_name.as_str().into());
         // TODO: Currently only literal interval supported.
-        // Tracked in: <TODO>
+        // Tracked in: <https://github.com/singularity-data/risingwave/issues/3896>
         let size = self.gen_simple_scalar(DataTypeName::Interval);
         let time_col = Expr::Identifier(time_col.name.as_str().into());
         let args = [name, time_col, size]
