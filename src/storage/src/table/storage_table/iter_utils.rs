@@ -35,7 +35,7 @@ struct Node<S: PkAndRowStream> {
 impl<S: PkAndRowStream> PartialEq for Node<S> {
     fn eq(&self, other: &Self) -> bool {
         match self.peeked.0 == other.peeked.0 {
-            true => unreachable!("primary keys from different iters should be unique"),
+            true => unreachable!("primary key from different iters should be unique"),
             false => false,
         }
     }
@@ -54,8 +54,8 @@ impl<S: PkAndRowStream> Ord for Node<S> {
     }
 }
 
-/// Merge multiple streams of primary keys and rows into a single stream, sorted by primary key.
-/// We should ensure that the primary keys from different streams are unique.
+/// Merge multiple streams of primary key and rows into a single stream, sorted by primary key.
+/// We should ensure that the primary key from different streams are unique.
 #[try_stream(ok = (Vec<u8>, Row), error = StorageError)]
 pub(super) async fn merge_sort<S>(streams: Vec<S>)
 where

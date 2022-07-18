@@ -32,7 +32,6 @@
 #![feature(backtrace)]
 #![feature(map_first_last)]
 #![feature(type_alias_impl_trait)]
-#![feature(let_chains)]
 #![feature(test)]
 #![feature(custom_test_frameworks)]
 #![feature(result_option_inspect)]

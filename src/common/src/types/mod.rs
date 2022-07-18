@@ -90,10 +90,18 @@ pub enum DataType {
     List { datatype: Box<DataType> },
 }
 
+pub fn unnested_list_type(datatype: DataType) -> DataType {
+    match datatype {
+        DataType::List { datatype } => unnested_list_type(*datatype),
+        _ => datatype,
+    }
+}
+
 const DECIMAL_DEFAULT_PRECISION: u32 = 20;
 const DECIMAL_DEFAULT_SCALE: u32 = 6;
 
 impl From<&ProstDataType> for DataType {
+    #[expect(clippy::needless_borrow)]
     fn from(proto: &ProstDataType) -> DataType {
         match proto.get_type_name().expect("missing type field") {
             TypeName::Int16 => DataType::Int16,
@@ -764,7 +772,7 @@ impl ScalarImpl {
                     DataType::Date => size_of::<NaiveDateWrapper>(),
                     DataType::Time => size_of::<NaiveTimeWrapper>(),
                     DataType::Timestamp => size_of::<NaiveDateTimeWrapper>(),
-                    DataType::Timestampz => size_of::<NaiveDateTimeWrapper>(),
+                    DataType::Timestampz => size_of::<i64>(),
                     DataType::Boolean => size_of::<u8>(),
                     DataType::Interval => size_of::<IntervalUnit>(),
 
@@ -800,9 +808,9 @@ impl ScalarImpl {
             ScalarImpl::Bool(v) => (*v as i8).to_be_bytes().to_vec(),
             ScalarImpl::Decimal(v) => v.to_string().as_bytes().to_vec(),
             ScalarImpl::Interval(v) => v.to_protobuf_owned(),
-            ScalarImpl::NaiveDate(_) => todo!(),
-            ScalarImpl::NaiveDateTime(_) => todo!(),
-            ScalarImpl::NaiveTime(_) => todo!(),
+            ScalarImpl::NaiveDate(v) => v.to_protobuf_owned(),
+            ScalarImpl::NaiveDateTime(v) => v.to_protobuf_owned(),
+            ScalarImpl::NaiveTime(v) => v.to_protobuf_owned(),
             ScalarImpl::Struct(v) => v.to_protobuf_owned(),
             ScalarImpl::List(v) => v.to_protobuf_owned(),
         };
@@ -862,6 +870,11 @@ impl ScalarImpl {
                 b,
                 data_type.get_interval_type()?,
             )?),
+            TypeName::Timestamp => {
+                ScalarImpl::NaiveDateTime(NaiveDateTimeWrapper::from_protobuf_bytes(b)?)
+            }
+            TypeName::Time => ScalarImpl::NaiveTime(NaiveTimeWrapper::from_protobuf_bytes(b)?),
+            TypeName::Date => ScalarImpl::NaiveDate(NaiveDateWrapper::from_protobuf_bytes(b)?),
             TypeName::Struct => {
                 let struct_value: ProstStructValue = Message::decode(b.as_slice())?;
                 let fields: Vec<Datum> = struct_value
@@ -989,5 +1002,24 @@ mod tests {
         assert_eq!(std::mem::size_of::<Decimal>(), 20);
         assert_eq!(std::mem::size_of::<ScalarImpl>(), 32);
         assert_eq!(std::mem::size_of::<Datum>(), 32);
+    }
+
+    #[test]
+    fn test_protobuf_conversion() {
+        let v = ScalarImpl::NaiveDateTime(NaiveDateTimeWrapper::default());
+        let actual =
+            ScalarImpl::bytes_to_scalar(&v.to_protobuf(), &DataType::Timestamp.to_protobuf())
+                .unwrap();
+        assert_eq!(v, actual);
+
+        let v = ScalarImpl::NaiveDate(NaiveDateWrapper::default());
+        let actual =
+            ScalarImpl::bytes_to_scalar(&v.to_protobuf(), &DataType::Date.to_protobuf()).unwrap();
+        assert_eq!(v, actual);
+
+        let v = ScalarImpl::NaiveTime(NaiveTimeWrapper::default());
+        let actual =
+            ScalarImpl::bytes_to_scalar(&v.to_protobuf(), &DataType::Time.to_protobuf()).unwrap();
+        assert_eq!(v, actual);
     }
 }
