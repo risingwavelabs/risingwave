@@ -159,7 +159,6 @@ impl<'a, R: Rng> SqlGenerator<'a, R> {
 
         let distinct = self.flip_coin();
         make_agg_expr(func.func.clone(), expr[0].clone(), distinct)
-            .unwrap_or_else(|| self.gen_simple_scalar(ret))
     }
 }
 
@@ -204,30 +203,20 @@ fn make_general_expr(func: ExprType, exprs: Vec<Expr>) -> Option<Expr> {
     }
 }
 
-fn make_agg_expr(func: AggKind, expr: Expr, distinct: bool) -> Option<Expr> {
+fn make_agg_expr(func: AggKind, expr: Expr, distinct: bool) -> Expr {
     use AggKind as A;
 
     match func {
-        A::Sum => Some(Expr::Function(make_agg_func("sum", &[expr], distinct))),
-        A::Min => Some(Expr::Function(make_agg_func("min", &[expr], distinct))),
-        A::Max => Some(Expr::Function(make_agg_func("max", &[expr], distinct))),
-        A::Count => Some(Expr::Function(make_agg_func("count", &[expr], distinct))),
-        A::Avg => Some(Expr::Function(make_agg_func("avg", &[expr], distinct))),
-        A::StringAgg => Some(Expr::Function(make_agg_func(
-            "string_agg",
-            &[expr],
-            distinct,
-        ))),
-        A::SingleValue => Some(Expr::Function(make_agg_func(
-            "single_value",
-            &[expr],
-            false,
-        ))),
-        A::ApproxCountDistinct => Some(Expr::Function(make_agg_func(
-            "approx_count_distinct",
-            &[expr],
-            false,
-        ))),
+        A::Sum => Expr::Function(make_agg_func("sum", &[expr], distinct)),
+        A::Min => Expr::Function(make_agg_func("min", &[expr], distinct)),
+        A::Max => Expr::Function(make_agg_func("max", &[expr], distinct)),
+        A::Count => Expr::Function(make_agg_func("count", &[expr], distinct)),
+        A::Avg => Expr::Function(make_agg_func("avg", &[expr], distinct)),
+        A::StringAgg => Expr::Function(make_agg_func("string_agg", &[expr], distinct)),
+        A::SingleValue => Expr::Function(make_agg_func("single_value", &[expr], false)),
+        A::ApproxCountDistinct => {
+            Expr::Function(make_agg_func("approx_count_distinct", &[expr], false))
+        }
     }
 }
 
