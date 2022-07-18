@@ -55,6 +55,8 @@ pub struct SourceColumnDesc {
     pub name: String,
     pub data_type: DataType,
     pub column_id: ColumnId,
+    pub fields: Vec<ColumnDesc>,
+    /// Now `skip_parse` is used to indicate whether the column is a row id column.
     pub skip_parse: bool,
 }
 
@@ -64,7 +66,20 @@ impl From<&ColumnDesc> for SourceColumnDesc {
             name: c.name.clone(),
             data_type: c.data_type.clone(),
             column_id: c.column_id,
+            fields: c.field_descs.clone(),
             skip_parse: false,
+        }
+    }
+}
+
+impl From<&SourceColumnDesc> for ColumnDesc {
+    fn from(s: &SourceColumnDesc) -> Self {
+        ColumnDesc {
+            data_type: s.data_type.clone(),
+            column_id: s.column_id,
+            name: s.name.clone(),
+            field_descs: s.fields.clone(),
+            type_name: "".to_string(),
         }
     }
 }
@@ -134,13 +149,11 @@ impl SourceManager for MemSourceManager {
             .iter()
             .enumerate()
             .map(|(idx, c)| {
-                let c = c.column_desc.as_ref().unwrap().clone();
-                SourceColumnDesc {
-                    name: c.name.clone(),
-                    data_type: DataType::from(&c.column_type.unwrap()),
-                    column_id: ColumnId::from(c.column_id),
-                    skip_parse: idx as i32 == info.row_id_index,
-                }
+                let mut col = SourceColumnDesc::from(&ColumnDesc::from(
+                    c.column_desc.as_ref().unwrap().clone(),
+                ));
+                col.skip_parse = idx as i32 == info.row_id_index;
+                col
             })
             .collect::<Vec<SourceColumnDesc>>();
 

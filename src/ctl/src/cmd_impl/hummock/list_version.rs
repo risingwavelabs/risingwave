@@ -21,6 +21,6 @@ pub async fn list_version() -> anyhow::Result<()> {
     let meta_client = meta_opts.create_meta_client().await?;
     let version = meta_client.pin_version(u64::MAX).await?;
     println!("{:#?}", version);
-    meta_client.unpin_version(&[version.id]).await?;
+    meta_client.unpin_version().await?;
     Ok(())
 }

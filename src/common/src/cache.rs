@@ -757,7 +757,9 @@ impl<K: LruKey, T: LruValue> LruCache<K, T> {
     }
 }
 
-impl<K: LruKey + Clone, T: LruValue> LruCache<K, T> {
+/// Only implement `lookup_with_request_dedup` for static values, as they can be sent across tokio
+/// spawned futures.
+impl<K: LruKey + Clone + 'static, T: LruValue + 'static> LruCache<K, T> {
     pub async fn lookup_with_request_dedup<F, E, VC>(
         self: &Arc<Self>,
         hash: u64,
@@ -766,8 +768,8 @@ impl<K: LruKey + Clone, T: LruValue> LruCache<K, T> {
     ) -> Result<Result<CachableEntry<K, T>, E>, RecvError>
     where
         F: FnOnce() -> VC,
-        E: Error,
-        VC: Future<Output = Result<(T, usize), E>>,
+        E: Error + Send + 'static,
+        VC: Future<Output = Result<(T, usize), E>> + Send + 'static,
     {
         match self.lookup_for_request(hash, key.clone()) {
             LookupResult::Cached(entry) => Ok(Ok(entry)),
@@ -775,16 +777,24 @@ impl<K: LruKey + Clone, T: LruValue> LruCache<K, T> {
                 let entry = recv.await?;
                 Ok(Ok(entry))
             }
-            LookupResult::Miss => match fetch_value().await {
-                Ok((value, charge)) => {
-                    let entry = self.insert(key, hash, charge, value);
-                    Ok(Ok(entry))
-                }
-                Err(e) => {
-                    self.clear_pending_request(&key, hash);
-                    Ok(Err(e))
-                }
-            },
+            LookupResult::Miss => {
+                let this = self.clone();
+                let fetch_value = fetch_value();
+                tokio::spawn(async move {
+                    match fetch_value.await {
+                        Ok((value, charge)) => {
+                            let entry = this.insert(key, hash, charge, value);
+                            Ok(Ok(entry))
+                        }
+                        Err(e) => {
+                            this.clear_pending_request(&key, hash);
+                            Ok(Err(e))
+                        }
+                    }
+                })
+                .await
+                .unwrap()
+            }
         }
     }
 }

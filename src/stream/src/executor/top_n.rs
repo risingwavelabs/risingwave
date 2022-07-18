@@ -101,7 +101,7 @@ pub struct InnerTopNExecutor<S: StateStore> {
     /// storage.
     first_execution: bool,
 
-    #[allow(dead_code)]
+    #[expect(dead_code)]
     /// Indices of the columns on which key distribution depends.
     key_indices: Vec<usize>,
 }

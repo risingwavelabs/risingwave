@@ -365,6 +365,7 @@ impl<'a, K: Ord + Debug, V: Clone> BTreeMapTransaction<'a, K, V> {
     }
 
     /// Start a `BTreeMapEntryTransaction` when the `key` exists
+    #[allow(dead_code)]
     pub fn new_entry_txn(&mut self, key: K) -> Option<BTreeMapEntryTransaction<K, V>> {
         BTreeMapEntryTransaction::new(self.tree_ref, key, None)
     }
