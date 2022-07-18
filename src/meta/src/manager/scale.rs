@@ -108,42 +108,53 @@ where
     ) -> Result<()> {
         let mut task_cache_guard = task_cache.lock().await;
         let mut task = task_cache_guard.get_mut(&task_id).unwrap();
-
         if TaskStatus::Cancelled == task.get_task_status()? {
             return Ok(());
         }
 
-        task.task_status = TaskStatus::Building as i32;
-        task.insert(&*meta_store).await?;
-
         match task.get_task_type()? {
             TaskType::Invalid => unreachable!(),
             TaskType::ScaleIn => {
-                let _hosts = task.get_hosts();
+                task.task_status = TaskStatus::Building as i32;
+                task.insert(&*meta_store).await?;
+                let _hosts = task.get_hosts().clone();
+                drop(task_cache_guard);
+
                 // TODO: call some method to scale in
 
+                task_cache_guard = task_cache.lock().await;
+                task = task_cache_guard.get_mut(&task_id).unwrap();
                 task.task_status = TaskStatus::Finished as i32;
                 task.insert(&*meta_store).await?;
             }
             TaskType::ScaleOut => {
-                let _hosts = task.get_hosts();
-                let _fragment_parallelism = task.get_fragment_parallelism();
-                // TODO: call some method to scale out
-
-                // Drop lock guard. Allow other threads to abort the scale task.
+                let _hosts = task.get_hosts().clone();
+                let _fragment_parallelism = task.get_fragment_parallelism().clone();
                 drop(task_cache_guard);
 
-                // TODO: wait before CN starts.
+                // TODO: call some method and wait before CN starts.
                 // Temporarily replace them with `sleep` in unit tests.
                 #[cfg(test)]
-                tokio::time::sleep(std::time::Duration::from_secs(1)).await;
+                tokio::time::sleep(std::time::Duration::from_millis(500)).await;
 
                 task_cache_guard = task_cache.lock().await;
                 task = task_cache_guard.get_mut(&task_id).unwrap();
-                if TaskStatus::Cancelled != task.get_task_status()? {
-                    task.task_status = TaskStatus::Finished as i32;
-                    task.insert(&*meta_store).await?;
+                if TaskStatus::Cancelled == task.get_task_status()? {
+                    return Ok(());
                 }
+                task.task_status = TaskStatus::Building as i32;
+                task.insert(&*meta_store).await?;
+                drop(task_cache_guard);
+
+                // TODO: call some method to scale out
+                // Temporarily replace them with `sleep` in unit tests.
+                #[cfg(test)]
+                tokio::time::sleep(std::time::Duration::from_millis(500)).await;
+
+                task_cache_guard = task_cache.lock().await;
+                task = task_cache_guard.get_mut(&task_id).unwrap();
+                task.task_status = TaskStatus::Finished as i32;
+                task.insert(&*meta_store).await?;
             }
         }
 
@@ -151,6 +162,7 @@ where
     }
 
     pub async fn add_scale_task(&self, mut task: ScaleTask) -> Result<ScaleTaskId> {
+        // Make sure tasks in task_queue are sorted in ascending order by task_id.
         let mut task_cache_guard = self.task_cache.lock().await;
         let task_id = self.next_task_id.fetch_add(1, Ordering::Relaxed);
         task.task_id = task_id;
@@ -172,16 +184,16 @@ where
     pub async fn abort_task(&self, task_id: ScaleTaskId) -> Result<()> {
         let mut task_cache_guard = self.task_cache.lock().await;
         if let Some(task) = task_cache_guard.get_mut(&task_id) {
-            let task_status = task.get_task_status()?;
-            if TaskStatus::Pending == task_status || TaskStatus::Building == task_status {
-                task.task_status = TaskStatus::Cancelled as i32;
-                task.insert(&*self.meta_store).await?;
-                Ok(())
-            } else {
-                Err(RwError::from(ErrorCode::InternalError(format!(
+            match task.get_task_status()? {
+                TaskStatus::Pending => {
+                    task.task_status = TaskStatus::Cancelled as i32;
+                    task.insert(&*self.meta_store).await?;
+                    Ok(())
+                }
+                status => Err(RwError::from(ErrorCode::InternalError(format!(
                     "TaskStatus: {:?}",
-                    task_status
-                ))))
+                    status
+                )))),
             }
         } else {
             Err(RwError::from(ErrorCode::InternalError(
@@ -193,14 +205,15 @@ where
     pub async fn remove_task(&self, task_id: ScaleTaskId) -> Result<()> {
         let mut task_cache_guard = self.task_cache.lock().await;
         if let Some(task) = task_cache_guard.get_mut(&task_id) {
-            let task_status = task.get_task_status()?;
-            if TaskStatus::Pending != task_status && TaskStatus::Building != task_status {
-                task_cache_guard.remove(&task_id);
-                Ok(())
-            } else {
-                Err(RwError::from(ErrorCode::InternalError(
+            match task.get_task_status()? {
+                TaskStatus::Cancelled | TaskStatus::Finished | TaskStatus::Failed => {
+                    task_cache_guard.remove(&task_id);
+                    ScaleTask::delete(&*self.meta_store, &task_id).await?;
+                    Ok(())
+                }
+                _ => Err(RwError::from(ErrorCode::InternalError(
                     "Task is being executed.".to_string(),
-                )))
+                ))),
             }
         } else {
             Err(RwError::from(ErrorCode::InternalError(
@@ -212,8 +225,6 @@ where
 
 #[cfg(test)]
 mod tests {
-    use std::collections::HashMap;
-
     use super::*;
     use crate::manager::MetaSrvEnv;
 
@@ -242,7 +253,7 @@ mod tests {
 
         tokio::time::sleep(std::time::Duration::from_millis(10)).await;
         assert_eq!(
-            TaskStatus::Building,
+            TaskStatus::Pending,
             scale_manager.get_task_status(task1_id).await?
         );
         assert_eq!(
@@ -252,7 +263,7 @@ mod tests {
 
         scale_manager.abort_task(task2_id).await?;
         assert_eq!(
-            TaskStatus::Building,
+            TaskStatus::Pending,
             scale_manager.get_task_status(task1_id).await?
         );
         assert_eq!(
@@ -271,21 +282,6 @@ mod tests {
         scale_handle.await?;
         assert_eq!(
             TaskStatus::Finished,
-            scale_manager.get_task_status(task3_id).await?
-        );
-
-        scale_manager
-            .abort_task(task3_id)
-            .await
-            .expect_err("task3 should panic");
-        assert_eq!(
-            TaskStatus::Finished,
-            scale_manager.get_task_status(task3_id).await?
-        );
-
-        scale_manager.remove_task(task3_id).await?;
-        assert_eq!(
-            TaskStatus::NotFound,
             scale_manager.get_task_status(task3_id).await?
         );
 
@@ -313,7 +309,7 @@ mod tests {
 
         tokio::time::sleep(std::time::Duration::from_millis(10)).await;
         assert_eq!(
-            TaskStatus::Building,
+            TaskStatus::Pending,
             scale_manager.get_task_status(task1_id).await?
         );
 
@@ -334,7 +330,7 @@ mod tests {
         let task3_id = scale_manager.add_scale_task(task3).await?;
         assert_eq!(3, task3_id);
 
-        tokio::time::sleep(std::time::Duration::from_millis(10)).await;
+        tokio::time::sleep(std::time::Duration::from_millis(10 + 500)).await;
         assert_eq!(
             TaskStatus::Cancelled,
             scale_manager.get_task_status(task1_id).await?
@@ -347,6 +343,57 @@ mod tests {
             TaskStatus::Pending,
             scale_manager.get_task_status(task3_id).await?
         );
+
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn test_abort_and_remove_finished_task() -> Result<()> {
+        let env = MetaSrvEnv::for_test().await;
+        let (scale_manager, scale_handle, scale_shutdown) =
+            ScaleManager::new(env.meta_store_ref()).await?;
+
+        let task = ScaleTask {
+            task_id: 0,
+            task_type: TaskType::ScaleOut as i32,
+            hosts: vec![],
+            fragment_parallelism: HashMap::new(),
+            task_status: TaskStatus::NotFound as i32,
+        };
+        let task_id = scale_manager.add_scale_task(task).await?;
+        tokio::time::sleep(std::time::Duration::from_millis(10)).await;
+        scale_shutdown.send(()).unwrap();
+        scale_handle.await?;
+
+        assert_eq!(
+            TaskStatus::Finished,
+            scale_manager.get_task_status(task_id).await?
+        );
+
+        scale_manager
+            .abort_task(task_id)
+            .await
+            .expect_err("task should panic");
+        assert_eq!(
+            TaskStatus::Finished,
+            scale_manager.get_task_status(task_id).await?
+        );
+        assert_eq!(
+            TaskStatus::Finished,
+            ScaleTask::select(&*env.meta_store_ref(), &task_id)
+                .await?
+                .unwrap()
+                .get_task_status()?
+        );
+
+        scale_manager.remove_task(task_id).await?;
+        assert_eq!(
+            TaskStatus::NotFound,
+            scale_manager.get_task_status(task_id).await?
+        );
+        assert!(ScaleTask::select(&*env.meta_store_ref(), &task_id)
+            .await?
+            .is_none());
 
         Ok(())
     }
