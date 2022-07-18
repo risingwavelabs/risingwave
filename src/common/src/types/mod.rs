@@ -124,6 +124,7 @@ impl From<&ProstDataType> for DataType {
             }
             TypeName::List => DataType::List {
                 // The first (and only) item is the list element type.
+                #[expect(clippy::needless_borrow)]
                 datatype: Box::new((&proto.field_type[0]).into()),
             },
         }

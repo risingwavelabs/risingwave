@@ -119,14 +119,14 @@ impl LocalQueryExecution {
         let plan_node_prost = match second_stage_id {
             None => {
                 debug!("Local execution mode converts a plan with a single stage");
-                self.convert_plan_node(&*root_stage.root, &mut None, None)?
+                self.convert_plan_node(&root_stage.root, &mut None, None)?
             }
             Some(second_stage_ids) => {
                 debug!("Local execution mode converts a plan with two stages");
                 if second_stage_ids.is_empty() {
                     // This branch is defensive programming. The semantics should be the same as
                     // `None`.
-                    self.convert_plan_node(&*root_stage.root, &mut None, None)?
+                    self.convert_plan_node(&root_stage.root, &mut None, None)?
                 } else {
                     let mut second_stages = HashMap::new();
                     for second_stage_id in second_stage_ids {
@@ -136,7 +136,7 @@ impl LocalQueryExecution {
                     }
                     let mut stage_id_to_plan = Some(second_stages);
                     let res =
-                        self.convert_plan_node(&*root_stage.root, &mut stage_id_to_plan, None)?;
+                        self.convert_plan_node(&root_stage.root, &mut stage_id_to_plan, None)?;
                     assert!(
                         stage_id_to_plan.as_ref().unwrap().is_empty(),
                         "We expect that all the child stage plan fragments have been used"
@@ -201,7 +201,7 @@ impl LocalQueryExecution {
                         (workers.into_iter().zip_eq(vnode_bitmaps.into_iter())).enumerate()
                     {
                         let second_stage_plan_node = self.convert_plan_node(
-                            &*second_stage.root,
+                            &second_stage.root,
                             &mut None,
                             Some(vnode_bitmap),
                         )?;
@@ -234,7 +234,7 @@ impl LocalQueryExecution {
                     }
                 } else {
                     let second_stage_plan_node =
-                        self.convert_plan_node(&*second_stage.root, &mut None, None)?;
+                        self.convert_plan_node(&second_stage.root, &mut None, None)?;
                     let second_stage_plan_fragment = PlanFragment {
                         root: Some(second_stage_plan_node),
                         exchange_info: Some(ExchangeInfo {
