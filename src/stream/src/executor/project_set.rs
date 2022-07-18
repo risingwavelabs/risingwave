@@ -15,10 +15,14 @@
 use std::fmt::{Debug, Formatter};
 use std::sync::Arc;
 
+use either::Either;
 use futures::StreamExt;
 use futures_async_stream::try_stream;
-use risingwave_common::array::StreamChunk;
+use itertools::Itertools;
+use risingwave_common::array::column::Column;
+use risingwave_common::array::{ArrayBuilder, ArrayRef, DataChunk, I64ArrayBuilder, StreamChunk};
 use risingwave_common::catalog::{Field, Schema};
+use risingwave_common::util::chunk_coalesce::DEFAULT_CHUNK_BUFFER_SIZE;
 use risingwave_expr::table_function::ProjectSetSelectItem;
 
 use super::error::StreamExecutorError;
@@ -90,7 +94,6 @@ impl ProjectSetExecutor {
     async fn execute_inner(self) {
         let data_types = self.schema().data_types();
         let input = self.input.execute();
-        let select_list = Arc::new(self.select_list);
 
         #[for_await]
         for msg in input {
@@ -101,16 +104,81 @@ impl ProjectSetExecutor {
 
                     let (data_chunk, ops) = chunk.into_parts();
 
-                    #[for_await]
-                    for (i, ret) in
-                        ProjectSetSelectItem::execute(&select_list, &data_types, &data_chunk)
-                            .enumerate()
-                    {
-                        let ret = ret.map_err(StreamExecutorError::eval_error)?;
-                        let new_chunk =
-                            StreamChunk::from_parts(vec![ops[i]; ret.cardinality()], ret);
-                        yield Message::Chunk(new_chunk)
+                    // First column will be `projected_row_id`, which represents the index in the
+                    // output table
+                    let mut projected_row_id_builder =
+                        I64ArrayBuilder::new(DEFAULT_CHUNK_BUFFER_SIZE);
+                    let mut builders = data_types
+                        .iter()
+                        .map(|ty| ty.create_array_builder(DEFAULT_CHUNK_BUFFER_SIZE))
+                        .collect_vec();
+                    let mut ret_ops = vec![];
+
+                    let results: Vec<_> = self
+                        .select_list
+                        .iter()
+                        .map(|select_item| select_item.eval(&data_chunk))
+                        .try_collect()?;
+
+                    let mut iters = results.iter().map(|r| r.iter()).collect_vec();
+
+                    // each iteration corresponds to the outputs of one input row
+                    for op in ops {
+                        let items = iters
+                            .iter_mut()
+                            .map(|iter| {
+                                iter.next()
+                                    .expect("unexpected finished iterator from table functions")
+                            })
+                            .collect_vec();
+
+                        // The maximum length of the results of table functions will be the output
+                        // length.
+                        let max_tf_len = items
+                            .iter()
+                            .map(|i| i.as_ref().map_left(|arr| arr.len()).left_or(0))
+                            .max()
+                            .unwrap();
+
+                        ret_ops.extend(vec![op; max_tf_len]);
+                        for i in 0..max_tf_len {
+                            projected_row_id_builder.append(Some(i as i64))?;
+                        }
+
+                        for (item, builder) in items.into_iter().zip_eq(builders.iter_mut()) {
+                            match item {
+                                Either::Left(array_ref) => {
+                                    builder.append_array(&array_ref)?;
+                                    for _ in 0..(max_tf_len - array_ref.len()) {
+                                        builder.append_null()?;
+                                    }
+                                }
+                                Either::Right(datum_ref) => {
+                                    for _ in 0..max_tf_len {
+                                        builder.append_datum_ref(datum_ref)?;
+                                    }
+                                }
+                            }
+                        }
                     }
+                    // All the iterators should reach the end at the same time.
+                    assert!(
+                        iters.iter_mut().all(|i| i.next().is_none()),
+                        "unexpected unfinished iterator from table functions"
+                    );
+
+                    let mut columns = Vec::with_capacity(self.select_list.len() + 1);
+                    let projected_row_id: ArrayRef =
+                        Arc::new(projected_row_id_builder.finish()?.into());
+                    let cardinality = projected_row_id.len();
+                    columns.push(Column::new(projected_row_id));
+                    for builder in builders {
+                        columns.push(Column::new(Arc::new(builder.finish()?)))
+                    }
+
+                    let chunk = DataChunk::new(columns, cardinality);
+
+                    yield Message::Chunk(StreamChunk::from_parts(ret_ops, chunk));
                 }
                 m => yield m,
             }
@@ -183,27 +251,18 @@ mod tests {
             StreamChunk::from_pretty(
                 " I I i i
                 + 0 5 1 2
-                + 1 5 . 2",
-            ),
-            StreamChunk::from_pretty(
-                " I I i i
+                + 1 5 . 2
                 + 0 7 1 2
-                + 1 7 . 2",
-            ),
-            StreamChunk::from_pretty(
-                " I I i i
+                + 1 7 . 2
                 + 0 9 1 2
                 + 1 9 . 2",
             ),
             StreamChunk::from_pretty(
                 " I I  i i
                 + 0 15 1 2
-                + 1 15 . 2",
-            ),
-            StreamChunk::from_pretty(
-                " I I i i
-                - 0 9 1 2
-                - 1 9 . 2",
+                + 1 15 . 2
+                - 0 9  1 2
+                - 1 9  . 2",
             ),
         ];
 

@@ -14,11 +14,14 @@
 
 use std::sync::Arc;
 
+use either::Either;
 use futures_async_stream::try_stream;
 use itertools::Itertools;
-use risingwave_common::array::DataChunk;
+use risingwave_common::array::column::Column;
+use risingwave_common::array::{ArrayBuilder, ArrayRef, DataChunk, I64ArrayBuilder};
 use risingwave_common::catalog::{Field, Schema};
 use risingwave_common::error::{Result, RwError};
+use risingwave_common::util::chunk_coalesce::DEFAULT_CHUNK_BUFFER_SIZE;
 use risingwave_expr::table_function::ProjectSetSelectItem;
 use risingwave_pb::batch_plan::plan_node::NodeBody;
 
@@ -52,15 +55,80 @@ impl ProjectSetExecutor {
     #[try_stream(boxed, ok = DataChunk, error = RwError)]
     async fn do_execute(self: Box<Self>) {
         let data_types = self.schema().data_types();
-        let select_list = Arc::new(self.select_list);
+        assert!(!self.select_list.is_empty());
+
         #[for_await]
         for data_chunk in self.child.execute() {
             let data_chunk = data_chunk?;
 
-            #[for_await]
-            for ret in ProjectSetSelectItem::execute(&select_list, &data_types, &data_chunk) {
-                yield ret?;
+            // First column will be `projected_row_id`, which represents the index in the
+            // output table
+            let mut projected_row_id_builder = I64ArrayBuilder::new(DEFAULT_CHUNK_BUFFER_SIZE);
+            let mut builders = data_types
+                .iter()
+                .map(|ty| ty.create_array_builder(DEFAULT_CHUNK_BUFFER_SIZE))
+                .collect_vec();
+
+            let results: Vec<_> = self
+                .select_list
+                .iter()
+                .map(|select_item| select_item.eval(&data_chunk))
+                .try_collect()?;
+
+            let mut iters = results.iter().map(|r| r.iter()).collect_vec();
+
+            // each iteration corresponds to the outputs of one input row
+            loop {
+                let items = iters.iter_mut().map(|iter| iter.next()).collect_vec();
+
+                if items[0].is_none() {
+                    // All the iterators should reach the end at the same time.
+                    assert!(
+                        items.iter().all(|i| i.is_none()),
+                        "unexpected finished iterator from table functions"
+                    );
+                    break;
+                }
+                let items = items.into_iter().map(|i| i.unwrap()).collect_vec();
+
+                // The maximum length of the results of table functions will be the output length.
+                let max_tf_len = items
+                    .iter()
+                    .map(|i| i.as_ref().map_left(|arr| arr.len()).left_or(0))
+                    .max()
+                    .unwrap();
+
+                for i in 0..max_tf_len {
+                    projected_row_id_builder.append(Some(i as i64))?;
+                }
+
+                for (item, builder) in items.into_iter().zip_eq(builders.iter_mut()) {
+                    match item {
+                        Either::Left(array_ref) => {
+                            builder.append_array(&array_ref)?;
+                            for _ in 0..(max_tf_len - array_ref.len()) {
+                                builder.append_null()?;
+                            }
+                        }
+                        Either::Right(datum_ref) => {
+                            for _ in 0..max_tf_len {
+                                builder.append_datum_ref(datum_ref)?;
+                            }
+                        }
+                    }
+                }
             }
+            let mut columns = Vec::with_capacity(self.select_list.len() + 1);
+            let projected_row_id: ArrayRef = Arc::new(projected_row_id_builder.finish()?.into());
+            let cardinality = projected_row_id.len();
+            columns.push(Column::new(projected_row_id));
+            for builder in builders {
+                columns.push(Column::new(Arc::new(builder.finish()?)))
+            }
+
+            let chunk = DataChunk::new(columns, cardinality);
+
+            yield chunk;
         }
     }
 }
@@ -158,38 +226,24 @@ mod tests {
         let fields = &proj_executor.schema().fields;
         assert_eq!(fields[0].data_type, DataType::Int32);
 
-        let expected = vec![
-            DataChunk::from_pretty(
-                "I i i i
-                 0 1 1 2
-                 1 1 1 2
-                 2 1 . 2",
-            ),
-            DataChunk::from_pretty(
-                "I i i i
-                 0 2 1 2
-                 1 2 1 2
-                 2 2 . 2",
-            ),
-            DataChunk::from_pretty(
-                "I i     i i
-                 0 33333 1 2
-                 1 33333 1 2
-                 2 33333 . 2",
-            ),
-            DataChunk::from_pretty(
-                "I i i i
-                 0 4 1 2
-                 1 4 1 2
-                 2 4 . 2",
-            ),
-            DataChunk::from_pretty(
-                "I i i i
-                 0 5 1 2
-                 1 5 1 2
-                 2 5 . 2",
-            ),
-        ];
+        let expected = vec![DataChunk::from_pretty(
+            "I i     i i
+             0 1     1 2
+             1 1     1 2
+             2 1     . 2
+             0 2     1 2
+             1 2     1 2
+             2 2     . 2
+             0 33333 1 2
+             1 33333 1 2
+             2 33333 . 2
+             0 4     1 2
+             1 4     1 2
+             2 4     . 2
+             0 5     1 2
+             1 5     1 2
+             2 5     . 2",
+        )];
 
         #[for_await]
         for (i, result_chunk) in proj_executor.execute().enumerate() {

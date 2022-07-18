@@ -17,13 +17,8 @@ use std::iter::Cloned;
 use std::sync::Arc;
 
 use either::Either;
-use futures_async_stream::try_stream;
 use itertools::Itertools;
-use risingwave_common::array::column::Column;
-use risingwave_common::array::{
-    ArrayBuilder, ArrayImplIterator, ArrayRef, DataChunk, I64ArrayBuilder,
-};
-use risingwave_common::error::RwError;
+use risingwave_common::array::{ArrayImplIterator, ArrayRef, DataChunk};
 use risingwave_common::types::{DataType, DatumRef};
 use risingwave_pb::expr::project_set_select_item::SelectItem::*;
 use risingwave_pb::expr::{
@@ -125,16 +120,6 @@ impl From<BoxedExpression> for ProjectSetSelectItem {
     }
 }
 
-/// A column corresponds to the range `0..len`
-fn index_array_column(len: usize) -> Column {
-    let mut builder = I64ArrayBuilder::new(len);
-    for value in 0..len {
-        builder.append(Some(value as i64)).unwrap();
-    }
-    let array = builder.finish().unwrap();
-    Column::new(Arc::new(array.into()))
-}
-
 impl ProjectSetSelectItem {
     pub fn from_prost(prost: &SelectItemProst) -> Result<Self> {
         match prost.select_item.as_ref().unwrap() {
@@ -150,7 +135,7 @@ impl ProjectSetSelectItem {
         }
     }
 
-    fn eval(&self, input: &DataChunk) -> Result<ProjectSetSelectItemResult> {
+    pub fn eval(&self, input: &DataChunk) -> Result<ProjectSetSelectItemResult> {
         match self {
             ProjectSetSelectItem::TableFunction(tf) => tf
                 .eval(input)
@@ -160,82 +145,16 @@ impl ProjectSetSelectItem {
             }
         }
     }
-
-    /// First column will be `projected_row_id`, which represents the index in the output table
-    #[try_stream(boxed, ok = DataChunk, error = RwError)]
-    pub async fn execute<'a>(
-        select_list: &'a [Self],
-        data_types: &'a [DataType],
-        input: &'a DataChunk,
-    ) {
-        assert!(!select_list.is_empty());
-
-        let results: Vec<_> = select_list
-            .iter()
-            .map(|select_item| select_item.eval(input))
-            .try_collect()?;
-
-        let mut iters = results.iter().map(|r| r.iter()).collect_vec();
-
-        // each iteration corresponds to the outputs of one input row
-        loop {
-            let items = iters.iter_mut().map(|iter| iter.next()).collect_vec();
-
-            if items[0].is_none() {
-                // All the iterators should reach the end at the same time.
-                assert!(
-                    items.iter().all(|i| i.is_none()),
-                    "unexpected finished iterator from table functions"
-                );
-                break;
-            }
-            let items = items.into_iter().map(|i| i.unwrap()).collect_vec();
-
-            // The maximum length of the results of table functions will be the output length.
-            let max_tf_len = items
-                .iter()
-                .map(|i| i.as_ref().map_left(|arr| arr.len()).left_or(0))
-                .max()
-                .unwrap();
-            let builders = data_types
-                .iter()
-                .map(|ty| ty.create_array_builder(max_tf_len));
-
-            let mut columns = Vec::with_capacity(select_list.len() + 1);
-            columns.push(index_array_column(max_tf_len));
-
-            for (item, mut builder) in items.into_iter().zip_eq(builders) {
-                match item {
-                    Either::Left(array_ref) => {
-                        builder.append_array(&array_ref)?;
-                        for _ in 0..(max_tf_len - array_ref.len()) {
-                            builder.append_null()?;
-                        }
-                    }
-                    Either::Right(datum_ref) => {
-                        for _ in 0..max_tf_len {
-                            builder.append_datum_ref(datum_ref)?;
-                        }
-                    }
-                }
-                let array = builder.finish()?;
-                columns.push(Column::new(Arc::new(array)));
-            }
-            let chunk = DataChunk::new(columns, max_tf_len);
-
-            yield chunk;
-        }
-    }
 }
 
-enum ProjectSetSelectItemResult {
+pub enum ProjectSetSelectItemResult {
     TableFunction(Vec<ArrayRef>),
     Expr(ArrayRef),
 }
 
 type IterArrays<'a> = Cloned<slice::Iter<'a, ArrayRef>>;
 
-struct ProjectSetSelectItemResultIter<'a>(Either<IterArrays<'a>, ArrayImplIterator<'a>>);
+pub struct ProjectSetSelectItemResultIter<'a>(Either<IterArrays<'a>, ArrayImplIterator<'a>>);
 
 impl<'a> Iterator for ProjectSetSelectItemResultIter<'a> {
     type Item = Either<ArrayRef, DatumRef<'a>>;
@@ -249,7 +168,7 @@ impl<'a> Iterator for ProjectSetSelectItemResultIter<'a> {
 }
 
 impl ProjectSetSelectItemResult {
-    fn iter(&self) -> ProjectSetSelectItemResultIter<'_> {
+    pub fn iter(&self) -> ProjectSetSelectItemResultIter<'_> {
         ProjectSetSelectItemResultIter(match self {
             ProjectSetSelectItemResult::TableFunction(arrays) => {
                 Either::Left(arrays.iter().cloned())
