@@ -198,7 +198,8 @@ async fn bench(
             metrics
                 .insert_lats
                 .write()
-                .insert(start.elapsed().as_secs_f64());
+                .record(start.elapsed().as_micros() as u64)
+                .expect("record out of range");
             metrics.insert_ios.fetch_add(1, Ordering::Relaxed);
             metrics.insert_bytes.fetch_add(args.bs, Ordering::Relaxed);
         }
@@ -215,7 +216,8 @@ async fn bench(
             metrics
                 .get_lats
                 .write()
-                .insert(start.elapsed().as_secs_f64());
+                .record(start.elapsed().as_micros() as u64)
+                .expect("record out of range");
             metrics.get_ios.fetch_add(1, Ordering::Relaxed);
             if miss {
                 metrics.get_miss_ios.fetch_add(1, Ordering::Relaxed);

@@ -19,8 +19,8 @@ use std::time::{Duration, Instant};
 
 use async_trait::async_trait;
 use bytesize::ByteSize;
+use hdrhistogram::Histogram;
 use parking_lot::RwLock;
-use quantiles::ckms::CKMS;
 use risingwave_storage::hummock::file_cache::cache::FlushBufferHook;
 use risingwave_storage::hummock::file_cache::error::Result;
 use tokio::sync::oneshot;
@@ -74,11 +74,11 @@ pub struct MetricsDump {
 pub struct Metrics {
     pub insert_ios: Arc<AtomicUsize>,
     pub insert_bytes: Arc<AtomicUsize>,
-    pub insert_lats: Arc<RwLock<CKMS<f64>>>,
+    pub insert_lats: Arc<RwLock<Histogram<u64>>>,
 
     pub get_ios: Arc<AtomicUsize>,
     pub get_miss_ios: Arc<AtomicUsize>,
-    pub get_lats: Arc<RwLock<CKMS<f64>>>,
+    pub get_lats: Arc<RwLock<Histogram<u64>>>,
 
     pub flush_ios: Arc<AtomicUsize>,
     pub flush_bytes: Arc<AtomicUsize>,
@@ -89,11 +89,15 @@ impl Default for Metrics {
         Self {
             insert_ios: Arc::new(AtomicUsize::new(0)),
             insert_bytes: Arc::new(AtomicUsize::new(0)),
-            insert_lats: Arc::new(RwLock::new(CKMS::new(0.001))),
+            insert_lats: Arc::new(RwLock::new(
+                Histogram::new_with_bounds(1, 1_000_000, 2).unwrap(),
+            )),
 
             get_ios: Arc::new(AtomicUsize::new(0)),
             get_miss_ios: Arc::new(AtomicUsize::new(0)),
-            get_lats: Arc::new(RwLock::new(CKMS::new(0.001))),
+            get_lats: Arc::new(RwLock::new(
+                Histogram::new_with_bounds(1, 1_000_000, 2).unwrap(),
+            )),
 
             flush_ios: Arc::new(AtomicUsize::new(0)),
             flush_bytes: Arc::new(AtomicUsize::new(0)),
@@ -108,15 +112,15 @@ impl Metrics {
         MetricsDump {
             insert_ios: self.insert_ios.load(Ordering::Relaxed),
             insert_bytes: self.insert_bytes.load(Ordering::Relaxed),
-            insert_lat_p50: insert_lats.query(0.5).unwrap_or_default().1,
-            insert_lat_p90: insert_lats.query(0.9).unwrap_or_default().1,
-            insert_lat_p99: insert_lats.query(0.99).unwrap_or_default().1,
+            insert_lat_p50: insert_lats.value_at_quantile(0.5) as f64 / 1_000_000f64,
+            insert_lat_p90: insert_lats.value_at_quantile(0.9) as f64 / 1_000_000f64,
+            insert_lat_p99: insert_lats.value_at_quantile(0.99) as f64 / 1_000_000f64,
 
             get_ios: self.get_ios.load(Ordering::Relaxed),
             get_miss_ios: self.get_miss_ios.load(Ordering::Relaxed),
-            get_lat_p50: get_lats.query(0.5).unwrap_or_default().1,
-            get_lat_p90: get_lats.query(0.9).unwrap_or_default().1,
-            get_lat_p99: get_lats.query(0.99).unwrap_or_default().1,
+            get_lat_p50: get_lats.value_at_quantile(0.5) as f64 / 1_000_000f64,
+            get_lat_p90: get_lats.value_at_quantile(0.9) as f64 / 1_000_000f64,
+            get_lat_p99: get_lats.value_at_quantile(0.99) as f64 / 1_000_000f64,
 
             flush_ios: self.flush_ios.load(Ordering::Relaxed),
             flush_bytes: self.flush_bytes.load(Ordering::Relaxed),
