@@ -29,6 +29,7 @@ use crate::utils::{iostat, IoStat};
 
 const SECTOR_SIZE: usize = 512;
 
+// latencies are measured by 'us'
 #[derive(Clone, Copy, Debug)]
 pub struct Analysis {
     disk_read_iops: f64,
@@ -38,15 +39,15 @@ pub struct Analysis {
 
     insert_iops: f64,
     insert_throughput: f64,
-    insert_lat_p50: f64,
-    insert_lat_p90: f64,
-    insert_lat_p99: f64,
+    insert_lat_p50: u64,
+    insert_lat_p90: u64,
+    insert_lat_p99: u64,
 
     get_iops: f64,
     get_miss: f64,
-    get_lat_p50: f64,
-    get_lat_p90: f64,
-    get_lat_p99: f64,
+    get_lat_p50: u64,
+    get_lat_p90: u64,
+    get_lat_p99: u64,
 
     flush_iops: f64,
     flush_throughput: f64,
@@ -56,15 +57,15 @@ pub struct Analysis {
 pub struct MetricsDump {
     pub insert_ios: usize,
     pub insert_bytes: usize,
-    pub insert_lat_p50: f64,
-    pub insert_lat_p90: f64,
-    pub insert_lat_p99: f64,
+    pub insert_lat_p50: u64,
+    pub insert_lat_p90: u64,
+    pub insert_lat_p99: u64,
 
     pub get_ios: usize,
     pub get_miss_ios: usize,
-    pub get_lat_p50: f64,
-    pub get_lat_p90: f64,
-    pub get_lat_p99: f64,
+    pub get_lat_p50: u64,
+    pub get_lat_p90: u64,
+    pub get_lat_p99: u64,
 
     pub flush_ios: usize,
     pub flush_bytes: usize,
@@ -112,15 +113,15 @@ impl Metrics {
         MetricsDump {
             insert_ios: self.insert_ios.load(Ordering::Relaxed),
             insert_bytes: self.insert_bytes.load(Ordering::Relaxed),
-            insert_lat_p50: insert_lats.value_at_quantile(0.5) as f64 / 1_000_000f64,
-            insert_lat_p90: insert_lats.value_at_quantile(0.9) as f64 / 1_000_000f64,
-            insert_lat_p99: insert_lats.value_at_quantile(0.99) as f64 / 1_000_000f64,
+            insert_lat_p50: insert_lats.value_at_quantile(0.5),
+            insert_lat_p90: insert_lats.value_at_quantile(0.9),
+            insert_lat_p99: insert_lats.value_at_quantile(0.99),
 
             get_ios: self.get_ios.load(Ordering::Relaxed),
             get_miss_ios: self.get_miss_ios.load(Ordering::Relaxed),
-            get_lat_p50: get_lats.value_at_quantile(0.5) as f64 / 1_000_000f64,
-            get_lat_p90: get_lats.value_at_quantile(0.9) as f64 / 1_000_000f64,
-            get_lat_p99: get_lats.value_at_quantile(0.99) as f64 / 1_000_000f64,
+            get_lat_p50: get_lats.value_at_quantile(0.5),
+            get_lat_p90: get_lats.value_at_quantile(0.9),
+            get_lat_p99: get_lats.value_at_quantile(0.99),
 
             flush_ios: self.flush_ios.load(Ordering::Relaxed),
             flush_bytes: self.flush_bytes.load(Ordering::Relaxed),
@@ -185,28 +186,16 @@ impl std::fmt::Display for Analysis {
             "insert throughput: {}/s",
             insert_throughput.to_string_as(true)
         )?;
-        writeln!(
-            f,
-            "insert lat p50: {:.1}us",
-            self.insert_lat_p50 * 1_000_000f64
-        )?;
-        writeln!(
-            f,
-            "insert lat p90: {:.1}us",
-            self.insert_lat_p90 * 1_000_000f64
-        )?;
-        writeln!(
-            f,
-            "insert lat p99: {:.1}us",
-            self.insert_lat_p99 * 1_000_000f64
-        )?;
+        writeln!(f, "insert lat p50: {}us", self.insert_lat_p50)?;
+        writeln!(f, "insert lat p90: {}us", self.insert_lat_p90)?;
+        writeln!(f, "insert lat p99: {}us", self.insert_lat_p99)?;
 
         // get statics
         writeln!(f, "get iops: {:.1}/s", self.get_iops)?;
         writeln!(f, "get miss: {:.2}% ", self.get_miss * 100f64)?;
-        writeln!(f, "get lat p50: {:.1}us", self.get_lat_p50 * 1_000_000f64)?;
-        writeln!(f, "get lat p90: {:.1}us", self.get_lat_p90 * 1_000_000f64)?;
-        writeln!(f, "get lat p99: {:.1}us", self.get_lat_p99 * 1_000_000f64)?;
+        writeln!(f, "get lat p50: {}us", self.get_lat_p50)?;
+        writeln!(f, "get lat p90: {}us", self.get_lat_p90)?;
+        writeln!(f, "get lat p99: {}us", self.get_lat_p99)?;
 
         // flush statics
         let flush_throughput = ByteSize::b(self.flush_throughput as u64);
