@@ -67,7 +67,7 @@ pub struct BindContext {
 impl BindContext {
     pub fn get_column_binding_index(
         &self,
-        table_name: Option<&String>,
+        table_name: &Option<String>,
         column_name: &String,
     ) -> Result<usize> {
         match table_name {

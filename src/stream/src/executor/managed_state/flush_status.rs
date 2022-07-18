@@ -12,6 +12,9 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+// This module should be deleted after the string_agg refactor
+#![allow(dead_code)]
+
 use madsim::collections::btree_map;
 
 /// Represents an entry in the `flush_buffer`. No `FlushStatus` associated with a key means no-op.
@@ -52,7 +55,6 @@ impl<T: std::fmt::Debug> BtreeMapFlushStatus<T> {
         }
     }
 
-    #[allow(dead_code)]
     pub fn as_option(&self) -> Option<&T> {
         match self {
             Self::DeleteInsert(value) | Self::Insert(value) => Some(value),

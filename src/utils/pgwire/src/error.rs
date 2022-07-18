@@ -12,24 +12,56 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+use std::io::Error as IoError;
+
 use thiserror::Error;
+
+use crate::pg_server::BoxedError;
+pub type PsqlResult<T> = std::result::Result<T, PsqlError>;
 
 /// Error type used in pgwire crates.
 #[derive(Error, Debug)]
 pub enum PsqlError {
+    #[error("SslError: {0}.")]
+    SslError(IoError),
+
+    #[error("StartupError: {0}.")]
+    StartupError(BoxedError),
+
+    #[error("PasswordError: {0}.")]
+    PasswordError(IoError),
+
+    #[error("QueryError: {0}.")]
+    QueryError(BoxedError),
+
     #[error("Encode error {0}.")]
-    CancelError(String),
+    CancelMsg(String),
+
+    #[error("ParseError: {0}.")]
+    ParseError(BoxedError),
+
+    #[error("BindError: {0}.")]
+    BindError(IoError),
+
+    #[error("ExecuteError: {0}.")]
+    ExecuteError(BoxedError),
+
+    #[error("DescribeErrro: {0}.")]
+    DescribeError(IoError),
+
+    #[error("CloseError: {0}.")]
+    CloseError(IoError),
+
+    #[error("ReadMsgError: {0}.")]
+    ReadMsgError(IoError),
+
     #[error("{0}")]
-    UnrecognizedParamError(String),
+    IoError(#[from] IoError),
 }
 
 impl PsqlError {
     /// Construct a Cancel error. Used when Ctrl-c a processing query. Similar to PG.
     pub fn cancel() -> Self {
-        PsqlError::CancelError("ERROR:  canceling statement due to user request".to_string())
-    }
-
-    pub fn unrecognized_param(param: &str) -> Self {
-        PsqlError::UnrecognizedParamError(format!("ERROR: unrecognized parameter {}", param))
+        PsqlError::CancelMsg("ERROR:  canceling statement due to user request".to_string())
     }
 }

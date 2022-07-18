@@ -55,7 +55,7 @@ impl JoinRow {
         Self { row, degree }
     }
 
-    #[allow(dead_code)]
+    #[expect(dead_code)]
     pub fn size(&self) -> usize {
         self.row.size()
     }
@@ -151,6 +151,7 @@ impl JoinHashMapMetrics {
 
 pub struct JoinHashMap<K: HashKey, S: StateStore> {
     /// Allocator
+    #[expect(dead_code)]
     alloc: SharedStatsAlloc<Global>,
     /// Store the join states.
     // SAFETY: This is a self-referential data structure and the allocator is owned by the struct
@@ -205,7 +206,7 @@ impl<K: HashKey, S: StateStore> JoinHashMap<K, S> {
         }
     }
 
-    #[allow(dead_code)]
+    #[expect(dead_code)]
     /// Report the bytes used by the join map.
     // FIXME: Currently, only memory used in the hash map itself is counted.
     pub fn bytes_in_use(&self) -> usize {
