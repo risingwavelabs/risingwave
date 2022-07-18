@@ -17,7 +17,7 @@ use rand::prelude::SliceRandom;
 use rand::Rng;
 use risingwave_frontend::expr::DataTypeName;
 use risingwave_sqlparser::ast::{
-    FunctionArg, FunctionArgExpr, Ident, ObjectName, TableAlias, TableFactor, TableWithJoins,
+    DataType, FunctionArg, FunctionArgExpr, ObjectName, TableAlias, TableFactor, TableWithJoins,
 };
 
 use crate::{Column, Expr, SqlGenerator, Table};
@@ -25,7 +25,10 @@ use crate::{Column, Expr, SqlGenerator, Table};
 impl<'a, R: Rng> SqlGenerator<'a, R> {
     /// Generates time window functions.
     pub(crate) fn gen_time_window_func(&mut self) -> TableWithJoins {
-        self.gen_tumble()
+        match self.flip_coin() {
+            true => self.gen_hop(),
+            false => self.gen_tumble(),
+        }
     }
 
     /// Generates `TUMBLE`.
@@ -35,41 +38,85 @@ impl<'a, R: Rng> SqlGenerator<'a, R> {
         let (source_table_name, time_cols, schema) = tables
             .choose(&mut self.rng)
             .expect("seeded tables all do not have timestamp");
-        let table_name = format!("tumble_{}", &self.bound_relations.len());
-        let alias = TableAlias {
-            name: Ident::new(table_name.clone()),
-            columns: vec![],
-        };
+        let table_name = self.create_table_name_with_prefix("tumble");
+        let alias = create_alias(&table_name);
+
+        let name = Expr::Identifier(source_table_name.as_str().into());
+        // TODO: Currently only literal size expr supported.
+        // Tracked in: <https://github.com/singularity-data/risingwave/issues/3896>
+        let size = self.gen_simple_scalar(DataTypeName::Interval);
+        let time_col = time_cols.choose(&mut self.rng).unwrap();
+        let time_col = Expr::Identifier(time_col.name.as_str().into());
+        let args = create_args(vec![name, time_col, size]);
+        let relation = create_tvf("tumble", alias, args);
+
+        let table = Table::new(table_name, schema.clone());
+        self.add_relation_to_context(table);
+
+        relation
+    }
+
+    /// Generates `HOP`.
+    /// HOP(data: TABLE, timecol: COLUMN, slide: INTERVAL, size: INTERVAL, offset?: INTERVAL)
+    fn gen_hop(&mut self) -> TableWithJoins {
+        let tables = find_tables_with_timestamp_cols(self.tables.clone());
+        let (source_table_name, time_cols, schema) = tables
+            .choose(&mut self.rng)
+            .expect("seeded tables all do not have timestamp");
+        let table_name = self.create_table_name_with_prefix("hop");
+        let alias = create_alias(&table_name);
 
         let time_col = time_cols.choose(&mut self.rng).unwrap();
 
         let name = Expr::Identifier(source_table_name.as_str().into());
-        // TODO: Currently only literal interval supported.
-        // Tracked in: <https://github.com/singularity-data/risingwave/issues/3896>
+        // TODO: Currently only literal slide/size expr supported.
+        // Tracked in: <https://github.com/singularity-data/risingwave/issues/3896>.
+        // We fix slide to "1" here, as slide needs to be divisible by size.
+        let slide = Expr::TypedString {
+            data_type: DataType::Interval,
+            value: "1".to_string(),
+        };
         let size = self.gen_simple_scalar(DataTypeName::Interval);
         let time_col = Expr::Identifier(time_col.name.as_str().into());
-        let args = [name, time_col, size]
-            .into_iter()
-            .map(create_function_arg_from_expr)
-            .collect_vec();
+        let args = create_args(vec![name, time_col, slide, size]);
 
-        let factor = TableFactor::Table {
-            name: ObjectName(vec!["tumble".into()]),
-            alias: Some(alias),
-            args,
-        };
-        let relation = TableWithJoins {
-            relation: factor,
-            joins: vec![],
-        };
+        let relation = create_tvf("hop", alias, args);
 
-        let table = Table {
-            name: table_name,
-            columns: schema.clone(),
-        };
+        let table = Table::new(table_name, schema.clone());
         self.add_relation_to_context(table);
 
         relation
+    }
+
+    fn create_table_name_with_prefix(&self, prefix: &str) -> String {
+        format!("{}_{}", prefix, &self.bound_relations.len())
+    }
+}
+
+fn create_args(arg_exprs: Vec<Expr>) -> Vec<FunctionArg> {
+    arg_exprs
+        .into_iter()
+        .map(create_function_arg_from_expr)
+        .collect()
+}
+
+fn create_alias(table_name: &str) -> TableAlias {
+    TableAlias {
+        name: table_name.into(),
+        columns: vec![],
+    }
+}
+
+/// Create a table view function.
+fn create_tvf(name: &str, alias: TableAlias, args: Vec<FunctionArg>) -> TableWithJoins {
+    let factor = TableFactor::Table {
+        name: ObjectName(vec![name.into()]),
+        alias: Some(alias),
+        args,
+    };
+    TableWithJoins {
+        relation: factor,
+        joins: vec![],
     }
 }
 
