@@ -13,7 +13,6 @@
 // limitations under the License.
 
 use itertools::Itertools;
-use itertools::zip_eq;
 use rand::prelude::SliceRandom;
 use rand::Rng;
 use risingwave_frontend::expr::DataTypeName;
@@ -149,32 +148,18 @@ impl<'a, R: Rng> SqlGenerator<'a, R> {
         let (source_table_name, time_cols, schema) = tables
             .choose(&mut self.rng)
             .expect("seeded tables all do not have timestamp");
-        let table_name = format!("tumble_{}", &self.tables.len());
-        let column_aliases = schema
-            .iter()
-            .map(|c|
-            format!("{}.{}", table_name, c.name)
-        ).collect_vec();
+        let table_name = format!("tumble_{}", &self.bound_relations.len());
         let alias = TableAlias {
             name: Ident::new(table_name.clone()),
-            columns: column_aliases.iter().cloned().map(|s| s.as_str().into()).collect_vec(),
+            columns: vec![]
         };
-
-        let column_types = schema
-            .iter()
-            .map(|c| c.data_type)
-            .collect_vec();
-        let columns = zip_eq(column_aliases, column_types).map( |(name, data_type)| Column {name, data_type}).collect_vec();
-        let table = Table {
-            name: table_name,
-            columns,
-        };
-        self.add_relation_to_context(table);
 
         let time_col = time_cols.choose(&mut self.rng).unwrap();
 
         let name = Expr::Identifier(source_table_name.as_str().into());
-        let size = self.gen_expr(DataTypeName::Interval);
+        // TODO: Currently only literal interval supported.
+        // Tracked in: <TODO>
+        let size = self.gen_simple_scalar(DataTypeName::Interval);
         let time_col = Expr::Identifier(time_col.name.as_str().into());
         let args = [name, time_col, size]
             .into_iter()
@@ -190,6 +175,13 @@ impl<'a, R: Rng> SqlGenerator<'a, R> {
             relation: factor,
             joins: vec![],
         };
+
+        let table = Table {
+            name: table_name,
+            columns: schema.clone(),
+        };
+        self.add_relation_to_context(table);
+
         relation
     }
 }
@@ -204,9 +196,9 @@ fn is_timestamp_col(c: &Column) -> bool {
 }
 
 fn get_table_name_and_cols_with_timestamp(table: Table) -> (String, Vec<Column>, Vec<Column>) {
-    let name = table.name;
+    let name = table.name.clone();
     let cols_with_timestamp = table
-        .columns
+        .get_qualified_columns()
         .iter()
         .cloned()
         .filter(is_timestamp_col)
