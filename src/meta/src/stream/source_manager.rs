@@ -195,8 +195,8 @@ pub struct SourceManagerCore<S: MetaStore> {
 }
 
 impl<S> SourceManagerCore<S>
-where
-    S: MetaStore,
+    where
+        S: MetaStore,
 {
     fn new(
         fragment_manager: FragmentManagerRef<S>,
@@ -339,7 +339,7 @@ pub(crate) fn fetch_source_fragments(
     for fragment in table_fragments.fragments() {
         for actor in &fragment.actors {
             if let Some(source_id) =
-                TableFragments::fetch_stream_source_id(actor.nodes.as_ref().unwrap())
+            TableFragments::fetch_stream_source_id(actor.nodes.as_ref().unwrap())
             {
                 source_fragments
                     .entry(source_id)
@@ -400,8 +400,8 @@ fn diff_splits(
 }
 
 impl<S> SourceManager<S>
-where
-    S: MetaStore,
+    where
+        S: MetaStore,
 {
     const SOURCE_RETRY_INTERVAL: Duration = Duration::from_secs(10);
     const SOURCE_TICK_INTERVAL: Duration = Duration::from_secs(10);
@@ -534,6 +534,11 @@ where
             }
 
             if let Some(splits) = &handle.splits.lock().await.splits {
+                if splits.is_empty() {
+                    tracing::warn!("no splits detected for source {}", source_id);
+                    continue;
+                }
+
                 for fragment_id in fragments {
                     let empty_actor_splits = table_fragments
                         .fragments
@@ -546,7 +551,9 @@ where
                         .map(|actor| (actor.actor_id, vec![]))
                         .collect();
 
-                    assigned.extend(diff_splits(empty_actor_splits, splits).unwrap());
+                    if let Some(diff) = diff_splits(empty_actor_splits, splits) {
+                        assigned.extend(diff);
+                    }
                 }
             } else {
                 unreachable!();
@@ -556,7 +563,7 @@ where
         Ok(assigned)
     }
 
-    async fn all_stream_clients(&self) -> Result<impl Iterator<Item = StreamClient>> {
+    async fn all_stream_clients(&self) -> Result<impl Iterator<Item=StreamClient>> {
         // FIXME: there is gap between the compute node activate itself and source ddl operation,
         // create/drop source(non-stateful source like TableSource) before the compute node
         // activate itself will cause an inconsistent state. This situation will happen when some
@@ -571,8 +578,8 @@ where
                 .iter()
                 .map(|worker| self.env.stream_client_pool().get(worker)),
         )
-        .await?
-        .into_iter();
+            .await?
+            .into_iter();
 
         Ok(all_stream_clients)
     }
@@ -722,8 +729,8 @@ where
                 let command = command.clone();
                 self.barrier_manager.run_command(command).await
             })
-            .await
-            .expect("source manager barrier push down failed");
+                .await
+                .expect("source manager barrier push down failed");
 
             self.patch_update(None, Some(diff))
                 .await
