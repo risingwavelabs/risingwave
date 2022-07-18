@@ -19,6 +19,7 @@ use futures::StreamExt;
 use parking_lot::Mutex;
 use risingwave_common::array::DataChunk;
 use risingwave_common::error::{ErrorCode, Result, RwError};
+use risingwave_common::util::debug_context::{DebugContext, DEBUG_CONTEXT};
 use risingwave_pb::batch_plan::{
     PlanFragment, TaskId as ProstTaskId, TaskOutputId as ProstOutputId,
 };
@@ -246,8 +247,11 @@ impl<C: BatchTaskContext> BatchTaskExecution<C> {
             let join_handle = tokio::spawn(async move {
                 // We should only pass a reference of sender to execution because we should only
                 // close it after task error has been set.
-                if let Err(e) = self
-                    .try_execute(exec, &mut sender, shutdown_rx)
+                if let Err(e) = DEBUG_CONTEXT
+                    .scope(
+                        DebugContext::BatchQuery,
+                        self.try_execute(exec, &mut sender, shutdown_rx),
+                    )
                     .instrument(tracing::trace_span!(
                         "batch_execute",
                         task_id = ?task_id.task_id,

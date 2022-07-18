@@ -4198,6 +4198,7 @@ dependencies = [
  "comfy-table",
  "crc32fast",
  "either",
+ "enum-as-inner",
  "futures",
  "futures-async-stream",
  "humantime",

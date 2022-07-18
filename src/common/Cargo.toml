@@ -15,6 +15,7 @@ chrono = { version = "0.4", default-features = false, features = ["clock", "std"
 comfy-table = "6"
 crc32fast = "1"
 either = "1"
+enum-as-inner = "0.5"
 futures = { version = "0.3", default-features = false, features = ["alloc"] }
 futures-async-stream = "0.2"
 humantime = "2.1"
