@@ -42,8 +42,6 @@ struct Args {
     bs: usize,
     #[clap(long, default_value = "8")]
     concurrency: usize,
-    #[clap(long, default_value = "268435456")] // 256 MiB/s
-    throughput: usize,
     #[clap(long, default_value = "600")] // 600s
     time: u64,
     #[clap(long, default_value = "1")]
