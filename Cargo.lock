@@ -4825,6 +4825,7 @@ dependencies = [
  "madsim-tokio",
  "paste",
  "rand 0.8.5",
+ "risingwave_expr",
  "risingwave_frontend",
  "risingwave_sqlparser",
  "tokio-postgres",

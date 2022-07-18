@@ -58,7 +58,7 @@ pub struct LocalBarrierManager {
     senders: HashMap<ActorId, UnboundedSender<Barrier>>,
 
     /// Span of the current epoch.
-    #[allow(dead_code)]
+    #[expect(dead_code)]
     span: tracing::Span,
 
     /// Current barrier collection state.

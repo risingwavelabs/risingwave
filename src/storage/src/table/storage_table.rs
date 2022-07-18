@@ -80,7 +80,6 @@ pub struct StorageTableBase<S: StateStore, E: Encoding, const T: AccessType> {
 
     /// All columns of this table. Note that this is different from the output columns in
     /// `mapping.output_columns`.
-    #[allow(dead_code)]
     table_columns: Vec<ColumnDesc>,
 
     /// The schema of the output columns, i.e., this table VIEWED BY some executor like
