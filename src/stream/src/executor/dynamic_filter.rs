@@ -382,9 +382,6 @@ impl<S: StateStore> Executor for DynamicFilterExecutor<S> {
 
 #[cfg(test)]
 mod tests {
-    // TODO: create cond - for each of 4 types
-    // #[tokio::test]
-    // fn test_two_epoch_fail
     use risingwave_common::array::stream_chunk::StreamChunkTestExt;
     use risingwave_common::array::*;
     use risingwave_common::catalog::{ColumnDesc, ColumnId, Field, Schema, TableId};
