@@ -205,8 +205,7 @@ impl<S: StateStore> TopNExecutorBase for InnerAppendOnlyTopNExecutor<S> {
                 // `elem` is in the range of `[0, offset)`,
                 // we ignored it for now as it is not in the result set.
                 self.managed_lower_state
-                    .insert(ordered_pk_row, row, epoch)
-                    .await?;
+                    .insert(ordered_pk_row, row, epoch)?;
                 continue;
             }
 
@@ -223,21 +222,18 @@ impl<S: StateStore> TopNExecutorBase for InnerAppendOnlyTopNExecutor<S> {
                     .await?
                     .unwrap();
                 self.managed_lower_state
-                    .insert(ordered_pk_row, row, epoch)
-                    .await?;
+                    .insert(ordered_pk_row, row, epoch)?;
                 res
             } else {
                 (ordered_pk_row, row)
             };
 
             if self.managed_higher_state.total_count() < num_need_to_keep {
-                self.managed_higher_state
-                    .insert(
-                        element_to_compare_with_upper.0,
-                        element_to_compare_with_upper.1.clone(),
-                        epoch,
-                    )
-                    .await?;
+                self.managed_higher_state.insert(
+                    element_to_compare_with_upper.0,
+                    element_to_compare_with_upper.1.clone(),
+                    epoch,
+                )?;
                 new_ops.push(Op::Insert);
                 new_rows.push(element_to_compare_with_upper.1);
             } else if self.managed_higher_state.top_element().unwrap().0
@@ -252,13 +248,11 @@ impl<S: StateStore> TopNExecutorBase for InnerAppendOnlyTopNExecutor<S> {
                 new_rows.push(element_to_pop.1);
                 new_ops.push(Op::Insert);
                 new_rows.push(element_to_compare_with_upper.1.clone());
-                self.managed_higher_state
-                    .insert(
-                        element_to_compare_with_upper.0,
-                        element_to_compare_with_upper.1,
-                        epoch,
-                    )
-                    .await?;
+                self.managed_higher_state.insert(
+                    element_to_compare_with_upper.0,
+                    element_to_compare_with_upper.1,
+                    epoch,
+                )?;
             }
             // The "else" case can only be that `element_to_compare_with_upper` is larger than
             // the largest element in [offset, offset+limit), which is already full.

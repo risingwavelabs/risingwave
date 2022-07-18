@@ -47,7 +47,7 @@ pub use data_chunk::{DataChunk, DataChunkTestExt, Vis};
 pub use data_chunk_iter::{Row, RowDeserializer, RowRef};
 pub use decimal_array::{DecimalArray, DecimalArrayBuilder};
 pub use interval_array::{IntervalArray, IntervalArrayBuilder};
-pub use iterator::ArrayIterator;
+pub use iterator::{ArrayImplIterator, ArrayIterator};
 pub use list_array::{ListArray, ListArrayBuilder, ListRef, ListValue};
 use paste::paste;
 pub use primitive_array::{PrimitiveArray, PrimitiveArrayBuilder, PrimitiveArrayItemType};
@@ -57,7 +57,6 @@ pub use struct_array::{StructArray, StructArrayBuilder, StructRef, StructValue};
 pub use utf8_array::*;
 
 pub use self::error::ArrayError;
-use crate::array::iterator::ArrayImplIterator;
 use crate::buffer::Bitmap;
 use crate::types::*;
 pub type ArrayResult<T> = std::result::Result<T, ArrayError>;
@@ -352,6 +351,15 @@ macro_rules! impl_convert {
 
                 impl <'a> From<&'a ArrayImpl> for &'a $array {
                     fn from(array: &'a ArrayImpl) -> Self {
+                        match array {
+                            ArrayImpl::$variant_name(inner) => inner,
+                            other_array => panic!("cannot convert ArrayImpl::{} to concrete type {}", other_array.get_ident(), stringify!($variant_name))
+                        }
+                    }
+                }
+
+                impl From<ArrayImpl> for $array {
+                    fn from(array: ArrayImpl) -> Self {
                         match array {
                             ArrayImpl::$variant_name(inner) => inner,
                             other_array => panic!("cannot convert ArrayImpl::{} to concrete type {}", other_array.get_ident(), stringify!($variant_name))
