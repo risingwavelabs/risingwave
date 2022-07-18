@@ -52,7 +52,7 @@ pub trait OverlapStrategy: Send + Sync {
         }
         others
             .iter()
-            .filter(|table| info.check_overlap(*table))
+            .filter(|table| info.check_overlap(table))
             .cloned()
             .collect_vec()
     }
@@ -126,7 +126,7 @@ impl OverlapInfo for HashOverlapInfo {
     fn check_multiple_overlap(&self, others: &[SstableInfo]) -> Vec<SstableInfo> {
         others
             .iter()
-            .filter(|table| self.check_overlap(*table))
+            .filter(|table| self.check_overlap(table))
             .cloned()
             .collect_vec()
     }

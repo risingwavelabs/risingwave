@@ -197,7 +197,7 @@ impl<S: StateStore> GlobalSimpleAggExecutor<S> {
             .iter_mut()
             .zip_eq(state_tables.iter_mut())
         {
-            state.flush(state_table).await?;
+            state.flush(state_table)?;
         }
 
         // Batch commit state tables.

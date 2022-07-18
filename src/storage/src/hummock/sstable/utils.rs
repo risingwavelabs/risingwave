@@ -81,7 +81,7 @@ pub fn put_length_prefixed_slice(buf: &mut Vec<u8>, slice: &[u8]) {
 
 pub fn get_length_prefixed_slice(buf: &mut &[u8]) -> Vec<u8> {
     let len = buf.get_u32_le() as usize;
-    let v = (&buf[..len]).to_vec();
+    let v = buf[..len].to_vec();
     buf.advance(len);
     v
 }

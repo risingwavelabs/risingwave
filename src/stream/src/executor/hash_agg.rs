@@ -332,7 +332,7 @@ impl<K: HashKey, S: StateStore> HashAggExecutor<K, S> {
                         .iter_mut()
                         .zip_eq(state_tables.iter_mut())
                     {
-                        state.flush(state_table).await?;
+                        state.flush(state_table)?;
                     }
                 }
             }

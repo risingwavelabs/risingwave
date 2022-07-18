@@ -255,6 +255,7 @@ impl AwsConfigV2 {
         }
     }
 
+    #[expect(clippy::unused_async)]
     async fn build_role_provider(
         &self,
         external_id: Option<String>,

@@ -84,11 +84,8 @@ impl ToDistributedBatch for BatchSimpleAgg {
 
         // TODO: distinct agg cannot use 2-phase agg yet.
         if dist_input.distribution().satisfies(&RequiredDist::AnyShard)
-            && self
-                .logical
-                .agg_calls()
-                .iter()
-                .all(|call| !call.distinct && call.order_by_fields.is_empty())
+            && self.logical.agg_calls().iter().all(|call| !call.distinct)
+            && !self.logical.is_agg_result_affected_by_order()
         {
             // partial agg
             let partial_agg = self.clone_with_input(dist_input).into();

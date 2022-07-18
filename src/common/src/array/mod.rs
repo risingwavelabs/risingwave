@@ -358,6 +358,15 @@ macro_rules! impl_convert {
                     }
                 }
 
+                impl From<ArrayImpl> for $array {
+                    fn from(array: ArrayImpl) -> Self {
+                        match array {
+                            ArrayImpl::$variant_name(inner) => inner,
+                            other_array => panic!("cannot convert ArrayImpl::{} to concrete type {}", other_array.get_ident(), stringify!($variant_name))
+                        }
+                    }
+                }
+
                 impl From<$builder> for ArrayBuilderImpl {
                     fn from(builder: $builder) -> Self {
                         Self::$variant_name(builder)
