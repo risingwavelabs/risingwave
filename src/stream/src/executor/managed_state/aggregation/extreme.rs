@@ -12,12 +12,12 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+use std::collections::BTreeMap;
 use std::marker::PhantomData;
 
 use async_trait::async_trait;
 use futures::{pin_mut, StreamExt};
 use itertools::Itertools;
-use madsim::collections::BTreeMap;
 use risingwave_common::array::stream_chunk::{Op, Ops};
 use risingwave_common::array::{Array, ArrayImpl, Row};
 use risingwave_common::buffer::Bitmap;
@@ -472,8 +472,9 @@ pub fn create_streaming_extreme_state<S: StateStore>(
 
 #[cfg(test)]
 mod tests {
+    use std::collections::{BTreeSet, HashSet};
+
     use itertools::Itertools;
-    use madsim::collections::{BTreeSet, HashSet};
     use madsim::rand::prelude::*;
     use risingwave_common::array::{I64Array, Op};
     use risingwave_common::catalog::{ColumnDesc, ColumnId, TableId};

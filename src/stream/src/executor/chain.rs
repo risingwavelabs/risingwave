@@ -60,7 +60,7 @@ impl ChainExecutor {
             info: ExecutorInfo {
                 schema,
                 pk_indices: upstream.pk_indices().to_owned(),
-                identity: "Chain".to_owned(),
+                identity: "Chain".into(),
             },
             snapshot,
             upstream,
