@@ -192,8 +192,12 @@ async fn bench(
             let key = Index { sst, idx };
             let value = vec![b'x'; args.bs];
 
+            let start = Instant::now();
             cache.insert(key, value).unwrap();
-
+            metrics
+                .insert_lats
+                .write()
+                .insert(start.elapsed().as_secs_f64());
             metrics.insert_ios.fetch_add(1, Ordering::Relaxed);
             metrics.insert_bytes.fetch_add(args.bs, Ordering::Relaxed);
         }
@@ -204,7 +208,17 @@ async fn bench(
                     std::cmp::max(idx, args.look_up_range + 1) - args.look_up_range..=idx,
                 ),
             };
-            cache.get(&key).await.unwrap();
+
+            let start = Instant::now();
+            let miss = cache.get(&key).await.unwrap().is_none();
+            metrics
+                .get_lats
+                .write()
+                .insert(start.elapsed().as_secs_f64());
+            metrics.get_ios.fetch_add(1, Ordering::Relaxed);
+            if miss {
+                metrics.get_miss_ios.fetch_add(1, Ordering::Relaxed);
+            }
         }
 
         tokio::task::yield_now().await;

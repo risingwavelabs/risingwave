@@ -16,8 +16,9 @@ log = "0.4"
 madsim = "=0.2.0-alpha.3"
 moka = { version = "0.9", features = ["future"] }
 nix = { version = "0.24.1", features = ["fs", "mman"] }
+parking_lot = "0.12"
 prometheus = { version = "0.13", features = ["process"] }
-quantogram = "0.4"
+quantiles = "0.7.1"
 rand = "0.8"
 risingwave_common = { path = "../common" }
 risingwave_hummock_sdk = { path = "../storage/hummock_sdk" }

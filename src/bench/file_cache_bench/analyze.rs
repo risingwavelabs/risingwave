@@ -15,10 +15,12 @@
 use std::path::Path;
 use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::Arc;
-use std::time::Duration;
+use std::time::{Duration, Instant};
 
 use async_trait::async_trait;
 use bytesize::ByteSize;
+use parking_lot::RwLock;
+use quantiles::ckms::CKMS;
 use risingwave_storage::hummock::file_cache::cache::FlushBufferHook;
 use risingwave_storage::hummock::file_cache::error::Result;
 use tokio::sync::oneshot;
@@ -36,6 +38,16 @@ pub struct Analysis {
 
     insert_iops: f64,
     insert_throughput: f64,
+    insert_lat_p50: f64,
+    insert_lat_p90: f64,
+    insert_lat_p99: f64,
+
+    get_iops: f64,
+    get_miss: f64,
+    get_lat_p50: f64,
+    get_lat_p90: f64,
+    get_lat_p99: f64,
+
     flush_iops: f64,
     flush_throughput: f64,
 }
@@ -44,23 +56,68 @@ pub struct Analysis {
 pub struct MetricsDump {
     pub insert_ios: usize,
     pub insert_bytes: usize,
+    pub insert_lat_p50: f64,
+    pub insert_lat_p90: f64,
+    pub insert_lat_p99: f64,
+
+    pub get_ios: usize,
+    pub get_miss_ios: usize,
+    pub get_lat_p50: f64,
+    pub get_lat_p90: f64,
+    pub get_lat_p99: f64,
+
     pub flush_ios: usize,
     pub flush_bytes: usize,
 }
 
-#[derive(Default, Clone, Debug)]
+#[derive(Clone, Debug)]
 pub struct Metrics {
     pub insert_ios: Arc<AtomicUsize>,
     pub insert_bytes: Arc<AtomicUsize>,
+    pub insert_lats: Arc<RwLock<CKMS<f64>>>,
+
+    pub get_ios: Arc<AtomicUsize>,
+    pub get_miss_ios: Arc<AtomicUsize>,
+    pub get_lats: Arc<RwLock<CKMS<f64>>>,
+
     pub flush_ios: Arc<AtomicUsize>,
     pub flush_bytes: Arc<AtomicUsize>,
 }
 
+impl Default for Metrics {
+    fn default() -> Self {
+        Self {
+            insert_ios: Arc::new(AtomicUsize::new(0)),
+            insert_bytes: Arc::new(AtomicUsize::new(0)),
+            insert_lats: Arc::new(RwLock::new(CKMS::new(0.001))),
+
+            get_ios: Arc::new(AtomicUsize::new(0)),
+            get_miss_ios: Arc::new(AtomicUsize::new(0)),
+            get_lats: Arc::new(RwLock::new(CKMS::new(0.001))),
+
+            flush_ios: Arc::new(AtomicUsize::new(0)),
+            flush_bytes: Arc::new(AtomicUsize::new(0)),
+        }
+    }
+}
+
 impl Metrics {
     pub fn dump(&self) -> MetricsDump {
+        let insert_lats = self.insert_lats.read();
+        let get_lats = self.get_lats.read();
         MetricsDump {
             insert_ios: self.insert_ios.load(Ordering::Relaxed),
             insert_bytes: self.insert_bytes.load(Ordering::Relaxed),
+            insert_lat_p50: insert_lats.query(0.5).unwrap_or_default().1,
+            insert_lat_p90: insert_lats.query(0.9).unwrap_or_default().1,
+            insert_lat_p99: insert_lats.query(0.99).unwrap_or_default().1,
+
+            get_ios: self.get_ios.load(Ordering::Relaxed),
+            get_miss_ios: self.get_miss_ios.load(Ordering::Relaxed),
+            get_lat_p50: get_lats.query(0.5).unwrap_or_default().1,
+            get_lat_p90: get_lats.query(0.9).unwrap_or_default().1,
+            get_lat_p99: get_lats.query(0.99).unwrap_or_default().1,
+
             flush_ios: self.flush_ios.load(Ordering::Relaxed),
             flush_bytes: self.flush_bytes.load(Ordering::Relaxed),
         }
@@ -92,6 +149,7 @@ impl std::fmt::Display for Analysis {
         let disk_write_throughput = ByteSize::b(self.disk_write_throughput as u64);
         let disk_total_throughput = disk_read_throughput + disk_write_throughput;
 
+        // disk statics
         writeln!(
             f,
             "disk total iops: {:.1}",
@@ -115,15 +173,39 @@ impl std::fmt::Display for Analysis {
             disk_write_throughput.to_string_as(true)
         )?;
 
+        // insert statics
         let insert_throughput = ByteSize::b(self.insert_throughput as u64);
-        let flush_throughput = ByteSize::b(self.flush_throughput as u64);
-
         writeln!(f, "insert iops: {:.1}/s", self.insert_iops)?;
         writeln!(
             f,
             "insert throughput: {}/s",
             insert_throughput.to_string_as(true)
         )?;
+        writeln!(
+            f,
+            "insert lat p50: {:.1}us",
+            self.insert_lat_p50 * 1_000_000f64
+        )?;
+        writeln!(
+            f,
+            "insert lat p90: {:.1}us",
+            self.insert_lat_p90 * 1_000_000f64
+        )?;
+        writeln!(
+            f,
+            "insert lat p99: {:.1}us",
+            self.insert_lat_p99 * 1_000_000f64
+        )?;
+
+        // get statics
+        writeln!(f, "get iops: {:.1}/s", self.get_iops)?;
+        writeln!(f, "get miss: {:.2}% ", self.get_miss * 100f64)?;
+        writeln!(f, "get lat p50: {:.1}us", self.get_lat_p50 * 1_000_000f64)?;
+        writeln!(f, "get lat p90: {:.1}us", self.get_lat_p90 * 1_000_000f64)?;
+        writeln!(f, "get lat p99: {:.1}us", self.get_lat_p99 * 1_000_000f64)?;
+
+        // flush statics
+        let flush_throughput = ByteSize::b(self.flush_throughput as u64);
         writeln!(f, "flush iops: {:.1}/s", self.flush_iops)?;
         writeln!(
             f,
@@ -142,23 +224,24 @@ pub fn analyze(
     metrics_dump_end: &MetricsDump,
 ) -> Analysis {
     let secs = duration.as_secs_f64();
-    let disk_read_iops = (iostat_end.read_ios as f64 - iostat_start.read_ios as f64) / secs;
-    let disk_read_throughput = (iostat_end.read_sectors as f64 - iostat_start.read_sectors as f64)
-        * SECTOR_SIZE as f64
-        / secs;
-    let disk_write_iops = (iostat_end.write_ios as f64 - iostat_start.write_ios as f64) / secs;
+    let disk_read_iops = (iostat_end.read_ios - iostat_start.read_ios) as f64 / secs;
+    let disk_read_throughput =
+        (iostat_end.read_sectors - iostat_start.read_sectors) as f64 * SECTOR_SIZE as f64 / secs;
+    let disk_write_iops = (iostat_end.write_ios - iostat_start.write_ios) as f64 / secs;
     let disk_write_throughput =
-        (iostat_end.write_sectors as f64 - iostat_start.write_sectors as f64) * SECTOR_SIZE as f64
-            / secs;
+        (iostat_end.write_sectors - iostat_start.write_sectors) as f64 * SECTOR_SIZE as f64 / secs;
 
-    let foreground_write_iops =
-        (metrics_dump_end.insert_ios as f64 - metrics_dump_start.insert_ios as f64) / secs;
-    let foreground_write_throughput =
-        (metrics_dump_end.insert_bytes as f64 - metrics_dump_start.insert_bytes as f64) / secs;
-    let flush_data_iops =
-        (metrics_dump_end.flush_ios as f64 - metrics_dump_start.flush_ios as f64) / secs;
-    let flush_data_throughput =
-        (metrics_dump_end.flush_bytes as f64 - metrics_dump_start.flush_bytes as f64) / secs;
+    let insert_iops = (metrics_dump_end.insert_ios - metrics_dump_start.insert_ios) as f64 / secs;
+    let insert_throughput =
+        (metrics_dump_end.insert_bytes - metrics_dump_start.insert_bytes) as f64 / secs;
+
+    let get_iops = (metrics_dump_end.get_ios - metrics_dump_start.get_ios) as f64 / secs;
+    let get_miss = (metrics_dump_end.get_miss_ios - metrics_dump_start.get_miss_ios) as f64
+        / (metrics_dump_end.get_ios - metrics_dump_start.get_ios) as f64;
+
+    let flush_iops = (metrics_dump_end.flush_ios - metrics_dump_start.flush_ios) as f64 / secs;
+    let flush_throughput =
+        (metrics_dump_end.flush_bytes - metrics_dump_start.flush_bytes) as f64 / secs;
 
     Analysis {
         disk_read_iops,
@@ -166,10 +249,20 @@ pub fn analyze(
         disk_write_iops,
         disk_write_throughput,
 
-        insert_iops: foreground_write_iops,
-        insert_throughput: foreground_write_throughput,
-        flush_iops: flush_data_iops,
-        flush_throughput: flush_data_throughput,
+        insert_iops,
+        insert_throughput,
+        insert_lat_p50: metrics_dump_end.insert_lat_p50,
+        insert_lat_p90: metrics_dump_end.insert_lat_p90,
+        insert_lat_p99: metrics_dump_end.insert_lat_p99,
+
+        get_iops,
+        get_miss,
+        get_lat_p50: metrics_dump_end.get_lat_p50,
+        get_lat_p90: metrics_dump_end.get_lat_p90,
+        get_lat_p99: metrics_dump_end.get_lat_p99,
+
+        flush_iops,
+        flush_throughput,
     }
 }
 
@@ -182,6 +275,7 @@ pub async fn monitor(
     let mut stat = iostat(&iostat_path);
     let mut metrics_dump = metrics.dump();
     loop {
+        let start = Instant::now();
         match stop.try_recv() {
             Err(oneshot::error::TryRecvError::Empty) => {}
             _ => return,
@@ -190,7 +284,14 @@ pub async fn monitor(
         tokio::time::sleep(interval).await;
         let new_stat = iostat(&iostat_path);
         let new_metrics_dump = metrics.dump();
-        let analysis = analyze(interval, &stat, &new_stat, &metrics_dump, &new_metrics_dump);
+        let analysis = analyze(
+            // interval may have ~ +7% error
+            start.elapsed(),
+            &stat,
+            &new_stat,
+            &metrics_dump,
+            &new_metrics_dump,
+        );
         println!("{}", analysis);
         stat = new_stat;
         metrics_dump = new_metrics_dump;
