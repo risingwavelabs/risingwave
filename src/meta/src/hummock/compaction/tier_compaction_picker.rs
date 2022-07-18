@@ -308,7 +308,6 @@ impl CompactionPicker for LevelCompactionPicker {
 
         let is_l0_pending_compact = level_handlers[0].is_level_pending_compact(&l0.sub_levels[0]);
 
-        println!("is_l0_pending_compact: {}", is_l0_pending_compact);
         if !is_l0_pending_compact && levels.levels[self.target_level - 1].table_infos.is_empty() {
             level_handlers[select_level].add_pending_task(
                 next_task_id,
@@ -336,7 +335,6 @@ impl CompactionPicker for LevelCompactionPicker {
         let mut input_levels = self.pick_min_overlap_tables(l0, &levels.levels, level_handlers);
 
         if input_levels.is_empty() {
-            println!("empty input levels");
             return None;
         }
 
@@ -376,10 +374,6 @@ impl CompactionPicker for LevelCompactionPicker {
                 cal_file_size(&levels.levels[self.target_level - 1].table_infos) * 100
                     / l0_total_file_size;
             if write_amplification < all_level_amplification {
-                println!(
-                    "large write amplification: {:?}, {:?}",
-                    write_amplification, all_level_amplification
-                );
                 return None;
             }
             input_levels.push(InputLevel {
@@ -728,7 +722,7 @@ pub mod tests {
             .pick_compaction(&levels, &mut levels_handler)
             .unwrap();
 
-        // Will be trival move. The second file can not be picked up because the range of files
+        // Will be trivial move. The second file can not be picked up because the range of files
         // [3,4] would be overlap with file [0]
         assert!(ret.input_levels[1].table_infos.is_empty());
         assert_eq!(ret.target_level, 1);
@@ -757,8 +751,8 @@ pub mod tests {
                 sub_level_id: 0,
             }],
             l0: Some(generate_l0_with_overlap(vec![
-                generate_table(1, 1, 100, 190, 2),
-                generate_table(2, 1, 190, 250, 2),
+                generate_table(1, 1, 100, 210, 2),
+                generate_table(2, 1, 200, 250, 2),
             ])),
         };
         let mut levels_handler = vec![LevelHandler::new(0), LevelHandler::new(1)];
@@ -767,7 +761,7 @@ pub mod tests {
             .pick_compaction(&levels, &mut levels_handler)
             .unwrap();
 
-        assert_eq!(levels_handler[0].get_pending_file_count(), 2);
+        assert_eq!(levels_handler[0].get_pending_file_count(), 1);
         assert_eq!(levels_handler[1].get_pending_file_count(), 1);
 
         push_table_level0(&mut levels, generate_table(4, 1, 170, 180, 3));
