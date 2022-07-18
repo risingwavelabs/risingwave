@@ -14,7 +14,7 @@
 
 use std::collections::HashMap;
 use std::fs::File;
-use std::io::{BufRead, BufReader};
+use std::io::{BufRead, BufReader, Read, Seek, SeekFrom, Write};
 use std::path::Path;
 use std::sync::Arc;
 
@@ -23,7 +23,7 @@ use log::{debug, error, info};
 use tokio::process::Command;
 
 use crate::schedule::TestResult::{Different, Same};
-use crate::{init_env, FileManager, Opts, Psql};
+use crate::{init_env, DatabaseMode, FileManager, Opts, Psql};
 
 /// Result of each test case.
 #[derive(PartialEq)]
@@ -184,32 +184,62 @@ impl Schedule {
 impl TestCase {
     async fn run(self) -> anyhow::Result<TestResult> {
         let mut command = Command::new("psql");
-        let args = [
+        command.env(
+            "PGAPPNAME",
+            format!("risingwave_regress/{}", self.test_name),
+        );
+
+        let host = &self.opts.host();
+        let port = &self.opts.port().to_string();
+        let database_name = self.opts.database_name();
+        let pg_user_name = self.opts.pg_user_name();
+        let args: Vec<&str> = vec![
             "-X",
             "-a",
             "-q",
             "-h",
-            &self.opts.host().to_string(),
+            host,
             "-p",
-            &self.opts.port().to_string(),
+            port,
             "-d",
-            self.opts.database_name(),
+            database_name,
             "-U",
-            self.opts.pg_user_name(),
+            pg_user_name,
             "-v",
             "HIDE_TABLEAM=on",
             "-v",
             "HIDE_TOAST_COMPRESSION=on",
         ];
+        println!("Ready to run command:\npsql {}", args.join(" "));
         command.args(args);
 
-        println!("Ready to run command:\npsql {}", args.join(" "));
+        let mut extra_lines_added_to_input = vec![];
 
         let input_path = self.file_manager.source_of(&self.test_name)?;
-        let input_file = File::options()
+        let mut input_file = File::options()
             .read(true)
             .open(&input_path)
             .with_context(|| format!("Failed to open {:?} for read.", input_path))?;
+        let input_file = match self.opts.database_mode() {
+            DatabaseMode::Risingwave => {
+                extra_lines_added_to_input.push("SET RW_IMPLICIT_FLUSH TO true;");
+                let mut tmp_file = tempfile::tempfile()?;
+                for extra_line in &extra_lines_added_to_input {
+                    tmp_file.write_all(extra_line.as_bytes())?;
+                }
+                let mut buffer = String::new();
+                // read data from the whole input file and write them into the tmp_file
+                input_file.read_to_string(&mut buffer)?;
+                tmp_file.write_all(buffer.as_bytes())?;
+                // We reset the position because tmp_file will be read.
+                tmp_file.seek(SeekFrom::Start(0))?;
+                tmp_file
+            }
+            DatabaseMode::PostgreSQL => input_file,
+        };
+        command.stdin(input_file);
+
+        let expected_output_file = self.file_manager.expected_output_of(&self.test_name)?;
 
         let output_path = self.file_manager.output_of(&self.test_name)?;
         let output_file = File::options()
@@ -217,14 +247,6 @@ impl TestCase {
             .write(true)
             .open(&output_path)
             .with_context(|| format!("Failed to create {:?} for writing output.", output_path))?;
-
-        let expected_output_file = self.file_manager.expected_output_of(&self.test_name)?;
-
-        command.env(
-            "PGAPPNAME",
-            format!("risingwave_regress/{}", self.test_name),
-        );
-        command.stdin(input_file);
         command.stdout(
             output_file
                 .try_clone()
@@ -257,26 +279,28 @@ impl TestCase {
             );
         }
 
-        let expected_output = read_lines(&expected_output_file).with_context(|| {
+        let expected_output = read_lines(&expected_output_file, 0).with_context(|| {
             format!(
                 "Failed to read expected output file: {:?}",
                 expected_output_file
             )
         })?;
 
-        let actual_output = read_lines(&output_path)
+        // Since we may add some lines to the beginning of each file, and these lines will be
+        // part of the actual output. So here we ignore those lines.
+        let actual_output = read_lines(&output_path, extra_lines_added_to_input.len())
             .with_context(|| format!("Failed to read actual output file: {:?}", output_path))?;
 
         if expected_output == actual_output {
             Ok(Same)
         } else {
+            // If the output is not as expected, we output the diff for easier human reading.
             let diff_path = self.file_manager.diff_of(&self.test_name)?;
             let mut diff_file = File::options()
                 .create_new(true)
                 .write(true)
                 .open(&diff_path)
                 .with_context(|| format!("Failed to create {:?} for writing diff.", diff_path))?;
-            use std::io::Write;
             write!(
                 diff_file,
                 "{}",
@@ -289,7 +313,7 @@ impl TestCase {
 
 /// This function ignores the comments and empty lines. They are not compared between
 /// expected output file and actual output file.
-fn read_lines<P>(filename: P) -> std::io::Result<String>
+fn read_lines<P>(filename: P, mut skip: usize) -> std::io::Result<String>
 where
     P: AsRef<Path>,
 {
@@ -299,8 +323,12 @@ where
     for line in lines {
         let line = line?;
         if !line.starts_with("--") && !line.is_empty() {
-            res.push_str(&line);
-            res.push('\n');
+            if skip == 0 {
+                res.push_str(&line);
+                res.push('\n');
+            } else {
+                skip -= 1;
+            }
         }
     }
     Ok(res)
