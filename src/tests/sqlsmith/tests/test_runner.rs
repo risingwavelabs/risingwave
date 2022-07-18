@@ -29,7 +29,7 @@ use risingwave_sqlsmith::{mview_sql_gen, sql_gen, Table};
 
 /// Create the tables defined in testdata.
 async fn create_tables(session: Arc<SessionImpl>, rng: &mut impl Rng) -> Vec<Table> {
-    let seed_files = vec!["tests/testdata/tpch.sql", "tests/testdata/time_window.sql"];
+    let seed_files = vec!["tests/testdata/tpch.sql", "tests/testdata/nexmark.sql"];
     let sql = seed_files
         .iter()
         .map(|filename| std::fs::read_to_string(filename).unwrap())

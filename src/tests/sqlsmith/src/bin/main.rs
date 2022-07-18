@@ -81,7 +81,7 @@ async fn create_tables(
 ) -> (Vec<Table>, Vec<Table>) {
     log::info!("Preparing tables...");
 
-    let seed_files = vec!["tpch.sql", "time_window.sql"];
+    let seed_files = vec!["tpch.sql", "nexmark.sql"];
     let sql = seed_files
         .iter()
         .map(|filename| std::fs::read_to_string(format!("{}/{}", opt.testdata, filename)).unwrap())
@@ -127,7 +127,7 @@ async fn drop_tables(mviews: &[Table], opt: &TestOptions, client: &tokio_postgre
             .unwrap();
     }
 
-    let seed_files = vec!["drop_tpch.sql", "drop_time_window.sql"];
+    let seed_files = vec!["drop_tpch.sql", "drop_nexmark.sql"];
     let sql = seed_files
         .iter()
         .map(|filename| std::fs::read_to_string(format!("{}/{}", opt.testdata, filename)).unwrap())
