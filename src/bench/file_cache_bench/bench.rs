@@ -103,8 +103,7 @@ pub async fn run() {
     let metrics_dump_start = metrics.dump();
     let time_start = Instant::now();
 
-    let (mut txs, rxs): (Vec<_>, Vec<_>) =
-        (0..args.concurrency).map(|_| oneshot::channel()).unzip();
+    let (txs, rxs): (Vec<_>, Vec<_>) = (0..args.concurrency).map(|_| oneshot::channel()).unzip();
 
     let futures = rxs
         .into_iter()
@@ -121,7 +120,7 @@ pub async fn run() {
         })
         .collect_vec();
 
-    let mut handles = futures.into_iter().map(tokio::spawn).collect_vec();
+    let handles = futures.into_iter().map(tokio::spawn).collect_vec();
 
     let (tx_monitor, rx_monitor) = oneshot::channel();
     let handle_monitor = tokio::spawn({
@@ -137,19 +136,19 @@ pub async fn run() {
             .await;
         }
     });
-    txs.push(tx_monitor);
-    handles.push(handle_monitor);
 
     tokio::spawn(async move {
         tokio::signal::ctrl_c().await.unwrap();
         for tx in txs {
             let _ = tx.send(());
         }
+        let _ = tx_monitor.send(());
     });
 
     for handle in handles {
         handle.await.unwrap();
     }
+    handle_monitor.abort();
 
     let iostat_end = iostat(&iostat_path);
     let metrics_dump_end = metrics.dump();
@@ -160,7 +159,11 @@ pub async fn run() {
         &metrics_dump_start,
         &metrics_dump_end,
     );
-    println!("Total:\n{}", analysis);
+    println!("\nTotal:\n{}", analysis);
+
+    // TODO: Remove this after graceful shutdown is done.
+    // Waiting for the inflight flush io to pervent files from being closed.
+    tokio::time::sleep(Duration::from_millis(300)).await;
 }
 
 async fn bench(
