@@ -42,7 +42,10 @@ impl PulsarAdminClient {
         let res = self.http_get(topic, "partitions").await?;
 
         if res.status() == StatusCode::NOT_FOUND {
-            return Err(anyhow!("could not found metadata for pulsar topic {}", topic.to_string()));
+            return Err(anyhow!(
+                "could not find metadata for pulsar topic {}",
+                topic.to_string()
+            ));
         }
 
         let body = hyper::body::aggregate(res).await?;
@@ -65,8 +68,8 @@ impl PulsarAdminClient {
     }
 
     pub async fn get<T>(&self, topic: &Topic, api: &str) -> Result<T>
-        where
-            T: for<'a> serde::Deserialize<'a>,
+    where
+        T: for<'a> serde::Deserialize<'a>,
     {
         let res = self.http_get(topic, api).await?;
         let body = hyper::body::aggregate(res).await?;
@@ -132,7 +135,7 @@ mod test {
             "/admin/v2/persistent/public/default/t2/partitions",
             "{\"partitions\":3}",
         )
-            .await;
+        .await;
 
         let client = PulsarAdminClient::new(server.uri());
 

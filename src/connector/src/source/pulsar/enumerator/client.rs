@@ -37,8 +37,6 @@ pub enum PulsarEnumeratorOffset {
     Timestamp(i64),
 }
 
-impl PulsarSplitEnumerator {}
-
 #[async_trait]
 impl SplitEnumerator for PulsarSplitEnumerator {
     type Properties = PulsarProperties;
@@ -82,51 +80,40 @@ impl SplitEnumerator for PulsarSplitEnumerator {
         assert!(!matches!(offset, PulsarEnumeratorOffset::MessageId(_)));
 
         let topic_metadata = self.admin_client.get_topic_metadata(&self.topic).await?;
-
-        match self.topic.partition_index {
-            // partitioned topic
-            None => self
-                .admin_client
-                .get_topic_metadata(&self.topic)
-                .await
-                .and_then(|meta| {
-                    if meta.partitions < 0 {
-                        Err(anyhow!(
-                            "metadata illegal for topic {}",
-                            self.topic.to_string()
-                        ))
-                    } else {
-                        Ok(meta)
-                    }
-                })
-                .map(|meta| {
-                    (0..meta.partitions)
-                        .into_iter()
-                        .map(|p| PulsarSplit {
-                            topic: self.topic.sub_topic(p as i32).unwrap(),
-                            start_offset: offset.clone(),
-                        })
-                        .collect_vec()
-                }),
-            // non partitioned topic
-            Some(_) => {
-                // we need to check topic exists
-                self.admin_client
-                    .get_topic_metadata(&self.topic)
-                    .await
-                    .map(|_| {
-                        vec![PulsarSplit {
-                            topic: self.topic.clone(),
-                            start_offset: offset.clone(),
-                        }]
-                    })
-            }
+        // note: may check topic exists by get stats
+        if topic_metadata.partitions < 0 {
+            return Err(anyhow!(
+                "illegal metadata {:?} for pulsar topic {}",
+                topic_metadata.partitions,
+                self.topic.to_string()
+            ));
         }
+
+        let splits = if topic_metadata.partitions > 0 {
+            // partitioned topic
+            (0..topic_metadata.partitions as i32)
+                .into_iter()
+                .map(|p| PulsarSplit {
+                    topic: self.topic.sub_topic(p).unwrap(),
+                    start_offset: offset.clone(),
+                })
+                .collect_vec()
+        } else {
+            // non partitioned topic
+            vec![PulsarSplit {
+                topic: self.topic.clone(),
+                start_offset: offset.clone(),
+            }]
+        };
+
+        Ok(splits)
     }
 }
 
 #[cfg(test)]
 mod test {
+    use std::default::Default;
+
     use wiremock::{Mock, MockServer, ResponseTemplate};
 
     use crate::source::pulsar::{PulsarEnumeratorOffset, PulsarProperties, PulsarSplitEnumerator};
@@ -136,7 +123,7 @@ mod test {
         MockServer::start().await
     }
 
-    async fn mock_server(web_path: &str, body: &str) -> MockServer {
+    pub async fn mock_server(web_path: &str, body: &str) -> MockServer {
         let mock_server = MockServer::start().await;
         use wiremock::matchers::{method, path};
 
@@ -158,7 +145,6 @@ mod test {
         let prop = PulsarProperties {
             topic: "t".to_string(),
             admin_url: "http://test_illegal_url:8000".to_string(),
-            scan_startup_mode: Some("earliest".to_string()),
             ..Default::default()
         };
         let mut enumerator = PulsarSplitEnumerator::new(prop).await.unwrap();
@@ -172,7 +158,6 @@ mod test {
         let prop = PulsarProperties {
             topic: "t".to_string(),
             admin_url: server.uri(),
-            scan_startup_mode: Some("earliest".to_string()),
             ..Default::default()
         };
         let mut enumerator = PulsarSplitEnumerator::new(prop).await.unwrap();
@@ -180,7 +165,7 @@ mod test {
     }
 
     #[tokio::test]
-    async fn test_list_splits() {
+    async fn test_list_splits_with_partitioned_topic() {
         let server = mock_server(
             "/admin/v2/persistent/public/default/t/partitions",
             "{\"partitions\":3}",
@@ -190,9 +175,7 @@ mod test {
         let prop = PulsarProperties {
             topic: "t".to_string(),
             admin_url: server.uri(),
-            service_url: "".to_string(),
-            scan_startup_mode: Some("earliest".to_string()),
-            time_offset: None,
+            ..Default::default()
         };
         let mut enumerator = PulsarSplitEnumerator::new(prop).await.unwrap();
 
@@ -203,5 +186,26 @@ mod test {
             assert_eq!(splits[i].start_offset, PulsarEnumeratorOffset::Earliest);
             assert_eq!(splits[i].topic.partition_index, Some(i as i32));
         });
+    }
+
+    #[tokio::test]
+    async fn test_list_splits_with_non_partitioned_topic() {
+        let server = mock_server(
+            "/admin/v2/persistent/public/default/t/partitions",
+            "{\"partitions\":0}",
+        )
+        .await;
+
+        let prop = PulsarProperties {
+            topic: "t".to_string(),
+            admin_url: server.uri(),
+            ..Default::default()
+        };
+        let mut enumerator = PulsarSplitEnumerator::new(prop).await.unwrap();
+
+        let splits = enumerator.list_splits().await.unwrap();
+        assert_eq!(splits.len(), 1);
+        assert_eq!(splits[0].start_offset, PulsarEnumeratorOffset::Earliest);
+        assert_eq!(splits[0].topic.partition_index, None);
     }
 }
