@@ -605,7 +605,6 @@ pub mod tests {
                 generate_table(3, 1, 0, 50, 1),
                 generate_table(4, 1, 150, 200, 1),
                 generate_table(5, 1, 250, 300, 1),
-                generate_table(6, 1, 1000, 2000, 1),
             ],
             total_file_size: 0,
             sub_level_id: 0,
@@ -617,9 +616,14 @@ pub mod tests {
                 total_file_size: 0,
             }),
         };
-        push_table_level0(&mut levels, generate_table(1, 1, 100, 200, 2));
-        push_table_level0(&mut levels, generate_table(2, 1, 400, 500, 2));
-        push_table_level0(&mut levels, generate_table(7, 1, 200, 250, 2));
+        push_tables_level0(&mut levels, vec![generate_table(1, 1, 50, 60, 2)]);
+        push_tables_level0(
+            &mut levels,
+            vec![
+                generate_table(7, 1, 200, 250, 2),
+                generate_table(8, 1, 400, 500, 2),
+            ],
+        );
 
         let mut levels_handler = vec![LevelHandler::new(0), LevelHandler::new(1)];
 
@@ -627,17 +631,17 @@ pub mod tests {
             .pick_compaction(&levels, &mut levels_handler)
             .unwrap();
 
-        assert_eq!(levels_handler[0].get_pending_file_count(), 2);
+        assert_eq!(levels_handler[0].get_pending_file_count(), 3);
+        assert_eq!(levels_handler[1].get_pending_file_count(), 3);
 
-        assert_eq!(levels_handler[1].get_pending_file_count(), 2);
-
+        assert_eq!(ret.input_levels.len(), 3);
         assert_eq!(
             ret.input_levels[0]
                 .table_infos
                 .iter()
                 .map(|t| t.id)
                 .collect_vec(),
-            vec![1, 7]
+            vec![1]
         );
 
         assert_eq!(
@@ -646,12 +650,12 @@ pub mod tests {
                 .iter()
                 .map(|t| t.id)
                 .collect_vec(),
-            vec![4, 5]
+            vec![7, 8]
         );
     }
 
     #[test]
-    fn test_compacting_key_range_overlap_l0() {
+    fn test_l0_to_l1_compact_conflict() {
         // When picking L0->L1, L0's selecting_key_range should not be overlapped with L0's
         // compacting_key_range.
         let picker = create_compaction_picker_for_test();
@@ -669,9 +673,13 @@ pub mod tests {
                 total_file_size: 0,
             }),
         };
-        push_table_level0(&mut levels, generate_table(1, 1, 100, 300, 2));
-        push_table_level0(&mut levels, generate_table(2, 1, 250, 500, 2));
-
+        push_tables_level0(
+            &mut levels,
+            vec![
+                generate_table(1, 1, 100, 300, 2),
+                generate_table(2, 1, 350, 500, 2),
+            ],
+        );
         let mut levels_handler = vec![LevelHandler::new(0), LevelHandler::new(1)];
 
         let _ret = picker
@@ -680,15 +688,16 @@ pub mod tests {
         assert_eq!(levels_handler[0].get_pending_file_count(), 2);
         assert_eq!(levels_handler[1].get_pending_file_count(), 0);
 
-        push_table_level0(&mut levels, generate_table(3, 1, 250, 300, 3));
-
+        push_tables_level0(&mut levels, vec![generate_table(3, 1, 250, 300, 3)]);
+        let picker =
+            TierCompactionPicker::new(1, picker.config.clone(), picker.overlap_strategy.clone());
         assert!(picker
             .pick_compaction(&levels, &mut levels_handler)
             .is_none());
     }
 
     #[test]
-    fn test_compacting_key_range_overlap_l1() {
+    fn test_compact_to_l1_concurrently() {
         // When picking L0->L1, L0's selecting_key_range should not be overlapped with any L1 files
         // under compaction.
         let picker = create_compaction_picker_for_test();
@@ -715,8 +724,11 @@ pub mod tests {
         assert_eq!(levels_handler[0].get_pending_file_count(), 1);
         assert_eq!(levels_handler[1].get_pending_file_count(), 1);
 
-        push_table_level0(&mut levels, generate_table(3, 1, 100, 140, 3));
-        push_table_level0(&mut levels, generate_table(4, 1, 400, 500, 3));
+        levels.l0.as_mut().unwrap().sub_levels[0].table_infos = vec![
+            generate_table(3, 1, 100, 140, 3),
+            generate_table(1, 1, 200, 250, 2),
+            generate_table(4, 1, 400, 500, 3),
+        ];
 
         let ret = picker
             .pick_compaction(&levels, &mut levels_handler)
