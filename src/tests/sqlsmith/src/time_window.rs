@@ -25,7 +25,10 @@ use crate::{Column, Expr, SqlGenerator, Table};
 impl<'a, R: Rng> SqlGenerator<'a, R> {
     /// Generates time window functions.
     pub(crate) fn gen_time_window_func(&mut self) -> TableWithJoins {
-        self.gen_tumble()
+        match self.flip_coin() {
+            _ => self.gen_hop(),
+            // _ => self.gen_tumble(),
+        }
     }
 
     /// Generates `TUMBLE`.
@@ -44,7 +47,7 @@ impl<'a, R: Rng> SqlGenerator<'a, R> {
         let time_col = time_cols.choose(&mut self.rng).unwrap();
 
         let name = Expr::Identifier(source_table_name.as_str().into());
-        // TODO: Currently only literal interval supported.
+        // TODO: Currently only literal size expr supported.
         // Tracked in: <https://github.com/singularity-data/risingwave/issues/3896>
         let size = self.gen_simple_scalar(DataTypeName::Interval);
         let time_col = Expr::Identifier(time_col.name.as_str().into());
@@ -55,6 +58,51 @@ impl<'a, R: Rng> SqlGenerator<'a, R> {
 
         let factor = TableFactor::Table {
             name: ObjectName(vec!["tumble".into()]),
+            alias: Some(alias),
+            args,
+        };
+        let relation = TableWithJoins {
+            relation: factor,
+            joins: vec![],
+        };
+
+        let table = Table {
+            name: table_name,
+            columns: schema.clone(),
+        };
+        self.add_relation_to_context(table);
+
+        relation
+    }
+
+    /// Generates `HOP`.
+    /// HOP(data: TABLE, timecol: COLUMN, slide: INTERVAL, size: INTERVAL, offset?: INTERVAL)
+    fn gen_hop(&mut self) -> TableWithJoins {
+        let tables = find_tables_with_timestamp_cols(self.tables.clone());
+        let (source_table_name, time_cols, schema) = tables
+            .choose(&mut self.rng)
+            .expect("seeded tables all do not have timestamp");
+        let table_name = format!("hop_{}", &self.bound_relations.len());
+        let alias = TableAlias {
+            name: Ident::new(table_name.clone()),
+            columns: vec![],
+        };
+
+        let time_col = time_cols.choose(&mut self.rng).unwrap();
+
+        let name = Expr::Identifier(source_table_name.as_str().into());
+        // TODO: Currently only literal slide/size expr supported.
+        // Tracked in: <https://github.com/singularity-data/risingwave/issues/3896>
+        let slide = self.gen_simple_scalar(DataTypeName::Interval);
+        let size = self.gen_simple_scalar(DataTypeName::Interval);
+        let time_col = Expr::Identifier(time_col.name.as_str().into());
+        let args = [name, time_col, slide, size]
+            .into_iter()
+            .map(create_function_arg_from_expr)
+            .collect_vec();
+
+        let factor = TableFactor::Table {
+            name: ObjectName(vec!["hop".into()]),
             alias: Some(alias),
             args,
         };
