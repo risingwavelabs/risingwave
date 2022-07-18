@@ -151,7 +151,7 @@ impl<'a, R: Rng> SqlGenerator<'a, R> {
         let table_name = format!("tumble_{}", &self.bound_relations.len());
         let alias = TableAlias {
             name: Ident::new(table_name.clone()),
-            columns: vec![]
+            columns: vec![],
         };
 
         let time_col = time_cols.choose(&mut self.rng).unwrap();
