@@ -57,7 +57,8 @@ impl StreamGlobalSimpleAgg {
 impl fmt::Display for StreamGlobalSimpleAgg {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         if self.input().append_only() {
-            self.logical.fmt_with_name(f, "StreamAppendOnlyGlobalSimpleAgg")
+            self.logical
+                .fmt_with_name(f, "StreamAppendOnlyGlobalSimpleAgg")
         } else {
             self.logical.fmt_with_name(f, "StreamGlobalSimpleAgg")
         }
