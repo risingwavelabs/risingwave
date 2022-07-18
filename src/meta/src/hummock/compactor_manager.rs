@@ -196,6 +196,7 @@ mod tests {
             compaction_filter_mask: 0,
             table_options: HashMap::default(),
             current_epoch_time: 0,
+            target_sub_level_id: 0,
         }
     }
 

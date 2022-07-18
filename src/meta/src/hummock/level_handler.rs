@@ -43,7 +43,7 @@ impl LevelHandler {
         for task in &self.pending_tasks {
             if task.task_id == target_task_id {
                 for sst in &task.ssts {
-                    self.compacting_files.remove(&sst);
+                    self.compacting_files.remove(sst);
                 }
             }
         }

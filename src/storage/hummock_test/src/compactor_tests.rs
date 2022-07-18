@@ -183,6 +183,7 @@ mod tests {
         let version = hummock_manager_ref.get_current_version().await;
         let output_table_id = version
             .get_compaction_group_levels(StaticCompactionGroupId::StateDefault.into())
+            .levels
             .last()
             .unwrap()
             .table_infos
@@ -281,6 +282,7 @@ mod tests {
         let version = hummock_manager_ref.get_current_version().await;
         let output_table_id = version
             .get_compaction_group_levels(StaticCompactionGroupId::StateDefault.into())
+            .levels
             .last()
             .unwrap()
             .table_infos
@@ -416,6 +418,7 @@ mod tests {
         let version = hummock_manager_ref.get_current_version().await;
         let output_level_info = version
             .get_compaction_group_levels(StaticCompactionGroupId::StateDefault.into())
+            .levels
             .last()
             .unwrap();
         assert_eq!(0, output_level_info.total_file_size);
@@ -530,12 +533,11 @@ mod tests {
 
         // 4. get the latest version and check
         let version: HummockVersion = hummock_manager_ref.get_current_version().await;
-        let table_ids_from_version: Vec<_> = version
-            .get_compaction_group_levels(StaticCompactionGroupId::StateDefault.into())
-            .iter()
-            .flat_map(|level| level.table_infos.iter())
-            .map(|table_info| table_info.id)
-            .collect::<Vec<_>>();
+        let mut table_ids_from_version = vec![];
+        version.level_iter(StaticCompactionGroupId::StateDefault.into(), |level| {
+            table_ids_from_version.extend(level.table_infos.iter().map(|table| table.id));
+            true
+        });
 
         let mut key_count = 0;
         for table_id in table_ids_from_version {
@@ -688,12 +690,11 @@ mod tests {
 
         // 4. get the latest version and check
         let version: HummockVersion = hummock_manager_ref.get_current_version().await;
-        let table_ids_from_version: Vec<_> = version
-            .get_compaction_group_levels(StaticCompactionGroupId::StateDefault.into())
-            .iter()
-            .flat_map(|level| level.table_infos.iter())
-            .map(|table_info| table_info.id)
-            .collect::<Vec<_>>();
+        let mut table_ids_from_version = vec![];
+        version.level_iter(StaticCompactionGroupId::StateDefault.into(), |level| {
+            table_ids_from_version.extend(level.table_infos.iter().map(|table| table.id));
+            true
+        });
 
         let mut key_count = 0;
         for table_id in table_ids_from_version {

@@ -158,37 +158,33 @@ impl HummockStorage {
                     self.sstable_store(),
                     iter_read_options.clone(),
                 )) as BoxedHummockIterator<T::Direction>);
+            } else if table_infos.len() == 1 {
+                let table = self
+                    .sstable_store
+                    .sstable(table_infos[0].id, &mut stats)
+                    .await?;
+                overlapped_iters.push(Box::new(T::SstableIteratorType::create(
+                    table,
+                    self.sstable_store(),
+                    iter_read_options.clone(),
+                )));
             } else {
-                if table_infos.len() == 1 {
+                let mut iters = vec![];
+                for table_info in table_infos.into_iter().rev() {
                     let table = self
                         .sstable_store
-                        .sstable(table_infos[0].id, &mut stats)
+                        .sstable(table_info.id, &mut stats)
                         .await?;
-                    overlapped_iters.push(Box::new(T::SstableIteratorType::create(
+                    iters.push(Box::new(T::SstableIteratorType::create(
                         table,
                         self.sstable_store(),
                         iter_read_options.clone(),
-                    )));
-                } else {
-                    let mut iters = vec![];
-                    for table_info in table_infos.into_iter().rev() {
-                        let table = self
-                            .sstable_store
-                            .sstable(table_info.id, &mut stats)
-                            .await?;
-                        iters.push(Box::new(T::SstableIteratorType::create(
-                            table,
-                            self.sstable_store(),
-                            iter_read_options.clone(),
-                        ))
-                            as BoxedHummockIterator<T::Direction>);
-                    }
-                    overlapped_iters.push(Box::new(OrderedMergeIteratorInner::<T::Direction>::new(
-                        iters,
-                        self.stats.clone(),
-                    ))
-                        as BoxedHummockIterator<T::Direction>)
+                    )) as BoxedHummockIterator<T::Direction>);
                 }
+                overlapped_iters.push(Box::new(OrderedMergeIteratorInner::<T::Direction>::new(
+                    iters,
+                    self.stats.clone(),
+                )) as BoxedHummockIterator<T::Direction>)
             }
         }
 

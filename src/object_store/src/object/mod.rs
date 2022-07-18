@@ -248,16 +248,12 @@ impl<OS: ObjectStore> MonitoredObjectStore<OS> {
             .with_label_values(&["read"])
             .start_timer();
 
-        let ret = self
-            .inner
-            .read(path, block_loc.clone())
-            .await
-            .map_err(|err| {
-                ObjectError::internal(format!(
-                    "read {:?} in block {:?} failed, error: {:?}",
-                    path, block_loc, err
-                ))
-            })?;
+        let ret = self.inner.read(path, block_loc).await.map_err(|err| {
+            ObjectError::internal(format!(
+                "read {:?} in block {:?} failed, error: {:?}",
+                path, block_loc, err
+            ))
+        })?;
         self.object_store_metrics
             .read_bytes
             .inc_by(ret.len() as u64);

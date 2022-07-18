@@ -297,11 +297,17 @@ async fn test_hummock_table() {
         .pin_version(context_id, u64::MAX)
         .await
         .unwrap();
+    let levels =
+        pinned_version.get_compaction_group_levels(StaticCompactionGroupId::StateDefault.into());
     assert_eq!(
         Ordering::Equal,
-        pinned_version
-            .get_compaction_group_levels(StaticCompactionGroupId::StateDefault.into())
+        levels
+            .l0
+            .as_ref()
+            .unwrap()
+            .sub_levels
             .iter()
+            .chain(levels.levels.iter())
             .flat_map(|level| level.table_infos.iter())
             .map(|info| info.id)
             .sorted()
