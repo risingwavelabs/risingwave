@@ -35,6 +35,7 @@ impl DatabaseCatalog {
     pub fn create_schema(&mut self, proto: ProstSchema) {
         let name = proto.name.clone();
         let id = proto.id;
+        #[expect(clippy::needless_borrow)]
         let schema = (&proto).into();
         self.schema_by_name
             .try_insert(name.clone(), schema)

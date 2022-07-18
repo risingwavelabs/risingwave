@@ -248,11 +248,8 @@ impl ExprVisitor for GetFieldDesc {
     /// Only check the first input because now we only accept nested column
     /// as first index.
     fn visit_agg_call(&mut self, agg_call: &AggCall) {
-        match agg_call.inputs().get(0) {
-            Some(input) => {
-                self.visit_expr(input);
-            }
-            None => {}
+        if let Some(input) = agg_call.inputs().get(0) {
+            self.visit_expr(input);
         }
     }
 

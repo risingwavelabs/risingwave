@@ -70,7 +70,7 @@ impl<S: StateStore> ManagedStateImpl<S> {
         state_table: &mut StateTable<S>,
     ) -> StreamExecutorResult<()> {
         match self {
-            Self::Value(state) => state.apply_batch(ops, visibility, data).await,
+            Self::Value(state) => state.apply_batch(ops, visibility, data),
             Self::Table(state) => {
                 state
                     .apply_batch(ops, visibility, data, epoch, state_table)
@@ -86,7 +86,7 @@ impl<S: StateStore> ManagedStateImpl<S> {
         state_table: &StateTable<S>,
     ) -> StreamExecutorResult<Datum> {
         match self {
-            Self::Value(state) => state.get_output().await,
+            Self::Value(state) => state.get_output(),
             Self::Table(state) => state.get_output(epoch, state_table).await,
         }
     }
@@ -100,9 +100,9 @@ impl<S: StateStore> ManagedStateImpl<S> {
     }
 
     /// Flush the internal state to a write batch.
-    pub async fn flush(&mut self, state_table: &mut StateTable<S>) -> StreamExecutorResult<()> {
+    pub fn flush(&mut self, state_table: &mut StateTable<S>) -> StreamExecutorResult<()> {
         match self {
-            Self::Value(state) => state.flush(state_table).await,
+            Self::Value(state) => state.flush(state_table),
             Self::Table(state) => state.flush(state_table),
         }
     }
@@ -131,18 +131,15 @@ impl<S: StateStore> ManagedStateImpl<S> {
                         ManagedValueState::new(agg_call, row_count, pk, state_table).await?,
                     ))
                 } else {
-                    Ok(Self::Table(
-                        create_streaming_extreme_state(
-                            agg_call,
-                            row_count.unwrap(),
-                            // TODO: estimate a good cache size instead of hard-coding
-                            Some(1024),
-                            pk_data_types,
-                            key_hash_code,
-                            pk,
-                        )
-                        .await?,
-                    ))
+                    Ok(Self::Table(create_streaming_extreme_state(
+                        agg_call,
+                        row_count.unwrap(),
+                        // TODO: estimate a good cache size instead of hard-coding
+                        Some(1024),
+                        pk_data_types,
+                        key_hash_code,
+                        pk,
+                    )?))
                 }
             }
             AggKind::StringAgg => {

@@ -31,8 +31,8 @@ pub struct SinkExecutor<S: StateStore> {
     identity: String,
 }
 
-async fn build_sink(config: SinkConfig) -> Result<Box<SinkImpl>> {
-    Ok(Box::new(SinkImpl::new(config).await?))
+fn build_sink(config: SinkConfig) -> Result<Box<SinkImpl>> {
+    Ok(Box::new(SinkImpl::new(config)?))
 }
 
 impl<S: StateStore> SinkExecutor<S> {
@@ -57,7 +57,7 @@ impl<S: StateStore> SinkExecutor<S> {
     async fn execute_inner(self) {
         let sink_config = SinkConfig::from_hashmap(self.properties.clone())
             .map_err(StreamExecutorError::sink_error)?;
-        let _sink = build_sink(sink_config).await;
+        let _sink = build_sink(sink_config);
 
         // TODO(tabVersion): the flag is required because kafka transaction requires at least one
         // message, so we should abort the transaction if the flag is true.
