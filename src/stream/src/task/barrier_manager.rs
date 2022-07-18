@@ -12,7 +12,8 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use madsim::collections::{HashMap, HashSet};
+use std::collections::{HashMap, HashSet};
+
 use risingwave_common::error::Result;
 use risingwave_pb::stream_service::barrier_complete_response::CreateMviewProgress as ProstCreateMviewProgress;
 use tokio::sync::mpsc::UnboundedSender;
@@ -58,7 +59,7 @@ pub struct LocalBarrierManager {
     senders: HashMap<ActorId, UnboundedSender<Barrier>>,
 
     /// Span of the current epoch.
-    #[allow(dead_code)]
+    #[expect(dead_code)]
     span: tracing::Span,
 
     /// Current barrier collection state.

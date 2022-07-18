@@ -67,12 +67,12 @@ impl LocalActorId {
         }
     }
 
-    #[allow(dead_code)]
+    #[expect(dead_code)]
     pub fn is_global(&self) -> bool {
         matches!(self, Self::Global(_))
     }
 
-    #[allow(dead_code)]
+    #[expect(dead_code)]
     pub fn is_local(&self) -> bool {
         matches!(self, Self::Local(_))
     }

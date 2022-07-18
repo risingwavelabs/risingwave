@@ -378,9 +378,9 @@ impl PredicatePushdown for LogicalScan {
 impl ToBatch for LogicalScan {
     fn to_batch(&self) -> Result<PlanRef> {
         if self.predicate.always_true() {
-            Ok(BatchSeqScan::new(self.clone(), ScanRange::full_table_scan()).into())
+            Ok(BatchSeqScan::new(self.clone(), vec![]).into())
         } else {
-            let (scan_range, predicate) = self.predicate.clone().split_to_scan_range(
+            let (scan_ranges, predicate) = self.predicate.clone().split_to_scan_ranges(
                 &self.table_desc.order_column_indices(),
                 self.table_desc.columns.len(),
             );
@@ -388,7 +388,7 @@ impl ToBatch for LogicalScan {
             scan.predicate = predicate; // We want to keep `required_col_idx` unchanged, so do not call `clone_with_predicate`.
             let (scan, predicate, project_expr) = scan.predicate_pull_up();
 
-            let mut plan: PlanRef = BatchSeqScan::new(scan, scan_range).into();
+            let mut plan: PlanRef = BatchSeqScan::new(scan, scan_ranges).into();
             if !predicate.always_true() {
                 plan = BatchFilter::new(LogicalFilter::new(plan, predicate)).into();
             }

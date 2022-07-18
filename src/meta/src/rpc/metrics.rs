@@ -200,6 +200,7 @@ impl MetaMetrics {
         &self.registry
     }
 
+    #[expect(clippy::unused_async)]
     async fn metrics_service(req: Request<Body>) -> Result<Response<Body>, hyper::Error> {
         let meta_metrics = req.extensions().get::<Arc<MetaMetrics>>().unwrap();
         let encoder = TextEncoder::new();
