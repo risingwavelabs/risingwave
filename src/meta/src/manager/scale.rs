@@ -251,16 +251,6 @@ mod tests {
         let task3_id = scale_manager.add_scale_task(task3).await?;
         assert_eq!(3, task3_id);
 
-        tokio::time::sleep(std::time::Duration::from_millis(10)).await;
-        assert_eq!(
-            TaskStatus::Pending,
-            scale_manager.get_task_status(task1_id).await?
-        );
-        assert_eq!(
-            TaskStatus::Pending,
-            scale_manager.get_task_status(task2_id).await?
-        );
-
         scale_manager.abort_task(task2_id).await?;
         assert_eq!(
             TaskStatus::Pending,
@@ -302,11 +292,15 @@ mod tests {
         };
         task.insert(env.meta_store()).await?;
 
-        let (scale_manager, _, _) = ScaleManager::new(env.meta_store_ref()).await?;
+        let (scale_manager, scale_handle, scale_shutdown) =
+            ScaleManager::new(env.meta_store_ref()).await?;
 
-        tokio::time::sleep(std::time::Duration::from_millis(510)).await;
+        tokio::time::sleep(std::time::Duration::from_millis(10)).await;
+        scale_shutdown.send(()).unwrap();
+        scale_handle.await?;
+
         assert_eq!(
-            TaskStatus::Building,
+            TaskStatus::Finished,
             scale_manager.get_task_status(task_id).await?
         );
         Ok(())
