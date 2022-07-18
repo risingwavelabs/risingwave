@@ -28,6 +28,7 @@ mod expr;
 pub use expr::print_function_table;
 mod relation;
 mod scalar;
+mod time_window;
 
 #[derive(Clone, Debug)]
 pub struct Table {
