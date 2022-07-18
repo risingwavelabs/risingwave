@@ -59,9 +59,19 @@ pub struct SchemaSliceTransform {
 
 impl SliceTransform for SchemaSliceTransform {
     fn transform<'a>(&self, full_key: &'a [u8]) -> &'a [u8] {
+        if full_key.len() < TABLE_PREFIX_LEN + VIRTUAL_NODE_SIZE {
+            panic!(
+                "full_key {:?} len {} not match the schema",
+                full_key,
+                full_key.len()
+            );
+        }
+
         let (_table_prefix, key) = full_key.split_at(TABLE_PREFIX_LEN);
         let (_vnode_prefix, pk) = key.split_at(VIRTUAL_NODE_SIZE);
 
+        // if the key with table_id deserializer fail from schema, that shoud panic here for early
+        // detection
         let pk_prefix_len = self
             .deserializer
             .deserialize_prefix_len_with_column_indices(
