@@ -37,6 +37,7 @@ pub enum LocalNotification {
 enum Target {
     Frontend,
     Compute,
+    Compactor,
 }
 
 #[derive(Debug)]
@@ -72,10 +73,18 @@ impl NotificationManager {
                             .notify_frontend(task.operation, &task.info)
                             .await
                     }
+
                     Target::Compute => {
                         core.lock()
                             .await
                             .notify_compute(task.operation, &task.info)
+                            .await
+                    }
+
+                    Target::Compactor => {
+                        core.lock()
+                            .await
+                            .notify_compactor(task.operation, &task.info)
                             .await
                     }
                 };
@@ -137,6 +146,10 @@ impl NotificationManager {
         self.notify(Target::Compute, operation, info).await
     }
 
+    pub async fn notify_compactor(&self, operation: Operation, info: Info) -> NotificationVersion {
+        self.notify(Target::Compactor, operation, info).await
+    }
+
     pub async fn notify_local_subscribers(&self, notification: LocalNotification) {
         let mut core_guard = self.core.lock().await;
         core_guard.local_senders.retain(|sender| {
@@ -173,6 +186,15 @@ impl NotificationManager {
         core_guard.compute_senders.insert(worker_key, sender);
     }
 
+    pub async fn insert_compactor_sender(
+        &self,
+        worker_key: WorkerKey,
+        sender: UnboundedSender<Notification>,
+    ) {
+        let mut core_guard = self.core.lock().await;
+        core_guard.compactor_senders.insert(worker_key, sender);
+    }
+
     pub async fn insert_local_sender(&self, sender: UnboundedSender<LocalNotification>) {
         let mut core_guard = self.core.lock().await;
         core_guard.local_senders.push(sender);
@@ -195,6 +217,9 @@ struct NotificationManagerCore {
     frontend_senders: HashMap<WorkerKey, UnboundedSender<Notification>>,
     /// The notification sender to compute nodes.
     compute_senders: HashMap<WorkerKey, UnboundedSender<Notification>>,
+    /// The notification sender to compactor nodes.
+    compactor_senders: HashMap<WorkerKey, UnboundedSender<Notification>>,
+
     /// The notification sender to local subscribers.
     local_senders: Vec<UnboundedSender<LocalNotification>>,
 
@@ -207,6 +232,7 @@ impl NotificationManagerCore {
         Self {
             frontend_senders: HashMap::new(),
             compute_senders: HashMap::new(),
+            compactor_senders: HashMap::new(),
             local_senders: vec![],
             current_version: 0,
         }
@@ -234,6 +260,22 @@ impl NotificationManagerCore {
     async fn notify_compute(&mut self, operation: Operation, info: &Info) -> NotificationVersion {
         self.current_version += 1;
         for (worker_key, sender) in &self.compute_senders {
+            if let Err(err) = sender.send(Ok(SubscribeResponse {
+                status: None,
+                operation: operation as i32,
+                info: Some(info.clone()),
+                version: self.current_version,
+            })) {
+                tracing::warn!("Failed to notify compute {:?}: {}", worker_key, err);
+            }
+        }
+
+        self.current_version
+    }
+
+    async fn notify_compactor(&mut self, operation: Operation, info: &Info) -> NotificationVersion {
+        self.current_version += 1;
+        for (worker_key, sender) in &self.compactor_senders {
             if let Err(err) = sender.send(Ok(SubscribeResponse {
                 status: None,
                 operation: operation as i32,

@@ -112,6 +112,36 @@ where
                     .insert_frontend_sender(WorkerKey(host_address), tx)
                     .await
             }
+
+            WorkerType::Compactor => {
+                // Send TableCatalog snapshot for compactor
+
+                let catalog_guard = self.catalog_manager.get_catalog_core_guard().await;
+                let (_, _, table, _) = catalog_guard.get_catalog().await?;
+
+                // Send the snapshot on subscription. After that we will send only updates.
+                let meta_snapshot = MetaSnapshot {
+                    nodes: vec![],
+                    database: vec![],
+                    schema: vec![],
+                    source: vec![],
+                    table, // only the table_catlog has schema
+                    users: vec![],
+                };
+                tx.send(Ok(SubscribeResponse {
+                    status: None,
+                    operation: Operation::Snapshot as i32,
+                    info: Some(Info::Snapshot(meta_snapshot)),
+                    version: self.env.notification_manager().current_version().await,
+                }))
+                .unwrap();
+
+                self.env
+                    .notification_manager()
+                    .insert_compactor_sender(WorkerKey(host_address), tx)
+                    .await
+            }
+
             _ => unreachable!(),
         };
 
