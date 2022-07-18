@@ -764,7 +764,9 @@ where
             .get_compact_task_impl(compaction_group_id, None)
             .await?;
         if let Some(mut task) = task {
-            if CompactStatus::is_trival_move_task(&task) {
+            // TODO: merge this two operation in one lock guard because the target sub-level may be
+            // removed by the other thread.
+            if CompactStatus::is_trivial_move_task(&task) {
                 task.task_status = true;
                 task.sorted_output_ssts = task.input_ssts[0].table_infos.clone();
                 let ret = self.report_compact_task_impl(&task, true).await?;

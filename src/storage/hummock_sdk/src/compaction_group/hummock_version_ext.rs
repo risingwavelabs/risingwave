@@ -48,9 +48,9 @@ pub trait HummockVersionExt {
     fn apply_compact_ssts(
         &mut self,
         compaction_group_id: CompactionGroupId,
-        delete_sst_levels: &[usize],
+        delete_sst_levels: &[u32],
         delete_sst_ids_set: &HashSet<u64>,
-        insert_sst_level: usize,
+        insert_sst_level: u32,
         insert_sub_level: u64,
         insert_table_infos: Vec<SstableInfo>,
     );
@@ -157,11 +157,10 @@ impl HummockVersionExt for HummockVersion {
                     insert_table_infos.extend(level_delta.inserted_table_infos.iter().cloned());
                 }
             }
-            let operand = &mut self
-                .get_compaction_group_levels_mut(*compaction_group_id as CompactionGroupId);
-            HummockVersion::apply_compact_ssts(
-                operand,
-                &delete_sst_levels,
+
+            self.apply_compact_ssts(
+                *compaction_group_id as CompactionGroupId,
+                delete_sst_levels.as_slice(),
                 &delete_sst_ids_set,
                 insert_sst_level,
                 insert_sub_level,
@@ -176,9 +175,9 @@ impl HummockVersionExt for HummockVersion {
     fn apply_compact_ssts(
         &mut self,
         compaction_group_id: CompactionGroupId,
-        delete_sst_levels: &[usize],
+        delete_sst_levels: &[u32],
         delete_sst_ids_set: &HashSet<u64>,
-        insert_sst_level: usize,
+        insert_sst_level: u32,
         insert_sub_level_id: u64,
         insert_table_infos: Vec<SstableInfo>,
     ) {
@@ -189,7 +188,8 @@ impl HummockVersionExt for HummockVersion {
                         level_delete_ssts(level, delete_sst_ids_set);
                     }
                 } else {
-                    level_delete_ssts(&mut levels.levels[*level_idx - 1], delete_sst_ids_set);
+                    let idx = *level_idx as usize - 1;
+                    level_delete_ssts(&mut levels.levels[idx], delete_sst_ids_set);
                 }
             }
             if !insert_table_infos.is_empty() {
@@ -201,7 +201,8 @@ impl HummockVersionExt for HummockVersion {
                         }
                     }
                 } else {
-                    level_insert_ssts(&mut levels.levels[insert_sst_level - 1], insert_table_infos);
+                    let idx = insert_sst_level as usize - 1;
+                    level_insert_ssts(&mut levels.levels[idx], insert_table_infos);
                 }
             }
             if delete_sst_levels.iter().any(|level_id| *level_id == 0) {

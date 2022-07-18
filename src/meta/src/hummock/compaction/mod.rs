@@ -152,7 +152,7 @@ impl CompactStatus {
         Some(compact_task)
     }
 
-    pub fn is_trival_move_task(task: &CompactTask) -> bool {
+    pub fn is_trivial_move_task(task: &CompactTask) -> bool {
         if task.input_ssts.len() <= 1 {
             return true;
         }
@@ -222,21 +222,21 @@ impl CompactStatus {
         let mut new_version = based_hummock_version;
         new_version.safe_epoch = std::cmp::max(new_version.safe_epoch, compact_task.watermark);
         let mut removed_table: HashSet<u64> = HashSet::default();
-        let mut removed_levels: Vec<usize> = vec![];
+        let mut removed_levels = vec![];
         for input_level in &compact_task.input_ssts {
             for table in &input_level.table_infos {
                 removed_table.insert(table.id);
             }
-            removed_levels.push(input_level.level_idx as usize);
+            removed_levels.push(input_level.level_idx);
         }
 
         removed_levels.sort();
         removed_levels.dedup();
         new_version.apply_compact_ssts(
             compact_task.compaction_group_id,
-            removed_levels.as_slice(),
+            &removed_levels,
             &removed_table,
-            compact_task.target_level as usize,
+            compact_task.target_level,
             compact_task.target_sub_level_id,
             compact_task.sorted_output_ssts.clone(),
         );
