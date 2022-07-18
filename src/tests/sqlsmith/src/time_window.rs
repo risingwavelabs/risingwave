@@ -70,7 +70,8 @@ impl<'a, R: Rng> SqlGenerator<'a, R> {
 
         let name = Expr::Identifier(source_table_name.as_str().into());
         // TODO: Currently only literal slide/size expr supported.
-        // Tracked in: <https://github.com/singularity-data/risingwave/issues/3896>
+        // Tracked in: <https://github.com/singularity-data/risingwave/issues/3896>.
+        // We fix slide to "1" here, as slide needs to be divisible by size.
         let slide = Expr::TypedString {
             data_type: DataType::Interval,
             value: "1".to_string(),
@@ -106,6 +107,7 @@ fn create_alias(table_name: &str) -> TableAlias {
     }
 }
 
+/// Create a table view function.
 fn create_tvf(name: &str, alias: TableAlias, args: Vec<FunctionArg>) -> TableWithJoins {
     let factor = TableFactor::Table {
         name: ObjectName(vec![name.into()]),
