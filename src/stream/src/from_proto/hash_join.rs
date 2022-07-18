@@ -18,6 +18,7 @@ use std::sync::Arc;
 use risingwave_common::hash::{calc_hash_key_kind, HashKey, HashKeyDispatcher, HashKeyKind};
 use risingwave_expr::expr::{build_from_prost, BoxedExpression};
 use risingwave_pb::plan_common::JoinType as JoinTypeProto;
+use risingwave_pb::stream_plan::hash_join_node::CachePolicy as CachePolicyProst;
 use risingwave_storage::table::state_table::StateTable;
 
 use super::*;
@@ -36,7 +37,8 @@ impl ExecutorBuilder for HashJoinExecutorBuilder {
     ) -> Result<BoxedExecutor> {
         let node = try_match_expand!(node.get_node_body().unwrap(), NodeBody::HashJoin)?;
         let is_append_only = node.is_append_only;
-        let cache_policy = JoinCachePolicy::from_prost(&node.cache_policy)?;
+        let cache_policy =
+            JoinCachePolicy::from_prost(&CachePolicyProst::from_i32(node.cache_policy).unwrap());
         let vnodes = Arc::new(params.vnode_bitmap.expect("vnodes not set for hash join"));
 
         let source_l = params.input.remove(0);

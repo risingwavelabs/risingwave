@@ -117,21 +117,19 @@ type JoinHashMapInner<K> =
 pub type JoinCachePolicyPrimitive = u8;
 #[allow(non_snake_case, non_upper_case_globals)]
 pub mod JoinCachePolicy {
-    use risingwave_common::bail;
+    use risingwave_pb::stream_plan::hash_join_node::CachePolicy as CachePolicyProst;
 
     use super::JoinCachePolicyPrimitive;
-    use crate::executor::error::StreamExecutorResult;
 
     /// Populate the cache when read a join key
     pub const OnRead: JoinCachePolicyPrimitive = 0;
     /// Populate the cache when read or write a join key
     pub const OnReadWrite: JoinCachePolicyPrimitive = 1;
 
-    pub fn from_prost(policy_prost: &str) -> StreamExecutorResult<JoinCachePolicyPrimitive> {
+    pub fn from_prost(policy_prost: &CachePolicyProst) -> JoinCachePolicyPrimitive {
         match policy_prost {
-            "OnRead" => Ok(OnRead),
-            "OnReadWrite" => Ok(OnReadWrite),
-            policy => bail!("Hash join cache policy {} not implemented", policy),
+            CachePolicyProst::Onread => OnRead,
+            CachePolicyProst::Onreadwrite => OnReadWrite,
         }
     }
 }
@@ -189,6 +187,7 @@ pub struct JoinHashMap<K: HashKey, S: StateStore> {
     /// State table
     state_table: StateTable<S>,
     /// Cache policy
+    /// TODO(yuhao): make it const generic if is bottleneck
     cache_policy: JoinCachePolicyPrimitive,
     /// Metrics of the hash map
     metrics: JoinHashMapMetrics,

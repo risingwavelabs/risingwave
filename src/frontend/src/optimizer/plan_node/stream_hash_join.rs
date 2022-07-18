@@ -239,7 +239,7 @@ impl ToStreamProst for StreamHashJoin {
                 .map(|&x| x as u32)
                 .collect(),
             is_append_only: self.is_append_only,
-            cache_policy: self.cache_policy.to_string(),
+            cache_policy: self.cache_policy.to_prost() as _,
         })
     }
 }

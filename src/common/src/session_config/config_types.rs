@@ -17,6 +17,8 @@
 use std::fmt::Formatter;
 use std::str::FromStr;
 
+use risingwave_pb::stream_plan::hash_join_node::CachePolicy as CachePolicyProst;
+
 use super::{ConfigEntry, CONFIG_KEYS, QUERY_MODE, STREAMING_HASH_JOIN_CACHE_POLICY};
 use crate::error::ErrorCode::{self, InvalidConfigValue};
 use crate::error::RwError;
@@ -101,12 +103,18 @@ impl std::fmt::Display for StreamingHashJoinCachePolicy {
 }
 
 impl StreamingHashJoinCachePolicy {
-    pub fn to_prost(&self) -> String {
-        self.to_string()
+    pub fn to_prost(&self) -> CachePolicyProst {
+        match self {
+            StreamingHashJoinCachePolicy::OnRead => CachePolicyProst::Onread,
+            StreamingHashJoinCachePolicy::OnReadWrite => CachePolicyProst::Onreadwrite,
+        }
     }
 
-    pub fn from_prost(s: &str) -> Result<Self, RwError> {
-        Self::from_str(s)
+    pub fn from_prost(policy: &CachePolicyProst) -> Self {
+        match policy {
+            CachePolicyProst::Onread => StreamingHashJoinCachePolicy::OnRead,
+            CachePolicyProst::Onreadwrite => StreamingHashJoinCachePolicy::OnReadWrite,
+        }
     }
 }
 
