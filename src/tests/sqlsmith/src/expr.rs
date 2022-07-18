@@ -269,9 +269,7 @@ fn make_overlay(exprs: Vec<Expr>) -> Expr {
     }
 }
 
-/// This is the function that generate simple function (one-to-one) such as IsNull that is not
-/// aggregate function because This function does not allowed Distinct, Order By or Filter.
-/// Therefore another function is generated for generating function that is one-to-one.
+/// Generates simple functions such as `length`, `round`, `to_char`. These operate on datums instead of columns / rows.
 fn make_simple_func(func_name: &str, exprs: &[Expr]) -> Function {
     let args = exprs
         .iter()
