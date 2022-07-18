@@ -15,7 +15,7 @@
 use std::fmt::{Debug, Formatter};
 use std::sync::Arc;
 
-use either::Either;
+use either::{for_both, Either};
 use futures::StreamExt;
 use futures_async_stream::try_stream;
 use itertools::Itertools;
@@ -119,16 +119,20 @@ impl ProjectSetExecutor {
                         .iter()
                         .map(|select_item| select_item.eval(&data_chunk))
                         .try_collect()?;
-
-                    let mut iters = results.iter().map(|r| r.iter()).collect_vec();
+                    assert!(
+                        results
+                            .iter()
+                            .all(|result| ops.len() == for_both!(result, r=>r.len())),
+                        "ProjectSet has mismatched output cardinalities among select list."
+                    );
 
                     // each iteration corresponds to the outputs of one input row
-                    for op in ops {
-                        let items = iters
-                            .iter_mut()
-                            .map(|iter| {
-                                iter.next()
-                                    .expect("unexpected finished iterator from table functions")
+                    for (row_idx, op) in ops.into_iter().enumerate() {
+                        let items = results
+                            .iter()
+                            .map(|result| match result {
+                                Either::Left(arrays) => Either::Left(arrays[row_idx].clone()),
+                                Either::Right(array) => Either::Right(array.value_at(row_idx)),
                             })
                             .collect_vec();
 
@@ -161,11 +165,6 @@ impl ProjectSetExecutor {
                             }
                         }
                     }
-                    // All the iterators should reach the end at the same time.
-                    assert!(
-                        iters.iter_mut().all(|i| i.next().is_none()),
-                        "unexpected unfinished iterator from table functions"
-                    );
 
                     let mut columns = Vec::with_capacity(self.select_list.len() + 1);
                     let projected_row_id: ArrayRef =

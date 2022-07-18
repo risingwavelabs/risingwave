@@ -14,7 +14,7 @@
 
 use std::sync::Arc;
 
-use either::Either;
+use either::{for_both, Either};
 use futures_async_stream::try_stream;
 use itertools::Itertools;
 use risingwave_common::array::column::Column;
@@ -75,22 +75,25 @@ impl ProjectSetExecutor {
                 .map(|select_item| select_item.eval(&data_chunk))
                 .try_collect()?;
 
-            let mut iters = results.iter().map(|r| r.iter()).collect_vec();
+            let mut lens = results
+                .iter()
+                .map(|result| for_both!(result, r=>r.len()))
+                .dedup();
+            let cardinality = lens.next().unwrap();
+            assert!(
+                lens.next().is_none(),
+                "ProjectSet has mismatched output cardinalities among select list."
+            );
 
             // each iteration corresponds to the outputs of one input row
-            loop {
-                let items = iters.iter_mut().map(|iter| iter.next()).collect_vec();
-
-                if items[0].is_none() {
-                    // All the iterators should reach the end at the same time.
-                    assert!(
-                        items.iter().all(|i| i.is_none()),
-                        "unexpected finished iterator from table functions"
-                    );
-                    break;
-                }
-                let items = items.into_iter().map(|i| i.unwrap()).collect_vec();
-
+            for row_idx in 0..cardinality {
+                let items = results
+                    .iter()
+                    .map(|result| match result {
+                        Either::Left(arrays) => Either::Left(arrays[row_idx].clone()),
+                        Either::Right(array) => Either::Right(array.value_at(row_idx)),
+                    })
+                    .collect_vec();
                 // The maximum length of the results of table functions will be the output length.
                 let max_tf_len = items
                     .iter()

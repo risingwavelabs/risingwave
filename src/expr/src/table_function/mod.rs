@@ -12,14 +12,12 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use core::slice;
-use std::iter::Cloned;
 use std::sync::Arc;
 
 use either::Either;
 use itertools::Itertools;
-use risingwave_common::array::{ArrayImplIterator, ArrayRef, DataChunk};
-use risingwave_common::types::{DataType, DatumRef};
+use risingwave_common::array::{ArrayRef, DataChunk};
+use risingwave_common::types::DataType;
 use risingwave_pb::expr::project_set_select_item::SelectItem::*;
 use risingwave_pb::expr::{
     ProjectSetSelectItem as SelectItemProst, TableFunction as TableFunctionProst,
@@ -135,45 +133,10 @@ impl ProjectSetSelectItem {
         }
     }
 
-    pub fn eval(&self, input: &DataChunk) -> Result<ProjectSetSelectItemResult> {
+    pub fn eval(&self, input: &DataChunk) -> Result<Either<Vec<ArrayRef>, ArrayRef>> {
         match self {
-            ProjectSetSelectItem::TableFunction(tf) => tf
-                .eval(input)
-                .map(ProjectSetSelectItemResult::TableFunction),
-            ProjectSetSelectItem::Expr(expr) => {
-                expr.eval(input).map(ProjectSetSelectItemResult::Expr)
-            }
+            ProjectSetSelectItem::TableFunction(tf) => tf.eval(input).map(Either::Left),
+            ProjectSetSelectItem::Expr(expr) => expr.eval(input).map(Either::Right),
         }
-    }
-}
-
-pub enum ProjectSetSelectItemResult {
-    TableFunction(Vec<ArrayRef>),
-    Expr(ArrayRef),
-}
-
-type IterArrays<'a> = Cloned<slice::Iter<'a, ArrayRef>>;
-
-pub struct ProjectSetSelectItemResultIter<'a>(Either<IterArrays<'a>, ArrayImplIterator<'a>>);
-
-impl<'a> Iterator for ProjectSetSelectItemResultIter<'a> {
-    type Item = Either<ArrayRef, DatumRef<'a>>;
-
-    fn next(&mut self) -> Option<Self::Item> {
-        match &mut self.0 {
-            Either::Left(l) => Either::Left(l.next()).factor_none(),
-            Either::Right(r) => Either::Right(r.next()).factor_none(),
-        }
-    }
-}
-
-impl ProjectSetSelectItemResult {
-    pub fn iter(&self) -> ProjectSetSelectItemResultIter<'_> {
-        ProjectSetSelectItemResultIter(match self {
-            ProjectSetSelectItemResult::TableFunction(arrays) => {
-                Either::Left(arrays.iter().cloned())
-            }
-            ProjectSetSelectItemResult::Expr(array) => Either::Right(array.iter()),
-        })
     }
 }
