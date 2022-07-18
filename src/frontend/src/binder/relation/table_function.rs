@@ -12,15 +12,17 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+use std::assert_matches::assert_matches;
+
 use itertools::Itertools;
 use risingwave_common::catalog::Field;
 use risingwave_common::error::ErrorCode;
-use risingwave_common::types::DataType;
+use risingwave_common::types::{unnested_list_type, DataType};
 use risingwave_sqlparser::ast::FunctionArg;
 
 use super::{Binder, Result};
 use crate::binder::FunctionType;
-use crate::expr::{align_types, Expr as _, ExprImpl, ExprType};
+use crate::expr::{Expr as _, ExprImpl, ExprType};
 
 #[derive(Debug, Clone)]
 pub struct BoundTableFunction {
@@ -50,11 +52,13 @@ impl Binder {
             .into());
         }
 
-        let expr = &exprs[0];
-        if let ExprImpl::FunctionCall(func) = expr {
+        let expr = exprs.into_iter().next().unwrap();
+        if let ExprImpl::FunctionCall(ref func) = expr {
             if func.get_expr_type() == ExprType::Array {
-                let mut exprs = self.array_flatten(expr)?;
-                let data_type = align_types(exprs.iter_mut())?;
+                let list_type = func.return_type();
+                assert_matches!(list_type, DataType::List { datatype: _ },);
+                let data_type = unnested_list_type(list_type);
+
                 let columns = [(
                     false,
                     Field {
@@ -69,7 +73,7 @@ impl Binder {
                 self.bind_context(columns, "unnest".to_string(), None)?;
 
                 Ok(BoundTableFunction {
-                    args: exprs,
+                    args: vec![expr],
                     data_type,
                     func_type: FunctionType::Unnest,
                 })
@@ -124,22 +128,6 @@ impl Binder {
             data_type,
             func_type: FunctionType::Generate,
         })
-    }
-
-    fn array_flatten(&mut self, expr: &ExprImpl) -> Result<Vec<ExprImpl>> {
-        if let ExprImpl::FunctionCall(func) = expr {
-            if func.get_expr_type() == ExprType::Array {
-                let mut result = vec![];
-                for e in func.inputs() {
-                    result.append(&mut self.array_flatten(e)?);
-                }
-                Ok(result)
-            } else {
-                Ok(vec![expr.clone()])
-            }
-        } else {
-            Ok(vec![expr.clone()])
-        }
     }
 }
 

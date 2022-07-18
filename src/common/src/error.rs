@@ -184,8 +184,9 @@ pub struct RwError {
 
 impl From<RwError> for tonic::Status {
     fn from(err: RwError) -> Self {
-        match *err.inner {
+        match &*err.inner {
             ErrorCode::OK => tonic::Status::ok(err.to_string()),
+            ErrorCode::ExprError(e) => tonic::Status::invalid_argument(e.to_string()),
             _ => {
                 let bytes = {
                     let status = err.to_status();
@@ -375,7 +376,12 @@ impl From<ProstFieldNotFound> for RwError {
 
 impl From<tonic::Status> for RwError {
     fn from(err: tonic::Status) -> Self {
-        ErrorCode::RpcError(err.into()).into()
+        match err.code() {
+            Code::InvalidArgument => {
+                ErrorCode::InvalidParameterValue(err.message().to_string()).into()
+            }
+            _ => ErrorCode::RpcError(err.into()).into(),
+        }
     }
 }
 

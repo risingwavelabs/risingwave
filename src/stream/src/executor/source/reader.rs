@@ -96,7 +96,6 @@ impl SourceReaderStream {
     }
 
     /// Pause the source stream.
-    #[allow(dead_code)]
     pub fn pause_source(&mut self) {
         if self.paused.is_some() {
             panic!("already paused");
@@ -107,7 +106,6 @@ impl SourceReaderStream {
     }
 
     /// Resume the source stream, panic if the source is not paused before.
-    #[allow(dead_code)]
     pub fn resume_source(&mut self) {
         let source_chunk_reader = self.paused.take().expect("not paused");
         let _ = std::mem::replace(self.inner.get_mut().1, source_chunk_reader);
