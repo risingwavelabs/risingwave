@@ -340,19 +340,22 @@ impl<K: HashKey, S: StateStore> JoinHashMap<K, S> {
         pk: Row,
         value: JoinRow,
     ) -> StreamExecutorResult<()> {
-        match self.cache_policy {
-            JoinCachePolicy::OnRead => {
-                if let Some(entry) = self.inner.get_mut(join_key) {
-                    entry.insert(pk, value.clone());
+        if let Some(entry) = self.inner.get_mut(join_key) {
+            entry.insert(pk, value.clone());
+        } else {
+            match self.cache_policy {
+                JoinCachePolicy::OnRead => {
+                    // do nothing
                 }
-            }
-            JoinCachePolicy::OnReadWrite => {
-                let mut state = self.fetch_cached_state(join_key).await?;
-                state.insert(pk, value.clone());
-                self.inner.put(join_key.clone(), state);
-            }
-            _ => bail!("Hash join cache policy not implemented"),
-        };
+                JoinCachePolicy::OnReadWrite => {
+                    // populate the cache
+                    let mut state = self.fetch_cached_state(join_key).await?;
+                    state.insert(pk, value.clone());
+                    self.inner.put(join_key.clone(), state);
+                }
+                _ => bail!("Hash join cache policy not implemented"),
+            };
+        }
 
         // If no cache maintained, only update the flush buffer.
         self.state_table.insert(value.into_row())?;
