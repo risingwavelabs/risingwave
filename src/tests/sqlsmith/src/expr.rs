@@ -54,14 +54,17 @@ fn init_agg_table() -> HashMap<DataTypeName, Vec<AggFuncSig>> {
 
 impl<'a, R: Rng> SqlGenerator<'a, R> {
     /// can_agg    - In generating expression, there is two execution mode
-    ///                 1) Non-Aggregate/Aggregate of Groupby Coloumns AND/OR Aggregate of Coloumns
-    /// that is not Groupby coloumns.                 2) No Aggregate for all columns
-    /// (NonGroupby coloumns when group by is being used will not be selected at all in this mode).
-    ///              When can_agg is false, it means the second execution mode which is strictly no
-    /// aggregate for all coloumns. inside_agg - Rule: an aggregate function cannot be inside an
-    /// aggregate function              Since expression can be recursive, so this variable show
-    /// that currently this expression is inside an aggregate function.              This will
-    /// ensure this rule is followed.
+    ///                 1)  Non-Aggregate/Aggregate of Groupby Coloumns AND/OR Aggregate of Coloumns
+    ///                     that is not Groupby coloumns.                 
+    ///                 2)  No Aggregate for all columns (NonGroupby coloumns when group by is being
+    ///                     used will not be selected at all in this mode).
+    ///
+    /// When can_agg is false, it means the second execution mode which is strictly no aggregate for
+    /// all coloumns.
+    ///
+    /// inside_agg - Rule: an aggregate function cannot be inside an aggregate function.
+    ///              Since expression can be recursive, so this variable show that currently this
+    ///              expression is inside an aggregate function, ensuring the rule is followed.
     pub(crate) fn gen_expr(&mut self, typ: DataTypeName, can_agg: bool, inside_agg: bool) -> Expr {
         if !self.can_recurse() {
             // Stop recursion with a simple scalar or column.
