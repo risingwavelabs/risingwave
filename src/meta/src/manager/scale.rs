@@ -291,59 +291,24 @@ mod tests {
     #[tokio::test]
     async fn test_scale_manager_recover() -> Result<()> {
         let env = MetaSrvEnv::for_test().await;
-        let (scale_manager, scale_handle, scale_shutdown) =
-            ScaleManager::new(env.meta_store_ref()).await?;
 
-        let task1 = ScaleTask {
-            task_id: 0,
+        let task_id = 1;
+        let task = ScaleTask {
+            task_id,
             task_type: TaskType::ScaleOut as i32,
             hosts: vec![],
             fragment_parallelism: HashMap::new(),
-            task_status: TaskStatus::NotFound as i32,
+            task_status: TaskStatus::Pending as i32,
         };
-        let task2 = task1.clone();
-        let task3 = task1.clone();
-
-        let task1_id = scale_manager.add_scale_task(task1).await?;
-        let task2_id = scale_manager.add_scale_task(task2).await?;
-
-        tokio::time::sleep(std::time::Duration::from_millis(10)).await;
-        assert_eq!(
-            TaskStatus::Pending,
-            scale_manager.get_task_status(task1_id).await?
-        );
-
-        scale_manager.abort_task(task1_id).await?;
-        assert_eq!(
-            TaskStatus::Cancelled,
-            scale_manager.get_task_status(task1_id).await?
-        );
-        assert_eq!(
-            TaskStatus::Pending,
-            scale_manager.get_task_status(task2_id).await?
-        );
-
-        scale_shutdown.send(()).unwrap();
-        scale_handle.await?;
+        task.insert(env.meta_store()).await?;
 
         let (scale_manager, _, _) = ScaleManager::new(env.meta_store_ref()).await?;
-        let task3_id = scale_manager.add_scale_task(task3).await?;
-        assert_eq!(3, task3_id);
 
-        tokio::time::sleep(std::time::Duration::from_millis(10 + 500)).await;
-        assert_eq!(
-            TaskStatus::Cancelled,
-            scale_manager.get_task_status(task1_id).await?
-        );
+        tokio::time::sleep(std::time::Duration::from_millis(510)).await;
         assert_eq!(
             TaskStatus::Building,
-            scale_manager.get_task_status(task2_id).await?
+            scale_manager.get_task_status(task_id).await?
         );
-        assert_eq!(
-            TaskStatus::Pending,
-            scale_manager.get_task_status(task3_id).await?
-        );
-
         Ok(())
     }
 
@@ -380,7 +345,7 @@ mod tests {
         );
         assert_eq!(
             TaskStatus::Finished,
-            ScaleTask::select(&*env.meta_store_ref(), &task_id)
+            ScaleTask::select(env.meta_store(), &task_id)
                 .await?
                 .unwrap()
                 .get_task_status()?
@@ -391,7 +356,7 @@ mod tests {
             TaskStatus::NotFound,
             scale_manager.get_task_status(task_id).await?
         );
-        assert!(ScaleTask::select(&*env.meta_store_ref(), &task_id)
+        assert!(ScaleTask::select(env.meta_store(), &task_id)
             .await?
             .is_none());
 
