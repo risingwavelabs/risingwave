@@ -161,6 +161,16 @@ impl fmt::Display for Ident {
 #[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
 pub struct ObjectName(pub Vec<Ident>);
 
+impl ObjectName {
+    pub fn real_value(&self) -> String {
+        self.0
+            .iter()
+            .map(|ident| ident.real_value())
+            .collect::<Vec<_>>()
+            .join(".")
+    }
+}
+
 impl fmt::Display for ObjectName {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         write!(f, "{}", display_separated(&self.0, "."))
@@ -170,6 +180,12 @@ impl fmt::Display for ObjectName {
 impl ParseTo for ObjectName {
     fn parse_to(p: &mut Parser) -> Result<Self, ParserError> {
         p.parse_object_name()
+    }
+}
+
+impl From<Vec<Ident>> for ObjectName {
+    fn from(value: Vec<Ident>) -> Self {
+        Self(value)
     }
 }
 
@@ -1668,7 +1684,7 @@ impl ParseTo for ObjectType {
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 #[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
 pub struct SqlOption {
-    pub name: Ident,
+    pub name: ObjectName,
     pub value: Value,
 }
 

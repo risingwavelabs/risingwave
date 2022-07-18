@@ -313,7 +313,7 @@
                   StreamTableScan { table: t, columns: [v1, v2, _row_id], pk_indices: [2] }
 - sql: |
     /* simple-stream-agg with append-only min-max should use 2-phase-agg */
-    create table t(v1 int, v2 int) with ('appendonly' = true);
+    create table t(v1 int, v2 int) with (appendonly = true);
     select min(v1) as a1, max(v2) as a2 from t;
   stream_plan: |
     StreamMaterialize { columns: [count(hidden), a1, a2], pk_columns: [] }
@@ -322,7 +322,7 @@
           StreamTableScan { table: t, columns: [v1, v2, _row_id], pk_indices: [2] }
 - sql: |
     /* simple-stream-agg with non-append-only min-max should use 1-phase agg */
-    create table t(v1 int, v2 int) with ('appendonly' = false);
+    create table t(v1 int, v2 int) with (appendonly = false);
     select sum(v1) as s1, min(v1) as a1, max(v2) as a2 from t;
   stream_plan: |
     StreamMaterialize { columns: [count(hidden), s1, a1, a2], pk_columns: [] }
@@ -331,7 +331,7 @@
           StreamTableScan { table: t, columns: [v1, v2, _row_id], pk_indices: [2] }
 - sql: |
     /* dup group key */
-    create table t(v1 int) with ('appendonly' = false);
+    create table t(v1 int) with (appendonly = false);
     select v1 from t group by v1, v1;
   logical_plan: |
     LogicalProject { exprs: [$0] }
@@ -351,7 +351,7 @@
               StreamTableScan { table: t, columns: [v1, _row_id], pk_indices: [1] }
 - sql: |
     /* dup group key */
-    create table t(v1 int, v2 int, v3 int) with ('appendonly' = false);
+    create table t(v1 int, v2 int, v3 int) with (appendonly = false);
     select v2, min(v1) as min_v1, v3, max(v1) as max_v1 from t group by v3, v2, v2;
   logical_plan: |
     LogicalProject { exprs: [$1, $3, $0, $4] }

@@ -1482,11 +1482,11 @@ fn parse_create_table_with_options() {
             assert_eq!(
                 vec![
                     SqlOption {
-                        name: "foo".into(),
+                        name: vec!["foo".into()].into(),
                         value: Value::SingleQuotedString("bar".into())
                     },
                     SqlOption {
-                        name: "a".into(),
+                        name: vec!["a".into()].into(),
                         value: number("123")
                     },
                 ],
@@ -2884,11 +2884,11 @@ fn parse_create_view_with_options() {
             assert_eq!(
                 vec![
                     SqlOption {
-                        name: "foo".into(),
+                        name: vec!["foo".into()].into(),
                         value: Value::SingleQuotedString("bar".into())
                     },
                     SqlOption {
-                        name: "a".into(),
+                        name: vec!["a".into()].into(),
                         value: number("123")
                     },
                 ],
