@@ -17,23 +17,26 @@ use std::collections::HashMap;
 use risingwave_common::types::DataType;
 use risingwave_expr::expr::AggKind;
 
+// Use AggCall to infer return type
 use super::super::AggCall;
 use super::DataTypeName;
 
+// Same as FuncSign in type_inference/func.rs except this is for aggregate function
 #[derive(PartialEq, Eq, Hash, Clone, Debug)]
-pub struct AggFuncSign {
+pub struct AggFuncSig {
     pub func: AggKind,
     pub inputs_type: Vec<DataTypeName>,
     pub ret_type: DataTypeName,
 }
 
+// Same as FuncSigMap in type_inference/func.rs except this is for aggregate function
 #[derive(Default)]
-pub struct AggFuncSigMap(HashMap<(AggKind, usize), Vec<AggFuncSign>>);
+pub struct AggFuncSigMap(HashMap<(AggKind, usize), Vec<AggFuncSig>>);
 impl AggFuncSigMap {
     fn insert(&mut self, func: AggKind, param_types: Vec<DataTypeName>, ret_type: DataTypeName) {
         let arity = param_types.len();
         let inputs_type = param_types.into_iter().map(Into::into).collect();
-        let sig = AggFuncSign {
+        let sig = AggFuncSig {
             func: func.clone(),
             inputs_type,
             ret_type,
@@ -42,11 +45,8 @@ impl AggFuncSigMap {
     }
 }
 
-/// This function builds type derived map for all built-in functions that take a fixed number
-/// of arguments.  They can be determined to have one or more type signatures since some are
-/// compatible with more than one type.
-/// Type signatures and arities of variadic functions are checked
-/// [elsewhere](crate::expr::FunctionCall::new).
+/// This function builds type derived map for all built-in aggregate functions that take a fixed
+/// number of arguments (In fact mostly is one).
 fn build_type_derive_map() -> AggFuncSigMap {
     use {AggKind as A, DataTypeName as T};
     let mut map = AggFuncSigMap::default();
@@ -96,6 +96,6 @@ lazy_static::lazy_static! {
 }
 
 /// The table of function signatures.
-pub fn agg_func_sigs() -> impl Iterator<Item = &'static AggFuncSign> {
+pub fn agg_func_sigs() -> impl Iterator<Item = &'static AggFuncSig> {
     AGG_FUNC_SIG_MAP.0.values().flatten()
 }

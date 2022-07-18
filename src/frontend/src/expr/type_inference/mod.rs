@@ -19,7 +19,7 @@ use risingwave_common::types::DataType;
 mod agg;
 mod cast;
 mod func;
-pub use agg::{agg_func_sigs, AggFuncSign};
+pub use agg::{agg_func_sigs, AggFuncSig};
 pub use cast::{
     align_types, cast_map_array, cast_ok, cast_ok_base, least_restrictive, CastContext,
 };

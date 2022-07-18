@@ -19,7 +19,7 @@ use rand::seq::SliceRandom;
 use rand::Rng;
 use risingwave_expr::expr::AggKind;
 use risingwave_frontend::expr::{
-    agg_func_sigs, func_sigs, AggFuncSign, DataTypeName, ExprType, FuncSign,
+    agg_func_sigs, func_sigs, AggFuncSig, DataTypeName, ExprType, FuncSign,
 };
 use risingwave_sqlparser::ast::{
     BinaryOperator, Expr, Function, FunctionArg, FunctionArgExpr, Ident, ObjectName,
@@ -35,7 +35,7 @@ lazy_static::lazy_static! {
 }
 
 lazy_static::lazy_static! {
-    static ref AGG_FUNC_TABLE: HashMap<DataTypeName, Vec<AggFuncSign>> = {
+    static ref AGG_FUNC_TABLE: HashMap<DataTypeName, Vec<AggFuncSig>> = {
         init_agg_table()
     };
 }
@@ -46,13 +46,22 @@ fn init_op_table() -> HashMap<DataTypeName, Vec<FuncSign>> {
     funcs
 }
 
-fn init_agg_table() -> HashMap<DataTypeName, Vec<AggFuncSign>> {
-    let mut funcs = HashMap::<DataTypeName, Vec<AggFuncSign>>::new();
+fn init_agg_table() -> HashMap<DataTypeName, Vec<AggFuncSig>> {
+    let mut funcs = HashMap::<DataTypeName, Vec<AggFuncSig>>::new();
     agg_func_sigs().for_each(|func| funcs.entry(func.ret_type).or_default().push(func.clone()));
     funcs
 }
 
 impl<'a, R: Rng> SqlGenerator<'a, R> {
+    /// can_agg    - In generating expression, there is two execution mode
+    ///                 1) Non-Aggregate/Aggregate of Groupby Coloumns AND/OR Aggregate of Coloumns
+    /// that is not Groupby coloumns.                 2) No Aggregate for all columns
+    /// (NonGroupby coloumns when group by is being used will not be selected at all in this mode).
+    ///              When can_agg is false, it means the second execution mode which is strictly no
+    /// aggregate for all coloumns. inside_agg - Rule: an aggregate function cannot be inside an
+    /// aggregate function              Since expression can be recursive, so this variable show
+    /// that currently this expression is inside an aggregate function.              This will
+    /// ensure this rule is followed.
     pub(crate) fn gen_expr(&mut self, typ: DataTypeName, can_agg: bool, inside_agg: bool) -> Expr {
         if !self.can_recurse() {
             // Stop recursion with a simple scalar or column.
@@ -61,7 +70,11 @@ impl<'a, R: Rng> SqlGenerator<'a, R> {
                 false => self.gen_col(typ, inside_agg),
             };
         }
-        assert!(!(!can_agg & inside_agg));
+
+        // It is impossible to have can_agg = false and inside_agg = true.
+        // It makes no sense that when stricly no aggregate can be used, and this expr is inside an
+        // aggregate function.
+        assert!(can_agg || !inside_agg);
 
         let range = if can_agg & !inside_agg { 99 } else { 90 };
 
@@ -130,14 +143,19 @@ impl<'a, R: Rng> SqlGenerator<'a, R> {
             Some(funcs) => funcs,
         };
         let func = funcs.choose(&mut self.rng).unwrap();
+        // Common sense that the aggregation is allowed in the overall expression
+        let can_agg = true;
+        // show then the expression inside this function is in aggregate function
+        let inside_agg = true;
         let expr: Vec<Expr> = func
             .inputs_type
             .iter()
-            .map(|t| self.gen_expr(*t, true, true))
+            .map(|t| self.gen_expr(*t, can_agg, inside_agg))
             .collect();
         assert!(expr.len() == 1);
 
-        make_agg_expr(func.func.clone(), expr[0].clone(), self.flip_coin())
+        let distinct = self.flip_coin();
+        make_agg_expr(func.func.clone(), expr[0].clone(), distinct)
             .unwrap_or_else(|| self.gen_simple_scalar(ret))
     }
 }
@@ -167,17 +185,17 @@ fn make_general_expr(func: ExprType, exprs: Vec<Expr>) -> Option<Expr> {
         E::IsNotTrue => Some(Expr::IsNotTrue(Box::new(exprs[0].clone()))),
         E::IsFalse => Some(Expr::IsFalse(Box::new(exprs[0].clone()))),
         E::IsNotFalse => Some(Expr::IsNotFalse(Box::new(exprs[0].clone()))),
-        E::Position => Some(Expr::Function(make_func("position", &exprs, false))),
-        E::RoundDigit => Some(Expr::Function(make_func("round", &exprs, false))),
-        E::Repeat => Some(Expr::Function(make_func("repeat", &exprs, false))),
-        E::CharLength => Some(Expr::Function(make_func("char_length", &exprs, false))),
-        E::Substr => Some(Expr::Function(make_func("substr", &exprs, false))),
-        E::Length => Some(Expr::Function(make_func("length", &exprs, false))),
-        E::Upper => Some(Expr::Function(make_func("upper", &exprs, false))),
-        E::Lower => Some(Expr::Function(make_func("lower", &exprs, false))),
-        E::Replace => Some(Expr::Function(make_func("replace", &exprs, false))),
-        E::Md5 => Some(Expr::Function(make_func("md5", &exprs, false))),
-        E::ToChar => Some(Expr::Function(make_func("to_char", &exprs, false))),
+        E::Position => Some(Expr::Function(make_simple_func("position", &exprs))),
+        E::RoundDigit => Some(Expr::Function(make_simple_func("round", &exprs))),
+        E::Repeat => Some(Expr::Function(make_simple_func("repeat", &exprs))),
+        E::CharLength => Some(Expr::Function(make_simple_func("char_length", &exprs))),
+        E::Substr => Some(Expr::Function(make_simple_func("substr", &exprs))),
+        E::Length => Some(Expr::Function(make_simple_func("length", &exprs))),
+        E::Upper => Some(Expr::Function(make_simple_func("upper", &exprs))),
+        E::Lower => Some(Expr::Function(make_simple_func("lower", &exprs))),
+        E::Replace => Some(Expr::Function(make_simple_func("replace", &exprs))),
+        E::Md5 => Some(Expr::Function(make_simple_func("md5", &exprs))),
+        E::ToChar => Some(Expr::Function(make_simple_func("to_char", &exprs))),
         E::Overlay => Some(make_overlay(exprs)),
         _ => None,
     }
@@ -187,14 +205,22 @@ fn make_agg_expr(func: AggKind, expr: Expr, distinct: bool) -> Option<Expr> {
     use AggKind as A;
 
     match func {
-        A::Sum => Some(Expr::Function(make_func("sum", &[expr], distinct))),
-        A::Min => Some(Expr::Function(make_func("min", &[expr], distinct))),
-        A::Max => Some(Expr::Function(make_func("max", &[expr], distinct))),
-        A::Count => Some(Expr::Function(make_func("count", &[expr], distinct))),
-        A::Avg => Some(Expr::Function(make_func("avg", &[expr], distinct))),
-        A::StringAgg => Some(Expr::Function(make_func("string_agg", &[expr], distinct))),
-        A::SingleValue => Some(Expr::Function(make_func("single_value", &[expr], false))),
-        A::ApproxCountDistinct => Some(Expr::Function(make_func(
+        A::Sum => Some(Expr::Function(make_agg_func("sum", &[expr], distinct))),
+        A::Min => Some(Expr::Function(make_agg_func("min", &[expr], distinct))),
+        A::Max => Some(Expr::Function(make_agg_func("max", &[expr], distinct))),
+        A::Count => Some(Expr::Function(make_agg_func("count", &[expr], distinct))),
+        A::Avg => Some(Expr::Function(make_agg_func("avg", &[expr], distinct))),
+        A::StringAgg => Some(Expr::Function(make_agg_func(
+            "string_agg",
+            &[expr],
+            distinct,
+        ))),
+        A::SingleValue => Some(Expr::Function(make_agg_func(
+            "single_value",
+            &[expr],
+            false,
+        ))),
+        A::ApproxCountDistinct => Some(Expr::Function(make_agg_func(
             "approx_count_distinct",
             &[expr],
             false,
@@ -240,8 +266,29 @@ fn make_overlay(exprs: Vec<Expr>) -> Expr {
     }
 }
 
-// DINSTINCT , ORDER BY or FILTER is allowed in aggregation functions,
-fn make_func(func_name: &str, exprs: &[Expr], distinct: bool) -> Function {
+/// This is the function that generate simple function (one-to-one) such as IsNull that is not
+/// aggregate function because This function does not allowed Distinct, Order By or Filter.
+/// Therefore another function is generated for generating function that is one-to-one.
+fn make_simple_func(func_name: &str, exprs: &[Expr]) -> Function {
+    let args = exprs
+        .iter()
+        .map(|e| FunctionArg::Unnamed(FunctionArgExpr::Expr(e.clone())))
+        .collect();
+
+    Function {
+        name: ObjectName(vec![Ident::new(func_name)]),
+        args,
+        over: None,
+        distinct: false,
+        order_by: vec![],
+        filter: None,
+    }
+}
+
+/// This is the function that generate aggregate function.
+/// DISTINCT , ORDER BY or FILTER is allowed in aggregation functions。
+/// Currently, distinct is allowed only, other and others rule is TODO: https://github.com/singularity-data/risingwave/issues/3933
+fn make_agg_func(func_name: &str, exprs: &[Expr], distinct: bool) -> Function {
     let args = exprs
         .iter()
         .map(|e| FunctionArg::Unnamed(FunctionArgExpr::Expr(e.clone())))
