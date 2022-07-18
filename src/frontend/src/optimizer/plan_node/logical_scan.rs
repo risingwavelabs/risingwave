@@ -20,6 +20,7 @@ use fixedbitset::FixedBitSet;
 use itertools::Itertools;
 use risingwave_common::catalog::{ColumnDesc, Field, Schema, TableDesc};
 use risingwave_common::error::{ErrorCode, Result, RwError};
+use risingwave_common::util::scan_range::ScanRange;
 
 use super::{
     BatchFilter, BatchProject, ColPrunable, PlanBase, PlanRef, PredicatePushdown, StreamTableScan,
@@ -29,7 +30,7 @@ use crate::catalog::ColumnId;
 use crate::expr::{CollectInputRef, ExprImpl, InputRef};
 use crate::optimizer::plan_node::{BatchSeqScan, LogicalFilter, LogicalProject};
 use crate::session::OptimizerContextRef;
-use crate::utils::{ColIndexMapping, Condition, ScanRange};
+use crate::utils::{ColIndexMapping, Condition};
 
 /// `LogicalScan` returns contents of a table or other equivalent object
 #[derive(Debug, Clone)]

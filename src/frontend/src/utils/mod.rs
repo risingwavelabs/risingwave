@@ -18,7 +18,6 @@ mod condition;
 pub use condition::*;
 mod connected_components;
 pub(crate) use connected_components::*;
-pub use risingwave_common::util::scan_range::*;
 
 use crate::expr::{Expr, ExprImpl, ExprRewriter, InputRef};
 
