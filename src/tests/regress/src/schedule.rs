@@ -287,6 +287,8 @@ impl TestCase {
     }
 }
 
+/// This function ignores the comments and empty lines. They are not compared between
+/// expected output file and actual output file.
 fn read_lines<P>(filename: P) -> std::io::Result<String>
 where
     P: AsRef<Path>,
