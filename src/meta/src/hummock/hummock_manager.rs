@@ -15,6 +15,7 @@
 use std::borrow::BorrowMut;
 use std::collections::{BTreeMap, HashSet, VecDeque};
 use std::future::Future;
+use std::ops::Bound::{Excluded, Included};
 use std::ops::DerefMut;
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::Arc;
@@ -332,40 +333,9 @@ where
             .hummock_versions
             .insert(redo_state.id, redo_state.clone());
 
-        for (id, version_delta) in &hummock_version_deltas {
+        for version_delta in hummock_version_deltas.values() {
             if version_delta.prev_id == redo_state.id {
-                for (compaction_group_id, level_deltas) in &version_delta.level_deltas {
-                    let mut delete_sst_levels = Vec::with_capacity(level_deltas.level_deltas.len());
-                    let mut delete_sst_ids_set = HashSet::new();
-                    let mut insert_sst_level = usize::MAX;
-                    let mut insert_sub_level = u64::MAX;
-                    let mut insert_table_infos = vec![];
-                    for level_delta in &level_deltas.level_deltas {
-                        if !level_delta.removed_table_ids.is_empty() {
-                            delete_sst_levels.push(level_delta.level_idx as usize);
-                            delete_sst_ids_set.extend(level_delta.removed_table_ids.iter().clone());
-                        }
-                        if !level_delta.inserted_table_infos.is_empty() {
-                            insert_sst_level = level_delta.level_idx as usize;
-                            insert_sub_level = level_delta.l0_sub_level_id;
-                            insert_table_infos
-                                .extend(level_delta.inserted_table_infos.iter().cloned());
-                        }
-                    }
-
-                    redo_state.apply_compact_ssts(
-                        *compaction_group_id as CompactionGroupId,
-                        &delete_sst_levels,
-                        &delete_sst_ids_set,
-                        insert_sst_level,
-                        insert_sub_level,
-                        insert_table_infos,
-                    );
-                }
-                redo_state.id = *id;
-                redo_state.max_committed_epoch = version_delta.max_committed_epoch;
-                redo_state.safe_epoch = version_delta.safe_epoch;
-
+                redo_state.apply_version_delta(version_delta);
                 versioning_guard
                     .hummock_versions
                     .insert(redo_state.id, redo_state.clone());
@@ -446,8 +416,8 @@ where
     pub async fn pin_version(
         &self,
         context_id: HummockContextId,
-        _last_pinned: HummockVersionId,
-    ) -> Result<HummockVersion> {
+        last_pinned: HummockVersionId,
+    ) -> Result<(bool, Vec<HummockVersionDelta>, Option<HummockVersion>)> {
         let mut versioning_guard = write_lock!(self, versioning).await;
         let _timer = start_measure_real_process_timer!(self);
         let versioning = versioning_guard.deref_mut();
@@ -464,12 +434,37 @@ where
 
         let version_id = current_version_id.id();
 
+        let (is_delta, ret_deltas) = {
+            if last_pinned <= version_id
+                && versioning.hummock_version_deltas.contains_key(&last_pinned)
+            {
+                (
+                    true,
+                    versioning
+                        .hummock_version_deltas
+                        .range((Excluded(last_pinned), Included(version_id)))
+                        .map(|(_, delta)| delta.clone())
+                        .collect_vec(),
+                )
+            } else {
+                (false, vec![])
+            }
+        };
+
         if context_pinned_version.min_pinned_id == 0 {
             context_pinned_version.min_pinned_id = version_id;
             commit_multi_var!(self, Some(context_id), context_pinned_version)?;
         }
 
-        let ret = Ok(hummock_versions.get(&version_id).unwrap().clone());
+        let ret = Ok((
+            is_delta,
+            ret_deltas,
+            if is_delta {
+                None
+            } else {
+                Some(hummock_versions.get(&version_id).unwrap().clone())
+            },
+        ));
 
         #[cfg(test)]
         {
