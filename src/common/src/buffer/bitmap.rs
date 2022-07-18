@@ -193,13 +193,7 @@ impl Bitmap {
 
     /// Return the next set bit index on or after `bit_idx`.
     pub fn next_set_bit(&self, bit_idx: usize) -> Option<usize> {
-        for idx in bit_idx..self.len() {
-            // Since `self.len()` guards the range, we can safely call unsafe function here.
-            if unsafe { self.is_set_unchecked(idx) } {
-                return Some(idx);
-            }
-        }
-        None
+        (bit_idx..self.len()).find(|&idx| unsafe { self.is_set_unchecked(idx) })
     }
 
     pub fn num_high_bits(&self) -> usize {
@@ -482,6 +476,7 @@ mod tests {
     }
 
     #[test]
+    #[expect(clippy::needless_borrow)]
     fn test_bitmap_from_protobuf() {
         let bitmap_bytes = vec![3u8 /* len % 8 */, 0b0101_0010, 0b110];
         let buf = ProstBuffer {

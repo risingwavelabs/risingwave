@@ -12,12 +12,12 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+use std::collections::btree_map::Range;
+use std::collections::{BTreeMap, HashSet};
 use std::ops::Bound::{self, *};
 use std::ops::RangeBounds;
 
 use anyhow::anyhow;
-use madsim::collections::btree_map::Range;
-use madsim::collections::{BTreeMap, HashSet};
 use risingwave_common::array::Row;
 use risingwave_common::types::ScalarImpl;
 use risingwave_storage::table::state_table::StateTable;

@@ -29,7 +29,6 @@
 #![feature(generic_associated_types)]
 #![feature(binary_heap_drain_sorted)]
 #![feature(option_result_contains)]
-#![feature(let_chains)]
 #![feature(let_else)]
 #![feature(type_alias_impl_trait)]
 #![feature(map_first_last)]
