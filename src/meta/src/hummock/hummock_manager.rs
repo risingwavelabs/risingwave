@@ -178,7 +178,8 @@ macro_rules! start_measure_real_process_timer {
 #[derive(Default)]
 struct Versioning {
     current_version_id: CurrentHummockVersionId,
-    hummock_versions: BTreeMap<HummockVersionId, HummockVersion>,
+    current_version: Option<HummockVersion>,
+    hummock_versions: BTreeMap<HummockVersionId, Vec<u64>>,
     hummock_version_deltas: BTreeMap<HummockVersionId, HummockVersionDelta>,
     pinned_versions: BTreeMap<HummockContextId, HummockPinnedVersion>,
     pinned_snapshots: BTreeMap<HummockContextId, HummockPinnedSnapshot>,
@@ -188,8 +189,8 @@ struct Versioning {
 
 impl Versioning {
     pub fn current_version_ref(&self) -> &HummockVersion {
-        self.hummock_versions
-            .get(&self.current_version_id.id())
+        self.current_version
+            .as_ref()
             .expect("current version should always be available.")
     }
 
@@ -328,7 +329,7 @@ where
         };
         versioning_guard
             .hummock_versions
-            .insert(redo_state.id, redo_state.clone());
+            .insert(redo_state.id, redo_state.get_sst_ids());
 
         for version_delta in hummock_version_deltas.values() {
             if version_delta.prev_id == redo_state.id {
@@ -336,17 +337,12 @@ where
 
                 versioning_guard
                     .hummock_versions
-                    .insert(redo_state.id, redo_state.clone());
+                    .insert(redo_state.id, redo_state.get_sst_ids());
             }
         }
-        self.max_committed_epoch.store(
-            versioning_guard
-                .hummock_versions
-                .get(&versioning_guard.current_version_id.id())
-                .unwrap()
-                .max_committed_epoch,
-            Ordering::Relaxed,
-        );
+        self.max_committed_epoch
+            .store(redo_state.max_committed_epoch, Ordering::Relaxed);
+        versioning_guard.current_version = Some(redo_state);
         versioning_guard.hummock_version_deltas = hummock_version_deltas;
 
         versioning_guard.pinned_versions = HummockPinnedVersion::list(self.env.meta_store())
@@ -420,7 +416,6 @@ where
         let _timer = start_measure_real_process_timer!(self);
         let versioning = versioning_guard.deref_mut();
         let mut pinned_versions = BTreeMapTransaction::new(&mut versioning.pinned_versions);
-        let hummock_versions = &versioning.hummock_versions;
         let current_version_id = versioning.current_version_id.clone();
         let mut context_pinned_version = pinned_versions.new_entry_txn_or_default(
             context_id,
@@ -460,7 +455,7 @@ where
             if is_delta {
                 None
             } else {
-                Some(hummock_versions.get(&version_id).unwrap().clone())
+                Some(versioning.current_version.as_ref().unwrap().clone())
             },
         ));
 
@@ -588,10 +583,9 @@ where
         let _timer = start_measure_real_process_timer!(self);
         // Use the max_committed_epoch in storage as the snapshot ts so only committed changes are
         // visible in the snapshot.
-        let version_id = versioning_guard.current_version_id.id();
         let max_committed_epoch = versioning_guard
-            .hummock_versions
-            .get(&version_id)
+            .current_version
+            .as_ref()
             .unwrap()
             .max_committed_epoch;
         // Ensure the unpin will not clean the latest one.
@@ -676,10 +670,9 @@ where
 
                 compact_task.watermark = {
                     let versioning_guard = read_lock!(self, versioning).await;
-                    let current_version_id = versioning_guard.current_version_id.id();
                     let max_committed_epoch = versioning_guard
-                        .hummock_versions
-                        .get(&current_version_id)
+                        .current_version
+                        .as_ref()
                         .unwrap()
                         .max_committed_epoch;
                     versioning_guard
@@ -911,7 +904,8 @@ where
             )?;
             versioning
                 .hummock_versions
-                .insert(new_version.id, new_version);
+                .insert(new_version.id, new_version.get_sst_ids());
+            versioning.current_version = Some(new_version);
         } else {
             // The compaction task is cancelled.
             commit_multi_var!(
@@ -1087,7 +1081,8 @@ where
         )?;
         versioning
             .hummock_versions
-            .insert(new_version_id, new_hummock_version);
+            .insert(new_version_id, new_hummock_version.get_sst_ids());
+        versioning.current_version = Some(new_hummock_version);
         self.max_committed_epoch.store(epoch, Ordering::Release);
 
         // Update metrics
@@ -1241,21 +1236,33 @@ where
 
     #[named]
     pub async fn proceed_version_checkpoint(&self) -> risingwave_common::error::Result<()> {
+        let mut checkpoint = HummockVersion::list(self.env.meta_store())
+            .await?
+            .into_iter()
+            .at_most_one()
+            .unwrap()
+            .unwrap();
+        let old_checkpoint_id = checkpoint.id;
         let mut version_deltas_to_delete = BTreeMap::new();
 
         {
             let mut versioning_guard = write_lock!(self, versioning).await;
-            let new_checkpoint = versioning_guard
+            let new_checkpoint_id = *versioning_guard
                 .hummock_versions
                 .first_key_value()
                 .unwrap()
-                .1
-                .clone();
-            new_checkpoint.insert(self.env.meta_store()).await?;
+                .0;
+            for (_, version_delta) in versioning_guard
+                .hummock_version_deltas
+                .range((Excluded(old_checkpoint_id), Included(new_checkpoint_id)))
+            {
+                checkpoint.apply_version_delta(version_delta);
+            }
+            checkpoint.insert(self.env.meta_store()).await?;
 
             version_deltas_to_delete.append(&mut versioning_guard.hummock_version_deltas);
             versioning_guard.hummock_version_deltas =
-                version_deltas_to_delete.split_off(&(new_checkpoint.id + 1));
+                version_deltas_to_delete.split_off(&(new_checkpoint_id + 1));
         }
 
         let mut trx = Transaction::default();
@@ -1379,7 +1386,7 @@ where
         // multiple `HummockVersion`s. Currently only memory stores multiple `HummockVersion`s, so
         // we only need to commit in memory.
         commit_multi_var!(self, None, stale_sstables)?;
-        hummock_versions.commit();
+        hummock_versions.commit_memory();
 
         #[cfg(test)]
         {
@@ -1455,18 +1462,8 @@ where
             versioning
                 .map(|versioning| {
                     versioning
-                        .levels
                         .iter()
-                        .flat_map(|(_, l)| &l.levels)
-                        .flat_map(|level| {
-                            level.table_infos.iter().map(|table_info| {
-                                versioning_guard
-                                    .sstable_id_infos
-                                    .get(&table_info.id)
-                                    .unwrap()
-                                    .clone()
-                            })
-                        })
+                        .map(|id| versioning_guard.sstable_id_infos.get(id).unwrap().clone())
                         .collect_vec()
                 })
                 .ok_or_else(|| {
@@ -1589,16 +1586,6 @@ where
     #[named]
     pub async fn get_current_version(&self) -> HummockVersion {
         read_lock!(self, versioning).await.current_version()
-    }
-
-    #[named]
-    pub async fn get_version(&self, version_id: HummockVersionId) -> HummockVersion {
-        read_lock!(self, versioning)
-            .await
-            .hummock_versions
-            .get(&version_id)
-            .unwrap()
-            .clone()
     }
 
     pub fn set_compaction_scheduler(&self, sender: CompactionRequestChannelRef) {
