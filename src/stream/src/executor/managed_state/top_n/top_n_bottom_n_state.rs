@@ -15,11 +15,11 @@
 #![allow(clippy::mutable_key_type)]
 #![allow(dead_code)]
 
+use std::collections::BTreeMap;
 use std::ops::Index;
 
 use futures::pin_mut;
 use futures::stream::StreamExt;
-use madsim::collections::BTreeMap;
 use risingwave_common::array::Row;
 use risingwave_common::catalog::{ColumnDesc, ColumnId, TableId};
 use risingwave_common::types::DataType;
