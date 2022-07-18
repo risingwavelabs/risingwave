@@ -258,7 +258,8 @@ fn make_overlay(exprs: Vec<Expr>) -> Expr {
     }
 }
 
-/// Generates simple functions such as `length`, `round`, `to_char`. These operate on datums instead of columns / rows.
+/// Generates simple functions such as `length`, `round`, `to_char`. These operate on datums instead
+/// of columns / rows.
 fn make_simple_func(func_name: &str, exprs: &[Expr]) -> Function {
     let args = exprs
         .iter()
