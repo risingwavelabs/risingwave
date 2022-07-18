@@ -35,6 +35,8 @@
 #![feature(assert_matches)]
 #![feature(let_else)]
 #![feature(lint_reasons)]
+#![feature(type_alias_impl_trait)]
+#![feature(generators)]
 
 pub mod error;
 pub mod expr;
