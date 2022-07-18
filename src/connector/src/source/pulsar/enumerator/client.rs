@@ -56,7 +56,9 @@ impl SplitEnumerator for PulsarSplitEnumerator {
             Some("latest") => PulsarEnumeratorOffset::Latest,
             None => PulsarEnumeratorOffset::Earliest,
             _ => {
-                bail!("properties `startup_mode` only support earliest and latest or leave it empty");
+                bail!(
+                    "properties `startup_mode` only support earliest and latest or leave it empty"
+                );
             }
         };
 
@@ -80,7 +82,11 @@ impl SplitEnumerator for PulsarSplitEnumerator {
         let topic_metadata = self.admin_client.get_topic_metadata(&self.topic).await?;
         // note: may check topic exists by get stats
         if topic_metadata.partitions < 0 {
-            bail!("illegal metadata {:?} for pulsar topic {}",topic_metadata.partitions,self.topic.to_string());
+            bail!(
+                "illegal metadata {:?} for pulsar topic {}",
+                topic_metadata.partitions,
+                self.topic.to_string()
+            );
         }
 
         let splits = if topic_metadata.partitions > 0 {
@@ -166,7 +172,7 @@ mod test {
             "/admin/v2/persistent/public/default/t/partitions",
             "{\"partitions\":3}",
         )
-            .await;
+        .await;
 
         let prop = PulsarProperties {
             topic: "t".to_string(),
@@ -192,7 +198,7 @@ mod test {
             "/admin/v2/persistent/public/default/t/partitions",
             "{\"partitions\":0}",
         )
-            .await;
+        .await;
 
         let prop = PulsarProperties {
             topic: "t".to_string(),
