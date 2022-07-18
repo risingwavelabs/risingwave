@@ -19,6 +19,7 @@ use futures::StreamExt;
 use parking_lot::Mutex;
 use risingwave_common::array::DataChunk;
 use risingwave_common::error::{ErrorCode, Result, RwError};
+use risingwave_common::util::debug_context::{DebugContext, DEBUG_CONTEXT};
 use risingwave_pb::batch_plan::{
     PlanFragment, TaskId as ProstTaskId, TaskOutputId as ProstOutputId,
 };
@@ -220,14 +221,19 @@ impl<C: BatchTaskContext> BatchTaskExecution<C> {
             serde_json::to_string_pretty(self.plan.get_root()?).unwrap()
         );
         *self.state.lock() = TaskStatus::Running;
-        let exec = ExecutorBuilder::new(
-            self.plan.root.as_ref().unwrap(),
-            &self.task_id,
-            self.context.clone(),
-            self.epoch,
-        )
-        .build()
-        .await?;
+
+        let exec = DEBUG_CONTEXT
+            .scope(
+                DebugContext::BatchQuery,
+                ExecutorBuilder::new(
+                    self.plan.root.as_ref().unwrap(),
+                    &self.task_id,
+                    self.context.clone(),
+                    self.epoch,
+                )
+                .build(),
+            )
+            .await?;
 
         let (sender, receivers) = create_output_channel(self.plan.get_exchange_info()?)?;
         let (shutdown_tx, shutdown_rx) = tokio::sync::oneshot::channel::<u64>();
@@ -246,8 +252,11 @@ impl<C: BatchTaskContext> BatchTaskExecution<C> {
             let join_handle = tokio::spawn(async move {
                 // We should only pass a reference of sender to execution because we should only
                 // close it after task error has been set.
-                if let Err(e) = self
-                    .try_execute(exec, &mut sender, shutdown_rx)
+                if let Err(e) = DEBUG_CONTEXT
+                    .scope(
+                        DebugContext::BatchQuery,
+                        self.try_execute(exec, &mut sender, shutdown_rx),
+                    )
                     .instrument(tracing::trace_span!(
                         "batch_execute",
                         task_id = ?task_id.task_id,
