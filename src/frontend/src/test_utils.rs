@@ -71,6 +71,7 @@ impl SessionManager for LocalFrontend {
 }
 
 impl LocalFrontend {
+    #[expect(clippy::unused_async)]
     pub async fn new(opts: FrontendOpts) -> Self {
         let env = FrontendEnv::mock();
         Self { opts, env }
@@ -94,7 +95,7 @@ impl LocalFrontend {
     }
 
     /// Convert a sql (must be an `Query`) into an unoptimized batch plan.
-    pub async fn to_batch_plan(&self, sql: impl Into<String>) -> Result<PlanRef> {
+    pub fn to_batch_plan(&self, sql: impl Into<String>) -> Result<PlanRef> {
         let raw_sql = &sql.into();
         let statements = Parser::parse_sql(raw_sql).unwrap();
         let statement = statements.get(0).unwrap();

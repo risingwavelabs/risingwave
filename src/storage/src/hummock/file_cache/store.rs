@@ -135,6 +135,7 @@ where
         PathBuf::from(&self.dir).join(CACHE_FILE_FILENAME)
     }
 
+    #[expect(clippy::unused_async)]
     pub async fn restore(&self, _indices: &LruCache<K, SlotId>) -> Result<()> {
         // TODO: Impl me!!!
         Ok(())
