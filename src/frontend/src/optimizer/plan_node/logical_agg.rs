@@ -22,6 +22,7 @@ use risingwave_common::error::{ErrorCode, Result};
 use risingwave_common::types::DataType;
 use risingwave_common::util::sort_util::OrderType;
 use risingwave_expr::expr::AggKind;
+use risingwave_pb::expr::agg_call::OrderByField as ProstAggOrderByField;
 use risingwave_pb::expr::AggCall as ProstAggCall;
 
 use super::{
@@ -96,6 +97,17 @@ impl fmt::Debug for PlanAggOrderByFieldVerboseDisplay<'_> {
     }
 }
 
+impl PlanAggOrderByField {
+    fn to_protobuf(&self) -> ProstAggOrderByField {
+        ProstAggOrderByField {
+            input: Some(self.input.to_proto()),
+            r#type: Some(self.input.data_type.to_protobuf()),
+            direction: self.direction.to_protobuf() as i32,
+            nulls_first: self.nulls_first,
+        }
+    }
+}
+
 /// Aggregation Call
 #[derive(Clone)]
 pub struct PlanAggCall {
@@ -161,6 +173,11 @@ impl PlanAggCall {
             return_type: Some(self.return_type.to_protobuf()),
             args: self.inputs.iter().map(InputRef::to_agg_arg_proto).collect(),
             distinct: self.distinct,
+            order_by_fields: self
+                .order_by_fields
+                .iter()
+                .map(PlanAggOrderByField::to_protobuf)
+                .collect(),
             filter: self
                 .filter
                 .as_expr_unless_true()
@@ -181,6 +198,7 @@ impl PlanAggCall {
         PlanAggCall {
             agg_kind: total_agg_kind,
             inputs: vec![InputRef::new(partial_output_idx, self.return_type.clone())],
+            order_by_fields: vec![], // order must make no difference when we use 2-phase agg
             filter: Condition::true_cond(),
             ..self.clone()
         }
@@ -392,6 +410,14 @@ impl LogicalAgg {
         let total_agg_logical_plan =
             LogicalAgg::new(total_agg_types, self.group_key().to_vec(), input);
         Ok(StreamGlobalSimpleAgg::new(total_agg_logical_plan).into())
+    }
+
+    /// Check if the aggregation result will be affected by order by clause, if any.
+    pub(crate) fn is_agg_result_affected_by_order(&self) -> bool {
+        self.agg_calls.iter().any(|call| match call.agg_kind {
+            AggKind::StringAgg => !call.order_by_fields.is_empty(),
+            _ => false,
+        })
     }
 }
 

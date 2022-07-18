@@ -12,12 +12,32 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+use std::ffi::OsStr;
 use std::net::{Ipv4Addr, SocketAddrV4};
 use std::path::{Path, PathBuf};
 
 use anyhow::Context;
 use clap::{Parser, ValueHint};
 use path_absolutize::*;
+
+#[derive(Debug, Clone, Copy, Eq, PartialEq)]
+pub(crate) enum DatabaseMode {
+    PostgreSQL,
+    Risingwave,
+}
+
+impl From<&OsStr> for DatabaseMode {
+    fn from(mode: &OsStr) -> Self {
+        let mode = mode
+            .to_str()
+            .expect("Expect utf-8 string for database mode");
+        match mode.to_lowercase().as_str() {
+            "postgres" | "pg" | "postgresql" => DatabaseMode::PostgreSQL,
+            "risingwave" | "rw" => DatabaseMode::Risingwave,
+            _ => unreachable!("Unrecognized database mode. Support PostgreSQL or Risingwave only."),
+        }
+    }
+}
 
 #[derive(Parser, Debug, Clone)]
 pub(crate) struct Opts {
@@ -45,6 +65,9 @@ pub(crate) struct Opts {
     /// Location for customized log file.
     #[clap(long, parse(from_os_str), default_value = "config/log4rs.yaml", value_hint=ValueHint::FilePath)]
     log4rs_config: PathBuf,
+    /// Database mode
+    #[clap(name = "DATABASE_MODE", long = "mode", parse(from_os_str))]
+    database_mode: DatabaseMode,
 }
 
 impl Opts {
@@ -98,5 +121,9 @@ impl Opts {
 
     pub(crate) fn port(&self) -> u16 {
         self.pg_server_port
+    }
+
+    pub(crate) fn database_mode(&self) -> DatabaseMode {
+        self.database_mode
     }
 }

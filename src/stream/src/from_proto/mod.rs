@@ -29,6 +29,7 @@ mod lookup_union;
 mod merge;
 mod mview;
 mod project;
+mod project_set;
 mod sink;
 mod source;
 mod top_n_appendonly;
@@ -58,6 +59,7 @@ use self::lookup_union::*;
 use self::merge::*;
 use self::mview::*;
 use self::project::*;
+use self::project_set::*;
 use self::sink::*;
 use self::source::*;
 use self::top_n_appendonly::*;
@@ -122,5 +124,6 @@ pub fn create_executor(
         NodeBody::LookupUnion => LookupUnionExecutorBuilder,
         NodeBody::Expand => ExpandExecutorBuilder,
         NodeBody::DynamicFilter => DynamicFilterExecutorBuilder,
+        NodeBody::ProjectSet => ProjectSetExecutorBuilder,
     }
 }
