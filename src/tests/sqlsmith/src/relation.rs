@@ -14,8 +14,8 @@
 
 use rand::prelude::SliceRandom;
 use rand::Rng;
+use risingwave_frontend::expr::DataTypeName;
 use risingwave_sqlparser::ast::{Ident, ObjectName, TableAlias, TableFactor, TableWithJoins};
-
 use crate::{
     BinaryOperator, Column, Expr, Join, JoinConstraint, JoinOperator, SqlGenerator, Table,
 };
@@ -130,4 +130,42 @@ impl<'a, R: Rng> SqlGenerator<'a, R> {
         self.add_relation_to_context(table);
         relation
     }
+
+    /// Generates time window functions.
+    fn gen_time_window_func(&mut self) -> TableWithJoins {
+        self.gen_tumble()
+    }
+
+    /// Generates `TUMBLE`.
+    /// TUMBLE(data: TABLE, timecol: COLUMN, size: INTERVAL, offset?: INTERVAL)
+    fn gen_tumble(&mut self) -> TableWithJoins {
+        let tables = find_tables_with_timestamp_cols(&self.tables);
+        let (table, time_cols) = tables.choose(&mut self.rng).expect("seeded tables all do not have timestamp");
+        let time_col = time_cols.choose(&mut self.rng).unwrap();
+        let interval = self.gen_expr(DataTypeName::Interval);
+
+        let alias = format!("tumble_{}", &table.name);
+        let alias = TableAlias {
+            name: Ident::new(alias),
+            columns: vec![],
+        };
+
+        let tumble_expr = make_tumble_expr(&table, &time_col, &interval);
+        let factor = TableFactor::TableFunction {
+            expr: tumble_expr,
+            alias: Some(alias),
+        };
+        TableWithJoins {
+            relation: factor,
+            joins: vec![],
+        }
+    }
+}
+
+fn make_tumble_expr(table: &Table, time_col: &Column, size: &Expr) -> Expr {
+    todo!()
+}
+
+fn find_tables_with_timestamp_cols(tables: &[Table]) -> Vec<(Table, Vec<Column>)> {
+    todo!()
 }
