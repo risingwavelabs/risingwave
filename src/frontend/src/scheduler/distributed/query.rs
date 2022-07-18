@@ -201,6 +201,7 @@ impl QueryExecution {
     }
 
     /// Cancel execution of this query.
+    #[expect(clippy::unused_async)]
     pub async fn abort(&mut self) -> SchedulerResult<()> {
         todo!()
     }
@@ -299,6 +300,7 @@ impl QueryRunner {
         Ok(())
     }
 
+    #[expect(clippy::unused_async)]
     async fn send_root_stage_info(&mut self) {
         let root_task_status = self.stage_executions[&self.query.root_stage_id()]
             .get_task_status_unchecked(ROOT_TASK_ID);
@@ -528,7 +530,7 @@ mod tests {
             r#type: ParallelUnitType::Single as i32,
             worker_node_id: node_id,
         }];
-        for id in start_id + 1..start_id + parallel_degree {
+        for id in start_id + 1..start_id + 1 + parallel_degree {
             parallel_units.push(ParallelUnit {
                 id,
                 r#type: ParallelUnitType::Hash as i32,

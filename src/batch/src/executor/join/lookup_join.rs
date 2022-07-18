@@ -98,16 +98,20 @@ impl<C: BatchTaskContext> ProbeSideSource<C> {
             .map(|scalar_impl| scalar_impl.to_protobuf())
             .collect_vec();
 
-        let scan_range = Some(ScanRange {
-            eq_conds,
-            lower_bound: None,
-            upper_bound: None,
-        });
+        let scan_ranges = if eq_conds.is_empty() {
+            vec![]
+        } else {
+            vec![ScanRange {
+                eq_conds,
+                lower_bound: None,
+                upper_bound: None,
+            }]
+        };
 
         Ok(NodeBody::RowSeqScan(RowSeqScanNode {
             table_desc: Some(self.table_desc.clone()),
             column_ids: self.probe_side_column_ids.clone(),
-            scan_range,
+            scan_ranges,
             vnode_bitmap: None,
         }))
     }

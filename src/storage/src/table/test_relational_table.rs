@@ -1249,7 +1249,7 @@ async fn test_dedup_cell_based_table_iter_with(
             .collect_vec());
 
         let bytes = cell_based_row_serializer
-            .cell_based_serialize(DEFAULT_VNODE, &pk_bytes, partial_row)
+            .serialize(DEFAULT_VNODE, &pk_bytes, partial_row)
             .unwrap();
 
         // ---------- Batch-write

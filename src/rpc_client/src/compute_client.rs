@@ -15,8 +15,7 @@
 use std::time::Duration;
 
 use risingwave_common::util::addr::HostAddr;
-use risingwave_pb::batch_plan::exchange_info::DistributionMode;
-use risingwave_pb::batch_plan::{ExchangeInfo, PlanFragment, PlanNode, TaskId, TaskOutputId};
+use risingwave_pb::batch_plan::{PlanFragment, TaskId, TaskOutputId};
 use risingwave_pb::task_service::exchange_service_client::ExchangeServiceClient;
 use risingwave_pb::task_service::task_service_client::TaskServiceClient;
 use risingwave_pb::task_service::{
@@ -89,31 +88,7 @@ impl ComputeClient {
             .into_inner())
     }
 
-    // TODO: Remove this
-    pub async fn create_task(&self, task_id: TaskId, plan: PlanNode, epoch: u64) -> Result<()> {
-        let plan = PlanFragment {
-            root: Some(plan),
-            exchange_info: Some(ExchangeInfo {
-                mode: DistributionMode::Single as i32,
-                ..Default::default()
-            }),
-        };
-        let _ = self
-            .create_task_inner(CreateTaskRequest {
-                task_id: Some(task_id),
-                plan: Some(plan),
-                epoch,
-            })
-            .await?;
-        Ok(())
-    }
-
-    pub async fn create_task2(
-        &self,
-        task_id: TaskId,
-        plan: PlanFragment,
-        epoch: u64,
-    ) -> Result<()> {
+    pub async fn create_task(&self, task_id: TaskId, plan: PlanFragment, epoch: u64) -> Result<()> {
         let _ = self
             .create_task_inner(CreateTaskRequest {
                 task_id: Some(task_id),

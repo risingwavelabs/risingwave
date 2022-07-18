@@ -288,7 +288,7 @@ impl<'a, K: Ord, V: Clone> Deref for BTreeMapTransactionValueGuard<'a, K, V> {
             BTreeMapTransactionStagingEntry::Vacant(_) => self
                 .orig_value
                 .expect("staging is vacant, so orig_value must be some"),
-            BTreeMapTransactionStagingEntry::Occupied(v) => *v,
+            BTreeMapTransactionStagingEntry::Occupied(v) => v,
         }
     }
 }
@@ -333,7 +333,7 @@ impl<'a, K: Ord, V: Clone> DerefMut for BTreeMapTransactionValueGuard<'a, K, V> 
             BTreeMapTransactionStagingEntry::Vacant(_) => {
                 unreachable!("we have inserted a cloned original value in case of vacant")
             }
-            BTreeMapTransactionStagingEntry::Occupied(v) => *v,
+            BTreeMapTransactionStagingEntry::Occupied(v) => v,
         }
     }
 }
@@ -365,6 +365,7 @@ impl<'a, K: Ord + Debug, V: Clone> BTreeMapTransaction<'a, K, V> {
     }
 
     /// Start a `BTreeMapEntryTransaction` when the `key` exists
+    #[allow(dead_code)]
     pub fn new_entry_txn(&mut self, key: K) -> Option<BTreeMapEntryTransaction<K, V>> {
         BTreeMapEntryTransaction::new(self.tree_ref, key, None)
     }
@@ -477,12 +478,11 @@ impl<'a, K: Ord, V: Transactional> ValTransaction for BTreeMapTransaction<'a, K,
         for (k, op) in &self.staging {
             match op {
                 BTreeMapOp::Insert(v) => v.upsert_in_transaction(txn)?,
-                BTreeMapOp::Delete => match self.tree_ref.get(k) {
-                    Some(v) => {
+                BTreeMapOp::Delete => {
+                    if let Some(v) = self.tree_ref.get(k) {
                         v.delete_in_transaction(txn)?;
                     }
-                    None => {}
-                },
+                }
             }
         }
         Ok(())

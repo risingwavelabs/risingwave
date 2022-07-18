@@ -20,8 +20,8 @@ use rand::Rng;
 use risingwave_frontend::binder::bind_data_type;
 use risingwave_frontend::expr::DataTypeName;
 use risingwave_sqlparser::ast::{
-    BinaryOperator, ColumnDef, Expr, Ident, Join, JoinConstraint, JoinOperator, OrderByExpr, Query,
-    Select, SelectItem, SetExpr, Statement, TableWithJoins, Value, With,
+    BinaryOperator, ColumnDef, Expr, Ident, Join, JoinConstraint, JoinOperator, ObjectName,
+    OrderByExpr, Query, Select, SelectItem, SetExpr, Statement, TableWithJoins, Value, With,
 };
 
 mod expr;
@@ -29,7 +29,7 @@ pub use expr::print_function_table;
 mod relation;
 mod scalar;
 
-#[derive(Clone)]
+#[derive(Clone, Debug)]
 pub struct Table {
     pub name: String,
     pub columns: Vec<Column>,
@@ -47,7 +47,7 @@ impl Table {
     }
 }
 
-#[derive(Clone)]
+#[derive(Clone, Debug)]
 pub struct Column {
     name: String,
     data_type: DataTypeName,
@@ -74,6 +74,13 @@ struct SqlGenerator<'a, R: Rng> {
     /// May not contain all columns from Self::bound_relations.
     /// e.g. GROUP BY clause will constrain bound_columns.
     bound_columns: Vec<Column>,
+
+    /// SqlGenerator can be used in two execution modes:
+    /// 1. Generating Query Statements.
+    /// 2. Generating queries for CREATE MATERIALIZED VIEW.
+    ///    Under this mode certain restrictions and workarounds are applied
+    ///    for unsupported stream executors.
+    is_mview: bool,
 }
 
 /// Generators
@@ -84,6 +91,17 @@ impl<'a, R: Rng> SqlGenerator<'a, R> {
             rng,
             bound_relations: vec![],
             bound_columns: vec![],
+            is_mview: false,
+        }
+    }
+
+    fn new_for_mview(rng: &'a mut R, tables: Vec<Table>) -> Self {
+        SqlGenerator {
+            tables,
+            rng,
+            bound_relations: vec![],
+            bound_columns: vec![],
+            is_mview: true,
         }
     }
 
@@ -96,6 +114,25 @@ impl<'a, R: Rng> SqlGenerator<'a, R> {
     fn gen_stmt(&mut self) -> Statement {
         let (query, _) = self.gen_query();
         Statement::Query(Box::new(query))
+    }
+
+    pub fn gen_mview(&mut self, name: &str) -> (Statement, Table) {
+        let (query, schema) = self.gen_query();
+        let query = Box::new(query);
+        let table = Table {
+            name: name.to_string(),
+            columns: schema,
+        };
+        let name = ObjectName(vec![Ident::new(name)]);
+        let mview = Statement::CreateView {
+            or_replace: false,
+            materialized: true,
+            name,
+            columns: vec![],
+            query,
+            with_options: vec![],
+        };
+        (mview, table)
     }
 
     fn gen_query(&mut self) -> (Query, Vec<Column>) {
@@ -145,7 +182,7 @@ impl<'a, R: Rng> SqlGenerator<'a, R> {
     }
 
     fn gen_limit(&mut self) -> Option<Expr> {
-        if self.rng.gen_bool(0.2) {
+        if !self.is_mview && self.rng.gen_bool(0.2) {
             Some(Expr::Value(Value::Number(
                 self.rng.gen_range(0..=100).to_string(),
                 false,
@@ -212,15 +249,17 @@ impl<'a, R: Rng> SqlGenerator<'a, R> {
     }
 
     fn gen_from(&mut self) -> Vec<TableWithJoins> {
-        (0..self.tables.len())
-            .filter_map(|_| {
-                if self.flip_coin() {
-                    Some(self.gen_from_relation())
-                } else {
-                    None
-                }
-            })
-            .collect()
+        if self.is_mview {
+            assert!(!self.tables.is_empty());
+            return vec![self.gen_from_relation()];
+        }
+        let mut from = vec![];
+        for _ in 0..self.tables.len() {
+            if self.flip_coin() {
+                from.push(self.gen_from_relation());
+            }
+        }
+        from
     }
 
     fn gen_where(&mut self) -> Option<Expr> {
@@ -270,4 +309,12 @@ impl<'a, R: Rng> SqlGenerator<'a, R> {
 pub fn sql_gen(rng: &mut impl Rng, tables: Vec<Table>) -> String {
     let mut gen = SqlGenerator::new(rng, tables);
     format!("{}", gen.gen_stmt())
+}
+
+/// Generate a random CREATE MATERIALIZED VIEW sql string.
+/// These are derived from `tables`.
+pub fn mview_sql_gen<R: Rng>(rng: &mut R, tables: Vec<Table>, name: &str) -> (String, Table) {
+    let mut gen = SqlGenerator::new_for_mview(rng, tables);
+    let (mview, table) = gen.gen_mview(name);
+    (mview.to_string(), table)
 }
