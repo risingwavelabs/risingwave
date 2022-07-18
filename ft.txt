@@ -1,0 +1,683 @@
+BitwiseAnd(Int16, Int16) -> Int16
+BitwiseAnd(Int16, Int32) -> Int32
+BitwiseAnd(Int16, Int64) -> Int64
+BitwiseAnd(Int32, Int16) -> Int32
+BitwiseAnd(Int32, Int32) -> Int32
+BitwiseAnd(Int32, Int64) -> Int64
+BitwiseAnd(Int64, Int16) -> Int64
+BitwiseAnd(Int64, Int32) -> Int64
+BitwiseAnd(Int64, Int64) -> Int64
+IsNotFalse(Boolean) -> Boolean
+NotEqual(Int16, Int16) -> Boolean
+NotEqual(Int16, Int32) -> Boolean
+NotEqual(Int16, Int64) -> Boolean
+NotEqual(Int16, Decimal) -> Boolean
+NotEqual(Int16, Float32) -> Boolean
+NotEqual(Int16, Float64) -> Boolean
+NotEqual(Int32, Int16) -> Boolean
+NotEqual(Int32, Int32) -> Boolean
+NotEqual(Int32, Int64) -> Boolean
+NotEqual(Int32, Decimal) -> Boolean
+NotEqual(Int32, Float32) -> Boolean
+NotEqual(Int32, Float64) -> Boolean
+NotEqual(Int64, Int16) -> Boolean
+NotEqual(Int64, Int32) -> Boolean
+NotEqual(Int64, Int64) -> Boolean
+NotEqual(Int64, Decimal) -> Boolean
+NotEqual(Int64, Float32) -> Boolean
+NotEqual(Int64, Float64) -> Boolean
+NotEqual(Decimal, Int16) -> Boolean
+NotEqual(Decimal, Int32) -> Boolean
+NotEqual(Decimal, Int64) -> Boolean
+NotEqual(Decimal, Decimal) -> Boolean
+NotEqual(Decimal, Float32) -> Boolean
+NotEqual(Decimal, Float64) -> Boolean
+NotEqual(Float32, Int16) -> Boolean
+NotEqual(Float32, Int32) -> Boolean
+NotEqual(Float32, Int64) -> Boolean
+NotEqual(Float32, Decimal) -> Boolean
+NotEqual(Float32, Float32) -> Boolean
+NotEqual(Float32, Float64) -> Boolean
+NotEqual(Float64, Int16) -> Boolean
+NotEqual(Float64, Int32) -> Boolean
+NotEqual(Float64, Int64) -> Boolean
+NotEqual(Float64, Decimal) -> Boolean
+NotEqual(Float64, Float32) -> Boolean
+NotEqual(Float64, Float64) -> Boolean
+NotEqual(Struct, Struct) -> Boolean
+NotEqual(List, List) -> Boolean
+NotEqual(Date, Date) -> Boolean
+NotEqual(Date, Timestamp) -> Boolean
+NotEqual(Date, Timestampz) -> Boolean
+NotEqual(Timestamp, Date) -> Boolean
+NotEqual(Timestamp, Timestamp) -> Boolean
+NotEqual(Timestamp, Timestampz) -> Boolean
+NotEqual(Timestampz, Date) -> Boolean
+NotEqual(Timestampz, Timestamp) -> Boolean
+NotEqual(Timestampz, Timestampz) -> Boolean
+NotEqual(Time, Time) -> Boolean
+NotEqual(Interval, Interval) -> Boolean
+NotEqual(Boolean, Boolean) -> Boolean
+NotEqual(Varchar, Varchar) -> Boolean
+IsFalse(Boolean) -> Boolean
+LessThanOrEqual(Int16, Int16) -> Boolean
+LessThanOrEqual(Int16, Int32) -> Boolean
+LessThanOrEqual(Int16, Int64) -> Boolean
+LessThanOrEqual(Int16, Decimal) -> Boolean
+LessThanOrEqual(Int16, Float32) -> Boolean
+LessThanOrEqual(Int16, Float64) -> Boolean
+LessThanOrEqual(Int32, Int16) -> Boolean
+LessThanOrEqual(Int32, Int32) -> Boolean
+LessThanOrEqual(Int32, Int64) -> Boolean
+LessThanOrEqual(Int32, Decimal) -> Boolean
+LessThanOrEqual(Int32, Float32) -> Boolean
+LessThanOrEqual(Int32, Float64) -> Boolean
+LessThanOrEqual(Int64, Int16) -> Boolean
+LessThanOrEqual(Int64, Int32) -> Boolean
+LessThanOrEqual(Int64, Int64) -> Boolean
+LessThanOrEqual(Int64, Decimal) -> Boolean
+LessThanOrEqual(Int64, Float32) -> Boolean
+LessThanOrEqual(Int64, Float64) -> Boolean
+LessThanOrEqual(Decimal, Int16) -> Boolean
+LessThanOrEqual(Decimal, Int32) -> Boolean
+LessThanOrEqual(Decimal, Int64) -> Boolean
+LessThanOrEqual(Decimal, Decimal) -> Boolean
+LessThanOrEqual(Decimal, Float32) -> Boolean
+LessThanOrEqual(Decimal, Float64) -> Boolean
+LessThanOrEqual(Float32, Int16) -> Boolean
+LessThanOrEqual(Float32, Int32) -> Boolean
+LessThanOrEqual(Float32, Int64) -> Boolean
+LessThanOrEqual(Float32, Decimal) -> Boolean
+LessThanOrEqual(Float32, Float32) -> Boolean
+LessThanOrEqual(Float32, Float64) -> Boolean
+LessThanOrEqual(Float64, Int16) -> Boolean
+LessThanOrEqual(Float64, Int32) -> Boolean
+LessThanOrEqual(Float64, Int64) -> Boolean
+LessThanOrEqual(Float64, Decimal) -> Boolean
+LessThanOrEqual(Float64, Float32) -> Boolean
+LessThanOrEqual(Float64, Float64) -> Boolean
+LessThanOrEqual(Struct, Struct) -> Boolean
+LessThanOrEqual(List, List) -> Boolean
+LessThanOrEqual(Date, Date) -> Boolean
+LessThanOrEqual(Date, Timestamp) -> Boolean
+LessThanOrEqual(Date, Timestampz) -> Boolean
+LessThanOrEqual(Timestamp, Date) -> Boolean
+LessThanOrEqual(Timestamp, Timestamp) -> Boolean
+LessThanOrEqual(Timestamp, Timestampz) -> Boolean
+LessThanOrEqual(Timestampz, Date) -> Boolean
+LessThanOrEqual(Timestampz, Timestamp) -> Boolean
+LessThanOrEqual(Timestampz, Timestampz) -> Boolean
+LessThanOrEqual(Time, Time) -> Boolean
+LessThanOrEqual(Interval, Interval) -> Boolean
+LessThanOrEqual(Boolean, Boolean) -> Boolean
+LessThanOrEqual(Varchar, Varchar) -> Boolean
+IsDistinctFrom(Int16, Int16) -> Boolean
+IsDistinctFrom(Int16, Int32) -> Boolean
+IsDistinctFrom(Int16, Int64) -> Boolean
+IsDistinctFrom(Int16, Decimal) -> Boolean
+IsDistinctFrom(Int16, Float32) -> Boolean
+IsDistinctFrom(Int16, Float64) -> Boolean
+IsDistinctFrom(Int32, Int16) -> Boolean
+IsDistinctFrom(Int32, Int32) -> Boolean
+IsDistinctFrom(Int32, Int64) -> Boolean
+IsDistinctFrom(Int32, Decimal) -> Boolean
+IsDistinctFrom(Int32, Float32) -> Boolean
+IsDistinctFrom(Int32, Float64) -> Boolean
+IsDistinctFrom(Int64, Int16) -> Boolean
+IsDistinctFrom(Int64, Int32) -> Boolean
+IsDistinctFrom(Int64, Int64) -> Boolean
+IsDistinctFrom(Int64, Decimal) -> Boolean
+IsDistinctFrom(Int64, Float32) -> Boolean
+IsDistinctFrom(Int64, Float64) -> Boolean
+IsDistinctFrom(Decimal, Int16) -> Boolean
+IsDistinctFrom(Decimal, Int32) -> Boolean
+IsDistinctFrom(Decimal, Int64) -> Boolean
+IsDistinctFrom(Decimal, Decimal) -> Boolean
+IsDistinctFrom(Decimal, Float32) -> Boolean
+IsDistinctFrom(Decimal, Float64) -> Boolean
+IsDistinctFrom(Float32, Int16) -> Boolean
+IsDistinctFrom(Float32, Int32) -> Boolean
+IsDistinctFrom(Float32, Int64) -> Boolean
+IsDistinctFrom(Float32, Decimal) -> Boolean
+IsDistinctFrom(Float32, Float32) -> Boolean
+IsDistinctFrom(Float32, Float64) -> Boolean
+IsDistinctFrom(Float64, Int16) -> Boolean
+IsDistinctFrom(Float64, Int32) -> Boolean
+IsDistinctFrom(Float64, Int64) -> Boolean
+IsDistinctFrom(Float64, Decimal) -> Boolean
+IsDistinctFrom(Float64, Float32) -> Boolean
+IsDistinctFrom(Float64, Float64) -> Boolean
+IsDistinctFrom(Struct, Struct) -> Boolean
+IsDistinctFrom(List, List) -> Boolean
+IsDistinctFrom(Date, Date) -> Boolean
+IsDistinctFrom(Date, Timestamp) -> Boolean
+IsDistinctFrom(Date, Timestampz) -> Boolean
+IsDistinctFrom(Timestamp, Date) -> Boolean
+IsDistinctFrom(Timestamp, Timestamp) -> Boolean
+IsDistinctFrom(Timestamp, Timestampz) -> Boolean
+IsDistinctFrom(Timestampz, Date) -> Boolean
+IsDistinctFrom(Timestampz, Timestamp) -> Boolean
+IsDistinctFrom(Timestampz, Timestampz) -> Boolean
+IsDistinctFrom(Time, Time) -> Boolean
+IsDistinctFrom(Interval, Interval) -> Boolean
+IsDistinctFrom(Boolean, Boolean) -> Boolean
+IsDistinctFrom(Varchar, Varchar) -> Boolean
+Multiply(Int16, Int16) -> Int16
+Multiply(Int16, Int32) -> Int32
+Multiply(Int16, Int64) -> Int64
+Multiply(Int16, Decimal) -> Decimal
+Multiply(Int16, Float32) -> Float32
+Multiply(Int16, Float64) -> Float64
+Multiply(Int32, Int16) -> Int32
+Multiply(Int32, Int32) -> Int32
+Multiply(Int32, Int64) -> Int64
+Multiply(Int32, Decimal) -> Decimal
+Multiply(Int32, Float32) -> Float32
+Multiply(Int32, Float64) -> Float64
+Multiply(Int64, Int16) -> Int64
+Multiply(Int64, Int32) -> Int64
+Multiply(Int64, Int64) -> Int64
+Multiply(Int64, Decimal) -> Decimal
+Multiply(Int64, Float32) -> Float32
+Multiply(Int64, Float64) -> Float64
+Multiply(Decimal, Int16) -> Decimal
+Multiply(Decimal, Int32) -> Decimal
+Multiply(Decimal, Int64) -> Decimal
+Multiply(Decimal, Decimal) -> Decimal
+Multiply(Decimal, Float32) -> Float32
+Multiply(Decimal, Float64) -> Float64
+Multiply(Float32, Int16) -> Float32
+Multiply(Float32, Int32) -> Float32
+Multiply(Float32, Int64) -> Float32
+Multiply(Float32, Decimal) -> Float32
+Multiply(Float32, Float32) -> Float32
+Multiply(Float32, Float64) -> Float64
+Multiply(Float64, Int16) -> Float64
+Multiply(Float64, Int32) -> Float64
+Multiply(Float64, Int64) -> Float64
+Multiply(Float64, Decimal) -> Float64
+Multiply(Float64, Float32) -> Float64
+Multiply(Float64, Float64) -> Float64
+Multiply(Interval, Int16) -> Interval
+Multiply(Int16, Interval) -> Interval
+Multiply(Interval, Int32) -> Interval
+Multiply(Int32, Interval) -> Interval
+Multiply(Interval, Int64) -> Interval
+Multiply(Int64, Interval) -> Interval
+Multiply(Interval, Decimal) -> Interval
+Multiply(Decimal, Interval) -> Interval
+Multiply(Interval, Float32) -> Interval
+Multiply(Float32, Interval) -> Interval
+Multiply(Interval, Float64) -> Interval
+Multiply(Float64, Interval) -> Interval
+Ltrim(Varchar, Varchar) -> Varchar
+Equal(Int16, Int16) -> Boolean
+Equal(Int16, Int32) -> Boolean
+Equal(Int16, Int64) -> Boolean
+Equal(Int16, Decimal) -> Boolean
+Equal(Int16, Float32) -> Boolean
+Equal(Int16, Float64) -> Boolean
+Equal(Int32, Int16) -> Boolean
+Equal(Int32, Int32) -> Boolean
+Equal(Int32, Int64) -> Boolean
+Equal(Int32, Decimal) -> Boolean
+Equal(Int32, Float32) -> Boolean
+Equal(Int32, Float64) -> Boolean
+Equal(Int64, Int16) -> Boolean
+Equal(Int64, Int32) -> Boolean
+Equal(Int64, Int64) -> Boolean
+Equal(Int64, Decimal) -> Boolean
+Equal(Int64, Float32) -> Boolean
+Equal(Int64, Float64) -> Boolean
+Equal(Decimal, Int16) -> Boolean
+Equal(Decimal, Int32) -> Boolean
+Equal(Decimal, Int64) -> Boolean
+Equal(Decimal, Decimal) -> Boolean
+Equal(Decimal, Float32) -> Boolean
+Equal(Decimal, Float64) -> Boolean
+Equal(Float32, Int16) -> Boolean
+Equal(Float32, Int32) -> Boolean
+Equal(Float32, Int64) -> Boolean
+Equal(Float32, Decimal) -> Boolean
+Equal(Float32, Float32) -> Boolean
+Equal(Float32, Float64) -> Boolean
+Equal(Float64, Int16) -> Boolean
+Equal(Float64, Int32) -> Boolean
+Equal(Float64, Int64) -> Boolean
+Equal(Float64, Decimal) -> Boolean
+Equal(Float64, Float32) -> Boolean
+Equal(Float64, Float64) -> Boolean
+Equal(Struct, Struct) -> Boolean
+Equal(List, List) -> Boolean
+Equal(Date, Date) -> Boolean
+Equal(Date, Timestamp) -> Boolean
+Equal(Date, Timestampz) -> Boolean
+Equal(Timestamp, Date) -> Boolean
+Equal(Timestamp, Timestamp) -> Boolean
+Equal(Timestamp, Timestampz) -> Boolean
+Equal(Timestampz, Date) -> Boolean
+Equal(Timestampz, Timestamp) -> Boolean
+Equal(Timestampz, Timestampz) -> Boolean
+Equal(Time, Time) -> Boolean
+Equal(Interval, Interval) -> Boolean
+Equal(Boolean, Boolean) -> Boolean
+Equal(Varchar, Varchar) -> Boolean
+Extract(Varchar, Timestamp) -> Decimal
+Extract(Varchar, Time) -> Decimal
+Extract(Varchar, Date) -> Decimal
+Modulus(Int16, Int16) -> Int16
+Modulus(Int16, Int32) -> Int32
+Modulus(Int16, Int64) -> Int64
+Modulus(Int16, Decimal) -> Decimal
+Modulus(Int32, Int16) -> Int32
+Modulus(Int32, Int32) -> Int32
+Modulus(Int32, Int64) -> Int64
+Modulus(Int32, Decimal) -> Decimal
+Modulus(Int64, Int16) -> Int64
+Modulus(Int64, Int32) -> Int64
+Modulus(Int64, Int64) -> Int64
+Modulus(Int64, Decimal) -> Decimal
+Modulus(Decimal, Int16) -> Decimal
+Modulus(Decimal, Int32) -> Decimal
+Modulus(Decimal, Int64) -> Decimal
+Modulus(Decimal, Decimal) -> Decimal
+SplitPart(Varchar, Varchar, Int32) -> Varchar
+IsNotTrue(Boolean) -> Boolean
+Upper(Varchar) -> Varchar
+Position(Varchar, Varchar) -> Int32
+Rtrim(Varchar) -> Varchar
+Neg(Int16) -> Int16
+Neg(Int32) -> Int32
+Neg(Int64) -> Int64
+Neg(Decimal) -> Decimal
+Neg(Float32) -> Float32
+Neg(Float64) -> Float64
+CharLength(Varchar) -> Int32
+Round(Float64) -> Float64
+Round(Decimal) -> Decimal
+Length(Varchar) -> Int32
+BitwiseXor(Int16, Int16) -> Int16
+BitwiseXor(Int16, Int32) -> Int32
+BitwiseXor(Int16, Int64) -> Int64
+BitwiseXor(Int32, Int16) -> Int32
+BitwiseXor(Int32, Int32) -> Int32
+BitwiseXor(Int32, Int64) -> Int64
+BitwiseXor(Int64, Int16) -> Int64
+BitwiseXor(Int64, Int32) -> Int64
+BitwiseXor(Int64, Int64) -> Int64
+BitwiseNot(Int16) -> Int16
+BitwiseNot(Int32) -> Int32
+BitwiseNot(Int64) -> Int64
+RoundDigit(Decimal, Int32) -> Decimal
+Trim(Varchar) -> Varchar
+Floor(Float64) -> Float64
+Floor(Decimal) -> Decimal
+Overlay(Varchar, Varchar, Int32) -> Varchar
+Substr(Varchar, Int32) -> Varchar
+Overlay(Varchar, Varchar, Int32, Int32) -> Varchar
+BitwiseOr(Int16, Int16) -> Int16
+BitwiseOr(Int16, Int32) -> Int32
+BitwiseOr(Int16, Int64) -> Int64
+BitwiseOr(Int32, Int16) -> Int32
+BitwiseOr(Int32, Int32) -> Int32
+BitwiseOr(Int32, Int64) -> Int64
+BitwiseOr(Int64, Int16) -> Int64
+BitwiseOr(Int64, Int32) -> Int64
+BitwiseOr(Int64, Int64) -> Int64
+OctetLength(Varchar) -> Int32
+BitwiseShiftLeft(Int16, Int16) -> Int16
+BitwiseShiftLeft(Int16, Int32) -> Int16
+BitwiseShiftLeft(Int32, Int16) -> Int32
+BitwiseShiftLeft(Int32, Int32) -> Int32
+BitwiseShiftLeft(Int64, Int16) -> Int64
+BitwiseShiftLeft(Int64, Int32) -> Int64
+LessThan(Int16, Int16) -> Boolean
+LessThan(Int16, Int32) -> Boolean
+LessThan(Int16, Int64) -> Boolean
+LessThan(Int16, Decimal) -> Boolean
+LessThan(Int16, Float32) -> Boolean
+LessThan(Int16, Float64) -> Boolean
+LessThan(Int32, Int16) -> Boolean
+LessThan(Int32, Int32) -> Boolean
+LessThan(Int32, Int64) -> Boolean
+LessThan(Int32, Decimal) -> Boolean
+LessThan(Int32, Float32) -> Boolean
+LessThan(Int32, Float64) -> Boolean
+LessThan(Int64, Int16) -> Boolean
+LessThan(Int64, Int32) -> Boolean
+LessThan(Int64, Int64) -> Boolean
+LessThan(Int64, Decimal) -> Boolean
+LessThan(Int64, Float32) -> Boolean
+LessThan(Int64, Float64) -> Boolean
+LessThan(Decimal, Int16) -> Boolean
+LessThan(Decimal, Int32) -> Boolean
+LessThan(Decimal, Int64) -> Boolean
+LessThan(Decimal, Decimal) -> Boolean
+LessThan(Decimal, Float32) -> Boolean
+LessThan(Decimal, Float64) -> Boolean
+LessThan(Float32, Int16) -> Boolean
+LessThan(Float32, Int32) -> Boolean
+LessThan(Float32, Int64) -> Boolean
+LessThan(Float32, Decimal) -> Boolean
+LessThan(Float32, Float32) -> Boolean
+LessThan(Float32, Float64) -> Boolean
+LessThan(Float64, Int16) -> Boolean
+LessThan(Float64, Int32) -> Boolean
+LessThan(Float64, Int64) -> Boolean
+LessThan(Float64, Decimal) -> Boolean
+LessThan(Float64, Float32) -> Boolean
+LessThan(Float64, Float64) -> Boolean
+LessThan(Struct, Struct) -> Boolean
+LessThan(List, List) -> Boolean
+LessThan(Date, Date) -> Boolean
+LessThan(Date, Timestamp) -> Boolean
+LessThan(Date, Timestampz) -> Boolean
+LessThan(Timestamp, Date) -> Boolean
+LessThan(Timestamp, Timestamp) -> Boolean
+LessThan(Timestamp, Timestampz) -> Boolean
+LessThan(Timestampz, Date) -> Boolean
+LessThan(Timestampz, Timestamp) -> Boolean
+LessThan(Timestampz, Timestampz) -> Boolean
+LessThan(Time, Time) -> Boolean
+LessThan(Interval, Interval) -> Boolean
+LessThan(Boolean, Boolean) -> Boolean
+LessThan(Varchar, Varchar) -> Boolean
+IsNotNull(Boolean) -> Boolean
+IsNotNull(Int16) -> Boolean
+IsNotNull(Int32) -> Boolean
+IsNotNull(Int64) -> Boolean
+IsNotNull(Decimal) -> Boolean
+IsNotNull(Float32) -> Boolean
+IsNotNull(Float64) -> Boolean
+IsNotNull(Varchar) -> Boolean
+IsNotNull(Date) -> Boolean
+IsNotNull(Timestamp) -> Boolean
+IsNotNull(Timestampz) -> Boolean
+IsNotNull(Time) -> Boolean
+IsNotNull(Interval) -> Boolean
+BitwiseShiftRight(Int16, Int16) -> Int16
+BitwiseShiftRight(Int16, Int32) -> Int16
+BitwiseShiftRight(Int32, Int16) -> Int32
+BitwiseShiftRight(Int32, Int32) -> Int32
+BitwiseShiftRight(Int64, Int16) -> Int64
+BitwiseShiftRight(Int64, Int32) -> Int64
+Ltrim(Varchar) -> Varchar
+TumbleStart(Timestamp, Interval) -> Timestamp
+TumbleStart(Date, Interval) -> Timestamp
+Replace(Varchar, Varchar, Varchar) -> Varchar
+Lower(Varchar) -> Varchar
+BoolOut(Boolean) -> Varchar
+GreaterThanOrEqual(Int16, Int16) -> Boolean
+GreaterThanOrEqual(Int16, Int32) -> Boolean
+GreaterThanOrEqual(Int16, Int64) -> Boolean
+GreaterThanOrEqual(Int16, Decimal) -> Boolean
+GreaterThanOrEqual(Int16, Float32) -> Boolean
+GreaterThanOrEqual(Int16, Float64) -> Boolean
+GreaterThanOrEqual(Int32, Int16) -> Boolean
+GreaterThanOrEqual(Int32, Int32) -> Boolean
+GreaterThanOrEqual(Int32, Int64) -> Boolean
+GreaterThanOrEqual(Int32, Decimal) -> Boolean
+GreaterThanOrEqual(Int32, Float32) -> Boolean
+GreaterThanOrEqual(Int32, Float64) -> Boolean
+GreaterThanOrEqual(Int64, Int16) -> Boolean
+GreaterThanOrEqual(Int64, Int32) -> Boolean
+GreaterThanOrEqual(Int64, Int64) -> Boolean
+GreaterThanOrEqual(Int64, Decimal) -> Boolean
+GreaterThanOrEqual(Int64, Float32) -> Boolean
+GreaterThanOrEqual(Int64, Float64) -> Boolean
+GreaterThanOrEqual(Decimal, Int16) -> Boolean
+GreaterThanOrEqual(Decimal, Int32) -> Boolean
+GreaterThanOrEqual(Decimal, Int64) -> Boolean
+GreaterThanOrEqual(Decimal, Decimal) -> Boolean
+GreaterThanOrEqual(Decimal, Float32) -> Boolean
+GreaterThanOrEqual(Decimal, Float64) -> Boolean
+GreaterThanOrEqual(Float32, Int16) -> Boolean
+GreaterThanOrEqual(Float32, Int32) -> Boolean
+GreaterThanOrEqual(Float32, Int64) -> Boolean
+GreaterThanOrEqual(Float32, Decimal) -> Boolean
+GreaterThanOrEqual(Float32, Float32) -> Boolean
+GreaterThanOrEqual(Float32, Float64) -> Boolean
+GreaterThanOrEqual(Float64, Int16) -> Boolean
+GreaterThanOrEqual(Float64, Int32) -> Boolean
+GreaterThanOrEqual(Float64, Int64) -> Boolean
+GreaterThanOrEqual(Float64, Decimal) -> Boolean
+GreaterThanOrEqual(Float64, Float32) -> Boolean
+GreaterThanOrEqual(Float64, Float64) -> Boolean
+GreaterThanOrEqual(Struct, Struct) -> Boolean
+GreaterThanOrEqual(List, List) -> Boolean
+GreaterThanOrEqual(Date, Date) -> Boolean
+GreaterThanOrEqual(Date, Timestamp) -> Boolean
+GreaterThanOrEqual(Date, Timestampz) -> Boolean
+GreaterThanOrEqual(Timestamp, Date) -> Boolean
+GreaterThanOrEqual(Timestamp, Timestamp) -> Boolean
+GreaterThanOrEqual(Timestamp, Timestampz) -> Boolean
+GreaterThanOrEqual(Timestampz, Date) -> Boolean
+GreaterThanOrEqual(Timestampz, Timestamp) -> Boolean
+GreaterThanOrEqual(Timestampz, Timestampz) -> Boolean
+GreaterThanOrEqual(Time, Time) -> Boolean
+GreaterThanOrEqual(Interval, Interval) -> Boolean
+GreaterThanOrEqual(Boolean, Boolean) -> Boolean
+GreaterThanOrEqual(Varchar, Varchar) -> Boolean
+Rtrim(Varchar, Varchar) -> Varchar
+Abs(Int16) -> Int16
+Abs(Int32) -> Int32
+Abs(Int64) -> Int64
+Abs(Decimal) -> Decimal
+Abs(Float32) -> Float32
+Abs(Float64) -> Float64
+BitLength(Varchar) -> Int32
+Ascii(Varchar) -> Int32
+GreaterThan(Int16, Int16) -> Boolean
+GreaterThan(Int16, Int32) -> Boolean
+GreaterThan(Int16, Int64) -> Boolean
+GreaterThan(Int16, Decimal) -> Boolean
+GreaterThan(Int16, Float32) -> Boolean
+GreaterThan(Int16, Float64) -> Boolean
+GreaterThan(Int32, Int16) -> Boolean
+GreaterThan(Int32, Int32) -> Boolean
+GreaterThan(Int32, Int64) -> Boolean
+GreaterThan(Int32, Decimal) -> Boolean
+GreaterThan(Int32, Float32) -> Boolean
+GreaterThan(Int32, Float64) -> Boolean
+GreaterThan(Int64, Int16) -> Boolean
+GreaterThan(Int64, Int32) -> Boolean
+GreaterThan(Int64, Int64) -> Boolean
+GreaterThan(Int64, Decimal) -> Boolean
+GreaterThan(Int64, Float32) -> Boolean
+GreaterThan(Int64, Float64) -> Boolean
+GreaterThan(Decimal, Int16) -> Boolean
+GreaterThan(Decimal, Int32) -> Boolean
+GreaterThan(Decimal, Int64) -> Boolean
+GreaterThan(Decimal, Decimal) -> Boolean
+GreaterThan(Decimal, Float32) -> Boolean
+GreaterThan(Decimal, Float64) -> Boolean
+GreaterThan(Float32, Int16) -> Boolean
+GreaterThan(Float32, Int32) -> Boolean
+GreaterThan(Float32, Int64) -> Boolean
+GreaterThan(Float32, Decimal) -> Boolean
+GreaterThan(Float32, Float32) -> Boolean
+GreaterThan(Float32, Float64) -> Boolean
+GreaterThan(Float64, Int16) -> Boolean
+GreaterThan(Float64, Int32) -> Boolean
+GreaterThan(Float64, Int64) -> Boolean
+GreaterThan(Float64, Decimal) -> Boolean
+GreaterThan(Float64, Float32) -> Boolean
+GreaterThan(Float64, Float64) -> Boolean
+GreaterThan(Struct, Struct) -> Boolean
+GreaterThan(List, List) -> Boolean
+GreaterThan(Date, Date) -> Boolean
+GreaterThan(Date, Timestamp) -> Boolean
+GreaterThan(Date, Timestampz) -> Boolean
+GreaterThan(Timestamp, Date) -> Boolean
+GreaterThan(Timestamp, Timestamp) -> Boolean
+GreaterThan(Timestamp, Timestampz) -> Boolean
+GreaterThan(Timestampz, Date) -> Boolean
+GreaterThan(Timestampz, Timestamp) -> Boolean
+GreaterThan(Timestampz, Timestampz) -> Boolean
+GreaterThan(Time, Time) -> Boolean
+GreaterThan(Interval, Interval) -> Boolean
+GreaterThan(Boolean, Boolean) -> Boolean
+GreaterThan(Varchar, Varchar) -> Boolean
+Trim(Varchar, Varchar) -> Varchar
+ToChar(Timestamp, Varchar) -> Varchar
+Add(Int16, Int16) -> Int16
+Add(Int16, Int32) -> Int32
+Add(Int16, Int64) -> Int64
+Add(Int16, Decimal) -> Decimal
+Add(Int16, Float32) -> Float32
+Add(Int16, Float64) -> Float64
+Add(Int32, Int16) -> Int32
+Add(Int32, Int32) -> Int32
+Add(Int32, Int64) -> Int64
+Add(Int32, Decimal) -> Decimal
+Add(Int32, Float32) -> Float32
+Add(Int32, Float64) -> Float64
+Add(Int64, Int16) -> Int64
+Add(Int64, Int32) -> Int64
+Add(Int64, Int64) -> Int64
+Add(Int64, Decimal) -> Decimal
+Add(Int64, Float32) -> Float32
+Add(Int64, Float64) -> Float64
+Add(Decimal, Int16) -> Decimal
+Add(Decimal, Int32) -> Decimal
+Add(Decimal, Int64) -> Decimal
+Add(Decimal, Decimal) -> Decimal
+Add(Decimal, Float32) -> Float32
+Add(Decimal, Float64) -> Float64
+Add(Float32, Int16) -> Float32
+Add(Float32, Int32) -> Float32
+Add(Float32, Int64) -> Float32
+Add(Float32, Decimal) -> Float32
+Add(Float32, Float32) -> Float32
+Add(Float32, Float64) -> Float64
+Add(Float64, Int16) -> Float64
+Add(Float64, Int32) -> Float64
+Add(Float64, Int64) -> Float64
+Add(Float64, Decimal) -> Float64
+Add(Float64, Float32) -> Float64
+Add(Float64, Float64) -> Float64
+Add(Date, Int32) -> Date
+Add(Int32, Date) -> Date
+Add(Timestamp, Interval) -> Timestamp
+Add(Interval, Timestamp) -> Timestamp
+Add(Timestampz, Interval) -> Timestampz
+Add(Interval, Timestampz) -> Timestampz
+Add(Time, Interval) -> Time
+Add(Interval, Time) -> Time
+Add(Interval, Interval) -> Interval
+Add(Date, Interval) -> Timestamp
+Add(Interval, Date) -> Timestamp
+Add(Date, Time) -> Timestamp
+Add(Time, Date) -> Timestamp
+Or(Boolean, Boolean) -> Boolean
+IsNull(Boolean) -> Boolean
+IsNull(Int16) -> Boolean
+IsNull(Int32) -> Boolean
+IsNull(Int64) -> Boolean
+IsNull(Decimal) -> Boolean
+IsNull(Float32) -> Boolean
+IsNull(Float64) -> Boolean
+IsNull(Varchar) -> Boolean
+IsNull(Date) -> Boolean
+IsNull(Timestamp) -> Boolean
+IsNull(Timestampz) -> Boolean
+IsNull(Time) -> Boolean
+IsNull(Interval) -> Boolean
+Subtract(Int16, Int16) -> Int16
+Subtract(Int16, Int32) -> Int32
+Subtract(Int16, Int64) -> Int64
+Subtract(Int16, Decimal) -> Decimal
+Subtract(Int16, Float32) -> Float32
+Subtract(Int16, Float64) -> Float64
+Subtract(Int32, Int16) -> Int32
+Subtract(Int32, Int32) -> Int32
+Subtract(Int32, Int64) -> Int64
+Subtract(Int32, Decimal) -> Decimal
+Subtract(Int32, Float32) -> Float32
+Subtract(Int32, Float64) -> Float64
+Subtract(Int64, Int16) -> Int64
+Subtract(Int64, Int32) -> Int64
+Subtract(Int64, Int64) -> Int64
+Subtract(Int64, Decimal) -> Decimal
+Subtract(Int64, Float32) -> Float32
+Subtract(Int64, Float64) -> Float64
+Subtract(Decimal, Int16) -> Decimal
+Subtract(Decimal, Int32) -> Decimal
+Subtract(Decimal, Int64) -> Decimal
+Subtract(Decimal, Decimal) -> Decimal
+Subtract(Decimal, Float32) -> Float32
+Subtract(Decimal, Float64) -> Float64
+Subtract(Float32, Int16) -> Float32
+Subtract(Float32, Int32) -> Float32
+Subtract(Float32, Int64) -> Float32
+Subtract(Float32, Decimal) -> Float32
+Subtract(Float32, Float32) -> Float32
+Subtract(Float32, Float64) -> Float64
+Subtract(Float64, Int16) -> Float64
+Subtract(Float64, Int32) -> Float64
+Subtract(Float64, Int64) -> Float64
+Subtract(Float64, Decimal) -> Float64
+Subtract(Float64, Float32) -> Float64
+Subtract(Float64, Float64) -> Float64
+Subtract(Date, Int32) -> Date
+Subtract(Date, Date) -> Int32
+Subtract(Timestamp, Interval) -> Timestamp
+Subtract(Timestamp, Timestamp) -> Interval
+Subtract(Timestampz, Interval) -> Timestampz
+Subtract(Timestampz, Timestampz) -> Interval
+Subtract(Time, Interval) -> Time
+Subtract(Time, Time) -> Interval
+Subtract(Interval, Interval) -> Interval
+Subtract(Date, Interval) -> Timestamp
+Translate(Varchar, Varchar, Varchar) -> Varchar
+IsTrue(Boolean) -> Boolean
+And(Boolean, Boolean) -> Boolean
+Like(Varchar, Varchar) -> Boolean
+Substr(Varchar, Int32, Int32) -> Varchar
+Repeat(Varchar, Int32) -> Varchar
+Not(Boolean) -> Boolean
+Ceil(Float64) -> Float64
+Ceil(Decimal) -> Decimal
+Divide(Int16, Int16) -> Int16
+Divide(Int16, Int32) -> Int32
+Divide(Int16, Int64) -> Int64
+Divide(Int16, Decimal) -> Decimal
+Divide(Int16, Float32) -> Float32
+Divide(Int16, Float64) -> Float64
+Divide(Int32, Int16) -> Int32
+Divide(Int32, Int32) -> Int32
+Divide(Int32, Int64) -> Int64
+Divide(Int32, Decimal) -> Decimal
+Divide(Int32, Float32) -> Float32
+Divide(Int32, Float64) -> Float64
+Divide(Int64, Int16) -> Int64
+Divide(Int64, Int32) -> Int64
+Divide(Int64, Int64) -> Int64
+Divide(Int64, Decimal) -> Decimal
+Divide(Int64, Float32) -> Float32
+Divide(Int64, Float64) -> Float64
+Divide(Decimal, Int16) -> Decimal
+Divide(Decimal, Int32) -> Decimal
+Divide(Decimal, Int64) -> Decimal
+Divide(Decimal, Decimal) -> Decimal
+Divide(Decimal, Float32) -> Float32
+Divide(Decimal, Float64) -> Float64
+Divide(Float32, Int16) -> Float32
+Divide(Float32, Int32) -> Float32
+Divide(Float32, Int64) -> Float32
+Divide(Float32, Decimal) -> Float32
+Divide(Float32, Float32) -> Float32
+Divide(Float32, Float64) -> Float64
+Divide(Float64, Int16) -> Float64
+Divide(Float64, Int32) -> Float64
+Divide(Float64, Int64) -> Float64
+Divide(Float64, Decimal) -> Float64
+Divide(Float64, Float32) -> Float64
+Divide(Float64, Float64) -> Float64
+Divide(Interval, Int16) -> Interval
+Divide(Interval, Int32) -> Interval
+Divide(Interval, Int64) -> Interval
+Divide(Interval, Decimal) -> Interval
+Divide(Interval, Float32) -> Interval
+Divide(Interval, Float64) -> Interval
+Md5(Varchar) -> Varchar
