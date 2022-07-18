@@ -261,3 +261,65 @@ impl Aggregator for StringAgg {
         }
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use risingwave_common::array::{DataChunk, DataChunkTestExt, Utf8ArrayBuilder};
+    use risingwave_common::types::DataType;
+    use risingwave_common::util::sort_util::{OrderPair, OrderType};
+
+    use super::*;
+    use crate::vector_op::agg::aggregator::Aggregator;
+
+    #[test]
+    fn test_basic_string_agg() -> Result<()> {
+        let chunk = DataChunk::from_pretty(
+            "T
+             aaa
+             bbb
+             ccc
+             ddd",
+        );
+        let mut agg = StringAgg::new(0, vec![], vec![]);
+        let mut builder = ArrayBuilderImpl::Utf8(Utf8ArrayBuilder::new(0));
+        agg.update_multi(&chunk, 0, chunk.cardinality())?;
+        agg.output(&mut builder)?;
+        agg.output_and_reset(&mut builder)?;
+        let output = builder.finish()?;
+        let actual = output.as_utf8();
+        let actual = actual.iter().collect::<Vec<_>>();
+        let expected = "aaabbbcccddd";
+        assert_eq!(actual, &[Some(expected), Some(expected)]);
+        Ok(())
+    }
+
+    #[test]
+    fn test_string_agg_with_order() -> Result<()> {
+        let chunk = DataChunk::from_pretty(
+            "T   i i
+             aaa 1 3
+             bbb 0 4
+             ccc 0 8
+             ddd 1 3",
+        );
+        let mut agg = StringAgg::new(
+            0,
+            vec![
+                OrderPair::new(1, OrderType::Ascending),
+                OrderPair::new(2, OrderType::Descending),
+                OrderPair::new(0, OrderType::Descending),
+            ],
+            vec![DataType::Int32, DataType::Int32, DataType::Varchar],
+        );
+        let mut builder = ArrayBuilderImpl::Utf8(Utf8ArrayBuilder::new(0));
+        agg.update_multi(&chunk, 0, chunk.cardinality())?;
+        agg.output(&mut builder)?;
+        agg.output_and_reset(&mut builder)?;
+        let output = builder.finish()?;
+        let actual = output.as_utf8();
+        let actual = actual.iter().collect::<Vec<_>>();
+        let expected = "cccbbbdddaaa";
+        assert_eq!(actual, &[Some(expected), Some(expected)]);
+        Ok(())
+    }
+}
