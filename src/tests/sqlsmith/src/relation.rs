@@ -17,8 +17,7 @@ use rand::prelude::SliceRandom;
 use rand::Rng;
 use risingwave_frontend::expr::DataTypeName;
 use risingwave_sqlparser::ast::{
-    Function, FunctionArg, FunctionArgExpr, Ident, ObjectName, TableAlias, TableFactor,
-    TableWithJoins,
+    FunctionArg, FunctionArgExpr, Ident, ObjectName, TableAlias, TableFactor, TableWithJoins,
 };
 
 use crate::{
@@ -149,25 +148,33 @@ impl<'a, R: Rng> SqlGenerator<'a, R> {
         let (name, time_cols) = tables
             .choose(&mut self.rng)
             .expect("seeded tables all do not have timestamp");
-        let time_col = time_cols.choose(&mut self.rng).unwrap();
-        let interval = self.gen_expr(DataTypeName::Interval);
-
-        let alias = format!("tumble_{}", &name);
         let alias = TableAlias {
-            name: Ident::new(alias),
+            name: Ident::new(format!("tumble_{}", &name)),
             columns: vec![],
         };
+        let time_col = time_cols.choose(&mut self.rng).unwrap();
+        let size = self.gen_expr(DataTypeName::Interval);
 
-        let tumble_expr = make_tumble_expr(name, time_col, &interval);
-        let factor = TableFactor::TableFunction {
-            expr: tumble_expr,
+        let time_col = create_expr_from_col(time_col);
+        let args = [time_col, size]
+            .into_iter()
+            .map(create_function_arg_from_expr)
+            .collect_vec();
+
+        let factor = TableFactor::Table {
+            name: create_object_name_from_str("tumble"),
             alias: Some(alias),
+            args,
         };
         TableWithJoins {
             relation: factor,
             joins: vec![],
         }
     }
+}
+
+fn create_object_name_from_str(name: &str) -> ObjectName {
+    ObjectName(vec![Ident::new(name)])
 }
 
 /// Create an expression from a `Column`.
@@ -178,23 +185,6 @@ fn create_expr_from_col(col: &Column) -> Expr {
 /// Create `FunctionArg` from an `Expr`.
 fn create_function_arg_from_expr(expr: Expr) -> FunctionArg {
     FunctionArg::Unnamed(FunctionArgExpr::Expr(expr))
-}
-
-/// Make `TUMBLE` expression.
-fn make_tumble_expr(name: &str, time_col: &Column, size: &Expr) -> Expr {
-    let name = ObjectName(vec![Ident::new(name)]);
-    let time_col = create_expr_from_col(time_col);
-    Expr::Function(Function {
-        name,
-        args: [time_col, size.clone()]
-            .into_iter()
-            .map(create_function_arg_from_expr)
-            .collect_vec(),
-        over: None,
-        distinct: false,
-        order_by: vec![],
-        filter: None,
-    })
 }
 
 fn is_timestamp_col(c: &Column) -> bool {
