@@ -172,7 +172,7 @@ mod tests {
 
         // assert compact_task
         assert_eq!(
-            compact_task.input_ssts.first().unwrap().table_infos.len(),
+            compact_task.input_ssts.len(),
             128
         );
 
@@ -183,7 +183,7 @@ mod tests {
         let version = hummock_manager_ref.get_current_version().await;
         let output_table_id = version
             .get_compaction_group_levels(StaticCompactionGroupId::StateDefault.into())
-            .levels
+            .l0.as_ref().unwrap().sub_levels
             .last()
             .unwrap()
             .table_infos
