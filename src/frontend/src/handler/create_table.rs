@@ -110,6 +110,7 @@ pub(crate) fn gen_materialized_source_plan(
 ) -> Result<(PlanRef, ProstTable)> {
     let materialize = {
         // Manually assemble the materialization plan for the table.
+        #[expect(clippy::needless_borrow)]
         let source_node: PlanRef =
             StreamSource::new(LogicalSource::new(Rc::new((&source).into()), context)).into();
         let mut required_cols = FixedBitSet::with_capacity(source_node.schema().len());

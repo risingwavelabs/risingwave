@@ -16,7 +16,6 @@ use std::ffi::OsStr;
 
 use libtest_mimic::{run_tests, Arguments, Outcome, Test};
 use risingwave_frontend_test_runner::run_test_file;
-use tokio::runtime;
 use walkdir::WalkDir;
 
 fn main() {
@@ -62,7 +61,7 @@ fn main() {
             .join(file_name);
 
         let file_content = std::fs::read_to_string(path).unwrap();
-        runtime::Builder::new_current_thread()
+        tokio::runtime::Builder::new_current_thread()
             .enable_all()
             .build()
             .unwrap()

@@ -54,3 +54,16 @@ pub fn complete_spin(pb: &ProgressBar) {
 pub fn fail_spin(pb: &ProgressBar) {
     pb.set_style(ProgressStyle::default_spinner().template("❗ {prefix}: {msg}"));
 }
+
+pub fn is_env_set(var: &str) -> bool {
+    if let Ok(val) = std::env::var(var) {
+        if let Ok(true) = val.parse() {
+            return true;
+        } else if let Ok(x) = val.parse::<usize>() {
+            if x != 0 {
+                return true;
+            }
+        }
+    }
+    false
+}

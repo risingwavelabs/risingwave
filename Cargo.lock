@@ -2639,11 +2639,12 @@ dependencies = [
 
 [[package]]
 name = "madsim"
-version = "0.2.0-alpha.3"
+version = "0.2.0-alpha.4"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "972a96fe6454e9ae8f8be37469a54439ce606de7e1ab81a5fa35f27e3b9f562a"
+checksum = "08eb4e2dd6827611e1c571149b244f0da5cfc3115d08d56d29d0c2f34d502610"
 dependencies = [
  "ahash",
+ "async-channel",
  "async-task",
  "bincode",
  "bytes",
@@ -2662,9 +2663,9 @@ dependencies = [
 
 [[package]]
 name = "madsim-macros"
-version = "0.2.0-alpha.3"
+version = "0.2.0-alpha.4"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "c28d2e056c057b6414485a1026f399c704ad8ab32365c4e507cc8390d149e057"
+checksum = "0f9cd5b09aefa5d86980ded42f8dcfac9bcc28429a5304c6dd8ce8ed563b6ca1"
 dependencies = [
  "darling 0.14.1",
  "proc-macro2",
@@ -2674,9 +2675,9 @@ dependencies = [
 
 [[package]]
 name = "madsim-tokio"
-version = "0.2.0-alpha.3"
+version = "0.2.0-alpha.4"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "42e6fd191e302ca7f8319e1efbd10434ca5e83db2170ab0184742de580b2d87f"
+checksum = "e2f69c0f9c53088e825c02aa678f66f90c4329570e51d78fecb2b58c38fd8787"
 dependencies = [
  "madsim",
  "tokio",
@@ -2684,9 +2685,9 @@ dependencies = [
 
 [[package]]
 name = "madsim-tonic"
-version = "0.2.0-alpha.3"
+version = "0.2.0-alpha.4"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "cd4b7aba0420d6eabfad6a986f7c5a6c73f819b02ffbe94cc678f84a96a6a148"
+checksum = "6260fcb2f7ee2cbb4b492217cdaa03d2c3423c3af8bace179b4444be42e94b64"
 dependencies = [
  "async-stream",
  "futures",
@@ -4155,7 +4156,6 @@ dependencies = [
  "risingwave_meta",
  "risingwave_rt",
  "tikv-jemallocator",
- "tokio",
  "tracing",
  "workspace-hack",
  "workspace-static-link",
@@ -4555,6 +4555,7 @@ dependencies = [
  "fail",
  "futures",
  "itertools",
+ "madsim",
  "madsim-tokio",
  "rand 0.8.5",
  "risingwave_common",
@@ -4642,6 +4643,7 @@ dependencies = [
  "fail",
  "futures",
  "itertools",
+ "madsim",
  "madsim-tokio",
  "prometheus",
  "risingwave_common",

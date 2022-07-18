@@ -212,6 +212,7 @@ impl NotificationManagerCore {
         }
     }
 
+    #[expect(clippy::unused_async)]
     async fn notify_frontend(&mut self, operation: Operation, info: &Info) -> NotificationVersion {
         self.current_version += 1;
         for (worker_key, sender) in &self.frontend_senders {
@@ -229,6 +230,7 @@ impl NotificationManagerCore {
     }
 
     /// Send a `SubscribeResponse` to backend.
+    #[expect(clippy::unused_async)]
     async fn notify_compute(&mut self, operation: Operation, info: &Info) -> NotificationVersion {
         self.current_version += 1;
         for (worker_key, sender) in &self.compute_senders {
