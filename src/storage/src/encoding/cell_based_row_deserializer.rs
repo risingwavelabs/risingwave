@@ -74,7 +74,6 @@ impl ColumnDescMapping {
 }
 
 pub type GeneralCellBasedRowDeserializer = CellBasedRowDeserializer;
-
 #[derive(Clone)]
 pub struct CellBasedRowDeserializer {
     /// A mapping from column id to its desc and the index in the row.

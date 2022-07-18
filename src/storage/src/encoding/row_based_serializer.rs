@@ -13,11 +13,13 @@
 // limitations under the License.
 
 use risingwave_common::array::Row;
+use risingwave_common::catalog::{ColumnDesc, ColumnId};
 use risingwave_common::error::Result;
 use risingwave_common::types::VirtualNode;
 use risingwave_common::util::value_encoding::serialize_datum;
 
-use super::Encoding;
+use super::row_based_deserializer::RowBasedDeserializer;
+use super::{Encoding, RowSerde};
 
 #[derive(Clone)]
 pub struct RowBasedSerializer {}
@@ -59,5 +61,25 @@ impl Encoding for RowBasedSerializer {
 
     fn column_ids(&self) -> &[risingwave_common::catalog::ColumnId] {
         unreachable!()
+    }
+}
+
+impl RowSerde for RowBasedSerializer {
+    type Deserializer = RowBasedDeserializer;
+    type Serializer = RowBasedSerializer;
+
+    fn create_serializer(
+        pk_indices: &[usize],
+        column_descs: &[ColumnDesc],
+        column_ids: &[ColumnId],
+    ) -> Self::Serializer {
+        Encoding::create_row_serializer(pk_indices, column_descs, column_ids)
+    }
+
+    fn create_deserializer(
+        column_mapping: std::sync::Arc<super::ColumnDescMapping>,
+        data_types: Vec<risingwave_common::types::DataType>,
+    ) -> Self::Deserializer {
+        super::Decoding::create_row_deserializer(column_mapping, data_types)
     }
 }

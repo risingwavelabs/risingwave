@@ -21,7 +21,7 @@ use risingwave_common::array::Row;
 use risingwave_common::catalog::{ColumnDesc, ColumnId, TableId};
 use risingwave_common::types::DataType;
 use risingwave_common::util::ordered::*;
-use risingwave_storage::table::state_table::StateTable;
+use risingwave_storage::table::state_table::RowBasedStateTable;
 use risingwave_storage::StateStore;
 
 use crate::executor::error::StreamExecutorResult;
@@ -30,7 +30,7 @@ use crate::executor::PkIndices;
 #[expect(dead_code)]
 pub struct ManagedTopNStateNew<S: StateStore> {
     /// Relational table.
-    state_table: StateTable<S>,
+    state_table: RowBasedStateTable<S>,
     /// The number of elements in both cache and storage.
     total_count: usize,
     /// Number of entries to retain in memory after each flush.
@@ -70,7 +70,7 @@ impl<S: StateStore> ManagedTopNStateNew<S> {
                 ColumnDesc::unnamed(ColumnId::from(id as i32), data_type.clone())
             })
             .collect::<Vec<_>>();
-        let state_table = StateTable::new_without_distribution(
+        let state_table = RowBasedStateTable::new_without_distribution(
             store,
             table_id,
             column_descs,
@@ -143,7 +143,7 @@ impl<S: StateStore> ManagedTopNStateNew<S> {
     }
 
     pub async fn flush(&mut self, epoch: u64) -> StreamExecutorResult<()> {
-        self.state_table.commit(epoch).await?;
+        self.state_table.commit_with_row_based(epoch).await?;
         Ok(())
     }
 }

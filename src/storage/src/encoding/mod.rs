@@ -90,8 +90,8 @@ pub trait Decoding {
 
 /// `RowSerde` provides the ability to convert between Row and KV entry.
 pub trait RowSerde: Send + Sync + Clone {
-    type Serializer: Encoding;
-    type Deserializer: Decoding;
+    type Serializer: Encoding + Send;
+    type Deserializer: Decoding + Send;
 
     /// `create_serializer` will create a row serializer to convert row into KV pairs.
     fn create_serializer(
