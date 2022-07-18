@@ -212,16 +212,23 @@ async fn bench(
             };
 
             let start = Instant::now();
-            let miss = cache.get(&key).await.unwrap().is_none();
-            metrics
-                .get_lats
-                .write()
-                .record(start.elapsed().as_micros() as u64)
-                .expect("record out of range");
-            metrics.get_ios.fetch_add(1, Ordering::Relaxed);
-            if miss {
+            let hit = cache.get(&key).await.unwrap().is_some();
+            let lat = start.elapsed().as_micros() as u64;
+            if hit {
+                metrics
+                    .get_hit_lats
+                    .write()
+                    .record(lat)
+                    .expect("record out of range");
+            } else {
+                metrics
+                    .get_miss_lats
+                    .write()
+                    .record(lat)
+                    .expect("record out of range");
                 metrics.get_miss_ios.fetch_add(1, Ordering::Relaxed);
             }
+            metrics.get_ios.fetch_add(1, Ordering::Relaxed);
         }
 
         tokio::task::yield_now().await;

@@ -45,9 +45,12 @@ pub struct Analysis {
 
     get_iops: f64,
     get_miss: f64,
-    get_lat_p50: u64,
-    get_lat_p90: u64,
-    get_lat_p99: u64,
+    get_miss_lat_p50: u64,
+    get_miss_lat_p90: u64,
+    get_miss_lat_p99: u64,
+    get_hit_lat_p50: u64,
+    get_hit_lat_p90: u64,
+    get_hit_lat_p99: u64,
 
     flush_iops: f64,
     flush_throughput: f64,
@@ -63,9 +66,12 @@ pub struct MetricsDump {
 
     pub get_ios: usize,
     pub get_miss_ios: usize,
-    pub get_lat_p50: u64,
-    pub get_lat_p90: u64,
-    pub get_lat_p99: u64,
+    pub get_hit_lat_p50: u64,
+    pub get_hit_lat_p90: u64,
+    pub get_hit_lat_p99: u64,
+    pub get_miss_lat_p50: u64,
+    pub get_miss_lat_p90: u64,
+    pub get_miss_lat_p99: u64,
 
     pub flush_ios: usize,
     pub flush_bytes: usize,
@@ -79,7 +85,8 @@ pub struct Metrics {
 
     pub get_ios: Arc<AtomicUsize>,
     pub get_miss_ios: Arc<AtomicUsize>,
-    pub get_lats: Arc<RwLock<Histogram<u64>>>,
+    pub get_hit_lats: Arc<RwLock<Histogram<u64>>>,
+    pub get_miss_lats: Arc<RwLock<Histogram<u64>>>,
 
     pub flush_ios: Arc<AtomicUsize>,
     pub flush_bytes: Arc<AtomicUsize>,
@@ -96,7 +103,10 @@ impl Default for Metrics {
 
             get_ios: Arc::new(AtomicUsize::new(0)),
             get_miss_ios: Arc::new(AtomicUsize::new(0)),
-            get_lats: Arc::new(RwLock::new(
+            get_hit_lats: Arc::new(RwLock::new(
+                Histogram::new_with_bounds(1, 1_000_000, 2).unwrap(),
+            )),
+            get_miss_lats: Arc::new(RwLock::new(
                 Histogram::new_with_bounds(1, 1_000_000, 2).unwrap(),
             )),
 
@@ -109,7 +119,8 @@ impl Default for Metrics {
 impl Metrics {
     pub fn dump(&self) -> MetricsDump {
         let insert_lats = self.insert_lats.read();
-        let get_lats = self.get_lats.read();
+        let get_hit_lats = self.get_hit_lats.read();
+        let get_miss_lats = self.get_miss_lats.read();
         MetricsDump {
             insert_ios: self.insert_ios.load(Ordering::Relaxed),
             insert_bytes: self.insert_bytes.load(Ordering::Relaxed),
@@ -119,9 +130,12 @@ impl Metrics {
 
             get_ios: self.get_ios.load(Ordering::Relaxed),
             get_miss_ios: self.get_miss_ios.load(Ordering::Relaxed),
-            get_lat_p50: get_lats.value_at_quantile(0.5),
-            get_lat_p90: get_lats.value_at_quantile(0.9),
-            get_lat_p99: get_lats.value_at_quantile(0.99),
+            get_hit_lat_p50: get_hit_lats.value_at_quantile(0.5),
+            get_hit_lat_p90: get_hit_lats.value_at_quantile(0.9),
+            get_hit_lat_p99: get_hit_lats.value_at_quantile(0.99),
+            get_miss_lat_p50: get_miss_lats.value_at_quantile(0.5),
+            get_miss_lat_p90: get_miss_lats.value_at_quantile(0.9),
+            get_miss_lat_p99: get_miss_lats.value_at_quantile(0.99),
 
             flush_ios: self.flush_ios.load(Ordering::Relaxed),
             flush_bytes: self.flush_bytes.load(Ordering::Relaxed),
@@ -193,9 +207,12 @@ impl std::fmt::Display for Analysis {
         // get statics
         writeln!(f, "get iops: {:.1}/s", self.get_iops)?;
         writeln!(f, "get miss: {:.2}% ", self.get_miss * 100f64)?;
-        writeln!(f, "get lat p50: {}us", self.get_lat_p50)?;
-        writeln!(f, "get lat p90: {}us", self.get_lat_p90)?;
-        writeln!(f, "get lat p99: {}us", self.get_lat_p99)?;
+        writeln!(f, "get hit lat p50: {}us", self.get_hit_lat_p50)?;
+        writeln!(f, "get hit lat p90: {}us", self.get_hit_lat_p90)?;
+        writeln!(f, "get hit lat p99: {}us", self.get_hit_lat_p99)?;
+        writeln!(f, "get miss lat p50: {}us", self.get_miss_lat_p50)?;
+        writeln!(f, "get miss lat p90: {}us", self.get_miss_lat_p90)?;
+        writeln!(f, "get miss lat p99: {}us", self.get_miss_lat_p99)?;
 
         // flush statics
         let flush_throughput = ByteSize::b(self.flush_throughput as u64);
@@ -250,9 +267,12 @@ pub fn analyze(
 
         get_iops,
         get_miss,
-        get_lat_p50: metrics_dump_end.get_lat_p50,
-        get_lat_p90: metrics_dump_end.get_lat_p90,
-        get_lat_p99: metrics_dump_end.get_lat_p99,
+        get_hit_lat_p50: metrics_dump_end.get_hit_lat_p50,
+        get_hit_lat_p90: metrics_dump_end.get_hit_lat_p90,
+        get_hit_lat_p99: metrics_dump_end.get_hit_lat_p99,
+        get_miss_lat_p50: metrics_dump_end.get_miss_lat_p50,
+        get_miss_lat_p90: metrics_dump_end.get_miss_lat_p90,
+        get_miss_lat_p99: metrics_dump_end.get_miss_lat_p99,
 
         flush_iops,
         flush_throughput,
