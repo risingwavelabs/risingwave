@@ -154,7 +154,7 @@ impl<'a, R: Rng> SqlGenerator<'a, R> {
     /// Generates a complex query which may recurse.
     /// e.g. through `gen_with` or other generated parts of the query.
     fn gen_complex_query(&mut self) -> (Query, Vec<Column>) {
-        let with = self.gen_with();
+        let (with, with_tables) = self.gen_with();
         let (query, schema) = self.gen_set_expr();
         (
             Query {
@@ -195,14 +195,17 @@ impl<'a, R: Rng> SqlGenerator<'a, R> {
         t
     }
 
-    fn gen_with(&mut self) -> Option<With> {
+    fn gen_with(&mut self) -> (Option<With>, Vec<Table>) {
         match self.flip_coin() {
-            true => None,
-            false => Some(self.gen_with_inner()),
+            true => (None, vec![]),
+            false => {
+                let (with, tables) = self.gen_with_inner();
+                (Some(with), tables)
+            },
         }
     }
 
-    fn gen_with_inner(&mut self) -> With {
+    fn gen_with_inner(&mut self) -> (With, Vec<Table>) {
         let alias = self.gen_alias_with_prefix("with");
         let (query, query_schema) = self.gen_local_query();
         let from = None;
@@ -212,16 +215,14 @@ impl<'a, R: Rng> SqlGenerator<'a, R> {
             from,
         };
 
-        let table = Table {
+        let with_tables = vec![Table {
             name: alias.name.value,
             columns: query_schema,
-        };
-        self.add_relation_to_context(table);
-
-        With {
+        }];
+        (With {
             recursive: false,
             cte_tables: vec![cte],
-        }
+        }, with_tables)
     }
 
     fn gen_set_expr(&mut self) -> (SetExpr, Vec<Column>) {
