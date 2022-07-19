@@ -78,7 +78,7 @@ impl ToBatchProst for BatchProjectSet {
                 .logical
                 .select_list()
                 .iter()
-                .map(|select_item| select_item.to_protobuf())
+                .map(|select_item| select_item.to_project_set_select_item_proto())
                 .collect_vec(),
         })
     }

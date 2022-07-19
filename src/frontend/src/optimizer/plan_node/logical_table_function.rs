@@ -18,7 +18,7 @@ use risingwave_common::catalog::{Field, Schema};
 use risingwave_common::error::{ErrorCode, Result};
 
 use super::{ColPrunable, LogicalFilter, PlanBase, PlanRef, PredicatePushdown, ToBatch, ToStream};
-use crate::binder::BoundTableFunction;
+use crate::expr::TableFunction;
 use crate::optimizer::plan_node::BatchTableFunction;
 use crate::session::OptimizerContextRef;
 use crate::utils::Condition;
@@ -27,12 +27,12 @@ use crate::utils::Condition;
 #[derive(Debug, Clone)]
 pub struct LogicalTableFunction {
     pub base: PlanBase,
-    pub table_function: BoundTableFunction,
+    pub table_function: TableFunction,
 }
 
 impl LogicalTableFunction {
     /// Create a [`LogicalTableFunction`] node. Used internally by optimizer.
-    pub fn new(table_function: BoundTableFunction, ctx: OptimizerContextRef) -> Self {
+    pub fn new(table_function: TableFunction, ctx: OptimizerContextRef) -> Self {
         let schema = Schema {
             fields: vec![Field::with_name(
                 table_function.return_type.clone(),

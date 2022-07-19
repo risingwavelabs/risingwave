@@ -16,21 +16,19 @@ use std::fmt;
 
 use risingwave_common::catalog::{Field, Schema};
 use risingwave_common::types::DataType;
-use risingwave_pb::expr::ProjectSetSelectItem as SelectItemProst;
 
 use super::{
     BatchProjectSet, ColPrunable, LogicalFilter, LogicalProject, PlanBase, PlanRef,
     PlanTreeNodeUnary, PredicatePushdown, StreamProjectSet, ToBatch, ToStream,
 };
-use crate::binder::BoundTableFunction;
-use crate::expr::{Expr, ExprImpl, ExprRewriter, InputRef};
+use crate::expr::{Expr, ExprImpl, ExprRewriter, ExprVerboseDisplay, InputRef};
 use crate::risingwave_common::error::Result;
 use crate::utils::{ColIndexMapping, Condition};
 
 /// `LogicalProjectSet` projects one row multiple times according to `select_list`.
 ///
 /// Different from `Project`, it supports [`TableFunction`](crate::binder::BoundTableFunction)s.
-/// See also [`SelectItemProst`] for examples.
+/// See also [`ProjectSetSelectItem`](risingwave_pb::expr::ProjectSetSelectItem) for examples.
 ///
 /// To have a pk, it has a hidden column `projected_row_id` at the beginning. The implementation of
 /// `LogicalProjectSet` is highly similar to [`LogicalProject`], except for the additional hidden
@@ -38,62 +36,17 @@ use crate::utils::{ColIndexMapping, Condition};
 #[derive(Debug, Clone)]
 pub struct LogicalProjectSet {
     pub base: PlanBase,
-    select_list: Vec<ProjectSetSelectItem>,
+    select_list: Vec<ExprImpl>,
     input: PlanRef,
 }
 
-/// See also [`SelectItemProst`]
-#[derive(Debug, Clone)]
-pub enum ProjectSetSelectItem {
-    TableFunction(BoundTableFunction),
-    Expr(ExprImpl),
-}
-
-impl From<BoundTableFunction> for ProjectSetSelectItem {
-    fn from(table_function: BoundTableFunction) -> Self {
-        ProjectSetSelectItem::TableFunction(table_function)
-    }
-}
-
-impl From<ExprImpl> for ProjectSetSelectItem {
-    fn from(expr: ExprImpl) -> Self {
-        ProjectSetSelectItem::Expr(expr)
-    }
-}
-
-impl ProjectSetSelectItem {
-    pub fn return_type(&self) -> DataType {
-        match self {
-            ProjectSetSelectItem::TableFunction(tf) => tf.return_type.clone(),
-            ProjectSetSelectItem::Expr(expr) => expr.return_type(),
-        }
-    }
-
-    pub fn to_protobuf(&self) -> SelectItemProst {
-        use risingwave_pb::expr::project_set_select_item::SelectItem::*;
-
-        SelectItemProst {
-            select_item: Some(match self {
-                ProjectSetSelectItem::TableFunction(tf) => TableFunction(tf.to_protobuf()),
-                ProjectSetSelectItem::Expr(expr) => Expr(expr.to_expr_proto()),
-            }),
-        }
-    }
-
-    pub fn rewrite(self, rewriter: &mut impl ExprRewriter) -> Self {
-        match self {
-            ProjectSetSelectItem::TableFunction(tf) => {
-                ProjectSetSelectItem::TableFunction(tf.rewrite(rewriter))
-            }
-            ProjectSetSelectItem::Expr(expr) => {
-                ProjectSetSelectItem::Expr(rewriter.rewrite_expr(expr))
-            }
-        }
-    }
-}
-
 impl LogicalProjectSet {
-    pub fn new(input: PlanRef, select_list: Vec<ProjectSetSelectItem>) -> Self {
+    pub fn new(input: PlanRef, select_list: Vec<ExprImpl>) -> Self {
+        assert!(
+            select_list.iter().any(|e| e.has_table_function()),
+            "ProjectSet should have at least one table function."
+        );
+
         let ctx = input.ctx();
         let schema = Self::derive_schema(&select_list, input.schema());
         let pk_indices = Self::derive_pk(input.schema(), input.pk_indices(), &select_list);
@@ -105,25 +58,24 @@ impl LogicalProjectSet {
         }
     }
 
-    fn derive_schema(select_list: &[ProjectSetSelectItem], input_schema: &Schema) -> Schema {
-        let _o2i = Self::o2i_col_mapping_inner(input_schema.len(), select_list);
+    fn derive_schema(select_list: &[ExprImpl], input_schema: &Schema) -> Schema {
+        let o2i = Self::o2i_col_mapping_inner(input_schema.len(), select_list);
 
         let mut fields = vec![Field::with_name(DataType::Int64, "projected_row_id")];
-        fields.extend(select_list.iter().enumerate().map(|(_idx, item)| {
-            // TODO: pretty schema like LogicalProject
+        fields.extend(select_list.iter().enumerate().map(|(idx, expr)| {
             // Get field info from o2i.
-            // let (name, sub_fields, type_name) = match o2i.try_map(id) {
-            //     Some(input_idx) => {
-            //         let field = input_schema.fields()[input_idx].clone();
-            //         (field.name, field.sub_fields, field.type_name)
-            //     }
-            //     None => (
-            //         format!("{:?}", ExprVerboseDisplay { expr, input_schema }),
-            //         vec![],
-            //         String::new(),
-            //     ),
-            // };
-            Field::unnamed(item.return_type())
+            let (name, sub_fields, type_name) = match o2i.try_map(idx) {
+                Some(input_idx) => {
+                    let field = input_schema.fields()[input_idx].clone();
+                    (field.name, field.sub_fields, field.type_name)
+                }
+                None => (
+                    format!("{:?}", ExprVerboseDisplay { expr, input_schema }),
+                    vec![],
+                    String::new(),
+                ),
+            };
+            Field::with_struct(expr.return_type(), name, sub_fields, type_name)
         }));
 
         Schema { fields }
@@ -132,7 +84,7 @@ impl LogicalProjectSet {
     fn derive_pk(
         input_schema: &Schema,
         input_pk: &[usize],
-        select_list: &[ProjectSetSelectItem],
+        select_list: &[ExprImpl],
     ) -> Vec<usize> {
         let i2o = Self::i2o_col_mapping_inner(input_schema.len(), select_list);
         let mut pk = input_pk
@@ -145,7 +97,7 @@ impl LogicalProjectSet {
         pk
     }
 
-    pub fn select_list(&self) -> &[ProjectSetSelectItem] {
+    pub fn select_list(&self) -> &[ExprImpl] {
         &self.select_list
     }
 
@@ -161,14 +113,11 @@ impl LogicalProjectSet {
 
 impl LogicalProjectSet {
     /// get the Mapping of columnIndex from output column index to input column index
-    fn o2i_col_mapping_inner(
-        input_len: usize,
-        select_list: &[ProjectSetSelectItem],
-    ) -> ColIndexMapping {
+    fn o2i_col_mapping_inner(input_len: usize, select_list: &[ExprImpl]) -> ColIndexMapping {
         let mut map = vec![None; 1 + select_list.len()];
         for (i, item) in select_list.iter().enumerate() {
             map[1 + i] = match item {
-                ProjectSetSelectItem::Expr(ExprImpl::InputRef(input)) => Some(input.index()),
+                ExprImpl::InputRef(input) => Some(input.index()),
                 _ => None,
             }
         }
@@ -177,10 +126,7 @@ impl LogicalProjectSet {
 
     /// get the Mapping of columnIndex from input column index to output column index,if a input
     /// column corresponds more than one out columns, mapping to any one
-    fn i2o_col_mapping_inner(
-        input_len: usize,
-        select_list: &[ProjectSetSelectItem],
-    ) -> ColIndexMapping {
+    fn i2o_col_mapping_inner(input_len: usize, select_list: &[ExprImpl]) -> ColIndexMapping {
         Self::o2i_col_mapping_inner(input_len, select_list).inverse()
     }
 
@@ -212,7 +158,7 @@ impl PlanTreeNodeUnary for LogicalProjectSet {
             .select_list
             .clone()
             .into_iter()
-            .map(|item| item.rewrite(&mut input_col_change))
+            .map(|item| input_col_change.rewrite_expr(item))
             .collect();
         let project_set = Self::new(input, select_list);
         // change the input columns index will not change the output column index
@@ -263,16 +209,15 @@ impl ToStream for LogicalProjectSet {
         let i2o = Self::i2o_col_mapping_inner(input.schema().len(), project_set.select_list());
         let col_need_to_add = input_pk.iter().cloned().filter(|i| i2o.try_map(*i) == None);
         let input_schema = input.schema();
-        let select_list = project_set
-            .select_list()
-            .iter()
-            .cloned()
-            .chain(col_need_to_add.map(|idx| {
-                let input_ref: ExprImpl =
-                    InputRef::new(idx, input_schema.fields[idx].data_type.clone()).into();
-                input_ref.into()
-            }))
-            .collect();
+        let select_list =
+            project_set
+                .select_list()
+                .iter()
+                .cloned()
+                .chain(col_need_to_add.map(|idx| {
+                    InputRef::new(idx, input_schema.fields[idx].data_type.clone()).into()
+                }))
+                .collect();
         let project_set = Self::new(input, select_list);
         // The added columns is at the end, so it will not change existing column indices.
         // But the target size of `out_col_change` should be the same as the length of the new

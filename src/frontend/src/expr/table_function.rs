@@ -15,16 +15,17 @@
 use itertools::Itertools;
 use risingwave_common::types::DataType;
 use risingwave_pb::expr::table_function::Type;
-use risingwave_pb::expr::TableFunction;
+use risingwave_pb::expr::TableFunction as TableFunctionProst;
 
-use crate::expr::{Expr as _, ExprImpl, ExprRewriter};
+use super::{Expr, ExprImpl, ExprRewriter};
 
 /// A table function takes a row as input and returns a table. It is also known as Set-Returning
 /// Function.
 ///
-/// See also [`TableFunction`](risingwave_expr::table_function::TableFunction) trait in expr crate.
-#[derive(Clone)]
-pub struct BoundTableFunction {
+/// See also [`TableFunction`](risingwave_expr::table_function::TableFunction) trait in expr crate
+/// and [`ProjectSetSelectItem`](risingwave_pb::expr::ProjectSetSelectItem).
+#[derive(Clone, Eq, PartialEq, Hash)]
+pub struct TableFunction {
     pub(crate) args: Vec<ExprImpl>,
     pub(crate) return_type: DataType,
     pub(crate) function_type: TableFunctionType,
@@ -54,9 +55,9 @@ impl TableFunctionType {
     }
 }
 
-impl BoundTableFunction {
-    pub fn to_protobuf(&self) -> TableFunction {
-        TableFunction {
+impl TableFunction {
+    pub fn to_protobuf(&self) -> TableFunctionProst {
+        TableFunctionProst {
             function_type: self.function_type.to_protobuf() as i32,
             args: self.args.iter().map(|c| c.to_expr_proto()).collect_vec(),
             return_type: Some(self.return_type.to_protobuf()),
@@ -75,7 +76,7 @@ impl BoundTableFunction {
     }
 }
 
-impl std::fmt::Debug for BoundTableFunction {
+impl std::fmt::Debug for TableFunction {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         if f.alternate() {
             f.debug_struct("FunctionCall")
@@ -91,5 +92,15 @@ impl std::fmt::Debug for BoundTableFunction {
             });
             builder.finish()
         }
+    }
+}
+
+impl Expr for TableFunction {
+    fn return_type(&self) -> DataType {
+        self.return_type.clone()
+    }
+
+    fn to_expr_proto(&self) -> risingwave_pb::expr::ExprNode {
+        unreachable!("Table function should not be converted to ExprNode")
     }
 }

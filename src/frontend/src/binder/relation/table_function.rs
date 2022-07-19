@@ -21,14 +21,10 @@ use risingwave_common::types::{unnested_list_type, DataType};
 use risingwave_sqlparser::ast::FunctionArg;
 
 use super::{Binder, Result};
-use crate::binder::table_function::{BoundTableFunction, TableFunctionType};
-use crate::expr::{Expr as _, ExprImpl, ExprType};
+use crate::expr::{Expr as _, ExprImpl, ExprType, TableFunction, TableFunctionType};
 
 impl Binder {
-    pub(super) fn bind_unnest_function(
-        &mut self,
-        args: Vec<FunctionArg>,
-    ) -> Result<BoundTableFunction> {
+    pub(super) fn bind_unnest_function(&mut self, args: Vec<FunctionArg>) -> Result<TableFunction> {
         // unnest ( Array[...] )
         if args.len() != 1 {
             return Err(ErrorCode::BindError(
@@ -65,7 +61,7 @@ impl Binder {
 
                 self.bind_table_to_context(columns, "unnest".to_string(), None)?;
 
-                Ok(BoundTableFunction {
+                Ok(TableFunction {
                     args: vec![expr],
                     return_type: data_type,
                     function_type: TableFunctionType::Unnest,
@@ -84,7 +80,7 @@ impl Binder {
     pub(super) fn bind_generate_series_function(
         &mut self,
         args: Vec<FunctionArg>,
-    ) -> Result<BoundTableFunction> {
+    ) -> Result<TableFunction> {
         let args = args.into_iter();
 
         // generate_series ( start timestamp, stop timestamp, step interval ) or
@@ -116,7 +112,7 @@ impl Binder {
 
         self.bind_table_to_context(columns, "generate_series".to_string(), None)?;
 
-        Ok(BoundTableFunction {
+        Ok(TableFunction {
             args: exprs,
             return_type: data_type,
             function_type: TableFunctionType::Generate,

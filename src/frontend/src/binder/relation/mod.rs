@@ -20,8 +20,8 @@ use risingwave_common::error::{internal_error, ErrorCode, Result};
 use risingwave_sqlparser::ast::{Ident, ObjectName, TableAlias, TableFactor};
 
 use super::bind_context::ColumnBinding;
-use super::table_function::BoundTableFunction;
 use crate::binder::Binder;
+use crate::expr::TableFunction;
 
 mod join;
 mod subquery;
@@ -44,7 +44,7 @@ pub enum Relation {
     Subquery(Box<BoundSubquery>),
     Join(Box<BoundJoin>),
     WindowTableFunction(Box<BoundWindowTableFunction>),
-    TableFunction(Box<BoundTableFunction>),
+    TableFunction(Box<TableFunction>),
 }
 
 impl Binder {
