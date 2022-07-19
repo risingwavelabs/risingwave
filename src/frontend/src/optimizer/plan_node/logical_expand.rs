@@ -23,6 +23,7 @@ use super::{
     PlanTreeNodeUnary, PredicatePushdown, StreamExpand, ToBatch, ToStream,
 };
 use crate::expr::InputRef;
+use crate::optimizer::property::FunctionalDependencySet;
 use crate::risingwave_common::error::Result;
 use crate::utils::{ColIndexMapping, Condition};
 
@@ -50,7 +51,8 @@ impl LogicalExpand {
 
         let schema = Self::derive_schema(input.schema());
         let ctx = input.ctx();
-        let base = PlanBase::new_logical(ctx, schema, pk_indices);
+        let functional_dependency = FunctionalDependencySet::with_key(schema.len(), &pk_indices);
+        let base = PlanBase::new_logical(ctx, schema, pk_indices, functional_dependency);
         LogicalExpand {
             base,
             column_subsets,

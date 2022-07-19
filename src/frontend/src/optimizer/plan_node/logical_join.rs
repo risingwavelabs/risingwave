@@ -31,7 +31,7 @@ use crate::optimizer::plan_node::{
     BatchFilter, BatchHashJoin, BatchLookupJoin, BatchNestedLoopJoin, EqJoinPredicate,
     LogicalFilter, StreamDynamicFilter, StreamFilter,
 };
-use crate::optimizer::property::{Distribution, RequiredDist};
+use crate::optimizer::property::{Distribution, FunctionalDependencySet, RequiredDist};
 use crate::utils::{ColIndexMapping, Condition, ConditionVerboseDisplay};
 
 /// `LogicalJoin` combines two relations according to some condition.
@@ -119,7 +119,8 @@ impl LogicalJoin {
             join_type,
             &output_indices,
         );
-        let base = PlanBase::new_logical(ctx, schema, pk_indices);
+        let functional_dependency = FunctionalDependencySet::with_key(schema.len(), &pk_indices);
+        let base = PlanBase::new_logical(ctx, schema, pk_indices, functional_dependency);
         LogicalJoin {
             base,
             left,

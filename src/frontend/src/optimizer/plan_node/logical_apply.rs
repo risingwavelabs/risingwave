@@ -22,6 +22,7 @@ use super::{
     ColPrunable, LogicalJoin, PlanBase, PlanRef, PlanTreeNodeBinary, PredicatePushdown, ToBatch,
     ToStream,
 };
+use crate::optimizer::property::FunctionalDependencySet;
 use crate::utils::{ColIndexMapping, Condition, ConditionVerboseDisplay};
 
 /// `LogicalApply` represents a correlated join, where the right side may refer to columns from the
@@ -85,7 +86,8 @@ impl LogicalApply {
             join_type,
             &output_indices,
         );
-        let base = PlanBase::new_logical(ctx, schema, pk_indices);
+        let functional_dependency = FunctionalDependencySet::with_key(schema.len(), &pk_indices);
+        let base = PlanBase::new_logical(ctx, schema, pk_indices, functional_dependency);
         LogicalApply {
             base,
             left,

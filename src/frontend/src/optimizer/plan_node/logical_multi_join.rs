@@ -25,6 +25,7 @@ use super::{
 };
 use crate::expr::{ExprImpl, ExprRewriter};
 use crate::optimizer::plan_node::PlanTreeNode;
+use crate::optimizer::property::FunctionalDependencySet;
 use crate::utils::{
     ColIndexMapping, Condition, ConditionVerboseDisplay, ConnectedComponentLabeller,
 };
@@ -252,7 +253,9 @@ impl LogicalMultiJoin {
                 .collect::<Option<Vec<_>>>()
                 .unwrap_or_default()
         };
-        let base = PlanBase::new_logical(inputs[0].ctx(), schema, pk_indices);
+        let functional_dependency = FunctionalDependencySet::with_key(schema.len(), &pk_indices);
+        let base =
+            PlanBase::new_logical(inputs[0].ctx(), schema, pk_indices, functional_dependency);
 
         Self {
             base,

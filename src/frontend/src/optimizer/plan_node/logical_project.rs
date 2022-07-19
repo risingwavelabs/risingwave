@@ -29,7 +29,7 @@ use crate::expr::{
     assert_input_ref, Expr, ExprImpl, ExprRewriter, ExprVerboseDisplay, ExprVisitor, InputRef,
 };
 use crate::optimizer::plan_node::CollectInputRef;
-use crate::optimizer::property::{Distribution, Order, RequiredDist};
+use crate::optimizer::property::{Distribution, FunctionalDependencySet, Order, RequiredDist};
 use crate::utils::{ColIndexMapping, Condition, Substitute};
 
 /// Construct a `LogicalProject` and dedup expressions.
@@ -87,7 +87,8 @@ impl LogicalProject {
             assert!(!expr.has_subquery());
             assert!(!expr.has_agg_call());
         }
-        let base = PlanBase::new_logical(ctx, schema, pk_indices);
+        let functional_dependency = FunctionalDependencySet::with_key(schema.len(), &pk_indices);
+        let base = PlanBase::new_logical(ctx, schema, pk_indices, functional_dependency);
         LogicalProject { base, exprs, input }
     }
 

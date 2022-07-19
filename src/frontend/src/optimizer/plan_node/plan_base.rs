@@ -17,7 +17,7 @@ use risingwave_common::catalog::Schema;
 
 use super::*;
 use crate::for_all_plan_nodes;
-use crate::optimizer::property::{Distribution, Order};
+use crate::optimizer::property::{Distribution, FunctionalDependencySet, Order};
 use crate::session::OptimizerContextRef;
 
 /// the common fields of all nodes, please make a field named `base` in
@@ -38,10 +38,16 @@ pub struct PlanBase {
     /// The append-only property of the PlanNode's output is a stream-only property. Append-only
     /// means the stream contains only insert operation.
     pub append_only: bool,
+    pub functional_dependency: FunctionalDependencySet,
 }
 
 impl PlanBase {
-    pub fn new_logical(ctx: OptimizerContextRef, schema: Schema, pk_indices: Vec<usize>) -> Self {
+    pub fn new_logical(
+        ctx: OptimizerContextRef,
+        schema: Schema,
+        pk_indices: Vec<usize>,
+        functional_dependency: FunctionalDependencySet,
+    ) -> Self {
         let id = ctx.next_plan_node_id();
         Self {
             id,
@@ -52,6 +58,7 @@ impl PlanBase {
             order: Order::any(),
             // Logical plan node won't touch `append_only` field
             append_only: true,
+            functional_dependency,
         }
     }
 
@@ -64,14 +71,16 @@ impl PlanBase {
     ) -> Self {
         // assert!(!pk_indices.is_empty()); TODO: reopen it when ensure the pk for stream op
         let id = ctx.next_plan_node_id();
+        let len = schema.len();
         Self {
             id,
             ctx,
             schema,
             dist,
             order: Order::any(),
-            pk_indices,
+            pk_indices: pk_indices.clone(),
             append_only,
+            functional_dependency: FunctionalDependencySet::with_key(len, &pk_indices),
         }
     }
 
@@ -91,6 +100,7 @@ impl PlanBase {
             pk_indices: vec![],
             // Batch plan node won't touch `append_only` field
             append_only: true,
+            functional_dependency: FunctionalDependencySet::with_key(0, &[]),
         }
     }
 }

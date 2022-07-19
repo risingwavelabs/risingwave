@@ -22,6 +22,7 @@ use super::{ColPrunable, LogicalFilter, PlanBase, PlanRef, PredicatePushdown, To
 use crate::binder::FunctionType;
 use crate::expr::ExprImpl;
 use crate::optimizer::plan_node::BatchTableFunction;
+use crate::optimizer::property::FunctionalDependencySet;
 use crate::session::OptimizerContextRef;
 use crate::utils::Condition;
 
@@ -45,7 +46,8 @@ impl LogicalTableFunction {
         let schema = Schema {
             fields: vec![Field::with_name(data_type.clone(), function_type.name())],
         };
-        let base = PlanBase::new_logical(ctx, schema, vec![]);
+        let functional_dependency = FunctionalDependencySet::new();
+        let base = PlanBase::new_logical(ctx, schema, vec![], functional_dependency);
         Self {
             base,
             args,

@@ -25,6 +25,7 @@ use super::{
     PredicatePushdown, StreamHopWindow, ToBatch, ToStream,
 };
 use crate::expr::{InputRef, InputRefDisplay, InputRefVerboseDisplay};
+use crate::optimizer::property::FunctionalDependencySet;
 use crate::utils::{ColIndexMapping, Condition};
 
 /// `LogicalHopWindow` implements Hop Table Function.
@@ -90,7 +91,9 @@ impl LogicalHopWindow {
             };
             input_pk.chain(window_pk).collect_vec()
         })();
-        let base = PlanBase::new_logical(ctx, actual_schema, pk_indices);
+        let functional_dependency =
+            FunctionalDependencySet::with_key(output_indices.len(), &pk_indices);
+        let base = PlanBase::new_logical(ctx, actual_schema, pk_indices, functional_dependency);
         LogicalHopWindow {
             base,
             input,

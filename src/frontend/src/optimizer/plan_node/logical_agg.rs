@@ -37,7 +37,7 @@ use crate::expr::{
 };
 use crate::optimizer::plan_node::utils::TableCatalogBuilder;
 use crate::optimizer::plan_node::{gen_filter_and_pushdown, LogicalProject};
-use crate::optimizer::property::{Direction, Order, RequiredDist};
+use crate::optimizer::property::{Direction, FunctionalDependencySet, Order, RequiredDist};
 use crate::utils::{ColIndexMapping, Condition, ConditionVerboseDisplay, Substitute};
 
 /// See also [`crate::expr::AggOrderByExpr`]
@@ -654,7 +654,8 @@ impl LogicalAgg {
             // group agg
             false => group_key.clone(),
         };
-        let base = PlanBase::new_logical(ctx, schema, pk_indices);
+        let functional_dependency = FunctionalDependencySet::with_key(schema.len(), &pk_indices);
+        let base = PlanBase::new_logical(ctx, schema, pk_indices, functional_dependency);
         Self {
             base,
             agg_calls,
