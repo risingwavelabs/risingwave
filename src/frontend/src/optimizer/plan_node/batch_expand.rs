@@ -56,20 +56,7 @@ impl BatchExpand {
 
 impl fmt::Display for BatchExpand {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        let verbose = self.base.ctx.is_explain_verbose();
-        if verbose {
-            write!(
-                f,
-                "BatchExpand {{ column_subsets: {:?} }}",
-                self.column_subsets_verbose_display()
-            )
-        } else {
-            write!(
-                f,
-                "BatchExpand {{ column_subsets: {:?} }}",
-                self.column_subsets()
-            )
-        }
+        self.logical.fmt_with_name(f, "BatchExpand")
     }
 }
 

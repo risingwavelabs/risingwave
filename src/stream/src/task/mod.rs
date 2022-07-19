@@ -12,9 +12,9 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+use std::collections::HashMap;
 use std::sync::Arc;
 
-use madsim::collections::HashMap;
 use parking_lot::{Mutex, MutexGuard, RwLock};
 use risingwave_common::error::{ErrorCode, Result, RwError};
 use risingwave_common::util::addr::HostAddr;
@@ -35,7 +35,6 @@ pub use stream_manager::*;
 pub const LOCAL_OUTPUT_CHANNEL_SIZE: usize = 16;
 
 pub type ConsumableChannelPair = (Option<Sender<Message>>, Option<Receiver<Message>>);
-pub type ConsumableChannelVecPair = (Vec<Sender<Message>>, Vec<Receiver<Message>>);
 pub type ActorId = u32;
 pub type FragmentId = u32;
 pub type DispatcherId = u64;
@@ -157,7 +156,7 @@ impl SharedContext {
         );
     }
 
-    pub fn retain<F>(&self, mut f: F)
+    pub fn retain_channel<F>(&self, mut f: F)
     where
         F: FnMut(&(u32, u32)) -> bool,
     {

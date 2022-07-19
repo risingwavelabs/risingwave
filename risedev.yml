@@ -196,14 +196,14 @@ risedev:
 
   # special config for deployment, see related PR for more information
   compose-3node-deploy:
-    - use: minio
-      id: minio-0
-      address: ${dns-host:rw-source-0}
-      listen-address: "0.0.0.0"
-      console-address: "0.0.0.0"
+    # - use: minio
+    #   id: minio-0
+    #   address: ${dns-host:rw-source-0}
+    #   listen-address: "0.0.0.0"
+    #   console-address: "0.0.0.0"
 
-    # - use: aws-s3
-    #   bucket: ${terraform:s3-bucket}
+    - use: aws-s3
+      bucket: ${terraform:s3-bucket}
 
     # Not enabled by default as all previous benchmarks are not done with etcd.
     # Also we currently only support node-level docker volume tear down.

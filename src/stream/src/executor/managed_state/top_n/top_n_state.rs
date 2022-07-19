@@ -12,12 +12,12 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+use std::collections::BTreeMap;
 use std::ops::Index;
 
 use futures::pin_mut;
 use futures::stream::StreamExt;
 use itertools::Itertools;
-use madsim::collections::BTreeMap;
 use risingwave_common::array::Row;
 use risingwave_common::catalog::{ColumnDesc, ColumnId, TableId};
 use risingwave_common::types::DataType;

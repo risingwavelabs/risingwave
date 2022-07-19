@@ -534,6 +534,11 @@ where
             }
 
             if let Some(splits) = &handle.splits.lock().await.splits {
+                if splits.is_empty() {
+                    tracing::warn!("no splits detected for source {}", source_id);
+                    continue;
+                }
+
                 for fragment_id in fragments {
                     let empty_actor_splits = table_fragments
                         .fragments
@@ -546,7 +551,9 @@ where
                         .map(|actor| (actor.actor_id, vec![]))
                         .collect();
 
-                    assigned.extend(diff_splits(empty_actor_splits, splits).unwrap());
+                    if let Some(diff) = diff_splits(empty_actor_splits, splits) {
+                        assigned.extend(diff);
+                    }
                 }
             } else {
                 unreachable!();
