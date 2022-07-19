@@ -97,12 +97,10 @@ struct SqlGenerator<'a, R: Rng> {
 /// Generators
 impl<'a, R: Rng> SqlGenerator<'a, R> {
     fn new(rng: &'a mut R, tables: Vec<Table>) -> Self {
-        let is_distinct_allowed = rng.gen_bool(0.5);
-
         SqlGenerator {
             tables,
             rng,
-            is_distinct_allowed,
+            is_distinct_allowed: rng.gen_bool(0.5);,
             bound_relations: vec![],
             bound_columns: vec![],
             is_mview: false,
@@ -111,11 +109,10 @@ impl<'a, R: Rng> SqlGenerator<'a, R> {
 
     fn new_for_mview(rng: &'a mut R, tables: Vec<Table>) -> Self {
         // distinct aggregate is not allowed for MV
-        let is_distinct_allowed = false;
         SqlGenerator {
             tables,
             rng,
-            is_distinct_allowed,
+            is_distinct_allowed: false,
             bound_relations: vec![],
             bound_columns: vec![],
             is_mview: true,
