@@ -329,22 +329,24 @@ impl<'a, R: Rng> SqlGenerator<'a, R> {
     }
 
     fn gen_from(&mut self, with_tables: Vec<Table>) -> Vec<TableWithJoins> {
-        let mut from = if with_tables.is_empty() {
-            vec![self.gen_from_relation()]
-        } else {
+        // Logical Join fails, not exactly sure how.
+        // Only happens when generating with clause along with another table.
+        // Tracked in: <TODO>
+        if !with_tables.is_empty() {
             let with_table = with_tables
                 .choose(&mut self.rng)
                 .expect("with tables should not be empty");
-            vec![create_table_with_joins_from_table(with_table)]
-        };
+            return vec![create_table_with_joins_from_table(with_table)];
+        }
         if self.is_mview {
             // TODO: These constraints are workarounds required by mview.
             // Tracked by: <https://github.com/singularity-data/risingwave/issues/4024>.
-            assert!(with_tables.len() <= 1);
             assert!(!self.tables.is_empty());
-            return from;
+            return vec![self.gen_from_relation()];
         }
-        for _ in 1..self.tables.len() {
+
+        let mut from = vec![];
+        for _ in 0..self.tables.len() {
             if self.flip_coin() {
                 from.push(self.gen_from_relation());
             }
