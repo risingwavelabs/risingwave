@@ -80,6 +80,7 @@ mod union;
 mod integration_tests;
 #[cfg(test)]
 mod test_utils;
+mod top_n_global;
 
 pub use actor::{Actor, ActorContext, ActorContextRef, OperatorInfo, OperatorInfoStatus};
 pub use batch_query::BatchQueryExecutor;
