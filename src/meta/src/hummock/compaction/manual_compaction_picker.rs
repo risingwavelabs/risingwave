@@ -208,12 +208,12 @@ impl CompactionPicker for ManualCompactionPicker {
         }
 
         let target_input_ssts = if target_level == level {
+            vec![]
+        } else {
             self.overlap_strategy.check_base_level_overlap(
                 &select_input_ssts,
                 &levels.levels[target_level - 1].table_infos,
             )
-        } else {
-            vec![]
         };
 
         if target_input_ssts
