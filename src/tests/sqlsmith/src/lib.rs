@@ -20,7 +20,7 @@ use rand::Rng;
 use risingwave_frontend::binder::bind_data_type;
 use risingwave_frontend::expr::DataTypeName;
 use risingwave_sqlparser::ast::{
-    BinaryOperator, ColumnDef, Expr, Ident, Join, JoinConstraint, JoinOperator, ObjectName,
+    BinaryOperator, ColumnDef, Cte, Expr, Ident, Join, JoinConstraint, JoinOperator, ObjectName,
     OrderByExpr, Query, Select, SelectItem, SetExpr, Statement, TableWithJoins, Value, With,
 };
 
@@ -157,7 +157,25 @@ impl<'a, R: Rng> SqlGenerator<'a, R> {
     }
 
     fn gen_with(&mut self) -> Option<With> {
-        None
+        match self.flip_coin() {
+            true => None,
+            false => Some(self.gen_with_inner()),
+        }
+    }
+
+    fn gen_with_inner(&mut self) -> With {
+        let alias = todo!();
+        let query = todo!();
+        let from = todo!();
+        let cte = Cte {
+            alias,
+            query,
+            from,
+        };
+        With {
+            recursive: false,
+            cte_tables: vec![cte],
+        }
     }
 
     fn gen_set_expr(&mut self) -> (SetExpr, Vec<Column>) {
