@@ -20,6 +20,7 @@ use risingwave_common::error::{internal_error, ErrorCode, Result};
 use risingwave_sqlparser::ast::{Ident, ObjectName, TableAlias, TableFactor};
 
 use super::bind_context::ColumnBinding;
+use super::table_function::BoundTableFunction;
 use crate::binder::Binder;
 
 mod join;
@@ -30,7 +31,6 @@ mod window_table_function;
 
 pub use join::BoundJoin;
 pub use subquery::BoundSubquery;
-pub use table_function::BoundTableFunction;
 pub use table_or_source::{BoundBaseTable, BoundSource, BoundSystemTable, BoundTableSource};
 pub use window_table_function::{BoundWindowTableFunction, WindowTableFunctionKind};
 
@@ -45,21 +45,6 @@ pub enum Relation {
     Join(Box<BoundJoin>),
     WindowTableFunction(Box<BoundWindowTableFunction>),
     TableFunction(Box<BoundTableFunction>),
-}
-
-#[derive(Debug, Clone, PartialEq, Eq, Hash)]
-pub enum FunctionType {
-    Generate,
-    Unnest,
-}
-
-impl FunctionType {
-    pub fn name(&self) -> &str {
-        match self {
-            FunctionType::Generate => "generate_series",
-            FunctionType::Unnest => "unnest",
-        }
-    }
 }
 
 impl Binder {

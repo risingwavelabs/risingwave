@@ -180,15 +180,13 @@ impl Executor for MergeExecutor {
 
         // Channels that're blocked by the barrier to align.
         select_all
-            .map(move |msg| {
+            .inspect(move |msg| {
                 if let Ok(Message::Chunk(chunk)) = &msg {
                     metrics
                         .actor_in_record_cnt
                         .with_label_values(&[&actor_id_str])
                         .inc_by(chunk.cardinality() as _);
                 }
-
-                msg
             })
             .boxed()
     }
@@ -219,7 +217,7 @@ impl SelectReceivers {
     fn new(actor_id: u32, status: OperatorInfoStatus, upstreams: Vec<Receiver<Message>>) -> Self {
         Self {
             blocks: Vec::with_capacity(upstreams.len()),
-            upstreams: upstreams.into_iter().map(ReceiverStream::new).collect(),
+            upstreams: upstreams.into_iter().map(Receiver::into).collect(),
             last_base: 0,
             actor_id,
             status,
