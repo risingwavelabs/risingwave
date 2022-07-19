@@ -22,7 +22,7 @@ use risingwave_sqlparser::ast::{Ident, ObjectName, TableAlias, TableFactor};
 
 use super::bind_context::ColumnBinding;
 use crate::binder::Binder;
-use crate::expr::{TableFunction, TableFunctionType};
+use crate::expr::{Expr, TableFunction, TableFunctionType};
 
 mod join;
 mod subquery;
@@ -207,10 +207,22 @@ impl Binder {
                             .map(|arg| self.bind_function_arg(arg))
                             .flatten_ok()
                             .try_collect()?;
-                        return Ok(Relation::TableFunction(Box::new(TableFunction::new(
-                            table_function_type,
-                            args,
-                        )?)));
+
+                        let tf = TableFunction::new(table_function_type, args)?;
+                        let columns = [(
+                            false,
+                            Field {
+                                data_type: tf.return_type(),
+                                name: tf.function_type.name().to_string(),
+                                sub_fields: vec![],
+                                type_name: "".to_string(),
+                            },
+                        )]
+                        .into_iter();
+
+                        self.bind_table_to_context(columns, "unnest".to_string(), None)?;
+
+                        return Ok(Relation::TableFunction(Box::new(tf)));
                     }
                     let kind = WindowTableFunctionKind::from_str(func_name).map_err(|_| {
                         ErrorCode::NotImplemented(
