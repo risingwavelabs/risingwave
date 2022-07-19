@@ -20,7 +20,7 @@ chmod +x ./target/debug/risedev-playground
 chmod +x ./target/debug/risingwave_regress_test
 
 echo "--- Generate RiseDev CI config"
-cp risedev-components.ci.env risedev-components.user.env
+cp ci/risedev-components.ci.env risedev-components.user.env
 
 echo "--- Prepare RiseDev playground"
 cargo make pre-start-playground

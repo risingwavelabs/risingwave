@@ -24,8 +24,8 @@ use crate::utils::Condition;
 ///
 /// To unnest, we just pull predicates contain correlated variables in Filter into Apply, and
 /// convert it into corresponding type of Join.
-pub struct PullUpCorrelatedPredicate {}
-impl Rule for PullUpCorrelatedPredicate {
+pub struct PullUpCorrelatedPredicateRule {}
+impl Rule for PullUpCorrelatedPredicateRule {
     fn apply(&self, plan: PlanRef) -> Option<PlanRef> {
         let apply = plan.as_logical_apply()?;
         let (apply_left, apply_right, apply_on, join_type, ..) = apply.clone().decompose();
@@ -122,8 +122,8 @@ impl ExprRewriter for Rewriter {
     }
 }
 
-impl PullUpCorrelatedPredicate {
+impl PullUpCorrelatedPredicateRule {
     pub fn create() -> BoxedRule {
-        Box::new(PullUpCorrelatedPredicate {})
+        Box::new(PullUpCorrelatedPredicateRule {})
     }
 }

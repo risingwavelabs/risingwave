@@ -34,7 +34,7 @@ use super::Distribution;
 use crate::encoding::cell_based_encoding_util::serialize_pk;
 use crate::encoding::cell_based_row_serializer::CellBasedRowSerializer;
 use crate::encoding::dedup_pk_cell_based_row_serializer::DedupPkCellBasedRowSerializer;
-use crate::encoding::Encoding;
+use crate::encoding::RowSerde;
 use crate::error::{StorageError, StorageResult};
 use crate::StateStore;
 
@@ -48,15 +48,15 @@ pub type StateTable<S> = StateTableBase<S, CellBasedRowSerializer>;
 /// `StateTableBase` is the interface accessing relational data in KV(`StateStore`) with
 /// encoding, using `RowSerializer` for row to cell serializing.
 #[derive(Clone)]
-pub struct StateTableBase<S: StateStore, E: Encoding> {
+pub struct StateTableBase<S: StateStore, RS: RowSerde> {
     /// buffer row operations.
     mem_table: MemTable,
 
     /// write into state store.
-    storage_table: StorageTableBase<S, E, READ_WRITE>,
+    storage_table: StorageTableBase<S, RS, READ_WRITE>,
 }
 
-impl<S: StateStore, E: Encoding> StateTableBase<S, E> {
+impl<S: StateStore, RS: RowSerde> StateTableBase<S, RS> {
     /// Create a state table without distribution, used for singleton executors and unit tests.
     pub fn new_without_distribution(
         store: S,
@@ -104,7 +104,7 @@ impl<S: StateStore, E: Encoding> StateTableBase<S, E> {
     }
 
     /// Get the underlying [` StorageTableBase`]. Should only be used for tests.
-    pub fn storage_table(&self) -> &StorageTableBase<S, E, READ_WRITE> {
+    pub fn storage_table(&self) -> &StorageTableBase<S, RS, READ_WRITE> {
         &self.storage_table
     }
 
@@ -224,45 +224,10 @@ impl<S: StateStore> StateTable<S> {
         store: S,
         vnodes: Option<Arc<Bitmap>>,
     ) -> Self {
-        let table_columns = table_catalog
-            .columns
-            .iter()
-            .map(|col| col.column_desc.as_ref().unwrap().into())
-            .collect();
-        let order_types = table_catalog
-            .order_key
-            .iter()
-            .map(|col_order| {
-                OrderType::from_prost(
-                    &risingwave_pb::plan_common::OrderType::from_i32(col_order.order_type).unwrap(),
-                )
-            })
-            .collect();
-        let dist_key_indices = table_catalog
-            .distribution_key
-            .iter()
-            .map(|dist_index| *dist_index as usize)
-            .collect();
-        let pk_indices = table_catalog
-            .order_key
-            .iter()
-            .map(|col_order| col_order.index as usize)
-            .collect();
-        let distribution = match vnodes {
-            Some(vnodes) => Distribution {
-                dist_key_indices,
-                vnodes,
-            },
-            None => Distribution::fallback(),
-        };
-        StateTable::new_with_distribution(
-            store,
-            TableId::new(table_catalog.id),
-            table_columns,
-            order_types,
-            pk_indices,
-            distribution,
-        )
+        Self {
+            mem_table: MemTable::new(),
+            storage_table: StorageTableBase::from_table_catalog(table_catalog, store, vnodes),
+        }
     }
 }
 

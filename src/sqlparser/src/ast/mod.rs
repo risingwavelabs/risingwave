@@ -118,6 +118,16 @@ impl Ident {
             quote_style: Some(quote),
         }
     }
+
+    /// Value after considering quote style
+    /// In certain places, double quotes can force case-sensitive, but not always
+    /// e.g. session variables.
+    pub fn real_value(&self) -> String {
+        match self.quote_style {
+            Some('"') => self.value.clone(),
+            _ => self.value.to_lowercase(),
+        }
+    }
 }
 
 impl From<&str> for Ident {
@@ -906,6 +916,8 @@ pub enum Statement {
         analyze: bool,
         // Display additional information regarding the plan.
         verbose: bool,
+        // Trace plan transformation of the optimizer step by step
+        trace: bool,
         /// A SQL query that specifies what to explain
         statement: Box<Statement>,
     },
@@ -927,6 +939,7 @@ impl fmt::Display for Statement {
                 describe_alias,
                 verbose,
                 analyze,
+                trace,
                 statement,
             } => {
                 if *describe_alias {
@@ -941,6 +954,10 @@ impl fmt::Display for Statement {
 
                 if *verbose {
                     write!(f, "VERBOSE ")?;
+                }
+
+                if *trace {
+                    write!(f, "TRACE ")?;
                 }
 
                 write!(f, "{}", statement)

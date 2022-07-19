@@ -22,14 +22,27 @@ tests: boolean
 
 * Install `psql` and ensure that it's in your path.
 * Start risingwave cluster.
-* Run 
+* Run tests against RisingWave.
 ```shell
 RUST_BACKTRACE=1 target/debug/risingwave_regress_test -h 127.0.0.1 \
   -p 4566 \
   -u root \
   --input `pwd`/src/tests/regress/data \
   --output `pwd`/src/tests/regress/output \
-  --schedule `pwd`/src/tests/regress/data/schedule
+  --schedule `pwd`/src/tests/regress/data/schedule \
+  --mode risingwave
+```
+
+* Run tests against PostgreSQL. Make sure PostgreSQL is running.
+```shell
+RUST_BACKTRACE=1 target/debug/risingwave_regress_test -h 127.0.0.1 \
+  -p 5432 \
+  -u `user name` \
+  --database `database name` \
+  --input `pwd`/src/tests/regress/data \
+  --output `pwd`/src/tests/regress/output \
+  --schedule `pwd`/src/tests/regress/data/schedule \
+  --mode postgres
 ```
 Please remove the `output` directory before running the test again.
 

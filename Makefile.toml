@@ -278,6 +278,19 @@ dependencies = [
   "prepare-config",
 ]
 
+[tasks.pre-start-benchmark]
+category = "RiseDev - Prepare"
+description = "Download necessary tools to deploy a benchmark env"
+dependencies = [
+  "download-minio",
+  "download-mcli",
+  "download-etcd",
+  "download-grafana",
+  "download-prometheus",
+  "download-jaeger",
+  "download-kafka",
+]
+
 [tasks.p]
 alias = "playground"
 
@@ -425,24 +438,24 @@ description = "Run unit tests"
 category = "RiseDev - Build in simulation mode"
 description = "Build in simulation mode"
 dependencies = ["warn-on-missing-tools"]
-env = { RUSTFLAGS = "--cfg madsim", CARGO_TARGET_DIR = "target/sim" }
+env = { RUSTFLAGS = "--cfg tokio_unstable --cfg madsim", CARGO_TARGET_DIR = "target/sim" }
 script = """
 #!/bin/bash
 set -e
 
-cargo build "$@"
+cargo build --workspace --exclude risingwave_cmd --exclude risingwave_cmd_all --exclude risingwave_rt --exclude risingwave_frontend_test_runner "$@"
 """
 
 [tasks.stest]
 category = "RiseDev - Deterministic Simulation Test"
 description = "Run unit tests in deterministic simulation mode"
 dependencies = ["warn-on-missing-tools"]
-env = { RUSTFLAGS = "--cfg madsim", CARGO_TARGET_DIR = "target/sim" }
+env = { RUSTFLAGS = "--cfg tokio_unstable --cfg madsim", CARGO_TARGET_DIR = "target/sim" }
 script = """
 #!/bin/bash
 set -e
 
-cargo nextest run "$@"
+cargo nextest run --workspace --exclude risingwave_cmd --exclude risingwave_cmd_all --exclude risingwave_rt --exclude risingwave_frontend_test_runner "$@"
 """
 
 [tasks.check-hakari]

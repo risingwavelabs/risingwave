@@ -20,9 +20,10 @@ use risingwave_common::catalog::{ColumnDesc, ColumnId};
 use risingwave_common::error::Result;
 use risingwave_common::types::VirtualNode;
 
+use super::cell_based_row_deserializer::CellBasedRowDeserializer;
 use super::cell_based_row_serializer::CellBasedRowSerializer;
-use super::{Encoding, KeyBytes, ValueBytes};
-
+use super::{Encoding, KeyBytes, RowSerde, ValueBytes};
+#[derive(Clone)]
 /// [`DedupPkCellBasedRowSerializer`] is identical to [`CellBasedRowSerializer`].
 /// Difference is that before serializing a row, pk datums are filtered out.
 pub struct DedupPkCellBasedRowSerializer {
@@ -86,7 +87,7 @@ impl DedupPkCellBasedRowSerializer {
 }
 
 impl Encoding for DedupPkCellBasedRowSerializer {
-    fn create_cell_based_serializer(
+    fn create_row_serializer(
         pk_indices: &[usize],
         column_descs: &[ColumnDesc],
         column_ids: &[ColumnId],
@@ -95,35 +96,51 @@ impl Encoding for DedupPkCellBasedRowSerializer {
     }
 
     /// Remove dup pk datums + serialize
-    fn cell_based_serialize(
+    fn serialize(
         &mut self,
         vnode: VirtualNode,
         pk: &[u8],
         row: Row,
     ) -> Result<Vec<(KeyBytes, ValueBytes)>> {
         let row = self.remove_dup_pk_datums(row);
-        self.inner.cell_based_serialize(vnode, pk, row)
+        self.inner.serialize(vnode, pk, row)
     }
 
     /// Remove dup pk datums + `serialize_without_filter`
-    fn cell_based_serialize_without_filter(
+    fn serialize_for_update(
         &mut self,
         vnode: VirtualNode,
         pk: &[u8],
         row: Row,
     ) -> Result<Vec<Option<(KeyBytes, ValueBytes)>>> {
         let row = self.remove_dup_pk_datums(row);
-        self.inner
-            .cell_based_serialize_without_filter(vnode, pk, row)
+        self.inner.serialize_for_update(vnode, pk, row)
     }
 
-    /// Get column ids used by cell serializer to serialize.
-    /// TODO: This should probably not be exposed to user.
     fn column_ids(&self) -> &[ColumnId] {
         self.inner.column_ids()
     }
 }
 
+impl RowSerde for DedupPkCellBasedRowSerializer {
+    type Deserializer = CellBasedRowDeserializer;
+    type Serializer = DedupPkCellBasedRowSerializer;
+
+    fn create_serializer(
+        pk_indices: &[usize],
+        column_descs: &[ColumnDesc],
+        column_ids: &[ColumnId],
+    ) -> Self::Serializer {
+        Encoding::create_row_serializer(pk_indices, column_descs, column_ids)
+    }
+
+    fn create_deserializer(
+        column_mapping: std::sync::Arc<super::ColumnDescMapping>,
+        data_types: Vec<risingwave_common::types::DataType>,
+    ) -> Self::Deserializer {
+        super::Decoding::create_row_deserializer(column_mapping, data_types)
+    }
+}
 #[cfg(test)]
 mod tests {
     use itertools::Itertools;
@@ -157,9 +174,7 @@ mod tests {
             Some(111_i32.into()),
             Some(1111_f64.into()),
         ]);
-        let actual = serializer
-            .cell_based_serialize(DEFAULT_VNODE, &pk, input)
-            .unwrap();
+        let actual = serializer.serialize(DEFAULT_VNODE, &pk, input).unwrap();
         // datums not in pk (2)
         // + datums whose memcmp not equal to value enc (1)
         // + delimiter cell (1)
@@ -223,9 +238,7 @@ mod tests {
             Some(11_i32.into()),
             Some(111_i32.into()),
         ]);
-        let actual = serializer
-            .cell_based_serialize(DEFAULT_VNODE, &pk, input)
-            .unwrap();
+        let actual = serializer.serialize(DEFAULT_VNODE, &pk, input).unwrap();
         // delimiter cell (1)
         assert_eq!(actual.len(), 1);
 

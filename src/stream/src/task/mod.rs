@@ -12,9 +12,9 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+use std::collections::HashMap;
 use std::sync::Arc;
 
-use madsim::collections::HashMap;
 use parking_lot::{Mutex, MutexGuard, RwLock};
 use risingwave_common::error::{ErrorCode, Result, RwError};
 use risingwave_common::util::addr::HostAddr;
@@ -175,11 +175,6 @@ impl SharedContext {
                     "actor not found in info table".into(),
                 ))
             })
-    }
-
-    #[cfg(test)]
-    pub fn get_channel_pair_number(&self) -> u32 {
-        self.lock_channel_map().len() as u32
     }
 }
 

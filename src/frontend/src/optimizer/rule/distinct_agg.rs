@@ -26,8 +26,8 @@ use crate::optimizer::PlanRef;
 use crate::utils::Condition;
 
 /// Transform distinct aggregates to `LogicalAgg` -> `LogicalAgg` -> `Expand` -> `Input`.
-pub struct DistinctAgg {}
-impl Rule for DistinctAgg {
+pub struct DistinctAggRule {}
+impl Rule for DistinctAggRule {
     fn apply(&self, plan: PlanRef) -> Option<PlanRef> {
         let agg: &LogicalAgg = plan.as_logical_agg()?;
         let (agg_calls, agg_group_keys, input) = agg.clone().decompose();
@@ -57,9 +57,9 @@ impl Rule for DistinctAgg {
     }
 }
 
-impl DistinctAgg {
+impl DistinctAggRule {
     pub fn create() -> BoxedRule {
-        Box::new(DistinctAgg {})
+        Box::new(DistinctAggRule {})
     }
 
     fn build_expand(

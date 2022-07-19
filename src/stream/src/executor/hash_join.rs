@@ -12,12 +12,12 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+use std::collections::HashSet;
 use std::sync::Arc;
 
 use futures::StreamExt;
 use futures_async_stream::try_stream;
 use itertools::Itertools;
-use madsim::collections::HashSet;
 use risingwave_common::array::{Op, Row, RowRef, StreamChunk};
 use risingwave_common::bail;
 use risingwave_common::catalog::Schema;
@@ -146,12 +146,13 @@ impl<K: HashKey, S: StateStore> std::fmt::Debug for JoinSide<K, S> {
 }
 
 impl<K: HashKey, S: StateStore> JoinSide<K, S> {
-    // WARNING: Please do not call this until we implement it.
+    // WARNING: Please do not call this until we implement it.、
+    #[expect(dead_code)]
     fn is_dirty(&self) -> bool {
         unimplemented!()
     }
 
-    #[allow(dead_code)]
+    #[expect(dead_code)]
     fn clear_cache(&mut self) {
         assert!(
             !self.is_dirty(),
@@ -189,7 +190,7 @@ pub struct HashJoinExecutor<K: HashKey, S: StateStore, const T: JoinTypePrimitiv
     /// Epoch
     epoch: u64,
 
-    #[allow(dead_code)]
+    #[expect(dead_code)]
     /// Logical Operator Info
     op_info: String,
 
