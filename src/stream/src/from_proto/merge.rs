@@ -52,11 +52,13 @@ impl ExecutorBuilder for MergeExecutorBuilder {
             )
             .boxed())
         } else {
+            let upstreams = upstreams.iter().copied().zip_eq(rxs).collect();
+
             Ok(MergeExecutor::new(
                 schema,
                 params.pk_indices,
                 params.actor_id,
-                rxs,
+                upstreams,
                 actor_context,
                 x_node.operator_id,
                 stream.streaming_metrics.clone(),

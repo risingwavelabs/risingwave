@@ -15,15 +15,14 @@
 use std::pin::Pin;
 use std::task::{Context, Poll};
 
-use futures::{Stream, StreamExt};
-use futures_async_stream::for_await;
+use futures::{pin_mut, FutureExt, Stream, StreamExt};
+use futures_async_stream::{for_await, try_stream};
 use madsim::time::Instant;
 use risingwave_common::catalog::Schema;
 use risingwave_common::error::Result;
 use risingwave_pb::task_service::GetStreamResponse;
 use risingwave_rpc_client::ComputeClient;
 use tokio::sync::mpsc::{Receiver, Sender};
-use tokio_stream::wrappers::ReceiverStream;
 use tonic::Streaming;
 
 use super::error::StreamExecutorError;
@@ -127,11 +126,13 @@ impl RemoteInput {
     }
 }
 
+pub type Upstream = (ActorId, Receiver<Message>);
+
 /// `MergeExecutor` merges data from multiple channels. Dataflow from one channel
 /// will be stopped on barrier.
 pub struct MergeExecutor {
     /// Upstream channels.
-    upstreams: Vec<Receiver<Message>>,
+    upstreams: Vec<Upstream>,
 
     /// Belonged actor id.
     actor_id: u32,
@@ -150,7 +151,7 @@ impl MergeExecutor {
         schema: Schema,
         pk_indices: PkIndices,
         actor_id: u32,
-        inputs: Vec<Receiver<Message>>,
+        inputs: Vec<Upstream>,
         actor_context: ActorContextRef,
         receiver_id: u64,
         metrics: Arc<StreamingMetrics>,
@@ -167,28 +168,34 @@ impl MergeExecutor {
             metrics,
         }
     }
-}
 
-impl Executor for MergeExecutor {
-    fn execute(self: Box<Self>) -> BoxedMessageStream {
-        let upstreams = self.upstreams;
+    #[try_stream(ok = Message, error = StreamExecutorError)]
+    async fn execute_inner(self: Box<Self>) {
         // Futures of all active upstreams.
-        let status = self.status;
-        let select_all = SelectReceivers::new(self.actor_id, status, upstreams);
+        let select_all = SelectReceivers::new(self.actor_id, self.status, self.upstreams);
         let actor_id_str = self.actor_id.to_string();
         let metrics = self.metrics.clone();
 
         // Channels that're blocked by the barrier to align.
-        select_all
-            .inspect(move |msg| {
-                if let Ok(Message::Chunk(chunk)) = &msg {
-                    metrics
-                        .actor_in_record_cnt
-                        .with_label_values(&[&actor_id_str])
-                        .inc_by(chunk.cardinality() as _);
-                }
-            })
-            .boxed()
+        #[for_await]
+        for msg in select_all {
+            let msg: Message = msg?;
+
+            if let Message::Chunk(chunk) = &msg {
+                metrics
+                    .actor_in_record_cnt
+                    .with_label_values(&[&actor_id_str])
+                    .inc_by(chunk.cardinality() as _);
+            }
+
+            yield msg;
+        }
+    }
+}
+
+impl Executor for MergeExecutor {
+    fn execute(self: Box<Self>) -> BoxedMessageStream {
+        self.execute_inner().boxed()
     }
 
     fn schema(&self) -> &Schema {
@@ -205,8 +212,8 @@ impl Executor for MergeExecutor {
 }
 
 pub struct SelectReceivers {
-    blocks: Vec<ReceiverStream<Message>>,
-    upstreams: Vec<ReceiverStream<Message>>,
+    blocks: Vec<Upstream>,
+    upstreams: Vec<Upstream>,
     barrier: Option<Barrier>,
     last_base: usize,
     status: OperatorInfoStatus,
@@ -214,10 +221,10 @@ pub struct SelectReceivers {
 }
 
 impl SelectReceivers {
-    fn new(actor_id: u32, status: OperatorInfoStatus, upstreams: Vec<Receiver<Message>>) -> Self {
+    fn new(actor_id: u32, status: OperatorInfoStatus, upstreams: Vec<Upstream>) -> Self {
         Self {
             blocks: Vec::with_capacity(upstreams.len()),
-            upstreams: upstreams.into_iter().map(Receiver::into).collect(),
+            upstreams,
             last_base: 0,
             actor_id,
             status,
@@ -235,7 +242,7 @@ impl Stream for SelectReceivers {
         let mut poll_count = 0;
         while poll_count < self.upstreams.len() {
             let idx = (poll_count + self.last_base) % self.upstreams.len();
-            match self.upstreams[idx].poll_next_unpin(cx) {
+            match self.upstreams[idx].1.poll_recv(cx) {
                 Poll::Pending => {
                     poll_count += 1;
                     continue;
@@ -333,7 +340,7 @@ mod tests {
         for _i in 0..CHANNEL_NUMBER {
             let (tx, rx) = tokio::sync::mpsc::channel(16);
             txs.push(tx);
-            rxs.push(rx);
+            rxs.push((0, rx));
         }
         let metrics = Arc::new(StreamingMetrics::unused());
         let merger = MergeExecutor::new(

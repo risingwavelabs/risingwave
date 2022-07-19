@@ -106,7 +106,7 @@ async fn test_merger_sum_aggr() {
     for _ in 0..17 {
         let (tx, rx) = channel(16);
         let (actor, channel) = make_actor(rx);
-        outputs.push(channel);
+        outputs.push((233, channel));
         handles.push(tokio::spawn(actor.run()));
         inputs.push(Box::new(LocalOutput::new(233, tx)) as Box<dyn Output>);
     }
