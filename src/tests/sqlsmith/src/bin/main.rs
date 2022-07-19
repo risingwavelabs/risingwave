@@ -203,7 +203,12 @@ async fn main() {
         }
     });
 
-    let mut rng = rand::thread_rng();
+    let mut rng;
+    if let Ok(x) = env::var("RW_RANDOM_SEED_SQLSMITH") && x == "true" {
+        rng = rand::rngs::SmallRng::from_entropy();
+    } else {
+        rng = rand::rngs::SmallRng::seed_from_u64(0);
+    }
 
     let (tables, mviews) = create_tables(&mut rng, &opt, &client).await;
 
