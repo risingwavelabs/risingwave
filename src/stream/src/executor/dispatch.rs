@@ -133,7 +133,7 @@ fn new_output(
 ) -> Result<Box<dyn Output>> {
     let downstream_addr = context.get_actor_info(&down_id)?.get_host()?.into();
     let tx = context.take_sender(&(actor_id, down_id))?;
-    if is_local_address(&downstream_addr, &context.addr) {
+    if is_local_address(&context.addr, &downstream_addr) {
         // if this is a local downstream actor
         Ok(Box::new(LocalOutput::new(down_id, tx)) as Box<dyn Output>)
     } else {

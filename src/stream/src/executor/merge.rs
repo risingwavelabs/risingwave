@@ -396,7 +396,6 @@ mod tests {
             txs.push(tx);
             rxs.push(rx);
         }
-        let metrics = Arc::new(StreamingMetrics::unused());
         let merger = MergeExecutor::for_test(rxs);
         let mut handles = Vec::with_capacity(CHANNEL_NUMBER);
 
