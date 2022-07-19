@@ -541,31 +541,36 @@ impl<S: StateStore, RS: RowSerde> StorageTableBase<S, RS, READ_WRITE> {
         for (pk, row_op) in buffer {
             match row_op {
                 RowOp::Insert(row) => {
-                    let value = self
+                    let vnode = self.compute_vnode_by_row(&row);
+                    let (key, value) = self
                         .row_serializer
-                        .serialize(DEFAULT_VNODE, &pk, row)
+                        .serialize(vnode, &pk, row)
                         .map_err(err)?[0]
-                        .1
                         .clone();
-                    local.put(pk, StorageValue::new_default_put(value));
+                    local.put(key, StorageValue::new_default_put(value));
                 }
-                RowOp::Delete(_) => {
-                    // TODO(wcy-fdu): only serialize key on deletion
-                    local.delete(pk);
+                RowOp::Delete(old_row) => {
+                    let vnode = self.compute_vnode_by_row(&old_row);
+                    let (delete_key, _) = self
+                        .row_serializer
+                        .serialize(vnode, &pk, old_row)
+                        .map_err(err)?[0]
+                        .clone();
+                    local.delete(delete_key);
                 }
                 RowOp::Update((old_row, new_row)) => {
                     // The row to update should keep the same primary key, so distribution key as
                     // well.
+
                     let vnode = self.compute_vnode_by_row(&new_row);
                     debug_assert_eq!(self.compute_vnode_by_row(&old_row), vnode);
 
-                    let insert_value = self
+                    let (insert_key, insert_value) = self
                         .row_serializer
-                        .serialize(DEFAULT_VNODE, &pk, new_row)
+                        .serialize(vnode, &pk, new_row)
                         .map_err(err)?[0]
-                        .1
                         .clone();
-                    local.put(pk, StorageValue::new_default_put(insert_value));
+                    local.put(insert_key, StorageValue::new_default_put(insert_value));
                 }
             }
         }
@@ -930,9 +935,9 @@ impl<S: StateStore, const T: AccessType> RowBasedStorageTable<S, T> {
         // For each vnode, construct an iterator.
         // TODO: if there're some vnodes continuously in the range and we don't care about order, we
         // can use a single iterator.
-        let iterators: Vec<_> = try_join_all(vnodes.map(|_vnode| {
-            // let raw_key_range = prefixed_range(encoded_key_range.clone(), &vnode.to_be_bytes());
-            let raw_key_range = encoded_key_range.clone();
+        let iterators: Vec<_> = try_join_all(vnodes.map(|vnode| {
+            let raw_key_range = prefixed_range(encoded_key_range.clone(), &vnode.to_be_bytes());
+            // let raw_key_range = encoded_key_range.clone();
             async move {
                 let data_types = self
                     .table_columns

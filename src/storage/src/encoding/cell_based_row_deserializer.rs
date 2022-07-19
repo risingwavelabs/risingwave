@@ -26,7 +26,6 @@ use super::cell_based_encoding_util::deserialize_column_id;
 use super::cell_based_row_serializer::CellBasedRowSerializer;
 use super::{Decoding, RowSerde};
 use crate::encoding::ColumnDescMapping;
-use crate::table::storage_table::DEFAULT_VNODE;
 
 #[allow(clippy::len_without_is_empty)]
 impl ColumnDescMapping {
@@ -103,13 +102,13 @@ impl CellBasedRowDeserializer {
         }
     }
 
-    fn deserialize_inner<const WITH_VNODE: bool>(
+    fn deserialize_inner(
         &mut self,
         raw_key: impl AsRef<[u8]>,
         cell: impl AsRef<[u8]>,
     ) -> Result<Option<(VirtualNode, Vec<u8>, Row)>> {
         let raw_key = raw_key.as_ref();
-        if raw_key.len() < if WITH_VNODE { VIRTUAL_NODE_SIZE } else { 0 } + 4 {
+        if raw_key.len() < VIRTUAL_NODE_SIZE {
             // vnode + cell_id
             return Err(ErrorCode::InternalError(format!(
                 "corrupted key: {:?}",
@@ -118,12 +117,10 @@ impl CellBasedRowDeserializer {
             .into());
         }
 
-        let (vnode, key_bytes) = if WITH_VNODE {
+        let (vnode, key_bytes) = {
             let (vnode_bytes, key_bytes) = raw_key.split_at(VIRTUAL_NODE_SIZE);
             let vnode = VirtualNode::from_be_bytes(vnode_bytes.try_into().unwrap());
             (vnode, key_bytes)
-        } else {
-            (DEFAULT_VNODE, raw_key)
         };
         let (cur_pk_bytes, cell_id_bytes) = key_bytes.split_at(key_bytes.len() - 4);
         let result;
@@ -157,15 +154,6 @@ impl CellBasedRowDeserializer {
         Ok(result)
     }
 
-    // TODO: remove this once we refactored lookup in delta join with cell-based table
-    pub fn deserialize_without_vnode(
-        &mut self,
-        raw_key: impl AsRef<[u8]>,
-        cell: impl AsRef<[u8]>,
-    ) -> Result<Option<(VirtualNode, Vec<u8>, Row)>> {
-        self.deserialize_inner::<false>(raw_key, cell)
-    }
-
     /// Since [`CellBasedRowDeserializer`] can be repetitively used with different inputs,
     /// it needs to be reset so that pk and data are both cleared for the next use.
     pub fn reset(&mut self) {
@@ -192,7 +180,7 @@ impl Decoding for CellBasedRowDeserializer {
         raw_key: impl AsRef<[u8]>,
         cell: impl AsRef<[u8]>,
     ) -> Result<Option<(VirtualNode, Vec<u8>, Row)>> {
-        self.deserialize_inner::<true>(raw_key, cell)
+        self.deserialize_inner(raw_key, cell)
     }
 
     /// Take the remaining data out of the deserializer.

@@ -12,11 +12,11 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use bytes::Buf;
+use bytes::{Buf, Bytes};
 use risingwave_common::array::Row;
 use risingwave_common::catalog::{ColumnDesc, ColumnId};
-use risingwave_common::error::Result;
-use risingwave_common::types::DataType;
+use risingwave_common::error::{ErrorCode, Result};
+use risingwave_common::types::{DataType, VirtualNode, VIRTUAL_NODE_SIZE};
 use risingwave_common::util::value_encoding::deserialize_datum;
 
 use super::row_based_serializer::RowBasedSerializer;
@@ -45,11 +45,7 @@ impl Decoding for RowBasedDeserializer {
         value: impl AsRef<[u8]>,
     ) -> Result<Option<(risingwave_common::types::VirtualNode, Vec<u8>, Row)>> {
         // todo: raw_key will be used in row-based pk dudup later.
-        Ok(Some((
-            0,
-            raw_key.as_ref().to_vec(),
-            row_based_deserialize_inner(self.data_types.clone(), value.as_ref())?,
-        )))
+        self.deserialize_inner(raw_key, value)
     }
 }
 
@@ -72,6 +68,34 @@ impl RowSerde for RowBasedDeserializer {
         Decoding::create_row_deserializer(column_mapping, data_types)
     }
 }
+impl RowBasedDeserializer {
+    fn deserialize_inner(
+        &mut self,
+        raw_key: impl AsRef<[u8]>,
+        value: impl AsRef<[u8]>,
+    ) -> Result<Option<(VirtualNode, Vec<u8>, Row)>> {
+        let raw_key = raw_key.as_ref();
+        if raw_key.len() < VIRTUAL_NODE_SIZE {
+            // vnode + cell_id
+            return Err(ErrorCode::InternalError(format!(
+                "corrupted key: {:?}",
+                Bytes::copy_from_slice(raw_key)
+            ))
+            .into());
+        }
+
+        let (vnode, key_bytes) = {
+            let (vnode_bytes, key_bytes) = raw_key.split_at(VIRTUAL_NODE_SIZE);
+            let vnode = VirtualNode::from_be_bytes(vnode_bytes.try_into().unwrap());
+            (vnode, key_bytes)
+        };
+        Ok(Some((
+            vnode,
+            key_bytes.to_vec(),
+            row_based_deserialize_inner(self.data_types.clone(), value.as_ref())?,
+        )))
+    }
+}
 
 fn row_based_deserialize_inner(data_types: Vec<DataType>, mut row: impl Buf) -> Result<Row> {
     // value encoding
@@ -91,6 +115,7 @@ mod tests {
     use crate::encoding::row_based_deserializer::RowBasedDeserializer;
     use crate::encoding::row_based_serializer::RowBasedSerializer;
     use crate::encoding::{ColumnDescMapping, Decoding, Encoding};
+    use crate::table::storage_table::DEFAULT_VNODE;
 
     #[test]
     fn test_row_based_serialize_and_deserialize_with_null() {
@@ -111,7 +136,7 @@ mod tests {
             &[ColumnDesc::new_atomic(DataType::Varchar, "unused", 2)],
             &[ColumnId::new(1)],
         );
-        let value_bytes = se.serialize(0, &[], row.clone()).unwrap();
+        let value_bytes = se.serialize(DEFAULT_VNODE, &[], row.clone()).unwrap();
         // each cell will add a is_none flag (u8)
 
         let mut de = RowBasedDeserializer::create_row_deserializer(
@@ -131,6 +156,7 @@ mod tests {
         for (pk, value) in value_bytes {
             assert_eq!(value.len(), 11 + 2 + 3 + 5 + 9 + 5 + 9 + 17 + 17);
             let row1 = de.deserialize(pk, value).unwrap();
+            assert_eq!(DEFAULT_VNODE, row1.clone().unwrap().0);
             assert_eq!(row, row1.unwrap().2);
         }
     }

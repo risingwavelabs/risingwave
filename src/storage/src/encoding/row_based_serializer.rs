@@ -29,15 +29,16 @@ impl Encoding for RowBasedSerializer {
     /// All values are nullable. Each value will have 1 extra byte to indicate whether it is null.
     fn serialize(
         &mut self,
-        _vnode: VirtualNode,
+        vnode: VirtualNode,
         pk: &[u8],
         row: Row,
     ) -> Result<Vec<(Vec<u8>, Vec<u8>)>> {
         let mut value_bytes = vec![];
+        let key = [vnode.to_be_bytes().as_slice(), pk].concat();
         for cell in &row.0 {
             value_bytes.extend(serialize_datum(cell)?);
         }
-        let res = vec![(pk.to_vec(), value_bytes)];
+        let res = vec![(key, value_bytes)];
         Ok(res)
     }
 
