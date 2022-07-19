@@ -24,7 +24,7 @@ use super::{
 use crate::expr::{assert_input_ref, ExprImpl};
 use crate::optimizer::plan_node::{BatchFilter, StreamFilter};
 use crate::risingwave_common::error::Result;
-use crate::utils::{ColIndexMapping, Condition};
+use crate::utils::{ColIndexMapping, Condition, ConditionVerboseDisplay};
 
 /// `LogicalFilter` iterates over its input and returns elements for which `predicate` evaluates to
 /// true, filtering out the others.
@@ -72,6 +72,25 @@ impl LogicalFilter {
     pub fn predicate(&self) -> &Condition {
         &self.predicate
     }
+
+    pub(super) fn fmt_with_name(&self, f: &mut fmt::Formatter, name: &str) -> fmt::Result {
+        let verbose = self.base.ctx.is_explain_verbose();
+        if verbose {
+            let input = self.input();
+            let input_schema = input.schema();
+            write!(
+                f,
+                "{} {{ predicate: {} }}",
+                name,
+                ConditionVerboseDisplay {
+                    condition: self.predicate(),
+                    input_schema
+                }
+            )
+        } else {
+            write!(f, "{} {{ predicate: {} }}", name, self.predicate())
+        }
+    }
 }
 
 impl PlanTreeNodeUnary for LogicalFilter {
@@ -98,7 +117,7 @@ impl_plan_tree_node_for_unary! {LogicalFilter}
 
 impl fmt::Display for LogicalFilter {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-        write!(f, "LogicalFilter {{ predicate: {} }}", self.predicate)
+        self.fmt_with_name(f, "LogicalFilter")
     }
 }
 

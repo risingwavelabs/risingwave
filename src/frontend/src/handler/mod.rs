@@ -51,8 +51,11 @@ pub async fn handle(session: Arc<SessionImpl>, stmt: Statement, sql: &str) -> Re
     let context = OptimizerContext::new(session.clone(), Arc::from(sql));
     match stmt {
         Statement::Explain {
-            statement, verbose, ..
-        } => explain::handle_explain(context, *statement, verbose),
+            statement,
+            verbose,
+            trace,
+            ..
+        } => explain::handle_explain(context, *statement, verbose, trace),
         Statement::CreateSource {
             is_materialized,
             stmt,
