@@ -78,10 +78,8 @@ async fn run_sqlsmith_with_seed(seed: u64) {
     }
 
     let tables = create_tables(session.clone(), &mut rng).await;
-
     for _ in 0..512 {
         let sql = sql_gen(&mut rng, tables.clone());
-
         let sql_copy = sql.clone();
         panic::set_hook(Box::new(move |e| {
             println!("Panic on SQL:\n{}\nReason:\n{}", sql_copy.clone(), e);
