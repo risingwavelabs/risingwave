@@ -4549,6 +4549,7 @@ dependencies = [
  "madsim",
  "madsim-tokio",
  "prost",
+ "risingwave_common",
  "risingwave_pb",
  "workspace-hack",
 ]
@@ -4579,7 +4580,6 @@ version = "0.1.10"
 dependencies = [
  "anyhow",
  "assert_matches",
- "async-recursion",
  "async-stream",
  "async-trait",
  "axum",
@@ -4612,7 +4612,6 @@ dependencies = [
  "rand 0.8.5",
  "risingwave_common",
  "risingwave_connector",
- "risingwave_frontend",
  "risingwave_hummock_sdk",
  "risingwave_pb",
  "risingwave_rpc_client",

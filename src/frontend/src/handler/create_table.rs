@@ -185,7 +185,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_create_table_handler() {
-        let sql = "create table t (v1 smallint, v2 struct<v3 bigint, v4 float, v5 double>) with ('appendonly' = true);";
+        let sql = "create table t (v1 smallint, v2 struct<v3 bigint, v4 float, v5 double>) with (appendonly = true);";
         let frontend = LocalFrontend::new(Default::default()).await;
         frontend.run_sql(sql).await.unwrap();
 
