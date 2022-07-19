@@ -38,6 +38,8 @@ message UpdateMutation {
     // Removed downstream actors.
     repeated uint32 removed_downstream_actor_id = 4;
   }
+  // TODO: These actor ids should be the same as those in `DispatcherUpdate`.
+  // We may find a way to deduplicate this.
   message MergeUpdate {
     // Added upstream actors.
     repeated uint32 added_upstream_actor_id = 1;

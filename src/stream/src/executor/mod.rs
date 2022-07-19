@@ -274,10 +274,12 @@ impl Barrier {
         Self { span, ..self }
     }
 
+    /// Whether this barrier is to stop the actor with `actor_id`.
     pub fn is_stop_actor(&self, actor_id: ActorId) -> bool {
         matches!(self.mutation.as_deref(), Some(Mutation::Stop(actors)) if actors.contains(&actor_id))
     }
 
+    /// Whether this barrier is to add new dispatchers for the actor with `actor_id`.
     pub fn is_add_dispatcher(&self, actor_id: ActorId) -> bool {
         matches!(
             self.mutation.as_deref(),
@@ -288,6 +290,8 @@ impl Barrier {
         )
     }
 
+    /// Returns the [`MergeUpdate`] if this barrier is to update the merge executors for the actor
+    /// with `actor_id`.
     pub fn as_update_merge(&self, actor_id: ActorId) -> Option<&MergeUpdate> {
         self.mutation
             .as_deref()
@@ -319,11 +323,11 @@ impl Mutation {
                 actors: actors.iter().copied().collect::<Vec<_>>(),
             }),
             Mutation::Update {
-                dispatchers: dispatcher,
-                merges: merge,
+                dispatchers,
+                merges,
             } => ProstMutation::Update(UpdateMutation {
-                actor_dispatcher_update: dispatcher.clone(),
-                actor_merge_update: merge.clone(),
+                actor_dispatcher_update: dispatchers.clone(),
+                actor_merge_update: merges.clone(),
             }),
             Mutation::Add { adds, .. } => ProstMutation::Add(AddMutation {
                 actor_dispatchers: adds

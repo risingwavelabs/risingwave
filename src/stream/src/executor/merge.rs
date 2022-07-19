@@ -139,7 +139,7 @@ pub(crate) fn new_input(
         .get_actor_info(&upstream_actor_id)?
         .get_host()?
         .into();
-    if !is_local_address(&upstream_addr, &context.addr) {
+    if !is_local_address(&context.addr, &upstream_addr) {
         // Get the sender for `RemoteInput` to forward received messages to receivers in
         // `ReceiverExecutor` or `MergeExecutor`.
         let sender = context.take_sender(&(upstream_actor_id, actor_id))?;
@@ -165,7 +165,7 @@ pub(crate) fn new_input(
     Ok((upstream_actor_id, rx))
 }
 
-pub type Upstream = (ActorId, Receiver<Message>);
+type Upstream = (ActorId, Receiver<Message>);
 
 /// `MergeExecutor` merges data from multiple channels. Dataflow from one channel
 /// will be stopped on barrier.
@@ -184,12 +184,13 @@ pub struct MergeExecutor {
 
     info: ExecutorInfo,
 
-    /// Actor operator context
+    /// Actor operator context.
     status: OperatorInfoStatus,
 
+    /// Shared context of the stream manager.
     context: Arc<SharedContext>,
 
-    /// Metrics
+    /// Streaming metrics.
     metrics: Arc<StreamingMetrics>,
 }
 
@@ -264,7 +265,7 @@ impl MergeExecutor {
                 }
                 Message::Barrier(barrier) => {
                     if let Some(update) = barrier.as_update_merge(self.actor_id) {
-                        // 1. Add new upstreams and poll the first barrier from them.
+                        // Create new upstreams receivers.
                         let new_upstreams = update
                             .added_upstream_actor_id
                             .iter()
@@ -279,14 +280,18 @@ impl MergeExecutor {
                                 )
                             })
                             .try_collect()
-                            .map_err(|_| anyhow::anyhow!("failed to create upstreams"))?;
+                            .map_err(|_| anyhow::anyhow!("failed to create upstream receivers"))?;
 
+                        // Poll the first barrier from the new upstreams. It must be the same as the
+                        // one we polled from original upstreams.
                         let mut select_new = SelectReceivers::new(self.actor_id, new_upstreams);
                         let new_barrier = expect_first_barrier(&mut select_new).await?;
-                        assert_eq!(barrier.epoch, new_barrier.epoch);
+                        assert_eq!(barrier, &new_barrier);
+
+                        // Add the new upstreams to select.
                         select_all.add_upstreams_from(select_new);
 
-                        // 2. Remove upstreams.
+                        // Remove upstreams.
                         select_all.remove_upstreams(
                             &update.removed_upstream_actor_id.iter().copied().collect(),
                         );
@@ -336,6 +341,7 @@ impl SelectReceivers {
         }
     }
 
+    /// Consume `other` and add its upstreams to `self`.
     fn add_upstreams_from(&mut self, other: Self) {
         assert!(self.blocks.is_empty() && self.barrier.is_none());
         assert!(other.blocks.is_empty() && other.barrier.is_none());
@@ -345,6 +351,7 @@ impl SelectReceivers {
         self.last_base = 0;
     }
 
+    /// Remove upstreams from `self` in `upstream_actor_ids`.
     fn remove_upstreams(&mut self, upstream_actor_ids: &HashSet<ActorId>) {
         assert!(self.blocks.is_empty() && self.barrier.is_none());
 
