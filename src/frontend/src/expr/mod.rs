@@ -522,9 +522,7 @@ impl std::fmt::Debug for ExprImpl {
                 Self::CorrelatedInputRef(arg0) => {
                     f.debug_tuple("CorrelatedInputRef").field(arg0).finish()
                 }
-                Self::TableFunction(_x) => {
-                    todo!()
-                }
+                Self::TableFunction(arg0) => f.debug_tuple("TableFunction").field(arg0).finish(),
             };
         }
         match self {
@@ -534,9 +532,7 @@ impl std::fmt::Debug for ExprImpl {
             Self::AggCall(x) => write!(f, "{:?}", x),
             Self::Subquery(x) => write!(f, "{:?}", x),
             Self::CorrelatedInputRef(x) => write!(f, "{:?}", x),
-            Self::TableFunction(_x) => {
-                todo!()
-            }
+            Self::TableFunction(x) => write!(f, "{:?}", x),
         }
     }
 }
@@ -570,7 +566,10 @@ impl std::fmt::Debug for ExprVerboseDisplay<'_> {
             ExprImpl::AggCall(x) => write!(f, "{:?}", x),
             ExprImpl::Subquery(x) => write!(f, "{:?}", x),
             ExprImpl::CorrelatedInputRef(x) => write!(f, "{:?}", x),
-            ExprImpl::TableFunction(_x) => todo!(),
+            ExprImpl::TableFunction(x) => {
+                // TODO: TableFunctionCallVerboseDisplay
+                write!(f, "{:?}", x)
+            }
         }
     }
 }

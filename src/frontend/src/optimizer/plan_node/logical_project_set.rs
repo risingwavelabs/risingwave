@@ -21,7 +21,9 @@ use super::{
     BatchProjectSet, ColPrunable, LogicalFilter, LogicalProject, PlanBase, PlanRef,
     PlanTreeNodeUnary, PredicatePushdown, StreamProjectSet, ToBatch, ToStream,
 };
-use crate::expr::{Expr, ExprImpl, ExprRewriter, ExprVerboseDisplay, InputRef};
+use crate::expr::{
+    Expr, ExprImpl, ExprRewriter, ExprVerboseDisplay, FunctionCall, InputRef, TableFunction,
+};
 use crate::risingwave_common::error::Result;
 use crate::utils::{ColIndexMapping, Condition};
 
@@ -58,15 +60,124 @@ impl LogicalProjectSet {
         }
     }
 
-    pub fn create(_input: PlanRef, _select_list: Vec<ExprImpl>) -> PlanRef {
-        todo!()
+    /// `create` will analyze select exprs with table functions and construct a plan.
+    ///
+    /// When table functions are used as arguments of a table function or a usual function, the
+    /// arguments will be put at a lower `ProjectSet` while the call will be put at a higher
+    /// `Project` or `ProjectSet`. The plan is like:
+    ///
+    /// ```text
+    /// LogicalProjectSet/LogicalProject -> LogicalProjectSet -> input
+    /// ```
+    ///
+    /// Otherwise it will be a simple `ProjectSet`.
+    pub fn create(input: PlanRef, select_list: Vec<ExprImpl>) -> PlanRef {
+        /// Rewrites a `FunctionCall` or `TableFunction` whose args contain table functions into one
+        /// using `InputRef` as args.
+        struct Rewriter {
+            collected: Vec<TableFunction>,
+            /// The nesting level of calls.
+            ///
+            /// f(x) has level 1 at x, and f(g(x)) has level 2 at x.
+            level: usize,
+            input_schema_len: usize,
+        }
+
+        impl ExprRewriter for Rewriter {
+            fn rewrite_table_function(&mut self, table_func: TableFunction) -> ExprImpl {
+                if self.level == 0 {
+                    // Top-level table function doesn't need to be collected.
+                    self.level += 1;
+
+                    let TableFunction {
+                        args,
+                        return_type,
+                        function_type,
+                    } = table_func;
+                    let args = args
+                        .into_iter()
+                        .map(|expr| self.rewrite_expr(expr))
+                        .collect();
+
+                    self.level -= 1;
+                    TableFunction {
+                        args,
+                        return_type,
+                        function_type,
+                    }
+                    .into()
+                } else {
+                    let input_ref = InputRef::new(
+                        self.input_schema_len + self.collected.len(),
+                        table_func.return_type(),
+                    );
+                    self.collected.push(table_func);
+                    input_ref.into()
+                }
+            }
+
+            fn rewrite_function_call(&mut self, func_call: FunctionCall) -> ExprImpl {
+                self.level += 1;
+                let (func_type, inputs, return_type) = func_call.decompose();
+                let inputs = inputs
+                    .into_iter()
+                    .map(|expr| self.rewrite_expr(expr))
+                    .collect();
+                self.level -= 1;
+                FunctionCall::new_unchecked(func_type, inputs, return_type).into()
+            }
+        }
+
+        let mut rewriter = Rewriter {
+            collected: vec![],
+            level: 0,
+            input_schema_len: input.schema().len(),
+        };
+        let select_list: Vec<_> = select_list
+            .into_iter()
+            .map(|e| rewriter.rewrite_expr(e))
+            .collect();
+
+        if rewriter.collected.is_empty() {
+            LogicalProjectSet::new(input, select_list).into()
+        } else {
+            let mut inner_select_list: Vec<_> = input
+                .schema()
+                .data_types()
+                .into_iter()
+                .enumerate()
+                .map(|(i, ty)| InputRef::new(i, ty).into())
+                .collect();
+            inner_select_list.extend(rewriter.collected.into_iter().map(|tf| tf.into()));
+            let inner = LogicalProjectSet::create(input, inner_select_list);
+
+            /// Increase all the input ref in the outer select list, because the inner project set
+            /// will output a hidden column at the beginning.
+            struct IncInputRef {}
+            impl ExprRewriter for IncInputRef {
+                fn rewrite_input_ref(&mut self, input_ref: InputRef) -> ExprImpl {
+                    InputRef::new(input_ref.index + 1, input_ref.data_type).into()
+                }
+            }
+            let mut rewriter = IncInputRef {};
+            let select_list: Vec<_> = select_list
+                .into_iter()
+                .map(|e| rewriter.rewrite_expr(e))
+                .collect();
+
+            if select_list.iter().any(|e| e.has_table_function()) {
+                LogicalProjectSet::new(inner, select_list).into()
+            } else {
+                LogicalProject::new(inner, select_list).into()
+            }
+        }
     }
 
     fn derive_schema(select_list: &[ExprImpl], input_schema: &Schema) -> Schema {
         let o2i = Self::o2i_col_mapping_inner(input_schema.len(), select_list);
-
         let mut fields = vec![Field::with_name(DataType::Int64, "projected_row_id")];
         fields.extend(select_list.iter().enumerate().map(|(idx, expr)| {
+            let idx = idx + 1;
             // Get field info from o2i.
             let (name, sub_fields, type_name) = match o2i.try_map(idx) {
                 Some(input_idx) => {

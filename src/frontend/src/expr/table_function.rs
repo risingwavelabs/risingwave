@@ -12,7 +12,6 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::assert_matches::assert_matches;
 use std::str::FromStr;
 
 use itertools::Itertools;
@@ -21,7 +20,7 @@ use risingwave_common::types::{unnested_list_type, DataType};
 use risingwave_pb::expr::table_function::Type;
 use risingwave_pb::expr::TableFunction as TableFunctionProst;
 
-use super::{Expr, ExprImpl, ExprRewriter, ExprType, Result};
+use super::{Expr, ExprImpl, ExprRewriter, Result};
 
 /// A table function takes a row as input and returns a table. It is also known as Set-Returning
 /// Function.
@@ -30,8 +29,8 @@ use super::{Expr, ExprImpl, ExprRewriter, ExprType, Result};
 /// and [`ProjectSetSelectItem`](risingwave_pb::expr::ProjectSetSelectItem).
 #[derive(Clone, Eq, PartialEq, Hash)]
 pub struct TableFunction {
-    pub(super) args: Vec<ExprImpl>,
-    pub(super) return_type: DataType,
+    pub args: Vec<ExprImpl>,
+    pub return_type: DataType,
     pub function_type: TableFunctionType,
 }
 
@@ -77,6 +76,9 @@ impl TableFunction {
     /// Create a `TableFunction` expr with the return type inferred from `func_type` and types of
     /// `inputs`.
     pub fn new(func_type: TableFunctionType, args: Vec<ExprImpl>) -> Result<Self> {
+        // TODO: refactor into sth like FunctionCall::new.
+        // Current implementation is copied from legacy code.
+
         match func_type {
             TableFunctionType::Generate => {
                 // generate_series ( start timestamp, stop timestamp, step interval ) or
@@ -121,25 +123,19 @@ impl TableFunction {
                 }
 
                 let expr = args.into_iter().next().unwrap();
-                if let ExprImpl::FunctionCall(ref func) = expr {
-                    if func.get_expr_type() == ExprType::Array {
-                        let list_type = func.return_type();
-                        assert_matches!(list_type, DataType::List { datatype: _ },);
-                        let data_type = unnested_list_type(list_type);
+                if matches!(expr.return_type(), DataType::List { datatype: _ }) {
+                    let data_type = unnested_list_type(expr.return_type());
 
-                        Ok(TableFunction {
-                            args: vec![expr],
-                            return_type: data_type,
-                            function_type: TableFunctionType::Unnest,
-                        })
-                    } else {
-                        Err(ErrorCode::BindError(
-                            "the expr function of unnest function should be array".to_string(),
-                        )
-                        .into())
-                    }
+                    Ok(TableFunction {
+                        args: vec![expr],
+                        return_type: data_type,
+                        function_type: TableFunctionType::Unnest,
+                    })
                 } else {
-                    unimplemented!()
+                    Err(ErrorCode::BindError(
+                        "the expr function of unnest function should be array".to_string(),
+                    )
+                    .into())
                 }
             }
         }
