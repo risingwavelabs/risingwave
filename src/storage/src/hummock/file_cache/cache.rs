@@ -157,7 +157,6 @@ where
         .await?;
         let store = Arc::new(store);
 
-        // TODO: Restore indices.
         let indices = Arc::new(LruCache::with_event_listeners(
             LRU_SHARD_BITS,
             options.capacity,
