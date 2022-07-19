@@ -64,28 +64,6 @@ impl Binder {
                     err = e;
                 }
             }
-            for LateralBindContext {
-                context,
-                is_visible,
-            } in lateral_contexts
-            {
-                if *is_visible {
-                    match context.get_column_binding_index(table_name, column_name) {
-                        Ok(index) => {
-                            let column = &context.columns[index];
-                            return Ok(CorrelatedInputRef::new(
-                                column.index,
-                                column.field.data_type.clone(),
-                                depth,
-                            )
-                            .into());
-                        }
-                        Err(e) => {
-                            err = e;
-                        }
-                    }
-                }
-            }
         }
         Err(err)
     }
