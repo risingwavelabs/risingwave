@@ -393,26 +393,6 @@ where
         }
     }
 
-    pub async fn create_source(&self, source: &Source) -> Result<NotificationVersion> {
-        let mut core = self.core.lock().await;
-        if !core.has_source(source) {
-            source.insert(self.env.meta_store()).await?;
-            core.add_source(source);
-
-            let version = self
-                .env
-                .notification_manager()
-                .notify_frontend(Operation::Add, Info::Source(source.to_owned()))
-                .await;
-
-            Ok(version)
-        } else {
-            Err(RwError::from(InternalError(
-                "source already exists".to_string(),
-            )))
-        }
-    }
-
     pub async fn update_table_mapping(
         &self,
         fragments: &Vec<TableFragments>,
