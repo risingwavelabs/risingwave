@@ -12,6 +12,8 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+#![feature(lint_reasons)]
+
 mod version_cmp;
 
 use risingwave_pb::hummock::SstableInfo;
@@ -21,6 +23,7 @@ pub mod compaction_group;
 pub mod key;
 pub mod key_range;
 pub mod prost_key_range;
+pub mod slice_transform;
 
 pub type HummockSSTableId = u64;
 pub type HummockRefCount = u64;
