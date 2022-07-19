@@ -38,8 +38,16 @@ message UpdateMutation {
     // Removed downstream actors.
     repeated uint32 removed_downstream_actor_id = 4;
   }
-  // Dispatcher updates for each actor.
+  message MergeUpdate {
+    // Added upstream actors.
+    repeated uint32 added_upstream_actor_id = 1;
+    // Removed upstream actors.
+    repeated uint32 removed_upstream_actor_id = 2;
+  }
+  // Dispatcher updates for each upstream actor.
   map<uint32, DispatcherUpdate> actor_dispatcher_update = 1;
+  // Merge updates for each downstream actor.
+  map<uint32, MergeUpdate> actor_merge_update = 2;
 }
 
 message SourceChangeSplitMutation {

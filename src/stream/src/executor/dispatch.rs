@@ -289,8 +289,8 @@ impl DispatchExecutorInner {
                     self.add_dispatchers(new_dispatchers)?;
                 }
             }
-            Mutation::Update(updates) => {
-                if let Some(update) = updates.get(&self.actor_id) {
+            Mutation::Update { dispatchers, .. } => {
+                if let Some(update) = dispatchers.get(&self.actor_id) {
                     self.pre_update_dispatcher(update)?;
                 }
             }
@@ -316,8 +316,8 @@ impl DispatchExecutorInner {
                     }
                 }
             }
-            Mutation::Update(updates) => {
-                if let Some(update) = updates.get(&self.actor_id) {
+            Mutation::Update { dispatchers, .. } => {
+                if let Some(update) = dispatchers.get(&self.actor_id) {
                     self.post_update_dispatcher(update)?;
                 }
             }
@@ -1111,7 +1111,10 @@ mod tests {
                 ..Default::default()
             }
         };
-        let b1 = Barrier::new_test_barrier(1).with_mutation(Mutation::Update(updates1));
+        let b1 = Barrier::new_test_barrier(1).with_mutation(Mutation::Update {
+            dispatchers: updates1,
+            merges: Default::default(),
+        });
         tx.send(Message::Barrier(b1)).await.unwrap();
         executor.next().await.unwrap().unwrap();
 

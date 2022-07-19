@@ -32,7 +32,7 @@ use risingwave_pb::data::Epoch as ProstEpoch;
 use risingwave_pb::stream_plan::add_mutation::Dispatchers;
 use risingwave_pb::stream_plan::barrier::Mutation as ProstMutation;
 use risingwave_pb::stream_plan::stream_message::StreamMessage;
-use risingwave_pb::stream_plan::update_mutation::DispatcherUpdate;
+use risingwave_pb::stream_plan::update_mutation::{DispatcherUpdate, MergeUpdate};
 use risingwave_pb::stream_plan::{
     AddMutation, Barrier as ProstBarrier, Dispatcher as ProstDispatcher, PauseMutation,
     ResumeMutation, SourceChangeSplitMutation, StopMutation, StreamMessage as ProstStreamMessage,
@@ -179,7 +179,10 @@ pub trait ExprFn = Fn(&DataChunk) -> Result<Bitmap> + Send + Sync + 'static;
 #[derive(Debug, Clone, PartialEq)]
 pub enum Mutation {
     Stop(HashSet<ActorId>),
-    Update(HashMap<ActorId, DispatcherUpdate>),
+    Update {
+        dispatchers: HashMap<ActorId, DispatcherUpdate>,
+        merges: HashMap<ActorId, MergeUpdate>,
+    },
     Add {
         adds: HashMap<ActorId, Vec<ProstDispatcher>>,
         // TODO: remove this and use `SourceChangesSplit` after we support multiple mutations.
@@ -306,8 +309,12 @@ impl Mutation {
             Mutation::Stop(actors) => ProstMutation::Stop(StopMutation {
                 actors: actors.iter().copied().collect::<Vec<_>>(),
             }),
-            Mutation::Update(updates) => ProstMutation::Update(UpdateMutation {
-                actor_dispatcher_update: updates.clone(),
+            Mutation::Update {
+                dispatchers: dispatcher,
+                merges: merge,
+            } => ProstMutation::Update(UpdateMutation {
+                actor_dispatcher_update: dispatcher.clone(),
+                actor_merge_update: merge.clone(),
             }),
             Mutation::Add { adds, .. } => ProstMutation::Add(AddMutation {
                 actor_dispatchers: adds
@@ -354,9 +361,10 @@ impl Mutation {
                 Mutation::Stop(HashSet::from_iter(stop.get_actors().clone()))
             }
 
-            ProstMutation::Update(update) => {
-                Mutation::Update(update.actor_dispatcher_update.clone())
-            }
+            ProstMutation::Update(update) => Mutation::Update {
+                dispatchers: update.actor_dispatcher_update.clone(),
+                merges: update.actor_merge_update.clone(),
+            },
 
             ProstMutation::Add(add) => Mutation::Add {
                 adds: add

@@ -15,7 +15,7 @@
 use std::pin::Pin;
 use std::task::{Context, Poll};
 
-use futures::{pin_mut, FutureExt, Stream, StreamExt};
+use futures::{Stream, StreamExt};
 use futures_async_stream::{for_await, try_stream};
 use madsim::time::Instant;
 use risingwave_common::catalog::Schema;
