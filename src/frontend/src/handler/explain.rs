@@ -12,6 +12,8 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+use std::sync::atomic::Ordering;
+
 use pgwire::pg_field_descriptor::{PgFieldDescriptor, TypeOid};
 use pgwire::pg_response::{PgResponse, StatementType};
 use pgwire::types::Row;
@@ -29,12 +31,12 @@ use crate::session::OptimizerContext;
 pub(super) fn handle_explain(
     context: OptimizerContext,
     stmt: Statement,
-    _verbose: bool,
+    verbose: bool,
 ) -> Result<PgResponse> {
     let session = context.session_ctx.clone();
+    context.explain_verbose.store(verbose, Ordering::Release);
     // bind, plan, optimize, and serialize here
     let mut planner = Planner::new(context.into());
-
     let plan = match stmt {
         Statement::CreateView {
             or_replace: false,
@@ -45,7 +47,7 @@ pub(super) fn handle_explain(
             ..
         } => {
             gen_create_mv_plan(
-                &*session,
+                &session,
                 planner.ctx(),
                 query,
                 name,
@@ -61,7 +63,7 @@ pub(super) fn handle_explain(
             ..
         } => {
             gen_create_table_plan(
-                &*session,
+                &session,
                 planner.ctx(),
                 name,
                 columns,
@@ -75,7 +77,7 @@ pub(super) fn handle_explain(
             table_name,
             columns,
             ..
-        } => gen_create_index_plan(&*session, planner.ctx(), name, table_name, columns)?.0,
+        } => gen_create_index_plan(&session, planner.ctx(), name, table_name, columns)?.0,
 
         stmt => {
             let bound = {

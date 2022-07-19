@@ -161,6 +161,7 @@ fn bench_nested_loop_join(c: &mut Criterion) {
         JoinType::RightOuter,
         JoinType::RightSemi,
         JoinType::RightAnti,
+        JoinType::FullOuter,
     ] {
         for chunk_size in &[32, 128, 512, 1024] {
             c.bench_with_input(

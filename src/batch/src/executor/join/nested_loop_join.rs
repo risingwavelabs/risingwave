@@ -94,7 +94,7 @@ impl NestedLoopJoinExecutor {
             JoinType::RightOuter => Self::do_right_outer_join,
             JoinType::RightSemi => Self::do_right_semi_anti_join::<false>,
             JoinType::RightAnti => Self::do_right_semi_anti_join::<true>,
-            JoinType::FullOuter => todo!(),
+            JoinType::FullOuter => Self::do_full_outer_join,
         };
 
         #[for_await]
@@ -424,6 +424,65 @@ impl NestedLoopJoinExecutor {
             }
         }
     }
+
+    #[try_stream(boxed, ok = DataChunk, error = RwError)]
+    async fn do_full_outer_join(
+        chunk_builder: &mut DataChunkBuilder,
+        left_data_types: Vec<DataType>,
+        join_expr: BoxedExpression,
+        left: Vec<DataChunk>,
+        right: BoxedExecutor,
+    ) {
+        let mut left_matched =
+            BitmapBuilder::zeroed(left.iter().map(|chunk| chunk.capacity()).sum());
+        let right_data_types = right.schema().data_types();
+        #[for_await]
+        for right_chunk in right.execute() {
+            let right_chunk = right_chunk?;
+            let mut right_matched = BitmapBuilder::zeroed(right_chunk.capacity()).finish();
+            for (left_row_idx, left_row) in left.iter().flat_map(|chunk| chunk.rows()).enumerate() {
+                let chunk = Self::concatenate_and_eval(
+                    join_expr.as_ref(),
+                    &left_data_types,
+                    left_row,
+                    &right_chunk,
+                )?;
+                if chunk.cardinality() > 0 {
+                    left_matched.set(left_row_idx, true);
+                    right_matched = &right_matched | chunk.visibility().unwrap();
+                    #[for_await]
+                    for spilled in Self::append_chunk(chunk_builder, chunk) {
+                        yield spilled?
+                    }
+                }
+            }
+            // Yield unmatched rows in the right table
+            for (right_row, _) in right_chunk
+                .rows()
+                .zip_eq(right_matched.iter())
+                .filter(|(_, matched)| !*matched)
+            {
+                let datum_refs = repeat_n(None, left_data_types.len()).chain(right_row.values());
+                if let Some(chunk) = chunk_builder.append_one_row_from_datum_refs(datum_refs)? {
+                    yield chunk
+                }
+            }
+        }
+        // Yield unmatched rows in the left table.
+        for (left_row, _) in left
+            .iter()
+            .flat_map(|chunk| chunk.rows())
+            .zip_eq(left_matched.finish().iter())
+            .filter(|(_, matched)| !*matched)
+        {
+            let datum_refs = left_row
+                .values()
+                .chain(repeat_n(None, right_data_types.len()));
+            if let Some(chunk) = chunk_builder.append_one_row_from_datum_refs(datum_refs)? {
+                yield chunk
+            }
+        }
+    }
 }
 #[cfg(test)]
 mod tests {
@@ -690,6 +749,33 @@ mod tests {
               30 9.6
              100 .
              200 8.18",
+        );
+
+        test_fixture.do_test(expected_chunk).await;
+    }
+
+    #[tokio::test]
+    async fn test_full_outer_join() {
+        let test_fixture = TestFixture::with_join_type(JoinType::FullOuter);
+
+        let expected_chunk = DataChunk::from_pretty(
+            "i f   i F
+             2 8.4 2 6.1
+             3 3.9 3 8.9
+             3 6.6 3 8.9
+             6 5.5 6 3.4
+             6 5.6 6 3.4
+             8 7.0 8 3.5
+             . .   9 7.5
+             . .   10 .
+             . .   11 8
+             . .   12 .
+             . .   20 5.7
+             . .   30 9.6
+             . .   100 .
+             . .   200 8.18
+             1 6.1 . .
+             4 0.7 . .",
         );
 
         test_fixture.do_test(expected_chunk).await;

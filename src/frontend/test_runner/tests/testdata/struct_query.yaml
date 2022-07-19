@@ -6,7 +6,7 @@
     BatchExchange { order: [], dist: Single }
       BatchScan { table: t, columns: [country] }
   stream_plan: |
-    StreamMaterialize { columns: [country, _row_id(hidden)], pk_columns: [_row_id] }
+    StreamMaterialize { columns: [country, t._row_id(hidden)], pk_columns: [t._row_id] }
       StreamTableScan { table: t, columns: [country, _row_id], pk_indices: [1] }
   create_source:
     row_format: protobuf

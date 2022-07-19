@@ -17,3 +17,26 @@ query T
 select TIME '19:46:41' >= TIME '11:33:43';
 ----
 t
+
+statement ok
+create table t (v1 time, v2 timestamp, v3 date);
+
+statement ok
+insert into t values ('20:55:12', '2022-07-12 20:55:12', '2022-07-12');
+
+statement ok
+insert into t values ('10:13:36.07'::TIME, '2019-10-08 10:13:36.07'::TIMESTAMP, '2019-10-08'::DATE);
+
+query TTT rowsort
+select * from t;
+----
+10:13:36.070 2019-10-08 10:13:36.070 2019-10-08
+20:55:12 2022-07-12 20:55:12 2022-07-12
+
+query T
+select v3 from t where v3 > '2022-01-01'::DATE;
+----
+2022-07-12
+
+statement ok
+drop table t;

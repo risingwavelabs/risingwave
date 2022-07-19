@@ -34,7 +34,8 @@ impl<'a, R: Rng> SqlGenerator<'a, R> {
     /// A relation specified in the FROM clause.
     pub(crate) fn gen_from_relation(&mut self) -> TableWithJoins {
         match self.rng.gen_range(0..=9) {
-            0..=9 => self.gen_simple_table(),
+            0..=8 => self.gen_simple_table(),
+            9..=9 => self.gen_time_window_func(),
             // TODO: Enable after resolving: <https://github.com/singularity-data/risingwave/issues/2771>.
             10..=10 => self.gen_equijoin_clause(),
             // TODO: Currently `gen_subquery` will cause panic due to some wrong assertions.
@@ -56,7 +57,7 @@ impl<'a, R: Rng> SqlGenerator<'a, R> {
         let alias = format!("t{}", self.bound_relations.len());
         let mut table = self.tables.choose(&mut self.rng).unwrap().clone();
         let table_factor = TableFactor::Table {
-            name: ObjectName(vec![Ident::new(table.name.clone())]),
+            name: ObjectName(vec![Ident::new(&table.name)]),
             alias: Some(TableAlias {
                 name: Ident::new(alias.clone()),
                 columns: vec![],
@@ -65,7 +66,7 @@ impl<'a, R: Rng> SqlGenerator<'a, R> {
         };
         table.name = alias; // Rename the table.
         let columns = table.get_qualified_columns();
-        self.bound_relations.push(table);
+        self.add_relation_to_context(table);
         (table_factor, columns)
     }
 
@@ -127,7 +128,7 @@ impl<'a, R: Rng> SqlGenerator<'a, R> {
             },
             joins: vec![],
         };
-        self.bound_relations.push(table);
+        self.add_relation_to_context(table);
         relation
     }
 }

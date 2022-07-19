@@ -258,7 +258,7 @@ mod stream_source;
 mod stream_table_scan;
 mod stream_topn;
 
-mod utils;
+pub mod utils;
 
 pub use batch_delete::BatchDelete;
 pub use batch_exchange::BatchExchange;
@@ -279,7 +279,7 @@ pub use batch_table_function::BatchTableFunction;
 pub use batch_topn::BatchTopN;
 pub use batch_update::BatchUpdate;
 pub use batch_values::BatchValues;
-pub use logical_agg::{LogicalAgg, PlanAggCall};
+pub use logical_agg::{LogicalAgg, PlanAggCall, PlanAggCallVerboseDisplay};
 pub use logical_apply::LogicalApply;
 pub use logical_delete::LogicalDelete;
 pub use logical_expand::LogicalExpand;

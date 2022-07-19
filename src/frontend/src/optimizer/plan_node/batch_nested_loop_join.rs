@@ -14,6 +14,7 @@
 
 use std::fmt;
 
+use risingwave_common::catalog::Schema;
 use risingwave_common::error::Result;
 use risingwave_pb::batch_plan::plan_node::NodeBody;
 use risingwave_pb::batch_plan::NestedLoopJoinNode;
@@ -22,6 +23,7 @@ use super::{LogicalJoin, PlanBase, PlanRef, PlanTreeNodeBinary, ToBatchProst, To
 use crate::expr::{Expr, ExprImpl};
 use crate::optimizer::plan_node::ToLocalBatch;
 use crate::optimizer::property::{Distribution, Order, RequiredDist};
+use crate::utils::ConditionVerboseDisplay;
 
 /// `BatchNestedLoopJoin` implements [`super::LogicalJoin`] by checking the join condition
 /// against all pairs of rows from inner & outer side within 2 layers of loops.
@@ -52,11 +54,25 @@ impl BatchNestedLoopJoin {
 
 impl fmt::Display for BatchNestedLoopJoin {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        let verbose = self.base.ctx.is_explain_verbose();
         write!(
             f,
             "BatchNestedLoopJoin {{ type: {:?}, predicate: {}, output_indices: {} }}",
             self.logical.join_type(),
-            self.logical.on(),
+            if verbose {
+                let mut concat_schema = self.left().schema().fields.clone();
+                concat_schema.extend(self.right().schema().fields.clone());
+                let concat_schema = Schema::new(concat_schema);
+                format!(
+                    "{}",
+                    ConditionVerboseDisplay {
+                        condition: self.logical.on(),
+                        input_schema: &concat_schema
+                    }
+                )
+            } else {
+                format!("{}", self.logical.on())
+            },
             if self
                 .logical
                 .output_indices()

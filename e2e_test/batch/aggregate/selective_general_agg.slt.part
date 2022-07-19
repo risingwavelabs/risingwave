@@ -1,0 +1,29 @@
+statement ok
+SET RW_IMPLICIT_FLUSH TO true;
+
+statement ok
+create table t(v1 int, v2 int)
+
+statement ok
+insert into t values (2, 300), (1, 200), (3, 200), (3, 500), (2, 100), (1, 500), (6, 300)
+
+query II
+select min(v1) filter (where v1 * 100 >= v2), min(v1) filter (where v1 * 100 < v2) from t
+----
+2 1
+
+query II
+select v2, sum(v1) filter(where v1 >= 2) from t group by v2 order by v2
+----
+100 2
+200 3
+300 8
+500 3
+
+query I
+with sub(a, b) as (select sum(v1), count(v2) filter (where v1 > 5) from t) select b from sub
+----
+1
+
+statement ok
+drop table t

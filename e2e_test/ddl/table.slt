@@ -65,3 +65,44 @@ create table st (v1 int, v2 struct<v1 int, v2 struct<v1 int, v2 int>>);
 
 statement ok
 drop table st
+
+# We test the case sensitivity of table name and column name.
+statement ok
+create table t1 (v1 int);
+
+statement ok
+drop table T1;
+
+statement ok
+create table T1 (v1 int);
+
+statement ok
+drop table t1;
+
+statement ok
+create table "T1" (v1 int);
+
+# Since we have not really bound the columns in the insert statement
+# this test case cannot be enabled.
+# statement error
+# insert into "T1" ("V1") values (1);
+
+statement error
+drop table t1;
+
+statement error
+drop table T1;
+
+statement ok
+drop table "T1";
+
+statement ok
+create table "T2" ("V1" int);
+
+# Since we have not really bound the columns in the insert statement
+# this test case cannot be enabled.
+# statement error
+# insert into "T2" (V1) values (1);
+
+statement ok
+insert into "T2" ("V1") values (1);
