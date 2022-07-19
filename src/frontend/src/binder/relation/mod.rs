@@ -246,7 +246,7 @@ impl Binder {
                     )
                     .into())
                 } else {
-                    // Non-lateral subqueries to not have access to the lateral context.
+                    // Non-lateral subqueries to not have access to the join-tree context.
                     self.push_lateral_context();
                     let bound_subquery = self.bind_subquery_relation(*subquery, alias)?;
                     self.pop_and_merge_lateral_context()?;

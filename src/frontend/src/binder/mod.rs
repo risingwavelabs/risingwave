@@ -64,7 +64,7 @@ pub struct Binder {
     /// A stack holding contexts of left-lateral `TableFactor`s.
     ///
     /// We need a separate stack as `CorrelatedInputRef` depth is
-    /// determined by the upper subquery context depth, not the table context stack depth.
+    /// determined by the upper subquery context depth, not the lateral context stack depth.
     lateral_contexts: Vec<LateralBindContext>,
 
     next_subquery_id: usize,

@@ -41,7 +41,10 @@ impl Binder {
             return Ok(InputRef::new(column.index, column.field.data_type.clone()).into());
         }
 
-        // Try to find a correlated column in `upper_contexts`, starting from the innermost context.
+        let mut outside_contexts = vec![];
+
+        // Try to find a correlated column in `subquery_contexts`, and `lateral_contexts` starting 
+        // from the innermost context.
         let mut err = ErrorCode::ItemNotFound(format!("Invalid column: {}", column_name)).into();
         for (i, (context, lateral_contexts)) in
             self.upper_subquery_contexts.iter().rev().enumerate()
@@ -51,7 +54,7 @@ impl Binder {
             match context.get_column_binding_index(table_name, column_name) {
                 Ok(index) => {
                     let column = &context.columns[index];
-                    return Ok(CorrelatedInputRef::new(
+                    outside_contexts.push(CorrelatedInputRef::new(
                         column.index,
                         column.field.data_type.clone(),
                         depth,
@@ -71,7 +74,7 @@ impl Binder {
                     match context.get_column_binding_index(table_name, column_name) {
                         Ok(index) => {
                             let column = &context.columns[index];
-                            return Ok(CorrelatedInputRef::new(
+                            outside_contexts.push(CorrelatedInputRef::new(
                                 column.index,
                                 column.field.data_type.clone(),
                                 depth,
@@ -85,6 +88,12 @@ impl Binder {
                 }
             }
         }
-        Err(err)
+        if outside_contexts.len() == 1 {
+            Ok(outside_contexts[0])
+        } else if outside_contexts.len() > 1 {
+            Err(ErrorCode::InternalError("Ambiguous column name".into()).into())
+        } else {
+            Err(err)
+        }
     }
 }
