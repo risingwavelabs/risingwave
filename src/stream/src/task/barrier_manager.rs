@@ -12,8 +12,9 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use prometheus::HistogramTimer;
 use std::collections::{HashMap, HashSet};
+
+use prometheus::HistogramTimer;
 use risingwave_common::error::Result;
 use risingwave_pb::stream_service::barrier_complete_response::CreateMviewProgress as ProstCreateMviewProgress;
 use tokio::sync::mpsc::UnboundedSender;
