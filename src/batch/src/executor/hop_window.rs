@@ -25,6 +25,7 @@ use risingwave_common::error::{Result, RwError};
 use risingwave_common::types::{DataType, IntervalUnit, ScalarImpl};
 use risingwave_expr::expr::expr_binary_nonnull::new_binary_expr;
 use risingwave_expr::expr::{Expression, InputRefExpression, LiteralExpression};
+use risingwave_expr::ExprError;
 use risingwave_pb::batch_plan::plan_node::NodeBody;
 use risingwave_pb::expr::expr_node;
 
@@ -144,11 +145,12 @@ impl HopWindowExecutor {
         let units = window_size
             .exact_div(&window_slide)
             .and_then(|x| NonZeroUsize::new(usize::try_from(x).ok()?))
-            .ok_or_else(|| {
-                BatchError::Internal(anyhow!(format!(
+            .ok_or_else(|| ExprError::InvalidParam {
+                name: "",
+                reason: format!(
                     "window_size {} cannot be divided by window_slide {}",
                     window_size, window_slide
-                )))
+                ),
             })?
             .get();
 
