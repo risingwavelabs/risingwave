@@ -161,7 +161,8 @@ impl CompactStatus {
             return false;
         }
 
-        if task.input_ssts[0].level_idx == task.input_ssts[0].level_idx
+        // it may be a manual compaction task
+        if task.input_ssts[0].level_idx == task.input_ssts[1].level_idx
             && task.input_ssts[0].level_idx > 0
         {
             return false;
