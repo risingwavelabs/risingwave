@@ -31,7 +31,7 @@ impl<'a, R: Rng> SqlGenerator<'a, R> {
         (current_bound_columns, current_bound_relations)
     }
 
-    pub(crate) fn restore_ctxt(&mut self, (old_cols, old_rels): Context) {
+    pub(crate) fn restore_context(&mut self, (old_cols, old_rels): Context) {
         self.bound_relations = old_rels;
         self.bound_columns = old_cols;
     }
