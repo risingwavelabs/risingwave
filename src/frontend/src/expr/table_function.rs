@@ -12,12 +12,16 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+use std::assert_matches::assert_matches;
+use std::str::FromStr;
+
 use itertools::Itertools;
-use risingwave_common::types::DataType;
+use risingwave_common::error::ErrorCode;
+use risingwave_common::types::{unnested_list_type, DataType};
 use risingwave_pb::expr::table_function::Type;
 use risingwave_pb::expr::TableFunction as TableFunctionProst;
 
-use super::{Expr, ExprImpl, ExprRewriter};
+use super::{Expr, ExprImpl, ExprRewriter, ExprType, Result};
 
 /// A table function takes a row as input and returns a table. It is also known as Set-Returning
 /// Function.
@@ -26,9 +30,9 @@ use super::{Expr, ExprImpl, ExprRewriter};
 /// and [`ProjectSetSelectItem`](risingwave_pb::expr::ProjectSetSelectItem).
 #[derive(Clone, Eq, PartialEq, Hash)]
 pub struct TableFunction {
-    pub(crate) args: Vec<ExprImpl>,
-    pub(crate) return_type: DataType,
-    pub(crate) function_type: TableFunctionType,
+    pub(super) args: Vec<ExprImpl>,
+    pub(super) return_type: DataType,
+    pub function_type: TableFunctionType,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
@@ -55,7 +59,92 @@ impl TableFunctionType {
     }
 }
 
+impl FromStr for TableFunctionType {
+    type Err = ();
+
+    fn from_str(s: &str) -> std::result::Result<Self, Self::Err> {
+        if s.eq_ignore_ascii_case("generate_series") {
+            Ok(TableFunctionType::Generate)
+        } else if s.eq_ignore_ascii_case("unnest") {
+            Ok(TableFunctionType::Unnest)
+        } else {
+            Err(())
+        }
+    }
+}
+
 impl TableFunction {
+    /// Create a `TableFunction` expr with the return type inferred from `func_type` and types of
+    /// `inputs`.
+    pub fn new(func_type: TableFunctionType, args: Vec<ExprImpl>) -> Result<Self> {
+        match func_type {
+            TableFunctionType::Generate => {
+                // generate_series ( start timestamp, stop timestamp, step interval ) or
+                // generate_series ( start i32, stop i32, step i32 )
+
+                fn type_check(exprs: &[ExprImpl]) -> Result<DataType> {
+                    let mut exprs = exprs.iter();
+                    let (start, stop, step) = exprs.next_tuple().unwrap();
+                    match (start.return_type(), stop.return_type(), step.return_type()) {
+                        (DataType::Int32, DataType::Int32, DataType::Int32) => Ok(DataType::Int32),
+                        (DataType::Timestamp, DataType::Timestamp, DataType::Interval) => {
+                            Ok(DataType::Timestamp)
+                        }
+                        _ => Err(ErrorCode::BindError(
+                            "Invalid arguments for Generate series function".to_string(),
+                        )
+                        .into()),
+                    }
+                }
+
+                if args.len() != 3 {
+                    return Err(ErrorCode::BindError(
+                        "the length of args of generate series function should be 3".to_string(),
+                    )
+                    .into());
+                }
+
+                let data_type = type_check(&args)?;
+
+                Ok(TableFunction {
+                    args,
+                    return_type: data_type,
+                    function_type: TableFunctionType::Generate,
+                })
+            }
+            TableFunctionType::Unnest => {
+                if args.len() != 1 {
+                    return Err(ErrorCode::BindError(
+                        "the length of args of unnest function should be 1".to_string(),
+                    )
+                    .into());
+                }
+
+                let expr = args.into_iter().next().unwrap();
+                if let ExprImpl::FunctionCall(ref func) = expr {
+                    if func.get_expr_type() == ExprType::Array {
+                        let list_type = func.return_type();
+                        assert_matches!(list_type, DataType::List { datatype: _ },);
+                        let data_type = unnested_list_type(list_type);
+
+                        Ok(TableFunction {
+                            args: vec![expr],
+                            return_type: data_type,
+                            function_type: TableFunctionType::Unnest,
+                        })
+                    } else {
+                        Err(ErrorCode::BindError(
+                            "the expr function of unnest function should be array".to_string(),
+                        )
+                        .into())
+                    }
+                } else {
+                    unimplemented!()
+                }
+            }
+        }
+    }
+
     pub fn to_protobuf(&self) -> TableFunctionProst {
         TableFunctionProst {
             function_type: self.function_type.to_protobuf() as i32,

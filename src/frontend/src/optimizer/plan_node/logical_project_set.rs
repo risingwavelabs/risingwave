@@ -27,7 +27,7 @@ use crate::utils::{ColIndexMapping, Condition};
 
 /// `LogicalProjectSet` projects one row multiple times according to `select_list`.
 ///
-/// Different from `Project`, it supports [`TableFunction`](crate::binder::BoundTableFunction)s.
+/// Different from `Project`, it supports [`TableFunction`](crate::expr::TableFunction)s.
 /// See also [`ProjectSetSelectItem`](risingwave_pb::expr::ProjectSetSelectItem) for examples.
 ///
 /// To have a pk, it has a hidden column `projected_row_id` at the beginning. The implementation of
@@ -56,6 +56,10 @@ impl LogicalProjectSet {
             select_list,
             input,
         }
+    }
+
+    pub fn create(_input: PlanRef, _select_list: Vec<ExprImpl>) -> PlanRef {
+        todo!()
     }
 
     fn derive_schema(select_list: &[ExprImpl], input_schema: &Schema) -> Schema {

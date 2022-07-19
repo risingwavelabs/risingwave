@@ -229,38 +229,24 @@ mod tests {
         let fields = &proj_executor.schema().fields;
         assert_eq!(fields[0].data_type, DataType::Int32);
 
-        let expected = vec![
-            DataChunk::from_pretty(
-                "i     i     i
-                 1     1     2
-                 1     1     2
-                 1     .     2",
-            ),
-            DataChunk::from_pretty(
-                "i     i     i
-                 2     1     2
-                 2     1     2
-                 2     .     2",
-            ),
-            DataChunk::from_pretty(
-                "i     i     i
-                 33333 1     2
-                 33333 1     2
-                 33333 .     2",
-            ),
-            DataChunk::from_pretty(
-                "i     i     i
-                 4     1     2
-                 4     1     2
-                 4     .     2",
-            ),
-            DataChunk::from_pretty(
-                "i     i     i
-                 5     1     2
-                 5     1     2
-                 5     .     2",
-            ),
-        ];
+        let expected = vec![DataChunk::from_pretty(
+            "I i     i i
+             0 1     1 2
+             1 1     1 2
+             2 1     . 2
+             0 2     1 2
+             1 2     1 2
+             2 2     . 2
+             0 33333 1 2
+             1 33333 1 2
+             2 33333 . 2
+             0 4     1 2
+             1 4     1 2
+             2 4     . 2
+             0 5     1 2
+             1 5     1 2
+             2 5     . 2",
+        )];
 
         #[for_await]
         for (i, result_chunk) in proj_executor.execute().enumerate() {

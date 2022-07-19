@@ -13,6 +13,7 @@
 // limitations under the License.
 
 use std::iter::once;
+use std::str::FromStr;
 
 use itertools::Itertools;
 use risingwave_common::error::{ErrorCode, Result};
@@ -24,6 +25,7 @@ use crate::binder::bind_context::Clause;
 use crate::binder::Binder;
 use crate::expr::{
     AggCall, AggOrderBy, AggOrderByExpr, Expr, ExprImpl, ExprType, FunctionCall, Literal,
+    TableFunction, TableFunctionType,
 };
 use crate::optimizer::property::Direction;
 use crate::utils::Condition;
@@ -121,6 +123,11 @@ impl Binder {
                 )
                 )
                 .into());
+            }
+            let table_function_type = TableFunctionType::from_str(function_name.as_str());
+            if let Ok(function_type) = table_function_type {
+                self.ensure_table_function_allowed()?;
+                return Ok(TableFunction::new(function_type, inputs)?.into());
             }
             let function_type = match function_name.as_str() {
                 // comparison
@@ -253,6 +260,19 @@ impl Binder {
             if clause == Clause::Values || clause == Clause::Where {
                 return Err(ErrorCode::InvalidInputSyntax(format!(
                     "aggregate functions are not allowed in {}",
+                    clause
+                ))
+                .into());
+            }
+        }
+        Ok(())
+    }
+
+    fn ensure_table_function_allowed(&self) -> Result<()> {
+        if let Some(clause) = self.context.clause {
+            if clause == Clause::Values || clause == Clause::Where {
+                return Err(ErrorCode::InvalidInputSyntax(format!(
+                    "table functions are not allowed in {}",
                     clause
                 ))
                 .into());
