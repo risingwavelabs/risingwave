@@ -59,7 +59,7 @@ impl HummockServiceOpts {
                 url
             }
             Err(_) => {
-                const MESSAGE: &'static str = "env variable `RW_HUMMOCK_URL` not found.
+                const MESSAGE: &str = "env variable `RW_HUMMOCK_URL` not found.
 
 For `./risedev d` use cases, please do the following:
 * use `./risedev d for-ctl` to start the cluster.
