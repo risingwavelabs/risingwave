@@ -21,8 +21,8 @@ use crate::optimizer::PlanRef;
 use crate::utils::ColIndexMapping;
 
 /// Push `LogicalApply` down `LogicalProject`.
-pub struct ApplyProj {}
-impl Rule for ApplyProj {
+pub struct ApplyProjRule {}
+impl Rule for ApplyProjRule {
     fn apply(&self, plan: PlanRef) -> Option<PlanRef> {
         let apply = plan.as_logical_apply()?;
         assert_eq!(apply.join_type(), JoinType::Inner);
@@ -57,8 +57,8 @@ impl Rule for ApplyProj {
     }
 }
 
-impl ApplyProj {
+impl ApplyProjRule {
     pub fn create() -> BoxedRule {
-        Box::new(ApplyProj {})
+        Box::new(ApplyProjRule {})
     }
 }

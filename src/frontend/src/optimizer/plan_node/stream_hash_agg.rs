@@ -15,13 +15,11 @@
 use std::fmt;
 
 use itertools::Itertools;
-use risingwave_common::catalog::{DatabaseId, FieldVerboseDisplay, SchemaId};
+use risingwave_common::catalog::{DatabaseId, SchemaId};
 use risingwave_pb::stream_plan::stream_node::NodeBody as ProstStreamNode;
 
 use super::logical_agg::PlanAggCall;
 use super::{LogicalAgg, PlanBase, PlanRef, PlanTreeNodeUnary, ToStreamProst};
-use crate::expr::InputRefDisplay;
-use crate::optimizer::plan_node::PlanAggCallVerboseDisplay;
 use crate::optimizer::property::Distribution;
 
 #[derive(Debug, Clone)]
@@ -54,39 +52,15 @@ impl StreamHashAgg {
     pub fn group_key(&self) -> &[usize] {
         self.logical.group_key()
     }
-
-    pub fn agg_calls_verbose_display(&self) -> Vec<PlanAggCallVerboseDisplay> {
-        self.logical.agg_calls_verbose_display()
-    }
-
-    pub fn group_key_display(&self) -> Vec<InputRefDisplay> {
-        self.logical.group_key_display()
-    }
-
-    pub fn group_key_verbose_display(&self) -> Vec<FieldVerboseDisplay> {
-        self.logical.group_key_verbose_display()
-    }
 }
 
 impl fmt::Display for StreamHashAgg {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-        let mut builder = if self.input().append_only() {
-            f.debug_struct("StreamAppendOnlyHashAgg")
+        if self.input().append_only() {
+            self.logical.fmt_with_name(f, "StreamAppendOnlyHashAgg")
         } else {
-            f.debug_struct("StreamHashAgg")
-        };
-
-        let verbose = self.base.ctx.is_explain_verbose();
-        if verbose {
-            builder
-                .field("group_key", &self.group_key_verbose_display())
-                .field("aggs", &self.agg_calls_verbose_display());
-        } else {
-            builder
-                .field("group_key", &self.group_key_display())
-                .field("aggs", &self.agg_calls());
+            self.logical.fmt_with_name(f, "StreamHashAgg")
         }
-        builder.finish()
     }
 }
 
