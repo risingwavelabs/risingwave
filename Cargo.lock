@@ -2084,6 +2084,7 @@ checksum = "31672b7011be2c4f7456c4ddbcb40e7e9a4a9fad8efe49a6ebaf5f307d0109c0"
 dependencies = [
  "base64",
  "byteorder",
+ "crossbeam-channel",
  "flate2",
  "nom 7.1.1",
  "num-traits",
@@ -4117,16 +4118,21 @@ dependencies = [
 name = "risingwave_bench"
 version = "0.1.10"
 dependencies = [
+ "async-trait",
  "bytes",
  "bytesize",
  "clap 3.2.8",
  "env_logger",
  "futures",
+ "hdrhistogram",
  "itertools",
+ "libc",
  "log",
  "madsim",
  "madsim-tokio",
  "moka",
+ "nix",
+ "parking_lot",
  "prometheus",
  "rand 0.8.5",
  "risingwave_common",
@@ -6460,6 +6466,7 @@ dependencies = [
  "futures-sink",
  "futures-task",
  "futures-util",
+ "hdrhistogram",
  "hyper",
  "indexmap",
  "isahc",
