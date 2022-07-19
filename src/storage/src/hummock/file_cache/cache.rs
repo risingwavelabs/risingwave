@@ -27,7 +27,7 @@ use super::error::Result;
 use super::filter::Filter;
 use super::meta::SlotId;
 use super::store::{Store, StoreOptions, StoreRef};
-use super::LRU_SHARD_BITS;
+use super::{utils, LRU_SHARD_BITS};
 
 pub struct FileCacheOptions {
     pub dir: String,
@@ -93,7 +93,12 @@ where
 
                 for ((key, value), slot) in batch.into_iter().zip_eq(slots.into_iter()) {
                     let hash = self.hash_builder.hash_one(&key);
-                    self.indices.insert(key, hash, value.len(), slot);
+                    self.indices.insert(
+                        key,
+                        hash,
+                        utils::align_up(self.store.block_size(), value.len()),
+                        slot,
+                    );
                     bytes += value.len();
                 }
 
@@ -153,10 +158,12 @@ where
         let store = Arc::new(store);
 
         // TODO: Restore indices.
-        let indices =
-            LruCache::with_event_listeners(LRU_SHARD_BITS, options.capacity, vec![store.clone()]);
-        store.restore(&indices).await?;
-        let indices = Arc::new(indices);
+        let indices = Arc::new(LruCache::with_event_listeners(
+            LRU_SHARD_BITS,
+            options.capacity,
+            vec![store.clone()],
+        ));
+        store.restore(&indices, &hash_builder)?;
 
         let buffer = TwoLevelBuffer::new(buffer_capacity);
         let buffer_flusher_notifier = Arc::new(Notify::new());
@@ -232,6 +239,7 @@ where
 #[cfg(test)]
 mod tests {
 
+    use std::collections::HashMap;
     use std::path::Path;
 
     use super::super::test_utils::{key, TestCacheKey};
@@ -389,6 +397,40 @@ mod tests {
             for i in l * SHARDSU64..(l + 1) * SHARDSU64 {
                 assert_eq!(cache.get(&key(i)).await.unwrap(), Some(vec![b'x'; BS]));
             }
+        }
+    }
+
+    #[tokio::test]
+    async fn test_recovery() {
+        let dir = tempdir();
+
+        let holder = Arc::new(FlushHolder::default());
+        let cache = create_file_cache_manager_for_test(dir.path(), vec![holder.clone()]).await;
+
+        for l in 0..LOOPS as u64 {
+            for i in l * SHARDSU64..(l + 1) * SHARDSU64 {
+                cache.insert(key(i), vec![b'x'; BS]).unwrap();
+                assert_eq!(cache.get(&key(i)).await.unwrap(), Some(vec![b'x'; BS]));
+            }
+            holder.trigger();
+            holder.wait().await;
+            cache.buffer_flusher_notifier.notify_one();
+            holder.trigger();
+            holder.wait().await;
+        }
+
+        let mut map = HashMap::new();
+        for l in 0..LOOPS as u64 {
+            for i in l * SHARDSU64..(l + 1) * SHARDSU64 {
+                map.insert(key(i), cache.get(&key(i)).await.unwrap());
+            }
+        }
+
+        drop(cache);
+
+        let cache = create_file_cache_manager_for_test(dir.path(), vec![holder.clone()]).await;
+        for (key, slot) in map {
+            assert_eq!(cache.get(&key).await.unwrap(), slot);
         }
     }
 }

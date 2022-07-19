@@ -196,6 +196,11 @@ where
             &self.buffer[Self::slot_info_len() * slot
                 ..Self::slot_info_len() * slot + BlockLoc::encoded_len()],
         );
+
+        // Set slot len = 0 to invalidate slot.
+        (&mut self.buffer[slot * Self::slot_info_len() + 4..slot * Self::slot_info_len() + 8])
+            .put_u32(0);
+
         Some(bloc)
     }
 
@@ -223,6 +228,10 @@ where
 
     pub fn size(&self) -> usize {
         self.size
+    }
+
+    pub fn slots(&self) -> usize {
+        self.size / Self::slot_info_len()
     }
 
     #[inline(always)]
