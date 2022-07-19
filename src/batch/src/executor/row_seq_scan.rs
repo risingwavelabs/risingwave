@@ -26,7 +26,9 @@ use risingwave_common::util::sort_util::OrderType;
 use risingwave_pb::batch_plan::plan_node::NodeBody;
 use risingwave_pb::batch_plan::{scan_range, ScanRange};
 use risingwave_pb::plan_common::{CellBasedTableDesc, OrderType as ProstOrderType};
-use risingwave_storage::table::storage_table::{BatchDedupPkIter, StorageTable, StorageTableIter};
+use risingwave_storage::table::storage_table::{
+    BatchDedupPkIter, CellBasedRowSerde, StorageTable, StorageTableIter,
+};
 use risingwave_storage::table::{Distribution, TableIter};
 use risingwave_storage::{dispatch_state_store, Keyspace, StateStore, StateStoreImpl};
 
@@ -46,8 +48,8 @@ pub struct RowSeqScanExecutor<S: StateStore> {
 }
 
 pub enum ScanType<S: StateStore> {
-    TableScan(BatchDedupPkIter<S>),
-    RangeScan(StorageTableIter<S>),
+    TableScan(BatchDedupPkIter<S, CellBasedRowSerde>),
+    RangeScan(StorageTableIter<S, CellBasedRowSerde>),
     PointGet(Option<Row>),
 }
 

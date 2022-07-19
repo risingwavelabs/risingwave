@@ -37,9 +37,8 @@ use risingwave_hummock_sdk::key::{end_bound_of_prefix, next_key, prefixed_range,
 use super::mem_table::RowOp;
 use super::{Distribution, TableIter};
 use crate::encoding::cell_based_encoding_util::{serialize_pk, serialize_pk_and_column_id};
-use crate::encoding::cell_based_row_deserializer::GeneralCellBasedRowDeserializer;
+use crate::encoding::cell_based_row_deserializer::CellBasedRowDeserializer;
 use crate::encoding::cell_based_row_serializer::CellBasedRowSerializer;
-use crate::encoding::dedup_pk_cell_based_row_serializer::DedupPkCellBasedRowSerializer;
 use crate::encoding::row_based_deserializer::RowBasedDeserializer;
 use crate::encoding::row_based_serializer::RowBasedSerializer;
 use crate::encoding::{ColumnDescMapping, Decoding, Encoding, RowSerde};
@@ -60,14 +59,25 @@ pub const READ_WRITE: AccessType = true;
 /// For tables without distribution (singleton), the `DEFAULT_VNODE` is encoded.
 pub const DEFAULT_VNODE: VirtualNode = 0;
 
-pub type DedupPkStorageTable<S, const T: AccessType> =
-    StorageTableBase<S, DedupPkCellBasedRowSerializer, T>;
-
 /// [`StorageTable`] is the interface accessing relational data in KV(`StateStore`) with encoding
 /// format: [keyspace | pk | `column_id` (4B)] -> value.
 /// if the key of the column id does not exist, it will be Null in the relation
-pub type StorageTable<S, const T: AccessType> = StorageTableBase<S, CellBasedRowSerializer, T>;
-pub type RowBasedStorageTable<S, const T: AccessType> = StorageTableBase<S, RowBasedSerializer, T>;
+pub type StorageTable<S, const T: AccessType> = StorageTableBase<S, CellBasedRowSerde, T>;
+#[derive(Clone)]
+pub struct CellBasedRowSerde;
+
+impl RowSerde for CellBasedRowSerde {
+    type Deserializer = CellBasedRowDeserializer;
+    type Serializer = CellBasedRowSerializer;
+}
+
+#[derive(Clone)]
+pub struct RowBasedSerde;
+
+impl RowSerde for RowBasedSerde {
+    type Deserializer = RowBasedDeserializer;
+    type Serializer = RowBasedSerializer;
+}
 
 /// [`StorageTableBase`] is the interface accessing relational data in KV(`StateStore`) with
 /// encoding format: [keyspace | pk | `column_id` (4B)] -> value.
@@ -531,11 +541,10 @@ impl<S: StateStore, RS: RowSerde> StorageTableBase<S, RS, READ_WRITE> {
 pub trait PkAndRowStream = Stream<Item = StorageResult<(Vec<u8>, Row)>> + Send;
 
 /// The row iterator of the storage table.
-pub type StorageTableIter<S: StateStore> = impl PkAndRowStream;
-pub type RowBasedStorageTableIter<S: StateStore> = impl PkAndRowStream;
+// pub type StorageTableIter<S: StateStore> = impl PkAndRowStream;
+pub type StorageTableIter<S: StateStore, RS: RowSerde> = impl PkAndRowStream;
 
-pub type BatchDedupPkIter<S: StateStore> = impl PkAndRowStream;
-// pub type BatchDedupPkIter<S: StateStore> = impl PkAndRowStream;
+pub type BatchDedupPkIter<S: StateStore, RS: RowSerde> = impl PkAndRowStream;
 
 #[async_trait::async_trait]
 impl<S: PkAndRowStream + Unpin> TableIter for S {
@@ -548,11 +557,8 @@ impl<S: PkAndRowStream + Unpin> TableIter for S {
 }
 
 /// Iterators
-impl<S: StateStore, RS: RowSerde, const T: AccessType> StorageTableBase<S, RS, T> {}
-
-/// Cell-based Iterators
-impl<S: StateStore, const T: AccessType> StorageTable<S, T> {
-    // Get multiple [`StorageTableIter`] based on the specified vnodes of this table with
+impl<S: StateStore, RS: RowSerde, const T: AccessType> StorageTableBase<S, RS, T> {
+    /// Get multiple [`StorageTableIter`] based on the specified vnodes of this table with
     /// `vnode_hint`, and merge or concat them by given `ordered`.
     async fn iter_with_encoded_key_range<R, B>(
         &self,
@@ -561,7 +567,7 @@ impl<S: StateStore, const T: AccessType> StorageTable<S, T> {
         vnode_hint: Option<VirtualNode>,
         wait_epoch: bool,
         ordered: bool,
-    ) -> StorageResult<StorageTableIter<S>>
+    ) -> StorageResult<StorageTableIter<S, RS>>
     where
         R: RangeBounds<B> + Send + Clone,
         B: AsRef<[u8]> + Send,
@@ -592,7 +598,7 @@ impl<S: StateStore, const T: AccessType> StorageTable<S, T> {
                 .map(|t| t.data_type)
                 .collect_vec();
             async move {
-                let iter = StorageTableIterInner::<S, GeneralCellBasedRowDeserializer>::new(
+                let iter = StorageTableIterInner::<S, RS>::new(
                     &self.keyspace,
                     self.mapping.clone(),
                     data_types,
@@ -630,7 +636,7 @@ impl<S: StateStore, const T: AccessType> StorageTable<S, T> {
         next_col_bounds: impl RangeBounds<Datum>,
         wait_epoch: bool,
         ordered: bool,
-    ) -> StorageResult<StorageTableIter<S>> {
+    ) -> StorageResult<StorageTableIter<S, RS>> {
         fn serialize_pk_bound(
             pk_serializer: &OrderedRowSerializer,
             pk_prefix: &Row,
@@ -718,7 +724,7 @@ impl<S: StateStore, const T: AccessType> StorageTable<S, T> {
         epoch: u64,
         pk_prefix: &Row,
         next_col_bounds: impl RangeBounds<Datum>,
-    ) -> StorageResult<StorageTableIter<S>> {
+    ) -> StorageResult<StorageTableIter<S, RS>> {
         self.iter_with_pk_bounds(epoch, pk_prefix, next_col_bounds, true, false)
             .await
     }
@@ -729,24 +735,26 @@ impl<S: StateStore, const T: AccessType> StorageTable<S, T> {
         epoch: u64,
         pk_prefix: &Row,
         next_col_bounds: impl RangeBounds<Datum>,
-    ) -> StorageResult<StorageTableIter<S>> {
+    ) -> StorageResult<StorageTableIter<S, RS>> {
         self.iter_with_pk_bounds(epoch, pk_prefix, next_col_bounds, false, true)
             .await
     }
 
-    // // The returned iterator will iterate data from a snapshot corresponding to the given
-    // `epoch`.
-    pub async fn batch_iter(&self, epoch: u64) -> StorageResult<StorageTableIter<S>> {
+    // The returned iterator will iterate data from a snapshot corresponding to the given `epoch`.
+    pub async fn batch_iter(&self, epoch: u64) -> StorageResult<StorageTableIter<S, RS>> {
         self.batch_iter_with_pk_bounds(epoch, Row::empty(), ..)
             .await
     }
 
+    /// `dedup_pk_iter` should be used when pk is not persisted as value in storage.
+    /// It will attempt to decode pk from key instead of cell value.
+    /// Tracking issue: <https://github.com/singularity-data/risingwave/issues/588>
     pub async fn batch_dedup_pk_iter(
         &self,
         epoch: u64,
         // TODO: remove this parameter: https://github.com/singularity-data/risingwave/issues/3203
         pk_descs: &[OrderedColumnDesc],
-    ) -> StorageResult<BatchDedupPkIter<S>> {
+    ) -> StorageResult<BatchDedupPkIter<S, RS>> {
         Ok(DedupPkStorageTableIter::new(
             self.batch_iter(epoch).await?,
             self.mapping.clone(),
@@ -754,172 +762,6 @@ impl<S: StateStore, const T: AccessType> StorageTable<S, T> {
         )
         .await?
         .into_stream())
-    }
-}
-/// Row-based Iterators
-impl<S: StateStore, const T: AccessType> RowBasedStorageTable<S, T> {
-    /// Construct a [`StorageTableIter`] for streaming executors with `row-based` encoding.
-    pub async fn streaming_iter_with_pk_bounds(
-        &self,
-        epoch: u64,
-        pk_prefix: &Row,
-        next_col_bounds: impl RangeBounds<Datum>,
-    ) -> StorageResult<RowBasedStorageTableIter<S>> {
-        self.iter_with_pk_bounds(epoch, pk_prefix, next_col_bounds, false, true)
-            .await
-    }
-
-    async fn iter_with_pk_bounds(
-        &self,
-        epoch: u64,
-        pk_prefix: &Row,
-        next_col_bounds: impl RangeBounds<Datum>,
-        wait_epoch: bool,
-        ordered: bool,
-    ) -> StorageResult<RowBasedStorageTableIter<S>> {
-        fn serialize_pk_bound(
-            pk_serializer: &OrderedRowSerializer,
-            pk_prefix: &Row,
-            next_col_bound: Bound<&Datum>,
-            is_start_bound: bool,
-        ) -> Bound<Vec<u8>> {
-            match next_col_bound {
-                Included(k) => {
-                    let pk_prefix_serializer = pk_serializer.prefix(pk_prefix.size() + 1);
-                    let mut key = pk_prefix.clone();
-                    key.0.push(k.clone());
-                    let serialized_key = serialize_pk(&key, &pk_prefix_serializer);
-                    if is_start_bound {
-                        Included(serialized_key)
-                    } else {
-                        // Should use excluded next key for end bound.
-                        // Otherwise keys starting with the bound is not included.
-                        end_bound_of_prefix(&serialized_key)
-                    }
-                }
-                Excluded(k) => {
-                    let pk_prefix_serializer = pk_serializer.prefix(pk_prefix.size() + 1);
-                    let mut key = pk_prefix.clone();
-                    key.0.push(k.clone());
-                    let serialized_key = serialize_pk(&key, &pk_prefix_serializer);
-                    if is_start_bound {
-                        // storage doesn't support excluded begin key yet, so transform it to
-                        // included
-                        // FIXME: What if `serialized_key` is `\xff\xff..`? Should the frontend
-                        // reject this?
-                        Included(next_key(&serialized_key))
-                    } else {
-                        Excluded(serialized_key)
-                    }
-                }
-                Unbounded => {
-                    let pk_prefix_serializer = pk_serializer.prefix(pk_prefix.size());
-                    let serialized_pk_prefix = serialize_pk(pk_prefix, &pk_prefix_serializer);
-                    if pk_prefix.size() == 0 {
-                        Unbounded
-                    } else if is_start_bound {
-                        Included(serialized_pk_prefix)
-                    } else {
-                        end_bound_of_prefix(&serialized_pk_prefix)
-                    }
-                }
-            }
-        }
-
-        let start_key = serialize_pk_bound(
-            &self.pk_serializer,
-            pk_prefix,
-            next_col_bounds.start_bound(),
-            true,
-        );
-        let end_key = serialize_pk_bound(
-            &self.pk_serializer,
-            pk_prefix,
-            next_col_bounds.end_bound(),
-            false,
-        );
-
-        trace!(
-            "iter_with_pk_bounds: start_key: {:?}, end_key: {:?}",
-            start_key,
-            end_key
-        );
-
-        self.iter_with_encoded_key_range(
-            (start_key, end_key),
-            epoch,
-            self.try_compute_vnode_by_pk_prefix(pk_prefix),
-            wait_epoch,
-            ordered,
-        )
-        .await
-    }
-
-    async fn iter_with_encoded_key_range<R, B>(
-        &self,
-        encoded_key_range: R,
-        epoch: u64,
-        vnode_hint: Option<VirtualNode>,
-        wait_epoch: bool,
-        ordered: bool,
-    ) -> StorageResult<RowBasedStorageTableIter<S>>
-    where
-        R: RangeBounds<B> + Send + Clone,
-        B: AsRef<[u8]> + Send,
-    {
-        // Vnodes that are set and should be accessed.
-        #[auto_enum(Iterator)]
-        let vnodes = match vnode_hint {
-            // If `vnode_hint` is set, we can only access this single vnode.
-            Some(vnode) => std::iter::once(vnode),
-            // Otherwise, we need to access all vnodes of this table.
-            None => self
-                .vnodes
-                .iter()
-                .enumerate()
-                .filter(|&(_, set)| set)
-                .map(|(i, _)| i as VirtualNode),
-        };
-
-        // For each vnode, construct an iterator.
-        // TODO: if there're some vnodes continuously in the range and we don't care about order, we
-        // can use a single iterator.
-        let iterators: Vec<_> = try_join_all(vnodes.map(|vnode| {
-            let raw_key_range = prefixed_range(encoded_key_range.clone(), &vnode.to_be_bytes());
-            // let raw_key_range = encoded_key_range.clone();
-            async move {
-                let data_types = self
-                    .table_columns
-                    .clone()
-                    .into_iter()
-                    .map(|t| t.data_type)
-                    .collect_vec();
-                let iter = StorageTableIterInner::<S, RowBasedDeserializer>::new(
-                    &self.keyspace,
-                    self.mapping.clone(),
-                    data_types,
-                    raw_key_range,
-                    epoch,
-                    wait_epoch,
-                )
-                .await?
-                .into_stream();
-                Ok::<_, StorageError>(iter)
-            }
-        }))
-        .await?;
-
-        #[auto_enum(futures::Stream)]
-        let iter = match iterators.len() {
-            0 => unreachable!(),
-            1 => iterators.into_iter().next().unwrap(),
-            // Concat all iterators if not to preserve order.
-            _ if !ordered => futures::stream::iter(iterators).flatten(),
-            // Merge all iterators if to preserve order.
-            _ => iter_utils::merge_sort(iterators.into_iter().map(Box::pin).collect()),
-        };
-
-        Ok(iter)
     }
 }
 

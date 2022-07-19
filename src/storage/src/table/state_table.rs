@@ -29,12 +29,10 @@ use risingwave_hummock_sdk::key::range_of_prefix;
 use risingwave_pb::catalog::Table;
 
 use super::mem_table::{MemTable, RowOp};
-use super::storage_table::{StorageTableBase, READ_WRITE};
+use super::storage_table::{CellBasedRowSerde, RowBasedSerde, StorageTableBase, READ_WRITE};
 use super::Distribution;
 use crate::encoding::cell_based_encoding_util::serialize_pk;
-use crate::encoding::cell_based_row_serializer::CellBasedRowSerializer;
 use crate::encoding::dedup_pk_cell_based_row_serializer::DedupPkCellBasedRowSerializer;
-use crate::encoding::row_based_serializer::RowBasedSerializer;
 use crate::encoding::RowSerde;
 use crate::error::{StorageError, StorageResult};
 use crate::StateStore;
@@ -44,9 +42,9 @@ use crate::StateStore;
 pub type DedupPkStateTable<S> = StateTableBase<S, DedupPkCellBasedRowSerializer>;
 
 /// `StateTable` is the interface accessing relational data in KV(`StateStore`) with encoding.
-pub type StateTable<S> = StateTableBase<S, CellBasedRowSerializer>;
+pub type StateTable<S> = StateTableBase<S, CellBasedRowSerde>;
 
-pub type RowBasedStateTable<S> = StateTableBase<S, RowBasedSerializer>;
+pub type RowBasedStateTable<S> = StateTableBase<S, RowBasedSerde>;
 /// `StateTableBase` is the interface accessing relational data in KV(`StateStore`) with
 /// encoding, using `RowSerializer` for row to cell serializing.
 #[derive(Clone)]
@@ -182,7 +180,6 @@ impl<S: StateStore, RS: RowSerde> StateTableBase<S, RS> {
         Ok(())
     }
 
-    // write with row-based encoding.
     pub async fn commit(&mut self, new_epoch: u64) -> StorageResult<()> {
         let mem_table = std::mem::take(&mut self.mem_table).into_parts();
         self.storage_table
