@@ -6,16 +6,16 @@ SELECT
   0.908 * price as price,
   CASE
     WHEN
-      extract(hour from dateTime) >= 8 AND
-      extract(hour from dateTime) <= 18
+      extract(hour from date_time) >= 8 AND
+      extract(hour from date_time) <= 18
     THEN 'dayTime'
     WHEN
-      extract(hour from dateTime) <= 6 OR
-      extract(hour from dateTime) >= 20
+      extract(hour from date_time) <= 6 OR
+      extract(hour from date_time) >= 20
     THEN 'nightTime'
     ELSE 'otherTime'
   END AS bidTimeType,
-  dateTime
+  date_time
   -- extra
   -- TODO: count_char is an UDF, add it back when we support similar functionality.
   -- https://github.com/nexmark/nexmark/blob/master/nexmark-flink/src/main/java/com/github/nexmark/flink/udf/CountChar.java
