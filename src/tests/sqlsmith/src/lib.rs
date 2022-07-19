@@ -155,7 +155,7 @@ impl<'a, R: Rng> SqlGenerator<'a, R> {
     /// e.g. through `gen_with` or other generated parts of the query.
     fn gen_complex_query(&mut self) -> (Query, Vec<Column>) {
         let (with, with_tables) = self.gen_with();
-        let (query, schema) = self.gen_set_expr();
+        let (query, schema) = self.gen_set_expr(with_tables);
         (
             Query {
                 with,
@@ -172,7 +172,8 @@ impl<'a, R: Rng> SqlGenerator<'a, R> {
     /// Generates a simple query which will not recurse.
     /// e.g. through `gen_with` or other generated parts of the query.
     fn gen_simple_query(&mut self) -> (Query, Vec<Column>) {
-        let (query, schema) = self.gen_set_expr();
+        let with_tables = vec![];
+        let (query, schema) = self.gen_set_expr(with_tables);
         (
             Query {
                 with: None,
@@ -225,10 +226,10 @@ impl<'a, R: Rng> SqlGenerator<'a, R> {
         }, with_tables)
     }
 
-    fn gen_set_expr(&mut self) -> (SetExpr, Vec<Column>) {
+    fn gen_set_expr(&mut self, with_tables: Vec<Table>) -> (SetExpr, Vec<Column>) {
         match self.rng.gen_range(0..=9) {
             0..=9 => {
-                let (select, schema) = self.gen_select_stmt();
+                let (select, schema) = self.gen_select_stmt(with_tables);
                 (SetExpr::Select(Box::new(select)), schema)
             }
             _ => unreachable!(),
@@ -262,9 +263,9 @@ impl<'a, R: Rng> SqlGenerator<'a, R> {
         }
     }
 
-    fn gen_select_stmt(&mut self) -> (Select, Vec<Column>) {
+    fn gen_select_stmt(&mut self, with_tables: Vec<Table>) -> (Select, Vec<Column>) {
         // Generate random tables/relations first so that select items can refer to them.
-        let from = self.gen_from();
+        let from = self.gen_from(with_tables);
         let selection = self.gen_where();
         let group_by = self.gen_group_by();
         let having = self.gen_having(!group_by.is_empty());
@@ -323,15 +324,18 @@ impl<'a, R: Rng> SqlGenerator<'a, R> {
         )
     }
 
-    fn gen_from(&mut self) -> Vec<TableWithJoins> {
+    fn gen_from(&mut self, with_tables: Vec<Table>) -> Vec<TableWithJoins> {
         if self.is_mview {
+            // TODO: These constraints are workarounds required for mview.
+            // Tracked by: <https://github.com/singularity-data/risingwave/issues/4024>.
+            assert!(with_tables.len() <= 1);
             assert!(!self.tables.is_empty());
-            return vec![self.gen_from_relation()];
+            return vec![self.gen_from_relation(&with_tables)];
         }
         let mut from = vec![];
         for _ in 0..self.tables.len() {
             if self.flip_coin() {
-                from.push(self.gen_from_relation());
+                from.push(self.gen_from_relation(&with_tables));
             }
         }
         from

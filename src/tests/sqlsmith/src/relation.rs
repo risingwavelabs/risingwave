@@ -32,7 +32,7 @@ fn create_join_on_clause(left: String, right: String) -> Expr {
 
 impl<'a, R: Rng> SqlGenerator<'a, R> {
     /// A relation specified in the FROM clause.
-    pub(crate) fn gen_from_relation(&mut self) -> TableWithJoins {
+    pub(crate) fn gen_from_relation(&mut self, with_tables: &[Table]) -> TableWithJoins {
         match self.rng.gen_range(0..=9) {
             0..=8 => self.gen_simple_table(),
             9..=9 => self.gen_time_window_func(),
