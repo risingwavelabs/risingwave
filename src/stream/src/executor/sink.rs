@@ -34,8 +34,8 @@ pub struct SinkExecutor<S: StateStore> {
     pk_indices: PkIndices,
 }
 
-async fn build_sink(config: SinkConfig) -> Result<Box<SinkImpl>> {
-    Ok(Box::new(SinkImpl::new(config).await?))
+fn build_sink(config: SinkConfig) -> Result<Box<SinkImpl>> {
+    Ok(Box::new(SinkImpl::new(config)?))
 }
 
 impl<S: StateStore> SinkExecutor<S> {

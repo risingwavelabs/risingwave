@@ -104,13 +104,7 @@ impl Planner {
         &mut self,
         table_function: BoundTableFunction,
     ) -> Result<PlanRef> {
-        Ok(LogicalTableFunction::new(
-            table_function.args,
-            table_function.func_type,
-            table_function.data_type,
-            self.ctx(),
-        )
-        .into())
+        Ok(LogicalTableFunction::new(table_function, self.ctx()).into())
     }
 
     fn plan_tumble_window(

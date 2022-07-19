@@ -69,6 +69,7 @@ pub fn read_bool_array(array: &ProstArray, cardinality: usize) -> ArrayResult<Ar
         "Must have only 1 buffer in a bool array"
     );
 
+    #[expect(clippy::needless_borrow)]
     let data = (&array.get_values()[0]).try_into()?;
     let bitmap: Bitmap = array.get_null_bitmap()?.try_into()?;
 

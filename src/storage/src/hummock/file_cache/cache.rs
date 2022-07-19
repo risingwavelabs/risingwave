@@ -45,7 +45,7 @@ pub trait FlushBufferHook: Send + Sync + 'static {
         Ok(())
     }
 
-    async fn post_flush(&self) -> Result<()> {
+    async fn post_flush(&self, _bytes: usize) -> Result<()> {
         Ok(())
     }
 }
@@ -84,6 +84,7 @@ where
             // TODO(MrCroxx): Avoid clone here?
             frozen.for_all(|key, value| batch.push((key.clone(), value.clone())));
 
+            let mut bytes = 0;
             if batch.is_empty() {
                 // Avoid allocate a new buffer.
                 self.buffer.swap();
@@ -93,13 +94,14 @@ where
                 for ((key, value), slot) in batch.into_iter().zip_eq(slots.into_iter()) {
                     let hash = self.hash_builder.hash_one(&key);
                     self.indices.insert(key, hash, value.len(), slot);
+                    bytes += value.len();
                 }
 
                 self.buffer.rotate();
             }
 
             for hook in &self.hooks {
-                hook.post_flush().await?;
+                hook.post_flush(bytes).await?;
             }
         }
     }

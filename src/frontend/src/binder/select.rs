@@ -150,7 +150,7 @@ impl Binder {
                     aliases.push(Some(alias.real_value()));
                 }
                 SelectItem::QualifiedWildcard(obj_name) => {
-                    let table_name = &obj_name.0.last().unwrap().value;
+                    let table_name = &obj_name.0.last().unwrap().real_value();
                     let (mut begin, end) =
                         self.context.range_of.get(table_name).ok_or_else(|| {
                             ErrorCode::ItemNotFound(format!("relation \"{}\"", table_name))

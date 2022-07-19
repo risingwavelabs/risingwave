@@ -12,6 +12,10 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+use std::collections::hash_map::Entry;
+use std::collections::HashMap;
+use std::fmt;
+
 use itertools::Itertools;
 
 use crate::optimizer::rule::BoxedRule;
@@ -29,23 +33,29 @@ pub enum ApplyOrder {
 pub struct HeuristicOptimizer {
     apply_order: ApplyOrder,
     rules: Vec<BoxedRule>,
+    stats: Stats,
 }
 
 impl HeuristicOptimizer {
     pub fn new(apply_order: ApplyOrder, rules: Vec<BoxedRule>) -> Self {
-        Self { apply_order, rules }
+        Self {
+            apply_order,
+            rules,
+            stats: Stats::new(),
+        }
     }
 
-    fn optimize_node(&self, mut plan: PlanRef) -> PlanRef {
+    fn optimize_node(&mut self, mut plan: PlanRef) -> PlanRef {
         for rule in &self.rules {
             if let Some(applied) = rule.apply(plan.clone()) {
                 plan = applied;
+                self.stats.count_rule(rule);
             }
         }
         plan
     }
 
-    fn optimize_inputs(&self, plan: PlanRef) -> PlanRef {
+    fn optimize_inputs(&mut self, plan: PlanRef) -> PlanRef {
         let inputs = plan
             .inputs()
             .into_iter()
@@ -54,7 +64,7 @@ impl HeuristicOptimizer {
         plan.clone_with_inputs(&inputs)
     }
 
-    pub fn optimize(&self, mut plan: PlanRef) -> PlanRef {
+    pub fn optimize(&mut self, mut plan: PlanRef) -> PlanRef {
         match self.apply_order {
             ApplyOrder::TopDown => {
                 plan = self.optimize_node(plan);
@@ -65,5 +75,50 @@ impl HeuristicOptimizer {
                 self.optimize_node(plan)
             }
         }
+    }
+
+    pub fn get_stats(&self) -> &Stats {
+        &self.stats
+    }
+}
+
+pub struct Stats {
+    rule_counter: HashMap<String, u32>,
+}
+
+impl Stats {
+    pub fn new() -> Self {
+        Self {
+            rule_counter: HashMap::new(),
+        }
+    }
+
+    pub fn count_rule(&mut self, rule: &BoxedRule) {
+        match self.rule_counter.entry(rule.description().to_string()) {
+            Entry::Occupied(mut entry) => {
+                *entry.get_mut() += 1;
+            }
+            Entry::Vacant(entry) => {
+                entry.insert(1);
+            }
+        }
+    }
+
+    pub fn has_applied_rule(&self) -> bool {
+        !self.rule_counter.is_empty()
+    }
+}
+
+impl fmt::Display for Stats {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(
+            f,
+            "{}",
+            self.rule_counter
+                .iter()
+                .map(|(rule, count)| format!("apply {} {} time(s)", rule, count))
+                .collect_vec()
+                .join("\n")
+        )
     }
 }

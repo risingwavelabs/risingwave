@@ -103,10 +103,10 @@ pub struct KafkaSink {
 }
 
 impl KafkaSink {
-    pub async fn new(config: KafkaConfig) -> Result<Self> {
+    pub fn new(config: KafkaConfig) -> Result<Self> {
         Ok(KafkaSink {
             config: config.clone(),
-            conductor: KafkaTransactionConductor::new(config).await?,
+            conductor: KafkaTransactionConductor::new(config)?,
             in_transaction_epoch: None,
             latest_success_epoch: KafkaSinkState::Init,
         })
@@ -358,7 +358,7 @@ pub struct KafkaTransactionConductor {
 }
 
 impl KafkaTransactionConductor {
-    async fn new(config: KafkaConfig) -> Result<Self> {
+    fn new(config: KafkaConfig) -> Result<Self> {
         let inner = ClientConfig::new()
             .set("bootstrap.servers", config.brokers.as_str())
             .set("message.timeout.ms", "5000")
@@ -408,6 +408,7 @@ impl KafkaTransactionConductor {
             .unwrap_or_else(|_| Err(KafkaError::Canceled))
     }
 
+    #[expect(clippy::unused_async)]
     async fn send<'a, K, P>(
         &'a self,
         record: BaseRecord<'a, K, P>,
@@ -447,7 +448,7 @@ mod test {
             "kafka.topic".to_string() => "test_topic".to_string(),
         };
         let kafka_config = KafkaConfig::from_hashmap(properties)?;
-        let mut sink = KafkaSink::new(kafka_config.clone()).await.unwrap();
+        let mut sink = KafkaSink::new(kafka_config.clone()).unwrap();
 
         for i in 0..10 {
             let mut fail_flag = false;

@@ -40,7 +40,7 @@ use crate::scheduler::worker_node_manager::WorkerNodeManagerRef;
 use crate::session::AuthContext;
 use crate::user::user_service::UserInfoReader;
 
-#[allow(dead_code)]
+#[expect(dead_code)]
 pub struct SysCatalogReaderImpl {
     // Read catalog info: database/schema/source/table.
     catalog_reader: CatalogReader,

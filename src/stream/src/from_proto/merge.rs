@@ -32,7 +32,7 @@ impl ExecutorBuilder for MergeExecutorBuilder {
         let upstream_fragment_id = node.get_upstream_fragment_id();
         let fields = node.fields.iter().map(Field::from).collect();
         let schema = Schema::new(fields);
-        let mut rxs = stream.get_receive_message(
+        let mut rxs = stream.take_receivers(
             params.actor_id,
             params.fragment_id,
             upstreams,

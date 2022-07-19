@@ -16,7 +16,7 @@ use std::sync::Arc;
 
 use risingwave_common::catalog::{ColumnDesc, Field, Schema};
 use risingwave_common::util::sort_util::OrderPair;
-use risingwave_storage::table::state_table::StateTable;
+use risingwave_storage::table::storage_table::StorageTable;
 
 use super::*;
 use crate::executor::{LookupExecutor, LookupExecutorParams};
@@ -48,7 +48,7 @@ impl ExecutorBuilder for LookupExecutorBuilder {
             .iter()
             .map(ColumnDesc::from)
             .collect();
-        let state_table = StateTable::from_table_catalog(
+        let storage_table = StorageTable::from_table_catalog(
             lookup.arrangement_table.as_ref().unwrap(),
             store,
             params.vnode_bitmap.map(Arc::new),
@@ -65,7 +65,7 @@ impl ExecutorBuilder for LookupExecutorBuilder {
             stream_join_key_indices: lookup.stream_key.iter().map(|x| *x as usize).collect(),
             arrange_join_key_indices: lookup.arrange_key.iter().map(|x| *x as usize).collect(),
             column_mapping: lookup.column_mapping.iter().map(|x| *x as usize).collect(),
-            state_table,
+            storage_table,
         })))
     }
 }
