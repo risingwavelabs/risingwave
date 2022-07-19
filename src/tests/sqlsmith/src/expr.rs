@@ -150,6 +150,11 @@ impl<'a, R: Rng> SqlGenerator<'a, R> {
         };
         let func = funcs.choose(&mut self.rng).unwrap();
 
+        // if distinct is allowed, it could not have ApproxCountDistinct
+        if func.func == AggKind::ApproxCountDistinct && self.is_distinct_allowed {
+            return self.gen_simple_scalar(ret);
+        }
+
         // Common sense that the aggregation is allowed in the overall expression
         let can_agg = true;
         // show then the expression inside this function is in aggregate function
