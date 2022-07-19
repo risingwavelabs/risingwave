@@ -92,21 +92,6 @@ harness = false
 # Enable debug if you want to generate flamegraph.
 # debug = true
 
-[[bench]]
-name = "bench_lru_cache"
-harness = false
-
-[[bench]]
-name = "bench_merge_iter"
-harness = false
-
-[[bench]]
-name = "bench_fs_operation"
-harness = false
-
-[[bench]]
-name = "bench_compression"
-harness = false
 
 [[bench]]
 name = "bench_compactor"
