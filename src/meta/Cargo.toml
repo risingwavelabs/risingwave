@@ -6,7 +6,6 @@ edition = "2021"
 [dependencies]
 anyhow = "1"
 assert_matches = "1"
-async-recursion = "1"
 async-stream = "0.3"
 async-trait = "0.1"
 axum = "0.5"
@@ -69,9 +68,6 @@ rand = "0.8"
 risingwave_test_runner = { path = "../test_runner" }
 static_assertions = "1"
 tempfile = "3"
-
-[target.'cfg(not(madsim))'.dev-dependencies]
-risingwave_frontend = { path = "../frontend" }
 
 [features]
 test = []

@@ -108,7 +108,7 @@ impl Binder {
     }
 
     /// Fill the [`BindContext`](super::BindContext) for table.
-    pub(super) fn bind_context(
+    pub(super) fn bind_table_to_context(
         &mut self,
         columns: impl IntoIterator<Item = (bool, Field)>, // bool indicates if the field is hidden
         table_name: String,
@@ -178,7 +178,7 @@ impl Binder {
             && let Some(bound_query) = self.cte_to_relation.get(&table_name)
         {
             let (query, alias) = bound_query.clone();
-            self.bind_context(
+            self.bind_table_to_context(
                 query
                     .body
                     .schema()
@@ -227,13 +227,31 @@ impl Binder {
                 alias,
             } => {
                 if lateral {
-                    Err(ErrorCode::NotImplemented("unsupported lateral".into(), None.into()).into())
+                    // If we detect a lateral, we mark the lateral context as visible.
+                    self.try_mark_lateral_as_visible();
+
+                    // Bind lateral subquery here.
+
+                    // Mark the lateral context as invisible once again.
+                    self.try_mark_lateral_as_invisible();
+                    Err(ErrorCode::NotImplemented(
+                        "lateral subqueries are not yet supported".into(),
+                        Some(3815).into(),
+                    )
+                    .into())
                 } else {
-                    Ok(Relation::Subquery(Box::new(
-                        self.bind_subquery_relation(*subquery, alias)?,
-                    )))
+                    // Non-lateral subqueries to not have access to the join-tree context.
+                    self.push_lateral_context();
+                    let bound_subquery = self.bind_subquery_relation(*subquery, alias)?;
+                    self.pop_and_merge_lateral_context()?;
+                    Ok(Relation::Subquery(Box::new(bound_subquery)))
                 }
             }
+
+            // TODO: if and when we allow nested joins (binding table factors which are themselves
+            // joins), We need to `self.push_table_context()` prior to binding the join and
+            // `self.pop_and_merge_table_context()` after. This ensures that the nested join's
+            // `BindContext` references only the columns that are visible to it.
             _ => Err(ErrorCode::NotImplemented(
                 format!("unsupported table factor {:?}", table_factor),
                 None.into(),

@@ -20,13 +20,13 @@ use std::sync::Arc;
 
 use nix::fcntl::{fallocate, FallocateFlags};
 use nix::sys::stat::fstat;
+use nix::unistd::ftruncate;
 
 use super::error::Result;
 use super::{asyncify, utils, DioBuffer, DIO_BUFFER_ALLOCATOR, LOGICAL_BLOCK_SIZE, ST_BLOCK_SIZE};
 
 #[derive(Clone, Debug)]
 pub struct CacheFileOptions {
-    pub fs_block_size: usize,
     /// NOTE: `block_size` must be a multiple of `fs_block_size`.
     pub block_size: usize,
     pub fallocate_unit: usize,
@@ -35,21 +35,30 @@ pub struct CacheFileOptions {
 impl CacheFileOptions {
     fn assert(&self) {
         utils::assert_pow2(LOGICAL_BLOCK_SIZE);
-        utils::assert_aligned(LOGICAL_BLOCK_SIZE, self.fs_block_size);
-        utils::assert_aligned(self.fs_block_size, self.block_size);
+        utils::assert_aligned(LOGICAL_BLOCK_SIZE, self.block_size);
     }
 }
 
 struct CacheFileCore {
+    block_size: usize,
+
     file: File,
     len: AtomicUsize,
     capacity: AtomicUsize,
 }
 
+impl Drop for CacheFileCore {
+    fn drop(&mut self) {
+        ftruncate(
+            self.file.as_raw_fd(),
+            utils::align_up(self.block_size, self.len.load(Ordering::Acquire)) as i64,
+        )
+        .expect("truncate cache file error");
+    }
+}
+
 #[derive(Clone)]
 pub struct CacheFile {
-    _fs_block_size: usize,
-    block_size: usize,
     fallocate_unit: usize,
 
     core: Arc<CacheFileCore>,
@@ -84,38 +93,26 @@ impl CacheFile {
             let file = oopts.open(path)?;
             let fd = file.as_raw_fd();
             let stat = fstat(fd)?;
-            if stat.st_blocks == 0 {
-                // newly created
-                fallocate(
-                    fd,
-                    FallocateFlags::FALLOC_FL_KEEP_SIZE,
-                    0,
-                    options.fallocate_unit as i64,
-                )?;
-                Ok((file, 0, options.fallocate_unit))
-            } else {
-                // existed
-                fallocate(
-                    fd,
-                    FallocateFlags::FALLOC_FL_KEEP_SIZE,
-                    stat.st_size as i64,
-                    options.fallocate_unit as i64,
-                )?;
-                Ok((
-                    file,
-                    stat.st_size as usize,
-                    stat.st_size as usize + options.fallocate_unit,
-                ))
-            }
+            fallocate(
+                fd,
+                FallocateFlags::FALLOC_FL_KEEP_SIZE,
+                stat.st_size as i64,
+                options.fallocate_unit as i64,
+            )?;
+            Ok((
+                file,
+                stat.st_size as usize,
+                stat.st_size as usize + options.fallocate_unit,
+            ))
         })
         .await?;
 
         let cache_file = Self {
-            _fs_block_size: options.fs_block_size,
-            block_size: options.block_size,
             fallocate_unit: options.fallocate_unit,
 
             core: Arc::new(CacheFileCore {
+                block_size: options.block_size,
+
                 file,
                 len: AtomicUsize::new(len),
                 capacity: AtomicUsize::new(capacity),
@@ -126,7 +123,7 @@ impl CacheFile {
     }
 
     pub async fn append(&self, buf: DioBuffer) -> Result<u64> {
-        utils::debug_assert_aligned(self.block_size, buf.len());
+        utils::debug_assert_aligned(self.core.block_size, buf.len());
 
         let core = self.core.clone();
         let fallocate_unit = self.fallocate_unit;
@@ -179,7 +176,7 @@ impl CacheFile {
     }
 
     pub async fn read(&self, offset: u64, len: usize) -> Result<DioBuffer> {
-        utils::debug_assert_aligned(self.block_size, len);
+        utils::debug_assert_aligned(self.core.block_size, len);
         let core = self.core.clone();
         asyncify(move || {
             let mut buf = DioBuffer::with_capacity_in(len, &DIO_BUFFER_ALLOCATOR);
@@ -192,8 +189,8 @@ impl CacheFile {
 
     // TODO(MrCroxx): Should be async (likely not)?
     pub fn punch_hole(&self, offset: u64, len: usize) -> Result<()> {
-        utils::debug_assert_aligned(self.block_size as u64, offset);
-        utils::debug_assert_aligned(self.block_size, len);
+        utils::debug_assert_aligned(self.core.block_size as u64, offset);
+        utils::debug_assert_aligned(self.core.block_size, len);
         fallocate(
             self.fd(),
             FallocateFlags::FALLOC_FL_PUNCH_HOLE | FallocateFlags::FALLOC_FL_KEEP_SIZE,
@@ -249,7 +246,7 @@ impl CacheFile {
     }
 
     pub fn block_size(&self) -> usize {
-        self.block_size
+        self.core.block_size
     }
 
     #[inline(always)]
@@ -274,12 +271,11 @@ mod tests {
         let tempdir = tempfile::tempdir().unwrap();
         let path = tempdir.path().join("test-cache-file");
         let options = CacheFileOptions {
-            fs_block_size: 4096,
             block_size: 4096,
             fallocate_unit: 4 * 4096,
         };
         let cf = CacheFile::open(&path, options.clone()).await.unwrap();
-        assert_eq!(cf.block_size, 4096);
+        assert_eq!(cf.block_size(), 4096);
         assert_eq!(cf.len(), 0);
         assert_eq!(cf.size(), 4 * 4096);
 
@@ -303,7 +299,7 @@ mod tests {
         drop(cf);
 
         let cf = CacheFile::open(&path, options).await.unwrap();
-        assert_eq!(cf.block_size, 4096);
+        assert_eq!(cf.block_size(), 4096);
         assert_eq!(cf.len(), 5 * 4096);
         assert_eq!(cf.size(), 9 * 4096);
     }
