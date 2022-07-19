@@ -168,12 +168,19 @@ impl<'a, R: Rng> SqlGenerator<'a, R> {
     fn gen_with_inner(&mut self) -> With {
         let alias = self.gen_alias_with_prefix("with");
         let (query, query_schema) = self.gen_query();
-        let from = todo!();
+        let from = None;
         let cte = Cte {
-            alias,
+            alias: alias.clone(),
             query,
             from,
         };
+
+        let table = Table {
+            name: alias.name.value,
+            columns: query_schema,
+        };
+        self.add_relation_to_context(table);
+
         With {
             recursive: false,
             cte_tables: vec![cte],

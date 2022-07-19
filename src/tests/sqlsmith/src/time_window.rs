@@ -103,11 +103,6 @@ fn create_tvf(name: &str, alias: TableAlias, args: Vec<FunctionArg>) -> TableWit
     }
 }
 
-/// Create `FunctionArg` from an `Expr`.
-fn create_function_arg_from_expr(expr: Expr) -> FunctionArg {
-    FunctionArg::Unnamed(FunctionArgExpr::Expr(expr))
-}
-
 fn is_timestamp_col(c: &Column) -> bool {
     c.data_type == DataTypeName::Timestamp || c.data_type == DataTypeName::Timestampz
 }
