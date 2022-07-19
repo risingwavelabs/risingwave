@@ -165,7 +165,7 @@ impl<'a, R: Rng> SqlGenerator<'a, R> {
     }
 
     fn gen_with_inner(&mut self) -> With {
-        let alias = todo!();
+        let alias = self.gen_alias_with_prefix("with");
         let query = todo!();
         let from = todo!();
         let cte = Cte {
