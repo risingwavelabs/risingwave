@@ -12,7 +12,26 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-pub mod bench;
-pub mod hummock;
-pub mod meta;
-pub mod table;
+use crate::common::MetaServiceOpts;
+
+pub async fn pause() -> anyhow::Result<()> {
+    let meta_opts = MetaServiceOpts::from_env()?;
+    let meta_client = meta_opts.create_meta_client().await?;
+
+    meta_client.pause().await?;
+
+    println!("Paused");
+
+    Ok(())
+}
+
+pub async fn resume() -> anyhow::Result<()> {
+    let meta_opts = MetaServiceOpts::from_env()?;
+    let meta_client = meta_opts.create_meta_client().await?;
+
+    meta_client.resume().await?;
+
+    println!("Resumed");
+
+    Ok(())
+}
