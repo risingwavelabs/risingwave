@@ -141,8 +141,19 @@ impl<'a, R: Rng> SqlGenerator<'a, R> {
         (mview, table)
     }
 
-    /// Returns query expression and query schema
+    /// Generates query expression and returns its
+    /// query schema as well.
     fn gen_query(&mut self) -> (Query, Vec<Column>) {
+        if self.can_recurse() {
+            self.gen_complex_query()
+        } else {
+            self.gen_simple_query()
+        }
+    }
+
+    /// Generates a complex query which may recurse.
+    /// e.g. through `gen_with` or other generated parts of the query.
+    fn gen_complex_query(&mut self) -> (Query, Vec<Column>) {
         let with = self.gen_with();
         let (query, schema) = self.gen_set_expr();
         (
@@ -151,6 +162,23 @@ impl<'a, R: Rng> SqlGenerator<'a, R> {
                 body: query,
                 order_by: self.gen_order_by(),
                 limit: self.gen_limit(),
+                offset: None,
+                fetch: None,
+            },
+            schema,
+        )
+    }
+
+    /// Generates a simple query which will not recurse.
+    /// e.g. through `gen_with` or other generated parts of the query.
+    fn gen_simple_query(&mut self) -> (Query, Vec<Column>) {
+        let (query, schema) = self.gen_set_expr();
+        (
+            Query {
+                with: None,
+                body: query,
+                order_by: vec![],
+                limit: None,
                 offset: None,
                 fetch: None,
             },
@@ -342,7 +370,7 @@ impl<'a, R: Rng> SqlGenerator<'a, R> {
 
     /// Provide recursion bounds.
     pub(crate) fn can_recurse(&mut self) -> bool {
-        self.rng.gen_bool(0.3)
+        self.rng.gen_bool(0.2)
     }
 }
 
