@@ -155,7 +155,10 @@ impl LogicalMultiJoinBuilder {
             None => return Self::with_input(plan),
         };
         let mut builder = Self::new(proj.input());
-        builder.output_indices = output_indices;
+        builder.output_indices = output_indices
+            .into_iter()
+            .map(|i| builder.output_indices[i])
+            .collect();
         builder
     }
 

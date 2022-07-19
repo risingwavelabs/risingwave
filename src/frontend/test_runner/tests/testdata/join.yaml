@@ -13,16 +13,16 @@
             LogicalScan { table: t2, columns: [_row_id, v3, v4] }
           LogicalScan { table: t3, columns: [_row_id, v5, v6] }
   stream_plan: |
-    StreamMaterialize { columns: [v1, v2, v3, v4, v5, v6, t1._row_id(hidden), t2._row_id(hidden), t3._row_id(hidden)], pk_columns: [t1._row_id, t2._row_id, t3._row_id] }
-      StreamExchange { dist: HashShard([6, 7, 8]) }
-        StreamHashJoin { type: Inner, predicate: $0 = $6, output_indices: [0, 1, 2, 3, 6, 7, 4, 5, 8] }
-          StreamHashJoin { type: Inner, predicate: $0 = $3, output_indices: [0, 1, 3, 4, 2, 5] }
-            StreamExchange { dist: HashShard([0]) }
-              StreamTableScan { table: t1, columns: [v1, v2, _row_id], pk_indices: [2] }
-            StreamExchange { dist: HashShard([0]) }
-              StreamTableScan { table: t2, columns: [v3, v4, _row_id], pk_indices: [2] }
+    StreamMaterialize { columns: [v1, v2, v3, v4, v5, v6, t3._row_id(hidden)], pk_columns: [v1, v4, t3._row_id] }
+      StreamExchange { dist: HashShard([0, 3, 6]) }
+        StreamHashJoin { type: Inner, predicate: $1 = $6, output_indices: [0, 1, 2, 3, 4, 5, 7] }
+          StreamHashJoin { type: Inner, predicate: $1 = $4, output_indices: all }
+            StreamExchange { dist: HashShard([1]) }
+              StreamTableScan { table: t1, columns: [_row_id, v1, v2], pk_indices: [0] }
+            StreamExchange { dist: HashShard([1]) }
+              StreamTableScan { table: t2, columns: [_row_id, v3, v4], pk_indices: [0] }
           StreamExchange { dist: HashShard([0]) }
-            StreamTableScan { table: t3, columns: [v5, v6, _row_id], pk_indices: [2] }
+            StreamTableScan { table: t3, columns: [v5, _row_id], pk_indices: [1] }
 - sql: |
     /* self join */
     create table t (v1 int, v2 int);
@@ -47,36 +47,36 @@
     select t1.v1 as t1_v1, t1.v2 as t1_v2, t2.v1 as t2_v1, t2.v2 as t2_v2, t3.v1 as t3_v1, t3.v2 as t3_v2 from t1 join t2 on (t1.v1 = t2.v1) join t3 on (t2.v2 = t3.v2);
   batch_plan: |
     BatchExchange { order: [], dist: Single }
-      BatchHashJoin { type: Inner, predicate: $3 = $5, output_indices: all }
-        BatchExchange { order: [], dist: HashShard([3]) }
-          BatchHashJoin { type: Inner, predicate: $0 = $2, output_indices: all }
-            BatchExchange { order: [], dist: HashShard([0]) }
-              BatchScan { table: t1, columns: [v1, v2] }
-            BatchExchange { order: [], dist: HashShard([0]) }
-              BatchScan { table: t2, columns: [v1, v2] }
-        BatchExchange { order: [], dist: HashShard([1]) }
-          BatchScan { table: t3, columns: [v1, v2] }
+      BatchHashJoin { type: Inner, predicate: $5 = $6, output_indices: [0, 1, 2, 3, 4, 5] }
+        BatchExchange { order: [], dist: HashShard([5]) }
+          BatchHashJoin { type: Inner, predicate: $1 = $4, output_indices: all }
+            BatchExchange { order: [], dist: HashShard([1]) }
+              BatchScan { table: t1, columns: [_row_id, v1, v2] }
+            BatchExchange { order: [], dist: HashShard([1]) }
+              BatchScan { table: t2, columns: [_row_id, v1, v2] }
+        BatchExchange { order: [], dist: HashShard([0]) }
+          BatchScan { table: t3, columns: [v2] }
   batch_local_plan: |
-    BatchHashJoin { type: Inner, predicate: $3 = $5, output_indices: all }
-      BatchHashJoin { type: Inner, predicate: $0 = $2, output_indices: all }
+    BatchHashJoin { type: Inner, predicate: $5 = $6, output_indices: [0, 1, 2, 3, 4, 5] }
+      BatchHashJoin { type: Inner, predicate: $1 = $4, output_indices: all }
         BatchExchange { order: [], dist: Single }
-          BatchScan { table: t1, columns: [v1, v2] }
+          BatchScan { table: t1, columns: [_row_id, v1, v2] }
         BatchExchange { order: [], dist: Single }
-          BatchScan { table: t2, columns: [v1, v2] }
+          BatchScan { table: t2, columns: [_row_id, v1, v2] }
       BatchExchange { order: [], dist: Single }
-        BatchScan { table: t3, columns: [v1, v2] }
+        BatchScan { table: t3, columns: [v2] }
   stream_plan: |
-    StreamMaterialize { columns: [t1_v1, t1_v2, t2_v1, t2_v2, t3_v1, t3_v2, t1._row_id(hidden), t2._row_id(hidden), t3._row_id(hidden)], pk_columns: [t1._row_id, t2._row_id, t3._row_id] }
-      StreamExchange { dist: HashShard([6, 7, 8]) }
-        StreamHashJoin { type: Inner, predicate: $3 = $7, output_indices: [0, 1, 2, 3, 6, 7, 4, 5, 8] }
-          StreamExchange { dist: HashShard([3]) }
-            StreamHashJoin { type: Inner, predicate: $0 = $3, output_indices: [0, 1, 3, 4, 2, 5] }
-              StreamExchange { dist: HashShard([0]) }
-                StreamTableScan { table: t1, columns: [v1, v2, _row_id], pk_indices: [2] }
-              StreamExchange { dist: HashShard([0]) }
-                StreamTableScan { table: t2, columns: [v1, v2, _row_id], pk_indices: [2] }
-          StreamExchange { dist: HashShard([1]) }
-            StreamTableScan { table: t3, columns: [v1, v2, _row_id], pk_indices: [2] }
+    StreamMaterialize { columns: [t1_v1, t1_v2, t2_v1, t2_v2, t3_v1, t3_v2, t3._row_id(hidden)], pk_columns: [t1_v1, t2_v2, t3._row_id] }
+      StreamExchange { dist: HashShard([0, 3, 6]) }
+        StreamHashJoin { type: Inner, predicate: $5 = $6, output_indices: [0, 1, 2, 3, 4, 5, 7] }
+          StreamExchange { dist: HashShard([5]) }
+            StreamHashJoin { type: Inner, predicate: $1 = $4, output_indices: all }
+              StreamExchange { dist: HashShard([1]) }
+                StreamTableScan { table: t1, columns: [_row_id, v1, v2], pk_indices: [0] }
+              StreamExchange { dist: HashShard([1]) }
+                StreamTableScan { table: t2, columns: [_row_id, v1, v2], pk_indices: [0] }
+          StreamExchange { dist: HashShard([0]) }
+            StreamTableScan { table: t3, columns: [v2, _row_id], pk_indices: [1] }
 - sql: |
     create table t1 (v1 int not null, v2 int not null);
     create table t2 (v1 int not null, v2 int not null);
@@ -152,15 +152,15 @@
     select * from ab join bc using(b) join ca using(c);
   batch_plan: |
     BatchExchange { order: [], dist: Single }
-      BatchHashJoin { type: Inner, predicate: $3 = $4, output_indices: all }
-        BatchExchange { order: [], dist: HashShard([3]) }
-          BatchHashJoin { type: Inner, predicate: $1 = $2, output_indices: all }
+      BatchHashJoin { type: Inner, predicate: $5 = $6, output_indices: [0, 1, 2, 3, 4, 5] }
+        BatchExchange { order: [], dist: HashShard([5]) }
+          BatchHashJoin { type: Inner, predicate: $2 = $4, output_indices: all }
+            BatchExchange { order: [], dist: HashShard([2]) }
+              BatchScan { table: ab, columns: [_row_id, a, b] }
             BatchExchange { order: [], dist: HashShard([1]) }
-              BatchScan { table: ab, columns: [a, b] }
-            BatchExchange { order: [], dist: HashShard([0]) }
-              BatchScan { table: bc, columns: [b, c] }
+              BatchScan { table: bc, columns: [_row_id, b, c] }
         BatchExchange { order: [], dist: HashShard([0]) }
-          BatchScan { table: ca, columns: [c, a] }
+          BatchScan { table: ca, columns: [c] }
 - sql: |
     /* Only push to left */
     create table t1 (v1 int, v2 int);

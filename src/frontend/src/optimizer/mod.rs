@@ -144,7 +144,7 @@ impl PlanRoot {
         // their relevant joins.
         plan = {
             let rules = vec![MergeMultiJoinRule::create()];
-            let heuristic_optimizer = HeuristicOptimizer::new(ApplyOrder::BottomUp, rules);
+            let heuristic_optimizer = HeuristicOptimizer::new(ApplyOrder::TopDown, rules);
             heuristic_optimizer.optimize(plan)
         };
 
