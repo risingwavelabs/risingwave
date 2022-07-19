@@ -62,7 +62,7 @@ impl<S: StateStore> SinkExecutor<S> {
         let sink_config = SinkConfig::from_hashmap(self.properties.clone())
             .map_err(StreamExecutorError::sink_error)?;
 
-        let mut sink = build_sink(sink_config)?;
+        let mut sink = build_sink(sink_config).map_err(StreamExecutorError::sink_error)?;
 
         // the flag is required because kafka transaction requires at least one
         // message, so we should abort the transaction if the flag is true.

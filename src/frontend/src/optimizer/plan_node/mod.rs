@@ -315,8 +315,11 @@ pub use stream_index_scan::StreamIndexScan;
 pub use stream_local_simple_agg::StreamLocalSimpleAgg;
 pub use stream_materialize::StreamMaterialize;
 pub use stream_project::StreamProject;
+pub use stream_project_set::StreamProjectSet;
 pub use stream_sink::StreamSink;
+pub use stream_source::StreamSource;
 pub use stream_table_scan::StreamTableScan;
+pub use stream_topn::StreamTopN;
 
 use crate::session::OptimizerContextRef;
 
