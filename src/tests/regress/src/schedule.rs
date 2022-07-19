@@ -14,12 +14,14 @@
 
 use std::collections::HashMap;
 use std::fs::File;
-use std::io::{BufRead, BufReader, Read, Seek, SeekFrom, Write};
+use std::io::{BufRead, BufReader, Write};
 use std::path::Path;
+use std::process::Stdio;
 use std::sync::Arc;
 
-use anyhow::{bail, Context};
+use anyhow::{anyhow, bail, Context};
 use log::{debug, error, info};
+use tokio::io::AsyncWriteExt;
 use tokio::process::Command;
 
 use crate::schedule::TestResult::{Different, Same};
@@ -183,12 +185,6 @@ impl Schedule {
 
 impl TestCase {
     async fn run(self) -> anyhow::Result<TestResult> {
-        let mut command = Command::new("psql");
-        command.env(
-            "PGAPPNAME",
-            format!("risingwave_regress/{}", self.test_name),
-        );
-
         let host = &self.opts.host();
         let port = &self.opts.port().to_string();
         let database_name = self.opts.database_name();
@@ -211,85 +207,96 @@ impl TestCase {
             "HIDE_TOAST_COMPRESSION=on",
         ];
         println!("Ready to run command:\npsql {}", args.join(" "));
-        command.args(args);
 
-        let mut extra_lines_added_to_input = vec![];
-
-        let input_path = self.file_manager.source_of(&self.test_name)?;
-        let mut input_file = File::options()
-            .read(true)
-            .open(&input_path)
-            .with_context(|| format!("Failed to open {:?} for read.", input_path))?;
-        let input_file = match self.opts.database_mode() {
+        let extra_lines_added_to_input = match self.opts.database_mode() {
             DatabaseMode::Risingwave => {
-                extra_lines_added_to_input.push("SET RW_IMPLICIT_FLUSH TO true;");
-                let mut tmp_file = tempfile::tempfile()?;
-                for extra_line in &extra_lines_added_to_input {
-                    tmp_file.write_all(extra_line.as_bytes())?;
-                }
-                let mut buffer = String::new();
-                // read data from the whole input file and write them into the tmp_file
-                input_file.read_to_string(&mut buffer)?;
-                tmp_file.write_all(buffer.as_bytes())?;
-                // We reset the position because tmp_file will be read.
-                tmp_file.seek(SeekFrom::Start(0))?;
-                tmp_file
+                vec!["SET RW_IMPLICIT_FLUSH TO true;\n"]
             }
-            DatabaseMode::PostgreSQL => input_file,
+            DatabaseMode::PostgreSQL => vec![],
         };
-        command.stdin(input_file);
 
-        let expected_output_file = self.file_manager.expected_output_of(&self.test_name)?;
-
-        let output_path = self.file_manager.output_of(&self.test_name)?;
-        let output_file = File::options()
+        let actual_output_path = self.file_manager.output_of(&self.test_name)?;
+        let actual_output_file = File::options()
             .create_new(true)
             .write(true)
-            .open(&output_path)
-            .with_context(|| format!("Failed to create {:?} for writing output.", output_path))?;
-        command.stdout(
-            output_file
-                .try_clone()
-                .with_context(|| format!("Failed to clone output file: {:?}", output_path))?,
-        );
-        command.stderr(output_file);
+            .open(&actual_output_path)
+            .with_context(|| {
+                format!(
+                    "Failed to create {:?} for writing output.",
+                    actual_output_path
+                )
+            })?;
 
+        let error_path = self.file_manager.error_of(&self.test_name)?;
+        let error_file = File::options()
+            .create_new(true)
+            .write(true)
+            .open(&error_path)
+            .with_context(|| format!("Failed to create {:?} for writing error.", error_path))?;
+
+        let mut command = Command::new("psql");
+        command.env(
+            "PGAPPNAME",
+            format!("risingwave_regress/{}", self.test_name),
+        );
+        command.args(args);
         info!(
             "Starting to execute test case: {}, command: {:?}",
             self.test_name, command
         );
-        let status = command
+        let mut child = command
+            .stdin(Stdio::piped())
+            .stdout(actual_output_file.try_clone().with_context(|| {
+                format!("Failed to clone output file: {:?}", actual_output_path)
+            })?)
+            .stderr(error_file)
             .spawn()
-            .with_context(|| format!("Failed to spawn child for test cast: {}", self.test_name))?
-            .wait()
-            .await
-            .with_context(|| {
-                format!("Failed to wait for finishing test cast: {}", self.test_name)
-            })?;
+            .with_context(|| format!("Failed to spawn child for test case: {}", self.test_name))?;
+
+        let child_stdin = child
+            .stdin
+            .as_mut()
+            .ok_or_else(|| anyhow!("Cannot get the stdin handle of the child process."))?;
+        for extra_line in &extra_lines_added_to_input {
+            child_stdin.write_all(extra_line.as_bytes()).await?;
+        }
+        let input_path = self.file_manager.source_of(&self.test_name)?;
+        let input_file_content = read_lines(input_path, 0)?;
+        info!("input_file_content:{}", input_file_content);
+        child_stdin.write_all(input_file_content.as_bytes()).await?;
+
+        let status = child.wait().await.with_context(|| {
+            format!("Failed to wait for finishing test case: {}", self.test_name)
+        })?;
 
         if !status.success() {
-            error!(
-                "Execution of test case {} failed, reason: {:?}",
-                self.test_name, status
+            let error_output = read_lines(&error_path, 0)
+                .with_context(|| format!("Failed to read error file: {:?}", error_path))?;
+            let error_msg = format!(
+                "Execution of test case {} failed, reason:\n{}",
+                self.test_name, error_output
             );
-            bail!(
-                "Execution of test case {} failed, reason: {:?}",
-                self.test_name,
-                status
-            );
+            error!("{}", error_msg);
+            bail!(error_msg);
         }
 
-        let expected_output = read_lines(&expected_output_file, 0).with_context(|| {
+        let expected_output_path = self.file_manager.expected_output_of(&self.test_name)?;
+        let expected_output = read_lines(&expected_output_path, 0).with_context(|| {
             format!(
                 "Failed to read expected output file: {:?}",
-                expected_output_file
+                expected_output_path
             )
         })?;
 
         // Since we may add some lines to the beginning of each file, and these lines will be
         // part of the actual output. So here we ignore those lines.
-        let actual_output = read_lines(&output_path, extra_lines_added_to_input.len())
-            .with_context(|| format!("Failed to read actual output file: {:?}", output_path))?;
+        let actual_output = read_lines(&actual_output_path, extra_lines_added_to_input.len())
+            .with_context(|| {
+                format!(
+                    "Failed to read actual output file: {:?}",
+                    actual_output_path
+                )
+            })?;
 
         if expected_output == actual_output {
             Ok(Same)
@@ -301,11 +308,9 @@ impl TestCase {
                 .write(true)
                 .open(&diff_path)
                 .with_context(|| format!("Failed to create {:?} for writing diff.", diff_path))?;
-            write!(
-                diff_file,
-                "{}",
-                format_diff(&expected_output, &actual_output)
-            )?;
+            let diffs = format_diff(&expected_output, &actual_output);
+            diff_file.write_all(diffs.as_bytes())?;
+            error!("Diff:\n{}", diffs);
             Ok(Different)
         }
     }
