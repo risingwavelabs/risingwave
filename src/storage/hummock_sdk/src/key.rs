@@ -22,6 +22,7 @@ use super::version_cmp::VersionedComparator;
 
 pub type Epoch = u64;
 const EPOCH_LEN: usize = std::mem::size_of::<Epoch>();
+pub const TABLE_PREFIX_LEN: usize = 5;
 
 /// Converts user key to full key by appending `u64::MAX - epoch` to the user key.
 ///
