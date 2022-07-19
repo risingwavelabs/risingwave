@@ -100,7 +100,7 @@ impl<'a, R: Rng> SqlGenerator<'a, R> {
         SqlGenerator {
             tables,
             rng,
-            is_distinct_allowed: rng.gen_bool(0.5);,
+            is_distinct_allowed: rng.gen_bool(0.5),
             bound_relations: vec![],
             bound_columns: vec![],
             is_mview: false,
