@@ -1,5 +1,5 @@
 statement ok
-create source debezium_json_mysql_source ( id int primary key, name varchar(255), description varchar(512), weight float) with ( 'upstream.source' = 'kafka', 'kafka.bootstrap.servers'='localhost:29092', 'kafka.topic' = 'dbserver1.inventory.products') row format 'debezium-json'
+create source debezium_json_mysql_source ( id int primary key, name varchar(255), description varchar(512), weight float) with ( upstream.source = 'kafka', kafka.bootstrap.servers='localhost:29092', kafka.topic = 'dbserver1.inventory.products') row format 'debezium-json'
 
 statement ok
 create materialized view debezium_json_mysql_mv as select * from debezium_json_mysql_source;
