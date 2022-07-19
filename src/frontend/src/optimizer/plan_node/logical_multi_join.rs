@@ -327,11 +327,8 @@ impl LogicalMultiJoin {
         // We will later push down all of the filters back to the individual joins via the
         // `FilterJoinRule`.
         output = LogicalFilter::create(output, self.on.clone());
-        let output_indices = self
-            .output_indices
-            .iter()
-            .map(|idx| reorder_mapping[*idx].unwrap());
-        output = LogicalProject::with_out_col_idx(output, output_indices).into();
+        output =
+            LogicalProject::with_out_col_idx(output, self.output_indices.iter().cloned()).into();
 
         output
     }
