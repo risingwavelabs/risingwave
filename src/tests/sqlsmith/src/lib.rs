@@ -99,7 +99,7 @@ impl<'a, R: Rng> SqlGenerator<'a, R> {
     fn new(rng: &'a mut R, tables: Vec<Table>) -> Self {
         SqlGenerator {
             tables,
-            rng.clone(),
+            rng: rng.clone(),
             is_distinct_allowed: rng.gen_bool(0.5),
             bound_relations: vec![],
             bound_columns: vec![],
