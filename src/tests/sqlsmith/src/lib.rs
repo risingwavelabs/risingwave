@@ -141,6 +141,7 @@ impl<'a, R: Rng> SqlGenerator<'a, R> {
         (mview, table)
     }
 
+    /// Returns query expression and query schema
     fn gen_query(&mut self) -> (Query, Vec<Column>) {
         let with = self.gen_with();
         let (query, schema) = self.gen_set_expr();
@@ -166,7 +167,7 @@ impl<'a, R: Rng> SqlGenerator<'a, R> {
 
     fn gen_with_inner(&mut self) -> With {
         let alias = self.gen_alias_with_prefix("with");
-        let query = todo!();
+        let (query, query_schema) = self.gen_query();
         let from = todo!();
         let cte = Cte {
             alias,
