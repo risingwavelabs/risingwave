@@ -17,11 +17,11 @@ use rand::prelude::SliceRandom;
 use rand::Rng;
 use risingwave_frontend::expr::DataTypeName;
 use risingwave_sqlparser::ast::{
-    DataType, FunctionArg, FunctionArgExpr, ObjectName, TableAlias, TableFactor, TableWithJoins,
+    DataType, FunctionArg, ObjectName, TableAlias, TableFactor, TableWithJoins,
 };
 
-use crate::{Column, Expr, SqlGenerator, Table};
 use crate::utils::{create_alias, create_args};
+use crate::{Column, Expr, SqlGenerator, Table};
 
 impl<'a, R: Rng> SqlGenerator<'a, R> {
     /// Generates time window functions.

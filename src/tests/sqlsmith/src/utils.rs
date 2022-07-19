@@ -12,15 +12,10 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use itertools::Itertools;
-use rand::prelude::SliceRandom;
 use rand::Rng;
-use risingwave_frontend::expr::DataTypeName;
-use risingwave_sqlparser::ast::{
-    DataType, FunctionArg, FunctionArgExpr, ObjectName, TableAlias, TableFactor, TableWithJoins,
-};
+use risingwave_sqlparser::ast::{FunctionArg, FunctionArgExpr, TableAlias};
 
-use crate::{Column, Expr, SqlGenerator, Table};
+use crate::{Expr, SqlGenerator};
 
 impl<'a, R: Rng> SqlGenerator<'a, R> {
     pub(crate) fn create_table_name_with_prefix(&self, prefix: &str) -> String {
@@ -33,14 +28,14 @@ impl<'a, R: Rng> SqlGenerator<'a, R> {
     }
 }
 
-pub (crate) fn create_alias(table_name: &str) -> TableAlias {
+pub(crate) fn create_alias(table_name: &str) -> TableAlias {
     TableAlias {
         name: table_name.into(),
         columns: vec![],
     }
 }
 
-pub (crate) fn create_args(arg_exprs: Vec<Expr>) -> Vec<FunctionArg> {
+pub(crate) fn create_args(arg_exprs: Vec<Expr>) -> Vec<FunctionArg> {
     arg_exprs
         .into_iter()
         .map(create_function_arg_from_expr)
