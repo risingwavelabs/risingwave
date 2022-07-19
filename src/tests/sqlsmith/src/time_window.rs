@@ -20,7 +20,7 @@ use risingwave_sqlparser::ast::{
     DataType, FunctionArg, ObjectName, TableAlias, TableFactor, TableWithJoins,
 };
 
-use crate::utils::{create_alias, create_args};
+use crate::utils::{create_args, create_table_alias};
 use crate::{Column, Expr, SqlGenerator, Table};
 
 impl<'a, R: Rng> SqlGenerator<'a, R> {
@@ -40,7 +40,7 @@ impl<'a, R: Rng> SqlGenerator<'a, R> {
             .choose(&mut self.rng)
             .expect("seeded tables all do not have timestamp");
         let table_name = self.create_table_name_with_prefix("tumble");
-        let alias = create_alias(&table_name);
+        let alias = create_table_alias(&table_name);
 
         let name = Expr::Identifier(source_table_name.as_str().into());
         // TODO: Currently only literal size expr supported.
@@ -65,7 +65,7 @@ impl<'a, R: Rng> SqlGenerator<'a, R> {
             .choose(&mut self.rng)
             .expect("seeded tables all do not have timestamp");
         let table_name = self.create_table_name_with_prefix("hop");
-        let alias = create_alias(&table_name);
+        let alias = create_table_alias(&table_name);
 
         let time_col = time_cols.choose(&mut self.rng).unwrap();
 

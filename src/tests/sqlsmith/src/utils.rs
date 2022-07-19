@@ -45,7 +45,7 @@ impl<'a, R: Rng> SqlGenerator<'a, R> {
 
     pub(crate) fn gen_alias_with_prefix(&self, prefix: &str) -> TableAlias {
         let name = &self.create_table_name_with_prefix(prefix);
-        create_alias(name)
+        create_table_alias(name)
     }
 }
 

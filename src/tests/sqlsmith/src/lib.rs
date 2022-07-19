@@ -171,7 +171,6 @@ impl<'a, R: Rng> SqlGenerator<'a, R> {
     }
 
     /// Generates a simple query which will not recurse.
-    /// e.g. through `gen_with` or other generated parts of the query.
     fn gen_simple_query(&mut self) -> (Query, Vec<Column>) {
         let with_tables = vec![];
         let (query, schema) = self.gen_set_expr(with_tables);
@@ -193,7 +192,7 @@ impl<'a, R: Rng> SqlGenerator<'a, R> {
     fn gen_local_query(&mut self) -> (Query, Vec<Column>) {
         let old_ctxt = self.new_local_ctxt();
         let t = self.gen_query();
-        self.restore_ctxt(old_ctxt);
+        self.restore_context(old_ctxt);
         t
     }
 
