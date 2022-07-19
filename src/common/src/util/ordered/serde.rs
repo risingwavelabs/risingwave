@@ -158,7 +158,7 @@ impl OrderedRowDeserializer {
     pub fn deserialize_prefix_len_with_column_indices(
         &self,
         key: &[u8],
-        column_indices: Vec<usize>,
+        column_indices: impl Iterator<Item = usize>,
     ) -> memcomparable::Result<usize> {
         use crate::types::ScalarImpl;
         let mut len: usize = 0;
@@ -359,7 +359,7 @@ mod tests {
 
         {
             let row_0_idx_0_len = deserializer
-                .deserialize_prefix_len_with_column_indices(&array[0], vec![0])
+                .deserialize_prefix_len_with_column_indices(&array[0], 0..=0)
                 .unwrap();
 
             let schema = vec![DataType::Varchar];
@@ -374,7 +374,7 @@ mod tests {
 
         {
             let row_0_idx_1_len = deserializer
-                .deserialize_prefix_len_with_column_indices(&array[0], vec![0, 1])
+                .deserialize_prefix_len_with_column_indices(&array[0], 0..=1)
                 .unwrap();
 
             let order_types = vec![OrderType::Descending, OrderType::Ascending];
