@@ -71,6 +71,13 @@ pub fn gen_create_mv_plan(
     table.owner = session.user_name().to_string();
     table.properties = properties;
 
+    let ctx = plan.ctx();
+    let explain_trace = ctx.is_explain_trace();
+    if explain_trace {
+        ctx.trace("Create Materialized View:".to_string());
+        ctx.trace(plan.explain_to_string().unwrap());
+    }
+
     Ok((plan, table))
 }
 

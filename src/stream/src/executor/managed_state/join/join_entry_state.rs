@@ -12,7 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use madsim::collections::{btree_map, BTreeMap};
+use std::collections::{btree_map, BTreeMap};
 
 use super::*;
 
