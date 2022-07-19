@@ -186,6 +186,15 @@ impl<'a, R: Rng> SqlGenerator<'a, R> {
         )
     }
 
+    /// Generates a query with local context.
+    /// Used by `WITH`, (and perhaps subquery should use this too)
+    fn gen_local_query(&mut self) -> (Query, Vec<Column>) {
+        let old_ctxt = self.new_local_ctxt();
+        let t = self.gen_query();
+        self.restore_ctxt(old_ctxt);
+        t
+    }
+
     fn gen_with(&mut self) -> Option<With> {
         match self.flip_coin() {
             true => None,
@@ -195,7 +204,7 @@ impl<'a, R: Rng> SqlGenerator<'a, R> {
 
     fn gen_with_inner(&mut self) -> With {
         let alias = self.gen_alias_with_prefix("with");
-        let (query, query_schema) = self.gen_query();
+        let (query, query_schema) = self.gen_local_query();
         let from = None;
         let cte = Cte {
             alias: alias.clone(),
