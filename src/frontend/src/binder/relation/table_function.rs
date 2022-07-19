@@ -63,7 +63,7 @@ impl Binder {
                 )]
                 .into_iter();
 
-                self.bind_context(columns, "unnest".to_string(), None)?;
+                self.bind_table_to_context(columns, "unnest".to_string(), None)?;
 
                 Ok(BoundTableFunction {
                     args: vec![expr],
@@ -114,7 +114,7 @@ impl Binder {
         )]
         .into_iter();
 
-        self.bind_context(columns, "generate_series".to_string(), None)?;
+        self.bind_table_to_context(columns, "generate_series".to_string(), None)?;
 
         Ok(BoundTableFunction {
             args: exprs,
