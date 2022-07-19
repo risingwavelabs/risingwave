@@ -64,7 +64,7 @@ pub(crate) fn create_table_with_joins_from_table(table: &Table) -> TableWithJoin
     }
 }
 
-pub(crate) fn create_alias(table_name: &str) -> TableAlias {
+pub(crate) fn create_table_alias(table_name: &str) -> TableAlias {
     TableAlias {
         name: table_name.into(),
         columns: vec![],
