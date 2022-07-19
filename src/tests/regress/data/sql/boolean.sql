@@ -5,7 +5,6 @@
 --
 -- sanity check - if this fails go insane!
 --
-SET RW_IMPLICIT_FLUSH TO true;
 SELECT 1 AS one;
 
 

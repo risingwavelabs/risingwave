@@ -12,13 +12,19 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use super::super::plan_node::*;
-use super::Rule;
-pub struct ProjectJoinRule {}
-impl Rule for ProjectJoinRule {
-    fn apply(&self, plan: PlanRef) -> Option<PlanRef> {
-        let project = plan.as_logical_project()?;
-        let _join = project.input().clone().as_logical_join()?;
-        todo!()
+#[cfg(target_os = "linux")]
+mod analyze;
+#[cfg(target_os = "linux")]
+mod bench;
+#[cfg(target_os = "linux")]
+mod utils;
+
+#[tokio::main]
+async fn main() {
+    if !cfg!(target_os = "linux") {
+        panic!("only support linux")
     }
+
+    #[cfg(target_os = "linux")]
+    bench::run().await;
 }

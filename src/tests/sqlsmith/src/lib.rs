@@ -28,6 +28,7 @@ mod expr;
 pub use expr::print_function_table;
 mod relation;
 mod scalar;
+mod time_window;
 
 #[derive(Clone, Debug)]
 pub struct Table {
@@ -36,6 +37,10 @@ pub struct Table {
 }
 
 impl Table {
+    pub fn new(name: String, columns: Vec<Column>) -> Self {
+        Self { name, columns }
+    }
+
     pub fn get_qualified_columns(&self) -> Vec<Column> {
         self.columns
             .iter()

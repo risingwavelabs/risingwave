@@ -22,8 +22,8 @@ use crate::optimizer::PlanRef;
 use crate::utils::{ColIndexMapping, Condition};
 
 /// Push `LogicalFilter` down `LogicalApply`
-pub struct ApplyFilter {}
-impl Rule for ApplyFilter {
+pub struct ApplyFilterRule {}
+impl Rule for ApplyFilterRule {
     fn apply(&self, plan: PlanRef) -> Option<PlanRef> {
         let apply = plan.as_logical_apply()?;
         let (left, right, on, join_type, correlated_indices) = apply.clone().decompose();
@@ -78,9 +78,9 @@ impl Rule for ApplyFilter {
     }
 }
 
-impl ApplyFilter {
+impl ApplyFilterRule {
     pub fn create() -> BoxedRule {
-        Box::new(ApplyFilter {})
+        Box::new(ApplyFilterRule {})
     }
 }
 
