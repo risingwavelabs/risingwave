@@ -232,13 +232,6 @@ impl HopWindowExecutor {
         let window_end_col_index = child.schema().len() + 1;
         let contains_window_start = output_indices.contains(&window_start_col_index);
         let contains_window_end = output_indices.contains(&window_end_col_index);
-        if !contains_window_start && !contains_window_end {
-            // make sure that either window_start or window_end is in output indices.
-            return Err(BatchError::Internal(anyhow!(
-                "neither window_start or window_end is in output_indices"
-            ))
-            .into());
-        }
         #[for_await]
         for data_chunk in child.execute() {
             let data_chunk = data_chunk?;

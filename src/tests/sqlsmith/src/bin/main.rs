@@ -12,8 +12,6 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-#![feature(let_chains)]
-
 use core::panic;
 use std::time::Duration;
 
@@ -81,7 +79,11 @@ async fn create_tables(
 ) -> (Vec<Table>, Vec<Table>) {
     log::info!("Preparing tables...");
 
-    let sql = std::fs::read_to_string(format!("{}/tpch.sql", opt.testdata)).unwrap();
+    let seed_files = vec!["tpch.sql", "nexmark.sql"];
+    let sql = seed_files
+        .iter()
+        .map(|filename| std::fs::read_to_string(format!("{}/{}", opt.testdata, filename)).unwrap())
+        .collect::<String>();
 
     let statements =
         Parser::parse_sql(&sql).unwrap_or_else(|_| panic!("Failed to parse SQL: {}", sql));
@@ -116,13 +118,19 @@ async fn create_tables(
 
 async fn drop_tables(mviews: &[Table], opt: &TestOptions, client: &tokio_postgres::Client) {
     log::info!("Cleaning tables...");
-    let sql = std::fs::read_to_string(format!("{}/drop_tpch.sql", opt.testdata)).unwrap();
     for Table { name, .. } in mviews.iter().rev() {
         client
             .execute(&format!("DROP MATERIALIZED VIEW {}", name), &[])
             .await
             .unwrap();
     }
+
+    let seed_files = vec!["drop_tpch.sql", "drop_nexmark.sql"];
+    let sql = seed_files
+        .iter()
+        .map(|filename| std::fs::read_to_string(format!("{}/{}", opt.testdata, filename)).unwrap())
+        .collect::<String>();
+
     for stmt in sql.lines() {
         client.execute(stmt, &[]).await.unwrap();
     }

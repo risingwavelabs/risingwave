@@ -25,7 +25,9 @@ use super::{
 };
 use crate::expr::{ExprImpl, ExprRewriter};
 use crate::optimizer::plan_node::PlanTreeNode;
-use crate::utils::{ColIndexMapping, Condition, ConnectedComponentLabeller};
+use crate::utils::{
+    ColIndexMapping, Condition, ConditionVerboseDisplay, ConnectedComponentLabeller,
+};
 
 /// `LogicalMultiJoin` combines two or more relations according to some condition.
 ///
@@ -54,7 +56,28 @@ pub struct LogicalMultiJoin {
 
 impl fmt::Display for LogicalMultiJoin {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-        write!(f, "LogicalMultiJoin {{ on: {} }}", &self.on)
+        let verbose = self.base.ctx.is_explain_verbose();
+        write!(
+            f,
+            "LogicalMultiJoin {{ on: {} }}",
+            if verbose {
+                let fields = self
+                    .inputs
+                    .iter()
+                    .flat_map(|input| input.schema().fields.clone())
+                    .collect_vec();
+                let input_schema = Schema { fields };
+                format!(
+                    "{}",
+                    ConditionVerboseDisplay {
+                        condition: self.on(),
+                        input_schema: &input_schema,
+                    }
+                )
+            } else {
+                format!("{}", self.on)
+            }
+        )
     }
 }
 

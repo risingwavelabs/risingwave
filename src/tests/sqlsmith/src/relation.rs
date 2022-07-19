@@ -34,7 +34,8 @@ impl<'a, R: Rng> SqlGenerator<'a, R> {
     /// A relation specified in the FROM clause.
     pub(crate) fn gen_from_relation(&mut self) -> TableWithJoins {
         match self.rng.gen_range(0..=9) {
-            0..=9 => self.gen_simple_table(),
+            0..=8 => self.gen_simple_table(),
+            9..=9 => self.gen_time_window_func(),
             // TODO: Enable after resolving: <https://github.com/singularity-data/risingwave/issues/2771>.
             10..=10 => self.gen_equijoin_clause(),
             // TODO: Currently `gen_subquery` will cause panic due to some wrong assertions.

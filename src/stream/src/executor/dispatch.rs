@@ -12,6 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+use std::collections::{HashMap, HashSet};
 use std::fmt::Debug;
 use std::future::Future;
 use std::iter::repeat_with;
@@ -21,7 +22,6 @@ use async_trait::async_trait;
 use futures::Stream;
 use futures_async_stream::try_stream;
 use itertools::Itertools;
-use madsim::collections::{HashMap, HashSet};
 use risingwave_common::array::{Op, StreamChunk};
 use risingwave_common::buffer::BitmapBuilder;
 use risingwave_common::error::{internal_error, Result};
@@ -277,6 +277,7 @@ impl DispatchExecutorInner {
     }
 
     /// For `Add` and `Update`, update the dispatchers before we dispatch the barrier.
+    #[expect(clippy::unused_async)]
     async fn pre_mutate_dispatchers(&mut self, mutation: &Option<Arc<Mutation>>) -> Result<()> {
         let Some(mutation) = mutation.as_deref() else {
             return Ok(())
@@ -300,6 +301,7 @@ impl DispatchExecutorInner {
     }
 
     /// For `Stop` and `Update`, update the dispatchers after we dispatch the barrier.
+    #[expect(clippy::unused_async)]
     async fn post_mutate_dispatchers(&mut self, mutation: &Option<Arc<Mutation>>) -> Result<()> {
         let Some(mutation) = mutation.as_deref() else {
             return Ok(())

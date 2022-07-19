@@ -47,8 +47,8 @@ pub type ExprType = risingwave_pb::expr::expr_node::Type;
 pub use expr_rewriter::ExprRewriter;
 pub use expr_visitor::ExprVisitor;
 pub use type_inference::{
-    align_types, cast_map_array, cast_ok, func_sigs, infer_type, least_restrictive, CastContext,
-    DataTypeName, FuncSign,
+    agg_func_sigs, align_types, cast_map_array, cast_ok, func_sigs, infer_type, least_restrictive,
+    AggFuncSig, CastContext, DataTypeName, FuncSign,
 };
 pub use utils::*;
 
@@ -347,7 +347,7 @@ impl ExprImpl {
         }
     }
 
-    pub fn as_eq_const(&self) -> Option<(InputRef, Literal)> {
+    pub fn as_eq_literal(&self) -> Option<(InputRef, Literal)> {
         if let ExprImpl::FunctionCall(function_call) = self &&
         function_call.get_expr_type() == ExprType::Equal{
             match function_call.clone().decompose_as_binary() {
@@ -360,7 +360,7 @@ impl ExprImpl {
         }
     }
 
-    pub fn as_comparison_const(&self) -> Option<(InputRef, ExprType, Literal)> {
+    pub fn as_comparison_literal(&self) -> Option<(InputRef, ExprType, Literal)> {
         fn reverse_comparison(comparison: ExprType) -> ExprType {
             match comparison {
                 ExprType::LessThan => ExprType::GreaterThan,
@@ -388,6 +388,25 @@ impl ExprImpl {
                 }
                 _ => None,
             }
+        } else {
+            None
+        }
+    }
+
+    pub fn as_in_literal_list(&self) -> Option<(InputRef, Vec<Literal>)> {
+        if let ExprImpl::FunctionCall(function_call) = self &&
+        function_call.get_expr_type() == ExprType::In {
+            let mut inputs = function_call.inputs().iter().cloned();
+            let input_ref= match inputs.next().unwrap() {
+                ExprImpl::InputRef(i) => *i,
+                _ => unreachable!()
+            };
+            let list: Option<Vec<_>> = inputs.map(|expr| match expr {
+                ExprImpl::Literal(x) => Some(*x),
+             _ => None ,
+            }).collect();
+
+            list.map(|list| (input_ref, list))
         } else {
             None
         }

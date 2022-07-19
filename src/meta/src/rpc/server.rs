@@ -367,7 +367,6 @@ pub async fn rpc_serve_with_store<S: MetaStore>(
             source_manager.clone(),
             compaction_group_manager.clone(),
         )
-        .await
         .unwrap(),
     );
 
