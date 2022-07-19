@@ -457,6 +457,7 @@ define_keywords!(
     TINYINT,
     TO,
     TOP,
+    TRACE,
     TRAILING,
     TRANSACTION,
     TRANSLATE,

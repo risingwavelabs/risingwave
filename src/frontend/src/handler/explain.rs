@@ -32,9 +32,11 @@ pub(super) fn handle_explain(
     context: OptimizerContext,
     stmt: Statement,
     verbose: bool,
+    trace: bool,
 ) -> Result<PgResponse> {
     let session = context.session_ctx.clone();
     context.explain_verbose.store(verbose, Ordering::Release);
+    context.explain_trace.store(trace, Ordering::Release);
     // bind, plan, optimize, and serialize here
     let mut planner = Planner::new(context.into());
     let plan = match stmt {
@@ -47,7 +49,7 @@ pub(super) fn handle_explain(
             ..
         } => {
             gen_create_mv_plan(
-                &*session,
+                &session,
                 planner.ctx(),
                 query,
                 name,
@@ -63,7 +65,7 @@ pub(super) fn handle_explain(
             ..
         } => {
             gen_create_table_plan(
-                &*session,
+                &session,
                 planner.ctx(),
                 name,
                 columns,
@@ -77,7 +79,7 @@ pub(super) fn handle_explain(
             table_name,
             columns,
             ..
-        } => gen_create_index_plan(&*session, planner.ctx(), name, table_name, columns)?.0,
+        } => gen_create_index_plan(&session, planner.ctx(), name, table_name, columns)?.0,
 
         stmt => {
             let bound = {
@@ -92,12 +94,23 @@ pub(super) fn handle_explain(
         }
     };
 
-    let output = plan.explain_to_string()?;
+    let ctx = plan.plan_base().ctx.clone();
+    let explain_trace = ctx.is_explain_trace();
 
-    let rows = output
-        .lines()
-        .map(|s| Row::new(vec![Some(s.into())]))
-        .collect::<Vec<_>>();
+    let rows = if explain_trace {
+        let trace = ctx.take_trace();
+        trace
+            .iter()
+            .flat_map(|s| s.lines())
+            .map(|s| Row::new(vec![Some(s.into())]))
+            .collect::<Vec<_>>()
+    } else {
+        let output = plan.explain_to_string()?;
+        output
+            .lines()
+            .map(|s| Row::new(vec![Some(s.into())]))
+            .collect::<Vec<_>>()
+    };
 
     Ok(PgResponse::new(
         StatementType::EXPLAIN,

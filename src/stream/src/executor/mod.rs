@@ -12,6 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+use std::collections::{HashMap, HashSet};
 use std::fmt::Debug;
 use std::sync::Arc;
 
@@ -20,7 +21,6 @@ use error::StreamExecutorResult;
 use futures::stream::BoxStream;
 use futures::{Stream, StreamExt};
 use itertools::Itertools;
-use madsim::collections::{HashMap, HashSet};
 use risingwave_common::array::column::Column;
 use risingwave_common::array::{ArrayImpl, ArrayRef, DataChunk, StreamChunk};
 use risingwave_common::buffer::Bitmap;
@@ -66,6 +66,7 @@ pub mod merge;
 pub mod monitor;
 mod mview;
 mod project;
+mod project_set;
 mod rearranged_chain;
 pub mod receiver;
 mod simple;
@@ -100,6 +101,7 @@ pub use managed_state::join::{JoinCachePolicy, JoinCachePolicyPrimitive};
 pub use merge::MergeExecutor;
 pub use mview::*;
 pub use project::ProjectExecutor;
+pub use project_set::*;
 pub use rearranged_chain::RearrangedChainExecutor;
 use risingwave_pb::source::{ConnectorSplit, ConnectorSplits};
 use simple::{SimpleExecutor, SimpleExecutorWrapper};

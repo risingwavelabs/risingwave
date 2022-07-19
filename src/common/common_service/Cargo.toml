@@ -11,7 +11,7 @@ prometheus = { version = "0.13" }
 risingwave_common = { path = "../" }
 risingwave_pb = { path = "../../prost" }
 risingwave_rpc_client = { path = "../../rpc_client" }
-tokio = { version = "=0.2.0-alpha.3", package = "madsim-tokio", features = ["rt", "rt-multi-thread", "sync", "macros", "time", "signal"] }
+tokio = { version = "=0.2.0-alpha.4", package = "madsim-tokio", features = ["rt", "rt-multi-thread", "sync", "macros", "time", "signal"] }
 tower = { version = "0.4", features = ["util", "load-shed"] }
 tower-http = { version = "0.2", features = ["add-extension", "cors"] }
 tracing = { version = "0.1" }

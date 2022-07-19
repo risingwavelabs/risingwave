@@ -20,12 +20,14 @@ use anyhow::anyhow;
 use arc_swap::ArcSwap;
 use futures::{stream, StreamExt};
 use itertools::Itertools;
+use risingwave_common::bail;
+use risingwave_common::util::worker_util::get_workers_by_parallel_unit_ids;
 use risingwave_pb::batch_plan::plan_node::NodeBody;
 use risingwave_pb::batch_plan::{
     ExchangeNode, ExchangeSource, MergeSortExchangeNode, PlanFragment, PlanNode as PlanNodeProst,
     TaskId as TaskIdProst, TaskOutputId,
 };
-use risingwave_pb::common::{Buffer, HostAddress, WorkerNode};
+use risingwave_pb::common::{HostAddress, WorkerNode};
 use risingwave_rpc_client::ComputeClientPoolRef;
 use tokio::spawn;
 use tokio::sync::mpsc::{channel, Receiver, Sender};
@@ -38,7 +40,9 @@ use StageEvent::Failed;
 use crate::optimizer::plan_node::PlanNodeType;
 use crate::scheduler::distributed::stage::StageState::Pending;
 use crate::scheduler::distributed::QueryMessage;
-use crate::scheduler::plan_fragmenter::{ExecutionPlanNode, QueryStageRef, StageId, TaskId};
+use crate::scheduler::plan_fragmenter::{
+    ExecutionPlanNode, PartitionInfo, QueryStageRef, StageId, TaskId,
+};
 use crate::scheduler::worker_node_manager::WorkerNodeManagerRef;
 use crate::scheduler::SchedulerError::Internal;
 use crate::scheduler::{SchedulerError, SchedulerResult};
@@ -198,6 +202,7 @@ impl StageExecution {
         }
     }
 
+    #[expect(clippy::unused_async)]
     pub async fn stop(&self) -> SchedulerResult<()> {
         todo!()
     }
@@ -293,16 +298,18 @@ impl StageRunner {
     async fn schedule_tasks(&self) -> SchedulerResult<()> {
         let mut futures = vec![];
 
-        if let Some(table_scan_info) = self.stage.table_scan_info.as_ref() && let Some(vnode_bitmaps) = table_scan_info.vnode_bitmaps.as_ref() {
+        if let Some(table_scan_info) = self.stage.table_scan_info.as_ref() && let Some(vnode_bitmaps) = table_scan_info.partitions.as_ref() {
             // If the stage has table scan nodes, we create tasks according to the data distribution
             // and partition of the table.
             // We let each task read one partition by setting the `vnode_ranges` of the scan node in
             // the task.
             // We schedule the task to the worker node that owns the data partition.
             let parallel_unit_ids = vnode_bitmaps.keys().cloned().collect_vec();
-            let workers = self
-                .worker_node_manager
-                .get_workers_by_parallel_unit_ids(&parallel_unit_ids)?;
+            let all_workers = self.worker_node_manager.list_worker_nodes();
+            let workers = match get_workers_by_parallel_unit_ids(&all_workers, &parallel_unit_ids) {
+                Ok(workers) => workers,
+                Err(e) => bail!("{}", e)
+            };
 
             for (i, (parallel_unit_id, worker)) in parallel_unit_ids
                 .into_iter()
@@ -347,6 +354,7 @@ impl StageRunner {
             .host
             .unwrap();
 
+        #[expect(clippy::needless_borrow)]
         let compute_client = self
             .compute_client_pool
             .get_client_for_addr((&worker_node_addr).into())
@@ -367,8 +375,12 @@ impl StageRunner {
         Ok(())
     }
 
-    fn create_plan_fragment(&self, task_id: TaskId, vnode_bitmap: Option<Buffer>) -> PlanFragment {
-        let plan_node_prost = self.convert_plan_node(&self.stage.root, task_id, vnode_bitmap);
+    fn create_plan_fragment(
+        &self,
+        task_id: TaskId,
+        partition: Option<PartitionInfo>,
+    ) -> PlanFragment {
+        let plan_node_prost = self.convert_plan_node(&self.stage.root, task_id, partition);
         let exchange_info = self.stage.exchange_info.clone();
 
         PlanFragment {
@@ -381,7 +393,7 @@ impl StageRunner {
         &self,
         execution_plan_node: &ExecutionPlanNode,
         task_id: TaskId,
-        vnode_bitmap: Option<Buffer>,
+        partition: Option<PartitionInfo>,
     ) -> PlanNodeProst {
         match execution_plan_node.plan_node_type {
             PlanNodeType::BatchExchange => {
@@ -429,7 +441,9 @@ impl StageRunner {
                 let NodeBody::RowSeqScan(mut scan_node) = node_body else {
                     unreachable!();
                 };
-                scan_node.vnode_bitmap = vnode_bitmap;
+                let partition = partition.unwrap();
+                scan_node.vnode_bitmap = Some(partition.vnode_bitmap);
+                scan_node.scan_ranges = partition.scan_ranges;
                 PlanNodeProst {
                     children: vec![],
                     // TODO: Generate meaningful identify
@@ -441,7 +455,7 @@ impl StageRunner {
                 let children = execution_plan_node
                     .children
                     .iter()
-                    .map(|e| self.convert_plan_node(e, task_id, vnode_bitmap.clone()))
+                    .map(|e| self.convert_plan_node(e, task_id, partition.clone()))
                     .collect();
 
                 PlanNodeProst {

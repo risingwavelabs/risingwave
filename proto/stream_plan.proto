@@ -324,6 +324,10 @@ message ExpandNode {
   repeated Subset column_subsets = 1;
 }
 
+message ProjectSetNode {
+  repeated expr.ProjectSetSelectItem select_list = 1;
+}
+
 message StreamNode {
   oneof node_body {
     SourceNode source = 100;
@@ -349,6 +353,7 @@ message StreamNode {
     SinkNode sink = 120;
     ExpandNode expand = 121;
     DynamicFilterNode dynamic_filter = 122;
+    ProjectSetNode project_set = 123;
   }
   // The id for the operator. This is local per mview.
   // TODO: should better be a uint32.
