@@ -80,7 +80,7 @@ impl ObserverManager {
                         self.observer_states.handle_notification(resp.unwrap());
                     }
                     Err(e) => {
-                        tracing::warn!("receives meta's notification err {:?}", e);
+                        tracing::error!("Receives meta's notification err {:?}", e);
                         self.re_subscribe().await;
                     }
                 }
