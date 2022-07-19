@@ -4682,6 +4682,7 @@ dependencies = [
  "madsim-tokio",
  "path-absolutize",
  "similar",
+ "tempfile",
  "workspace-hack",
 ]
 
