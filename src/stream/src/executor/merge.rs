@@ -583,13 +583,17 @@ mod tests {
                 }
             };
         }
-        let mut recv = || merge.next().now_or_never().flatten().transpose().unwrap();
+        macro_rules! recv {
+            () => {
+                merge.next().now_or_never().flatten().transpose().unwrap()
+            };
+        }
 
         // 3. Send a chunk.
         send!([234, 235], Message::Chunk(StreamChunk::default()));
-        recv().unwrap().as_chunk().unwrap(); // We should be able to receive the chunk twice.
-        recv().unwrap().as_chunk().unwrap();
-        assert!(recv().is_none());
+        recv!().unwrap().as_chunk().unwrap(); // We should be able to receive the chunk twice.
+        recv!().unwrap().as_chunk().unwrap();
+        assert!(recv!().is_none());
 
         // 4. Send a configuration change barrier.
         let merge_updates = maplit::hashmap! {
@@ -604,16 +608,16 @@ mod tests {
             merges: merge_updates,
         });
         send!([234, 235], Message::Barrier(b1.clone()));
-        assert!(recv().is_none()); // We should not receive the barrier, since merger is waiting for the new upstream 238.
+        assert!(recv!().is_none()); // We should not receive the barrier, since merger is waiting for the new upstream 238.
 
         send!([238], Message::Barrier(b1.clone()));
-        recv().unwrap().as_barrier().unwrap(); // We should now receive the barrier.
+        recv!().unwrap().as_barrier().unwrap(); // We should now receive the barrier.
 
         // 5. Send a chunk.
         send!([234, 238], Message::Chunk(StreamChunk::default()));
-        recv().unwrap().as_chunk().unwrap(); // We should be able to receive the chunk twice, since 235 is removed.
-        recv().unwrap().as_chunk().unwrap();
-        assert!(recv().is_none());
+        recv!().unwrap().as_chunk().unwrap(); // We should be able to receive the chunk twice, since 235 is removed.
+        recv!().unwrap().as_chunk().unwrap();
+        assert!(recv!().is_none());
     }
 
     struct FakeExchangeService {
