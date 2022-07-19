@@ -132,39 +132,37 @@ pub(crate) fn new_input(
     metrics: Arc<StreamingMetrics>,
     actor_id: ActorId,
     fragment_id: FragmentId,
-    upstream_id: ActorId,
+    upstream_actor_id: ActorId,
     upstream_fragment_id: FragmentId,
 ) -> Result<Upstream> {
-    let upstream_addr = context.get_actor_info(&upstream_id)?.get_host()?.into();
+    let upstream_addr = context
+        .get_actor_info(&upstream_actor_id)?
+        .get_host()?
+        .into();
     if !is_local_address(&upstream_addr, &context.addr) {
         // Get the sender for `RemoteInput` to forward received messages to receivers in
         // `ReceiverExecutor` or `MergeExecutor`.
-        let sender = context.take_sender(&(upstream_id, actor_id))?;
+        let sender = context.take_sender(&(upstream_actor_id, actor_id))?;
         // spawn the `RemoteInput`
         let pool = context.compute_client_pool.clone();
         tokio::spawn(async move {
-            let init_client = async move {
-                let remote_input = RemoteInput::create(
-                    pool.get_client_for_addr(upstream_addr).await?,
-                    (upstream_id, actor_id),
-                    (upstream_fragment_id, fragment_id),
-                    sender,
-                    metrics,
-                )
-                .await?;
-                Ok::<_, RwError>(remote_input)
-            };
-            match init_client.await {
-                Ok(remote_input) => remote_input.run().await,
-                Err(e) => {
-                    error!("Spawn remote input fails:{}", e);
-                }
-            }
+            let remote_input = RemoteInput::create(
+                pool.get_client_for_addr(upstream_addr).await?,
+                (upstream_actor_id, actor_id),
+                (upstream_fragment_id, fragment_id),
+                sender,
+                metrics,
+            )
+            .await
+            .inspect_err(|e| error!("Spawn remote input fails:{}", e))?;
+
+            remote_input.run().await;
+            Ok::<_, RwError>(())
         });
     }
-    let rx = context.take_receiver(&(upstream_id, actor_id))?;
+    let rx = context.take_receiver(&(upstream_actor_id, actor_id))?;
 
-    Ok((upstream_id, rx))
+    Ok((upstream_actor_id, rx))
 }
 
 pub type Upstream = (ActorId, Receiver<Message>);
