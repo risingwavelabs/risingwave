@@ -251,7 +251,7 @@ impl Binder {
                     self.try_mark_lateral_as_invisible();
                     Err(ErrorCode::NotImplemented(
                         "lateral subqueries are not yet supported".into(),
-                        None.into(),
+                        Some(3815).into(),
                     )
                     .into())
                 } else {
