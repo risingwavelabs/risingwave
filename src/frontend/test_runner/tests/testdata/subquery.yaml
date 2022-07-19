@@ -128,17 +128,6 @@
     );
   binder_error: 'Item not found: Invalid column: c'
 - sql: |
-    /* Reference to left table should be permitted with lateral */
-    create table ab (a int, b int);
-    create table bc (b int, c int);
-    create table t (v1 int, v2 int);
-    select * from ab where exists (
-      select * from bc, lateral (
-          select * from t where v1 = a and v2 = c
-      ) as t0
-    );
-  binder_error: 'Feature is not yet implemented: lateral subqueries are not yet supported, Tracking issue: https://github.com/singularity-data/risingwave/issues/3815'
-- sql: |
     /* We need to ensure doubly nested reference to a left table is not permitted */
     create table ab (a int, b int);
     create table bc (b int, c int);
@@ -149,14 +138,3 @@
       ) as t0
     );
   binder_error: 'Item not found: Invalid column: a'
-- sql: |
-    /* Doubly nested reference to a left table with lateral is permitted */
-    create table ab (a int, b int);
-    create table bc (b int, c int);
-    create table t (v1 int, v2 int);
-    select * from ab, lateral (
-      select * from bc, (
-          select * from t where v1 = a
-      ) as t0
-    );
-  binder_error: 'Feature is not yet implemented: lateral subqueries are not yet supported, Tracking issue: https://github.com/singularity-data/risingwave/issues/3815'
