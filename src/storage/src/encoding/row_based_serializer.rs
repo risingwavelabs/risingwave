@@ -53,11 +53,17 @@ impl Encoding for RowBasedSerializer {
 
     fn serialize_for_update(
         &mut self,
-        _vnode: risingwave_common::types::VirtualNode,
-        _pk: &[u8],
-        _row: Row,
+        vnode: risingwave_common::types::VirtualNode,
+        pk: &[u8],
+        row: Row,
     ) -> Result<Vec<Option<(super::KeyBytes, super::ValueBytes)>>> {
-        unreachable!();
+        let mut value_bytes = vec![];
+        let key = [vnode.to_be_bytes().as_slice(), pk].concat();
+        for cell in &row.0 {
+            value_bytes.extend(serialize_datum(cell)?);
+        }
+        let res = vec![Some((key, value_bytes))];
+        Ok(res)
     }
 
     fn column_ids(&self) -> &[risingwave_common::catalog::ColumnId] {
