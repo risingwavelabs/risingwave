@@ -1,0 +1,118 @@
+statement ok
+CREATE TABLE order_events (
+    order_id VARCHAR,
+    item_id VARCHAR,
+    item_price DOUBLE PRECISION,
+    event_timestamp TIMESTAMP
+);
+
+statement ok
+INSERT INTO
+    order_events (order_id, item_id, item_price, event_timestamp)
+values
+    ('58', '467', 8316.518912, '2022-07-19 12:31:22.07'),
+    ('58', '809', 9532.930970, '2022-07-19 12:31:22.07'),
+    ('58', '759', 1682.144385, '2022-07-19 12:31:22.07'),
+    ('58', '19', 3378.811626, '2022-07-19 12:31:22.07'),
+    ('62', '804', 5343.655381, '2022-07-19 12:31:22.07'),
+    ('62', '218', 2443.691829, '2022-07-19 12:31:22.07'),
+    ('62', '803', 2443.632235, '2022-07-19 12:31:22.07'),
+    ('63', '74', 390.383406, '2022-07-19 12:31:22.07');
+
+statement ok
+CREATE MATERIALIZED VIEW order_details AS
+SELECT
+    order_id,
+    ROUND(SUM(item_price)::NUMERIC, 2) AS total_price,
+    ROUND(AVG(item_price)::NUMERIC, 2) AS avg_price
+FROM
+    order_events
+GROUP BY
+    order_id;
+
+statement ok
+flush;
+
+query IRR rowsort
+SELECT * FROM order_details;
+----
+58 22910.41 5727.60
+62 10230.98 3410.33
+63 390.38 390.38
+
+query IRR rowsort
+SELECT
+    order_id,
+    ROUND(SUM(item_price)::NUMERIC, 2) AS total_price,
+    ROUND(AVG(item_price)::NUMERIC, 2) AS avg_price
+FROM
+    order_events
+GROUP BY
+    order_id;
+----
+58 22910.41 5727.60
+62 10230.98 3410.33
+63 390.38 390.38
+
+statement ok
+DROP MATERIALIZED VIEW order_details;
+
+statement ok
+DROP TABLE order_events;
+
+statement ok
+CREATE TABLE parcel_events (
+    order_id VARCHAR,
+    event_timestamp TIMESTAMP,
+    event_type VARCHAR
+);
+
+statement ok
+INSERT INTO parcel_events
+(order_id, event_timestamp, event_type) VALUES
+('56', '2022-07-19 12:31:22.07', 'order_created'),
+('76', '2022-07-19 12:31:23.07', 'order_created'),
+('77', '2022-07-19 12:31:24.07', 'order_created'),
+('56', '2022-07-20 12:31:22.07', 'parcel_shipped'),
+('76', '2022-08-10 12:31:22.07', 'parcel_shipped');
+
+statement ok
+CREATE MATERIALIZED VIEW abnormal_delivery AS
+SELECT
+    t1.order_id AS order_id,
+    (t2.event_timestamp - t1.event_timestamp) as delivery_time
+FROM
+    (
+        SELECT
+            order_id,
+            event_timestamp
+        FROM
+            parcel_events
+        WHERE
+            event_type = 'order_created'
+    ) AS t1
+    JOIN (
+        SELECT
+            order_id,
+            event_timestamp
+        FROM
+            parcel_events
+        WHERE
+            event_type = 'parcel_shipped'
+    ) t2 ON t1.order_id = t2.order_id
+where
+    t2.event_timestamp - t1.event_timestamp > interval '7 days';
+
+statement ok
+flush;
+
+query IT rowsort
+SELECT * FROM abnormal_delivery;
+----
+76       21 days 23:59:59
+
+statement ok
+DROP MATERIALIZED VIEW abnormal_delivery;
+
+statement ok
+DROP TABLE parcel_events;
