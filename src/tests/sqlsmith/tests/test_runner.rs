@@ -12,8 +12,6 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-#![feature(let_chains)]
-
 use std::sync::Arc;
 use std::{env, panic};
 
@@ -29,7 +27,11 @@ use risingwave_sqlsmith::{mview_sql_gen, sql_gen, Table};
 
 /// Create the tables defined in testdata.
 async fn create_tables(session: Arc<SessionImpl>, rng: &mut impl Rng) -> Vec<Table> {
-    let sql = std::fs::read_to_string("tests/testdata/tpch.sql").unwrap();
+    let seed_files = vec!["tests/testdata/tpch.sql", "tests/testdata/nexmark.sql"];
+    let sql = seed_files
+        .iter()
+        .map(|filename| std::fs::read_to_string(filename).unwrap())
+        .collect::<String>();
     let statements =
         Parser::parse_sql(&sql).unwrap_or_else(|_| panic!("Failed to parse SQL: {}", sql));
     let n_statements = statements.len();
@@ -76,10 +78,8 @@ async fn run_sqlsmith_with_seed(seed: u64) {
     }
 
     let tables = create_tables(session.clone(), &mut rng).await;
-
     for _ in 0..512 {
         let sql = sql_gen(&mut rng, tables.clone());
-
         let sql_copy = sql.clone();
         panic::set_hook(Box::new(move |e| {
             println!("Panic on SQL:\n{}\nReason:\n{}", sql_copy.clone(), e);

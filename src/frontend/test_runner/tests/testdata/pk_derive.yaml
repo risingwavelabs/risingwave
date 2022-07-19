@@ -71,7 +71,7 @@
         v2,
         v3;
   optimized_logical_plan: |
-    LogicalAgg { group_key: [0, 1, 2], agg_calls: [] }
+    LogicalAgg { group_key: [$0, $1, $2], aggs: [] }
       LogicalScan { table: t, columns: [v1, v2, v3] }
   stream_plan: |
     StreamMaterialize { columns: [v1, v2, v3, count(hidden)], pk_columns: [v1, v2, v3] }

@@ -17,7 +17,7 @@ use std::io::{Error, ErrorKind};
 use std::marker::Sync;
 use std::path::PathBuf;
 use std::sync::atomic::{AtomicBool, AtomicI32, Ordering};
-use std::sync::Arc;
+use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
 use parking_lot::{RwLock, RwLockReadGuard};
@@ -67,6 +67,11 @@ pub struct OptimizerContext {
 
     /// it indicates whether the explain mode is verbose for explain statement
     pub explain_verbose: AtomicBool,
+
+    /// it indicates whether the explain mode is trace for explain statement
+    pub explain_trace: AtomicBool,
+    /// Store the trace of optimizer
+    pub optimizer_trace: Arc<Mutex<Vec<String>>>,
 }
 
 #[derive(Clone, Debug)]
@@ -99,6 +104,21 @@ impl OptimizerContextRef {
     pub fn is_explain_verbose(&self) -> bool {
         self.inner.explain_verbose.load(Ordering::Acquire)
     }
+
+    pub fn is_explain_trace(&self) -> bool {
+        self.inner.explain_trace.load(Ordering::Acquire)
+    }
+
+    pub fn trace(&self, str: String) {
+        let mut guard = self.inner.optimizer_trace.lock().unwrap();
+        guard.push(str);
+        guard.push("\n".to_string());
+    }
+
+    pub fn take_trace(&self) -> Vec<String> {
+        let mut guard = self.inner.optimizer_trace.lock().unwrap();
+        guard.drain(..).collect()
+    }
 }
 
 impl OptimizerContext {
@@ -108,17 +128,22 @@ impl OptimizerContext {
             next_id: AtomicI32::new(0),
             sql,
             explain_verbose: AtomicBool::new(false),
+            explain_trace: AtomicBool::new(false),
+            optimizer_trace: Arc::new(Mutex::new(vec![])),
         }
     }
 
     // TODO(TaoWu): Remove the async.
     #[cfg(test)]
+    #[expect(clippy::unused_async)]
     pub async fn mock() -> OptimizerContextRef {
         Self {
             session_ctx: Arc::new(SessionImpl::mock()),
             next_id: AtomicI32::new(0),
             sql: Arc::from(""),
             explain_verbose: AtomicBool::new(false),
+            explain_trace: AtomicBool::new(false),
+            optimizer_trace: Arc::new(Mutex::new(vec![])),
         }
         .into()
     }
@@ -288,6 +313,7 @@ impl FrontendEnv {
     }
 
     /// Get a reference to the frontend env's catalog writer.
+    #[expect(clippy::explicit_auto_deref)]
     pub fn catalog_writer(&self) -> &dyn CatalogWriter {
         &*self.catalog_writer
     }
@@ -298,6 +324,7 @@ impl FrontendEnv {
     }
 
     /// Get a reference to the frontend env's user info writer.
+    #[expect(clippy::explicit_auto_deref)]
     pub fn user_info_writer(&self) -> &dyn UserInfoWriter {
         &*self.user_info_writer
     }
@@ -307,6 +334,7 @@ impl FrontendEnv {
         &self.user_info_reader
     }
 
+    #[expect(clippy::explicit_auto_deref)]
     pub fn worker_node_manager(&self) -> &WorkerNodeManager {
         &*self.worker_node_manager
     }
@@ -315,6 +343,7 @@ impl FrontendEnv {
         self.worker_node_manager.clone()
     }
 
+    #[expect(clippy::explicit_auto_deref)]
     pub fn meta_client(&self) -> &dyn FrontendMetaClient {
         &*self.meta_client
     }

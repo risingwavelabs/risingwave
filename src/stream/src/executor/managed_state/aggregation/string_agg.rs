@@ -14,9 +14,10 @@
 
 #![allow(dead_code)]
 
+use std::collections::BTreeMap;
+
 use bytes::Bytes;
 use itertools::Itertools;
-use madsim::collections::BTreeMap;
 use risingwave_common::array::stream_chunk::{Op, Ops};
 use risingwave_common::array::ArrayImpl;
 use risingwave_common::buffer::Bitmap;
@@ -72,7 +73,7 @@ pub struct ManagedStringAggState<S: StateStore> {
 impl<S: StateStore> ManagedStringAggState<S> {
     /// Create a managed string agg state based on `Keyspace`.
     // TODO: enable string agg state
-    pub async fn new(
+    pub fn new(
         keyspace: Keyspace<S>,
         row_count: usize,
         sort_key_indices: Vec<usize>,
@@ -290,7 +291,7 @@ mod tests {
 
     use super::*;
 
-    async fn create_managed_state<S: StateStore>(
+    fn create_managed_state<S: StateStore>(
         store: S,
         table_id: TableId,
         row_count: usize,
@@ -299,7 +300,6 @@ mod tests {
         let value_index = 0;
         let orderings = vec![OrderType::Descending, OrderType::Ascending];
         let order_pairs = orderings
-            .clone()
             .into_iter()
             .zip_eq(sort_key_indices.clone().into_iter())
             .map(|(ord, idx)| OrderPair::new(idx, ord))
@@ -314,7 +314,6 @@ mod tests {
             "||".to_string(),
             sort_key_serializer,
         )
-        .await
         .unwrap()
     }
 
@@ -325,7 +324,7 @@ mod tests {
     #[tokio::test]
     async fn test_managed_string_agg_state() {
         let store = MemoryStateStore::new();
-        let mut managed_state = create_managed_state(store.clone(), TableId::from(0x2333), 0).await;
+        let mut managed_state = create_managed_state(store.clone(), TableId::from(0x2333), 0);
         assert!(!managed_state.is_dirty());
         let mut epoch: u64 = 0;
         let mut state_table = mock_state_table(MemoryStateStore::new(), TableId::from(0x2333));
@@ -453,7 +452,7 @@ mod tests {
 
         // Recover the state by `row_count`.
         let mut managed_state =
-            create_managed_state(store.clone(), TableId::from(0x2333), row_count).await;
+            create_managed_state(store.clone(), TableId::from(0x2333), row_count);
         assert!(!managed_state.is_dirty());
         // Get the output after recovery
         assert_eq!(
@@ -541,7 +540,7 @@ mod tests {
 
         drop(managed_state);
         let mut managed_state =
-            create_managed_state(store.clone(), TableId::from(0x2333), row_count).await;
+            create_managed_state(store.clone(), TableId::from(0x2333), row_count);
         // Delete right after recovery.
         managed_state
             .apply_batch(
@@ -578,7 +577,7 @@ mod tests {
 
         drop(managed_state);
         let mut managed_state =
-            create_managed_state(store.clone(), TableId::from(0x2333), row_count).await;
+            create_managed_state(store.clone(), TableId::from(0x2333), row_count);
         assert_eq!(
             managed_state.get_output(epoch, &state_table).await.unwrap(),
             Some(ScalarImpl::Utf8("miko||miko".to_string()))
@@ -611,7 +610,7 @@ mod tests {
 
         drop(managed_state);
         let mut managed_state =
-            create_managed_state(store.clone(), TableId::from(0x2333), row_count).await;
+            create_managed_state(store.clone(), TableId::from(0x2333), row_count);
         // As we didn't flush the changes, the result should be the same as the result before last
         // changes.
         assert_eq!(
