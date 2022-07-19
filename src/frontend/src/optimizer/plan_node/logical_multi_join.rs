@@ -39,22 +39,33 @@ pub struct LogicalMultiJoin {
     inputs: Vec<PlanRef>,
     on: Condition,
     output_indices: Vec<usize>,
-    // XXX(st1page): these fields will be used in prune_col and pk_derive soon.
-    #[allow(unused)]
     inner2output: ColIndexMapping,
+    // XXX(st1page): these fields will be used in prune_col and
+    // pk_derive soon.
     /// the mapping output_col_idx -> (input_idx, input_col_idx), **"output_col_idx" is internal,
     /// not consider output_indices**
     #[allow(unused)]
     inner_o2i_mapping: Vec<(usize, usize)>,
-    /// the mapping ColIndexMapping<input_idx->output_idx> of each inputs, **"output_col_idx" is
-    /// internal, not consider output_indices**
-    #[allow(unused)]
     inner_i2o_mappings: Vec<ColIndexMapping>,
 }
 
 impl fmt::Display for LogicalMultiJoin {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-        write!(f, "LogicalMultiJoin {{ on: {} }}", &self.on)
+        write!(
+            f,
+            "LogicalMultiJoin {{  on: {}, output_indices: {} }}",
+            &self.on,
+            if self
+                .output_indices
+                .iter()
+                .copied()
+                .eq(0..self.inner_o2i_mapping.len())
+            {
+                "all".to_string()
+            } else {
+                format!("{:?}", self.output_indices)
+            }
+        )
     }
 }
 
@@ -294,15 +305,33 @@ impl LogicalMultiJoin {
                 .into()
             });
 
-        if join_ordering != (0..self.schema().len()).collect::<Vec<_>>() {
-            output =
-                LogicalProject::with_mapping(output, self.mapping_from_ordering(join_ordering))
-                    .into();
-        }
+        let total_col_num = self.inner2output.source_size();
+        let reorder_mapping = {
+            let mut reorder_mapping = vec![None; total_col_num];
+            join_ordering
+                .iter()
+                .cloned()
+                .flat_map(|input_idx| {
+                    (0..self.inputs[input_idx].schema().len())
+                        .into_iter()
+                        .map(move |col_idx| self.inner_i2o_mappings[input_idx].map(col_idx))
+                })
+                .enumerate()
+                .for_each(|(tar, src)| reorder_mapping[src] = Some(tar));
+            reorder_mapping
+        };
+        output =
+            LogicalProject::with_out_col_idx(output, reorder_mapping.iter().map(|i| i.unwrap()))
+                .into();
 
         // We will later push down all of the filters back to the individual joins via the
         // `FilterJoinRule`.
         output = LogicalFilter::create(output, self.on.clone());
+        let output_indices = self
+            .output_indices
+            .iter()
+            .map(|idx| reorder_mapping[*idx].unwrap());
+        output = LogicalProject::with_out_col_idx(output, output_indices).into();
 
         output
     }
@@ -410,27 +439,6 @@ impl LogicalMultiJoin {
 
     pub(crate) fn input_col_nums(&self) -> Vec<usize> {
         self.inputs.iter().map(|i| i.schema().len()).collect()
-    }
-
-    pub(crate) fn mapping_from_ordering(&self, ordering: &[usize]) -> ColIndexMapping {
-        let offsets = self.input_col_offsets();
-        let max_len = offsets[self.inputs.len()];
-        let mut map = Vec::with_capacity(self.schema().len());
-        let input_num_cols = self.input_col_nums();
-        for &input_index in ordering {
-            map.extend(
-                (offsets[input_index]..offsets[input_index] + input_num_cols[input_index])
-                    .map(Some),
-            )
-        }
-        ColIndexMapping::with_target_size(map, max_len)
-    }
-
-    fn input_col_offsets(&self) -> Vec<usize> {
-        self.inputs().iter().fold(vec![0], |mut v, i| {
-            v.push(v.last().unwrap() + i.schema().len());
-            v
-        })
     }
 }
 
