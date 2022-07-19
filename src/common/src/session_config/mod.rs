@@ -88,10 +88,6 @@ impl<const NAME: usize, const DEFAULT: bool> Deref for ConfigBool<NAME, DEFAULT>
 #[derive(Default)]
 struct ConfigString<const NAME: usize>(String);
 
-// This is a work around to implement string config type that need a default value
-// TODO(yuhao): remove this once we have `adt_const_params`
-struct ConfigStringNoDeriveDefault<const NAME: usize>(String);
-
 impl<const NAME: usize> Deref for ConfigString<NAME> {
     type Target = String;
 
