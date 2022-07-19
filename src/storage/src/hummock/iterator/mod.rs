@@ -61,6 +61,20 @@ pub trait HummockIterator: Send + Sync {
     /// This function will panic if the iterator is invalid.
     async fn next(&mut self) -> HummockResult<()>;
 
+    /// Moves a valid iterator to the next key.
+    ///
+    /// Note:
+    /// - Before calling this function, makes sure the iterator `is_valid`.
+    /// - After calling this function, you may first check whether the iterator `is_valid` again,
+    ///   then get the new data by calling `key` and `value`.
+    /// - If this method return false, it means this iterator may be invalid or just need an IO
+    ///   operation, please call `next` instead.
+    ///
+    ///
+    /// # Panics
+    /// This function will panic if the iterator is invalid.
+    fn try_next(&mut self) -> bool;
+
     /// Retrieves the current key.
     ///
     /// Note:

@@ -291,6 +291,10 @@ where
         self.next_inner().await
     }
 
+    fn try_next(&mut self) -> bool {
+        todo!()
+    }
+
     fn key(&self) -> &[u8] {
         self.heap.peek().expect("no inner iter").iter.key()
     }
