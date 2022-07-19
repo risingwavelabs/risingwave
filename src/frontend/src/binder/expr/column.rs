@@ -11,6 +11,7 @@
 // WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 // See the License for the specific language governing permissions and
 // limitations under the License.
+use std::cmp::Ordering;
 
 use risingwave_common::error::{ErrorCode, Result};
 use risingwave_sqlparser::ast::Ident;
@@ -57,12 +58,8 @@ impl Binder {
             if let Ok(index) = context.get_column_binding_index(&table_name, &column_name) {
                 let column = &context.columns[index];
                 outside_contexts.push(
-                    CorrelatedInputRef::new(
-                        column.index,
-                        column.field.data_type.clone(),
-                        depth,
-                    )
-                    .into(),
+                    CorrelatedInputRef::new(column.index, column.field.data_type.clone(), depth)
+                        .into(),
                 );
             }
             for LateralBindContext {
@@ -85,12 +82,14 @@ impl Binder {
                 }
             }
         }
-        if outside_contexts.len() == 1 {
-            Ok(outside_contexts[0].clone())
-        } else if outside_contexts.len() > 1 {
-            Err(ErrorCode::InternalError("Ambiguous column name".into()).into())
-        } else {
-            Err(ErrorCode::ItemNotFound(format!("Invalid column: {}", column_name)).into())
+        match outside_contexts.len().cmp(&1) {
+            Ordering::Equal => Ok(outside_contexts[0].clone()),
+            Ordering::Greater => {
+                Err(ErrorCode::InternalError("Ambiguous column name".into()).into())
+            }
+            Ordering::Less => {
+                Err(ErrorCode::ItemNotFound(format!("Invalid column: {}", column_name)).into())
+            }
         }
     }
 }
