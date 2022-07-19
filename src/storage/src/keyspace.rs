@@ -17,7 +17,7 @@ use std::ops::RangeBounds;
 
 use bytes::{BufMut, Bytes, BytesMut};
 use risingwave_common::catalog::TableId;
-use risingwave_hummock_sdk::key::prefixed_range;
+use risingwave_hummock_sdk::key::{prefixed_range, TABLE_PREFIX_LEN};
 
 use crate::error::StorageResult;
 use crate::store::ReadOptions;
@@ -45,7 +45,7 @@ impl<S: StateStore> Keyspace<S> {
     /// Creates a root [`Keyspace`] for a table.
     pub fn table_root(store: S, id: &TableId) -> Self {
         let prefix = {
-            let mut buf = BytesMut::with_capacity(5);
+            let mut buf = BytesMut::with_capacity(TABLE_PREFIX_LEN);
             buf.put_u8(b't');
             buf.put_u32(id.table_id);
             buf.to_vec()
