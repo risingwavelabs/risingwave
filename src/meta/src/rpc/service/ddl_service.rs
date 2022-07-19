@@ -479,7 +479,13 @@ where
                     .map_err(tonic_err)?;
                 return Err(e);
             }
-            Ok(()) => self.get_internal_table(&ctx)?,
+            Ok(()) => {
+                match relation {
+                    Relation::Table(mview) => self.set_table_mapping(mview).map_err(tonic_err)?,
+                    _ => {}
+                }
+                self.get_internal_table(&ctx)?
+            }
         };
 
         // tracing for checking the diff of catalog::Table and internal_table_id count
