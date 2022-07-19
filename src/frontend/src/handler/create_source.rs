@@ -138,7 +138,7 @@ pub mod tests {
         let proto_file = create_proto_file(PROTO_FILE_DATA);
         let sql = format!(
             r#"CREATE SOURCE t
-    WITH ('kafka.topic' = 'abc', 'kafka.servers' = 'localhost:1001')
+    WITH (kafka.topic = 'abc', kafka.servers = 'localhost:1001')
     ROW FORMAT PROTOBUF MESSAGE '.test.TestRecord' ROW SCHEMA LOCATION 'file://{}'"#,
             proto_file.path().to_str().unwrap()
         );

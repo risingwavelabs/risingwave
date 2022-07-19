@@ -83,7 +83,7 @@ pub mod tests {
         let proto_file = create_proto_file(PROTO_FILE_DATA);
         let sql = format!(
             r#"CREATE SOURCE t1
-    WITH ('kafka.topic' = 'abc', 'kafka.servers' = 'localhost:1001')
+    WITH (kafka.topic = 'abc', kafka.servers = 'localhost:1001')
     ROW FORMAT PROTOBUF MESSAGE '.test.TestRecord' ROW SCHEMA LOCATION 'file://{}';"#,
             proto_file.path().to_str().unwrap()
         );
@@ -94,9 +94,9 @@ pub mod tests {
         frontend.run_sql(sql).await.unwrap();
 
         let sql = r#"CREATE SINK snk1 FROM mv1
-                    WITH ('sink' = 'mysql', 'mysql.endpoint' = '127.0.0.1:3306', 'mysql.table' =
-                        '<table_name>', 'mysql.database' = '<database_name>', 'mysql.user' = '<user_name>',
-                        'mysql.password' = '<password>');"#.to_string();
+                    WITH (sink = 'mysql', mysql.endpoint = '127.0.0.1:3306', mysql.table =
+                        '<table_name>', mysql.database = '<database_name>', mysql.user = '<user_name>',
+                        mysql.password = '<password>');"#.to_string();
         frontend.run_sql(sql).await.unwrap();
 
         let session = frontend.session_ref();
