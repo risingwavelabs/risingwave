@@ -127,6 +127,11 @@ impl RemoteInput {
     }
 }
 
+/// Create an input for merge and receiver executor. For local upstream actor, this will be simply a
+/// channel receiver. For remote upstream actor, this will spawn a long running [`RemoteInput`] task
+/// to receive messages from gRPC exchange service and return the receiver.
+// TODO: there's no need to use 4 channels for remote input. We may introduce a trait `Input` and
+// directly receive the message from the `RemoteInput`, just like the `Output`.
 pub(crate) fn new_input(
     context: &SharedContext,
     metrics: Arc<StreamingMetrics>,
@@ -143,7 +148,7 @@ pub(crate) fn new_input(
         // Get the sender for `RemoteInput` to forward received messages to receivers in
         // `ReceiverExecutor` or `MergeExecutor`.
         let sender = context.take_sender(&(upstream_actor_id, actor_id))?;
-        // spawn the `RemoteInput`
+        // Spawn the `RemoteInput`.
         let pool = context.compute_client_pool.clone();
         tokio::spawn(async move {
             let remote_input = RemoteInput::create(
