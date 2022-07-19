@@ -1,0 +1,14 @@
+[package]
+name = "risingwave_simulation"
+version = "0.1.0"
+edition = "2021"
+# See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
+
+[dependencies]
+clap = "3"
+madsim = "=0.2.0-alpha.4"
+risingwave_compactor = { path = "../../storage/compactor" }
+risingwave_compute = { path = "../../compute" }
+risingwave_frontend = { path = "../../frontend" }
+risingwave_meta = { path = "../../meta" }
+tokio = { version = "=0.2.0-alpha.4", package = "madsim-tokio" }
