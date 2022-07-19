@@ -187,11 +187,17 @@ where
 
 /// The behaviour of `next` of order aware merge iterator is different from the normal one, so we
 /// extract this trait.
-trait MergeIteratorNext {
+pub trait MergeIteratorNext {
     type HummockResultFuture<'a>: Future<Output = HummockResult<()>> + Send + 'a
     where
         Self: 'a;
     fn next_inner(&mut self) -> Self::HummockResultFuture<'_>;
+
+    fn key_inner(&self) -> &[u8];
+
+    fn value_inner(&self) -> HummockValue<&[u8]>;
+
+    fn is_valid_inner(&self) -> bool;
 }
 
 impl<D: HummockIteratorDirection> MergeIteratorNext for OrderedMergeIteratorInner<D> {
@@ -240,6 +246,18 @@ impl<D: HummockIteratorDirection> MergeIteratorNext for OrderedMergeIteratorInne
             Ok(())
         }
     }
+
+    fn key_inner(&self) -> &[u8] {
+        self.heap.peek().expect("no inner iter").iter.key()
+    }
+
+    fn value_inner(&self) -> HummockValue<&[u8]> {
+        self.heap.peek().expect("no inner iter").iter.value()
+    }
+
+    fn is_valid_inner(&self) -> bool {
+        self.heap.peek().map_or(false, |n| n.iter.is_valid())
+    }
 }
 
 impl<D: HummockIteratorDirection> MergeIteratorNext for UnorderedMergeIteratorInner<D> {
@@ -276,6 +294,18 @@ impl<D: HummockIteratorDirection> MergeIteratorNext for UnorderedMergeIteratorIn
             Ok(())
         }
     }
+
+    fn key_inner(&self) -> &[u8] {
+        self.heap.peek().expect("no inner iter").iter.key()
+    }
+
+    fn value_inner(&self) -> HummockValue<&[u8]> {
+        self.heap.peek().expect("no inner iter").iter.value()
+    }
+
+    fn is_valid_inner(&self) -> bool {
+        self.heap.peek().map_or(false, |n| n.iter.is_valid())
+    }
 }
 
 #[async_trait]
@@ -289,10 +319,6 @@ where
 
     async fn next(&mut self) -> HummockResult<()> {
         self.next_inner().await
-    }
-
-    fn try_next(&mut self) -> bool {
-        todo!()
     }
 
     fn key(&self) -> &[u8] {

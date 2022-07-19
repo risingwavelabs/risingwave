@@ -268,7 +268,7 @@ impl BlockBuilder {
         self.entry_count += 1;
     }
 
-    pub fn get_last_key(&self)-> &[u8] {
+    pub fn get_last_key(&self) -> &[u8] {
         &self.last_key
     }
 
@@ -315,7 +315,7 @@ impl BlockBuilder {
                     .unwrap();
                 let (writer, result) = encoder.finish();
                 result.map_err(HummockError::encode_error).unwrap();
-                self.buf =  writer.into_inner();
+                self.buf = writer.into_inner();
             }
             CompressionAlgorithm::Zstd => {
                 let mut encoder =

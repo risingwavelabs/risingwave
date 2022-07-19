@@ -115,55 +115,8 @@ impl SSTableIterator {
             self.seek_idx(self.cur_idx + 1, None).await
         }
     }
-}
 
-#[async_trait]
-impl HummockIterator for SSTableIterator {
-    type Direction = Forward;
-
-    async fn next(&mut self) -> HummockResult<()> {
-        self.stats.scan_key_count += 1;
-        let block_iter = self.block_iter.as_mut().expect("no block iter");
-        if block_iter.is_valid() {
-            block_iter.next();
-        }
-
-        if block_iter.is_valid() {
-            Ok(())
-        } else {
-            // seek to next block
-            self.seek_idx(self.cur_idx + 1, None).await
-        }
-    }
-
-    fn try_next(&mut self) -> bool {
-        self.stats.scan_key_count += 1;
-        let block_iter = self.block_iter.as_mut().expect("no block iter");
-        if block_iter.is_valid() {
-            block_iter.next();
-        }
-        block_iter.is_valid()
-    }
-
-    fn key(&self) -> &[u8] {
-        self.block_iter.as_ref().expect("no block iter").key()
-    }
-
-    fn value(&self) -> HummockValue<&[u8]> {
-        let raw_value = self.block_iter.as_ref().expect("no block iter").value();
-
-        HummockValue::from_slice(raw_value).expect("decode error")
-    }
-
-    fn is_valid(&self) -> bool {
-        self.block_iter.as_ref().map_or(false, |i| i.is_valid())
-    }
-
-    async fn rewind(&mut self) -> HummockResult<()> {
-        self.seek_idx(0, None).await
-    }
-
-    async fn seek(&mut self, key: &[u8]) -> HummockResult<()> {
+    pub async fn seek_inner(&mut self, key: &[u8]) -> HummockResult<()> {
         let block_idx = self
             .sst
             .value()
@@ -185,6 +138,46 @@ impl HummockIterator for SSTableIterator {
         }
 
         Ok(())
+    }
+}
+
+#[async_trait]
+impl HummockIterator for SSTableIterator {
+    type Direction = Forward;
+
+    async fn next(&mut self) -> HummockResult<()> {
+        self.stats.scan_key_count += 1;
+        let block_iter = self.block_iter.as_mut().expect("no block iter");
+        block_iter.next();
+
+        if block_iter.is_valid() {
+            Ok(())
+        } else {
+            // seek to next block
+            self.seek_idx(self.cur_idx + 1, None).await
+        }
+    }
+
+    fn key(&self) -> &[u8] {
+        self.block_iter.as_ref().expect("no block iter").key()
+    }
+
+    fn value(&self) -> HummockValue<&[u8]> {
+        let raw_value = self.block_iter.as_ref().expect("no block iter").value();
+
+        HummockValue::from_slice(raw_value).expect("decode error")
+    }
+
+    fn is_valid(&self) -> bool {
+        self.block_iter.as_ref().map_or(false, |i| i.is_valid())
+    }
+
+    async fn rewind(&mut self) -> HummockResult<()> {
+        self.seek_idx(0, None).await
+    }
+
+    async fn seek(&mut self, key: &[u8]) -> HummockResult<()> {
+        self.seek_inner(key).await
     }
 
     fn collect_local_statistic(&self, stats: &mut StoreLocalStatistic) {

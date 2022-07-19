@@ -108,7 +108,7 @@ pub(crate) async fn build_ordered_merge_iter<T: HummockIteratorType>(
     stats: Arc<StateStoreMetrics>,
     local_stats: &mut StoreLocalStatistic,
     read_options: Arc<ReadOptions>,
-) -> HummockResult<BoxedHummockIterator<T::Direction>> {
+) -> HummockResult<Box<OrderedMergeIteratorInner<T::Direction>>> {
     let mut ordered_iters = Vec::with_capacity(uncommitted_data.len());
     for data_list in uncommitted_data {
         let mut data_iters = Vec::new();
