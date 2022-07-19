@@ -35,7 +35,17 @@ impl MetaServiceOpts {
                 url
             }
             Err(_) => {
-                bail!("env variable `RW_META_ADDR` not found, please do one of the following:\n* use `./risedev ctl` to start risectl.\n* `source .risingwave/config/risectl-env` or `source ~/risingwave-deploy/risectl-env` before running risectl.\n* manually set `RW_META_ADDR` in env variable.\nrisectl requires a full persistent cluster to operate, so please also remember to add `use: minio` to risedev config.");
+                const MESSAGE: &str = "env variable `RW_META_ADDR` not found.
+
+For `./risedev d` use cases, please do the following:
+* use `./risedev d for-ctl` to start the cluster.
+* use `./risedev ctl` to use risectl.
+
+For `./risedev apply-compose-deploy` users,
+* `RW_META_ADDR` will be printed out when deploying. Please copy the bash exports to your console.
+
+risectl requires a full persistent cluster to operate. Please make sure you're not running in minimum mode.";
+                bail!(MESSAGE);
             }
         };
         Ok(Self { meta_addr })

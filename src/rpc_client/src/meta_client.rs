@@ -33,6 +33,7 @@ use risingwave_pb::meta::cluster_service_client::ClusterServiceClient;
 use risingwave_pb::meta::heartbeat_service_client::HeartbeatServiceClient;
 use risingwave_pb::meta::list_table_fragments_response::TableFragmentInfo;
 use risingwave_pb::meta::notification_service_client::NotificationServiceClient;
+use risingwave_pb::meta::scale_service_client::ScaleServiceClient;
 use risingwave_pb::meta::stream_manager_service_client::StreamManagerServiceClient;
 use risingwave_pb::meta::*;
 use risingwave_pb::stream_plan::StreamFragmentGraph;
@@ -341,17 +342,36 @@ impl MetaClient {
         let resp = self.inner.list_table_fragments(request).await?;
         Ok(resp.table_fragments)
     }
+
+    pub async fn pause(&self) -> Result<()> {
+        let request = PauseRequest {};
+        let _resp = self.inner.pause(request).await?;
+        Ok(())
+    }
+
+    pub async fn resume(&self) -> Result<()> {
+        let request = ResumeRequest {};
+        let _resp = self.inner.resume(request).await?;
+        Ok(())
+    }
 }
 
 #[async_trait]
 impl HummockMetaClient for MetaClient {
-    async fn pin_version(&self, last_pinned: HummockVersionId) -> Result<HummockVersion> {
+    async fn pin_version(
+        &self,
+        last_pinned: HummockVersionId,
+    ) -> Result<(bool, Vec<HummockVersionDelta>, Option<HummockVersion>)> {
         let req = PinVersionRequest {
             context_id: self.worker_id(),
             last_pinned,
         };
         let resp = self.inner.pin_version(req).await?;
-        Ok(resp.pinned_version.unwrap())
+        Ok((
+            resp.is_delta_response,
+            resp.version_deltas,
+            resp.pinned_version,
+        ))
     }
 
     async fn unpin_version(&self) -> Result<()> {
@@ -483,6 +503,7 @@ pub struct GrpcMetaClient {
     pub notification_client: NotificationServiceClient<Channel>,
     pub stream_client: StreamManagerServiceClient<Channel>,
     pub user_client: UserServiceClient<Channel>,
+    pub scale_client: ScaleServiceClient<Channel>,
 }
 
 impl GrpcMetaClient {
@@ -519,7 +540,8 @@ impl GrpcMetaClient {
         let hummock_client = HummockManagerServiceClient::new(channel.clone());
         let notification_client = NotificationServiceClient::new(channel.clone());
         let stream_client = StreamManagerServiceClient::new(channel.clone());
-        let user_client = UserServiceClient::new(channel);
+        let user_client = UserServiceClient::new(channel.clone());
+        let scale_client = ScaleServiceClient::new(channel);
         Ok(Self {
             cluster_client,
             heartbeat_client,
@@ -528,6 +550,7 @@ impl GrpcMetaClient {
             notification_client,
             stream_client,
             user_client,
+            scale_client,
         })
     }
 }
@@ -589,6 +612,8 @@ macro_rules! for_all_meta_rpc {
             ,{ user_client, drop_user, DropUserRequest, DropUserResponse }
             ,{ user_client, grant_privilege, GrantPrivilegeRequest, GrantPrivilegeResponse }
             ,{ user_client, revoke_privilege, RevokePrivilegeRequest, RevokePrivilegeResponse }
+            ,{ scale_client, pause, PauseRequest, PauseResponse }
+            ,{ scale_client, resume, ResumeRequest, ResumeResponse }
         }
     };
 }

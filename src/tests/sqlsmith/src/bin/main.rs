@@ -12,8 +12,6 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-#![feature(let_chains)]
-
 use core::panic;
 use std::time::Duration;
 
@@ -81,7 +79,11 @@ async fn create_tables(
 ) -> (Vec<Table>, Vec<Table>) {
     log::info!("Preparing tables...");
 
-    let sql = std::fs::read_to_string(format!("{}/tpch.sql", opt.testdata)).unwrap();
+    let seed_files = vec!["tpch.sql", "nexmark.sql"];
+    let sql = seed_files
+        .iter()
+        .map(|filename| std::fs::read_to_string(format!("{}/{}", opt.testdata, filename)).unwrap())
+        .collect::<String>();
 
     let statements =
         Parser::parse_sql(&sql).unwrap_or_else(|_| panic!("Failed to parse SQL: {}", sql));
@@ -116,13 +118,19 @@ async fn create_tables(
 
 async fn drop_tables(mviews: &[Table], opt: &TestOptions, client: &tokio_postgres::Client) {
     log::info!("Cleaning tables...");
-    let sql = std::fs::read_to_string(format!("{}/drop_tpch.sql", opt.testdata)).unwrap();
     for Table { name, .. } in mviews.iter().rev() {
         client
             .execute(&format!("DROP MATERIALIZED VIEW {}", name), &[])
             .await
             .unwrap();
     }
+
+    let seed_files = vec!["drop_tpch.sql", "drop_nexmark.sql"];
+    let sql = seed_files
+        .iter()
+        .map(|filename| std::fs::read_to_string(format!("{}/{}", opt.testdata, filename)).unwrap())
+        .collect::<String>();
+
     for stmt in sql.lines() {
         client.execute(stmt, &[]).await.unwrap();
     }
@@ -132,11 +140,23 @@ async fn drop_tables(mviews: &[Table], opt: &TestOptions, client: &tokio_postgre
 /// See: <https://github.com/singularity-data/risingwave/blob/b4eb1107bc16f8d583563f776f748632ddcaa0cb/src/expr/src/vector_op/bitwise_op.rs#L24>
 /// FIXME: This approach is brittle and should change in the future,
 /// when we have a better way of handling overflows.
-/// Tracked here: <https://github.com/singularity-data/risingwave/issues/3900>
+/// Tracked by: <https://github.com/singularity-data/risingwave/issues/3900>
 fn is_numeric_out_of_range_err(db_error: &DbError) -> bool {
+    db_error.message().contains("Expr error: NumericOutOfRange")
+}
+
+/// Workaround to permit runtime errors not being propagated through channels.
+/// FIXME: This also means some internal system errors won't be caught.
+/// Tracked by: <https://github.com/singularity-data/risingwave/issues/3908#issuecomment-1186782810>
+fn is_broken_chan_err(db_error: &DbError) -> bool {
+    db_error
+        .message()
+        .contains("internal error: broken fifo_channel")
+}
+
+fn is_permissible_error(db_error: &DbError) -> bool {
     let is_internal_error = *db_error.code() == SqlState::INTERNAL_ERROR;
-    let is_numeric_error = db_error.message().contains("Expr error: NumericOutOfRange");
-    is_internal_error && is_numeric_error
+    is_internal_error && (is_numeric_out_of_range_err(db_error) || is_broken_chan_err(db_error))
 }
 
 /// Validate client responses
@@ -145,7 +165,9 @@ fn validate_response<_Row>(response: Result<_Row, PgError>) {
         Ok(_) => {}
         Err(e) => {
             // Permit runtime errors conservatively.
-            if let Some(e) = e.as_db_error() && is_numeric_out_of_range_err(e) {
+            if let Some(e) = e.as_db_error()
+                && is_permissible_error(e)
+            {
                 return;
             }
             panic!("{}", e);

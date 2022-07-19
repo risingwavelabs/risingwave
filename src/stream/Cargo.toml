@@ -23,7 +23,7 @@ iter-chunks = "0.1"
 itertools = "0.10"
 lazy_static = "1"
 log = "0.4"
-madsim = "=0.2.0-alpha.3"
+madsim = "=0.2.0-alpha.4"
 maplit = "1.0.2"
 memcomparable = { path = "../utils/memcomparable" }
 minstant = "0.1"
@@ -49,7 +49,7 @@ smallvec = "1"
 static_assertions = "1"
 stats_alloc = { path = "../utils/stats_alloc" }
 thiserror = "1"
-tokio = { version = "=0.2.0-alpha.3", package = "madsim-tokio", features = [
+tokio = { version = "=0.2.0-alpha.4", package = "madsim-tokio", features = [
     "rt",
     "rt-multi-thread",
     "sync",
@@ -60,7 +60,7 @@ tokio = { version = "=0.2.0-alpha.3", package = "madsim-tokio", features = [
 ] }
 tokio-metrics = "0.1.0"
 tokio-stream = "0.1"
-tonic = { version = "=0.2.0-alpha.3", package = "madsim-tonic" }
+tonic = { version = "=0.2.0-alpha.4", package = "madsim-tonic" }
 tower = { version = "0.4", features = ["util", "load-shed"] }
 tracing = { version = "0.1" }
 tracing-futures = "0.2"

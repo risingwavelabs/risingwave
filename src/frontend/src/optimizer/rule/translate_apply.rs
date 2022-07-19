@@ -29,8 +29,8 @@ use crate::utils::{ColIndexMapping, Condition};
 
 /// Translate `LogicalApply` into `LogicalJoin` and `LogicalApply`, and rewrite
 /// `LogicalApply`'s left.
-pub struct TranslateApply {}
-impl Rule for TranslateApply {
+pub struct TranslateApplyRule {}
+impl Rule for TranslateApplyRule {
     fn apply(&self, plan: PlanRef) -> Option<PlanRef> {
         let apply = plan.as_logical_apply()?;
         let (left, right, on, join_type, correlated_indices) = apply.clone().decompose();
@@ -122,9 +122,9 @@ impl Rule for TranslateApply {
     }
 }
 
-impl TranslateApply {
+impl TranslateApplyRule {
     pub fn create() -> BoxedRule {
-        Box::new(TranslateApply {})
+        Box::new(TranslateApplyRule {})
     }
 
     /// Rewrite `LogicalApply`'s left according to `correlated_indices`.

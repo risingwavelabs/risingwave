@@ -13,7 +13,7 @@
 // limitations under the License.
 
 use async_trait::async_trait;
-use madsim::collections::HashSet;
+use std::collections::HashSet;
 use risingwave_common::array::{Op, StreamChunk};
 use risingwave_common::catalog::{Schema, TableId};
 use risingwave_common::types::DataType;
