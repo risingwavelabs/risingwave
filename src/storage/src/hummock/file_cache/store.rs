@@ -134,7 +134,6 @@ where
         PathBuf::from(&self.dir).join(CACHE_FILE_FILENAME)
     }
 
-    #[expect(clippy::unused_async)]
     pub fn restore<S: HashBuilder>(
         &self,
         indices: &Arc<LruCache<K, SlotId>>,
