@@ -41,6 +41,9 @@ enum Commands {
     /// Commands for Tables
     #[clap(subcommand)]
     Table(TableCommands),
+    /// Commands for Meta
+    #[clap(subcommand)]
+    Meta(MetaCommands),
     /// Commands for Benchmarks
     #[clap(subcommand)]
     Bench(BenchCommands),
@@ -88,6 +91,14 @@ enum TableCommands {
     List,
 }
 
+#[derive(Subcommand)]
+enum MetaCommands {
+    /// pause the stream graph
+    Pause,
+    /// resume the stream graph
+    Resume,
+}
+
 pub async fn start(opts: CliOpts) -> Result<()> {
     match opts.command {
         Commands::Hummock(HummockCommands::ListVersion) => {
@@ -117,6 +128,8 @@ pub async fn start(opts: CliOpts) -> Result<()> {
         }
         Commands::Table(TableCommands::List) => tokio::spawn(cmd_impl::table::list()).await??,
         Commands::Bench(cmd) => tokio::spawn(cmd_impl::bench::do_bench(cmd)).await??,
+        Commands::Meta(MetaCommands::Pause) => tokio::spawn(cmd_impl::meta::pause()).await??,
+        Commands::Meta(MetaCommands::Resume) => tokio::spawn(cmd_impl::meta::resume()).await??,
     }
     Ok(())
 }
