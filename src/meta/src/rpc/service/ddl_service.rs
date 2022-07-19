@@ -480,9 +480,8 @@ where
                 return Err(e);
             }
             Ok(()) => {
-                match relation {
-                    Relation::Table(mview) => self.set_table_mapping(mview).map_err(tonic_err)?,
-                    _ => {}
+                if let Relation::Table(table) = relation {
+                    self.set_table_mapping(table).map_err(tonic_err)?;
                 }
                 self.get_internal_table(&ctx)?
             }
