@@ -97,10 +97,11 @@ struct SqlGenerator<'a, R: Rng> {
 /// Generators
 impl<'a, R: Rng> SqlGenerator<'a, R> {
     fn new(rng: &'a mut R, tables: Vec<Table>) -> Self {
+        let is_distinct_allowed = rng.gen_bool(0.5);
         SqlGenerator {
             tables,
-            rng: rng.clone(),
-            is_distinct_allowed: rng.gen_bool(0.5),
+            rng,
+            is_distinct_allowed,
             bound_relations: vec![],
             bound_columns: vec![],
             is_mview: false,
