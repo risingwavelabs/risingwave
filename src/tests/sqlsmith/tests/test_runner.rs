@@ -59,7 +59,6 @@ async fn create_tables(session: Arc<SessionImpl>, rng: &mut impl Rng) -> Vec<Tab
         let (sql, table) = mview_sql_gen(rng, tables.clone(), &format!("m{}", i));
         let stmts =
             Parser::parse_sql(&sql).unwrap_or_else(|_| panic!("Failed to parse SQL: {}", sql));
-
         let stmt = stmts[0].clone();
         handler::handle(session.clone(), stmt, &sql).await.unwrap();
         tables.push(table);
