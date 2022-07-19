@@ -58,6 +58,8 @@ impl ExecutorBuilder for MergeExecutorBuilder {
                 schema,
                 params.pk_indices,
                 params.actor_id,
+                params.fragment_id,
+                upstream_fragment_id,
                 upstreams,
                 actor_context,
                 x_node.operator_id,

@@ -106,7 +106,7 @@ async fn test_merger_sum_aggr() {
     for _ in 0..17 {
         let (tx, rx) = channel(16);
         let (actor, channel) = make_actor(rx);
-        outputs.push((233, channel));
+        outputs.push(channel);
         handles.push(tokio::spawn(actor.run()));
         inputs.push(Box::new(LocalOutput::new(233, tx)) as Box<dyn Output>);
     }
@@ -144,17 +144,8 @@ async fn test_merger_sum_aggr() {
     );
     handles.push(tokio::spawn(actor.run()));
 
-    let metrics = Arc::new(StreamingMetrics::unused());
     // use a merge operator to collect data from dispatchers before sending them to aggregator
-    let merger = MergeExecutor::new(
-        schema,
-        vec![],
-        0,
-        outputs,
-        ActorContext::create(),
-        0,
-        metrics,
-    );
+    let merger = MergeExecutor::for_test(outputs);
 
     // for global aggregator, we need to sum data and sum row count
     let append_only = false;

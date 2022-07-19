@@ -28,7 +28,7 @@ use tonic::Streaming;
 use super::error::StreamExecutorError;
 use super::*;
 use crate::executor::monitor::StreamingMetrics;
-use crate::task::{UpDownActorIds, UpDownFragmentIds};
+use crate::task::{FragmentId, UpDownActorIds, UpDownFragmentIds};
 
 /// Receive data from `gRPC` and forwards to `MergerExecutor`/`ReceiverExecutor`
 pub struct RemoteInput {
@@ -135,7 +135,13 @@ pub struct MergeExecutor {
     upstreams: Vec<Upstream>,
 
     /// Belonged actor id.
-    actor_id: u32,
+    actor_id: ActorId,
+
+    /// Belonged fragment id.
+    fragment_id: FragmentId,
+
+    /// Upstream fragment id.
+    upstream_fragment_id: FragmentId,
 
     info: ExecutorInfo,
 
@@ -150,7 +156,9 @@ impl MergeExecutor {
     pub fn new(
         schema: Schema,
         pk_indices: PkIndices,
-        actor_id: u32,
+        actor_id: ActorId,
+        fragment_id: FragmentId,
+        upstream_fragment_id: FragmentId,
         inputs: Vec<Upstream>,
         actor_context: ActorContextRef,
         receiver_id: u64,
@@ -159,6 +167,8 @@ impl MergeExecutor {
         Self {
             upstreams: inputs,
             actor_id,
+            fragment_id,
+            upstream_fragment_id,
             info: ExecutorInfo {
                 schema,
                 pk_indices,
@@ -167,6 +177,24 @@ impl MergeExecutor {
             status: OperatorInfoStatus::new(actor_context, receiver_id),
             metrics,
         }
+    }
+
+    pub fn for_test(inputs: Vec<Receiver<Message>>) -> Self {
+        Self::new(
+            Schema::default(),
+            vec![],
+            114,
+            514,
+            1919,
+            inputs
+                .into_iter()
+                .enumerate()
+                .map(|(i, r)| (i as ActorId, r))
+                .collect(),
+            ActorContext::create(),
+            810,
+            StreamingMetrics::unused().into(),
+        )
     }
 
     #[try_stream(ok = Message, error = StreamExecutorError)]
@@ -366,18 +394,10 @@ mod tests {
         for _i in 0..CHANNEL_NUMBER {
             let (tx, rx) = tokio::sync::mpsc::channel(16);
             txs.push(tx);
-            rxs.push((0, rx));
+            rxs.push(rx);
         }
         let metrics = Arc::new(StreamingMetrics::unused());
-        let merger = MergeExecutor::new(
-            Schema::default(),
-            vec![],
-            0,
-            rxs,
-            ActorContext::create(),
-            0,
-            metrics,
-        );
+        let merger = MergeExecutor::for_test(rxs);
         let mut handles = Vec::with_capacity(CHANNEL_NUMBER);
 
         let epochs = (10..1000u64).step_by(10).collect_vec();
