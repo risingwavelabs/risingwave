@@ -203,7 +203,7 @@ impl<'a, R: Rng> SqlGenerator<'a, R> {
             false => {
                 let (with, tables) = self.gen_with_inner();
                 (Some(with), tables)
-            },
+            }
         }
     }
 
@@ -221,10 +221,13 @@ impl<'a, R: Rng> SqlGenerator<'a, R> {
             name: alias.name.value,
             columns: query_schema,
         }];
-        (With {
-            recursive: false,
-            cte_tables: vec![cte],
-        }, with_tables)
+        (
+            With {
+                recursive: false,
+                cte_tables: vec![cte],
+            },
+            with_tables,
+        )
     }
 
     fn gen_set_expr(&mut self, with_tables: Vec<Table>) -> (SetExpr, Vec<Column>) {
@@ -329,7 +332,9 @@ impl<'a, R: Rng> SqlGenerator<'a, R> {
         let mut from = if with_tables.is_empty() {
             vec![self.gen_from_relation()]
         } else {
-            let with_table = with_tables.choose(&mut self.rng).expect("with tables should not be empty");
+            let with_table = with_tables
+                .choose(&mut self.rng)
+                .expect("with tables should not be empty");
             vec![create_table_with_joins_from_table(with_table)]
         };
         if self.is_mview {

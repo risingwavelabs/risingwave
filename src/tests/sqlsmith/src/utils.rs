@@ -12,11 +12,14 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use rand::Rng;
-use risingwave_sqlparser::ast::{FunctionArg, FunctionArgExpr, TableAlias, TableFactor, TableWithJoins};
-
 use std::mem;
-use crate::{Column, Expr, ObjectName, Ident, Table, SqlGenerator};
+
+use rand::Rng;
+use risingwave_sqlparser::ast::{
+    FunctionArg, FunctionArgExpr, TableAlias, TableFactor, TableWithJoins,
+};
+
+use crate::{Column, Expr, Ident, ObjectName, SqlGenerator, Table};
 
 type Context = (Vec<Column>, Vec<Table>);
 
@@ -27,6 +30,7 @@ impl<'a, R: Rng> SqlGenerator<'a, R> {
         let current_bound_columns = mem::take(&mut self.bound_columns);
         (current_bound_columns, current_bound_relations)
     }
+
     pub(crate) fn restore_ctxt(&mut self, (old_cols, old_rels): Context) {
         self.bound_relations = old_rels;
         self.bound_columns = old_cols;
