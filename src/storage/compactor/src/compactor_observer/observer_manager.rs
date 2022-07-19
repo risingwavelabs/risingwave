@@ -12,52 +12,12 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-// use std::sync::Arc;
-
-// use risingwave_common::catalog::CatalogVersion;
-use std::collections::HashMap;
-use std::sync::Arc;
-
-use parking_lot::RwLock;
+use risingwave_common::catalog::local_table_catalog_manager::LocalTableManagerRef;
 use risingwave_common::error::{ErrorCode, Result};
 use risingwave_common_service::observer_manager::ObserverNodeImpl;
 use risingwave_pb::catalog::Table;
 use risingwave_pb::meta::subscribe_response::Info;
 use risingwave_pb::meta::SubscribeResponse;
-
-#[derive(Default)]
-struct LocalTableManagerCore {
-    table_calalog_cache: HashMap<u32, Table>,
-}
-
-pub struct LocalTableManager {
-    core: RwLock<LocalTableManagerCore>,
-}
-
-impl LocalTableManager {
-    pub fn new() -> Self {
-        Self {
-            core: RwLock::new(LocalTableManagerCore::default()),
-        }
-    }
-
-    pub fn insert(&self, table_id: u32, table: Table) {
-        let guard = &mut self.core.write().table_calalog_cache;
-        guard.insert(table_id, table);
-    }
-
-    pub fn erase(&self, table_id: u32) {
-        let guard = &mut self.core.write().table_calalog_cache;
-        guard.remove(&table_id);
-    }
-
-    pub fn get(&self, table_id: u32) -> Option<Table> {
-        let guard = &self.core.read().table_calalog_cache;
-        guard.get(&table_id).cloned()
-    }
-}
-
-pub type LocalTableManagerRef = Arc<LocalTableManager>;
 
 pub struct CompactorObserverNode {
     local_table_manager: LocalTableManagerRef,

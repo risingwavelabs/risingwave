@@ -119,9 +119,10 @@ pub fn start(opts: CompactorOpts) -> Pin<Box<dyn Future<Output = ()> + Send>> {
             .unwrap();
         tracing::info!("Client address is {}", client_address);
 
-        let (join_handle, _shutdown_sender) =
+        let (join_handle, observer_join_handle, _shutdown_sender) =
             compactor_serve(listen_address, client_address, opts).await;
 
         join_handle.await.unwrap();
+        observer_join_handle.await.unwrap();
     })
 }

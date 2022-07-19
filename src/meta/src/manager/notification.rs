@@ -273,6 +273,8 @@ impl NotificationManagerCore {
         self.current_version
     }
 
+    /// Send a `SubscribeResponse` to backend.
+    #[expect(clippy::unused_async)]
     async fn notify_compactor(&mut self, operation: Operation, info: &Info) -> NotificationVersion {
         self.current_version += 1;
         for (worker_key, sender) in &self.compactor_senders {
@@ -282,7 +284,7 @@ impl NotificationManagerCore {
                 info: Some(info.clone()),
                 version: self.current_version,
             })) {
-                tracing::warn!("Failed to notify compute {:?}: {}", worker_key, err);
+                tracing::warn!("Failed to notify compactor {:?}: {}", worker_key, err);
             }
         }
 
