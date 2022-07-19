@@ -19,7 +19,8 @@ use futures::{pin_mut, Stream, StreamExt};
 use futures_async_stream::{for_await, try_stream};
 use madsim::time::Instant;
 use risingwave_common::catalog::Schema;
-use risingwave_common::error::Result;
+use risingwave_common::error::{Result, RwError};
+use risingwave_common::util::addr::is_local_address;
 use risingwave_pb::task_service::GetStreamResponse;
 use risingwave_rpc_client::ComputeClient;
 use tokio::sync::mpsc::{Receiver, Sender};
@@ -28,7 +29,7 @@ use tonic::Streaming;
 use super::error::StreamExecutorError;
 use super::*;
 use crate::executor::monitor::StreamingMetrics;
-use crate::task::{FragmentId, UpDownActorIds, UpDownFragmentIds};
+use crate::task::{FragmentId, SharedContext, UpDownActorIds, UpDownFragmentIds};
 
 /// Receive data from `gRPC` and forwards to `MergerExecutor`/`ReceiverExecutor`
 pub struct RemoteInput {
@@ -126,6 +127,46 @@ impl RemoteInput {
     }
 }
 
+pub(crate) fn new_input(
+    context: &SharedContext,
+    metrics: Arc<StreamingMetrics>,
+    actor_id: ActorId,
+    fragment_id: FragmentId,
+    upstream_id: ActorId,
+    upstream_fragment_id: FragmentId,
+) -> Result<Upstream> {
+    let upstream_addr = context.get_actor_info(&upstream_id)?.get_host()?.into();
+    if !is_local_address(&upstream_addr, &context.addr) {
+        // Get the sender for `RemoteInput` to forward received messages to receivers in
+        // `ReceiverExecutor` or `MergeExecutor`.
+        let sender = context.take_sender(&(upstream_id, actor_id))?;
+        // spawn the `RemoteInput`
+        let pool = context.compute_client_pool.clone();
+        tokio::spawn(async move {
+            let init_client = async move {
+                let remote_input = RemoteInput::create(
+                    pool.get_client_for_addr(upstream_addr).await?,
+                    (upstream_id, actor_id),
+                    (upstream_fragment_id, fragment_id),
+                    sender,
+                    metrics,
+                )
+                .await?;
+                Ok::<_, RwError>(remote_input)
+            };
+            match init_client.await {
+                Ok(remote_input) => remote_input.run().await,
+                Err(e) => {
+                    error!("Spawn remote input fails:{}", e);
+                }
+            }
+        });
+    }
+    let rx = context.take_receiver(&(upstream_id, actor_id))?;
+
+    Ok((upstream_id, rx))
+}
+
 pub type Upstream = (ActorId, Receiver<Message>);
 
 /// `MergeExecutor` merges data from multiple channels. Dataflow from one channel
@@ -148,11 +189,14 @@ pub struct MergeExecutor {
     /// Actor operator context
     status: OperatorInfoStatus,
 
+    context: Arc<SharedContext>,
+
     /// Metrics
     metrics: Arc<StreamingMetrics>,
 }
 
 impl MergeExecutor {
+    #[allow(clippy::too_many_arguments)]
     pub fn new(
         schema: Schema,
         pk_indices: PkIndices,
@@ -160,6 +204,7 @@ impl MergeExecutor {
         fragment_id: FragmentId,
         upstream_fragment_id: FragmentId,
         inputs: Vec<Upstream>,
+        context: Arc<SharedContext>,
         actor_context: ActorContextRef,
         receiver_id: u64,
         metrics: Arc<StreamingMetrics>,
@@ -175,10 +220,12 @@ impl MergeExecutor {
                 identity: "MergeExecutor".to_string(),
             },
             status: OperatorInfoStatus::new(actor_context, receiver_id),
+            context,
             metrics,
         }
     }
 
+    #[cfg(test)]
     pub fn for_test(inputs: Vec<Receiver<Message>>) -> Self {
         Self::new(
             Schema::default(),
@@ -191,6 +238,7 @@ impl MergeExecutor {
                 .enumerate()
                 .map(|(i, r)| (i as ActorId, r))
                 .collect(),
+            SharedContext::for_test().into(),
             ActorContext::create(),
             810,
             StreamingMetrics::unused().into(),
@@ -219,7 +267,23 @@ impl MergeExecutor {
                 Message::Barrier(barrier) => {
                     if let Some(update) = barrier.as_update_merge(self.actor_id) {
                         // 1. Add new upstreams and poll the first barrier from them.
-                        let mut select_new = SelectReceivers::new(self.actor_id, vec![]);
+                        let new_upstreams = update
+                            .added_upstream_actor_id
+                            .iter()
+                            .map(|&upstream_actor_id| {
+                                new_input(
+                                    &self.context,
+                                    self.metrics.clone(),
+                                    self.actor_id,
+                                    self.fragment_id,
+                                    upstream_actor_id,
+                                    self.upstream_fragment_id,
+                                )
+                            })
+                            .try_collect()
+                            .map_err(|_| anyhow::anyhow!("failed to create upstreams"))?;
+
+                        let mut select_new = SelectReceivers::new(self.actor_id, new_upstreams);
                         let new_barrier = expect_first_barrier(&mut select_new).await?;
                         assert_eq!(barrier.epoch, new_barrier.epoch);
                         select_all.add_upstreams_from(select_new);

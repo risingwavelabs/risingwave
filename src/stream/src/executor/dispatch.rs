@@ -46,7 +46,7 @@ pub trait Output: Debug + Send + Sync + 'static {
     fn actor_id(&self) -> ActorId;
 }
 
-type BoxedOutput = Box<dyn Output>;
+pub type BoxedOutput = Box<dyn Output>;
 
 /// `LocalOutput` sends data to a local `mpsc::Channel`
 pub struct LocalOutput {
@@ -126,18 +126,14 @@ impl Output for RemoteOutput {
     }
 }
 
-fn new_output(
-    context: &SharedContext,
-    actor_id: ActorId,
-    down_id: ActorId,
-) -> Result<Box<dyn Output>> {
+fn new_output(context: &SharedContext, actor_id: ActorId, down_id: ActorId) -> Result<BoxedOutput> {
     let downstream_addr = context.get_actor_info(&down_id)?.get_host()?.into();
     let tx = context.take_sender(&(actor_id, down_id))?;
     if is_local_address(&context.addr, &downstream_addr) {
         // if this is a local downstream actor
-        Ok(Box::new(LocalOutput::new(down_id, tx)) as Box<dyn Output>)
+        Ok(Box::new(LocalOutput::new(down_id, tx)) as BoxedOutput)
     } else {
-        Ok(Box::new(RemoteOutput::new(down_id, tx)) as Box<dyn Output>)
+        Ok(Box::new(RemoteOutput::new(down_id, tx)) as BoxedOutput)
     }
 }
 
