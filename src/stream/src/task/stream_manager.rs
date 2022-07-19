@@ -13,11 +13,12 @@
 // limitations under the License.
 
 use core::time::Duration;
+use std::collections::{HashMap, HashSet};
 use std::fmt::Debug;
 use std::sync::Arc;
 
+use anyhow::anyhow;
 use itertools::Itertools;
-use madsim::collections::{HashMap, HashSet};
 use parking_lot::Mutex;
 use risingwave_common::buffer::Bitmap;
 use risingwave_common::config::StreamingConfig;
@@ -38,7 +39,7 @@ use crate::executor::monitor::StreamingMetrics;
 use crate::executor::*;
 use crate::from_proto::create_executor;
 use crate::task::{
-    ActorId, ConsumableChannelPair, FragmentId, SharedContext, StreamEnvironment, UpDownActorIds,
+    ActorId, FragmentId, SharedContext, StreamEnvironment, UpDownActorIds,
     LOCAL_OUTPUT_CHANNEL_SIZE,
 };
 
@@ -62,10 +63,6 @@ pub struct LocalStreamManagerCore {
 
     /// Stores all actor tokio runtime montioring tasks.
     actor_monitor_tasks: HashMap<ActorId, JoinHandle<()>>,
-
-    /// Mock source, `actor_id = 0`.
-    /// TODO: remove this
-    mock_source: ConsumableChannelPair,
 
     /// The state store implement
     state_store: StateStoreImpl,
@@ -197,8 +194,7 @@ impl LocalStreamManager {
         dispatch_state_store!(self.state_store(), store, {
             match store.sync(Some(epoch)).await {
                 Ok(_) => store.get_uncommitted_ssts(epoch),
-                // TODO: Handle sync failure by propagating it
-                // back to global barrier manager
+                // TODO: Handle sync failure by propagating it back to global barrier manager
                 Err(e) => panic!(
                     "Failed to sync state store after receiving barrier prev_epoch {:?} due to {}",
                     epoch, e
@@ -293,15 +289,6 @@ impl LocalStreamManager {
         Ok(())
     }
 
-    #[cfg(test)]
-    pub async fn wait_actors(&self, actor_ids: &[ActorId]) -> Result<()> {
-        let handles = self.core.lock().remove_actor_handles(actor_ids)?;
-        for handle in handles {
-            handle.await.unwrap();
-        }
-        Ok(())
-    }
-
     /// This function could only be called once during the lifecycle of `LocalStreamManager` for
     /// now.
     pub fn update_actor_info(
@@ -317,18 +304,6 @@ impl LocalStreamManager {
     pub fn build_actors(&self, actors: &[ActorId], env: StreamEnvironment) -> Result<()> {
         let mut core = self.core.lock();
         core.build_actors(actors, env)
-    }
-
-    #[cfg(test)]
-    pub fn take_source(&self) -> tokio::sync::mpsc::Sender<Message> {
-        let mut core = self.core.lock();
-        core.mock_source.0.take().unwrap()
-    }
-
-    #[cfg(test)]
-    pub fn take_sink(&self, ids: UpDownActorIds) -> Receiver<Message> {
-        let core = self.core.lock();
-        core.context.take_receiver(&ids).unwrap()
     }
 
     pub fn state_store(&self) -> StateStoreImpl {
@@ -353,23 +328,20 @@ impl LocalStreamManagerCore {
         config: StreamingConfig,
     ) -> Self {
         let context = SharedContext::new(addr);
-        Self::with_store_and_context(state_store, context, streaming_metrics, config)
+        Self::new_inner(state_store, context, streaming_metrics, config)
     }
 
-    fn with_store_and_context(
+    fn new_inner(
         state_store: StateStoreImpl,
         context: SharedContext,
         streaming_metrics: Arc<StreamingMetrics>,
         config: StreamingConfig,
     ) -> Self {
-        let (tx, rx) = channel(LOCAL_OUTPUT_CHANNEL_SIZE);
-
         Self {
             handles: HashMap::new(),
             context: Arc::new(context),
             actors: HashMap::new(),
             actor_monitor_tasks: HashMap::new(),
-            mock_source: (Some(tx), Some(rx)),
             state_store,
             streaming_metrics,
             compute_client_pool: ComputeClientPool::new(u64::MAX),
@@ -383,7 +355,7 @@ impl LocalStreamManagerCore {
 
         let register = prometheus::Registry::new();
         let streaming_metrics = Arc::new(StreamingMetrics::new(register));
-        Self::with_store_and_context(
+        Self::new_inner(
             StateStoreImpl::shared_in_memory_store(Arc::new(StateStoreMetrics::unused())),
             SharedContext::for_test(),
             streaming_metrics,
@@ -523,7 +495,7 @@ impl LocalStreamManagerCore {
         .boxed()
     }
 
-    pub(crate) fn get_receive_message(
+    pub(crate) fn take_receivers(
         &mut self,
         actor_id: ActorId,
         fragment_id: FragmentId,
@@ -531,46 +503,41 @@ impl LocalStreamManagerCore {
         up_fragment_id: FragmentId,
     ) -> Result<Vec<Receiver<Message>>> {
         assert!(!upstreams.is_empty());
-        let rxs = upstreams
+        let rxs: Vec<_> = upstreams
             .iter()
             .map(|up_id| {
-                if *up_id == 0 {
-                    Ok(self.mock_source.1.take().unwrap())
-                } else {
-                    let upstream_addr = self.context.get_actor_info(up_id)?.get_host()?.into();
-                    if !is_local_address(&upstream_addr, &self.context.addr) {
-                        // Get the sender for `RemoteInput` to forward received messages to
-                        // receivers in `ReceiverExecutor` or
-                        // `MergerExecutor`.
-                        let sender = self.context.take_sender(&(*up_id, actor_id))?;
-                        // spawn the `RemoteInput`
-                        let up_id = *up_id;
-                        let pool = self.compute_client_pool.clone();
-                        let metrics = self.streaming_metrics.clone();
-                        tokio::spawn(async move {
-                            let init_client = async move {
-                                let remote_input = RemoteInput::create(
-                                    pool.get_client_for_addr(upstream_addr).await?,
-                                    (up_id, actor_id),
-                                    (up_fragment_id, fragment_id),
-                                    sender,
-                                    metrics,
-                                )
-                                .await?;
-                                Ok::<_, RwError>(remote_input)
-                            };
-                            match init_client.await {
-                                Ok(remote_input) => remote_input.run().await,
-                                Err(e) => {
-                                    error!("Spawn remote input fails:{}", e);
-                                }
+                let upstream_addr = self.context.get_actor_info(up_id)?.get_host()?.into();
+                if !is_local_address(&upstream_addr, &self.context.addr) {
+                    // Get the sender for `RemoteInput` to forward received messages to receivers in
+                    // `ReceiverExecutor` or `MergeExecutor`.
+                    let sender = self.context.take_sender(&(*up_id, actor_id))?;
+                    // spawn the `RemoteInput`
+                    let up_id = *up_id;
+                    let pool = self.compute_client_pool.clone();
+                    let metrics = self.streaming_metrics.clone();
+                    tokio::spawn(async move {
+                        let init_client = async move {
+                            let remote_input = RemoteInput::create(
+                                pool.get_client_for_addr(upstream_addr).await?,
+                                (up_id, actor_id),
+                                (up_fragment_id, fragment_id),
+                                sender,
+                                metrics,
+                            )
+                            .await?;
+                            Ok::<_, RwError>(remote_input)
+                        };
+                        match init_client.await {
+                            Ok(remote_input) => remote_input.run().await,
+                            Err(e) => {
+                                error!("Spawn remote input fails:{}", e);
                             }
-                        });
-                    }
-                    Ok::<_, RwError>(self.context.take_receiver(&(*up_id, actor_id))?)
+                        }
+                    });
                 }
+                self.context.take_receiver(&(*up_id, actor_id))
             })
-            .collect::<Result<Vec<_>>>()?;
+            .try_collect()?;
 
         assert_eq!(
             rxs.len(),
@@ -585,8 +552,7 @@ impl LocalStreamManagerCore {
     }
 
     fn build_actors(&mut self, actors: &[ActorId], env: StreamEnvironment) -> Result<()> {
-        for actor_id in actors {
-            let actor_id = *actor_id;
+        for &actor_id in actors {
             let actor = self.actors.remove(&actor_id).unwrap();
             let actor_context = Arc::new(Mutex::new(ActorContext::default()));
             let vnode_bitmap = actor
@@ -722,7 +688,7 @@ impl LocalStreamManagerCore {
     /// sink. All the actors in the actors should stop themselves before this method is invoked.
     fn drop_actor(&mut self, actor_id: ActorId) {
         let handle = self.handles.remove(&actor_id).unwrap();
-        self.context.retain(|&(up_id, _)| up_id != actor_id);
+        self.context.retain_channel(|&(up_id, _)| up_id != actor_id);
         self.actor_monitor_tasks.remove(&actor_id).unwrap().abort();
         self.context.actor_infos.write().remove(&actor_id);
         self.actors.remove(&actor_id);
@@ -734,7 +700,7 @@ impl LocalStreamManagerCore {
     /// sink. All the actors in the actors should stop themselves before this method is invoked.
     fn drop_all_actors(&mut self) {
         for (actor_id, handle) in self.handles.drain() {
-            self.context.retain(|&(up_id, _)| up_id != actor_id);
+            self.context.retain_channel(|&(up_id, _)| up_id != actor_id);
             self.actor_monitor_tasks.remove(&actor_id).unwrap().abort();
             self.actors.remove(&actor_id);
             // Task should have already stopped when this method is invoked.
@@ -757,14 +723,9 @@ impl LocalStreamManagerCore {
         );
 
         for actor in actors {
-            let ret = self.actors.insert(actor.get_actor_id(), actor.clone());
-            if ret.is_some() {
-                return Err(ErrorCode::InternalError(format!(
-                    "duplicated actor {}",
-                    actor.get_actor_id()
-                ))
-                .into());
-            }
+            self.actors
+                .try_insert(actor.get_actor_id(), actor.clone())
+                .map_err(|_| anyhow!("duplicated actor {}", actor.get_actor_id()))?;
         }
 
         for actor in actors {

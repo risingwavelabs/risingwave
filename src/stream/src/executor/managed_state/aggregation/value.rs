@@ -77,7 +77,7 @@ impl ManagedValueState {
     }
 
     /// Apply a batch of data to the state.
-    pub async fn apply_batch(
+    pub fn apply_batch(
         &mut self,
         ops: Ops<'_>,
         visibility: Option<&Bitmap>,
@@ -91,7 +91,7 @@ impl ManagedValueState {
     /// Get the output of the state. Note that in our case, getting the output is very easy, as the
     /// output is the same as the aggregation state. In other aggregators, like min and max,
     /// `get_output` might involve a scan from the state store.
-    pub async fn get_output(&self) -> StreamExecutorResult<Datum> {
+    pub fn get_output(&self) -> StreamExecutorResult<Datum> {
         debug_assert!(!self.is_dirty());
         self.state.get_output()
     }
@@ -101,7 +101,7 @@ impl ManagedValueState {
         self.is_dirty
     }
 
-    pub async fn flush<S: StateStore>(
+    pub fn flush<S: StateStore>(
         &mut self,
         state_table: &mut StateTable<S>,
     ) -> StreamExecutorResult<()> {
@@ -167,18 +167,17 @@ mod tests {
                     .unwrap()
                     .into()],
             )
-            .await
             .unwrap();
         assert!(managed_state.is_dirty());
 
         // write to state store
         let epoch: u64 = 0;
-        managed_state.flush(&mut state_table).await.unwrap();
+        managed_state.flush(&mut state_table).unwrap();
         state_table.commit(epoch).await.unwrap();
 
         // get output
         assert_eq!(
-            managed_state.get_output().await.unwrap(),
+            managed_state.get_output().unwrap(),
             Some(ScalarImpl::Int64(3))
         );
 
@@ -188,7 +187,7 @@ mod tests {
                 .await
                 .unwrap();
         assert_eq!(
-            managed_state.get_output().await.unwrap(),
+            managed_state.get_output().unwrap(),
             Some(ScalarImpl::Int64(3))
         );
     }
@@ -233,18 +232,17 @@ mod tests {
                         .into(),
                 ],
             )
-            .await
             .unwrap();
         assert!(managed_state.is_dirty());
 
         // write to state store
         let epoch: u64 = 0;
-        managed_state.flush(&mut state_table).await.unwrap();
+        managed_state.flush(&mut state_table).unwrap();
         state_table.commit(epoch).await.unwrap();
 
         // get output
         assert_eq!(
-            managed_state.get_output().await.unwrap(),
+            managed_state.get_output().unwrap(),
             Some(ScalarImpl::Int64(2))
         );
 
@@ -254,7 +252,7 @@ mod tests {
                 .await
                 .unwrap();
         assert_eq!(
-            managed_state.get_output().await.unwrap(),
+            managed_state.get_output().unwrap(),
             Some(ScalarImpl::Int64(2))
         );
     }

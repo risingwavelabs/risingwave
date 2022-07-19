@@ -21,9 +21,7 @@ use risingwave_hummock_sdk::compact::compact_task_to_string;
 use risingwave_hummock_sdk::compaction_group::hummock_version_ext::HummockVersionExt;
 use risingwave_hummock_sdk::compaction_group::StaticCompactionGroupId;
 // use risingwave_hummock_sdk::key_range::KeyRange;
-use risingwave_hummock_sdk::{
-    HummockContextId, HummockSSTableId, FIRST_VERSION_ID, INVALID_VERSION_ID,
-};
+use risingwave_hummock_sdk::{HummockContextId, HummockSSTableId, FIRST_VERSION_ID};
 use risingwave_pb::common::{HostAddress, ParallelUnitType, WorkerType};
 use risingwave_pb::hummock::{
     HummockPinnedSnapshot, HummockPinnedVersion, HummockSnapshot, KeyRange,
@@ -36,7 +34,7 @@ use crate::hummock::test_utils::*;
 use crate::model::MetadataModel;
 
 fn pin_versions_sum(pin_versions: &[HummockPinnedVersion]) -> usize {
-    pin_versions.iter().map(|p| p.version_id.len()).sum()
+    pin_versions.iter().len()
 }
 
 fn pin_snapshots_epoch(pin_snapshots: &[HummockPinnedSnapshot]) -> Vec<u64> {
@@ -61,6 +59,8 @@ async fn test_hummock_pin_unpin() {
         let hummock_version = hummock_manager
             .pin_version(context_id, u64::MAX)
             .await
+            .unwrap()
+            .2
             .unwrap();
         let levels = hummock_version
             .get_compaction_group_levels(StaticCompactionGroupId::StateDefault.into());
@@ -72,20 +72,11 @@ async fn test_hummock_pin_unpin() {
         let pinned_versions = HummockPinnedVersion::list(env.meta_store()).await.unwrap();
         assert_eq!(pin_versions_sum(&pinned_versions), 1);
         assert_eq!(pinned_versions[0].context_id, context_id);
-        assert_eq!(pinned_versions[0].version_id.len(), 1);
-        assert_eq!(pinned_versions[0].version_id[0], version_id);
     }
 
-    // unpin nonexistent target will not return error
+    // unpin one context will delete the whole version info of the context
     for _ in 0..3 {
-        hummock_manager
-            .unpin_version(context_id, vec![version_id])
-            .await
-            .unwrap();
-        assert_eq!(
-            pin_versions_sum(&HummockPinnedVersion::list(env.meta_store()).await.unwrap()),
-            0
-        );
+        hummock_manager.unpin_version(context_id).await.unwrap();
     }
 
     assert!(HummockPinnedSnapshot::list(env.meta_store())
@@ -297,6 +288,8 @@ async fn test_hummock_table() {
     let pinned_version = hummock_manager
         .pin_version(context_id, u64::MAX)
         .await
+        .unwrap()
+        .2
         .unwrap();
     assert_eq!(
         Ordering::Equal,
@@ -339,14 +332,13 @@ async fn test_hummock_transaction() {
         let pinned_version = hummock_manager
             .pin_version(context_id, u64::MAX)
             .await
+            .unwrap()
+            .2
             .unwrap();
         assert_eq!(pinned_version.max_committed_epoch, INVALID_EPOCH);
         assert!(get_sorted_committed_sstable_ids(&pinned_version).is_empty());
 
-        hummock_manager
-            .unpin_version(context_id, vec![pinned_version.id])
-            .await
-            .unwrap();
+        hummock_manager.unpin_version(context_id).await.unwrap();
 
         // Commit epoch1
         hummock_manager
@@ -359,6 +351,8 @@ async fn test_hummock_transaction() {
         let pinned_version = hummock_manager
             .pin_version(context_id, u64::MAX)
             .await
+            .unwrap()
+            .2
             .unwrap();
         assert_eq!(pinned_version.max_committed_epoch, epoch1);
         assert_eq!(
@@ -366,10 +360,7 @@ async fn test_hummock_transaction() {
             get_sorted_committed_sstable_ids(&pinned_version)
         );
 
-        hummock_manager
-            .unpin_version(context_id, vec![pinned_version.id])
-            .await
-            .unwrap();
+        hummock_manager.unpin_version(context_id).await.unwrap();
     }
 
     // Add and commit tables in epoch2.
@@ -390,16 +381,15 @@ async fn test_hummock_transaction() {
         let pinned_version = hummock_manager
             .pin_version(context_id, u64::MAX)
             .await
+            .unwrap()
+            .2
             .unwrap();
         assert_eq!(pinned_version.max_committed_epoch, epoch1);
         assert_eq!(
             get_sorted_sstable_ids(&committed_tables),
             get_sorted_committed_sstable_ids(&pinned_version)
         );
-        hummock_manager
-            .unpin_version(context_id, vec![pinned_version.id])
-            .await
-            .unwrap();
+        hummock_manager.unpin_version(context_id).await.unwrap();
 
         // Commit epoch2
         hummock_manager
@@ -413,16 +403,15 @@ async fn test_hummock_transaction() {
         let pinned_version = hummock_manager
             .pin_version(context_id, u64::MAX)
             .await
+            .unwrap()
+            .2
             .unwrap();
         assert_eq!(pinned_version.max_committed_epoch, epoch2);
         assert_eq!(
             get_sorted_sstable_ids(&committed_tables),
             get_sorted_committed_sstable_ids(&pinned_version)
         );
-        hummock_manager
-            .unpin_version(context_id, vec![pinned_version.id])
-            .await
-            .unwrap();
+        hummock_manager.unpin_version(context_id).await.unwrap();
     }
 }
 
@@ -519,12 +508,6 @@ async fn test_context_id_validation() {
         .delete_worker_node(worker_node.host.unwrap())
         .await
         .unwrap();
-    // Invalid context id is rejected.
-    let error = hummock_manager
-        .pin_version(context_id, u64::MAX)
-        .await
-        .unwrap_err();
-    assert!(matches!(error, Error::InvalidContext(_)));
 }
 
 #[tokio::test]
@@ -580,6 +563,8 @@ async fn test_hummock_manager_basic() {
         let version = hummock_manager
             .pin_version(context_id_1, u64::MAX)
             .await
+            .unwrap()
+            .2
             .unwrap();
         assert_eq!(version.id, FIRST_VERSION_ID + 1);
         assert_eq!(
@@ -595,6 +580,8 @@ async fn test_hummock_manager_basic() {
         let version = hummock_manager
             .pin_version(context_id_2, u64::MAX)
             .await
+            .unwrap()
+            .2
             .unwrap();
         assert_eq!(version.id, FIRST_VERSION_ID + 1);
         assert_eq!(
@@ -629,98 +616,6 @@ async fn test_hummock_manager_basic() {
         .delete_versions(&[FIRST_VERSION_ID])
         .await
         .unwrap();
-}
-
-#[tokio::test]
-async fn test_retryable_pin_version() {
-    let (_env, hummock_manager, _cluster_manager, worker_node) = setup_compute_env(80).await;
-    let context_id = worker_node.id;
-    // Pin a version with smallest last_pin
-    // [ v0 ] -> [ v0:pinned ]
-    let version = hummock_manager
-        .pin_version(context_id, INVALID_VERSION_ID)
-        .await
-        .unwrap();
-    assert_eq!(version.id, FIRST_VERSION_ID);
-
-    let mut epoch: u64 = 1;
-    // [ v0:pinned, v1, v2 ]
-    for _ in 0..2 {
-        let test_tables = generate_test_tables(
-            epoch,
-            vec![
-                hummock_manager.get_new_table_id().await.unwrap(),
-                hummock_manager.get_new_table_id().await.unwrap(),
-            ],
-        );
-        register_sstable_infos_to_compaction_group(
-            hummock_manager.compaction_group_manager_ref_for_test(),
-            &test_tables,
-            StaticCompactionGroupId::StateDefault.into(),
-        )
-        .await;
-        // Increase the version
-        hummock_manager
-            .commit_epoch(epoch, to_local_sstable_info(&test_tables))
-            .await
-            .unwrap();
-        epoch += 1;
-    }
-
-    // Retry and results the same version pinned.
-    // [ v0:pinned, v1, v2 ] -> [ v0:pinned, v1, v2 ]
-    let version_retry = hummock_manager
-        .pin_version(context_id, INVALID_VERSION_ID)
-        .await
-        .unwrap();
-    assert_eq!(version_retry.id, version.id);
-
-    // Use correct last_pin to pin newer version.
-    // [ v0:pinned, v1, v2 ] -> [ v0:pinned, v1, v2:pinned ]
-    let version_2 = hummock_manager
-        .pin_version(context_id, version.id)
-        .await
-        .unwrap();
-    assert_eq!(version_2.id, version.id + 2);
-
-    // [ v0:pinned, v1, v2:pinned ] -> [ v0:pinned, v1, v2:pinned, v3, v4 ]
-    for _ in 0..2 {
-        let test_tables = generate_test_tables(
-            epoch,
-            vec![
-                hummock_manager.get_new_table_id().await.unwrap(),
-                hummock_manager.get_new_table_id().await.unwrap(),
-            ],
-        );
-        register_sstable_infos_to_compaction_group(
-            hummock_manager.compaction_group_manager_ref_for_test(),
-            &test_tables,
-            StaticCompactionGroupId::StateDefault.into(),
-        )
-        .await;
-        // Increase the version
-        hummock_manager
-            .commit_epoch(epoch, to_local_sstable_info(&test_tables))
-            .await
-            .unwrap();
-        epoch += 1;
-    }
-
-    // Retry and results the same version pinned.
-    // [ v0:pinned, v1, v2:pinned, v3, v4 ] -> [ v0:pinned, v1, v2:pinned, v3, v4 ]
-    let version_2_retry = hummock_manager
-        .pin_version(context_id, version.id)
-        .await
-        .unwrap();
-    assert_eq!(version_2_retry.id, version_2.id);
-
-    // Use None as last_pin to pin greatest version
-    // [ v0:pinned, v1, v2:pinned, v3, v4 ] -> [ v0:pinned, v1, v2:pinned, v3, v4:pinned ]
-    let version_3 = hummock_manager
-        .pin_version(context_id, u64::MAX)
-        .await
-        .unwrap();
-    assert_eq!(version_3.id, version.id + 4);
 }
 
 #[tokio::test]

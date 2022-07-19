@@ -20,6 +20,7 @@ use risingwave_common::error::{internal_error, ErrorCode, Result};
 use risingwave_sqlparser::ast::{Ident, ObjectName, TableAlias, TableFactor};
 
 use super::bind_context::ColumnBinding;
+use super::table_function::BoundTableFunction;
 use crate::binder::Binder;
 
 mod join;
@@ -30,7 +31,6 @@ mod window_table_function;
 
 pub use join::BoundJoin;
 pub use subquery::BoundSubquery;
-pub use table_function::BoundTableFunction;
 pub use table_or_source::{BoundBaseTable, BoundSource, BoundSystemTable, BoundTableSource};
 pub use window_table_function::{BoundWindowTableFunction, WindowTableFunctionKind};
 
@@ -47,12 +47,6 @@ pub enum Relation {
     TableFunction(Box<BoundTableFunction>),
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Hash)]
-pub enum FunctionType {
-    Generate,
-    Unnest,
-}
-
 impl Binder {
     /// return first and second name in identifiers,
     /// must have one name and can use default name as other one.
@@ -64,11 +58,11 @@ impl Binder {
         let second_name = identifiers
             .pop()
             .ok_or_else(|| ErrorCode::InternalError(err_str.into()))?
-            .value;
+            .real_value();
 
         let first_name = identifiers
             .pop()
-            .map(|ident| ident.value)
+            .map(|ident| ident.real_value())
             .unwrap_or_else(|| default_name.into());
 
         Ok((first_name, second_name))
@@ -85,7 +79,7 @@ impl Binder {
         let name = identifiers
             .pop()
             .ok_or_else(|| ErrorCode::InternalError(format!("empty {}", ident_desc)))?
-            .value;
+            .real_value();
 
         Ok(name)
     }
@@ -122,7 +116,7 @@ impl Binder {
     ) -> Result<()> {
         let (table_name, column_aliases) = match alias {
             None => (table_name, vec![]),
-            Some(TableAlias { name, columns }) => (name.value, columns),
+            Some(TableAlias { name, columns }) => (name.real_value(), columns),
         };
 
         let begin = self.context.columns.len();
@@ -242,11 +236,11 @@ impl Binder {
                     self.try_mark_lateral_as_invisible();
                     Err(ErrorCode::NotImplemented(
                         "lateral subqueries are not yet supported".into(),
-                        None.into(),
+                        Some(3815).into(),
                     )
                     .into())
                 } else {
-                    // Non-lateral subqueries to not have access to the lateral context.
+                    // Non-lateral subqueries to not have access to the join-tree context.
                     self.push_lateral_context();
                     let bound_subquery = self.bind_subquery_relation(*subquery, alias)?;
                     self.pop_and_merge_lateral_context()?;

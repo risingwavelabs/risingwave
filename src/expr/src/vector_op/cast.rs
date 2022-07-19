@@ -166,7 +166,7 @@ pub fn str_to_bool(input: &str) -> Result<bool> {
         Ok(true)
     } else if FALSE_BOOL_LITERALS
         .iter()
-        .any(|s| trimmed_input.eq_ignore_ascii_case(*s))
+        .any(|s| trimmed_input.eq_ignore_ascii_case(s))
     {
         Ok(false)
     } else {

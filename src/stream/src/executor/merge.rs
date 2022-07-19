@@ -15,7 +15,6 @@
 use std::pin::Pin;
 use std::task::{Context, Poll};
 
-use async_trait::async_trait;
 use futures::{Stream, StreamExt};
 use futures_async_stream::for_await;
 use madsim::time::Instant;
@@ -170,7 +169,6 @@ impl MergeExecutor {
     }
 }
 
-#[async_trait]
 impl Executor for MergeExecutor {
     fn execute(self: Box<Self>) -> BoxedMessageStream {
         let upstreams = self.upstreams;
@@ -182,15 +180,13 @@ impl Executor for MergeExecutor {
 
         // Channels that're blocked by the barrier to align.
         select_all
-            .map(move |msg| {
+            .inspect(move |msg| {
                 if let Ok(Message::Chunk(chunk)) = &msg {
                     metrics
                         .actor_in_record_cnt
                         .with_label_values(&[&actor_id_str])
                         .inc_by(chunk.cardinality() as _);
                 }
-
-                msg
             })
             .boxed()
     }
@@ -221,7 +217,7 @@ impl SelectReceivers {
     fn new(actor_id: u32, status: OperatorInfoStatus, upstreams: Vec<Receiver<Message>>) -> Self {
         Self {
             blocks: Vec::with_capacity(upstreams.len()),
-            upstreams: upstreams.into_iter().map(ReceiverStream::new).collect(),
+            upstreams: upstreams.into_iter().map(Receiver::into).collect(),
             last_base: 0,
             actor_id,
             status,
@@ -298,13 +294,13 @@ impl Stream for SelectReceivers {
 
 #[cfg(test)]
 mod tests {
+    use std::collections::HashSet;
     use std::sync::atomic::{AtomicBool, Ordering};
     use std::sync::Arc;
     use std::time::Duration;
 
     use assert_matches::assert_matches;
     use itertools::Itertools;
-    use madsim::collections::HashSet;
     use risingwave_common::array::{Op, StreamChunk};
     use risingwave_pb::stream_plan::StreamMessage;
     use risingwave_pb::task_service::exchange_service_server::{

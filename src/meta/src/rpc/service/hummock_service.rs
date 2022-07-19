@@ -77,10 +77,14 @@ where
             .pin_version(req.context_id, req.last_pinned)
             .await;
         match result {
-            Ok(pinned_version) => Ok(Response::new(PinVersionResponse {
-                status: None,
-                pinned_version: Some(pinned_version),
-            })),
+            Ok((is_delta_response, version_deltas, pinned_version)) => {
+                Ok(Response::new(PinVersionResponse {
+                    status: None,
+                    is_delta_response,
+                    version_deltas,
+                    pinned_version,
+                }))
+            }
             Err(e) => Err(tonic_err(e)),
         }
     }
@@ -90,12 +94,24 @@ where
         request: Request<UnpinVersionRequest>,
     ) -> Result<Response<UnpinVersionResponse>, Status> {
         let req = request.into_inner();
-        let result = self
-            .hummock_manager
-            .unpin_version(req.context_id, req.pinned_version_ids)
-            .await;
+        let result = self.hummock_manager.unpin_version(req.context_id).await;
         match result {
             Ok(_) => Ok(Response::new(UnpinVersionResponse { status: None })),
+            Err(e) => Err(tonic_err(e)),
+        }
+    }
+
+    async fn unpin_version_before(
+        &self,
+        request: Request<UnpinVersionBeforeRequest>,
+    ) -> Result<Response<UnpinVersionBeforeResponse>, Status> {
+        let req = request.into_inner();
+        let result = self
+            .hummock_manager
+            .unpin_version_before(req.context_id, req.unpin_version_before)
+            .await;
+        match result {
+            Ok(_) => Ok(Response::new(UnpinVersionBeforeResponse { status: None })),
             Err(e) => Err(tonic_err(e)),
         }
     }

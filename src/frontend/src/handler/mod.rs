@@ -47,16 +47,15 @@ mod show;
 pub mod util;
 mod variable;
 
-pub(super) async fn handle(
-    session: Arc<SessionImpl>,
-    stmt: Statement,
-    sql: &str,
-) -> Result<PgResponse> {
+pub async fn handle(session: Arc<SessionImpl>, stmt: Statement, sql: &str) -> Result<PgResponse> {
     let context = OptimizerContext::new(session.clone(), Arc::from(sql));
     match stmt {
         Statement::Explain {
-            statement, verbose, ..
-        } => explain::handle_explain(context, *statement, verbose),
+            statement,
+            verbose,
+            trace,
+            ..
+        } => explain::handle_explain(context, *statement, verbose, trace),
         Statement::CreateSource {
             is_materialized,
             stmt,

@@ -123,6 +123,7 @@ impl Binder {
             }
         };
 
+        #[expect(clippy::needless_borrow)]
         self.bind_table_to_context(
             columns
                 .iter()
@@ -163,6 +164,7 @@ impl Binder {
 
         let columns = table_catalog.columns.clone();
 
+        #[expect(clippy::needless_borrow)]
         self.bind_table_to_context(
             columns
                 .iter()

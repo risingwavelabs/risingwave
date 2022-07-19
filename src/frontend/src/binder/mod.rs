@@ -27,6 +27,7 @@ mod select;
 mod set_expr;
 mod statement;
 mod struct_field;
+mod table_function;
 mod update;
 mod values;
 
@@ -36,13 +37,14 @@ pub use expr::bind_data_type;
 pub use insert::BoundInsert;
 pub use query::BoundQuery;
 pub use relation::{
-    BoundBaseTable, BoundJoin, BoundSource, BoundSystemTable, BoundTableFunction, BoundTableSource,
-    BoundWindowTableFunction, FunctionType, Relation, WindowTableFunctionKind,
+    BoundBaseTable, BoundJoin, BoundSource, BoundSystemTable, BoundTableSource,
+    BoundWindowTableFunction, Relation, WindowTableFunctionKind,
 };
 use risingwave_common::error::ErrorCode;
 pub use select::BoundSelect;
 pub use set_expr::BoundSetExpr;
 pub use statement::BoundStatement;
+pub use table_function::{BoundTableFunction, TableFunctionType};
 pub use update::BoundUpdate;
 pub use values::BoundValues;
 
@@ -64,7 +66,7 @@ pub struct Binder {
     /// A stack holding contexts of left-lateral `TableFactor`s.
     ///
     /// We need a separate stack as `CorrelatedInputRef` depth is
-    /// determined by the upper subquery context depth, not the table context stack depth.
+    /// determined by the upper subquery context depth, not the lateral context stack depth.
     lateral_contexts: Vec<LateralBindContext>,
 
     next_subquery_id: usize,

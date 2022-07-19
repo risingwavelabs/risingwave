@@ -15,6 +15,7 @@
 use std::borrow::BorrowMut;
 use std::collections::{BTreeMap, HashSet, VecDeque};
 use std::future::Future;
+use std::ops::Bound::{Excluded, Included};
 use std::ops::DerefMut;
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::Arc;
@@ -47,9 +48,7 @@ use crate::hummock::compaction_group::manager::CompactionGroupManagerRef;
 use crate::hummock::compaction_scheduler::CompactionRequestChannelRef;
 use crate::hummock::error::{Error, Result};
 use crate::hummock::metrics_utils::{trigger_commit_stat, trigger_sst_stat};
-use crate::hummock::model::{
-    sstable_id_info, CurrentHummockVersionId, HummockPinnedVersionExt, INVALID_TIMESTAMP,
-};
+use crate::hummock::model::{sstable_id_info, CurrentHummockVersionId, INVALID_TIMESTAMP};
 use crate::hummock::CompactorManagerRef;
 use crate::manager::{IdCategory, MetaSrvEnv};
 use crate::model::{
@@ -331,37 +330,9 @@ where
             .hummock_versions
             .insert(redo_state.id, redo_state.clone());
 
-        for (id, version_delta) in &hummock_version_deltas {
+        for version_delta in hummock_version_deltas.values() {
             if version_delta.prev_id == redo_state.id {
-                for (compaction_group_id, level_deltas) in &version_delta.level_deltas {
-                    let mut delete_sst_levels = Vec::with_capacity(level_deltas.level_deltas.len());
-                    let mut delete_sst_ids_set = HashSet::new();
-                    let mut insert_sst_level = u32::MAX;
-                    let mut insert_table_infos = vec![];
-                    for level_delta in &level_deltas.level_deltas {
-                        if !level_delta.removed_table_ids.is_empty() {
-                            delete_sst_levels.push(level_delta.level_idx);
-                            delete_sst_ids_set.extend(level_delta.removed_table_ids.iter().clone());
-                        }
-                        if !level_delta.inserted_table_infos.is_empty() {
-                            insert_sst_level = level_delta.level_idx;
-                            insert_table_infos
-                                .extend(level_delta.inserted_table_infos.iter().cloned());
-                        }
-                    }
-                    let operand = &mut redo_state
-                        .get_compaction_group_levels_mut(*compaction_group_id as CompactionGroupId);
-                    HummockVersion::apply_compact_ssts(
-                        operand,
-                        &delete_sst_levels,
-                        &delete_sst_ids_set,
-                        insert_sst_level,
-                        insert_table_infos,
-                    );
-                }
-                redo_state.id = *id;
-                redo_state.max_committed_epoch = version_delta.max_committed_epoch;
-                redo_state.safe_epoch = version_delta.safe_epoch;
+                redo_state.apply_version_delta(version_delta);
 
                 versioning_guard
                     .hummock_versions
@@ -437,18 +408,14 @@ where
         meta_store.txn(trx).await.map_err(Into::into)
     }
 
-    /// Pin a hummock version that is greater than `last_pinned`. The pin belongs to `context_id`
+    /// Pin the current greatest hummock version. The pin belongs to `context_id`
     /// and will be unpinned when `context_id` is invalidated.
-    /// `last_pinned` helps to make `pin_version` retryable:
-    /// 1 Return the smallest already pinned version of `context_id` that is greater than
-    /// `last_pinned`, if any.
-    /// 2 Otherwise pin and return the current greatest version.
     #[named]
     pub async fn pin_version(
         &self,
         context_id: HummockContextId,
         last_pinned: HummockVersionId,
-    ) -> Result<HummockVersion> {
+    ) -> Result<(bool, Vec<HummockVersionDelta>, Option<HummockVersion>)> {
         let mut versioning_guard = write_lock!(self, versioning).await;
         let _timer = start_measure_real_process_timer!(self);
         let versioning = versioning_guard.deref_mut();
@@ -459,33 +426,43 @@ where
             context_id,
             HummockPinnedVersion {
                 context_id,
-                version_id: vec![],
+                min_pinned_id: 0,
             },
         );
 
-        let mut already_pinned = false;
-        let version_id = {
-            let partition_point = context_pinned_version
-                .version_id
-                .iter()
-                .sorted()
-                .cloned()
-                .collect_vec()
-                .partition_point(|p| *p <= last_pinned);
-            if partition_point < context_pinned_version.version_id.len() {
-                already_pinned = true;
-                context_pinned_version.version_id[partition_point]
+        let version_id = current_version_id.id();
+
+        let (is_delta, ret_deltas) = {
+            if last_pinned <= version_id
+                && versioning.hummock_version_deltas.contains_key(&last_pinned)
+            {
+                (
+                    true,
+                    versioning
+                        .hummock_version_deltas
+                        .range((Excluded(last_pinned), Included(version_id)))
+                        .map(|(_, delta)| delta.clone())
+                        .collect_vec(),
+                )
             } else {
-                current_version_id.id()
+                (false, vec![])
             }
         };
 
-        if !already_pinned {
-            context_pinned_version.pin_version(version_id);
+        if context_pinned_version.min_pinned_id == 0 {
+            context_pinned_version.min_pinned_id = version_id;
             commit_multi_var!(self, Some(context_id), context_pinned_version)?;
         }
 
-        let ret = Ok(hummock_versions.get(&version_id).unwrap().clone());
+        let ret = Ok((
+            is_delta,
+            ret_deltas,
+            if is_delta {
+                None
+            } else {
+                Some(hummock_versions.get(&version_id).unwrap().clone())
+            },
+        ));
 
         #[cfg(test)]
         {
@@ -496,25 +473,49 @@ where
         ret
     }
 
+    /// Unpin all pins which belongs to `context_id` and has an id which is older than
+    /// `unpin_before`. All versions >= `unpin_before` will be treated as if they are all pinned by
+    /// this `context_id` so they will not be vacummed.
     #[named]
-    pub async fn unpin_version(
+    pub async fn unpin_version_before(
         &self,
         context_id: HummockContextId,
-        pinned_version_ids: impl AsRef<[HummockVersionId]>,
+        unpin_before: HummockVersionId,
     ) -> Result<()> {
         let mut versioning_guard = write_lock!(self, versioning).await;
         let _timer = start_measure_real_process_timer!(self);
-        let mut pinned_versions = BTreeMapTransaction::new(&mut versioning_guard.pinned_versions);
-        let mut context_pinned_version = match pinned_versions.new_entry_txn(context_id) {
-            None => {
-                return Ok(());
-            }
-            Some(context_pinned_version) => context_pinned_version,
-        };
-        for pinned_version_id in pinned_version_ids.as_ref() {
-            context_pinned_version.unpin_version(*pinned_version_id);
-        }
+        let versioning = versioning_guard.deref_mut();
+        let mut pinned_versions = BTreeMapTransaction::new(&mut versioning.pinned_versions);
+        let mut context_pinned_version = pinned_versions.new_entry_txn_or_default(
+            context_id,
+            HummockPinnedVersion {
+                context_id,
+                min_pinned_id: 0,
+            },
+        );
+
+        context_pinned_version.min_pinned_id = unpin_before;
         commit_multi_var!(self, Some(context_id), context_pinned_version)?;
+
+        #[cfg(test)]
+        {
+            drop(versioning_guard);
+            self.check_state_consistency().await;
+        }
+
+        Ok(())
+    }
+
+    /// Remove this context from context pin info.
+    #[named]
+    pub async fn unpin_version(&self, context_id: HummockContextId) -> Result<()> {
+        let mut versioning_guard = write_lock!(self, versioning).await;
+        let _timer = start_measure_real_process_timer!(self);
+        let mut pinned_versions = BTreeMapTransaction::new(&mut versioning_guard.pinned_versions);
+        let release_version = pinned_versions.remove(context_id);
+        if release_version.is_some() {
+            commit_multi_var!(self, Some(context_id), pinned_versions)?;
+        }
 
         #[cfg(test)]
         {
@@ -1258,11 +1259,20 @@ where
         }
 
         let mut trx = Transaction::default();
-        for (_, version_delta_item) in version_deltas_to_delete {
+        for version_delta_item in version_deltas_to_delete.values() {
             version_delta_item.delete_in_transaction(&mut trx)?;
         }
-        self.commit_trx(self.env.meta_store(), trx, None, self.env.get_leader_info())
-            .await?;
+        let ret = self
+            .commit_trx(self.env.meta_store(), trx, None, self.env.get_leader_info())
+            .await;
+
+        if ret.is_err() {
+            let mut versioning_guard = write_lock!(self, versioning).await;
+            versioning_guard
+                .hummock_version_deltas
+                .append(&mut version_deltas_to_delete);
+            return Err(ret.unwrap_err().into());
+        }
 
         Ok(())
     }
@@ -1278,7 +1288,7 @@ where
         let count = versioning_guard
             .pinned_versions
             .values()
-            .filter(|version_pin| version_pin.version_id.contains(&version_id))
+            .filter(|version_pin| version_pin.min_pinned_id <= version_id)
             .count();
         Ok(count as HummockRefCount)
     }
@@ -1360,12 +1370,16 @@ where
 
             for version_pin in pinned_versions_ref.values() {
                 assert!(
-                    !version_pin.version_id.contains(version_id),
+                    version_pin.min_pinned_id > *version_id,
                     "version still referenced shouldn't be deleted."
                 );
             }
         }
-        commit_multi_var!(self, None, hummock_versions, stale_sstables)?;
+        // We do not call `commit_multi_var!(hummock_versions)` because meta store does not store
+        // multiple `HummockVersion`s. Currently only memory stores multiple `HummockVersion`s, so
+        // we only need to commit in memory.
+        commit_multi_var!(self, None, stale_sstables)?;
+        hummock_versions.commit();
 
         #[cfg(test)]
         {

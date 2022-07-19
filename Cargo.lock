@@ -1677,6 +1677,15 @@ dependencies = [
 ]
 
 [[package]]
+name = "fiemap"
+version = "0.1.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "084632422a59165633e28f8436545a6694b3d659405ceb3be0a441d4bfbf25d1"
+dependencies = [
+ "bitflags",
+]
+
+[[package]]
 name = "findshlibs"
 version = "0.10.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -2075,6 +2084,7 @@ checksum = "31672b7011be2c4f7456c4ddbcb40e7e9a4a9fad8efe49a6ebaf5f307d0109c0"
 dependencies = [
  "base64",
  "byteorder",
+ "crossbeam-channel",
  "flate2",
  "nom 7.1.1",
  "num-traits",
@@ -2630,11 +2640,12 @@ dependencies = [
 
 [[package]]
 name = "madsim"
-version = "0.2.0-alpha.3"
+version = "0.2.0-alpha.4"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "972a96fe6454e9ae8f8be37469a54439ce606de7e1ab81a5fa35f27e3b9f562a"
+checksum = "08eb4e2dd6827611e1c571149b244f0da5cfc3115d08d56d29d0c2f34d502610"
 dependencies = [
  "ahash",
+ "async-channel",
  "async-task",
  "bincode",
  "bytes",
@@ -2653,9 +2664,9 @@ dependencies = [
 
 [[package]]
 name = "madsim-macros"
-version = "0.2.0-alpha.3"
+version = "0.2.0-alpha.4"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "c28d2e056c057b6414485a1026f399c704ad8ab32365c4e507cc8390d149e057"
+checksum = "0f9cd5b09aefa5d86980ded42f8dcfac9bcc28429a5304c6dd8ce8ed563b6ca1"
 dependencies = [
  "darling 0.14.1",
  "proc-macro2",
@@ -2665,9 +2676,9 @@ dependencies = [
 
 [[package]]
 name = "madsim-tokio"
-version = "0.2.0-alpha.3"
+version = "0.2.0-alpha.4"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "42e6fd191e302ca7f8319e1efbd10434ca5e83db2170ab0184742de580b2d87f"
+checksum = "e2f69c0f9c53088e825c02aa678f66f90c4329570e51d78fecb2b58c38fd8787"
 dependencies = [
  "madsim",
  "tokio",
@@ -2675,9 +2686,9 @@ dependencies = [
 
 [[package]]
 name = "madsim-tonic"
-version = "0.2.0-alpha.3"
+version = "0.2.0-alpha.4"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "cd4b7aba0420d6eabfad6a986f7c5a6c73f819b02ffbe94cc678f84a96a6a148"
+checksum = "6260fcb2f7ee2cbb4b492217cdaa03d2c3423c3af8bace179b4444be42e94b64"
 dependencies = [
  "async-stream",
  "futures",
@@ -4107,16 +4118,21 @@ dependencies = [
 name = "risingwave_bench"
 version = "0.1.10"
 dependencies = [
+ "async-trait",
  "bytes",
  "bytesize",
  "clap 3.2.8",
  "env_logger",
  "futures",
+ "hdrhistogram",
  "itertools",
+ "libc",
  "log",
  "madsim",
  "madsim-tokio",
  "moka",
+ "nix",
+ "parking_lot",
  "prometheus",
  "rand 0.8.5",
  "risingwave_common",
@@ -4146,7 +4162,6 @@ dependencies = [
  "risingwave_meta",
  "risingwave_rt",
  "tikv-jemallocator",
- "tokio",
  "tracing",
  "workspace-hack",
  "workspace-static-link",
@@ -4189,6 +4204,7 @@ dependencies = [
  "comfy-table",
  "crc32fast",
  "either",
+ "enum-as-inner",
  "futures",
  "futures-async-stream",
  "humantime",
@@ -4545,6 +4561,7 @@ dependencies = [
  "fail",
  "futures",
  "itertools",
+ "madsim",
  "madsim-tokio",
  "rand 0.8.5",
  "risingwave_common",
@@ -4632,6 +4649,7 @@ dependencies = [
  "fail",
  "futures",
  "itertools",
+ "madsim",
  "madsim-tokio",
  "prometheus",
  "risingwave_common",
@@ -4670,6 +4688,7 @@ dependencies = [
  "madsim-tokio",
  "path-absolutize",
  "similar",
+ "tempfile",
  "workspace-hack",
 ]
 
@@ -4816,6 +4835,7 @@ dependencies = [
  "madsim-tokio",
  "paste",
  "rand 0.8.5",
+ "risingwave_expr",
  "risingwave_frontend",
  "risingwave_sqlparser",
  "tokio-postgres",
@@ -4829,6 +4849,7 @@ dependencies = [
  "anyhow",
  "async-trait",
  "auto_enums",
+ "bitvec",
  "byteorder",
  "bytes",
  "chrono",
@@ -4841,6 +4862,7 @@ dependencies = [
  "enum-as-inner",
  "fail",
  "farmhash",
+ "fiemap",
  "futures",
  "futures-async-stream",
  "hyper",
@@ -4863,6 +4885,7 @@ dependencies = [
  "prometheus",
  "prost",
  "rand 0.8.5",
+ "regex",
  "risingwave_common",
  "risingwave_hummock_sdk",
  "risingwave_object_store",
@@ -6443,6 +6466,7 @@ dependencies = [
  "futures-sink",
  "futures-task",
  "futures-util",
+ "hdrhistogram",
  "hyper",
  "indexmap",
  "isahc",

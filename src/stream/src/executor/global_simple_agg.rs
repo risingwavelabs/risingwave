@@ -89,10 +89,15 @@ impl<S: StateStore> GlobalSimpleAggExecutor<S> {
         agg_calls: Vec<AggCall>,
         pk_indices: PkIndices,
         executor_id: u64,
-        state_tables: Vec<StateTable<S>>,
+        mut state_tables: Vec<StateTable<S>>,
     ) -> Result<Self> {
         let input_info = input.info();
         let schema = generate_agg_schema(input.as_ref(), &agg_calls, None);
+
+        // TODO: enable sanity check for globle simple agg executor <https://github.com/singularity-data/risingwave/issues/3885>
+        for state_table in &mut state_tables {
+            state_table.disable_sanity_check();
+        }
 
         Ok(Self {
             input,
@@ -192,7 +197,7 @@ impl<S: StateStore> GlobalSimpleAggExecutor<S> {
             .iter_mut()
             .zip_eq(state_tables.iter_mut())
         {
-            state.flush(state_table).await?;
+            state.flush(state_table)?;
         }
 
         // Batch commit state tables.

@@ -125,20 +125,25 @@ impl DiskObjectStore {
             path.hash(&mut hasher);
             hasher.finish()
         };
+        let path_when_err = path.clone();
         let entry = self
             .opened_read_file_cache
-            .lookup_with_request_dedup::<_, ObjectError, _>(hash, path.clone(), || async {
-                let file = utils::open_file(&path, true, false, false)
-                    .await?
-                    .into_std()
-                    .await;
-                Ok((file, 1))
-            })
+            .lookup_with_request_dedup::<_, ObjectError, _>(
+                hash,
+                path.clone(),
+                move || async move {
+                    let file = utils::open_file(&path, true, false, false)
+                        .await?
+                        .into_std()
+                        .await;
+                    Ok((file, 1))
+                },
+            )
             .await
             .map_err(|e| {
                 ObjectError::internal(format!(
                     "open file cache request dedup get canceled {:?}. Err{:?}",
-                    path.to_str(),
+                    path_when_err.to_str(),
                     e
                 ))
             })??;
