@@ -722,3 +722,27 @@ impl LocalStreamManagerCore {
         Ok(())
     }
 }
+
+#[cfg(test)]
+pub mod test_utils {
+    use risingwave_pb::common::HostAddress;
+
+    use super::*;
+
+    pub fn add_local_channels(ctx: Arc<SharedContext>, up_down_ids: Vec<(u32, u32)>) {
+        for up_down_id in up_down_ids {
+            let (tx, rx) = channel(LOCAL_OUTPUT_CHANNEL_SIZE);
+            ctx.add_channel_pairs(up_down_id, (Some(tx), Some(rx)));
+        }
+    }
+
+    pub fn helper_make_local_actor(actor_id: u32) -> ActorInfo {
+        ActorInfo {
+            actor_id,
+            host: Some(HostAddress {
+                host: LOCAL_TEST_ADDR.host.clone(),
+                port: LOCAL_TEST_ADDR.port as i32,
+            }),
+        }
+    }
+}

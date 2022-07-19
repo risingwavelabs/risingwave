@@ -885,7 +885,6 @@ mod tests {
     use risingwave_common::array::{Array, ArrayBuilder, I32ArrayBuilder, Op};
     use risingwave_common::catalog::Schema;
     use risingwave_common::types::VIRTUAL_NODE_COUNT;
-    use risingwave_pb::common::{ActorInfo, HostAddress};
     use risingwave_pb::stream_plan::DispatcherType;
     use static_assertions::const_assert_eq;
     use tokio::sync::mpsc::channel;
@@ -893,7 +892,7 @@ mod tests {
     use super::*;
     use crate::executor::receiver::ReceiverExecutor;
     use crate::executor::ActorContext;
-    use crate::task::{LOCAL_OUTPUT_CHANNEL_SIZE, LOCAL_TEST_ADDR};
+    use crate::task::test_utils::{add_local_channels, helper_make_local_actor};
 
     #[derive(Debug)]
     pub struct MockOutput {
@@ -993,40 +992,6 @@ mod tests {
         );
     }
 
-    fn add_local_channels(ctx: Arc<SharedContext>, up_down_ids: Vec<(u32, u32)>) {
-        for up_down_id in up_down_ids {
-            let (tx, rx) = channel(LOCAL_OUTPUT_CHANNEL_SIZE);
-            ctx.add_channel_pairs(up_down_id, (Some(tx), Some(rx)));
-        }
-    }
-
-    fn add_remote_channels(ctx: Arc<SharedContext>, up_id: u32, down_ids: Vec<u32>) {
-        for down_id in down_ids {
-            let (tx, rx) = channel(LOCAL_OUTPUT_CHANNEL_SIZE);
-            ctx.add_channel_pairs((up_id, down_id), (Some(tx), Some(rx)));
-        }
-    }
-
-    fn helper_make_local_actor(actor_id: u32) -> ActorInfo {
-        ActorInfo {
-            actor_id,
-            host: Some(HostAddress {
-                host: LOCAL_TEST_ADDR.host.clone(),
-                port: LOCAL_TEST_ADDR.port as i32,
-            }),
-        }
-    }
-
-    fn helper_make_remote_actor(actor_id: u32) -> ActorInfo {
-        ActorInfo {
-            actor_id,
-            host: Some(HostAddress {
-                host: "172.1.1.2".to_string(),
-                port: 2334,
-            }),
-        }
-    }
-
     #[tokio::test]
     async fn test_configuration_change() {
         let schema = Schema { fields: vec![] };
@@ -1049,16 +1014,14 @@ mod tests {
         {
             let mut actor_infos = ctx.actor_infos.write();
 
-            for local_actor_id in [233, 234, 235] {
+            for local_actor_id in [actor_id, 234, 235, 238] {
                 actor_infos.insert(local_actor_id, helper_make_local_actor(local_actor_id));
             }
-            #[expect(clippy::single_element_loop)]
-            for remote_actor_id in [238] {
-                actor_infos.insert(remote_actor_id, helper_make_remote_actor(remote_actor_id));
-            }
         }
-        add_local_channels(ctx.clone(), vec![(233, 234), (233, 235)]);
-        add_remote_channels(ctx.clone(), 233, vec![238]);
+        add_local_channels(
+            ctx.clone(),
+            vec![(actor_id, 234), (actor_id, 235), (actor_id, 238)],
+        );
 
         let dispatcher = DispatcherImpl::new(
             &ctx,
@@ -1085,7 +1048,7 @@ mod tests {
         // 2. Take downstream receivers.
         let mut rxs = [234, 235, 238]
             .into_iter()
-            .map(|id| (id, ctx.take_receiver(&(233, id)).unwrap()))
+            .map(|id| (id, ctx.take_receiver(&(actor_id, id)).unwrap()))
             .collect::<HashMap<_, _>>();
         macro_rules! try_recv {
             ($down_id:expr) => {
@@ -1099,7 +1062,7 @@ mod tests {
             .unwrap();
 
         // 4. Send a configuration change barrier.
-        let updates1 = maplit::hashmap! {
+        let dispatcher_updates = maplit::hashmap! {
             actor_id => ProstDispatcherUpdate {
                 dispatcher_id,
                 added_downstream_actor_id: vec![238],
@@ -1108,7 +1071,7 @@ mod tests {
             }
         };
         let b1 = Barrier::new_test_barrier(1).with_mutation(Mutation::Update {
-            dispatchers: updates1,
+            dispatchers: dispatcher_updates,
             merges: Default::default(),
         });
         tx.send(Message::Barrier(b1)).await.unwrap();

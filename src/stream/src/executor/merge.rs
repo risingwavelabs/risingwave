@@ -129,7 +129,7 @@ impl RemoteInput {
 
 /// Create an input for merge and receiver executor. For local upstream actor, this will be simply a
 /// channel receiver. For remote upstream actor, this will spawn a long running [`RemoteInput`] task
-/// to receive messages from gRPC exchange service and return the receiver.
+/// to receive messages from `gRPC` exchange service and return the receiver.
 // TODO: there's no need to use 4 channels for remote input. We may introduce a trait `Input` and
 // directly receive the message from the `RemoteInput`, just like the `Output`.
 pub(crate) fn new_input(
@@ -435,6 +435,7 @@ mod tests {
     use std::time::Duration;
 
     use assert_matches::assert_matches;
+    use futures::FutureExt;
     use itertools::Itertools;
     use risingwave_common::array::{Op, StreamChunk};
     use risingwave_pb::stream_plan::StreamMessage;
@@ -453,6 +454,7 @@ mod tests {
     use super::*;
     use crate::executor::merge::RemoteInput;
     use crate::executor::{Barrier, Executor, Mutation};
+    use crate::task::test_utils::{add_local_channels, helper_make_local_actor};
 
     fn build_test_chunk(epoch: u64) -> StreamChunk {
         // The number of items in `ops` is the epoch count.
@@ -521,6 +523,97 @@ mod tests {
         for handle in handles {
             handle.await.unwrap();
         }
+    }
+
+    #[tokio::test]
+    async fn test_configuration_change() {
+        let schema = Schema { fields: vec![] };
+
+        let actor_id = 233;
+        let ctx = Arc::new(SharedContext::for_test());
+        let metrics = Arc::new(StreamingMetrics::unused());
+
+        // 1. Register info and channels in context.
+        {
+            let mut actor_infos = ctx.actor_infos.write();
+
+            for local_actor_id in [actor_id, 234, 235, 238] {
+                actor_infos.insert(local_actor_id, helper_make_local_actor(local_actor_id));
+            }
+        }
+        add_local_channels(
+            ctx.clone(),
+            vec![(234, actor_id), (235, actor_id), (238, actor_id)],
+        );
+
+        let inputs: Vec<_> = [234, 235]
+            .into_iter()
+            .map(|upstream_actor_id| {
+                new_input(&ctx, metrics.clone(), actor_id, 0, upstream_actor_id, 0)
+            })
+            .try_collect()
+            .unwrap();
+
+        let merge = MergeExecutor::new(
+            schema,
+            vec![],
+            actor_id,
+            0,
+            0,
+            inputs,
+            ctx.clone(),
+            ActorContext::create(),
+            233,
+            metrics.clone(),
+        )
+        .boxed()
+        .execute();
+
+        pin_mut!(merge);
+
+        // 2. Take downstream receivers.
+        let txs = [234, 235, 238]
+            .into_iter()
+            .map(|id| (id, ctx.take_sender(&(id, actor_id)).unwrap()))
+            .collect::<HashMap<_, _>>();
+        macro_rules! send {
+            ($actors:expr, $msg:expr) => {
+                for actor in $actors {
+                    txs.get(&actor).unwrap().send($msg).await.unwrap();
+                }
+            };
+        }
+        let mut recv = || merge.next().now_or_never().flatten().transpose().unwrap();
+
+        // 3. Send a chunk.
+        send!([234, 235], Message::Chunk(StreamChunk::default()));
+        recv().unwrap().as_chunk().unwrap(); // We should be able to receive the chunk twice.
+        recv().unwrap().as_chunk().unwrap();
+        assert!(recv().is_none());
+
+        // 4. Send a configuration change barrier.
+        let merge_updates = maplit::hashmap! {
+            actor_id => MergeUpdate {
+                added_upstream_actor_id: vec![238],
+                removed_upstream_actor_id: vec![235],
+            }
+        };
+
+        let b1 = Barrier::new_test_barrier(1).with_mutation(Mutation::Update {
+            dispatchers: Default::default(),
+            merges: merge_updates,
+        });
+        send!([234, 235], Message::Barrier(b1.clone()));
+        assert!(recv().is_none()); // We should not receive the barrier, since merger is waiting for the new upstream 238.
+
+        send!([238], Message::Barrier(b1.clone()));
+        recv().unwrap().as_barrier().unwrap(); // We should now receive the barrier.
+
+        // 5. Send a chunk.
+        send!([234, 238], Message::Chunk(StreamChunk::default()));
+        recv().unwrap().as_chunk().unwrap(); // We should be able to receive the chunk twice, since 235 is removed.
+        recv().unwrap().as_chunk().unwrap();
+        assert!(recv().is_none());
     }
 
     struct FakeExchangeService {
