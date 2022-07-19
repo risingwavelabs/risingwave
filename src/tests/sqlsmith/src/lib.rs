@@ -329,7 +329,7 @@ impl<'a, R: Rng> SqlGenerator<'a, R> {
     }
 
     fn gen_from(&mut self, with_tables: Vec<Table>) -> Vec<TableWithJoins> {
-        // Cross join with `with` fails.
+        // Cross join with `with` fails. Hence we generate it in isolation.
         // Tracked in: <https://github.com/singularity-data/risingwave/issues/4025>
         if !with_tables.is_empty() {
             let with_table = with_tables
@@ -396,7 +396,7 @@ impl<'a, R: Rng> SqlGenerator<'a, R> {
 
     /// Provide recursion bounds.
     pub(crate) fn can_recurse(&mut self) -> bool {
-        self.rng.gen_bool(0.2)
+        self.rng.gen_bool(0.3)
     }
 }
 
