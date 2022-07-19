@@ -93,7 +93,9 @@ enum TableCommands {
 
 #[derive(Subcommand)]
 enum MetaCommands {
+    /// pause the stream graph
     Pause,
+    /// resume the stream graph
     Resume,
 }
 
