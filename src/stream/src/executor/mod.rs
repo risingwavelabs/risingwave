@@ -176,7 +176,7 @@ pub const INVALID_EPOCH: u64 = 0;
 pub trait ExprFn = Fn(&DataChunk) -> Result<Bitmap> + Send + Sync + 'static;
 
 /// See [`risingwave_pb::stream_plan::barrier::Mutation`] for the semantics of each mutation.
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, PartialEq, EnumAsInner)]
 pub enum Mutation {
     Stop(HashSet<ActorId>),
     Update {
@@ -274,11 +274,11 @@ impl Barrier {
         Self { span, ..self }
     }
 
-    pub fn is_to_stop_actor(&self, actor_id: ActorId) -> bool {
+    pub fn is_stop_actor(&self, actor_id: ActorId) -> bool {
         matches!(self.mutation.as_deref(), Some(Mutation::Stop(actors)) if actors.contains(&actor_id))
     }
 
-    pub fn is_to_add_dispatcher(&self, actor_id: ActorId) -> bool {
+    pub fn is_add_dispatcher(&self, actor_id: ActorId) -> bool {
         matches!(
             self.mutation.as_deref(),
             Some(Mutation::Add {adds, ..}) if adds
@@ -286,6 +286,15 @@ impl Barrier {
                 .flatten()
                 .any(|dispatcher| dispatcher.downstream_actor_id.contains(&actor_id))
         )
+    }
+
+    pub fn as_update_merge(&self, actor_id: ActorId) -> Option<&MergeUpdate> {
+        self.mutation
+            .as_deref()
+            .and_then(|mutation| match mutation {
+                Mutation::Update { merges, .. } => merges.get(&actor_id),
+                _ => None,
+            })
     }
 }
 

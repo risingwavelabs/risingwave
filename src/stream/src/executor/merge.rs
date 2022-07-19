@@ -15,7 +15,7 @@
 use std::pin::Pin;
 use std::task::{Context, Poll};
 
-use futures::{Stream, StreamExt};
+use futures::{pin_mut, Stream, StreamExt};
 use futures_async_stream::{for_await, try_stream};
 use madsim::time::Instant;
 use risingwave_common::catalog::Schema;
@@ -170,22 +170,38 @@ impl MergeExecutor {
     }
 
     #[try_stream(ok = Message, error = StreamExecutorError)]
-    async fn execute_inner(self: Box<Self>) {
+    async fn execute_inner(mut self: Box<Self>) {
         // Futures of all active upstreams.
-        let select_all = SelectReceivers::new(self.actor_id, self.status, self.upstreams);
+        let select_all = SelectReceivers::new(self.actor_id, self.upstreams);
         let actor_id_str = self.actor_id.to_string();
-        let metrics = self.metrics.clone();
 
         // Channels that're blocked by the barrier to align.
-        #[for_await]
-        for msg in select_all {
+        pin_mut!(select_all);
+        while let Some(msg) = select_all.next().await {
             let msg: Message = msg?;
+            self.status.next_message(&msg);
 
-            if let Message::Chunk(chunk) = &msg {
-                metrics
-                    .actor_in_record_cnt
-                    .with_label_values(&[&actor_id_str])
-                    .inc_by(chunk.cardinality() as _);
+            match &msg {
+                Message::Chunk(chunk) => {
+                    self.metrics
+                        .actor_in_record_cnt
+                        .with_label_values(&[&actor_id_str])
+                        .inc_by(chunk.cardinality() as _);
+                }
+                Message::Barrier(barrier) => {
+                    if let Some(update) = barrier.as_update_merge(self.actor_id) {
+                        // 1. Add new upstreams and poll the first barrier from them.
+                        let mut select_new = SelectReceivers::new(self.actor_id, vec![]);
+                        let new_barrier = expect_first_barrier(&mut select_new).await?;
+                        assert_eq!(barrier.epoch, new_barrier.epoch);
+                        select_all.add_upstreams_from(select_new);
+
+                        // 2. Remove upstreams.
+                        select_all.remove_upstreams(
+                            &update.removed_upstream_actor_id.iter().copied().collect(),
+                        );
+                    }
+                }
             }
 
             yield msg;
@@ -216,24 +232,37 @@ pub struct SelectReceivers {
     upstreams: Vec<Upstream>,
     barrier: Option<Barrier>,
     last_base: usize,
-    status: OperatorInfoStatus,
     actor_id: u32,
 }
 
 impl SelectReceivers {
-    fn new(actor_id: u32, status: OperatorInfoStatus, upstreams: Vec<Upstream>) -> Self {
+    fn new(actor_id: u32, upstreams: Vec<Upstream>) -> Self {
         Self {
             blocks: Vec::with_capacity(upstreams.len()),
             upstreams,
             last_base: 0,
             actor_id,
-            status,
             barrier: None,
         }
     }
-}
 
-impl Unpin for SelectReceivers {}
+    fn add_upstreams_from(&mut self, other: Self) {
+        assert!(self.blocks.is_empty() && self.barrier.is_none());
+        assert!(other.blocks.is_empty() && other.barrier.is_none());
+        assert_eq!(self.actor_id, other.actor_id);
+
+        self.upstreams.extend(other.upstreams);
+        self.last_base = 0;
+    }
+
+    fn remove_upstreams(&mut self, upstream_actor_ids: &HashSet<ActorId>) {
+        assert!(self.blocks.is_empty() && self.barrier.is_none());
+
+        self.upstreams
+            .retain(|(id, _)| !upstream_actor_ids.contains(id));
+        self.last_base = 0;
+    }
+}
 
 impl Stream for SelectReceivers {
     type Item = std::result::Result<Message, StreamExecutorError>;
@@ -271,8 +300,6 @@ impl Stream for SelectReceivers {
                         }
                         Message::Chunk(chunk) => {
                             let message = Message::Chunk(chunk);
-
-                            self.status.next_message(&message);
                             self.last_base = (idx + 1) % self.upstreams.len();
                             return Poll::Ready(Some(Ok(message)));
                         }
@@ -284,11 +311,10 @@ impl Stream for SelectReceivers {
             if let Some(barrier) = self.barrier.take() {
                 // If this barrier acquire the executor stop, we do not reset the upstreams
                 // so that the next call would return `Poll::Ready(None)`.
-                if !barrier.is_to_stop_actor(self.actor_id) {
+                if !barrier.is_stop_actor(self.actor_id) {
                     self.upstreams = std::mem::take(&mut self.blocks);
                 }
                 let message = Message::Barrier(barrier);
-                self.status.next_message(&message);
                 Poll::Ready(Some(Ok(message)))
             } else {
                 Poll::Ready(None)
