@@ -53,18 +53,14 @@ fn init_agg_table() -> HashMap<DataTypeName, Vec<AggFuncSig>> {
 }
 
 impl<'a, R: Rng> SqlGenerator<'a, R> {
-    /// can_agg    - In generating expression, there is two execution mode
-    ///                 1)  Non-Aggregate/Aggregate of Groupby Coloumns AND/OR Aggregate of Coloumns
-    ///                     that is not Groupby coloumns.                 
-    ///                 2)  No Aggregate for all columns (NonGroupby coloumns when group by is being
-    ///                     used will not be selected at all in this mode).
+    /// In generating expression, there are two execution modes:
+    /// 1) Can have Aggregate expressions (`can_agg` = true)
+    ///    We can have aggregate of all bound columns (those present in GROUP BY and otherwise).
+    ///    Not all GROUP BY columns need to be aggregated.
+    /// 2) Can't have Aggregate expressions (`can_agg` = false)
+    ///    Only columns present in GROUP BY can be selected.
     ///
-    /// When can_agg is false, it means the second execution mode which is strictly no aggregate for
-    /// all coloumns.
-    ///
-    /// inside_agg - Rule: an aggregate function cannot be inside an aggregate function.
-    ///              Since expression can be recursive, so this variable show that currently this
-    ///              expression is inside an aggregate function, ensuring the rule is followed.
+    /// `inside_agg` indicates if we are calling `gen_expr` inside an aggregate.
     pub(crate) fn gen_expr(&mut self, typ: DataTypeName, can_agg: bool, inside_agg: bool) -> Expr {
         if !self.can_recurse() {
             // Stop recursion with a simple scalar or column.
@@ -74,13 +70,11 @@ impl<'a, R: Rng> SqlGenerator<'a, R> {
             };
         }
 
-        // It is impossible to have can_agg = false and inside_agg = true.
-        // It makes no sense that when stricly no aggregate can be used, and this expr is inside an
-        // aggregate function.
-        assert!(can_agg || !inside_agg);
+        if !can_agg {
+            assert!(!inside_agg);
+        }
 
         // TODO:  https://github.com/singularity-data/risingwave/issues/3989.
-        // After the issue is resolved, uncomment the statement below
         // let range = if can_agg & !inside_agg { 99 } else { 90 };
         let range = 90;
 
