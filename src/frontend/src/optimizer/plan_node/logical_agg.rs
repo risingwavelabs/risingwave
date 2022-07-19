@@ -473,11 +473,15 @@ impl LogicalAggBuilder {
         None
     }
 
+    /// do some syntax check for distinct aggregates.
+    ///
+    /// TODO: we may disable this syntax check in the future because we may use another approach to
+    /// implement distinct aggregates.
     pub fn syntax_check(&self) -> Result<()> {
         let mut has_distinct = false;
         let mut has_approx_count_distinct = false;
         let mut has_order_by = false;
-        let mut signle_value_has_disintct = false;
+        let mut single_value_has_disintct = false;
         self.agg_calls.iter().for_each(|agg_call| {
             if agg_call.distinct {
                 has_distinct = true;
@@ -487,7 +491,7 @@ impl LogicalAggBuilder {
                     has_approx_count_distinct = true;
                 }
                 AggKind::SingleValue if agg_call.distinct => {
-                    signle_value_has_disintct = true;
+                    single_value_has_disintct = true;
                 }
                 _ => {}
             }
@@ -507,7 +511,7 @@ impl LogicalAggBuilder {
             )
             .into());
         }
-        if signle_value_has_disintct {
+        if single_value_has_disintct {
             return Err(
                 ErrorCode::InvalidInputSyntax("Single value can't have distinct".into()).into(),
             );
