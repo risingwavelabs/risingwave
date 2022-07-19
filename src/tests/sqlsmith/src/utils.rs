@@ -13,10 +13,10 @@
 // limitations under the License.
 
 use rand::Rng;
-use risingwave_sqlparser::ast::{FunctionArg, FunctionArgExpr, TableAlias};
+use risingwave_sqlparser::ast::{FunctionArg, FunctionArgExpr, TableAlias, TableFactor, TableWithJoins};
 
 use std::mem;
-use crate::{Column, Expr, Table, SqlGenerator};
+use crate::{Column, Expr, ObjectName, Ident, Table, SqlGenerator};
 
 type Context = (Vec<Column>, Vec<Table>);
 
@@ -42,6 +42,21 @@ impl<'a, R: Rng> SqlGenerator<'a, R> {
     pub(crate) fn gen_alias_with_prefix(&self, prefix: &str) -> TableAlias {
         let name = &self.create_table_name_with_prefix(prefix);
         create_alias(name)
+    }
+}
+
+pub(crate) fn create_table_factor_from_table(table: &Table) -> TableFactor {
+    TableFactor::Table {
+        name: ObjectName(vec![Ident::new(&table.name)]),
+        alias: None,
+        args: vec![],
+    }
+}
+
+pub(crate) fn create_table_with_joins_from_table(table: &Table) -> TableWithJoins {
+    TableWithJoins {
+        relation: create_table_factor_from_table(table),
+        joins: vec![],
     }
 }
 
