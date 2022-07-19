@@ -217,41 +217,6 @@ impl StreamService for StreamServiceImpl {
 
         Ok(Response::new(DropSourceResponse { status: None }))
     }
-
-    #[cfg_attr(coverage, no_coverage)]
-    async fn create_sink(
-        &self,
-        request: Request<CreateSinkRequest>,
-    ) -> Result<Response<CreateSinkResponse>, Status> {
-        let sink = request.into_inner().sink.unwrap();
-
-        let id = TableId::new(sink.id); // TODO: use SinkId instead
-        let properties = sink.get_properties();
-
-        self.env
-            .sink_manager()
-            .create_sink(&id, properties.clone())
-            .await?;
-
-        tracing::debug!(id = %sink.id, "create sink");
-
-        Ok(Response::new(CreateSinkResponse { status: None }))
-    }
-
-    #[cfg_attr(coverage, no_coverage)]
-    async fn drop_sink(
-        &self,
-        request: Request<DropSinkRequest>,
-    ) -> Result<Response<DropSinkResponse>, Status> {
-        let id = request.into_inner().sink_id;
-        let id = TableId::new(id); // TODO: use SinkId instead
-
-        self.env.sink_manager().drop_sink(&id).map_err(tonic_err)?;
-
-        tracing::debug!(id = %id, "drop sink");
-
-        Ok(Response::new(DropSinkResponse { status: None }))
-    }
 }
 
 impl StreamServiceImpl {
