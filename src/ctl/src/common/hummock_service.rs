@@ -59,7 +59,17 @@ impl HummockServiceOpts {
                 url
             }
             Err(_) => {
-                bail!("env variable `RW_HUMMOCK_URL` not found, please do one of the following:\n* use `./risedev ctl` to start risectl.\n* `source .risingwave/config/risectl-env` or `source ~/risingwave-deploy/risectl-env` before running risectl.\n* manually set `RW_HUMMOCK_URL` in env variable.\nPlease also remember to add `use: minio` to risedev config.");
+                const MESSAGE: &'static str = "env variable `RW_HUMMOCK_URL` not found.
+
+For `./risedev d` use cases, please do the following:
+* use `./risedev d for-ctl` to start the cluster.
+* use `./risedev ctl` to use risectl.
+
+For `./risedev apply-compose-deploy` users,
+* `RW_HUMMOCK_URL` will be printed out when deploying. Please copy the bash exports to your console.
+
+risectl requires a full persistent cluster to operate. Please make sure you're not running in minimum mode.";
+                bail!(MESSAGE);
             }
         };
         Ok(Self {
