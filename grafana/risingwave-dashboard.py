@@ -389,16 +389,17 @@ def section_streaming(panels):
                 f"histogram_quantile({quantile}, sum(rate(stream_barrier_inflight_duration_seconds_bucket[$__rate_interval])) by (le))", f"barrier_inflight_latency_p{legend}"
             ), [50, 90, 99, 999, "max"]) + [
                 panels.target(
-                    "rate(stream_barrier_inflight_duration_seconds_sum[$__rate_interval]) / rate(stream_barrier_inflight_duration_seconds_count[$__rate_interval])", "barrier_inflight_latency_avg"
+                    "max(sum by(le, instance)(rate(stream_barrier_inflight_duration_seconds_sum[$__rate_interval]))  / sum by(le, instance)(rate(stream_barrier_inflight_duration_seconds_count[$__rate_interval])))", "barrier_inflight_latency_avg"
                 ),
             ]),
         panels.timeseries_latency(
             "Barrier Sync Latency",
+
             quantile(lambda quantile, legend: panels.target(
-                f"histogram_quantile({quantile}, sum(rate(stream_barrier_sync_storage_duration_seconds_bucket[$__rate_interval])) by (le))", f"barrier_sync_latency_p{legend}"
+                f"histogram_quantile({quantile}, sum(rate(stream_barrier_sync_storage_duration_seconds_bucket[$__rate_interval])) by (le,instance))", f"barrier_sync_latency_p{legend}"+" - computer @ {{instance}}"
             ), [50, 90, 99, 999, "max"]) + [
                 panels.target(
-                    "rate(stream_barrier_sync_storage_duration_seconds_sum[$__rate_interval]) / rate(stream_barrier_sync_storage_duration_seconds_count[$__rate_interval])", "barrier_sync_latency_avg"
+                    "sum by(le, instance)(rate(stream_barrier_sync_storage_duration_seconds_sum[$__rate_interval]))  / sum by(le, instance)(rate(stream_barrier_sync_storage_duration_seconds_count[$__rate_interval]))", "barrier_sync_latency_avg - computer @ {{instance}}"
                 ),
             ]),
         panels.timeseries_latency(
@@ -792,7 +793,7 @@ def section_hummock(panels):
         ]),
         panels.timeseries_bytes("sync size every epoch", [
             panels.target(
-                "sum by(le, job, instance) (rate(state_store_write_l0_size_every_epoch_sum[$__rate_interval])) / sum by(le, job, instance) (rate(state_store_write_l0_size_every_epoch_count[$__rate_interval]))", "avg - {{job}} @ {{instance}}"
+                "sum by(le, job, instance) (rate(state_store_write_l0_size_per_epoch_sum[$__rate_interval])) / sum by(le, job, instance) (rate(state_store_write_l0_size_per_epoch_count[$__rate_interval]))", "avg - {{job}} @ {{instance}}"
             ),
         ]),
         panels.timeseries_latency("build sstable duration", [

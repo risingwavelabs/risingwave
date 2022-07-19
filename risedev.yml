@@ -74,6 +74,14 @@ risedev:
     - use: etcd
     - use: meta-node
     - use: compute-node
+      port: 5687
+      exporter-port: 1222
+    - use: compute-node
+      port: 5688
+      exporter-port: 1223
+    - use: compute-node
+      port: 5689
+      exporter-port: 1224
     - use: frontend
     - use: compactor
     - use: prometheus

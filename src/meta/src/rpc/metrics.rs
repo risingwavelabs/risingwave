@@ -31,9 +31,10 @@ pub struct MetaMetrics {
 
     /// gRPC latency of meta services
     pub grpc_latency: HistogramVec,
-    /// latency of each barrier
+    /// The duration from barrier injection to commit
+    /// It is the sum of inflight-latency , sync-latency and wait-commit-latency
     pub barrier_latency: Histogram,
-
+    /// The duration from barrier complete to commit
     pub barrier_wait_commit_latency: Histogram,
 
     /// latency between each barrier send

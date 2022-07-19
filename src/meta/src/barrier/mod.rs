@@ -194,17 +194,20 @@ struct CheckpointControl<S: MetaStore> {
     /// The barrier does not send or collect the actors of these tables, even if they are
     /// `Running`.
     dropping_table_ids: HashSet<TableId>,
+
+    metrics: Arc<MetaMetrics>,
 }
 
 impl<S> CheckpointControl<S>
 where
     S: MetaStore,
 {
-    fn new() -> Self {
+    fn new(metrics: Arc<MetaMetrics>) -> Self {
         Self {
             command_ctx_queue: VecDeque::default(),
             creating_table_ids: HashSet::default(),
             dropping_table_ids: HashSet::default(),
+            metrics,
         }
     }
 
@@ -223,24 +226,22 @@ where
             || s == ActorState::Inactive && self.creating_table_ids.contains(table_id)
     }
 
-    /// Return the nums of barrier (the nums of in-flight-barrier , the nums of all-barrier)
-    fn get_barrier_len(&self) -> (usize, usize) {
-        (
+    /// Update the metrics of barrier nums.
+    fn update_barrier_nums_metrics(&self) {
+        self.metrics.in_flight_barrier_nums.set(
             self.command_ctx_queue
                 .iter()
                 .filter(|x| matches!(x.state, InFlight))
-                .count(),
-            self.command_ctx_queue.len(),
-        )
+                .count() as i64,
+        );
+        self.metrics
+            .all_barrier_nums
+            .set(self.command_ctx_queue.len() as i64);
     }
 
     /// Inject a `command_ctx` in `command_ctx_queue`, and it's state is `InFlight`.
-    fn inject(
-        &mut self,
-        command_ctx: Arc<CommandContext<S>>,
-        notifiers: SmallVec<[Notifier; 1]>,
-        timer: HistogramTimer,
-    ) {
+    fn inject(&mut self, command_ctx: Arc<CommandContext<S>>, notifiers: SmallVec<[Notifier; 1]>) {
+        let timer = self.metrics.barrier_latency.start_timer();
         if let Drop(table) = command_ctx.command.changed_table_id() {
             self.dropping_table_ids.insert(table);
         }
@@ -260,8 +261,8 @@ where
         &mut self,
         prev_epoch: u64,
         result: Result<Vec<BarrierCompleteResponse>>,
-        wait_commit_timer: HistogramTimer,
     ) -> VecDeque<EpochNode<S>> {
+        let wait_commit_timer = self.metrics.barrier_wait_commit_latency.start_timer();
         // change state to complete, and wait for nodes with the smaller epoch to commit
         if let Some(node) = self
             .command_ctx_queue
@@ -320,7 +321,9 @@ where
 
 /// The state and message of this barrier
 pub struct EpochNode<S: MetaStore> {
+    /// The timer of `barrier_latency`
     timer: Option<HistogramTimer>,
+    /// The timer of `barrier_wait_commit_latency`
     wait_commit_timer: Option<HistogramTimer>,
     result: Option<Result<Vec<BarrierCompleteResponse>>>,
     state: BarrierEpochState,
@@ -422,7 +425,7 @@ where
         min_interval.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Delay);
         let mut barrier_timer: Option<HistogramTimer> = None;
         let (barrier_complete_tx, mut barrier_complete_rx) = tokio::sync::mpsc::unbounded_channel();
-        let mut checkpoint_control = CheckpointControl::new();
+        let mut checkpoint_control = CheckpointControl::new(self.metrics.clone());
         loop {
             tokio::select! {
                 biased;
@@ -432,11 +435,7 @@ where
                     return;
                 }
                 result = barrier_complete_rx.recv() => {
-                    let (in_flight_nums, all_nums) = checkpoint_control.get_barrier_len();
-                    self.metrics
-                        .in_flight_barrier_nums
-                        .set(in_flight_nums as i64);
-                    self.metrics.all_barrier_nums.set(all_nums as i64);
+                    checkpoint_control.update_barrier_nums_metrics();
 
                     let (prev_epoch, result) = result.unwrap();
                     self.barrier_complete_and_commit(
@@ -495,8 +494,7 @@ where
             ));
             let mut notifiers = notifiers;
             notifiers.iter_mut().for_each(Notifier::notify_to_send);
-            let timer = self.metrics.barrier_latency.start_timer();
-            checkpoint_control.inject(command_ctx.clone(), notifiers, timer);
+            checkpoint_control.inject(command_ctx.clone(), notifiers);
 
             self.inject_and_send_err(command_ctx, barrier_complete_tx.clone())
                 .await;
@@ -626,9 +624,8 @@ where
         tracker: &mut CreateMviewProgressTracker,
         checkpoint_control: &mut CheckpointControl<S>,
     ) {
-        let wait_commit_timer = self.metrics.barrier_wait_commit_latency.start_timer();
         // change the state is Complete
-        let mut complete_nodes = checkpoint_control.complete(prev_epoch, result, wait_commit_timer);
+        let mut complete_nodes = checkpoint_control.complete(prev_epoch, result);
         // try commit complete nodes
         let (mut index, mut err_msg) = (0, None);
         for (i, node) in complete_nodes.iter_mut().enumerate() {

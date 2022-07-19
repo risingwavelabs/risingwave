@@ -46,7 +46,11 @@ pub struct StreamingMetrics {
     pub join_lookup_miss_count: GenericCounterVec<AtomicU64>,
     pub join_total_lookup_count: GenericCounterVec<AtomicU64>,
     pub join_barrier_align_duration: HistogramVec,
+    /// The duration from receipt of barrier to all actors collection.
+    /// And the max of all node `barrier_inflight_latency` is the latency for a barrier
+    /// to flow through the graph.
     pub barrier_inflight_latency: Histogram,
+    /// The duration of sync to storage.
     pub barrier_sync_latency: Histogram,
 }
 

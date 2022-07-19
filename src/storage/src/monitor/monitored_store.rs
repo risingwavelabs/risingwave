@@ -234,7 +234,7 @@ where
                 .inspect_err(|e| error!("Failed in sync: {:?}", e))?;
             timer.observe_duration();
             if size != 0 {
-                self.stats.write_l0_size_every_epoch.observe(size as _);
+                self.stats.write_l0_size_per_epoch.observe(size as _);
             }
             Ok(size)
         }
