@@ -329,9 +329,8 @@ impl<'a, R: Rng> SqlGenerator<'a, R> {
     }
 
     fn gen_from(&mut self, with_tables: Vec<Table>) -> Vec<TableWithJoins> {
-        // Logical Join fails, not exactly sure how.
-        // Only happens when generating with clause along with another table.
-        // Tracked in: <TODO>
+        // Cross join with `with` fails.
+        // Tracked in: <https://github.com/singularity-data/risingwave/issues/4025>
         if !with_tables.is_empty() {
             let with_table = with_tables
                 .choose(&mut self.rng)
