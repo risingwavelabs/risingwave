@@ -16,6 +16,7 @@ use std::collections::HashMap;
 
 use risingwave_pb::catalog::{Sink, Table};
 
+// This enum is used in order to re-use code in `DdlServiceImpl` for creating MaterializedView and Sink.
 pub enum Relation {
     Table(Table),
     Sink(Sink),
