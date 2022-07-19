@@ -305,29 +305,6 @@ where
         }
     }
 
-    pub async fn create_table(&self, table: &Table) -> Result<NotificationVersion> {
-        let mut core = self.core.lock().await;
-        if !core.has_table(table) {
-            table.insert(self.env.meta_store()).await?;
-            core.add_table(table);
-            for &dependent_relation_id in &table.dependent_relations {
-                core.increase_ref_count(dependent_relation_id);
-            }
-
-            let version = self
-                .env
-                .notification_manager()
-                .notify_frontend(Operation::Add, Info::Table(table.to_owned()))
-                .await;
-
-            Ok(version)
-        } else {
-            Err(RwError::from(InternalError(
-                "table already exists".to_string(),
-            )))
-        }
-    }
-
     pub async fn drop_table(&self, table_id: TableId) -> Result<NotificationVersion> {
         let mut core = self.core.lock().await;
         let table = Table::select(self.env.meta_store(), &table_id).await?;
