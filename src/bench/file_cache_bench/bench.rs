@@ -50,6 +50,8 @@ struct Args {
     write: usize,
     #[clap(long, default_value = "10000")]
     look_up_range: u32,
+    #[clap(long, default_value = "0")] // 0ms
+    loop_min_interval: u64,
 
     #[clap(long, default_value = "1")] // (s)
     report_interval: u64,
@@ -180,6 +182,8 @@ async fn bench(
     let mut idx = 0;
 
     loop {
+        let loop_start = Instant::now();
+
         match stop.try_recv() {
             Err(oneshot::error::TryRecvError::Empty) => {}
             _ => return,
@@ -231,6 +235,13 @@ async fn bench(
             metrics.get_ios.fetch_add(1, Ordering::Relaxed);
         }
 
-        tokio::task::yield_now().await;
+        if args.loop_min_interval == 0 {
+            tokio::task::yield_now().await;
+        } else {
+            let elapsed = loop_start.elapsed().as_millis() as u64;
+            if elapsed < args.loop_min_interval {
+                tokio::time::sleep(Duration::from_millis(args.loop_min_interval - elapsed)).await;
+            }
+        }
     }
 }
