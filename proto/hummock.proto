@@ -85,12 +85,22 @@ message PinVersionRequest {
 
 message PinVersionResponse {
   common.Status status = 1;
-  HummockVersion pinned_version = 2;
+  bool is_delta_response = 2;
+  repeated HummockVersionDelta version_deltas = 3;
+  HummockVersion pinned_version = 4;
+}
+
+message UnpinVersionBeforeRequest {
+  uint32 context_id = 1;
+  uint64 unpin_version_before = 2;
+}
+
+message UnpinVersionBeforeResponse {
+  common.Status status = 1;
 }
 
 message UnpinVersionRequest {
   uint32 context_id = 1;
-  repeated uint64 pinned_version_ids = 2;
 }
 
 message UnpinVersionResponse {
@@ -212,7 +222,7 @@ message ReportCompactionTasksResponse {
 
 message HummockPinnedVersion {
   uint32 context_id = 1;
-  repeated uint64 version_id = 2;
+  uint64 min_pinned_id = 2;
 }
 
 message HummockPinnedSnapshot {
@@ -284,6 +294,7 @@ message ListSstableIdInfosResponse {
 service HummockManagerService {
   rpc PinVersion(PinVersionRequest) returns (PinVersionResponse);
   rpc UnpinVersion(UnpinVersionRequest) returns (UnpinVersionResponse);
+  rpc UnpinVersionBefore(UnpinVersionBeforeRequest) returns (UnpinVersionBeforeResponse);
   rpc ReportCompactionTasks(ReportCompactionTasksRequest) returns (ReportCompactionTasksResponse);
   rpc PinSnapshot(PinSnapshotRequest) returns (PinSnapshotResponse);
   rpc GetEpoch(GetEpochRequest) returns (GetEpochResponse);

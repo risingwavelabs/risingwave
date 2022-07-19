@@ -2338,12 +2338,14 @@ impl Parser {
     pub fn parse_explain(&mut self, describe_alias: bool) -> Result<Statement, ParserError> {
         let analyze = self.parse_keyword(Keyword::ANALYZE);
         let verbose = self.parse_keyword(Keyword::VERBOSE);
+        let trace = self.parse_keyword(Keyword::TRACE);
 
         let statement = self.parse_statement()?;
         Ok(Statement::Explain {
             describe_alias,
             analyze,
             verbose,
+            trace,
             statement: Box::new(statement),
         })
     }

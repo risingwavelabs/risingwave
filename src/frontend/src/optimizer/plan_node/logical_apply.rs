@@ -14,6 +14,7 @@
 //
 use std::fmt;
 
+use risingwave_common::catalog::Schema;
 use risingwave_common::error::{ErrorCode, Result, RwError};
 use risingwave_pb::plan_common::JoinType;
 
@@ -21,7 +22,7 @@ use super::{
     ColPrunable, LogicalJoin, PlanBase, PlanRef, PlanTreeNodeBinary, PredicatePushdown, ToBatch,
     ToStream,
 };
-use crate::utils::{ColIndexMapping, Condition};
+use crate::utils::{ColIndexMapping, Condition, ConditionVerboseDisplay};
 
 /// `LogicalApply` represents a correlated join, where the right side may refer to columns from the
 /// left side.
@@ -39,10 +40,25 @@ pub struct LogicalApply {
 
 impl fmt::Display for LogicalApply {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        let verbose = self.base.ctx.is_explain_verbose();
         write!(
             f,
             "LogicalApply {{ type: {:?}, on: {} }}",
-            &self.join_type, &self.on
+            &self.join_type,
+            if verbose {
+                let mut concat_schema = self.left().schema().fields.clone();
+                concat_schema.extend(self.right().schema().fields.clone());
+                let concat_schema = Schema::new(concat_schema);
+                format!(
+                    "{}",
+                    ConditionVerboseDisplay {
+                        condition: &self.on,
+                        input_schema: &concat_schema
+                    }
+                )
+            } else {
+                format!("{}", &self.on)
+            }
         )
     }
 }

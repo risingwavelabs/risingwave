@@ -192,3 +192,17 @@ message MetaLeaseInfo {
   uint64 lease_register_time = 2;
   uint64 lease_expire_time = 3;
 }
+
+message PauseRequest {}
+
+message PauseResponse {}
+
+message ResumeRequest {}
+
+message ResumeResponse {}
+
+service ScaleService {
+  // TODO(Kexiang): delete them when config change interface is finished
+  rpc Pause(PauseRequest) returns (PauseResponse);
+  rpc Resume(ResumeRequest) returns (ResumeResponse);
+}

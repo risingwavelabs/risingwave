@@ -29,7 +29,6 @@
 #![feature(generic_associated_types)]
 #![feature(binary_heap_drain_sorted)]
 #![feature(option_result_contains)]
-#![feature(let_chains)]
 #![feature(let_else)]
 #![feature(type_alias_impl_trait)]
 #![feature(map_first_last)]
@@ -104,6 +103,10 @@ pub struct MetaNodeOpts {
     #[clap(long)]
     disable_recovery: bool,
 
+    /// enable migrate actors when recovery, disable by default.
+    #[clap(long)]
+    enable_migrate: bool,
+
     #[clap(long, default_value = "10")]
     meta_leader_lease_secs: u64,
 
@@ -164,6 +167,7 @@ pub fn start(opts: MetaNodeOpts) -> Pin<Box<dyn Future<Output = ()> + Send>> {
             opts.meta_leader_lease_secs,
             MetaOpts {
                 enable_recovery: !opts.disable_recovery,
+                enable_migrate: opts.enable_migrate,
                 checkpoint_interval,
                 max_idle_ms,
                 in_flight_barrier_nums,

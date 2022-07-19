@@ -15,7 +15,6 @@
 use std::pin::Pin;
 use std::task::{Context, Poll};
 
-use async_trait::async_trait;
 use futures::{Stream, StreamExt};
 use futures_async_stream::for_await;
 use madsim::time::Instant;
@@ -170,7 +169,6 @@ impl MergeExecutor {
     }
 }
 
-#[async_trait]
 impl Executor for MergeExecutor {
     fn execute(self: Box<Self>) -> BoxedMessageStream {
         let upstreams = self.upstreams;
@@ -298,13 +296,13 @@ impl Stream for SelectReceivers {
 
 #[cfg(test)]
 mod tests {
+    use std::collections::HashSet;
     use std::sync::atomic::{AtomicBool, Ordering};
     use std::sync::Arc;
     use std::time::Duration;
 
     use assert_matches::assert_matches;
     use itertools::Itertools;
-    use madsim::collections::HashSet;
     use risingwave_common::array::{Op, StreamChunk};
     use risingwave_pb::stream_plan::StreamMessage;
     use risingwave_pb::task_service::exchange_service_server::{

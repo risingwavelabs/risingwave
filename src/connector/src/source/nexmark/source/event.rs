@@ -141,9 +141,10 @@ impl Event {
 /// Person represents a person submitting an item for auction and/or making a
 /// bid on an auction.
 #[derive(PartialEq, Eq, Clone, Debug, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
 pub struct Person {
     /// A person-unique integer ID.
-    pub p_id: Id,
+    pub id: Id,
     /// A string for the person’s full name.
     pub name: String,
     /// The person’s email address as a string.
@@ -155,14 +156,14 @@ pub struct Person {
     /// One of several US states as a two-letter string.
     pub state: String,
     /// A millisecond timestamp for the event origin.
-    pub p_date_time: String,
+    pub date_time: String,
 }
 
 impl Person {
     /// Creates a new `Person` event.
     fn new(id: usize, time: usize, rng: &mut SmallRng, nex: &NexmarkConfig) -> Self {
         Self {
-            p_id: Self::last_id(id, nex) + nex.first_person_id,
+            id: Self::last_id(id, nex) + nex.first_person_id,
             name: format!(
                 "{} {}",
                 nex.first_names.choose(rng).unwrap(),
@@ -175,7 +176,7 @@ impl Person {
                 .join(" "),
             city: nex.us_cities.choose(rng).unwrap().clone(),
             state: nex.us_states.choose(rng).unwrap().clone(),
-            p_date_time: milli_ts_to_timestamp_string(time),
+            date_time: milli_ts_to_timestamp_string(time),
         }
     }
 
@@ -197,9 +198,10 @@ impl Person {
 
 /// Auction represents an item under auction.
 #[derive(PartialEq, Eq, Clone, Debug, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
 pub struct Auction {
     /// An auction-unique integer ID.
-    pub a_id: Id,
+    pub id: Id,
     /// The name of the item being auctioned.
     pub item_name: String,
     /// A short description of the item.
@@ -209,7 +211,7 @@ pub struct Auction {
     /// The minimum price for the auction to succeed.
     pub reserve: usize,
     /// A millisecond timestamp for the event origin.
-    pub a_date_time: String,
+    pub date_time: String,
     /// A UNIX epoch timestamp for the expiration date of the auction.
     pub expires: String,
     /// The ID of the person that created this auction.
@@ -233,12 +235,12 @@ impl Auction {
             Person::next_id(id, rng, nex)
         };
         Auction {
-            a_id: Self::last_id(id, nex) + nex.first_auction_id,
+            id: Self::last_id(id, nex) + nex.first_auction_id,
             item_name: rng.gen_string(20),
             description: rng.gen_string(100),
             initial_bid,
             reserve: initial_bid + rng.gen_price(),
-            a_date_time: milli_ts_to_timestamp_string(time),
+            date_time: milli_ts_to_timestamp_string(time),
             expires: milli_ts_to_timestamp_string(
                 time + Self::next_length(events_so_far, rng, time, nex),
             ),
@@ -289,6 +291,7 @@ impl Auction {
 
 /// Bid represents a bid for an item under auction.
 #[derive(PartialEq, Eq, Clone, Debug, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
 pub struct Bid {
     /// The ID of the auction this bid is for.
     pub auction: Id,
@@ -297,7 +300,7 @@ pub struct Bid {
     /// The price in cents that the person bid for.
     pub price: usize,
     /// A millisecond timestamp for the event origin.
-    pub b_date_time: String,
+    pub date_time: String,
 }
 
 impl Bid {
@@ -316,7 +319,7 @@ impl Bid {
             auction: auction + nex.first_auction_id,
             bidder: bidder + nex.first_person_id,
             price: rng.gen_price(),
-            b_date_time: milli_ts_to_timestamp_string(time),
+            date_time: milli_ts_to_timestamp_string(time),
         }
     }
 }
@@ -365,7 +368,7 @@ mod tests {
         let (event_2, _) = Event::new(0, &config, NEXMARK_BASE_TIME);
         assert_eq!(event_1, event_2);
 
-        let event_1_payload = r#"{"p_id":1000,"name":"vicky noris","email_address":"vzbhp@wxv.com","credit_card":"4355 0142 3460 9324","city":"boise","state":"ca","p_date_time":"2015-07-15 00:00:00"}"#.to_string();
+        let event_1_payload = r#"{"id":1000,"name":"vicky noris","emailAddress":"vzbhp@wxv.com","creditCard":"4355 0142 3460 9324","city":"boise","state":"ca","dateTime":"2015-07-15 00:00:00"}"#.to_string();
         assert_eq!(event_1.to_json(), event_1_payload);
         Ok(())
     }

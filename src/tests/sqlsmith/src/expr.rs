@@ -79,7 +79,10 @@ impl<'a, R: Rng> SqlGenerator<'a, R> {
         // aggregate function.
         assert!(can_agg || !inside_agg);
 
-        let range = if can_agg & !inside_agg { 99 } else { 90 };
+        // TODO:  https://github.com/singularity-data/risingwave/issues/3989.
+        // After the issue is resolved, uncomment the statement below
+        // let range = if can_agg & !inside_agg { 99 } else { 90 };
+        let range = 90;
 
         match self.rng.gen_range(0..=range) {
             0..=90 => self.gen_func(typ, can_agg, inside_agg),
@@ -149,7 +152,7 @@ impl<'a, R: Rng> SqlGenerator<'a, R> {
 
         // if distinct is allowed, it could not have ApproxCountDistinct
         if func.func == AggKind::ApproxCountDistinct && self.is_distinct_allowed {
-            return self.gen_simple_scalar(ret)
+            return self.gen_simple_scalar(ret);
         }
 
         // Common sense that the aggregation is allowed in the overall expression
@@ -163,8 +166,9 @@ impl<'a, R: Rng> SqlGenerator<'a, R> {
             .collect();
         assert!(expr.len() == 1);
 
-        let distinct = self.is_distinct_allowed && self.flip_coin();
+        let distinct = self.flip_coin();
         make_agg_expr(func.func.clone(), expr[0].clone(), distinct)
+            .unwrap_or_else(|| self.gen_simple_scalar(ret))
     }
 }
 
@@ -209,20 +213,32 @@ fn make_general_expr(func: ExprType, exprs: Vec<Expr>) -> Option<Expr> {
     }
 }
 
-fn make_agg_expr(func: AggKind, expr: Expr, distinct: bool) -> Expr {
+// Even though when all current AggKind is implemented, the reason that Option is used here
+// because of if future there is a new AggKind is added, it would cause the compilation error here
+// So it is still better to keep it as Option
+fn make_agg_expr(func: AggKind, expr: Expr, distinct: bool) -> Option<Expr> {
     use AggKind as A;
 
     match func {
-        A::Sum => Expr::Function(make_agg_func("sum", &[expr], distinct)),
-        A::Min => Expr::Function(make_agg_func("min", &[expr], distinct)),
-        A::Max => Expr::Function(make_agg_func("max", &[expr], distinct)),
-        A::Count => Expr::Function(make_agg_func("count", &[expr], distinct)),
-        A::Avg => Expr::Function(make_agg_func("avg", &[expr], distinct)),
-        A::StringAgg => Expr::Function(make_agg_func("string_agg", &[expr], distinct)),
-        A::SingleValue => Expr::Function(make_agg_func("single_value", &[expr], false)),
-        A::ApproxCountDistinct => {
-            Expr::Function(make_agg_func("approx_count_distinct", &[expr], false))
-        }
+        A::Sum => Some(Expr::Function(make_agg_func("sum", &[expr], distinct))),
+        A::Min => Some(Expr::Function(make_agg_func("min", &[expr], distinct))),
+        A::Max => Some(Expr::Function(make_agg_func("max", &[expr], distinct))),
+        A::Count => Some(Expr::Function(make_agg_func("count", &[expr], distinct))),
+        A::Avg => Some(Expr::Function(make_agg_func("avg", &[expr], distinct))),
+        // Refer to src/frontend/src/optimizer/plan_node/logical_agg.rs line  356 , it is todo:
+        // Uncomment the line below when it is implemented
+        // A::StringAgg => Expr::Function(make_agg_func("string_agg", &[expr], distinct)),
+        A::SingleValue => Some(Expr::Function(make_agg_func(
+            "single_value",
+            &[expr],
+            false,
+        ))),
+        A::ApproxCountDistinct => Some(Expr::Function(make_agg_func(
+            "approx_count_distinct",
+            &[expr],
+            false,
+        ))),
+        _ => None,
     }
 }
 
@@ -337,7 +353,7 @@ pub(crate) fn sql_null() -> Expr {
 }
 
 pub fn print_function_table() -> String {
-    func_sigs()
+    let func_str = func_sigs()
         .map(|sign| {
             format!(
                 "{:?}({}) -> {:?}",
@@ -349,5 +365,21 @@ pub fn print_function_table() -> String {
                 sign.ret_type,
             )
         })
-        .join("\n")
+        .join("\n");
+
+    let agg_func_str = agg_func_sigs()
+        .map(|sign| {
+            format!(
+                "{:?}({}) -> {:?}",
+                sign.func,
+                sign.inputs_type
+                    .iter()
+                    .map(|arg| format!("{:?}", arg))
+                    .join(", "),
+                sign.ret_type,
+            )
+        })
+        .join("\n");
+
+    func_str + "\n" + &agg_func_str
 }

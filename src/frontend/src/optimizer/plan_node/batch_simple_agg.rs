@@ -20,7 +20,7 @@ use risingwave_pb::batch_plan::SortAggNode;
 
 use super::logical_agg::PlanAggCall;
 use super::{LogicalAgg, PlanBase, PlanRef, PlanTreeNodeUnary, ToBatchProst, ToDistributedBatch};
-use crate::optimizer::plan_node::{BatchExchange, PlanAggCallVerboseDisplay, ToLocalBatch};
+use crate::optimizer::plan_node::{BatchExchange, ToLocalBatch};
 use crate::optimizer::property::{Distribution, Order, RequiredDist};
 
 #[derive(Debug, Clone)]
@@ -46,22 +46,11 @@ impl BatchSimpleAgg {
     pub fn agg_calls(&self) -> &[PlanAggCall] {
         self.logical.agg_calls()
     }
-
-    pub fn agg_calls_verbose_display(&self) -> Vec<PlanAggCallVerboseDisplay> {
-        self.logical.agg_calls_verbose_display()
-    }
 }
 
 impl fmt::Display for BatchSimpleAgg {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-        let verbose = self.base.ctx.is_explain_verbose();
-        let mut builder = f.debug_struct("BatchSimpleAgg");
-        if verbose {
-            builder.field("aggs", &self.agg_calls_verbose_display());
-        } else {
-            builder.field("aggs", &self.agg_calls());
-        }
-        builder.finish()
+        self.logical.fmt_with_name(f, "BatchSimpleAgg")
     }
 }
 
@@ -84,11 +73,8 @@ impl ToDistributedBatch for BatchSimpleAgg {
 
         // TODO: distinct agg cannot use 2-phase agg yet.
         if dist_input.distribution().satisfies(&RequiredDist::AnyShard)
-            && self
-                .logical
-                .agg_calls()
-                .iter()
-                .all(|call| !call.distinct && call.order_by_fields.is_empty())
+            && self.logical.agg_calls().iter().all(|call| !call.distinct)
+            && !self.logical.is_agg_result_affected_by_order()
         {
             // partial agg
             let partial_agg = self.clone_with_input(dist_input).into();

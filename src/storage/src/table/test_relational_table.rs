@@ -346,6 +346,8 @@ async fn test_state_table_update_insert() -> StorageResult<()> {
         .await
         .unwrap();
     assert_eq!(row1, None);
+
+    epoch += 1;
     state_table.commit(epoch).await.unwrap();
 
     let row1_commit = state_table
@@ -1247,7 +1249,7 @@ async fn test_dedup_cell_based_table_iter_with(
             .collect_vec());
 
         let bytes = cell_based_row_serializer
-            .cell_based_serialize(DEFAULT_VNODE, &pk_bytes, partial_row)
+            .serialize(DEFAULT_VNODE, &pk_bytes, partial_row)
             .unwrap();
 
         // ---------- Batch-write

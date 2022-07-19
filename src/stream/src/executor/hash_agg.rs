@@ -12,6 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+use std::collections::HashMap;
 use std::marker::PhantomData;
 use std::sync::Arc;
 
@@ -19,7 +20,6 @@ use futures::{stream, StreamExt};
 use futures_async_stream::try_stream;
 use iter_chunks::IterChunks;
 use itertools::Itertools;
-use madsim::collections::HashMap;
 use risingwave_common::array::column::Column;
 use risingwave_common::array::{StreamChunk, Vis};
 use risingwave_common::buffer::Bitmap;
@@ -110,10 +110,15 @@ impl<K: HashKey, S: StateStore> HashAggExecutor<K, S> {
         pk_indices: PkIndices,
         executor_id: u64,
         key_indices: Vec<usize>,
-        state_tables: Vec<StateTable<S>>,
+        mut state_tables: Vec<StateTable<S>>,
     ) -> Result<Self> {
         let input_info = input.info();
         let schema = generate_agg_schema(input.as_ref(), &agg_calls, Some(&key_indices));
+
+        // TODO: enable sanity check for hash agg executor <https://github.com/singularity-data/risingwave/issues/3885>
+        for state_table in &mut state_tables {
+            state_table.disable_sanity_check();
+        }
 
         Ok(Self {
             input,
@@ -327,7 +332,7 @@ impl<K: HashKey, S: StateStore> HashAggExecutor<K, S> {
                         .iter_mut()
                         .zip_eq(state_tables.iter_mut())
                     {
-                        state.flush(state_table).await?;
+                        state.flush(state_table)?;
                     }
                 }
             }

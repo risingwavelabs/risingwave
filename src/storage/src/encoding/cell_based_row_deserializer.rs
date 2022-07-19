@@ -13,18 +13,19 @@
 // limitations under the License.
 
 use std::collections::HashMap;
-use std::ops::Deref;
 use std::sync::Arc;
 
 use bytes::Bytes;
 use risingwave_common::array::Row;
 use risingwave_common::catalog::{ColumnDesc, ColumnId};
 use risingwave_common::error::{ErrorCode, Result};
-use risingwave_common::types::{Datum, VirtualNode, VIRTUAL_NODE_SIZE};
+use risingwave_common::types::{DataType, Datum, VirtualNode, VIRTUAL_NODE_SIZE};
 use risingwave_common::util::value_encoding::deserialize_cell;
 
 use super::cell_based_encoding_util::deserialize_column_id;
-use crate::encoding::{ColumnDescMapping, Decoding};
+use super::cell_based_row_serializer::CellBasedRowSerializer;
+use super::{Decoding, RowSerde};
+use crate::encoding::ColumnDescMapping;
 use crate::table::storage_table::DEFAULT_VNODE;
 
 #[allow(clippy::len_without_is_empty)]
@@ -72,12 +73,12 @@ impl ColumnDescMapping {
     }
 }
 
-pub type GeneralCellBasedRowDeserializer = CellBasedRowDeserializer<Arc<ColumnDescMapping>>;
+pub type GeneralCellBasedRowDeserializer = CellBasedRowDeserializer;
 
 #[derive(Clone)]
-pub struct CellBasedRowDeserializer<Desc: Deref<Target = ColumnDescMapping>> {
+pub struct CellBasedRowDeserializer {
     /// A mapping from column id to its desc and the index in the row.
-    columns: Desc,
+    columns: Arc<ColumnDescMapping>,
 
     data: Vec<Datum>,
 
@@ -93,8 +94,8 @@ pub fn make_cell_based_row_deserializer(
     GeneralCellBasedRowDeserializer::new(ColumnDescMapping::new(output_columns))
 }
 
-impl<Desc: Deref<Target = ColumnDescMapping>> CellBasedRowDeserializer<Desc> {
-    pub fn new(column_mapping: Desc) -> Self {
+impl CellBasedRowDeserializer {
+    pub fn new(column_mapping: Arc<ColumnDescMapping>) -> Self {
         let num_cells = column_mapping.len();
         Self {
             columns: column_mapping,
@@ -176,9 +177,12 @@ impl<Desc: Deref<Target = ColumnDescMapping>> CellBasedRowDeserializer<Desc> {
     }
 }
 
-impl<Desc: Deref<Target = ColumnDescMapping>> Decoding<Desc> for CellBasedRowDeserializer<Desc> {
+impl Decoding for CellBasedRowDeserializer {
     /// Constructs a new serializer.
-    fn create_cell_based_deserializer(column_mapping: Desc) -> Self {
+    fn create_row_deserializer(
+        column_mapping: Arc<ColumnDescMapping>,
+        _data_types: Vec<DataType>,
+    ) -> Self {
         Self::new(column_mapping)
     }
 
@@ -203,6 +207,10 @@ impl<Desc: Deref<Target = ColumnDescMapping>> Decoding<Desc> for CellBasedRowDes
     }
 }
 
+impl RowSerde for CellBasedRowDeserializer {
+    type Deserializer = CellBasedRowDeserializer;
+    type Serializer = CellBasedRowSerializer;
+}
 #[cfg(test)]
 mod tests {
     use bytes::Bytes;
@@ -214,7 +222,6 @@ mod tests {
     use super::make_cell_based_row_deserializer;
     use crate::encoding::cell_based_encoding_util::serialize_pk_and_row_state;
     use crate::encoding::Decoding;
-
     #[test]
     fn test_cell_based_deserializer() {
         let column_ids = vec![

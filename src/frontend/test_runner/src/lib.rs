@@ -14,7 +14,6 @@
 
 #![allow(clippy::derive_partial_eq_without_eq)]
 //! Data-driven tests.
-#![feature(let_chains)]
 
 mod resolve_id;
 

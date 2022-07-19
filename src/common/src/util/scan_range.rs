@@ -15,11 +15,12 @@
 use std::ops::{Bound, RangeBounds};
 
 use itertools::Itertools;
-use risingwave_common::array::Row;
-use risingwave_common::types::{ScalarImpl, VirtualNode};
-use risingwave_common::util::hash_util::CRC32FastBuilder;
 use risingwave_pb::batch_plan::scan_range::Bound as BoundProst;
 use risingwave_pb::batch_plan::ScanRange as ScanRangeProst;
+
+use crate::array::Row;
+use crate::types::{ScalarImpl, VirtualNode};
+use crate::util::hash_util::CRC32FastBuilder;
 
 /// See also [`ScanRangeProst`]
 #[derive(Debug, Clone)]
