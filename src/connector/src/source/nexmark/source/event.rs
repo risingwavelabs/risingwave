@@ -141,7 +141,6 @@ impl Event {
 /// Person represents a person submitting an item for auction and/or making a
 /// bid on an auction.
 #[derive(PartialEq, Eq, Clone, Debug, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase")]
 pub struct Person {
     /// A person-unique integer ID.
     pub id: Id,
@@ -198,7 +197,6 @@ impl Person {
 
 /// Auction represents an item under auction.
 #[derive(PartialEq, Eq, Clone, Debug, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase")]
 pub struct Auction {
     /// An auction-unique integer ID.
     pub id: Id,
@@ -291,7 +289,6 @@ impl Auction {
 
 /// Bid represents a bid for an item under auction.
 #[derive(PartialEq, Eq, Clone, Debug, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase")]
 pub struct Bid {
     /// The ID of the auction this bid is for.
     pub auction: Id,
@@ -368,7 +365,7 @@ mod tests {
         let (event_2, _) = Event::new(0, &config, NEXMARK_BASE_TIME);
         assert_eq!(event_1, event_2);
 
-        let event_1_payload = r#"{"id":1000,"name":"vicky noris","emailAddress":"vzbhp@wxv.com","creditCard":"4355 0142 3460 9324","city":"boise","state":"ca","dateTime":"2015-07-15 00:00:00"}"#.to_string();
+        let event_1_payload = r#"{"id":1000,"name":"vicky noris","email_address":"vzbhp@wxv.com","credit_card":"4355 0142 3460 9324","city":"boise","state":"ca","date_time":"2015-07-15 00:00:00"}"#.to_string();
         assert_eq!(event_1.to_json(), event_1_payload);
         Ok(())
     }
