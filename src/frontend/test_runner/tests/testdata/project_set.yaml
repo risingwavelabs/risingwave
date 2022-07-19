@@ -71,3 +71,13 @@
       StreamProjectSet { select_list: [($3 * $4), Unnest($2), $1, $0] }
         StreamProjectSet { select_list: [$0, $1, Unnest($1), Unnest($1)] }
           StreamTableScan { table: t, columns: [_row_id, x], pk_indices: [0] }
+- sql: |
+    /* table functions as parameters of table functions */
+    create table t(x int[]);
+    select generate_series(unnest(x),100,1) from t;
+  batch_plan: |
+    BatchProject { exprs: [$1] }
+      BatchExchange { order: [], dist: Single }
+        BatchProjectSet { select_list: [Generate($3, 100:Int32, 1:Int32)] }
+          BatchProjectSet { select_list: [$0, $1, Unnest($1)] }
+            BatchScan { table: t, columns: [_row_id, x] }
