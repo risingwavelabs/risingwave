@@ -311,7 +311,7 @@ impl<S: StateStore> RowBasedStateTable<S> {
     pub async fn commit(&mut self, new_epoch: u64) -> StorageResult<()> {
         let mem_table = std::mem::take(&mut self.mem_table).into_parts();
         self.storage_table
-            .batch_write_rows_with_row_based_encoding(mem_table, new_epoch)
+            .batch_write_rows(mem_table, new_epoch)
             .await?;
         Ok(())
     }
