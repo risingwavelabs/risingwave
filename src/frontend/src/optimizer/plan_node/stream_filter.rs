@@ -20,7 +20,7 @@ use risingwave_pb::stream_plan::FilterNode;
 use super::{LogicalFilter, PlanRef, PlanTreeNodeUnary, ToStreamProst};
 use crate::expr::{Expr, ExprImpl};
 use crate::optimizer::plan_node::PlanBase;
-use crate::utils::{Condition, ConditionVerboseDisplay};
+use crate::utils::Condition;
 
 /// `StreamFilter` implements [`super::LogicalFilter`]
 #[derive(Debug, Clone)]
@@ -53,21 +53,7 @@ impl StreamFilter {
 
 impl fmt::Display for StreamFilter {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-        let verbose = self.base.ctx.is_explain_verbose();
-        if verbose {
-            let input = self.input();
-            let input_schema = input.schema();
-            write!(
-                f,
-                "StreamFilter {{ predicate: {} }}",
-                ConditionVerboseDisplay {
-                    condition: self.logical.predicate(),
-                    input_schema
-                }
-            )
-        } else {
-            write!(f, "StreamFilter {{ predicate: {} }}", self.predicate())
-        }
+        self.logical.fmt_with_name(f, "StreamFilter")
     }
 }
 
