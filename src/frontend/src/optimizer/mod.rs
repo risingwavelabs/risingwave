@@ -155,35 +155,35 @@ impl PlanRoot {
             heuristic_optimizer.optimize(plan)
         };
 
-        // // Predicate Push-down: apply filter pushdown rules again since we pullup all join
-        // // conditions into a filter above the multijoin.
-        // plan = plan.predicate_pushdown(Condition::true_cond());
+        // Predicate Push-down: apply filter pushdown rules again since we pullup all join
+        // conditions into a filter above the multijoin.
+        plan = plan.predicate_pushdown(Condition::true_cond());
 
-        // // Convert distinct aggregates.
-        // plan = {
-        //     let rules = vec![DistinctAgg::create()];
-        //     let heuristic_optimizer = HeuristicOptimizer::new(ApplyOrder::TopDown, rules);
-        //     heuristic_optimizer.optimize(plan)
-        // };
+        // Convert distinct aggregates.
+        plan = {
+            let rules = vec![DistinctAgg::create()];
+            let heuristic_optimizer = HeuristicOptimizer::new(ApplyOrder::TopDown, rules);
+            heuristic_optimizer.optimize(plan)
+        };
 
-        // // Prune Columns
-        // //
-        // // Currently, the expressions in ORDER BY will be merged into the expressions in SELECT
-        // and // they shouldn't be a part of output columns, so we use `out_fields` to
-        // control the // visibility of these expressions. To avoid these expressions being
-        // pruned, we can't // use `self.out_fields` as `required_cols` here.
-        // let required_cols = (0..self.plan.schema().len()).collect_vec();
-        // plan = plan.prune_col(&required_cols);
+        // Prune Columns
+        //
+        // Currently, the expressions in ORDER BY will be merged into the expressions in SELECT and
+        // they shouldn't be a part of output columns, so we use `out_fields` to control the
+        // visibility of these expressions. To avoid these expressions being pruned, we can't use
+        // `self.out_fields` as `required_cols` here.
+        let required_cols = (0..self.plan.schema().len()).collect_vec();
+        plan = plan.prune_col(&required_cols);
 
-        // plan = {
-        //     let rules = vec![
-        //         // merge should be applied before eliminate
-        //         ProjectMergeRule::create(),
-        //         ProjectEliminateRule::create(),
-        //     ];
-        //     let heuristic_optimizer = HeuristicOptimizer::new(ApplyOrder::BottomUp, rules);
-        //     heuristic_optimizer.optimize(plan)
-        // };
+        plan = {
+            let rules = vec![
+                // merge should be applied before eliminate
+                ProjectMergeRule::create(),
+                ProjectEliminateRule::create(),
+            ];
+            let heuristic_optimizer = HeuristicOptimizer::new(ApplyOrder::BottomUp, rules);
+            heuristic_optimizer.optimize(plan)
+        };
 
         plan
     }
