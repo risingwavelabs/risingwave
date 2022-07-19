@@ -341,6 +341,8 @@ impl LevelSelector for DynamicLevelSelector {
         let ctx = self.get_priority_levels(levels, level_handlers);
         let target_level = if option.level == 0 {
             ctx.base_level
+        } else if option.level == self.config.max_level as usize {
+            option.level
         } else {
             option.level + 1
         };

@@ -271,7 +271,11 @@ mod tests {
 
         // assert compact_task
         assert_eq!(
-            compact_task.input_ssts.first().unwrap().table_infos.len(),
+            compact_task
+                .input_ssts
+                .iter()
+                .map(|level| level.table_infos.len())
+                .sum::<usize>(),
             128
         );
 
@@ -282,8 +286,11 @@ mod tests {
         let version = hummock_manager_ref.get_current_version().await;
         let output_table_id = version
             .get_compaction_group_levels(StaticCompactionGroupId::StateDefault.into())
-            .levels
-            .last()
+            .l0
+            .as_ref()
+            .unwrap()
+            .sub_levels
+            .first()
             .unwrap()
             .table_infos
             .first()
@@ -407,8 +414,12 @@ mod tests {
         compact_task.compaction_filter_mask = compaction_filter_flag.bits();
         // assert compact_task
         assert_eq!(
-            compact_task.input_ssts.first().unwrap().table_infos.len(),
-            kv_count
+            compact_task
+                .input_ssts
+                .iter()
+                .map(|level| level.table_infos.len())
+                .sum::<usize>(),
+            128
         );
 
         // 3. compact
@@ -456,7 +467,7 @@ mod tests {
 
         let drop_table_id = 1;
         let existing_table_ids = 2;
-        let kv_count = 128;
+        let kv_count: usize = 128;
         let mut epoch: u64 = 1;
         for index in 0..kv_count {
             let table_id = if index % 2 == 0 {
@@ -524,7 +535,12 @@ mod tests {
 
         // assert compact_task
         assert_eq!(
-            compact_task.input_ssts.first().unwrap().table_infos.len(),
+            compact_task
+                .input_ssts
+                .iter()
+                .filter(|level| level.level_idx != compact_task.target_level)
+                .map(|level| level.table_infos.len())
+                .sum::<usize>(),
             kv_count
         );
 
@@ -681,7 +697,11 @@ mod tests {
 
         // assert compact_task
         assert_eq!(
-            compact_task.input_ssts.first().unwrap().table_infos.len(),
+            compact_task
+                .input_ssts
+                .iter()
+                .map(|level| level.table_infos.len())
+                .sum::<usize>(),
             kv_count,
         );
 

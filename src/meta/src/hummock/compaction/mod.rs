@@ -156,7 +156,13 @@ impl CompactStatus {
 
     pub fn is_trivial_move_task(task: &CompactTask) -> bool {
         if task.input_ssts.len() != 2
-            || task.input_ssts[0].level_type == LevelType::Nonoverlapping as i32
+            || task.input_ssts[0].level_type != LevelType::Nonoverlapping as i32
+        {
+            return false;
+        }
+
+        if task.input_ssts[0].level_idx == task.input_ssts[0].level_idx
+            && task.input_ssts[0].level_idx > 0
         {
             return false;
         }

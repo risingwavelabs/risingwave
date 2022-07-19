@@ -890,19 +890,7 @@ async fn test_trigger_manual_compaction() {
         assert_eq!("internal error: trigger_manual_compaction No compaction_task is available. compaction_group 2", result.err().unwrap().to_string());
     }
 
-    // Add some sstables and commit.
-    let epoch: u64 = 1;
-    let original_tables = generate_test_tables(epoch, get_sst_ids(&hummock_manager, sst_num).await);
-    register_sstable_infos_to_compaction_group(
-        hummock_manager.compaction_group_manager_ref_for_test(),
-        &original_tables,
-        StaticCompactionGroupId::StateDefault.into(),
-    )
-    .await;
-    hummock_manager
-        .commit_epoch(epoch, to_local_sstable_info(&original_tables))
-        .await
-        .unwrap();
+    let _ = add_test_tables(&hummock_manager, context_id).await;
 
     // check safe epoch in hummock version
     let version_id1 = CurrentHummockVersionId::get(env.meta_store())
@@ -910,10 +898,14 @@ async fn test_trigger_manual_compaction() {
         .unwrap()
         .unwrap();
     let hummock_version1 = hummock_manager.get_version(version_id1.id()).await;
+    assert_eq!(1, hummock_version1.safe_epoch);
 
-    // safe epoch should be INVALID before success compaction
-    assert_eq!(INVALID_EPOCH, hummock_version1.safe_epoch);
-
+    // trigger once trivial move
+    let ret = hummock_manager
+        .get_compact_task(StaticCompactionGroupId::StateDefault.into())
+        .await
+        .unwrap();
+    assert!(ret.is_none());
     {
         // to check compactor send task fail
         drop(receiver);
@@ -931,7 +923,7 @@ async fn test_trigger_manual_compaction() {
 
     {
         let option = ManualCompactionOption {
-            level: 0,
+            level: 6,
             key_range: KeyRange {
                 inf: true,
                 ..Default::default()
@@ -945,7 +937,7 @@ async fn test_trigger_manual_compaction() {
         assert!(result.is_ok());
     }
 
-    let task_id: u64 = 3;
+    let task_id: u64 = 5;
     let compact_task = hummock_manager
         .compaction_task_from_assignment_for_test(task_id)
         .await

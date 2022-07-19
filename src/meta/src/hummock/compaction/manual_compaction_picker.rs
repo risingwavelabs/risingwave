@@ -16,7 +16,7 @@ use std::sync::Arc;
 
 use itertools::Itertools;
 use risingwave_pb::hummock::hummock_version::Levels;
-use risingwave_pb::hummock::{InputLevel, SstableInfo};
+use risingwave_pb::hummock::{InputLevel, LevelType, SstableInfo};
 
 use super::overlap_strategy::OverlapInfo;
 use super::CompactionPicker;
@@ -45,6 +45,97 @@ impl ManualCompactionPicker {
             target_level,
         }
     }
+
+    fn pick_l0_files(
+        &self,
+        levels: &Levels,
+        level_handlers: &mut [LevelHandler],
+    ) -> Option<CompactionInput> {
+        let l0 = levels.l0.as_ref().unwrap();
+        let mut input_levels = vec![];
+        let mut max_sub_level_idx = usize::MAX;
+        let mut info = self.overlap_strategy.create_overlap_info();
+        let mut tmp_sst_info = SstableInfo::default();
+        let mut range_overlap_info = RangeOverlapInfo::default();
+        tmp_sst_info.key_range = Some(self.option.key_range.clone());
+        range_overlap_info.update(&tmp_sst_info);
+        for (idx, level) in l0.sub_levels.iter().enumerate() {
+            if self
+                .overlap_strategy
+                .check_overlap_with_tables(&[tmp_sst_info.clone()], &level.table_infos)
+                .is_empty()
+            {
+                continue;
+            }
+            if self.option.internal_table_id.is_empty() {
+                max_sub_level_idx = idx;
+                continue;
+            }
+
+            // to collect internal_table_id from sst_info
+            let table_id_in_sst: Vec<u32> = level
+                .table_infos
+                .iter()
+                .flat_map(|sst| sst.table_ids.clone())
+                .collect_vec();
+
+            // to filter sst_file by table_id
+            let mut found = false;
+            for table_id in &table_id_in_sst {
+                if self.option.internal_table_id.contains(table_id) {
+                    found = true;
+                    break;
+                }
+            }
+            if found {
+                max_sub_level_idx = idx;
+            }
+        }
+        if max_sub_level_idx == usize::MAX {
+            return None;
+        }
+        for idx in 0..=max_sub_level_idx {
+            if level_handlers[0].is_level_pending_compact(&l0.sub_levels[idx]) {
+                return None;
+            }
+            for table in &l0.sub_levels[idx].table_infos {
+                info.update(table);
+            }
+            input_levels.push(InputLevel {
+                level_idx: 0,
+                level_type: l0.sub_levels[idx].level_type,
+                table_infos: l0.sub_levels[idx].table_infos.clone(),
+            })
+        }
+        let target_input_ssts =
+            info.check_multiple_overlap(&levels.levels[self.target_level - 1].table_infos);
+        if target_input_ssts
+            .iter()
+            .any(|table| level_handlers[self.target_level].is_pending_compact(&table.id))
+        {
+            return None;
+        }
+
+        input_levels.push(InputLevel {
+            level_idx: self.target_level as u32,
+            level_type: LevelType::Nonoverlapping as i32,
+            table_infos: target_input_ssts,
+        });
+        for level in &input_levels {
+            if !level.table_infos.is_empty() {
+                level_handlers[level.level_idx as usize].add_pending_task(
+                    self.compact_task_id,
+                    self.target_level,
+                    &level.table_infos,
+                );
+            }
+        }
+        Some(CompactionInput {
+            input_levels,
+            target_level: self.target_level,
+            target_sub_level_id: 0,
+        })
+    }
 }
 
 impl CompactionPicker for ManualCompactionPicker {
@@ -53,6 +144,11 @@ impl CompactionPicker for ManualCompactionPicker {
         levels: &Levels,
         level_handlers: &mut [LevelHandler],
     ) -> Option<CompactionInput> {
+        // TODO: support pick up level 0
+        if self.option.level == 0 {
+            return self.pick_l0_files(levels, level_handlers);
+        }
+
         let level = self.option.level;
         let target_level = self.target_level;
 
@@ -111,14 +207,18 @@ impl CompactionPicker for ManualCompactionPicker {
             return None;
         }
 
-        let target_input_ssts = self.overlap_strategy.check_base_level_overlap(
-            &select_input_ssts,
-            &levels.levels[target_level - 1].table_infos,
-        );
+        let target_input_ssts = if target_level == level {
+            self.overlap_strategy.check_base_level_overlap(
+                &select_input_ssts,
+                &levels.levels[target_level - 1].table_infos,
+            )
+        } else {
+            vec![]
+        };
 
         if target_input_ssts
             .iter()
-            .any(|table| level_handlers[level].is_pending_compact(&table.id))
+            .any(|table| level_handlers[target_level].is_pending_compact(&table.id))
         {
             return None;
         }
