@@ -12,9 +12,10 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use anyhow::Result;
+use anyhow::{anyhow, bail, Result};
+use http::{Response, StatusCode};
 use hyper::body::Buf;
-use hyper::{Client, Uri};
+use hyper::{Body, Client, Uri};
 use serde_derive::{Deserialize, Serialize};
 
 use crate::source::pulsar::topic::Topic;
@@ -38,13 +39,20 @@ impl PulsarAdminClient {
     }
 
     pub async fn get_topic_metadata(&self, topic: &Topic) -> Result<PartitionedTopicMetadata> {
-        self.get(topic, "partitions").await
+        let res = self.http_get(topic, "partitions").await?;
+
+        if res.status() == StatusCode::NOT_FOUND {
+            bail!(
+                "could not find metadata for pulsar topic {}",
+                topic.to_string()
+            );
+        }
+
+        let body = hyper::body::aggregate(res).await?;
+        serde_json::from_reader(body.reader()).map_err(|e| anyhow!(e))
     }
 
-    pub async fn get<T>(&self, topic: &Topic, api: &str) -> Result<T>
-    where
-        T: for<'a> serde::Deserialize<'a>,
-    {
+    pub async fn http_get(&self, topic: &Topic, api: &str) -> Result<Response<Body>> {
         let client = Client::new();
 
         let url = format!(
@@ -56,7 +64,14 @@ impl PulsarAdminClient {
         );
 
         let url: Uri = url.parse()?;
-        let res = client.get(url).await?;
+        client.get(url).await.map_err(|e| anyhow!(e))
+    }
+
+    pub async fn get<T>(&self, topic: &Topic, api: &str) -> Result<T>
+    where
+        T: for<'a> serde::Deserialize<'a>,
+    {
+        let res = self.http_get(topic, api).await?;
         let body = hyper::body::aggregate(res).await?;
         let result: T = serde_json::from_reader(body.reader())?;
         Ok(result)

@@ -237,6 +237,7 @@ impl_aggregator! { NaiveDateTimeArray, NaiveDateTime, I64Array, Int64 }
 impl_aggregator! { I64Array, Int64, DecimalArray, Decimal }
 
 #[cfg(test)]
+#[expect(clippy::needless_borrow)]
 mod tests {
     use std::sync::Arc;
 

@@ -82,7 +82,7 @@ impl Executor for ReceiverExecutor {
         let metrics = self.metrics.clone();
         let actor_id_str = self.actor_id.to_string();
         ReceiverStream::new(self.receiver)
-            .map(move |msg| {
+            .inspect(move |msg| {
                 match &msg {
                     Message::Chunk(chunk) => {
                         metrics
@@ -92,9 +92,9 @@ impl Executor for ReceiverExecutor {
                     }
                     Message::Barrier(_) => {}
                 };
-                status.next_message(&msg);
-                Ok(msg)
+                status.next_message(msg);
             })
+            .map(Ok)
             .boxed()
     }
 
