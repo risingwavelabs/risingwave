@@ -12,7 +12,6 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-#![allow(dead_code)]
 use std::collections::HashMap;
 use std::sync::Arc;
 
@@ -24,14 +23,14 @@ use risingwave_pb::catalog::Table;
 
 use crate::key::{get_table_id, TABLE_PREFIX_LEN};
 
-trait SliceTransform {
+/// Slice Transform generally used to transform key which will store in BloomFilter
+pub trait SliceTransform: Sync + Send {
     fn transform<'a>(&self, full_key: &'a [u8]) -> &'a [u8];
 }
 
 #[derive(Default)]
 pub struct FullKeySliceTransform;
 
-// Slice Transform generally used to transform key which will store in BloomFilter
 impl SliceTransform for FullKeySliceTransform {
     fn transform<'a>(&self, full_key: &'a [u8]) -> &'a [u8] {
         full_key
@@ -41,18 +40,18 @@ impl SliceTransform for FullKeySliceTransform {
 #[derive(Default)]
 pub struct DummySliceTransform;
 impl SliceTransform for DummySliceTransform {
-    fn transform<'a>(&self, full_key: &'a [u8]) -> &'a [u8] {
-        &full_key[0..0]
+    fn transform<'a>(&self, _full_key: &'a [u8]) -> &'a [u8] {
+        &[]
     }
 }
 
-// SchemaSliceTransform build from table_catalog and transform a full_key to prefix for
-// prefix_bloom_filter
+/// [`SchemaSliceTransform`] build from table_catalog and transform a `full_key` to prefix for
+/// prefix_bloom_filter
 pub struct SchemaSliceTransform {
-    // Each stateful operator has its own read pattern, partly using `Prefix Scan`.
-    // `PrefixKeyLength` can be decoded through its `DataType` and `OrderType` which obtained from
-    // `TableCatalog`. `read_pattern_prefix_column` means the count of column to decode prefix from
-    // `StorageKey`
+    /// Each stateful operator has its own read pattern, partly using prefix scan.
+    /// Perfix key length can be decoded through its `DataType` and `OrderType` which obtained from
+    /// `TableCatalog`. `read_pattern_prefix_column` means the count of column to decode prefix
+    /// from storage key.
     read_pattern_prefix_column: u32,
     deserializer: OrderedRowDeserializer,
     // TODO:need some bench test for same prefix case like join (if we need a prefix_cache for same
@@ -61,13 +60,7 @@ pub struct SchemaSliceTransform {
 
 impl SliceTransform for SchemaSliceTransform {
     fn transform<'a>(&self, full_key: &'a [u8]) -> &'a [u8] {
-        if full_key.len() < TABLE_PREFIX_LEN + VIRTUAL_NODE_SIZE {
-            panic!(
-                "full_key {:?} len {} not match the schema",
-                full_key,
-                full_key.len()
-            );
-        }
+        debug_assert!(full_key.len() >= TABLE_PREFIX_LEN + VIRTUAL_NODE_SIZE);
 
         let (_table_prefix, key) = full_key.split_at(TABLE_PREFIX_LEN);
         let (_vnode_prefix, pk) = key.split_at(VIRTUAL_NODE_SIZE);
@@ -78,7 +71,7 @@ impl SliceTransform for SchemaSliceTransform {
             .deserializer
             .deserialize_prefix_len_with_column_indices(
                 pk,
-                (0..self.read_pattern_prefix_column as usize).collect(),
+                0..self.read_pattern_prefix_column as usize,
             )
             .unwrap();
 
@@ -88,7 +81,7 @@ impl SliceTransform for SchemaSliceTransform {
 }
 
 impl SchemaSliceTransform {
-    fn new(table_catalog: &Table) -> Self {
+    pub fn new(table_catalog: &Table) -> Self {
         assert_ne!(0, table_catalog.read_pattern_prefix_column);
 
         // column_index in pk
@@ -122,31 +115,30 @@ impl SchemaSliceTransform {
 }
 
 #[derive(Default)]
-pub struct MultiSliceTransForm {
+pub struct MultiSliceTransform {
+    // TODO: use Enum to rewrite since this might be dynamically dispatched frequently.
     id_to_slice_transform: HashMap<u32, Arc<dyn SliceTransform>>,
 
     // cached state
     last_slice_transform_state: Option<(u32, Arc<dyn SliceTransform>)>,
 }
 
-impl MultiSliceTransForm {
-    fn register(&mut self, table_id: u32, slice_transform: Arc<dyn SliceTransform>) {
+impl MultiSliceTransform {
+    pub fn register(&mut self, table_id: u32, slice_transform: Arc<dyn SliceTransform>) {
         self.id_to_slice_transform.insert(table_id, slice_transform);
     }
 
     fn update_state(&mut self, new_table_id: u32) {
-        match self.id_to_slice_transform.get(&new_table_id) {
-            Some(box_slice_transform) => {
-                self.last_slice_transform_state = Some((new_table_id, box_slice_transform.clone()))
-            }
-
-            None => {
-                unreachable!();
-            }
-        }
+        self.last_slice_transform_state = Some((
+            new_table_id,
+            self.id_to_slice_transform
+                .get(&new_table_id)
+                .unwrap()
+                .clone(),
+        ));
     }
 
-    fn transform<'a>(&mut self, full_key: &'a [u8]) -> &'a [u8] {
+    pub fn transform<'a>(&mut self, full_key: &'a [u8]) -> &'a [u8] {
         assert!(full_key.len() > TABLE_PREFIX_LEN + VIRTUAL_NODE_SIZE);
 
         let table_id = get_table_id(full_key).unwrap();
@@ -171,7 +163,6 @@ impl MultiSliceTransForm {
 }
 
 #[cfg(test)]
-#[expect(clippy::needless_borrow)]
 mod tests {
     use std::collections::HashMap;
     use std::mem;
@@ -189,7 +180,7 @@ mod tests {
 
     use super::{DummySliceTransform, SchemaSliceTransform, SliceTransform};
     use crate::key::TABLE_PREFIX_LEN;
-    use crate::slice_transform::{FullKeySliceTransform, MultiSliceTransForm};
+    use crate::slice_transform::{FullKeySliceTransform, MultiSliceTransform};
 
     #[test]
     fn test_default_slice_transform() {
@@ -206,6 +197,7 @@ mod tests {
     }
 
     fn build_table_with_prefix_column_num(column_count: u32) -> ProstTable {
+        #[expect(clippy::needless_borrow)]
         ProstTable {
             is_index: false,
             index_on_id: 0,
@@ -324,7 +316,7 @@ mod tests {
 
     #[test]
     fn test_multi_slice_transform() {
-        let mut multi_slice_transform = MultiSliceTransForm::default();
+        let mut multi_slice_transform = MultiSliceTransform::default();
 
         {
             // test table_id 1
@@ -359,7 +351,7 @@ mod tests {
             let deserializer = OrderedRowDeserializer::new(data_types, order_types);
 
             let pk_prefix_len = deserializer
-                .deserialize_prefix_len_with_column_indices(&row_bytes, vec![0])
+                .deserialize_prefix_len_with_column_indices(&row_bytes, 0..=0)
                 .unwrap();
             assert_eq!(
                 TABLE_PREFIX_LEN + VIRTUAL_NODE_SIZE + pk_prefix_len,
@@ -400,7 +392,7 @@ mod tests {
             let deserializer = OrderedRowDeserializer::new(data_types, order_types);
 
             let pk_prefix_len = deserializer
-                .deserialize_prefix_len_with_column_indices(&row_bytes, vec![0, 1])
+                .deserialize_prefix_len_with_column_indices(&row_bytes, 0..=1)
                 .unwrap();
 
             assert_eq!(
