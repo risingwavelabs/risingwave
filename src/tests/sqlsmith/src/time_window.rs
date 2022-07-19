@@ -21,6 +21,7 @@ use risingwave_sqlparser::ast::{
 };
 
 use crate::{Column, Expr, SqlGenerator, Table};
+use crate::utils::{create_alias, create_args};
 
 impl<'a, R: Rng> SqlGenerator<'a, R> {
     /// Generates time window functions.
@@ -86,24 +87,6 @@ impl<'a, R: Rng> SqlGenerator<'a, R> {
         self.add_relation_to_context(table);
 
         relation
-    }
-
-    fn create_table_name_with_prefix(&self, prefix: &str) -> String {
-        format!("{}_{}", prefix, &self.bound_relations.len())
-    }
-}
-
-fn create_args(arg_exprs: Vec<Expr>) -> Vec<FunctionArg> {
-    arg_exprs
-        .into_iter()
-        .map(create_function_arg_from_expr)
-        .collect()
-}
-
-fn create_alias(table_name: &str) -> TableAlias {
-    TableAlias {
-        name: table_name.into(),
-        columns: vec![],
     }
 }
 
