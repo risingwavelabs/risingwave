@@ -216,16 +216,16 @@
                   LogicalScan { table: partsupp, columns: [ps_partkey, ps_suppkey, ps_supplycost] }
                   LogicalScan { table: part, output_columns: [p_partkey, p_mfgr], required_columns: [$1:p_partkey, $3:p_mfgr, $5:p_type, $6:p_size], predicate: ($6 = 4:Int32) AND Like($5, '%TIN':Varchar) }
                 LogicalScan { table: supplier, columns: [s_suppkey, s_name, s_address, s_nationkey, s_phone, s_acctbal, s_comment] }
-              LogicalScan { table: nation, columns: [n_nationkey, n_name, n_regionkey] }
-            LogicalScan { table: region, output_columns: [r_regionkey], required_columns: [$1:r_regionkey, $2:r_name], predicate: ($2 = 'AFRICA':Varchar) }
-          LogicalAgg { group_key: [$0], aggs: [min($1)] }
-            LogicalJoin { type: Inner, on: ($2 = $3), output_indices: [0, 1] }
-              LogicalJoin { type: Inner, on: ($2 = $3), output_indices: [0, 1, 4] }
-                LogicalJoin { type: Inner, on: ($3 = $1), output_indices: [0, 2, 4] }
-                  LogicalScan { table: partsupp, columns: [ps_partkey, ps_suppkey, ps_supplycost] }
-                  LogicalScan { table: supplier, columns: [s_suppkey, s_nationkey] }
-                LogicalScan { table: nation, columns: [n_nationkey, n_regionkey] }
-              LogicalScan { table: region, output_columns: [r_regionkey], required_columns: [$1:r_regionkey, $2:r_name], predicate: ($2 = 'AFRICA':Varchar) }
+              LogicalAgg { group_key: [$0], aggs: [min($1)] }
+                LogicalJoin { type: Inner, on: ($2 = $3), output_indices: [0, 1] }
+                  LogicalJoin { type: Inner, on: ($2 = $3), output_indices: [0, 1, 4] }
+                    LogicalJoin { type: Inner, on: ($3 = $1), output_indices: [0, 2, 4] }
+                      LogicalScan { table: partsupp, columns: [ps_partkey, ps_suppkey, ps_supplycost] }
+                      LogicalScan { table: supplier, columns: [s_suppkey, s_nationkey] }
+                    LogicalScan { table: nation, columns: [n_nationkey, n_regionkey] }
+                  LogicalScan { table: region, output_columns: [r_regionkey], required_columns: [$1:r_regionkey, $2:r_name], predicate: ($2 = 'AFRICA':Varchar) }
+            LogicalScan { table: nation, columns: [n_nationkey, n_name, n_regionkey] }
+          LogicalScan { table: region, output_columns: [r_regionkey], required_columns: [$1:r_regionkey, $2:r_name], predicate: ($2 = 'AFRICA':Varchar) }
   batch_plan: |
     BatchTopN { order: "[$0 DESC, $2 ASC, $1 ASC, $3 ASC]", limit: 100, offset: 0 }
       BatchExchange { order: [], dist: Single }
@@ -1109,9 +1109,9 @@
     LogicalTopN { order: "[$2 DESC]", limit: 20, offset: 0 }
       LogicalProject { exprs: [$0, $1, $7, $2, $4, $5, $3, $6] }
         LogicalAgg { group_key: [$0, $1, $2, $3, $4, $5, $6], aggs: [sum($7)] }
-          LogicalProject { exprs: [$0, $1, $4, $3, $8, $2, $5, ($6 * (1.00:Decimal - $7))] }
-            LogicalJoin { type: Inner, on: ($3 = $9), output_indices: [0, 1, 2, 4, 5, 6, 7, 8, 10] }
-              LogicalJoin { type: Inner, on: ($8 = $7), output_indices: [0, 1, 2, 3, 4, 5, 6, 9, 10] }
+          LogicalProject { exprs: [$0, $1, $4, $3, $6, $2, $5, ($7 * (1.00:Decimal - $8))] }
+            LogicalJoin { type: Inner, on: ($8 = $6), output_indices: [0, 1, 2, 3, 4, 5, 7, 9, 10] }
+              LogicalJoin { type: Inner, on: ($3 = $8), output_indices: [0, 1, 2, 4, 5, 6, 7, 9] }
                 LogicalJoin { type: Inner, on: ($0 = $8), output_indices: [0, 1, 2, 3, 4, 5, 6, 7] }
                   LogicalScan { table: customer, columns: [c_custkey, c_name, c_address, c_nationkey, c_phone, c_acctbal, c_comment] }
                   LogicalScan { table: orders, output_columns: [o_orderkey, o_custkey], required_columns: [$1:o_orderkey, $2:o_custkey, $5:o_orderdate], predicate: ($5 >= '1994-01-01':Varchar::Date) AND ($5 < ('1994-01-01':Varchar::Date + '3 mons 00:00:00':Interval)) }
