@@ -29,7 +29,7 @@ use crate::catalog::ColumnId;
 use crate::expr::{CollectInputRef, ExprImpl, InputRef};
 use crate::optimizer::plan_node::{BatchSeqScan, LogicalFilter, LogicalProject};
 use crate::session::OptimizerContextRef;
-use crate::utils::{ColIndexMapping, Condition};
+use crate::utils::{ColIndexMapping, Condition, ConditionVerboseDisplay};
 
 /// `LogicalScan` returns contents of a table or other equivalent object
 #[derive(Debug, Clone)]
@@ -323,12 +323,18 @@ impl_plan_tree_node_for_leaf! {LogicalScan}
 
 impl fmt::Display for LogicalScan {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        let verbose = self.base.ctx.is_explain_verbose();
         if self.predicate.always_true() {
             write!(
                 f,
                 "LogicalScan {{ table: {}, columns: [{}] }}",
                 self.table_name,
-                self.column_names().join(", "),
+                if verbose {
+                    self.column_names_with_table_prefix()
+                } else {
+                    self.column_names()
+                }
+                .join(", "),
             )
         } else {
             let required_col_names = self
@@ -341,9 +347,22 @@ impl fmt::Display for LogicalScan {
                 f,
                 "LogicalScan {{ table: {}, output_columns: [{}], required_columns: [{}], predicate: {} }}",
                 self.table_name,
-                self.column_names().join(", "),
+                if verbose {
+                    self.column_names_with_table_prefix()
+                } else {
+                    self.column_names()
+                }.join(", "),
                 required_col_names.join(", "),
-                self.predicate,
+                if verbose {
+                    let fields = self.table_desc.columns.iter().map(|col|  Field::from_with_table_name_prefix(col, &self.table_name)).collect_vec();
+                    let input_schema = Schema{fields};
+                    format!("{}", ConditionVerboseDisplay{
+                        condition: &self.predicate,
+                        input_schema: &input_schema,
+                    })
+                } else {
+                    format!("{}", self.predicate)
+                }
             )
         }
     }
