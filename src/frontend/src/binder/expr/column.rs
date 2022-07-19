@@ -11,12 +11,10 @@
 // WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 // See the License for the specific language governing permissions and
 // limitations under the License.
-use std::cmp::Ordering;
 
 use risingwave_common::error::{ErrorCode, Result};
 use risingwave_sqlparser::ast::Ident;
 
-use crate::binder::bind_context::LateralBindContext;
 use crate::binder::Binder;
 use crate::expr::{CorrelatedInputRef, ExprImpl, InputRef};
 
@@ -24,13 +22,9 @@ impl Binder {
     pub fn bind_column(&mut self, idents: &[Ident]) -> Result<ExprImpl> {
         // TODO: check quote style of `ident`.
         let (_schema_name, table_name, column_name) = match idents {
-            [column] => (None, None, column.real_value()),
-            [table, column] => (None, Some(table.real_value()), column.real_value()),
-            [schema, table, column] => (
-                Some(schema.real_value()),
-                Some(table.real_value()),
-                column.real_value(),
-            ),
+            [column] => (None, None, &column.value),
+            [table, column] => (None, Some(&table.value), &column.value),
+            [schema, table, column] => (Some(&schema.value), Some(&table.value), &column.value),
             _ => {
                 return Err(
                     ErrorCode::InternalError(format!("Too many idents: {:?}", idents)).into(),
@@ -40,56 +34,34 @@ impl Binder {
 
         if let Ok(index) = self
             .context
-            .get_column_binding_index(&table_name, &column_name)
+            .get_column_binding_index(table_name, column_name)
         {
             let column = &self.context.columns[index];
             return Ok(InputRef::new(column.index, column.field.data_type.clone()).into());
         }
 
-        let mut outside_contexts: Vec<ExprImpl> = vec![];
-
-        // Try to find a correlated column in `subquery_contexts`, and `lateral_contexts` starting
-        // from the innermost context.
+        // Try to find a correlated column in `upper_contexts`, starting from the innermost context.
+        let mut err = ErrorCode::ItemNotFound(format!("Invalid column: {}", column_name)).into();
         for (i, (context, lateral_contexts)) in
             self.upper_subquery_contexts.iter().rev().enumerate()
         {
             // `depth` starts from 1.
             let depth = i + 1;
-            if let Ok(index) = context.get_column_binding_index(&table_name, &column_name) {
-                let column = &context.columns[index];
-                outside_contexts.push(
-                    CorrelatedInputRef::new(column.index, column.field.data_type.clone(), depth)
-                        .into(),
-                );
-            }
-            for LateralBindContext {
-                context,
-                is_visible,
-            } in lateral_contexts
-            {
-                if *is_visible {
-                    if let Ok(index) = context.get_column_binding_index(&table_name, &column_name) {
-                        let column = &context.columns[index];
-                        outside_contexts.push(
-                            CorrelatedInputRef::new(
-                                column.index,
-                                column.field.data_type.clone(),
-                                depth,
-                            )
-                            .into(),
-                        );
-                    }
+            match context.get_column_binding_index(table_name, column_name) {
+                Ok(index) => {
+                    let column = &context.columns[index];
+                    return Ok(CorrelatedInputRef::new(
+                        column.index,
+                        column.field.data_type.clone(),
+                        depth,
+                    )
+                    .into());
+                }
+                Err(e) => {
+                    err = e;
                 }
             }
         }
-        match outside_contexts.len().cmp(&1) {
-            Ordering::Equal => Ok(outside_contexts[0].clone()),
-            Ordering::Greater => {
-                Err(ErrorCode::InternalError("Ambiguous column name".into()).into())
-            }
-            Ordering::Less => {
-                Err(ErrorCode::ItemNotFound(format!("Invalid column: {}", column_name)).into())
-            }
-        }
+        Err(err)
     }
 }
