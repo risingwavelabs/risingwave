@@ -20,8 +20,9 @@ use risingwave_common::catalog::{ColumnDesc, ColumnId};
 use risingwave_common::error::Result;
 use risingwave_common::types::VirtualNode;
 
-use super::{cell_based_row_serializer::CellBasedRowSerializer, RowSerde, cell_based_row_deserializer::CellBasedRowDeserializer};
-use super::{KeyBytes, RowSerialize, ValueBytes};
+use super::cell_based_row_deserializer::CellBasedRowDeserializer;
+use super::cell_based_row_serializer::CellBasedRowSerializer;
+use super::{KeyBytes, RowSerde, RowSerialize, ValueBytes};
 #[derive(Clone)]
 /// [`DedupPkCellBasedRowSerializer`] is identical to [`CellBasedRowSerializer`].
 /// Difference is that before serializing a row, pk datums are filtered out.

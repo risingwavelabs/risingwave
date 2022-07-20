@@ -31,10 +31,10 @@ use risingwave_pb::catalog::Table;
 use super::mem_table::{MemTable, RowOp};
 use super::storage_table::{CellBasedRowSerde, RowBasedSerde, StorageTableBase, READ_WRITE};
 use super::Distribution;
-use crate::encoding::cell_based_encoding_util::serialize_pk;
-use crate::encoding::dedup_pk_cell_based_row_serializer::DedupPkCellBasedRowSerializer;
-use crate::encoding::RowSerde;
 use crate::error::{StorageError, StorageResult};
+use crate::row_serde::cell_based_encoding_util::serialize_pk;
+use crate::row_serde::dedup_pk_cell_based_row_serializer::DedupPkCellBasedRowSerializer;
+use crate::row_serde::RowSerde;
 use crate::StateStore;
 
 /// Identical to `StateTable`. Used when we want to
