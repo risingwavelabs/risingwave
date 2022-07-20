@@ -279,3 +279,9 @@ query T
 select regexp_match('abc01234xyz', '(?:(.*?)(\d+)(.*)){1,1}');
 ----
 {abc,01234,xyz}
+
+query T
+select regexp_matches('foobarbequebazilbarfbonk', '(b[^b]+)(b[^b]+)', 'g');
+----
+ {bar,beque}
+ {bazil,barf}

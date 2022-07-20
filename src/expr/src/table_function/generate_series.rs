@@ -125,11 +125,10 @@ where
     }
 }
 
-pub fn new_generate_series(
-    args: Vec<BoxedExpression>,
-    return_type: DataType,
-) -> Result<BoxedTableFunction> {
-    ensure!(args.len() == 3);
+pub fn new_generate_series(prost: &TableFunctionProst) -> Result<BoxedTableFunction> {
+    ensure!(prost.args.len() == 3);
+    let return_type = DataType::from(prost.get_return_type().unwrap());
+    let args: Vec<_> = prost.args.iter().map(expr_build_from_prost).try_collect()?;
     let (start, stop, step) = args.into_iter().collect_tuple().unwrap();
 
     match return_type {
