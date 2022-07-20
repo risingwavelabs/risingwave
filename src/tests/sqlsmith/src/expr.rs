@@ -282,7 +282,7 @@ fn make_simple_func(func_name: &str, exprs: &[Expr]) -> Function {
 
 /// This is the function that generate aggregate function.
 /// DISTINCT , ORDER BY or FILTER is allowed in aggregation functions。
-/// Currently, distinct is allowed only, other and others rule is TODO: https://github.com/singularity-data/risingwave/issues/3933
+/// Currently, distinct is allowed only, other and others rule is TODO: <https://github.com/singularity-data/risingwave/issues/3933>
 fn make_agg_func(func_name: &str, exprs: &[Expr], distinct: bool) -> Function {
     let args = exprs
         .iter()
