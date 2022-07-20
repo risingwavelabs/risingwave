@@ -16,8 +16,7 @@ use risingwave_common::catalog::{Field, Schema};
 
 use super::*;
 use crate::executor::exchange::input::new_input;
-use crate::executor::receiver::ReceiverExecutor;
-use crate::executor::MergeExecutor;
+use crate::executor::{MergeExecutor, ReceiverExecutor};
 
 pub struct MergeExecutorBuilder;
 

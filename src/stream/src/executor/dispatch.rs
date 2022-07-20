@@ -18,124 +18,23 @@ use std::future::Future;
 use std::iter::repeat_with;
 use std::sync::Arc;
 
-use async_trait::async_trait;
 use futures::Stream;
 use futures_async_stream::try_stream;
 use itertools::Itertools;
 use risingwave_common::array::{Op, StreamChunk};
 use risingwave_common::buffer::BitmapBuilder;
-use risingwave_common::error::{internal_error, Result};
+use risingwave_common::error::Result;
 use risingwave_common::types::VIRTUAL_NODE_COUNT;
-use risingwave_common::util::addr::is_local_address;
 use risingwave_common::util::compress::decompress_data;
 use risingwave_common::util::hash_util::CRC32FastBuilder;
 use risingwave_pb::stream_plan::update_mutation::DispatcherUpdate as ProstDispatcherUpdate;
 use risingwave_pb::stream_plan::Dispatcher as ProstDispatcher;
-use tokio::sync::mpsc::Sender;
 use tracing::event;
 
+use super::exchange::output::{new_output, BoxedOutput};
 use crate::executor::monitor::StreamingMetrics;
 use crate::executor::{Barrier, BoxedExecutor, Message, Mutation, StreamConsumer};
 use crate::task::{ActorId, DispatcherId, SharedContext};
-
-/// `Output` provides an interface for `Dispatcher` to send data into downstream actors.
-#[async_trait]
-pub trait Output: Debug + Send + Sync + 'static {
-    async fn send(&mut self, message: Message) -> Result<()>;
-
-    fn actor_id(&self) -> ActorId;
-}
-
-pub type BoxedOutput = Box<dyn Output>;
-
-/// `LocalOutput` sends data to a local `mpsc::Channel`
-pub struct LocalOutput {
-    actor_id: ActorId,
-
-    ch: Sender<Message>,
-}
-
-impl Debug for LocalOutput {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        f.debug_struct("LocalOutput")
-            .field("actor_id", &self.actor_id)
-            .finish()
-    }
-}
-
-impl LocalOutput {
-    pub fn new(actor_id: ActorId, ch: Sender<Message>) -> Self {
-        Self { actor_id, ch }
-    }
-}
-
-#[async_trait]
-impl Output for LocalOutput {
-    async fn send(&mut self, message: Message) -> Result<()> {
-        self.ch
-            .send(message)
-            .await
-            .map_err(|_| internal_error("failed to send"))?;
-        Ok(())
-    }
-
-    fn actor_id(&self) -> ActorId {
-        self.actor_id
-    }
-}
-
-/// `RemoteOutput` forwards data to`ExchangeServiceImpl`
-pub struct RemoteOutput {
-    actor_id: ActorId,
-
-    ch: Sender<Message>,
-}
-
-impl Debug for RemoteOutput {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        f.debug_struct("RemoteOutput")
-            .field("actor_id", &self.actor_id)
-            .finish()
-    }
-}
-
-impl RemoteOutput {
-    pub fn new(actor_id: ActorId, ch: Sender<Message>) -> Self {
-        Self { actor_id, ch }
-    }
-}
-
-#[async_trait]
-impl Output for RemoteOutput {
-    async fn send(&mut self, message: Message) -> Result<()> {
-        let message = match message {
-            Message::Chunk(chk) => Message::Chunk(chk.compact()?),
-            _ => message,
-        };
-
-        self.ch
-            .send(message)
-            .await
-            .map_err(|_| internal_error("failed to send"))?;
-
-        Ok(())
-    }
-
-    fn actor_id(&self) -> ActorId {
-        self.actor_id
-    }
-}
-
-fn new_output(context: &SharedContext, actor_id: ActorId, down_id: ActorId) -> Result<BoxedOutput> {
-    let downstream_addr = context.get_actor_info(&down_id)?.get_host()?.into();
-    let tx = context.take_sender(&(actor_id, down_id))?;
-    if is_local_address(&context.addr, &downstream_addr) {
-        // if this is a local downstream actor
-        Ok(Box::new(LocalOutput::new(down_id, tx)) as BoxedOutput)
-    } else {
-        Ok(Box::new(RemoteOutput::new(down_id, tx)) as BoxedOutput)
-    }
-}
 
 /// [`DispatchExecutor`] consumes messages and send them into downstream actors. Usually,
 /// data chunks will be dispatched with some specified policy, while control message
@@ -878,6 +777,7 @@ mod tests {
     use std::hash::{BuildHasher, Hasher};
     use std::sync::{Arc, Mutex};
 
+    use async_trait::async_trait;
     use futures::{pin_mut, StreamExt};
     use itertools::Itertools;
     use risingwave_common::array::column::Column;
@@ -891,6 +791,7 @@ mod tests {
 
     use super::*;
     use crate::executor::exchange::input::LocalInput;
+    use crate::executor::exchange::output::Output;
     use crate::executor::receiver::ReceiverExecutor;
     use crate::executor::ActorContext;
     use crate::task::test_utils::{add_local_channels, helper_make_local_actor};

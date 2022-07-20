@@ -28,6 +28,7 @@ use crate::executor::actor::ActorContext;
 use crate::executor::aggregation::{AggArgs, AggCall};
 use crate::executor::dispatch::*;
 use crate::executor::exchange::input::LocalInput;
+use crate::executor::exchange::output::{BoxedOutput, LocalOutput};
 use crate::executor::monitor::StreamingMetrics;
 use crate::executor::receiver::ReceiverExecutor;
 use crate::executor::test_utils::create_in_memory_keyspace_agg;

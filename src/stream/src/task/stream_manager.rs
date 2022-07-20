@@ -32,7 +32,6 @@ use tokio::sync::mpsc::{channel, Receiver};
 use tokio::task::JoinHandle;
 
 use super::{unique_executor_id, unique_operator_id, CollectResult};
-use crate::executor::dispatch::*;
 use crate::executor::monitor::StreamingMetrics;
 use crate::executor::*;
 use crate::from_proto::create_executor;
