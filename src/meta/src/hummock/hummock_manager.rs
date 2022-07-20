@@ -178,7 +178,7 @@ macro_rules! start_measure_real_process_timer {
 #[derive(Default)]
 struct Versioning {
     current_version_id: CurrentHummockVersionId,
-    current_version: Option<HummockVersion>,
+    current_version: HummockVersion,
     hummock_versions: BTreeMap<HummockVersionId, Vec<u64>>,
     hummock_version_deltas: BTreeMap<HummockVersionId, HummockVersionDelta>,
     pinned_versions: BTreeMap<HummockContextId, HummockPinnedVersion>,
@@ -189,9 +189,7 @@ struct Versioning {
 
 impl Versioning {
     pub fn current_version_ref(&self) -> &HummockVersion {
-        self.current_version
-            .as_ref()
-            .expect("current version should always be available.")
+        &self.current_version
     }
 
     pub fn current_version(&self) -> HummockVersion {
@@ -342,7 +340,7 @@ where
         }
         self.max_committed_epoch
             .store(redo_state.max_committed_epoch, Ordering::Relaxed);
-        versioning_guard.current_version = Some(redo_state);
+        versioning_guard.current_version = redo_state;
         versioning_guard.hummock_version_deltas = hummock_version_deltas;
 
         versioning_guard.pinned_versions = HummockPinnedVersion::list(self.env.meta_store())
@@ -455,7 +453,7 @@ where
             if is_delta {
                 None
             } else {
-                Some(versioning.current_version.as_ref().unwrap().clone())
+                Some(versioning.current_version.clone())
             },
         ));
 
@@ -583,11 +581,7 @@ where
         let _timer = start_measure_real_process_timer!(self);
         // Use the max_committed_epoch in storage as the snapshot ts so only committed changes are
         // visible in the snapshot.
-        let max_committed_epoch = versioning_guard
-            .current_version
-            .as_ref()
-            .unwrap()
-            .max_committed_epoch;
+        let max_committed_epoch = versioning_guard.current_version.max_committed_epoch;
         // Ensure the unpin will not clean the latest one.
         #[cfg(not(test))]
         {
@@ -670,11 +664,7 @@ where
 
                 compact_task.watermark = {
                     let versioning_guard = read_lock!(self, versioning).await;
-                    let max_committed_epoch = versioning_guard
-                        .current_version
-                        .as_ref()
-                        .unwrap()
-                        .max_committed_epoch;
+                    let max_committed_epoch = versioning_guard.current_version.max_committed_epoch;
                     versioning_guard
                         .pinned_snapshots
                         .values()
@@ -905,7 +895,7 @@ where
             versioning
                 .hummock_versions
                 .insert(new_version.id, new_version.get_sst_ids());
-            versioning.current_version = Some(new_version);
+            versioning.current_version = new_version;
         } else {
             // The compaction task is cancelled.
             commit_multi_var!(
@@ -1082,7 +1072,7 @@ where
         versioning
             .hummock_versions
             .insert(new_version_id, new_hummock_version.get_sst_ids());
-        versioning.current_version = Some(new_hummock_version);
+        versioning.current_version = new_hummock_version;
         self.max_committed_epoch.store(epoch, Ordering::Release);
 
         // Update metrics
