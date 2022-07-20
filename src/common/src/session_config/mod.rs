@@ -178,7 +178,7 @@ pub struct ConfigMap {
     /// see <https://www.postgresql.org/docs/14/runtime-config-logging.html#:~:text=What%20to%20Log-,application_name,-(string)>
     application_name: ApplicationName,
 
-    /// see https://www.postgresql.org/docs/current/runtime-config-client.html#GUC-DATESTYLE
+    /// see <https://www.postgresql.org/docs/current/runtime-config-client.html#GUC-DATESTYLE>
     date_style: DateStyle,
 
     /// To force the usage of lookup join instead of hash join in batch execution
