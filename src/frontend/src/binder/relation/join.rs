@@ -142,6 +142,8 @@ impl Binder {
                 let mut left_col_indices = Vec::new();
                 let mut right_col_indices = Vec::new();
                 let mut binary_expr = Expr::Value(Value::Boolean(true));
+
+                // Walk the LHS cols, checking to see if any share a name with the RHS cols
                 for (column, idxes) in columns {
                     let left_col_index = match old_context.get_index(&column.value) {
                         Err(e) => {
@@ -174,6 +176,8 @@ impl Binder {
                         }),
                     }
                 }
+                // Matching left cols in the join condition may be replaced with a coalesce
+                // or with the corresponding right col in the projection
                 let left_col_iter = old_context.columns.iter().map(|left| {
                     let l_col = left.index;
                     let l_data_type = left.field.data_type.clone();
@@ -214,6 +218,8 @@ impl Binder {
                     }
                 });
                 let mut r_col = 0;
+                // Remove right cols that appear in the join condition. They have been substituted
+                // for with their matching left cols
                 let right_col_iter = (0..self.context.columns.len())
                     .filter(|idx| !right_col_indices.contains(idx))
                     .map(|idx| {
@@ -227,6 +233,9 @@ impl Binder {
                 self.pop_and_merge_lateral_context()?;
                 let expr = self.bind_expr(binary_expr)?;
 
+                // Remove the indices from the RHS that participate in the join condition. They have
+                // been excluded from the projection And the table's output schema
+                // should reflect that.
                 self.context.remove_indices(
                     &left_col_indices
                         .iter()
