@@ -28,20 +28,16 @@ pub type Notification = std::result::Result<SubscribeResponse, Status>;
 
 pub type NotificationVersion = u64;
 
+use risingwave_pb::common::WorkerType;
+
 #[derive(Clone)]
 pub enum LocalNotification {
     WorkerDeletion(WorkerNode),
 }
 
 #[derive(Debug)]
-enum Target {
-    Frontend,
-    Compute,
-}
-
-#[derive(Debug)]
 struct Task {
-    target: Target,
+    target: WorkerType,
     callback_tx: Option<oneshot::Sender<NotificationVersion>>,
     operation: Operation,
     info: Info,
@@ -65,20 +61,11 @@ impl NotificationManager {
 
         tokio::spawn(async move {
             while let Some(task) = task_rx.recv().await {
-                let version = match task.target {
-                    Target::Frontend => {
-                        core.lock()
-                            .await
-                            .notify_frontend(task.operation, &task.info)
-                            .await
-                    }
-                    Target::Compute => {
-                        core.lock()
-                            .await
-                            .notify_compute(task.operation, &task.info)
-                            .await
-                    }
-                };
+                let version = core
+                    .lock()
+                    .await
+                    .notify(task.target, task.operation, &task.info)
+                    .await;
                 if let Some(tx) = task.callback_tx {
                     tx.send(version).unwrap();
                 }
@@ -92,7 +79,7 @@ impl NotificationManager {
     }
 
     /// Add a notification to the waiting queue and return immediately
-    fn notify_asynchronously(&self, target: Target, operation: Operation, info: Info) {
+    fn notify_asynchronously(&self, target: WorkerType, operation: Operation, info: Info) {
         let task = Task {
             target,
             callback_tx: None,
@@ -106,7 +93,7 @@ impl NotificationManager {
     /// sent successfully
     async fn notify(
         &self,
-        target: Target,
+        target: WorkerType,
         operation: Operation,
         info: Info,
     ) -> NotificationVersion {
@@ -122,19 +109,23 @@ impl NotificationManager {
     }
 
     pub fn notify_frontend_asynchronously(&self, operation: Operation, info: Info) {
-        self.notify_asynchronously(Target::Frontend, operation, info);
+        self.notify_asynchronously(WorkerType::Frontend, operation, info);
     }
 
     pub async fn notify_frontend(&self, operation: Operation, info: Info) -> NotificationVersion {
-        self.notify(Target::Frontend, operation, info).await
-    }
-
-    pub fn notify_compute_asynchronously(&self, operation: Operation, info: Info) {
-        self.notify_asynchronously(Target::Compute, operation, info);
+        self.notify(WorkerType::Frontend, operation, info).await
     }
 
     pub async fn notify_compute(&self, operation: Operation, info: Info) -> NotificationVersion {
-        self.notify(Target::Compute, operation, info).await
+        self.notify(WorkerType::ComputeNode, operation, info).await
+    }
+
+    pub async fn notify_compactor(&self, operation: Operation, info: Info) -> NotificationVersion {
+        self.notify(WorkerType::Compactor, operation, info).await
+    }
+
+    pub fn notify_compute_asynchronously(&self, operation: Operation, info: Info) {
+        self.notify_asynchronously(WorkerType::ComputeNode, operation, info);
     }
 
     pub async fn notify_local_subscribers(&self, notification: LocalNotification) {
@@ -155,22 +146,22 @@ impl NotificationManager {
         core_guard.frontend_senders.remove(&worker_key);
     }
 
-    pub async fn insert_frontend_sender(
+    pub async fn insert_sender(
         &self,
+        worker_type: WorkerType,
         worker_key: WorkerKey,
         sender: UnboundedSender<Notification>,
     ) {
         let mut core_guard = self.core.lock().await;
-        core_guard.frontend_senders.insert(worker_key, sender);
-    }
+        let senders = match worker_type {
+            WorkerType::Frontend => &mut core_guard.frontend_senders,
+            WorkerType::ComputeNode => &mut core_guard.compactor_senders,
+            WorkerType::Compactor => &mut core_guard.compactor_senders,
 
-    pub async fn insert_compute_sender(
-        &self,
-        worker_key: WorkerKey,
-        sender: UnboundedSender<Notification>,
-    ) {
-        let mut core_guard = self.core.lock().await;
-        core_guard.compute_senders.insert(worker_key, sender);
+            _ => unreachable!(),
+        };
+
+        senders.insert(worker_key, sender);
     }
 
     pub async fn insert_local_sender(&self, sender: UnboundedSender<LocalNotification>) {
@@ -195,6 +186,9 @@ struct NotificationManagerCore {
     frontend_senders: HashMap<WorkerKey, UnboundedSender<Notification>>,
     /// The notification sender to compute nodes.
     compute_senders: HashMap<WorkerKey, UnboundedSender<Notification>>,
+    /// The notification sender to compactor nodes.
+    compactor_senders: HashMap<WorkerKey, UnboundedSender<Notification>>,
+
     /// The notification sender to local subscribers.
     local_senders: Vec<UnboundedSender<LocalNotification>>,
 
@@ -207,38 +201,42 @@ impl NotificationManagerCore {
         Self {
             frontend_senders: HashMap::new(),
             compute_senders: HashMap::new(),
+            compactor_senders: HashMap::new(),
             local_senders: vec![],
             current_version: 0,
         }
     }
 
-    async fn notify_frontend(&mut self, operation: Operation, info: &Info) -> NotificationVersion {
+    #[expect(clippy::unused_async)]
+    async fn notify(
+        &mut self,
+        worker_type: WorkerType,
+        operation: Operation,
+        info: &Info,
+    ) -> NotificationVersion {
         self.current_version += 1;
-        for (worker_key, sender) in &self.frontend_senders {
+
+        let senders = match worker_type {
+            WorkerType::Frontend => &self.frontend_senders,
+            WorkerType::ComputeNode => &self.compactor_senders,
+            WorkerType::Compactor => &self.compactor_senders,
+
+            _ => unreachable!(),
+        };
+
+        for (worker_key, sender) in senders {
             if let Err(err) = sender.send(Ok(SubscribeResponse {
                 status: None,
                 operation: operation as i32,
                 info: Some(info.clone()),
                 version: self.current_version,
             })) {
-                tracing::warn!("Failed to notify frontend {:?}: {}", worker_key, err);
-            }
-        }
-
-        self.current_version
-    }
-
-    /// Send a `SubscribeResponse` to backend.
-    async fn notify_compute(&mut self, operation: Operation, info: &Info) -> NotificationVersion {
-        self.current_version += 1;
-        for (worker_key, sender) in &self.compute_senders {
-            if let Err(err) = sender.send(Ok(SubscribeResponse {
-                status: None,
-                operation: operation as i32,
-                info: Some(info.clone()),
-                version: self.current_version,
-            })) {
-                tracing::warn!("Failed to notify compute {:?}: {}", worker_key, err);
+                tracing::warn!(
+                    "Failed to notify {:?} {:?}: {}",
+                    worker_type,
+                    worker_key,
+                    err
+                );
             }
         }
 

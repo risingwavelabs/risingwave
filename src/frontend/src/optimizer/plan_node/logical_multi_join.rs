@@ -25,7 +25,9 @@ use super::{
 };
 use crate::expr::{ExprImpl, ExprRewriter};
 use crate::optimizer::plan_node::PlanTreeNode;
-use crate::utils::{ColIndexMapping, Condition, ConnectedComponentLabeller};
+use crate::utils::{
+    ColIndexMapping, Condition, ConditionVerboseDisplay, ConnectedComponentLabeller,
+};
 
 /// `LogicalMultiJoin` combines two or more relations according to some condition.
 ///
@@ -39,22 +41,40 @@ pub struct LogicalMultiJoin {
     inputs: Vec<PlanRef>,
     on: Condition,
     output_indices: Vec<usize>,
-    // XXX(st1page): these fields will be used in prune_col and pk_derive soon.
-    #[allow(unused)]
     inner2output: ColIndexMapping,
+    // XXX(st1page): these fields will be used in prune_col and
+    // pk_derive soon.
     /// the mapping output_col_idx -> (input_idx, input_col_idx), **"output_col_idx" is internal,
     /// not consider output_indices**
     #[allow(unused)]
     inner_o2i_mapping: Vec<(usize, usize)>,
-    /// the mapping ColIndexMapping<input_idx->output_idx> of each inputs, **"output_col_idx" is
-    /// internal, not consider output_indices**
-    #[allow(unused)]
     inner_i2o_mappings: Vec<ColIndexMapping>,
 }
 
 impl fmt::Display for LogicalMultiJoin {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-        write!(f, "LogicalMultiJoin {{ on: {} }}", &self.on)
+        let verbose = self.base.ctx.is_explain_verbose();
+        write!(
+            f,
+            "LogicalMultiJoin {{ on: {} }}",
+            if verbose {
+                let fields = self
+                    .inputs
+                    .iter()
+                    .flat_map(|input| input.schema().fields.clone())
+                    .collect_vec();
+                let input_schema = Schema { fields };
+                format!(
+                    "{}",
+                    ConditionVerboseDisplay {
+                        condition: self.on(),
+                        input_schema: &input_schema,
+                    }
+                )
+            } else {
+                format!("{}", self.on)
+            }
+        )
     }
 }
 
@@ -69,6 +89,17 @@ pub struct LogicalMultiJoinBuilder {
 }
 
 impl LogicalMultiJoinBuilder {
+    /// add a predicate above the plan, so they will be rewriten from the `output_indices` to the
+    /// input indices
+    pub fn add_predicate_above(&mut self, exprs: impl Iterator<Item = ExprImpl>) {
+        let mut mapping = ColIndexMapping::with_target_size(
+            self.output_indices.iter().map(|i| Some(*i)).collect(),
+            self.tot_input_col_num,
+        );
+        self.conjunctions
+            .extend(exprs.map(|expr| mapping.rewrite_expr(expr)));
+    }
+
     pub fn build(self) -> LogicalMultiJoin {
         LogicalMultiJoin::new(
             self.inputs,
@@ -112,7 +143,7 @@ impl LogicalMultiJoinBuilder {
 
         // the mapping from the right's column index to the current multi join's internal column
         // index
-        let mut mapping = ColIndexMapping::with_shift_offset(
+        let mut shift_mapping = ColIndexMapping::with_shift_offset(
             r_tot_input_col_num,
             builder.tot_input_col_num as isize,
         );
@@ -122,15 +153,16 @@ impl LogicalMultiJoinBuilder {
         builder.conjunctions.extend(
             r_conjunctions
                 .into_iter()
-                .map(|expr| mapping.rewrite_expr(expr)),
+                .map(|expr| shift_mapping.rewrite_expr(expr)),
         );
-        builder
-            .conjunctions
-            .extend(join.on().conjunctions.iter().cloned());
 
-        builder
-            .output_indices
-            .extend(r_output_indices.into_iter().map(|idx| mapping.map(idx)));
+        builder.output_indices.extend(
+            r_output_indices
+                .into_iter()
+                .map(|idx| shift_mapping.map(idx)),
+        );
+        builder.add_predicate_above(join.on().conjunctions.iter().cloned());
+
         builder.output_indices = join
             .output_indices()
             .iter()
@@ -142,9 +174,7 @@ impl LogicalMultiJoinBuilder {
     fn with_filter(plan: PlanRef) -> LogicalMultiJoinBuilder {
         let filter: &LogicalFilter = plan.as_logical_filter().unwrap();
         let mut builder = Self::new(filter.input());
-        builder
-            .conjunctions
-            .extend(filter.predicate().conjunctions.clone());
+        builder.add_predicate_above(filter.predicate().conjunctions.iter().cloned());
         builder
     }
 
@@ -155,7 +185,10 @@ impl LogicalMultiJoinBuilder {
             None => return Self::with_input(plan),
         };
         let mut builder = Self::new(proj.input());
-        builder.output_indices = output_indices;
+        builder.output_indices = output_indices
+            .into_iter()
+            .map(|i| builder.output_indices[i])
+            .collect();
         builder
     }
 
@@ -291,15 +324,30 @@ impl LogicalMultiJoin {
                 .into()
             });
 
-        if join_ordering != (0..self.schema().len()).collect::<Vec<_>>() {
-            output =
-                LogicalProject::with_mapping(output, self.mapping_from_ordering(join_ordering))
-                    .into();
-        }
+        let total_col_num = self.inner2output.source_size();
+        let reorder_mapping = {
+            let mut reorder_mapping = vec![None; total_col_num];
+            join_ordering
+                .iter()
+                .cloned()
+                .flat_map(|input_idx| {
+                    (0..self.inputs[input_idx].schema().len())
+                        .into_iter()
+                        .map(move |col_idx| self.inner_i2o_mappings[input_idx].map(col_idx))
+                })
+                .enumerate()
+                .for_each(|(tar, src)| reorder_mapping[src] = Some(tar));
+            reorder_mapping
+        };
+        output =
+            LogicalProject::with_out_col_idx(output, reorder_mapping.iter().map(|i| i.unwrap()))
+                .into();
 
         // We will later push down all of the filters back to the individual joins via the
         // `FilterJoinRule`.
         output = LogicalFilter::create(output, self.on.clone());
+        output =
+            LogicalProject::with_out_col_idx(output, self.output_indices.iter().cloned()).into();
 
         output
     }
@@ -407,27 +455,6 @@ impl LogicalMultiJoin {
 
     pub(crate) fn input_col_nums(&self) -> Vec<usize> {
         self.inputs.iter().map(|i| i.schema().len()).collect()
-    }
-
-    pub(crate) fn mapping_from_ordering(&self, ordering: &[usize]) -> ColIndexMapping {
-        let offsets = self.input_col_offsets();
-        let max_len = offsets[self.inputs.len()];
-        let mut map = Vec::with_capacity(self.schema().len());
-        let input_num_cols = self.input_col_nums();
-        for &input_index in ordering {
-            map.extend(
-                (offsets[input_index]..offsets[input_index] + input_num_cols[input_index])
-                    .map(Some),
-            )
-        }
-        ColIndexMapping::with_target_size(map, max_len)
-    }
-
-    fn input_col_offsets(&self) -> Vec<usize> {
-        self.inputs().iter().fold(vec![0], |mut v, i| {
-            v.push(v.last().unwrap() + i.schema().len());
-            v
-        })
     }
 }
 

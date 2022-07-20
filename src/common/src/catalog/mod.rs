@@ -14,6 +14,7 @@
 
 mod column;
 mod internal_table;
+pub mod local_table_catalog_manager;
 mod physical_table;
 mod schema;
 pub mod test_utils;
@@ -25,6 +26,7 @@ use std::sync::Arc;
 use async_trait::async_trait;
 pub use column::*;
 pub use internal_table::*;
+pub use local_table_catalog_manager::*;
 pub use physical_table::*;
 pub use schema::{test_utils as schema_test_utils, Field, FieldVerboseDisplay, Schema};
 
@@ -158,22 +160,18 @@ impl TableOption {
     pub fn build_table_option(table_properties: &HashMap<String, String>) -> Self {
         // now we only support ttl for TableOption
         let mut result = TableOption::default();
-        match table_properties.get(hummock::PROPERTIES_TTL_KEY) {
-            Some(ttl_string) => {
-                match ttl_string.trim().parse::<u32>() {
-                    Ok(ttl_u32) => result.ttl = Some(ttl_u32),
-                    Err(e) => {
-                        tracing::info!(
-                            "build_table_option parse option ttl_string {} fail {}",
-                            ttl_string,
-                            e
-                        );
-                        result.ttl = None;
-                    }
-                };
-            }
-
-            None => {}
+        if let Some(ttl_string) = table_properties.get(hummock::PROPERTIES_TTL_KEY) {
+            match ttl_string.trim().parse::<u32>() {
+                Ok(ttl_u32) => result.ttl = Some(ttl_u32),
+                Err(e) => {
+                    tracing::info!(
+                        "build_table_option parse option ttl_string {} fail {}",
+                        ttl_string,
+                        e
+                    );
+                    result.ttl = None;
+                }
+            };
         }
 
         result

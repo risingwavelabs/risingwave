@@ -32,7 +32,7 @@ use crate::optimizer::plan_node::{
     LogicalFilter, StreamDynamicFilter, StreamFilter,
 };
 use crate::optimizer::property::{Distribution, RequiredDist};
-use crate::utils::{ColIndexMapping, Condition};
+use crate::utils::{ColIndexMapping, Condition, ConditionVerboseDisplay};
 
 /// `LogicalJoin` combines two relations according to some condition.
 ///
@@ -52,11 +52,25 @@ pub struct LogicalJoin {
 
 impl fmt::Display for LogicalJoin {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        let verbose = self.base.ctx.is_explain_verbose();
         write!(
             f,
             "LogicalJoin {{ type: {:?}, on: {}, output_indices: {} }}",
             &self.join_type,
-            &self.on,
+            if verbose {
+                let mut concat_schema = self.left().schema().fields.clone();
+                concat_schema.extend(self.right().schema().fields.clone());
+                let concat_schema = Schema::new(concat_schema);
+                format!(
+                    "{}",
+                    ConditionVerboseDisplay {
+                        condition: self.on(),
+                        input_schema: &concat_schema
+                    }
+                )
+            } else {
+                format!("{}", self.on())
+            },
             if self
                 .output_indices
                 .iter()
@@ -706,8 +720,6 @@ impl ToBatch for LogicalJoin {
             self.right.schema().len(),
             self.on.clone(),
         );
-
-        log::error!("{:?}", self.join_type);
 
         let left = self.left().to_batch()?;
         let right = self.right().to_batch()?;

@@ -1132,8 +1132,8 @@ mod tests {
         let cache = Arc::new(LruCache::new(0, 5));
         {
             let mut shard = cache.shards[0].lock();
-            insert(&mut *shard, "a", "v1");
-            assert!(lookup(&mut *shard, "a"));
+            insert(&mut shard, "a", "v1");
+            assert!(lookup(&mut shard, "a"));
         }
         let ret = cache.lookup_for_request(0, "a".to_string());
         match ret {

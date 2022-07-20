@@ -19,8 +19,8 @@ use crate::optimizer::plan_node::{LogicalAgg, PlanTreeNodeBinary, PlanTreeNodeUn
 use crate::optimizer::PlanRef;
 
 /// Push `LogicalApply` down `LogicalAgg`.
-pub struct ApplyAgg {}
-impl Rule for ApplyAgg {
+pub struct ApplyAggRule {}
+impl Rule for ApplyAggRule {
     fn apply(&self, plan: PlanRef) -> Option<PlanRef> {
         let apply = plan.as_logical_apply()?;
         assert_eq!(apply.join_type(), JoinType::Inner);
@@ -46,8 +46,8 @@ impl Rule for ApplyAgg {
     }
 }
 
-impl ApplyAgg {
+impl ApplyAggRule {
     pub fn create() -> BoxedRule {
-        Box::new(ApplyAgg {})
+        Box::new(ApplyAggRule {})
     }
 }

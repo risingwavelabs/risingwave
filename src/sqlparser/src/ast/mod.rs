@@ -161,6 +161,16 @@ impl fmt::Display for Ident {
 #[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
 pub struct ObjectName(pub Vec<Ident>);
 
+impl ObjectName {
+    pub fn real_value(&self) -> String {
+        self.0
+            .iter()
+            .map(|ident| ident.real_value())
+            .collect::<Vec<_>>()
+            .join(".")
+    }
+}
+
 impl fmt::Display for ObjectName {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         write!(f, "{}", display_separated(&self.0, "."))
@@ -170,6 +180,12 @@ impl fmt::Display for ObjectName {
 impl ParseTo for ObjectName {
     fn parse_to(p: &mut Parser) -> Result<Self, ParserError> {
         p.parse_object_name()
+    }
+}
+
+impl From<Vec<Ident>> for ObjectName {
+    fn from(value: Vec<Ident>) -> Self {
+        Self(value)
     }
 }
 
@@ -916,6 +932,8 @@ pub enum Statement {
         analyze: bool,
         // Display additional information regarding the plan.
         verbose: bool,
+        // Trace plan transformation of the optimizer step by step
+        trace: bool,
         /// A SQL query that specifies what to explain
         statement: Box<Statement>,
     },
@@ -937,6 +955,7 @@ impl fmt::Display for Statement {
                 describe_alias,
                 verbose,
                 analyze,
+                trace,
                 statement,
             } => {
                 if *describe_alias {
@@ -951,6 +970,10 @@ impl fmt::Display for Statement {
 
                 if *verbose {
                     write!(f, "VERBOSE ")?;
+                }
+
+                if *trace {
+                    write!(f, "TRACE ")?;
                 }
 
                 write!(f, "{}", statement)
@@ -1668,7 +1691,7 @@ impl ParseTo for ObjectType {
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 #[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
 pub struct SqlOption {
-    pub name: Ident,
+    pub name: ObjectName,
     pub value: Value,
 }
 

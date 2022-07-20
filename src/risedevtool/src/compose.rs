@@ -315,19 +315,18 @@ impl Compose for RedPandaConfig {
     fn compose(&self, config: &ComposeConfig) -> Result<ComposeService> {
         let mut command = Command::new("redpanda");
 
-        command.args(vec![
-            "start",
-            "--smp",
-            "4",
-            "--reserve-memory",
-            "0M",
-            "--memory",
-            "4G",
-            "--overprovisioned",
-            "--node-id",
-            "0",
-            "--check=false",
-        ]);
+        command
+            .arg("start")
+            .arg("--smp")
+            .arg(self.cpus.to_string())
+            .arg("--reserve-memory")
+            .arg("0")
+            .arg("--memory")
+            .arg(&self.memory)
+            .arg("--overprovisioned")
+            .arg("--node-id")
+            .arg("0")
+            .arg("--check=false");
 
         command.arg("--kafka-addr").arg(format!(
             "PLAINTEXT://0.0.0.0:{},OUTSIDE://0.0.0.0:{}",

@@ -110,6 +110,7 @@ pub(crate) fn gen_materialized_source_plan(
 ) -> Result<(PlanRef, ProstTable)> {
     let materialize = {
         // Manually assemble the materialization plan for the table.
+        #[expect(clippy::needless_borrow)]
         let source_node: PlanRef =
             StreamSource::new(LogicalSource::new(Rc::new((&source).into()), context)).into();
         let mut required_cols = FixedBitSet::with_capacity(source_node.schema().len());
@@ -184,7 +185,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_create_table_handler() {
-        let sql = "create table t (v1 smallint, v2 struct<v3 bigint, v4 float, v5 double>) with ('appendonly' = true);";
+        let sql = "create table t (v1 smallint, v2 struct<v3 bigint, v4 float, v5 double>) with (appendonly = true);";
         let frontend = LocalFrontend::new(Default::default()).await;
         frontend.run_sql(sql).await.unwrap();
 

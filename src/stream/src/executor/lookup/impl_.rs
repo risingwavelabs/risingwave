@@ -19,7 +19,8 @@ use risingwave_common::array::{Row, RowRef};
 use risingwave_common::catalog::{ColumnDesc, Schema};
 use risingwave_common::error::Result;
 use risingwave_common::util::sort_util::OrderPair;
-use risingwave_storage::table::state_table::StateTable;
+use risingwave_storage::table::storage_table::{StorageTable, READ_ONLY};
+use risingwave_storage::table::TableIter;
 use risingwave_storage::StateStore;
 
 use super::sides::{stream_lookup_arrange_prev_epoch, stream_lookup_arrange_this_epoch};
@@ -29,7 +30,6 @@ use crate::executor::lookup::cache::LookupCache;
 use crate::executor::lookup::sides::{ArrangeJoinSide, ArrangeMessage, StreamJoinSide};
 use crate::executor::lookup::LookupExecutor;
 use crate::executor::{Barrier, Epoch, Executor, Message, PkIndices, PROCESSING_WINDOW_SIZE};
-
 /// Parameters for [`LookupExecutor`].
 pub struct LookupExecutorParams<S: StateStore> {
     /// The side for arrangement. Currently, it should be a
@@ -100,7 +100,7 @@ pub struct LookupExecutorParams<S: StateStore> {
     /// The join keys on the arrangement side.
     pub arrange_join_key_indices: Vec<usize>,
 
-    pub state_table: StateTable<S>,
+    pub storage_table: StorageTable<S, READ_ONLY>,
 }
 
 impl<S: StateStore> LookupExecutor<S> {
@@ -116,7 +116,7 @@ impl<S: StateStore> LookupExecutor<S> {
             arrange_join_key_indices,
             schema: output_schema,
             column_mapping,
-            state_table,
+            storage_table,
         } = params;
 
         let output_column_length = stream.schema().len() + arrangement.schema().len();
@@ -208,7 +208,7 @@ impl<S: StateStore> LookupExecutor<S> {
                 order_rules: arrangement_order_rules,
                 key_indices: arrange_join_key_indices,
                 use_current_epoch,
-                state_table,
+                storage_table,
             },
             column_mapping,
             key_indices_mapping,
@@ -325,6 +325,7 @@ impl<S: StateStore> LookupExecutor<S> {
     }
 
     /// Store the barrier.
+    #[expect(clippy::unused_async)]
     async fn process_barrier(&mut self, barrier: Barrier) -> Result<()> {
         if self.last_barrier.is_none() {
             assert_ne!(barrier.epoch.prev, 0, "lookup requires prev epoch != 0");
@@ -381,14 +382,13 @@ impl<S: StateStore> LookupExecutor<S> {
         {
             let all_data_iter = self
                 .arrangement
-                .state_table
-                .iter_with_pk_prefix(&lookup_row, lookup_epoch)
-                .await?
-                .fuse();
+                .storage_table
+                .streaming_iter_with_pk_bounds(lookup_epoch, &lookup_row, ..)
+                .await?;
             pin_mut!(all_data_iter);
-            while let Some(inner) = all_data_iter.next().await {
-                let ret = inner?;
-                all_rows.push(ret.into_owned());
+            while let Some(inner) = all_data_iter.next_row().await? {
+                // Only need value (include storage pk).
+                all_rows.push(inner);
             }
         }
 
