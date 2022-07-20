@@ -186,10 +186,23 @@ impl DistinctAggRule {
                 agg_call.filter = Condition::true_cond();
 
                 // change final agg's agg_kind just like two-phase agg.
-                if agg_call.agg_kind == AggKind::Count {
-                    indices_of_count.push(i);
-                    agg_call.agg_kind = AggKind::Sum;
-                };
+                //
+                // future `AggKind` may or may not be able to use the same agg call for mid and
+                // final agg so we use exhaustive match here to make compiler remind
+                // people adding new `AggKind` to update it.
+                match agg_call.agg_kind {
+                    AggKind::Min
+                    | AggKind::Max
+                    | AggKind::Sum
+                    | AggKind::Avg
+                    | AggKind::StringAgg
+                    | AggKind::SingleValue
+                    | AggKind::ApproxCountDistinct => (),
+                    AggKind::Count => {
+                        indices_of_count.push(i);
+                        agg_call.agg_kind = AggKind::Sum;
+                    }
+                }
 
                 // the index of non-distinct aggs' subset in `column_subsets` is always 0 if it
                 // exists.

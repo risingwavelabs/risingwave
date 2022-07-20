@@ -499,49 +499,31 @@ impl LogicalAggBuilder {
         None
     }
 
-    /// do some syntax check for distinct aggregates.
+    /// syntax check for distinct aggregates.
     ///
     /// TODO: we may disable this syntax check in the future because we may use another approach to
     /// implement distinct aggregates.
     pub fn syntax_check(&self) -> Result<()> {
         let mut has_distinct = false;
-        let mut has_approx_count_distinct = false;
         let mut has_order_by = false;
-        let mut single_value_has_disintct = false;
         self.agg_calls.iter().for_each(|agg_call| {
             if agg_call.distinct {
                 has_distinct = true;
-            }
-            match agg_call.agg_kind {
-                AggKind::ApproxCountDistinct => {
-                    has_approx_count_distinct = true;
-                }
-                AggKind::SingleValue if agg_call.distinct => {
-                    single_value_has_disintct = true;
-                }
-                _ => {}
             }
             if !agg_call.order_by_fields.is_empty() {
                 has_order_by = true;
             }
         });
-        if has_distinct && has_approx_count_distinct {
-            return Err(ErrorCode::InvalidInputSyntax(
-                "The APPROXIMATE_COUNT_DISTINCT function cannot appear in the same query block as distinct aggregates.".into(),
-            )
-            .into());
-        }
+
+        // order by is disallowed occur with distinct because we can not diectly rewrite agg with
+        // order by into 2-phase agg.
         if has_distinct && has_order_by {
             return Err(ErrorCode::InvalidInputSyntax(
                 "Order by aggregates are disallowed to occur with distinct aggregates".into(),
             )
             .into());
         }
-        if single_value_has_disintct {
-            return Err(
-                ErrorCode::InvalidInputSyntax("Single value can't have distinct".into()).into(),
-            );
-        }
+
         Ok(())
     }
 }
@@ -556,9 +538,21 @@ impl ExprRewriter for LogicalAggBuilder {
     fn rewrite_agg_call(&mut self, agg_call: AggCall) -> ExprImpl {
         let return_type = agg_call.return_type();
         let (agg_kind, inputs, distinct, mut order_by, filter) = agg_call.decompose();
-        if agg_kind != AggKind::StringAgg {
-            // this order by is unnecessary.
-            order_by = AggOrderBy::new(vec![]);
+        match &agg_kind {
+            AggKind::Min
+            | AggKind::Max
+            | AggKind::Sum
+            | AggKind::Count
+            | AggKind::Avg
+            | AggKind::SingleValue
+            | AggKind::ApproxCountDistinct => {
+                // this order by is unnecessary.
+                order_by = AggOrderBy::new(vec![]);
+            }
+            _ => {
+                // To be conservative, we just treat newly added AggKind in the future as not
+                // rewritable.
+            }
         }
 
         self.is_in_filter_clause = true;

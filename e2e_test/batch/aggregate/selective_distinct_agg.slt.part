@@ -12,7 +12,6 @@ select count(*), count(distinct v2) from t;
 query I
 select count(*), count(distinct v2) from t group by v3;
 ----
-(empty)
 
 query I
 select count(*) filter(where v1 > 100), count(distinct v2) from t;

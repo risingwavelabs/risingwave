@@ -657,4 +657,4 @@
 - sql: |
     create table t(x int, y varchar);
     select single_value(distinct x) from t;
-  planner_error: 'Invalid input syntax: Single value can''t have distinct'
+  binder_error: 'Invalid input syntax: single_value(distinct) is disallowed'
