@@ -32,7 +32,7 @@ use risingwave_pb::data::Epoch as ProstEpoch;
 use risingwave_pb::stream_plan::add_mutation::Dispatchers;
 use risingwave_pb::stream_plan::barrier::Mutation as ProstMutation;
 use risingwave_pb::stream_plan::stream_message::StreamMessage;
-use risingwave_pb::stream_plan::update_mutation::DispatcherUpdate;
+use risingwave_pb::stream_plan::update_mutation::{DispatcherUpdate, MergeUpdate};
 use risingwave_pb::stream_plan::{
     AddMutation, Barrier as ProstBarrier, Dispatcher as ProstDispatcher, PauseMutation,
     ResumeMutation, SourceChangeSplitMutation, StopMutation, StreamMessage as ProstStreamMessage,
@@ -176,10 +176,13 @@ pub const INVALID_EPOCH: u64 = 0;
 pub trait ExprFn = Fn(&DataChunk) -> Result<Bitmap> + Send + Sync + 'static;
 
 /// See [`risingwave_pb::stream_plan::barrier::Mutation`] for the semantics of each mutation.
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, PartialEq, EnumAsInner)]
 pub enum Mutation {
     Stop(HashSet<ActorId>),
-    Update(HashMap<ActorId, DispatcherUpdate>),
+    Update {
+        dispatchers: HashMap<ActorId, DispatcherUpdate>,
+        merges: HashMap<ActorId, MergeUpdate>,
+    },
     Add {
         adds: HashMap<ActorId, Vec<ProstDispatcher>>,
         // TODO: remove this and use `SourceChangesSplit` after we support multiple mutations.
@@ -271,11 +274,13 @@ impl Barrier {
         Self { span, ..self }
     }
 
-    pub fn is_to_stop_actor(&self, actor_id: ActorId) -> bool {
+    /// Whether this barrier is to stop the actor with `actor_id`.
+    pub fn is_stop_actor(&self, actor_id: ActorId) -> bool {
         matches!(self.mutation.as_deref(), Some(Mutation::Stop(actors)) if actors.contains(&actor_id))
     }
 
-    pub fn is_to_add_dispatcher(&self, actor_id: ActorId) -> bool {
+    /// Whether this barrier is to add new dispatchers for the actor with `actor_id`.
+    pub fn is_add_dispatcher(&self, actor_id: ActorId) -> bool {
         matches!(
             self.mutation.as_deref(),
             Some(Mutation::Add {adds, ..}) if adds
@@ -283,6 +288,17 @@ impl Barrier {
                 .flatten()
                 .any(|dispatcher| dispatcher.downstream_actor_id.contains(&actor_id))
         )
+    }
+
+    /// Returns the [`MergeUpdate`] if this barrier is to update the merge executors for the actor
+    /// with `actor_id`.
+    pub fn as_update_merge(&self, actor_id: ActorId) -> Option<&MergeUpdate> {
+        self.mutation
+            .as_deref()
+            .and_then(|mutation| match mutation {
+                Mutation::Update { merges, .. } => merges.get(&actor_id),
+                _ => None,
+            })
     }
 }
 
@@ -306,8 +322,12 @@ impl Mutation {
             Mutation::Stop(actors) => ProstMutation::Stop(StopMutation {
                 actors: actors.iter().copied().collect::<Vec<_>>(),
             }),
-            Mutation::Update(updates) => ProstMutation::Update(UpdateMutation {
-                actor_dispatcher_update: updates.clone(),
+            Mutation::Update {
+                dispatchers,
+                merges,
+            } => ProstMutation::Update(UpdateMutation {
+                actor_dispatcher_update: dispatchers.clone(),
+                actor_merge_update: merges.clone(),
             }),
             Mutation::Add { adds, .. } => ProstMutation::Add(AddMutation {
                 actor_dispatchers: adds
@@ -354,9 +374,10 @@ impl Mutation {
                 Mutation::Stop(HashSet::from_iter(stop.get_actors().clone()))
             }
 
-            ProstMutation::Update(update) => {
-                Mutation::Update(update.actor_dispatcher_update.clone())
-            }
+            ProstMutation::Update(update) => Mutation::Update {
+                dispatchers: update.actor_dispatcher_update.clone(),
+                merges: update.actor_merge_update.clone(),
+            },
 
             ProstMutation::Add(add) => Mutation::Add {
                 adds: add

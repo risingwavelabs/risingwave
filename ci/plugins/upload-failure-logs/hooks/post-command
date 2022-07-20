@@ -7,4 +7,11 @@ if [ $BUILDKITE_COMMAND_EXIT_STATUS -ne 0 ]; then
   zip -q -r risedev-logs.zip risedev-logs/
   buildkite-agent artifact upload "risedev-logs/*"
   buildkite-agent artifact upload risedev-logs.zip
+  REGRESS_TEST_DIR="$PWD/src/tests/regress/output/results/"
+  if [ -d "$REGRESS_TEST_DIR" ]; then
+    mkdir regress-test-logs && cp src/tests/regress/output/results/* regress-test-logs/
+    zip -q -r regress-test.zip regress-test-logs/
+    buildkite-agent artifact upload "regress-test-logs/*"
+    buildkite-agent artifact upload regress-test-logs.zip
+  fi
 fi
