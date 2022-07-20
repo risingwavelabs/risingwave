@@ -1,11 +1,11 @@
 statement ok
 INSERT INTO auction (
     id,
-    itemName,
+    item_name,
     description,
-    initialBid,
+    initial_bid,
     reserve,
-    dateTime,
+    date_time,
     expires,
     seller,
     category

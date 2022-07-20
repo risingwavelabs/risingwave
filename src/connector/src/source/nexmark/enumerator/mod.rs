@@ -58,7 +58,7 @@ mod tests {
     async fn test_nexmark_split_enumerator() -> Result<()> {
         let mut enumerator = NexmarkSplitEnumerator { split_num: 4 };
         let list_splits_resp = enumerator.list_splits().await?;
-        // println!("{:#?}", list_splits_resp);
+
         assert_eq!(list_splits_resp.len(), 4);
         assert_eq!(list_splits_resp[0].id(), "4-0".to_string());
         assert_eq!(list_splits_resp[1].id(), "4-1".to_string());

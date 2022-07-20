@@ -12,7 +12,9 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use super::{AggCall, CorrelatedInputRef, ExprImpl, FunctionCall, InputRef, Literal, Subquery};
+use super::{
+    AggCall, CorrelatedInputRef, ExprImpl, FunctionCall, InputRef, Literal, Subquery, TableFunction,
+};
 
 /// By default, `ExprRewriter` simply traverses the expression tree and leaves nodes unchanged.
 /// Implementations can override a subset of methods and perform transformation on some particular
@@ -26,6 +28,7 @@ pub trait ExprRewriter {
             ExprImpl::AggCall(inner) => self.rewrite_agg_call(*inner),
             ExprImpl::Subquery(inner) => self.rewrite_subquery(*inner),
             ExprImpl::CorrelatedInputRef(inner) => self.rewrite_correlated_input_ref(*inner),
+            ExprImpl::TableFunction(inner) => self.rewrite_table_function(*inner),
         }
     }
     fn rewrite_function_call(&mut self, func_call: FunctionCall) -> ExprImpl {
@@ -59,5 +62,22 @@ pub trait ExprRewriter {
     }
     fn rewrite_correlated_input_ref(&mut self, input_ref: CorrelatedInputRef) -> ExprImpl {
         input_ref.into()
+    }
+    fn rewrite_table_function(&mut self, table_func: TableFunction) -> ExprImpl {
+        let TableFunction {
+            args,
+            return_type,
+            function_type,
+        } = table_func;
+        let args = args
+            .into_iter()
+            .map(|expr| self.rewrite_expr(expr))
+            .collect();
+        TableFunction {
+            args,
+            return_type,
+            function_type,
+        }
+        .into()
     }
 }

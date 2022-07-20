@@ -19,8 +19,9 @@ use std::ops::Bound;
 use fixedbitset::FixedBitSet;
 use itertools::Itertools;
 use risingwave_common::catalog::Schema;
+use risingwave_common::types::ScalarImpl;
+use risingwave_common::util::scan_range::ScanRange;
 
-use super::ScanRange;
 use crate::expr::{
     factorization_expr, fold_boolean_constant, push_down_not, to_conjunctions,
     try_get_bool_constant, ExprImpl, ExprRewriter, ExprType, ExprVerboseDisplay, ExprVisitor,
@@ -232,11 +233,15 @@ impl Condition {
     }
 
     /// See also [`ScanRange`](risingwave_pb::batch_plan::ScanRange).
-    pub fn split_to_scan_range(
+    pub fn split_to_scan_ranges(
         self,
         order_column_ids: &[usize],
         num_cols: usize,
-    ) -> (ScanRange, Self) {
+    ) -> (Vec<ScanRange>, Self) {
+        fn always_false() -> (Vec<ScanRange>, Condition) {
+            (vec![], Condition::false_cond())
+        }
+
         let mut col_idx_to_pk_idx = vec![None; num_cols];
         order_column_ids
             .iter()
@@ -268,7 +273,11 @@ impl Condition {
             if group.is_empty() {
                 groups.push(other_conds);
                 return (
-                    scan_range,
+                    if scan_range.is_full_table_scan() {
+                        vec![]
+                    } else {
+                        vec![scan_range]
+                    },
                     Self {
                         conjunctions: groups[i + 1..].concat(),
                     },
@@ -276,28 +285,48 @@ impl Condition {
             }
             let mut lb = vec![];
             let mut ub = vec![];
-            let mut eq_cond = None;
-            for expr in group {
-                if let Some((input_ref, lit)) = expr.as_eq_const() {
+            // values in eq_cond are OR'ed
+            let mut eq_conds = vec![];
+
+            // analyze exprs in the group. scan_range is not updated
+            for expr in group.clone() {
+                if let Some((input_ref, lit)) = expr.as_eq_literal() {
                     assert_eq!(input_ref.index, order_column_ids[i]);
                     if lit.is_null() {
-                        // Always false
-                        return (ScanRange::full_table_scan(), Self::false_cond());
+                        return always_false();
                     }
                     let lit = lit.eval_as(input_ref.data_type);
-                    if let Some(l) = eq_cond && l != lit {
-                        // Always false
-                        return (
-                            ScanRange::full_table_scan(),
-                            Self::false_cond(),
-                        );
+                    if !eq_conds.is_empty() && eq_conds.into_iter().all(|l| l != lit) {
+                        return always_false();
                     }
-                    eq_cond = Some(lit);
-                } else if let Some((input_ref, op, lit)) = expr.as_comparison_const() {
+                    eq_conds = vec![lit];
+                } else if let Some((input_ref, in_lit_list)) = expr.as_in_literal_list() {
+                    assert_eq!(input_ref.index, order_column_ids[i]);
+                    let mut scalars = vec![];
+                    for lit in in_lit_list.into_iter().unique() {
+                        if lit.is_null() {
+                            continue;
+                        }
+                        scalars.push(lit.eval_as(input_ref.data_type.clone()));
+                    }
+                    if scalars.is_empty() {
+                        // There're only NULLs in the in-list
+                        return always_false();
+                    }
+                    if !eq_conds.is_empty() {
+                        let old: HashSet<ScalarImpl> = HashSet::from_iter(eq_conds);
+                        let new = HashSet::from_iter(scalars);
+                        let intersection: HashSet<_> = old.intersection(&new).collect();
+                        if intersection.is_empty() {
+                            return always_false();
+                        }
+                        scalars = intersection.into_iter().cloned().collect();
+                    }
+                    eq_conds = scalars;
+                } else if let Some((input_ref, op, lit)) = expr.as_comparison_literal() {
                     assert_eq!(input_ref.index, order_column_ids[i]);
                     if lit.is_null() {
-                        // Always false
-                        return (ScanRange::full_table_scan(), Self::false_cond());
+                        return always_false();
                     }
                     let lit = lit.eval_as(input_ref.data_type);
                     match op {
@@ -320,18 +349,19 @@ impl Condition {
                 }
             }
 
-            match eq_cond {
-                Some(lit) => {
-                    scan_range.eq_conds.push(lit);
-                    // TODO: simplify bounds
+            // update scan_range
+            match eq_conds.len() {
+                1 => {
+                    scan_range.eq_conds.extend(eq_conds.into_iter());
+                    // TODO: simplify bounds: it's either true or false according to whether lit is
+                    // included
                     other_conds.extend(lb.into_iter().chain(ub.into_iter()).map(|(_, expr)| expr));
                 }
-                None => {
+                0 => {
                     if lb.len() > 1 || ub.len() > 1 {
-                        // TODO: simplify bounds
+                        // TODO: simplify bounds: it can be merged into a single lb & ub.
                         other_conds
                             .extend(lb.into_iter().chain(ub.into_iter()).map(|(_, expr)| expr));
-                        break;
                     } else if !lb.is_empty() || !ub.is_empty() {
                         scan_range.range = (
                             lb.first()
@@ -342,12 +372,42 @@ impl Condition {
                                 .unwrap_or(Bound::Unbounded),
                         )
                     }
+                    other_conds.extend(groups[i + 1..].iter().flatten().cloned());
+                    break;
+                }
+                _ => {
+                    // currently we will split IN list to multiple scan ranges immediately
+                    // i.e., a = 1 AND b in (1,2) is handled
+                    // TODO:
+                    // a in (1,2) AND b = 1
+                    // a in (1,2) AND b in (1,2)
+                    // a in (1,2) AND b > 1
+                    other_conds.extend(lb.into_iter().chain(ub.into_iter()).map(|(_, expr)| expr));
+                    other_conds.extend(groups[i + 1..].iter().flatten().cloned());
+                    let scan_ranges = eq_conds
+                        .into_iter()
+                        .map(|lit| {
+                            let mut scan_range = scan_range.clone();
+                            scan_range.eq_conds.push(lit);
+                            scan_range
+                        })
+                        .collect();
+                    return (
+                        scan_ranges,
+                        Self {
+                            conjunctions: other_conds,
+                        },
+                    );
                 }
             }
         }
 
         (
-            scan_range,
+            if scan_range.is_full_table_scan() {
+                vec![]
+            } else {
+                vec![scan_range]
+            },
             Self {
                 conjunctions: other_conds,
             },

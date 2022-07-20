@@ -25,6 +25,7 @@ mod merge_sort_exchange;
 pub mod monitor;
 mod order_by;
 mod project;
+mod project_set;
 mod row_seq_scan;
 mod sort_agg;
 mod sys_row_seq_scan;
@@ -50,6 +51,7 @@ pub use merge_sort_exchange::*;
 pub use monitor::*;
 pub use order_by::*;
 pub use project::*;
+pub use project_set::*;
 use risingwave_common::array::DataChunk;
 use risingwave_common::catalog::Schema;
 use risingwave_common::error::Result;
@@ -190,6 +192,7 @@ impl<'a, C: BatchTaskContext> ExecutorBuilder<'a, C> {
             NodeBody::SysRowSeqScan => SysRowSeqScanExecutorBuilder,
             NodeBody::Expand => ExpandExecutor,
             NodeBody::LookupJoin => LookupJoinExecutorBuilder,
+            NodeBody::ProjectSet => ProjectSetExecutor,
         }
         .await?;
         let input_desc = real_executor.identity().to_string();

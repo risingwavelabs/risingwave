@@ -14,7 +14,6 @@
 
 #![allow(clippy::derive_partial_eq_without_eq)]
 //! Data-driven tests.
-#![feature(let_chains)]
 
 mod resolve_id;
 
@@ -216,7 +215,7 @@ impl TestCase {
                     };
                     let sql = format!(
                         r#"CREATE {} SOURCE {}
-    WITH ('kafka.topic' = 'abc', 'kafka.servers' = 'localhost:1001')
+    WITH (kafka.topic = 'abc', kafka.servers = 'localhost:1001')
     ROW FORMAT {} MESSAGE '.test.TestRecord' ROW SCHEMA LOCATION 'file://"#,
                         materialized, source.name, source.row_format
                     );

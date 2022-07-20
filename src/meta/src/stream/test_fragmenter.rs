@@ -27,10 +27,11 @@ use risingwave_pb::expr::expr_node::Type::{Add, GreaterThan, InputRef};
 use risingwave_pb::expr::{AggCall, ExprNode, FunctionCall, InputRefExpr};
 use risingwave_pb::plan_common::{ColumnCatalog, ColumnDesc, ColumnOrder, Field, OrderType};
 use risingwave_pb::stream_plan::source_node::SourceType;
+use risingwave_pb::stream_plan::stream_fragment_graph::{StreamFragment, StreamFragmentEdge};
 use risingwave_pb::stream_plan::stream_node::NodeBody;
 use risingwave_pb::stream_plan::{
-    DispatchStrategy, DispatcherType, ExchangeNode, FilterNode, MaterializeNode, ProjectNode,
-    SimpleAggNode, SourceNode, StreamNode,
+    DispatchStrategy, DispatcherType, ExchangeNode, FilterNode, FragmentType, MaterializeNode,
+    ProjectNode, SimpleAggNode, SourceNode, StreamFragmentGraph, StreamNode,
 };
 
 use crate::manager::MetaSrvEnv;
@@ -64,6 +65,7 @@ fn make_sum_aggcall(idx: i32) -> AggCall {
             ..Default::default()
         }),
         distinct: false,
+        order_by_fields: vec![],
         filter: None,
     }
 }
@@ -99,13 +101,13 @@ fn make_column(column_type: TypeName, column_id: i32) -> ColumnCatalog {
     }
 }
 
-fn make_internal_table(is_agg_value: bool) -> ProstTable {
+fn make_internal_table(id: u32, is_agg_value: bool) -> ProstTable {
     let mut columns = vec![make_column(TypeName::Int64, 0)];
     if !is_agg_value {
         columns.push(make_column(TypeName::Int32, 1));
     }
     ProstTable {
-        id: TableId::placeholder().table_id,
+        id,
         schema_id: SchemaId::placeholder() as u32,
         database_id: DatabaseId::placeholder() as u32,
         name: String::new(),
@@ -119,12 +121,13 @@ fn make_internal_table(is_agg_value: bool) -> ProstTable {
     }
 }
 
-/// [`make_stream_node`] build a plan represent in `StreamNode` for SQL as follow:
+/// [`make_stream_fragments`] build all stream fragments for SQL as follow:
 /// ```sql
 /// create table t (v1 int, v2 int);
 /// create materialized view T_distributed as select sum(v1)+1 as V from t where v1>v2;
 /// ```
-fn make_stream_node() -> StreamNode {
+fn make_stream_fragments() -> Vec<StreamFragment> {
+    let mut fragments = vec![];
     // table source node
     let source_node = StreamNode {
         node_body: Some(NodeBody::Source(SourceNode {
@@ -135,6 +138,13 @@ fn make_stream_node() -> StreamNode {
         pk_indices: vec![2],
         ..Default::default()
     };
+    fragments.push(StreamFragment {
+        fragment_id: 2,
+        node: Some(source_node),
+        fragment_type: FragmentType::Source as i32,
+        is_singleton: false,
+        table_ids_cnt: 0,
+    });
 
     // exchange node
     let exchange_node = StreamNode {
@@ -149,7 +159,7 @@ fn make_stream_node() -> StreamNode {
             make_field(TypeName::Int32),
             make_field(TypeName::Int64),
         ],
-        input: vec![source_node],
+        input: vec![],
         pk_indices: vec![2],
         operator_id: 1,
         identity: "ExchangeExecutor".to_string(),
@@ -184,7 +194,7 @@ fn make_stream_node() -> StreamNode {
         node_body: Some(NodeBody::GlobalSimpleAgg(SimpleAggNode {
             agg_calls: vec![make_sum_aggcall(0), make_sum_aggcall(1)],
             distribution_key: Default::default(),
-            internal_tables: vec![make_internal_table(true), make_internal_table(false)],
+            internal_tables: vec![make_internal_table(2, true), make_internal_table(3, false)],
             column_mapping: HashMap::new(),
             is_append_only: false,
         })),
@@ -196,6 +206,14 @@ fn make_stream_node() -> StreamNode {
         ..Default::default()
     };
 
+    fragments.push(StreamFragment {
+        fragment_id: 1,
+        node: Some(simple_agg_node),
+        fragment_type: FragmentType::Others as i32,
+        is_singleton: false,
+        table_ids_cnt: 0,
+    });
+
     // exchange node
     let exchange_node_1 = StreamNode {
         node_body: Some(NodeBody::Exchange(ExchangeNode {
@@ -205,7 +223,7 @@ fn make_stream_node() -> StreamNode {
             }),
         })),
         fields: vec![make_field(TypeName::Int64), make_field(TypeName::Int64)],
-        input: vec![simple_agg_node],
+        input: vec![],
         pk_indices: vec![0, 1],
         operator_id: 4,
         identity: "ExchangeExecutor".to_string(),
@@ -217,7 +235,7 @@ fn make_stream_node() -> StreamNode {
         node_body: Some(NodeBody::GlobalSimpleAgg(SimpleAggNode {
             agg_calls: vec![make_sum_aggcall(0), make_sum_aggcall(1)],
             distribution_key: Default::default(),
-            internal_tables: vec![make_internal_table(true), make_internal_table(false)],
+            internal_tables: vec![make_internal_table(0, true), make_internal_table(1, false)],
             column_mapping: HashMap::new(),
             is_append_only: false,
         })),
@@ -257,18 +275,63 @@ fn make_stream_node() -> StreamNode {
     };
 
     // mview node
-    StreamNode {
+    let mview_node = StreamNode {
         input: vec![project_node],
         pk_indices: vec![],
         node_body: Some(NodeBody::Materialize(MaterializeNode {
             table_id: 1,
-            table: Some(make_internal_table(true)),
+            table: Some(make_internal_table(4, true)),
             column_orders: vec![make_column_order(1), make_column_order(2)],
         })),
         fields: vec![], // TODO: fill this later
         operator_id: 7,
         identity: "MaterializeExecutor".to_string(),
         ..Default::default()
+    };
+
+    fragments.push(StreamFragment {
+        fragment_id: 0,
+        node: Some(mview_node),
+        fragment_type: FragmentType::Sink as i32,
+        is_singleton: true,
+        table_ids_cnt: 0,
+    });
+
+    fragments
+}
+
+fn make_fragment_edges() -> Vec<StreamFragmentEdge> {
+    vec![
+        StreamFragmentEdge {
+            dispatch_strategy: Some(DispatchStrategy {
+                r#type: DispatcherType::Simple as i32,
+                column_indices: vec![],
+            }),
+            same_worker_node: false,
+            link_id: 4,
+            upstream_id: 1,
+            downstream_id: 0,
+        },
+        StreamFragmentEdge {
+            dispatch_strategy: Some(DispatchStrategy {
+                r#type: DispatcherType::Hash as i32,
+                column_indices: vec![0],
+            }),
+            same_worker_node: false,
+            link_id: 1,
+            upstream_id: 2,
+            downstream_id: 1,
+        },
+    ]
+}
+
+fn make_stream_graph() -> StreamFragmentGraph {
+    let fragments = make_stream_fragments();
+    StreamFragmentGraph {
+        fragments: HashMap::from_iter(fragments.into_iter().map(|f| (f.fragment_id, f))),
+        edges: make_fragment_edges(),
+        dependent_table_ids: vec![],
+        table_ids_cnt: 4,
     }
 }
 
@@ -277,16 +340,13 @@ fn make_stream_node() -> StreamNode {
 #[cfg(not(madsim))]
 #[tokio::test]
 async fn test_fragmenter() -> Result<()> {
-    use risingwave_frontend::stream_fragmenter::StreamFragmenter;
-
     use crate::model::FragmentId;
 
     let env = MetaSrvEnv::for_test().await;
-    let stream_node = make_stream_node();
     let fragment_manager = Arc::new(FragmentManager::new(env.clone()).await?);
     let parallel_degree = 4;
     let mut ctx = CreateMaterializedViewContext::default();
-    let graph = StreamFragmenter::build_graph(stream_node);
+    let graph = make_stream_graph();
 
     let mut actor_graph_builder =
         ActorGraphBuilder::new(env.id_gen_manager_ref(), &graph, &mut ctx).await?;

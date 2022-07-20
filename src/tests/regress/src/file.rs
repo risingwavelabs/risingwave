@@ -80,6 +80,24 @@ impl FileManager {
             .join(format!("{}.out", test_name)))
     }
 
+    /// Try to find the error output file of `test_name`.
+    pub(crate) fn error_of(&self, test_name: &str) -> anyhow::Result<PathBuf> {
+        Ok(self
+            .opts
+            .absolutized_output_dir()?
+            .join("results")
+            .join(format!("{}.err", test_name)))
+    }
+
+    /// Try to find the diff file of `test_name`.
+    pub(crate) fn diff_of(&self, test_name: &str) -> anyhow::Result<PathBuf> {
+        Ok(self
+            .opts
+            .absolutized_output_dir()?
+            .join("results")
+            .join(format!("{}.diff", test_name)))
+    }
+
     /// Try to find the expected output file of `test_name`.
     pub(crate) fn expected_output_of(&self, test_name: &str) -> anyhow::Result<PathBuf> {
         let mut path = self

@@ -19,7 +19,10 @@ use futures_async_stream::try_stream;
 use log::debug;
 use risingwave_common::array::DataChunk;
 use risingwave_common::error::RwError;
-use risingwave_pb::batch_plan::{PlanNode as BatchPlanProst, TaskId, TaskOutputId};
+use risingwave_pb::batch_plan::exchange_info::DistributionMode;
+use risingwave_pb::batch_plan::{
+    ExchangeInfo, PlanFragment, PlanNode as BatchPlanProst, TaskId, TaskOutputId,
+};
 use risingwave_pb::common::HostAddress;
 use risingwave_rpc_client::ComputeClientPoolRef;
 use uuid::Uuid;
@@ -71,6 +74,8 @@ impl QueryManager {
         plan: BatchPlanProst,
     ) -> SchedulerResult<impl DataChunkStream> {
         let worker_node_addr = self.worker_node_manager.next_random()?.host.unwrap();
+
+        #[expect(clippy::needless_borrow)]
         let compute_client = self
             .compute_client_pool
             .get_client_for_addr((&worker_node_addr).into())
@@ -96,6 +101,14 @@ impl QueryManager {
             .get_epoch(query_id.clone())
             .await?;
 
+        // The exchange of DML is Single.
+        let plan = PlanFragment {
+            root: Some(plan),
+            exchange_info: Some(ExchangeInfo {
+                mode: DistributionMode::Single as i32,
+                ..Default::default()
+            }),
+        };
         let creat_task_resp = compute_client
             .create_task(task_id.clone(), plan, epoch)
             .await;
@@ -171,6 +184,7 @@ impl QueryResultFetcher {
             "Starting to run query result fetcher, task output id: {:?}, task_host: {:?}",
             self.task_output_id, self.task_host
         );
+        #[expect(clippy::needless_borrow)]
         let compute_client = self
             .compute_client_pool
             .get_client_for_addr((&self.task_host).into())
