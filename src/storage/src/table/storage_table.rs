@@ -59,8 +59,8 @@ pub const READ_WRITE: AccessType = true;
 /// For tables without distribution (singleton), the `DEFAULT_VNODE` is encoded.
 pub const DEFAULT_VNODE: VirtualNode = 0;
 
-/// [`StorageTable`] is the interface accessing relational data in KV(`StateStore`) with encoding
-/// format: [keyspace | pk | `column_id` (4B)] -> value.
+/// [`StorageTable`] is the interface accessing relational data in KV(`StateStore`) with cell-based
+/// encoding format: [keyspace | pk | `column_id` (4B)] -> value.
 /// if the key of the column id does not exist, it will be Null in the relation
 pub type StorageTable<S, const T: AccessType> = StorageTableBase<S, CellBasedRowSerde, T>;
 #[derive(Clone)]
@@ -398,7 +398,7 @@ impl<S: StateStore, RS: RowSerde, const T: AccessType> StorageTableBase<S, RS, T
 
 const ENABLE_STATE_TABLE_SANITY_CHECK: bool = cfg!(debug_assertions);
 
-/// Write with cell-based encoding,
+/// Write with different encoding format, depending on the specific implementation of RS.
 impl<S: StateStore, RS: RowSerde> StorageTableBase<S, RS, READ_WRITE> {
     /// Get vnode value with full row.
     fn compute_vnode_by_row(&self, row: &Row) -> VirtualNode {
@@ -467,7 +467,6 @@ impl<S: StateStore, RS: RowSerde> StorageTableBase<S, RS, READ_WRITE> {
                     }
 
                     let vnode = self.compute_vnode_by_row(&old_row);
-                    // TODO(wcy-fdu): only serialize key on deletion
                     let bytes = self
                         .row_serializer
                         .serialize(vnode, &pk, old_row)
@@ -504,7 +503,9 @@ impl<S: StateStore, RS: RowSerde> StorageTableBase<S, RS, READ_WRITE> {
                     let vnode = self.compute_vnode_by_row(&new_row);
                     debug_assert_eq!(self.compute_vnode_by_row(&old_row), vnode);
 
-                    // todo: row-based encoding does not need to serializer old_row
+                    // TODO: Row-based encoding does not need to serializer old_row, while a little
+                    // overhead can be allowed here. Refactor this part after cell-based encoding is
+                    // removed.
                     let delete_bytes = self
                         .row_serializer
                         .serialize_for_update(vnode, &pk, old_row)
@@ -541,7 +542,6 @@ impl<S: StateStore, RS: RowSerde> StorageTableBase<S, RS, READ_WRITE> {
 pub trait PkAndRowStream = Stream<Item = StorageResult<(Vec<u8>, Row)>> + Send;
 
 /// The row iterator of the storage table.
-// pub type StorageTableIter<S: StateStore> = impl PkAndRowStream;
 pub type StorageTableIter<S: StateStore, RS: RowSerde> = impl PkAndRowStream;
 
 pub type BatchDedupPkIter<S: StateStore, RS: RowSerde> = impl PkAndRowStream;

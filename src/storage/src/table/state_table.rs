@@ -41,12 +41,15 @@ use crate::StateStore;
 /// rows to have dedup pk cell encoding.
 pub type DedupPkStateTable<S> = StateTableBase<S, DedupPkCellBasedRowSerializer>;
 
-/// `StateTable` is the interface accessing relational data in KV(`StateStore`) with encoding.
+/// `StateTable` is the interface accessing relational data in KV(`StateStore`) with cell-based
+/// encoding.
 pub type StateTable<S> = StateTableBase<S, CellBasedRowSerde>;
 
+/// `RowBasedStateTable` is the interface accessing relational data in KV(`StateStore`) with
+/// row-based encoding.
 pub type RowBasedStateTable<S> = StateTableBase<S, RowBasedSerde>;
 /// `StateTableBase` is the interface accessing relational data in KV(`StateStore`) with
-/// encoding, using `RowSerializer` for row to cell serializing.
+/// encoding, using `RowSerde` for row to KV entries.
 #[derive(Clone)]
 pub struct StateTableBase<S: StateStore, RS: RowSerde> {
     /// buffer row operations.
