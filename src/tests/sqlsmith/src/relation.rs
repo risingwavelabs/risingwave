@@ -70,23 +70,23 @@ impl<'a, R: Rng> SqlGenerator<'a, R> {
         (table_factor, columns)
     }
 
-    fn gen_local_table_factor(&mut self) -> (TableFactor, Vec<Column>) {
+    fn gen_table_factor(&mut self) -> (TableFactor, Vec<Column>) {
         let current_context = self.new_local_context();
-        let factor = self.gen_table_factor();
+        let factor = self.gen_table_factor_inner();
         self.restore_context(current_context);
         factor
     }
 
     /// Generates a table factor, and provides bound columns.
     /// Generated column names should be qualified by table name.
-    fn gen_table_factor(&mut self) -> (TableFactor, Vec<Column>) {
+    fn gen_table_factor_inner(&mut self) -> (TableFactor, Vec<Column>) {
         // TODO: TableFactor::Derived, TableFactor::TableFunction, TableFactor::NestedJoin
         self.gen_simple_table_factor()
     }
 
     fn gen_equijoin_clause(&mut self) -> TableWithJoins {
-        let (left_factor, left_columns) = self.gen_local_table_factor();
-        let (right_factor, right_columns) = self.gen_local_table_factor();
+        let (left_factor, left_columns) = self.gen_table_factor();
+        let (right_factor, right_columns) = self.gen_table_factor();
 
         let mut available_join_on_columns = vec![];
         for left_column in &left_columns {
