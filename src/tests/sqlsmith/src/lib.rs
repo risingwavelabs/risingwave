@@ -343,22 +343,22 @@ impl<'a, R: Rng> SqlGenerator<'a, R> {
     }
 
     fn gen_from(&mut self, with_tables: Vec<Table>) -> Vec<TableWithJoins> {
-        // Cross join with `with` fails. Hence we generate it in isolation.
-        // Tracked in: <https://github.com/singularity-data/risingwave/issues/4025>
-        if !with_tables.is_empty() {
+        let mut from = if !with_tables.is_empty() {
             let with_table = with_tables
                 .choose(&mut self.rng)
                 .expect("with tables should not be empty");
-            return vec![create_table_with_joins_from_table(with_table)];
-        }
+            vec![create_table_with_joins_from_table(with_table)]
+        } else {
+            vec![self.gen_from_relation()]
+        };
+
         if self.is_mview {
             // TODO: These constraints are workarounds required by mview.
             // Tracked by: <https://github.com/singularity-data/risingwave/issues/4024>.
             assert!(!self.tables.is_empty());
-            return vec![self.gen_from_relation()];
+            return from;
         }
 
-        let mut from = vec![];
         for _ in 0..self.tables.len() {
             if self.flip_coin() {
                 from.push(self.gen_from_relation());
