@@ -89,6 +89,17 @@ pub struct LogicalMultiJoinBuilder {
 }
 
 impl LogicalMultiJoinBuilder {
+    /// add a predicate above the plan, so they will be rewriten from the output_indices to the
+    /// input indices
+    pub fn add_predicate_above(&mut self, exprs: impl Iterator<Item = ExprImpl>) {
+        let mut mapping = ColIndexMapping::with_target_size(
+            self.output_indices.iter().map(|i| Some(*i)).collect(),
+            self.tot_input_col_num,
+        );
+        self.conjunctions
+            .extend(exprs.map(|expr| mapping.rewrite_expr(expr)));
+    }
+
     pub fn build(self) -> LogicalMultiJoin {
         LogicalMultiJoin::new(
             self.inputs,
@@ -132,7 +143,7 @@ impl LogicalMultiJoinBuilder {
 
         // the mapping from the right's column index to the current multi join's internal column
         // index
-        let mut mapping = ColIndexMapping::with_shift_offset(
+        let mut shift_mapping = ColIndexMapping::with_shift_offset(
             r_tot_input_col_num,
             builder.tot_input_col_num as isize,
         );
@@ -142,15 +153,16 @@ impl LogicalMultiJoinBuilder {
         builder.conjunctions.extend(
             r_conjunctions
                 .into_iter()
-                .map(|expr| mapping.rewrite_expr(expr)),
+                .map(|expr| shift_mapping.rewrite_expr(expr)),
         );
-        builder
-            .conjunctions
-            .extend(join.on().conjunctions.iter().cloned());
 
-        builder
-            .output_indices
-            .extend(r_output_indices.into_iter().map(|idx| mapping.map(idx)));
+        builder.output_indices.extend(
+            r_output_indices
+                .into_iter()
+                .map(|idx| shift_mapping.map(idx)),
+        );
+        builder.add_predicate_above(join.on().conjunctions.iter().cloned());
+
         builder.output_indices = join
             .output_indices()
             .iter()
@@ -162,9 +174,7 @@ impl LogicalMultiJoinBuilder {
     fn with_filter(plan: PlanRef) -> LogicalMultiJoinBuilder {
         let filter: &LogicalFilter = plan.as_logical_filter().unwrap();
         let mut builder = Self::new(filter.input());
-        builder
-            .conjunctions
-            .extend(filter.predicate().conjunctions.clone());
+        builder.add_predicate_above(filter.predicate().conjunctions.iter().cloned());
         builder
     }
 
