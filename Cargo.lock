@@ -4559,6 +4559,7 @@ dependencies = [
  "prost",
  "rand 0.8.5",
  "risingwave_common",
+ "risingwave_common_service",
  "risingwave_connector",
  "risingwave_hummock_sdk",
  "risingwave_pb",
