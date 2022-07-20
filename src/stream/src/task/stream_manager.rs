@@ -23,18 +23,16 @@ use parking_lot::Mutex;
 use risingwave_common::buffer::Bitmap;
 use risingwave_common::config::StreamingConfig;
 use risingwave_common::error::{ErrorCode, Result, RwError};
-use risingwave_common::util::addr::{is_local_address, HostAddr};
+use risingwave_common::util::addr::HostAddr;
 use risingwave_hummock_sdk::LocalSstableInfo;
 use risingwave_pb::common::ActorInfo;
 use risingwave_pb::{stream_plan, stream_service};
-use risingwave_rpc_client::ComputeClientPool;
 use risingwave_storage::{dispatch_state_store, StateStore, StateStoreImpl};
 use tokio::sync::mpsc::{channel, Receiver};
 use tokio::task::JoinHandle;
 
 use super::{unique_executor_id, unique_operator_id, CollectResult};
 use crate::executor::dispatch::*;
-use crate::executor::merge::RemoteInput;
 use crate::executor::monitor::StreamingMetrics;
 use crate::executor::*;
 use crate::from_proto::create_executor;
@@ -69,12 +67,6 @@ pub struct LocalStreamManagerCore {
 
     /// Metrics of the stream manager
     pub(crate) streaming_metrics: Arc<StreamingMetrics>,
-
-    /// The pool of compute clients.
-    ///
-    /// TODO: currently the client pool won't be cleared. Should remove compute clients when
-    /// disconnected.
-    compute_client_pool: ComputeClientPool,
 
     /// Config of streaming engine
     pub(crate) config: StreamingConfig,
@@ -344,7 +336,6 @@ impl LocalStreamManagerCore {
             actor_monitor_tasks: HashMap::new(),
             state_store,
             streaming_metrics,
-            compute_client_pool: ComputeClientPool::new(u64::MAX),
             config,
         }
     }
@@ -493,62 +484,6 @@ impl LocalStreamManagerCore {
             streaming_metrics,
         )
         .boxed()
-    }
-
-    pub(crate) fn take_receivers(
-        &mut self,
-        actor_id: ActorId,
-        fragment_id: FragmentId,
-        upstreams: &[ActorId],
-        up_fragment_id: FragmentId,
-    ) -> Result<Vec<Receiver<Message>>> {
-        assert!(!upstreams.is_empty());
-        let rxs: Vec<_> = upstreams
-            .iter()
-            .map(|up_id| {
-                let upstream_addr = self.context.get_actor_info(up_id)?.get_host()?.into();
-                if !is_local_address(&upstream_addr, &self.context.addr) {
-                    // Get the sender for `RemoteInput` to forward received messages to receivers in
-                    // `ReceiverExecutor` or `MergeExecutor`.
-                    let sender = self.context.take_sender(&(*up_id, actor_id))?;
-                    // spawn the `RemoteInput`
-                    let up_id = *up_id;
-                    let pool = self.compute_client_pool.clone();
-                    let metrics = self.streaming_metrics.clone();
-                    tokio::spawn(async move {
-                        let init_client = async move {
-                            let remote_input = RemoteInput::create(
-                                pool.get_client_for_addr(upstream_addr).await?,
-                                (up_id, actor_id),
-                                (up_fragment_id, fragment_id),
-                                sender,
-                                metrics,
-                            )
-                            .await?;
-                            Ok::<_, RwError>(remote_input)
-                        };
-                        match init_client.await {
-                            Ok(remote_input) => remote_input.run().await,
-                            Err(e) => {
-                                error!("Spawn remote input fails:{}", e);
-                            }
-                        }
-                    });
-                }
-                self.context.take_receiver(&(*up_id, actor_id))
-            })
-            .try_collect()?;
-
-        assert_eq!(
-            rxs.len(),
-            upstreams.len(),
-            "upstreams are not fully available: {} registered while {} required, actor_id={}",
-            rxs.len(),
-            upstreams.len(),
-            actor_id
-        );
-
-        Ok(rxs)
     }
 
     fn build_actors(&mut self, actors: &[ActorId], env: StreamEnvironment) -> Result<()> {
@@ -785,5 +720,29 @@ impl LocalStreamManagerCore {
             }
         }
         Ok(())
+    }
+}
+
+#[cfg(test)]
+pub mod test_utils {
+    use risingwave_pb::common::HostAddress;
+
+    use super::*;
+
+    pub fn add_local_channels(ctx: Arc<SharedContext>, up_down_ids: Vec<(u32, u32)>) {
+        for up_down_id in up_down_ids {
+            let (tx, rx) = channel(LOCAL_OUTPUT_CHANNEL_SIZE);
+            ctx.add_channel_pairs(up_down_id, (Some(tx), Some(rx)));
+        }
+    }
+
+    pub fn helper_make_local_actor(actor_id: u32) -> ActorInfo {
+        ActorInfo {
+            actor_id,
+            host: Some(HostAddress {
+                host: LOCAL_TEST_ADDR.host.clone(),
+                port: LOCAL_TEST_ADDR.port as i32,
+            }),
+        }
     }
 }
