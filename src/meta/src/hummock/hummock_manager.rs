@@ -179,7 +179,7 @@ macro_rules! start_measure_real_process_timer {
 struct Versioning {
     current_version_id: CurrentHummockVersionId,
     current_version: HummockVersion,
-    hummock_versions: BTreeMap<HummockVersionId, Vec<u64>>,
+    hummock_versions: BTreeMap<HummockVersionId, Vec<HummockSSTableId>>,
     hummock_version_deltas: BTreeMap<HummockVersionId, HummockVersionDelta>,
     pinned_versions: BTreeMap<HummockContextId, HummockPinnedVersion>,
     pinned_snapshots: BTreeMap<HummockContextId, HummockPinnedSnapshot>,
