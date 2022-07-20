@@ -148,7 +148,7 @@ impl ToBatchProst for BatchLookupJoin {
                 .iter()
                 .map(|&x| x as u32)
                 .collect(),
-            sources: vec![],
+            worker_nodes: vec![], // To be filled in at local.rs
         })
     }
 }

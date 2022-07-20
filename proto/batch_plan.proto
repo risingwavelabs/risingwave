@@ -200,7 +200,7 @@ message LookupJoinNode {
   plan_common.CellBasedTableDesc probe_side_table_desc = 4;
   repeated int32 probe_side_column_ids = 5;
   repeated uint32 output_indices = 6;
-  repeated ExchangeSource sources = 7;
+  repeated common.WorkerNode worker_nodes = 7;
 }
 
 message PlanNode {
