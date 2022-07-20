@@ -26,7 +26,8 @@ pub struct ApplyScanRule {}
 impl Rule for ApplyScanRule {
     fn apply(&self, plan: PlanRef) -> Option<PlanRef> {
         let apply = plan.as_logical_apply()?;
-        let (left, right, on, join_type, correlated_indices) = apply.clone().decompose();
+        let (left, right, on, join_type, _correlated_id, correlated_indices) =
+            apply.clone().decompose();
         let apply_left_len = left.schema().len();
         assert_eq!(join_type, JoinType::Inner);
         // TODO: Push `LogicalApply` down `LogicalJoin`.

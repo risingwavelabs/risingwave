@@ -34,7 +34,7 @@ mod type_inference;
 mod utils;
 
 pub use agg_call::{AggCall, AggOrderBy, AggOrderByExpr};
-pub use correlated_input_ref::CorrelatedInputRef;
+pub use correlated_input_ref::{CorrelatedId, CorrelatedInputRef};
 pub use function_call::{FunctionCall, FunctionCallVerboseDisplay};
 pub use input_ref::{
     as_alias_display, input_ref_to_column_indices, InputRef, InputRefDisplay,
@@ -200,7 +200,7 @@ impl_has_variant! {InputRef, Literal, FunctionCall, AggCall, Subquery, TableFunc
 impl ExprImpl {
     /// Used to check whether the expression has [`CorrelatedInputRef`].
     // We need to traverse inside subqueries.
-    pub fn has_correlated_input_ref(&self) -> bool {
+    pub fn has_correlated_input_ref_by_depth(&self) -> bool {
         struct Has {
             has: bool,
             depth: usize,
@@ -238,17 +238,57 @@ impl ExprImpl {
         visitor.has
     }
 
+    pub fn has_correlated_input_ref_by_correlated_id(&self, correlated_id: CorrelatedId) -> bool {
+        struct Has {
+            has: bool,
+            correlated_id: CorrelatedId,
+        }
+
+        impl ExprVisitor for Has {
+            fn visit_correlated_input_ref(&mut self, correlated_input_ref: &CorrelatedInputRef) {
+                if correlated_input_ref.get_correlated_id() == self.correlated_id {
+                    self.has = true;
+                }
+            }
+
+            fn visit_subquery(&mut self, subquery: &Subquery) {
+                use crate::binder::BoundSetExpr;
+                match &subquery.query.body {
+                    BoundSetExpr::Select(select) => select
+                        .select_items
+                        .iter()
+                        .chain(select.group_by.iter())
+                        .chain(select.where_clause.iter())
+                        .for_each(|expr| self.visit_expr(expr)),
+                    BoundSetExpr::Values(_) => {}
+                }
+            }
+        }
+
+        let mut visitor = Has {
+            has: false,
+            correlated_id,
+        };
+        visitor.visit_expr(self);
+        visitor.has
+    }
+
     /// Collect `CorrelatedInputRef`s in `ExprImpl` and return theirs indices.
-    pub fn collect_correlated_indices(&self) -> Vec<usize> {
+    pub fn collect_correlated_indices_by_depth_and_assign_id(
+        &self,
+        correlated_id: CorrelatedId,
+    ) -> Vec<usize> {
         struct Collector {
             depth: usize,
             correlated_indices: Vec<usize>,
+            correlated_id: CorrelatedId,
         }
 
         impl ExprVisitor for Collector {
             fn visit_correlated_input_ref(&mut self, correlated_input_ref: &CorrelatedInputRef) {
                 if correlated_input_ref.depth() == self.depth {
                     self.correlated_indices.push(correlated_input_ref.index());
+                    correlated_input_ref.set_correlated_id(self.correlated_id);
                 }
             }
 
@@ -272,6 +312,7 @@ impl ExprImpl {
         let mut collector = Collector {
             depth: 1,
             correlated_indices: vec![],
+            correlated_id,
         };
         collector.visit_expr(self);
         collector.correlated_indices

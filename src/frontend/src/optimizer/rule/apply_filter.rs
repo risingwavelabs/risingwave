@@ -16,7 +16,7 @@ use itertools::{Either, Itertools};
 use risingwave_pb::plan_common::JoinType;
 
 use super::{BoxedRule, Rule};
-use crate::expr::{CorrelatedInputRef, Expr, ExprImpl, ExprRewriter, InputRef};
+use crate::expr::{CorrelatedId, CorrelatedInputRef, Expr, ExprImpl, ExprRewriter, InputRef};
 use crate::optimizer::plan_node::{LogicalApply, LogicalFilter, PlanTreeNodeUnary};
 use crate::optimizer::PlanRef;
 use crate::utils::{ColIndexMapping, Condition};
@@ -26,7 +26,8 @@ pub struct ApplyFilterRule {}
 impl Rule for ApplyFilterRule {
     fn apply(&self, plan: PlanRef) -> Option<PlanRef> {
         let apply = plan.as_logical_apply()?;
-        let (left, right, on, join_type, correlated_indices) = apply.clone().decompose();
+        let (left, right, on, join_type, correlated_id, correlated_indices) =
+            apply.clone().decompose();
         assert_eq!(join_type, JoinType::Inner);
         let filter = right.as_logical_filter()?;
         let input = filter.input();
@@ -39,6 +40,7 @@ impl Rule for ApplyFilterRule {
             )
             .inverse(),
             has_correlated_input_ref: false,
+            correlated_id,
         };
         // Split predicates in LogicalFilter into correlated expressions and uncorrelated
         // expressions.
@@ -65,6 +67,7 @@ impl Rule for ApplyFilterRule {
             input,
             join_type,
             new_on,
+            apply.correlated_id(),
             (0..correlated_indices_len).collect_vec(),
         );
         let new_filter = LogicalFilter::new(
@@ -89,14 +92,15 @@ struct Rewriter {
     offset: usize,
     index_mapping: ColIndexMapping,
     has_correlated_input_ref: bool,
+    correlated_id: CorrelatedId,
 }
 impl ExprRewriter for Rewriter {
     fn rewrite_correlated_input_ref(
         &mut self,
         correlated_input_ref: CorrelatedInputRef,
     ) -> ExprImpl {
-        // TODO: just decrease `correlated_input_ref`'s index by 1.
-        self.has_correlated_input_ref = true;
+        self.has_correlated_input_ref =
+            correlated_input_ref.get_correlated_id() == self.correlated_id;
         InputRef::new(
             self.index_mapping.map(correlated_input_ref.index()),
             correlated_input_ref.return_type(),
