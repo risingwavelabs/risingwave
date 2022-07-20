@@ -39,7 +39,7 @@ create materialized view mv as
     select tag, count(*) as cnt from tags group by tag;
 
 query TI rowsort
----
+----
 #1          2
 #2          1
 #risingwave 1
