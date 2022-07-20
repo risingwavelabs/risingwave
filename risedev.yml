@@ -625,3 +625,9 @@ template:
 
     # Connect address
     address: ${id}
+
+    # Number of CPUs to use
+    cpus: 8
+
+    # Memory limit for Redpanda
+    memory: 16G
