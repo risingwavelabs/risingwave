@@ -307,7 +307,12 @@ where
                 core.add_table(&internal_table);
                 self.env
                     .notification_manager()
-                    .notify_frontend(Operation::Add, Info::Table(internal_table))
+                    .notify_frontend(Operation::Add, Info::Table(internal_table.to_owned()))
+                    .await;
+
+                self.env
+                    .notification_manager()
+                    .notify_compactor(Operation::Add, Info::Table(internal_table.to_owned()))
                     .await;
             }
             core.add_table(table);
@@ -315,6 +320,12 @@ where
                 .env
                 .notification_manager()
                 .notify_frontend(Operation::Add, Info::Table(table.to_owned()))
+                .await;
+
+            // notify table_catalog to compactor
+            self.env
+                .notification_manager()
+                .notify_compactor(Operation::Add, Info::Table(table.to_owned()))
                 .await;
             Ok(version)
         } else {
@@ -364,7 +375,13 @@ where
                     let version = self
                         .env
                         .notification_manager()
-                        .notify_frontend(Operation::Delete, Info::Table(table))
+                        .notify_frontend(Operation::Delete, Info::Table(table.to_owned()))
+                        .await;
+
+                    // notify table_catalog to compactor
+                    self.env
+                        .notification_manager()
+                        .notify_compactor(Operation::Delete, Info::Table(table.to_owned()))
                         .await;
 
                     Ok(version)
@@ -466,6 +483,11 @@ where
                 .notification_manager()
                 .notify_frontend(Operation::Update, Info::Table(table.to_owned()))
                 .await;
+
+            self.env
+                .notification_manager()
+                .notify_compactor(Operation::Update, Info::Table(table.to_owned()))
+                .await;
             core.add_table(table);
         }
         Ok(())
@@ -561,12 +583,22 @@ where
                 core.add_table(&table);
                 self.env
                     .notification_manager()
-                    .notify_frontend(Operation::Add, Info::Table(table))
+                    .notify_frontend(Operation::Add, Info::Table(table.to_owned()))
+                    .await;
+
+                self.env
+                    .notification_manager()
+                    .notify_compactor(Operation::Add, Info::Table(table.to_owned()))
                     .await;
             }
             self.env
                 .notification_manager()
                 .notify_frontend(Operation::Add, Info::Table(mview.to_owned()))
+                .await;
+
+            self.env
+                .notification_manager()
+                .notify_compactor(Operation::Add, Info::Table(mview.to_owned()))
                 .await;
             // Currently frontend uses source's version
             let version = self
@@ -666,8 +698,14 @@ where
 
                 self.env
                     .notification_manager()
-                    .notify_frontend(Operation::Delete, Info::Table(mview))
+                    .notify_frontend(Operation::Delete, Info::Table(mview.to_owned()))
                     .await;
+
+                self.env
+                    .notification_manager()
+                    .notify_compactor(Operation::Delete, Info::Table(mview.to_owned()))
+                    .await;
+
                 let version = self
                     .env
                     .notification_manager()

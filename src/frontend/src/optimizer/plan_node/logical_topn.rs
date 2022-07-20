@@ -177,10 +177,14 @@ impl ColPrunable for LogicalTopN {
         if input_required_cols == required_cols {
             top_n
         } else {
+            let output_required_cols = required_cols
+                .iter()
+                .map(|&idx| mapping.map(idx))
+                .collect_vec();
             let src_size = top_n.schema().len();
             LogicalProject::with_mapping(
                 top_n,
-                ColIndexMapping::with_remaining_columns(required_cols, src_size),
+                ColIndexMapping::with_remaining_columns(&output_required_cols, src_size),
             )
             .into()
         }

@@ -12,7 +12,8 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use risingwave_common::error::tonic_err;
+use lazy_static;
+use risingwave_common::error::{tonic_err, RwError};
 use risingwave_pb::common::worker_node::State::Running;
 use risingwave_pb::common::WorkerType;
 use risingwave_pb::meta::notification_service_server::NotificationService;
@@ -25,6 +26,32 @@ use tonic::{Request, Response, Status};
 use crate::cluster::{ClusterManagerRef, WorkerKey};
 use crate::manager::{CatalogManagerRef, MetaSrvEnv, Notification, UserInfoManagerRef};
 use crate::storage::MetaStore;
+
+#[derive(Debug, Clone)]
+pub enum SubscibeDataType {
+    Node,
+    Database,
+    Schema,
+    Source,
+    Table,
+    Sink,
+    User,
+}
+
+lazy_static::lazy_static! {
+static ref  COMPACTOR_DATA_TYPE: Vec<SubscibeDataType> = vec![SubscibeDataType::Table];
+
+static ref FRONTEND_DATA_TYPE: Vec<SubscibeDataType> = vec![
+    SubscibeDataType::Node,
+    SubscibeDataType::Database,
+    SubscibeDataType::Schema,
+    SubscibeDataType::Source,
+    SubscibeDataType::Table,
+    SubscibeDataType::Sink,
+    SubscibeDataType::User,
+];
+}
+
 pub struct NotificationServiceImpl<S: MetaStore> {
     env: MetaSrvEnv<S>,
 
@@ -50,6 +77,55 @@ where
             user_manager,
         }
     }
+
+    async fn build_snapshot_by_type(
+        &self,
+        worker_type: WorkerType,
+    ) -> Result<MetaSnapshot, RwError> {
+        let catalog_guard = self.catalog_manager.get_catalog_core_guard().await;
+        let (database, schema, table, source, sink) = catalog_guard.get_catalog().await?;
+
+        let cluster_guard = self.cluster_manager.get_cluster_core_guard().await;
+        let nodes = cluster_guard.list_worker_node(WorkerType::ComputeNode, Some(Running));
+
+        let user_guard = self.user_manager.get_user_core_guard().await;
+        let users = user_guard
+            .get_user_info()
+            .values()
+            .cloned()
+            .collect::<Vec<_>>();
+
+        // Send the snapshot on subscription. After that we will send only updates.
+        let subscirbe_data_type = match worker_type {
+            WorkerType::Frontend => FRONTEND_DATA_TYPE.clone(),
+            WorkerType::Compactor => COMPACTOR_DATA_TYPE.clone(),
+            _ => unreachable!(),
+        };
+
+        // to filter info by subscirbe_data_type
+        let mut nodes = Some(nodes);
+        let mut database = Some(database);
+        let mut schema = Some(schema);
+        let mut source = Some(source);
+        let mut table = Some(table);
+        let mut sink = Some(sink);
+        let mut users = Some(users);
+
+        let mut result = MetaSnapshot::default();
+        for data_type in subscirbe_data_type {
+            match data_type {
+                SubscibeDataType::Node => result.nodes = nodes.take().unwrap(),
+                SubscibeDataType::Database => result.database = database.take().unwrap(),
+                SubscibeDataType::Schema => result.schema = schema.take().unwrap(),
+                SubscibeDataType::Source => result.source = source.take().unwrap(),
+                SubscibeDataType::Table => result.table = table.take().unwrap(),
+                SubscibeDataType::Sink => result.sink = sink.take().unwrap(),
+                SubscibeDataType::User => result.users = users.take().unwrap(),
+            }
+        }
+
+        Ok(result)
+    }
 }
 
 #[async_trait::async_trait]
@@ -70,51 +146,20 @@ where
 
         let (tx, rx) = mpsc::unbounded_channel();
 
-        match worker_type {
-            WorkerType::ComputeNode => {
-                self.env
-                    .notification_manager()
-                    .insert_compute_sender(WorkerKey(host_address), tx)
-                    .await
-            }
-            WorkerType::Frontend => {
-                let catalog_guard = self.catalog_manager.get_catalog_core_guard().await;
-                let (database, schema, table, source, sink) = catalog_guard.get_catalog().await?;
+        let meta_snapshot = self.build_snapshot_by_type(worker_type).await?;
 
-                let cluster_guard = self.cluster_manager.get_cluster_core_guard().await;
-                let nodes = cluster_guard.list_worker_node(WorkerType::ComputeNode, Some(Running));
+        tx.send(Ok(SubscribeResponse {
+            status: None,
+            operation: Operation::Snapshot as i32,
+            info: Some(Info::Snapshot(meta_snapshot)),
+            version: self.env.notification_manager().current_version().await,
+        }))
+        .unwrap();
 
-                let user_guard = self.user_manager.get_user_core_guard().await;
-                let users = user_guard
-                    .get_user_info()
-                    .values()
-                    .cloned()
-                    .collect::<Vec<_>>();
-
-                // Send the snapshot on subscription. After that we will send only updates.
-                let meta_snapshot = MetaSnapshot {
-                    nodes,
-                    database,
-                    schema,
-                    source,
-                    sink,
-                    table,
-                    users,
-                };
-                tx.send(Ok(SubscribeResponse {
-                    status: None,
-                    operation: Operation::Snapshot as i32,
-                    info: Some(Info::Snapshot(meta_snapshot)),
-                    version: self.env.notification_manager().current_version().await,
-                }))
-                .unwrap();
-                self.env
-                    .notification_manager()
-                    .insert_frontend_sender(WorkerKey(host_address), tx)
-                    .await
-            }
-            _ => unreachable!(),
-        };
+        self.env
+            .notification_manager()
+            .insert_sender(worker_type, WorkerKey(host_address), tx)
+            .await;
 
         Ok(Response::new(UnboundedReceiverStream::new(rx)))
     }
