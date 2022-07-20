@@ -648,14 +648,6 @@ impl LocalStreamManagerCore {
         actors: &[stream_plan::StreamActor],
         hanging_channels: &[stream_service::HangingChannel],
     ) -> Result<()> {
-        let local_actor_ids: HashSet<ActorId> = HashSet::from_iter(
-            actors
-                .iter()
-                .map(|actor| actor.get_actor_id())
-                .collect::<Vec<_>>()
-                .into_iter(),
-        );
-
         for actor in actors {
             self.actors
                 .try_insert(actor.get_actor_id(), actor.clone())
@@ -672,46 +664,28 @@ impl LocalStreamManagerCore {
                 .map(|id| (actor.actor_id, *id))
                 .collect_vec();
             update_upstreams(&self.context, &down_id);
-
-            // Add remote input channels.
-            let mut up_id = vec![];
-            for upstream_id in actor.get_upstream_actor_id() {
-                if !local_actor_ids.contains(upstream_id) {
-                    up_id.push((*upstream_id, actor.actor_id));
-                }
-            }
-            update_upstreams(&self.context, &up_id);
         }
 
         for hanging_channel in hanging_channels {
             match (&hanging_channel.upstream, &hanging_channel.downstream) {
                 (
-                    Some(up),
-                    Some(ActorInfo {
-                        actor_id: down_id,
-                        host: None,
-                    }),
-                ) => {
-                    let up_down_ids = (up.actor_id, *down_id);
-                    let (tx, rx) = channel(LOCAL_OUTPUT_CHANNEL_SIZE);
-                    self.context
-                        .add_channel_pairs(up_down_ids, (Some(tx), Some(rx)));
-                }
-                (
                     Some(ActorInfo {
                         actor_id: up_id,
-                        host: None,
+                        host: None, // local
                     }),
-                    Some(down),
+                    Some(ActorInfo {
+                        actor_id: down_id,
+                        host: Some(_), // remote
+                    }),
                 ) => {
-                    let up_down_ids = (*up_id, down.actor_id);
+                    let up_down_ids = (*up_id, *down_id);
                     let (tx, rx) = channel(LOCAL_OUTPUT_CHANNEL_SIZE);
                     self.context
                         .add_channel_pairs(up_down_ids, (Some(tx), Some(rx)));
                 }
                 _ => {
                     return Err(ErrorCode::InternalError(format!(
-                        "hanging channel should has exactly one remote side: {:?}",
+                        "hanging channel must be from local to remote: {:?}",
                         hanging_channel,
                     ))
                     .into())

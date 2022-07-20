@@ -557,7 +557,7 @@ mod tests {
             let pool = ComputeClientPool::new(u64::MAX);
             RemoteInput::new(
                 pool,
-                addr.clone().into(),
+                addr.into(),
                 (0, 0),
                 (0, 0),
                 Arc::new(StreamingMetrics::unused()),
