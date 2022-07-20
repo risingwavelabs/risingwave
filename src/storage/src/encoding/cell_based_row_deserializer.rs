@@ -22,9 +22,8 @@ use risingwave_common::error::{ErrorCode, Result};
 use risingwave_common::types::{DataType, Datum, VirtualNode, VIRTUAL_NODE_SIZE};
 use risingwave_common::util::value_encoding::deserialize_cell;
 
-use super::cell_based_encoding_util::deserialize_column_id;
-use super::cell_based_row_serializer::CellBasedRowSerializer;
-use super::{Decoding, RowSerde};
+use super::cell_based_encoding_util::{deserialize_column_id, parse_raw_key_to_vnode_and_key};
+use super::Decoding;
 use crate::encoding::ColumnDescMapping;
 
 #[allow(clippy::len_without_is_empty)]
@@ -108,7 +107,7 @@ impl CellBasedRowDeserializer {
         cell: impl AsRef<[u8]>,
     ) -> Result<Option<(VirtualNode, Vec<u8>, Row)>> {
         let raw_key = raw_key.as_ref();
-        if raw_key.len() < VIRTUAL_NODE_SIZE {
+        if raw_key.len() < VIRTUAL_NODE_SIZE + 4 {
             // vnode + cell_id
             return Err(ErrorCode::InternalError(format!(
                 "corrupted key: {:?}",
@@ -117,11 +116,7 @@ impl CellBasedRowDeserializer {
             .into());
         }
 
-        let (vnode, key_bytes) = {
-            let (vnode_bytes, key_bytes) = raw_key.split_at(VIRTUAL_NODE_SIZE);
-            let vnode = VirtualNode::from_be_bytes(vnode_bytes.try_into().unwrap());
-            (vnode, key_bytes)
-        };
+        let (vnode, key_bytes) = parse_raw_key_to_vnode_and_key(raw_key);
         let (cur_pk_bytes, cell_id_bytes) = key_bytes.split_at(key_bytes.len() - 4);
         let result;
 
@@ -194,10 +189,6 @@ impl Decoding for CellBasedRowDeserializer {
     }
 }
 
-impl RowSerde for CellBasedRowDeserializer {
-    type Deserializer = CellBasedRowDeserializer;
-    type Serializer = CellBasedRowSerializer;
-}
 #[cfg(test)]
 mod tests {
     use bytes::Bytes;

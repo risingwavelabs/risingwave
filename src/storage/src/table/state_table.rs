@@ -193,9 +193,9 @@ impl<S: StateStore, RS: RowSerde> StateTableBase<S, RS> {
 }
 
 /// Iterator functions with cell-based encoding.
-impl<S: StateStore> StateTable<S> {
+impl<S: StateStore, RS: RowSerde> StateTableBase<S, RS> {
     /// This function scans rows from the relational table.
-    pub async fn iter(&self, epoch: u64) -> StorageResult<RowStream<'_, S>> {
+    pub async fn iter(&self, epoch: u64) -> StorageResult<RowStream<'_, S, RS>> {
         self.iter_with_pk_prefix(Row::empty(), epoch).await
     }
 
@@ -204,7 +204,7 @@ impl<S: StateStore> StateTable<S> {
         &'a self,
         pk_prefix: &'a Row,
         epoch: u64,
-    ) -> StorageResult<RowStream<'a, S>> {
+    ) -> StorageResult<RowStream<'a, S, RS>> {
         let storage_table_iter = self
             .storage_table
             .streaming_iter_with_pk_bounds(epoch, pk_prefix, ..)
@@ -258,7 +258,7 @@ impl<S: StateStore> StateTable<S> {
             },
             None => Distribution::fallback(),
         };
-        StateTable::new_with_distribution(
+        StateTableBase::new_with_distribution(
             store,
             TableId::new(table_catalog.id),
             table_columns,
@@ -269,38 +269,8 @@ impl<S: StateStore> StateTable<S> {
     }
 }
 
-/// Iterator functions.
-impl<S: StateStore> RowBasedStateTable<S> {
-    /// This function scans rows from the relational table.
-    pub async fn iter(&self, epoch: u64) -> StorageResult<RowBasedStream<'_, S>> {
-        self.iter_with_pk_prefix(Row::empty(), epoch).await
-    }
-
-    /// This function scans rows from the relational table with specific `pk_prefix`.
-    pub async fn iter_with_pk_prefix<'a>(
-        &'a self,
-        pk_prefix: &'a Row,
-        epoch: u64,
-    ) -> StorageResult<RowBasedStream<'a, S>> {
-        let storage_table_iter = self
-            .storage_table
-            .streaming_iter_with_pk_bounds(epoch, pk_prefix, ..)
-            .await?;
-
-        let mem_table_iter = {
-            // TODO: reuse calculated serialized key from cell-based table.
-            let prefix_serializer = self.pk_serializer().prefix(pk_prefix.size());
-            let encoded_prefix = serialize_pk(pk_prefix, &prefix_serializer);
-            let encoded_key_range = range_of_prefix(&encoded_prefix);
-            self.mem_table.iter(encoded_key_range)
-        };
-
-        Ok(StateTableRowIter::new(mem_table_iter, storage_table_iter).into_stream())
-    }
-}
-
-pub type RowStream<'a, S: StateStore> = impl Stream<Item = StorageResult<Cow<'a, Row>>>;
-pub type RowBasedStream<'a, S: StateStore> = impl Stream<Item = StorageResult<Cow<'a, Row>>>;
+pub type RowStream<'a, S: StateStore, RS: RowSerde> =
+    impl Stream<Item = StorageResult<Cow<'a, Row>>>;
 struct StateTableRowIter<'a, M, C> {
     mem_table_iter: M,
     storage_table_iter: C,

@@ -19,6 +19,7 @@ use risingwave_common::error::{ErrorCode, Result};
 use risingwave_common::types::{DataType, VirtualNode, VIRTUAL_NODE_SIZE};
 use risingwave_common::util::value_encoding::deserialize_datum;
 
+use super::cell_based_encoding_util::parse_raw_key_to_vnode_and_key;
 use super::row_based_serializer::RowBasedSerializer;
 use super::{Decoding, RowSerde};
 
@@ -84,11 +85,7 @@ impl RowBasedDeserializer {
             .into());
         }
 
-        let (vnode, key_bytes) = {
-            let (vnode_bytes, key_bytes) = raw_key.split_at(VIRTUAL_NODE_SIZE);
-            let vnode = VirtualNode::from_be_bytes(vnode_bytes.try_into().unwrap());
-            (vnode, key_bytes)
-        };
+        let (vnode, key_bytes) = parse_raw_key_to_vnode_and_key(raw_key);
         Ok(Some((
             vnode,
             key_bytes.to_vec(),
