@@ -89,7 +89,7 @@ pub struct LogicalMultiJoinBuilder {
 }
 
 impl LogicalMultiJoinBuilder {
-    /// add a predicate above the plan, so they will be rewriten from the output_indices to the
+    /// add a predicate above the plan, so they will be rewriten from the `output_indices` to the
     /// input indices
     pub fn add_predicate_above(&mut self, exprs: impl Iterator<Item = ExprImpl>) {
         let mut mapping = ColIndexMapping::with_target_size(
