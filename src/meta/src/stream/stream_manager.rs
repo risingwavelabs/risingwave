@@ -98,7 +98,7 @@ impl<S> GlobalStreamManager<S>
 where
     S: MetaStore,
 {
-    pub async fn new(
+    pub fn new(
         env: MetaSrvEnv<S>,
         fragment_manager: FragmentManagerRef<S>,
         barrier_manager: BarrierManagerRef<S>,
@@ -868,7 +868,7 @@ mod tests {
 
             sleep(Duration::from_secs(1));
 
-            let env = MetaSrvEnv::for_test_opts(Arc::new(MetaOpts::test(true))).await;
+            let env = MetaSrvEnv::for_test_opts(Arc::new(MetaOpts::test(true, false))).await;
             let cluster_manager =
                 Arc::new(ClusterManager::new(env.clone(), Duration::from_secs(3600)).await?);
             let host = HostAddress {
@@ -929,8 +929,7 @@ mod tests {
                 cluster_manager.clone(),
                 source_manager.clone(),
                 compaction_group_manager.clone(),
-            )
-            .await?;
+            )?;
 
             let (join_handle_2, shutdown_tx_2) = GlobalBarrierManager::start(barrier_manager).await;
 

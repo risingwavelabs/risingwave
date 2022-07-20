@@ -18,9 +18,13 @@ use super::PlanRef;
 
 /// A one-to-one transform for the [`PlanNode`](super::plan_node::PlanNode), every [`Rule`] should
 /// downcast and check if the node matches the rule.
-pub trait Rule: Send + Sync {
+pub trait Rule: Send + Sync + Description {
     /// return err(()) if not match
     fn apply(&self, plan: PlanRef) -> Option<PlanRef>;
+}
+
+pub trait Description {
+    fn description(&self) -> &str;
 }
 
 pub(super) type BoxedRule = Box<dyn Rule>;
@@ -51,3 +55,39 @@ mod merge_multijoin;
 pub use merge_multijoin::*;
 mod distinct_agg;
 pub use distinct_agg::*;
+
+#[macro_export]
+macro_rules! for_all_rules {
+    ($macro:ident $(, $x:tt)*) => {
+        $macro! {
+            [$($x),*]
+            ,{ApplyAggRule}
+            ,{ApplyFilterRule}
+            ,{ApplyProjRule}
+            ,{ApplyScanRule}
+            ,{DistinctAggRule}
+            ,{IndexDeltaJoinRule}
+            ,{MergeMultiJoinRule}
+            ,{ProjectEliminateRule}
+            ,{ProjectJoinRule}
+            ,{ProjectMergeRule}
+            ,{PullUpCorrelatedPredicateRule}
+            ,{ReorderMultiJoinRule}
+            ,{TranslateApplyRule}
+        }
+    };
+}
+
+macro_rules! impl_description {
+    ([], $( { $name:ident }),*) => {
+        paste::paste!{
+            $(impl Description for [<$name>] {
+                fn description(&self) -> &str {
+                    stringify!([<$name>])
+                }
+            })*
+        }
+    }
+}
+
+for_all_rules! {impl_description}

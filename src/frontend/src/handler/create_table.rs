@@ -45,7 +45,7 @@ pub fn bind_sql_columns(columns: Vec<ColumnDef>) -> Result<Vec<ColumnCatalog>> {
         column_descs.push(row_id_column_desc());
         // Then user columns.
         for (i, column) in columns.into_iter().enumerate() {
-            check_valid_column_name(&column.name.value)?;
+            check_valid_column_name(&column.name.real_value())?;
             let field_descs = if let AstDataType::Struct(fields) = &column.data_type {
                 fields
                     .iter()
@@ -57,7 +57,7 @@ pub fn bind_sql_columns(columns: Vec<ColumnDef>) -> Result<Vec<ColumnCatalog>> {
             column_descs.push(ColumnDesc {
                 data_type: bind_data_type(&column.data_type)?,
                 column_id: ColumnId::new((i + 1) as i32),
-                name: column.name.value,
+                name: column.name.real_value(),
                 field_descs,
                 type_name: "".to_string(),
             });
@@ -110,6 +110,7 @@ pub(crate) fn gen_materialized_source_plan(
 ) -> Result<(PlanRef, ProstTable)> {
     let materialize = {
         // Manually assemble the materialization plan for the table.
+        #[expect(clippy::needless_borrow)]
         let source_node: PlanRef =
             StreamSource::new(LogicalSource::new(Rc::new((&source).into()), context)).into();
         let mut required_cols = FixedBitSet::with_capacity(source_node.schema().len());
@@ -184,7 +185,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_create_table_handler() {
-        let sql = "create table t (v1 smallint, v2 struct<v3 bigint, v4 float, v5 double>) with ('appendonly' = true);";
+        let sql = "create table t (v1 smallint, v2 struct<v3 bigint, v4 float, v5 double>) with (appendonly = true);";
         let frontend = LocalFrontend::new(Default::default()).await;
         frontend.run_sql(sql).await.unwrap();
 

@@ -158,7 +158,7 @@ impl OrderedRowDeserializer {
     pub fn deserialize_prefix_len_with_column_indices(
         &self,
         key: &[u8],
-        column_indices: Vec<usize>,
+        column_indices: impl Iterator<Item = usize>,
     ) -> memcomparable::Result<usize> {
         use crate::types::ScalarImpl;
         let mut len: usize = 0;
@@ -359,7 +359,7 @@ mod tests {
 
         {
             let row_0_idx_0_len = deserializer
-                .deserialize_prefix_len_with_column_indices(&array[0], vec![0])
+                .deserialize_prefix_len_with_column_indices(&array[0], 0..=0)
                 .unwrap();
 
             let schema = vec![DataType::Varchar];
@@ -374,7 +374,7 @@ mod tests {
 
         {
             let row_0_idx_1_len = deserializer
-                .deserialize_prefix_len_with_column_indices(&array[0], vec![0, 1])
+                .deserialize_prefix_len_with_column_indices(&array[0], 0..=1)
                 .unwrap();
 
             let order_types = vec![OrderType::Descending, OrderType::Ascending];
@@ -451,6 +451,20 @@ mod tests {
                         .unwrap();
                 let data_size = size_of::<NaiveDateTimeWrapper>();
                 assert_eq!(12, data_size);
+                assert_eq!(1 + data_size, encoding_data_size);
+            }
+
+            {
+                // tz
+                let row = Row(vec![Some(ScalarImpl::Int64(1111111111))]);
+                let mut row_bytes = vec![];
+                serializer.serialize(&row, &mut row_bytes);
+                let mut deserializer = memcomparable::Deserializer::new(&row_bytes[..]);
+                let encoding_data_size =
+                    ScalarImpl::encoding_data_size(&DataType::Timestampz, &mut deserializer)
+                        .unwrap();
+                let data_size = size_of::<i64>();
+                assert_eq!(8, data_size);
                 assert_eq!(1 + data_size, encoding_data_size);
             }
 

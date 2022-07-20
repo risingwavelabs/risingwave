@@ -1482,11 +1482,11 @@ fn parse_create_table_with_options() {
             assert_eq!(
                 vec![
                     SqlOption {
-                        name: "foo".into(),
+                        name: vec!["foo".into()].into(),
                         value: Value::SingleQuotedString("bar".into())
                     },
                     SqlOption {
-                        name: "a".into(),
+                        name: vec!["a".into()].into(),
                         value: number("123")
                     },
                 ],
@@ -1736,16 +1736,23 @@ fn parse_bad_constraint() {
     );
 }
 
-fn run_explain_analyze(query: &str, expected_verbose: bool, expected_analyze: bool) {
+fn run_explain_analyze(
+    query: &str,
+    expected_verbose: bool,
+    expected_analyze: bool,
+    expected_trace: bool,
+) {
     match verified_stmt(query) {
         Statement::Explain {
             describe_alias: _,
             analyze,
             verbose,
+            trace,
             statement,
         } => {
             assert_eq!(verbose, expected_verbose);
             assert_eq!(analyze, expected_analyze);
+            assert_eq!(trace, expected_trace);
             assert_eq!("SELECT sqrt(id) FROM foo", statement.to_string());
         }
         _ => panic!("Unexpected Statement, must be Explain"),
@@ -1754,12 +1761,31 @@ fn run_explain_analyze(query: &str, expected_verbose: bool, expected_analyze: bo
 
 #[test]
 fn parse_explain_analyze_with_simple_select() {
-    run_explain_analyze("EXPLAIN SELECT sqrt(id) FROM foo", false, false);
-    run_explain_analyze("EXPLAIN VERBOSE SELECT sqrt(id) FROM foo", true, false);
-    run_explain_analyze("EXPLAIN ANALYZE SELECT sqrt(id) FROM foo", false, true);
+    run_explain_analyze("EXPLAIN SELECT sqrt(id) FROM foo", false, false, false);
+    run_explain_analyze(
+        "EXPLAIN VERBOSE SELECT sqrt(id) FROM foo",
+        true,
+        false,
+        false,
+    );
+    run_explain_analyze(
+        "EXPLAIN ANALYZE SELECT sqrt(id) FROM foo",
+        false,
+        true,
+        false,
+    );
+    run_explain_analyze("EXPLAIN TRACE SELECT sqrt(id) FROM foo", false, false, true);
     run_explain_analyze(
         "EXPLAIN ANALYZE VERBOSE SELECT sqrt(id) FROM foo",
         true,
+        true,
+        false,
+    );
+
+    run_explain_analyze(
+        "EXPLAIN VERBOSE TRACE SELECT sqrt(id) FROM foo",
+        true,
+        false,
         true,
     );
 }
@@ -2884,11 +2910,11 @@ fn parse_create_view_with_options() {
             assert_eq!(
                 vec![
                     SqlOption {
-                        name: "foo".into(),
+                        name: vec!["foo".into()].into(),
                         value: Value::SingleQuotedString("bar".into())
                     },
                     SqlOption {
-                        name: "a".into(),
+                        name: vec!["a".into()].into(),
                         value: number("123")
                     },
                 ],
