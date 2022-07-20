@@ -178,7 +178,7 @@ impl Planner {
             JoinType::LeftSemi
         };
         let correlated_id = self.ctx.next_correlated_id();
-        let subquery = expr.into_subquery().unwrap();
+        let mut subquery = expr.into_subquery().unwrap();
         let correlated_indices =
             subquery.collect_correlated_indices_by_depth_and_assign_id(correlated_id);
         let output_column_type = subquery.query.data_types()[0].clone();
@@ -230,7 +230,7 @@ impl Planner {
 
         // TODO: consider the multi-subquery case for normal predicate.
         impl ExprRewriter for SubstituteSubQueries {
-            fn rewrite_subquery(&mut self, subquery: Subquery) -> ExprImpl {
+            fn rewrite_subquery(&mut self, mut subquery: Subquery) -> ExprImpl {
                 let input_ref = InputRef::new(self.input_col_num, subquery.return_type()).into();
                 self.input_col_num += 1;
                 self.correlated_indices_collection.push(

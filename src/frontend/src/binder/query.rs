@@ -54,7 +54,7 @@ impl BoundQuery {
     }
 
     pub fn collect_correlated_indices_by_depth_and_assign_id(
-        &self,
+        &mut self,
         correlated_id: CorrelatedId,
     ) -> Vec<usize> {
         // TODO: collect `correlated_input_ref` in `extra_order_exprs`.

@@ -13,8 +13,6 @@
 // limitations under the License.
 
 use core::fmt;
-use std::cell::RefCell;
-use std::hash::{Hash, Hasher};
 
 use risingwave_common::types::DataType;
 
@@ -22,7 +20,7 @@ use super::Expr;
 
 pub type CorrelatedId = u32;
 
-#[derive(Clone, Eq)]
+#[derive(Clone, Eq, PartialEq, Hash)]
 /// A reference to a column outside the subquery.
 ///
 /// `depth` is the number of of nesting levels of the subquery relative to the refered relation, and
@@ -34,24 +32,7 @@ pub struct CorrelatedInputRef {
     index: usize,
     data_type: DataType,
     depth: usize,
-    correlated_id: RefCell<CorrelatedId>,
-}
-
-impl Hash for CorrelatedInputRef {
-    fn hash<H: Hasher>(&self, state: &mut H) {
-        self.index.hash(state);
-        self.data_type.hash(state);
-        self.depth.hash(state);
-    }
-}
-
-impl PartialEq for CorrelatedInputRef {
-    fn eq(&self, other: &Self) -> bool {
-        self.index.eq(&other.index)
-            && self.data_type.eq(&other.data_type)
-            && self.depth.eq(&other.depth)
-            && *self.correlated_id.borrow() == *other.correlated_id.borrow()
-    }
+    correlated_id: CorrelatedId,
 }
 
 impl CorrelatedInputRef {
@@ -60,7 +41,7 @@ impl CorrelatedInputRef {
             index,
             data_type,
             depth,
-            correlated_id: RefCell::new(0),
+            correlated_id: 0,
         }
     }
 
@@ -73,12 +54,12 @@ impl CorrelatedInputRef {
         self.depth
     }
 
-    pub fn set_correlated_id(&self, correlated_id: CorrelatedId) {
-        *self.correlated_id.borrow_mut() = correlated_id;
+    pub fn set_correlated_id(&mut self, correlated_id: CorrelatedId) {
+        self.correlated_id = correlated_id;
     }
 
     pub fn get_correlated_id(&self) -> CorrelatedId {
-        *self.correlated_id.borrow()
+        self.correlated_id
     }
 }
 
@@ -96,7 +77,7 @@ impl fmt::Debug for CorrelatedInputRef {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         f.debug_struct("CorrelatedInputRef")
             .field("index", &self.index)
-            .field("correlated_id", &self.correlated_id.borrow())
+            .field("correlated_id", &self.correlated_id)
             .finish()
     }
 }

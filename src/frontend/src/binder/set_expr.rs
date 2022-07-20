@@ -45,7 +45,7 @@ impl BoundSetExpr {
     }
 
     pub fn collect_correlated_indices_by_depth_and_assign_id(
-        &self,
+        &mut self,
         correlated_id: CorrelatedId,
     ) -> Vec<usize> {
         match self {
