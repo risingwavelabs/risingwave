@@ -15,7 +15,7 @@
 use risingwave_common::catalog::{Field, Schema};
 
 use super::*;
-use crate::executor::merge::new_input;
+use crate::executor::exchange::input::new_input;
 use crate::executor::receiver::ReceiverExecutor;
 use crate::executor::MergeExecutor;
 
@@ -53,7 +53,7 @@ impl ExecutorBuilder for MergeExecutorBuilder {
             Ok(ReceiverExecutor::new(
                 schema,
                 params.pk_indices,
-                upstreams.into_iter().next().unwrap().1,
+                upstreams.into_iter().next().unwrap(),
                 actor_context,
                 x_node.operator_id,
                 params.actor_id,

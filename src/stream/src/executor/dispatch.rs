@@ -890,6 +890,7 @@ mod tests {
     use tokio::sync::mpsc::channel;
 
     use super::*;
+    use crate::executor::exchange::input::{Input, LocalInput};
     use crate::executor::receiver::ReceiverExecutor;
     use crate::executor::ActorContext;
     use crate::task::test_utils::{add_local_channels, helper_make_local_actor};
@@ -999,7 +1000,7 @@ mod tests {
         let input = Box::new(ReceiverExecutor::new(
             schema.clone(),
             vec![],
-            rx,
+            LocalInput::new(rx, 0).boxed_input(),
             ActorContext::create(),
             0,
             0,

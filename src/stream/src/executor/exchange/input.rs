@@ -22,11 +22,11 @@ pub trait Input: MessageStream {
     where
         Self: Sized + 'static,
     {
-        Box::new(self)
+        Box::pin(self)
     }
 }
 
-pub type BoxedInput = Box<dyn Input>;
+pub type BoxedInput = Pin<Box<dyn Input>>;
 
 type RemoteInputStreamInner = impl MessageStream;
 
@@ -159,6 +159,12 @@ pub struct LocalInput {
     actor_id: ActorId,
 }
 
+impl LocalInput {
+    pub fn new(channel: Receiver<Message>, actor_id: ActorId) -> Self {
+        Self { channel, actor_id }
+    }
+}
+
 impl Stream for LocalInput {
     type Item = MessageStreamItem;
 
@@ -176,8 +182,6 @@ impl Input for LocalInput {
 /// Create an input for merge and receiver executor. For local upstream actor, this will be simply a
 /// channel receiver. For remote upstream actor, this will spawn a long running [`RemoteInput`] task
 /// to receive messages from `gRPC` exchange service and return the receiver.
-// TODO: there's no need to use 4 channels for remote input. We may introduce a trait `Input` and
-// directly receive the message from the `RemoteInput`, just like the `Output`.
 pub(crate) fn new_input(
     context: &SharedContext,
     metrics: Arc<StreamingMetrics>,
@@ -192,10 +196,10 @@ pub(crate) fn new_input(
         .into();
 
     let input = if is_local_address(&context.addr, &upstream_addr) {
-        LocalInput {
-            channel: context.take_receiver(&(upstream_actor_id, actor_id))?,
-            actor_id: upstream_actor_id,
-        }
+        LocalInput::new(
+            context.take_receiver(&(upstream_actor_id, actor_id))?,
+            upstream_actor_id,
+        )
         .boxed_input()
     } else {
         RemoteInput::new(
