@@ -16,9 +16,10 @@ use futures::StreamExt;
 use futures_async_stream::try_stream;
 use itertools::Itertools;
 use risingwave_common::array::{Array, DataChunk, RowRef};
+use risingwave_common::buffer::BitmapBuilder;
 use risingwave_common::catalog::{ColumnDesc, Field, Schema};
 use risingwave_common::error::{ErrorCode, Result, RwError};
-use risingwave_common::types::{DataType, ParallelUnitId, ToOwnedDatum};
+use risingwave_common::types::{DataType, ParallelUnitId, ToOwnedDatum, VirtualNode};
 use risingwave_common::util::chunk_coalesce::{DataChunkBuilder, SlicedDataChunk};
 use risingwave_common::util::scan_range::ScanRange;
 use risingwave_common::util::worker_util::get_workers_by_parallel_unit_ids;
@@ -66,7 +67,7 @@ pub trait ProbeSideSourceBuilder: Send {
 }
 
 impl<C: BatchTaskContext> ProbeSideSource<C> {
-    fn get_parallel_unit_ids(&self, scan_range: &ScanRange) -> Result<Vec<ParallelUnitId>> {
+    fn get_virtual_node(&self, scan_range: &ScanRange) -> Result<VirtualNode> {
         let dist_keys = self
             .table_desc
             .dist_key_indices
@@ -81,13 +82,9 @@ impl<C: BatchTaskContext> ProbeSideSource<C> {
             .collect_vec();
 
         let virtual_node = scan_range.try_compute_vnode(&dist_keys, &pk_indices);
-
-        let mapping = match virtual_node {
-            None => self.vnode_mapping.clone(),
-            Some(vnode) => vec![self.vnode_mapping[vnode as usize]],
-        };
-
-        Ok(mapping)
+        virtual_node.ok_or_else(|| {
+            ErrorCode::InternalError("Could not compute vnode for lookup join".to_string()).into()
+        })
     }
 
     fn create_scan_range(&self, cur_row: &RowRef) -> Result<ScanRange> {
@@ -101,7 +98,11 @@ impl<C: BatchTaskContext> ProbeSideSource<C> {
 
     /// Creates the `RowSeqScanNode` that will be used for scanning the probe side table
     /// based on the passed `RowRef`.
-    fn create_row_seq_scan_node(&self, scan_range: &ScanRange) -> Result<NodeBody> {
+    fn create_row_seq_scan_node(
+        &self,
+        scan_range: &ScanRange,
+        vnode: VirtualNode,
+    ) -> Result<NodeBody> {
         // Check that the data types of both sides of the equality predicate are the same
         // TODO: Handle the cases where the data types of both sides are different but castable
         // (e.g. int32 and int64)
@@ -125,17 +126,14 @@ impl<C: BatchTaskContext> ProbeSideSource<C> {
             ).into());
         }
 
-        let scan_ranges = if scan_range.eq_conds.is_empty() {
-            vec![]
-        } else {
-            vec![scan_range.to_protobuf()]
-        };
+        let mut vnode_bitmap = BitmapBuilder::zeroed(self.vnode_mapping.len());
+        vnode_bitmap.set(vnode as usize, true);
 
         let row_seq_scan_node = NodeBody::RowSeqScan(RowSeqScanNode {
             table_desc: Some(self.table_desc.clone()),
             column_ids: self.probe_side_column_ids.clone(),
-            scan_ranges,
-            vnode_bitmap: None,
+            scan_ranges: vec![scan_range.to_protobuf()],
+            vnode_bitmap: Some(vnode_bitmap.finish().to_protobuf()),
         });
 
         Ok(row_seq_scan_node)
@@ -145,7 +143,9 @@ impl<C: BatchTaskContext> ProbeSideSource<C> {
     /// the source templates.
     fn build_prost_exchange_sources(&self, cur_row: &RowRef) -> Result<Vec<ProstExchangeSource>> {
         let scan_range = self.create_scan_range(cur_row)?;
-        let parallel_unit_ids = self.get_parallel_unit_ids(&scan_range)?;
+        let vnode = self.get_virtual_node(&scan_range)?;
+
+        let parallel_unit_ids = vec![self.vnode_mapping[vnode as usize]];
         let workers = match get_workers_by_parallel_unit_ids(&self.worker_nodes, &parallel_unit_ids)
         {
             Ok(workers) => workers,
@@ -157,7 +157,7 @@ impl<C: BatchTaskContext> ProbeSideSource<C> {
                 root: Some(PlanNode {
                     children: vec![],
                     identity: Uuid::new_v4().to_string(),
-                    node_body: Some(self.create_row_seq_scan_node(&scan_range)?),
+                    node_body: Some(self.create_row_seq_scan_node(&scan_range, vnode)?),
                 }),
                 exchange_info: Some(ExchangeInfo {
                     mode: DistributionMode::Single as i32,
