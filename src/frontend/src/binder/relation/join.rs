@@ -181,8 +181,7 @@ impl Binder {
                         match join_type {
                             JoinType::FullOuter => {
                                 let r_col = right_col_indices[pos];
-                                let r_data_type =
-                                    self.context.columns[r_col].field.data_type();
+                                let r_data_type = self.context.columns[r_col].field.data_type();
                                 ExprImpl::FunctionCall(Box::new(
                                     FunctionCall::new(
                                         ExprType::Coalesce,
@@ -202,8 +201,7 @@ impl Binder {
                             }
                             JoinType::RightOuter => {
                                 let r_col = right_col_indices[pos];
-                                let r_data_type =
-                                    self.context.columns[r_col].field.data_type();
+                                let r_data_type = self.context.columns[r_col].field.data_type();
                                 ExprImpl::InputRef(Box::new(InputRef::new(
                                     r_col + l_len,
                                     r_data_type,
