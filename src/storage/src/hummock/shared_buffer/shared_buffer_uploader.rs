@@ -40,9 +40,9 @@ pub struct SharedBufferUploader {
     hummock_meta_client: Arc<dyn HummockMetaClient>,
     next_local_sstable_id: Arc<AtomicU64>,
     stats: Arc<StateStoreMetrics>,
+    compaction_executor: Option<Arc<CompactionExecutor>>,
     local_object_store_compactor_context: Arc<CompactorContext>,
     remote_object_store_compactor_context: Arc<CompactorContext>,
-    compaction_executor: Option<Arc<CompactionExecutor>>,
 }
 
 impl SharedBufferUploader {
