@@ -14,12 +14,11 @@
 
 use criterion::{black_box, criterion_group, criterion_main, BatchSize, BenchmarkId, Criterion};
 use futures::StreamExt;
-use risingwave_batch::executor::row_level_iter::RowLevelIter;
 use risingwave_batch::executor::test_utils::{gen_sorted_data, MockExecutor};
-use risingwave_batch::executor::{BoxedExecutor, Executor, JoinType, SortMergeJoinExecutor};
+use risingwave_batch::executor::{BoxedExecutor, JoinType, SortMergeJoinExecutor};
 use risingwave_common::catalog::schema_test_utils::field_n;
-use risingwave_common::catalog::Schema;
 use risingwave_common::types::DataType;
+use risingwave_common::util::sort_util::OrderType;
 use tikv_jemallocator::Jemalloc;
 use tokio::runtime::Runtime;
 
@@ -42,20 +41,16 @@ fn create_sort_merge_join_executor(
     right_input.into_iter().for_each(|c| right_child.add(c));
 
     Box::new(SortMergeJoinExecutor::new(
+        OrderType::Ascending,
         JoinType::Inner,
-        Schema::from_iter(
-            left_child
-                .schema()
-                .fields()
-                .iter()
-                .chain(right_child.schema().fields().iter())
-                .cloned(),
-        ),
+        // [field[0] of the left schema, field[0] of the right schema]
         vec![0, 1],
-        RowLevelIter::new(left_child),
-        RowLevelIter::new(right_child),
+        // field[0] of the left schema
         vec![0],
+        // field[0] of the right schema
         vec![0],
+        left_child,
+        right_child,
         "SortMergeJoinExecutor".into(),
     ))
 }
