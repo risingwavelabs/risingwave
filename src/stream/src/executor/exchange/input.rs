@@ -19,6 +19,7 @@ use futures::Stream;
 use futures_async_stream::try_stream;
 use madsim::time::Instant;
 use pin_project::pin_project;
+use risingwave_common::bail;
 use risingwave_common::error::Result;
 use risingwave_common::util::addr::{is_local_address, HostAddr};
 use risingwave_rpc_client::ComputeClientPool;
@@ -139,6 +140,8 @@ impl RemoteInput {
             match data_res {
                 Ok(stream_msg) => {
                     let bytes = Message::get_encoded_len(&stream_msg);
+                    let msg = stream_msg.get_message().expect("no message");
+
                     metrics
                         .exchange_recv_size
                         .with_label_values(&[&up_actor_id, &down_actor_id])
@@ -152,39 +155,23 @@ impl RemoteInput {
                     // add deserialization duration metric with given sampling frequency
                     let msg_res = if rr % SAMPLING_FREQUENCY == 0 {
                         let start_time = Instant::now();
-                        let msg_res = Message::from_protobuf(
-                            stream_msg
-                                .get_message()
-                                .expect("no message in stream response!"),
-                        );
+                        let msg_res = Message::from_protobuf(msg);
                         metrics
                             .actor_sampled_deserialize_duration_ns
                             .with_label_values(&[&down_actor_id])
                             .inc_by(start_time.elapsed().as_nanos() as u64);
                         msg_res
                     } else {
-                        Message::from_protobuf(
-                            stream_msg
-                                .get_message()
-                                .expect("no message in stream response!"),
-                        )
+                        Message::from_protobuf(msg)
                     };
                     rr += 1;
 
                     match msg_res {
-                        Ok(msg) => {
-                            yield msg;
-                        }
-                        Err(e) => {
-                            error!("RemoteInput forward message error:{}", e);
-                            break;
-                        }
+                        Ok(msg) => yield msg,
+                        Err(e) => bail!("RemoteInput decode message error: {}", e),
                     }
                 }
-                Err(e) => {
-                    error!("RemoteInput tonic error status:{}", e);
-                    break;
-                }
+                Err(e) => bail!("RemoteInput tonic error: {}", e),
             }
         }
     }

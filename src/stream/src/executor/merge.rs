@@ -231,13 +231,10 @@ impl Stream for SelectReceivers {
                     continue;
                 }
                 Poll::Ready(item) => {
-                    let message = item.expect(
-                        "upstream channel closed unexpectedly, please check error in upstream executors"
-                    );
-                    let message = match message {
-                        Ok(message) => message,
-                        Err(e) => return Poll::Ready(Some(Err(e))),
-                    };
+                    let message = item
+                        .expect("upstream closed unexpectedly, please check error in upstream executors")
+                        .expect("upstream error");
+
                     match message {
                         Message::Barrier(barrier) => {
                             let rc = self.upstreams.swap_remove(idx);
