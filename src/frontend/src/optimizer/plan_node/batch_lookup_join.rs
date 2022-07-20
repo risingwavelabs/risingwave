@@ -137,6 +137,12 @@ impl ToBatchProst for BatchLookupJoin {
                 .map(|a| a as i32)
                 .collect(),
             probe_side_table_desc: Some(self.right_table_desc.to_protobuf()),
+            probe_side_vnode_mapping: self
+                .right_table_desc
+                .vnode_mapping
+                .as_ref()
+                .unwrap_or(&vec![])
+                .clone(),
             probe_side_column_ids: self
                 .right_output_column_ids
                 .iter()

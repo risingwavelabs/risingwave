@@ -50,6 +50,7 @@ pub struct ProbeSideSource<C> {
     build_side_eq_types: Vec<DataType>,
     build_side_idxs: Vec<usize>,
     table_desc: CellBasedTableDesc,
+    vnode_mapping: Vec<ParallelUnitId>,
     probe_side_schema: Schema,
     probe_side_column_ids: Vec<i32>,
     context: C,
@@ -66,8 +67,6 @@ pub trait ProbeSideSourceBuilder: Send {
 
 impl<C: BatchTaskContext> ProbeSideSource<C> {
     fn get_parallel_unit_ids(&self, scan_range: &ScanRange) -> Result<Vec<ParallelUnitId>> {
-        assert!(!self.table_desc.vnode_mapping.is_empty());
-
         let dist_keys = self
             .table_desc
             .dist_key_indices
@@ -84,8 +83,8 @@ impl<C: BatchTaskContext> ProbeSideSource<C> {
         let virtual_node = scan_range.try_compute_vnode(&dist_keys, &pk_indices);
 
         let mapping = match virtual_node {
-            None => self.table_desc.vnode_mapping.clone(),
-            Some(vnode) => vec![self.table_desc.vnode_mapping[vnode as usize]],
+            None => self.vnode_mapping.clone(),
+            Some(vnode) => vec![self.vnode_mapping[vnode as usize]],
         };
 
         Ok(mapping)
@@ -503,10 +502,14 @@ impl BoxedExecutorBuilder for LookupJoinExecutorBuilder {
             .map(|&idx| build_side_data_types[idx].clone())
             .collect_vec();
 
+        let vnode_mapping = lookup_join_node.get_probe_side_vnode_mapping().to_vec();
+        assert!(!vnode_mapping.is_empty());
+
         let probe_side_source = ProbeSideSource {
             build_side_eq_types,
             build_side_idxs,
             table_desc: probe_side_table_desc.clone(),
+            vnode_mapping,
             probe_side_schema,
             probe_side_column_ids,
             context: source.context().clone(),

@@ -67,11 +67,6 @@ impl TableDesc {
             columns: self.columns.iter().map(Into::into).collect(),
             order_key: self.order_key.iter().map(|v| v.to_protobuf()).collect(),
             dist_key_indices: self.distribution_key.iter().map(|&k| k as u32).collect(),
-            vnode_mapping: if let Some(vm) = self.vnode_mapping.as_ref() {
-                vm.clone()
-            } else {
-                vec![]
-            },
         }
     }
 }
