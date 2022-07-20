@@ -11,7 +11,6 @@
 // WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 // See the License for the specific language governing permissions and
 // limitations under the License.
-use std::collections::HashSet;
 
 use risingwave_common::error::{ErrorCode, Result};
 use risingwave_common::types::DataType;
@@ -21,7 +20,7 @@ use risingwave_sqlparser::ast::{
 };
 
 use crate::binder::{Binder, Relation};
-use crate::expr::{Expr as _, ExprImpl};
+use crate::expr::{Expr as _, ExprImpl, ExprType, FunctionCall, InputRef};
 
 #[derive(Debug, Clone)]
 pub struct BoundJoin {
@@ -29,6 +28,7 @@ pub struct BoundJoin {
     pub left: Relation,
     pub right: Relation,
     pub cond: ExprImpl,
+    pub projection: Option<Vec<ExprImpl>>,
 }
 
 impl Binder {
@@ -53,17 +53,13 @@ impl Binder {
                 left: root,
                 right,
                 cond: ExprImpl::literal_bool(true),
+                projection: None,
             }));
         }
         Ok(Some(root))
     }
 
     fn bind_table_with_joins(&mut self, table: TableWithJoins) -> Result<Relation> {
-        if let TableFactor::Derived { lateral: true, .. } = &table.relation && !table.joins.is_empty() {
-            return Err(ErrorCode::InternalError(
-                "Lateral subquery must be the sole factor in table".to_string()
-            ).into());
-        }
         let mut root = self.bind_table_factor(table.relation)?;
         for join in table.joins {
             let (constraint, join_type) = match join.join_operator {
@@ -76,22 +72,25 @@ impl Binder {
             };
             let right: Relation;
             let cond: ExprImpl;
+            let mut projection = None;
             if matches!(
                 constraint,
                 JoinConstraint::Using(_) | JoinConstraint::Natural
             ) {
                 let option_rel: Option<Relation>;
-                (cond, option_rel) = self.bind_join_constraint(constraint, Some(join.relation))?;
+                (cond, option_rel, projection) =
+                    self.bind_join_constraint(constraint, Some(join.relation), join_type)?;
                 right = option_rel.unwrap();
             } else {
                 right = self.bind_table_factor(join.relation.clone())?;
-                (cond, _) = self.bind_join_constraint(constraint, None)?;
+                (cond, _, _) = self.bind_join_constraint(constraint, None, join_type)?;
             }
             let join = BoundJoin {
                 join_type,
                 left: root,
                 right,
                 cond,
+                projection,
             };
             root = Relation::Join(Box::new(join));
         }
@@ -103,27 +102,47 @@ impl Binder {
         &mut self,
         constraint: JoinConstraint,
         table_factor: Option<TableFactor>,
-    ) -> Result<(ExprImpl, Option<Relation>)> {
+        join_type: JoinType,
+    ) -> Result<(ExprImpl, Option<Relation>, Option<Vec<ExprImpl>>)> {
         Ok(match constraint {
-            JoinConstraint::None => (ExprImpl::literal_bool(true), None),
+            JoinConstraint::None => (ExprImpl::literal_bool(true), None, None),
             JoinConstraint::Natural => {
                 // First, we identify columns with the same name.
                 let old_context = self.context.clone();
-                self.push_lateral_context();
+                let l_len = old_context.columns.len();
                 // Bind this table factor to an empty context
+                self.push_lateral_context();
                 let table_factor = table_factor.unwrap();
                 let right_table = get_table_name(&table_factor);
                 let relation = self.bind_table_factor(table_factor)?;
-                let columns = HashSet::<_>::from_iter(
-                    self.context
-                        .indexs_of
-                        .keys()
-                        .filter(|s| *s != "_row_id") // filter out `_row_id`
-                        .map(|s| Ident::new(s.to_owned())),
-                );
+                for (column, idxes) in &self.context.indexs_of {
+                    if idxes.len() > 1 {
+                        return Err(ErrorCode::InternalError(format!(
+                            "Ambiguous column name: {}",
+                            column
+                        ))
+                        .into());
+                    }
+                    if idxes.len() < 1 {
+                        return Err(ErrorCode::ItemNotFound(format!(
+                            "Column {} does not have an associated index",
+                            column
+                        ))
+                        .into());
+                    }
+                }
+                let columns = self
+                    .context
+                    .indexs_of
+                    .iter()
+                    .filter(|(s, _)| *s != "_row_id") // filter out `_row_id`
+                    .map(|(s, idxes)| (Ident::new(s.to_owned()), idxes))
+                    .collect::<Vec<_>>();
 
+                let mut left_col_indices = Vec::new();
+                let mut right_col_indices = Vec::new();
                 let mut binary_expr = Expr::Value(Value::Boolean(true));
-                for column in columns {
+                for (column, idxes) in columns {
                     let left_col_index = match old_context.get_index(&column.value) {
                         Err(e) => {
                             if let ErrorCode::ItemNotFound(_) = e.inner() {
@@ -134,6 +153,9 @@ impl Binder {
                         }
                         Ok(idx) => idx,
                     };
+                    left_col_indices.push(left_col_index);
+                    debug_assert_eq!(idxes.len(), 1);
+                    right_col_indices.push(idxes[0]);
                     let left_table = old_context.columns[left_col_index].table_name.clone();
                     binary_expr = Expr::BinaryOp {
                         left: Box::new(binary_expr),
@@ -152,8 +174,68 @@ impl Binder {
                         }),
                     }
                 }
+                let left_col_iter = old_context.columns.iter().map(|left| {
+                    let l_col = left.index;
+                    let l_data_type = left.field.data_type.clone();
+                    if let Some(pos) = left_col_indices.iter().position(|x| *x == l_col) {
+                        match join_type {
+                            JoinType::FullOuter => {
+                                let r_col = right_col_indices[pos];
+                                let r_data_type =
+                                    self.context.columns[r_col].field.data_type().clone();
+                                ExprImpl::FunctionCall(Box::new(
+                                    FunctionCall::new(
+                                        ExprType::Coalesce,
+                                        vec![
+                                            ExprImpl::InputRef(Box::new(InputRef::new(
+                                                l_col,
+                                                l_data_type,
+                                            ))),
+                                            ExprImpl::InputRef(Box::new(InputRef::new(
+                                                r_col + l_len,
+                                                r_data_type,
+                                            ))),
+                                        ],
+                                    )
+                                    .expect("Could not create Coalesce expression"),
+                                ))
+                            }
+                            JoinType::RightOuter => {
+                                let r_col = right_col_indices[pos];
+                                let r_data_type =
+                                    self.context.columns[r_col].field.data_type().clone();
+                                ExprImpl::InputRef(Box::new(InputRef::new(
+                                    r_col + l_len,
+                                    r_data_type,
+                                )))
+                            }
+                            _ => ExprImpl::InputRef(Box::new(InputRef::new(l_col, l_data_type))),
+                        }
+                    } else {
+                        ExprImpl::InputRef(Box::new(InputRef::new(l_col, l_data_type)))
+                    }
+                });
+                let mut r_col = 0;
+                let right_col_iter = (0..self.context.columns.len())
+                    .filter(|idx| !right_col_indices.contains(&idx))
+                    .map(|idx| {
+                        let r_data_type = self.context.columns[idx].field.data_type().clone();
+                        let input_ref =
+                            ExprImpl::InputRef(Box::new(InputRef::new(r_col, r_data_type)));
+                        r_col += 1;
+                        input_ref
+                    });
+                let projection = left_col_iter.chain(right_col_iter).collect();
                 self.pop_and_merge_lateral_context()?;
-                (self.bind_expr(binary_expr)?, Some(relation))
+                let expr = self.bind_expr(binary_expr)?;
+
+                self.context.remove_indices(
+                    &left_col_indices
+                        .iter()
+                        .map(|idx| idx + l_len)
+                        .collect::<Vec<_>>(),
+                );
+                (expr, Some(relation), Some(projection))
             }
             JoinConstraint::On(expr) => {
                 let bound_expr = self.bind_expr(expr)?;
@@ -164,7 +246,7 @@ impl Binder {
                     ))
                     .into());
                 }
-                (bound_expr, None)
+                (bound_expr, None, None)
             }
             JoinConstraint::Using(columns) => {
                 let table_factor = table_factor.unwrap();
@@ -193,7 +275,7 @@ impl Binder {
                 }
                 // We cannot move this into ret expression since it should be done before bind_expr
                 let relation = self.bind_table_factor(table_factor)?;
-                (self.bind_expr(binary_expr)?, Some(relation))
+                (self.bind_expr(binary_expr)?, Some(relation), None)
             }
         })
     }
