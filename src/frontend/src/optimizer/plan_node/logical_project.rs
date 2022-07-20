@@ -396,6 +396,8 @@ impl ToStream for LogicalProject {
     fn logical_rewrite_for_stream(&self) -> Result<(PlanRef, ColIndexMapping)> {
         let (input, input_col_change) = self.input.logical_rewrite_for_stream()?;
         let (proj, out_col_change) = self.rewrite_with_input(input.clone(), input_col_change);
+
+        // Add missing columns of input_pk into the select list.
         let input_pk = input.pk_indices();
         let i2o = Self::i2o_col_mapping_inner(input.schema().len(), proj.exprs());
         let col_need_to_add = input_pk.iter().cloned().filter(|i| i2o.try_map(*i) == None);
@@ -409,8 +411,9 @@ impl ToStream for LogicalProject {
                 }))
                 .collect();
         let proj = Self::new(input, exprs);
-        // the added columns is at the end, so it will not change the exists column index
-        // but the target size of `out_col_change` should be the same as the length of schema.
+        // The added columns is at the end, so it will not change existing column indices.
+        // But the target size of `out_col_change` should be the same as the length of the new
+        // schema.
         let (map, _) = out_col_change.into_parts();
         let out_col_change = ColIndexMapping::with_target_size(map, proj.base.schema.len());
         Ok((proj.into(), out_col_change))

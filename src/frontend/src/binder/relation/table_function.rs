@@ -21,15 +21,8 @@ use risingwave_common::types::{unnested_list_type, DataType};
 use risingwave_sqlparser::ast::FunctionArg;
 
 use super::{Binder, Result};
-use crate::binder::FunctionType;
+use crate::binder::table_function::{BoundTableFunction, TableFunctionType};
 use crate::expr::{Expr as _, ExprImpl, ExprType};
-
-#[derive(Debug, Clone)]
-pub struct BoundTableFunction {
-    pub(crate) args: Vec<ExprImpl>,
-    pub(crate) data_type: DataType,
-    pub(crate) func_type: FunctionType,
-}
 
 impl Binder {
     pub(super) fn bind_unnest_function(
@@ -70,12 +63,12 @@ impl Binder {
                 )]
                 .into_iter();
 
-                self.bind_context(columns, "unnest".to_string(), None)?;
+                self.bind_table_to_context(columns, "unnest".to_string(), None)?;
 
                 Ok(BoundTableFunction {
                     args: vec![expr],
-                    data_type,
-                    func_type: FunctionType::Unnest,
+                    return_type: data_type,
+                    function_type: TableFunctionType::Unnest,
                 })
             } else {
                 Err(ErrorCode::BindError(
@@ -121,12 +114,12 @@ impl Binder {
         )]
         .into_iter();
 
-        self.bind_context(columns, "generate_series".to_string(), None)?;
+        self.bind_table_to_context(columns, "generate_series".to_string(), None)?;
 
         Ok(BoundTableFunction {
             args: exprs,
-            data_type,
-            func_type: FunctionType::Generate,
+            return_type: data_type,
+            function_type: TableFunctionType::Generate,
         })
     }
 }
