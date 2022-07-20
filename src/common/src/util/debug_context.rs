@@ -33,6 +33,8 @@ pub enum DebugContext {
     Unknown,
 }
 
+// FIXME: This is a false-positive clippy test, remove this while bumping toolchain.
+#[expect(clippy::declare_interior_mutable_const)]
 tokio::task_local! {
     pub static DEBUG_CONTEXT: DebugContext
 }
