@@ -17,12 +17,12 @@ use log::debug;
 use pgwire::pg_field_descriptor::PgFieldDescriptor;
 use pgwire::pg_response::{PgResponse, StatementType};
 use risingwave_batch::executor::BoxedDataChunkStream;
-use risingwave_common::error::Result;
+use risingwave_common::error::{ErrorCode, Result};
 use risingwave_common::session_config::QueryMode;
 use risingwave_sqlparser::ast::Statement;
 use tracing::info;
 
-use crate::binder::{Binder, BoundStatement};
+use crate::binder::{Binder, BoundSetExpr, BoundStatement, Relation};
 use crate::handler::util::{to_pg_field, to_pg_rows};
 use crate::planner::Planner;
 use crate::scheduler::{
@@ -45,6 +45,15 @@ pub async fn handle_query(context: OptimizerContext, stmt: Statement) -> Result<
     let query_mode = session.config().get_query_mode();
 
     debug!("query_mode:{:?}", query_mode);
+    let BoundStatement::Query(query) = &bound else {
+        unreachable!();
+    };
+    if let BoundSetExpr::Select(select) = &query.body
+        && let Some(relation) = &select.from
+        && query_mode == QueryMode::Distributed
+        && let Relation::SystemTable(_) = relation {
+        return Err(ErrorCode::InternalError("system table only work in local mode".to_string()).into());
+    }
 
     let (data_stream, pg_descs) = match query_mode {
         QueryMode::Local => local_execute(context, bound)?,
