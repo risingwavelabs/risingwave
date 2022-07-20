@@ -19,7 +19,7 @@ use futures_async_stream::try_stream;
 use itertools::Itertools;
 
 use crate::array::column::Column;
-use crate::array::{ArrayBuilderImpl, ArrayResult, DataChunk, RowRef};
+use crate::array::{ArrayBuilderImpl, ArrayImpl, ArrayResult, DataChunk, RowRef};
 use crate::error::ErrorCode::InternalError;
 use crate::error::RwError;
 use crate::types::{DataType, Datum, DatumRef};
@@ -212,6 +212,39 @@ impl DataChunkBuilder {
         self.ensure_builders()?;
 
         self.do_append_one_row_from_datums(datums)?;
+        if self.buffered_count == self.batch_size {
+            Ok(Some(self.build_data_chunk()?))
+        } else {
+            Ok(None)
+        }
+    }
+
+    /// Append one row from the given two arrays.
+    /// Return a data chunk if the buffer is full after append one row. Otherwise `None`.
+    pub fn append_one_row_from_array_elements<'a, I1, I2>(
+        &mut self,
+        left_arrays: I1,
+        left_row_id: usize,
+        right_arrays: I2,
+        right_row_id: usize,
+    ) -> ArrayResult<Option<DataChunk>>
+    where
+        I1: Iterator<Item = &'a ArrayImpl>,
+        I2: Iterator<Item = &'a ArrayImpl>,
+    {
+        ensure!(self.buffered_count < self.batch_size);
+        self.ensure_builders()?;
+
+        for (array_builder, (array, row_id)) in self.array_builders.iter_mut().zip_eq(
+            left_arrays
+                .map(|array| (array, left_row_id))
+                .chain(right_arrays.map(|array| (array, right_row_id))),
+        ) {
+            array_builder.append_array_element(array, row_id)?
+        }
+
+        self.buffered_count += 1;
+
         if self.buffered_count == self.batch_size {
             Ok(Some(self.build_data_chunk()?))
         } else {
