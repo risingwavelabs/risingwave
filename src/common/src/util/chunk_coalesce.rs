@@ -326,7 +326,7 @@ impl SlicedDataChunk {
 mod tests {
     use crate::array::DataChunk;
     use crate::test_prelude::DataChunkTestExt;
-    use crate::types::DataType;
+    use crate::types::{DataType, ScalarImpl};
     use crate::util::chunk_coalesce::{DataChunkBuilder, SlicedDataChunk};
 
     #[test]
