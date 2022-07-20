@@ -200,7 +200,7 @@ impl<'a, R: Rng> SqlGenerator<'a, R> {
     /// Generates a query with local context.
     /// Used by `WITH`, (and perhaps subquery should use this too)
     fn gen_local_query(&mut self) -> (Query, Vec<Column>) {
-        let old_ctxt = self.new_local_ctxt();
+        let old_ctxt = self.new_local_context();
         let t = self.gen_query();
         self.restore_context(old_ctxt);
         t
