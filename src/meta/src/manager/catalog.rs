@@ -33,7 +33,7 @@ use risingwave_pb::meta::subscribe_response::{Info, Operation};
 use tokio::sync::{Mutex, MutexGuard};
 
 use super::IdCategory;
-use crate::manager::{MetaSrvEnv, NotificationVersion};
+use crate::manager::{MetaSrvEnv, NotificationVersion, Relation};
 use crate::model::{MetadataModel, TableFragments, Transactional};
 use crate::storage::{MetaStore, Transaction};
 
@@ -240,6 +240,34 @@ where
             Err(RwError::from(InternalError(
                 "schema doesn't exist".to_string(),
             )))
+        }
+    }
+
+    pub async fn start_create_procedure(&self, relation: &Relation) -> Result<()> {
+        match relation {
+            Relation::Table(table) => self.start_create_table_procedure(table).await,
+            Relation::Sink(sink) => self.start_create_sink_procedure(sink).await,
+        }
+    }
+
+    pub async fn cancel_create_procedure(&self, relation: &Relation) -> Result<()> {
+        match relation {
+            Relation::Table(table) => self.cancel_create_table_procedure(table).await,
+            Relation::Sink(sink) => self.cancel_create_sink_procedure(sink).await,
+        }
+    }
+
+    pub async fn finish_create_procedure(
+        &self,
+        internal_tables: Option<Vec<Table>>,
+        relation: &Relation,
+    ) -> Result<NotificationVersion> {
+        match relation {
+            Relation::Table(table) => {
+                self.finish_create_table_procedure(internal_tables.unwrap(), table)
+                    .await
+            }
+            Relation::Sink(sink) => self.finish_create_sink_procedure(sink).await,
         }
     }
 
