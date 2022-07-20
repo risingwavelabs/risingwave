@@ -13,12 +13,20 @@ use crate::task::{ActorId, SharedContext};
 pub trait Output: Debug + Send + Sync + 'static {
     async fn send(&mut self, message: Message) -> Result<()>;
 
+    /// The downstream actor id.
     fn actor_id(&self) -> ActorId;
+
+    fn boxed(self) -> BoxedOutput
+    where
+        Self: Sized + 'static,
+    {
+        Box::new(self)
+    }
 }
 
 pub type BoxedOutput = Box<dyn Output>;
 
-/// `LocalOutput` sends data to a local `mpsc::Channel`
+/// `LocalOutput` sends data to a local channel.
 pub struct LocalOutput {
     actor_id: ActorId,
 
@@ -45,8 +53,7 @@ impl Output for LocalOutput {
         self.ch
             .send(message)
             .await
-            .map_err(|_| internal_error("failed to send"))?;
-        Ok(())
+            .map_err(|_| internal_error("failed to send"))
     }
 
     fn actor_id(&self) -> ActorId {
@@ -54,7 +61,10 @@ impl Output for LocalOutput {
     }
 }
 
-/// `RemoteOutput` forwards data to`ExchangeServiceImpl`
+/// `RemoteOutput` compacts the data and send to a local buffer channel, which will be further sent
+/// to the remote actor by [`ExchangeService`].
+///
+/// [`ExchangeService`]: risingwave_pb::task_service::exchange_service_server::ExchangeService
 pub struct RemoteOutput {
     actor_id: ActorId,
 
@@ -86,9 +96,7 @@ impl Output for RemoteOutput {
         self.ch
             .send(message)
             .await
-            .map_err(|_| internal_error("failed to send"))?;
-
-        Ok(())
+            .map_err(|_| internal_error("failed to send"))
     }
 
     fn actor_id(&self) -> ActorId {
@@ -96,6 +104,8 @@ impl Output for RemoteOutput {
     }
 }
 
+/// Create a [`LocalOutput`] or [`RemoteOutput`] instance for the current actor id and the
+/// downstream actor id. Used by dispatchers.
 pub fn new_output(
     context: &SharedContext,
     actor_id: ActorId,
@@ -103,10 +113,12 @@ pub fn new_output(
 ) -> Result<BoxedOutput> {
     let downstream_addr = context.get_actor_info(&down_id)?.get_host()?.into();
     let tx = context.take_sender(&(actor_id, down_id))?;
-    if is_local_address(&context.addr, &downstream_addr) {
-        // if this is a local downstream actor
-        Ok(Box::new(LocalOutput::new(down_id, tx)) as BoxedOutput)
+
+    let output = if is_local_address(&context.addr, &downstream_addr) {
+        LocalOutput::new(down_id, tx).boxed()
     } else {
-        Ok(Box::new(RemoteOutput::new(down_id, tx)) as BoxedOutput)
-    }
+        RemoteOutput::new(down_id, tx).boxed()
+    };
+
+    Ok(output)
 }

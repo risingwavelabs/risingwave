@@ -15,7 +15,10 @@ use crate::executor::monitor::StreamingMetrics;
 use crate::executor::*;
 use crate::task::{FragmentId, SharedContext, UpDownActorIds, UpDownFragmentIds};
 
+/// `Input` provides an interface for [`MergeExecutor`] and [`ReceiverExecutor`] to receive data
+/// from upstream actors.
 pub trait Input: MessageStream {
+    /// The upstream actor id.
     fn actor_id(&self) -> ActorId;
 
     fn boxed_input(self) -> BoxedInput
@@ -28,8 +31,41 @@ pub trait Input: MessageStream {
 
 pub type BoxedInput = Pin<Box<dyn Input>>;
 
-type RemoteInputStreamInner = impl MessageStream;
+/// `LocalInput` receives data from a local channel.
+pub struct LocalInput {
+    channel: Receiver<Message>,
 
+    actor_id: ActorId,
+}
+
+impl LocalInput {
+    fn new(channel: Receiver<Message>, actor_id: ActorId) -> Self {
+        Self { channel, actor_id }
+    }
+
+    #[cfg(test)]
+    pub fn for_test(channel: Receiver<Message>) -> BoxedInput {
+        // `actor_id` is currently only used by configuration change, use a dummy value.
+        Self::new(channel, 0).boxed_input()
+    }
+}
+
+impl Stream for LocalInput {
+    type Item = MessageStreamItem;
+
+    fn poll_next(mut self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Option<Self::Item>> {
+        // TODO: shall we pass the error with local exchange?
+        self.channel.poll_recv(cx).map(|m| m.map(Ok))
+    }
+}
+
+impl Input for LocalInput {
+    fn actor_id(&self) -> ActorId {
+        self.actor_id
+    }
+}
+
+/// `RemoteInput` connects to the upstream exchange server and receives data with `gRPC`.
 #[pin_project]
 pub struct RemoteInput {
     #[pin]
@@ -37,6 +73,7 @@ pub struct RemoteInput {
 
     actor_id: ActorId,
 }
+type RemoteInputStreamInner = impl MessageStream;
 
 impl RemoteInput {
     /// Create a remote input from compute client and related info. Should provide the corresponding
@@ -153,40 +190,8 @@ impl Input for RemoteInput {
     }
 }
 
-pub struct LocalInput {
-    channel: Receiver<Message>,
-
-    actor_id: ActorId,
-}
-
-impl LocalInput {
-    fn new(channel: Receiver<Message>, actor_id: ActorId) -> Self {
-        Self { channel, actor_id }
-    }
-
-    #[cfg(test)]
-    pub fn for_test(channel: Receiver<Message>) -> BoxedInput {
-        Self::new(channel, 0).boxed_input()
-    }
-}
-
-impl Stream for LocalInput {
-    type Item = MessageStreamItem;
-
-    fn poll_next(mut self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Option<Self::Item>> {
-        self.channel.poll_recv(cx).map(|m| m.map(Ok))
-    }
-}
-
-impl Input for LocalInput {
-    fn actor_id(&self) -> ActorId {
-        self.actor_id
-    }
-}
-
-/// Create an input for merge and receiver executor. For local upstream actor, this will be simply a
-/// channel receiver. For remote upstream actor, this will spawn a long running [`RemoteInput`] task
-/// to receive messages from `gRPC` exchange service and return the receiver.
+/// Create a [`LocalInput`] or [`RemoteInput`] instance with given info. Used by merge executors and
+/// receiver executors.
 pub(crate) fn new_input(
     context: &SharedContext,
     metrics: Arc<StreamingMetrics>,
