@@ -320,7 +320,7 @@ impl Compose for RedPandaConfig {
             .arg("--smp")
             .arg(self.cpus.to_string())
             .arg("--reserve-memory")
-            .arg(&self.memory)
+            .arg("0")
             .arg("--memory")
             .arg(&self.memory)
             .arg("--overprovisioned")
