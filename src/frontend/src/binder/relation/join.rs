@@ -123,7 +123,7 @@ impl Binder {
                         ))
                         .into());
                     }
-                    if idxes.len() < 1 {
+                    if idxes.is_empty() {
                         return Err(ErrorCode::ItemNotFound(format!(
                             "Column {} does not have an associated index",
                             column
@@ -182,7 +182,7 @@ impl Binder {
                             JoinType::FullOuter => {
                                 let r_col = right_col_indices[pos];
                                 let r_data_type =
-                                    self.context.columns[r_col].field.data_type().clone();
+                                    self.context.columns[r_col].field.data_type();
                                 ExprImpl::FunctionCall(Box::new(
                                     FunctionCall::new(
                                         ExprType::Coalesce,
@@ -203,7 +203,7 @@ impl Binder {
                             JoinType::RightOuter => {
                                 let r_col = right_col_indices[pos];
                                 let r_data_type =
-                                    self.context.columns[r_col].field.data_type().clone();
+                                    self.context.columns[r_col].field.data_type();
                                 ExprImpl::InputRef(Box::new(InputRef::new(
                                     r_col + l_len,
                                     r_data_type,
@@ -217,9 +217,9 @@ impl Binder {
                 });
                 let mut r_col = 0;
                 let right_col_iter = (0..self.context.columns.len())
-                    .filter(|idx| !right_col_indices.contains(&idx))
+                    .filter(|idx| !right_col_indices.contains(idx))
                     .map(|idx| {
-                        let r_data_type = self.context.columns[idx].field.data_type().clone();
+                        let r_data_type = self.context.columns[idx].field.data_type();
                         let input_ref =
                             ExprImpl::InputRef(Box::new(InputRef::new(r_col, r_data_type)));
                         r_col += 1;
