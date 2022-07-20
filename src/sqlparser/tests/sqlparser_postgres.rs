@@ -156,15 +156,15 @@ fn parse_create_table_with_defaults() {
                 with_options,
                 vec![
                     SqlOption {
-                        name: "fillfactor".into(),
+                        name: vec!["fillfactor".into()].into(),
                         value: number("20")
                     },
                     SqlOption {
-                        name: "user_catalog_table".into(),
+                        name: vec!["user_catalog_table".into()].into(),
                         value: Value::Boolean(true)
                     },
                     SqlOption {
-                        name: "autovacuum_vacuum_threshold".into(),
+                        name: vec!["autovacuum_vacuum_threshold".into()].into(),
                         value: number("100")
                     },
                 ]
