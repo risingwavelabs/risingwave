@@ -34,12 +34,12 @@ impl<'a, R: Rng> SqlGenerator<'a, R> {
     /// A relation specified in the FROM clause.
     pub(crate) fn gen_from_relation(&mut self) -> TableWithJoins {
         match self.rng.gen_range(0..=9) {
-            0..=8 => self.gen_simple_table(),
-            9..=9 => self.gen_time_window_func(),
+            0..=7 => self.gen_simple_table(),
+            8..=8 => self.gen_time_window_func(),
             // TODO: Enable after resolving: <https://github.com/singularity-data/risingwave/issues/2771>.
-            10..=10 => self.gen_equijoin_clause(),
+            9..=9 => self.gen_equijoin_clause(),
             // TODO: Currently `gen_subquery` will cause panic due to some wrong assertions.
-            11..=11 => self.gen_subquery(),
+            10..=10 => self.gen_subquery(),
             _ => unreachable!(),
         }
     }
@@ -93,6 +93,9 @@ impl<'a, R: Rng> SqlGenerator<'a, R> {
                     available_join_on_columns.push((left_column, right_column))
                 }
             }
+        }
+        if available_join_on_columns.is_empty() {
+            return self.gen_simple_table();
         }
         let i = self.rng.gen_range(0..available_join_on_columns.len());
         let (left_column, right_column) = available_join_on_columns[i];
