@@ -52,6 +52,7 @@ mod debug;
 pub mod dispatch;
 mod dynamic_filter;
 mod error;
+mod exchange;
 mod expand;
 mod filter;
 mod global_simple_agg;

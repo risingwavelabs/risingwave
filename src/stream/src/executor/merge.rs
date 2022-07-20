@@ -15,9 +15,10 @@
 use std::pin::Pin;
 use std::task::{Context, Poll};
 
-use futures::{pin_mut, Stream, StreamExt};
-use futures_async_stream::{for_await, try_stream};
+use futures::{pin_mut, FutureExt, Stream, StreamExt};
+use futures_async_stream::{for_await, stream, try_stream};
 use madsim::time::Instant;
+use pin_project::pin_project;
 use risingwave_common::catalog::Schema;
 use risingwave_common::error::{Result, RwError};
 use risingwave_common::util::addr::is_local_address;
@@ -30,6 +31,120 @@ use super::error::StreamExecutorError;
 use super::*;
 use crate::executor::monitor::StreamingMetrics;
 use crate::task::{FragmentId, SharedContext, UpDownActorIds, UpDownFragmentIds};
+
+trait Input: Stream<Item = Message> {
+    fn actor_id(&self) -> ActorId;
+}
+
+type RemoteInputStreamInner = impl Stream<Item = Message>;
+
+#[pin_project]
+pub struct RemoteInputNew {
+    #[pin]
+    inner: RemoteInputStreamInner,
+
+    actor_id: ActorId,
+}
+
+impl RemoteInputNew {
+    /// Create a remote input from compute client and related info. Should provide the corresponding
+    /// compute client of where the actor is placed.
+    pub async fn new(
+        client: ComputeClient,
+        up_down_ids: UpDownActorIds,
+        up_down_frag: UpDownFragmentIds,
+        metrics: Arc<StreamingMetrics>,
+    ) -> Result<Self> {
+        let stream = client
+            .get_stream(up_down_ids.0, up_down_ids.1, up_down_frag.0, up_down_frag.1)
+            .await?;
+
+        let actor_id = up_down_ids.0;
+
+        Ok(Self {
+            actor_id,
+            inner: Self::run(up_down_ids, up_down_frag, metrics, stream),
+        })
+    }
+
+    #[stream(item = Message)]
+    async fn run(
+        up_down_ids: UpDownActorIds,
+        up_down_frag: UpDownFragmentIds,
+        metrics: Arc<StreamingMetrics>,
+        stream: Streaming<GetStreamResponse>,
+    ) {
+        let up_actor_id = up_down_ids.0.to_string();
+        let down_actor_id = up_down_ids.1.to_string();
+        let up_fragment_id = up_down_frag.0.to_string();
+        let down_fragment_id = up_down_frag.1.to_string();
+
+        let mut rr = 0;
+        const SAMPLING_FREQUENCY: u64 = 100;
+
+        #[for_await]
+        for data_res in stream {
+            match data_res {
+                Ok(stream_msg) => {
+                    let bytes = Message::get_encoded_len(&stream_msg);
+                    metrics
+                        .exchange_recv_size
+                        .with_label_values(&[&up_actor_id, &down_actor_id])
+                        .inc_by(bytes as u64);
+
+                    metrics
+                        .exchange_frag_recv_size
+                        .with_label_values(&[&up_fragment_id, &down_fragment_id])
+                        .inc_by(bytes as u64);
+
+                    // add deserialization duration metric with given sampling frequency
+                    let msg_res = if rr % SAMPLING_FREQUENCY == 0 {
+                        let start_time = Instant::now();
+                        let msg_res = Message::from_protobuf(
+                            stream_msg
+                                .get_message()
+                                .expect("no message in stream response!"),
+                        );
+                        metrics
+                            .actor_sampled_deserialize_duration_ns
+                            .with_label_values(&[&down_actor_id])
+                            .inc_by(start_time.elapsed().as_nanos() as u64);
+                        msg_res
+                    } else {
+                        Message::from_protobuf(
+                            stream_msg
+                                .get_message()
+                                .expect("no message in stream response!"),
+                        )
+                    };
+                    rr += 1;
+
+                    match msg_res {
+                        Ok(msg) => {
+                            yield msg;
+                        }
+                        Err(e) => {
+                            error!("RemoteInput forward message error:{}", e);
+                            break;
+                        }
+                    }
+                }
+                Err(e) => {
+                    error!("RemoteInput tonic error status:{}", e);
+                    break;
+                }
+            }
+        }
+    }
+}
+
+impl Stream for RemoteInputNew {
+    type Item = Message;
+
+    fn poll_next(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Option<Self::Item>> {
+        self.project().inner.poll_next(cx)
+    }
+}
 
 /// Receive data from `gRPC` and forwards to `MergerExecutor`/`ReceiverExecutor`
 pub struct RemoteInput {
