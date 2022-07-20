@@ -27,7 +27,6 @@ mod select;
 mod set_expr;
 mod statement;
 mod struct_field;
-mod table_function;
 mod update;
 mod values;
 
@@ -44,7 +43,6 @@ use risingwave_common::error::ErrorCode;
 pub use select::BoundSelect;
 pub use set_expr::BoundSetExpr;
 pub use statement::BoundStatement;
-pub use table_function::{BoundTableFunction, TableFunctionType};
 pub use update::BoundUpdate;
 pub use values::BoundValues;
 
