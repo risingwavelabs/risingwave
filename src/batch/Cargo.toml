@@ -78,3 +78,6 @@ harness = false
 name = "sort_merge_join"
 harness = false
 
+[[bench]]
+name = "hash_join"
+harness = false

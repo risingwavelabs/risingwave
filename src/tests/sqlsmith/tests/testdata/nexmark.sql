@@ -1,20 +1,20 @@
 CREATE TABLE person (
     id BIGINT,
     name VARCHAR,
-    emailAddress VARCHAR,
-    creditCard VARCHAR,
+    email_address VARCHAR,
+    credit_card VARCHAR,
     city VARCHAR,
     state VARCHAR,
-    dateTime TIMESTAMP
+    date_time TIMESTAMP
 );
 
 CREATE TABLE auction (
     id BIGINT,
-    itemName VARCHAR,
+    item_name VARCHAR,
     description VARCHAR,
-    initialBid BIGINT,
+    initial_bid BIGINT,
     reserve BIGINT,
-    dateTime TIMESTAMP,
+    date_time TIMESTAMP,
     expires TIMESTAMP,
     seller BIGINT,
     category BIGINT
@@ -24,5 +24,5 @@ CREATE TABLE bid (
     auction BIGINT,
     bidder BIGINT,
     price BIGINT,
-    dateTime TIMESTAMP
+    date_time TIMESTAMP
 );

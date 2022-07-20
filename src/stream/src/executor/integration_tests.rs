@@ -108,7 +108,7 @@ async fn test_merger_sum_aggr() {
         let (actor, channel) = make_actor(rx);
         outputs.push(channel);
         handles.push(tokio::spawn(actor.run()));
-        inputs.push(Box::new(LocalOutput::new(233, tx)) as Box<dyn Output>);
+        inputs.push(Box::new(LocalOutput::new(233, tx)) as BoxedOutput);
     }
 
     // create a round robin dispatcher, which dispatches messages to the actors
@@ -144,17 +144,8 @@ async fn test_merger_sum_aggr() {
     );
     handles.push(tokio::spawn(actor.run()));
 
-    let metrics = Arc::new(StreamingMetrics::unused());
     // use a merge operator to collect data from dispatchers before sending them to aggregator
-    let merger = MergeExecutor::new(
-        schema,
-        vec![],
-        0,
-        outputs,
-        ActorContext::create(),
-        0,
-        metrics,
-    );
+    let merger = MergeExecutor::for_test(outputs);
 
     // for global aggregator, we need to sum data and sum row count
     let append_only = false;
@@ -275,7 +266,7 @@ impl StreamConsumer for MockConsumer {
 /// `SenderConsumer` consumes data from input executor and send it into a channel.
 pub struct SenderConsumer {
     input: BoxedExecutor,
-    channel: Box<dyn Output>,
+    channel: BoxedOutput,
 }
 
 impl StreamConsumer for SenderConsumer {
