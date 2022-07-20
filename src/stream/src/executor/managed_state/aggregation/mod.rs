@@ -27,11 +27,12 @@ pub use value::*;
 
 use crate::executor::aggregation::AggCall;
 use crate::executor::error::{StreamExecutorError, StreamExecutorResult};
+use crate::executor::managed_state::aggregation::string_agg_new::ManagedStringAggState;
 use crate::executor::PkDataTypes;
 
 mod extreme;
 
-// mod string_agg;
+mod string_agg_new;
 mod value;
 
 /// Verify if the data going through the state is valid by checking if `ops.len() ==
@@ -144,10 +145,14 @@ impl<S: StateStore> ManagedStateImpl<S> {
             }
             AggKind::StringAgg => {
                 // TODO, It seems with `order by`, `StringAgg` needs more stuff from `AggCall`
-                Err(StreamExecutorError::not_implemented(
-                    "It seems with `order by`, `StringAgg` needs more stuff from `AggCall`",
-                    None,
-                ))
+                // Err(StreamExecutorError::not_implemented(
+                //     "It seems with `order by`, `StringAgg` needs more stuff from `AggCall`",
+                //     None,
+                // ))
+                println!("[rc] AggKind::StringAgg!!");
+                Ok(Self::Table(Box::new(ManagedStringAggState::new(
+                    pk_data_types,
+                )?)))
             }
             // TODO: for append-only lists, we can create `ManagedValueState` instead of
             // `ManagedExtremeState`.

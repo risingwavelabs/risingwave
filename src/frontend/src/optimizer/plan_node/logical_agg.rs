@@ -362,14 +362,15 @@ impl LogicalAgg {
                                     vec![(OrderType::Descending, agg_call.inputs[0].index)]
                                 }
                                 AggKind::StringAgg => {
-                                    // TODO: string agg order by
-                                    todo!();
+                                    // TODO(rc): order by clause
+                                    vec![]
                                 }
                                 _ => unreachable!(),
                             }
                         };
 
                         let include_keys = match agg_call.agg_kind {
+                            // TODO(rc): is this needed?
                             AggKind::StringAgg => {
                                 vec![agg_call.inputs[0].index]
                             }
