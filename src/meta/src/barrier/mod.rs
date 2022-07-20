@@ -670,7 +670,7 @@ where
         }
     }
 
-    /// Try to commit this node. It err, returns
+    /// Try to commit this node. If err, returns
     async fn complete_barriers(
         &self,
         node: &mut EpochNode<S>,

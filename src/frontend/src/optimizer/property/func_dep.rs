@@ -200,7 +200,7 @@ impl FunctionalDependencySet {
         }
         closure
     }
-    
+
     /// Return `true` if the dependency determinant -> dependant exists.
     ///
     /// # Examples

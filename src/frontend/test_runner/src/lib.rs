@@ -215,7 +215,7 @@ impl TestCase {
                     };
                     let sql = format!(
                         r#"CREATE {} SOURCE {}
-    WITH ('kafka.topic' = 'abc', 'kafka.servers' = 'localhost:1001')
+    WITH (kafka.topic = 'abc', kafka.servers = 'localhost:1001')
     ROW FORMAT {} MESSAGE '.test.TestRecord' ROW SCHEMA LOCATION 'file://"#,
                         materialized, source.name, source.row_format
                     );

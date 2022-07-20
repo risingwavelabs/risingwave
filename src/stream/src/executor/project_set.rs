@@ -22,6 +22,7 @@ use itertools::Itertools;
 use risingwave_common::array::column::Column;
 use risingwave_common::array::{ArrayBuilder, ArrayRef, DataChunk, I64ArrayBuilder, StreamChunk};
 use risingwave_common::catalog::{Field, Schema};
+use risingwave_common::types::DataType;
 use risingwave_common::util::chunk_coalesce::DEFAULT_CHUNK_BUFFER_SIZE;
 use risingwave_expr::table_function::ProjectSetSelectItem;
 
@@ -35,10 +36,12 @@ impl ProjectSetExecutor {
         select_list: Vec<ProjectSetSelectItem>,
         executor_id: u64,
     ) -> Self {
-        let fields = select_list
-            .iter()
-            .map(|expr| Field::unnamed(expr.return_type()))
-            .collect();
+        let mut fields = vec![Field::with_name(DataType::Int64, "projected_row_id")];
+        fields.extend(
+            select_list
+                .iter()
+                .map(|expr| Field::unnamed(expr.return_type())),
+        );
 
         let info = ExecutorInfo {
             schema: Schema { fields },
@@ -92,7 +95,11 @@ impl Executor for ProjectSetExecutor {
 impl ProjectSetExecutor {
     #[try_stream(ok = Message, error = StreamExecutorError)]
     async fn execute_inner(self) {
-        let data_types = self.schema().data_types();
+        let data_types = self
+            .select_list
+            .iter()
+            .map(|i| i.return_type())
+            .collect_vec();
         let input = self.input.execute();
 
         #[for_await]

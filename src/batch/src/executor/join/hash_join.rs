@@ -40,7 +40,7 @@ use crate::task::{BatchTaskContext, TaskId};
 /// select a.a1, a.a2, b.b1, b.b2 from a inner join b where a.a3 = b.b3 and a.a1 = b.b1
 /// ```
 #[derive(Default)]
-pub(super) struct EquiJoinParams {
+pub struct EquiJoinParams {
     join_type: JoinType,
     /// Column indexes of left key in equi join, e.g., the column indexes of `b1` and `b3` in `b`.
     left_key_columns: Vec<usize>,
@@ -64,7 +64,7 @@ pub(super) struct EquiJoinParams {
     pub cond: Option<BoxedExpression>,
 }
 
-pub(super) struct HashJoinExecutor<K> {
+pub struct HashJoinExecutor<K> {
     /// Probe side
     left_child: Option<BoxedExecutor>,
     /// Build side
@@ -115,6 +115,33 @@ impl EquiJoinParams {
     #[inline(always)]
     pub(super) fn has_non_equi_cond(&self) -> bool {
         self.cond.is_some()
+    }
+
+    #[allow(clippy::too_many_arguments)]
+    pub fn new(
+        join_type: JoinType,
+        left_key_columns: Vec<usize>,
+        left_key_types: Vec<DataType>,
+        left_col_len: usize,
+        right_key_columns: Vec<usize>,
+        right_key_types: Vec<DataType>,
+        right_col_len: usize,
+        full_data_types: Vec<DataType>,
+        batch_size: usize,
+        cond: Option<BoxedExpression>,
+    ) -> Self {
+        Self {
+            join_type,
+            left_key_columns,
+            left_key_types,
+            left_col_len,
+            right_key_columns,
+            right_key_types,
+            right_col_len,
+            full_data_types,
+            batch_size,
+            cond,
+        }
     }
 }
 
@@ -240,7 +267,7 @@ pub enum HashJoinState {
 }
 
 impl<K> HashJoinExecutor<K> {
-    fn new(
+    pub fn new(
         left_child: BoxedExecutor,
         right_child: BoxedExecutor,
         params: EquiJoinParams,

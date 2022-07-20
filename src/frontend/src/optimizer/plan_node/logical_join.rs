@@ -722,8 +722,6 @@ impl ToBatch for LogicalJoin {
             self.on.clone(),
         );
 
-        log::error!("{:?}", self.join_type);
-
         let left = self.left().to_batch()?;
         let right = self.right().to_batch()?;
         let logical_join = self.clone_with_left_right(left, right);

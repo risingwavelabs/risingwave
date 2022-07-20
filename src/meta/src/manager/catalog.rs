@@ -272,7 +272,12 @@ where
                 core.add_table(&internal_table);
                 self.env
                     .notification_manager()
-                    .notify_frontend(Operation::Add, Info::Table(internal_table))
+                    .notify_frontend(Operation::Add, Info::Table(internal_table.to_owned()))
+                    .await;
+
+                self.env
+                    .notification_manager()
+                    .notify_compactor(Operation::Add, Info::Table(internal_table.to_owned()))
                     .await;
             }
             core.add_table(table);
@@ -280,6 +285,12 @@ where
                 .env
                 .notification_manager()
                 .notify_frontend(Operation::Add, Info::Table(table.to_owned()))
+                .await;
+
+            // notify table_catalog to compactor
+            self.env
+                .notification_manager()
+                .notify_compactor(Operation::Add, Info::Table(table.to_owned()))
                 .await;
             Ok(version)
         } else {
@@ -301,29 +312,6 @@ where
         } else {
             Err(RwError::from(InternalError(
                 "table already exist or not in creating procedure".to_string(),
-            )))
-        }
-    }
-
-    pub async fn create_table(&self, table: &Table) -> Result<NotificationVersion> {
-        let mut core = self.core.lock().await;
-        if !core.has_table(table) {
-            table.insert(self.env.meta_store()).await?;
-            core.add_table(table);
-            for &dependent_relation_id in &table.dependent_relations {
-                core.increase_ref_count(dependent_relation_id);
-            }
-
-            let version = self
-                .env
-                .notification_manager()
-                .notify_frontend(Operation::Add, Info::Table(table.to_owned()))
-                .await;
-
-            Ok(version)
-        } else {
-            Err(RwError::from(InternalError(
-                "table already exists".to_string(),
             )))
         }
     }
@@ -352,7 +340,13 @@ where
                     let version = self
                         .env
                         .notification_manager()
-                        .notify_frontend(Operation::Delete, Info::Table(table))
+                        .notify_frontend(Operation::Delete, Info::Table(table.to_owned()))
+                        .await;
+
+                    // notify table_catalog to compactor
+                    self.env
+                        .notification_manager()
+                        .notify_compactor(Operation::Delete, Info::Table(table.to_owned()))
                         .await;
 
                     Ok(version)
@@ -416,26 +410,6 @@ where
         }
     }
 
-    pub async fn create_source(&self, source: &Source) -> Result<NotificationVersion> {
-        let mut core = self.core.lock().await;
-        if !core.has_source(source) {
-            source.insert(self.env.meta_store()).await?;
-            core.add_source(source);
-
-            let version = self
-                .env
-                .notification_manager()
-                .notify_frontend(Operation::Add, Info::Source(source.to_owned()))
-                .await;
-
-            Ok(version)
-        } else {
-            Err(RwError::from(InternalError(
-                "source already exists".to_string(),
-            )))
-        }
-    }
-
     pub async fn update_table_mapping(
         &self,
         fragments: &Vec<TableFragments>,
@@ -473,6 +447,11 @@ where
             self.env
                 .notification_manager()
                 .notify_frontend(Operation::Update, Info::Table(table.to_owned()))
+                .await;
+
+            self.env
+                .notification_manager()
+                .notify_compactor(Operation::Update, Info::Table(table.to_owned()))
                 .await;
             core.add_table(table);
         }
@@ -569,12 +548,22 @@ where
                 core.add_table(&table);
                 self.env
                     .notification_manager()
-                    .notify_frontend(Operation::Add, Info::Table(table))
+                    .notify_frontend(Operation::Add, Info::Table(table.to_owned()))
+                    .await;
+
+                self.env
+                    .notification_manager()
+                    .notify_compactor(Operation::Add, Info::Table(table.to_owned()))
                     .await;
             }
             self.env
                 .notification_manager()
                 .notify_frontend(Operation::Add, Info::Table(mview.to_owned()))
+                .await;
+
+            self.env
+                .notification_manager()
+                .notify_compactor(Operation::Add, Info::Table(mview.to_owned()))
                 .await;
             // Currently frontend uses source's version
             let version = self
@@ -674,8 +663,14 @@ where
 
                 self.env
                     .notification_manager()
-                    .notify_frontend(Operation::Delete, Info::Table(mview))
+                    .notify_frontend(Operation::Delete, Info::Table(mview.to_owned()))
                     .await;
+
+                self.env
+                    .notification_manager()
+                    .notify_compactor(Operation::Delete, Info::Table(mview.to_owned()))
+                    .await;
+
                 let version = self
                     .env
                     .notification_manager()

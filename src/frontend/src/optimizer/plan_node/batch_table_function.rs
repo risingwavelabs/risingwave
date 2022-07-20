@@ -14,14 +14,11 @@
 
 use std::fmt;
 
-use itertools::Itertools;
 use risingwave_common::error::Result;
 use risingwave_pb::batch_plan::plan_node::NodeBody;
 use risingwave_pb::batch_plan::TableFunctionNode;
-use risingwave_pb::expr::TableFunction;
 
 use super::{PlanBase, PlanRef, PlanTreeNodeLeaf, ToBatchProst, ToDistributedBatch};
-use crate::expr::Expr;
 use crate::optimizer::plan_node::logical_table_function::LogicalTableFunction;
 use crate::optimizer::plan_node::ToLocalBatch;
 use crate::optimizer::property::{Distribution, Order};
@@ -54,7 +51,11 @@ impl BatchTableFunction {
 
 impl fmt::Display for BatchTableFunction {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-        self.logical.fmt_with_name(f, "BatchTableFunction")
+        write!(
+            f,
+            "BatchTableFunction {{ {:?} }}",
+            self.logical.table_function
+        )
     }
 }
 
@@ -67,16 +68,7 @@ impl ToDistributedBatch for BatchTableFunction {
 impl ToBatchProst for BatchTableFunction {
     fn to_batch_prost_body(&self) -> NodeBody {
         NodeBody::TableFunction(TableFunctionNode {
-            table_function: Some(TableFunction {
-                function_type: self.logical.function_type.clone() as i32,
-                args: self
-                    .logical
-                    .args
-                    .iter()
-                    .map(|c| c.to_expr_proto())
-                    .collect_vec(),
-                return_type: Some(self.logical.data_type.to_protobuf()),
-            }),
+            table_function: Some(self.logical.table_function.to_protobuf()),
         })
     }
 }
