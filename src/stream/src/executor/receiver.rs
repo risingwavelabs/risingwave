@@ -27,7 +27,8 @@ use crate::task::ActorId;
 /// there should be a `ReceiverExecutor` running in the background, so as to push
 /// messages down to the executors.
 pub struct ReceiverExecutor {
-    receiver: BoxedInput,
+    /// Input from upstream.
+    input: BoxedInput,
 
     /// Logical Operator Info
     info: ExecutorInfo,
@@ -55,14 +56,14 @@ impl ReceiverExecutor {
     pub fn new(
         schema: Schema,
         pk_indices: PkIndices,
-        receiver: BoxedInput,
+        input: BoxedInput,
         actor_context: ActorContextRef,
         receiver_id: u64,
         actor_id: ActorId,
         metrics: Arc<StreamingMetrics>,
     ) -> Self {
         Self {
-            receiver,
+            input,
             info: ExecutorInfo {
                 schema,
                 pk_indices,
@@ -80,7 +81,7 @@ impl Executor for ReceiverExecutor {
         let mut status = self.status;
         let metrics = self.metrics.clone();
         let actor_id_str = self.actor_id.to_string();
-        self.receiver
+        self.input
             .inspect(move |msg| {
                 let Ok(msg) = msg else { return };
                 match &msg {

@@ -15,7 +15,7 @@
 use std::pin::Pin;
 use std::task::{Context, Poll};
 
-use futures::{pin_mut, FutureExt, Stream, StreamExt};
+use futures::{pin_mut, Stream, StreamExt};
 use futures_async_stream::try_stream;
 use risingwave_common::catalog::Schema;
 
@@ -26,13 +26,11 @@ use crate::executor::exchange::input::new_input;
 use crate::executor::monitor::StreamingMetrics;
 use crate::task::{FragmentId, SharedContext};
 
-type Upstream = BoxedInput;
-
 /// `MergeExecutor` merges data from multiple channels. Dataflow from one channel
 /// will be stopped on barrier.
 pub struct MergeExecutor {
     /// Upstream channels.
-    upstreams: Vec<Upstream>,
+    upstreams: Vec<BoxedInput>,
 
     /// Belonged actor id.
     actor_id: ActorId,
@@ -63,7 +61,7 @@ impl MergeExecutor {
         actor_id: ActorId,
         fragment_id: FragmentId,
         upstream_fragment_id: FragmentId,
-        inputs: Vec<Upstream>,
+        inputs: Vec<BoxedInput>,
         context: Arc<SharedContext>,
         actor_context: ActorContextRef,
         receiver_id: u64,
@@ -88,7 +86,6 @@ impl MergeExecutor {
     #[cfg(test)]
     pub fn for_test(inputs: Vec<tokio::sync::mpsc::Receiver<Message>>) -> Self {
         use super::exchange::input::LocalInput;
-        use crate::executor::exchange::input::Input;
 
         Self::new(
             Schema::default(),
@@ -96,11 +93,7 @@ impl MergeExecutor {
             114,
             514,
             1919,
-            inputs
-                .into_iter()
-                .enumerate()
-                .map(|(i, r)| LocalInput::new(r, i as _).boxed_input())
-                .collect(),
+            inputs.into_iter().map(LocalInput::for_test).collect(),
             SharedContext::for_test().into(),
             ActorContext::create(),
             810,
@@ -187,15 +180,15 @@ impl Executor for MergeExecutor {
 }
 
 pub struct SelectReceivers {
-    blocks: Vec<Upstream>,
-    upstreams: Vec<Upstream>,
+    blocks: Vec<BoxedInput>,
+    upstreams: Vec<BoxedInput>,
     barrier: Option<Barrier>,
     last_base: usize,
     actor_id: u32,
 }
 
 impl SelectReceivers {
-    fn new(actor_id: u32, upstreams: Vec<Upstream>) -> Self {
+    fn new(actor_id: u32, upstreams: Vec<BoxedInput>) -> Self {
         Self {
             blocks: Vec::with_capacity(upstreams.len()),
             upstreams,

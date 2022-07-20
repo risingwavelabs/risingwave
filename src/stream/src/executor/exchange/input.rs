@@ -160,8 +160,13 @@ pub struct LocalInput {
 }
 
 impl LocalInput {
-    pub fn new(channel: Receiver<Message>, actor_id: ActorId) -> Self {
+    fn new(channel: Receiver<Message>, actor_id: ActorId) -> Self {
         Self { channel, actor_id }
+    }
+
+    #[cfg(test)]
+    pub fn for_test(channel: Receiver<Message>) -> BoxedInput {
+        Self::new(channel, 0).boxed_input()
     }
 }
 
