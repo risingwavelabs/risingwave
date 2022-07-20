@@ -16,21 +16,21 @@ use std::fmt;
 
 use risingwave_common::catalog::{Field, Schema};
 use risingwave_common::types::DataType;
-use risingwave_pb::expr::ProjectSetSelectItem as SelectItemProst;
 
 use super::{
     BatchProjectSet, ColPrunable, LogicalFilter, LogicalProject, PlanBase, PlanRef,
     PlanTreeNodeUnary, PredicatePushdown, StreamProjectSet, ToBatch, ToStream,
 };
-use crate::binder::BoundTableFunction;
-use crate::expr::{Expr, ExprImpl, ExprRewriter, InputRef};
+use crate::expr::{
+    Expr, ExprImpl, ExprRewriter, ExprVerboseDisplay, FunctionCall, InputRef, TableFunction,
+};
 use crate::risingwave_common::error::Result;
 use crate::utils::{ColIndexMapping, Condition};
 
 /// `LogicalProjectSet` projects one row multiple times according to `select_list`.
 ///
-/// Different from `Project`, it supports [`TableFunction`](crate::binder::BoundTableFunction)s.
-/// See also [`SelectItemProst`] for examples.
+/// Different from `Project`, it supports [`TableFunction`](crate::expr::TableFunction)s.
+/// See also [`ProjectSetSelectItem`](risingwave_pb::expr::ProjectSetSelectItem) for examples.
 ///
 /// To have a pk, it has a hidden column `projected_row_id` at the beginning. The implementation of
 /// `LogicalProjectSet` is highly similar to [`LogicalProject`], except for the additional hidden
@@ -38,62 +38,17 @@ use crate::utils::{ColIndexMapping, Condition};
 #[derive(Debug, Clone)]
 pub struct LogicalProjectSet {
     pub base: PlanBase,
-    select_list: Vec<ProjectSetSelectItem>,
+    select_list: Vec<ExprImpl>,
     input: PlanRef,
 }
 
-/// See also [`SelectItemProst`]
-#[derive(Debug, Clone)]
-pub enum ProjectSetSelectItem {
-    TableFunction(BoundTableFunction),
-    Expr(ExprImpl),
-}
-
-impl From<BoundTableFunction> for ProjectSetSelectItem {
-    fn from(table_function: BoundTableFunction) -> Self {
-        ProjectSetSelectItem::TableFunction(table_function)
-    }
-}
-
-impl From<ExprImpl> for ProjectSetSelectItem {
-    fn from(expr: ExprImpl) -> Self {
-        ProjectSetSelectItem::Expr(expr)
-    }
-}
-
-impl ProjectSetSelectItem {
-    pub fn return_type(&self) -> DataType {
-        match self {
-            ProjectSetSelectItem::TableFunction(tf) => tf.return_type.clone(),
-            ProjectSetSelectItem::Expr(expr) => expr.return_type(),
-        }
-    }
-
-    pub fn to_protobuf(&self) -> SelectItemProst {
-        use risingwave_pb::expr::project_set_select_item::SelectItem::*;
-
-        SelectItemProst {
-            select_item: Some(match self {
-                ProjectSetSelectItem::TableFunction(tf) => TableFunction(tf.to_protobuf()),
-                ProjectSetSelectItem::Expr(expr) => Expr(expr.to_expr_proto()),
-            }),
-        }
-    }
-
-    pub fn rewrite(self, rewriter: &mut impl ExprRewriter) -> Self {
-        match self {
-            ProjectSetSelectItem::TableFunction(tf) => {
-                ProjectSetSelectItem::TableFunction(tf.rewrite(rewriter))
-            }
-            ProjectSetSelectItem::Expr(expr) => {
-                ProjectSetSelectItem::Expr(rewriter.rewrite_expr(expr))
-            }
-        }
-    }
-}
-
 impl LogicalProjectSet {
-    pub fn new(input: PlanRef, select_list: Vec<ProjectSetSelectItem>) -> Self {
+    pub fn new(input: PlanRef, select_list: Vec<ExprImpl>) -> Self {
+        assert!(
+            select_list.iter().any(|e| e.has_table_function()),
+            "ProjectSet should have at least one table function."
+        );
+
         let ctx = input.ctx();
         let schema = Self::derive_schema(&select_list, input.schema());
         let pk_indices = Self::derive_pk(input.schema(), input.pk_indices(), &select_list);
@@ -105,25 +60,137 @@ impl LogicalProjectSet {
         }
     }
 
-    fn derive_schema(select_list: &[ProjectSetSelectItem], input_schema: &Schema) -> Schema {
-        let _o2i = Self::o2i_col_mapping_inner(input_schema.len(), select_list);
+    /// `create` will analyze select exprs with table functions and construct a plan.
+    ///
+    /// When table functions are used as arguments of a table function or a usual function, the
+    /// arguments will be put at a lower `ProjectSet` while the call will be put at a higher
+    /// `Project` or `ProjectSet`. The plan is like:
+    ///
+    /// ```text
+    /// LogicalProjectSet/LogicalProject -> LogicalProjectSet -> input
+    /// ```
+    ///
+    /// Otherwise it will be a simple `ProjectSet`.
+    pub fn create(input: PlanRef, select_list: Vec<ExprImpl>) -> PlanRef {
+        /// Rewrites a `FunctionCall` or `TableFunction` whose args contain table functions into one
+        /// using `InputRef` as args.
+        struct Rewriter {
+            collected: Vec<TableFunction>,
+            /// The nesting level of calls.
+            ///
+            /// f(x) has level 1 at x, and f(g(x)) has level 2 at x.
+            level: usize,
+            input_schema_len: usize,
+        }
 
+        impl ExprRewriter for Rewriter {
+            fn rewrite_table_function(&mut self, table_func: TableFunction) -> ExprImpl {
+                if self.level == 0 {
+                    // Top-level table function doesn't need to be collected.
+                    self.level += 1;
+
+                    let TableFunction {
+                        args,
+                        return_type,
+                        function_type,
+                    } = table_func;
+                    let args = args
+                        .into_iter()
+                        .map(|expr| self.rewrite_expr(expr))
+                        .collect();
+
+                    self.level -= 1;
+                    TableFunction {
+                        args,
+                        return_type,
+                        function_type,
+                    }
+                    .into()
+                } else {
+                    let input_ref = InputRef::new(
+                        self.input_schema_len + self.collected.len(),
+                        table_func.return_type(),
+                    );
+                    self.collected.push(table_func);
+                    input_ref.into()
+                }
+            }
+
+            fn rewrite_function_call(&mut self, func_call: FunctionCall) -> ExprImpl {
+                self.level += 1;
+                let (func_type, inputs, return_type) = func_call.decompose();
+                let inputs = inputs
+                    .into_iter()
+                    .map(|expr| self.rewrite_expr(expr))
+                    .collect();
+                self.level -= 1;
+                FunctionCall::new_unchecked(func_type, inputs, return_type).into()
+            }
+        }
+
+        let mut rewriter = Rewriter {
+            collected: vec![],
+            level: 0,
+            input_schema_len: input.schema().len(),
+        };
+        let select_list: Vec<_> = select_list
+            .into_iter()
+            .map(|e| rewriter.rewrite_expr(e))
+            .collect();
+
+        if rewriter.collected.is_empty() {
+            LogicalProjectSet::new(input, select_list).into()
+        } else {
+            let mut inner_select_list: Vec<_> = input
+                .schema()
+                .data_types()
+                .into_iter()
+                .enumerate()
+                .map(|(i, ty)| InputRef::new(i, ty).into())
+                .collect();
+            inner_select_list.extend(rewriter.collected.into_iter().map(|tf| tf.into()));
+            let inner = LogicalProjectSet::create(input, inner_select_list);
+
+            /// Increase all the input ref in the outer select list, because the inner project set
+            /// will output a hidden column at the beginning.
+            struct IncInputRef {}
+            impl ExprRewriter for IncInputRef {
+                fn rewrite_input_ref(&mut self, input_ref: InputRef) -> ExprImpl {
+                    InputRef::new(input_ref.index + 1, input_ref.data_type).into()
+                }
+            }
+            let mut rewriter = IncInputRef {};
+            let select_list: Vec<_> = select_list
+                .into_iter()
+                .map(|e| rewriter.rewrite_expr(e))
+                .collect();
+
+            if select_list.iter().any(|e| e.has_table_function()) {
+                LogicalProjectSet::new(inner, select_list).into()
+            } else {
+                LogicalProject::new(inner, select_list).into()
+            }
+        }
+    }
+
+    fn derive_schema(select_list: &[ExprImpl], input_schema: &Schema) -> Schema {
+        let o2i = Self::o2i_col_mapping_inner(input_schema.len(), select_list);
         let mut fields = vec![Field::with_name(DataType::Int64, "projected_row_id")];
-        fields.extend(select_list.iter().enumerate().map(|(_idx, item)| {
-            // TODO: pretty schema like LogicalProject
+        fields.extend(select_list.iter().enumerate().map(|(idx, expr)| {
+            let idx = idx + 1;
             // Get field info from o2i.
-            // let (name, sub_fields, type_name) = match o2i.try_map(id) {
-            //     Some(input_idx) => {
-            //         let field = input_schema.fields()[input_idx].clone();
-            //         (field.name, field.sub_fields, field.type_name)
-            //     }
-            //     None => (
-            //         format!("{:?}", ExprVerboseDisplay { expr, input_schema }),
-            //         vec![],
-            //         String::new(),
-            //     ),
-            // };
-            Field::unnamed(item.return_type())
+            let (name, sub_fields, type_name) = match o2i.try_map(idx) {
+                Some(input_idx) => {
+                    let field = input_schema.fields()[input_idx].clone();
+                    (field.name, field.sub_fields, field.type_name)
+                }
+                None => (
+                    format!("{:?}", ExprVerboseDisplay { expr, input_schema }),
+                    vec![],
+                    String::new(),
+                ),
+            };
+            Field::with_struct(expr.return_type(), name, sub_fields, type_name)
         }));
 
         Schema { fields }
@@ -132,7 +199,7 @@ impl LogicalProjectSet {
     fn derive_pk(
         input_schema: &Schema,
         input_pk: &[usize],
-        select_list: &[ProjectSetSelectItem],
+        select_list: &[ExprImpl],
     ) -> Vec<usize> {
         let i2o = Self::i2o_col_mapping_inner(input_schema.len(), select_list);
         let mut pk = input_pk
@@ -145,7 +212,7 @@ impl LogicalProjectSet {
         pk
     }
 
-    pub fn select_list(&self) -> &[ProjectSetSelectItem] {
+    pub fn select_list(&self) -> &[ExprImpl] {
         &self.select_list
     }
 
@@ -161,14 +228,11 @@ impl LogicalProjectSet {
 
 impl LogicalProjectSet {
     /// get the Mapping of columnIndex from output column index to input column index
-    fn o2i_col_mapping_inner(
-        input_len: usize,
-        select_list: &[ProjectSetSelectItem],
-    ) -> ColIndexMapping {
+    fn o2i_col_mapping_inner(input_len: usize, select_list: &[ExprImpl]) -> ColIndexMapping {
         let mut map = vec![None; 1 + select_list.len()];
         for (i, item) in select_list.iter().enumerate() {
             map[1 + i] = match item {
-                ProjectSetSelectItem::Expr(ExprImpl::InputRef(input)) => Some(input.index()),
+                ExprImpl::InputRef(input) => Some(input.index()),
                 _ => None,
             }
         }
@@ -177,10 +241,7 @@ impl LogicalProjectSet {
 
     /// get the Mapping of columnIndex from input column index to output column index,if a input
     /// column corresponds more than one out columns, mapping to any one
-    fn i2o_col_mapping_inner(
-        input_len: usize,
-        select_list: &[ProjectSetSelectItem],
-    ) -> ColIndexMapping {
+    fn i2o_col_mapping_inner(input_len: usize, select_list: &[ExprImpl]) -> ColIndexMapping {
         Self::o2i_col_mapping_inner(input_len, select_list).inverse()
     }
 
@@ -212,7 +273,7 @@ impl PlanTreeNodeUnary for LogicalProjectSet {
             .select_list
             .clone()
             .into_iter()
-            .map(|item| item.rewrite(&mut input_col_change))
+            .map(|item| input_col_change.rewrite_expr(item))
             .collect();
         let project_set = Self::new(input, select_list);
         // change the input columns index will not change the output column index
@@ -263,16 +324,15 @@ impl ToStream for LogicalProjectSet {
         let i2o = Self::i2o_col_mapping_inner(input.schema().len(), project_set.select_list());
         let col_need_to_add = input_pk.iter().cloned().filter(|i| i2o.try_map(*i) == None);
         let input_schema = input.schema();
-        let select_list = project_set
-            .select_list()
-            .iter()
-            .cloned()
-            .chain(col_need_to_add.map(|idx| {
-                let input_ref: ExprImpl =
-                    InputRef::new(idx, input_schema.fields[idx].data_type.clone()).into();
-                input_ref.into()
-            }))
-            .collect();
+        let select_list =
+            project_set
+                .select_list()
+                .iter()
+                .cloned()
+                .chain(col_need_to_add.map(|idx| {
+                    InputRef::new(idx, input_schema.fields[idx].data_type.clone()).into()
+                }))
+                .collect();
         let project_set = Self::new(input, select_list);
         // The added columns is at the end, so it will not change existing column indices.
         // But the target size of `out_col_change` should be the same as the length of the new

@@ -15,17 +15,17 @@
 use std::collections::hash_map::Entry;
 use std::str::FromStr;
 
+use itertools::Itertools;
 use risingwave_common::catalog::{Field, DEFAULT_SCHEMA_NAME};
 use risingwave_common::error::{internal_error, ErrorCode, Result};
 use risingwave_sqlparser::ast::{Ident, ObjectName, TableAlias, TableFactor};
 
 use super::bind_context::ColumnBinding;
-use super::table_function::BoundTableFunction;
 use crate::binder::Binder;
+use crate::expr::{Expr, TableFunction, TableFunctionType};
 
 mod join;
 mod subquery;
-mod table_function;
 mod table_or_source;
 mod window_table_function;
 
@@ -44,7 +44,7 @@ pub enum Relation {
     Subquery(Box<BoundSubquery>),
     Join(Box<BoundJoin>),
     WindowTableFunction(Box<BoundWindowTableFunction>),
-    TableFunction(Box<BoundTableFunction>),
+    TableFunction(Box<TableFunction>),
 }
 
 impl Binder {
@@ -201,18 +201,32 @@ impl Binder {
                     self.bind_relation_by_name(name, alias)
                 } else {
                     let func_name = &name.0[0].value;
-                    if func_name.eq_ignore_ascii_case("generate_series") {
-                        return Ok(Relation::TableFunction(Box::new(
-                            self.bind_generate_series_function(args)?,
-                        )));
-                    } else if func_name.eq_ignore_ascii_case("unnest") {
-                        return Ok(Relation::TableFunction(Box::new(
-                            self.bind_unnest_function(args)?,
-                        )));
+                    if let Ok(table_function_type) = TableFunctionType::from_str(func_name) {
+                        let args = args
+                            .into_iter()
+                            .map(|arg| self.bind_function_arg(arg))
+                            .flatten_ok()
+                            .try_collect()?;
+
+                        let tf = TableFunction::new(table_function_type, args)?;
+                        let columns = [(
+                            false,
+                            Field {
+                                data_type: tf.return_type(),
+                                name: tf.function_type.name().to_string(),
+                                sub_fields: vec![],
+                                type_name: "".to_string(),
+                            },
+                        )]
+                        .into_iter();
+
+                        self.bind_table_to_context(columns, "unnest".to_string(), None)?;
+
+                        return Ok(Relation::TableFunction(Box::new(tf)));
                     }
                     let kind = WindowTableFunctionKind::from_str(func_name).map_err(|_| {
                         ErrorCode::NotImplemented(
-                            format!("unknown window function kind: {}", name.0[0].value),
+                            format!("unknown table function kind: {}", name.0[0].value),
                             1191.into(),
                         )
                     })?;
