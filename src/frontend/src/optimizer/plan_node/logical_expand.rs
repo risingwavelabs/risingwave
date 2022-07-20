@@ -12,6 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+use std::collections::HashMap;
 use std::fmt;
 
 use itertools::Itertools;
@@ -51,7 +52,17 @@ impl LogicalExpand {
 
         let schema = Self::derive_schema(input.schema());
         let ctx = input.ctx();
-        let functional_dependency = FunctionalDependencySet::with_key(schema.len(), &pk_indices);
+        let functional_dependency = {
+            let input_fd = input.functional_dependency().clone().into_dependencies();
+            let mut current_fd = FunctionalDependencySet::new();
+            for (mut from, mut to) in input_fd {
+                from.grow(schema.len());
+                to.grow(schema.len());
+                from.set(schema.len() - 1, true);
+                current_fd.add_functional_dependency(from, to);
+            }
+            current_fd
+        };
         let base = PlanBase::new_logical(ctx, schema, pk_indices, functional_dependency);
         LogicalExpand {
             base,

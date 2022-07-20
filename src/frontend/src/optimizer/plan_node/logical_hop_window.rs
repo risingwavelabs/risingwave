@@ -12,6 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+use std::collections::HashMap;
 use std::fmt;
 
 use fixedbitset::FixedBitSet;
@@ -65,25 +66,21 @@ impl LogicalHopWindow {
             .iter()
             .map(|&idx| original_schema[idx].clone())
             .collect();
+        let window_start_index = output_indices
+            .iter()
+            .position(|&idx| idx == input.schema().len());
+        let window_end_index = output_indices
+            .iter()
+            .position(|&idx| idx == input.schema().len() + 1);
         let pk_indices = (|| {
             let input_pk = input
                 .pk_indices()
                 .iter()
                 .filter_map(|&pk_idx| output_indices.iter().position(|&idx| idx == pk_idx));
-            let window_pk = if output_indices.contains(&input.schema().len()) {
-                std::iter::once(
-                    output_indices
-                        .iter()
-                        .position(|&idx| idx == input.schema().len())
-                        .unwrap(),
-                )
-            } else if output_indices.contains(&(input.schema().len() + 1)) {
-                std::iter::once(
-                    output_indices
-                        .iter()
-                        .position(|&idx| idx == input.schema().len() + 1)
-                        .unwrap(),
-                )
+            let window_pk = if let Some(start_idx) = window_start_index {
+                std::iter::once(start_idx)
+            } else if let Some(end_idx) = window_end_index {
+                std::iter::once(end_idx)
             } else {
                 // If neither `window_start` or `window_end` is in `output_indices`, pk cannot be
                 // derived. In this situation, return empty vec.
@@ -91,8 +88,35 @@ impl LogicalHopWindow {
             };
             input_pk.chain(window_pk).collect_vec()
         })();
-        let functional_dependency =
-            FunctionalDependencySet::with_key(output_indices.len(), &pk_indices);
+        let functional_dependency = {
+            let input_fd = input
+                .functional_dependency()
+                .clone()
+                .rewrite_with_mapping(ColIndexMapping::with_remaining_columns(
+                    &output_indices,
+                    original_schema.len(),
+                ))
+                .into_dependencies();
+            let mut current_fd = FunctionalDependencySet::new();
+            for (from, to) in input_fd {
+                if let Some(start_idx) = window_start_index {
+                    let mut from_with_start = from.clone();
+                    from_with_start.set(start_idx, true);
+                    current_fd.add_functional_dependency(from_with_start, to);
+                } else if let Some(end_idx) = window_end_index {
+                    let mut from_with_end = from.clone();
+                    from_with_end.set(end_idx, true);
+                    current_fd.add_functional_dependency(from_with_end, to);
+                }
+            }
+            if let Some(start_idx) = window_start_index {
+                current_fd.add_key_column_by_indices(actual_schema.len(), &[start_idx])
+            }
+            if let Some(end_idx) = window_end_index {
+                current_fd.add_key_column_by_indices(actual_schema.len(), &[end_idx])
+            }
+            current_fd
+        };
         let base = PlanBase::new_logical(ctx, actual_schema, pk_indices, functional_dependency);
         LogicalHopWindow {
             base,

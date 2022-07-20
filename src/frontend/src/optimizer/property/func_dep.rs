@@ -17,6 +17,8 @@ use std::collections::HashMap;
 
 use fixedbitset::FixedBitSet;
 
+use crate::utils::ColIndexMapping;
+
 #[derive(Debug, PartialEq, Clone, Default)]
 pub struct FunctionalDependencySet {
     fd: HashMap<FixedBitSet, FixedBitSet>,
@@ -27,10 +29,24 @@ impl FunctionalDependencySet {
         Self { fd: HashMap::new() }
     }
 
-    pub fn with_key(column_cnt: usize, pk_indices: &[usize]) -> Self {
+    pub fn with_key(column_cnt: usize, key_indices: &[usize]) -> Self {
         let mut tmp = Self::new();
-        tmp.add_key_column_by_indices(column_cnt, pk_indices);
+        tmp.add_key_column_by_indices(column_cnt, key_indices);
         tmp
+    }
+    
+    pub fn with_dependencies(dependencies: HashMap<FixedBitSet, FixedBitSet>) -> Self {
+        Self {
+            fd: dependencies
+        }
+    }
+    
+    pub fn dependencies_mut(&mut self) -> &mut HashMap<FixedBitSet, FixedBitSet> {
+        &mut self.fd
+    }
+    
+    pub fn into_dependencies(self) -> HashMap<FixedBitSet, FixedBitSet> {
+        self.fd
     }
 
     pub fn add_functional_dependency(&mut self, from: FixedBitSet, to: FixedBitSet) {
@@ -57,8 +73,8 @@ impl FunctionalDependencySet {
         self.add_functional_dependency(from, to);
     }
 
-    pub fn add_key_column_by_indices(&mut self, column_cnt: usize, pk_indices: &[usize]) {
-        for &i in pk_indices {
+    pub fn add_key_column_by_indices(&mut self, column_cnt: usize, key_indices: &[usize]) {
+        for &i in key_indices {
             self.add_key_column_by_index(column_cnt, i);
         }
     }
@@ -114,7 +130,22 @@ impl FunctionalDependencySet {
         self.get_closure(determinant).is_superset(&dependant)
     }
 
-    // pub fn rewrite_with_change(&self, col_change: ColIndexMapping) -> Self {
-
-    // }
+    pub fn rewrite_with_mapping(mut self, col_change: ColIndexMapping) -> Self {
+        let mut new_fd = HashMap::new();
+        for (from, to) in self.fd.drain() {
+            assert_eq!(from.len(), col_change.source_size());
+            assert_eq!(to.len(), col_change.source_size());
+            let mut new_from = FixedBitSet::with_capacity(col_change.target_size());
+            for i in from.ones() {
+                if let Some(i) = col_change.try_map(i) {
+                    new_from.insert(i);
+                } else {
+                    continue;
+                }
+            }
+            let new_to = col_change.rewrite_bitset(&to);
+            new_fd.insert(new_from, new_to);
+        }
+        Self { fd: new_fd }
+    }
 }

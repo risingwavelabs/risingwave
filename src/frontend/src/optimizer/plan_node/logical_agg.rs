@@ -648,13 +648,8 @@ impl LogicalAgg {
     pub fn new(agg_calls: Vec<PlanAggCall>, group_key: Vec<usize>, input: PlanRef) -> Self {
         let ctx = input.ctx();
         let schema = Self::derive_schema(input.schema(), &group_key, &agg_calls);
-        let pk_indices = match group_key.is_empty() {
-            // simple agg
-            true => vec![],
-            // group agg
-            false => group_key.clone(),
-        };
-        let functional_dependency = FunctionalDependencySet::with_key(schema.len(), &pk_indices);
+        let pk_indices = group_key.clone();
+        let functional_dependency = FunctionalDependencySet::with_key(schema.len(), &group_key);
         let base = PlanBase::new_logical(ctx, schema, pk_indices, functional_dependency);
         Self {
             base,
