@@ -17,9 +17,11 @@ use std::path::PathBuf;
 use std::sync::Arc;
 use std::time::Duration;
 
+use risingwave_common::catalog::local_table_catalog_manager::LocalTableManager;
 use risingwave_common::monitor::process_linux::monitor_process;
 use risingwave_common::util::addr::HostAddr;
 use risingwave_common_service::metrics_manager::MetricsManager;
+use risingwave_common_service::observer_manager::ObserverManager;
 use risingwave_object_store::object::parse_remote_object_store;
 use risingwave_pb::common::WorkerType;
 use risingwave_pb::hummock::compactor_service_server::CompactorServiceServer;
@@ -33,6 +35,7 @@ use risingwave_storage::monitor::{
 use tokio::sync::oneshot::Sender;
 use tokio::task::JoinHandle;
 
+use super::compactor_observer::observer_manager::CompactorObserverNode;
 use crate::rpc::CompactorServiceImpl;
 use crate::{CompactorConfig, CompactorOpts};
 
@@ -41,7 +44,7 @@ pub async fn compactor_serve(
     listen_addr: SocketAddr,
     client_addr: HostAddr,
     opts: CompactorOpts,
-) -> (JoinHandle<()>, Sender<()>) {
+) -> (JoinHandle<()>, JoinHandle<()>, Sender<()>) {
     let mut config = {
         if opts.config_path.is_empty() {
             CompactorConfig::default()
@@ -93,6 +96,19 @@ pub async fn compactor_serve(
     ));
     monitor_cache(sstable_store.clone(), &registry).unwrap();
 
+    let local_table_manager = LocalTableManager::new();
+    let compactor_observer_node = CompactorObserverNode::new(Arc::new(local_table_manager));
+    // todo use ObserverManager
+    let observer_manager = ObserverManager::new(
+        meta_client.clone(),
+        client_addr.clone(),
+        Box::new(compactor_observer_node),
+        WorkerType::Compactor,
+    )
+    .await;
+
+    let observer_join_handle = observer_manager.start().await.unwrap();
+
     let sub_tasks = vec![
         MetaClient::start_heartbeat_loop(
             meta_client.clone(),
@@ -139,5 +155,5 @@ pub async fn compactor_serve(
         );
     }
 
-    (join_handle, shutdown_send)
+    (join_handle, observer_join_handle, shutdown_send)
 }
