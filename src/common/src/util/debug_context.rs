@@ -12,6 +12,11 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+// FIXME: This is a false-positive clippy test, remove this while bumping toolchain.
+// https://github.com/tokio-rs/tokio/issues/4836
+// https://github.com/rust-lang/rust-clippy/issues/8493
+#![expect(clippy::declare_interior_mutable_const)]
+
 use enum_as_inner::EnumAsInner;
 
 /// The context used for debugging. Use [`with_debug_context`] to access the context.
@@ -33,8 +38,6 @@ pub enum DebugContext {
     Unknown,
 }
 
-// FIXME: This is a false-positive clippy test, remove this while bumping toolchain.
-#[expect(clippy::declare_interior_mutable_const)]
 tokio::task_local! {
     pub static DEBUG_CONTEXT: DebugContext
 }
