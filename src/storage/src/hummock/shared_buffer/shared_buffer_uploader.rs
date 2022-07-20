@@ -40,6 +40,8 @@ pub struct SharedBufferUploader {
     hummock_meta_client: Arc<dyn HummockMetaClient>,
     next_local_sstable_id: Arc<AtomicU64>,
     stats: Arc<StateStoreMetrics>,
+    local_object_store_compactor_context: Arc<CompactorContext>,
+    remote_object_store_compactor_context: Arc<CompactorContext>,
     compaction_executor: Option<Arc<CompactionExecutor>>,
 }
 
@@ -58,14 +60,44 @@ impl SharedBufferUploader {
                 options.share_buffer_compaction_worker_threads_number as usize,
             ))))
         };
+        let next_local_sstable_id = Arc::new(AtomicU64::new(0));
+        let local_object_store_compactor_context = Arc::new(CompactorContext {
+            options: options.clone(),
+            hummock_meta_client: hummock_meta_client.clone(),
+            sstable_store: sstable_store.clone(),
+            stats: stats.clone(),
+            is_share_buffer_compact: true,
+            sstable_id_generator: {
+                let atomic = next_local_sstable_id.clone();
+                Arc::new(move || {
+                    {
+                        let atomic = atomic.clone();
+                        async move { Ok(get_local_sst_id(atomic.fetch_add(1, Relaxed))) }
+                    }
+                    .boxed()
+                })
+            },
+            compaction_executor: compaction_executor.as_ref().cloned(),
+        });
+        let remote_object_store_compactor_context = Arc::new(CompactorContext {
+            options: options.clone(),
+            hummock_meta_client: hummock_meta_client.clone(),
+            sstable_store: sstable_store.clone(),
+            stats: stats.clone(),
+            is_share_buffer_compact: true,
+            sstable_id_generator: get_remote_sstable_id_generator(hummock_meta_client.clone()),
+            compaction_executor: compaction_executor.as_ref().cloned(),
+        });
         Self {
             options,
             write_conflict_detector,
             sstable_store,
             hummock_meta_client,
-            next_local_sstable_id: Arc::new(AtomicU64::new(0)),
+            next_local_sstable_id,
             stats,
             compaction_executor,
+            local_object_store_compactor_context,
+            remote_object_store_compactor_context,
         }
     }
 }
@@ -82,32 +114,15 @@ impl SharedBufferUploader {
         }
 
         // Compact buffers into SSTs
-        let mem_compactor_ctx = CompactorContext {
-            options: self.options.clone(),
-            hummock_meta_client: self.hummock_meta_client.clone(),
-            sstable_store: self.sstable_store.clone(),
-            stats: self.stats.clone(),
-            is_share_buffer_compact: true,
-            sstable_id_generator: if is_local {
-                let atomic = self.next_local_sstable_id.clone();
-                Arc::new(move || {
-                    {
-                        let atomic = atomic.clone();
-                        async move { Ok(get_local_sst_id(atomic.fetch_add(1, Relaxed))) }
-                    }
-                    .boxed()
-                })
-            } else {
-                get_remote_sstable_id_generator(self.hummock_meta_client.clone())
-            },
-            compaction_executor: self.compaction_executor.as_ref().cloned(),
+        let mem_compactor_ctx = if is_local {
+            self.local_object_store_compactor_context.clone()
+        } else {
+            self.remote_object_store_compactor_context.clone()
         };
 
-        let tables = Compactor::compact_shared_buffer_by_compaction_group(
-            Arc::new(mem_compactor_ctx),
-            payload,
-        )
-        .await?;
+        let tables =
+            Compactor::compact_shared_buffer_by_compaction_group(mem_compactor_ctx, payload)
+                .await?;
 
         let uploaded_sst_info = tables
             .into_iter()
