@@ -217,6 +217,7 @@ mod batch_limit;
 mod batch_lookup_join;
 mod batch_nested_loop_join;
 mod batch_project;
+mod batch_project_set;
 mod batch_seq_scan;
 mod batch_simple_agg;
 mod batch_sort;
@@ -235,6 +236,7 @@ mod logical_join;
 mod logical_limit;
 mod logical_multi_join;
 mod logical_project;
+mod logical_project_set;
 mod logical_scan;
 mod logical_source;
 mod logical_table_function;
@@ -254,6 +256,7 @@ mod stream_index_scan;
 mod stream_local_simple_agg;
 mod stream_materialize;
 mod stream_project;
+mod stream_project_set;
 mod stream_source;
 mod stream_table_scan;
 mod stream_topn;
@@ -272,6 +275,7 @@ pub use batch_limit::BatchLimit;
 pub use batch_lookup_join::BatchLookupJoin;
 pub use batch_nested_loop_join::BatchNestedLoopJoin;
 pub use batch_project::BatchProject;
+pub use batch_project_set::BatchProjectSet;
 pub use batch_seq_scan::BatchSeqScan;
 pub use batch_simple_agg::BatchSimpleAgg;
 pub use batch_sort::BatchSort;
@@ -290,6 +294,7 @@ pub use logical_join::LogicalJoin;
 pub use logical_limit::LogicalLimit;
 pub use logical_multi_join::{LogicalMultiJoin, LogicalMultiJoinBuilder};
 pub use logical_project::{LogicalProject, LogicalProjectBuilder};
+pub use logical_project_set::LogicalProjectSet;
 pub use logical_scan::LogicalScan;
 pub use logical_source::LogicalSource;
 pub use logical_table_function::LogicalTableFunction;
@@ -309,6 +314,7 @@ pub use stream_index_scan::StreamIndexScan;
 pub use stream_local_simple_agg::StreamLocalSimpleAgg;
 pub use stream_materialize::StreamMaterialize;
 pub use stream_project::StreamProject;
+pub use stream_project_set::StreamProjectSet;
 pub use stream_source::StreamSource;
 pub use stream_table_scan::StreamTableScan;
 pub use stream_topn::StreamTopN;
@@ -349,6 +355,7 @@ macro_rules! for_all_plan_nodes {
             , { Logical, TableFunction }
             , { Logical, MultiJoin }
             , { Logical, Expand }
+            , { Logical, ProjectSet }
             // , { Logical, Sort } we don't need a LogicalSort, just require the Order
             , { Batch, SimpleAgg }
             , { Batch, HashAgg }
@@ -369,6 +376,7 @@ macro_rules! for_all_plan_nodes {
             , { Batch, TableFunction }
             , { Batch, Expand }
             , { Batch, LookupJoin }
+            , { Batch, ProjectSet }
             , { Stream, Project }
             , { Stream, Filter }
             , { Stream, TableScan }
@@ -385,6 +393,7 @@ macro_rules! for_all_plan_nodes {
             , { Stream, IndexScan }
             , { Stream, Expand }
             , { Stream, DynamicFilter }
+            , { Stream, ProjectSet }
         }
     };
 }
@@ -412,6 +421,7 @@ macro_rules! for_logical_plan_nodes {
             , { Logical, TableFunction }
             , { Logical, MultiJoin }
             , { Logical, Expand }
+            , { Logical, ProjectSet }
             // , { Logical, Sort} not sure if we will support Order by clause in subquery/view/MV
             // if we dont support that, we don't need LogicalSort, just require the Order at the top of query
         }
@@ -443,6 +453,7 @@ macro_rules! for_batch_plan_nodes {
             , { Batch, TableFunction }
             , { Batch, Expand }
             , { Batch, LookupJoin }
+            , { Batch, ProjectSet }
         }
     };
 }
@@ -469,6 +480,7 @@ macro_rules! for_stream_plan_nodes {
             , { Stream, IndexScan }
             , { Stream, Expand }
             , { Stream, DynamicFilter }
+            , { Stream, ProjectSet }
         }
     };
 }

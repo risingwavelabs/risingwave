@@ -125,10 +125,8 @@ impl Stream for SourceReaderStream {
 
 #[cfg(test)]
 mod tests {
-    use std::time::Duration;
-
     use assert_matches::assert_matches;
-    use futures::pin_mut;
+    use futures::{pin_mut, FutureExt};
     use risingwave_common::array::StreamChunk;
     use tokio::sync::mpsc;
 
@@ -145,12 +143,18 @@ mod tests {
         let stream = SourceReaderStream::new(barrier_rx, Box::new(source_reader));
         pin_mut!(stream);
 
+        macro_rules! next {
+            () => {
+                stream.next().now_or_never().flatten()
+            };
+        }
+
         // Write a chunk, and we should receive it.
         table_source.write_chunk(StreamChunk::default()).unwrap();
-        assert_matches!(stream.next().await.unwrap(), Either::Right(_));
+        assert_matches!(next!().unwrap(), Either::Right(_));
         // Write a barrier, and we should receive it.
         barrier_tx.send(Barrier::default()).unwrap();
-        assert_matches!(stream.next().await.unwrap(), Either::Left(_));
+        assert_matches!(next!().unwrap(), Either::Left(_));
 
         // Pause the stream.
         stream.pause_source();
@@ -161,15 +165,13 @@ mod tests {
         table_source.write_chunk(StreamChunk::default()).unwrap();
 
         // We should receive the barrier.
-        assert_matches!(stream.next().await.unwrap(), Either::Left(_));
+        assert_matches!(next!().unwrap(), Either::Left(_));
         // We shouldn't receive the chunk.
-        madsim::time::timeout(Duration::from_millis(100), stream.next())
-            .await
-            .unwrap_err();
+        assert!(next!().is_none());
 
         // Resume the stream.
         stream.resume_source();
         // Then we can receive the chunk sent when the stream is paused.
-        assert_matches!(stream.next().await.unwrap(), Either::Right(_));
+        assert_matches!(next!().unwrap(), Either::Right(_));
     }
 }

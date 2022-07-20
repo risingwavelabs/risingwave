@@ -15,6 +15,7 @@
 use risingwave_common::catalog::{Field, Schema};
 
 use super::*;
+use crate::executor::merge::new_input;
 use crate::executor::receiver::ReceiverExecutor;
 use crate::executor::MergeExecutor;
 
@@ -32,19 +33,27 @@ impl ExecutorBuilder for MergeExecutorBuilder {
         let upstream_fragment_id = node.get_upstream_fragment_id();
         let fields = node.fields.iter().map(Field::from).collect();
         let schema = Schema::new(fields);
-        let mut rxs = stream.get_receive_message(
-            params.actor_id,
-            params.fragment_id,
-            upstreams,
-            upstream_fragment_id,
-        )?;
         let actor_context = params.actor_context;
+
+        let upstreams: Vec<_> = upstreams
+            .iter()
+            .map(|&upstream_actor_id| {
+                new_input(
+                    &stream.context,
+                    stream.streaming_metrics.clone(),
+                    params.actor_id,
+                    params.fragment_id,
+                    upstream_actor_id,
+                    upstream_fragment_id,
+                )
+            })
+            .try_collect()?;
 
         if upstreams.len() == 1 {
             Ok(ReceiverExecutor::new(
                 schema,
                 params.pk_indices,
-                rxs.remove(0),
+                upstreams.into_iter().next().unwrap().1,
                 actor_context,
                 x_node.operator_id,
                 params.actor_id,
@@ -56,7 +65,10 @@ impl ExecutorBuilder for MergeExecutorBuilder {
                 schema,
                 params.pk_indices,
                 params.actor_id,
-                rxs,
+                params.fragment_id,
+                upstream_fragment_id,
+                upstreams,
+                stream.context.clone(),
                 actor_context,
                 x_node.operator_id,
                 stream.streaming_metrics.clone(),
