@@ -295,15 +295,19 @@ mod tests {
     use itertools::Itertools;
     use risingwave_common::array::{Op, StreamChunk};
     use risingwave_pb::stream_plan::StreamMessage;
-    use risingwave_pb::task_service::exchange_service_server::ExchangeService;
+    use risingwave_pb::task_service::exchange_service_server::{
+        ExchangeService, ExchangeServiceServer,
+    };
     use risingwave_pb::task_service::{
         GetDataRequest, GetDataResponse, GetStreamRequest, GetStreamResponse,
     };
+    use risingwave_rpc_client::ComputeClientPool;
     use tokio::time::sleep;
     use tokio_stream::wrappers::ReceiverStream;
     use tonic::{Request, Response, Status};
 
     use super::*;
+    use crate::executor::exchange::input::RemoteInput;
     use crate::executor::{Barrier, Executor, Mutation};
     use crate::task::test_utils::{add_local_channels, helper_make_local_actor};
 
@@ -523,56 +527,57 @@ mod tests {
         }
     }
 
-    // #[tokio::test(flavor = "multi_thread")]
-    // async fn test_stream_exchange_client() {
-    //     let rpc_called = Arc::new(AtomicBool::new(false));
-    //     let server_run = Arc::new(AtomicBool::new(false));
-    //     let addr = "127.0.0.1:12348".parse().unwrap();
+    #[tokio::test(flavor = "multi_thread")]
+    async fn test_stream_exchange_client() {
+        let rpc_called = Arc::new(AtomicBool::new(false));
+        let server_run = Arc::new(AtomicBool::new(false));
+        let addr = "127.0.0.1:12348".parse().unwrap();
 
-    //     // Start a server.
-    //     let (shutdown_send, shutdown_recv) = tokio::sync::oneshot::channel();
-    //     let exchange_svc = ExchangeServiceServer::new(FakeExchangeService {
-    //         rpc_called: rpc_called.clone(),
-    //     });
-    //     let cp_server_run = server_run.clone();
-    //     let join_handle = tokio::spawn(async move {
-    //         cp_server_run.store(true, Ordering::SeqCst);
-    //         tonic::transport::Server::builder()
-    //             .add_service(exchange_svc)
-    //             .serve_with_shutdown(addr, async move {
-    //                 shutdown_recv.await.unwrap();
-    //             })
-    //             .await
-    //             .unwrap();
-    //     });
+        // Start a server.
+        let (shutdown_send, shutdown_recv) = tokio::sync::oneshot::channel();
+        let exchange_svc = ExchangeServiceServer::new(FakeExchangeService {
+            rpc_called: rpc_called.clone(),
+        });
+        let cp_server_run = server_run.clone();
+        let join_handle = tokio::spawn(async move {
+            cp_server_run.store(true, Ordering::SeqCst);
+            tonic::transport::Server::builder()
+                .add_service(exchange_svc)
+                .serve_with_shutdown(addr, async move {
+                    shutdown_recv.await.unwrap();
+                })
+                .await
+                .unwrap();
+        });
 
-    //     sleep(Duration::from_secs(1)).await;
-    //     assert!(server_run.load(Ordering::SeqCst));
-    //     let (tx, mut rx) = channel(16);
-    //     let input_handle = tokio::spawn(async move {
-    //         let remote_input = RemoteInput::create(
-    //             ComputeClient::new(addr.into()).await.unwrap(),
-    //             (0, 0),
-    //             (0, 0),
-    //             tx,
-    //             Arc::new(StreamingMetrics::unused()),
-    //         )
-    //         .await
-    //         .unwrap();
-    //         remote_input.run().await
-    //     });
-    //     assert_matches!(rx.recv().await.unwrap(), Message::Chunk(chunk) => {
-    //         let (ops, columns, visibility) = chunk.into_inner();
-    //         assert_eq!(ops.len() as u64, 0);
-    //         assert_eq!(columns.len() as u64, 0);
-    //         assert_eq!(visibility, None);
-    //     });
-    //     assert_matches!(rx.recv().await.unwrap(), Message::Barrier(Barrier { epoch:
-    // barrier_epoch, mutation: _, .. }) => {         assert_eq!(barrier_epoch.curr, 12345);
-    //     });
-    //     assert!(rpc_called.load(Ordering::SeqCst));
-    //     input_handle.await.unwrap();
-    //     shutdown_send.send(()).unwrap();
-    //     join_handle.await.unwrap();
-    // }
+        sleep(Duration::from_secs(1)).await;
+        assert!(server_run.load(Ordering::SeqCst));
+
+        let remote_input = {
+            let pool = ComputeClientPool::new(u64::MAX);
+            RemoteInput::new(
+                pool,
+                addr.clone().into(),
+                (0, 0),
+                (0, 0),
+                Arc::new(StreamingMetrics::unused()),
+            )
+        };
+
+        pin_mut!(remote_input);
+
+        assert_matches!(remote_input.next().await.unwrap().unwrap(), Message::Chunk(chunk) => {
+            let (ops, columns, visibility) = chunk.into_inner();
+            assert_eq!(ops.len() as u64, 0);
+            assert_eq!(columns.len() as u64, 0);
+            assert_eq!(visibility, None);
+        });
+        assert_matches!(remote_input.next().await.unwrap().unwrap(), Message::Barrier(Barrier { epoch: barrier_epoch, mutation: _, .. }) => {
+            assert_eq!(barrier_epoch.curr, 12345);
+        });
+        assert!(rpc_called.load(Ordering::SeqCst));
+
+        shutdown_send.send(()).unwrap();
+        join_handle.await.unwrap();
+    }
 }
