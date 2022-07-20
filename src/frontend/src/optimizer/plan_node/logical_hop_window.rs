@@ -12,7 +12,6 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::collections::HashMap;
 use std::fmt;
 
 use fixedbitset::FixedBitSet;
@@ -89,24 +88,31 @@ impl LogicalHopWindow {
             input_pk.chain(window_pk).collect_vec()
         })();
         let functional_dependency = {
-            let input_fd = input
-                .functional_dependency()
-                .clone()
-                .rewrite_with_mapping(ColIndexMapping::with_remaining_columns(
+            let input_fd = {
+                let tmp = input.functional_dependency().clone();
+                let mut input_fd = FunctionalDependencySet::new();
+                for (from, to) in tmp.as_dependencies() {
+                    let mut from = from.clone();
+                    let mut to = to.clone();
+                    from.grow(original_schema.len());
+                    to.grow(original_schema.len());
+                    input_fd.add_functional_dependency(from, to);
+                }
+                input_fd.rewrite_with_mapping(ColIndexMapping::with_remaining_columns(
                     &output_indices,
                     original_schema.len(),
                 ))
-                .into_dependencies();
+            };
             let mut current_fd = FunctionalDependencySet::new();
-            for (from, to) in input_fd {
+            for (from, to) in input_fd.as_dependencies() {
                 if let Some(start_idx) = window_start_index {
                     let mut from_with_start = from.clone();
                     from_with_start.set(start_idx, true);
-                    current_fd.add_functional_dependency(from_with_start, to);
+                    current_fd.add_functional_dependency(from_with_start, to.clone());
                 } else if let Some(end_idx) = window_end_index {
                     let mut from_with_end = from.clone();
                     from_with_end.set(end_idx, true);
-                    current_fd.add_functional_dependency(from_with_end, to);
+                    current_fd.add_functional_dependency(from_with_end, to.clone());
                 }
             }
             if let Some(start_idx) = window_start_index {

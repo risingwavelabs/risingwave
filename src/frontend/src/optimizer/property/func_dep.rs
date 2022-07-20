@@ -41,8 +41,12 @@ impl FunctionalDependencySet {
         }
     }
     
-    pub fn dependencies_mut(&mut self) -> &mut HashMap<FixedBitSet, FixedBitSet> {
+    pub fn as_dependencies_mut(&mut self) -> &mut HashMap<FixedBitSet, FixedBitSet> {
         &mut self.fd
+    }
+    
+    pub fn as_dependencies(&self) -> & HashMap<FixedBitSet, FixedBitSet> {
+        &self.fd
     }
     
     pub fn into_dependencies(self) -> HashMap<FixedBitSet, FixedBitSet> {
