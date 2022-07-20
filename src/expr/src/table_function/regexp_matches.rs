@@ -34,7 +34,7 @@ impl RegexpContext {
     }
 }
 
-/// It is almost the same as [`RegexpMatchExpr`](crate::expr::expr_regexp::RegexpMatchExpr), except
+/// It is almost the same as `regexp_match` function (see `expr_regexp.rs`), except
 /// that all the captures are returned.
 #[derive(Debug)]
 pub struct RegexpMatches {
