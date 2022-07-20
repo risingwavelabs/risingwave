@@ -167,6 +167,10 @@ pub struct StorageConfig {
     /// Number of tasks shared buffer can upload in parallel.
     #[serde(default = "default::share_buffer_upload_concurrency")]
     pub share_buffer_upload_concurrency: usize,
+
+    /// URI for tiered cache.
+    #[serde(default = "default::tiered_cache_uri")]
+    pub tiered_cache_uri: String,
 }
 
 impl Default for StorageConfig {
@@ -286,6 +290,10 @@ mod default {
 
     pub fn unsafe_worker_node_parallel_degree() -> usize {
         4
+    }
+
+    pub fn tiered_cache_uri() -> String {
+        "none://".to_string()
     }
 }
 

@@ -24,7 +24,6 @@ use tokio::sync::Notify;
 use super::buffer::TwoLevelBuffer;
 use super::coding::{CacheKey, HashBuilder};
 use super::error::Result;
-use super::filter::Filter;
 use super::meta::SlotId;
 use super::store::{Store, StoreOptions, StoreRef};
 use super::{utils, LRU_SHARD_BITS};
@@ -34,7 +33,6 @@ pub struct FileCacheOptions {
     pub capacity: usize,
     pub total_buffer_capacity: usize,
     pub cache_file_fallocate_unit: usize,
-    pub filters: Vec<Arc<dyn Filter>>,
 
     pub flush_buffer_hooks: Vec<Arc<dyn FlushBufferHook>>,
 }
@@ -120,8 +118,6 @@ where
 {
     hash_builder: S,
 
-    _filters: Vec<Arc<dyn Filter>>,
-
     indices: Arc<LruCache<K, SlotId>>,
 
     store: StoreRef<K>,
@@ -187,8 +183,6 @@ where
         Ok(Self {
             hash_builder,
 
-            _filters: options.filters,
-
             indices,
 
             store,
@@ -241,10 +235,9 @@ mod tests {
     use std::collections::HashMap;
     use std::path::Path;
 
-    use super::super::test_utils::{key, TestCacheKey};
+    use super::super::test_utils::{datasize, key, FlushHolder, ModuloHasherBuilder, TestCacheKey};
     use super::super::utils;
     use super::*;
-    use crate::hummock::file_cache::test_utils::{datasize, FlushHolder, ModuloHasherBuilder};
 
     const SHARDS: usize = 1 << LRU_SHARD_BITS;
     const SHARDSU8: u8 = SHARDS as u8;
@@ -286,7 +279,6 @@ mod tests {
             capacity: CAPACITY,
             total_buffer_capacity: 2 * BUFFER_CAPACITY,
             cache_file_fallocate_unit: FALLOCATE_UNIT,
-            filters: vec![],
 
             flush_buffer_hooks,
         };

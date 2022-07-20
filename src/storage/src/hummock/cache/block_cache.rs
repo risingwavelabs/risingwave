@@ -21,8 +21,7 @@ use futures::Future;
 use risingwave_common::cache::{CachableEntry, LruCache};
 use risingwave_hummock_sdk::HummockSSTableId;
 
-use super::{Block, HummockResult};
-use crate::hummock::HummockError;
+use crate::hummock::{Block, HummockError, HummockResult};
 
 const MIN_BUFFER_SIZE_PER_SHARD: usize = 32 * 1024 * 1024;
 

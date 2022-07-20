@@ -91,7 +91,6 @@ pub async fn run() {
         capacity: args.capacity,
         total_buffer_capacity: args.total_buffer_capacity,
         cache_file_fallocate_unit: args.cache_file_fallocate_unit,
-        filters: vec![],
         flush_buffer_hooks: vec![hook],
     };
 
