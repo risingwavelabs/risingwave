@@ -21,7 +21,7 @@ use risingwave_common::error::{internal_error, ErrorCode, Result};
 use risingwave_sqlparser::ast::{Ident, ObjectName, TableAlias, TableFactor};
 
 use super::bind_context::ColumnBinding;
-use crate::binder::Binder;
+use crate::binder::{Binder, BoundSetExpr};
 use crate::expr::{Expr, TableFunction, TableFunctionType};
 
 mod join;
@@ -45,6 +45,26 @@ pub enum Relation {
     Join(Box<BoundJoin>),
     WindowTableFunction(Box<BoundWindowTableFunction>),
     TableFunction(Box<TableFunction>),
+}
+
+impl Relation {
+    pub fn contains_sys_table(&self) -> bool {
+        match self {
+            Relation::SystemTable(_) => true,
+            Relation::Subquery(s) => {
+                if let BoundSetExpr::Select(select) = &s.query.body
+                    && let Some(relation) = &select.from {
+                    relation.contains_sys_table()
+                } else {
+                    false
+                }
+            },
+            Relation::Join(j) => {
+                j.left.contains_sys_table() || j.right.contains_sys_table()
+            },
+            _ => false,
+        }
+    }
 }
 
 impl Binder {
