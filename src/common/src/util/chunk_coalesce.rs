@@ -447,4 +447,59 @@ mod tests {
         assert_eq!(Some(2), output.as_ref().map(DataChunk::capacity));
         assert!(output.unwrap().visibility().is_none());
     }
+
+    #[test]
+    fn test_append_one_row_from_array_elements() {
+        let mut builder = DataChunkBuilder::new(vec![DataType::Int32, DataType::Int64], 3);
+
+        assert!(builder.consume_all().unwrap().is_none());
+
+        let mut left_array_builder = DataType::Int32.create_array_builder(5);
+        for v in [1, 2, 3, 4, 5] {
+            assert!(left_array_builder
+                .append_datum(&Some(ScalarImpl::Int32(v)))
+                .is_ok())
+        }
+        let left_arrays = vec![left_array_builder.finish().unwrap()];
+
+        let mut right_array_builder = DataType::Int64.create_array_builder(5);
+        for v in [5, 4, 3, 2, 1] {
+            assert!(right_array_builder
+                .append_datum(&Some(ScalarImpl::Int64(v)))
+                .is_ok())
+        }
+        let right_arrays = vec![right_array_builder.finish().unwrap()];
+
+        let mut output_chunks = Vec::new();
+
+        for i in 0..5 {
+            if let Some(chunk) = builder
+                .append_one_row_from_array_elements(left_arrays.iter(), i, right_arrays.iter(), i)
+                .unwrap()
+            {
+                output_chunks.push(chunk)
+            }
+        }
+
+        if let Some(chunk) = builder.consume_all().unwrap() {
+            output_chunks.push(chunk)
+        }
+
+        assert_eq!(
+            output_chunks,
+            vec![
+                DataChunk::from_pretty(
+                    "i I
+                    1 5
+                    2 4
+                    3 3"
+                ),
+                DataChunk::from_pretty(
+                    "i I
+                    4 2
+                    5 1"
+                ),
+            ]
+        )
+    }
 }
