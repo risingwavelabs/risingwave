@@ -1,11 +1,11 @@
 statement ok
-CREATE MATERIALIZED SOURCE s (v1 int) WITH ('connector' = 'datagen') ROW FORMAT json;
+CREATE MATERIALIZED SOURCE s (v1 int) WITH (connector = 'datagen') ROW FORMAT json;
 
 statement ok
 CREATE MATERIALIZED VIEW mv AS SELECT avg(v1) AS average FROM s;
 
 statement ok
-CREATE SINK si FROM mv WITH ('kafka.brokers' = '127.0.0.1:29092', 'kafka.topic' = 'test_topic', 'sink.type' = 'append_only', 'sink_type' = 'kafka');
+CREATE SINK si FROM mv WITH (kafka.brokers = '127.0.0.1:29092', kafka.topic = 'test_topic', sink.type = 'append_only', sink_type = 'kafka');
 
 statement ok
 DROP SINK si;
