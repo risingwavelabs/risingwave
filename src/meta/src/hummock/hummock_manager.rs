@@ -447,15 +447,11 @@ where
             commit_multi_var!(self, Some(context_id), context_pinned_version)?;
         }
 
-        let ret = Ok((
-            is_delta,
-            ret_deltas,
-            if is_delta {
-                None
-            } else {
-                Some(versioning.current_version.clone())
-            },
-        ));
+        let ret_version = if is_delta {
+            None
+        } else {
+            Some(versioning.current_version.clone())
+        };
 
         #[cfg(test)]
         {
@@ -463,7 +459,7 @@ where
             self.check_state_consistency().await;
         }
 
-        ret
+        Ok((is_delta, ret_deltas, ret_version))
     }
 
     /// Unpin all pins which belongs to `context_id` and has an id which is older than
