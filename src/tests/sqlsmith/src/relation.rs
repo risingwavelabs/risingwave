@@ -54,12 +54,12 @@ impl<'a, R: Rng> SqlGenerator<'a, R> {
     }
 
     fn gen_simple_table_factor(&mut self) -> (TableFactor, Vec<Column>) {
-        let alias = format!("t{}", self.bound_relations.len());
+        let alias = self.gen_table_name_with_prefix("t");
         let mut table = self.tables.choose(&mut self.rng).unwrap().clone();
         let table_factor = TableFactor::Table {
             name: ObjectName(vec![Ident::new(&table.name)]),
             alias: Some(TableAlias {
-                name: Ident::new(alias.clone()),
+                name: alias.as_str().into(),
                 columns: vec![],
             }),
             args: vec![],
@@ -70,6 +70,13 @@ impl<'a, R: Rng> SqlGenerator<'a, R> {
         (table_factor, columns)
     }
 
+    fn gen_local_table_factor(&mut self) -> (TableFactor, Vec<Column>) {
+        let current_context = self.new_local_context();
+        let factor = self.gen_table_factor();
+        self.restore_context(current_context);
+        factor
+    }
+
     /// Generates a table factor, and provides bound columns.
     /// Generated column names should be qualified by table name.
     fn gen_table_factor(&mut self) -> (TableFactor, Vec<Column>) {
@@ -78,8 +85,8 @@ impl<'a, R: Rng> SqlGenerator<'a, R> {
     }
 
     fn gen_equijoin_clause(&mut self) -> TableWithJoins {
-        let (left_factor, left_columns) = self.gen_table_factor();
-        let (right_factor, right_columns) = self.gen_table_factor();
+        let (left_factor, left_columns) = self.gen_local_table_factor();
+        let (right_factor, right_columns) = self.gen_local_table_factor();
 
         let mut available_join_on_columns = vec![];
         for left_column in &left_columns {
@@ -115,7 +122,7 @@ impl<'a, R: Rng> SqlGenerator<'a, R> {
 
     fn gen_subquery(&mut self) -> TableWithJoins {
         let (subquery, columns) = self.gen_query();
-        let alias = format!("t{}", self.bound_relations.len());
+        let alias = self.gen_table_name_with_prefix("sq");
         let table = Table {
             name: alias.clone(),
             columns,

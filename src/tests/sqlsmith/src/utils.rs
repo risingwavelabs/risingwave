@@ -39,12 +39,18 @@ impl<'a, R: Rng> SqlGenerator<'a, R> {
 
 /// Gen utils
 impl<'a, R: Rng> SqlGenerator<'a, R> {
-    pub(crate) fn create_table_name_with_prefix(&self, prefix: &str) -> String {
-        format!("{}_{}", prefix, &self.bound_relations.len())
+    pub(crate) fn gen_table_name_with_prefix(&mut self, prefix: &str) -> String {
+        format!("{}_{}", prefix, &self.gen_relation_id())
     }
 
-    pub(crate) fn gen_alias_with_prefix(&self, prefix: &str) -> TableAlias {
-        let name = &self.create_table_name_with_prefix(prefix);
+    fn gen_relation_id(&mut self) -> u32 {
+        let id = self.relation_id;
+        self.relation_id += 1;
+        id
+    }
+
+    pub(crate) fn gen_table_alias_with_prefix(&mut self, prefix: &str) -> TableAlias {
+        let name = &self.gen_table_name_with_prefix(prefix);
         create_table_alias(name)
     }
 }
