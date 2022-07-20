@@ -18,41 +18,62 @@ use std::collections::HashMap;
 use fixedbitset::FixedBitSet;
 
 use crate::utils::ColIndexMapping;
-
+/// [`FunctionalDependencySet`] contains the functional dependencies.
+///
+/// It is used in optimizer to track the dependencies between columns.
 #[derive(Debug, PartialEq, Clone, Default)]
 pub struct FunctionalDependencySet {
     fd: HashMap<FixedBitSet, FixedBitSet>,
 }
 
 impl FunctionalDependencySet {
+    /// Create a empty [`FunctionalDependencySet`]
     pub fn new() -> Self {
         Self { fd: HashMap::new() }
     }
 
+    /// Create a [`FunctionalDependencySet`] with the indices of a key.
+    ///
+    /// # Examples
+    /// ```rust
+    /// # use risingwave_frontend::optimizer::property::FunctionalDependencySet;
+    /// # use itertools::Itertools;
+    /// let mut fd = FunctionalDependencySet::with_key(4, &[1]);
+    /// let fd_inner = fd.into_dependencies();
+    ///
+    /// assert_eq!(fd_inner.len(), 1);
+    ///
+    /// let (from, to) = fd_inner.into_iter().next().unwrap();
+    /// assert_eq!(from.ones().collect_vec(), &[1]);
+    /// assert_eq!(to.ones().collect_vec(), &[0, 2, 3]);
+    /// ```
     pub fn with_key(column_cnt: usize, key_indices: &[usize]) -> Self {
         let mut tmp = Self::new();
         tmp.add_key_column_by_indices(column_cnt, key_indices);
         tmp
     }
-    
+
+    /// Create a [`FunctionalDependencySet`] with a dependency [`HashMap`]
     pub fn with_dependencies(dependencies: HashMap<FixedBitSet, FixedBitSet>) -> Self {
-        Self {
-            fd: dependencies
-        }
+        Self { fd: dependencies }
     }
-    
+
     pub fn as_dependencies_mut(&mut self) -> &mut HashMap<FixedBitSet, FixedBitSet> {
         &mut self.fd
     }
-    
-    pub fn as_dependencies(&self) -> & HashMap<FixedBitSet, FixedBitSet> {
+
+    pub fn as_dependencies(&self) -> &HashMap<FixedBitSet, FixedBitSet> {
         &self.fd
     }
-    
+
     pub fn into_dependencies(self) -> HashMap<FixedBitSet, FixedBitSet> {
         self.fd
     }
 
+    /// Add a dependency to [`FunctionalDependencySet`] using [`FixedBitset`].
+    ///
+    /// # SAFETY
+    /// The length of `from` and `to` must be the same.
     pub fn add_functional_dependency(&mut self, from: FixedBitSet, to: FixedBitSet) {
         assert_eq!(
             from.len(),
@@ -77,18 +98,68 @@ impl FunctionalDependencySet {
         self.add_functional_dependency(from, to);
     }
 
+    /// Add key columns to a  [`FunctionalDependencySet`].
+    ///
+    /// # Examples
+    ///
+    /// ```rust
+    /// # use risingwave_frontend::optimizer::property::FunctionalDependencySet;
+    /// # use itertools::Itertools;
+    /// let mut fd = FunctionalDependencySet::new();
+    /// fd.add_key_column_by_indices(4, &[1]);
+    /// let fd_inner = fd.into_dependencies();
+    ///
+    /// assert_eq!(fd_inner.len(), 1);
+    ///
+    /// let (from, to) = fd_inner.into_iter().next().unwrap();
+    /// assert_eq!(from.ones().collect_vec(), &[1]);
+    /// assert_eq!(to.ones().collect_vec(), &[0, 2, 3]);
+    /// ```
     pub fn add_key_column_by_indices(&mut self, column_cnt: usize, key_indices: &[usize]) {
         for &i in key_indices {
             self.add_key_column_by_index(column_cnt, i);
         }
     }
 
+    /// Add constant columns to a  [`FunctionalDependencySet`].
+    ///
+    /// # Examples
+    /// ```rust
+    /// # use risingwave_frontend::optimizer::property::FunctionalDependencySet;
+    /// # use itertools::Itertools;
+    /// let mut fd = FunctionalDependencySet::new();
+    /// fd.add_constant_column_by_index(4, 1);
+    /// let fd_inner = fd.into_dependencies();
+    ///
+    /// assert_eq!(fd_inner.len(), 1);
+    ///
+    /// let (from, to) = fd_inner.into_iter().next().unwrap();
+    /// assert!(from.ones().collect_vec().is_empty());
+    /// assert_eq!(to.ones().collect_vec(), &[1]);
+    /// ```
     pub fn add_constant_column_by_index(&mut self, column_cnt: usize, column_id: usize) {
         let mut to = FixedBitSet::with_capacity(column_cnt);
         to.set(column_id, true);
         self.add_functional_dependency(FixedBitSet::with_capacity(column_cnt), to);
     }
 
+    /// Add a dependency to [`FunctionalDependencySet`] using column indices.
+    ///
+    /// # Examples
+    ///
+    /// ```rust
+    /// # use risingwave_frontend::optimizer::property::FunctionalDependencySet;
+    /// # use itertools::Itertools;
+    /// let mut fd = FunctionalDependencySet::new();
+    /// fd.add_functional_dependency_by_column_indices(&[1, 2], &[0], 4); // (1, 2) --> (0), 4 columns
+    /// let fd_inner = fd.into_dependencies();
+    ///
+    /// assert_eq!(fd_inner.len(), 1);
+    ///
+    /// let (from, to) = fd_inner.into_iter().next().unwrap();
+    /// assert_eq!(from.ones().collect_vec(), &[1, 2]);
+    /// assert_eq!(to.ones().collect_vec(), &[0]);
+    /// ```
     pub fn add_functional_dependency_by_column_indices(
         &mut self,
         from: &[usize],
@@ -118,7 +189,7 @@ impl FunctionalDependencySet {
         loop {
             no_updates = true;
             for (from, to) in &self.fd {
-                if from.is_subset(&closure) {
+                if from.is_subset(&closure) && !to.is_subset(&closure) {
                     closure.union_with(to);
                     no_updates = false;
                 }
@@ -129,7 +200,22 @@ impl FunctionalDependencySet {
         }
         closure
     }
-
+    
+    /// Return `true` if the dependency determinant -> dependant exists.
+    ///
+    /// # Examples
+    ///
+    /// ```rust
+    /// # use risingwave_frontend::optimizer::property::FunctionalDependencySet;
+    /// # use fixedbitset::FixedBitSet;
+    /// let mut fd = FunctionalDependencySet::new();
+    /// fd.add_functional_dependency_by_column_indices(&[1, 2], &[0], 5); // (1, 2) --> (0)
+    /// fd.add_functional_dependency_by_column_indices(&[0, 1], &[3], 5); // (0, 1) --> (3)
+    /// fd.add_functional_dependency_by_column_indices(&[3], &[4], 5); // (3) --> (4)
+    /// let from = FixedBitSet::from_iter([1usize, 2usize].into_iter());
+    /// let to = FixedBitSet::from_iter([4usize].into_iter());
+    /// assert!(fd.is_determined_by(from, to)); // (1, 2) --> (4)
+    /// ```
     pub fn is_determined_by(&self, determinant: FixedBitSet, dependant: FixedBitSet) -> bool {
         self.get_closure(determinant).is_superset(&dependant)
     }
