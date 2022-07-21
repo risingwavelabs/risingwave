@@ -63,9 +63,9 @@ impl NotificationManager {
             while let Some(task) = task_rx.recv().await {
                 let mut guard = core.lock().await;
                 let version = match task.target {
-                    WorkerType::Generic => guard.notify_all(task.operation, &task.info).await,
+                    WorkerType::Generic => guard.notify_all(task.operation, &task.info),
 
-                    _ => guard.notify(task.target, task.operation, &task.info).await,
+                    _ => guard.notify(task.target, task.operation, &task.info),
                 };
                 if let Some(tx) = task.callback_tx {
                     tx.send(version).unwrap();
@@ -214,8 +214,7 @@ impl NotificationManagerCore {
         }
     }
 
-    #[expect(clippy::unused_async)]
-    async fn notify(
+    fn notify(
         &mut self,
         worker_type: WorkerType,
         operation: Operation,
@@ -250,8 +249,7 @@ impl NotificationManagerCore {
         self.current_version
     }
 
-    #[expect(clippy::unused_async)]
-    async fn notify_all(&mut self, operation: Operation, info: &Info) -> NotificationVersion {
+    fn notify_all(&mut self, operation: Operation, info: &Info) -> NotificationVersion {
         self.current_version += 1;
 
         for (worker_key, sender) in self
