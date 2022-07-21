@@ -195,21 +195,29 @@ fn print_kv_pairs(block_data: Bytes, table_data: &TableData) -> anyhow::Result<(
         println!("\t\t      type: {}", if is_put { "Put" } else { "Delete" });
 
         if let Some(table_id) = get_table_id(full_key) {
-            let (table_name, columns) = table_data.get(&table_id).unwrap();
-            println!("\t\t     table: {} - {}", table_id, table_name);
+            print!("\t\t     table: {} - ", table_id);
+            match table_data.get(&table_id) {
+                None => {
+                    println!("(unknown)");
+                }
+                Some((table_name, columns)) => {
+                    println!("{}", table_name);
 
-            // Print stored value.
-            let column_idx = deserialize_column_id(&user_key[user_key.len() - 4..])?.get_id();
-            if is_put && !user_val.is_empty() && column_idx >= 0 {
-                let (data_type, name, is_hidden) = &columns[column_idx as usize];
-                let datum = deserialize_cell(user_val, data_type).unwrap().unwrap();
-                println!(
-                    "\t\t    column: {} {}",
-                    name,
-                    if *is_hidden { "(hidden)" } else { "" }
-                );
-                println!("\t\t     datum: {:?}", datum);
-            }
+                    // Print stored value.
+                    let column_idx =
+                        deserialize_column_id(&user_key[user_key.len() - 4..])?.get_id();
+                    if is_put && !user_val.is_empty() && column_idx >= 0 {
+                        let (data_type, name, is_hidden) = &columns[column_idx as usize];
+                        let datum = deserialize_cell(user_val, data_type).unwrap().unwrap();
+                        println!(
+                            "\t\t    column: {} {}",
+                            name,
+                            if *is_hidden { "(hidden)" } else { "" }
+                        );
+                        println!("\t\t     datum: {:?}", datum);
+                    }
+                }
+            };
         }
 
         println!();
