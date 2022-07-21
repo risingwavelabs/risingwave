@@ -36,28 +36,52 @@ pub struct ManagedStringAggState<S: StateStore> {
 
     /// The upstream pk. Assembled as pk of relational table.
     upstream_pk_len: usize,
+
+    // Primary key to look up in relational table. For value state, there is only one row.
+    /// If None, the pk is empty vector (simple agg). If not None, the pk is group key (hash agg).
+    group_key: Option<Row>,
 }
 
 impl<S: StateStore> ManagedStringAggState<S> {
-    pub fn new(pk_data_types: PkDataTypes) -> StreamExecutorResult<Self> {
+    pub fn new(pk_data_types: PkDataTypes, group_key: Option<&Row>) -> StreamExecutorResult<Self> {
+        println!(
+            "[rc] new, pk_data_types: {:?}, group_key: {:?}",
+            pk_data_types, group_key
+        );
         Ok(Self {
             _phantom_data: PhantomData,
             upstream_pk_len: pk_data_types.len(),
+            group_key: group_key.cloned(),
         })
     }
 
     fn make_state_row(&self, value: Option<String>, pk_values: Vec<Datum>) -> Row {
-        let mut row_vals = pk_values.clone();
+        let mut row_vals = if let Some(group_key) = self.group_key.as_ref() {
+            group_key.0.to_vec()
+        } else {
+            vec![]
+        };
+        row_vals.extend(pk_values);
         row_vals.push(value.map(Into::into));
         Row::new(row_vals)
     }
 
     fn decompose_state_row(&self, row: &Row) -> (Option<String>, Vec<Datum>) {
+        let n_group_key_cols = if let Some(group_key) = self.group_key.as_ref() {
+            group_key.size()
+        } else {
+            0
+        };
         let value = row[row.size() - 1].clone().map(|x| match x {
             ScalarImpl::Utf8(s) => s,
             _ => panic!("Expected Utf8"),
         });
-        let pk = row.values().take(self.upstream_pk_len).cloned().collect();
+        let pk = row
+            .values()
+            .skip(n_group_key_cols)
+            .take(self.upstream_pk_len)
+            .cloned()
+            .collect();
         (value, pk)
     }
 }
@@ -124,9 +148,14 @@ impl<S: StateStore> ManagedTableState<S> for ManagedStringAggState<S> {
         epoch: u64,
         state_table: &StateTable<S>,
     ) -> StreamExecutorResult<Datum> {
-        let all_data_iter = state_table.iter(epoch).await?;
+        let all_data_iter = if let Some(group_key) = self.group_key.as_ref() {
+            state_table.iter_with_pk_prefix(group_key, epoch).await?
+        } else {
+            state_table.iter(epoch).await?
+        };
         pin_mut!(all_data_iter);
 
+        // TODO(rc): cache the result
         let mut agg_result = String::new();
 
         #[for_await]

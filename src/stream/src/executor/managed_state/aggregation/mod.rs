@@ -152,6 +152,7 @@ impl<S: StateStore> ManagedStateImpl<S> {
                 println!("[rc] AggKind::StringAgg!!");
                 Ok(Self::Table(Box::new(ManagedStringAggState::new(
                     pk_data_types,
+                    pk,
                 )?)))
             }
             // TODO: for append-only lists, we can create `ManagedValueState` instead of
