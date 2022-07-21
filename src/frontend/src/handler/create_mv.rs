@@ -17,8 +17,10 @@ use std::collections::HashMap;
 use pgwire::pg_response::{PgResponse, StatementType};
 use risingwave_common::error::{ErrorCode, Result};
 use risingwave_pb::catalog::Table as ProstTable;
+use risingwave_pb::user::grant_privilege::{Action, Object};
 use risingwave_sqlparser::ast::{ObjectName, Query, WithProperties};
 
+use super::handle_privilege::check_privilege;
 use super::util::handle_with_properties;
 use crate::binder::{Binder, BoundSetExpr};
 use crate::catalog::check_schema_writable;
@@ -43,6 +45,12 @@ pub fn gen_create_mv_plan(
         .catalog_reader()
         .read_guard()
         .check_relation_name_duplicated(session.database(), &schema_name, &table_name)?;
+
+    {
+        let object = Object::SchemaId(schema_id);
+        let action = Action::Create;
+        check_privilege(&session, object, action)?;
+    }
 
     let bound = {
         let mut binder = Binder::new(
@@ -102,6 +110,12 @@ pub async fn handle_create_mv(
 
         (table, graph)
     };
+
+    if table.owner != session.user_name().to_string() {
+        let object = Object::TableId(table.id);
+        let action = Action::Select;
+        check_privilege(&session, object, action)?;
+    }
 
     let catalog_writer = session.env().catalog_writer();
     catalog_writer

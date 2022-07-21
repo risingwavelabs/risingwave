@@ -15,8 +15,10 @@
 use pgwire::pg_response::{PgResponse, StatementType};
 use risingwave_common::error::{ErrorCode, Result, RwError};
 use risingwave_pb::stream_plan::source_node::SourceType;
+use risingwave_pb::user::grant_privilege::{Action, Object};
 use risingwave_sqlparser::ast::ObjectName;
 
+use super::handle_privilege::check_privilege;
 use crate::binder::Binder;
 use crate::session::OptimizerContext;
 
@@ -29,6 +31,12 @@ pub async fn handle_drop_source(context: OptimizerContext, name: ObjectName) -> 
         .read_guard()
         .get_source_by_name(session.database(), &schema_name, &source_name)?
         .clone();
+
+    if source.owner != session.user_name().to_string() {
+        let object = Object::SourceId(source.id);
+        let action = Action::Delete;
+        check_privilege(&session, object, action)?;
+    }
 
     match source.source_type {
         SourceType::Table => {

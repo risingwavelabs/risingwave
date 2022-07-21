@@ -146,6 +146,8 @@ pub enum ErrorCode {
     InvalidParameterValue(String),
     #[error("Sink error: {0}")]
     SinkError(BoxedError),
+    #[error("Authentication error: {0}")]
+    AuthError(String),
 
     /// This error occurs when the meta node receives heartbeat from a previous removed worker
     /// node. Currently we don't support re-register, and the worker node need a full restart.
@@ -344,6 +346,7 @@ impl ErrorCode {
             ErrorCode::SinkError(_) => 31,
             ErrorCode::RpcError(_) => 32,
             ErrorCode::BatchError(_) => 33,
+            ErrorCode::AuthError(_) => 34,
             ErrorCode::UnknownError(_) => 101,
         }
     }

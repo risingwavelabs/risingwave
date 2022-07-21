@@ -13,6 +13,7 @@
 // limitations under the License.
 
 use pgwire::pg_response::{PgResponse, StatementType};
+use risingwave_common::error::ErrorCode::AuthError;
 use risingwave_common::error::Result;
 use risingwave_sqlparser::ast::ObjectName;
 
@@ -27,6 +28,18 @@ pub async fn handle_create_database(
 ) -> Result<PgResponse> {
     let session = context.session_ctx;
     let database_name = Binder::resolve_database_name(database_name)?;
+
+    {
+        let user_reader = session.env().user_info_reader();
+        let reader = user_reader.read_guard();
+        if let Some(info) = reader.get_user_by_name(session.user_name()) {
+            if !info.can_create_db && !info.is_supper {
+                return Err(AuthError("Do not have the privilege".to_string()).into());
+            }
+        } else {
+            return Err(AuthError("Session user is invalid".to_string()).into());
+        }
+    }
 
     {
         let catalog_reader = session.env().catalog_reader();

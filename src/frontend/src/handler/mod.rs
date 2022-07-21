@@ -152,7 +152,7 @@ pub async fn handle(session: Arc<SessionImpl>, stmt: Statement, sql: &str) -> Re
                 )
                 .into());
             }
-            create_index::handle_create_index(context, name, table_name, columns).await
+            create_index::handle_create_index(context, name, table_name, columns.to_vec()).await
         }
         // Ignore `StartTransaction` and `Abort` temporarily.Its not final implementation.
         // 1. Fully support transaction is too hard and gives few benefits to us.

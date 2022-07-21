@@ -53,7 +53,7 @@ pub async fn handle_drop_database(
             }
         }
     };
-    let database_id = {
+    let (database_id, owner) = {
         // If the mode is `Restrict` or `None`, the `database` need to be empty.
         if !database.is_empty() {
             return Err(CatalogError::NotEmpty(
@@ -64,8 +64,12 @@ pub async fn handle_drop_database(
             )
             .into());
         }
-        database.id()
+        (database.id(), database.owner())
     };
+
+    if session.user_name().to_string() != owner {
+        return Err(ErrorCode::AuthError("Do not have the privilege".to_string()).into());
+    }
 
     let catalog_writer = session.env().catalog_writer();
     catalog_writer.drop_database(database_id).await?;

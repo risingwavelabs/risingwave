@@ -20,10 +20,12 @@ use itertools::Itertools;
 use pgwire::pg_response::{PgResponse, StatementType};
 use risingwave_common::error::{ErrorCode, Result, RwError};
 use risingwave_pb::catalog::Table as ProstTable;
+use risingwave_pb::user::grant_privilege::{Action, Object};
 use risingwave_sqlparser::ast::{ObjectName, OrderByExpr};
 
 use crate::binder::Binder;
 use crate::catalog::check_schema_writable;
+use crate::handler::handle_privilege::check_privilege;
 use crate::optimizer::plan_node::{LogicalScan, StreamTableScan};
 use crate::optimizer::property::{FieldOrder, Order, RequiredDist};
 use crate::optimizer::{PlanRef, PlanRoot};
@@ -166,6 +168,12 @@ pub async fn handle_create_index(
 
         (graph, table)
     };
+
+    if table.owner != session.user_name().to_string() {
+        let object = Object::TableId(table.id);
+        let action = Action::Select;
+        check_privilege(&session, object, action)?;
+    }
 
     log::trace!(
         "name={}, graph=\n{}",

@@ -17,8 +17,10 @@ use std::collections::HashMap;
 use pgwire::pg_response::{PgResponse, StatementType};
 use risingwave_common::error::Result;
 use risingwave_pb::catalog::Sink as ProstSink;
+use risingwave_pb::user::grant_privilege::{Action, Object};
 use risingwave_sqlparser::ast::CreateSinkStatement;
 
+use super::handle_privilege::check_privilege;
 use super::util::handle_with_properties;
 use crate::binder::Binder;
 use crate::catalog::{DatabaseId, SchemaId};
@@ -50,11 +52,23 @@ pub async fn handle_create_sink(
     let session = context.session_ctx.clone();
 
     let (schema_name, sink_name) = Binder::resolve_table_name(stmt.sink_name.clone())?;
-    let (database_id, schema_id) = session
-        .env()
-        .catalog_reader()
-        .read_guard()
-        .check_relation_name_duplicated(session.database(), &schema_name, sink_name.as_str())?;
+
+    let (database_id, schema_id) = {
+        let catalog_reader = session.env().catalog_reader().read_guard();
+
+        let schema = catalog_reader.get_schema_by_name(session.database(), &schema_name)?;
+        if schema.owner() != session.user_name().to_string() {
+            let object = Object::SchemaId(schema.id());
+            let action = Action::Create;
+            check_privilege(&session, object, action)?;
+        }
+
+        catalog_reader.check_relation_name_duplicated(
+            session.database(),
+            &schema_name,
+            sink_name.as_str(),
+        )?
+    };
 
     let mv_name = stmt.materialized_view.to_string();
     let sink = make_prost_sink(

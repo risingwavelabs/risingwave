@@ -17,8 +17,10 @@ use std::sync::Arc;
 use pgwire::pg_response::{PgResponse, StatementType};
 use risingwave_common::error::{ErrorCode, Result, RwError};
 use risingwave_pb::stream_plan::source_node::SourceType;
+use risingwave_pb::user::grant_privilege::{Action, Object};
 use risingwave_sqlparser::ast::ObjectName;
 
+use super::handle_privilege::check_privilege;
 use crate::binder::Binder;
 use crate::catalog::catalog_service::CatalogReader;
 use crate::session::{OptimizerContext, SessionImpl};
@@ -54,6 +56,12 @@ pub async fn handle_drop_table(
     let (source_id, table_id) = {
         let reader = catalog_reader.read_guard();
         let table = reader.get_table_by_name(session.database(), &schema_name, &table_name)?;
+
+        if table.owner != session.user_name().to_string() {
+            let object = Object::TableId(table.id().table_id());
+            let action = Action::Delete;
+            check_privilege(&session, object, action)?;
+        }
 
         // If associated source is `None`, then it is a normal mview.
         match table.associated_source_id() {
