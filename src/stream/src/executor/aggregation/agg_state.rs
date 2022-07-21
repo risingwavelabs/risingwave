@@ -17,6 +17,7 @@ use std::fmt::Debug;
 use itertools::Itertools;
 use risingwave_common::array::{ArrayBuilderImpl, Op};
 use risingwave_common::types::Datum;
+use risingwave_expr::expr::ExpressionRef;
 use risingwave_storage::table::state_table::StateTable;
 use risingwave_storage::StateStore;
 
@@ -28,6 +29,9 @@ use crate::executor::managed_state::aggregation::ManagedStateImpl;
 pub struct AggState<S: StateStore> {
     /// Current managed states for all [`crate::executor::aggregation::AggCall`]s.
     pub managed_states: Vec<ManagedStateImpl<S>>,
+
+    /// Filters of `agg_call`s
+    pub filters: Vec<Option<ExpressionRef>>,
 
     /// Previous outputs of managed states. Initializing with `None`.
     pub prev_states: Option<Vec<Datum>>,

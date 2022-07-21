@@ -21,10 +21,11 @@ use dyn_clone::{self, DynClone};
 pub use foldable::*;
 use risingwave_common::array::column::Column;
 use risingwave_common::array::stream_chunk::Ops;
+use risingwave_common::array::ArrayImpl::Bool;
 use risingwave_common::array::{
-    Array, ArrayBuilder, ArrayBuilderImpl, ArrayImpl, ArrayRef, BoolArray, DecimalArray, F32Array,
-    F64Array, I16Array, I32Array, I64Array, IntervalArray, ListArray, NaiveDateArray,
-    NaiveDateTimeArray, NaiveTimeArray, Row, StructArray, Utf8Array,
+    Array, ArrayBuilder, ArrayBuilderImpl, ArrayImpl, ArrayRef, BoolArray, DataChunk, DecimalArray,
+    F32Array, F64Array, I16Array, I32Array, I64Array, IntervalArray, ListArray, NaiveDateArray,
+    NaiveDateTimeArray, NaiveTimeArray, Row, StructArray, Utf8Array, Vis,
 };
 use risingwave_common::buffer::Bitmap;
 use risingwave_common::catalog::{Field, Schema};
@@ -355,6 +356,7 @@ pub async fn generate_managed_agg_state<S: StateStore>(
     state_tables: &[StateTable<S>],
 ) -> StreamExecutorResult<AggState<S>> {
     let mut managed_states = vec![];
+    let mut filters = vec![];
 
     // Currently the loop here only works if `ROW_COUNT_COLUMN` is 0.
     const_assert_eq!(ROW_COUNT_COLUMN, 0);
@@ -379,10 +381,12 @@ pub async fn generate_managed_agg_state<S: StateStore>(
         }
 
         managed_states.push(managed_state);
+        filters.push(agg_call.filter.clone());
     }
 
     Ok(AggState {
         managed_states,
+        filters,
         prev_states: None,
     })
 }
@@ -403,4 +407,29 @@ pub fn generate_state_tables_from_proto<S: StateStore>(
         state_tables.push(state_table)
     }
     state_tables
+}
+
+pub fn agg_call_filter_res(
+    agg_call: &AggCall,
+    columns: &Vec<Column>,
+    vis_map: Option<&Bitmap>,
+    capacity: usize,
+) -> StreamExecutorResult<Option<Bitmap>> {
+    if let Some(ref filter) = agg_call.filter {
+        let vis = Vis::from(
+            vis_map
+                .cloned()
+                .unwrap_or_else(|| Bitmap::all_high_bits(capacity)),
+        );
+        let data_chunk = DataChunk::new(columns.to_owned(), vis);
+        if let Bool(filter_res) = filter.eval(&data_chunk)?.as_ref() {
+            Ok(Some(filter_res.to_bitmap()))
+        } else {
+            Err(StreamExecutorError::invalid_argument(
+                "Filter can only receive bool array",
+            ))
+        }
+    } else {
+        Ok(vis_map.cloned())
+    }
 }

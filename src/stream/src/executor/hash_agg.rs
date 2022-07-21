@@ -31,6 +31,7 @@ use risingwave_common::util::hash_util::CRC32FastBuilder;
 use risingwave_storage::table::state_table::StateTable;
 use risingwave_storage::StateStore;
 
+use super::aggregation::agg_call_filter_res;
 use super::{
     expect_first_barrier, pk_input_arrays, Executor, PkDataTypes, PkIndicesRef,
     StreamExecutorResult,
@@ -206,6 +207,7 @@ impl<K: HashKey, S: StateStore> HashAggExecutor<K, S> {
         // Compute hash code here before serializing keys to avoid duplicate hash code computation.
         let hash_codes = data_chunk.get_hash_values(key_indices, CRC32FastBuilder)?;
         let keys = K::build_from_hash_code(key_indices, &data_chunk, hash_codes.clone());
+        let capacity = data_chunk.capacity();
         let (columns, vis) = data_chunk.into_parts();
         let visibility = match vis {
             Vis::Bitmap(b) => Some(b),
@@ -290,15 +292,17 @@ impl<K: HashKey, S: StateStore> HashAggExecutor<K, S> {
         for (key, _, vis_map) in &unique_keys {
             let state = state_map.get_mut(key).unwrap().as_mut().unwrap();
             // 3. Apply batch to each of the state (per agg_call)
-            for ((agg_state, data), state_table) in state
+            for (((agg_state, agg_call), data), state_table) in state
                 .managed_states
                 .iter_mut()
+                .zip_eq(agg_calls.iter())
                 .zip_eq(all_agg_data.iter())
                 .zip_eq(state_tables.iter_mut())
             {
                 let data = data.iter().map(|d| &**d).collect_vec();
+                let vis_map = agg_call_filter_res(agg_call, &columns, Some(vis_map), capacity)?;
                 agg_state
-                    .apply_batch(&ops, Some(vis_map), &data, epoch, state_table)
+                    .apply_batch(&ops, vis_map.as_ref(), &data, epoch, state_table)
                     .await?;
             }
         }
@@ -582,18 +586,21 @@ mod tests {
                 args: AggArgs::None,
                 return_type: DataType::Int64,
                 append_only,
+                filter: None,
             },
             AggCall {
                 kind: AggKind::Count,
                 args: AggArgs::Unary(DataType::Int64, 0),
                 return_type: DataType::Int64,
                 append_only,
+                filter: None,
             },
             AggCall {
                 kind: AggKind::Count,
                 args: AggArgs::None,
                 return_type: DataType::Int64,
                 append_only,
+                filter: None,
             },
         ];
 
@@ -669,12 +676,14 @@ mod tests {
                 args: AggArgs::None,
                 return_type: DataType::Int64,
                 append_only,
+                filter: None,
             },
             AggCall {
                 kind: AggKind::Sum,
                 args: AggArgs::Unary(DataType::Int64, 1),
                 return_type: DataType::Int64,
                 append_only,
+                filter: None,
             },
             // This is local hash aggregation, so we add another sum state
             AggCall {
@@ -682,6 +691,7 @@ mod tests {
                 args: AggArgs::Unary(DataType::Int64, 2),
                 return_type: DataType::Int64,
                 append_only,
+                filter: None,
             },
         ];
 
@@ -764,12 +774,14 @@ mod tests {
                 args: AggArgs::None,
                 return_type: DataType::Int64,
                 append_only: false,
+                filter: None,
             },
             AggCall {
                 kind: AggKind::Min,
                 args: AggArgs::Unary(DataType::Int64, 1),
                 return_type: DataType::Int64,
                 append_only: false,
+                filter: None,
             },
         ];
 
@@ -853,12 +865,14 @@ mod tests {
                 args: AggArgs::None,
                 return_type: DataType::Int64,
                 append_only,
+                filter: None,
             },
             AggCall {
                 kind: AggKind::Min,
                 args: AggArgs::Unary(DataType::Int64, 1),
                 return_type: DataType::Int64,
                 append_only,
+                filter: None,
             },
         ];
 

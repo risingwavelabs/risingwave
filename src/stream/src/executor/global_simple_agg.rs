@@ -22,6 +22,7 @@ use risingwave_common::error::Result;
 use risingwave_storage::table::state_table::StateTable;
 use risingwave_storage::StateStore;
 
+use super::aggregation::agg_call_filter_res;
 use super::*;
 use crate::executor::aggregation::{
     agg_input_array_refs, generate_agg_schema, generate_managed_agg_state, AggCall, AggState,
@@ -124,6 +125,7 @@ impl<S: StateStore> GlobalSimpleAggExecutor<S> {
         epoch: u64,
         state_tables: &mut [StateTable<S>],
     ) -> StreamExecutorResult<()> {
+        let capacity = chunk.capacity();
         let (ops, columns, visibility) = chunk.into_inner();
 
         // --- Retrieve all aggregation inputs in advance ---
@@ -163,14 +165,16 @@ impl<S: StateStore> GlobalSimpleAggExecutor<S> {
         states.may_mark_as_dirty(epoch, state_tables).await?;
 
         // 3. Apply batch to each of the state (per agg_call)
-        for ((agg_state, data), state_table) in states
+        for (((agg_state, agg_call), data), state_table) in states
             .managed_states
             .iter_mut()
+            .zip_eq(agg_calls.iter())
             .zip_eq(all_agg_data.iter())
             .zip_eq(state_tables.iter_mut())
         {
+            let vis_map = agg_call_filter_res(agg_call, &columns, visibility.as_ref(), capacity)?;
             agg_state
-                .apply_batch(&ops, visibility.as_ref(), data, epoch, state_table)
+                .apply_batch(&ops, vis_map.as_ref(), data, epoch, state_table)
                 .await?;
         }
 
@@ -330,24 +334,28 @@ mod tests {
                 args: AggArgs::None,
                 return_type: DataType::Int64,
                 append_only,
+                filter: None,
             },
             AggCall {
                 kind: AggKind::Sum,
                 args: AggArgs::Unary(DataType::Int64, 0),
                 return_type: DataType::Int64,
                 append_only,
+                filter: None,
             },
             AggCall {
                 kind: AggKind::Sum,
                 args: AggArgs::Unary(DataType::Int64, 1),
                 return_type: DataType::Int64,
                 append_only,
+                filter: None,
             },
             AggCall {
                 kind: AggKind::Min,
                 args: AggArgs::Unary(DataType::Int64, 0),
                 return_type: DataType::Int64,
                 append_only,
+                filter: None,
             },
         ];
 
