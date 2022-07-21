@@ -37,6 +37,16 @@ async fn sqlsmith_handle(session: Arc<SessionImpl>, stmt: Statement, sql: String
     }
 }
 
+/// test abort
+async fn abort_proc() {
+    std::process::abort();
+}
+
+/// test normal panic
+async fn panic_proc() {
+    panic!("")
+}
+
 /// Create the tables defined in testdata.
 async fn create_tables(session: Arc<SessionImpl>, rng: &mut impl Rng) -> Vec<Table> {
     let seed_files = vec!["tests/testdata/tpch.sql", "tests/testdata/nexmark.sql"];
@@ -59,6 +69,7 @@ async fn create_tables(session: Arc<SessionImpl>, rng: &mut impl Rng) -> Vec<Tab
             } => {
                 let name = name.0[0].value.clone();
                 let columns = columns.iter().map(|c| c.clone().into()).collect();
+                sqlsmith_handle(session.clone(), s, &stmt_sql).await;
                 handler::handle(session.clone(), s, &stmt_sql).await.unwrap();
                 tables.push(Table { name, columns })
             }
