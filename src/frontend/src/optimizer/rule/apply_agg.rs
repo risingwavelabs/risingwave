@@ -15,20 +15,22 @@
 use risingwave_pb::plan_common::JoinType;
 
 use super::{BoxedRule, Rule};
-use crate::optimizer::plan_node::{LogicalAgg, PlanTreeNodeBinary, PlanTreeNodeUnary};
+use crate::optimizer::plan_node::{LogicalAgg, LogicalApply, LogicalFilter, PlanTreeNodeUnary};
 use crate::optimizer::PlanRef;
+use crate::utils::Condition;
 
 /// Push `LogicalApply` down `LogicalAgg`.
 pub struct ApplyAggRule {}
 impl Rule for ApplyAggRule {
     fn apply(&self, plan: PlanRef) -> Option<PlanRef> {
-        let apply = plan.as_logical_apply()?;
-        assert_eq!(apply.join_type(), JoinType::Inner);
-        let right = apply.right();
+        let apply: &LogicalApply = plan.as_logical_apply()?;
+        let (left, right, on, join_type, correlated_id, correlated_indices) =
+            apply.clone().decompose();
+        assert_eq!(join_type, JoinType::Inner);
         let agg = right.as_logical_agg()?;
 
         // Insert all the columns of `LogicalApply`'s left at the beginning of `LogicalAgg`.
-        let apply_left_len = apply.left().schema().len();
+        let apply_left_len = left.schema().len();
         let mut group_key: Vec<usize> = (0..apply_left_len).collect();
         let (mut agg_calls, agg_group_key, _) = agg.clone().decompose();
         group_key.extend(agg_group_key.into_iter().map(|key| key + apply_left_len));
@@ -40,9 +42,25 @@ impl Rule for ApplyAggRule {
             });
         });
 
-        let new_apply = apply.clone_with_left_right(apply.left(), agg.input());
-        let new_agg = LogicalAgg::new(agg_calls, group_key, new_apply.into());
-        Some(new_agg.into())
+        let new_apply = LogicalApply::create(
+            left,
+            agg.input(),
+            join_type,
+            Condition {
+                conjunctions: vec![],
+            },
+            correlated_id,
+            correlated_indices,
+        );
+        let new_agg: PlanRef = LogicalAgg::new(agg_calls, group_key, new_apply).into();
+
+        // left apply's on condition for predicate push to deal with
+        if !on.conjunctions.is_empty() {
+            let filter = LogicalFilter::create(new_agg, on);
+            Some(filter)
+        } else {
+            Some(new_agg)
+        }
     }
 }
 

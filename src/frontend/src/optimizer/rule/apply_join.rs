@@ -318,7 +318,6 @@ impl PlanCorrelatedIdFinder {
 }
 
 impl PlanVisitor<()> for PlanCorrelatedIdFinder {
-
     /// common subquery is project, filter and join
 
     fn visit_logical_join(&mut self, plan: &LogicalJoin) {
