@@ -513,7 +513,7 @@ impl Compactor {
             let compaction_executor = compactor.context.compaction_executor.as_ref().cloned();
             let filter = multi_filter.clone();
             let split_task = async move {
-                let merge_iter = compactor.build_sst_iter().await?;
+                let merge_iter = compactor.build_sst_iter()?;
                 compactor
                     .compact_key_range_with_filter(split_index, merge_iter, filter)
                     .await
@@ -764,7 +764,7 @@ impl Compactor {
     }
 
     /// Build the merge iterator based on the given input ssts.
-    async fn build_sst_iter(&self) -> HummockResult<Box<FastMergeConcatIterator>> {
+    fn build_sst_iter(&self) -> HummockResult<Box<FastMergeConcatIterator>> {
         let mut table_iters = Vec::new();
         let read_options = Arc::new(ReadOptions { prefetch: true });
 

@@ -1,3 +1,17 @@
+// Copyright 2022 Singularity Data
+//
+// Licensed under the Apache License, Version 2.0 (the "License");
+// you may not use this file except in compliance with the License.
+// You may obtain a copy of the License at
+//
+// http://www.apache.org/licenses/LICENSE-2.0
+//
+// Unless required by applicable law or agreed to in writing, software
+// distributed under the License is distributed on an "AS IS" BASIS,
+// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+// See the License for the specific language governing permissions and
+// limitations under the License.
+
 use std::cmp::Ordering;
 use std::collections::binary_heap::PeekMut;
 use std::collections::{BinaryHeap, LinkedList};
@@ -209,14 +223,6 @@ impl FastMergeConcatIterator {
         self.heap = self.unused_iters.drain_filter(|i| i.is_valid()).collect();
     }
 
-    pub fn key(&self) -> &[u8] {
-        self.heap.peek().expect("no inner iter").key()
-    }
-
-    pub fn value(&self) -> HummockValue<&[u8]> {
-        self.heap.peek().expect("no inner iter").value()
-    }
-
     pub fn is_valid(&self) -> bool {
         self.heap.peek().map_or(false, |n| n.is_valid())
     }
@@ -298,5 +304,137 @@ impl MergeIteratorNext for FastMergeConcatIterator {
 
     fn is_valid_inner(&self) -> bool {
         self.heap.peek().map_or(false, |n| n.is_valid())
+    }
+}
+#[cfg(test)]
+mod test {
+    use std::sync::Arc;
+
+    use risingwave_pb::hummock::KeyRange;
+
+    use super::*;
+    use crate::hummock::iterator::test_utils::{
+        default_builder_opt_for_test, iterator_test_key_of, mock_sstable_store,
+    };
+    use crate::hummock::iterator::{MergeIteratorNext, ReadOptions};
+    use crate::hummock::test_utils::gen_test_sstable;
+    use crate::hummock::value::HummockValue;
+    use crate::monitor::StateStoreMetrics;
+
+    async fn gen_test_sstable_info(
+        sst_id: u64,
+        kvs: impl Iterator<Item = (Vec<u8>, HummockValue<Vec<u8>>)>,
+        sstable_store: SstableStoreRef,
+    ) -> SstableInfo {
+        let table = gen_test_sstable(
+            default_builder_opt_for_test(),
+            sst_id,
+            kvs,
+            sstable_store.clone(),
+        )
+        .await;
+        SstableInfo {
+            id: sst_id,
+            key_range: Some(KeyRange {
+                left: table.meta.smallest_key.to_vec(),
+                right: table.meta.largest_key.to_vec(),
+                inf: false,
+            }),
+            file_size: table.meta.estimated_size as u64,
+            table_ids: vec![],
+            unit_id: 0,
+        }
+    }
+
+    #[tokio::test]
+    async fn test_merge_iter_basic() {
+        let sstable_store = mock_sstable_store();
+        let read_options = Arc::new(ReadOptions::default());
+        const TEST_KEYS_COUNT: usize = 100;
+        const TEST_KEYS_MIDDLE: usize = 50;
+
+        let non_overlapped_sstable = vec![
+            gen_test_sstable_info(
+                0,
+                (0..TEST_KEYS_COUNT)
+                    .filter(|x| x % 3 == 0 && *x <= TEST_KEYS_MIDDLE)
+                    .map(|x| {
+                        (
+                            iterator_test_key_of(x),
+                            HummockValue::put(format!("non_overlapped_{}", x).as_bytes().to_vec()),
+                        )
+                    }),
+                sstable_store.clone(),
+            )
+            .await,
+            gen_test_sstable_info(
+                1,
+                (0..TEST_KEYS_COUNT)
+                    .filter(|x| x % 3 == 0 && *x > TEST_KEYS_MIDDLE)
+                    .map(|x| {
+                        (
+                            iterator_test_key_of(x),
+                            HummockValue::put(format!("non_overlapped_{}", x).as_bytes().to_vec()),
+                        )
+                    }),
+                sstable_store.clone(),
+            )
+            .await,
+        ];
+
+        let overlapped_old_sstable = gen_test_sstable_info(
+            2,
+            (0..TEST_KEYS_COUNT).filter(|x| x % 3 == 2).map(|x| {
+                (
+                    iterator_test_key_of(x),
+                    HummockValue::put(format!("overlapped_old_{}", x).as_bytes().to_vec()),
+                )
+            }),
+            sstable_store.clone(),
+        )
+        .await;
+
+        let overlapped_new_sstable = gen_test_sstable_info(
+            3,
+            (0..TEST_KEYS_COUNT).filter(|x| x % 3 == 1).map(|x| {
+                (
+                    iterator_test_key_of(x),
+                    HummockValue::put(format!("overlapped_new_{}", x).as_bytes().to_vec()),
+                )
+            }),
+            sstable_store.clone(),
+        )
+        .await;
+
+        let mut iter = FastMergeConcatIterator::new(
+            vec![
+                non_overlapped_sstable,
+                vec![overlapped_new_sstable],
+                vec![overlapped_old_sstable],
+            ],
+            sstable_store.clone(),
+            read_options.clone(),
+            Arc::new(StateStoreMetrics::unused()),
+        );
+        iter.rewind().await.unwrap();
+
+        let mut count = 0;
+
+        while iter.is_valid_inner() {
+            assert_eq!(iter.key_inner(), iterator_test_key_of(count));
+            let expected_value = match count % 3 {
+                0 => format!("non_overlapped_{}", count).as_bytes().to_vec(),
+                1 => format!("overlapped_new_{}", count).as_bytes().to_vec(),
+                2 => format!("overlapped_old_{}", count).as_bytes().to_vec(),
+                _ => unreachable!(),
+            };
+            assert_eq!(
+                iter.value_inner(),
+                HummockValue::put(expected_value.as_slice())
+            );
+            count += 1;
+            iter.next_inner().await.unwrap();
+        }
+        assert_eq!(count, TEST_KEYS_COUNT);
     }
 }
