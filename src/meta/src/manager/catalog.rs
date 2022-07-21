@@ -17,13 +17,12 @@ use std::collections::{HashMap, HashSet};
 use std::option::Option::Some;
 use std::sync::Arc;
 
-use anyhow::anyhow;
 use itertools::Itertools;
 use risingwave_common::catalog::{
     DEFAULT_DATABASE_NAME, DEFAULT_SCHEMA_NAME, DEFAULT_SUPPER_USER, PG_CATALOG_SCHEMA_NAME,
 };
 use risingwave_common::ensure;
-use risingwave_common::error::ErrorCode::{CatalogError, InternalError};
+use risingwave_common::error::ErrorCode::{InternalError, PermissionDenied};
 use risingwave_common::error::{Result, RwError};
 use risingwave_common::types::ParallelUnitId;
 use risingwave_pb::catalog::table::OptionalAssociatedSourceId;
@@ -308,14 +307,10 @@ where
         let table = Table::select(self.env.meta_store(), &table_id).await?;
         if let Some(table) = table {
             match core.get_ref_count(table_id) {
-                Some(ref_count) => Err(CatalogError(
-                    anyhow!(
-                        "Fail to delete table `{}` because {} other relation(s) depend on it.",
-                        table.name,
-                        ref_count
-                    )
-                    .into(),
-                )
+                Some(ref_count) => Err(PermissionDenied(format!(
+                    "Fail to delete table `{}` because {} other relation(s) depend on it",
+                    table.name, ref_count
+                ))
                 .into()),
                 None => {
                     Table::delete(self.env.meta_store(), &table_id).await?;
@@ -435,14 +430,10 @@ where
         let source = Source::select(self.env.meta_store(), &source_id).await?;
         if let Some(source) = source {
             match core.get_ref_count(source_id) {
-                Some(ref_count) => Err(CatalogError(
-                    anyhow!(
-                        "Fail to delete source `{}` because {} other relation(s) depend on it.",
-                        source.name,
-                        ref_count
-                    )
-                    .into(),
-                )
+                Some(ref_count) => Err(PermissionDenied(format!(
+                    "Fail to delete source `{}` because {} other relation(s) depend on it",
+                    source.name, ref_count
+                ))
                 .into()),
                 None => {
                     Source::delete(self.env.meta_store(), &source_id).await?;
@@ -587,25 +578,17 @@ where
                 }
                 // check ref count
                 if let Some(ref_count) = core.get_ref_count(mview_id) {
-                    return Err(CatalogError(
-                        anyhow!(
-                            "Fail to delete table `{}` because {} other relation(s) depend on it.",
-                            mview.name,
-                            ref_count
-                        )
-                        .into(),
-                    )
+                    return Err(PermissionDenied(format!(
+                        "Fail to delete table `{}` because {} other relation(s) depend on it",
+                        mview.name, ref_count
+                    ))
                     .into());
                 }
                 if let Some(ref_count) = core.get_ref_count(source_id) {
-                    return Err(CatalogError(
-                        anyhow!(
-                            "Fail to delete source `{}` because {} other relation(s) depend on it.",
-                            source.name,
-                            ref_count
-                        )
-                        .into(),
-                    )
+                    return Err(PermissionDenied(format!(
+                        "Fail to delete source `{}` because {} other relation(s) depend on it",
+                        source.name, ref_count
+                    ))
                     .into());
                 }
 
