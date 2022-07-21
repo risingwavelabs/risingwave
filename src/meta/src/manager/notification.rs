@@ -61,11 +61,12 @@ impl NotificationManager {
 
         tokio::spawn(async move {
             while let Some(task) = task_rx.recv().await {
-                let version = core
-                    .lock()
-                    .await
-                    .notify(task.target, task.operation, &task.info)
-                    .await;
+                let mut guard = core.lock().await;
+                let version = match task.target {
+                    WorkerType::Generic => guard.notify_all(task.operation, &task.info).await,
+
+                    _ => guard.notify(task.target, task.operation, &task.info).await,
+                };
                 if let Some(tx) = task.callback_tx {
                     tx.send(version).unwrap();
                 }
@@ -128,6 +129,11 @@ impl NotificationManager {
         self.notify_asynchronously(WorkerType::ComputeNode, operation, info);
     }
 
+    /// To notify all the `worker_type` sender
+    pub async fn notify_all_node(&self, operation: Operation, info: Info) -> NotificationVersion {
+        self.notify(WorkerType::Generic, operation, info).await
+    }
+
     pub async fn notify_local_subscribers(&self, notification: LocalNotification) {
         let mut core_guard = self.core.lock().await;
         core_guard.local_senders.retain(|sender| {
@@ -146,6 +152,7 @@ impl NotificationManager {
         core_guard.frontend_senders.remove(&worker_key);
     }
 
+    /// Tell `NotificationManagerCore` to insert sender by `worker_type`.
     pub async fn insert_sender(
         &self,
         worker_type: WorkerType,
@@ -237,6 +244,29 @@ impl NotificationManagerCore {
                     worker_key,
                     err
                 );
+            }
+        }
+
+        self.current_version
+    }
+
+    #[expect(clippy::unused_async)]
+    async fn notify_all(&mut self, operation: Operation, info: &Info) -> NotificationVersion {
+        self.current_version += 1;
+
+        for (worker_key, sender) in self
+            .frontend_senders
+            .iter()
+            .chain(self.compute_senders.iter())
+            .chain(self.compactor_senders.iter())
+        {
+            if let Err(err) = sender.send(Ok(SubscribeResponse {
+                status: None,
+                operation: operation as i32,
+                info: Some(info.clone()),
+                version: self.current_version,
+            })) {
+                tracing::warn!("Failed to notify_all {:?}: {}", worker_key, err);
             }
         }
 

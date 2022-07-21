@@ -270,28 +270,15 @@ where
 
             for internal_table in internal_tables {
                 core.add_table(&internal_table);
-                self.env
-                    .notification_manager()
-                    .notify_frontend(Operation::Add, Info::Table(internal_table.to_owned()))
-                    .await;
 
-                self.env
-                    .notification_manager()
-                    .notify_compactor(Operation::Add, Info::Table(internal_table.to_owned()))
+                self.publish_table(Operation::Add, Info::Table(internal_table.to_owned()))
                     .await;
             }
             core.add_table(table);
             let version = self
-                .env
-                .notification_manager()
-                .notify_frontend(Operation::Add, Info::Table(table.to_owned()))
+                .publish_table(Operation::Add, Info::Table(table.to_owned()))
                 .await;
 
-            // notify table_catalog to compactor
-            self.env
-                .notification_manager()
-                .notify_compactor(Operation::Add, Info::Table(table.to_owned()))
-                .await;
             Ok(version)
         } else {
             Err(RwError::from(InternalError(
@@ -338,15 +325,7 @@ where
                     }
 
                     let version = self
-                        .env
-                        .notification_manager()
-                        .notify_frontend(Operation::Delete, Info::Table(table.to_owned()))
-                        .await;
-
-                    // notify table_catalog to compactor
-                    self.env
-                        .notification_manager()
-                        .notify_compactor(Operation::Delete, Info::Table(table.to_owned()))
+                        .publish_table(Operation::Delete, Info::Table(table.to_owned()))
                         .await;
 
                     Ok(version)
@@ -444,14 +423,7 @@ where
         }
         core.env.meta_store().txn(transaction).await?;
         for table in &tables {
-            self.env
-                .notification_manager()
-                .notify_frontend(Operation::Update, Info::Table(table.to_owned()))
-                .await;
-
-            self.env
-                .notification_manager()
-                .notify_compactor(Operation::Update, Info::Table(table.to_owned()))
+            self.publish_table(Operation::Update, Info::Table(table.to_owned()))
                 .await;
             core.add_table(table);
         }
@@ -546,25 +518,12 @@ where
 
             for table in tables {
                 core.add_table(&table);
-                self.env
-                    .notification_manager()
-                    .notify_frontend(Operation::Add, Info::Table(table.to_owned()))
-                    .await;
-
-                self.env
-                    .notification_manager()
-                    .notify_compactor(Operation::Add, Info::Table(table.to_owned()))
+                self.publish_table(Operation::Add, Info::Table(table.to_owned()))
                     .await;
             }
-            self.env
-                .notification_manager()
-                .notify_frontend(Operation::Add, Info::Table(mview.to_owned()))
+            self.publish_table(Operation::Add, Info::Table(mview.to_owned()))
                 .await;
 
-            self.env
-                .notification_manager()
-                .notify_compactor(Operation::Add, Info::Table(mview.to_owned()))
-                .await;
             // Currently frontend uses source's version
             let version = self
                 .env
@@ -661,14 +620,7 @@ where
                     core.decrease_ref_count(dependent_relation_id);
                 }
 
-                self.env
-                    .notification_manager()
-                    .notify_frontend(Operation::Delete, Info::Table(mview.to_owned()))
-                    .await;
-
-                self.env
-                    .notification_manager()
-                    .notify_compactor(Operation::Delete, Info::Table(mview.to_owned()))
+                self.publish_table(Operation::Delete, Info::Table(mview.to_owned()))
                     .await;
 
                 let version = self
@@ -703,6 +655,15 @@ where
             .filter(|s| s.schema_id == schema_id)
             .map(|s| s.id)
             .collect())
+    }
+
+    async fn publish_table(&self, operation: Operation, info: Info) -> NotificationVersion {
+        let result = self
+            .env
+            .notification_manager()
+            .notify_all_node(operation, info)
+            .await;
+        result
     }
 }
 

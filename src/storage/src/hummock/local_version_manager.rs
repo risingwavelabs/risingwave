@@ -25,6 +25,7 @@ use parking_lot::{RwLock, RwLockUpgradableReadGuard, RwLockWriteGuard};
 use risingwave_common::config::StorageConfig;
 use risingwave_hummock_sdk::compaction_group::hummock_version_ext::HummockVersionExt;
 use risingwave_hummock_sdk::key::FullKey;
+use risingwave_hummock_sdk::slice_transform::SliceTransform;
 use risingwave_hummock_sdk::{CompactionGroupId, LocalSstableInfo};
 use risingwave_pb::hummock::{HummockVersion, HummockVersionDelta};
 use risingwave_rpc_client::HummockMetaClient;
@@ -147,6 +148,7 @@ impl LocalVersionManager {
         stats: Arc<StateStoreMetrics>,
         hummock_meta_client: Arc<dyn HummockMetaClient>,
         write_conflict_detector: Option<Arc<ConflictDetector>>,
+        table_id_to_slice_transform: Arc<RwLock<HashMap<u32, Arc<dyn SliceTransform>>>>,
     ) -> Arc<LocalVersionManager> {
         let (version_unpin_worker_tx, version_unpin_worker_rx) =
             tokio::sync::mpsc::unbounded_channel();
@@ -182,12 +184,14 @@ impl LocalVersionManager {
                 buffer_event_sender,
             ),
             write_conflict_detector: write_conflict_detector.clone(),
+
             shared_buffer_uploader: Arc::new(SharedBufferUploader::new(
                 options.clone(),
                 sstable_store,
                 hummock_meta_client.clone(),
                 stats,
                 write_conflict_detector,
+                table_id_to_slice_transform.clone(),
             )),
         });
 
@@ -211,6 +215,23 @@ impl LocalVersionManager {
         ));
 
         local_version_manager
+    }
+
+    pub async fn for_test(
+        options: Arc<StorageConfig>,
+        sstable_store: SstableStoreRef,
+        hummock_meta_client: Arc<dyn HummockMetaClient>,
+        write_conflict_detector: Option<Arc<ConflictDetector>>,
+    ) -> Arc<LocalVersionManager> {
+        Self::new(
+            options,
+            sstable_store,
+            Arc::new(StateStoreMetrics::unused()),
+            hummock_meta_client,
+            write_conflict_detector,
+            Arc::new(RwLock::new(HashMap::new())),
+        )
+        .await
     }
 
     /// Updates cached version if the new version is of greater id.
