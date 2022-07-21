@@ -38,8 +38,18 @@ message UpdateMutation {
     // Removed downstream actors.
     repeated uint32 removed_downstream_actor_id = 4;
   }
-  // Dispatcher updates for each actor.
+  // TODO: These actor ids should be the same as those in `DispatcherUpdate`.
+  // We may find a way to deduplicate this.
+  message MergeUpdate {
+    // Added upstream actors.
+    repeated uint32 added_upstream_actor_id = 1;
+    // Removed upstream actors.
+    repeated uint32 removed_upstream_actor_id = 2;
+  }
+  // Dispatcher updates for each upstream actor.
   map<uint32, DispatcherUpdate> actor_dispatcher_update = 1;
+  // Merge updates for each downstream actor.
+  map<uint32, MergeUpdate> actor_merge_update = 2;
 }
 
 message SourceChangeSplitMutation {
@@ -441,7 +451,7 @@ message StreamFragmentGraph {
     DispatchStrategy dispatch_strategy = 1;
     // Whether the two linked nodes should be placed on the same worker node
     bool same_worker_node = 2;
-    // A unique identifer of this edge. Generally it should be exchange node's operator id. When
+    // A unique identifier of this edge. Generally it should be exchange node's operator id. When
     // rewriting fragments into delta joins or when inserting 1-to-1 exchange, there will be
     // virtual links generated.
     uint64 link_id = 3;
