@@ -25,6 +25,20 @@ use risingwave_sqlparser::ast::Statement;
 use risingwave_sqlparser::parser::Parser;
 use risingwave_sqlsmith::{mview_sql_gen, sql_gen, Table};
 
+/// Executes sql queries
+/// It captures panics so it can recover and print failing sql query.
+async fn handle(session: Arc<SessionImpl>, stmt: Statement, sql: String) {
+    let sql_for_thread = sql.clone();
+    let res =
+        tokio::spawn(async move { handler::handle(session.clone(), stmt, &sql_for_thread).await })
+            .await;
+    match res {
+        Ok(Ok(_)) => {}
+        Ok(Err(e)) => panic!("Encountered error while running SQL: {}\nERROR: {}", sql, e),
+        Err(e) => panic!("Panic while running SQL: {}\nERROR: {}", sql, e),
+    }
+}
+
 /// Create the tables defined in testdata.
 async fn create_tables(session: Arc<SessionImpl>, rng: &mut impl Rng) -> Vec<Table> {
     let seed_files = vec!["tests/testdata/tpch.sql", "tests/testdata/nexmark.sql"];
@@ -38,6 +52,7 @@ async fn create_tables(session: Arc<SessionImpl>, rng: &mut impl Rng) -> Vec<Tab
 
     let mut tables = vec![];
     for s in statements.into_iter() {
+        let stmt_sql = s.to_string();
         match s {
             Statement::CreateTable {
                 ref name,
@@ -46,7 +61,7 @@ async fn create_tables(session: Arc<SessionImpl>, rng: &mut impl Rng) -> Vec<Tab
             } => {
                 let name = name.0[0].value.clone();
                 let columns = columns.iter().map(|c| c.clone().into()).collect();
-                handler::handle(session.clone(), s, &sql).await.unwrap();
+                handle(session.clone(), s, stmt_sql).await;
                 tables.push(Table { name, columns })
             }
             _ => panic!("Unexpected statement: {}", s),
@@ -60,7 +75,7 @@ async fn create_tables(session: Arc<SessionImpl>, rng: &mut impl Rng) -> Vec<Tab
         let stmts =
             Parser::parse_sql(&sql).unwrap_or_else(|_| panic!("Failed to parse SQL: {}", sql));
         let stmt = stmts[0].clone();
-        handler::handle(session.clone(), stmt, &sql).await.unwrap();
+        handle(session.clone(), stmt, sql).await;
         tables.push(table);
     }
     tables
