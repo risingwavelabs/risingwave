@@ -179,7 +179,12 @@ macro_rules! start_measure_real_process_timer {
 struct Versioning {
     current_version_id: CurrentHummockVersionId,
     current_version: HummockVersion,
+    // mapping from id of each hummock version which succeeds checkpoint to ids of each SST in that
+    // `HummockVersion`, because we need to search `HummockVersion` for useless SSTs in order to
+    // determine whether a SST can be deleted in vacuum process
     hummock_versions: BTreeMap<HummockVersionId, Vec<HummockSSTableId>>,
+    // mapping from id of each hummock version which succeeds checkpoint to its
+    // `HummockVersionDelta`
     hummock_version_deltas: BTreeMap<HummockVersionId, HummockVersionDelta>,
     pinned_versions: BTreeMap<HummockContextId, HummockPinnedVersion>,
     pinned_snapshots: BTreeMap<HummockContextId, HummockPinnedSnapshot>,
