@@ -29,22 +29,24 @@ use risingwave_sqlsmith::{mview_sql_gen, sql_gen, Table};
 /// NOTE: It cannot deal with aborts
 async fn sqlsmith_handle(session: Arc<SessionImpl>, stmt: Statement, sql: String) {
     let res = tokio::spawn(async move {
-        handler::handle(session.clone(), stmt, &sql).await
+        panic_proc().await
     }).await;
     match res {
         Ok(Ok(_)) => {},
-        _ => {}
+        _ => println!("caught some err"),
     }
 }
 
 /// test abort
-async fn abort_proc() {
+async fn abort_proc() -> Result<(), ()> {
     std::process::abort();
+    Ok(())
 }
 
 /// test normal panic
-async fn panic_proc() {
-    panic!("")
+async fn panic_proc() -> Result<(), ()> {
+    panic!("");
+    Ok(())
 }
 
 /// Create the tables defined in testdata.
@@ -60,7 +62,7 @@ async fn create_tables(session: Arc<SessionImpl>, rng: &mut impl Rng) -> Vec<Tab
 
     let mut tables = vec![];
     for s in statements.into_iter() {
-        let stmt_sql = &s.to_string();
+        let stmt_sql = s.to_string();
         match s {
             Statement::CreateTable {
                 ref name,
@@ -69,8 +71,7 @@ async fn create_tables(session: Arc<SessionImpl>, rng: &mut impl Rng) -> Vec<Tab
             } => {
                 let name = name.0[0].value.clone();
                 let columns = columns.iter().map(|c| c.clone().into()).collect();
-                sqlsmith_handle(session.clone(), s, &stmt_sql).await;
-                handler::handle(session.clone(), s, &stmt_sql).await.unwrap();
+                sqlsmith_handle(session.clone(), s, stmt_sql).await;
                 tables.push(Table { name, columns })
             }
             _ => panic!("Unexpected statement: {}", s),
