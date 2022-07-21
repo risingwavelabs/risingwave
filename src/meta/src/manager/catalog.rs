@@ -271,12 +271,12 @@ where
             for internal_table in internal_tables {
                 core.add_table(&internal_table);
 
-                self.publish_table(Operation::Add, Info::Table(internal_table.to_owned()))
+                self.broadcast_table_op(Operation::Add, Info::Table(internal_table.to_owned()))
                     .await;
             }
             core.add_table(table);
             let version = self
-                .publish_table(Operation::Add, Info::Table(table.to_owned()))
+                .broadcast_table_op(Operation::Add, Info::Table(table.to_owned()))
                 .await;
 
             Ok(version)
@@ -325,7 +325,7 @@ where
                     }
 
                     let version = self
-                        .publish_table(Operation::Delete, Info::Table(table.to_owned()))
+                        .broadcast_table_op(Operation::Delete, Info::Table(table.to_owned()))
                         .await;
 
                     Ok(version)
@@ -423,7 +423,7 @@ where
         }
         core.env.meta_store().txn(transaction).await?;
         for table in &tables {
-            self.publish_table(Operation::Update, Info::Table(table.to_owned()))
+            self.broadcast_table_op(Operation::Update, Info::Table(table.to_owned()))
                 .await;
             core.add_table(table);
         }
@@ -518,10 +518,10 @@ where
 
             for table in tables {
                 core.add_table(&table);
-                self.publish_table(Operation::Add, Info::Table(table.to_owned()))
+                self.broadcast_table_op(Operation::Add, Info::Table(table.to_owned()))
                     .await;
             }
-            self.publish_table(Operation::Add, Info::Table(mview.to_owned()))
+            self.broadcast_table_op(Operation::Add, Info::Table(mview.to_owned()))
                 .await;
 
             // Currently frontend uses source's version
@@ -620,7 +620,7 @@ where
                     core.decrease_ref_count(dependent_relation_id);
                 }
 
-                self.publish_table(Operation::Delete, Info::Table(mview.to_owned()))
+                self.broadcast_table_op(Operation::Delete, Info::Table(mview.to_owned()))
                     .await;
 
                 let version = self
@@ -657,7 +657,7 @@ where
             .collect())
     }
 
-    async fn publish_table(&self, operation: Operation, info: Info) -> NotificationVersion {
+    async fn broadcast_table_op(&self, operation: Operation, info: Info) -> NotificationVersion {
         self.env
             .notification_manager()
             .notify_all_node(operation, info)

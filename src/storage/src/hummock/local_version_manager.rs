@@ -217,6 +217,7 @@ impl LocalVersionManager {
         local_version_manager
     }
 
+    #[cfg(any(test, feature = "test"))]
     pub async fn for_test(
         options: Arc<StorageConfig>,
         sstable_store: SstableStoreRef,
