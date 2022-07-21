@@ -56,16 +56,17 @@ impl<'a, R: Rng> SqlGenerator<'a, R> {
     fn gen_simple_table_factor(&mut self) -> (TableFactor, Vec<Column>) {
         let alias = self.gen_table_name_with_prefix("t");
         let mut table = self.tables.choose(&mut self.rng).unwrap().clone();
+        let columns = self.gen_columns_from_schema(&table.columns);
         let table_factor = TableFactor::Table {
             name: ObjectName(vec![Ident::new(&table.name)]),
             alias: Some(TableAlias {
                 name: alias.as_str().into(),
-                columns: vec![],
+                columns: columns.iter().map(|c| c.name.as_str().into()).collect(),
             }),
             args: vec![],
         };
         table.name = alias; // Rename the table.
-        let columns = table.get_qualified_columns();
+        table.columns = columns.clone();
         self.add_relation_to_context(table);
         (table_factor, columns)
     }

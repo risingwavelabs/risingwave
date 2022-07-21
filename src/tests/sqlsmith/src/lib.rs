@@ -76,6 +76,9 @@ struct SqlGenerator<'a, R: Rng> {
     /// Relation ID used to generate table names and aliases
     relation_id: u32,
 
+    /// Column ID used to generate column ids and aliases
+    column_id: u32,
+
     /// is_distinct_allowed - Distinct and Orderby/Approx.. cannot be generated together among agg
     ///                       having and
     /// When this variable is true, it means distinct only
@@ -107,6 +110,7 @@ impl<'a, R: Rng> SqlGenerator<'a, R> {
             tables,
             rng,
             relation_id: 0,
+            column_id: 0,
             is_distinct_allowed,
             bound_relations: vec![],
             bound_columns: vec![],
@@ -120,6 +124,7 @@ impl<'a, R: Rng> SqlGenerator<'a, R> {
             tables,
             rng,
             relation_id: 0,
+            column_id: 0,
             is_distinct_allowed: false,
             bound_relations: vec![],
             bound_columns: vec![],

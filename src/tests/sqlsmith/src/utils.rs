@@ -53,6 +53,24 @@ impl<'a, R: Rng> SqlGenerator<'a, R> {
         let name = &self.gen_table_name_with_prefix(prefix);
         create_table_alias(name)
     }
+
+    /// Generate new columns with globally unique names
+    pub(crate) fn gen_columns_from_schema(&mut self, schema: &[Column]) -> Vec<Column> {
+        schema
+            .iter()
+            .map(|c| Column {
+                name: format!("col{}", self.gen_column_id()),
+                data_type: c.data_type,
+            })
+            .collect()
+    }
+
+    /// Generate new column ids which are globally unique
+    fn gen_column_id(&mut self) -> u32 {
+        let id = self.column_id;
+        self.column_id += 1;
+        id
+    }
 }
 
 pub(crate) fn create_table_factor_from_table(table: &Table) -> TableFactor {
