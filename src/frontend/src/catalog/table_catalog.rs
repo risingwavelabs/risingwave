@@ -178,6 +178,7 @@ impl From<ProstTable> for TableCatalog {
         let mut col_names = HashSet::new();
         let mut col_index: HashMap<i32, usize> = HashMap::new();
         let columns: Vec<ColumnCatalog> = tb.columns.into_iter().map(ColumnCatalog::from).collect();
+        panic!("test");
         for (idx, catalog) in columns.clone().into_iter().enumerate() {
             for col_desc in catalog.column_desc.flatten() {
                 let col_name = col_desc.name.clone();
