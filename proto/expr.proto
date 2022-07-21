@@ -111,6 +111,7 @@ message TableFunction {
   enum Type {
     GENERATE = 0;
     UNNEST = 1;
+    REGEXP_MATCHES = 2;
   }
   Type function_type = 1;
   repeated expr.ExprNode args = 2;
