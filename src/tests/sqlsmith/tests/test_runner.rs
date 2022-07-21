@@ -34,8 +34,8 @@ async fn sqlsmith_handle(session: Arc<SessionImpl>, stmt: Statement, sql: String
             .await;
     match res {
         Ok(Ok(_)) => {}
-        Ok(Err(e)) => println!("Encountered error while running SQL: {}\nERROR: {}", sql, e),
-        Err(e) => println!("Panic while running SQL: {}\nERROR: {}", sql, e),
+        Ok(Err(e)) => panic!("Encountered error while running SQL: {}\nERROR: {}", sql, e),
+        Err(e) => panic!("Panic while running SQL: {}\nERROR: {}", sql, e),
     }
 }
 
