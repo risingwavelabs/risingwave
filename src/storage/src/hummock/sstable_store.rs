@@ -86,7 +86,7 @@ impl SstableStore {
     }
 
     pub async fn put(&self, sst: Sstable, data: Bytes, policy: CachePolicy) -> HummockResult<()> {
-        self.put_sst_data(sst.id, data.clone()).await?;
+        self.put_sst_data(sst.id, data).await?;
 
         fail_point!("metadata_upload_err");
         if let Err(e) = self.put_meta(&sst).await {

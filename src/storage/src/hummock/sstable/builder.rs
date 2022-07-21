@@ -189,7 +189,7 @@ impl SSTableBuilder {
     }
 
     pub fn approximate_len(&self) -> usize {
-        self.buf.len() + 4
+        self.buf.len() + self.block_builder.approximate_len() + 4
     }
 
     fn build_block(&mut self) {

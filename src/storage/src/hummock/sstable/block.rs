@@ -212,7 +212,8 @@ pub struct BlockBuilder {
 impl BlockBuilder {
     pub fn new(options: BlockBuilderOptions) -> Self {
         Self {
-            buf: BytesMut::with_capacity(options.capacity),
+            // add more space to avoid re-allocate space.
+            buf: BytesMut::with_capacity(options.capacity + 256),
             restart_count: options.restart_interval,
             restart_points: Vec::with_capacity(
                 options.capacity / DEFAULT_ENTRY_SIZE / options.restart_interval + 1,
@@ -341,7 +342,8 @@ impl BlockBuilder {
 
     /// Approximate block len (uncompressed).
     pub fn approximate_len(&self) -> usize {
-        self.buf.len() + 4 * self.restart_points.len() + 4 + 1 + 4
+        // block + restart_points + restart_points.len + compression_algorithm + checksum
+        self.buf.len() + 4 * self.restart_points.len() + 4 + 1 + 8
     }
 }
 

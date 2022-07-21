@@ -38,9 +38,7 @@ use tokio::sync::oneshot::Sender;
 use tokio::task::JoinHandle;
 
 use super::multi_builder::CapacitySplitTableBuilder;
-use super::{
-    CompressionAlgorithm, HummockResult, SSTableBuilder, SSTableBuilderOptions, Sstable,
-};
+use super::{CompressionAlgorithm, HummockResult, SSTableBuilder, SSTableBuilderOptions, Sstable};
 use crate::hummock::compaction_executor::CompactionExecutor;
 use crate::hummock::iterator::{
     FastMergeConcatIterator, HummockIterator, MergeIteratorNext, OrderedAwareMergeIterator,
@@ -97,7 +95,7 @@ pub struct CompactorContext {
     pub compaction_executor: Option<Arc<CompactionExecutor>>,
 }
 
-trait CompactionFilter: Send + DynClone {
+pub trait CompactionFilter: Send + DynClone {
     fn should_delete(&mut self, _: &[u8]) -> bool {
         false
     }
@@ -922,7 +920,7 @@ impl Compactor {
         (join_handle, shutdown_tx)
     }
 
-    async fn compact_and_build_sst<B, F, I: MergeIteratorNext>(
+    pub async fn compact_and_build_sst<B, F, I: MergeIteratorNext>(
         sst_builder: &mut CapacitySplitTableBuilder<B>,
         kr: KeyRange,
         mut iter: Box<I>,
