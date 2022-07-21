@@ -25,8 +25,8 @@ use risingwave_sqlparser::ast::Statement;
 use risingwave_sqlparser::parser::Parser;
 use risingwave_sqlsmith::{mview_sql_gen, sql_gen, Table};
 
-/// Executes and catches system panics to recover
-/// NOTE: It cannot deal with aborts
+/// Executes sql queries
+/// It captures panics so it can recover and print failing sql query.
 async fn sqlsmith_handle(session: Arc<SessionImpl>, stmt: Statement, sql: String) {
     let sql_for_thread = sql.clone();
     let res =
