@@ -19,6 +19,7 @@ use std::marker::PhantomData;
 use risingwave_common::hash::{calc_hash_key_kind, HashKey, HashKeyDispatcher};
 use risingwave_storage::table::state_table::RowBasedStateTable;
 
+use super::agg_call::build_agg_call_from_prost;
 use super::*;
 use crate::executor::aggregation::{generate_state_tables_from_proto, AggCall};
 use crate::executor::{HashAggExecutor, PkIndices};

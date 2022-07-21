@@ -26,7 +26,7 @@ use risingwave_storage::StateStore;
 pub use value::*;
 
 use crate::executor::aggregation::AggCall;
-use crate::executor::error::{StreamExecutorError, StreamExecutorResult};
+use crate::executor::error::StreamExecutorResult;
 use crate::executor::managed_state::aggregation::string_agg_new::ManagedStringAggState;
 use crate::executor::PkDataTypes;
 

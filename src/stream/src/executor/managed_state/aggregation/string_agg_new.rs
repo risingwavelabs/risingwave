@@ -15,14 +15,14 @@
 use std::marker::PhantomData;
 
 use async_trait::async_trait;
-use futures::{pin_mut, StreamExt};
+use futures::pin_mut;
 use futures_async_stream::for_await;
 use itertools::Itertools;
 use risingwave_common::array::stream_chunk::Ops;
 use risingwave_common::array::Op::{Delete, Insert, UpdateDelete, UpdateInsert};
 use risingwave_common::array::{Array, ArrayImpl, Row, Utf8Array};
 use risingwave_common::buffer::Bitmap;
-use risingwave_common::types::{option_to_owned_scalar, Datum, ScalarImpl, ScalarRef};
+use risingwave_common::types::{Datum, ScalarImpl, ScalarRef};
 use risingwave_storage::table::state_table::StateTable;
 use risingwave_storage::StateStore;
 
