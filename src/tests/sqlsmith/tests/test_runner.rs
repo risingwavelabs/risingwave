@@ -28,15 +28,14 @@ use risingwave_sqlsmith::{mview_sql_gen, sql_gen, Table};
 /// Executes sql queries
 /// It captures panics so it can recover and print failing sql query.
 async fn handle(session: Arc<SessionImpl>, stmt: Statement, sql: String) {
-    let sql_for_thread = sql.clone();
-    let res =
-        tokio::spawn(async move { handler::handle(session.clone(), stmt, &sql_for_thread).await })
-            .await;
-    match res {
-        Ok(Ok(_)) => {}
-        Ok(Err(e)) => panic!("Encountered error while running SQL: {}\nERROR: {}", sql, e),
-        Err(e) => panic!("Panic while running SQL: {}\nERROR: {}", sql, e),
-    }
+    let sql_copy = sql.clone();
+    panic::set_hook(Box::new(move |e| {
+        println!("Panic on SQL:\n{}\nReason:\n{}", sql_copy, e);
+    }));
+
+    handler::handle(session.clone(), stmt, &sql)
+        .await
+        .unwrap_or_else(|e| panic!("Failed to handle SQL:\n{}\nReason:\n{}", sql, e));
 }
 
 /// Create the tables defined in testdata.
