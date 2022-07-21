@@ -35,7 +35,7 @@ message CellBasedTableDesc {
   repeated ColumnDesc columns = 2;
   // TODO: may refactor primary key representations
   repeated ColumnOrder order_key = 3;
-  repeated uint32 dist_key_indices = 5;
+  repeated uint32 dist_key_indices = 4;
 }
 
 enum JoinType {
