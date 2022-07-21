@@ -4215,6 +4215,7 @@ dependencies = [
  "madsim",
  "madsim-tokio",
  "madsim-tonic",
+ "parking_lot",
  "prometheus",
  "risingwave_common",
  "risingwave_common_service",
