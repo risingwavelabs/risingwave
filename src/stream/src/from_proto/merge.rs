@@ -15,9 +15,8 @@
 use risingwave_common::catalog::{Field, Schema};
 
 use super::*;
-use crate::executor::merge::new_input;
-use crate::executor::receiver::ReceiverExecutor;
-use crate::executor::MergeExecutor;
+use crate::executor::exchange::input::new_input;
+use crate::executor::{MergeExecutor, ReceiverExecutor};
 
 pub struct MergeExecutorBuilder;
 
@@ -35,7 +34,7 @@ impl ExecutorBuilder for MergeExecutorBuilder {
         let schema = Schema::new(fields);
         let actor_context = params.actor_context;
 
-        let upstreams: Vec<_> = upstreams
+        let inputs: Vec<_> = upstreams
             .iter()
             .map(|&upstream_actor_id| {
                 new_input(
@@ -49,11 +48,11 @@ impl ExecutorBuilder for MergeExecutorBuilder {
             })
             .try_collect()?;
 
-        if upstreams.len() == 1 {
+        if inputs.len() == 1 {
             Ok(ReceiverExecutor::new(
                 schema,
                 params.pk_indices,
-                upstreams.into_iter().next().unwrap().1,
+                inputs.into_iter().next().unwrap(),
                 actor_context,
                 x_node.operator_id,
                 params.actor_id,
@@ -67,7 +66,7 @@ impl ExecutorBuilder for MergeExecutorBuilder {
                 params.actor_id,
                 params.fragment_id,
                 upstream_fragment_id,
-                upstreams,
+                inputs,
                 stream.context.clone(),
                 actor_context,
                 x_node.operator_id,
