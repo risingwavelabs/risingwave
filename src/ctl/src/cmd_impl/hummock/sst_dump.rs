@@ -23,12 +23,12 @@ use risingwave_hummock_sdk::key::{get_epoch, get_table_id, user_key};
 use risingwave_hummock_sdk::HummockSSTableId;
 use risingwave_object_store::object::{BlockLocation, ObjectStore};
 use risingwave_rpc_client::{HummockMetaClient, MetaClient};
-use risingwave_storage::encoding::cell_based_encoding_util::deserialize_column_id;
 use risingwave_storage::hummock::value::HummockValue;
 use risingwave_storage::hummock::{
     Block, BlockHolder, BlockIterator, CompressionAlgorithm, SstableMeta, SstableStore,
 };
 use risingwave_storage::monitor::StoreLocalStatistic;
+use risingwave_storage::row_serde::cell_based_encoding_util::deserialize_column_id;
 
 use crate::common::HummockServiceOpts;
 
