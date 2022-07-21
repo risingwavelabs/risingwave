@@ -658,12 +658,10 @@ where
     }
 
     async fn publish_table(&self, operation: Operation, info: Info) -> NotificationVersion {
-        let result = self
-            .env
+        self.env
             .notification_manager()
             .notify_all_node(operation, info)
-            .await;
-        result
+            .await
     }
 }
 
