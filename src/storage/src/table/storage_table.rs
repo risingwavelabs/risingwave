@@ -593,6 +593,7 @@ impl<S: StateStore, RS: RowSerde> StorageTableBase<S, RS, READ_WRITE> {
 pub trait PkAndRowStream = Stream<Item = StorageResult<(Vec<u8>, Row)>> + Send;
 
 /// The row iterator of the storage table.
+/// The wrapper of [`StorageTableIter`] if pk is not persisted.
 pub type StorageTableIter<S: StateStore, RS: RowSerde> = impl PkAndRowStream;
 
 pub type BatchDedupPkIter<S: StateStore, RS: RowSerde> = impl PkAndRowStream;

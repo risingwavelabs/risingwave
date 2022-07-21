@@ -14,14 +14,12 @@
 
 use bytes::{Buf, Bytes};
 use risingwave_common::array::Row;
-use risingwave_common::catalog::{ColumnDesc, ColumnId};
 use risingwave_common::error::{ErrorCode, Result};
 use risingwave_common::types::{DataType, VirtualNode, VIRTUAL_NODE_SIZE};
 use risingwave_common::util::value_encoding::deserialize_datum;
 
 use super::cell_based_encoding_util::parse_raw_key_to_vnode_and_key;
-use super::row_based_serializer::RowBasedSerializer;
-use super::{RowDeserialize, RowSerde};
+use super::RowDeserialize;
 
 #[derive(Clone)]
 pub struct RowBasedDeserializer {
@@ -50,25 +48,6 @@ impl RowDeserialize for RowBasedDeserializer {
     }
 }
 
-impl RowSerde for RowBasedDeserializer {
-    type Deserializer = RowBasedDeserializer;
-    type Serializer = RowBasedSerializer;
-
-    fn create_serializer(
-        pk_indices: &[usize],
-        column_descs: &[ColumnDesc],
-        column_ids: &[ColumnId],
-    ) -> Self::Serializer {
-        super::RowSerialize::create_row_serializer(pk_indices, column_descs, column_ids)
-    }
-
-    fn create_deserializer(
-        column_mapping: std::sync::Arc<super::ColumnDescMapping>,
-        data_types: Vec<risingwave_common::types::DataType>,
-    ) -> Self::Deserializer {
-        RowDeserialize::create_row_deserializer(column_mapping, data_types)
-    }
-}
 impl RowBasedDeserializer {
     fn deserialize_inner(
         &mut self,

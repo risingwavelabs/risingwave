@@ -192,7 +192,7 @@ impl<S: StateStore, RS: RowSerde> StateTableBase<S, RS> {
     }
 }
 
-/// Iterator functions with cell-based encoding.
+/// Iterator functions.
 impl<S: StateStore, RS: RowSerde> StateTableBase<S, RS> {
     /// This function scans rows from the relational table.
     pub async fn iter(&self, epoch: u64) -> StorageResult<RowStream<'_, S, RS>> {
