@@ -145,6 +145,7 @@ impl<'a, R: Rng> SqlGenerator<'a, R> {
 
     pub fn gen_mview(&mut self, name: &str) -> (Statement, Table) {
         let (query, schema) = self.gen_query();
+        let schema = self.gen_columns_from_schema(&schema);
         let query = Box::new(query);
         let table = Table {
             name: name.to_string(),
