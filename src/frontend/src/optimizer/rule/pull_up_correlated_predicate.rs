@@ -16,7 +16,7 @@ use itertools::{Either, Itertools};
 
 use super::super::plan_node::*;
 use super::{BoxedRule, Rule};
-use crate::expr::{CorrelatedInputRef, Expr, ExprImpl, ExprRewriter, InputRef};
+use crate::expr::{CorrelatedId, CorrelatedInputRef, Expr, ExprImpl, ExprRewriter, InputRef};
 use crate::optimizer::PlanRef;
 use crate::utils::Condition;
 
@@ -40,6 +40,7 @@ impl Rule for PullUpCorrelatedPredicateRule {
         let mut rewriter = Rewriter {
             input_refs: vec![],
             index: proj_exprs.len() + apply_left.schema().fields().len(),
+            correlated_id,
         };
         // Split predicates in LogicalFilter into correlated expressions and uncorrelated
         // expressions.
@@ -94,6 +95,8 @@ struct Rewriter {
     pub input_refs: Vec<InputRef>,
 
     pub index: usize,
+
+    pub correlated_id: CorrelatedId,
 }
 
 impl ExprRewriter for Rewriter {
@@ -102,12 +105,16 @@ impl ExprRewriter for Rewriter {
         correlated_input_ref: CorrelatedInputRef,
     ) -> ExprImpl {
         // Convert correlated_input_ref to input_ref.
-        // TODO: use LiftCorrelatedInputRef here.
-        InputRef::new(
-            correlated_input_ref.index(),
-            correlated_input_ref.return_type(),
-        )
-        .into()
+        // only rewrite the correlated_input_ref with the same correlated_id
+        if correlated_input_ref.get_correlated_id() == self.correlated_id {
+            InputRef::new(
+                correlated_input_ref.index(),
+                correlated_input_ref.return_type(),
+            )
+            .into()
+        } else {
+            correlated_input_ref.into()
+        }
     }
 
     fn rewrite_input_ref(&mut self, input_ref: InputRef) -> ExprImpl {
