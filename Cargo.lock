@@ -4493,6 +4493,7 @@ version = "0.1.10"
 dependencies = [
  "bytes",
  "hex",
+ "itertools",
  "log",
  "madsim",
  "madsim-tokio",
@@ -6401,6 +6402,7 @@ dependencies = [
  "bytes",
  "cc",
  "chrono",
+ "clap 3.2.13",
  "criterion",
  "crossbeam-deque",
  "crossbeam-epoch",

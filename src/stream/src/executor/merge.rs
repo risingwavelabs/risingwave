@@ -16,167 +16,21 @@ use std::pin::Pin;
 use std::task::{Context, Poll};
 
 use futures::{pin_mut, Stream, StreamExt};
-use futures_async_stream::{for_await, try_stream};
-use madsim::time::Instant;
+use futures_async_stream::try_stream;
 use risingwave_common::catalog::Schema;
-use risingwave_common::error::{Result, RwError};
-use risingwave_common::util::addr::is_local_address;
-use risingwave_pb::task_service::GetStreamResponse;
-use risingwave_rpc_client::ComputeClient;
-use tokio::sync::mpsc::{Receiver, Sender};
-use tonic::Streaming;
 
 use super::error::StreamExecutorError;
+use super::exchange::input::BoxedInput;
 use super::*;
+use crate::executor::exchange::input::new_input;
 use crate::executor::monitor::StreamingMetrics;
-use crate::task::{FragmentId, SharedContext, UpDownActorIds, UpDownFragmentIds};
-
-/// Receive data from `gRPC` and forwards to `MergerExecutor`/`ReceiverExecutor`
-pub struct RemoteInput {
-    stream: Streaming<GetStreamResponse>,
-    sender: Sender<Message>,
-    up_down_ids: UpDownActorIds,
-    up_down_frag: UpDownFragmentIds,
-    metrics: Arc<StreamingMetrics>,
-}
-
-impl RemoteInput {
-    /// Create a remote input from compute client and related info. Should provide the corresponding
-    /// compute client of where the actor is placed.
-    pub async fn create(
-        client: ComputeClient,
-        up_down_ids: UpDownActorIds,
-        up_down_frag: UpDownFragmentIds,
-        sender: Sender<Message>,
-        metrics: Arc<StreamingMetrics>,
-    ) -> Result<Self> {
-        let stream = client
-            .get_stream(up_down_ids.0, up_down_ids.1, up_down_frag.0, up_down_frag.1)
-            .await?;
-        Ok(Self {
-            stream,
-            sender,
-            up_down_ids,
-            up_down_frag,
-            metrics,
-        })
-    }
-
-    pub async fn run(self) {
-        let up_actor_id = self.up_down_ids.0.to_string();
-        let down_actor_id = self.up_down_ids.1.to_string();
-        let up_fragment_id = self.up_down_frag.0.to_string();
-        let down_fragment_id = self.up_down_frag.1.to_string();
-
-        let mut rr = 0;
-        const SAMPLING_FREQUENCY: u64 = 100;
-
-        #[for_await]
-        for data_res in self.stream {
-            match data_res {
-                Ok(stream_msg) => {
-                    let bytes = Message::get_encoded_len(&stream_msg);
-                    self.metrics
-                        .exchange_recv_size
-                        .with_label_values(&[&up_actor_id, &down_actor_id])
-                        .inc_by(bytes as u64);
-
-                    self.metrics
-                        .exchange_frag_recv_size
-                        .with_label_values(&[&up_fragment_id, &down_fragment_id])
-                        .inc_by(bytes as u64);
-
-                    // add deserialization duration metric with given sampling frequency
-                    let msg_res = if rr % SAMPLING_FREQUENCY == 0 {
-                        let start_time = Instant::now();
-                        let msg_res = Message::from_protobuf(
-                            stream_msg
-                                .get_message()
-                                .expect("no message in stream response!"),
-                        );
-                        self.metrics
-                            .actor_sampled_deserialize_duration_ns
-                            .with_label_values(&[&down_actor_id])
-                            .inc_by(start_time.elapsed().as_nanos() as u64);
-                        msg_res
-                    } else {
-                        Message::from_protobuf(
-                            stream_msg
-                                .get_message()
-                                .expect("no message in stream response!"),
-                        )
-                    };
-                    rr += 1;
-
-                    match msg_res {
-                        Ok(msg) => {
-                            self.sender.send(msg).await.unwrap();
-                        }
-                        Err(e) => {
-                            error!("RemoteInput forward message error:{}", e);
-                            break;
-                        }
-                    }
-                }
-                Err(e) => {
-                    error!("RemoteInput tonic error status:{}", e);
-                    break;
-                }
-            }
-        }
-    }
-}
-
-/// Create an input for merge and receiver executor. For local upstream actor, this will be simply a
-/// channel receiver. For remote upstream actor, this will spawn a long running [`RemoteInput`] task
-/// to receive messages from `gRPC` exchange service and return the receiver.
-// TODO: there's no need to use 4 channels for remote input. We may introduce a trait `Input` and
-// directly receive the message from the `RemoteInput`, just like the `Output`.
-pub(crate) fn new_input(
-    context: &SharedContext,
-    metrics: Arc<StreamingMetrics>,
-    actor_id: ActorId,
-    fragment_id: FragmentId,
-    upstream_actor_id: ActorId,
-    upstream_fragment_id: FragmentId,
-) -> Result<Upstream> {
-    let upstream_addr = context
-        .get_actor_info(&upstream_actor_id)?
-        .get_host()?
-        .into();
-    if !is_local_address(&context.addr, &upstream_addr) {
-        // Get the sender for `RemoteInput` to forward received messages to receivers in
-        // `ReceiverExecutor` or `MergeExecutor`.
-        let sender = context.take_sender(&(upstream_actor_id, actor_id))?;
-        // Spawn the `RemoteInput`.
-        let pool = context.compute_client_pool.clone();
-        tokio::spawn(async move {
-            let remote_input = RemoteInput::create(
-                pool.get_client_for_addr(upstream_addr).await?,
-                (upstream_actor_id, actor_id),
-                (upstream_fragment_id, fragment_id),
-                sender,
-                metrics,
-            )
-            .await
-            .inspect_err(|e| error!("Spawn remote input fails:{}", e))?;
-
-            remote_input.run().await;
-            Ok::<_, RwError>(())
-        });
-    }
-    let rx = context.take_receiver(&(upstream_actor_id, actor_id))?;
-
-    Ok((upstream_actor_id, rx))
-}
-
-type Upstream = (ActorId, Receiver<Message>);
+use crate::task::{FragmentId, SharedContext};
 
 /// `MergeExecutor` merges data from multiple channels. Dataflow from one channel
 /// will be stopped on barrier.
 pub struct MergeExecutor {
     /// Upstream channels.
-    upstreams: Vec<Upstream>,
+    upstreams: Vec<BoxedInput>,
 
     /// Belonged actor id.
     actor_id: ActorId,
@@ -207,7 +61,7 @@ impl MergeExecutor {
         actor_id: ActorId,
         fragment_id: FragmentId,
         upstream_fragment_id: FragmentId,
-        inputs: Vec<Upstream>,
+        inputs: Vec<BoxedInput>,
         context: Arc<SharedContext>,
         actor_context: ActorContextRef,
         receiver_id: u64,
@@ -230,18 +84,16 @@ impl MergeExecutor {
     }
 
     #[cfg(test)]
-    pub fn for_test(inputs: Vec<Receiver<Message>>) -> Self {
+    pub fn for_test(inputs: Vec<tokio::sync::mpsc::Receiver<Message>>) -> Self {
+        use super::exchange::input::LocalInput;
+
         Self::new(
             Schema::default(),
             vec![],
             114,
             514,
             1919,
-            inputs
-                .into_iter()
-                .enumerate()
-                .map(|(i, r)| (i as ActorId, r))
-                .collect(),
+            inputs.into_iter().map(LocalInput::for_test).collect(),
             SharedContext::for_test().into(),
             ActorContext::create(),
             810,
@@ -328,15 +180,15 @@ impl Executor for MergeExecutor {
 }
 
 pub struct SelectReceivers {
-    blocks: Vec<Upstream>,
-    upstreams: Vec<Upstream>,
+    blocks: Vec<BoxedInput>,
+    upstreams: Vec<BoxedInput>,
     barrier: Option<Barrier>,
     last_base: usize,
     actor_id: u32,
 }
 
 impl SelectReceivers {
-    fn new(actor_id: u32, upstreams: Vec<Upstream>) -> Self {
+    fn new(actor_id: u32, upstreams: Vec<BoxedInput>) -> Self {
         Self {
             blocks: Vec::with_capacity(upstreams.len()),
             upstreams,
@@ -361,7 +213,7 @@ impl SelectReceivers {
         assert!(self.blocks.is_empty() && self.barrier.is_none());
 
         self.upstreams
-            .retain(|(id, _)| !upstream_actor_ids.contains(id));
+            .retain(|u| !upstream_actor_ids.contains(&u.actor_id()));
         self.last_base = 0;
     }
 }
@@ -373,15 +225,16 @@ impl Stream for SelectReceivers {
         let mut poll_count = 0;
         while poll_count < self.upstreams.len() {
             let idx = (poll_count + self.last_base) % self.upstreams.len();
-            match self.upstreams[idx].1.poll_recv(cx) {
+            match self.upstreams[idx].poll_next_unpin(cx) {
                 Poll::Pending => {
                     poll_count += 1;
                     continue;
                 }
                 Poll::Ready(item) => {
-                    let message = item.expect(
-                        "upstream channel closed unexpectedly, please check error in upstream executors"
-                    );
+                    let message = item
+                        .expect("upstream closed unexpectedly, please check error in upstream executors")
+                        .expect("upstream error");
+
                     match message {
                         Message::Barrier(barrier) => {
                             let rc = self.upstreams.swap_remove(idx);
@@ -445,14 +298,13 @@ mod tests {
     use risingwave_pb::task_service::{
         GetDataRequest, GetDataResponse, GetStreamRequest, GetStreamResponse,
     };
-    use risingwave_rpc_client::ComputeClient;
-    use tokio::sync::mpsc::channel;
+    use risingwave_rpc_client::ComputeClientPool;
     use tokio::time::sleep;
     use tokio_stream::wrappers::ReceiverStream;
     use tonic::{Request, Response, Status};
 
     use super::*;
-    use crate::executor::merge::RemoteInput;
+    use crate::executor::exchange::input::RemoteInput;
     use crate::executor::{Barrier, Executor, Mutation};
     use crate::task::test_utils::{add_local_channels, helper_make_local_actor};
 
@@ -697,30 +549,31 @@ mod tests {
 
         sleep(Duration::from_secs(1)).await;
         assert!(server_run.load(Ordering::SeqCst));
-        let (tx, mut rx) = channel(16);
-        let input_handle = tokio::spawn(async move {
-            let remote_input = RemoteInput::create(
-                ComputeClient::new(addr.into()).await.unwrap(),
+
+        let remote_input = {
+            let pool = ComputeClientPool::new(u64::MAX);
+            RemoteInput::new(
+                pool,
+                addr.into(),
                 (0, 0),
                 (0, 0),
-                tx,
                 Arc::new(StreamingMetrics::unused()),
             )
-            .await
-            .unwrap();
-            remote_input.run().await
-        });
-        assert_matches!(rx.recv().await.unwrap(), Message::Chunk(chunk) => {
+        };
+
+        pin_mut!(remote_input);
+
+        assert_matches!(remote_input.next().await.unwrap().unwrap(), Message::Chunk(chunk) => {
             let (ops, columns, visibility) = chunk.into_inner();
             assert_eq!(ops.len() as u64, 0);
             assert_eq!(columns.len() as u64, 0);
             assert_eq!(visibility, None);
         });
-        assert_matches!(rx.recv().await.unwrap(), Message::Barrier(Barrier { epoch: barrier_epoch, mutation: _, .. }) => {
+        assert_matches!(remote_input.next().await.unwrap().unwrap(), Message::Barrier(Barrier { epoch: barrier_epoch, mutation: _, .. }) => {
             assert_eq!(barrier_epoch.curr, 12345);
         });
         assert!(rpc_called.load(Ordering::SeqCst));
-        input_handle.await.unwrap();
+
         shutdown_send.send(()).unwrap();
         join_handle.await.unwrap();
     }

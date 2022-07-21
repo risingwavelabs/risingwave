@@ -30,6 +30,8 @@ mod generate_series;
 use generate_series::*;
 mod unnest;
 use unnest::*;
+mod regexp_matches;
+use regexp_matches::*;
 
 /// Instance of a table function.
 ///
@@ -53,12 +55,10 @@ pub type BoxedTableFunction = Box<dyn TableFunction>;
 pub fn build_from_prost(prost: &TableFunctionProst) -> Result<BoxedTableFunction> {
     use risingwave_pb::expr::table_function::Type::*;
 
-    let return_type = DataType::from(prost.get_return_type().unwrap());
-    let args: Vec<_> = prost.args.iter().map(expr_build_from_prost).try_collect()?;
-
     match prost.get_function_type().unwrap() {
-        Generate => new_generate_series(args, return_type),
-        Unnest => new_unnest(args, return_type),
+        Generate => new_generate_series(prost),
+        Unnest => new_unnest(prost),
+        RegexpMatches => new_regexp_matches(prost),
     }
 }
 
