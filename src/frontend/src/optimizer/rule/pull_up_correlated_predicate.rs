@@ -18,8 +18,8 @@ use super::super::plan_node::*;
 use super::{BoxedRule, Rule};
 use crate::expr::{CorrelatedId, CorrelatedInputRef, Expr, ExprImpl, ExprRewriter, InputRef};
 use crate::optimizer::plan_visitor::PlanVisitor;
-use crate::optimizer::PlanRef;
 use crate::optimizer::rule::PlanCorrelatedIdFinder;
+use crate::optimizer::PlanRef;
 use crate::utils::Condition;
 
 /// This rule is for pattern: Apply->Project->Filter.
@@ -76,11 +76,14 @@ impl Rule for PullUpCorrelatedPredicateRule {
 
         let project: PlanRef = LogicalProject::new(filter, proj_exprs).into();
 
-        // Check whether correlated_input_ref with same correlated_id exists for the join right side.
-        // If yes, bail out and left for general subquery unnesting to deal with
+        // Check whether correlated_input_ref with same correlated_id exists for the join right
+        // side. If yes, bail out and left for general subquery unnesting to deal with
         let mut collect_cor_input_ref = PlanCorrelatedIdFinder::new();
         collect_cor_input_ref.visit(project.clone());
-        if collect_cor_input_ref.correlated_id_set.contains(&correlated_id) {
+        if collect_cor_input_ref
+            .correlated_id_set
+            .contains(&correlated_id)
+        {
             return None;
         }
 

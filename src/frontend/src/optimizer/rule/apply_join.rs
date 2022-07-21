@@ -13,6 +13,7 @@
 // limitations under the License.
 
 use std::collections::HashSet;
+
 use fixedbitset::FixedBitSet;
 use itertools::Itertools;
 use risingwave_common::types::DataType;
@@ -24,10 +25,12 @@ use crate::expr::{
     CollectInputRef, CorrelatedId, CorrelatedInputRef, Expr, ExprImpl, ExprRewriter, ExprType,
     ExprVisitor, FunctionCall, InputRef,
 };
-use crate::optimizer::plan_node::{LogicalApply, LogicalFilter, LogicalJoin, LogicalProject, PlanTreeNode, PlanTreeNodeBinary};
+use crate::optimizer::plan_node::{
+    LogicalApply, LogicalFilter, LogicalJoin, LogicalProject, PlanTreeNode, PlanTreeNodeBinary,
+};
+use crate::optimizer::plan_visitor::PlanVisitor;
 use crate::optimizer::PlanRef;
 use crate::utils::{ColIndexMapping, Condition};
-use crate::optimizer::plan_visitor::PlanVisitor;
 
 /// Push `LogicalJoin` down `LogicalApply`
 /// D Apply (T1 join<p> T2)  ->  (D Apply T1) join<p and natural join D> (D Apply T2)
@@ -45,7 +48,10 @@ impl Rule for ApplyJoinRule {
         // If no, bail out and left for ApplyScan rule to deal with
         let mut collect_cor_input_ref = PlanCorrelatedIdFinder::new();
         collect_cor_input_ref.visit(apply_right.clone());
-        if !collect_cor_input_ref.correlated_id_set.contains(&correlated_id) {
+        if !collect_cor_input_ref
+            .correlated_id_set
+            .contains(&correlated_id)
+        {
             return None;
         }
 
@@ -105,8 +111,10 @@ impl Rule for ApplyJoinRule {
                 right_apply_condition.extend(apply_on);
             }
             JoinType::Inner | JoinType::LeftOuter | JoinType::RightOuter | JoinType::FullOuter => {
-                let mut d_t1_bit_set = FixedBitSet::with_capacity(apply_left_len + join.base.schema.len());
-                let mut d_t2_bit_set = FixedBitSet::with_capacity(apply_left_len + join.base.schema.len());
+                let mut d_t1_bit_set =
+                    FixedBitSet::with_capacity(apply_left_len + join.base.schema.len());
+                let mut d_t2_bit_set =
+                    FixedBitSet::with_capacity(apply_left_len + join.base.schema.len());
                 d_t1_bit_set.set_range(0..apply_left_len + join_left_len, true);
                 d_t2_bit_set.set_range(0..apply_left_len, true);
                 d_t2_bit_set.set_range(
@@ -298,38 +306,49 @@ impl ExprRewriter for Rewriter {
 }
 
 pub struct PlanCorrelatedIdFinder {
-    pub correlated_id_set: HashSet<CorrelatedId>
+    pub correlated_id_set: HashSet<CorrelatedId>,
 }
 
 impl PlanCorrelatedIdFinder {
     pub fn new() -> Self {
         Self {
-            correlated_id_set: HashSet::new()
+            correlated_id_set: HashSet::new(),
         }
     }
 }
 
 impl PlanVisitor<()> for PlanCorrelatedIdFinder {
+
+    /// common subquery is project, filter and join
+
     fn visit_logical_join(&mut self, plan: &LogicalJoin) {
         let mut finder = ExprCorrelatedIdFinder::new();
-        plan.on().conjunctions.iter().for_each(|expr| finder.visit_expr(expr));
+        plan.on()
+            .conjunctions
+            .iter()
+            .for_each(|expr| finder.visit_expr(expr));
         self.correlated_id_set.extend(finder.correlated_id_set);
 
         let mut iter = plan.inputs().into_iter();
-        let ret = self.visit(iter.next().unwrap());
-        iter.for_each(|input| {self.visit(input);});
-        ret
+        self.visit(iter.next().unwrap());
+        iter.for_each(|input| {
+            self.visit(input);
+        });
     }
 
     fn visit_logical_filter(&mut self, plan: &LogicalFilter) {
         let mut finder = ExprCorrelatedIdFinder::new();
-        plan.predicate().conjunctions.iter().for_each(|expr| finder.visit_expr(expr));
+        plan.predicate()
+            .conjunctions
+            .iter()
+            .for_each(|expr| finder.visit_expr(expr));
         self.correlated_id_set.extend(finder.correlated_id_set);
 
         let mut iter = plan.inputs().into_iter();
-        let ret = self.visit(iter.next().unwrap());
-        iter.for_each(|input| {self.visit(input);});
-        ret
+        self.visit(iter.next().unwrap());
+        iter.for_each(|input| {
+            self.visit(input);
+        });
     }
 
     fn visit_logical_project(&mut self, plan: &LogicalProject) {
@@ -338,26 +357,28 @@ impl PlanVisitor<()> for PlanCorrelatedIdFinder {
         self.correlated_id_set.extend(finder.correlated_id_set);
 
         let mut iter = plan.inputs().into_iter();
-        let ret = self.visit(iter.next().unwrap());
-        iter.for_each(|input| {self.visit(input);});
-        ret
+        self.visit(iter.next().unwrap());
+        iter.for_each(|input| {
+            self.visit(input);
+        });
     }
 }
 
 struct ExprCorrelatedIdFinder {
-    correlated_id_set: HashSet<CorrelatedId>
+    correlated_id_set: HashSet<CorrelatedId>,
 }
 
 impl ExprCorrelatedIdFinder {
     pub fn new() -> Self {
         Self {
-            correlated_id_set: HashSet::new()
+            correlated_id_set: HashSet::new(),
         }
     }
 }
 
 impl ExprVisitor for ExprCorrelatedIdFinder {
     fn visit_correlated_input_ref(&mut self, correlated_input_ref: &CorrelatedInputRef) {
-        self.correlated_id_set.insert(correlated_input_ref.get_correlated_id());
+        self.correlated_id_set
+            .insert(correlated_input_ref.get_correlated_id());
     }
 }

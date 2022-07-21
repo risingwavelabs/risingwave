@@ -16,8 +16,8 @@ use itertools::Itertools;
 use risingwave_pb::plan_common::JoinType;
 
 use super::{BoxedRule, Rule};
-use crate::expr::{ExprImpl, ExprRewriter, InputRef};
-use crate::optimizer::plan_node::{LogicalApply, LogicalProject, PlanTreeNodeUnary};
+use crate::expr::{CorrelatedId, CorrelatedInputRef, Expr, ExprImpl, ExprRewriter, InputRef};
+use crate::optimizer::plan_node::{LogicalApply, LogicalProject};
 use crate::optimizer::PlanRef;
 use crate::utils::ColIndexMapping;
 
@@ -43,21 +43,31 @@ impl Rule for ApplyProjRule {
             .collect();
 
         let (proj_exprs, proj_input) = project.clone().decompose();
-        let mut col_mapping = ColIndexMapping::with_shift_offset(
-            project.input().schema().len(),
-            left.schema().len() as isize,
-        );
 
-        let shift_proj_exprs: Vec<ExprImpl> = proj_exprs
+        // replace correlated_input_ref in project exprs
+        let mut rewriter = Rewriter {
+            offset: left.schema().len(),
+            index_mapping: ColIndexMapping::new(
+                correlated_indices
+                    .clone()
+                    .into_iter()
+                    .map(Some)
+                    .collect_vec(),
+            )
+            .inverse(),
+            correlated_id,
+        };
+
+        let new_proj_exprs: Vec<ExprImpl> = proj_exprs
             .into_iter()
-            .map(|expr| col_mapping.rewrite_expr(expr))
+            .map(|expr| rewriter.rewrite_expr(expr))
             .collect_vec();
 
-        exprs.extend(shift_proj_exprs.clone().into_iter());
+        exprs.extend(new_proj_exprs.clone().into_iter());
 
-        let mut rewriter = Rewriter {
+        let mut rewriter = ApplyOnConditionRewriter {
             left_input_len: left.schema().len(),
-            mapping: shift_proj_exprs,
+            mapping: new_proj_exprs,
         };
         let new_on = on.rewrite_expr(&mut rewriter);
         let new_apply = LogicalApply::create(
@@ -80,17 +90,44 @@ impl ApplyProjRule {
     }
 }
 
-pub struct Rewriter {
+pub struct ApplyOnConditionRewriter {
     pub left_input_len: usize,
     pub mapping: Vec<ExprImpl>,
 }
 
-impl ExprRewriter for Rewriter {
+impl ExprRewriter for ApplyOnConditionRewriter {
     fn rewrite_input_ref(&mut self, input_ref: InputRef) -> ExprImpl {
         if input_ref.index >= self.left_input_len {
             self.mapping[input_ref.index() - self.left_input_len].clone()
         } else {
             input_ref.into()
         }
+    }
+}
+
+/// Convert `CorrelatedInputRef` to `InputRef` and shift `InputRef` with offset.
+struct Rewriter {
+    offset: usize,
+    index_mapping: ColIndexMapping,
+    correlated_id: CorrelatedId,
+}
+impl ExprRewriter for Rewriter {
+    fn rewrite_correlated_input_ref(
+        &mut self,
+        correlated_input_ref: CorrelatedInputRef,
+    ) -> ExprImpl {
+        if correlated_input_ref.get_correlated_id() == self.correlated_id {
+            InputRef::new(
+                self.index_mapping.map(correlated_input_ref.index()),
+                correlated_input_ref.return_type(),
+            )
+            .into()
+        } else {
+            correlated_input_ref.into()
+        }
+    }
+
+    fn rewrite_input_ref(&mut self, input_ref: InputRef) -> ExprImpl {
+        InputRef::new(input_ref.index() + self.offset, input_ref.return_type()).into()
     }
 }
