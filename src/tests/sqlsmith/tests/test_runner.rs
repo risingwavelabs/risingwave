@@ -27,12 +27,13 @@ use risingwave_sqlsmith::{mview_sql_gen, sql_gen, Table};
 
 /// Executes and catches system panics to recover
 /// NOTE: It cannot deal with aborts
-async fn sqlsmith_handle(session: Arc<SessionImpl>, stmt: Statement, sql: &str) {
-    let res = panic::catch_unwind(|| async {
-        handler::handle(session.clone(), stmt, sql).await
-    });
+async fn sqlsmith_handle(session: Arc<SessionImpl>, stmt: Statement, sql: String) {
+    let res = tokio::spawn(async move {
+        handler::handle(session.clone(), stmt, &sql).await
+    }).await;
     match res {
-        Ok(Ok(_)) => {}
+        Ok(Ok(_)) => {},
+        _ => {}
     }
 }
 
