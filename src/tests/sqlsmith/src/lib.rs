@@ -73,6 +73,9 @@ struct SqlGenerator<'a, R: Rng> {
     tables: Vec<Table>,
     rng: &'a mut R,
 
+    /// Relation ID used to generate table names and aliases
+    relation_id: u32,
+
     /// is_distinct_allowed - Distinct and Orderby/Approx.. cannot be generated together among agg
     ///                       having and
     /// When this variable is true, it means distinct only
@@ -103,6 +106,7 @@ impl<'a, R: Rng> SqlGenerator<'a, R> {
         SqlGenerator {
             tables,
             rng,
+            relation_id: 0,
             is_distinct_allowed,
             bound_relations: vec![],
             bound_columns: vec![],
@@ -115,6 +119,7 @@ impl<'a, R: Rng> SqlGenerator<'a, R> {
         SqlGenerator {
             tables,
             rng,
+            relation_id: 0,
             is_distinct_allowed: false,
             bound_relations: vec![],
             bound_columns: vec![],
@@ -200,7 +205,7 @@ impl<'a, R: Rng> SqlGenerator<'a, R> {
     /// Generates a query with local context.
     /// Used by `WITH`, (and perhaps subquery should use this too)
     fn gen_local_query(&mut self) -> (Query, Vec<Column>) {
-        let old_ctxt = self.new_local_ctxt();
+        let old_ctxt = self.new_local_context();
         let t = self.gen_query();
         self.restore_context(old_ctxt);
         t
@@ -217,7 +222,7 @@ impl<'a, R: Rng> SqlGenerator<'a, R> {
     }
 
     fn gen_with_inner(&mut self) -> (With, Vec<Table>) {
-        let alias = self.gen_alias_with_prefix("with");
+        let alias = self.gen_table_alias_with_prefix("with");
         let (query, query_schema) = self.gen_local_query();
         let from = None;
         let cte = Cte {
@@ -338,22 +343,22 @@ impl<'a, R: Rng> SqlGenerator<'a, R> {
     }
 
     fn gen_from(&mut self, with_tables: Vec<Table>) -> Vec<TableWithJoins> {
-        // Cross join with `with` fails. Hence we generate it in isolation.
-        // Tracked in: <https://github.com/singularity-data/risingwave/issues/4025>
-        if !with_tables.is_empty() {
+        let mut from = if !with_tables.is_empty() {
             let with_table = with_tables
                 .choose(&mut self.rng)
                 .expect("with tables should not be empty");
-            return vec![create_table_with_joins_from_table(with_table)];
-        }
+            vec![create_table_with_joins_from_table(with_table)]
+        } else {
+            vec![self.gen_from_relation()]
+        };
+
         if self.is_mview {
             // TODO: These constraints are workarounds required by mview.
             // Tracked by: <https://github.com/singularity-data/risingwave/issues/4024>.
             assert!(!self.tables.is_empty());
-            return vec![self.gen_from_relation()];
+            return from;
         }
 
-        let mut from = vec![];
         for _ in 0..self.tables.len() {
             if self.flip_coin() {
                 from.push(self.gen_from_relation());
