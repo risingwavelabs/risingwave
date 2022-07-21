@@ -31,12 +31,15 @@ impl Rule for ApplyFilterRule {
         assert_eq!(join_type, JoinType::Inner);
         let filter = right.as_logical_filter()?;
         let input = filter.input();
-        let correlated_indices_len = correlated_indices.len();
 
         let mut rewriter = Rewriter {
             offset: left.schema().len(),
             index_mapping: ColIndexMapping::new(
-                correlated_indices.into_iter().map(Some).collect_vec(),
+                correlated_indices
+                    .clone()
+                    .into_iter()
+                    .map(Some)
+                    .collect_vec(),
             )
             .inverse(),
             has_correlated_input_ref: false,
@@ -68,7 +71,7 @@ impl Rule for ApplyFilterRule {
             join_type,
             new_on,
             apply.correlated_id(),
-            (0..correlated_indices_len).collect_vec(),
+            correlated_indices,
         );
         let new_filter = LogicalFilter::new(
             new_apply,
@@ -106,7 +109,7 @@ impl ExprRewriter for Rewriter {
                 self.index_mapping.map(correlated_input_ref.index()),
                 correlated_input_ref.return_type(),
             )
-                .into()
+            .into()
         } else {
             correlated_input_ref.into()
         }

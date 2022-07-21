@@ -55,8 +55,9 @@ impl Rule for ApplyScanRule {
             // See the fourth section of Unnesting Arbitrary Queries for how to do the optimization.
             let mut exprs: Vec<ExprImpl> = correlated_indices
                 .into_iter()
-                .map(|correlated_index| {
-                    let (col_index, data_type) = column_mapping.get(&correlated_index).unwrap();
+                .enumerate()
+                .map(|(i, _)| {
+                    let (col_index, data_type) = column_mapping.get(&i).unwrap();
                     InputRef::new(*col_index - apply_left_len, data_type.clone()).into()
                 })
                 .collect();
