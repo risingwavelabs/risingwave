@@ -27,6 +27,8 @@ use super::*;
 use crate::executor::actor::ActorContext;
 use crate::executor::aggregation::{AggArgs, AggCall};
 use crate::executor::dispatch::*;
+use crate::executor::exchange::input::LocalInput;
+use crate::executor::exchange::output::{BoxedOutput, LocalOutput};
 use crate::executor::monitor::StreamingMetrics;
 use crate::executor::receiver::ReceiverExecutor;
 use crate::executor::test_utils::create_in_memory_keyspace_agg;
@@ -48,7 +50,7 @@ async fn test_merger_sum_aggr() {
         let input = ReceiverExecutor::new(
             schema,
             vec![],
-            input_rx,
+            LocalInput::for_test(input_rx),
             ActorContext::create(),
             0,
             0,
@@ -119,7 +121,7 @@ async fn test_merger_sum_aggr() {
     let receiver_op = Box::new(ReceiverExecutor::new(
         schema.clone(),
         vec![],
-        rx,
+        LocalInput::for_test(rx),
         ActorContext::create(),
         0,
         0,

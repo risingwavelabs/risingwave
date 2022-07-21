@@ -53,9 +53,12 @@ impl ExpandExecutor {
         for msg in self.input.execute() {
             match msg? {
                 Message::Chunk(chunk) => {
-                    // TODO: handle dummy chunk.
                     let chunk = chunk.compact()?;
                     let (data_chunk, ops) = chunk.into_parts();
+                    assert!(
+                        data_chunk.dimension() > 0,
+                        "The input data chunk of expand can't be dummy chunk."
+                    );
                     let cardinality = data_chunk.cardinality();
                     let (columns, _) = data_chunk.into_parts();
 
