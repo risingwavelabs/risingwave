@@ -149,14 +149,14 @@ impl<'a, R: Rng> SqlGenerator<'a, R> {
         let query = Box::new(query);
         let table = Table {
             name: name.to_string(),
-            columns: schema,
+            columns: schema.clone(),
         };
         let name = ObjectName(vec![Ident::new(name)]);
         let mview = Statement::CreateView {
             or_replace: false,
             materialized: true,
             name,
-            columns: vec![],
+            columns: schema.iter().map(|c| c.name.as_str().into()).collect(),
             query,
             with_options: vec![],
         };
