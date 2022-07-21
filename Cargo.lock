@@ -6401,6 +6401,7 @@ dependencies = [
  "bytes",
  "cc",
  "chrono",
+ "clap 3.2.13",
  "criterion",
  "crossbeam-deque",
  "crossbeam-epoch",
