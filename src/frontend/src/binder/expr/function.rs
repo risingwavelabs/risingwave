@@ -13,6 +13,7 @@
 // limitations under the License.
 
 use std::iter::once;
+use std::str::FromStr;
 
 use itertools::Itertools;
 use risingwave_common::error::{ErrorCode, Result};
@@ -24,13 +25,14 @@ use crate::binder::bind_context::Clause;
 use crate::binder::Binder;
 use crate::expr::{
     AggCall, AggOrderBy, AggOrderByExpr, Expr, ExprImpl, ExprType, FunctionCall, Literal,
+    TableFunction, TableFunctionType,
 };
 use crate::optimizer::property::Direction;
 use crate::utils::Condition;
 
 impl Binder {
     pub(super) fn bind_function(&mut self, f: Function) -> Result<ExprImpl> {
-        let mut inputs = f
+        let mut inputs: Vec<ExprImpl> = f
             .args
             .into_iter()
             .map(|arg| self.bind_function_arg(arg))
@@ -53,6 +55,35 @@ impl Binder {
             };
             if let Some(kind) = agg_kind {
                 self.ensure_aggregate_allowed()?;
+                if f.distinct {
+                    match &kind {
+                        AggKind::Count if inputs.is_empty() => {
+                            // single_value(distinct ..) and count(distinct *) are disallowed
+                            // because their semantic is unclear.
+                            return Err(ErrorCode::InvalidInputSyntax(
+                                "count(distinct *) is disallowed".to_string(),
+                            )
+                            .into());
+                        }
+                        AggKind::SingleValue => {
+                            return Err(ErrorCode::InvalidInputSyntax(
+                                "single_value(distinct) is disallowed".to_string(),
+                            )
+                            .into());
+                        }
+                        AggKind::ApproxCountDistinct => {
+                            // approx_count_distinct(distinct ..) is disallowed because this defeats
+                            // its purpose of trading accuracy for
+                            // speed.
+                            return Err(ErrorCode::InvalidInputSyntax(
+                "The approx_count_distinct function cannot appear in the same query block as distinct aggregates. Try to remove distinct or just use count(distinct)".into(),
+            )
+            .into());
+                        }
+                        _ => (),
+                    };
+                }
+
                 let filter = match f.filter {
                     Some(filter) => {
                         let expr = self.bind_expr(*filter)?;
@@ -80,14 +111,7 @@ impl Binder {
                     }
                     None => Condition::true_cond(),
                 };
-                // TODO(yuchao): handle DISTINCT and ORDER BY appear at the same time
-                if f.distinct && !f.order_by.is_empty() {
-                    return Err(ErrorCode::InvalidInputSyntax(
-                        "DISTINCT and ORDER BY are not supported to appear at the same time now"
-                            .to_string(),
-                    )
-                    .into());
-                }
+
                 let order_by = AggOrderBy::new(
                     f.order_by
                         .into_iter()
@@ -121,6 +145,11 @@ impl Binder {
                 )
                 )
                 .into());
+            }
+            let table_function_type = TableFunctionType::from_str(function_name.as_str());
+            if let Ok(function_type) = table_function_type {
+                self.ensure_table_function_allowed()?;
+                return Ok(TableFunction::new(function_type, inputs)?.into());
             }
             let function_type = match function_name.as_str() {
                 // comparison
@@ -253,6 +282,19 @@ impl Binder {
             if clause == Clause::Values || clause == Clause::Where {
                 return Err(ErrorCode::InvalidInputSyntax(format!(
                     "aggregate functions are not allowed in {}",
+                    clause
+                ))
+                .into());
+            }
+        }
+        Ok(())
+    }
+
+    fn ensure_table_function_allowed(&self) -> Result<()> {
+        if let Some(clause) = self.context.clause {
+            if clause == Clause::Values || clause == Clause::Where {
+                return Err(ErrorCode::InvalidInputSyntax(format!(
+                    "table functions are not allowed in {}",
                     clause
                 ))
                 .into());

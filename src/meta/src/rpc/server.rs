@@ -58,7 +58,10 @@ use crate::stream::{FragmentManager, GlobalStreamManager, SourceManager};
 
 #[derive(Debug)]
 pub enum MetaStoreBackend {
-    Etcd { endpoints: Vec<String> },
+    Etcd {
+        endpoints: Vec<String>,
+        credentials: Option<(String, String)>,
+    },
     Mem,
 }
 
@@ -91,16 +94,20 @@ pub async fn rpc_serve(
     opts: MetaOpts,
 ) -> Result<(JoinHandle<()>, Sender<()>)> {
     match meta_store_backend {
-        MetaStoreBackend::Etcd { endpoints } => {
-            let client = EtcdClient::connect(
-                endpoints,
-                Some(
-                    ConnectOptions::default()
-                        .with_keep_alive(Duration::from_secs(3), Duration::from_secs(5)),
-                ),
-            )
-            .await
-            .map_err(|e| RwError::from(InternalError(format!("failed to connect etcd {}", e))))?;
+        MetaStoreBackend::Etcd {
+            endpoints,
+            credentials,
+        } => {
+            let mut options = ConnectOptions::default()
+                .with_keep_alive(Duration::from_secs(3), Duration::from_secs(5));
+            if let Some((username, password)) = credentials {
+                options = options.with_user(username, password)
+            }
+            let client = EtcdClient::connect(endpoints, Some(options))
+                .await
+                .map_err(|e| {
+                    RwError::from(InternalError(format!("failed to connect etcd {}", e)))
+                })?;
             let meta_store = Arc::new(EtcdMetaStore::new(client));
             rpc_serve_with_store(
                 meta_store,

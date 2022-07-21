@@ -4,6 +4,20 @@ SET RW_IMPLICIT_FLUSH TO true;
 statement ok
 create table t(v1 int, v2 int, v3 int)
 
+query I
+select count(*), count(distinct v2) from t;
+----
+0 0
+
+query I
+select count(*), count(distinct v2) from t group by v3;
+----
+
+query I
+select count(*) filter(where v1 > 100), count(distinct v2) from t;
+----
+0 0
+
 statement ok
 insert into t values (2, 200, -1), (1, 200, -2), (3, 100, -2), (3, 300, -1), (2, 100, -1), (1, 500, -2), (6, 500, -1)
 
