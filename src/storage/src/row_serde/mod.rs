@@ -20,6 +20,11 @@ use risingwave_common::catalog::{ColumnDesc, ColumnId};
 use risingwave_common::error::Result;
 use risingwave_common::types::{DataType, VirtualNode};
 
+use self::cell_based_row_deserializer::CellBasedRowDeserializer;
+use self::cell_based_row_serializer::CellBasedRowSerializer;
+use self::row_based_deserializer::RowBasedDeserializer;
+use self::row_based_serializer::RowBasedSerializer;
+
 pub mod cell_based_encoding_util;
 pub mod cell_based_row_deserializer;
 pub mod cell_based_row_serializer;
@@ -28,11 +33,27 @@ pub mod dedup_pk_cell_based_row_serializer;
 pub mod row_based_deserializer;
 pub mod row_based_serializer;
 
+#[derive(Clone)]
+pub struct CellBasedRowSerde;
+
+impl RowSerde for CellBasedRowSerde {
+    type Deserializer = CellBasedRowDeserializer;
+    type Serializer = CellBasedRowSerializer;
+}
+
+#[derive(Clone)]
+pub struct RowBasedSerde;
+
+impl RowSerde for RowBasedSerde {
+    type Deserializer = RowBasedDeserializer;
+    type Serializer = RowBasedSerializer;
+}
+
 pub type KeyBytes = Vec<u8>;
 pub type ValueBytes = Vec<u8>;
 
 /// `Encoding` defines an interface for encoding a key row into kv storage.
-pub trait Encoding: Clone {
+pub trait RowSerialize: Clone {
     /// Constructs a new serializer.
     fn create_row_serializer(
         pk_indices: &[usize],
@@ -69,7 +90,7 @@ pub struct ColumnDescMapping {
 }
 
 /// `Decoding` defines an interface for decoding a key row from kv storage.
-pub trait Decoding {
+pub trait RowDeserialize {
     /// Constructs a new serializer.
     fn create_row_deserializer(
         column_mapping: Arc<ColumnDescMapping>,
@@ -90,8 +111,8 @@ pub trait Decoding {
 
 /// `RowSerde` provides the ability to convert between Row and KV entry.
 pub trait RowSerde: Send + Sync + Clone {
-    type Serializer: Encoding;
-    type Deserializer: Decoding;
+    type Serializer: RowSerialize + Send;
+    type Deserializer: RowDeserialize + Send;
 
     /// `create_serializer` will create a row serializer to convert row into KV pairs.
     fn create_serializer(
@@ -99,7 +120,7 @@ pub trait RowSerde: Send + Sync + Clone {
         column_descs: &[ColumnDesc],
         column_ids: &[ColumnId],
     ) -> Self::Serializer {
-        Encoding::create_row_serializer(pk_indices, column_descs, column_ids)
+        RowSerialize::create_row_serializer(pk_indices, column_descs, column_ids)
     }
 
     /// `create_deserializer` will create a row deserializer to convert KV pairs into row.
@@ -107,6 +128,6 @@ pub trait RowSerde: Send + Sync + Clone {
         column_mapping: Arc<ColumnDescMapping>,
         data_types: Vec<DataType>,
     ) -> Self::Deserializer {
-        Decoding::create_row_deserializer(column_mapping, data_types)
+        RowDeserialize::create_row_deserializer(column_mapping, data_types)
     }
 }
