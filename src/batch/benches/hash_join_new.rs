@@ -25,7 +25,9 @@ use risingwave_common::util::chunk_coalesce::DEFAULT_CHUNK_BUFFER_SIZE;
 use risingwave_expr::expr::build_from_prost;
 use risingwave_pb::data::data_type::TypeName;
 use risingwave_pb::expr::expr_node::RexNode;
-use risingwave_pb::expr::expr_node::Type::{ConstantValue as TConstValue, InputRef, Modulus};
+use risingwave_pb::expr::expr_node::Type::{
+    ConstantValue as TConstValue, GreaterThan, InputRef, Modulus,
+};
 use risingwave_pb::expr::{ConstantValue, ExprNode, FunctionCall, InputRefExpr};
 use tikv_jemallocator::Jemalloc;
 use tokio::runtime::Runtime;
@@ -35,6 +37,7 @@ static GLOBAL: Jemalloc = Jemalloc;
 
 fn create_hash_join_executor(
     join_type: JoinType,
+    with_cond: bool,
     left_chunk_size: usize,
     left_chunk_num: usize,
     right_chunk_size: usize,
@@ -123,6 +126,40 @@ fn create_hash_join_executor(
         _ => vec![0, 1],
     };
 
+    let cond = if with_cond {
+        let left_input_ref = ExprNode {
+            expr_type: InputRef as i32,
+            return_type: Some(risingwave_pb::data::DataType {
+                type_name: TypeName::Int64 as i32,
+                ..Default::default()
+            }),
+            rex_node: Some(RexNode::InputRef(InputRefExpr { column_idx: 0 })),
+        };
+        let literal100 = ExprNode {
+            expr_type: TConstValue as i32,
+            return_type: Some(risingwave_pb::data::DataType {
+                type_name: TypeName::Int64 as i32,
+                ..Default::default()
+            }),
+            rex_node: Some(RexNode::Constant(ConstantValue {
+                body: ScalarImpl::Int64(100).to_protobuf(),
+            })),
+        };
+        Some(ExprNode {
+            expr_type: GreaterThan as i32,
+            return_type: Some(risingwave_pb::data::DataType {
+                type_name: TypeName::Int64 as i32,
+                ..Default::default()
+            }),
+            rex_node: Some(RexNode::FuncCall(FunctionCall {
+                children: vec![left_input_ref, literal100],
+            })),
+        })
+    } else {
+        None
+    }
+    .map(|expr| build_from_prost(&expr).unwrap());
+
     Box::new(HashJoinExecutor::<hash::Key64>::new(
         join_type,
         output_indices,
@@ -130,7 +167,7 @@ fn create_hash_join_executor(
         right_child,
         vec![0],
         vec![0],
-        None,
+        cond,
         "HashJoinExecutor".into(),
     ))
 }
@@ -146,41 +183,47 @@ fn bench_hash_join(c: &mut Criterion) {
     const LEFT_SIZE: usize = 2 * 1024;
     const RIGHT_SIZE: usize = 2 * 1024;
     let rt = Runtime::new().unwrap();
-    for join_type in &[
-        JoinType::Inner,
-        // JoinType::LeftOuter,
-        // JoinType::LeftSemi,
-        // JoinType::LeftAnti,
-        // JoinType::RightOuter,
-        // JoinType::RightSemi,
-        // JoinType::RightAnti,
-        // JoinType::FullOuter,
-    ] {
-        for chunk_size in &[32, 128, 512, 1024] {
-            c.bench_with_input(
-                BenchmarkId::new(
-                    "HashJoinExecutor",
-                    format!("{}({:?})", chunk_size, join_type),
-                ),
-                chunk_size,
-                |b, &chunk_size| {
-                    let left_chunk_num = LEFT_SIZE / chunk_size;
-                    let right_chunk_num = RIGHT_SIZE / chunk_size;
-                    b.to_async(&rt).iter_batched(
-                        || {
-                            create_hash_join_executor(
-                                *join_type,
-                                chunk_size,
-                                left_chunk_num,
-                                chunk_size,
-                                right_chunk_num,
-                            )
-                        },
-                        |e| execute_hash_join_executor(e),
-                        BatchSize::SmallInput,
-                    );
-                },
-            );
+    for with_cond in [false, true] {
+        for join_type in &[
+            JoinType::Inner,
+            // JoinType::LeftOuter,
+            // JoinType::LeftSemi,
+            // JoinType::LeftAnti,
+            // JoinType::RightOuter,
+            // JoinType::RightSemi,
+            // JoinType::RightAnti,
+            // JoinType::FullOuter,
+        ] {
+            for chunk_size in &[32, 128, 512, 1024] {
+                c.bench_with_input(
+                    BenchmarkId::new(
+                        "HashJoinExecutor",
+                        format!(
+                            "{}({:?})(non_equi_join: {})",
+                            chunk_size, join_type, with_cond
+                        ),
+                    ),
+                    chunk_size,
+                    |b, &chunk_size| {
+                        let left_chunk_num = LEFT_SIZE / chunk_size;
+                        let right_chunk_num = RIGHT_SIZE / chunk_size;
+                        b.to_async(&rt).iter_batched(
+                            || {
+                                create_hash_join_executor(
+                                    *join_type,
+                                    with_cond,
+                                    chunk_size,
+                                    left_chunk_num,
+                                    chunk_size,
+                                    right_chunk_num,
+                                )
+                            },
+                            |e| execute_hash_join_executor(e),
+                            BatchSize::SmallInput,
+                        );
+                    },
+                );
+            }
         }
     }
 }
