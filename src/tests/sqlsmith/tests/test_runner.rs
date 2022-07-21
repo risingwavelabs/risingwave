@@ -46,7 +46,9 @@ async fn create_tables(session: Arc<SessionImpl>, rng: &mut impl Rng) -> Vec<Tab
             } => {
                 let name = name.0[0].value.clone();
                 let columns = columns.iter().map(|c| c.clone().into()).collect();
-                handler::handle(session.clone(), s, &sql).await.unwrap();
+                handler::handle(session.clone(), s, &sql)
+                    .await
+                    .unwrap_or_else(|_| panic!("Failed to handle SQL: {}", sql));
                 tables.push(Table { name, columns })
             }
             _ => panic!("Unexpected statement: {}", s),
@@ -60,7 +62,9 @@ async fn create_tables(session: Arc<SessionImpl>, rng: &mut impl Rng) -> Vec<Tab
         let stmts =
             Parser::parse_sql(&sql).unwrap_or_else(|_| panic!("Failed to parse SQL: {}", sql));
         let stmt = stmts[0].clone();
-        handler::handle(session.clone(), stmt, &sql).await.unwrap();
+        handler::handle(session.clone(), stmt, &sql)
+            .await
+            .unwrap_or_else(|_| panic!("Failed to handle SQL: {}", sql));
         tables.push(table);
     }
     tables

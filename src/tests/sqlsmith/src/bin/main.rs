@@ -91,7 +91,10 @@ async fn create_tables(
 
     for stmt in statements.iter() {
         let create_sql = format!("{}", stmt);
-        client.execute(&create_sql, &[]).await.unwrap();
+        client
+            .execute(&create_sql, &[])
+            .await
+            .unwrap_or_else(|_| panic!("Failed to execute SQL: {}", create_sql));
     }
     let mut tables = statements
         .into_iter()
@@ -109,7 +112,10 @@ async fn create_tables(
     // of being queried.
     for i in 0..n_statements {
         let (create_sql, table) = mview_sql_gen(rng, tables.clone(), &format!("m{}", i));
-        client.execute(&create_sql, &[]).await.unwrap();
+        client
+            .execute(&create_sql, &[])
+            .await
+            .unwrap_or_else(|_| panic!("Failed to execute SQL: {}", create_sql));
         tables.push(table.clone());
         mviews.push(table);
     }
@@ -132,7 +138,10 @@ async fn drop_tables(mviews: &[Table], opt: &TestOptions, client: &tokio_postgre
         .collect::<String>();
 
     for stmt in sql.lines() {
-        client.execute(stmt, &[]).await.unwrap();
+        client
+            .execute(stmt, &[])
+            .await
+            .unwrap_or_else(|_| panic!("Failed to execute SQL: {}", stmt));
     }
 }
 
