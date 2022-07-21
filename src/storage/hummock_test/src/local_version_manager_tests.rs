@@ -29,7 +29,6 @@ use risingwave_storage::hummock::shared_buffer::UploadTaskType::SyncEpoch;
 use risingwave_storage::hummock::test_utils::{
     default_config_for_test, gen_dummy_batch, gen_dummy_sst_info,
 };
-use risingwave_storage::monitor::StateStoreMetrics;
 use risingwave_storage::storage_value::StorageValue;
 use tokio::sync::mpsc;
 
@@ -37,10 +36,9 @@ use tokio::sync::mpsc;
 async fn test_update_pinned_version() {
     let opt = Arc::new(default_config_for_test());
     let (_, hummock_manager_ref, _, worker_node) = setup_compute_env(8080).await;
-    let local_version_manager = LocalVersionManager::new(
+    let local_version_manager = LocalVersionManager::for_test(
         opt.clone(),
         mock_sstable_store(),
-        Arc::new(StateStoreMetrics::unused()),
         Arc::new(MockHummockMetaClient::new(
             hummock_manager_ref.clone(),
             worker_node.id,
@@ -125,10 +123,9 @@ async fn test_update_pinned_version() {
 async fn test_update_uncommitted_ssts() {
     let opt = Arc::new(default_config_for_test());
     let (_, hummock_manager_ref, _, worker_node) = setup_compute_env(8080).await;
-    let local_version_manager = LocalVersionManager::new(
+    let local_version_manager = LocalVersionManager::for_test(
         opt.clone(),
         mock_sstable_store(),
-        Arc::new(StateStoreMetrics::unused()),
         Arc::new(MockHummockMetaClient::new(
             hummock_manager_ref.clone(),
             worker_node.id,
@@ -331,10 +328,9 @@ async fn test_update_uncommitted_ssts() {
 async fn test_clear_shared_buffer() {
     let opt = Arc::new(default_config_for_test());
     let (_, hummock_manager_ref, _, worker_node) = setup_compute_env(8080).await;
-    let local_version_manager = LocalVersionManager::new(
+    let local_version_manager = LocalVersionManager::for_test(
         opt.clone(),
         mock_sstable_store(),
-        Arc::new(StateStoreMetrics::unused()),
         Arc::new(MockHummockMetaClient::new(
             hummock_manager_ref.clone(),
             worker_node.id,

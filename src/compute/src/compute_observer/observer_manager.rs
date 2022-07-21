@@ -25,13 +25,13 @@ use risingwave_pb::catalog::Table;
 use risingwave_pb::meta::subscribe_response::{Info, Operation};
 use risingwave_pb::meta::SubscribeResponse;
 
-pub struct CompactorObserverNode {
+pub struct ComputeObserverNode {
     table_id_to_slice_transform: Arc<RwLock<HashMap<u32, Arc<dyn SliceTransform>>>>,
 
     version: u64,
 }
 
-impl ObserverNodeImpl for CompactorObserverNode {
+impl ObserverNodeImpl for ComputeObserverNode {
     fn handle_notification(&mut self, resp: SubscribeResponse) {
         let Some(info) = resp.info.as_ref() else {
             return;
@@ -75,7 +75,7 @@ impl ObserverNodeImpl for CompactorObserverNode {
     }
 }
 
-impl CompactorObserverNode {
+impl ComputeObserverNode {
     pub fn new(
         table_id_to_slice_transform: Arc<RwLock<HashMap<u32, Arc<dyn SliceTransform>>>>,
     ) -> Self {
@@ -91,6 +91,8 @@ impl CompactorObserverNode {
             Operation::Add | Operation::Update => {
                 let slice_transform: Arc<dyn SliceTransform> =
                     if table_catalog.read_pattern_prefix_column < 1 {
+                        // for now frontend had not infer the table_id_to_slice_transform, so we use
+                        // DummySliceTransform
                         Arc::new(DummySliceTransform::default())
                     } else {
                         Arc::new(SchemaSliceTransform::new(&table_catalog))
