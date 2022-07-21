@@ -18,18 +18,25 @@ use risingwave_pb::common::WorkerNode;
 
 use crate::error::Result;
 use crate::types::ParallelUnitId;
+pub fn get_pu_to_worker_mapping(nodes: &[WorkerNode]) -> HashMap<ParallelUnitId, WorkerNode> {
+    let mut pu_to_worker = HashMap::new();
 
-pub fn get_workers_by_parallel_unit_ids(
-    current_nodes: &[WorkerNode],
-    parallel_unit_ids: &[ParallelUnitId],
-) -> Result<Vec<WorkerNode>> {
-    let mut pu_to_worker: HashMap<ParallelUnitId, WorkerNode> = HashMap::new();
     for node in current_nodes {
         for pu in &node.parallel_units {
             let res = pu_to_worker.insert(pu.id, node.clone());
             assert!(res.is_none(), "duplicate parallel unit id");
         }
     }
+
+    pu_to_worker
+}
+
+
+pub fn get_workers_by_parallel_unit_ids(
+    current_nodes: &[WorkerNode],
+    parallel_unit_ids: &[ParallelUnitId],
+) -> Result<Vec<WorkerNode>> {
+    let mut pu_to_worker = get_pu_to_worker_mapping(current_nodes);
 
     let mut workers = Vec::with_capacity(parallel_unit_ids.len());
     for parallel_unit_id in parallel_unit_ids {

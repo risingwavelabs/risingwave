@@ -12,7 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::collections::BinaryHeap;
+use std::collections::{BinaryHeap, HashMap};
 use std::sync::Arc;
 
 use futures::StreamExt;
@@ -26,7 +26,7 @@ use risingwave_common::types::{DataType, ParallelUnitId, ScalarImpl, ToOwnedDatu
 use risingwave_common::util::chunk_coalesce::{DataChunkBuilder, SlicedDataChunk};
 use risingwave_common::util::scan_range::ScanRange;
 use risingwave_common::util::sort_util::{HeapElem, OrderPair, OrderType};
-use risingwave_common::util::worker_util::get_workers_by_parallel_unit_ids;
+use risingwave_common::util::worker_util::{get_pu_to_worker_mapping, get_workers_by_parallel_unit_ids};
 use risingwave_expr::expr::{build_from_prost, BoxedExpression};
 use risingwave_pb::batch_plan::exchange_info::DistributionMode;
 use risingwave_pb::batch_plan::exchange_source::LocalExecutePlan::Plan;
@@ -52,7 +52,6 @@ use crate::task::{BatchTaskContext, TaskId};
 
 /// Probe side source for the `LookupJoinExecutor`
 pub struct ProbeSideSource<C> {
-    build_side_key_types: Vec<DataType>,
     table_desc: CellBasedTableDesc,
     vnode_mapping: Vec<ParallelUnitId>,
     probe_side_schema: Schema,
@@ -60,16 +59,60 @@ pub struct ProbeSideSource<C> {
     context: C,
     task_id: TaskId,
     epoch: u64,
-    worker_nodes: Vec<WorkerNode>,
+    pu_to_worker_mapping: HashMap<ParallelUnitId, WorkerNode>,
+    pu_to_scan_range_mapping: HashMap<ParallelUnitId, Vec<(ScanRange, VirtualNode)>>
 }
 
 /// Used to build the executor for the probe side
 #[async_trait::async_trait]
 pub trait ProbeSideSourceBuilder: Send {
-    async fn build_source(&self, key_scalar_impls: Vec<ScalarImpl>) -> Result<BoxedExecutor>;
+    async fn build_source(&self) -> Result<BoxedExecutor>;
 }
 
 impl<C: BatchTaskContext> ProbeSideSource<C> {
+    fn new(build_side_key_types: Vec<DataType>,
+           table_desc: CellBasedTableDesc,
+           vnode_mapping: Vec<ParallelUnitId>,
+           probe_side_schema: Schema,
+           probe_side_column_ids: Vec<i32>,
+           source: &ExecutorBuilder<C>,
+           worker_nodes: &[WorkerNode]) -> Result<Self> {
+        // Check that the data types of both sides of the equality predicate are the same
+        // TODO: Handle the cases where the data types of both sides are different but castable
+        // (e.g. int32 and int64)
+        let probe_side_key_types = table_desc
+            .order_key
+            .iter()
+            .map(|order| probe_side_schema.fields[order.index as usize].data_type.clone())
+            .collect_vec();
+
+        if !(0..build_side_key_types.len()).all(|i| {
+            i < probe_side_key_types.len() && build_side_key_types[i] == probe_side_key_types[i]
+        }) {
+            return Err(ErrorCode::NotImplemented(
+                "Lookup Joins where the two sides of an equality predicate have different data types".to_string(),
+                None.into()
+            ).into());
+        }
+
+        Ok(ProbeSideSource {
+            table_desc,
+            vnode_mapping,
+            probe_side_schema,
+            probe_side_column_ids,
+            context: source.context().clone(),
+            task_id: source.task_id.clone(),
+            epoch: source.epoch(),
+            pu_to_worker_mapping: get_pu_to_worker_mapping(worker_nodes),
+            pu_to_scan_range_mapping: HashMap::new(),
+        })
+    }
+
+    fn reset(&mut self) {
+        self.pu_to_scan_range_mapping = HashMap::new();
+    }
+
+    /// Gets the virtual node based on the given `scan_range`
     fn get_virtual_node(&self, scan_range: &ScanRange) -> Result<VirtualNode> {
         let dist_keys = self
             .table_desc
@@ -90,80 +133,55 @@ impl<C: BatchTaskContext> ProbeSideSource<C> {
         })
     }
 
-    fn create_scan_range(&self, key_scalar_impls: Vec<ScalarImpl>) -> Result<ScanRange> {
+    /// Adds the scan range made from the given `kwy_scalar_impls` into the parallel unit id
+    /// hash map, along with the scan range's virtual node.
+    fn add_scan_range(&mut self, key_scalar_impls: &[ScalarImpl]) -> Result<()> {
         let mut scan_range = ScanRange::full_table_scan();
-        key_scalar_impls.iter().for_each(|scalar_impl| {
-            scan_range.eq_conds.push(scalar_impl.clone());
-        });
-        Ok(scan_range)
+        key_scalar_impls.iter().for_each(|&idx| scan_range.eq_conds.push(scalar_impl));
+
+        let vnode = self.get_virtual_node(&scan_range)?;
+        let parallel_unit_id = self.vnode_mapping[vnode as usize];
+
+        let list = self.pu_to_scan_range_mapping.entry(parallel_unit_id).or_insert(vec![]);
+        list.push((scan_range, vnode));
+
+        Ok(())
     }
 
     /// Creates the `RowSeqScanNode` that will be used for scanning the probe side table
-    /// based on the passed `RowRef`.
-    fn create_row_seq_scan_node(
-        &self,
-        scan_range: &ScanRange,
-        vnode: VirtualNode,
-    ) -> Result<NodeBody> {
-        // Check that the data types of both sides of the equality predicate are the same
-        // TODO: Handle the cases where the data types of both sides are different but castable
-        // (e.g. int32 and int64)
-        let probe_side_key_types = self
-            .table_desc
-            .order_key
-            .iter()
-            .map(|order| {
-                self.probe_side_schema.fields[order.index as usize]
-                    .data_type
-                    .clone()
-            })
-            .collect_vec();
-
-        if !(0..self.build_side_key_types.len()).all(|i| {
-            i < probe_side_key_types.len()
-                && self.build_side_key_types[i] == probe_side_key_types[i]
-        }) {
-            return Err(ErrorCode::NotImplemented(
-                    "Lookup Joins where the two sides of an equality predicate have different data types".to_string(),
-                    None.into()
-            ).into());
-        }
-
+    /// based on the passed `scan_range` and virtual node.
+    fn create_row_seq_scan_node(&self, id: &ParallelUnitId) -> Result<NodeBody> {
+        let list = self.pu_to_scan_range_mapping.get(id).unwrap();
+        let mut scan_ranges = vec![];
         let mut vnode_bitmap = BitmapBuilder::zeroed(self.vnode_mapping.len());
-        vnode_bitmap.set(vnode as usize, true);
+
+        list.iter().for_each(|(scan_range, vnode)| {
+            scan_ranges.push(scan_range.to_protobuf());
+            vnode_bitmap.set(vnode as usize, true);
+        });
 
         let row_seq_scan_node = NodeBody::RowSeqScan(RowSeqScanNode {
             table_desc: Some(self.table_desc.clone()),
             column_ids: self.probe_side_column_ids.clone(),
-            scan_ranges: vec![scan_range.to_protobuf()],
+            scan_ranges,
             vnode_bitmap: Some(vnode_bitmap.finish().to_protobuf()),
         });
 
         Ok(row_seq_scan_node)
     }
 
-    /// Creates all the `ProstExchangeSource` that will be sent to the `ExchangeExecutor` using
-    /// the source templates.
-    fn build_prost_exchange_sources(
-        &self,
-        key_scalar_impls: Vec<ScalarImpl>,
-    ) -> Result<Vec<ProstExchangeSource>> {
-        let scan_range = self.create_scan_range(key_scalar_impls)?;
-        let vnode = self.get_virtual_node(&scan_range)?;
-
-        let parallel_unit_ids = vec![self.vnode_mapping[vnode as usize]];
-        let workers = match get_workers_by_parallel_unit_ids(&self.worker_nodes, &parallel_unit_ids)
-        {
-            Ok(workers) => workers,
-            Err(e) => bail!("{}", e),
-        };
+    /// Creates the `ProstExchangeSource` using the given `id`.
+    fn build_prost_exchange_source(&self, id: &ParallelUnitId) -> Result<ProstExchangeSource> {
+        let worker = self.pu_to_worker_mapping.get(id).ok_or(
+            ErrorCode::InternalError("Parallel unit id does not correspond to a worker node in Lookup Join".to_string()).into()
+        )?;
 
         let local_execute_plan = LocalExecutePlan {
             plan: Some(PlanFragment {
                 root: Some(PlanNode {
                     children: vec![],
                     identity: Uuid::new_v4().to_string(),
-                    node_body: Some(self.create_row_seq_scan_node(&scan_range, vnode)?),
+                    node_body: Some(self.create_row_seq_scan_node(id)?),
                 }),
                 exchange_info: Some(ExchangeInfo {
                     mode: DistributionMode::Single as i32,
@@ -173,19 +191,16 @@ impl<C: BatchTaskContext> ProbeSideSource<C> {
             epoch: self.epoch,
         };
 
-        let prost_exchange_sources = workers
-            .iter()
-            .map(|worker| ProstExchangeSource {
+        let prost_exchange_source = ProstExchangeSource {
                 task_output_id: Some(TaskOutputId {
                     task_id: Some(ProstTaskId::default()),
                     output_id: 0,
                 }),
                 host: Some(worker.host.as_ref().unwrap().clone()),
                 local_execute_plan: Some(Plan(local_execute_plan.clone())),
-            })
-            .collect();
+            };
 
-        Ok(prost_exchange_sources)
+        Ok(prost_exchange_source)
     }
 }
 
@@ -193,8 +208,11 @@ impl<C: BatchTaskContext> ProbeSideSource<C> {
 impl<C: BatchTaskContext> ProbeSideSourceBuilder for ProbeSideSource<C> {
     /// Builds and returns the `ExchangeExecutor` used for the probe side of the
     /// `LookupJoinExecutor`.
-    async fn build_source(&self, key_scalar_impls: Vec<ScalarImpl>) -> Result<BoxedExecutor> {
-        let sources = self.build_prost_exchange_sources(key_scalar_impls)?;
+    async fn build_source(&self) -> Result<BoxedExecutor> {
+        let mut sources = vec![];
+        for id in self.pu_to_scan_range_mapping.keys() {
+            sources.push(self.build_prost_exchange_source(id)?);
+        }
 
         let exchange_node = NodeBody::Exchange(ExchangeNode {
             sources,
@@ -267,106 +285,111 @@ impl<P: 'static + ProbeSideSourceBuilder> LookupJoinExecutor<P> {
         while let Some(build_chunk) = build_side_stream.next().await {
             let build_chunk = build_chunk?.compact()?;
 
-            let grouped_rows = self.get_grouped_build_side_rows(&build_chunk)?;
+            let grouped_build_rows = self.get_grouped_build_side_rows(&build_chunk)?;
 
-            for (prev_keys, row_idxs) in grouped_rows {
-                let row_refs = row_idxs
-                    .iter()
-                    .map(|&idx| build_chunk.row_at_unchecked_vis(idx))
-                    .collect_vec();
+            let probe_child = self.probe_side_source.build_source(prev_keys).await?;
+            let mut probe_side_stream = probe_child.execute();
 
-                let probe_child = self.probe_side_source.build_source(prev_keys).await?;
-                let mut probe_side_stream = probe_child.execute();
+            while let Some(chunk) = probe_side_stream.next().await {
+                for (prev_keys, row_idxs) in grouped_rows {
+                    let row_refs = row_idxs
+                        .iter()
+                        .map(|&idx| build_chunk.row_at_unchecked_vis(idx))
+                        .collect_vec();
 
-                let mut has_match = vec![false; row_refs.len()];
-                let mut probe_side_chunk_exists = true;
+                    let probe_child = self.probe_side_source.build_source(prev_keys).await?;
+                    let mut probe_side_stream = probe_child.execute();
 
-                while probe_side_chunk_exists {
-                    let probe_side_chunk = probe_side_stream.next().await;
-                    probe_side_chunk_exists = probe_side_chunk.is_some();
+                    let mut has_match = vec![false; row_refs.len()];
+                    let mut probe_side_chunk_exists = true;
 
-                    let probe_side_chunk = if let Some(chunk) = probe_side_chunk {
-                        Some(chunk?.compact()?)
-                    } else {
-                        None
-                    };
+                    while probe_side_chunk_exists {
+                        let probe_side_chunk = probe_side_stream.next().await;
+                        probe_side_chunk_exists = probe_side_chunk.is_some();
 
-                    // The handling of the different join types and which operation they should
-                    // perform under each condition is very complex. For each
-                    // row, the gist of it is:
-                    //
-                    // Inner Join: Join the cur_row and the probe chunk until the latter is None.
-                    //
-                    // Left Outer Join: Same as inner join but if the probe chunk is None and the
-                    //      row has no match yet, null-pad the current row and append it
-                    //
-                    // Left Semi Join: Check for matches until probe chunk is None or a match is
-                    //      found. If there were any matches by the end, append the row.
-                    //
-                    // Left Anti Join: Check for matches until probe chunk is None or a match is
-                    //      found. If there were no matches by the end, append the row.
-                    // TODO: Simplify the logic of handling the different join types
-                    for (i, cur_row) in row_refs.iter().enumerate() {
-                        let join_result = if probe_side_chunk_exists {
-                            let chunk = probe_side_chunk.as_ref().unwrap().clone();
-                            match self.join_type {
-                                JoinType::LeftSemi | JoinType::LeftAnti if has_match[i] => {
-                                    continue;
-                                }
-                                JoinType::Inner
-                                | JoinType::LeftOuter
-                                | JoinType::LeftSemi
-                                | JoinType::LeftAnti => self.do_inner_join(cur_row, chunk),
-                                _ => Err(invalid_join_error.clone()),
-                            }
+                        let probe_side_chunk = if let Some(chunk) = probe_side_chunk {
+                            Some(chunk?.compact()?)
                         } else {
-                            match self.join_type {
-                                JoinType::Inner => break,
-                                JoinType::LeftOuter if has_match[i] => continue,
-                                JoinType::LeftOuter if !has_match[i] => {
-                                    self.do_left_outer_join(cur_row)
-                                }
-                                JoinType::LeftSemi if has_match[i] => {
-                                    self.convert_row_for_builder(cur_row)
-                                }
-                                JoinType::LeftSemi if !has_match[i] => continue,
-                                JoinType::LeftAnti if has_match[i] => continue,
-                                JoinType::LeftAnti if !has_match[i] => {
-                                    self.convert_row_for_builder(cur_row)
-                                }
-                                _ => Err(invalid_join_error.clone()),
-                            }
-                        }?;
+                            None
+                        };
 
-                        // Append chunk from the join result to the chunk builder if it exists
-                        if let Some(return_chunk) = join_result {
-                            if return_chunk.cardinality() > 0 {
-                                has_match[i] = true;
+                        // The handling of the different join types and which operation they should
+                        // perform under each condition is very complex. For each
+                        // row, the gist of it is:
+                        //
+                        // Inner Join: Join the cur_row and the probe chunk until the latter is None.
+                        //
+                        // Left Outer Join: Same as inner join but if the probe chunk is None and the
+                        //      row has no match yet, null-pad the current row and append it
+                        //
+                        // Left Semi Join: Check for matches until probe chunk is None or a match is
+                        //      found. If there were any matches by the end, append the row.
+                        //
+                        // Left Anti Join: Check for matches until probe chunk is None or a match is
+                        //      found. If there were no matches by the end, append the row.
+                        // TODO: Simplify the logic of handling the different join types
+                        for (i, cur_row) in row_refs.iter().enumerate() {
+                            let join_result = if probe_side_chunk_exists {
+                                let chunk = probe_side_chunk.as_ref().unwrap().clone();
+                                match self.join_type {
+                                    JoinType::LeftSemi | JoinType::LeftAnti if has_match[i] => {
+                                        continue;
+                                    }
+                                    JoinType::Inner
+                                    | JoinType::LeftOuter
+                                    | JoinType::LeftSemi
+                                    | JoinType::LeftAnti => self.do_inner_join(cur_row, chunk),
+                                    _ => Err(invalid_join_error.clone()),
+                                }
+                            } else {
+                                match self.join_type {
+                                    JoinType::Inner => break,
+                                    JoinType::LeftOuter if has_match[i] => continue,
+                                    JoinType::LeftOuter if !has_match[i] => {
+                                        self.do_left_outer_join(cur_row)
+                                    }
+                                    JoinType::LeftSemi if has_match[i] => {
+                                        self.convert_row_for_builder(cur_row)
+                                    }
+                                    JoinType::LeftSemi if !has_match[i] => continue,
+                                    JoinType::LeftAnti if has_match[i] => continue,
+                                    JoinType::LeftAnti if !has_match[i] => {
+                                        self.convert_row_for_builder(cur_row)
+                                    }
+                                    _ => Err(invalid_join_error.clone()),
+                                }
+                            }?;
 
-                                // Skip adding if it's a Left Anti/Semi Join and the probe side
-                                // chunk exists. Rows for Left Anti/Semi Join are added at the end
-                                // when the probe side chunk is None instread.
-                                if let (JoinType::LeftSemi | JoinType::LeftAnti, true) =
+                            // Append chunk from the join result to the chunk builder if it exists
+                            if let Some(return_chunk) = join_result {
+                                if return_chunk.cardinality() > 0 {
+                                    has_match[i] = true;
+
+                                    // Skip adding if it's a Left Anti/Semi Join and the probe side
+                                    // chunk exists. Rows for Left Anti/Semi Join are added at the end
+                                    // when the probe side chunk is None instread.
+                                    if let (JoinType::LeftSemi | JoinType::LeftAnti, true) =
                                     (self.join_type, probe_side_chunk_exists)
-                                {
-                                    continue;
-                                }
+                                    {
+                                        continue;
+                                    }
 
-                                let append_result =
-                                    self.append_chunk(SlicedDataChunk::new_checked(return_chunk)?)?;
-                                if let Some(inner_chunk) = append_result {
+                                    let append_result =
+                                        self.append_chunk(SlicedDataChunk::new_checked(return_chunk)?)?;
+                                    if let Some(inner_chunk) = append_result {
+                                        yield inner_chunk.reorder_columns(&self.output_indices);
+                                    }
+                                }
+                            }
+
+                            // Until we don't have any more last_chunks to append to the chunk builder,
+                            // keep appending them to the chunk builder
+                            while self.last_chunk.is_some() {
+                                let temp_chunk: Option<SlicedDataChunk> =
+                                    std::mem::take(&mut self.last_chunk);
+                                if let Some(inner_chunk) = self.append_chunk(temp_chunk.unwrap())? {
                                     yield inner_chunk.reorder_columns(&self.output_indices);
                                 }
-                            }
-                        }
-
-                        // Until we don't have any more last_chunks to append to the chunk builder,
-                        // keep appending them to the chunk builder
-                        while self.last_chunk.is_some() {
-                            let temp_chunk: Option<SlicedDataChunk> =
-                                std::mem::take(&mut self.last_chunk);
-                            if let Some(inner_chunk) = self.append_chunk(temp_chunk.unwrap())? {
-                                yield inner_chunk.reorder_columns(&self.output_indices);
                             }
                         }
                     }
@@ -580,17 +603,15 @@ impl BoxedExecutorBuilder for LookupJoinExecutorBuilder {
         let vnode_mapping = lookup_join_node.get_probe_side_vnode_mapping().to_vec();
         assert!(!vnode_mapping.is_empty());
 
-        let probe_side_source = ProbeSideSource {
+        let probe_side_source = ProbeSideSource::new(
             build_side_key_types,
             table_desc: probe_side_table_desc.clone(),
             vnode_mapping,
             probe_side_schema,
             probe_side_column_ids,
-            context: source.context().clone(),
-            task_id: source.task_id.clone(),
-            epoch: source.epoch(),
+            source,
             worker_nodes: lookup_join_node.get_worker_nodes().to_vec(),
-        };
+        )?;
 
         Ok(Box::new(LookupJoinExecutor {
             join_type,
