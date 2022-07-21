@@ -81,3 +81,7 @@ harness = false
 [[bench]]
 name = "hash_join"
 harness = false
+
+[[bench]]
+name = "hash_join_new"
+harness = false
