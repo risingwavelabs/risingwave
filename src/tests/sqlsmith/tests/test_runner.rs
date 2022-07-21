@@ -34,7 +34,8 @@ async fn handle(session: Arc<SessionImpl>, stmt: Statement, sql: String) {
     }));
 
     handler::handle(session.clone(), stmt, &sql)
-        .await.unwrap_or_else(|e| panic!("Failed to handle SQL:\n{}\nReason:\n{}", sql, e));
+        .await
+        .unwrap_or_else(|e| panic!("Failed to handle SQL:\n{}\nReason:\n{}", sql, e));
 }
 
 /// Create the tables defined in testdata.
