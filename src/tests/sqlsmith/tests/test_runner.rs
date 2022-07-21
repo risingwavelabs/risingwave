@@ -28,25 +28,15 @@ use risingwave_sqlsmith::{mview_sql_gen, sql_gen, Table};
 /// Executes and catches system panics to recover
 /// NOTE: It cannot deal with aborts
 async fn sqlsmith_handle(session: Arc<SessionImpl>, stmt: Statement, sql: String) {
-    let res = tokio::spawn(async move {
-        panic_proc().await
-    }).await;
+    let sql_for_thread = sql.clone();
+    let res =
+        tokio::spawn(async move { handler::handle(session.clone(), stmt, &sql_for_thread).await })
+            .await;
     match res {
-        Ok(Ok(_)) => {},
-        _ => println!("caught some err"),
+        Ok(Ok(_)) => {}
+        Ok(Err(e)) => println!("Encountered error: {}", e),
+        Err(e) => println!("Panic while running sql: {}\n error: {}", sql, e),
     }
-}
-
-/// test abort
-async fn abort_proc() -> Result<(), ()> {
-    std::process::abort();
-    Ok(())
-}
-
-/// test normal panic
-async fn panic_proc() -> Result<(), ()> {
-    panic!("");
-    Ok(())
 }
 
 /// Create the tables defined in testdata.
