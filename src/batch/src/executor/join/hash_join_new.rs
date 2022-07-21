@@ -13,12 +13,13 @@
 // limitations under the License.
 
 use std::collections::{HashMap, LinkedList};
+use std::iter::empty;
 use std::marker::PhantomData;
 
 use futures::TryStreamExt;
 use futures_async_stream::try_stream;
 use itertools::Itertools;
-use risingwave_common::array::{ArrayBuilderImpl, DataChunk, RowRef};
+use risingwave_common::array::{Array, ArrayBuilderImpl, DataChunk, RowRef};
 use risingwave_common::catalog::Schema;
 use risingwave_common::error::{Result, RwError};
 use risingwave_common::hash::{
@@ -64,85 +65,125 @@ impl<K: HashKey> Executor for HashJoinExecutor<K> {
 
 type JoinHashMap<K> = HashMap<K, RowId, PrecomputedBuildHasher>;
 
+struct EquiJoinParams<K> {
+    chunk_builder: DataChunkBuilder,
+    probe_side: BoxedExecutor,
+    probe_key_idxs: Vec<usize>,
+    build_side: Vec<DataChunk>,
+    hash_map: JoinHashMap<K>,
+    next_row_id: ChunkedData<Option<RowId>>,
+}
+
 impl<K: HashKey> HashJoinExecutor<K> {
     #[try_stream(boxed, ok = DataChunk, error = RwError)]
     async fn do_execute(self: Box<Self>) {
         let mut build_side = Vec::new();
+        let mut build_row_count = 0;
         #[for_await]
         for build_chunk in self.build_side_source.execute() {
             let compacted = build_chunk?.compact()?;
             if compacted.capacity() > 0 {
+                build_row_count += compacted.capacity();
                 build_side.push(compacted)
             }
         }
-        let build_row_count = build_side.iter().map(|c| c.capacity()).sum();
         let mut hash_map =
             JoinHashMap::with_capacity_and_hasher(build_row_count, PrecomputedBuildHasher);
-        let mut next_row_with_same_key =
+        let mut next_row_id =
             ChunkedData::with_chunk_sizes(build_side.iter().map(|c| c.capacity()))?;
 
         // Build hash map
         for (build_chunk_id, build_chunk) in build_side.iter().enumerate() {
             let build_keys = K::build(&self.build_key_idxs, build_chunk)?;
-            for (build_row_id, build_key) in build_keys.into_iter().enumerate() {
+            // In pg `null` and `null` never joins, so we should skip them in hash table.
+            for (build_row_id, build_key) in build_keys
+                .into_iter()
+                .enumerate()
+                .filter(|(_, key)| !key.has_null())
+            {
                 let row_id = RowId::new(build_chunk_id, build_row_id);
-                next_row_with_same_key[row_id] = hash_map.insert(build_key, row_id);
+                next_row_id[row_id] = hash_map.insert(build_key, row_id);
             }
         }
 
-        let mut chunk_builder =
-            DataChunkBuilder::with_default_size(self.original_schema.data_types());
+        let chunk_builder = DataChunkBuilder::with_default_size(self.original_schema.data_types());
 
-        let stream = match self.join_type {
-            JoinType::Inner => Self::do_inner_join,
-            _ => todo!(),
-        };
-
-        #[for_await]
-        for chunk in stream(
-            &mut chunk_builder,
-            self.probe_side_source,
-            self.probe_key_idxs,
+        let params = EquiJoinParams {
+            chunk_builder,
+            probe_side: self.probe_side_source,
+            probe_key_idxs: self.probe_key_idxs,
             build_side,
             hash_map,
-            next_row_with_same_key,
-        ) {
-            yield chunk?.reorder_columns(&self.output_indices)
-        }
+            next_row_id,
+        };
 
-        if let Some(chunk) = chunk_builder.consume_all()? {
-            yield chunk.reorder_columns(&self.output_indices)
-        }
+        if let Some(cond) = self.cond {
+            let stream = match self.join_type {
+                JoinType::Inner => Self::do_inner_join_with_non_equi_condition,
+                _ => todo!(),
+            };
+            #[for_await]
+            for chunk in stream(params, cond) {
+                yield chunk?.reorder_columns(&self.output_indices)
+            }
+        } else {
+            let stream = match self.join_type {
+                JoinType::Inner => Self::do_inner_join,
+                _ => todo!(),
+            };
+            #[for_await]
+            for chunk in stream(params) {
+                yield chunk?.reorder_columns(&self.output_indices)
+            }
+        };
     }
 
     #[try_stream(boxed, ok = DataChunk, error = RwError)]
     async fn do_inner_join(
-        chunk_builder: &mut DataChunkBuilder,
-        probe_side: BoxedExecutor,
-        probe_key_idxs: Vec<usize>,
-        build_side: Vec<DataChunk>,
-        hash_map: JoinHashMap<K>,
-        next_row_with_same_key: ChunkedData<Option<RowId>>,
+        EquiJoinParams {
+            mut chunk_builder,
+            probe_side,
+            probe_key_idxs,
+            build_side,
+            hash_map,
+            next_row_id,
+        }: EquiJoinParams<K>,
     ) {
         #[for_await]
         for probe_chunk in probe_side.execute() {
             let probe_chunk = probe_chunk?;
             let probe_keys = K::build(&probe_key_idxs, &probe_chunk)?;
-            for (probe_row, probe_key) in probe_chunk.rows().zip_eq(probe_keys) {
+            for (probe_row_id, probe_key) in probe_keys.iter().enumerate() {
                 let mut matched_build_row_id = hash_map.get(&probe_key);
                 while let Some(&build_row_id) = matched_build_row_id {
                     let build_chunk = &build_side[build_row_id.chunk_id()];
-                    // Since build chunk is compacted, all rows are visible.
-                    let build_row = build_chunk.row_at_unchecked_vis(build_row_id.row_id());
-                    let datum_refs = probe_row.values().chain(build_row.values());
-                    if let Some(spilled) =
-                        chunk_builder.append_one_row_from_datum_refs(datum_refs)?
-                    {
+                    if let Some(spilled) = chunk_builder.append_one_row_from_array_elements(
+                        probe_chunk.columns().iter().map(|c| c.array_ref()),
+                        probe_row_id,
+                        build_chunk.columns().iter().map(|c| c.array_ref()),
+                        build_row_id.row_id(),
+                    )? {
                         yield spilled
                     }
-                    matched_build_row_id = next_row_with_same_key[build_row_id].as_ref();
+                    matched_build_row_id = next_row_id[build_row_id].as_ref();
                 }
             }
+        }
+        if let Some(spilled) = chunk_builder.consume_all()? {
+            yield spilled
+        }
+    }
+
+    #[try_stream(boxed, ok = DataChunk, error = RwError)]
+    async fn do_inner_join_with_non_equi_condition(
+        params: EquiJoinParams<K>,
+        cond: BoxedExpression,
+    ) {
+        #[for_await]
+        for chunk in Self::do_inner_join(params) {
+            let mut chunk = chunk?;
+            chunk.set_visibility(cond.eval(&chunk)?.as_bool().iter().collect());
+            yield chunk
         }
     }
 }
@@ -276,5 +317,637 @@ impl<K> HashJoinExecutor<K> {
             identity,
             _phantom: PhantomData,
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use std::sync::Arc;
+
+    use futures::StreamExt;
+    use itertools::Itertools;
+    use risingwave_common::array::column::Column;
+    use risingwave_common::array::{ArrayBuilderImpl, DataChunk};
+    use risingwave_common::catalog::{Field, Schema};
+    use risingwave_common::error::Result;
+    use risingwave_common::hash::Key32;
+    use risingwave_common::test_prelude::DataChunkTestExt;
+    use risingwave_common::types::DataType;
+    use risingwave_expr::expr::expr_binary_nonnull::new_binary_expr;
+    use risingwave_expr::expr::{BoxedExpression, InputRefExpression};
+    use risingwave_pb::expr::expr_node::Type;
+
+    use crate::executor::join::hash_join_new::HashJoinExecutor;
+    use crate::executor::join::JoinType;
+    use crate::executor::test_utils::MockExecutor;
+    use crate::executor::BoxedExecutor;
+    struct DataChunkMerger {
+        data_types: Vec<DataType>,
+        array_builders: Vec<ArrayBuilderImpl>,
+        array_len: usize,
+    }
+
+    impl DataChunkMerger {
+        fn new(data_types: Vec<DataType>) -> Result<Self> {
+            let array_builders = data_types
+                .iter()
+                .map(|data_type| data_type.create_array_builder(1024))
+                .collect();
+
+            Ok(Self {
+                data_types,
+                array_builders,
+                array_len: 0,
+            })
+        }
+
+        fn append(&mut self, data_chunk: &DataChunk) -> Result<()> {
+            ensure!(self.array_builders.len() == data_chunk.dimension());
+            for idx in 0..self.array_builders.len() {
+                self.array_builders[idx].append_array(data_chunk.column_at(idx).array_ref())?;
+            }
+            self.array_len += data_chunk.capacity();
+
+            Ok(())
+        }
+
+        fn finish(self) -> Result<DataChunk> {
+            let columns = self
+                .array_builders
+                .into_iter()
+                .map(|array_builder| array_builder.finish().map(|arr| Column::new(Arc::new(arr))))
+                .try_collect()?;
+
+            Ok(DataChunk::new(columns, self.array_len))
+        }
+    }
+
+    fn is_data_chunk_eq(left: &DataChunk, right: &DataChunk) -> bool {
+        assert!(left.visibility().is_none());
+        assert!(right.visibility().is_none());
+
+        if left.cardinality() != right.cardinality() {
+            return false;
+        }
+
+        left.rows()
+            .zip_eq(right.rows())
+            .all(|(row1, row2)| row1 == row2)
+    }
+
+    struct TestFixture {
+        left_types: Vec<DataType>,
+        right_types: Vec<DataType>,
+        join_type: JoinType,
+    }
+
+    /// Sql for creating test data:
+    /// ```sql
+    /// drop table t1 if exists;
+    /// create table t1(v1 int, v2 float);
+    /// insert into t1 values
+    /// (1, 6.1::FLOAT), (2, null), (null, 8.4::FLOAT), (3, 3.9::FLOAT), (null, null),
+    /// (4, 6.6::FLOAT), (3, null), (null, 0.7::FLOAT), (5, null), (null, 5.5::FLOAT);
+    ///
+    /// drop table t2 if exists;
+    /// create table t2(v1 int, v2 real);
+    /// insert into t2 values
+    /// (8, 6.1::REAL), (2, null), (null, 8.9::REAL), (3, null), (null, 3.5::REAL),
+    /// (6, null), (4, 7.5::REAL), (6, null), (null, 8::REAL), (7, null),
+    /// (null, 9.1::REAL), (9, null), (3, 3.7::REAL), (9, null), (null, 9.6::REAL),
+    /// (100, null), (null, 8.18::REAL), (200, null);
+    /// ```
+    impl TestFixture {
+        fn with_join_type(join_type: JoinType) -> Self {
+            Self {
+                left_types: vec![DataType::Int32, DataType::Float32],
+                right_types: vec![DataType::Int32, DataType::Float64],
+                join_type,
+            }
+        }
+
+        fn create_left_executor(&self) -> BoxedExecutor {
+            let schema = Schema {
+                fields: vec![
+                    Field::unnamed(DataType::Int32),
+                    Field::unnamed(DataType::Float32),
+                ],
+            };
+            let mut executor = MockExecutor::new(schema);
+
+            executor.add(DataChunk::from_pretty(
+                "i f
+                 1 6.1
+                 2 .
+                 . 8.4
+                 3 3.9
+                 . .  ",
+            ));
+
+            executor.add(DataChunk::from_pretty(
+                "i f
+                 4 6.6
+                 3 .
+                 . 0.7
+                 5 .
+                 . 5.5",
+            ));
+
+            Box::new(executor)
+        }
+
+        fn create_right_executor(&self) -> BoxedExecutor {
+            let schema = Schema {
+                fields: vec![
+                    Field::unnamed(DataType::Int32),
+                    Field::unnamed(DataType::Float64),
+                ],
+            };
+            let mut executor = MockExecutor::new(schema);
+
+            executor.add(DataChunk::from_pretty(
+                "i F
+                 8 6.1
+                 2 .
+                 . 8.9
+                 3 .
+                 . 3.5
+                 6 .  ",
+            ));
+
+            executor.add(DataChunk::from_pretty(
+                "i F
+                 4 7.5
+                 6 .
+                 . 8
+                 7 .
+                 . 9.1
+                 9 .  ",
+            ));
+
+            executor.add(DataChunk::from_pretty(
+                "  i F
+                   3 3.7
+                   9 .
+                   . 9.6
+                 100 .
+                   . 8.18
+                 200 .   ",
+            ));
+
+            Box::new(executor)
+        }
+
+        fn full_data_types(&self) -> Vec<DataType> {
+            [self.left_types.clone(), self.right_types.clone()].concat()
+        }
+
+        fn output_data_types(&self) -> Vec<DataType> {
+            let join_type = self.join_type;
+            if join_type.keep_all() {
+                [self.left_types.clone(), self.right_types.clone()].concat()
+            } else if join_type.keep_left() {
+                self.left_types.clone()
+            } else if join_type.keep_right() {
+                self.right_types.clone()
+            } else {
+                unreachable!()
+            }
+        }
+
+        fn create_cond() -> BoxedExpression {
+            let left_expr = InputRefExpression::new(DataType::Float32, 1);
+            let right_expr = InputRefExpression::new(DataType::Float64, 3);
+            new_binary_expr(
+                Type::LessThan,
+                DataType::Boolean,
+                Box::new(left_expr),
+                Box::new(right_expr),
+            )
+        }
+
+        fn create_join_executor(&self, has_non_equi_cond: bool) -> BoxedExecutor {
+            let join_type = self.join_type;
+
+            let left_child = self.create_left_executor();
+            let right_child = self.create_right_executor();
+
+            let output_indices = (0..match join_type {
+                JoinType::LeftSemi | JoinType::LeftAnti => left_child.schema().fields().len(),
+                JoinType::RightSemi | JoinType::RightAnti => right_child.schema().fields().len(),
+                _ => left_child.schema().fields().len() + right_child.schema().fields().len(),
+            })
+                .collect();
+
+            let cond = if has_non_equi_cond {
+                Some(Self::create_cond())
+            } else {
+                None
+            };
+
+            Box::new(HashJoinExecutor::<Key32>::new(
+                join_type,
+                output_indices,
+                left_child,
+                right_child,
+                vec![0],
+                vec![0],
+                cond,
+                "HashJoinExecutor".to_string(),
+            ))
+        }
+
+        fn select_from_chunk(&self, data_chunk: DataChunk) -> DataChunk {
+            let join_type = self.join_type;
+            let (columns, vis) = data_chunk.into_parts();
+
+            let keep_columns = if join_type.keep_all() {
+                vec![columns[1].clone(), columns[3].clone()]
+            } else if join_type.keep_left() || join_type.keep_right() {
+                vec![columns[1].clone()]
+            } else {
+                unreachable!()
+            };
+
+            DataChunk::new(keep_columns, vis)
+        }
+
+        async fn do_test(&self, expected: DataChunk, has_non_equi_cond: bool) {
+            let join_executor = self.create_join_executor(has_non_equi_cond);
+
+            let mut data_chunk_merger = DataChunkMerger::new(self.output_data_types()).unwrap();
+
+            let fields = &join_executor.schema().fields;
+
+            if self.join_type.keep_all() {
+                assert_eq!(fields[1].data_type, DataType::Float32);
+                assert_eq!(fields[3].data_type, DataType::Float64);
+            } else if self.join_type.keep_left() {
+                assert_eq!(fields[1].data_type, DataType::Float32);
+            } else if self.join_type.keep_right() {
+                assert_eq!(fields[1].data_type, DataType::Float64)
+            } else {
+                unreachable!()
+            }
+
+            let mut stream = join_executor.execute();
+
+            while let Some(data_chunk) = stream.next().await {
+                let data_chunk = data_chunk.unwrap();
+                let data_chunk = data_chunk.compact().unwrap();
+                data_chunk_merger.append(&data_chunk).unwrap();
+            }
+
+            let result_chunk = data_chunk_merger.finish().unwrap();
+
+            // Take (t1.v2, t2.v2) in inner and left/right/full outer
+            // or v2 decided by side of anti/semi.
+            let output_chunk = self.select_from_chunk(result_chunk);
+
+            // TODO: Replace this with unsorted comparison
+            // assert_eq!(expected, result_chunk);
+            assert!(is_data_chunk_eq(&expected, &output_chunk));
+        }
+    }
+
+    /// Sql:
+    /// ```sql
+    /// select t1.v2 as t1_v2, t2.v2 as t2_v2 from t1 join t2 on t1.v1 = t2.v1;
+    /// ```
+    #[tokio::test]
+    async fn test_inner_join() {
+        let test_fixture = TestFixture::with_join_type(JoinType::Inner);
+
+        let expected_chunk = DataChunk::from_pretty(
+            "f   F
+             .   .
+             3.9 3.7
+             3.9 .
+             6.6 7.5
+             .   3.7
+             .   .  ",
+        );
+
+        test_fixture.do_test(expected_chunk, false).await;
+    }
+
+    /// Sql:
+    /// ```sql
+    /// select t1.v2 as t1_v2, t2.v2 as t2_v2 from t1 join t2 on t1.v1 = t2.v1 and t1.v2 < t2.v2;
+    /// ```
+    #[tokio::test]
+    async fn test_inner_join_with_non_equi_condition() {
+        let test_fixture = TestFixture::with_join_type(JoinType::Inner);
+
+        let expected_chunk = DataChunk::from_pretty(
+            "f   F
+             6.6 7.5",
+        );
+
+        test_fixture.do_test(expected_chunk, true).await;
+    }
+
+    /// Sql:
+    /// ```sql
+    /// select t1.v2 as t1_v2, t2.v2 as t2_v2 from t1 left outer join t2 on t1.v1 = t2.v1;
+    /// ```
+    #[tokio::test]
+    async fn test_left_outer_join() {
+        let test_fixture = TestFixture::with_join_type(JoinType::LeftOuter);
+
+        let expected_chunk = DataChunk::from_pretty(
+            "f   F
+             6.1 .
+             .   .
+             8.4 .
+             3.9 3.7
+             3.9 .
+             .   .
+             6.6 7.5
+             .   3.7
+             .   .
+             0.7 .
+             .   .
+             5.5 .  ",
+        );
+
+        test_fixture.do_test(expected_chunk, false).await;
+    }
+
+    /// Sql:
+    /// ```sql
+    /// select t1.v2 as t1_v2, t2.v2 as t2_v2 from t1 left outer join t2 on t1.v1 = t2.v1 and t1.v2 < t2.v2;
+    /// ```
+    #[tokio::test]
+    async fn test_left_outer_join_with_non_equi_condition() {
+        let test_fixture = TestFixture::with_join_type(JoinType::LeftOuter);
+
+        let expected_chunk = DataChunk::from_pretty(
+            "f   F
+             6.1 .
+             .   .
+             8.4 .
+             3.9 .
+             .   .
+             6.6 7.5
+             .   .
+             0.7 .
+             .   .
+             5.5 .",
+        );
+
+        test_fixture.do_test(expected_chunk, true).await;
+    }
+
+    /// Sql:
+    /// ```sql
+    /// select t1.v2 as t1_v2, t2.v2 as t2_v2 from t1 right outer join t2 on t1.v1 = t2.v1;
+    /// ```
+    #[tokio::test]
+    async fn test_right_outer_join() {
+        let test_fixture = TestFixture::with_join_type(JoinType::RightOuter);
+
+        let expected_chunk = DataChunk::from_pretty(
+            "f   F
+             .   .
+             3.9 3.7
+             3.9 .
+             6.6 7.5
+             .   3.7
+             .   .
+             .   6.1
+             .   8.9
+             .   3.5
+             .   .
+             .   .
+             .   8.0
+             .   .
+             .   9.1
+             .   .
+             .   .
+             .   9.6
+             .   .
+             .   8.18
+             .   .",
+        );
+
+        test_fixture.do_test(expected_chunk, false).await;
+    }
+
+    /// Sql:
+    /// ```sql
+    /// select t1.v2 as t1_v2, t2.v2 as t2_v2 from t1 left outer join t2 on t1.v1 = t2.v1 and t1.v2 < t2.v2;
+    /// ```
+    #[tokio::test]
+    async fn test_right_outer_join_with_non_equi_condition() {
+        let test_fixture = TestFixture::with_join_type(JoinType::RightOuter);
+
+        let expected_chunk = DataChunk::from_pretty(
+            "f   F
+             6.6 7.5
+             .   6.1
+             .   .
+             .   8.9
+             .   .
+             .   3.5
+             .   .
+             .   .
+             .   8.0
+             .   .
+             .   9.1
+             .   .
+             .   3.7
+             .   .
+             .   9.6
+             .   .
+             .   8.18
+             .   .",
+        );
+
+        test_fixture.do_test(expected_chunk, true).await;
+    }
+
+    /// ```sql
+    /// select t1.v2 as t1_v2, t2.v2 as t2_v2 from t1 full outer join t2 on t1.v1 = t2.v1;
+    /// ```
+    #[tokio::test]
+    async fn test_full_outer_join() {
+        let test_fixture = TestFixture::with_join_type(JoinType::FullOuter);
+
+        let expected_chunk = DataChunk::from_pretty(
+            "f   F
+             6.1 .
+             .   .
+             8.4 .
+             3.9 3.7
+             3.9 .
+             .   .
+             6.6 7.5
+             .   3.7
+             .   .
+             0.7 .
+             .   .
+             5.5 .
+             .   6.1
+             .   8.9
+             .   3.5
+             .   .
+             .   .
+             .   8.0
+             .   .
+             .   9.1
+             .   .
+             .   .
+             .   9.6
+             .   .
+             .   8.18
+             .   .   ",
+        );
+
+        test_fixture.do_test(expected_chunk, false).await;
+    }
+
+    #[tokio::test]
+    async fn test_left_anti_join() {
+        let test_fixture = TestFixture::with_join_type(JoinType::LeftAnti);
+
+        let expected_chunk = DataChunk::from_pretty(
+            "f
+             6.1
+             8.4
+             .
+             0.7
+             .
+             5.5",
+        );
+
+        test_fixture.do_test(expected_chunk, false).await;
+    }
+
+    #[tokio::test]
+    async fn test_left_anti_join_with_non_equi_condition() {
+        let test_fixture = TestFixture::with_join_type(JoinType::LeftAnti);
+
+        let expected_chunk = DataChunk::from_pretty(
+            "f
+             6.1
+             .
+             8.4
+             3.9
+             .
+             .
+             0.7
+             .
+             5.5",
+        );
+
+        test_fixture.do_test(expected_chunk, true).await;
+    }
+
+    #[tokio::test]
+    async fn test_left_semi_join() {
+        let test_fixture = TestFixture::with_join_type(JoinType::LeftSemi);
+
+        let expected_chunk = DataChunk::from_pretty(
+            "f
+             .
+             3.9
+             6.6
+             .",
+        );
+
+        test_fixture.do_test(expected_chunk, false).await;
+    }
+
+    #[tokio::test]
+    async fn test_left_semi_join_with_non_equi_condition() {
+        let test_fixture = TestFixture::with_join_type(JoinType::LeftSemi);
+
+        let expected_chunk = DataChunk::from_pretty(
+            "f
+             6.6",
+        );
+
+        test_fixture.do_test(expected_chunk, true).await;
+    }
+
+    #[tokio::test]
+    async fn test_right_anti_join() {
+        let test_fixture = TestFixture::with_join_type(JoinType::RightAnti);
+
+        let expected_chunk = DataChunk::from_pretty(
+            "F
+             6.1
+             8.9
+             3.5
+             .
+             .
+             8.0
+             .
+             9.1
+             .
+             .
+             9.6
+             .
+             8.18
+             .",
+        );
+
+        test_fixture.do_test(expected_chunk, false).await;
+    }
+
+    #[tokio::test]
+    async fn test_right_anti_join_with_non_equi_condition() {
+        let test_fixture = TestFixture::with_join_type(JoinType::RightAnti);
+
+        let expected_chunk = DataChunk::from_pretty(
+            "F
+             6.1
+             .
+             8.9
+             .
+             3.5
+             .
+             .
+             8.0
+             .
+             9.1
+             .
+             3.7
+             .
+             9.6
+             .
+             8.18
+             .",
+        );
+
+        test_fixture.do_test(expected_chunk, true).await;
+    }
+
+    #[tokio::test]
+    async fn test_right_semi_join() {
+        let test_fixture = TestFixture::with_join_type(JoinType::RightSemi);
+
+        let expected_chunk = DataChunk::from_pretty(
+            "F
+             .
+             3.7
+             .
+             7.5",
+        );
+
+        test_fixture.do_test(expected_chunk, false).await;
+    }
+
+    #[tokio::test]
+    async fn test_right_semi_join_with_non_equi_condition() {
+        let test_fixture = TestFixture::with_join_type(JoinType::RightSemi);
+
+        let expected_chunk = DataChunk::from_pretty(
+            "F
+             7.5",
+        );
+
+        test_fixture.do_test(expected_chunk, true).await;
     }
 }
