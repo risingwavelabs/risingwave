@@ -185,7 +185,7 @@ impl PlanRoot {
             plan,
             "To MultiJoin".to_string(),
             vec![MergeMultiJoinRule::create()],
-            ApplyOrder::BottomUp,
+            ApplyOrder::TopDown,
         );
 
         // Reorder multijoin into left-deep join tree.
@@ -217,8 +217,8 @@ impl PlanRoot {
         //
         // Currently, the expressions in ORDER BY will be merged into the expressions in SELECT and
         // they shouldn't be a part of output columns, so we use `out_fields` to control the
-        // visibility of these expressions. To avoid these expressions being pruned, we can't
-        // use `self.out_fields` as `required_cols` here.
+        // visibility of these expressions. To avoid these expressions being pruned, we can't use
+        // `self.out_fields` as `required_cols` here.
         let required_cols = (0..self.plan.schema().len()).collect_vec();
         plan = plan.prune_col(&required_cols);
 
