@@ -13,20 +13,19 @@
 // limitations under the License.
 
 use std::collections::HashMap;
-use std::sync::atomic::{AtomicU32, Ordering};
 use std::sync::Arc;
 
 use itertools::Itertools;
 use log::error;
 use risingwave_common::error::{ErrorCode, Result, RwError};
 use risingwave_pb::meta::scale_task::TaskType;
-use risingwave_pb::meta::{ScaleTask, TaskStatus};
+use risingwave_pb::meta::TaskStatus;
 use tokio::sync::mpsc::UnboundedSender;
 use tokio::sync::oneshot::Sender;
 use tokio::sync::{mpsc, Mutex};
 use tokio::task::JoinHandle;
 
-use crate::model::{MetadataModel, ScaleTaskId};
+use crate::model::{MetadataModel, ScaleTask, ScaleTaskId};
 use crate::storage::MetaStore;
 
 pub type ScaleManagerRef<S> = Arc<ScaleManager<S>>;
@@ -37,7 +36,6 @@ type ScaleTaskCacheRef = Arc<Mutex<HashMap<ScaleTaskId, ScaleTask>>>;
 pub struct ScaleManager<S: MetaStore> {
     meta_store: Arc<S>,
 
-    next_task_id: AtomicU32,
     task_cache: ScaleTaskCacheRef,
     task_queue_tx: UnboundedSender<ScaleTaskId>,
 }
@@ -50,22 +48,23 @@ where
         let tasks = ScaleTask::list(&*meta_store).await?;
         let (task_queue_tx, mut task_queue_rx) = mpsc::unbounded_channel();
 
-        let next_task_id = tasks.iter().map(|task| task.task_id).max().unwrap_or(0) + 1;
         tasks
             .iter()
-            .filter(|task| task.task_status == TaskStatus::Pending as i32)
-            .map(|task| task.task_id)
-            .sorted()
+            .filter(|task| task.task_status == TaskStatus::Pending)
+            .sorted_by(|t1, t2| t1.task_create_time.cmp(&t2.task_create_time))
+            .map(|task| task.task_id.clone())
             .for_each(|task_id| {
                 task_queue_tx.send(task_id).unwrap();
             });
         let task_cache = Arc::new(Mutex::new(
-            tasks.into_iter().map(|task| (task.task_id, task)).collect(),
+            tasks
+                .into_iter()
+                .map(|task| (task.task_id.clone(), task))
+                .collect(),
         ));
 
         let scale_manager = ScaleManager {
             meta_store: meta_store.clone(),
-            next_task_id: AtomicU32::new(next_task_id),
             task_cache: task_cache.clone(),
             task_queue_tx,
         };
@@ -86,13 +85,12 @@ where
                     }
                 };
                 if let Err(err) =
-                    Self::solve_task(meta_store.clone(), task_cache.clone(), task_id).await
+                    Self::solve_task(meta_store.clone(), task_cache.clone(), task_id.clone()).await
                 {
                     error!("Failed to solve scale task: {}", err);
                     let mut task_cache_guard = task_cache.lock().await;
-                    if let Some(mut task) = task_cache_guard.get_mut(&task_id) {
-                        task.task_status = TaskStatus::Failed as i32;
-                        task.insert(&*meta_store).await.ok();
+                    if let Some(task) = task_cache_guard.get_mut(&task_id) {
+                        task.end(&*meta_store, TaskStatus::Failed).await.ok();
                     }
                 }
             }
@@ -108,28 +106,26 @@ where
     ) -> Result<()> {
         let mut task_cache_guard = task_cache.lock().await;
         let mut task = task_cache_guard.get_mut(&task_id).unwrap();
-        if TaskStatus::Cancelled == task.get_task_status()? {
+        if TaskStatus::Cancelled == task.task_status {
             return Ok(());
         }
 
-        match task.get_task_type()? {
+        match task.task_type {
             TaskType::Invalid => unreachable!(),
             TaskType::ScaleIn => {
-                task.task_status = TaskStatus::Building as i32;
-                task.insert(&*meta_store).await?;
-                let _hosts = task.get_hosts().clone();
+                task.status(&*meta_store, TaskStatus::Building).await?;
+                let _hosts = task.hosts.clone();
                 drop(task_cache_guard);
 
                 // TODO: call some method to scale in
 
                 task_cache_guard = task_cache.lock().await;
                 task = task_cache_guard.get_mut(&task_id).unwrap();
-                task.task_status = TaskStatus::Finished as i32;
-                task.insert(&*meta_store).await?;
+                task.end(&*meta_store, TaskStatus::Finished).await?;
             }
             TaskType::ScaleOut => {
-                let _hosts = task.get_hosts().clone();
-                let _fragment_parallelism = task.get_fragment_parallelism().clone();
+                let _hosts = task.hosts.clone();
+                let _fragment_parallelism = task.fragment_parallelism.clone();
                 drop(task_cache_guard);
 
                 // TODO: call some method and wait before CN starts.
@@ -139,11 +135,10 @@ where
 
                 task_cache_guard = task_cache.lock().await;
                 task = task_cache_guard.get_mut(&task_id).unwrap();
-                if TaskStatus::Cancelled == task.get_task_status()? {
+                if TaskStatus::Cancelled == task.task_status {
                     return Ok(());
                 }
-                task.task_status = TaskStatus::Building as i32;
-                task.insert(&*meta_store).await?;
+                task.status(&*meta_store, TaskStatus::Building).await?;
                 drop(task_cache_guard);
 
                 // TODO: call some method to scale out
@@ -153,8 +148,7 @@ where
 
                 task_cache_guard = task_cache.lock().await;
                 task = task_cache_guard.get_mut(&task_id).unwrap();
-                task.task_status = TaskStatus::Finished as i32;
-                task.insert(&*meta_store).await?;
+                task.end(&*meta_store, TaskStatus::Finished).await?;
             }
         }
 
@@ -164,30 +158,27 @@ where
     pub async fn add_scale_task(&self, mut task: ScaleTask) -> Result<ScaleTaskId> {
         // Make sure tasks in task_queue are sorted in ascending order by task_id.
         let mut task_cache_guard = self.task_cache.lock().await;
-        let task_id = self.next_task_id.fetch_add(1, Ordering::Relaxed);
-        task.task_id = task_id;
-        task.task_status = TaskStatus::Pending as i32;
-        task.insert(&*self.meta_store).await?;
-        task_cache_guard.insert(task_id, task);
-        self.task_queue_tx.send(task_id).unwrap();
+        task.init(&*self.meta_store).await?;
+        let task_id = task.task_id.clone();
+        task_cache_guard.insert(task_id.clone(), task);
+        self.task_queue_tx.send(task_id.clone()).unwrap();
         Ok(task_id)
     }
 
-    pub async fn get_task_status(&self, task_id: ScaleTaskId) -> Result<TaskStatus> {
+    pub async fn get_task_status(&self, task_id: ScaleTaskId) -> TaskStatus {
         self.task_cache
             .lock()
             .await
             .get(&task_id)
-            .map_or(Ok(TaskStatus::NotFound), |task| Ok(task.get_task_status()?))
+            .map_or(TaskStatus::NotFound, |task| task.task_status)
     }
 
     pub async fn abort_task(&self, task_id: ScaleTaskId) -> Result<()> {
         let mut task_cache_guard = self.task_cache.lock().await;
         if let Some(task) = task_cache_guard.get_mut(&task_id) {
-            match task.get_task_status()? {
+            match task.task_status {
                 TaskStatus::Pending => {
-                    task.task_status = TaskStatus::Cancelled as i32;
-                    task.insert(&*self.meta_store).await?;
+                    task.end(&*self.meta_store, TaskStatus::Cancelled).await?;
                     Ok(())
                 }
                 status => Err(RwError::from(ErrorCode::InternalError(format!(
@@ -205,7 +196,7 @@ where
     pub async fn remove_task(&self, task_id: ScaleTaskId) -> Result<()> {
         let mut task_cache_guard = self.task_cache.lock().await;
         if let Some(task) = task_cache_guard.get_mut(&task_id) {
-            match task.get_task_status()? {
+            match task.task_status {
                 TaskStatus::Cancelled | TaskStatus::Finished | TaskStatus::Failed => {
                     task_cache_guard.remove(&task_id);
                     ScaleTask::delete(&*self.meta_store, &task_id).await?;
@@ -235,36 +226,35 @@ mod tests {
             ScaleManager::new(env.meta_store_ref()).await?;
 
         let task1 = ScaleTask {
-            task_id: 0,
-            task_type: TaskType::ScaleOut as i32,
+            task_id: String::new(),
+            task_type: TaskType::ScaleOut,
             hosts: vec![],
             fragment_parallelism: HashMap::new(),
-            task_status: TaskStatus::NotFound as i32,
+            task_status: TaskStatus::NotFound,
+            task_create_time: 0,
+            task_end_time: 0,
         };
         let task2 = task1.clone();
         let task3 = task1.clone();
 
         let task1_id = scale_manager.add_scale_task(task1).await?;
-        assert_eq!(1, task1_id);
         let task2_id = scale_manager.add_scale_task(task2).await?;
-        assert_eq!(2, task2_id);
         let task3_id = scale_manager.add_scale_task(task3).await?;
-        assert_eq!(3, task3_id);
 
-        scale_manager.abort_task(task2_id).await?;
+        scale_manager.abort_task(task2_id.clone()).await?;
         assert_eq!(
             TaskStatus::Pending,
-            scale_manager.get_task_status(task1_id).await?
+            scale_manager.get_task_status(task1_id.clone()).await
         );
         assert_eq!(
             TaskStatus::Cancelled,
-            scale_manager.get_task_status(task2_id).await?
+            scale_manager.get_task_status(task2_id).await
         );
 
-        scale_manager.abort_task(task1_id).await?;
+        scale_manager.abort_task(task1_id.clone()).await?;
         assert_eq!(
             TaskStatus::Cancelled,
-            scale_manager.get_task_status(task1_id).await?
+            scale_manager.get_task_status(task1_id).await
         );
 
         tokio::time::sleep(std::time::Duration::from_secs(3)).await;
@@ -272,7 +262,7 @@ mod tests {
         scale_handle.await?;
         assert_eq!(
             TaskStatus::Finished,
-            scale_manager.get_task_status(task3_id).await?
+            scale_manager.get_task_status(task3_id).await
         );
 
         Ok(())
@@ -282,13 +272,15 @@ mod tests {
     async fn test_scale_manager_recover() -> Result<()> {
         let env = MetaSrvEnv::for_test().await;
 
-        let task_id = 1;
+        let task_id = uuid::Uuid::new_v4().to_string();
         let task = ScaleTask {
-            task_id,
-            task_type: TaskType::ScaleOut as i32,
+            task_id: task_id.clone(),
+            task_type: TaskType::ScaleOut,
             hosts: vec![],
             fragment_parallelism: HashMap::new(),
-            task_status: TaskStatus::Pending as i32,
+            task_status: TaskStatus::Finished,
+            task_create_time: 0,
+            task_end_time: 0,
         };
         task.insert(env.meta_store()).await?;
 
@@ -301,7 +293,7 @@ mod tests {
 
         assert_eq!(
             TaskStatus::Finished,
-            scale_manager.get_task_status(task_id).await?
+            scale_manager.get_task_status(task_id).await
         );
         Ok(())
     }
@@ -313,11 +305,13 @@ mod tests {
             ScaleManager::new(env.meta_store_ref()).await?;
 
         let task = ScaleTask {
-            task_id: 0,
-            task_type: TaskType::ScaleOut as i32,
+            task_id: String::new(),
+            task_type: TaskType::ScaleOut,
             hosts: vec![],
             fragment_parallelism: HashMap::new(),
-            task_status: TaskStatus::NotFound as i32,
+            task_status: TaskStatus::NotFound,
+            task_create_time: 0,
+            task_end_time: 0,
         };
         let task_id = scale_manager.add_scale_task(task).await?;
         tokio::time::sleep(std::time::Duration::from_millis(10)).await;
@@ -326,29 +320,29 @@ mod tests {
 
         assert_eq!(
             TaskStatus::Finished,
-            scale_manager.get_task_status(task_id).await?
+            scale_manager.get_task_status(task_id.clone()).await
         );
 
         scale_manager
-            .abort_task(task_id)
+            .abort_task(task_id.clone())
             .await
             .expect_err("task should panic");
         assert_eq!(
             TaskStatus::Finished,
-            scale_manager.get_task_status(task_id).await?
+            scale_manager.get_task_status(task_id.clone()).await
         );
         assert_eq!(
             TaskStatus::Finished,
             ScaleTask::select(env.meta_store(), &task_id)
                 .await?
                 .unwrap()
-                .get_task_status()?
+                .task_status
         );
 
-        scale_manager.remove_task(task_id).await?;
+        scale_manager.remove_task(task_id.clone()).await?;
         assert_eq!(
             TaskStatus::NotFound,
-            scale_manager.get_task_status(task_id).await?
+            scale_manager.get_task_status(task_id.clone()).await
         );
         assert!(ScaleTask::select(env.meta_store(), &task_id)
             .await?

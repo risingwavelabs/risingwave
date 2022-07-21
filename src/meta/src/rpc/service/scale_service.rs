@@ -27,6 +27,7 @@ use tonic::{Request, Response, Status};
 
 use crate::barrier::{BarrierManagerRef, Command};
 use crate::manager::ScaleManagerRef;
+use crate::model::{MetadataModel, ScaleTask};
 use crate::storage::MetaStore;
 
 pub struct ScaleServiceImpl<S: MetaStore> {
@@ -64,7 +65,11 @@ where
         let req = request.into_inner();
         let task = try_match_expand!(req.task, Some, "ScaleTaskRequest::task is empty")?;
         task.get_task_type().map_err(tonic_err)?;
-        let task_id = self.scale_manager.add_scale_task(task).await?;
+        task.get_task_status().map_err(tonic_err)?;
+        let task_id = self
+            .scale_manager
+            .add_scale_task(ScaleTask::from_protobuf(task))
+            .await?;
         Ok(Response::new(ScaleTaskResponse {
             status: None,
             task_id,
@@ -79,11 +84,7 @@ where
         let task_id = req.task_id;
         Ok(Response::new(GetTaskStatusResponse {
             status: None,
-            task_status: self
-                .scale_manager
-                .get_task_status(task_id)
-                .await
-                .map_err(tonic_err)? as i32,
+            task_status: self.scale_manager.get_task_status(task_id).await as i32,
         }))
     }
 

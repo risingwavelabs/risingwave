@@ -209,12 +209,14 @@ message ScaleTask {
     SCALE_IN = 1;
     SCALE_OUT = 2;
   }
-  uint32 task_id = 1;
+  string task_id = 1;
   TaskStatus task_status = 2;
   TaskType task_type = 3;
-  repeated common.HostAddress hosts = 4;
+  uint64 task_create_time = 4;
+  uint64 task_end_time = 5;
+  repeated common.HostAddress hosts = 6;
   // pass the fragment parallelism change here, this could be refactored when more scale strategy supported.
-  map<uint32, uint32> fragment_parallelism = 5;
+  map<uint32, uint32> fragment_parallelism = 7;
 }
 
 message ScaleTaskRequest {
@@ -223,11 +225,11 @@ message ScaleTaskRequest {
 
 message ScaleTaskResponse {
   common.Status status = 1;
-  uint32 task_id = 2;
+  string task_id = 2;
 }
 
 message GetTaskStatusRequest {
-  uint32 task_id = 1;
+  string task_id = 1;
 }
 
 message GetTaskStatusResponse {
@@ -236,7 +238,7 @@ message GetTaskStatusResponse {
 }
 
 message AbortTaskRequest {
-  uint32 task_id = 1;
+  string task_id = 1;
 }
 
 message AbortTaskResponse {
@@ -244,7 +246,7 @@ message AbortTaskResponse {
 }
 
 message RemoveTaskRequest {
-  uint32 task_id = 1;
+  string task_id = 1;
 }
 
 message RemoveTaskResponse {
