@@ -12,7 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::panic;
+use core::panic;
 use std::time::Duration;
 
 use clap::Parser as ClapParser;
