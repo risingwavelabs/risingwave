@@ -21,8 +21,8 @@ use risingwave_common::types::{Datum, VirtualNode};
 use risingwave_common::util::ordered::OrderedRowDeserializer;
 
 use super::cell_based_row_deserializer::CellBasedRowDeserializer;
-use super::Decoding;
-use crate::encoding::ColumnDescMapping;
+use super::RowDeserialize;
+use crate::row_serde::ColumnDescMapping;
 
 /// Similar to [`CellBasedRowDeserializer`], but for dedup pk cell encoding.
 #[derive(Clone)]
@@ -136,18 +136,6 @@ impl DedupPkCellBasedRowDeserializer {
         self.replace_dedupped_datums(raw_result)
     }
 
-    /// Functionally the same as [`CellBasedRowDeserializer::deserialize_without_vnode`],
-    /// but with dedup pk encoding.
-    // TODO: remove this once we refactored lookup in delta join with cell-based table
-    pub fn deserialize_without_vnode(
-        &mut self,
-        raw_key: impl AsRef<[u8]>,
-        cell: impl AsRef<[u8]>,
-    ) -> Result<Option<(VirtualNode, Vec<u8>, Row)>> {
-        let raw_result = self.inner.deserialize_without_vnode(raw_key, cell)?;
-        self.replace_dedupped_datums(raw_result)
-    }
-
     /// Functionally the same as [`CellBasedRowDeserializer::take`],
     /// but with dedup pk encoding.
     pub fn take(&mut self) -> Result<Option<(VirtualNode, Vec<u8>, Row)>> {
@@ -173,8 +161,8 @@ mod tests {
     use risingwave_common::util::sort_util::OrderType;
 
     use super::*;
-    use crate::encoding::cell_based_encoding_util::serialize_pk_and_row;
-    use crate::encoding::ColumnDescMapping;
+    use crate::row_serde::cell_based_encoding_util::serialize_pk_and_row;
+    use crate::row_serde::ColumnDescMapping;
 
     #[test]
     fn test_cell_based_deserializer() {
