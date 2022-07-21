@@ -29,12 +29,12 @@ use risingwave_hummock_sdk::key::range_of_prefix;
 use risingwave_pb::catalog::Table;
 
 use super::mem_table::{MemTable, RowOp};
-use super::storage_table::{CellBasedRowSerde, RowBasedSerde, StorageTableBase, READ_WRITE};
+use super::storage_table::{StorageTableBase, READ_WRITE};
 use super::Distribution;
 use crate::error::{StorageError, StorageResult};
 use crate::row_serde::cell_based_encoding_util::serialize_pk;
 use crate::row_serde::dedup_pk_cell_based_row_serializer::DedupPkCellBasedRowSerializer;
-use crate::row_serde::RowSerde;
+use crate::row_serde::{CellBasedRowSerde, RowBasedSerde, RowSerde};
 use crate::StateStore;
 
 /// Identical to `StateTable`. Used when we want to

@@ -40,11 +40,9 @@ use super::{Distribution, TableIter};
 use crate::error::{StorageError, StorageResult};
 use crate::keyspace::StripPrefixIterator;
 use crate::row_serde::cell_based_encoding_util::{serialize_pk, serialize_pk_and_column_id};
-use crate::row_serde::cell_based_row_deserializer::CellBasedRowDeserializer;
-use crate::row_serde::cell_based_row_serializer::CellBasedRowSerializer;
-use crate::row_serde::row_based_deserializer::RowBasedDeserializer;
-use crate::row_serde::row_based_serializer::RowBasedSerializer;
-use crate::row_serde::{ColumnDescMapping, RowDeserialize, RowSerde, RowSerialize};
+use crate::row_serde::{
+    CellBasedRowSerde, ColumnDescMapping, RowDeserialize, RowSerde, RowSerialize,
+};
 use crate::storage_value::StorageValue;
 use crate::store::WriteOptions;
 use crate::{Keyspace, StateStore, StateStoreIter};
@@ -64,22 +62,6 @@ pub const DEFAULT_VNODE: VirtualNode = 0;
 /// encoding format: [keyspace | pk | `column_id` (4B)] -> value.
 /// if the key of the column id does not exist, it will be Null in the relation
 pub type StorageTable<S, const T: AccessType> = StorageTableBase<S, CellBasedRowSerde, T>;
-#[derive(Clone)]
-pub struct CellBasedRowSerde;
-
-impl RowSerde for CellBasedRowSerde {
-    type Deserializer = CellBasedRowDeserializer;
-    type Serializer = CellBasedRowSerializer;
-}
-
-#[derive(Clone)]
-pub struct RowBasedSerde;
-
-impl RowSerde for RowBasedSerde {
-    type Deserializer = RowBasedDeserializer;
-    type Serializer = RowBasedSerializer;
-}
-
 /// [`StorageTableBase`] is the interface accessing relational data in KV(`StateStore`) with
 /// encoding format: [keyspace | pk | `column_id` (4B)] -> value.
 /// if the key of the column id does not exist, it will be Null in the relation.

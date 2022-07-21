@@ -20,6 +20,11 @@ use risingwave_common::catalog::{ColumnDesc, ColumnId};
 use risingwave_common::error::Result;
 use risingwave_common::types::{DataType, VirtualNode};
 
+use self::cell_based_row_deserializer::CellBasedRowDeserializer;
+use self::cell_based_row_serializer::CellBasedRowSerializer;
+use self::row_based_deserializer::RowBasedDeserializer;
+use self::row_based_serializer::RowBasedSerializer;
+
 pub mod cell_based_encoding_util;
 pub mod cell_based_row_deserializer;
 pub mod cell_based_row_serializer;
@@ -27,6 +32,22 @@ pub mod dedup_pk_cell_based_row_deserializer;
 pub mod dedup_pk_cell_based_row_serializer;
 pub mod row_based_deserializer;
 pub mod row_based_serializer;
+
+#[derive(Clone)]
+pub struct CellBasedRowSerde;
+
+impl RowSerde for CellBasedRowSerde {
+    type Deserializer = CellBasedRowDeserializer;
+    type Serializer = CellBasedRowSerializer;
+}
+
+#[derive(Clone)]
+pub struct RowBasedSerde;
+
+impl RowSerde for RowBasedSerde {
+    type Deserializer = RowBasedDeserializer;
+    type Serializer = RowBasedSerializer;
+}
 
 pub type KeyBytes = Vec<u8>;
 pub type ValueBytes = Vec<u8>;
