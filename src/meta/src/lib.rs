@@ -93,12 +93,12 @@ pub struct MetaNodeOpts {
 
     /// Username of etcd, required when --etcd-auth is enabled.
     /// Default value is read from the 'ETCD_USERNAME' environment variable.
-    #[clap(long, env = "ETCD_USERNAME", required = false)]
+    #[clap(long, env = "ETCD_USERNAME", default_value = "")]
     etcd_username: String,
 
     /// Password of etcd, required when --etcd-auth is enabled.
     /// Default value is read from the 'ETCD_PASSWORD' environment variable.
-    #[clap(long, env = "ETCD_PASSWORD", required = false)]
+    #[clap(long, env = "ETCD_PASSWORD", default_value = "")]
     etcd_password: String,
 
     /// Maximum allowed heartbeat interval in ms.
