@@ -399,3 +399,38 @@
         LogicalScan { table: a, output_columns: [y, z], required_columns: [$2:y, $3:z, $1:x], predicate: ($1 = 3:Int32) }
         LogicalAgg { group_key: [$0], aggs: [count] }
           LogicalScan { table: b, columns: [z] }
+- sql: |
+    create table a(x int, y varchar, z int);
+    create table b(x varchar, y int, z int);
+    select count(*) from a where a.y = (select string_agg(x order by x) from b where b.z = a.z);
+  optimized_logical_plan: |
+    LogicalAgg { aggs: [count] }
+      LogicalJoin { type: Inner, on: ($1 = $2) AND ($0 = $3), output_indices: [] }
+        LogicalScan { table: a, columns: [y, z] }
+        LogicalAgg { group_key: [$0], aggs: [string_agg($1 order_by($1 ASC NULLS LAST))] }
+          LogicalProject { exprs: [$1, $0] }
+            LogicalScan { table: b, columns: [x, z] }
+- sql: |
+    create table a(x int, y int, z int);
+    create table b(x int, y int, z int);
+    select count(*) from a where a.y = (select count(distinct x) from b where b.z = a.z);
+  optimized_logical_plan: |
+    LogicalAgg { aggs: [count] }
+      LogicalJoin { type: Inner, on: ($1 = $2) AND ($0 = $3), output_indices: [] }
+        LogicalScan { table: a, columns: [y, z] }
+        LogicalAgg { group_key: [$0], aggs: [count($1) filter(($2 = 0:Int64))] }
+          LogicalAgg { group_key: [$0, $1, $2], aggs: [] }
+            LogicalExpand { column_subsets: [[0, 1]] }
+              LogicalProject { exprs: [$1, $0] }
+                LogicalScan { table: b, columns: [x, z] }
+- sql: |
+    create table a(x int, y int, z int);
+    create table b(x int, y int, z int);
+    select count(*) from a where a.y = (select count(x) filter(where x < 100) from b where b.z = a.z);
+  optimized_logical_plan: |
+    LogicalAgg { aggs: [count] }
+      LogicalJoin { type: Inner, on: ($1 = $2) AND ($0 = $3), output_indices: [] }
+        LogicalScan { table: a, columns: [y, z] }
+        LogicalAgg { group_key: [$0], aggs: [count($1) filter(($1 < 100:Int32))] }
+          LogicalProject { exprs: [$1, $0] }
+            LogicalScan { table: b, columns: [x, z] }

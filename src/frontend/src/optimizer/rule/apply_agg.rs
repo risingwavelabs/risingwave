@@ -15,9 +15,9 @@
 use risingwave_pb::plan_common::JoinType;
 
 use super::{BoxedRule, Rule};
-use crate::optimizer::plan_node::{LogicalAgg, LogicalApply, LogicalFilter, PlanTreeNodeUnary};
+use crate::optimizer::plan_node::{LogicalAgg, LogicalApply, LogicalFilter};
 use crate::optimizer::PlanRef;
-use crate::utils::Condition;
+use crate::utils::{ColIndexMapping, Condition};
 
 /// Push `LogicalApply` down `LogicalAgg`.
 pub struct ApplyAggRule {}
@@ -32,19 +32,26 @@ impl Rule for ApplyAggRule {
         // Insert all the columns of `LogicalApply`'s left at the beginning of `LogicalAgg`.
         let apply_left_len = left.schema().len();
         let mut group_key: Vec<usize> = (0..apply_left_len).collect();
-        let (mut agg_calls, agg_group_key, _) = agg.clone().decompose();
+        let (mut agg_calls, agg_group_key, input) = agg.clone().decompose();
         group_key.extend(agg_group_key.into_iter().map(|key| key + apply_left_len));
 
         // Shift index of agg_calls' `InputRef` with `apply_left_len`.
+        let offset = apply_left_len as isize;
+        let mut shift_index = ColIndexMapping::with_shift_offset(input.schema().len(), offset);
         agg_calls.iter_mut().for_each(|agg_call| {
             agg_call.inputs.iter_mut().for_each(|input_ref| {
-                input_ref.shift_with_offset(apply_left_len as isize);
+                input_ref.shift_with_offset(offset);
             });
+            agg_call
+                .order_by_fields
+                .iter_mut()
+                .for_each(|o| o.input.shift_with_offset(offset));
+            agg_call.filter = agg_call.filter.clone().rewrite_expr(&mut shift_index);
         });
 
         let new_apply = LogicalApply::create(
             left,
-            agg.input(),
+            input,
             join_type,
             Condition {
                 conjunctions: vec![],
