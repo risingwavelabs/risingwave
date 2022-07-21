@@ -27,22 +27,24 @@ use crate::optimizer::PlanRef;
 use crate::utils::{ColIndexMapping, Condition};
 
 /// Push `LogicalJoin` down `LogicalApply`
+/// D Apply (T1 join<p> T2)  ->  (D Apply T1) join<p and natural join D> (D Apply T2)
 pub struct ApplyJoinRule {}
 impl Rule for ApplyJoinRule {
     fn apply(&self, plan: PlanRef) -> Option<PlanRef> {
         let apply: &LogicalApply = plan.as_logical_apply()?;
-        let (left, right, on, join_type, correlated_id, correlated_indices) =
+        let (apply_left, apply_right, apply_on, apply_join_type, correlated_id, correlated_indices) =
             apply.clone().decompose();
-        assert_eq!(join_type, JoinType::Inner);
-        let join: &LogicalJoin = right.as_logical_join()?;
+        assert_eq!(apply_join_type, JoinType::Inner);
+        let join: &LogicalJoin = apply_right.as_logical_join()?;
 
+        // TODO: if the Apply are only required on one side, just push it to the corresponding side
+
+        let apply_left_len = apply_left.schema().len();
         let join_left_len = join.left().schema().len();
-        let join_left_offset = left.schema().len();
-        let join_right_offset = 2 * left.schema().len();
         let mut rewriter = Rewriter {
             join_left_len,
-            join_left_offset,
-            join_right_offset,
+            join_left_offset: apply_left_len,
+            join_right_offset: 2 * apply_left_len,
             index_mapping: ColIndexMapping::new(
                 correlated_indices
                     .clone()
@@ -51,12 +53,11 @@ impl Rule for ApplyJoinRule {
                     .collect_vec(),
             )
             .inverse(),
-            has_correlated_input_ref: false,
             correlated_id,
         };
 
         // rewrite join on condition and add natural join condition
-        let natural_conjunctions = left
+        let natural_conjunctions = apply_left
             .schema()
             .fields
             .iter()
@@ -65,7 +66,7 @@ impl Rule for ApplyJoinRule {
                 Self::create_equal_expr(
                     i,
                     field.data_type.clone(),
-                    i + join_left_len + join_left_offset,
+                    i + join_left_len + apply_left_len,
                     field.data_type.clone(),
                 )
             })
@@ -80,18 +81,18 @@ impl Rule for ApplyJoinRule {
                 .collect_vec(),
         };
         let new_join_left = LogicalApply::create(
-            left.clone(),
+            apply_left.clone(),
             join.left().clone(),
-            join_type,
-            on.clone(),
+            apply_join_type,
+            apply_on.clone(),
             correlated_id,
             correlated_indices.clone(),
         );
         let new_join_right = LogicalApply::create(
-            left.clone(),
+            apply_left.clone(),
             join.right().clone(),
-            join_type,
-            on,
+            apply_join_type,
+            apply_on,
             correlated_id,
             correlated_indices,
         );
@@ -107,7 +108,7 @@ impl Rule for ApplyJoinRule {
                 Some(new_join.into())
             }
             JoinType::Inner | JoinType::LeftOuter | JoinType::RightOuter | JoinType::FullOuter => {
-                // use to provide a natural join
+                // project use to provide a natural join
                 let mut project_exprs: Vec<ExprImpl> = vec![];
                 project_exprs.extend(
                     new_join_left
@@ -126,7 +127,7 @@ impl Rule for ApplyJoinRule {
                         .fields
                         .iter()
                         .enumerate()
-                        .skip(join_left_offset)
+                        .skip(apply_left_len)
                         .map(|(i, field)| {
                             ExprImpl::InputRef(Box::new(InputRef::new(
                                 i + new_join_left.schema().fields.len(),
@@ -173,7 +174,6 @@ struct Rewriter {
     join_left_offset: usize,
     join_right_offset: usize,
     index_mapping: ColIndexMapping,
-    has_correlated_input_ref: bool,
     correlated_id: CorrelatedId,
 }
 impl ExprRewriter for Rewriter {
@@ -181,9 +181,7 @@ impl ExprRewriter for Rewriter {
         &mut self,
         correlated_input_ref: CorrelatedInputRef,
     ) -> ExprImpl {
-        let found = correlated_input_ref.get_correlated_id() == self.correlated_id;
-        self.has_correlated_input_ref |= found;
-        if found {
+        if correlated_input_ref.get_correlated_id() == self.correlated_id {
             InputRef::new(
                 self.index_mapping.map(correlated_input_ref.index()),
                 correlated_input_ref.return_type(),
