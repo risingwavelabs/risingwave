@@ -12,12 +12,15 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+use std::collections::HashMap;
 use std::sync::atomic::AtomicU64;
 use std::sync::atomic::Ordering::Relaxed;
 use std::sync::Arc;
 
 use futures::FutureExt;
+use parking_lot::RwLock;
 use risingwave_common::config::StorageConfig;
+use risingwave_hummock_sdk::slice_transform::SliceTransform;
 use risingwave_hummock_sdk::{get_local_sst_id, HummockEpoch, LocalSstableInfo};
 use risingwave_pb::hummock::SstableInfo;
 use risingwave_rpc_client::HummockMetaClient;
@@ -52,6 +55,7 @@ impl SharedBufferUploader {
         hummock_meta_client: Arc<dyn HummockMetaClient>,
         stats: Arc<StateStoreMetrics>,
         write_conflict_detector: Option<Arc<ConflictDetector>>,
+        table_id_to_slice_transform: Arc<RwLock<HashMap<u32, Arc<dyn SliceTransform>>>>,
     ) -> Self {
         let compaction_executor = if options.share_buffer_compaction_worker_threads_number == 0 {
             None
@@ -78,6 +82,7 @@ impl SharedBufferUploader {
                 })
             },
             compaction_executor: compaction_executor.as_ref().cloned(),
+            table_id_to_slice_transform: table_id_to_slice_transform.clone(),
         });
         let remote_object_store_compactor_context = Arc::new(CompactorContext {
             options: options.clone(),
@@ -87,6 +92,7 @@ impl SharedBufferUploader {
             is_share_buffer_compact: true,
             sstable_id_generator: get_remote_sstable_id_generator(hummock_meta_client.clone()),
             compaction_executor: compaction_executor.as_ref().cloned(),
+            table_id_to_slice_transform: table_id_to_slice_transform.clone(),
         });
         Self {
             options,
