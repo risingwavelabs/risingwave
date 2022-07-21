@@ -88,7 +88,7 @@ pub async fn handle_drop_schema(
         }
     };
 
-    if schema.owner() != session.user_name().to_string() {
+    if schema.owner() != *session.user_name() {
         let object = Object::SchemaId(schema_id);
         let action = Action::Delete;
         check_privilege(&session, object, action)?;

@@ -61,7 +61,7 @@ pub async fn handle_create_schema(
         (db.id(), db.owner())
     };
 
-    if db_owner != session.user_name().to_string() {
+    if db_owner != *session.user_name() {
         let object = Object::DatabaseId(db_id);
         let action = Action::Create;
         check_privilege(&session, object, action)?;

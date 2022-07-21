@@ -32,7 +32,7 @@ pub async fn handle_drop_source(context: OptimizerContext, name: ObjectName) -> 
         .get_source_by_name(session.database(), &schema_name, &source_name)?
         .clone();
 
-    if source.owner != session.user_name().to_string() {
+    if source.owner != *session.user_name() {
         let object = Object::SourceId(source.id);
         let action = Action::Delete;
         check_privilege(&session, object, action)?;

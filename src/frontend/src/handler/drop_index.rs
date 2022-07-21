@@ -37,7 +37,7 @@ pub async fn handle_drop_index(
         let reader = catalog_reader.read_guard();
         let table = reader.get_table_by_name(session.database(), &schema_name, &table_name)?;
 
-        if table.owner != session.user_name().to_string() {
+        if table.owner != *session.user_name() {
             let object = Object::TableId(table.id().table_id());
             let action = Action::Delete;
             check_privilege(&session, object, action)?;

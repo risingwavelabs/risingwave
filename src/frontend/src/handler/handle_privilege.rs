@@ -105,7 +105,7 @@ pub(crate) fn resolve_privilege(
             let (schema_name, table_name) = Binder::resolve_table_name(table_name.clone())?;
             let table_catalog =
                 reader.get_table_by_name(session.database(), &schema_name, &table_name)?;
-            is_owner = table_catalog.owner == session.user_name().to_string();
+            is_owner = table_catalog.owner == *session.user_name();
             ProstObject::TableId(table_catalog.id().table_id())
         }
         Statement::Update { table, .. } => {
@@ -117,7 +117,7 @@ pub(crate) fn resolve_privilege(
             let (schema_name, table_name) = Binder::resolve_table_name(table_name)?;
             let table_catalog =
                 reader.get_table_by_name(session.database(), &schema_name, &table_name)?;
-            is_owner = table_catalog.owner == session.user_name().to_string();
+            is_owner = table_catalog.owner == *session.user_name();
             ProstObject::TableId(table_catalog.id().table_id())
         }
         _ => unreachable!(),

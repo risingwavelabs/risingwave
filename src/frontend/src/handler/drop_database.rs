@@ -67,7 +67,7 @@ pub async fn handle_drop_database(
         (database.id(), database.owner())
     };
 
-    if session.user_name().to_string() != owner {
+    if *session.user_name() != owner {
         return Err(ErrorCode::AuthError("Do not have the privilege".to_string()).into());
     }
 

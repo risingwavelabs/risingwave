@@ -169,7 +169,7 @@ pub async fn handle_create_index(
         (graph, table)
     };
 
-    if table.owner != session.user_name().to_string() {
+    if table.owner != *session.user_name() {
         let object = Object::TableId(table.id);
         let action = Action::Select;
         check_privilege(&session, object, action)?;

@@ -57,7 +57,7 @@ pub async fn handle_create_sink(
         let catalog_reader = session.env().catalog_reader().read_guard();
 
         let schema = catalog_reader.get_schema_by_name(session.database(), &schema_name)?;
-        if schema.owner() != session.user_name().to_string() {
+        if schema.owner() != *session.user_name() {
             let object = Object::SchemaId(schema.id());
             let action = Action::Create;
             check_privilege(&session, object, action)?;

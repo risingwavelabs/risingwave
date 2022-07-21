@@ -49,7 +49,7 @@ pub fn gen_create_mv_plan(
     {
         let object = Object::SchemaId(schema_id);
         let action = Action::Create;
-        check_privilege(&session, object, action)?;
+        check_privilege(session, object, action)?;
     }
 
     let bound = {
@@ -111,7 +111,7 @@ pub async fn handle_create_mv(
         (table, graph)
     };
 
-    if table.owner != session.user_name().to_string() {
+    if table.owner != *session.user_name() {
         let object = Object::TableId(table.id);
         let action = Action::Select;
         check_privilege(&session, object, action)?;
