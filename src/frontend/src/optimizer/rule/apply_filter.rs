@@ -99,13 +99,17 @@ impl ExprRewriter for Rewriter {
         &mut self,
         correlated_input_ref: CorrelatedInputRef,
     ) -> ExprImpl {
-        self.has_correlated_input_ref =
-            correlated_input_ref.get_correlated_id() == self.correlated_id;
-        InputRef::new(
-            self.index_mapping.map(correlated_input_ref.index()),
-            correlated_input_ref.return_type(),
-        )
-        .into()
+        let found = correlated_input_ref.get_correlated_id() == self.correlated_id;
+        self.has_correlated_input_ref |= found;
+        if found {
+            InputRef::new(
+                self.index_mapping.map(correlated_input_ref.index()),
+                correlated_input_ref.return_type(),
+            )
+                .into()
+        } else {
+            correlated_input_ref.into()
+        }
     }
 
     fn rewrite_input_ref(&mut self, input_ref: InputRef) -> ExprImpl {
