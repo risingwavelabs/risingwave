@@ -224,45 +224,10 @@ impl<S: StateStore> StateTable<S> {
         store: S,
         vnodes: Option<Arc<Bitmap>>,
     ) -> Self {
-        let table_columns = table_catalog
-            .columns
-            .iter()
-            .map(|col| col.column_desc.as_ref().unwrap().into())
-            .collect();
-        let order_types = table_catalog
-            .order_key
-            .iter()
-            .map(|col_order| {
-                OrderType::from_prost(
-                    &risingwave_pb::plan_common::OrderType::from_i32(col_order.order_type).unwrap(),
-                )
-            })
-            .collect();
-        let dist_key_indices = table_catalog
-            .distribution_key
-            .iter()
-            .map(|dist_index| *dist_index as usize)
-            .collect();
-        let pk_indices = table_catalog
-            .order_key
-            .iter()
-            .map(|col_order| col_order.index as usize)
-            .collect();
-        let distribution = match vnodes {
-            Some(vnodes) => Distribution {
-                dist_key_indices,
-                vnodes,
-            },
-            None => Distribution::fallback(),
-        };
-        StateTable::new_with_distribution(
-            store,
-            TableId::new(table_catalog.id),
-            table_columns,
-            order_types,
-            pk_indices,
-            distribution,
-        )
+        Self {
+            mem_table: MemTable::new(),
+            storage_table: StorageTableBase::from_table_catalog(table_catalog, store, vnodes),
+        }
     }
 }
 

@@ -34,11 +34,12 @@ impl<'a, R: Rng> SqlGenerator<'a, R> {
     /// A relation specified in the FROM clause.
     pub(crate) fn gen_from_relation(&mut self) -> TableWithJoins {
         match self.rng.gen_range(0..=9) {
-            0..=9 => self.gen_simple_table(),
+            0..=7 => self.gen_simple_table(),
+            8..=8 => self.gen_time_window_func(),
             // TODO: Enable after resolving: <https://github.com/singularity-data/risingwave/issues/2771>.
-            10..=10 => self.gen_equijoin_clause(),
+            9..=9 => self.gen_equijoin_clause(),
             // TODO: Currently `gen_subquery` will cause panic due to some wrong assertions.
-            11..=11 => self.gen_subquery(),
+            10..=10 => self.gen_subquery(),
             _ => unreachable!(),
         }
     }
@@ -53,12 +54,12 @@ impl<'a, R: Rng> SqlGenerator<'a, R> {
     }
 
     fn gen_simple_table_factor(&mut self) -> (TableFactor, Vec<Column>) {
-        let alias = format!("t{}", self.bound_relations.len());
+        let alias = self.gen_table_name_with_prefix("t");
         let mut table = self.tables.choose(&mut self.rng).unwrap().clone();
         let table_factor = TableFactor::Table {
             name: ObjectName(vec![Ident::new(&table.name)]),
             alias: Some(TableAlias {
-                name: Ident::new(alias.clone()),
+                name: alias.as_str().into(),
                 columns: vec![],
             }),
             args: vec![],
@@ -69,9 +70,16 @@ impl<'a, R: Rng> SqlGenerator<'a, R> {
         (table_factor, columns)
     }
 
+    fn gen_table_factor(&mut self) -> (TableFactor, Vec<Column>) {
+        let current_context = self.new_local_context();
+        let factor = self.gen_table_factor_inner();
+        self.restore_context(current_context);
+        factor
+    }
+
     /// Generates a table factor, and provides bound columns.
     /// Generated column names should be qualified by table name.
-    fn gen_table_factor(&mut self) -> (TableFactor, Vec<Column>) {
+    fn gen_table_factor_inner(&mut self) -> (TableFactor, Vec<Column>) {
         // TODO: TableFactor::Derived, TableFactor::TableFunction, TableFactor::NestedJoin
         self.gen_simple_table_factor()
     }
@@ -93,6 +101,9 @@ impl<'a, R: Rng> SqlGenerator<'a, R> {
                 }
             }
         }
+        if available_join_on_columns.is_empty() {
+            return self.gen_simple_table();
+        }
         let i = self.rng.gen_range(0..available_join_on_columns.len());
         let (left_column, right_column) = available_join_on_columns[i];
         let join_on_expr =
@@ -111,7 +122,7 @@ impl<'a, R: Rng> SqlGenerator<'a, R> {
 
     fn gen_subquery(&mut self) -> TableWithJoins {
         let (subquery, columns) = self.gen_query();
-        let alias = format!("t{}", self.bound_relations.len());
+        let alias = self.gen_table_name_with_prefix("sq");
         let table = Table {
             name: alias.clone(),
             columns,

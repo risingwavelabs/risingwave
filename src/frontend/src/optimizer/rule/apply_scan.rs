@@ -22,8 +22,8 @@ use crate::expr::{Expr, ExprImpl, ExprType, FunctionCall, InputRef};
 use crate::optimizer::plan_node::{LogicalJoin, LogicalProject};
 use crate::optimizer::PlanRef;
 
-pub struct ApplyScan {}
-impl Rule for ApplyScan {
+pub struct ApplyScanRule {}
+impl Rule for ApplyScanRule {
     fn apply(&self, plan: PlanRef) -> Option<PlanRef> {
         let apply = plan.as_logical_apply()?;
         let (left, right, on, join_type, correlated_indices) = apply.clone().decompose();
@@ -77,9 +77,9 @@ impl Rule for ApplyScan {
     }
 }
 
-impl ApplyScan {
+impl ApplyScanRule {
     pub fn create() -> BoxedRule {
-        Box::new(ApplyScan {})
+        Box::new(ApplyScanRule {})
     }
 
     /// Check whether the `func_call` is like v1 = v2, in which v1 and v2 belong respectively to

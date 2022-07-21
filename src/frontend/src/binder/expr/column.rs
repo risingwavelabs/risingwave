@@ -46,7 +46,7 @@ impl Binder {
 
         // Try to find a correlated column in `upper_contexts`, starting from the innermost context.
         let mut err = ErrorCode::ItemNotFound(format!("Invalid column: {}", column_name)).into();
-        for (i, context) in self.upper_contexts.iter().rev().enumerate() {
+        for (i, (context, _)) in self.upper_subquery_contexts.iter().rev().enumerate() {
             // `depth` starts from 1.
             let depth = i + 1;
             match context.get_column_binding_index(&table_name, &column_name) {

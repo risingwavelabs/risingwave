@@ -12,7 +12,7 @@ FROM (
         bid B
     WHERE 
         A.id = B.auction AND 
-        B.dateTime BETWEEN A.dateTime AND A.expires
+        B.date_time BETWEEN A.date_time AND A.expires
     GROUP BY 
         A.id, A.category
     ) Q

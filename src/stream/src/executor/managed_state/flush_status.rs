@@ -15,7 +15,7 @@
 // This module should be deleted after the string_agg refactor
 #![allow(dead_code)]
 
-use madsim::collections::btree_map;
+use std::collections::btree_map;
 
 /// Represents an entry in the `flush_buffer`. No `FlushStatus` associated with a key means no-op.
 ///
