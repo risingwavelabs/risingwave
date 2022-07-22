@@ -60,7 +60,7 @@ impl From<&Vis> for Vis {
     fn from(vis: &Vis) -> Self {
         match vis {
             Vis::Bitmap(b) => b.clone().into(),
-            Vis::Compact(c) => c.clone().into(),
+            Vis::Compact(c) => (*c).into(),
         }
     }
 }

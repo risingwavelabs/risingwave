@@ -52,7 +52,7 @@ impl ProjectExecutor {
     async fn do_execute(mut self: Box<Self>) {
         #[for_await]
         for data_chunk in self.child.execute() {
-            let data_chunk: DataChunk = data_chunk?;
+            let data_chunk = data_chunk?;
             // let data_chunk = data_chunk.compact()?;
             let arrays: Vec<Column> = self
                 .expr
