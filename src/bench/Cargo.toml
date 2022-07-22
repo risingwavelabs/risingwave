@@ -26,6 +26,14 @@ risingwave_meta = { path = "../meta", features = ["test"] }
 risingwave_pb = { path = "../prost" }
 risingwave_rpc_client = { path = "../rpc_client" }
 risingwave_storage = { path = "../storage" }
+risingwave_object_store = { path = "../object_store"}
+rusoto_core = "0.47"
+rusoto_credential = "0.47"
+rusoto_s3 = "0.47"
+
+aws-config = { version = "0.15", default-features = false, features = ["rt-tokio", "native-tls"] }
+aws-sdk-s3 = { version = "0.15", default-features = false, features = ["rt-tokio", "native-tls"] }
+aws-smithy-http = "0.45"
 serde = { version = "1", features = ["derive"] }
 tokio = { version = "=0.2.0-alpha.4", package = "madsim-tokio", features = [
     "fs",
@@ -46,3 +54,11 @@ path = "ss_bench/main.rs"
 [[bin]]
 name = "file-cache-bench"
 path = "file_cache_bench/main.rs"
+
+[[bin]]
+name = "s3-bench"
+path = "s3_bench/main.rs"
+
+[[bin]]
+name = "s3-bench-main"
+path = "s3_bench/main1.rs"
