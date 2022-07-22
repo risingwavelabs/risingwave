@@ -26,7 +26,7 @@ use risingwave_pb::hummock::LevelType;
 use super::iterator::{
     BackwardUserIterator, ConcatIteratorInner, DirectedUserIterator, UserIterator,
 };
-use super::utils::{search_sst_idx, validate_epoch};
+use super::utils::{can_concat, search_sst_idx, validate_epoch};
 use super::{BackwardSSTableIterator, HummockStorage, SSTableIterator, SSTableIteratorType};
 use crate::error::StorageResult;
 use crate::hummock::iterator::{
@@ -130,6 +130,7 @@ impl HummockStorage {
                 continue;
             }
             if level.level_type == LevelType::Nonoverlapping as i32 {
+                debug_assert!(can_concat(&table_infos));
                 let start_table_idx = match key_range.start_bound() {
                     Included(key) | Excluded(key) => search_sst_idx(&table_infos, key),
                     _ => 0,

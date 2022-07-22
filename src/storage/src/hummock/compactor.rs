@@ -54,6 +54,7 @@ use crate::hummock::shared_buffer::shared_buffer_uploader::UploadTaskPayload;
 use crate::hummock::shared_buffer::{build_ordered_merge_iter, UncommittedData};
 use crate::hummock::sstable_store::SstableStoreRef;
 use crate::hummock::state_store::ForwardIter;
+use crate::hummock::utils::can_concat;
 use crate::hummock::vacuum::Vacuum;
 use crate::hummock::{CachePolicy, HummockError};
 use crate::monitor::{StateStoreMetrics, StoreLocalStatistic};
@@ -775,6 +776,7 @@ impl Compactor {
             // }
 
             if level.level_type == LevelType::Nonoverlapping as i32 {
+                debug_assert!(can_concat(&level.table_infos.iter().collect_vec()));
                 table_iters.push(Box::new(ConcatIterator::new(
                     level.table_infos.clone(),
                     self.context.sstable_store.clone(),
