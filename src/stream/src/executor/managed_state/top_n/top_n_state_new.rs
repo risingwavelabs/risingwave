@@ -70,14 +70,13 @@ impl<S: StateStore> ManagedTopNStateNew<S> {
                 ColumnDesc::unnamed(ColumnId::from(id as i32), data_type.clone())
             })
             .collect::<Vec<_>>();
-        let mut state_table = RowBasedStateTable::new_without_distribution(
+        let state_table = RowBasedStateTable::new_without_distribution(
             store,
             table_id,
             column_descs,
             order_types,
             pk_indices,
         );
-        state_table.disable_sanity_check();
         Self {
             state_table,
             total_count,
