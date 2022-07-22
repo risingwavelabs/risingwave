@@ -14,6 +14,7 @@
 
 use std::collections::HashSet;
 
+use itertools::Itertools;
 use risingwave_pb::hummock::{HummockVersion, HummockVersionDelta, Level, SstableInfo};
 
 use crate::prost_key_range::KeyRangeExt;
@@ -31,6 +32,7 @@ pub trait HummockVersionExt {
     ///
     /// Levels belonging to the same compaction group retain their relative order.
     fn get_combined_levels(&self) -> Vec<&Level>;
+    fn get_sst_ids(&self) -> Vec<u64>;
     fn apply_compact_ssts(
         levels: &mut Vec<Level>,
         delete_sst_levels: &[u32],
@@ -67,6 +69,14 @@ impl HummockVersionExt for HummockVersion {
             combined_levels.extend(level.levels.iter());
         }
         combined_levels
+    }
+
+    fn get_sst_ids(&self) -> Vec<u64> {
+        self.levels
+            .iter()
+            .flat_map(|(_, l)| &l.levels)
+            .flat_map(|level| level.table_infos.iter().map(|table_info| table_info.id))
+            .collect_vec()
     }
 
     fn apply_compact_ssts(

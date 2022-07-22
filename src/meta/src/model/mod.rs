@@ -456,10 +456,8 @@ impl<'a, K: Ord + Debug, V: Clone> BTreeMapTransaction<'a, K, V> {
             None => None,
         }
     }
-}
 
-impl<'a, K: Ord, V: Transactional> ValTransaction for BTreeMapTransaction<'a, K, V> {
-    fn commit(self) {
+    pub fn commit_memory(self) {
         // Apply each op stored in the staging to original tree.
         for (k, op) in self.staging {
             match op {
@@ -471,6 +469,14 @@ impl<'a, K: Ord, V: Transactional> ValTransaction for BTreeMapTransaction<'a, K,
                 }
             }
         }
+    }
+}
+
+impl<'a, K: Ord + Debug, V: Transactional + Clone> ValTransaction
+    for BTreeMapTransaction<'a, K, V>
+{
+    fn commit(self) {
+        self.commit_memory();
     }
 
     fn apply_to_txn(&self, txn: &mut Transaction) -> Result<()> {

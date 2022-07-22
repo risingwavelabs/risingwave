@@ -17,8 +17,11 @@ use std::sync::Arc;
 mod operations;
 mod utils;
 
+use std::collections::HashMap;
+
 use clap::Parser;
 use operations::*;
+use parking_lot::RwLock;
 use risingwave_common::config::StorageConfig;
 use risingwave_common::monitor::Print;
 use risingwave_meta::hummock::test_utils::setup_compute_env;
@@ -165,12 +168,15 @@ async fn main() {
         hummock_manager_ref.clone(),
         worker_node.id,
     ));
+
+    let table_id_to_slice_transform = Arc::new(RwLock::new(HashMap::new()));
     let state_store = StateStoreImpl::new(
         &opts.store,
         config.clone(),
         mock_hummock_meta_client.clone(),
         state_store_stats.clone(),
         object_store_stats.clone(),
+        table_id_to_slice_transform.clone(),
     )
     .await
     .expect("Failed to get state_store");
@@ -189,6 +195,7 @@ async fn main() {
                 compaction_executor: Some(Arc::new(CompactionExecutor::new(Some(
                     config.share_buffer_compaction_worker_threads_number as usize,
                 )))),
+                table_id_to_slice_transform: table_id_to_slice_transform.clone(),
             }),
             hummock.local_version_manager(),
         ));
