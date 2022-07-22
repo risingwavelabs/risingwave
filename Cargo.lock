@@ -183,6 +183,15 @@ dependencies = [
 ]
 
 [[package]]
+name = "async-ringbuffer"
+version = "0.5.5"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "a8560d41bc860fe61e04b9825e56ee96969dbbe1c3e76e4d59b204931413ff9c"
+dependencies = [
+ "futures-io",
+]
+
+[[package]]
 name = "async-stream"
 version = "0.3.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -2603,11 +2612,10 @@ dependencies = [
 [[package]]
 name = "madsim"
 version = "0.2.0-alpha.4"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "08eb4e2dd6827611e1c571149b244f0da5cfc3115d08d56d29d0c2f34d502610"
 dependencies = [
  "ahash",
  "async-channel",
+ "async-ringbuffer",
  "async-task",
  "bincode",
  "bytes",
@@ -2627,8 +2635,6 @@ dependencies = [
 [[package]]
 name = "madsim-macros"
 version = "0.2.0-alpha.4"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "0f9cd5b09aefa5d86980ded42f8dcfac9bcc28429a5304c6dd8ce8ed563b6ca1"
 dependencies = [
  "darling 0.14.1",
  "proc-macro2",
@@ -2639,18 +2645,36 @@ dependencies = [
 [[package]]
 name = "madsim-tokio"
 version = "0.2.0-alpha.4"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "e2f69c0f9c53088e825c02aa678f66f90c4329570e51d78fecb2b58c38fd8787"
 dependencies = [
+ "futures-lite",
  "madsim",
  "tokio",
 ]
 
 [[package]]
+name = "madsim-tokio-postgres"
+version = "0.7.6"
+dependencies = [
+ "async-trait",
+ "byteorder",
+ "bytes",
+ "fallible-iterator",
+ "futures",
+ "log",
+ "madsim-tokio",
+ "parking_lot",
+ "percent-encoding",
+ "phf",
+ "pin-project-lite",
+ "postgres-protocol",
+ "postgres-types",
+ "socket2",
+ "tokio-util",
+]
+
+[[package]]
 name = "madsim-tonic"
 version = "0.2.0-alpha.4"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "6260fcb2f7ee2cbb4b492217cdaa03d2c3423c3af8bace179b4444be42e94b64"
 dependencies = [
  "async-stream",
  "futures",
@@ -4693,6 +4717,20 @@ dependencies = [
 ]
 
 [[package]]
+name = "risingwave_simulation"
+version = "0.1.0"
+dependencies = [
+ "clap 3.2.13",
+ "madsim",
+ "madsim-tokio",
+ "madsim-tokio-postgres",
+ "risingwave_compactor",
+ "risingwave_compute",
+ "risingwave_frontend",
+ "risingwave_meta",
+]
+
+[[package]]
 name = "risingwave_source"
 version = "0.1.10"
 dependencies = [
@@ -5795,6 +5833,7 @@ checksum = "cc463cd8deddc3770d20f9852143d50bf6094e640b485cb2e189a2099085ff45"
 dependencies = [
  "bytes",
  "futures-core",
+ "futures-io",
  "futures-sink",
  "pin-project-lite",
  "tokio",

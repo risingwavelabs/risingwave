@@ -51,3 +51,8 @@ rpath = false
 
 [profile.release]
 debug = true
+
+[patch.crates-io]
+madsim = { path = "../madsim/madsim" }
+madsim-tokio = { path = "../madsim/madsim-tokio" }
+madsim-tonic = { path = "../madsim/madsim-tonic" }

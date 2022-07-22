@@ -12,3 +12,5 @@ risingwave_compute = { path = "../../compute" }
 risingwave_frontend = { path = "../../frontend" }
 risingwave_meta = { path = "../../meta" }
 tokio = { version = "=0.2.0-alpha.4", package = "madsim-tokio" }
+# tokio-postgres = { version = "0.7", package = "madsim-tokio-postgres" }
+tokio-postgres = { path = "../../../../madsim/madsim-tokio-postgres", package = "madsim-tokio-postgres" }
