@@ -23,8 +23,9 @@ use risingwave_frontend::session::{OptimizerContext, OptimizerContextRef, Sessio
 use risingwave_frontend::test_utils::LocalFrontend;
 use risingwave_frontend::{handler, FrontendOpts};
 use risingwave_sqlparser::ast::Statement;
-use risingwave_sqlsmith::{mview_sql_gen, parse_sql, sql_gen, Table};
-use risingwave_sqlsmith::create_table_statement_to_table;
+use risingwave_sqlsmith::{
+    create_table_statement_to_table, mview_sql_gen, parse_sql, sql_gen, Table,
+};
 
 /// Executes sql queries
 /// It captures panics so it can recover and print failing sql query.
@@ -51,10 +52,13 @@ fn get_seed_table_sql() -> String {
 async fn create_tables(session: Arc<SessionImpl>, rng: &mut impl Rng) -> Vec<Table> {
     let sql = get_seed_table_sql();
     let statements = parse_sql(&sql);
-    let mut tables = statements.iter().map(create_table_statement_to_table).collect_vec();
+    let mut tables = statements
+        .iter()
+        .map(create_table_statement_to_table)
+        .collect_vec();
 
     for s in statements.into_iter() {
-        let create_sql = stmt.to_string();
+        let create_sql = s.to_string();
         handle(session.clone(), s, create_sql).await;
     }
 

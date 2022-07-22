@@ -18,11 +18,11 @@ use std::time::Duration;
 use clap::Parser as ClapParser;
 use itertools::Itertools;
 use rand::Rng;
-use risingwave_sqlparser::ast::Statement;
-use risingwave_sqlsmith::{mview_sql_gen, parse_sql, print_function_table, sql_gen, Table};
+use risingwave_sqlsmith::{
+    create_table_statement_to_table, mview_sql_gen, parse_sql, print_function_table, sql_gen, Table,
+};
 use tokio_postgres::error::{DbError, Error as PgError, SqlState};
 use tokio_postgres::NoTls;
-use risingwave_sqlsmith::create_table_statement_to_table;
 
 #[derive(ClapParser, Debug, Clone)]
 #[clap(about, version, author)]
@@ -89,7 +89,10 @@ async fn create_tables(
 
     let sql = get_seed_table_sql(opt);
     let statements = parse_sql(&sql);
-    let mut tables = statements.iter().map(create_table_statement_to_table).collect_vec();
+    let mut tables = statements
+        .iter()
+        .map(create_table_statement_to_table)
+        .collect_vec();
 
     for stmt in statements.iter() {
         let create_sql = stmt.to_string();
