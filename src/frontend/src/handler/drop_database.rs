@@ -68,7 +68,7 @@ pub async fn handle_drop_database(
     };
 
     if *session.user_name() != owner {
-        return Err(ErrorCode::AuthError("Do not have the privilege".to_string()).into());
+        return Err(ErrorCode::PermissionDenied("Do not have the privilege".to_string()).into());
     }
 
     let catalog_writer = session.env().catalog_writer();

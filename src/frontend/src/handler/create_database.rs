@@ -13,7 +13,7 @@
 // limitations under the License.
 
 use pgwire::pg_response::{PgResponse, StatementType};
-use risingwave_common::error::ErrorCode::AuthError;
+use risingwave_common::error::ErrorCode::PermissionDenied;
 use risingwave_common::error::Result;
 use risingwave_sqlparser::ast::ObjectName;
 
@@ -34,10 +34,10 @@ pub async fn handle_create_database(
         let reader = user_reader.read_guard();
         if let Some(info) = reader.get_user_by_name(session.user_name()) {
             if !info.can_create_db && !info.is_supper {
-                return Err(AuthError("Do not have the privilege".to_string()).into());
+                return Err(PermissionDenied("Do not have the privilege".to_string()).into());
             }
         } else {
-            return Err(AuthError("Session user is invalid".to_string()).into());
+            return Err(PermissionDenied("Session user is invalid".to_string()).into());
         }
     }
 

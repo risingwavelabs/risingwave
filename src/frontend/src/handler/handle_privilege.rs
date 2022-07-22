@@ -14,7 +14,7 @@
 
 use pgwire::pg_response::{PgResponse, StatementType};
 use risingwave_common::ensure;
-use risingwave_common::error::ErrorCode::AuthError;
+use risingwave_common::error::ErrorCode::PermissionDenied;
 use risingwave_common::error::{ErrorCode, Result};
 use risingwave_pb::user::grant_privilege::{
     Action as ProstAction, ActionWithGrantOption, Object as ProstObject,
@@ -146,10 +146,10 @@ pub(crate) fn check_privilege(
                     .any(|ao| ao.action == action as i32)
         });
         if !has_privilege {
-            return Err(AuthError("Do not have the privilege".to_string()).into());
+            return Err(PermissionDenied("Do not have the privilege".to_string()).into());
         }
     } else {
-        return Err(AuthError("Session user is invalid".to_string()).into());
+        return Err(PermissionDenied("Session user is invalid".to_string()).into());
     }
     Ok(())
 }
