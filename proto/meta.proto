@@ -201,8 +201,15 @@ message ResumeRequest {}
 
 message ResumeResponse {}
 
+message GetClusterInfoRequest {}
+
+message GetClusterInfoResponse {
+  repeated TableFragments table_fragments = 1;
+}
+
 service ScaleService {
   // TODO(Kexiang): delete them when config change interface is finished
   rpc Pause(PauseRequest) returns (PauseResponse);
   rpc Resume(ResumeRequest) returns (ResumeResponse);
+  rpc GetClusterInfo(GetClusterInfoRequest) returns (GetClusterInfoResponse);
 }
