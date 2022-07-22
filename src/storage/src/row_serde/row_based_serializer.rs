@@ -63,8 +63,4 @@ impl RowSerialize for RowBasedSerializer {
         let res = vec![Some((key, value_bytes))];
         Ok(res)
     }
-
-    // fn column_ids(&self) -> &[risingwave_common::catalog::ColumnId] {
-    //     unreachable!()
-    // }
 }

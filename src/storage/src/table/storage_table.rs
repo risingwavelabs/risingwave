@@ -322,8 +322,8 @@ impl<S: StateStore, RS: RowSerde, const T: AccessType> StorageTableBase<S, RS, T
         &self.pk_indices
     }
 
-    pub(super) fn column_ids(&self) -> Vec<ColumnId> {
-        self.table_columns.iter().map(|t| t.column_id).collect_vec()
+    pub(super) fn column_ids(&self) -> impl Iterator<Item = ColumnId> + '_ {
+        self.table_columns.iter().map(|t| t.column_id)
     }
 }
 
