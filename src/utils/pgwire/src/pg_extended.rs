@@ -138,7 +138,7 @@ impl PgStatement {
         session: Arc<SM::Session>,
         portal_name: String,
         params: &[Bytes],
-        result_format: Vec<i16>
+        result_format: bool
     ) -> Result<PgPortal, ()> {
         let statement = cstr_to_str(&self.query_string).unwrap().to_owned();
 
@@ -198,7 +198,7 @@ pub struct PgPortal {
     result_cache: Option<IntoIter<Row>>,
     stmt_type: Option<StatementType>,
     row_description: Vec<PgFieldDescriptor>,
-    result_format:Vec<i16>,
+    result_format:bool,
 }
 
 impl PgPortal {
@@ -213,6 +213,10 @@ impl PgPortal {
 
     pub fn row_desc(&self) -> Vec<PgFieldDescriptor> {
         self.row_description.clone()
+    }
+
+    pub fn result_format(&self) -> bool {
+        self.result_format
     }
 
     pub async fn execute<SM: SessionManager>(
@@ -259,7 +263,7 @@ impl PgPortal {
             self.stmt_type.unwrap(),
             data_set.len() as _,
             data_set,
-            vec![],
+            self.row_description.clone(),
             row_end,
         ))
     }

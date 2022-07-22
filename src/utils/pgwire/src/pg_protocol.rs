@@ -31,6 +31,7 @@ use crate::pg_message::{
 };
 use crate::pg_response::PgResponse;
 use crate::pg_server::{Session, SessionManager, UserAuthenticator};
+use crate::types::Row;
 
 /// The state machine for each psql connection.
 /// Read pg messages from tcp stream and write results back.
@@ -483,23 +484,37 @@ where
     async fn process_response_results(
         &mut self,
         res: PgResponse,
-        extended: bool,
+
+        // extended:None indicates simple query mode.
+        // extended:Some(result_format_code) indicates extended query mode.
+        extended: Option<bool>,
     ) -> Result<(), IoError> {
         // The possible responses to Execute are the same as those described above for queries
         // issued via simple query protocol, except that Execute doesn't cause ReadyForQuery or
         // RowDescription to be issued.
         // Quoted from: https://www.postgresql.org/docs/current/protocol-flow.html#PROTOCOL-FLOW-EXT-QUERY
-        if !extended {
-            self.stream
-                .write(&BeMessage::RowDescription(&res.get_row_desc()))
+        if extended.is_none() {
+            self.stream.write(&BeMessage::RowDescription(&res.get_row_desc()))
                 .await?;
         }
 
         let mut rows_cnt = 0;
-        let iter = res.iter();
-        for val in iter {
-            self.stream.write(&BeMessage::DataRow(val)).await?;
-            rows_cnt += 1;
+
+        // Simple query mode(default format: 'TEXT') or result_format is 'TEXT'.
+        if extended.is_none() || extended.unwrap() == false {
+            let iter = res.iter();
+            for val in iter {
+                self.stream.write(&BeMessage::DataRow(val)).await?;
+                rows_cnt += 1;
+            }
+        } else {
+            let iter = res.iter();
+            let row_description = res.get_row_desc();
+            for val in iter {
+                let val = Self::covert_to_binary_format(val, &row_description);
+                self.stream.write(&BeMessage::BinaryRow(&val)).await?;
+                rows_cnt += 1;
+            }
         }
 
         // If has rows limit, it must be extended mode.
@@ -509,13 +524,12 @@ where
         // to complete the operation. The CommandComplete message indicating completion of the
         // source SQL command is not sent until the portal's execution is completed.
         // Quote from: https://www.postgresql.org/docs/current/protocol-flow.html#PROTOCOL-FLOW-EXT-QUERY:~:text=Once%20a%20portal,ErrorResponse%2C%20or%20PortalSuspended
-        if !extended || res.is_row_end() {
-            self.stream
-                .write_no_flush(&BeMessage::CommandComplete(BeCommandCompleteMessage {
-                    stmt_type: res.get_stmt_type(),
-                    notice: res.get_notice(),
-                    rows_cnt,
-                }))?;
+        if extended.is_none() || res.is_row_end() {
+            self.stream.write_no_flush(&BeMessage::CommandComplete(BeCommandCompleteMessage {
+                stmt_type: res.get_stmt_type(),
+                notice: res.get_notice(),
+                rows_cnt,
+            }))?;
         } else {
             self.stream.write(&BeMessage::PortalSuspended).await?;
         }
@@ -590,5 +604,41 @@ where
         self.write_buf.clear();
         self.stream.flush().await?;
         Ok(())
+    }
+
+    /// covert_the row to binary format.
+    fn covert_to_binary_format(row: &Row, row_desc: &Vec<PgFieldDescriptor>) -> Vec<Option<Bytes>> {
+        assert_eq!(row.len(), row_desc.len());
+
+        let len = row.len();
+        let mut res = Vec::with_capacity(len);
+
+        for idx in 0..len {
+            let value = &row[idx];
+            let type_oid = row_desc[idx].get_type_oid();
+
+            match value {
+                None => res.push(None),
+                Some(value) => match type_oid {
+                    TypeOid::Boolean => todo!(),
+                    TypeOid::BigInt => todo!(),
+                    TypeOid::SmallInt => todo!(),
+                    TypeOid::Int => {
+                        let value: i32 = value.parse().unwrap();
+                        res.push(Some(value.to_be_bytes().to_vec().into()));
+                    }
+                    TypeOid::Float4 => todo!(),
+                    TypeOid::Float8 => todo!(),
+                    TypeOid::Varchar => res.push(Some(value.clone().into())),
+                    TypeOid::Date => todo!(),
+                    TypeOid::Time => todo!(),
+                    TypeOid::Timestamp => todo!(),
+                    TypeOid::Timestampz => todo!(),
+                    TypeOid::Decimal => todo!(),
+                    TypeOid::Interval => todo!(),
+                },
+            }
+        }
+        res
     }
 }

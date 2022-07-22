@@ -72,7 +72,12 @@ pub struct FeQueryMessage {
 #[derive(Debug)]
 pub struct FeBindMessage {
     pub format_codes: Vec<i16>,
-    pub result_format_codes: Vec<i16>,
+
+    // result_format_code:
+    //  false: text
+    //  true: binary
+    pub result_format_code: bool,
+    
     pub params: Vec<Bytes>,
     pub portal_name: Bytes,
     pub statement_name: Bytes,
@@ -152,12 +157,20 @@ impl FeBindMessage {
             .collect();
         // Read ResultFormatCode
         let len = buf.get_i16();
-        let result_format_codes = (0..len).map(|_| buf.get_i16()).collect();
+
+        assert!(len==0||len==1,"Only support default format(len==0) or uniform format(len==1), can't support mix format now.");
+
+        let result_format_code = if len == 0 {
+            //default format:text
+            false
+        }else{
+            buf.get_i16() == 1
+        };
 
         Ok(FeMessage::Bind(FeBindMessage {
             format_codes,
             params,
-            result_format_codes,
+            result_format_code,
             portal_name,
             statement_name,
         }))
@@ -321,6 +334,7 @@ pub enum BeMessage<'a> {
     ParameterDescription(&'a [TypeOid]),
     NoData,
     DataRow(&'a Row),
+    BinaryRow(&'a Vec<Option<Bytes>>),
     ParameterStatus(BeParameterStatusMessage<'a>),
     ReadyForQuery,
     RowDescription(&'a [PgFieldDescriptor]),
@@ -466,6 +480,23 @@ impl<'a> BeMessage<'a> {
                         if let Some(val) = val_opt {
                             buf.put_u32(val.len() as u32);
                             buf.put_slice(val.as_bytes());
+                        } else {
+                            buf.put_i32(-1);
+                        }
+                    }
+                    Ok(())
+                })
+                .unwrap();
+            }
+
+            BeMessage::BinaryRow(vals) => {
+                buf.put_u8(b'D');
+                write_body(buf, |buf| {
+                    buf.put_u16(vals.len() as u16); // num of cols
+                    for val_opt in vals.iter() {
+                        if let Some(val) = val_opt {
+                            buf.put_u32(val.len() as u32);
+                            buf.put_slice(val);
                         } else {
                             buf.put_i32(-1);
                         }

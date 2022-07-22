@@ -100,12 +100,6 @@ impl PgResponse {
         row_desc: Vec<PgFieldDescriptor>,
         row_end: bool,
     ) -> Self {
-        assert_eq!(row_desc.len(), {
-            match values.first(){
-                Some(row) => row.len(),
-                None => 0,
-            }
-        });
         Self {
             stmt_type,
             row_cnt,
