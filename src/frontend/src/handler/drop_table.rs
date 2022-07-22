@@ -20,7 +20,7 @@ use risingwave_pb::stream_plan::source_node::SourceType;
 use risingwave_pb::user::grant_privilege::{Action, Object};
 use risingwave_sqlparser::ast::ObjectName;
 
-use super::handle_privilege::check_privilege;
+use super::privilege::check_privilege;
 use crate::binder::Binder;
 use crate::catalog::catalog_service::CatalogReader;
 use crate::session::{OptimizerContext, SessionImpl};
@@ -60,7 +60,7 @@ pub async fn handle_drop_table(
         if table.owner != *session.user_name() {
             let object = Object::TableId(table.id().table_id());
             let action = Action::Delete;
-            check_privilege(&session, object, action)?;
+            check_privilege(&session, &object, action)?;
         }
 
         // If associated source is `None`, then it is a normal mview.

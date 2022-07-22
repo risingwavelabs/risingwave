@@ -17,7 +17,7 @@ use risingwave_common::error::{ErrorCode, Result, RwError};
 use risingwave_pb::user::grant_privilege::{Action, Object};
 use risingwave_sqlparser::ast::ObjectName;
 
-use super::handle_privilege::check_privilege;
+use super::privilege::check_privilege;
 use crate::binder::Binder;
 use crate::handler::drop_table::check_source;
 use crate::session::OptimizerContext;
@@ -40,7 +40,7 @@ pub async fn handle_drop_index(
         if table.owner != *session.user_name() {
             let object = Object::TableId(table.id().table_id());
             let action = Action::Delete;
-            check_privilege(&session, object, action)?;
+            check_privilege(&session, &object, action)?;
         }
 
         // If associated source is `Some`, then it is a actually a materialized source / table v2.

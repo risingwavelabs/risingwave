@@ -20,7 +20,7 @@ use risingwave_pb::catalog::Sink as ProstSink;
 use risingwave_pb::user::grant_privilege::{Action, Object};
 use risingwave_sqlparser::ast::CreateSinkStatement;
 
-use super::handle_privilege::check_privilege;
+use super::privilege::check_privilege;
 use super::util::handle_with_properties;
 use crate::binder::Binder;
 use crate::catalog::{DatabaseId, SchemaId};
@@ -60,7 +60,7 @@ pub async fn handle_create_sink(
         if schema.owner() != *session.user_name() {
             let object = Object::SchemaId(schema.id());
             let action = Action::Create;
-            check_privilege(&session, object, action)?;
+            check_privilege(&session, &object, action)?;
         }
 
         catalog_reader.check_relation_name_duplicated(

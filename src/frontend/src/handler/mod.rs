@@ -42,6 +42,7 @@ pub mod drop_user;
 mod explain;
 mod flush;
 pub mod handle_privilege;
+pub mod privilege;
 pub mod query;
 mod show;
 pub mod util;

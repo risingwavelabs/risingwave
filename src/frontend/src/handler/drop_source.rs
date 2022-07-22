@@ -18,7 +18,7 @@ use risingwave_pb::stream_plan::source_node::SourceType;
 use risingwave_pb::user::grant_privilege::{Action, Object};
 use risingwave_sqlparser::ast::ObjectName;
 
-use super::handle_privilege::check_privilege;
+use super::privilege::check_privilege;
 use crate::binder::Binder;
 use crate::session::OptimizerContext;
 
@@ -35,7 +35,7 @@ pub async fn handle_drop_source(context: OptimizerContext, name: ObjectName) -> 
     if source.owner != *session.user_name() {
         let object = Object::SourceId(source.id);
         let action = Action::Delete;
-        check_privilege(&session, object, action)?;
+        check_privilege(&session, &object, action)?;
     }
 
     match source.source_type {

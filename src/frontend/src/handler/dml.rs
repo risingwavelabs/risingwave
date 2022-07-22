@@ -18,7 +18,7 @@ use risingwave_common::error::Result;
 use risingwave_sqlparser::ast::Statement;
 
 use crate::binder::Binder;
-use crate::handler::handle_privilege::{check_privilege, resolve_privilege};
+use crate::handler::privilege::{check_privilege, resolve_privilege};
 use crate::handler::util::{to_pg_field, to_pg_rows};
 use crate::planner::Planner;
 use crate::scheduler::{ExecutionContext, ExecutionContextRef};
@@ -30,7 +30,7 @@ pub async fn handle_dml(context: OptimizerContext, stmt: Statement) -> Result<Pg
 
     let (is_owner, object, action) = resolve_privilege(&session, &stmt)?;
     if !is_owner {
-        check_privilege(&session, object, action)?;
+        check_privilege(&session, &object, action)?;
     }
 
     let bound = {

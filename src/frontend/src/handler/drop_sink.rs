@@ -17,7 +17,7 @@ use risingwave_common::error::Result;
 use risingwave_pb::user::grant_privilege::{Action, Object};
 use risingwave_sqlparser::ast::ObjectName;
 
-use super::handle_privilege::check_privilege;
+use super::privilege::check_privilege;
 use crate::binder::Binder;
 use crate::handler::drop_table::check_source;
 use crate::session::OptimizerContext;
@@ -42,7 +42,7 @@ pub async fn handle_drop_sink(
     {
         let object = Object::TableId(sink_id);
         let action = Action::Delete;
-        check_privilege(&session, object, action)?;
+        check_privilege(&session, &object, action)?;
     }
 
     let catalog_writer = session.env().catalog_writer();

@@ -25,7 +25,7 @@ use risingwave_sqlparser::ast::{ObjectName, OrderByExpr};
 
 use crate::binder::Binder;
 use crate::catalog::check_schema_writable;
-use crate::handler::handle_privilege::check_privilege;
+use crate::handler::privilege::check_privilege;
 use crate::optimizer::plan_node::{LogicalScan, StreamTableScan};
 use crate::optimizer::property::{FieldOrder, Order, RequiredDist};
 use crate::optimizer::{PlanRef, PlanRoot};
@@ -171,8 +171,8 @@ pub async fn handle_create_index(
 
     if table.owner != *session.user_name() {
         let object = Object::TableId(table.id);
-        let action = Action::Select;
-        check_privilege(&session, object, action)?;
+        let action = Action::Create;
+        check_privilege(&session, &object, action)?;
     }
 
     log::trace!(
