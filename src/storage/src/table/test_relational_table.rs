@@ -22,14 +22,14 @@ use risingwave_common::types::DataType;
 use risingwave_common::util::ordered::OrderedRowSerializer;
 use risingwave_common::util::sort_util::OrderType;
 
-use crate::encoding::cell_based_encoding_util::serialize_pk;
-use crate::encoding::cell_based_row_serializer::CellBasedRowSerializer;
-use crate::encoding::Encoding;
 use crate::error::StorageResult;
 use crate::memory::MemoryStateStore;
+use crate::row_serde::cell_based_encoding_util::serialize_pk;
+use crate::row_serde::cell_based_row_serializer::CellBasedRowSerializer;
+use crate::row_serde::RowSerialize;
 use crate::storage_value::StorageValue;
 use crate::store::{StateStore, WriteOptions};
-use crate::table::state_table::{DedupPkStateTable, StateTable};
+use crate::table::state_table::{DedupPkStateTable, RowBasedStateTable, StateTable};
 use crate::table::storage_table::{StorageTable, DEFAULT_VNODE};
 use crate::table::TableIter;
 use crate::Keyspace;
@@ -370,6 +370,251 @@ async fn test_state_table_iter() {
     ];
     let pk_index = vec![0_usize, 1_usize];
     let mut state = StateTable::new_without_distribution(
+        state_store.clone(),
+        TableId::from(0x42),
+        column_descs.clone(),
+        order_types.clone(),
+        pk_index,
+    );
+    let epoch: u64 = 0;
+
+    state
+        .insert(Row(vec![
+            Some(1_i32.into()),
+            Some(11_i32.into()),
+            Some(111_i32.into()),
+        ]))
+        .unwrap();
+    state
+        .insert(Row(vec![
+            Some(2_i32.into()),
+            Some(22_i32.into()),
+            Some(222_i32.into()),
+        ]))
+        .unwrap();
+    state
+        .delete(Row(vec![
+            Some(2_i32.into()),
+            Some(22_i32.into()),
+            Some(222_i32.into()),
+        ]))
+        .unwrap();
+
+    state
+        .insert(Row(vec![
+            Some(3_i32.into()),
+            Some(33_i32.into()),
+            Some(3333_i32.into()),
+        ]))
+        .unwrap();
+
+    state
+        .insert(Row(vec![
+            Some(6_i32.into()),
+            Some(66_i32.into()),
+            Some(666_i32.into()),
+        ]))
+        .unwrap();
+
+    state
+        .insert(Row(vec![
+            Some(9_i32.into()),
+            Some(99_i32.into()),
+            Some(999_i32.into()),
+        ]))
+        .unwrap();
+
+    {
+        let iter = state.iter(epoch).await.unwrap();
+        pin_mut!(iter);
+
+        let res = iter.next().await.unwrap().unwrap();
+        assert_eq!(
+            &Row(vec![
+                Some(1_i32.into()),
+                Some(11_i32.into()),
+                Some(111_i32.into())
+            ]),
+            res.as_ref()
+        );
+
+        // will not get [2, 22, 222]
+        let res = iter.next().await.unwrap().unwrap();
+        assert_eq!(
+            &Row(vec![
+                Some(3_i32.into()),
+                Some(33_i32.into()),
+                Some(3333_i32.into())
+            ]),
+            res.as_ref()
+        );
+
+        let res = iter.next().await.unwrap().unwrap();
+        assert_eq!(
+            &Row(vec![
+                Some(6_i32.into()),
+                Some(66_i32.into()),
+                Some(666_i32.into())
+            ]),
+            res.as_ref()
+        );
+    }
+
+    state.commit(epoch).await.unwrap();
+
+    let epoch = u64::MAX;
+
+    // write [3, 33, 333], [4, 44, 444], [5, 55, 555], [7, 77, 777], [8, 88, 888]into mem_table,
+    // [3, 33, 3333], [6, 66, 666], [9, 99, 999] exists in
+    // cell_based_table
+
+    state
+        .delete(Row(vec![
+            Some(1_i32.into()),
+            Some(11_i32.into()),
+            Some(111_i32.into()),
+        ]))
+        .unwrap();
+    state
+        .insert(Row(vec![
+            Some(3_i32.into()),
+            Some(33_i32.into()),
+            Some(333_i32.into()),
+        ]))
+        .unwrap();
+
+    state
+        .insert(Row(vec![
+            Some(4_i32.into()),
+            Some(44_i32.into()),
+            Some(444_i32.into()),
+        ]))
+        .unwrap();
+
+    state
+        .insert(Row(vec![
+            Some(5_i32.into()),
+            Some(55_i32.into()),
+            Some(555_i32.into()),
+        ]))
+        .unwrap();
+    state
+        .insert(Row(vec![
+            Some(7_i32.into()),
+            Some(77_i32.into()),
+            Some(777_i32.into()),
+        ]))
+        .unwrap();
+
+    state
+        .insert(Row(vec![
+            Some(8_i32.into()),
+            Some(88_i32.into()),
+            Some(888_i32.into()),
+        ]))
+        .unwrap();
+
+    let iter = state.iter(epoch).await.unwrap();
+    pin_mut!(iter);
+
+    let res = iter.next().await.unwrap().unwrap();
+
+    // this pk exist in both cell_based_table(shared_storage) and mem_table(buffer)
+    assert_eq!(
+        &Row(vec![
+            Some(3_i32.into()),
+            Some(33_i32.into()),
+            Some(333_i32.into())
+        ]),
+        res.as_ref()
+    );
+
+    // this row exists in mem_table
+    let res = iter.next().await.unwrap().unwrap();
+    assert_eq!(
+        &Row(vec![
+            Some(4_i32.into()),
+            Some(44_i32.into()),
+            Some(444_i32.into())
+        ]),
+        res.as_ref()
+    );
+
+    let res = iter.next().await.unwrap().unwrap();
+
+    // this row exists in mem_table
+    assert_eq!(
+        &Row(vec![
+            Some(5_i32.into()),
+            Some(55_i32.into()),
+            Some(555_i32.into())
+        ]),
+        res.as_ref()
+    );
+    let res = iter.next().await.unwrap().unwrap();
+
+    // this row exists in cell_based_table
+    assert_eq!(
+        &Row(vec![
+            Some(6_i32.into()),
+            Some(66_i32.into()),
+            Some(666_i32.into())
+        ]),
+        res.as_ref()
+    );
+
+    let res = iter.next().await.unwrap().unwrap();
+    // this row exists in mem_table
+    assert_eq!(
+        &Row(vec![
+            Some(7_i32.into()),
+            Some(77_i32.into()),
+            Some(777.into())
+        ]),
+        res.as_ref()
+    );
+
+    let res = iter.next().await.unwrap().unwrap();
+
+    // this row exists in mem_table
+    assert_eq!(
+        &Row(vec![
+            Some(8_i32.into()),
+            Some(88_i32.into()),
+            Some(888_i32.into())
+        ]),
+        res.as_ref()
+    );
+
+    let res = iter.next().await.unwrap().unwrap();
+
+    // this row exists in cell_based_table
+    assert_eq!(
+        &Row(vec![
+            Some(9_i32.into()),
+            Some(99_i32.into()),
+            Some(999_i32.into())
+        ]),
+        res.as_ref()
+    );
+
+    // there is no row in both cell_based_table and mem_table
+    let res = iter.next().await;
+    assert!(res.is_none());
+}
+
+#[tokio::test]
+async fn test_row_based_state_table_iter() {
+    let state_store = MemoryStateStore::new();
+    let order_types = vec![OrderType::Ascending, OrderType::Descending];
+    let column_ids = vec![ColumnId::from(0), ColumnId::from(1), ColumnId::from(2)];
+    let column_descs = vec![
+        ColumnDesc::unnamed(column_ids[0], DataType::Int32),
+        ColumnDesc::unnamed(column_ids[1], DataType::Int32),
+        ColumnDesc::unnamed(column_ids[2], DataType::Int32),
+    ];
+    let pk_index = vec![0_usize, 1_usize];
+    let mut state = RowBasedStateTable::new_without_distribution(
         state_store.clone(),
         TableId::from(0x42),
         column_descs.clone(),

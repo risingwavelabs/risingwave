@@ -49,9 +49,13 @@ pub mod value;
 #[cfg(target_os = "linux")]
 pub mod file_cache;
 
+use std::collections::HashMap;
+
 pub use error::*;
+use parking_lot::RwLock;
 pub use risingwave_common::cache::{CachableEntry, LookupResult, LruCache};
 use risingwave_common::catalog::TableId;
+use risingwave_hummock_sdk::slice_transform::SliceTransform;
 use value::*;
 
 use self::iterator::HummockIterator;
@@ -98,6 +102,7 @@ impl HummockStorage {
             hummock_meta_client,
             hummock_metrics,
             compaction_group_client,
+            Arc::new(RwLock::new(HashMap::new())),
         )
         .await
     }
@@ -110,6 +115,7 @@ impl HummockStorage {
         // TODO: separate `HummockStats` from `StateStoreMetrics`.
         stats: Arc<StateStoreMetrics>,
         compaction_group_client: Arc<dyn CompactionGroupClient>,
+        table_id_to_slice_transform: Arc<RwLock<HashMap<u32, Arc<dyn SliceTransform>>>>,
     ) -> HummockResult<Self> {
         // For conflict key detection. Enabled by setting `write_conflict_detection_enabled` to
         // true in `StorageConfig`
@@ -121,6 +127,7 @@ impl HummockStorage {
             stats.clone(),
             hummock_meta_client.clone(),
             write_conflict_detector,
+            table_id_to_slice_transform,
         )
         .await;
 

@@ -57,17 +57,12 @@ impl CurrentHummockVersionId {
         }
     }
 
+    #[allow(dead_code)]
     pub async fn get<S: MetaStore>(meta_store: &S) -> Result<Option<CurrentHummockVersionId>> {
         CurrentHummockVersionId::select(meta_store, &HUMMOCK_VERSION_ID_KEY.to_string()).await
     }
 
-    /// Increase version id, return previous one
-    pub fn increase(&mut self) -> HummockVersionId {
-        let previous_id = self.id;
-        self.id += 1;
-        previous_id
-    }
-
+    #[allow(dead_code)]
     pub fn id(&self) -> HummockVersionId {
         self.id
     }
