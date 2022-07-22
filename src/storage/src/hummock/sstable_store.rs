@@ -254,7 +254,10 @@ impl SstableStore {
                 .block_metas
                 .get(start_block_index as usize)
                 .ok_or_else(HummockError::invalid_block)?;
-            let total_len = sst.meta.block_metas[start_block_index..].iter().map(|m| m.len).sum();
+            let total_len: u32 = sst.meta.block_metas[start_block_index as usize..]
+                .iter()
+                .map(|m| m.len)
+                .sum();
             let block_loc = BlockLocation {
                 offset: block_meta.offset as usize,
                 size: total_len as usize,
@@ -432,7 +435,8 @@ mod tests {
     async fn test_block_stream() {
         let sstable_store = mock_sstable_store();
         let mut opts = default_builder_opt_for_test();
-        opts.block_capacity = 32; // make lots of blocks
+        assert_eq!(iterator_test_key_of(0).len(), 22);
+        opts.block_capacity = 32; // make 100 blocks
         let (data, meta, _) = gen_test_sstable_data(
             opts,
             (0..100).map(|x| {
@@ -465,6 +469,28 @@ mod tests {
             num_blocks += 1;
         }
         assert_eq!(i, 100);
-        assert!(num_blocks > 1);
+        assert_eq!(num_blocks, 100);
+
+        // Test with non-zero start_block_index
+        for start_index in 1..100 {
+            let mut i = start_index;
+            let mut num_blocks = 0;
+            let mut stream = sstable_store
+                .get_block_stream(&Sstable::new(1, meta.clone()), start_index as u64)
+                .await
+                .unwrap();
+            while let Some(block) = stream.next().await {
+                let mut block_iter = BlockIterator::new(block.expect("invalid block"));
+                block_iter.seek_to_first();
+                while block_iter.is_valid() {
+                    assert_eq!(block_iter.key(), iterator_test_key_of(i).as_slice());
+                    block_iter.next();
+                    i += 1;
+                }
+                num_blocks += 1;
+            }
+            assert_eq!(i, 100);
+            assert_eq!(num_blocks, 100 - start_index);
+        }
     }
 }
