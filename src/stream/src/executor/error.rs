@@ -18,6 +18,7 @@ use either::Either;
 use risingwave_common::array::ArrayError;
 use risingwave_common::error::{BoxedError, Error, ErrorCode, RwError, TrackingIssue};
 use risingwave_expr::ExprError;
+use risingwave_rpc_client::error::RpcError;
 use risingwave_storage::error::StorageError;
 
 use super::Barrier;
@@ -47,7 +48,7 @@ enum StreamExecutorErrorInner {
     SinkError(RwError),
 
     #[error("RPC error: {0}")]
-    RpcError(risingwave_rpc_client::error::RpcError),
+    RpcError(RpcError),
 
     #[error("Channel `{0}` closed")]
     ChannelClosed(String),
@@ -148,8 +149,8 @@ impl From<memcomparable::Error> for StreamExecutorError {
     }
 }
 
-impl From<risingwave_rpc_client::error::RpcError> for StreamExecutorError {
-    fn from(e: risingwave_rpc_client::error::RpcError) -> Self {
+impl From<RpcError> for StreamExecutorError {
+    fn from(e: RpcError) -> Self {
         StreamExecutorErrorInner::RpcError(e).into()
     }
 }
