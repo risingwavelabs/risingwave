@@ -141,17 +141,20 @@ message SimpleAggNode {
   // Only used for local simple agg, not used for global simple agg.
   repeated uint32 distribution_key = 2;
   repeated catalog.Table internal_tables = 3;
-  map<uint32, int32> column_mapping = 4;
+  repeated ColumnMapping column_mappings = 4;
   // Whether to optimize for append only stream.
   // It is true when the input is append-only
   bool is_append_only = 5;
 }
 
+message ColumnMapping {
+  repeated uint32 indices = 1;
+}
 message HashAggNode {
   repeated uint32 group_key = 1;
   repeated expr.AggCall agg_calls = 2;
   repeated catalog.Table internal_tables = 3;
-  map<uint32, int32> column_mapping = 4;
+  repeated ColumnMapping column_mappings = 4;
   // Whether to optimize for append only stream.
   // It is true when the input is append-only
   bool is_append_only = 5;
