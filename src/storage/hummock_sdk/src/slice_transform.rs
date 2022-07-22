@@ -177,6 +177,11 @@ impl MultiSliceTransform {
     pub fn size(&self) -> usize {
         self.id_to_slice_transform.len()
     }
+
+    #[cfg(test)]
+    fn last_slice_transform_state(&self) -> &Option<(u32, Box<SliceTransformImpl>)> {
+        &self.last_slice_transform_state
+    }
 }
 
 impl Debug for MultiSliceTransform {
@@ -364,6 +369,8 @@ mod tests {
     #[test]
     fn test_multi_slice_transform() {
         let mut multi_slice_transform = MultiSliceTransform::default();
+        let last_state = multi_slice_transform.last_slice_transform_state();
+        assert!(last_state.is_none());
 
         {
             // test table_id 1
@@ -404,6 +411,10 @@ mod tests {
                 TABLE_PREFIX_LEN + VIRTUAL_NODE_SIZE + pk_prefix_len,
                 output_key.len()
             );
+
+            let last_state = multi_slice_transform.last_slice_transform_state();
+            assert!(last_state.is_some());
+            assert_eq!(1, last_state.as_ref().unwrap().0);
         }
 
         {
@@ -446,6 +457,10 @@ mod tests {
                 TABLE_PREFIX_LEN + VIRTUAL_NODE_SIZE + pk_prefix_len,
                 output_key.len()
             );
+
+            let last_state = multi_slice_transform.last_slice_transform_state();
+            assert!(last_state.is_some());
+            assert_eq!(2, last_state.as_ref().unwrap().0);
         }
 
         {
@@ -471,6 +486,10 @@ mod tests {
                 TABLE_PREFIX_LEN + VIRTUAL_NODE_SIZE + row_bytes.len(),
                 output_key.len()
             );
+
+            let last_state = multi_slice_transform.last_slice_transform_state();
+            assert!(last_state.is_some());
+            assert_eq!(3, last_state.as_ref().unwrap().0);
         }
     }
 }
