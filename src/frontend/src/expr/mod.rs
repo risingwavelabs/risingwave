@@ -322,51 +322,6 @@ impl ExprImpl {
         collector.correlated_indices
     }
 
-    // /// Collect `CorrelatedInputRef`s in `ExprImpl` and return theirs indices.
-    // pub fn collect_correlated_indices_by_depth_and_assign_id(
-    //     &mut self,
-    //     correlated_id: CorrelatedId,
-    // ) -> Vec<usize> {
-    //     struct Collector {
-    //         depth: usize,
-    //         correlated_indices: Vec<usize>,
-    //         correlated_id: CorrelatedId,
-    //     }
-    //
-    //     impl ExprVisitor for Collector {
-    //         fn visit_correlated_input_ref(&mut self, correlated_input_ref: &CorrelatedInputRef) {
-    //             if correlated_input_ref.depth() == self.depth {
-    //                 self.correlated_indices.push(correlated_input_ref.index());
-    //                 correlated_input_ref.set_correlated_id(self.correlated_id);
-    //             }
-    //         }
-    //
-    //         fn visit_subquery(&mut self, subquery: &Subquery) {
-    //             use crate::binder::BoundSetExpr;
-    //
-    //             self.depth += 1;
-    //             match &subquery.query.body {
-    //                 BoundSetExpr::Select(select) => select
-    //                     .select_items
-    //                     .iter()
-    //                     .chain(select.group_by.iter())
-    //                     .chain(select.where_clause.iter())
-    //                     .for_each(|expr| self.visit_expr(expr)),
-    //                 BoundSetExpr::Values(_) => {}
-    //             }
-    //             self.depth -= 1;
-    //         }
-    //     }
-    //
-    //     let mut collector = Collector {
-    //         depth: 1,
-    //         correlated_indices: vec![],
-    //         correlated_id,
-    //     };
-    //     collector.visit_expr(self);
-    //     collector.correlated_indices
-    // }
-
     /// Checks whether this is a constant expr that can be evaluated over a dummy chunk.
     /// Equivalent to `!has_input_ref && !has_agg_call && !has_subquery &&
     /// !has_correlated_input_ref` but checks them in one pass.
