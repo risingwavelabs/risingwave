@@ -451,7 +451,6 @@ pub mod tests {
         assert_eq!(ret.input_levels[0].table_infos[0].id, 7);
         assert_eq!(ret.input_levels[0].table_infos[1].id, 8);
         assert_eq!(ret.input_levels[0].table_infos[2].id, 9);
-        assert!(ret.input_levels[1].table_infos.is_empty());
         levels_handler[0].remove_task(1);
         levels[0].table_infos.retain(|table| table.id < 7);
         levels[0]
