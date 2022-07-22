@@ -258,8 +258,7 @@ impl<S: StateStore> DynamicFilterExecutor<S> {
         );
 
         let mut stream_chunk_builder =
-            StreamChunkBuilder::new(PROCESSING_WINDOW_SIZE, &self.schema.data_types(), 0, 0)
-                .map_err(StreamExecutorError::eval_error)?;
+            StreamChunkBuilder::new(PROCESSING_WINDOW_SIZE, &self.schema.data_types(), 0, 0)?;
 
         #[for_await]
         for msg in aligned_stream {
@@ -318,22 +317,16 @@ impl<S: StateStore> DynamicFilterExecutor<S> {
                         let (range, latest_is_lower, is_insert) = self.get_range(&curr, prev);
                         for (_, rows) in self.range_cache.range(range, latest_is_lower) {
                             for row in rows {
-                                if let Some(chunk) = stream_chunk_builder
-                                    .append_row_matched(
-                                        // All rows have a single identity at this point
-                                        if is_insert { Op::Insert } else { Op::Delete },
-                                        row,
-                                    )
-                                    .map_err(StreamExecutorError::eval_error)?
-                                {
+                                if let Some(chunk) = stream_chunk_builder.append_row_matched(
+                                    // All rows have a single identity at this point
+                                    if is_insert { Op::Insert } else { Op::Delete },
+                                    row,
+                                )? {
                                     yield Message::Chunk(chunk);
                                 }
                             }
                         }
-                        if let Some(chunk) = stream_chunk_builder
-                            .take()
-                            .map_err(StreamExecutorError::eval_error)?
-                        {
+                        if let Some(chunk) = stream_chunk_builder.take()? {
                             yield Message::Chunk(chunk);
                         }
                     }

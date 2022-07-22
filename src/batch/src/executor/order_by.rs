@@ -122,7 +122,7 @@ impl BoxedExecutorBuilder for OrderByExecutor {
 
 impl OrderByExecutor {
     fn push_heap_for_chunk(&mut self, idx: usize) {
-        while self.vis_indices[idx] < self.chunks[idx].cardinality() {
+        while self.vis_indices[idx] < self.chunks[idx].capacity() {
             let skip: bool = match self.chunks[idx].visibility() {
                 Some(visibility) => visibility
                     .is_set(self.sorted_indices[idx][self.vis_indices[idx]])
@@ -152,7 +152,7 @@ impl OrderByExecutor {
     }
 
     fn get_order_index_from(&self, idx: usize) -> Vec<usize> {
-        let mut index: Vec<usize> = (0..self.chunks[idx].cardinality()).collect();
+        let mut index: Vec<usize> = (0..self.chunks[idx].capacity()).collect();
         index.sort_by(|ia, ib| {
             if self.disable_encoding || !self.encodable {
                 compare_rows_in_chunk(
