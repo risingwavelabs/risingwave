@@ -297,7 +297,7 @@ impl<P: 'static + ProbeSideSourceBuilder> LookupJoinExecutor<P> {
 
             let mut probe_side_chunk_exists = true;
 
-            // has_match tells us, for each row in the build side chunk, if it has a match
+            // for each row in the build side chunk, has_match tells us if it has a match
             // on the probe side table
             let mut has_match = all_row_refs
                 .iter()
@@ -446,7 +446,7 @@ impl<P: 'static + ProbeSideSourceBuilder> LookupJoinExecutor<P> {
         }
     }
 
-    /// Inner Joins the `cur_row` with the `probe_side_chunk`. The non-equi condition is also
+    /// Inner joins the `cur_row` with the `probe_side_chunk`. The non-equi condition is also
     /// evaluated to hide the rows in the join result that don't match the condition.
     fn do_inner_join(
         &self,
@@ -496,7 +496,7 @@ impl<P: 'static + ProbeSideSourceBuilder> LookupJoinExecutor<P> {
         )?))
     }
 
-    /// Appends `input_chunk` to the `self.chunk_builder`. If there is a leftover chunk, assign it
+    /// Appends `input_chunk` to `self.chunk_builder`. If there is a leftover chunk, assign it
     /// to `self.last_chunk`. Note that `self.last_chunk` is always None before this is called.
     fn append_chunk(&mut self, input_chunk: SlicedDataChunk) -> Result<Option<DataChunk>> {
         let (mut left_data_chunk, return_chunk) = self.chunk_builder.append_chunk(input_chunk)?;
@@ -513,7 +513,7 @@ impl BoxedExecutorBuilder for LookupJoinExecutorBuilder {
         source: &ExecutorBuilder<C>,
         mut inputs: Vec<BoxedExecutor>,
     ) -> Result<BoxedExecutor> {
-        ensure!(inputs.len() == 1, "LookupJoinExeuctor should have 1 child!");
+        ensure!(inputs.len() == 1, "LookupJoinExecutor should have 1 child!");
 
         let lookup_join_node = try_match_expand!(
             source.plan_node().get_node_body().unwrap(),
