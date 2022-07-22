@@ -23,7 +23,7 @@ use std::sync::Arc;
 use async_trait::async_trait;
 use itertools::Itertools;
 use risingwave_common::array::Row;
-use risingwave_common::catalog::{ColumnDesc, SysCatalogReader, TableId, DEFAULT_SUPPER_USER};
+use risingwave_common::catalog::{ColumnDesc, SysCatalogReader, TableId, DEFAULT_SUPPER_USER_ID};
 use risingwave_common::error::{ErrorCode, Result};
 use risingwave_common::types::{DataType, ScalarImpl};
 use serde_json::json;
@@ -99,7 +99,7 @@ impl SysCatalogReaderImpl {
                 Row::new(vec![
                     Some(ScalarImpl::Int32(schema.id as i32)),
                     Some(ScalarImpl::Utf8(schema.name.clone())),
-                    Some(ScalarImpl::Utf8(schema.owner.clone())),
+                    Some(ScalarImpl::Int32(schema.owner as i32)),
                 ])
             })
             .collect_vec())
@@ -134,7 +134,7 @@ impl SysCatalogReaderImpl {
                             Some(ScalarImpl::Int32(t.id.table_id as i32)),
                             Some(ScalarImpl::Utf8(t.name.clone())),
                             Some(ScalarImpl::Utf8(schema.clone())),
-                            Some(ScalarImpl::Utf8(t.owner.clone())),
+                            Some(ScalarImpl::Int32(t.owner as i32)),
                             Some(ScalarImpl::Utf8(json!(fragments).to_string())),
                         ]));
                     }
@@ -169,7 +169,7 @@ macro_rules! def_sys_catalog {
                 })
                 .collect::<Vec<_>>(),
             pk: vec![0], // change this when multi-column pk is needed in some system table.
-            owner: DEFAULT_SUPPER_USER.to_string(),
+            owner: DEFAULT_SUPPER_USER_ID,
         }
     };
 }

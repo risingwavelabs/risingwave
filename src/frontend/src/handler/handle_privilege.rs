@@ -271,7 +271,7 @@ pub async fn handle_revoke_privilege(
 
 #[cfg(test)]
 mod tests {
-    
+    use risingwave_common::catalog::DEFAULT_SUPPER_USER_ID;
 
     use super::*;
     use crate::test_utils::LocalFrontend;
@@ -311,12 +311,12 @@ mod tests {
                         ActionWithGrantOption {
                             action: ProstAction::Connect as i32,
                             with_grant_option: true,
-                            granted_by: 1,
+                            granted_by: DEFAULT_SUPPER_USER_ID,
                         },
                         ActionWithGrantOption {
                             action: ProstAction::Create as i32,
                             with_grant_option: true,
-                            granted_by: 1,
+                            granted_by: DEFAULT_SUPPER_USER_ID,
                         }
                     ],
                     object: Some(ProstObject::DatabaseId(database_id)),

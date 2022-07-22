@@ -26,7 +26,9 @@ use pgwire::pg_response::PgResponse;
 use pgwire::pg_server::{BoxedError, Session, SessionManager, UserAuthenticator};
 use rand::RngCore;
 #[cfg(test)]
-use risingwave_common::catalog::{DEFAULT_DATABASE_NAME, DEFAULT_SUPPER_USER};
+use risingwave_common::catalog::{
+    DEFAULT_DATABASE_NAME, DEFAULT_SUPPER_USER, DEFAULT_SUPPER_USER_ID,
+};
 use risingwave_common::config::FrontendConfig;
 use risingwave_common::error::Result;
 use risingwave_common::session_config::ConfigMap;
@@ -412,7 +414,7 @@ impl SessionImpl {
             auth_context: Arc::new(AuthContext::new(
                 DEFAULT_DATABASE_NAME.to_string(),
                 DEFAULT_SUPPER_USER.to_string(),
-                1,
+                DEFAULT_SUPPER_USER_ID,
             )),
             user_authenticator: UserAuthenticator::None,
             config_map: Default::default(),

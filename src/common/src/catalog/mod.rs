@@ -37,9 +37,12 @@ pub const DEFAULT_SCHEMA_NAME: &str = "public";
 pub const PG_CATALOG_SCHEMA_NAME: &str = "pg_catalog";
 pub const RESERVED_PG_SCHEMA_PREFIX: &str = "pg_";
 pub const DEFAULT_SUPPER_USER: &str = "root";
+pub const DEFAULT_SUPPER_USER_ID: u32 = 1;
 // This is for compatibility with customized utils for PostgreSQL.
 pub const DEFAULT_SUPPER_USER_FOR_PG: &str = "postgres";
+pub const DEFAULT_SUPPER_USER_FOR_PG_ID: u32 = 2;
 
+pub const RESERVED_USER_ID: i32 = 10;
 pub const RESERVED_PG_CATALOG_TABLE_ID: i32 = 1000;
 
 /// The local system catalog reader in the frontend node.

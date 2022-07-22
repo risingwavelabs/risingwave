@@ -274,7 +274,7 @@ mod tests {
             distribution_key: vec![],
             optional_associated_source_id: None,
             appendonly: false,
-            owner: risingwave_common::catalog::DEFAULT_SUPPER_USER.to_string(),
+            owner: risingwave_common::catalog::DEFAULT_SUPPER_USER_ID,
             mapping: None,
             properties: HashMap::from([(String::from("ttl"), String::from("300"))]),
             read_pattern_prefix_column: column_count, // 1 column

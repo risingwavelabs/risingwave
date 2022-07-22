@@ -15,7 +15,10 @@
 use std::collections::{HashMap, HashSet, VecDeque};
 use std::sync::Arc;
 
-use risingwave_common::catalog::{DEFAULT_SUPPER_USER, DEFAULT_SUPPER_USER_FOR_PG};
+use risingwave_common::catalog::{
+    DEFAULT_SUPPER_USER, DEFAULT_SUPPER_USER_FOR_PG, DEFAULT_SUPPER_USER_FOR_PG_ID,
+    DEFAULT_SUPPER_USER_ID,
+};
 use risingwave_common::error::ErrorCode::{InternalError, PermissionDenied};
 use risingwave_common::error::{Result, RwError};
 use risingwave_pb::meta::subscribe_response::{Info, Operation};
@@ -105,7 +108,10 @@ impl<S: MetaStore> UserManager<S> {
 
     async fn init(&self) -> Result<()> {
         let mut core = self.core.lock().await;
-        for (user, id) in [(DEFAULT_SUPPER_USER, 1), (DEFAULT_SUPPER_USER_FOR_PG, 2)] {
+        for (user, id) in [
+            (DEFAULT_SUPPER_USER, DEFAULT_SUPPER_USER_ID),
+            (DEFAULT_SUPPER_USER_FOR_PG, DEFAULT_SUPPER_USER_FOR_PG_ID),
+        ] {
             if !core.all_users.contains(user) {
                 let default_user = UserInfo {
                     id,
@@ -286,7 +292,9 @@ impl<S: MetaStore> UserManager<S> {
                 .ok_or_else(|| InternalError(format!("User {} does not exist", user_id)))
                 .cloned()?;
 
-            core.user_grant_relation.entry(grantor).or_insert_with(HashSet::new);
+            core.user_grant_relation
+                .entry(grantor)
+                .or_insert_with(HashSet::new);
             let grant_user = core.user_grant_relation.get_mut(&grantor).unwrap();
 
             if user.is_supper {
@@ -484,7 +492,9 @@ impl<S: MetaStore> UserManager<S> {
                         .grant_privileges
                         .retain(|privilege| !privilege.action_with_opts.is_empty());
                 }
-                if let std::collections::hash_map::Entry::Vacant(e) = user_updated.entry(now_user.id) {
+                if let std::collections::hash_map::Entry::Vacant(e) =
+                    user_updated.entry(now_user.id)
+                {
                     now_user.upsert_in_transaction(&mut transaction)?;
                     e.insert(now_user);
                 }
@@ -580,7 +590,7 @@ mod tests {
             .create_user(&make_test_user(test_sub_user_id, test_sub_user))
             .await?;
         assert!(user_manager
-            .create_user(&make_test_user(1, DEFAULT_SUPPER_USER))
+            .create_user(&make_test_user(DEFAULT_SUPPER_USER_ID, DEFAULT_SUPPER_USER))
             .await
             .is_err());
 
@@ -613,7 +623,7 @@ mod tests {
                     &[Action::Select, Action::Insert],
                     false,
                 )],
-                1,
+                DEFAULT_SUPPER_USER_ID,
             )
             .await?;
         let user = user_manager.get_user(test_user_id).await?;
@@ -648,7 +658,7 @@ mod tests {
                     &[Action::Select, Action::Insert],
                     true,
                 )],
-                1,
+                DEFAULT_SUPPER_USER_ID,
             )
             .await?;
         let user = user_manager.get_user(test_user_id).await?;
@@ -683,7 +693,7 @@ mod tests {
                     &[Action::Select, Action::Update, Action::Delete],
                     true,
                 )],
-                1,
+                DEFAULT_SUPPER_USER_ID,
             )
             .await?;
         let user = user_manager.get_user(test_user_id).await?;
@@ -746,7 +756,7 @@ mod tests {
                     false,
                 )],
                 0,
-                1,
+                DEFAULT_SUPPER_USER_ID,
                 true,
                 false,
             )
@@ -771,7 +781,7 @@ mod tests {
                     false,
                 )],
                 0,
-                1,
+                DEFAULT_SUPPER_USER_ID,
                 true,
                 true,
             )
@@ -794,7 +804,7 @@ mod tests {
                     false,
                 )],
                 0,
-                1,
+                DEFAULT_SUPPER_USER_ID,
                 false,
                 true,
             )
