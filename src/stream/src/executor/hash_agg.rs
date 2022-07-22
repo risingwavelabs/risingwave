@@ -27,7 +27,7 @@ use risingwave_common::catalog::Schema;
 use risingwave_common::collection::evictable::EvictableHashMap;
 use risingwave_common::hash::{HashCode, HashKey};
 use risingwave_common::util::hash_util::CRC32FastBuilder;
-use risingwave_storage::table::state_table::StateTable;
+use risingwave_storage::table::state_table::RowBasedStateTable;
 use risingwave_storage::StateStore;
 
 use super::{
@@ -81,7 +81,7 @@ struct HashAggExecutorExtra<S: StateStore> {
     /// all of the aggregation functions in this executor should depend on same group of keys
     key_indices: Vec<usize>,
 
-    state_tables: Vec<StateTable<S>>,
+    state_tables: Vec<RowBasedStateTable<S>>,
 }
 
 impl<K: HashKey, S: StateStore> Executor for HashAggExecutor<K, S> {
@@ -109,7 +109,7 @@ impl<K: HashKey, S: StateStore> HashAggExecutor<K, S> {
         pk_indices: PkIndices,
         executor_id: u64,
         key_indices: Vec<usize>,
-        mut state_tables: Vec<StateTable<S>>,
+        mut state_tables: Vec<RowBasedStateTable<S>>,
     ) -> StreamExecutorResult<Self> {
         let input_info = input.info();
         let schema = generate_agg_schema(input.as_ref(), &agg_calls, Some(&key_indices));
@@ -449,7 +449,7 @@ mod tests {
     use risingwave_common::types::DataType;
     use risingwave_expr::expr::*;
     use risingwave_storage::memory::MemoryStateStore;
-    use risingwave_storage::table::state_table::StateTable;
+    use risingwave_storage::table::state_table::RowBasedStateTable;
     use risingwave_storage::StateStore;
 
     use crate::executor::aggregation::{generate_agg_schema, AggArgs, AggCall};
@@ -465,7 +465,7 @@ mod tests {
         key_indices: Vec<usize>,
         pk_indices: PkIndices,
         executor_id: u64,
-        state_tables: Vec<StateTable<S>>,
+        state_tables: Vec<RowBasedStateTable<S>>,
     }
 
     impl<S: StateStore> HashKeyDispatcher for HashAggExecutorDispatcher<S> {
