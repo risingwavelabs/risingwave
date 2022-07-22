@@ -92,7 +92,7 @@ async fn create_tables(
     let mut tables = statements.iter().map(create_table_statement_to_table).collect_vec();
 
     for stmt in statements.iter() {
-        let create_sql = format!("{}", stmt);
+        let create_sql = stmt.to_string();
         client.execute(&create_sql, &[]).await.unwrap();
     }
 

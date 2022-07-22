@@ -51,12 +51,11 @@ fn get_seed_table_sql() -> String {
 async fn create_tables(session: Arc<SessionImpl>, rng: &mut impl Rng) -> Vec<Table> {
     let sql = get_seed_table_sql();
     let statements = parse_sql(&sql);
-
     let mut tables = statements.iter().map(create_table_statement_to_table).collect_vec();
 
     for s in statements.into_iter() {
-        let stmt_sql = s.to_string();
-        handle(session.clone(), s, stmt_sql).await;
+        let create_sql = stmt.to_string();
+        handle(session.clone(), s, create_sql).await;
     }
 
     // Generate some mviews
