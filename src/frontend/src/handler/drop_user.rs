@@ -38,7 +38,7 @@ pub async fn handle_drop_user(
     match user {
         Some(user) => {
             let user_info_writer = session.env().user_info_writer();
-            user_info_writer.drop_user(&user.name).await?;
+            user_info_writer.drop_user(user.id).await?;
         }
         None => {
             return if if_exists {

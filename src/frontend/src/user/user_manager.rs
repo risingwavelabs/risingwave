@@ -16,15 +16,13 @@ use std::collections::HashMap;
 
 use risingwave_pb::user::{GrantPrivilege, UserInfo};
 
-use crate::user::{UserInfoVersion, UserName};
-
-pub type UserId = u32;
+use crate::user::{UserId, UserInfoVersion};
 
 /// `UserInfoManager` is responsible for managing users.
 pub struct UserInfoManager {
     version: UserInfoVersion,
-    user_by_name: HashMap<UserName, UserInfo>,
-    user_name_by_id: HashMap<UserId, UserName>,
+    user_by_name: HashMap<String, UserInfo>,
+    user_name_by_id: HashMap<UserId, String>,
 }
 
 #[expect(clippy::derivable_impls)]
@@ -39,15 +37,16 @@ impl Default for UserInfoManager {
 }
 
 impl UserInfoManager {
-    pub fn get_user_mut(&mut self, user_name: &str) -> Option<&mut UserInfo> {
-        self.user_by_name.get_mut(user_name)
+    pub fn get_user_mut(&mut self, id: UserId) -> Option<&mut UserInfo> {
+        let name = self.user_name_by_id.get(&id)?;
+        self.user_by_name.get_mut(name)
     }
 
     pub fn get_user_by_name(&self, user_name: &str) -> Option<&UserInfo> {
         self.user_by_name.get(user_name)
     }
 
-    pub fn get_user_name_by_id(&self, id: UserId) -> Option<UserName> {
+    pub fn get_user_name_by_id(&self, id: UserId) -> Option<String> {
         self.user_name_by_id.get(&id).cloned()
     }
 
@@ -60,9 +59,9 @@ impl UserInfoManager {
         self.user_name_by_id.try_insert(id, name).unwrap();
     }
 
-    pub fn drop_user(&mut self, user_name: &str) {
-        let user = self.user_by_name.remove(user_name).unwrap();
-        self.user_name_by_id.remove(&user.id).unwrap();
+    pub fn drop_user(&mut self, id: UserId) {
+        let name = self.user_name_by_id.remove(&id).unwrap();
+        self.user_by_name.remove(&name).unwrap();
     }
 
     pub fn update_user(&mut self, user_info: UserInfo) {

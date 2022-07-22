@@ -49,7 +49,7 @@ use crate::planner::Planner;
 use crate::session::{AuthContext, FrontendEnv, OptimizerContext, SessionImpl};
 use crate::user::user_manager::UserInfoManager;
 use crate::user::user_service::UserInfoWriter;
-use crate::user::UserName;
+use crate::user::UserId;
 use crate::FrontendOpts;
 
 /// An embedded frontend without starting meta and without starting frontend as a tcp server.
@@ -124,6 +124,7 @@ impl LocalFrontend {
             Arc::new(AuthContext::new(
                 DEFAULT_DATABASE_NAME.to_string(),
                 DEFAULT_SUPPER_USER.to_string(),
+                1,
             )),
             UserAuthenticator::None,
         ))
@@ -364,14 +365,14 @@ pub struct MockUserInfoWriter {
 #[async_trait::async_trait]
 impl UserInfoWriter for MockUserInfoWriter {
     async fn create_user(&self, user: UserInfo) -> Result<()> {
-        let mut user = user.clone();
+        let mut user = user;
         user.id = self.gen_id();
         self.user_info.write().create_user(user);
         Ok(())
     }
 
-    async fn drop_user(&self, user_name: &str) -> Result<()> {
-        self.user_info.write().drop_user(user_name);
+    async fn drop_user(&self, id: UserId) -> Result<()> {
+        self.user_info.write().drop_user(id);
         Ok(())
     }
 
@@ -379,10 +380,10 @@ impl UserInfoWriter for MockUserInfoWriter {
     /// `GrantAllSources` when grant privilege to user.
     async fn grant_privilege(
         &self,
-        users: Vec<UserName>,
+        users: Vec<UserId>,
         privileges: Vec<GrantPrivilege>,
         with_grant_option: bool,
-        _grantor: UserName,
+        _grantor: UserId,
     ) -> Result<()> {
         let privileges = privileges
             .into_iter()
@@ -393,8 +394,8 @@ impl UserInfoWriter for MockUserInfoWriter {
                 p
             })
             .collect::<Vec<_>>();
-        for user_name in users {
-            if let Some(u) = self.user_info.write().get_user_mut(&user_name) {
+        for user_id in users {
+            if let Some(u) = self.user_info.write().get_user_mut(user_id) {
                 u.grant_privileges.extend(privileges.clone());
             }
         }
@@ -405,15 +406,15 @@ impl UserInfoWriter for MockUserInfoWriter {
     /// `RevokeAllSources` when revoke privilege from user.
     async fn revoke_privilege(
         &self,
-        users: Vec<UserName>,
+        users: Vec<UserId>,
         privileges: Vec<GrantPrivilege>,
-        _granted_by: Option<UserName>,
-        _revoke_by: UserName,
+        _granted_by: Option<UserId>,
+        _revoke_by: UserId,
         revoke_grant_option: bool,
         _cascade: bool,
     ) -> Result<()> {
-        for user_name in users {
-            if let Some(u) = self.user_info.write().get_user_mut(&user_name) {
+        for user_id in users {
+            if let Some(u) = self.user_info.write().get_user_mut(user_id) {
                 u.grant_privileges.iter_mut().for_each(|p| {
                     for rp in &privileges {
                         if rp.object != p.object {

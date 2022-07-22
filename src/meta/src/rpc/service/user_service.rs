@@ -132,10 +132,9 @@ impl<S: MetaStore> UserService for UserServiceImpl<S> {
         request: Request<DropUserRequest>,
     ) -> Result<Response<DropUserResponse>, Status> {
         let req = request.into_inner();
-        let user_name = req.name;
         let version = self
             .user_manager
-            .drop_user(&user_name)
+            .drop_user(req.user_id)
             .await
             .map_err(tonic_err)?;
 
@@ -157,7 +156,7 @@ impl<S: MetaStore> UserService for UserServiceImpl<S> {
             .map_err(tonic_err)?;
         let version = self
             .user_manager
-            .grant_privilege(&req.users, &new_privileges, req.granted_by)
+            .grant_privilege(&req.user_ids, &new_privileges, req.granted_by)
             .await
             .map_err(tonic_err)?;
 
@@ -181,7 +180,7 @@ impl<S: MetaStore> UserService for UserServiceImpl<S> {
         let version = self
             .user_manager
             .revoke_privilege(
-                &req.users,
+                &req.user_ids,
                 &privileges,
                 req.granted_by,
                 req.revoke_by,

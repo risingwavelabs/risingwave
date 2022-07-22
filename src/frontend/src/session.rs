@@ -56,6 +56,7 @@ use crate::test_utils::MockUserInfoWriter;
 use crate::user::user_authentication::md5_hash_with_salt;
 use crate::user::user_manager::UserInfoManager;
 use crate::user::user_service::{UserInfoReader, UserInfoWriter, UserInfoWriterImpl};
+use crate::user::UserId;
 use crate::FrontendOpts;
 
 pub struct OptimizerContext {
@@ -368,13 +369,15 @@ impl FrontendEnv {
 pub struct AuthContext {
     pub database: String,
     pub user_name: String,
+    pub user_id: UserId,
 }
 
 impl AuthContext {
-    pub fn new(database: String, user_name: String) -> Self {
+    pub fn new(database: String, user_name: String, user_id: UserId) -> Self {
         Self {
             database,
             user_name,
+            user_id,
         }
     }
 }
@@ -409,6 +412,7 @@ impl SessionImpl {
             auth_context: Arc::new(AuthContext::new(
                 DEFAULT_DATABASE_NAME.to_string(),
                 DEFAULT_SUPPER_USER.to_string(),
+                1,
             )),
             user_authenticator: UserAuthenticator::None,
             config_map: Default::default(),
@@ -429,6 +433,10 @@ impl SessionImpl {
 
     pub fn user_name(&self) -> &str {
         &self.auth_context.user_name
+    }
+
+    pub fn user_id(&self) -> UserId {
+        self.auth_context.user_id
     }
 
     pub fn config(&self) -> RwLockReadGuard<ConfigMap> {
@@ -502,6 +510,7 @@ impl SessionManager for SessionManagerImpl {
                 Arc::new(AuthContext::new(
                     database.to_string(),
                     user_name.to_string(),
+                    user.id,
                 )),
                 user_authenticator,
             )
