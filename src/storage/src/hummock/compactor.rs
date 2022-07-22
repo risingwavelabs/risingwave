@@ -23,6 +23,7 @@ use dyn_clone::DynClone;
 use futures::future::{try_join_all, BoxFuture};
 use futures::{stream, FutureExt, StreamExt, TryFutureExt};
 use itertools::Itertools;
+use parking_lot::RwLock;
 use risingwave_common::config::constant::hummock::{CompactionFilterFlag, TABLE_OPTION_DUMMY_TTL};
 use risingwave_common::config::StorageConfig;
 use risingwave_hummock_sdk::compact::compact_task_to_string;
@@ -31,8 +32,11 @@ use risingwave_hummock_sdk::key::{
     extract_table_id_and_epoch, get_epoch, get_table_id, Epoch, FullKey,
 };
 use risingwave_hummock_sdk::key_range::KeyRange;
+use risingwave_hummock_sdk::slice_transform::SliceTransform;
 use risingwave_hummock_sdk::{CompactionGroupId, HummockSSTableId, VersionedComparator};
-use risingwave_pb::hummock::{CompactTask, SstableInfo, SubscribeCompactTasksResponse, VacuumTask};
+use risingwave_pb::hummock::{
+    CompactTask, LevelType, SstableInfo, SubscribeCompactTasksResponse, VacuumTask,
+};
 use risingwave_rpc_client::HummockMetaClient;
 use tokio::sync::oneshot::Sender;
 use tokio::task::JoinHandle;
@@ -93,6 +97,8 @@ pub struct CompactorContext {
     pub sstable_id_generator: SstableIdGenerator,
 
     pub compaction_executor: Option<Arc<CompactionExecutor>>,
+
+    pub table_id_to_slice_transform: Arc<RwLock<HashMap<u32, Arc<dyn SliceTransform>>>>,
 }
 
 pub trait CompactionFilter: Send + DynClone {
@@ -219,7 +225,7 @@ pub struct Compactor {
     compact_task: CompactTask,
 }
 
-pub type CompactOutput = (usize, Vec<(Sstable, u64, Vec<u32>)>);
+pub type CompactOutput = (usize, Vec<(Sstable, Vec<u32>)>);
 
 impl Compactor {
     /// Create a new compactor.
@@ -234,7 +240,7 @@ impl Compactor {
     pub async fn compact_shared_buffer_by_compaction_group(
         context: Arc<CompactorContext>,
         payload: UploadTaskPayload,
-    ) -> HummockResult<Vec<(CompactionGroupId, Sstable, u64, Vec<u32>)>> {
+    ) -> HummockResult<Vec<(CompactionGroupId, Sstable, Vec<u32>)>> {
         let mut grouped_payload: HashMap<CompactionGroupId, UploadTaskPayload> = HashMap::new();
         for uncommitted_list in payload {
             let mut next_inner = HashSet::new();
@@ -262,7 +268,7 @@ impl Compactor {
                     move |results| {
                         results
                             .into_iter()
-                            .map(move |result| (id_copy, result.0, result.1, result.2))
+                            .map(move |result| (id_copy, result.0, result.1))
                             .collect_vec()
                     },
                 ),
@@ -281,7 +287,7 @@ impl Compactor {
     pub async fn compact_shared_buffer(
         context: Arc<CompactorContext>,
         payload: UploadTaskPayload,
-    ) -> HummockResult<Vec<(Sstable, u64, Vec<u32>)>> {
+    ) -> HummockResult<Vec<(Sstable, Vec<u32>)>> {
         let mut start_user_keys = payload
             .iter()
             .flat_map(|data_list| data_list.iter().map(UncommittedData::start_user_key))
@@ -378,7 +384,7 @@ impl Compactor {
             let mut level0 = Vec::with_capacity(parallelism);
 
             for (_, sst) in output_ssts {
-                for (table, _, _) in &sst {
+                for (table, _) in &sst {
                     compactor
                         .context
                         .stats
@@ -567,7 +573,7 @@ impl Compactor {
             .reserve(self.compact_task.splits.len());
         let mut compaction_write_bytes = 0;
         for (_, ssts) in output_ssts {
-            for (sst, unit_id, table_ids) in ssts {
+            for (sst, table_ids) in ssts {
                 let sst_info = SstableInfo {
                     id: sst.id,
                     key_range: Some(risingwave_pb::hummock::KeyRange {
@@ -577,7 +583,6 @@ impl Compactor {
                     }),
                     file_size: sst.meta.estimated_size as u64,
                     table_ids,
-                    unit_id,
                 };
                 compaction_write_bytes += sst_info.file_size;
                 self.compact_task.sorted_output_ssts.push(sst_info);
@@ -684,12 +689,11 @@ impl Compactor {
             table_ids,
             upload_join_handle,
             data_len,
-            unit_id,
         } in sealed_builders
         {
             let sst = Sstable::new(table_id, meta);
             let len = data_len;
-            ssts.push((sst, unit_id, table_ids));
+            ssts.push((sst, table_ids));
             upload_join_handles.push(upload_join_handle);
 
             if self.context.is_share_buffer_compact {
@@ -775,7 +779,8 @@ impl Compactor {
             }
             // Do not need to filter the table because manager has done it.
 
-            if can_concat(&level.table_infos.iter().collect_vec()) {
+            if level.level_type == LevelType::Nonoverlapping as i32 {
+                debug_assert!(can_concat(&level.table_infos.iter().collect_vec()));
                 table_iters.push(level.table_infos.clone());
             } else {
                 for table_info in &level.table_infos {
@@ -823,6 +828,7 @@ impl Compactor {
         sstable_store: SstableStoreRef,
         stats: Arc<StateStoreMetrics>,
         compaction_executor: Option<Arc<CompactionExecutor>>,
+        table_id_to_slice_transform: Arc<RwLock<HashMap<u32, Arc<dyn SliceTransform>>>>,
     ) -> (JoinHandle<()>, Sender<()>) {
         let compactor_context = Arc::new(CompactorContext {
             options,
@@ -832,6 +838,7 @@ impl Compactor {
             is_share_buffer_compact: false,
             sstable_id_generator: get_remote_sstable_id_generator(hummock_meta_client.clone()),
             compaction_executor,
+            table_id_to_slice_transform: table_id_to_slice_transform.clone(),
         });
         let (shutdown_tx, mut shutdown_rx) = tokio::sync::oneshot::channel();
         let stream_retry_interval = Duration::from_secs(60);
