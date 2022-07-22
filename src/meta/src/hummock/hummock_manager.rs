@@ -179,14 +179,19 @@ struct Versioning {
     // Newest version
     current_version: HummockVersion,
     // These SSTs should be deleted from object store.
-    // The mapping is from SST to the version that has marked it stale. See `ack_deleted_ssts`.
+    // Mapping from a SST to the version that has marked it stale. See `ack_deleted_ssts`.
     ssts_to_delete: BTreeMap<HummockSSTableId, HummockVersionId>,
     // These deltas should be deleted from meta store.
+    // A delta can be deleted if
+    // - It's version id <= checkpoint version id. Currently we only make checkpoint for version id
+    //   <= min_pinned_version_id.
+    // - AND It either contains no SST to delete, or all these SSTs has been deleted. See
+    //   `extend_ssts_to_delete_from_deltas`.
     deltas_to_delete: Vec<HummockVersionId>,
 
     // Persistent states below
 
-    // mapping from id of each hummock version which succeeds checkpoint to its
+    // Mapping from id of each hummock version which succeeds checkpoint to its
     // `HummockVersionDelta`
     hummock_version_deltas: BTreeMap<HummockVersionId, HummockVersionDelta>,
     pinned_versions: BTreeMap<HummockContextId, HummockPinnedVersion>,
@@ -211,9 +216,9 @@ impl Versioning {
     ) {
         for (_, delta) in self.hummock_version_deltas.range(delta_range) {
             let mut no_sst_to_delete = true;
-            for (_, level_deltas) in delta.level_deltas.iter() {
-                for level_delta in level_deltas.level_deltas.iter() {
-                    for sst_id in level_delta.removed_table_ids.iter() {
+            for level_deltas in delta.level_deltas.values() {
+                for level_delta in &level_deltas.level_deltas {
+                    for sst_id in &level_delta.removed_table_ids {
                         assert!(self.ssts_to_delete.insert(*sst_id, delta.id).is_none());
                         no_sst_to_delete = false;
                     }
@@ -223,8 +228,8 @@ impl Versioning {
             if no_sst_to_delete {
                 self.deltas_to_delete.push(delta.id);
             }
-            // Otherwise, the delta is the delta is qualified for deletion after all its
-            // sst_to_delete is deleted.
+            // Otherwise, the delta is qualified for deletion after all its sst_to_delete is
+            // deleted.
         }
     }
 }
@@ -377,7 +382,18 @@ where
             .collect();
 
         let checkpoint_id = versioning_guard.checkpoint_version.id;
+        versioning_guard.ssts_to_delete.clear();
         versioning_guard.extend_ssts_to_delete_from_deltas(..=checkpoint_id);
+        let preserved_deltas: HashSet<HummockVersionId> =
+            HashSet::from_iter(versioning_guard.ssts_to_delete.values().cloned());
+        versioning_guard.deltas_to_delete = versioning_guard
+            .hummock_version_deltas
+            .keys()
+            .cloned()
+            .filter(|id| {
+                *id <= versioning_guard.checkpoint_version.id && !preserved_deltas.contains(id)
+            })
+            .collect_vec();
 
         Ok(())
     }
@@ -1124,28 +1140,32 @@ where
     /// Tries to checkpoint at min_pinned_version_id
     /// Returns the diff between new and old checkpoint id.
     #[named]
-    pub async fn proceed_version_checkpoint(&self) -> Result<()> {
+    pub async fn proceed_version_checkpoint(&self) -> Result<u64> {
         let mut versioning_guard = write_lock!(self, versioning).await;
         let min_pinned_version_id = versioning_guard.min_pinned_version_id();
         if min_pinned_version_id <= versioning_guard.checkpoint_version.id {
-            return Ok(());
+            return Ok(0);
         }
         let versioning = versioning_guard.deref_mut();
         let mut checkpoint = VarTransaction::new(&mut versioning.checkpoint_version);
         let old_checkpoint_id = checkpoint.id;
-        let new_checkpoint_id = min_pinned_version_id;
+        let mut new_checkpoint_id = min_pinned_version_id;
         for (_, version_delta) in versioning
             .hummock_version_deltas
             .range((Excluded(old_checkpoint_id), Included(new_checkpoint_id)))
         {
             checkpoint.apply_version_delta(version_delta);
         }
+        new_checkpoint_id = checkpoint.id;
+        if new_checkpoint_id == old_checkpoint_id {
+            return Ok(0);
+        }
         commit_multi_var!(self, None, checkpoint)?;
         versioning.extend_ssts_to_delete_from_deltas((
             Excluded(old_checkpoint_id),
             Included(new_checkpoint_id),
         ));
-        Ok(())
+        Ok(new_checkpoint_id - old_checkpoint_id)
     }
 
     #[named]
@@ -1432,7 +1452,7 @@ where
         }
         commit_multi_var!(self, None, hummock_version_deltas)?;
         let deleted = cmp::min(batch_size, versioning.deltas_to_delete.len());
-        versioning.deltas_to_delete.drain(..batch_size);
+        versioning.deltas_to_delete.drain(..deleted);
         let remain = versioning.deltas_to_delete.len();
         #[cfg(test)]
         {

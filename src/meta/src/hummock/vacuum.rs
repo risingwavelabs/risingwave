@@ -48,7 +48,8 @@ where
     }
 
     /// Tries to make checkpoint at the minimum pinned version.
-    /// Returns number of deleted delta
+    ///
+    /// Returns number of deleted deltas
     pub async fn vacuum_version_metadata(&self) -> Result<usize> {
         self.hummock_manager.proceed_version_checkpoint().await?;
         let batch_size = 64usize;
@@ -169,7 +170,6 @@ where
 #[cfg(test)]
 mod tests {
     use std::sync::Arc;
-    use std::time::Duration;
 
     use itertools::Itertools;
     use risingwave_pb::hummock::VacuumTask;
@@ -188,96 +188,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn test_vacuum_version_metadata() {
-        let (_env, hummock_manager, _cluster_manager, worker_node) = setup_compute_env(80).await;
-        let context_id = worker_node.id;
-        let compactor_manager = Arc::new(CompactorManager::default());
-        let vacuum = Arc::new(VacuumTrigger::new(
-            hummock_manager.clone(),
-            compactor_manager.clone(),
-        ));
-
-        hummock_manager
-            .pin_version(context_id, u64::MAX)
-            .await
-            .unwrap();
-
-        // Vacuum no version because the smallest v0 is pinned.
-        assert_eq!(
-            VacuumTrigger::vacuum_version_metadata(&vacuum)
-                .await
-                .unwrap(),
-            0
-        );
-        hummock_manager.unpin_version(context_id).await.unwrap();
-
-        add_test_tables(hummock_manager.as_ref(), context_id).await;
-        // Current state: {v0: [], v1: [test_tables], v2: [test_tables_2, to_delete:test_tables],
-        // v3: [test_tables_2, test_tables_3]}
-
-        // Vacuum v0, v1, v2
-        assert_eq!(
-            VacuumTrigger::vacuum_version_metadata(&vacuum)
-                .await
-                .unwrap(),
-            3
-        );
-    }
-
-    #[tokio::test]
-    async fn test_vacuum_orphan_sst_data() {
-        let (_env, hummock_manager, _cluster_manager, _worker_node) = setup_compute_env(80).await;
-        let compactor_manager = Arc::new(CompactorManager::default());
-        let vacuum = VacuumTrigger::new(hummock_manager.clone(), compactor_manager.clone());
-        // 1. acquire 2 SST ids.
-        hummock_manager.get_new_table_id().await.unwrap();
-        hummock_manager.get_new_table_id().await.unwrap();
-        // 2. no expired SST id.
-        assert_eq!(
-            VacuumTrigger::vacuum_sst_data(&vacuum, Duration::from_secs(60),)
-                .await
-                .unwrap()
-                .len(),
-            0
-        );
-        // 3. 2 expired SST id but no vacuum node.
-        assert_eq!(
-            VacuumTrigger::vacuum_sst_data(&vacuum, Duration::from_secs(0),)
-                .await
-                .unwrap()
-                .len(),
-            0
-        );
-        let _receiver = compactor_manager.add_compactor(0);
-        // 4. 2 expired SST ids.
-        let sst_ids = VacuumTrigger::vacuum_sst_data(&vacuum, Duration::from_secs(0))
-            .await
-            .unwrap();
-        assert_eq!(sst_ids.len(), 2);
-        // 5. got the same 2 expired sst ids because the previous pending SST ids are not
-        // reported.
-        let sst_ids_2 = VacuumTrigger::vacuum_sst_data(&vacuum, Duration::from_secs(0))
-            .await
-            .unwrap();
-        assert_eq!(sst_ids, sst_ids_2);
-        // 6. report the previous pending SST ids to indicate their success.
-        vacuum
-            .report_vacuum_task(VacuumTask {
-                sstable_ids: sst_ids_2,
-            })
-            .await
-            .unwrap();
-        assert_eq!(
-            VacuumTrigger::vacuum_sst_data(&vacuum, Duration::from_secs(0),)
-                .await
-                .unwrap()
-                .len(),
-            0
-        );
-    }
-
-    #[tokio::test]
-    async fn test_vacuum_marked_for_deletion_sst_data() {
+    async fn test_vacuum_basic() {
         let (_env, hummock_manager, _cluster_manager, worker_node) = setup_compute_env(80).await;
         let context_id = worker_node.id;
         let compactor_manager = Arc::new(CompactorManager::default());
@@ -286,35 +197,50 @@ mod tests {
             compactor_manager.clone(),
         ));
         let _receiver = compactor_manager.add_compactor(0);
+
+        assert_eq!(
+            VacuumTrigger::vacuum_version_metadata(&vacuum)
+                .await
+                .unwrap(),
+            0
+        );
+
+        assert_eq!(
+            VacuumTrigger::vacuum_sst_data(&vacuum).await.unwrap().len(),
+            0
+        );
 
         let sst_infos = add_test_tables(hummock_manager.as_ref(), context_id).await;
         // Current state: {v0: [], v1: [test_tables], v2: [test_tables_2, to_delete:test_tables],
         // v3: [test_tables_2, test_tables_3]}
 
-        // Vacuum v0, v1, v2
+        // Makes checkpoint and extends deltas_to_delete. Deletes deltas of v0->v1 and v2->v3.
+        // Delta of v1->v2 cannot be deleted yet because it's used by ssts_to_delete.
         assert_eq!(
             VacuumTrigger::vacuum_version_metadata(&vacuum)
                 .await
                 .unwrap(),
+            2
+        );
+
+        // Found ssts_to_delete
+        assert_eq!(
+            VacuumTrigger::vacuum_sst_data(&vacuum).await.unwrap().len(),
             3
         );
 
-        // Found test_table is marked for deletion.
+        // The deletion is not acked yet.
         assert_eq!(
-            VacuumTrigger::vacuum_sst_data(&vacuum, Duration::from_secs(600),)
-                .await
-                .unwrap()
-                .len(),
+            VacuumTrigger::vacuum_sst_data(&vacuum).await.unwrap().len(),
             3
         );
 
-        // The vacuum task is not reported yet.
+        // The delta cannot be deleted yet.
         assert_eq!(
-            VacuumTrigger::vacuum_sst_data(&vacuum, Duration::from_secs(600),)
+            VacuumTrigger::vacuum_version_metadata(&vacuum)
                 .await
-                .unwrap()
-                .len(),
-            3
+                .unwrap(),
+            0
         );
 
         // The vacuum task is reported.
@@ -330,13 +256,20 @@ mod tests {
             .await
             .unwrap();
 
-        // test_table is already reported.
+        // The delta can be deleted now.
         assert_eq!(
-            VacuumTrigger::vacuum_sst_data(&vacuum, Duration::from_secs(600),)
+            VacuumTrigger::vacuum_version_metadata(&vacuum)
                 .await
-                .unwrap()
-                .len(),
+                .unwrap(),
+            1
+        );
+
+        // No ssts_to_delete.
+        assert_eq!(
+            VacuumTrigger::vacuum_sst_data(&vacuum).await.unwrap().len(),
             0
         );
     }
+
+    // TODO #4081: re-enable after orphan SST GC via listing object store is implemented
 }
