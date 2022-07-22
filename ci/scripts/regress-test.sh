@@ -26,9 +26,22 @@ echo "--- Prepare RiseDev playground"
 cargo make pre-start-playground
 cargo make link-all-in-one-binaries
 
+echo "--- Postgres regress test"
+apt-get update -yy
+apt-get -y install postgresql-client
+export PGPASSWORD='postgres';
+RUST_BACKTRACE=1 target/debug/risingwave_regress_test -h db \
+  -p 5432 \
+  -u postgres \
+  --database postgres \
+  --input `pwd`/src/tests/regress/data \
+  --output `pwd`/src/tests/regress/output \
+  --schedule `pwd`/src/tests/regress/data/schedule \
+  --mode postgres
+
 echo "--- ci-3cn-1fe, RisingWave regress test"
+rm -rf `pwd`/src/tests/regress/output
 cargo make ci-start ci-3cn-1fe
-apt-get update -yy && apt-get -y install postgresql-client
 RUST_BACKTRACE=1 target/debug/risingwave_regress_test -h 127.0.0.1 \
   -p 4566 \
   -u root \

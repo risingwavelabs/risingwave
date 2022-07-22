@@ -13,7 +13,6 @@
 // limitations under the License.
 
 use std::ffi::OsStr;
-use std::net::{Ipv4Addr, SocketAddrV4};
 use std::path::{Path, PathBuf};
 
 use anyhow::Context;
@@ -48,8 +47,13 @@ pub(crate) struct Opts {
     #[clap(name = "PG_USERNAME", short = 'u', long = "user", default_value="postgres", value_hint=ValueHint::Username)]
     pg_user_name: String,
     /// Postgresql server address to test against.
-    #[clap(name = "PG_SERVER_ADDRESS", short = 'h', long = "host", value_hint = ValueHint::Hostname)]
-    pg_server_host: Ipv4Addr,
+    #[clap(
+        name = "PG_SERVER_ADDRESS",
+        short = 'h',
+        long = "host",
+        default_value = "localhost"
+    )]
+    pg_server_host: String,
     /// Postgresql server port to test against.
     #[clap(name = "PG_SERVER_PORT", short = 'p', long = "port")]
     pg_server_port: u16,
@@ -71,10 +75,6 @@ pub(crate) struct Opts {
 }
 
 impl Opts {
-    pub(crate) fn pg_server_addr(&self) -> SocketAddrV4 {
-        SocketAddrV4::new(self.pg_server_host, self.pg_server_port)
-    }
-
     pub(crate) fn pg_user_name(&self) -> &str {
         &self.pg_user_name
     }

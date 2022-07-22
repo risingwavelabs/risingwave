@@ -1,6 +1,27 @@
 version: "3.9"
 services:
+  db:
+    image: postgres
+    environment:
+      - POSTGRES_USER=postgres
+      - POSTGRES_PASSWORD=postgres
+    ports:
+      - '5432:5432'
+    healthcheck:
+      test: [ "CMD-SHELL", "pg_isready -U postgres" ]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+
   rw-build-env:
     image: public.ecr.aws/x5u3w5h6/rw-build-env:v20220718
+    volumes:
+      - ..:/risingwave
+
+  regress-test-env:
+    image: public.ecr.aws/x5u3w5h6/rw-build-env:v20220718
+    depends_on:
+      db:
+        condition: service_healthy
     volumes:
       - ..:/risingwave
