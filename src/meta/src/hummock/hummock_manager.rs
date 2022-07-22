@@ -732,7 +732,22 @@ where
         &self,
         compaction_group_id: CompactionGroupId,
     ) -> Result<Option<CompactTask>> {
-        self.get_compact_task_impl(compaction_group_id, None).await
+        let task = self
+            .get_compact_task_impl(compaction_group_id, None)
+            .await?;
+        if let Some(mut task) = task {
+            // TODO: merge this two operation in one lock guard because the target sub-level may be
+            // removed by the other thread.
+            if CompactStatus::is_trivial_move_task(&task) {
+                task.task_status = true;
+                task.sorted_output_ssts = task.input_ssts[0].table_infos.clone();
+                let ret = self.report_compact_task_impl(&task, true).await?;
+                assert!(ret);
+            } else {
+                return Ok(Some(task));
+            }
+        }
+        Ok(None)
     }
 
     pub async fn manual_get_compact_task(
@@ -785,11 +800,19 @@ where
         Ok(())
     }
 
+    pub async fn report_compact_task(&self, compact_task: &CompactTask) -> Result<bool> {
+        self.report_compact_task_impl(compact_task, false).await
+    }
+
     /// `report_compact_task` is retryable. `task_id` in `compact_task` parameter is used as the
     /// idempotency key. Return Ok(false) to indicate the `task_id` is not found, which may have
     /// been processed previously.
     #[named]
-    pub async fn report_compact_task(&self, compact_task: &CompactTask) -> Result<bool> {
+    pub async fn report_compact_task_impl(
+        &self,
+        compact_task: &CompactTask,
+        trival_move: bool,
+    ) -> Result<bool> {
         let mut compaction_guard = write_lock!(self, compaction).await;
         let start_time = Instant::now();
         let compaction = compaction_guard.deref_mut();
@@ -803,13 +826,13 @@ where
         );
         let mut compact_task_assignment =
             BTreeMapTransaction::new(&mut compaction.compact_task_assignment);
-        let assignee_context_id = match compact_task_assignment.remove(compact_task.task_id) {
-            None => {
-                // The task is not found.
-                return Ok(false);
-            }
-            Some(assignment) => assignment.context_id,
-        };
+        let assignee_context_id = compact_task_assignment
+            .remove(compact_task.task_id)
+            .map(|assignment| assignment.context_id);
+        // The task is not found.
+        if assignee_context_id.is_none() && !trival_move {
+            return Ok(false);
+        }
         compact_status.report_compact_task(compact_task);
         if compact_task.task_status {
             // The compaction task is finished.
@@ -839,9 +862,11 @@ where
                 .or_default()
                 .level_deltas;
             for level in &compact_task.input_ssts {
-                version_stale_sstables
-                    .id
-                    .extend(level.table_infos.iter().map(|sst| sst.id).collect_vec());
+                if !trival_move {
+                    version_stale_sstables
+                        .id
+                        .extend(level.table_infos.iter().map(|sst| sst.id).collect_vec());
+                }
                 let level_delta = LevelDelta {
                     level_idx: level.level_idx,
                     removed_table_ids: level.table_infos.iter().map(|sst| sst.id).collect_vec(),
@@ -862,29 +887,41 @@ where
             version_delta.id = new_version_id;
             hummock_version_deltas.insert(version_delta.id, version_delta);
 
-            for SstableInfo { id: ref sst_id, .. } in &compact_task.sorted_output_ssts {
-                match sstable_id_infos.get_mut(*sst_id) {
-                    None => {
-                        return Err(Error::InternalError(format!(
-                            "invalid sst id {}, may have been vacuumed",
-                            sst_id
-                        )));
-                    }
-                    Some(mut sst_id_info) => {
-                        sst_id_info.meta_create_timestamp = sstable_id_info::get_timestamp_now();
+            if !trival_move {
+                for SstableInfo { id: ref sst_id, .. } in &compact_task.sorted_output_ssts {
+                    match sstable_id_infos.get_mut(*sst_id) {
+                        None => {
+                            return Err(Error::InternalError(format!(
+                                "invalid sst id {}, may have been vacuumed",
+                                sst_id
+                            )));
+                        }
+                        Some(mut sst_id_info) => {
+                            sst_id_info.meta_create_timestamp =
+                                sstable_id_info::get_timestamp_now();
+                        }
                     }
                 }
             }
+            if trival_move {
+                commit_multi_var!(
+                    self,
+                    assignee_context_id,
+                    compact_status,
+                    hummock_version_deltas
+                )?;
+            } else {
+                commit_multi_var!(
+                    self,
+                    assignee_context_id,
+                    compact_status,
+                    compact_task_assignment,
+                    hummock_version_deltas,
+                    version_stale_sstables,
+                    sstable_id_infos
+                )?;
+            }
 
-            commit_multi_var!(
-                self,
-                Some(assignee_context_id),
-                compact_status,
-                compact_task_assignment,
-                hummock_version_deltas,
-                version_stale_sstables,
-                sstable_id_infos
-            )?;
             versioning
                 .hummock_versions
                 .insert(new_version.id, new_version.get_sst_ids());
@@ -893,7 +930,7 @@ where
             // The compaction task is cancelled.
             commit_multi_var!(
                 self,
-                Some(assignee_context_id),
+                assignee_context_id,
                 compact_status,
                 compact_task_assignment
             )?;
