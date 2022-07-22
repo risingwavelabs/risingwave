@@ -89,7 +89,6 @@ async fn create_tables(
     let sql = get_seed_table_sql(opt);
 
     let statements = parse_sql(&sql);
-    let n_statements = statements.len();
 
     for stmt in statements.iter() {
         let create_sql = format!("{}", stmt);
@@ -107,9 +106,8 @@ async fn create_tables(
         .collect_vec();
 
     let mut mviews = vec![];
-    // Generate Materialized Views 1:1 with tables, so they have equal weight
-    // of being queried.
-    for i in 0..n_statements {
+    // Generate some mviews
+    for i in 0..10 {
         let (create_sql, table) = mview_sql_gen(rng, tables.clone(), &format!("m{}", i));
         client.execute(&create_sql, &[]).await.unwrap();
         tables.push(table.clone());

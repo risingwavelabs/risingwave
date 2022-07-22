@@ -49,7 +49,6 @@ fn get_seed_table_sql() -> String {
 async fn create_tables(session: Arc<SessionImpl>, rng: &mut impl Rng) -> Vec<Table> {
     let sql = get_seed_table_sql();
     let statements = parse_sql(&sql);
-    let n_statements = statements.len();
 
     let mut tables = vec![];
     for s in statements.into_iter() {
@@ -69,9 +68,8 @@ async fn create_tables(session: Arc<SessionImpl>, rng: &mut impl Rng) -> Vec<Tab
         }
     }
 
-    // Generate Materialized Views 1:1 with tables, so they have equal weight
-    // of being queried.
-    for i in 0..n_statements {
+    // Generate some mviews
+    for i in 0..10 {
         let (sql, table) = mview_sql_gen(rng, tables.clone(), &format!("m{}", i));
         let stmts = parse_sql(&sql);
         let stmt = stmts[0].clone();
