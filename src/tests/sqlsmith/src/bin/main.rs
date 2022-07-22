@@ -71,6 +71,14 @@ enum Commands {
     Test(TestOptions),
 }
 
+fn get_seed_table_sql(opt: &TestOptions) -> String {
+    let seed_files = vec!["tpch.sql", "nexmark.sql"];
+    seed_files
+        .iter()
+        .map(|filename| std::fs::read_to_string(format!("{}/{}", opt.testdata, filename)).unwrap())
+        .collect::<String>()
+}
+
 async fn create_tables(
     rng: &mut impl Rng,
     opt: &TestOptions,
@@ -78,11 +86,7 @@ async fn create_tables(
 ) -> (Vec<Table>, Vec<Table>) {
     log::info!("Preparing tables...");
 
-    let seed_files = vec!["tpch.sql", "nexmark.sql"];
-    let sql = seed_files
-        .iter()
-        .map(|filename| std::fs::read_to_string(format!("{}/{}", opt.testdata, filename)).unwrap())
-        .collect::<String>();
+    let sql = get_seed_table_sql(opt);
 
     let statements = parse_sql(&sql);
     let n_statements = statements.len();

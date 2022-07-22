@@ -37,13 +37,17 @@ async fn handle(session: Arc<SessionImpl>, stmt: Statement, sql: String) {
         .unwrap_or_else(|e| panic!("Failed to handle SQL:\n{}\nReason:\n{}", sql, e));
 }
 
-/// Create the tables defined in testdata.
-async fn create_tables(session: Arc<SessionImpl>, rng: &mut impl Rng) -> Vec<Table> {
+fn get_seed_table_sql() -> String {
     let seed_files = vec!["tests/testdata/tpch.sql", "tests/testdata/nexmark.sql"];
-    let sql = seed_files
+    seed_files
         .iter()
         .map(|filename| std::fs::read_to_string(filename).unwrap())
-        .collect::<String>();
+        .collect::<String>()
+}
+
+/// Create the tables defined in testdata.
+async fn create_tables(session: Arc<SessionImpl>, rng: &mut impl Rng) -> Vec<Table> {
+    let sql = get_seed_table_sql();
     let statements = parse_sql(&sql);
     let n_statements = statements.len();
 
