@@ -19,8 +19,7 @@ use clap::Parser as ClapParser;
 use itertools::Itertools;
 use rand::Rng;
 use risingwave_sqlparser::ast::Statement;
-use risingwave_sqlparser::parser::Parser;
-use risingwave_sqlsmith::{mview_sql_gen, print_function_table, sql_gen, Table};
+use risingwave_sqlsmith::{mview_sql_gen, parse_sql, print_function_table, sql_gen, Table};
 use tokio_postgres::error::{DbError, Error as PgError, SqlState};
 use tokio_postgres::NoTls;
 
@@ -85,8 +84,7 @@ async fn create_tables(
         .map(|filename| std::fs::read_to_string(format!("{}/{}", opt.testdata, filename)).unwrap())
         .collect::<String>();
 
-    let statements =
-        Parser::parse_sql(&sql).unwrap_or_else(|_| panic!("Failed to parse SQL: {}", sql));
+    let statements = parse_sql(&sql);
     let n_statements = statements.len();
 
     for stmt in statements.iter() {

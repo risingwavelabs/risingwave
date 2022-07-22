@@ -22,12 +22,7 @@ use risingwave_frontend::session::{OptimizerContext, OptimizerContextRef, Sessio
 use risingwave_frontend::test_utils::LocalFrontend;
 use risingwave_frontend::{handler, FrontendOpts};
 use risingwave_sqlparser::ast::Statement;
-use risingwave_sqlparser::parser::Parser;
-use risingwave_sqlsmith::{mview_sql_gen, sql_gen, Table};
-
-fn parse_sql(sql: &str) -> Vec<Statement> {
-    Parser::parse_sql(sql).unwrap_or_else(|_| panic!("Failed to parse SQL: {}", sql))
-}
+use risingwave_sqlsmith::{mview_sql_gen, parse_sql, sql_gen, Table};
 
 /// Executes sql queries
 /// It captures panics so it can recover and print failing sql query.
