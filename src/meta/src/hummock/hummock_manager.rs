@@ -219,7 +219,8 @@ impl Versioning {
             for level_deltas in delta.level_deltas.values() {
                 for level_delta in &level_deltas.level_deltas {
                     for sst_id in &level_delta.removed_table_ids {
-                        assert!(self.ssts_to_delete.insert(*sst_id, delta.id).is_none());
+                        let duplicate_insert = self.ssts_to_delete.insert(*sst_id, delta.id);
+                        assert!(duplicate_insert.is_none());
                         no_sst_to_delete = false;
                     }
                 }
@@ -1165,6 +1166,11 @@ where
             Excluded(old_checkpoint_id),
             Included(new_checkpoint_id),
         ));
+        #[cfg(test)]
+        {
+            drop(versioning_guard);
+            self.check_state_consistency().await;
+        }
         Ok(new_checkpoint_id - old_checkpoint_id)
     }
 
@@ -1185,15 +1191,23 @@ where
              versioning_guard: &RwLockWriteGuard<'_, Versioning>| {
                 let compact_statuses_copy = compaction_guard.compaction_statuses.clone();
                 let compact_task_assignment_copy = compaction_guard.compact_task_assignment.clone();
-                let current_version_id_copy = versioning_guard.current_version.id;
+                let current_version_copy = versioning_guard.current_version.clone();
                 let pinned_versions_copy = versioning_guard.pinned_versions.clone();
                 let pinned_snapshots_copy = versioning_guard.pinned_snapshots.clone();
+                let ssts_to_delete_copy = versioning_guard.ssts_to_delete.clone();
+                let deltas_to_delete_copy = versioning_guard.deltas_to_delete.clone();
+                let checkpoint_version_copy = versioning_guard.checkpoint_version.clone();
+                let hummock_version_deltas_copy = versioning_guard.hummock_version_deltas.clone();
                 (
                     compact_statuses_copy,
                     compact_task_assignment_copy,
-                    current_version_id_copy,
+                    current_version_copy,
                     pinned_versions_copy,
                     pinned_snapshots_copy,
+                    ssts_to_delete_copy,
+                    deltas_to_delete_copy,
+                    checkpoint_version_copy,
+                    hummock_version_deltas_copy,
                 )
             };
         let mem_state = get_state(compaction_guard.borrow(), versioning_guard.borrow());
