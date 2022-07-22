@@ -65,7 +65,6 @@ pub fn build_agg_call_from_prost(
             )))
         }
     };
-    // TODO: rewrite here.
     let filter = match agg_call_proto.filter {
         Some(ref prost_filter) => Some(Arc::from(build_from_prost(prost_filter)?)),
         None => None,

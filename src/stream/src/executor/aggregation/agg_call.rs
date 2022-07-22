@@ -65,7 +65,6 @@ pub struct AggCall {
     /// Specific `StreamingAggStateImpl` may optimize its implementation based on this knowledge.
     pub append_only: bool,
 
-    /// TODO: rewrite.
     /// Filter of aggregation.
     pub filter: Option<ExpressionRef>,
 }

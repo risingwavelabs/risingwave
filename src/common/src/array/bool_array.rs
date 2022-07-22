@@ -41,7 +41,6 @@ impl BoolArray {
         builder.finish()
     }
 
-    // TODO: rethink.
     pub fn to_bitmap(&self) -> Bitmap {
         self.data.to_owned().bitand(self.null_bitmap())
     }
