@@ -110,5 +110,10 @@ name = "bench_fs_operation"
 harness = false
 
 [[bench]]
+name = "bench_compression"
+harness = false
+
+[[bench]]
 name = "bench_compactor"
 harness = false
+
