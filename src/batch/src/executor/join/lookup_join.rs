@@ -210,11 +210,21 @@ impl<C: BatchTaskContext> ProbeSideSourceBuilder for ProbeSideSource<C> {
 
 /// Lookup Join Executor.
 /// High-level idea:
-/// 1) Iterate through each row in the build side
-/// 2) For each row R, find the rows that match with R on the join conditions on the probe side by
-/// using the `ExchangeExecutor` to query the probe side
-/// 3) Join R and the matching rows on the probe side together with either inner or left outer join
-/// 4) Repeat 2-3) for every row in the build side
+/// 1) Group together build side rows with the same datums on the key columns
+/// 2) Create all the `ExchangeExecutors` for scanning the rows on the probe side table
+/// 3) Execute the `ExchangeExecutors` and get the probe side chunks
+/// 4) For each group of rows R1, determine the rows R2 in the probe side chunks that have the
+///    same key datums as the rows in R1.
+/// 5) Join R1 and R2 together based on the join type and condition.
+/// 6) Repeat 4-5) for every row on the build side.
+///
+/// The actual implementation of this high level idea is much more complicated as we receive
+/// rows on the build side and probe side chunk-by-chunk instead of all of once.
+///
+/// Furthermore, we also want to minimize the number of RPC requests we send through the
+/// `ExchangeExecutors`. This is done by grouping rows with the same key datums together, and also
+/// by grouping together scan ranges that point to the same partition (and can thus be easily
+/// scanned by the same worker node).
 pub struct LookupJoinExecutor<P> {
     join_type: JoinType,
     condition: Option<BoxedExpression>,
@@ -273,6 +283,7 @@ impl<P: 'static + ProbeSideSourceBuilder> LookupJoinExecutor<P> {
 
             assert_eq!(row_keys.len(), row_refs_list.len());
 
+            //
             self.probe_side_source.reset();
             for row_key in &row_keys {
                 self.probe_side_source.add_scan_range(row_key)?;
@@ -282,11 +293,15 @@ impl<P: 'static + ProbeSideSourceBuilder> LookupJoinExecutor<P> {
             let mut probe_side_stream = probe_child.execute();
 
             let mut probe_side_chunk_exists = true;
+
+            // has_match tells us, for each row in the build side chunk, if it has a match
+            // on the probe side table
             let mut has_match = row_idxs
                 .iter()
                 .map(|rows| vec![false; rows.len()])
                 .collect_vec();
 
+            // Keep looping until there are no more probe side chunks to get, then do 1 more loop
             while probe_side_chunk_exists {
                 let probe_side_chunk = probe_side_stream.next().await;
                 probe_side_chunk_exists = probe_side_chunk.is_some();
@@ -298,8 +313,9 @@ impl<P: 'static + ProbeSideSourceBuilder> LookupJoinExecutor<P> {
                 };
 
                 for (i, row_refs) in row_refs_list.iter().enumerate() {
-                    let expr = self.build_expression(&row_keys[i], 0);
-
+                    // We filter the probe side chunk to only have the rows whose key datums
+                    // matches the key datums of the row_refs we're currently looking at
+                    let expr = self.create_expression(&row_keys[i], 0);
                     let chunk = if let Some(chunk) = probe_side_chunk.as_ref() {
                         let vis = expr.eval(chunk)?;
                         let chunk = chunk.with_visibility(vis.as_bool().iter().collect());
@@ -469,9 +485,9 @@ impl<P: 'static + ProbeSideSourceBuilder> LookupJoinExecutor<P> {
         (all_row_keys, all_row_idxs)
     }
 
-    /// Returns an expression that returns true if the value of the datums in all the probe side
+    /// Creates an expression that returns true if the value of the datums in all the probe side
     /// key columns match the given `key_scalar_impls`.
-    fn build_expression(&self, key_scalar_impls: &[ScalarImpl], i: usize) -> BoxedExpression {
+    fn create_expression(&self, key_scalar_impls: &[ScalarImpl], i: usize) -> BoxedExpression {
         assert!(i < key_scalar_impls.len());
 
         let literal = Box::new(LiteralExpression::new(
@@ -493,7 +509,7 @@ impl<P: 'static + ProbeSideSourceBuilder> LookupJoinExecutor<P> {
                 Type::And,
                 DataType::Boolean,
                 equal,
-                self.build_expression(key_scalar_impls, i + 1),
+                self.create_expression(key_scalar_impls, i + 1),
             )
         }
     }
@@ -539,6 +555,7 @@ impl<P: 'static + ProbeSideSourceBuilder> LookupJoinExecutor<P> {
         Ok(Some(one_row_chunk))
     }
 
+    /// Converts row to a data chunk
     fn convert_row_for_builder(&self, cur_row: &RowRef) -> Result<Option<DataChunk>> {
         Ok(Some(convert_row_to_chunk(
             cur_row,
