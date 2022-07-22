@@ -197,7 +197,6 @@ pub fn generate_tables(metas: Vec<(u64, SstableMeta)>) -> Vec<SstableInfo> {
             }),
             file_size: meta.estimated_size as u64,
             table_ids: vec![id as u32],
-            unit_id: 0,
         })
         .collect_vec()
 }
