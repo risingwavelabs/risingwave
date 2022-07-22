@@ -150,7 +150,7 @@ mod tests {
                 1,
                 vec![Row::new(res)],
                 // NOTE: Extended mode don't need.
-                vec![PgFieldDescriptor::new("".to_string(), TypeOid::Varchar);len],
+                vec![PgFieldDescriptor::new("".to_string(), TypeOid::Varchar); len],
                 true,
             ))
         }
