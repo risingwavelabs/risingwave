@@ -194,35 +194,54 @@ fn print_kv_pairs(block_data: Bytes, table_data: &TableData) -> anyhow::Result<(
         println!("\t\t     epoch: {}", epoch);
         println!("\t\t      type: {}", if is_put { "Put" } else { "Delete" });
 
-        if let Some(table_id) = get_table_id(full_key) {
-            print!("\t\t     table: {} - ", table_id);
-            match table_data.get(&table_id) {
-                None => {
-                    println!("(unknown)");
-                }
-                Some((table_name, columns)) => {
-                    println!("{}", table_name);
-
-                    // Print stored value.
-                    let column_idx =
-                        deserialize_column_id(&user_key[user_key.len() - 4..])?.get_id();
-                    if is_put && !user_val.is_empty() && column_idx >= 0 {
-                        let (data_type, name, is_hidden) = &columns[column_idx as usize];
-                        let datum = deserialize_cell(user_val, data_type).unwrap().unwrap();
-                        println!(
-                            "\t\t    column: {} {}",
-                            name,
-                            if *is_hidden { "(hidden)" } else { "" }
-                        );
-                        println!("\t\t     datum: {:?}", datum);
-                    }
-                }
-            };
-        }
+        print_table_column(full_key, user_val, table_data, is_put)?;
 
         println!();
 
         block_iter.next();
+    }
+
+    Ok(())
+}
+
+/// If possible, prints information about the table, column, and stored value.
+fn print_table_column(
+    full_key: &[u8],
+    user_val: &[u8],
+    table_data: &TableData,
+    is_put: bool,
+) -> anyhow::Result<()> {
+    let user_key = user_key(full_key);
+
+    let table_id = match get_table_id(full_key) {
+        None => return Ok(()),
+        Some(table_id) => table_id,
+    };
+
+    print!("\t\t     table: {} - ", table_id);
+    let (table_name, columns) = match table_data.get(&table_id) {
+        None => {
+            println!("(unknown)");
+            return Ok(());
+        }
+        Some((table_name, columns)) => (table_name, columns),
+    };
+    println!("{}", table_name);
+
+    // Print stored value.
+    let column_idx = deserialize_column_id(&user_key[user_key.len() - 4..])?.get_id();
+    if is_put && !user_val.is_empty() && column_idx >= 0 && (column_idx as usize) < columns.len() {
+        let (data_type, name, is_hidden) = &columns[column_idx as usize];
+        let datum = match deserialize_cell(user_val, data_type)? {
+            None => return Ok(()),
+            Some(datum) => datum,
+        };
+        println!(
+            "\t\t    column: {} {}",
+            name,
+            if *is_hidden { "(hidden)" } else { "" }
+        );
+        println!("\t\t     datum: {:?}", datum);
     }
 
     Ok(())
