@@ -110,7 +110,7 @@ select * from mv_hop_agg_1 order by window_start;
  8 2022-01-01 11:00:00
 
 query IIT
-select * from mv_hop_agg_2 order by window_start;
+select * from mv_hop_agg_2 order by window_start, uid;
 ----
 1 4 2022-01-01 09:45:00
 2 2 2022-01-01 09:45:00

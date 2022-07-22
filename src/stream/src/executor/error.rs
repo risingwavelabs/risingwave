@@ -41,12 +41,14 @@ enum StreamExecutorErrorInner {
     SerdeError(BoxedError),
 
     // TODO: remove this
-    #[error("Hash join error: {0}")]
-    HashJoinError(RwError),
-
-    // TODO: remove this
     #[error("Source error: {0}")]
     SourceError(RwError),
+
+    #[error("Sink error: {0}")]
+    SinkError(RwError),
+
+    #[error("RPC error: {0}")]
+    RpcError(risingwave_rpc_client::error::RpcError),
 
     #[error("Channel `{0}` closed")]
     ChannelClosed(String),
@@ -74,12 +76,16 @@ impl StreamExecutorError {
         StreamExecutorErrorInner::SerdeError(error.into()).into()
     }
 
-    pub fn hash_join_error(error: impl Into<RwError>) -> Self {
-        StreamExecutorErrorInner::HashJoinError(error.into()).into()
-    }
-
     pub fn source_error(error: impl Into<RwError>) -> Self {
         StreamExecutorErrorInner::SourceError(error.into()).into()
+    }
+
+    pub fn sink_error(error: impl Into<RwError>) -> Self {
+        StreamExecutorErrorInner::SinkError(error.into()).into()
+    }
+
+    pub fn rpc_error(error: risingwave_rpc_client::error::RpcError) -> Self {
+        StreamExecutorErrorInner::RpcError(error).into()
     }
 
     pub fn channel_closed(name: impl Into<String>) -> Self {
@@ -156,6 +162,12 @@ impl From<anyhow::Error> for StreamExecutorError {
 impl From<memcomparable::Error> for StreamExecutorError {
     fn from(m: memcomparable::Error) -> Self {
         Self::serde_error(m)
+    }
+}
+
+impl From<risingwave_rpc_client::error::RpcError> for StreamExecutorError {
+    fn from(e: risingwave_rpc_client::error::RpcError) -> Self {
+        Self::rpc_error(e)
     }
 }
 

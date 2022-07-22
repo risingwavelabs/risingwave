@@ -14,7 +14,7 @@
 
 use std::env;
 
-use anyhow::Result;
+use anyhow::{bail, Result};
 use risingwave_pb::common::WorkerType;
 use risingwave_rpc_client::MetaClient;
 
@@ -29,14 +29,25 @@ impl MetaServiceOpts {
     ///
     /// * `RW_META_ADDR`: meta service address
     pub fn from_env() -> Result<Self> {
-        let meta_addr = env::var("RW_META_ADDR").unwrap_or_else(|_| {
-            const DEFAULT_ADDR: &str = "http://127.0.0.1:5690";
-            tracing::warn!(
-                "`RW_META_ADDR` not found, using default meta address {}",
-                DEFAULT_ADDR
-            );
-            DEFAULT_ADDR.to_string()
-        });
+        let meta_addr = match env::var("RW_META_ADDR") {
+            Ok(url) => {
+                tracing::info!("using meta addr from `RW_META_ADDR`: {}", url);
+                url
+            }
+            Err(_) => {
+                const MESSAGE: &str = "env variable `RW_META_ADDR` not found.
+
+For `./risedev d` use cases, please do the following:
+* use `./risedev d for-ctl` to start the cluster.
+* use `./risedev ctl` to use risectl.
+
+For `./risedev apply-compose-deploy` users,
+* `RW_META_ADDR` will be printed out when deploying. Please copy the bash exports to your console.
+
+risectl requires a full persistent cluster to operate. Please make sure you're not running in minimum mode.";
+                bail!(MESSAGE);
+            }
+        };
         Ok(Self { meta_addr })
     }
 

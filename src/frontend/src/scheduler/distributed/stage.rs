@@ -13,31 +13,36 @@
 // limitations under the License.
 
 use std::collections::HashMap;
-use std::mem::swap;
+use std::mem;
 use std::sync::Arc;
 
 use anyhow::anyhow;
 use arc_swap::ArcSwap;
 use futures::{stream, StreamExt};
+use itertools::Itertools;
+use risingwave_common::bail;
+use risingwave_common::util::worker_util::get_workers_by_parallel_unit_ids;
 use risingwave_pb::batch_plan::plan_node::NodeBody;
 use risingwave_pb::batch_plan::{
     ExchangeNode, ExchangeSource, MergeSortExchangeNode, PlanFragment, PlanNode as PlanNodeProst,
     TaskId as TaskIdProst, TaskOutputId,
 };
-use risingwave_pb::common::HostAddress;
+use risingwave_pb::common::{HostAddress, WorkerNode};
 use risingwave_rpc_client::ComputeClientPoolRef;
 use tokio::spawn;
 use tokio::sync::mpsc::{channel, Receiver, Sender};
 use tokio::sync::RwLock;
 use tokio::task::JoinHandle;
-use tracing::{error, info};
+use tracing::error;
 use uuid::Uuid;
 use StageEvent::Failed;
 
 use crate::optimizer::plan_node::PlanNodeType;
 use crate::scheduler::distributed::stage::StageState::Pending;
 use crate::scheduler::distributed::QueryMessage;
-use crate::scheduler::plan_fragmenter::{ExecutionPlanNode, QueryStageRef, StageId, TaskId};
+use crate::scheduler::plan_fragmenter::{
+    ExecutionPlanNode, PartitionInfo, QueryStageRef, StageId, TaskId,
+};
 use crate::scheduler::worker_node_manager::WorkerNodeManagerRef;
 use crate::scheduler::SchedulerError::Internal;
 use crate::scheduler::{SchedulerError, SchedulerResult};
@@ -187,15 +192,17 @@ impl StageExecution {
             _ => {
                 // This is possible since we notify stage schedule event to query runner, which may
                 // receive multi events and start stage multi times.
-                info!(
+                tracing::trace!(
                     "Staged {:?}-{:?} already started, skipping.",
-                    &self.stage.query_id, &self.stage.id
+                    &self.stage.query_id,
+                    &self.stage.id
                 );
                 Ok(())
             }
         }
     }
 
+    #[expect(clippy::unused_async)]
     pub async fn stop(&self) -> SchedulerResult<()> {
         todo!()
     }
@@ -210,7 +217,8 @@ impl StageExecution {
     }
 
     /// Returns all exchange sources for `output_id`. Each `ExchangeSource` is identified by
-    /// producer `TaskId` and `output_id`, since each task may produce output to several channels.
+    /// producer's `TaskId` and `output_id` (consumer's `TaskId`), since each task may produce
+    /// output to several channels.
     ///
     /// When this method is called, all tasks should have been scheduled, and their `worker_node`
     /// should have been set.
@@ -256,9 +264,7 @@ impl StageRunner {
         {
             // Changing state
             let mut s = self.state.write().await;
-            let mut tmp_s = StageState::Failed;
-            swap(&mut *s, &mut tmp_s);
-            match tmp_s {
+            match mem::replace(&mut *s, StageState::Failed) {
                 StageState::Started { sender, handle } => {
                     *s = StageState::Running {
                         _sender: sender,
@@ -270,16 +276,8 @@ impl StageRunner {
         }
 
         // All tasks scheduled, send `StageScheduled` event to `QueryRunner`.
-        self.msg_sender
-            .send(QueryMessage::Stage(StageEvent::Scheduled(self.stage.id)))
-            .await
-            .map_err(|e| {
-                Internal(anyhow!(
-                    "Failed to send stage scheduled event: {:?}, reason: {:?}",
-                    self.stage.id,
-                    e
-                ))
-            })?;
+        self.send_event(QueryMessage::Stage(StageEvent::Scheduled(self.stage.id)))
+            .await?;
 
         Ok(())
     }
@@ -299,14 +297,44 @@ impl StageRunner {
 
     async fn schedule_tasks(&self) -> SchedulerResult<()> {
         let mut futures = vec![];
-        for id in 0..self.stage.parallelism {
-            let task_id = TaskIdProst {
-                query_id: self.stage.query_id.id.clone(),
-                stage_id: self.stage.id,
-                task_id: id,
+
+        if let Some(table_scan_info) = self.stage.table_scan_info.as_ref() && let Some(vnode_bitmaps) = table_scan_info.partitions.as_ref() {
+            // If the stage has table scan nodes, we create tasks according to the data distribution
+            // and partition of the table.
+            // We let each task read one partition by setting the `vnode_ranges` of the scan node in
+            // the task.
+            // We schedule the task to the worker node that owns the data partition.
+            let parallel_unit_ids = vnode_bitmaps.keys().cloned().collect_vec();
+            let all_workers = self.worker_node_manager.list_worker_nodes();
+            let workers = match get_workers_by_parallel_unit_ids(&all_workers, &parallel_unit_ids) {
+                Ok(workers) => workers,
+                Err(e) => bail!("{}", e)
             };
-            let plan_fragment = self.create_plan_fragment(id);
-            futures.push(async { self.schedule_task(task_id, plan_fragment).await });
+
+            for (i, (parallel_unit_id, worker)) in parallel_unit_ids
+                .into_iter()
+                .zip_eq(workers.into_iter())
+                .enumerate()
+            {
+                let task_id = TaskIdProst {
+                    query_id: self.stage.query_id.id.clone(),
+                    stage_id: self.stage.id,
+                    task_id: i as u32,
+                };
+                let vnode_ranges = vnode_bitmaps[&parallel_unit_id].clone();
+                let plan_fragment = self.create_plan_fragment(i as u32, Some(vnode_ranges));
+                futures.push(self.schedule_task(task_id, plan_fragment, Some(worker)));
+            }
+        } else {
+            for id in 0..self.stage.parallelism {
+                let task_id = TaskIdProst {
+                    query_id: self.stage.query_id.id.clone(),
+                    stage_id: self.stage.id,
+                    task_id: id,
+                };
+                let plan_fragment = self.create_plan_fragment(id, None);
+                futures.push(self.schedule_task(task_id, plan_fragment, None));
+            }
         }
         let mut buffered = stream::iter(futures).buffer_unordered(TASK_SCHEDULING_PARALLELISM);
         while let Some(result) = buffered.next().await {
@@ -319,30 +347,40 @@ impl StageRunner {
         &self,
         task_id: TaskIdProst,
         plan_fragment: PlanFragment,
+        worker: Option<WorkerNode>,
     ) -> SchedulerResult<()> {
-        let worker_node = self.worker_node_manager.next_random()?;
+        let worker_node_addr = worker
+            .unwrap_or(self.worker_node_manager.next_random()?)
+            .host
+            .unwrap();
+
+        #[expect(clippy::needless_borrow)]
         let compute_client = self
             .compute_client_pool
-            .get_client_for_addr(worker_node.host.as_ref().unwrap().into())
+            .get_client_for_addr((&worker_node_addr).into())
             .await
             .map_err(|e| anyhow!(e))?;
 
         let t_id = task_id.task_id;
         compute_client
-            .create_task2(task_id, plan_fragment, self.epoch)
+            .create_task(task_id, plan_fragment, self.epoch)
             .await
             .map_err(|e| anyhow!(e))?;
 
         self.tasks[&t_id].inner.store(Arc::new(TaskStatus {
             _task_id: t_id,
-            location: Some(worker_node.host.unwrap()),
+            location: Some(worker_node_addr),
         }));
 
         Ok(())
     }
 
-    fn create_plan_fragment(&self, task_id: TaskId) -> PlanFragment {
-        let plan_node_prost = self.convert_plan_node(&self.stage.root, task_id);
+    fn create_plan_fragment(
+        &self,
+        task_id: TaskId,
+        partition: Option<PartitionInfo>,
+    ) -> PlanFragment {
+        let plan_node_prost = self.convert_plan_node(&self.stage.root, task_id, partition);
         let exchange_info = self.stage.exchange_info.clone();
 
         PlanFragment {
@@ -355,18 +393,19 @@ impl StageRunner {
         &self,
         execution_plan_node: &ExecutionPlanNode,
         task_id: TaskId,
+        partition: Option<PartitionInfo>,
     ) -> PlanNodeProst {
         match execution_plan_node.plan_node_type {
             PlanNodeType::BatchExchange => {
                 // Find the stage this exchange node should fetch from and get all exchange sources.
-                let exchange_sources = self
+                let child_stage = self
                     .children
                     .iter()
                     .find(|child_stage| {
-                        child_stage.stage.id == execution_plan_node.stage_id.unwrap()
+                        child_stage.stage.id == execution_plan_node.source_stage_id.unwrap()
                     })
-                    .map(|child_stage| child_stage.all_exchange_sources_for(task_id))
                     .unwrap();
+                let exchange_sources = child_stage.all_exchange_sources_for(task_id);
 
                 match &execution_plan_node.node {
                     NodeBody::Exchange(_exchange_node) => {
@@ -397,11 +436,26 @@ impl StageRunner {
                     _ => unreachable!(),
                 }
             }
+            PlanNodeType::BatchSeqScan => {
+                let node_body = execution_plan_node.node.clone();
+                let NodeBody::RowSeqScan(mut scan_node) = node_body else {
+                    unreachable!();
+                };
+                let partition = partition.unwrap();
+                scan_node.vnode_bitmap = Some(partition.vnode_bitmap);
+                scan_node.scan_ranges = partition.scan_ranges;
+                PlanNodeProst {
+                    children: vec![],
+                    // TODO: Generate meaningful identify
+                    identity: Uuid::new_v4().to_string(),
+                    node_body: Some(NodeBody::RowSeqScan(scan_node)),
+                }
+            }
             _ => {
                 let children = execution_plan_node
                     .children
                     .iter()
-                    .map(|e| self.convert_plan_node(e, task_id))
+                    .map(|e| self.convert_plan_node(e, task_id, partition.clone()))
                     .collect();
 
                 PlanNodeProst {

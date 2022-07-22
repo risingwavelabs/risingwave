@@ -4,7 +4,7 @@
 
 RisingWave supports creating a new materialized view (abbreviated as mview) based on the source and another mview, so users can split their data into multiple layers and use mviews' chains to connect them.
 
-In detail, we will support the creation of a materialized view whose source is some other mviews. **Please note that there should not be a circular dependency on mviews**.
+In detail, we will support the creation of a materialized view whose source is some other mview(s). **Please note that there should not be a circular dependency on mviews**.
 
 ```sql
 create table t1 (v1 int, deleted boolean);
@@ -17,15 +17,15 @@ create materialized view mv3 as select count(v1) as count_v1 from mv1;
 
 ### Broadcast operator
 
-In physical representation, we introduced a new dispatcher operator, *Broadcast*. Broadcast will dispatch every message to multiple downstreams. To simplify our design, we can assume that every MViewOperator has a `Broadcast` output, with 0 or more downstreams. The implementation of Broadcast is trivial.
+In physical representation, we introduce a dispatcher operator type, *Broadcast*. Broadcast dispatcher, as its name indicates, will dispatch every message to multiple downstreams. To simplify our design, we can assume that every MViewOperator has a `Broadcast` output, with zero or more downstreams.
 
 ![fig1](../docs/images/mv-on-mv/mv-on-mv-01.svg)
 
 ### Create new mview online
 
-Assume that we already have a materialized view mv1, and we want to create a new materialized view mv2 based on mv1. This is equivalent to a configuration change to Broadcast. Before the real change happened, we have to apply the snapshot of mv1 to mv2 first. We can introduce a new operator named *Chain*.
+Assume that we already have a materialized view mv1, and we want to create a new materialized view mv2 based on mv1. This is equivalent to a configuration change to Broadcast dispatcher. Before the real change happens, we have to apply the snapshot of mv1 to mv2 first. Therefore, we introduce another operator named *Chain*.
 
-The Chain operator has two inputs, the first will be a batch query, which is a finite append-only stream (the snapshot of historical data in the base mview), and the second is its original input, an infinite stream.
+The Chain operator has two inputs. The first one will be a batch query, denoted by the blue patterns in the figure below, which is a finite append-only stream (the snapshot of historical data in the base mview). The second one is its original input, an infinite stream, denoted by the red patterns.
 
 ![fig2](../docs/images/mv-on-mv/mv-on-mv-02.svg)
 

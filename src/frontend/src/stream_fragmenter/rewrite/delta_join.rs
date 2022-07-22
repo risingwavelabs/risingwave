@@ -13,11 +13,11 @@
 // limitations under the License.
 
 use itertools::Itertools;
-use risingwave_common::catalog::{ColumnDesc, ColumnId, Field};
+use risingwave_common::catalog::{ColumnDesc, ColumnId, DatabaseId, Field, SchemaId};
 use risingwave_common::error::Result;
+use risingwave_common::try_match_expand;
 use risingwave_common::util::sort_util::{OrderPair, OrderType};
-use risingwave_pb::expr::InputRefExpr;
-use risingwave_pb::plan_common::{ColumnOrder, Field as ProstField};
+use risingwave_pb::plan_common::{ColumnOrder, Field as ProstField, OrderType as ProstOrderType};
 use risingwave_pb::stream_plan::lookup_node::ArrangementTableId;
 use risingwave_pb::stream_plan::stream_node::NodeBody;
 use risingwave_pb::stream_plan::{
@@ -26,6 +26,8 @@ use risingwave_pb::stream_plan::{
 };
 
 use super::super::{BuildFragmentGraphState, StreamFragment, StreamFragmentEdge, StreamFragmenter};
+use crate::catalog::TableCatalog;
+use crate::optimizer::plan_node::utils::TableCatalogBuilder;
 
 impl StreamFragmenter {
     /// All exchanges inside delta join is one-to-one exchange.
@@ -126,10 +128,7 @@ impl StreamFragmenter {
             )
             .map(|x| ColumnOrder {
                 order_type: x.order_type.to_prost() as i32,
-                input_ref: Some(InputRefExpr {
-                    column_idx: x.column_idx as i32,
-                }),
-                return_type: None,
+                index: x.column_idx as u32,
             })
             .collect();
 
@@ -161,7 +160,9 @@ impl StreamFragmenter {
                 node_body: Some(NodeBody::Arrange(ArrangeNode {
                     table_info: Some(arrangement_info),
                     table_id,
-                    distribution_keys: exchange_node.pk_indices.clone(),
+                    // Requires arrange key at the first few columns. This is always true for delta
+                    // join.
+                    distribution_key: arrange_key_indexes.iter().map(|x| *x as _).collect(),
                 })),
                 input: vec![exchange_node.clone()],
                 append_only: exchange_node.append_only,
@@ -210,6 +211,7 @@ impl StreamFragmenter {
             Some(NodeBody::DeltaIndexJoin(node)) => node,
             _ => unreachable!(),
         };
+        let output_indices = &delta_join_node.output_indices;
 
         let arrange_0 = arrange_0_frag.node.as_ref().unwrap();
         let arrange_1 = arrange_1_frag.node.as_ref().unwrap();
@@ -221,6 +223,16 @@ impl StreamFragmenter {
         let i0_length = arrange_0.fields.len();
         let i1_length = arrange_1.fields.len();
 
+        let lookup_0_column_reordering = {
+            let tmp: Vec<i32> = (i1_length..i1_length + i0_length)
+                .chain(0..i1_length)
+                .map(|x| x as _)
+                .collect_vec();
+            output_indices
+                .iter()
+                .map(|&x| tmp[x as usize])
+                .collect_vec()
+        };
         // lookup left table by right stream
         let lookup_0 = self.build_lookup_for_delta_join(
             state,
@@ -236,14 +248,37 @@ impl StreamFragmenter {
                 } else {
                     Some(ArrangementTableId::IndexId(delta_join_node.left_table_id))
                 },
-                column_mapping: (i1_length..i1_length + i0_length)
-                    .chain(0..i1_length)
-                    .map(|x| x as _)
-                    .collect_vec(),
+                column_mapping: lookup_0_column_reordering,
                 arrangement_table_info: delta_join_node.left_info.clone(),
+                arrangement_table: Some(
+                    Self::infer_internal_table_catalog(
+                        delta_join_node.left_info.as_ref(),
+                        // Use Arrange node's dist key.
+                        try_match_expand!(arrange_0.get_node_body().unwrap(), NodeBody::Arrange)?
+                            .distribution_key
+                            .clone()
+                            .iter()
+                            .map(|x| *x as usize)
+                            .collect(),
+                        exchange_a0l0.append_only,
+                    )
+                    .to_prost(
+                        SchemaId::placeholder() as u32,
+                        DatabaseId::placeholder() as u32,
+                    ),
+                ),
             },
         );
-
+        let lookup_1_column_reordering = {
+            let tmp: Vec<i32> = (0..i0_length + i1_length)
+                .chain(0..i1_length)
+                .map(|x| x as _)
+                .collect_vec();
+            output_indices
+                .iter()
+                .map(|&x| tmp[x as usize])
+                .collect_vec()
+        };
         // lookup right table by left stream
         let lookup_1 = self.build_lookup_for_delta_join(
             state,
@@ -259,8 +294,25 @@ impl StreamFragmenter {
                 } else {
                     Some(ArrangementTableId::IndexId(delta_join_node.right_table_id))
                 },
-                column_mapping: (0..i0_length + i1_length).map(|x| x as _).collect_vec(),
+                column_mapping: lookup_1_column_reordering,
                 arrangement_table_info: delta_join_node.right_info.clone(),
+                arrangement_table: Some(
+                    Self::infer_internal_table_catalog(
+                        delta_join_node.right_info.as_ref(),
+                        // Use Arrange node's dist key.
+                        try_match_expand!(arrange_1.get_node_body().unwrap(), NodeBody::Arrange)?
+                            .distribution_key
+                            .clone()
+                            .iter()
+                            .map(|x| *x as usize)
+                            .collect(),
+                        exchange_a1l1.append_only,
+                    )
+                    .to_prost(
+                        SchemaId::placeholder() as u32,
+                        DatabaseId::placeholder() as u32,
+                    ),
+                ),
             },
         );
 
@@ -436,13 +488,13 @@ impl StreamFragmenter {
             state,
             &exchange_i0a0,
             hash_join_node.left_key.clone(),
-            hash_join_node.left_table_id,
+            hash_join_node.left_table.as_ref().unwrap().id,
         );
         let (arrange_1_info, arrange_1) = self.build_arrange_for_delta_join(
             state,
             &exchange_i1a1,
             hash_join_node.right_key.clone(),
-            hash_join_node.right_table_id,
+            hash_join_node.right_table.as_ref().unwrap().id,
         );
 
         let arrange_0_frag = self.build_and_add_fragment(state, arrange_0)?;
@@ -465,11 +517,12 @@ impl StreamFragmenter {
                 join_type: hash_join_node.join_type,
                 left_key: hash_join_node.left_key.clone(),
                 right_key: hash_join_node.right_key.clone(),
-                left_table_id: hash_join_node.left_table_id,
-                right_table_id: hash_join_node.right_table_id,
+                left_table_id: hash_join_node.left_table.as_ref().unwrap().id,
+                right_table_id: hash_join_node.right_table.as_ref().unwrap().id,
                 condition: hash_join_node.condition.clone(),
                 left_info: Some(arrange_0_info),
                 right_info: Some(arrange_1_info),
+                output_indices: hash_join_node.output_indices.clone(),
             })),
             ..node
         };
@@ -484,5 +537,26 @@ impl StreamFragmenter {
         )?;
 
         Ok(union)
+    }
+
+    fn infer_internal_table_catalog(
+        arrangement_info: Option<&ArrangementInfo>,
+        distribution_key: Vec<usize>,
+        append_only: bool,
+    ) -> TableCatalog {
+        let arrangement_info = arrangement_info.unwrap();
+        let mut internal_table_catalog_builder = TableCatalogBuilder::new();
+        for column_desc in &arrangement_info.column_descs {
+            internal_table_catalog_builder.add_column(&Field::from(&ColumnDesc::from(column_desc)));
+        }
+
+        for order in &arrangement_info.arrange_key_orders {
+            internal_table_catalog_builder.add_order_column(
+                order.index as usize,
+                OrderType::from_prost(&ProstOrderType::from_i32(order.order_type).unwrap()),
+            );
+        }
+
+        internal_table_catalog_builder.build(distribution_key, append_only)
     }
 }

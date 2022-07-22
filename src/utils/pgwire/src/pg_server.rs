@@ -13,12 +13,12 @@
 // limitations under the License.
 
 use std::io;
-use std::io::ErrorKind;
 use std::result::Result;
 use std::sync::Arc;
 
 use tokio::net::{TcpListener, TcpStream};
 
+use crate::pg_field_descriptor::PgFieldDescriptor;
 use crate::pg_protocol::PgProtocol;
 use crate::pg_response::PgResponse;
 
@@ -37,7 +37,10 @@ pub trait SessionManager: Send + Sync + 'static {
 #[async_trait::async_trait]
 pub trait Session: Send + Sync {
     async fn run_statement(self: Arc<Self>, sql: &str) -> Result<PgResponse, BoxedError>;
-
+    async fn infer_return_type(
+        self: Arc<Self>,
+        sql: &str,
+    ) -> Result<Vec<PgFieldDescriptor>, BoxedError>;
     fn user_authenticator(&self) -> &UserAuthenticator;
 }
 
@@ -108,20 +111,8 @@ async fn pg_serve_conn(socket: TcpStream, session_mgr: Arc<impl SessionManager>)
                 &mut named_portals,
             )
             .await;
-        match terminate {
-            Ok(is_ter) => {
-                if is_ter {
-                    break;
-                }
-            }
-            Err(e) => {
-                if e.kind() == ErrorKind::UnexpectedEof {
-                    break;
-                }
-                // Execution error should not break current connection.
-                // For unexpected eof, just break and not print to log.
-                tracing::error!("Error {:?}!", e);
-            }
+        if terminate {
+            break;
         }
     }
 }
@@ -134,6 +125,7 @@ mod tests {
     use tokio_postgres::types::*;
     use tokio_postgres::NoTls;
 
+    use crate::pg_field_descriptor::{PgFieldDescriptor, TypeOid};
     use crate::pg_response::{PgResponse, StatementType};
     use crate::pg_server::{pg_serve, Session, SessionManager, UserAuthenticator};
     use crate::types::Row;
@@ -160,7 +152,7 @@ mod tests {
             self: Arc<Self>,
             sql: &str,
         ) -> Result<PgResponse, Box<dyn Error + Send + Sync>> {
-            // split a statement and trim \' around the intput param to construct result.
+            // split a statement and trim \' around the input param to construct result.
             // Ex:
             //    SELECT 'a','b' -> result: a , b
             let res: Vec<Option<String>> = sql
@@ -181,11 +173,23 @@ mod tests {
                 vec![Row::new(res)],
                 // NOTE: Extended mode don't need.
                 vec![],
+                true,
             ))
         }
 
         fn user_authenticator(&self) -> &UserAuthenticator {
             &UserAuthenticator::None
+        }
+
+        async fn infer_return_type(
+            self: Arc<Self>,
+            sql: &str,
+        ) -> Result<Vec<PgFieldDescriptor>, super::BoxedError> {
+            let count = sql.split(&[' ', ',', ';']).skip(1).count();
+            Ok(vec![
+                PgFieldDescriptor::new("".to_string(), TypeOid::Varchar,);
+                count
+            ])
         }
     }
 
@@ -196,7 +200,7 @@ mod tests {
     // - Input description(params description) should include all the generic params description we
     //   need.
     #[tokio::test]
-    async fn test_psql_extended_mode_exlicit_simple() {
+    async fn test_psql_extended_mode_explicit_simple() {
         let session_mgr = Arc::new(MockSessionManager {});
         tokio::spawn(async move { pg_serve("127.0.0.1:10000", session_mgr).await });
 
@@ -228,7 +232,7 @@ mod tests {
             let value: &str = rows[0].get(0);
             assert_eq!(value, "BB");
         }
-        // explict parameter (test portal)
+        // explicit parameter (test portal)
         {
             let transaction = client.transaction().await.unwrap();
             let statement = transaction
@@ -320,6 +324,14 @@ mod tests {
             assert_eq!(value, "BB");
             let value: &str = rows[0].get(1);
             assert_eq!(value, "AA");
+        }
+        // no params
+        {
+            let rows = client.query("SELECT 'AA','BB';", &[]).await.unwrap();
+            let value: &str = rows[0].get(0);
+            assert_eq!(value, "AA");
+            let value: &str = rows[0].get(1);
+            assert_eq!(value, "BB");
         }
     }
 }

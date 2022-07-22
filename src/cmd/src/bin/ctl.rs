@@ -14,20 +14,19 @@
 
 #![cfg_attr(coverage, feature(no_coverage))]
 
+use anyhow::Result;
 use tikv_jemallocator::Jemalloc;
 
 #[global_allocator]
 static GLOBAL: Jemalloc = Jemalloc;
 
 #[cfg_attr(coverage, no_coverage)]
-#[tokio::main(flavor = "multi_thread", worker_threads = 4)]
-async fn main() {
+fn main() -> Result<()> {
     use clap::StructOpt;
 
     let opts = risingwave_ctl::CliOpts::parse();
 
-    risingwave_logging::oneshot_common();
-    risingwave_logging::init_risingwave_logger(false, true);
+    risingwave_rt::init_risingwave_logger(risingwave_rt::LoggerSettings::new_default());
 
-    risingwave_ctl::start(opts).await
+    risingwave_rt::main_okk(risingwave_ctl::start(opts))
 }

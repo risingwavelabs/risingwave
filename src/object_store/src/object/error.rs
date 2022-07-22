@@ -38,7 +38,6 @@ enum ObjectErrorInner {
 #[derive(Error)]
 #[error("{inner}")]
 pub struct ObjectError {
-    #[source]
     #[from]
     inner: ObjectErrorInner,
 
@@ -67,6 +66,10 @@ impl ObjectError {
 
     pub fn disk(msg: String, err: io::Error) -> Self {
         ObjectErrorInner::Disk { msg, inner: err }.into()
+    }
+
+    pub fn s3(err: impl Into<BoxedError>) -> Self {
+        ObjectErrorInner::S3(err.into()).into()
     }
 }
 

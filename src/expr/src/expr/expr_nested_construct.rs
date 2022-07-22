@@ -42,7 +42,7 @@ impl Expression for NestedConstructExpression {
         let columns = self
             .elements
             .iter()
-            .map(|e| e.eval(input))
+            .map(|e| e.eval_checked(input))
             .collect::<Result<Vec<_>>>()?;
 
         if let DataType::Struct { fields } = &self.data_type {
@@ -51,11 +51,8 @@ impl Expression for NestedConstructExpression {
                 ArrayMeta::Struct {
                     children: fields.clone(),
                 },
-            )
-            .map_err(ExprError::Array)?;
-            builder
-                .append_array_refs(columns, input.capacity())
-                .map_err(ExprError::Array)?;
+            );
+            builder.append_array_refs(columns, input.capacity())?;
             builder
                 .finish()
                 .map(|a| Arc::new(ArrayImpl::Struct(a)))
@@ -68,12 +65,14 @@ impl Expression for NestedConstructExpression {
                 ArrayMeta::List {
                     datatype: datatype.clone(),
                 },
-            )
-            .map_err(ExprError::Array)?;
-            chunk
-                .rows()
-                .try_for_each(|row| builder.append_row_ref(row))
-                .map_err(ExprError::Array)?;
+            );
+            chunk.rows_with_holes().try_for_each(|row| {
+                if let Some(row) = row {
+                    builder.append_row_ref(row)
+                } else {
+                    builder.append_null()
+                }
+            })?;
             builder
                 .finish()
                 .map(|a| Arc::new(ArrayImpl::List(a)))

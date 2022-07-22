@@ -12,6 +12,8 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+//! Fragment and schedule batch queries.
+
 use std::sync::Arc;
 
 use futures::Stream;

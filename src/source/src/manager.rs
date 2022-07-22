@@ -24,10 +24,11 @@ use risingwave_common::error::ErrorCode::{ConnectorError, InternalError, Protoco
 use risingwave_common::error::{Result, RwError};
 use risingwave_common::types::DataType;
 use risingwave_common::util::epoch::UNIX_SINGULARITY_DATE_EPOCH;
-use risingwave_connector::ConnectorProperties;
+use risingwave_connector::source::ConnectorProperties;
 use risingwave_pb::catalog::StreamSourceInfo;
 use risingwave_pb::plan_common::RowFormatType;
 
+use crate::monitor::SourceMetrics;
 use crate::row_id::{RowId, RowIdGenerator};
 use crate::table_v2::TableSourceV2;
 use crate::{ConnectorSource, SourceFormat, SourceImpl, SourceParserImpl};
@@ -54,6 +55,8 @@ pub struct SourceColumnDesc {
     pub name: String,
     pub data_type: DataType,
     pub column_id: ColumnId,
+    pub fields: Vec<ColumnDesc>,
+    /// Now `skip_parse` is used to indicate whether the column is a row id column.
     pub skip_parse: bool,
 }
 
@@ -63,7 +66,20 @@ impl From<&ColumnDesc> for SourceColumnDesc {
             name: c.name.clone(),
             data_type: c.data_type.clone(),
             column_id: c.column_id,
+            fields: c.field_descs.clone(),
             skip_parse: false,
+        }
+    }
+}
+
+impl From<&SourceColumnDesc> for ColumnDesc {
+    fn from(s: &SourceColumnDesc) -> Self {
+        ColumnDesc {
+            data_type: s.data_type.clone(),
+            column_id: s.column_id,
+            name: s.name.clone(),
+            field_descs: s.fields.clone(),
+            type_name: "".to_string(),
         }
     }
 }
@@ -74,6 +90,7 @@ pub struct SourceDesc {
     pub source: SourceRef,
     pub format: SourceFormat,
     pub columns: Vec<SourceColumnDesc>,
+    pub metrics: Arc<SourceMetrics>,
 
     // The column index of row ID. By default it's 0, which means the first column is row ID.
     // TODO: change to Option<usize> when pk supported in the future.
@@ -88,11 +105,7 @@ impl SourceDesc {
 
     pub fn next_row_id_batch(&self, length: usize) -> Vec<RowId> {
         let mut guard = self.row_id_generator.as_ref().lock();
-        let mut result = Vec::with_capacity(length);
-        for _ in 0..length {
-            result.push(guard.next());
-        }
-        result
+        guard.next_batch(length)
     }
 }
 
@@ -103,6 +116,8 @@ pub struct MemSourceManager {
     sources: Mutex<HashMap<TableId, SourceDesc>>,
     /// Located worker id.
     worker_id: u32,
+    /// local source metrics
+    metrics: Arc<SourceMetrics>,
 }
 
 #[async_trait]
@@ -134,13 +149,11 @@ impl SourceManager for MemSourceManager {
             .iter()
             .enumerate()
             .map(|(idx, c)| {
-                let c = c.column_desc.as_ref().unwrap().clone();
-                SourceColumnDesc {
-                    name: c.name.clone(),
-                    data_type: DataType::from(&c.column_type.unwrap()),
-                    column_id: ColumnId::from(c.column_id),
-                    skip_parse: idx as i32 == info.row_id_index,
-                }
+                let mut col = SourceColumnDesc::from(&ColumnDesc::from(
+                    c.column_desc.as_ref().unwrap().clone(),
+                ));
+                col.skip_parse = idx as i32 == info.row_id_index;
+                col
             })
             .collect::<Vec<SourceColumnDesc>>();
 
@@ -169,6 +182,7 @@ impl SourceManager for MemSourceManager {
                 self.worker_id,
                 *UNIX_SINGULARITY_DATE_EPOCH,
             ))),
+            metrics: self.metrics.clone(),
         };
 
         let mut tables = self.get_sources()?;
@@ -204,6 +218,7 @@ impl SourceManager for MemSourceManager {
                 self.worker_id,
                 *UNIX_SINGULARITY_DATE_EPOCH,
             ))),
+            metrics: self.metrics.clone(),
         };
 
         sources.insert(*table_id, desc);
@@ -236,10 +251,11 @@ impl SourceManager for MemSourceManager {
 }
 
 impl MemSourceManager {
-    pub fn new(worker_id: u32) -> Self {
+    pub fn new(worker_id: u32, metrics: Arc<SourceMetrics>) -> Self {
         MemSourceManager {
             sources: Mutex::new(HashMap::new()),
             worker_id,
+            metrics,
         }
     }
 
@@ -253,7 +269,7 @@ mod tests {
     use risingwave_common::catalog::{ColumnDesc, ColumnId, Field, Schema, TableId};
     use risingwave_common::error::Result;
     use risingwave_common::types::DataType;
-    use risingwave_connector::kinesis::config::kinesis_demo_properties;
+    use risingwave_connector::source::kinesis::config::kinesis_demo_properties;
     use risingwave_pb::catalog::StreamSourceInfo;
     use risingwave_pb::plan_common::ColumnCatalog;
     use risingwave_storage::memory::MemoryStateStore;

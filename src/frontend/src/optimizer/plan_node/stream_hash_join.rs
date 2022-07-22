@@ -15,14 +15,18 @@
 use std::fmt;
 
 use itertools::Itertools;
-use risingwave_common::session_config::DELTA_JOIN;
+use risingwave_common::catalog::{DatabaseId, Field, Schema, SchemaId};
+use risingwave_common::types::DataType;
+use risingwave_common::util::sort_util::OrderType;
 use risingwave_pb::plan_common::JoinType;
 use risingwave_pb::stream_plan::stream_node::NodeBody;
 use risingwave_pb::stream_plan::HashJoinNode;
 
+use super::utils::TableCatalogBuilder;
 use super::{LogicalJoin, PlanBase, PlanRef, PlanTreeNodeBinary, StreamDeltaJoin, ToStreamProst};
+use crate::catalog::table_catalog::TableCatalog;
 use crate::expr::Expr;
-use crate::optimizer::plan_node::EqJoinPredicate;
+use crate::optimizer::plan_node::{EqJoinPredicate, EqJoinPredicateVerboseDisplay};
 use crate::optimizer::property::Distribution;
 use crate::utils::ColIndexMapping;
 
@@ -42,6 +46,10 @@ pub struct StreamHashJoin {
     /// be create automatically when building the executors on meta service. For testing purpose
     /// only. Will remove after we have fully support shared state and index.
     is_delta: bool,
+
+    /// Whether can optimize for append-only stream.
+    /// It is true if input of both side is append-only
+    is_append_only: bool,
 }
 
 impl StreamHashJoin {
@@ -52,6 +60,7 @@ impl StreamHashJoin {
             JoinType::Inner => logical.left().append_only() && logical.right().append_only(),
             _ => false,
         };
+
         let dist = Self::derive_dist(
             logical.left().distribution(),
             logical.right().distribution(),
@@ -60,11 +69,7 @@ impl StreamHashJoin {
                 .composite(&logical.i2o_col_mapping()),
         );
 
-        let force_delta = if let Some(config) = ctx.inner().session_ctx.get_config(DELTA_JOIN) {
-            config.is_set(false)
-        } else {
-            false
-        };
+        let force_delta = ctx.inner().session_ctx.config().get_delta_join();
 
         // TODO: derive from input
         let base = PlanBase::new_stream(
@@ -80,6 +85,7 @@ impl StreamHashJoin {
             logical,
             eq_join_predicate,
             is_delta: force_delta,
+            is_append_only: append_only,
         }
     }
 
@@ -96,12 +102,12 @@ impl StreamHashJoin {
     pub(super) fn derive_dist(
         left: &Distribution,
         right: &Distribution,
-        l2o_mapping: &ColIndexMapping,
+        side2o_mapping: &ColIndexMapping,
     ) -> Distribution {
         match (left, right) {
             (Distribution::Single, Distribution::Single) => Distribution::Single,
             (Distribution::HashShard(_), Distribution::HashShard(_)) => {
-                l2o_mapping.rewrite_provided_distribution(left)
+                side2o_mapping.rewrite_provided_distribution(left)
             }
             (_, _) => panic!(),
         }
@@ -117,16 +123,51 @@ impl fmt::Display for StreamHashJoin {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         let mut builder = if self.is_delta {
             f.debug_struct("StreamDeltaHashJoin")
+        } else if self.is_append_only {
+            f.debug_struct("StreamAppendOnlyHashJoin")
         } else {
             f.debug_struct("StreamHashJoin")
         };
-        builder
-            .field("type", &format_args!("{:?}", self.logical.join_type()))
-            .field("predicate", &format_args!("{}", self.eq_join_predicate()));
+
+        let verbose = self.base.ctx.is_explain_verbose();
+        builder.field("type", &format_args!("{:?}", self.logical.join_type()));
+
+        if verbose {
+            let mut concat_schema = self.left().schema().fields.clone();
+            concat_schema.extend(self.right().schema().fields.clone());
+            let concat_schema = Schema::new(concat_schema);
+            builder.field(
+                "predicate",
+                &format_args!(
+                    "{}",
+                    EqJoinPredicateVerboseDisplay {
+                        eq_join_predicate: self.eq_join_predicate(),
+                        input_schema: &concat_schema
+                    }
+                ),
+            );
+        } else {
+            builder.field("predicate", &format_args!("{}", self.eq_join_predicate()));
+        }
 
         if self.append_only() {
             builder.field("append_only", &format_args!("{}", true));
         }
+        if self
+            .logical
+            .output_indices()
+            .iter()
+            .copied()
+            .eq(0..self.logical.internal_column_num())
+        {
+            builder.field("output_indices", &format_args!("all"));
+        } else {
+            builder.field(
+                "output_indices",
+                &format_args!("{:?}", self.logical.output_indices()),
+            );
+        }
+
         builder.finish()
     }
 }
@@ -152,34 +193,73 @@ impl_plan_tree_node_for_binary! { StreamHashJoin }
 
 impl ToStreamProst for StreamHashJoin {
     fn to_stream_prost_body(&self) -> NodeBody {
+        let left_key_indices = self.eq_join_predicate.left_eq_indexes();
+        let right_key_indices = self.eq_join_predicate.right_eq_indexes();
+        let left_key_indices_prost = left_key_indices.iter().map(|idx| *idx as i32).collect_vec();
+        let right_key_indices_prost = right_key_indices
+            .iter()
+            .map(|idx| *idx as i32)
+            .collect_vec();
         NodeBody::HashJoin(HashJoinNode {
             join_type: self.logical.join_type() as i32,
-            left_key: self
-                .eq_join_predicate
-                .left_eq_indexes()
-                .iter()
-                .map(|v| *v as i32)
-                .collect(),
-            right_key: self
-                .eq_join_predicate
-                .right_eq_indexes()
-                .iter()
-                .map(|v| *v as i32)
-                .collect(),
+            left_key: left_key_indices_prost,
+            right_key: right_key_indices_prost,
             condition: self
                 .eq_join_predicate
                 .other_cond()
                 .as_expr_unless_true()
                 .map(|x| x.to_expr_proto()),
-            distribution_keys: self
-                .base
-                .dist
-                .dist_column_indices()
-                .iter()
-                .map(|idx| *idx as u32)
-                .collect_vec(),
             is_delta_join: self.is_delta,
-            ..Default::default()
+            left_table: Some(
+                infer_internal_table_catalog(self.left(), left_key_indices).to_prost(
+                    SchemaId::placeholder() as u32,
+                    DatabaseId::placeholder() as u32,
+                ),
+            ),
+            right_table: Some(
+                infer_internal_table_catalog(self.right(), right_key_indices).to_prost(
+                    SchemaId::placeholder() as u32,
+                    DatabaseId::placeholder() as u32,
+                ),
+            ),
+            output_indices: self
+                .logical
+                .output_indices()
+                .iter()
+                .map(|&x| x as u32)
+                .collect(),
+            is_append_only: self.is_append_only,
         })
     }
+}
+
+fn infer_internal_table_catalog(input: PlanRef, join_key_indices: Vec<usize>) -> TableCatalog {
+    let base = input.plan_base();
+    let schema = &base.schema;
+
+    let append_only = input.append_only();
+    let dist_keys = base.dist.dist_column_indices().to_vec();
+
+    // The pk of hash join internal table should be join_key + input_pk.
+    let mut pk_indices = join_key_indices;
+    // TODO(yuhao): dedup the dist key and pk.
+    pk_indices.extend(&base.pk_indices);
+
+    let mut columns_fields = schema.fields().to_vec();
+
+    // The join degree at the end of internal table.
+    let degree_column_field = Field::with_name(DataType::Int64, "_degree");
+    columns_fields.push(degree_column_field);
+
+    let mut internal_table_catalog_builder = TableCatalogBuilder::new();
+
+    columns_fields.iter().for_each(|field| {
+        internal_table_catalog_builder.add_column(field);
+    });
+
+    pk_indices.iter().for_each(|idx| {
+        internal_table_catalog_builder.add_order_column(*idx, OrderType::Ascending)
+    });
+
+    internal_table_catalog_builder.build(dist_keys, append_only)
 }

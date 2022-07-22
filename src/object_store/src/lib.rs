@@ -13,5 +13,8 @@
 // limitations under the License.
 
 #![feature(backtrace)]
+#![feature(generic_associated_types)]
+#![feature(trait_alias)]
+#![feature(type_alias_impl_trait)]
 
 pub mod object;

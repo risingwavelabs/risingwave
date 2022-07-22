@@ -24,12 +24,12 @@ use risingwave_hummock_sdk::HummockSSTableId;
 use super::{Block, HummockResult};
 use crate::hummock::HummockError;
 
-const MAX_CACHE_SHARD_BITS: usize = 6; // It means that there will be 64 shards lru-cache to avoid lock conflict.
 const MIN_BUFFER_SIZE_PER_SHARD: usize = 32 * 1024 * 1024;
 
 enum BlockEntry {
     Cache(CachableEntry<(HummockSSTableId, u64), Box<Block>>),
     Owned(Box<Block>),
+    RefEntry(Arc<Block>),
 }
 
 pub struct BlockHolder {
@@ -38,6 +38,14 @@ pub struct BlockHolder {
 }
 
 impl BlockHolder {
+    pub fn from_ref_block(block: Arc<Block>) -> Self {
+        let ptr = block.as_ref() as *const _;
+        Self {
+            _handle: BlockEntry::RefEntry(block),
+            block: ptr,
+        }
+    }
+
     pub fn from_owned_block(block: Box<Block>) -> Self {
         let ptr = block.as_ref() as *const _;
         Self {
@@ -72,15 +80,14 @@ pub struct BlockCache {
 }
 
 impl BlockCache {
-    pub fn new(capacity: usize) -> Self {
+    pub fn new(capacity: usize, mut max_shard_bits: usize) -> Self {
         if capacity == 0 {
             panic!("block cache capacity == 0");
         }
-        let mut shard_bits = MAX_CACHE_SHARD_BITS;
-        while (capacity >> shard_bits) < MIN_BUFFER_SIZE_PER_SHARD && shard_bits > 0 {
-            shard_bits -= 1;
+        while (capacity >> max_shard_bits) < MIN_BUFFER_SIZE_PER_SHARD && max_shard_bits > 0 {
+            max_shard_bits -= 1;
         }
-        let cache = LruCache::new(shard_bits, capacity);
+        let cache = LruCache::new(max_shard_bits, capacity);
         Self {
             inner: Arc::new(cache),
         }
@@ -106,23 +113,27 @@ impl BlockCache {
         ))
     }
 
-    pub async fn get_or_insert_with<F>(
+    pub async fn get_or_insert_with<F, Fut>(
         &self,
         sst_id: HummockSSTableId,
         block_idx: u64,
         f: F,
     ) -> HummockResult<BlockHolder>
     where
-        F: Future<Output = HummockResult<Box<Block>>>,
+        F: FnOnce() -> Fut,
+        Fut: Future<Output = HummockResult<Box<Block>>> + Send + 'static,
     {
         let h = Self::hash(sst_id, block_idx);
         let key = (sst_id, block_idx);
         let entry = self
             .inner
-            .lookup_with_request_dedup::<_, HummockError, _>(h, key, || async {
-                let block = f.await?;
-                let len = block.len();
-                Ok((block, len))
+            .lookup_with_request_dedup::<_, HummockError, _>(h, key, || {
+                let f = f();
+                async move {
+                    let block = f.await?;
+                    let len = block.len();
+                    Ok((block, len))
+                }
             })
             .await
             .map_err(|e| {
@@ -145,7 +156,7 @@ impl BlockCache {
         self.inner.get_memory_usage()
     }
 
-    #[cfg(test)]
+    #[cfg(any(test, feature = "test"))]
     pub fn clear(&self) {
         // This is only a method for test. Therefore it should be safe to call the unsafe method.
         unsafe {

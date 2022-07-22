@@ -16,9 +16,7 @@ use std::sync::{Arc, RwLock};
 
 use rand::distributions::{Distribution as RandDistribution, Uniform};
 use risingwave_common::bail;
-use risingwave_common::error::Result;
-use risingwave_pb::common::{WorkerNode, WorkerType};
-use risingwave_rpc_client::MetaClient;
+use risingwave_pb::common::WorkerNode;
 
 use crate::scheduler::SchedulerResult;
 
@@ -29,14 +27,16 @@ pub struct WorkerNodeManager {
 
 pub type WorkerNodeManagerRef = Arc<WorkerNodeManager>;
 
+impl Default for WorkerNodeManager {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl WorkerNodeManager {
-    pub async fn new(client: MetaClient) -> Result<Self> {
-        let worker_nodes = RwLock::new(
-            client
-                .list_all_nodes(WorkerType::ComputeNode, false)
-                .await?,
-        );
-        Ok(Self { worker_nodes })
+    pub fn new() -> Self {
+        let worker_nodes = RwLock::new(Vec::new());
+        Self { worker_nodes }
     }
 
     /// Used in tests.
@@ -84,7 +84,7 @@ impl WorkerNodeManager {
 mod tests {
 
     use risingwave_common::util::addr::HostAddr;
-    use risingwave_pb::common::worker_node;
+    use risingwave_pb::common::{worker_node, WorkerType};
 
     #[test]
     fn test_worker_node_manager() {

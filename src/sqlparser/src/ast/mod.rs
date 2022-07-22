@@ -118,6 +118,16 @@ impl Ident {
             quote_style: Some(quote),
         }
     }
+
+    /// Value after considering quote style
+    /// In certain places, double quotes can force case-sensitive, but not always
+    /// e.g. session variables.
+    pub fn real_value(&self) -> String {
+        match self.quote_style {
+            Some('"') => self.value.clone(),
+            _ => self.value.to_lowercase(),
+        }
+    }
 }
 
 impl From<&str> for Ident {
@@ -151,6 +161,16 @@ impl fmt::Display for Ident {
 #[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
 pub struct ObjectName(pub Vec<Ident>);
 
+impl ObjectName {
+    pub fn real_value(&self) -> String {
+        self.0
+            .iter()
+            .map(|ident| ident.real_value())
+            .collect::<Vec<_>>()
+            .join(".")
+    }
+}
+
 impl fmt::Display for ObjectName {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         write!(f, "{}", display_separated(&self.0, "."))
@@ -160,6 +180,12 @@ impl fmt::Display for ObjectName {
 impl ParseTo for ObjectName {
     fn parse_to(p: &mut Parser) -> Result<Self, ParserError> {
         p.parse_object_name()
+    }
+}
+
+impl From<Vec<Ident>> for ObjectName {
+    fn from(value: Vec<Ident>) -> Self {
+        Self(value)
     }
 }
 
@@ -242,6 +268,13 @@ pub enum Expr {
         expr: Box<Expr>,
         substring_from: Option<Box<Expr>>,
         substring_for: Option<Box<Expr>>,
+    },
+    /// OVERLAY(<expr> PLACING <expr> FROM <expr> [ FOR <expr> ])
+    Overlay {
+        expr: Box<Expr>,
+        new_substring: Box<Expr>,
+        start: Box<Expr>,
+        count: Option<Box<Expr>>,
     },
     /// TRIM([BOTH | LEADING | TRAILING] <expr> [FROM <expr>])\
     /// Or\
@@ -345,12 +378,18 @@ impl fmt::Display for Expr {
                 low,
                 high
             ),
-            Expr::BinaryOp { left, op, right } => write!(f, "{} {} {}", left, op, right),
+            Expr::BinaryOp { left, op, right } => write!(
+                f,
+                "{} {} {}",
+                fmt_expr_with_paren(left),
+                op,
+                fmt_expr_with_paren(right)
+            ),
             Expr::UnaryOp { op, expr } => {
                 if op == &UnaryOperator::PGPostfixFactorial {
                     write!(f, "{}{}", expr, op)
                 } else {
-                    write!(f, "{} {}", op, expr)
+                    write!(f, "{} {}", op, fmt_expr_with_paren(expr))
                 }
             }
             Expr::Cast { expr, data_type } => write!(f, "CAST({} AS {})", expr, data_type),
@@ -438,6 +477,22 @@ impl fmt::Display for Expr {
 
                 write!(f, ")")
             }
+            Expr::Overlay {
+                expr,
+                new_substring,
+                start,
+                count,
+            } => {
+                write!(f, "OVERLAY({}", expr)?;
+                write!(f, " PLACING {}", new_substring)?;
+                write!(f, " FROM {}", start)?;
+
+                if let Some(count_expr) = count {
+                    write!(f, " FOR {}", count_expr)?;
+                }
+
+                write!(f, ")")
+            }
             Expr::IsDistinctFrom(a, b) => write!(f, "{} IS DISTINCT FROM {}", a, b),
             Expr::IsNotDistinctFrom(a, b) => write!(f, "{} IS NOT DISTINCT FROM {}", a, b),
             Expr::Trim { expr, trim_where } => {
@@ -479,6 +534,24 @@ impl fmt::Display for Expr {
             ),
         }
     }
+}
+
+/// Wrap complex expressions with necessary parentheses.
+/// For example, `a > b LIKE c` becomes `a > (b LIKE c)`.
+fn fmt_expr_with_paren(e: &Expr) -> String {
+    use Expr as E;
+    match e {
+        E::BinaryOp { .. }
+        | E::UnaryOp { .. }
+        | E::IsNull(_)
+        | E::IsNotNull(_)
+        | E::IsFalse(_)
+        | E::IsTrue(_)
+        | E::IsNotTrue(_)
+        | E::IsNotFalse(_) => return format!("({})", e),
+        _ => {}
+    };
+    format!("{}", e)
 }
 
 /// A window specification (i.e. `OVER (PARTITION BY .. ORDER BY .. etc.)`)
@@ -620,6 +693,7 @@ pub enum ShowObject {
     Schema,
     MaterializedView { schema: Option<Ident> },
     Source { schema: Option<Ident> },
+    Sink { schema: Option<Ident> },
     MaterializedSource { schema: Option<Ident> },
     Columns { table: ObjectName },
 }
@@ -647,6 +721,7 @@ impl fmt::Display for ShowObject {
             ShowObject::MaterializedSource { schema } => {
                 write!(f, "MATERIALIZED SOURCES{}", fmt_schema(schema))
             }
+            ShowObject::Sink { schema } => write!(f, "SINKS{}", fmt_schema(schema)),
             ShowObject::Columns { table } => write!(f, "COLUMNS FROM {}", table),
         }
     }
@@ -751,6 +826,8 @@ pub enum Statement {
         is_materialized: bool,
         stmt: CreateSourceStatement,
     },
+    /// CREATE SINK
+    CreateSink { stmt: CreateSinkStatement },
     /// ALTER TABLE
     AlterTable {
         /// Table name
@@ -855,6 +932,8 @@ pub enum Statement {
         analyze: bool,
         // Display additional information regarding the plan.
         verbose: bool,
+        // Trace plan transformation of the optimizer step by step
+        trace: bool,
         /// A SQL query that specifies what to explain
         statement: Box<Statement>,
     },
@@ -876,6 +955,7 @@ impl fmt::Display for Statement {
                 describe_alias,
                 verbose,
                 analyze,
+                trace,
                 statement,
             } => {
                 if *describe_alias {
@@ -890,6 +970,10 @@ impl fmt::Display for Statement {
 
                 if *verbose {
                     write!(f, "VERBOSE ")?;
+                }
+
+                if *trace {
+                    write!(f, "TRACE ")?;
                 }
 
                 write!(f, "{}", statement)
@@ -1090,6 +1174,7 @@ impl fmt::Display for Statement {
                     ""
                 }
             ),
+            Statement::CreateSink { stmt } => write!(f, "CREATE SINK {}", stmt,),
             Statement::AlterTable { name, operation } => {
                 write!(f, "ALTER TABLE {} {}", name, operation)
             }
@@ -1509,19 +1594,31 @@ pub struct Function {
     pub over: Option<WindowSpec>,
     // aggregate functions may specify eg `COUNT(DISTINCT x)`
     pub distinct: bool,
+    // aggregate functions may contain order_by_clause
+    pub order_by: Vec<OrderByExpr>,
+    pub filter: Option<Box<Expr>>,
 }
 
 impl fmt::Display for Function {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         write!(
             f,
-            "{}({}{})",
+            "{}({}{}{}{})",
             self.name,
             if self.distinct { "DISTINCT " } else { "" },
             display_comma_separated(&self.args),
+            if !self.order_by.is_empty() {
+                " ORDER BY "
+            } else {
+                ""
+            },
+            display_comma_separated(&self.order_by),
         )?;
         if let Some(o) = &self.over {
             write!(f, " OVER ({})", o)?;
+        }
+        if let Some(filter) = &self.filter {
+            write!(f, " FILTER(WHERE {})", filter)?;
         }
         Ok(())
     }
@@ -1537,6 +1634,7 @@ pub enum ObjectType {
     Schema,
     Source,
     MaterializedSource,
+    Sink,
     Database,
     User,
 }
@@ -1551,6 +1649,7 @@ impl fmt::Display for ObjectType {
             ObjectType::Schema => "SCHEMA",
             ObjectType::Source => "SOURCE",
             ObjectType::MaterializedSource => "MATERIALIZED SOURCE",
+            ObjectType::Sink => "SINK",
             ObjectType::Database => "DATABASE",
             ObjectType::User => "USER",
         })
@@ -1569,6 +1668,8 @@ impl ParseTo for ObjectType {
             ObjectType::MaterializedSource
         } else if parser.parse_keyword(Keyword::SOURCE) {
             ObjectType::Source
+        } else if parser.parse_keyword(Keyword::SINK) {
+            ObjectType::Sink
         } else if parser.parse_keyword(Keyword::INDEX) {
             ObjectType::Index
         } else if parser.parse_keyword(Keyword::SCHEMA) {
@@ -1579,7 +1680,7 @@ impl ParseTo for ObjectType {
             ObjectType::User
         } else {
             return parser.expected(
-                "TABLE, VIEW, INDEX, MATERIALIZED VIEW, SOURCE, MATERIALIZED SOURCE, SCHEMA, DATABASE or USER after DROP",
+                "TABLE, VIEW, INDEX, MATERIALIZED VIEW, SOURCE, MATERIALIZED SOURCE, SINK, SCHEMA, DATABASE or USER after DROP",
                 parser.peek_token(),
             );
         };
@@ -1590,7 +1691,7 @@ impl ParseTo for ObjectType {
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 #[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
 pub struct SqlOption {
-    pub name: Ident,
+    pub name: ObjectName,
     pub value: Value,
 }
 

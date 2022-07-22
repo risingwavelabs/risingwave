@@ -9,7 +9,7 @@ FROM (
 		count(*) AS num, 
         window_start AS starttime
     FROM 
-        HOP(bid, dateTime, INTERVAL '2' SECOND, INTERVAL '10' SECOND)
+        HOP(bid, date_time, INTERVAL '2' SECOND, INTERVAL '10' SECOND)
     GROUP BY
     	window_start, 
 		bid.auction
@@ -22,7 +22,7 @@ JOIN (
 		SELECT
 			count(*) AS num,
 			window_start AS starttime_c
-		FROM HOP(bid, dateTime, INTERVAL '2' SECOND, INTERVAL '10' SECOND)
+		FROM HOP(bid, date_time, INTERVAL '2' SECOND, INTERVAL '10' SECOND)
 		GROUP BY
 			bid.auction,
 			window_start

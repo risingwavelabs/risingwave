@@ -19,8 +19,7 @@ use risingwave_pb::batch_plan::TaskOutputId;
 use risingwave_pb::task_service::task_service_server::TaskService;
 use risingwave_pb::task_service::{
     AbortTaskRequest, AbortTaskResponse, CreateTaskRequest, CreateTaskResponse, ExecuteRequest,
-    GetDataResponse, GetTaskInfoRequest, GetTaskInfoResponse, RemoveTaskRequest,
-    RemoveTaskResponse,
+    GetDataResponse, GetTaskInfoRequest, GetTaskInfoResponse,
 };
 use tokio_stream::wrappers::ReceiverStream;
 use tonic::{Request, Response, Status};
@@ -51,14 +50,18 @@ impl TaskService for BatchServiceImpl {
         &self,
         request: Request<CreateTaskRequest>,
     ) -> Result<Response<CreateTaskResponse>, Status> {
-        let req = request.into_inner();
+        let CreateTaskRequest {
+            task_id,
+            plan,
+            epoch,
+        } = request.into_inner();
 
         let res = self
             .mgr
             .fire_task(
-                req.get_task_id().expect("no task id found"),
-                req.get_plan().expect("no plan found").clone(),
-                req.epoch,
+                &task_id.expect("no task id found"),
+                plan.expect("no plan found").clone(),
+                epoch,
                 ComputeNodeContext::new(self.env.clone()),
             )
             .await;
@@ -98,38 +101,24 @@ impl TaskService for BatchServiceImpl {
     }
 
     #[cfg_attr(coverage, no_coverage)]
-    async fn remove_task(
-        &self,
-        req: Request<RemoveTaskRequest>,
-    ) -> Result<Response<RemoveTaskResponse>, Status> {
-        let req = req.into_inner();
-        let res = self
-            .mgr
-            .remove_task(req.get_task_id().expect("no task id found"));
-        match res {
-            Ok(_) => Ok(Response::new(RemoveTaskResponse { status: None })),
-            Err(e) => {
-                error!("failed to remove task {}", e);
-                Err(e.into())
-            }
-        }
-    }
-
-    #[cfg_attr(coverage, no_coverage)]
     async fn execute(
         &self,
         req: Request<ExecuteRequest>,
     ) -> Result<Response<Self::ExecuteStream>, Status> {
-        let req = req.into_inner();
-        let task_id = req.get_task_id().expect("no task id found");
-        let plan = req.get_plan().expect("no plan found").clone();
-        let epoch = req.epoch;
+        let ExecuteRequest {
+            task_id,
+            plan,
+            epoch,
+        } = req.into_inner();
+        let task_id = task_id.expect("no task id found");
+        let plan = plan.expect("no plan found").clone();
         let context = ComputeNodeContext::new(self.env.clone());
-        debug!(
+        trace!(
             "local execute request: plan:{:?} with task id:{:?}",
-            plan, task_id
+            plan,
+            task_id
         );
-        let task = BatchTaskExecution::new(task_id, plan, context, epoch)?;
+        let task = BatchTaskExecution::new(&task_id, plan, context, epoch)?;
         let task = Arc::new(task);
 
         if let Err(e) = task.clone().async_execute().await {

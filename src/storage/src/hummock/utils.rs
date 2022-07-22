@@ -16,7 +16,6 @@ use std::cmp::Ordering;
 use std::ops::Bound::{Excluded, Included, Unbounded};
 use std::ops::RangeBounds;
 
-use risingwave_common::consistent_hash::VNodeBitmap;
 use risingwave_hummock_sdk::key::user_key;
 use risingwave_pb::hummock::{Level, SstableInfo};
 
@@ -73,23 +72,15 @@ pub fn validate_table_key_range(levels: &[Level]) -> HummockResult<()> {
     Ok(())
 }
 
-pub fn filter_single_sst<R, B>(
-    info: &SstableInfo,
-    key_range: &R,
-    vnode_set: Option<&VNodeBitmap>,
-) -> bool
+pub fn filter_single_sst<R, B>(info: &SstableInfo, key_range: &R) -> bool
 where
     R: RangeBounds<B>,
     B: AsRef<[u8]>,
 {
-    ({
-        let table_range = info.key_range.as_ref().unwrap();
-        let table_start = user_key(table_range.left.as_slice());
-        let table_end = user_key(table_range.right.as_slice());
-        range_overlap(key_range, table_start, table_end)
-    }) && vnode_set.map_or(true, |vnode_set| {
-        vnode_set.check_overlap(&info.vnode_bitmaps)
-    })
+    let table_range = info.key_range.as_ref().unwrap();
+    let table_start = user_key(table_range.left.as_slice());
+    let table_end = user_key(table_range.right.as_slice());
+    range_overlap(key_range, table_start, table_end)
 }
 
 /// Prune SSTs that does not overlap with a specific key range or does not overlap with a specific
@@ -97,13 +88,12 @@ where
 pub fn prune_ssts<'a, R, B>(
     ssts: impl Iterator<Item = &'a SstableInfo>,
     key_range: &R,
-    vnode_set: Option<&VNodeBitmap>,
 ) -> Vec<&'a SstableInfo>
 where
     R: RangeBounds<B>,
     B: AsRef<[u8]>,
 {
-    ssts.filter(|info| filter_single_sst(info, key_range, vnode_set))
+    ssts.filter(|info| filter_single_sst(info, key_range))
         .collect()
 }
 

@@ -20,6 +20,7 @@
 #![warn(clippy::explicit_into_iter_loop)]
 #![warn(clippy::explicit_iter_loop)]
 #![warn(clippy::inconsistent_struct_constructor)]
+#![warn(clippy::unused_async)]
 #![warn(clippy::map_flatten)]
 #![warn(clippy::no_effect_underscore_binding)]
 #![warn(clippy::await_holding_lock)]
@@ -28,7 +29,6 @@
 #![feature(trait_alias)]
 #![feature(generic_associated_types)]
 #![feature(binary_heap_drain_sorted)]
-#![feature(let_chains)]
 #![feature(exact_size_is_empty)]
 #![feature(type_alias_impl_trait)]
 #![cfg_attr(coverage, feature(no_coverage))]
@@ -37,10 +37,13 @@
 #![feature(iterator_try_collect)]
 #![feature(lint_reasons)]
 
+mod error;
+pub mod exchange_source;
 pub mod execution;
 pub mod executor;
 pub mod rpc;
 pub mod task;
+
 #[macro_use]
 extern crate log;
 #[macro_use]

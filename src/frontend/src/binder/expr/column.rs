@@ -22,9 +22,13 @@ impl Binder {
     pub fn bind_column(&mut self, idents: &[Ident]) -> Result<ExprImpl> {
         // TODO: check quote style of `ident`.
         let (_schema_name, table_name, column_name) = match idents {
-            [column] => (None, None, &column.value),
-            [table, column] => (None, Some(&table.value), &column.value),
-            [schema, table, column] => (Some(&schema.value), Some(&table.value), &column.value),
+            [column] => (None, None, column.real_value()),
+            [table, column] => (None, Some(table.real_value()), column.real_value()),
+            [schema, table, column] => (
+                Some(schema.real_value()),
+                Some(table.real_value()),
+                column.real_value(),
+            ),
             _ => {
                 return Err(
                     ErrorCode::InternalError(format!("Too many idents: {:?}", idents)).into(),
@@ -34,7 +38,7 @@ impl Binder {
 
         if let Ok(index) = self
             .context
-            .get_column_binding_index(table_name, column_name)
+            .get_column_binding_index(&table_name, &column_name)
         {
             let column = &self.context.columns[index];
             return Ok(InputRef::new(column.index, column.field.data_type.clone()).into());
@@ -42,10 +46,10 @@ impl Binder {
 
         // Try to find a correlated column in `upper_contexts`, starting from the innermost context.
         let mut err = ErrorCode::ItemNotFound(format!("Invalid column: {}", column_name)).into();
-        for (i, context) in self.upper_contexts.iter().rev().enumerate() {
+        for (i, (context, _)) in self.upper_subquery_contexts.iter().rev().enumerate() {
             // `depth` starts from 1.
             let depth = i + 1;
-            match context.get_column_binding_index(table_name, column_name) {
+            match context.get_column_binding_index(&table_name, &column_name) {
                 Ok(index) => {
                     let column = &context.columns[index];
                     return Ok(CorrelatedInputRef::new(

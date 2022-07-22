@@ -44,7 +44,7 @@
       LogicalHopWindow { time_col: $2, slide: 1 day 00:00:00, size: 3 days 00:00:00, output_indices: all }
         LogicalScan { table: t1, columns: [_row_id, id, created_at] }
   stream_plan: |
-    StreamMaterialize { columns: [id, created_at, window_start, window_end, _row_id(hidden)], pk_columns: [_row_id, window_start] }
+    StreamMaterialize { columns: [id, created_at, window_start, window_end, t1._row_id(hidden)], pk_columns: [t1._row_id, window_start] }
       StreamHopWindow { time_col: $1, slide: 1 day 00:00:00, size: 3 days 00:00:00, output_indices: [0, 1, 3, 4, 2] }
         StreamTableScan { table: t1, columns: [id, created_at, _row_id], pk_indices: [2] }
 - sql: |
@@ -55,7 +55,7 @@
       LogicalHopWindow { time_col: $2, slide: 1 day 00:00:00, size: 3 days 00:00:00, output_indices: all }
         LogicalScan { table: t1, columns: [_row_id, id, created_at] }
   stream_plan: |
-    StreamMaterialize { columns: [id, created_at, window_start, _row_id(hidden)], pk_columns: [_row_id, window_start] }
+    StreamMaterialize { columns: [id, created_at, window_start, t1._row_id(hidden)], pk_columns: [t1._row_id, window_start] }
       StreamHopWindow { time_col: $1, slide: 1 day 00:00:00, size: 3 days 00:00:00, output_indices: [0, 1, 3, 2] }
         StreamTableScan { table: t1, columns: [id, created_at, _row_id], pk_indices: [2] }
 - sql: |
@@ -66,7 +66,7 @@
       LogicalHopWindow { time_col: $2, slide: 1 day 00:00:00, size: 3 days 00:00:00, output_indices: all }
         LogicalScan { table: t1, columns: [_row_id, id, created_at] }
   stream_plan: |
-    StreamMaterialize { columns: [id, created_at, window_end, _row_id(hidden)], pk_columns: [_row_id, window_end] }
+    StreamMaterialize { columns: [id, created_at, window_end, t1._row_id(hidden)], pk_columns: [t1._row_id, window_end] }
       StreamHopWindow { time_col: $1, slide: 1 day 00:00:00, size: 3 days 00:00:00, output_indices: [0, 1, 4, 2] }
         StreamTableScan { table: t1, columns: [id, created_at, _row_id], pk_indices: [2] }
 - sql: |
@@ -81,7 +81,7 @@
       BatchExchange { order: [], dist: Single }
         BatchScan { table: t1, columns: [id, created_at] }
   stream_plan: |
-    StreamMaterialize { columns: [id, created_at, window_start(hidden), _row_id(hidden)], pk_columns: [_row_id, window_start] }
+    StreamMaterialize { columns: [id, created_at, window_start(hidden), t1._row_id(hidden)], pk_columns: [t1._row_id, window_start] }
       StreamHopWindow { time_col: $1, slide: 1 day 00:00:00, size: 3 days 00:00:00, output_indices: [0, 1, 3, 2] }
         StreamTableScan { table: t1, columns: [id, created_at, _row_id], pk_indices: [2] }
 - sql: |
@@ -96,7 +96,7 @@
       BatchExchange { order: [], dist: Single }
         BatchScan { table: t1, columns: [id, created_at] }
   stream_plan: |
-    StreamMaterialize { columns: [id, created_at, window_start(hidden), _row_id(hidden)], pk_columns: [_row_id, window_start] }
+    StreamMaterialize { columns: [id, created_at, window_start(hidden), t1._row_id(hidden)], pk_columns: [t1._row_id, window_start] }
       StreamHopWindow { time_col: $1, slide: 1 day 00:00:00, size: 3 days 00:00:00, output_indices: [0, 1, 3, 2] }
         StreamTableScan { table: t1, columns: [id, created_at, _row_id], pk_indices: [2] }
 - sql: |
@@ -104,14 +104,14 @@
     select v1, window_end, avg(v3) as avg from hop( t, v2, interval '1' minute, interval '10' minute) group by v1, window_end;
   logical_plan: |
     LogicalProject { exprs: [$0, $1, ($2 / $3)] }
-      LogicalAgg { group_keys: [0, 1], agg_calls: [sum($2), count($2)] }
+      LogicalAgg { group_key: [$0, $1], aggs: [sum($2), count($2)] }
         LogicalProject { exprs: [$1, $5, $3] }
           LogicalHopWindow { time_col: $2, slide: 00:01:00, size: 00:10:00, output_indices: all }
             LogicalScan { table: t, columns: [_row_id, v1, v2, v3] }
   batch_plan: |
     BatchExchange { order: [], dist: Single }
       BatchProject { exprs: [$0, $1, ($2 / $3)] }
-        BatchHashAgg { group_keys: [$0, $1], aggs: [sum($2), count($2)] }
+        BatchHashAgg { group_key: [$0, $1], aggs: [sum($2), count($2)] }
           BatchExchange { order: [], dist: HashShard([0, 1]) }
             BatchProject { exprs: [$0, $2, $1] }
               BatchHopWindow { time_col: $1, slide: 00:01:00, size: 00:10:00, output_indices: [0, 2, 4] }
@@ -119,7 +119,7 @@
   stream_plan: |
     StreamMaterialize { columns: [v1, window_end, avg], pk_columns: [v1, window_end] }
       StreamProject { exprs: [$0, $1, ($3 / $4)] }
-        StreamHashAgg { group_keys: [$0, $1], aggs: [count, sum($2), count($2)] }
+        StreamHashAgg { group_key: [$0, $1], aggs: [count, sum($2), count($2)] }
           StreamExchange { dist: HashShard([0, 1]) }
             StreamProject { exprs: [$0, $2, $1, $3] }
               StreamHopWindow { time_col: $1, slide: 00:01:00, size: 00:10:00, output_indices: [0, 2, 5, 3] }
@@ -137,7 +137,7 @@
       BatchProject { exprs: [$0, $1, $2, TumbleStart($2, '3 days 00:00:00':Interval), (TumbleStart($2, '3 days 00:00:00':Interval) + '3 days 00:00:00':Interval)] }
         BatchScan { table: t1, columns: [id, v1, created_at] }
   stream_plan: |
-    StreamMaterialize { columns: [id, v1, created_at, window_start, window_end, _row_id(hidden)], pk_columns: [_row_id] }
+    StreamMaterialize { columns: [id, v1, created_at, window_start, window_end, t1._row_id(hidden)], pk_columns: [t1._row_id] }
       StreamProject { exprs: [$0, $1, $2, TumbleStart($2, '3 days 00:00:00':Interval), (TumbleStart($2, '3 days 00:00:00':Interval) + '3 days 00:00:00':Interval), $3] }
         StreamTableScan { table: t1, columns: [id, v1, created_at, _row_id], pk_indices: [3] }
 - sql: |
@@ -156,7 +156,7 @@
         BatchFilter { predicate: ($1 >= 10:Int32) }
           BatchScan { table: t1, columns: [id, v1, created_at] }
   stream_plan: |
-    StreamMaterialize { columns: [id, v1, created_at, window_start, window_end, _row_id(hidden)], pk_columns: [_row_id, window_start] }
+    StreamMaterialize { columns: [id, v1, created_at, window_start, window_end, t1._row_id(hidden)], pk_columns: [t1._row_id, window_start] }
       StreamHopWindow { time_col: $2, slide: 1 day 00:00:00, size: 3 days 00:00:00, output_indices: [0, 1, 2, 4, 5, 3] }
         StreamFilter { predicate: ($1 >= 10:Int32) }
           StreamTableScan { table: t1, columns: [id, v1, created_at, _row_id], pk_indices: [3] }

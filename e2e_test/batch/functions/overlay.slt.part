@@ -1,0 +1,31 @@
+query T
+SELECT OVERLAY('abcdef' PLACING '45' FROM 4);
+----
+abc45f
+
+query T
+SELECT OVERLAY('yabadoo' PLACING 'daba' FROM 5);
+----
+yabadaba
+
+query T
+SELECT OVERLAY('yabadoo' PLACING 'daba' FROM 5 FOR 0);
+----
+yabadabadoo
+
+query T
+SELECT OVERLAY('babosa' PLACING 'ubb' FROM 2 FOR 4);
+----
+bubba
+
+statement error
+SELECT OVERLAY('abc', 'xyz');
+
+statement error
+SELECT OVERLAY('abc' PLACING 'xyz');
+
+statement error
+SELECT OVERLAY('abc' PLACING 'xyz' FOR 2)
+
+statement error
+SELECT OVERLAY('abc' PLACING 'xyz' FOR 2 FROM 1)

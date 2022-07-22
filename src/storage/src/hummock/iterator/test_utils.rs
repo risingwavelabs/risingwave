@@ -15,11 +15,11 @@
 use std::iter::Iterator;
 use std::sync::Arc;
 
-use futures::executor::block_on;
-use itertools::Itertools;
 use risingwave_hummock_sdk::key::{key_with_epoch, Epoch};
 use risingwave_hummock_sdk::HummockSSTableId;
-use risingwave_object_store::object::{InMemObjectStore, ObjectStoreImpl, ObjectStoreRef};
+use risingwave_object_store::object::{
+    InMemObjectStore, ObjectStore, ObjectStoreImpl, ObjectStoreRef,
+};
 
 use crate::hummock::iterator::{BoxedForwardHummockIterator, ReadOptions};
 use crate::hummock::sstable_store::SstableStore;
@@ -46,10 +46,14 @@ macro_rules! assert_bytes_eq {
 pub const TEST_KEYS_COUNT: usize = 10;
 
 pub fn mock_sstable_store() -> SstableStoreRef {
-    mock_sstable_store_with_object_store(Arc::new(ObjectStoreImpl::new(
-        Box::new(InMemObjectStore::new(false)),
-        Arc::new(ObjectStoreMetrics::unused()),
-    )))
+    mock_sstable_store_with_object_store(Arc::new(ObjectStoreImpl::Hybrid {
+        local: Box::new(ObjectStoreImpl::InMem(
+            InMemObjectStore::new().monitored(Arc::new(ObjectStoreMetrics::unused())),
+        )),
+        remote: Box::new(ObjectStoreImpl::InMem(
+            InMemObjectStore::new().monitored(Arc::new(ObjectStoreMetrics::unused())),
+        )),
+    }))
 }
 
 pub fn mock_sstable_store_with_object_store(store: ObjectStoreRef) -> SstableStoreRef {
@@ -113,27 +117,50 @@ pub async fn gen_iterator_test_sstable_from_kv_pair(
     .await
 }
 
-pub fn gen_merge_iterator_interleave_test_sstable_iters(
+pub async fn gen_merge_iterator_interleave_test_sstable_iters(
     key_count: usize,
     count: usize,
 ) -> Vec<BoxedForwardHummockIterator> {
     let sstable_store = mock_sstable_store();
     let cache = create_small_table_cache();
-    (0..count)
-        .map(|i: usize| {
-            let table = block_on(gen_iterator_test_sstable_base(
-                i as HummockSSTableId,
-                default_builder_opt_for_test(),
-                |x| x * count + i,
-                sstable_store.clone(),
-                key_count,
-            ));
-            let handle = cache.insert(table.id, table.id, 1, Box::new(table));
-            Box::new(SSTableIterator::create(
-                handle,
-                sstable_store.clone(),
-                Arc::new(ReadOptions::default()),
-            )) as BoxedForwardHummockIterator
-        })
-        .collect_vec()
+    let mut result = vec![];
+    for i in 0..count {
+        let table = gen_iterator_test_sstable_base(
+            i as HummockSSTableId,
+            default_builder_opt_for_test(),
+            |x| x * count + i,
+            sstable_store.clone(),
+            key_count,
+        )
+        .await;
+        let handle = cache.insert(table.id, table.id, 1, Box::new(table));
+        result.push(Box::new(SSTableIterator::create(
+            handle,
+            sstable_store.clone(),
+            Arc::new(ReadOptions::default()),
+        )) as BoxedForwardHummockIterator);
+    }
+    result
+}
+
+pub async fn gen_iterator_test_sstable_with_incr_epoch(
+    sst_id: HummockSSTableId,
+    opts: SSTableBuilderOptions,
+    idx_mapping: impl Fn(usize) -> usize,
+    sstable_store: SstableStoreRef,
+    total: usize,
+    epoch_base: u64,
+) -> Sstable {
+    gen_test_sstable(
+        opts,
+        sst_id,
+        (0..total).map(|i| {
+            (
+                iterator_test_key_of_epoch(idx_mapping(i), epoch_base + i as u64),
+                HummockValue::put(iterator_test_value_of(idx_mapping(i))),
+            )
+        }),
+        sstable_store,
+    )
+    .await
 }

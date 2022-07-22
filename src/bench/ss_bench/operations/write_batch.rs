@@ -24,6 +24,7 @@ use risingwave_rpc_client::HummockMetaClient;
 use risingwave_storage::hummock::compactor::{Compactor, CompactorContext};
 use risingwave_storage::hummock::local_version_manager::LocalVersionManager;
 use risingwave_storage::storage_value::StorageValue;
+use risingwave_storage::store::WriteOptions;
 use risingwave_storage::StateStore;
 
 use super::{Batch, Operations, PerfMetrics};
@@ -106,7 +107,7 @@ impl Operations {
                     // LocalVersionManager::start_workers is modified into push-based.
                     let last_pinned_id = local_version_manager.get_pinned_version().id();
                     let version = self.meta_client.pin_version(last_pinned_id).await.unwrap();
-                    local_version_manager.try_update_pinned_version(version);
+                    local_version_manager.try_update_pinned_version(Some(last_pinned_id), version);
                 }
             }
         }
@@ -186,10 +187,19 @@ impl Operations {
                     let start = Instant::now();
                     let batch = batch
                         .into_iter()
-                        .map(|(k, v)| (k, StorageValue::new(Default::default(), v)))
+                        .map(|(k, v)| (k, StorageValue::new(v)))
                         .collect_vec();
                     let epoch = ctx.epoch.load(Ordering::Acquire);
-                    store.ingest_batch(batch, epoch).await.unwrap();
+                    store
+                        .ingest_batch(
+                            batch,
+                            WriteOptions {
+                                epoch,
+                                table_id: Default::default(),
+                            },
+                        )
+                        .await
+                        .unwrap();
                     let last_batch = i + 1 == l;
                     if ctx.epoch_barrier_finish(last_batch) {
                         store.sync(Some(epoch)).await.unwrap();

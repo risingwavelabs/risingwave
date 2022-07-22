@@ -54,7 +54,7 @@ impl AvroParser {
             match url_schema {
                 "file" => {
                     load_schema_async(
-                        |path, _props| async move { read_schema_from_local(path).await },
+                        |path, _props| async move { read_schema_from_local(path) },
                         schema_path.to_string(),
                         None,
                     )
@@ -282,7 +282,7 @@ pub async fn read_schema_from_s3(
 }
 
 /// Read avro schema file from local file.For on-premise or testing.
-pub async fn read_schema_from_local(path: String) -> Result<String> {
+pub fn read_schema_from_local(path: String) -> Result<String> {
     let content_rs = std::fs::read_to_string(path.as_str());
     if let Ok(content) = content_rs {
         Ok(content)
@@ -366,7 +366,7 @@ mod test {
     #[tokio::test]
     async fn test_read_schema_from_local() {
         let schema_path = test_data_path("complex-schema.avsc");
-        let content_rs = read_schema_from_local(schema_path).await;
+        let content_rs = read_schema_from_local(schema_path);
         assert!(content_rs.is_ok());
     }
 
@@ -390,7 +390,7 @@ mod test {
     async fn test_load_schema_from_local() {
         let schema_location = test_data_path("complex-schema.avsc");
         let schema_rs = load_schema_async(
-            |path, _props| read_schema_from_local(path),
+            |path, _props| async move { read_schema_from_local(path) },
             schema_location,
             None,
         )
@@ -479,48 +479,56 @@ mod test {
                 data_type: DataType::Int32,
                 column_id: ColumnId::from(0),
                 skip_parse: false,
+                fields: vec![],
             },
             SourceColumnDesc {
                 name: "sequence_id".to_string(),
                 data_type: DataType::Int64,
                 column_id: ColumnId::from(1),
                 skip_parse: false,
+                fields: vec![],
             },
             SourceColumnDesc {
                 name: "name".to_string(),
                 data_type: DataType::Varchar,
                 column_id: ColumnId::from(2),
                 skip_parse: false,
+                fields: vec![],
             },
             SourceColumnDesc {
                 name: "score".to_string(),
                 data_type: DataType::Float32,
                 column_id: ColumnId::from(3),
                 skip_parse: false,
+                fields: vec![],
             },
             SourceColumnDesc {
                 name: "avg_score".to_string(),
                 data_type: DataType::Float64,
                 column_id: ColumnId::from(4),
                 skip_parse: false,
+                fields: vec![],
             },
             SourceColumnDesc {
                 name: "is_lasted".to_string(),
                 data_type: DataType::Boolean,
                 column_id: ColumnId::from(5),
                 skip_parse: false,
+                fields: vec![],
             },
             SourceColumnDesc {
                 name: "entrance_date".to_string(),
                 data_type: DataType::Date,
                 column_id: ColumnId::from(6),
                 skip_parse: false,
+                fields: vec![],
             },
             SourceColumnDesc {
                 name: "birthday".to_string(),
                 data_type: DataType::Timestamp,
                 column_id: ColumnId::from(7),
                 skip_parse: false,
+                fields: vec![],
             },
         ]
     }

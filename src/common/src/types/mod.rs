@@ -13,6 +13,7 @@
 // limitations under the License.
 
 use std::convert::TryFrom;
+use std::hash::Hash;
 use std::sync::Arc;
 
 use anyhow::anyhow;
@@ -20,7 +21,7 @@ use bytes::{Buf, BufMut};
 use risingwave_pb::data::DataType as ProstDataType;
 use serde::{Deserialize, Serialize};
 
-use crate::array::{ArrayError, ArrayResult};
+use crate::array::{ArrayError, ArrayResult, NULL_VAL_FOR_HASH};
 mod native_type;
 mod ops;
 mod scalar_impl;
@@ -57,6 +58,16 @@ use crate::array::{
     StructValue,
 };
 
+/// Parallel unit is the minimal scheduling unit.
+pub type ParallelUnitId = u32;
+
+// VirtualNode (a.k.a. VNode) is a minimal partition that a set of keys belong to. It is used for
+// consistent hashing.
+pub type VirtualNode = u8;
+pub const VIRTUAL_NODE_SIZE: usize = std::mem::size_of::<VirtualNode>();
+pub const VNODE_BITS: usize = 8;
+pub const VIRTUAL_NODE_COUNT: usize = 1 << VNODE_BITS;
+
 pub type OrderedF32 = ordered_float::OrderedFloat<f32>;
 pub type OrderedF64 = ordered_float::OrderedFloat<f64>;
 
@@ -79,18 +90,18 @@ pub enum DataType {
     List { datatype: Box<DataType> },
 }
 
+pub fn unnested_list_type(datatype: DataType) -> DataType {
+    match datatype {
+        DataType::List { datatype } => unnested_list_type(*datatype),
+        _ => datatype,
+    }
+}
+
 const DECIMAL_DEFAULT_PRECISION: u32 = 20;
 const DECIMAL_DEFAULT_SCALE: u32 = 6;
 
-/// Number of bytes of one element in array of [`DataType`].
-pub enum DataSize {
-    /// For types with fixed size, e.g. int, float.
-    Fixed(usize),
-    /// For types with variable size, e.g. string.
-    Variable,
-}
-
 impl From<&ProstDataType> for DataType {
+    #[expect(clippy::needless_borrow)]
     fn from(proto: &ProstDataType) -> DataType {
         match proto.get_type_name().expect("missing type field") {
             TypeName::Int16 => DataType::Int16,
@@ -120,41 +131,63 @@ impl From<&ProstDataType> for DataType {
     }
 }
 
+impl Display for DataType {
+    fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
+        match self {
+            DataType::Boolean => f.write_str("boolean"),
+            DataType::Int16 => f.write_str("smallint"),
+            DataType::Int32 => f.write_str("integer"),
+            DataType::Int64 => f.write_str("bigint"),
+            DataType::Float32 => f.write_str("real"),
+            DataType::Float64 => f.write_str("double precision"),
+            DataType::Decimal => f.write_str("numeric"),
+            DataType::Date => f.write_str("date"),
+            DataType::Varchar => f.write_str("character varying"),
+            DataType::Time => f.write_str("time without time zone"),
+            DataType::Timestamp => f.write_str("timestamp without time zone"),
+            DataType::Timestampz => f.write_str("timestamp with time zone"),
+            DataType::Interval => f.write_str("interval"),
+            DataType::Struct { .. } => f.write_str("record"),
+            DataType::List { datatype } => write!(f, "{}[]", datatype),
+        }
+    }
+}
+
 impl DataType {
-    pub fn create_array_builder(&self, capacity: usize) -> ArrayResult<ArrayBuilderImpl> {
+    pub fn create_array_builder(&self, capacity: usize) -> ArrayBuilderImpl {
         use crate::array::*;
-        Ok(match self {
-            DataType::Boolean => BoolArrayBuilder::new(capacity)?.into(),
-            DataType::Int16 => PrimitiveArrayBuilder::<i16>::new(capacity)?.into(),
-            DataType::Int32 => PrimitiveArrayBuilder::<i32>::new(capacity)?.into(),
-            DataType::Int64 => PrimitiveArrayBuilder::<i64>::new(capacity)?.into(),
-            DataType::Float32 => PrimitiveArrayBuilder::<OrderedF32>::new(capacity)?.into(),
-            DataType::Float64 => PrimitiveArrayBuilder::<OrderedF64>::new(capacity)?.into(),
-            DataType::Decimal => DecimalArrayBuilder::new(capacity)?.into(),
-            DataType::Date => NaiveDateArrayBuilder::new(capacity)?.into(),
-            DataType::Varchar => Utf8ArrayBuilder::new(capacity)?.into(),
-            DataType::Time => NaiveTimeArrayBuilder::new(capacity)?.into(),
-            DataType::Timestamp => NaiveDateTimeArrayBuilder::new(capacity)?.into(),
-            DataType::Timestampz => PrimitiveArrayBuilder::<i64>::new(capacity)?.into(),
-            DataType::Interval => IntervalArrayBuilder::new(capacity)?.into(),
+        match self {
+            DataType::Boolean => BoolArrayBuilder::new(capacity).into(),
+            DataType::Int16 => PrimitiveArrayBuilder::<i16>::new(capacity).into(),
+            DataType::Int32 => PrimitiveArrayBuilder::<i32>::new(capacity).into(),
+            DataType::Int64 => PrimitiveArrayBuilder::<i64>::new(capacity).into(),
+            DataType::Float32 => PrimitiveArrayBuilder::<OrderedF32>::new(capacity).into(),
+            DataType::Float64 => PrimitiveArrayBuilder::<OrderedF64>::new(capacity).into(),
+            DataType::Decimal => DecimalArrayBuilder::new(capacity).into(),
+            DataType::Date => NaiveDateArrayBuilder::new(capacity).into(),
+            DataType::Varchar => Utf8ArrayBuilder::new(capacity).into(),
+            DataType::Time => NaiveTimeArrayBuilder::new(capacity).into(),
+            DataType::Timestamp => NaiveDateTimeArrayBuilder::new(capacity).into(),
+            DataType::Timestampz => PrimitiveArrayBuilder::<i64>::new(capacity).into(),
+            DataType::Interval => IntervalArrayBuilder::new(capacity).into(),
             DataType::Struct { fields } => StructArrayBuilder::with_meta(
                 capacity,
                 ArrayMeta::Struct {
                     children: fields.clone(),
                 },
-            )?
+            )
             .into(),
             DataType::List { datatype } => ListArrayBuilder::with_meta(
                 capacity,
                 ArrayMeta::List {
                     datatype: datatype.clone(),
                 },
-            )?
+            )
             .into(),
-        })
+        }
     }
 
-    fn prost_type_name(&self) -> TypeName {
+    pub fn prost_type_name(&self) -> TypeName {
         match self {
             DataType::Int16 => TypeName::Int16,
             DataType::Int32 => TypeName::Int32,
@@ -185,27 +218,6 @@ impl DataType {
             is_nullable: true,
             field_type,
             ..Default::default()
-        }
-    }
-
-    pub fn data_size(&self) -> DataSize {
-        use std::mem::size_of;
-        match self {
-            DataType::Boolean => DataSize::Variable,
-            DataType::Int16 => DataSize::Fixed(size_of::<i16>()),
-            DataType::Int32 => DataSize::Fixed(size_of::<i32>()),
-            DataType::Int64 => DataSize::Fixed(size_of::<i64>()),
-            DataType::Float32 => DataSize::Fixed(size_of::<OrderedF32>()),
-            DataType::Float64 => DataSize::Fixed(size_of::<OrderedF64>()),
-            DataType::Decimal => DataSize::Fixed(size_of::<Decimal>()),
-            DataType::Varchar => DataSize::Variable,
-            DataType::Date => DataSize::Fixed(size_of::<NaiveDateWrapper>()),
-            DataType::Time => DataSize::Fixed(size_of::<NaiveTimeWrapper>()),
-            DataType::Timestamp => DataSize::Fixed(size_of::<NaiveDateTimeWrapper>()),
-            DataType::Timestampz => DataSize::Fixed(size_of::<NaiveDateTimeWrapper>()),
-            DataType::Interval => DataSize::Variable,
-            DataType::Struct { .. } => DataSize::Variable,
-            DataType::List { .. } => DataSize::Variable,
         }
     }
 
@@ -520,7 +532,7 @@ macro_rules! impl_convert {
 
 for_all_scalar_variants! { impl_convert }
 
-// Implement `From<raw float>` for `ScalarImpl` manually/
+// Implement `From<raw float>` for `ScalarImpl` manually
 impl From<f32> for ScalarImpl {
     fn from(f: f32) -> Self {
         Self::Float32(f.into())
@@ -561,30 +573,43 @@ macro_rules! impl_scalar_impl_ref_conversion {
 
 for_all_scalar_variants! { impl_scalar_impl_ref_conversion }
 
-// FIXME: should implement Hash and Eq all by deriving
-// TODO: may take type information into consideration later
+/// Should behave the same as [`crate::array::Array::hash_at`] for non-null items.
 #[expect(clippy::derive_hash_xor_eq)]
-impl std::hash::Hash for ScalarImpl {
+impl Hash for ScalarImpl {
     fn hash<H: std::hash::Hasher>(&self, state: &mut H) {
         macro_rules! impl_all_hash {
             ([$self:ident], $({ $variant_type:ty, $scalar_type:ident } ),*) => {
                 match $self {
+                    // Primitive types
                     $( Self::$scalar_type(inner) => {
                         NativeType::hash_wrapper(inner, state);
                     }, )*
-                    Self::Bool(b) => b.hash(state),
-                    Self::Utf8(s) => s.hash(state),
-                    Self::Decimal(decimal) => decimal.hash(state),
                     Self::Interval(interval) => interval.hash(state),
                     Self::NaiveDate(naivedate) => naivedate.hash(state),
-                    Self::NaiveDateTime(naivedatetime) => naivedatetime.hash(state),
                     Self::NaiveTime(naivetime) => naivetime.hash(state),
-                    Self::Struct(v) => v.hash(state),
-                    Self::List(v) => v.hash(state),
+                    Self::NaiveDateTime(naivedatetime) => naivedatetime.hash(state),
+
+                    // Manually implemented
+                    Self::Bool(b) => b.hash(state),
+                    Self::Utf8(s) => state.write(s.as_bytes()),
+                    Self::Decimal(decimal) => decimal.normalize().hash(state),
+                    Self::Struct(v) => v.hash(state), // TODO: check if this is consistent with `StructArray::hash_at`
+                    Self::List(v) => v.hash(state),   // TODO: check if this is consistent with `ListArray::hash_at`
                 }
             };
         }
         for_all_native_types! { impl_all_hash, self }
+    }
+}
+
+/// Feeds the raw scalar of `datum` to the given `state`, which should behave the same as
+/// [`crate::array::Array::hash_at`]. NULL value will be carefully handled.
+///
+/// Caveats: this relies on the above implementation of [`Hash`].
+pub fn hash_datum(datum: &Datum, state: &mut impl std::hash::Hasher) {
+    match datum {
+        Some(scalar) => scalar.hash(state),
+        None => NULL_VAL_FOR_HASH.hash(state),
     }
 }
 
@@ -723,6 +748,55 @@ impl ScalarImpl {
         })
     }
 
+    /// Deserialize the `data_size` of `input_data_type` in `storage_encoding`. This function will
+    /// consume the offset of deserializer then return the length (without memcopy, only length
+    /// calculation). The difference between `encoding_data_size` and `ScalarImpl::data_size` is
+    /// that `ScalarImpl::data_size` calculates the `memory_length` of type instead of
+    /// `storage_encoding`
+    pub fn encoding_data_size(
+        data_type: &DataType,
+        deserializer: &mut memcomparable::Deserializer<impl Buf>,
+    ) -> memcomparable::Result<usize> {
+        let base_position = deserializer.position();
+        let null_tag = u8::deserialize(&mut *deserializer)?;
+        match null_tag {
+            0 => {}
+            1 => {
+                use std::mem::size_of;
+                let len = match data_type {
+                    DataType::Int16 => size_of::<i16>(),
+                    DataType::Int32 => size_of::<i32>(),
+                    DataType::Int64 => size_of::<i64>(),
+                    DataType::Float32 => size_of::<OrderedF32>(),
+                    DataType::Float64 => size_of::<OrderedF64>(),
+                    DataType::Date => size_of::<NaiveDateWrapper>(),
+                    DataType::Time => size_of::<NaiveTimeWrapper>(),
+                    DataType::Timestamp => size_of::<NaiveDateTimeWrapper>(),
+                    DataType::Timestampz => size_of::<i64>(),
+                    DataType::Boolean => size_of::<u8>(),
+                    DataType::Interval => size_of::<IntervalUnit>(),
+
+                    DataType::Decimal => deserializer.read_decimal_len()?,
+                    DataType::List { .. } | DataType::Struct { .. } => {
+                        // these two types is var-length and should only be determine at runtime.
+                        // TODO: need some test for this case (e.g. e2e test)
+                        deserializer.read_struct_and_list_len()?
+                    }
+                    DataType::Varchar => deserializer.read_bytes_len()?,
+                };
+
+                // consume offset of fixed_type
+                if deserializer.position() == base_position + 1 {
+                    // fixed type
+                    deserializer.advance(len);
+                }
+            }
+            _ => return Err(memcomparable::Error::InvalidTagEncoding(null_tag as _)),
+        }
+
+        Ok(deserializer.position() - base_position)
+    }
+
     pub fn to_protobuf(&self) -> Vec<u8> {
         let body = match self {
             ScalarImpl::Int16(v) => v.to_be_bytes().to_vec(),
@@ -734,9 +808,9 @@ impl ScalarImpl {
             ScalarImpl::Bool(v) => (*v as i8).to_be_bytes().to_vec(),
             ScalarImpl::Decimal(v) => v.to_string().as_bytes().to_vec(),
             ScalarImpl::Interval(v) => v.to_protobuf_owned(),
-            ScalarImpl::NaiveDate(_) => todo!(),
-            ScalarImpl::NaiveDateTime(_) => todo!(),
-            ScalarImpl::NaiveTime(_) => todo!(),
+            ScalarImpl::NaiveDate(v) => v.to_protobuf_owned(),
+            ScalarImpl::NaiveDateTime(v) => v.to_protobuf_owned(),
+            ScalarImpl::NaiveTime(v) => v.to_protobuf_owned(),
             ScalarImpl::Struct(v) => v.to_protobuf_owned(),
             ScalarImpl::List(v) => v.to_protobuf_owned(),
         };
@@ -796,6 +870,11 @@ impl ScalarImpl {
                 b,
                 data_type.get_interval_type()?,
             )?),
+            TypeName::Timestamp => {
+                ScalarImpl::NaiveDateTime(NaiveDateTimeWrapper::from_protobuf_bytes(b)?)
+            }
+            TypeName::Time => ScalarImpl::NaiveTime(NaiveTimeWrapper::from_protobuf_bytes(b)?),
+            TypeName::Date => ScalarImpl::NaiveDate(NaiveDateWrapper::from_protobuf_bytes(b)?),
             TypeName::Struct => {
                 let struct_value: ProstStructValue = Message::decode(b.as_slice())?;
                 let fields: Vec<Datum> = struct_value
@@ -923,5 +1002,24 @@ mod tests {
         assert_eq!(std::mem::size_of::<Decimal>(), 20);
         assert_eq!(std::mem::size_of::<ScalarImpl>(), 32);
         assert_eq!(std::mem::size_of::<Datum>(), 32);
+    }
+
+    #[test]
+    fn test_protobuf_conversion() {
+        let v = ScalarImpl::NaiveDateTime(NaiveDateTimeWrapper::default());
+        let actual =
+            ScalarImpl::bytes_to_scalar(&v.to_protobuf(), &DataType::Timestamp.to_protobuf())
+                .unwrap();
+        assert_eq!(v, actual);
+
+        let v = ScalarImpl::NaiveDate(NaiveDateWrapper::default());
+        let actual =
+            ScalarImpl::bytes_to_scalar(&v.to_protobuf(), &DataType::Date.to_protobuf()).unwrap();
+        assert_eq!(v, actual);
+
+        let v = ScalarImpl::NaiveTime(NaiveTimeWrapper::default());
+        let actual =
+            ScalarImpl::bytes_to_scalar(&v.to_protobuf(), &DataType::Time.to_protobuf()).unwrap();
+        assert_eq!(v, actual);
     }
 }

@@ -12,7 +12,6 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-#![feature(let_chains)]
 #![cfg_attr(coverage, feature(no_coverage))]
 
 use tikv_jemallocator::Jemalloc;
@@ -22,17 +21,15 @@ static GLOBAL: Jemalloc = Jemalloc;
 
 use std::collections::HashMap;
 use std::env;
-use std::future::Future;
-use std::pin::Pin;
 
+use anyhow::{bail, Result};
 use clap::StructOpt;
 use risingwave_cmd_all::playground;
 
-type RwFns = HashMap<&'static str, Box<dyn Fn(Vec<String>) -> Box<dyn Future<Output = ()>>>>;
+type RwFns = HashMap<&'static str, Box<dyn Fn(Vec<String>) -> Result<()>>>;
 
 #[cfg_attr(coverage, no_coverage)]
-#[tokio::main]
-async fn main() {
+fn main() -> Result<()> {
     let mut fns: RwFns = HashMap::new();
 
     // compute node configuration
@@ -40,16 +37,18 @@ async fn main() {
         fns.insert(
             fn_name,
             Box::new(|args: Vec<String>| {
-                Box::new(async move {
-                    eprintln!("launching compute node");
+                eprintln!("launching compute node");
 
-                    let opts = risingwave_compute::ComputeNodeOpts::parse_from(args);
+                let opts = risingwave_compute::ComputeNodeOpts::parse_from(args);
 
-                    risingwave_logging::oneshot_common();
-                    risingwave_logging::init_risingwave_logger(opts.enable_jaeger_tracing, false);
+                risingwave_rt::init_risingwave_logger(risingwave_rt::LoggerSettings::new(
+                    opts.enable_jaeger_tracing,
+                    false,
+                ));
 
-                    risingwave_compute::start(opts).await
-                })
+                risingwave_rt::main_okk(risingwave_compute::start(opts));
+
+                Ok(())
             }),
         );
     }
@@ -58,17 +57,16 @@ async fn main() {
     for fn_name in ["meta", "meta-node", "meta_node"] {
         fns.insert(
             fn_name,
-            Box::new(|args: Vec<String>| {
-                Box::new(async move {
-                    eprintln!("launching meta node");
+            Box::new(move |args: Vec<String>| {
+                eprintln!("launching meta node");
 
-                    let opts = risingwave_meta::MetaNodeOpts::parse_from(args);
+                let opts = risingwave_meta::MetaNodeOpts::parse_from(args);
 
-                    risingwave_logging::oneshot_common();
-                    risingwave_logging::init_risingwave_logger(false, false);
+                risingwave_rt::init_risingwave_logger(risingwave_rt::LoggerSettings::new_default());
 
-                    risingwave_meta::start(opts).await
-                })
+                risingwave_rt::main_okk(risingwave_meta::start(opts));
+
+                Ok(())
             }),
         );
     }
@@ -77,17 +75,16 @@ async fn main() {
     for fn_name in ["frontend", "frontend-node", "frontend_node"] {
         fns.insert(
             fn_name,
-            Box::new(|args: Vec<String>| {
-                Box::new(async move {
-                    eprintln!("launching frontend node");
+            Box::new(move |args: Vec<String>| {
+                eprintln!("launching frontend node");
 
-                    let opts = risingwave_frontend::FrontendOpts::parse_from(args);
+                let opts = risingwave_frontend::FrontendOpts::parse_from(args);
 
-                    risingwave_logging::oneshot_common();
-                    risingwave_logging::init_risingwave_logger(false, false);
+                risingwave_rt::init_risingwave_logger(risingwave_rt::LoggerSettings::new_default());
 
-                    risingwave_frontend::start(opts).await
-                })
+                risingwave_rt::main_okk(risingwave_frontend::start(opts));
+
+                Ok(())
             }),
         );
     }
@@ -96,17 +93,16 @@ async fn main() {
     for fn_name in ["compactor", "compactor-node", "compactor_node"] {
         fns.insert(
             fn_name,
-            Box::new(|args: Vec<String>| {
-                Box::new(async move {
-                    eprintln!("launching compactor node");
+            Box::new(move |args: Vec<String>| {
+                eprintln!("launching compactor node");
 
-                    let opts = risingwave_compactor::CompactorOpts::parse_from(args);
+                let opts = risingwave_compactor::CompactorOpts::parse_from(args);
 
-                    risingwave_logging::oneshot_common();
-                    risingwave_logging::init_risingwave_logger(false, false);
+                risingwave_rt::init_risingwave_logger(risingwave_rt::LoggerSettings::new_default());
 
-                    risingwave_compactor::start(opts).await
-                })
+                risingwave_rt::main_okk(risingwave_compactor::start(opts));
+
+                Ok(())
             }),
         );
     }
@@ -114,16 +110,13 @@ async fn main() {
     // risectl
     fns.insert(
         "risectl",
-        Box::new(|args: Vec<String>| {
-            Box::new(async move {
-                eprintln!("launching risectl");
+        Box::new(move |args: Vec<String>| {
+            eprintln!("launching risectl");
 
-                let opts = risingwave_ctl::CliOpts::parse_from(args);
-                risingwave_logging::oneshot_common();
-                risingwave_logging::init_risingwave_logger(false, true);
+            let opts = risingwave_ctl::CliOpts::parse_from(args);
+            risingwave_rt::init_risingwave_logger(risingwave_rt::LoggerSettings::new_default());
 
-                risingwave_ctl::start(opts).await
-            })
+            risingwave_rt::main_okk(risingwave_ctl::start(opts))
         }),
     );
 
@@ -131,7 +124,15 @@ async fn main() {
     for fn_name in ["play", "playground"] {
         fns.insert(
             fn_name,
-            Box::new(|_: Vec<String>| Box::new(async move { playground().await.unwrap() })),
+            Box::new(move |_: Vec<String>| {
+                risingwave_rt::init_risingwave_logger(risingwave_rt::LoggerSettings::new_default());
+
+                // Enable tokio console for `./risedev p` by replacing the above statement to:
+                // risingwave_rt::init_risingwave_logger(risingwave_rt::LoggerSettings::new(false,
+                // true));
+
+                risingwave_rt::main_okk(playground())
+            }),
         );
     }
 
@@ -158,11 +159,12 @@ async fn main() {
 
     match fns.remove(target.as_str()) {
         Some(func) => {
-            let func: Pin<Box<dyn Future<Output = ()>>> = func(args).into();
-            func.await
+            func(args)?;
         }
         None => {
-            panic!("unknown target: {}\nPlease either:\n* set `RW_NODE` env variable (`RW_NODE=<component>`)\n* create a symbol link to `risingwave` binary (ln -s risingwave <component>)\n* start with subcommand `risingwave <component>``\nwith one of the following: {:?}", target, fns.keys().collect::<Vec<_>>());
+            bail!("unknown target: {}\nPlease either:\n* set `RW_NODE` env variable (`RW_NODE=<component>`)\n* create a symbol link to `risingwave` binary (ln -s risingwave <component>)\n* start with subcommand `risingwave <component>``\nwith one of the following: {:?}", target, fns.keys().collect::<Vec<_>>());
         }
     }
+
+    Ok(())
 }

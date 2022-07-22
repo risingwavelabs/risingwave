@@ -23,6 +23,3 @@ pub use hummock_metrics::*;
 mod local_metrics;
 pub use local_metrics::StoreLocalStatistic;
 pub use risingwave_object_store::object::object_metrics::ObjectStoreMetrics;
-
-mod process_linux;
-pub use self::process_linux::monitor_process;

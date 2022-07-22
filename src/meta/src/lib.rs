@@ -19,6 +19,7 @@
 #![warn(clippy::explicit_into_iter_loop)]
 #![warn(clippy::explicit_iter_loop)]
 #![warn(clippy::inconsistent_struct_constructor)]
+#![warn(clippy::unused_async)]
 #![warn(clippy::map_flatten)]
 #![warn(clippy::no_effect_underscore_binding)]
 #![warn(clippy::await_holding_lock)]
@@ -28,13 +29,17 @@
 #![feature(generic_associated_types)]
 #![feature(binary_heap_drain_sorted)]
 #![feature(option_result_contains)]
-#![feature(let_chains)]
 #![feature(let_else)]
 #![feature(type_alias_impl_trait)]
 #![feature(map_first_last)]
 #![feature(drain_filter)]
+#![feature(custom_test_frameworks)]
 #![feature(lint_reasons)]
+#![feature(map_try_insert)]
 #![cfg_attr(coverage, feature(no_coverage))]
+#![test_runner(risingwave_test_runner::test_runner::run_failpont_tests)]
+
+extern crate core;
 
 mod barrier;
 pub mod cluster;
@@ -53,7 +58,7 @@ use clap::{ArgEnum, Parser};
 use risingwave_common::config::ComputeNodeConfig;
 
 use crate::manager::MetaOpts;
-use crate::rpc::server::{rpc_serve, MetaStoreBackend};
+use crate::rpc::server::{rpc_serve, AddressInfo, MetaStoreBackend};
 
 #[derive(Copy, Clone, Debug, ArgEnum)]
 enum Backend {
@@ -65,7 +70,10 @@ enum Backend {
 pub struct MetaNodeOpts {
     // TODO: rename to listen_address and separate out the port.
     #[clap(long, default_value = "127.0.0.1:5690")]
-    host: String,
+    listen_addr: String,
+
+    #[clap(long)]
+    host: Option<String>,
 
     #[clap(long)]
     dashboard_host: Option<String>,
@@ -78,6 +86,20 @@ pub struct MetaNodeOpts {
 
     #[clap(long, default_value_t = String::from(""))]
     etcd_endpoints: String,
+
+    /// Enable authentication with etcd. By default disabled.
+    #[clap(long)]
+    etcd_auth: bool,
+
+    /// Username of etcd, required when --etcd-auth is enabled.
+    /// Default value is read from the 'ETCD_USERNAME' environment variable.
+    #[clap(long, env = "ETCD_USERNAME", default_value = "")]
+    etcd_username: String,
+
+    /// Password of etcd, required when --etcd-auth is enabled.
+    /// Default value is read from the 'ETCD_PASSWORD' environment variable.
+    #[clap(long, env = "ETCD_PASSWORD", default_value = "")]
+    etcd_password: String,
 
     /// Maximum allowed heartbeat interval in ms.
     #[clap(long, default_value = "60000")]
@@ -94,6 +116,18 @@ pub struct MetaNodeOpts {
     /// e2e tests.
     #[clap(long)]
     disable_recovery: bool,
+
+    /// enable migrate actors when recovery, disable by default.
+    #[clap(long)]
+    enable_migrate: bool,
+
+    #[clap(long, default_value = "10")]
+    meta_leader_lease_secs: u64,
+
+    /// After specified seconds of idle (no mview or flush), the process will be exited.
+    /// It is mainly useful for playgrounds.
+    #[clap(long)]
+    dangerous_max_idle_secs: Option<u64>,
 }
 
 fn load_config(opts: &MetaNodeOpts) -> ComputeNodeConfig {
@@ -104,12 +138,14 @@ use std::future::Future;
 use std::pin::Pin;
 
 /// Start meta node
+
 pub fn start(opts: MetaNodeOpts) -> Pin<Box<dyn Future<Output = ()> + Send>> {
     // WARNING: don't change the function signature. Making it `async fn` will cause
     // slow compile in release mode.
     Box::pin(async move {
         let compute_config = load_config(&opts);
-        let addr = opts.host.parse().unwrap();
+        let meta_addr = opts.host.unwrap_or_else(|| opts.listen_addr.clone());
+        let listen_addr = opts.listen_addr.parse().unwrap();
         let dashboard_addr = opts.dashboard_host.map(|x| x.parse().unwrap());
         let prometheus_addr = opts.prometheus_host.map(|x| x.parse().unwrap());
         let backend = match opts.backend {
@@ -119,28 +155,46 @@ pub fn start(opts: MetaNodeOpts) -> Pin<Box<dyn Future<Output = ()> + Send>> {
                     .split(',')
                     .map(|x| x.to_string())
                     .collect(),
+                credentials: match opts.etcd_auth {
+                    true => Some((opts.etcd_username, opts.etcd_password)),
+                    false => None,
+                },
             },
             Backend::Mem => MetaStoreBackend::Mem,
         };
         let max_heartbeat_interval = Duration::from_millis(opts.max_heartbeat_interval as u64);
         let checkpoint_interval =
             Duration::from_millis(compute_config.streaming.checkpoint_interval_ms as u64);
+        let max_idle_ms = opts.dangerous_max_idle_secs.unwrap_or(0) * 1000;
+        let in_flight_barrier_nums = compute_config.streaming.in_flight_barrier_nums as usize;
+        let unsafe_worker_node_parallel_degree =
+            compute_config.streaming.unsafe_worker_node_parallel_degree;
 
-        tracing::info!("Meta server listening at {}", addr);
-        let (join_handle, _shutdown_send) = rpc_serve(
-            addr,
+        tracing::info!("Meta server listening at {}", listen_addr);
+        let add_info = AddressInfo {
+            addr: meta_addr,
+            listen_addr,
             prometheus_addr,
             dashboard_addr,
+            ui_path: opts.dashboard_ui_path,
+        };
+        let (join_handle, _shutdown_send) = rpc_serve(
+            add_info,
             backend,
             max_heartbeat_interval,
-            opts.dashboard_ui_path,
+            opts.meta_leader_lease_secs,
             MetaOpts {
                 enable_recovery: !opts.disable_recovery,
+                enable_migrate: opts.enable_migrate,
                 checkpoint_interval,
+                max_idle_ms,
+                in_flight_barrier_nums,
+                unsafe_worker_node_parallel_degree,
             },
         )
         .await
         .unwrap();
         join_handle.await.unwrap();
+        tracing::info!("Meta server is stopped");
     })
 }

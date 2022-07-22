@@ -2,7 +2,7 @@
 version: "3"
 services:
   compactor-0:
-    image: "ghcr.io/singularity-data/risingwave:latest"
+    image: "ghcr.io/singularity-data/risingwave:nightly-20220620"
     command:
       - compactor-node
       - "--host"
@@ -29,8 +29,17 @@ services:
     environment:
       RUST_BACKTRACE: "1"
     container_name: compactor-0
+    healthcheck:
+      test:
+        - CMD
+        - printf
+        - ""
+        - /dev/tcp/127.0.0.1/6660
+      interval: 1s
+      timeout: 5s
+      retries: 5
   compute-node-0:
-    image: "ghcr.io/singularity-data/risingwave:latest"
+    image: "ghcr.io/singularity-data/risingwave:nightly-20220620"
     command:
       - compute-node
       - "--host"
@@ -59,6 +68,15 @@ services:
     environment:
       RUST_BACKTRACE: "1"
     container_name: compute-node-0
+    healthcheck:
+      test:
+        - CMD
+        - printf
+        - ""
+        - /dev/tcp/127.0.0.1/5688
+      interval: 1s
+      timeout: 5s
+      retries: 5
   etcd-0:
     image: "quay.io/coreos/etcd:latest"
     command:
@@ -78,9 +96,11 @@ services:
       - "--max-txn-ops"
       - "999999"
       - "--auto-compaction-mode"
-      - revision
+      - periodic
       - "--auto-compaction-retention"
-      - "100"
+      - 1m
+      - "--snapshot-count"
+      - "10000"
     expose:
       - "2388"
     ports:
@@ -91,8 +111,17 @@ services:
       - "etcd-0:/etcd-data"
     environment: {}
     container_name: etcd-0
+    healthcheck:
+      test:
+        - CMD
+        - printf
+        - ""
+        - /dev/tcp/127.0.0.1/2388
+      interval: 1s
+      timeout: 5s
+      retries: 5
   frontend-node-0:
-    image: "ghcr.io/singularity-data/risingwave:latest"
+    image: "ghcr.io/singularity-data/risingwave:nightly-20220620"
     command:
       - frontend-node
       - "--host"
@@ -109,6 +138,15 @@ services:
     environment:
       RUST_BACKTRACE: "1"
     container_name: frontend-node-0
+    healthcheck:
+      test:
+        - CMD
+        - printf
+        - ""
+        - /dev/tcp/127.0.0.1/4566
+      interval: 1s
+      timeout: 5s
+      retries: 5
   grafana-0:
     image: "grafana/grafana-oss:latest"
     command: []
@@ -125,12 +163,23 @@ services:
       - "./risingwave-dashboard.json:/risingwave-dashboard.json"
     environment: {}
     container_name: grafana-0
+    healthcheck:
+      test:
+        - CMD
+        - printf
+        - ""
+        - /dev/tcp/127.0.0.1/3001
+      interval: 1s
+      timeout: 5s
+      retries: 5
   meta-node-0:
-    image: "ghcr.io/singularity-data/risingwave:latest"
+    image: "ghcr.io/singularity-data/risingwave:nightly-20220620"
     command:
       - meta-node
-      - "--host"
+      - "--listen-addr"
       - "0.0.0.0:5690"
+      - "--host"
+      - meta-node-0
       - "--dashboard-host"
       - "0.0.0.0:5691"
       - "--prometheus-host"
@@ -152,6 +201,15 @@ services:
     environment:
       RUST_BACKTRACE: "1"
     container_name: meta-node-0
+    healthcheck:
+      test:
+        - CMD
+        - printf
+        - ""
+        - /dev/tcp/127.0.0.1/5690
+      interval: 1s
+      timeout: 5s
+      retries: 5
   minio-0:
     image: "quay.io/minio/minio:latest"
     command:
@@ -172,11 +230,21 @@ services:
       - "minio-0:/data"
     entrypoint: "\n/bin/sh -c '\nset -e\nmkdir -p \"/data/hummock001\"\n/usr/bin/docker-entrypoint.sh \"$$0\" \"$$@\"\n'"
     environment:
+      MINIO_CI_CD: "1"
       MINIO_PROMETHEUS_AUTH_TYPE: public
       MINIO_PROMETHEUS_URL: "http://prometheus-0:9500"
       MINIO_ROOT_PASSWORD: hummockadmin
       MINIO_ROOT_USER: hummockadmin
     container_name: minio-0
+    healthcheck:
+      test:
+        - CMD
+        - printf
+        - ""
+        - /dev/tcp/127.0.0.1/9301
+      interval: 1s
+      timeout: 5s
+      retries: 5
   prometheus-0:
     image: "prom/prometheus:latest"
     command:
@@ -196,6 +264,15 @@ services:
       - "./prometheus.yaml:/etc/prometheus/prometheus.yml"
     environment: {}
     container_name: prometheus-0
+    healthcheck:
+      test:
+        - CMD
+        - printf
+        - ""
+        - /dev/tcp/127.0.0.1/9500
+      interval: 1s
+      timeout: 5s
+      retries: 5
   redpanda:
     image: "docker.vectorized.io/vectorized/redpanda:latest"
     command:
@@ -220,11 +297,21 @@ services:
       - "9092"
     ports:
       - "9092:9092"
+      - "9644:9644"
     depends_on: []
     volumes:
       - "redpanda:/var/lib/redpanda/data"
     environment: {}
     container_name: redpanda
+    healthcheck:
+      test:
+        - CMD
+        - printf
+        - ""
+        - /dev/tcp/127.0.0.1/9092
+      interval: 1s
+      timeout: 5s
+      retries: 5
 volumes:
   etcd-0:
     external: false

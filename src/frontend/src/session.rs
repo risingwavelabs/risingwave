@@ -12,39 +12,44 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::collections::HashMap;
 use std::fmt::Formatter;
 use std::io::{Error, ErrorKind};
 use std::marker::Sync;
 use std::path::PathBuf;
-use std::sync::atomic::{AtomicI32, Ordering};
-use std::sync::Arc;
+use std::sync::atomic::{AtomicBool, AtomicI32, Ordering};
+use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
-use parking_lot::RwLock;
+use parking_lot::{RwLock, RwLockReadGuard};
+use pgwire::pg_field_descriptor::PgFieldDescriptor;
 use pgwire::pg_response::PgResponse;
 use pgwire::pg_server::{BoxedError, Session, SessionManager, UserAuthenticator};
 use rand::RngCore;
 #[cfg(test)]
 use risingwave_common::catalog::{DEFAULT_DATABASE_NAME, DEFAULT_SUPPER_USER};
 use risingwave_common::config::FrontendConfig;
-use risingwave_common::error::{ErrorCode, Result, RwError};
-use risingwave_common::session_config::{DELTA_JOIN, IMPLICIT_FLUSH, QUERY_MODE};
+use risingwave_common::error::Result;
+use risingwave_common::session_config::ConfigMap;
 use risingwave_common::util::addr::HostAddr;
+use risingwave_common_service::observer_manager::ObserverManager;
 use risingwave_pb::common::WorkerType;
 use risingwave_pb::user::auth_info::EncryptionType;
 use risingwave_rpc_client::{ComputeClientPool, MetaClient};
+use risingwave_sqlparser::ast::Statement;
 use risingwave_sqlparser::parser::Parser;
 use tokio::sync::oneshot::Sender;
 use tokio::sync::watch;
 use tokio::task::JoinHandle;
 
+use crate::binder::Binder;
 use crate::catalog::catalog_service::{CatalogReader, CatalogWriter, CatalogWriterImpl};
 use crate::catalog::root_catalog::Catalog;
 use crate::handler::handle;
+use crate::handler::util::to_pg_field;
 use crate::meta_client::{FrontendMetaClient, FrontendMetaClientImpl};
-use crate::observer::observer_manager::ObserverManager;
+use crate::observer::observer_manager::FrontendObserverNode;
 use crate::optimizer::plan_node::PlanNodeId;
+use crate::planner::Planner;
 use crate::scheduler::worker_node_manager::{WorkerNodeManager, WorkerNodeManagerRef};
 use crate::scheduler::{HummockSnapshotManager, HummockSnapshotManagerRef, QueryManager};
 use crate::test_utils::MockUserInfoWriter;
@@ -57,6 +62,16 @@ pub struct OptimizerContext {
     pub session_ctx: Arc<SessionImpl>,
     // We use `AtomicI32` here because  `Arc<T>` implements `Send` only when `T: Send + Sync`.
     pub next_id: AtomicI32,
+    /// For debugging purposes, store the SQL string in Context
+    pub sql: Arc<str>,
+
+    /// it indicates whether the explain mode is verbose for explain statement
+    pub explain_verbose: AtomicBool,
+
+    /// it indicates whether the explain mode is trace for explain statement
+    pub explain_trace: AtomicBool,
+    /// Store the trace of optimizer
+    pub optimizer_trace: Arc<Mutex<Vec<String>>>,
 }
 
 #[derive(Clone, Debug)]
@@ -85,22 +100,50 @@ impl OptimizerContextRef {
         let next_id = self.inner.next_id.fetch_add(1, Ordering::Relaxed);
         PlanNodeId(next_id)
     }
+
+    pub fn is_explain_verbose(&self) -> bool {
+        self.inner.explain_verbose.load(Ordering::Acquire)
+    }
+
+    pub fn is_explain_trace(&self) -> bool {
+        self.inner.explain_trace.load(Ordering::Acquire)
+    }
+
+    pub fn trace(&self, str: String) {
+        let mut guard = self.inner.optimizer_trace.lock().unwrap();
+        guard.push(str);
+        guard.push("\n".to_string());
+    }
+
+    pub fn take_trace(&self) -> Vec<String> {
+        let mut guard = self.inner.optimizer_trace.lock().unwrap();
+        guard.drain(..).collect()
+    }
 }
 
 impl OptimizerContext {
-    pub fn new(session_ctx: Arc<SessionImpl>) -> Self {
+    pub fn new(session_ctx: Arc<SessionImpl>, sql: Arc<str>) -> Self {
         Self {
             session_ctx,
             next_id: AtomicI32::new(0),
+            sql,
+            explain_verbose: AtomicBool::new(false),
+            explain_trace: AtomicBool::new(false),
+            optimizer_trace: Arc::new(Mutex::new(vec![])),
         }
     }
 
     // TODO(TaoWu): Remove the async.
     #[cfg(test)]
+    #[expect(clippy::unused_async)]
     pub async fn mock() -> OptimizerContextRef {
         Self {
             session_ctx: Arc::new(SessionImpl::mock()),
             next_id: AtomicI32::new(0),
+            sql: Arc::from(""),
+            explain_verbose: AtomicBool::new(false),
+            explain_trace: AtomicBool::new(false),
+            optimizer_trace: Arc::new(Mutex::new(vec![])),
         }
         .into()
     }
@@ -212,7 +255,7 @@ impl FrontendEnv {
         ));
         let catalog_reader = CatalogReader::new(catalog.clone());
 
-        let worker_node_manager = Arc::new(WorkerNodeManager::new(meta_client.clone()).await?);
+        let worker_node_manager = Arc::new(WorkerNodeManager::new());
 
         let frontend_meta_client = Arc::new(FrontendMetaClientImpl(meta_client.clone()));
         let hummock_snapshot_manager =
@@ -232,15 +275,19 @@ impl FrontendEnv {
             user_info_updated_rx,
         ));
 
-        let observer_manager = ObserverManager::new(
-            meta_client.clone(),
-            frontend_address.clone(),
+        let frontend_observer_node = FrontendObserverNode::new(
             worker_node_manager.clone(),
             catalog,
             catalog_updated_tx,
             user_info_manager,
             user_info_updated_tx,
             hummock_snapshot_manager.clone(),
+        );
+        let observer_manager = ObserverManager::new(
+            meta_client.clone(),
+            frontend_address.clone(),
+            Box::new(frontend_observer_node),
+            WorkerType::Frontend,
         )
         .await;
         let observer_join_handle = observer_manager.start().await?;
@@ -266,6 +313,7 @@ impl FrontendEnv {
     }
 
     /// Get a reference to the frontend env's catalog writer.
+    #[expect(clippy::explicit_auto_deref)]
     pub fn catalog_writer(&self) -> &dyn CatalogWriter {
         &*self.catalog_writer
     }
@@ -276,6 +324,7 @@ impl FrontendEnv {
     }
 
     /// Get a reference to the frontend env's user info writer.
+    #[expect(clippy::explicit_auto_deref)]
     pub fn user_info_writer(&self) -> &dyn UserInfoWriter {
         &*self.user_info_writer
     }
@@ -285,6 +334,7 @@ impl FrontendEnv {
         &self.user_info_reader
     }
 
+    #[expect(clippy::explicit_auto_deref)]
     pub fn worker_node_manager(&self) -> &WorkerNodeManager {
         &*self.worker_node_manager
     }
@@ -293,6 +343,7 @@ impl FrontendEnv {
         self.worker_node_manager.clone()
     }
 
+    #[expect(clippy::explicit_auto_deref)]
     pub fn meta_client(&self) -> &dyn FrontendMetaClient {
         &*self.meta_client
     }
@@ -314,66 +365,40 @@ impl FrontendEnv {
     }
 }
 
+pub struct AuthContext {
+    pub database: String,
+    pub user_name: String,
+}
+
+impl AuthContext {
+    pub fn new(database: String, user_name: String) -> Self {
+        Self {
+            database,
+            user_name,
+        }
+    }
+}
+
 pub struct SessionImpl {
     env: FrontendEnv,
-    database: String,
-    user_name: String,
+    auth_context: Arc<AuthContext>,
     // Used for user authentication.
     user_authenticator: UserAuthenticator,
     /// Stores the value of configurations.
-    config_map: RwLock<HashMap<String, ConfigEntry>>,
-}
-
-#[derive(Clone)]
-pub struct ConfigEntry {
-    str_val: String,
-}
-
-impl ConfigEntry {
-    pub fn new(str_val: String) -> Self {
-        ConfigEntry { str_val }
-    }
-
-    /// Only used for boolean configurations.
-    pub fn is_set(&self, default: bool) -> bool {
-        self.str_val.parse().unwrap_or(default)
-    }
-
-    pub fn get_val<V>(&self, default: V) -> V
-    where
-        for<'a> V: TryFrom<&'a str, Error = RwError>,
-    {
-        V::try_from(&self.str_val).unwrap_or(default)
-    }
-}
-
-fn build_default_session_config_map() -> HashMap<String, String> {
-    let mut m = HashMap::new();
-    m.insert(IMPLICIT_FLUSH.to_ascii_lowercase(), "false".to_string());
-    m.insert(DELTA_JOIN.to_ascii_lowercase(), "false".to_string());
-    m.insert(QUERY_MODE.to_ascii_lowercase(), "distributed".to_string());
-    m
-}
-
-lazy_static::lazy_static! {
-    static ref DEFAULT_SESSION_CONFIG_MAP: HashMap<String, String> = {
-        build_default_session_config_map()
-    };
+    config_map: RwLock<ConfigMap>,
 }
 
 impl SessionImpl {
     pub fn new(
         env: FrontendEnv,
-        database: String,
-        user_name: String,
+        auth_context: Arc<AuthContext>,
         user_authenticator: UserAuthenticator,
     ) -> Self {
         Self {
             env,
-            database,
-            user_name,
+            auth_context,
             user_authenticator,
-            config_map: Self::init_config_map(),
+            config_map: RwLock::new(Default::default()),
         }
     }
 
@@ -381,10 +406,12 @@ impl SessionImpl {
     pub fn mock() -> Self {
         Self {
             env: FrontendEnv::mock(),
-            database: DEFAULT_DATABASE_NAME.to_string(),
-            user_name: DEFAULT_SUPPER_USER.to_string(),
+            auth_context: Arc::new(AuthContext::new(
+                DEFAULT_DATABASE_NAME.to_string(),
+                DEFAULT_SUPPER_USER.to_string(),
+            )),
             user_authenticator: UserAuthenticator::None,
-            config_map: Self::init_config_map(),
+            config_map: Default::default(),
         }
     }
 
@@ -392,41 +419,24 @@ impl SessionImpl {
         &self.env
     }
 
+    pub fn auth_context(&self) -> Arc<AuthContext> {
+        self.auth_context.clone()
+    }
+
     pub fn database(&self) -> &str {
-        &self.database
+        &self.auth_context.database
     }
 
     pub fn user_name(&self) -> &str {
-        &self.user_name
+        &self.auth_context.user_name
     }
 
-    /// Set configuration values in this session.
-    /// For example, `set_config("RW_IMPLICIT_FLUSH", true)` will implicit flush for every inserts.
-    pub fn set_config(&self, key: &str, val: &str) -> Result<()> {
-        let lower_key = key.to_ascii_lowercase();
-        self.config_map
-            .read()
-            .get(&lower_key)
-            .ok_or_else(|| ErrorCode::UnrecognizedConfigurationParameter(key.to_string()))?;
-        self.config_map
-            .write()
-            .insert(lower_key, ConfigEntry::new(val.to_string()));
-        Ok(())
+    pub fn config(&self) -> RwLockReadGuard<ConfigMap> {
+        self.config_map.read()
     }
 
-    /// Get configuration values in this session.
-    pub fn get_config(&self, key: &str) -> Option<ConfigEntry> {
-        let key = key.to_ascii_lowercase();
-        let reader = self.config_map.read();
-        reader.get(&key).cloned()
-    }
-
-    fn init_config_map() -> RwLock<HashMap<String, ConfigEntry>> {
-        let mut map = HashMap::new();
-        for (key, value) in &*DEFAULT_SESSION_CONFIG_MAP {
-            map.insert(key.clone(), ConfigEntry::new(value.clone()));
-        }
-        RwLock::new(map)
+    pub fn set_config(&self, key: &str, value: &str) -> Result<()> {
+        self.config_map.write().set(key, value)
     }
 }
 
@@ -462,7 +472,7 @@ impl SessionManager for SessionManagerImpl {
                     format!("User {} is not allowed to login", user_name),
                 )));
             }
-            let authenticator = match &user.auth_info {
+            let user_authenticator = match &user.auth_info {
                 None => UserAuthenticator::None,
                 Some(auth_info) => {
                     if auth_info.encryption_type == EncryptionType::Plaintext as i32 {
@@ -489,9 +499,11 @@ impl SessionManager for SessionManagerImpl {
 
             Ok(SessionImpl::new(
                 self.env.clone(),
-                database.to_string(),
-                user_name.to_string(),
-                authenticator,
+                Arc::new(AuthContext::new(
+                    database.to_string(),
+                    user_name.to_string(),
+                )),
+                user_authenticator,
             )
             .into())
         } else {
@@ -533,18 +545,45 @@ impl Session for SessionImpl {
             tracing::error!("failed to parse sql:\n{}:\n{}", sql, e);
             e
         })?;
-        // With pgwire, there would be at most 1 statement in the vec.
-        assert!(stmts.len() <= 1);
         if stmts.is_empty() {
-            return Ok(PgResponse::new(
+            return Ok(PgResponse::empty_result(
                 pgwire::pg_response::StatementType::EMPTY,
-                0,
-                vec![],
-                vec![],
+            ));
+        }
+        if stmts.len() > 1 {
+            return Ok(PgResponse::empty_result_with_notice(
+                pgwire::pg_response::StatementType::EMPTY,
+                "cannot insert multiple commands into statement".to_string(),
             ));
         }
         let stmt = stmts.swap_remove(0);
-        let rsp = handle(self, stmt).await.map_err(|e| {
+        let rsp = handle(self, stmt, sql).await.map_err(|e| {
+            tracing::error!("failed to handle sql:\n{}:\n{}", sql, e);
+            e
+        })?;
+        Ok(rsp)
+    }
+
+    async fn infer_return_type(
+        self: Arc<Self>,
+        sql: &str,
+    ) -> std::result::Result<Vec<PgFieldDescriptor>, BoxedError> {
+        // Parse sql.
+        let mut stmts = Parser::parse_sql(sql).map_err(|e| {
+            tracing::error!("failed to parse sql:\n{}:\n{}", sql, e);
+            e
+        })?;
+        if stmts.is_empty() {
+            return Ok(vec![]);
+        }
+        if stmts.len() > 1 {
+            return Err(Box::new(Error::new(
+                ErrorKind::InvalidInput,
+                "cannot insert multiple commands into statement",
+            )));
+        }
+        let stmt = stmts.swap_remove(0);
+        let rsp = infer(self, stmt, sql).map_err(|e| {
             tracing::error!("failed to handle sql:\n{}:\n{}", sql, e);
             e
         })?;
@@ -554,6 +593,31 @@ impl Session for SessionImpl {
     fn user_authenticator(&self) -> &UserAuthenticator {
         &self.user_authenticator
     }
+}
+
+/// Returns row description of the statement
+fn infer(session: Arc<SessionImpl>, stmt: Statement, sql: &str) -> Result<Vec<PgFieldDescriptor>> {
+    let context = OptimizerContext::new(session, Arc::from(sql));
+    let session = context.session_ctx.clone();
+
+    let bound = {
+        let mut binder = Binder::new(
+            session.env().catalog_reader().read_guard(),
+            session.database().to_string(),
+        );
+        binder.bind(stmt)?
+    };
+
+    let root = Planner::new(context.into()).plan(bound)?;
+
+    let pg_descs = root
+        .schema()
+        .fields()
+        .iter()
+        .map(to_pg_field)
+        .collect::<Vec<PgFieldDescriptor>>();
+
+    Ok(pg_descs)
 }
 
 #[cfg(test)]

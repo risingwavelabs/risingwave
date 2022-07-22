@@ -31,7 +31,7 @@ pub(crate) trait SourceChunkBuilder {
         let mut builders: Vec<_> = column_descs
             .iter()
             .map(|k| k.data_type.create_array_builder(DEFAULT_CHUNK_BUFFER_SIZE))
-            .try_collect()?;
+            .collect();
 
         for row in rows {
             row.iter()

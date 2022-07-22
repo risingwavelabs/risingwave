@@ -40,9 +40,13 @@ impl Binder {
             Some(t) => t,
             None => return Ok(None),
         };
+        self.push_lateral_context();
         let mut root = self.bind_table_with_joins(first)?;
+        self.pop_and_merge_lateral_context()?;
         for t in from_iter {
-            let right = self.bind_table_with_joins(t)?;
+            self.push_lateral_context();
+            let right = self.bind_table_with_joins(t.clone())?;
+            self.pop_and_merge_lateral_context()?;
             root = Relation::Join(Box::new(BoundJoin {
                 join_type: JoinType::Inner,
                 left: root,
@@ -71,7 +75,7 @@ impl Binder {
                 (cond, option_rel) = self.bind_join_constraint(constraint, Some(join.relation))?;
                 right = option_rel.unwrap();
             } else {
-                right = self.bind_table_factor(join.relation)?;
+                right = self.bind_table_factor(join.relation.clone())?;
                 (cond, _) = self.bind_join_constraint(constraint, None)?;
             }
             let join = BoundJoin {

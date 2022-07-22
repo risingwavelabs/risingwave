@@ -13,11 +13,12 @@
 // limitations under the License.
 
 use std::fmt::{Debug, Formatter};
+use std::future::Future;
 
 use risingwave_common::array::DataChunk;
 use risingwave_common::error::Result;
-use risingwave_rpc_client::ExchangeSource;
 
+use crate::exchange_source::ExchangeSource;
 use crate::task::{BatchTaskContext, TaskId, TaskOutput, TaskOutputId};
 
 /// Exchange data from a local task execution.
@@ -50,21 +51,24 @@ impl Debug for LocalExchangeSource {
     }
 }
 
-#[async_trait::async_trait]
 impl ExchangeSource for LocalExchangeSource {
-    async fn take_data(&mut self) -> Result<Option<DataChunk>> {
-        let ret = self.task_output.direct_take_data().await?;
-        if let Some(data) = ret {
-            let data = data.compact()?;
-            trace!(
-                "Receiver task: {:?}, source task output: {:?}, data: {:?}",
-                self.task_id,
-                self.task_output.id(),
-                data
-            );
-            Ok(Some(data))
-        } else {
-            Ok(None)
+    type TakeDataFuture<'a> = impl Future<Output = Result<Option<DataChunk>>>;
+
+    fn take_data(&mut self) -> Self::TakeDataFuture<'_> {
+        async {
+            let ret = self.task_output.direct_take_data().await?;
+            if let Some(data) = ret {
+                let data = data.compact()?;
+                trace!(
+                    "Receiver task: {:?}, source task output: {:?}, data: {:?}",
+                    self.task_id,
+                    self.task_output.id(),
+                    data
+                );
+                Ok(Some(data))
+            } else {
+                Ok(None)
+            }
         }
     }
 }
@@ -86,10 +90,10 @@ mod tests {
     use risingwave_pb::task_service::{
         GetDataRequest, GetDataResponse, GetStreamRequest, GetStreamResponse,
     };
-    use risingwave_rpc_client::ExchangeSource;
     use tokio_stream::wrappers::ReceiverStream;
     use tonic::{Request, Response, Status};
 
+    use crate::exchange_source::ExchangeSource;
     use crate::execution::grpc_exchange::GrpcExchangeSource;
 
     struct FakeExchangeService {

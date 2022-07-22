@@ -97,6 +97,12 @@ impl Binder {
                 substring_from,
                 substring_for,
             } => self.bind_substring(*expr, substring_from, substring_for),
+            Expr::Overlay {
+                expr,
+                new_substring,
+                start,
+                count,
+            } => self.bind_overlay(*expr, *new_substring, *start, count),
             _ => Err(ErrorCode::NotImplemented(
                 format!("unsupported expression {:?}", expr),
                 112.into(),
@@ -247,6 +253,24 @@ impl Binder {
         FunctionCall::new(ExprType::Substr, args).map(|f| f.into())
     }
 
+    fn bind_overlay(
+        &mut self,
+        expr: Expr,
+        new_substring: Expr,
+        start: Expr,
+        count: Option<Box<Expr>>,
+    ) -> Result<ExprImpl> {
+        let mut args = vec![
+            self.bind_expr(expr)?,
+            self.bind_expr(new_substring)?,
+            self.bind_expr(start)?,
+        ];
+        if let Some(count) = count {
+            args.push(self.bind_expr(*count)?);
+        }
+        FunctionCall::new(ExprType::Overlay, args).map(|f| f.into())
+    }
+
     /// Bind `expr (not) between low and high`
     pub(super) fn bind_between(
         &mut self,
@@ -355,7 +379,7 @@ pub fn bind_struct_field(column_def: &StructField) -> Result<ColumnDesc> {
                     data_type: bind_data_type(&f.data_type)?,
                     // Literals don't have `column_id`.
                     column_id: ColumnId::new(0),
-                    name: f.name.value.clone(),
+                    name: f.name.real_value(),
                     field_descs: vec![],
                     type_name: "".to_string(),
                 })
@@ -367,7 +391,7 @@ pub fn bind_struct_field(column_def: &StructField) -> Result<ColumnDesc> {
     Ok(ColumnDesc {
         data_type: bind_data_type(&column_def.data_type)?,
         column_id: ColumnId::new(0),
-        name: column_def.name.value.clone(),
+        name: column_def.name.real_value(),
         field_descs,
         type_name: "".to_string(),
     })
@@ -405,6 +429,13 @@ pub fn bind_data_type(data_type: &AstDataType) -> Result<DataType> {
                 .collect::<Result<Vec<_>>>()?
                 .into(),
         },
+        AstDataType::Text => {
+            return Err(ErrorCode::NotImplemented(
+                format!("unsupported data type: {:?}", data_type),
+                2535.into(),
+            )
+            .into())
+        }
         _ => {
             return Err(ErrorCode::NotImplemented(
                 format!("unsupported data type: {:?}", data_type),

@@ -19,6 +19,7 @@ use risingwave_pb::stream_plan::stream_node::NodeBody as ProstStreamNode;
 use risingwave_pb::stream_plan::StreamNode as ProstStreamPlan;
 
 use super::{LogicalScan, PlanBase, PlanNodeId, ToStreamProst};
+use crate::catalog::ColumnId;
 use crate::optimizer::property::Distribution;
 
 /// `StreamIndexScan` is a virtual plan node to represent a stream table scan. It will be converted
@@ -42,7 +43,7 @@ impl StreamIndexScan {
             ctx,
             logical.schema().clone(),
             logical.base.pk_indices.clone(),
-            Distribution::HashShard(logical.map_distribution_keys()),
+            Distribution::HashShard(logical.distribution_key().unwrap()),
             false, // TODO: determine the `append-only` field of table scan
         );
         Self {
@@ -65,11 +66,17 @@ impl_plan_tree_node_for_leaf! { StreamIndexScan }
 
 impl fmt::Display for StreamIndexScan {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        let verbose = self.base.ctx.is_explain_verbose();
         write!(
             f,
             "StreamIndexScan {{ index: {}, columns: [{}], pk_indices: {:?} }}",
             self.logical.table_name(),
-            self.logical.column_names().join(", "),
+            if verbose {
+                self.logical.column_names_with_table_prefix()
+            } else {
+                self.logical.column_names()
+            }
+            .join(", "),
             self.base.pk_indices
         )
     }
@@ -87,37 +94,13 @@ impl StreamIndexScan {
         use risingwave_pb::stream_plan::*;
 
         let batch_plan_node = BatchPlanNode {
-            table_desc: Some(CellBasedTableDesc {
-                table_id: self.logical.table_desc().table_id.into(),
-                order_key: self
-                    .logical
-                    .table_desc()
-                    .order_desc
-                    .iter()
-                    .map(|v| v.into())
-                    .collect(),
-            }),
-            column_descs: self
-                .schema()
-                .fields()
+            table_desc: Some(self.logical.table_desc().to_protobuf()),
+            column_ids: self
+                .logical
+                .output_column_ids()
                 .iter()
-                .zip_eq(self.logical.column_descs().iter())
-                .zip_eq(self.logical.column_names().iter())
-                .map(|((field, col), column_name)| ColumnDesc {
-                    column_type: Some(field.data_type().to_protobuf()),
-                    column_id: col.column_id.into(),
-                    name: column_name.clone(),
-                    field_descs: vec![],
-                    type_name: "".to_string(),
-                })
+                .map(ColumnId::get_id)
                 .collect(),
-            distribution_keys: self
-                .base
-                .dist
-                .dist_column_indices()
-                .iter()
-                .map(|k| *k as u32)
-                .collect_vec(),
         };
 
         let pk_indices = self.base.pk_indices.iter().map(|x| *x as u32).collect_vec();
@@ -145,12 +128,9 @@ impl StreamIndexScan {
                 },
             ],
             node_body: Some(ProstStreamNode::Chain(ChainNode {
+                table_id: self.logical.table_desc().table_id.table_id,
                 same_worker_node: true,
                 disable_rearrange: true,
-                table_ref_id: Some(TableRefId {
-                    table_id: self.logical.table_desc().table_id.table_id as i32,
-                    schema_ref_id: None, // TODO: fill schema ref id
-                }),
                 // The fields from upstream
                 upstream_fields: self
                     .logical

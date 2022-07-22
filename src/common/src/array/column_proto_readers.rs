@@ -48,7 +48,7 @@ pub fn read_numeric_array<T: PrimitiveArrayItemType, R: PrimitiveValueReader<T>>
         "Unexpected memory layout of numeric array"
     );
 
-    let mut builder = PrimitiveArrayBuilder::<T>::new(cardinality)?;
+    let mut builder = PrimitiveArrayBuilder::<T>::new(cardinality);
     let bitmap: Bitmap = array.get_null_bitmap()?.try_into()?;
     let mut cursor = Cursor::new(buf);
     for not_null in bitmap.iter() {
@@ -69,6 +69,7 @@ pub fn read_bool_array(array: &ProstArray, cardinality: usize) -> ArrayResult<Ar
         "Must have only 1 buffer in a bool array"
     );
 
+    #[expect(clippy::needless_borrow)]
     let data = (&array.get_values()[0]).try_into()?;
     let bitmap: Bitmap = array.get_null_bitmap()?.try_into()?;
 
@@ -86,7 +87,7 @@ fn read_naive_date(cursor: &mut Cursor<&[u8]>) -> ArrayResult<NaiveDateWrapper> 
 }
 
 fn read_naive_time(cursor: &mut Cursor<&[u8]>) -> ArrayResult<NaiveTimeWrapper> {
-    match cursor.read_i64::<BigEndian>() {
+    match cursor.read_u64::<BigEndian>() {
         Ok(t) => NaiveTimeWrapper::from_protobuf(t),
         Err(e) => bail!("Failed to read i64 from NaiveTime buffer: {}", e),
     }
@@ -126,7 +127,7 @@ macro_rules! read_one_value_array {
 
                 let buf = array.get_values()[0].get_body().as_slice();
 
-                let mut builder = $builder::new(cardinality)?;
+                let mut builder = $builder::new(cardinality);
                 let bitmap: Bitmap = array.get_null_bitmap()?.try_into()?;
                 let mut cursor = Cursor::new(buf);
                 for not_null in bitmap.iter() {
@@ -169,7 +170,7 @@ pub fn read_string_array<B: ArrayBuilder, R: VarSizedValueReader<B>>(
     let offset_buff = array.get_values()[0].get_body().as_slice();
     let data_buf = array.get_values()[1].get_body().as_slice();
 
-    let mut builder = B::with_meta(cardinality, ArrayMeta::Simple)?;
+    let mut builder = B::with_meta(cardinality, ArrayMeta::Simple);
     let bitmap: Bitmap = array.get_null_bitmap()?.try_into()?;
     let mut offset_cursor = Cursor::new(offset_buff);
     let mut data_cursor = Cursor::new(data_buf);

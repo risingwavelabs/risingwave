@@ -105,7 +105,7 @@ pub fn run_failpont_tests(cases: &[&TestDescAndFn]) {
     let mut cases1 = vec![];
     let mut cases2 = vec![];
     cases.iter().for_each(|case| {
-        if case.desc.name.as_slice().contains("test_failpoint") {
+        if case.desc.name.as_slice().contains("test_failpoints") {
             cases1.push(*case);
         } else {
             cases2.push(*case);

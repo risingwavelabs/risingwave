@@ -17,7 +17,6 @@ use std::fmt;
 use risingwave_common::error::Result;
 use risingwave_pb::batch_plan::plan_node::NodeBody;
 use risingwave_pb::batch_plan::InsertNode;
-use risingwave_pb::plan_common::TableRefId;
 
 use super::{LogicalInsert, PlanRef, PlanTreeNodeUnary, ToBatchProst, ToDistributedBatch};
 use crate::optimizer::plan_node::{PlanBase, ToLocalBatch};
@@ -38,7 +37,7 @@ impl BatchInsert {
             ctx,
             logical.schema().clone(),
             Distribution::Single,
-            Order::any().clone(),
+            Order::any(),
         );
         BatchInsert { base, logical }
     }
@@ -72,11 +71,7 @@ impl ToDistributedBatch for BatchInsert {
 impl ToBatchProst for BatchInsert {
     fn to_batch_prost_body(&self) -> NodeBody {
         NodeBody::Insert(InsertNode {
-            table_source_ref_id: TableRefId {
-                table_id: self.logical.source_id().table_id() as i32,
-                ..Default::default()
-            }
-            .into(),
+            table_source_id: self.logical.source_id().table_id(),
             column_ids: vec![], // unused
         })
     }

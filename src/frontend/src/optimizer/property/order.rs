@@ -15,10 +15,9 @@
 use std::fmt;
 
 use itertools::Itertools;
-use risingwave_common::catalog::Schema;
+use risingwave_common::catalog::{FieldVerboseDisplay, Schema};
 use risingwave_common::error::Result;
-use risingwave_common::util::sort_util::OrderType;
-use risingwave_pb::expr::InputRefExpr;
+use risingwave_common::util::sort_util::{OrderPair, OrderType};
 use risingwave_pb::plan_common::{ColumnOrder, OrderType as ProstOrderType};
 
 use super::super::plan_node::*;
@@ -30,23 +29,15 @@ pub struct Order {
 }
 
 impl Order {
-    pub fn new(field_order: Vec<FieldOrder>) -> Self {
+    pub const fn new(field_order: Vec<FieldOrder>) -> Self {
         Self { field_order }
     }
 
     /// Convert into protobuf.
-    pub fn to_protobuf(&self, schema: &Schema) -> Vec<ColumnOrder> {
+    pub fn to_protobuf(&self, _schema: &Schema) -> Vec<ColumnOrder> {
         self.field_order
             .iter()
-            .map(|f| {
-                let (input_ref, order_type) = f.to_protobuf();
-                let data_type = schema.fields[f.index].data_type.to_protobuf();
-                ColumnOrder {
-                    order_type: order_type as i32,
-                    input_ref: Some(input_ref),
-                    return_type: Some(data_type),
-                }
-            })
+            .map(FieldOrder::to_protobuf)
             .collect_vec()
     }
 }
@@ -64,7 +55,42 @@ impl fmt::Display for Order {
     }
 }
 
-#[derive(Clone)]
+pub struct OrderVerboseDisplay<'a> {
+    pub order: &'a Order,
+    pub input_schema: &'a Schema,
+}
+
+impl OrderVerboseDisplay<'_> {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        let that = self.order;
+        f.write_str("[")?;
+        for (i, field_order) in that.field_order.iter().enumerate() {
+            if i > 0 {
+                f.write_str(", ")?;
+            }
+            FieldOrderVerboseDisplay {
+                field_order,
+                input_schema: self.input_schema,
+            }
+            .fmt(f)?;
+        }
+        f.write_str("]")
+    }
+}
+
+impl fmt::Display for OrderVerboseDisplay<'_> {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        self.fmt(f)
+    }
+}
+
+impl fmt::Debug for OrderVerboseDisplay<'_> {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        self.fmt(f)
+    }
+}
+
+#[derive(Clone, PartialEq)]
 pub struct FieldOrder {
     pub index: usize,
     pub direct: Direction,
@@ -73,6 +99,29 @@ pub struct FieldOrder {
 impl std::fmt::Debug for FieldOrder {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         write!(f, "${} {}", self.index, self.direct)
+    }
+}
+
+pub struct FieldOrderVerboseDisplay<'a> {
+    pub field_order: &'a FieldOrder,
+    pub input_schema: &'a Schema,
+}
+
+impl FieldOrderVerboseDisplay<'_> {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        let that = self.field_order;
+        write!(
+            f,
+            "{} {}",
+            FieldVerboseDisplay(self.input_schema.fields.get(that.index).unwrap()),
+            that.direct
+        )
+    }
+}
+
+impl fmt::Debug for FieldOrderVerboseDisplay<'_> {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        self.fmt(f)
     }
 }
 
@@ -91,12 +140,27 @@ impl FieldOrder {
         }
     }
 
-    pub fn to_protobuf(&self) -> (InputRefExpr, ProstOrderType) {
-        let input_ref_expr = InputRefExpr {
-            column_idx: self.index as i32,
-        };
-        let order_type = self.direct.to_protobuf();
-        (input_ref_expr, order_type)
+    pub fn to_protobuf(&self) -> ColumnOrder {
+        ColumnOrder {
+            order_type: self.direct.to_protobuf() as i32,
+            index: self.index as u32,
+        }
+    }
+
+    pub fn from_protobuf(column_order: &ColumnOrder) -> Self {
+        let order_type: ProstOrderType = ProstOrderType::from_i32(column_order.order_type).unwrap();
+        Self {
+            direct: Direction::from_protobuf(&order_type),
+            index: column_order.index as usize,
+        }
+    }
+
+    // TODO: unify them
+    pub fn to_order_pair(&self) -> OrderPair {
+        OrderPair {
+            column_idx: self.index,
+            order_type: self.direct.to_order(),
+        }
     }
 }
 
@@ -106,7 +170,7 @@ impl fmt::Display for FieldOrder {
     }
 }
 
-#[derive(Debug, Clone, PartialEq, Copy)]
+#[derive(Debug, Clone, Eq, PartialEq, Copy, Hash)]
 pub enum Direction {
     Asc,
     Desc,
@@ -142,6 +206,23 @@ impl Direction {
             _ => unimplemented!(),
         }
     }
+
+    pub fn from_protobuf(order_type: &ProstOrderType) -> Self {
+        match order_type {
+            ProstOrderType::Ascending => Self::Asc,
+            ProstOrderType::Descending => Self::Desc,
+            ProstOrderType::Invalid => unreachable!(),
+        }
+    }
+
+    // TODO: unify them
+    pub fn to_order(&self) -> OrderType {
+        match self {
+            Self::Asc => OrderType::Ascending,
+            Self::Desc => OrderType::Descending,
+            _ => unreachable!(),
+        }
+    }
 }
 
 impl Direction {
@@ -153,11 +234,9 @@ impl Direction {
     }
 }
 
-lazy_static::lazy_static! {
-    static ref ANY_ORDER: Order = Order {
-        field_order: vec![],
-    };
-}
+const ANY_ORDER: Order = Order {
+    field_order: vec![],
+};
 
 impl Order {
     pub fn enforce_if_not_satisfies(&self, plan: PlanRef) -> Result<PlanRef> {
@@ -186,10 +265,12 @@ impl Order {
         true
     }
 
-    pub fn any() -> &'static Self {
-        &ANY_ORDER
+    #[inline(always)]
+    pub const fn any() -> Self {
+        ANY_ORDER
     }
 
+    #[inline(always)]
     pub fn is_any(&self) -> bool {
         self.field_order.is_empty()
     }

@@ -21,11 +21,10 @@ is_all_in_one_enabled = get_env ENABLE_ALL_IN_ONE
 if ${is_sanitizer_enabled}
   set_env RISEDEV_CARGO_BUILD_EXTRA_ARGS "-Zbuild-std --target ${CARGO_MAKE_RUST_TARGET_TRIPLE}"
   set_env RISEDEV_BUILD_TARGET_DIR "${CARGO_MAKE_RUST_TARGET_TRIPLE}/"
-  set_env RISEDEV_RUSTFLAGS "-Zsanitizer=thread"
+  set_env RISEDEV_RUSTFLAGS "--cfg tokio_unstable -Zsanitizer=thread"
 else
   set_env RISEDEV_CARGO_BUILD_EXTRA_ARGS ""
   set_env RISEDEV_BUILD_TARGET_DIR ""
-  set_env RISEDEV_RUSTFLAGS ""
 end
 
 if ${is_all_in_one_enabled}
@@ -213,13 +212,13 @@ category = "RiseDev - Build"
 description = "Build Rust components"
 condition = { env_set = ["ENABLE_BUILD_RUST"] }
 script = '''
-#!@shell
+#!/bin/bash
 
 set -e
 echo "$(tput setaf 4)$(tput bold)[Reminder]$(tput sgr0) risedev will only build $(tput setaf 4)risingwave_cmd(_all) and risedev$(tput sgr0) crates."
 
-export RUSTFLAGS="${RISEDEV_RUSTFLAGS}"
-echo + RUSTFLAGS="$RUSTFLAGS"
+[[ -z "${RISEDEV_RUSTFLAGS}" ]] || export RUSTFLAGS="${RISEDEV_RUSTFLAGS}"
+echo + RUSTFLAGS="${RUSTFLAGS:-<not set>}"
 set -xe
 cargo build -p ${RISEDEV_CARGO_BUILD_CRATE} -p risedev \
             --profile "${RISINGWAVE_BUILD_PROFILE}" \
@@ -279,6 +278,19 @@ dependencies = [
   "prepare-config",
 ]
 
+[tasks.pre-start-benchmark]
+category = "RiseDev - Prepare"
+description = "Download necessary tools to deploy a benchmark env"
+dependencies = [
+  "download-minio",
+  "download-mcli",
+  "download-etcd",
+  "download-grafana",
+  "download-prometheus",
+  "download-jaeger",
+  "download-kafka",
+]
+
 [tasks.p]
 alias = "playground"
 
@@ -295,6 +307,25 @@ echo "Use \`./risedev d\` instead if you want to start a full cluster."
 set -ex
 
 RUST_BACKTRACE=1 RW_NODE=playground cargo run --bin risingwave --profile "${RISINGWAVE_BUILD_PROFILE}"
+'''
+
+[tasks.ctl]
+category = "RiseDev - Start"
+description = "Start RiseCtl"
+script = '''
+#!@shell
+
+RC_ENV_FILE="${PREFIX_CONFIG}/risectl-env"
+
+if [ ! -f "${RC_ENV_FILE}" ]; then
+  echo "risectl-env file not found. Did you start cluster using $(tput setaf 4)\`./risedev d\`$(tput sgr0)?"
+  exit 1
+fi
+
+source "${RC_ENV_FILE}"
+
+cargo run --bin risectl --profile "${RISINGWAVE_BUILD_PROFILE}" -- "$@"
+test $? -eq 0 || exit 1
 '''
 
 [tasks.d]
@@ -348,7 +379,7 @@ set -e
 for tool in cargo-llvm-cov cargo-nextest cargo-udeps cargo-hakari cargo-sort cargo-make
 do
   echo "install: $(tput setaf 4)$tool$(tput sgr0)"
-  cargo install $tool
+  cargo install $tool --locked
   echo
 done
 
@@ -407,24 +438,24 @@ description = "Run unit tests"
 category = "RiseDev - Build in simulation mode"
 description = "Build in simulation mode"
 dependencies = ["warn-on-missing-tools"]
-env = { RUSTFLAGS = "--cfg madsim", CARGO_TARGET_DIR = "target/sim" }
+env = { RUSTFLAGS = "--cfg tokio_unstable --cfg madsim", CARGO_TARGET_DIR = "target/sim" }
 script = """
 #!/bin/bash
 set -e
 
-cargo build "$@"
+cargo build --workspace --exclude risingwave_cmd --exclude risingwave_cmd_all --exclude risingwave_rt --exclude risingwave_frontend_test_runner "$@"
 """
 
 [tasks.stest]
 category = "RiseDev - Deterministic Simulation Test"
 description = "Run unit tests in deterministic simulation mode"
 dependencies = ["warn-on-missing-tools"]
-env = { RUSTFLAGS = "--cfg madsim", CARGO_TARGET_DIR = "target/sim" }
+env = { RUSTFLAGS = "--cfg tokio_unstable --cfg madsim", CARGO_TARGET_DIR = "target/sim" }
 script = """
 #!/bin/bash
 set -e
 
-cargo nextest run "$@"
+cargo nextest run --workspace --exclude risingwave_cmd --exclude risingwave_cmd_all --exclude risingwave_rt --exclude risingwave_frontend_test_runner "$@"
 """
 
 [tasks.check-hakari]
@@ -587,4 +618,14 @@ echo
 echo "Deploy finished!"
 
 cat .risingwave/rw-docker/_message.partial.sh
+'''
+
+[tasks.apply-compose-docker]
+category = "RiseDev - Compose"
+description = "Run deploy.sh"
+script = '''
+#!@shell
+set -e
+
+cp -a .risingwave/rw-docker/* docker
 '''

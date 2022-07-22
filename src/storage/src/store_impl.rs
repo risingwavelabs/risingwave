@@ -12,15 +12,21 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+use std::collections::HashMap;
 use std::fmt::Debug;
 use std::sync::Arc;
 
 use enum_as_inner::EnumAsInner;
+use parking_lot::RwLock;
 use risingwave_common::config::StorageConfig;
-use risingwave_object_store::object::{parse_object_store, HybridObjectStore, ObjectStoreImpl};
+use risingwave_hummock_sdk::slice_transform::SliceTransform;
+use risingwave_object_store::object::{
+    parse_local_object_store, parse_remote_object_store, ObjectStoreImpl,
+};
 use risingwave_rpc_client::HummockMetaClient;
 
 use crate::error::StorageResult;
+use crate::hummock::compaction_group_client::CompactionGroupClientImpl;
 use crate::hummock::{HummockStorage, SstableStore};
 use crate::memory::MemoryStateStore;
 use crate::monitor::{MonitoredStateStore as Monitored, ObjectStoreMetrics, StateStoreMetrics};
@@ -89,37 +95,41 @@ impl StateStoreImpl {
         hummock_meta_client: Arc<dyn HummockMetaClient>,
         state_store_stats: Arc<StateStoreMetrics>,
         object_store_metrics: Arc<ObjectStoreMetrics>,
+        table_id_to_slice_transform: Arc<RwLock<HashMap<u32, Arc<dyn SliceTransform>>>>,
     ) -> StorageResult<Self> {
         let store = match s {
             hummock if hummock.starts_with("hummock+") => {
-                let remote_object_store =
-                    parse_object_store(hummock.strip_prefix("hummock+").unwrap(), false).await;
+                let remote_object_store = parse_remote_object_store(
+                    hummock.strip_prefix("hummock+").unwrap(),
+                    object_store_metrics.clone(),
+                )
+                .await;
                 let object_store = if config.enable_local_spill {
-                    let local_object_store = Arc::from(
-                        parse_object_store(config.local_object_store.as_str(), true).await,
-                    );
-                    Box::new(HybridObjectStore::new(
-                        local_object_store,
-                        Arc::from(remote_object_store),
-                    ))
+                    let local_object_store = parse_local_object_store(
+                        config.local_object_store.as_str(),
+                        object_store_metrics.clone(),
+                    )
+                    .await;
+                    ObjectStoreImpl::hybrid(local_object_store, remote_object_store)
                 } else {
                     remote_object_store
                 };
 
                 let sstable_store = Arc::new(SstableStore::new(
-                    Arc::new(ObjectStoreImpl::new(
-                        object_store,
-                        object_store_metrics.clone(),
-                    )),
+                    Arc::new(object_store),
                     config.data_directory.to_string(),
                     config.block_cache_capacity_mb * (1 << 20),
                     config.meta_cache_capacity_mb * (1 << 20),
                 ));
+                let compaction_group_client =
+                    Arc::new(CompactionGroupClientImpl::new(hummock_meta_client.clone()));
                 let inner = HummockStorage::new(
                     config.clone(),
                     sstable_store.clone(),
                     hummock_meta_client.clone(),
                     state_store_stats.clone(),
+                    compaction_group_client,
+                    table_id_to_slice_transform,
                 )
                 .await?;
                 StateStoreImpl::HummockStateStore(inner.monitored(state_store_stats))

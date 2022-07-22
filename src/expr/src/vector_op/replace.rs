@@ -51,7 +51,7 @@ mod tests {
         ];
 
         for (s, from_str, to_str, expected) in cases {
-            let builder = Utf8ArrayBuilder::new(1).unwrap();
+            let builder = Utf8ArrayBuilder::new(1);
             let writer = builder.writer();
             let guard = replace(s, from_str, to_str, writer).unwrap();
             let array = guard.into_inner().finish().unwrap();

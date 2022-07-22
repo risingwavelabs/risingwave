@@ -21,6 +21,7 @@
 #![warn(clippy::explicit_into_iter_loop)]
 #![warn(clippy::explicit_iter_loop)]
 #![warn(clippy::inconsistent_struct_constructor)]
+#![warn(clippy::unused_async)]
 #![warn(clippy::map_flatten)]
 #![warn(clippy::no_effect_underscore_binding)]
 #![warn(clippy::await_holding_lock)]
@@ -37,6 +38,7 @@
 #![feature(trusted_len)]
 #![feature(allocator_api)]
 #![feature(lint_reasons)]
+#![feature(generators)]
 
 #[macro_use]
 pub mod error;
@@ -49,10 +51,9 @@ pub mod cache;
 pub mod catalog;
 pub mod collection;
 pub mod config;
-pub mod consistent_hash;
+pub mod field_generator;
 pub mod hash;
 pub mod monitor;
-pub mod service;
 pub mod session_config;
 #[cfg(test)]
 pub mod test_utils;

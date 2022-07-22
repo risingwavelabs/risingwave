@@ -15,26 +15,30 @@
 use std::hash::{BuildHasher, Hash, Hasher};
 use std::ops;
 
-use bytes::Buf;
 use itertools::Itertools;
 
 use super::column::Column;
 use crate::array::DataChunk;
-use crate::error::Result as RwResult;
 use crate::hash::HashCode;
 use crate::types::{
-    deserialize_datum_from, deserialize_datum_not_null_from, serialize_datum_into,
+    deserialize_datum_from, deserialize_datum_not_null_from, hash_datum, serialize_datum_into,
     serialize_datum_not_null_into, DataType, Datum, DatumRef, ToOwnedDatum,
 };
 use crate::util::sort_util::OrderType;
-use crate::util::value_encoding::{deserialize_datum, serialize_datum};
-
 impl DataChunk {
     /// Get an iterator for visible rows.
     pub fn rows(&self) -> impl Iterator<Item = RowRef> {
         DataChunkRefIter {
             chunk: self,
             idx: Some(0),
+        }
+    }
+
+    /// Get an iterator for all rows in the chunk, and a `None` represents an invisible row.
+    pub fn rows_with_holes(&self) -> impl Iterator<Item = Option<RowRef>> {
+        DataChunkRefIterWithHoles {
+            chunk: self,
+            idx: 0,
         }
     }
 }
@@ -64,6 +68,34 @@ impl<'a> Iterator for DataChunkRefIter<'a> {
                     }
                 }
             }
+        }
+    }
+}
+
+struct DataChunkRefIterWithHoles<'a> {
+    chunk: &'a DataChunk,
+    idx: usize,
+}
+
+impl<'a> Iterator for DataChunkRefIterWithHoles<'a> {
+    type Item = Option<RowRef<'a>>;
+
+    fn next(&mut self) -> Option<Self::Item> {
+        let len = self.chunk.capacity();
+        let vis = self.chunk.vis();
+        if self.idx == len {
+            None
+        } else {
+            let ret = Some(if !vis.is_set(self.idx) {
+                None
+            } else {
+                Some(RowRef {
+                    chunk: self.chunk,
+                    idx: self.idx,
+                })
+            });
+            self.idx += 1;
+            ret
         }
     }
 }
@@ -219,6 +251,11 @@ impl Row {
         Self(values)
     }
 
+    pub fn empty<'a>() -> &'a Self {
+        static EMPTY_ROW: Row = Row(Vec::new());
+        &EMPTY_ROW
+    }
+
     /// Serialize the row into a memcomparable bytes.
     ///
     /// All values are nullable. Each value will have 1 extra byte to indicate whether it is null.
@@ -264,17 +301,6 @@ impl Row {
         Ok(serializer.into_inner())
     }
 
-    /// Serialize the row into a value encode bytes.
-    ///
-    /// All values are nullable. Each value will have 1 extra byte to indicate whether it is null.
-    pub fn value_encode(&self) -> RwResult<Vec<u8>> {
-        let mut vec = vec![];
-        for v in &self.0 {
-            vec.extend(serialize_datum(v)?);
-        }
-        Ok(vec)
-    }
-
     /// Return number of cells in the row.
     pub fn size(&self) -> usize {
         self.0.len()
@@ -291,29 +317,28 @@ impl Row {
     {
         let mut hasher = hash_builder.build_hasher();
         for datum in &self.0 {
-            datum.hash(&mut hasher);
+            hash_datum(datum, &mut hasher);
         }
         HashCode(hasher.finish())
     }
 
     /// Compute hash value of a row on corresponding indices.
-    pub fn hash_by_indices<H>(
-        &self,
-        hash_indices: &[usize],
-        hash_builder: &H,
-    ) -> super::ArrayResult<HashCode>
+    pub fn hash_by_indices<H>(&self, hash_indices: &[usize], hash_builder: &H) -> HashCode
     where
         H: BuildHasher,
     {
         let mut hasher = hash_builder.build_hasher();
         for idx in hash_indices {
-            let datum = self.0.get(*idx);
-            match datum {
-                Some(datum) => datum.hash(&mut hasher),
-                None => bail!("index {} out of row bound", idx),
-            }
+            hash_datum(&self.0[*idx], &mut hasher);
         }
-        Ok(HashCode(hasher.finish()))
+        HashCode(hasher.finish())
+    }
+
+    /// Get an owned `Row` by the given `indices` from current row.
+    ///
+    /// Use `datum_refs_by_indices` if possible instead to avoid allocating owned datums.
+    pub fn by_indices(&self, indices: &[usize]) -> Row {
+        Row(indices.iter().map(|&idx| self.0[idx].clone()).collect_vec())
     }
 }
 
@@ -364,15 +389,6 @@ impl RowDeserializer {
         let mut deserializer = memcomparable::Deserializer::new(data);
         let datum = deserialize_datum_from(&self.data_types[datum_idx], &mut deserializer)?;
         Ok(datum)
-    }
-
-    /// Deserialize the row from a value encoding bytes.
-    pub fn value_decode(&self, mut data: impl Buf) -> RwResult<Row> {
-        let mut values = Vec::with_capacity(self.data_types.len());
-        for ty in &self.data_types {
-            values.push(deserialize_datum(&mut data, ty)?);
-        }
-        Ok(Row(values))
     }
 }
 

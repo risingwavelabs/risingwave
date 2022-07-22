@@ -42,8 +42,10 @@ impl MetaNodeService {
 
     /// Apply command args according to config
     pub fn apply_command_args(cmd: &mut Command, config: &MetaNodeConfig) -> Result<()> {
-        cmd.arg("--host")
+        cmd.arg("--listen-addr")
             .arg(format!("{}:{}", config.listen_address, config.port))
+            .arg("--host")
+            .arg(config.address.clone())
             .arg("--dashboard-host")
             .arg(format!(
                 "{}:{}",
@@ -82,6 +84,12 @@ impl MetaNodeService {
             cmd.arg("--disable-recovery");
         }
 
+        if let Some(sec) = config.max_idle_secs_to_exit {
+            if sec > 0 {
+                cmd.arg("--dangerous-max-idle-secs").arg(format!("{}", sec));
+            }
+        }
+
         Ok(())
     }
 }
@@ -94,6 +102,12 @@ impl Task for MetaNodeService {
         let mut cmd = self.meta_node()?;
 
         cmd.env("RUST_BACKTRACE", "1");
+        if crate::util::is_env_set("RISEDEV_ENABLE_PROFILE") {
+            cmd.env(
+                "RW_PROFILE_PATH",
+                Path::new(&env::var("PREFIX_LOG")?).join(format!("profile-{}", self.id())),
+            );
+        }
         Self::apply_command_args(&mut cmd, &self.config)?;
 
         let prefix_config = env::var("PREFIX_CONFIG")?;

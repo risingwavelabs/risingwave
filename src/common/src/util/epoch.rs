@@ -70,6 +70,18 @@ impl Epoch {
     pub fn as_system_time(&self) -> SystemTime {
         *UNIX_SINGULARITY_DATE_EPOCH + Duration::from_millis(self.physical_time())
     }
+
+    /// Returns the epoch subtract `relative_time_ms`, which used for ttl to get epoch corresponding
+    /// to the lowerbound timepoint (`src/storage/src/hummock/iterator/forward_user.rs`)
+    pub fn subtract_ms(&self, relative_time_ms: u64) -> Self {
+        let physical_time = self.physical_time();
+
+        if physical_time < relative_time_ms {
+            Epoch(INVALID_EPOCH)
+        } else {
+            Epoch((physical_time - relative_time_ms) << EPOCH_PHYSICAL_SHIFT_BITS)
+        }
+    }
 }
 
 impl From<u64> for Epoch {
@@ -105,6 +117,27 @@ mod tests {
             let epoch = prev_epoch.next();
             assert!(epoch > prev_epoch);
             prev_epoch = epoch;
+        }
+    }
+
+    #[test]
+    fn test_subtract_ms() {
+        {
+            let epoch = Epoch(10);
+            assert_eq!(0, epoch.physical_time());
+            assert_eq!(0, epoch.subtract_ms(20).0);
+        }
+
+        {
+            let epoch = Epoch::now();
+            let physical_time = epoch.physical_time();
+            let interval = 10;
+
+            assert_ne!(0, physical_time);
+            assert_eq!(
+                physical_time - interval,
+                epoch.subtract_ms(interval).physical_time()
+            );
         }
     }
 }

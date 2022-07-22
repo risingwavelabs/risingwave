@@ -16,11 +16,10 @@ use std::collections::{BTreeMap, HashMap};
 use std::sync::Arc;
 
 use parking_lot::Mutex;
-use risingwave_common::consistent_hash::{VirtualNode, VIRTUAL_NODE_COUNT};
+use risingwave_common::types::{ParallelUnitId, VirtualNode, VIRTUAL_NODE_COUNT};
 use risingwave_pb::common::ParallelUnit;
 
 use super::TableId;
-use crate::cluster::ParallelUnitId;
 use crate::model::FragmentId;
 
 pub type HashMappingManagerRef = Arc<HashMappingManager>;
@@ -89,16 +88,6 @@ impl HashMappingManager {
             .map(|info| info.vnode_mapping.clone())
     }
 
-    pub fn set_need_consolidation(&self, newflag: bool) {
-        let mut core = self.core.lock();
-        core.need_sst_consolidation = newflag;
-    }
-
-    pub fn get_need_consolidation(&self) -> bool {
-        let core = self.core.lock();
-        core.need_sst_consolidation
-    }
-
     /// For test.
     #[cfg(test)]
     fn get_fragment_mapping_info(&self, fragment_id: &FragmentId) -> Option<HashMappingInfo> {
@@ -109,7 +98,7 @@ impl HashMappingManager {
 
 /// `HashMappingInfo` stores the vnode mapping and some other helpers for maintaining a
 /// load-balanced vnode mapping.
-#[derive(Clone)]
+#[derive(Clone, Debug)]
 struct HashMappingInfo {
     /// Hash mapping from virtual node to parallel unit.
     vnode_mapping: Vec<ParallelUnitId>,
@@ -122,7 +111,6 @@ struct HashMappingInfo {
 }
 
 struct HashMappingManagerCore {
-    need_sst_consolidation: bool,
     /// Mapping from fragment to hash mapping information. One fragment will have exactly one vnode
     /// mapping, which describes the data distribution of the fragment.
     hash_mapping_infos: HashMap<FragmentId, HashMappingInfo>,
@@ -133,12 +121,15 @@ struct HashMappingManagerCore {
 impl HashMappingManagerCore {
     fn new() -> Self {
         Self {
-            need_sst_consolidation: true,
             hash_mapping_infos: HashMap::new(),
             state_table_fragment_mapping: HashMap::new(),
         }
     }
 
+    /// Build a [`HashMappingInfo`] and record it for the fragment based on given `parallel_units`.
+    ///
+    /// For example, if `parallel_units` is `[0, 1, 2]`, and the total vnode count is 10, we'll
+    /// generate mapping like `[0, 0, 0, 0, 1, 1, 1, 2, 2, 2]`.
     fn build_fragment_hash_mapping(
         &mut self,
         fragment_id: FragmentId,
@@ -146,29 +137,28 @@ impl HashMappingManagerCore {
     ) -> Vec<ParallelUnitId> {
         let mut vnode_mapping = Vec::with_capacity(VIRTUAL_NODE_COUNT);
         let mut owner_mapping: HashMap<ParallelUnitId, Vec<VirtualNode>> = HashMap::new();
-        let mut load_balancer: BTreeMap<usize, Vec<ParallelUnitId>> = BTreeMap::new();
+
         let hash_shard_size = VIRTUAL_NODE_COUNT / parallel_units.len();
-        let mut init_bound = hash_shard_size;
+        let mut one_more_count = VIRTUAL_NODE_COUNT % parallel_units.len();
+        let mut init_bound = 0;
 
         parallel_units.iter().for_each(|parallel_unit| {
+            let vnode_count = if one_more_count > 0 {
+                one_more_count -= 1;
+                hash_shard_size + 1
+            } else {
+                hash_shard_size
+            };
             let parallel_unit_id = parallel_unit.id;
+            init_bound += vnode_count;
             vnode_mapping.resize(init_bound, parallel_unit_id);
-            let vnodes = (init_bound - hash_shard_size..init_bound)
+            let vnodes = (init_bound - vnode_count..init_bound)
                 .map(|id| id as VirtualNode)
                 .collect();
             owner_mapping.insert(parallel_unit_id, vnodes);
-            init_bound += hash_shard_size;
         });
 
-        let mut parallel_unit_iter = parallel_units.iter().cycle();
-        for vnode in init_bound - hash_shard_size..VIRTUAL_NODE_COUNT {
-            let id = parallel_unit_iter.next().unwrap().id;
-            vnode_mapping.push(id);
-            owner_mapping
-                .entry(id)
-                .or_default()
-                .push(vnode as VirtualNode);
-        }
+        let mut load_balancer: BTreeMap<usize, Vec<ParallelUnitId>> = BTreeMap::new();
 
         owner_mapping.iter().for_each(|(parallel_unit_id, vnodes)| {
             let vnode_count = vnodes.len();
@@ -183,11 +173,13 @@ impl HashMappingManagerCore {
             owner_mapping,
             load_balancer,
         };
+
         self.hash_mapping_infos.insert(fragment_id, mapping_info);
 
         vnode_mapping
     }
 
+    /// Construct a [`HashMappingInfo`] with given `vnode_mapping` and record it for the fragment.
     fn set_fragment_hash_mapping(
         &mut self,
         fragment_id: FragmentId,
@@ -225,13 +217,17 @@ impl HashMappingManagerCore {
 #[cfg(test)]
 mod tests {
     use itertools::Itertools;
-    use risingwave_common::consistent_hash::VIRTUAL_NODE_COUNT;
+    use risingwave_common::types::VIRTUAL_NODE_COUNT;
     use risingwave_pb::common::{ParallelUnit, ParallelUnitType};
+    use static_assertions::const_assert_eq;
 
     use super::{HashMappingInfo, HashMappingManager};
 
     #[test]
     fn test_build_hash_mapping() {
+        // This test only works when VIRTUAL_NODE_COUNT is 256.
+        const_assert_eq!(VIRTUAL_NODE_COUNT, 256);
+
         let parallel_unit_count = 6usize;
         let parallel_units = (1..parallel_unit_count + 1)
             .map(|id| ParallelUnit {
@@ -266,14 +262,14 @@ mod tests {
                 .iter()
                 .filter(|&parallel_unit_id| *parallel_unit_id == 3)
                 .count(),
-            VIRTUAL_NODE_COUNT / parallel_unit_count
+            VIRTUAL_NODE_COUNT / parallel_unit_count + 1
         );
         assert_eq!(
             vnode_mapping
                 .iter()
                 .filter(|&parallel_unit_id| *parallel_unit_id == 4)
                 .count(),
-            VIRTUAL_NODE_COUNT / parallel_unit_count
+            VIRTUAL_NODE_COUNT / parallel_unit_count + 1
         );
         assert_eq!(
             vnode_mapping

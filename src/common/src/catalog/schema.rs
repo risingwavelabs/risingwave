@@ -18,7 +18,7 @@ use itertools::Itertools;
 use risingwave_pb::plan_common::Field as ProstField;
 
 use super::ColumnDesc;
-use crate::array::{ArrayBuilderImpl, ArrayResult};
+use crate::array::ArrayBuilderImpl;
 use crate::error::{ErrorCode, Result};
 use crate::types::DataType;
 
@@ -64,6 +64,20 @@ impl Field {
             ))
             .into())
         }
+    }
+}
+
+pub struct FieldVerboseDisplay<'a>(pub &'a Field);
+
+impl std::fmt::Debug for FieldVerboseDisplay<'_> {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "{}", self.0.name)
+    }
+}
+
+impl std::fmt::Display for FieldVerboseDisplay<'_> {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "{}", self.0.name)
     }
 }
 
@@ -118,11 +132,11 @@ impl Schema {
     }
 
     /// Create array builders for all fields in this schema.
-    pub fn create_array_builders(&self, capacity: usize) -> ArrayResult<Vec<ArrayBuilderImpl>> {
+    pub fn create_array_builders(&self, capacity: usize) -> Vec<ArrayBuilderImpl> {
         self.fields
             .iter()
             .map(|field| field.data_type.create_array_builder(capacity))
-            .try_collect()
+            .collect()
     }
 
     pub fn to_prost(&self) -> Vec<ProstField> {
@@ -176,6 +190,15 @@ impl Field {
     pub fn data_type(&self) -> DataType {
         self.data_type.clone()
     }
+
+    pub fn from_with_table_name_prefix(desc: &ColumnDesc, table_name: &str) -> Self {
+        Self {
+            data_type: desc.data_type.clone(),
+            name: format!("{}.{}", table_name, desc.name),
+            sub_fields: desc.field_descs.iter().map(|d| d.into()).collect_vec(),
+            type_name: desc.type_name.clone(),
+        }
+    }
 }
 
 impl From<&ProstField> for Field {
@@ -219,7 +242,7 @@ impl FromIterator<Field> for Schema {
 pub mod test_utils {
     use super::*;
 
-    fn field_n<const N: usize>(data_type: DataType) -> Schema {
+    pub fn field_n<const N: usize>(data_type: DataType) -> Schema {
         Schema::new(vec![Field::unnamed(data_type); N])
     }
 

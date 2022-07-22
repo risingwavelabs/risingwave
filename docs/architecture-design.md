@@ -2,14 +2,14 @@
 
 ## Motivation 
 
-This doc serves as one of the materials for newcomers to learn the high-level architecture and the functionalities of each component.
+This document serves as one of the materials for newcomers to learn the high-level architecture and the functionalities of each component.
 
 ## Architecture 
 
 There are currently 3 types of nodes in the cluster: 
 
 * **Frontend**: Frontend is a stateless proxy that accepts user queries through Postgres protocol. It is responsible for parsing, validation, optimization, and answering the results of each individual query. 
-* **ComputeNode**: ComputeNode is responsible to execute the optimized query plan. 
+* **ComputeNode**: ComputeNode is responsible for executing the optimized query plan. 
 * **MetaServer**: The central metadata management service. It also acts as a failure detector that periodically sends heartbeats to frontends and compute-nodes in the cluster.
 
 ![Architecture](./images/architecture-design/architecture.svg)
@@ -36,7 +36,7 @@ SELECT SUM(t.quantity) FROM t group by t.company;
 
 ![Batch-Query](./images/architecture-design/batch-query.svg)
 
-The query will be sliced into multiple *plan fragments*, each is an independent scheduling unit and probably with different parallelism. For simplicity, parallelism is usually set to the number of compute-nodes in the cluster.
+The query will be sliced into multiple *plan fragments*, each being an independent scheduling unit and probably with different parallelism. For simplicity, parallelism is usually set to the number of compute-nodes in the cluster.
 
 Each parallel unit is called a *task*. Specifically, PlanFragment 2 will be distributed as 3 tasks to 3 compute-nodes.
 
@@ -48,7 +48,7 @@ To know more about Hummock, you can check out "[An Overview of RisingWave State 
 
 ### Streaming Mode 
 
-The other is the *streaming mode*. Users build streaming pipelines via [CREATE MATERIALIZED VIEW statement](https://www.postgresql.org/docs/current/sql-creatematerializedview.html). 
+The other execution mode is the *streaming mode*. Users build streaming pipelines via [CREATE MATERIALIZED VIEW statement](https://www.postgresql.org/docs/current/sql-creatematerializedview.html). 
 For example: 
 
 ```sql
@@ -59,14 +59,14 @@ CREATE MATERIALIZED VIEW mv1 AS SELECT SUM(t.quantity) as q FROM t group by t.co
 
 When the data source (Kafka, e.g.) propagates a bunch of records into the system, the materialized view will refresh automatically.
 
-Assuming a sequence [(2, "AMERICA"), (3, "ASIA"), (4, "AMERICA"), (5, "ASIA")]. After the sequence flowed through the DAG, the MV will be updated to: 
+Assume that we have a sequence `[(2, "AMERICA"), (3, "ASIA"), (4, "AMERICA"), (5, "ASIA")]`. After the sequence flows through the DAG, the MV will be updated to: 
 
 | A | B
 | - | -
 | 6 | AMERICA
 | 8 | ASIA
 
-While another sequence [(6, "EUROPE"), (7, "EUROPE")] comes, the MV will soon be: 
+When another sequence `[(6, "EUROPE"), (7, "EUROPE")]` comes, the MV will soon become: 
 
 | A | B
 | - | -

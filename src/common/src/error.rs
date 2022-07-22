@@ -72,7 +72,7 @@ impl Display for TrackingIssue {
                 "Tracking issue: https://github.com/singularity-data/risingwave/issues/{}",
                 id
             ),
-            None => write!(f, "No tracking issue"),
+            None => write!(f, "No tracking issue yet. Feel free to submit a feature request at https://github.com/singularity-data/risingwave/issues/new?labels=type%2Ffeature&template=feature_request.md"),
         }
     }
 }
@@ -101,6 +101,8 @@ pub enum ErrorCode {
     ),
     #[error("Expr error: {0:?}")]
     ExprError(BoxedError),
+    #[error("BatchError: {0:?}")]
+    BatchError(BoxedError),
     #[error("Array error: {0:?}")]
     ArrayError(ArrayError),
     #[error("Stream error: {0:?}")]
@@ -109,6 +111,8 @@ pub enum ErrorCode {
         #[source]
         BoxedError,
     ),
+    #[error("RPC error: {0:?}")]
+    RpcError(BoxedError),
     #[error("Parse error: {0}")]
     ParseError(String),
     #[error("Bind error: {0}")]
@@ -140,8 +144,11 @@ pub enum ErrorCode {
     },
     #[error("Invalid Parameter Value: {0}")]
     InvalidParameterValue(String),
-    #[error("MySQL error: {0}")]
+    #[error("Sink error: {0}")]
     SinkError(BoxedError),
+
+    #[error("Permission denied: {0}")]
+    PermissionDenied(String),
 
     /// This error occurs when the meta node receives heartbeat from a previous removed worker
     /// node. Currently we don't support re-register, and the worker node need a full restart.
@@ -180,8 +187,10 @@ pub struct RwError {
 
 impl From<RwError> for tonic::Status {
     fn from(err: RwError) -> Self {
-        match *err.inner {
+        match &*err.inner {
             ErrorCode::OK => tonic::Status::ok(err.to_string()),
+            ErrorCode::ExprError(e) => tonic::Status::invalid_argument(e.to_string()),
+            ErrorCode::PermissionDenied(e) => tonic::Status::permission_denied(e),
             _ => {
                 let bytes = {
                     let status = err.to_status();
@@ -337,6 +346,9 @@ impl ErrorCode {
             ErrorCode::ArrayError(_) => 29,
             ErrorCode::SchedulerError(_) => 30,
             ErrorCode::SinkError(_) => 31,
+            ErrorCode::RpcError(_) => 32,
+            ErrorCode::BatchError(_) => 33,
+            ErrorCode::PermissionDenied(_) => 34,
             ErrorCode::UnknownError(_) => 101,
         }
     }
@@ -367,6 +379,24 @@ impl From<ProstFieldNotFound> for RwError {
     }
 }
 
+impl From<tonic::Status> for RwError {
+    fn from(err: tonic::Status) -> Self {
+        match err.code() {
+            Code::InvalidArgument => {
+                ErrorCode::InvalidParameterValue(err.message().to_string()).into()
+            }
+            Code::PermissionDenied => ErrorCode::PermissionDenied(err.message().to_string()).into(),
+            _ => ErrorCode::RpcError(err.into()).into(),
+        }
+    }
+}
+
+impl From<tonic::transport::Error> for RwError {
+    fn from(err: tonic::transport::Error) -> Self {
+        ErrorCode::RpcError(err.into()).into()
+    }
+}
+
 /// Convert `RwError` into `tonic::Status`. Generally used in `map_err`.
 pub fn tonic_err(err: impl Into<RwError>) -> tonic::Status {
     err.into().into()
@@ -394,20 +424,6 @@ impl<T, E: ToErrorStr> ToRwResult<T, E> for std::result::Result<T, E> {
         self.map_err(|e| {
             ErrorCode::InternalError(format!("{}: {}", func(), e.to_error_str())).into()
         })
-    }
-}
-
-impl ToErrorStr for tonic::Status {
-    /// [`tonic::Status`] means no transportation error but only application-level failure.
-    /// In this case we focus on the message rather than other fields.
-    fn to_error_str(self) -> String {
-        self.message().to_string()
-    }
-}
-
-impl ToErrorStr for tonic::transport::Error {
-    fn to_error_str(self) -> String {
-        format!("tonic transport error: {}", self)
     }
 }
 

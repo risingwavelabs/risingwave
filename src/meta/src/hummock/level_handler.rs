@@ -63,6 +63,7 @@ impl LevelHandler {
             total_file_size += sst.file_size;
             table_ids.push(sst.id);
         }
+
         self.pending_tasks
             .push((task_id, total_file_size, table_ids));
     }

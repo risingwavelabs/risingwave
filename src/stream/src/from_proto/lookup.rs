@@ -12,9 +12,11 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use risingwave_common::catalog::{ColumnDesc, Field, Schema, TableId};
-use risingwave_common::util::sort_util::{OrderPair, OrderType};
-use risingwave_pb::stream_plan::lookup_node::ArrangementTableId;
+use std::sync::Arc;
+
+use risingwave_common::catalog::{ColumnDesc, Field, Schema};
+use risingwave_common::util::sort_util::OrderPair;
+use risingwave_storage::table::storage_table::StorageTable;
 
 use super::*;
 use crate::executor::{LookupExecutor, LookupExecutorParams};
@@ -34,16 +36,11 @@ impl ExecutorBuilder for LookupExecutorBuilder {
         let stream = params.input.remove(0);
 
         let arrangement_order_rules = lookup
-            .arrange_key
+            .get_arrangement_table_info()?
+            .arrange_key_orders
             .iter()
-            // TODO: allow descending order
-            .map(|x| OrderPair::new(*x as usize, OrderType::Ascending))
+            .map(OrderPair::from_prost)
             .collect();
-
-        let arrangement_table_id = match lookup.arrangement_table_id.as_ref().unwrap() {
-            ArrangementTableId::IndexId(x) => *x,
-            ArrangementTableId::TableId(x) => *x,
-        };
 
         let arrangement_col_descs = lookup
             .get_arrangement_table_info()?
@@ -51,12 +48,16 @@ impl ExecutorBuilder for LookupExecutorBuilder {
             .iter()
             .map(ColumnDesc::from)
             .collect();
+        let storage_table = StorageTable::from_table_catalog(
+            lookup.arrangement_table.as_ref().unwrap(),
+            store,
+            params.vnode_bitmap.map(Arc::new),
+        );
 
         Ok(Box::new(LookupExecutor::new(LookupExecutorParams {
             schema: Schema::new(node.fields.iter().map(Field::from).collect()),
             arrangement,
             stream,
-            arrangement_keyspace: Keyspace::table_root(store, &TableId::from(arrangement_table_id)),
             arrangement_col_descs,
             arrangement_order_rules,
             pk_indices: params.pk_indices,
@@ -64,6 +65,7 @@ impl ExecutorBuilder for LookupExecutorBuilder {
             stream_join_key_indices: lookup.stream_key.iter().map(|x| *x as usize).collect(),
             arrange_join_key_indices: lookup.arrange_key.iter().map(|x| *x as usize).collect(),
             column_mapping: lookup.column_mapping.iter().map(|x| *x as usize).collect(),
+            storage_table,
         })))
     }
 }

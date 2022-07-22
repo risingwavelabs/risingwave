@@ -12,8 +12,6 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::sync::Arc;
-
 use either::Either;
 use futures::stream::PollNext;
 use futures::StreamExt;
@@ -21,12 +19,9 @@ use futures_async_stream::try_stream;
 use risingwave_common::array::StreamChunk;
 use risingwave_common::catalog::ColumnDesc;
 use risingwave_common::types::DataType;
-use risingwave_common::util::ordered::OrderedRowSerializer;
 use risingwave_common::util::sort_util::OrderPair;
-use risingwave_storage::cell_based_row_deserializer::{
-    CellBasedRowDeserializer, ColumnDescMapping,
-};
-use risingwave_storage::{Keyspace, StateStore};
+use risingwave_storage::table::storage_table::{StorageTable, READ_ONLY};
+use risingwave_storage::StateStore;
 
 use crate::executor::error::StreamExecutorError;
 use crate::executor::{Barrier, Executor, Message, MessageStream};
@@ -72,20 +67,12 @@ pub(crate) struct ArrangeJoinSide<S: StateStore> {
     ///
     /// The key indices of the arrange side won't be used for the lookup process, but we still
     /// record it here in case anyone would use it in the future.
-    #[allow(dead_code)]
     pub key_indices: Vec<usize>,
-
-    /// Keyspace for the arrangement
-    pub keyspace: Keyspace<S>,
 
     /// Whether to join with the arrangement of the current epoch
     pub use_current_epoch: bool,
 
-    /// Serializer for the arrangement
-    pub serializer: OrderedRowSerializer,
-
-    /// Deserializer for the arrangement
-    pub deserializer: CellBasedRowDeserializer<Arc<ColumnDescMapping>>,
+    pub storage_table: StorageTable<S, READ_ONLY>,
 }
 
 /// Message from the `arrange_join_stream`.

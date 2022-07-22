@@ -175,48 +175,48 @@ impl HopWindowExecutor {
         #[for_await]
         for msg in input.execute() {
             let msg = msg?;
-            let Message::Chunk(chunk) = msg else {
-                // TODO: syn has not supported `let_else`, we desugar here manually.
-                yield std::task::Poll::Ready(msg);
+            if let Message::Chunk(chunk) = msg {
+                // TODO: compact may be not necessary here.
+                let chunk = chunk.compact()?;
+                let (data_chunk, ops) = chunk.into_parts();
+                let hop_start = hop_start.eval(&data_chunk)?;
+                let len = hop_start.len();
+                let hop_start_chunk = DataChunk::new(vec![Column::new(hop_start)], len);
+                let (origin_cols, vis) = data_chunk.into_parts();
+                // SAFETY: Already compacted.
+                assert!(matches!(vis, Vis::Compact(_)));
+                for i in 0..units {
+                    let window_start_col = if output_indices.contains(&window_start_col_index) {
+                        Some(window_start_exprs[i].eval(&hop_start_chunk)?)
+                    } else {
+                        None
+                    };
+                    let window_end_col = if output_indices.contains(&window_end_col_index) {
+                        Some(window_end_exprs[i].eval(&hop_start_chunk)?)
+                    } else {
+                        None
+                    };
+                    let new_cols = output_indices
+                        .iter()
+                        .filter_map(|&idx| {
+                            if idx < window_start_col_index {
+                                Some(origin_cols[idx].clone())
+                            } else if idx == window_start_col_index {
+                                Some(Column::new(window_start_col.clone().unwrap()))
+                            } else if idx == window_end_col_index {
+                                Some(Column::new(window_end_col.clone().unwrap()))
+                            } else {
+                                None
+                            }
+                        })
+                        .collect();
+                    let new_chunk = StreamChunk::new(ops.clone(), new_cols, None);
+                    yield Message::Chunk(new_chunk);
+                }
+            } else {
+                yield msg;
                 continue;
             };
-            // TODO: compact may be not necessary here.
-            let chunk = chunk.compact()?;
-            let (data_chunk, ops) = chunk.into_parts();
-            let hop_start = hop_start.eval(&data_chunk)?;
-            let len = hop_start.len();
-            let hop_start_chunk = DataChunk::new(vec![Column::new(hop_start)], len);
-            let (origin_cols, vis) = data_chunk.into_parts();
-            // SAFETY: Already compacted.
-            assert!(matches!(vis, Vis::Compact(_)));
-            for i in 0..units {
-                let window_start_col = if output_indices.contains(&window_start_col_index) {
-                    Some(window_start_exprs[i].eval(&hop_start_chunk)?)
-                } else {
-                    None
-                };
-                let window_end_col = if output_indices.contains(&window_end_col_index) {
-                    Some(window_end_exprs[i].eval(&hop_start_chunk)?)
-                } else {
-                    None
-                };
-                let new_cols = output_indices
-                    .iter()
-                    .filter_map(|&idx| {
-                        if idx < window_start_col_index {
-                            Some(origin_cols[idx].clone())
-                        } else if idx == window_start_col_index {
-                            Some(Column::new(window_start_col.clone().unwrap()))
-                        } else if idx == window_end_col_index {
-                            Some(Column::new(window_end_col.clone().unwrap()))
-                        } else {
-                            None
-                        }
-                    })
-                    .collect();
-                let new_chunk = StreamChunk::new(ops.clone(), new_cols, None);
-                yield Message::Chunk(new_chunk);
-            }
         }
     }
 }

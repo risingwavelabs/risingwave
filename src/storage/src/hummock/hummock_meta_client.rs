@@ -15,11 +15,12 @@
 use std::sync::Arc;
 
 use async_trait::async_trait;
-use risingwave_common::error::{ErrorCode, Result};
+use risingwave_hummock_sdk::LocalSstableInfo;
 use risingwave_pb::hummock::{
-    CompactTask, CompactionGroup, HummockVersion, SstableInfo, SubscribeCompactTasksResponse,
-    VacuumTask,
+    CompactTask, CompactionGroup, HummockVersion, HummockVersionDelta, SstableIdInfo,
+    SubscribeCompactTasksResponse, VacuumTask,
 };
+use risingwave_rpc_client::error::Result;
 use risingwave_rpc_client::{HummockMetaClient, MetaClient};
 use tonic::Streaming;
 
@@ -40,7 +41,10 @@ impl MonitoredHummockMetaClient {
 
 #[async_trait]
 impl HummockMetaClient for MonitoredHummockMetaClient {
-    async fn pin_version(&self, last_pinned: HummockVersionId) -> Result<HummockVersion> {
+    async fn pin_version(
+        &self,
+        last_pinned: HummockVersionId,
+    ) -> Result<(bool, Vec<HummockVersionDelta>, Option<HummockVersion>)> {
         self.stats.pin_version_counts.inc();
         let timer = self.stats.pin_version_latency.start_timer();
         let res = self.meta_client.pin_version(last_pinned).await;
@@ -48,26 +52,45 @@ impl HummockMetaClient for MonitoredHummockMetaClient {
         res
     }
 
-    async fn unpin_version(&self, pinned_version_ids: &[HummockVersionId]) -> Result<()> {
+    async fn unpin_version(&self) -> Result<()> {
         self.stats.unpin_version_counts.inc();
         let timer = self.stats.unpin_version_latency.start_timer();
-        let res = self.meta_client.unpin_version(pinned_version_ids).await;
+        let res = self.meta_client.unpin_version().await;
         timer.observe_duration();
         res
     }
 
-    async fn pin_snapshot(&self, last_pinned: HummockEpoch) -> Result<HummockEpoch> {
+    async fn unpin_version_before(&self, unpin_version_before: HummockVersionId) -> Result<()> {
+        self.stats.unpin_version_before_counts.inc();
+        let timer = self.stats.unpin_version_before_latency.start_timer();
+        let res = self
+            .meta_client
+            .unpin_version_before(unpin_version_before)
+            .await;
+        timer.observe_duration();
+        res
+    }
+
+    async fn pin_snapshot(&self) -> Result<HummockEpoch> {
         self.stats.pin_snapshot_counts.inc();
         let timer = self.stats.pin_snapshot_latency.start_timer();
-        let res = self.meta_client.pin_snapshot(last_pinned).await;
+        let res = self.meta_client.pin_snapshot().await;
         timer.observe_duration();
         res
     }
 
-    async fn unpin_snapshot(&self, pinned_epochs: &[HummockEpoch]) -> Result<()> {
+    async fn get_epoch(&self) -> Result<HummockEpoch> {
+        self.stats.pin_snapshot_counts.inc();
+        let timer = self.stats.pin_snapshot_latency.start_timer();
+        let res = self.meta_client.get_epoch().await;
+        timer.observe_duration();
+        res
+    }
+
+    async fn unpin_snapshot(&self) -> Result<()> {
         self.stats.unpin_snapshot_counts.inc();
         let timer = self.stats.unpin_snapshot_latency.start_timer();
-        let res = self.meta_client.unpin_snapshot(pinned_epochs).await;
+        let res = self.meta_client.unpin_snapshot().await;
         timer.observe_duration();
         res
     }
@@ -92,8 +115,12 @@ impl HummockMetaClient for MonitoredHummockMetaClient {
         res
     }
 
-    async fn commit_epoch(&self, _epoch: HummockEpoch, _sstables: Vec<SstableInfo>) -> Result<()> {
-        Err(ErrorCode::NotImplemented("commit_epoch unsupported".to_string(), None.into()).into())
+    async fn commit_epoch(
+        &self,
+        _epoch: HummockEpoch,
+        _sstables: Vec<LocalSstableInfo>,
+    ) -> Result<()> {
+        panic!("Only meta service can commit_epoch in production.")
     }
 
     async fn subscribe_compact_tasks(&self) -> Result<Streaming<SubscribeCompactTasksResponse>> {
@@ -106,5 +133,20 @@ impl HummockMetaClient for MonitoredHummockMetaClient {
 
     async fn get_compaction_groups(&self) -> Result<Vec<CompactionGroup>> {
         self.meta_client.get_compaction_groups().await
+    }
+
+    async fn trigger_manual_compaction(
+        &self,
+        compaction_group_id: u64,
+        table_id: u32,
+        level: u32,
+    ) -> Result<()> {
+        self.meta_client
+            .trigger_manual_compaction(compaction_group_id, table_id, level)
+            .await
+    }
+
+    async fn list_sstable_id_infos(&self, _version_id: u64) -> Result<Vec<SstableIdInfo>> {
+        todo!()
     }
 }

@@ -20,7 +20,8 @@ use risingwave_common::catalog::{CatalogVersion, TableId};
 use risingwave_common::error::ErrorCode::InternalError;
 use risingwave_common::error::{Result, RwError};
 use risingwave_pb::catalog::{
-    Database as ProstDatabase, Schema as ProstSchema, Source as ProstSource, Table as ProstTable,
+    Database as ProstDatabase, Schema as ProstSchema, Sink as ProstSink, Source as ProstSource,
+    Table as ProstTable,
 };
 use risingwave_pb::stream_plan::StreamFragmentGraph;
 use risingwave_rpc_client::MetaClient;
@@ -49,9 +50,14 @@ impl CatalogReader {
 /// the version.
 #[async_trait::async_trait]
 pub trait CatalogWriter: Send + Sync {
-    async fn create_database(&self, db_name: &str) -> Result<()>;
+    async fn create_database(&self, db_name: &str, owner: String) -> Result<()>;
 
-    async fn create_schema(&self, db_id: DatabaseId, schema_name: &str) -> Result<()>;
+    async fn create_schema(
+        &self,
+        db_id: DatabaseId,
+        schema_name: &str,
+        owner: String,
+    ) -> Result<()>;
 
     async fn create_materialized_view(
         &self,
@@ -68,11 +74,15 @@ pub trait CatalogWriter: Send + Sync {
 
     async fn create_source(&self, source: ProstSource) -> Result<()>;
 
+    async fn create_sink(&self, source: ProstSink) -> Result<()>;
+
     async fn drop_materialized_source(&self, source_id: u32, table_id: TableId) -> Result<()>;
 
     async fn drop_materialized_view(&self, table_id: TableId) -> Result<()>;
 
     async fn drop_source(&self, source_id: u32) -> Result<()>;
+
+    async fn drop_sink(&self, sink_id: u32) -> Result<()>;
 
     async fn drop_database(&self, database_id: u32) -> Result<()>;
 
@@ -87,24 +97,31 @@ pub struct CatalogWriterImpl {
 
 #[async_trait::async_trait]
 impl CatalogWriter for CatalogWriterImpl {
-    async fn create_database(&self, db_name: &str) -> Result<()> {
+    async fn create_database(&self, db_name: &str, owner: String) -> Result<()> {
         let (_, version) = self
             .meta_client
             .create_database(ProstDatabase {
                 name: db_name.to_string(),
                 id: 0,
+                owner,
             })
             .await?;
         self.wait_version(version).await
     }
 
-    async fn create_schema(&self, db_id: DatabaseId, schema_name: &str) -> Result<()> {
+    async fn create_schema(
+        &self,
+        db_id: DatabaseId,
+        schema_name: &str,
+        owner: String,
+    ) -> Result<()> {
         let (_, version) = self
             .meta_client
             .create_schema(ProstSchema {
                 id: 0,
                 name: schema_name.to_string(),
                 database_id: db_id,
+                owner,
             })
             .await?;
         self.wait_version(version).await
@@ -141,6 +158,10 @@ impl CatalogWriter for CatalogWriterImpl {
         self.wait_version(version).await
     }
 
+    async fn create_sink(&self, _sink: ProstSink) -> Result<()> {
+        todo!();
+    }
+
     async fn drop_materialized_source(&self, source_id: u32, table_id: TableId) -> Result<()> {
         let version = self
             .meta_client
@@ -157,6 +178,10 @@ impl CatalogWriter for CatalogWriterImpl {
     async fn drop_source(&self, source_id: u32) -> Result<()> {
         let version = self.meta_client.drop_source(source_id).await?;
         self.wait_version(version).await
+    }
+
+    async fn drop_sink(&self, _sink_id: u32) -> Result<()> {
+        todo!();
     }
 
     async fn drop_schema(&self, schema_id: u32) -> Result<()> {

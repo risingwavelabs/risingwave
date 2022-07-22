@@ -51,7 +51,11 @@ impl Binder {
             BinaryOperator::PGBitwiseShiftRight => ExprType::BitwiseShiftRight,
             BinaryOperator::Concat => return self.bind_concat_op(bound_left, bound_right),
 
-            _ => return Err(ErrorCode::NotImplemented(format!("{:?}", op), 112.into()).into()),
+            _ => {
+                return Err(
+                    ErrorCode::NotImplemented(format!("binary op: {:?}", op), 112.into()).into(),
+                )
+            }
         };
         Ok(FunctionCall::new(func_type, vec![bound_left, bound_right])?.into())
     }

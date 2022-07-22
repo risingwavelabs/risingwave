@@ -14,7 +14,6 @@
 
 use std::fmt;
 
-use risingwave_pb::plan_common::TableRefId;
 use risingwave_pb::stream_plan::stream_node::NodeBody as ProstStreamNode;
 use risingwave_pb::stream_plan::SourceNode;
 
@@ -59,24 +58,15 @@ impl fmt::Display for StreamSource {
             .field(
                 "columns",
                 &format_args!("[{}]", &self.column_names().join(", ")),
-            );
-
-        if self.append_only() {
-            builder.field("append_only", &format_args!("{}", true));
-        }
-        builder.finish()
+            )
+            .finish()
     }
 }
 
 impl ToStreamProst for StreamSource {
     fn to_stream_prost_body(&self) -> ProstStreamNode {
         ProstStreamNode::Source(SourceNode {
-            // TODO: Refactor this id
-            table_ref_id: TableRefId {
-                table_id: self.logical.source_catalog.id as i32,
-                ..Default::default()
-            }
-            .into(),
+            table_id: self.logical.source_catalog.id,
             column_ids: self
                 .logical
                 .source_catalog

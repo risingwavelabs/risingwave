@@ -120,9 +120,7 @@ impl CacheBase for LruCacheImpl {
     }
 }
 
-lazy_static::lazy_static! {
-    static ref IO_COUNT: AtomicUsize = AtomicUsize::new(0);
-}
+static IO_COUNT: AtomicUsize = AtomicUsize::new(0);
 
 async fn get_fake_block(sst: u64, offset: u64, io_latency: Duration) -> HummockResult<Block> {
     if !io_latency.is_zero() {

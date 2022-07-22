@@ -12,6 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+use risingwave_common::array::ArrayError;
 use risingwave_common::error::{ErrorCode, RwError};
 use thiserror::Error;
 
@@ -22,13 +23,12 @@ pub enum StorageError {
     #[error("Hummock error: {0}")]
     Hummock(
         #[backtrace]
-        #[source]
         #[from]
         HummockError,
     ),
 
-    #[error("Cell-based table error: {0}")]
-    CellBasedTable(
+    #[error("Storage table error: {0}")]
+    StorageTable(
         #[backtrace]
         #[source]
         RwError,
@@ -40,6 +40,9 @@ pub enum StorageError {
         #[source]
         RwError,
     ),
+
+    #[error("Array error: {0}")]
+    ArrayError(#[from] ArrayError),
 }
 
 pub type StorageResult<T> = std::result::Result<T, StorageError>;

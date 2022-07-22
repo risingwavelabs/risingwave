@@ -12,15 +12,10 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::fmt::Debug;
 use std::time::Duration;
 
-use risingwave_common::array::DataChunk;
-use risingwave_common::error::ErrorCode::InternalError;
-use risingwave_common::error::{Result, ToRwResult};
 use risingwave_common::util::addr::HostAddr;
-use risingwave_pb::batch_plan::exchange_info::DistributionMode;
-use risingwave_pb::batch_plan::{ExchangeInfo, PlanFragment, PlanNode, TaskId, TaskOutputId};
+use risingwave_pb::batch_plan::{PlanFragment, TaskId, TaskOutputId};
 use risingwave_pb::task_service::exchange_service_client::ExchangeServiceClient;
 use risingwave_pb::task_service::task_service_client::TaskServiceClient;
 use risingwave_pb::task_service::{
@@ -29,6 +24,8 @@ use risingwave_pb::task_service::{
 };
 use tonic::transport::{Channel, Endpoint};
 use tonic::Streaming;
+
+use crate::error::Result;
 
 #[derive(Clone)]
 pub struct ComputeClient {
@@ -39,12 +36,10 @@ pub struct ComputeClient {
 
 impl ComputeClient {
     pub async fn new(addr: HostAddr) -> Result<Self> {
-        let channel = Endpoint::from_shared(format!("http://{}", &addr))
-            .map_err(|e| InternalError(format!("{}", e)))?
+        let channel = Endpoint::from_shared(format!("http://{}", &addr))?
             .connect_timeout(Duration::from_secs(5))
             .connect()
-            .await
-            .to_rw_result_with(|| format!("failed to connect to {}", &addr))?;
+            .await?;
         let exchange_client = ExchangeServiceClient::new(channel.clone());
         let task_client = TaskServiceClient::new(channel);
         Ok(Self {
@@ -61,13 +56,14 @@ impl ComputeClient {
             .get_data(GetDataRequest {
                 task_output_id: Some(output_id),
             })
-            .await
-            .to_rw_result()?
+            .await?
             .into_inner())
     }
 
     pub async fn get_stream(
         &self,
+        up_actor_id: u32,
+        down_actor_id: u32,
         up_fragment_id: u32,
         down_fragment_id: u32,
     ) -> Result<Streaming<GetStreamResponse>> {
@@ -75,44 +71,24 @@ impl ComputeClient {
             .exchange_client
             .to_owned()
             .get_stream(GetStreamRequest {
+                up_actor_id,
+                down_actor_id,
                 up_fragment_id,
                 down_fragment_id,
             })
             .await
-            .to_rw_result_with(|| {
-                format!(
+            .inspect_err(|_| {
+                tracing::error!(
                     "failed to create stream from remote_input {} from fragment {} to fragment {}",
-                    self.addr, up_fragment_id, down_fragment_id
+                    self.addr,
+                    up_actor_id,
+                    down_actor_id
                 )
             })?
             .into_inner())
     }
 
-    // TODO: Remove this
-    pub async fn create_task(&self, task_id: TaskId, plan: PlanNode, epoch: u64) -> Result<()> {
-        let plan = PlanFragment {
-            root: Some(plan),
-            exchange_info: Some(ExchangeInfo {
-                mode: DistributionMode::Single as i32,
-                ..Default::default()
-            }),
-        };
-        let _ = self
-            .create_task_inner(CreateTaskRequest {
-                task_id: Some(task_id),
-                plan: Some(plan),
-                epoch,
-            })
-            .await?;
-        Ok(())
-    }
-
-    pub async fn create_task2(
-        &self,
-        task_id: TaskId,
-        plan: PlanFragment,
-        epoch: u64,
-    ) -> Result<()> {
+    pub async fn create_task(&self, task_id: TaskId, plan: PlanFragment, epoch: u64) -> Result<()> {
         let _ = self
             .create_task_inner(CreateTaskRequest {
                 task_id: Some(task_id),
@@ -128,24 +104,11 @@ impl ComputeClient {
             .task_client
             .to_owned()
             .create_task(req)
-            .await
-            .to_rw_result()?
+            .await?
             .into_inner())
     }
 
     pub async fn execute(&self, req: ExecuteRequest) -> Result<Streaming<GetDataResponse>> {
-        Ok(self
-            .task_client
-            .to_owned()
-            .execute(req)
-            .await
-            .to_rw_result()?
-            .into_inner())
+        Ok(self.task_client.to_owned().execute(req).await?.into_inner())
     }
-}
-
-/// Each ExchangeSource maps to one task, it takes the execution result from task chunk by chunk.
-#[async_trait::async_trait]
-pub trait ExchangeSource: Send + Debug {
-    async fn take_data(&mut self) -> Result<Option<DataChunk>>;
 }

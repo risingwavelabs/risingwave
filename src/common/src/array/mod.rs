@@ -47,7 +47,7 @@ pub use data_chunk::{DataChunk, DataChunkTestExt, Vis};
 pub use data_chunk_iter::{Row, RowDeserializer, RowRef};
 pub use decimal_array::{DecimalArray, DecimalArrayBuilder};
 pub use interval_array::{IntervalArray, IntervalArrayBuilder};
-pub use iterator::ArrayIterator;
+pub use iterator::{ArrayImplIterator, ArrayIterator};
 pub use list_array::{ListArray, ListArrayBuilder, ListRef, ListValue};
 use paste::paste;
 pub use primitive_array::{PrimitiveArray, PrimitiveArrayBuilder, PrimitiveArrayItemType};
@@ -57,7 +57,6 @@ pub use struct_array::{StructArray, StructArrayBuilder, StructRef, StructValue};
 pub use utf8_array::*;
 
 pub use self::error::ArrayError;
-use crate::array::iterator::ArrayImplIterator;
 use crate::buffer::Bitmap;
 use crate::types::*;
 pub type ArrayResult<T> = std::result::Result<T, ArrayError>;
@@ -75,7 +74,7 @@ pub type F64ArrayBuilder = PrimitiveArrayBuilder<OrderedF64>;
 pub type F32ArrayBuilder = PrimitiveArrayBuilder<OrderedF32>;
 
 /// The hash source for `None` values when hashing an item.
-static NULL_VAL_FOR_HASH: u32 = 0xfffffff0;
+pub(crate) static NULL_VAL_FOR_HASH: u32 = 0xfffffff0;
 
 /// A trait over all array builders.
 ///
@@ -92,12 +91,14 @@ pub trait ArrayBuilder: Send + Sync + Sized + 'static {
     type ArrayType: Array<Builder = Self>;
 
     /// Create a new builder with `capacity`.
-    fn new(capacity: usize) -> ArrayResult<Self> {
+    fn new(capacity: usize) -> Self {
         // No metadata by default.
         Self::with_meta(capacity, ArrayMeta::Simple)
     }
 
-    fn with_meta(capacity: usize, meta: ArrayMeta) -> ArrayResult<Self>;
+    /// # Panics
+    /// Panics if `meta`'s type mismatches with the array type.
+    fn with_meta(capacity: usize, meta: ArrayMeta) -> Self;
 
     /// Append a value to builder.
     fn append(
@@ -174,6 +175,9 @@ pub trait Array: std::fmt::Debug + Send + Sync + Sized + 'static + Into<ArrayImp
     /// Get the null `Bitmap` from `Array`.
     fn null_bitmap(&self) -> &Bitmap;
 
+    /// Get the owned null `Bitmap` from `Array`.
+    fn into_null_bitmap(self) -> Bitmap;
+
     /// Check if an element is `null` or not.
     fn is_null(&self, idx: usize) -> bool {
         self.null_bitmap().is_set(idx).map(|v| !v).unwrap()
@@ -229,7 +233,7 @@ trait CompactableArray: Array {
 impl<A: Array> CompactableArray for A {
     fn compact(&self, visibility: &Bitmap, cardinality: usize) -> ArrayResult<Self> {
         use itertools::Itertools;
-        let mut builder = A::Builder::with_meta(cardinality, self.array_meta())?;
+        let mut builder = A::Builder::with_meta(cardinality, self.array_meta());
         for (elem, visible) in self.iter().zip_eq(visibility.iter()) {
             if visible {
                 builder.append(elem)?;
@@ -354,6 +358,15 @@ macro_rules! impl_convert {
                     }
                 }
 
+                impl From<ArrayImpl> for $array {
+                    fn from(array: ArrayImpl) -> Self {
+                        match array {
+                            ArrayImpl::$variant_name(inner) => inner,
+                            other_array => panic!("cannot convert ArrayImpl::{} to concrete type {}", other_array.get_ident(), stringify!($variant_name))
+                        }
+                    }
+                }
+
                 impl From<$builder> for ArrayBuilderImpl {
                     fn from(builder: $builder) -> Self {
                         Self::$variant_name(builder)
@@ -463,6 +476,12 @@ macro_rules! impl_array {
             pub fn null_bitmap(&self) -> &Bitmap {
                 match self {
                     $( Self::$variant_name(inner) => inner.null_bitmap(), )*
+                }
+            }
+
+            pub fn into_null_bitmap(self) -> Bitmap {
+                match self {
+                    $( Self::$variant_name(inner) => inner.into_null_bitmap(), )*
                 }
             }
 
@@ -603,7 +622,7 @@ mod tests {
         A: Array + 'a,
         F: Fn(Option<A::RefItem<'a>>) -> bool,
     {
-        let mut builder = A::Builder::with_meta(data.len(), data.array_meta())?;
+        let mut builder = A::Builder::with_meta(data.len(), data.array_meta());
         for i in 0..data.len() {
             if pred(data.value_at(i)) {
                 builder.append(data.value_at(i))?;
@@ -614,7 +633,7 @@ mod tests {
 
     #[test]
     fn test_filter() {
-        let mut builder = PrimitiveArrayBuilder::<i32>::new(0).unwrap();
+        let mut builder = PrimitiveArrayBuilder::<i32>::new(0);
         for i in 0..=60 {
             builder.append(Some(i as i32)).unwrap();
         }
@@ -634,7 +653,7 @@ mod tests {
         T2: PrimitiveArrayItemType + AsPrimitive<T3>,
         T3: PrimitiveArrayItemType + CheckedAdd,
     {
-        let mut builder = PrimitiveArrayBuilder::<T3>::new(a.len())?;
+        let mut builder = PrimitiveArrayBuilder::<T3>::new(a.len());
         for (a, b) in a.iter().zip_eq(b.iter()) {
             let item = match (a, b) {
                 (Some(a), Some(b)) => Some(a.as_() + b.as_()),
@@ -647,13 +666,13 @@ mod tests {
 
     #[test]
     fn test_vectorized_add() {
-        let mut builder = PrimitiveArrayBuilder::<i32>::new(0).unwrap();
+        let mut builder = PrimitiveArrayBuilder::<i32>::new(0);
         for i in 0..=60 {
             builder.append(Some(i as i32)).unwrap();
         }
         let array1 = builder.finish().unwrap();
 
-        let mut builder = PrimitiveArrayBuilder::<i16>::new(0).unwrap();
+        let mut builder = PrimitiveArrayBuilder::<i16>::new(0);
         for i in 0..=60 {
             builder.append(Some(i as i16)).unwrap();
         }

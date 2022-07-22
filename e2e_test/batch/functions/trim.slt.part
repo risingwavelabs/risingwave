@@ -1,0 +1,24 @@
+query T
+select trim(both 'cba' from 'abcxyzabc');
+----
+xyz
+
+query T
+select trim(leading 'cba' from 'abcxyzabc');
+----
+xyzabc
+
+query T
+select trim(trailing 'cba' from 'abcxyzabc');
+----
+abcxyz
+
+query T
+select ltrim('abcxyzabc', 'bca');
+----
+xyzabc
+
+query T
+select rtrim('abcxyzabc', 'bca');
+----
+abcxyz

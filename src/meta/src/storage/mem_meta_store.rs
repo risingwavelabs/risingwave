@@ -104,6 +104,15 @@ impl MetaStore for MemStore {
                         return Err(Error::TransactionAbort());
                     }
                 }
+                KeyEqual { cf, key, value } => {
+                    let v = inner
+                        .cf_ref(cf.as_str())
+                        .map(|cf| cf.get(key.as_slice()))
+                        .unwrap_or(None);
+                    if !v.map_or(false, |v| v.eq(&value)) {
+                        return Err(Error::TransactionAbort());
+                    }
+                }
             }
         }
 

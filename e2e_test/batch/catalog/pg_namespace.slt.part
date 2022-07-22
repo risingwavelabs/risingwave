@@ -1,0 +1,5 @@
+query IT rowsort
+SELECT nspname FROM pg_catalog.pg_namespace;
+----
+pg_catalog
+public

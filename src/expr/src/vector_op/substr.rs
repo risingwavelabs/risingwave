@@ -65,7 +65,7 @@ mod tests {
         ];
 
         for (s, off, len, expected) in cases {
-            let builder = Utf8ArrayBuilder::new(1).unwrap();
+            let builder = Utf8ArrayBuilder::new(1);
             let writer = builder.writer();
             let guard = match (off, len) {
                 (Some(off), Some(len)) => {

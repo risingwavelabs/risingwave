@@ -22,7 +22,6 @@ use std::sync::Arc;
 use bytes::Bytes;
 use lazy_static::lazy_static;
 use parking_lot::RwLock;
-use risingwave_common::consistent_hash::VNodeBitmap;
 
 use crate::error::{StorageError, StorageResult};
 use crate::hummock::HummockError;
@@ -110,18 +109,11 @@ impl StateStore for MemoryStateStore {
 
     define_state_store_associated_type!();
 
-    fn get<'a>(
-        &'a self,
-        key: &'a [u8],
-        epoch: u64,
-        _vnode: Option<&'a VNodeBitmap>,
-    ) -> Self::GetFuture<'_> {
+    fn get<'a>(&'a self, key: &'a [u8], read_options: ReadOptions) -> Self::GetFuture<'_> {
         async move {
             let range_bounds = key.to_vec()..=key.to_vec();
             // We do not really care about vnodes here, so we just use the default value.
-            let res = self
-                .scan(range_bounds, Some(1), epoch, Default::default())
-                .await?;
+            let res = self.scan(range_bounds, Some(1), read_options).await?;
 
             Ok(match res.as_slice() {
                 [] => None,
@@ -135,14 +127,14 @@ impl StateStore for MemoryStateStore {
         &self,
         key_range: R,
         limit: Option<usize>,
-        epoch: u64,
-        _vnodes: Option<VNodeBitmap>,
+        read_options: ReadOptions,
     ) -> Self::ScanFuture<'_, R, B>
     where
         R: RangeBounds<B> + Send,
         B: AsRef<[u8]> + Send,
     {
         async move {
+            let epoch = read_options.epoch;
             let mut data = vec![];
             if limit == Some(0) {
                 return Ok(vec![]);
@@ -172,8 +164,7 @@ impl StateStore for MemoryStateStore {
         &self,
         _key_range: R,
         _limit: Option<usize>,
-        _epoch: u64,
-        _vnodes: Option<VNodeBitmap>,
+        _read_options: ReadOptions,
     ) -> Self::BackwardScanFuture<'_, R, B>
     where
         R: RangeBounds<B> + Send,
@@ -185,9 +176,10 @@ impl StateStore for MemoryStateStore {
     fn ingest_batch(
         &self,
         kv_pairs: Vec<(Bytes, StorageValue)>,
-        epoch: u64,
+        write_options: WriteOptions,
     ) -> Self::IngestBatchFuture<'_> {
         async move {
+            let epoch = write_options.epoch;
             let mut inner = self.inner.write();
             let mut size: usize = 0;
             for (key, value) in kv_pairs {
@@ -201,24 +193,19 @@ impl StateStore for MemoryStateStore {
     fn replicate_batch(
         &self,
         _kv_pairs: Vec<(Bytes, StorageValue)>,
-        _epoch: u64,
+        _write_options: WriteOptions,
     ) -> Self::ReplicateBatchFuture<'_> {
         async move { unimplemented!() }
     }
 
-    fn iter<R, B>(
-        &self,
-        key_range: R,
-        epoch: u64,
-        vnodes: Option<VNodeBitmap>,
-    ) -> Self::IterFuture<'_, R, B>
+    fn iter<R, B>(&self, key_range: R, read_options: ReadOptions) -> Self::IterFuture<'_, R, B>
     where
         R: RangeBounds<B> + Send,
         B: AsRef<[u8]> + Send,
     {
         async move {
             Ok(MemoryStateStoreIter::new(
-                self.scan(key_range, None, epoch, vnodes)
+                self.scan(key_range, None, read_options)
                     .await
                     .unwrap()
                     .into_iter(),
@@ -229,8 +216,7 @@ impl StateStore for MemoryStateStore {
     fn backward_iter<R, B>(
         &self,
         _key_range: R,
-        _epoch: u64,
-        _vnodes: Option<VNodeBitmap>,
+        _read_options: ReadOptions,
     ) -> Self::BackwardIterFuture<'_, R, B>
     where
         R: RangeBounds<B> + Send,
@@ -251,6 +237,10 @@ impl StateStore for MemoryStateStore {
             // memory backend doesn't support push to S3, so this is a no-op
             Ok(())
         }
+    }
+
+    fn clear_shared_buffer(&self) -> Self::ClearSharedBufferFuture<'_> {
+        async move { Ok(()) }
     }
 }
 
@@ -297,7 +287,10 @@ mod tests {
                         StorageValue::new_default_put(b"v1".to_vec()),
                     ),
                 ],
-                0,
+                WriteOptions {
+                    epoch: 0,
+                    table_id: Default::default(),
+                },
             )
             .await
             .unwrap();
@@ -310,13 +303,24 @@ mod tests {
                     ),
                     (b"b".to_vec().into(), StorageValue::new_default_delete()),
                 ],
-                1,
+                WriteOptions {
+                    epoch: 1,
+                    table_id: Default::default(),
+                },
             )
             .await
             .unwrap();
         assert_eq!(
             state_store
-                .scan("a"..="b", None, 0, Default::default())
+                .scan(
+                    "a"..="b",
+                    None,
+                    ReadOptions {
+                        epoch: 0,
+                        table_id: Default::default(),
+                        ttl: None,
+                    }
+                )
                 .await
                 .unwrap(),
             vec![
@@ -326,32 +330,117 @@ mod tests {
         );
         assert_eq!(
             state_store
-                .scan("a"..="b", Some(1), 0, Default::default())
+                .scan(
+                    "a"..="b",
+                    Some(1),
+                    ReadOptions {
+                        epoch: 0,
+                        table_id: Default::default(),
+                        ttl: None,
+                    }
+                )
                 .await
                 .unwrap(),
             vec![(b"a".to_vec().into(), b"v1".to_vec().into())]
         );
         assert_eq!(
             state_store
-                .scan("a"..="b", None, 1, Default::default())
+                .scan(
+                    "a"..="b",
+                    None,
+                    ReadOptions {
+                        epoch: 1,
+                        table_id: Default::default(),
+                        ttl: None,
+                    }
+                )
                 .await
                 .unwrap(),
             vec![(b"a".to_vec().into(), b"v2".to_vec().into())]
         );
         assert_eq!(
-            state_store.get(b"a", 0, None).await.unwrap(),
+            state_store
+                .get(
+                    b"a",
+                    ReadOptions {
+                        epoch: 0,
+                        table_id: Default::default(),
+                        ttl: None,
+                    }
+                )
+                .await
+                .unwrap(),
             Some(b"v1".to_vec().into())
         );
         assert_eq!(
-            state_store.get(b"b", 0, None).await.unwrap(),
+            state_store
+                .get(
+                    b"b",
+                    ReadOptions {
+                        epoch: 0,
+                        table_id: Default::default(),
+                        ttl: None,
+                    }
+                )
+                .await
+                .unwrap(),
             Some(b"v1".to_vec().into())
         );
-        assert_eq!(state_store.get(b"c", 0, None).await.unwrap(), None);
         assert_eq!(
-            state_store.get(b"a", 1, None).await.unwrap(),
+            state_store
+                .get(
+                    b"c",
+                    ReadOptions {
+                        epoch: 0,
+                        table_id: Default::default(),
+                        ttl: None,
+                    }
+                )
+                .await
+                .unwrap(),
+            None
+        );
+        assert_eq!(
+            state_store
+                .get(
+                    b"a",
+                    ReadOptions {
+                        epoch: 1,
+                        table_id: Default::default(),
+                        ttl: None,
+                    }
+                )
+                .await
+                .unwrap(),
             Some(b"v2".to_vec().into())
         );
-        assert_eq!(state_store.get(b"b", 1, None).await.unwrap(), None);
-        assert_eq!(state_store.get(b"c", 1, None).await.unwrap(), None);
+        assert_eq!(
+            state_store
+                .get(
+                    b"b",
+                    ReadOptions {
+                        epoch: 1,
+                        table_id: Default::default(),
+                        ttl: None,
+                    }
+                )
+                .await
+                .unwrap(),
+            None
+        );
+        assert_eq!(
+            state_store
+                .get(
+                    b"c",
+                    ReadOptions {
+                        epoch: 1,
+                        table_id: Default::default(),
+                        ttl: None,
+                    }
+                )
+                .await
+                .unwrap(),
+            None
+        );
     }
 }

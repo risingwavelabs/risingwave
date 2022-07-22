@@ -74,6 +74,12 @@ impl Task for CompactorService {
         let mut cmd = self.compactor()?;
 
         cmd.env("RUST_BACKTRACE", "1");
+        if crate::util::is_env_set("RISEDEV_ENABLE_PROFILE") {
+            cmd.env(
+                "RW_PROFILE_PATH",
+                Path::new(&env::var("PREFIX_LOG")?).join(format!("profile-{}", self.id())),
+            );
+        }
         cmd.arg("--config-path")
             .arg(Path::new(&prefix_config).join("risingwave.toml"));
         Self::apply_command_args(&mut cmd, &self.config)?;

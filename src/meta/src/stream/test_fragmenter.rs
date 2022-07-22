@@ -14,40 +14,30 @@
 
 use std::collections::{HashMap, HashSet};
 use std::sync::Arc;
+use std::vec;
 
-use risingwave_common::catalog::TableId;
+use risingwave_common::catalog::{DatabaseId, SchemaId, TableId};
 use risingwave_common::error::Result;
+use risingwave_pb::catalog::Table as ProstTable;
 use risingwave_pb::data::data_type::TypeName;
 use risingwave_pb::data::DataType;
 use risingwave_pb::expr::agg_call::{Arg, Type};
 use risingwave_pb::expr::expr_node::RexNode;
 use risingwave_pb::expr::expr_node::Type::{Add, GreaterThan, InputRef};
 use risingwave_pb::expr::{AggCall, ExprNode, FunctionCall, InputRefExpr};
-use risingwave_pb::plan_common::{
-    ColumnOrder, DatabaseRefId, Field, OrderType, SchemaRefId, TableRefId,
-};
+use risingwave_pb::plan_common::{ColumnCatalog, ColumnDesc, ColumnOrder, Field, OrderType};
 use risingwave_pb::stream_plan::source_node::SourceType;
+use risingwave_pb::stream_plan::stream_fragment_graph::{StreamFragment, StreamFragmentEdge};
 use risingwave_pb::stream_plan::stream_node::NodeBody;
 use risingwave_pb::stream_plan::{
-    DispatchStrategy, DispatcherType, ExchangeNode, FilterNode, MaterializeNode, ProjectNode,
-    SimpleAggNode, SourceNode, StreamNode,
+    DispatchStrategy, DispatcherType, ExchangeNode, FilterNode, FragmentType, MaterializeNode,
+    ProjectNode, SimpleAggNode, SourceNode, StreamFragmentGraph, StreamNode,
 };
 
-use crate::hummock::compaction_group::manager::CompactionGroupManager;
 use crate::manager::MetaSrvEnv;
 use crate::model::TableFragments;
 use crate::stream::stream_graph::ActorGraphBuilder;
 use crate::stream::{CreateMaterializedViewContext, FragmentManager};
-
-fn make_table_ref_id(id: i32) -> TableRefId {
-    TableRefId {
-        schema_ref_id: Some(SchemaRefId {
-            database_ref_id: Some(DatabaseRefId { database_id: 0 }),
-            schema_id: 0,
-        }),
-        table_id: id,
-    }
-}
 
 fn make_inputref(idx: i32) -> ExprNode {
     ExprNode {
@@ -75,6 +65,8 @@ fn make_sum_aggcall(idx: i32) -> AggCall {
             ..Default::default()
         }),
         distinct: false,
+        order_by_fields: vec![],
+        filter: None,
     }
 }
 
@@ -88,34 +80,71 @@ fn make_field(type_name: TypeName) -> Field {
     }
 }
 
-fn make_column_order(idx: i32) -> ColumnOrder {
+fn make_column_order(index: u32) -> ColumnOrder {
     ColumnOrder {
         order_type: OrderType::Ascending as i32,
-        input_ref: Some(InputRefExpr { column_idx: idx }),
-        return_type: Some(DataType {
-            type_name: TypeName::Int64 as i32,
-            ..Default::default()
-        }),
+        index,
     }
 }
 
-/// [`make_stream_node`] build a plan represent in `StreamNode` for SQL as follow:
+fn make_column(column_type: TypeName, column_id: i32) -> ColumnCatalog {
+    ColumnCatalog {
+        column_desc: Some(ColumnDesc {
+            column_type: Some(DataType {
+                type_name: column_type as i32,
+                ..Default::default()
+            }),
+            column_id,
+            ..Default::default()
+        }),
+        is_hidden: false,
+    }
+}
+
+fn make_internal_table(id: u32, is_agg_value: bool) -> ProstTable {
+    let mut columns = vec![make_column(TypeName::Int64, 0)];
+    if !is_agg_value {
+        columns.push(make_column(TypeName::Int32, 1));
+    }
+    ProstTable {
+        id,
+        schema_id: SchemaId::placeholder() as u32,
+        database_id: DatabaseId::placeholder() as u32,
+        name: String::new(),
+        columns,
+        order_key: vec![ColumnOrder {
+            index: 0,
+            order_type: 2,
+        }],
+        pk: vec![2],
+        ..Default::default()
+    }
+}
+
+/// [`make_stream_fragments`] build all stream fragments for SQL as follow:
 /// ```sql
 /// create table t (v1 int, v2 int);
 /// create materialized view T_distributed as select sum(v1)+1 as V from t where v1>v2;
 /// ```
-fn make_stream_node() -> StreamNode {
-    let table_ref_id = make_table_ref_id(1);
+fn make_stream_fragments() -> Vec<StreamFragment> {
+    let mut fragments = vec![];
     // table source node
     let source_node = StreamNode {
         node_body: Some(NodeBody::Source(SourceNode {
-            table_ref_id: Some(table_ref_id),
+            table_id: 1,
             column_ids: vec![1, 2, 0],
             source_type: SourceType::Table as i32,
         })),
         pk_indices: vec![2],
         ..Default::default()
     };
+    fragments.push(StreamFragment {
+        fragment_id: 2,
+        node: Some(source_node),
+        fragment_type: FragmentType::Source as i32,
+        is_singleton: false,
+        table_ids_cnt: 0,
+    });
 
     // exchange node
     let exchange_node = StreamNode {
@@ -130,7 +159,7 @@ fn make_stream_node() -> StreamNode {
             make_field(TypeName::Int32),
             make_field(TypeName::Int64),
         ],
-        input: vec![source_node],
+        input: vec![],
         pk_indices: vec![2],
         operator_id: 1,
         identity: "ExchangeExecutor".to_string(),
@@ -164,9 +193,10 @@ fn make_stream_node() -> StreamNode {
     let simple_agg_node = StreamNode {
         node_body: Some(NodeBody::GlobalSimpleAgg(SimpleAggNode {
             agg_calls: vec![make_sum_aggcall(0), make_sum_aggcall(1)],
-            distribution_keys: Default::default(),
-            table_ids: vec![],
-            append_only: false,
+            distribution_key: Default::default(),
+            internal_tables: vec![make_internal_table(2, true), make_internal_table(3, false)],
+            column_mapping: HashMap::new(),
+            is_append_only: false,
         })),
         input: vec![filter_node],
         fields: vec![], // TODO: fill this later
@@ -175,6 +205,14 @@ fn make_stream_node() -> StreamNode {
         identity: "GlobalSimpleAggExecutor".to_string(),
         ..Default::default()
     };
+
+    fragments.push(StreamFragment {
+        fragment_id: 1,
+        node: Some(simple_agg_node),
+        fragment_type: FragmentType::Others as i32,
+        is_singleton: false,
+        table_ids_cnt: 0,
+    });
 
     // exchange node
     let exchange_node_1 = StreamNode {
@@ -185,7 +223,7 @@ fn make_stream_node() -> StreamNode {
             }),
         })),
         fields: vec![make_field(TypeName::Int64), make_field(TypeName::Int64)],
-        input: vec![simple_agg_node],
+        input: vec![],
         pk_indices: vec![0, 1],
         operator_id: 4,
         identity: "ExchangeExecutor".to_string(),
@@ -196,9 +234,10 @@ fn make_stream_node() -> StreamNode {
     let simple_agg_node_1 = StreamNode {
         node_body: Some(NodeBody::GlobalSimpleAgg(SimpleAggNode {
             agg_calls: vec![make_sum_aggcall(0), make_sum_aggcall(1)],
-            distribution_keys: Default::default(),
-            table_ids: vec![],
-            append_only: false,
+            distribution_key: Default::default(),
+            internal_tables: vec![make_internal_table(0, true), make_internal_table(1, false)],
+            column_mapping: HashMap::new(),
+            is_append_only: false,
         })),
         fields: vec![], // TODO: fill this later
         input: vec![exchange_node_1],
@@ -236,20 +275,63 @@ fn make_stream_node() -> StreamNode {
     };
 
     // mview node
-    StreamNode {
+    let mview_node = StreamNode {
         input: vec![project_node],
         pk_indices: vec![],
         node_body: Some(NodeBody::Materialize(MaterializeNode {
-            table_ref_id: Some(make_table_ref_id(1)),
-            associated_table_ref_id: None,
-            column_ids: vec![0_i32, 1_i32],
+            table_id: 1,
+            table: Some(make_internal_table(4, true)),
             column_orders: vec![make_column_order(1), make_column_order(2)],
-            distribution_keys: Default::default(),
         })),
         fields: vec![], // TODO: fill this later
         operator_id: 7,
         identity: "MaterializeExecutor".to_string(),
         ..Default::default()
+    };
+
+    fragments.push(StreamFragment {
+        fragment_id: 0,
+        node: Some(mview_node),
+        fragment_type: FragmentType::Sink as i32,
+        is_singleton: true,
+        table_ids_cnt: 0,
+    });
+
+    fragments
+}
+
+fn make_fragment_edges() -> Vec<StreamFragmentEdge> {
+    vec![
+        StreamFragmentEdge {
+            dispatch_strategy: Some(DispatchStrategy {
+                r#type: DispatcherType::Simple as i32,
+                column_indices: vec![],
+            }),
+            same_worker_node: false,
+            link_id: 4,
+            upstream_id: 1,
+            downstream_id: 0,
+        },
+        StreamFragmentEdge {
+            dispatch_strategy: Some(DispatchStrategy {
+                r#type: DispatcherType::Hash as i32,
+                column_indices: vec![0],
+            }),
+            same_worker_node: false,
+            link_id: 1,
+            upstream_id: 2,
+            downstream_id: 1,
+        },
+    ]
+}
+
+fn make_stream_graph() -> StreamFragmentGraph {
+    let fragments = make_stream_fragments();
+    StreamFragmentGraph {
+        fragments: HashMap::from_iter(fragments.into_iter().map(|f| (f.fragment_id, f))),
+        edges: make_fragment_edges(),
+        dependent_table_ids: vec![],
+        table_ids_cnt: 4,
     }
 }
 
@@ -258,37 +340,52 @@ fn make_stream_node() -> StreamNode {
 #[cfg(not(madsim))]
 #[tokio::test]
 async fn test_fragmenter() -> Result<()> {
-    use risingwave_frontend::stream_fragmenter::StreamFragmenter;
+    use crate::model::FragmentId;
 
     let env = MetaSrvEnv::for_test().await;
-    let stream_node = make_stream_node();
-    let compaction_group_manager = Arc::new(CompactionGroupManager::new(env.clone()).await?);
-    let fragment_manager =
-        Arc::new(FragmentManager::new(env.clone(), compaction_group_manager).await?);
+    let fragment_manager = Arc::new(FragmentManager::new(env.clone()).await?);
     let parallel_degree = 4;
     let mut ctx = CreateMaterializedViewContext::default();
-    let graph = StreamFragmenter::build_graph(stream_node);
-    let graph = ActorGraphBuilder::generate_graph(
-        env.id_gen_manager_ref(),
-        fragment_manager,
-        parallel_degree,
-        &graph,
-        &mut ctx,
-    )
-    .await?;
-    let table_fragments =
-        TableFragments::new(TableId::default(), graph, ctx.internal_table_id_set.clone());
+    let graph = make_stream_graph();
+
+    let mut actor_graph_builder =
+        ActorGraphBuilder::new(env.id_gen_manager_ref(), &graph, &mut ctx).await?;
+
+    let parallelisms: HashMap<FragmentId, u32> = actor_graph_builder
+        .list_fragment_ids()
+        .into_iter()
+        .map(|(fragment_id, is_singleton)| {
+            if is_singleton {
+                (fragment_id, 1)
+            } else {
+                (fragment_id, parallel_degree as u32)
+            }
+        })
+        .collect();
+
+    let graph = actor_graph_builder
+        .generate_graph(
+            env.id_gen_manager_ref(),
+            fragment_manager,
+            parallelisms.clone(),
+            &mut ctx,
+        )
+        .await?;
+
+    let internal_table_id_set = ctx
+        .internal_table_id_map
+        .iter()
+        .map(|(table_id, _)| *table_id)
+        .collect::<HashSet<u32>>();
+    let table_fragments = TableFragments::new(TableId::default(), graph, internal_table_id_set);
     let actors = table_fragments.actors();
     let source_actor_ids = table_fragments.source_actor_ids();
     let sink_actor_ids = table_fragments.sink_actor_ids();
-    let mut internal_table_ids = table_fragments.internal_table_ids();
+    let internal_table_ids = table_fragments.internal_table_ids();
     assert_eq!(actors.len(), 9);
     assert_eq!(source_actor_ids, vec![6, 7, 8, 9]);
     assert_eq!(sink_actor_ids, vec![1]);
     assert_eq!(4, internal_table_ids.len());
-    internal_table_ids.sort();
-    let expected_internal_table_ids = vec![0, 1, 2, 3];
-    assert_eq!(expected_internal_table_ids, internal_table_ids);
 
     let mut expected_downstream = HashMap::new();
     expected_downstream.insert(1, vec![]);
@@ -315,7 +412,10 @@ async fn test_fragmenter() -> Result<()> {
     for actor in actors {
         assert_eq!(
             expected_downstream.get(&actor.get_actor_id()).unwrap(),
-            actor.dispatcher[0].get_downstream_actor_id(),
+            actor
+                .dispatcher
+                .first()
+                .map_or(&vec![], |d| d.get_downstream_actor_id()),
         );
         let mut node = actor.get_nodes().unwrap();
         while !node.get_input().is_empty() {

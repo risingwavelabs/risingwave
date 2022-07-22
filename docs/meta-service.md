@@ -39,11 +39,11 @@ To execute a DDL statement like `CREATE` or `DROP TABLE`, the frontend sends an 
 
 ### Storage
 
-Hummock, as an LSM-Tree-based storage, stores the mapping from version to the set of SSTable files in Meta Service. See more details in the [overview of State Store](./state-store-overview.md).
+Hummock, an LSM-Tree-based storage engine, stores the mapping from version to the set of SSTable files in Meta Service. See more details in the [overview of State Store](./state-store-overview.md).
 
 ## Push on Updates
 
-There are 2 choices for how to distribute information across multiple nodes. 
+There are 2 choices on how to distribute information across multiple nodes. 
 
 * *Push*: When metadata changes, the meta node tells all nodes to update, and master node must wait for others to acknowledge before continuing. 
 * *Pull*: When data changes, the master node does nothing. Other nodes may not have the latest information, so they need to ask the master node every time.

@@ -12,76 +12,40 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::collections::BTreeMap;
+use std::collections::HashMap;
 use std::sync::atomic::AtomicU64;
 use std::sync::atomic::Ordering::Relaxed;
 use std::sync::Arc;
 
-use futures::{FutureExt, StreamExt};
+use futures::FutureExt;
+use parking_lot::RwLock;
 use risingwave_common::config::StorageConfig;
-use risingwave_hummock_sdk::{get_local_sst_id, HummockEpoch};
+use risingwave_hummock_sdk::slice_transform::SliceTransform;
+use risingwave_hummock_sdk::{get_local_sst_id, HummockEpoch, LocalSstableInfo};
 use risingwave_pb::hummock::SstableInfo;
 use risingwave_rpc_client::HummockMetaClient;
-use tokio::sync::{mpsc, oneshot};
-use tracing::error;
 
 use crate::hummock::compaction_executor::CompactionExecutor;
 use crate::hummock::compactor::{get_remote_sstable_id_generator, Compactor, CompactorContext};
 use crate::hummock::conflict_detector::ConflictDetector;
-use crate::hummock::shared_buffer::{OrderIndex, OrderSortedUncommittedData};
-use crate::hummock::{HummockError, HummockResult, SstableStoreRef};
+use crate::hummock::shared_buffer::OrderSortedUncommittedData;
+use crate::hummock::{HummockResult, SstableStoreRef};
 use crate::monitor::StateStoreMetrics;
 
 pub(crate) type UploadTaskPayload = OrderSortedUncommittedData;
-pub(crate) type UploadTaskResult =
-    BTreeMap<(HummockEpoch, OrderIndex), HummockResult<Vec<SstableInfo>>>;
-
-#[derive(Debug)]
-pub struct UploadTask {
-    pub(crate) order_index: OrderIndex,
-    pub(crate) epoch: HummockEpoch,
-    pub(crate) payload: UploadTaskPayload,
-    pub(crate) is_local: bool,
-}
-
-impl UploadTask {
-    pub fn new(
-        order_index: OrderIndex,
-        epoch: HummockEpoch,
-        payload: UploadTaskPayload,
-        is_local: bool,
-    ) -> Self {
-        Self {
-            order_index,
-            epoch,
-            payload,
-            is_local,
-        }
-    }
-}
-
-pub struct UploadItem {
-    pub(crate) tasks: Vec<UploadTask>,
-    pub(crate) notifier: oneshot::Sender<UploadTaskResult>,
-}
-
-impl UploadItem {
-    pub fn new(tasks: Vec<UploadTask>, notifier: oneshot::Sender<UploadTaskResult>) -> Self {
-        Self { tasks, notifier }
-    }
-}
+pub(crate) type UploadTaskResult = HummockResult<Vec<LocalSstableInfo>>;
 
 pub struct SharedBufferUploader {
     options: Arc<StorageConfig>,
     write_conflict_detector: Option<Arc<ConflictDetector>>,
-
-    uploader_rx: Option<mpsc::UnboundedReceiver<UploadItem>>,
 
     sstable_store: SstableStoreRef,
     hummock_meta_client: Arc<dyn HummockMetaClient>,
     next_local_sstable_id: Arc<AtomicU64>,
     stats: Arc<StateStoreMetrics>,
     compaction_executor: Option<Arc<CompactionExecutor>>,
+    local_object_store_compactor_context: Arc<CompactorContext>,
+    remote_object_store_compactor_context: Arc<CompactorContext>,
 }
 
 impl SharedBufferUploader {
@@ -89,9 +53,9 @@ impl SharedBufferUploader {
         options: Arc<StorageConfig>,
         sstable_store: SstableStoreRef,
         hummock_meta_client: Arc<dyn HummockMetaClient>,
-        uploader_rx: mpsc::UnboundedReceiver<UploadItem>,
         stats: Arc<StateStoreMetrics>,
         write_conflict_detector: Option<Arc<ConflictDetector>>,
+        table_id_to_slice_transform: Arc<RwLock<HashMap<u32, Arc<dyn SliceTransform>>>>,
     ) -> Self {
         let compaction_executor = if options.share_buffer_compaction_worker_threads_number == 0 {
             None
@@ -100,91 +64,15 @@ impl SharedBufferUploader {
                 options.share_buffer_compaction_worker_threads_number as usize,
             ))))
         };
-        Self {
-            options,
-            write_conflict_detector,
-            uploader_rx: Some(uploader_rx),
-            sstable_store,
-            hummock_meta_client,
-            next_local_sstable_id: Arc::new(AtomicU64::new(0)),
-            stats,
-            compaction_executor,
-        }
-    }
-
-    pub async fn run(mut self) -> HummockResult<()> {
-        let rx = self.uploader_rx.take().unwrap();
-        let this = Arc::new(self);
-        let rx = tokio_stream::wrappers::UnboundedReceiverStream::new(rx);
-        let mut stream = rx
-            .map(|item| {
-                let this = this.clone();
-                tokio::spawn(this.run_inner(item))
-            })
-            .buffer_unordered(this.options.share_buffer_upload_concurrency);
-        while let Some(res) = stream.next().await {
-            res.unwrap()?;
-        }
-        Ok(())
-    }
-}
-
-impl SharedBufferUploader {
-    async fn run_inner(self: Arc<Self>, item: UploadItem) -> HummockResult<()> {
-        let mut task_results = BTreeMap::new();
-        let mut failed = false;
-        for UploadTask {
-            order_index,
-            epoch,
-            payload,
-            is_local,
-        } in item.tasks
-        {
-            // If a previous task failed, this task will also fail
-            let result = if failed {
-                Err(HummockError::shared_buffer_error(
-                    "failed due to previous failure",
-                ))
-            } else {
-                self.flush(epoch, is_local, &payload)
-                    .await
-                    .inspect_err(|e| {
-                        error!("Failed to flush shared buffer: {:?}", e);
-                        failed = true;
-                    })
-            };
-            assert!(
-                task_results.insert((epoch, order_index), result).is_none(),
-                "Upload task duplicate. epoch: {:?}, order_index: {:?}",
-                epoch,
-                order_index,
-            );
-        }
-        item.notifier
-            .send(task_results)
-            .map_err(|_| HummockError::shared_buffer_error("failed to send result"))?;
-        Ok(())
-    }
-
-    async fn flush(
-        &self,
-        _epoch: HummockEpoch,
-        is_local: bool,
-        payload: &UploadTaskPayload,
-    ) -> HummockResult<Vec<SstableInfo>> {
-        if payload.is_empty() {
-            return Ok(vec![]);
-        }
-
-        // Compact buffers into SSTs
-        let mem_compactor_ctx = CompactorContext {
-            options: self.options.clone(),
-            hummock_meta_client: self.hummock_meta_client.clone(),
-            sstable_store: self.sstable_store.clone(),
-            stats: self.stats.clone(),
+        let next_local_sstable_id = Arc::new(AtomicU64::new(0));
+        let local_object_store_compactor_context = Arc::new(CompactorContext {
+            options: options.clone(),
+            hummock_meta_client: hummock_meta_client.clone(),
+            sstable_store: sstable_store.clone(),
+            stats: stats.clone(),
             is_share_buffer_compact: true,
-            sstable_id_generator: if is_local {
-                let atomic = self.next_local_sstable_id.clone();
+            sstable_id_generator: {
+                let atomic = next_local_sstable_id.clone();
                 Arc::new(move || {
                     {
                         let atomic = atomic.clone();
@@ -192,26 +80,73 @@ impl SharedBufferUploader {
                     }
                     .boxed()
                 })
-            } else {
-                get_remote_sstable_id_generator(self.hummock_meta_client.clone())
             },
-            compaction_executor: self.compaction_executor.as_ref().cloned(),
+            compaction_executor: compaction_executor.as_ref().cloned(),
+            table_id_to_slice_transform: table_id_to_slice_transform.clone(),
+        });
+        let remote_object_store_compactor_context = Arc::new(CompactorContext {
+            options: options.clone(),
+            hummock_meta_client: hummock_meta_client.clone(),
+            sstable_store: sstable_store.clone(),
+            stats: stats.clone(),
+            is_share_buffer_compact: true,
+            sstable_id_generator: get_remote_sstable_id_generator(hummock_meta_client.clone()),
+            compaction_executor: compaction_executor.as_ref().cloned(),
+            table_id_to_slice_transform: table_id_to_slice_transform.clone(),
+        });
+        Self {
+            options,
+            write_conflict_detector,
+            sstable_store,
+            hummock_meta_client,
+            next_local_sstable_id,
+            stats,
+            compaction_executor,
+            local_object_store_compactor_context,
+            remote_object_store_compactor_context,
+        }
+    }
+}
+
+impl SharedBufferUploader {
+    pub async fn flush(
+        &self,
+        _epoch: HummockEpoch,
+        is_local: bool,
+        payload: UploadTaskPayload,
+    ) -> HummockResult<Vec<LocalSstableInfo>> {
+        if payload.is_empty() {
+            return Ok(vec![]);
+        }
+
+        // Compact buffers into SSTs
+        let mem_compactor_ctx = if is_local {
+            self.local_object_store_compactor_context.clone()
+        } else {
+            self.remote_object_store_compactor_context.clone()
         };
 
-        let tables = Compactor::compact_shared_buffer(Arc::new(mem_compactor_ctx), payload).await?;
+        let tables =
+            Compactor::compact_shared_buffer_by_compaction_group(mem_compactor_ctx, payload)
+                .await?;
 
-        let uploaded_sst_info: Vec<SstableInfo> = tables
+        let uploaded_sst_info = tables
             .into_iter()
-            .map(|(sst, unit_id, vnode_bitmaps)| SstableInfo {
-                id: sst.id,
-                key_range: Some(risingwave_pb::hummock::KeyRange {
-                    left: sst.meta.smallest_key.clone(),
-                    right: sst.meta.largest_key.clone(),
-                    inf: false,
-                }),
-                file_size: sst.meta.estimated_size as u64,
-                vnode_bitmaps,
-                unit_id,
+            .map(|(compaction_group_id, sst, unit_id, table_ids)| {
+                (
+                    compaction_group_id,
+                    SstableInfo {
+                        id: sst.id,
+                        key_range: Some(risingwave_pb::hummock::KeyRange {
+                            left: sst.meta.smallest_key.clone(),
+                            right: sst.meta.largest_key.clone(),
+                            inf: false,
+                        }),
+                        file_size: sst.meta.estimated_size as u64,
+                        table_ids,
+                        unit_id,
+                    },
+                )
             })
             .collect();
 

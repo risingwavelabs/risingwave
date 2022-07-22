@@ -14,14 +14,16 @@
 
 //! Local execution for batch query.
 use std::collections::HashMap;
+use std::sync::Arc;
 
-use anyhow::anyhow;
 use futures_async_stream::try_stream;
+use itertools::Itertools;
 use risingwave_batch::executor::ExecutorBuilder;
 use risingwave_batch::task::TaskId;
 use risingwave_common::array::DataChunk;
+use risingwave_common::bail;
 use risingwave_common::error::RwError;
-use risingwave_common::{bail, try_match_expand};
+use risingwave_common::util::worker_util::get_workers_by_parallel_unit_ids;
 use risingwave_pb::batch_plan::exchange_info::DistributionMode;
 use risingwave_pb::batch_plan::exchange_source::LocalExecutePlan::Plan;
 use risingwave_pb::batch_plan::plan_node::NodeBody;
@@ -32,26 +34,35 @@ use risingwave_pb::batch_plan::{
 use tracing::debug;
 use uuid::Uuid;
 
+use super::plan_fragmenter::{PartitionInfo, QueryStageRef};
 use crate::optimizer::plan_node::PlanNodeType;
 use crate::scheduler::plan_fragmenter::{ExecutionPlanNode, Query, StageId};
 use crate::scheduler::task_context::FrontendBatchTaskContext;
 use crate::scheduler::SchedulerResult;
-use crate::session::FrontendEnv;
+use crate::session::{AuthContext, FrontendEnv};
 
 pub struct LocalQueryExecution {
     sql: String,
     query: Query,
     front_env: FrontendEnv,
     epoch: Option<u64>,
+
+    auth_context: Arc<AuthContext>,
 }
 
 impl LocalQueryExecution {
-    pub fn new<S: Into<String>>(query: Query, front_env: FrontendEnv, sql: S) -> Self {
+    pub fn new<S: Into<String>>(
+        query: Query,
+        front_env: FrontendEnv,
+        sql: S,
+        auth_context: Arc<AuthContext>,
+    ) -> Self {
         Self {
             sql: sql.into(),
             query,
             front_env,
             epoch: None,
+            auth_context,
         }
     }
 
@@ -62,7 +73,8 @@ impl LocalQueryExecution {
             self.query.query_id, self.sql
         );
 
-        let context = FrontendBatchTaskContext::new(self.front_env.clone());
+        let context =
+            FrontendBatchTaskContext::new(self.front_env.clone(), self.auth_context.clone());
 
         let query_id = self.query.query_id().clone();
 
@@ -102,36 +114,29 @@ impl LocalQueryExecution {
     fn create_plan_fragment(&self) -> SchedulerResult<PlanFragment> {
         let root_stage_id = self.query.root_stage_id();
         let root_stage = self.query.stage_graph.stages.get(&root_stage_id).unwrap();
+        assert_eq!(root_stage.parallelism, 1);
         let second_stage_id = self.query.stage_graph.get_child_stages(&root_stage_id);
         let plan_node_prost = match second_stage_id {
             None => {
                 debug!("Local execution mode converts a plan with a single stage");
-                self.convert_plan_node(&*root_stage.root, &mut None)?
+                self.convert_plan_node(&root_stage.root, &mut None, None)?
             }
             Some(second_stage_ids) => {
                 debug!("Local execution mode converts a plan with two stages");
                 if second_stage_ids.is_empty() {
                     // This branch is defensive programming. The semantics should be the same as
                     // `None`.
-                    self.convert_plan_node(&*root_stage.root, &mut None)?
+                    self.convert_plan_node(&root_stage.root, &mut None, None)?
                 } else {
-                    let mut stage_id_to_plan = HashMap::new();
+                    let mut second_stages = HashMap::new();
                     for second_stage_id in second_stage_ids {
                         let second_stage =
                             self.query.stage_graph.stages.get(second_stage_id).unwrap();
-                        let second_stage_plan_node =
-                            self.convert_plan_node(&*second_stage.root, &mut None)?;
-                        let second_stage_plan_fragment = PlanFragment {
-                            root: Some(second_stage_plan_node),
-                            exchange_info: Some(ExchangeInfo {
-                                mode: DistributionMode::Single as i32,
-                                ..Default::default()
-                            }),
-                        };
-                        stage_id_to_plan.insert(*second_stage_id, second_stage_plan_fragment);
+                        second_stages.insert(*second_stage_id, second_stage.clone());
                     }
-                    let mut stage_id_to_plan = Some(stage_id_to_plan);
-                    let res = self.convert_plan_node(&*root_stage.root, &mut stage_id_to_plan)?;
+                    let mut stage_id_to_plan = Some(second_stages);
+                    let res =
+                        self.convert_plan_node(&root_stage.root, &mut stage_id_to_plan, None)?;
                     assert!(
                         stage_id_to_plan.as_ref().unwrap().is_empty(),
                         "We expect that all the child stage plan fragments have been used"
@@ -153,67 +158,177 @@ impl LocalQueryExecution {
     fn convert_plan_node(
         &self,
         execution_plan_node: &ExecutionPlanNode,
-        second_stage_plan: &mut Option<HashMap<StageId, PlanFragment>>,
+        second_stages: &mut Option<HashMap<StageId, QueryStageRef>>,
+        partition: Option<PartitionInfo>,
     ) -> SchedulerResult<PlanNodeProst> {
         match execution_plan_node.plan_node_type {
             PlanNodeType::BatchExchange => {
-                let exchange_from_stage_id = execution_plan_node
-                    .stage_id
+                let exchange_source_stage_id = execution_plan_node
+                    .source_stage_id
                     .expect("We expect stage id for Exchange Operator");
-                match second_stage_plan.as_mut() {
-                    Some(second_stage_plan) => {
-                        let second_stage_plan_fragment = second_stage_plan.remove(&exchange_from_stage_id).expect("We expect child stage fragment for Exchange Operator running in the frontend");
-                        let mut exchange_node =
-                            try_match_expand!(execution_plan_node.node.clone(), NodeBody::Exchange)
-                                .map_err(|e| anyhow!(e))?;
-                        let local_execute_plan = LocalExecutePlan {
-                            plan: Some(second_stage_plan_fragment),
-                            epoch: self.epoch.expect("Local execution mode has not acquired the epoch when generating the plan.")
+                let Some(second_stages) = second_stages.as_mut() else {
+                    bail!("Unexpected exchange detected. We are either converting a single stage plan or converting the second stage of the plan.")
+                };
+                let second_stage = second_stages.remove(&exchange_source_stage_id).expect(
+                    "We expect child stage fragment for Exchange Operator running in the frontend",
+                );
+                let mut node_body = execution_plan_node.node.clone();
+                let sources = match &mut node_body {
+                    NodeBody::Exchange(exchange_node) => &mut exchange_node.sources,
+                    NodeBody::MergeSortExchange(merge_sort_exchange_node) => {
+                        &mut merge_sort_exchange_node
+                            .exchange
+                            .as_mut()
+                            .expect("MergeSortExchangeNode must have a exchange node")
+                            .sources
+                    }
+                    _ => unreachable!(),
+                };
+                assert!(sources.is_empty());
+
+                if let Some(table_scan_info) = second_stage.table_scan_info.clone() && let Some(vnode_bitmaps) = table_scan_info.partitions {
+                    // Similar to the distributed case (StageRunner::schedule_tasks).
+                    // Set `vnode_ranges` of the scan node in `local_execute_plan` of each
+                    // `exchange_source`.
+                    let (parallel_unit_ids, vnode_bitmaps): (Vec<_>, Vec<_>) =
+                        vnode_bitmaps.into_iter().unzip();
+                    let all_workers = self.front_env.worker_node_manager().list_worker_nodes();
+                    let workers = match get_workers_by_parallel_unit_ids(&all_workers, &parallel_unit_ids) {
+                        Ok(workers) => workers,
+                        Err(e) => bail!("{}", e)
+                    };
+
+                    for (idx, (worker_node, partition)) in
+                        (workers.into_iter().zip_eq(vnode_bitmaps.into_iter())).enumerate()
+                    {
+                        let second_stage_plan_node = self.convert_plan_node(
+                            &second_stage.root,
+                            &mut None,
+                            Some(partition),
+                        )?;
+                        let second_stage_plan_fragment = PlanFragment {
+                            root: Some(second_stage_plan_node),
+                            exchange_info: Some(ExchangeInfo {
+                                mode: DistributionMode::Single as i32,
+                                ..Default::default()
+                            }),
                         };
-                        exchange_node.sources.extend(
-                            self.front_env
-                                .worker_node_manager()
-                                .list_worker_nodes()
-                                .iter()
-                                .enumerate()
-                                .map(|(idx, worker_node)| {
-                                    let exchange_source = ExchangeSource {
-                                        task_output_id: Some(TaskOutputId {
-                                            task_id: Some(ProstTaskId {
-                                                // We remark that `RowSeqScanExecutor` relies on the
-                                                // task_id
-                                                // to differentiate which one is primary and
-                                                // should really read all the data.
-                                                task_id: idx as u32,
-                                                stage_id: exchange_from_stage_id,
-                                                query_id: self.query.query_id.id.clone(),
-                                            }),
-                                            output_id: 0,
-                                        }),
-                                        host: Some(worker_node.host.as_ref().unwrap().clone()),
-                                        local_execute_plan: Some(Plan(local_execute_plan.clone())),
-                                    };
-                                    exchange_source
+                        let local_execute_plan =  LocalExecutePlan {
+                            plan: Some(second_stage_plan_fragment),
+                            epoch: self.epoch.expect(
+                                "Local execution mode has not acquired the epoch when generating the plan.",
+                            ),
+                            };
+                        let exchange_source = ExchangeSource {
+                            task_output_id: Some(TaskOutputId {
+                                task_id: Some(ProstTaskId {
+                                    task_id: idx as u32,
+                                    stage_id: exchange_source_stage_id,
+                                    query_id: self.query.query_id.id.clone(),
                                 }),
-                        );
-                        Ok(PlanNodeProst {
-                            /// Since all the rest plan is embedded into the exchange node,
-                            /// there is no children any more.
-                            children: vec![],
-                            identity: Uuid::new_v4().to_string(),
-                            node_body: Some(NodeBody::Exchange(exchange_node)),
+                                output_id: 0,
+                            }),
+                            host: Some(worker_node.host.as_ref().unwrap().clone()),
+                            local_execute_plan: Some(Plan(local_execute_plan)),
+                        };
+                        sources.push(exchange_source);
+                    }
+                } else {
+                    let second_stage_plan_node =
+                        self.convert_plan_node(&second_stage.root, &mut None, None)?;
+                    let second_stage_plan_fragment = PlanFragment {
+                        root: Some(second_stage_plan_node),
+                        exchange_info: Some(ExchangeInfo {
+                            mode: DistributionMode::Single as i32,
+                            ..Default::default()
+                        }),
+                    };
+
+                    let local_execute_plan = LocalExecutePlan {
+                    plan: Some(second_stage_plan_fragment),
+                    epoch: self.epoch.expect(
+                        "Local execution mode has not acquired the epoch when generating the plan.",
+                    ),
+                    };
+
+                    let workers = if second_stage.parallelism == 1 {
+                        vec![self.front_env.worker_node_manager().next_random()?]
+                    } else {
+                        self.front_env.worker_node_manager().list_worker_nodes()
+                    };
+                    *sources = workers
+                        .iter()
+                        .enumerate()
+                        .map(|(idx, worker_node)| {
+                            let exchange_source = ExchangeSource {
+                                task_output_id: Some(TaskOutputId {
+                                    task_id: Some(ProstTaskId {
+                                        task_id: idx as u32,
+                                        stage_id: exchange_source_stage_id,
+                                        query_id: self.query.query_id.id.clone(),
+                                    }),
+                                    output_id: 0,
+                                }),
+                                host: Some(worker_node.host.as_ref().unwrap().clone()),
+                                local_execute_plan: Some(Plan(local_execute_plan.clone())),
+                            };
+                            exchange_source
                         })
-                    }
-                    None => {
-                        bail!("Unexpected exchange detected. We are either converting a single stage plan or converting the second stage of the plan.")
-                    }
+                        .collect();
                 }
+
+                Ok(PlanNodeProst {
+                    /// Since all the rest plan is embedded into the exchange node,
+                    /// there is no children any more.
+                    children: vec![],
+                    identity: Uuid::new_v4().to_string(),
+                    node_body: Some(node_body),
+                })
+            }
+            PlanNodeType::BatchSeqScan => {
+                let mut node_body = execution_plan_node.node.clone();
+                match &mut node_body {
+                    NodeBody::RowSeqScan(ref mut scan_node) => {
+                        let partition = partition.unwrap();
+                        scan_node.vnode_bitmap = Some(partition.vnode_bitmap);
+                        scan_node.scan_ranges = partition.scan_ranges;
+                    }
+                    NodeBody::SysRowSeqScan(_) => {}
+                    _ => unreachable!(),
+                }
+
+                Ok(PlanNodeProst {
+                    children: vec![],
+                    // TODO: Generate meaningful identify
+                    identity: Uuid::new_v4().to_string(),
+                    node_body: Some(node_body),
+                })
+            }
+            PlanNodeType::BatchLookupJoin => {
+                let mut node_body = execution_plan_node.node.clone();
+                let worker_nodes = match &mut node_body {
+                    NodeBody::LookupJoin(node) => &mut node.worker_nodes,
+                    _ => unreachable!(),
+                };
+                *worker_nodes = self.front_env.worker_node_manager().list_worker_nodes();
+
+                let left_child = self.convert_plan_node(
+                    &execution_plan_node.children[0],
+                    second_stages,
+                    partition,
+                )?;
+
+                Ok(PlanNodeProst {
+                    children: vec![left_child],
+                    identity: Uuid::new_v4().to_string(),
+                    node_body: Some(node_body),
+                })
             }
             _ => {
                 let children = execution_plan_node
                     .children
                     .iter()
-                    .map(|e| self.convert_plan_node(e, second_stage_plan))
+                    .map(|e| self.convert_plan_node(e, second_stages, partition.clone()))
                     .collect::<SchedulerResult<Vec<PlanNodeProst>>>()?;
 
                 Ok(PlanNodeProst {

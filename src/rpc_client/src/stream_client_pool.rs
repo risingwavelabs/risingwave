@@ -15,13 +15,14 @@
 use std::sync::Arc;
 use std::time::Duration;
 
+use anyhow::anyhow;
 use moka::future::Cache;
-use risingwave_common::error::ErrorCode::{self, InternalError};
-use risingwave_common::error::{Result, RwError, ToRwResult};
 use risingwave_common::util::addr::HostAddr;
 use risingwave_pb::common::WorkerNode;
 use risingwave_pb::stream_service::stream_service_client::StreamServiceClient;
 use tonic::transport::{Channel, Endpoint};
+
+use crate::error::{Result, RpcError};
 
 pub type StreamClient = StreamServiceClient<Channel>;
 
@@ -51,22 +52,18 @@ impl StreamClientPool {
     pub async fn get(&self, node: &WorkerNode) -> Result<StreamServiceClient<Channel>> {
         self.clients
             .try_get_with(node.id, async {
-                let addr: HostAddr = node.get_host()?.into();
-                let endpoint = Endpoint::from_shared(format!("http://{}", addr));
+                let addr: HostAddr = node.get_host().unwrap().into();
+                let endpoint = Endpoint::from_shared(format!("http://{}", addr))?;
                 let client = StreamServiceClient::new(
                     endpoint
-                        .map_err(|e| InternalError(e.to_string()))?
                         .connect_timeout(Duration::from_secs(5))
                         .connect()
-                        .await
-                        .to_rw_result_with(|| format!("failed to connect to {}", node.get_id()))?,
+                        .await?,
                 );
-                Ok::<_, RwError>(client)
+                Ok::<_, RpcError>(client)
             })
             .await
-            .map_err(|e| {
-                ErrorCode::InternalError(format!("failed to create compute client: {:?}", e)).into()
-            })
+            .map_err(|e| anyhow!("failed to create compute client: {:?}", e).into())
     }
 }
 

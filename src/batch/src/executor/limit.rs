@@ -108,7 +108,9 @@ impl LimitExecutor {
                 returned += r - l;
                 skipped += l;
             }
-            yield data_chunk.with_visibility(new_vis.try_into()?).compact()?;
+            yield data_chunk
+                .with_visibility(new_vis.into_iter().collect())
+                .compact()?;
         }
     }
 }
@@ -302,9 +304,8 @@ mod tests {
             .unwrap()
             .into_iter()
             .for_each(|x| {
-                mock_executor.add(
-                    x.with_visibility((x.column_at(1).array_ref().as_bool()).try_into().unwrap()),
-                )
+                mock_executor
+                    .add(x.with_visibility((x.column_at(1).array_ref().as_bool()).iter().collect()))
             });
 
         let limit_executor = Box::new(LimitExecutor {

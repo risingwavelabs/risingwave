@@ -82,7 +82,7 @@ impl ValuesExecutor {
                 let one_row_chunk = DataChunk::new_dummy(1);
 
                 let chunk_size = self.chunk_size.min(self.rows.len());
-                let mut array_builders = self.schema.create_array_builders(chunk_size)?;
+                let mut array_builders = self.schema.create_array_builders(chunk_size);
                 for row in self.rows.by_ref().take(chunk_size) {
                     for (expr, builder) in row.into_iter().zip_eq(&mut array_builders) {
                         let out = expr.eval(&one_row_chunk)?;

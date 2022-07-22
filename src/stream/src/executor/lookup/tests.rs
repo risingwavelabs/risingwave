@@ -19,11 +19,15 @@ use risingwave_common::array::stream_chunk::StreamChunkTestExt;
 use risingwave_common::array::StreamChunk;
 use risingwave_common::catalog::{ColumnDesc, ColumnId, Field, Schema, TableId};
 use risingwave_common::types::DataType;
-use risingwave_common::util::ordered::{deserialize_column_id, SENTINEL_CELL_ID};
+use risingwave_common::util::ordered::SENTINEL_CELL_ID;
 use risingwave_common::util::sort_util::{OrderPair, OrderType};
 use risingwave_common::util::value_encoding::deserialize_cell;
 use risingwave_storage::memory::MemoryStateStore;
-use risingwave_storage::{Keyspace, StateStore};
+use risingwave_storage::row_serde::cell_based_encoding_util::deserialize_column_id;
+use risingwave_storage::store::ReadOptions;
+use risingwave_storage::table::storage_table::{StorageTable, READ_ONLY};
+use risingwave_storage::table::Distribution;
+use risingwave_storage::StateStore;
 
 use crate::executor::lookup::impl_::LookupExecutorParams;
 use crate::executor::lookup::LookupExecutor;
@@ -78,7 +82,7 @@ fn arrangement_col_arrange_rules_join_key() -> Vec<OrderPair> {
 /// | +  | 2337  | 8    | 3       |
 /// | -  | 2333  | 6    | 3       |
 /// | b  |       |      | 3 -> 4  |
-async fn create_arrangement(
+fn create_arrangement(
     table_id: TableId,
     memory_state_store: MemoryStateStore,
 ) -> Box<dyn Executor + Send> {
@@ -123,15 +127,13 @@ async fn create_arrangement(
         ],
     );
 
-    let keyspace = Keyspace::table_root(memory_state_store, &table_id);
-
-    Box::new(MaterializeExecutor::new(
+    Box::new(MaterializeExecutor::new_for_test(
         Box::new(source),
-        keyspace,
+        memory_state_store,
+        table_id,
         arrangement_col_arrange_rules(),
         column_ids,
         1,
-        vec![0usize],
     ))
 }
 
@@ -146,7 +148,7 @@ async fn create_arrangement(
 /// | b  |       |      | 2 -> 3  |
 /// | -  | 6     | 1    | 3       |
 /// | b  |       |      | 3 -> 4  |
-async fn create_source() -> Box<dyn Executor + Send> {
+fn create_source() -> Box<dyn Executor + Send> {
     let columns = vec![
         ColumnDesc {
             data_type: DataType::Int64,
@@ -205,18 +207,34 @@ fn check_chunk_eq(chunk1: &StreamChunk, chunk2: &StreamChunk) {
     assert_eq!(format!("{:?}", chunk1), format!("{:?}", chunk2));
 }
 
+fn build_state_table_helper<S: StateStore>(
+    s: S,
+    table_id: TableId,
+    columns: Vec<ColumnDesc>,
+    order_types: Vec<OrderPair>,
+    pk_indices: Vec<usize>,
+) -> StorageTable<S, READ_ONLY> {
+    StorageTable::new_partial(
+        s,
+        table_id,
+        columns.clone(),
+        columns.iter().map(|col| col.column_id).collect(),
+        order_types.iter().map(|pair| pair.order_type).collect_vec(),
+        pk_indices,
+        Distribution::fallback(),
+    )
+}
 #[tokio::test]
 async fn test_lookup_this_epoch() {
     // TODO: memory state store doesn't support read epoch yet, so it is possible that this test
     // fails because read epoch doesn't take effect in memory state store.
     let store = MemoryStateStore::new();
     let table_id = TableId::new(1);
-    let arrangement = create_arrangement(table_id, store.clone()).await;
-    let stream = create_source().await;
+    let arrangement = create_arrangement(table_id, store.clone());
+    let stream = create_source();
     let lookup_executor = Box::new(LookupExecutor::new(LookupExecutorParams {
         arrangement,
         stream,
-        arrangement_keyspace: Keyspace::table_root(store.clone(), &table_id),
         arrangement_col_descs: arrangement_col_descs(),
         arrangement_order_rules: arrangement_col_arrange_rules_join_key(),
         pk_indices: vec![1, 2],
@@ -230,6 +248,13 @@ async fn test_lookup_this_epoch() {
             Field::with_name(DataType::Int64, "rowid_column"),
             Field::with_name(DataType::Int64, "join_column"),
         ]),
+        storage_table: build_state_table_helper(
+            store.clone(),
+            table_id,
+            arrangement_col_descs(),
+            arrangement_col_arrange_rules(),
+            vec![1, 0],
+        ),
     }));
     let mut lookup_executor = lookup_executor.execute();
 
@@ -241,7 +266,15 @@ async fn test_lookup_this_epoch() {
     next_msg(&mut msgs, &mut lookup_executor).await;
 
     for (k, v) in store
-        .scan::<_, Vec<u8>>(.., None, u64::MAX, Default::default())
+        .scan::<_, Vec<u8>>(
+            ..,
+            None,
+            ReadOptions {
+                epoch: u64::MAX,
+                table_id: Default::default(),
+                ttl: None,
+            },
+        )
         .await
         .unwrap()
     {
@@ -283,12 +316,11 @@ async fn test_lookup_this_epoch() {
 async fn test_lookup_last_epoch() {
     let store = MemoryStateStore::new();
     let table_id = TableId::new(1);
-    let arrangement = create_arrangement(table_id, store.clone()).await;
-    let stream = create_source().await;
+    let arrangement = create_arrangement(table_id, store.clone());
+    let stream = create_source();
     let lookup_executor = Box::new(LookupExecutor::new(LookupExecutorParams {
         arrangement,
         stream,
-        arrangement_keyspace: Keyspace::table_root(store.clone(), &table_id),
         arrangement_col_descs: arrangement_col_descs(),
         arrangement_order_rules: arrangement_col_arrange_rules_join_key(),
         pk_indices: vec![1, 2],
@@ -302,6 +334,13 @@ async fn test_lookup_last_epoch() {
             Field::with_name(DataType::Int64, "join_column"),
             Field::with_name(DataType::Int64, "rowid_column"),
         ]),
+        storage_table: build_state_table_helper(
+            store.clone(),
+            table_id,
+            arrangement_col_descs(),
+            arrangement_col_arrange_rules(),
+            vec![1, 0],
+        ),
     }));
     let mut lookup_executor = lookup_executor.execute();
 

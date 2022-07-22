@@ -17,19 +17,23 @@ use std::collections::{HashMap, HashSet};
 use std::option::Option::Some;
 use std::sync::Arc;
 
-use anyhow::anyhow;
-use risingwave_common::catalog::{DEFAULT_DATABASE_NAME, DEFAULT_SCHEMA_NAME};
+use itertools::Itertools;
+use risingwave_common::catalog::{
+    DEFAULT_DATABASE_NAME, DEFAULT_SCHEMA_NAME, DEFAULT_SUPPER_USER, PG_CATALOG_SCHEMA_NAME,
+};
 use risingwave_common::ensure;
-use risingwave_common::error::ErrorCode::{CatalogError, InternalError};
+use risingwave_common::error::ErrorCode::{InternalError, PermissionDenied};
 use risingwave_common::error::{Result, RwError};
+use risingwave_common::types::ParallelUnitId;
 use risingwave_pb::catalog::table::OptionalAssociatedSourceId;
 use risingwave_pb::catalog::{Database, Schema, Source, Table};
+use risingwave_pb::common::ParallelUnit;
 use risingwave_pb::meta::subscribe_response::{Info, Operation};
 use tokio::sync::{Mutex, MutexGuard};
 
 use super::IdCategory;
 use crate::manager::{MetaSrvEnv, NotificationVersion};
-use crate::model::{MetadataModel, Transactional};
+use crate::model::{MetadataModel, TableFragments, Transactional};
 use crate::storage::{MetaStore, Transaction};
 
 pub type DatabaseId = u32;
@@ -64,6 +68,7 @@ where
     async fn init(&self) -> Result<()> {
         let mut database = Database {
             name: DEFAULT_DATABASE_NAME.to_string(),
+            owner: DEFAULT_SUPPER_USER.to_string(),
             ..Default::default()
         };
         if !self.core.lock().await.has_database(&database) {
@@ -81,18 +86,21 @@ where
             .collect::<Vec<Database>>();
         assert_eq!(1, databases.len());
 
-        let mut schema = Schema {
-            name: DEFAULT_SCHEMA_NAME.to_string(),
-            database_id: databases[0].id,
-            ..Default::default()
-        };
-        if !self.core.lock().await.has_schema(&schema) {
-            schema.id = self
-                .env
-                .id_gen_manager()
-                .generate::<{ IdCategory::Schema }>()
-                .await? as u32;
-            self.create_schema(&schema).await?;
+        for name in [DEFAULT_SCHEMA_NAME, PG_CATALOG_SCHEMA_NAME] {
+            let mut schema = Schema {
+                name: name.to_string(),
+                database_id: databases[0].id,
+                owner: DEFAULT_SUPPER_USER.to_string(),
+                ..Default::default()
+            };
+            if !self.core.lock().await.has_schema(&schema) {
+                schema.id = self
+                    .env
+                    .id_gen_manager()
+                    .generate::<{ IdCategory::Schema }>()
+                    .await? as u32;
+                self.create_schema(&schema).await?;
+            }
         }
         Ok(())
     }
@@ -111,14 +119,39 @@ where
     pub async fn create_database(&self, database: &Database) -> Result<NotificationVersion> {
         let mut core = self.core.lock().await;
         if !core.has_database(database) {
-            database.insert(self.env.meta_store()).await?;
-            core.add_database(database);
+            let mut transaction = Transaction::default();
+            database.upsert_in_transaction(&mut transaction)?;
+            let mut schemas = vec![];
+            for schema_name in [DEFAULT_SCHEMA_NAME, PG_CATALOG_SCHEMA_NAME] {
+                let schema = Schema {
+                    id: self
+                        .env
+                        .id_gen_manager()
+                        .generate::<{ IdCategory::Schema }>()
+                        .await? as u32,
+                    database_id: database.id,
+                    name: schema_name.to_string(),
+                    owner: database.owner.clone(),
+                };
+                schema.upsert_in_transaction(&mut transaction)?;
+                schemas.push(schema);
+            }
+            self.env.meta_store().txn(transaction).await?;
 
-            let version = self
+            core.add_database(database);
+            let mut version = self
                 .env
                 .notification_manager()
                 .notify_frontend(Operation::Add, Info::Database(database.to_owned()))
                 .await;
+            for schema in schemas {
+                core.add_schema(&schema);
+                version = self
+                    .env
+                    .notification_manager()
+                    .notify_frontend(Operation::Add, Info::Schema(schema))
+                    .await;
+            }
 
             Ok(version)
         } else {
@@ -132,7 +165,19 @@ where
         let mut core = self.core.lock().await;
         let database = Database::select(self.env.meta_store(), &database_id).await?;
         if let Some(database) = database {
-            Database::delete(self.env.meta_store(), &database_id).await?;
+            let schemas = Schema::list(self.env.meta_store()).await?;
+            let schemas = schemas
+                .iter()
+                .filter(|schema| {
+                    schema.database_id == database_id && schema.name == PG_CATALOG_SCHEMA_NAME
+                })
+                .collect_vec();
+            assert_eq!(1, schemas.len());
+            let mut transaction = Transaction::default();
+            database.delete_in_transaction(&mut transaction)?;
+            schemas[0].delete_in_transaction(&mut transaction)?;
+            self.env.meta_store().txn(transaction).await?;
+            core.drop_schema(schemas[0]);
             core.drop_database(&database);
 
             let version = self
@@ -208,19 +253,29 @@ where
 
     pub async fn finish_create_table_procedure(
         &self,
+        internal_tables: Vec<Table>,
         table: &Table,
     ) -> Result<NotificationVersion> {
         let mut core = self.core.lock().await;
         let key = (table.database_id, table.schema_id, table.name.clone());
         if !core.has_table(table) && core.has_in_progress_creation(&key) {
             core.unmark_creating(&key);
-            table.insert(self.env.meta_store()).await?;
-            core.add_table(table);
+            let mut transaction = Transaction::default();
+            for table in &internal_tables {
+                table.upsert_in_transaction(&mut transaction)?;
+            }
+            table.upsert_in_transaction(&mut transaction)?;
+            core.env.meta_store().txn(transaction).await?;
 
+            for internal_table in internal_tables {
+                core.add_table(&internal_table);
+
+                self.broadcast_table_op(Operation::Add, Info::Table(internal_table.to_owned()))
+                    .await;
+            }
+            core.add_table(table);
             let version = self
-                .env
-                .notification_manager()
-                .notify_frontend(Operation::Add, Info::Table(table.to_owned()))
+                .broadcast_table_op(Operation::Add, Info::Table(table.to_owned()))
                 .await;
 
             Ok(version)
@@ -247,42 +302,15 @@ where
         }
     }
 
-    pub async fn create_table(&self, table: &Table) -> Result<NotificationVersion> {
-        let mut core = self.core.lock().await;
-        if !core.has_table(table) {
-            table.insert(self.env.meta_store()).await?;
-            core.add_table(table);
-            for &dependent_relation_id in &table.dependent_relations {
-                core.increase_ref_count(dependent_relation_id);
-            }
-
-            let version = self
-                .env
-                .notification_manager()
-                .notify_frontend(Operation::Add, Info::Table(table.to_owned()))
-                .await;
-
-            Ok(version)
-        } else {
-            Err(RwError::from(InternalError(
-                "table already exists".to_string(),
-            )))
-        }
-    }
-
     pub async fn drop_table(&self, table_id: TableId) -> Result<NotificationVersion> {
         let mut core = self.core.lock().await;
         let table = Table::select(self.env.meta_store(), &table_id).await?;
         if let Some(table) = table {
             match core.get_ref_count(table_id) {
-                Some(ref_count) => Err(CatalogError(
-                    anyhow!(
-                        "Fail to delete table `{}` because {} other relation(s) depend on it.",
-                        table.name,
-                        ref_count
-                    )
-                    .into(),
-                )
+                Some(ref_count) => Err(PermissionDenied(format!(
+                    "Fail to delete table `{}` because {} other relation(s) depend on it",
+                    table.name, ref_count
+                ))
                 .into()),
                 None => {
                     Table::delete(self.env.meta_store(), &table_id).await?;
@@ -292,9 +320,7 @@ where
                     }
 
                     let version = self
-                        .env
-                        .notification_manager()
-                        .notify_frontend(Operation::Delete, Info::Table(table))
+                        .broadcast_table_op(Operation::Delete, Info::Table(table.to_owned()))
                         .await;
 
                     Ok(version)
@@ -358,24 +384,45 @@ where
         }
     }
 
-    pub async fn create_source(&self, source: &Source) -> Result<NotificationVersion> {
+    pub async fn update_table_mapping(
+        &self,
+        fragments: &Vec<TableFragments>,
+        migrate_map: &HashMap<ParallelUnitId, ParallelUnit>,
+    ) -> Result<()> {
         let mut core = self.core.lock().await;
-        if !core.has_source(source) {
-            source.insert(self.env.meta_store()).await?;
-            core.add_source(source);
-
-            let version = self
-                .env
-                .notification_manager()
-                .notify_frontend(Operation::Add, Info::Source(source.to_owned()))
-                .await;
-
-            Ok(version)
-        } else {
-            Err(RwError::from(InternalError(
-                "source already exists".to_string(),
-            )))
+        let mut transaction = Transaction::default();
+        let mut tables = Vec::new();
+        for fragment in fragments {
+            let table_id = fragment.table_id().table_id();
+            let internal_tables = fragment.internal_table_ids();
+            let mut table_to_updates = vec![table_id];
+            table_to_updates.extend(internal_tables);
+            for table_id in table_to_updates {
+                let table = Table::select(self.env.meta_store(), &table_id).await?;
+                if let Some(mut table) = table {
+                    if let Some(ref mut mapping) = table.mapping {
+                        let mut migrated = false;
+                        mapping.data.iter_mut().for_each(|id| {
+                            if migrate_map.contains_key(id) {
+                                migrated = true;
+                                *id = migrate_map.get(id).unwrap().id;
+                            }
+                        });
+                        if migrated {
+                            table.upsert_in_transaction(&mut transaction)?;
+                            tables.push(table);
+                        }
+                    }
+                }
+            }
         }
+        core.env.meta_store().txn(transaction).await?;
+        for table in &tables {
+            self.broadcast_table_op(Operation::Update, Info::Table(table.to_owned()))
+                .await;
+            core.add_table(table);
+        }
+        Ok(())
     }
 
     pub async fn drop_source(&self, source_id: SourceId) -> Result<NotificationVersion> {
@@ -383,14 +430,10 @@ where
         let source = Source::select(self.env.meta_store(), &source_id).await?;
         if let Some(source) = source {
             match core.get_ref_count(source_id) {
-                Some(ref_count) => Err(CatalogError(
-                    anyhow!(
-                        "Fail to delete source `{}` because {} other relation(s) depend on it.",
-                        source.name,
-                        ref_count
-                    )
-                    .into(),
-                )
+                Some(ref_count) => Err(PermissionDenied(format!(
+                    "Fail to delete source `{}` because {} other relation(s) depend on it",
+                    source.name, ref_count
+                ))
                 .into()),
                 None => {
                     Source::delete(self.env.meta_store(), &source_id).await?;
@@ -440,6 +483,7 @@ where
         &self,
         source: &Source,
         mview: &Table,
+        tables: Vec<Table>,
     ) -> Result<NotificationVersion> {
         let mut core = self.core.lock().await;
         let source_key = (source.database_id, source.schema_id, source.name.clone());
@@ -455,14 +499,22 @@ where
             let mut transaction = Transaction::default();
             source.upsert_in_transaction(&mut transaction)?;
             mview.upsert_in_transaction(&mut transaction)?;
+            for table in &tables {
+                table.upsert_in_transaction(&mut transaction)?;
+            }
             core.env.meta_store().txn(transaction).await?;
+
             core.add_source(source);
             core.add_table(mview);
 
-            self.env
-                .notification_manager()
-                .notify_frontend(Operation::Add, Info::Table(mview.to_owned()))
+            for table in tables {
+                core.add_table(&table);
+                self.broadcast_table_op(Operation::Add, Info::Table(table.to_owned()))
+                    .await;
+            }
+            self.broadcast_table_op(Operation::Add, Info::Table(mview.to_owned()))
                 .await;
+
             // Currently frontend uses source's version
             let version = self
                 .env
@@ -526,25 +578,17 @@ where
                 }
                 // check ref count
                 if let Some(ref_count) = core.get_ref_count(mview_id) {
-                    return Err(CatalogError(
-                        anyhow!(
-                            "Fail to delete table `{}` because {} other relation(s) depend on it.",
-                            mview.name,
-                            ref_count
-                        )
-                        .into(),
-                    )
+                    return Err(PermissionDenied(format!(
+                        "Fail to delete table `{}` because {} other relation(s) depend on it",
+                        mview.name, ref_count
+                    ))
                     .into());
                 }
                 if let Some(ref_count) = core.get_ref_count(source_id) {
-                    return Err(CatalogError(
-                        anyhow!(
-                            "Fail to delete source `{}` because {} other relation(s) depend on it.",
-                            source.name,
-                            ref_count
-                        )
-                        .into(),
-                    )
+                    return Err(PermissionDenied(format!(
+                        "Fail to delete source `{}` because {} other relation(s) depend on it",
+                        source.name, ref_count
+                    ))
                     .into());
                 }
 
@@ -559,10 +603,9 @@ where
                     core.decrease_ref_count(dependent_relation_id);
                 }
 
-                self.env
-                    .notification_manager()
-                    .notify_frontend(Operation::Delete, Info::Table(mview))
+                self.broadcast_table_op(Operation::Delete, Info::Table(mview.to_owned()))
                     .await;
+
                 let version = self
                     .env
                     .notification_manager()
@@ -595,6 +638,13 @@ where
             .filter(|s| s.schema_id == schema_id)
             .map(|s| s.id)
             .collect())
+    }
+
+    async fn broadcast_table_op(&self, operation: Operation, info: Info) -> NotificationVersion {
+        self.env
+            .notification_manager()
+            .notify_all_node(operation, info)
+            .await
     }
 }
 

@@ -40,10 +40,11 @@ impl ExecutorBuilder for TopNExecutorBuilder {
         };
         let cache_size = Some(1024);
         let total_count = (0, 0, 0);
-        let table_id = TableId::new(node.get_table_id());
-        let keyspace = Keyspace::table_root(store, &table_id);
+        let table_id_l = TableId::new(node.get_table_id_l());
+        let table_id_m = TableId::new(node.get_table_id_m());
+        let table_id_h = TableId::new(node.get_table_id_h());
         let key_indices = node
-            .get_distribution_keys()
+            .get_distribution_key()
             .iter()
             .map(|key| *key as usize)
             .collect::<Vec<_>>();
@@ -53,7 +54,10 @@ impl ExecutorBuilder for TopNExecutorBuilder {
             order_pairs,
             (node.offset as usize, limit),
             params.pk_indices,
-            keyspace,
+            store,
+            table_id_l,
+            table_id_m,
+            table_id_h,
             cache_size,
             total_count,
             params.executor_id,

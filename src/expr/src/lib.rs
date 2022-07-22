@@ -19,6 +19,7 @@
 #![warn(clippy::explicit_into_iter_loop)]
 #![warn(clippy::explicit_iter_loop)]
 #![warn(clippy::inconsistent_struct_constructor)]
+#![warn(clippy::unused_async)]
 #![warn(clippy::map_flatten)]
 #![warn(clippy::no_effect_underscore_binding)]
 #![warn(clippy::await_holding_lock)]
@@ -27,15 +28,19 @@
 #![feature(trait_alias)]
 #![feature(generic_associated_types)]
 #![feature(binary_heap_drain_sorted)]
+#![feature(binary_heap_into_iter_sorted)]
 #![feature(is_sorted)]
 #![feature(backtrace)]
 #![feature(fn_traits)]
 #![feature(assert_matches)]
 #![feature(let_else)]
 #![feature(lint_reasons)]
+#![feature(type_alias_impl_trait)]
+#![feature(generators)]
 
 pub mod error;
 pub mod expr;
+pub mod table_function;
 pub mod vector_op;
 
 pub use error::ExprError;

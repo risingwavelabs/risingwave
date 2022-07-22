@@ -19,13 +19,13 @@
 #![warn(clippy::explicit_into_iter_loop)]
 #![warn(clippy::explicit_iter_loop)]
 #![warn(clippy::inconsistent_struct_constructor)]
+#![warn(clippy::unused_async)]
 #![warn(clippy::map_flatten)]
 #![warn(clippy::no_effect_underscore_binding)]
 #![warn(clippy::await_holding_lock)]
 #![deny(unused_must_use)]
 #![deny(rustdoc::broken_intra_doc_links)]
 #![feature(map_try_insert)]
-#![feature(let_chains)]
 #![feature(negative_impls)]
 #![feature(generators)]
 #![feature(proc_macro_hygiene, stmt_expr_attributes)]
@@ -56,7 +56,6 @@ pub mod test_utils;
 extern crate core;
 extern crate risingwave_common;
 
-mod config;
 pub mod user;
 
 use std::ffi::OsString;

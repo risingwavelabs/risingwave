@@ -45,7 +45,7 @@ pub trait ToStream {
     /// convert the plan to streaming physical plan and satisfy the required distribution
     fn to_stream_with_dist_required(&self, required_dist: &RequiredDist) -> Result<PlanRef> {
         let ret = self.to_stream()?;
-        required_dist.enforce_if_not_satisfies(ret, Order::any())
+        required_dist.enforce_if_not_satisfies(ret, &Order::any())
     }
 }
 
@@ -57,9 +57,9 @@ pub trait ToStream {
 /// - Or, if the required order is given, there will be a better plan. For example a join with
 ///   join-key(a,b) and the plan is required sorted by (a,b,c), a sort merge join is better. you can
 ///   implement `to_batch_with_order_required`, and implement `to_batch` with
-///   `to_batch_with_order_required(Order::any())`. you can see [`LogicalJoin`] as an example.
+///   `to_batch_with_order_required(&Order::any())`. you can see [`LogicalJoin`] as an example.
 pub trait ToBatch {
-    /// `to_batch` is equivalent to `to_batch_with_order_required(Order::any())`
+    /// `to_batch` is equivalent to `to_batch_with_order_required(&Order::any())`
     fn to_batch(&self) -> Result<PlanRef>;
     /// convert the plan to batch physical plan and satisfy the required Order
     fn to_batch_with_order_required(&self, required_order: &Order) -> Result<PlanRef> {
@@ -91,10 +91,10 @@ pub trait ToLocalBatch {
 /// - Or, if the required order and distribution is given, there will be a better plan. For example
 ///   a hash join with hash-key(a,b) and the plan is required hash-distributed by (a,b,c). you can
 ///   implement `to_distributed_with_required`, and implement `to_distributed` with
-///   `to_distributed_with_required(Order::any())`.
+///   `to_distributed_with_required(&Order::any())`.
 pub trait ToDistributedBatch {
     /// `to_distributed` is equivalent to `to_distributed_with_required(RequiredDist::Any,
-    /// Order::any())`
+    /// &Order::any())`
     fn to_distributed(&self) -> Result<PlanRef>;
     /// insert the exchange in batch physical plan to satisfy the required Distribution and Order.
     fn to_distributed_with_required(

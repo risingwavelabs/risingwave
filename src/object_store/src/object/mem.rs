@@ -21,19 +21,17 @@ use itertools::Itertools;
 use tokio::sync::Mutex;
 
 use super::{ObjectError, ObjectResult};
-use crate::object::{strip_path_local, BlockLocation, ObjectMetadata, ObjectStore};
+use crate::object::{BlockLocation, ObjectMetadata, ObjectStore};
 
 /// In-memory object storage, useful for testing.
 #[derive(Default)]
 pub struct InMemObjectStore {
-    is_local: bool,
     objects: Mutex<HashMap<String, Bytes>>,
 }
 
 #[async_trait::async_trait]
 impl ObjectStore for InMemObjectStore {
     async fn upload(&self, path: &str, obj: Bytes) -> ObjectResult<()> {
-        let path = strip_path_local(path, self.is_local);
         fail_point!("mem_upload_err", |_| Err(ObjectError::internal(
             "mem upload error"
         )));
@@ -46,7 +44,6 @@ impl ObjectStore for InMemObjectStore {
     }
 
     async fn read(&self, path: &str, block: Option<BlockLocation>) -> ObjectResult<Bytes> {
-        let path = strip_path_local(path, self.is_local);
         fail_point!("mem_read_err", |_| Err(ObjectError::internal(
             "mem read error"
         )));
@@ -58,7 +55,6 @@ impl ObjectStore for InMemObjectStore {
     }
 
     async fn readv(&self, path: &str, block_locs: &[BlockLocation]) -> ObjectResult<Vec<Bytes>> {
-        let path = strip_path_local(path, self.is_local);
         let futures = block_locs
             .iter()
             .map(|block_loc| self.read(path, Some(*block_loc)))
@@ -67,13 +63,11 @@ impl ObjectStore for InMemObjectStore {
     }
 
     async fn metadata(&self, path: &str) -> ObjectResult<ObjectMetadata> {
-        let path = strip_path_local(path, self.is_local);
         let total_size = self.get_object(path, |v| v.len()).await?;
         Ok(ObjectMetadata { total_size })
     }
 
     async fn delete(&self, path: &str) -> ObjectResult<()> {
-        let path = strip_path_local(path, self.is_local);
         fail_point!("mem_delete_err", |_| Err(ObjectError::internal(
             "mem delete error"
         )));
@@ -83,9 +77,8 @@ impl ObjectStore for InMemObjectStore {
 }
 
 impl InMemObjectStore {
-    pub fn new(is_local: bool) -> Self {
+    pub fn new() -> Self {
         Self {
-            is_local,
             objects: Mutex::new(HashMap::new()),
         }
     }
@@ -121,7 +114,7 @@ mod tests {
     async fn test_upload() {
         let block = Bytes::from("123456");
 
-        let s3 = InMemObjectStore::new(false);
+        let s3 = InMemObjectStore::new();
         s3.upload("/abc", block).await.unwrap();
 
         // No such object.
@@ -152,7 +145,7 @@ mod tests {
     async fn test_metadata() {
         let block = Bytes::from("123456");
 
-        let obj_store = InMemObjectStore::new(false);
+        let obj_store = InMemObjectStore::new();
         obj_store.upload("/abc", block).await.unwrap();
 
         let metadata = obj_store.metadata("/abc").await.unwrap();

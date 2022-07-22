@@ -15,8 +15,8 @@
 use risingwave_common::catalog::{Field, Schema};
 
 use super::*;
-use crate::executor::receiver::ReceiverExecutor;
-use crate::executor::MergeExecutor;
+use crate::executor::exchange::input::new_input;
+use crate::executor::{MergeExecutor, ReceiverExecutor};
 
 pub struct MergeExecutorBuilder;
 
@@ -29,18 +29,34 @@ impl ExecutorBuilder for MergeExecutorBuilder {
     ) -> Result<BoxedExecutor> {
         let node = try_match_expand!(x_node.get_node_body().unwrap(), NodeBody::Merge)?;
         let upstreams = node.get_upstream_actor_id();
+        let upstream_fragment_id = node.get_upstream_fragment_id();
         let fields = node.fields.iter().map(Field::from).collect();
         let schema = Schema::new(fields);
-        let mut rxs = stream.get_receive_message(params.actor_id, upstreams)?;
         let actor_context = params.actor_context;
 
-        if upstreams.len() == 1 {
+        let inputs: Vec<_> = upstreams
+            .iter()
+            .map(|&upstream_actor_id| {
+                new_input(
+                    &stream.context,
+                    stream.streaming_metrics.clone(),
+                    params.actor_id,
+                    params.fragment_id,
+                    upstream_actor_id,
+                    upstream_fragment_id,
+                )
+            })
+            .try_collect()?;
+
+        if inputs.len() == 1 {
             Ok(ReceiverExecutor::new(
                 schema,
                 params.pk_indices,
-                rxs.remove(0),
+                inputs.into_iter().next().unwrap(),
                 actor_context,
                 x_node.operator_id,
+                params.actor_id,
+                stream.streaming_metrics.clone(),
             )
             .boxed())
         } else {
@@ -48,9 +64,13 @@ impl ExecutorBuilder for MergeExecutorBuilder {
                 schema,
                 params.pk_indices,
                 params.actor_id,
-                rxs,
+                params.fragment_id,
+                upstream_fragment_id,
+                inputs,
+                stream.context.clone(),
                 actor_context,
                 x_node.operator_id,
+                stream.streaming_metrics.clone(),
             )
             .boxed())
         }

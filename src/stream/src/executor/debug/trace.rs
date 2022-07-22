@@ -16,6 +16,7 @@ use std::sync::Arc;
 
 use futures::{pin_mut, StreamExt};
 use futures_async_stream::try_stream;
+use risingwave_common::util::debug_context::{DebugContext, DEBUG_CONTEXT};
 use tracing::event;
 use tracing_futures::Instrument;
 
@@ -23,6 +24,11 @@ use crate::executor::error::StreamExecutorError;
 use crate::executor::monitor::StreamingMetrics;
 use crate::executor::{ExecutorInfo, Message, MessageStream};
 use crate::task::ActorId;
+
+/// Set to true to enable per-executor row count metrics. This will produce a lot of timeseries and
+/// might affect the prometheus performance. If you only need actor input and output rows data, see
+/// `stream_actor_in_record_cnt` and `stream_actor_out_record_cnt` instead.
+const ENABLE_EXECUTOR_ROW_COUNT: bool = false;
 
 /// Streams wrapped by `trace` will print data passing in the stream graph to stdout.
 #[try_stream(ok = Message, error = StreamExecutorError)]
@@ -46,16 +52,28 @@ pub async fn trace(
             input_pos = input_pos,
         )
     };
+    let debug_context = || DebugContext::StreamExecutor {
+        actor_id,
+        executor_id: executor_id as u32, // Use the lower 32 bit to match the dashboard.
+        identity: info.identity.clone(),
+    };
 
     pin_mut!(input);
 
-    while let Some(message) = input.next().instrument(span()).await.transpose()? {
+    while let Some(message) = DEBUG_CONTEXT
+        .scope(debug_context(), input.next())
+        .instrument(span())
+        .await
+        .transpose()?
+    {
         if let Message::Chunk(chunk) = &message {
             if chunk.cardinality() > 0 {
-                metrics
-                    .executor_row_count
-                    .with_label_values(&[&actor_id_string, &executor_id_string])
-                    .inc_by(chunk.cardinality() as u64);
+                if ENABLE_EXECUTOR_ROW_COUNT {
+                    metrics
+                        .executor_row_count
+                        .with_label_values(&[&actor_id_string, &executor_id_string])
+                        .inc_by(chunk.cardinality() as u64);
+                }
                 event!(tracing::Level::TRACE, prev = %info.identity, msg = "chunk", "input = \n{:#?}", chunk);
             }
         }
@@ -77,12 +95,14 @@ pub async fn metrics(
     pin_mut!(input);
 
     while let Some(message) = input.next().await.transpose()? {
-        if let Message::Chunk(chunk) = &message {
-            if chunk.cardinality() > 0 {
-                metrics
-                    .executor_row_count
-                    .with_label_values(&[&actor_id_string, &executor_id_string])
-                    .inc_by(chunk.cardinality() as u64);
+        if ENABLE_EXECUTOR_ROW_COUNT {
+            if let Message::Chunk(chunk) = &message {
+                if chunk.cardinality() > 0 {
+                    metrics
+                        .executor_row_count
+                        .with_label_values(&[&actor_id_string, &executor_id_string])
+                        .inc_by(chunk.cardinality() as u64);
+                }
             }
         }
 

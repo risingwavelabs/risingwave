@@ -81,8 +81,8 @@ pub struct JoinTable(pub usize);
 pub struct JoinEdge {
     pub left: JoinTable,
     pub right: JoinTable,
-    pub left_join_keys: Vec<usize>,
-    pub right_join_keys: Vec<usize>,
+    pub left_join_key: Vec<usize>,
+    pub right_join_key: Vec<usize>,
 }
 
 impl JoinEdge {
@@ -91,8 +91,8 @@ impl JoinEdge {
         Self {
             left: self.right,
             right: self.left,
-            left_join_keys: self.right_join_keys.clone(),
-            right_join_keys: self.left_join_keys.clone(),
+            left_join_key: self.right_join_key.clone(),
+            right_join_key: self.left_join_key.clone(),
         }
     }
 }
@@ -316,8 +316,8 @@ impl DeltaJoinSolver {
                 return true;
             }
 
-            for (table, join_keys) in current_distribution {
-                if table == &edge.left && join_keys == &edge.left_join_keys {
+            for (table, join_key) in current_distribution {
+                if table == &edge.left && join_key == &edge.left_join_key {
                     return true;
                 }
             }
@@ -351,7 +351,7 @@ impl DeltaJoinSolver {
                 if let Some(edge) = reachable_tables.get(table) {
                     current_table_set.insert(edge.right);
                     path.push(edge.right);
-                    current_distribution.push((edge.right, edge.right_join_keys.clone()));
+                    current_distribution.push((edge.right, edge.right_join_key.clone()));
                     continue 'next_table;
                 }
             }
@@ -377,7 +377,7 @@ impl DeltaJoinSolver {
                     current_table_set.insert(edge.right);
                     path.push(edge.right);
                     current_distribution.clear();
-                    current_distribution.push((edge.right, edge.right_join_keys.clone()));
+                    current_distribution.push((edge.right, edge.right_join_key.clone()));
                     continue 'next_table;
                 }
             }
@@ -432,8 +432,8 @@ mod tests {
             edges: vec![JoinEdge {
                 left: JoinTable(1),
                 right: JoinTable(2),
-                left_join_keys: vec![2, 3],
-                right_join_keys: vec![3, 2],
+                left_join_key: vec![2, 3],
+                right_join_key: vec![3, 2],
             }],
             join_order: vec![JoinTable(1), JoinTable(2)],
         };
@@ -454,8 +454,8 @@ mod tests {
             edges: vec![JoinEdge {
                 left: JoinTable(1),
                 right: JoinTable(2),
-                left_join_keys: vec![2, 3],
-                right_join_keys: vec![3, 2],
+                left_join_key: vec![2, 3],
+                right_join_key: vec![3, 2],
             }],
             join_order: vec![JoinTable(1), JoinTable(2)],
         };
@@ -476,8 +476,8 @@ mod tests {
             edges: vec![JoinEdge {
                 left: JoinTable(1),
                 right: JoinTable(2),
-                left_join_keys: vec![2, 3],
-                right_join_keys: vec![3, 2],
+                left_join_key: vec![2, 3],
+                right_join_key: vec![3, 2],
             }],
             join_order: vec![JoinTable(1), JoinTable(2)],
         };
@@ -498,8 +498,8 @@ mod tests {
             edges: vec![JoinEdge {
                 left: JoinTable(1),
                 right: JoinTable(2),
-                left_join_keys: vec![2, 3],
-                right_join_keys: vec![3, 2],
+                left_join_key: vec![2, 3],
+                right_join_key: vec![3, 2],
             }],
             join_order: vec![JoinTable(1), JoinTable(2)],
         };
@@ -529,20 +529,20 @@ mod tests {
                 JoinEdge {
                     left: JoinTable(1),
                     right: JoinTable(2),
-                    left_join_keys: vec![2, 3],
-                    right_join_keys: vec![3, 2],
+                    left_join_key: vec![2, 3],
+                    right_join_key: vec![3, 2],
                 },
                 JoinEdge {
                     left: JoinTable(2),
                     right: JoinTable(3),
-                    left_join_keys: vec![3, 2],
-                    right_join_keys: vec![1, 1],
+                    left_join_key: vec![3, 2],
+                    right_join_key: vec![1, 1],
                 },
                 JoinEdge {
                     left: JoinTable(3),
                     right: JoinTable(1),
-                    left_join_keys: vec![1, 1],
-                    right_join_keys: vec![2, 3],
+                    left_join_key: vec![1, 1],
+                    right_join_key: vec![2, 3],
                 },
             ],
             join_order: vec![JoinTable(1), JoinTable(2), JoinTable(3)],
@@ -576,14 +576,14 @@ mod tests {
                 JoinEdge {
                     left: JoinTable(1),
                     right: JoinTable(2),
-                    left_join_keys: vec![0],
-                    right_join_keys: vec![0],
+                    left_join_key: vec![0],
+                    right_join_key: vec![0],
                 },
                 JoinEdge {
                     left: JoinTable(2),
                     right: JoinTable(3),
-                    left_join_keys: vec![1],
-                    right_join_keys: vec![1],
+                    left_join_key: vec![1],
+                    right_join_key: vec![1],
                 },
             ],
             join_order: vec![JoinTable(1), JoinTable(2), JoinTable(3)],
@@ -609,8 +609,8 @@ mod tests {
             edges: vec![JoinEdge {
                 left: JoinTable(1),
                 right: JoinTable(2),
-                left_join_keys: vec![0],
-                right_join_keys: vec![0],
+                left_join_key: vec![0],
+                right_join_key: vec![0],
             }],
             join_order: vec![JoinTable(1), JoinTable(2), JoinTable(3)],
         };

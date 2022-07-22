@@ -107,10 +107,7 @@ impl LocalSimpleAggExecutor {
                     if is_dirty {
                         is_dirty = false;
 
-                        let mut builders = info
-                            .schema
-                            .create_array_builders(1)
-                            .map_err(StreamExecutorError::eval_error)?;
+                        let mut builders = info.schema.create_array_builders(1);
                         states.iter_mut().zip_eq(builders.iter_mut()).try_for_each(
                             |(state, builder)| {
                                 let data = state.get_output()?;
@@ -186,7 +183,7 @@ mod tests {
         tx.push_barrier(3, false);
 
         let agg_calls = vec![AggCall {
-            kind: AggKind::RowCount,
+            kind: AggKind::Count,
             args: AggArgs::None,
             return_type: DataType::Int64,
             append_only: false,
@@ -240,7 +237,7 @@ mod tests {
         // This is local simple aggregation, so we add another row count state
         let agg_calls = vec![
             AggCall {
-                kind: AggKind::RowCount,
+                kind: AggKind::Count,
                 args: AggArgs::None,
                 return_type: DataType::Int64,
                 append_only: false,

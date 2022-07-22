@@ -51,6 +51,18 @@ impl BoundSelect {
             .chain(self.where_clause.iter())
             .any(|expr| expr.has_correlated_input_ref())
     }
+
+    pub fn collect_correlated_indices(&self) -> Vec<usize> {
+        let mut correlated_indices = vec![];
+        self.select_items
+            .iter()
+            .chain(self.group_by.iter())
+            .chain(self.where_clause.iter())
+            .for_each(|expr| {
+                correlated_indices.extend(expr.collect_correlated_indices());
+            });
+        correlated_indices
+    }
 }
 
 impl Binder {
@@ -80,7 +92,7 @@ impl Binder {
         Self::require_bool_clause(&having, "HAVING")?;
 
         // Bind SELECT clause.
-        let (select_items, aliases) = self.bind_project(select.projection)?;
+        let (select_items, aliases) = self.bind_select_list(select.projection)?;
 
         // Store field from `ExprImpl` to support binding `field_desc` in `subquery`.
         let fields = select_items
@@ -104,7 +116,7 @@ impl Binder {
         })
     }
 
-    pub fn bind_project(
+    pub fn bind_select_list(
         &mut self,
         select_items: Vec<SelectItem>,
     ) -> Result<(Vec<ExprImpl>, Vec<Option<String>>)> {
@@ -115,15 +127,15 @@ impl Binder {
                 SelectItem::UnnamedExpr(expr) => {
                     let (select_expr, alias) = match &expr.clone() {
                         Expr::Identifier(ident) => {
-                            (self.bind_expr(expr)?, Some(ident.value.clone()))
+                            (self.bind_expr(expr)?, Some(ident.real_value()))
                         }
                         Expr::CompoundIdentifier(idents) => (
                             self.bind_expr(expr)?,
-                            idents.last().map(|ident| ident.value.clone()),
+                            idents.last().map(|ident| ident.real_value()),
                         ),
                         Expr::FieldIdentifier(field_expr, idents) => (
                             self.bind_single_field_column(*field_expr.clone(), idents)?,
-                            idents.last().map(|ident| ident.value.clone()),
+                            idents.last().map(|ident| ident.real_value()),
                         ),
                         _ => (self.bind_expr(expr)?, None),
                     };
@@ -131,19 +143,25 @@ impl Binder {
                     aliases.push(alias);
                 }
                 SelectItem::ExprWithAlias { expr, alias } => {
-                    check_valid_column_name(&alias.value)?;
+                    check_valid_column_name(&alias.real_value())?;
 
                     let expr = self.bind_expr(expr)?;
                     select_list.push(expr);
-                    aliases.push(Some(alias.value));
+                    aliases.push(Some(alias.real_value()));
                 }
                 SelectItem::QualifiedWildcard(obj_name) => {
-                    let table_name = &obj_name.0.last().unwrap().value;
-                    let (begin, end) = self.context.range_of.get(table_name).ok_or_else(|| {
-                        ErrorCode::ItemNotFound(format!("relation \"{}\"", table_name))
-                    })?;
+                    let table_name = &obj_name.0.last().unwrap().real_value();
+                    let (mut begin, end) =
+                        self.context.range_of.get(table_name).ok_or_else(|| {
+                            ErrorCode::ItemNotFound(format!("relation \"{}\"", table_name))
+                        })?;
+                    // Here we make the assumption that the hidden columns are always at the
+                    // beginning.
+                    while begin < *end && self.context.columns[begin].is_hidden {
+                        begin += 1;
+                    }
                     let (exprs, names) =
-                        Self::iter_bound_columns(self.context.columns[*begin..*end].iter());
+                        Self::iter_bound_columns(self.context.columns[begin..*end].iter());
                     select_list.extend(exprs);
                     aliases.extend(names);
                 }

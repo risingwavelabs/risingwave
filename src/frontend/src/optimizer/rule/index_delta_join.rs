@@ -70,7 +70,7 @@ impl Rule for IndexDeltaJoinRule {
                 // `Hash(A, B) == Hash(B, A)`, so we consider order of each item in distribution
                 // keys here.
                 if index
-                    .distribution_keys
+                    .distribution_key
                     .iter()
                     .map(|x| index.columns[*x].column_id)
                     .collect_vec()
@@ -88,10 +88,8 @@ impl Rule for IndexDeltaJoinRule {
                 // Begin match join columns with index prefix. e.g., if the join columns are `a, b,
                 // c`, and the index has `a, b, c` or `a, c, b` or any combination as prefix, then
                 // we can use this index.
-                for ordered_column in &index.order_desc {
-                    let column_id = ordered_column.column_desc.column_id;
-
-                    match remaining_to_match.remove(&column_id) {
+                for column_id in &index.order_column_ids() {
+                    match remaining_to_match.remove(column_id) {
                         true => continue, // matched
                         false => break,   // not matched
                     }

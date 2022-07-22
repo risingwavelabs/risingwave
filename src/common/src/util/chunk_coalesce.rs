@@ -15,10 +15,13 @@
 use std::mem::swap;
 use std::sync::Arc;
 
+use futures_async_stream::try_stream;
 use itertools::Itertools;
 
 use crate::array::column::Column;
-use crate::array::{ArrayBuilderImpl, ArrayResult, DataChunk, RowRef};
+use crate::array::{ArrayBuilderImpl, ArrayImpl, ArrayResult, DataChunk, RowRef};
+use crate::error::ErrorCode::InternalError;
+use crate::error::RwError;
 use crate::types::{DataType, Datum, DatumRef};
 
 pub const DEFAULT_CHUNK_BUFFER_SIZE: usize = 2048;
@@ -66,7 +69,7 @@ impl DataChunkBuilder {
                 .data_types
                 .iter()
                 .map(|data_type| data_type.create_array_builder(self.batch_size))
-                .collect::<ArrayResult<Vec<ArrayBuilderImpl>>>()?;
+                .collect::<Vec<ArrayBuilderImpl>>();
 
             ensure!(self.buffered_count == 0);
         }
@@ -91,7 +94,7 @@ impl DataChunkBuilder {
         let mut new_return_offset = input_chunk.offset;
         match input_chunk.data_chunk.visibility() {
             Some(vis) => {
-                for vis in vis.iter_from(input_chunk.offset)? {
+                for vis in vis.iter_from(input_chunk.offset) {
                     new_return_offset += 1;
                     if !vis {
                         continue;
@@ -216,6 +219,39 @@ impl DataChunkBuilder {
         }
     }
 
+    /// Append one row from the given two arrays.
+    /// Return a data chunk if the buffer is full after append one row. Otherwise `None`.
+    pub fn append_one_row_from_array_elements<'a, I1, I2>(
+        &mut self,
+        left_arrays: I1,
+        left_row_id: usize,
+        right_arrays: I2,
+        right_row_id: usize,
+    ) -> ArrayResult<Option<DataChunk>>
+    where
+        I1: Iterator<Item = &'a ArrayImpl>,
+        I2: Iterator<Item = &'a ArrayImpl>,
+    {
+        ensure!(self.buffered_count < self.batch_size);
+        self.ensure_builders()?;
+
+        for (array_builder, (array, row_id)) in self.array_builders.iter_mut().zip_eq(
+            left_arrays
+                .map(|array| (array, left_row_id))
+                .chain(right_arrays.map(|array| (array, right_row_id))),
+        ) {
+            array_builder.append_array_element(array, row_id)?
+        }
+
+        self.buffered_count += 1;
+
+        if self.buffered_count == self.batch_size {
+            Ok(Some(self.build_data_chunk()?))
+        } else {
+            Ok(None)
+        }
+    }
+
     fn build_data_chunk(&mut self) -> ArrayResult<DataChunk> {
         let mut new_array_builders = vec![];
         swap(&mut new_array_builders, &mut self.array_builders);
@@ -236,6 +272,34 @@ impl DataChunkBuilder {
 
     pub fn buffered_count(&self) -> usize {
         self.buffered_count
+    }
+
+    pub fn data_types(&self) -> Vec<DataType> {
+        self.data_types.clone()
+    }
+
+    #[try_stream(boxed, ok = DataChunk, error = RwError)]
+    pub async fn trunc_data_chunk(&mut self, data_chunk: DataChunk) {
+        let mut sliced_data_chunk = SlicedDataChunk::new_checked(data_chunk)?;
+        loop {
+            let (left_data, output) = self.append_chunk(sliced_data_chunk)?;
+            match (left_data, output) {
+                (Some(left_data), Some(output)) => {
+                    sliced_data_chunk = left_data;
+                    yield output;
+                }
+                (None, Some(output)) => {
+                    yield output;
+                    break;
+                }
+                (None, None) => {
+                    break;
+                }
+                _ => {
+                    return Err(InternalError("Data chunk builder error".to_string()).into());
+                }
+            }
+        }
     }
 }
 
@@ -262,7 +326,7 @@ impl SlicedDataChunk {
 mod tests {
     use crate::array::DataChunk;
     use crate::test_prelude::DataChunkTestExt;
-    use crate::types::DataType;
+    use crate::types::{DataType, ScalarImpl};
     use crate::util::chunk_coalesce::{DataChunkBuilder, SlicedDataChunk};
 
     #[test]
@@ -382,5 +446,60 @@ mod tests {
         assert_eq!(Some(2), output.as_ref().map(DataChunk::cardinality));
         assert_eq!(Some(2), output.as_ref().map(DataChunk::capacity));
         assert!(output.unwrap().visibility().is_none());
+    }
+
+    #[test]
+    fn test_append_one_row_from_array_elements() {
+        let mut builder = DataChunkBuilder::new(vec![DataType::Int32, DataType::Int64], 3);
+
+        assert!(builder.consume_all().unwrap().is_none());
+
+        let mut left_array_builder = DataType::Int32.create_array_builder(5);
+        for v in [1, 2, 3, 4, 5] {
+            assert!(left_array_builder
+                .append_datum(&Some(ScalarImpl::Int32(v)))
+                .is_ok())
+        }
+        let left_arrays = vec![left_array_builder.finish().unwrap()];
+
+        let mut right_array_builder = DataType::Int64.create_array_builder(5);
+        for v in [5, 4, 3, 2, 1] {
+            assert!(right_array_builder
+                .append_datum(&Some(ScalarImpl::Int64(v)))
+                .is_ok())
+        }
+        let right_arrays = vec![right_array_builder.finish().unwrap()];
+
+        let mut output_chunks = Vec::new();
+
+        for i in 0..5 {
+            if let Some(chunk) = builder
+                .append_one_row_from_array_elements(left_arrays.iter(), i, right_arrays.iter(), i)
+                .unwrap()
+            {
+                output_chunks.push(chunk)
+            }
+        }
+
+        if let Some(chunk) = builder.consume_all().unwrap() {
+            output_chunks.push(chunk)
+        }
+
+        assert_eq!(
+            output_chunks,
+            vec![
+                DataChunk::from_pretty(
+                    "i I
+                    1 5
+                    2 4
+                    3 3"
+                ),
+                DataChunk::from_pretty(
+                    "i I
+                    4 2
+                    5 1"
+                ),
+            ]
+        )
     }
 }

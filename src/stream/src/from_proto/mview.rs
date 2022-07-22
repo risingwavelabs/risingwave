@@ -12,6 +12,8 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+use std::sync::Arc;
+
 use risingwave_common::catalog::{ColumnId, TableId};
 use risingwave_common::util::sort_util::OrderPair;
 
@@ -29,34 +31,35 @@ impl ExecutorBuilder for MaterializeExecutorBuilder {
     ) -> Result<BoxedExecutor> {
         let node = try_match_expand!(node.get_node_body().unwrap(), NodeBody::Materialize)?;
 
-        let table_id = TableId::from(&node.table_ref_id);
-        let keys = node
+        let table_id = TableId::new(node.table_id);
+        let order_key = node
             .column_orders
             .iter()
             .map(OrderPair::from_prost)
             .collect();
         let column_ids = node
-            .column_ids
+            .get_table()?
+            .get_columns()
             .iter()
-            .map(|id| ColumnId::from(*id))
+            .map(|t| ColumnId::from(t.column_desc.as_ref().unwrap().column_id))
             .collect();
 
-        let keyspace =
-            Keyspace::table_root_with_vnodes(store, &table_id, (*params.vnode_bitmap).clone());
-
-        let distribution_keys = node
-            .distribution_keys
+        let distribution_key = node
+            .get_table()?
+            .get_distribution_key()
             .iter()
             .map(|key| *key as usize)
             .collect();
 
         let executor = MaterializeExecutor::new(
             params.input.remove(0),
-            keyspace,
-            keys,
+            store,
+            table_id,
+            order_key,
             column_ids,
             params.executor_id,
-            distribution_keys,
+            distribution_key,
+            params.vnode_bitmap.map(Arc::new),
         );
 
         Ok(executor.boxed())
@@ -73,12 +76,7 @@ impl ExecutorBuilder for ArrangeExecutorBuilder {
         _stream: &mut LocalStreamManagerCore,
     ) -> Result<BoxedExecutor> {
         let arrange_node = try_match_expand!(node.get_node_body().unwrap(), NodeBody::Arrange)?;
-
-        let keyspace = Keyspace::table_root_with_vnodes(
-            store,
-            &TableId::from(arrange_node.table_id),
-            (*params.vnode_bitmap).clone(),
-        );
+        let table_id = TableId::from(arrange_node.table_id);
 
         let keys = arrange_node
             .get_table_info()?
@@ -94,19 +92,25 @@ impl ExecutorBuilder for ArrangeExecutorBuilder {
             .map(|x| ColumnId::from(x.column_id))
             .collect();
 
-        let distribution_keys = arrange_node
-            .distribution_keys
+        let distribution_key = arrange_node
+            .distribution_key
             .iter()
             .map(|key| *key as usize)
             .collect();
 
+        // FIXME: Lookup is now implemented without cell-based table API and relies on all vnodes
+        // being `DEFAULT_VNODE`, so we need to make the Arrange a singleton.
+        let vnodes = params.vnode_bitmap.map(Arc::new);
+
         let executor = MaterializeExecutor::new(
             params.input.remove(0),
-            keyspace,
+            store,
+            table_id,
             keys,
             column_ids,
             params.executor_id,
-            distribution_keys,
+            distribution_key,
+            vnodes,
         );
 
         Ok(executor.boxed())

@@ -38,7 +38,7 @@ mod tests {
         ];
 
         for (s, expected) in cases {
-            let builder = Utf8ArrayBuilder::new(1).unwrap();
+            let builder = Utf8ArrayBuilder::new(1);
             let writer = builder.writer();
             let guard = ltrim(s, writer)?;
             let array = guard.into_inner().finish().unwrap();

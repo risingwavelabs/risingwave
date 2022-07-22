@@ -23,7 +23,6 @@ use prometheus::{
 use risingwave_common::monitor::Print;
 use risingwave_hummock_sdk::HummockSSTableId;
 
-use super::monitor_process;
 use crate::hummock::sstable_store::SstableStoreRef;
 use crate::hummock::{BlockCache, LruCache, Sstable};
 
@@ -44,6 +43,12 @@ macro_rules! for_all_metrics {
             range_scan_duration: Histogram,
             range_backward_scan_size: Histogram,
             range_backward_scan_duration: Histogram,
+
+            iter_size: Histogram,
+            iter_item: Histogram,
+            iter_duration: Histogram,
+            iter_scan_duration: Histogram,
+            iter_in_process_counts: GenericCounter<AtomicU64>,
 
             write_batch_tuple_counts: GenericCounter<AtomicU64>,
             write_batch_duration: Histogram,
@@ -69,6 +74,7 @@ macro_rules! for_all_metrics {
             compact_write_sstn: GenericCounterVec<AtomicU64>,
             compact_sst_duration: Histogram,
             compact_task_duration: HistogramVec,
+            compact_parallelism: GenericCounter<AtomicU64>,
 
             get_table_id_total_time_duration: Histogram,
             remote_read_time: Histogram,
@@ -173,6 +179,41 @@ impl StateStoreMetrics {
         );
         let range_backward_scan_duration =
             register_histogram_with_registry!(opts, registry).unwrap();
+
+        let opts = histogram_opts!(
+            "state_store_iter_size",
+            "Total bytes gotten from state store scan(), for calculating read throughput",
+            exponential_buckets(1.0, 2.0, 25).unwrap() // max 16MB
+        );
+        let iter_size = register_histogram_with_registry!(opts, registry).unwrap();
+
+        let opts = histogram_opts!(
+            "state_store_iter_item",
+            "Total bytes gotten from state store scan(), for calculating read throughput",
+            exponential_buckets(1.0, 2.0, 20).unwrap() // max 2^20 items
+        );
+        let iter_item = register_histogram_with_registry!(opts, registry).unwrap();
+
+        let opts = histogram_opts!(
+            "state_store_iter_duration",
+            "Histogram of iterator scan and initialization time that have been issued to state store",
+            exponential_buckets(0.0001, 2.0, 21).unwrap() // max 104s
+        );
+        let iter_duration = register_histogram_with_registry!(opts, registry).unwrap();
+
+        let opts = histogram_opts!(
+            "state_store_iter_scan_duration",
+            "Histogram of iterator scan time that have been issued to state store",
+            exponential_buckets(0.0001, 2.0, 21).unwrap() // max 104s
+        );
+        let iter_scan_duration = register_histogram_with_registry!(opts, registry).unwrap();
+
+        let iter_in_process_counts = register_int_counter_with_registry!(
+            "state_store_iter_in_process_counts",
+            "Total number of iter_in_process that have been issued to state store",
+            registry
+        )
+        .unwrap();
 
         // ----- write_batch -----
         let write_batch_tuple_counts = register_int_counter_with_registry!(
@@ -339,7 +380,13 @@ impl StateStoreMetrics {
         )
         .unwrap();
 
-        monitor_process(&registry).unwrap();
+        let compact_parallelism = register_int_counter_with_registry!(
+            "storage_compact_parallelism",
+            "the num of storage compact parallelism",
+            registry
+        )
+        .unwrap();
+
         Self {
             get_duration,
             get_key_size,
@@ -351,6 +398,11 @@ impl StateStoreMetrics {
             range_scan_duration,
             range_backward_scan_size,
             range_backward_scan_duration,
+            iter_size,
+            iter_item,
+            iter_duration,
+            iter_scan_duration,
+            iter_in_process_counts,
             write_batch_tuple_counts,
             write_batch_duration,
             write_batch_size,
@@ -372,6 +424,8 @@ impl StateStoreMetrics {
             compact_write_sstn,
             compact_sst_duration,
             compact_task_duration,
+            compact_parallelism,
+
             get_table_id_total_time_duration,
             remote_read_time,
         }

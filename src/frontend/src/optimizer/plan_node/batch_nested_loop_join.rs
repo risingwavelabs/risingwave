@@ -14,6 +14,7 @@
 
 use std::fmt;
 
+use risingwave_common::catalog::Schema;
 use risingwave_common::error::Result;
 use risingwave_pb::batch_plan::plan_node::NodeBody;
 use risingwave_pb::batch_plan::NestedLoopJoinNode;
@@ -22,6 +23,7 @@ use super::{LogicalJoin, PlanBase, PlanRef, PlanTreeNodeBinary, ToBatchProst, To
 use crate::expr::{Expr, ExprImpl};
 use crate::optimizer::plan_node::ToLocalBatch;
 use crate::optimizer::property::{Distribution, Order, RequiredDist};
+use crate::utils::ConditionVerboseDisplay;
 
 /// `BatchNestedLoopJoin` implements [`super::LogicalJoin`] by checking the join condition
 /// against all pairs of rows from inner & outer side within 2 layers of loops.
@@ -38,7 +40,7 @@ impl BatchNestedLoopJoin {
             logical.left().distribution(),
             logical.right().distribution(),
         );
-        let base = PlanBase::new_batch(ctx, logical.schema().clone(), dist, Order::any().clone());
+        let base = PlanBase::new_batch(ctx, logical.schema().clone(), dist, Order::any());
         Self { base, logical }
     }
 
@@ -52,11 +54,36 @@ impl BatchNestedLoopJoin {
 
 impl fmt::Display for BatchNestedLoopJoin {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        let verbose = self.base.ctx.is_explain_verbose();
         write!(
             f,
-            "BatchNestedLoopJoin {{ type: {:?}, predicate: {} }}",
+            "BatchNestedLoopJoin {{ type: {:?}, predicate: {}, output_indices: {} }}",
             self.logical.join_type(),
-            self.logical.on()
+            if verbose {
+                let mut concat_schema = self.left().schema().fields.clone();
+                concat_schema.extend(self.right().schema().fields.clone());
+                let concat_schema = Schema::new(concat_schema);
+                format!(
+                    "{}",
+                    ConditionVerboseDisplay {
+                        condition: self.logical.on(),
+                        input_schema: &concat_schema
+                    }
+                )
+            } else {
+                format!("{}", self.logical.on())
+            },
+            if self
+                .logical
+                .output_indices()
+                .iter()
+                .copied()
+                .eq(0..self.logical.internal_column_num())
+            {
+                "all".to_string()
+            } else {
+                format!("{:?}", self.logical.output_indices())
+            }
         )
     }
 }
@@ -81,10 +108,10 @@ impl ToDistributedBatch for BatchNestedLoopJoin {
     fn to_distributed(&self) -> Result<PlanRef> {
         let left = self
             .left()
-            .to_distributed_with_required(Order::any(), &RequiredDist::single())?;
+            .to_distributed_with_required(&Order::any(), &RequiredDist::single())?;
         let right = self
             .right()
-            .to_distributed_with_required(Order::any(), &RequiredDist::single())?;
+            .to_distributed_with_required(&Order::any(), &RequiredDist::single())?;
 
         Ok(self.clone_with_left_right(left, right).into())
     }
@@ -95,6 +122,12 @@ impl ToBatchProst for BatchNestedLoopJoin {
         NodeBody::NestedLoopJoin(NestedLoopJoinNode {
             join_type: self.logical.join_type() as i32,
             join_cond: Some(ExprImpl::from(self.logical.on().clone()).to_expr_proto()),
+            output_indices: self
+                .logical
+                .output_indices()
+                .iter()
+                .map(|&x| x as u32)
+                .collect(),
         })
     }
 }
@@ -102,10 +135,10 @@ impl ToBatchProst for BatchNestedLoopJoin {
 impl ToLocalBatch for BatchNestedLoopJoin {
     fn to_local(&self) -> Result<PlanRef> {
         let left = RequiredDist::single()
-            .enforce_if_not_satisfies(self.left().to_local()?, Order::any())?;
+            .enforce_if_not_satisfies(self.left().to_local()?, &Order::any())?;
 
         let right = RequiredDist::single()
-            .enforce_if_not_satisfies(self.right().to_local()?, Order::any())?;
+            .enforce_if_not_satisfies(self.right().to_local()?, &Order::any())?;
 
         Ok(self.clone_with_left_right(left, right).into())
     }

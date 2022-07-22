@@ -14,7 +14,6 @@
 
 #![allow(clippy::derive_partial_eq_without_eq)]
 #![feature(exit_status_error)]
-#![feature(let_chains)]
 #![feature(let_else)]
 #![feature(lint_reasons)]
 
@@ -30,6 +29,8 @@ mod compose;
 pub use compose::*;
 mod compose_deploy;
 pub use compose_deploy::*;
+mod risectl_env;
+pub use risectl_env::*;
 
 mod task;
 pub mod util;

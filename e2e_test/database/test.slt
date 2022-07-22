@@ -1,7 +1,8 @@
-query T
+query T rowsort
 show schemas;
 ----
 public
+pg_catalog
 
 statement ok
 create table ddl_t (v1 int not null);

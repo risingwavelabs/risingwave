@@ -30,12 +30,12 @@ export default function App({ Component, pageProps }) {
     router.events.on("routeChangeStart", () => setIsLoading(true));
     router.events.on('routeChangeComplete', () => setIsLoading(false));
     router.events.on('routeChangeError', () => setIsLoading(false));
-  })
+  }, [])
 
-  return isLoading
-    ? <div>Loading</div> 
-    : <Layout>
-      <Component {...pageProps} />
-    </Layout> ;
+  return (
+    <Layout>
+      {isLoading ? <p>Loading...</p> : <Component {...pageProps} />}
+    </Layout>
+  );
 }
 

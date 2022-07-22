@@ -186,7 +186,7 @@ where
                 .collect(self.id, &barrier)?;
 
             // Then stop this actor if asked
-            let to_stop = barrier.is_to_stop_actor(self.id);
+            let to_stop = barrier.is_stop_actor(self.id);
             if to_stop {
                 tracing::trace!(actor_id = self.id, "actor exit");
                 return Ok(());

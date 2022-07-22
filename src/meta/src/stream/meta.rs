@@ -18,17 +18,17 @@ use std::sync::Arc;
 
 use itertools::Itertools;
 use risingwave_common::catalog::TableId;
-use risingwave_common::consistent_hash::VIRTUAL_NODE_COUNT;
 use risingwave_common::error::ErrorCode::InternalError;
 use risingwave_common::error::{Result, RwError};
 use risingwave_common::try_match_expand;
+use risingwave_common::types::{ParallelUnitId, VIRTUAL_NODE_COUNT};
 use risingwave_common::util::compress::decompress_data;
+use risingwave_pb::common::{ParallelUnit, ParallelUnitType, WorkerNode};
 use risingwave_pb::meta::table_fragments::ActorState;
-use risingwave_pb::stream_plan::{FragmentType, StreamActor};
+use risingwave_pb::stream_plan::{Dispatcher, FragmentType, StreamActor};
 use tokio::sync::RwLock;
 
-use crate::cluster::{ParallelUnitId, WorkerId};
-use crate::hummock::compaction_group::manager::CompactionGroupManagerRef;
+use crate::cluster::WorkerId;
 use crate::manager::{HashMappingManagerRef, MetaSrvEnv};
 use crate::model::{ActorId, MetadataModel, TableFragments, Transactional};
 use crate::storage::{MetaStore, Transaction};
@@ -43,8 +43,6 @@ pub struct FragmentManager<S: MetaStore> {
     meta_store: Arc<S>,
 
     core: RwLock<FragmentManagerCore>,
-
-    compaction_group_manager: CompactionGroupManagerRef<S>,
 }
 
 pub struct ActorInfos {
@@ -67,10 +65,7 @@ impl<S: MetaStore> FragmentManager<S>
 where
     S: MetaStore,
 {
-    pub async fn new(
-        env: MetaSrvEnv<S>,
-        compaction_group_manager: CompactionGroupManagerRef<S>,
-    ) -> Result<Self> {
+    pub async fn new(env: MetaSrvEnv<S>) -> Result<Self> {
         let meta_store = env.meta_store_ref();
         let table_fragments = try_match_expand!(
             TableFragments::list(&*meta_store).await,
@@ -83,17 +78,12 @@ where
             .map(|tf| (tf.table_id(), tf))
             .collect();
 
+        // Extract vnode mapping info from listed `table_fragments` to hash mapping manager.
         Self::restore_vnode_mappings(env.hash_mapping_manager_ref(), &table_fragments)?;
-
-        let table_fragments_list = table_fragments.values().collect_vec();
-        compaction_group_manager
-            .purge_stale_members(&table_fragments_list)
-            .await?;
 
         Ok(Self {
             meta_store,
             core: RwLock::new(FragmentManagerCore { table_fragments }),
-            compaction_group_manager,
         })
     }
 
@@ -103,21 +93,30 @@ where
         Ok(map.values().cloned().collect())
     }
 
-    pub async fn update_table_fragments(&self, table_fragment: TableFragments) -> Result<()> {
+    pub async fn batch_update_table_fragments(
+        &self,
+        table_fragments: &[TableFragments],
+    ) -> Result<()> {
         let map = &mut self.core.write().await.table_fragments;
 
-        match map.entry(table_fragment.table_id()) {
-            Entry::Occupied(mut entry) => {
-                table_fragment.insert(&*self.meta_store).await?;
-                entry.insert(table_fragment);
-
-                Ok(())
+        let mut transaction = Transaction::default();
+        for table_fragment in table_fragments {
+            if map.contains_key(&table_fragment.table_id()) {
+                table_fragment.upsert_in_transaction(&mut transaction)?;
+            } else {
+                return Err(RwError::from(InternalError(format!(
+                    "table_fragment not exist: id={}",
+                    table_fragment.table_id()
+                ))));
             }
-            Entry::Vacant(_) => Err(RwError::from(InternalError(format!(
-                "table_fragment not exist: id={}",
-                table_fragment.table_id()
-            )))),
         }
+
+        self.meta_store.txn(transaction).await?;
+        for table_fragment in table_fragments {
+            map.insert(table_fragment.table_id(), table_fragment.clone());
+        }
+
+        Ok(())
     }
 
     pub async fn select_table_fragments_by_table_id(
@@ -146,13 +145,6 @@ where
                 table_fragment.table_id()
             )))),
             Entry::Vacant(v) => {
-                // Register to compaction group beforehand.
-                // If any following operation fails, the registration will be eventually reverted by
-                // CompactionGroupManager::purge_stale_members.
-                self.compaction_group_manager
-                    .register_table_fragments(&table_fragment)
-                    .await?;
-
                 table_fragment.insert(&*self.meta_store).await?;
                 v.insert(table_fragment);
                 Ok(())
@@ -167,15 +159,7 @@ where
         match map.entry(*table_id) {
             Entry::Occupied(o) => {
                 TableFragments::delete(&*self.meta_store, &table_id.table_id).await?;
-                let table_fragments = o.remove();
-                // Unregister from compaction group afterwards.
-                if let Err(e) = self
-                    .compaction_group_manager
-                    .unregister_table_fragments(&table_fragments)
-                    .await
-                {
-                    tracing::warn!("Failed to unregister table {}. It wll be unregistered eventually by CompactionGroupManager::purge_stale_members.\n{:#?}", table_id, e);
-                }
+                o.remove();
                 Ok(())
             }
             Entry::Vacant(_) => Err(RwError::from(InternalError(format!(
@@ -190,7 +174,7 @@ where
     pub async fn finish_create_table_fragments(
         &self,
         table_id: &TableId,
-        dependent_table_actors: &[(TableId, HashMap<ActorId, Vec<ActorId>>)],
+        dependent_table_actors: Vec<(TableId, HashMap<ActorId, Vec<Dispatcher>>)>,
     ) -> Result<()> {
         let map = &mut self.core.write().await.table_fragments;
 
@@ -202,9 +186,9 @@ where
             table_fragments.upsert_in_transaction(&mut transaction)?;
 
             let mut dependent_tables = Vec::with_capacity(dependent_table_actors.len());
-            for (dependent_table_id, extra_downstream_actors) in dependent_table_actors {
+            for (dependent_table_id, mut new_dispatchers) in dependent_table_actors {
                 let mut dependent_table = map
-                    .get(dependent_table_id)
+                    .get(&dependent_table_id)
                     .ok_or_else(|| {
                         RwError::from(InternalError(format!(
                             "table_fragment not exist: id={}",
@@ -214,12 +198,9 @@ where
                     .clone();
                 for fragment in dependent_table.fragments.values_mut() {
                     for actor in &mut fragment.actors {
-                        if let Some(downstream_actors) =
-                            extra_downstream_actors.get(&actor.actor_id)
-                        {
-                            actor.dispatcher[0]
-                                .downstream_actor_id
-                                .extend(downstream_actors.iter().cloned());
+                        // Extend new dispatchers to table fragments.
+                        if let Some(new_dispatchers) = new_dispatchers.remove(&actor.actor_id) {
+                            actor.dispatcher.extend(new_dispatchers);
                         }
                     }
                 }
@@ -267,9 +248,16 @@ where
                 for fragment in dependent_table.fragments.values_mut() {
                     if fragment.fragment_type == FragmentType::Sink as i32 {
                         for actor in &mut fragment.actors {
-                            actor.dispatcher[0]
-                                .downstream_actor_id
-                                .retain(|x| !chain_actor_ids.contains(x));
+                            // Remove these downstream actor ids from all dispatchers.
+                            for dispatcher in &mut actor.dispatcher {
+                                dispatcher
+                                    .downstream_actor_id
+                                    .retain(|x| !chain_actor_ids.contains(x));
+                            }
+                            // Remove empty dispatchers.
+                            actor
+                                .dispatcher
+                                .retain(|d| !d.downstream_actor_id.is_empty());
                         }
                     }
                 }
@@ -278,17 +266,9 @@ where
             }
 
             self.meta_store.txn(transaction).await?;
-            let table_fragments = map.remove(table_id).unwrap();
+            map.remove(table_id).unwrap();
             for dependent_table in dependent_tables {
                 map.insert(dependent_table.table_id(), dependent_table);
-            }
-            // Unregister from compaction group afterwards.
-            if let Err(e) = self
-                .compaction_group_manager
-                .unregister_table_fragments(&table_fragments)
-                .await
-            {
-                tracing::warn!("Failed to unregister table {}. It wll be unregistered eventually by CompactionGroupManager::purge_stale_members.\n{:#?}", table_id, e);
             }
             Ok(())
         } else {
@@ -299,21 +279,20 @@ where
         }
     }
 
-    /// Used in [`crate::barrier::GlobalBarrierManager`]
-    pub async fn load_all_actors(&self, with_creating_table: Option<TableId>) -> ActorInfos {
+    /// Used in [`crate::barrier::GlobalBarrierManager`], load all actor that need to be sent or
+    /// collected
+    pub async fn load_all_actors(
+        &self,
+        check_state: impl Fn(ActorState, &TableId) -> bool,
+    ) -> ActorInfos {
         let mut actor_maps = HashMap::new();
         let mut source_actor_ids = HashMap::new();
 
         let map = &self.core.read().await.table_fragments;
         for fragments in map.values() {
-            let include_inactive = with_creating_table.contains(&fragments.table_id());
-            let check_state = |s: ActorState| {
-                s == ActorState::Running || include_inactive && s == ActorState::Inactive
-            };
-
             for (node_id, actor_states) in fragments.node_actor_states() {
                 for actor_state in actor_states {
-                    if check_state(actor_state.1) {
+                    if check_state(actor_state.1, &fragments.table_id()) {
                         actor_maps
                             .entry(node_id)
                             .or_insert_with(Vec::new)
@@ -325,7 +304,7 @@ where
             let source_actors = fragments.node_source_actor_states();
             for (&node_id, actor_states) in &source_actors {
                 for actor_state in actor_states {
-                    if check_state(actor_state.1) {
+                    if check_state(actor_state.1, &fragments.table_id()) {
                         source_actor_ids
                             .entry(node_id)
                             .or_insert_with(Vec::new)
@@ -339,6 +318,79 @@ where
             actor_maps,
             source_actor_maps: source_actor_ids,
         }
+    }
+
+    /// Used in [`crate::barrier::GlobalBarrierManager`]
+    /// migrate actors and update fragments, generate migrate info
+    pub async fn migrate_actors(
+        &self,
+        migrate_map: &HashMap<ParallelUnitId, WorkerId>,
+        node_map: &HashMap<WorkerId, WorkerNode>,
+    ) -> Result<(Vec<TableFragments>, HashMap<ParallelUnitId, ParallelUnit>)> {
+        let mut parallel_unit_migrate_map = HashMap::new();
+        let mut pu_hash_map: HashMap<WorkerId, Vec<&ParallelUnit>> = HashMap::new();
+        let mut pu_single_map: HashMap<WorkerId, Vec<&ParallelUnit>> = HashMap::new();
+        // split parallelunits of node into types, map them with WorkerId
+        for (node_id, node) in node_map {
+            let pu_hash = node
+                .parallel_units
+                .iter()
+                .filter(|pu| pu.r#type == ParallelUnitType::Hash as i32)
+                .collect_vec();
+            pu_hash_map.insert(*node_id, pu_hash);
+            let pu_single = node
+                .parallel_units
+                .iter()
+                .filter(|pu| pu.r#type == ParallelUnitType::Single as i32)
+                .collect_vec();
+            pu_single_map.insert(*node_id, pu_single);
+        }
+        // update actor status and generate pu to pu migrate info
+        let mut table_fragments = self.list_table_fragments().await?;
+        let mut new_fragments = Vec::new();
+        table_fragments.iter_mut().for_each(|fragment| {
+            let mut flag = false;
+            fragment
+                .actor_status
+                .iter_mut()
+                .for_each(|(actor_id, status)| {
+                    if let Some(new_node_id) = migrate_map.get(actor_id) {
+                        if let Some(ref old_parallel_unit) = status.parallel_unit {
+                            if let std::collections::hash_map::Entry::Vacant(e) =
+                                parallel_unit_migrate_map.entry(old_parallel_unit.id)
+                            {
+                                if old_parallel_unit.r#type == ParallelUnitType::Hash as i32 {
+                                    let new_parallel_unit =
+                                        pu_hash_map.get_mut(new_node_id).unwrap().pop().unwrap();
+                                    e.insert(new_parallel_unit.clone());
+                                    status.parallel_unit = Some(new_parallel_unit.clone());
+                                } else {
+                                    let new_parallel_unit =
+                                        pu_single_map.get_mut(new_node_id).unwrap().pop().unwrap();
+                                    e.insert(new_parallel_unit.clone());
+                                    status.parallel_unit = Some(new_parallel_unit.clone());
+                                }
+                                flag = true;
+                            } else {
+                                status.parallel_unit = Some(
+                                    parallel_unit_migrate_map
+                                        .get(&old_parallel_unit.id)
+                                        .unwrap()
+                                        .clone(),
+                                );
+                            }
+                        }
+                    };
+                });
+            if flag {
+                // update vnode mapping of updated fragments
+                fragment.update_vnode_mapping(&parallel_unit_migrate_map);
+                new_fragments.push(fragment.clone());
+            }
+        });
+        // update fragments
+        self.batch_update_table_fragments(&new_fragments).await?;
+        Ok((new_fragments, parallel_unit_migrate_map))
     }
 
     pub async fn all_node_actors(

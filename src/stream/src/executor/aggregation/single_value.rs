@@ -151,7 +151,7 @@ macro_rules! impl_single_value_agg {
             }
 
             fn new_builder(&self) -> ArrayBuilderImpl {
-                ArrayBuilderImpl::$result_variant(<$array_type as Array>::Builder::new(0).unwrap())
+                ArrayBuilderImpl::$result_variant(<$array_type as Array>::Builder::new(0))
             }
 
             fn reset(&mut self) {

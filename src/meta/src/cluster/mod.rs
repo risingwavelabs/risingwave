@@ -23,6 +23,7 @@ use std::time::{Duration, SystemTime};
 use itertools::Itertools;
 use risingwave_common::error::{internal_error, ErrorCode, Result};
 use risingwave_common::try_match_expand;
+use risingwave_common::types::ParallelUnitId;
 use risingwave_pb::common::worker_node::State;
 use risingwave_pb::common::{HostAddress, ParallelUnit, ParallelUnitType, WorkerNode, WorkerType};
 use risingwave_pb::meta::subscribe_response::{Info, Operation};
@@ -35,11 +36,9 @@ use crate::model::{MetadataModel, Worker, INVALID_EXPIRE_AT};
 use crate::storage::MetaStore;
 
 pub type WorkerId = u32;
-pub type ParallelUnitId = u32;
+pub type ParallelId = u32;
 pub type WorkerLocations = HashMap<WorkerId, WorkerNode>;
 pub type ClusterManagerRef<S> = Arc<ClusterManager<S>>;
-
-pub const DEFAULT_WORK_NODE_PARALLEL_DEGREE: usize = 4;
 
 #[derive(Debug)]
 pub struct WorkerKey(pub HostAddress);
@@ -113,8 +112,11 @@ where
 
                 // Generate parallel units.
                 let parallel_units = if r#type == WorkerType::ComputeNode {
-                    self.generate_cn_parallel_units(DEFAULT_WORK_NODE_PARALLEL_DEGREE, worker_id)
-                        .await?
+                    self.generate_cn_parallel_units(
+                        self.env.opts.unsafe_worker_node_parallel_degree,
+                        worker_id,
+                    )
+                    .await?
                 } else {
                     vec![]
                 };
@@ -218,7 +220,7 @@ where
                     _ = min_interval.tick() => {},
                     // Shutdown
                     _ = &mut shutdown_rx => {
-                        tracing::info!("Heartbeat checker is shutting down");
+                        tracing::info!("Heartbeat checker is stopped");
                         return;
                     }
                 }
@@ -310,6 +312,7 @@ where
         core.get_parallel_unit_count(parallel_unit_type)
     }
 
+    /// Generate `parallel_degree` hash parallel units and 1 single parallel unit.
     async fn generate_cn_parallel_units(
         &self,
         parallel_degree: usize,
@@ -318,16 +321,16 @@ where
         let start_id = self
             .env
             .id_gen_manager()
-            .generate_interval::<{ IdCategory::ParallelUnit }>(parallel_degree as i32)
+            .generate_interval::<{ IdCategory::ParallelUnit }>((parallel_degree + 1) as i32)
             .await? as ParallelUnitId;
-        let mut parallel_units = Vec::with_capacity(parallel_degree);
+        let mut parallel_units = Vec::with_capacity(parallel_degree + 1);
         let single_parallel_unit = ParallelUnit {
             id: start_id,
             r#type: ParallelUnitType::Single as i32,
             worker_node_id: worker_id,
         };
         parallel_units.push(single_parallel_unit);
-        (start_id + 1..start_id + parallel_degree as ParallelUnitId).for_each(|id| {
+        (start_id + 1..start_id + 1 + parallel_degree as ParallelUnitId).for_each(|id| {
             let hash_parallel_unit = ParallelUnit {
                 id,
                 r#type: ParallelUnitType::Hash as i32,
@@ -526,7 +529,7 @@ mod tests {
         }
 
         let single_parallel_count = worker_count;
-        let hash_parallel_count = (DEFAULT_WORK_NODE_PARALLEL_DEGREE - 1) * worker_count;
+        let hash_parallel_count = env.opts.unsafe_worker_node_parallel_degree * worker_count;
         assert_cluster_manager(&cluster_manager, single_parallel_count, hash_parallel_count).await;
 
         let worker_to_delete_count = 4usize;
@@ -540,7 +543,12 @@ mod tests {
                 .await
                 .unwrap();
         }
-        assert_cluster_manager(&cluster_manager, 1, DEFAULT_WORK_NODE_PARALLEL_DEGREE - 1).await;
+        assert_cluster_manager(
+            &cluster_manager,
+            1,
+            env.opts.unsafe_worker_node_parallel_degree,
+        )
+        .await;
 
         Ok(())
     }

@@ -1,12 +1,13 @@
 [package]
 edition = "2021"
 name = "risedev"
-version = "0.1.9"
+version = "0.1.10"
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
 [dependencies]
 anyhow = "1"
 bytes = "1"
+chrono = { version = "0.4", default-features = false, features = ["clock", "std"] }
 clap = { version = "3", features = ["derive"] }
 console = "0.15"
 dialoguer = "0.10"

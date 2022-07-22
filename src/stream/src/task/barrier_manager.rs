@@ -12,10 +12,10 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use madsim::collections::{HashMap, HashSet};
+use std::collections::{HashMap, HashSet};
+
 use risingwave_common::error::Result;
-use risingwave_pb::hummock::SstableInfo;
-use risingwave_pb::stream_service::inject_barrier_response::CreateMviewProgress as ProstCreateMviewProgress;
+use risingwave_pb::stream_service::barrier_complete_response::CreateMviewProgress as ProstCreateMviewProgress;
 use tokio::sync::mpsc::UnboundedSender;
 use tokio::sync::oneshot;
 
@@ -38,8 +38,6 @@ pub const ENABLE_BARRIER_AGGREGATION: bool = false;
 #[derive(Debug)]
 pub struct CollectResult {
     pub create_mview_progress: Vec<ProstCreateMviewProgress>,
-
-    pub synced_sstables: Vec<SstableInfo>,
 }
 
 enum BarrierState {
@@ -61,11 +59,14 @@ pub struct LocalBarrierManager {
     senders: HashMap<ActorId, UnboundedSender<Barrier>>,
 
     /// Span of the current epoch.
-    #[allow(dead_code)]
+    #[expect(dead_code)]
     span: tracing::Span,
 
     /// Current barrier collection state.
     state: BarrierState,
+
+    /// Save collect rx
+    collect_complete_receiver: HashMap<u64, Option<oneshot::Receiver<CollectResult>>>,
 }
 
 impl Default for LocalBarrierManager {
@@ -80,6 +81,7 @@ impl LocalBarrierManager {
             senders: HashMap::new(),
             span: tracing::Span::none(),
             state,
+            collect_complete_receiver: HashMap::default(),
         }
     }
 
@@ -99,14 +101,14 @@ impl LocalBarrierManager {
         self.senders.keys().cloned().collect()
     }
 
-    /// Broadcast a barrier to all senders. Returns a receiver which will get notified when this
+    /// Broadcast a barrier to all senders. Save a receiver which will get notified when this
     /// barrier is finished, in managed mode.
     pub fn send_barrier(
         &mut self,
         barrier: &Barrier,
         actor_ids_to_send: impl IntoIterator<Item = ActorId>,
         actor_ids_to_collect: impl IntoIterator<Item = ActorId>,
-    ) -> Result<Option<oneshot::Receiver<CollectResult>>> {
+    ) -> Result<()> {
         let to_send = {
             let to_send: HashSet<ActorId> = actor_ids_to_send.into_iter().collect();
             match &self.state {
@@ -153,7 +155,36 @@ impl LocalBarrierManager {
             }
         }
 
-        Ok(rx)
+        self.collect_complete_receiver
+            .insert(barrier.epoch.prev, rx);
+        Ok(())
+    }
+
+    /// Use `prev_epoch` to remove collect rx and return rx.
+    pub fn remove_collect_rx(&mut self, prev_epoch: u64) -> oneshot::Receiver<CollectResult> {
+        self.collect_complete_receiver
+            .remove(&prev_epoch)
+            .unwrap_or_else(|| {
+                panic!(
+                    "barrier collect complete receiver for prev epoch {} not exists",
+                    prev_epoch
+                )
+            })
+            .expect("no rx for local mode")
+    }
+
+    /// remove all collect rx less than `prev_epoch`
+    pub fn drain_collect_rx(&mut self, prev_epoch: u64) {
+        self.collect_complete_receiver
+            .drain_filter(|x, _| x <= &prev_epoch);
+        match &mut self.state {
+            #[cfg(test)]
+            BarrierState::Local => {}
+
+            BarrierState::Managed(managed_state) => {
+                managed_state.remove_stop_barrier(prev_epoch);
+            }
+        }
     }
 
     /// When a [`StreamConsumer`] (typically [`DispatchExecutor`]) get a barrier, it should report

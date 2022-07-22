@@ -18,7 +18,7 @@ RisingWave's data source covers four parts: connectors, enumerators, ConnectorSo
 
 ### Connectors
 
-`Connector` serve as an interface to upstream data pipeline, including the message queue and file system. In the current design, it does not have infinite concurrency. One connector instance only reads from one split from the upstream. For example, if upstream is a Kafka and it has three partitions so, in RisingWave, there should be three connectors.
+`Connector` serves as an interface to upstream data pipeline, including the message queue and file system. In the current design, it can only have a limited concurrency. One connector instance only reads from one split from the upstream. For example, if upstream is a Kafka and it has three partitions so, in RisingWave, there should be three connectors.
 
 All connectors need to implement the following trait and it exposes two methods to the upper layer.
 
