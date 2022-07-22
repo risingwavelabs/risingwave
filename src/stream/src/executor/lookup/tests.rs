@@ -22,10 +22,11 @@ use risingwave_common::types::DataType;
 use risingwave_common::util::ordered::SENTINEL_CELL_ID;
 use risingwave_common::util::sort_util::{OrderPair, OrderType};
 use risingwave_common::util::value_encoding::deserialize_cell;
-use risingwave_storage::encoding::cell_based_encoding_util::deserialize_column_id;
 use risingwave_storage::memory::MemoryStateStore;
+use risingwave_storage::row_serde::cell_based_encoding_util::deserialize_column_id;
 use risingwave_storage::store::ReadOptions;
-use risingwave_storage::table::state_table::StateTable;
+use risingwave_storage::table::storage_table::{StorageTable, READ_ONLY};
+use risingwave_storage::table::Distribution;
 use risingwave_storage::StateStore;
 
 use crate::executor::lookup::impl_::LookupExecutorParams;
@@ -212,13 +213,15 @@ fn build_state_table_helper<S: StateStore>(
     columns: Vec<ColumnDesc>,
     order_types: Vec<OrderPair>,
     pk_indices: Vec<usize>,
-) -> StateTable<S> {
-    StateTable::new_without_distribution(
+) -> StorageTable<S, READ_ONLY> {
+    StorageTable::new_partial(
         s,
         table_id,
-        columns,
+        columns.clone(),
+        columns.iter().map(|col| col.column_id).collect(),
         order_types.iter().map(|pair| pair.order_type).collect_vec(),
         pk_indices,
+        Distribution::fallback(),
     )
 }
 #[tokio::test]
@@ -245,7 +248,7 @@ async fn test_lookup_this_epoch() {
             Field::with_name(DataType::Int64, "rowid_column"),
             Field::with_name(DataType::Int64, "join_column"),
         ]),
-        state_table: build_state_table_helper(
+        storage_table: build_state_table_helper(
             store.clone(),
             table_id,
             arrangement_col_descs(),
@@ -331,7 +334,7 @@ async fn test_lookup_last_epoch() {
             Field::with_name(DataType::Int64, "join_column"),
             Field::with_name(DataType::Int64, "rowid_column"),
         ]),
-        state_table: build_state_table_helper(
+        storage_table: build_state_table_helper(
             store.clone(),
             table_id,
             arrangement_col_descs(),

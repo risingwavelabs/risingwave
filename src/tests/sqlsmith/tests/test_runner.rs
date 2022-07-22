@@ -12,8 +12,6 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-#![feature(let_chains)]
-
 use std::sync::Arc;
 use std::{env, panic};
 
@@ -27,15 +25,33 @@ use risingwave_sqlparser::ast::Statement;
 use risingwave_sqlparser::parser::Parser;
 use risingwave_sqlsmith::{mview_sql_gen, sql_gen, Table};
 
+/// Executes sql queries
+/// It captures panics so it can recover and print failing sql query.
+async fn handle(session: Arc<SessionImpl>, stmt: Statement, sql: String) {
+    let sql_copy = sql.clone();
+    panic::set_hook(Box::new(move |e| {
+        println!("Panic on SQL:\n{}\nReason:\n{}", sql_copy, e);
+    }));
+
+    handler::handle(session.clone(), stmt, &sql)
+        .await
+        .unwrap_or_else(|e| panic!("Failed to handle SQL:\n{}\nReason:\n{}", sql, e));
+}
+
 /// Create the tables defined in testdata.
 async fn create_tables(session: Arc<SessionImpl>, rng: &mut impl Rng) -> Vec<Table> {
-    let sql = std::fs::read_to_string("tests/testdata/tpch.sql").unwrap();
+    let seed_files = vec!["tests/testdata/tpch.sql", "tests/testdata/nexmark.sql"];
+    let sql = seed_files
+        .iter()
+        .map(|filename| std::fs::read_to_string(filename).unwrap())
+        .collect::<String>();
     let statements =
         Parser::parse_sql(&sql).unwrap_or_else(|_| panic!("Failed to parse SQL: {}", sql));
     let n_statements = statements.len();
 
     let mut tables = vec![];
     for s in statements.into_iter() {
+        let stmt_sql = s.to_string();
         match s {
             Statement::CreateTable {
                 ref name,
@@ -44,7 +60,7 @@ async fn create_tables(session: Arc<SessionImpl>, rng: &mut impl Rng) -> Vec<Tab
             } => {
                 let name = name.0[0].value.clone();
                 let columns = columns.iter().map(|c| c.clone().into()).collect();
-                handler::handle(session.clone(), s, &sql).await.unwrap();
+                handle(session.clone(), s, stmt_sql).await;
                 tables.push(Table { name, columns })
             }
             _ => panic!("Unexpected statement: {}", s),
@@ -58,7 +74,7 @@ async fn create_tables(session: Arc<SessionImpl>, rng: &mut impl Rng) -> Vec<Tab
         let stmts =
             Parser::parse_sql(&sql).unwrap_or_else(|_| panic!("Failed to parse SQL: {}", sql));
         let stmt = stmts[0].clone();
-        handler::handle(session.clone(), stmt, &sql).await.unwrap();
+        handle(session.clone(), stmt, sql).await;
         tables.push(table);
     }
     tables
@@ -76,10 +92,8 @@ async fn run_sqlsmith_with_seed(seed: u64) {
     }
 
     let tables = create_tables(session.clone(), &mut rng).await;
-
     for _ in 0..512 {
         let sql = sql_gen(&mut rng, tables.clone());
-
         let sql_copy = sql.clone();
         panic::set_hook(Box::new(move |e| {
             println!("Panic on SQL:\n{}\nReason:\n{}", sql_copy.clone(), e);

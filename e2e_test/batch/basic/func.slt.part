@@ -57,6 +57,21 @@ SELECT 1 in (3, 0.5*2, min(v1)) from t;
 ----
 t
 
+query T
+SELECT 1 in (3, 0.5*2, min(v1), null) from t;
+----
+t
+
+query T
+SELECT null in (null, 3, 0.5*2, min(v1)) from t;
+----
+NULL
+
+query T
+SELECT 99 in (null, 3, 0.5*2, min(v1)) from t;
+----
+NULL
+
 query I
 SELECT b2 from b where 1 in (3, 1.0, (select min(v1) from t));
 ----
@@ -264,3 +279,9 @@ query T
 select regexp_match('abc01234xyz', '(?:(.*?)(\d+)(.*)){1,1}');
 ----
 {abc,01234,xyz}
+
+query T
+select regexp_matches('foobarbequebazilbarfbonk', '(b[^b]+)(b[^b]+)', 'g');
+----
+ {bar,beque}
+ {bazil,barf}

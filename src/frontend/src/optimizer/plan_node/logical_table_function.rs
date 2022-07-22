@@ -16,11 +16,9 @@ use std::fmt;
 
 use risingwave_common::catalog::{Field, Schema};
 use risingwave_common::error::{ErrorCode, Result};
-use risingwave_common::types::DataType;
 
 use super::{ColPrunable, LogicalFilter, PlanBase, PlanRef, PredicatePushdown, ToBatch, ToStream};
-use crate::binder::FunctionType;
-use crate::expr::ExprImpl;
+use crate::expr::{Expr, TableFunction};
 use crate::optimizer::plan_node::BatchTableFunction;
 use crate::session::OptimizerContextRef;
 use crate::utils::Condition;
@@ -29,43 +27,22 @@ use crate::utils::Condition;
 #[derive(Debug, Clone)]
 pub struct LogicalTableFunction {
     pub base: PlanBase,
-    pub(super) args: Vec<ExprImpl>,
-    pub function_type: FunctionType,
-    pub data_type: DataType,
+    pub table_function: TableFunction,
 }
 
 impl LogicalTableFunction {
     /// Create a [`LogicalTableFunction`] node. Used internally by optimizer.
-    pub fn new(
-        args: Vec<ExprImpl>,
-        function_type: FunctionType,
-        data_type: DataType,
-        ctx: OptimizerContextRef,
-    ) -> Self {
+    pub fn new(table_function: TableFunction, ctx: OptimizerContextRef) -> Self {
         let schema = Schema {
-            fields: vec![Field::with_name(data_type.clone(), function_type.name())],
+            fields: vec![Field::with_name(
+                table_function.return_type(),
+                table_function.function_type.name(),
+            )],
         };
         let base = PlanBase::new_logical(ctx, schema, vec![]);
         Self {
             base,
-            args,
-            function_type,
-            data_type,
-        }
-    }
-
-    pub fn fmt_with_name(&self, f: &mut fmt::Formatter, name: &str) -> fmt::Result {
-        match self.function_type {
-            FunctionType::Generate => {
-                write!(
-                    f,
-                    "{} {{ start: {:?} stop: {:?} step: {:?} }}",
-                    name, self.args[0], self.args[1], self.args[2],
-                )
-            }
-            FunctionType::Unnest => {
-                write!(f, "{} {{ {:?} }}", name, self.args,)
-            }
+            table_function,
         }
     }
 }
@@ -74,7 +51,7 @@ impl_plan_tree_node_for_leaf! { LogicalTableFunction }
 
 impl fmt::Display for LogicalTableFunction {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-        self.fmt_with_name(f, "LogicalTableFunction")
+        write!(f, "LogicalTableFunction {{ {:?} }}", self.table_function)
     }
 }
 

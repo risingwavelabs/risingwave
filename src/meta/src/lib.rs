@@ -29,7 +29,6 @@
 #![feature(generic_associated_types)]
 #![feature(binary_heap_drain_sorted)]
 #![feature(option_result_contains)]
-#![feature(let_chains)]
 #![feature(let_else)]
 #![feature(type_alias_impl_trait)]
 #![feature(map_first_last)]
@@ -88,6 +87,20 @@ pub struct MetaNodeOpts {
     #[clap(long, default_value_t = String::from(""))]
     etcd_endpoints: String,
 
+    /// Enable authentication with etcd. By default disabled.
+    #[clap(long)]
+    etcd_auth: bool,
+
+    /// Username of etcd, required when --etcd-auth is enabled.
+    /// Default value is read from the 'ETCD_USERNAME' environment variable.
+    #[clap(long, env = "ETCD_USERNAME", default_value = "")]
+    etcd_username: String,
+
+    /// Password of etcd, required when --etcd-auth is enabled.
+    /// Default value is read from the 'ETCD_PASSWORD' environment variable.
+    #[clap(long, env = "ETCD_PASSWORD", default_value = "")]
+    etcd_password: String,
+
     /// Maximum allowed heartbeat interval in ms.
     #[clap(long, default_value = "60000")]
     max_heartbeat_interval: u32,
@@ -142,6 +155,10 @@ pub fn start(opts: MetaNodeOpts) -> Pin<Box<dyn Future<Output = ()> + Send>> {
                     .split(',')
                     .map(|x| x.to_string())
                     .collect(),
+                credentials: match opts.etcd_auth {
+                    true => Some((opts.etcd_username, opts.etcd_password)),
+                    false => None,
+                },
             },
             Backend::Mem => MetaStoreBackend::Mem,
         };

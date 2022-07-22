@@ -23,6 +23,7 @@ use risingwave_batch::task::TaskId;
 use risingwave_common::array::DataChunk;
 use risingwave_common::bail;
 use risingwave_common::error::RwError;
+use risingwave_common::util::worker_util::get_workers_by_parallel_unit_ids;
 use risingwave_pb::batch_plan::exchange_info::DistributionMode;
 use risingwave_pb::batch_plan::exchange_source::LocalExecutePlan::Plan;
 use risingwave_pb::batch_plan::plan_node::NodeBody;
@@ -30,11 +31,10 @@ use risingwave_pb::batch_plan::{
     ExchangeInfo, ExchangeSource, LocalExecutePlan, PlanFragment, PlanNode as PlanNodeProst,
     TaskId as ProstTaskId, TaskOutputId,
 };
-use risingwave_pb::common::Buffer;
 use tracing::debug;
 use uuid::Uuid;
 
-use super::plan_fragmenter::QueryStageRef;
+use super::plan_fragmenter::{PartitionInfo, QueryStageRef};
 use crate::optimizer::plan_node::PlanNodeType;
 use crate::scheduler::plan_fragmenter::{ExecutionPlanNode, Query, StageId};
 use crate::scheduler::task_context::FrontendBatchTaskContext;
@@ -119,14 +119,14 @@ impl LocalQueryExecution {
         let plan_node_prost = match second_stage_id {
             None => {
                 debug!("Local execution mode converts a plan with a single stage");
-                self.convert_plan_node(&*root_stage.root, &mut None, None)?
+                self.convert_plan_node(&root_stage.root, &mut None, None)?
             }
             Some(second_stage_ids) => {
                 debug!("Local execution mode converts a plan with two stages");
                 if second_stage_ids.is_empty() {
                     // This branch is defensive programming. The semantics should be the same as
                     // `None`.
-                    self.convert_plan_node(&*root_stage.root, &mut None, None)?
+                    self.convert_plan_node(&root_stage.root, &mut None, None)?
                 } else {
                     let mut second_stages = HashMap::new();
                     for second_stage_id in second_stage_ids {
@@ -136,7 +136,7 @@ impl LocalQueryExecution {
                     }
                     let mut stage_id_to_plan = Some(second_stages);
                     let res =
-                        self.convert_plan_node(&*root_stage.root, &mut stage_id_to_plan, None)?;
+                        self.convert_plan_node(&root_stage.root, &mut stage_id_to_plan, None)?;
                     assert!(
                         stage_id_to_plan.as_ref().unwrap().is_empty(),
                         "We expect that all the child stage plan fragments have been used"
@@ -159,7 +159,7 @@ impl LocalQueryExecution {
         &self,
         execution_plan_node: &ExecutionPlanNode,
         second_stages: &mut Option<HashMap<StageId, QueryStageRef>>,
-        vnode_bitmap: Option<Buffer>,
+        partition: Option<PartitionInfo>,
     ) -> SchedulerResult<PlanNodeProst> {
         match execution_plan_node.plan_node_type {
             PlanNodeType::BatchExchange => {
@@ -186,24 +186,25 @@ impl LocalQueryExecution {
                 };
                 assert!(sources.is_empty());
 
-                if let Some(table_scan_info) = second_stage.table_scan_info.clone() && let Some(vnode_bitmaps) = table_scan_info.vnode_bitmaps {
+                if let Some(table_scan_info) = second_stage.table_scan_info.clone() && let Some(vnode_bitmaps) = table_scan_info.partitions {
                     // Similar to the distributed case (StageRunner::schedule_tasks).
                     // Set `vnode_ranges` of the scan node in `local_execute_plan` of each
                     // `exchange_source`.
                     let (parallel_unit_ids, vnode_bitmaps): (Vec<_>, Vec<_>) =
                         vnode_bitmaps.into_iter().unzip();
-                    let workers = self
-                        .front_env
-                        .worker_node_manager()
-                        .get_workers_by_parallel_unit_ids(&parallel_unit_ids)?;
+                    let all_workers = self.front_env.worker_node_manager().list_worker_nodes();
+                    let workers = match get_workers_by_parallel_unit_ids(&all_workers, &parallel_unit_ids) {
+                        Ok(workers) => workers,
+                        Err(e) => bail!("{}", e)
+                    };
 
-                    for (idx, (worker_node, vnode_bitmap)) in
+                    for (idx, (worker_node, partition)) in
                         (workers.into_iter().zip_eq(vnode_bitmaps.into_iter())).enumerate()
                     {
                         let second_stage_plan_node = self.convert_plan_node(
-                            &*second_stage.root,
+                            &second_stage.root,
                             &mut None,
-                            Some(vnode_bitmap),
+                            Some(partition),
                         )?;
                         let second_stage_plan_fragment = PlanFragment {
                             root: Some(second_stage_plan_node),
@@ -234,7 +235,7 @@ impl LocalQueryExecution {
                     }
                 } else {
                     let second_stage_plan_node =
-                        self.convert_plan_node(&*second_stage.root, &mut None, None)?;
+                        self.convert_plan_node(&second_stage.root, &mut None, None)?;
                     let second_stage_plan_fragment = PlanFragment {
                         root: Some(second_stage_plan_node),
                         exchange_info: Some(ExchangeInfo {
@@ -288,7 +289,9 @@ impl LocalQueryExecution {
                 let mut node_body = execution_plan_node.node.clone();
                 match &mut node_body {
                     NodeBody::RowSeqScan(ref mut scan_node) => {
-                        scan_node.vnode_bitmap = vnode_bitmap;
+                        let partition = partition.unwrap();
+                        scan_node.vnode_bitmap = Some(partition.vnode_bitmap);
+                        scan_node.scan_ranges = partition.scan_ranges;
                     }
                     NodeBody::SysRowSeqScan(_) => {}
                     _ => unreachable!(),
@@ -302,42 +305,17 @@ impl LocalQueryExecution {
                 })
             }
             PlanNodeType::BatchLookupJoin => {
-                // Need to set up source templates for LookupJoinExecutor
-                let local_execute_plan = LocalExecutePlan {
-                    plan: None,
-                    epoch: self.epoch.expect(
-                        "Local execution mode has not acquired the epoch when generating the plan.",
-                    ),
-                };
-
-                // Only 1 worker is used since distribution of BatchLookupJoin is always single
-                let worker = self.front_env.worker_node_manager().next_random()?;
-
-                let exchange_source = ExchangeSource {
-                    task_output_id: Some(TaskOutputId {
-                        task_id: Some(ProstTaskId {
-                            task_id: 0,
-                            stage_id: 0, // this value doesn't matter
-                            query_id: self.query.query_id.id.clone(),
-                        }),
-                        output_id: 0,
-                    }),
-                    host: Some(worker.host.as_ref().unwrap().clone()),
-                    local_execute_plan: Some(Plan(local_execute_plan)),
-                };
-
                 let mut node_body = execution_plan_node.node.clone();
-                let sources = match &mut node_body {
-                    NodeBody::LookupJoin(node) => &mut node.sources,
+                let worker_nodes = match &mut node_body {
+                    NodeBody::LookupJoin(node) => &mut node.worker_nodes,
                     _ => unreachable!(),
                 };
-                assert!(sources.is_empty());
-                *sources = vec![exchange_source];
+                *worker_nodes = self.front_env.worker_node_manager().list_worker_nodes();
 
                 let left_child = self.convert_plan_node(
                     &execution_plan_node.children[0],
                     second_stages,
-                    vnode_bitmap,
+                    partition,
                 )?;
 
                 Ok(PlanNodeProst {
@@ -350,7 +328,7 @@ impl LocalQueryExecution {
                 let children = execution_plan_node
                     .children
                     .iter()
-                    .map(|e| self.convert_plan_node(e, second_stages, vnode_bitmap.clone()))
+                    .map(|e| self.convert_plan_node(e, second_stages, partition.clone()))
                     .collect::<SchedulerResult<Vec<PlanNodeProst>>>()?;
 
                 Ok(PlanNodeProst {

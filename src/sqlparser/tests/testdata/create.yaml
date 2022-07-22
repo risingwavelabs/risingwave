@@ -31,10 +31,10 @@
 - input: CREATE SOURCE src ROW FORMAT JSON
   formatted_sql: CREATE SOURCE src ROW FORMAT JSON
 
-- input: CREATE SOURCE IF NOT EXISTS src WITH ('kafka.topic' = 'abc', 'kafka.servers' = 'localhost:1001') ROW FORMAT PROTOBUF MESSAGE 'Foo' ROW SCHEMA LOCATION 'file://'
-  formatted_sql: CREATE SOURCE IF NOT EXISTS src WITH ('kafka.topic' = 'abc', 'kafka.servers' = 'localhost:1001') ROW FORMAT PROTOBUF MESSAGE 'Foo' ROW SCHEMA LOCATION 'file://'
+- input: CREATE SOURCE IF NOT EXISTS src WITH (kafka.topic = 'abc', kafka.servers = 'localhost:1001') ROW FORMAT PROTOBUF MESSAGE 'Foo' ROW SCHEMA LOCATION 'file://'
+  formatted_sql: CREATE SOURCE IF NOT EXISTS src WITH (kafka.topic = 'abc', kafka.servers = 'localhost:1001') ROW FORMAT PROTOBUF MESSAGE 'Foo' ROW SCHEMA LOCATION 'file://'
   formatted_ast: |
-    CreateSource { is_materialized: false, stmt: CreateSourceStatement { if_not_exists: true, columns: [], constraints: [], source_name: ObjectName([Ident { value: "src", quote_style: None }]), with_properties: WithProperties([SqlOption { name: Ident { value: "kafka.topic", quote_style: Some('\'') }, value: SingleQuotedString("abc") }, SqlOption { name: Ident { value: "kafka.servers", quote_style: Some('\'') }, value: SingleQuotedString("localhost:1001") }]), source_schema: Protobuf(ProtobufSchema { message_name: AstString("Foo"), row_schema_location: AstString("file://") }) } }
+    CreateSource { is_materialized: false, stmt: CreateSourceStatement { if_not_exists: true, columns: [], constraints: [], source_name: ObjectName([Ident { value: "src", quote_style: None }]), with_properties: WithProperties([SqlOption { name: ObjectName([Ident { value: "kafka", quote_style: None }, Ident { value: "topic", quote_style: None }]), value: SingleQuotedString("abc") }, SqlOption { name: ObjectName([Ident { value: "kafka", quote_style: None }, Ident { value: "servers", quote_style: None }]), value: SingleQuotedString("localhost:1001") }]), source_schema: Protobuf(ProtobufSchema { message_name: AstString("Foo"), row_schema_location: AstString("file://") }) } }
 
 - input: CREATE TABLE T (v1 INT, v2 STRUCT<v1 INT, v2 INT>)
   formatted_sql: CREATE TABLE T (v1 INT, v2 STRUCT<v1 INT, v2 INT>)
@@ -52,5 +52,5 @@
   error_msg: |
     sql parser error: Expected FROM, found: EOF
 
-- input: CREATE SINK IF NOT EXISTS snk FROM mv WITH ('sink' = 'mysql', 'mysql.endpoint' = '127.0.0.1:3306', 'mysql.table' = '<table_name>', 'mysql.database' = '<database_name>', 'mysql.user' = '<user_name>', 'mysql.password' = '<password>')
-  formatted_sql: CREATE SINK IF NOT EXISTS snk FROM mv WITH ('sink' = 'mysql', 'mysql.endpoint' = '127.0.0.1:3306', 'mysql.table' = '<table_name>', 'mysql.database' = '<database_name>', 'mysql.user' = '<user_name>', 'mysql.password' = '<password>')
+- input: CREATE SINK IF NOT EXISTS snk FROM mv WITH (sink = 'mysql', mysql.endpoint = '127.0.0.1:3306', mysql.table = '<table_name>', mysql.database = '<database_name>', mysql.user = '<user_name>', mysql.password = '<password>')
+  formatted_sql: CREATE SINK IF NOT EXISTS snk FROM mv WITH (sink = 'mysql', mysql.endpoint = '127.0.0.1:3306', mysql.table = '<table_name>', mysql.database = '<database_name>', mysql.user = '<user_name>', mysql.password = '<password>')

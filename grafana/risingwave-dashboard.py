@@ -385,10 +385,12 @@ def section_streaming(panels):
             ]),
         panels.timeseries_rowsps("Source Throughput", [
             panels.target(
-                "rate(stream_source_output_rows_counts[$__rate_interval])", "source_id = {{source_id}}"
+                "rate(stream_source_output_rows_counts[$__rate_interval])", "source={{source_id}} @ {{instance}}"
             ),
+        ]),
+        panels.timeseries_rowsps("Source Throughput Per Partition", [
             panels.target(
-                "rate(partition_input_count[5s])", "{{actor_id}}-{{source_id}}-{{partition}}"
+                "rate(partition_input_count[$__rate_interval])", "actor={{actor_id}} source={{source_id}} partition={{partition}}"
             )
         ]),
     ]
@@ -554,9 +556,9 @@ def section_streaming_exchange(outer_panels):
                     "rate(stream_exchange_recv_size[$__rate_interval])", "{{up_actor_id}}->{{down_actor_id}}"
                 ),
             ]),
-            panels.timeseries_bytes_per_sec("Fragment Exchange Send Throughput",[
+            panels.timeseries_bytes_per_sec("Fragment Exchange Send Throughput", [
                 panels.target(
-                    "rate(stream_exchange_frag_send_size[$__rate_interval])","{{up_fragment_id}}->{{down_fragment_id}}"
+                    "rate(stream_exchange_frag_send_size[$__rate_interval])", "{{up_fragment_id}}->{{down_fragment_id}}"
                 ),
             ]),
             panels.timeseries_bytes_per_sec("Fragment Exchange Recv Throughput", [
@@ -586,7 +588,7 @@ def section_hummock(panels):
                 "sum(rate(state_store_get_shared_buffer_hit_counts[$__rate_interval])) by (job,instance)", "shared_buffer hit - {{job}} @ {{instance}}"
             ),
             panels.target(
-                "sum(rate(state_store_iter_in_process_counts[$__rate_interval])) by(job,instance)", "iter_in_process_counts - {{job}} @ {{instance}}"
+                "sum(rate(state_store_iter_in_process_counts[$__rate_interval])) by(job,instance)", "iter - {{job}} @ {{instance}}"
             ),
         ]),
         panels.timeseries_latency("Read Duration - Get", [

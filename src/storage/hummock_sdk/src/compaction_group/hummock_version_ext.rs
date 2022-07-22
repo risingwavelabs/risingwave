@@ -14,7 +14,8 @@
 
 use std::collections::HashSet;
 
-use risingwave_pb::hummock::{HummockVersion, Level, SstableInfo};
+use itertools::Itertools;
+use risingwave_pb::hummock::{HummockVersion, HummockVersionDelta, Level, SstableInfo};
 
 use crate::prost_key_range::KeyRangeExt;
 use crate::CompactionGroupId;
@@ -31,6 +32,7 @@ pub trait HummockVersionExt {
     ///
     /// Levels belonging to the same compaction group retain their relative order.
     fn get_combined_levels(&self) -> Vec<&Level>;
+    fn get_sst_ids(&self) -> Vec<u64>;
     fn apply_compact_ssts(
         levels: &mut Vec<Level>,
         delete_sst_levels: &[u32],
@@ -38,6 +40,7 @@ pub trait HummockVersionExt {
         insert_sst_level: u32,
         insert_table_infos: Vec<SstableInfo>,
     );
+    fn apply_version_delta(&mut self, version_delta: &HummockVersionDelta);
 }
 
 impl HummockVersionExt for HummockVersion {
@@ -68,6 +71,14 @@ impl HummockVersionExt for HummockVersion {
         combined_levels
     }
 
+    fn get_sst_ids(&self) -> Vec<u64> {
+        self.levels
+            .iter()
+            .flat_map(|(_, l)| &l.levels)
+            .flat_map(|level| level.table_infos.iter().map(|table_info| table_info.id))
+            .collect_vec()
+    }
+
     fn apply_compact_ssts(
         levels: &mut Vec<Level>,
         delete_sst_levels: &[u32],
@@ -90,6 +101,37 @@ impl HummockVersionExt for HummockVersion {
                 &l0_remove_position,
             );
         }
+    }
+
+    fn apply_version_delta(&mut self, version_delta: &HummockVersionDelta) {
+        for (compaction_group_id, level_deltas) in &version_delta.level_deltas {
+            let mut delete_sst_levels = Vec::with_capacity(level_deltas.level_deltas.len());
+            let mut delete_sst_ids_set = HashSet::new();
+            let mut insert_sst_level = u32::MAX;
+            let mut insert_table_infos = vec![];
+            for level_delta in &level_deltas.level_deltas {
+                if !level_delta.removed_table_ids.is_empty() {
+                    delete_sst_levels.push(level_delta.level_idx);
+                    delete_sst_ids_set.extend(level_delta.removed_table_ids.iter().clone());
+                }
+                if !level_delta.inserted_table_infos.is_empty() {
+                    insert_sst_level = level_delta.level_idx;
+                    insert_table_infos.extend(level_delta.inserted_table_infos.iter().cloned());
+                }
+            }
+            let operand = &mut self
+                .get_compaction_group_levels_mut(*compaction_group_id as CompactionGroupId);
+            HummockVersion::apply_compact_ssts(
+                operand,
+                &delete_sst_levels,
+                &delete_sst_ids_set,
+                insert_sst_level,
+                insert_table_infos,
+            );
+        }
+        self.id = version_delta.id;
+        self.max_committed_epoch = version_delta.max_committed_epoch;
+        self.safe_epoch = version_delta.safe_epoch;
     }
 }
 

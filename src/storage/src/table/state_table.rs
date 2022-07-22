@@ -31,32 +31,35 @@ use risingwave_pb::catalog::Table;
 use super::mem_table::{MemTable, RowOp};
 use super::storage_table::{StorageTableBase, READ_WRITE};
 use super::Distribution;
-use crate::encoding::cell_based_encoding_util::serialize_pk;
-use crate::encoding::cell_based_row_serializer::CellBasedRowSerializer;
-use crate::encoding::dedup_pk_cell_based_row_serializer::DedupPkCellBasedRowSerializer;
-use crate::encoding::Encoding;
 use crate::error::{StorageError, StorageResult};
+use crate::row_serde::cell_based_encoding_util::serialize_pk;
+use crate::row_serde::dedup_pk_cell_based_row_serializer::DedupPkCellBasedRowSerializer;
+use crate::row_serde::{CellBasedRowSerde, RowBasedSerde, RowSerde};
 use crate::StateStore;
 
 /// Identical to `StateTable`. Used when we want to
 /// rows to have dedup pk cell encoding.
 pub type DedupPkStateTable<S> = StateTableBase<S, DedupPkCellBasedRowSerializer>;
 
-/// `StateTable` is the interface accessing relational data in KV(`StateStore`) with encoding.
-pub type StateTable<S> = StateTableBase<S, CellBasedRowSerializer>;
+/// `StateTable` is the interface accessing relational data in KV(`StateStore`) with cell-based
+/// encoding.
+pub type StateTable<S> = StateTableBase<S, CellBasedRowSerde>;
 
+/// `RowBasedStateTable` is the interface accessing relational data in KV(`StateStore`) with
+/// row-based encoding.
+pub type RowBasedStateTable<S> = StateTableBase<S, RowBasedSerde>;
 /// `StateTableBase` is the interface accessing relational data in KV(`StateStore`) with
-/// encoding, using `RowSerializer` for row to cell serializing.
+/// encoding, using `RowSerde` for row to KV entries.
 #[derive(Clone)]
-pub struct StateTableBase<S: StateStore, E: Encoding> {
+pub struct StateTableBase<S: StateStore, RS: RowSerde> {
     /// buffer row operations.
     mem_table: MemTable,
 
     /// write into state store.
-    storage_table: StorageTableBase<S, E, READ_WRITE>,
+    storage_table: StorageTableBase<S, RS, READ_WRITE>,
 }
 
-impl<S: StateStore, E: Encoding> StateTableBase<S, E> {
+impl<S: StateStore, RS: RowSerde> StateTableBase<S, RS> {
     /// Create a state table without distribution, used for singleton executors and unit tests.
     pub fn new_without_distribution(
         store: S,
@@ -104,7 +107,7 @@ impl<S: StateStore, E: Encoding> StateTableBase<S, E> {
     }
 
     /// Get the underlying [` StorageTableBase`]. Should only be used for tests.
-    pub fn storage_table(&self) -> &StorageTableBase<S, E, READ_WRITE> {
+    pub fn storage_table(&self) -> &StorageTableBase<S, RS, READ_WRITE> {
         &self.storage_table
     }
 
@@ -190,9 +193,9 @@ impl<S: StateStore, E: Encoding> StateTableBase<S, E> {
 }
 
 /// Iterator functions.
-impl<S: StateStore> StateTable<S> {
+impl<S: StateStore, RS: RowSerde> StateTableBase<S, RS> {
     /// This function scans rows from the relational table.
-    pub async fn iter(&self, epoch: u64) -> StorageResult<RowStream<'_, S>> {
+    pub async fn iter(&self, epoch: u64) -> StorageResult<RowStream<'_, S, RS>> {
         self.iter_with_pk_prefix(Row::empty(), epoch).await
     }
 
@@ -201,7 +204,7 @@ impl<S: StateStore> StateTable<S> {
         &'a self,
         pk_prefix: &'a Row,
         epoch: u64,
-    ) -> StorageResult<RowStream<'a, S>> {
+    ) -> StorageResult<RowStream<'a, S, RS>> {
         let storage_table_iter = self
             .storage_table
             .streaming_iter_with_pk_bounds(epoch, pk_prefix, ..)
@@ -224,50 +227,15 @@ impl<S: StateStore> StateTable<S> {
         store: S,
         vnodes: Option<Arc<Bitmap>>,
     ) -> Self {
-        let table_columns = table_catalog
-            .columns
-            .iter()
-            .map(|col| col.column_desc.as_ref().unwrap().into())
-            .collect();
-        let order_types = table_catalog
-            .order_key
-            .iter()
-            .map(|col_order| {
-                OrderType::from_prost(
-                    &risingwave_pb::plan_common::OrderType::from_i32(col_order.order_type).unwrap(),
-                )
-            })
-            .collect();
-        let dist_key_indices = table_catalog
-            .distribution_key
-            .iter()
-            .map(|dist_index| *dist_index as usize)
-            .collect();
-        let pk_indices = table_catalog
-            .order_key
-            .iter()
-            .map(|col_order| col_order.index as usize)
-            .collect();
-        let distribution = match vnodes {
-            Some(vnodes) => Distribution {
-                dist_key_indices,
-                vnodes,
-            },
-            None => Distribution::fallback(),
-        };
-        StateTable::new_with_distribution(
-            store,
-            TableId::new(table_catalog.id),
-            table_columns,
-            order_types,
-            pk_indices,
-            distribution,
-        )
+        Self {
+            mem_table: MemTable::new(),
+            storage_table: StorageTableBase::from_table_catalog(table_catalog, store, vnodes),
+        }
     }
 }
 
-pub type RowStream<'a, S: StateStore> = impl Stream<Item = StorageResult<Cow<'a, Row>>>;
-
+pub type RowStream<'a, S: StateStore, RS: RowSerde> =
+    impl Stream<Item = StorageResult<Cow<'a, Row>>>;
 struct StateTableRowIter<'a, M, C> {
     mem_table_iter: M,
     storage_table_iter: C,

@@ -20,10 +20,11 @@ hyper = "0.14"
 itertools = "0.10"
 lazy_static = "1"
 log = "0.4"
-madsim = "=0.2.0-alpha.3"
+madsim = "=0.2.0-alpha.4"
 maplit = "1.0.2"
 memcomparable = { path = "../utils/memcomparable" }
 num-traits = "0.2"
+parking_lot = "0.12"
 paste = "1"
 prometheus = { version = "0.13" }
 prost = "0.10"
@@ -32,6 +33,7 @@ risingwave_batch = { path = "../batch" }
 risingwave_common = { path = "../common" }
 risingwave_common_service = { path = "../common/common_service" }
 risingwave_connector = { path = "../connector" }
+risingwave_hummock_sdk = { path = "../storage/hummock_sdk" }
 risingwave_pb = { path = "../prost" }
 risingwave_rpc_client = { path = "../rpc_client" }
 risingwave_source = { path = "../source" }
@@ -43,7 +45,7 @@ serde_json = "1"
 smallvec = "1"
 static_assertions = "1"
 thiserror = "1"
-tokio = { version = "=0.2.0-alpha.3", package = "madsim-tokio", features = [
+tokio = { version = "=0.2.0-alpha.4", package = "madsim-tokio", features = [
     "rt",
     "rt-multi-thread",
     "sync",
@@ -53,7 +55,7 @@ tokio = { version = "=0.2.0-alpha.3", package = "madsim-tokio", features = [
     "fs",
 ] }
 tokio-stream = "0.1"
-tonic = { version = "=0.2.0-alpha.3", package = "madsim-tonic" }
+tonic = { version = "=0.2.0-alpha.4", package = "madsim-tonic" }
 tower = { version = "0.4", features = ["util", "load-shed"] }
 tower-http = { version = "0.3", features = ["add-extension", "cors"] }
 tracing = { version = "0.1" }

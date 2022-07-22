@@ -27,7 +27,7 @@ use risingwave_common::catalog::Schema;
 use risingwave_common::error::{Result, RwError};
 use risingwave_common::util::chunk_coalesce::DEFAULT_CHUNK_BUFFER_SIZE;
 use risingwave_common::util::encoding_for_comparison::{encode_chunk, is_type_encodable};
-use risingwave_common::util::sort_util::{compare_two_row, HeapElem, OrderPair};
+use risingwave_common::util::sort_util::{compare_rows_in_chunk, HeapElem, OrderPair};
 use risingwave_pb::batch_plan::plan_node::NodeBody;
 
 use crate::error::BatchError;
@@ -122,7 +122,7 @@ impl BoxedExecutorBuilder for OrderByExecutor {
 
 impl OrderByExecutor {
     fn push_heap_for_chunk(&mut self, idx: usize) {
-        while self.vis_indices[idx] < self.chunks[idx].cardinality() {
+        while self.vis_indices[idx] < self.chunks[idx].capacity() {
             let skip: bool = match self.chunks[idx].visibility() {
                 Some(visibility) => visibility
                     .is_set(self.sorted_indices[idx][self.vis_indices[idx]])
@@ -152,15 +152,15 @@ impl OrderByExecutor {
     }
 
     fn get_order_index_from(&self, idx: usize) -> Vec<usize> {
-        let mut index: Vec<usize> = (0..self.chunks[idx].cardinality()).collect();
+        let mut index: Vec<usize> = (0..self.chunks[idx].capacity()).collect();
         index.sort_by(|ia, ib| {
             if self.disable_encoding || !self.encodable {
-                compare_two_row(
-                    self.order_pairs.as_ref(),
+                compare_rows_in_chunk(
                     &self.chunks[idx],
                     *ia,
                     &self.chunks[idx],
                     *ib,
+                    self.order_pairs.as_ref(),
                 )
                 .unwrap_or(Ordering::Equal)
             } else {
@@ -178,7 +178,7 @@ impl OrderByExecutor {
             let chunk = chunk?;
             if !self.disable_encoding && self.encodable {
                 self.encoded_keys
-                    .push(encode_chunk(&chunk, self.order_pairs.clone()));
+                    .push(Arc::new(encode_chunk(&chunk, &self.order_pairs)));
             }
             self.chunks.push(chunk);
             self.sorted_indices
@@ -233,7 +233,7 @@ impl OrderByExecutor {
                         ($b: ident, $a: ident, [$( $tt: ident), *]) => {
                             match ($b, $a) {
                                 $((ArrayBuilderImpl::$tt($b), ArrayImpl::$tt($a)) => Ok($b.append($a.value_at(top.elem_idx))),)*
-                                    _ => Err(BatchError::Internal(anyhow!("Unmatched array and array builder types"))),
+                                _ => Err(BatchError::Internal(anyhow!("Unmatched array and array builder types"))),
                             }?
                         }
                     }
