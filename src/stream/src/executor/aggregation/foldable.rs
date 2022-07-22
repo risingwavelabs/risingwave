@@ -21,11 +21,11 @@ use risingwave_common::array::stream_chunk::Ops;
 use risingwave_common::array::*;
 use risingwave_common::bail;
 use risingwave_common::buffer::Bitmap;
-use risingwave_common::error::{ErrorCode, RwError};
 use risingwave_common::types::{Datum, Scalar, ScalarRef};
+use risingwave_expr::ExprError;
 
 use super::{StreamingAggFunction, StreamingAggState, StreamingAggStateImpl};
-use crate::executor::error::{StreamExecutorError, StreamExecutorResult};
+use crate::executor::error::StreamExecutorResult;
 
 /// A trait over all fold functions.
 ///
@@ -103,8 +103,7 @@ where
         Ok(match (result, input) {
             (Some(x), Some(y)) => Some(
                 x.checked_add(&(y.to_owned_scalar()).into())
-                    .ok_or_else(|| RwError::from(ErrorCode::NumericValueOutOfRange))
-                    .map_err(StreamExecutorError::eval_error)?,
+                    .ok_or(ExprError::NumericOutOfRange)?,
             ),
             (Some(x), None) => Some(x.clone()),
             (None, Some(y)) => Some((y.to_owned_scalar()).into()),
@@ -119,8 +118,7 @@ where
         Ok(match (result, input) {
             (Some(x), Some(y)) => Some(
                 x.checked_sub(&(y.to_owned_scalar()).into())
-                    .ok_or_else(|| RwError::from(ErrorCode::NumericValueOutOfRange))
-                    .map_err(StreamExecutorError::eval_error)?,
+                    .ok_or(ExprError::NumericOutOfRange)?,
             ),
             (Some(x), None) => Some(x.clone()),
             (None, Some(y)) => Some((-y.to_owned_scalar()).into()),
