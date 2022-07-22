@@ -12,8 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::collections::{BinaryHeap, HashMap};
-use std::sync::Arc;
+use std::collections::HashMap;
 
 use futures::StreamExt;
 use futures_async_stream::try_stream;
@@ -25,7 +24,6 @@ use risingwave_common::error::{internal_error, ErrorCode, Result, RwError};
 use risingwave_common::types::{DataType, ParallelUnitId, ScalarImpl, ToOwnedDatum, VirtualNode};
 use risingwave_common::util::chunk_coalesce::{DataChunkBuilder, SlicedDataChunk};
 use risingwave_common::util::scan_range::ScanRange;
-use risingwave_common::util::sort_util::{HeapElem, OrderPair, OrderType};
 use risingwave_common::util::worker_util::get_pu_to_worker_mapping;
 use risingwave_expr::expr::expr_binary_nonnull::new_binary_expr;
 use risingwave_expr::expr::expr_binary_nullable::new_nullable_binary_expr;
@@ -271,19 +269,24 @@ impl<P: 'static + ProbeSideSourceBuilder> LookupJoinExecutor<P> {
         while let Some(build_chunk) = build_side_stream.next().await {
             let build_chunk = build_chunk?.compact()?;
 
-            let (row_keys, row_idxs) = self.get_grouped_build_side_rows(&build_chunk);
-            let row_refs_list = row_idxs
-                .iter()
-                .map(|rows| {
-                    rows.iter()
-                        .map(|&i| build_chunk.row_at_unchecked_vis(i))
-                        .collect_vec()
-                })
-                .collect_vec();
+            // Group rows with the same key datums together
+            let groups = build_chunk.rows().into_group_map_by(|row| {
+                self.build_side_key_idxs
+                    .iter()
+                    .map(|&idx| row.value_at(idx).to_owned_datum().unwrap())
+                    .collect_vec()
+            });
 
-            assert_eq!(row_keys.len(), row_refs_list.len());
+            let mut row_keys = vec![];
+            let mut all_row_refs = vec![];
 
-            //
+            groups.into_iter().for_each(|(row_key, row_refs)| {
+                row_keys.push(row_key);
+                all_row_refs.push(row_refs);
+            });
+
+            assert_eq!(row_keys.len(), all_row_refs.len());
+
             self.probe_side_source.reset();
             for row_key in &row_keys {
                 self.probe_side_source.add_scan_range(row_key)?;
@@ -296,7 +299,7 @@ impl<P: 'static + ProbeSideSourceBuilder> LookupJoinExecutor<P> {
 
             // has_match tells us, for each row in the build side chunk, if it has a match
             // on the probe side table
-            let mut has_match = row_idxs
+            let mut has_match = all_row_refs
                 .iter()
                 .map(|rows| vec![false; rows.len()])
                 .collect_vec();
@@ -312,7 +315,7 @@ impl<P: 'static + ProbeSideSourceBuilder> LookupJoinExecutor<P> {
                     None
                 };
 
-                for (i, row_refs) in row_refs_list.iter().enumerate() {
+                for (i, row_refs) in all_row_refs.iter().enumerate() {
                     // We filter the probe side chunk to only have the rows whose key datums
                     // matches the key datums of the row_refs we're currently looking at
                     let expr = self.create_expression(&row_keys[i], 0);
@@ -412,77 +415,6 @@ impl<P: 'static + ProbeSideSourceBuilder> LookupJoinExecutor<P> {
         if let Some(data_chunk) = self.chunk_builder.consume_all()? {
             yield data_chunk.reorder_columns(&self.output_indices);
         }
-    }
-
-    /// Builds the min heap to sort the rows in the data chunk by their key columns.
-    fn build_min_heap(&self, data_chunk: &DataChunk) -> BinaryHeap<HeapElem> {
-        let mut min_heap = BinaryHeap::new();
-
-        let order_pairs = Arc::new(
-            self.build_side_key_idxs
-                .iter()
-                .map(|&idx| OrderPair::new(idx, OrderType::Ascending))
-                .collect_vec(),
-        );
-
-        for row_idx in 0..data_chunk.capacity() {
-            let heap_elem = HeapElem {
-                order_pairs: order_pairs.clone(),
-                chunk: data_chunk.clone(),
-                chunk_idx: 0,
-                elem_idx: row_idx,
-                encoded_chunk: None,
-            };
-
-            min_heap.push(heap_elem);
-        }
-
-        min_heap
-    }
-
-    /// Gets a list of the build side rows grouped together based on their key columns.
-    /// Rows that have the same values on the key columns are grouped together.
-    fn get_grouped_build_side_rows(
-        &self,
-        data_chunk: &DataChunk,
-    ) -> (Vec<Vec<ScalarImpl>>, Vec<Vec<usize>>) {
-        let mut min_heap = self.build_min_heap(data_chunk);
-        let mut all_row_keys = vec![];
-        let mut all_row_idxs = vec![];
-
-        while min_heap.peek().is_some() {
-            let mut row_idxs = vec![];
-            let mut prev_key: Vec<ScalarImpl> = vec![];
-
-            // Build the list of rows which are equal on the build side key indices
-            while min_heap.peek().is_some() {
-                let heap_elem = min_heap.peek().unwrap();
-                // Data chunk was compacted so this is always visible
-                let cur_row = heap_elem.chunk.row_at_unchecked_vis(heap_elem.elem_idx);
-                let cur_key = self
-                    .build_side_key_idxs
-                    .iter()
-                    .map(|&idx| cur_row.value_at(idx).to_owned_datum().unwrap())
-                    .collect_vec();
-
-                if prev_key.is_empty() {
-                    prev_key = cur_key.clone();
-                } else {
-                    let key_matches = prev_key.iter().zip_eq(&cur_key).all(|(a, b)| a == b);
-                    if !key_matches {
-                        break;
-                    }
-                }
-
-                let heap_elem = min_heap.pop().unwrap();
-                row_idxs.push(heap_elem.elem_idx);
-            }
-
-            all_row_keys.push(prev_key);
-            all_row_idxs.push(row_idxs);
-        }
-
-        (all_row_keys, all_row_idxs)
     }
 
     /// Creates an expression that returns true if the value of the datums in all the probe side
