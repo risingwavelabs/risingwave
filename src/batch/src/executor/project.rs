@@ -52,14 +52,14 @@ impl ProjectExecutor {
     async fn do_execute(mut self: Box<Self>) {
         #[for_await]
         for data_chunk in self.child.execute() {
-            let data_chunk = data_chunk?;
+            let data_chunk: DataChunk = data_chunk?;
             // let data_chunk = data_chunk.compact()?;
             let arrays: Vec<Column> = self
                 .expr
                 .iter_mut()
                 .map(|expr| expr.eval(&data_chunk).map(Column::new))
                 .try_collect()?;
-            let ret = DataChunk::new(arrays, data_chunk.cardinality());
+            let ret = DataChunk::new(arrays, data_chunk.vis());
             yield ret
         }
     }
