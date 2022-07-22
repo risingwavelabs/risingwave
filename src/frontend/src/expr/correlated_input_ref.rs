@@ -18,21 +18,28 @@ use risingwave_common::types::DataType;
 
 use super::Expr;
 
+pub type Depth = usize;
 pub type CorrelatedId = u32;
 
+/// Relative `Depth` is the number of of nesting levels of the subquery relative to the refered
+/// relation, and should be non-zero.
+/// Absolute `CorrelatedId` is the id of the related Apply operator, and should be non-zero.
 #[derive(Clone, Eq, PartialEq, Hash)]
+pub enum Position {
+    Relative(Depth),
+    Absolute(CorrelatedId),
+}
+
 /// A reference to a column outside the subquery.
 ///
-/// `depth` is the number of of nesting levels of the subquery relative to the refered relation, and
-/// should be non-zero.
-///
 /// `index` is the index in the refered relation.
-/// `correlated_id` is the id of the related Apply operator. 0 means uninitialized.
+/// `position` has two mode Relative and Absolute.
+/// For binding we use relative position, for optimization we use absolute position.
+#[derive(Clone, Eq, PartialEq, Hash)]
 pub struct CorrelatedInputRef {
     index: usize,
     data_type: DataType,
-    depth: usize,
-    correlated_id: CorrelatedId,
+    position: Position,
 }
 
 impl CorrelatedInputRef {
@@ -40,8 +47,7 @@ impl CorrelatedInputRef {
         CorrelatedInputRef {
             index,
             data_type,
-            depth,
-            correlated_id: 0,
+            position: Position::Relative(depth),
         }
     }
 
@@ -51,15 +57,21 @@ impl CorrelatedInputRef {
     }
 
     pub fn depth(&self) -> usize {
-        self.depth
+        match self.position {
+            Position::Relative(depth) => depth,
+            Position::Absolute(_) => 0,
+        }
     }
 
     pub fn set_correlated_id(&mut self, correlated_id: CorrelatedId) {
-        self.correlated_id = correlated_id;
+        self.position = Position::Absolute(correlated_id);
     }
 
     pub fn get_correlated_id(&self) -> CorrelatedId {
-        self.correlated_id
+        match self.position {
+            Position::Relative(_) => 0,
+            Position::Absolute(correlated_id) => correlated_id,
+        }
     }
 }
 
@@ -77,7 +89,7 @@ impl fmt::Debug for CorrelatedInputRef {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         f.debug_struct("CorrelatedInputRef")
             .field("index", &self.index)
-            .field("correlated_id", &self.correlated_id)
+            .field("correlated_id", &self.get_correlated_id())
             .finish()
     }
 }
