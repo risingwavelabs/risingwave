@@ -188,8 +188,8 @@ impl<S: StateStore> SourceExecutor<S> {
                 .await
                 .map(SourceStreamReaderImpl::Connector),
         }
-        .map_err(StreamExecutorError::eval_error)?;
-        
+        .map_err(|e| StreamExecutorError::connector_error(e.to_string()))?;
+
         Ok(Box::new(reader))
     }
 

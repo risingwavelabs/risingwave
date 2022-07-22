@@ -16,6 +16,7 @@ use std::backtrace::Backtrace;
 
 use risingwave_common::array::ArrayError;
 use risingwave_common::error::{BoxedError, Error, ErrorCode, RwError, TrackingIssue};
+use risingwave_connector::error::ConnectorError;
 use risingwave_expr::ExprError;
 use risingwave_storage::error::StorageError;
 
@@ -45,6 +46,9 @@ enum StreamExecutorErrorInner {
 
     #[error("Failed to align barrier: expected {0:?} but got {1:?}")]
     AlignBarrier(Box<Barrier>, Box<Barrier>),
+
+    #[error("Connector error: {0}")]
+    ConnectorError(String),
 
     #[error("Feature is not yet implemented: {0}, {1}")]
     NotImplemented(String, TrackingIssue),
@@ -76,6 +80,10 @@ impl StreamExecutorError {
 
     pub fn invalid_argument(error: impl Into<String>) -> Self {
         StreamExecutorErrorInner::InvalidArgument(error.into()).into()
+    }
+
+    pub fn connector_error(error: impl Into<String>) -> Self {
+        StreamExecutorErrorInner::ConnectorError(error.into()).into()
     }
 
     pub fn not_implemented(error: impl Into<String>, issue: impl Into<TrackingIssue>) -> Self {
@@ -147,6 +155,13 @@ impl From<memcomparable::Error> for StreamExecutorError {
 impl From<StreamExecutorError> for RwError {
     fn from(h: StreamExecutorError) -> Self {
         ErrorCode::StreamError(h.into()).into()
+    }
+}
+
+/// Connector error.
+impl From<ConnectorError> for StreamExecutorError {
+    fn from(s: ConnectorError) -> Self {
+        Self::connector_error(s.to_string())
     }
 }
 
