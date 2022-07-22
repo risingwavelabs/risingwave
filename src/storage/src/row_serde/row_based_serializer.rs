@@ -63,4 +63,11 @@ impl RowSerialize for RowBasedSerializer {
         let res = vec![Some((key, value_bytes))];
         Ok(res)
     }
+
+    fn serialize_sentinel_cell(
+        _pk_buf: &[u8],
+        _col_id: &risingwave_common::catalog::ColumnId,
+    ) -> Result<Option<Vec<u8>>> {
+        Ok(None)
+    }
 }
