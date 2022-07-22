@@ -116,10 +116,6 @@ impl RowSerialize for DedupPkCellBasedRowSerializer {
         let row = self.remove_dup_pk_datums(row);
         self.inner.serialize_for_update(vnode, pk, row)
     }
-
-    fn column_ids(&self) -> &[ColumnId] {
-        self.inner.column_ids()
-    }
 }
 
 impl RowSerde for DedupPkCellBasedRowSerializer {
