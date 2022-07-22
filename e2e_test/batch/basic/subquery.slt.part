@@ -8,19 +8,25 @@ statement ok
 create table t2 (x int, y int)
 
 statement ok
-insert into t1 values (1, 1), (2, 2)
+insert into t1 values (1, 1), (2, 2), (1, null), (null, 2), (2, null), (null, 1), (null, null)
 
 statement ok
-insert into t2 values (1, 2), (2, 2)
+insert into t2 values (1, 2), (2, 2), (1, null), (null, 2), (2, null), (null, 1), (null, null)
 
 query III
-select * from t1 where exists(select * from t2 where t1.x = t2.x and t1.y <> t2.y)
+select * from t1 where exists(select * from t2 where t1.x = t2.x and t1.y <> t2.y) order by t1.x, t1.y
 ----
 1 1
 
+
 query III
-select * from t1 where not exists(select * from t2 where t1.x = t2.x and t1.y <> t2.y)
+select * from t1 where not exists(select * from t2 where t1.x = t2.x and t1.y <> t2.y) order by t1.x, t1.y
 ----
+NULL NULL
+NULL 1
+NULL 2
+1 NULL
+2 NULL
 2 2
 
 
