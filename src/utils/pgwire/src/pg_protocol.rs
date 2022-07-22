@@ -501,7 +501,7 @@ where
         let mut rows_cnt = 0;
 
         // Simple query mode(default format: 'TEXT') or result_format is 'TEXT'.
-        if extended.is_none() || extended.unwrap() == false {
+        if extended.is_none() || !extended.unwrap() {
             let iter = res.iter();
             for val in iter {
                 self.stream.write(&BeMessage::DataRow(val)).await?;

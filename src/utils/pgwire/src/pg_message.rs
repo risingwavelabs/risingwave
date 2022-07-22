@@ -77,7 +77,7 @@ pub struct FeBindMessage {
     //  false: text
     //  true: binary
     pub result_format_code: bool,
-    
+
     pub params: Vec<Bytes>,
     pub portal_name: Bytes,
     pub statement_name: Bytes,
@@ -161,9 +161,9 @@ impl FeBindMessage {
         assert!(len==0||len==1,"Only support default format(len==0) or uniform format(len==1), can't support mix format now.");
 
         let result_format_code = if len == 0 {
-            //default format:text
+            // default format:text
             false
-        }else{
+        } else {
             buf.get_i16() == 1
         };
 

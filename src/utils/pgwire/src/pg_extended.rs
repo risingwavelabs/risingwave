@@ -138,7 +138,7 @@ impl PgStatement {
         session: Arc<SM::Session>,
         portal_name: String,
         params: &[Bytes],
-        result_format: bool
+        result_format: bool,
     ) -> Result<PgPortal, ()> {
         let statement = cstr_to_str(&self.query_string).unwrap().to_owned();
 
@@ -198,11 +198,10 @@ pub struct PgPortal {
     result_cache: Option<IntoIter<Row>>,
     stmt_type: Option<StatementType>,
     row_description: Vec<PgFieldDescriptor>,
-    result_format:bool,
+    result_format: bool,
 }
 
 impl PgPortal {
-
     pub fn name(&self) -> String {
         self.name.clone()
     }
