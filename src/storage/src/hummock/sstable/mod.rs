@@ -127,7 +127,6 @@ impl Sstable {
             }),
             file_size: self.meta.estimated_size as u64,
             table_ids: vec![],
-            unit_id: 0,
         }
     }
 }
