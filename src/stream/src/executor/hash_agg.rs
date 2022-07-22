@@ -251,11 +251,7 @@ impl<K: HashKey, S: StateStore> HashAggExecutor<K, S> {
                         Some(s) => s.unwrap(),
                         None => Box::new(
                             generate_managed_agg_state(
-                                Some(
-                                    &key.clone()
-                                        .deserialize(key_data_types.iter())
-                                        .map_err(StreamExecutorError::serde_error)?,
-                                ),
+                                Some(&key.clone().deserialize(key_data_types.iter())?),
                                 agg_calls,
                                 input_pk_data_types.clone(),
                                 epoch,
@@ -371,8 +367,7 @@ impl<K: HashKey, S: StateStore> HashAggExecutor<K, S> {
 
                     for _ in 0..appended {
                         key.clone()
-                            .deserialize_to_builders(&mut builders[..key_indices.len()])
-                            .map_err(StreamExecutorError::serde_error)?;
+                            .deserialize_to_builders(&mut builders[..key_indices.len()])?;
                     }
                 }
 
