@@ -16,8 +16,8 @@ use std::collections::HashMap;
 
 use risingwave_pb::common::WorkerNode;
 
-use crate::error::Result;
 use crate::types::ParallelUnitId;
+
 pub fn get_pu_to_worker_mapping(nodes: &[WorkerNode]) -> HashMap<ParallelUnitId, WorkerNode> {
     let mut pu_to_worker = HashMap::new();
 
@@ -29,23 +29,4 @@ pub fn get_pu_to_worker_mapping(nodes: &[WorkerNode]) -> HashMap<ParallelUnitId,
     }
 
     pu_to_worker
-}
-
-pub fn get_workers_by_parallel_unit_ids(
-    current_nodes: &[WorkerNode],
-    parallel_unit_ids: &[ParallelUnitId],
-) -> Result<Vec<WorkerNode>> {
-    let pu_to_worker = get_pu_to_worker_mapping(current_nodes);
-
-    let mut workers = Vec::with_capacity(parallel_unit_ids.len());
-    for parallel_unit_id in parallel_unit_ids {
-        match pu_to_worker.get(parallel_unit_id) {
-            Some(worker) => workers.push(worker.clone()),
-            None => bail!(
-                "No worker node found for parallel unit id: {}",
-                parallel_unit_id
-            ),
-        }
-    }
-    Ok(workers)
 }
