@@ -42,6 +42,7 @@ enum StreamExecutorErrorInner {
     #[error("Source error: {0}")]
     SourceError(RwError),
 
+    // TODO: remove this
     #[error("Sink error: {0}")]
     SinkError(RwError),
 
