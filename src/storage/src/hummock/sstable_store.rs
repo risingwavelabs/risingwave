@@ -254,9 +254,10 @@ impl SstableStore {
                 .block_metas
                 .get(start_block_index as usize)
                 .ok_or_else(HummockError::invalid_block)?;
+            let total_len = sst.meta.block_metas[start_block_index..].iter().map(|m| m.len).sum();
             let block_loc = BlockLocation {
                 offset: block_meta.offset as usize,
-                size: block_meta.len as usize,
+                size: total_len as usize,
             };
             Some(block_loc)
         } else {
