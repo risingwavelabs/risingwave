@@ -20,6 +20,7 @@ use risingwave_common::catalog::{ColumnDesc, ColumnId};
 use risingwave_common::error::Result;
 use risingwave_common::types::VirtualNode;
 
+use super::cell_based_encoding_util::serialize_column_id;
 use super::cell_based_row_deserializer::CellBasedRowDeserializer;
 use super::cell_based_row_serializer::CellBasedRowSerializer;
 use super::{KeyBytes, RowSerde, RowSerialize, ValueBytes};
@@ -117,8 +118,10 @@ impl RowSerialize for DedupPkCellBasedRowSerializer {
         self.inner.serialize_for_update(vnode, pk, row)
     }
 
-    fn column_ids(&self) -> &[ColumnId] {
-        self.inner.column_ids()
+    fn serialize_sentinel_cell(pk_buf: &[u8], col_id: &ColumnId) -> Result<Option<Vec<u8>>> {
+        Ok(Some(
+            [pk_buf, serialize_column_id(col_id).as_slice()].concat(),
+        ))
     }
 }
 
