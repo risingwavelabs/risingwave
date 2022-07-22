@@ -129,12 +129,12 @@ impl CompactionPicker for ManualCompactionPicker {
             input_levels: vec![
                 InputLevel {
                     level_idx: level as u32,
-                    level_type: levels[level - 1].level_type,
+                    level_type: levels[level].level_type,
                     table_infos: select_input_ssts,
                 },
                 InputLevel {
                     level_idx: target_level as u32,
-                    level_type: levels[target_level - 1].level_type,
+                    level_type: levels[target_level].level_type,
                     table_infos: target_input_ssts,
                 },
             ],

@@ -169,8 +169,8 @@ impl CompactionPicker for MinOverlappingPicker {
         level_handlers: &mut [LevelHandler],
     ) -> Option<CompactionInput> {
         let (select_input_ssts, target_input_ssts) = self.pick_tables(
-            &levels[self.level - 1].table_infos,
             &levels[self.level].table_infos,
+            &levels[self.level + 1].table_infos,
             level_handlers,
         );
         if select_input_ssts.is_empty() {
@@ -212,6 +212,12 @@ pub mod tests {
     fn test_compact_l1() {
         let picker = MinOverlappingPicker::new(0, 1, 2, Arc::new(RangeOverlapStrategy::default()));
         let levels = vec![
+            Level {
+                level_idx: 0,
+                level_type: LevelType::Overlapping as i32,
+                table_infos: vec![],
+                total_file_size: 0,
+            },
             Level {
                 level_idx: 1,
                 level_type: LevelType::Nonoverlapping as i32,
@@ -277,6 +283,12 @@ pub mod tests {
     fn test_expand_l1_files() {
         let picker = MinOverlappingPicker::new(0, 1, 2, Arc::new(RangeOverlapStrategy::default()));
         let levels = vec![
+            Level {
+                level_idx: 0,
+                level_type: LevelType::Overlapping as i32,
+                table_infos: vec![],
+                total_file_size: 0,
+            },
             Level {
                 level_idx: 1,
                 level_type: LevelType::Nonoverlapping as i32,
