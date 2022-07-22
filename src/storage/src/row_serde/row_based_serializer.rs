@@ -64,7 +64,7 @@ impl RowSerialize for RowBasedSerializer {
         Ok(res)
     }
 
-    fn column_ids(&self) -> &[risingwave_common::catalog::ColumnId] {
-        unreachable!()
-    }
+    // fn column_ids(&self) -> &[risingwave_common::catalog::ColumnId] {
+    //     unreachable!()
+    // }
 }

@@ -78,7 +78,6 @@ pub trait RowSerialize: Clone {
         pk: &[u8],
         row: Row,
     ) -> Result<Vec<Option<(KeyBytes, ValueBytes)>>>;
-    fn column_ids(&self) -> &[ColumnId];
 }
 
 /// Record mapping from [`ColumnDesc`], [`ColumnId`], and output index of columns in a table.
