@@ -21,6 +21,7 @@ use bytes::Bytes;
 use itertools::Itertools;
 use risingwave_hummock_sdk::key::key_with_epoch;
 use risingwave_hummock_sdk::LocalSstableInfo;
+use risingwave_pb::hummock::LevelType;
 
 use super::iterator::{
     BackwardUserIterator, ConcatIteratorInner, DirectedUserIterator, UserIterator,
@@ -128,7 +129,8 @@ impl HummockStorage {
             if table_infos.is_empty() {
                 continue;
             }
-            if can_concat(&table_infos) {
+            if level.level_type == LevelType::Nonoverlapping as i32 {
+                debug_assert!(can_concat(&table_infos));
                 let start_table_idx = match key_range.start_bound() {
                     Included(key) | Excluded(key) => search_sst_idx(&table_infos, key),
                     _ => 0,

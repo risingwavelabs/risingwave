@@ -79,8 +79,10 @@ impl TableFunction for Unnest {
     }
 }
 
-pub fn new_unnest(args: Vec<BoxedExpression>, return_type: DataType) -> Result<BoxedTableFunction> {
-    ensure!(args.len() == 1);
+pub fn new_unnest(prost: &TableFunctionProst) -> Result<BoxedTableFunction> {
+    ensure!(prost.args.len() == 1);
+    let return_type = DataType::from(prost.get_return_type().unwrap());
+    let args: Vec<_> = prost.args.iter().map(expr_build_from_prost).try_collect()?;
     let list = args.into_iter().next().unwrap();
 
     Ok(Unnest { return_type, list }.boxed())
