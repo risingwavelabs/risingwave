@@ -19,14 +19,14 @@ use parking_lot::RwLock;
 use risingwave_common::error::{ErrorCode, Result};
 use risingwave_common_service::observer_manager::ObserverNodeImpl;
 use risingwave_hummock_sdk::slice_transform::{
-    DummySliceTransform, SchemaSliceTransform, SliceTransform,
+    DummySliceTransform, SchemaSliceTransform, SliceTransformImpl,
 };
 use risingwave_pb::catalog::Table;
 use risingwave_pb::meta::subscribe_response::{Info, Operation};
 use risingwave_pb::meta::SubscribeResponse;
 
 pub struct CompactorObserverNode {
-    table_id_to_slice_transform: Arc<RwLock<HashMap<u32, Arc<dyn SliceTransform>>>>,
+    table_id_to_slice_transform: Arc<RwLock<HashMap<u32, SliceTransformImpl>>>,
 
     version: u64,
 }
@@ -76,9 +76,7 @@ impl ObserverNodeImpl for CompactorObserverNode {
 }
 
 impl CompactorObserverNode {
-    pub fn new(
-        table_id_to_slice_transform: Arc<RwLock<HashMap<u32, Arc<dyn SliceTransform>>>>,
-    ) -> Self {
+    pub fn new(table_id_to_slice_transform: Arc<RwLock<HashMap<u32, SliceTransformImpl>>>) -> Self {
         Self {
             table_id_to_slice_transform,
             version: 0,
@@ -89,12 +87,11 @@ impl CompactorObserverNode {
         let mut guard = self.table_id_to_slice_transform.write();
         match operation {
             Operation::Add | Operation::Update => {
-                let slice_transform: Arc<dyn SliceTransform> =
-                    if table_catalog.read_pattern_prefix_column < 1 {
-                        Arc::new(DummySliceTransform::default())
-                    } else {
-                        Arc::new(SchemaSliceTransform::new(&table_catalog))
-                    };
+                let slice_transform = if table_catalog.read_pattern_prefix_column < 1 {
+                    SliceTransformImpl::Dummy(DummySliceTransform::default())
+                } else {
+                    SliceTransformImpl::Schema(SchemaSliceTransform::new(&table_catalog))
+                };
                 guard.insert(table_catalog.id, slice_transform);
             }
 
