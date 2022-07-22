@@ -151,24 +151,26 @@ impl SchemaSliceTransform {
 
 #[derive(Default, Clone)]
 pub struct MultiSliceTransform {
-    id_to_slice_transform: HashMap<u32, Box<SliceTransformImpl>>,
+    id_to_slice_transform: HashMap<u32, SliceTransformImpl>,
 
     // cached state
     last_slice_transform_state: Option<(u32, Box<SliceTransformImpl>)>,
 }
 
 impl MultiSliceTransform {
-    pub fn register(&mut self, table_id: u32, slice_transform: Box<SliceTransformImpl>) {
+    pub fn register(&mut self, table_id: u32, slice_transform: SliceTransformImpl) {
         self.id_to_slice_transform.insert(table_id, slice_transform);
     }
 
     fn update_state(&mut self, new_table_id: u32) {
         self.last_slice_transform_state = Some((
             new_table_id,
-            self.id_to_slice_transform
-                .get(&new_table_id)
-                .unwrap()
-                .clone(),
+            Box::new(
+                self.id_to_slice_transform
+                    .get(&new_table_id)
+                    .unwrap()
+                    .clone(),
+            ),
         ));
     }
 
@@ -367,10 +369,7 @@ mod tests {
             // test table_id 1
             let prost_table = build_table_with_prefix_column_num(1);
             let schema_slice_transform = SchemaSliceTransform::new(&prost_table);
-            multi_slice_transform.register(
-                1,
-                Box::new(SliceTransformImpl::Schema(schema_slice_transform)),
-            );
+            multi_slice_transform.register(1, SliceTransformImpl::Schema(schema_slice_transform));
             let order_types: Vec<OrderType> = vec![OrderType::Ascending, OrderType::Ascending];
 
             let serializer = OrderedRowSerializer::new(order_types);
@@ -411,10 +410,7 @@ mod tests {
             // test table_id 1
             let prost_table = build_table_with_prefix_column_num(2);
             let schema_slice_transform = SchemaSliceTransform::new(&prost_table);
-            multi_slice_transform.register(
-                2,
-                Box::new(SliceTransformImpl::Schema(schema_slice_transform)),
-            );
+            multi_slice_transform.register(2, SliceTransformImpl::Schema(schema_slice_transform));
             let order_types: Vec<OrderType> = vec![OrderType::Ascending, OrderType::Ascending];
 
             let serializer = OrderedRowSerializer::new(order_types);
@@ -454,10 +450,8 @@ mod tests {
 
         {
             let full_key_slice_transform = FullKeySliceTransform::default();
-            multi_slice_transform.register(
-                3,
-                Box::new(SliceTransformImpl::FullKey(full_key_slice_transform)),
-            );
+            multi_slice_transform
+                .register(3, SliceTransformImpl::FullKey(full_key_slice_transform));
 
             let table_prefix = {
                 let mut buf = BytesMut::with_capacity(TABLE_PREFIX_LEN);

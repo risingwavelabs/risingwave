@@ -26,7 +26,7 @@ use risingwave_pb::meta::subscribe_response::{Info, Operation};
 use risingwave_pb::meta::SubscribeResponse;
 
 pub struct CompactorObserverNode {
-    table_id_to_slice_transform: Arc<RwLock<HashMap<u32, Box<SliceTransformImpl>>>>,
+    table_id_to_slice_transform: Arc<RwLock<HashMap<u32, SliceTransformImpl>>>,
 
     version: u64,
 }
@@ -76,9 +76,7 @@ impl ObserverNodeImpl for CompactorObserverNode {
 }
 
 impl CompactorObserverNode {
-    pub fn new(
-        table_id_to_slice_transform: Arc<RwLock<HashMap<u32, Box<SliceTransformImpl>>>>,
-    ) -> Self {
+    pub fn new(table_id_to_slice_transform: Arc<RwLock<HashMap<u32, SliceTransformImpl>>>) -> Self {
         Self {
             table_id_to_slice_transform,
             version: 0,
@@ -89,14 +87,11 @@ impl CompactorObserverNode {
         let mut guard = self.table_id_to_slice_transform.write();
         match operation {
             Operation::Add | Operation::Update => {
-                let slice_transform: Box<SliceTransformImpl> =
-                    if table_catalog.read_pattern_prefix_column < 1 {
-                        Box::new(SliceTransformImpl::Dummy(DummySliceTransform::default()))
-                    } else {
-                        Box::new(SliceTransformImpl::Schema(SchemaSliceTransform::new(
-                            &table_catalog,
-                        )))
-                    };
+                let slice_transform = if table_catalog.read_pattern_prefix_column < 1 {
+                    SliceTransformImpl::Dummy(DummySliceTransform::default())
+                } else {
+                    SliceTransformImpl::Schema(SchemaSliceTransform::new(&table_catalog))
+                };
                 guard.insert(table_catalog.id, slice_transform);
             }
 
