@@ -8,10 +8,16 @@ statement ok
 create table t2 (x int, y int)
 
 statement ok
+create table t3(x int, y int)
+
+statement ok
 insert into t1 values (1, 1), (2, 2)
 
 statement ok
 insert into t2 values (1, 2), (2, 2)
+
+statement ok
+insert into t3 values (1, 2), (2, 2)
 
 query III
 select * from t1 where exists(select * from t2 where t1.x = t2.x and t1.y <> t2.y)
@@ -23,6 +29,22 @@ select * from t1 where not exists(select * from t2 where t1.x = t2.x and t1.y <>
 ----
 2 2
 
+query III
+select * from t1 where t1.y in (select t1.y from t2 where t1.x = t2.x) order by t1.x
+----
+1 1
+2 2
+
+query III
+select * from t1 where exists(select x from t2 where t1.x = t2.x and t2.y in (select t3.y from t3 where t1.x = t3.x)) order by t1.x
+----
+1 1
+2 2
+
+query III
+select * from t1 where exists(select t2.x from t2 join t3 on t2.x = t3.x and t1.y = t2.y and t1.y = t3.y)  order by t1.x
+----
+2 2
 
 
 statement ok
@@ -30,3 +52,6 @@ drop table t1;
 
 statement ok
 drop table t2;
+
+statement ok
+drop table t3;

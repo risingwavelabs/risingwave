@@ -449,18 +449,18 @@
     create table t1(x int, y int);
     create table t2(x int, y int);
     create table t3(x int, y int);
-    select * from t1 where exists(select x from t2 join t3 on t2.x = t3.x and t1.y = t2.y and t1.y = t3.y);
+    select * from t1 where exists(select t2.x from t2 join t3 on t2.x = t3.x and t1.y = t2.y and t1.y = t3.y);
   optimized_logical_plan: |
-    LogicalJoin { type: LeftSemi, on: ($0 = $2) AND ($1 = $3), output_indices: all }
+    LogicalJoin { type: LeftSemi, on: ($1 = $2), output_indices: all }
       LogicalScan { table: t1, columns: [x, y] }
-      LogicalJoin { type: Inner, on: ($2 = $3) AND ($1 = $4), output_indices: [0, 1] }
-        LogicalJoin { type: Inner, on: ($0 = $3) AND ($1 = $4), output_indices: [0, 1, 2] }
-          LogicalJoin { type: Inner, on: ($1 = $3), output_indices: [0, 1, 2] }
-            LogicalAgg { group_key: [$0, $1], aggs: [] }
-              LogicalScan { table: t1, columns: [x, y] }
+      LogicalJoin { type: Inner, on: ($1 = $2) AND ($0 = $3), output_indices: [0] }
+        LogicalJoin { type: Inner, on: ($0 = $2), output_indices: [0, 1] }
+          LogicalJoin { type: Inner, on: ($0 = $2), output_indices: [0, 1] }
+            LogicalAgg { group_key: [$0], aggs: [] }
+              LogicalScan { table: t1, columns: [y] }
             LogicalScan { table: t2, columns: [x, y] }
-          LogicalAgg { group_key: [$0, $1], aggs: [] }
-            LogicalScan { table: t1, columns: [x, y] }
+          LogicalAgg { group_key: [$0], aggs: [] }
+            LogicalScan { table: t1, columns: [y] }
         LogicalScan { table: t3, columns: [x, y] }
 - sql: |
     create table t1(x int, y int);
