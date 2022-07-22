@@ -18,9 +18,9 @@ use std::time::Duration;
 use clap::Parser as ClapParser;
 use itertools::Itertools;
 use rand::Rng;
-use risingwave_sqlparser::ast::Statement;
-use risingwave_sqlparser::parser::Parser;
-use risingwave_sqlsmith::{mview_sql_gen, print_function_table, sql_gen, Table};
+use risingwave_sqlsmith::{
+    create_table_statement_to_table, mview_sql_gen, parse_sql, print_function_table, sql_gen, Table,
+};
 use tokio_postgres::error::{DbError, Error as PgError, SqlState};
 use tokio_postgres::NoTls;
 
@@ -72,6 +72,14 @@ enum Commands {
     Test(TestOptions),
 }
 
+fn get_seed_table_sql(opt: &TestOptions) -> String {
+    let seed_files = vec!["tpch.sql", "nexmark.sql"];
+    seed_files
+        .iter()
+        .map(|filename| std::fs::read_to_string(format!("{}/{}", opt.testdata, filename)).unwrap())
+        .collect::<String>()
+}
+
 async fn create_tables(
     rng: &mut impl Rng,
     opt: &TestOptions,
@@ -79,35 +87,21 @@ async fn create_tables(
 ) -> (Vec<Table>, Vec<Table>) {
     log::info!("Preparing tables...");
 
-    let seed_files = vec!["tpch.sql", "nexmark.sql"];
-    let sql = seed_files
-        .iter()
-        .map(|filename| std::fs::read_to_string(format!("{}/{}", opt.testdata, filename)).unwrap())
-        .collect::<String>();
-
-    let statements =
-        Parser::parse_sql(&sql).unwrap_or_else(|_| panic!("Failed to parse SQL: {}", sql));
-    let n_statements = statements.len();
-
-    for stmt in statements.iter() {
-        let create_sql = format!("{}", stmt);
-        client.execute(&create_sql, &[]).await.unwrap();
-    }
+    let sql = get_seed_table_sql(opt);
+    let statements = parse_sql(&sql);
     let mut tables = statements
-        .into_iter()
-        .map(|s| match s {
-            Statement::CreateTable { name, columns, .. } => Table {
-                name: name.0[0].value.clone(),
-                columns: columns.iter().map(|c| c.clone().into()).collect(),
-            },
-            _ => panic!("Unexpected statement: {}", s),
-        })
+        .iter()
+        .map(create_table_statement_to_table)
         .collect_vec();
 
+    for stmt in statements.iter() {
+        let create_sql = stmt.to_string();
+        client.execute(&create_sql, &[]).await.unwrap();
+    }
+
     let mut mviews = vec![];
-    // Generate Materialized Views 1:1 with tables, so they have equal weight
-    // of being queried.
-    for i in 0..n_statements {
+    // Generate some mviews
+    for i in 0..10 {
         let (create_sql, table) = mview_sql_gen(rng, tables.clone(), &format!("m{}", i));
         client.execute(&create_sql, &[]).await.unwrap();
         tables.push(table.clone());
