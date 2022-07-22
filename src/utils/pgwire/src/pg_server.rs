@@ -144,13 +144,13 @@ mod tests {
                     )
                 })
                 .collect();
-
+            let len = res.len();
             Ok(PgResponse::new(
                 StatementType::SELECT,
                 1,
                 vec![Row::new(res)],
                 // NOTE: Extended mode don't need.
-                vec![],
+                vec![PgFieldDescriptor::new("".to_string(), TypeOid::Varchar);len],
                 true,
             ))
         }
