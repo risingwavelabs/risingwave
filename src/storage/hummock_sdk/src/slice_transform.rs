@@ -13,7 +13,7 @@
 // limitations under the License.
 
 use std::collections::HashMap;
-use std::sync::Arc;
+use std::fmt::Debug;
 
 use risingwave_common::catalog::ColumnDesc;
 use risingwave_common::types::VIRTUAL_NODE_SIZE;
@@ -24,29 +24,64 @@ use risingwave_pb::catalog::Table;
 use crate::key::{get_table_id, TABLE_PREFIX_LEN};
 
 /// Slice Transform generally used to transform key which will store in BloomFilter
-pub trait SliceTransform: Sync + Send {
-    fn transform<'a>(&self, full_key: &'a [u8]) -> &'a [u8];
+pub trait SliceTransform: Clone + Send + Sync {
+    fn transform<'a>(&mut self, full_key: &'a [u8]) -> &'a [u8];
 }
 
-#[derive(Default)]
+#[derive(Clone)]
+pub enum SliceTransformImpl {
+    Schema(SchemaSliceTransform),
+    FullKey(FullKeySliceTransform),
+    Dummy(DummySliceTransform),
+    Multi(MultiSliceTransform),
+}
+
+macro_rules! impl_dispatcher {
+    ([], $( { $variant_name:ident } ),*) => {
+        impl SliceTransformImpl {
+            pub fn transform<'a>(&mut self, full_key: &'a [u8]) -> &'a [u8]{
+                match self {
+                    $( Self::$variant_name(inner) => inner.transform(full_key), )*
+                }
+            }
+        }
+    }
+}
+
+macro_rules! for_all_dispatcher_variants {
+    ($macro:ident $(, $x:tt)*) => {
+        $macro! {
+            [$($x), *],
+            { Schema },
+            { FullKey },
+            { Dummy },
+            { Multi }
+        }
+    };
+}
+
+for_all_dispatcher_variants! { impl_dispatcher }
+
+#[derive(Default, Clone)]
 pub struct FullKeySliceTransform;
 
 impl SliceTransform for FullKeySliceTransform {
-    fn transform<'a>(&self, full_key: &'a [u8]) -> &'a [u8] {
+    fn transform<'a>(&mut self, full_key: &'a [u8]) -> &'a [u8] {
         full_key
     }
 }
 
-#[derive(Default)]
+#[derive(Default, Clone)]
 pub struct DummySliceTransform;
 impl SliceTransform for DummySliceTransform {
-    fn transform<'a>(&self, _full_key: &'a [u8]) -> &'a [u8] {
+    fn transform<'a>(&mut self, _full_key: &'a [u8]) -> &'a [u8] {
         &[]
     }
 }
 
 /// [`SchemaSliceTransform`] build from table_catalog and transform a `full_key` to prefix for
 /// prefix_bloom_filter
+#[derive(Clone)]
 pub struct SchemaSliceTransform {
     /// Each stateful operator has its own read pattern, partly using prefix scan.
     /// Perfix key length can be decoded through its `DataType` and `OrderType` which obtained from
@@ -59,7 +94,7 @@ pub struct SchemaSliceTransform {
 }
 
 impl SliceTransform for SchemaSliceTransform {
-    fn transform<'a>(&self, full_key: &'a [u8]) -> &'a [u8] {
+    fn transform<'a>(&mut self, full_key: &'a [u8]) -> &'a [u8] {
         debug_assert!(full_key.len() >= TABLE_PREFIX_LEN + VIRTUAL_NODE_SIZE);
 
         let (_table_prefix, key) = full_key.split_at(TABLE_PREFIX_LEN);
@@ -114,17 +149,16 @@ impl SchemaSliceTransform {
     }
 }
 
-#[derive(Default)]
+#[derive(Default, Clone)]
 pub struct MultiSliceTransform {
-    // TODO: use Enum to rewrite since this might be dynamically dispatched frequently.
-    id_to_slice_transform: HashMap<u32, Arc<dyn SliceTransform>>,
+    id_to_slice_transform: HashMap<u32, Box<SliceTransformImpl>>,
 
     // cached state
-    last_slice_transform_state: Option<(u32, Arc<dyn SliceTransform>)>,
+    last_slice_transform_state: Option<(u32, Box<SliceTransformImpl>)>,
 }
 
 impl MultiSliceTransform {
-    pub fn register(&mut self, table_id: u32, slice_transform: Arc<dyn SliceTransform>) {
+    pub fn register(&mut self, table_id: u32, slice_transform: Box<SliceTransformImpl>) {
         self.id_to_slice_transform.insert(table_id, slice_transform);
     }
 
@@ -138,7 +172,19 @@ impl MultiSliceTransform {
         ));
     }
 
-    pub fn transform<'a>(&mut self, full_key: &'a [u8]) -> &'a [u8] {
+    pub fn size(&self) -> usize {
+        self.id_to_slice_transform.len()
+    }
+}
+
+impl Debug for MultiSliceTransform {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "MultiSliceTransform size {} ", self.size())
+    }
+}
+
+impl SliceTransform for MultiSliceTransform {
+    fn transform<'a>(&mut self, full_key: &'a [u8]) -> &'a [u8] {
         assert!(full_key.len() > TABLE_PREFIX_LEN + VIRTUAL_NODE_SIZE);
 
         let table_id = get_table_id(full_key).unwrap();
@@ -155,7 +201,7 @@ impl MultiSliceTransform {
         }
 
         self.last_slice_transform_state
-            .as_ref()
+            .as_mut()
             .unwrap()
             .1
             .transform(full_key)
@@ -166,7 +212,6 @@ impl MultiSliceTransform {
 mod tests {
     use std::collections::HashMap;
     use std::mem;
-    use std::sync::Arc;
 
     use bytes::{BufMut, BytesMut};
     use risingwave_common::array::Row;
@@ -180,17 +225,17 @@ mod tests {
 
     use super::{DummySliceTransform, SchemaSliceTransform, SliceTransform};
     use crate::key::TABLE_PREFIX_LEN;
-    use crate::slice_transform::{FullKeySliceTransform, MultiSliceTransform};
+    use crate::slice_transform::{FullKeySliceTransform, MultiSliceTransform, SliceTransformImpl};
 
     #[test]
     fn test_default_slice_transform() {
-        let dummy_slice_transform = DummySliceTransform::default();
+        let mut dummy_slice_transform = DummySliceTransform::default();
         let full_key = "full_key".as_bytes();
         let output_key = dummy_slice_transform.transform(full_key);
 
         assert_eq!("".as_bytes(), output_key);
 
-        let full_key_slice_transform = FullKeySliceTransform::default();
+        let mut full_key_slice_transform = FullKeySliceTransform::default();
         let output_key = full_key_slice_transform.transform(full_key);
 
         assert_eq!(full_key, output_key);
@@ -284,7 +329,7 @@ mod tests {
     #[test]
     fn test_schema_slice_transform() {
         let prost_table = build_table_with_prefix_column_num(1);
-        let schema_slice_transform = SchemaSliceTransform::new(&prost_table);
+        let mut schema_slice_transform = SchemaSliceTransform::new(&prost_table);
 
         let order_types: Vec<OrderType> = vec![OrderType::Ascending, OrderType::Ascending];
 
@@ -322,7 +367,10 @@ mod tests {
             // test table_id 1
             let prost_table = build_table_with_prefix_column_num(1);
             let schema_slice_transform = SchemaSliceTransform::new(&prost_table);
-            multi_slice_transform.register(1, Arc::new(schema_slice_transform));
+            multi_slice_transform.register(
+                1,
+                Box::new(SliceTransformImpl::Schema(schema_slice_transform)),
+            );
             let order_types: Vec<OrderType> = vec![OrderType::Ascending, OrderType::Ascending];
 
             let serializer = OrderedRowSerializer::new(order_types);
@@ -363,7 +411,10 @@ mod tests {
             // test table_id 1
             let prost_table = build_table_with_prefix_column_num(2);
             let schema_slice_transform = SchemaSliceTransform::new(&prost_table);
-            multi_slice_transform.register(2, Arc::new(schema_slice_transform));
+            multi_slice_transform.register(
+                2,
+                Box::new(SliceTransformImpl::Schema(schema_slice_transform)),
+            );
             let order_types: Vec<OrderType> = vec![OrderType::Ascending, OrderType::Ascending];
 
             let serializer = OrderedRowSerializer::new(order_types);
@@ -403,7 +454,10 @@ mod tests {
 
         {
             let full_key_slice_transform = FullKeySliceTransform::default();
-            multi_slice_transform.register(3, Arc::new(full_key_slice_transform));
+            multi_slice_transform.register(
+                3,
+                Box::new(SliceTransformImpl::FullKey(full_key_slice_transform)),
+            );
 
             let table_prefix = {
                 let mut buf = BytesMut::with_capacity(TABLE_PREFIX_LEN);

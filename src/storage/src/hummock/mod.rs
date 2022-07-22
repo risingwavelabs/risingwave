@@ -55,7 +55,7 @@ pub use error::*;
 use parking_lot::RwLock;
 pub use risingwave_common::cache::{CachableEntry, LookupResult, LruCache};
 use risingwave_common::catalog::TableId;
-use risingwave_hummock_sdk::slice_transform::SliceTransform;
+use risingwave_hummock_sdk::slice_transform::SliceTransformImpl;
 use value::*;
 
 use self::iterator::HummockIterator;
@@ -115,7 +115,7 @@ impl HummockStorage {
         // TODO: separate `HummockStats` from `StateStoreMetrics`.
         stats: Arc<StateStoreMetrics>,
         compaction_group_client: Arc<dyn CompactionGroupClient>,
-        table_id_to_slice_transform: Arc<RwLock<HashMap<u32, Arc<dyn SliceTransform>>>>,
+        table_id_to_slice_transform: Arc<RwLock<HashMap<u32, Box<SliceTransformImpl>>>>,
     ) -> HummockResult<Self> {
         // For conflict key detection. Enabled by setting `write_conflict_detection_enabled` to
         // true in `StorageConfig`
