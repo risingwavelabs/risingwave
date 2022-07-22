@@ -12,16 +12,14 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::ops::Bound;
-use std::ops::Bound::*;
+use std::ops::Bound::{self, *};
 use std::sync::Arc;
 
 use anyhow::anyhow;
 use futures::StreamExt;
 use futures_async_stream::try_stream;
 use itertools::Itertools;
-use madsim::collections::{BTreeMap, HashSet};
-use risingwave_common::array::{Array, ArrayImpl, DataChunk, Op, Row, StreamChunk};
+use risingwave_common::array::{Array, ArrayImpl, DataChunk, Op, StreamChunk};
 use risingwave_common::buffer::{Bitmap, BitmapBuilder};
 use risingwave_common::catalog::Schema;
 use risingwave_common::types::{DataType, Datum, ScalarImpl, ToOwnedDatum};
@@ -29,27 +27,33 @@ use risingwave_expr::expr::expr_binary_nonnull::new_binary_expr;
 use risingwave_expr::expr::{BoxedExpression, InputRefExpression, LiteralExpression};
 use risingwave_pb::expr::expr_node::Type as ExprNodeType;
 use risingwave_pb::expr::expr_node::Type::*;
+use risingwave_storage::table::state_table::StateTable;
+use risingwave_storage::StateStore;
 
 use super::barrier_align::*;
 use super::error::StreamExecutorError;
+use super::managed_state::dynamic_filter::RangeCache;
 use super::monitor::StreamingMetrics;
 use super::{BoxedExecutor, BoxedMessageStream, Executor, Message, PkIndices, PkIndicesRef};
 use crate::common::StreamChunkBuilder;
 use crate::executor::PROCESSING_WINDOW_SIZE;
 
-pub struct DynamicFilterExecutor {
+pub struct DynamicFilterExecutor<S: StateStore> {
     source_l: Option<BoxedExecutor>,
     source_r: Option<BoxedExecutor>,
     key_l: usize,
     pk_indices: PkIndices,
     identity: String,
     comparator: ExprNodeType,
+    range_cache: RangeCache<S>,
+    right_table: StateTable<S>,
+    is_right_table_writer: bool,
     actor_id: u64,
     schema: Schema,
     metrics: Arc<StreamingMetrics>,
 }
 
-impl DynamicFilterExecutor {
+impl<S: StateStore> DynamicFilterExecutor<S> {
     #[allow(clippy::too_many_arguments)]
     pub fn new(
         source_l: BoxedExecutor,
@@ -58,6 +62,9 @@ impl DynamicFilterExecutor {
         pk_indices: PkIndices,
         executor_id: u64,
         comparator: ExprNodeType,
+        state_table_l: StateTable<S>,
+        state_table_r: StateTable<S>,
+        is_right_table_writer: bool,
         actor_id: u64,
         metrics: Arc<StreamingMetrics>,
     ) -> Self {
@@ -69,6 +76,9 @@ impl DynamicFilterExecutor {
             pk_indices,
             identity: format!("DynamicFilterExecutor {:X}", executor_id),
             comparator,
+            range_cache: RangeCache::new(state_table_l, 0, usize::MAX),
+            right_table: state_table_r,
+            is_right_table_writer,
             actor_id,
             metrics,
             schema,
@@ -76,11 +86,10 @@ impl DynamicFilterExecutor {
     }
 
     fn apply_batch(
-        &self,
+        &mut self,
         data_chunk: &DataChunk,
         ops: Vec<Op>,
         condition: Option<BoxedExpression>,
-        state: &mut BTreeMap<ScalarImpl, HashSet<Row>>,
     ) -> Result<(Vec<Op>, Bitmap), StreamExecutorError> {
         debug_assert_eq!(ops.len(), data_chunk.cardinality());
         let mut new_ops = Vec::with_capacity(ops.len());
@@ -153,22 +162,10 @@ impl DynamicFilterExecutor {
             if let Some(val) = left_val {
                 match *op {
                     Op::Insert | Op::UpdateInsert => {
-                        let entry = state.entry(val).or_insert_with(HashSet::new);
-                        entry.insert(row.to_owned_row());
+                        self.range_cache.insert(val, row.to_owned_row())?;
                     }
                     Op::Delete | Op::UpdateDelete => {
-                        let contains_element = state
-                            .get_mut(&val)
-                            .ok_or_else(|| {
-                                StreamExecutorError::from(anyhow!("Deleting non-existent element"))
-                            })?
-                            .remove(&row.to_owned_row());
-
-                        if !contains_element {
-                            return Err(StreamExecutorError::from(anyhow!(
-                                "Deleting non-existent element"
-                            )));
-                        };
+                        self.range_cache.delete(&val, row.to_owned_row())?;
                     }
                 }
             }
@@ -179,11 +176,13 @@ impl DynamicFilterExecutor {
         Ok((new_ops, new_visibility))
     }
 
+    /// Returns the required range, whether the latest value is in lower bound (rather than upper)
+    /// and whether to insert or delete the range.
     fn get_range(
         &self,
         curr: &Datum,
         prev: Datum,
-    ) -> ((Bound<ScalarImpl>, Bound<ScalarImpl>), bool) {
+    ) -> ((Bound<ScalarImpl>, Bound<ScalarImpl>), bool, bool) {
         debug_assert_ne!(curr, &prev);
         let curr_is_some = curr.is_some();
         match (curr.clone(), prev) {
@@ -196,7 +195,9 @@ impl DynamicFilterExecutor {
                     _ => unreachable!(),
                 };
                 let is_insert = curr_is_some;
-                (range, is_insert)
+                // The new bound is always towards the last known value
+                let is_lower = matches!(self.comparator, GreaterThan | GreaterThanOrEqual);
+                (range, is_lower, is_insert)
             }
             (Some(c), Some(p)) => {
                 if c < p {
@@ -206,7 +207,7 @@ impl DynamicFilterExecutor {
                         _ => unreachable!(),
                     };
                     let is_insert = matches!(self.comparator, GreaterThan | GreaterThanOrEqual);
-                    (range, is_insert)
+                    (range, true, is_insert)
                 } else {
                     // p > c
                     let range = match self.comparator {
@@ -215,7 +216,7 @@ impl DynamicFilterExecutor {
                         _ => unreachable!(),
                     };
                     let is_insert = matches!(self.comparator, LessThan | LessThanOrEqual);
-                    (range, is_insert)
+                    (range, false, is_insert)
                 }
             }
             (None, None) => unreachable!(), // prev != curr
@@ -242,20 +243,8 @@ impl DynamicFilterExecutor {
 
         let mut prev_epoch_value: Option<Datum> = None;
         let mut current_epoch_value: Option<Datum> = None;
-
-        // The state is sorted by the comparison value
-        //
-        // TODO: convert this into a `StateTable` compatible managed state
-        //
-        // TODO: It could be potentially expensive memory-wise to store `HashSet`.
-        //       The memory overhead per single row is potentially a backing Vec of size 4
-        //       (See: https://github.com/rust-lang/hashbrown/pull/162)
-        //       + some byte-per-entry metadata. Well, `Row` is on heap anyway...
-        //
-        //       It could be preferred to find a way to do prefix range scans on the left key and
-        //       storing as `BTreeSet<(ScalarImpl, Row)>`.
-        //       We could solve it if `ScalarImpl` had a successor/predecessor function.
-        let mut state = BTreeMap::<ScalarImpl, HashSet<Row>>::new();
+        let mut current_epoch_row = None;
+        let mut epoch: u64 = 0;
 
         let aligned_stream = barrier_align(
             input_l.execute(),
@@ -283,7 +272,7 @@ impl DynamicFilterExecutor {
                     let condition = dynamic_cond(right_val);
 
                     let (new_ops, new_visibility) =
-                        self.apply_batch(&data_chunk, ops, condition, &mut state)?;
+                        self.apply_batch(&data_chunk, ops, condition)?;
 
                     let (columns, _) = data_chunk.into_parts();
 
@@ -293,9 +282,7 @@ impl DynamicFilterExecutor {
                     }
                 }
                 AlignedMessage::Right(chunk) => {
-                    // Store the latest update to the right value
-                    // (This should eventually be persisted via `StateTable` as well - at the
-                    // barrier)
+                    // Record the latest update to the right value
                     let chunk = chunk.compact()?; // Is this unnecessary work?
                     let (data_chunk, ops) = chunk.into_parts();
 
@@ -305,8 +292,11 @@ impl DynamicFilterExecutor {
                             Op::UpdateInsert | Op::Insert => {
                                 last_is_insert = true;
                                 current_epoch_value = Some(row.value_at(0).to_owned_datum());
+                                current_epoch_row = Some(row.to_owned_row());
                             }
-                            _ => last_is_insert = false,
+                            _ => {
+                                last_is_insert = false;
+                            }
                         }
                     }
 
@@ -321,8 +311,8 @@ impl DynamicFilterExecutor {
                     let curr: Datum = current_epoch_value.clone().flatten();
                     let prev: Datum = prev_epoch_value.flatten();
                     if prev != curr {
-                        let (range, is_insert) = self.get_range(&curr, prev);
-                        for (_, rows) in state.range(range) {
+                        let (range, latest_is_lower, is_insert) = self.get_range(&curr, prev);
+                        for (_, rows) in self.range_cache.range(range, latest_is_lower) {
                             for row in rows {
                                 if let Some(chunk) = stream_chunk_builder
                                     .append_row_matched(
@@ -343,8 +333,24 @@ impl DynamicFilterExecutor {
                             yield Message::Chunk(chunk);
                         }
                     }
-                    // TODO: We will persist `prev_epoch_value` to the `StateTable` as well
+
+                    if self.is_right_table_writer {
+                        if let Some(row) = current_epoch_row.take() {
+                            assert_eq!(epoch, barrier.epoch.prev);
+                            self.right_table.insert(row)?;
+                            self.right_table.commit(epoch).await?;
+                        }
+                    }
+
+                    self.range_cache.flush().await?;
+
+                    // We have flushed all the state for the prev epoch. We can now update the
+                    // epochs.
+                    epoch = barrier.epoch.curr;
+                    self.range_cache.update_epoch(barrier.epoch.curr);
+
                     prev_epoch_value = Some(curr);
+
                     yield Message::Barrier(barrier);
                 }
             }
@@ -352,7 +358,7 @@ impl DynamicFilterExecutor {
     }
 }
 
-impl Executor for DynamicFilterExecutor {
+impl<S: StateStore> Executor for DynamicFilterExecutor<S> {
     fn execute(self: Box<Self>) -> BoxedMessageStream {
         self.into_stream().boxed()
     }

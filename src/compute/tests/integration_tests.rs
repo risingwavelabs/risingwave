@@ -389,12 +389,11 @@ async fn test_row_seq_scan() -> Result<()> {
         ColumnDesc::unnamed(ColumnId::from(2), schema[2].data_type.clone()),
     ];
 
-    let mut state = StateTable::new(
+    let mut state = StateTable::new_without_distribution(
         memory_state_store.clone(),
         TableId::from(0x42),
         column_descs.clone(),
         vec![OrderType::Ascending],
-        None,
         vec![0_usize],
     );
     let table = state.storage_table().clone();

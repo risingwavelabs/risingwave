@@ -81,6 +81,7 @@ message SourceNode {
 message SinkNode {
   uint32 table_id = 1;
   repeated int32 column_ids = 2;
+  map<string, string> properties = 3;
 }
 
 message ProjectNode {
@@ -164,10 +165,11 @@ message HashJoinNode {
 message DynamicFilterNode {
   uint32 left_key = 1;
   // Must be one of <, <=, >, >=
-  expr.ExprNode condition = 3;
-  // Used for internal table states.
-  // catalog.Table left_table = 4;
-  // uint32 dist_key_l = 8;
+  expr.ExprNode condition = 2;
+  // Left table stores all states with predicate possibly not NULL.
+  catalog.Table left_table = 3;
+  // Right table stores single value from RHS of predicate.
+  catalog.Table right_table = 4;
   // It is true when the right side of the inequality predicate is monotonically:
   // - decreasing for <, <=, increasing for >, >=
   // bool is_monotonic = 10;

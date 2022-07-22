@@ -11,9 +11,11 @@
 // WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 // See the License for the specific language governing permissions and
 // limitations under the License.
+use std::sync::Arc;
 
 use risingwave_common::error::{internal_error, Result};
 use risingwave_pb::expr::expr_node::Type::*;
+use risingwave_storage::table::state_table::StateTable;
 
 use super::*;
 use crate::executor::DynamicFilterExecutor;
@@ -24,13 +26,19 @@ impl ExecutorBuilder for DynamicFilterExecutorBuilder {
     fn new_boxed_executor(
         mut params: ExecutorParams,
         node: &StreamNode,
-        _store: impl StateStore,
+        store: impl StateStore,
         _stream: &mut LocalStreamManagerCore,
     ) -> Result<BoxedExecutor> {
         let node = try_match_expand!(node.get_node_body().unwrap(), NodeBody::DynamicFilter)?;
         let source_r = params.input.remove(1);
         let source_l = params.input.remove(0);
         let key_l = node.get_left_key() as usize;
+
+        let vnodes = Arc::new(
+            params
+                .vnode_bitmap
+                .expect("vnodes not set for dynamic filter"),
+        );
 
         let prost_condition = node.get_condition()?;
         let comparator = prost_condition.get_expr_type()?;
@@ -44,11 +52,13 @@ impl ExecutorBuilder for DynamicFilterExecutorBuilder {
             ));
         }
 
-        let _key = source_l.schema().fields[key_l as usize].data_type();
+        // Only write the RHS value if this actor is in charge of vnode 0
+        let is_right_table_writer = vnodes.is_set(0)?;
 
-        // TODO: add the tables and backing state store.
-        // let left_table_id = TableId::from(node.left_table.as_ref().unwrap().id);
-        // let right_table_id = TableId::from(node.right_table.as_ref().unwrap().id);
+        let state_table_l =
+            StateTable::from_table_catalog(node.get_left_table()?, store.clone(), Some(vnodes));
+
+        let state_table_r = StateTable::from_table_catalog(node.get_right_table()?, store, None);
 
         Ok(Box::new(DynamicFilterExecutor::new(
             source_l,
@@ -57,8 +67,9 @@ impl ExecutorBuilder for DynamicFilterExecutorBuilder {
             params.pk_indices,
             params.executor_id,
             comparator,
-            // keyspace_l: Keyspace::table_root(store.clone(), &TableId { table_id: 0 }),
-            // keyspace_r: Keyspace::table_root(store, &right_table_id),
+            state_table_l,
+            state_table_r,
+            is_right_table_writer,
             params.actor_id as u64,
             params.executor_stats,
         )))

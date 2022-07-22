@@ -86,8 +86,13 @@ impl<S: StateStore, const TOP_N_TYPE: usize> ManagedTopNState<S, TOP_N_TYPE> {
                 ColumnDesc::unnamed(ColumnId::from(id as i32), data_type.clone())
             })
             .collect::<Vec<_>>();
-        let state_table =
-            StateTable::new(store, table_id, column_descs, order_types, None, pk_indices);
+        let state_table = StateTable::new_without_distribution(
+            store,
+            table_id,
+            column_descs,
+            order_types,
+            pk_indices,
+        );
         Self {
             top_n: BTreeMap::new(),
             state_table,

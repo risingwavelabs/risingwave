@@ -32,6 +32,7 @@ use crate::error::StorageResult;
 use crate::table::storage_table::DEFAULT_VNODE;
 
 /// Represents the distribution for a specific table instance.
+#[derive(Debug)]
 pub struct Distribution {
     /// Indices of distribution keys for computing vnode, based on the all columns of the table.
     pub dist_key_indices: Vec<usize>,

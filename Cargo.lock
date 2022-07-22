@@ -1762,6 +1762,21 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "2022715d62ab30faffd124d40b76f4134a550a87792276512b18d63272333394"
 
 [[package]]
+name = "function_name"
+version = "0.3.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "b1ab577a896d09940b5fe12ec5ae71f9d8211fff62c919c03a3750a9901e98a7"
+dependencies = [
+ "function_name-proc-macro",
+]
+
+[[package]]
+name = "function_name-proc-macro"
+version = "0.3.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "673464e1e314dd67a0fd9544abc99e8eb28d0c7e3b69b033bcff9b2d00b87333"
+
+[[package]]
 name = "funty"
 version = "2.0.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -3617,9 +3632,11 @@ dependencies = [
 
 [[package]]
 name = "pulsar"
-version = "4.1.1"
-source = "git+https://github.com/singularity-data/pulsar-rs.git?rev=8d4789eea780d520136e1cc2535a1fec9385c53d#8d4789eea780d520136e1cc2535a1fec9385c53d"
+version = "4.1.2"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "31a5a4fbe9363c113b7e25ae76dd2d6455411c815d688977be6f0b68ae5e73b8"
 dependencies = [
+ "async-trait",
  "bit-vec",
  "bytes",
  "chrono",
@@ -4229,12 +4246,15 @@ dependencies = [
  "serde",
  "serde_derive",
  "serde_json",
+ "serde_with",
  "smallvec",
  "static_assertions",
  "tempfile",
  "thiserror",
+ "tokio-retry",
  "tokio-stream",
  "tokio-util",
+ "tracing",
  "twox-hash",
  "url",
  "urlencoding",
@@ -4390,6 +4410,25 @@ dependencies = [
 ]
 
 [[package]]
+name = "risingwave_hummock_test"
+version = "0.1.10"
+dependencies = [
+ "bytes",
+ "fail",
+ "futures",
+ "itertools",
+ "madsim-tokio",
+ "rand 0.8.5",
+ "risingwave_common",
+ "risingwave_hummock_sdk",
+ "risingwave_meta",
+ "risingwave_pb",
+ "risingwave_rpc_client",
+ "risingwave_storage",
+ "workspace-hack",
+]
+
+[[package]]
 name = "risingwave_meta"
 version = "0.1.10"
 dependencies = [
@@ -4408,6 +4447,7 @@ dependencies = [
  "either",
  "etcd-client",
  "fail",
+ "function_name",
  "futures",
  "hex",
  "hyper",
@@ -4696,7 +4736,6 @@ dependencies = [
  "rand 0.8.5",
  "risingwave_common",
  "risingwave_hummock_sdk",
- "risingwave_meta",
  "risingwave_object_store",
  "risingwave_pb",
  "risingwave_rpc_client",

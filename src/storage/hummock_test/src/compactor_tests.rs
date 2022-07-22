@@ -36,15 +36,16 @@ mod tests {
     use risingwave_meta::hummock::MockHummockMetaClient;
     use risingwave_pb::hummock::{HummockVersion, TableOption};
     use risingwave_rpc_client::HummockMetaClient;
-
-    use crate::hummock::compaction_group_client::DummyCompactionGroupClient;
-    use crate::hummock::compactor::{get_remote_sstable_id_generator, Compactor, CompactorContext};
-    use crate::hummock::iterator::test_utils::mock_sstable_store;
-    use crate::hummock::HummockStorage;
-    use crate::monitor::{StateStoreMetrics, StoreLocalStatistic};
-    use crate::storage_value::StorageValue;
-    use crate::store::{ReadOptions, WriteOptions};
-    use crate::{Keyspace, StateStore};
+    use risingwave_storage::hummock::compaction_group_client::DummyCompactionGroupClient;
+    use risingwave_storage::hummock::compactor::{
+        get_remote_sstable_id_generator, Compactor, CompactorContext,
+    };
+    use risingwave_storage::hummock::iterator::test_utils::mock_sstable_store;
+    use risingwave_storage::hummock::HummockStorage;
+    use risingwave_storage::monitor::{StateStoreMetrics, StoreLocalStatistic};
+    use risingwave_storage::storage_value::StorageValue;
+    use risingwave_storage::store::{ReadOptions, WriteOptions};
+    use risingwave_storage::{Keyspace, StateStore};
 
     async fn get_hummock_storage(
         hummock_meta_client: Arc<dyn HummockMetaClient>,
@@ -102,7 +103,7 @@ mod tests {
             hummock_meta_client
                 .commit_epoch(
                     epoch,
-                    storage.local_version_manager.get_uncommitted_ssts(epoch),
+                    storage.local_version_manager().get_uncommitted_ssts(epoch),
                 )
                 .await
                 .unwrap();
@@ -374,7 +375,7 @@ mod tests {
             write_batch.ingest().await.unwrap();
 
             storage.sync(Some(epoch)).await.unwrap();
-            let ssts = storage.local_version_manager.get_uncommitted_ssts(epoch);
+            let ssts = storage.local_version_manager().get_uncommitted_ssts(epoch);
             hummock_meta_client.commit_epoch(epoch, ssts).await.unwrap();
         }
 
@@ -482,7 +483,7 @@ mod tests {
             hummock_meta_client
                 .commit_epoch(
                     epoch,
-                    storage.local_version_manager.get_uncommitted_ssts(epoch),
+                    storage.local_version_manager().get_uncommitted_ssts(epoch),
                 )
                 .await
                 .unwrap();
@@ -639,7 +640,7 @@ mod tests {
             hummock_meta_client
                 .commit_epoch(
                     *epoch,
-                    storage.local_version_manager.get_uncommitted_ssts(*epoch),
+                    storage.local_version_manager().get_uncommitted_ssts(*epoch),
                 )
                 .await
                 .unwrap();

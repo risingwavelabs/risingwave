@@ -14,6 +14,7 @@
 
 pub mod my_stats;
 pub mod process_linux;
+pub mod rwlock;
 
 use prometheus::core::{AtomicU64, Collector, GenericCounter, GenericCounterVec, Metric};
 use prometheus::{Histogram, HistogramVec};

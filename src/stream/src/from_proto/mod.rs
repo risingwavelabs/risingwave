@@ -29,6 +29,7 @@ mod lookup_union;
 mod merge;
 mod mview;
 mod project;
+mod sink;
 mod source;
 mod top_n_appendonly;
 mod top_n_new;
@@ -57,6 +58,7 @@ use self::lookup_union::*;
 use self::merge::*;
 use self::mview::*;
 use self::project::*;
+use self::sink::*;
 use self::source::*;
 use self::top_n_appendonly::*;
 use self::top_n_new::*;
@@ -105,6 +107,7 @@ pub fn create_executor(
         store,
         stream,
         NodeBody::Source => SourceExecutorBuilder,
+        NodeBody::Sink => SinkExecutorBuilder,
         NodeBody::Project => ProjectExecutorBuilder,
         NodeBody::TopN => TopNExecutorNewBuilder,
         NodeBody::AppendOnlyTopN => AppendOnlyTopNExecutorBuilder,

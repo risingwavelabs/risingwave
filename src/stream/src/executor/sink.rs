@@ -12,42 +12,82 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+use std::collections::HashMap;
+
 use futures::StreamExt;
 use futures_async_stream::try_stream;
 use risingwave_common::catalog::Schema;
-use risingwave_connector::sink::Sink;
+use risingwave_common::error::Result;
+use risingwave_connector::sink::{SinkConfig, SinkImpl};
+use risingwave_storage::StateStore;
 
 use super::error::StreamExecutorError;
 use super::{BoxedExecutor, Executor, Message};
 
-pub struct SinkExecutor<S: Sink> {
-    child: BoxedExecutor,
-    _external_sink: S,
+pub struct SinkExecutor<S: StateStore> {
+    input: BoxedExecutor,
+    _store: S,
+    properties: HashMap<String, String>,
     identity: String,
 }
 
-impl<S: Sink> SinkExecutor<S> {
-    pub fn _new(materialize_executor: BoxedExecutor, _external_sink: S) -> Self {
+async fn build_sink(config: SinkConfig) -> Result<Box<SinkImpl>> {
+    Ok(Box::new(SinkImpl::new(config).await?))
+}
+
+impl<S: StateStore> SinkExecutor<S> {
+    pub fn new(
+        materialize_executor: BoxedExecutor,
+        _store: S,
+        mut properties: HashMap<String, String>,
+        executor_id: u64,
+    ) -> Self {
+        // This field can be used to distinguish a specific actor in parallelism to prevent
+        // transaction execution errors
+        properties.insert("identifier".to_string(), format!("sink-{:?}", executor_id));
         Self {
-            child: materialize_executor,
-            _external_sink,
-            identity: "SinkExecutor".to_string(),
+            input: materialize_executor,
+            _store,
+            properties,
+            identity: format!("SinkExecutor_{:?}", executor_id),
         }
     }
 
     #[try_stream(ok = Message, error = StreamExecutorError)]
     async fn execute_inner(self) {
-        todo!()
+        let sink_config = SinkConfig::from_hashmap(self.properties.clone())
+            .map_err(StreamExecutorError::sink_error)?;
+        let _sink = build_sink(sink_config).await;
+
+        // TODO(tabVersion): the flag is required because kafka transaction requires at least one
+        // message, so we should abort the transaction if the flag is true.
+        #[allow(clippy::no_effect_underscore_binding)]
+        let _empty_epoch_flag = true;
+
+        let input = self.input.execute();
+        #[for_await]
+        for msg in input {
+            match msg? {
+                Message::Chunk(chunk) => {
+                    let _visible_chunk = chunk.clone().compact()?;
+
+                    yield Message::Chunk(chunk);
+                }
+                Message::Barrier(barrier) => {
+                    yield Message::Barrier(barrier);
+                }
+            }
+        }
     }
 }
 
-impl<S: Sink + 'static + Send> Executor for SinkExecutor<S> {
+impl<S: StateStore> Executor for SinkExecutor<S> {
     fn execute(self: Box<Self>) -> super::BoxedMessageStream {
         self.execute_inner().boxed()
     }
 
     fn schema(&self) -> &Schema {
-        self.child.schema()
+        self.input.schema()
     }
 
     fn pk_indices(&self) -> super::PkIndicesRef {
@@ -78,11 +118,11 @@ mod test {
             password: Some(String::from("<password>")),
         };
 
-        let mysql_sink = MySQLSink::new(cfg);
+        let _mysql_sink = MySQLSink::new(cfg);
 
         // Mock `child`
-        let mock = MockSource::with_messages(Schema::default(), PkIndices::new(), vec![]);
+        let _mock = MockSource::with_messages(Schema::default(), PkIndices::new(), vec![]);
 
-        let _sink_executor = SinkExecutor::_new(Box::new(mock), mysql_sink);
+        // let _sink_executor = SinkExecutor::_new(Box::new(mock), mysql_sink);
     }
 }

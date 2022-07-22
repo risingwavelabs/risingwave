@@ -100,8 +100,7 @@ impl ExecutorBuilder for ArrangeExecutorBuilder {
 
         // FIXME: Lookup is now implemented without cell-based table API and relies on all vnodes
         // being `DEFAULT_VNODE`, so we need to make the Arrange a singleton.
-        let vnodes = None;
-        // let vnodes = params.vnode_bitmap.map(Arc::new);
+        let vnodes = params.vnode_bitmap.map(Arc::new);
 
         let executor = MaterializeExecutor::new(
             params.input.remove(0),

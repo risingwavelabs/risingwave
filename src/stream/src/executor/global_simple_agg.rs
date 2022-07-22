@@ -321,7 +321,7 @@ mod tests {
         let append_only = false;
         let agg_calls = vec![
             AggCall {
-                kind: AggKind::RowCount,
+                kind: AggKind::Count,
                 args: AggArgs::None,
                 return_type: DataType::Int64,
                 append_only,

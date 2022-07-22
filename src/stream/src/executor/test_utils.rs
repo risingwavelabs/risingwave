@@ -222,9 +222,8 @@ pub mod global_simple_agg {
         } else {
             table_desc.len() - 1
         };
-        let dist_keys: Vec<usize> = (0..group_key.len()).collect();
 
-        StateTable::new(
+        StateTable::new_without_distribution(
             store,
             table_id,
             table_desc,
@@ -237,11 +236,6 @@ pub mod global_simple_agg {
                 };
                 relational_pk_len
             ],
-            if dist_keys.is_empty() {
-                None
-            } else {
-                Some(dist_keys)
-            },
             (0..relational_pk_len).collect(),
         )
     }

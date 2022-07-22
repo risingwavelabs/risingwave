@@ -220,7 +220,7 @@ impl SstableStore {
         self.block_cache.clone()
     }
 
-    #[cfg(test)]
+    #[cfg(any(test, feature = "test"))]
     pub fn clear_block_cache(&self) {
         self.block_cache.clear();
     }

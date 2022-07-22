@@ -24,6 +24,7 @@ pub use source::*;
 pub use split::*;
 
 pub const DATAGEN_CONNECTOR: &str = "datagen";
+
 #[derive(Clone, Debug, Deserialize)]
 pub struct DatagenProperties {
     /// split_num means data source partition
