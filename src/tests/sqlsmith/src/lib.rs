@@ -433,3 +433,13 @@ pub fn mview_sql_gen<R: Rng>(rng: &mut R, tables: Vec<Table>, name: &str) -> (St
 pub fn parse_sql(sql: &str) -> Vec<Statement> {
     Parser::parse_sql(sql).unwrap_or_else(|_| panic!("Failed to parse SQL: {}", sql))
 }
+
+pub fn create_table_statement_to_table(statement: &Statement) -> Table {
+    match statement {
+        Statement::CreateTable { name, columns, .. } => Table {
+            name: name.0[0].value.clone(),
+            columns: columns.iter().map(|c| c.clone().into()).collect(),
+        },
+        _ => panic!("Unexpected statement: {}", statement),
+    }
+}

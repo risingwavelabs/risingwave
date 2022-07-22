@@ -15,6 +15,7 @@
 use std::sync::Arc;
 use std::{env, panic};
 
+use itertools::Itertools;
 use rand::{Rng, SeedableRng};
 use risingwave_frontend::binder::Binder;
 use risingwave_frontend::planner::Planner;
@@ -23,6 +24,7 @@ use risingwave_frontend::test_utils::LocalFrontend;
 use risingwave_frontend::{handler, FrontendOpts};
 use risingwave_sqlparser::ast::Statement;
 use risingwave_sqlsmith::{mview_sql_gen, parse_sql, sql_gen, Table};
+use risingwave_sqlsmith::create_table_statement_to_table;
 
 /// Executes sql queries
 /// It captures panics so it can recover and print failing sql query.
@@ -50,22 +52,11 @@ async fn create_tables(session: Arc<SessionImpl>, rng: &mut impl Rng) -> Vec<Tab
     let sql = get_seed_table_sql();
     let statements = parse_sql(&sql);
 
-    let mut tables = vec![];
+    let mut tables = statements.iter().map(create_table_statement_to_table).collect_vec();
+
     for s in statements.into_iter() {
         let stmt_sql = s.to_string();
-        match s {
-            Statement::CreateTable {
-                ref name,
-                ref columns,
-                ..
-            } => {
-                let name = name.0[0].value.clone();
-                let columns = columns.iter().map(|c| c.clone().into()).collect();
-                handle(session.clone(), s, stmt_sql).await;
-                tables.push(Table { name, columns })
-            }
-            _ => panic!("Unexpected statement: {}", s),
-        }
+        handle(session.clone(), s, stmt_sql).await;
     }
 
     // Generate some mviews
