@@ -321,6 +321,21 @@ pub fn agg_input_array_refs<'a>(
         .collect()
 }
 
+pub fn agg_order_array_refs<'a>(
+    agg_calls: &[AggCall],
+    columns: &'a [Column],
+) -> Vec<Vec<&'a ArrayImpl>> {
+    agg_calls
+        .iter()
+        .map(|agg| {
+            agg.order_pairs
+                .iter()
+                .map(|o| columns[o.column_idx].array_ref())
+                .collect()
+        })
+        .collect()
+}
+
 /// Generate [`crate::executor::HashAggExecutor`]'s schema from `input`, `agg_calls` and
 /// `group_key_indices`. For [`crate::executor::HashAggExecutor`], the group key indices should
 /// be provided.

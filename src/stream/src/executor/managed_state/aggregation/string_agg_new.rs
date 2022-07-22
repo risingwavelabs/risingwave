@@ -12,6 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+use std::collections::BTreeSet;
 use std::marker::PhantomData;
 
 use async_trait::async_trait;
@@ -23,15 +24,16 @@ use risingwave_common::array::Op::{Delete, Insert, UpdateDelete, UpdateInsert};
 use risingwave_common::array::{Array, ArrayImpl, Row, Utf8Array};
 use risingwave_common::buffer::Bitmap;
 use risingwave_common::types::{Datum, ScalarImpl, ScalarRef};
+use risingwave_common::util::sort_util::OrderableRow;
 use risingwave_storage::table::state_table::StateTable;
 use risingwave_storage::StateStore;
 
 use super::ManagedTableState;
+use crate::executor::aggregation::AggCall;
 use crate::executor::error::StreamExecutorResult;
 use crate::executor::PkDataTypes;
 
 pub struct ManagedStringAggState<S: StateStore> {
-    // cache: BTreeMap if order by, Vec otherwise
     _phantom_data: PhantomData<S>,
 
     /// The upstream pk. Assembled as pk of relational table.
@@ -40,10 +42,17 @@ pub struct ManagedStringAggState<S: StateStore> {
     // Primary key to look up in relational table. For value state, there is only one row.
     /// If None, the pk is empty vector (simple agg). If not None, the pk is group key (hash agg).
     group_key: Option<Row>,
+
+    dirty: bool,
+    cache: BTreeSet<OrderableRow>,
 }
 
 impl<S: StateStore> ManagedStringAggState<S> {
-    pub fn new(pk_data_types: PkDataTypes, group_key: Option<&Row>) -> StreamExecutorResult<Self> {
+    pub fn new(
+        agg_call: AggCall,
+        pk_data_types: PkDataTypes,
+        group_key: Option<&Row>,
+    ) -> StreamExecutorResult<Self> {
         println!(
             "[rc] new, pk_data_types: {:?}, group_key: {:?}",
             pk_data_types, group_key
@@ -52,6 +61,8 @@ impl<S: StateStore> ManagedStringAggState<S> {
             _phantom_data: PhantomData,
             upstream_pk_len: pk_data_types.len(),
             group_key: group_key.cloned(),
+            dirty: false,
+            cache: BTreeSet::new(),
         })
     }
 
@@ -72,10 +83,7 @@ impl<S: StateStore> ManagedStringAggState<S> {
         } else {
             0
         };
-        let value = row[row.size() - 1].clone().map(|x| match x {
-            ScalarImpl::Utf8(s) => s,
-            _ => panic!("Expected Utf8"),
-        });
+        let value = row[row.size() - 1].clone().map(ScalarImpl::into_utf8);
         let pk = row
             .values()
             .skip(n_group_key_cols)
@@ -93,7 +101,7 @@ impl<S: StateStore> ManagedTableState<S> for ManagedStringAggState<S> {
         ops: Ops<'_>,
         visibility: Option<&Bitmap>,
         data: &[&ArrayImpl],
-        epoch: u64,
+        _epoch: u64,
         state_table: &mut StateTable<S>,
     ) -> StreamExecutorResult<()> {
         debug_assert!(super::verify_batch(ops, visibility, data));
@@ -112,6 +120,7 @@ impl<S: StateStore> ManagedTableState<S> for ManagedStringAggState<S> {
             if !visible {
                 continue;
             }
+            self.dirty = true;
 
             let value = value.map(|x| x.to_owned_scalar().into());
             let pk_values: Vec<Datum> = pk_columns.iter().map(|col| col.datum_at(id)).collect();
@@ -155,7 +164,6 @@ impl<S: StateStore> ManagedTableState<S> for ManagedStringAggState<S> {
         };
         pin_mut!(all_data_iter);
 
-        // TODO(rc): cache the result
         let mut agg_result = String::new();
 
         #[for_await]
@@ -172,11 +180,14 @@ impl<S: StateStore> ManagedTableState<S> for ManagedStringAggState<S> {
     }
 
     fn is_dirty(&self) -> bool {
-        unreachable!("It seems that this function will never be called.")
+        self.dirty
     }
 
     fn flush(&mut self, state_table: &mut StateTable<S>) -> StreamExecutorResult<()> {
         println!("[rc] ManagedStringAggState::flush");
+        if self.dirty {
+            // TODO(rc): do more things later
+        }
         Ok(())
     }
 }

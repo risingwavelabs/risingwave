@@ -208,6 +208,11 @@ where
             // sort key may be null
             let key: Option<A::OwnedItem> = option_to_owned_scalar(&key);
 
+            println!(
+                "[rc] apply_batch_inner, id: {}, op: {:?}, key: {:?}",
+                id, op, key
+            );
+
             // Concat pk with the original key to create a composed key
             let composed_key = (
                 key.clone(),
@@ -217,11 +222,22 @@ where
                     .map(|col| col.datum_at(id))
                     .collect::<ExtremePk>(),
             );
+            println!("[rc] composed_key: {:?}", composed_key);
 
             // Get relational pk and value.
             let sort_key = key.map(|key| key.into());
             let relational_value =
                 self.get_relational_value(sort_key.clone(), composed_key.1.clone());
+            println!(
+                "[rc] sort_key: {:?}, relational_value: {:?}",
+                sort_key, relational_value
+            );
+
+            println!(
+                "[rc] state table schema: {:?}, pk indices: {:?}",
+                state_table.storage_table().schema(),
+                state_table.pk_indices()
+            );
 
             match op {
                 Op::Insert | Op::UpdateInsert => {

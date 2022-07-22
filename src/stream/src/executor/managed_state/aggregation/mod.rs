@@ -119,6 +119,12 @@ impl<S: StateStore> ManagedStateImpl<S> {
         pk: Option<&Row>,
         state_table: &RowBasedStateTable<S>,
     ) -> StreamExecutorResult<Self> {
+        println!(
+            "[rc] create_managed_state, agg_call: {:?}, row_count: {:?}, state table schema: {:?}",
+            agg_call,
+            row_count,
+            state_table.storage_table().schema()
+        );
         match agg_call.kind {
             AggKind::Max | AggKind::Min => {
                 assert!(
@@ -151,6 +157,7 @@ impl<S: StateStore> ManagedStateImpl<S> {
                 // ))
                 println!("[rc] AggKind::StringAgg!!");
                 Ok(Self::Table(Box::new(ManagedStringAggState::new(
+                    agg_call,
                     pk_data_types,
                     pk,
                 )?)))

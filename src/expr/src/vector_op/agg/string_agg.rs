@@ -12,44 +12,17 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::cmp::Ordering;
 use std::collections::BinaryHeap;
 use std::sync::Arc;
 
 use itertools::Itertools;
-use risingwave_common::array::{Array, ArrayBuilder, ArrayBuilderImpl, ArrayImpl, DataChunk, Row};
+use risingwave_common::array::{Array, ArrayBuilder, ArrayBuilderImpl, ArrayImpl, DataChunk};
 use risingwave_common::error::{ErrorCode, Result};
 use risingwave_common::types::{DataType, ScalarImpl};
 use risingwave_common::util::encoding_for_comparison::{encode_row, is_type_encodable};
-use risingwave_common::util::sort_util::{compare_rows, OrderPair};
+use risingwave_common::util::sort_util::{OrderPair, OrderableRow};
 
 use crate::vector_op::agg::aggregator::Aggregator;
-
-#[derive(Debug, Clone, PartialEq, Eq)]
-struct OrderableRow {
-    row: Row,
-    encoded_row: Option<Vec<u8>>,
-    order_pairs: Arc<Vec<OrderPair>>,
-}
-
-impl Ord for OrderableRow {
-    fn cmp(&self, other: &Self) -> Ordering {
-        let ord = if let (Some(encoded_lhs), Some(encoded_rhs)) =
-            (self.encoded_row.as_ref(), other.encoded_row.as_ref())
-        {
-            encoded_lhs.as_slice().cmp(encoded_rhs.as_slice())
-        } else {
-            compare_rows(&self.row, &other.row, &self.order_pairs).unwrap()
-        };
-        ord.reverse() // we have to reverse the order because BinaryHeap is a max-heap
-    }
-}
-
-impl PartialOrd for OrderableRow {
-    fn partial_cmp(&self, other: &Self) -> Option<Ordering> {
-        Some(self.cmp(other))
-    }
-}
 
 enum StringAggState {
     WithoutOrder {

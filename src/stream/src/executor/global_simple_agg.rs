@@ -22,7 +22,7 @@ use risingwave_common::error::Result;
 use risingwave_storage::table::state_table::RowBasedStateTable;
 use risingwave_storage::StateStore;
 
-use super::aggregation::agg_call_filter_res;
+use super::aggregation::{agg_call_filter_res, agg_order_array_refs};
 use super::*;
 use crate::executor::aggregation::{
     agg_input_array_refs, generate_agg_schema, generate_managed_agg_state, AggCall, AggState,
@@ -130,16 +130,26 @@ impl<S: StateStore> GlobalSimpleAggExecutor<S> {
 
         // --- Retrieve all aggregation inputs in advance ---
         let all_agg_input_arrays = agg_input_array_refs(agg_calls, &columns);
+        let all_agg_order_arrays = agg_order_array_refs(agg_calls, &columns);
         let pk_input_arrays = pk_input_array_refs(input_pk_indices, &columns);
         let input_pk_data_types = input_pk_indices
             .iter()
             .map(|idx| input_schema.fields[*idx].data_type.clone())
             .collect();
 
+        // TODO(rc): Maybe it's better not to merge all these columns together, the indices are
+        // very easily to be mistaken.
+        // Two alternative options:
+        // 1. Just pass all the columns to downstream, the all indices won't need to be updated.
+        // 2. Split different kinds of columns, like (agg_input_cols, agg_order_cols, pk_cols), and
+        //    pass them to downstream separately.
+
         // When applying batch, we will send columns of primary keys to the last N columns.
         let all_agg_data = all_agg_input_arrays
             .into_iter()
-            .map(|mut input_arrays| {
+            .zip_eq(all_agg_order_arrays.into_iter())
+            .map(|(mut input_arrays, order_arrays)| {
+                input_arrays.extend(order_arrays.into_iter());
                 input_arrays.extend(pk_input_arrays.iter());
                 input_arrays
             })
