@@ -78,7 +78,8 @@ pub trait RowSerialize: Clone {
         pk: &[u8],
         row: Row,
     ) -> Result<Vec<Option<(KeyBytes, ValueBytes)>>>;
-    fn column_ids(&self) -> &[ColumnId];
+
+    fn serialize_sentinel_cell(pk_buf: &[u8], col_id: &ColumnId) -> Result<Option<Vec<u8>>>;
 }
 
 /// Record mapping from [`ColumnDesc`], [`ColumnId`], and output index of columns in a table.

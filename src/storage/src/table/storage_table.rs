@@ -322,8 +322,8 @@ impl<S: StateStore, RS: RowSerde, const T: AccessType> StorageTableBase<S, RS, T
         &self.pk_indices
     }
 
-    pub(super) fn column_ids(&self) -> &[ColumnId] {
-        self.row_serializer.column_ids()
+    pub(super) fn column_ids(&self) -> impl Iterator<Item = ColumnId> + '_ {
+        self.table_columns.iter().map(|t| t.column_id)
     }
 }
 
@@ -380,18 +380,36 @@ impl<S: StateStore, RS: RowSerde, const T: AccessType> StorageTableBase<S, RS, T
     pub async fn get_row(&self, pk: &Row, epoch: u64) -> StorageResult<Option<Row>> {
         // TODO: use multi-get for storage get_row
         let serialized_pk = self.serialize_pk_with_vnode(pk);
-
-        let sentinel_key =
-            serialize_pk_and_column_id(&serialized_pk, &SENTINEL_CELL_ID).map_err(err)?;
-        if self.keyspace.get(&sentinel_key, epoch).await?.is_none() {
-            // if sentinel cell is none, this row doesn't exist
-            return Ok(None);
-        };
-
         let data_types = self.schema().data_types();
         let mut deserializer = RS::create_deserializer(self.mapping.clone(), data_types);
+        let sentinel_key = <RS as RowSerde>::Serializer::serialize_sentinel_cell(
+            &serialized_pk,
+            &SENTINEL_CELL_ID,
+        )
+        .map_err(err)?;
+        match sentinel_key {
+            Some(sentinel_key) => {
+                if self.keyspace.get(&sentinel_key, epoch).await?.is_none() {
+                    // if sentinel cell is none, this row doesn't exist
+                    return Ok(None);
+                };
+            }
+            // if sentinel cell does not exist, the encoding format is row-based.
+            None => {
+                if let Some(value) = self.keyspace.get(&serialized_pk, epoch).await? {
+                    let deserialize_res = deserializer
+                        .deserialize(&serialized_pk, &value)
+                        .map_err(err)?;
+                    match deserialize_res {
+                        Some(deserialize_res) => return Ok(Some(deserialize_res.2)),
+                        None => return Ok(None),
+                    }
+                }
+            }
+        }
+
         for column_id in self.column_ids() {
-            let key = serialize_pk_and_column_id(&serialized_pk, column_id).map_err(err)?;
+            let key = serialize_pk_and_column_id(&serialized_pk, &column_id).map_err(err)?;
             if let Some(value) = self.keyspace.get(&key, epoch).await? {
                 let deserialize_res = deserializer.deserialize(&key, &value).map_err(err)?;
                 assert!(deserialize_res.is_none());
