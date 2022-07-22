@@ -25,6 +25,10 @@ use risingwave_sqlparser::ast::Statement;
 use risingwave_sqlparser::parser::Parser;
 use risingwave_sqlsmith::{mview_sql_gen, sql_gen, Table};
 
+fn parse_sql(sql: &str) -> Vec<Statement> {
+    Parser::parse_sql(sql).unwrap_or_else(|_| panic!("Failed to parse SQL: {}", sql))
+}
+
 /// Executes sql queries
 /// It captures panics so it can recover and print failing sql query.
 async fn handle(session: Arc<SessionImpl>, stmt: Statement, sql: String) {
@@ -45,8 +49,7 @@ async fn create_tables(session: Arc<SessionImpl>, rng: &mut impl Rng) -> Vec<Tab
         .iter()
         .map(|filename| std::fs::read_to_string(filename).unwrap())
         .collect::<String>();
-    let statements =
-        Parser::parse_sql(&sql).unwrap_or_else(|_| panic!("Failed to parse SQL: {}", sql));
+    let statements = parse_sql(&sql);
     let n_statements = statements.len();
 
     let mut tables = vec![];
@@ -71,8 +74,7 @@ async fn create_tables(session: Arc<SessionImpl>, rng: &mut impl Rng) -> Vec<Tab
     // of being queried.
     for i in 0..n_statements {
         let (sql, table) = mview_sql_gen(rng, tables.clone(), &format!("m{}", i));
-        let stmts =
-            Parser::parse_sql(&sql).unwrap_or_else(|_| panic!("Failed to parse SQL: {}", sql));
+        let stmts = parse_sql(&sql);
         let stmt = stmts[0].clone();
         handle(session.clone(), stmt, sql).await;
         tables.push(table);
@@ -100,8 +102,7 @@ async fn run_sqlsmith_with_seed(seed: u64) {
         }));
 
         // The generated SQL must be parsable.
-        let statements =
-            Parser::parse_sql(&sql).unwrap_or_else(|_| panic!("Failed to parse SQL: {}", sql));
+        let statements = parse_sql(&sql);
         let stmt = statements[0].clone();
         let context: OptimizerContextRef =
             OptimizerContext::new(session.clone(), Arc::from(sql.clone())).into();
