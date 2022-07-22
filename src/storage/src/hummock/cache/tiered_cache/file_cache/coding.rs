@@ -12,14 +12,10 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::hash::{BuildHasher, Hash};
+use std::hash::BuildHasher;
 
-pub trait CacheKey: Eq + Send + Sync + Hash + Clone + 'static + std::fmt::Debug {
-    fn encoded_len() -> usize;
+use crate::hummock::cache::tiered_cache::TieredCacheKey;
 
-    fn encode(&self, buf: &mut [u8]);
-
-    fn decode(buf: &[u8]) -> Self;
-}
+pub trait CacheKey = TieredCacheKey;
 
 pub trait HashBuilder = BuildHasher + Clone + Send + Sync + 'static;

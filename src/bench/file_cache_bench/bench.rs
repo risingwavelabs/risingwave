@@ -22,6 +22,7 @@ use itertools::Itertools;
 use rand::{Rng, SeedableRng};
 use risingwave_storage::hummock::file_cache::cache::{FileCache, FileCacheOptions};
 use risingwave_storage::hummock::file_cache::coding::CacheKey;
+use risingwave_storage::hummock::TieredCacheKey;
 use tokio::sync::oneshot;
 
 use crate::analyze::{analyze, monitor, Hook, Metrics};
@@ -63,7 +64,7 @@ struct Index {
     idx: u32,
 }
 
-impl CacheKey for Index {
+impl TieredCacheKey for Index {
     fn encoded_len() -> usize {
         8
     }

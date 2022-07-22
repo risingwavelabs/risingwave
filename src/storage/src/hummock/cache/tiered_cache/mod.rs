@@ -13,11 +13,6 @@
 // limitations under the License.
 
 use std::hash::Hash;
-use std::marker::PhantomData;
-
-use async_trait::async_trait;
-
-use crate::hummock::HummockResult;
 
 pub trait TieredCacheKey: Eq + Send + Sync + Hash + Clone + 'static + std::fmt::Debug {
     fn encoded_len() -> usize;
@@ -27,30 +22,37 @@ pub trait TieredCacheKey: Eq + Send + Sync + Hash + Clone + 'static + std::fmt::
     fn decode(buf: &[u8]) -> Self;
 }
 
-#[async_trait]
-pub trait TieredCache<K: TieredCacheKey>: Send + Sync + Clone {
-    async fn insert(&self, key: K, value: Vec<u8>) -> HummockResult<()>;
-    async fn get(&self, key: &K) -> HummockResult<Option<Vec<u8>>>;
-    async fn erase(&self, key: &K) -> HummockResult<()>;
-}
-
 #[cfg(target_os = "linux")]
 pub mod file_cache;
 
-#[derive(Clone)]
-pub struct NoneTieredCache<K: TieredCacheKey>(PhantomData<K>);
+#[cfg(target_os = "linux")]
+pub mod linux {
+    use super::file_cache::cache::FileCache;
 
-#[async_trait]
-impl<K: TieredCacheKey> TieredCache<K> for NoneTieredCache<K> {
-    async fn insert(&self, _key: K, _value: Vec<u8>) -> HummockResult<()> {
-        Ok(())
-    }
+    pub type TieredCache<K> = FileCache<K>;
+}
 
-    async fn get(&self, _key: &K) -> HummockResult<Option<Vec<u8>>> {
-        Ok(None)
-    }
+#[cfg(not(target_os = "linux"))]
+pub mod not_linux {
+    use std::marker::PhantomData;
 
-    async fn erase(&self, _key: &K) -> HummockResult<()> {
-        Ok(())
+    use super::TieredCacheKey;
+    use crate::hummock::HummockResult;
+
+    #[derive(Clone)]
+    pub struct TieredCache<K: TieredCacheKey>(PhantomData<K>);
+
+    impl<K: TieredCacheKey> TieredCache<K> {
+        pub fn insert(&self, _key: K, _value: Vec<u8>) -> HummockResult<()> {
+            Ok(())
+        }
+
+        pub async fn get(&self, _key: &K) -> HummockResult<Option<Vec<u8>>> {
+            Ok(None)
+        }
+
+        pub fn erase(&self, _key: &K) -> HummockResult<()> {
+            Ok(())
+        }
     }
 }
