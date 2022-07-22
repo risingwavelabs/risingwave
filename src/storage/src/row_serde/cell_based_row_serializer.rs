@@ -74,8 +74,4 @@ impl RowSerialize for CellBasedRowSerializer {
         let res = serialize_pk_and_row(&key, &row, &self.column_ids)?;
         Ok(res)
     }
-
-    fn column_ids(&self) -> &[ColumnId] {
-        &self.column_ids
-    }
 }

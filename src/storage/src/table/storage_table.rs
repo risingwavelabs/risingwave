@@ -322,8 +322,8 @@ impl<S: StateStore, RS: RowSerde, const T: AccessType> StorageTableBase<S, RS, T
         &self.pk_indices
     }
 
-    pub(super) fn column_ids(&self) -> &[ColumnId] {
-        self.row_serializer.column_ids()
+    pub(super) fn column_ids(&self) -> impl Iterator<Item = ColumnId> + '_ {
+        self.table_columns.iter().map(|t| t.column_id)
     }
 }
 
@@ -391,7 +391,7 @@ impl<S: StateStore, RS: RowSerde, const T: AccessType> StorageTableBase<S, RS, T
         let data_types = self.schema().data_types();
         let mut deserializer = RS::create_deserializer(self.mapping.clone(), data_types);
         for column_id in self.column_ids() {
-            let key = serialize_pk_and_column_id(&serialized_pk, column_id).map_err(err)?;
+            let key = serialize_pk_and_column_id(&serialized_pk, &column_id).map_err(err)?;
             if let Some(value) = self.keyspace.get(&key, epoch).await? {
                 let deserialize_res = deserializer.deserialize(&key, &value).map_err(err)?;
                 assert!(deserialize_res.is_none());
