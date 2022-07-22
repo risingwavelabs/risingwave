@@ -452,6 +452,7 @@ mod tests {
             .unwrap();
 
         let mut i = 0;
+        let mut num_blocks = 0;
         while let Some(block) = stream.next().await {
             let mut block_iter = BlockIterator::new(block.expect("invalid block"));
             block_iter.seek_to_first();
@@ -460,7 +461,9 @@ mod tests {
                 block_iter.next();
                 i += 1;
             }
+            num_blocks += 1;
         }
         assert_eq!(i, 100);
+        assert!(num_blocks > 1);
     }
 }
