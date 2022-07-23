@@ -144,19 +144,19 @@ impl HummockStorage {
 
     async fn get_from_table(
         &self,
-        table: TableHolder,
+        sstable: TableHolder,
         internal_key: &[u8],
         key: &[u8],
         read_options: Arc<ReadOptions>,
         stats: &mut StoreLocalStatistic,
     ) -> HummockResult<Option<Option<Bytes>>> {
-        if table.value().surely_not_have_user_key(key) {
+        if sstable.value().surely_not_have_user_key(key) {
             stats.bloom_filter_true_negative_count += 1;
             return Ok(None);
         }
         // Might have the key, take it as might positive.
         stats.bloom_filter_might_positive_count += 1;
-        let mut iter = SSTableIterator::create(table, self.sstable_store.clone(), read_options);
+        let mut iter = SsTableIterator::create(sstable, self.sstable_store.clone(), read_options);
         iter.seek(internal_key).await?;
         // Iterator has seeked passed the borders.
         if !iter.is_valid() {

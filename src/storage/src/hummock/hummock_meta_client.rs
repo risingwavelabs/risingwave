@@ -24,7 +24,7 @@ use risingwave_rpc_client::error::Result;
 use risingwave_rpc_client::{HummockMetaClient, MetaClient};
 use tonic::Streaming;
 
-use crate::hummock::{HummockEpoch, HummockSSTableId, HummockVersionId};
+use crate::hummock::{HummockEpoch, HummockSsTableId, HummockVersionId};
 use crate::monitor::HummockMetrics;
 
 pub struct MonitoredHummockMetaClient {
@@ -99,7 +99,7 @@ impl HummockMetaClient for MonitoredHummockMetaClient {
         unreachable!("Currently CNs should not call this function")
     }
 
-    async fn get_new_table_id(&self) -> Result<HummockSSTableId> {
+    async fn get_new_table_id(&self) -> Result<HummockSsTableId> {
         self.stats.get_new_table_id_counts.inc();
         let timer = self.stats.get_new_table_id_latency.start_timer();
         let res = self.meta_client.get_new_table_id().await;

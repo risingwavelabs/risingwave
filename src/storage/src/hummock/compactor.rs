@@ -33,7 +33,7 @@ use risingwave_hummock_sdk::key::{
 };
 use risingwave_hummock_sdk::key_range::KeyRange;
 use risingwave_hummock_sdk::slice_transform::SliceTransformImpl;
-use risingwave_hummock_sdk::{CompactionGroupId, HummockSSTableId, VersionedComparator};
+use risingwave_hummock_sdk::{CompactionGroupId, HummockSsTableId, VersionedComparator};
 use risingwave_pb::hummock::{
     CompactTask, LevelType, SstableInfo, SubscribeCompactTasksResponse, VacuumTask,
 };
@@ -44,8 +44,8 @@ use tokio::task::JoinHandle;
 use super::iterator::{BoxedForwardHummockIterator, ConcatIterator, MergeIterator};
 use super::multi_builder::CapacitySplitTableBuilder;
 use super::{
-    CompressionAlgorithm, HummockResult, SSTableBuilder, SSTableBuilderOptions, SSTableIterator,
-    SSTableIteratorType, Sstable,
+    CompressionAlgorithm, HummockResult, SsTableBuilder, SsTableBuilderOptions, SsTableIterator,
+    SsTableIteratorType, Sstable,
 };
 use crate::hummock::compaction_executor::CompactionExecutor;
 use crate::hummock::iterator::ReadOptions;
@@ -60,7 +60,7 @@ use crate::hummock::{CachePolicy, HummockError};
 use crate::monitor::{StateStoreMetrics, StoreLocalStatistic};
 
 pub type SstableIdGenerator =
-    Arc<dyn Fn() -> BoxFuture<'static, HummockResult<HummockSSTableId>> + Send + Sync>;
+    Arc<dyn Fn() -> BoxFuture<'static, HummockResult<HummockSsTableId>> + Send + Sync>;
 
 pub fn get_remote_sstable_id_generator(
     meta_client: Arc<dyn HummockMetaClient>,
@@ -86,7 +86,7 @@ pub struct CompactorContext {
     /// The meta client.
     pub hummock_meta_client: Arc<dyn HummockMetaClient>,
 
-    /// SSTable store that manages the sstables.
+    /// SsTable store that manages the sstables.
     pub sstable_store: SstableStoreRef,
 
     /// Statistics.
@@ -652,7 +652,7 @@ impl Compactor {
                 let timer = Instant::now();
                 let table_id = (self.context.sstable_id_generator)().await?;
                 let cost = (timer.elapsed().as_secs_f64() * 1000000.0).round() as u64;
-                let mut options: SSTableBuilderOptions = self.context.options.as_ref().into();
+                let mut options: SsTableBuilderOptions = self.context.options.as_ref().into();
 
                 options.capacity = target_file_size;
                 options.compression_algorithm = match self.compact_task.compression_algorithm {
@@ -660,7 +660,7 @@ impl Compactor {
                     1 => CompressionAlgorithm::Lz4,
                     _ => CompressionAlgorithm::Zstd,
                 };
-                let builder = SSTableBuilder::new(table_id, options);
+                let builder = SsTableBuilder::new(table_id, options);
                 get_id_time.fetch_add(cost, Ordering::Relaxed);
                 Ok(builder)
             },
@@ -789,7 +789,7 @@ impl Compactor {
                         .sstable_store
                         .load_table(table_info.id, true, &mut stats)
                         .await?;
-                    table_iters.push(Box::new(SSTableIterator::create(
+                    table_iters.push(Box::new(SsTableIterator::create(
                         table,
                         self.context.sstable_store.clone(),
                         read_options.clone(),
@@ -945,7 +945,7 @@ impl Compactor {
     ) -> HummockResult<()>
     where
         B: Clone + Fn() -> F,
-        F: Future<Output = HummockResult<SSTableBuilder>>,
+        F: Future<Output = HummockResult<SsTableBuilder>>,
     {
         if !kr.left.is_empty() {
             iter.seek(&kr.left).await?;

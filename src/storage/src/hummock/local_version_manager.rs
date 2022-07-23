@@ -130,7 +130,7 @@ impl BufferTracker {
 }
 
 /// The `LocalVersionManager` maintains a local copy of storage service's hummock version data.
-/// By acquiring a `ScopedLocalVersion`, the `SSTables` of this version is guaranteed to be valid
+/// By acquiring a `ScopedLocalVersion`, the `SsTables` of this version is guaranteed to be valid
 /// during the lifetime of `ScopedLocalVersion`. Internally `LocalVersionManager` will pin/unpin the
 /// versions in storage service.
 pub struct LocalVersionManager {

@@ -13,12 +13,12 @@
 // limitations under the License.
 
 use crate::hummock::iterator::concat_inner::ConcatIteratorInner;
-use crate::hummock::BackwardSSTableIterator;
+use crate::hummock::BackwardSsTableIterator;
 
 /// Iterates backwards on multiple non-overlapping tables.
-pub type BackwardConcatIterator = ConcatIteratorInner<BackwardSSTableIterator>;
+pub type BackwardConcatIterator = ConcatIteratorInner<BackwardSsTableIterator>;
 
-/// Mirrors the tests used for `SSTableIterator`
+/// Mirrors the tests used for `SsTableIterator`
 #[cfg(test)]
 mod tests {
     use std::sync::Arc;

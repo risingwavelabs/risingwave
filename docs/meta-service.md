@@ -39,7 +39,7 @@ To execute a DDL statement like `CREATE` or `DROP TABLE`, the frontend sends an 
 
 ### Storage
 
-Hummock, an LSM-Tree-based storage engine, stores the mapping from version to the set of SSTable files in Meta Service. See more details in the [overview of State Store](./state-store-overview.md).
+Hummock, an LSM-Tree-based storage engine, stores the mapping from version to the set of SsTable files in Meta Service. See more details in the [overview of State Store](./state-store-overview.md).
 
 ## Push on Updates
 

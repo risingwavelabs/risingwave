@@ -40,4 +40,4 @@ A local shared buffer is introduced to stage these uncommitted write batches. On
 
 ![shared buffer](./images/checkpoint/shared-buffer.svg)
 
-Another benefit of shared buffer is that the write batches in a compute node can be compacted into a single SSTable file before uploading, which significantly reduces the number of SSTable files in Layer 0.
+Another benefit of shared buffer is that the write batches in a compute node can be compacted into a single SsTable file before uploading, which significantly reduces the number of SsTable files in Layer 0.

@@ -14,34 +14,34 @@
 
 use futures::Future;
 use risingwave_hummock_sdk::key::{Epoch, FullKey};
-use risingwave_hummock_sdk::HummockSSTableId;
+use risingwave_hummock_sdk::HummockSsTableId;
 use tokio::task::JoinHandle;
 
 use super::SstableMeta;
 use crate::hummock::sstable_store::SstableStoreRef;
 use crate::hummock::value::HummockValue;
-use crate::hummock::{CachePolicy, HummockResult, SSTableBuilder, Sstable};
+use crate::hummock::{CachePolicy, HummockResult, SsTableBuilder, Sstable};
 
 pub struct SealedSstableBuilder {
-    pub id: HummockSSTableId,
+    pub id: HummockSsTableId,
     pub meta: SstableMeta,
     pub table_ids: Vec<u32>,
     pub upload_join_handle: JoinHandle<HummockResult<()>>,
     pub data_len: usize,
 }
 
-/// A wrapper for [`SSTableBuilder`] which automatically split key-value pairs into multiple tables,
+/// A wrapper for [`SsTableBuilder`] which automatically split key-value pairs into multiple tables,
 /// based on their target capacity set in options.
 ///
 /// When building is finished, one may call `finish` to get the results of zero, one or more tables.
 pub struct CapacitySplitTableBuilder<B> {
-    /// When creating a new [`SSTableBuilder`], caller use this closure to specify the id and
+    /// When creating a new [`SsTableBuilder`], caller use this closure to specify the id and
     /// options.
     get_id_and_builder: B,
 
     sealed_builders: Vec<SealedSstableBuilder>,
 
-    current_builder: Option<SSTableBuilder>,
+    current_builder: Option<SsTableBuilder>,
 
     policy: CachePolicy,
     sstable_store: SstableStoreRef,
@@ -50,7 +50,7 @@ pub struct CapacitySplitTableBuilder<B> {
 impl<B, F> CapacitySplitTableBuilder<B>
 where
     B: Clone + Fn() -> F,
-    F: Future<Output = HummockResult<SSTableBuilder>>,
+    F: Future<Output = HummockResult<SsTableBuilder>>,
 {
     /// Creates a new [`CapacitySplitTableBuilder`] using given configuration generator.
     pub fn new(get_id_and_builder: B, policy: CachePolicy, sstable_store: SstableStoreRef) -> Self {
@@ -63,7 +63,7 @@ where
         }
     }
 
-    /// Returns the number of [`SSTableBuilder`]s.
+    /// Returns the number of [`SsTableBuilder`]s.
     pub fn len(&self) -> usize {
         self.sealed_builders.len() + if self.current_builder.is_some() { 1 } else { 0 }
     }
@@ -172,7 +172,7 @@ mod tests {
     use crate::hummock::iterator::test_utils::mock_sstable_store;
     use crate::hummock::sstable::utils::CompressionAlgorithm;
     use crate::hummock::test_utils::default_builder_opt_for_test;
-    use crate::hummock::{SSTableBuilderOptions, DEFAULT_RESTART_INTERVAL};
+    use crate::hummock::{SsTableBuilderOptions, DEFAULT_RESTART_INTERVAL};
 
     #[tokio::test]
     async fn test_empty() {
@@ -180,9 +180,9 @@ mod tests {
         let block_size = 1 << 10;
         let table_capacity = 4 * block_size;
         let get_id_and_builder = || async {
-            Ok(SSTableBuilder::new(
+            Ok(SsTableBuilder::new(
                 next_id.fetch_add(1, SeqCst),
-                SSTableBuilderOptions {
+                SsTableBuilderOptions {
                     capacity: table_capacity,
                     block_capacity: block_size,
                     restart_interval: DEFAULT_RESTART_INTERVAL,
@@ -207,9 +207,9 @@ mod tests {
         let block_size = 1 << 10;
         let table_capacity = 4 * block_size;
         let get_id_and_builder = || async {
-            Ok(SSTableBuilder::new(
+            Ok(SsTableBuilder::new(
                 next_id.fetch_add(1, SeqCst),
-                SSTableBuilderOptions {
+                SsTableBuilderOptions {
                     capacity: table_capacity,
                     block_capacity: block_size,
                     restart_interval: DEFAULT_RESTART_INTERVAL,
@@ -245,7 +245,7 @@ mod tests {
         let next_id = AtomicU64::new(1001);
         let mut builder = CapacitySplitTableBuilder::new(
             || async {
-                Ok(SSTableBuilder::new(
+                Ok(SsTableBuilder::new(
                     next_id.fetch_add(1, SeqCst),
                     default_builder_opt_for_test(),
                 ))
@@ -290,7 +290,7 @@ mod tests {
         let next_id = AtomicU64::new(1001);
         let mut builder = CapacitySplitTableBuilder::new(
             || async {
-                Ok(SSTableBuilder::new(
+                Ok(SsTableBuilder::new(
                     next_id.fetch_add(1, SeqCst),
                     default_builder_opt_for_test(),
                 ))

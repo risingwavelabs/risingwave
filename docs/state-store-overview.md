@@ -75,7 +75,7 @@ In this part, we will discuss how data are stored and organized in Hummock inter
 
 [SST encoding source code](https://github.com/singularity-data/risingwave/tree/main/src/storage/src/hummock/sstable)
 
-All key-value pairs are stored in block-based SSTables. Each user key is associated with an epoch. In SSTs, key-value pairs are sorted first by user key (lexicographical order), and then by epoch (largest to smallest).
+All key-value pairs are stored in block-based SsTables. Each user key is associated with an epoch. In SSTs, key-value pairs are sorted first by user key (lexicographical order), and then by epoch (largest to smallest).
 
 For example, if users write two batches in consequence:
 
@@ -117,10 +117,10 @@ For `scan`, we simply select by overlapping key range. For point get, we will fi
 ![Read Path](images/state-store-overview/state-store-overview-03.svg)
 
 Hummock implements the following iterators:
-- `BlockIterator`: iterates a block of an SSTable.
-- `SSTableIterator`: iterates an SSTable.
-- `ConcatIterator`: iterates SSTables with non-overlapping keyspaces.
-- `MergeIterator`: iterates SSTables with overlapping keyspaces.
+- `BlockIterator`: iterates a block of an SsTable.
+- `SsTableIterator`: iterates an SsTable.
+- `ConcatIterator`: iterates SsTables with non-overlapping keyspaces.
+- `MergeIterator`: iterates SsTables with overlapping keyspaces.
 - `UserIterator`: wraps internal iterators and outputs user key-value with epoch <= read epoch.
 
 [iterators source code](https://github.com/singularity-data/risingwave/tree/main/src/storage/src/hummock/iterator)
