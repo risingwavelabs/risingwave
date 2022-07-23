@@ -25,7 +25,7 @@ use crate::monitor::StoreLocalStatistic;
 
 pub trait SstableIteratorType: HummockIterator + 'static {
     fn create(
-        sstable: TableHolder,
+        sstable: impl Into<TableHolder>,
         sstable_store: SstableStoreRef,
         read_options: Arc<ReadOptions>,
     ) -> Self;
@@ -48,10 +48,11 @@ pub struct SstableIterator {
 
 impl SstableIterator {
     pub fn new(
-        sstable: TableHolder,
+        sstable: impl Into<TableHolder>,
         sstable_store: SstableStoreRef,
         _options: Arc<ReadOptions>,
     ) -> Self {
+        let sstable = sstable.into();
         Self {
             block_iter: None,
             cur_idx: 0,
@@ -171,7 +172,7 @@ impl HummockIterator for SstableIterator {
 
 impl SstableIteratorType for SstableIterator {
     fn create(
-        sstable: TableHolder,
+        sstable: impl Into<TableHolder>,
         sstable_store: SstableStoreRef,
         options: Arc<ReadOptions>,
     ) -> Self {
