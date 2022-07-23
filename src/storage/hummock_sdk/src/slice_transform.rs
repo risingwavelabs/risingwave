@@ -36,7 +36,7 @@ pub enum SliceTransformImpl {
     Multi(MultiSliceTransform),
 }
 
-macro_rules! impl_dispatcher {
+macro_rules! impl_slice_transform {
     ([], $( { $variant_name:ident } ),*) => {
         impl SliceTransformImpl {
             pub fn transform<'a>(&mut self, full_key: &'a [u8]) -> &'a [u8]{
@@ -48,7 +48,7 @@ macro_rules! impl_dispatcher {
     }
 }
 
-macro_rules! for_all_dispatcher_variants {
+macro_rules! for_all_slice_transform_variants {
     ($macro:ident $(, $x:tt)*) => {
         $macro! {
             [$($x), *],
@@ -60,7 +60,7 @@ macro_rules! for_all_dispatcher_variants {
     };
 }
 
-for_all_dispatcher_variants! { impl_dispatcher }
+for_all_slice_transform_variants! { impl_slice_transform }
 
 #[derive(Default, Clone)]
 pub struct FullKeySliceTransform;
