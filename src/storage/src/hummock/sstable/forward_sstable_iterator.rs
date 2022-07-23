@@ -195,7 +195,10 @@ mod tests {
     };
     use crate::hummock::{CachePolicy, Sstable};
 
-    async fn inner_test_forward_iterator(sstable_store: SstableStoreRef, handle: TableHolder) {
+    async fn inner_test_forward_iterator(
+        sstable_store: SstableStoreRef,
+        handle: impl Into<TableHolder>,
+    ) {
         // We should have at least 10 blocks, so that sstable iterator test could cover more code
         // path.
         let mut sstable_iter =
