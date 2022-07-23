@@ -24,8 +24,9 @@ use crate::hummock::iterator::test_utils::{
 use crate::hummock::iterator::{
     Backward, BackwardConcatIterator, BackwardMergeIterator, BackwardUserIterator,
     BoxedBackwardHummockIterator, BoxedForwardHummockIterator, ConcatIterator, Forward,
-    HummockIterator, MergeIterator, ReadOptions, UserIterator,
+    HummockIterator, MergeIterator, UserIterator,
 };
+use crate::hummock::sstable::SstableIteratorReadOptions;
 use crate::hummock::test_utils::default_builder_opt_for_test;
 use crate::hummock::{BackwardSstableIterator, SstableIterator};
 use crate::monitor::{StateStoreMetrics, StoreLocalStatistic};
@@ -56,7 +57,7 @@ async fn test_failpoints_concat_read_err() {
     let mut iter = ConcatIterator::new(
         vec![table0.get_sstable_info(), table1.get_sstable_info()],
         sstable_store,
-        Arc::new(ReadOptions::default()),
+        Arc::new(SstableIteratorReadOptions::default()),
     );
     iter.rewind().await.unwrap();
     fail::cfg(mem_read_err, "return").unwrap();
@@ -117,7 +118,7 @@ async fn test_failpoints_backward_concat_read_err() {
     let mut iter = BackwardConcatIterator::new(
         vec![table1.get_sstable_info(), table0.get_sstable_info()],
         sstable_store.clone(),
-        Arc::new(ReadOptions::default()),
+        Arc::new(SstableIteratorReadOptions::default()),
     );
     iter.rewind().await.unwrap();
     fail::cfg(mem_read_err, "return").unwrap();
@@ -182,7 +183,7 @@ async fn test_failpoints_merge_invalid_key() {
                         .await
                         .unwrap(),
                     sstable_store.clone(),
-                    Arc::new(ReadOptions::default()),
+                    Arc::new(SstableIteratorReadOptions::default()),
                 ))
                     as Box<dyn HummockIterator<Direction = Forward>>);
             }
@@ -287,12 +288,12 @@ async fn test_failpoints_user_read_err() {
         Box::new(SstableIterator::new(
             sstable_store.sstable(table0.id, &mut stats).await.unwrap(),
             sstable_store.clone(),
-            Arc::new(ReadOptions::default()),
+            Arc::new(SstableIteratorReadOptions::default()),
         )),
         Box::new(SstableIterator::new(
             sstable_store.sstable(table1.id, &mut stats).await.unwrap(),
             sstable_store.clone(),
-            Arc::new(ReadOptions::default()),
+            Arc::new(SstableIteratorReadOptions::default()),
         )),
     ];
 
