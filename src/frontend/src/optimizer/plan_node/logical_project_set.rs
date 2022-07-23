@@ -51,8 +51,8 @@ impl LogicalProjectSet {
 
         let ctx = input.ctx();
         let schema = Self::derive_schema(&select_list, input.schema());
-        let pk_indices = Self::derive_pk(input.schema(), input.pk_indices(), &select_list);
-        let base = PlanBase::new_logical(ctx, schema, pk_indices);
+        let logical_pk = Self::derive_pk(input.schema(), input.logical_pk(), &select_list);
+        let base = PlanBase::new_logical(ctx, schema, logical_pk);
         LogicalProjectSet {
             base,
             select_list,
@@ -320,7 +320,7 @@ impl ToStream for LogicalProjectSet {
             self.rewrite_with_input(input.clone(), input_col_change);
 
         // Add missing columns of input_pk into the select list.
-        let input_pk = input.pk_indices();
+        let input_pk = input.logical_pk();
         let i2o = Self::i2o_col_mapping_inner(input.schema().len(), project_set.select_list());
         let col_need_to_add = input_pk.iter().cloned().filter(|i| i2o.try_map(*i) == None);
         let input_schema = input.schema();

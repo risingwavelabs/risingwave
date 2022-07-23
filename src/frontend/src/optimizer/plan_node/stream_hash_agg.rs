@@ -14,7 +14,6 @@
 
 use std::fmt;
 
-use futures::stream;
 use itertools::Itertools;
 use risingwave_common::catalog::{DatabaseId, SchemaId};
 use risingwave_pb::stream_plan::stream_node::NodeBody as ProstStreamNode;
