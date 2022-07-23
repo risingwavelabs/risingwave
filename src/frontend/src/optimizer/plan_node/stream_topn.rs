@@ -37,9 +37,9 @@ impl StreamTopN {
         let base = PlanBase::new_stream(
             ctx,
             logical.schema().clone(),
-            logical.input().pk_indices().to_vec(),
             dist,
             false,
+            logical.input().stream_key().to_vec(),
         );
         StreamTopN { base, logical }
     }

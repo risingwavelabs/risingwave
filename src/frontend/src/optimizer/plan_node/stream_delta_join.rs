@@ -58,9 +58,9 @@ impl StreamDeltaJoin {
         let base = PlanBase::new_stream(
             ctx,
             logical.schema().clone(),
-            logical.base.pk_indices.to_vec(),
             dist,
             append_only,
+            logical.base.logical_pk.to_vec(),
         );
 
         Self {

@@ -44,8 +44,8 @@ impl LogicalFilter {
             assert_input_ref!(cond, input.schema().fields().len());
         }
         let schema = input.schema().clone();
-        let pk_indices = input.pk_indices().to_vec();
-        let base = PlanBase::new_logical(ctx, schema, pk_indices);
+        let logical_pk = input.logical_pk().to_vec();
+        let base = PlanBase::new_logical(ctx, schema, logical_pk);
         LogicalFilter {
             base,
             predicate,

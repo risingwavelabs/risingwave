@@ -38,7 +38,6 @@ impl StreamProject {
     pub fn new(logical: LogicalProject) -> Self {
         let ctx = logical.base.ctx.clone();
         let input = logical.input();
-        let pk_indices = logical.base.pk_indices.to_vec();
         let distribution = logical
             .i2o_col_mapping()
             .rewrite_provided_distribution(input.distribution());
@@ -47,9 +46,9 @@ impl StreamProject {
         let base = PlanBase::new_stream(
             ctx,
             logical.schema().clone(),
-            pk_indices,
             distribution,
             logical.input().append_only(),
+            logical.base.logical_pk.to_vec(),
         );
         StreamProject { base, logical }
     }

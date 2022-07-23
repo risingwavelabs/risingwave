@@ -42,10 +42,10 @@ impl StreamDynamicFilter {
         let base = PlanBase::new_stream(
             left.ctx(),
             left.schema().clone(),
-            left.pk_indices().to_vec(),
             left.distribution().clone(),
             false, /* we can have a new abstraction for append only and monotonically increasing
                     * in the future */
+            left.stream_key().to_vec(),
         );
         Self {
             base,
@@ -128,7 +128,7 @@ fn infer_left_internal_table_catalog(input: PlanRef, left_key_index: usize) -> T
     // The pk of dynamic filter internal table should be left_key + input_pk.
     let mut pk_indices = vec![left_key_index];
     // TODO(yuhao): dedup the dist key and pk.
-    pk_indices.extend(&base.pk_indices);
+    pk_indices.extend(&base.logical_pk);
 
     let mut internal_table_catalog_builder = TableCatalogBuilder::new();
 

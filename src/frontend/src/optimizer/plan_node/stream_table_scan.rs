@@ -42,10 +42,10 @@ impl StreamTableScan {
         let base = PlanBase::new_stream(
             ctx,
             logical.schema().clone(),
-            logical.base.pk_indices.clone(),
             // follows upstream distribution from TableCatalog
             Distribution::HashShard(logical.distribution_key().unwrap()),
             logical.table_desc().appendonly,
+            logical.base.logical_pk.clone(),
         );
         Self {
             base,
@@ -86,7 +86,7 @@ impl fmt::Display for StreamTableScan {
                     .join(", ")
                 ),
             )
-            .field("pk_indices", &format_args!("{:?}", self.base.pk_indices))
+            .field("pk_indices", &format_args!("{:?}", self.base.logical_pk))
             .finish()
     }
 }
@@ -112,7 +112,7 @@ impl StreamTableScan {
                 .collect(),
         };
 
-        let pk_indices = self.base.pk_indices.iter().map(|x| *x as u32).collect_vec();
+        let pk_indices = self.base.logical_pk.iter().map(|x| *x as u32).collect_vec();
 
         ProstStreamPlan {
             fields: self.schema().to_prost(),

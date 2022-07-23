@@ -216,20 +216,20 @@ impl LogicalMultiJoin {
                 .collect_vec()
         };
 
-        let pk_indices = {
-            let mut pk_indices = vec![];
-            for (i, input_pk) in inputs.iter().map(|input| input.pk_indices()).enumerate() {
+        let logical_pk = {
+            let mut logical_pk = vec![];
+            for (i, input_pk) in inputs.iter().map(|input| input.logical_pk()).enumerate() {
                 for input_pk_idx in input_pk {
-                    pk_indices.push(inner_i2o_mappings[i].map(*input_pk_idx));
+                    logical_pk.push(inner_i2o_mappings[i].map(*input_pk_idx));
                 }
             }
-            pk_indices
+            logical_pk
                 .into_iter()
                 .map(|col_idx| inner2output.try_map(col_idx))
                 .collect::<Option<Vec<_>>>()
                 .unwrap_or_default()
         };
-        let base = PlanBase::new_logical(inputs[0].ctx(), schema, pk_indices);
+        let base = PlanBase::new_logical(inputs[0].ctx(), schema, logical_pk);
 
         Self {
             base,

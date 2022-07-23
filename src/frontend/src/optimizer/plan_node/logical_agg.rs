@@ -283,7 +283,7 @@ impl LogicalAgg {
         let mut table_catalogs = vec![];
         let out_fields = self.base.schema.fields();
         let in_fields = self.input().schema().fields().to_vec();
-        let in_pks = self.input().pk_indices().to_vec();
+        let in_pks = self.input().logical_pk().to_vec();
         let in_append_only = self.input.append_only();
         let in_dist_key = self.input().distribution().dist_column_indices().to_vec();
         let get_sorted_input_state_table =
@@ -622,13 +622,13 @@ impl LogicalAgg {
     pub fn new(agg_calls: Vec<PlanAggCall>, group_key: Vec<usize>, input: PlanRef) -> Self {
         let ctx = input.ctx();
         let schema = Self::derive_schema(input.schema(), &group_key, &agg_calls);
-        let pk_indices = match group_key.is_empty() {
+        let logical_pk = match group_key.is_empty() {
             // simple agg
             true => vec![],
             // group agg
             false => group_key.clone(),
         };
-        let base = PlanBase::new_logical(ctx, schema, pk_indices);
+        let base = PlanBase::new_logical(ctx, schema, logical_pk);
         Self {
             base,
             agg_calls,

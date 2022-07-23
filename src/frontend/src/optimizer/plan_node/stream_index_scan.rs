@@ -42,9 +42,9 @@ impl StreamIndexScan {
         let base = PlanBase::new_stream(
             ctx,
             logical.schema().clone(),
-            logical.base.pk_indices.clone(),
             Distribution::HashShard(logical.distribution_key().unwrap()),
             false, // TODO: determine the `append-only` field of table scan
+            logical.base.logical_pk.to_vec(),
         );
         Self {
             base,
@@ -77,7 +77,7 @@ impl fmt::Display for StreamIndexScan {
                 self.logical.column_names()
             }
             .join(", "),
-            self.base.pk_indices
+            self.base.logical_pk
         )
     }
 }
@@ -103,7 +103,7 @@ impl StreamIndexScan {
                 .collect(),
         };
 
-        let pk_indices = self.base.pk_indices.iter().map(|x| *x as u32).collect_vec();
+        let pk_indices = self.base.logical_pk.iter().map(|x| *x as u32).collect_vec();
 
         ProstStreamPlan {
             fields: self.schema().to_prost(),

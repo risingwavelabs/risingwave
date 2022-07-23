@@ -46,14 +46,14 @@ impl LogicalSource {
                 (&c.column_desc).into()
             })
             .collect();
-        let pk_indices = source_catalog
+        let logical_pk = source_catalog
             .pk_col_ids
             .iter()
             .map(|c| id_to_idx.get(c).copied())
             .collect::<Option<Vec<_>>>()
             .unwrap_or_default();
         let schema = Schema { fields };
-        let base = PlanBase::new_logical(ctx, schema, pk_indices);
+        let base = PlanBase::new_logical(ctx, schema, logical_pk);
         LogicalSource {
             base,
             source_catalog,

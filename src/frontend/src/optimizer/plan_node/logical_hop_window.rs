@@ -64,9 +64,9 @@ impl LogicalHopWindow {
             .iter()
             .map(|&idx| original_schema[idx].clone())
             .collect();
-        let pk_indices = (|| {
+        let logical_pk = (|| {
             let input_pk = input
-                .pk_indices()
+                .logical_pk()
                 .iter()
                 .filter_map(|&pk_idx| output_indices.iter().position(|&idx| idx == pk_idx));
             let window_pk = if output_indices.contains(&input.schema().len()) {
@@ -90,7 +90,7 @@ impl LogicalHopWindow {
             };
             input_pk.chain(window_pk).collect_vec()
         })();
-        let base = PlanBase::new_logical(ctx, actual_schema, pk_indices);
+        let base = PlanBase::new_logical(ctx, actual_schema, logical_pk);
         LogicalHopWindow {
             base,
             input,
@@ -362,7 +362,7 @@ impl ToStream for LogicalHopWindow {
         let i2o = self.i2o_col_mapping();
         output_indices.extend(
             input
-                .pk_indices()
+                .logical_pk()
                 .iter()
                 .cloned()
                 .filter(|i| i2o.try_map(*i).is_none()),

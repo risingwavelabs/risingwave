@@ -32,7 +32,6 @@ pub struct StreamLocalSimpleAgg {
 impl StreamLocalSimpleAgg {
     pub fn new(logical: LogicalAgg) -> Self {
         let ctx = logical.base.ctx.clone();
-        let pk_indices = logical.base.pk_indices.to_vec();
         let input = logical.input();
         let input_dist = input.distribution();
         debug_assert!(input_dist.satisfies(&RequiredDist::AnyShard));
@@ -44,9 +43,9 @@ impl StreamLocalSimpleAgg {
         let base = PlanBase::new_stream(
             ctx,
             logical.schema().clone(),
-            pk_indices,
             input_dist.clone(),
             append_only,
+            logical.base.logical_pk.to_vec(),
         );
         StreamLocalSimpleAgg { base, logical }
     }

@@ -75,9 +75,9 @@ impl StreamHashJoin {
         let base = PlanBase::new_stream(
             ctx,
             logical.schema().clone(),
-            logical.base.pk_indices.to_vec(),
             dist,
             append_only,
+            logical.base.logical_pk.to_vec(),
         );
 
         Self {
@@ -243,7 +243,7 @@ fn infer_internal_table_catalog(input: PlanRef, join_key_indices: Vec<usize>) ->
     // The pk of hash join internal table should be join_key + input_pk.
     let mut pk_indices = join_key_indices;
     // TODO(yuhao): dedup the dist key and pk.
-    pk_indices.extend(&base.pk_indices);
+    pk_indices.extend(&base.logical_pk);
 
     let mut columns_fields = schema.fields().to_vec();
 

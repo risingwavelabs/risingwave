@@ -43,16 +43,15 @@ impl StreamMaterialize {
         let ctx = input.ctx();
 
         let schema = input.schema().clone();
-        let pk_indices = input.pk_indices();
 
         // Materialize executor won't change the append-only behavior of the stream, so it depends
         // on input's `append_only`.
         Ok(PlanBase::new_stream(
             ctx,
             schema,
-            pk_indices.to_vec(),
             input.distribution().clone(),
             input.append_only(),
+            input.stream_key().to_vec(),
         ))
     }
 
@@ -83,7 +82,7 @@ impl StreamMaterialize {
                     ))
                 } else {
                     // ensure the same pk will not shuffle to different node
-                    RequiredDist::shard_by_key(input.schema().len(), input.pk_indices())
+                    RequiredDist::shard_by_key(input.schema().len(), input.stream_key())
                 }
             }
         };
@@ -91,7 +90,7 @@ impl StreamMaterialize {
         let input = required_dist.enforce_if_not_satisfies(input, &Order::any())?;
         let base = Self::derive_plan_base(&input)?;
         let schema = &base.schema;
-        let pk_indices = &base.pk_indices;
+        let pk_indices = &base.logical_pk;
 
         let mut col_names = HashMap::new();
         for name in &out_names {
@@ -226,7 +225,7 @@ impl PlanTreeNodeUnary for StreamMaterialize {
     fn clone_with_input(&self, input: PlanRef) -> Self {
         let new = Self::new(input, self.table().clone());
         assert_eq!(new.plan_base().schema, self.plan_base().schema);
-        assert_eq!(new.plan_base().pk_indices, self.plan_base().pk_indices);
+        assert_eq!(new.plan_base().logical_pk, self.plan_base().logical_pk);
         new
     }
 }

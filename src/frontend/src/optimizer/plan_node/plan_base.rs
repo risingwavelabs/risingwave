@@ -27,8 +27,9 @@ pub struct PlanBase {
     pub id: PlanNodeId,
     pub ctx: OptimizerContextRef,
     pub schema: Schema,
-    /// the pk indices of the PlanNode's output, a empty pk_indices vec means there is no pk
-    pub pk_indices: Vec<usize>,
+    /// will be deprecate and replaced by stream_key, the pk indices of the PlanNode's output, a
+    /// empty logical_pk vec means there is no pk
+    pub logical_pk: Vec<usize>,
     /// The order property of the PlanNode's output, store an `&Order::any()` here will not affect
     /// correctness, but insert unnecessary sort in plan
     pub order: Order,
@@ -38,29 +39,33 @@ pub struct PlanBase {
     /// The append-only property of the PlanNode's output is a stream-only property. Append-only
     /// means the stream contains only insert operation.
     pub append_only: bool,
+    /// identify a row in the materialized relation of the stream output's materialize (even not be
+    /// really materialized), it is still
+    pub stream_key: Vec<usize>,
 }
 
 impl PlanBase {
-    pub fn new_logical(ctx: OptimizerContextRef, schema: Schema, pk_indices: Vec<usize>) -> Self {
+    pub fn new_logical(ctx: OptimizerContextRef, schema: Schema, logical_pk: Vec<usize>) -> Self {
         let id = ctx.next_plan_node_id();
         Self {
             id,
             ctx,
             schema,
-            pk_indices,
+            logical_pk,
             dist: Distribution::Single,
             order: Order::any(),
             // Logical plan node won't touch `append_only` field
             append_only: true,
+            stream_key: vec![],
         }
     }
 
     pub fn new_stream(
         ctx: OptimizerContextRef,
         schema: Schema,
-        pk_indices: Vec<usize>,
         dist: Distribution,
         append_only: bool,
+        stream_key: Vec<usize>,
     ) -> Self {
         // assert!(!pk_indices.is_empty()); TODO: reopen it when ensure the pk for stream op
         let id = ctx.next_plan_node_id();
@@ -69,8 +74,9 @@ impl PlanBase {
             ctx,
             schema,
             dist,
+            stream_key,
             order: Order::any(),
-            pk_indices,
+            logical_pk: vec![],
             append_only,
         }
     }
@@ -88,9 +94,10 @@ impl PlanBase {
             schema,
             dist,
             order,
-            pk_indices: vec![],
+            logical_pk: vec![],
             // Batch plan node won't touch `append_only` field
             append_only: true,
+            stream_key: vec![],
         }
     }
 }
@@ -108,7 +115,7 @@ macro_rules! impl_base_delegate {
                     &self.plan_base().schema
                 }
                 pub fn pk_indices(&self) -> &[usize] {
-                    &self.plan_base().pk_indices
+                    &self.plan_base().logical_pk
                 }
                 pub fn order(&self) -> &Order {
                     &self.plan_base().order

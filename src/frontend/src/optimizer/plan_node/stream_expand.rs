@@ -34,9 +34,9 @@ impl StreamExpand {
         let base = PlanBase::new_stream(
             logical.base.ctx.clone(),
             logical.schema().clone(),
-            logical.base.pk_indices.to_vec(),
             Distribution::SomeShard,
             logical.input().append_only(),
+            logical.base.logical_pk.to_vec(),
         );
         StreamExpand { base, logical }
     }

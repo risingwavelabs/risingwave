@@ -14,6 +14,7 @@
 
 use std::fmt;
 
+use futures::stream;
 use itertools::Itertools;
 use risingwave_common::catalog::{DatabaseId, FieldVerboseDisplay, SchemaId};
 use risingwave_pb::stream_plan::stream_node::NodeBody as ProstStreamNode;
@@ -33,7 +34,6 @@ pub struct StreamHashAgg {
 impl StreamHashAgg {
     pub fn new(logical: LogicalAgg) -> Self {
         let ctx = logical.base.ctx.clone();
-        let pk_indices = logical.base.pk_indices.to_vec();
         let input = logical.input();
         let input_dist = input.distribution();
         let dist = match input_dist {
@@ -43,7 +43,13 @@ impl StreamHashAgg {
             d => d.clone(),
         };
         // Hash agg executor might change the append-only behavior of the stream.
-        let base = PlanBase::new_stream(ctx, logical.schema().clone(), pk_indices, dist, false);
+        let base = PlanBase::new_stream(
+            ctx,
+            logical.schema().clone(),
+            dist,
+            false,
+            logical.base.logical_pk.to_vec(),
+        );
         StreamHashAgg { base, logical }
     }
 

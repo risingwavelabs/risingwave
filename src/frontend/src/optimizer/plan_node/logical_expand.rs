@@ -45,12 +45,12 @@ impl LogicalExpand {
             assert!(*key < input_schema_len);
         }
         // The last column should be the flag.
-        let mut pk_indices = input.pk_indices().to_vec();
-        pk_indices.push(input_schema_len);
+        let mut logical_pk = input.logical_pk().to_vec();
+        logical_pk.push(input_schema_len);
 
         let schema = Self::derive_schema(input.schema());
         let ctx = input.ctx();
-        let base = PlanBase::new_logical(ctx, schema, pk_indices);
+        let base = PlanBase::new_logical(ctx, schema, logical_pk);
         LogicalExpand {
             base,
             column_subsets,

@@ -79,7 +79,7 @@ impl LogicalScan {
             })
             .collect();
 
-        let pk_indices = table_desc
+        let logical_pk = table_desc
             .pk
             .iter()
             .map(|&c| id_to_op_idx.get(&table_desc.columns[c].column_id).copied())
@@ -87,7 +87,7 @@ impl LogicalScan {
             .unwrap_or_default();
 
         let schema = Schema { fields };
-        let base = PlanBase::new_logical(ctx, schema, pk_indices);
+        let base = PlanBase::new_logical(ctx, schema, logical_pk);
 
         let mut required_col_idx = output_col_idx.clone();
         let mut visitor =
@@ -427,7 +427,7 @@ impl ToStream for LogicalScan {
                 None.into(),
             )));
         }
-        match self.base.pk_indices.is_empty() {
+        match self.base.logical_pk.is_empty() {
             true => {
                 let mut col_ids = HashSet::new();
 

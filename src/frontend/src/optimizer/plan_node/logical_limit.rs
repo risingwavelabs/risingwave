@@ -35,8 +35,8 @@ impl LogicalLimit {
     pub fn new(input: PlanRef, limit: usize, offset: usize) -> Self {
         let ctx = input.ctx();
         let schema = input.schema().clone();
-        let pk_indices = input.pk_indices().to_vec();
-        let base = PlanBase::new_logical(ctx, schema, pk_indices);
+        let logical_pk = input.logical_pk().to_vec();
+        let base = PlanBase::new_logical(ctx, schema, logical_pk);
         LogicalLimit {
             base,
             input,
