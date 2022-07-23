@@ -14,14 +14,16 @@
 
 use std::fmt::Debug;
 
-use anyhow::{anyhow, Result};
 use bytes::Bytes;
 use log::error;
-use risingwave_common::error::{internal_error, Result as RwResult};
+use risingwave_common::bail;
 use risingwave_connector::source::{SplitImpl, SplitMetaData};
 use risingwave_storage::storage_value::StorageValue;
 use risingwave_storage::store::WriteOptions;
 use risingwave_storage::{Keyspace, StateStore};
+
+use crate::executor::error::StreamExecutorError;
+use crate::executor::StreamExecutorResult;
 
 /// `SourceState` Represents an abstraction of state,
 /// e.g. if the Kafka Source state consists of `topic` `partition_id` and `offset`.
@@ -54,13 +56,13 @@ impl<S: StateStore> SourceStateHandler<S> {
     /// and needs to be invoked by the ``SourceReader`` to call it,
     /// and will return the error when the dependent ``StateStore`` handles the error.
     /// The caller should ensure that the passed parameters are not empty.
-    pub async fn take_snapshot<SS>(&self, states: Vec<SS>, epoch: u64) -> Result<()>
+    pub async fn take_snapshot<SS>(&self, states: Vec<SS>, epoch: u64) -> StreamExecutorResult<()>
     where
         SS: SplitMetaData,
     {
         if states.is_empty() {
             // TODO should be a clear Error Code
-            Err(anyhow!("states require not null"))
+            bail!("states require not null");
         } else {
             let mut write_batch = self.keyspace.state_store().start_write_batch(WriteOptions {
                 epoch,
@@ -73,17 +75,14 @@ impl<S: StateStore> SourceStateHandler<S> {
                 local_batch.put(state.id(), StorageValue::new_default_put(value));
             });
             // If an error is returned, the underlying state should be rollback
-            let ingest_rs = write_batch.ingest().await;
-            match ingest_rs {
-                Err(e) => {
-                    error!(
-                        "SourceStateHandler take_snapshot() batch.ingest Error,cause by {:?}",
-                        e
-                    );
-                    Err(anyhow!(e))
-                }
-                _ => Ok(()),
-            }
+            write_batch.ingest().await.inspect_err(|e| {
+                error!(
+                    "SourceStateHandler take_snapshot() batch.ingest Error,cause by {:?}",
+                    e
+                );
+            })?;
+
+            Ok(())
         }
     }
 
@@ -95,26 +94,29 @@ impl<S: StateStore> SourceStateHandler<S> {
         &self,
         state_identifier: String,
         epoch: u64,
-    ) -> Result<Option<Bytes>> {
+    ) -> StreamExecutorResult<Option<Bytes>> {
         self.keyspace
             .get(state_identifier, epoch)
             .await
-            .map_err(|e| anyhow!(e))
+            .map_err(Into::into)
     }
 
     pub async fn try_recover_from_state_store(
         &self,
         stream_source_split: &SplitImpl,
         epoch: u64,
-    ) -> RwResult<Option<SplitImpl>> {
+    ) -> StreamExecutorResult<Option<SplitImpl>> {
         // let connector_type = stream_source_split.get_type();
-        match self.restore_states(stream_source_split.id(), epoch).await {
-            Ok(Some(s)) => Ok(Some(
-                SplitImpl::restore_from_bytes(&s).map_err(|e| internal_error(e.to_string()))?,
-            )),
-            Ok(None) => Ok(None),
-            Err(e) => Err(internal_error(e.to_string())),
-        }
+        let s = self.restore_states(stream_source_split.id(), epoch).await?;
+
+        let split = match s {
+            Some(s) => {
+                Some(SplitImpl::restore_from_bytes(&s).map_err(StreamExecutorError::source_error)?)
+            }
+            None => None,
+        };
+
+        Ok(split)
     }
 }
 
@@ -148,13 +150,13 @@ mod tests {
             Bytes::from(serde_json::to_string(self).unwrap())
         }
 
-        fn restore_from_bytes(bytes: &[u8]) -> Result<Self> {
-            serde_json::from_slice(bytes).map_err(|e| anyhow!(e))
+        fn restore_from_bytes(bytes: &[u8]) -> anyhow::Result<Self> {
+            serde_json::from_slice(bytes).map_err(|e| anyhow::anyhow!(e))
         }
     }
 
     #[test]
-    fn test_state_encode() -> Result<()> {
+    fn test_state_encode() -> anyhow::Result<()> {
         let offset = 100_i64;
         let partition = String::from("p0");
         let state_instance = TestSourceState::new(partition.clone(), offset);
@@ -185,13 +187,13 @@ mod tests {
     async fn take_snapshot_and_get_states(
         state_handler: SourceStateHandler<MemoryStateStore>,
         current_epoch: u64,
-    ) -> (Vec<TestSourceState>, Result<()>) {
+    ) -> (Vec<TestSourceState>, anyhow::Result<()>) {
         let states = test_state_store_vec();
         println!("Vec<TestSourceStat>={:?}", states.clone());
         let rs = state_handler
             .take_snapshot(states.clone(), current_epoch)
             .await;
-        (states, rs)
+        (states, rs.map_err(Into::into))
     }
 
     #[tokio::test]
