@@ -102,17 +102,46 @@ impl SSTableStreamIterator {
 impl HummockIterator for SSTableStreamIterator {
     type Direction = Forward;
 
+    /// Moves to the next KV-pair in the table. Assumes that the current position is valid. Even if
+    /// the next position is valid, the function return `Ok(())`.
     async fn next(&mut self) -> HummockResult<()> {
-        self.stats.scan_key_count += 1;
-        let block_iter = self.block_iter.as_mut().expect("no block iter");
-        block_iter.next();
+        // We have to handle two internal iterators.
+        //   - block_stream: iterates over the blocks of the table.
+        //   - block_iter: iterates over the KV-pairs of the current block.
+        // These iterators work in different ways.
 
-        if block_iter.is_valid() {
-            Ok(())
-        } else {
-            // seek to next block
-            self.seek_idx(self.cur_idx + 1, None).await
+        // BlockIterator (and Self) works as follows: After new(), we call seek(). That brings us
+        // to the first element. Calling next() then brings us to the second element and does not
+        // return anything.
+
+        // BlockStream follows a different approach. After new(), we do not seek, instead next()
+        // returns the first value.
+
+        self.stats.scan_key_count += 1;
+
+        // Unwrap internal iterators.
+        let block_stream = self.block_stream.as_mut().expect("no block stream");
+        let block_iter = self.block_iter.as_mut().expect("no block iterator");
+
+        // Note that we assume that we are at a valid position.
+
+        // Can we continue in current block?
+        block_iter.next();
+        if !block_iter.is_valid() {
+            // No, block is exhausted. Load next.
+            self.cur_idx += 1;
+            if let Some(block) = block_stream.next().await? {
+                let mut block_iter = BlockIterator::new(block);
+                block_iter.seek_to_first();
+                self.block_iter = Some(block_iter);
+            } else {
+                // Reached end of table.
+                self.block_stream = None;
+                self.block_iter = None;
+            }
         }
+
+        Ok(())
     }
 
     fn key(&self) -> &[u8] {
