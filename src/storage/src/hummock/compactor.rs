@@ -42,7 +42,7 @@ use tokio::sync::oneshot::Sender;
 use tokio::task::JoinHandle;
 
 use super::multi_builder::CapacitySplitTableBuilder;
-use super::{CompressionAlgorithm, HummockResult, SSTableBuilder, SSTableBuilderOptions, Sstable};
+use super::{CompressionAlgorithm, HummockResult, Sstable, SstableBuilderOptions};
 use crate::hummock::compaction_executor::CompactionExecutor;
 use crate::hummock::iterator::{
     FastMergeConcatIterator, HummockIterator, MergeIteratorNext, OrderedAwareMergeIterator,
@@ -55,7 +55,7 @@ use crate::hummock::sstable_store::SstableStoreRef;
 use crate::hummock::state_store::ForwardIter;
 use crate::hummock::utils::can_concat;
 use crate::hummock::vacuum::Vacuum;
-use crate::hummock::{CachePolicy, HummockError};
+use crate::hummock::{CachePolicy, HummockError, SstableBuilder};
 use crate::monitor::{StateStoreMetrics, StoreLocalStatistic};
 
 pub type SstableIdGenerator =

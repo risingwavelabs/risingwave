@@ -25,12 +25,12 @@ use crate::hummock::iterator::merge_inner::MergeIteratorNext;
 use crate::hummock::iterator::{HummockIterator, ReadOptions};
 use crate::hummock::sstable_store::SstableStoreRef;
 use crate::hummock::value::HummockValue;
-use crate::hummock::{HummockResult, SSTableIterator};
+use crate::hummock::{HummockResult, SstableIterator};
 use crate::monitor::{StateStoreMetrics, StoreLocalStatistic};
 
 struct ConcatSstableIterator {
     /// The iterator of the current table.
-    sstable_iter: Option<SSTableIterator>,
+    sstable_iter: Option<SstableIterator>,
 
     /// Current table index.
     cur_idx: usize,
@@ -80,7 +80,7 @@ impl ConcatSstableIterator {
                     .await?
             };
             let mut sstable_iter =
-                SSTableIterator::new(table, self.sstable_store.clone(), self.read_options.clone());
+                SstableIterator::new(table, self.sstable_store.clone(), self.read_options.clone());
 
             if let Some(key) = seek_key {
                 sstable_iter.seek_inner(key).await?;

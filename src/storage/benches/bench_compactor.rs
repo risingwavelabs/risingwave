@@ -17,6 +17,7 @@ use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::Arc;
 
 use bytes::Bytes;
+use criterion::async_executor::FuturesExecutor;
 use criterion::{criterion_group, criterion_main, Criterion};
 use itertools::Itertools;
 use risingwave_hummock_sdk::key::key_with_epoch;
@@ -33,8 +34,8 @@ use risingwave_storage::hummock::multi_builder::CapacitySplitTableBuilder;
 use risingwave_storage::hummock::sstable_store::SstableStoreRef;
 use risingwave_storage::hummock::value::HummockValue;
 use risingwave_storage::hummock::{
-    CachePolicy, CompressionAlgorithm, SSTableBuilder, SSTableBuilderOptions, SSTableIterator,
-    Sstable, SstableMeta, SstableStore,
+    CachePolicy, CompressionAlgorithm, Sstable, SstableBuilder, SstableBuilderOptions,
+    SstableIterator, SstableMeta, SstableStore,
 };
 use risingwave_storage::monitor::{StateStoreMetrics, StoreLocalStatistic};
 
@@ -42,7 +43,7 @@ pub fn mock_sstable_store() -> SstableStoreRef {
     let store = InMemObjectStore::new().monitored(Arc::new(ObjectStoreMetrics::unused()));
     let store = Arc::new(ObjectStoreImpl::InMem(store));
     let path = "test".to_string();
-    Arc::new(SstableStore::new(store, path, 64 << 20, 512 << 20))
+    Arc::new(SstableStore::new(store, path, 64 << 20, 128 << 20))
 }
 
 pub fn test_key_of(idx: usize, epoch: u64) -> Vec<u8> {
@@ -53,9 +54,9 @@ pub fn test_key_of(idx: usize, epoch: u64) -> Vec<u8> {
 const MAX_KEY_COUNT: usize = 128 * 1024;
 
 fn build_table(sstable_id: u64, range: Range<u64>, epoch: u64) -> (Bytes, SstableMeta) {
-    let mut builder = SSTableBuilder::new(
+    let mut builder = SstableBuilder::new(
         sstable_id,
-        SSTableBuilderOptions {
+        SstableBuilderOptions {
             capacity: 32 * 1024 * 1024,
             block_capacity: 16 * 1024,
             restart_interval: 16,
@@ -82,7 +83,7 @@ async fn scan_all_table(sstable_store: SstableStoreRef) {
     let default_read_options = Arc::new(ReadOptions::default());
     // warm up to make them all in memory. I do not use CachePolicy::Fill because it will fetch
     // block from meta.
-    let mut iter = SSTableIterator::new(table, sstable_store.clone(), default_read_options);
+    let mut iter = SstableIterator::new(table, sstable_store.clone(), default_read_options);
     iter.rewind().await.unwrap();
     while iter.is_valid() {
         iter.next().await.unwrap();
@@ -95,7 +96,7 @@ async fn scan_all_table_inline(sstable_store: SstableStoreRef) {
     let default_read_options = Arc::new(ReadOptions::default());
     // warm up to make them all in memory. I do not use CachePolicy::Fill because it will fetch
     // block from meta.
-    let mut iter = SSTableIterator::new(table, sstable_store.clone(), default_read_options);
+    let mut iter = SstableIterator::new(table, sstable_store.clone(), default_read_options);
     iter.rewind().await.unwrap();
     while iter.is_valid() {
         iter.next_inner().await.unwrap();
@@ -131,27 +132,13 @@ fn bench_table_scan(c: &mut Criterion) {
     });
 
     c.bench_function("bench_table_iterator", |b| {
-        b.iter(|| {
-            let sstable_store2 = sstable_store.clone();
-            let runtime = tokio::runtime::Builder::new_current_thread()
-                .build()
-                .unwrap();
-            runtime.block_on(async move {
-                scan_all_table(sstable_store2).await;
-            });
-        });
+        b.to_async(FuturesExecutor)
+            .iter(|| scan_all_table(sstable_store.clone()));
     });
 
     c.bench_function("bench_table_iterator_inline", |b| {
-        b.iter(|| {
-            let sstable_store2 = sstable_store.clone();
-            let runtime = tokio::runtime::Builder::new_current_thread()
-                .build()
-                .unwrap();
-            runtime.block_on(async move {
-                scan_all_table_inline(sstable_store2).await;
-            });
-        });
+        b.to_async(FuturesExecutor)
+            .iter(|| scan_all_table_inline(sstable_store.clone()));
     });
 }
 
@@ -160,14 +147,14 @@ async fn compact<I: MergeIteratorNext>(iter: Box<I>, sstable_store: SstableStore
     let mut builder = CapacitySplitTableBuilder::new(
         || async {
             let table_id = global_table_id.fetch_add(1, Ordering::SeqCst);
-            let options = SSTableBuilderOptions {
+            let options = SstableBuilderOptions {
                 capacity: 32 * 1024 * 1024,
                 block_capacity: 64 * 1024,
                 restart_interval: 16,
                 bloom_false_positive: 0.01,
                 compression_algorithm: CompressionAlgorithm::None,
             };
-            let builder = SSTableBuilder::new(table_id, options);
+            let builder = SstableBuilder::new(table_id, options);
             Ok(builder)
         },
         CachePolicy::NotFill,
@@ -210,8 +197,8 @@ fn bench_merge_iterator_compactor(c: &mut Criterion) {
     let test_key_size = 256 * 1024;
     let (data1, meta1) = build_table(1, 0..test_key_size, 1);
     let (data2, meta2) = build_table(2, 0..test_key_size, 1);
-    let sst1 = Sstable::new(1, meta1.clone());
-    let sst2 = Sstable::new(2, meta2.clone());
+    let sst1 = Sstable::new_with_data(1, meta1.clone(), data1.clone()).unwrap();
+    let sst2 = Sstable::new_with_data(2, meta2.clone(), data2.clone()).unwrap();
     runtime.block_on(async move {
         sstable_store1
             .put(sst1, data1, CachePolicy::Fill)
@@ -226,8 +213,8 @@ fn bench_merge_iterator_compactor(c: &mut Criterion) {
 
     let (data1, meta1) = build_table(1, 0..test_key_size, 2);
     let (data2, meta2) = build_table(2, 0..test_key_size, 2);
-    let sst3 = Sstable::new(3, meta1.clone());
-    let sst4 = Sstable::new(4, meta2.clone());
+    let sst3 = Sstable::new_with_data(3, meta1.clone(), data1.clone()).unwrap();
+    let sst4 = Sstable::new_with_data(4, meta2.clone(), data2.clone()).unwrap();
     let sstable_store1 = sstable_store.clone();
     runtime.block_on(async move {
         sstable_store1
@@ -241,13 +228,9 @@ fn bench_merge_iterator_compactor(c: &mut Criterion) {
     });
     let level2 = generate_tables(vec![(1, meta1), (2, meta2)]);
     let read_options = Arc::new(ReadOptions { prefetch: true });
-
     c.bench_function("bench_fast_merge_iterator", |b| {
         let stats = Arc::new(StateStoreMetrics::unused());
-        let runtime = tokio::runtime::Builder::new_current_thread()
-            .build()
-            .unwrap();
-        b.iter(|| {
+        b.to_async(FuturesExecutor).iter(|| {
             let sstable_store1 = sstable_store.clone();
 
             let mut iter = Box::new(FastMergeConcatIterator::new(
@@ -256,10 +239,10 @@ fn bench_merge_iterator_compactor(c: &mut Criterion) {
                 read_options.clone(),
                 stats.clone(),
             ));
-            runtime.block_on(async move {
+            async move {
                 iter.rewind().await.unwrap();
                 compact(iter, sstable_store1).await;
-            });
+            }
         });
     });
     c.bench_function("bench_normal_merge_iterator", |b| {
