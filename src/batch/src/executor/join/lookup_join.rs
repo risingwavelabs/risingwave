@@ -634,10 +634,13 @@ impl BoxedExecutorBuilder for LookupJoinExecutorBuilder {
 
 #[cfg(test)]
 mod tests {
+    use std::collections::BinaryHeap;
+    use std::sync::Arc;
     use risingwave_common::array::{DataChunk, DataChunkTestExt};
     use risingwave_common::catalog::{Field, Schema};
     use risingwave_common::types::{DataType, ScalarImpl};
     use risingwave_common::util::chunk_coalesce::DataChunkBuilder;
+    use risingwave_common::util::sort_util::{OrderPair, OrderType};
     use risingwave_expr::expr::expr_binary_nonnull::new_binary_expr;
     use risingwave_expr::expr::{BoxedExpression, InputRefExpression, LiteralExpression};
     use risingwave_pb::expr::expr_node::Type;
@@ -646,7 +649,7 @@ mod tests {
     use crate::executor::test_utils::{
         diff_executor_output, FakeProbeSideSourceBuilder, MockExecutor,
     };
-    use crate::executor::{BoxedExecutor, LookupJoinExecutor};
+    use crate::executor::{BoxedExecutor, LookupJoinExecutor, OrderByExecutor};
 
     pub struct MockGatherExecutor {
         chunks: Vec<DataChunk>,
@@ -716,11 +719,39 @@ mod tests {
         })
     }
 
+    fn create_order_by_executor(child: BoxedExecutor) -> BoxedExecutor {
+        let order_pairs = vec![
+            OrderPair {
+                column_idx: 0,
+                order_type: OrderType::Ascending,
+            },
+            OrderPair {
+                column_idx: 1,
+                order_type: OrderType::Ascending,
+            }
+        ];
+
+        Box::new(OrderByExecutor::new(
+            child,
+            vec![],
+            vec![],
+            vec![],
+            BinaryHeap::new(),
+            Arc::new(order_pairs),
+            vec![],
+            false,
+            false,
+            "OrderByExecutor".to_string(),
+            2048,
+        ))
+    }
+
     async fn do_test(join_type: JoinType, condition: Option<BoxedExpression>, expected: DataChunk) {
         let lookup_join_executor = create_lookup_join_executor(join_type, condition);
-        let mut expected_mock_exec = MockExecutor::new(lookup_join_executor.schema().clone());
+        let order_by_executor = create_order_by_executor(lookup_join_executor);
+        let mut expected_mock_exec = MockExecutor::new(order_by_executor.schema().clone());
         expected_mock_exec.add(expected);
-        diff_executor_output(lookup_join_executor, Box::new(expected_mock_exec)).await;
+        diff_executor_output(order_by_executor, Box::new(expected_mock_exec)).await;
     }
 
     #[tokio::test]
@@ -728,13 +759,13 @@ mod tests {
         let expected = DataChunk::from_pretty(
             "i f   i f
              1 6.1 1 9.2
-             2 8.4 2 4.4
-             2 8.4 2 5.5
              2 5.5 2 4.4
              2 5.5 2 5.5
+             2 8.4 2 4.4
+             2 8.4 2 5.5
              5 4.1 5 3.7
-             5 9.1 5 3.7
              5 4.1 5 2.3
+             5 9.1 5 3.7
              5 9.1 5 2.3",
         );
 
@@ -746,14 +777,14 @@ mod tests {
         let expected = DataChunk::from_pretty(
             "i f   i f
              1 6.1 1 9.2
+             2 5.5 2 4.4
+             2 5.5 2 5.5
              2 8.4 2 4.4
              2 8.4 2 5.5
              3 3.9 . .
-             2 5.5 2 4.4
-             2 5.5 2 5.5
              5 4.1 5 3.7
-             5 9.1 5 3.7
              5 4.1 5 2.3
+             5 9.1 5 3.7
              5 9.1 5 2.3",
         );
 
@@ -765,8 +796,8 @@ mod tests {
         let expected = DataChunk::from_pretty(
             "i f
              1 6.1
-             2 8.4
              2 5.5
+             2 8.4
              5 4.1
              5 9.1",
         );
@@ -789,8 +820,8 @@ mod tests {
         let expected = DataChunk::from_pretty(
             "i f   i f
              1 6.1 1 9.2
-             2 8.4 2 5.5
-             2 5.5 2 5.5",
+             2 5.5 2 5.5
+             2 8.4 2 5.5",
         );
 
         let condition = Some(new_binary_expr(
@@ -811,9 +842,9 @@ mod tests {
         let expected = DataChunk::from_pretty(
             "i f   i f
              1 6.1 1 9.2
+             2 5.5 2 5.5
              2 8.4 2 5.5
              3 3.9 . .
-             2 5.5 2 5.5
              5 4.1 . .
              5 9.1 . .",
         );
@@ -836,8 +867,8 @@ mod tests {
         let expected = DataChunk::from_pretty(
             "i f
              1 6.1
-             2 8.4
-             2 5.5",
+             2 5.5
+             2 8.4",
         );
 
         let condition = Some(new_binary_expr(
