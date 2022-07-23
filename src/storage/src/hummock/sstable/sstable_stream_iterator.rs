@@ -21,12 +21,15 @@ use risingwave_hummock_sdk::VersionedComparator;
 use super::super::{HummockResult, HummockValue};
 use super::SSTableIteratorType;
 use crate::hummock::iterator::{Forward, HummockIterator, ReadOptions};
-use crate::hummock::{BlockHolder, BlockIterator, SstableStoreRef, TableHolder};
+use crate::hummock::{BlockHolder, BlockIterator, BlockStream, SstableStoreRef, TableHolder};
 use crate::monitor::StoreLocalStatistic;
 
 /// Iterates on a table while downloading it.
 pub struct SSTableStreamIterator {
-    /// The iterator of the current block.
+    /// Iterates over the blocks of the table.
+    block_stream: Option<BlockStream>,
+
+    /// Iterates over the KV-pairs of the current block.
     block_iter: Option<BlockIterator>,
 
     /// Current block index.
@@ -40,12 +43,9 @@ pub struct SSTableStreamIterator {
 }
 
 impl SSTableStreamIterator {
-    pub fn new(
-        table: TableHolder,
-        sstable_store: SstableStoreRef,
-        _options: Arc<ReadOptions>,
-    ) -> Self {
+    pub fn new(table: TableHolder, sstable_store: SstableStoreRef) -> Self {
         Self {
+            block_stream: None,
             block_iter: None,
             cur_idx: 0,
             sst: table,
@@ -168,7 +168,7 @@ impl SSTableIteratorType for SSTableStreamIterator {
         sstable_store: SstableStoreRef,
         options: Arc<ReadOptions>,
     ) -> Self {
-        SSTableStreamIterator::new(table, sstable_store, options)
+        SSTableStreamIterator::new(table, sstable_store)
     }
 }
 
