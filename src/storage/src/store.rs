@@ -170,7 +170,7 @@ pub trait StateStore: Send + Sync + 'static + Clone {
         MonitoredStateStore::new(self, stats)
     }
 
-    /// Gets `epoch`'s uncommitted `SsTables`.
+    /// Gets `epoch`'s uncommitted `Sstables`.
     fn get_uncommitted_ssts(&self, _epoch: u64) -> Vec<LocalSstableInfo> {
         todo!()
     }

@@ -38,7 +38,7 @@ use async_trait::async_trait;
 
 use crate::monitor::StoreLocalStatistic;
 
-/// `HummockIterator` defines the interface of all iterators, including `SsTableIterator`,
+/// `HummockIterator` defines the interface of all iterators, including `SstableIterator`,
 /// `MergeIterator`, `UserIterator` and `ConcatIterator`.
 ///
 /// After creating the iterator instance,

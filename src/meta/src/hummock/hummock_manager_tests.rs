@@ -21,7 +21,7 @@ use risingwave_hummock_sdk::compact::compact_task_to_string;
 use risingwave_hummock_sdk::compaction_group::hummock_version_ext::HummockVersionExt;
 use risingwave_hummock_sdk::compaction_group::StaticCompactionGroupId;
 // use risingwave_hummock_sdk::key_range::KeyRange;
-use risingwave_hummock_sdk::{HummockContextId, HummockSsTableId, FIRST_VERSION_ID};
+use risingwave_hummock_sdk::{HummockContextId, HummockSstableId, FIRST_VERSION_ID};
 use risingwave_pb::common::{HostAddress, ParallelUnitType, WorkerType};
 use risingwave_pb::hummock::{
     HummockPinnedSnapshot, HummockPinnedVersion, HummockSnapshot, KeyRange,
@@ -757,7 +757,7 @@ async fn test_print_compact_task() {
 async fn test_invalid_sst_id() {
     let (_, hummock_manager, _cluster_manager, _) = setup_compute_env(80).await;
     let epoch = 1;
-    let ssts = generate_test_tables(epoch, vec![HummockSsTableId::MAX]);
+    let ssts = generate_test_tables(epoch, vec![HummockSstableId::MAX]);
     register_sstable_infos_to_compaction_group(
         hummock_manager.compaction_group_manager_ref_for_test(),
         &ssts,

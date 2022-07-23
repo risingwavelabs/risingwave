@@ -21,12 +21,12 @@ use risingwave_hummock_sdk::VersionedComparator;
 use crate::hummock::iterator::{Backward, HummockIterator, ReadOptions};
 use crate::hummock::value::HummockValue;
 use crate::hummock::{
-    BlockIterator, HummockResult, SsTableIteratorType, SstableStoreRef, TableHolder,
+    BlockIterator, HummockResult, SstableIteratorType, SstableStoreRef, TableHolder,
 };
 use crate::monitor::StoreLocalStatistic;
 
 /// Iterates backwards on a sstable.
-pub struct BackwardSsTableIterator {
+pub struct BackwardSstableIterator {
     /// The iterator of the current block.
     block_iter: Option<BlockIterator>,
 
@@ -41,7 +41,7 @@ pub struct BackwardSsTableIterator {
     stats: StoreLocalStatistic,
 }
 
-impl BackwardSsTableIterator {
+impl BackwardSstableIterator {
     pub fn new(sstable: TableHolder, sstable_store: SstableStoreRef) -> Self {
         Self {
             block_iter: None,
@@ -82,7 +82,7 @@ impl BackwardSsTableIterator {
 }
 
 #[async_trait]
-impl HummockIterator for BackwardSsTableIterator {
+impl HummockIterator for BackwardSstableIterator {
     type Direction = Backward;
 
     async fn next(&mut self) -> HummockResult<()> {
@@ -112,7 +112,7 @@ impl HummockIterator for BackwardSsTableIterator {
         self.block_iter.as_ref().map_or(false, |i| i.is_valid())
     }
 
-    /// Instead of setting idx to 0th block, a `BackwardSsTableIterator` rewinds to the last block
+    /// Instead of setting idx to 0th block, a `BackwardSstableIterator` rewinds to the last block
     /// in the sstable.
     async fn rewind(&mut self) -> HummockResult<()> {
         self.seek_idx(self.sst.value().block_count() as isize - 1, None)
@@ -149,13 +149,13 @@ impl HummockIterator for BackwardSsTableIterator {
     }
 }
 
-impl SsTableIteratorType for BackwardSsTableIterator {
+impl SstableIteratorType for BackwardSstableIterator {
     fn create(sstable: TableHolder, sstable_store: SstableStoreRef, _: Arc<ReadOptions>) -> Self {
-        BackwardSsTableIterator::new(sstable, sstable_store)
+        BackwardSstableIterator::new(sstable, sstable_store)
     }
 }
 
-/// Mirror the tests used for `SsTableIterator`
+/// Mirror the tests used for `SstableIterator`
 #[cfg(test)]
 mod tests {
     use itertools::Itertools;
@@ -182,7 +182,7 @@ mod tests {
         assert!(sstable.meta.block_metas.len() > 10);
         let cache = create_small_table_cache();
         let handle = cache.insert(0, 0, 1, Box::new(sstable));
-        let mut sstable_iter = BackwardSsTableIterator::new(handle, sstable_store);
+        let mut sstable_iter = BackwardSstableIterator::new(handle, sstable_store);
         let mut cnt = TEST_KEYS_COUNT;
         sstable_iter.rewind().await.unwrap();
 
@@ -209,7 +209,7 @@ mod tests {
         assert!(sstable.meta.block_metas.len() > 10);
         let cache = create_small_table_cache();
         let handle = cache.insert(0, 0, 1, Box::new(sstable));
-        let mut sstable_iter = BackwardSsTableIterator::new(handle, sstable_store);
+        let mut sstable_iter = BackwardSstableIterator::new(handle, sstable_store);
         let mut all_key_to_test = (0..TEST_KEYS_COUNT).collect_vec();
         let mut rng = thread_rng();
         all_key_to_test.shuffle(&mut rng);

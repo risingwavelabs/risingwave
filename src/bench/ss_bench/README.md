@@ -58,12 +58,12 @@ We use a mock meta-service for `ss_bench`, and it may not be fully functional.
 
 - `--table-size-mb`
   
-  - Size (MB) of an SsTable
+  - Size (MB) of an Sstable
   - Default: 256
 
 - `--block-size-kb`
   
-  - Size (KB) of a block in an SsTable
+  - Size (KB) of a block in an Sstable
   - Default: 64
 
 - `--block-cache-capacity-mb`

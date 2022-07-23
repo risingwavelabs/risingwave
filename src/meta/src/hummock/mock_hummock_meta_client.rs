@@ -18,7 +18,7 @@ use anyhow::anyhow;
 use async_trait::async_trait;
 use risingwave_hummock_sdk::compaction_group::StaticCompactionGroupId;
 use risingwave_hummock_sdk::{
-    HummockContextId, HummockEpoch, HummockSsTableId, HummockVersionId, LocalSstableInfo,
+    HummockContextId, HummockEpoch, HummockSstableId, HummockVersionId, LocalSstableInfo,
 };
 use risingwave_pb::hummock::{
     CompactTask, CompactionGroup, HummockSnapshot, HummockVersion, HummockVersionDelta,
@@ -119,7 +119,7 @@ impl HummockMetaClient for MockHummockMetaClient {
             .map_err(mock_err)
     }
 
-    async fn get_new_table_id(&self) -> Result<HummockSsTableId> {
+    async fn get_new_table_id(&self) -> Result<HummockSstableId> {
         self.hummock_manager
             .get_new_table_id()
             .await

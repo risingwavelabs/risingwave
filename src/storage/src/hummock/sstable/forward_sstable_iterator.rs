@@ -23,7 +23,7 @@ use crate::hummock::iterator::{Forward, HummockIterator, ReadOptions};
 use crate::hummock::{BlockHolder, BlockIterator, SstableStoreRef, TableHolder};
 use crate::monitor::StoreLocalStatistic;
 
-pub trait SsTableIteratorType: HummockIterator + 'static {
+pub trait SstableIteratorType: HummockIterator + 'static {
     fn create(
         sstable: TableHolder,
         sstable_store: SstableStoreRef,
@@ -32,7 +32,7 @@ pub trait SsTableIteratorType: HummockIterator + 'static {
 }
 
 /// Iterates on a sstable.
-pub struct SsTableIterator {
+pub struct SstableIterator {
     /// The iterator of the current block.
     block_iter: Option<BlockIterator>,
 
@@ -46,7 +46,7 @@ pub struct SsTableIterator {
     stats: StoreLocalStatistic,
 }
 
-impl SsTableIterator {
+impl SstableIterator {
     pub fn new(
         sstable: TableHolder,
         sstable_store: SstableStoreRef,
@@ -106,7 +106,7 @@ impl SsTableIterator {
 }
 
 #[async_trait]
-impl HummockIterator for SsTableIterator {
+impl HummockIterator for SstableIterator {
     type Direction = Forward;
 
     async fn next(&mut self) -> HummockResult<()> {
@@ -169,13 +169,13 @@ impl HummockIterator for SsTableIterator {
     }
 }
 
-impl SsTableIteratorType for SsTableIterator {
+impl SstableIteratorType for SstableIterator {
     fn create(
         sstable: TableHolder,
         sstable_store: SstableStoreRef,
         options: Arc<ReadOptions>,
     ) -> Self {
-        SsTableIterator::new(sstable, sstable_store, options)
+        SstableIterator::new(sstable, sstable_store, options)
     }
 }
 
@@ -198,7 +198,7 @@ mod tests {
         // We should have at least 10 blocks, so that sstable iterator test could cover more code
         // path.
         let mut sstable_iter =
-            SsTableIterator::create(handle, sstable_store, Arc::new(ReadOptions::default()));
+            SstableIterator::create(handle, sstable_store, Arc::new(ReadOptions::default()));
         let mut cnt = 0;
         sstable_iter.rewind().await.unwrap();
 
@@ -250,7 +250,7 @@ mod tests {
         let handle = cache.insert(0, 0, 1, Box::new(sstable));
 
         let mut sstable_iter =
-            SsTableIterator::create(handle, sstable_store, Arc::new(ReadOptions::default()));
+            SstableIterator::create(handle, sstable_store, Arc::new(ReadOptions::default()));
         let mut all_key_to_test = (0..TEST_KEYS_COUNT).collect_vec();
         let mut rng = thread_rng();
         all_key_to_test.shuffle(&mut rng);
@@ -325,7 +325,7 @@ mod tests {
             .unwrap();
 
         let mut stats = StoreLocalStatistic::default();
-        let mut sstable_iter = SsTableIterator::create(
+        let mut sstable_iter = SstableIterator::create(
             sstable_store.sstable(0, &mut stats).await.unwrap(),
             sstable_store,
             Arc::new(ReadOptions { prefetch: true }),

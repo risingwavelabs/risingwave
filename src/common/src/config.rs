@@ -109,7 +109,7 @@ impl Default for StreamingConfig {
 #[derive(Clone, Debug, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct StorageConfig {
-    /// Target size of the SsTable.
+    /// Target size of the Sstable.
     #[serde(default = "default::sst_size_mb")]
     pub sstable_size_mb: u32,
 

@@ -23,11 +23,11 @@ use crate::hummock::iterator::{
     DirectionEnum, HummockIterator, HummockIteratorDirection, ReadOptions,
 };
 use crate::hummock::value::HummockValue;
-use crate::hummock::{HummockResult, SsTableIteratorType, SstableStoreRef};
+use crate::hummock::{HummockResult, SstableIteratorType, SstableStoreRef};
 use crate::monitor::StoreLocalStatistic;
 
 /// Served as the concrete implementation of `ConcatIterator` and `BackwardConcatIterator`.
-pub struct ConcatIteratorInner<TI: SsTableIteratorType> {
+pub struct ConcatIteratorInner<TI: SstableIteratorType> {
     /// The iterator of the current table.
     sstable_iter: Option<TI>,
 
@@ -43,7 +43,7 @@ pub struct ConcatIteratorInner<TI: SsTableIteratorType> {
     read_options: Arc<ReadOptions>,
 }
 
-impl<TI: SsTableIteratorType> ConcatIteratorInner<TI> {
+impl<TI: SstableIteratorType> ConcatIteratorInner<TI> {
     /// Caller should make sure that `tables` are non-overlapping,
     /// arranged in ascending order when it serves as a forward iterator,
     /// and arranged in descending order when it serves as a backward iterator.
@@ -99,7 +99,7 @@ impl<TI: SsTableIteratorType> ConcatIteratorInner<TI> {
 }
 
 #[async_trait]
-impl<TI: SsTableIteratorType> HummockIterator for ConcatIteratorInner<TI> {
+impl<TI: SstableIteratorType> HummockIterator for ConcatIteratorInner<TI> {
     type Direction = TI::Direction;
 
     async fn next(&mut self) -> HummockResult<()> {

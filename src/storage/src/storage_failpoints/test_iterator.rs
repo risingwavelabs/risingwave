@@ -27,7 +27,7 @@ use crate::hummock::iterator::{
     HummockIterator, MergeIterator, ReadOptions, UserIterator,
 };
 use crate::hummock::test_utils::default_builder_opt_for_test;
-use crate::hummock::{BackwardSsTableIterator, SsTableIterator};
+use crate::hummock::{BackwardSstableIterator, SstableIterator};
 use crate::monitor::{StateStoreMetrics, StoreLocalStatistic};
 
 #[tokio::test]
@@ -176,7 +176,7 @@ async fn test_failpoints_merge_invalid_key() {
         {
             let mut iters = vec![];
             for table in &tables {
-                iters.push(Box::new(SsTableIterator::new(
+                iters.push(Box::new(SstableIterator::new(
                     sstable_store
                         .sstable(table.id, &mut StoreLocalStatistic::default())
                         .await
@@ -232,7 +232,7 @@ async fn test_failpoints_backward_merge_invalid_key() {
         {
             let mut iters = vec![];
             for table in &tables {
-                iters.push(Box::new(BackwardSsTableIterator::new(
+                iters.push(Box::new(BackwardSstableIterator::new(
                     sstable_store
                         .sstable(table.id, &mut StoreLocalStatistic::default())
                         .await
@@ -284,12 +284,12 @@ async fn test_failpoints_user_read_err() {
     .await;
     let mut stats = StoreLocalStatistic::default();
     let iters: Vec<BoxedForwardHummockIterator> = vec![
-        Box::new(SsTableIterator::new(
+        Box::new(SstableIterator::new(
             sstable_store.sstable(table0.id, &mut stats).await.unwrap(),
             sstable_store.clone(),
             Arc::new(ReadOptions::default()),
         )),
-        Box::new(SsTableIterator::new(
+        Box::new(SstableIterator::new(
             sstable_store.sstable(table1.id, &mut stats).await.unwrap(),
             sstable_store.clone(),
             Arc::new(ReadOptions::default()),
@@ -346,11 +346,11 @@ async fn test_failpoints_backward_user_read_err() {
     .await;
     let mut stats = StoreLocalStatistic::default();
     let iters: Vec<BoxedBackwardHummockIterator> = vec![
-        Box::new(BackwardSsTableIterator::new(
+        Box::new(BackwardSstableIterator::new(
             sstable_store.sstable(table0.id, &mut stats).await.unwrap(),
             sstable_store.clone(),
         )),
-        Box::new(BackwardSsTableIterator::new(
+        Box::new(BackwardSstableIterator::new(
             sstable_store.sstable(table1.id, &mut stats).await.unwrap(),
             sstable_store.clone(),
         )),
