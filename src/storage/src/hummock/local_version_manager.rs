@@ -23,9 +23,11 @@ use futures::future::{join_all, try_join_all};
 use itertools::Itertools;
 use parking_lot::{RwLock, RwLockUpgradableReadGuard, RwLockWriteGuard};
 use risingwave_common::config::StorageConfig;
+use risingwave_hummock_sdk::compaction_group::hummock_version_ext::HummockVersionExt;
 use risingwave_hummock_sdk::key::FullKey;
+use risingwave_hummock_sdk::slice_transform::SliceTransformImpl;
 use risingwave_hummock_sdk::{CompactionGroupId, LocalSstableInfo};
-use risingwave_pb::hummock::HummockVersion;
+use risingwave_pb::hummock::{HummockVersion, HummockVersionDelta};
 use risingwave_rpc_client::HummockMetaClient;
 use tokio::sync::mpsc::error::TryRecvError;
 use tokio::sync::mpsc::UnboundedReceiver;
@@ -128,7 +130,7 @@ impl BufferTracker {
 }
 
 /// The `LocalVersionManager` maintains a local copy of storage service's hummock version data.
-/// By acquiring a `ScopedLocalVersion`, the `SSTables` of this version is guaranteed to be valid
+/// By acquiring a `ScopedLocalVersion`, the `Sstables` of this version is guaranteed to be valid
 /// during the lifetime of `ScopedLocalVersion`. Internally `LocalVersionManager` will pin/unpin the
 /// versions in storage service.
 pub struct LocalVersionManager {
@@ -146,6 +148,7 @@ impl LocalVersionManager {
         stats: Arc<StateStoreMetrics>,
         hummock_meta_client: Arc<dyn HummockMetaClient>,
         write_conflict_detector: Option<Arc<ConflictDetector>>,
+        table_id_to_slice_transform: Arc<RwLock<HashMap<u32, SliceTransformImpl>>>,
     ) -> Arc<LocalVersionManager> {
         let (version_unpin_worker_tx, version_unpin_worker_rx) =
             tokio::sync::mpsc::unbounded_channel();
@@ -160,7 +163,9 @@ impl LocalVersionManager {
         )
         .await
         .expect("should be `Some` since `break_condition` is always false")
-        .expect("should be able to pinned the first version");
+        .expect("should be able to pinned the first version")
+        .2
+        .unwrap();
 
         let (buffer_event_sender, buffer_event_receiver) = mpsc::unbounded_channel();
 
@@ -179,12 +184,14 @@ impl LocalVersionManager {
                 buffer_event_sender,
             ),
             write_conflict_detector: write_conflict_detector.clone(),
+
             shared_buffer_uploader: Arc::new(SharedBufferUploader::new(
                 options.clone(),
                 sstable_store,
                 hummock_meta_client.clone(),
                 stats,
                 write_conflict_detector,
+                table_id_to_slice_transform.clone(),
             )),
         });
 
@@ -210,21 +217,65 @@ impl LocalVersionManager {
         local_version_manager
     }
 
+    #[cfg(any(test, feature = "test"))]
+    pub async fn for_test(
+        options: Arc<StorageConfig>,
+        sstable_store: SstableStoreRef,
+        hummock_meta_client: Arc<dyn HummockMetaClient>,
+        write_conflict_detector: Option<Arc<ConflictDetector>>,
+    ) -> Arc<LocalVersionManager> {
+        Self::new(
+            options,
+            sstable_store,
+            Arc::new(StateStoreMetrics::unused()),
+            hummock_meta_client,
+            write_conflict_detector,
+            Arc::new(RwLock::new(HashMap::new())),
+        )
+        .await
+    }
+
     /// Updates cached version if the new version is of greater id.
     /// You shouldn't unpin even the method returns false, as it is possible `hummock_version` is
     /// being referenced by some readers.
-    pub fn try_update_pinned_version(&self, newly_pinned_version: HummockVersion) -> bool {
-        let new_version_id = newly_pinned_version.id;
+    pub fn try_update_pinned_version(
+        &self,
+        last_pinned: Option<u64>,
+        pin_resp: (bool, Vec<HummockVersionDelta>, Option<HummockVersion>),
+    ) -> bool {
+        let old_version = self.local_version.upgradable_read();
+        if let Some(last_pinned_id) = last_pinned {
+            if old_version.pinned_version().id() != last_pinned_id {
+                return false;
+            }
+        }
+
+        let new_version_id = if pin_resp.0 {
+            match pin_resp.1.last() {
+                Some(version_delta) => version_delta.id,
+                None => old_version.pinned_version().id(),
+            }
+        } else {
+            pin_resp.2.as_ref().unwrap().id
+        };
+        if old_version.pinned_version().id() >= new_version_id {
+            return false;
+        }
+
+        let newly_pinned_version = if pin_resp.0 {
+            let mut version_to_apply = old_version.pinned_version().version();
+            for version_delta in pin_resp.1 {
+                version_to_apply.apply_version_delta(&version_delta);
+            }
+            version_to_apply
+        } else {
+            pin_resp.2.unwrap()
+        };
         for levels in newly_pinned_version.levels.values() {
             if validate_table_key_range(&levels.levels).is_err() {
                 error!("invalid table key range: {:?}", levels.levels);
                 return false;
             }
-        }
-
-        let old_version = self.local_version.upgradable_read();
-        if old_version.pinned_version().id() >= new_version_id {
-            return false;
         }
 
         if let Some(conflict_detector) = self.write_conflict_detector.as_ref() {
@@ -514,7 +565,7 @@ impl LocalVersionManager {
         last_pinned: HummockVersionId,
         max_retry: usize,
         break_condition: impl Fn() -> bool,
-    ) -> Option<HummockResult<HummockVersion>> {
+    ) -> Option<HummockResult<(bool, Vec<HummockVersionDelta>, Option<HummockVersion>)>> {
         let max_retry_interval = Duration::from_secs(10);
         let mut retry_backoff = tokio_retry::strategy::ExponentialBackoff::from_millis(10)
             .max_delay(max_retry_interval)
@@ -585,7 +636,8 @@ impl LocalVersionManager {
             .await
             {
                 Some(Ok(pinned_version)) => {
-                    local_version_manager.try_update_pinned_version(pinned_version);
+                    local_version_manager
+                        .try_update_pinned_version(Some(last_pinned), pinned_version);
                 }
                 Some(Err(_)) => {
                     unreachable!(
@@ -835,7 +887,7 @@ impl LocalVersionManager {
     pub async fn refresh_version(&self, hummock_meta_client: &dyn HummockMetaClient) -> bool {
         let last_pinned = self.get_pinned_version().id();
         let version = hummock_meta_client.pin_version(last_pinned).await.unwrap();
-        self.try_update_pinned_version(version)
+        self.try_update_pinned_version(Some(last_pinned), version)
     }
 
     pub fn local_version(&self) -> &RwLock<LocalVersion> {

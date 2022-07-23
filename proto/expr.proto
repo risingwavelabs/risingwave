@@ -3,6 +3,7 @@ syntax = "proto3";
 package expr;
 
 import "data.proto";
+import "plan_common.proto";
 
 option optimize_for = SPEED;
 
@@ -110,6 +111,7 @@ message TableFunction {
   enum Type {
     GENERATE = 0;
     UNNEST = 1;
+    REGEXP_MATCHES = 2;
   }
   Type function_type = 1;
   repeated expr.ExprNode args = 2;
@@ -118,6 +120,39 @@ message TableFunction {
 
 message InputRefExpr {
   int32 column_idx = 1;
+}
+
+// The items which can occur in the select list of `ProjectSet` operator.
+//
+// When there are table functions in the SQL query `SELECT ...`, it will be planned as `ProjectSet`.
+// Otherwise it will be planned as `Project`.
+//
+// # Examples
+//
+// ```sql
+// # Project
+// select 1;
+//
+// # ProjectSet
+// select unnest(array[1,2,3]);
+//
+// # ProjectSet (table function & usual expression)
+// select unnest(array[1,2,3]), 1;
+//
+// # ProjectSet (multiple table functions)
+// select unnest(array[1,2,3]), unnest(array[4,5]);
+//
+// # ProjectSet over ProjectSet (table function as parameters of table function)
+// select unnest(regexp_matches(v1, 'a(\d)c(\d)', 'g')) from t;
+//
+// # Project over ProjectSet (table function as parameters of usual function)
+// select unnest(regexp_matches(v1, 'a(\d)c(\d)', 'g')) from t;
+// ```
+message ProjectSetSelectItem {
+  oneof select_item {
+    expr.ExprNode expr = 1;
+    expr.TableFunction table_function = 2;
+  }
 }
 
 message ConstantValue {
@@ -163,5 +198,12 @@ message AggCall {
   repeated Arg args = 2;
   data.DataType return_type = 3;
   bool distinct = 4;
-  ExprNode filter = 5;
+  message OrderByField {
+    InputRefExpr input = 1;
+    data.DataType type = 2;
+    plan_common.OrderType direction = 3;
+    bool nulls_first = 4;
+  }
+  repeated OrderByField order_by_fields = 5;
+  ExprNode filter = 6;
 }

@@ -252,7 +252,6 @@ pub async fn handle_revoke_privilege(
             if reader.get_user_by_name(&granted_by.value).is_none() {
                 return Err(ErrorCode::BindError("Grantor does not exist".to_string()).into());
             }
-            // TODO: check whether if grantor is a super user or have the privilege to grant.
         }
     }
     let privileges = make_prost_privilege(&session, privileges, objects)?;

@@ -6,14 +6,13 @@ edition = "2021"
 [dependencies]
 anyhow = "1"
 assert_matches = "1"
-async-recursion = "1"
 async-stream = "0.3"
 async-trait = "0.1"
 axum = "0.5"
 byteorder = "1"
 bytes = { version = "1", features = ["serde"] }
 chrono = { version = "0.4", default-features = false, features = ["clock", "std"] }
-clap = { version = "3", features = ["derive"] }
+clap = { version = "3", features = ["derive", "env"] }
 crc32fast = "1"
 derivative = "2"
 either = "1"
@@ -26,7 +25,7 @@ hyper = "0.14"
 itertools = "0.10"
 lazy_static = "1"
 log = "0.4"
-madsim = "=0.2.0-alpha.3"
+madsim = "=0.2.0-alpha.4"
 memcomparable = { path = "../utils/memcomparable" }
 num-integer = "0.1"
 num-traits = "0.2"
@@ -36,6 +35,7 @@ prometheus = "0.13"
 prost = "0.10"
 rand = "0.8"
 risingwave_common = { path = "../common" }
+risingwave_common_service = { path = "../common/common_service"}
 risingwave_connector = { path = "../connector" }
 risingwave_hummock_sdk = { path = "../storage/hummock_sdk" }
 risingwave_pb = { path = "../prost" }
@@ -46,7 +46,7 @@ serde_derive = "1"
 serde_json = "1"
 smallvec = "1"
 thiserror = "1"
-tokio = { version = "=0.2.0-alpha.3", package = "madsim-tokio", features = [
+tokio = { version = "=0.2.0-alpha.4", package = "madsim-tokio", features = [
     "rt",
     "rt-multi-thread",
     "sync",
@@ -56,7 +56,7 @@ tokio = { version = "=0.2.0-alpha.3", package = "madsim-tokio", features = [
 ] }
 tokio-retry = "0.3"
 tokio-stream = { version = "0.1", features = ["net"] }
-tonic = { version = "=0.2.0-alpha.3", package = "madsim-tonic" }
+tonic = { version = "=0.2.0-alpha.4", package = "madsim-tonic" }
 tower = { version = "0.4", features = ["util", "load-shed"] }
 tower-http = { version = "0.3", features = ["add-extension", "cors", "fs"] }
 tracing = { version = "0.1" }
@@ -69,9 +69,6 @@ rand = "0.8"
 risingwave_test_runner = { path = "../test_runner" }
 static_assertions = "1"
 tempfile = "3"
-
-[target.'cfg(not(madsim))'.dev-dependencies]
-risingwave_frontend = { path = "../frontend" }
 
 [features]
 test = []

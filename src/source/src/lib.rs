@@ -31,11 +31,11 @@
 #![feature(binary_heap_drain_sorted)]
 #![feature(lint_reasons)]
 
+use std::collections::HashMap;
 use std::fmt::Debug;
 
 use async_trait::async_trait;
 use enum_as_inner::EnumAsInner;
-use madsim::collections::HashMap;
 pub use manager::*;
 pub use parser::*;
 use risingwave_common::array::StreamChunk;

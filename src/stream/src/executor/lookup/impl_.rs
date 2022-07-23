@@ -17,19 +17,18 @@ use futures_async_stream::try_stream;
 use itertools::Itertools;
 use risingwave_common::array::{Row, RowRef};
 use risingwave_common::catalog::{ColumnDesc, Schema};
-use risingwave_common::error::Result;
 use risingwave_common::util::sort_util::OrderPair;
-use risingwave_storage::table::state_table::StateTable;
+use risingwave_storage::table::storage_table::{StorageTable, READ_ONLY};
+use risingwave_storage::table::TableIter;
 use risingwave_storage::StateStore;
 
 use super::sides::{stream_lookup_arrange_prev_epoch, stream_lookup_arrange_this_epoch};
 use crate::common::StreamChunkBuilder;
-use crate::executor::error::StreamExecutorError;
+use crate::executor::error::{StreamExecutorError, StreamExecutorResult};
 use crate::executor::lookup::cache::LookupCache;
 use crate::executor::lookup::sides::{ArrangeJoinSide, ArrangeMessage, StreamJoinSide};
 use crate::executor::lookup::LookupExecutor;
 use crate::executor::{Barrier, Epoch, Executor, Message, PkIndices, PROCESSING_WINDOW_SIZE};
-
 /// Parameters for [`LookupExecutor`].
 pub struct LookupExecutorParams<S: StateStore> {
     /// The side for arrangement. Currently, it should be a
@@ -100,7 +99,7 @@ pub struct LookupExecutorParams<S: StateStore> {
     /// The join keys on the arrangement side.
     pub arrange_join_key_indices: Vec<usize>,
 
-    pub state_table: StateTable<S>,
+    pub storage_table: StorageTable<S, READ_ONLY>,
 }
 
 impl<S: StateStore> LookupExecutor<S> {
@@ -116,7 +115,7 @@ impl<S: StateStore> LookupExecutor<S> {
             arrange_join_key_indices,
             schema: output_schema,
             column_mapping,
-            state_table,
+            storage_table,
         } = params;
 
         let output_column_length = stream.schema().len() + arrangement.schema().len();
@@ -208,7 +207,7 @@ impl<S: StateStore> LookupExecutor<S> {
                 order_rules: arrangement_order_rules,
                 key_indices: arrange_join_key_indices,
                 use_current_epoch,
-                state_table,
+                storage_table,
             },
             column_mapping,
             key_indices_mapping,
@@ -247,9 +246,7 @@ impl<S: StateStore> LookupExecutor<S> {
                         // arrange barrier. So we flush now.
                         self.lookup_cache.flush();
                     }
-                    self.process_barrier(barrier.clone())
-                        .await
-                        .map_err(StreamExecutorError::eval_error)?;
+                    self.process_barrier(barrier.clone()).await?;
                     if self.arrangement.use_current_epoch {
                         // When lookup this epoch, stream side barrier always come after arrangement
                         // ready, so we can forward barrier now.
@@ -287,7 +284,7 @@ impl<S: StateStore> LookupExecutor<S> {
                     } else {
                         last_barrier.epoch.prev
                     };
-                    let chunk = chunk.compact().map_err(StreamExecutorError::eval_error)?;
+                    let chunk = chunk.compact()?;
                     let (chunk, ops) = chunk.into_parts();
 
                     let mut builder = StreamChunkBuilder::new(
@@ -295,28 +292,20 @@ impl<S: StateStore> LookupExecutor<S> {
                         &self.chunk_data_types,
                         0,
                         self.stream.col_types.len(),
-                    )
-                    .map_err(StreamExecutorError::eval_error)?;
+                    )?;
 
                     for (op, row) in ops.iter().zip_eq(chunk.rows()) {
-                        for matched_row in self
-                            .lookup_one_row(&row, lookup_epoch)
-                            .await
-                            .map_err(StreamExecutorError::eval_error)?
-                        {
+                        for matched_row in self.lookup_one_row(&row, lookup_epoch).await? {
                             tracing::trace!(target: "events::stream::lookup::put", "{:?} {:?}", row, matched_row);
 
-                            if let Some(chunk) = builder
-                                .append_row(*op, &row, &matched_row)
-                                .map_err(StreamExecutorError::eval_error)?
-                            {
+                            if let Some(chunk) = builder.append_row(*op, &row, &matched_row)? {
                                 yield Message::Chunk(chunk.reorder_columns(&self.column_mapping));
                             }
                         }
                         // TODO: support outer join (return null if no rows are matched)
                     }
 
-                    if let Some(chunk) = builder.take().map_err(StreamExecutorError::eval_error)? {
+                    if let Some(chunk) = builder.take()? {
                         yield Message::Chunk(chunk.reorder_columns(&self.column_mapping));
                     }
                 }
@@ -325,7 +314,8 @@ impl<S: StateStore> LookupExecutor<S> {
     }
 
     /// Store the barrier.
-    async fn process_barrier(&mut self, barrier: Barrier) -> Result<()> {
+    #[expect(clippy::unused_async)]
+    async fn process_barrier(&mut self, barrier: Barrier) -> StreamExecutorResult<()> {
         if self.last_barrier.is_none() {
             assert_ne!(barrier.epoch.prev, 0, "lookup requires prev epoch != 0");
 
@@ -361,7 +351,7 @@ impl<S: StateStore> LookupExecutor<S> {
         &mut self,
         stream_row: &RowRef<'_>,
         lookup_epoch: u64,
-    ) -> Result<Vec<Row>> {
+    ) -> StreamExecutorResult<Vec<Row>> {
         // fast-path for empty look-ups.
         if lookup_epoch == 0 {
             return Ok(vec![]);
@@ -381,14 +371,13 @@ impl<S: StateStore> LookupExecutor<S> {
         {
             let all_data_iter = self
                 .arrangement
-                .state_table
-                .iter_with_pk_prefix(&lookup_row, lookup_epoch)
-                .await?
-                .fuse();
+                .storage_table
+                .streaming_iter_with_pk_bounds(lookup_epoch, &lookup_row, ..)
+                .await?;
             pin_mut!(all_data_iter);
-            while let Some(inner) = all_data_iter.next().await {
-                let ret = inner?;
-                all_rows.push(ret.into_owned());
+            while let Some(inner) = all_data_iter.next_row().await? {
+                // Only need value (include storage pk).
+                all_rows.push(inner);
             }
         }
 

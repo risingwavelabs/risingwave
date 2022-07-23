@@ -19,7 +19,7 @@ use risingwave_common::array::column::Column;
 use risingwave_common::array::StreamChunk;
 use risingwave_common::catalog::Schema;
 use risingwave_common::error::Result;
-use risingwave_storage::table::state_table::StateTable;
+use risingwave_storage::table::state_table::RowBasedStateTable;
 use risingwave_storage::StateStore;
 
 use super::*;
@@ -62,7 +62,7 @@ pub struct GlobalSimpleAggExecutor<S: StateStore> {
 
     /// Relational state tables used by this executor.
     /// One-to-one map with AggCall.
-    state_tables: Vec<StateTable<S>>,
+    state_tables: Vec<RowBasedStateTable<S>>,
 }
 
 impl<S: StateStore> Executor for GlobalSimpleAggExecutor<S> {
@@ -89,7 +89,7 @@ impl<S: StateStore> GlobalSimpleAggExecutor<S> {
         agg_calls: Vec<AggCall>,
         pk_indices: PkIndices,
         executor_id: u64,
-        mut state_tables: Vec<StateTable<S>>,
+        mut state_tables: Vec<RowBasedStateTable<S>>,
     ) -> Result<Self> {
         let input_info = input.info();
         let schema = generate_agg_schema(input.as_ref(), &agg_calls, None);
@@ -122,7 +122,7 @@ impl<S: StateStore> GlobalSimpleAggExecutor<S> {
         states: &mut Option<AggState<S>>,
         chunk: StreamChunk,
         epoch: u64,
-        state_tables: &mut [StateTable<S>],
+        state_tables: &mut [RowBasedStateTable<S>],
     ) -> StreamExecutorResult<()> {
         let (ops, columns, visibility) = chunk.into_inner();
 
@@ -181,7 +181,7 @@ impl<S: StateStore> GlobalSimpleAggExecutor<S> {
         schema: &Schema,
         states: &mut Option<AggState<S>>,
         epoch: u64,
-        state_tables: &mut [StateTable<S>],
+        state_tables: &mut [RowBasedStateTable<S>],
     ) -> StreamExecutorResult<Option<StreamChunk>> {
         // --- Flush states to the state store ---
         // Some state will have the correct output only after their internal states have been fully
@@ -197,7 +197,7 @@ impl<S: StateStore> GlobalSimpleAggExecutor<S> {
             .iter_mut()
             .zip_eq(state_tables.iter_mut())
         {
-            state.flush(state_table).await?;
+            state.flush(state_table)?;
         }
 
         // Batch commit state tables.

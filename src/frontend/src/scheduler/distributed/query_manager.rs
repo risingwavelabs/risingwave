@@ -74,6 +74,8 @@ impl QueryManager {
         plan: BatchPlanProst,
     ) -> SchedulerResult<impl DataChunkStream> {
         let worker_node_addr = self.worker_node_manager.next_random()?.host.unwrap();
+
+        #[expect(clippy::needless_borrow)]
         let compute_client = self
             .compute_client_pool
             .get_client_for_addr((&worker_node_addr).into())
@@ -182,6 +184,7 @@ impl QueryResultFetcher {
             "Starting to run query result fetcher, task output id: {:?}, task_host: {:?}",
             self.task_output_id, self.task_host
         );
+        #[expect(clippy::needless_borrow)]
         let compute_client = self
             .compute_client_pool
             .get_client_for_addr((&self.task_host).into())

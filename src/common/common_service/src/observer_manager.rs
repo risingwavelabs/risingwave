@@ -70,13 +70,19 @@ impl ObserverManager {
             .handle_initialization_notification(first_resp)?;
         let handle = tokio::spawn(async move {
             loop {
-                if let Ok(resp) = self.rx.next().await {
-                    if resp.is_none() {
-                        tracing::error!("Stream of notification terminated.");
-                        self.re_subscribe().await;
-                        continue;
+                match self.rx.next().await {
+                    Ok(resp) => {
+                        if resp.is_none() {
+                            tracing::error!("Stream of notification terminated.");
+                            self.re_subscribe().await;
+                            continue;
+                        }
+                        self.observer_states.handle_notification(resp.unwrap());
                     }
-                    self.observer_states.handle_notification(resp.unwrap());
+                    Err(e) => {
+                        tracing::error!("Receives meta's notification err {:?}", e);
+                        self.re_subscribe().await;
+                    }
                 }
             }
         });

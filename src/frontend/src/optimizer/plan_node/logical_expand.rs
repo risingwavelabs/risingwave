@@ -83,6 +83,25 @@ impl LogicalExpand {
             })
             .collect_vec()
     }
+
+    pub(super) fn fmt_with_name(&self, f: &mut fmt::Formatter<'_>, name: &str) -> fmt::Result {
+        let verbose = self.base.ctx.is_explain_verbose();
+        if verbose {
+            write!(
+                f,
+                "{} {{ column_subsets: {:?} }}",
+                name,
+                self.column_subsets_verbose_display()
+            )
+        } else {
+            write!(
+                f,
+                "{} {{ column_subsets: {:?} }}",
+                name,
+                self.column_subsets()
+            )
+        }
+    }
 }
 
 impl PlanTreeNodeUnary for LogicalExpand {
@@ -116,11 +135,7 @@ impl_plan_tree_node_for_unary! {LogicalExpand}
 
 impl fmt::Display for LogicalExpand {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        write!(
-            f,
-            "LogicalExpand {{ column_subsets: {:?} }}",
-            self.column_subsets
-        )
+        self.fmt_with_name(f, "LogicalExpand")
     }
 }
 

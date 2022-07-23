@@ -21,7 +21,7 @@ use risingwave_common::buffer::Bitmap;
 use risingwave_common::hash::HashCode;
 use risingwave_common::types::Datum;
 use risingwave_expr::expr::AggKind;
-use risingwave_storage::table::state_table::StateTable;
+use risingwave_storage::table::state_table::RowBasedStateTable;
 use risingwave_storage::StateStore;
 pub use value::*;
 
@@ -67,10 +67,10 @@ impl<S: StateStore> ManagedStateImpl<S> {
         visibility: Option<&Bitmap>,
         data: &[&ArrayImpl],
         epoch: u64,
-        state_table: &mut StateTable<S>,
+        state_table: &mut RowBasedStateTable<S>,
     ) -> StreamExecutorResult<()> {
         match self {
-            Self::Value(state) => state.apply_batch(ops, visibility, data).await,
+            Self::Value(state) => state.apply_batch(ops, visibility, data),
             Self::Table(state) => {
                 state
                     .apply_batch(ops, visibility, data, epoch, state_table)
@@ -83,10 +83,10 @@ impl<S: StateStore> ManagedStateImpl<S> {
     pub async fn get_output(
         &mut self,
         epoch: u64,
-        state_table: &StateTable<S>,
+        state_table: &RowBasedStateTable<S>,
     ) -> StreamExecutorResult<Datum> {
         match self {
-            Self::Value(state) => state.get_output().await,
+            Self::Value(state) => state.get_output(),
             Self::Table(state) => state.get_output(epoch, state_table).await,
         }
     }
@@ -100,9 +100,9 @@ impl<S: StateStore> ManagedStateImpl<S> {
     }
 
     /// Flush the internal state to a write batch.
-    pub async fn flush(&mut self, state_table: &mut StateTable<S>) -> StreamExecutorResult<()> {
+    pub fn flush(&mut self, state_table: &mut RowBasedStateTable<S>) -> StreamExecutorResult<()> {
         match self {
-            Self::Value(state) => state.flush(state_table).await,
+            Self::Value(state) => state.flush(state_table),
             Self::Table(state) => state.flush(state_table),
         }
     }
@@ -116,7 +116,7 @@ impl<S: StateStore> ManagedStateImpl<S> {
         is_row_count: bool,
         key_hash_code: Option<HashCode>,
         pk: Option<&Row>,
-        state_table: &StateTable<S>,
+        state_table: &RowBasedStateTable<S>,
     ) -> StreamExecutorResult<Self> {
         match agg_call.kind {
             AggKind::Max | AggKind::Min => {
@@ -131,18 +131,15 @@ impl<S: StateStore> ManagedStateImpl<S> {
                         ManagedValueState::new(agg_call, row_count, pk, state_table).await?,
                     ))
                 } else {
-                    Ok(Self::Table(
-                        create_streaming_extreme_state(
-                            agg_call,
-                            row_count.unwrap(),
-                            // TODO: estimate a good cache size instead of hard-coding
-                            Some(1024),
-                            pk_data_types,
-                            key_hash_code,
-                            pk,
-                        )
-                        .await?,
-                    ))
+                    Ok(Self::Table(create_streaming_extreme_state(
+                        agg_call,
+                        row_count.unwrap(),
+                        // TODO: estimate a good cache size instead of hard-coding
+                        Some(1024),
+                        pk_data_types,
+                        key_hash_code,
+                        pk,
+                    )?))
                 }
             }
             AggKind::StringAgg => {

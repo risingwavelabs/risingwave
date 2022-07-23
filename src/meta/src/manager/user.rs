@@ -16,7 +16,7 @@ use std::collections::{HashMap, HashSet, VecDeque};
 use std::sync::Arc;
 
 use risingwave_common::catalog::{DEFAULT_SUPPER_USER, DEFAULT_SUPPER_USER_FOR_PG};
-use risingwave_common::error::ErrorCode::InternalError;
+use risingwave_common::error::ErrorCode::{InternalError, PermissionDenied};
 use risingwave_common::error::{Result, RwError};
 use risingwave_pb::meta::subscribe_response::{Info, Operation};
 use risingwave_pb::user::grant_privilege::{ActionWithGrantOption, Object};
@@ -51,10 +51,10 @@ fn get_relation(user_info: &HashMap<UserName, UserInfo>) -> HashMap<UserName, Ha
                 user_grant_relation
                     .entry(option.get_granted_by().to_string())
                     .or_insert_with(HashSet::new);
-                let realtion_item = user_grant_relation
+                let relation_item = user_grant_relation
                     .get_mut(option.get_granted_by())
                     .unwrap();
-                realtion_item.insert(user_name.clone());
+                relation_item.insert(user_name.clone());
             }
         }
     }
@@ -124,7 +124,7 @@ impl<S: MetaStore> UserManager<S> {
     pub async fn create_user(&self, user: &UserInfo) -> Result<NotificationVersion> {
         let mut core = self.core.lock().await;
         if core.user_info.contains_key(&user.name) {
-            return Err(RwError::from(InternalError(format!(
+            return Err(RwError::from(PermissionDenied(format!(
                 "User {} already exists",
                 user.name
             ))));
@@ -158,7 +158,7 @@ impl<S: MetaStore> UserManager<S> {
             ))));
         }
         if user_name == DEFAULT_SUPPER_USER || user_name == DEFAULT_SUPPER_USER_FOR_PG {
-            return Err(RwError::from(InternalError(format!(
+            return Err(RwError::from(PermissionDenied(format!(
                 "Cannot drop default super user {}",
                 user_name
             ))));
@@ -170,7 +170,7 @@ impl<S: MetaStore> UserManager<S> {
             .grant_privileges
             .is_empty()
         {
-            return Err(RwError::from(InternalError(format!(
+            return Err(RwError::from(PermissionDenied(format!(
                 "Cannot drop user {} with privileges",
                 user_name
             ))));
@@ -178,12 +178,11 @@ impl<S: MetaStore> UserManager<S> {
         if core.user_grant_relation.contains_key(user_name)
             && !core.user_grant_relation.get(user_name).unwrap().is_empty()
         {
-            return Err(RwError::from(InternalError(format!(
+            return Err(RwError::from(PermissionDenied(format!(
                 "Cannot drop user {} with privileges granted to others",
                 user_name
             ))));
         }
-        // TODO: add more check, like whether he owns any database/schema/table/source.
         UserInfo::delete(self.env.meta_store(), user_name).await?;
         let user = core.user_info.remove(user_name).unwrap();
 
@@ -211,7 +210,7 @@ impl<S: MetaStore> UserManager<S> {
         );
         for nao in &new_privilege.action_with_opts {
             if let Some(o) = action_map.get_mut(&nao.action) {
-                (*o).0 |= nao.with_grant_option;
+                o.0 |= nao.with_grant_option;
             } else {
                 action_map.insert(nao.action, (nao.with_grant_option, nao.granted_by.clone()));
             }
@@ -284,7 +283,7 @@ impl<S: MetaStore> UserManager<S> {
             let grant_user = core.user_grant_relation.get_mut(&grantor).unwrap();
 
             if user.is_supper {
-                return Err(RwError::from(InternalError(format!(
+                return Err(RwError::from(PermissionDenied(format!(
                     "Cannot grant privilege to supper user {}",
                     user_name
                 ))));
@@ -297,13 +296,13 @@ impl<S: MetaStore> UserManager<S> {
                         .find(|p| p.object == new_grant_privilege.object)
                     {
                         if !Self::check_privilege(privilege, new_grant_privilege, true) {
-                            return Err(RwError::from(InternalError(format!(
+                            return Err(RwError::from(PermissionDenied(format!(
                                 "Cannot grant privilege without grant permission for user {}",
                                 grantor
                             ))));
                         }
                     } else {
-                        return Err(RwError::from(InternalError(format!(
+                        return Err(RwError::from(PermissionDenied(format!(
                             "Grantor {} do not have one of the privileges",
                             grantor
                         ))));
@@ -404,13 +403,13 @@ impl<S: MetaStore> UserManager<S> {
                     .find(|p| p.object == privilege.object)
                 {
                     if !Self::check_privilege(user_privilege, privilege, same_user) {
-                        return Err(RwError::from(InternalError(format!(
+                        return Err(RwError::from(PermissionDenied(format!(
                             "Cannot revoke privilege without permission for user {}",
                             &revoke_by.name
                         ))));
                     }
                 } else {
-                    return Err(RwError::from(InternalError(format!(
+                    return Err(RwError::from(PermissionDenied(format!(
                         "User {} do not have one of the privileges",
                         &revoke_by.name
                     ))));
@@ -425,7 +424,7 @@ impl<S: MetaStore> UserManager<S> {
                 .ok_or_else(|| InternalError(format!("User {} does not exist", user_name)))
                 .cloned()?;
             if user.is_supper {
-                return Err(RwError::from(InternalError(format!(
+                return Err(RwError::from(PermissionDenied(format!(
                     "Cannot revoke privilege from supper user {}",
                     user_name
                 ))));
@@ -461,7 +460,7 @@ impl<S: MetaStore> UserManager<S> {
             if recursive_flag {
                 // check with cascade/restrict strategy
                 if !cascade && !users.contains(&now_user.name) {
-                    return Err(RwError::from(InternalError(format!(
+                    return Err(RwError::from(PermissionDenied(format!(
                         "Cannot revoke privilege from user {} for restrict",
                         &now_user.name
                     ))));

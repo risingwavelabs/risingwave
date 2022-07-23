@@ -52,20 +52,7 @@ impl StreamExpand {
 
 impl fmt::Display for StreamExpand {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        let verbose = self.base.ctx.is_explain_verbose();
-        if verbose {
-            write!(
-                f,
-                "StreamExpand {{ column_subsets: {:?} }}",
-                self.column_subsets_verbose_display()
-            )
-        } else {
-            write!(
-                f,
-                "StreamExpand {{ column_subsets: {:?} }}",
-                self.column_subsets()
-            )
-        }
+        self.logical.fmt_with_name(f, "StreamExpand")
     }
 }
 

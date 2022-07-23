@@ -18,8 +18,8 @@ use risingwave_common::catalog::{ColumnDesc, ColumnId};
 use risingwave_common::error::Result;
 use risingwave_common::types::VirtualNode;
 
-use super::cell_based_encoding_util::serialize_pk_and_row;
-use crate::encoding::{Encoding, KeyBytes, ValueBytes};
+use super::cell_based_encoding_util::{serialize_column_id, serialize_pk_and_row};
+use crate::row_serde::{KeyBytes, RowSerialize, ValueBytes};
 
 #[derive(Clone)]
 pub struct CellBasedRowSerializer {
@@ -32,7 +32,7 @@ impl CellBasedRowSerializer {
     }
 }
 
-impl Encoding for CellBasedRowSerializer {
+impl RowSerialize for CellBasedRowSerializer {
     fn create_row_serializer(
         _pk_indices: &[usize],
         _column_descs: &[ColumnDesc],
@@ -75,7 +75,9 @@ impl Encoding for CellBasedRowSerializer {
         Ok(res)
     }
 
-    fn column_ids(&self) -> &[ColumnId] {
-        &self.column_ids
+    fn serialize_sentinel_cell(pk_buf: &[u8], col_id: &ColumnId) -> Result<Option<Vec<u8>>> {
+        Ok(Some(
+            [pk_buf, serialize_column_id(col_id).as_slice()].concat(),
+        ))
     }
 }

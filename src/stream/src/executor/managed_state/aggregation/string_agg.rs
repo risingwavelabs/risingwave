@@ -14,9 +14,10 @@
 
 #![allow(dead_code)]
 
+use std::collections::BTreeMap;
+
 use bytes::Bytes;
 use itertools::Itertools;
-use madsim::collections::BTreeMap;
 use risingwave_common::array::stream_chunk::{Op, Ops};
 use risingwave_common::array::ArrayImpl;
 use risingwave_common::buffer::Bitmap;
@@ -24,7 +25,7 @@ use risingwave_common::types::{DataType, Datum, ScalarImpl};
 use risingwave_common::util::ordered::OrderedArraysSerializer;
 use risingwave_common::util::value_encoding::{deserialize_cell, serialize_cell};
 use risingwave_storage::storage_value::StorageValue;
-use risingwave_storage::table::state_table::StateTable;
+use risingwave_storage::table::state_table::RowBasedStateTable;
 use risingwave_storage::write_batch::WriteBatch;
 use risingwave_storage::{Keyspace, StateStore};
 
@@ -72,7 +73,7 @@ pub struct ManagedStringAggState<S: StateStore> {
 impl<S: StateStore> ManagedStringAggState<S> {
     /// Create a managed string agg state based on `Keyspace`.
     // TODO: enable string agg state
-    pub async fn new(
+    pub fn new(
         keyspace: Keyspace<S>,
         row_count: usize,
         sort_key_indices: Vec<usize>,
@@ -160,7 +161,7 @@ impl<S: StateStore> ManagedStringAggState<S> {
         visibility: Option<&Bitmap>,
         data: &[&ArrayImpl],
         epoch: u64,
-        _state_table: &mut StateTable<S>,
+        _state_table: &mut RowBasedStateTable<S>,
     ) -> StreamExecutorResult<()> {
         debug_assert!(super::verify_batch(ops, visibility, data));
         for sort_key_index in &self.sort_key_indices {
@@ -210,7 +211,7 @@ impl<S: StateStore> ManagedStringAggState<S> {
     async fn get_output(
         &mut self,
         epoch: u64,
-        _state_table: &StateTable<S>,
+        _state_table: &RowBasedStateTable<S>,
     ) -> StreamExecutorResult<Datum> {
         // We allow people to get output when the data is dirty.
         // As this is easier compared to `ManagedMinState` as we have a all-or-nothing cache policy
@@ -248,7 +249,7 @@ impl<S: StateStore> ManagedStringAggState<S> {
     fn flush(
         &mut self,
         write_batch: &mut WriteBatch<S>,
-        _state_table: &mut StateTable<S>,
+        _state_table: &mut RowBasedStateTable<S>,
     ) -> StreamExecutorResult<()> {
         if !self.is_dirty() {
             return Ok(());
@@ -290,7 +291,7 @@ mod tests {
 
     use super::*;
 
-    async fn create_managed_state<S: StateStore>(
+    fn create_managed_state<S: StateStore>(
         store: S,
         table_id: TableId,
         row_count: usize,
@@ -299,7 +300,6 @@ mod tests {
         let value_index = 0;
         let orderings = vec![OrderType::Descending, OrderType::Ascending];
         let order_pairs = orderings
-            .clone()
             .into_iter()
             .zip_eq(sort_key_indices.clone().into_iter())
             .map(|(ord, idx)| OrderPair::new(idx, ord))
@@ -314,18 +314,17 @@ mod tests {
             "||".to_string(),
             sort_key_serializer,
         )
-        .await
         .unwrap()
     }
 
-    fn mock_state_table<S: StateStore>(store: S, table_id: TableId) -> StateTable<S> {
-        StateTable::new_without_distribution(store, table_id, vec![], vec![], vec![])
+    fn mock_state_table<S: StateStore>(store: S, table_id: TableId) -> RowBasedStateTable<S> {
+        RowBasedStateTable::new_without_distribution(store, table_id, vec![], vec![], vec![])
     }
 
     #[tokio::test]
     async fn test_managed_string_agg_state() {
         let store = MemoryStateStore::new();
-        let mut managed_state = create_managed_state(store.clone(), TableId::from(0x2333), 0).await;
+        let mut managed_state = create_managed_state(store.clone(), TableId::from(0x2333), 0);
         assert!(!managed_state.is_dirty());
         let mut epoch: u64 = 0;
         let mut state_table = mock_state_table(MemoryStateStore::new(), TableId::from(0x2333));
@@ -453,7 +452,7 @@ mod tests {
 
         // Recover the state by `row_count`.
         let mut managed_state =
-            create_managed_state(store.clone(), TableId::from(0x2333), row_count).await;
+            create_managed_state(store.clone(), TableId::from(0x2333), row_count);
         assert!(!managed_state.is_dirty());
         // Get the output after recovery
         assert_eq!(
@@ -541,7 +540,7 @@ mod tests {
 
         drop(managed_state);
         let mut managed_state =
-            create_managed_state(store.clone(), TableId::from(0x2333), row_count).await;
+            create_managed_state(store.clone(), TableId::from(0x2333), row_count);
         // Delete right after recovery.
         managed_state
             .apply_batch(
@@ -578,7 +577,7 @@ mod tests {
 
         drop(managed_state);
         let mut managed_state =
-            create_managed_state(store.clone(), TableId::from(0x2333), row_count).await;
+            create_managed_state(store.clone(), TableId::from(0x2333), row_count);
         assert_eq!(
             managed_state.get_output(epoch, &state_table).await.unwrap(),
             Some(ScalarImpl::Utf8("miko||miko".to_string()))
@@ -611,7 +610,7 @@ mod tests {
 
         drop(managed_state);
         let mut managed_state =
-            create_managed_state(store.clone(), TableId::from(0x2333), row_count).await;
+            create_managed_state(store.clone(), TableId::from(0x2333), row_count);
         // As we didn't flush the changes, the result should be the same as the result before last
         // changes.
         assert_eq!(

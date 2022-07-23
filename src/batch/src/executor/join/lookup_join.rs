@@ -16,18 +16,22 @@ use futures::StreamExt;
 use futures_async_stream::try_stream;
 use itertools::Itertools;
 use risingwave_common::array::{Array, DataChunk, RowRef};
+use risingwave_common::buffer::BitmapBuilder;
 use risingwave_common::catalog::{ColumnDesc, Field, Schema};
 use risingwave_common::error::{ErrorCode, Result, RwError};
-use risingwave_common::types::{DataType, ToOwnedDatum};
+use risingwave_common::types::{DataType, ParallelUnitId, ToOwnedDatum, VirtualNode};
 use risingwave_common::util::chunk_coalesce::{DataChunkBuilder, SlicedDataChunk};
+use risingwave_common::util::scan_range::ScanRange;
+use risingwave_common::util::worker_util::get_workers_by_parallel_unit_ids;
 use risingwave_expr::expr::{build_from_prost, BoxedExpression};
 use risingwave_pb::batch_plan::exchange_info::DistributionMode;
 use risingwave_pb::batch_plan::exchange_source::LocalExecutePlan::Plan;
 use risingwave_pb::batch_plan::plan_node::NodeBody;
 use risingwave_pb::batch_plan::{
     ExchangeInfo, ExchangeNode, ExchangeSource as ProstExchangeSource, LocalExecutePlan,
-    PlanFragment, PlanNode, RowSeqScanNode, ScanRange,
+    PlanFragment, PlanNode, RowSeqScanNode, TaskId as ProstTaskId, TaskOutputId,
 };
+use risingwave_pb::common::WorkerNode;
 use risingwave_pb::plan_common::CellBasedTableDesc;
 use uuid::Uuid;
 
@@ -47,12 +51,13 @@ pub struct ProbeSideSource<C> {
     build_side_eq_types: Vec<DataType>,
     build_side_idxs: Vec<usize>,
     table_desc: CellBasedTableDesc,
+    vnode_mapping: Vec<ParallelUnitId>,
     probe_side_schema: Schema,
     probe_side_column_ids: Vec<i32>,
-    source_templates: Vec<ProstExchangeSource>,
     context: C,
     task_id: TaskId,
     epoch: u64,
+    worker_nodes: Vec<WorkerNode>,
 }
 
 /// Used to build the executor for the probe side
@@ -62,9 +67,42 @@ pub trait ProbeSideSourceBuilder: Send {
 }
 
 impl<C: BatchTaskContext> ProbeSideSource<C> {
+    fn get_virtual_node(&self, scan_range: &ScanRange) -> Result<VirtualNode> {
+        let dist_keys = self
+            .table_desc
+            .dist_key_indices
+            .iter()
+            .map(|&k| k as usize)
+            .collect_vec();
+        let pk_indices = self
+            .table_desc
+            .order_key
+            .iter()
+            .map(|col| self.table_desc.columns[col.index as usize].column_id as usize)
+            .collect_vec();
+
+        let virtual_node = scan_range.try_compute_vnode(&dist_keys, &pk_indices);
+        virtual_node.ok_or_else(|| {
+            ErrorCode::InternalError("Could not compute vnode for lookup join".to_string()).into()
+        })
+    }
+
+    fn create_scan_range(&self, cur_row: &RowRef) -> Result<ScanRange> {
+        let mut scan_range = ScanRange::full_table_scan();
+        self.build_side_idxs.iter().for_each(|&idx| {
+            let scalar_impl = cur_row.value_at(idx).to_owned_datum().unwrap();
+            scan_range.eq_conds.push(scalar_impl);
+        });
+        Ok(scan_range)
+    }
+
     /// Creates the `RowSeqScanNode` that will be used for scanning the probe side table
     /// based on the passed `RowRef`.
-    fn create_row_seq_scan_node(&self, cur_row: &RowRef) -> Result<NodeBody> {
+    fn create_row_seq_scan_node(
+        &self,
+        scan_range: &ScanRange,
+        vnode: VirtualNode,
+    ) -> Result<NodeBody> {
         // Check that the data types of both sides of the equality predicate are the same
         // TODO: Handle the cases where the data types of both sides are different but castable
         // (e.g. int32 and int64)
@@ -88,58 +126,55 @@ impl<C: BatchTaskContext> ProbeSideSource<C> {
             ).into());
         }
 
-        let eq_conds = self
-            .build_side_idxs
-            .iter()
-            .map(|&idx| {
-                cur_row
-                    .value_at(idx)
-                    .to_owned_datum()
-                    .unwrap()
-                    .to_protobuf()
-            })
-            .collect();
+        let mut vnode_bitmap = BitmapBuilder::zeroed(self.vnode_mapping.len());
+        vnode_bitmap.set(vnode as usize, true);
 
-        let scan_range = Some(ScanRange {
-            eq_conds,
-            lower_bound: None,
-            upper_bound: None,
-        });
-
-        Ok(NodeBody::RowSeqScan(RowSeqScanNode {
+        let row_seq_scan_node = NodeBody::RowSeqScan(RowSeqScanNode {
             table_desc: Some(self.table_desc.clone()),
             column_ids: self.probe_side_column_ids.clone(),
-            scan_range,
-            vnode_bitmap: None,
-        }))
+            scan_ranges: vec![scan_range.to_protobuf()],
+            vnode_bitmap: Some(vnode_bitmap.finish().to_protobuf()),
+        });
+
+        Ok(row_seq_scan_node)
     }
 
     /// Creates all the `ProstExchangeSource` that will be sent to the `ExchangeExecutor` using
     /// the source templates.
     fn build_prost_exchange_sources(&self, cur_row: &RowRef) -> Result<Vec<ProstExchangeSource>> {
-        let Plan(inner_template_plan) = self.source_templates[0].get_local_execute_plan().unwrap();
+        let scan_range = self.create_scan_range(cur_row)?;
+        let vnode = self.get_virtual_node(&scan_range)?;
+
+        let parallel_unit_ids = vec![self.vnode_mapping[vnode as usize]];
+        let workers = match get_workers_by_parallel_unit_ids(&self.worker_nodes, &parallel_unit_ids)
+        {
+            Ok(workers) => workers,
+            Err(e) => bail!("{}", e),
+        };
 
         let local_execute_plan = LocalExecutePlan {
             plan: Some(PlanFragment {
                 root: Some(PlanNode {
                     children: vec![],
                     identity: Uuid::new_v4().to_string(),
-                    node_body: Some(self.create_row_seq_scan_node(cur_row)?),
+                    node_body: Some(self.create_row_seq_scan_node(&scan_range, vnode)?),
                 }),
                 exchange_info: Some(ExchangeInfo {
                     mode: DistributionMode::Single as i32,
                     ..Default::default()
                 }),
             }),
-            epoch: inner_template_plan.epoch,
+            epoch: self.epoch,
         };
 
-        let prost_exchange_sources = self
-            .source_templates
+        let prost_exchange_sources = workers
             .iter()
-            .map(|source| ProstExchangeSource {
-                task_output_id: Some(source.get_task_output_id().unwrap().clone()),
-                host: Some(source.get_host().unwrap().clone()),
+            .map(|worker| ProstExchangeSource {
+                task_output_id: Some(TaskOutputId {
+                    task_id: Some(ProstTaskId::default()),
+                    output_id: 0,
+                }),
+                host: Some(worker.host.as_ref().unwrap().clone()),
                 local_execute_plan: Some(Plan(local_execute_plan.clone())),
             })
             .collect();
@@ -467,17 +502,20 @@ impl BoxedExecutorBuilder for LookupJoinExecutorBuilder {
             .map(|&idx| build_side_data_types[idx].clone())
             .collect_vec();
 
-        ensure!(!lookup_join_node.get_sources().is_empty());
+        let vnode_mapping = lookup_join_node.get_probe_side_vnode_mapping().to_vec();
+        assert!(!vnode_mapping.is_empty());
+
         let probe_side_source = ProbeSideSource {
             build_side_eq_types,
             build_side_idxs,
             table_desc: probe_side_table_desc.clone(),
+            vnode_mapping,
             probe_side_schema,
             probe_side_column_ids,
-            source_templates: lookup_join_node.get_sources().to_vec(),
             context: source.context().clone(),
             task_id: source.task_id.clone(),
             epoch: source.epoch(),
+            worker_nodes: lookup_join_node.get_worker_nodes().to_vec(),
         };
 
         Ok(Box::new(LookupJoinExecutor {

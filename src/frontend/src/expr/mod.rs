@@ -18,7 +18,7 @@ use paste::paste;
 use risingwave_common::error::Result;
 use risingwave_common::types::{DataType, Scalar};
 use risingwave_expr::expr::AggKind;
-use risingwave_pb::expr::ExprNode;
+use risingwave_pb::expr::{ExprNode, ProjectSetSelectItem};
 
 mod agg_call;
 mod correlated_input_ref;
@@ -26,6 +26,7 @@ mod function_call;
 mod input_ref;
 mod literal;
 mod subquery;
+mod table_function;
 
 mod expr_rewriter;
 mod expr_visitor;
@@ -41,14 +42,15 @@ pub use input_ref::{
 };
 pub use literal::Literal;
 pub use subquery::{Subquery, SubqueryKind};
+pub use table_function::{TableFunction, TableFunctionType};
 
 pub type ExprType = risingwave_pb::expr::expr_node::Type;
 
 pub use expr_rewriter::ExprRewriter;
 pub use expr_visitor::ExprVisitor;
 pub use type_inference::{
-    align_types, cast_map_array, cast_ok, func_sigs, infer_type, least_restrictive, CastContext,
-    DataTypeName, FuncSign,
+    agg_func_sigs, align_types, cast_map_array, cast_ok, func_sigs, infer_type, least_restrictive,
+    AggFuncSig, CastContext, DataTypeName, FuncSign,
 };
 pub use utils::*;
 
@@ -70,6 +72,7 @@ pub enum ExprImpl {
     FunctionCall(Box<FunctionCall>),
     AggCall(Box<AggCall>),
     Subquery(Box<Subquery>),
+    TableFunction(Box<TableFunction>),
 }
 
 impl ExprImpl {
@@ -192,7 +195,7 @@ macro_rules! impl_has_variant {
     };
 }
 
-impl_has_variant! {InputRef, Literal, FunctionCall, AggCall, Subquery}
+impl_has_variant! {InputRef, Literal, FunctionCall, AggCall, Subquery, TableFunction}
 
 impl ExprImpl {
     /// Used to check whether the expression has [`CorrelatedInputRef`].
@@ -347,7 +350,7 @@ impl ExprImpl {
         }
     }
 
-    pub fn as_eq_const(&self) -> Option<(InputRef, Literal)> {
+    pub fn as_eq_literal(&self) -> Option<(InputRef, Literal)> {
         if let ExprImpl::FunctionCall(function_call) = self &&
         function_call.get_expr_type() == ExprType::Equal{
             match function_call.clone().decompose_as_binary() {
@@ -360,7 +363,7 @@ impl ExprImpl {
         }
     }
 
-    pub fn as_comparison_const(&self) -> Option<(InputRef, ExprType, Literal)> {
+    pub fn as_comparison_literal(&self) -> Option<(InputRef, ExprType, Literal)> {
         fn reverse_comparison(comparison: ExprType) -> ExprType {
             match comparison {
                 ExprType::LessThan => ExprType::GreaterThan,
@@ -392,6 +395,36 @@ impl ExprImpl {
             None
         }
     }
+
+    pub fn as_in_literal_list(&self) -> Option<(InputRef, Vec<Literal>)> {
+        if let ExprImpl::FunctionCall(function_call) = self &&
+        function_call.get_expr_type() == ExprType::In {
+            let mut inputs = function_call.inputs().iter().cloned();
+            let input_ref= match inputs.next().unwrap() {
+                ExprImpl::InputRef(i) => *i,
+                _ => unreachable!()
+            };
+            let list: Option<Vec<_>> = inputs.map(|expr| match expr {
+                ExprImpl::Literal(x) => Some(*x),
+             _ => None ,
+            }).collect();
+
+            list.map(|list| (input_ref, list))
+        } else {
+            None
+        }
+    }
+
+    pub fn to_project_set_select_item_proto(&self) -> ProjectSetSelectItem {
+        use risingwave_pb::expr::project_set_select_item::SelectItem::*;
+
+        ProjectSetSelectItem {
+            select_item: Some(match self {
+                ExprImpl::TableFunction(tf) => TableFunction(tf.to_protobuf()),
+                expr => Expr(expr.to_expr_proto()),
+            }),
+        }
+    }
 }
 
 impl Expr for ExprImpl {
@@ -403,6 +436,7 @@ impl Expr for ExprImpl {
             ExprImpl::AggCall(expr) => expr.return_type(),
             ExprImpl::Subquery(expr) => expr.return_type(),
             ExprImpl::CorrelatedInputRef(expr) => expr.return_type(),
+            ExprImpl::TableFunction(expr) => expr.return_type(),
         }
     }
 
@@ -414,6 +448,9 @@ impl Expr for ExprImpl {
             ExprImpl::AggCall(e) => e.to_expr_proto(),
             ExprImpl::Subquery(e) => e.to_expr_proto(),
             ExprImpl::CorrelatedInputRef(e) => e.to_expr_proto(),
+            ExprImpl::TableFunction(_e) => {
+                unreachable!("Table function should not be converted to ExprNode")
+            }
         }
     }
 }
@@ -454,6 +491,12 @@ impl From<CorrelatedInputRef> for ExprImpl {
     }
 }
 
+impl From<TableFunction> for ExprImpl {
+    fn from(tf: TableFunction) -> Self {
+        ExprImpl::TableFunction(Box::new(tf))
+    }
+}
+
 impl From<Condition> for ExprImpl {
     fn from(c: Condition) -> Self {
         merge_expr_by_binary(
@@ -479,6 +522,7 @@ impl std::fmt::Debug for ExprImpl {
                 Self::CorrelatedInputRef(arg0) => {
                     f.debug_tuple("CorrelatedInputRef").field(arg0).finish()
                 }
+                Self::TableFunction(arg0) => f.debug_tuple("TableFunction").field(arg0).finish(),
             };
         }
         match self {
@@ -488,6 +532,7 @@ impl std::fmt::Debug for ExprImpl {
             Self::AggCall(x) => write!(f, "{:?}", x),
             Self::Subquery(x) => write!(f, "{:?}", x),
             Self::CorrelatedInputRef(x) => write!(f, "{:?}", x),
+            Self::TableFunction(x) => write!(f, "{:?}", x),
         }
     }
 }
@@ -521,6 +566,10 @@ impl std::fmt::Debug for ExprVerboseDisplay<'_> {
             ExprImpl::AggCall(x) => write!(f, "{:?}", x),
             ExprImpl::Subquery(x) => write!(f, "{:?}", x),
             ExprImpl::CorrelatedInputRef(x) => write!(f, "{:?}", x),
+            ExprImpl::TableFunction(x) => {
+                // TODO: TableFunctionCallVerboseDisplay
+                write!(f, "{:?}", x)
+            }
         }
     }
 }

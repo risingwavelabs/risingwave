@@ -333,7 +333,7 @@ mod tests {
             return_type,
             DecimalArrayBuilder::new(0).into(),
         )?;
-        let actual: &DecimalArray = (&actual).into();
+        let actual: DecimalArray = actual.into();
         let actual = actual.iter().collect::<Vec<Option<Decimal>>>();
         assert_eq!(actual, vec![Some(Decimal::from(6))]);
         Ok(())

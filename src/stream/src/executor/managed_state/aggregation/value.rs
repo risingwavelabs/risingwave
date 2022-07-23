@@ -16,7 +16,7 @@ use risingwave_common::array::stream_chunk::Ops;
 use risingwave_common::array::{ArrayImpl, Row};
 use risingwave_common::buffer::Bitmap;
 use risingwave_common::types::Datum;
-use risingwave_storage::table::state_table::StateTable;
+use risingwave_storage::table::state_table::RowBasedStateTable;
 use risingwave_storage::StateStore;
 
 use crate::executor::aggregation::{create_streaming_agg_state, AggCall, StreamingAggStateImpl};
@@ -44,7 +44,7 @@ impl ManagedValueState {
         agg_call: AggCall,
         row_count: Option<usize>,
         pk: Option<&Row>,
-        state_table: &StateTable<S>,
+        state_table: &RowBasedStateTable<S>,
     ) -> StreamExecutorResult<Self> {
         let data = if row_count != Some(0) {
             // TODO: use the correct epoch
@@ -77,7 +77,7 @@ impl ManagedValueState {
     }
 
     /// Apply a batch of data to the state.
-    pub async fn apply_batch(
+    pub fn apply_batch(
         &mut self,
         ops: Ops<'_>,
         visibility: Option<&Bitmap>,
@@ -91,7 +91,7 @@ impl ManagedValueState {
     /// Get the output of the state. Note that in our case, getting the output is very easy, as the
     /// output is the same as the aggregation state. In other aggregators, like min and max,
     /// `get_output` might involve a scan from the state store.
-    pub async fn get_output(&self) -> StreamExecutorResult<Datum> {
+    pub fn get_output(&self) -> StreamExecutorResult<Datum> {
         debug_assert!(!self.is_dirty());
         self.state.get_output()
     }
@@ -101,9 +101,9 @@ impl ManagedValueState {
         self.is_dirty
     }
 
-    pub async fn flush<S: StateStore>(
+    pub fn flush<S: StateStore>(
         &mut self,
-        state_table: &mut StateTable<S>,
+        state_table: &mut RowBasedStateTable<S>,
     ) -> StreamExecutorResult<()> {
         // If the managed state is not dirty, the caller should not flush. But forcing a flush won't
         // cause incorrect result: it will only produce more I/O.
@@ -129,7 +129,7 @@ mod tests {
     use risingwave_common::catalog::{ColumnDesc, ColumnId, TableId};
     use risingwave_common::types::{DataType, ScalarImpl};
     use risingwave_storage::memory::MemoryStateStore;
-    use risingwave_storage::table::state_table::StateTable;
+    use risingwave_storage::table::state_table::RowBasedStateTable;
 
     use super::*;
     use crate::executor::aggregation::AggArgs;
@@ -145,7 +145,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_managed_value_state() {
-        let mut state_table = StateTable::new_without_distribution(
+        let mut state_table = RowBasedStateTable::new_without_distribution(
             MemoryStateStore::new(),
             TableId::from(0x2333),
             vec![ColumnDesc::unnamed(ColumnId::new(0), DataType::Int64)],
@@ -167,18 +167,17 @@ mod tests {
                     .unwrap()
                     .into()],
             )
-            .await
             .unwrap();
         assert!(managed_state.is_dirty());
 
         // write to state store
         let epoch: u64 = 0;
-        managed_state.flush(&mut state_table).await.unwrap();
+        managed_state.flush(&mut state_table).unwrap();
         state_table.commit(epoch).await.unwrap();
 
         // get output
         assert_eq!(
-            managed_state.get_output().await.unwrap(),
+            managed_state.get_output().unwrap(),
             Some(ScalarImpl::Int64(3))
         );
 
@@ -188,7 +187,7 @@ mod tests {
                 .await
                 .unwrap();
         assert_eq!(
-            managed_state.get_output().await.unwrap(),
+            managed_state.get_output().unwrap(),
             Some(ScalarImpl::Int64(3))
         );
     }
@@ -205,7 +204,7 @@ mod tests {
     #[tokio::test]
     async fn test_managed_value_state_append_only() {
         let pk_index = vec![];
-        let mut state_table = StateTable::new_without_distribution(
+        let mut state_table = RowBasedStateTable::new_without_distribution(
             MemoryStateStore::new(),
             TableId::from(0x2333),
             vec![ColumnDesc::unnamed(ColumnId::new(0), DataType::Int64)],
@@ -233,18 +232,17 @@ mod tests {
                         .into(),
                 ],
             )
-            .await
             .unwrap();
         assert!(managed_state.is_dirty());
 
         // write to state store
         let epoch: u64 = 0;
-        managed_state.flush(&mut state_table).await.unwrap();
+        managed_state.flush(&mut state_table).unwrap();
         state_table.commit(epoch).await.unwrap();
 
         // get output
         assert_eq!(
-            managed_state.get_output().await.unwrap(),
+            managed_state.get_output().unwrap(),
             Some(ScalarImpl::Int64(2))
         );
 
@@ -254,7 +252,7 @@ mod tests {
                 .await
                 .unwrap();
         assert_eq!(
-            managed_state.get_output().await.unwrap(),
+            managed_state.get_output().unwrap(),
             Some(ScalarImpl::Int64(2))
         );
     }

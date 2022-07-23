@@ -20,7 +20,7 @@ use nix::sys::statfs::{statfs, FsType as NixFsType, EXT4_SUPER_MAGIC};
 use parking_lot::RwLock;
 use risingwave_common::cache::{LruCache, LruCacheEventListener};
 
-use super::coding::CacheKey;
+use super::coding::{CacheKey, HashBuilder};
 use super::error::{Error, Result};
 use super::file::{CacheFile, CacheFileOptions};
 use super::meta::{BlockLoc, MetaFile, SlotId};
@@ -78,7 +78,6 @@ where
         let fs_block_size = fs_stat.block_size() as usize;
 
         let cf_opts = CacheFileOptions {
-            fs_block_size,
             // TODO: Make it configurable.
             block_size: fs_block_size,
             fallocate_unit: options.cache_file_fallocate_unit,
@@ -135,8 +134,26 @@ where
         PathBuf::from(&self.dir).join(CACHE_FILE_FILENAME)
     }
 
-    pub async fn restore(&self, _indices: &LruCache<K, SlotId>) -> Result<()> {
-        // TODO: Impl me!!!
+    pub fn restore<S: HashBuilder>(
+        &self,
+        indices: &Arc<LruCache<K, SlotId>>,
+        hash_builder: &S,
+    ) -> Result<()> {
+        let slots = self.meta_file.read().slots();
+
+        for slot in 0..slots {
+            // Wrap the read guard, or there will be deadlock when evicting entries.
+            let res = { self.meta_file.read().get(slot) };
+            if let Some((block_loc, key)) = res {
+                indices.insert(
+                    key.clone(),
+                    hash_builder.hash_one(&key),
+                    utils::align_up(self.block_size, block_loc.len as usize),
+                    slot,
+                );
+            }
+        }
+
         Ok(())
     }
 

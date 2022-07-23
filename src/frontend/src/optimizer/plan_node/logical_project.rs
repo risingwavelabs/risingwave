@@ -79,6 +79,11 @@ pub struct LogicalProject {
 }
 impl LogicalProject {
     pub fn new(input: PlanRef, exprs: Vec<ExprImpl>) -> Self {
+        assert!(
+            exprs.iter().all(|e| !e.has_table_function()),
+            "Project should not have table function."
+        );
+
         let ctx = input.ctx();
         let schema = Self::derive_schema(&exprs, input.schema());
         let logical_pk = Self::derive_pk(input.schema(), input.logical_pk(), &exprs);
@@ -150,9 +155,13 @@ impl LogicalProject {
 
     /// Creates a `LogicalProject` which select some columns from the input.
     pub fn with_out_fields(input: PlanRef, out_fields: &FixedBitSet) -> Self {
-        let input_schema = input.schema().fields();
+        LogicalProject::with_out_col_idx(input, out_fields.ones())
+    }
+
+    /// Creates a `LogicalProject` which select some columns from the input.
+    pub fn with_out_col_idx(input: PlanRef, out_fields: impl Iterator<Item = usize>) -> Self {
+        let input_schema = input.schema();
         let exprs = out_fields
-            .ones()
             .map(|index| InputRef::new(index, input_schema[index].data_type()).into())
             .collect();
         LogicalProject::new(input, exprs)
@@ -409,8 +418,9 @@ impl ToStream for LogicalProject {
                 }))
                 .collect();
         let proj = Self::new(input, exprs);
-        // the added columns is at the end, so it will not change the exists column index
-        // but the target size of `out_col_change` should be the same as the length of schema.
+        // The added columns is at the end, so it will not change existing column indices.
+        // But the target size of `out_col_change` should be the same as the length of the new
+        // schema.
         let (map, _) = out_col_change.into_parts();
         let out_col_change = ColIndexMapping::with_target_size(map, proj.base.schema.len());
         Ok((proj.into(), out_col_change))

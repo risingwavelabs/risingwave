@@ -21,7 +21,7 @@ use risingwave_hummock_sdk::compact::compact_task_to_string;
 use risingwave_hummock_sdk::compaction_group::hummock_version_ext::HummockVersionExt;
 use risingwave_hummock_sdk::compaction_group::StaticCompactionGroupId;
 // use risingwave_hummock_sdk::key_range::KeyRange;
-use risingwave_hummock_sdk::{HummockContextId, HummockSSTableId, FIRST_VERSION_ID};
+use risingwave_hummock_sdk::{HummockContextId, HummockSstableId, FIRST_VERSION_ID};
 use risingwave_pb::common::{HostAddress, ParallelUnitType, WorkerType};
 use risingwave_pb::hummock::{
     HummockPinnedSnapshot, HummockPinnedVersion, HummockSnapshot, KeyRange,
@@ -29,7 +29,6 @@ use risingwave_pb::hummock::{
 
 use crate::hummock::compaction::ManualCompactionOption;
 use crate::hummock::error::Error;
-use crate::hummock::model::CurrentHummockVersionId;
 use crate::hummock::test_utils::*;
 use crate::model::MetadataModel;
 
@@ -59,6 +58,8 @@ async fn test_hummock_pin_unpin() {
         let hummock_version = hummock_manager
             .pin_version(context_id, u64::MAX)
             .await
+            .unwrap()
+            .2
             .unwrap();
         let levels = hummock_version
             .get_compaction_group_levels(StaticCompactionGroupId::StateDefault.into());
@@ -176,16 +177,6 @@ async fn test_hummock_compaction_task() {
         .await
         .unwrap();
 
-    // check safe epoch in hummock version
-    let version_id1 = CurrentHummockVersionId::get(env.meta_store())
-        .await
-        .unwrap()
-        .unwrap();
-    let hummock_version1 = hummock_manager.get_version(version_id1.id()).await;
-
-    // safe epoch should be INVALID before success compaction
-    assert_eq!(INVALID_EPOCH, hummock_version1.safe_epoch);
-
     // Get a compaction task.
     let mut compact_task = hummock_manager
         .get_compact_task(StaticCompactionGroupId::StateDefault.into())
@@ -218,17 +209,6 @@ async fn test_hummock_compaction_task() {
         .await
         .unwrap());
 
-    // check safe epoch in hummock version
-    let version_id2 = CurrentHummockVersionId::get(env.meta_store())
-        .await
-        .unwrap()
-        .unwrap();
-
-    let hummock_version2 = hummock_manager.get_version(version_id2.id()).await;
-
-    // safe epoch should still be INVALID since comapction task is canceled
-    assert_eq!(INVALID_EPOCH, hummock_version2.safe_epoch);
-
     // Get a compaction task.
     let mut compact_task = hummock_manager
         .get_compact_task(StaticCompactionGroupId::StateDefault.into())
@@ -252,17 +232,6 @@ async fn test_hummock_compaction_task() {
         .report_compact_task(&compact_task)
         .await
         .unwrap());
-
-    // check safe epoch in hummock version after success compaction
-    let version_id3 = CurrentHummockVersionId::get(env.meta_store())
-        .await
-        .unwrap()
-        .unwrap();
-
-    let hummock_version3 = hummock_manager.get_version(version_id3.id()).await;
-
-    // Since there is no pinned epochs, the safe epoch in version should be max_committed_epoch
-    assert_eq!(epoch, hummock_version3.safe_epoch);
 }
 
 #[tokio::test]
@@ -286,6 +255,8 @@ async fn test_hummock_table() {
     let pinned_version = hummock_manager
         .pin_version(context_id, u64::MAX)
         .await
+        .unwrap()
+        .2
         .unwrap();
     assert_eq!(
         Ordering::Equal,
@@ -328,6 +299,8 @@ async fn test_hummock_transaction() {
         let pinned_version = hummock_manager
             .pin_version(context_id, u64::MAX)
             .await
+            .unwrap()
+            .2
             .unwrap();
         assert_eq!(pinned_version.max_committed_epoch, INVALID_EPOCH);
         assert!(get_sorted_committed_sstable_ids(&pinned_version).is_empty());
@@ -345,6 +318,8 @@ async fn test_hummock_transaction() {
         let pinned_version = hummock_manager
             .pin_version(context_id, u64::MAX)
             .await
+            .unwrap()
+            .2
             .unwrap();
         assert_eq!(pinned_version.max_committed_epoch, epoch1);
         assert_eq!(
@@ -373,6 +348,8 @@ async fn test_hummock_transaction() {
         let pinned_version = hummock_manager
             .pin_version(context_id, u64::MAX)
             .await
+            .unwrap()
+            .2
             .unwrap();
         assert_eq!(pinned_version.max_committed_epoch, epoch1);
         assert_eq!(
@@ -393,6 +370,8 @@ async fn test_hummock_transaction() {
         let pinned_version = hummock_manager
             .pin_version(context_id, u64::MAX)
             .await
+            .unwrap()
+            .2
             .unwrap();
         assert_eq!(pinned_version.max_committed_epoch, epoch2);
         assert_eq!(
@@ -551,6 +530,8 @@ async fn test_hummock_manager_basic() {
         let version = hummock_manager
             .pin_version(context_id_1, u64::MAX)
             .await
+            .unwrap()
+            .2
             .unwrap();
         assert_eq!(version.id, FIRST_VERSION_ID + 1);
         assert_eq!(
@@ -566,6 +547,8 @@ async fn test_hummock_manager_basic() {
         let version = hummock_manager
             .pin_version(context_id_2, u64::MAX)
             .await
+            .unwrap()
+            .2
             .unwrap();
         assert_eq!(version.id, FIRST_VERSION_ID + 1);
         assert_eq!(
@@ -774,7 +757,7 @@ async fn test_print_compact_task() {
 async fn test_invalid_sst_id() {
     let (_, hummock_manager, _cluster_manager, _) = setup_compute_env(80).await;
     let epoch = 1;
-    let ssts = generate_test_tables(epoch, vec![HummockSSTableId::MAX]);
+    let ssts = generate_test_tables(epoch, vec![HummockSstableId::MAX]);
     register_sstable_infos_to_compaction_group(
         hummock_manager.compaction_group_manager_ref_for_test(),
         &ssts,
@@ -882,16 +865,6 @@ async fn test_trigger_manual_compaction() {
         .commit_epoch(epoch, to_local_sstable_info(&original_tables))
         .await
         .unwrap();
-
-    // check safe epoch in hummock version
-    let version_id1 = CurrentHummockVersionId::get(env.meta_store())
-        .await
-        .unwrap()
-        .unwrap();
-    let hummock_version1 = hummock_manager.get_version(version_id1.id()).await;
-
-    // safe epoch should be INVALID before success compaction
-    assert_eq!(INVALID_EPOCH, hummock_version1.safe_epoch);
 
     {
         // to check compactor send task fail

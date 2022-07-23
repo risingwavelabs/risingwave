@@ -22,6 +22,7 @@ use risingwave_common::error::{ErrorCode, Result};
 use risingwave_common::types::DataType;
 use risingwave_common::util::sort_util::OrderType;
 use risingwave_expr::expr::AggKind;
+use risingwave_pb::expr::agg_call::OrderByField as ProstAggOrderByField;
 use risingwave_pb::expr::AggCall as ProstAggCall;
 
 use super::{
@@ -31,8 +32,8 @@ use super::{
 };
 use crate::catalog::table_catalog::TableCatalog;
 use crate::expr::{
-    AggCall, Expr, ExprImpl, ExprRewriter, ExprType, FunctionCall, InputRef, InputRefDisplay,
-    InputRefVerboseDisplay,
+    AggCall, AggOrderBy, Expr, ExprImpl, ExprRewriter, ExprType, FunctionCall, InputRef,
+    InputRefDisplay, InputRefVerboseDisplay,
 };
 use crate::optimizer::plan_node::utils::TableCatalogBuilder;
 use crate::optimizer::plan_node::{gen_filter_and_pushdown, LogicalProject};
@@ -93,6 +94,17 @@ impl fmt::Debug for PlanAggOrderByFieldVerboseDisplay<'_> {
             if that.nulls_first { "FIRST" } else { "LAST" }
         )?;
         Ok(())
+    }
+}
+
+impl PlanAggOrderByField {
+    fn to_protobuf(&self) -> ProstAggOrderByField {
+        ProstAggOrderByField {
+            input: Some(self.input.to_proto()),
+            r#type: Some(self.input.data_type.to_protobuf()),
+            direction: self.direction.to_protobuf() as i32,
+            nulls_first: self.nulls_first,
+        }
     }
 }
 
@@ -161,6 +173,11 @@ impl PlanAggCall {
             return_type: Some(self.return_type.to_protobuf()),
             args: self.inputs.iter().map(InputRef::to_agg_arg_proto).collect(),
             distinct: self.distinct,
+            order_by_fields: self
+                .order_by_fields
+                .iter()
+                .map(PlanAggOrderByField::to_protobuf)
+                .collect(),
             filter: self
                 .filter
                 .as_expr_unless_true()
@@ -181,6 +198,7 @@ impl PlanAggCall {
         PlanAggCall {
             agg_kind: total_agg_kind,
             inputs: vec![InputRef::new(partial_output_idx, self.return_type.clone())],
+            order_by_fields: vec![], // order must make no difference when we use 2-phase agg
             filter: Condition::true_cond(),
             ..self.clone()
         }
@@ -393,6 +411,14 @@ impl LogicalAgg {
             LogicalAgg::new(total_agg_types, self.group_key().to_vec(), input);
         Ok(StreamGlobalSimpleAgg::new(total_agg_logical_plan).into())
     }
+
+    /// Check if the aggregation result will be affected by order by clause, if any.
+    pub(crate) fn is_agg_result_affected_by_order(&self) -> bool {
+        self.agg_calls.iter().any(|call| match call.agg_kind {
+            AggKind::StringAgg => !call.order_by_fields.is_empty(),
+            _ => false,
+        })
+    }
 }
 
 /// `LogicalAggBuilder` extracts agg calls and references to group columns from select list and
@@ -472,6 +498,34 @@ impl LogicalAggBuilder {
         }
         None
     }
+
+    /// syntax check for distinct aggregates.
+    ///
+    /// TODO: we may disable this syntax check in the future because we may use another approach to
+    /// implement distinct aggregates.
+    pub fn syntax_check(&self) -> Result<()> {
+        let mut has_distinct = false;
+        let mut has_order_by = false;
+        self.agg_calls.iter().for_each(|agg_call| {
+            if agg_call.distinct {
+                has_distinct = true;
+            }
+            if !agg_call.order_by_fields.is_empty() {
+                has_order_by = true;
+            }
+        });
+
+        // order by is disallowed occur with distinct because we can not diectly rewrite agg with
+        // order by into 2-phase agg.
+        if has_distinct && has_order_by {
+            return Err(ErrorCode::InvalidInputSyntax(
+                "Order by aggregates are disallowed to occur with distinct aggregates".into(),
+            )
+            .into());
+        }
+
+        Ok(())
+    }
 }
 
 impl ExprRewriter for LogicalAggBuilder {
@@ -483,7 +537,24 @@ impl ExprRewriter for LogicalAggBuilder {
     /// Note that the rewriter does not traverse into inputs of agg calls.
     fn rewrite_agg_call(&mut self, agg_call: AggCall) -> ExprImpl {
         let return_type = agg_call.return_type();
-        let (agg_kind, inputs, distinct, order_by, filter) = agg_call.decompose();
+        let (agg_kind, inputs, distinct, mut order_by, filter) = agg_call.decompose();
+        match &agg_kind {
+            AggKind::Min
+            | AggKind::Max
+            | AggKind::Sum
+            | AggKind::Count
+            | AggKind::Avg
+            | AggKind::SingleValue
+            | AggKind::ApproxCountDistinct => {
+                // this order by is unnecessary.
+                order_by = AggOrderBy::new(vec![]);
+            }
+            _ => {
+                // To be conservative, we just treat newly added AggKind in the future as not
+                // rewritable.
+            }
+        }
+
         self.is_in_filter_clause = true;
         let filter = filter.rewrite_expr(self);
         self.is_in_filter_clause = false;
@@ -686,6 +757,18 @@ impl LogicalAgg {
         having: Option<ExprImpl>,
         input: PlanRef,
     ) -> Result<(PlanRef, Vec<ExprImpl>, Option<ExprImpl>)> {
+        if select_exprs
+            .iter()
+            .chain(group_exprs.iter())
+            .any(|e| e.has_table_function())
+        {
+            return Err(ErrorCode::NotImplemented(
+                "Table functions in agg call or group by is not suppported yet".to_string(),
+                3814.into(),
+            )
+            .into());
+        }
+
         let mut agg_builder = LogicalAggBuilder::new(group_exprs)?;
 
         let rewritten_select_exprs = select_exprs
@@ -695,6 +778,8 @@ impl LogicalAgg {
         let rewritten_having = having
             .map(|expr| agg_builder.rewrite_with_error(expr))
             .transpose()?;
+
+        agg_builder.syntax_check()?;
 
         Ok((
             agg_builder.build(input).into(),
@@ -773,6 +858,23 @@ impl LogicalAgg {
             .collect();
         Self::new(agg_calls, group_key, input)
     }
+
+    pub(super) fn fmt_with_name(&self, f: &mut fmt::Formatter, name: &str) -> fmt::Result {
+        let verbose = self.base.ctx.is_explain_verbose();
+        let mut builder = f.debug_struct(name);
+        if verbose {
+            if !self.group_key.is_empty() {
+                builder.field("group_key", &self.group_key_verbose_display());
+            }
+            builder.field("aggs", &self.agg_calls_verbose_display());
+        } else {
+            if !self.group_key.is_empty() {
+                builder.field("group_key", &self.group_key_display());
+            }
+            builder.field("aggs", &self.agg_calls());
+        }
+        builder.finish()
+    }
 }
 
 impl PlanTreeNodeUnary for LogicalAgg {
@@ -801,10 +903,7 @@ impl_plan_tree_node_for_unary! {LogicalAgg}
 
 impl fmt::Display for LogicalAgg {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-        f.debug_struct("LogicalAgg")
-            .field("group_key", &self.group_key)
-            .field("agg_calls", &self.agg_calls)
-            .finish()
+        self.fmt_with_name(f, "LogicalAgg")
     }
 }
 

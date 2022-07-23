@@ -12,6 +12,8 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+#![feature(lint_reasons)]
+
 mod version_cmp;
 
 use risingwave_pb::hummock::SstableInfo;
@@ -21,8 +23,9 @@ pub mod compaction_group;
 pub mod key;
 pub mod key_range;
 pub mod prost_key_range;
+pub mod slice_transform;
 
-pub type HummockSSTableId = u64;
+pub type HummockSstableId = u64;
 pub type HummockRefCount = u64;
 pub type HummockVersionId = u64;
 pub type HummockContextId = u32;
@@ -32,19 +35,19 @@ pub type CompactionGroupId = u64;
 pub const INVALID_VERSION_ID: HummockVersionId = 0;
 pub const FIRST_VERSION_ID: HummockVersionId = 1;
 
-pub const LOCAL_SST_ID_MASK: HummockSSTableId = 1 << (HummockSSTableId::BITS - 1);
-pub const REMOTE_SST_ID_MASK: HummockSSTableId = !LOCAL_SST_ID_MASK;
+pub const LOCAL_SST_ID_MASK: HummockSstableId = 1 << (HummockSstableId::BITS - 1);
+pub const REMOTE_SST_ID_MASK: HummockSstableId = !LOCAL_SST_ID_MASK;
 
 pub type LocalSstableInfo = (CompactionGroupId, SstableInfo);
 
-pub fn get_remote_sst_id(id: HummockSSTableId) -> HummockSSTableId {
+pub fn get_remote_sst_id(id: HummockSstableId) -> HummockSstableId {
     id & REMOTE_SST_ID_MASK
 }
 
-pub fn get_local_sst_id(id: HummockSSTableId) -> HummockSSTableId {
+pub fn get_local_sst_id(id: HummockSstableId) -> HummockSstableId {
     id | LOCAL_SST_ID_MASK
 }
 
-pub fn is_remote_sst_id(id: HummockSSTableId) -> bool {
+pub fn is_remote_sst_id(id: HummockSstableId) -> bool {
     id & LOCAL_SST_ID_MASK == 0
 }
