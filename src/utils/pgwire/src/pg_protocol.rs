@@ -271,7 +271,7 @@ where
         if res.is_empty() {
             self.stream.write_no_flush(&BeMessage::EmptyQueryResponse)?;
         } else if res.is_query() {
-            self.process_response_results(res, false).await?;
+            self.process_response_results(res, None).await?;
         } else {
             self.stream
                 .write_no_flush(&BeMessage::CommandComplete(BeCommandCompleteMessage {
@@ -416,7 +416,8 @@ where
         if res.is_empty() {
             self.stream.write_no_flush(&BeMessage::EmptyQueryResponse)?;
         } else if res.is_query() {
-            self.process_response_results(res, Some(portal.result_format()))
+            let result_format = portal.result_format();
+            self.process_response_results(res, Some(result_format))
                 .await?;
         } else {
             self.stream
@@ -496,7 +497,8 @@ where
         // RowDescription to be issued.
         // Quoted from: https://www.postgresql.org/docs/current/protocol-flow.html#PROTOCOL-FLOW-EXT-QUERY
         if extended.is_none() {
-            self.stream.write(&BeMessage::RowDescription(&res.get_row_desc()))
+            self.stream
+                .write(&BeMessage::RowDescription(&res.get_row_desc()))
                 .await?;
         }
 
@@ -513,7 +515,7 @@ where
             let iter = res.iter();
             let row_description = res.get_row_desc();
             for val in iter {
-                let val = Self::covert_to_binary_format(val, &row_description);
+                let val = Self::convert_to_binary_format(val, &row_description);
                 self.stream.write(&BeMessage::BinaryRow(&val)).await?;
                 rows_cnt += 1;
             }
@@ -527,15 +529,55 @@ where
         // source SQL command is not sent until the portal's execution is completed.
         // Quote from: https://www.postgresql.org/docs/current/protocol-flow.html#PROTOCOL-FLOW-EXT-QUERY:~:text=Once%20a%20portal,ErrorResponse%2C%20or%20PortalSuspended
         if extended.is_none() || res.is_row_end() {
-            self.stream.write_no_flush(&BeMessage::CommandComplete(BeCommandCompleteMessage {
-                stmt_type: res.get_stmt_type(),
-                notice: res.get_notice(),
-                rows_cnt,
-            }))?;
+            self.stream
+                .write_no_flush(&BeMessage::CommandComplete(BeCommandCompleteMessage {
+                    stmt_type: res.get_stmt_type(),
+                    notice: res.get_notice(),
+                    rows_cnt,
+                }))?;
         } else {
             self.stream.write(&BeMessage::PortalSuspended).await?;
         }
         Ok(())
+    }
+
+    /// convert_the row to binary format.
+    fn convert_to_binary_format(
+        row: &Row,
+        row_desc: &Vec<PgFieldDescriptor>,
+    ) -> Vec<Option<Bytes>> {
+        assert_eq!(row.len(), row_desc.len());
+
+        let len = row.len();
+        let mut res = Vec::with_capacity(len);
+
+        for idx in 0..len {
+            let value = &row[idx];
+            let type_oid = row_desc[idx].get_type_oid();
+
+            match value {
+                None => res.push(None),
+                Some(value) => match type_oid {
+                    TypeOid::Boolean => todo!(),
+                    TypeOid::BigInt => todo!(),
+                    TypeOid::SmallInt => todo!(),
+                    TypeOid::Int => {
+                        let value: i32 = value.parse().unwrap();
+                        res.push(Some(value.to_be_bytes().to_vec().into()));
+                    }
+                    TypeOid::Float4 => todo!(),
+                    TypeOid::Float8 => todo!(),
+                    TypeOid::Varchar => res.push(Some(value.clone().into())),
+                    TypeOid::Date => todo!(),
+                    TypeOid::Time => todo!(),
+                    TypeOid::Timestamp => todo!(),
+                    TypeOid::Timestampz => todo!(),
+                    TypeOid::Decimal => todo!(),
+                    TypeOid::Interval => todo!(),
+                },
+            }
+        }
+        res
     }
 }
 
@@ -606,44 +648,5 @@ where
         self.write_buf.clear();
         self.stream.flush().await?;
         Ok(())
-    }
-
-    /// convert_the row to binary format.
-    fn convert_to_binary_format(
-        row: &Row,
-        row_desc: &Vec<PgFieldDescriptor>,
-    ) -> Vec<Option<Bytes>> {
-        assert_eq!(row.len(), row_desc.len());
-
-        let len = row.len();
-        let mut res = Vec::with_capacity(len);
-
-        for idx in 0..len {
-            let value = &row[idx];
-            let type_oid = row_desc[idx].get_type_oid();
-
-            match value {
-                None => res.push(None),
-                Some(value) => match type_oid {
-                    TypeOid::Boolean => todo!(),
-                    TypeOid::BigInt => todo!(),
-                    TypeOid::SmallInt => todo!(),
-                    TypeOid::Int => {
-                        let value: i32 = value.parse().unwrap();
-                        res.push(Some(value.to_be_bytes().to_vec().into()));
-                    }
-                    TypeOid::Float4 => todo!(),
-                    TypeOid::Float8 => todo!(),
-                    TypeOid::Varchar => res.push(Some(value.clone().into())),
-                    TypeOid::Date => todo!(),
-                    TypeOid::Time => todo!(),
-                    TypeOid::Timestamp => todo!(),
-                    TypeOid::Timestampz => todo!(),
-                    TypeOid::Decimal => todo!(),
-                    TypeOid::Interval => todo!(),
-                },
-            }
-        }
-        res
     }
 }
