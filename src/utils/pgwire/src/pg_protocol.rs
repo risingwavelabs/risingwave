@@ -606,8 +606,8 @@ where
         Ok(())
     }
 
-    /// covert_the row to binary format.
-    fn covert_to_binary_format(row: &Row, row_desc: &Vec<PgFieldDescriptor>) -> Vec<Option<Bytes>> {
+    /// convert_the row to binary format.
+    fn convert_to_binary_format(row: &Row, row_desc: &Vec<PgFieldDescriptor>) -> Vec<Option<Bytes>> {
         assert_eq!(row.len(), row_desc.len());
 
         let len = row.len();
