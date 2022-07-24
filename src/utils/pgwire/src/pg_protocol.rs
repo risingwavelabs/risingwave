@@ -374,6 +374,7 @@ where
                 self.session.clone().unwrap(),
                 portal_name.clone(),
                 &msg.params,
+                msg.result_format_code,
             )
             .await
             .unwrap();
@@ -415,7 +416,8 @@ where
         if res.is_empty() {
             self.stream.write_no_flush(&BeMessage::EmptyQueryResponse)?;
         } else if res.is_query() {
-            self.process_response_results(res, true).await?;
+            self.process_response_results(res, Some(portal.result_format()))
+                .await?;
         } else {
             self.stream
                 .write_no_flush(&BeMessage::CommandComplete(BeCommandCompleteMessage {
