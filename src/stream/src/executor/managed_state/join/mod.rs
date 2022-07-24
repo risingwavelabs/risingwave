@@ -31,7 +31,7 @@ use risingwave_storage::table::state_table::StateTable;
 use risingwave_storage::StateStore;
 use stats_alloc::{SharedStatsAlloc, StatsAlloc};
 
-use crate::executor::error::{StreamExecutorError, StreamExecutorResult};
+use crate::executor::error::StreamExecutorResult;
 use crate::executor::monitor::StreamingMetrics;
 
 type DegreeType = u64;
@@ -278,10 +278,7 @@ impl<K: HashKey, S: StateStore> JoinHashMap<K, S> {
     /// Fetch cache from the state store. Should only be called if the key does not exist in memory.
     /// Will return a empty `JoinEntryState` even when state does not exist in remote.
     async fn fetch_cached_state(&self, key: &K) -> StreamExecutorResult<JoinEntryState> {
-        let key = key
-            .clone()
-            .deserialize(self.join_key_data_types.iter())
-            .map_err(StreamExecutorError::serde_error)?;
+        let key = key.clone().deserialize(self.join_key_data_types.iter())?;
 
         let table_iter = self
             .state_table

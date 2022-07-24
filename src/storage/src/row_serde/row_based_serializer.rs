@@ -64,7 +64,10 @@ impl RowSerialize for RowBasedSerializer {
         Ok(res)
     }
 
-    fn column_ids(&self) -> &[risingwave_common::catalog::ColumnId] {
-        unreachable!()
+    fn serialize_sentinel_cell(
+        _pk_buf: &[u8],
+        _col_id: &risingwave_common::catalog::ColumnId,
+    ) -> Result<Option<Vec<u8>>> {
+        Ok(None)
     }
 }

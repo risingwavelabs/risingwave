@@ -21,7 +21,7 @@ use prometheus::{
     register_int_counter_with_registry, Histogram, HistogramVec, IntGauge, Opts, Registry,
 };
 use risingwave_common::monitor::Print;
-use risingwave_hummock_sdk::HummockSSTableId;
+use risingwave_hummock_sdk::HummockSstableId;
 
 use crate::hummock::sstable_store::SstableStoreRef;
 use crate::hummock::{BlockCache, LruCache, Sstable};
@@ -439,7 +439,7 @@ impl StateStoreMetrics {
 
 struct StateStoreCollector {
     block_cache: BlockCache,
-    meta_cache: Arc<LruCache<HummockSSTableId, Box<Sstable>>>,
+    meta_cache: Arc<LruCache<HummockSstableId, Box<Sstable>>>,
     descs: Vec<Desc>,
     block_cache_size: IntGauge,
     meta_cache_size: IntGauge,
