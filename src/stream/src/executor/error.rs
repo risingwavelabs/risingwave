@@ -14,9 +14,11 @@
 
 use std::backtrace::Backtrace;
 
+use either::Either;
 use risingwave_common::array::ArrayError;
 use risingwave_common::error::{BoxedError, Error, ErrorCode, RwError, TrackingIssue};
 use risingwave_expr::ExprError;
+use risingwave_rpc_client::error::RpcError;
 use risingwave_storage::error::StorageError;
 
 use super::Barrier;
@@ -30,11 +32,8 @@ enum StreamExecutorErrorInner {
         StorageError,
     ),
 
-    #[error("Invalid argument: {0}")]
-    InvalidArgument(String),
-
     #[error("Chunk operation error: {0}")]
-    EvalError(BoxedError),
+    EvalError(Either<ArrayError, ExprError>),
 
     // TODO: remove this after state table is fully used
     #[error("Serialize/deserialize error: {0}")]
@@ -44,8 +43,12 @@ enum StreamExecutorErrorInner {
     #[error("Source error: {0}")]
     SourceError(RwError),
 
+    // TODO: remove this
     #[error("Sink error: {0}")]
     SinkError(RwError),
+
+    #[error("RPC error: {0}")]
+    RpcError(RpcError),
 
     #[error("Channel `{0}` closed")]
     ChannelClosed(String),
@@ -61,14 +64,6 @@ enum StreamExecutorErrorInner {
 }
 
 impl StreamExecutorError {
-    pub fn storage(error: impl Into<StorageError>) -> Self {
-        StreamExecutorErrorInner::Storage(error.into()).into()
-    }
-
-    pub fn eval_error(error: impl Error) -> Self {
-        StreamExecutorErrorInner::EvalError(error.into()).into()
-    }
-
     pub fn serde_error(error: impl Error) -> Self {
         StreamExecutorErrorInner::SerdeError(error.into()).into()
     }
@@ -87,10 +82,6 @@ impl StreamExecutorError {
 
     pub fn align_barrier(expected: Barrier, received: Barrier) -> Self {
         StreamExecutorErrorInner::AlignBarrier(expected.into(), received.into()).into()
-    }
-
-    pub fn invalid_argument(error: impl Into<String>) -> Self {
-        StreamExecutorErrorInner::InvalidArgument(error.into()).into()
     }
 
     pub fn not_implemented(error: impl Into<String>, issue: impl Into<TrackingIssue>) -> Self {
@@ -128,19 +119,19 @@ impl std::fmt::Debug for StreamExecutorError {
 /// Storage error.
 impl From<StorageError> for StreamExecutorError {
     fn from(s: StorageError) -> Self {
-        Self::storage(s)
+        StreamExecutorErrorInner::Storage(s).into()
     }
 }
 
 // Chunk operation error.
 impl From<ArrayError> for StreamExecutorError {
     fn from(e: ArrayError) -> Self {
-        Self::eval_error(e)
+        StreamExecutorErrorInner::EvalError(Either::Left(e)).into()
     }
 }
 impl From<ExprError> for StreamExecutorError {
     fn from(e: ExprError) -> Self {
-        Self::eval_error(e)
+        StreamExecutorErrorInner::EvalError(Either::Right(e)).into()
     }
 }
 
@@ -155,6 +146,12 @@ impl From<anyhow::Error> for StreamExecutorError {
 impl From<memcomparable::Error> for StreamExecutorError {
     fn from(m: memcomparable::Error) -> Self {
         Self::serde_error(m)
+    }
+}
+
+impl From<RpcError> for StreamExecutorError {
+    fn from(e: RpcError) -> Self {
+        StreamExecutorErrorInner::RpcError(e).into()
     }
 }
 

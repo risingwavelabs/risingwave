@@ -17,13 +17,12 @@ use std::collections::{HashMap, HashSet};
 use std::option::Option::Some;
 use std::sync::Arc;
 
-use anyhow::anyhow;
 use itertools::Itertools;
 use risingwave_common::catalog::{
     DEFAULT_DATABASE_NAME, DEFAULT_SCHEMA_NAME, DEFAULT_SUPPER_USER, PG_CATALOG_SCHEMA_NAME,
 };
 use risingwave_common::ensure;
-use risingwave_common::error::ErrorCode::{CatalogError, InternalError};
+use risingwave_common::error::ErrorCode::{InternalError, PermissionDenied};
 use risingwave_common::error::{Result, RwError};
 use risingwave_common::types::ParallelUnitId;
 use risingwave_pb::catalog::table::OptionalAssociatedSourceId;
@@ -305,28 +304,15 @@ where
 
             for internal_table in internal_tables {
                 core.add_table(&internal_table);
-                self.env
-                    .notification_manager()
-                    .notify_frontend(Operation::Add, Info::Table(internal_table.to_owned()))
-                    .await;
 
-                self.env
-                    .notification_manager()
-                    .notify_compactor(Operation::Add, Info::Table(internal_table.to_owned()))
+                self.broadcast_table_op(Operation::Add, Info::Table(internal_table.to_owned()))
                     .await;
             }
             core.add_table(table);
             let version = self
-                .env
-                .notification_manager()
-                .notify_frontend(Operation::Add, Info::Table(table.to_owned()))
+                .broadcast_table_op(Operation::Add, Info::Table(table.to_owned()))
                 .await;
 
-            // notify table_catalog to compactor
-            self.env
-                .notification_manager()
-                .notify_compactor(Operation::Add, Info::Table(table.to_owned()))
-                .await;
             Ok(version)
         } else {
             Err(RwError::from(InternalError(
@@ -356,14 +342,10 @@ where
         let table = Table::select(self.env.meta_store(), &table_id).await?;
         if let Some(table) = table {
             match core.get_ref_count(table_id) {
-                Some(ref_count) => Err(CatalogError(
-                    anyhow!(
-                        "Fail to delete table `{}` because {} other relation(s) depend on it.",
-                        table.name,
-                        ref_count
-                    )
-                    .into(),
-                )
+                Some(ref_count) => Err(PermissionDenied(format!(
+                    "Fail to delete table `{}` because {} other relation(s) depend on it",
+                    table.name, ref_count
+                ))
                 .into()),
                 None => {
                     Table::delete(self.env.meta_store(), &table_id).await?;
@@ -373,15 +355,7 @@ where
                     }
 
                     let version = self
-                        .env
-                        .notification_manager()
-                        .notify_frontend(Operation::Delete, Info::Table(table.to_owned()))
-                        .await;
-
-                    // notify table_catalog to compactor
-                    self.env
-                        .notification_manager()
-                        .notify_compactor(Operation::Delete, Info::Table(table.to_owned()))
+                        .broadcast_table_op(Operation::Delete, Info::Table(table.to_owned()))
                         .await;
 
                     Ok(version)
@@ -479,14 +453,7 @@ where
         }
         core.env.meta_store().txn(transaction).await?;
         for table in &tables {
-            self.env
-                .notification_manager()
-                .notify_frontend(Operation::Update, Info::Table(table.to_owned()))
-                .await;
-
-            self.env
-                .notification_manager()
-                .notify_compactor(Operation::Update, Info::Table(table.to_owned()))
+            self.broadcast_table_op(Operation::Update, Info::Table(table.to_owned()))
                 .await;
             core.add_table(table);
         }
@@ -498,14 +465,10 @@ where
         let source = Source::select(self.env.meta_store(), &source_id).await?;
         if let Some(source) = source {
             match core.get_ref_count(source_id) {
-                Some(ref_count) => Err(CatalogError(
-                    anyhow!(
-                        "Fail to delete source `{}` because {} other relation(s) depend on it.",
-                        source.name,
-                        ref_count
-                    )
-                    .into(),
-                )
+                Some(ref_count) => Err(PermissionDenied(format!(
+                    "Fail to delete source `{}` because {} other relation(s) depend on it",
+                    source.name, ref_count
+                ))
                 .into()),
                 None => {
                     Source::delete(self.env.meta_store(), &source_id).await?;
@@ -581,25 +544,12 @@ where
 
             for table in tables {
                 core.add_table(&table);
-                self.env
-                    .notification_manager()
-                    .notify_frontend(Operation::Add, Info::Table(table.to_owned()))
-                    .await;
-
-                self.env
-                    .notification_manager()
-                    .notify_compactor(Operation::Add, Info::Table(table.to_owned()))
+                self.broadcast_table_op(Operation::Add, Info::Table(table.to_owned()))
                     .await;
             }
-            self.env
-                .notification_manager()
-                .notify_frontend(Operation::Add, Info::Table(mview.to_owned()))
+            self.broadcast_table_op(Operation::Add, Info::Table(mview.to_owned()))
                 .await;
 
-            self.env
-                .notification_manager()
-                .notify_compactor(Operation::Add, Info::Table(mview.to_owned()))
-                .await;
             // Currently frontend uses source's version
             let version = self
                 .env
@@ -663,25 +613,17 @@ where
                 }
                 // check ref count
                 if let Some(ref_count) = core.get_ref_count(mview_id) {
-                    return Err(CatalogError(
-                        anyhow!(
-                            "Fail to delete table `{}` because {} other relation(s) depend on it.",
-                            mview.name,
-                            ref_count
-                        )
-                        .into(),
-                    )
+                    return Err(PermissionDenied(format!(
+                        "Fail to delete table `{}` because {} other relation(s) depend on it",
+                        mview.name, ref_count
+                    ))
                     .into());
                 }
                 if let Some(ref_count) = core.get_ref_count(source_id) {
-                    return Err(CatalogError(
-                        anyhow!(
-                            "Fail to delete source `{}` because {} other relation(s) depend on it.",
-                            source.name,
-                            ref_count
-                        )
-                        .into(),
-                    )
+                    return Err(PermissionDenied(format!(
+                        "Fail to delete source `{}` because {} other relation(s) depend on it",
+                        source.name, ref_count
+                    ))
                     .into());
                 }
 
@@ -696,14 +638,7 @@ where
                     core.decrease_ref_count(dependent_relation_id);
                 }
 
-                self.env
-                    .notification_manager()
-                    .notify_frontend(Operation::Delete, Info::Table(mview.to_owned()))
-                    .await;
-
-                self.env
-                    .notification_manager()
-                    .notify_compactor(Operation::Delete, Info::Table(mview.to_owned()))
+                self.broadcast_table_op(Operation::Delete, Info::Table(mview.to_owned()))
                     .await;
 
                 let version = self
@@ -830,6 +765,13 @@ where
             .filter(|s| s.schema_id == schema_id)
             .map(|s| s.id)
             .collect())
+    }
+
+    async fn broadcast_table_op(&self, operation: Operation, info: Info) -> NotificationVersion {
+        self.env
+            .notification_manager()
+            .notify_all_node(operation, info)
+            .await
     }
 }
 

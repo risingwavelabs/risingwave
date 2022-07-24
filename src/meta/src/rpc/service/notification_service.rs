@@ -12,7 +12,6 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use lazy_static;
 use risingwave_common::error::{tonic_err, RwError};
 use risingwave_pb::common::worker_node::State::Running;
 use risingwave_pb::common::WorkerType;
@@ -26,31 +25,6 @@ use tonic::{Request, Response, Status};
 use crate::cluster::{ClusterManagerRef, WorkerKey};
 use crate::manager::{CatalogManagerRef, MetaSrvEnv, Notification, UserInfoManagerRef};
 use crate::storage::MetaStore;
-
-#[derive(Debug, Clone)]
-pub enum SubscibeDataType {
-    Node,
-    Database,
-    Schema,
-    Source,
-    Table,
-    Sink,
-    User,
-}
-
-lazy_static::lazy_static! {
-static ref  COMPACTOR_DATA_TYPE: Vec<SubscibeDataType> = vec![SubscibeDataType::Table];
-
-static ref FRONTEND_DATA_TYPE: Vec<SubscibeDataType> = vec![
-    SubscibeDataType::Node,
-    SubscibeDataType::Database,
-    SubscibeDataType::Schema,
-    SubscibeDataType::Source,
-    SubscibeDataType::Table,
-    SubscibeDataType::Sink,
-    SubscibeDataType::User,
-];
-}
 
 pub struct NotificationServiceImpl<S: MetaStore> {
     env: MetaSrvEnv<S>,
@@ -96,33 +70,29 @@ where
             .collect::<Vec<_>>();
 
         // Send the snapshot on subscription. After that we will send only updates.
-        let subscirbe_data_type = match worker_type {
-            WorkerType::Frontend => FRONTEND_DATA_TYPE.clone(),
-            WorkerType::Compactor => COMPACTOR_DATA_TYPE.clone(),
+        let result = match worker_type {
+            WorkerType::Frontend => MetaSnapshot {
+                nodes,
+                database,
+                schema,
+                source,
+                table,
+                sink,
+                users,
+            },
+
+            WorkerType::Compactor => MetaSnapshot {
+                table,
+                ..Default::default()
+            },
+
+            WorkerType::ComputeNode => MetaSnapshot {
+                table,
+                ..Default::default()
+            },
+
             _ => unreachable!(),
         };
-
-        // to filter info by subscirbe_data_type
-        let mut nodes = Some(nodes);
-        let mut database = Some(database);
-        let mut schema = Some(schema);
-        let mut source = Some(source);
-        let mut table = Some(table);
-        let mut sink = Some(sink);
-        let mut users = Some(users);
-
-        let mut result = MetaSnapshot::default();
-        for data_type in subscirbe_data_type {
-            match data_type {
-                SubscibeDataType::Node => result.nodes = nodes.take().unwrap(),
-                SubscibeDataType::Database => result.database = database.take().unwrap(),
-                SubscibeDataType::Schema => result.schema = schema.take().unwrap(),
-                SubscibeDataType::Source => result.source = source.take().unwrap(),
-                SubscibeDataType::Table => result.table = table.take().unwrap(),
-                SubscibeDataType::Sink => result.sink = sink.take().unwrap(),
-                SubscibeDataType::User => result.users = users.take().unwrap(),
-            }
-        }
 
         Ok(result)
     }

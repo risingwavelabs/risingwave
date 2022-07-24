@@ -18,11 +18,10 @@ use std::collections::HashMap;
 use futures::StreamExt;
 use futures_async_stream::try_stream;
 use risingwave_common::catalog::Schema;
-use risingwave_common::error::Result;
 use risingwave_connector::sink::{Sink, SinkConfig, SinkImpl};
 use risingwave_storage::StateStore;
 
-use super::error::StreamExecutorError;
+use super::error::{StreamExecutorError, StreamExecutorResult};
 use super::{BoxedExecutor, Executor, Message};
 use crate::executor::PkIndices;
 
@@ -34,8 +33,10 @@ pub struct SinkExecutor<S: StateStore> {
     pk_indices: PkIndices,
 }
 
-fn build_sink(config: SinkConfig) -> Result<Box<SinkImpl>> {
-    Ok(Box::new(SinkImpl::new(config)?))
+fn build_sink(config: SinkConfig) -> StreamExecutorResult<Box<SinkImpl>> {
+    Ok(Box::new(
+        SinkImpl::new(config).map_err(StreamExecutorError::sink_error)?,
+    ))
 }
 
 impl<S: StateStore> SinkExecutor<S> {
