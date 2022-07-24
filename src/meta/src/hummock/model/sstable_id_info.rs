@@ -15,7 +15,7 @@
 use std::time::SystemTime;
 
 use prost::Message;
-use risingwave_hummock_sdk::HummockSSTableId;
+use risingwave_hummock_sdk::HummockSstableId;
 use risingwave_pb::hummock::SstableIdInfo;
 
 use crate::model::MetadataModel;
@@ -29,7 +29,7 @@ pub const INVALID_TIMESTAMP: u64 = 0;
 /// `SstableIdInfo` tracks when the sstable id is acquired from meta node and when the corresponding
 /// sstable is tracked in meta node.
 impl MetadataModel for SstableIdInfo {
-    type KeyType = HummockSSTableId;
+    type KeyType = HummockSstableId;
     type ProstType = SstableIdInfo;
 
     fn cf_name() -> String {

@@ -27,7 +27,7 @@ use super::iterator::{
     BackwardUserIterator, ConcatIteratorInner, DirectedUserIterator, UserIterator,
 };
 use super::utils::{can_concat, search_sst_idx, validate_epoch};
-use super::{BackwardSSTableIterator, HummockStorage, SSTableIterator, SSTableIteratorType};
+use super::{BackwardSstableIterator, HummockStorage, SstableIterator, SstableIteratorType};
 use crate::error::StorageResult;
 use crate::hummock::iterator::{
     Backward, BoxedHummockIterator, DirectedUserIteratorBuilder, DirectionEnum, Forward,
@@ -47,7 +47,7 @@ use crate::{define_state_store_associated_type, StateStore, StateStoreIter};
 
 pub(crate) trait HummockIteratorType {
     type Direction: HummockIteratorDirection;
-    type SstableIteratorType: SSTableIteratorType<Direction = Self::Direction>;
+    type SstableIteratorType: SstableIteratorType<Direction = Self::Direction>;
     type UserIteratorBuilder: DirectedUserIteratorBuilder<Direction = Self::Direction>;
 
     fn direction() -> DirectionEnum {
@@ -60,13 +60,13 @@ pub(crate) struct BackwardIter;
 
 impl HummockIteratorType for ForwardIter {
     type Direction = Forward;
-    type SstableIteratorType = SSTableIterator;
+    type SstableIteratorType = SstableIterator;
     type UserIteratorBuilder = UserIterator;
 }
 
 impl HummockIteratorType for BackwardIter {
     type Direction = Backward;
-    type SstableIteratorType = BackwardSSTableIterator;
+    type SstableIteratorType = BackwardSstableIterator;
     type UserIteratorBuilder = BackwardUserIterator;
 }
 
