@@ -387,35 +387,6 @@ impl<S> DdlServiceImpl<S>
 where
     S: MetaStore,
 {
-    fn get_dependent_relations(&self, fragment_graph: &StreamFragmentGraph) -> RwResult<Vec<u32>> {
-        // TODO: distinguish SourceId and TableId
-        fn resolve_dependent_relations(
-            stream_node: &StreamNode,
-            dependent_relations: &mut HashSet<TableId>,
-        ) -> RwResult<()> {
-            match stream_node.node_body.as_ref().unwrap() {
-                NodeBody::Source(source_node) => {
-                    dependent_relations.insert(source_node.get_table_id());
-                }
-                NodeBody::Chain(chain_node) => {
-                    dependent_relations.insert(chain_node.get_table_id());
-                }
-                _ => {}
-            }
-            for child in &stream_node.input {
-                resolve_dependent_relations(child, dependent_relations)?;
-            }
-            Ok(())
-        }
-
-        let mut dependent_relations = Default::default();
-        for fragment in fragment_graph.fragments.values() {
-            resolve_dependent_relations(fragment.node.as_ref().unwrap(), &mut dependent_relations)
-                .map_err(tonic_err)?;
-        }
-        Ok(dependent_relations.into_iter().collect())
-    }
-
     fn get_internal_table(&self, ctx: &CreateMaterializedViewContext) -> RwResult<Vec<Table>> {
         let mut internal_table = ctx
             .internal_table_id_map
@@ -446,7 +417,7 @@ where
         relation.set_id(id);
 
         // 1. Resolve the dependent relations.
-        let dependent_relations = self.get_dependent_relations(&fragment_graph)?;
+        let dependent_relations = get_dependent_relations(&fragment_graph)?;
         assert!(
             !dependent_relations.is_empty(),
             "there should be at lease 1 dependent relation when creating sink"
@@ -523,7 +494,7 @@ where
     ) -> RwResult<()> {
         use risingwave_common::catalog::TableId;
 
-        let mview_id = match relation {
+        let relation_id = match relation {
             Relation::Table(_) => {
                 // Fill in the correct mview id for stream node.
                 fn fill_mview_id(stream_node: &mut StreamNode, mview_id: TableId) -> usize {
@@ -597,7 +568,7 @@ where
             internal_table_id_set.len() as u32
         );
 
-        let table_fragments = TableFragments::new(mview_id, graph, internal_table_id_set);
+        let table_fragments = TableFragments::new(relation_id, graph, internal_table_id_set);
 
         // Create on compute node.
         self.stream_manager
@@ -757,4 +728,33 @@ where
             .into()),
         }
     }
+}
+
+fn get_dependent_relations(fragment_graph: &StreamFragmentGraph) -> RwResult<Vec<TableId>> {
+    // TODO: distinguish SourceId and TableId
+    fn resolve_dependent_relations(
+        stream_node: &StreamNode,
+        dependent_relations: &mut HashSet<TableId>,
+    ) -> RwResult<()> {
+        match stream_node.node_body.as_ref().unwrap() {
+            NodeBody::Source(source_node) => {
+                dependent_relations.insert(source_node.get_table_id());
+            }
+            NodeBody::Chain(chain_node) => {
+                dependent_relations.insert(chain_node.get_table_id());
+            }
+            _ => {}
+        }
+        for child in &stream_node.input {
+            resolve_dependent_relations(child, dependent_relations)?;
+        }
+        Ok(())
+    }
+
+    let mut dependent_relations = Default::default();
+    for fragment in fragment_graph.fragments.values() {
+        resolve_dependent_relations(fragment.node.as_ref().unwrap(), &mut dependent_relations)
+            .map_err(tonic_err)?;
+    }
+    Ok(dependent_relations.into_iter().collect())
 }

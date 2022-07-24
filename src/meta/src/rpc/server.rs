@@ -405,7 +405,6 @@ pub async fn rpc_serve_with_store<S: MetaStore>(
         catalog_manager.clone(),
         stream_manager,
         source_manager,
-        // sink_manager,
         cluster_manager.clone(),
         fragment_manager.clone(),
         ddl_lock.clone(),
