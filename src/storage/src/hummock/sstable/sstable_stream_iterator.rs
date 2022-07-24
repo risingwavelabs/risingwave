@@ -21,7 +21,7 @@ use risingwave_hummock_sdk::VersionedComparator;
 use super::super::{HummockResult, HummockValue};
 use super::SSTableIteratorType;
 use crate::hummock::iterator::{Forward, HummockIterator, ReadOptions};
-use crate::hummock::{BlockHolder, BlockIterator, BlockStream, SstableStoreRef, TableHolder};
+use crate::hummock::{BlockIterator, BlockStream, SstableStoreRef, TableHolder};
 use crate::monitor::StoreLocalStatistic;
 
 /// Iterates on a table while downloading it.
@@ -54,13 +54,18 @@ impl SSTableStreamIterator {
         }
     }
 
-    /// Seeks to a block, and then seeks to the key if `seek_key` is given.
-    async fn seek_idx(&mut self, idx: usize, seek_key: Option<&[u8]>) -> HummockResult<()> {
+    /// Seeks to a block, and then seeks to the first position where the key >= `seek_key` (if
+    /// given).
+    async fn start_stream(
+        &mut self,
+        block_idx: usize,
+        start_key: Option<&[u8]>,
+    ) -> HummockResult<()> {
         tracing::trace!(
             target: "events::storage::sstable::block_seek",
             "table iterator seek: table_id = {}, block_id = {}",
             self.sst.value().id,
-            idx,
+            block_idx,
         );
 
         // When all data are in block cache, it is highly possible that this iterator will stay on a
@@ -68,30 +73,32 @@ impl SSTableStreamIterator {
         // do cooperative scheduling.
         tokio::task::consume_budget().await;
 
-        if idx >= self.sst.value().block_count() {
+        if block_idx >= self.sst.value().block_count() {
+            self.block_stream = None;
             self.block_iter = None;
         } else {
-            let block = if idx < self.sst.value().blocks.len() {
-                BlockHolder::from_ref_block(self.sst.value().blocks[idx].clone())
-            } else {
-                self.sstable_store
-                    .get(
-                        self.sst.value(),
-                        idx as u64,
-                        crate::hummock::CachePolicy::Fill,
-                        &mut self.stats,
-                    )
-                    .await?
-            };
-            let mut block_iter = BlockIterator::new(block);
-            if let Some(key) = seek_key {
+            let block_stream = self
+                .sstable_store
+                .get_block_stream(
+                    self.sst.value(),
+                    block_idx, /* ToDo: What about parameters used before (CachePolicy,
+                                * &StoreLocalStatistic)? */
+                )
+                .await?;
+
+            let mut block_iter = BlockIterator::new(block_stream.next()?.unwrap());
+
+            if let Some(key) = start_key {
                 block_iter.seek(key);
+                // ToDo: If key is not in block, then the key is not in table and would be stored
+                // between two blocks. Set position to first key of next block.
             } else {
                 block_iter.seek_to_first();
             }
 
+            self.block_stream = Some(block_stream);
             self.block_iter = Some(block_iter);
-            self.cur_idx = idx;
+            self.cur_idx = block_idx;
         }
 
         Ok(())
@@ -159,7 +166,7 @@ impl HummockIterator for SSTableStreamIterator {
     }
 
     async fn rewind(&mut self) -> HummockResult<()> {
-        self.seek_idx(0, None).await
+        self.start_stream(0, None).await
     }
 
     async fn seek(&mut self, key: &[u8]) -> HummockResult<()> {
@@ -172,15 +179,23 @@ impl HummockIterator for SSTableStreamIterator {
                 // compare by version comparator
                 // Note: we are comparing against the `smallest_key` of the `block`, thus the
                 // partition point should be `prev(<=)` instead of `<`.
+
+                // ToDo: It should be min < k. No Idea what prev refers here to.
+                // Also no need to subtract 1. Same logic is in BlockIterator searches.
+
                 let ord = VersionedComparator::compare_key(block_meta.smallest_key.as_slice(), key);
                 ord == Less || ord == Equal
             })
             .saturating_sub(1); // considering the boundary of 0
 
-        self.seek_idx(block_idx, Some(key)).await?;
+        self.start_stream(block_idx, Some(key)).await?;
+
+        // Checks if result is valid, because we might search for a key that would be after the
+        // current block, and before the next (i.e. key is not stored in the table).
+        // ToDo: fix that in start_stream.
         if !self.is_valid() {
             // seek to next block
-            self.seek_idx(block_idx + 1, None).await?;
+            self.start_stream(block_idx + 1, None).await?;
         }
 
         Ok(())
