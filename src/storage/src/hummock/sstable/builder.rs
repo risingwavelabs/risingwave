@@ -90,7 +90,7 @@ pub struct SstableBuilder {
 impl SstableBuilder {
     pub fn new(sstable_id: u64, options: SstableBuilderOptions) -> Self {
         Self {
-            buf: BytesMut::with_capacity(options.capacity),
+            buf: BytesMut::with_capacity(options.capacity + options.block_capacity),
             block_builder: BlockBuilder::new(BlockBuilderOptions {
                 capacity: options.block_capacity,
                 restart_interval: options.restart_interval,

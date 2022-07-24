@@ -263,7 +263,7 @@ impl SstableStore {
                         };
                         let mut size = meta.encoded_size();
                         let sst = if load_data {
-                            size = meta.estimated_size as usize;
+                            size += meta.estimated_size as usize;
 
                             let block_data = store
                                 .read(&data_path, None)
