@@ -34,7 +34,7 @@ use fail::fail_point;
 pub use forward_sstable_iterator::*;
 mod backward_sstable_iterator;
 pub use backward_sstable_iterator::*;
-use risingwave_hummock_sdk::HummockSSTableId;
+use risingwave_hummock_sdk::HummockSstableId;
 #[cfg(test)]
 use risingwave_pb::hummock::{KeyRange, SstableInfo};
 
@@ -52,7 +52,7 @@ const VERSION: u32 = 1;
 
 /// [`Sstable`] is a handle for accessing SST.
 pub struct Sstable {
-    pub id: HummockSSTableId,
+    pub id: HummockSstableId,
     pub meta: SstableMeta,
     pub blocks: Vec<Arc<Block>>,
 }
@@ -67,7 +67,7 @@ impl Debug for Sstable {
 }
 
 impl Sstable {
-    pub fn new(id: HummockSSTableId, meta: SstableMeta) -> Self {
+    pub fn new(id: HummockSstableId, meta: SstableMeta) -> Self {
         Self {
             id,
             meta,
@@ -76,7 +76,7 @@ impl Sstable {
     }
 
     pub fn new_with_data(
-        id: HummockSSTableId,
+        id: HummockSstableId,
         meta: SstableMeta,
         data: Bytes,
     ) -> HummockResult<Self> {
@@ -271,6 +271,11 @@ impl SstableMeta {
             + 4 // version
             + 4 // magic
     }
+}
+
+#[derive(Default)]
+pub struct SstableIteratorReadOptions {
+    pub prefetch: bool,
 }
 
 #[cfg(test)]

@@ -30,7 +30,7 @@ use risingwave_hummock_sdk::compact::compact_task_to_string;
 use risingwave_hummock_sdk::compaction_group::hummock_version_ext::HummockVersionExt;
 use risingwave_hummock_sdk::{
     get_remote_sst_id, CompactionGroupId, HummockCompactionTaskId, HummockContextId, HummockEpoch,
-    HummockRefCount, HummockSSTableId, HummockVersionId, LocalSstableInfo, FIRST_VERSION_ID,
+    HummockRefCount, HummockSstableId, HummockVersionId, LocalSstableInfo, FIRST_VERSION_ID,
 };
 use risingwave_pb::hummock::hummock_version::Levels;
 use risingwave_pb::hummock::{
@@ -181,14 +181,14 @@ struct Versioning {
     // mapping from id of each hummock version which succeeds checkpoint to ids of each SST in that
     // `HummockVersion`, because we need to search `HummockVersion` for useless SSTs in order to
     // determine whether a SST can be deleted in vacuum process
-    hummock_versions: BTreeMap<HummockVersionId, Vec<HummockSSTableId>>,
+    hummock_versions: BTreeMap<HummockVersionId, Vec<HummockSstableId>>,
     // mapping from id of each hummock version which succeeds checkpoint to its
     // `HummockVersionDelta`
     hummock_version_deltas: BTreeMap<HummockVersionId, HummockVersionDelta>,
     pinned_versions: BTreeMap<HummockContextId, HummockPinnedVersion>,
     pinned_snapshots: BTreeMap<HummockContextId, HummockPinnedSnapshot>,
     stale_sstables: BTreeMap<HummockVersionId, HummockStaleSstables>,
-    sstable_id_infos: BTreeMap<HummockSSTableId, SstableIdInfo>,
+    sstable_id_infos: BTreeMap<HummockSstableId, SstableIdInfo>,
 }
 
 impl Versioning {
@@ -785,11 +785,19 @@ where
         Ok(())
     }
 
+    pub async fn report_compact_task(&self, compact_task: &CompactTask) -> Result<bool> {
+        self.report_compact_task_impl(compact_task, false).await
+    }
+
     /// `report_compact_task` is retryable. `task_id` in `compact_task` parameter is used as the
     /// idempotency key. Return Ok(false) to indicate the `task_id` is not found, which may have
     /// been processed previously.
     #[named]
-    pub async fn report_compact_task(&self, compact_task: &CompactTask) -> Result<bool> {
+    pub async fn report_compact_task_impl(
+        &self,
+        compact_task: &CompactTask,
+        trival_move: bool,
+    ) -> Result<bool> {
         let mut compaction_guard = write_lock!(self, compaction).await;
         let start_time = Instant::now();
         let compaction = compaction_guard.deref_mut();
@@ -803,13 +811,13 @@ where
         );
         let mut compact_task_assignment =
             BTreeMapTransaction::new(&mut compaction.compact_task_assignment);
-        let assignee_context_id = match compact_task_assignment.remove(compact_task.task_id) {
-            None => {
-                // The task is not found.
-                return Ok(false);
-            }
-            Some(assignment) => assignment.context_id,
-        };
+        let assignee_context_id = compact_task_assignment
+            .remove(compact_task.task_id)
+            .map(|assignment| assignment.context_id);
+        // The task is not found.
+        if assignee_context_id.is_none() && !trival_move {
+            return Ok(false);
+        }
         compact_status.report_compact_task(compact_task);
         if compact_task.task_status {
             // The compaction task is finished.
@@ -839,9 +847,11 @@ where
                 .or_default()
                 .level_deltas;
             for level in &compact_task.input_ssts {
-                version_stale_sstables
-                    .id
-                    .extend(level.table_infos.iter().map(|sst| sst.id).collect_vec());
+                if !trival_move {
+                    version_stale_sstables
+                        .id
+                        .extend(level.table_infos.iter().map(|sst| sst.id).collect_vec());
+                }
                 let level_delta = LevelDelta {
                     level_idx: level.level_idx,
                     removed_table_ids: level.table_infos.iter().map(|sst| sst.id).collect_vec(),
@@ -862,29 +872,41 @@ where
             version_delta.id = new_version_id;
             hummock_version_deltas.insert(version_delta.id, version_delta);
 
-            for SstableInfo { id: ref sst_id, .. } in &compact_task.sorted_output_ssts {
-                match sstable_id_infos.get_mut(*sst_id) {
-                    None => {
-                        return Err(Error::InternalError(format!(
-                            "invalid sst id {}, may have been vacuumed",
-                            sst_id
-                        )));
-                    }
-                    Some(mut sst_id_info) => {
-                        sst_id_info.meta_create_timestamp = sstable_id_info::get_timestamp_now();
+            if !trival_move {
+                for SstableInfo { id: ref sst_id, .. } in &compact_task.sorted_output_ssts {
+                    match sstable_id_infos.get_mut(*sst_id) {
+                        None => {
+                            return Err(Error::InternalError(format!(
+                                "invalid sst id {}, may have been vacuumed",
+                                sst_id
+                            )));
+                        }
+                        Some(mut sst_id_info) => {
+                            sst_id_info.meta_create_timestamp =
+                                sstable_id_info::get_timestamp_now();
+                        }
                     }
                 }
             }
+            if trival_move {
+                commit_multi_var!(
+                    self,
+                    assignee_context_id,
+                    compact_status,
+                    hummock_version_deltas
+                )?;
+            } else {
+                commit_multi_var!(
+                    self,
+                    assignee_context_id,
+                    compact_status,
+                    compact_task_assignment,
+                    hummock_version_deltas,
+                    version_stale_sstables,
+                    sstable_id_infos
+                )?;
+            }
 
-            commit_multi_var!(
-                self,
-                Some(assignee_context_id),
-                compact_status,
-                compact_task_assignment,
-                hummock_version_deltas,
-                version_stale_sstables,
-                sstable_id_infos
-            )?;
             versioning
                 .hummock_versions
                 .insert(new_version.id, new_version.get_sst_ids());
@@ -893,7 +915,7 @@ where
             // The compaction task is cancelled.
             commit_multi_var!(
                 self,
-                Some(assignee_context_id),
+                assignee_context_id,
                 compact_status,
                 compact_task_assignment
             )?;
@@ -1088,14 +1110,14 @@ where
     }
 
     #[named]
-    pub async fn get_new_table_id(&self) -> Result<HummockSSTableId> {
+    pub async fn get_new_table_id(&self) -> Result<HummockSstableId> {
         // TODO id_gen_manager generates u32, we need u64
         let sstable_id = get_remote_sst_id(
             self.env
                 .id_gen_manager()
-                .generate::<{ IdCategory::HummockSSTableId }>()
+                .generate::<{ IdCategory::HummockSstableId }>()
                 .await
-                .map(|id| id as HummockSSTableId)?,
+                .map(|id| id as HummockSstableId)?,
         );
 
         let mut versioning_guard = write_lock!(self, versioning).await;
@@ -1279,7 +1301,7 @@ where
     pub async fn get_ssts_to_delete(
         &self,
         version_id: HummockVersionId,
-    ) -> Result<Vec<HummockSSTableId>> {
+    ) -> Result<Vec<HummockSstableId>> {
         let versioning_guard = read_lock!(self, versioning).await;
         let _timer = start_measure_real_process_timer!(self);
         Ok(versioning_guard
@@ -1293,7 +1315,7 @@ where
     pub async fn delete_will_not_be_used_ssts(
         &self,
         version_id: HummockVersionId,
-        ssts_in_use: &HashSet<HummockSSTableId>,
+        ssts_in_use: &HashSet<HummockSstableId>,
     ) -> Result<()> {
         let mut versioning_guard = write_lock!(self, versioning).await;
         let _timer = start_measure_real_process_timer!(self);
@@ -1451,7 +1473,7 @@ where
     }
 
     #[named]
-    pub async fn delete_sstable_ids(&self, sst_ids: impl AsRef<[HummockSSTableId]>) -> Result<()> {
+    pub async fn delete_sstable_ids(&self, sst_ids: impl AsRef<[HummockSstableId]>) -> Result<()> {
         let mut versioning_guard = write_lock!(self, versioning).await;
         let _timer = start_measure_real_process_timer!(self);
         let mut sstable_id_infos = BTreeMapTransaction::new(&mut versioning_guard.sstable_id_infos);

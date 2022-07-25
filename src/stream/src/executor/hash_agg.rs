@@ -25,10 +25,9 @@ use risingwave_common::array::{StreamChunk, Vis};
 use risingwave_common::buffer::Bitmap;
 use risingwave_common::catalog::Schema;
 use risingwave_common::collection::evictable::EvictableHashMap;
-use risingwave_common::error::Result;
 use risingwave_common::hash::{HashCode, HashKey};
 use risingwave_common::util::hash_util::CRC32FastBuilder;
-use risingwave_storage::table::state_table::StateTable;
+use risingwave_storage::table::state_table::RowBasedStateTable;
 use risingwave_storage::StateStore;
 
 use super::aggregation::agg_call_filter_res;
@@ -83,7 +82,7 @@ struct HashAggExecutorExtra<S: StateStore> {
     /// all of the aggregation functions in this executor should depend on same group of keys
     key_indices: Vec<usize>,
 
-    state_tables: Vec<StateTable<S>>,
+    state_tables: Vec<RowBasedStateTable<S>>,
 }
 
 impl<K: HashKey, S: StateStore> Executor for HashAggExecutor<K, S> {
@@ -111,8 +110,8 @@ impl<K: HashKey, S: StateStore> HashAggExecutor<K, S> {
         pk_indices: PkIndices,
         executor_id: u64,
         key_indices: Vec<usize>,
-        mut state_tables: Vec<StateTable<S>>,
-    ) -> Result<Self> {
+        mut state_tables: Vec<RowBasedStateTable<S>>,
+    ) -> StreamExecutorResult<Self> {
         let input_info = input.info();
         let schema = generate_agg_schema(input.as_ref(), &agg_calls, Some(&key_indices));
 
@@ -148,7 +147,7 @@ impl<K: HashKey, S: StateStore> HashAggExecutor<K, S> {
         keys: Vec<K>,
         key_hash_codes: Vec<HashCode>,
         visibility: &Option<Bitmap>,
-    ) -> Result<Vec<(K, HashCode, Bitmap)>> {
+    ) -> StreamExecutorResult<Vec<(K, HashCode, Bitmap)>> {
         let total_num_rows = keys.len();
         assert_eq!(key_hash_codes.len(), total_num_rows);
         // Each hash key, e.g. `key1` corresponds to a visibility map that not only shadows
@@ -216,8 +215,7 @@ impl<K: HashKey, S: StateStore> HashAggExecutor<K, S> {
 
         // --- Find unique keys in this batch and generate visibility map for each key ---
         // TODO: this might be inefficient if there are not too many duplicated keys in one batch.
-        let unique_keys = Self::get_unique_keys(keys, hash_codes, &visibility)
-            .map_err(StreamExecutorError::eval_error)?;
+        let unique_keys = Self::get_unique_keys(keys, hash_codes, &visibility)?;
 
         // --- Retrieve all aggregation inputs in advance ---
         // Previously, this is done in `unique_keys` inner loop, which is very inefficient.
@@ -255,11 +253,7 @@ impl<K: HashKey, S: StateStore> HashAggExecutor<K, S> {
                         Some(s) => s.unwrap(),
                         None => Box::new(
                             generate_managed_agg_state(
-                                Some(
-                                    &key.clone()
-                                        .deserialize(key_data_types.iter())
-                                        .map_err(StreamExecutorError::eval_error)?,
-                                ),
+                                Some(&key.clone().deserialize(key_data_types.iter())?),
                                 agg_calls,
                                 input_pk_data_types.clone(),
                                 epoch,
@@ -377,16 +371,16 @@ impl<K: HashKey, S: StateStore> HashAggExecutor<K, S> {
 
                     for _ in 0..appended {
                         key.clone()
-                            .deserialize_to_builders(&mut builders[..key_indices.len()])
-                            .map_err(StreamExecutorError::eval_error)?;
+                            .deserialize_to_builders(&mut builders[..key_indices.len()])?;
                     }
                 }
 
                 let columns: Vec<Column> = builders
                     .into_iter()
-                    .map(|builder| -> Result<_> { Ok(Column::new(Arc::new(builder.finish()?))) })
-                    .try_collect()
-                    .map_err(StreamExecutorError::eval_error)?;
+                    .map(|builder| {
+                        Ok::<_, StreamExecutorError>(Column::new(Arc::new(builder.finish()?)))
+                    })
+                    .try_collect()?;
 
                 let chunk = StreamChunk::new(new_ops, columns, None);
 
@@ -459,7 +453,7 @@ mod tests {
     use risingwave_common::types::DataType;
     use risingwave_expr::expr::*;
     use risingwave_storage::memory::MemoryStateStore;
-    use risingwave_storage::table::state_table::StateTable;
+    use risingwave_storage::table::state_table::RowBasedStateTable;
     use risingwave_storage::StateStore;
 
     use crate::executor::aggregation::{generate_agg_schema, AggArgs, AggCall};
@@ -475,7 +469,7 @@ mod tests {
         key_indices: Vec<usize>,
         pk_indices: PkIndices,
         executor_id: u64,
-        state_tables: Vec<StateTable<S>>,
+        state_tables: Vec<RowBasedStateTable<S>>,
     }
 
     impl<S: StateStore> HashKeyDispatcher for HashAggExecutorDispatcher<S> {

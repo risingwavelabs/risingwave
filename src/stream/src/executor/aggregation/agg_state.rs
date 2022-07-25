@@ -18,7 +18,7 @@ use itertools::Itertools;
 use risingwave_common::array::{ArrayBuilderImpl, Op};
 use risingwave_common::types::Datum;
 use risingwave_expr::expr::ExpressionRef;
-use risingwave_storage::table::state_table::StateTable;
+use risingwave_storage::table::state_table::RowBasedStateTable;
 use risingwave_storage::StateStore;
 
 use crate::executor::error::StreamExecutorResult;
@@ -52,7 +52,7 @@ impl<S: StateStore> AggState<S> {
     pub async fn row_count(
         &mut self,
         epoch: u64,
-        state_table: &StateTable<S>,
+        state_table: &RowBasedStateTable<S>,
     ) -> StreamExecutorResult<i64> {
         Ok(self.managed_states[ROW_COUNT_COLUMN]
             .get_output(epoch, state_table)
@@ -83,7 +83,7 @@ impl<S: StateStore> AggState<S> {
     pub async fn may_mark_as_dirty(
         &mut self,
         epoch: u64,
-        state_tables: &[StateTable<S>],
+        state_tables: &[RowBasedStateTable<S>],
     ) -> StreamExecutorResult<()> {
         if self.is_dirty() {
             return Ok(());
@@ -106,7 +106,7 @@ impl<S: StateStore> AggState<S> {
         builders: &mut [ArrayBuilderImpl],
         new_ops: &mut Vec<Op>,
         epoch: u64,
-        state_tables: &[StateTable<S>],
+        state_tables: &[RowBasedStateTable<S>],
     ) -> StreamExecutorResult<usize> {
         if !self.is_dirty() {
             return Ok(0);

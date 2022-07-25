@@ -23,6 +23,7 @@ use risingwave_sqlparser::ast::{
     BinaryOperator, ColumnDef, Cte, Expr, Ident, Join, JoinConstraint, JoinOperator, ObjectName,
     OrderByExpr, Query, Select, SelectItem, SetExpr, Statement, TableWithJoins, Value, With,
 };
+use risingwave_sqlparser::parser::Parser;
 
 mod expr;
 pub use expr::print_function_table;
@@ -426,4 +427,19 @@ pub fn mview_sql_gen<R: Rng>(rng: &mut R, tables: Vec<Table>, name: &str) -> (St
     let mut gen = SqlGenerator::new_for_mview(rng, tables);
     let (mview, table) = gen.gen_mview(name);
     (mview.to_string(), table)
+}
+
+/// Parse SQL
+pub fn parse_sql(sql: &str) -> Vec<Statement> {
+    Parser::parse_sql(sql).unwrap_or_else(|_| panic!("Failed to parse SQL: {}", sql))
+}
+
+pub fn create_table_statement_to_table(statement: &Statement) -> Table {
+    match statement {
+        Statement::CreateTable { name, columns, .. } => Table {
+            name: name.0[0].value.clone(),
+            columns: columns.iter().map(|c| c.clone().into()).collect(),
+        },
+        _ => panic!("Unexpected statement: {}", statement),
+    }
 }

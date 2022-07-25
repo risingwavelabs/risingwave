@@ -20,7 +20,6 @@ use itertools::Itertools;
 use risingwave_common::array::column::Column;
 use risingwave_common::array::{Op, StreamChunk};
 use risingwave_common::catalog::Schema;
-use risingwave_common::error::Result;
 
 use super::aggregation::{
     agg_call_filter_res, create_streaming_agg_state, generate_agg_schema, AggCall,
@@ -123,11 +122,12 @@ impl LocalSimpleAggExecutor {
                         )?;
                         let columns: Vec<Column> = builders
                             .into_iter()
-                            .map(|builder| -> Result<_> {
-                                Ok(Column::new(Arc::new(builder.finish()?)))
+                            .map(|builder| {
+                                Ok::<_, StreamExecutorError>(Column::new(Arc::new(
+                                    builder.finish()?,
+                                )))
                             })
-                            .try_collect()
-                            .map_err(StreamExecutorError::eval_error)?;
+                            .try_collect()?;
                         let ops = vec![Op::Insert; 1];
 
                         yield Message::Chunk(StreamChunk::new(ops, columns, None));
@@ -146,7 +146,7 @@ impl LocalSimpleAggExecutor {
         agg_calls: Vec<AggCall>,
         pk_indices: PkIndices,
         executor_id: u64,
-    ) -> Result<Self> {
+    ) -> StreamExecutorResult<Self> {
         let schema = generate_agg_schema(input.as_ref(), &agg_calls, None);
         let info = ExecutorInfo {
             schema,
