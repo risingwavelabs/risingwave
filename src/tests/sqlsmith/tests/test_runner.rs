@@ -73,6 +73,10 @@ async fn create_tables(session: Arc<SessionImpl>, rng: &mut impl Rng) -> Vec<Tab
     tables
 }
 
+fn gen_n_batch_queries(rng: &mut impl Rng, tables: Vec<Table>, n: u32) -> Vec<String> {
+    (0..n).map(|_| sql_gen(rng, tables.clone())).collect()
+}
+
 async fn test_binder() {
 
 }
@@ -87,6 +91,10 @@ async fn test_batch_query_plan() {
 
 async fn test_batch() {
 
+}
+
+fn gen_n_stream_queries(rng: &mut impl Rng, tables: Vec<Table>, n: u32) -> Vec<String> {
+    (0..n).map(|i| mview_sql_gen(rng, tables.clone(), &format!("s{}", i)).0).collect()
 }
 
 async fn test_create_mv_plan() {
