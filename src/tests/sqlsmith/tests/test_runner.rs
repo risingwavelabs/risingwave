@@ -77,6 +77,9 @@ fn gen_n_batch_queries(rng: &mut impl Rng, tables: Vec<Table>, n: u32) -> Vec<St
     (0..n).map(|_| sql_gen(rng, tables.clone())).collect()
 }
 
+async fn test_batch_parse() {
+}
+
 async fn test_binder() {
 
 }
@@ -89,12 +92,45 @@ async fn test_batch_query_plan() {
 
 }
 
-async fn test_batch() {
+async fn test_batch(session: Arc<SessionImpl>, sql: String) {
+    let sql_copy = sql.clone();
+    panic::set_hook(Box::new(move |e| {
+        println!("Panic on SQL:\n{}\nReason:\n{}", sql_copy.clone(), e);
+    }));
 
+    // The generated SQL must be parsable.
+    let statements = parse_sql(&sql);
+    let stmt = statements[0].clone();
+    let context: OptimizerContextRef =
+        OptimizerContext::new(session.clone(), Arc::from(sql.clone())).into();
+
+    match stmt.clone() {
+        Statement::Query(_) => {
+            let mut binder = Binder::new(
+                session.env().catalog_reader().read_guard(),
+                session.database().to_string(),
+            );
+            let bound = binder
+                .bind(stmt.clone())
+                .unwrap_or_else(|e| panic!("Failed to bind:\n{}\nReason:\n{}", sql, e));
+            let mut planner = Planner::new(context.clone());
+            let logical_plan = planner.plan(bound).unwrap_or_else(|e| {
+                panic!("Failed to generate logical plan:\n{}\nReason:\n{}", sql, e)
+            });
+            logical_plan.gen_batch_query_plan().unwrap_or_else(|e| {
+                panic!("Failed to generate batch plan:\n{}\nReason:\n{}", sql, e)
+            });
+        }
+        _ => unreachable!(),
+    }
 }
 
 fn gen_n_stream_queries(rng: &mut impl Rng, tables: Vec<Table>, n: u32) -> Vec<String> {
     (0..n).map(|i| mview_sql_gen(rng, tables.clone(), &format!("s{}", i)).0).collect()
+}
+
+async fn test_stream_parse() {
+   
 }
 
 async fn test_create_mv_plan() {
@@ -117,38 +153,11 @@ async fn run_sqlsmith_with_seed(seed: u64) {
     }
 
     let tables = create_tables(session.clone(), &mut rng).await;
-    for _ in 0..512 {
-        let sql = sql_gen(&mut rng, tables.clone());
-        let sql_copy = sql.clone();
-        panic::set_hook(Box::new(move |e| {
-            println!("Panic on SQL:\n{}\nReason:\n{}", sql_copy.clone(), e);
-        }));
 
-        // The generated SQL must be parsable.
-        let statements = parse_sql(&sql);
-        let stmt = statements[0].clone();
-        let context: OptimizerContextRef =
-            OptimizerContext::new(session.clone(), Arc::from(sql.clone())).into();
-
-        match stmt.clone() {
-            Statement::Query(_) => {
-                let mut binder = Binder::new(
-                    session.env().catalog_reader().read_guard(),
-                    session.database().to_string(),
-                );
-                let bound = binder
-                    .bind(stmt.clone())
-                    .unwrap_or_else(|e| panic!("Failed to bind:\n{}\nReason:\n{}", sql, e));
-                let mut planner = Planner::new(context.clone());
-                let logical_plan = planner.plan(bound).unwrap_or_else(|e| {
-                    panic!("Failed to generate logical plan:\n{}\nReason:\n{}", sql, e)
-                });
-                logical_plan.gen_batch_query_plan().unwrap_or_else(|e| {
-                    panic!("Failed to generate batch plan:\n{}\nReason:\n{}", sql, e)
-                });
-            }
-            _ => unreachable!(),
-        }
+    let n_testcases = 512;
+    let sqls = gen_n_batch_queries(&mut rng, tables.clone(), n_testcases);
+    for sql in sqls {
+      test_batch(session.clone(), sql).await;
     }
 }
 
