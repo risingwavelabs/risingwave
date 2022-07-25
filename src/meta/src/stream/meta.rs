@@ -324,13 +324,13 @@ where
     /// migrate actors and update fragments, generate migrate info
     pub async fn migrate_actors(
         &self,
-        migrate_map: &HashMap<ParallelUnitId, WorkerId>,
+        migrate_map: &HashMap<ActorId, WorkerId>,
         node_map: &HashMap<WorkerId, WorkerNode>,
     ) -> Result<(Vec<TableFragments>, HashMap<ParallelUnitId, ParallelUnit>)> {
         let mut parallel_unit_migrate_map = HashMap::new();
         let mut pu_hash_map: HashMap<WorkerId, Vec<&ParallelUnit>> = HashMap::new();
         let mut pu_single_map: HashMap<WorkerId, Vec<&ParallelUnit>> = HashMap::new();
-        // split parallelunits of node into types, map them with WorkerId
+        // split parallel units of node into types, map them with WorkerId
         for (node_id, node) in node_map {
             let pu_hash = node
                 .parallel_units
@@ -356,7 +356,7 @@ where
                 .for_each(|(actor_id, status)| {
                     if let Some(new_node_id) = migrate_map.get(actor_id) {
                         if let Some(ref old_parallel_unit) = status.parallel_unit {
-                            if let std::collections::hash_map::Entry::Vacant(e) =
+                            if let Entry::Vacant(e) =
                                 parallel_unit_migrate_map.entry(old_parallel_unit.id)
                             {
                                 if old_parallel_unit.r#type == ParallelUnitType::Hash as i32 {
