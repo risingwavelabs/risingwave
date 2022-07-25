@@ -34,9 +34,13 @@ pub trait SessionManager: Send + Sync + 'static {
 
 /// A psql connection. Each connection binds with a database. Switching database will need to
 /// recreate another connection.
+/// 
+/// format:
+/// false: TEXT
+/// true: BINARY
 #[async_trait::async_trait]
 pub trait Session: Send + Sync {
-    async fn run_statement(self: Arc<Self>, sql: &str) -> Result<PgResponse, BoxedError>;
+    async fn run_statement(self: Arc<Self>, sql: &str, format:bool) -> Result<PgResponse, BoxedError>;
     async fn infer_return_type(
         self: Arc<Self>,
         sql: &str,
@@ -100,6 +104,7 @@ mod tests {
     use std::error::Error;
     use std::sync::Arc;
 
+    use bytes::Bytes;
     use tokio_postgres::types::*;
     use tokio_postgres::NoTls;
 
@@ -129,18 +134,19 @@ mod tests {
         async fn run_statement(
             self: Arc<Self>,
             sql: &str,
+            _format: bool,
         ) -> Result<PgResponse, Box<dyn Error + Send + Sync>> {
             // split a statement and trim \' around the input param to construct result.
             // Ex:
             //    SELECT 'a','b' -> result: a , b
-            let res: Vec<Option<String>> = sql
+            let res: Vec<Option<Bytes>> = sql
                 .split(&[' ', ',', ';'])
                 .skip(1)
                 .map(|x| {
                     Some(
                         x.trim_start_matches('\'')
                             .trim_end_matches('\'')
-                            .to_string(),
+                            .to_string().into(),
                     )
                 })
                 .collect();

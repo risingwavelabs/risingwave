@@ -550,6 +550,11 @@ impl Session for SessionImpl {
     async fn run_statement(
         self: Arc<Self>,
         sql: &str,
+
+        // format: indicate the query PgReponse format (Only meaningful for SELECT queries).
+        // false: TEXT
+        // true: BINARY
+        format: bool,
     ) -> std::result::Result<PgResponse, BoxedError> {
         // Parse sql.
         let mut stmts = Parser::parse_sql(sql).map_err(|e| {
@@ -568,7 +573,7 @@ impl Session for SessionImpl {
             ));
         }
         let stmt = stmts.swap_remove(0);
-        let rsp = handle(self, stmt, sql).await.map_err(|e| {
+        let rsp = handle(self, stmt, sql,format).await.map_err(|e| {
             tracing::error!("failed to handle sql:\n{}:\n{}", sql, e);
             e
         })?;
