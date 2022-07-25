@@ -107,7 +107,7 @@ impl CompactionPicker for TierCompactionPicker {
             return Some(CompactionInput {
                 input_levels: vec![InputLevel {
                     level_idx: 0,
-                    level_type: 0,
+                    level_type: LevelType::Overlapping as i32,
                     table_infos: select_level_inputs,
                 }],
                 target_level: 0,

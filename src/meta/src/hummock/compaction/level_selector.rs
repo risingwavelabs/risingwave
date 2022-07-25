@@ -246,7 +246,6 @@ impl DynamicLevelSelector {
         let mut splits = vec![];
         if input.input_levels.last().unwrap().table_infos.len() > 1 {
             const SPLIT_RANGE_STEP: usize = 8;
-            const MAX_CONCURRENCY: usize = 4;
             let mut keys = input
                 .input_levels
                 .iter()
@@ -262,7 +261,10 @@ impl DynamicLevelSelector {
             if keys.len() >= SPLIT_RANGE_STEP * 2 {
                 splits.push(KeyRange::new(vec![], vec![]));
                 keys.sort_by(|a, b| VersionedComparator::compare_key(a.as_ref(), b.as_ref()));
-                let concurrency = std::cmp::min(keys.len() / SPLIT_RANGE_STEP, MAX_CONCURRENCY);
+                let concurrency = std::cmp::min(
+                    keys.len() / SPLIT_RANGE_STEP,
+                    self.config.max_sub_compaction as usize,
+                );
                 let step = (keys.len() + concurrency - 1) / concurrency;
                 assert!(step > 1);
                 for (idx, key) in keys.into_iter().enumerate() {
