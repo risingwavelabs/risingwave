@@ -29,7 +29,7 @@ size = "128MiB"
 [[case]]
 type = "Put"
 [case.args]
-name = "s3 - put - 128MiB"
+name = "s3 - put - 256MiB"
 obj = "256MiB"
 size = "256MiB"
 
@@ -63,6 +63,14 @@ type = "MultiPartUpload"
 name = "s3 - multi part upload - 128MiB-p8MiB"
 obj = "128MiB-p8MiB"
 size = "128MiB"
+part = "8MiB"
+
+[[case]]
+type = "MultiPartUpload"
+[case.args]
+name = "s3 - multi part upload - 256MiB-p8MiB"
+obj = "256MiB-p8MiB"
+size = "256MiB"
 part = "8MiB"
 
 [[case]]

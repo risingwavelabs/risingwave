@@ -38,7 +38,9 @@ const READ_BUFFER_SIZE: ByteSize = ByteSize::mib(8);
 
 // Avoid regenerate objs in the same size with `rand`.
 #[derive(Default)]
-struct ObjPool(HashMap<ByteSize, Vec<u8>>);
+struct ObjPool(
+    HashMap<(ByteSize,String), Vec<u8>>
+);
 
 #[derive(Default)]
 struct Cost {
@@ -87,10 +89,10 @@ impl Durations {
 }
 
 impl ObjPool {
-    fn obj(&mut self, size: ByteSize) -> Vec<u8> {
-        match self.0.entry(size) {
+    fn obj(&mut self, key: (ByteSize,String)) -> Vec<u8> {
+        match self.0.entry(key.clone()) {
             Entry::Occupied(o) => o.get().to_owned(),
-            Entry::Vacant(v) => v.insert(gen_obj(size)).to_owned(),
+            Entry::Vacant(v) => v.insert(gen_obj(key.0.clone())).to_owned(),
         }
     }
 }
@@ -322,7 +324,7 @@ async fn run_case(index: usize, case: Case, cfg: Arc<Config>, client: Arc<Client
             obj: obj_name,
             size: obj_size,
         } => {
-            let obj = objs.write().await.obj(obj_size);
+            let obj = objs.write().await.obj((obj_size,obj_name.clone()));
             (
                 name.to_owned(),
                 iter_exec(|| put(cfg.clone(), client, obj_name, obj), cfg.iter.clone()).await,
@@ -334,7 +336,7 @@ async fn run_case(index: usize, case: Case, cfg: Arc<Config>, client: Arc<Client
             size: obj_size,
             part: part_size,
         } => {
-            let obj = objs.write().await.obj(obj_size);
+            let obj = objs.write().await.obj((obj_size,obj_name.clone()));
             (
                 name.to_owned(),
                 iter_exec(
@@ -541,7 +543,7 @@ async fn main() {
                 .block_on(async move{
                     try_join_all(features).await.unwrap();
                 });
-        });
+        }).join().unwrap();
     }else{
         for (i, case) in cases.drain(..).enumerate() {
             debug!("running case: {:?}", case);
