@@ -30,7 +30,7 @@ use risingwave_hummock_sdk::compact::compact_task_to_string;
 use risingwave_hummock_sdk::compaction_group::hummock_version_ext::HummockVersionExt;
 use risingwave_hummock_sdk::{
     get_remote_sst_id, CompactionGroupId, HummockCompactionTaskId, HummockContextId, HummockEpoch,
-    HummockRefCount, HummockSSTableId, HummockVersionId, LocalSstableInfo, FIRST_VERSION_ID,
+    HummockRefCount, HummockSstableId, HummockVersionId, LocalSstableInfo, FIRST_VERSION_ID,
 };
 use risingwave_pb::hummock::hummock_version::Levels;
 use risingwave_pb::hummock::{
@@ -181,14 +181,14 @@ struct Versioning {
     // mapping from id of each hummock version which succeeds checkpoint to ids of each SST in that
     // `HummockVersion`, because we need to search `HummockVersion` for useless SSTs in order to
     // determine whether a SST can be deleted in vacuum process
-    hummock_versions: BTreeMap<HummockVersionId, Vec<HummockSSTableId>>,
+    hummock_versions: BTreeMap<HummockVersionId, Vec<HummockSstableId>>,
     // mapping from id of each hummock version which succeeds checkpoint to its
     // `HummockVersionDelta`
     hummock_version_deltas: BTreeMap<HummockVersionId, HummockVersionDelta>,
     pinned_versions: BTreeMap<HummockContextId, HummockPinnedVersion>,
     pinned_snapshots: BTreeMap<HummockContextId, HummockPinnedSnapshot>,
     stale_sstables: BTreeMap<HummockVersionId, HummockStaleSstables>,
-    sstable_id_infos: BTreeMap<HummockSSTableId, SstableIdInfo>,
+    sstable_id_infos: BTreeMap<HummockSstableId, SstableIdInfo>,
 }
 
 impl Versioning {
@@ -1088,14 +1088,14 @@ where
     }
 
     #[named]
-    pub async fn get_new_table_id(&self) -> Result<HummockSSTableId> {
+    pub async fn get_new_table_id(&self) -> Result<HummockSstableId> {
         // TODO id_gen_manager generates u32, we need u64
         let sstable_id = get_remote_sst_id(
             self.env
                 .id_gen_manager()
-                .generate::<{ IdCategory::HummockSSTableId }>()
+                .generate::<{ IdCategory::HummockSstableId }>()
                 .await
-                .map(|id| id as HummockSSTableId)?,
+                .map(|id| id as HummockSstableId)?,
         );
 
         let mut versioning_guard = write_lock!(self, versioning).await;
@@ -1279,7 +1279,7 @@ where
     pub async fn get_ssts_to_delete(
         &self,
         version_id: HummockVersionId,
-    ) -> Result<Vec<HummockSSTableId>> {
+    ) -> Result<Vec<HummockSstableId>> {
         let versioning_guard = read_lock!(self, versioning).await;
         let _timer = start_measure_real_process_timer!(self);
         Ok(versioning_guard
@@ -1293,7 +1293,7 @@ where
     pub async fn delete_will_not_be_used_ssts(
         &self,
         version_id: HummockVersionId,
-        ssts_in_use: &HashSet<HummockSSTableId>,
+        ssts_in_use: &HashSet<HummockSstableId>,
     ) -> Result<()> {
         let mut versioning_guard = write_lock!(self, versioning).await;
         let _timer = start_measure_real_process_timer!(self);
@@ -1451,7 +1451,7 @@ where
     }
 
     #[named]
-    pub async fn delete_sstable_ids(&self, sst_ids: impl AsRef<[HummockSSTableId]>) -> Result<()> {
+    pub async fn delete_sstable_ids(&self, sst_ids: impl AsRef<[HummockSstableId]>) -> Result<()> {
         let mut versioning_guard = write_lock!(self, versioning).await;
         let _timer = start_measure_real_process_timer!(self);
         let mut sstable_id_infos = BTreeMapTransaction::new(&mut versioning_guard.sstable_id_infos);

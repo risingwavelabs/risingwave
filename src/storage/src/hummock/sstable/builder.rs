@@ -30,7 +30,7 @@ pub const DEFAULT_SSTABLE_SIZE: usize = 4 * 1024 * 1024;
 pub const DEFAULT_BLOOM_FALSE_POSITIVE: f64 = 0.1;
 
 #[derive(Clone, Debug)]
-pub struct SSTableBuilderOptions {
+pub struct SstableBuilderOptions {
     /// Approximate sstable capacity.
     pub capacity: usize,
     /// Approximate block capacity.
@@ -43,9 +43,9 @@ pub struct SSTableBuilderOptions {
     pub compression_algorithm: CompressionAlgorithm,
 }
 
-impl From<&StorageConfig> for SSTableBuilderOptions {
-    fn from(options: &StorageConfig) -> SSTableBuilderOptions {
-        SSTableBuilderOptions {
+impl From<&StorageConfig> for SstableBuilderOptions {
+    fn from(options: &StorageConfig) -> SstableBuilderOptions {
+        SstableBuilderOptions {
             capacity: (options.sstable_size_mb as usize) * (1 << 20),
             block_capacity: (options.block_size_kb as usize) * (1 << 10),
             restart_interval: DEFAULT_RESTART_INTERVAL,
@@ -55,7 +55,7 @@ impl From<&StorageConfig> for SSTableBuilderOptions {
     }
 }
 
-impl Default for SSTableBuilderOptions {
+impl Default for SstableBuilderOptions {
     fn default() -> Self {
         Self {
             capacity: DEFAULT_SSTABLE_SIZE,
@@ -67,9 +67,9 @@ impl Default for SSTableBuilderOptions {
     }
 }
 
-pub struct SSTableBuilder {
+pub struct SstableBuilder {
     /// Options.
-    options: SSTableBuilderOptions,
+    options: SstableBuilderOptions,
     /// Write buffer.
     buf: BytesMut,
     /// Current block builder.
@@ -86,8 +86,8 @@ pub struct SSTableBuilder {
     sstable_id: u64,
 }
 
-impl SSTableBuilder {
-    pub fn new(sstable_id: u64, options: SSTableBuilderOptions) -> Self {
+impl SstableBuilder {
+    pub fn new(sstable_id: u64, options: SstableBuilderOptions) -> Self {
         Self {
             options: options.clone(),
             buf: BytesMut::with_capacity(options.capacity),
@@ -229,7 +229,7 @@ pub(super) mod tests {
     #[test]
     #[should_panic]
     fn test_empty() {
-        let opt = SSTableBuilderOptions {
+        let opt = SstableBuilderOptions {
             capacity: 0,
             block_capacity: 4096,
             restart_interval: 16,
@@ -237,14 +237,14 @@ pub(super) mod tests {
             compression_algorithm: CompressionAlgorithm::None,
         };
 
-        let b = SSTableBuilder::new(0, opt);
+        let b = SstableBuilder::new(0, opt);
 
         b.finish();
     }
 
     #[test]
     fn test_smallest_key_and_largest_key() {
-        let mut b = SSTableBuilder::new(0, default_builder_opt_for_test());
+        let mut b = SstableBuilder::new(0, default_builder_opt_for_test());
 
         for i in 0..TEST_KEYS_COUNT {
             b.add(&test_key_of(i), HummockValue::put(&test_value_of(i)));
@@ -259,7 +259,7 @@ pub(super) mod tests {
     async fn test_with_bloom_filter(with_blooms: bool) {
         let key_count = 1000;
 
-        let opts = SSTableBuilderOptions {
+        let opts = SstableBuilderOptions {
             capacity: 0,
             block_capacity: 4096,
             restart_interval: 16,

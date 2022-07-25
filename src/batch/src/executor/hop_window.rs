@@ -146,7 +146,7 @@ impl HopWindowExecutor {
             .exact_div(&window_slide)
             .and_then(|x| NonZeroUsize::new(usize::try_from(x).ok()?))
             .ok_or_else(|| ExprError::InvalidParam {
-                name: "",
+                name: "window",
                 reason: format!(
                     "window_size {} cannot be divided by window_slide {}",
                     window_size, window_slide
