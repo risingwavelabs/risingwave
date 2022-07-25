@@ -68,6 +68,7 @@ impl BatchSeqScan {
     }
 
     pub fn new(logical: LogicalScan, scan_ranges: Vec<ScanRange>) -> Self {
+        // Use `Single` by default, will be updated later with `clone_with_dist`.
         Self::new_inner(logical, Distribution::Single, scan_ranges)
     }
 
@@ -78,6 +79,7 @@ impl BatchSeqScan {
                 Distribution::Single
             } else {
                 match self.logical.distribution_key() {
+                    Some(dist_key) if dist_key.is_empty() => Distribution::Single,
                     Some(dist_key) => Distribution::HashShard(dist_key),
                     None => Distribution::SomeShard,
                 }
@@ -133,13 +135,14 @@ impl fmt::Display for BatchSeqScan {
         if self.scan_ranges.is_empty() {
             write!(
                 f,
-                "BatchScan {{ table: {}, columns: [{}] }}",
+                "BatchScan {{ table: {}, columns: [{}], distribution: {} }}",
                 self.logical.table_name(),
                 match verbose {
                     true => self.logical.column_names_with_table_prefix(),
                     false => self.logical.column_names(),
                 }
-                .join(", ")
+                .join(", "),
+                self.distribution()
             )
         } else {
             let order_names = match verbose {

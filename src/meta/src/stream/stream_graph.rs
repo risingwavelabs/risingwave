@@ -820,8 +820,8 @@ impl ActorGraphBuilder {
             .collect();
 
         Ok(Self {
-            fragment_graph,
             parallelisms,
+            fragment_graph,
         })
     }
 
@@ -893,7 +893,7 @@ impl ActorGraphBuilder {
                     fragment_id,
                     Fragment {
                         fragment_id,
-                        fragment_type: fragment.fragment_type as i32,
+                        fragment_type: fragment.fragment_type,
                         distribution_type: if fragment.is_singleton {
                             FragmentDistributionType::Single
                         } else {

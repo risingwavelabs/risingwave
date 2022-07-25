@@ -96,6 +96,7 @@ impl fmt::Display for StreamTableScan {
                 ),
             )
             .field("pk_indices", &format_args!("{:?}", self.base.pk_indices))
+            .field("distribution", &self.distribution())
             .finish()
     }
 }
@@ -167,6 +168,7 @@ impl StreamTableScan {
                     .iter()
                     .map(|x| x.column_id.get_id())
                     .collect(),
+                is_singleton: *self.distribution() == Distribution::Single,
             })),
             pk_indices,
             operator_id: if auto_fields {

@@ -22,6 +22,7 @@ use risingwave_common::error::Result;
 use risingwave_common::types::{ParallelUnitId, VIRTUAL_NODE_COUNT};
 use risingwave_pb::catalog::{Source, Table};
 use risingwave_pb::common::{ActorInfo, ParallelUnitMapping, WorkerType};
+use risingwave_pb::meta::table_fragments::fragment::FragmentDistributionType;
 use risingwave_pb::meta::table_fragments::{ActorState, ActorStatus};
 use risingwave_pb::stream_plan::stream_node::NodeBody;
 use risingwave_pb::stream_plan::{ActorMapping, Dispatcher, DispatcherType, StreamNode};
@@ -146,15 +147,15 @@ where
                 stream_node: &mut StreamNode,
                 actor_id: ActorId,
                 same_worker_node_as_upstream: bool,
+                is_singleton: bool,
             ) -> Result<()> {
                 let Some(NodeBody::Chain(ref mut chain)) = stream_node.node_body else {
                     // If node is not chain node, recursively deal with input nodes
                     for input in &mut stream_node.input {
-                        self.resolve_chain_node_inner(input, actor_id, same_worker_node_as_upstream)?;
+                        self.resolve_chain_node_inner(input, actor_id, same_worker_node_as_upstream, is_singleton)?;
                     }
                     return Ok(());
                 };
-                // If node is chain node, we insert upstream ids into chain's input (merge)
 
                 // get upstream table id
                 let table_id = TableId::new(chain.table_id);
@@ -163,13 +164,20 @@ where
                     // 1. use table id to get upstream parallel_unit -> actor_id mapping
                     let upstream_parallel_actor_mapping =
                         &self.upstream_parallel_unit_info[&table_id];
-                    dbg!(&upstream_parallel_actor_mapping);
-                    // 2. use our actor id to get parallel unit id of the chain actor
-                    let parallel_unit_id = self.locations.actor_locations[&actor_id].id;
-                    dbg!(&parallel_unit_id);
-                    // 3. and use chain actor's parallel unit id to get the corresponding upstream
-                    // actor id
-                    upstream_parallel_actor_mapping[&parallel_unit_id]
+                    // dbg!(&upstream_parallel_actor_mapping);
+
+                    if is_singleton {
+                        // Directly find the singleton actor id.
+                        assert!(upstream_parallel_actor_mapping.len() == 1);
+                        *upstream_parallel_actor_mapping.values().next().unwrap()
+                    } else {
+                        // 2. use our actor id to get parallel unit id of the chain actor
+                        let parallel_unit_id = self.locations.actor_locations[&actor_id].id;
+                        // dbg!(&parallel_unit_id);
+                        // 3. and use chain actor's parallel unit id to get the corresponding
+                        // upstream actor id
+                        upstream_parallel_actor_mapping[&parallel_unit_id]
+                    }
                 };
 
                 // The current implementation already ensures chain and upstream are on the same
@@ -265,14 +273,17 @@ where
         };
 
         for fragment in table_fragments.fragments.values_mut() {
+            let is_singleton =
+                fragment.get_distribution_type()? == FragmentDistributionType::Single;
+
             for actor in &mut fragment.actors {
-                if let Some(ref mut stream_node) = actor.nodes {
-                    env.resolve_chain_node_inner(
-                        stream_node,
-                        actor.actor_id,
-                        actor.same_worker_node_as_upstream,
-                    )?;
-                }
+                let stream_node = actor.nodes.as_mut().unwrap();
+                env.resolve_chain_node_inner(
+                    stream_node,
+                    actor.actor_id,
+                    actor.same_worker_node_as_upstream,
+                    is_singleton,
+                )?;
             }
         }
         Ok(())
