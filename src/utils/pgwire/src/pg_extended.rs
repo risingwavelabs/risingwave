@@ -214,10 +214,6 @@ impl PgPortal {
         self.row_description.clone()
     }
 
-    pub fn result_format(&self) -> bool {
-        self.result_format
-    }
-
     pub async fn execute<SM: SessionManager>(
         &mut self,
         session: Arc<SM::Session>,
@@ -225,7 +221,7 @@ impl PgPortal {
     ) -> Result<PgResponse, BoxedError> {
         if self.result_cache.is_none() {
             let process_res = session
-                .run_statement(cstr_to_str(&self.query_string).unwrap())
+                .run_statement(cstr_to_str(&self.query_string).unwrap(), self.result_format)
                 .await;
 
             // Return result directly if
