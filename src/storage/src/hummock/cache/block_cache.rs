@@ -20,6 +20,7 @@ use std::sync::Arc;
 use bytes::{Buf, BufMut, Bytes};
 use futures::Future;
 use risingwave_common::cache::{CachableEntry, LruCache, LruCacheEventListener};
+use risingwave_common::config::TieredCacheConfig;
 use risingwave_hummock_sdk::HummockSstableId;
 
 use crate::hummock::{
@@ -100,14 +101,6 @@ impl TieredCacheKey for CacheKey {
     }
 }
 
-#[derive(Clone)]
-pub struct BlockCache {
-    // TODO: replace `(HummockSstableId, u64)` with CacheKey.
-    inner: Arc<LruCache<(HummockSstableId, u64), Box<Block>>>,
-
-    tiered_cache: TieredCache<CacheKey>,
-}
-
 // N (4B) + N * restart point len (N * 4B) + data len
 fn encode_block(block: &Block) -> Vec<u8> {
     let mut buf = Vec::with_capacity(block.len() + 4 + block.restart_point_len() * 4);
@@ -158,9 +151,38 @@ impl LruCacheEventListener for MemoryBlockCacheEventListener {
     }
 }
 
+#[derive(Clone)]
+pub struct BlockCache {
+    // TODO: replace `(HummockSstableId, u64)` with CacheKey.
+    inner: Arc<LruCache<(HummockSstableId, u64), Box<Block>>>,
+
+    tiered_cache: TieredCache<CacheKey>,
+}
+
 impl BlockCache {
-    pub async fn new(capacity: usize, mut max_shard_bits: usize) -> Self {
-        let tiered_cache_options = TieredCacheOptions::NoneCache;
+    pub async fn new(
+        capacity: usize,
+        mut max_shard_bits: usize,
+        tiered_cache_config: TieredCacheConfig,
+    ) -> Self {
+        let tiered_cache_options = match tiered_cache_config {
+            TieredCacheConfig::NoneCache => TieredCacheOptions::NoneCache,
+            #[cfg(target_os = "linux")]
+            TieredCacheConfig::FileCache(config) => {
+                use crate::hummock::file_cache::cache::FileCacheOptions;
+                TieredCacheOptions::FileCache(FileCacheOptions {
+                    dir: config.dir,
+                    capacity: config.capacity,
+                    total_buffer_capacity: config.total_buffer_capacity,
+                    cache_file_fallocate_unit: config.cache_file_fallocate_unit,
+                    flush_buffer_hooks: vec![],
+                })
+            }
+            #[cfg(not(target_os = "linux"))]
+            TieredCacheConfig::FileCache(_) => {
+                panic!("file cache is not supported on not-linux targets")
+            }
+        };
         let tiered_cache = TieredCache::open(tiered_cache_options).await.unwrap();
 
         let listener = Arc::new(MemoryBlockCacheEventListener {

@@ -15,6 +15,7 @@
 use std::iter::Iterator;
 use std::sync::Arc;
 
+use risingwave_common::config::TieredCacheConfig;
 use risingwave_hummock_sdk::key::{key_with_epoch, Epoch};
 use risingwave_hummock_sdk::HummockSstableId;
 use risingwave_object_store::object::{
@@ -59,7 +60,16 @@ pub async fn mock_sstable_store() -> SstableStoreRef {
 
 pub async fn mock_sstable_store_with_object_store(store: ObjectStoreRef) -> SstableStoreRef {
     let path = "test".to_string();
-    Arc::new(SstableStore::new(store, path, 64 << 20, 64 << 20).await)
+    Arc::new(
+        SstableStore::new(
+            store,
+            path,
+            64 << 20,
+            64 << 20,
+            TieredCacheConfig::NoneCache,
+        )
+        .await,
+    )
 }
 
 /// Generates keys like `key_test_00002` with epoch 233.

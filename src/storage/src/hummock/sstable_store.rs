@@ -17,6 +17,7 @@ use std::sync::Arc;
 
 use bytes::Bytes;
 use fail::fail_point;
+use risingwave_common::config::TieredCacheConfig;
 use risingwave_hummock_sdk::{is_remote_sst_id, HummockSstableId};
 use risingwave_object_store::object::{get_local_path, BlockLocation, ObjectStore, ObjectStoreRef};
 
@@ -54,6 +55,7 @@ impl SstableStore {
         path: String,
         block_cache_capacity: usize,
         meta_cache_capacity: usize,
+        tiered_cache_config: TieredCacheConfig,
     ) -> Self {
         let mut shard_bits = MAX_META_CACHE_SHARD_BITS;
         while (meta_cache_capacity >> shard_bits) < MIN_BUFFER_SIZE_PER_SHARD && shard_bits > 0 {
@@ -63,7 +65,12 @@ impl SstableStore {
         Self {
             path,
             store,
-            block_cache: BlockCache::new(block_cache_capacity, MAX_CACHE_SHARD_BITS).await,
+            block_cache: BlockCache::new(
+                block_cache_capacity,
+                MAX_CACHE_SHARD_BITS,
+                tiered_cache_config,
+            )
+            .await,
             meta_cache,
         }
     }
@@ -80,7 +87,8 @@ impl SstableStore {
         Self {
             path,
             store,
-            block_cache: BlockCache::new(block_cache_capacity, 2).await,
+            block_cache: BlockCache::new(block_cache_capacity, 2, TieredCacheConfig::NoneCache)
+                .await,
             meta_cache,
         }
     }

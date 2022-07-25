@@ -121,6 +121,7 @@ impl StateStoreImpl {
                         config.data_directory.to_string(),
                         config.block_cache_capacity_mb * (1 << 20),
                         config.meta_cache_capacity_mb * (1 << 20),
+                        config.tiered_cache.clone(),
                     )
                     .await,
                 );

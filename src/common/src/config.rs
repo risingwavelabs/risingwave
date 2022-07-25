@@ -168,12 +168,46 @@ pub struct StorageConfig {
     #[serde(default = "default::share_buffer_upload_concurrency")]
     pub share_buffer_upload_concurrency: usize,
 
-    /// URI for tiered cache.
-    #[serde(default = "default::tiered_cache_uri")]
-    pub tiered_cache_uri: String,
+    #[serde(default)]
+    pub tiered_cache: TieredCacheConfig,
 }
 
 impl Default for StorageConfig {
+    fn default() -> Self {
+        toml::from_str("").unwrap()
+    }
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize)]
+#[serde(deny_unknown_fields, tag = "type", content = "args")]
+pub enum TieredCacheConfig {
+    NoneCache,
+    FileCache(FileCacheConfig),
+}
+
+impl Default for TieredCacheConfig {
+    fn default() -> Self {
+        Self::NoneCache
+    }
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct FileCacheConfig {
+    /// Directory for cache data.
+    pub dir: String,
+
+    #[serde(default = "default::file_cache_capacity")]
+    pub capacity: usize,
+
+    #[serde(default = "default::file_cache_total_buffer_capacity")]
+    pub total_buffer_capacity: usize,
+
+    #[serde(default = "default::file_cache_cache_file_fallocate_unit")]
+    pub cache_file_fallocate_unit: usize,
+}
+
+impl Default for FileCacheConfig {
     fn default() -> Self {
         toml::from_str("").unwrap()
     }
@@ -292,8 +326,19 @@ mod default {
         4
     }
 
-    pub fn tiered_cache_uri() -> String {
-        "none://".to_string()
+    pub fn file_cache_capacity() -> usize {
+        // 1 GiB
+        1024 * 1024 * 1024
+    }
+
+    pub fn file_cache_total_buffer_capacity() -> usize {
+        // 128 MiB
+        128 * 1024 * 1024
+    }
+
+    pub fn file_cache_cache_file_fallocate_unit() -> usize {
+        // 96 MiB
+        96 * 1024 * 1024
     }
 }
 
