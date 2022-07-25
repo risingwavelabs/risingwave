@@ -158,8 +158,8 @@ impl HummockStorage {
         }
         // Might have the key, take it as might positive.
         stats.bloom_filter_might_positive_count += 1;
-        // TODO: now SstableIterator not use prefect through SstableIteratorReadOptions, so use
-        // default before refine
+        // TODO: now SstableIterator does not use prefetch through SstableIteratorReadOptions, so we
+        // use default before refinement.
         let mut iter = SstableIterator::create(
             sstable,
             self.sstable_store.clone(),
