@@ -217,13 +217,6 @@ impl ops::Index<usize> for Row {
     }
 }
 
-impl AsRef<Row> for Row {
-    #[inline]
-    fn as_ref(&self) -> &Row {
-        self
-    }
-}
-
 // TODO: remove this due to implicit allocation
 impl From<RowRef<'_>> for Row {
     fn from(row_ref: RowRef<'_>) -> Self {

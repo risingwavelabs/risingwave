@@ -19,7 +19,7 @@ use std::sync::Arc;
 
 use futures::Future;
 use risingwave_common::cache::{CachableEntry, LruCache};
-use risingwave_hummock_sdk::HummockSSTableId;
+use risingwave_hummock_sdk::HummockSstableId;
 
 use super::{Block, HummockResult};
 use crate::hummock::HummockError;
@@ -27,7 +27,7 @@ use crate::hummock::HummockError;
 const MIN_BUFFER_SIZE_PER_SHARD: usize = 32 * 1024 * 1024;
 
 enum BlockEntry {
-    Cache(CachableEntry<(HummockSSTableId, u64), Box<Block>>),
+    Cache(CachableEntry<(HummockSstableId, u64), Box<Block>>),
     Owned(Box<Block>),
     RefEntry(Arc<Block>),
 }
@@ -54,7 +54,7 @@ impl BlockHolder {
         }
     }
 
-    pub fn from_cached_block(entry: CachableEntry<(HummockSSTableId, u64), Box<Block>>) -> Self {
+    pub fn from_cached_block(entry: CachableEntry<(HummockSstableId, u64), Box<Block>>) -> Self {
         let ptr = entry.value().as_ref() as *const _;
         Self {
             _handle: BlockEntry::Cache(entry),
@@ -76,7 +76,7 @@ unsafe impl Sync for BlockHolder {}
 
 #[derive(Clone)]
 pub struct BlockCache {
-    inner: Arc<LruCache<(HummockSSTableId, u64), Box<Block>>>,
+    inner: Arc<LruCache<(HummockSstableId, u64), Box<Block>>>,
 }
 
 impl BlockCache {
@@ -93,7 +93,7 @@ impl BlockCache {
         }
     }
 
-    pub fn get(&self, sst_id: HummockSSTableId, block_idx: u64) -> Option<BlockHolder> {
+    pub fn get(&self, sst_id: HummockSstableId, block_idx: u64) -> Option<BlockHolder> {
         self.inner
             .lookup(Self::hash(sst_id, block_idx), &(sst_id, block_idx))
             .map(BlockHolder::from_cached_block)
@@ -101,7 +101,7 @@ impl BlockCache {
 
     pub fn insert(
         &self,
-        sst_id: HummockSSTableId,
+        sst_id: HummockSstableId,
         block_idx: u64,
         block: Box<Block>,
     ) -> BlockHolder {
@@ -115,7 +115,7 @@ impl BlockCache {
 
     pub async fn get_or_insert_with<F, Fut>(
         &self,
-        sst_id: HummockSSTableId,
+        sst_id: HummockSstableId,
         block_idx: u64,
         f: F,
     ) -> HummockResult<BlockHolder>
@@ -145,7 +145,7 @@ impl BlockCache {
         Ok(BlockHolder::from_cached_block(entry))
     }
 
-    fn hash(sst_id: HummockSSTableId, block_idx: u64) -> u64 {
+    fn hash(sst_id: HummockSstableId, block_idx: u64) -> u64 {
         let mut hasher = DefaultHasher::default();
         sst_id.hash(&mut hasher);
         block_idx.hash(&mut hasher);
