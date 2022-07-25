@@ -101,6 +101,7 @@ where
     ) -> Result<WorkerNode> {
         let mut core = self.core.write().await;
         match core.get_worker_by_host(host_address.clone()) {
+            // TODO(zehua): update parallelism when the worker exists.
             Some(worker) => Ok(worker.to_protobuf()),
             None => {
                 // Generate worker id.
