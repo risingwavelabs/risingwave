@@ -206,7 +206,11 @@ impl TestCase {
             "-v",
             "HIDE_TOAST_COMPRESSION=on",
         ];
-        println!("Ready to run command:\npsql {}", args.join(" "));
+        println!(
+            "Ready to run command:\npsql {}\n for test case:{}",
+            args.join(" "),
+            self.test_name
+        );
 
         let extra_lines_added_to_input = match self.opts.database_mode() {
             DatabaseMode::Risingwave => {
@@ -227,13 +231,6 @@ impl TestCase {
                 )
             })?;
 
-        let error_path = self.file_manager.error_of(&self.test_name)?;
-        let error_file = File::options()
-            .create_new(true)
-            .write(true)
-            .open(&error_path)
-            .with_context(|| format!("Failed to create {:?} for writing error.", error_path))?;
-
         let mut command = Command::new("psql");
         command.env(
             "PGAPPNAME",
@@ -249,7 +246,7 @@ impl TestCase {
             .stdout(actual_output_file.try_clone().with_context(|| {
                 format!("Failed to clone output file: {:?}", actual_output_path)
             })?)
-            .stderr(error_file)
+            .stderr(actual_output_file)
             .spawn()
             .with_context(|| format!("Failed to spawn child for test case: {}", self.test_name))?;
 
@@ -270,8 +267,8 @@ impl TestCase {
         })?;
 
         if !status.success() {
-            let error_output = read_lines(&error_path, 0)
-                .with_context(|| format!("Failed to read error file: {:?}", error_path))?;
+            let error_output = read_lines(&actual_output_path, 0)
+                .with_context(|| format!("Failed to read output file: {:?}", actual_output_path))?;
             let error_msg = format!(
                 "Execution of test case {} failed, reason:\n{}",
                 self.test_name, error_output
