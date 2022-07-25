@@ -17,6 +17,8 @@ use itertools::{Either, Itertools};
 use super::super::plan_node::*;
 use super::{BoxedRule, Rule};
 use crate::expr::{CorrelatedId, CorrelatedInputRef, Expr, ExprImpl, ExprRewriter, InputRef};
+use crate::optimizer::plan_correlated_id_finder::PlanCorrelatedIdFinder;
+use crate::optimizer::plan_visitor::PlanVisitor;
 use crate::optimizer::PlanRef;
 use crate::utils::Condition;
 
@@ -73,6 +75,14 @@ impl Rule for PullUpCorrelatedPredicateRule {
         );
 
         let project: PlanRef = LogicalProject::new(filter, proj_exprs).into();
+
+        // Check whether correlated_input_ref with same correlated_id exists for the join right
+        // side. If yes, bail out and left for general subquery unnesting to deal with
+        let mut plan_correlated_id_finder = PlanCorrelatedIdFinder::new();
+        plan_correlated_id_finder.visit(project.clone());
+        if plan_correlated_id_finder.contains(&correlated_id) {
+            return None;
+        }
 
         // Merge these expressions with LogicalApply into LogicalJoin.
         let on = apply_on.and(Condition {
