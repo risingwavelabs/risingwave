@@ -25,44 +25,72 @@ pub trait TieredCacheKey: Eq + Send + Sync + Hash + Clone + 'static + std::fmt::
 #[cfg(target_os = "linux")]
 pub mod file_cache;
 
-#[cfg(target_os = "linux")]
-pub mod linux {
-    use super::file_cache::cache::FileCache;
+use std::marker::PhantomData;
 
-    pub type TieredCacheError = super::file_cache::error::Error;
-
-    pub type TieredCache<K> = FileCache<K>;
+#[derive(thiserror::Error, Debug)]
+pub enum TieredCacheError {
+    #[cfg(target_os = "linux")]
+    #[error("file cache error: {0}")]
+    FileCache(#[from] file_cache::error::Error),
 }
 
-#[cfg(not(target_os = "linux"))]
-pub mod not_linux {
-    use std::marker::PhantomData;
+pub type Result<T> = core::result::Result<T, TieredCacheError>;
 
-    use super::TieredCacheKey;
-    use crate::hummock::HummockResult;
+pub enum TieredCacheOptions {
+    NoneCache,
+    #[cfg(target_os = "linux")]
+    FileCache(file_cache::cache::FileCacheOptions),
+}
 
-    #[derive(thiserror::Error, Debug)]
-    pub enum TieredCacheError {}
+#[derive(Clone)]
+pub enum TieredCache<K: TieredCacheKey> {
+    NoneCache(PhantomData<K>),
+    #[cfg(target_os = "linux")]
+    FileCache(file_cache::cache::FileCache<K>),
+}
 
-    #[derive(Clone)]
-    pub struct TieredCache<K: TieredCacheKey>(PhantomData<K>);
-
-    impl<K: TieredCacheKey> TieredCache<K> {
-        pub fn insert(&self, _key: K, _value: Vec<u8>) -> HummockResult<()> {
-            Ok(())
+impl<K: TieredCacheKey> TieredCache<K> {
+    pub async fn open(options: TieredCacheOptions) -> Result<Self> {
+        match options {
+            TieredCacheOptions::NoneCache => Ok(Self::NoneCache(PhantomData::default())),
+            #[cfg(target_os = "linux")]
+            TieredCacheOptions::FileCache(options) => {
+                let file_cache = file_cache::cache::FileCache::open(options).await?;
+                Ok(Self::FileCache(file_cache))
+            }
         }
+    }
 
-        pub async fn get(&self, _key: &K) -> HummockResult<Option<Vec<u8>>> {
-            Ok(None)
+    pub fn insert(&self, key: K, value: Vec<u8>) -> Result<()> {
+        match self {
+            TieredCache::NoneCache(_) => Ok(()),
+            #[cfg(target_os = "linux")]
+            TieredCache::FileCache(file_cache) => {
+                file_cache.insert(key, value)?;
+                Ok(())
+            }
         }
+    }
 
-        pub fn erase(&self, _key: &K) -> HummockResult<()> {
-            Ok(())
+    pub fn erase(&self, key: &K) -> Result<()> {
+        match self {
+            TieredCache::NoneCache(_) => Ok(()),
+            #[cfg(target_os = "linux")]
+            TieredCache::FileCache(file_cache) => {
+                file_cache.erase(key)?;
+                Ok(())
+            }
+        }
+    }
+
+    pub async fn get(&self, key: &K) -> Result<Option<Vec<u8>>> {
+        match self {
+            TieredCache::NoneCache(_) => Ok(None),
+            #[cfg(target_os = "linux")]
+            TieredCache::FileCache(file_cache) => {
+                let value = file_cache.get(key).await?;
+                Ok(value)
+            }
         }
     }
 }
-
-#[cfg(target_os = "linux")]
-pub use linux::*;
-#[cfg(not(target_os = "linux"))]
-pub use not_linux::*;

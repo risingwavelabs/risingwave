@@ -194,7 +194,7 @@ mod tests {
         let builder = CapacitySplitTableBuilder::new(
             get_id_and_builder,
             CachePolicy::NotFill,
-            mock_sstable_store(),
+            mock_sstable_store().await,
         );
         let results = builder.finish();
         assert!(results.is_empty());
@@ -221,7 +221,7 @@ mod tests {
         let mut builder = CapacitySplitTableBuilder::new(
             get_id_and_builder,
             CachePolicy::NotFill,
-            mock_sstable_store(),
+            mock_sstable_store().await,
         );
 
         for i in 0..table_capacity {
@@ -251,7 +251,7 @@ mod tests {
                 ))
             },
             CachePolicy::NotFill,
-            mock_sstable_store(),
+            mock_sstable_store().await,
         );
         let mut epoch = 100;
 
@@ -296,7 +296,7 @@ mod tests {
                 ))
             },
             CachePolicy::NotFill,
-            mock_sstable_store(),
+            mock_sstable_store().await,
         );
 
         builder

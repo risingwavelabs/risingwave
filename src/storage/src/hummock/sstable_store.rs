@@ -49,7 +49,7 @@ pub struct SstableStore {
 }
 
 impl SstableStore {
-    pub fn new(
+    pub async fn new(
         store: ObjectStoreRef,
         path: String,
         block_cache_capacity: usize,
@@ -63,14 +63,14 @@ impl SstableStore {
         Self {
             path,
             store,
-            block_cache: BlockCache::new(block_cache_capacity, MAX_CACHE_SHARD_BITS),
+            block_cache: BlockCache::new(block_cache_capacity, MAX_CACHE_SHARD_BITS).await,
             meta_cache,
         }
     }
 
     /// For compactor, we do not need a high concurrency load for cache. Instead, we need the cache
     ///  can be evict more effective.
-    pub fn for_compactor(
+    pub async fn for_compactor(
         store: ObjectStoreRef,
         path: String,
         block_cache_capacity: usize,
@@ -80,7 +80,7 @@ impl SstableStore {
         Self {
             path,
             store,
-            block_cache: BlockCache::new(block_cache_capacity, 2),
+            block_cache: BlockCache::new(block_cache_capacity, 2).await,
             meta_cache,
         }
     }
@@ -188,7 +188,7 @@ impl SstableStore {
                     .get_or_insert_with(sst.id, block_index, fetch_block)
                     .await
             }
-            CachePolicy::NotFill => match self.block_cache.get(sst.id, block_index) {
+            CachePolicy::NotFill => match self.block_cache.get(sst.id, block_index).await {
                 Some(block) => Ok(block),
                 None => fetch_block().await.map(BlockHolder::from_owned_block),
             },
@@ -313,7 +313,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_read_whole_data_object() {
-        let sstable_store = mock_sstable_store();
+        let sstable_store = mock_sstable_store().await;
         let (data, meta, _) = gen_test_sstable_data(
             default_builder_opt_for_test(),
             (0..100).map(|x| {

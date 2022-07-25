@@ -115,12 +115,15 @@ impl StateStoreImpl {
                     remote_object_store
                 };
 
-                let sstable_store = Arc::new(SstableStore::new(
-                    Arc::new(object_store),
-                    config.data_directory.to_string(),
-                    config.block_cache_capacity_mb * (1 << 20),
-                    config.meta_cache_capacity_mb * (1 << 20),
-                ));
+                let sstable_store = Arc::new(
+                    SstableStore::new(
+                        Arc::new(object_store),
+                        config.data_directory.to_string(),
+                        config.block_cache_capacity_mb * (1 << 20),
+                        config.meta_cache_capacity_mb * (1 << 20),
+                    )
+                    .await,
+                );
                 let compaction_group_client =
                     Arc::new(CompactionGroupClientImpl::new(hummock_meta_client.clone()));
                 let inner = HummockStorage::new(

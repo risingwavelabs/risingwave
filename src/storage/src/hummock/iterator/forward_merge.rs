@@ -131,7 +131,7 @@ mod test {
 
     #[tokio::test]
     async fn test_merge_invalidate_reset() {
-        let sstable_store = mock_sstable_store();
+        let sstable_store = mock_sstable_store().await;
         let read_options = Arc::new(ReadOptions::default());
         let table0 = Box::new(
             gen_iterator_test_sstable_base(
@@ -212,7 +212,7 @@ mod test {
 
     #[tokio::test]
     async fn test_ordered_merge_iter() {
-        let sstable_store = mock_sstable_store();
+        let sstable_store = mock_sstable_store().await;
         let read_options = Arc::new(ReadOptions::default());
 
         let non_overlapped_sstable = Box::new(
