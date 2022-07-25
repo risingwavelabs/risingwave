@@ -18,7 +18,8 @@ use risingwave_hummock_sdk::key::key_with_epoch;
 
 use crate::assert_bytes_eq;
 use crate::hummock::iterator::test_utils::mock_sstable_store;
-use crate::hummock::iterator::{HummockIterator, ReadOptions};
+use crate::hummock::iterator::HummockIterator;
+use crate::hummock::sstable::SstableIteratorReadOptions;
 use crate::hummock::test_utils::{
     default_builder_opt_for_test, gen_test_sstable_data, test_key_of, test_value_of,
     TEST_KEYS_COUNT,
@@ -52,7 +53,7 @@ async fn test_failpoints_table_read() {
     let mut sstable_iter = SstableIterator::create(
         sstable_store.sstable(0, &mut stats).await.unwrap(),
         sstable_store,
-        Arc::new(ReadOptions::default()),
+        Arc::new(SstableIteratorReadOptions::default()),
     );
     sstable_iter.rewind().await.unwrap();
 
@@ -123,7 +124,7 @@ async fn test_failpoints_vacuum_and_metadata() {
     let mut sstable_iter = SstableIterator::create(
         sstable_store.sstable(table_id, &mut stats).await.unwrap(),
         sstable_store,
-        Arc::new(ReadOptions::default()),
+        Arc::new(SstableIteratorReadOptions::default()),
     );
     let mut cnt = 0;
     sstable_iter.rewind().await.unwrap();
