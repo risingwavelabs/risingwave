@@ -667,6 +667,9 @@ def section_hummock(panels):
             panels.target(
                 "avg(state_store_block_cache_size) by (job,instance)", "data cache - {{job}} @ {{instance}}"
             ),
+            panels.target(
+                "avg(state_store_limit_memory_size) by (job)", "data cache - {{job}}"
+            ),
         ]),
         panels.timeseries_ops("Write Ops", [
             panels.target(
