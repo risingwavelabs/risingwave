@@ -14,7 +14,7 @@
 
 use futures::Future;
 use risingwave_hummock_sdk::key::{Epoch, FullKey};
-use risingwave_hummock_sdk::HummockSSTableId;
+use risingwave_hummock_sdk::HummockSstableId;
 use tokio::task::JoinHandle;
 
 use super::SstableMeta;
@@ -23,7 +23,7 @@ use crate::hummock::value::HummockValue;
 use crate::hummock::{CachePolicy, HummockResult, SSTableBuilder, Sstable};
 
 pub struct SealedSstableBuilder {
-    pub id: HummockSSTableId,
+    pub id: HummockSstableId,
     pub meta: SstableMeta,
     pub table_ids: Vec<u32>,
     pub upload_join_handle: JoinHandle<HummockResult<()>>,

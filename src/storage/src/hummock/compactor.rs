@@ -31,7 +31,7 @@ use risingwave_hummock_sdk::key::{
     extract_table_id_and_epoch, get_epoch, get_table_id, Epoch, FullKey,
 };
 use risingwave_hummock_sdk::key_range::KeyRange;
-use risingwave_hummock_sdk::{CompactionGroupId, HummockSSTableId, VersionedComparator};
+use risingwave_hummock_sdk::{CompactionGroupId, HummockSstableId, VersionedComparator};
 use risingwave_pb::hummock::{CompactTask, SstableInfo, SubscribeCompactTasksResponse, VacuumTask};
 use risingwave_rpc_client::HummockMetaClient;
 use tokio::sync::oneshot::Sender;
@@ -56,7 +56,7 @@ use crate::hummock::{CachePolicy, HummockError};
 use crate::monitor::{StateStoreMetrics, StoreLocalStatistic};
 
 pub type SstableIdGenerator =
-    Arc<dyn Fn() -> BoxFuture<'static, HummockResult<HummockSSTableId>> + Send + Sync>;
+    Arc<dyn Fn() -> BoxFuture<'static, HummockResult<HummockSstableId>> + Send + Sync>;
 
 pub fn get_remote_sstable_id_generator(
     meta_client: Arc<dyn HummockMetaClient>,

@@ -31,7 +31,7 @@ use risingwave_hummock_sdk::compact::compact_task_to_string;
 use risingwave_hummock_sdk::compaction_group::hummock_version_ext::HummockVersionExt;
 use risingwave_hummock_sdk::{
     get_remote_sst_id, CompactionGroupId, HummockCompactionTaskId, HummockContextId, HummockEpoch,
-    HummockSSTableId, HummockVersionId, LocalSstableInfo, FIRST_VERSION_ID,
+    HummockSstableId, HummockVersionId, LocalSstableInfo, FIRST_VERSION_ID,
 };
 use risingwave_pb::hummock::hummock_version::Levels;
 use risingwave_pb::hummock::{
@@ -180,7 +180,7 @@ struct Versioning {
     current_version: HummockVersion,
     // These SSTs should be deleted from object store.
     // Mapping from a SST to the version that has marked it stale. See `ack_deleted_ssts`.
-    ssts_to_delete: BTreeMap<HummockSSTableId, HummockVersionId>,
+    ssts_to_delete: BTreeMap<HummockSstableId, HummockVersionId>,
     // These deltas should be deleted from meta store.
     // A delta can be deleted if
     // - It's version id <= checkpoint version id. Currently we only make checkpoint for version id
@@ -1051,14 +1051,14 @@ where
         Ok(())
     }
 
-    pub async fn get_new_table_id(&self) -> Result<HummockSSTableId> {
+    pub async fn get_new_table_id(&self) -> Result<HummockSstableId> {
         // TODO #4037: deprecate `get_new_table_id`
         let sstable_id = get_remote_sst_id(
             self.env
                 .id_gen_manager()
                 .generate::<{ IdCategory::HummockSSTableId }>()
                 .await
-                .map(|id| id as HummockSSTableId)?,
+                .map(|id| id as HummockSstableId)?,
         );
 
         Ok(sstable_id)
@@ -1421,7 +1421,7 @@ where
 
     /// Gets SSTs that is safe to be deleted from object store.
     #[named]
-    pub async fn get_ssts_to_delete(&self) -> Vec<HummockSSTableId> {
+    pub async fn get_ssts_to_delete(&self) -> Vec<HummockSstableId> {
         read_lock!(self, versioning)
             .await
             .ssts_to_delete
@@ -1434,7 +1434,7 @@ where
     ///
     /// Possibly extends deltas_to_delete.
     #[named]
-    pub async fn ack_deleted_ssts(&self, sst_ids: &[HummockSSTableId]) -> Result<()> {
+    pub async fn ack_deleted_ssts(&self, sst_ids: &[HummockSstableId]) -> Result<()> {
         let mut deltas_to_delete = HashSet::new();
         let mut versioning_guard = write_lock!(self, versioning).await;
         for sst_id in sst_ids {

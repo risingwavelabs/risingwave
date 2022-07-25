@@ -20,7 +20,7 @@ use async_trait::async_trait;
 use paste::paste;
 use risingwave_common::catalog::{CatalogVersion, TableId};
 use risingwave_common::util::addr::HostAddr;
-use risingwave_hummock_sdk::{HummockEpoch, HummockSSTableId, HummockVersionId, LocalSstableInfo};
+use risingwave_hummock_sdk::{HummockEpoch, HummockSstableId, HummockVersionId, LocalSstableInfo};
 use risingwave_pb::catalog::{
     Database as ProstDatabase, Schema as ProstSchema, Source as ProstSource, Table as ProstTable,
 };
@@ -425,7 +425,7 @@ impl HummockMetaClient for MetaClient {
         Ok(())
     }
 
-    async fn get_new_table_id(&self) -> Result<HummockSSTableId> {
+    async fn get_new_table_id(&self) -> Result<HummockSstableId> {
         let resp = self.inner.get_new_table_id(GetNewTableIdRequest {}).await?;
         Ok(resp.table_id)
     }

@@ -20,7 +20,7 @@ use risingwave_common::util::value_encoding::deserialize_cell;
 use risingwave_frontend::catalog::TableCatalog;
 use risingwave_hummock_sdk::compaction_group::hummock_version_ext::HummockVersionExt;
 use risingwave_hummock_sdk::key::{get_epoch, get_table_id, user_key};
-use risingwave_hummock_sdk::HummockSSTableId;
+use risingwave_hummock_sdk::HummockSstableId;
 use risingwave_object_store::object::{BlockLocation, ObjectStore};
 use risingwave_rpc_client::{HummockMetaClient, MetaClient};
 use risingwave_storage::encoding::cell_based_encoding_util::deserialize_column_id;
@@ -35,12 +35,12 @@ use crate::common::HummockServiceOpts;
 type TableData = HashMap<u32, (String, Vec<(DataType, String, bool)>)>;
 
 pub async fn sst_dump() -> anyhow::Result<()> {
-    // Retrieves the SSTable store so we can access the SSTableMeta
+    // Retrieves the Sstable store so we can access the SstableMeta
     let mut hummock_opts = HummockServiceOpts::from_env()?;
     let (meta_client, hummock) = hummock_opts.create_hummock_store().await?;
     let sstable_store = &*hummock.sstable_store();
 
-    // Retrieves the latest HummockVersion from the meta client so we can access the SSTableInfo
+    // Retrieves the latest HummockVersion from the meta client so we can access the SstableInfo
     let version = meta_client.pin_version(u64::MAX).await?.2.unwrap();
 
     // SST's timestamp info is only available in object store
@@ -110,7 +110,7 @@ async fn load_table_schemas(meta_client: &MetaClient) -> anyhow::Result<TableDat
 
 /// Prints all blocks of a given SST including all contained KV-pairs.
 async fn print_blocks(
-    id: HummockSSTableId,
+    id: HummockSstableId,
     table_data: &TableData,
     sstable_store: &SstableStore,
     sstable_meta: &SstableMeta,

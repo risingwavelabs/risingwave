@@ -14,7 +14,7 @@
 
 use risingwave_pb::hummock::{CompactTask, SstableInfo};
 
-use crate::HummockSSTableId;
+use crate::HummockSstableId;
 
 pub fn compact_task_to_string(compact_task: &CompactTask) -> String {
     use std::fmt::Write;
@@ -31,7 +31,7 @@ pub fn compact_task_to_string(compact_task: &CompactTask) -> String {
     writeln!(s, "Compaction task status: {:?} ", compact_task.task_status).unwrap();
     s.push_str("Compaction SSTables structure: \n");
     for level_entry in &compact_task.input_ssts {
-        let tables: Vec<(HummockSSTableId, String)> = level_entry
+        let tables: Vec<(HummockSstableId, String)> = level_entry
             .table_infos
             .iter()
             .map(|table| (table.id, format!("{}KB", table.file_size / 1024)))
