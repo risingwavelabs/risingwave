@@ -46,11 +46,9 @@ impl PlanVisitor<()> for PlanCorrelatedIdFinder {
             .for_each(|expr| finder.visit_expr(expr));
         self.correlated_id_set.extend(finder.correlated_id_set);
 
-        let mut iter = plan.inputs().into_iter();
-        self.visit(iter.next().unwrap());
-        iter.for_each(|input| {
-            self.visit(input);
-        });
+        plan.inputs()
+            .into_iter()
+            .for_each(|input| self.visit(input));
     }
 
     fn visit_logical_filter(&mut self, plan: &LogicalFilter) {
@@ -61,11 +59,9 @@ impl PlanVisitor<()> for PlanCorrelatedIdFinder {
             .for_each(|expr| finder.visit_expr(expr));
         self.correlated_id_set.extend(finder.correlated_id_set);
 
-        let mut iter = plan.inputs().into_iter();
-        self.visit(iter.next().unwrap());
-        iter.for_each(|input| {
-            self.visit(input);
-        });
+        plan.inputs()
+            .into_iter()
+            .for_each(|input| self.visit(input));
     }
 
     fn visit_logical_project(&mut self, plan: &LogicalProject) {
@@ -73,11 +69,9 @@ impl PlanVisitor<()> for PlanCorrelatedIdFinder {
         plan.exprs().iter().for_each(|expr| finder.visit_expr(expr));
         self.correlated_id_set.extend(finder.correlated_id_set);
 
-        let mut iter = plan.inputs().into_iter();
-        self.visit(iter.next().unwrap());
-        iter.for_each(|input| {
-            self.visit(input);
-        });
+        plan.inputs()
+            .into_iter()
+            .for_each(|input| self.visit(input));
     }
 }
 
