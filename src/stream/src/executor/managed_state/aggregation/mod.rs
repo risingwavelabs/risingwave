@@ -31,7 +31,7 @@ use crate::executor::PkDataTypes;
 
 mod extreme;
 
-mod string_agg;
+// mod string_agg;
 mod value;
 
 /// Verify if the data going through the state is valid by checking if `ops.len() ==

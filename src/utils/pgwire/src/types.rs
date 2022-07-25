@@ -14,14 +14,16 @@
 
 use std::ops::Index;
 
+use bytes::Bytes;
+
 /// A row of data returned from the database by a query.
 #[derive(Debug, Clone)]
 // NOTE: Since we only support simple query protocol, the values are represented as strings.
-pub struct Row(Vec<Option<String>>);
+pub struct Row(Vec<Option<Bytes>>);
 
 impl Row {
     /// Create a row from values.
-    pub fn new(row: Vec<Option<String>>) -> Self {
+    pub fn new(row: Vec<Option<Bytes>>) -> Self {
         Self(row)
     }
 
@@ -36,13 +38,13 @@ impl Row {
     }
 
     /// Returns the values.
-    pub fn values(&self) -> &[Option<String>] {
+    pub fn values(&self) -> &[Option<Bytes>] {
         &self.0
     }
 }
 
 impl Index<usize> for Row {
-    type Output = Option<String>;
+    type Output = Option<Bytes>;
 
     fn index(&self, index: usize) -> &Self::Output {
         &self.0[index]

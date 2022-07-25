@@ -140,6 +140,7 @@ mod tests {
             args: AggArgs::Unary(DataType::Int64, 0),
             return_type: DataType::Int64,
             append_only: false,
+            filter: None,
         }
     }
 
@@ -198,6 +199,7 @@ mod tests {
             args: AggArgs::Unary(DataType::Int64, 0),
             return_type: DataType::Int64,
             append_only: true,
+            filter: None,
         }
     }
 
