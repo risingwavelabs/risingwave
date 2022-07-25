@@ -130,7 +130,7 @@ pub mod IdCategory {
     pub const Fragment: IdCategoryType = 5;
     pub const Actor: IdCategoryType = 6;
     pub const HummockSnapshot: IdCategoryType = 7;
-    pub const HummockSSTableId: IdCategoryType = 8;
+    pub const HummockSstableId: IdCategoryType = 8;
     pub const ParallelUnit: IdCategoryType = 9;
     pub const Source: IdCategoryType = 10;
     pub const HummockCompactionTask: IdCategoryType = 11;
@@ -208,7 +208,7 @@ where
             IdCategory::Actor => &self.actor,
             IdCategory::HummockSnapshot => &self.hummock_snapshot,
             IdCategory::Worker => &self.worker,
-            IdCategory::HummockSSTableId => &self.hummock_ss_table_id,
+            IdCategory::HummockSstableId => &self.hummock_ss_table_id,
             IdCategory::ParallelUnit => &self.parallel_unit,
             IdCategory::HummockCompactionTask => &self.hummock_compaction_task,
             _ => unreachable!(),

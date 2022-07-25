@@ -21,7 +21,7 @@ use risingwave_common::buffer::Bitmap;
 use risingwave_common::hash::HashCode;
 use risingwave_common::types::Datum;
 use risingwave_expr::expr::AggKind;
-use risingwave_storage::table::state_table::StateTable;
+use risingwave_storage::table::state_table::RowBasedStateTable;
 use risingwave_storage::StateStore;
 pub use value::*;
 
@@ -31,7 +31,7 @@ use crate::executor::PkDataTypes;
 
 mod extreme;
 
-mod string_agg;
+// mod string_agg;
 mod value;
 
 /// Verify if the data going through the state is valid by checking if `ops.len() ==
@@ -67,7 +67,7 @@ impl<S: StateStore> ManagedStateImpl<S> {
         visibility: Option<&Bitmap>,
         data: &[&ArrayImpl],
         epoch: u64,
-        state_table: &mut StateTable<S>,
+        state_table: &mut RowBasedStateTable<S>,
     ) -> StreamExecutorResult<()> {
         match self {
             Self::Value(state) => state.apply_batch(ops, visibility, data),
@@ -83,7 +83,7 @@ impl<S: StateStore> ManagedStateImpl<S> {
     pub async fn get_output(
         &mut self,
         epoch: u64,
-        state_table: &StateTable<S>,
+        state_table: &RowBasedStateTable<S>,
     ) -> StreamExecutorResult<Datum> {
         match self {
             Self::Value(state) => state.get_output(),
@@ -100,7 +100,7 @@ impl<S: StateStore> ManagedStateImpl<S> {
     }
 
     /// Flush the internal state to a write batch.
-    pub fn flush(&mut self, state_table: &mut StateTable<S>) -> StreamExecutorResult<()> {
+    pub fn flush(&mut self, state_table: &mut RowBasedStateTable<S>) -> StreamExecutorResult<()> {
         match self {
             Self::Value(state) => state.flush(state_table),
             Self::Table(state) => state.flush(state_table),
@@ -116,7 +116,7 @@ impl<S: StateStore> ManagedStateImpl<S> {
         is_row_count: bool,
         key_hash_code: Option<HashCode>,
         pk: Option<&Row>,
-        state_table: &StateTable<S>,
+        state_table: &RowBasedStateTable<S>,
     ) -> StreamExecutorResult<Self> {
         match agg_call.kind {
             AggKind::Max | AggKind::Min => {

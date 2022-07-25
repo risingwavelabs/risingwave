@@ -15,15 +15,21 @@
 use std::sync::Arc;
 
 use risingwave_pb::meta::scale_service_server::ScaleService;
-use risingwave_pb::meta::{PauseRequest, PauseResponse, ResumeRequest, ResumeResponse};
+use risingwave_pb::meta::{
+    GetClusterInfoRequest, GetClusterInfoResponse, PauseRequest, PauseResponse, ResumeRequest,
+    ResumeResponse,
+};
 use tokio::sync::RwLock;
 use tonic::{Request, Response, Status};
 
 use crate::barrier::{BarrierManagerRef, Command};
+use crate::model::MetadataModel;
 use crate::storage::MetaStore;
+use crate::stream::FragmentManagerRef;
 
 pub struct ScaleServiceImpl<S: MetaStore> {
     barrier_manager: BarrierManagerRef<S>,
+    fragment_manager: FragmentManagerRef<S>,
     ddl_lock: Arc<RwLock<()>>,
 }
 
@@ -31,9 +37,14 @@ impl<S> ScaleServiceImpl<S>
 where
     S: MetaStore,
 {
-    pub fn new(barrier_manager: BarrierManagerRef<S>, ddl_lock: Arc<RwLock<()>>) -> Self {
+    pub fn new(
+        barrier_manager: BarrierManagerRef<S>,
+        fragment_manager: FragmentManagerRef<S>,
+        ddl_lock: Arc<RwLock<()>>,
+    ) -> Self {
         Self {
             barrier_manager,
+            fragment_manager,
             ddl_lock,
         }
     }
@@ -56,5 +67,17 @@ where
         self.ddl_lock.write().await;
         self.barrier_manager.run_command(Command::resume()).await?;
         Ok(Response::new(ResumeResponse {}))
+    }
+
+    #[cfg_attr(coverage, no_coverage)]
+    async fn get_cluster_info(
+        &self,
+        _: Request<GetClusterInfoRequest>,
+    ) -> Result<Response<GetClusterInfoResponse>, Status> {
+        let table_fragments = self.fragment_manager.list_table_fragments().await?;
+        let table_fragments_proto = table_fragments.iter().map(|tf| tf.to_protobuf()).collect();
+        Ok(Response::new(GetClusterInfoResponse {
+            table_fragments: table_fragments_proto,
+        }))
     }
 }
