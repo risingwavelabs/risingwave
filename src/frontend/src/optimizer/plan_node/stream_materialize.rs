@@ -119,7 +119,7 @@ impl StreamMaterialize {
 
                     while !col_names.insert(name.clone()) {
                         count += 1;
-                        name = field.name.clone() + "#" + &(count.to_string());
+                        name = field.name.clone() + "#" + &count.to_string();
                     }
 
                     name
