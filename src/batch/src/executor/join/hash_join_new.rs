@@ -12,19 +12,26 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::collections::{HashMap, LinkedList};
+use std::cell::RefCell;
+use std::collections::{HashMap, LinkedList, VecDeque};
 use std::iter::empty;
 use std::marker::PhantomData;
+use std::mem::{replace, swap, take};
+use std::sync::Arc;
 
-use futures::TryStreamExt;
+use futures::future::Join;
+use futures::{StreamExt, TryStreamExt};
 use futures_async_stream::try_stream;
-use itertools::Itertools;
-use risingwave_common::array::{Array, ArrayBuilderImpl, DataChunk, RowRef};
+use itertools::{repeat_n, Itertools};
+use risingwave_common::array::column::Column;
+use risingwave_common::array::{Array, ArrayBuilderImpl, DataChunk, Row, RowRef};
+use risingwave_common::buffer::{Bitmap, BitmapBuilder};
 use risingwave_common::catalog::Schema;
 use risingwave_common::error::{Result, RwError};
 use risingwave_common::hash::{
     calc_hash_key_kind, HashKey, HashKeyDispatcher, PrecomputedBuildHasher,
 };
+use risingwave_common::types::{DataType, ToOwnedDatum};
 use risingwave_common::util::chunk_coalesce::DataChunkBuilder;
 use risingwave_expr::expr::{build_from_prost, BoxedExpression};
 use risingwave_pb::batch_plan::plan_node::NodeBody;
@@ -65,11 +72,38 @@ impl<K: HashKey> Executor for HashJoinExecutor<K> {
 
 type JoinHashMap<K> = HashMap<K, RowId, PrecomputedBuildHasher>;
 
+struct RowIdIter<'a> {
+    current_row_id: Option<RowId>,
+    next_row_id: &'a ChunkedData<Option<RowId>>,
+}
+
+impl ChunkedData<Option<RowId>> {
+    fn row_id_iter(&self, begin: Option<RowId>) -> RowIdIter {
+        RowIdIter {
+            current_row_id: begin,
+            next_row_id: self,
+        }
+    }
+}
+
+impl<'a> Iterator for RowIdIter<'a> {
+    type Item = RowId;
+
+    fn next(&mut self) -> Option<Self::Item> {
+        self.current_row_id.map(|row_id| {
+            self.current_row_id = self.next_row_id[row_id];
+            row_id
+        })
+    }
+}
+
 struct EquiJoinParams<K> {
     chunk_builder: DataChunkBuilder,
     probe_side: BoxedExecutor,
+    probe_data_types: Vec<DataType>,
     probe_key_idxs: Vec<usize>,
     build_side: Vec<DataChunk>,
+    build_data_types: Vec<DataType>,
     hash_map: JoinHashMap<K>,
     next_row_id: ChunkedData<Option<RowId>>,
 }
@@ -77,14 +111,18 @@ struct EquiJoinParams<K> {
 impl<K: HashKey> HashJoinExecutor<K> {
     #[try_stream(boxed, ok = DataChunk, error = RwError)]
     async fn do_execute(self: Box<Self>) {
+        let probe_data_types = self.probe_side_source.schema().data_types();
+        let build_data_types = self.build_side_source.schema().data_types();
+
         let mut build_side = Vec::new();
         let mut build_row_count = 0;
         #[for_await]
         for build_chunk in self.build_side_source.execute() {
-            let compacted = build_chunk?.compact()?;
-            if compacted.capacity() > 0 {
-                build_row_count += compacted.capacity();
-                build_side.push(compacted)
+            let build_chunk = build_chunk?;
+            // Assume build_chunk is compacted.
+            if build_chunk.capacity() > 0 {
+                build_row_count += build_chunk.capacity();
+                build_side.push(build_chunk)
             }
         }
         let mut hash_map =
@@ -111,31 +149,34 @@ impl<K: HashKey> HashJoinExecutor<K> {
         let params = EquiJoinParams {
             chunk_builder,
             probe_side: self.probe_side_source,
+            probe_data_types,
             probe_key_idxs: self.probe_key_idxs,
             build_side,
+            build_data_types,
             hash_map,
             next_row_id,
         };
 
-        if let Some(cond) = self.cond {
-            let stream = match self.join_type {
-                JoinType::Inner => Self::do_inner_join_with_non_equi_condition,
+        let stream = if let Some(cond) = self.cond {
+            match self.join_type {
+                JoinType::Inner => Self::do_inner_join_with_non_equi_condition(params, cond),
+                JoinType::LeftOuter => {
+                    Self::do_left_outer_join_with_non_equi_condition(params, cond)
+                }
                 _ => todo!(),
-            };
-            #[for_await]
-            for chunk in stream(params, cond) {
-                yield chunk?.reorder_columns(&self.output_indices)
             }
         } else {
-            let stream = match self.join_type {
-                JoinType::Inner => Self::do_inner_join,
+            match self.join_type {
+                JoinType::Inner => Self::do_inner_join(params),
+                JoinType::LeftOuter => Self::do_left_outer_join(params),
                 _ => todo!(),
-            };
-            #[for_await]
-            for chunk in stream(params) {
-                yield chunk?.reorder_columns(&self.output_indices)
             }
         };
+
+        #[for_await]
+        for chunk in stream {
+            yield chunk?.reorder_columns(&self.output_indices)
+        }
     }
 
     #[try_stream(boxed, ok = DataChunk, error = RwError)]
@@ -147,6 +188,7 @@ impl<K: HashKey> HashJoinExecutor<K> {
             build_side,
             hash_map,
             next_row_id,
+            ..
         }: EquiJoinParams<K>,
     ) {
         #[for_await]
@@ -154,8 +196,7 @@ impl<K: HashKey> HashJoinExecutor<K> {
             let probe_chunk = probe_chunk?;
             let probe_keys = K::build(&probe_key_idxs, &probe_chunk)?;
             for (probe_row_id, probe_key) in probe_keys.iter().enumerate() {
-                let mut matched_build_row_id = hash_map.get(&probe_key);
-                while let Some(&build_row_id) = matched_build_row_id {
+                for build_row_id in next_row_id.row_id_iter(hash_map.get(&probe_key).copied()) {
                     let build_chunk = &build_side[build_row_id.chunk_id()];
                     if let Some(spilled) = chunk_builder.append_one_row_from_array_elements(
                         probe_chunk.columns().iter().map(|c| c.array_ref()),
@@ -165,7 +206,6 @@ impl<K: HashKey> HashJoinExecutor<K> {
                     )? {
                         yield spilled
                     }
-                    matched_build_row_id = next_row_id[build_row_id].as_ref();
                 }
             }
         }
@@ -183,8 +223,209 @@ impl<K: HashKey> HashJoinExecutor<K> {
         for chunk in Self::do_inner_join(params) {
             let mut chunk = chunk?;
             chunk.set_visibility(cond.eval(&chunk)?.as_bool().iter().collect());
-            yield chunk
+            if chunk.cardinality() > 0 {
+                yield chunk.compact()?
+            }
         }
+    }
+
+    #[try_stream(boxed, ok = DataChunk, error = RwError)]
+    async fn do_left_outer_join(
+        EquiJoinParams {
+            mut chunk_builder,
+            probe_side,
+            probe_key_idxs,
+            build_side,
+            build_data_types,
+            hash_map,
+            next_row_id,
+            ..
+        }: EquiJoinParams<K>,
+    ) {
+        #[for_await]
+        for probe_chunk in probe_side.execute() {
+            let probe_chunk = probe_chunk?;
+            let probe_keys = K::build(&probe_key_idxs, &probe_chunk)?;
+            for (probe_row_id, probe_key) in probe_keys.iter().enumerate() {
+                let mut found_matched = false;
+                for build_row_id in next_row_id.row_id_iter(hash_map.get(&probe_key).copied()) {
+                    found_matched = true;
+                    let build_chunk = &build_side[build_row_id.chunk_id()];
+                    if let Some(spilled) = chunk_builder.append_one_row_from_array_elements(
+                        probe_chunk.columns().iter().map(|c| c.array_ref()),
+                        probe_row_id,
+                        build_chunk.columns().iter().map(|c| c.array_ref()),
+                        build_row_id.row_id(),
+                    )? {
+                        yield spilled
+                    }
+                }
+                if !found_matched {
+                    let probe_row = probe_chunk.row_at_unchecked_vis(probe_row_id);
+                    if let Some(spilled) = chunk_builder.append_one_row_from_datum_refs(
+                        probe_row
+                            .values()
+                            .chain(repeat_n(None, build_data_types.len())),
+                    )? {
+                        yield spilled
+                    }
+                }
+            }
+        }
+        if let Some(spilled) = chunk_builder.consume_all()? {
+            yield spilled
+        }
+    }
+
+    #[try_stream(boxed, ok = DataChunk, error = RwError)]
+    async fn do_left_outer_join_with_non_equi_condition(
+        EquiJoinParams {
+            mut chunk_builder,
+            probe_side,
+            probe_data_types,
+            probe_key_idxs,
+            build_side,
+            build_data_types,
+            hash_map,
+            next_row_id,
+            ..
+        }: EquiJoinParams<K>,
+        cond: BoxedExpression,
+    ) {
+        let probe_column_count = probe_data_types.len();
+        let mut output_info = Vec::new();
+        let mut last_output_info = None;
+
+        #[for_await]
+        for probe_chunk in probe_side.execute() {
+            let probe_chunk = probe_chunk?;
+            let probe_keys = K::build(&probe_key_idxs, &probe_chunk)?;
+            for (probe_row_id, probe_key) in probe_keys.iter().enumerate() {
+                let mut found_matched = false;
+                last_output_info = Some(chunk_builder.buffered_count());
+                for build_row_id in next_row_id.row_id_iter(hash_map.get(&probe_key).copied()) {
+                    found_matched = true;
+                    last_output_info = Some(chunk_builder.buffered_count());
+                    let build_chunk = &build_side[build_row_id.chunk_id()];
+                    if let Some(spilled) = chunk_builder.append_one_row_from_array_elements(
+                        probe_chunk.columns().iter().map(|c| c.array_ref()),
+                        probe_row_id,
+                        build_chunk.columns().iter().map(|c| c.array_ref()),
+                        build_row_id.row_id(),
+                    )? {
+                        let filter = cond.eval(&spilled)?.as_bool().iter().collect();
+                        yield DataChunkWrapper(spilled)
+                            .nullify_build_side_for_non_equi_condition(&filter, probe_column_count)
+                            .remove_duplicate_rows_for_left_outer_join(
+                                &filter,
+                                &mut output_info,
+                                &mut last_output_info,
+                            )
+                            .take()
+                            .compact()?
+                    }
+                }
+                if !found_matched {
+                    let probe_row = probe_chunk.row_at_unchecked_vis(probe_row_id);
+                    if let Some(spilled) = chunk_builder.append_one_row_from_datum_refs(
+                        probe_row
+                            .values()
+                            .chain(repeat_n(None, build_data_types.len())),
+                    )? {
+                        let filter = cond.eval(&spilled)?.as_bool().iter().collect();
+                        yield DataChunkWrapper(spilled)
+                            .nullify_build_side_for_non_equi_condition(&filter, probe_column_count)
+                            .remove_duplicate_rows_for_left_outer_join(
+                                &filter,
+                                &mut output_info,
+                                &mut last_output_info,
+                            )
+                            .take()
+                            .compact()?
+                    }
+                }
+                if let Some(last_match_info) = last_output_info.take() {
+                    output_info.push(last_match_info);
+                }
+            }
+        }
+        if let Some(spilled) = chunk_builder.consume_all()? {
+            let filter = cond.eval(&spilled)?.as_bool().iter().collect();
+            yield DataChunkWrapper(spilled)
+                .nullify_build_side_for_non_equi_condition(&filter, probe_column_count)
+                .remove_duplicate_rows_for_left_outer_join(
+                    &filter,
+                    &mut output_info,
+                    &mut last_output_info,
+                )
+                .take()
+                .compact()?
+        }
+    }
+}
+
+#[repr(transparent)]
+struct DataChunkWrapper(DataChunk);
+
+impl DataChunkWrapper {
+    /// Nullify build side columns according to the filter
+    fn nullify_build_side_for_non_equi_condition(
+        self,
+        filter: &Bitmap,
+        probe_column_count: usize,
+    ) -> Self {
+        let (mut columns, vis) = self.0.into_parts();
+
+        for build_column in columns.split_off(probe_column_count) {
+            // Is it really safe to use Arc::try_unwrap here?
+            let mut array = Arc::try_unwrap(build_column.into_inner()).unwrap();
+            array.set_bitmap(filter.clone());
+            columns.push(Column::new(Arc::new(array)));
+        }
+
+        Self(DataChunk::new(columns, vis))
+    }
+
+    /// Remove duplicate NULL output rows for each probe row
+    fn remove_duplicate_rows_for_left_outer_join(
+        mut self,
+        filter: &Bitmap,
+        output_info: &mut Vec<usize>,
+        last_output_info: &mut Option<usize>,
+    ) -> Self {
+        let mut vis = BitmapBuilder::zeroed(self.0.capacity());
+        let mut first_output_row_id = 0;
+
+        for last_output_row_id in output_info.iter() {
+            let mut found_non_null = false;
+            for output_row_id in first_output_row_id..=*last_output_row_id {
+                if filter.is_set(output_row_id).unwrap() {
+                    found_non_null = true;
+                    vis.set(output_row_id, true);
+                }
+            }
+            if !found_non_null {
+                vis.set(*last_output_row_id, true);
+            }
+            first_output_row_id = last_output_row_id + 1;
+        }
+
+        output_info.clear();
+
+        if let Some(last_output_info) = last_output_info.take() {
+            for output_row_id in first_output_row_id..=last_output_info {
+                if filter.is_set(output_row_id).unwrap() {
+                    vis.set(output_row_id, true);
+                }
+            }
+        }
+
+        self.0.set_visibility(vis.finish());
+        self
+    }
+
+    fn take(self) -> DataChunk {
+        self.0
     }
 }
 
@@ -557,21 +798,6 @@ mod tests {
             ))
         }
 
-        fn select_from_chunk(&self, data_chunk: DataChunk) -> DataChunk {
-            let join_type = self.join_type;
-            let (columns, vis) = data_chunk.into_parts();
-
-            let keep_columns = if join_type.keep_all() {
-                vec![columns[1].clone(), columns[3].clone()]
-            } else if join_type.keep_left() || join_type.keep_right() {
-                vec![columns[1].clone()]
-            } else {
-                unreachable!()
-            };
-
-            DataChunk::new(keep_columns, vis)
-        }
-
         async fn do_test(&self, expected: DataChunk, has_non_equi_cond: bool) {
             let join_executor = self.create_join_executor(has_non_equi_cond);
 
@@ -600,32 +826,30 @@ mod tests {
 
             let result_chunk = data_chunk_merger.finish().unwrap();
 
-            // Take (t1.v2, t2.v2) in inner and left/right/full outer
-            // or v2 decided by side of anti/semi.
-            let output_chunk = self.select_from_chunk(result_chunk);
+            println!("{:#?}", result_chunk);
 
             // TODO: Replace this with unsorted comparison
             // assert_eq!(expected, result_chunk);
-            assert!(is_data_chunk_eq(&expected, &output_chunk));
+            assert!(is_data_chunk_eq(&expected, &result_chunk));
         }
     }
 
     /// Sql:
     /// ```sql
-    /// select t1.v2 as t1_v2, t2.v2 as t2_v2 from t1 join t2 on t1.v1 = t2.v1;
+    /// select * from t1 join t2 on t1.v1 = t2.v1;
     /// ```
     #[tokio::test]
     async fn test_inner_join() {
         let test_fixture = TestFixture::with_join_type(JoinType::Inner);
 
         let expected_chunk = DataChunk::from_pretty(
-            "f   F
-             .   .
-             3.9 3.7
-             3.9 .
-             6.6 7.5
-             .   3.7
-             .   .  ",
+            "i   f   i   F
+             2   .   2   .
+             3   3.9 3   3.7
+             3   3.9 3   .
+             4   6.6 4   7.5
+             3   .   3   3.7
+             3   .   3   ."
         );
 
         test_fixture.do_test(expected_chunk, false).await;
@@ -633,15 +857,15 @@ mod tests {
 
     /// Sql:
     /// ```sql
-    /// select t1.v2 as t1_v2, t2.v2 as t2_v2 from t1 join t2 on t1.v1 = t2.v1 and t1.v2 < t2.v2;
+    /// select * from t1 join t2 on t1.v1 = t2.v1 and t1.v2 < t2.v2;
     /// ```
     #[tokio::test]
     async fn test_inner_join_with_non_equi_condition() {
         let test_fixture = TestFixture::with_join_type(JoinType::Inner);
 
         let expected_chunk = DataChunk::from_pretty(
-            "f   F
-             6.6 7.5",
+            "i   f   i   F
+             4   6.6 4   7.5",
         );
 
         test_fixture.do_test(expected_chunk, true).await;
@@ -656,19 +880,19 @@ mod tests {
         let test_fixture = TestFixture::with_join_type(JoinType::LeftOuter);
 
         let expected_chunk = DataChunk::from_pretty(
-            "f   F
-             6.1 .
-             .   .
-             8.4 .
-             3.9 3.7
-             3.9 .
-             .   .
-             6.6 7.5
-             .   3.7
-             .   .
-             0.7 .
-             .   .
-             5.5 .  ",
+            "i   f   i   F
+             1   6.1 .   .
+             2   .   2   .
+             .   8.4 .   .
+             3   3.9 3   3.7
+             3   3.9 3   .
+             .   .   .   .
+             4   6.6 4   7.5
+             3   .   3   3.7
+             3   .   3   .
+             .   0.7 .   .
+             5   .   .   .
+             .   5.5 .   .",
         );
 
         test_fixture.do_test(expected_chunk, false).await;
@@ -676,24 +900,24 @@ mod tests {
 
     /// Sql:
     /// ```sql
-    /// select t1.v2 as t1_v2, t2.v2 as t2_v2 from t1 left outer join t2 on t1.v1 = t2.v1 and t1.v2 < t2.v2;
+    /// select * from t1 left outer join t2 on t1.v1 = t2.v1 and t1.v2 < t2.v2;
     /// ```
     #[tokio::test]
     async fn test_left_outer_join_with_non_equi_condition() {
         let test_fixture = TestFixture::with_join_type(JoinType::LeftOuter);
 
         let expected_chunk = DataChunk::from_pretty(
-            "f   F
-             6.1 .
-             .   .
-             8.4 .
-             3.9 .
-             .   .
-             6.6 7.5
-             .   .
-             0.7 .
-             .   .
-             5.5 .",
+            "i   f   i   F
+             1   6.1 .   .
+             2   .   .   .
+             .   8.4 .   .
+             3   3.9 .   .
+             .   .   .   .
+             4   6.6 4   7.5
+             3   .   .   .
+             .   0.7 .   .
+             5   .   .   .
+             .   5.5 .   .",
         );
 
         test_fixture.do_test(expected_chunk, true).await;
