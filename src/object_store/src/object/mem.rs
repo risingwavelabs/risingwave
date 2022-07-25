@@ -68,7 +68,7 @@ impl ObjectStore for InMemObjectStore {
         &self,
         path: &str,
         block_loc: Option<BlockLocation>,
-    ) -> ObjectResult<Box<dyn AsyncRead + Unpin>> {
+    ) -> ObjectResult<Box<dyn AsyncRead + Unpin + Send + Sync>> {
         fail_point!("mem_streaming_read_err", |_| Err(ObjectError::internal(
             "mem streaming read error"
         )));

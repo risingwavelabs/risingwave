@@ -240,7 +240,7 @@ impl ObjectStore for DiskObjectStore {
         &self,
         _path: &str,
         _block_loc: Option<BlockLocation>,
-    ) -> ObjectResult<Box<dyn AsyncRead + Unpin>> {
+    ) -> ObjectResult<Box<dyn AsyncRead + Unpin + Send + Sync>> {
         unimplemented!()
     }
 

@@ -87,8 +87,8 @@ impl SSTableStreamIterator {
             .sstable_store
             .get_block_stream(
                 self.sst.value(),
-                block_idx, /* ToDo: What about parameters used before (CachePolicy,
-                            * &StoreLocalStatistic)? */
+                block_idx as u64, /* ToDo: What about parameters used before (CachePolicy,
+                                   * &StoreLocalStatistic)? */
             )
             .await?;
 
@@ -235,7 +235,7 @@ impl SSTableIteratorType for SSTableStreamIterator {
     fn create(
         table: TableHolder,
         sstable_store: SstableStoreRef,
-        options: Arc<ReadOptions>,
+        _options_: Arc<ReadOptions>,
     ) -> Self {
         SSTableStreamIterator::new(table, sstable_store)
     }

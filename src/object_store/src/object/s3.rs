@@ -94,7 +94,7 @@ impl ObjectStore for S3ObjectStore {
         &self,
         path: &str,
         block_loc: Option<BlockLocation>,
-    ) -> ObjectResult<Box<dyn AsyncRead + Unpin>> {
+    ) -> ObjectResult<Box<dyn AsyncRead + Unpin + Send + Sync>> {
         fail_point!("s3_streaming_read_err", |_| Err(ObjectError::internal(
             "s3 streaming read error"
         )));
