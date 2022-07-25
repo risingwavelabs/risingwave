@@ -39,6 +39,10 @@ impl BoolArray {
         }
         builder.finish()
     }
+
+    pub fn to_bitmap(&self) -> Bitmap {
+        &self.data & self.null_bitmap()
+    }
 }
 
 impl Array for BoolArray {

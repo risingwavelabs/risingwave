@@ -15,12 +15,12 @@
 use std::sync::Arc;
 
 use itertools::Itertools;
-use risingwave_pb::hummock::{Level, SstableInfo};
+use risingwave_pb::hummock::{InputLevel, Level, SstableInfo};
 
 use super::overlap_strategy::OverlapInfo;
 use super::CompactionPicker;
 use crate::hummock::compaction::overlap_strategy::{OverlapStrategy, RangeOverlapInfo};
-use crate::hummock::compaction::{ManualCompactionOption, SearchResult};
+use crate::hummock::compaction::{CompactionInput, ManualCompactionOption};
 use crate::hummock::level_handler::LevelHandler;
 
 pub struct ManualCompactionPicker {
@@ -51,7 +51,7 @@ impl CompactionPicker for ManualCompactionPicker {
         &self,
         levels: &[Level],
         level_handlers: &mut [LevelHandler],
-    ) -> Option<SearchResult> {
+    ) -> Option<CompactionInput> {
         let level = self.option.level;
         let target_level = self.target_level;
 
@@ -125,22 +125,21 @@ impl CompactionPicker for ManualCompactionPicker {
             level_handlers[target_level].add_pending_task(self.compact_task_id, &target_input_ssts);
         }
 
-        Some(SearchResult {
-            select_level: Level {
-                level_idx: level as u32,
-                level_type: levels[level].level_type,
-                total_file_size: select_input_ssts.iter().map(|table| table.file_size).sum(),
-                table_infos: select_input_ssts,
-            },
-            target_level: Level {
-                level_idx: target_level as u32,
-                level_type: levels[target_level].level_type,
-                total_file_size: target_input_ssts.iter().map(|table| table.file_size).sum(),
-                table_infos: target_input_ssts,
-            },
-            split_ranges: vec![],
-            target_file_size: 0,
-            compression_algorithm: "".to_string(),
+        Some(CompactionInput {
+            input_levels: vec![
+                InputLevel {
+                    level_idx: level as u32,
+                    level_type: levels[level].level_type,
+                    table_infos: select_input_ssts,
+                },
+                InputLevel {
+                    level_idx: target_level as u32,
+                    level_type: levels[target_level].level_type,
+                    table_infos: target_input_ssts,
+                },
+            ],
+            target_level,
+            target_sub_level_id: 0,
         })
     }
 }
@@ -152,8 +151,8 @@ pub mod tests {
     pub use risingwave_pb::hummock::{KeyRange, LevelType};
 
     use super::*;
+    use crate::hummock::compaction::level_selector::tests::generate_table;
     use crate::hummock::compaction::overlap_strategy::RangeOverlapStrategy;
-    use crate::hummock::compaction::tier_compaction_picker::tests::generate_table;
     use crate::hummock::test_utils::iterator_test_key_of_epoch;
 
     #[test]
@@ -223,8 +222,8 @@ pub mod tests {
                 .pick_compaction(&levels, &mut levels_handler)
                 .unwrap();
 
-            assert_eq!(2, result.select_level.table_infos.len());
-            assert_eq!(3, result.target_level.table_infos.len());
+            assert_eq!(2, result.input_levels[0].table_infos.len());
+            assert_eq!(3, result.input_levels[1].table_infos.len());
         }
 
         {
@@ -244,8 +243,8 @@ pub mod tests {
                 .pick_compaction(&levels, &mut levels_handler)
                 .unwrap();
 
-            assert_eq!(3, result.select_level.table_infos.len());
-            assert_eq!(3, result.target_level.table_infos.len());
+            assert_eq!(3, result.input_levels[0].table_infos.len());
+            assert_eq!(3, result.input_levels[1].table_infos.len());
         }
 
         {
@@ -277,8 +276,8 @@ pub mod tests {
                 .pick_compaction(&levels, &mut levels_handler)
                 .unwrap();
 
-            assert_eq!(1, result.select_level.table_infos.len());
-            assert_eq!(2, result.target_level.table_infos.len());
+            assert_eq!(1, result.input_levels[0].table_infos.len());
+            assert_eq!(2, result.input_levels[1].table_infos.len());
         }
 
         {
@@ -316,8 +315,8 @@ pub mod tests {
                 .pick_compaction(&levels, &mut levels_handler)
                 .unwrap();
 
-            assert_eq!(1, result.select_level.table_infos.len());
-            assert_eq!(2, result.target_level.table_infos.len());
+            assert_eq!(1, result.input_levels[0].table_infos.len());
+            assert_eq!(2, result.input_levels[1].table_infos.len());
         }
     }
 }

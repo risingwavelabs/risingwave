@@ -483,7 +483,8 @@ impl LogicalJoin {
         let table_desc = logical_scan.table_desc().clone();
         let output_column_ids = logical_scan.output_column_ids();
 
-        // Verify that the right equality columns are a prefix of the primary key
+        // Verify that the right join key columns are the same as the primary key
+        // TODO: Refactor Lookup Join so that prefixes of the primary key are allowed
         let eq_col_warn_message = "In Lookup Join, the right columns of the equality join \
         predicates must be the same as the primary key. A different join will be used instead.";
 

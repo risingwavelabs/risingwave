@@ -30,8 +30,8 @@ use risingwave_pb::stream_plan::source_node::SourceType;
 use risingwave_pb::stream_plan::stream_fragment_graph::{StreamFragment, StreamFragmentEdge};
 use risingwave_pb::stream_plan::stream_node::NodeBody;
 use risingwave_pb::stream_plan::{
-    DispatchStrategy, DispatcherType, ExchangeNode, FilterNode, FragmentType, MaterializeNode,
-    ProjectNode, SimpleAggNode, SourceNode, StreamFragmentGraph, StreamNode,
+    ColumnMapping, DispatchStrategy, DispatcherType, ExchangeNode, FilterNode, FragmentType,
+    MaterializeNode, ProjectNode, SimpleAggNode, SourceNode, StreamFragmentGraph, StreamNode,
 };
 
 use crate::manager::MetaSrvEnv;
@@ -195,7 +195,11 @@ fn make_stream_fragments() -> Vec<StreamFragment> {
             agg_calls: vec![make_sum_aggcall(0), make_sum_aggcall(1)],
             distribution_key: Default::default(),
             internal_tables: vec![make_internal_table(2, true), make_internal_table(3, false)],
-            column_mapping: HashMap::new(),
+            // Note: This mappings is not checked yet.
+            column_mappings: vec![
+                ColumnMapping { indices: vec![0] },
+                ColumnMapping { indices: vec![1] },
+            ],
             is_append_only: false,
         })),
         input: vec![filter_node],
@@ -236,7 +240,11 @@ fn make_stream_fragments() -> Vec<StreamFragment> {
             agg_calls: vec![make_sum_aggcall(0), make_sum_aggcall(1)],
             distribution_key: Default::default(),
             internal_tables: vec![make_internal_table(0, true), make_internal_table(1, false)],
-            column_mapping: HashMap::new(),
+            // Note: This mappings is not checked yet.
+            column_mappings: vec![
+                ColumnMapping { indices: vec![0] },
+                ColumnMapping { indices: vec![1] },
+            ],
             is_append_only: false,
         })),
         fields: vec![], // TODO: fill this later

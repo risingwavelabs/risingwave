@@ -102,13 +102,13 @@ pub(super) fn handle_explain(
         trace
             .iter()
             .flat_map(|s| s.lines())
-            .map(|s| Row::new(vec![Some(s.into())]))
+            .map(|s| Row::new(vec![Some(s.to_string().into())]))
             .collect::<Vec<_>>()
     } else {
         let output = plan.explain_to_string()?;
         output
             .lines()
-            .map(|s| Row::new(vec![Some(s.into())]))
+            .map(|s| Row::new(vec![Some(s.to_string().into())]))
             .collect::<Vec<_>>()
     };
 
