@@ -19,15 +19,14 @@ use async_trait::async_trait;
 use risingwave_hummock_sdk::VersionedComparator;
 use risingwave_pb::hummock::SstableInfo;
 
-use crate::hummock::iterator::{
-    DirectionEnum, HummockIterator, HummockIteratorDirection, ReadOptions,
-};
+use crate::hummock::iterator::{DirectionEnum, HummockIterator, HummockIteratorDirection};
+use crate::hummock::sstable::SstableIteratorReadOptions;
 use crate::hummock::value::HummockValue;
-use crate::hummock::{HummockResult, SSTableIteratorType, SstableStoreRef};
+use crate::hummock::{HummockResult, SstableIteratorType, SstableStoreRef};
 use crate::monitor::StoreLocalStatistic;
 
 /// Served as the concrete implementation of `ConcatIterator` and `BackwardConcatIterator`.
-pub struct ConcatIteratorInner<TI: SSTableIteratorType> {
+pub struct ConcatIteratorInner<TI: SstableIteratorType> {
     /// The iterator of the current table.
     sstable_iter: Option<TI>,
 
@@ -40,17 +39,17 @@ pub struct ConcatIteratorInner<TI: SSTableIteratorType> {
     sstable_store: SstableStoreRef,
 
     stats: StoreLocalStatistic,
-    read_options: Arc<ReadOptions>,
+    read_options: Arc<SstableIteratorReadOptions>,
 }
 
-impl<TI: SSTableIteratorType> ConcatIteratorInner<TI> {
+impl<TI: SstableIteratorType> ConcatIteratorInner<TI> {
     /// Caller should make sure that `tables` are non-overlapping,
     /// arranged in ascending order when it serves as a forward iterator,
     /// and arranged in descending order when it serves as a backward iterator.
     pub fn new(
         tables: Vec<SstableInfo>,
         sstable_store: SstableStoreRef,
-        read_options: Arc<ReadOptions>,
+        read_options: Arc<SstableIteratorReadOptions>,
     ) -> Self {
         Self {
             sstable_iter: None,
@@ -99,7 +98,7 @@ impl<TI: SSTableIteratorType> ConcatIteratorInner<TI> {
 }
 
 #[async_trait]
-impl<TI: SSTableIteratorType> HummockIterator for ConcatIteratorInner<TI> {
+impl<TI: SstableIteratorType> HummockIterator for ConcatIteratorInner<TI> {
     type Direction = TI::Direction;
 
     async fn next(&mut self) -> HummockResult<()> {
