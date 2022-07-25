@@ -54,8 +54,9 @@ impl SSTableStreamIterator {
         }
     }
 
-    /// Seeks to a block, and then seeks to the first position where the key >= `seek_key` (if
-    /// given).
+    /// Seeks to a block, and then seeks to the first position where the key >= `start_key` (if
+    /// given). If the the block does not contain such a key, the iterator continues to the first
+    /// key of the next block.
     async fn start_stream(
         &mut self,
         block_idx: usize,
@@ -73,32 +74,50 @@ impl SSTableStreamIterator {
         // do cooperative scheduling.
         tokio::task::consume_budget().await;
 
+        self.cur_idx = block_idx;
+
         if block_idx >= self.sst.value().block_count() {
             self.block_stream = None;
             self.block_iter = None;
+
+            return Ok(());
+        }
+
+        let mut block_stream = self
+            .sstable_store
+            .get_block_stream(
+                self.sst.value(),
+                block_idx, /* ToDo: What about parameters used before (CachePolicy,
+                            * &StoreLocalStatistic)? */
+            )
+            .await?;
+
+        let mut block_iter = BlockIterator::new(block_stream.next().await?.unwrap());
+
+        if let Some(key) = start_key {
+            block_iter.seek(key);
         } else {
-            let block_stream = self
-                .sstable_store
-                .get_block_stream(
-                    self.sst.value(),
-                    block_idx, /* ToDo: What about parameters used before (CachePolicy,
-                                * &StoreLocalStatistic)? */
-                )
-                .await?;
+            block_iter.seek_to_first();
+        }
 
-            let mut block_iter = BlockIterator::new(block_stream.next()?.unwrap());
-
-            if let Some(key) = start_key {
-                block_iter.seek(key);
-                // ToDo: If key is not in block, then the key is not in table and would be stored
-                // between two blocks. Set position to first key of next block.
-            } else {
-                block_iter.seek_to_first();
-            }
-
+        if block_iter.is_valid() {
             self.block_stream = Some(block_stream);
             self.block_iter = Some(block_iter);
-            self.cur_idx = block_idx;
+        } else {
+            // If `key` is larger than anything stored in the current block, then `block_iter`
+            // searches through the whole block and eventually ends in an invalid state. We
+            // therefore move to the start of the next block.
+            self.cur_idx += 1;
+
+            if let Some(block) = block_stream.next().await? {
+                let mut block_iter = BlockIterator::new(block);
+                block_iter.seek_to_first();
+                self.block_iter = Some(block_iter);
+            } else {
+                // Reached end of table.
+                self.block_stream = None;
+                self.block_iter = None;
+            }
         }
 
         Ok(())
@@ -180,8 +199,13 @@ impl HummockIterator for SSTableStreamIterator {
                 // Note: we are comparing against the `smallest_key` of the `block`, thus the
                 // partition point should be `prev(<=)` instead of `<`.
 
-                // ToDo: It should be min < k. No Idea what prev refers here to.
-                // Also no need to subtract 1. Same logic is in BlockIterator searches.
+                // It would be better to compare based on the largest key of a block. However, we do
+                // not have this information in the meta data. Since we can only compare against the
+                // smallest key of a block and we want that all (search) keys within a block create
+                // the same result, we use <= here (note that we are given a fixed key and search
+                // over a set of min-keys). Subsequently, our search returns the index of the first
+                // block for which we know that it does not contain our search key. We therefore
+                // subtract 1 from the resulting index.
 
                 let ord = VersionedComparator::compare_key(block_meta.smallest_key.as_slice(), key);
                 ord == Less || ord == Equal
@@ -190,13 +214,14 @@ impl HummockIterator for SSTableStreamIterator {
 
         self.start_stream(block_idx, Some(key)).await?;
 
-        // Checks if result is valid, because we might search for a key that would be after the
-        // current block, and before the next (i.e. key is not stored in the table).
-        // ToDo: fix that in start_stream.
-        if !self.is_valid() {
-            // seek to next block
-            self.start_stream(block_idx + 1, None).await?;
-        }
+        // Assume that our table contains two blocks `A: [k l m]` and `B: [s t u]` and that we
+        // search for the key `p`. The search above then returns `A` (first `B` and then subtracts
+        // 1). The `seek_idx()` of `SSTableIterator` then searches over `A` for `p`. Since `A` does
+        // not contain `p`, the search eventually reaches the end of `A` and leaves the iterator in
+        // an invalid state. To compensate for that `SSTableIterator::seek()` then restarts the
+        // search for the next block without a search key. We divert from that approach to avoid a
+        // second call of `start_stream`. Instead, we implement `start_stream()` in such a way that
+        // it handles this case without the need to start a second download.
 
         Ok(())
     }
