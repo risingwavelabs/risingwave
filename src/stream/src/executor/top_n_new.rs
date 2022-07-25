@@ -96,13 +96,13 @@ pub struct InnerTopNExecutorNew<S: StateStore> {
     key_indices: Vec<usize>,
 }
 
-const TOPN_CACHE_DEFAULT_EXPAND_SIZE: usize = 1024;
+const TOPN_CACHE_DEFAULT_HIGH_CAPACITY: usize = 1024;
 
 struct TopNCache {
     pub low: BTreeMap<OrderedRow, Row>,
     pub middle: BTreeMap<OrderedRow, Row>,
     pub high: BTreeMap<OrderedRow, Row>,
-    high_cache_size: usize,
+    high_capacity: usize,
 }
 
 impl TopNCache {
@@ -111,12 +111,12 @@ impl TopNCache {
             low: BTreeMap::new(),
             middle: BTreeMap::new(),
             high: BTreeMap::new(),
-            high_cache_size: TOPN_CACHE_DEFAULT_EXPAND_SIZE,
+            high_capacity: TOPN_CACHE_DEFAULT_HIGH_CAPACITY,
         }
     }
 
     fn is_high_cache_full(&self) -> bool {
-        self.high.len() == self.high_cache_size
+        self.high.len() == self.high_capacity
     }
 }
 
@@ -250,8 +250,8 @@ impl<S: StateStore> TopNExecutorBase for InnerTopNExecutorNew<S> {
 
                     // Then insert input row to corresponding cache range according to its order key
                     if self.cache.low.len() < self.offset {
-                        assert!(self.cache.middle.is_empty());
-                        assert!(self.cache.high.is_empty());
+                        debug_assert!(self.cache.middle.is_empty());
+                        debug_assert!(self.cache.high.is_empty());
                         self.cache.low.insert(ordered_pk_row, row);
                         continue;
                     }
@@ -336,7 +336,7 @@ impl<S: StateStore> TopNExecutorBase for InnerTopNExecutorNew<S> {
                                 .fill_cache(
                                     &mut self.cache.high,
                                     largest_ordered_key_in_middle,
-                                    self.cache.high_cache_size,
+                                    self.cache.high_capacity,
                                     epoch,
                                 )
                                 .await?;
@@ -369,7 +369,7 @@ impl<S: StateStore> TopNExecutorBase for InnerTopNExecutorNew<S> {
                                     .fill_cache(
                                         &mut self.cache.high,
                                         largest_ordered_key_in_middle,
-                                        self.cache.high_cache_size,
+                                        self.cache.high_capacity,
                                         epoch,
                                     )
                                     .await?;
