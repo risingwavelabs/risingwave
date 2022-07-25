@@ -44,8 +44,8 @@ use tokio::task::JoinHandle;
 use super::iterator::{BoxedForwardHummockIterator, ConcatIterator, MergeIterator};
 use super::multi_builder::CapacitySplitTableBuilder;
 use super::{
-    CompressionAlgorithm, HummockResult, SSTableBuilder, SSTableBuilderOptions, SSTableIterator,
-    SSTableIteratorType, Sstable,
+    CompressionAlgorithm, HummockResult, SSTableBuilder, SSTableBuilderOptions,
+    SSTableStreamIterator, Sstable, SSTableIteratorType,
 };
 use crate::hummock::compaction_executor::CompactionExecutor;
 use crate::hummock::iterator::ReadOptions;
@@ -787,9 +787,10 @@ impl Compactor {
                     let table = self
                         .context
                         .sstable_store
-                        .load_table(table_info.id, true, &mut stats)
+                        // Change to false (only load meta data).
+                        .load_table(table_info.id, false, &mut stats)
                         .await?;
-                    table_iters.push(Box::new(SSTableIterator::create(
+                    table_iters.push(Box::new(SSTableStreamIterator::create(
                         table,
                         self.context.sstable_store.clone(),
                         read_options.clone(),
