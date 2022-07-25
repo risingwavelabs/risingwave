@@ -62,12 +62,8 @@ impl Rule for ApplyAggRule {
         let new_agg: PlanRef = LogicalAgg::new(agg_calls, group_key, new_apply).into();
 
         // left apply's on condition for predicate push to deal with
-        if !on.conjunctions.is_empty() {
-            let filter = LogicalFilter::create(new_agg, on);
-            Some(filter)
-        } else {
-            Some(new_agg)
-        }
+        let filter = LogicalFilter::create(new_agg, on);
+        Some(filter)
     }
 }
 
