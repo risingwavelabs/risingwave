@@ -15,7 +15,7 @@
 use std::cmp::Ordering;
 use std::ops::Bound::{Excluded, Included, Unbounded};
 use std::ops::RangeBounds;
-use std::sync::atomic::AtomicU64;
+use std::sync::atomic::{AtomicU64, AtomicUsize};
 use std::sync::Arc;
 
 use risingwave_hummock_sdk::key::user_key;
@@ -128,11 +128,22 @@ where
 struct MemoryLimiterInner {
     total_size: AtomicU64,
     notify: Notify,
+    check_count: AtomicUsize,
+    quota: u64,
+}
+
+impl MemoryLimiterInner {
+    pub fn may_notify(&self, quota: u64) {
+        while self.check_count.load(AtomicOrdering::SeqCst) > 0 {}
+        let total_size = self.total_size.fetch_sub(quota, AtomicOrdering::Release);
+        if total_size - quota < self.quota {
+            self.notify.notify_waiters();
+        }
+    }
 }
 
 pub struct MemoryLimiter {
     inner: Arc<MemoryLimiterInner>,
-    quota: u64,
 }
 
 pub struct MemoryTracker {
@@ -148,36 +159,39 @@ impl MemoryLimiter {
             inner: Arc::new(MemoryLimiterInner {
                 total_size: AtomicU64::new(0),
                 notify: Notify::new(),
+                check_count: AtomicUsize::new(0),
+                quota,
             }),
-            quota,
         }
     }
 
     pub async fn require_memory(&self, quota: u64) -> Option<MemoryTracker> {
-        if quota > self.quota {
+        if quota > self.inner.quota {
             return None;
         }
-        let mut need_quota = self
-            .inner
-            .total_size
-            .fetch_add(quota, AtomicOrdering::SeqCst);
-        if need_quota + quota < self.quota {
+        let current_quota = self.inner.total_size.load(AtomicOrdering::Acquire);
+        if current_quota < self.inner.quota {
+            self.inner
+                .total_size
+                .fetch_add(quota, AtomicOrdering::Acquire);
             return Some(MemoryTracker {
                 limiter: self.inner.clone(),
                 quota,
             });
         }
-        while need_quota + quota > self.quota {
-            self.inner
-                .total_size
-                .fetch_sub(quota, AtomicOrdering::SeqCst);
+        self.inner.check_count.fetch_add(1, AtomicOrdering::SeqCst);
+        let mut current_quota = self.inner.total_size.load(AtomicOrdering::Acquire);
+        while current_quota > self.inner.quota {
             let notified = self.inner.notify.notified();
+            self.inner.check_count.fetch_sub(1, AtomicOrdering::SeqCst);
             notified.await;
-            need_quota = self
-                .inner
-                .total_size
-                .fetch_add(quota, AtomicOrdering::SeqCst);
+            self.inner.check_count.fetch_add(1, AtomicOrdering::SeqCst);
+            current_quota = self.inner.total_size.load(AtomicOrdering::Acquire) + quota;
         }
+        self.inner
+            .total_size
+            .fetch_add(quota, AtomicOrdering::SeqCst);
+        self.inner.check_count.fetch_sub(1, AtomicOrdering::SeqCst);
         Some(MemoryTracker {
             limiter: self.inner.clone(),
             quota,
@@ -187,17 +201,10 @@ impl MemoryLimiter {
     pub fn get_memory_usage(&self) -> u64 {
         self.inner.total_size.load(AtomicOrdering::Acquire)
     }
-
-    pub fn notify_all(&self) {
-        self.inner.notify.notify_waiters();
-    }
 }
 
 impl Drop for MemoryTracker {
     fn drop(&mut self) {
-        self.limiter
-            .total_size
-            .fetch_sub(self.quota, AtomicOrdering::Release);
-        self.limiter.notify.notify_waiters();
+        self.limiter.may_notify(self.quota);
     }
 }

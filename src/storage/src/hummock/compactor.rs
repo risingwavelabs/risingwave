@@ -604,7 +604,6 @@ impl Compactor {
                 compactor.context.sstable_store.delete_cache(table.id);
             }
         }
-        compactor.context.memory_limiter.notify_all();
         compact_success
     }
 
