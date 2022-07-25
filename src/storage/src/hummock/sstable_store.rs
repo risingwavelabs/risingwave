@@ -313,7 +313,8 @@ mod tests {
     use std::sync::Arc;
 
     use crate::hummock::iterator::test_utils::{iterator_test_key_of, mock_sstable_store};
-    use crate::hummock::iterator::{HummockIterator, ReadOptions};
+    use crate::hummock::iterator::HummockIterator;
+    use crate::hummock::sstable::SstableIteratorReadOptions;
     use crate::hummock::test_utils::{default_builder_opt_for_test, gen_test_sstable_data};
     use crate::hummock::value::HummockValue;
     use crate::hummock::{CachePolicy, Sstable, SstableIterator};
@@ -347,8 +348,11 @@ mod tests {
             holder.value().blocks.len()
         );
         assert!(!holder.value().blocks.is_empty());
-        let mut iter =
-            SstableIterator::new(holder, sstable_store, Arc::new(ReadOptions::default()));
+        let mut iter = SstableIterator::new(
+            holder,
+            sstable_store,
+            Arc::new(SstableIteratorReadOptions::default()),
+        );
         iter.rewind().await.unwrap();
         for i in 0..100 {
             let key = iter.key();

@@ -27,7 +27,7 @@ mod cache;
 pub use cache::block_cache::*;
 pub use cache::tiered_cache::*;
 
-mod sstable;
+pub mod sstable;
 pub use sstable::*;
 
 pub mod compaction_executor;
@@ -64,10 +64,11 @@ pub use self::state_store::HummockStateStoreIter;
 use super::monitor::StateStoreMetrics;
 use crate::hummock::compaction_group_client::CompactionGroupClient;
 use crate::hummock::conflict_detector::ConflictDetector;
-use crate::hummock::iterator::ReadOptions;
 use crate::hummock::local_version_manager::LocalVersionManager;
+use crate::hummock::sstable::SstableIteratorReadOptions;
 use crate::hummock::sstable_store::{SstableStoreRef, TableHolder};
 use crate::monitor::StoreLocalStatistic;
+use crate::store::ReadOptions;
 
 /// Hummock is the state store backend.
 #[derive(Clone)]
@@ -146,16 +147,23 @@ impl HummockStorage {
         sstable: TableHolder,
         internal_key: &[u8],
         key: &[u8],
-        read_options: Arc<ReadOptions>,
+        _read_options: &ReadOptions,
         stats: &mut StoreLocalStatistic,
     ) -> HummockResult<Option<Option<Bytes>>> {
+        // TODO: via read_options to determine whether to check bloom_filter next PR
         if sstable.value().surely_not_have_user_key(key) {
             stats.bloom_filter_true_negative_count += 1;
             return Ok(None);
         }
         // Might have the key, take it as might positive.
         stats.bloom_filter_might_positive_count += 1;
-        let mut iter = SstableIterator::create(sstable, self.sstable_store.clone(), read_options);
+        // TODO: now SstableIterator does not use prefetch through SstableIteratorReadOptions, so we
+        // use default before refinement.
+        let mut iter = SstableIterator::create(
+            sstable,
+            self.sstable_store.clone(),
+            Arc::new(SstableIteratorReadOptions::default()),
+        );
         iter.seek(internal_key).await?;
         // Iterator has seeked passed the borders.
         if !iter.is_valid() {

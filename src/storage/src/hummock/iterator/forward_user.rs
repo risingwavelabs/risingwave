@@ -314,8 +314,10 @@ mod tests {
         iterator_test_key_of, iterator_test_key_of_epoch, iterator_test_value_of,
         mock_sstable_store, TEST_KEYS_COUNT,
     };
-    use crate::hummock::iterator::{BoxedForwardHummockIterator, ReadOptions};
-    use crate::hummock::sstable::{SstableIterator, SstableIteratorType};
+    use crate::hummock::iterator::BoxedForwardHummockIterator;
+    use crate::hummock::sstable::{
+        SstableIterator, SstableIteratorReadOptions, SstableIteratorType,
+    };
     use crate::hummock::test_utils::create_small_table_cache;
     use crate::hummock::value::HummockValue;
     use crate::monitor::StateStoreMetrics;
@@ -323,7 +325,7 @@ mod tests {
     #[tokio::test]
     async fn test_basic() {
         let sstable_store = mock_sstable_store().await;
-        let read_options = Arc::new(ReadOptions::default());
+        let read_options = Arc::new(SstableIteratorReadOptions::default());
         let table0 = gen_iterator_test_sstable_base(
             0,
             default_builder_opt_for_test(),
@@ -414,7 +416,7 @@ mod tests {
             TEST_KEYS_COUNT,
         )
         .await;
-        let read_options = Arc::new(ReadOptions::default());
+        let read_options = Arc::new(SstableIteratorReadOptions::default());
         let cache = create_small_table_cache();
         let iters: Vec<BoxedForwardHummockIterator> = vec![
             Box::new(SstableIterator::create(
@@ -503,7 +505,7 @@ mod tests {
         let table1 =
             gen_iterator_test_sstable_from_kv_pair(1, kv_pairs, sstable_store.clone()).await;
 
-        let read_options = Arc::new(ReadOptions::default());
+        let read_options = Arc::new(SstableIteratorReadOptions::default());
         let cache = create_small_table_cache();
         let iters: Vec<BoxedForwardHummockIterator> = vec![
             Box::new(SstableIterator::create(
@@ -557,7 +559,7 @@ mod tests {
         let table =
             gen_iterator_test_sstable_from_kv_pair(0, kv_pairs, sstable_store.clone()).await;
         let cache = create_small_table_cache();
-        let read_options = Arc::new(ReadOptions::default());
+        let read_options = Arc::new(SstableIteratorReadOptions::default());
         let iters: Vec<BoxedForwardHummockIterator> = vec![Box::new(SstableIterator::create(
             cache.insert(table.id, table.id, 1, Box::new(table)),
             sstable_store,
@@ -640,7 +642,7 @@ mod tests {
         let table =
             gen_iterator_test_sstable_from_kv_pair(0, kv_pairs, sstable_store.clone()).await;
         let cache = create_small_table_cache();
-        let read_options = Arc::new(ReadOptions::default());
+        let read_options = Arc::new(SstableIteratorReadOptions::default());
         let iters: Vec<BoxedForwardHummockIterator> = vec![Box::new(SstableIterator::create(
             cache.insert(table.id, table.id, 1, Box::new(table)),
             sstable_store,
@@ -724,7 +726,7 @@ mod tests {
         let table =
             gen_iterator_test_sstable_from_kv_pair(0, kv_pairs, sstable_store.clone()).await;
         let cache = create_small_table_cache();
-        let read_options = Arc::new(ReadOptions::default());
+        let read_options = Arc::new(SstableIteratorReadOptions::default());
         let iters: Vec<BoxedForwardHummockIterator> = vec![Box::new(SstableIterator::create(
             cache.insert(table.id, table.id, 1, Box::new(table)),
             sstable_store,
@@ -810,7 +812,7 @@ mod tests {
         let table =
             gen_iterator_test_sstable_from_kv_pair(0, kv_pairs, sstable_store.clone()).await;
         let cache = create_small_table_cache();
-        let read_options = Arc::new(ReadOptions::default());
+        let read_options = Arc::new(SstableIteratorReadOptions::default());
         let iters: Vec<BoxedForwardHummockIterator> = vec![Box::new(SstableIterator::create(
             cache.insert(table.id, table.id, 1, Box::new(table)),
             sstable_store,
@@ -879,7 +881,7 @@ mod tests {
     #[tokio::test]
     async fn test_min_epoch() {
         let sstable_store = mock_sstable_store().await;
-        let read_options = Arc::new(ReadOptions::default());
+        let read_options = Arc::new(SstableIteratorReadOptions::default());
         let table0 = gen_iterator_test_sstable_with_incr_epoch(
             0,
             default_builder_opt_for_test(),
