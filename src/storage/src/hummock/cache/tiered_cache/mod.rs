@@ -50,6 +50,7 @@ pub enum TieredCache<K: TieredCacheKey> {
 }
 
 impl<K: TieredCacheKey> TieredCache<K> {
+    #[allow(clippy::unused_async)]
     pub async fn open(options: TieredCacheOptions) -> Result<Self> {
         match options {
             TieredCacheOptions::NoneCache => Ok(Self::NoneCache(PhantomData::default())),
@@ -61,6 +62,7 @@ impl<K: TieredCacheKey> TieredCache<K> {
         }
     }
 
+    #[allow(unused_variables)]
     pub fn insert(&self, key: K, value: Vec<u8>) -> Result<()> {
         match self {
             TieredCache::NoneCache(_) => Ok(()),
@@ -72,6 +74,7 @@ impl<K: TieredCacheKey> TieredCache<K> {
         }
     }
 
+    #[allow(unused_variables)]
     pub fn erase(&self, key: &K) -> Result<()> {
         match self {
             TieredCache::NoneCache(_) => Ok(()),
@@ -83,6 +86,7 @@ impl<K: TieredCacheKey> TieredCache<K> {
         }
     }
 
+    #[allow(unused_variables, clippy::unused_async)]
     pub async fn get(&self, key: &K) -> Result<Option<Vec<u8>>> {
         match self {
             TieredCache::NoneCache(_) => Ok(None),
