@@ -191,7 +191,7 @@ mod tests {
     impl TableBuilderFactory for LocalTableBuilderFactory {
         async fn open_builder(&self) -> HummockResult<(MemoryTracker, SstableBuilder)> {
             let id = self.next_id.fetch_add(1, SeqCst);
-            let builder = SstableBuilder::new(id, self.options.clone());
+            let builder = SstableBuilder::new_for_test(id, self.options.clone());
             let tracker = self.limiter.require_memory(1).await.unwrap();
             Ok((tracker, builder))
         }

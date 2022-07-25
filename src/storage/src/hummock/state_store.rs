@@ -518,8 +518,7 @@ impl StateStore for HummockStorage {
             // not check
         }
 
-        // TODO: transfer prefix_hint to iter_inner next pr
-        self.iter_inner::<_, _, ForwardIter>(None, key_range, read_options)
+        self.iter_inner::<_, _, ForwardIter>(prefix_hint, key_range, read_options)
     }
 
     /// Returns a backward iterator that scans from the end key to the begin key

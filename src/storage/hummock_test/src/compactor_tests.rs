@@ -27,8 +27,11 @@ mod tests {
     use risingwave_common::util::epoch::Epoch;
     use risingwave_hummock_sdk::compaction_group::hummock_version_ext::HummockVersionExt;
     use risingwave_hummock_sdk::compaction_group::StaticCompactionGroupId;
-    use risingwave_hummock_sdk::filter_key_extractor::FilterKeyExtractorManager;
-    use risingwave_hummock_sdk::key::get_table_id;
+    use risingwave_hummock_sdk::filter_key_extractor::{
+        FilterKeyExtractorImpl, FilterKeyExtractorManager, FilterKeyExtractorManagerRef,
+        FixedLengthFilterKeyExtractor, FullKeyFilterKeyExtractor,
+    };
+    use risingwave_hummock_sdk::key::{get_table_id, next_key, table_prefix, TABLE_PREFIX_LEN};
     use risingwave_meta::hummock::compaction::ManualCompactionOption;
     use risingwave_meta::hummock::test_utils::{
         register_table_ids_to_compaction_group, setup_compute_env,
@@ -37,7 +40,6 @@ mod tests {
     use risingwave_meta::hummock::MockHummockMetaClient;
     use risingwave_pb::hummock::{HummockVersion, TableOption};
     use risingwave_rpc_client::HummockMetaClient;
-    use risingwave_storage::hummock::compaction_group_client::DummyCompactionGroupClient;
     use risingwave_storage::hummock::compactor::{CompactionExecutor, Compactor, CompactorContext};
     use risingwave_storage::hummock::iterator::test_utils::mock_sstable_store;
     use risingwave_storage::hummock::{HummockStorage, MemoryLimiter, SstableIdManager};
@@ -60,14 +62,36 @@ mod tests {
         });
         let sstable_store = mock_sstable_store();
 
-        HummockStorage::with_default_stats(
+        HummockStorage::for_test(
             options.clone(),
             sstable_store,
             hummock_meta_client.clone(),
-            Arc::new(StateStoreMetrics::unused()),
-            Arc::new(DummyCompactionGroupClient::new(
-                StaticCompactionGroupId::StateDefault.into(),
-            )),
+            Arc::new(FilterKeyExtractorManager::default()),
+        )
+        .await
+        .unwrap()
+    }
+
+    async fn get_hummock_storage_with_filter_key_extractor_manager(
+        hummock_meta_client: Arc<dyn HummockMetaClient>,
+        filter_key_extractor_manager: FilterKeyExtractorManagerRef,
+    ) -> HummockStorage {
+        let remote_dir = "hummock_001_test".to_string();
+        let options = Arc::new(StorageConfig {
+            sstable_size_mb: 1,
+            block_size_kb: 1,
+            bloom_false_positive: 0.1,
+            data_directory: remote_dir.clone(),
+            write_conflict_detection_enabled: true,
+            ..Default::default()
+        });
+        let sstable_store = mock_sstable_store();
+
+        HummockStorage::for_test(
+            options.clone(),
+            sstable_store,
+            hummock_meta_client.clone(),
+            filter_key_extractor_manager.clone(),
         )
         .await
         .unwrap()
@@ -113,6 +137,18 @@ mod tests {
         storage: &HummockStorage,
         hummock_meta_client: &Arc<dyn HummockMetaClient>,
     ) -> CompactorContext {
+        get_compactor_context_with_filter_key_extractor_manager(
+            storage,
+            hummock_meta_client,
+            Arc::new(FilterKeyExtractorManager::default()),
+        )
+    }
+
+    fn get_compactor_context_with_filter_key_extractor_manager(
+        storage: &HummockStorage,
+        hummock_meta_client: &Arc<dyn HummockMetaClient>,
+        filter_key_extractor_manager: FilterKeyExtractorManagerRef,
+    ) -> CompactorContext {
         CompactorContext {
             options: storage.options().clone(),
             sstable_store: storage.sstable_store(),
@@ -120,7 +156,7 @@ mod tests {
             stats: Arc::new(StateStoreMetrics::unused()),
             is_share_buffer_compact: false,
             compaction_executor: Arc::new(CompactionExecutor::new(Some(1))),
-            filter_key_extractor_manager: Arc::new(FilterKeyExtractorManager::default()),
+            filter_key_extractor_manager,
             memory_limiter: Arc::new(MemoryLimiter::new(1024 * 1024 * 128)),
             sstable_id_manager: Arc::new(SstableIdManager::new(
                 hummock_meta_client.clone(),
@@ -353,8 +389,26 @@ mod tests {
             hummock_manager_ref.clone(),
             worker_node.id,
         ));
-        let storage = get_hummock_storage(hummock_meta_client.clone()).await;
-        let compact_ctx = get_compactor_context(&storage, &hummock_meta_client);
+
+        let filter_key_extractor_manager = Arc::new(FilterKeyExtractorManager::default());
+        filter_key_extractor_manager.update(
+            1,
+            Arc::new(FilterKeyExtractorImpl::FullKey(
+                FullKeyFilterKeyExtractor::default(),
+            )),
+        );
+
+        let storage = get_hummock_storage_with_filter_key_extractor_manager(
+            hummock_meta_client.clone(),
+            filter_key_extractor_manager.clone(),
+        )
+        .await;
+
+        let compact_ctx = get_compactor_context_with_filter_key_extractor_manager(
+            &storage,
+            &hummock_meta_client,
+            filter_key_extractor_manager.clone(),
+        );
 
         // 1. add sstables
         let val = Bytes::from(b"0"[..].repeat(1 << 10)); // 1024 Byte value
@@ -451,8 +505,33 @@ mod tests {
             hummock_manager_ref.clone(),
             worker_node.id,
         ));
-        let storage = get_hummock_storage(hummock_meta_client.clone()).await;
-        let compact_ctx = get_compactor_context(&storage, &hummock_meta_client);
+
+        let filter_key_extractor_manager = Arc::new(FilterKeyExtractorManager::default());
+        filter_key_extractor_manager.update(
+            1,
+            Arc::new(FilterKeyExtractorImpl::FullKey(
+                FullKeyFilterKeyExtractor::default(),
+            )),
+        );
+
+        filter_key_extractor_manager.update(
+            2,
+            Arc::new(FilterKeyExtractorImpl::FullKey(
+                FullKeyFilterKeyExtractor::default(),
+            )),
+        );
+
+        let storage = get_hummock_storage_with_filter_key_extractor_manager(
+            hummock_meta_client.clone(),
+            filter_key_extractor_manager.clone(),
+        )
+        .await;
+
+        let compact_ctx = get_compactor_context_with_filter_key_extractor_manager(
+            &storage,
+            &hummock_meta_client,
+            filter_key_extractor_manager.clone(),
+        );
 
         // 1. add sstables
         let val = Bytes::from(b"0"[..].repeat(1 << 10)); // 1024 Byte value
@@ -604,8 +683,24 @@ mod tests {
             hummock_manager_ref.clone(),
             worker_node.id,
         ));
-        let storage = get_hummock_storage(hummock_meta_client.clone()).await;
-        let compact_ctx = get_compactor_context(&storage, &hummock_meta_client);
+
+        let filter_key_extractor_manager = Arc::new(FilterKeyExtractorManager::default());
+        let storage = get_hummock_storage_with_filter_key_extractor_manager(
+            hummock_meta_client.clone(),
+            filter_key_extractor_manager.clone(),
+        )
+        .await;
+        let compact_ctx = get_compactor_context_with_filter_key_extractor_manager(
+            &storage,
+            &hummock_meta_client,
+            filter_key_extractor_manager.clone(),
+        );
+        filter_key_extractor_manager.update(
+            2,
+            Arc::new(FilterKeyExtractorImpl::FullKey(
+                FullKeyFilterKeyExtractor::default(),
+            )),
+        );
 
         // 1. add sstables
         let val = Bytes::from(b"0"[..].to_vec()); // 1 Byte value

@@ -42,7 +42,21 @@ pub enum FilterKeyExtractorImpl {
 
 impl FilterKeyExtractorImpl {
     pub fn from_table(table_catalog: &Table) -> Self {
-        if table_catalog.read_pattern_prefix_column < 1 {
+        let dist_key_indices: Vec<usize> = table_catalog
+            .distribution_key
+            .iter()
+            .map(|dist_index| *dist_index as usize)
+            .collect();
+
+        let pk_indices: Vec<usize> = table_catalog
+            .order_key
+            .iter()
+            .map(|col_order| col_order.index as usize)
+            .collect();
+
+        let match_read_pattern =
+            !dist_key_indices.is_empty() && pk_indices.starts_with(&dist_key_indices);
+        if !match_read_pattern {
             // for now frontend had not infer the table_id_to_filter_key_extractor, so we
             // use FullKeyFilterKeyExtractor
             FilterKeyExtractorImpl::FullKey(FullKeyFilterKeyExtractor::default())
@@ -121,7 +135,7 @@ pub struct SchemaFilterKeyExtractor {
     /// Perfix key length can be decoded through its `DataType` and `OrderType` which obtained from
     /// `TableCatalog`. `read_pattern_prefix_column` means the count of column to decode prefix
     /// from storage key.
-    read_pattern_prefix_column: u32,
+    read_pattern_prefix_column: usize,
     deserializer: OrderedRowDeserializer,
     // TODO:need some bench test for same prefix case like join (if we need a prefix_cache for same
     // prefix_key)
@@ -129,7 +143,9 @@ pub struct SchemaFilterKeyExtractor {
 
 impl FilterKeyExtractor for SchemaFilterKeyExtractor {
     fn extract<'a>(&self, full_key: &'a [u8]) -> &'a [u8] {
-        debug_assert!(full_key.len() >= TABLE_PREFIX_LEN + VIRTUAL_NODE_SIZE);
+        if full_key.len() < TABLE_PREFIX_LEN + VIRTUAL_NODE_SIZE {
+            return full_key;
+        }
 
         let (_table_prefix, key) = full_key.split_at(TABLE_PREFIX_LEN);
         let (_vnode_prefix, pk) = key.split_at(VIRTUAL_NODE_SIZE);
@@ -138,10 +154,7 @@ impl FilterKeyExtractor for SchemaFilterKeyExtractor {
         // detection
         let pk_prefix_len = self
             .deserializer
-            .deserialize_prefix_len_with_column_indices(
-                pk,
-                0..self.read_pattern_prefix_column as usize,
-            )
+            .deserialize_prefix_len_with_column_indices(pk, 0..self.read_pattern_prefix_column)
             .unwrap();
 
         let prefix_len = TABLE_PREFIX_LEN + VIRTUAL_NODE_SIZE + pk_prefix_len;
@@ -151,7 +164,8 @@ impl FilterKeyExtractor for SchemaFilterKeyExtractor {
 
 impl SchemaFilterKeyExtractor {
     pub fn new(table_catalog: &Table) -> Self {
-        assert_ne!(0, table_catalog.read_pattern_prefix_column);
+        let read_pattern_prefix_column = table_catalog.distribution_key.len();
+        assert_ne!(0, read_pattern_prefix_column);
 
         // column_index in pk
         let pk_indices: Vec<usize> = table_catalog
@@ -177,7 +191,7 @@ impl SchemaFilterKeyExtractor {
             .collect();
 
         Self {
-            read_pattern_prefix_column: table_catalog.read_pattern_prefix_column,
+            read_pattern_prefix_column,
             deserializer: OrderedRowDeserializer::new(data_types, order_types),
         }
     }
@@ -380,7 +394,6 @@ impl FilterKeyExtractorManager {
     /// Internally, try to get all `filter_key_extractor` from `hashmap`. Will block the caller if
     /// table_id does not util version update (notify), and retry to get
     pub async fn acquire(&self, table_id_set: HashSet<u32>) -> FilterKeyExtractorImpl {
-        println!("begin acquire {:?}", table_id_set);
         self.inner.acquire(table_id_set).await
     }
 
@@ -404,6 +417,7 @@ mod tests {
     use std::time::Duration;
 
     use bytes::{BufMut, BytesMut};
+    use itertools::Itertools;
     use risingwave_common::array::Row;
     use risingwave_common::catalog::{ColumnDesc, ColumnId};
     use risingwave_common::config::constant::hummock::PROPERTIES_RETAINTION_SECOND_KEY;
@@ -510,7 +524,7 @@ mod tests {
             ],
             pk: vec![0],
             dependent_relations: vec![],
-            distribution_key: vec![],
+            distribution_key: (0..column_count as i32).collect_vec(),
             optional_associated_source_id: None,
             appendonly: false,
             owner: risingwave_common::catalog::DEFAULT_SUPER_USER_ID,
@@ -518,7 +532,6 @@ mod tests {
                 String::from(PROPERTIES_RETAINTION_SECOND_KEY),
                 String::from("300"),
             )]),
-            read_pattern_prefix_column: column_count, // 1 column
         }
     }
 

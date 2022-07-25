@@ -15,16 +15,14 @@
 use std::sync::Arc;
 
 use bytes::Bytes;
-use risingwave_hummock_sdk::compaction_group::StaticCompactionGroupId;
+use risingwave_hummock_sdk::filter_key_extractor::FilterKeyExtractorManager;
 use risingwave_hummock_sdk::HummockEpoch;
 use risingwave_meta::hummock::test_utils::setup_compute_env;
 use risingwave_meta::hummock::MockHummockMetaClient;
 use risingwave_rpc_client::HummockMetaClient;
-use risingwave_storage::hummock::compaction_group_client::DummyCompactionGroupClient;
 use risingwave_storage::hummock::iterator::test_utils::mock_sstable_store;
 use risingwave_storage::hummock::test_utils::{count_iter, default_config_for_test};
 use risingwave_storage::hummock::HummockStorage;
-use risingwave_storage::monitor::StateStoreMetrics;
 use risingwave_storage::storage_value::StorageValue;
 use risingwave_storage::store::{ReadOptions, StateStore, WriteOptions};
 use risingwave_storage::StateStoreIter;
@@ -39,14 +37,11 @@ async fn test_basic() {
         hummock_manager_ref.clone(),
         worker_node.id,
     ));
-    let hummock_storage = HummockStorage::with_default_stats(
+    let hummock_storage = HummockStorage::for_test(
         hummock_options,
         sstable_store,
         meta_client.clone(),
-        Arc::new(StateStoreMetrics::unused()),
-        Arc::new(DummyCompactionGroupClient::new(
-            StaticCompactionGroupId::StateDefault.into(),
-        )),
+        Arc::new(FilterKeyExtractorManager::default()),
     )
     .await
     .unwrap();
@@ -335,14 +330,11 @@ async fn test_state_store_sync() {
         hummock_manager_ref.clone(),
         worker_node.id,
     ));
-    let hummock_storage = HummockStorage::with_default_stats(
+    let hummock_storage = HummockStorage::for_test(
         hummock_options,
         sstable_store,
         meta_client.clone(),
-        Arc::new(StateStoreMetrics::unused()),
-        Arc::new(DummyCompactionGroupClient::new(
-            StaticCompactionGroupId::StateDefault.into(),
-        )),
+        Arc::new(FilterKeyExtractorManager::default()),
     )
     .await
     .unwrap();
@@ -448,19 +440,16 @@ async fn test_reload_storage() {
     let hummock_options = Arc::new(default_config_for_test());
     let (_env, hummock_manager_ref, _cluster_manager_ref, worker_node) =
         setup_compute_env(8080).await;
-    let hummock_meta_client = Arc::new(MockHummockMetaClient::new(
+    let meta_client = Arc::new(MockHummockMetaClient::new(
         hummock_manager_ref.clone(),
         worker_node.id,
     ));
 
-    let hummock_storage = HummockStorage::with_default_stats(
-        hummock_options,
+    let hummock_storage = HummockStorage::for_test(
+        hummock_options.clone(),
         sstable_store.clone(),
-        hummock_meta_client.clone(),
-        Arc::new(StateStoreMetrics::unused()),
-        Arc::new(DummyCompactionGroupClient::new(
-            StaticCompactionGroupId::StateDefault.into(),
-        )),
+        meta_client.clone(),
+        Arc::new(FilterKeyExtractorManager::default()),
     )
     .await
     .unwrap();
@@ -501,14 +490,11 @@ async fn test_reload_storage() {
 
     // Mock something happened to storage internal, and storage is reloaded.
     drop(hummock_storage);
-    let hummock_storage = HummockStorage::with_default_stats(
-        Arc::new(default_config_for_test()),
-        sstable_store,
-        hummock_meta_client,
-        Arc::new(StateStoreMetrics::unused()),
-        Arc::new(DummyCompactionGroupClient::new(
-            StaticCompactionGroupId::StateDefault.into(),
-        )),
+    let hummock_storage = HummockStorage::for_test(
+        hummock_options.clone(),
+        sstable_store.clone(),
+        meta_client.clone(),
+        Arc::new(FilterKeyExtractorManager::default()),
     )
     .await
     .unwrap();
@@ -642,14 +628,12 @@ async fn test_write_anytime() {
         hummock_manager_ref.clone(),
         worker_node.id,
     ));
-    let hummock_storage = HummockStorage::with_default_stats(
+
+    let hummock_storage = HummockStorage::for_test(
         hummock_options,
         sstable_store,
         meta_client.clone(),
-        Arc::new(StateStoreMetrics::unused()),
-        Arc::new(DummyCompactionGroupClient::new(
-            StaticCompactionGroupId::StateDefault.into(),
-        )),
+        Arc::new(FilterKeyExtractorManager::default()),
     )
     .await
     .unwrap();
@@ -883,19 +867,16 @@ async fn test_delete_get() {
     let hummock_options = Arc::new(default_config_for_test());
     let (_env, hummock_manager_ref, _cluster_manager_ref, worker_node) =
         setup_compute_env(8080).await;
-    let hummock_meta_client = Arc::new(MockHummockMetaClient::new(
+    let meta_client = Arc::new(MockHummockMetaClient::new(
         hummock_manager_ref.clone(),
         worker_node.id,
     ));
 
-    let hummock_storage = HummockStorage::with_default_stats(
+    let hummock_storage = HummockStorage::for_test(
         hummock_options,
-        sstable_store.clone(),
-        hummock_meta_client.clone(),
-        Arc::new(StateStoreMetrics::unused()),
-        Arc::new(DummyCompactionGroupClient::new(
-            StaticCompactionGroupId::StateDefault.into(),
-        )),
+        sstable_store,
+        meta_client.clone(),
+        Arc::new(FilterKeyExtractorManager::default()),
     )
     .await
     .unwrap();
@@ -921,10 +902,7 @@ async fn test_delete_get() {
         .unwrap();
     hummock_storage.sync(Some(epoch1)).await.unwrap();
     let ssts = hummock_storage.get_uncommitted_ssts(epoch1);
-    hummock_meta_client
-        .commit_epoch(epoch1, ssts)
-        .await
-        .unwrap();
+    meta_client.commit_epoch(epoch1, ssts).await.unwrap();
     let epoch2 = initial_epoch + 2;
     let batch2 = vec![(Bytes::from("bb"), StorageValue::new_default_delete())];
     hummock_storage
@@ -939,10 +917,7 @@ async fn test_delete_get() {
         .unwrap();
     hummock_storage.sync(Some(epoch2)).await.unwrap();
     let ssts = hummock_storage.get_uncommitted_ssts(epoch2);
-    hummock_meta_client
-        .commit_epoch(epoch2, ssts)
-        .await
-        .unwrap();
+    meta_client.commit_epoch(epoch2, ssts).await.unwrap();
     hummock_storage.wait_epoch(epoch2).await.unwrap();
     assert!(hummock_storage
         .get(
