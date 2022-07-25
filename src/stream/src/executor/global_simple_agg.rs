@@ -186,9 +186,6 @@ impl<S: StateStore> GlobalSimpleAggExecutor<S> {
             .zip_eq(state_tables.iter_mut())
         {
             let vis_map = agg_call_filter_res(agg_call, &columns, visibility.as_ref(), capacity)?;
-            agg_state
-                .apply_batch(&ops, vis_map.as_ref(), data, epoch, state_table)
-                .await?;
             if agg_call.kind == AggKind::StringAgg {
                 let chunk_cols = columns.iter().map(|col| col.array_ref()).collect_vec();
                 agg_state

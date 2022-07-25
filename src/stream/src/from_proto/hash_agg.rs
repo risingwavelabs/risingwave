@@ -33,6 +33,7 @@ struct HashAggExecutorDispatcherArgs<S: StateStore> {
     pk_indices: PkIndices,
     executor_id: u64,
     state_tables: Vec<RowBasedStateTable<S>>,
+    state_table_col_mappings: Vec<Vec<usize>>,
 }
 
 impl<S: StateStore> HashKeyDispatcher for HashAggExecutorDispatcher<S> {
@@ -47,6 +48,7 @@ impl<S: StateStore> HashKeyDispatcher for HashAggExecutorDispatcher<S> {
             args.executor_id,
             args.key_indices,
             args.state_tables,
+            args.state_table_col_mappings,
         )?
         .boxed())
     }
@@ -72,6 +74,11 @@ impl ExecutorBuilder for HashAggExecutorBuilder {
             .iter()
             .map(|agg_call| build_agg_call_from_prost(node.is_append_only, agg_call))
             .try_collect()?;
+        let state_table_col_mappings: Vec<Vec<usize>> = node
+            .get_column_mappings()
+            .iter()
+            .map(|mapping| mapping.indices.iter().map(|idx| *idx as usize).collect())
+            .collect();
         let input = params.input.remove(0);
         let keys = key_indices
             .iter()
@@ -90,6 +97,7 @@ impl ExecutorBuilder for HashAggExecutorBuilder {
             pk_indices: params.pk_indices,
             executor_id: params.executor_id,
             state_tables,
+            state_table_col_mappings,
         };
         HashAggExecutorDispatcher::dispatch_by_kind(kind, args)
     }

@@ -27,6 +27,7 @@ use risingwave_common::catalog::Schema;
 use risingwave_common::collection::evictable::EvictableHashMap;
 use risingwave_common::hash::{HashCode, HashKey};
 use risingwave_common::util::hash_util::CRC32FastBuilder;
+use risingwave_expr::expr::AggKind;
 use risingwave_storage::table::state_table::RowBasedStateTable;
 use risingwave_storage::StateStore;
 
@@ -83,6 +84,7 @@ struct HashAggExecutorExtra<S: StateStore> {
     key_indices: Vec<usize>,
 
     state_tables: Vec<RowBasedStateTable<S>>,
+    state_table_col_mappings: Vec<Vec<usize>>,
 }
 
 impl<K: HashKey, S: StateStore> Executor for HashAggExecutor<K, S> {
@@ -111,6 +113,7 @@ impl<K: HashKey, S: StateStore> HashAggExecutor<K, S> {
         executor_id: u64,
         key_indices: Vec<usize>,
         mut state_tables: Vec<RowBasedStateTable<S>>,
+        state_table_col_mappings: Vec<Vec<usize>>,
     ) -> StreamExecutorResult<Self> {
         let input_info = input.info();
         let schema = generate_agg_schema(input.as_ref(), &agg_calls, Some(&key_indices));
@@ -131,6 +134,7 @@ impl<K: HashKey, S: StateStore> HashAggExecutor<K, S> {
                 agg_calls,
                 key_indices,
                 state_tables,
+                state_table_col_mappings,
             },
             _phantom: PhantomData,
         })
@@ -195,6 +199,7 @@ impl<K: HashKey, S: StateStore> HashAggExecutor<K, S> {
             ref input_schema,
             ref schema,
             ref mut state_tables,
+            ref state_table_col_mappings,
             ..
         }: &mut HashAggExecutorExtra<S>,
         state_map: &mut EvictableHashMap<K, Option<Box<AggState<S>>>>,
@@ -260,7 +265,7 @@ impl<K: HashKey, S: StateStore> HashAggExecutor<K, S> {
                                 epoch,
                                 Some(hash_code.clone()),
                                 state_tables,
-                                todo!(), // TODO(rc)
+                                state_table_col_mappings,
                             )
                             .await?,
                         ),
@@ -295,11 +300,20 @@ impl<K: HashKey, S: StateStore> HashAggExecutor<K, S> {
                 .zip_eq(all_agg_data.iter())
                 .zip_eq(state_tables.iter_mut())
             {
-                let data = data.iter().map(|d| &**d).collect_vec();
                 let vis_map = agg_call_filter_res(agg_call, &columns, Some(vis_map), capacity)?;
-                agg_state
-                    .apply_batch(&ops, vis_map.as_ref(), &data, epoch, state_table)
-                    .await?;
+                if agg_call.kind == AggKind::StringAgg {
+                    let chunk_cols = columns.iter().map(|col| col.array_ref()).collect_vec();
+                    agg_state
+                        .apply_batch(&ops, vis_map.as_ref(), &chunk_cols, epoch, state_table)
+                        .await?;
+                } else {
+                    // TODO(yuchao): Pass all the columns to agg states' apply_batch for other agg
+                    // calls
+                    let data = data.iter().map(|d| &**d).collect_vec();
+                    agg_state
+                        .apply_batch(&ops, vis_map.as_ref(), &data, epoch, state_table)
+                        .await?;
+                }
             }
         }
 
