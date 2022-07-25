@@ -875,8 +875,9 @@ mod tests {
                 host: host.to_string(),
                 port: port as i32,
             };
+            let fake_parallelism = 4;
             cluster_manager
-                .add_worker_node(host.clone(), WorkerType::ComputeNode)
+                .add_worker_node(WorkerType::ComputeNode, host.clone(), fake_parallelism)
                 .await?;
             cluster_manager.activate_worker_node(host).await?;
 
