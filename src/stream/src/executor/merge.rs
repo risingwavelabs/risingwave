@@ -266,7 +266,7 @@ impl Stream for SelectReceivers {
             if let Some(barrier) = self.barrier.take() {
                 // If this barrier acquire the executor stop, we do not reset the upstreams
                 // so that the next call would return `Poll::Ready(None)`.
-                if !barrier.is_stop_actor(self.actor_id) {
+                if !barrier.is_stop_or_update_drop_actor(self.actor_id) {
                     self.upstreams = std::mem::take(&mut self.blocks);
                 }
                 let message = Message::Barrier(barrier);
