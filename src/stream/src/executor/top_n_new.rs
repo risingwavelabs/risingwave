@@ -12,6 +12,8 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+use std::collections::BTreeMap;
+
 use async_trait::async_trait;
 use risingwave_common::array::{Op, Row, StreamChunk};
 use risingwave_common::catalog::{Schema, TableId};
@@ -21,7 +23,7 @@ use risingwave_common::util::sort_util::{OrderPair, OrderType};
 use risingwave_storage::StateStore;
 
 use super::error::StreamExecutorResult;
-use super::managed_state::top_n::{ManagedTopNStateNew, TopNStateRow};
+use super::managed_state::top_n::ManagedTopNStateNew;
 use super::top_n_executor::{generate_output, TopNExecutorBase, TopNExecutorWrapper};
 use super::{BoxedMessageStream, Executor, ExecutorInfo, PkIndices, PkIndicesRef};
 
@@ -38,7 +40,6 @@ impl<S: StateStore> TopNExecutorNew<S> {
         pk_indices: PkIndices,
         store: S,
         table_id: TableId,
-        cache_size: Option<usize>,
         total_count: usize,
         executor_id: u64,
         key_indices: Vec<usize>,
@@ -56,7 +57,6 @@ impl<S: StateStore> TopNExecutorNew<S> {
                 pk_indices,
                 store,
                 table_id,
-                cache_size,
                 total_count,
                 executor_id,
                 key_indices,
@@ -88,9 +88,36 @@ pub struct InnerTopNExecutorNew<S: StateStore> {
     /// We are interested in which element is in the range of [offset, offset+limit).
     managed_state: ManagedTopNStateNew<S>,
 
+    /// In-memory cache of top (N + `TOPN_CACHE_DEFAULT_EXPAND_SIZE`) rows
+    cache: TopNCache,
+
     #[expect(dead_code)]
     /// Indices of the columns on which key distribution depends.
     key_indices: Vec<usize>,
+}
+
+const TOPN_CACHE_DEFAULT_EXPAND_SIZE: usize = 1024;
+
+struct TopNCache {
+    pub low: BTreeMap<OrderedRow, Row>,
+    pub middle: BTreeMap<OrderedRow, Row>,
+    pub high: BTreeMap<OrderedRow, Row>,
+    high_cache_size: usize,
+}
+
+impl TopNCache {
+    pub fn new(_num_offset: usize, _num_limit: usize) -> Self {
+        Self {
+            low: BTreeMap::new(),
+            middle: BTreeMap::new(),
+            high: BTreeMap::new(),
+            high_cache_size: TOPN_CACHE_DEFAULT_EXPAND_SIZE,
+        }
+    }
+
+    fn is_high_cache_full(&self) -> bool {
+        self.high.len() == self.high_cache_size
+    }
 }
 
 pub fn generate_internal_key(
@@ -131,7 +158,6 @@ impl<S: StateStore> InnerTopNExecutorNew<S> {
         pk_indices: PkIndices,
         store: S,
         table_id: TableId,
-        cache_size: Option<usize>,
         total_count: usize,
         executor_id: u64,
         key_indices: Vec<usize>,
@@ -148,8 +174,9 @@ impl<S: StateStore> InnerTopNExecutorNew<S> {
             .map(|field| field.data_type.clone())
             .collect::<Vec<_>>();
 
+        let num_offset = offset_and_limit.0;
+        let num_limit = offset_and_limit.1.unwrap_or_default();
         let managed_state = ManagedTopNStateNew::<S>::new(
-            cache_size,
             total_count,
             store,
             table_id,
@@ -171,6 +198,7 @@ impl<S: StateStore> InnerTopNExecutorNew<S> {
             pk_indices,
             internal_key_indices,
             internal_key_order_types,
+            cache: TopNCache::new(num_offset, num_limit),
             key_indices,
         })
     }
@@ -209,12 +237,6 @@ impl<S: StateStore> TopNExecutorBase for InnerTopNExecutorNew<S> {
         let mut res_rows = Vec::with_capacity(self.limit.unwrap_or_default());
         let num_limit = self.limit.unwrap_or(usize::MAX);
 
-        // find the top-n range before modification
-        let old_rows = self
-            .managed_state
-            .find_range(self.offset, num_limit, epoch)
-            .await?;
-
         // apply the chunk to state table
         for (op, row_ref) in chunk.rows() {
             let pk_row = row_ref.row_by_indices(&self.internal_key_indices);
@@ -222,27 +244,160 @@ impl<S: StateStore> TopNExecutorBase for InnerTopNExecutorNew<S> {
             let row = row_ref.to_owned_row();
             match op {
                 Op::Insert | Op::UpdateInsert => {
-                    self.managed_state.insert(ordered_pk_row, row, epoch)?;
+                    // First insert input row to state store
+                    self.managed_state
+                        .insert(ordered_pk_row.clone(), row.clone(), epoch)?;
+
+                    // Then insert input row to corresponding cache range according to its order key
+                    if self.cache.low.len() < self.offset {
+                        assert!(self.cache.middle.is_empty());
+                        assert!(self.cache.high.is_empty());
+                        self.cache.low.insert(ordered_pk_row, row);
+                        continue;
+                    }
+
+                    // If offset is 0, every input row has noting to do with `cache.low`
+                    let elem_to_compare_with_middle = if self.offset > 0
+                        && ordered_pk_row <= *self.cache.low.last_key_value().unwrap().0
+                    {
+                        // If the new row is in the range of [0, offset), the largest row in
+                        // `cache.low` needs be moved to `cache.middle`
+                        // which covers the range of [offset, offset+limit)
+                        let res = self.cache.low.pop_last().unwrap();
+                        self.cache.low.insert(ordered_pk_row, row);
+                        res
+                    } else {
+                        (ordered_pk_row, row)
+                    };
+
+                    if self.cache.middle.len() < num_limit {
+                        self.cache.middle.insert(
+                            elem_to_compare_with_middle.0,
+                            elem_to_compare_with_middle.1.clone(),
+                        );
+                        res_ops.push(Op::Insert);
+                        res_rows.push(elem_to_compare_with_middle.1);
+                        continue;
+                    }
+
+                    let elem_to_compare_with_high = if elem_to_compare_with_middle.0
+                        <= *self.cache.middle.last_key_value().unwrap().0
+                    {
+                        // If the row in the range of [offset, offset+limit), the largest row in
+                        // `cache.middle` needs to be moved to `cache.high`
+                        let res = self.cache.middle.pop_last().unwrap();
+                        res_ops.push(Op::Delete);
+                        res_rows.push(res.1.clone());
+                        res_ops.push(Op::Insert);
+                        res_rows.push(elem_to_compare_with_middle.1.clone());
+                        self.cache
+                            .middle
+                            .insert(elem_to_compare_with_middle.0, elem_to_compare_with_middle.1);
+                        res
+                    } else {
+                        elem_to_compare_with_middle
+                    };
+
+                    if !self.cache.is_high_cache_full() {
+                        self.cache
+                            .high
+                            .insert(elem_to_compare_with_high.0, elem_to_compare_with_high.1);
+                    } else if elem_to_compare_with_high.0
+                        <= *self.cache.high.last_key_value().unwrap().0
+                    {
+                        self.cache.high.pop_last();
+                        self.cache
+                            .high
+                            .insert(elem_to_compare_with_high.0, elem_to_compare_with_high.1);
+                    }
                 }
 
                 Op::Delete | Op::UpdateDelete => {
-                    self.managed_state.delete(&ordered_pk_row, row, epoch)?;
+                    // First remove the row from state store
+                    self.managed_state
+                        .delete(&ordered_pk_row, row.clone(), epoch)?;
+
+                    // Then we need to remove the row from cache
+                    if self.cache.middle.len() == num_limit
+                        && ordered_pk_row > *self.cache.middle.last_key_value().unwrap().0
+                    {
+                        // The row in the range of [offset+limit, +inf)
+                        self.cache.high.remove(&ordered_pk_row);
+                    } else if self.cache.low.len() == self.offset
+                        && (self.offset == 0
+                            || ordered_pk_row > *self.cache.low.last_key_value().unwrap().0)
+                    {
+                        // The row in the range of [offset, offset+limit) which is the result set
+                        // Try to fill the high cache if it is empty
+                        let largest_ordered_key_in_middle =
+                            self.cache.middle.last_key_value().unwrap().0;
+                        if self.cache.high.is_empty() {
+                            self.managed_state
+                                .fill_cache(
+                                    &mut self.cache.high,
+                                    largest_ordered_key_in_middle,
+                                    self.cache.high_cache_size,
+                                    epoch,
+                                )
+                                .await?;
+                        }
+
+                        self.cache.middle.remove(&ordered_pk_row);
+                        res_ops.push(Op::Delete);
+                        res_rows.push(row.clone());
+
+                        // Bring one element, if any, from high cache to middle cache
+                        if !self.cache.high.is_empty() {
+                            let smallest_elem_in_high = self.cache.high.pop_first().unwrap();
+                            res_ops.push(Op::Insert);
+                            res_rows.push(smallest_elem_in_high.1.clone());
+
+                            self.cache
+                                .middle
+                                .insert(smallest_elem_in_high.0, smallest_elem_in_high.1);
+                        }
+                    } else {
+                        // The row in the range of [0, offset)
+                        self.cache.low.remove(&ordered_pk_row);
+                        // Bring one element, if any, from middle cache to low cache
+                        if !self.cache.middle.is_empty() {
+                            // Try to fill the high cache if it is empty
+                            let largest_ordered_key_in_middle =
+                                self.cache.middle.last_key_value().unwrap().0;
+                            if self.cache.high.is_empty() {
+                                self.managed_state
+                                    .fill_cache(
+                                        &mut self.cache.high,
+                                        largest_ordered_key_in_middle,
+                                        self.cache.high_cache_size,
+                                        epoch,
+                                    )
+                                    .await?;
+                            }
+
+                            let smallest_elem_in_middle = self.cache.middle.pop_first().unwrap();
+                            res_ops.push(Op::Delete);
+                            res_rows.push(smallest_elem_in_middle.1.clone());
+                            self.cache
+                                .low
+                                .insert(smallest_elem_in_middle.0, smallest_elem_in_middle.1);
+                        }
+
+                        // Bring one element, if any, from high cache to middle cache
+                        if !self.cache.high.is_empty() && self.cache.middle.len() == (num_limit - 1)
+                        {
+                            let smallest_elem_in_high = self.cache.high.pop_first().unwrap();
+
+                            res_ops.push(Op::Insert);
+                            res_rows.push(smallest_elem_in_high.1.clone());
+                            self.cache
+                                .middle
+                                .insert(smallest_elem_in_high.0, smallest_elem_in_high.1);
+                        }
+                    }
                 }
             }
         }
-
-        // find the top-n range after modification
-        let new_rows = self
-            .managed_state
-            .find_range(self.offset, num_limit, epoch)
-            .await?;
-
-        // TODO: only emit the difference instead of emitting the full contents.
-        // delete previous result set
-        emit_multi_rows(&mut res_ops, &mut res_rows, Op::Delete, old_rows);
-        // emit new result set
-        emit_multi_rows(&mut res_ops, &mut res_rows, Op::Insert, new_rows);
-
         // compare the those two ranges and emit the differantial result
         generate_output(res_rows, res_ops, &self.schema)
     }
@@ -262,18 +417,6 @@ impl<S: StateStore> TopNExecutorBase for InnerTopNExecutorNew<S> {
     fn identity(&self) -> &str {
         &self.info.identity
     }
-}
-
-fn emit_multi_rows(
-    res_ops: &mut Vec<Op>,
-    res_rows: &mut Vec<Row>,
-    op: Op,
-    rows: Vec<TopNStateRow>,
-) {
-    rows.into_iter().for_each(|topn_row| {
-        res_ops.push(op);
-        res_rows.push(topn_row.row);
-    })
 }
 
 #[cfg(test)]
@@ -412,11 +555,10 @@ mod tests {
             TopNExecutorNew::new(
                 source as Box<dyn Executor>,
                 order_types,
-                (3, None),
+                (3, Some(1000)),
                 vec![0, 1],
                 MemoryStateStore::new(),
                 TableId::from(0x2333),
-                Some(2),
                 0,
                 1,
                 vec![],
@@ -432,9 +574,9 @@ mod tests {
             *res.as_chunk().unwrap(),
             StreamChunk::from_pretty(
                 "  I I
-                +  8 5
+                + 10 3
                 +  9 4
-                + 10 3"
+                +  8 5"
             )
         );
         // Barrier
@@ -447,11 +589,11 @@ mod tests {
             *res.as_chunk().unwrap(),
             StreamChunk::from_pretty(
                 "  I I
+                +  7 6
+                -  7 6
                 -  8 5
-                -  9 4
-                - 10 3
-                +  9 4
-                + 10 3
+                +  8 5
+                -  8 5
                 + 11 8"
             )
         );
@@ -468,13 +610,7 @@ mod tests {
             *res.as_chunk().unwrap(),
             StreamChunk::from_pretty(
                 "  I  I
-                -  9 4
-                - 10 3
-                - 11 8
                 +  8  5
-                +  9 4
-                + 10 3
-                + 11 8
                 + 12 10
                 + 13 11
                 + 14 12"
@@ -492,17 +628,9 @@ mod tests {
             *res.as_chunk().unwrap(),
             StreamChunk::from_pretty(
                 "  I I
-                -  8  5
+                -  8 5
                 -  9 4
-                - 10 3
-                - 11 8
-                - 12 10
-                - 13 11
-                - 14 12
-                + 10 3
-                + 12 10
-                + 13 11
-                + 14 12"
+                - 11 8"
             )
         );
         // barrier
@@ -524,7 +652,6 @@ mod tests {
                 vec![0, 1],
                 MemoryStateStore::new(),
                 TableId::from(0x2333),
-                Some(2),
                 0,
                 1,
                 vec![],
@@ -543,6 +670,10 @@ mod tests {
                 +  1 0
                 +  2 1
                 +  3 2
+                + 10 3
+                - 10 3
+                +  9 4
+                -  9 4
                 +  8 5"
             )
         );
@@ -558,13 +689,15 @@ mod tests {
             *res.as_chunk().unwrap(),
             StreamChunk::from_pretty(
                 "  I I
-                -  1 0
-                -  2 1
-                -  3 2
                 -  8 5
-                +  5 7
                 +  7 6
+                -  3 2
                 +  8 5
+                -  1 0
+                +  9 4
+                -  9 4
+                +  5 7
+                -  2 1
                 +  9 4"
             )
         );
@@ -581,14 +714,8 @@ mod tests {
             *res.as_chunk().unwrap(),
             StreamChunk::from_pretty(
                 "  I I
-                -  5 7
-                -  7 6
-                -  8 5
                 -  9 4
-                +  5 7
-                +  6 9
-                +  7 6
-                +  8 5"
+                +  6 9"
             )
         );
         // (5, 6, 7, 8)
@@ -604,12 +731,8 @@ mod tests {
             StreamChunk::from_pretty(
                 "  I I
                 -  5 7
-                -  6 9
-                -  7 6
-                -  8 5
-                +  7 6
-                +  8 5
                 +  9 4
+                -  6 9
                 + 10 3"
             )
         );
@@ -633,7 +756,6 @@ mod tests {
                 vec![0, 1],
                 MemoryStateStore::new(),
                 TableId::from(0x2333),
-                Some(2),
                 0,
                 1,
                 vec![],
@@ -649,9 +771,9 @@ mod tests {
             *res.as_chunk().unwrap(),
             StreamChunk::from_pretty(
                 "  I I
-                +  8 5
+                + 10 3
                 +  9 4
-                + 10 3"
+                +  8 5"
             )
         );
         // barrier
@@ -664,11 +786,11 @@ mod tests {
             *res.as_chunk().unwrap(),
             StreamChunk::from_pretty(
                 "  I I
+                +  7 6
+                -  7 6
                 -  8 5
-                -  9 4
-                - 10 3
-                +  9 4
-                + 10 3
+                +  8 5
+                -  8 5
                 + 11 8"
             )
         );
@@ -683,13 +805,7 @@ mod tests {
             *res.as_chunk().unwrap(),
             StreamChunk::from_pretty(
                 "  I I
-                -  9 4
-                - 10 3
-                - 11 8
-                +  8 5
-                +  9 4
-                + 10 3
-                + 11 8"
+                +  8 5"
             )
         );
         // barrier
@@ -703,12 +819,10 @@ mod tests {
             StreamChunk::from_pretty(
                 "  I  I
                 -  8  5 
-                -  9  4 
-                - 10  3
-                - 11  8 
-                + 10  3
                 + 12 10
+                -  9  4 
                 + 13 11
+                - 11  8 
                 + 14 12"
             )
         );
@@ -732,7 +846,6 @@ mod tests {
                 vec![3],
                 MemoryStateStore::new(),
                 TableId::from(0x2333),
-                Some(2),
                 0,
                 1,
                 vec![],
@@ -766,11 +879,11 @@ mod tests {
             *res.as_chunk().unwrap(),
             StreamChunk::from_pretty(
                 "  I I I I
-                -  5 1 4 1002
-                +  1 1 4 1001
                 +  1 9 1 1003
-                +  5 1 4 1002",
-            )
+                +  9 8 1 1004
+                -  9 8 1 1004
+                +  1 1 4 1001",
+            ),
         );
 
         let res = top_n_executor.next().await.unwrap().unwrap();
@@ -778,11 +891,7 @@ mod tests {
             *res.as_chunk().unwrap(),
             StreamChunk::from_pretty(
                 "  I I I I
-                -  1 1 4 1001
-                -  1 9 1 1003
                 -  5 1 4 1002
-                +  1 1 4 1001
-                +  1 9 1 1003
                 +  1 0 2 1006",
             )
         );
