@@ -22,7 +22,7 @@ pub const PG_MATVIEWS_INFO_COLUMNS: &[PgCatalogColumnsDef] = &[
     (DataType::Int32, "matviewid"),
     (DataType::Varchar, "matviewname"),
     (DataType::Varchar, "matviewschema"),
-    (DataType::Varchar, "matviewowner"),
+    (DataType::Int32, "matviewowner"),
     // TODO: add index back when open create index doc again.
     // (DataType::Boolean, "hasindexes"),
     (DataType::Varchar, "matviewgraph"), // materialized view graph is json encoded fragment infos.

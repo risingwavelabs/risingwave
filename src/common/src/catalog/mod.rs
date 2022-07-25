@@ -36,11 +36,14 @@ pub const DEFAULT_DATABASE_NAME: &str = "dev";
 pub const DEFAULT_SCHEMA_NAME: &str = "public";
 pub const PG_CATALOG_SCHEMA_NAME: &str = "pg_catalog";
 pub const RESERVED_PG_SCHEMA_PREFIX: &str = "pg_";
-pub const DEFAULT_SUPPER_USER: &str = "root";
+pub const DEFAULT_SUPER_USER: &str = "root";
+pub const DEFAULT_SUPER_USER_ID: u32 = 1;
 // This is for compatibility with customized utils for PostgreSQL.
-pub const DEFAULT_SUPPER_USER_FOR_PG: &str = "postgres";
+pub const DEFAULT_SUPER_USER_FOR_PG: &str = "postgres";
+pub const DEFAULT_SUPER_USER_FOR_PG_ID: u32 = 2;
 
-pub const RESERVED_PG_CATALOG_TABLE_ID: i32 = 1000;
+pub const NON_RESERVED_USER_ID: i32 = 11;
+pub const NON_RESERVED_PG_CATALOG_TABLE_ID: i32 = 1001;
 
 /// The local system catalog reader in the frontend node.
 #[async_trait]
@@ -51,12 +54,6 @@ pub trait SysCatalogReader: Sync + Send + 'static {
 pub type SysCatalogReaderRef = Arc<dyn SysCatalogReader>;
 
 pub type CatalogVersion = u64;
-
-pub enum CatalogId {
-    DatabaseId(DatabaseId),
-    SchemaId(SchemaId),
-    TableId(TableId),
-}
 
 #[derive(Clone, Debug, Default, Hash, PartialOrd, PartialEq, Eq)]
 pub struct DatabaseId {
