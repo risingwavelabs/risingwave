@@ -14,6 +14,7 @@
 
 use std::collections::HashMap;
 
+use itertools::Itertools;
 use risingwave_pb::user::{GrantPrivilege, UserInfo};
 
 use crate::user::{UserId, UserInfoVersion};
@@ -40,6 +41,10 @@ impl UserInfoManager {
     pub fn get_user_mut(&mut self, id: UserId) -> Option<&mut UserInfo> {
         let name = self.user_name_by_id.get(&id)?;
         self.user_by_name.get_mut(name)
+    }
+
+    pub fn get_all_users(&self) -> Vec<UserInfo> {
+        self.user_by_name.values().cloned().collect_vec()
     }
 
     pub fn get_user_by_name(&self, user_name: &str) -> Option<&UserInfo> {
