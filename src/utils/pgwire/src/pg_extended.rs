@@ -138,6 +138,7 @@ impl PgStatement {
         session: Arc<SM::Session>,
         portal_name: String,
         params: &[Bytes],
+        result_format: bool,
     ) -> Result<PgPortal, ()> {
         let statement = cstr_to_str(&self.query_string).unwrap().to_owned();
 
@@ -151,6 +152,7 @@ impl PgStatement {
                 result_cache: None,
                 stmt_type: None,
                 row_description,
+                result_format,
             });
         }
 
@@ -184,6 +186,7 @@ impl PgStatement {
             result_cache: None,
             stmt_type: None,
             row_description,
+            result_format,
         })
     }
 }
@@ -195,19 +198,10 @@ pub struct PgPortal {
     result_cache: Option<IntoIter<Row>>,
     stmt_type: Option<StatementType>,
     row_description: Vec<PgFieldDescriptor>,
+    result_format: bool,
 }
 
 impl PgPortal {
-    pub fn new(name: String, query_string: Bytes, row_description: Vec<PgFieldDescriptor>) -> Self {
-        PgPortal {
-            name,
-            query_string,
-            result_cache: None,
-            stmt_type: None,
-            row_description,
-        }
-    }
-
     pub fn name(&self) -> String {
         self.name.clone()
     }
@@ -218,6 +212,10 @@ impl PgPortal {
 
     pub fn row_desc(&self) -> Vec<PgFieldDescriptor> {
         self.row_description.clone()
+    }
+
+    pub fn result_format(&self) -> bool {
+        self.result_format
     }
 
     pub async fn execute<SM: SessionManager>(
@@ -264,7 +262,7 @@ impl PgPortal {
             self.stmt_type.unwrap(),
             data_set.len() as _,
             data_set,
-            vec![],
+            self.row_description.clone(),
             row_end,
         ))
     }
