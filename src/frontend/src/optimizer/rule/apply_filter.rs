@@ -16,7 +16,7 @@ use itertools::{Either, Itertools};
 use risingwave_pb::plan_common::JoinType;
 
 use super::{BoxedRule, Rule};
-use crate::expr::{CorrelatedInputRef, Expr, ExprImpl, ExprRewriter, InputRef};
+use crate::expr::{CorrelatedId, CorrelatedInputRef, Expr, ExprImpl, ExprRewriter, InputRef};
 use crate::optimizer::plan_node::{LogicalApply, LogicalFilter, PlanTreeNodeUnary};
 use crate::optimizer::PlanRef;
 use crate::utils::{ColIndexMapping, Condition};
@@ -26,19 +26,24 @@ pub struct ApplyFilterRule {}
 impl Rule for ApplyFilterRule {
     fn apply(&self, plan: PlanRef) -> Option<PlanRef> {
         let apply = plan.as_logical_apply()?;
-        let (left, right, on, join_type, correlated_indices) = apply.clone().decompose();
+        let (left, right, on, join_type, correlated_id, correlated_indices) =
+            apply.clone().decompose();
         assert_eq!(join_type, JoinType::Inner);
         let filter = right.as_logical_filter()?;
         let input = filter.input();
-        let correlated_indices_len = correlated_indices.len();
 
         let mut rewriter = Rewriter {
             offset: left.schema().len(),
             index_mapping: ColIndexMapping::new(
-                correlated_indices.into_iter().map(Some).collect_vec(),
+                correlated_indices
+                    .clone()
+                    .into_iter()
+                    .map(Some)
+                    .collect_vec(),
             )
             .inverse(),
             has_correlated_input_ref: false,
+            correlated_id,
         };
         // Split predicates in LogicalFilter into correlated expressions and uncorrelated
         // expressions.
@@ -65,7 +70,8 @@ impl Rule for ApplyFilterRule {
             input,
             join_type,
             new_on,
-            (0..correlated_indices_len).collect_vec(),
+            apply.correlated_id(),
+            correlated_indices,
         );
         let new_filter = LogicalFilter::new(
             new_apply,
@@ -89,19 +95,24 @@ struct Rewriter {
     offset: usize,
     index_mapping: ColIndexMapping,
     has_correlated_input_ref: bool,
+    correlated_id: CorrelatedId,
 }
 impl ExprRewriter for Rewriter {
     fn rewrite_correlated_input_ref(
         &mut self,
         correlated_input_ref: CorrelatedInputRef,
     ) -> ExprImpl {
-        // TODO: just decrease `correlated_input_ref`'s index by 1.
-        self.has_correlated_input_ref = true;
-        InputRef::new(
-            self.index_mapping.map(correlated_input_ref.index()),
-            correlated_input_ref.return_type(),
-        )
-        .into()
+        let found = correlated_input_ref.correlated_id() == self.correlated_id;
+        self.has_correlated_input_ref |= found;
+        if found {
+            InputRef::new(
+                self.index_mapping.map(correlated_input_ref.index()),
+                correlated_input_ref.return_type(),
+            )
+            .into()
+        } else {
+            correlated_input_ref.into()
+        }
     }
 
     fn rewrite_input_ref(&mut self, input_ref: InputRef) -> ExprImpl {

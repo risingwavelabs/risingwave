@@ -16,7 +16,7 @@ use std::fmt::Formatter;
 use std::io::{Error, ErrorKind};
 use std::marker::Sync;
 use std::path::PathBuf;
-use std::sync::atomic::{AtomicBool, AtomicI32, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicI32, AtomicU32, Ordering};
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
@@ -46,6 +46,7 @@ use tokio::task::JoinHandle;
 use crate::binder::Binder;
 use crate::catalog::catalog_service::{CatalogReader, CatalogWriter, CatalogWriterImpl};
 use crate::catalog::root_catalog::Catalog;
+use crate::expr::CorrelatedId;
 use crate::handler::handle;
 use crate::handler::util::to_pg_field;
 use crate::meta_client::{FrontendMetaClient, FrontendMetaClientImpl};
@@ -75,6 +76,8 @@ pub struct OptimizerContext {
     pub explain_trace: AtomicBool,
     /// Store the trace of optimizer
     pub optimizer_trace: Arc<Mutex<Vec<String>>>,
+    /// Store correlated id
+    pub next_correlated_id: AtomicU32,
 }
 
 #[derive(Clone, Debug)]
@@ -102,6 +105,12 @@ impl OptimizerContextRef {
         // `QueryContextRef` not `Sync`.
         let next_id = self.inner.next_id.fetch_add(1, Ordering::Relaxed);
         PlanNodeId(next_id)
+    }
+
+    pub fn next_correlated_id(&self) -> CorrelatedId {
+        self.inner
+            .next_correlated_id
+            .fetch_add(1, Ordering::Relaxed)
     }
 
     pub fn is_explain_verbose(&self) -> bool {
@@ -133,6 +142,7 @@ impl OptimizerContext {
             explain_verbose: AtomicBool::new(false),
             explain_trace: AtomicBool::new(false),
             optimizer_trace: Arc::new(Mutex::new(vec![])),
+            next_correlated_id: AtomicU32::new(1),
         }
     }
 
@@ -147,6 +157,7 @@ impl OptimizerContext {
             explain_verbose: AtomicBool::new(false),
             explain_trace: AtomicBool::new(false),
             optimizer_trace: Arc::new(Mutex::new(vec![])),
+            next_correlated_id: AtomicU32::new(1),
         }
         .into()
     }
