@@ -98,4 +98,26 @@ impl TableCatalogBuilder {
             read_pattern_prefix_column: 0,
         }
     }
+
+    /// Consume builder and create `TableCatalog` (for proto).
+    pub fn build_with_column_mapping(
+        self,
+        distribution_key: Vec<usize>,
+        append_only: bool,
+        column_mapping: &[usize],
+    ) -> TableCatalog {
+        // Transform `distribution_key` (based on input schema) to distribution indices on internal
+        // table columns via `column_mapping` (input col idx -> state table col idx).
+        let dist_indices_on_table_columns = distribution_key
+            .iter()
+            .map(|x| {
+                column_mapping
+                    .iter()
+                    .position(|col_idx| *col_idx == *x)
+                    .expect("Always expect to find corresponding dist key in table columns")
+            })
+            .collect();
+
+        self.build(dist_indices_on_table_columns, append_only)
+    }
 }
