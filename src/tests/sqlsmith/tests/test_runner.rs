@@ -73,6 +73,30 @@ async fn create_tables(session: Arc<SessionImpl>, rng: &mut impl Rng) -> Vec<Tab
     tables
 }
 
+async fn test_binder() {
+
+}
+
+async fn test_logical_plan() {
+
+}
+
+async fn test_batch_query_plan() {
+
+}
+
+async fn test_batch() {
+
+}
+
+async fn test_create_mv_plan() {
+
+}
+
+async fn test_stream() {
+
+}
+
 async fn run_sqlsmith_with_seed(seed: u64) {
     let frontend = LocalFrontend::new(FrontendOpts::default()).await;
     let session = frontend.session_ref();
