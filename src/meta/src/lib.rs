@@ -29,7 +29,6 @@
 #![feature(generic_associated_types)]
 #![feature(binary_heap_drain_sorted)]
 #![feature(option_result_contains)]
-#![feature(let_chains)]
 #![feature(let_else)]
 #![feature(type_alias_impl_trait)]
 #![feature(map_first_last)]
@@ -88,6 +87,20 @@ pub struct MetaNodeOpts {
     #[clap(long, default_value_t = String::from(""))]
     etcd_endpoints: String,
 
+    /// Enable authentication with etcd. By default disabled.
+    #[clap(long)]
+    etcd_auth: bool,
+
+    /// Username of etcd, required when --etcd-auth is enabled.
+    /// Default value is read from the 'ETCD_USERNAME' environment variable.
+    #[clap(long, env = "ETCD_USERNAME", default_value = "")]
+    etcd_username: String,
+
+    /// Password of etcd, required when --etcd-auth is enabled.
+    /// Default value is read from the 'ETCD_PASSWORD' environment variable.
+    #[clap(long, env = "ETCD_PASSWORD", default_value = "")]
+    etcd_password: String,
+
     /// Maximum allowed heartbeat interval in ms.
     #[clap(long, default_value = "60000")]
     max_heartbeat_interval: u32,
@@ -142,6 +155,10 @@ pub fn start(opts: MetaNodeOpts) -> Pin<Box<dyn Future<Output = ()> + Send>> {
                     .split(',')
                     .map(|x| x.to_string())
                     .collect(),
+                credentials: match opts.etcd_auth {
+                    true => Some((opts.etcd_username, opts.etcd_password)),
+                    false => None,
+                },
             },
             Backend::Mem => MetaStoreBackend::Mem,
         };
@@ -150,8 +167,6 @@ pub fn start(opts: MetaNodeOpts) -> Pin<Box<dyn Future<Output = ()> + Send>> {
             Duration::from_millis(compute_config.streaming.checkpoint_interval_ms as u64);
         let max_idle_ms = opts.dangerous_max_idle_secs.unwrap_or(0) * 1000;
         let in_flight_barrier_nums = compute_config.streaming.in_flight_barrier_nums as usize;
-        let unsafe_worker_node_parallel_degree =
-            compute_config.streaming.unsafe_worker_node_parallel_degree;
 
         tracing::info!("Meta server listening at {}", listen_addr);
         let add_info = AddressInfo {
@@ -172,7 +187,6 @@ pub fn start(opts: MetaNodeOpts) -> Pin<Box<dyn Future<Output = ()> + Send>> {
                 checkpoint_interval,
                 max_idle_ms,
                 in_flight_barrier_nums,
-                unsafe_worker_node_parallel_degree,
             },
         )
         .await

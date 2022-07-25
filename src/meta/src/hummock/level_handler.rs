@@ -15,14 +15,14 @@
 use std::collections::HashMap;
 
 use itertools::Itertools;
-use risingwave_hummock_sdk::HummockSSTableId;
+use risingwave_hummock_sdk::HummockSstableId;
 use risingwave_pb::hummock::level_handler::RunningCompactTask;
 use risingwave_pb::hummock::{Level, SstableInfo};
 
 #[derive(Clone, Debug, PartialEq)]
 pub struct LevelHandler {
     level: u32,
-    compacting_files: HashMap<HummockSSTableId, u64>,
+    compacting_files: HashMap<HummockSstableId, u64>,
     pending_tasks: Vec<RunningCompactTask>,
 }
 
@@ -51,7 +51,7 @@ impl LevelHandler {
             .retain(|task| task.task_id != target_task_id);
     }
 
-    pub fn is_pending_compact(&self, sst_id: &HummockSSTableId) -> bool {
+    pub fn is_pending_compact(&self, sst_id: &HummockSstableId) -> bool {
         self.compacting_files.contains_key(sst_id)
     }
 

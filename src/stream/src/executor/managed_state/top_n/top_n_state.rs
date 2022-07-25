@@ -12,12 +12,12 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+use std::collections::BTreeMap;
 use std::ops::Index;
 
 use futures::pin_mut;
 use futures::stream::StreamExt;
 use itertools::Itertools;
-use madsim::collections::BTreeMap;
 use risingwave_common::array::Row;
 use risingwave_common::catalog::{ColumnDesc, ColumnId, TableId};
 use risingwave_common::types::DataType;
@@ -176,12 +176,7 @@ impl<S: StateStore, const TOP_N_TYPE: usize> ManagedTopNState<S, TOP_N_TYPE> {
         }
     }
 
-    pub async fn insert(
-        &mut self,
-        key: OrderedRow,
-        value: Row,
-        _epoch: u64,
-    ) -> StreamExecutorResult<()> {
+    pub fn insert(&mut self, key: OrderedRow, value: Row, _epoch: u64) -> StreamExecutorResult<()> {
         let have_key_on_storage = self.total_count > self.top_n.len();
         let need_to_flush = if have_key_on_storage {
             // It is impossible that the cache is empty.
@@ -366,7 +361,6 @@ mod tests {
         let epoch = 0;
         managed_state
             .insert(ordered_rows[3].clone(), rows[3].clone(), epoch)
-            .await
             .unwrap();
         // now ("ab", 4)
 
@@ -379,7 +373,6 @@ mod tests {
 
         managed_state
             .insert(ordered_rows[2].clone(), rows[2].clone(), epoch)
-            .await
             .unwrap();
         // now ("abd", 3) -> ("ab", 4)
 
@@ -392,7 +385,6 @@ mod tests {
 
         managed_state
             .insert(ordered_rows[1].clone(), rows[1].clone(), epoch)
-            .await
             .unwrap();
         // now ("abd", 3) -> ("abc", 3) -> ("ab", 4)
         let epoch: u64 = 0;
@@ -456,7 +448,6 @@ mod tests {
 
         managed_state
             .insert(ordered_rows[0].clone(), rows[0].clone(), epoch)
-            .await
             .unwrap();
         // now ("abd", 3) in memory -> ("abc", 2)
         assert_eq!(

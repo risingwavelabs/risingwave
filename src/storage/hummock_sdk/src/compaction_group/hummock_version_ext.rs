@@ -14,6 +14,7 @@
 
 use std::collections::HashSet;
 
+use itertools::Itertools;
 use risingwave_pb::hummock::hummock_version::Levels;
 use risingwave_pb::hummock::{HummockVersion, HummockVersionDelta, Level, LevelType, SstableInfo};
 
@@ -45,6 +46,7 @@ pub trait HummockVersionExt {
         f: F,
     );
     fn level_iter<F: FnMut(&Level) -> bool>(&self, compaction_group_id: CompactionGroupId, f: F);
+    fn get_sst_ids(&self) -> Vec<u64>;
     fn apply_compact_ssts(
         &mut self,
         compaction_group_id: CompactionGroupId,
@@ -80,6 +82,14 @@ impl HummockVersionExt for HummockVersion {
             combined_levels.extend(level.levels.iter());
         }
         combined_levels
+    }
+
+    fn get_sst_ids(&self) -> Vec<u64> {
+        self.levels
+            .iter()
+            .flat_map(|(_, l)| &l.levels)
+            .flat_map(|level| level.table_infos.iter().map(|table_info| table_info.id))
+            .collect_vec()
     }
 
     fn iter_tables<F: FnMut(&SstableInfo)>(

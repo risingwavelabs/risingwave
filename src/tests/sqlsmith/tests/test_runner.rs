@@ -12,11 +12,10 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-#![feature(let_chains)]
-
 use std::sync::Arc;
 use std::{env, panic};
 
+use itertools::Itertools;
 use rand::{Rng, SeedableRng};
 use risingwave_frontend::binder::Binder;
 use risingwave_frontend::planner::Planner;
@@ -24,41 +23,51 @@ use risingwave_frontend::session::{OptimizerContext, OptimizerContextRef, Sessio
 use risingwave_frontend::test_utils::LocalFrontend;
 use risingwave_frontend::{handler, FrontendOpts};
 use risingwave_sqlparser::ast::Statement;
-use risingwave_sqlparser::parser::Parser;
-use risingwave_sqlsmith::{mview_sql_gen, sql_gen, Table};
+use risingwave_sqlsmith::{
+    create_table_statement_to_table, mview_sql_gen, parse_sql, sql_gen, Table,
+};
+
+/// Executes sql queries
+/// It captures panics so it can recover and print failing sql query.
+async fn handle(session: Arc<SessionImpl>, stmt: Statement, sql: String) {
+    let sql_copy = sql.clone();
+    panic::set_hook(Box::new(move |e| {
+        println!("Panic on SQL:\n{}\nReason:\n{}", sql_copy, e);
+    }));
+
+    handler::handle(session.clone(), stmt, &sql, false)
+        .await
+        .unwrap_or_else(|e| panic!("Failed to handle SQL:\n{}\nReason:\n{}", sql, e));
+}
+
+fn get_seed_table_sql() -> String {
+    let seed_files = vec!["tests/testdata/tpch.sql", "tests/testdata/nexmark.sql"];
+    seed_files
+        .iter()
+        .map(|filename| std::fs::read_to_string(filename).unwrap())
+        .collect::<String>()
+}
 
 /// Create the tables defined in testdata.
 async fn create_tables(session: Arc<SessionImpl>, rng: &mut impl Rng) -> Vec<Table> {
-    let sql = std::fs::read_to_string("tests/testdata/tpch.sql").unwrap();
-    let statements =
-        Parser::parse_sql(&sql).unwrap_or_else(|_| panic!("Failed to parse SQL: {}", sql));
-    let n_statements = statements.len();
+    let sql = get_seed_table_sql();
+    let statements = parse_sql(&sql);
+    let mut tables = statements
+        .iter()
+        .map(create_table_statement_to_table)
+        .collect_vec();
 
-    let mut tables = vec![];
     for s in statements.into_iter() {
-        match s {
-            Statement::CreateTable {
-                ref name,
-                ref columns,
-                ..
-            } => {
-                let name = name.0[0].value.clone();
-                let columns = columns.iter().map(|c| c.clone().into()).collect();
-                handler::handle(session.clone(), s, &sql).await.unwrap();
-                tables.push(Table { name, columns })
-            }
-            _ => panic!("Unexpected statement: {}", s),
-        }
+        let create_sql = s.to_string();
+        handle(session.clone(), s, create_sql).await;
     }
 
-    // Generate Materialized Views 1:1 with tables, so they have equal weight
-    // of being queried.
-    for i in 0..n_statements {
+    // Generate some mviews
+    for i in 0..10 {
         let (sql, table) = mview_sql_gen(rng, tables.clone(), &format!("m{}", i));
-        let stmts =
-            Parser::parse_sql(&sql).unwrap_or_else(|_| panic!("Failed to parse SQL: {}", sql));
+        let stmts = parse_sql(&sql);
         let stmt = stmts[0].clone();
-        handler::handle(session.clone(), stmt, &sql).await.unwrap();
+        handle(session.clone(), stmt, sql).await;
         tables.push(table);
     }
     tables
@@ -76,18 +85,15 @@ async fn run_sqlsmith_with_seed(seed: u64) {
     }
 
     let tables = create_tables(session.clone(), &mut rng).await;
-
     for _ in 0..512 {
         let sql = sql_gen(&mut rng, tables.clone());
-
         let sql_copy = sql.clone();
         panic::set_hook(Box::new(move |e| {
             println!("Panic on SQL:\n{}\nReason:\n{}", sql_copy.clone(), e);
         }));
 
         // The generated SQL must be parsable.
-        let statements =
-            Parser::parse_sql(&sql).unwrap_or_else(|_| panic!("Failed to parse SQL: {}", sql));
+        let statements = parse_sql(&sql);
         let stmt = statements[0].clone();
         let context: OptimizerContextRef =
             OptimizerContext::new(session.clone(), Arc::from(sql.clone())).into();

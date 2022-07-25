@@ -49,7 +49,7 @@ pub(crate) fn make_prost_source(
         database_id,
         name,
         info: Some(source_info),
-        owner: session.user_name().to_string(),
+        owner: session.user_id(),
     })
 }
 
@@ -105,7 +105,7 @@ pub async fn handle_create_source(
             let (plan, table) = gen_materialized_source_plan(
                 context.into(),
                 source.clone(),
-                session.user_name().to_string(),
+                session.user_id(),
                 with_properties.clone(),
             )?;
             let plan = plan.to_stream_prost();
@@ -138,7 +138,7 @@ pub mod tests {
         let proto_file = create_proto_file(PROTO_FILE_DATA);
         let sql = format!(
             r#"CREATE SOURCE t
-    WITH ('kafka.topic' = 'abc', 'kafka.servers' = 'localhost:1001')
+    WITH (kafka.topic = 'abc', kafka.servers = 'localhost:1001')
     ROW FORMAT PROTOBUF MESSAGE '.test.TestRecord' ROW SCHEMA LOCATION 'file://{}'"#,
             proto_file.path().to_str().unwrap()
         );

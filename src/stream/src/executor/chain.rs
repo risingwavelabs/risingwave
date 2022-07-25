@@ -60,7 +60,7 @@ impl ChainExecutor {
             info: ExecutorInfo {
                 schema,
                 pk_indices: upstream.pk_indices().to_owned(),
-                identity: "Chain".to_owned(),
+                identity: "Chain".into(),
             },
             snapshot,
             upstream,
@@ -81,7 +81,7 @@ impl ChainExecutor {
         // If the barrier is a conf change of creating this mview, init snapshot from its epoch
         // and begin to consume the snapshot.
         // Otherwise, it means we've recovered and the snapshot is already consumed.
-        let to_consume_snapshot = barrier.is_to_add_dispatcher(self.actor_id);
+        let to_consume_snapshot = barrier.is_add_dispatcher(self.actor_id);
 
         // The first barrier message should be propagated.
         yield Message::Barrier(barrier);

@@ -20,10 +20,10 @@ use itertools::Itertools;
 use risingwave_common::array::column::Column;
 use risingwave_common::array::{Op, StreamChunk};
 use risingwave_common::catalog::Schema;
-use risingwave_common::error::Result;
 
 use super::aggregation::{
-    create_streaming_agg_state, generate_agg_schema, AggCall, StreamingAggStateImpl,
+    agg_call_filter_res, create_streaming_agg_state, generate_agg_schema, AggCall,
+    StreamingAggStateImpl,
 };
 use super::error::StreamExecutorError;
 use super::*;
@@ -58,18 +58,21 @@ impl LocalSimpleAggExecutor {
         states: &mut [Box<dyn StreamingAggStateImpl>],
         chunk: StreamChunk,
     ) -> StreamExecutorResult<()> {
+        let capacity = chunk.capacity();
         let (ops, columns, visibility) = chunk.into_inner();
         agg_calls
             .iter()
             .zip_eq(states.iter_mut())
             .try_for_each(|(agg_call, state)| {
+                let vis_map =
+                    agg_call_filter_res(agg_call, &columns, visibility.as_ref(), capacity)?;
                 let cols = agg_call
                     .args
                     .val_indices()
                     .iter()
                     .map(|idx| columns[*idx].array_ref())
                     .collect_vec();
-                state.apply_batch(&ops, visibility.as_ref(), &cols[..])
+                state.apply_batch(&ops, vis_map.as_ref(), &cols[..])
             })?;
         Ok(())
     }
@@ -119,11 +122,12 @@ impl LocalSimpleAggExecutor {
                         )?;
                         let columns: Vec<Column> = builders
                             .into_iter()
-                            .map(|builder| -> Result<_> {
-                                Ok(Column::new(Arc::new(builder.finish()?)))
+                            .map(|builder| {
+                                Ok::<_, StreamExecutorError>(Column::new(Arc::new(
+                                    builder.finish()?,
+                                )))
                             })
-                            .try_collect()
-                            .map_err(StreamExecutorError::eval_error)?;
+                            .try_collect()?;
                         let ops = vec![Op::Insert; 1];
 
                         yield Message::Chunk(StreamChunk::new(ops, columns, None));
@@ -142,7 +146,7 @@ impl LocalSimpleAggExecutor {
         agg_calls: Vec<AggCall>,
         pk_indices: PkIndices,
         executor_id: u64,
-    ) -> Result<Self> {
+    ) -> StreamExecutorResult<Self> {
         let schema = generate_agg_schema(input.as_ref(), &agg_calls, None);
         let info = ExecutorInfo {
             schema,
@@ -187,6 +191,7 @@ mod tests {
             args: AggArgs::None,
             return_type: DataType::Int64,
             append_only: false,
+            filter: None,
         }];
 
         let simple_agg = Box::new(LocalSimpleAggExecutor::new(
@@ -241,18 +246,21 @@ mod tests {
                 args: AggArgs::None,
                 return_type: DataType::Int64,
                 append_only: false,
+                filter: None,
             },
             AggCall {
                 kind: AggKind::Sum,
                 args: AggArgs::Unary(DataType::Int64, 0),
                 return_type: DataType::Int64,
                 append_only: false,
+                filter: None,
             },
             AggCall {
                 kind: AggKind::Sum,
                 args: AggArgs::Unary(DataType::Int64, 1),
                 return_type: DataType::Int64,
                 append_only: false,
+                filter: None,
             },
         ];
 

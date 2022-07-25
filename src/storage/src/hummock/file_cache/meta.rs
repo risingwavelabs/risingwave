@@ -19,7 +19,6 @@ use std::mem::{forget, ManuallyDrop};
 use std::os::unix::prelude::{AsRawFd, RawFd};
 use std::path::Path;
 
-use bitvec::prelude::*;
 use bytes::{Buf, BufMut};
 use libc::c_void;
 use nix::fcntl::{fallocate, FallocateFlags};
@@ -89,8 +88,6 @@ where
 
     /// Free slots list.
     free: VecDeque<usize>,
-    /// Valid slots bitmap.
-    valid: BitVec,
 
     _phantom: PhantomData<K>,
 }
@@ -134,32 +131,25 @@ where
             (ptr, buffer)
         };
 
-        let mut free = VecDeque::new();
-        let mut valid = bitvec![usize,Lsb0;0; size / Self::slot_info_len()];
-        for slot in 0..size / Self::slot_info_len() {
-            // Free if `len == 0`;
-            if (&buffer[slot * Self::slot_info_len() + 4..slot * Self::slot_info_len() + 8])
-                .get_u32()
-                == 0
-            {
-                free.push_back(slot);
-            } else {
-                valid.set(slot, true);
-            }
-        }
-
-        Ok(Self {
+        let mut meta = Self {
             fd,
 
             ptr,
             buffer,
             size,
 
-            free,
-            valid,
+            free: VecDeque::new(),
 
             _phantom: PhantomData,
-        })
+        };
+
+        for slot in 0..meta.slots() {
+            if !meta.is_slot_valid(slot) {
+                meta.free.push_back(slot);
+            }
+        }
+
+        Ok(meta)
     }
 
     pub fn insert(&mut self, key: &K, bloc: &BlockLoc) -> Result<usize> {
@@ -168,7 +158,6 @@ where
             self.grow()?;
         }
         let slot = self.free.pop_front().unwrap();
-        self.valid.set(slot, true);
 
         let mut cursor = Self::slot_info_len() * slot;
         bloc.encode(&mut self.buffer[cursor..cursor + BlockLoc::encoded_len()]);
@@ -186,16 +175,18 @@ where
             slot * Self::slot_info_len(),
             self.size
         );
-        if !*self.valid.get(slot).unwrap() {
+        if !self.is_slot_valid(slot) {
             return None;
         }
-        self.valid.set(slot, false);
-        self.free.push_back(slot);
 
         let bloc = BlockLoc::decode(
             &self.buffer[Self::slot_info_len() * slot
                 ..Self::slot_info_len() * slot + BlockLoc::encoded_len()],
         );
+
+        self.invalidate_slot(slot);
+        self.free.push_back(slot);
+
         Some(bloc)
     }
 
@@ -207,7 +198,7 @@ where
             slot * Self::slot_info_len(),
             self.size
         );
-        if !*self.valid.get(slot).unwrap() {
+        if !self.is_slot_valid(slot) {
             return None;
         }
 
@@ -223,6 +214,20 @@ where
 
     pub fn size(&self) -> usize {
         self.size
+    }
+
+    pub fn slots(&self) -> usize {
+        self.size / Self::slot_info_len()
+    }
+
+    fn is_slot_valid(&self, slot: SlotId) -> bool {
+        (&self.buffer[slot * Self::slot_info_len() + 4..slot * Self::slot_info_len() + 8]).get_u32()
+            != 0
+    }
+
+    fn invalidate_slot(&mut self, slot: SlotId) {
+        (&mut self.buffer[slot * Self::slot_info_len() + 4..slot * Self::slot_info_len() + 8])
+            .put_u32(0);
     }
 
     #[inline(always)]
@@ -255,7 +260,6 @@ where
         for slot in (old_size / Self::slot_info_len())..(new_size / Self::slot_info_len()) {
             self.free.push_back(slot);
         }
-        self.valid.resize(new_size / Self::slot_info_len(), false);
 
         self.ptr = ptr;
         self.buffer = buffer;

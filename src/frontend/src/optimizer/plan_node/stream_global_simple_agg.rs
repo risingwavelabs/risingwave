@@ -56,18 +56,12 @@ impl StreamGlobalSimpleAgg {
 
 impl fmt::Display for StreamGlobalSimpleAgg {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-        let mut builder = if self.input().append_only() {
-            f.debug_struct("StreamAppendOnlyGlobalSimpleAgg")
+        if self.input().append_only() {
+            self.logical
+                .fmt_with_name(f, "StreamAppendOnlyGlobalSimpleAgg")
         } else {
-            f.debug_struct("StreamGlobalSimpleAgg")
-        };
-        let verbose = self.base.ctx.is_explain_verbose();
-        if verbose {
-            builder.field("aggs", &self.agg_calls_verbose_display());
-        } else {
-            builder.field("aggs", &self.agg_calls());
+            self.logical.fmt_with_name(f, "StreamGlobalSimpleAgg")
         }
-        builder.finish()
     }
 }
 
@@ -108,9 +102,11 @@ impl ToStreamProst for StreamGlobalSimpleAgg {
                     )
                 })
                 .collect_vec(),
-            column_mapping: column_mapping
+            column_mappings: column_mapping
                 .into_iter()
-                .map(|(k, v)| (k as u32, v))
+                .map(|v| ColumnMapping {
+                    indices: v.iter().map(|x| *x as u32).collect(),
+                })
                 .collect(),
             is_append_only: self.input().append_only(),
         })

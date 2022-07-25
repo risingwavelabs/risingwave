@@ -15,9 +15,8 @@ use std::sync::Arc;
 
 use futures::StreamExt;
 use risingwave_common::catalog::Schema;
-use tokio::sync::mpsc::Receiver;
-use tokio_stream::wrappers::ReceiverStream;
 
+use super::exchange::input::BoxedInput;
 use super::{ActorContextRef, OperatorInfoStatus};
 use crate::executor::monitor::StreamingMetrics;
 use crate::executor::{
@@ -28,7 +27,8 @@ use crate::task::ActorId;
 /// there should be a `ReceiverExecutor` running in the background, so as to push
 /// messages down to the executors.
 pub struct ReceiverExecutor {
-    receiver: Receiver<Message>,
+    /// Input from upstream.
+    input: BoxedInput,
 
     /// Logical Operator Info
     info: ExecutorInfo,
@@ -56,14 +56,14 @@ impl ReceiverExecutor {
     pub fn new(
         schema: Schema,
         pk_indices: PkIndices,
-        receiver: Receiver<Message>,
+        input: BoxedInput,
         actor_context: ActorContextRef,
         receiver_id: u64,
         actor_id: ActorId,
         metrics: Arc<StreamingMetrics>,
     ) -> Self {
         Self {
-            receiver,
+            input,
             info: ExecutorInfo {
                 schema,
                 pk_indices,
@@ -81,8 +81,9 @@ impl Executor for ReceiverExecutor {
         let mut status = self.status;
         let metrics = self.metrics.clone();
         let actor_id_str = self.actor_id.to_string();
-        ReceiverStream::new(self.receiver)
-            .map(move |msg| {
+        self.input
+            .inspect(move |msg| {
+                let Ok(msg) = msg else { return };
                 match &msg {
                     Message::Chunk(chunk) => {
                         metrics
@@ -92,8 +93,7 @@ impl Executor for ReceiverExecutor {
                     }
                     Message::Barrier(_) => {}
                 };
-                status.next_message(&msg);
-                Ok(msg)
+                status.next_message(msg);
             })
             .boxed()
     }

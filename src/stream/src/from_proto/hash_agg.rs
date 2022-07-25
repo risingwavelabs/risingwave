@@ -17,7 +17,7 @@
 use std::marker::PhantomData;
 
 use risingwave_common::hash::{calc_hash_key_kind, HashKey, HashKeyDispatcher};
-use risingwave_storage::table::state_table::StateTable;
+use risingwave_storage::table::state_table::RowBasedStateTable;
 
 use super::*;
 use crate::executor::aggregation::{generate_state_tables_from_proto, AggCall};
@@ -31,7 +31,7 @@ struct HashAggExecutorDispatcherArgs<S: StateStore> {
     key_indices: Vec<usize>,
     pk_indices: PkIndices,
     executor_id: u64,
-    state_tables: Vec<StateTable<S>>,
+    state_tables: Vec<RowBasedStateTable<S>>,
 }
 
 impl<S: StateStore> HashKeyDispatcher for HashAggExecutorDispatcher<S> {

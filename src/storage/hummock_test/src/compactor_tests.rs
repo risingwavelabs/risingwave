@@ -20,6 +20,7 @@ mod tests {
 
     use bytes::Bytes;
     use itertools::Itertools;
+    use parking_lot::RwLock;
     use rand::Rng;
     use risingwave_common::catalog::TableId;
     use risingwave_common::config::constant::hummock::CompactionFilterFlag;
@@ -122,6 +123,7 @@ mod tests {
             is_share_buffer_compact: false,
             sstable_id_generator: get_remote_sstable_id_generator(hummock_meta_client.clone()),
             compaction_executor: None,
+            table_id_to_slice_transform: Arc::new(RwLock::new(HashMap::new())),
         }
     }
 
@@ -355,6 +357,7 @@ mod tests {
             is_share_buffer_compact: false,
             sstable_id_generator: get_remote_sstable_id_generator(hummock_meta_client.clone()),
             compaction_executor: None,
+            table_id_to_slice_transform: Arc::new(RwLock::new(HashMap::new())),
         };
 
         // 1. add sstables
@@ -460,6 +463,7 @@ mod tests {
             is_share_buffer_compact: false,
             sstable_id_generator: get_remote_sstable_id_generator(hummock_meta_client.clone()),
             compaction_executor: None,
+            table_id_to_slice_transform: Arc::new(RwLock::new(HashMap::new())),
         };
 
         // 1. add sstables
@@ -620,6 +624,7 @@ mod tests {
             is_share_buffer_compact: false,
             sstable_id_generator: get_remote_sstable_id_generator(hummock_meta_client.clone()),
             compaction_executor: None,
+            table_id_to_slice_transform: Arc::new(RwLock::new(HashMap::new())),
         };
 
         // 1. add sstables

@@ -14,8 +14,6 @@
 
 //! Configures the RisingWave binary, including logging, locks, panic handler, etc.
 
-#![feature(let_chains)]
-
 mod trace_runtime;
 
 use std::path::PathBuf;

@@ -28,13 +28,14 @@ pub struct DatabaseCatalog {
     name: String,
     schema_by_name: HashMap<String, SchemaCatalog>,
     schema_name_by_id: HashMap<SchemaId, String>,
-    owner: String,
+    owner: u32,
 }
 
 impl DatabaseCatalog {
     pub fn create_schema(&mut self, proto: ProstSchema) {
         let name = proto.name.clone();
         let id = proto.id;
+        #[expect(clippy::needless_borrow)]
         let schema = (&proto).into();
         self.schema_by_name
             .try_insert(name.clone(), schema)
@@ -81,8 +82,8 @@ impl DatabaseCatalog {
         self.id
     }
 
-    pub fn owner(&self) -> String {
-        self.owner.clone()
+    pub fn owner(&self) -> u32 {
+        self.owner
     }
 }
 impl From<&ProstDatabase> for DatabaseCatalog {
@@ -92,7 +93,7 @@ impl From<&ProstDatabase> for DatabaseCatalog {
             name: db.name.clone(),
             schema_by_name: HashMap::new(),
             schema_name_by_id: HashMap::new(),
-            owner: db.owner.clone(),
+            owner: db.owner,
         }
     }
 }

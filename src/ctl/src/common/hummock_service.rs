@@ -12,11 +12,13 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+use std::collections::HashMap;
 use std::env;
 use std::sync::Arc;
 use std::time::Duration;
 
 use anyhow::{anyhow, bail, Result};
+use parking_lot::RwLock;
 use risingwave_common::config::StorageConfig;
 use risingwave_rpc_client::MetaClient;
 use risingwave_storage::hummock::hummock_meta_client::MonitoredHummockMetaClient;
@@ -59,7 +61,17 @@ impl HummockServiceOpts {
                 url
             }
             Err(_) => {
-                bail!("env variable `RW_HUMMOCK_URL` not found, please do one of the following:\n* use `./risedev ctl` to start risectl.\n* `source .risingwave/config/risectl-env` or `source ~/risingwave-deploy/risectl-env` before running risectl.\n* manually set `RW_HUMMOCK_URL` in env variable.\nPlease also remember to add `use: minio` to risedev config.");
+                const MESSAGE: &str = "env variable `RW_HUMMOCK_URL` not found.
+
+For `./risedev d` use cases, please do the following:
+* use `./risedev d for-ctl` to start the cluster.
+* use `./risedev ctl` to use risectl.
+
+For `./risedev apply-compose-deploy` users,
+* `RW_HUMMOCK_URL` will be printed out when deploying. Please copy the bash exports to your console.
+
+risectl requires a full persistent cluster to operate. Please make sure you're not running in minimum mode.";
+                bail!(MESSAGE);
             }
         };
         Ok(Self {
@@ -94,6 +106,7 @@ impl HummockServiceOpts {
             object_store_metrics: Arc::new(ObjectStoreMetrics::unused()),
         };
 
+        let table_id_to_slice_transform = Arc::new(RwLock::new(HashMap::new()));
         let state_store_impl = StateStoreImpl::new(
             &self.hummock_url,
             Arc::new(config),
@@ -103,6 +116,7 @@ impl HummockServiceOpts {
             )),
             metrics.state_store_metrics.clone(),
             metrics.object_store_metrics.clone(),
+            table_id_to_slice_transform.clone(),
         )
         .await?;
 

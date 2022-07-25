@@ -27,7 +27,7 @@ use risingwave_expr::expr::expr_binary_nonnull::new_binary_expr;
 use risingwave_expr::expr::{BoxedExpression, InputRefExpression, LiteralExpression};
 use risingwave_pb::expr::expr_node::Type as ExprNodeType;
 use risingwave_pb::expr::expr_node::Type::*;
-use risingwave_storage::table::state_table::StateTable;
+use risingwave_storage::table::state_table::RowBasedStateTable;
 use risingwave_storage::StateStore;
 
 use super::barrier_align::*;
@@ -46,7 +46,7 @@ pub struct DynamicFilterExecutor<S: StateStore> {
     identity: String,
     comparator: ExprNodeType,
     range_cache: RangeCache<S>,
-    right_table: StateTable<S>,
+    right_table: RowBasedStateTable<S>,
     is_right_table_writer: bool,
     actor_id: u64,
     schema: Schema,
@@ -62,8 +62,8 @@ impl<S: StateStore> DynamicFilterExecutor<S> {
         pk_indices: PkIndices,
         executor_id: u64,
         comparator: ExprNodeType,
-        mut state_table_l: StateTable<S>,
-        mut state_table_r: StateTable<S>,
+        mut state_table_l: RowBasedStateTable<S>,
+        mut state_table_r: RowBasedStateTable<S>,
         is_right_table_writer: bool,
         actor_id: u64,
         metrics: Arc<StreamingMetrics>,
@@ -206,8 +206,8 @@ impl<S: StateStore> DynamicFilterExecutor<S> {
             (Some(c), Some(p)) => {
                 if c < p {
                     let range = match self.comparator {
-                        GreaterThan | LessThan => (Excluded(c), Excluded(p)),
-                        GreaterThanOrEqual | LessThanOrEqual => (Included(c), Included(p)),
+                        GreaterThan | LessThanOrEqual => (Excluded(c), Included(p)),
+                        GreaterThanOrEqual | LessThan => (Included(c), Excluded(p)),
                         _ => unreachable!(),
                     };
                     let is_insert = matches!(self.comparator, GreaterThan | GreaterThanOrEqual);
@@ -215,8 +215,8 @@ impl<S: StateStore> DynamicFilterExecutor<S> {
                 } else {
                     // p > c
                     let range = match self.comparator {
-                        GreaterThan | LessThan => (Excluded(p), Excluded(c)),
-                        GreaterThanOrEqual | LessThanOrEqual => (Included(p), Included(c)),
+                        GreaterThan | LessThanOrEqual => (Excluded(p), Included(c)),
+                        GreaterThanOrEqual | LessThan => (Included(p), Excluded(c)),
                         _ => unreachable!(),
                     };
                     let is_insert = matches!(self.comparator, LessThan | LessThanOrEqual);
@@ -258,8 +258,7 @@ impl<S: StateStore> DynamicFilterExecutor<S> {
         );
 
         let mut stream_chunk_builder =
-            StreamChunkBuilder::new(PROCESSING_WINDOW_SIZE, &self.schema.data_types(), 0, 0)
-                .map_err(StreamExecutorError::eval_error)?;
+            StreamChunkBuilder::new(PROCESSING_WINDOW_SIZE, &self.schema.data_types(), 0, 0)?;
 
         #[for_await]
         for msg in aligned_stream {
@@ -318,22 +317,16 @@ impl<S: StateStore> DynamicFilterExecutor<S> {
                         let (range, latest_is_lower, is_insert) = self.get_range(&curr, prev);
                         for (_, rows) in self.range_cache.range(range, latest_is_lower) {
                             for row in rows {
-                                if let Some(chunk) = stream_chunk_builder
-                                    .append_row_matched(
-                                        // All rows have a single identity at this point
-                                        if is_insert { Op::Insert } else { Op::Delete },
-                                        row,
-                                    )
-                                    .map_err(StreamExecutorError::eval_error)?
-                                {
+                                if let Some(chunk) = stream_chunk_builder.append_row_matched(
+                                    // All rows have a single identity at this point
+                                    if is_insert { Op::Insert } else { Op::Delete },
+                                    row,
+                                )? {
                                     yield Message::Chunk(chunk);
                                 }
                             }
                         }
-                        if let Some(chunk) = stream_chunk_builder
-                            .take()
-                            .map_err(StreamExecutorError::eval_error)?
-                        {
+                        if let Some(chunk) = stream_chunk_builder.take()? {
                             yield Message::Chunk(chunk);
                         }
                     }
@@ -380,4 +373,478 @@ impl<S: StateStore> Executor for DynamicFilterExecutor<S> {
     }
 }
 
-// TODO: unit tests - test each comparator. With inserts and deletes. With updates on RHS.
+#[cfg(test)]
+mod tests {
+    use risingwave_common::array::stream_chunk::StreamChunkTestExt;
+    use risingwave_common::array::*;
+    use risingwave_common::catalog::{ColumnDesc, ColumnId, Field, Schema, TableId};
+    use risingwave_common::util::sort_util::OrderType;
+    use risingwave_storage::memory::MemoryStateStore;
+
+    use super::*;
+    use crate::executor::test_utils::{MessageSender, MockSource};
+
+    fn create_in_memory_state_table() -> (
+        RowBasedStateTable<MemoryStateStore>,
+        RowBasedStateTable<MemoryStateStore>,
+    ) {
+        let mem_state = MemoryStateStore::new();
+
+        let column_descs = ColumnDesc::unnamed(ColumnId::new(0), DataType::Int64);
+        let state_table_l = RowBasedStateTable::new_without_distribution(
+            mem_state.clone(),
+            TableId::new(0),
+            vec![column_descs.clone()],
+            vec![OrderType::Ascending],
+            vec![0],
+        );
+        let state_table_r = RowBasedStateTable::new_without_distribution(
+            mem_state,
+            TableId::new(1),
+            vec![column_descs],
+            vec![OrderType::Ascending],
+            vec![0],
+        );
+        (state_table_l, state_table_r)
+    }
+
+    fn create_executor(
+        comparator: ExprNodeType,
+    ) -> (MessageSender, MessageSender, BoxedMessageStream) {
+        let schema = Schema {
+            fields: vec![Field::unnamed(DataType::Int64)],
+        };
+        let (tx_l, source_l) = MockSource::channel(schema.clone(), vec![0]);
+        let (tx_r, source_r) = MockSource::channel(schema, vec![]);
+
+        let (mem_state_l, mem_state_r) = create_in_memory_state_table();
+        let executor = DynamicFilterExecutor::<MemoryStateStore>::new(
+            Box::new(source_l),
+            Box::new(source_r),
+            0,
+            vec![0],
+            1,
+            comparator,
+            mem_state_l,
+            mem_state_r,
+            true,
+            1,
+            Arc::new(StreamingMetrics::unused()),
+        );
+        (tx_l, tx_r, Box::new(executor).execute())
+    }
+
+    #[tokio::test]
+    async fn test_dynamic_filter_greater_than() {
+        let chunk_l1 = StreamChunk::from_pretty(
+            "  I
+             + 1
+             + 2
+             + 3",
+        );
+        let chunk_l2 = StreamChunk::from_pretty(
+            "  I
+             + 4
+             - 3",
+        );
+        let chunk_r1 = StreamChunk::from_pretty(
+            "  I
+             + 2",
+        );
+        let chunk_r2 = StreamChunk::from_pretty(
+            "  I
+             + 1",
+        );
+        let chunk_r3 = StreamChunk::from_pretty(
+            "  I
+             + 4",
+        );
+        let (mut tx_l, mut tx_r, mut dynamic_filter) = create_executor(ExprNodeType::GreaterThan);
+
+        // push the init barrier for left and right
+        tx_l.push_barrier(1, false);
+        tx_r.push_barrier(1, false);
+        dynamic_filter.next().await.unwrap().unwrap();
+
+        // push the 1st left chunk
+        tx_l.push_chunk(chunk_l1);
+
+        // push the 1st right chunk
+        tx_r.push_chunk(chunk_r1);
+
+        // push the init barrier for left and right
+        tx_l.push_barrier(2, false);
+        tx_r.push_barrier(2, false);
+
+        let chunk = dynamic_filter.next().await.unwrap().unwrap();
+        assert_eq!(
+            chunk.into_chunk().unwrap(),
+            StreamChunk::from_pretty(
+                " I
+                + 3"
+            )
+        );
+
+        // Get the barrier
+        dynamic_filter.next().await.unwrap().unwrap();
+
+        // push the 2nd left chunk
+        tx_l.push_chunk(chunk_l2);
+        let chunk = dynamic_filter.next().await.unwrap().unwrap();
+        assert_eq!(
+            chunk.into_chunk().unwrap().compact().unwrap(),
+            StreamChunk::from_pretty(
+                " I
+                + 4
+                - 3"
+            )
+        );
+
+        // push the 2nd right chunk
+        tx_r.push_chunk(chunk_r2);
+
+        // push the init barrier for left and right
+        tx_l.push_barrier(3, false);
+        tx_r.push_barrier(3, false);
+
+        let chunk = dynamic_filter.next().await.unwrap().unwrap();
+        assert_eq!(
+            chunk.into_chunk().unwrap(),
+            StreamChunk::from_pretty(
+                " I
+                + 2"
+            )
+        );
+
+        // Get the barrier
+        dynamic_filter.next().await.unwrap().unwrap();
+
+        // push the 3rd right chunk
+        tx_r.push_chunk(chunk_r3);
+
+        // push the init barrier for left and right
+        tx_l.push_barrier(4, false);
+        tx_r.push_barrier(4, false);
+
+        let chunk = dynamic_filter.next().await.unwrap().unwrap();
+        assert_eq!(
+            chunk.into_chunk().unwrap(),
+            StreamChunk::from_pretty(
+                " I
+                - 2
+                - 4"
+            )
+        );
+    }
+
+    #[tokio::test]
+    async fn test_dynamic_filter_greater_than_or_equal() {
+        let chunk_l1 = StreamChunk::from_pretty(
+            "  I
+             + 1
+             + 2
+             + 3",
+        );
+        let chunk_l2 = StreamChunk::from_pretty(
+            "  I
+             + 4
+             - 3",
+        );
+        let chunk_r1 = StreamChunk::from_pretty(
+            "  I
+             + 3",
+        );
+        let chunk_r2 = StreamChunk::from_pretty(
+            "  I
+             + 2",
+        );
+        let chunk_r3 = StreamChunk::from_pretty(
+            "  I
+             + 5",
+        );
+        let (mut tx_l, mut tx_r, mut dynamic_filter) =
+            create_executor(ExprNodeType::GreaterThanOrEqual);
+
+        // push the init barrier for left and right
+        tx_l.push_barrier(1, false);
+        tx_r.push_barrier(1, false);
+        dynamic_filter.next().await.unwrap().unwrap();
+
+        // push the 1st left chunk
+        tx_l.push_chunk(chunk_l1);
+
+        // push the 1st right chunk
+        tx_r.push_chunk(chunk_r1);
+
+        // push the init barrier for left and right
+        tx_l.push_barrier(2, false);
+        tx_r.push_barrier(2, false);
+
+        let chunk = dynamic_filter.next().await.unwrap().unwrap();
+        assert_eq!(
+            chunk.into_chunk().unwrap(),
+            StreamChunk::from_pretty(
+                " I
+                + 3"
+            )
+        );
+
+        // Get the barrier
+        dynamic_filter.next().await.unwrap().unwrap();
+
+        // push the 2nd left chunk
+        tx_l.push_chunk(chunk_l2);
+        let chunk = dynamic_filter.next().await.unwrap().unwrap();
+        assert_eq!(
+            chunk.into_chunk().unwrap().compact().unwrap(),
+            StreamChunk::from_pretty(
+                " I
+                + 4
+                - 3"
+            )
+        );
+
+        // push the 2nd right chunk
+        tx_r.push_chunk(chunk_r2);
+
+        // push the init barrier for left and right
+        tx_l.push_barrier(3, false);
+        tx_r.push_barrier(3, false);
+
+        let chunk = dynamic_filter.next().await.unwrap().unwrap();
+        assert_eq!(
+            chunk.into_chunk().unwrap(),
+            StreamChunk::from_pretty(
+                " I
+                + 2"
+            )
+        );
+
+        // Get the barrier
+        dynamic_filter.next().await.unwrap().unwrap();
+
+        // push the 3rd right chunk
+        tx_r.push_chunk(chunk_r3);
+
+        // push the init barrier for left and right
+        tx_l.push_barrier(4, false);
+        tx_r.push_barrier(4, false);
+
+        let chunk = dynamic_filter.next().await.unwrap().unwrap();
+        assert_eq!(
+            chunk.into_chunk().unwrap(),
+            StreamChunk::from_pretty(
+                " I
+                - 2
+                - 4"
+            )
+        );
+    }
+
+    #[tokio::test]
+    async fn test_dynamic_filter_less_than() {
+        let chunk_l1 = StreamChunk::from_pretty(
+            "  I
+             + 2
+             + 3
+             + 4",
+        );
+        let chunk_l2 = StreamChunk::from_pretty(
+            "  I
+             + 1
+             - 2",
+        );
+        let chunk_r1 = StreamChunk::from_pretty(
+            "  I
+             + 3",
+        );
+        let chunk_r2 = StreamChunk::from_pretty(
+            "  I
+             + 4",
+        );
+        let chunk_r3 = StreamChunk::from_pretty(
+            "  I
+             + 1",
+        );
+        let (mut tx_l, mut tx_r, mut dynamic_filter) = create_executor(ExprNodeType::LessThan);
+
+        // push the init barrier for left and right
+        tx_l.push_barrier(1, false);
+        tx_r.push_barrier(1, false);
+        dynamic_filter.next().await.unwrap().unwrap();
+
+        // push the 1st left chunk
+        tx_l.push_chunk(chunk_l1);
+
+        // push the 1st right chunk
+        tx_r.push_chunk(chunk_r1);
+
+        // push the init barrier for left and right
+        tx_l.push_barrier(2, false);
+        tx_r.push_barrier(2, false);
+
+        let chunk = dynamic_filter.next().await.unwrap().unwrap();
+        assert_eq!(
+            chunk.into_chunk().unwrap(),
+            StreamChunk::from_pretty(
+                " I
+                + 2"
+            )
+        );
+
+        // Get the barrier
+        dynamic_filter.next().await.unwrap().unwrap();
+
+        // push the 2nd left chunk
+        tx_l.push_chunk(chunk_l2);
+        let chunk = dynamic_filter.next().await.unwrap().unwrap();
+        assert_eq!(
+            chunk.into_chunk().unwrap().compact().unwrap(),
+            StreamChunk::from_pretty(
+                " I
+                + 1
+                - 2"
+            )
+        );
+
+        // push the 2nd right chunk
+        tx_r.push_chunk(chunk_r2);
+
+        // push the init barrier for left and right
+        tx_l.push_barrier(3, false);
+        tx_r.push_barrier(3, false);
+
+        let chunk = dynamic_filter.next().await.unwrap().unwrap();
+        assert_eq!(
+            chunk.into_chunk().unwrap(),
+            StreamChunk::from_pretty(
+                " I
+                + 3"
+            )
+        );
+
+        // Get the barrier
+        dynamic_filter.next().await.unwrap().unwrap();
+
+        // push the 3rd right chunk
+        tx_r.push_chunk(chunk_r3);
+
+        // push the init barrier for left and right
+        tx_l.push_barrier(4, false);
+        tx_r.push_barrier(4, false);
+
+        let chunk = dynamic_filter.next().await.unwrap().unwrap();
+        assert_eq!(
+            chunk.into_chunk().unwrap(),
+            StreamChunk::from_pretty(
+                " I
+                - 1
+                - 3"
+            )
+        );
+    }
+
+    #[tokio::test]
+    async fn test_dynamic_filter_less_than_or_equal() {
+        let chunk_l1 = StreamChunk::from_pretty(
+            "  I
+             + 2
+             + 3
+             + 4",
+        );
+        let chunk_l2 = StreamChunk::from_pretty(
+            "  I
+             + 1
+             - 2",
+        );
+        let chunk_r1 = StreamChunk::from_pretty(
+            "  I
+             + 2",
+        );
+        let chunk_r2 = StreamChunk::from_pretty(
+            "  I
+             + 3",
+        );
+        let chunk_r3 = StreamChunk::from_pretty(
+            "  I
+             + 0",
+        );
+        let (mut tx_l, mut tx_r, mut dynamic_filter) =
+            create_executor(ExprNodeType::LessThanOrEqual);
+
+        // push the init barrier for left and right
+        tx_l.push_barrier(1, false);
+        tx_r.push_barrier(1, false);
+        dynamic_filter.next().await.unwrap().unwrap();
+
+        // push the 1st left chunk
+        tx_l.push_chunk(chunk_l1);
+
+        // push the 1st right chunk
+        tx_r.push_chunk(chunk_r1);
+
+        // push the init barrier for left and right
+        tx_l.push_barrier(2, false);
+        tx_r.push_barrier(2, false);
+
+        let chunk = dynamic_filter.next().await.unwrap().unwrap();
+        assert_eq!(
+            chunk.into_chunk().unwrap(),
+            StreamChunk::from_pretty(
+                " I
+                + 2"
+            )
+        );
+
+        // Get the barrier
+        dynamic_filter.next().await.unwrap().unwrap();
+
+        // push the 2nd left chunk
+        tx_l.push_chunk(chunk_l2);
+        let chunk = dynamic_filter.next().await.unwrap().unwrap();
+        assert_eq!(
+            chunk.into_chunk().unwrap().compact().unwrap(),
+            StreamChunk::from_pretty(
+                " I
+                + 1
+                - 2"
+            )
+        );
+
+        // push the 2nd right chunk
+        tx_r.push_chunk(chunk_r2);
+
+        // push the init barrier for left and right
+        tx_l.push_barrier(3, false);
+        tx_r.push_barrier(3, false);
+
+        let chunk = dynamic_filter.next().await.unwrap().unwrap();
+        assert_eq!(
+            chunk.into_chunk().unwrap(),
+            StreamChunk::from_pretty(
+                " I
+                + 3"
+            )
+        );
+
+        // Get the barrier
+        dynamic_filter.next().await.unwrap().unwrap();
+
+        // push the 3rd right chunk
+        tx_r.push_chunk(chunk_r3);
+
+        // push the init barrier for left and right
+        tx_l.push_barrier(4, false);
+        tx_r.push_barrier(4, false);
+
+        let chunk = dynamic_filter.next().await.unwrap().unwrap();
+        assert_eq!(
+            chunk.into_chunk().unwrap(),
+            StreamChunk::from_pretty(
+                " I
+                - 1
+                - 3"
+            )
+        );
+    }
+}

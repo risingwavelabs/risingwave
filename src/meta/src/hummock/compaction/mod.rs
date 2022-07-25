@@ -74,6 +74,19 @@ impl Clone for CompactStatus {
     }
 }
 
+pub struct CompactionInput {
+    pub input_levels: Vec<InputLevel>,
+    pub target_level: usize,
+    pub target_sub_level_id: u64,
+}
+
+pub struct CompactionTask {
+    pub input: CompactionInput,
+    pub compression_algorithm: String,
+    pub target_file_size: u64,
+    pub splits: Vec<KeyRange>,
+}
+
 pub fn create_overlap_strategy(compaction_mode: CompactionMode) -> Arc<dyn OverlapStrategy> {
     match compaction_mode {
         CompactionMode::Range => Arc::new(RangeOverlapStrategy::default()),
@@ -280,19 +293,6 @@ impl Default for ManualCompactionOption {
             level: 1,
         }
     }
-}
-
-pub struct CompactionInput {
-    pub input_levels: Vec<InputLevel>,
-    pub target_level: usize,
-    pub target_sub_level_id: u64,
-}
-
-pub struct CompactionTask {
-    pub input: CompactionInput,
-    pub compression_algorithm: String,
-    pub target_file_size: u64,
-    pub splits: Vec<KeyRange>,
 }
 
 pub trait CompactionPicker {

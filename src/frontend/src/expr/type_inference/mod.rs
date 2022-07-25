@@ -16,13 +16,14 @@
 //! functionCall expressions have same input type requirement and return type definition as backend.
 use risingwave_common::types::DataType;
 
+mod agg;
 mod cast;
 mod func;
+pub use agg::{agg_func_sigs, AggFuncSig};
 pub use cast::{
     align_types, cast_map_array, cast_ok, cast_ok_base, least_restrictive, CastContext,
 };
 pub use func::{func_sigs, infer_type, FuncSign};
-
 /// `DataTypeName` is designed for type derivation here. In other scenarios,
 /// use `DataType` instead.
 #[derive(Debug, Ord, PartialOrd, Clone, PartialEq, Eq, Hash, Copy)]
@@ -89,6 +90,7 @@ impl From<&DataType> for DataTypeName {
 }
 
 impl From<DataType> for DataTypeName {
+    #[expect(clippy::needless_borrow)]
     fn from(ty: DataType) -> Self {
         (&ty).into()
     }

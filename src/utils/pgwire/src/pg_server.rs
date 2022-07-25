@@ -16,7 +16,7 @@ use std::io;
 use std::result::Result;
 use std::sync::Arc;
 
-use tokio::net::{TcpListener, TcpStream};
+use tokio::net::TcpListener;
 
 use crate::pg_field_descriptor::PgFieldDescriptor;
 use crate::pg_protocol::PgProtocol;
@@ -34,9 +34,17 @@ pub trait SessionManager: Send + Sync + 'static {
 
 /// A psql connection. Each connection binds with a database. Switching database will need to
 /// recreate another connection.
+///
+/// format:
+/// false: TEXT
+/// true: BINARY
 #[async_trait::async_trait]
 pub trait Session: Send + Sync {
-    async fn run_statement(self: Arc<Self>, sql: &str) -> Result<PgResponse, BoxedError>;
+    async fn run_statement(
+        self: Arc<Self>,
+        sql: &str,
+        format: bool,
+    ) -> Result<PgResponse, BoxedError>;
     async fn infer_return_type(
         self: Arc<Self>,
         sql: &str,
@@ -82,7 +90,8 @@ pub async fn pg_serve(addr: &str, session_mgr: Arc<impl SessionManager>) -> io::
                 tracing::info!("New connection: {}", peer_addr);
                 tokio::spawn(async move {
                     // connection succeeded
-                    pg_serve_conn(stream, session_mgr).await;
+                    let mut pg_proto = PgProtocol::new(stream, session_mgr);
+                    while !pg_proto.process().await {}
                     tracing::info!("Connection {} closed", peer_addr);
                 });
             }
@@ -94,34 +103,12 @@ pub async fn pg_serve(addr: &str, session_mgr: Arc<impl SessionManager>) -> io::
     }
 }
 
-async fn pg_serve_conn(socket: TcpStream, session_mgr: Arc<impl SessionManager>) {
-    let mut pg_proto = PgProtocol::new(socket, session_mgr);
-
-    let mut unnamed_statement = Default::default();
-    let mut unnamed_portal = Default::default();
-    let mut named_statements = Default::default();
-    let mut named_portals = Default::default();
-
-    loop {
-        let terminate = pg_proto
-            .process(
-                &mut unnamed_statement,
-                &mut unnamed_portal,
-                &mut named_statements,
-                &mut named_portals,
-            )
-            .await;
-        if terminate {
-            break;
-        }
-    }
-}
-
 #[cfg(test)]
 mod tests {
     use std::error::Error;
     use std::sync::Arc;
 
+    use bytes::Bytes;
     use tokio_postgres::types::*;
     use tokio_postgres::NoTls;
 
@@ -151,28 +138,30 @@ mod tests {
         async fn run_statement(
             self: Arc<Self>,
             sql: &str,
+            _format: bool,
         ) -> Result<PgResponse, Box<dyn Error + Send + Sync>> {
             // split a statement and trim \' around the input param to construct result.
             // Ex:
             //    SELECT 'a','b' -> result: a , b
-            let res: Vec<Option<String>> = sql
+            let res: Vec<Option<Bytes>> = sql
                 .split(&[' ', ',', ';'])
                 .skip(1)
                 .map(|x| {
                     Some(
                         x.trim_start_matches('\'')
                             .trim_end_matches('\'')
-                            .to_string(),
+                            .to_string()
+                            .into(),
                     )
                 })
                 .collect();
-
+            let len = res.len();
             Ok(PgResponse::new(
                 StatementType::SELECT,
                 1,
                 vec![Row::new(res)],
                 // NOTE: Extended mode don't need.
-                vec![],
+                vec![PgFieldDescriptor::new("".to_string(), TypeOid::Varchar); len],
                 true,
             ))
         }

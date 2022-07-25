@@ -12,6 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+use std::collections::HashMap;
 use std::marker::PhantomData;
 use std::sync::Arc;
 
@@ -19,18 +20,17 @@ use futures::{stream, StreamExt};
 use futures_async_stream::try_stream;
 use iter_chunks::IterChunks;
 use itertools::Itertools;
-use madsim::collections::HashMap;
 use risingwave_common::array::column::Column;
 use risingwave_common::array::{StreamChunk, Vis};
 use risingwave_common::buffer::Bitmap;
 use risingwave_common::catalog::Schema;
 use risingwave_common::collection::evictable::EvictableHashMap;
-use risingwave_common::error::Result;
 use risingwave_common::hash::{HashCode, HashKey};
 use risingwave_common::util::hash_util::CRC32FastBuilder;
-use risingwave_storage::table::state_table::StateTable;
+use risingwave_storage::table::state_table::RowBasedStateTable;
 use risingwave_storage::StateStore;
 
+use super::aggregation::agg_call_filter_res;
 use super::{
     expect_first_barrier, pk_input_arrays, Executor, PkDataTypes, PkIndicesRef,
     StreamExecutorResult,
@@ -82,7 +82,7 @@ struct HashAggExecutorExtra<S: StateStore> {
     /// all of the aggregation functions in this executor should depend on same group of keys
     key_indices: Vec<usize>,
 
-    state_tables: Vec<StateTable<S>>,
+    state_tables: Vec<RowBasedStateTable<S>>,
 }
 
 impl<K: HashKey, S: StateStore> Executor for HashAggExecutor<K, S> {
@@ -110,8 +110,8 @@ impl<K: HashKey, S: StateStore> HashAggExecutor<K, S> {
         pk_indices: PkIndices,
         executor_id: u64,
         key_indices: Vec<usize>,
-        mut state_tables: Vec<StateTable<S>>,
-    ) -> Result<Self> {
+        mut state_tables: Vec<RowBasedStateTable<S>>,
+    ) -> StreamExecutorResult<Self> {
         let input_info = input.info();
         let schema = generate_agg_schema(input.as_ref(), &agg_calls, Some(&key_indices));
 
@@ -147,7 +147,7 @@ impl<K: HashKey, S: StateStore> HashAggExecutor<K, S> {
         keys: Vec<K>,
         key_hash_codes: Vec<HashCode>,
         visibility: &Option<Bitmap>,
-    ) -> Result<Vec<(K, HashCode, Bitmap)>> {
+    ) -> StreamExecutorResult<Vec<(K, HashCode, Bitmap)>> {
         let total_num_rows = keys.len();
         assert_eq!(key_hash_codes.len(), total_num_rows);
         // Each hash key, e.g. `key1` corresponds to a visibility map that not only shadows
@@ -206,6 +206,7 @@ impl<K: HashKey, S: StateStore> HashAggExecutor<K, S> {
         // Compute hash code here before serializing keys to avoid duplicate hash code computation.
         let hash_codes = data_chunk.get_hash_values(key_indices, CRC32FastBuilder)?;
         let keys = K::build_from_hash_code(key_indices, &data_chunk, hash_codes.clone());
+        let capacity = data_chunk.capacity();
         let (columns, vis) = data_chunk.into_parts();
         let visibility = match vis {
             Vis::Bitmap(b) => Some(b),
@@ -214,8 +215,7 @@ impl<K: HashKey, S: StateStore> HashAggExecutor<K, S> {
 
         // --- Find unique keys in this batch and generate visibility map for each key ---
         // TODO: this might be inefficient if there are not too many duplicated keys in one batch.
-        let unique_keys = Self::get_unique_keys(keys, hash_codes, &visibility)
-            .map_err(StreamExecutorError::eval_error)?;
+        let unique_keys = Self::get_unique_keys(keys, hash_codes, &visibility)?;
 
         // --- Retrieve all aggregation inputs in advance ---
         // Previously, this is done in `unique_keys` inner loop, which is very inefficient.
@@ -253,11 +253,7 @@ impl<K: HashKey, S: StateStore> HashAggExecutor<K, S> {
                         Some(s) => s.unwrap(),
                         None => Box::new(
                             generate_managed_agg_state(
-                                Some(
-                                    &key.clone()
-                                        .deserialize(key_data_types.iter())
-                                        .map_err(StreamExecutorError::eval_error)?,
-                                ),
+                                Some(&key.clone().deserialize(key_data_types.iter())?),
                                 agg_calls,
                                 input_pk_data_types.clone(),
                                 epoch,
@@ -290,15 +286,17 @@ impl<K: HashKey, S: StateStore> HashAggExecutor<K, S> {
         for (key, _, vis_map) in &unique_keys {
             let state = state_map.get_mut(key).unwrap().as_mut().unwrap();
             // 3. Apply batch to each of the state (per agg_call)
-            for ((agg_state, data), state_table) in state
+            for (((agg_state, agg_call), data), state_table) in state
                 .managed_states
                 .iter_mut()
+                .zip_eq(agg_calls.iter())
                 .zip_eq(all_agg_data.iter())
                 .zip_eq(state_tables.iter_mut())
             {
                 let data = data.iter().map(|d| &**d).collect_vec();
+                let vis_map = agg_call_filter_res(agg_call, &columns, Some(vis_map), capacity)?;
                 agg_state
-                    .apply_batch(&ops, Some(vis_map), &data, epoch, state_table)
+                    .apply_batch(&ops, vis_map.as_ref(), &data, epoch, state_table)
                     .await?;
             }
         }
@@ -332,7 +330,7 @@ impl<K: HashKey, S: StateStore> HashAggExecutor<K, S> {
                         .iter_mut()
                         .zip_eq(state_tables.iter_mut())
                     {
-                        state.flush(state_table).await?;
+                        state.flush(state_table)?;
                     }
                 }
             }
@@ -373,16 +371,16 @@ impl<K: HashKey, S: StateStore> HashAggExecutor<K, S> {
 
                     for _ in 0..appended {
                         key.clone()
-                            .deserialize_to_builders(&mut builders[..key_indices.len()])
-                            .map_err(StreamExecutorError::eval_error)?;
+                            .deserialize_to_builders(&mut builders[..key_indices.len()])?;
                     }
                 }
 
                 let columns: Vec<Column> = builders
                     .into_iter()
-                    .map(|builder| -> Result<_> { Ok(Column::new(Arc::new(builder.finish()?))) })
-                    .try_collect()
-                    .map_err(StreamExecutorError::eval_error)?;
+                    .map(|builder| {
+                        Ok::<_, StreamExecutorError>(Column::new(Arc::new(builder.finish()?)))
+                    })
+                    .try_collect()?;
 
                 let chunk = StreamChunk::new(new_ops, columns, None);
 
@@ -455,7 +453,7 @@ mod tests {
     use risingwave_common::types::DataType;
     use risingwave_expr::expr::*;
     use risingwave_storage::memory::MemoryStateStore;
-    use risingwave_storage::table::state_table::StateTable;
+    use risingwave_storage::table::state_table::RowBasedStateTable;
     use risingwave_storage::StateStore;
 
     use crate::executor::aggregation::{generate_agg_schema, AggArgs, AggCall};
@@ -471,7 +469,7 @@ mod tests {
         key_indices: Vec<usize>,
         pk_indices: PkIndices,
         executor_id: u64,
-        state_tables: Vec<StateTable<S>>,
+        state_tables: Vec<RowBasedStateTable<S>>,
     }
 
     impl<S: StateStore> HashKeyDispatcher for HashAggExecutorDispatcher<S> {
@@ -582,18 +580,21 @@ mod tests {
                 args: AggArgs::None,
                 return_type: DataType::Int64,
                 append_only,
+                filter: None,
             },
             AggCall {
                 kind: AggKind::Count,
                 args: AggArgs::Unary(DataType::Int64, 0),
                 return_type: DataType::Int64,
                 append_only,
+                filter: None,
             },
             AggCall {
                 kind: AggKind::Count,
                 args: AggArgs::None,
                 return_type: DataType::Int64,
                 append_only,
+                filter: None,
             },
         ];
 
@@ -669,12 +670,14 @@ mod tests {
                 args: AggArgs::None,
                 return_type: DataType::Int64,
                 append_only,
+                filter: None,
             },
             AggCall {
                 kind: AggKind::Sum,
                 args: AggArgs::Unary(DataType::Int64, 1),
                 return_type: DataType::Int64,
                 append_only,
+                filter: None,
             },
             // This is local hash aggregation, so we add another sum state
             AggCall {
@@ -682,6 +685,7 @@ mod tests {
                 args: AggArgs::Unary(DataType::Int64, 2),
                 return_type: DataType::Int64,
                 append_only,
+                filter: None,
             },
         ];
 
@@ -764,12 +768,14 @@ mod tests {
                 args: AggArgs::None,
                 return_type: DataType::Int64,
                 append_only: false,
+                filter: None,
             },
             AggCall {
                 kind: AggKind::Min,
                 args: AggArgs::Unary(DataType::Int64, 1),
                 return_type: DataType::Int64,
                 append_only: false,
+                filter: None,
             },
         ];
 
@@ -853,12 +859,14 @@ mod tests {
                 args: AggArgs::None,
                 return_type: DataType::Int64,
                 append_only,
+                filter: None,
             },
             AggCall {
                 kind: AggKind::Min,
                 args: AggArgs::Unary(DataType::Int64, 1),
                 return_type: DataType::Int64,
                 append_only,
+                filter: None,
             },
         ];
 

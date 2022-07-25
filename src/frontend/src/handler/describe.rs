@@ -74,8 +74,8 @@ pub fn handle_describe(context: OptimizerContext, table_name: ObjectName) -> Res
             .map(|c| i.columns[*c].name().to_string())
             .collect_vec();
         Row::new(vec![
-            Some(i.name.clone()),
-            Some(format!("index({})", display_comma_separated(&s))),
+            Some(i.name.clone().into()),
+            Some(format!("index({})", display_comma_separated(&s)).into()),
         ])
     }));
 
@@ -119,8 +119,8 @@ mod tests {
             .iter()
             .map(|row| {
                 (
-                    row.index(0).as_ref().unwrap().as_str(),
-                    row.index(1).as_ref().unwrap().as_str(),
+                    std::str::from_utf8(row.index(0).as_ref().unwrap()).unwrap(),
+                    std::str::from_utf8(row.index(1).as_ref().unwrap()).unwrap(),
                 )
             })
             .collect::<HashMap<&str, &str>>();

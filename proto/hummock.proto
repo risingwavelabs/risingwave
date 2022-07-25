@@ -341,4 +341,5 @@ message CompactionConfig {
   repeated string compression_algorithm = 9;
   uint64 target_file_size_base = 10;
   uint32 compaction_filter_mask = 11;
+  uint32 max_sub_compaction = 12;
 }

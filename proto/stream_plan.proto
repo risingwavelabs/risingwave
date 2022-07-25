@@ -38,8 +38,20 @@ message UpdateMutation {
     // Removed downstream actors.
     repeated uint32 removed_downstream_actor_id = 4;
   }
-  // Dispatcher updates for each actor.
+  // TODO: These actor ids should be the same as those in `DispatcherUpdate`.
+  // We may find a way to deduplicate this.
+  message MergeUpdate {
+    // Added upstream actors.
+    repeated uint32 added_upstream_actor_id = 1;
+    // Removed upstream actors.
+    repeated uint32 removed_upstream_actor_id = 2;
+  }
+  // Dispatcher updates for each upstream actor.
   map<uint32, DispatcherUpdate> actor_dispatcher_update = 1;
+  // Merge updates for each downstream actor.
+  map<uint32, MergeUpdate> actor_merge_update = 2;
+
+  repeated uint32 dropped_actors = 3;
 }
 
 message SourceChangeSplitMutation {
@@ -131,17 +143,20 @@ message SimpleAggNode {
   // Only used for local simple agg, not used for global simple agg.
   repeated uint32 distribution_key = 2;
   repeated catalog.Table internal_tables = 3;
-  map<uint32, int32> column_mapping = 4;
+  repeated ColumnMapping column_mappings = 4;
   // Whether to optimize for append only stream.
   // It is true when the input is append-only
   bool is_append_only = 5;
 }
 
+message ColumnMapping {
+  repeated uint32 indices = 1;
+}
 message HashAggNode {
   repeated uint32 group_key = 1;
   repeated expr.AggCall agg_calls = 2;
   repeated catalog.Table internal_tables = 3;
-  map<uint32, int32> column_mapping = 4;
+  repeated ColumnMapping column_mappings = 4;
   // Whether to optimize for append only stream.
   // It is true when the input is append-only
   bool is_append_only = 5;
@@ -317,6 +332,10 @@ message ExpandNode {
   repeated Subset column_subsets = 1;
 }
 
+message ProjectSetNode {
+  repeated expr.ProjectSetSelectItem select_list = 1;
+}
+
 message StreamNode {
   oneof node_body {
     SourceNode source = 100;
@@ -342,6 +361,7 @@ message StreamNode {
     SinkNode sink = 120;
     ExpandNode expand = 121;
     DynamicFilterNode dynamic_filter = 122;
+    ProjectSetNode project_set = 123;
   }
   // The id for the operator. This is local per mview.
   // TODO: should better be a uint32.
@@ -436,7 +456,7 @@ message StreamFragmentGraph {
     DispatchStrategy dispatch_strategy = 1;
     // Whether the two linked nodes should be placed on the same worker node
     bool same_worker_node = 2;
-    // A unique identifer of this edge. Generally it should be exchange node's operator id. When
+    // A unique identifier of this edge. Generally it should be exchange node's operator id. When
     // rewriting fragments into delta joins or when inserting 1-to-1 exchange, there will be
     // virtual links generated.
     uint64 link_id = 3;

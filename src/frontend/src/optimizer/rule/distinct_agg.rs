@@ -18,14 +18,16 @@ use risingwave_common::types::DataType;
 use risingwave_expr::expr::AggKind;
 
 use super::{BoxedRule, Rule};
-use crate::expr::{ExprType, FunctionCall, InputRef, Literal};
-use crate::optimizer::plan_node::{CollectInputRef, LogicalAgg, LogicalExpand, PlanAggCall};
+use crate::expr::{ExprImpl, ExprType, FunctionCall, InputRef, Literal};
+use crate::optimizer::plan_node::{
+    CollectInputRef, LogicalAgg, LogicalExpand, LogicalProject, PlanAggCall,
+};
 use crate::optimizer::PlanRef;
 use crate::utils::Condition;
 
 /// Transform distinct aggregates to `LogicalAgg` -> `LogicalAgg` -> `Expand` -> `Input`.
-pub struct DistinctAgg {}
-impl Rule for DistinctAgg {
+pub struct DistinctAggRule {}
+impl Rule for DistinctAggRule {
     fn apply(&self, plan: PlanRef) -> Option<PlanRef> {
         let agg: &LogicalAgg = plan.as_logical_agg()?;
         let (agg_calls, agg_group_keys, input) = agg.clone().decompose();
@@ -55,9 +57,9 @@ impl Rule for DistinctAgg {
     }
 }
 
-impl DistinctAgg {
+impl DistinctAggRule {
     pub fn create() -> BoxedRule {
-        Box::new(DistinctAgg {})
+        Box::new(DistinctAggRule {})
     }
 
     fn build_expand(
@@ -143,7 +145,8 @@ impl DistinctAgg {
         let mut index_of_distinct_agg_argument = old_group_keys_len;
         // scan through `count_star_with_filter` or `non-distinct agg`.
         let mut index_of_middle_agg = input.group_key().len();
-        agg_calls.iter_mut().for_each(|agg_call| {
+        let mut indices_of_count = vec![];
+        agg_calls.iter_mut().enumerate().for_each(|(i, agg_call)| {
             let flag_value;
             if agg_call.distinct {
                 agg_call.distinct = false;
@@ -183,12 +186,23 @@ impl DistinctAgg {
                 agg_call.filter = Condition::true_cond();
 
                 // change final agg's agg_kind just like two-phase agg.
+                //
+                // future `AggKind` may or may not be able to use the same agg call for mid and
+                // final agg so we use exhaustive match here to make compiler remind
+                // people adding new `AggKind` to update it.
                 match agg_call.agg_kind {
-                    AggKind::Count | AggKind::ApproxCountDistinct => {
+                    AggKind::Min
+                    | AggKind::Max
+                    | AggKind::Sum
+                    | AggKind::Avg
+                    | AggKind::StringAgg
+                    | AggKind::SingleValue
+                    | AggKind::ApproxCountDistinct => (),
+                    AggKind::Count => {
+                        indices_of_count.push(i);
                         agg_call.agg_kind = AggKind::Sum;
                     }
-                    _ => {}
-                };
+                }
 
                 // the index of non-distinct aggs' subset in `column_subsets` is always 0 if it
                 // exists.
@@ -207,11 +221,35 @@ impl DistinctAgg {
             agg_call.filter.conjunctions.push(filter_expr.into());
         });
 
-        LogicalAgg::new(
+        let mut plan: PlanRef = LogicalAgg::new(
             agg_calls,
             (0..old_group_keys_len).collect_vec(),
             input.into(),
         )
-        .into()
+        .into();
+
+        if !indices_of_count.is_empty() {
+            let mut exprs: Vec<ExprImpl> = plan
+                .schema()
+                .data_types()
+                .into_iter()
+                .enumerate()
+                .map(|(i, data_type)| InputRef::new(i, data_type).into())
+                .collect_vec();
+            for i in indices_of_count {
+                let index = old_group_keys_len + i;
+                exprs[index] = FunctionCall::new(
+                    ExprType::Coalesce,
+                    vec![
+                        exprs[index].clone(),
+                        Literal::new(Some(0_i64.into()), DataType::Int64).into(),
+                    ],
+                )
+                .unwrap()
+                .into();
+            }
+            plan = LogicalProject::create(plan, exprs);
+        }
+        plan
     }
 }

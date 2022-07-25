@@ -35,7 +35,6 @@
 #![feature(lint_reasons)]
 #![feature(binary_heap_drain_sorted)]
 #![feature(map_first_last)]
-#![feature(let_chains)]
 #![feature(let_else)]
 #![feature(hash_drain_filter)]
 #![feature(drain_filter)]
@@ -45,6 +44,7 @@
 #![feature(unzip_option)]
 #![feature(allocator_api)]
 #![feature(map_try_insert)]
+#![feature(result_option_inspect)]
 
 #[macro_use]
 extern crate log;

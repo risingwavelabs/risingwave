@@ -22,7 +22,7 @@ use crate::model::MetadataModel;
 /// `cf(hummock_version)`: `HummockVersionId` -> `HummockVersion`
 const HUMMOCK_VERSION_CF_NAME: &str = "cf/hummock_version";
 
-/// `HummockVersion` tracks `SSTables` in given version.
+/// `HummockVersion` tracks `Sstables` in given version.
 impl MetadataModel for HummockVersion {
     type KeyType = HummockVersionId;
     type ProstType = HummockVersion;

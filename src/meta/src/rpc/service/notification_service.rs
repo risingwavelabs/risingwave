@@ -12,7 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use risingwave_common::error::tonic_err;
+use risingwave_common::error::{tonic_err, RwError};
 use risingwave_pb::common::worker_node::State::Running;
 use risingwave_pb::common::WorkerType;
 use risingwave_pb::meta::notification_service_server::NotificationService;
@@ -25,6 +25,7 @@ use tonic::{Request, Response, Status};
 use crate::cluster::{ClusterManagerRef, WorkerKey};
 use crate::manager::{CatalogManagerRef, MetaSrvEnv, Notification, UserInfoManagerRef};
 use crate::storage::MetaStore;
+
 pub struct NotificationServiceImpl<S: MetaStore> {
     env: MetaSrvEnv<S>,
 
@@ -50,6 +51,50 @@ where
             user_manager,
         }
     }
+
+    async fn build_snapshot_by_type(
+        &self,
+        worker_type: WorkerType,
+    ) -> Result<MetaSnapshot, RwError> {
+        let catalog_guard = self.catalog_manager.get_catalog_core_guard().await;
+        let (database, schema, table, source) = catalog_guard.get_catalog().await?;
+
+        let cluster_guard = self.cluster_manager.get_cluster_core_guard().await;
+        let nodes = cluster_guard.list_worker_node(WorkerType::ComputeNode, Some(Running));
+
+        let user_guard = self.user_manager.get_user_core_guard().await;
+        let users = user_guard
+            .get_user_info()
+            .values()
+            .cloned()
+            .collect::<Vec<_>>();
+
+        // Send the snapshot on subscription. After that we will send only updates.
+        let result = match worker_type {
+            WorkerType::Frontend => MetaSnapshot {
+                nodes,
+                database,
+                schema,
+                source,
+                table,
+                users,
+            },
+
+            WorkerType::Compactor => MetaSnapshot {
+                table,
+                ..Default::default()
+            },
+
+            WorkerType::ComputeNode => MetaSnapshot {
+                table,
+                ..Default::default()
+            },
+
+            _ => unreachable!(),
+        };
+
+        Ok(result)
+    }
 }
 
 #[async_trait::async_trait]
@@ -70,50 +115,20 @@ where
 
         let (tx, rx) = mpsc::unbounded_channel();
 
-        match worker_type {
-            WorkerType::ComputeNode => {
-                self.env
-                    .notification_manager()
-                    .insert_compute_sender(WorkerKey(host_address), tx)
-                    .await
-            }
-            WorkerType::Frontend => {
-                let catalog_guard = self.catalog_manager.get_catalog_core_guard().await;
-                let (database, schema, table, source) = catalog_guard.get_catalog().await?;
+        let meta_snapshot = self.build_snapshot_by_type(worker_type).await?;
 
-                let cluster_guard = self.cluster_manager.get_cluster_core_guard().await;
-                let nodes = cluster_guard.list_worker_node(WorkerType::ComputeNode, Some(Running));
+        tx.send(Ok(SubscribeResponse {
+            status: None,
+            operation: Operation::Snapshot as i32,
+            info: Some(Info::Snapshot(meta_snapshot)),
+            version: self.env.notification_manager().current_version().await,
+        }))
+        .unwrap();
 
-                let user_guard = self.user_manager.get_user_core_guard().await;
-                let users = user_guard
-                    .get_user_info()
-                    .values()
-                    .cloned()
-                    .collect::<Vec<_>>();
-
-                // Send the snapshot on subscription. After that we will send only updates.
-                let meta_snapshot = MetaSnapshot {
-                    nodes,
-                    database,
-                    schema,
-                    source,
-                    table,
-                    users,
-                };
-                tx.send(Ok(SubscribeResponse {
-                    status: None,
-                    operation: Operation::Snapshot as i32,
-                    info: Some(Info::Snapshot(meta_snapshot)),
-                    version: self.env.notification_manager().current_version().await,
-                }))
-                .unwrap();
-                self.env
-                    .notification_manager()
-                    .insert_frontend_sender(WorkerKey(host_address), tx)
-                    .await
-            }
-            _ => unreachable!(),
-        };
+        self.env
+            .notification_manager()
+            .insert_sender(worker_type, WorkerKey(host_address), tx)
+            .await;
 
         Ok(Response::new(UnboundedReceiverStream::new(rx)))
     }

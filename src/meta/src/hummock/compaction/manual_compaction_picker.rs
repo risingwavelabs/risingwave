@@ -144,7 +144,6 @@ impl CompactionPicker for ManualCompactionPicker {
         levels: &Levels,
         level_handlers: &mut [LevelHandler],
     ) -> Option<CompactionInput> {
-        // TODO: support pick up level 0
         if self.option.level == 0 {
             return self.pick_l0_files(levels, level_handlers);
         }

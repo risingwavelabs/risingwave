@@ -12,15 +12,15 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+use std::collections::btree_map::Range;
+use std::collections::{BTreeMap, HashSet};
 use std::ops::Bound::{self, *};
 use std::ops::RangeBounds;
 
 use anyhow::anyhow;
-use madsim::collections::btree_map::Range;
-use madsim::collections::{BTreeMap, HashSet};
 use risingwave_common::array::Row;
 use risingwave_common::types::ScalarImpl;
-use risingwave_storage::table::state_table::StateTable;
+use risingwave_storage::table::state_table::RowBasedStateTable;
 use risingwave_storage::StateStore;
 
 use crate::executor::error::StreamExecutorError;
@@ -39,7 +39,7 @@ pub struct RangeCache<S: StateStore> {
     //       storing as `BTreeSet<(ScalarImpl, Row)>`.
     //       We could solve it if `ScalarImpl` had a successor/predecessor function.
     cache: BTreeMap<ScalarImpl, HashSet<Row>>,
-    state_table: StateTable<S>,
+    state_table: RowBasedStateTable<S>,
     /// The current range stored in the cache.
     /// Any request for a set of values outside of this range will result in a scan
     /// from storage
@@ -54,7 +54,7 @@ pub struct RangeCache<S: StateStore> {
 
 impl<S: StateStore> RangeCache<S> {
     /// Create a [`RangeCache`] with given capacity and epoch
-    pub fn new(state_table: StateTable<S>, current_epoch: u64, capacity: usize) -> Self {
+    pub fn new(state_table: RowBasedStateTable<S>, current_epoch: u64, capacity: usize) -> Self {
         Self {
             cache: BTreeMap::new(),
             state_table,

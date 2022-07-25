@@ -12,12 +12,12 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::collections::HashMap;
 use std::sync::{Arc, RwLock};
 
 use rand::distributions::{Distribution as RandDistribution, Uniform};
 use risingwave_common::bail;
 use risingwave_common::types::ParallelUnitId;
+use risingwave_common::util::worker_util::get_pu_to_worker_mapping;
 use risingwave_pb::common::WorkerNode;
 
 use crate::scheduler::SchedulerResult;
@@ -85,14 +85,7 @@ impl WorkerNodeManager {
         &self,
         parallel_unit_ids: &[ParallelUnitId],
     ) -> SchedulerResult<Vec<WorkerNode>> {
-        let current_nodes = self.worker_nodes.read().unwrap();
-        let mut pu_to_worker: HashMap<ParallelUnitId, WorkerNode> = HashMap::new();
-        for node in &*current_nodes {
-            for pu in &node.parallel_units {
-                let res = pu_to_worker.insert(pu.id, node.clone());
-                assert!(res.is_none(), "duplicate parallel unit id");
-            }
-        }
+        let pu_to_worker = get_pu_to_worker_mapping(&self.worker_nodes.read().unwrap());
 
         let mut workers = Vec::with_capacity(parallel_unit_ids.len());
         for parallel_unit_id in parallel_unit_ids {
