@@ -94,6 +94,9 @@ pub struct StreamingConfig {
 
     #[serde(default = "default::in_flight_barrier_nums")]
     pub in_flight_barrier_nums: usize,
+
+    #[serde(default = "default::worker_node_parallelism")]
+    pub worker_node_parallelism: usize,
 }
 
 impl Default for StreamingConfig {
@@ -279,6 +282,10 @@ mod default {
 
     pub fn share_buffer_upload_concurrency() -> usize {
         8
+    }
+
+    pub fn worker_node_parallelism() -> usize {
+        num_cpus::get()
     }
 }
 

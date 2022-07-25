@@ -67,7 +67,6 @@ fn get_compile_mode() -> &'static str {
 pub async fn compute_node_serve(
     listen_addr: SocketAddr,
     client_addr: HostAddr,
-    worker_node_parallelism: usize,
     opts: ComputeNodeOpts,
 ) -> (Vec<JoinHandle<()>>, Sender<()>) {
     // Load the configuration.
@@ -85,7 +84,7 @@ pub async fn compute_node_serve(
         .register(
             WorkerType::ComputeNode,
             &client_addr,
-            worker_node_parallelism,
+            config.streaming.worker_node_parallelism,
         )
         .await
         .unwrap();

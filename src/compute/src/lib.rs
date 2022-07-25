@@ -73,11 +73,6 @@ pub struct ComputeNodeOpts {
     /// Enable reporting tracing information to jaeger
     #[clap(long)]
     pub enable_jaeger_tracing: bool,
-
-    /// The number of parallel units.
-    /// We will use the number of cpu cores if not specified.
-    #[clap(long, default_value = "0")]
-    pub worker_node_parallelism: usize,
 }
 
 use std::future::Future;
@@ -103,17 +98,9 @@ pub fn start(opts: ComputeNodeOpts) -> Pin<Box<dyn Future<Output = ()> + Send>> 
             .unwrap();
         tracing::info!("Client address is {}", client_address);
 
-        let worker_node_parallelism = if opts.worker_node_parallelism > 0 {
-            opts.worker_node_parallelism
-        } else {
-            num_cpus::get()
-        };
-        tracing::info!("Worker node parallelism is {}", worker_node_parallelism);
-
         let (join_handle_vec, _shutdown_send) = compute_node_serve(
             listen_address,
             client_address,
-            worker_node_parallelism,
             opts,
         )
         .await;
