@@ -45,9 +45,8 @@ pub async fn handle_create_database(
     }
 
     let catalog_writer = session.env().catalog_writer();
-    let owner: String = session.user_name().to_string();
     catalog_writer
-        .create_database(&database_name, owner.clone())
+        .create_database(&database_name, session.user_id())
         .await?;
 
     Ok(PgResponse::empty_result(StatementType::CREATE_DATABASE))

@@ -157,7 +157,7 @@ impl StreamMaterialize {
             is_index_on,
             distribution_key: base.dist.dist_column_indices().to_vec(),
             appendonly: input.append_only(),
-            owner: risingwave_common::catalog::DEFAULT_SUPPER_USER.to_string(),
+            owner: risingwave_common::catalog::DEFAULT_SUPER_USER_ID,
             vnode_mapping: None,
             properties: HashMap::default(),
             read_pattern_prefix_column: 0,
