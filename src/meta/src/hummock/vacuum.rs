@@ -18,7 +18,7 @@ use std::time::Duration;
 
 use itertools::Itertools;
 use risingwave_common::error::Result;
-use risingwave_hummock_sdk::HummockSSTableId;
+use risingwave_hummock_sdk::HummockSstableId;
 use risingwave_pb::hummock::VacuumTask;
 
 use crate::hummock::model::INVALID_TIMESTAMP;
@@ -38,7 +38,7 @@ pub struct VacuumTrigger<S: MetaStore> {
     /// Use the CompactorManager to dispatch VacuumTask.
     compactor_manager: Arc<CompactorManager>,
     /// SST ids which have been dispatched to vacuum nodes but are not replied yet.
-    pending_sst_ids: parking_lot::RwLock<HashSet<HummockSSTableId>>,
+    pending_sst_ids: parking_lot::RwLock<HashSet<HummockSstableId>>,
 }
 
 impl<S> VacuumTrigger<S>
@@ -126,7 +126,7 @@ where
     pub async fn vacuum_sst_data(
         &self,
         orphan_sst_retention_interval: Duration,
-    ) -> risingwave_common::error::Result<Vec<HummockSSTableId>> {
+    ) -> risingwave_common::error::Result<Vec<HummockSstableId>> {
         // Select SSTs to delete.
         let ssts_to_delete = {
             // 1. Retry the pending SSTs first.

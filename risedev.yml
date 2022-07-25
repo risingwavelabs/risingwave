@@ -50,6 +50,15 @@ risedev:
       address: "[::1]"
       listen-address: "[::]"
 
+  # The minimum config to use with risectl.
+  for-ctl:
+    - use: minio
+    - use: meta-node
+      unsafe-disable-recovery: true
+    - use: compute-node
+    - use: frontend
+    - use: compactor
+
   # `dev-compute-node` have the same settings as default except the the compute node will be started by user.
   dev-compute-node:
     - use: meta-node
@@ -616,3 +625,9 @@ template:
 
     # Connect address
     address: ${id}
+
+    # Number of CPUs to use
+    cpus: 8
+
+    # Memory limit for Redpanda
+    memory: 16G

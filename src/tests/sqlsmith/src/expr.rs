@@ -53,18 +53,14 @@ fn init_agg_table() -> HashMap<DataTypeName, Vec<AggFuncSig>> {
 }
 
 impl<'a, R: Rng> SqlGenerator<'a, R> {
-    /// can_agg    - In generating expression, there is two execution mode
-    ///                 1)  Non-Aggregate/Aggregate of Groupby Coloumns AND/OR Aggregate of Coloumns
-    ///                     that is not Groupby coloumns.                 
-    ///                 2)  No Aggregate for all columns (NonGroupby coloumns when group by is being
-    ///                     used will not be selected at all in this mode).
+    /// In generating expression, there are two execution modes:
+    /// 1) Can have Aggregate expressions (`can_agg` = true)
+    ///    We can have aggregate of all bound columns (those present in GROUP BY and otherwise).
+    ///    Not all GROUP BY columns need to be aggregated.
+    /// 2) Can't have Aggregate expressions (`can_agg` = false)
+    ///    Only columns present in GROUP BY can be selected.
     ///
-    /// When can_agg is false, it means the second execution mode which is strictly no aggregate for
-    /// all coloumns.
-    ///
-    /// inside_agg - Rule: an aggregate function cannot be inside an aggregate function.
-    ///              Since expression can be recursive, so this variable show that currently this
-    ///              expression is inside an aggregate function, ensuring the rule is followed.
+    /// `inside_agg` indicates if we are calling `gen_expr` inside an aggregate.
     pub(crate) fn gen_expr(&mut self, typ: DataTypeName, can_agg: bool, inside_agg: bool) -> Expr {
         if !self.can_recurse() {
             // Stop recursion with a simple scalar or column.
@@ -74,13 +70,11 @@ impl<'a, R: Rng> SqlGenerator<'a, R> {
             };
         }
 
-        // It is impossible to have can_agg = false and inside_agg = true.
-        // It makes no sense that when stricly no aggregate can be used, and this expr is inside an
-        // aggregate function.
-        assert!(can_agg || !inside_agg);
+        if !can_agg {
+            assert!(!inside_agg);
+        }
 
         // TODO:  https://github.com/singularity-data/risingwave/issues/3989.
-        // After the issue is resolved, uncomment the statement below
         // let range = if can_agg & !inside_agg { 99 } else { 90 };
         let range = 90;
 
@@ -161,9 +155,31 @@ impl<'a, R: Rng> SqlGenerator<'a, R> {
             .collect();
         assert!(expr.len() == 1);
 
-        let distinct = self.flip_coin();
-        make_agg_expr(func.func.clone(), expr[0].clone(), distinct)
-            .unwrap_or_else(|| self.gen_simple_scalar(ret))
+        let distinct = self.flip_coin() && self.is_distinct_allowed;
+        self.make_agg_expr(func.func.clone(), expr[0].clone(), distinct)
+    }
+
+    fn make_agg_expr(&mut self, func: AggKind, expr: Expr, distinct: bool) -> Expr {
+        use AggKind as A;
+
+        match func {
+            A::Sum => Expr::Function(make_agg_func("sum", &[expr], distinct)),
+            A::Min => Expr::Function(make_agg_func("min", &[expr], distinct)),
+            A::Max => Expr::Function(make_agg_func("max", &[expr], distinct)),
+            A::Count => Expr::Function(make_agg_func("count", &[expr], distinct)),
+            A::Avg => Expr::Function(make_agg_func("avg", &[expr], distinct)),
+            // TODO: Tracked by: <https://github.com/singularity-data/risingwave/issues/3115>
+            // A::StringAgg => Expr::Function(make_agg_func("string_agg", &[expr], distinct)),
+            A::StringAgg => self.gen_simple_scalar(DataTypeName::Varchar),
+            A::SingleValue => Expr::Function(make_agg_func("single_value", &[expr], false)),
+            A::ApproxCountDistinct => {
+                if distinct {
+                    self.gen_simple_scalar(DataTypeName::Int64)
+                } else {
+                    Expr::Function(make_agg_func("approx_count_distinct", &[expr], false))
+                }
+            }
+        }
     }
 }
 
@@ -204,35 +220,6 @@ fn make_general_expr(func: ExprType, exprs: Vec<Expr>) -> Option<Expr> {
         E::Md5 => Some(Expr::Function(make_simple_func("md5", &exprs))),
         E::ToChar => Some(Expr::Function(make_simple_func("to_char", &exprs))),
         E::Overlay => Some(make_overlay(exprs)),
-        _ => None,
-    }
-}
-
-// Even though when all current AggKind is implemented, the reason that Option is used here
-// because of if future there is a new AggKind is added, it would cause the compilation error here
-// So it is still better to keep it as Option
-fn make_agg_expr(func: AggKind, expr: Expr, distinct: bool) -> Option<Expr> {
-    use AggKind as A;
-
-    match func {
-        A::Sum => Some(Expr::Function(make_agg_func("sum", &[expr], distinct))),
-        A::Min => Some(Expr::Function(make_agg_func("min", &[expr], distinct))),
-        A::Max => Some(Expr::Function(make_agg_func("max", &[expr], distinct))),
-        A::Count => Some(Expr::Function(make_agg_func("count", &[expr], distinct))),
-        A::Avg => Some(Expr::Function(make_agg_func("avg", &[expr], distinct))),
-        // Refer to src/frontend/src/optimizer/plan_node/logical_agg.rs line  356 , it is todo:
-        // Uncomment the line below when it is implemented
-        // A::StringAgg => Expr::Function(make_agg_func("string_agg", &[expr], distinct)),
-        A::SingleValue => Some(Expr::Function(make_agg_func(
-            "single_value",
-            &[expr],
-            false,
-        ))),
-        A::ApproxCountDistinct => Some(Expr::Function(make_agg_func(
-            "approx_count_distinct",
-            &[expr],
-            false,
-        ))),
         _ => None,
     }
 }
@@ -295,7 +282,7 @@ fn make_simple_func(func_name: &str, exprs: &[Expr]) -> Function {
 
 /// This is the function that generate aggregate function.
 /// DISTINCT , ORDER BY or FILTER is allowed in aggregation functions。
-/// Currently, distinct is allowed only, other and others rule is TODO: https://github.com/singularity-data/risingwave/issues/3933
+/// Currently, distinct is allowed only, other and others rule is TODO: <https://github.com/singularity-data/risingwave/issues/3933>
 fn make_agg_func(func_name: &str, exprs: &[Expr], distinct: bool) -> Function {
     let args = exprs
         .iter()

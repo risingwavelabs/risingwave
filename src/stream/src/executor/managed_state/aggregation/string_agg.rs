@@ -25,7 +25,7 @@ use risingwave_common::types::{DataType, Datum, ScalarImpl};
 use risingwave_common::util::ordered::OrderedArraysSerializer;
 use risingwave_common::util::value_encoding::{deserialize_cell, serialize_cell};
 use risingwave_storage::storage_value::StorageValue;
-use risingwave_storage::table::state_table::StateTable;
+use risingwave_storage::table::state_table::RowBasedStateTable;
 use risingwave_storage::write_batch::WriteBatch;
 use risingwave_storage::{Keyspace, StateStore};
 
@@ -161,7 +161,7 @@ impl<S: StateStore> ManagedStringAggState<S> {
         visibility: Option<&Bitmap>,
         data: &[&ArrayImpl],
         epoch: u64,
-        _state_table: &mut StateTable<S>,
+        _state_table: &mut RowBasedStateTable<S>,
     ) -> StreamExecutorResult<()> {
         debug_assert!(super::verify_batch(ops, visibility, data));
         for sort_key_index in &self.sort_key_indices {
@@ -211,7 +211,7 @@ impl<S: StateStore> ManagedStringAggState<S> {
     async fn get_output(
         &mut self,
         epoch: u64,
-        _state_table: &StateTable<S>,
+        _state_table: &RowBasedStateTable<S>,
     ) -> StreamExecutorResult<Datum> {
         // We allow people to get output when the data is dirty.
         // As this is easier compared to `ManagedMinState` as we have a all-or-nothing cache policy
@@ -249,7 +249,7 @@ impl<S: StateStore> ManagedStringAggState<S> {
     fn flush(
         &mut self,
         write_batch: &mut WriteBatch<S>,
-        _state_table: &mut StateTable<S>,
+        _state_table: &mut RowBasedStateTable<S>,
     ) -> StreamExecutorResult<()> {
         if !self.is_dirty() {
             return Ok(());
@@ -317,8 +317,8 @@ mod tests {
         .unwrap()
     }
 
-    fn mock_state_table<S: StateStore>(store: S, table_id: TableId) -> StateTable<S> {
-        StateTable::new_without_distribution(store, table_id, vec![], vec![], vec![])
+    fn mock_state_table<S: StateStore>(store: S, table_id: TableId) -> RowBasedStateTable<S> {
+        RowBasedStateTable::new_without_distribution(store, table_id, vec![], vec![], vec![])
     }
 
     #[tokio::test]

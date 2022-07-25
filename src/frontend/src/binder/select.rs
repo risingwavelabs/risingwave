@@ -92,7 +92,7 @@ impl Binder {
         Self::require_bool_clause(&having, "HAVING")?;
 
         // Bind SELECT clause.
-        let (select_items, aliases) = self.bind_project(select.projection)?;
+        let (select_items, aliases) = self.bind_select_list(select.projection)?;
 
         // Store field from `ExprImpl` to support binding `field_desc` in `subquery`.
         let fields = select_items
@@ -116,7 +116,7 @@ impl Binder {
         })
     }
 
-    pub fn bind_project(
+    pub fn bind_select_list(
         &mut self,
         select_items: Vec<SelectItem>,
     ) -> Result<(Vec<ExprImpl>, Vec<Option<String>>)> {

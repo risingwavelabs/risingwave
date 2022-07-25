@@ -13,7 +13,7 @@ FROM
             window_start AS starttime,
             window_end AS endtime
         FROM
-            TUMBLE(person, dateTime, INTERVAL '10' SECOND)
+            TUMBLE(person, date_time, INTERVAL '10' SECOND)
         GROUP BY
             id,
             name,
@@ -26,7 +26,7 @@ FROM
             window_start AS starttime,
             window_end AS endtime
         FROM
-            TUMBLE(auction, dateTime, INTERVAL '10' SECOND)
+            TUMBLE(auction, date_time, INTERVAL '10' SECOND)
         GROUP BY
             seller,
             window_start,

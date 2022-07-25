@@ -45,6 +45,19 @@
     LogicalAgg { aggs: [count($0)] }
       LogicalScan { table: t, output_columns: [v1], required_columns: [$1:v1, $2:v2], predicate: ($2 > 2:Int32) }
 - sql: |
+    /* top n */
+    create table t (v1 int, v2 int, v3 int);
+    select v3 from (select * from t order by v3, v2 limit 2) as s;
+  logical_plan: |
+    LogicalProject { exprs: [$2] }
+      LogicalTopN { order: "[$2 ASC, $1 ASC]", limit: 2, offset: 0 }
+        LogicalProject { exprs: [$1, $2, $3] }
+          LogicalScan { table: t, columns: [_row_id, v1, v2, v3] }
+  optimized_logical_plan: |
+    LogicalProject { exprs: [$1] }
+      LogicalTopN { order: "[$1 ASC, $0 ASC]", limit: 2, offset: 0 }
+        LogicalScan { table: t, columns: [v2, v3] }
+- sql: |
     /* constant */
     create table t (v1 bigint, v2 double precision, v3 int);
     select 1 from t

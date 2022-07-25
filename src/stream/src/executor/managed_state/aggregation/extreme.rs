@@ -24,7 +24,7 @@ use risingwave_common::buffer::Bitmap;
 use risingwave_common::hash::HashCode;
 use risingwave_common::types::*;
 use risingwave_expr::expr::AggKind;
-use risingwave_storage::table::state_table::StateTable;
+use risingwave_storage::table::state_table::RowBasedStateTable;
 use risingwave_storage::StateStore;
 use smallvec::SmallVec;
 
@@ -105,21 +105,21 @@ pub trait ManagedTableState<S: StateStore>: Send + Sync + 'static {
         visibility: Option<&Bitmap>,
         data: &[&ArrayImpl],
         epoch: u64,
-        state_table: &mut StateTable<S>,
+        state_table: &mut RowBasedStateTable<S>,
     ) -> StreamExecutorResult<()>;
 
     /// Get the output of the state. Must flush before getting output.
     async fn get_output(
         &mut self,
         epoch: u64,
-        state_table: &StateTable<S>,
+        state_table: &RowBasedStateTable<S>,
     ) -> StreamExecutorResult<Datum>;
 
     /// Check if this state needs a flush.
     fn is_dirty(&self) -> bool;
 
     /// Flush the internal state to a write batch.
-    fn flush(&mut self, state_table: &mut StateTable<S>) -> StreamExecutorResult<()>;
+    fn flush(&mut self, state_table: &mut RowBasedStateTable<S>) -> StreamExecutorResult<()>;
 }
 
 impl<S: StateStore, A: Array, const EXTREME_TYPE: usize> GenericExtremeState<S, A, EXTREME_TYPE>
@@ -177,7 +177,7 @@ where
         ops: Ops<'_>,
         visibility: Option<&Bitmap>,
         data: &[&ArrayImpl],
-        state_table: &mut StateTable<S>,
+        state_table: &mut RowBasedStateTable<S>,
     ) -> StreamExecutorResult<()> {
         debug_assert!(super::verify_batch(ops, visibility, data));
 
@@ -287,7 +287,7 @@ where
     async fn get_output_inner(
         &mut self,
         epoch: u64,
-        state_table: &StateTable<S>,
+        state_table: &RowBasedStateTable<S>,
     ) -> StreamExecutorResult<Datum> {
         // To make things easier, we do not allow get_output before flushing. Otherwise we will need
         // to merge data from flush_buffer and state store, which is hard to implement.
@@ -377,7 +377,7 @@ where
         visibility: Option<&Bitmap>,
         data: &[&ArrayImpl],
         _epoch: u64,
-        state_table: &mut StateTable<S>,
+        state_table: &mut RowBasedStateTable<S>,
     ) -> StreamExecutorResult<()> {
         self.apply_batch_inner(ops, visibility, data, state_table)
     }
@@ -385,7 +385,7 @@ where
     async fn get_output(
         &mut self,
         epoch: u64,
-        state_table: &StateTable<S>,
+        state_table: &RowBasedStateTable<S>,
     ) -> StreamExecutorResult<Datum> {
         self.get_output_inner(epoch, state_table).await
     }
@@ -396,7 +396,7 @@ where
         unreachable!("Should not call this function anymore, check state table for dirty data");
     }
 
-    fn flush(&mut self, _state_table: &mut StateTable<S>) -> StreamExecutorResult<()> {
+    fn flush(&mut self, _state_table: &mut RowBasedStateTable<S>) -> StreamExecutorResult<()> {
         self.flush_inner()
     }
 }
@@ -667,7 +667,7 @@ mod tests {
         table_id: TableId,
         column_cnt: usize,
         order_type: OrderType,
-    ) -> StateTable<S> {
+    ) -> RowBasedStateTable<S> {
         let mut column_descs = Vec::with_capacity(column_cnt);
         for id in 0..column_cnt {
             column_descs.push(ColumnDesc::unnamed(
@@ -676,7 +676,7 @@ mod tests {
             ));
         }
         let relational_pk_len = column_descs.len();
-        StateTable::new_without_distribution(
+        RowBasedStateTable::new_without_distribution(
             store,
             table_id,
             column_descs,
@@ -1090,7 +1090,7 @@ mod tests {
     async fn helper_flush<S: StateStore>(
         managed_state: &mut impl ManagedTableState<S>,
         epoch: u64,
-        state_table: &mut StateTable<S>,
+        state_table: &mut RowBasedStateTable<S>,
     ) {
         managed_state.flush(state_table).unwrap();
         state_table.commit(epoch).await.unwrap();

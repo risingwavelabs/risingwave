@@ -11,5 +11,5 @@ SELECT
     auction,
     bidder,
     0.908 * price as price,
-    dateTime
+    date_time
 FROM bid;

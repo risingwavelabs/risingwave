@@ -13,16 +13,15 @@
 // limitations under the License.
 
 use futures_async_stream::for_await;
-use log::debug;
 use pgwire::pg_field_descriptor::PgFieldDescriptor;
 use pgwire::pg_response::{PgResponse, StatementType};
 use risingwave_batch::executor::BoxedDataChunkStream;
 use risingwave_common::error::Result;
 use risingwave_common::session_config::QueryMode;
 use risingwave_sqlparser::ast::Statement;
-use tracing::info;
+use tracing::{debug, info};
 
-use crate::binder::{Binder, BoundStatement};
+use crate::binder::{Binder, BoundSetExpr, BoundStatement};
 use crate::handler::util::{to_pg_field, to_pg_rows};
 use crate::planner::Planner;
 use crate::scheduler::{
@@ -42,9 +41,18 @@ pub async fn handle_query(context: OptimizerContext, stmt: Statement) -> Result<
         binder.bind(stmt)?
     };
 
-    let query_mode = session.config().get_query_mode();
+    let mut query_mode = session.config().get_query_mode();
 
     debug!("query_mode:{:?}", query_mode);
+    let BoundStatement::Query(query) = &bound else {
+        unreachable!();
+    };
+    if let BoundSetExpr::Select(select) = &query.body
+        && let Some(relation) = &select.from
+        && relation.contains_sys_table() {
+        debug!("force query mode to local when contains system table");
+        query_mode = QueryMode::Local;
+    }
 
     let (data_stream, pg_descs) = match query_mode {
         QueryMode::Local => local_execute(context, bound)?,

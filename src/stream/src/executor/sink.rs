@@ -17,11 +17,10 @@ use std::collections::HashMap;
 use futures::StreamExt;
 use futures_async_stream::try_stream;
 use risingwave_common::catalog::Schema;
-use risingwave_common::error::Result;
 use risingwave_connector::sink::{SinkConfig, SinkImpl};
 use risingwave_storage::StateStore;
 
-use super::error::StreamExecutorError;
+use super::error::{StreamExecutorError, StreamExecutorResult};
 use super::{BoxedExecutor, Executor, Message};
 
 pub struct SinkExecutor<S: StateStore> {
@@ -31,8 +30,10 @@ pub struct SinkExecutor<S: StateStore> {
     identity: String,
 }
 
-fn build_sink(config: SinkConfig) -> Result<Box<SinkImpl>> {
-    Ok(Box::new(SinkImpl::new(config)?))
+fn build_sink(config: SinkConfig) -> StreamExecutorResult<Box<SinkImpl>> {
+    Ok(Box::new(
+        SinkImpl::new(config).map_err(StreamExecutorError::sink_error)?,
+    ))
 }
 
 impl<S: StateStore> SinkExecutor<S> {
@@ -57,7 +58,7 @@ impl<S: StateStore> SinkExecutor<S> {
     async fn execute_inner(self) {
         let sink_config = SinkConfig::from_hashmap(self.properties.clone())
             .map_err(StreamExecutorError::sink_error)?;
-        let _sink = build_sink(sink_config);
+        let _sink = build_sink(sink_config)?;
 
         // TODO(tabVersion): the flag is required because kafka transaction requires at least one
         // message, so we should abort the transaction if the flag is true.
