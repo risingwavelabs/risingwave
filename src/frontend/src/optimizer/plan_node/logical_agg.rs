@@ -32,8 +32,8 @@ use super::{
 };
 use crate::catalog::table_catalog::TableCatalog;
 use crate::expr::{
-    AggCall, Expr, ExprImpl, ExprRewriter, ExprType, FunctionCall, InputRef, InputRefDisplay,
-    InputRefVerboseDisplay,
+    AggCall, AggOrderBy, Expr, ExprImpl, ExprRewriter, ExprType, FunctionCall, InputRef,
+    InputRefDisplay, InputRefVerboseDisplay,
 };
 use crate::optimizer::plan_node::utils::TableCatalogBuilder;
 use crate::optimizer::plan_node::{gen_filter_and_pushdown, LogicalProject};
@@ -498,6 +498,34 @@ impl LogicalAggBuilder {
         }
         None
     }
+
+    /// syntax check for distinct aggregates.
+    ///
+    /// TODO: we may disable this syntax check in the future because we may use another approach to
+    /// implement distinct aggregates.
+    pub fn syntax_check(&self) -> Result<()> {
+        let mut has_distinct = false;
+        let mut has_order_by = false;
+        self.agg_calls.iter().for_each(|agg_call| {
+            if agg_call.distinct {
+                has_distinct = true;
+            }
+            if !agg_call.order_by_fields.is_empty() {
+                has_order_by = true;
+            }
+        });
+
+        // order by is disallowed occur with distinct because we can not diectly rewrite agg with
+        // order by into 2-phase agg.
+        if has_distinct && has_order_by {
+            return Err(ErrorCode::InvalidInputSyntax(
+                "Order by aggregates are disallowed to occur with distinct aggregates".into(),
+            )
+            .into());
+        }
+
+        Ok(())
+    }
 }
 
 impl ExprRewriter for LogicalAggBuilder {
@@ -509,7 +537,24 @@ impl ExprRewriter for LogicalAggBuilder {
     /// Note that the rewriter does not traverse into inputs of agg calls.
     fn rewrite_agg_call(&mut self, agg_call: AggCall) -> ExprImpl {
         let return_type = agg_call.return_type();
-        let (agg_kind, inputs, distinct, order_by, filter) = agg_call.decompose();
+        let (agg_kind, inputs, distinct, mut order_by, filter) = agg_call.decompose();
+        match &agg_kind {
+            AggKind::Min
+            | AggKind::Max
+            | AggKind::Sum
+            | AggKind::Count
+            | AggKind::Avg
+            | AggKind::SingleValue
+            | AggKind::ApproxCountDistinct => {
+                // this order by is unnecessary.
+                order_by = AggOrderBy::new(vec![]);
+            }
+            _ => {
+                // To be conservative, we just treat newly added AggKind in the future as not
+                // rewritable.
+            }
+        }
+
         self.is_in_filter_clause = true;
         let filter = filter.rewrite_expr(self);
         self.is_in_filter_clause = false;
@@ -729,6 +774,8 @@ impl LogicalAgg {
         let rewritten_having = having
             .map(|expr| agg_builder.rewrite_with_error(expr))
             .transpose()?;
+
+        agg_builder.syntax_check()?;
 
         Ok((
             agg_builder.build(input).into(),

@@ -22,10 +22,9 @@ use chrono::{Datelike, Timelike};
 use itertools::Itertools;
 
 use crate::array::{
-    Array, ArrayBuilder, ArrayBuilderImpl, ArrayImpl, ArrayResult, DataChunk, ListRef, Row,
-    StructRef,
+    Array, ArrayBuilder, ArrayBuilderImpl, ArrayError, ArrayImpl, ArrayResult, DataChunk, ListRef,
+    Row, StructRef,
 };
-use crate::error::Result;
 use crate::types::{
     DataType, Datum, Decimal, IntervalUnit, NaiveDateTimeWrapper, NaiveDateWrapper,
     NaiveTimeWrapper, OrderedF32, OrderedF64, ScalarRef, ToOwnedDatum, VirtualNode,
@@ -72,7 +71,7 @@ pub trait HashKeySerializer {
 pub trait HashKeyDeserializer {
     type K: HashKey;
     fn from_hash_key(hash_key: Self::K) -> Self;
-    fn deserialize<'a, D: HashKeySerDe<'a>>(&'a mut self) -> Result<Option<D>>;
+    fn deserialize<'a, D: HashKeySerDe<'a>>(&'a mut self) -> ArrayResult<Option<D>>;
 }
 
 pub trait HashKeySerDe<'a>: ScalarRef<'a> {
@@ -130,18 +129,18 @@ pub trait HashKey: Clone + Debug + Hash + Eq + Sized + Send + Sync + 'static {
     }
 
     #[inline(always)]
-    fn deserialize<'a>(self, data_types: impl Iterator<Item = &'a DataType>) -> Result<Row> {
+    fn deserialize<'a>(self, data_types: impl Iterator<Item = &'a DataType>) -> ArrayResult<Row> {
         let mut builders: Vec<_> = data_types.map(|dt| dt.create_array_builder(1)).collect();
 
         self.deserialize_to_builders(&mut builders)?;
         builders
             .into_iter()
-            .map(|builder| -> Result<Datum> { Ok(builder.finish()?.value_at(0).to_owned_datum()) })
-            .collect::<Result<Vec<_>>>()
+            .map(|builder| Ok::<_, ArrayError>(builder.finish()?.value_at(0).to_owned_datum()))
+            .try_collect()
             .map(Row)
     }
 
-    fn deserialize_to_builders(self, array_builders: &mut [ArrayBuilderImpl]) -> Result<()>;
+    fn deserialize_to_builders(self, array_builders: &mut [ArrayBuilderImpl]) -> ArrayResult<()>;
 
     fn has_null(&self) -> bool;
 }
@@ -520,7 +519,7 @@ impl<const N: usize> HashKeyDeserializer for FixedSizeKeyDeserializer<N> {
         }
     }
 
-    fn deserialize<'a, D: HashKeySerDe<'a>>(&mut self) -> Result<Option<D>> {
+    fn deserialize<'a, D: HashKeySerDe<'a>>(&mut self) -> ArrayResult<Option<D>> {
         ensure!(self.null_bitmap_idx < 8);
         let mask = 1u8 << self.null_bitmap_idx;
         let is_null = (self.null_bitmap & mask) == 0u8;
@@ -586,7 +585,7 @@ where
 fn deserialize_array_element_from_hash_key<'a, A, S>(
     builder: &'a mut A,
     deserializer: &'a mut S,
-) -> Result<()>
+) -> ArrayResult<()>
 where
     A: ArrayBuilder,
     <<A as ArrayBuilder>::ArrayType as Array>::RefItem<'a>: HashKeySerDe<'a>,
@@ -613,7 +612,7 @@ impl ArrayBuilderImpl {
     fn deserialize_from_hash_key<S: HashKeyDeserializer>(
         &mut self,
         deserializer: &mut S,
-    ) -> Result<()> {
+    ) -> ArrayResult<()> {
         macro_rules! impl_all_deserialize_from_hash_key {
             ([$self:ident, $deserializer: ident], $({ $variant_name:ident, $suffix_name:ident, $array:ty, $builder:ty } ),*) => {
                 match $self {
@@ -628,7 +627,7 @@ impl ArrayBuilderImpl {
 impl<const N: usize> HashKey for FixedSizeKey<N> {
     type S = FixedSizeKeySerializer<N>;
 
-    fn deserialize_to_builders(self, array_builders: &mut [ArrayBuilderImpl]) -> Result<()> {
+    fn deserialize_to_builders(self, array_builders: &mut [ArrayBuilderImpl]) -> ArrayResult<()> {
         let mut deserializer = FixedSizeKeyDeserializer::<N>::from_hash_key(self);
         array_builders.iter_mut().try_for_each(|array_builder| {
             array_builder.deserialize_from_hash_key(&mut deserializer)
@@ -643,7 +642,7 @@ impl<const N: usize> HashKey for FixedSizeKey<N> {
 impl HashKey for SerializedKey {
     type S = SerializedKeySerializer;
 
-    fn deserialize_to_builders(self, array_builders: &mut [ArrayBuilderImpl]) -> Result<()> {
+    fn deserialize_to_builders(self, array_builders: &mut [ArrayBuilderImpl]) -> ArrayResult<()> {
         ensure!(self.key.len() == array_builders.len());
         array_builders
             .iter_mut()

@@ -16,7 +16,7 @@ use std::io;
 use std::result::Result;
 use std::sync::Arc;
 
-use tokio::net::{TcpListener, TcpStream};
+use tokio::net::TcpListener;
 
 use crate::pg_field_descriptor::PgFieldDescriptor;
 use crate::pg_protocol::PgProtocol;
@@ -82,7 +82,8 @@ pub async fn pg_serve(addr: &str, session_mgr: Arc<impl SessionManager>) -> io::
                 tracing::info!("New connection: {}", peer_addr);
                 tokio::spawn(async move {
                     // connection succeeded
-                    pg_serve_conn(stream, session_mgr).await;
+                    let mut pg_proto = PgProtocol::new(stream, session_mgr);
+                    while !pg_proto.process().await {}
                     tracing::info!("Connection {} closed", peer_addr);
                 });
             }
@@ -90,29 +91,6 @@ pub async fn pg_serve(addr: &str, session_mgr: Arc<impl SessionManager>) -> io::
             Err(e) => {
                 tracing::error!("Connection failure: {}", e);
             }
-        }
-    }
-}
-
-async fn pg_serve_conn(socket: TcpStream, session_mgr: Arc<impl SessionManager>) {
-    let mut pg_proto = PgProtocol::new(socket, session_mgr);
-
-    let mut unnamed_statement = Default::default();
-    let mut unnamed_portal = Default::default();
-    let mut named_statements = Default::default();
-    let mut named_portals = Default::default();
-
-    loop {
-        let terminate = pg_proto
-            .process(
-                &mut unnamed_statement,
-                &mut unnamed_portal,
-                &mut named_statements,
-                &mut named_portals,
-            )
-            .await;
-        if terminate {
-            break;
         }
     }
 }

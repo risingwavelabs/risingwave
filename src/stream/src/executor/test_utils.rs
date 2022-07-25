@@ -214,7 +214,7 @@ pub mod global_simple_agg {
         pk_indices: &[usize],
         agg_schema: &Schema,
         input_ref: &dyn Executor,
-    ) -> StateTable<S> {
+    ) -> RowBasedStateTable<S> {
         let table_desc =
             generate_column_descs(agg_call, group_key, pk_indices, agg_schema, input_ref);
         let relational_pk_len = if agg_call.kind == AggKind::Max || agg_call.kind == AggKind::Min {
@@ -223,7 +223,7 @@ pub mod global_simple_agg {
             table_desc.len() - 1
         };
 
-        StateTable::new_without_distribution(
+        RowBasedStateTable::new_without_distribution(
             store,
             table_id,
             table_desc,
@@ -245,7 +245,7 @@ pub mod global_simple_agg {
     use risingwave_common::util::sort_util::OrderType;
     use risingwave_expr::expr::AggKind;
     use risingwave_storage::memory::MemoryStateStore;
-    use risingwave_storage::table::state_table::StateTable;
+    use risingwave_storage::table::state_table::RowBasedStateTable;
     use risingwave_storage::StateStore;
 
     use crate::executor::aggregation::{generate_agg_schema, AggCall};
