@@ -47,8 +47,8 @@ pub type GlobalStreamManagerRef<S> = Arc<GlobalStreamManager<S>>;
 pub struct CreateMaterializedViewContext {
     /// New dispatchers to add from upstream actors to downstream actors.
     pub dispatchers: HashMap<ActorId, Vec<Dispatcher>>,
-    /// Upstream mview actor ids grouped by node id.
-    pub upstream_node_actors: HashMap<WorkerId, HashSet<ActorId>>,
+    /// Upstream mview actor ids grouped by worker node id.
+    pub upstream_worker_actors: HashMap<WorkerId, HashSet<ActorId>>,
     /// Upstream mview actor ids grouped by table id.
     pub table_sink_map: HashMap<TableId, Vec<ActorId>>,
     /// Dependent table ids
@@ -123,7 +123,7 @@ where
         table_fragments: &mut TableFragments,
         dependent_table_ids: &HashSet<TableId>,
         dispatchers: &mut HashMap<ActorId, Vec<Dispatcher>>,
-        upstream_node_actors: &mut HashMap<WorkerId, HashSet<ActorId>>,
+        upstream_worker_actors: &mut HashMap<WorkerId, HashSet<ActorId>>,
         locations: &ScheduledLocations,
     ) -> Result<()> {
         // The closure environment. Used to simulate recursive closure.
@@ -163,8 +163,10 @@ where
                     // 1. use table id to get upstream parallel_unit -> actor_id mapping
                     let upstream_parallel_actor_mapping =
                         &self.upstream_parallel_unit_info[&table_id];
+                    dbg!(&upstream_parallel_actor_mapping);
                     // 2. use our actor id to get parallel unit id of the chain actor
                     let parallel_unit_id = self.locations.actor_locations[&actor_id].id;
+                    dbg!(&parallel_unit_id);
                     // 3. and use chain actor's parallel unit id to get the corresponding upstream
                     // actor id
                     upstream_parallel_actor_mapping[&parallel_unit_id]
@@ -259,7 +261,7 @@ where
             tables_node_actors,
             locations,
             dispatchers,
-            upstream_node_actors,
+            upstream_node_actors: upstream_worker_actors,
         };
 
         for fragment in table_fragments.fragments.values_mut() {
@@ -291,7 +293,7 @@ where
         mut table_fragments: TableFragments,
         CreateMaterializedViewContext {
             dispatchers,
-            upstream_node_actors,
+            upstream_worker_actors,
             table_sink_map,
             dependent_table_ids,
             table_properties,
@@ -347,7 +349,7 @@ where
             &mut table_fragments,
             dependent_table_ids,
             dispatchers,
-            upstream_node_actors,
+            upstream_worker_actors,
             &locations,
         )
         .await?;
@@ -457,14 +459,14 @@ where
         // 2. all upstream actors.
         let actor_infos_to_broadcast = {
             let current = locations.actor_infos();
-            let upstream = upstream_node_actors
+            let upstream = upstream_worker_actors
                 .iter()
-                .flat_map(|(node_id, upstreams)| {
+                .flat_map(|(worker_id, upstreams)| {
                     upstreams.iter().map(|up_id| ActorInfo {
                         actor_id: *up_id,
                         host: locations
                             .worker_locations
-                            .get(node_id)
+                            .get(worker_id)
                             .unwrap()
                             .host
                             .clone(),
@@ -474,10 +476,10 @@ where
         };
 
         let actor_host_infos = locations.actor_info_map();
-        let node_actors = locations.worker_actors();
+        let worker_actors = locations.worker_actors();
 
         // Hanging channels for each worker node.
-        let mut node_hanging_channels = {
+        let mut hanging_channels = {
             // upstream_actor_id -> Vec<downstream_actor_info>
             let up_id_to_down_info = dispatchers
                 .iter()
@@ -491,7 +493,7 @@ where
                 })
                 .collect::<HashMap<_, _>>();
 
-            upstream_node_actors
+            upstream_worker_actors
                 .iter()
                 .map(|(node_id, up_ids)| {
                     (
@@ -519,13 +521,11 @@ where
         // The first stage does 2 things: broadcast actor info, and send local actor ids to
         // different WorkerNodes. Such that each WorkerNode knows the overall actor
         // allocation, but not actually builds it. We initialize all channels in this stage.
-        for (node_id, actors) in &node_actors {
-            let node = locations.worker_locations.get(node_id).unwrap();
-
-            let client = self.client_pool.get(node).await?;
+        for (worker_id, actors) in &worker_actors {
+            let worker_node = locations.worker_locations.get(worker_id).unwrap();
+            let mut client = self.client_pool.get(worker_node).await?;
 
             client
-                .to_owned()
                 .broadcast_actor_info_table(BroadcastActorInfoTableRequest {
                     info: actor_infos_to_broadcast.clone(),
                 })
@@ -539,24 +539,22 @@ where
             let request_id = Uuid::new_v4().to_string();
             tracing::debug!(request_id = request_id.as_str(), actors = ?actors, "update actors");
             client
-                .to_owned()
                 .update_actors(UpdateActorsRequest {
                     request_id,
                     actors: stream_actors.clone(),
-                    hanging_channels: node_hanging_channels.remove(node_id).unwrap_or_default(),
+                    hanging_channels: hanging_channels.remove(worker_id).unwrap_or_default(),
                 })
                 .await?;
         }
 
         // Build remaining hanging channels on compute nodes.
-        for (node_id, hanging_channels) in node_hanging_channels {
-            let node = locations.worker_locations.get(&node_id).unwrap();
+        for (worker_id, hanging_channels) in hanging_channels {
+            let worker_node = locations.worker_locations.get(&worker_id).unwrap();
+            let mut client = self.client_pool.get(worker_node).await?;
 
-            let client = self.client_pool.get(node).await?;
             let request_id = Uuid::new_v4().to_string();
 
             client
-                .to_owned()
                 .update_actors(UpdateActorsRequest {
                     request_id,
                     actors: vec![],
@@ -579,15 +577,13 @@ where
 
         // In the second stage, each [`WorkerNode`] builds local actors and connect them with
         // channels.
-        for (node_id, actors) in node_actors {
-            let node = locations.worker_locations.get(&node_id).unwrap();
-
-            let client = self.client_pool.get(node).await?;
+        for (worker_id, actors) in worker_actors {
+            let worker_node = locations.worker_locations.get(&worker_id).unwrap();
+            let mut client = self.client_pool.get(worker_node).await?;
 
             let request_id = Uuid::new_v4().to_string();
             tracing::debug!(request_id = request_id.as_str(), actors = ?actors, "build actors");
             client
-                .to_owned()
                 .build_actors(BuildActorsRequest {
                     request_id,
                     actor_id: actors,
