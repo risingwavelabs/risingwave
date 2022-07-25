@@ -28,7 +28,7 @@ pub use value::*;
 use crate::executor::aggregation::AggCall;
 use crate::executor::error::StreamExecutorResult;
 use crate::executor::managed_state::aggregation::string_agg_new::ManagedStringAggState;
-use crate::executor::PkDataTypes;
+use crate::executor::{PkDataTypes, PkIndices};
 
 mod extreme;
 
@@ -113,11 +113,13 @@ impl<S: StateStore> ManagedStateImpl<S> {
     pub async fn create_managed_state(
         agg_call: AggCall,
         row_count: Option<usize>,
+        pk_indices: PkIndices,
         pk_data_types: PkDataTypes,
         is_row_count: bool,
         key_hash_code: Option<HashCode>,
         pk: Option<&Row>,
         state_table: &RowBasedStateTable<S>,
+        state_table_col_indices: Vec<usize>,
     ) -> StreamExecutorResult<Self> {
         println!(
             "[rc] create_managed_state, agg_call: {:?}, row_count: {:?}, state table schema: {:?}",
@@ -158,8 +160,10 @@ impl<S: StateStore> ManagedStateImpl<S> {
                 println!("[rc] AggKind::StringAgg!!");
                 Ok(Self::Table(Box::new(ManagedStringAggState::new(
                     agg_call,
+                    pk_indices,
                     pk_data_types,
                     pk,
+                    state_table_col_indices,
                 )?)))
             }
             // TODO: for append-only lists, we can create `ManagedValueState` instead of

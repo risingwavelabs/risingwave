@@ -25,23 +25,26 @@ use risingwave_common::array::{Array, ArrayImpl, Row, Utf8Array};
 use risingwave_common::buffer::Bitmap;
 use risingwave_common::types::{Datum, ScalarImpl, ScalarRef};
 use risingwave_common::util::sort_util::OrderableRow;
-use risingwave_storage::table::state_table::StateTable;
+use risingwave_storage::table::state_table::RowBasedStateTable;
 use risingwave_storage::StateStore;
 
 use super::ManagedTableState;
 use crate::executor::aggregation::AggCall;
 use crate::executor::error::StreamExecutorResult;
-use crate::executor::PkDataTypes;
+use crate::executor::{PkDataTypes, PkIndices};
 
 pub struct ManagedStringAggState<S: StateStore> {
     _phantom_data: PhantomData<S>,
 
-    /// The upstream pk. Assembled as pk of relational table.
-    upstream_pk_len: usize,
+    upstream_pk_indices: PkIndices,
 
     // Primary key to look up in relational table. For value state, there is only one row.
     /// If None, the pk is empty vector (simple agg). If not None, the pk is group key (hash agg).
-    group_key: Option<Row>,
+    group_key: Option<Row>, // TODO(rc): this seems useless after we have `state_table_col_indices`
+
+    agg_col_idx: usize,
+    state_table_col_indices: Vec<usize>,
+    state_table_agg_col_idx: usize,
 
     dirty: bool,
     cache: BTreeSet<OrderableRow>,
@@ -50,47 +53,31 @@ pub struct ManagedStringAggState<S: StateStore> {
 impl<S: StateStore> ManagedStringAggState<S> {
     pub fn new(
         agg_call: AggCall,
+        pk_indices: PkIndices,
         pk_data_types: PkDataTypes,
         group_key: Option<&Row>,
+        state_table_col_indices: Vec<usize>,
     ) -> StreamExecutorResult<Self> {
         println!(
-            "[rc] new, pk_data_types: {:?}, group_key: {:?}",
-            pk_data_types, group_key
+            "[rc] new, pk_indices: {:?}, pk_data_types: {:?}, group_key: {:?}",
+            pk_indices, pk_data_types, group_key
         );
+        let agg_col_idx = agg_call.args.val_indices()[0];
+        let state_table_agg_col_idx = state_table_col_indices
+            .iter()
+            .find_position(|idx| **idx == agg_col_idx)
+            .map(|(pos, _)| pos)
+            .expect("the column to be aggregate must appear in the state table");
         Ok(Self {
             _phantom_data: PhantomData,
-            upstream_pk_len: pk_data_types.len(),
+            upstream_pk_indices: pk_indices,
             group_key: group_key.cloned(),
+            agg_col_idx,
+            state_table_col_indices,
+            state_table_agg_col_idx,
             dirty: false,
             cache: BTreeSet::new(),
         })
-    }
-
-    fn make_state_row(&self, value: Option<String>, pk_values: Vec<Datum>) -> Row {
-        let mut row_vals = if let Some(group_key) = self.group_key.as_ref() {
-            group_key.0.to_vec()
-        } else {
-            vec![]
-        };
-        row_vals.extend(pk_values);
-        row_vals.push(value.map(Into::into));
-        Row::new(row_vals)
-    }
-
-    fn decompose_state_row(&self, row: &Row) -> (Option<String>, Vec<Datum>) {
-        let n_group_key_cols = if let Some(group_key) = self.group_key.as_ref() {
-            group_key.size()
-        } else {
-            0
-        };
-        let value = row[row.size() - 1].clone().map(ScalarImpl::into_utf8);
-        let pk = row
-            .values()
-            .skip(n_group_key_cols)
-            .take(self.upstream_pk_len)
-            .cloned()
-            .collect();
-        (value, pk)
     }
 }
 
@@ -100,43 +87,33 @@ impl<S: StateStore> ManagedTableState<S> for ManagedStringAggState<S> {
         &mut self,
         ops: Ops<'_>,
         visibility: Option<&Bitmap>,
-        data: &[&ArrayImpl],
-        _epoch: u64,
-        state_table: &mut StateTable<S>,
+        chunk_cols: &[&ArrayImpl],
+        epoch: u64,
+        state_table: &mut RowBasedStateTable<S>,
     ) -> StreamExecutorResult<()> {
-        debug_assert!(super::verify_batch(ops, visibility, data));
+        debug_assert!(super::verify_batch(ops, visibility, chunk_cols));
         println!(
-            "[rc] ManagedStringAggState::apply_batch, ops: {:?}, visibility: {:?}, data: {:?}",
-            ops, visibility, data
+            "[rc] ManagedStringAggState::apply_chunk, ops: {:?}, visibility: {:?}, chunk_cols: {:?}",
+            ops, visibility, chunk_cols
         );
 
-        let agg_column: &Utf8Array = data[0].into();
-        let pk_columns = (0..self.upstream_pk_len)
-            .map(|idx| data[idx + 1])
-            .collect_vec();
-
-        for (id, (op, value)) in ops.iter().zip_eq(agg_column.iter()).enumerate() {
-            let visible = visibility.map(|x| x.is_set(id).unwrap()).unwrap_or(true);
+        for (i, op) in ops.iter().enumerate() {
+            let visible = visibility.map(|x| x.is_set(i).unwrap()).unwrap_or(true);
             if !visible {
                 continue;
             }
             self.dirty = true;
 
-            let value = value.map(|x| x.to_owned_scalar().into());
-            let pk_values: Vec<Datum> = pk_columns.iter().map(|col| col.datum_at(id)).collect();
-
-            println!(
-                "[rc] apply_batch_inner, id: {}, op: {:?}, value: {:?}, pk_values: {:?}",
-                id, op, value, pk_values
+            let state_row = Row::new(
+                self.state_table_col_indices
+                    .iter()
+                    .map(|col_idx| chunk_cols[*col_idx].datum_at(i))
+                    .collect(),
             );
-
-            let state_row = self.make_state_row(value, pk_values);
             println!("[rc] state_row: {:?}", state_row);
-
             println!(
-                "[rc] state table schema: {:?}, pk indices: {:?}",
-                state_table.storage_table().schema(),
-                state_table.pk_indices()
+                "[rc] state table schema: {:?}",
+                state_table.storage_table().schema()
             );
 
             match op {
@@ -155,7 +132,7 @@ impl<S: StateStore> ManagedTableState<S> for ManagedStringAggState<S> {
     async fn get_output(
         &mut self,
         epoch: u64,
-        state_table: &StateTable<S>,
+        state_table: &RowBasedStateTable<S>,
     ) -> StreamExecutorResult<Datum> {
         let all_data_iter = if let Some(group_key) = self.group_key.as_ref() {
             state_table.iter_with_pk_prefix(group_key, epoch).await?
@@ -167,10 +144,12 @@ impl<S: StateStore> ManagedTableState<S> for ManagedStringAggState<S> {
         let mut agg_result = String::new();
 
         #[for_await]
-        for row in all_data_iter {
-            let row = row?;
-            let (value, pk_values) = self.decompose_state_row(&row);
-            println!("[rc] value: {:?}, pk_values: {:?}", value, pk_values);
+        for state_row in all_data_iter {
+            let state_row = state_row?;
+            let value = state_row[self.state_table_agg_col_idx]
+                .clone()
+                .map(ScalarImpl::into_utf8);
+            println!("[rc] state_row: {:?}, value: {:?}", state_row, value);
             if let Some(s) = value {
                 agg_result.push_str(&s);
             }
@@ -183,7 +162,7 @@ impl<S: StateStore> ManagedTableState<S> for ManagedStringAggState<S> {
         self.dirty
     }
 
-    fn flush(&mut self, state_table: &mut StateTable<S>) -> StreamExecutorResult<()> {
+    fn flush(&mut self, state_table: &mut RowBasedStateTable<S>) -> StreamExecutorResult<()> {
         println!("[rc] ManagedStringAggState::flush");
         if self.dirty {
             // TODO(rc): do more things later

@@ -34,7 +34,7 @@ impl ExecutorBuilder for GlobalSimpleAggExecutorBuilder {
             .iter()
             .map(|agg_call| build_agg_call_from_prost(node.is_append_only, agg_call))
             .try_collect()?;
-        let column_mappings: Vec<Vec<usize>> = node
+        let state_table_col_mappings: Vec<Vec<usize>> = node
             .get_column_mappings()
             .iter()
             .map(|mapping| mapping.indices.iter().map(|idx| *idx as usize).collect())
@@ -45,10 +45,10 @@ impl ExecutorBuilder for GlobalSimpleAggExecutorBuilder {
         Ok(GlobalSimpleAggExecutor::new(
             params.input.remove(0),
             agg_calls,
-            column_mappings,
             params.pk_indices,
             params.executor_id,
             state_tables,
+            state_table_col_mappings,
         )?
         .boxed())
     }
