@@ -23,6 +23,7 @@ const DEFAULT_MAX_BYTES_FOR_LEVEL_BASE: u64 = 1024 * 1024 * 1024; // 1GB
 // decrease this configure when the generation of checkpoint barrier is not frequent.
 const DEFAULT_TIER_COMPACT_TRIGGER_NUMBER: u64 = 16;
 const DEFAULT_TARGET_FILE_SIZE_BASE: u64 = 32 * 1024 * 1024; // 32MB
+const DEFAULT_MAX_SUB_COMPACTION: u32 = 4;
 const MAX_LEVEL: u64 = 6;
 
 pub struct CompactionConfigBuilder {
@@ -57,6 +58,7 @@ impl CompactionConfigBuilder {
                 compaction_filter_mask: (CompactionFilterFlag::STATE_CLEAN
                     | CompactionFilterFlag::TTL)
                     .into(),
+                max_sub_compaction: DEFAULT_MAX_SUB_COMPACTION,
             },
         }
     }
@@ -100,4 +102,5 @@ builder_field! {
     compaction_mode: i32,
     compression_algorithm: Vec<String>,
     compaction_filter_mask: u32,
+    max_sub_compaction: u32,
 }

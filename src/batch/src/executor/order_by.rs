@@ -52,7 +52,7 @@ pub struct OrderByExecutor {
 
 #[expect(clippy::too_many_arguments)]
 impl OrderByExecutor {
-    fn new(
+    pub fn new(
         child: BoxedExecutor,
         sorted_indices: Vec<Vec<usize>>,
         chunks: Vec<DataChunk>,
