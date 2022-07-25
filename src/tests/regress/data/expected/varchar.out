@@ -1,7 +1,7 @@
 --
 -- VARCHAR
 --
-CREATE TABLE VARCHAR_TBL(f1 varchar(1));
+CREATE TABLE VARCHAR_TBL(f1 varchar);
 INSERT INTO VARCHAR_TBL (f1) VALUES ('a');
 INSERT INTO VARCHAR_TBL (f1) VALUES ('A');
 -- any of the following three input formats are acceptable
@@ -12,36 +12,39 @@ INSERT INTO VARCHAR_TBL (f1) VALUES ('3');
 INSERT INTO VARCHAR_TBL (f1) VALUES ('');
 -- try varchar's of greater than 1 length
 INSERT INTO VARCHAR_TBL (f1) VALUES ('cd');
-ERROR:  value too long for type character varying(1)
 INSERT INTO VARCHAR_TBL (f1) VALUES ('c     ');
-SELECT * FROM VARCHAR_TBL;
- f1 
+SELECT * FROM VARCHAR_TBL ORDER BY f1;
+   f1   
 ----
- a
- A
+ 
  1
  2
  3
+ A
+ a
+ c     
+ cd
+(8 rows)
+
+SELECT c.*
+   FROM VARCHAR_TBL c
+   WHERE c.f1 <> 'a'
+   ORDER BY c.f1;
+   f1   
+----
  
- c
+ 1
+ 2
+ 3
+ A
+ c     
+ cd
 (7 rows)
 
 SELECT c.*
    FROM VARCHAR_TBL c
-   WHERE c.f1 <> 'a';
- f1 
-----
- A
- 1
- 2
- 3
- 
- c
-(6 rows)
-
-SELECT c.*
-   FROM VARCHAR_TBL c
-   WHERE c.f1 = 'a';
+   WHERE c.f1 = 'a'
+   ORDER BY c.f1;
  f1 
 ----
  a
@@ -49,63 +52,70 @@ SELECT c.*
 
 SELECT c.*
    FROM VARCHAR_TBL c
-   WHERE c.f1 < 'a';
+   WHERE c.f1 < 'a'
+   ORDER BY c.f1;
  f1 
 ----
- A
+ 
  1
  2
  3
- 
+ A
 (5 rows)
 
 SELECT c.*
    FROM VARCHAR_TBL c
-   WHERE c.f1 <= 'a';
+   WHERE c.f1 <= 'a'
+   ORDER BY c.f1;
  f1 
 ----
- a
- A
+ 
  1
  2
  3
- 
+ A
+ a
 (6 rows)
 
 SELECT c.*
    FROM VARCHAR_TBL c
-   WHERE c.f1 > 'a';
- f1 
+   WHERE c.f1 > 'a'
+   ORDER BY c.f1;
+   f1   
 ----
- c
-(1 row)
+ c     
+ cd
+(2 rows)
 
 SELECT c.*
    FROM VARCHAR_TBL c
-   WHERE c.f1 >= 'a';
- f1 
+   WHERE c.f1 >= 'a'
+   ORDER BY c.f1;
+   f1   
 ----
  a
- c
-(2 rows)
+ c     
+ cd
+(3 rows)
 
 DROP TABLE VARCHAR_TBL;
 --
 -- Now test longer arrays of char
 --
-CREATE TABLE VARCHAR_TBL(f1 varchar(4));
+CREATE TABLE VARCHAR_TBL(f1 varchar);
 INSERT INTO VARCHAR_TBL (f1) VALUES ('a');
 INSERT INTO VARCHAR_TBL (f1) VALUES ('ab');
 INSERT INTO VARCHAR_TBL (f1) VALUES ('abcd');
 INSERT INTO VARCHAR_TBL (f1) VALUES ('abcde');
-ERROR:  value too long for type character varying(4)
 INSERT INTO VARCHAR_TBL (f1) VALUES ('abcd    ');
-SELECT * FROM VARCHAR_TBL;
-  f1  
+SELECT * FROM VARCHAR_TBL ORDER BY f1;
+    f1    
 ------
  a
  ab
  abcd
- abcd
-(4 rows)
+ abcd    
+ abcde
+(5 rows)
 
+DROP TABLE VARCHAR_TBL;
