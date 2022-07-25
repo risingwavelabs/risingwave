@@ -273,6 +273,11 @@ impl SstableMeta {
     }
 }
 
+#[derive(Default)]
+pub struct SstableIteratorReadOptions {
+    pub prefetch: bool,
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

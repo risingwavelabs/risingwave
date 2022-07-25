@@ -2,7 +2,7 @@
 -- VARCHAR
 --
 
-CREATE TABLE VARCHAR_TBL(f1 varchar(1));
+CREATE TABLE VARCHAR_TBL(f1 varchar);
 
 INSERT INTO VARCHAR_TBL (f1) VALUES ('a');
 
@@ -23,31 +23,37 @@ INSERT INTO VARCHAR_TBL (f1) VALUES ('cd');
 INSERT INTO VARCHAR_TBL (f1) VALUES ('c     ');
 
 
-SELECT * FROM VARCHAR_TBL;
+SELECT * FROM VARCHAR_TBL ORDER BY f1;
 
 SELECT c.*
    FROM VARCHAR_TBL c
-   WHERE c.f1 <> 'a';
+   WHERE c.f1 <> 'a'
+   ORDER BY c.f1;
 
 SELECT c.*
    FROM VARCHAR_TBL c
-   WHERE c.f1 = 'a';
+   WHERE c.f1 = 'a'
+   ORDER BY c.f1;
 
 SELECT c.*
    FROM VARCHAR_TBL c
-   WHERE c.f1 < 'a';
+   WHERE c.f1 < 'a'
+   ORDER BY c.f1;
 
 SELECT c.*
    FROM VARCHAR_TBL c
-   WHERE c.f1 <= 'a';
+   WHERE c.f1 <= 'a'
+   ORDER BY c.f1;
 
 SELECT c.*
    FROM VARCHAR_TBL c
-   WHERE c.f1 > 'a';
+   WHERE c.f1 > 'a'
+   ORDER BY c.f1;
 
 SELECT c.*
    FROM VARCHAR_TBL c
-   WHERE c.f1 >= 'a';
+   WHERE c.f1 >= 'a'
+   ORDER BY c.f1;
 
 DROP TABLE VARCHAR_TBL;
 
@@ -55,7 +61,7 @@ DROP TABLE VARCHAR_TBL;
 -- Now test longer arrays of char
 --
 
-CREATE TABLE VARCHAR_TBL(f1 varchar(4));
+CREATE TABLE VARCHAR_TBL(f1 varchar);
 
 INSERT INTO VARCHAR_TBL (f1) VALUES ('a');
 INSERT INTO VARCHAR_TBL (f1) VALUES ('ab');
@@ -63,4 +69,6 @@ INSERT INTO VARCHAR_TBL (f1) VALUES ('abcd');
 INSERT INTO VARCHAR_TBL (f1) VALUES ('abcde');
 INSERT INTO VARCHAR_TBL (f1) VALUES ('abcd    ');
 
-SELECT * FROM VARCHAR_TBL;
+SELECT * FROM VARCHAR_TBL ORDER BY f1;
+
+DROP TABLE VARCHAR_TBL;
