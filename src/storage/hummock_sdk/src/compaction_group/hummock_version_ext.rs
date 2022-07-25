@@ -18,7 +18,6 @@ use itertools::Itertools;
 use risingwave_pb::hummock::hummock_version::Levels;
 use risingwave_pb::hummock::{HummockVersion, HummockVersionDelta, Level, LevelType, SstableInfo};
 
-
 use crate::prost_key_range::KeyRangeExt;
 use crate::CompactionGroupId;
 

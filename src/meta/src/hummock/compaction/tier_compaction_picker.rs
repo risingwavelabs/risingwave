@@ -20,7 +20,6 @@ use risingwave_pb::hummock::{
 };
 
 use crate::hummock::compaction::min_overlap_compaction_picker::MinOverlappingPicker;
-
 use crate::hummock::compaction::overlap_strategy::OverlapStrategy;
 use crate::hummock::compaction::{CompactionInput, CompactionPicker};
 use crate::hummock::level_handler::LevelHandler;

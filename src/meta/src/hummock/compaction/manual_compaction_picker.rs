@@ -18,7 +18,6 @@ use itertools::Itertools;
 use risingwave_pb::hummock::hummock_version::Levels;
 use risingwave_pb::hummock::{InputLevel, LevelType, SstableInfo};
 
-
 use super::overlap_strategy::OverlapInfo;
 use super::CompactionPicker;
 use crate::hummock::compaction::overlap_strategy::{OverlapStrategy, RangeOverlapInfo};
