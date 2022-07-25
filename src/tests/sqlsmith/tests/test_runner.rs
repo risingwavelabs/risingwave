@@ -35,7 +35,7 @@ async fn handle(session: Arc<SessionImpl>, stmt: Statement, sql: String) {
         println!("Panic on SQL:\n{}\nReason:\n{}", sql_copy, e);
     }));
 
-    handler::handle(session.clone(), stmt, &sql)
+    handler::handle(session.clone(), stmt, &sql,false)
         .await
         .unwrap_or_else(|e| panic!("Failed to handle SQL:\n{}\nReason:\n{}", sql, e));
 }
