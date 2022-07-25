@@ -1052,8 +1052,14 @@ impl Compactor {
 pub fn estimate_memory_use_for_compaction(task: &CompactTask) -> u64 {
     let mut total_memory_size = 0;
     for level in &task.input_ssts {
-        if let Some(table) = level.table_infos.first() {
-            total_memory_size += table.file_size;
+        if level.level_type == LevelType::Nonoverlapping {
+            if let Some(table) = level.table_infos.first() {
+                total_memory_size += table.file_size;
+            }
+        } else {
+            for table in &level.table_infos {
+                total_memory_size += table.file_size;
+            }
         }
     }
     total_memory_size * task.splits.len() as u64
