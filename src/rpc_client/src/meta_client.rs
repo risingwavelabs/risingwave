@@ -90,10 +90,16 @@ impl MetaClient {
     }
 
     /// Register the current node to the cluster and set the corresponding worker id.
-    pub async fn register(&mut self, addr: &HostAddr, worker_type: WorkerType) -> Result<u32> {
+    pub async fn register(
+        &mut self,
+        worker_type: WorkerType,
+        addr: &HostAddr,
+        worker_node_parallelism: usize,
+    ) -> Result<u32> {
         let request = AddWorkerNodeRequest {
             worker_type: worker_type as i32,
             host: Some(addr.to_protobuf()),
+            worker_node_parallelism: worker_node_parallelism as u64,
         };
         let resp = self.inner.add_worker_node(request).await?;
         let worker_node = resp.node.expect("AddWorkerNodeResponse::node is empty");
