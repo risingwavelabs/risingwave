@@ -17,6 +17,7 @@ use memcomparable::from_slice;
 use risingwave_common::array::Row;
 use risingwave_common::catalog::ColumnId;
 use risingwave_common::error::Result;
+use risingwave_common::types::{VirtualNode, VIRTUAL_NODE_SIZE};
 use risingwave_common::util::ordered::{OrderedRowSerializer, SENTINEL_CELL_ID};
 use risingwave_common::util::value_encoding::serialize_cell;
 
@@ -109,4 +110,10 @@ pub fn deserialize_column_id(bytes: &[u8]) -> Result<ColumnId> {
 
 pub fn serialize_pk_and_column_id(pk_buf: &[u8], col_id: &ColumnId) -> Result<Vec<u8>> {
     Ok([pk_buf, serialize_column_id(col_id).as_slice()].concat())
+}
+
+pub fn parse_raw_key_to_vnode_and_key(raw_key: &[u8]) -> (VirtualNode, &[u8]) {
+    let (vnode_bytes, key_bytes) = raw_key.split_at(VIRTUAL_NODE_SIZE);
+    let vnode = VirtualNode::from_be_bytes(vnode_bytes.try_into().unwrap());
+    (vnode, key_bytes)
 }

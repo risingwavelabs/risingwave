@@ -308,7 +308,7 @@ mod tests {
     use crate::hummock::iterator::{HummockIterator, ReadOptions};
     use crate::hummock::test_utils::{default_builder_opt_for_test, gen_test_sstable_data};
     use crate::hummock::value::HummockValue;
-    use crate::hummock::{CachePolicy, SSTableIterator, Sstable};
+    use crate::hummock::{CachePolicy, Sstable, SstableIterator};
     use crate::monitor::StoreLocalStatistic;
 
     #[tokio::test]
@@ -340,7 +340,7 @@ mod tests {
         );
         assert!(!holder.value().blocks.is_empty());
         let mut iter =
-            SSTableIterator::new(holder, sstable_store, Arc::new(ReadOptions::default()));
+            SstableIterator::new(holder, sstable_store, Arc::new(ReadOptions::default()));
         iter.rewind().await.unwrap();
         for i in 0..100 {
             let key = iter.key();
