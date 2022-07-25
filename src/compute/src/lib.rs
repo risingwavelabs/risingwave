@@ -98,12 +98,8 @@ pub fn start(opts: ComputeNodeOpts) -> Pin<Box<dyn Future<Output = ()> + Send>> 
             .unwrap();
         tracing::info!("Client address is {}", client_address);
 
-        let (join_handle_vec, _shutdown_send) = compute_node_serve(
-            listen_address,
-            client_address,
-            opts,
-        )
-        .await;
+        let (join_handle_vec, _shutdown_send) =
+            compute_node_serve(listen_address, client_address, opts).await;
 
         for join_handle in join_handle_vec {
             join_handle.await.unwrap();
