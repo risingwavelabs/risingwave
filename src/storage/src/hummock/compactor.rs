@@ -23,6 +23,7 @@ use dyn_clone::DynClone;
 use futures::future::{try_join_all, BoxFuture};
 use futures::{stream, FutureExt, StreamExt, TryFutureExt};
 use itertools::Itertools;
+use parking_lot::RwLock;
 use risingwave_common::config::constant::hummock::{CompactionFilterFlag, TABLE_OPTION_DUMMY_TTL};
 use risingwave_common::config::StorageConfig;
 use risingwave_hummock_sdk::compact::compact_task_to_string;
@@ -31,8 +32,11 @@ use risingwave_hummock_sdk::key::{
     extract_table_id_and_epoch, get_epoch, get_table_id, Epoch, FullKey,
 };
 use risingwave_hummock_sdk::key_range::KeyRange;
-use risingwave_hummock_sdk::{CompactionGroupId, HummockSSTableId, VersionedComparator};
-use risingwave_pb::hummock::{CompactTask, SstableInfo, SubscribeCompactTasksResponse, VacuumTask};
+use risingwave_hummock_sdk::slice_transform::SliceTransformImpl;
+use risingwave_hummock_sdk::{CompactionGroupId, HummockSstableId, VersionedComparator};
+use risingwave_pb::hummock::{
+    CompactTask, LevelType, SstableInfo, SubscribeCompactTasksResponse, VacuumTask,
+};
 use risingwave_rpc_client::HummockMetaClient;
 use tokio::sync::oneshot::Sender;
 use tokio::task::JoinHandle;
@@ -40,8 +44,8 @@ use tokio::task::JoinHandle;
 use super::iterator::{BoxedForwardHummockIterator, ConcatIterator, MergeIterator};
 use super::multi_builder::CapacitySplitTableBuilder;
 use super::{
-    CompressionAlgorithm, HummockResult, SSTableBuilder, SSTableBuilderOptions, SSTableIterator,
-    SSTableIteratorType, Sstable,
+    CompressionAlgorithm, HummockResult, Sstable, SstableBuilder, SstableBuilderOptions,
+    SstableIterator, SstableIteratorType,
 };
 use crate::hummock::compaction_executor::CompactionExecutor;
 use crate::hummock::iterator::ReadOptions;
@@ -56,7 +60,7 @@ use crate::hummock::{CachePolicy, HummockError};
 use crate::monitor::{StateStoreMetrics, StoreLocalStatistic};
 
 pub type SstableIdGenerator =
-    Arc<dyn Fn() -> BoxFuture<'static, HummockResult<HummockSSTableId>> + Send + Sync>;
+    Arc<dyn Fn() -> BoxFuture<'static, HummockResult<HummockSstableId>> + Send + Sync>;
 
 pub fn get_remote_sstable_id_generator(
     meta_client: Arc<dyn HummockMetaClient>,
@@ -82,7 +86,7 @@ pub struct CompactorContext {
     /// The meta client.
     pub hummock_meta_client: Arc<dyn HummockMetaClient>,
 
-    /// SSTable store that manages the sstables.
+    /// Sstable store that manages the sstables.
     pub sstable_store: SstableStoreRef,
 
     /// Statistics.
@@ -94,6 +98,8 @@ pub struct CompactorContext {
     pub sstable_id_generator: SstableIdGenerator,
 
     pub compaction_executor: Option<Arc<CompactionExecutor>>,
+
+    pub table_id_to_slice_transform: Arc<RwLock<HashMap<u32, SliceTransformImpl>>>,
 }
 
 trait CompactionFilter: Send + DynClone {
@@ -220,7 +226,7 @@ pub struct Compactor {
     compact_task: CompactTask,
 }
 
-pub type CompactOutput = (usize, Vec<(Sstable, u64, Vec<u32>)>);
+pub type CompactOutput = (usize, Vec<(Sstable, Vec<u32>)>);
 
 impl Compactor {
     /// Create a new compactor.
@@ -235,7 +241,7 @@ impl Compactor {
     pub async fn compact_shared_buffer_by_compaction_group(
         context: Arc<CompactorContext>,
         payload: UploadTaskPayload,
-    ) -> HummockResult<Vec<(CompactionGroupId, Sstable, u64, Vec<u32>)>> {
+    ) -> HummockResult<Vec<(CompactionGroupId, Sstable, Vec<u32>)>> {
         let mut grouped_payload: HashMap<CompactionGroupId, UploadTaskPayload> = HashMap::new();
         for uncommitted_list in payload {
             let mut next_inner = HashSet::new();
@@ -263,7 +269,7 @@ impl Compactor {
                     move |results| {
                         results
                             .into_iter()
-                            .map(move |result| (id_copy, result.0, result.1, result.2))
+                            .map(move |result| (id_copy, result.0, result.1))
                             .collect_vec()
                     },
                 ),
@@ -282,7 +288,7 @@ impl Compactor {
     pub async fn compact_shared_buffer(
         context: Arc<CompactorContext>,
         payload: UploadTaskPayload,
-    ) -> HummockResult<Vec<(Sstable, u64, Vec<u32>)>> {
+    ) -> HummockResult<Vec<(Sstable, Vec<u32>)>> {
         let mut start_user_keys = payload
             .iter()
             .flat_map(|data_list| data_list.iter().map(UncommittedData::start_user_key))
@@ -379,7 +385,7 @@ impl Compactor {
             let mut level0 = Vec::with_capacity(parallelism);
 
             for (_, sst) in output_ssts {
-                for (table, _, _) in &sst {
+                for (table, _) in &sst {
                     compactor
                         .context
                         .stats
@@ -568,7 +574,7 @@ impl Compactor {
             .reserve(self.compact_task.splits.len());
         let mut compaction_write_bytes = 0;
         for (_, ssts) in output_ssts {
-            for (sst, unit_id, table_ids) in ssts {
+            for (sst, table_ids) in ssts {
                 let sst_info = SstableInfo {
                     id: sst.id,
                     key_range: Some(risingwave_pb::hummock::KeyRange {
@@ -578,7 +584,6 @@ impl Compactor {
                     }),
                     file_size: sst.meta.estimated_size as u64,
                     table_ids,
-                    unit_id,
                 };
                 compaction_write_bytes += sst_info.file_size;
                 self.compact_task.sorted_output_ssts.push(sst_info);
@@ -647,7 +652,7 @@ impl Compactor {
                 let timer = Instant::now();
                 let table_id = (self.context.sstable_id_generator)().await?;
                 let cost = (timer.elapsed().as_secs_f64() * 1000000.0).round() as u64;
-                let mut options: SSTableBuilderOptions = self.context.options.as_ref().into();
+                let mut options: SstableBuilderOptions = self.context.options.as_ref().into();
 
                 options.capacity = target_file_size;
                 options.compression_algorithm = match self.compact_task.compression_algorithm {
@@ -655,7 +660,7 @@ impl Compactor {
                     1 => CompressionAlgorithm::Lz4,
                     _ => CompressionAlgorithm::Zstd,
                 };
-                let builder = SSTableBuilder::new(table_id, options);
+                let builder = SstableBuilder::new(table_id, options);
                 get_id_time.fetch_add(cost, Ordering::Relaxed);
                 Ok(builder)
             },
@@ -691,12 +696,11 @@ impl Compactor {
             table_ids,
             upload_join_handle,
             data_len,
-            unit_id,
         } in sealed_builders
         {
             let sst = Sstable::new(table_id, meta);
             let len = data_len;
-            ssts.push((sst, unit_id, table_ids));
+            ssts.push((sst, table_ids));
             upload_join_handles.push(upload_join_handle);
 
             if self.context.is_share_buffer_compact {
@@ -771,7 +775,8 @@ impl Compactor {
             // 1024) as f64;     read_statistics.cnt += 1;
             // }
 
-            if can_concat(&level.table_infos.iter().collect_vec()) {
+            if level.level_type == LevelType::Nonoverlapping as i32 {
+                debug_assert!(can_concat(&level.table_infos.iter().collect_vec()));
                 table_iters.push(Box::new(ConcatIterator::new(
                     level.table_infos.clone(),
                     self.context.sstable_store.clone(),
@@ -784,7 +789,7 @@ impl Compactor {
                         .sstable_store
                         .load_table(table_info.id, true, &mut stats)
                         .await?;
-                    table_iters.push(Box::new(SSTableIterator::create(
+                    table_iters.push(Box::new(SstableIterator::create(
                         table,
                         self.context.sstable_store.clone(),
                         read_options.clone(),
@@ -831,6 +836,7 @@ impl Compactor {
         sstable_store: SstableStoreRef,
         stats: Arc<StateStoreMetrics>,
         compaction_executor: Option<Arc<CompactionExecutor>>,
+        table_id_to_slice_transform: Arc<RwLock<HashMap<u32, SliceTransformImpl>>>,
     ) -> (JoinHandle<()>, Sender<()>) {
         let compactor_context = Arc::new(CompactorContext {
             options,
@@ -840,6 +846,7 @@ impl Compactor {
             is_share_buffer_compact: false,
             sstable_id_generator: get_remote_sstable_id_generator(hummock_meta_client.clone()),
             compaction_executor,
+            table_id_to_slice_transform,
         });
         let (shutdown_tx, mut shutdown_rx) = tokio::sync::oneshot::channel();
         let stream_retry_interval = Duration::from_secs(60);
@@ -938,7 +945,7 @@ impl Compactor {
     ) -> HummockResult<()>
     where
         B: Clone + Fn() -> F,
-        F: Future<Output = HummockResult<SSTableBuilder>>,
+        F: Future<Output = HummockResult<SstableBuilder>>,
     {
         if !kr.left.is_empty() {
             iter.seek(&kr.left).await?;

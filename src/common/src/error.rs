@@ -72,7 +72,7 @@ impl Display for TrackingIssue {
                 "Tracking issue: https://github.com/singularity-data/risingwave/issues/{}",
                 id
             ),
-            None => write!(f, "No tracking issue"),
+            None => write!(f, "No tracking issue yet. Feel free to submit a feature request at https://github.com/singularity-data/risingwave/issues/new?labels=type%2Ffeature&template=feature_request.md"),
         }
     }
 }
@@ -147,6 +147,9 @@ pub enum ErrorCode {
     #[error("Sink error: {0}")]
     SinkError(BoxedError),
 
+    #[error("Permission denied: {0}")]
+    PermissionDenied(String),
+
     /// This error occurs when the meta node receives heartbeat from a previous removed worker
     /// node. Currently we don't support re-register, and the worker node need a full restart.
     #[error("Unknown worker")]
@@ -187,6 +190,7 @@ impl From<RwError> for tonic::Status {
         match &*err.inner {
             ErrorCode::OK => tonic::Status::ok(err.to_string()),
             ErrorCode::ExprError(e) => tonic::Status::invalid_argument(e.to_string()),
+            ErrorCode::PermissionDenied(e) => tonic::Status::permission_denied(e),
             _ => {
                 let bytes = {
                     let status = err.to_status();
@@ -344,6 +348,7 @@ impl ErrorCode {
             ErrorCode::SinkError(_) => 31,
             ErrorCode::RpcError(_) => 32,
             ErrorCode::BatchError(_) => 33,
+            ErrorCode::PermissionDenied(_) => 34,
             ErrorCode::UnknownError(_) => 101,
         }
     }
@@ -380,6 +385,7 @@ impl From<tonic::Status> for RwError {
             Code::InvalidArgument => {
                 ErrorCode::InvalidParameterValue(err.message().to_string()).into()
             }
+            Code::PermissionDenied => ErrorCode::PermissionDenied(err.message().to_string()).into(),
             _ => ErrorCode::RpcError(err.into()).into(),
         }
     }

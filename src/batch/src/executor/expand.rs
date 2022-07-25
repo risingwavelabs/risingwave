@@ -53,8 +53,11 @@ impl ExpandExecutor {
 
         #[for_await]
         for data_chunk in self.child.execute() {
-            // TODO: handle dummy chunk.
             let data_chunk: DataChunk = data_chunk?.compact()?;
+            assert!(
+                data_chunk.dimension() > 0,
+                "The input data chunk of expand can't be dummy chunk."
+            );
             let cardinality = data_chunk.cardinality();
             let (columns, vis) = data_chunk.into_parts();
             assert_eq!(vis, Vis::Compact(cardinality));

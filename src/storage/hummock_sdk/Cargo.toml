@@ -6,6 +6,7 @@ edition = "2021"
 [dependencies]
 bytes = "1"
 hex = "0.4"
+itertools = "0.10"
 log = "0.4"
 madsim = "=0.2.0-alpha.4"
 prost = "0.10"

@@ -38,6 +38,7 @@ pub struct TableFunction {
 pub enum TableFunctionType {
     Generate,
     Unnest,
+    RegexpMatches,
 }
 
 impl TableFunctionType {
@@ -45,6 +46,7 @@ impl TableFunctionType {
         match self {
             TableFunctionType::Generate => Type::Generate,
             TableFunctionType::Unnest => Type::Unnest,
+            TableFunctionType::RegexpMatches => Type::RegexpMatches,
         }
     }
 }
@@ -54,6 +56,7 @@ impl TableFunctionType {
         match self {
             TableFunctionType::Generate => "generate_series",
             TableFunctionType::Unnest => "unnest",
+            TableFunctionType::RegexpMatches => "regexp_matches",
         }
     }
 }
@@ -66,6 +69,8 @@ impl FromStr for TableFunctionType {
             Ok(TableFunctionType::Generate)
         } else if s.eq_ignore_ascii_case("unnest") {
             Ok(TableFunctionType::Unnest)
+        } else if s.eq_ignore_ascii_case("regexp_matches") {
+            Ok(TableFunctionType::RegexpMatches)
         } else {
             Err(())
         }
@@ -138,6 +143,13 @@ impl TableFunction {
                     .into())
                 }
             }
+            TableFunctionType::RegexpMatches => Ok(TableFunction {
+                args,
+                return_type: DataType::List {
+                    datatype: Box::new(DataType::Varchar),
+                },
+                function_type: TableFunctionType::RegexpMatches,
+            }),
         }
     }
 
