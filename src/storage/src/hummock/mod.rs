@@ -69,6 +69,7 @@ use crate::hummock::local_version_manager::LocalVersionManager;
 use crate::hummock::sstable::SstableIteratorReadOptions;
 use crate::hummock::sstable_store::{SstableStoreRef, TableHolder};
 use crate::monitor::StoreLocalStatistic;
+use crate::store::ReadOptions;
 
 /// Hummock is the state store backend.
 #[derive(Clone)]

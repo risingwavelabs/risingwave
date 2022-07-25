@@ -18,6 +18,7 @@ use itertools::Itertools;
 use risingwave_pb::hummock::hummock_version::Levels;
 use risingwave_pb::hummock::{HummockVersion, HummockVersionDelta, Level, LevelType, SstableInfo};
 
+
 use crate::prost_key_range::KeyRangeExt;
 use crate::CompactionGroupId;
 
@@ -46,6 +47,7 @@ pub trait HummockVersionExt {
         f: F,
     );
     fn level_iter<F: FnMut(&Level) -> bool>(&self, compaction_group_id: CompactionGroupId, f: F);
+
     fn get_sst_ids(&self) -> Vec<u64>;
     fn apply_compact_ssts(
         &mut self,

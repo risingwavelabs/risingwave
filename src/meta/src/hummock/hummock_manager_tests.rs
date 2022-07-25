@@ -869,7 +869,6 @@ async fn test_trigger_manual_compaction() {
     }
 
     let _ = add_test_tables(&hummock_manager, context_id).await;
-
     {
         // to check compactor send task fail
         drop(receiver);

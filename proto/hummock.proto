@@ -47,6 +47,12 @@ message InputLevel {
   repeated SstableInfo table_infos = 3;
 }
 
+message InputLevel {
+  uint32 level_idx = 1;
+  LevelType level_type = 2;
+  repeated SstableInfo table_infos = 3;
+}
+
 message LevelDelta {
   uint32 level_idx = 1;
   uint64 l0_sub_level_id = 2;

@@ -20,6 +20,7 @@ use risingwave_pb::hummock::{
 };
 
 use crate::hummock::compaction::min_overlap_compaction_picker::MinOverlappingPicker;
+
 use crate::hummock::compaction::overlap_strategy::OverlapStrategy;
 use crate::hummock::compaction::{CompactionInput, CompactionPicker};
 use crate::hummock::level_handler::LevelHandler;
@@ -563,6 +564,7 @@ pub mod tests {
         assert_eq!(ret.input_levels[0].table_infos.len(), 1);
         assert_eq!(ret.input_levels[0].table_infos[0].id, 8);
         assert_eq!(ret.input_levels[1].table_infos[0].id, 9);
+
         levels_handler[0].remove_task(1);
         levels
             .l0

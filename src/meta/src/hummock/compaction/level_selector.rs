@@ -26,6 +26,7 @@ use risingwave_hummock_sdk::{HummockCompactionTaskId, HummockEpoch, VersionedCom
 use risingwave_pb::hummock::hummock_version::Levels;
 use risingwave_pb::hummock::{CompactionConfig, KeyRange};
 
+
 use crate::hummock::compaction::compaction_config::CompactionConfigBuilder;
 use crate::hummock::compaction::manual_compaction_picker::ManualCompactionPicker;
 use crate::hummock::compaction::min_overlap_compaction_picker::MinOverlappingPicker;
@@ -382,6 +383,7 @@ pub mod tests {
     use risingwave_pb::hummock::compaction_config::CompactionMode;
     use risingwave_pb::hummock::{Level, LevelType, OverlappingLevel, SstableInfo};
 
+
     use super::*;
     use crate::hummock::compaction::compaction_config::CompactionConfigBuilder;
     use crate::hummock::compaction::overlap_strategy::RangeOverlapStrategy;
@@ -589,6 +591,7 @@ pub mod tests {
         assert_eq!(compaction.input.input_levels[0].level_idx, 0);
         assert!(compaction.input.input_levels[1].table_infos.is_empty());
         assert_eq!(compaction.input.target_level, 0);
+
 
         let compaction_filter_flag = CompactionFilterFlag::STATE_CLEAN | CompactionFilterFlag::TTL;
         let config = CompactionConfigBuilder::new_with(config)
