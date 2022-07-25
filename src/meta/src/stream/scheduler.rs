@@ -306,13 +306,14 @@ mod test {
             Arc::new(ClusterManager::new(env.clone(), Duration::from_secs(3600)).await?);
 
         let node_count = 4;
+        let fake_parallelism = 4;
         for i in 0..node_count {
             let host = HostAddress {
                 host: "127.0.0.1".to_string(),
                 port: i as i32,
             };
             cluster_manager
-                .add_worker_node(host.clone(), WorkerType::ComputeNode)
+                .add_worker_node(WorkerType::ComputeNode, host.clone(), fake_parallelism)
                 .await?;
             cluster_manager.activate_worker_node(host).await?;
         }
@@ -348,7 +349,7 @@ mod test {
             })
             .collect_vec();
 
-        let parallel_degree = env.opts.unsafe_worker_node_parallel_degree;
+        let parallel_degree = fake_parallelism;
         let mut normal_fragments = (6..8u32)
             .map(|fragment_id| {
                 let actors = (actor_id..actor_id + node_count * parallel_degree as u32)

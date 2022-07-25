@@ -250,7 +250,7 @@ impl FrontendEnv {
             .unwrap();
         // Register in meta by calling `AddWorkerNode` RPC.
         meta_client
-            .register(&frontend_address, WorkerType::Frontend)
+            .register(WorkerType::Frontend, &frontend_address, 0)
             .await?;
 
         let (heartbeat_join_handle, heartbeat_shutdown_sender) = MetaClient::start_heartbeat_loop(
