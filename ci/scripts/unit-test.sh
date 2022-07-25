@@ -8,7 +8,7 @@ source ci/scripts/common.env.sh
 echo "+++ Run unit tests with coverage"
 # disable fuzzing tests (risingwave_sqlsmith)
 # use tee to disable progress bar
-NEXTEST_PROFILE=ci cargo nextest run -E "not package(sqlsmith)" 2> >(tee)
+NEXTEST_PROFILE=ci cargo nextest run -E "not package(risingwave_sqlsmith)" 2> >(tee)
 cargo llvm-cov --lcov --output-path lcov.info --features failpoints 2> >(tee)
 
 echo "--- Codecov upload coverage reports"
