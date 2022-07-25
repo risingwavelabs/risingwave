@@ -22,14 +22,14 @@ extern crate bytesize;
 use bytesize::ByteSize;
 use clap::Parser;
 use futures::stream::{self, StreamExt};
-use futures::{future, Future, FutureExt, TryFutureExt};
+use futures::{future, Future, FutureExt};
 use itertools::Itertools;
 use log::debug;
 use rand::{Rng, SeedableRng};
 use aws_sdk_s3::Client;
+use aws_sdk_s3::model::{ CompletedMultipartUpload, CompletedPart};
 use aws_smithy_http::body::SdkBody;
-use tokio::io::AsyncReadExt;
-use risingwave_object_store::object::S3ObjectStore;
+use risingwave_common::error::RwError;
 
 const READ_BUFFER_SIZE: ByteSize = ByteSize::mib(8);
 
@@ -107,29 +107,29 @@ enum Case {
         #[serde(deserialize_with = "de_size_str")]
         size: ByteSize,
     },
-    // MultiPartUpload {
-    //     name: String,
-    //     obj: String,
-    //     #[serde(deserialize_with = "de_size_str")]
-    //     size: ByteSize,
-    //     #[serde(deserialize_with = "de_size_str")]
-    //     part: ByteSize,
-    // },
+    MultiPartUpload {
+        name: String,
+        obj: String,
+        #[serde(deserialize_with = "de_size_str")]
+        size: ByteSize,
+        #[serde(deserialize_with = "de_size_str")]
+        part: ByteSize,
+    },
     Get {
         name: String,
         obj: String,
     },
-    // MultiPartGet {
-    //     name: String,
-    //     obj: String,
-    //     part: Vec<i64>,
-    // },
-    // ByteRangeGet {
-    //     name: String,
-    //     obj: String,
-    //     start: u64,
-    //     end: u64,
-    // },
+    MultiPartGet {
+        name: String,
+        obj: String,
+        part: Vec<i32>,
+    },
+    ByteRangeGet {
+        name: String,
+        obj: String,
+        start: u64,
+        end: u64,
+    },
 }
 
 #[derive(Parser, Debug)]
@@ -174,7 +174,6 @@ async fn put(cfg: &Config, client: &Client, name: String, obj: Vec<u8>) -> Cost 
     let ttfb = t.elapsed();
     client.put_object().bucket(&cfg.bucket).body(SdkBody::from(obj).into())
         .key(name).send().await.unwrap();
-    //client.put_object(req).await.unwrap();
     let ttlb = t.elapsed();
     Cost {
         bytes,
@@ -185,76 +184,56 @@ async fn put(cfg: &Config, client: &Client, name: String, obj: Vec<u8>) -> Cost 
 }
 
 
-// async fn multi_part_upload(
-//     cfg: &Config,
-//     client: &Client,
-//     name: String,
-//     obj: Vec<u8>,
-//     part_size: ByteSize,
-// ) -> Cost {
-//     let t = Instant::now();
-//     let bytes = obj.len();
-//     let req = CreateMultipartUploadRequest {
-//         bucket: cfg.bucket.clone().unwrap(),
-//         key: name.clone(),
-//         ..Default::default()
-//     };
-//     let rsp = client.create_multipart_upload(req).await.unwrap();
-//     let upload_id = rsp.upload_id.unwrap();
-//
-//     let name_clone = name.clone();
-//     let upload_id_clone = upload_id.clone();
-//     let create_upload_part_req = move |part: Vec<u8>, part_number: i64| UploadPartRequest {
-//         bucket: cfg.bucket.clone().unwrap(),
-//         key: name_clone.clone(),
-//         upload_id: upload_id_clone.clone(),
-//         part_number,
-//         body: Some(part.into()),
-//         ..Default::default()
-//     };
-//
-//     let chunks = obj
-//         .chunks(part_size.as_u64() as usize)
-//         .into_iter()
-//         .map(|chunk| chunk.to_owned())
-//         .collect_vec();
-//
-//     let futures = chunks
-//         .into_iter()
-//         .enumerate()
-//         .map(|(i, part)| create_upload_part_req(part, (i + 1) as i64))
-//         .map(|req| client.upload_part(req))
-//         .collect_vec();
-//     let ttfb = t.elapsed();
-//     let completed_parts = future::try_join_all(futures)
-//         .await
-//         .unwrap()
-//         .into_iter()
-//         .enumerate()
-//         .map(|(i, rsp)| CompletedPart {
-//             e_tag: rsp.e_tag,
-//             part_number: Some((i + 1) as i64),
-//         })
-//         .collect_vec();
-//     let ttlb = t.elapsed();
-//
-//     let req = CompleteMultipartUploadRequest {
-//         bucket: cfg.bucket.clone().unwrap(),
-//         key: name.clone(),
-//         upload_id: upload_id.clone(),
-//         multipart_upload: Some(CompletedMultipartUpload {
-//             parts: Some(completed_parts),
-//         }),
-//         ..Default::default()
-//     };
-//     client.complete_multipart_upload(req).await.unwrap();
-//     Cost {
-//         bytes,
-//         ttfb,
-//         ttlb,
-//         ..Default::default()
-//     }
-// }
+async fn multi_part_upload(
+    cfg: &Config,
+    client: &Client,
+    name: String,
+    obj: Vec<u8>,
+    part_size: ByteSize,
+) -> Cost {
+
+    let t = Instant::now();
+    let bytes = obj.len();
+    let rsp = client.create_multipart_upload().bucket(cfg.bucket.clone()).key(name.clone()).send().await.unwrap();
+    let upload_id = rsp.upload_id.unwrap();
+    let upload_id_clone = upload_id.clone();
+    let name_clone = name.clone();
+    let upload_part_handle = move |part: Vec<u8>, part_number: i32|{
+        client.upload_part().bucket(cfg.bucket.clone()).key(name_clone.clone())
+            .upload_id(upload_id_clone.clone()).part_number(part_number).body(SdkBody::from(part).into())
+    };
+    let chunks = obj
+        .chunks(part_size.as_u64() as usize)
+        .into_iter()
+        .map(|chunk| chunk.to_owned())
+        .collect_vec();
+    let futures = chunks
+        .into_iter()
+        .enumerate()
+        .map(|(i, part)| upload_part_handle(part,(i + 1) as i32))
+        .map(|a| a.send())
+        .collect_vec();
+    let ttfb = t.elapsed();
+    let completed_parts = future::try_join_all(futures)
+        .await
+        .unwrap()
+        .into_iter()
+        .enumerate()
+        .map(|(i, rsp)| CompletedPart::builder().set_e_tag(rsp.e_tag).set_part_number(Some((i + 1) as i32)).build())
+        .collect_vec();
+    let ttlb = t.elapsed();
+
+    client.complete_multipart_upload().bucket(cfg.bucket.clone())
+        .key(name.clone()).upload_id(upload_id.clone()).multipart_upload(
+        CompletedMultipartUpload::builder().set_parts(Some(completed_parts)).build()).send().await.unwrap();
+
+    Cost {
+        bytes,
+        ttfb,
+        ttlb,
+        ..Default::default()
+    }
+}
 
 async fn get(cfg: &Config, client: &Client, name: String) -> Cost {
     let t = Instant::now();
@@ -264,6 +243,61 @@ async fn get(cfg: &Config, client: &Client, name: String) -> Cost {
         .key(name)
         .send()
         .await.unwrap();
+    let ttfb = t.elapsed();
+    let bytes = resp.body.collect().await.unwrap().into_bytes().len();
+    let ttlb = t.elapsed();
+    Cost {
+        bytes,
+        ttfb,
+        ttlb,
+        ..Default::default()
+    }
+}
+
+async fn multi_part_get(
+    cfg: &Config,
+    client: &Client,
+    name: String,
+    part_numbers: Vec<i32>,
+) -> Cost {
+    let t = Instant::now();
+    let create_part_get = move |part_number| {
+        client.get_object().bucket(cfg.bucket.clone()).key(name.clone()).part_number(part_number).send()
+    };
+    let futures = part_numbers
+        .into_iter()
+        .map(|part_number|create_part_get(part_number))
+        .map(|resp| {
+            async move { let result:Result<(usize,Duration),RwError>= Ok((resp.await.unwrap().body.collect().await.unwrap().into_bytes().len(), t.elapsed()));
+            result
+        }})
+        .collect_vec();
+    let (bytes, ttfb) = future::try_join_all(futures)
+        .await
+        .unwrap()
+        .iter()
+        .fold((0, Duration::MAX), |(total_bytes, ttfb), (bytes, time)| {
+            (total_bytes + bytes, ttfb.min(*time))
+        });
+    let ttlb = t.elapsed();
+    Cost {
+        bytes,
+        ttfb,
+        ttlb,
+        ..Default::default()
+    }
+}
+
+async fn byte_range_get(
+    cfg: &Config,
+    client: &Client,
+    name: String,
+    start: u64,
+    end: u64,
+) -> Cost {
+    let t = Instant::now();
+    let resp = client.get_object().bucket(cfg.bucket.clone()).key(name.clone()).range(format!("bytes={}-{}", start, end))
+        .send().await.unwrap();
     let ttfb = t.elapsed();
     let bytes = resp.body.collect().await.unwrap().into_bytes().len();
     let ttlb = t.elapsed();
@@ -288,22 +322,22 @@ async fn run_case(index: usize, case: Case, cfg: &Config, client: &Client, objs:
                 iter_exec(|| put(cfg, client, obj_name, obj), cfg.iter).await,
             )
         }
-        // Case::MultiPartUpload {
-        //     name,
-        //     obj: obj_name,
-        //     size: obj_size,
-        //     part: part_size,
-        // } => {
-        //     let obj = objs.obj(obj_size);
-        //     (
-        //         name.to_owned(),
-        //         iter_exec(
-        //             || multi_part_upload(cfg, client, obj_name, obj, part_size),
-        //             cfg.iter,
-        //         )
-        //             .await,
-        //     )
-        // }
+        Case::MultiPartUpload {
+            name,
+            obj: obj_name,
+            size: obj_size,
+            part: part_size,
+        } => {
+            let obj = objs.obj(obj_size);
+            (
+                name.to_owned(),
+                iter_exec(
+                    || multi_part_upload(cfg, client, obj_name, obj, part_size),
+                    cfg.iter,
+                )
+                    .await,
+            )
+        }
         Case::Get {
             name,
             obj: obj_name,
@@ -311,34 +345,31 @@ async fn run_case(index: usize, case: Case, cfg: &Config, client: &Client, objs:
             name.to_owned(),
             iter_exec(|| get(cfg, client, obj_name), cfg.iter).await,
         ),
-        // Case::MultiPartGet {
-        //     name,
-        //     obj: obj_name,
-        //     part: part_numbers,
-        // } => (
-        //     name.to_owned(),
-        //     iter_exec(
-        //         || multi_part_get(cfg, client, obj_name, part_numbers),
-        //         cfg.iter,
-        //     )
-        //         .await,
-        // ),
-        // Case::ByteRangeGet {
-        //     name,
-        //     obj: obj_name,
-        //     start,
-        //     end,
-        // } => (
-        //     name.to_owned(),
-        //     iter_exec(
-        //         || byte_range_get(cfg, client, obj_name, start, end),
-        //         cfg.iter,
-        //     )
-        //         .await,
-        // ),
-        // _ =>{Analysis{
-        //
-        // }},
+        Case::MultiPartGet {
+            name,
+            obj: obj_name,
+            part: part_numbers,
+        } => (
+            name.to_owned(),
+            iter_exec(
+                || multi_part_get(cfg, client, obj_name, part_numbers),
+                cfg.iter,
+            )
+                .await,
+        ),
+        Case::ByteRangeGet {
+            name,
+            obj: obj_name,
+            start,
+            end,
+        } => (
+            name.to_owned(),
+            iter_exec(
+                || byte_range_get(cfg, client, obj_name, start, end),
+                cfg.iter,
+            )
+                .await,
+        ),
     };
     let d2s = |d: &Duration| match d.as_nanos() {
         0 => "-".to_owned(),
@@ -453,7 +484,6 @@ async fn iter_exec<F, FB>(fb: FB, iter_size: usize) -> Analysis
     let bytes = ByteSize::b(costs[0].bytes as u64);
     let ttls = Durations::gen(costs.iter().map(|cost| cost.ttl).collect_vec());
     let ttfbs = Durations::gen(costs.iter().map(|cost| cost.ttfb).collect_vec());
-    // let ttlbs = Durations::gen(costs.iter().map(|cost| cost.ttlb).collect_vec());
     let data_transfer_secs = costs
         .iter()
         .map(|cost| (cost.ttlb - cost.ttfb).as_secs_f64())
@@ -480,7 +510,7 @@ struct Analysis {
 async fn main() {
     env_logger::init();
 
-    let mut cfg = Config::parse();
+    let cfg = Config::parse();
 
     let shared_config = aws_config::load_from_env().await;
     let client = Client::new(&shared_config);
