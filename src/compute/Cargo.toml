@@ -36,7 +36,6 @@ risingwave_connector = { path = "../connector" }
 risingwave_hummock_sdk = { path = "../storage/hummock_sdk" }
 risingwave_pb = { path = "../prost" }
 risingwave_rpc_client = { path = "../rpc_client" }
-risingwave_sink = { path = "../sink" }
 risingwave_source = { path = "../source" }
 risingwave_storage = { path = "../storage" }
 risingwave_stream = { path = "../stream" }
