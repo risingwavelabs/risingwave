@@ -12,3 +12,9 @@ CREATE SINK snk FROM mv
 
 statement ok
 DROP SINK snk;
+
+statement ok
+DROP MATERIALIZED VIEW mv;
+
+statement ok
+DROP TABLE t;
