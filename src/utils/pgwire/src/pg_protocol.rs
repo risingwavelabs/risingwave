@@ -263,7 +263,7 @@ where
         let session = self.session.clone().unwrap();
         // execute query
         let res = session
-            .run_statement(sql,false)
+            .run_statement(sql, false)
             .await
             .map_err(|err| PsqlError::QueryError(err))?;
 
@@ -503,12 +503,11 @@ where
 
         let mut rows_cnt = 0;
 
-        
-            let iter = res.iter();
-            for val in iter {
-                self.stream.write(&BeMessage::DataRow(val)).await?;
-                rows_cnt += 1;
-            }
+        let iter = res.iter();
+        for val in iter {
+            self.stream.write(&BeMessage::DataRow(val)).await?;
+            rows_cnt += 1;
+        }
 
         // If has rows limit, it must be extended mode.
         // If Execute terminates before completing the execution of a portal (due to reaching a

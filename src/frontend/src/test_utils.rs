@@ -82,7 +82,7 @@ impl LocalFrontend {
         sql: impl Into<String>,
     ) -> std::result::Result<PgResponse, Box<dyn std::error::Error + Send + Sync>> {
         let sql = sql.into();
-        self.session_ref().run_statement(sql.as_str(),false).await
+        self.session_ref().run_statement(sql.as_str(), false).await
     }
 
     pub async fn query_formatted_result(&self, sql: impl Into<String>) -> Vec<String> {

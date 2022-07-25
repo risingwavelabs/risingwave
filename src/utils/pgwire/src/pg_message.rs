@@ -487,7 +487,7 @@ impl<'a> BeMessage<'a> {
                 })
                 .unwrap();
             }
-            
+
             // RowDescription
             // +-----+-----------+--------------+-------+-----+-------+
             // | 'T' | int32 len | int16 colNum | field | ... | field |

@@ -120,7 +120,7 @@ mod tests {
             .map(|row| {
                 (
                     std::str::from_utf8(row.index(0).as_ref().unwrap()).unwrap(),
-                    std::str::from_utf8(row.index(1).as_ref().unwrap()).unwrap()
+                    std::str::from_utf8(row.index(1).as_ref().unwrap()).unwrap(),
                 )
             })
             .collect::<HashMap<&str, &str>>();

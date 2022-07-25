@@ -30,7 +30,7 @@ use risingwave_sqlparser::ast::{SqlOption, Value};
 fn pg_value_format(d: ScalarRefImpl, format: bool) -> Bytes {
     // format == false means TEXT format
     // format == true means BINARY format
-    if format == false {
+    if !format {
         match d {
             ScalarRefImpl::Bool(b) => if b { "t" } else { "f" }.into(),
             ScalarRefImpl::Float32(v) => pg_float_format(v).into(),
@@ -39,15 +39,9 @@ fn pg_value_format(d: ScalarRefImpl, format: bool) -> Bytes {
         }
     } else {
         match d {
-            ScalarRefImpl::Int16(d) => {
-                d.to_be_bytes().to_vec().into()
-            },
-            ScalarRefImpl::Int32(d) => {
-                d.to_be_bytes().to_vec().into()
-            },
-            ScalarRefImpl::Int64(d) => {
-                d.to_be_bytes().to_vec().into()
-            },
+            ScalarRefImpl::Int16(d) => d.to_be_bytes().to_vec().into(),
+            ScalarRefImpl::Int32(d) => d.to_be_bytes().to_vec().into(),
+            ScalarRefImpl::Int64(d) => d.to_be_bytes().to_vec().into(),
             ScalarRefImpl::Float32(_) => todo!(),
             ScalarRefImpl::Float64(_) => todo!(),
             ScalarRefImpl::Utf8(_) => todo!(),
@@ -181,7 +175,7 @@ mod tests {
              4 . .    .  ",
         );
         let rows = to_pg_rows(chunk, false);
-        let expected:Vec<Vec<Option<Bytes>>> = vec![
+        let expected: Vec<Vec<Option<Bytes>>> = vec![
             vec![
                 Some("1".into()),
                 Some("6".into()),

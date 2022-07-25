@@ -225,7 +225,7 @@ impl PgPortal {
     ) -> Result<PgResponse, BoxedError> {
         if self.result_cache.is_none() {
             let process_res = session
-                .run_statement(cstr_to_str(&self.query_string).unwrap(),self.result_format)
+                .run_statement(cstr_to_str(&self.query_string).unwrap(), self.result_format)
                 .await;
 
             // Return result directly if

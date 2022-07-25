@@ -34,13 +34,17 @@ pub trait SessionManager: Send + Sync + 'static {
 
 /// A psql connection. Each connection binds with a database. Switching database will need to
 /// recreate another connection.
-/// 
+///
 /// format:
 /// false: TEXT
 /// true: BINARY
 #[async_trait::async_trait]
 pub trait Session: Send + Sync {
-    async fn run_statement(self: Arc<Self>, sql: &str, format:bool) -> Result<PgResponse, BoxedError>;
+    async fn run_statement(
+        self: Arc<Self>,
+        sql: &str,
+        format: bool,
+    ) -> Result<PgResponse, BoxedError>;
     async fn infer_return_type(
         self: Arc<Self>,
         sql: &str,
@@ -146,7 +150,8 @@ mod tests {
                     Some(
                         x.trim_start_matches('\'')
                             .trim_end_matches('\'')
-                            .to_string().into(),
+                            .to_string()
+                            .into(),
                     )
                 })
                 .collect();
