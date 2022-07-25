@@ -35,7 +35,6 @@ impl fmt::Display for FunctionalDependency {
 }
 
 impl FunctionalDependency {
-    
     /// Create a [`FunctionalDependency`] with bitset.
     /// This indicate a from --> to dependency.
     pub fn new(from: FixedBitSet, to: FixedBitSet) -> Self {
@@ -46,7 +45,7 @@ impl FunctionalDependency {
         );
         FunctionalDependency { from, to }
     }
-    
+
     /// Create a [`FunctionalDependency`] with column indices.
     pub fn with_indices(column_cnt: usize, from: &[usize], to: &[usize]) -> Self {
         let from = {
@@ -66,7 +65,8 @@ impl FunctionalDependency {
         FunctionalDependency { from, to }
     }
 
-    /// Create a [`FunctionalDependency`] for a key column. This column can determine all other columns.
+    /// Create a [`FunctionalDependency`] for a key column. This column can determine all other
+    /// columns.
     pub fn with_key_column(column_cnt: usize, key_column_id: usize) -> Self {
         let mut from = FixedBitSet::with_capacity(column_cnt);
         from.set(key_column_id, true);
@@ -75,7 +75,8 @@ impl FunctionalDependency {
         FunctionalDependency { from, to }
     }
 
-    /// Create a [`FunctionalDependency`] for a constant column. This column can be determined by any column.
+    /// Create a [`FunctionalDependency`] for a constant column. This column can be determined by
+    /// any column.
     pub fn with_constant_column(column_cnt: usize, constant_column_id: usize) -> Self {
         let mut to = FixedBitSet::with_capacity(column_cnt);
         to.set(constant_column_id, true);
@@ -127,7 +128,9 @@ impl FunctionalDependencySet {
 
     /// Create a [`FunctionalDependencySet`] with a dependency [`Vec`]
     pub fn with_dependencies(dependencies: Vec<FunctionalDependency>) -> Self {
-        Self { strict: dependencies }
+        Self {
+            strict: dependencies,
+        }
     }
 
     pub fn as_dependencies_mut(&mut self) -> &mut Vec<FunctionalDependency> {
@@ -286,6 +289,31 @@ impl FunctionalDependencySet {
     /// ```
     pub fn is_determined_by(&self, determinant: FixedBitSet, dependant: FixedBitSet) -> bool {
         self.get_closure(determinant).is_superset(&dependant)
+    }
+
+    /// Return true if `columns` is a key.
+    pub fn is_key(&self, columns: FixedBitSet) -> bool {
+        let all_columns = {
+            let mut tmp = columns.clone();
+            tmp.set_range(.., true);
+            tmp
+        };
+        self.is_determined_by(columns, all_columns)
+    }
+
+    /// Remove redundant columns from the given set.
+    /// Redundant columns can be functionally determined by other columns so there is no need to
+    /// keep them in a key. Note that the accurate minimization algorithm can take O(2^n) time,
+    /// so we use a approximate algorithm.
+    pub fn minimize_key(&self, key: FixedBitSet) -> FixedBitSet {
+        let mut new_key = key.clone();
+        for i in key.ones() {
+            new_key.set(i, false);
+            if !self.is_key(new_key.clone()) {
+                new_key.set(i, true);
+            }
+        }
+        new_key
     }
 
     pub fn rewrite_with_mapping(mut self, col_change: ColIndexMapping) -> Self {
