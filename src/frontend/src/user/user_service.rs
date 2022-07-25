@@ -23,7 +23,7 @@ use risingwave_rpc_client::MetaClient;
 use tokio::sync::watch::Receiver;
 
 use crate::user::user_manager::UserInfoManager;
-use crate::user::{UserInfoVersion, UserName};
+use crate::user::{UserId, UserInfoVersion};
 
 pub type UserInfoReadGuard = ArcRwLockReadGuard<RawRwLock, UserInfoManager>;
 
@@ -43,22 +43,22 @@ impl UserInfoReader {
 pub trait UserInfoWriter: Send + Sync {
     async fn create_user(&self, user_info: UserInfo) -> Result<()>;
 
-    async fn drop_user(&self, user_name: &str) -> Result<()>;
+    async fn drop_user(&self, id: UserId) -> Result<()>;
 
     async fn grant_privilege(
         &self,
-        users: Vec<UserName>,
+        users: Vec<UserId>,
         privileges: Vec<GrantPrivilege>,
         with_grant_option: bool,
-        grantor: UserName,
+        grantor: UserId,
     ) -> Result<()>;
 
     async fn revoke_privilege(
         &self,
-        users: Vec<UserName>,
+        users: Vec<UserId>,
         privileges: Vec<GrantPrivilege>,
-        granted_by: Option<UserName>,
-        revoke_by: UserName,
+        granted_by: Option<UserId>,
+        revoke_by: UserId,
         revoke_grant_option: bool,
         cascade: bool,
     ) -> Result<()>;
@@ -77,17 +77,17 @@ impl UserInfoWriter for UserInfoWriterImpl {
         self.wait_version(version).await
     }
 
-    async fn drop_user(&self, user_name: &str) -> Result<()> {
-        let version = self.meta_client.drop_user(user_name).await?;
+    async fn drop_user(&self, id: UserId) -> Result<()> {
+        let version = self.meta_client.drop_user(id).await?;
         self.wait_version(version).await
     }
 
     async fn grant_privilege(
         &self,
-        users: Vec<UserName>,
+        users: Vec<UserId>,
         privileges: Vec<GrantPrivilege>,
         with_grant_option: bool,
-        granted_by: UserName,
+        granted_by: UserId,
     ) -> Result<()> {
         let version = self
             .meta_client
@@ -98,10 +98,10 @@ impl UserInfoWriter for UserInfoWriterImpl {
 
     async fn revoke_privilege(
         &self,
-        users: Vec<UserName>,
+        users: Vec<UserId>,
         privileges: Vec<GrantPrivilege>,
-        granted_by: Option<UserName>,
-        revoke_by: UserName,
+        granted_by: Option<UserId>,
+        revoke_by: UserId,
         revoke_grant_option: bool,
         cascade: bool,
     ) -> Result<()> {

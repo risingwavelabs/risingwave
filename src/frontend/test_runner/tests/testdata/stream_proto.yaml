@@ -127,7 +127,7 @@
           - 1
         pk:
           - 1
-        owner: root
+        owner: 1
     ---
     id: 4294967294
     schemaId: 1
@@ -152,7 +152,7 @@
       - 1
     pk:
       - 1
-    owner: root
+    owner: 1
 - sql: |
     /* test projection */
     create table t (v1 int);
@@ -250,7 +250,7 @@
           - 1
         pk:
           - 1
-        owner: root
+        owner: 1
     ---
     id: 4294967294
     schemaId: 1
@@ -275,7 +275,7 @@
       - 1
     pk:
       - 1
-    owner: root
+    owner: 1
 - sql: |
     /* test projection for single column */
     create table t (v1 int, v2 int);
@@ -382,7 +382,7 @@
           - 1
         pk:
           - 1
-        owner: root
+        owner: 1
     ---
     id: 4294967294
     schemaId: 1
@@ -407,7 +407,7 @@
       - 1
     pk:
       - 1
-    owner: root
+    owner: 1
 - sql: |
     /* test simple agg */
     create table t (v1 int);
@@ -506,7 +506,7 @@
                             name: count
                       distributionKey:
                         - 1
-                      owner: root
+                      owner: 1
                     - id: 4294967294
                       schemaId: 2147483646
                       databaseId: 2147483646
@@ -518,7 +518,7 @@
                             name: sum(t.v1)
                       distributionKey:
                         - 1
-                      owner: root
+                      owner: 1
                   columnMappings:
                     - {}
                     - {}
@@ -574,7 +574,7 @@
                       typeName: INT64
                       isNullable: true
                     name: sum(count)
-              owner: root
+              owner: 1
             - id: 4294967294
               schemaId: 2147483646
               databaseId: 2147483646
@@ -584,7 +584,7 @@
                       typeName: INT64
                       isNullable: true
                     name: sum(sum(t.v1))
-              owner: root
+              owner: 1
           columnMappings:
             - {}
             - {}
@@ -616,7 +616,7 @@
                 isNullable: true
               columnId: 1
               name: sum
-        owner: root
+        owner: 1
     ---
     id: 4294967294
     schemaId: 1
@@ -634,7 +634,7 @@
             isNullable: true
           columnId: 1
           name: sum
-    owner: root
+    owner: 1
 - sql: |
     /* test simple agg */
     create table t (v1 int, v2 int);
@@ -820,7 +820,7 @@
                     - 0
                   pk:
                     - 0
-                  owner: root
+                  owner: 1
                 - id: 4294967294
                   schemaId: 2147483646
                   databaseId: 2147483646
@@ -842,7 +842,7 @@
                     - 0
                   pk:
                     - 0
-                  owner: root
+                  owner: 1
               columnMappings:
                 - {}
                 - {}
@@ -910,7 +910,7 @@
           - 1
         pk:
           - 1
-        owner: root
+        owner: 1
     ---
     id: 4294967294
     schemaId: 1
@@ -935,4 +935,4 @@
       - 1
     pk:
       - 1
-    owner: root
+    owner: 1
