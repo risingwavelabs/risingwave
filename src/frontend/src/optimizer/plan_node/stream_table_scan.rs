@@ -39,12 +39,21 @@ impl StreamTableScan {
         let ctx = logical.base.ctx.clone();
 
         let batch_plan_id = ctx.next_plan_node_id();
+
+        let distribuion = {
+            let distribution_key = logical.distribution_key().unwrap();
+            if distribution_key.is_empty() {
+                Distribution::Single
+            } else {
+                // follows upstream distribution from TableCatalog
+                Distribution::HashShard(distribution_key)
+            }
+        };
         let base = PlanBase::new_stream(
             ctx,
             logical.schema().clone(),
             logical.base.pk_indices.clone(),
-            // follows upstream distribution from TableCatalog
-            Distribution::HashShard(logical.distribution_key().unwrap()),
+            distribuion,
             logical.table_desc().appendonly,
         );
         Self {

@@ -101,10 +101,13 @@ impl Distribution {
             } as i32,
             distribution: match self {
                 Distribution::Single => None,
-                Distribution::HashShard(key) => Some(DistributionProst::HashInfo(HashInfo {
-                    output_count,
-                    key: key.iter().map(|num| *num as u32).collect(),
-                })),
+                Distribution::HashShard(key) => {
+                    assert!(!key.is_empty(), "hash key should not be empty");
+                    Some(DistributionProst::HashInfo(HashInfo {
+                        output_count,
+                        key: key.iter().map(|num| *num as u32).collect(),
+                    }))
+                }
                 // TODO: add round robin distribution
                 Distribution::SomeShard => None,
                 Distribution::Broadcast => None,
