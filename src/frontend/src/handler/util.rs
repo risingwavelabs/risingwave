@@ -44,7 +44,7 @@ fn pg_value_format(d: ScalarRefImpl, format: bool) -> Bytes {
             ScalarRefImpl::Int64(d) => d.to_be_bytes().to_vec().into(),
             ScalarRefImpl::Float32(_) => todo!(),
             ScalarRefImpl::Float64(_) => todo!(),
-            ScalarRefImpl::Utf8(_) => todo!(),
+            ScalarRefImpl::Utf8(d) => d.to_string().into(),
             ScalarRefImpl::Bool(_) => todo!(),
             ScalarRefImpl::Decimal(_) => todo!(),
             ScalarRefImpl::Interval(_) => todo!(),

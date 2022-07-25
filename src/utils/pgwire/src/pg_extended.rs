@@ -214,10 +214,6 @@ impl PgPortal {
         self.row_description.clone()
     }
 
-    pub fn result_format(&self) -> bool {
-        self.result_format
-    }
-
     pub async fn execute<SM: SessionManager>(
         &mut self,
         session: Arc<SM::Session>,

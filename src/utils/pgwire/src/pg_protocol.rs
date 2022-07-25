@@ -270,7 +270,7 @@ where
         if res.is_empty() {
             self.stream.write_no_flush(&BeMessage::EmptyQueryResponse)?;
         } else if res.is_query() {
-            self.process_response_results(res, None).await?;
+            self.process_response_results(res, false).await?;
         } else {
             self.stream
                 .write_no_flush(&BeMessage::CommandComplete(BeCommandCompleteMessage {
@@ -415,8 +415,7 @@ where
         if res.is_empty() {
             self.stream.write_no_flush(&BeMessage::EmptyQueryResponse)?;
         } else if res.is_query() {
-            let result_format = portal.result_format();
-            self.process_response_results(res, Some(result_format))
+            self.process_response_results(res, true)
                 .await?;
         } else {
             self.stream
@@ -486,16 +485,13 @@ where
     async fn process_response_results(
         &mut self,
         res: PgResponse,
-
-        // extended:None indicates simple query mode.
-        // extended:Some(result_format_code) indicates extended query mode.
-        extended: Option<bool>,
+        is_extended: bool,
     ) -> Result<(), IoError> {
         // The possible responses to Execute are the same as those described above for queries
         // issued via simple query protocol, except that Execute doesn't cause ReadyForQuery or
         // RowDescription to be issued.
         // Quoted from: https://www.postgresql.org/docs/current/protocol-flow.html#PROTOCOL-FLOW-EXT-QUERY
-        if extended.is_none() {
+        if !is_extended {
             self.stream
                 .write(&BeMessage::RowDescription(&res.get_row_desc()))
                 .await?;
@@ -516,7 +512,7 @@ where
         // to complete the operation. The CommandComplete message indicating completion of the
         // source SQL command is not sent until the portal's execution is completed.
         // Quote from: https://www.postgresql.org/docs/current/protocol-flow.html#PROTOCOL-FLOW-EXT-QUERY:~:text=Once%20a%20portal,ErrorResponse%2C%20or%20PortalSuspended
-        if extended.is_none() || res.is_row_end() {
+        if !is_extended || res.is_row_end() {
             self.stream
                 .write_no_flush(&BeMessage::CommandComplete(BeCommandCompleteMessage {
                     stmt_type: res.get_stmt_type(),
