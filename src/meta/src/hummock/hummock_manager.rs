@@ -1056,7 +1056,7 @@ where
         let sstable_id = get_remote_sst_id(
             self.env
                 .id_gen_manager()
-                .generate::<{ IdCategory::HummockSSTableId }>()
+                .generate::<{ IdCategory::HummockSstableId }>()
                 .await
                 .map(|id| id as HummockSstableId)?,
         );
