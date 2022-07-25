@@ -35,7 +35,7 @@ impl PlanCorrelatedIdFinder {
 }
 
 impl PlanVisitor<()> for PlanCorrelatedIdFinder {
-    /// common subquery is project, filter and join
+    /// `correlated_input_ref` can only appear in `LogicalProject`, `LogicalFilter` and `LogicalJoin` now.
 
     fn visit_logical_join(&mut self, plan: &LogicalJoin) {
         let mut finder = ExprCorrelatedIdFinder::new();
