@@ -28,9 +28,10 @@ use risingwave_pb::hummock::SstableInfo;
 use risingwave_storage::hummock::compactor::{Compactor, DummyCompactionFilter};
 use risingwave_storage::hummock::iterator::{
     BoxedForwardHummockIterator, ConcatIterator, FastMergeConcatIterator, HummockIterator,
-    MergeIterator, MergeIteratorNext, ReadOptions,
+    MergeIterator, MergeIteratorNext,
 };
 use risingwave_storage::hummock::multi_builder::CapacitySplitTableBuilder;
+use risingwave_storage::hummock::sstable::SstableIteratorReadOptions;
 use risingwave_storage::hummock::sstable_store::SstableStoreRef;
 use risingwave_storage::hummock::value::HummockValue;
 use risingwave_storage::hummock::{
@@ -80,7 +81,7 @@ fn build_table(sstable_id: u64, range: Range<u64>, epoch: u64) -> (Bytes, Sstabl
 async fn scan_all_table(sstable_store: SstableStoreRef) {
     let mut stats = StoreLocalStatistic::default();
     let table = sstable_store.sstable(1, &mut stats).await.unwrap();
-    let default_read_options = Arc::new(ReadOptions::default());
+    let default_read_options = Arc::new(SstableIteratorReadOptions::default());
     // warm up to make them all in memory. I do not use CachePolicy::Fill because it will fetch
     // block from meta.
     let mut iter = SstableIterator::new(table, sstable_store.clone(), default_read_options);
@@ -93,7 +94,7 @@ async fn scan_all_table(sstable_store: SstableStoreRef) {
 async fn scan_all_table_inline(sstable_store: SstableStoreRef) {
     let mut stats = StoreLocalStatistic::default();
     let table = sstable_store.sstable(1, &mut stats).await.unwrap();
-    let default_read_options = Arc::new(ReadOptions::default());
+    let default_read_options = Arc::new(SstableIteratorReadOptions::default());
     // warm up to make them all in memory. I do not use CachePolicy::Fill because it will fetch
     // block from meta.
     let mut iter = SstableIterator::new(table, sstable_store.clone(), default_read_options);
@@ -227,7 +228,7 @@ fn bench_merge_iterator_compactor(c: &mut Criterion) {
             .unwrap();
     });
     let level2 = generate_tables(vec![(1, meta1), (2, meta2)]);
-    let read_options = Arc::new(ReadOptions { prefetch: true });
+    let read_options = Arc::new(SstableIteratorReadOptions { prefetch: true });
     c.bench_function("bench_fast_merge_iterator", |b| {
         let stats = Arc::new(StateStoreMetrics::unused());
         b.to_async(FuturesExecutor).iter(|| {

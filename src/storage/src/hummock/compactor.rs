@@ -46,7 +46,6 @@ use super::{CompressionAlgorithm, HummockResult, Sstable, SstableBuilderOptions}
 use crate::hummock::compaction_executor::CompactionExecutor;
 use crate::hummock::iterator::{
     FastMergeConcatIterator, HummockIterator, MergeIteratorNext, OrderedAwareMergeIterator,
-    ReadOptions,
 };
 use crate::hummock::multi_builder::SealedSstableBuilder;
 use crate::hummock::shared_buffer::shared_buffer_uploader::UploadTaskPayload;
@@ -771,8 +770,7 @@ impl Compactor {
     /// Build the merge iterator based on the given input ssts.
     fn build_sst_iter(&self) -> HummockResult<Box<FastMergeConcatIterator>> {
         let mut table_iters = Vec::new();
-        let read_options = Arc::new(ReadOptions { prefetch: true });
-
+        let read_options = Arc::new(SstableIteratorReadOptions { prefetch: true });
 
         // TODO: check memory limit
         for level in &self.compact_task.input_ssts {

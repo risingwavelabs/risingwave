@@ -22,7 +22,8 @@ use risingwave_hummock_sdk::VersionedComparator;
 use risingwave_pb::hummock::SstableInfo;
 
 use crate::hummock::iterator::merge_inner::MergeIteratorNext;
-use crate::hummock::iterator::{HummockIterator, ReadOptions};
+use crate::hummock::iterator::HummockIterator;
+use crate::hummock::sstable::SstableIteratorReadOptions;
 use crate::hummock::sstable_store::SstableStoreRef;
 use crate::hummock::value::HummockValue;
 use crate::hummock::{HummockResult, SstableIterator};
@@ -41,7 +42,7 @@ struct ConcatSstableIterator {
     sstable_store: SstableStoreRef,
 
     stats: StoreLocalStatistic,
-    read_options: Arc<ReadOptions>,
+    read_options: Arc<SstableIteratorReadOptions>,
 }
 
 impl ConcatSstableIterator {
@@ -51,7 +52,7 @@ impl ConcatSstableIterator {
     fn new(
         tables: Vec<SstableInfo>,
         sstable_store: SstableStoreRef,
-        read_options: Arc<ReadOptions>,
+        read_options: Arc<SstableIteratorReadOptions>,
     ) -> Self {
         Self {
             sstable_iter: None,
@@ -189,7 +190,7 @@ impl FastMergeConcatIterator {
     pub fn new(
         tables: Vec<Vec<SstableInfo>>,
         sstable_store: SstableStoreRef,
-        read_options: Arc<ReadOptions>,
+        read_options: Arc<SstableIteratorReadOptions>,
         stats: Arc<StateStoreMetrics>,
     ) -> Self {
         let mut unused_iters = LinkedList::default();
@@ -316,7 +317,7 @@ mod test {
     use crate::hummock::iterator::test_utils::{
         default_builder_opt_for_test, iterator_test_key_of, mock_sstable_store,
     };
-    use crate::hummock::iterator::{MergeIteratorNext, ReadOptions};
+    use crate::hummock::iterator::MergeIteratorNext;
     use crate::hummock::test_utils::gen_test_sstable;
     use crate::hummock::value::HummockValue;
     use crate::monitor::StateStoreMetrics;
@@ -348,7 +349,7 @@ mod test {
     #[tokio::test]
     async fn test_merge_iter_basic() {
         let sstable_store = mock_sstable_store();
-        let read_options = Arc::new(ReadOptions::default());
+        let read_options = Arc::new(SstableIteratorReadOptions::default());
         const TEST_KEYS_COUNT: usize = 100;
         const TEST_KEYS_MIDDLE: usize = 50;
 
