@@ -519,6 +519,9 @@
                       distributionKey:
                         - 1
                       owner: root
+                  columnMappings:
+                    - {}
+                    - {}
             fields:
               - dataType:
                   typeName: INT64
@@ -582,6 +585,9 @@
                       isNullable: true
                     name: sum(sum(t.v1))
               owner: root
+          columnMappings:
+            - {}
+            - {}
     fields:
       - dataType:
           typeName: INT64
@@ -837,6 +843,9 @@
                   pk:
                     - 0
                   owner: root
+              columnMappings:
+                - {}
+                - {}
         pkIndices:
           - 1
         fields:
