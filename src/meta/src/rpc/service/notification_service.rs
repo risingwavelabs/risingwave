@@ -76,8 +76,8 @@ where
                 database,
                 schema,
                 source,
-                table,
                 sink,
+                table,
                 users,
             },
 
