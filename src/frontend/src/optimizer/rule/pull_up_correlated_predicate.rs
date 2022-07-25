@@ -119,7 +119,7 @@ impl ExprRewriter for Rewriter {
     ) -> ExprImpl {
         // Convert correlated_input_ref to input_ref.
         // only rewrite the correlated_input_ref with the same correlated_id
-        if correlated_input_ref.get_correlated_id() == self.correlated_id {
+        if correlated_input_ref.correlated_id() == self.correlated_id {
             InputRef::new(
                 correlated_input_ref.index(),
                 correlated_input_ref.return_type(),

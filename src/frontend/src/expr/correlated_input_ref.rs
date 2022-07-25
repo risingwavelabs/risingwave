@@ -67,7 +67,7 @@ impl CorrelatedInputRef {
         self.position = Position::Absolute(correlated_id);
     }
 
-    pub fn get_correlated_id(&self) -> CorrelatedId {
+    pub fn correlated_id(&self) -> CorrelatedId {
         match self.position {
             Position::Relative(_) => 0,
             Position::Absolute(correlated_id) => correlated_id,
@@ -89,7 +89,7 @@ impl fmt::Debug for CorrelatedInputRef {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         f.debug_struct("CorrelatedInputRef")
             .field("index", &self.index)
-            .field("correlated_id", &self.get_correlated_id())
+            .field("correlated_id", &self.correlated_id())
             .finish()
     }
 }

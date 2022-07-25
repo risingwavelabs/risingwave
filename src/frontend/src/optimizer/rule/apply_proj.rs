@@ -116,7 +116,7 @@ impl ExprRewriter for Rewriter {
         &mut self,
         correlated_input_ref: CorrelatedInputRef,
     ) -> ExprImpl {
-        if correlated_input_ref.get_correlated_id() == self.correlated_id {
+        if correlated_input_ref.correlated_id() == self.correlated_id {
             InputRef::new(
                 self.index_mapping.map(correlated_input_ref.index()),
                 correlated_input_ref.return_type(),

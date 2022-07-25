@@ -277,7 +277,7 @@ impl ExprRewriter for Rewriter {
         &mut self,
         correlated_input_ref: CorrelatedInputRef,
     ) -> ExprImpl {
-        if correlated_input_ref.get_correlated_id() == self.correlated_id {
+        if correlated_input_ref.correlated_id() == self.correlated_id {
             InputRef::new(
                 self.index_mapping.map(correlated_input_ref.index()),
                 correlated_input_ref.return_type(),
@@ -378,6 +378,6 @@ impl ExprCorrelatedIdFinder {
 impl ExprVisitor for ExprCorrelatedIdFinder {
     fn visit_correlated_input_ref(&mut self, correlated_input_ref: &CorrelatedInputRef) {
         self.correlated_id_set
-            .insert(correlated_input_ref.get_correlated_id());
+            .insert(correlated_input_ref.correlated_id());
     }
 }

@@ -247,7 +247,7 @@ impl ExprImpl {
 
         impl ExprVisitor for Has {
             fn visit_correlated_input_ref(&mut self, correlated_input_ref: &CorrelatedInputRef) {
-                if correlated_input_ref.get_correlated_id() == self.correlated_id {
+                if correlated_input_ref.correlated_id() == self.correlated_id {
                     self.has = true;
                 }
             }
@@ -274,7 +274,8 @@ impl ExprImpl {
         visitor.has
     }
 
-    /// Collect `CorrelatedInputRef`s in `ExprImpl` and return theirs indices.
+    /// Collect `CorrelatedInputRef`s in `ExprImpl` by relative `depth`, return their indices, and
+    /// assign absolute `correlated_id` for them.
     pub fn collect_correlated_indices_by_depth_and_assign_id(
         &mut self,
         correlated_id: CorrelatedId,
