@@ -232,7 +232,7 @@ impl DynamicLevelSelector {
         base_level: usize,
     ) -> CompactionTask {
         let target_file_size = if input.target_level == 0 {
-            self.config.target_file_size_base * 2
+            self.config.target_file_size_base
         } else {
             assert!(input.target_level >= base_level);
             self.config.target_file_size_base << (input.target_level - base_level)
@@ -244,34 +244,40 @@ impl DynamicLevelSelector {
             self.config.compression_algorithm[idx].clone()
         };
         let mut splits = vec![];
-        if input.input_levels.last().unwrap().table_infos.len() > 1 {
-            const SPLIT_RANGE_STEP: usize = 8;
-            let mut keys = input
-                .input_levels
-                .iter()
-                .flat_map(|level| level.table_infos.iter())
-                .map(|table| {
-                    FullKey::from_user_key_slice(
-                        user_key(&table.key_range.as_ref().unwrap().left),
-                        HummockEpoch::MAX,
-                    )
-                    .into_inner()
-                })
-                .collect_vec();
-            if keys.len() >= SPLIT_RANGE_STEP * 2 {
-                splits.push(KeyRange::new(vec![], vec![]));
-                keys.sort_by(|a, b| VersionedComparator::compare_key(a.as_ref(), b.as_ref()));
-                let concurrency = std::cmp::min(
-                    keys.len() / SPLIT_RANGE_STEP,
-                    self.config.max_sub_compaction as usize,
-                );
-                let step = (keys.len() + concurrency - 1) / concurrency;
-                assert!(step > 1);
-                for (idx, key) in keys.into_iter().enumerate() {
-                    if idx > 0 && idx % step == 0 {
-                        splits.last_mut().unwrap().right = key.clone();
-                        splits.push(KeyRange::new(key, vec![]));
-                    }
+        const SPLIT_RANGE_STEP: usize = 8;
+        let mut keys = input
+            .input_levels
+            .iter()
+            .flat_map(|level| level.table_infos.iter())
+            .map(|table| {
+                FullKey::from_user_key_slice(
+                    user_key(&table.key_range.as_ref().unwrap().left),
+                    HummockEpoch::MAX,
+                )
+                .into_inner()
+            })
+            .collect_vec();
+        let total_file_size = input
+            .input_levels
+            .iter()
+            .flat_map(|level| level.table_infos.iter())
+            .map(|table| table.file_size)
+            .sum::<u64>();
+
+        if total_file_size > self.config.min_compaction_bytes && keys.len() >= SPLIT_RANGE_STEP * 2
+        {
+            splits.push(KeyRange::new(vec![], vec![]));
+            keys.sort_by(|a, b| VersionedComparator::compare_key(a.as_ref(), b.as_ref()));
+            let concurrency = std::cmp::min(
+                keys.len() / SPLIT_RANGE_STEP,
+                self.config.max_sub_compaction as usize,
+            );
+            let step = (keys.len() + concurrency - 1) / concurrency;
+            assert!(step > 1);
+            for (idx, key) in keys.into_iter().enumerate() {
+                if idx > 0 && idx % step == 0 {
+                    splits.last_mut().unwrap().right = key.clone();
+                    splits.push(KeyRange::new(key, vec![]));
                 }
             }
         }
