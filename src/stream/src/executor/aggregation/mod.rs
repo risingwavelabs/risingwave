@@ -357,7 +357,6 @@ pub async fn generate_managed_agg_state<S: StateStore>(
     state_tables: &[RowBasedStateTable<S>],
 ) -> StreamExecutorResult<AggState<S>> {
     let mut managed_states = vec![];
-    let mut filters = vec![];
 
     // Currently the loop here only works if `ROW_COUNT_COLUMN` is 0.
     const_assert_eq!(ROW_COUNT_COLUMN, 0);
@@ -382,12 +381,10 @@ pub async fn generate_managed_agg_state<S: StateStore>(
         }
 
         managed_states.push(managed_state);
-        filters.push(agg_call.filter.clone());
     }
 
     Ok(AggState {
         managed_states,
-        filters,
         prev_states: None,
     })
 }

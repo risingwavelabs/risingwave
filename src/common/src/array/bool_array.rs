@@ -13,7 +13,6 @@
 // limitations under the License.
 
 use std::hash::{Hash, Hasher};
-use std::ops::BitAnd;
 
 use risingwave_pb::data::{Array as ProstArray, ArrayType};
 
@@ -42,7 +41,7 @@ impl BoolArray {
     }
 
     pub fn to_bitmap(&self) -> Bitmap {
-        self.data.to_owned().bitand(self.null_bitmap())
+        &self.data & self.null_bitmap()
     }
 }
 
