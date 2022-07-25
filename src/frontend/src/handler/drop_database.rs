@@ -105,6 +105,16 @@ mod tests {
             .await
             .unwrap();
 
+        frontend.run_sql("CREATE USER user WITH NOSUPERUSER NOCREATEDB PASSWORD 'md5827ccb0eea8a706c4c34a16891f84e7b'").await.unwrap();
+        let res = frontend
+            .run_user_sql(
+                "DROP DATABASE database",
+                "dev".to_string(),
+                "user".to_string(),
+            )
+            .await;
+        assert!(res.is_err());
+
         frontend.run_sql("DROP DATABASE database").await.unwrap();
 
         let database = catalog_reader

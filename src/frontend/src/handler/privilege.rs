@@ -21,6 +21,8 @@ use risingwave_sqlparser::ast::{DropStatement, Statement, TableFactor};
 use crate::binder::Binder;
 use crate::session::SessionImpl;
 
+/// Convert query Statement `stmt` to privilege we need.
+/// Return `is_owner`(check whether user in `session` is owner of the object), object and action.
 pub(crate) fn resolve_privilege(
     session: &SessionImpl,
     stmt: &Statement,
@@ -60,6 +62,7 @@ pub(crate) fn resolve_privilege(
     Ok((is_owner, object, action))
 }
 
+/// check whether user in `session` has privilege of `action` on `object`
 pub(crate) fn check_privilege(
     session: &SessionImpl,
     object: &ProstObject,
@@ -87,4 +90,46 @@ pub(crate) fn check_privilege(
         return Err(PermissionDenied("Session user is invalid".to_string()).into());
     }
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use risingwave_common::catalog::DEFAULT_DATABASE_NAME;
+
+    use super::*;
+    use crate::test_utils::LocalFrontend;
+
+    #[tokio::test]
+    async fn test_check_privilege() {
+        let frontend = LocalFrontend::new(Default::default()).await;
+        let session = frontend.session_ref();
+        let catalog_reader = session.env().catalog_reader();
+        frontend.run_sql("CREATE SCHEMA schema").await.unwrap();
+
+        let schema = catalog_reader
+            .read_guard()
+            .get_schema_by_name(DEFAULT_DATABASE_NAME, "schema")
+            .unwrap()
+            .clone();
+        let action = ProstAction::Create;
+        let object = ProstObject::SchemaId(schema.id());
+        assert!(check_privilege(&session, &object, action).is_ok());
+
+        frontend
+            .run_sql(
+                "CREATE USER user WITH NOSUPERUSER PASSWORD 'md5827ccb0eea8a706c4c34a16891f84e7b'",
+            )
+            .await
+            .unwrap();
+        let database = DEFAULT_DATABASE_NAME.to_string();
+        let user_name = "user".to_string();
+        let session = frontend.session_user_ref(database, user_name);
+        assert!(check_privilege(&session, &object, action).is_err());
+
+        frontend
+            .run_sql("GRANT CREATE ON SCHEMA schema TO user")
+            .await
+            .unwrap();
+        assert!(check_privilege(&session, &object, action).is_ok());
+    }
 }
