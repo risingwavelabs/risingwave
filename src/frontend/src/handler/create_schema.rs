@@ -62,9 +62,7 @@ pub async fn handle_create_schema(
     };
 
     if db_owner != *session.user_name() {
-        let object = Object::DatabaseId(db_id);
-        let action = Action::Create;
-        check_privilege(&session, &object, action)?;
+        check_privilege(&session, &Object::DatabaseId(db_id), Action::Create)?;
     }
 
     let catalog_writer = session.env().catalog_writer();

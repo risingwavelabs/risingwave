@@ -58,9 +58,7 @@ pub async fn handle_create_sink(
 
         let schema = catalog_reader.get_schema_by_name(session.database(), &schema_name)?;
         if schema.owner() != *session.user_name() {
-            let object = Object::SchemaId(schema.id());
-            let action = Action::Create;
-            check_privilege(&session, &object, action)?;
+            check_privilege(&session, &Object::SchemaId(schema.id()), Action::Create)?;
         }
 
         catalog_reader.check_relation_name_duplicated(

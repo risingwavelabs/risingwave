@@ -40,9 +40,7 @@ pub async fn handle_drop_sink(
     )?;
 
     {
-        let object = Object::TableId(sink_id);
-        let action = Action::Delete;
-        check_privilege(&session, &object, action)?;
+        check_privilege(&session, &Object::TableId(sink_id), Action::Delete)?;
     }
 
     let catalog_writer = session.env().catalog_writer();

@@ -47,9 +47,7 @@ pub fn gen_create_mv_plan(
         .check_relation_name_duplicated(session.database(), &schema_name, &table_name)?;
 
     {
-        let object = Object::SchemaId(schema_id);
-        let action = Action::Create;
-        check_privilege(session, &object, action)?;
+        check_privilege(session, &Object::SchemaId(schema_id), Action::Create)?;
     }
 
     let bound = {
@@ -112,9 +110,7 @@ pub async fn handle_create_mv(
     };
 
     if table.owner != *session.user_name() {
-        let object = Object::TableId(table.id);
-        let action = Action::Select;
-        check_privilege(&session, &object, action)?;
+        check_privilege(&session, &Object::TableId(table.id), Action::Select)?;
     }
 
     let catalog_writer = session.env().catalog_writer();

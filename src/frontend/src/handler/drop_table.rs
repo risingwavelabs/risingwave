@@ -58,9 +58,11 @@ pub async fn handle_drop_table(
         let table = reader.get_table_by_name(session.database(), &schema_name, &table_name)?;
 
         if table.owner != *session.user_name() {
-            let object = Object::TableId(table.id().table_id());
-            let action = Action::Delete;
-            check_privilege(&session, &object, action)?;
+            check_privilege(
+                &session,
+                &Object::TableId(table.id().table_id()),
+                Action::Delete,
+            )?;
         }
 
         // If associated source is `None`, then it is a normal mview.

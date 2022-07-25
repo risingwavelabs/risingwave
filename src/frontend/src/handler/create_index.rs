@@ -170,9 +170,7 @@ pub async fn handle_create_index(
     };
 
     if table.owner != *session.user_name() {
-        let object = Object::TableId(table.id);
-        let action = Action::Create;
-        check_privilege(&session, &object, action)?;
+        check_privilege(&session, &Object::TableId(table.id), Action::Create)?;
     }
 
     log::trace!(
