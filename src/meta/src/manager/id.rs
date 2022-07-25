@@ -15,7 +15,7 @@
 use std::sync::atomic::{AtomicI32, Ordering};
 use std::sync::Arc;
 
-use risingwave_common::catalog::{RESERVED_PG_CATALOG_TABLE_ID, RESERVED_USER_ID};
+use risingwave_common::catalog::{NON_RESERVED_PG_CATALOG_TABLE_ID, NON_RESERVED_USER_ID};
 use risingwave_common::error::Result;
 use tokio::sync::RwLock;
 
@@ -171,7 +171,7 @@ where
                 StoredIdGenerator::new(
                     meta_store.clone(),
                     "table",
-                    Some(RESERVED_PG_CATALOG_TABLE_ID + 1),
+                    Some(NON_RESERVED_PG_CATALOG_TABLE_ID),
                 )
                 .await,
             ),
@@ -184,7 +184,7 @@ where
             ),
             actor: Arc::new(StoredIdGenerator::new(meta_store.clone(), "actor", Some(1)).await),
             user: Arc::new(
-                StoredIdGenerator::new(meta_store.clone(), "user", Some(RESERVED_USER_ID + 1))
+                StoredIdGenerator::new(meta_store.clone(), "user", Some(NON_RESERVED_USER_ID))
                     .await,
             ),
             hummock_snapshot: Arc::new(

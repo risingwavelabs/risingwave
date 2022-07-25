@@ -19,7 +19,7 @@ use std::sync::Arc;
 
 use itertools::Itertools;
 use risingwave_common::catalog::{
-    DEFAULT_DATABASE_NAME, DEFAULT_SCHEMA_NAME, DEFAULT_SUPPER_USER_ID, PG_CATALOG_SCHEMA_NAME,
+    DEFAULT_DATABASE_NAME, DEFAULT_SCHEMA_NAME, DEFAULT_SUPER_USER_ID, PG_CATALOG_SCHEMA_NAME,
 };
 use risingwave_common::ensure;
 use risingwave_common::error::ErrorCode::{InternalError, PermissionDenied};
@@ -68,7 +68,7 @@ where
     async fn init(&self) -> Result<()> {
         let mut database = Database {
             name: DEFAULT_DATABASE_NAME.to_string(),
-            owner: DEFAULT_SUPPER_USER_ID,
+            owner: DEFAULT_SUPER_USER_ID,
             ..Default::default()
         };
         if !self.core.lock().await.has_database(&database) {
@@ -90,7 +90,7 @@ where
             let mut schema = Schema {
                 name: name.to_string(),
                 database_id: databases[0].id,
-                owner: DEFAULT_SUPPER_USER_ID,
+                owner: DEFAULT_SUPER_USER_ID,
                 ..Default::default()
             };
             if !self.core.lock().await.has_schema(&schema) {

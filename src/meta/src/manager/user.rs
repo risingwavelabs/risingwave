@@ -16,8 +16,8 @@ use std::collections::{HashMap, HashSet, VecDeque};
 use std::sync::Arc;
 
 use risingwave_common::catalog::{
-    DEFAULT_SUPPER_USER, DEFAULT_SUPPER_USER_FOR_PG, DEFAULT_SUPPER_USER_FOR_PG_ID,
-    DEFAULT_SUPPER_USER_ID,
+    DEFAULT_SUPER_USER, DEFAULT_SUPER_USER_FOR_PG, DEFAULT_SUPER_USER_FOR_PG_ID,
+    DEFAULT_SUPER_USER_ID,
 };
 use risingwave_common::error::ErrorCode::{InternalError, PermissionDenied};
 use risingwave_common::error::{Result, RwError};
@@ -82,6 +82,8 @@ impl UserManagerInner {
     }
 
     fn drop_user(&mut self, user_id: UserId) {
+        // user in user_grant_relation (as key or value) are already checked before entering this
+        // function.
         if let Some(user) = self.user_info.remove(&user_id) {
             self.all_users.remove(&user.name);
         }
@@ -109,8 +111,8 @@ impl<S: MetaStore> UserManager<S> {
     async fn init(&self) -> Result<()> {
         let mut core = self.core.lock().await;
         for (user, id) in [
-            (DEFAULT_SUPPER_USER, DEFAULT_SUPPER_USER_ID),
-            (DEFAULT_SUPPER_USER_FOR_PG, DEFAULT_SUPPER_USER_FOR_PG_ID),
+            (DEFAULT_SUPER_USER, DEFAULT_SUPER_USER_ID),
+            (DEFAULT_SUPER_USER_FOR_PG, DEFAULT_SUPER_USER_FOR_PG_ID),
         ] {
             if !core.all_users.contains(user) {
                 let default_user = UserInfo {
@@ -179,7 +181,7 @@ impl<S: MetaStore> UserManager<S> {
         }
         let user = core.user_info.get(&id).cloned().unwrap();
 
-        if user.name == DEFAULT_SUPPER_USER || user.name == DEFAULT_SUPPER_USER_FOR_PG {
+        if user.name == DEFAULT_SUPER_USER || user.name == DEFAULT_SUPER_USER_FOR_PG {
             return Err(RwError::from(PermissionDenied(format!(
                 "Cannot drop default super user {}",
                 id
@@ -571,7 +573,7 @@ mod tests {
                 .map(|&action| ActionWithGrantOption {
                     action: action as i32,
                     with_grant_option,
-                    granted_by: 1,
+                    granted_by: DEFAULT_SUPER_USER_ID,
                 })
                 .collect(),
         }
@@ -590,7 +592,7 @@ mod tests {
             .create_user(&make_test_user(test_sub_user_id, test_sub_user))
             .await?;
         assert!(user_manager
-            .create_user(&make_test_user(DEFAULT_SUPPER_USER_ID, DEFAULT_SUPPER_USER))
+            .create_user(&make_test_user(DEFAULT_SUPER_USER_ID, DEFAULT_SUPER_USER))
             .await
             .is_err());
 
@@ -623,7 +625,7 @@ mod tests {
                     &[Action::Select, Action::Insert],
                     false,
                 )],
-                DEFAULT_SUPPER_USER_ID,
+                DEFAULT_SUPER_USER_ID,
             )
             .await?;
         let user = user_manager.get_user(test_user_id).await?;
@@ -658,7 +660,7 @@ mod tests {
                     &[Action::Select, Action::Insert],
                     true,
                 )],
-                DEFAULT_SUPPER_USER_ID,
+                DEFAULT_SUPER_USER_ID,
             )
             .await?;
         let user = user_manager.get_user(test_user_id).await?;
@@ -693,7 +695,7 @@ mod tests {
                     &[Action::Select, Action::Update, Action::Delete],
                     true,
                 )],
-                DEFAULT_SUPPER_USER_ID,
+                DEFAULT_SUPER_USER_ID,
             )
             .await?;
         let user = user_manager.get_user(test_user_id).await?;
@@ -756,7 +758,7 @@ mod tests {
                     false,
                 )],
                 0,
-                DEFAULT_SUPPER_USER_ID,
+                DEFAULT_SUPER_USER_ID,
                 true,
                 false,
             )
@@ -781,7 +783,7 @@ mod tests {
                     false,
                 )],
                 0,
-                DEFAULT_SUPPER_USER_ID,
+                DEFAULT_SUPER_USER_ID,
                 true,
                 true,
             )
@@ -804,7 +806,7 @@ mod tests {
                     false,
                 )],
                 0,
-                DEFAULT_SUPPER_USER_ID,
+                DEFAULT_SUPER_USER_ID,
                 false,
                 true,
             )

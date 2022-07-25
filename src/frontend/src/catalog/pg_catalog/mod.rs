@@ -23,7 +23,7 @@ use std::sync::Arc;
 use async_trait::async_trait;
 use itertools::Itertools;
 use risingwave_common::array::Row;
-use risingwave_common::catalog::{ColumnDesc, SysCatalogReader, TableId, DEFAULT_SUPPER_USER_ID};
+use risingwave_common::catalog::{ColumnDesc, SysCatalogReader, TableId, DEFAULT_SUPER_USER_ID};
 use risingwave_common::error::{ErrorCode, Result};
 use risingwave_common::types::{DataType, ScalarImpl};
 use serde_json::json;
@@ -169,7 +169,7 @@ macro_rules! def_sys_catalog {
                 })
                 .collect::<Vec<_>>(),
             pk: vec![0], // change this when multi-column pk is needed in some system table.
-            owner: DEFAULT_SUPPER_USER_ID,
+            owner: DEFAULT_SUPER_USER_ID,
         }
     };
 }

@@ -21,8 +21,8 @@ use parking_lot::RwLock;
 use pgwire::pg_response::PgResponse;
 use pgwire::pg_server::{BoxedError, Session, SessionManager, UserAuthenticator};
 use risingwave_common::catalog::{
-    TableId, DEFAULT_DATABASE_NAME, DEFAULT_SCHEMA_NAME, DEFAULT_SUPPER_USER,
-    DEFAULT_SUPPER_USER_ID, PG_CATALOG_SCHEMA_NAME, RESERVED_USER_ID,
+    TableId, DEFAULT_DATABASE_NAME, DEFAULT_SCHEMA_NAME, DEFAULT_SUPER_USER, DEFAULT_SUPER_USER_ID,
+    NON_RESERVED_USER_ID, PG_CATALOG_SCHEMA_NAME,
 };
 use risingwave_common::error::Result;
 use risingwave_pb::catalog::table::OptionalAssociatedSourceId;
@@ -123,8 +123,8 @@ impl LocalFrontend {
             self.env.clone(),
             Arc::new(AuthContext::new(
                 DEFAULT_DATABASE_NAME.to_string(),
-                DEFAULT_SUPPER_USER.to_string(),
-                DEFAULT_SUPPER_USER_ID,
+                DEFAULT_SUPER_USER.to_string(),
+                DEFAULT_SUPER_USER_ID,
             )),
             UserAuthenticator::None,
         ))
@@ -261,19 +261,19 @@ impl MockCatalogWriter {
         catalog.write().create_database(ProstDatabase {
             id: 0,
             name: DEFAULT_DATABASE_NAME.to_string(),
-            owner: DEFAULT_SUPPER_USER_ID,
+            owner: DEFAULT_SUPER_USER_ID,
         });
         catalog.write().create_schema(ProstSchema {
             id: 1,
             name: DEFAULT_SCHEMA_NAME.to_string(),
             database_id: 0,
-            owner: DEFAULT_SUPPER_USER_ID,
+            owner: DEFAULT_SUPER_USER_ID,
         });
         catalog.write().create_schema(ProstSchema {
             id: 2,
             name: PG_CATALOG_SCHEMA_NAME.to_string(),
             database_id: 0,
-            owner: DEFAULT_SUPPER_USER_ID,
+            owner: DEFAULT_SUPER_USER_ID,
         });
         let mut map: HashMap<u32, DatabaseId> = HashMap::new();
         map.insert(1_u32, 0_u32);
@@ -450,8 +450,8 @@ impl UserInfoWriter for MockUserInfoWriter {
 impl MockUserInfoWriter {
     pub fn new(user_info: Arc<RwLock<UserInfoManager>>) -> Self {
         user_info.write().create_user(UserInfo {
-            id: DEFAULT_SUPPER_USER_ID,
-            name: DEFAULT_SUPPER_USER.to_string(),
+            id: DEFAULT_SUPER_USER_ID,
+            name: DEFAULT_SUPER_USER.to_string(),
             is_supper: true,
             can_create_db: true,
             can_login: true,
@@ -459,7 +459,7 @@ impl MockUserInfoWriter {
         });
         Self {
             user_info,
-            id: AtomicU32::new(1 + RESERVED_USER_ID as u32),
+            id: AtomicU32::new(NON_RESERVED_USER_ID as u32),
         }
     }
 

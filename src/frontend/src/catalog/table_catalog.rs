@@ -299,7 +299,7 @@ mod tests {
             optional_associated_source_id: OptionalAssociatedSourceId::AssociatedSourceId(233)
                 .into(),
             appendonly: false,
-            owner: risingwave_common::catalog::DEFAULT_SUPPER_USER_ID,
+            owner: risingwave_common::catalog::DEFAULT_SUPER_USER_ID,
             mapping: Some(ParallelUnitMapping {
                 table_id: 0,
                 original_indices,
@@ -354,7 +354,7 @@ mod tests {
                 }],
                 distribution_key: vec![],
                 appendonly: false,
-                owner: risingwave_common::catalog::DEFAULT_SUPPER_USER_ID,
+                owner: risingwave_common::catalog::DEFAULT_SUPER_USER_ID,
                 vnode_mapping: Some(mapping),
                 properties: HashMap::from([(String::from("ttl"), String::from("300"))]),
                 read_pattern_prefix_column: 0,
