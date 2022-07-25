@@ -11,7 +11,7 @@ echo "+++ Run unit tests with coverage"
 NEXTEST_PROFILE=ci cargo llvm-cov nextest \
     --lcov --output-path lcov.info \
     --features failpoints \
-    --workspace --exclude risingwave_sqlsmith
+    --workspace --exclude risingwave_sqlsmith \
     2> >(tee)
 
 echo "--- Codecov upload coverage reports"
