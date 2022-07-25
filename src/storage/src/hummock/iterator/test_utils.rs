@@ -21,7 +21,8 @@ use risingwave_object_store::object::{
     InMemObjectStore, ObjectStore, ObjectStoreImpl, ObjectStoreRef,
 };
 
-use crate::hummock::iterator::{BoxedForwardHummockIterator, ReadOptions};
+use crate::hummock::iterator::BoxedForwardHummockIterator;
+use crate::hummock::sstable::SstableIteratorReadOptions;
 use crate::hummock::sstable_store::SstableStore;
 pub use crate::hummock::test_utils::default_builder_opt_for_test;
 use crate::hummock::test_utils::{create_small_table_cache, gen_test_sstable};
@@ -137,7 +138,7 @@ pub async fn gen_merge_iterator_interleave_test_sstable_iters(
         result.push(Box::new(SstableIterator::create(
             handle,
             sstable_store.clone(),
-            Arc::new(ReadOptions::default()),
+            Arc::new(SstableIteratorReadOptions::default()),
         )) as BoxedForwardHummockIterator);
     }
     result
