@@ -30,7 +30,7 @@ impl Rule for ApplyScanRule {
             apply.clone().decompose();
         let apply_left_len = left.schema().len();
         assert_eq!(join_type, JoinType::Inner);
-
+        // TODO: Push `LogicalApply` down `LogicalJoin`.
         if let (None, None) = (right.as_logical_scan(), right.as_logical_join()) {
             return None;
         }

@@ -102,7 +102,7 @@ impl ExprRewriter for Rewriter {
         &mut self,
         correlated_input_ref: CorrelatedInputRef,
     ) -> ExprImpl {
-        let found = correlated_input_ref.get_correlated_id() == self.correlated_id;
+        let found = correlated_input_ref.correlated_id() == self.correlated_id;
         self.has_correlated_input_ref |= found;
         if found {
             InputRef::new(
