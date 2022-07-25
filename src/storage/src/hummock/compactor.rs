@@ -51,6 +51,7 @@ use crate::hummock::iterator::{
 use crate::hummock::multi_builder::SealedSstableBuilder;
 use crate::hummock::shared_buffer::shared_buffer_uploader::UploadTaskPayload;
 use crate::hummock::shared_buffer::{build_ordered_merge_iter, UncommittedData};
+use crate::hummock::sstable::SstableIteratorReadOptions;
 use crate::hummock::sstable_store::SstableStoreRef;
 use crate::hummock::state_store::ForwardIter;
 use crate::hummock::utils::can_concat;
@@ -351,7 +352,7 @@ impl Compactor {
                 sstable_store.clone(),
                 stats.clone(),
                 &mut local_stats,
-                Arc::new(ReadOptions::default()),
+                Arc::new(SstableIteratorReadOptions::default()),
             )
             .await?;
             let compaction_executor = compactor.context.compaction_executor.as_ref().cloned();
@@ -771,6 +772,7 @@ impl Compactor {
     fn build_sst_iter(&self) -> HummockResult<Box<FastMergeConcatIterator>> {
         let mut table_iters = Vec::new();
         let read_options = Arc::new(ReadOptions { prefetch: true });
+
 
         // TODO: check memory limit
         for level in &self.compact_task.input_ssts {
