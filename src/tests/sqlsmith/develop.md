@@ -5,6 +5,7 @@
 There are two phases:
 1. Setup phase - Creates relations e.g. `CREATE TABLE`.
 2. Query phase - Generate and send queries e.g. `SELECT * FROM t`.
+3. Cleanup phase - Cleanup created relations.
 
 ### Setup phase
 
@@ -17,6 +18,11 @@ Queries are generated at random, with weighted constraints.
 
 Additionally query complexity is determined by `can_recurse`. This controls how deeply queries nest.
 We can have better ways to configure this in the future.
+
+### Cleanup phase
+
+1. `DROP MATERIALIZED VIEW` first, to allow tables to be dropped.
+2. `DROP TABLE`.
 
 ## Table and Column name generation
 
