@@ -29,6 +29,8 @@ pub mod file_cache;
 pub mod linux {
     use super::file_cache::cache::FileCache;
 
+    pub type TieredCacheError = super::file_cache::error::Error;
+
     pub type TieredCache<K> = FileCache<K>;
 }
 
@@ -38,6 +40,9 @@ pub mod not_linux {
 
     use super::TieredCacheKey;
     use crate::hummock::HummockResult;
+
+    #[derive(thiserror::Error, Debug)]
+    pub enum TieredCacheError {}
 
     #[derive(Clone)]
     pub struct TieredCache<K: TieredCacheKey>(PhantomData<K>);
@@ -56,3 +61,8 @@ pub mod not_linux {
         }
     }
 }
+
+#[cfg(target_os = "linux")]
+pub use linux::*;
+#[cfg(not(target_os = "linux"))]
+pub use not_linux::*;
