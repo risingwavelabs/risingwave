@@ -18,7 +18,8 @@ use std::sync::Arc;
 use async_trait::async_trait;
 use risingwave_hummock_sdk::VersionedComparator;
 
-use crate::hummock::iterator::{Backward, HummockIterator, ReadOptions};
+use crate::hummock::iterator::{Backward, HummockIterator};
+use crate::hummock::sstable::SstableIteratorReadOptions;
 use crate::hummock::value::HummockValue;
 use crate::hummock::{
     BlockIterator, HummockResult, SstableIteratorType, SstableStoreRef, TableHolder,
@@ -150,7 +151,11 @@ impl HummockIterator for BackwardSstableIterator {
 }
 
 impl SstableIteratorType for BackwardSstableIterator {
-    fn create(sstable: TableHolder, sstable_store: SstableStoreRef, _: Arc<ReadOptions>) -> Self {
+    fn create(
+        sstable: TableHolder,
+        sstable_store: SstableStoreRef,
+        _: Arc<SstableIteratorReadOptions>,
+    ) -> Self {
         BackwardSstableIterator::new(sstable, sstable_store)
     }
 }

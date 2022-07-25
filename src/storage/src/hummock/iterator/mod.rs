@@ -147,8 +147,3 @@ impl HummockIteratorDirection for Backward {
         DirectionEnum::Backward
     }
 }
-
-#[derive(Default)]
-pub struct ReadOptions {
-    pub prefetch: bool,
-}
