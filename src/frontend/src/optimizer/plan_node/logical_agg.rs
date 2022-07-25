@@ -341,24 +341,14 @@ impl LogicalAgg {
             )
         };
 
-        let get_value_state_table = |value_key: usize,
-                                     column_mapping: &mut Vec<usize>|
-         -> TableCatalog {
+        let get_value_state_table = |value_key_out: usize| -> TableCatalog {
             let mut internal_table_catalog_builder = TableCatalogBuilder::new();
             for &idx in &self.group_key {
                 let column_idx = internal_table_catalog_builder.add_column(&in_fields[idx]);
                 internal_table_catalog_builder.add_order_column(column_idx, OrderType::Ascending);
-                // The column mapping of simple value state (sum, count or append-only max/min) may
-                // not be used in executor. Collect here for distribution indices transformation in
-                // `.build()`.
-                column_mapping.push(idx);
             }
-            internal_table_catalog_builder.add_column(&out_fields[value_key]);
-            internal_table_catalog_builder.build_with_column_mapping(
-                in_dist_key.clone(),
-                in_append_only,
-                column_mapping,
-            )
+            internal_table_catalog_builder.add_column(&out_fields[value_key_out]);
+            internal_table_catalog_builder.build(in_dist_key.clone(), in_append_only)
         };
         // Map input col idx -> table col idx.
         let mut column_mappings_vec = vec![];
@@ -392,7 +382,7 @@ impl LogicalAgg {
 
                         get_sorted_input_state_table(sort_keys, include_keys, &mut column_mapping)
                     } else {
-                        get_value_state_table(self.group_key.len() + agg_idx, &mut column_mapping)
+                        get_value_state_table(self.group_key.len() + agg_idx)
                     }
                 }
                 AggKind::Sum
@@ -400,7 +390,7 @@ impl LogicalAgg {
                 | AggKind::Avg
                 | AggKind::SingleValue
                 | AggKind::ApproxCountDistinct => {
-                    get_value_state_table(self.group_key.len() + agg_idx, &mut column_mapping)
+                    get_value_state_table(self.group_key.len() + agg_idx)
                 }
             };
             table_catalogs.push(state_table);
