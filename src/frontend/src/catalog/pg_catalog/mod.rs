@@ -116,6 +116,7 @@ impl SysCatalogReaderImpl {
                     Some(ScalarImpl::Utf8(user.name.clone())),
                     Some(ScalarImpl::Bool(user.can_create_db)),
                     Some(ScalarImpl::Bool(user.is_supper)),
+                    // compatible with PG.
                     Some(ScalarImpl::Utf8("********".to_string())),
                 ])
             })
