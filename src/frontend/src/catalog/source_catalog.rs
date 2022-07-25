@@ -39,7 +39,7 @@ pub struct SourceCatalog {
     pub pk_col_ids: Vec<ColumnId>,
     pub source_type: SourceType,
     pub append_only: bool,
-    pub owner: String,
+    pub owner: u32,
 }
 
 impl SourceCatalog {
@@ -91,7 +91,7 @@ impl From<&ProstSource> for SourceCatalog {
         let columns = prost_columns.into_iter().map(ColumnCatalog::from).collect();
 
         let append_only = check_append_only(&with_options);
-        let owner: String = prost.owner.clone();
+        let owner = prost.owner;
 
         Self {
             id,

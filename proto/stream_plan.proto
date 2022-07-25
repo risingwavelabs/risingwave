@@ -50,6 +50,8 @@ message UpdateMutation {
   map<uint32, DispatcherUpdate> actor_dispatcher_update = 1;
   // Merge updates for each downstream actor.
   map<uint32, MergeUpdate> actor_merge_update = 2;
+
+  repeated uint32 dropped_actors = 3;
 }
 
 message SourceChangeSplitMutation {
