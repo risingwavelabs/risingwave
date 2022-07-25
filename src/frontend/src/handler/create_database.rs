@@ -79,8 +79,7 @@ mod tests {
         frontend.run_sql("CREATE DATABASE database").await.unwrap();
         {
             let reader = catalog_reader.read_guard();
-            let database = reader.get_database_by_name("database").ok().cloned();
-            assert!(database.is_some());
+            assert!(reader.get_database_by_name("database").is_ok());
         }
 
         frontend.run_sql("CREATE USER user WITH NOSUPERUSER NOCREATEDB PASSWORD 'md5827ccb0eea8a706c4c34a16891f84e7b'").await.unwrap();
@@ -104,8 +103,7 @@ mod tests {
             .unwrap();
         {
             let reader = catalog_reader.read_guard();
-            let database = reader.get_database_by_name("database2").ok().cloned();
-            assert!(database.is_some());
+            assert!(reader.get_database_by_name("database2").is_ok());
         }
     }
 }
