@@ -31,7 +31,6 @@ use crate::pg_message::{
 };
 use crate::pg_response::PgResponse;
 use crate::pg_server::{Session, SessionManager, UserAuthenticator};
-use crate::types::Row;
 
 /// The state machine for each psql connection.
 /// Read pg messages from tcp stream and write results back.
@@ -264,7 +263,7 @@ where
         let session = self.session.clone().unwrap();
         // execute query
         let res = session
-            .run_statement(sql)
+            .run_statement(sql,false)
             .await
             .map_err(|err| PsqlError::QueryError(err))?;
 
@@ -504,22 +503,12 @@ where
 
         let mut rows_cnt = 0;
 
-        // Simple query mode(default format: 'TEXT') or result_format is 'TEXT'.
-        if extended.is_none() || !extended.unwrap() {
+        
             let iter = res.iter();
             for val in iter {
                 self.stream.write(&BeMessage::DataRow(val)).await?;
                 rows_cnt += 1;
             }
-        } else {
-            let iter = res.iter();
-            let row_description = res.get_row_desc();
-            for val in iter {
-                let val = Self::convert_to_binary_format(val, &row_description);
-                self.stream.write(&BeMessage::BinaryRow(&val)).await?;
-                rows_cnt += 1;
-            }
-        }
 
         // If has rows limit, it must be extended mode.
         // If Execute terminates before completing the execution of a portal (due to reaching a
@@ -539,45 +528,6 @@ where
             self.stream.write(&BeMessage::PortalSuspended).await?;
         }
         Ok(())
-    }
-
-    /// convert_the row to binary format.
-    fn convert_to_binary_format(
-        row: &Row,
-        row_desc: &Vec<PgFieldDescriptor>,
-    ) -> Vec<Option<Bytes>> {
-        assert_eq!(row.len(), row_desc.len());
-
-        let len = row.len();
-        let mut res = Vec::with_capacity(len);
-
-        for idx in 0..len {
-            let value = &row[idx];
-            let type_oid = row_desc[idx].get_type_oid();
-
-            match value {
-                None => res.push(None),
-                Some(value) => match type_oid {
-                    TypeOid::Boolean => todo!(),
-                    TypeOid::BigInt => todo!(),
-                    TypeOid::SmallInt => todo!(),
-                    TypeOid::Int => {
-                        let value: i32 = value.parse().unwrap();
-                        res.push(Some(value.to_be_bytes().to_vec().into()));
-                    }
-                    TypeOid::Float4 => todo!(),
-                    TypeOid::Float8 => todo!(),
-                    TypeOid::Varchar => res.push(Some(value.clone().into())),
-                    TypeOid::Date => todo!(),
-                    TypeOid::Time => todo!(),
-                    TypeOid::Timestamp => todo!(),
-                    TypeOid::Timestampz => todo!(),
-                    TypeOid::Decimal => todo!(),
-                    TypeOid::Interval => todo!(),
-                },
-            }
-        }
-        res
     }
 }
 
