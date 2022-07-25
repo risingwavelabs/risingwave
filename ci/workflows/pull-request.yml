@@ -158,7 +158,7 @@ steps:
           config: ci/docker-compose.yml
           mount-buildkite-agent: true
       - chronotc/monorepo-diff#v2.3.0:
-          diff: "git diff --name-only"
+          diff: "git diff --name-only origin/main"
           watch:
             - path: "ci/workflows/sqlsmith-fe.sh"
             - path: "src/tests/sqlsmith"
