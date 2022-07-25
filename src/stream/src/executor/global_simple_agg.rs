@@ -61,6 +61,10 @@ pub struct GlobalSimpleAggExecutor<S: StateStore> {
     /// An operator will support multiple aggregation calls.
     agg_calls: Vec<AggCall>,
 
+    /// State table column mappings for each aggregation calls,
+    /// Index: state table column index, Elem: agg call column index.
+    column_mappings: Vec<Vec<usize>>,
+
     /// Relational state tables used by this executor.
     /// One-to-one map with AggCall.
     state_tables: Vec<RowBasedStateTable<S>>,
@@ -88,6 +92,7 @@ impl<S: StateStore> GlobalSimpleAggExecutor<S> {
     pub fn new(
         input: Box<dyn Executor>,
         agg_calls: Vec<AggCall>,
+        column_mappings: Vec<Vec<usize>>,
         pk_indices: PkIndices,
         executor_id: u64,
         mut state_tables: Vec<RowBasedStateTable<S>>,
@@ -111,6 +116,7 @@ impl<S: StateStore> GlobalSimpleAggExecutor<S> {
             input_schema: input_info.schema,
             states: None,
             agg_calls,
+            column_mappings,
             state_tables,
         })
     }
@@ -249,6 +255,7 @@ impl<S: StateStore> GlobalSimpleAggExecutor<S> {
             input_schema,
             mut states,
             agg_calls,
+            column_mappings,
             mut state_tables,
         } = self;
         let mut input = input.execute();

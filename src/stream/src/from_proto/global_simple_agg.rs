@@ -34,12 +34,18 @@ impl ExecutorBuilder for GlobalSimpleAggExecutorBuilder {
             .iter()
             .map(|agg_call| build_agg_call_from_prost(node.is_append_only, agg_call))
             .try_collect()?;
+        let column_mappings: Vec<Vec<usize>> = node
+            .get_column_mappings()
+            .iter()
+            .map(|mapping| mapping.indices.iter().map(|idx| *idx as usize).collect())
+            .collect();
 
         let state_tables = generate_state_tables_from_proto(store, &node.internal_tables, None);
 
         Ok(GlobalSimpleAggExecutor::new(
             params.input.remove(0),
             agg_calls,
+            column_mappings,
             params.pk_indices,
             params.executor_id,
             state_tables,

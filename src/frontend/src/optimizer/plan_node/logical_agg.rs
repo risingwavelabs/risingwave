@@ -12,6 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+use std::collections::BTreeSet;
 use std::fmt;
 
 use fixedbitset::FixedBitSet;
@@ -298,7 +299,6 @@ pub struct LogicalAgg {
 impl LogicalAgg {
     pub fn infer_internal_table_catalog(&self) -> (Vec<TableCatalog>, Vec<Vec<usize>>) {
         let mut table_catalogs = vec![];
-        let mut column_mapping = HashMap::new();
         let out_fields = self.base.schema.fields();
         let in_fields = self.input().schema().fields().to_vec();
         let in_pks = self.input().pk_indices().to_vec();
