@@ -260,7 +260,6 @@ impl<K: HashKey, S: StateStore> HashAggExecutor<K, S> {
                             generate_managed_agg_state(
                                 Some(&key.clone().deserialize(key_data_types.iter())?),
                                 agg_calls,
-                                input_pk_indices.clone(),
                                 input_pk_data_types.clone(),
                                 epoch,
                                 Some(hash_code.clone()),

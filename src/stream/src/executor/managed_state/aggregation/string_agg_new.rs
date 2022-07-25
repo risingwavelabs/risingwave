@@ -21,9 +21,9 @@ use futures_async_stream::for_await;
 use itertools::Itertools;
 use risingwave_common::array::stream_chunk::Ops;
 use risingwave_common::array::Op::{Delete, Insert, UpdateDelete, UpdateInsert};
-use risingwave_common::array::{Array, ArrayImpl, Row, Utf8Array};
+use risingwave_common::array::{ArrayImpl, Row};
 use risingwave_common::buffer::Bitmap;
-use risingwave_common::types::{Datum, ScalarImpl, ScalarRef};
+use risingwave_common::types::{Datum, ScalarImpl};
 use risingwave_common::util::sort_util::OrderableRow;
 use risingwave_storage::table::state_table::RowBasedStateTable;
 use risingwave_storage::StateStore;
@@ -31,18 +31,14 @@ use risingwave_storage::StateStore;
 use super::ManagedTableState;
 use crate::executor::aggregation::AggCall;
 use crate::executor::error::StreamExecutorResult;
-use crate::executor::{PkDataTypes, PkIndices};
 
 pub struct ManagedStringAggState<S: StateStore> {
     _phantom_data: PhantomData<S>,
 
-    upstream_pk_indices: PkIndices,
+    /// Group key to aggregate with group.
+    /// None for simple agg, Some for group key of hash agg.
+    group_key: Option<Row>,
 
-    // Primary key to look up in relational table. For value state, there is only one row.
-    /// If None, the pk is empty vector (simple agg). If not None, the pk is group key (hash agg).
-    group_key: Option<Row>, // TODO(rc): this seems useless after we have `state_table_col_indices`
-
-    agg_col_idx: usize,
     state_table_col_indices: Vec<usize>,
     state_table_agg_col_idx: usize,
 
@@ -53,15 +49,9 @@ pub struct ManagedStringAggState<S: StateStore> {
 impl<S: StateStore> ManagedStringAggState<S> {
     pub fn new(
         agg_call: AggCall,
-        pk_indices: PkIndices,
-        pk_data_types: PkDataTypes,
         group_key: Option<&Row>,
         state_table_col_indices: Vec<usize>,
     ) -> StreamExecutorResult<Self> {
-        println!(
-            "[rc] new, pk_indices: {:?}, pk_data_types: {:?}, group_key: {:?}",
-            pk_indices, pk_data_types, group_key
-        );
         let agg_col_idx = agg_call.args.val_indices()[0];
         let state_table_agg_col_idx = state_table_col_indices
             .iter()
@@ -70,9 +60,7 @@ impl<S: StateStore> ManagedStringAggState<S> {
             .expect("the column to be aggregate must appear in the state table");
         Ok(Self {
             _phantom_data: PhantomData,
-            upstream_pk_indices: pk_indices,
             group_key: group_key.cloned(),
-            agg_col_idx,
             state_table_col_indices,
             state_table_agg_col_idx,
             dirty: false,
