@@ -95,11 +95,34 @@ impl SstableStore {
         }
 
         if let CachePolicy::Fill = policy {
-            self.meta_cache
-                .insert(sst.id, sst.id, sst.encoded_size(), Box::new(sst));
+            self.meta_cache.insert(
+                sst.id,
+                sst.id,
+                sst.meta.encoded_size() + sst.meta.estimated_size as usize,
+                Box::new(sst),
+            );
         }
 
         Ok(())
+    }
+
+    pub async fn delete(&self, sst_id: HummockSstableId) -> HummockResult<()> {
+        // Meta
+        self.store
+            .delete(self.get_sst_meta_path(sst_id).as_str())
+            .await
+            .map_err(HummockError::object_io_error)?;
+        // Data
+        self.store
+            .delete(self.get_sst_data_path(sst_id).as_str())
+            .await
+            .map_err(HummockError::object_io_error)?;
+        self.meta_cache.erase(sst_id, &sst_id);
+        Ok(())
+    }
+
+    pub fn delete_cache(&self, sst_id: HummockSstableId) {
+        self.meta_cache.erase(sst_id, &sst_id);
     }
 
     async fn put_meta(&self, sst: &Sstable) -> HummockResult<()> {
@@ -259,12 +282,11 @@ impl SstableStore {
                         };
                         let mut size = meta.encoded_size();
                         let sst = if load_data {
-                            size = meta.estimated_size as usize;
-
                             let block_data = store
                                 .read(&data_path, None)
                                 .await
                                 .map_err(HummockError::object_io_error)?;
+                            size += block_data.len();
                             Sstable::new_with_data(sst_id, meta, block_data)?
                         } else {
                             Sstable::new(sst_id, meta)

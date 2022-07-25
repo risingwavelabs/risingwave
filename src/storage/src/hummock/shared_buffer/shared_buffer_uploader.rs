@@ -29,7 +29,7 @@ use crate::hummock::compaction_executor::CompactionExecutor;
 use crate::hummock::compactor::{get_remote_sstable_id_generator, Compactor, CompactorContext};
 use crate::hummock::conflict_detector::ConflictDetector;
 use crate::hummock::shared_buffer::OrderSortedUncommittedData;
-use crate::hummock::{HummockResult, SstableStoreRef};
+use crate::hummock::{HummockResult, MemoryLimiter, SstableStoreRef};
 use crate::monitor::StateStoreMetrics;
 
 pub(crate) type UploadTaskPayload = OrderSortedUncommittedData;
@@ -65,6 +65,9 @@ impl SharedBufferUploader {
             ))))
         };
         let next_local_sstable_id = Arc::new(AtomicU64::new(0));
+        let memory_limiter = Arc::new(MemoryLimiter::new(
+            options.compactor_memory_limit_mb as u64 * 1024 * 1024,
+        ));
         let local_object_store_compactor_context = Arc::new(CompactorContext {
             options: options.clone(),
             hummock_meta_client: hummock_meta_client.clone(),
@@ -83,6 +86,7 @@ impl SharedBufferUploader {
             },
             compaction_executor: compaction_executor.as_ref().cloned(),
             table_id_to_slice_transform: table_id_to_slice_transform.clone(),
+            memory_limiter: memory_limiter.clone(),
         });
         let remote_object_store_compactor_context = Arc::new(CompactorContext {
             options: options.clone(),
@@ -93,6 +97,7 @@ impl SharedBufferUploader {
             sstable_id_generator: get_remote_sstable_id_generator(hummock_meta_client.clone()),
             compaction_executor: compaction_executor.as_ref().cloned(),
             table_id_to_slice_transform,
+            memory_limiter: memory_limiter.clone(),
         });
         Self {
             options,

@@ -75,8 +75,9 @@ pub async fn compactor_serve(
         hummock_metrics.clone(),
     ));
 
-    // TODO: remove it after we can configure compactor independently.
-    config.storage.meta_cache_capacity_mb = config.storage.block_cache_capacity_mb;
+    // use half of limit because any memory which would hold in meta-cache will be allocate by
+    // limited at first.
+    config.storage.meta_cache_capacity_mb = config.storage.compactor_memory_limit_mb;
 
     let storage_config = Arc::new(config.storage);
     let state_store_stats = Arc::new(StateStoreMetrics::new(registry.clone()));

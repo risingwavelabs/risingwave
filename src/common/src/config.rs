@@ -167,6 +167,10 @@ pub struct StorageConfig {
     /// Number of tasks shared buffer can upload in parallel.
     #[serde(default = "default::share_buffer_upload_concurrency")]
     pub share_buffer_upload_concurrency: usize,
+
+    /// Capacity of sstable meta cache.
+    #[serde(default = "default::compactor_memory_limit_mb")]
+    pub compactor_memory_limit_mb: usize,
 }
 
 impl Default for StorageConfig {
@@ -286,6 +290,10 @@ mod default {
 
     pub fn unsafe_worker_node_parallel_degree() -> usize {
         4
+    }
+
+    pub fn compactor_memory_limit_mb() -> usize {
+        512
     }
 }
 

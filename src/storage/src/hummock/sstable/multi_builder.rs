@@ -12,15 +12,20 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use futures::Future;
 use risingwave_hummock_sdk::key::{Epoch, FullKey};
 use risingwave_hummock_sdk::HummockSstableId;
 use tokio::task::JoinHandle;
 
 use super::SstableMeta;
 use crate::hummock::sstable_store::SstableStoreRef;
+use crate::hummock::utils::MemoryTracker;
 use crate::hummock::value::HummockValue;
 use crate::hummock::{CachePolicy, HummockResult, Sstable, SstableBuilder};
+
+#[async_trait::async_trait]
+pub trait TableBuilderFactory {
+    async fn open_builder(&self) -> HummockResult<(MemoryTracker, SstableBuilder)>;
+}
 
 pub struct SealedSstableBuilder {
     pub id: HummockSstableId,
@@ -34,10 +39,10 @@ pub struct SealedSstableBuilder {
 /// based on their target capacity set in options.
 ///
 /// When building is finished, one may call `finish` to get the results of zero, one or more tables.
-pub struct CapacitySplitTableBuilder<B> {
+pub struct CapacitySplitTableBuilder<F: TableBuilderFactory> {
     /// When creating a new [`SstableBuilder`], caller use this closure to specify the id and
     /// options.
-    get_id_and_builder: B,
+    builder_factory: F,
 
     sealed_builders: Vec<SealedSstableBuilder>,
 
@@ -45,21 +50,19 @@ pub struct CapacitySplitTableBuilder<B> {
 
     policy: CachePolicy,
     sstable_store: SstableStoreRef,
+    tracker: Option<MemoryTracker>,
 }
 
-impl<B, F> CapacitySplitTableBuilder<B>
-where
-    B: Clone + Fn() -> F,
-    F: Future<Output = HummockResult<SstableBuilder>>,
-{
+impl<F: TableBuilderFactory> CapacitySplitTableBuilder<F> {
     /// Creates a new [`CapacitySplitTableBuilder`] using given configuration generator.
-    pub fn new(get_id_and_builder: B, policy: CachePolicy, sstable_store: SstableStoreRef) -> Self {
+    pub fn new(builder_factory: F, policy: CachePolicy, sstable_store: SstableStoreRef) -> Self {
         Self {
-            get_id_and_builder,
+            builder_factory,
             sealed_builders: Vec::new(),
             current_builder: None,
             policy,
             sstable_store,
+            tracker: None,
         }
     }
 
@@ -109,9 +112,9 @@ where
         }
 
         if self.current_builder.is_none() {
-            let _ = self
-                .current_builder
-                .insert((self.get_id_and_builder)().await?);
+            let (tracker, builder) = self.builder_factory.open_builder().await?;
+            self.current_builder = Some(builder);
+            self.tracker = Some(tracker);
         }
 
         let builder = self.current_builder.as_mut().unwrap();
@@ -130,8 +133,9 @@ where
             let sstable_store = self.sstable_store.clone();
             let meta_clone = meta.clone();
             let policy = self.policy;
+            let tracker = self.tracker.take();
             let upload_join_handle = tokio::spawn(async move {
-                if policy == CachePolicy::Fill {
+                let ret = if policy == CachePolicy::Fill {
                     let sst = Sstable::new_with_data(table_id, meta_clone, data.clone())?;
                     sstable_store.put(sst, data, CachePolicy::Fill).await
                 } else {
@@ -142,7 +146,9 @@ where
                             CachePolicy::NotFill,
                         )
                         .await
-                }
+                };
+                drop(tracker);
+                ret
             });
             self.sealed_builders.push(SealedSstableBuilder {
                 id: table_id,
