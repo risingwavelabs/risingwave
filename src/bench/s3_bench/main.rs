@@ -15,6 +15,7 @@
 use std::collections::hash_map::{Entry, HashMap};
 use std::ops::Div;
 use std::str::FromStr;
+use std::sync::Arc;
 use std::time::{Duration, Instant};
 
 extern crate bytesize;
@@ -29,7 +30,9 @@ use rand::{Rng, SeedableRng};
 use aws_sdk_s3::Client;
 use aws_sdk_s3::model::{ CompletedMultipartUpload, CompletedPart};
 use aws_smithy_http::body::SdkBody;
+use tokio::sync::RwLock;
 use risingwave_common::error::RwError;
+use crate::future::try_join_all;
 
 const READ_BUFFER_SIZE: ByteSize = ByteSize::mib(8);
 
@@ -158,9 +161,12 @@ pub struct Config {
     /// Print tabular format.
     #[clap(short, long)]
     format: bool,
+
+    #[clap(short, long)]
+    multithread: usize,
 }
 
-fn read_cases(cfg: &Config) -> Vec<Case> {
+fn read_cases(cfg: Arc<Config>) -> Vec<Case> {
     let data = std::fs::read_to_string(&cfg.path).unwrap();
     toml::from_str::<HashMap<String, Vec<Case>>>(&data)
         .unwrap()
@@ -168,7 +174,7 @@ fn read_cases(cfg: &Config) -> Vec<Case> {
         .unwrap()
 }
 
-async fn put(cfg: &Config, client: &Client, name: String, obj: Vec<u8>) -> Cost {
+async fn put(cfg: Arc<Config>, client: Arc<Client>, name: String, obj: Vec<u8>) -> Cost {
     let t = Instant::now();
     let bytes = obj.len();
     let ttfb = t.elapsed();
@@ -185,8 +191,8 @@ async fn put(cfg: &Config, client: &Client, name: String, obj: Vec<u8>) -> Cost 
 
 
 async fn multi_part_upload(
-    cfg: &Config,
-    client: &Client,
+    cfg: Arc<Config>,
+    client: Arc<Client>,
     name: String,
     obj: Vec<u8>,
     part_size: ByteSize,
@@ -194,12 +200,14 @@ async fn multi_part_upload(
 
     let t = Instant::now();
     let bytes = obj.len();
-    let rsp = client.create_multipart_upload().bucket(cfg.bucket.clone()).key(name.clone()).send().await.unwrap();
+    let bucket = cfg.bucket.clone();
+    let rsp = client.create_multipart_upload().bucket(bucket.clone()).key(name.clone()).send().await.unwrap();
     let upload_id = rsp.upload_id.unwrap();
     let upload_id_clone = upload_id.clone();
     let name_clone = name.clone();
+    let client_clone = client.clone();
     let upload_part_handle = move |part: Vec<u8>, part_number: i32|{
-        client.upload_part().bucket(cfg.bucket.clone()).key(name_clone.clone())
+        client_clone.upload_part().bucket(bucket.clone()).key(name_clone.clone())
             .upload_id(upload_id_clone.clone()).part_number(part_number).body(SdkBody::from(part).into())
     };
     let chunks = obj
@@ -235,7 +243,7 @@ async fn multi_part_upload(
     }
 }
 
-async fn get(cfg: &Config, client: &Client, name: String) -> Cost {
+async fn get(cfg: Arc<Config>, client: Arc<Client>, name: String) -> Cost {
     let t = Instant::now();
     let resp = client
         .get_object()
@@ -255,8 +263,7 @@ async fn get(cfg: &Config, client: &Client, name: String) -> Cost {
 }
 
 async fn multi_part_get(
-    cfg: &Config,
-    client: &Client,
+    cfg: Arc<Config>, client: Arc<Client>,
     name: String,
     part_numbers: Vec<i32>,
 ) -> Cost {
@@ -289,8 +296,7 @@ async fn multi_part_get(
 }
 
 async fn byte_range_get(
-    cfg: &Config,
-    client: &Client,
+    cfg: Arc<Config>, client: Arc<Client>,
     name: String,
     start: u64,
     end: u64,
@@ -309,17 +315,17 @@ async fn byte_range_get(
     }
 }
 
-async fn run_case(index: usize, case: Case, cfg: &Config, client: &Client, objs: &mut ObjPool) {
+async fn run_case(index: usize, case: Case, cfg: Arc<Config>, client: Arc<Client>, objs: Arc<RwLock<ObjPool>>)->Result<(),RwError> {
     let (name, analysis) = match case.clone() {
         Case::Put {
             name,
             obj: obj_name,
             size: obj_size,
         } => {
-            let obj = objs.obj(obj_size);
+            let obj = objs.write().await.obj(obj_size);
             (
                 name.to_owned(),
-                iter_exec(|| put(cfg, client, obj_name, obj), cfg.iter).await,
+                iter_exec(|| put(cfg.clone(), client, obj_name, obj), cfg.iter.clone()).await,
             )
         }
         Case::MultiPartUpload {
@@ -328,12 +334,12 @@ async fn run_case(index: usize, case: Case, cfg: &Config, client: &Client, objs:
             size: obj_size,
             part: part_size,
         } => {
-            let obj = objs.obj(obj_size);
+            let obj = objs.write().await.obj(obj_size);
             (
                 name.to_owned(),
                 iter_exec(
-                    || multi_part_upload(cfg, client, obj_name, obj, part_size),
-                    cfg.iter,
+                    || multi_part_upload(cfg.clone(), client, obj_name, obj, part_size),
+                    cfg.iter.clone(),
                 )
                     .await,
             )
@@ -343,7 +349,7 @@ async fn run_case(index: usize, case: Case, cfg: &Config, client: &Client, objs:
             obj: obj_name,
         } => (
             name.to_owned(),
-            iter_exec(|| get(cfg, client, obj_name), cfg.iter).await,
+            iter_exec(|| get(cfg.clone(), client, obj_name), cfg.iter.clone()).await,
         ),
         Case::MultiPartGet {
             name,
@@ -352,8 +358,8 @@ async fn run_case(index: usize, case: Case, cfg: &Config, client: &Client, objs:
         } => (
             name.to_owned(),
             iter_exec(
-                || multi_part_get(cfg, client, obj_name, part_numbers),
-                cfg.iter,
+                || multi_part_get(cfg.clone(), client, obj_name, part_numbers),
+                cfg.iter.clone(),
             )
                 .await,
         ),
@@ -365,8 +371,8 @@ async fn run_case(index: usize, case: Case, cfg: &Config, client: &Client, objs:
         } => (
             name.to_owned(),
             iter_exec(
-                || byte_range_get(cfg, client, obj_name, start, end),
-                cfg.iter,
+                || byte_range_get(cfg.clone(), client, obj_name, start, end),
+                cfg.iter.clone(),
             )
                 .await,
         ),
@@ -380,7 +386,7 @@ async fn run_case(index: usize, case: Case, cfg: &Config, client: &Client, objs:
         _ => d2s(d),
     };
     let data_with_name = [
-        ("name".to_owned(), format!("{} ({} iters)", name, cfg.iter)),
+        ("name".to_owned(), format!("{} ({} iters)", name, cfg.iter.clone())),
         ("bytes".to_owned(), analysis.bytes.to_string_as(true)),
         (
             "bandwidth".to_owned(),
@@ -430,12 +436,13 @@ async fn run_case(index: usize, case: Case, cfg: &Config, client: &Client, objs:
             .map(|(_, item)| item.to_owned())
             .collect_vec();
         println!("{}", data.join(","));
-        return;
+        return Ok(());
     }
     for (name, item) in data_with_name {
         println!("{}: {}", name, item);
     }
-    println!()
+    println!();
+    Ok(())
 }
 async fn exec<F, FB>(fb: FB) -> Cost
     where
@@ -510,18 +517,35 @@ struct Analysis {
 async fn main() {
     env_logger::init();
 
-    let cfg = Config::parse();
-
+    let cfg = Arc::new(Config::parse());
     let shared_config = aws_config::load_from_env().await;
-    let client = Client::new(&shared_config);
+    let client = Arc::new(Client::new(&shared_config));
 
-    // let client = S3Client::new_with(HttpClient::new().unwrap(), provider, region);
-    let mut objs = ObjPool::default();
+    let objs = Arc::new(RwLock::new(ObjPool::default()));
 
-    let mut cases = read_cases(&cfg);
+    let mut cases = read_cases(cfg.clone());
 
-    for (i, case) in cases.drain(..).enumerate() {
-        debug!("running case: {:?}", case);
-        run_case(i, case, &cfg, &client, &mut objs).await;
+    if cfg.multithread > 1 {
+        let mut features = vec![];
+        for (i, case) in cases.drain(..).enumerate() {
+            debug!("running case: {:?}", case);
+            let objs = objs.clone();
+            features.push(run_case(i, case, cfg.clone(), client.clone(), objs));
+        }
+        std::thread::spawn(move || {
+            tokio::runtime::Builder::new_multi_thread()
+                .worker_threads(cfg.multithread)
+                .enable_all()
+                .build()
+                .unwrap()
+                .block_on(async move{
+                    try_join_all(features).await.unwrap();
+                });
+        });
+    }else{
+        for (i, case) in cases.drain(..).enumerate() {
+            debug!("running case: {:?}", case);
+            run_case(i, case, cfg.clone(), client.clone(), objs.clone()).await.unwrap();
+        }
     }
 }
