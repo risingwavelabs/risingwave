@@ -92,7 +92,7 @@ impl TableCatalogBuilder {
             is_index_on: None,
             distribution_key,
             appendonly: append_only,
-            owner: risingwave_common::catalog::DEFAULT_SUPPER_USER.to_string(),
+            owner: risingwave_common::catalog::DEFAULT_SUPER_USER_ID,
             vnode_mapping: None,
             properties: HashMap::default(),
             read_pattern_prefix_column: 0,

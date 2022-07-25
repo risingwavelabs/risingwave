@@ -67,7 +67,7 @@ mod tests {
         Database {
             id,
             name: format!("database_{}", id),
-            owner: risingwave_common::catalog::DEFAULT_SUPPER_USER.to_string(),
+            owner: risingwave_common::catalog::DEFAULT_SUPER_USER_ID,
         }
     }
 
