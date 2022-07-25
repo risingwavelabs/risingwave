@@ -98,7 +98,7 @@ impl SstableStore {
             self.meta_cache.insert(
                 sst.id,
                 sst.id,
-                sst.encoded_size() + sst.meta.estimated_size as usize,
+                sst.meta.encoded_size() + sst.meta.estimated_size as usize,
                 Box::new(sst),
             );
         }
