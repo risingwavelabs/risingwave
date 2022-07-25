@@ -9,9 +9,9 @@ echo "+++ Run unit tests with coverage"
 # disable fuzzing tests (risingwave_sqlsmith)
 # use tee to disable progress bar
 NEXTEST_PROFILE=ci cargo llvm-cov nextest \
+    --exclude_from_test risingwave_sqlsmith \
     --lcov --output-path lcov.info \
     --features failpoints \
-    --workspace --exclude risingwave_sqlsmith \
     2> >(tee)
 
 echo "--- Codecov upload coverage reports"
