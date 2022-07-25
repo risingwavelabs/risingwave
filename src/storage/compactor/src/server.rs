@@ -29,7 +29,7 @@ use risingwave_pb::hummock::compactor_service_server::CompactorServiceServer;
 use risingwave_rpc_client::MetaClient;
 use risingwave_storage::hummock::compaction_executor::CompactionExecutor;
 use risingwave_storage::hummock::hummock_meta_client::MonitoredHummockMetaClient;
-use risingwave_storage::hummock::SstableStore;
+use risingwave_storage::hummock::{MemoryLimiter, SstableStore};
 use risingwave_storage::monitor::{
     monitor_cache, HummockMetrics, ObjectStoreMetrics, StateStoreMetrics,
 };
@@ -96,7 +96,6 @@ pub async fn compactor_serve(
         storage_config.block_cache_capacity_mb * (1 << 20),
         storage_config.meta_cache_capacity_mb * (1 << 20),
     ));
-    monitor_cache(sstable_store.clone(), &registry).unwrap();
 
     let table_id_to_slice_transform = Arc::new(RwLock::new(HashMap::new()));
     let compactor_observer_node = CompactorObserverNode::new(table_id_to_slice_transform.clone());
@@ -110,6 +109,10 @@ pub async fn compactor_serve(
     .await;
 
     let observer_join_handle = observer_manager.start().await.unwrap();
+    let memory_limiter = Arc::new(MemoryLimiter::new(
+        (storage_config.compactor_memory_limit_mb as u64) << 20,
+    ));
+    monitor_cache(sstable_store.clone(), memory_limiter.clone(), &registry).unwrap();
 
     let sub_tasks = vec![
         MetaClient::start_heartbeat_loop(
@@ -123,6 +126,7 @@ pub async fn compactor_serve(
             state_store_stats,
             Some(Arc::new(CompactionExecutor::new(None))),
             table_id_to_slice_transform.clone(),
+            memory_limiter,
         ),
     ];
 

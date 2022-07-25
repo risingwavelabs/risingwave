@@ -874,8 +874,10 @@ impl Compactor {
         stats: Arc<StateStoreMetrics>,
         compaction_executor: Option<Arc<CompactionExecutor>>,
         table_id_to_slice_transform: Arc<RwLock<HashMap<u32, SliceTransformImpl>>>,
+        memory_limiter: Arc<MemoryLimiter>,
     ) -> (JoinHandle<()>, Sender<()>) {
         let compactor_context = Arc::new(CompactorContext {
+            options,
             hummock_meta_client: hummock_meta_client.clone(),
             sstable_store: sstable_store.clone(),
             stats,
@@ -883,10 +885,7 @@ impl Compactor {
             sstable_id_generator: get_remote_sstable_id_generator(hummock_meta_client.clone()),
             compaction_executor,
             table_id_to_slice_transform,
-            memory_limiter: Arc::new(MemoryLimiter::new(
-                options.compactor_memory_limit_mb as u64 * 1024 * 1024,
-            )),
-            options,
+            memory_limiter,
         });
         let (shutdown_tx, mut shutdown_rx) = tokio::sync::oneshot::channel();
         let stream_retry_interval = Duration::from_secs(60);
@@ -1052,7 +1051,7 @@ impl Compactor {
 pub fn estimate_memory_use_for_compaction(task: &CompactTask) -> u64 {
     let mut total_memory_size = 0;
     for level in &task.input_ssts {
-        if level.level_type == LevelType::Nonoverlapping {
+        if level.level_type == LevelType::Nonoverlapping as i32 {
             if let Some(table) = level.table_infos.first() {
                 total_memory_size += table.file_size;
             }

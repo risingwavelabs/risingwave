@@ -36,6 +36,7 @@ use risingwave_source::MemSourceManager;
 use risingwave_storage::hummock::compaction_executor::CompactionExecutor;
 use risingwave_storage::hummock::compactor::Compactor;
 use risingwave_storage::hummock::hummock_meta_client::MonitoredHummockMetaClient;
+use risingwave_storage::hummock::MemoryLimiter;
 use risingwave_storage::monitor::{
     monitor_cache, HummockMetrics, ObjectStoreMetrics, StateStoreMetrics,
 };
@@ -134,6 +135,9 @@ pub async fn compute_node_serve(
     .await
     .unwrap();
     if let StateStoreImpl::HummockStateStore(storage) = &state_store {
+        let memory_limiter = Arc::new(MemoryLimiter::new(
+            storage_config.compactor_memory_limit_mb as u64 * 1024 * 1024,
+        ));
         if opts.state_store.starts_with("hummock+memory")
             || opts.state_store.starts_with("hummock+disk")
             || storage_config.disable_remote_compactor
@@ -147,10 +151,11 @@ pub async fn compute_node_serve(
                 state_store_metrics.clone(),
                 Some(Arc::new(CompactionExecutor::new(Some(1)))),
                 table_id_to_slice_transform.clone(),
+                memory_limiter.clone(),
             );
             sub_tasks.push((handle, shutdown_sender));
         }
-        monitor_cache(storage.sstable_store(), &registry).unwrap();
+        monitor_cache(storage.sstable_store(), memory_limiter, &registry).unwrap();
     }
 
     // Initialize the managers.

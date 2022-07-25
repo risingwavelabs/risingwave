@@ -24,7 +24,7 @@ use risingwave_common::monitor::Print;
 use risingwave_hummock_sdk::HummockSstableId;
 
 use crate::hummock::sstable_store::SstableStoreRef;
-use crate::hummock::{BlockCache, LruCache, Sstable};
+use crate::hummock::{BlockCache, LruCache, MemoryLimiter, Sstable};
 
 /// Define all metrics.
 #[macro_export]
@@ -443,10 +443,12 @@ struct StateStoreCollector {
     descs: Vec<Desc>,
     block_cache_size: IntGauge,
     meta_cache_size: IntGauge,
+    limit_memory_size: IntGauge,
+    memory_limiter: Arc<MemoryLimiter>,
 }
 
 impl StateStoreCollector {
-    pub fn new(sstable_store: SstableStoreRef) -> Self {
+    pub fn new(sstable_store: SstableStoreRef, memory_limiter: Arc<MemoryLimiter>) -> Self {
         let mut descs = Vec::new();
 
         let block_cache_size = IntGauge::with_opts(Opts::new(
@@ -462,6 +464,12 @@ impl StateStoreCollector {
         ))
         .unwrap();
         descs.extend(meta_cache_size.desc().into_iter().cloned());
+        let limit_memory_size = IntGauge::with_opts(Opts::new(
+            "state_store_limit_memory_size",
+            "the size of cache for meta file cache",
+        ))
+        .unwrap();
+        descs.extend(limit_memory_size.desc().into_iter().cloned());
 
         Self {
             block_cache: sstable_store.get_block_cache(),
@@ -469,6 +477,8 @@ impl StateStoreCollector {
             descs,
             block_cache_size,
             meta_cache_size,
+            memory_limiter,
+            limit_memory_size,
         }
     }
 }
@@ -482,18 +492,26 @@ impl Collector for StateStoreCollector {
         self.block_cache_size.set(self.block_cache.size() as i64);
         self.meta_cache_size
             .set(self.meta_cache.get_memory_usage() as i64);
+        self.limit_memory_size
+            .set(self.memory_limiter.get_memory_usage() as i64);
 
         // collect MetricFamilies.
         let mut mfs = Vec::with_capacity(2);
         mfs.extend(self.block_cache_size.collect());
         mfs.extend(self.meta_cache_size.collect());
+        mfs.extend(self.limit_memory_size.collect());
         mfs
     }
 }
 
 use std::io::{Error, ErrorKind, Result};
-pub fn monitor_cache(sstable_store: SstableStoreRef, registry: &Registry) -> Result<()> {
-    let collector = StateStoreCollector::new(sstable_store);
+
+pub fn monitor_cache(
+    sstable_store: SstableStoreRef,
+    memory_limiter: Arc<MemoryLimiter>,
+    registry: &Registry,
+) -> Result<()> {
+    let collector = StateStoreCollector::new(sstable_store, memory_limiter);
     registry
         .register(Box::new(collector))
         .map_err(|e| Error::new(ErrorKind::Other, e.to_string()))
