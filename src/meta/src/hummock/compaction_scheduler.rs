@@ -22,6 +22,7 @@ use risingwave_hummock_sdk::CompactionGroupId;
 use tokio::sync::mpsc::UnboundedSender;
 use tokio::sync::oneshot::Receiver;
 
+use crate::hummock::compaction::CompactStatus;
 use crate::hummock::error::Error;
 use crate::hummock::{CompactorManagerRef, HummockManagerRef};
 use crate::storage::MetaStore;
@@ -124,7 +125,7 @@ where
             .get_compact_task(compaction_group)
             .await;
         request_channel.unschedule(compaction_group);
-        let compact_task = match compact_task {
+        let mut compact_task = match compact_task {
             Ok(Some(compact_task)) => compact_task,
             Ok(None) => {
                 // No compaction task available.
@@ -139,6 +140,17 @@ where
             "Picked compaction task. {}",
             compact_task_to_string(&compact_task)
         );
+        // TODO: merge this two operation in one lock guard because the target sub-level may be
+        // removed by the other thread.
+        if CompactStatus::is_trivial_move_task(&compact_task) {
+            compact_task.task_status = true;
+            compact_task.sorted_output_ssts = compact_task.input_ssts[0].table_infos.clone();
+            return self
+                .hummock_manager
+                .report_compact_task_impl(&compact_task, true)
+                .await
+                .is_ok();
+        }
 
         // 2. Assign the compaction task to a compactor.
         'send_task: loop {
