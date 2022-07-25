@@ -12,24 +12,96 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::collections::hash_map::Entry;
-use std::collections::HashMap;
+use std::fmt;
 
 use fixedbitset::FixedBitSet;
+use itertools::Itertools;
 
 use crate::utils::ColIndexMapping;
+
+/// [`FunctionalDependency`] represent a dependency of from --> to.
+#[derive(Debug, PartialEq, Clone, Default)]
+pub struct FunctionalDependency {
+    pub from: FixedBitSet,
+    pub to: FixedBitSet,
+}
+
+impl fmt::Display for FunctionalDependency {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        let from = self.from.ones().collect_vec();
+        let to = self.to.ones().collect_vec();
+        f.write_fmt(format_args!("{:?} --> {:?}", from, to))
+    }
+}
+
+impl FunctionalDependency {
+    
+    /// Create a [`FunctionalDependency`] with bitset.
+    /// This indicate a from --> to dependency.
+    pub fn new(from: FixedBitSet, to: FixedBitSet) -> Self {
+        assert_eq!(
+            from.len(),
+            to.len(),
+            "from and to should have the same length"
+        );
+        FunctionalDependency { from, to }
+    }
+    
+    /// Create a [`FunctionalDependency`] with column indices.
+    pub fn with_indices(column_cnt: usize, from: &[usize], to: &[usize]) -> Self {
+        let from = {
+            let mut tmp = FixedBitSet::with_capacity(column_cnt);
+            for &i in from {
+                tmp.set(i, true);
+            }
+            tmp
+        };
+        let to = {
+            let mut tmp = FixedBitSet::with_capacity(column_cnt);
+            for &i in to {
+                tmp.set(i, true);
+            }
+            tmp
+        };
+        FunctionalDependency { from, to }
+    }
+
+    /// Create a [`FunctionalDependency`] for a key column. This column can determine all other columns.
+    pub fn with_key_column(column_cnt: usize, key_column_id: usize) -> Self {
+        let mut from = FixedBitSet::with_capacity(column_cnt);
+        from.set(key_column_id, true);
+        let mut to = from.clone();
+        to.toggle_range(0..to.len());
+        FunctionalDependency { from, to }
+    }
+
+    /// Create a [`FunctionalDependency`] for a constant column. This column can be determined by any column.
+    pub fn with_constant_column(column_cnt: usize, constant_column_id: usize) -> Self {
+        let mut to = FixedBitSet::with_capacity(column_cnt);
+        to.set(constant_column_id, true);
+        FunctionalDependency {
+            from: FixedBitSet::with_capacity(column_cnt),
+            to,
+        }
+    }
+
+    pub fn into_inner(self) -> (FixedBitSet, FixedBitSet) {
+        (self.from, self.to)
+    }
+}
+
 /// [`FunctionalDependencySet`] contains the functional dependencies.
 ///
 /// It is used in optimizer to track the dependencies between columns.
 #[derive(Debug, PartialEq, Clone, Default)]
 pub struct FunctionalDependencySet {
-    fd: HashMap<FixedBitSet, FixedBitSet>,
+    strict: Vec<FunctionalDependency>,
 }
 
 impl FunctionalDependencySet {
     /// Create a empty [`FunctionalDependencySet`]
     pub fn new() -> Self {
-        Self { fd: HashMap::new() }
+        Self { strict: Vec::new() }
     }
 
     /// Create a [`FunctionalDependencySet`] with the indices of a key.
@@ -43,7 +115,7 @@ impl FunctionalDependencySet {
     ///
     /// assert_eq!(fd_inner.len(), 1);
     ///
-    /// let (from, to) = fd_inner.into_iter().next().unwrap();
+    /// let FunctionalDependency { from, to } = fd_inner[0];
     /// assert_eq!(from.ones().collect_vec(), &[1]);
     /// assert_eq!(to.ones().collect_vec(), &[0, 2, 3]);
     /// ```
@@ -53,40 +125,34 @@ impl FunctionalDependencySet {
         tmp
     }
 
-    /// Create a [`FunctionalDependencySet`] with a dependency [`HashMap`]
-    pub fn with_dependencies(dependencies: HashMap<FixedBitSet, FixedBitSet>) -> Self {
-        Self { fd: dependencies }
+    /// Create a [`FunctionalDependencySet`] with a dependency [`Vec`]
+    pub fn with_dependencies(dependencies: Vec<FunctionalDependency>) -> Self {
+        Self { strict: dependencies }
     }
 
-    pub fn as_dependencies_mut(&mut self) -> &mut HashMap<FixedBitSet, FixedBitSet> {
-        &mut self.fd
+    pub fn as_dependencies_mut(&mut self) -> &mut Vec<FunctionalDependency> {
+        &mut self.strict
     }
 
-    pub fn as_dependencies(&self) -> &HashMap<FixedBitSet, FixedBitSet> {
-        &self.fd
+    pub fn as_dependencies(&self) -> &Vec<FunctionalDependency> {
+        &self.strict
     }
 
-    pub fn into_dependencies(self) -> HashMap<FixedBitSet, FixedBitSet> {
-        self.fd
+    pub fn into_dependencies(self) -> Vec<FunctionalDependency> {
+        self.strict
     }
 
     /// Add a dependency to [`FunctionalDependencySet`] using [`FixedBitset`].
-    ///
-    /// # SAFETY
-    /// The length of `from` and `to` must be the same.
-    pub fn add_functional_dependency(&mut self, from: FixedBitSet, to: FixedBitSet) {
+    pub fn add_functional_dependency(&mut self, fd: FunctionalDependency) {
+        let FunctionalDependency { from, to } = fd;
         assert_eq!(
             from.len(),
             to.len(),
             "from and to should have the same length"
         );
-        match self.fd.entry(from) {
-            Entry::Vacant(e) => {
-                e.insert(to);
-            }
-            Entry::Occupied(mut e) => {
-                e.get_mut().union_with(&to);
-            }
+        match self.strict.iter().position(|elem| elem.from == from) {
+            Some(idx) => self.strict[idx].to.union_with(&to),
+            None => self.strict.push(FunctionalDependency::new(from, to)),
         }
     }
 
@@ -95,7 +161,9 @@ impl FunctionalDependencySet {
         from.set(column_id, true);
         let mut to = from.clone();
         to.toggle_range(0..to.len());
-        self.add_functional_dependency(from, to);
+        self.add_functional_dependency(FunctionalDependency::with_key_column(
+            column_cnt, column_id,
+        ));
     }
 
     /// Add key columns to a  [`FunctionalDependencySet`].
@@ -111,7 +179,7 @@ impl FunctionalDependencySet {
     ///
     /// assert_eq!(fd_inner.len(), 1);
     ///
-    /// let (from, to) = fd_inner.into_iter().next().unwrap();
+    /// let FunctionalDependency { from, to } = fd_inner[0];
     /// assert_eq!(from.ones().collect_vec(), &[1]);
     /// assert_eq!(to.ones().collect_vec(), &[0, 2, 3]);
     /// ```
@@ -133,14 +201,14 @@ impl FunctionalDependencySet {
     ///
     /// assert_eq!(fd_inner.len(), 1);
     ///
-    /// let (from, to) = fd_inner.into_iter().next().unwrap();
+    /// let FunctionalDependency { from, to } = fd_inner[0];
     /// assert!(from.ones().collect_vec().is_empty());
     /// assert_eq!(to.ones().collect_vec(), &[1]);
     /// ```
     pub fn add_constant_column_by_index(&mut self, column_cnt: usize, column_id: usize) {
-        let mut to = FixedBitSet::with_capacity(column_cnt);
-        to.set(column_id, true);
-        self.add_functional_dependency(FixedBitSet::with_capacity(column_cnt), to);
+        self.add_functional_dependency(FunctionalDependency::with_constant_column(
+            column_cnt, column_id,
+        ));
     }
 
     /// Add a dependency to [`FunctionalDependencySet`] using column indices.
@@ -156,7 +224,7 @@ impl FunctionalDependencySet {
     ///
     /// assert_eq!(fd_inner.len(), 1);
     ///
-    /// let (from, to) = fd_inner.into_iter().next().unwrap();
+    /// let FunctionalDependency { from, to } = fd_inner[0];
     /// assert_eq!(from.ones().collect_vec(), &[1, 2]);
     /// assert_eq!(to.ones().collect_vec(), &[0]);
     /// ```
@@ -180,7 +248,7 @@ impl FunctionalDependencySet {
             }
             tmp
         };
-        self.add_functional_dependency(from, to)
+        self.add_functional_dependency(FunctionalDependency::new(from, to))
     }
 
     fn get_closure(&self, columns: FixedBitSet) -> FixedBitSet {
@@ -188,7 +256,7 @@ impl FunctionalDependencySet {
         let mut no_updates;
         loop {
             no_updates = true;
-            for (from, to) in &self.fd {
+            for FunctionalDependency { from, to } in &self.strict {
                 if from.is_subset(&closure) && !to.is_subset(&closure) {
                     closure.union_with(to);
                     no_updates = false;
@@ -214,15 +282,15 @@ impl FunctionalDependencySet {
     /// fd.add_functional_dependency_by_column_indices(&[3], &[4], 5); // (3) --> (4)
     /// let from = FixedBitSet::from_iter([1usize, 2usize].into_iter());
     /// let to = FixedBitSet::from_iter([4usize].into_iter());
-    /// assert!(fd.is_determined_by(from, to)); // (1, 2) --> (4)
+    /// assert!(fd.is_determined_by(from, to)); // (1, 2) --> (4) holds
     /// ```
     pub fn is_determined_by(&self, determinant: FixedBitSet, dependant: FixedBitSet) -> bool {
         self.get_closure(determinant).is_superset(&dependant)
     }
 
     pub fn rewrite_with_mapping(mut self, col_change: ColIndexMapping) -> Self {
-        let mut new_fd = HashMap::new();
-        for (from, to) in self.fd.drain() {
+        let mut new_fd = Vec::new();
+        for FunctionalDependency { from, to } in self.strict.drain(..) {
             assert_eq!(from.len(), col_change.source_size());
             assert_eq!(to.len(), col_change.source_size());
             let mut new_from = FixedBitSet::with_capacity(col_change.target_size());
@@ -234,8 +302,8 @@ impl FunctionalDependencySet {
                 }
             }
             let new_to = col_change.rewrite_bitset(&to);
-            new_fd.insert(new_from, new_to);
+            new_fd.push(FunctionalDependency::new(new_from, new_to));
         }
-        Self { fd: new_fd }
+        Self { strict: new_fd }
     }
 }

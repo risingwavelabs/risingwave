@@ -23,7 +23,7 @@ use super::{
     PlanTreeNodeUnary, PredicatePushdown, StreamExpand, ToBatch, ToStream,
 };
 use crate::expr::InputRef;
-use crate::optimizer::property::FunctionalDependencySet;
+use crate::optimizer::property::{FunctionalDependencySet};
 use crate::risingwave_common::error::Result;
 use crate::utils::{ColIndexMapping, Condition};
 
@@ -54,11 +54,11 @@ impl LogicalExpand {
         let functional_dependency = {
             let input_fd = input.functional_dependency().clone().into_dependencies();
             let mut current_fd = FunctionalDependencySet::new();
-            for (mut from, mut to) in input_fd {
-                from.grow(schema.len());
-                to.grow(schema.len());
-                from.set(schema.len() - 1, true);
-                current_fd.add_functional_dependency(from, to);
+            for mut fd in input_fd {
+                fd.from.grow(schema.len());
+                fd.to.grow(schema.len());
+                fd.from.set(schema.len() - 1, true);
+                current_fd.add_functional_dependency(fd);
             }
             current_fd
         };

@@ -89,14 +89,12 @@ impl LogicalHopWindow {
         })();
         let functional_dependency = {
             let input_fd = {
-                let tmp = input.functional_dependency().clone();
                 let mut input_fd = FunctionalDependencySet::new();
-                for (from, to) in tmp.as_dependencies() {
-                    let mut from = from.clone();
-                    let mut to = to.clone();
-                    from.grow(original_schema.len());
-                    to.grow(original_schema.len());
-                    input_fd.add_functional_dependency(from, to);
+                for fd in input.functional_dependency().as_dependencies() {
+                    let mut fd = fd.clone();
+                    fd.from.grow(original_schema.len());
+                    fd.to.grow(original_schema.len());
+                    input_fd.add_functional_dependency(fd);
                 }
                 input_fd.rewrite_with_mapping(ColIndexMapping::with_remaining_columns(
                     &output_indices,
@@ -104,15 +102,14 @@ impl LogicalHopWindow {
                 ))
             };
             let mut current_fd = FunctionalDependencySet::new();
-            for (from, to) in input_fd.as_dependencies() {
+            for fd in input_fd.as_dependencies() {
+                let mut fd = fd.clone();
                 if let Some(start_idx) = window_start_index {
-                    let mut from_with_start = from.clone();
-                    from_with_start.set(start_idx, true);
-                    current_fd.add_functional_dependency(from_with_start, to.clone());
+                    fd.from.set(start_idx, true);
+                    current_fd.add_functional_dependency(fd);
                 } else if let Some(end_idx) = window_end_index {
-                    let mut from_with_end = from.clone();
-                    from_with_end.set(end_idx, true);
-                    current_fd.add_functional_dependency(from_with_end, to.clone());
+                    fd.from.set(end_idx, true);
+                    current_fd.add_functional_dependency(fd);
                 }
             }
             if let Some(start_idx) = window_start_index {
