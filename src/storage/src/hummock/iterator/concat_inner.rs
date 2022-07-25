@@ -19,9 +19,8 @@ use async_trait::async_trait;
 use risingwave_hummock_sdk::VersionedComparator;
 use risingwave_pb::hummock::SstableInfo;
 
-use crate::hummock::iterator::{
-    DirectionEnum, HummockIterator, HummockIteratorDirection, ReadOptions,
-};
+use crate::hummock::iterator::{DirectionEnum, HummockIterator, HummockIteratorDirection};
+use crate::hummock::sstable::SstableIteratorReadOptions;
 use crate::hummock::value::HummockValue;
 use crate::hummock::{HummockResult, SstableIteratorType, SstableStoreRef};
 use crate::monitor::StoreLocalStatistic;
@@ -40,7 +39,7 @@ pub struct ConcatIteratorInner<TI: SstableIteratorType> {
     sstable_store: SstableStoreRef,
 
     stats: StoreLocalStatistic,
-    read_options: Arc<ReadOptions>,
+    read_options: Arc<SstableIteratorReadOptions>,
 }
 
 impl<TI: SstableIteratorType> ConcatIteratorInner<TI> {
@@ -50,7 +49,7 @@ impl<TI: SstableIteratorType> ConcatIteratorInner<TI> {
     pub fn new(
         tables: Vec<SstableInfo>,
         sstable_store: SstableStoreRef,
-        read_options: Arc<ReadOptions>,
+        read_options: Arc<SstableIteratorReadOptions>,
     ) -> Self {
         Self {
             sstable_iter: None,
