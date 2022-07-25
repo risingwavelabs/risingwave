@@ -17,24 +17,24 @@ use std::sync::Arc;
 
 pub use agg_call::*;
 pub use agg_state::*;
+use anyhow::anyhow;
 use dyn_clone::{self, DynClone};
 pub use foldable::*;
 use risingwave_common::array::column::Column;
 use risingwave_common::array::stream_chunk::Ops;
+use risingwave_common::array::ArrayImpl::Bool;
 use risingwave_common::array::{
-    Array, ArrayBuilder, ArrayBuilderImpl, ArrayImpl, ArrayRef, BoolArray, DecimalArray, F32Array,
-    F64Array, I16Array, I32Array, I64Array, IntervalArray, ListArray, NaiveDateArray,
-    NaiveDateTimeArray, NaiveTimeArray, Row, StructArray, Utf8Array,
+    Array, ArrayBuilder, ArrayBuilderImpl, ArrayImpl, ArrayRef, BoolArray, DataChunk, DecimalArray,
+    F32Array, F64Array, I16Array, I32Array, I64Array, IntervalArray, ListArray, NaiveDateArray,
+    NaiveDateTimeArray, NaiveTimeArray, Row, StructArray, Utf8Array, Vis,
 };
 use risingwave_common::buffer::Bitmap;
 use risingwave_common::catalog::{Field, Schema};
 use risingwave_common::hash::HashCode;
 use risingwave_common::types::{DataType, Datum};
-use risingwave_common::util::sort_util::OrderType;
 use risingwave_expr::expr::AggKind;
 use risingwave_expr::*;
-use risingwave_storage::table::state_table::StateTable;
-use risingwave_storage::table::Distribution;
+use risingwave_storage::table::state_table::RowBasedStateTable;
 use risingwave_storage::StateStore;
 pub use row_count::*;
 use static_assertions::const_assert_eq;
@@ -271,12 +271,6 @@ pub fn create_streaming_agg_state(
         }
         [] => {
             match (agg_type, return_type, datum) {
-                // `AggKind::Count` for partial/local Count(*) == RowCount while `AggKind::Sum` for
-                // final/global Count(*)
-                (AggKind::RowCount, DataType::Int64, Some(datum)) => {
-                    Box::new(StreamingRowCountAgg::with_row_cnt(datum))
-                }
-                (AggKind::RowCount, DataType::Int64, None) => Box::new(StreamingRowCountAgg::new()),
                 // According to the function header comments and the link, Count(*) == RowCount
                 // `StreamingCountAgg` does not count `NULL`, so we use `StreamingRowCountAgg` here.
                 (AggKind::Count, DataType::Int64, Some(datum)) => {
@@ -360,7 +354,7 @@ pub async fn generate_managed_agg_state<S: StateStore>(
     pk_data_types: PkDataTypes,
     epoch: u64,
     key_hash_code: Option<HashCode>,
-    state_tables: &[StateTable<S>],
+    state_tables: &[RowBasedStateTable<S>],
 ) -> StreamExecutorResult<AggState<S>> {
     let mut managed_states = vec![];
 
@@ -401,57 +395,39 @@ pub fn generate_state_tables_from_proto<S: StateStore>(
     store: S,
     internal_tables: &[risingwave_pb::catalog::Table],
     vnodes: Option<Arc<Bitmap>>,
-) -> Vec<StateTable<S>> {
+) -> Vec<RowBasedStateTable<S>> {
     let mut state_tables = Vec::with_capacity(internal_tables.len());
 
     for table_catalog in internal_tables {
         // Parse info from proto and create state table.
-        let state_table = {
-            let columns = table_catalog
-                .columns
-                .iter()
-                .map(|col| col.column_desc.as_ref().unwrap().into())
-                .collect();
-            let order_types = table_catalog
-                .order_keys
-                .iter()
-                .map(|order_key| {
-                    OrderType::from_prost(
-                        &risingwave_pb::plan_common::OrderType::from_i32(order_key.order_type)
-                            .unwrap(),
-                    )
-                })
-                .collect();
-            let dist_key_indices = table_catalog
-                .distribution_keys
-                .iter()
-                .map(|dist_index| *dist_index as usize)
-                .collect();
-            let pk_indices = table_catalog
-                .pk
-                .iter()
-                .map(|pk_index| *pk_index as usize)
-                .collect();
-            let distribution = match vnodes.clone() {
-                // Hash Agg
-                Some(vnodes) => Distribution {
-                    dist_key_indices,
-                    vnodes,
-                },
-                // Simple Agg
-                None => Distribution::fallback(),
-            };
-            StateTable::new_with_distribution(
-                store.clone(),
-                risingwave_common::catalog::TableId::new(table_catalog.id),
-                columns,
-                order_types,
-                pk_indices,
-                distribution,
-            )
-        };
-
+        let state_table =
+            RowBasedStateTable::from_table_catalog(table_catalog, store.clone(), vnodes.clone());
         state_tables.push(state_table)
     }
     state_tables
+}
+
+pub fn agg_call_filter_res(
+    agg_call: &AggCall,
+    columns: &Vec<Column>,
+    vis_map: Option<&Bitmap>,
+    capacity: usize,
+) -> StreamExecutorResult<Option<Bitmap>> {
+    if let Some(ref filter) = agg_call.filter {
+        let vis = Vis::from(
+            vis_map
+                .cloned()
+                .unwrap_or_else(|| Bitmap::all_high_bits(capacity)),
+        );
+        let data_chunk = DataChunk::new(columns.to_owned(), vis);
+        if let Bool(filter_res) = filter.eval(&data_chunk)?.as_ref() {
+            Ok(Some(filter_res.to_bitmap()))
+        } else {
+            Err(StreamExecutorError::from(anyhow!(
+                "Filter can only receive bool array"
+            )))
+        }
+    } else {
+        Ok(vis_map.cloned())
+    }
 }

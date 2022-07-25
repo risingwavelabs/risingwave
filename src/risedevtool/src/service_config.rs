@@ -155,6 +155,10 @@ pub struct PrometheusConfig {
     pub port: u16,
     pub listen_address: String,
 
+    pub remote_write: bool,
+    pub remote_write_region: String,
+    pub remote_write_url: String,
+
     pub provide_compute_node: Option<Vec<ComputeNodeConfig>>,
     pub provide_meta_node: Option<Vec<MetaNodeConfig>>,
     pub provide_minio: Option<Vec<MinioConfig>>,
@@ -241,6 +245,8 @@ pub struct RedPandaConfig {
     pub internal_port: u16,
     pub outside_port: u16,
     pub address: String,
+    pub cpus: usize,
+    pub memory: String,
 }
 
 /// All service configuration

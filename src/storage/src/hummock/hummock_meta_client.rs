@@ -17,14 +17,14 @@ use std::sync::Arc;
 use async_trait::async_trait;
 use risingwave_hummock_sdk::LocalSstableInfo;
 use risingwave_pb::hummock::{
-    CompactTask, CompactionGroup, HummockVersion, SstableIdInfo, SubscribeCompactTasksResponse,
-    VacuumTask,
+    CompactTask, CompactionGroup, HummockVersion, HummockVersionDelta, SstableIdInfo,
+    SubscribeCompactTasksResponse, VacuumTask,
 };
 use risingwave_rpc_client::error::Result;
 use risingwave_rpc_client::{HummockMetaClient, MetaClient};
 use tonic::Streaming;
 
-use crate::hummock::{HummockEpoch, HummockSSTableId, HummockVersionId};
+use crate::hummock::{HummockEpoch, HummockSstableId, HummockVersionId};
 use crate::monitor::HummockMetrics;
 
 pub struct MonitoredHummockMetaClient {
@@ -41,7 +41,10 @@ impl MonitoredHummockMetaClient {
 
 #[async_trait]
 impl HummockMetaClient for MonitoredHummockMetaClient {
-    async fn pin_version(&self, last_pinned: HummockVersionId) -> Result<HummockVersion> {
+    async fn pin_version(
+        &self,
+        last_pinned: HummockVersionId,
+    ) -> Result<(bool, Vec<HummockVersionDelta>, Option<HummockVersion>)> {
         self.stats.pin_version_counts.inc();
         let timer = self.stats.pin_version_latency.start_timer();
         let res = self.meta_client.pin_version(last_pinned).await;
@@ -49,10 +52,21 @@ impl HummockMetaClient for MonitoredHummockMetaClient {
         res
     }
 
-    async fn unpin_version(&self, pinned_version_ids: &[HummockVersionId]) -> Result<()> {
+    async fn unpin_version(&self) -> Result<()> {
         self.stats.unpin_version_counts.inc();
         let timer = self.stats.unpin_version_latency.start_timer();
-        let res = self.meta_client.unpin_version(pinned_version_ids).await;
+        let res = self.meta_client.unpin_version().await;
+        timer.observe_duration();
+        res
+    }
+
+    async fn unpin_version_before(&self, unpin_version_before: HummockVersionId) -> Result<()> {
+        self.stats.unpin_version_before_counts.inc();
+        let timer = self.stats.unpin_version_before_latency.start_timer();
+        let res = self
+            .meta_client
+            .unpin_version_before(unpin_version_before)
+            .await;
         timer.observe_duration();
         res
     }
@@ -85,7 +99,7 @@ impl HummockMetaClient for MonitoredHummockMetaClient {
         unreachable!("Currently CNs should not call this function")
     }
 
-    async fn get_new_table_id(&self) -> Result<HummockSSTableId> {
+    async fn get_new_table_id(&self) -> Result<HummockSstableId> {
         self.stats.get_new_table_id_counts.inc();
         let timer = self.stats.get_new_table_id_latency.start_timer();
         let res = self.meta_client.get_new_table_id().await;

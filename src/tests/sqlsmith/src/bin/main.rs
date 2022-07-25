@@ -12,19 +12,29 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+use core::panic;
 use std::time::Duration;
 
 use clap::Parser as ClapParser;
-use risingwave_sqlparser::ast::Statement;
-use risingwave_sqlparser::parser::Parser;
-use risingwave_sqlsmith::{sql_gen, Table};
+use itertools::Itertools;
+use rand::Rng;
+use risingwave_sqlsmith::{
+    create_table_statement_to_table, mview_sql_gen, parse_sql, print_function_table, sql_gen, Table,
+};
+use tokio_postgres::error::{DbError, Error as PgError, SqlState};
 use tokio_postgres::NoTls;
 
 #[derive(ClapParser, Debug, Clone)]
 #[clap(about, version, author)]
 struct Opt {
+    #[clap(subcommand)]
+    command: Commands,
+}
+
+#[derive(clap::Args, Clone, Debug)]
+struct TestOptions {
     /// The database server host.
-    #[clap(short, long, default_value = "localhost")]
+    #[clap(long, default_value = "localhost")]
     host: String,
 
     /// The database server port.
@@ -46,29 +56,117 @@ struct Opt {
     /// Path to the testing data files.
     #[clap(short, long)]
     testdata: String,
+
+    /// The number of test cases to generate.
+    #[clap(long, default_value = "1000")]
+    count: usize,
 }
 
-async fn create_tables(opt: &Opt, client: &tokio_postgres::Client) -> Vec<Table> {
+#[derive(clap::Subcommand, Clone, Debug)]
+enum Commands {
+    /// Prints the currently supported function/operator table.
+    #[clap(name = "print-function-table")]
+    PrintFunctionTable,
+
+    /// Run testing.
+    Test(TestOptions),
+}
+
+fn get_seed_table_sql(opt: &TestOptions) -> String {
+    let seed_files = vec!["tpch.sql", "nexmark.sql"];
+    seed_files
+        .iter()
+        .map(|filename| std::fs::read_to_string(format!("{}/{}", opt.testdata, filename)).unwrap())
+        .collect::<String>()
+}
+
+async fn create_tables(
+    rng: &mut impl Rng,
+    opt: &TestOptions,
+    client: &tokio_postgres::Client,
+) -> (Vec<Table>, Vec<Table>) {
     log::info!("Preparing tables...");
 
-    let sql = std::fs::read_to_string(format!("{}/tpch.sql", opt.testdata)).unwrap();
+    let sql = get_seed_table_sql(opt);
+    let statements = parse_sql(&sql);
+    let mut tables = statements
+        .iter()
+        .map(create_table_statement_to_table)
+        .collect_vec();
 
-    let statements =
-        Parser::parse_sql(&sql).unwrap_or_else(|_| panic!("Failed to parse SQL: {}", sql));
     for stmt in statements.iter() {
-        let create_sql = format!("{}", stmt);
+        let create_sql = stmt.to_string();
         client.execute(&create_sql, &[]).await.unwrap();
     }
-    statements
-        .into_iter()
-        .map(|s| match s {
-            Statement::CreateTable { name, columns, .. } => Table {
-                name: name.0[0].value.clone(),
-                columns: columns.iter().map(|c| c.clone().into()).collect(),
-            },
-            _ => panic!("Unexpected statement: {}", s),
-        })
-        .collect()
+
+    let mut mviews = vec![];
+    // Generate some mviews
+    for i in 0..10 {
+        let (create_sql, table) = mview_sql_gen(rng, tables.clone(), &format!("m{}", i));
+        client.execute(&create_sql, &[]).await.unwrap();
+        tables.push(table.clone());
+        mviews.push(table);
+    }
+    (tables, mviews)
+}
+
+async fn drop_tables(mviews: &[Table], opt: &TestOptions, client: &tokio_postgres::Client) {
+    log::info!("Cleaning tables...");
+    for Table { name, .. } in mviews.iter().rev() {
+        client
+            .execute(&format!("DROP MATERIALIZED VIEW {}", name), &[])
+            .await
+            .unwrap();
+    }
+
+    let seed_files = vec!["drop_tpch.sql", "drop_nexmark.sql"];
+    let sql = seed_files
+        .iter()
+        .map(|filename| std::fs::read_to_string(format!("{}/{}", opt.testdata, filename)).unwrap())
+        .collect::<String>();
+
+    for stmt in sql.lines() {
+        client.execute(stmt, &[]).await.unwrap();
+    }
+}
+
+/// We diverge from PostgreSQL, instead of having undefined behaviour for overflows,
+/// See: <https://github.com/singularity-data/risingwave/blob/b4eb1107bc16f8d583563f776f748632ddcaa0cb/src/expr/src/vector_op/bitwise_op.rs#L24>
+/// FIXME: This approach is brittle and should change in the future,
+/// when we have a better way of handling overflows.
+/// Tracked by: <https://github.com/singularity-data/risingwave/issues/3900>
+fn is_numeric_out_of_range_err(db_error: &DbError) -> bool {
+    db_error.message().contains("Expr error: NumericOutOfRange")
+}
+
+/// Workaround to permit runtime errors not being propagated through channels.
+/// FIXME: This also means some internal system errors won't be caught.
+/// Tracked by: <https://github.com/singularity-data/risingwave/issues/3908#issuecomment-1186782810>
+fn is_broken_chan_err(db_error: &DbError) -> bool {
+    db_error
+        .message()
+        .contains("internal error: broken fifo_channel")
+}
+
+fn is_permissible_error(db_error: &DbError) -> bool {
+    let is_internal_error = *db_error.code() == SqlState::INTERNAL_ERROR;
+    is_internal_error && (is_numeric_out_of_range_err(db_error) || is_broken_chan_err(db_error))
+}
+
+/// Validate client responses
+fn validate_response<_Row>(response: Result<_Row, PgError>) {
+    match response {
+        Ok(_) => {}
+        Err(e) => {
+            // Permit runtime errors conservatively.
+            if let Some(e) = e.as_db_error()
+                && is_permissible_error(e)
+            {
+                return;
+            }
+            panic!("{}", e);
+        }
+    }
 }
 
 #[tokio::main(flavor = "multi_thread", worker_threads = 5)]
@@ -76,6 +174,13 @@ async fn main() {
     env_logger::init();
 
     let opt = Opt::parse();
+    let opt = match opt.command {
+        Commands::PrintFunctionTable => {
+            println!("{}", print_function_table());
+            return;
+        }
+        Commands::Test(test_opts) => test_opts,
+    };
     let (client, connection) = tokio_postgres::Config::new()
         .host(&opt.host)
         .port(opt.port)
@@ -92,13 +197,16 @@ async fn main() {
         }
     });
 
-    let tables = create_tables(&opt, &client).await;
-
     let mut rng = rand::thread_rng();
 
-    for _ in 0..100 {
+    let (tables, mviews) = create_tables(&mut rng, &opt, &client).await;
+
+    for _ in 0..opt.count {
         let sql = sql_gen(&mut rng, tables.clone());
         log::info!("Executing: {}", sql);
-        let _ = client.query(sql.as_str(), &[]).await.unwrap();
+        let response = client.query(sql.as_str(), &[]).await;
+        validate_response(response);
     }
+
+    drop_tables(&mviews, &opt, &client).await;
 }

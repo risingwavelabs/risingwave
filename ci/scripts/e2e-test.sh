@@ -33,7 +33,7 @@ chmod +x ./target/debug/risingwave
 chmod +x ./target/debug/risedev-playground
 
 echo "--- Generate RiseDev CI config"
-cp risedev-components.ci.env risedev-components.user.env
+cp ci/risedev-components.ci.env risedev-components.user.env
 
 echo "--- Prepare RiseDev playground"
 cargo make pre-start-playground
@@ -41,7 +41,7 @@ cargo make link-all-in-one-binaries
 
 echo "--- e2e, ci-3cn-1fe, streaming"
 cargo make ci-start ci-3cn-1fe
-timeout 5m sqllogictest -p 4566 -d dev './e2e_test/streaming/**/*.slt' --junit "streaming-${profile}"
+timeout 8m sqllogictest -p 4566 -d dev './e2e_test/streaming/**/*.slt' --junit "streaming-${profile}"
 
 echo "--- Kill cluster"
 cargo make ci-kill

@@ -20,7 +20,6 @@ use risingwave_pb::stream_plan::stream_node::NodeBody as ProstStreamNode;
 
 use super::logical_agg::PlanAggCall;
 use super::{LogicalAgg, PlanBase, PlanRef, PlanTreeNodeUnary, ToStreamProst};
-use crate::expr::InputRefDisplay;
 use crate::optimizer::property::Distribution;
 
 #[derive(Debug, Clone)]
@@ -50,30 +49,18 @@ impl StreamHashAgg {
         self.logical.agg_calls()
     }
 
-    pub fn group_keys(&self) -> &[usize] {
-        self.logical.group_keys()
+    pub fn group_key(&self) -> &[usize] {
+        self.logical.group_key()
     }
 }
 
 impl fmt::Display for StreamHashAgg {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-        let mut builder = if self.input().append_only() {
-            f.debug_struct("StreamAppendOnlyHashAgg")
+        if self.input().append_only() {
+            self.logical.fmt_with_name(f, "StreamAppendOnlyHashAgg")
         } else {
-            f.debug_struct("StreamHashAgg")
-        };
-        builder
-            .field(
-                "group_keys",
-                &self
-                    .group_keys()
-                    .iter()
-                    .copied()
-                    .map(InputRefDisplay)
-                    .collect_vec(),
-            )
-            .field("aggs", &self.agg_calls())
-            .finish()
+            self.logical.fmt_with_name(f, "StreamHashAgg")
+        }
     }
 }
 
@@ -93,11 +80,7 @@ impl ToStreamProst for StreamHashAgg {
         use risingwave_pb::stream_plan::*;
         let (internal_tables, column_mapping) = self.logical.infer_internal_table_catalog();
         ProstStreamNode::HashAgg(HashAggNode {
-            group_keys: self
-                .group_keys()
-                .iter()
-                .map(|idx| *idx as u32)
-                .collect_vec(),
+            group_key: self.group_key().iter().map(|idx| *idx as u32).collect_vec(),
             agg_calls: self
                 .agg_calls()
                 .iter()
@@ -112,9 +95,11 @@ impl ToStreamProst for StreamHashAgg {
                     )
                 })
                 .collect_vec(),
-            column_mapping: column_mapping
+            column_mappings: column_mapping
                 .into_iter()
-                .map(|(k, v)| (k as u32, v))
+                .map(|v| ColumnMapping {
+                    indices: v.iter().map(|x| *x as u32).collect(),
+                })
                 .collect(),
             is_append_only: self.input().append_only(),
         })

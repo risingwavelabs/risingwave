@@ -16,57 +16,51 @@ use std::borrow::Cow;
 use std::cmp::Ordering;
 use std::marker::PhantomData;
 use std::ops::Index;
+use std::sync::Arc;
 
 use futures::{pin_mut, Stream, StreamExt};
 use futures_async_stream::try_stream;
 use risingwave_common::array::Row;
+use risingwave_common::buffer::Bitmap;
 use risingwave_common::catalog::{ColumnDesc, TableId};
-use risingwave_common::util::ordered::{serialize_pk, OrderedRowSerializer};
+use risingwave_common::util::ordered::OrderedRowSerializer;
 use risingwave_common::util::sort_util::OrderType;
 use risingwave_hummock_sdk::key::range_of_prefix;
+use risingwave_pb::catalog::Table;
 
 use super::mem_table::{MemTable, RowOp};
 use super::storage_table::{StorageTableBase, READ_WRITE};
 use super::Distribution;
-use crate::encoding::cell_based_row_serializer::CellBasedRowSerializer;
-use crate::encoding::dedup_pk_cell_based_row_serializer::DedupPkCellBasedRowSerializer;
-use crate::encoding::Encoding;
 use crate::error::{StorageError, StorageResult};
+use crate::row_serde::cell_based_encoding_util::serialize_pk;
+use crate::row_serde::dedup_pk_cell_based_row_serializer::DedupPkCellBasedRowSerializer;
+use crate::row_serde::{CellBasedRowSerde, RowBasedSerde, RowSerde};
 use crate::StateStore;
 
 /// Identical to `StateTable`. Used when we want to
 /// rows to have dedup pk cell encoding.
 pub type DedupPkStateTable<S> = StateTableBase<S, DedupPkCellBasedRowSerializer>;
 
-/// `StateTable` is the interface accessing relational data in KV(`StateStore`) with encoding.
-pub type StateTable<S> = StateTableBase<S, CellBasedRowSerializer>;
+/// `StateTable` is the interface accessing relational data in KV(`StateStore`) with cell-based
+/// encoding.
+pub type StateTable<S> = StateTableBase<S, CellBasedRowSerde>;
 
+/// `RowBasedStateTable` is the interface accessing relational data in KV(`StateStore`) with
+/// row-based encoding.
+pub type RowBasedStateTable<S> = StateTableBase<S, RowBasedSerde>;
 /// `StateTableBase` is the interface accessing relational data in KV(`StateStore`) with
-/// encoding, using `RowSerializer` for row to cell serializing.
+/// encoding, using `RowSerde` for row to KV entries.
 #[derive(Clone)]
-pub struct StateTableBase<S: StateStore, E: Encoding> {
-    /// buffer key/values
+pub struct StateTableBase<S: StateStore, RS: RowSerde> {
+    /// buffer row operations.
     mem_table: MemTable,
 
-    /// Relation layer
-    storage_table: StorageTableBase<S, E, READ_WRITE>,
+    /// write into state store.
+    storage_table: StorageTableBase<S, RS, READ_WRITE>,
 }
 
-impl<S: StateStore, E: Encoding> StateTableBase<S, E> {
-    /// Note: `dist_key_indices` is ignored, use `new_with[out]_distribution` instead.
-    // TODO: remove this after all state table usages are replaced by `new_with[out]_distribution`.
-    pub fn new(
-        store: S,
-        table_id: TableId,
-        columns: Vec<ColumnDesc>,
-        order_types: Vec<OrderType>,
-        _dist_key_indices: Option<Vec<usize>>,
-        pk_indices: Vec<usize>,
-    ) -> Self {
-        Self::new_without_distribution(store, table_id, columns, order_types, pk_indices)
-    }
-
-    /// Create a state table without distribution, used for singleton executors and tests.
+impl<S: StateStore, RS: RowSerde> StateTableBase<S, RS> {
+    /// Create a state table without distribution, used for singleton executors and unit tests.
     pub fn new_without_distribution(
         store: S,
         table_id: TableId,
@@ -107,8 +101,13 @@ impl<S: StateStore, E: Encoding> StateTableBase<S, E> {
         }
     }
 
+    /// Disable sanity check in this state table. Need revisit and fix behavior for all tables.
+    pub fn disable_sanity_check(&mut self) {
+        self.storage_table.disable_sanity_check();
+    }
+
     /// Get the underlying [` StorageTableBase`]. Should only be used for tests.
-    pub fn storage_table(&self) -> &StorageTableBase<S, E, READ_WRITE> {
+    pub fn storage_table(&self) -> &StorageTableBase<S, RS, READ_WRITE> {
         &self.storage_table
     }
 
@@ -162,7 +161,7 @@ impl<S: StateStore, E: Encoding> StateTableBase<S, E> {
         Ok(())
     }
 
-    /// Insert a row into state table. Must provide a full row of old value corresponding to the
+    /// Delete a row from state table. Must provide a full row of old value corresponding to the
     /// column desc of the table.
     pub fn delete(&mut self, old_value: Row) -> StorageResult<()> {
         let mut datums = vec![];
@@ -194,9 +193,9 @@ impl<S: StateStore, E: Encoding> StateTableBase<S, E> {
 }
 
 /// Iterator functions.
-impl<S: StateStore> StateTable<S> {
+impl<S: StateStore, RS: RowSerde> StateTableBase<S, RS> {
     /// This function scans rows from the relational table.
-    pub async fn iter(&self, epoch: u64) -> StorageResult<RowStream<'_, S>> {
+    pub async fn iter(&self, epoch: u64) -> StorageResult<RowStream<'_, S, RS>> {
         self.iter_with_pk_prefix(Row::empty(), epoch).await
     }
 
@@ -205,7 +204,7 @@ impl<S: StateStore> StateTable<S> {
         &'a self,
         pk_prefix: &'a Row,
         epoch: u64,
-    ) -> StorageResult<RowStream<'a, S>> {
+    ) -> StorageResult<RowStream<'a, S, RS>> {
         let storage_table_iter = self
             .storage_table
             .streaming_iter_with_pk_bounds(epoch, pk_prefix, ..)
@@ -221,10 +220,22 @@ impl<S: StateStore> StateTable<S> {
 
         Ok(StateTableRowIter::new(mem_table_iter, storage_table_iter).into_stream())
     }
+
+    /// Create state table from table catalog and store.
+    pub fn from_table_catalog(
+        table_catalog: &Table,
+        store: S,
+        vnodes: Option<Arc<Bitmap>>,
+    ) -> Self {
+        Self {
+            mem_table: MemTable::new(),
+            storage_table: StorageTableBase::from_table_catalog(table_catalog, store, vnodes),
+        }
+    }
 }
 
-pub type RowStream<'a, S: StateStore> = impl Stream<Item = StorageResult<Cow<'a, Row>>>;
-
+pub type RowStream<'a, S: StateStore, RS: RowSerde> =
+    impl Stream<Item = StorageResult<Cow<'a, Row>>>;
 struct StateTableRowIter<'a, M, C> {
     mem_table_iter: M,
     storage_table_iter: C,

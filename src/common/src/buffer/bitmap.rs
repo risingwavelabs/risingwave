@@ -91,6 +91,14 @@ impl BitmapBuilder {
         }
     }
 
+    pub fn is_set(&self, n: usize) -> bool {
+        assert!(n < self.len);
+
+        let byte = self.data.get(n / 8).unwrap_or(&self.head);
+        let mask = 1 << (n % 8);
+        *byte & mask != 0
+    }
+
     pub fn append(&mut self, bit_set: bool) -> &mut Self {
         self.head |= (bit_set as u8) << (self.len % 8);
         self.num_high_bits += bit_set as usize;
@@ -185,13 +193,7 @@ impl Bitmap {
 
     /// Return the next set bit index on or after `bit_idx`.
     pub fn next_set_bit(&self, bit_idx: usize) -> Option<usize> {
-        for idx in bit_idx..self.len() {
-            // Since `self.len()` guards the range, we can safely call unsafe function here.
-            if unsafe { self.is_set_unchecked(idx) } {
-                return Some(idx);
-            }
-        }
-        None
+        (bit_idx..self.len()).find(|&idx| unsafe { self.is_set_unchecked(idx) })
     }
 
     pub fn num_high_bits(&self) -> usize {
@@ -384,23 +386,16 @@ mod tests {
     fn test_bitmap_builder() {
         let bitmap1 = {
             let mut builder = BitmapBuilder::default();
-            builder
-                .append(false)
-                .append(true)
-                .append(true)
-                .append(false)
-                .append(true)
-                .append(false)
-                .append(true)
-                .append(false)
-                .append(true)
-                .append(false)
-                .append(true)
-                .append(true)
-                .append(false)
-                .append(true)
-                .append(false)
-                .append(true);
+            let bits = [
+                false, true, true, false, true, false, true, false, true, false, true, true, false,
+                true, false, true,
+            ];
+            for bit in bits {
+                builder.append(bit);
+            }
+            for (idx, bit) in bits.iter().enumerate() {
+                assert_eq!(builder.is_set(idx), *bit);
+            }
             builder.finish()
         };
         let byte1 = 0b0101_0110_u8;
@@ -414,15 +409,13 @@ mod tests {
 
         let bitmap2 = {
             let mut builder = BitmapBuilder::default();
-            builder
-                .append(false)
-                .append(true)
-                .append(true)
-                .append(false)
-                .append(true)
-                .append(false)
-                .append(true)
-                .append(false);
+            let bits = [false, true, true, false, true, false, true, false];
+            for bit in bits {
+                builder.append(bit);
+            }
+            for (idx, bit) in bits.iter().enumerate() {
+                assert_eq!(builder.is_set(idx), *bit);
+            }
             builder.finish()
         };
         let byte1 = 0b0101_0110_u8;
@@ -483,6 +476,7 @@ mod tests {
     }
 
     #[test]
+    #[expect(clippy::needless_borrow)]
     fn test_bitmap_from_protobuf() {
         let bitmap_bytes = vec![3u8 /* len % 8 */, 0b0101_0010, 0b110];
         let buf = ProstBuffer {

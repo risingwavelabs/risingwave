@@ -31,14 +31,14 @@ mod merge_inner;
 pub use forward_user::*;
 pub use merge_inner::{OrderedMergeIteratorInner, UnorderedMergeIteratorInner};
 
-#[cfg(test)]
-pub(crate) mod test_utils;
+#[cfg(any(test, feature = "test"))]
+pub mod test_utils;
 
 use async_trait::async_trait;
 
 use crate::monitor::StoreLocalStatistic;
 
-/// `HummockIterator` defines the interface of all iterators, including `SSTableIterator`,
+/// `HummockIterator` defines the interface of all iterators, including `SstableIterator`,
 /// `MergeIterator`, `UserIterator` and `ConcatIterator`.
 ///
 /// After creating the iterator instance,
@@ -143,9 +143,4 @@ impl HummockIteratorDirection for Backward {
     fn direction() -> DirectionEnum {
         DirectionEnum::Backward
     }
-}
-
-#[derive(Default)]
-pub struct ReadOptions {
-    pub prefetch: bool,
 }

@@ -20,6 +20,7 @@ use risingwave_pb::stream_plan::stream_node::NodeBody as ProstStreamNode;
 
 use super::logical_agg::PlanAggCall;
 use super::{LogicalAgg, PlanBase, PlanRef, PlanTreeNodeUnary, ToStreamProst};
+use crate::optimizer::plan_node::PlanAggCallVerboseDisplay;
 use crate::optimizer::property::Distribution;
 
 #[derive(Debug, Clone)]
@@ -47,17 +48,20 @@ impl StreamGlobalSimpleAgg {
     pub fn agg_calls(&self) -> &[PlanAggCall] {
         self.logical.agg_calls()
     }
+
+    pub fn agg_calls_verbose_display(&self) -> Vec<PlanAggCallVerboseDisplay> {
+        self.logical.agg_calls_verbose_display()
+    }
 }
 
 impl fmt::Display for StreamGlobalSimpleAgg {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-        let mut builder = if self.input().append_only() {
-            f.debug_struct("StreamAppendOnlyGlobalSimpleAgg")
+        if self.input().append_only() {
+            self.logical
+                .fmt_with_name(f, "StreamAppendOnlyGlobalSimpleAgg")
         } else {
-            f.debug_struct("StreamGlobalSimpleAgg")
-        };
-        builder.field("aggs", &self.agg_calls());
-        builder.finish()
+            self.logical.fmt_with_name(f, "StreamGlobalSimpleAgg")
+        }
     }
 }
 
@@ -82,7 +86,7 @@ impl ToStreamProst for StreamGlobalSimpleAgg {
                 .iter()
                 .map(PlanAggCall::to_protobuf)
                 .collect(),
-            distribution_keys: self
+            distribution_key: self
                 .base
                 .dist
                 .dist_column_indices()
@@ -98,9 +102,11 @@ impl ToStreamProst for StreamGlobalSimpleAgg {
                     )
                 })
                 .collect_vec(),
-            column_mapping: column_mapping
+            column_mappings: column_mapping
                 .into_iter()
-                .map(|(k, v)| (k as u32, v))
+                .map(|v| ColumnMapping {
+                    indices: v.iter().map(|x| *x as u32).collect(),
+                })
                 .collect(),
             is_append_only: self.input().append_only(),
         })

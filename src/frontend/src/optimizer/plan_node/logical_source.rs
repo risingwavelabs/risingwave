@@ -37,6 +37,8 @@ pub struct LogicalSource {
 impl LogicalSource {
     pub fn new(source_catalog: Rc<SourceCatalog>, ctx: OptimizerContextRef) -> Self {
         let mut id_to_idx = HashMap::new();
+
+        #[expect(clippy::needless_borrow)]
         let fields = source_catalog
             .columns
             .iter()

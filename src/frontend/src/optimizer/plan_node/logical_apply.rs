@@ -14,6 +14,7 @@
 //
 use std::fmt;
 
+use risingwave_common::catalog::Schema;
 use risingwave_common::error::{ErrorCode, Result, RwError};
 use risingwave_pb::plan_common::JoinType;
 
@@ -21,7 +22,8 @@ use super::{
     ColPrunable, LogicalJoin, PlanBase, PlanRef, PlanTreeNodeBinary, PredicatePushdown, ToBatch,
     ToStream,
 };
-use crate::utils::{ColIndexMapping, Condition};
+use crate::expr::CorrelatedId;
+use crate::utils::{ColIndexMapping, Condition, ConditionVerboseDisplay};
 
 /// `LogicalApply` represents a correlated join, where the right side may refer to columns from the
 /// left side.
@@ -33,16 +35,35 @@ pub struct LogicalApply {
     on: Condition,
     join_type: JoinType,
 
+    /// Id of the Apply operator.
+    /// So correlated_input_ref can refer the Apply operator exactly by correlated_id.
+    correlated_id: CorrelatedId,
     /// The indices of `CorrelatedInputRef`s in `right`.
     correlated_indices: Vec<usize>,
 }
 
 impl fmt::Display for LogicalApply {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        let verbose = self.base.ctx.is_explain_verbose();
         write!(
             f,
-            "LogicalApply {{ type: {:?}, on: {} }}",
-            &self.join_type, &self.on
+            "LogicalApply {{ type: {:?}, on: {}, correlated_id: {} }}",
+            &self.join_type,
+            if verbose {
+                let mut concat_schema = self.left().schema().fields.clone();
+                concat_schema.extend(self.right().schema().fields.clone());
+                let concat_schema = Schema::new(concat_schema);
+                format!(
+                    "{}",
+                    ConditionVerboseDisplay {
+                        condition: &self.on,
+                        input_schema: &concat_schema
+                    }
+                )
+            } else {
+                format!("{}", &self.on)
+            },
+            self.correlated_id
         )
     }
 }
@@ -53,6 +74,7 @@ impl LogicalApply {
         right: PlanRef,
         join_type: JoinType,
         on: Condition,
+        correlated_id: CorrelatedId,
         correlated_indices: Vec<usize>,
     ) -> Self {
         let ctx = left.ctx();
@@ -76,6 +98,7 @@ impl LogicalApply {
             right,
             on,
             join_type,
+            correlated_id,
             correlated_indices,
         }
     }
@@ -85,9 +108,18 @@ impl LogicalApply {
         right: PlanRef,
         join_type: JoinType,
         on: Condition,
+        correlated_id: CorrelatedId,
         correlated_indices: Vec<usize>,
     ) -> PlanRef {
-        Self::new(left, right, join_type, on, correlated_indices).into()
+        Self::new(
+            left,
+            right,
+            join_type,
+            on,
+            correlated_id,
+            correlated_indices,
+        )
+        .into()
     }
 
     /// Get the join type of the logical apply.
@@ -95,14 +127,28 @@ impl LogicalApply {
         self.join_type
     }
 
-    pub fn decompose(self) -> (PlanRef, PlanRef, Condition, JoinType, Vec<usize>) {
+    pub fn decompose(
+        self,
+    ) -> (
+        PlanRef,
+        PlanRef,
+        Condition,
+        JoinType,
+        CorrelatedId,
+        Vec<usize>,
+    ) {
         (
             self.left,
             self.right,
             self.on,
             self.join_type,
+            self.correlated_id,
             self.correlated_indices,
         )
+    }
+
+    pub fn correlated_id(&self) -> CorrelatedId {
+        self.correlated_id
     }
 }
 
@@ -121,6 +167,7 @@ impl PlanTreeNodeBinary for LogicalApply {
             right,
             self.join_type,
             self.on.clone(),
+            self.correlated_id,
             self.correlated_indices.clone(),
         )
     }

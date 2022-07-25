@@ -15,6 +15,7 @@
 use std::fmt;
 
 use itertools::Itertools;
+use risingwave_common::catalog::FieldVerboseDisplay;
 use risingwave_common::error::Result;
 use risingwave_pb::batch_plan::expand_node::Subset;
 use risingwave_pb::batch_plan::plan_node::NodeBody;
@@ -47,15 +48,15 @@ impl BatchExpand {
     pub fn column_subsets(&self) -> &Vec<Vec<usize>> {
         self.logical.column_subsets()
     }
+
+    pub fn column_subsets_verbose_display(&self) -> Vec<Vec<FieldVerboseDisplay>> {
+        self.logical.column_subsets_verbose_display()
+    }
 }
 
 impl fmt::Display for BatchExpand {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        write!(
-            f,
-            "BatchExpand {{ column_subsets: {:?} }}",
-            self.column_subsets()
-        )
+        self.logical.fmt_with_name(f, "BatchExpand")
     }
 }
 
@@ -91,8 +92,8 @@ impl ToBatchProst for BatchExpand {
 }
 
 fn subset_to_protobuf(subset: &[usize]) -> Subset {
-    let keys = subset.iter().map(|key| *key as u32).collect_vec();
-    Subset { keys }
+    let column_indices = subset.iter().map(|key| *key as u32).collect_vec();
+    Subset { column_indices }
 }
 
 impl ToLocalBatch for BatchExpand {

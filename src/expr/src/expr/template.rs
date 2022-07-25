@@ -385,6 +385,7 @@ macro_rules! for_all_cmp_variants {
             { float64, decimal, float64, $general_f },
             { timestamp, timestamp, timestamp, $general_f },
             { interval, interval, interval, $general_f },
+            { time, time, time, $general_f },
             { date, date, date, $general_f },
             { boolean, boolean, boolean, $general_f },
             { timestamp, date, timestamp, $general_f },

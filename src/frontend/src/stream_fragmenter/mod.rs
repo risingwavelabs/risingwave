@@ -75,6 +75,17 @@ impl BuildFragmentGraphState {
 pub struct StreamFragmenter {}
 
 impl StreamFragmenter {
+    fn is_stateful_executor(stream_node: &StreamNode) -> bool {
+        matches!(
+            stream_node.get_node_body().unwrap(),
+            NodeBody::HashAgg(_)
+                | NodeBody::HashJoin(_)
+                | NodeBody::DeltaIndexJoin(_)
+                | NodeBody::Chain(_)
+                | NodeBody::DynamicFilter(_)
+        )
+    }
+
     /// Do some dirty rewrites on meta. Currently, it will split stateful operators into two
     /// fragments.
     fn rewrite_stream_node(
@@ -82,7 +93,8 @@ impl StreamFragmenter {
         state: &mut BuildFragmentGraphState,
         stream_node: StreamNode,
     ) -> Result<StreamNode> {
-        self.rewrite_stream_node_inner(state, stream_node, false)
+        let insert_exchange_flag = Self::is_stateful_executor(&stream_node);
+        self.rewrite_stream_node_inner(state, stream_node, insert_exchange_flag)
     }
 
     fn rewrite_stream_node_inner(
@@ -94,43 +106,40 @@ impl StreamFragmenter {
         let mut inputs = vec![];
 
         for child_node in stream_node.input {
-            let input = match child_node.get_node_body()? {
-                // For stateful operators, set `exchange_flag = true`. If it's already true, force
-                // add an exchange.
-                NodeBody::HashAgg(_)
-                | NodeBody::HashJoin(_)
-                | NodeBody::DeltaIndexJoin(_)
-                | NodeBody::Chain(_) => {
-                    if insert_exchange_flag {
-                        let child_node =
-                            self.rewrite_stream_node_inner(state, child_node, false)?;
+            // For stateful operators, set `exchange_flag = true`. If it's already true, force
+            // add an exchange.
+            let input = if Self::is_stateful_executor(&child_node) {
+                if insert_exchange_flag {
+                    let child_node = self.rewrite_stream_node_inner(state, child_node, true)?;
 
-                        let strategy = DispatchStrategy {
-                            r#type: DispatcherType::NoShuffle.into(),
-                            column_indices: vec![],
-                        };
-                        let append_only = child_node.append_only;
-                        StreamNode {
-                            pk_indices: child_node.pk_indices.clone(),
-                            fields: child_node.fields.clone(),
-                            node_body: Some(NodeBody::Exchange(ExchangeNode {
-                                strategy: Some(strategy.clone()),
-                            })),
-                            operator_id: state.gen_operator_id() as u64,
-                            input: vec![child_node],
-                            identity: "Exchange (NoShuffle)".to_string(),
-                            append_only,
-                        }
-                    } else {
-                        self.rewrite_stream_node_inner(state, child_node, true)?
+                    let strategy = DispatchStrategy {
+                        r#type: DispatcherType::NoShuffle.into(),
+                        column_indices: vec![], // TODO: use distribution key
+                    };
+                    let append_only = child_node.append_only;
+                    StreamNode {
+                        pk_indices: child_node.pk_indices.clone(),
+                        fields: child_node.fields.clone(),
+                        node_body: Some(NodeBody::Exchange(ExchangeNode {
+                            strategy: Some(strategy.clone()),
+                        })),
+                        operator_id: state.gen_operator_id() as u64,
+                        input: vec![child_node],
+                        identity: "Exchange (NoShuffle)".to_string(),
+                        append_only,
                     }
+                } else {
+                    self.rewrite_stream_node_inner(state, child_node, true)?
                 }
-                // For exchanges, reset the flag.
-                NodeBody::Exchange(_) => {
-                    self.rewrite_stream_node_inner(state, child_node, false)?
+            } else {
+                match child_node.get_node_body()? {
+                    // For exchanges, reset the flag.
+                    NodeBody::Exchange(_) => {
+                        self.rewrite_stream_node_inner(state, child_node, false)?
+                    }
+                    // Otherwise, recursively visit the children.
+                    _ => self.rewrite_stream_node_inner(state, child_node, insert_exchange_flag)?,
                 }
-                // Otherwise, recursively visit the children.
-                _ => self.rewrite_stream_node_inner(state, child_node, insert_exchange_flag)?,
             };
             inputs.push(input);
         }
@@ -191,7 +200,7 @@ impl StreamFragmenter {
                 // memorize table id for later use
                 state
                     .dependent_table_ids
-                    .insert(TableId::from(&node.table_ref_id));
+                    .insert(TableId::new(node.table_id));
             }
 
             _ => {}
@@ -355,6 +364,15 @@ impl StreamFragmenter {
                 append_only_top_n_node.table_id_h = state.gen_table_id();
             }
 
+            NodeBody::DynamicFilter(dynamic_filter_node) => {
+                if let Some(left_table) = &mut dynamic_filter_node.left_table {
+                    left_table.id = state.gen_table_id();
+                }
+                if let Some(right_table) = &mut dynamic_filter_node.right_table {
+                    right_table.id = state.gen_table_id();
+                }
+            }
+
             _ => {}
         }
     }
@@ -387,6 +405,8 @@ mod tests {
                 ..Default::default()
             }),
             distinct: false,
+            order_by_fields: vec![],
+            filter: None,
         }
     }
 
@@ -413,7 +433,7 @@ mod tests {
             id: TableId::placeholder().table_id,
             name: String::new(),
             columns,
-            order_keys: vec![ColumnOrder {
+            order_key: vec![ColumnOrder {
                 index: 0,
                 order_type: 2,
             }],

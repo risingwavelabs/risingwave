@@ -20,7 +20,7 @@ use async_trait::async_trait;
 use paste::paste;
 use risingwave_common::catalog::{CatalogVersion, TableId};
 use risingwave_common::util::addr::HostAddr;
-use risingwave_hummock_sdk::{HummockEpoch, HummockSSTableId, HummockVersionId, LocalSstableInfo};
+use risingwave_hummock_sdk::{HummockEpoch, HummockSstableId, HummockVersionId, LocalSstableInfo};
 use risingwave_pb::catalog::{
     Database as ProstDatabase, Schema as ProstSchema, Source as ProstSource, Table as ProstTable,
 };
@@ -33,6 +33,7 @@ use risingwave_pb::meta::cluster_service_client::ClusterServiceClient;
 use risingwave_pb::meta::heartbeat_service_client::HeartbeatServiceClient;
 use risingwave_pb::meta::list_table_fragments_response::TableFragmentInfo;
 use risingwave_pb::meta::notification_service_client::NotificationServiceClient;
+use risingwave_pb::meta::scale_service_client::ScaleServiceClient;
 use risingwave_pb::meta::stream_manager_service_client::StreamManagerServiceClient;
 use risingwave_pb::meta::*;
 use risingwave_pb::stream_plan::StreamFragmentGraph;
@@ -89,10 +90,16 @@ impl MetaClient {
     }
 
     /// Register the current node to the cluster and set the corresponding worker id.
-    pub async fn register(&mut self, addr: &HostAddr, worker_type: WorkerType) -> Result<u32> {
+    pub async fn register(
+        &mut self,
+        worker_type: WorkerType,
+        addr: &HostAddr,
+        worker_node_parallelism: usize,
+    ) -> Result<u32> {
         let request = AddWorkerNodeRequest {
             worker_type: worker_type as i32,
             host: Some(addr.to_protobuf()),
+            worker_node_parallelism: worker_node_parallelism as u64,
         };
         let resp = self.inner.add_worker_node(request).await?;
         let worker_node = resp.node.expect("AddWorkerNodeResponse::node is empty");
@@ -114,10 +121,7 @@ impl MetaClient {
 
     /// Send heartbeat signal to meta service.
     pub async fn send_heartbeat(&self, node_id: u32) -> Result<()> {
-        let request = HeartbeatRequest {
-            node_id,
-            worker_type: WorkerType::ComputeNode as i32,
-        };
+        let request = HeartbeatRequest { node_id };
         self.inner.heartbeat(request).await?;
         Ok(())
     }
@@ -225,23 +229,21 @@ impl MetaClient {
         Ok(resp.version)
     }
 
-    pub async fn drop_user(&self, user_name: &str) -> Result<u64> {
-        let request = DropUserRequest {
-            name: user_name.to_string(),
-        };
+    pub async fn drop_user(&self, user_id: u32) -> Result<u64> {
+        let request = DropUserRequest { user_id };
         let resp = self.inner.drop_user(request).await?;
         Ok(resp.version)
     }
 
     pub async fn grant_privilege(
         &self,
-        users: Vec<String>,
+        user_ids: Vec<u32>,
         privileges: Vec<GrantPrivilege>,
         with_grant_option: bool,
-        granted_by: String,
+        granted_by: u32,
     ) -> Result<u64> {
         let request = GrantPrivilegeRequest {
-            users,
+            user_ids,
             privileges,
             with_grant_option,
             granted_by,
@@ -252,16 +254,16 @@ impl MetaClient {
 
     pub async fn revoke_privilege(
         &self,
-        users: Vec<String>,
+        user_ids: Vec<u32>,
         privileges: Vec<GrantPrivilege>,
-        granted_by: Option<String>,
-        revoke_by: String,
+        granted_by: Option<u32>,
+        revoke_by: u32,
         revoke_grant_option: bool,
         cascade: bool,
     ) -> Result<u64> {
         let granted_by = granted_by.unwrap_or_default();
         let request = RevokePrivilegeRequest {
-            users,
+            user_ids,
             privileges,
             granted_by,
             revoke_by,
@@ -344,25 +346,52 @@ impl MetaClient {
         let resp = self.inner.list_table_fragments(request).await?;
         Ok(resp.table_fragments)
     }
+
+    pub async fn pause(&self) -> Result<()> {
+        let request = PauseRequest {};
+        let _resp = self.inner.pause(request).await?;
+        Ok(())
+    }
+
+    pub async fn resume(&self) -> Result<()> {
+        let request = ResumeRequest {};
+        let _resp = self.inner.resume(request).await?;
+        Ok(())
+    }
 }
 
 #[async_trait]
 impl HummockMetaClient for MetaClient {
-    async fn pin_version(&self, last_pinned: HummockVersionId) -> Result<HummockVersion> {
+    async fn pin_version(
+        &self,
+        last_pinned: HummockVersionId,
+    ) -> Result<(bool, Vec<HummockVersionDelta>, Option<HummockVersion>)> {
         let req = PinVersionRequest {
             context_id: self.worker_id(),
             last_pinned,
         };
         let resp = self.inner.pin_version(req).await?;
-        Ok(resp.pinned_version.unwrap())
+        Ok((
+            resp.is_delta_response,
+            resp.version_deltas,
+            resp.pinned_version,
+        ))
     }
 
-    async fn unpin_version(&self, pinned_version_ids: &[HummockVersionId]) -> Result<()> {
+    async fn unpin_version(&self) -> Result<()> {
         let req = UnpinVersionRequest {
             context_id: self.worker_id(),
-            pinned_version_ids: pinned_version_ids.to_owned(),
         };
         self.inner.unpin_version(req).await?;
+        Ok(())
+    }
+
+    async fn unpin_version_before(&self, unpin_version_before: HummockVersionId) -> Result<()> {
+        let req = UnpinVersionBeforeRequest {
+            context_id: self.worker_id(),
+            unpin_version_before,
+        };
+        self.inner.unpin_version_before(req).await?;
         Ok(())
     }
 
@@ -400,7 +429,7 @@ impl HummockMetaClient for MetaClient {
         Ok(())
     }
 
-    async fn get_new_table_id(&self) -> Result<HummockSSTableId> {
+    async fn get_new_table_id(&self) -> Result<HummockSstableId> {
         let resp = self.inner.get_new_table_id(GetNewTableIdRequest {}).await?;
         Ok(resp.table_id)
     }
@@ -478,6 +507,7 @@ pub struct GrpcMetaClient {
     pub notification_client: NotificationServiceClient<Channel>,
     pub stream_client: StreamManagerServiceClient<Channel>,
     pub user_client: UserServiceClient<Channel>,
+    pub scale_client: ScaleServiceClient<Channel>,
 }
 
 impl GrpcMetaClient {
@@ -514,7 +544,8 @@ impl GrpcMetaClient {
         let hummock_client = HummockManagerServiceClient::new(channel.clone());
         let notification_client = NotificationServiceClient::new(channel.clone());
         let stream_client = StreamManagerServiceClient::new(channel.clone());
-        let user_client = UserServiceClient::new(channel);
+        let user_client = UserServiceClient::new(channel.clone());
+        let scale_client = ScaleServiceClient::new(channel);
         Ok(Self {
             cluster_client,
             heartbeat_client,
@@ -523,6 +554,7 @@ impl GrpcMetaClient {
             notification_client,
             stream_client,
             user_client,
+            scale_client,
         })
     }
 }
@@ -568,6 +600,7 @@ macro_rules! for_all_meta_rpc {
             ,{ ddl_client, risectl_list_state_tables, RisectlListStateTablesRequest, RisectlListStateTablesResponse }
             ,{ hummock_client, pin_version, PinVersionRequest, PinVersionResponse }
             ,{ hummock_client, unpin_version, UnpinVersionRequest, UnpinVersionResponse }
+            ,{ hummock_client, unpin_version_before, UnpinVersionBeforeRequest, UnpinVersionBeforeResponse }
             ,{ hummock_client, pin_snapshot, PinSnapshotRequest, PinSnapshotResponse }
             ,{ hummock_client, get_epoch, GetEpochRequest, GetEpochResponse }
             ,{ hummock_client, unpin_snapshot, UnpinSnapshotRequest, UnpinSnapshotResponse }
@@ -583,6 +616,8 @@ macro_rules! for_all_meta_rpc {
             ,{ user_client, drop_user, DropUserRequest, DropUserResponse }
             ,{ user_client, grant_privilege, GrantPrivilegeRequest, GrantPrivilegeResponse }
             ,{ user_client, revoke_privilege, RevokePrivilegeRequest, RevokePrivilegeResponse }
+            ,{ scale_client, pause, PauseRequest, PauseResponse }
+            ,{ scale_client, resume, ResumeRequest, ResumeResponse }
         }
     };
 }

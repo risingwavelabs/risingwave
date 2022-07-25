@@ -46,6 +46,10 @@ impl Planner {
         let dist = RequiredDist::single();
         let mut out_fields = FixedBitSet::with_capacity(plan.schema().len());
         out_fields.insert_range(..plan.schema().len() - extra_order_exprs_len);
+        if plan.as_logical_project_set().is_some() {
+            // Do not output projected_row_id hidden column.
+            out_fields.set(0, false);
+        }
         let root = PlanRoot::new(plan, dist, order, out_fields, out_names);
         Ok(root)
     }

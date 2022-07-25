@@ -12,12 +12,14 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+use std::collections::HashMap;
 use std::sync::Arc;
 
-use madsim::collections::HashMap;
-use parking_lot::{Mutex, MutexGuard};
+use parking_lot::{Mutex, MutexGuard, RwLock};
 use risingwave_common::error::{ErrorCode, Result, RwError};
 use risingwave_common::util::addr::HostAddr;
+use risingwave_pb::common::ActorInfo;
+use risingwave_rpc_client::ComputeClientPool;
 use tokio::sync::mpsc::{Receiver, Sender};
 
 use crate::executor::Message;
@@ -34,10 +36,11 @@ pub use stream_manager::*;
 pub const LOCAL_OUTPUT_CHANNEL_SIZE: usize = 16;
 
 pub type ConsumableChannelPair = (Option<Sender<Message>>, Option<Receiver<Message>>);
-pub type ConsumableChannelVecPair = (Vec<Sender<Message>>, Vec<Receiver<Message>>);
 pub type ActorId = u32;
+pub type FragmentId = u32;
 pub type DispatcherId = u64;
 pub type UpDownActorIds = (ActorId, ActorId);
+pub type UpDownFragmentIds = (FragmentId, FragmentId);
 
 /// Stores the information which may be modified from the data plane.
 pub struct SharedContext {
@@ -60,12 +63,20 @@ pub struct SharedContext {
     /// is on the server-side and we will also introduce backpressure.
     pub(crate) channel_map: Mutex<HashMap<UpDownActorIds, ConsumableChannelPair>>,
 
+    /// Stores all actor information.
+    pub(crate) actor_infos: RwLock<HashMap<ActorId, ActorInfo>>,
+
     /// Stores the local address.
     ///
     /// It is used to test whether an actor is local or not,
     /// thus determining whether we should setup local channel only or remote rpc connection
     /// between two actors/actors.
     pub(crate) addr: HostAddr,
+
+    /// The pool of compute clients.
+    // TODO: currently the client pool won't be cleared. Should remove compute clients when
+    // disconnected.
+    pub(crate) compute_client_pool: ComputeClientPool,
 
     pub(crate) barrier_manager: Arc<Mutex<LocalBarrierManager>>,
 }
@@ -81,19 +92,17 @@ impl std::fmt::Debug for SharedContext {
 impl SharedContext {
     pub fn new(addr: HostAddr) -> Self {
         Self {
-            channel_map: Mutex::new(HashMap::new()),
+            channel_map: Default::default(),
+            actor_infos: Default::default(),
             addr,
+            compute_client_pool: ComputeClientPool::new(u64::MAX),
             barrier_manager: Arc::new(Mutex::new(LocalBarrierManager::new())),
         }
     }
 
     #[cfg(test)]
     pub fn for_test() -> Self {
-        Self {
-            channel_map: Mutex::new(HashMap::new()),
-            addr: LOCAL_TEST_ADDR.clone(),
-            barrier_manager: Arc::new(Mutex::new(LocalBarrierManager::for_test())),
-        }
+        Self::new(LOCAL_TEST_ADDR.clone())
     }
 
     #[inline]
@@ -154,7 +163,7 @@ impl SharedContext {
         );
     }
 
-    pub fn retain<F>(&self, mut f: F)
+    pub fn retain_channel<F>(&self, mut f: F)
     where
         F: FnMut(&(u32, u32)) -> bool,
     {
@@ -162,9 +171,16 @@ impl SharedContext {
             .retain(|up_down_ids, _| f(up_down_ids));
     }
 
-    #[cfg(test)]
-    pub fn get_channel_pair_number(&self) -> u32 {
-        self.lock_channel_map().len() as u32
+    pub fn get_actor_info(&self, actor_id: &ActorId) -> Result<ActorInfo> {
+        self.actor_infos
+            .read()
+            .get(actor_id)
+            .cloned()
+            .ok_or_else(|| {
+                RwError::from(ErrorCode::InternalError(
+                    "actor not found in info table".into(),
+                ))
+            })
     }
 }
 

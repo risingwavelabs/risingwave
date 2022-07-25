@@ -20,7 +20,7 @@ use risingwave_hummock_sdk::compaction_group::hummock_version_ext::HummockVersio
 use risingwave_hummock_sdk::compaction_group::StaticCompactionGroupId;
 use risingwave_hummock_sdk::key::key_with_epoch;
 use risingwave_hummock_sdk::{
-    CompactionGroupId, HummockContextId, HummockEpoch, HummockSSTableId, LocalSstableInfo,
+    CompactionGroupId, HummockContextId, HummockEpoch, HummockSstableId, LocalSstableInfo,
 };
 use risingwave_pb::common::{HostAddress, WorkerNode, WorkerType};
 use risingwave_pb::hummock::{HummockVersion, KeyRange, SstableInfo};
@@ -118,7 +118,7 @@ where
     vec![test_tables, test_tables_2, test_tables_3]
 }
 
-pub fn generate_test_tables(epoch: u64, sst_ids: Vec<HummockSSTableId>) -> Vec<SstableInfo> {
+pub fn generate_test_tables(epoch: u64, sst_ids: Vec<HummockSstableId>) -> Vec<SstableInfo> {
     let mut sst_info = vec![];
     for (i, sst_id) in sst_ids.into_iter().enumerate() {
         sst_info.push(SstableInfo {
@@ -130,7 +130,6 @@ pub fn generate_test_tables(epoch: u64, sst_ids: Vec<HummockSSTableId>) -> Vec<S
             }),
             file_size: 1,
             table_ids: vec![(i + 1) as u32, (i + 2) as u32],
-            unit_id: 0,
         });
     }
     sst_info
@@ -189,7 +188,7 @@ pub async fn unregister_table_ids_from_compaction_group<S>(
 
 /// Generate keys like `001_key_test_00002` with timestamp `epoch`.
 pub fn iterator_test_key_of_epoch(
-    table: HummockSSTableId,
+    table: HummockSstableId,
     idx: usize,
     ts: HummockEpoch,
 ) -> Vec<u8> {
@@ -202,11 +201,11 @@ pub fn iterator_test_key_of_epoch(
     )
 }
 
-pub fn get_sorted_sstable_ids(sstables: &[SstableInfo]) -> Vec<HummockSSTableId> {
+pub fn get_sorted_sstable_ids(sstables: &[SstableInfo]) -> Vec<HummockSstableId> {
     sstables.iter().map(|table| table.id).sorted().collect_vec()
 }
 
-pub fn get_sorted_committed_sstable_ids(hummock_version: &HummockVersion) -> Vec<HummockSSTableId> {
+pub fn get_sorted_committed_sstable_ids(hummock_version: &HummockVersion) -> Vec<HummockSstableId> {
     hummock_version
         .get_compaction_group_levels(StaticCompactionGroupId::StateDefault.into())
         .iter()
@@ -258,8 +257,9 @@ pub async fn setup_compute_env(
         host: "127.0.0.1".to_string(),
         port,
     };
-    let (worker_node, _) = cluster_manager
-        .add_worker_node(fake_host_address, WorkerType::ComputeNode)
+    let fake_parallelism = 4;
+    let worker_node = cluster_manager
+        .add_worker_node(WorkerType::ComputeNode, fake_host_address, fake_parallelism)
         .await
         .unwrap();
     (env, hummock_manager, cluster_manager, worker_node)
@@ -268,7 +268,7 @@ pub async fn setup_compute_env(
 pub async fn get_sst_ids<S>(
     hummock_manager: &HummockManager<S>,
     number: usize,
-) -> Vec<HummockSSTableId>
+) -> Vec<HummockSstableId>
 where
     S: MetaStore,
 {

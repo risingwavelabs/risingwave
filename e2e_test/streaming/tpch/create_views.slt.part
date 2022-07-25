@@ -8,6 +8,7 @@ include ./views/q7.slt.part
 include ./views/q8.slt.part
 include ./views/q9.slt.part
 include ./views/q10.slt.part
+include ./views/q11.slt.part
 include ./views/q12.slt.part
 include ./views/q13.slt.part
 include ./views/q14.slt.part
@@ -16,3 +17,4 @@ include ./views/q17.slt.part
 #include ./views/q18.slt.part
 include ./views/q19.slt.part
 #include ./views/q20.slt.part
+#include ./views/q22.slt.part

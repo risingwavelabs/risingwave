@@ -91,8 +91,12 @@ pub struct StreamingConfig {
     // pub chunk_size: u32,
     #[serde(default = "default::checkpoint_interval_ms")]
     pub checkpoint_interval_ms: u32,
+
     #[serde(default = "default::in_flight_barrier_nums")]
     pub in_flight_barrier_nums: usize,
+
+    #[serde(default = "default::worker_node_parallelism")]
+    pub worker_node_parallelism: usize,
 }
 
 impl Default for StreamingConfig {
@@ -105,7 +109,7 @@ impl Default for StreamingConfig {
 #[derive(Clone, Debug, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct StorageConfig {
-    /// Target size of the SSTable.
+    /// Target size of the Sstable.
     #[serde(default = "default::sst_size_mb")]
     pub sstable_size_mb: u32,
 
@@ -216,7 +220,7 @@ mod default {
     }
 
     pub fn block_size_kb() -> u32 {
-        16
+        1024
     }
 
     pub fn bloom_false_positive() -> f64 {
@@ -271,11 +275,17 @@ mod default {
     pub fn checkpoint_interval_ms() -> u32 {
         250
     }
+
     pub fn in_flight_barrier_nums() -> usize {
         40
     }
+
     pub fn share_buffer_upload_concurrency() -> usize {
         8
+    }
+
+    pub fn worker_node_parallelism() -> usize {
+        num_cpus::get()
     }
 }
 

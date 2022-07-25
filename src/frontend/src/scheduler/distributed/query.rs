@@ -179,9 +179,10 @@ impl QueryExecution {
                     .await
                     .map_err(|e| anyhow!("Starting query execution failed: {:?}", e))??;
 
-                info!(
+                tracing::trace!(
                     "Received root stage query result fetcher: {:?}, query id: {:?}",
-                    root_stage, self.query.query_id
+                    root_stage,
+                    self.query.query_id
                 );
 
                 *state = QueryState::Running {
@@ -200,6 +201,7 @@ impl QueryExecution {
     }
 
     /// Cancel execution of this query.
+    #[expect(clippy::unused_async)]
     pub async fn abort(&mut self) -> SchedulerResult<()> {
         todo!()
     }
@@ -211,17 +213,19 @@ impl QueryRunner {
         let leaf_stages = self.query.leaf_stages();
         for stage_id in &leaf_stages {
             // TODO: We should not return error here, we should abort query.
-            info!(
+            tracing::trace!(
                 "Starting query stage: {:?}-{:?}",
-                self.query.query_id, stage_id
+                self.query.query_id,
+                stage_id
             );
             self.stage_executions[stage_id].start().await.map_err(|e| {
                 error!("Failed to start stage: {}, reason: {:?}", stage_id, e);
                 e
             })?;
-            info!(
+            tracing::trace!(
                 "Query stage {:?}-{:?} started.",
-                self.query.query_id, stage_id
+                self.query.query_id,
+                stage_id
             );
         }
         let mut stages_with_table_scan = self.query.stages_with_table_scan();
@@ -230,9 +234,10 @@ impl QueryRunner {
         while let Some(msg) = self.msg_receiver.recv().await {
             match msg {
                 Stage(Scheduled(stage_id)) => {
-                    info!(
+                    tracing::trace!(
                         "Query stage {:?}-{:?} scheduled.",
-                        self.query.query_id, stage_id
+                        self.query.query_id,
+                        stage_id
                     );
                     self.scheduled_stages_count += 1;
                     stages_with_table_scan.remove(&stage_id);
@@ -240,7 +245,7 @@ impl QueryRunner {
                         // We can be sure here that all the Hummock iterators have been created,
                         // thus they all successfully pinned a HummockVersion.
                         // So we can now unpin their epoch.
-                        info!("Query {:?} has scheduled all of its stages that have table scan (iterator creation).", self.query.query_id);
+                        tracing::trace!("Query {:?} has scheduled all of its stages that have table scan (iterator creation).", self.query.query_id);
                         self.hummock_snapshot_manager
                             .unpin_snapshot(self.epoch, self.query.query_id())
                             .await?;
@@ -295,6 +300,7 @@ impl QueryRunner {
         Ok(())
     }
 
+    #[expect(clippy::unused_async)]
     async fn send_root_stage_info(&mut self) {
         let root_task_status = self.stage_executions[&self.query.root_stage_id()]
             .get_task_status_unchecked(ROOT_TASK_ID);
@@ -399,8 +405,8 @@ mod tests {
             false,
             Rc::new(TableDesc {
                 table_id: 0.into(),
-                pks: vec![],
-                order_keys: vec![],
+                pk: vec![],
+                order_key: vec![],
                 columns: vec![
                     ColumnDesc {
                         data_type: DataType::Int32,
@@ -417,7 +423,7 @@ mod tests {
                         field_descs: vec![],
                     },
                 ],
-                distribution_keys: vec![],
+                distribution_key: vec![],
                 appendonly: false,
                 vnode_mapping: Some(vec![]),
             }),
@@ -524,7 +530,7 @@ mod tests {
             r#type: ParallelUnitType::Single as i32,
             worker_node_id: node_id,
         }];
-        for id in start_id + 1..start_id + parallel_degree {
+        for id in start_id + 1..start_id + 1 + parallel_degree {
             parallel_units.push(ParallelUnit {
                 id,
                 r#type: ParallelUnitType::Hash as i32,

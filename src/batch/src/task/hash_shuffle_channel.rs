@@ -46,9 +46,9 @@ fn generate_hash_values(chunk: &DataChunk, hash_info: &HashInfo) -> Result<Vec<u
     let hash_values = chunk
         .get_hash_values(
             &hash_info
-                .keys
+                .key
                 .iter()
-                .map(|key| *key as usize)
+                .map(|idx| *idx as usize)
                 .collect::<Vec<_>>(),
             hasher_builder,
         )

@@ -21,22 +21,24 @@ use bytes::Bytes;
 use itertools::Itertools;
 use risingwave_hummock_sdk::key::key_with_epoch;
 use risingwave_hummock_sdk::LocalSstableInfo;
+use risingwave_pb::hummock::LevelType;
 
 use super::iterator::{
     BackwardUserIterator, ConcatIteratorInner, DirectedUserIterator, UserIterator,
 };
 use super::utils::{can_concat, search_sst_idx, validate_epoch};
-use super::{BackwardSSTableIterator, HummockStorage, SSTableIterator, SSTableIteratorType};
+use super::{BackwardSstableIterator, HummockStorage, SstableIterator, SstableIteratorType};
 use crate::error::StorageResult;
 use crate::hummock::iterator::{
     Backward, BoxedHummockIterator, DirectedUserIteratorBuilder, DirectionEnum, Forward,
-    HummockIteratorDirection, ReadOptions as IterReadOptions,
+    HummockIteratorDirection,
 };
 use crate::hummock::local_version::PinnedVersion;
 use crate::hummock::shared_buffer::shared_buffer_batch::SharedBufferBatch;
 use crate::hummock::shared_buffer::{
     build_ordered_merge_iter, OrderSortedUncommittedData, UncommittedData,
 };
+use crate::hummock::sstable::SstableIteratorReadOptions;
 use crate::hummock::utils::prune_ssts;
 use crate::hummock::HummockResult;
 use crate::monitor::StoreLocalStatistic;
@@ -46,7 +48,7 @@ use crate::{define_state_store_associated_type, StateStore, StateStoreIter};
 
 pub(crate) trait HummockIteratorType {
     type Direction: HummockIteratorDirection;
-    type SstableIteratorType: SSTableIteratorType<Direction = Self::Direction>;
+    type SstableIteratorType: SstableIteratorType<Direction = Self::Direction>;
     type UserIteratorBuilder: DirectedUserIteratorBuilder<Direction = Self::Direction>;
 
     fn direction() -> DirectionEnum {
@@ -59,13 +61,13 @@ pub(crate) struct BackwardIter;
 
 impl HummockIteratorType for ForwardIter {
     type Direction = Forward;
-    type SstableIteratorType = SSTableIterator;
+    type SstableIteratorType = SstableIterator;
     type UserIteratorBuilder = UserIterator;
 }
 
 impl HummockIteratorType for BackwardIter {
     type Direction = Backward;
-    type SstableIteratorType = BackwardSSTableIterator;
+    type SstableIteratorType = BackwardSstableIterator;
     type UserIteratorBuilder = BackwardUserIterator;
 }
 
@@ -81,15 +83,15 @@ impl HummockStorage {
         T: HummockIteratorType,
     {
         let epoch = read_options.epoch;
-        let compaction_group_id = read_options
-            .table_id
-            .as_ref()
-            .map(|table_id| self.get_compaction_group_id(*table_id));
+        let compaction_group_id = match read_options.table_id.as_ref() {
+            None => None,
+            Some(table_id) => Some(self.get_compaction_group_id(*table_id).await?),
+        };
         let min_epoch = read_options.min_epoch();
-        let iter_read_options = Arc::new(IterReadOptions::default());
+        let iter_read_options = Arc::new(SstableIteratorReadOptions::default());
         let mut overlapped_iters = vec![];
 
-        let (shared_buffer_data, pinned_version) = self.read_filter(read_options, &key_range)?;
+        let (shared_buffer_data, pinned_version) = self.read_filter(&read_options, &key_range)?;
 
         let mut stats = StoreLocalStatistic::default();
 
@@ -128,7 +130,8 @@ impl HummockStorage {
             if table_infos.is_empty() {
                 continue;
             }
-            if can_concat(&table_infos) {
+            if level.level_type == LevelType::Nonoverlapping as i32 {
+                debug_assert!(can_concat(&table_infos));
                 let start_table_idx = match key_range.start_bound() {
                     Included(key) | Excluded(key) => search_sst_idx(&table_infos, key),
                     _ => 0,
@@ -208,12 +211,12 @@ impl HummockStorage {
         read_options: ReadOptions,
     ) -> StorageResult<Option<Bytes>> {
         let epoch = read_options.epoch;
-        let compaction_group_id = read_options
-            .table_id
-            .as_ref()
-            .map(|table_id| self.get_compaction_group_id(*table_id));
+        let compaction_group_id = match read_options.table_id.as_ref() {
+            None => None,
+            Some(table_id) => Some(self.get_compaction_group_id(*table_id).await?),
+        };
         let mut stats = StoreLocalStatistic::default();
-        let (shared_buffer_data, pinned_version) = self.read_filter(read_options, &(key..=key))?;
+        let (shared_buffer_data, pinned_version) = self.read_filter(&read_options, &(key..=key))?;
 
         // Return `Some(None)` means the key is deleted.
         let get_from_batch = |batch: &SharedBufferBatch| -> Option<Option<Bytes>> {
@@ -225,8 +228,6 @@ impl HummockStorage {
 
         let mut table_counts = 0;
         let internal_key = key_with_epoch(key.to_vec(), epoch);
-        // TODO: may want to avoid use Arc in read options
-        let iter_read_options = Arc::new(IterReadOptions::default());
 
         // Query shared buffer. Return the value without iterating SSTs if found
         for (replicated_batches, uncommitted_data) in shared_buffer_data {
@@ -255,7 +256,7 @@ impl HummockStorage {
                                     table,
                                     &internal_key,
                                     key,
-                                    iter_read_options.clone(),
+                                    &read_options,
                                     &mut stats,
                                 )
                                 .await?
@@ -283,13 +284,7 @@ impl HummockStorage {
                         .await?;
                     table_counts += 1;
                     if let Some(v) = self
-                        .get_from_table(
-                            table,
-                            &internal_key,
-                            key,
-                            iter_read_options.clone(),
-                            &mut stats,
-                        )
+                        .get_from_table(table, &internal_key, key, &read_options, &mut stats)
                         .await?
                     {
                         return Ok(v);
@@ -308,7 +303,7 @@ impl HummockStorage {
     #[expect(clippy::type_complexity)]
     fn read_filter<R, B>(
         &self,
-        read_options: ReadOptions,
+        read_options: &ReadOptions,
         key_range: &R,
     ) -> HummockResult<(
         Vec<(Vec<SharedBufferBatch>, OrderSortedUncommittedData)>,
@@ -395,7 +390,7 @@ impl StateStore for HummockStorage {
     ) -> Self::IngestBatchFuture<'_> {
         async move {
             let epoch = write_options.epoch;
-            let compaction_group_id = self.get_compaction_group_id(write_options.table_id);
+            let compaction_group_id = self.get_compaction_group_id(write_options.table_id).await?;
             // See comments in HummockStorage::iter_inner for details about using
             // compaction_group_id in read/write path.
             let size = self
@@ -414,7 +409,7 @@ impl StateStore for HummockStorage {
     ) -> Self::ReplicateBatchFuture<'_> {
         async move {
             let epoch = write_options.epoch;
-            let compaction_group_id = self.get_compaction_group_id(write_options.table_id);
+            let compaction_group_id = self.get_compaction_group_id(write_options.table_id).await?;
             // See comments in HummockStorage::iter_inner for details about using
             // compaction_group_id in read/write path.
             self.local_version_manager

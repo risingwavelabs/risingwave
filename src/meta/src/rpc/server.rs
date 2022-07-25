@@ -21,19 +21,24 @@ use itertools::Itertools;
 use prost::Message;
 use risingwave_common::error::ErrorCode::InternalError;
 use risingwave_common::error::{ErrorCode, Result, RwError};
+use risingwave_common::monitor::process_linux::monitor_process;
+use risingwave_common_service::metrics_manager::MetricsManager;
 use risingwave_pb::ddl_service::ddl_service_server::DdlServiceServer;
 use risingwave_pb::hummock::hummock_manager_service_server::HummockManagerServiceServer;
 use risingwave_pb::meta::cluster_service_server::ClusterServiceServer;
 use risingwave_pb::meta::heartbeat_service_server::HeartbeatServiceServer;
 use risingwave_pb::meta::notification_service_server::NotificationServiceServer;
+use risingwave_pb::meta::scale_service_server::ScaleServiceServer;
 use risingwave_pb::meta::stream_manager_service_server::StreamManagerServiceServer;
 use risingwave_pb::meta::{MetaLeaderInfo, MetaLeaseInfo};
 use risingwave_pb::user::user_service_server::UserServiceServer;
 use tokio::sync::oneshot::Sender;
+use tokio::sync::RwLock;
 use tokio::task::JoinHandle;
 
 use super::intercept::MetricsMiddlewareLayer;
 use super::service::notification_service::NotificationServiceImpl;
+use super::service::scale_service::ScaleServiceImpl;
 use super::DdlServiceImpl;
 use crate::barrier::GlobalBarrierManager;
 use crate::cluster::ClusterManager;
@@ -54,7 +59,10 @@ use crate::stream::{FragmentManager, GlobalStreamManager, SourceManager};
 
 #[derive(Debug)]
 pub enum MetaStoreBackend {
-    Etcd { endpoints: Vec<String> },
+    Etcd {
+        endpoints: Vec<String>,
+        credentials: Option<(String, String)>,
+    },
     Mem,
 }
 
@@ -87,16 +95,20 @@ pub async fn rpc_serve(
     opts: MetaOpts,
 ) -> Result<(JoinHandle<()>, Sender<()>)> {
     match meta_store_backend {
-        MetaStoreBackend::Etcd { endpoints } => {
-            let client = EtcdClient::connect(
-                endpoints,
-                Some(
-                    ConnectOptions::default()
-                        .with_keep_alive(Duration::from_secs(3), Duration::from_secs(5)),
-                ),
-            )
-            .await
-            .map_err(|e| RwError::from(InternalError(format!("failed to connect etcd {}", e))))?;
+        MetaStoreBackend::Etcd {
+            endpoints,
+            credentials,
+        } => {
+            let mut options = ConnectOptions::default()
+                .with_keep_alive(Duration::from_secs(3), Duration::from_secs(5));
+            if let Some((username, password)) = credentials {
+                options = options.with_user(username, password)
+            }
+            let client = EtcdClient::connect(endpoints, Some(options))
+                .await
+                .map_err(|e| {
+                    RwError::from(InternalError(format!("failed to connect etcd {}", e)))
+                })?;
             let meta_store = Arc::new(EtcdMetaStore::new(client));
             rpc_serve_with_store(
                 meta_store,
@@ -291,6 +303,7 @@ pub async fn rpc_serve_with_store<S: MetaStore>(
         Arc::new(CompactionGroupManager::new(env.clone()).await.unwrap());
     let fragment_manager = Arc::new(FragmentManager::new(env.clone()).await.unwrap());
     let meta_metrics = Arc::new(MetaMetrics::new());
+    monitor_process(meta_metrics.registry()).unwrap();
     let compactor_manager = Arc::new(hummock::CompactorManager::new());
 
     let cluster_manager = Arc::new(
@@ -362,7 +375,6 @@ pub async fn rpc_serve_with_store<S: MetaStore>(
             source_manager.clone(),
             compaction_group_manager.clone(),
         )
-        .await
         .unwrap(),
     );
 
@@ -393,6 +405,7 @@ pub async fn rpc_serve_with_store<S: MetaStore>(
         hummock_manager.clone(),
         compactor_manager.clone(),
     ));
+    let ddl_lock = Arc::new(RwLock::new(()));
 
     let heartbeat_srv = HeartbeatServiceImpl::new(cluster_manager.clone());
     let ddl_srv = DdlServiceImpl::<S>::new(
@@ -402,8 +415,13 @@ pub async fn rpc_serve_with_store<S: MetaStore>(
         source_manager,
         cluster_manager.clone(),
         fragment_manager.clone(),
+        ddl_lock.clone(),
     );
-    let user_srv = UserServiceImpl::<S>::new(catalog_manager.clone(), user_manager.clone());
+
+    let user_srv =
+        UserServiceImpl::<S>::new(env.clone(), catalog_manager.clone(), user_manager.clone());
+    let scale_srv =
+        ScaleServiceImpl::<S>::new(barrier_manager.clone(), fragment_manager.clone(), ddl_lock);
     let cluster_srv = ClusterServiceImpl::<S>::new(cluster_manager.clone());
     let stream_srv = StreamServiceImpl::<S>::new(
         env.clone(),
@@ -426,7 +444,10 @@ pub async fn rpc_serve_with_store<S: MetaStore>(
     );
 
     if let Some(prometheus_addr) = address_info.prometheus_addr {
-        meta_metrics.boot_metrics_service(prometheus_addr);
+        MetricsManager::boot_metrics_service(
+            prometheus_addr.to_string(),
+            Arc::new(meta_metrics.registry().clone()),
+        )
     }
 
     let mut sub_tasks = hummock::start_hummock_workers(
@@ -475,6 +496,7 @@ pub async fn rpc_serve_with_store<S: MetaStore>(
             .add_service(NotificationServiceServer::new(notification_srv))
             .add_service(DdlServiceServer::new(ddl_srv))
             .add_service(UserServiceServer::new(user_srv))
+            .add_service(ScaleServiceServer::new(scale_srv))
             .serve(address_info.listen_addr)
             .await
             .unwrap();

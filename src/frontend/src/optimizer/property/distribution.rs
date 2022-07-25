@@ -42,7 +42,12 @@
 //!             └─────────────┘     x└────────────┘
 //!                                 x
 //!                                 x
+use std::fmt;
+use std::fmt::Debug;
+
 use fixedbitset::FixedBitSet;
+use itertools::Itertools;
+use risingwave_common::catalog::{FieldVerboseDisplay, Schema};
 use risingwave_common::error::Result;
 use risingwave_pb::batch_plan::exchange_info::{
     Distribution as DistributionProst, DistributionMode, HashInfo,
@@ -61,8 +66,8 @@ pub enum Distribution {
     /// Records are sharded into partitions, and satisfy the `AnyShard` but without any guarantee
     /// about their placement rules.
     SomeShard,
-    /// Records are sharded into partitions based on the hash value of some keys, which means the
-    /// records with the same hash values must be on the same partition.
+    /// Records are sharded into partitions based on the hash value of some columns, which means
+    /// the records with the same hash values must be on the same partition.
     /// `usize` is the index of column used as the distribution key.
     HashShard(Vec<usize>),
     /// Records are available on all downstream shards
@@ -96,9 +101,9 @@ impl Distribution {
             } as i32,
             distribution: match self {
                 Distribution::Single => None,
-                Distribution::HashShard(keys) => Some(DistributionProst::HashInfo(HashInfo {
+                Distribution::HashShard(key) => Some(DistributionProst::HashInfo(HashInfo {
                     output_count,
-                    keys: keys.iter().map(|num| *num as u32).collect(),
+                    key: key.iter().map(|num| *num as u32).collect(),
                 })),
                 // TODO: add round robin distribution
                 Distribution::SomeShard => None,
@@ -117,10 +122,10 @@ impl Distribution {
                     Distribution::SomeShard | Distribution::HashShard(_) | Distribution::Broadcast
                 )
             }
-            RequiredDist::ShardByKey(required_keys) => match self {
-                Distribution::HashShard(hash_keys) => hash_keys
-                    .iter()
-                    .all(|hash_key| required_keys.contains(*hash_key)),
+            RequiredDist::ShardByKey(required_key) => match self {
+                Distribution::HashShard(hash_key) => {
+                    hash_key.iter().all(|idx| required_key.contains(*idx))
+                }
                 _ => false,
             },
             RequiredDist::PhysicalDist(other) => self == other,
@@ -139,14 +144,77 @@ impl Distribution {
     }
 }
 
+impl fmt::Display for Distribution {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.write_str("[")?;
+        match self {
+            Self::Single => f.write_str("Single")?,
+            Self::SomeShard => f.write_str("SomeShard")?,
+            Self::Broadcast => f.write_str("Broadcast")?,
+            Self::HashShard(vec) => {
+                for key in vec {
+                    std::fmt::Debug::fmt(&key, f)?;
+                }
+            }
+        }
+        f.write_str("]")
+    }
+}
+
+pub struct DistributionVerboseDisplay<'a> {
+    pub distribution: &'a Distribution,
+    pub input_schema: &'a Schema,
+}
+
+impl DistributionVerboseDisplay<'_> {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        let that = self.distribution;
+        f.write_str("[")?;
+        match that {
+            Distribution::Single => f.write_str("Single")?,
+            Distribution::SomeShard => f.write_str("SomeShard")?,
+            Distribution::Broadcast => f.write_str("Broadcast")?,
+            Distribution::HashShard(vec) => {
+                for key in vec.iter().copied().with_position() {
+                    std::fmt::Debug::fmt(
+                        &FieldVerboseDisplay(
+                            self.input_schema.fields.get(key.into_inner()).unwrap(),
+                        ),
+                        f,
+                    )?;
+                    match key {
+                        itertools::Position::First(_) | itertools::Position::Middle(_) => {
+                            f.write_str(", ")?;
+                        }
+                        _ => {}
+                    }
+                }
+            }
+        }
+        f.write_str("]")
+    }
+}
+
+impl fmt::Debug for DistributionVerboseDisplay<'_> {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        self.fmt(f)
+    }
+}
+
+impl fmt::Display for DistributionVerboseDisplay<'_> {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        self.fmt(f)
+    }
+}
+
 impl RequiredDist {
     pub fn single() -> Self {
         Self::PhysicalDist(Distribution::Single)
     }
 
-    pub fn shard_by_key(tot_col_num: usize, keys: &[usize]) -> Self {
+    pub fn shard_by_key(tot_col_num: usize, key: &[usize]) -> Self {
         let mut cols = FixedBitSet::with_capacity(tot_col_num);
-        for i in keys {
+        for i in key {
             cols.insert(*i);
         }
         if cols.count_ones(..) == 0 {
@@ -175,9 +243,9 @@ impl RequiredDist {
             RequiredDist::AnyShard => {
                 matches!(required, RequiredDist::Any | RequiredDist::AnyShard)
             }
-            RequiredDist::ShardByKey(keys) => match required {
+            RequiredDist::ShardByKey(key) => match required {
                 RequiredDist::Any | RequiredDist::AnyShard => true,
-                RequiredDist::ShardByKey(required_keys) => keys.is_subset(required_keys),
+                RequiredDist::ShardByKey(required_key) => key.is_subset(required_key),
                 _ => false,
             },
             RequiredDist::PhysicalDist(dist) => dist.satisfies(required),

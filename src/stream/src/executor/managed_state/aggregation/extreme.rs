@@ -12,19 +12,19 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+use std::collections::BTreeMap;
 use std::marker::PhantomData;
 
 use async_trait::async_trait;
 use futures::{pin_mut, StreamExt};
 use itertools::Itertools;
-use madsim::collections::BTreeMap;
 use risingwave_common::array::stream_chunk::{Op, Ops};
 use risingwave_common::array::{Array, ArrayImpl, Row};
 use risingwave_common::buffer::Bitmap;
 use risingwave_common::hash::HashCode;
 use risingwave_common::types::*;
 use risingwave_expr::expr::AggKind;
-use risingwave_storage::table::state_table::StateTable;
+use risingwave_storage::table::state_table::RowBasedStateTable;
 use risingwave_storage::StateStore;
 use smallvec::SmallVec;
 
@@ -83,7 +83,7 @@ where
     // TODO: Remove this phantom to get rid of S: StateStore.
     _phantom_data: PhantomData<S>,
 
-    /// The upstream pks. Assembled as pk of relational table.
+    /// The upstream pk. Assembled as pk of relational table.
     upstream_pk_len: usize,
 
     /// Primary key to look up in relational table. For value state, there is only one row.
@@ -105,21 +105,21 @@ pub trait ManagedTableState<S: StateStore>: Send + Sync + 'static {
         visibility: Option<&Bitmap>,
         data: &[&ArrayImpl],
         epoch: u64,
-        state_table: &mut StateTable<S>,
+        state_table: &mut RowBasedStateTable<S>,
     ) -> StreamExecutorResult<()>;
 
     /// Get the output of the state. Must flush before getting output.
     async fn get_output(
         &mut self,
         epoch: u64,
-        state_table: &StateTable<S>,
+        state_table: &RowBasedStateTable<S>,
     ) -> StreamExecutorResult<Datum>;
 
     /// Check if this state needs a flush.
     fn is_dirty(&self) -> bool;
 
     /// Flush the internal state to a write batch.
-    fn flush(&mut self, state_table: &mut StateTable<S>) -> StreamExecutorResult<()>;
+    fn flush(&mut self, state_table: &mut RowBasedStateTable<S>) -> StreamExecutorResult<()>;
 }
 
 impl<S: StateStore, A: Array, const EXTREME_TYPE: usize> GenericExtremeState<S, A, EXTREME_TYPE>
@@ -130,7 +130,7 @@ where
     /// Create a managed min state. When `top_n_count` is `None`, the cache will
     /// always be retained when flushing the managed state. Otherwise, we will only retain n entries
     /// after each flush.
-    pub async fn new(
+    pub fn new(
         top_n_count: Option<usize>,
         row_count: usize,
         pk_data_types: PkDataTypes,
@@ -172,12 +172,12 @@ where
     }
 
     /// Apply a batch of data to the state.
-    async fn apply_batch_inner(
+    fn apply_batch_inner(
         &mut self,
         ops: Ops<'_>,
         visibility: Option<&Bitmap>,
         data: &[&ArrayImpl],
-        state_table: &mut StateTable<S>,
+        state_table: &mut RowBasedStateTable<S>,
     ) -> StreamExecutorResult<()> {
         debug_assert!(super::verify_batch(ops, visibility, data));
 
@@ -287,7 +287,7 @@ where
     async fn get_output_inner(
         &mut self,
         epoch: u64,
-        state_table: &StateTable<S>,
+        state_table: &RowBasedStateTable<S>,
     ) -> StreamExecutorResult<Datum> {
         // To make things easier, we do not allow get_output before flushing. Otherwise we will need
         // to merge data from flush_buffer and state store, which is hard to implement.
@@ -377,16 +377,15 @@ where
         visibility: Option<&Bitmap>,
         data: &[&ArrayImpl],
         _epoch: u64,
-        state_table: &mut StateTable<S>,
+        state_table: &mut RowBasedStateTable<S>,
     ) -> StreamExecutorResult<()> {
         self.apply_batch_inner(ops, visibility, data, state_table)
-            .await
     }
 
     async fn get_output(
         &mut self,
         epoch: u64,
-        state_table: &StateTable<S>,
+        state_table: &RowBasedStateTable<S>,
     ) -> StreamExecutorResult<Datum> {
         self.get_output_inner(epoch, state_table).await
     }
@@ -397,12 +396,12 @@ where
         unreachable!("Should not call this function anymore, check state table for dirty data");
     }
 
-    fn flush(&mut self, _state_table: &mut StateTable<S>) -> StreamExecutorResult<()> {
+    fn flush(&mut self, _state_table: &mut RowBasedStateTable<S>) -> StreamExecutorResult<()> {
         self.flush_inner()
     }
 }
 
-pub async fn create_streaming_extreme_state<S: StateStore>(
+pub fn create_streaming_extreme_state<S: StateStore>(
     agg_call: AggCall,
     row_count: usize,
     top_n_count: Option<usize>,
@@ -436,7 +435,7 @@ pub async fn create_streaming_extreme_state<S: StateStore>(
                             pk_data_types,
                             key_hash_code.unwrap_or_default(),
                             pk
-                        ).await?,
+                        )?,
                     )),
                     (AggKind::Min, $( $kind )|+) => Ok(Box::new(
                         ManagedMinState::<_, $array>::new(
@@ -445,7 +444,7 @@ pub async fn create_streaming_extreme_state<S: StateStore>(
                             pk_data_types,
                             key_hash_code.unwrap_or_default(),
                             pk
-                        ).await?,
+                        )?,
                     )),
                 )*
                 (kind, return_type) => unimplemented!("unsupported extreme agg, kind: {:?}, return type: {:?}", kind, return_type),
@@ -473,8 +472,9 @@ pub async fn create_streaming_extreme_state<S: StateStore>(
 
 #[cfg(test)]
 mod tests {
+    use std::collections::{BTreeSet, HashSet};
+
     use itertools::Itertools;
-    use madsim::collections::{BTreeSet, HashSet};
     use madsim::rand::prelude::*;
     use risingwave_common::array::{I64Array, Op};
     use risingwave_common::catalog::{ColumnDesc, ColumnId, TableId};
@@ -498,7 +498,6 @@ mod tests {
             HashCode(567),
             None,
         )
-        .await
         .unwrap();
         assert!(!state_table.is_dirty());
 
@@ -634,7 +633,6 @@ mod tests {
             HashCode(567),
             None,
         )
-        .await
         .unwrap();
 
         // The minimum should still be 30
@@ -669,7 +667,7 @@ mod tests {
         table_id: TableId,
         column_cnt: usize,
         order_type: OrderType,
-    ) -> StateTable<S> {
+    ) -> RowBasedStateTable<S> {
         let mut column_descs = Vec::with_capacity(column_cnt);
         for id in 0..column_cnt {
             column_descs.push(ColumnDesc::unnamed(
@@ -678,12 +676,11 @@ mod tests {
             ));
         }
         let relational_pk_len = column_descs.len();
-        StateTable::new(
+        RowBasedStateTable::new_without_distribution(
             store,
             table_id,
             column_descs,
             vec![order_type; relational_pk_len],
-            None,
             (0..relational_pk_len).collect(),
         )
     }
@@ -705,7 +702,6 @@ mod tests {
             HashCode(567),
             None,
         )
-        .await
         .unwrap();
         assert!(!state_table.is_dirty());
 
@@ -811,7 +807,6 @@ mod tests {
             HashCode(567),
             None,
         )
-        .await
         .unwrap();
         assert!(!state_table.is_dirty());
 
@@ -927,7 +922,6 @@ mod tests {
             HashCode(567),
             None,
         )
-        .await
         .unwrap();
         let mut state_table =
             state_table_create_helper(store, TableId::from(0x2333), 1, OrderType::Ascending);
@@ -1025,7 +1019,6 @@ mod tests {
             HashCode(567),
             None,
         )
-        .await
         .unwrap();
 
         let mut heap = BTreeSet::new();
@@ -1097,7 +1090,7 @@ mod tests {
     async fn helper_flush<S: StateStore>(
         managed_state: &mut impl ManagedTableState<S>,
         epoch: u64,
-        state_table: &mut StateTable<S>,
+        state_table: &mut RowBasedStateTable<S>,
     ) {
         managed_state.flush(state_table).unwrap();
         state_table.commit(epoch).await.unwrap();
@@ -1118,7 +1111,6 @@ mod tests {
             HashCode(567),
             None,
         )
-        .await
         .unwrap();
         let mut state_table =
             state_table_create_helper(store, TableId::from(0x2333), 1, OrderType::Ascending);

@@ -1,0 +1,5 @@
+query TT rowsort
+select * from tpch_q22;
+----
+30 1 7638.57
+31 2 14318.40

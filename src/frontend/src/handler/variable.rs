@@ -28,7 +28,10 @@ pub(super) fn handle_set(
     let string_val = to_string(&value[0]);
     // Currently store the config variable simply as String -> ConfigEntry(String).
     // In future we can add converter/parser to make the API more robust.
-    context.session_ctx.set_config(&name.value, &string_val)?;
+    // We remark that the name of session parameter is always case-insensitive.
+    context
+        .session_ctx
+        .set_config(&name.value.to_lowercase(), &string_val)?;
 
     Ok(PgResponse::empty_result(StatementType::SET_OPTION))
 }
@@ -40,15 +43,12 @@ pub(super) fn handle_show(context: OptimizerContext, variable: Vec<Ident>) -> Re
             ErrorCode::InvalidInputSyntax("only one variable or ALL required".to_string()).into(),
         );
     }
-    let name = &variable[0].value;
+    // TODO: Verify that the name used in `show` command is indeed always case-insensitive.
+    let name = &variable[0].value.to_lowercase();
     if name.eq_ignore_ascii_case("ALL") {
-        return Err(ErrorCode::NotImplemented(
-            "SHOW ALL is not supported".to_string(),
-            3665.into(),
-        )
-        .into());
+        return handle_show_all(&context);
     }
-    let row = Row::new(vec![Some(config_reader.get(name)?)]);
+    let row = Row::new(vec![Some(config_reader.get(name)?.into())]);
 
     Ok(PgResponse::new(
         StatementType::SHOW_COMMAND,
@@ -58,6 +58,35 @@ pub(super) fn handle_show(context: OptimizerContext, variable: Vec<Ident>) -> Re
             name.to_ascii_lowercase(),
             TypeOid::Varchar,
         )],
+        true,
+    ))
+}
+
+pub(super) fn handle_show_all(context: &OptimizerContext) -> Result<PgResponse> {
+    let config_reader = context.session_ctx.config();
+
+    let all_variables = config_reader.get_all();
+
+    let rows = all_variables
+        .iter()
+        .map(|info| {
+            Row::new(vec![
+                Some(info.name.clone().into()),
+                Some(info.setting.clone().into()),
+                Some(info.description.clone().into()),
+            ])
+        })
+        .collect();
+
+    Ok(PgResponse::new(
+        StatementType::SHOW_COMMAND,
+        all_variables.len() as i32,
+        rows,
+        vec![
+            PgFieldDescriptor::new("name".to_string(), TypeOid::Varchar),
+            PgFieldDescriptor::new("setting".to_string(), TypeOid::Varchar),
+            PgFieldDescriptor::new("description".to_string(), TypeOid::Varchar),
+        ],
         true,
     ))
 }

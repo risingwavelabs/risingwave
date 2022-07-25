@@ -15,7 +15,7 @@
 use std::sync::atomic::{AtomicI32, Ordering};
 use std::sync::Arc;
 
-use risingwave_common::catalog::RESERVED_PG_CATALOG_TABLE_ID;
+use risingwave_common::catalog::{NON_RESERVED_PG_CATALOG_TABLE_ID, NON_RESERVED_USER_ID};
 use risingwave_common::error::Result;
 use tokio::sync::RwLock;
 
@@ -130,10 +130,11 @@ pub mod IdCategory {
     pub const Fragment: IdCategoryType = 5;
     pub const Actor: IdCategoryType = 6;
     pub const HummockSnapshot: IdCategoryType = 7;
-    pub const HummockSSTableId: IdCategoryType = 8;
+    pub const HummockSstableId: IdCategoryType = 8;
     pub const ParallelUnit: IdCategoryType = 9;
     pub const Source: IdCategoryType = 10;
     pub const HummockCompactionTask: IdCategoryType = 11;
+    pub const User: IdCategoryType = 12;
 }
 
 pub type IdGeneratorManagerRef<S> = Arc<IdGeneratorManager<S>>;
@@ -149,6 +150,7 @@ pub struct IdGeneratorManager<S> {
     worker: Arc<StoredIdGenerator<S>>,
     fragment: Arc<StoredIdGenerator<S>>,
     actor: Arc<StoredIdGenerator<S>>,
+    user: Arc<StoredIdGenerator<S>>,
     hummock_snapshot: Arc<StoredIdGenerator<S>>,
     hummock_ss_table_id: Arc<StoredIdGenerator<S>>,
     hummock_compaction_task: Arc<StoredIdGenerator<S>>,
@@ -169,7 +171,7 @@ where
                 StoredIdGenerator::new(
                     meta_store.clone(),
                     "table",
-                    Some(RESERVED_PG_CATALOG_TABLE_ID + 1),
+                    Some(NON_RESERVED_PG_CATALOG_TABLE_ID),
                 )
                 .await,
             ),
@@ -181,6 +183,10 @@ where
                 StoredIdGenerator::new(meta_store.clone(), "fragment", Some(1)).await,
             ),
             actor: Arc::new(StoredIdGenerator::new(meta_store.clone(), "actor", Some(1)).await),
+            user: Arc::new(
+                StoredIdGenerator::new(meta_store.clone(), "user", Some(NON_RESERVED_USER_ID))
+                    .await,
+            ),
             hummock_snapshot: Arc::new(
                 StoredIdGenerator::new(meta_store.clone(), "hummock_snapshot", Some(1)).await,
             ),
@@ -206,9 +212,10 @@ where
             IdCategory::Table => &self.table,
             IdCategory::Fragment => &self.fragment,
             IdCategory::Actor => &self.actor,
+            IdCategory::User => &self.user,
             IdCategory::HummockSnapshot => &self.hummock_snapshot,
             IdCategory::Worker => &self.worker,
-            IdCategory::HummockSSTableId => &self.hummock_ss_table_id,
+            IdCategory::HummockSstableId => &self.hummock_ss_table_id,
             IdCategory::ParallelUnit => &self.parallel_unit,
             IdCategory::HummockCompactionTask => &self.hummock_compaction_task,
             _ => unreachable!(),

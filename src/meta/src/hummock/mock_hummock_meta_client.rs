@@ -18,11 +18,11 @@ use anyhow::anyhow;
 use async_trait::async_trait;
 use risingwave_hummock_sdk::compaction_group::StaticCompactionGroupId;
 use risingwave_hummock_sdk::{
-    HummockContextId, HummockEpoch, HummockSSTableId, HummockVersionId, LocalSstableInfo,
+    HummockContextId, HummockEpoch, HummockSstableId, HummockVersionId, LocalSstableInfo,
 };
 use risingwave_pb::hummock::{
-    CompactTask, CompactionGroup, HummockSnapshot, HummockVersion, SstableIdInfo,
-    SubscribeCompactTasksResponse, VacuumTask,
+    CompactTask, CompactionGroup, HummockSnapshot, HummockVersion, HummockVersionDelta,
+    SstableIdInfo, SubscribeCompactTasksResponse, VacuumTask,
 };
 use risingwave_rpc_client::error::{Result, RpcError};
 use risingwave_rpc_client::HummockMetaClient;
@@ -61,16 +61,26 @@ fn mock_err(error: super::error::Error) -> RpcError {
 
 #[async_trait]
 impl HummockMetaClient for MockHummockMetaClient {
-    async fn pin_version(&self, last_pinned: HummockVersionId) -> Result<HummockVersion> {
+    async fn pin_version(
+        &self,
+        last_pinned: HummockVersionId,
+    ) -> Result<(bool, Vec<HummockVersionDelta>, Option<HummockVersion>)> {
         self.hummock_manager
             .pin_version(self.context_id, last_pinned)
             .await
             .map_err(mock_err)
     }
 
-    async fn unpin_version(&self, pinned_version_id: &[HummockVersionId]) -> Result<()> {
+    async fn unpin_version(&self) -> Result<()> {
         self.hummock_manager
-            .unpin_version(self.context_id, pinned_version_id)
+            .unpin_version(self.context_id)
+            .await
+            .map_err(mock_err)
+    }
+
+    async fn unpin_version_before(&self, unpin_version_before: HummockVersionId) -> Result<()> {
+        self.hummock_manager
+            .unpin_version_before(self.context_id, unpin_version_before)
             .await
             .map_err(mock_err)
     }
@@ -109,7 +119,7 @@ impl HummockMetaClient for MockHummockMetaClient {
             .map_err(mock_err)
     }
 
-    async fn get_new_table_id(&self) -> Result<HummockSSTableId> {
+    async fn get_new_table_id(&self) -> Result<HummockSstableId> {
         self.hummock_manager
             .get_new_table_id()
             .await

@@ -13,16 +13,16 @@
 // limitations under the License.
 
 use std::borrow::BorrowMut;
+use std::collections::HashMap;
 use std::sync::Arc;
 
 use async_trait::async_trait;
 use futures::future::{try_join_all, Either};
 use itertools::Itertools;
-use madsim::collections::HashMap;
 use risingwave_common::array::StreamChunk;
 use risingwave_common::catalog::{ColumnId, TableId};
 use risingwave_common::error::{internal_error, Result, RwError, ToRwResult};
-use risingwave_connector::{
+use risingwave_connector::source::{
     Column, ConnectorProperties, ConnectorState, SourceMessage, SplitMetaData, SplitReaderImpl,
 };
 use tokio::sync::mpsc::{Receiver, Sender};

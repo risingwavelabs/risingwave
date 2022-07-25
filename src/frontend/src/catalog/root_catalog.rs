@@ -31,9 +31,9 @@ use crate::catalog::table_catalog::TableCatalog;
 use crate::catalog::{pg_catalog, DatabaseId, SchemaId};
 
 /// Root catalog of database catalog. Manage all database/schema/table in memory on frontend. it
-/// is protected by a `RwLock`. only [`crate::observer::observer_manager::ObserverManager`] will get
-/// its mut reference and do write to sync with the meta catalog. Other situations it is read only
-/// with a read guard.
+/// is protected by a `RwLock`. only [`crate::observer::observer_manager::FrontendObserverNode`]
+/// will get its mut reference and do write to sync with the meta catalog. Other situations it is
+/// read only with a read guard.
 ///
 /// - catalog (root catalog)
 ///   - database catalog
@@ -72,6 +72,7 @@ impl Catalog {
         let name = db.name.clone();
         let id = db.id;
 
+        #[expect(clippy::needless_borrow)]
         self.database_by_name
             .try_insert(name.clone(), (&db).into())
             .unwrap();
@@ -135,6 +136,14 @@ impl Catalog {
             .get_schema_mut(schema_id)
             .unwrap()
             .drop_table(tb_id);
+    }
+
+    pub fn update_table(&mut self, proto: &ProstTable) {
+        self.get_database_mut(proto.database_id)
+            .unwrap()
+            .get_schema_mut(proto.schema_id)
+            .unwrap()
+            .update_table(proto);
     }
 
     pub fn drop_source(&mut self, db_id: DatabaseId, schema_id: SchemaId, source_id: SourceId) {

@@ -50,6 +50,15 @@ risedev:
       address: "[::1]"
       listen-address: "[::]"
 
+  # The minimum config to use with risectl.
+  for-ctl:
+    - use: minio
+    - use: meta-node
+      unsafe-disable-recovery: true
+    - use: compute-node
+    - use: frontend
+    - use: compactor
+
   # `dev-compute-node` have the same settings as default except the the compute node will be started by user.
   dev-compute-node:
     - use: meta-node
@@ -77,6 +86,23 @@ risedev:
     - use: frontend
     - use: compactor
     - use: prometheus
+    - use: grafana
+    - use: zookeeper
+      persist-data: true
+    - use: kafka
+      persist-data: true
+
+  full-benchmark:
+    - use: minio
+    - use: etcd
+    - use: meta-node
+    - use: compute-node
+    - use: frontend
+    - use: compactor
+    - use: prometheus
+      remote-write: true
+      remote-write-region: "ap-southeast-1"
+      remote-write-url: "https://aps-workspaces.ap-southeast-1.amazonaws.com/workspaces/ws-f3841dad-6a5c-420f-8f62-8f66487f512a/api/v1/remote_write"
     - use: grafana
     - use: zookeeper
       persist-data: true
@@ -179,14 +205,14 @@ risedev:
 
   # special config for deployment, see related PR for more information
   compose-3node-deploy:
-    - use: minio
-      id: minio-0
-      address: ${dns-host:rw-source-0}
-      listen-address: "0.0.0.0"
-      console-address: "0.0.0.0"
+    # - use: minio
+    #   id: minio-0
+    #   address: ${dns-host:rw-source-0}
+    #   listen-address: "0.0.0.0"
+    #   console-address: "0.0.0.0"
 
-    # - use: aws-s3
-    #   bucket: ${terraform:s3-bucket}
+    - use: aws-s3
+      bucket: ${terraform:s3-bucket}
 
     # Not enabled by default as all previous benchmarks are not done with etcd.
     # Also we currently only support node-level docker volume tear down.
@@ -433,6 +459,15 @@ template:
     # Id of this instance
     id: prometheus
 
+    # If `remote_write` is true, this Prometheus instance will push metrics to remote instance
+    remote-write: false
+
+    # AWS region of remote write
+    remote-write-region: ""
+
+    # Remote write url of this instance
+    remote-write-url: ""
+
     # Compute-nodes used by this Prometheus instance
     provide-compute-node: "compute-node*"
 
@@ -590,3 +625,9 @@ template:
 
     # Connect address
     address: ${id}
+
+    # Number of CPUs to use
+    cpus: 8
+
+    # Memory limit for Redpanda
+    memory: 16G

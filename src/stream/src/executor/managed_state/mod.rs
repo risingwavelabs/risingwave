@@ -13,6 +13,6 @@
 // limitations under the License.
 
 pub mod aggregation;
-pub mod flush_status;
+pub mod dynamic_filter;
 pub mod join;
 pub mod top_n;

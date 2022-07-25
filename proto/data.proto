@@ -3,7 +3,6 @@ syntax = "proto3";
 package data;
 
 import "common.proto";
-import "source.proto";
 
 option optimize_for = SPEED;
 
@@ -118,13 +117,6 @@ enum Op {
   UPDATE_DELETE = 3;
 }
 
-message StreamMessage {
-  oneof stream_message {
-    StreamChunk stream_chunk = 1;
-    Barrier barrier = 2;
-  }
-}
-
 message StreamChunk {
   // for Column::from_protobuf(), may not need later
   uint32 cardinality = 1;
@@ -132,43 +124,9 @@ message StreamChunk {
   repeated Column columns = 3;
 }
 
-message StopMutation {
-  repeated uint32 actors = 1;
-}
-
-message DispatcherMutation {
-  uint32 actor_id = 1;
-  uint64 dispatcher_id = 2;
-  repeated common.ActorInfo info = 3;
-}
-
-message UpdateMutation {
-  repeated DispatcherMutation mutations = 1;
-}
-
-message AddMutation {
-  repeated DispatcherMutation mutations = 1;
-  map<uint32, source.ConnectorSplits> actor_splits = 2;
-}
-
-message SourceChangeSplitMutation {
-  map<uint32, source.ConnectorSplits> actor_splits = 2;
-}
-
 message Epoch {
   uint64 curr = 1;
   uint64 prev = 2;
-}
-
-message Barrier {
-  Epoch epoch = 1;
-  oneof mutation {
-    StopMutation stop = 3;
-    UpdateMutation update = 4;
-    AddMutation add = 5;
-    SourceChangeSplitMutation splits = 7;
-  }
-  bytes span = 6;
 }
 
 message Terminate {}

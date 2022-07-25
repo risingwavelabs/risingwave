@@ -14,14 +14,12 @@
 
 use std::fmt;
 
-use itertools::Itertools;
 use risingwave_common::error::Result;
 use risingwave_pb::batch_plan::plan_node::NodeBody;
 use risingwave_pb::batch_plan::HashAggNode;
 
 use super::logical_agg::PlanAggCall;
 use super::{LogicalAgg, PlanBase, PlanRef, PlanTreeNodeUnary, ToBatchProst, ToDistributedBatch};
-use crate::expr::InputRefDisplay;
 use crate::optimizer::plan_node::ToLocalBatch;
 use crate::optimizer::property::{Distribution, Order, RequiredDist};
 
@@ -50,25 +48,14 @@ impl BatchHashAgg {
         self.logical.agg_calls()
     }
 
-    pub fn group_keys(&self) -> &[usize] {
-        self.logical.group_keys()
+    pub fn group_key(&self) -> &[usize] {
+        self.logical.group_key()
     }
 }
 
 impl fmt::Display for BatchHashAgg {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-        f.debug_struct("BatchHashAgg")
-            .field(
-                "group_keys",
-                &self
-                    .group_keys()
-                    .iter()
-                    .copied()
-                    .map(InputRefDisplay)
-                    .collect_vec(),
-            )
-            .field("aggs", &self.agg_calls())
-            .finish()
+        self.logical.fmt_with_name(f, "BatchHashAgg")
     }
 }
 
@@ -86,7 +73,7 @@ impl ToDistributedBatch for BatchHashAgg {
     fn to_distributed(&self) -> Result<PlanRef> {
         let new_input = self.input().to_distributed_with_required(
             &Order::any(),
-            &RequiredDist::shard_by_key(self.input().schema().len(), self.group_keys()),
+            &RequiredDist::shard_by_key(self.input().schema().len(), self.group_key()),
         )?;
         Ok(self.clone_with_input(new_input).into())
     }
@@ -100,8 +87,8 @@ impl ToBatchProst for BatchHashAgg {
                 .iter()
                 .map(PlanAggCall::to_protobuf)
                 .collect(),
-            group_keys: self
-                .group_keys()
+            group_key: self
+                .group_key()
                 .iter()
                 .clone()
                 .map(|index| *index as u32)

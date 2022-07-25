@@ -6,9 +6,18 @@ edition = "2021"
 [dependencies]
 bytes = "1"
 hex = "0.4"
+itertools = "0.10"
 log = "0.4"
-madsim = "=0.2.0-alpha.3"
+madsim = "=0.2.0-alpha.4"
 prost = "0.10"
+risingwave_common = { path = "../../common" }
 risingwave_pb = { path = "../../prost" }
-tokio = { version = "=0.2.0-alpha.3", package = "madsim-tokio", features = ["rt", "rt-multi-thread", "sync", "macros", "time", "signal"] }
+tokio = { version = "=0.2.0-alpha.4", package = "madsim-tokio", features = [
+    "rt",
+    "rt-multi-thread",
+    "sync",
+    "macros",
+    "time",
+    "signal",
+] }
 workspace-hack = { version = "0.1", path = "../../workspace-hack" }

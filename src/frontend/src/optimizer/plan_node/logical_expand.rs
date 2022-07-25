@@ -15,7 +15,7 @@
 use std::fmt;
 
 use itertools::Itertools;
-use risingwave_common::catalog::{Field, Schema};
+use risingwave_common::catalog::{Field, FieldVerboseDisplay, Schema};
 use risingwave_common::types::DataType;
 
 use super::{
@@ -71,6 +71,37 @@ impl LogicalExpand {
     pub fn column_subsets(&self) -> &Vec<Vec<usize>> {
         &self.column_subsets
     }
+
+    pub fn column_subsets_verbose_display(&self) -> Vec<Vec<FieldVerboseDisplay>> {
+        self.column_subsets()
+            .iter()
+            .map(|subset| {
+                subset
+                    .iter()
+                    .map(|&i| FieldVerboseDisplay(self.input.schema().fields.get(i).unwrap()))
+                    .collect_vec()
+            })
+            .collect_vec()
+    }
+
+    pub(super) fn fmt_with_name(&self, f: &mut fmt::Formatter<'_>, name: &str) -> fmt::Result {
+        let verbose = self.base.ctx.is_explain_verbose();
+        if verbose {
+            write!(
+                f,
+                "{} {{ column_subsets: {:?} }}",
+                name,
+                self.column_subsets_verbose_display()
+            )
+        } else {
+            write!(
+                f,
+                "{} {{ column_subsets: {:?} }}",
+                name,
+                self.column_subsets()
+            )
+        }
+    }
 }
 
 impl PlanTreeNodeUnary for LogicalExpand {
@@ -104,11 +135,7 @@ impl_plan_tree_node_for_unary! {LogicalExpand}
 
 impl fmt::Display for LogicalExpand {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        write!(
-            f,
-            "LogicalExpand {{ column_subsets: {:?} }}",
-            self.column_subsets
-        )
+        self.fmt_with_name(f, "LogicalExpand")
     }
 }
 

@@ -28,6 +28,7 @@ mod expr_is_null;
 mod expr_literal;
 mod expr_nested_construct;
 mod expr_quaternary_bytes;
+mod expr_regexp;
 mod expr_ternary_bytes;
 pub mod expr_unary;
 mod template;
@@ -48,6 +49,7 @@ use crate::expr::expr_coalesce::CoalesceExpression;
 use crate::expr::expr_concat_ws::ConcatWsExpression;
 use crate::expr::expr_field::FieldExpression;
 use crate::expr::expr_nested_construct::NestedConstructExpression;
+use crate::expr::expr_regexp::RegexpMatchExpr;
 use crate::ExprError;
 
 pub type ExpressionRef = Arc<dyn Expression>;
@@ -119,6 +121,7 @@ pub fn build_from_prost(prost: &ExprNode) -> Result<BoxedExpression> {
         Field => FieldExpression::try_from(prost).map(Expression::boxed),
         Array => NestedConstructExpression::try_from(prost).map(Expression::boxed),
         Row => NestedConstructExpression::try_from(prost).map(Expression::boxed),
+        RegexpMatch => RegexpMatchExpr::try_from(prost).map(Expression::boxed),
         _ => Err(ExprError::UnsupportedFunction(format!(
             "{:?}",
             prost.get_expr_type()

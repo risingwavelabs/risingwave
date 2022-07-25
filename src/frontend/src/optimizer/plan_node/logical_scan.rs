@@ -18,7 +18,7 @@ use std::rc::Rc;
 
 use fixedbitset::FixedBitSet;
 use itertools::Itertools;
-use risingwave_common::catalog::{ColumnDesc, Schema, TableDesc};
+use risingwave_common::catalog::{ColumnDesc, Field, Schema, TableDesc};
 use risingwave_common::error::{ErrorCode, Result, RwError};
 
 use super::{
@@ -29,7 +29,7 @@ use crate::catalog::ColumnId;
 use crate::expr::{CollectInputRef, ExprImpl, InputRef};
 use crate::optimizer::plan_node::{BatchSeqScan, LogicalFilter, LogicalProject};
 use crate::session::OptimizerContextRef;
-use crate::utils::{ColIndexMapping, Condition, ScanRange};
+use crate::utils::{ColIndexMapping, Condition, ConditionVerboseDisplay};
 
 /// `LogicalScan` returns contents of a table or other equivalent object
 #[derive(Debug, Clone)]
@@ -75,12 +75,12 @@ impl LogicalScan {
             .map(|(op_idx, tb_idx)| {
                 let col = &table_desc.columns[*tb_idx];
                 id_to_op_idx.insert(col.column_id, op_idx);
-                col.into()
+                Field::from_with_table_name_prefix(col, &table_name)
             })
             .collect();
 
         let pk_indices = table_desc
-            .pks
+            .pk
             .iter()
             .map(|&c| id_to_op_idx.get(&table_desc.columns[c].column_id).copied())
             .collect::<Option<Vec<_>>>()
@@ -138,11 +138,38 @@ impl LogicalScan {
             .collect()
     }
 
+    pub(super) fn column_names_with_table_prefix(&self) -> Vec<String> {
+        self.output_col_idx
+            .iter()
+            .map(|i| {
+                format!(
+                    "{}.{}",
+                    self.table_name.clone(),
+                    self.table_desc.columns[*i].name
+                )
+            })
+            .collect()
+    }
+
     pub(super) fn order_names(&self) -> Vec<String> {
         self.table_desc
             .order_column_indices()
             .iter()
             .map(|&i| self.table_desc.columns[i].name.clone())
+            .collect()
+    }
+
+    pub(super) fn order_names_with_table_prefix(&self) -> Vec<String> {
+        self.table_desc
+            .order_column_indices()
+            .iter()
+            .map(|&i| {
+                format!(
+                    "{}.{}",
+                    self.table_name.clone(),
+                    self.table_desc.columns[i].name
+                )
+            })
             .collect()
     }
 
@@ -180,9 +207,12 @@ impl LogicalScan {
         &self.indexes
     }
 
-    /// distribution keys stored in catalog only contains column index of the table (`table_idx`),
-    /// so we need to convert it to `operator_idx` when filling distributions.
-    pub fn map_distribution_keys(&self) -> Vec<usize> {
+    /// The mapped distribution key of the scan operator.
+    ///
+    /// The column indices in it is the position in the `required_col_idx`,
+    /// instead of the position in all the columns of the table
+    /// (which is the table's distribution key).
+    pub fn distribution_key(&self) -> Option<Vec<usize>> {
         let tb_idx_to_op_idx = self
             .required_col_idx
             .iter()
@@ -190,9 +220,9 @@ impl LogicalScan {
             .map(|(op_idx, tb_idx)| (*tb_idx, op_idx))
             .collect::<HashMap<_, _>>();
         self.table_desc
-            .distribution_keys
+            .distribution_key
             .iter()
-            .map(|&tb_idx| tb_idx_to_op_idx[&tb_idx])
+            .map(|&tb_idx| tb_idx_to_op_idx.get(&tb_idx).cloned())
             .collect()
     }
 
@@ -293,12 +323,18 @@ impl_plan_tree_node_for_leaf! {LogicalScan}
 
 impl fmt::Display for LogicalScan {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        let verbose = self.base.ctx.is_explain_verbose();
         if self.predicate.always_true() {
             write!(
                 f,
                 "LogicalScan {{ table: {}, columns: [{}] }}",
                 self.table_name,
-                self.column_names().join(", "),
+                if verbose {
+                    self.column_names_with_table_prefix()
+                } else {
+                    self.column_names()
+                }
+                .join(", "),
             )
         } else {
             let required_col_names = self
@@ -311,9 +347,22 @@ impl fmt::Display for LogicalScan {
                 f,
                 "LogicalScan {{ table: {}, output_columns: [{}], required_columns: [{}], predicate: {} }}",
                 self.table_name,
-                self.column_names().join(", "),
+                if verbose {
+                    self.column_names_with_table_prefix()
+                } else {
+                    self.column_names()
+                }.join(", "),
                 required_col_names.join(", "),
-                self.predicate,
+                if verbose {
+                    let fields = self.table_desc.columns.iter().map(|col|  Field::from_with_table_name_prefix(col, &self.table_name)).collect_vec();
+                    let input_schema = Schema{fields};
+                    format!("{}", ConditionVerboseDisplay{
+                        condition: &self.predicate,
+                        input_schema: &input_schema,
+                    })
+                } else {
+                    format!("{}", self.predicate)
+                }
             )
         }
     }
@@ -347,9 +396,9 @@ impl PredicatePushdown for LogicalScan {
 impl ToBatch for LogicalScan {
     fn to_batch(&self) -> Result<PlanRef> {
         if self.predicate.always_true() {
-            Ok(BatchSeqScan::new(self.clone(), ScanRange::full_table_scan()).into())
+            Ok(BatchSeqScan::new(self.clone(), vec![]).into())
         } else {
-            let (scan_range, predicate) = self.predicate.clone().split_to_scan_range(
+            let (scan_ranges, predicate) = self.predicate.clone().split_to_scan_ranges(
                 &self.table_desc.order_column_indices(),
                 self.table_desc.columns.len(),
             );
@@ -357,7 +406,7 @@ impl ToBatch for LogicalScan {
             scan.predicate = predicate; // We want to keep `required_col_idx` unchanged, so do not call `clone_with_predicate`.
             let (scan, predicate, project_expr) = scan.predicate_pull_up();
 
-            let mut plan: PlanRef = BatchSeqScan::new(scan, scan_range).into();
+            let mut plan: PlanRef = BatchSeqScan::new(scan, scan_ranges).into();
             if !predicate.always_true() {
                 plan = BatchFilter::new(LogicalFilter::new(plan, predicate)).into();
             }
@@ -406,7 +455,7 @@ impl ToStream for LogicalScan {
                 }
                 let col_need_to_add = self
                     .table_desc
-                    .order_keys
+                    .order_key
                     .iter()
                     .filter_map(|c| {
                         if !col_ids.contains(&self.table_desc().columns[c.column_idx].column_id) {

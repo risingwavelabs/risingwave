@@ -45,6 +45,11 @@ pub async fn epoch_check(info: Arc<ExecutorInfo>, input: impl MessageStream) {
                     b
                 );
             }
+
+            if let Some(last_epoch) = last_epoch {
+                assert!(b.epoch.prev == last_epoch, "missing barrier: last barrier's epoch = {}, while current barrier prev={} curr={}", last_epoch, b.epoch.prev, b.epoch.curr);
+            }
+
             last_epoch = Some(new_epoch);
         } else if last_epoch.is_none() && !info.identity.contains("BatchQuery") {
             panic!(
@@ -70,20 +75,20 @@ mod tests {
     #[tokio::test]
     async fn test_epoch_ok() {
         let (mut tx, source) = MockSource::channel(Default::default(), vec![]);
-        tx.push_barrier(100, false);
+        tx.push_barrier(1, false);
         tx.push_chunk(StreamChunk::default());
-        tx.push_barrier(114, false);
-        tx.push_barrier(114, false);
-        tx.push_barrier(514, false);
+        tx.push_barrier(2, false);
+        tx.push_barrier(3, false);
+        tx.push_barrier(4, false);
 
         let checked = epoch_check(source.info().into(), source.boxed().execute());
         pin_mut!(checked);
 
-        assert_matches!(checked.next().await.unwrap().unwrap(), Message::Barrier(b) if b.epoch.curr == 100);
+        assert_matches!(checked.next().await.unwrap().unwrap(), Message::Barrier(b) if b.epoch.curr == 1);
         assert_matches!(checked.next().await.unwrap().unwrap(), Message::Chunk(_));
-        assert_matches!(checked.next().await.unwrap().unwrap(), Message::Barrier(b) if b.epoch.curr == 114);
-        assert_matches!(checked.next().await.unwrap().unwrap(), Message::Barrier(b) if b.epoch.curr == 114);
-        assert_matches!(checked.next().await.unwrap().unwrap(), Message::Barrier(b) if b.epoch.curr == 514);
+        assert_matches!(checked.next().await.unwrap().unwrap(), Message::Barrier(b) if b.epoch.curr == 2);
+        assert_matches!(checked.next().await.unwrap().unwrap(), Message::Barrier(b) if b.epoch.curr == 3);
+        assert_matches!(checked.next().await.unwrap().unwrap(), Message::Barrier(b) if b.epoch.curr == 4);
     }
 
     #[should_panic]

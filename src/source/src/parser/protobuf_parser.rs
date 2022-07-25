@@ -133,7 +133,7 @@ impl ProtobufParser {
     }
 
     // Use pb field to create column_desc, use index to create increment column_id
-    pub fn pb_field_to_col_desc(
+    fn pb_field_to_col_desc(
         field_descriptor: &FieldDescriptor,
         descriptors: &Descriptors,
         index: &mut i32,
@@ -431,36 +431,42 @@ mod tests {
                 data_type: DataType::Int32,
                 column_id: ColumnId::from(0),
                 skip_parse: false,
+                fields: vec![],
             },
             SourceColumnDesc {
                 name: "address".to_string(),
                 data_type: DataType::Varchar,
                 column_id: ColumnId::from(1),
                 skip_parse: false,
+                fields: vec![],
             },
             SourceColumnDesc {
                 name: "city".to_string(),
                 data_type: DataType::Varchar,
                 column_id: ColumnId::from(2),
                 skip_parse: false,
+                fields: vec![],
             },
             SourceColumnDesc {
                 name: "zipcode".to_string(),
                 data_type: DataType::Int64,
                 column_id: ColumnId::from(3),
                 skip_parse: false,
+                fields: vec![],
             },
             SourceColumnDesc {
                 name: "rate".to_string(),
                 data_type: DataType::Float32,
                 column_id: ColumnId::from(4),
                 skip_parse: false,
+                fields: vec![],
             },
             SourceColumnDesc {
                 name: "date".to_string(),
                 data_type: DataType::Date,
                 column_id: ColumnId::from(5),
                 skip_parse: false,
+                fields: vec![],
             },
         ];
 

@@ -15,12 +15,12 @@
 use std::slice;
 
 use risingwave_common::types::DataType;
-use risingwave_expr::expr::AggKind;
+use risingwave_expr::expr::{AggKind, ExpressionRef};
 
 /// An aggregation function may accept 0, 1 or 2 arguments.
 #[derive(Clone, Debug)]
 pub enum AggArgs {
-    /// `None` is used for aggregation function accepts 0 arguments, such as [`AggKind::RowCount`].
+    /// `None` is used for aggregation function accepts 0 arguments, such as `count(*)`.
     None,
     /// `Unary` is used for aggregation function accepts 1 argument, such as [`AggKind::Sum`].
     Unary(DataType, usize),
@@ -64,4 +64,7 @@ pub struct AggCall {
     /// Whether the stream is append-only.
     /// Specific `StreamingAggStateImpl` may optimize its implementation based on this knowledge.
     pub append_only: bool,
+
+    /// Filter of aggregation.
+    pub filter: Option<ExpressionRef>,
 }

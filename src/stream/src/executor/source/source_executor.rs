@@ -16,7 +16,6 @@ use std::fmt::{Debug, Formatter};
 use std::sync::Arc;
 
 use either::Either;
-use futures::stream::{select_with_strategy, PollNext, SelectWithStrategy};
 use futures::StreamExt;
 use futures_async_stream::try_stream;
 use risingwave_common::array::column::Column;
@@ -24,12 +23,13 @@ use risingwave_common::array::{ArrayBuilder, I64ArrayBuilder, StreamChunk};
 use risingwave_common::bail;
 use risingwave_common::catalog::{ColumnId, Schema, TableId};
 use risingwave_common::error::Result;
-use risingwave_connector::{ConnectorState, SplitImpl, SplitMetaData};
+use risingwave_connector::source::{ConnectorState, SplitImpl, SplitMetaData};
 use risingwave_source::connector_source::SourceContext;
 use risingwave_source::*;
 use risingwave_storage::{Keyspace, StateStore};
 use tokio::sync::mpsc::UnboundedReceiver;
 
+use super::reader::SourceReaderStream;
 use crate::executor::error::StreamExecutorError;
 use crate::executor::monitor::StreamingMetrics;
 use crate::executor::source::state::SourceStateHandler;
@@ -133,69 +133,6 @@ impl<S: StateStore> SourceExecutor<S> {
     }
 }
 
-type SourceReaderMessage =
-    Either<StreamExecutorResult<Barrier>, StreamExecutorResult<StreamChunkWithState>>;
-type SourceReaderArm = BoxStream<'static, SourceReaderMessage>;
-type SourceReaderStream =
-    SelectWithStrategy<SourceReaderArm, SourceReaderArm, fn(&mut ()) -> PollNext, ()>;
-
-struct SourceReader {
-    /// The reader for barrier.
-    barrier_receiver: UnboundedReceiver<Barrier>,
-
-    /// The reader for stream source.
-    source_chunk_reader: Box<SourceStreamReaderImpl>,
-}
-
-impl SourceReader {
-    /// Receive barriers from barrier manager with the channel, error on channel close.
-    #[try_stream(ok = Barrier, error = StreamExecutorError)]
-    async fn barrier_receiver(mut rx: UnboundedReceiver<Barrier>) {
-        while let Some(barrier) = rx.recv().await {
-            yield barrier;
-        }
-        bail!("barrier reader closed unexpectedly");
-    }
-
-    /// Receive chunks and states from the source reader, hang up on error.
-    #[try_stream(ok = StreamChunkWithState, error = StreamExecutorError)]
-    async fn source_chunk_reader(mut reader: Box<SourceStreamReaderImpl>) {
-        loop {
-            match reader.next().await {
-                Ok(chunk) => yield chunk,
-                Err(err) => {
-                    error!("hang up stream reader due to polling error: {}", err);
-                    futures::future::pending().await
-                }
-            }
-        }
-    }
-
-    /// We prefer barrier on the left hand side over source chunks.
-    fn prefer_barrier_strategy(_: &mut ()) -> PollNext {
-        PollNext::Left
-    }
-
-    /// Convert this reader to a stream.
-    fn into_stream(self) -> SourceReaderStream {
-        let barrier_receiver = Self::barrier_receiver(self.barrier_receiver);
-        let source_chunk_reader = Self::source_chunk_reader(self.source_chunk_reader);
-        select_with_strategy(
-            barrier_receiver.map(Either::Left).boxed(),
-            source_chunk_reader.map(Either::Right).boxed(),
-            Self::prefer_barrier_strategy,
-        )
-    }
-
-    /// Replace the source chunk reader with a new one for given `stream`. Used for split change.
-    fn replace_source_chunk_reader(
-        stream: &mut SourceReaderStream,
-        reader: Box<SourceStreamReaderImpl>,
-    ) {
-        *stream.get_mut().1 = Self::source_chunk_reader(reader).map(Either::Right).boxed();
-    }
-}
-
 impl<S: StateStore> SourceExecutor<S> {
     fn get_diff(&self, rhs: ConnectorState) -> ConnectorState {
         // rhs can not be None because we do not support split number reduction
@@ -226,10 +163,7 @@ impl<S: StateStore> SourceExecutor<S> {
             .collect_vec();
 
         if !cache.is_empty() {
-            self.split_state_store
-                .take_snapshot(cache, epoch)
-                .await
-                .map_err(StreamExecutorError::source_error)?;
+            self.split_state_store.take_snapshot(cache, epoch).await?;
         }
 
         Ok(())
@@ -265,8 +199,8 @@ impl<S: StateStore> SourceExecutor<S> {
         let barrier = barrier_receiver.recv().await.unwrap();
 
         if let Some(mutation) = barrier.mutation.as_ref() {
-            if let Mutation::AddOutput(add_output) = mutation.as_ref() {
-                if let Some(splits) = add_output.splits.get(&self.actor_id) {
+            if let Mutation::Add { splits, .. } = mutation.as_ref() {
+                if let Some(splits) = splits.get(&self.actor_id) {
                     self.stream_source_splits = splits.clone();
                 }
             }
@@ -279,8 +213,7 @@ impl<S: StateStore> SourceExecutor<S> {
             if let Some(recover_state) = self
                 .split_state_store
                 .try_recover_from_state_store(ele, epoch)
-                .await
-                .map_err(StreamExecutorError::source_error)?
+                .await?
             {
                 *ele = recover_state;
             }
@@ -292,11 +225,7 @@ impl<S: StateStore> SourceExecutor<S> {
         let source_chunk_reader = self.build_stream_source_reader(recover_state).await?;
 
         // Merge the chunks from source and the barriers into a single stream.
-        let mut stream = SourceReader {
-            barrier_receiver,
-            source_chunk_reader,
-        }
-        .into_stream();
+        let mut stream = SourceReaderStream::new(barrier_receiver, source_chunk_reader);
 
         yield Message::Barrier(barrier);
 
@@ -308,24 +237,31 @@ impl<S: StateStore> SourceExecutor<S> {
                     let epoch = barrier.epoch.prev;
                     self.take_snapshot(epoch).await?;
 
-                    if let Some(Mutation::SourceChangeSplit(mapping)) = barrier.mutation.as_deref()
-                    {
-                        if let Some(target_splits) = mapping.get(&self.actor_id).cloned() {
-                            if let Some(target_state) = self.get_diff(target_splits) {
-                                log::info!(
-                                    "actor {:?} apply source split change to {:?}",
-                                    self.actor_id,
-                                    target_state
-                                );
+                    if let Some(mutation) = barrier.mutation.as_deref() {
+                        match mutation {
+                            Mutation::SourceChangeSplit(mapping) => {
+                                if let Some(target_splits) = mapping.get(&self.actor_id).cloned() {
+                                    if let Some(target_state) = self.get_diff(target_splits) {
+                                        log::info!(
+                                            "actor {:?} apply source split change to {:?}",
+                                            self.actor_id,
+                                            target_state
+                                        );
 
-                                // Replace the source reader with a new one of the new state.
-                                let reader = self
-                                    .build_stream_source_reader(Some(target_state.clone()))
-                                    .await?;
-                                SourceReader::replace_source_chunk_reader(&mut stream, reader);
+                                        // Replace the source reader with a new one of the new
+                                        // state.
+                                        let reader = self
+                                            .build_stream_source_reader(Some(target_state.clone()))
+                                            .await?;
+                                        stream.replace_source_chunk_reader(reader);
 
-                                self.stream_source_splits = target_state;
+                                        self.stream_source_splits = target_state;
+                                    }
+                                }
                             }
+                            Mutation::Pause => stream.pause_source(),
+                            Mutation::Resume => stream.resume_source(),
+                            _ => {}
                         }
                     }
                     self.state_cache.clear();
@@ -422,7 +358,7 @@ mod tests {
     use risingwave_common::catalog::{ColumnDesc, Field, Schema};
     use risingwave_common::types::DataType;
     use risingwave_common::util::sort_util::{OrderPair, OrderType};
-    use risingwave_connector::datagen::DatagenSplit;
+    use risingwave_connector::source::datagen::DatagenSplit;
     use risingwave_pb::catalog::StreamSourceInfo;
     use risingwave_pb::data::data_type::TypeName;
     use risingwave_pb::data::DataType as ProstDataType;
@@ -770,20 +706,19 @@ mod tests {
         .execute();
 
         let curr_epoch = 1919;
-        let init_barrier =
-            Barrier::new_test_barrier(curr_epoch).with_mutation(Mutation::AddOutput(AddOutput {
-                map: HashMap::new(),
-                splits: hashmap! {
-                    ActorId::default() => vec![
-                        SplitImpl::Datagen(
-                        DatagenSplit {
-                            split_index: 0,
-                            split_num: 3,
-                            start_offset: None,
-                        }),
-                    ],
-                },
-            }));
+        let init_barrier = Barrier::new_test_barrier(curr_epoch).with_mutation(Mutation::Add {
+            adds: HashMap::new(),
+            splits: hashmap! {
+                ActorId::default() => vec![
+                    SplitImpl::Datagen(
+                    DatagenSplit {
+                        split_index: 0,
+                        split_num: 3,
+                        start_offset: None,
+                    }),
+                ],
+            },
+        });
         barrier_tx.send(init_barrier).unwrap();
 
         let _ = materialize.next().await.unwrap(); // barrier
@@ -844,6 +779,13 @@ mod tests {
         );
         assert_eq!(drop_row_id(chunk_3.unwrap()), drop_row_id(chunk_3_truth));
 
+        let pause_barrier =
+            Barrier::new_test_barrier(curr_epoch + 2).with_mutation(Mutation::Pause);
+        barrier_tx.send(pause_barrier).unwrap();
+
+        let pause_barrier =
+            Barrier::new_test_barrier(curr_epoch + 3).with_mutation(Mutation::Resume);
+        barrier_tx.send(pause_barrier).unwrap();
         Ok(())
     }
 }

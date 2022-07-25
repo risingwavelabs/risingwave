@@ -28,6 +28,8 @@ enum WorkerType {
   COMPUTE_NODE = 1;
   RISE_CTL = 2;
   COMPACTOR = 3;
+
+  GENERIC = 100;
 }
 
 enum ParallelUnitType {
@@ -52,13 +54,6 @@ message WorkerNode {
   State state = 4;
   // a mapping from logical key to parallel unit, with logical key as the index of array
   repeated ParallelUnit parallel_units = 5;
-}
-
-// A cluster can be either a set of OLAP compute nodes, or a set of streaming compute nodes.
-message Cluster {
-  uint32 id = 1;
-  repeated common.WorkerNode nodes = 2;
-  map<string, string> config = 3;
 }
 
 message Buffer {

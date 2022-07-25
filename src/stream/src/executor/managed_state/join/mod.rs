@@ -24,16 +24,14 @@ use itertools::Itertools;
 pub use join_entry_state::JoinEntryState;
 use risingwave_common::array::Row;
 use risingwave_common::bail;
-use risingwave_common::catalog::{ColumnDesc, ColumnId, TableId};
 use risingwave_common::collection::evictable::EvictableHashMap;
 use risingwave_common::hash::{HashKey, PrecomputedBuildHasher};
 use risingwave_common::types::{DataType, Datum, ScalarImpl};
-use risingwave_common::util::sort_util::OrderType;
-use risingwave_storage::table::state_table::StateTable;
+use risingwave_storage::table::state_table::RowBasedStateTable;
 use risingwave_storage::StateStore;
 use stats_alloc::{SharedStatsAlloc, StatsAlloc};
 
-use crate::executor::error::{StreamExecutorError, StreamExecutorResult};
+use crate::executor::error::StreamExecutorResult;
 use crate::executor::monitor::StreamingMetrics;
 
 type DegreeType = u64;
@@ -57,7 +55,7 @@ impl JoinRow {
         Self { row, degree }
     }
 
-    #[allow(dead_code)]
+    #[expect(dead_code)]
     pub fn size(&self) -> usize {
         self.row.size()
     }
@@ -153,6 +151,7 @@ impl JoinHashMapMetrics {
 
 pub struct JoinHashMap<K: HashKey, S: StateStore> {
     /// Allocator
+    #[expect(dead_code)]
     alloc: SharedStatsAlloc<Global>,
     /// Store the join states.
     // SAFETY: This is a self-referential data structure and the allocator is owned by the struct
@@ -165,7 +164,7 @@ pub struct JoinHashMap<K: HashKey, S: StateStore> {
     /// Current epoch
     current_epoch: u64,
     /// State table
-    state_table: StateTable<S>,
+    state_table: RowBasedStateTable<S>,
     /// Metrics of the hash map
     metrics: JoinHashMapMetrics,
 }
@@ -178,9 +177,7 @@ impl<K: HashKey, S: StateStore> JoinHashMap<K, S> {
         pk_indices: Vec<usize>,
         join_key_indices: Vec<usize>,
         mut data_types: Vec<DataType>,
-        store: S,
-        table_id: TableId,
-        dist_key_indices: Option<Vec<usize>>,
+        state_table: RowBasedStateTable<S>,
         metrics: Arc<StreamingMetrics>,
         actor_id: u64,
         side: &'static str,
@@ -193,25 +190,6 @@ impl<K: HashKey, S: StateStore> JoinHashMap<K, S> {
         // Put the degree to the last column of the table.
         data_types.push(DataType::Int64);
 
-        let column_descs = data_types
-            .iter()
-            .enumerate()
-            .map(|(id, data_type)| ColumnDesc::unnamed(ColumnId::new(id as i32), data_type.clone()))
-            .collect_vec();
-
-        let table_pk_indices = [join_key_indices, pk_indices.clone()].concat();
-
-        // Order type doesn not affect correctness. Choose Ascending for better performance.
-        let order_types = vec![OrderType::Ascending; table_pk_indices.len()];
-
-        let state_table = StateTable::new(
-            store,
-            table_id,
-            column_descs,
-            order_types,
-            dist_key_indices,
-            table_pk_indices,
-        );
         let alloc = StatsAlloc::new(Global).shared();
         Self {
             inner: EvictableHashMap::with_hasher_in(
@@ -228,7 +206,7 @@ impl<K: HashKey, S: StateStore> JoinHashMap<K, S> {
         }
     }
 
-    #[allow(dead_code)]
+    #[expect(dead_code)]
     /// Report the bytes used by the join map.
     // FIXME: Currently, only memory used in the hash map itself is counted.
     pub fn bytes_in_use(&self) -> usize {
@@ -300,10 +278,7 @@ impl<K: HashKey, S: StateStore> JoinHashMap<K, S> {
     /// Fetch cache from the state store. Should only be called if the key does not exist in memory.
     /// Will return a empty `JoinEntryState` even when state does not exist in remote.
     async fn fetch_cached_state(&self, key: &K) -> StreamExecutorResult<JoinEntryState> {
-        let key = key
-            .clone()
-            .deserialize(self.join_key_data_types.iter())
-            .map_err(StreamExecutorError::serde_error)?;
+        let key = key.clone().deserialize(self.join_key_data_types.iter())?;
 
         let table_iter = self
             .state_table

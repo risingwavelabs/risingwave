@@ -18,20 +18,21 @@ use fixedbitset::FixedBitSet;
 use itertools::Itertools;
 use risingwave_common::catalog::Schema;
 use risingwave_common::error::{ErrorCode, Result, RwError};
+use risingwave_common::session_config::QueryMode;
 use risingwave_pb::plan_common::JoinType;
 
 use super::{
-    BatchProject, ColPrunable, CollectInputRef, LogicalProject, PlanBase, PlanRef,
+    BatchProject, ColPrunable, CollectInputRef, LogicalProject, PlanBase, PlanNodeType, PlanRef,
     PlanTreeNodeBinary, PlanTreeNodeUnary, PredicatePushdown, StreamHashJoin, StreamProject,
     ToBatch, ToStream,
 };
 use crate::expr::{ExprImpl, ExprType};
 use crate::optimizer::plan_node::{
-    BatchFilter, BatchHashJoin, BatchNestedLoopJoin, EqJoinPredicate, LogicalFilter,
-    StreamDynamicFilter, StreamFilter,
+    BatchFilter, BatchHashJoin, BatchLookupJoin, BatchNestedLoopJoin, EqJoinPredicate,
+    LogicalFilter, StreamDynamicFilter, StreamFilter,
 };
 use crate::optimizer::property::{Distribution, RequiredDist};
-use crate::utils::{ColIndexMapping, Condition};
+use crate::utils::{ColIndexMapping, Condition, ConditionVerboseDisplay};
 
 /// `LogicalJoin` combines two relations according to some condition.
 ///
@@ -51,11 +52,25 @@ pub struct LogicalJoin {
 
 impl fmt::Display for LogicalJoin {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        let verbose = self.base.ctx.is_explain_verbose();
         write!(
             f,
             "LogicalJoin {{ type: {:?}, on: {}, output_indices: {} }}",
             &self.join_type,
-            &self.on,
+            if verbose {
+                let mut concat_schema = self.left().schema().fields.clone();
+                concat_schema.extend(self.right().schema().fields.clone());
+                let concat_schema = Schema::new(concat_schema);
+                format!(
+                    "{}",
+                    ConditionVerboseDisplay {
+                        condition: self.on(),
+                        input_schema: &concat_schema
+                    }
+                )
+            } else {
+                format!("{}", self.on())
+            },
             if self
                 .output_indices
                 .iter()
@@ -450,6 +465,44 @@ impl LogicalJoin {
             (false, false) => JoinType::Inner,
         }
     }
+
+    fn convert_to_lookup_join(
+        &self,
+        logical_join: LogicalJoin,
+        predicate: EqJoinPredicate,
+    ) -> Option<PlanRef> {
+        if self.right.as_ref().node_type() != PlanNodeType::LogicalScan {
+            log::warn!(
+                "Lookup Join only supports basic tables on the join's right side. A \
+            different join will be used instead."
+            );
+            return None;
+        }
+
+        let logical_scan = self.right.as_logical_scan().unwrap();
+        let table_desc = logical_scan.table_desc().clone();
+        let output_column_ids = logical_scan.output_column_ids();
+
+        // Verify that the right join key columns are the same as the primary key
+        // TODO: Refactor Lookup Join so that prefixes of the primary key are allowed
+        let eq_col_warn_message = "In Lookup Join, the right columns of the equality join \
+        predicates must be the same as the primary key. A different join will be used instead.";
+
+        let order_col_indices = table_desc.order_column_indices();
+        if order_col_indices.len() != predicate.right_eq_indexes().len() {
+            log::warn!("{}", eq_col_warn_message);
+            return None;
+        }
+
+        for (i, eq_idx) in predicate.right_eq_indexes().into_iter().enumerate() {
+            if order_col_indices[i] != output_column_ids[eq_idx].get_id() as usize {
+                log::warn!("{}", eq_col_warn_message);
+                return None;
+            }
+        }
+
+        Some(BatchLookupJoin::new(logical_join, predicate, table_desc, output_column_ids).into())
+    }
 }
 
 impl PlanTreeNodeBinary for LogicalJoin {
@@ -673,7 +726,24 @@ impl ToBatch for LogicalJoin {
         let right = self.right().to_batch()?;
         let logical_join = self.clone_with_left_right(left, right);
 
+        let config = self.base.ctx.inner().session_ctx.config();
+
         if predicate.has_eq() {
+            if config.get_batch_enable_lookup_join() {
+                if config.get_query_mode() == QueryMode::Local {
+                    if let Some(lookup_join) =
+                        self.convert_to_lookup_join(logical_join.clone(), predicate.clone())
+                    {
+                        return Ok(lookup_join);
+                    }
+                } else {
+                    log::warn!(
+                        "Lookup Join can only be done in local mode. A different join will \
+                    be used instead."
+                    );
+                }
+            }
+
             // Convert to Hash Join for equal joins
             // For inner joins, pull non-equal conditions to a filter operator on top of it
             let pull_filter = self.join_type == JoinType::Inner && predicate.has_non_eq();
@@ -792,7 +862,7 @@ impl ToStream for LogicalJoin {
                 self.right()
             };
 
-            if let Some(agg) = maybe_simple_agg.as_logical_agg() && agg.group_keys().is_empty() {
+            if let Some(agg) = maybe_simple_agg.as_logical_agg() && agg.group_key().is_empty() {
                 /* do nothing */
             } else {
                 return Err(nested_loop_join_error);
@@ -836,8 +906,15 @@ impl ToStream for LogicalJoin {
                 Distribution::Single
             );
 
-            let plan = StreamDynamicFilter::new(predicate.other_cond().clone(), left, right).into();
+            let plan = StreamDynamicFilter::new(
+                left_ref_index,
+                predicate.other_cond().clone(),
+                left,
+                right,
+            )
+            .into();
 
+            // TODO: `DynamicFilterExecutor` should use `output_indices` in `ChunkBuilder`
             if self.output_indices != (0..self.internal_column_num()).collect::<Vec<_>>() {
                 let logical_project = LogicalProject::with_mapping(
                     plan,

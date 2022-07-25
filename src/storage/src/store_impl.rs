@@ -12,11 +12,14 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+use std::collections::HashMap;
 use std::fmt::Debug;
 use std::sync::Arc;
 
 use enum_as_inner::EnumAsInner;
+use parking_lot::RwLock;
 use risingwave_common::config::StorageConfig;
+use risingwave_hummock_sdk::slice_transform::SliceTransformImpl;
 use risingwave_object_store::object::{
     parse_local_object_store, parse_remote_object_store, ObjectStoreImpl,
 };
@@ -85,19 +88,6 @@ macro_rules! dispatch_state_store {
     };
 }
 
-#[macro_export]
-macro_rules! dispatch_hummock_state_store {
-    ($impl:expr, $store:ident, $body:tt) => {
-        match $impl {
-            StateStoreImpl::MemoryStateStore($store) => {
-                let _store = $store;
-                unimplemented!("memory state store should never be used in release mode");
-            }
-            StateStoreImpl::HummockStateStore($store) => $body,
-        }
-    };
-}
-
 impl StateStoreImpl {
     pub async fn new(
         s: &str,
@@ -105,6 +95,7 @@ impl StateStoreImpl {
         hummock_meta_client: Arc<dyn HummockMetaClient>,
         state_store_stats: Arc<StateStoreMetrics>,
         object_store_metrics: Arc<ObjectStoreMetrics>,
+        table_id_to_slice_transform: Arc<RwLock<HashMap<u32, SliceTransformImpl>>>,
     ) -> StorageResult<Self> {
         let store = match s {
             hummock if hummock.starts_with("hummock+") => {
@@ -138,6 +129,7 @@ impl StateStoreImpl {
                     hummock_meta_client.clone(),
                     state_store_stats.clone(),
                     compaction_group_client,
+                    table_id_to_slice_transform,
                 )
                 .await?;
                 StateStoreImpl::HummockStateStore(inner.monitored(state_store_stats))

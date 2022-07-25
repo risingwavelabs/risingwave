@@ -349,6 +349,20 @@ pub enum ListRef<'a> {
 }
 
 impl<'a> ListRef<'a> {
+    pub fn flatten(&self) -> Vec<DatumRef<'a>> {
+        self.values_ref()
+            .into_iter()
+            .flat_map(|datum_ref| {
+                if let Some(ScalarRefImpl::List(list_ref)) = datum_ref {
+                    list_ref.flatten()
+                } else {
+                    vec![datum_ref]
+                }
+                .into_iter()
+            })
+            .collect()
+    }
+
     pub fn values_ref(&self) -> Vec<DatumRef<'a>> {
         match self {
             ListRef::Indexed { arr, idx } => (arr.offsets[*idx]..arr.offsets[*idx + 1])
@@ -438,7 +452,7 @@ impl Display for ListRef<'_> {
     // This function will be invoked when pgwire prints a list value in string.
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         let values = self.values_ref().iter().map(display_datum_ref).join(",");
-        write!(f, "[{}]", values)
+        write!(f, "{{{}}}", values)
     }
 }
 
@@ -703,6 +717,6 @@ mod tests {
     fn test_list_ref_display() {
         let v = ListValue::new(vec![Some(1.into()), None]);
         let r = ListRef::ValueRef { val: &v };
-        assert_eq!("[1,NULL]".to_string(), format!("{}", r));
+        assert_eq!("{1,NULL}".to_string(), format!("{}", r));
     }
 }

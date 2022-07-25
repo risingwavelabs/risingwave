@@ -17,7 +17,7 @@ use std::sync::Arc;
 
 use bytes::Bytes;
 use fail::fail_point;
-use risingwave_hummock_sdk::{is_remote_sst_id, HummockSSTableId};
+use risingwave_hummock_sdk::{is_remote_sst_id, HummockSstableId};
 use risingwave_object_store::object::{get_local_path, BlockLocation, ObjectStore, ObjectStoreRef};
 
 use super::{Block, BlockCache, Sstable, SstableMeta};
@@ -28,7 +28,7 @@ const MAX_META_CACHE_SHARD_BITS: usize = 2;
 const MAX_CACHE_SHARD_BITS: usize = 6; // It means that there will be 64 shards lru-cache to avoid lock conflict.
 const MIN_BUFFER_SIZE_PER_SHARD: usize = 256 * 1024 * 1024; // 256MB
 
-pub type TableHolder = CachableEntry<HummockSSTableId, Box<Sstable>>;
+pub type TableHolder = CachableEntry<HummockSstableId, Box<Sstable>>;
 
 // TODO: Define policy based on use cases (read / compaction / ...).
 #[derive(Clone, Copy, Eq, PartialEq)]
@@ -45,7 +45,7 @@ pub struct SstableStore {
     path: String,
     store: ObjectStoreRef,
     block_cache: BlockCache,
-    meta_cache: Arc<LruCache<HummockSSTableId, Box<Sstable>>>,
+    meta_cache: Arc<LruCache<HummockSstableId, Box<Sstable>>>,
 }
 
 impl SstableStore {
@@ -111,7 +111,7 @@ impl SstableStore {
             .map_err(HummockError::object_io_error)
     }
 
-    async fn put_sst_data(&self, sst_id: HummockSSTableId, data: Bytes) -> HummockResult<()> {
+    async fn put_sst_data(&self, sst_id: HummockSstableId, data: Bytes) -> HummockResult<()> {
         let data_path = self.get_sst_data_path(sst_id);
         self.store
             .upload(&data_path, data)
@@ -119,7 +119,7 @@ impl SstableStore {
             .map_err(HummockError::object_io_error)
     }
 
-    async fn delete_sst_data(&self, sst_id: HummockSSTableId) -> HummockResult<()> {
+    async fn delete_sst_data(&self, sst_id: HummockSstableId) -> HummockResult<()> {
         let data_path = self.get_sst_data_path(sst_id);
         self.store
             .delete(&data_path)
@@ -129,7 +129,7 @@ impl SstableStore {
 
     pub fn add_block_cache(
         &self,
-        sst_id: HummockSSTableId,
+        sst_id: HummockSstableId,
         block_idx: u64,
         block_data: Bytes,
     ) -> HummockResult<()> {
@@ -146,25 +146,29 @@ impl SstableStore {
         stats: &mut StoreLocalStatistic,
     ) -> HummockResult<BlockHolder> {
         stats.cache_data_block_total += 1;
-        let fetch_block = async {
+        let mut fetch_block = || {
             stats.cache_data_block_miss += 1;
             let block_meta = sst
                 .meta
                 .block_metas
                 .get(block_index as usize)
-                .ok_or_else(HummockError::invalid_block)?;
+                .ok_or_else(HummockError::invalid_block)
+                .unwrap(); // FIXME: don't unwrap here.
             let block_loc = BlockLocation {
                 offset: block_meta.offset as usize,
                 size: block_meta.len as usize,
             };
             let data_path = self.get_sst_data_path(sst.id);
-            let block_data = self
-                .store
-                .read(&data_path, Some(block_loc))
-                .await
-                .map_err(HummockError::object_io_error)?;
-            let block = Block::decode(block_data)?;
-            Ok(Box::new(block))
+            let store = self.store.clone();
+
+            async move {
+                let block_data = store
+                    .read(&data_path, Some(block_loc))
+                    .await
+                    .map_err(HummockError::object_io_error)?;
+                let block = Block::decode(block_data)?;
+                Ok(Box::new(block))
+            }
         };
 
         let disable_cache: fn() -> bool = || {
@@ -186,13 +190,13 @@ impl SstableStore {
             }
             CachePolicy::NotFill => match self.block_cache.get(sst.id, block_index) {
                 Some(block) => Ok(block),
-                None => fetch_block.await.map(BlockHolder::from_owned_block),
+                None => fetch_block().await.map(BlockHolder::from_owned_block),
             },
-            CachePolicy::Disable => fetch_block.await.map(BlockHolder::from_owned_block),
+            CachePolicy::Disable => fetch_block().await.map(BlockHolder::from_owned_block),
         }
     }
 
-    pub fn get_sst_meta_path(&self, sst_id: HummockSSTableId) -> String {
+    pub fn get_sst_meta_path(&self, sst_id: HummockSstableId) -> String {
         let mut ret = format!("{}/{}.meta", self.path, sst_id);
         if !is_remote_sst_id(sst_id) {
             ret = get_local_path(&ret);
@@ -200,7 +204,7 @@ impl SstableStore {
         ret
     }
 
-    pub fn get_sst_data_path(&self, sst_id: HummockSSTableId) -> String {
+    pub fn get_sst_data_path(&self, sst_id: HummockSstableId) -> String {
         let mut ret = format!("{}/{}.data", self.path, sst_id);
         if !is_remote_sst_id(sst_id) {
             ret = get_local_path(&ret);
@@ -212,7 +216,7 @@ impl SstableStore {
         self.store.clone()
     }
 
-    pub fn get_meta_cache(&self) -> Arc<LruCache<HummockSSTableId, Box<Sstable>>> {
+    pub fn get_meta_cache(&self) -> Arc<LruCache<HummockSstableId, Box<Sstable>>> {
         self.meta_cache.clone()
     }
 
@@ -220,14 +224,14 @@ impl SstableStore {
         self.block_cache.clone()
     }
 
-    #[cfg(test)]
+    #[cfg(any(test, feature = "test"))]
     pub fn clear_block_cache(&self) {
         self.block_cache.clear();
     }
 
     pub async fn load_table(
         &self,
-        sst_id: HummockSSTableId,
+        sst_id: HummockSstableId,
         load_data: bool,
         stats: &mut StoreLocalStatistic,
     ) -> HummockResult<TableHolder> {
@@ -236,34 +240,37 @@ impl SstableStore {
             stats.cache_meta_block_total += 1;
             let entry = self
                 .meta_cache
-                .lookup_with_request_dedup::<_, HummockError, _>(sst_id, sst_id, || async {
+                .lookup_with_request_dedup::<_, HummockError, _>(sst_id, sst_id, || {
+                    let store = self.store.clone();
+                    let meta_path = self.get_sst_meta_path(sst_id);
+                    let data_path = self.get_sst_data_path(sst_id);
                     stats.cache_meta_block_miss += 1;
-                    let meta = match meta_data {
-                        Some(data) => data,
-                        None => {
-                            let path = self.get_sst_meta_path(sst_id);
-                            let buf = self
-                                .store
-                                .read(&path, None)
+
+                    async move {
+                        let meta = match meta_data {
+                            Some(data) => data,
+                            None => {
+                                let buf = store
+                                    .read(&meta_path, None)
+                                    .await
+                                    .map_err(HummockError::object_io_error)?;
+                                SstableMeta::decode(&mut &buf[..])?
+                            }
+                        };
+                        let mut size = meta.encoded_size();
+                        let sst = if load_data {
+                            size = meta.estimated_size as usize;
+
+                            let block_data = store
+                                .read(&data_path, None)
                                 .await
                                 .map_err(HummockError::object_io_error)?;
-                            SstableMeta::decode(&mut &buf[..])?
-                        }
-                    };
-                    let mut size = meta.encoded_size();
-                    let sst = if load_data {
-                        size = meta.estimated_size as usize;
-                        let data_path = self.get_sst_data_path(sst_id);
-                        let block_data = self
-                            .store
-                            .read(&data_path, None)
-                            .await
-                            .map_err(HummockError::object_io_error)?;
-                        Sstable::new_with_data(sst_id, meta, block_data)?
-                    } else {
-                        Sstable::new(sst_id, meta)
-                    };
-                    Ok((Box::new(sst), size))
+                            Sstable::new_with_data(sst_id, meta, block_data)?
+                        } else {
+                            Sstable::new(sst_id, meta)
+                        };
+                        Ok((Box::new(sst), size))
+                    }
                 })
                 .await
                 .map_err(|e| {
@@ -284,7 +291,7 @@ impl SstableStore {
 
     pub async fn sstable(
         &self,
-        sst_id: HummockSSTableId,
+        sst_id: HummockSstableId,
         stats: &mut StoreLocalStatistic,
     ) -> HummockResult<TableHolder> {
         self.load_table(sst_id, false, stats).await
@@ -298,10 +305,11 @@ mod tests {
     use std::sync::Arc;
 
     use crate::hummock::iterator::test_utils::{iterator_test_key_of, mock_sstable_store};
-    use crate::hummock::iterator::{HummockIterator, ReadOptions};
+    use crate::hummock::iterator::HummockIterator;
+    use crate::hummock::sstable::SstableIteratorReadOptions;
     use crate::hummock::test_utils::{default_builder_opt_for_test, gen_test_sstable_data};
     use crate::hummock::value::HummockValue;
-    use crate::hummock::{CachePolicy, SSTableIterator, Sstable};
+    use crate::hummock::{CachePolicy, Sstable, SstableIterator};
     use crate::monitor::StoreLocalStatistic;
 
     #[tokio::test]
@@ -332,8 +340,11 @@ mod tests {
             holder.value().blocks.len()
         );
         assert!(!holder.value().blocks.is_empty());
-        let mut iter =
-            SSTableIterator::new(holder, sstable_store, Arc::new(ReadOptions::default()));
+        let mut iter = SstableIterator::new(
+            holder,
+            sstable_store,
+            Arc::new(SstableIteratorReadOptions::default()),
+        );
         iter.rewind().await.unwrap();
         for i in 0..100 {
             let key = iter.key();

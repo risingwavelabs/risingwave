@@ -59,7 +59,8 @@ impl ProjectExecutor {
                 .iter_mut()
                 .map(|expr| expr.eval(&data_chunk).map(Column::new))
                 .try_collect()?;
-            let ret = DataChunk::new(arrays, data_chunk.cardinality());
+            let (_, vis) = data_chunk.into_parts();
+            let ret = DataChunk::new(arrays, vis);
             yield ret
         }
     }

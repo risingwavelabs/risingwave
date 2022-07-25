@@ -19,9 +19,10 @@ use risingwave_common::array::column::Column;
 use risingwave_common::array::StreamChunk;
 use risingwave_common::catalog::Schema;
 use risingwave_common::error::Result;
-use risingwave_storage::table::state_table::StateTable;
+use risingwave_storage::table::state_table::RowBasedStateTable;
 use risingwave_storage::StateStore;
 
+use super::aggregation::agg_call_filter_res;
 use super::*;
 use crate::executor::aggregation::{
     agg_input_array_refs, generate_agg_schema, generate_managed_agg_state, AggCall, AggState,
@@ -62,7 +63,7 @@ pub struct GlobalSimpleAggExecutor<S: StateStore> {
 
     /// Relational state tables used by this executor.
     /// One-to-one map with AggCall.
-    state_tables: Vec<StateTable<S>>,
+    state_tables: Vec<RowBasedStateTable<S>>,
 }
 
 impl<S: StateStore> Executor for GlobalSimpleAggExecutor<S> {
@@ -89,10 +90,15 @@ impl<S: StateStore> GlobalSimpleAggExecutor<S> {
         agg_calls: Vec<AggCall>,
         pk_indices: PkIndices,
         executor_id: u64,
-        state_tables: Vec<StateTable<S>>,
+        mut state_tables: Vec<RowBasedStateTable<S>>,
     ) -> Result<Self> {
         let input_info = input.info();
         let schema = generate_agg_schema(input.as_ref(), &agg_calls, None);
+
+        // TODO: enable sanity check for globle simple agg executor <https://github.com/singularity-data/risingwave/issues/3885>
+        for state_table in &mut state_tables {
+            state_table.disable_sanity_check();
+        }
 
         Ok(Self {
             input,
@@ -117,8 +123,9 @@ impl<S: StateStore> GlobalSimpleAggExecutor<S> {
         states: &mut Option<AggState<S>>,
         chunk: StreamChunk,
         epoch: u64,
-        state_tables: &mut [StateTable<S>],
+        state_tables: &mut [RowBasedStateTable<S>],
     ) -> StreamExecutorResult<()> {
+        let capacity = chunk.capacity();
         let (ops, columns, visibility) = chunk.into_inner();
 
         // --- Retrieve all aggregation inputs in advance ---
@@ -158,14 +165,16 @@ impl<S: StateStore> GlobalSimpleAggExecutor<S> {
         states.may_mark_as_dirty(epoch, state_tables).await?;
 
         // 3. Apply batch to each of the state (per agg_call)
-        for ((agg_state, data), state_table) in states
+        for (((agg_state, agg_call), data), state_table) in states
             .managed_states
             .iter_mut()
+            .zip_eq(agg_calls.iter())
             .zip_eq(all_agg_data.iter())
             .zip_eq(state_tables.iter_mut())
         {
+            let vis_map = agg_call_filter_res(agg_call, &columns, visibility.as_ref(), capacity)?;
             agg_state
-                .apply_batch(&ops, visibility.as_ref(), data, epoch, state_table)
+                .apply_batch(&ops, vis_map.as_ref(), data, epoch, state_table)
                 .await?;
         }
 
@@ -176,7 +185,7 @@ impl<S: StateStore> GlobalSimpleAggExecutor<S> {
         schema: &Schema,
         states: &mut Option<AggState<S>>,
         epoch: u64,
-        state_tables: &mut [StateTable<S>],
+        state_tables: &mut [RowBasedStateTable<S>],
     ) -> StreamExecutorResult<Option<StreamChunk>> {
         // --- Flush states to the state store ---
         // Some state will have the correct output only after their internal states have been fully
@@ -192,7 +201,7 @@ impl<S: StateStore> GlobalSimpleAggExecutor<S> {
             .iter_mut()
             .zip_eq(state_tables.iter_mut())
         {
-            state.flush(state_table).await?;
+            state.flush(state_table)?;
         }
 
         // Batch commit state tables.
@@ -321,28 +330,32 @@ mod tests {
         let append_only = false;
         let agg_calls = vec![
             AggCall {
-                kind: AggKind::RowCount,
+                kind: AggKind::Count,
                 args: AggArgs::None,
                 return_type: DataType::Int64,
                 append_only,
+                filter: None,
             },
             AggCall {
                 kind: AggKind::Sum,
                 args: AggArgs::Unary(DataType::Int64, 0),
                 return_type: DataType::Int64,
                 append_only,
+                filter: None,
             },
             AggCall {
                 kind: AggKind::Sum,
                 args: AggArgs::Unary(DataType::Int64, 1),
                 return_type: DataType::Int64,
                 append_only,
+                filter: None,
             },
             AggCall {
                 kind: AggKind::Min,
                 args: AggArgs::Unary(DataType::Int64, 0),
                 return_type: DataType::Int64,
                 append_only,
+                filter: None,
             },
         ];
 

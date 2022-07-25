@@ -21,7 +21,6 @@ message SstableInfo {
   KeyRange key_range = 2;
   uint64 file_size = 3;
   repeated uint32 table_ids = 4;
-  uint64 unit_id = 5;
 }
 
 enum LevelType {
@@ -34,6 +33,12 @@ message Level {
   LevelType level_type = 2;
   repeated SstableInfo table_infos = 3;
   uint64 total_file_size = 4;
+}
+
+message InputLevel {
+  uint32 level_idx = 1;
+  LevelType level_type = 2;
+  repeated SstableInfo table_infos = 3;
 }
 
 message LevelDelta {
@@ -85,12 +90,22 @@ message PinVersionRequest {
 
 message PinVersionResponse {
   common.Status status = 1;
-  HummockVersion pinned_version = 2;
+  bool is_delta_response = 2;
+  repeated HummockVersionDelta version_deltas = 3;
+  HummockVersion pinned_version = 4;
+}
+
+message UnpinVersionBeforeRequest {
+  uint32 context_id = 1;
+  uint64 unpin_version_before = 2;
+}
+
+message UnpinVersionBeforeResponse {
+  common.Status status = 1;
 }
 
 message UnpinVersionRequest {
   uint32 context_id = 1;
-  repeated uint64 pinned_version_ids = 2;
 }
 
 message UnpinVersionResponse {
@@ -142,7 +157,7 @@ message TableOption {
 
 message CompactTask {
   // SSTs to be compacted, which will be removed from LSM after compaction
-  repeated Level input_ssts = 1;
+  repeated InputLevel input_ssts = 1;
   // In ideal case, the compaction will generate `splits.len()` tables which have key range
   // corresponding to that in [`splits`], respectively
   repeated KeyRange splits = 2;
@@ -156,9 +171,6 @@ message CompactTask {
   uint32 target_level = 6;
   bool gc_delete_keys = 7;
   bool task_status = 9;
-  // Hash mapping from virtual node to parallel unit. Since one compactor might deal with SSTs
-  // with data for more than one relational state tables, here a vector is required.
-  repeated common.ParallelUnitMapping vnode_mappings = 11;
   // compaction group the task belongs to
   uint64 compaction_group_id = 12;
   // existing_table_ids for compaction drop key
@@ -215,7 +227,7 @@ message ReportCompactionTasksResponse {
 
 message HummockPinnedVersion {
   uint32 context_id = 1;
-  repeated uint64 version_id = 2;
+  uint64 min_pinned_id = 2;
 }
 
 message HummockPinnedSnapshot {
@@ -287,6 +299,7 @@ message ListSstableIdInfosResponse {
 service HummockManagerService {
   rpc PinVersion(PinVersionRequest) returns (PinVersionResponse);
   rpc UnpinVersion(UnpinVersionRequest) returns (UnpinVersionResponse);
+  rpc UnpinVersionBefore(UnpinVersionBeforeRequest) returns (UnpinVersionBeforeResponse);
   rpc ReportCompactionTasks(ReportCompactionTasksRequest) returns (ReportCompactionTasksResponse);
   rpc PinSnapshot(PinSnapshotRequest) returns (PinSnapshotResponse);
   rpc GetEpoch(GetEpochRequest) returns (GetEpochResponse);
@@ -318,4 +331,5 @@ message CompactionConfig {
   repeated string compression_algorithm = 9;
   uint64 target_file_size_base = 10;
   uint32 compaction_filter_mask = 11;
+  uint32 max_sub_compaction = 12;
 }

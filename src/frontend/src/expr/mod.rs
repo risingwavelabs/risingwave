@@ -18,7 +18,7 @@ use paste::paste;
 use risingwave_common::error::Result;
 use risingwave_common::types::{DataType, Scalar};
 use risingwave_expr::expr::AggKind;
-use risingwave_pb::expr::ExprNode;
+use risingwave_pb::expr::{ExprNode, ProjectSetSelectItem};
 
 mod agg_call;
 mod correlated_input_ref;
@@ -26,26 +26,32 @@ mod function_call;
 mod input_ref;
 mod literal;
 mod subquery;
+mod table_function;
 
+mod expr_mutator;
 mod expr_rewriter;
 mod expr_visitor;
 mod type_inference;
 mod utils;
 
-pub use agg_call::AggCall;
-pub use correlated_input_ref::CorrelatedInputRef;
-pub use function_call::FunctionCall;
-pub use input_ref::{as_alias_display, input_ref_to_column_indices, InputRef, InputRefDisplay};
+pub use agg_call::{AggCall, AggOrderBy, AggOrderByExpr};
+pub use correlated_input_ref::{CorrelatedId, CorrelatedInputRef};
+pub use function_call::{FunctionCall, FunctionCallVerboseDisplay};
+pub use input_ref::{
+    as_alias_display, input_ref_to_column_indices, InputRef, InputRefDisplay,
+    InputRefVerboseDisplay,
+};
 pub use literal::Literal;
 pub use subquery::{Subquery, SubqueryKind};
+pub use table_function::{TableFunction, TableFunctionType};
 
 pub type ExprType = risingwave_pb::expr::expr_node::Type;
 
 pub use expr_rewriter::ExprRewriter;
 pub use expr_visitor::ExprVisitor;
 pub use type_inference::{
-    align_types, cast_map_array, cast_ok, func_sigs, infer_type, least_restrictive, CastContext,
-    DataTypeName, FuncSign,
+    agg_func_sigs, align_types, cast_map_array, cast_ok, func_sigs, infer_type, least_restrictive,
+    AggFuncSig, CastContext, DataTypeName, FuncSign,
 };
 pub use utils::*;
 
@@ -67,6 +73,7 @@ pub enum ExprImpl {
     FunctionCall(Box<FunctionCall>),
     AggCall(Box<AggCall>),
     Subquery(Box<Subquery>),
+    TableFunction(Box<TableFunction>),
 }
 
 impl ExprImpl {
@@ -91,9 +98,15 @@ impl ExprImpl {
     /// A `count(*)` aggregate function.
     #[inline(always)]
     pub fn count_star() -> Self {
-        AggCall::new(AggKind::Count, vec![], false, Condition::true_cond())
-            .unwrap()
-            .into()
+        AggCall::new(
+            AggKind::Count,
+            vec![],
+            false,
+            AggOrderBy::any(),
+            Condition::true_cond(),
+        )
+        .unwrap()
+        .into()
     }
 
     /// Collect all `InputRef`s' indexes in the expression.
@@ -183,12 +196,12 @@ macro_rules! impl_has_variant {
     };
 }
 
-impl_has_variant! {InputRef, Literal, FunctionCall, AggCall, Subquery}
+impl_has_variant! {InputRef, Literal, FunctionCall, AggCall, Subquery, TableFunction}
 
 impl ExprImpl {
     /// Used to check whether the expression has [`CorrelatedInputRef`].
     // We need to traverse inside subqueries.
-    pub fn has_correlated_input_ref(&self) -> bool {
+    pub fn has_correlated_input_ref_by_depth(&self) -> bool {
         struct Has {
             has: bool,
             depth: usize,
@@ -226,30 +239,74 @@ impl ExprImpl {
         visitor.has
     }
 
-    /// Collect `CorrelatedInputRef`s in `ExprImpl` and return theirs indices.
-    pub fn collect_correlated_indices(&self) -> Vec<usize> {
-        struct Collector {
-            depth: usize,
-            correlated_indices: Vec<usize>,
+    pub fn has_correlated_input_ref_by_correlated_id(&self, correlated_id: CorrelatedId) -> bool {
+        struct Has {
+            has: bool,
+            correlated_id: CorrelatedId,
         }
 
-        impl ExprVisitor for Collector {
+        impl ExprVisitor for Has {
             fn visit_correlated_input_ref(&mut self, correlated_input_ref: &CorrelatedInputRef) {
-                if correlated_input_ref.depth() == self.depth {
-                    self.correlated_indices.push(correlated_input_ref.index());
+                if correlated_input_ref.correlated_id() == self.correlated_id {
+                    self.has = true;
                 }
             }
 
             fn visit_subquery(&mut self, subquery: &Subquery) {
                 use crate::binder::BoundSetExpr;
-
-                self.depth += 1;
                 match &subquery.query.body {
                     BoundSetExpr::Select(select) => select
                         .select_items
                         .iter()
                         .chain(select.group_by.iter())
                         .chain(select.where_clause.iter())
+                        .for_each(|expr| self.visit_expr(expr)),
+                    BoundSetExpr::Values(_) => {}
+                }
+            }
+        }
+
+        let mut visitor = Has {
+            has: false,
+            correlated_id,
+        };
+        visitor.visit_expr(self);
+        visitor.has
+    }
+
+    /// Collect `CorrelatedInputRef`s in `ExprImpl` by relative `depth`, return their indices, and
+    /// assign absolute `correlated_id` for them.
+    pub fn collect_correlated_indices_by_depth_and_assign_id(
+        &mut self,
+        correlated_id: CorrelatedId,
+    ) -> Vec<usize> {
+        struct Collector {
+            depth: usize,
+            correlated_indices: Vec<usize>,
+            correlated_id: CorrelatedId,
+        }
+
+        impl ExprMutator for Collector {
+            fn visit_correlated_input_ref(
+                &mut self,
+                correlated_input_ref: &mut CorrelatedInputRef,
+            ) {
+                if correlated_input_ref.depth() == self.depth {
+                    self.correlated_indices.push(correlated_input_ref.index());
+                    correlated_input_ref.set_correlated_id(self.correlated_id);
+                }
+            }
+
+            fn visit_subquery(&mut self, subquery: &mut Subquery) {
+                use crate::binder::BoundSetExpr;
+
+                self.depth += 1;
+                match &mut subquery.query.body {
+                    BoundSetExpr::Select(select) => select
+                        .select_items
+                        .iter_mut()
+                        .chain(select.group_by.iter_mut())
+                        .chain(select.where_clause.iter_mut())
                         .for_each(|expr| self.visit_expr(expr)),
                     BoundSetExpr::Values(_) => {}
                 }
@@ -260,6 +317,7 @@ impl ExprImpl {
         let mut collector = Collector {
             depth: 1,
             correlated_indices: vec![],
+            correlated_id,
         };
         collector.visit_expr(self);
         collector.correlated_indices
@@ -338,7 +396,7 @@ impl ExprImpl {
         }
     }
 
-    pub fn as_eq_const(&self) -> Option<(InputRef, Literal)> {
+    pub fn as_eq_literal(&self) -> Option<(InputRef, Literal)> {
         if let ExprImpl::FunctionCall(function_call) = self &&
         function_call.get_expr_type() == ExprType::Equal{
             match function_call.clone().decompose_as_binary() {
@@ -351,7 +409,7 @@ impl ExprImpl {
         }
     }
 
-    pub fn as_comparison_const(&self) -> Option<(InputRef, ExprType, Literal)> {
+    pub fn as_comparison_literal(&self) -> Option<(InputRef, ExprType, Literal)> {
         fn reverse_comparison(comparison: ExprType) -> ExprType {
             match comparison {
                 ExprType::LessThan => ExprType::GreaterThan,
@@ -383,6 +441,36 @@ impl ExprImpl {
             None
         }
     }
+
+    pub fn as_in_literal_list(&self) -> Option<(InputRef, Vec<Literal>)> {
+        if let ExprImpl::FunctionCall(function_call) = self &&
+        function_call.get_expr_type() == ExprType::In {
+            let mut inputs = function_call.inputs().iter().cloned();
+            let input_ref= match inputs.next().unwrap() {
+                ExprImpl::InputRef(i) => *i,
+                _ => unreachable!()
+            };
+            let list: Option<Vec<_>> = inputs.map(|expr| match expr {
+                ExprImpl::Literal(x) => Some(*x),
+             _ => None ,
+            }).collect();
+
+            list.map(|list| (input_ref, list))
+        } else {
+            None
+        }
+    }
+
+    pub fn to_project_set_select_item_proto(&self) -> ProjectSetSelectItem {
+        use risingwave_pb::expr::project_set_select_item::SelectItem::*;
+
+        ProjectSetSelectItem {
+            select_item: Some(match self {
+                ExprImpl::TableFunction(tf) => TableFunction(tf.to_protobuf()),
+                expr => Expr(expr.to_expr_proto()),
+            }),
+        }
+    }
 }
 
 impl Expr for ExprImpl {
@@ -394,6 +482,7 @@ impl Expr for ExprImpl {
             ExprImpl::AggCall(expr) => expr.return_type(),
             ExprImpl::Subquery(expr) => expr.return_type(),
             ExprImpl::CorrelatedInputRef(expr) => expr.return_type(),
+            ExprImpl::TableFunction(expr) => expr.return_type(),
         }
     }
 
@@ -405,6 +494,9 @@ impl Expr for ExprImpl {
             ExprImpl::AggCall(e) => e.to_expr_proto(),
             ExprImpl::Subquery(e) => e.to_expr_proto(),
             ExprImpl::CorrelatedInputRef(e) => e.to_expr_proto(),
+            ExprImpl::TableFunction(_e) => {
+                unreachable!("Table function should not be converted to ExprNode")
+            }
         }
     }
 }
@@ -445,6 +537,12 @@ impl From<CorrelatedInputRef> for ExprImpl {
     }
 }
 
+impl From<TableFunction> for ExprImpl {
+    fn from(tf: TableFunction) -> Self {
+        ExprImpl::TableFunction(Box::new(tf))
+    }
+}
+
 impl From<Condition> for ExprImpl {
     fn from(c: Condition) -> Self {
         merge_expr_by_binary(
@@ -470,6 +568,7 @@ impl std::fmt::Debug for ExprImpl {
                 Self::CorrelatedInputRef(arg0) => {
                     f.debug_tuple("CorrelatedInputRef").field(arg0).finish()
                 }
+                Self::TableFunction(arg0) => f.debug_tuple("TableFunction").field(arg0).finish(),
             };
         }
         match self {
@@ -479,6 +578,44 @@ impl std::fmt::Debug for ExprImpl {
             Self::AggCall(x) => write!(f, "{:?}", x),
             Self::Subquery(x) => write!(f, "{:?}", x),
             Self::CorrelatedInputRef(x) => write!(f, "{:?}", x),
+            Self::TableFunction(x) => write!(f, "{:?}", x),
+        }
+    }
+}
+
+pub struct ExprVerboseDisplay<'a> {
+    pub expr: &'a ExprImpl,
+    pub input_schema: &'a Schema,
+}
+
+impl std::fmt::Debug for ExprVerboseDisplay<'_> {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        let that = self.expr;
+        match that {
+            ExprImpl::InputRef(x) => write!(
+                f,
+                "{:?}",
+                InputRefVerboseDisplay {
+                    input_ref: x,
+                    input_schema: self.input_schema
+                }
+            ),
+            ExprImpl::Literal(x) => write!(f, "{:?}", x),
+            ExprImpl::FunctionCall(x) => write!(
+                f,
+                "{:?}",
+                FunctionCallVerboseDisplay {
+                    function_call: x,
+                    input_schema: self.input_schema
+                }
+            ),
+            ExprImpl::AggCall(x) => write!(f, "{:?}", x),
+            ExprImpl::Subquery(x) => write!(f, "{:?}", x),
+            ExprImpl::CorrelatedInputRef(x) => write!(f, "{:?}", x),
+            ExprImpl::TableFunction(x) => {
+                // TODO: TableFunctionCallVerboseDisplay
+                write!(f, "{:?}", x)
+            }
         }
     }
 }
@@ -496,7 +633,9 @@ macro_rules! assert_eq_input_ref {
 
 #[cfg(test)]
 pub(crate) use assert_eq_input_ref;
+use risingwave_common::catalog::Schema;
 
+use crate::expr::expr_mutator::ExprMutator;
 use crate::utils::Condition;
 
 #[cfg(test)]

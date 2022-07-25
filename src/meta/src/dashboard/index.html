@@ -127,7 +127,7 @@
   let currentMvs = new Set
   let showAssociateMv = false
 
-  const types = new Set(["source", "project", "filter", "materialize", "localSimpleAgg", "globalSimpleAgg", "hashAgg", "appendOnlyTopN", "hashJoin", "topN", "hopWindow", "merge", "exchange", "chain", "batchPlan", "lookup", "arrange", "lookupUnion", "union", "deltaIndexJoin"]);
+  const types = new Set(["dynamicFilter", "source", "project", "filter", "materialize", "localSimpleAgg", "globalSimpleAgg", "hashAgg", "appendOnlyTopN", "hashJoin", "topN", "hopWindow", "merge", "exchange", "chain", "batchPlan", "lookup", "arrange", "lookupUnion", "union", "deltaIndexJoin"]);
 
   const cluster = (type, cluster) => `
 <div class="p-6 max-w bg-white rounded-xl shadow-md flex flex-col space-y-1">
@@ -542,21 +542,35 @@
       data => $("#clusters").append(cluster("Compute Node", data))))
   $("#clusters").append(cluster("Meta Node", { host: { host: "127.0.0.1", port: "2333" } }))
 
-  const eraseDownstreamIfBroadcast = (dispatcher) => {
-    // legacy dashboard doesn't support broadcast downstream, so we'd rather let the internal logic
+  const eraseDownstreamIfChain = (dispatcher) => {
+    // legacy dashboard doesn't support chain downstream, so we'd rather let the internal logic
     // think there's no downstream.
-    if (dispatcher.type == "BROADCAST") {
+
+    // HACK: for chain nodes, their dispatcher id is the same as downstream actor id. We can leverage
+    // this property to find such chain actors.
+    if (dispatcher.type == "NO_SHUFFLE" && dispatcher.dispatcherId == dispatcher.downstreamActorId[0]) {
       return []
     } else {
       return dispatcher.downstreamActorId || []
     }
   }
 
-  const toV1Actor = (actor) => ({
-    ...actor,
-    dispatcher: actor.dispatcher[0],
-    downstreamActorId: eraseDownstreamIfBroadcast(actor.dispatcher[0])
-  })
+  const toV1Actor = (actor) => {
+    if (actor.dispatcher) {
+      return ({
+        ...actor,
+        dispatcher: actor.dispatcher[0],
+        downstreamActorId: eraseDownstreamIfChain(actor.dispatcher[0])
+      })
+    } else {
+      return ({
+        ...actor,
+        dispatcher: { type: "BROADCAST", dispatcherId: "0", downstreamActorId: [] },
+        downstreamActorId: []
+      })
+    }
+
+  }
 
   const loadActors = () => {
     fetch('/api/actors')

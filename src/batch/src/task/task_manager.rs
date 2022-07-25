@@ -178,11 +178,12 @@ mod tests {
     use risingwave_expr::expr::make_i32_literal;
     use risingwave_pb::batch_plan::exchange_info::DistributionMode;
     use risingwave_pb::batch_plan::plan_node::NodeBody;
-    use risingwave_pb::batch_plan::table_function_node::Type;
     use risingwave_pb::batch_plan::{
         ExchangeInfo, PlanFragment, PlanNode, TableFunctionNode, TaskId as ProstTaskId,
         TaskOutputId as ProstTaskOutputId, ValuesNode,
     };
+    use risingwave_pb::expr::table_function::Type;
+    use risingwave_pb::expr::TableFunction;
     use tonic::Code;
 
     use crate::task::{BatchManager, ComputeNodeContext, TaskId};
@@ -260,15 +261,17 @@ mod tests {
                 children: vec![],
                 identity: "".to_string(),
                 node_body: Some(NodeBody::TableFunction(TableFunctionNode {
-                    function_type: Type::Generate as i32,
-                    args: vec![
-                        make_i32_literal(1),
-                        make_i32_literal(i32::MAX),
-                        make_i32_literal(1),
-                    ],
-                    // This is a bit hacky as we want to make sure the task lasts long enough
-                    // for us to abort it.
-                    return_type: Some(DataType::Int32.to_protobuf()),
+                    table_function: Some(TableFunction {
+                        function_type: Type::Generate as i32,
+                        args: vec![
+                            make_i32_literal(1),
+                            make_i32_literal(i32::MAX),
+                            make_i32_literal(1),
+                        ],
+                        // This is a bit hacky as we want to make sure the task lasts long enough
+                        // for us to abort it.
+                        return_type: Some(DataType::Int32.to_protobuf()),
+                    }),
                 })),
             }),
             exchange_info: Some(ExchangeInfo {

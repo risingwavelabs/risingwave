@@ -12,7 +12,6 @@ option optimize_for = SPEED;
 
 message HeartbeatRequest {
   uint32 node_id = 1;
-  common.WorkerType worker_type = 2;
 }
 
 message HeartbeatResponse {
@@ -99,6 +98,7 @@ service StreamManagerService {
 message AddWorkerNodeRequest {
   common.WorkerType worker_type = 1;
   common.HostAddress host = 2;
+  uint64 worker_node_parallelism = 3;
 }
 
 message AddWorkerNodeResponse {
@@ -192,4 +192,25 @@ message MetaLeaseInfo {
   MetaLeaderInfo leader = 1;
   uint64 lease_register_time = 2;
   uint64 lease_expire_time = 3;
+}
+
+message PauseRequest {}
+
+message PauseResponse {}
+
+message ResumeRequest {}
+
+message ResumeResponse {}
+
+message GetClusterInfoRequest {}
+
+message GetClusterInfoResponse {
+  repeated TableFragments table_fragments = 1;
+}
+
+service ScaleService {
+  // TODO(Kexiang): delete them when config change interface is finished
+  rpc Pause(PauseRequest) returns (PauseResponse);
+  rpc Resume(ResumeRequest) returns (ResumeResponse);
+  rpc GetClusterInfo(GetClusterInfoRequest) returns (GetClusterInfoResponse);
 }

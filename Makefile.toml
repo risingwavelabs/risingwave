@@ -25,7 +25,6 @@ if ${is_sanitizer_enabled}
 else
   set_env RISEDEV_CARGO_BUILD_EXTRA_ARGS ""
   set_env RISEDEV_BUILD_TARGET_DIR ""
-  set_env RISEDEV_RUSTFLAGS "--cfg tokio_unstable"
 end
 
 if ${is_all_in_one_enabled}
@@ -213,13 +212,13 @@ category = "RiseDev - Build"
 description = "Build Rust components"
 condition = { env_set = ["ENABLE_BUILD_RUST"] }
 script = '''
-#!@shell
+#!/bin/bash
 
 set -e
 echo "$(tput setaf 4)$(tput bold)[Reminder]$(tput sgr0) risedev will only build $(tput setaf 4)risingwave_cmd(_all) and risedev$(tput sgr0) crates."
 
-export RUSTFLAGS="${RISEDEV_RUSTFLAGS}"
-echo + RUSTFLAGS="$RUSTFLAGS"
+[[ -z "${RISEDEV_RUSTFLAGS}" ]] || export RUSTFLAGS="${RISEDEV_RUSTFLAGS}"
+echo + RUSTFLAGS="${RUSTFLAGS:-<not set>}"
 set -xe
 cargo build -p ${RISEDEV_CARGO_BUILD_CRATE} -p risedev \
             --profile "${RISINGWAVE_BUILD_PROFILE}" \
@@ -277,6 +276,19 @@ dependencies = [
   "extract-dashboard-artifact",
   "export-dashboard-v2",
   "prepare-config",
+]
+
+[tasks.pre-start-benchmark]
+category = "RiseDev - Prepare"
+description = "Download necessary tools to deploy a benchmark env"
+dependencies = [
+  "download-minio",
+  "download-mcli",
+  "download-etcd",
+  "download-grafana",
+  "download-prometheus",
+  "download-jaeger",
+  "download-kafka",
 ]
 
 [tasks.p]
@@ -426,24 +438,24 @@ description = "Run unit tests"
 category = "RiseDev - Build in simulation mode"
 description = "Build in simulation mode"
 dependencies = ["warn-on-missing-tools"]
-env = { RUSTFLAGS = "--cfg madsim", CARGO_TARGET_DIR = "target/sim" }
+env = { RUSTFLAGS = "--cfg tokio_unstable --cfg madsim", CARGO_TARGET_DIR = "target/sim" }
 script = """
 #!/bin/bash
 set -e
 
-cargo build "$@"
+cargo build --workspace --exclude risingwave_cmd --exclude risingwave_cmd_all --exclude risingwave_rt --exclude risingwave_frontend_test_runner "$@"
 """
 
 [tasks.stest]
 category = "RiseDev - Deterministic Simulation Test"
 description = "Run unit tests in deterministic simulation mode"
 dependencies = ["warn-on-missing-tools"]
-env = { RUSTFLAGS = "--cfg madsim", CARGO_TARGET_DIR = "target/sim" }
+env = { RUSTFLAGS = "--cfg tokio_unstable --cfg madsim", CARGO_TARGET_DIR = "target/sim" }
 script = """
 #!/bin/bash
 set -e
 
-cargo nextest run "$@"
+cargo nextest run --workspace --exclude risingwave_cmd --exclude risingwave_cmd_all --exclude risingwave_rt --exclude risingwave_frontend_test_runner "$@"
 """
 
 [tasks.check-hakari]

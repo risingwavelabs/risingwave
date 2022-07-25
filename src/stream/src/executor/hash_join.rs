@@ -12,18 +12,19 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+use std::collections::HashSet;
 use std::sync::Arc;
 
 use futures::StreamExt;
 use futures_async_stream::try_stream;
 use itertools::Itertools;
-use madsim::collections::HashSet;
 use risingwave_common::array::{Op, Row, RowRef, StreamChunk};
 use risingwave_common::bail;
-use risingwave_common::catalog::{Schema, TableId};
+use risingwave_common::catalog::Schema;
 use risingwave_common::hash::HashKey;
 use risingwave_common::types::{DataType, ToOwnedDatum};
 use risingwave_expr::expr::BoxedExpression;
+use risingwave_storage::table::state_table::RowBasedStateTable;
 use risingwave_storage::StateStore;
 
 use super::barrier_align::*;
@@ -145,12 +146,13 @@ impl<K: HashKey, S: StateStore> std::fmt::Debug for JoinSide<K, S> {
 }
 
 impl<K: HashKey, S: StateStore> JoinSide<K, S> {
-    // WARNING: Please do not call this until we implement it.
+    // WARNING: Please do not call this until we implement it.、
+    #[expect(dead_code)]
     fn is_dirty(&self) -> bool {
         unimplemented!()
     }
 
-    #[allow(dead_code)]
+    #[expect(dead_code)]
     fn clear_cache(&mut self) {
         assert!(
             !self.is_dirty(),
@@ -188,7 +190,7 @@ pub struct HashJoinExecutor<K: HashKey, S: StateStore, const T: JoinTypePrimitiv
     /// Epoch
     epoch: u64,
 
-    #[allow(dead_code)]
+    #[expect(dead_code)]
     /// Logical Operator Info
     op_info: String,
 
@@ -382,13 +384,15 @@ impl<K: HashKey, S: StateStore, const T: JoinTypePrimitive> HashJoinExecutor<K, 
         executor_id: u64,
         cond: Option<BoxedExpression>,
         op_info: String,
-        store_l: S,
-        table_id_l: TableId,
-        store_r: S,
-        table_id_r: TableId,
+        mut state_table_l: RowBasedStateTable<S>,
+        mut state_table_r: RowBasedStateTable<S>,
         is_append_only: bool,
         metrics: Arc<StreamingMetrics>,
     ) -> Self {
+        // TODO: enable sanity check for hash join executor <https://github.com/singularity-data/risingwave/issues/3887>
+        state_table_l.disable_sanity_check();
+        state_table_r.disable_sanity_check();
+
         let side_l_column_n = input_l.schema().len();
 
         let schema_fields = match T {
@@ -458,9 +462,7 @@ impl<K: HashKey, S: StateStore, const T: JoinTypePrimitive> HashJoinExecutor<K, 
                     pk_indices_l.clone(),
                     params_l.key_indices.clone(),
                     col_l_datatypes.clone(),
-                    store_l,
-                    table_id_l,
-                    Some(params_l.dist_keys.clone()),
+                    state_table_l,
                     metrics.clone(),
                     actor_id,
                     "left",
@@ -476,9 +478,7 @@ impl<K: HashKey, S: StateStore, const T: JoinTypePrimitive> HashJoinExecutor<K, 
                     pk_indices_r.clone(),
                     params_r.key_indices.clone(),
                     col_r_datatypes.clone(),
-                    store_r,
-                    table_id_r,
-                    Some(params_r.dist_keys.clone()),
+                    state_table_r,
                     metrics.clone(),
                     actor_id,
                     "right",
@@ -774,8 +774,9 @@ impl<K: HashKey, S: StateStore, const T: JoinTypePrimitive> HashJoinExecutor<K, 
 mod tests {
     use risingwave_common::array::stream_chunk::StreamChunkTestExt;
     use risingwave_common::array::*;
-    use risingwave_common::catalog::{Field, Schema, TableId};
+    use risingwave_common::catalog::{ColumnDesc, ColumnId, Field, Schema, TableId};
     use risingwave_common::hash::{Key128, Key64};
+    use risingwave_common::util::sort_util::OrderType;
     use risingwave_expr::expr::expr_binary_nonnull::new_binary_expr;
     use risingwave_expr::expr::InputRefExpression;
     use risingwave_pb::expr::expr_node::Type;
@@ -784,6 +785,39 @@ mod tests {
     use super::*;
     use crate::executor::test_utils::{MessageSender, MockSource};
     use crate::executor::{Barrier, Epoch, Message};
+
+    fn create_in_memory_state_table(
+        data_types: &[DataType],
+        order_types: &[OrderType],
+        pk_indices: &[usize],
+    ) -> (
+        RowBasedStateTable<MemoryStateStore>,
+        RowBasedStateTable<MemoryStateStore>,
+    ) {
+        let mem_state = MemoryStateStore::new();
+
+        // The last column is for degree.
+        let column_descs = data_types
+            .iter()
+            .enumerate()
+            .map(|(id, data_type)| ColumnDesc::unnamed(ColumnId::new(id as i32), data_type.clone()))
+            .collect_vec();
+        let state_table_l = RowBasedStateTable::new_without_distribution(
+            mem_state.clone(),
+            TableId::new(0),
+            column_descs.clone(),
+            order_types.to_vec(),
+            pk_indices.to_vec(),
+        );
+        let state_table_r = RowBasedStateTable::new_without_distribution(
+            mem_state,
+            TableId::new(1),
+            column_descs,
+            order_types.to_vec(),
+            pk_indices.to_vec(),
+        );
+        (state_table_l, state_table_r)
+    }
 
     fn create_cond() -> BoxedExpression {
         let left_expr = InputRefExpression::new(DataType::Int64, 1);
@@ -810,8 +844,12 @@ mod tests {
         let params_l = JoinParams::new(vec![0], vec![]);
         let params_r = JoinParams::new(vec![0], vec![]);
         let cond = with_condition.then(create_cond);
-        let mem_state = MemoryStateStore::new();
 
+        let (mem_state_l, mem_state_r) = create_in_memory_state_table(
+            &[DataType::Int64, DataType::Int64, DataType::Int64],
+            &[OrderType::Ascending, OrderType::Ascending],
+            &[0, 1],
+        );
         let schema_len = match T {
             JoinType::LeftSemi | JoinType::LeftAnti => source_l.schema().len(),
             JoinType::RightSemi | JoinType::RightAnti => source_r.schema().len(),
@@ -828,10 +866,8 @@ mod tests {
             1,
             cond,
             "HashJoinExecutor".to_string(),
-            mem_state.clone(),
-            TableId::new(0),
-            mem_state,
-            TableId::new(1),
+            mem_state_l,
+            mem_state_r,
             false,
             Arc::new(StreamingMetrics::unused()),
         );
@@ -853,7 +889,21 @@ mod tests {
         let params_l = JoinParams::new(vec![0, 1], vec![]);
         let params_r = JoinParams::new(vec![0, 1], vec![]);
         let cond = with_condition.then(create_cond);
-        let mem_store = MemoryStateStore::new();
+
+        let (mem_state_l, mem_state_r) = create_in_memory_state_table(
+            &[
+                DataType::Int64,
+                DataType::Int64,
+                DataType::Int64,
+                DataType::Int64,
+            ],
+            &[
+                OrderType::Ascending,
+                OrderType::Ascending,
+                OrderType::Ascending,
+            ],
+            &[0, 1, 1],
+        );
         let schema_len = match T {
             JoinType::LeftSemi | JoinType::LeftAnti => source_l.schema().len(),
             JoinType::RightSemi | JoinType::RightAnti => source_r.schema().len(),
@@ -870,10 +920,8 @@ mod tests {
             1,
             cond,
             "HashJoinExecutor".to_string(),
-            mem_store.clone(),
-            TableId::new(0),
-            mem_store,
-            TableId::new(1),
+            mem_state_l,
+            mem_state_r,
             true,
             Arc::new(StreamingMetrics::unused()),
         );

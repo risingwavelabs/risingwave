@@ -1,0 +1,26 @@
+statement ok
+SET RW_IMPLICIT_FLUSH TO true;
+
+statement ok
+create table t(v1 varchar, v2 int, v3 int)
+
+statement ok
+insert into t values ('aaa', 1, 1), ('bbb', 0, 2), ('ccc', 0, 5), ('ddd', 1, 4)
+
+query T
+select string_agg(v1 order by v1) from t
+----
+aaabbbcccddd
+
+query T
+select string_agg(v1 order by v3) from t
+----
+aaabbbdddccc
+
+query T
+select string_agg(v1 order by v2 asc, v3 desc) from t
+----
+cccbbbdddaaa
+
+statement ok
+drop table t

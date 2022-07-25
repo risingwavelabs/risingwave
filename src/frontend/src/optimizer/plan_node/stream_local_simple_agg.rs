@@ -57,9 +57,7 @@ impl StreamLocalSimpleAgg {
 
 impl fmt::Display for StreamLocalSimpleAgg {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-        let mut builder = f.debug_struct("StreamLocalSimpleAgg");
-        builder.field("aggs", &self.agg_calls());
-        builder.finish()
+        self.logical.fmt_with_name(f, "StreamLocalSimpleAgg")
     }
 }
 
@@ -84,7 +82,7 @@ impl ToStreamProst for StreamLocalSimpleAgg {
                 .iter()
                 .map(PlanAggCall::to_protobuf)
                 .collect(),
-            distribution_keys: self
+            distribution_key: self
                 .base
                 .dist
                 .dist_column_indices()
@@ -100,9 +98,11 @@ impl ToStreamProst for StreamLocalSimpleAgg {
                     )
                 })
                 .collect_vec(),
-            column_mapping: column_mapping
+            column_mappings: column_mapping
                 .into_iter()
-                .map(|(k, v)| (k as u32, v))
+                .map(|v| ColumnMapping {
+                    indices: v.iter().map(|x| *x as u32).collect(),
+                })
                 .collect(),
             is_append_only: self.input().append_only(),
         })

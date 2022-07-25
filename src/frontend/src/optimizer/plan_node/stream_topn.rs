@@ -47,17 +47,11 @@ impl StreamTopN {
 
 impl fmt::Display for StreamTopN {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-        let mut builder = if self.input().append_only() {
-            f.debug_struct("StreamAppendOnlyTopN")
+        if self.input().append_only() {
+            self.logical.fmt_with_name(f, "StreamAppendOnlyTopN")
         } else {
-            f.debug_struct("StreamTopN")
-        };
-
-        builder
-            .field("order", &format_args!("{}", self.logical.topn_order()))
-            .field("limit", &format_args!("{}", self.logical.limit()))
-            .field("offset", &format_args!("{}", self.logical.offset()))
-            .finish()
+            self.logical.fmt_with_name(f, "StreamTopN")
+        }
     }
 }
 
@@ -88,7 +82,7 @@ impl ToStreamProst for StreamTopN {
             column_orders,
             limit: self.logical.limit() as u64,
             offset: self.logical.offset() as u64,
-            distribution_keys: vec![], // TODO: seems unnecessary
+            distribution_key: vec![], // TODO: seems unnecessary
             ..Default::default()
         };
 

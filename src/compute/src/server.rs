@@ -12,16 +12,20 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+use std::collections::HashMap;
 use std::net::SocketAddr;
 use std::sync::Arc;
 use std::time::Duration;
 
+use parking_lot::RwLock;
 use risingwave_batch::executor::monitor::BatchMetrics;
 use risingwave_batch::rpc::service::task_service::BatchServiceImpl;
 use risingwave_batch::task::{BatchEnvironment, BatchManager};
 use risingwave_common::config::ComputeNodeConfig;
-use risingwave_common::service::MetricsManager;
+use risingwave_common::monitor::process_linux::monitor_process;
 use risingwave_common::util::addr::HostAddr;
+use risingwave_common_service::metrics_manager::MetricsManager;
+use risingwave_common_service::observer_manager::ObserverManager;
 use risingwave_pb::common::WorkerType;
 use risingwave_pb::stream_service::stream_service_server::StreamServiceServer;
 use risingwave_pb::task_service::exchange_service_server::ExchangeServiceServer;
@@ -41,6 +45,7 @@ use risingwave_stream::task::{LocalStreamManager, StreamEnvironment};
 use tokio::sync::oneshot::Sender;
 use tokio::task::JoinHandle;
 
+use crate::compute_observer::observer_manager::ComputeObserverNode;
 use crate::rpc::service::exchange_metrics::ExchangeServiceMetrics;
 use crate::rpc::service::exchange_service::ExchangeServiceImpl;
 use crate::rpc::service::stream_service::StreamServiceImpl;
@@ -63,7 +68,7 @@ pub async fn compute_node_serve(
     listen_addr: SocketAddr,
     client_addr: HostAddr,
     opts: ComputeNodeOpts,
-) -> (JoinHandle<()>, Sender<()>) {
+) -> (Vec<JoinHandle<()>>, Sender<()>) {
     // Load the configuration.
     let config = load_config(&opts);
     info!(
@@ -76,7 +81,11 @@ pub async fn compute_node_serve(
 
     // Register to the cluster. We're not ready to serve until activate is called.
     let worker_id = meta_client
-        .register(&client_addr, WorkerType::ComputeNode)
+        .register(
+            WorkerType::ComputeNode,
+            &client_addr,
+            config.streaming.worker_node_parallelism,
+        )
         .await
         .unwrap();
     info!("Assigned worker node id {}", worker_id);
@@ -87,6 +96,7 @@ pub async fn compute_node_serve(
     )];
     // Initialize the metrics subsystem.
     let registry = prometheus::Registry::new();
+    monitor_process(&registry).unwrap();
     let source_metrics = Arc::new(SourceMetrics::new(registry.clone()));
     let hummock_metrics = Arc::new(HummockMetrics::new(registry.clone()));
     let streaming_metrics = Arc::new(StreamingMetrics::new(registry.clone()));
@@ -101,12 +111,29 @@ pub async fn compute_node_serve(
         meta_client.clone(),
         hummock_metrics.clone(),
     ));
+
+    let mut join_handle_vec = vec![];
+    let table_id_to_slice_transform = Arc::new(RwLock::new(HashMap::new()));
+    let compute_observer_node = ComputeObserverNode::new(table_id_to_slice_transform.clone());
+    // todo use ObserverManager
+    let observer_manager = ObserverManager::new(
+        meta_client.clone(),
+        client_addr.clone(),
+        Box::new(compute_observer_node),
+        WorkerType::Compactor,
+    )
+    .await;
+
+    let observer_join_handle = observer_manager.start().await.unwrap();
+    join_handle_vec.push(observer_join_handle);
+
     let state_store = StateStoreImpl::new(
         &opts.state_store,
         storage_config.clone(),
         hummock_meta_client.clone(),
         state_store_metrics.clone(),
         object_store_metrics,
+        table_id_to_slice_transform.clone(),
     )
     .await
     .unwrap();
@@ -123,6 +150,7 @@ pub async fn compute_node_serve(
                 storage.sstable_store(),
                 state_store_metrics.clone(),
                 Some(Arc::new(CompactionExecutor::new(Some(1)))),
+                table_id_to_slice_transform.clone(),
             );
             sub_tasks.push((handle, shutdown_sender));
         }
@@ -192,6 +220,7 @@ pub async fn compute_node_serve(
             .await
             .unwrap();
     });
+    join_handle_vec.push(join_handle);
 
     // Boot metrics service.
     if opts.metrics_level > 0 {
@@ -204,5 +233,5 @@ pub async fn compute_node_serve(
     // All set, let the meta service know we're ready.
     meta_client.activate(&client_addr).await.unwrap();
 
-    (join_handle, shutdown_send)
+    (join_handle_vec, shutdown_send)
 }
