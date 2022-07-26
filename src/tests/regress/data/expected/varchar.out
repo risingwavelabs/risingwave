@@ -13,38 +13,36 @@ INSERT INTO VARCHAR_TBL (f1) VALUES ('');
 -- try varchar's of greater than 1 length
 INSERT INTO VARCHAR_TBL (f1) VALUES ('cd');
 INSERT INTO VARCHAR_TBL (f1) VALUES ('c     ');
-SELECT * FROM VARCHAR_TBL ORDER BY f1;
+SELECT * FROM VARCHAR_TBL;
    f1   
-----
- 
- 1
- 2
- 3
+--------
  A
+ 
+ 2
  a
- c     
+ 3
+ 1
  cd
+ c     
 (8 rows)
 
 SELECT c.*
    FROM VARCHAR_TBL c
-   WHERE c.f1 <> 'a'
-   ORDER BY c.f1;
+   WHERE c.f1 <> 'a';
    f1   
-----
- 
- 1
- 2
- 3
+--------
  A
- c     
+ 2
+ 
+ 3
+ 1
  cd
+ c     
 (7 rows)
 
 SELECT c.*
    FROM VARCHAR_TBL c
-   WHERE c.f1 = 'a'
-   ORDER BY c.f1;
+   WHERE c.f1 = 'a';
  f1 
 ----
  a
@@ -52,50 +50,46 @@ SELECT c.*
 
 SELECT c.*
    FROM VARCHAR_TBL c
-   WHERE c.f1 < 'a'
-   ORDER BY c.f1;
+   WHERE c.f1 < 'a';
  f1 
 ----
- 
  1
- 2
- 3
  A
+ 3
+ 2
+ 
 (5 rows)
 
 SELECT c.*
    FROM VARCHAR_TBL c
-   WHERE c.f1 <= 'a'
-   ORDER BY c.f1;
+   WHERE c.f1 <= 'a';
  f1 
 ----
- 
  1
- 2
- 3
  A
+ 2
+ 
+ 3
  a
 (6 rows)
 
 SELECT c.*
    FROM VARCHAR_TBL c
-   WHERE c.f1 > 'a'
-   ORDER BY c.f1;
+   WHERE c.f1 > 'a';
    f1   
-----
- c     
+--------
  cd
+ c     
 (2 rows)
 
 SELECT c.*
    FROM VARCHAR_TBL c
-   WHERE c.f1 >= 'a'
-   ORDER BY c.f1;
+   WHERE c.f1 >= 'a';
    f1   
-----
+--------
  a
- c     
  cd
+ c     
 (3 rows)
 
 DROP TABLE VARCHAR_TBL;
@@ -108,14 +102,14 @@ INSERT INTO VARCHAR_TBL (f1) VALUES ('ab');
 INSERT INTO VARCHAR_TBL (f1) VALUES ('abcd');
 INSERT INTO VARCHAR_TBL (f1) VALUES ('abcde');
 INSERT INTO VARCHAR_TBL (f1) VALUES ('abcd    ');
-SELECT * FROM VARCHAR_TBL ORDER BY f1;
+SELECT * FROM VARCHAR_TBL;
     f1    
-------
- a
- ab
- abcd
+----------
  abcd    
  abcde
+ ab
+ abcd
+ a
 (5 rows)
 
 DROP TABLE VARCHAR_TBL;

@@ -80,6 +80,7 @@ pub struct SharedBufferBatch {
     inner: Arc<SharedBufferBatchInner>,
     epoch: HummockEpoch,
     compaction_group_id: CompactionGroupId,
+    pub table_id: u32,
 }
 
 impl SharedBufferBatch {
@@ -88,8 +89,15 @@ impl SharedBufferBatch {
         epoch: HummockEpoch,
         buffer_release_notifier: mpsc::UnboundedSender<SharedBufferEvent>,
         compaction_group_id: CompactionGroupId,
+        table_id: u32,
     ) -> Self {
         let size: usize = Self::measure_batch_size(&sorted_items);
+
+        #[cfg(debug_assertions)]
+        {
+            Self::check_table_prefix(table_id, &sorted_items)
+        }
+
         Self {
             inner: Arc::new(SharedBufferBatchInner {
                 payload: sorted_items,
@@ -98,6 +106,7 @@ impl SharedBufferBatch {
             }),
             epoch,
             compaction_group_id,
+            table_id,
         }
     }
 
@@ -170,6 +179,22 @@ impl SharedBufferBatch {
 
     pub fn compaction_group_id(&self) -> CompactionGroupId {
         self.compaction_group_id
+    }
+
+    #[cfg(debug_assertions)]
+    fn check_table_prefix(check_table_id: u32, sorted_items: &Vec<SharedBufferItem>) {
+        use risingwave_hummock_sdk::key::table_prefix;
+
+        if check_table_id == 0 {
+            // for unit-test
+            return;
+        }
+
+        let prefix = table_prefix(check_table_id);
+
+        for (key, _value) in sorted_items {
+            assert!(prefix == key[0..prefix.len()]);
+        }
     }
 }
 
@@ -313,6 +338,7 @@ mod tests {
             epoch,
             mpsc::unbounded_channel().0,
             StaticCompactionGroupId::StateDefault.into(),
+            Default::default(),
         );
 
         // Sketch
@@ -390,6 +416,7 @@ mod tests {
             epoch,
             mpsc::unbounded_channel().0,
             StaticCompactionGroupId::StateDefault.into(),
+            Default::default(),
         );
 
         // FORWARD: Seek to a key < 1st key, expect all three items to return

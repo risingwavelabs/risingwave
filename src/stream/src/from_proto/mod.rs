@@ -14,6 +14,7 @@
 
 //! Build executor from protobuf.
 
+mod agg_call;
 mod batch_query;
 mod chain;
 mod dynamic_filter;

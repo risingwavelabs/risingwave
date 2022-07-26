@@ -20,11 +20,11 @@ use assert_matches::assert_matches;
 use futures_async_stream::{for_await, try_stream};
 use itertools::Itertools;
 use risingwave_common::array::column::Column;
-use risingwave_common::array::{DataChunk, DataChunkTestExt, RowRef};
+use risingwave_common::array::{DataChunk, DataChunkTestExt};
 use risingwave_common::catalog::Schema;
 use risingwave_common::error::{Result, RwError};
 use risingwave_common::field_generator::FieldGeneratorImpl;
-use risingwave_common::types::{DataType, ScalarImpl};
+use risingwave_common::types::{DataType, ScalarImpl, ToOwnedDatum};
 use risingwave_pb::batch_plan::ExchangeSource as ProstExchangeSource;
 
 use crate::exchange_source::{ExchangeSource, ExchangeSourceImpl};
@@ -278,17 +278,21 @@ impl CreateSource for FakeCreateSource {
 
 pub struct FakeProbeSideSourceBuilder {
     schema: Schema,
+    scalar_impls: Vec<Vec<ScalarImpl>>,
 }
 
 impl FakeProbeSideSourceBuilder {
     pub fn new(schema: Schema) -> Self {
-        Self { schema }
+        Self {
+            schema,
+            scalar_impls: vec![],
+        }
     }
 }
 
 #[async_trait::async_trait]
 impl ProbeSideSourceBuilder for FakeProbeSideSourceBuilder {
-    async fn build_source(&self, cur_row: &RowRef) -> Result<BoxedExecutor> {
+    async fn build_source(&self) -> Result<BoxedExecutor> {
         let mut mock_executor = MockExecutor::new(self.schema.clone());
 
         let base_data_chunk = DataChunk::from_pretty(
@@ -303,14 +307,27 @@ impl ProbeSideSourceBuilder for FakeProbeSideSourceBuilder {
 
         for idx in 0..base_data_chunk.capacity() {
             let probe_row = base_data_chunk.row_at_unchecked_vis(idx);
-            if cur_row.value_at(0) == probe_row.value_at(0) {
-                let owned_row = probe_row.to_owned_row();
-                let chunk =
-                    DataChunk::from_rows(&[owned_row], &[DataType::Int32, DataType::Float32])?;
-                mock_executor.add(chunk);
+            for scalar_impl in &self.scalar_impls {
+                if scalar_impl[0] == probe_row.value_at(0).to_owned_datum().unwrap() {
+                    let owned_row = probe_row.to_owned_row();
+                    let chunk =
+                        DataChunk::from_rows(&[owned_row], &[DataType::Int32, DataType::Float32])?;
+                    mock_executor.add(chunk);
+                    break;
+                }
             }
         }
 
         Ok(Box::new(mock_executor))
+    }
+
+    fn add_scan_range(&mut self, key_scalar_impls: &[ScalarImpl]) -> Result<()> {
+        self.scalar_impls
+            .push(key_scalar_impls.iter().cloned().collect_vec());
+        Ok(())
+    }
+
+    fn reset(&mut self) {
+        self.scalar_impls = vec![];
     }
 }

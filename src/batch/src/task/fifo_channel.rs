@@ -16,9 +16,11 @@ use std::future::Future;
 
 use risingwave_common::array::DataChunk;
 use risingwave_common::error::ErrorCode::InternalError;
-use risingwave_common::error::{Result, ToRwResult};
+use risingwave_common::error::Result;
 use tokio::sync::mpsc;
 
+use crate::error::BatchError::SenderError;
+use crate::error::Result as BatchResult;
 use crate::task::channel::{ChanReceiver, ChanReceiverImpl, ChanSender, ChanSenderImpl};
 use crate::task::data_chunk_in_channel::DataChunkInChannel;
 use crate::task::BOUNDED_BUFFER_SIZE;
@@ -32,14 +34,14 @@ pub struct FifoReceiver {
 }
 
 impl ChanSender for FifoSender {
-    type SendFuture<'a> = impl Future<Output = Result<()>>;
+    type SendFuture<'a> = impl Future<Output = BatchResult<()>>;
 
     fn send(&mut self, chunk: Option<DataChunk>) -> Self::SendFuture<'_> {
         async move {
             self.sender
                 .send(chunk.map(DataChunkInChannel::new))
                 .await
-                .to_rw_result_with(|| "FifoSender::send".into())
+                .map_err(|_| SenderError)
         }
     }
 }
