@@ -264,6 +264,10 @@ message ChainNode {
   bool disable_rearrange = 4;
   // Whether to place this chain on the same worker node as upstream actors.
   bool same_worker_node = 5;
+  // Whether the upstream materialize is and this chain should be a singleton.
+  // FIXME: This is a workaround for fragmenter since the distribution info will be lost if there's only one
+  // fragment in the downstream mview. Remove this when we refactor the fragmenter.
+  bool is_singleton = 6;
 }
 
 // BatchPlanNode is used for mv on mv snapshot read.
@@ -433,9 +437,9 @@ message StreamActor {
 }
 
 enum FragmentType {
-  SOURCE = 0;
-  SINK = 1;
-  OTHERS = 2;
+  OTHERS = 0;
+  SOURCE = 1;
+  SINK = 2;
 }
 
 message StreamFragmentGraph {

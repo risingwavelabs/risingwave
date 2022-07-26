@@ -284,9 +284,10 @@ impl LocalQueryExecution {
                 let mut node_body = execution_plan_node.node.clone();
                 match &mut node_body {
                     NodeBody::RowSeqScan(ref mut scan_node) => {
-                        let partition = partition.unwrap();
-                        scan_node.vnode_bitmap = Some(partition.vnode_bitmap);
-                        scan_node.scan_ranges = partition.scan_ranges;
+                        if let Some(partition) = partition {
+                            scan_node.vnode_bitmap = Some(partition.vnode_bitmap);
+                            scan_node.scan_ranges = partition.scan_ranges;
+                        }
                     }
                     NodeBody::SysRowSeqScan(_) => {}
                     _ => unreachable!(),
