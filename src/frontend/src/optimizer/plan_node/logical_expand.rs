@@ -23,7 +23,7 @@ use super::{
     PlanTreeNodeUnary, PredicatePushdown, StreamExpand, ToBatch, ToStream,
 };
 use crate::expr::InputRef;
-use crate::optimizer::property::{FunctionalDependencySet};
+use crate::optimizer::property::FunctionalDependencySet;
 use crate::risingwave_common::error::Result;
 use crate::utils::{ColIndexMapping, Condition};
 

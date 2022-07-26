@@ -29,7 +29,9 @@ use crate::expr::{
     assert_input_ref, Expr, ExprImpl, ExprRewriter, ExprVerboseDisplay, ExprVisitor, InputRef,
 };
 use crate::optimizer::plan_node::CollectInputRef;
-use crate::optimizer::property::{Distribution, FunctionalDependencySet, Order, RequiredDist};
+use crate::optimizer::property::{
+    Distribution, FunctionalDependency, FunctionalDependencySet, Order, RequiredDist,
+};
 use crate::utils::{ColIndexMapping, Condition, Substitute};
 
 /// Construct a `LogicalProject` and dedup expressions.
@@ -92,7 +94,7 @@ impl LogicalProject {
             assert!(!expr.has_subquery());
             assert!(!expr.has_agg_call());
         }
-        let functional_dependency = FunctionalDependencySet::with_key(schema.len(), &pk_indices);
+        let functional_dependency = Self::derive_fd(input.functional_dependency(), &exprs);
         let base = PlanBase::new_logical(ctx, schema, pk_indices, functional_dependency);
         LogicalProject { base, exprs, input }
     }
@@ -199,6 +201,47 @@ impl LogicalProject {
             .map(|pk_col| i2o.try_map(*pk_col))
             .collect::<Option<Vec<_>>>()
             .unwrap_or_default()
+    }
+
+    fn derive_fd(
+        input_fd_set: &FunctionalDependencySet,
+        exprs: &[ExprImpl],
+    ) -> FunctionalDependencySet {
+        let input_refs: HashMap<_, _> = exprs
+            .iter()
+            .enumerate()
+            .filter_map(|(idx, expr)| {
+                expr.as_input_ref()
+                    .map(|input_ref| (input_ref.index(), idx))
+            })
+            .collect();
+        let mut fd_set = FunctionalDependencySet::new();
+        for i in input_fd_set.as_dependencies() {
+            if i.from
+                .ones()
+                .all(|column_index| input_refs.contains_key(&column_index))
+                && i.to.ones().any(|idx| input_refs.contains_key(&idx))
+            {
+                let from = {
+                    let mut from = FixedBitSet::with_capacity(exprs.len());
+                    for i in i.from.ones() {
+                        from.set(input_refs[&i], true);
+                    }
+                    from
+                };
+                let to = {
+                    let mut to = FixedBitSet::with_capacity(exprs.len());
+                    for i in i.to.ones() {
+                        if let Some(new_idx) = input_refs.get(&i) {
+                            to.set(*new_idx, true);
+                        }
+                    }
+                    to
+                };
+                fd_set.add_functional_dependency(FunctionalDependency::new(from, to));
+            }
+        }
+        fd_set
     }
 
     pub fn exprs(&self) -> &Vec<ExprImpl> {
