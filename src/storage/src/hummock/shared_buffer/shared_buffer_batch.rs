@@ -19,7 +19,6 @@ use std::sync::Arc;
 
 use async_trait::async_trait;
 use bytes::Bytes;
-use risingwave_hummock_sdk::key::table_prefix;
 use risingwave_hummock_sdk::CompactionGroupId;
 use tokio::sync::mpsc;
 use tracing::error;
@@ -184,6 +183,8 @@ impl SharedBufferBatch {
 
     #[cfg(debug_assertions)]
     fn check_table_prefix(check_table_id: u32, sorted_items: &Vec<SharedBufferItem>) {
+        use risingwave_hummock_sdk::key::table_prefix;
+
         if check_table_id == 0 {
             // for unit-test
             return;
