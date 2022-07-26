@@ -462,7 +462,7 @@ impl<S: StateStore, RS: RowSerde, const T: AccessType> StorageTableBase<S, RS, T
         let read_options = self.get_read_option(epoch);
         let kv_pairs = self
             .keyspace
-            .scan_with_range(key_range, None, read_options.clone())
+            .scan_with_range(key_range, None, read_options)
             .await?;
 
         let mut deserializer = RS::create_deserializer(self.mapping.clone());

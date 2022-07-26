@@ -632,7 +632,6 @@ mod tests {
             epoch_set.insert(epoch);
             let mut write_batch = keyspace.state_store().start_write_batch(WriteOptions {
                 epoch,
-                // table_id: keyspace.table_id(),
                 table_id: TableId::from(existing_table_id),
             });
             let mut local = write_batch.prefixify(&keyspace);
