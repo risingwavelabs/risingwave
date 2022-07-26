@@ -504,8 +504,6 @@
                               typeName: INT64
                               isNullable: true
                             name: count
-                      distributionKey:
-                        - 1
                       owner: 1
                     - id: 4294967294
                       schemaId: 2147483646
@@ -516,8 +514,6 @@
                               typeName: INT64
                               isNullable: true
                             name: sum(t.v1)
-                      distributionKey:
-                        - 1
                       owner: 1
                   columnMappings:
                     - {}
@@ -844,8 +840,10 @@
                     - 0
                   owner: 1
               columnMappings:
-                - {}
-                - {}
+                - indices:
+                    - 0
+                - indices:
+                    - 0
         pkIndices:
           - 1
         fields:
