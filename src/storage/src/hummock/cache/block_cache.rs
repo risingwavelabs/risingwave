@@ -160,6 +160,7 @@ pub struct BlockCache {
 }
 
 impl BlockCache {
+    #[allow(unused_variables)]
     pub async fn new(
         capacity: usize,
         mut max_shard_bits: usize,
