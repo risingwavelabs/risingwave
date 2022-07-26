@@ -13,7 +13,7 @@
 // limitations under the License.
 
 use risingwave_common::array::Row;
-use risingwave_common::types::{DataType, Datum, ScalarImpl};
+use risingwave_common::types::{literal_type_match, DataType, Datum, ScalarImpl};
 use risingwave_expr::expr::expr_unary::new_unary_expr;
 use risingwave_expr::expr::{Expression, LiteralExpression};
 use risingwave_pb::expr::expr_node::RexNode;
@@ -48,6 +48,7 @@ impl std::fmt::Debug for Literal {
 
 impl Literal {
     pub fn new(data: Datum, data_type: DataType) -> Self {
+        assert!(literal_type_match(&data_type, data.as_ref()));
         Literal { data, data_type }
     }
 
