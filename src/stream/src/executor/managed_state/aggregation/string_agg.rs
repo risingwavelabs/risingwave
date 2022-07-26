@@ -35,7 +35,7 @@ use crate::executor::PkIndices;
 
 #[derive(Debug)]
 struct Cache {
-    dirty: Option<bool>, // None means not synced from state table (cold start)
+    synced: bool, // `false` means not synced from state table (cold start)
     order_pairs: Arc<Vec<OrderPair>>,
     rows: BTreeSet<DescOrderedRow>,
 }
@@ -43,29 +43,24 @@ struct Cache {
 impl Cache {
     fn new(order_pairs: Vec<OrderPair>) -> Cache {
         Cache {
-            dirty: None,
+            synced: false,
             order_pairs: Arc::new(order_pairs),
             rows: BTreeSet::new(),
         }
     }
 
     fn is_cold_start(&self) -> bool {
-        self.dirty.is_none()
+        !self.synced
     }
 
-    fn is_dirty(&self) -> bool {
-        self.dirty.unwrap_or(false)
-    }
-
-    fn set_dirty(&mut self, dirty: bool) {
-        self.dirty = Some(dirty);
+    fn set_synced(&mut self) {
+        self.synced = true;
     }
 
     fn insert(&mut self, row: Row) {
         if !self.is_cold_start() {
             let orderable_row = DescOrderedRow::new(row, None, self.order_pairs.clone());
             self.rows.insert(orderable_row);
-            self.set_dirty(true);
         }
     }
 
@@ -73,7 +68,6 @@ impl Cache {
         if !self.is_cold_start() {
             let orderable_row = DescOrderedRow::new(row, None, self.order_pairs.clone());
             self.rows.remove(&orderable_row);
-            self.set_dirty(true);
         }
     }
 }
@@ -226,7 +220,7 @@ impl<S: StateStore> ManagedTableState<S> for ManagedStringAggState<S> {
                 }
             }
 
-            self.cache.set_dirty(false); // now the cache is fully synced
+            self.cache.set_synced(); // now the cache is fully synced
         } else {
             println!("[rc] warm start");
             // rev() is required because cache.rows is in reverse order
@@ -248,7 +242,7 @@ impl<S: StateStore> ManagedTableState<S> for ManagedStringAggState<S> {
     }
 
     fn is_dirty(&self) -> bool {
-        self.cache.is_dirty()
+        false
     }
 
     fn flush(&mut self, _state_table: &mut RowBasedStateTable<S>) -> StreamExecutorResult<()> {
