@@ -23,7 +23,7 @@ use risingwave_common::error::{Result, RwError};
 use risingwave_common::try_match_expand;
 use risingwave_common::types::{ParallelUnitId, VIRTUAL_NODE_COUNT};
 use risingwave_common::util::compress::decompress_data;
-use risingwave_pb::common::{ParallelUnit, ParallelUnitType, WorkerNode};
+use risingwave_pb::common::{ParallelUnit, WorkerNode};
 use risingwave_pb::meta::table_fragments::ActorState;
 use risingwave_pb::stream_plan::{Dispatcher, FragmentType, StreamActor};
 use tokio::sync::RwLock;
@@ -328,22 +328,11 @@ where
         node_map: &HashMap<WorkerId, WorkerNode>,
     ) -> Result<(Vec<TableFragments>, HashMap<ParallelUnitId, ParallelUnit>)> {
         let mut parallel_unit_migrate_map = HashMap::new();
-        let mut pu_hash_map: HashMap<WorkerId, Vec<&ParallelUnit>> = HashMap::new();
-        let mut pu_single_map: HashMap<WorkerId, Vec<&ParallelUnit>> = HashMap::new();
+        let mut pu_map: HashMap<WorkerId, Vec<&ParallelUnit>> = HashMap::new();
         // split parallel units of node into types, map them with WorkerId
         for (node_id, node) in node_map {
-            let pu_hash = node
-                .parallel_units
-                .iter()
-                .filter(|pu| pu.r#type == ParallelUnitType::Hash as i32)
-                .collect_vec();
-            pu_hash_map.insert(*node_id, pu_hash);
-            let pu_single = node
-                .parallel_units
-                .iter()
-                .filter(|pu| pu.r#type == ParallelUnitType::Single as i32)
-                .collect_vec();
-            pu_single_map.insert(*node_id, pu_single);
+            let pu = node.parallel_units.iter().collect_vec();
+            pu_map.insert(*node_id, pu);
         }
         // update actor status and generate pu to pu migrate info
         let mut table_fragments = self.list_table_fragments().await?;
@@ -359,17 +348,10 @@ where
                             if let Entry::Vacant(e) =
                                 parallel_unit_migrate_map.entry(old_parallel_unit.id)
                             {
-                                if old_parallel_unit.r#type == ParallelUnitType::Hash as i32 {
-                                    let new_parallel_unit =
-                                        pu_hash_map.get_mut(new_node_id).unwrap().pop().unwrap();
-                                    e.insert(new_parallel_unit.clone());
-                                    status.parallel_unit = Some(new_parallel_unit.clone());
-                                } else {
-                                    let new_parallel_unit =
-                                        pu_single_map.get_mut(new_node_id).unwrap().pop().unwrap();
-                                    e.insert(new_parallel_unit.clone());
-                                    status.parallel_unit = Some(new_parallel_unit.clone());
-                                }
+                                let new_parallel_unit =
+                                    pu_map.get_mut(new_node_id).unwrap().pop().unwrap();
+                                e.insert(new_parallel_unit.clone());
+                                status.parallel_unit = Some(new_parallel_unit.clone());
                                 flag = true;
                             } else {
                                 status.parallel_unit = Some(
