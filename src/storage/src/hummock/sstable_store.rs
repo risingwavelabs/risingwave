@@ -13,6 +13,7 @@
 // limitations under the License.
 
 use std::clone::Clone;
+use std::mem::size_of;
 use std::sync::Arc;
 
 use bytes::Bytes;
@@ -95,12 +96,16 @@ impl SstableStore {
         }
 
         if let CachePolicy::Fill = policy {
-            self.meta_cache.insert(
-                sst.id,
-                sst.id,
-                sst.meta.encoded_size() + sst.meta.estimated_size as usize,
-                Box::new(sst),
-            );
+            let charge = sst
+                .blocks
+                .iter()
+                .map(|block| block.restart_point_len())
+                .sum::<usize>()
+                * size_of::<usize>()
+                + sst.meta.encoded_size()
+                + data.len();
+            self.meta_cache
+                .insert(sst.id, sst.id, charge, Box::new(sst));
         }
 
         Ok(())
@@ -287,7 +292,14 @@ impl SstableStore {
                                 .await
                                 .map_err(HummockError::object_io_error)?;
                             size += block_data.len();
-                            Sstable::new_with_data(sst_id, meta, block_data)?
+                            let sst = Sstable::new_with_data(sst_id, meta, block_data)?;
+                            size += sst
+                                .blocks
+                                .iter()
+                                .map(|block| block.restart_point_len())
+                                .sum::<usize>()
+                                * size_of::<usize>();
+                            sst
                         } else {
                             Sstable::new(sst_id, meta)
                         };

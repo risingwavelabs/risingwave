@@ -136,7 +136,7 @@ impl MemoryLimiterInner {
     pub fn may_notify(&self, quota: u64) {
         while self.check_count.load(AtomicOrdering::SeqCst) > 0 {}
         let total_size = self.total_size.fetch_sub(quota, AtomicOrdering::Release);
-        if total_size - quota < self.quota {
+        if total_size >= self.quota {
             self.notify.notify_waiters();
         }
     }
@@ -176,28 +176,30 @@ impl MemoryLimiter {
         if quota > self.inner.quota {
             return None;
         }
-        let current_quota = self.inner.total_size.load(AtomicOrdering::Acquire);
+        let mut current_quota = self
+            .inner
+            .total_size
+            .fetch_add(quota, AtomicOrdering::SeqCst);
         if current_quota < self.inner.quota {
-            self.inner
-                .total_size
-                .fetch_add(quota, AtomicOrdering::Acquire);
             return Some(MemoryTracker {
                 limiter: self.inner.clone(),
                 quota,
             });
         }
         self.inner.check_count.fetch_add(1, AtomicOrdering::SeqCst);
-        let mut current_quota = self.inner.total_size.load(AtomicOrdering::Acquire);
         while current_quota >= self.inner.quota {
+            self.inner
+                .total_size
+                .fetch_sub(quota, AtomicOrdering::Acquire);
             let notified = self.inner.notify.notified();
             self.inner.check_count.fetch_sub(1, AtomicOrdering::SeqCst);
             notified.await;
             self.inner.check_count.fetch_add(1, AtomicOrdering::SeqCst);
-            current_quota = self.inner.total_size.load(AtomicOrdering::Acquire);
+            current_quota = self
+                .inner
+                .total_size
+                .fetch_add(quota, AtomicOrdering::SeqCst);
         }
-        self.inner
-            .total_size
-            .fetch_add(quota, AtomicOrdering::SeqCst);
         self.inner.check_count.fetch_sub(1, AtomicOrdering::SeqCst);
         Some(MemoryTracker {
             limiter: self.inner.clone(),
