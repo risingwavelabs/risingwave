@@ -28,8 +28,7 @@ use crate::row_serde::ColumnDescMapping;
 
 #[allow(clippy::len_without_is_empty)]
 impl ColumnDescMapping {
-    /// Create a mapping with given `output_columns`.
-    pub fn new(output_columns: Vec<ColumnDesc>) -> Arc<Self> {
+    fn new_inner(output_columns: Vec<ColumnDesc>, all_data_types: Vec<DataType>) -> Arc<Self> {
         let id_to_column_index = output_columns
             .iter()
             .enumerate()
@@ -39,12 +38,21 @@ impl ColumnDescMapping {
         Self {
             output_columns,
             id_to_column_index,
+            all_data_types,
         }
         .into()
     }
 
+    /// Create a mapping with given `output_columns`.
+    pub fn new(output_columns: Vec<ColumnDesc>) -> Arc<Self> {
+        let all_data_types = output_columns.iter().map(|d| d.data_type.clone()).collect();
+        Self::new_inner(output_columns, all_data_types)
+    }
+
     /// Create a mapping with given `table_columns` projected on the `column_ids`.
     pub fn new_partial(table_columns: &[ColumnDesc], column_ids: &[ColumnId]) -> Arc<Self> {
+        let all_data_types = table_columns.iter().map(|d| d.data_type.clone()).collect();
+
         let mut table_columns = table_columns
             .iter()
             .map(|c| (c.column_id, c.clone()))
@@ -55,7 +63,7 @@ impl ColumnDescMapping {
             .map(|id| table_columns.remove(id).unwrap())
             .collect();
 
-        Self::new(output_columns)
+        Self::new_inner(output_columns, all_data_types)
     }
 
     /// Get the [`ColumnDesc`] and its index in the output with given `id`.
@@ -161,10 +169,7 @@ impl CellBasedRowDeserializer {
 
 impl RowDeserialize for CellBasedRowDeserializer {
     /// Constructs a new serializer.
-    fn create_row_deserializer(
-        column_mapping: Arc<ColumnDescMapping>,
-        _data_types: Vec<DataType>,
-    ) -> Self {
+    fn create_row_deserializer(column_mapping: Arc<ColumnDescMapping>) -> Self {
         Self::new(column_mapping)
     }
 

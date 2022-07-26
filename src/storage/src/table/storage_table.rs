@@ -28,7 +28,7 @@ use risingwave_common::array::Row;
 use risingwave_common::buffer::Bitmap;
 use risingwave_common::catalog::{ColumnDesc, ColumnId, OrderedColumnDesc, Schema, TableId};
 use risingwave_common::error::RwError;
-use risingwave_common::types::{DataType, Datum, VirtualNode};
+use risingwave_common::types::{Datum, VirtualNode};
 use risingwave_common::util::hash_util::CRC32FastBuilder;
 use risingwave_common::util::ordered::*;
 use risingwave_common::util::sort_util::OrderType;
@@ -39,9 +39,9 @@ use super::mem_table::RowOp;
 use super::{Distribution, TableIter};
 use crate::error::{StorageError, StorageResult};
 use crate::keyspace::StripPrefixIterator;
-use crate::row_serde::cell_based_encoding_util::{serialize_pk, serialize_pk_and_column_id};
+use crate::row_serde::cell_based_encoding_util::serialize_pk_and_column_id;
 use crate::row_serde::{
-    CellBasedRowSerde, ColumnDescMapping, RowDeserialize, RowSerde, RowSerialize,
+    serialize_pk, CellBasedRowSerde, ColumnDescMapping, RowDeserialize, RowSerde, RowSerialize,
 };
 use crate::storage_value::StorageValue;
 use crate::store::WriteOptions;
@@ -380,8 +380,7 @@ impl<S: StateStore, RS: RowSerde, const T: AccessType> StorageTableBase<S, RS, T
     pub async fn get_row(&self, pk: &Row, epoch: u64) -> StorageResult<Option<Row>> {
         // TODO: use multi-get for storage get_row
         let serialized_pk = self.serialize_pk_with_vnode(pk);
-        let data_types = self.schema().data_types();
-        let mut deserializer = RS::create_deserializer(self.mapping.clone(), data_types);
+        let mut deserializer = RS::create_deserializer(self.mapping.clone());
         let sentinel_key = <RS as RowSerde>::Serializer::serialize_sentinel_cell(
             &serialized_pk,
             &SENTINEL_CELL_ID,
@@ -433,8 +432,7 @@ impl<S: StateStore, RS: RowSerde, const T: AccessType> StorageTableBase<S, RS, T
             .scan_with_range(key_range, None, epoch)
             .await?;
 
-        let data_types = self.schema().data_types();
-        let mut deserializer = RS::create_deserializer(self.mapping.clone(), data_types);
+        let mut deserializer = RS::create_deserializer(self.mapping.clone());
         for (key, value) in kv_pairs {
             deserializer.deserialize(&key, &value).map_err(err)?;
         }
@@ -643,17 +641,11 @@ impl<S: StateStore, RS: RowSerde, const T: AccessType> StorageTableBase<S, RS, T
         // can use a single iterator.
         let iterators: Vec<_> = try_join_all(vnodes.map(|vnode| {
             let raw_key_range = prefixed_range(encoded_key_range.clone(), &vnode.to_be_bytes());
-            let data_types = self
-                .table_columns
-                .clone()
-                .into_iter()
-                .map(|t| t.data_type)
-                .collect_vec();
+
             async move {
                 let iter = StorageTableIterInner::<S, RS>::new(
                     &self.keyspace,
                     self.mapping.clone(),
-                    data_types,
                     raw_key_range,
                     epoch,
                     wait_epoch,
@@ -830,7 +822,6 @@ impl<S: StateStore, RS: RowSerde> StorageTableIterInner<S, RS> {
     async fn new<R, B>(
         keyspace: &Keyspace<S>,
         table_descs: Arc<ColumnDescMapping>,
-        data_types: Vec<DataType>,
         raw_key_range: R,
         epoch: u64,
         wait_epoch: bool,
@@ -843,7 +834,7 @@ impl<S: StateStore, RS: RowSerde> StorageTableIterInner<S, RS> {
             keyspace.state_store().wait_epoch(epoch).await?;
         }
 
-        let row_deserializer = RS::create_deserializer(table_descs, data_types);
+        let row_deserializer = RS::create_deserializer(table_descs);
 
         let iter = keyspace.iter_with_range(raw_key_range, epoch).await?;
         let iter = Self {
