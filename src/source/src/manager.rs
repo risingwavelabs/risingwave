@@ -24,7 +24,7 @@ use risingwave_common::error::ErrorCode::{ConnectorError, InternalError, Protoco
 use risingwave_common::error::{Result, RwError};
 use risingwave_common::types::DataType;
 use risingwave_common::util::epoch::UNIX_SINGULARITY_DATE_EPOCH;
-use risingwave_common::util::row_id::{Id, IdGenerator};
+use risingwave_common::util::id::{Id, IdGenerator};
 use risingwave_connector::source::ConnectorProperties;
 use risingwave_pb::catalog::StreamSourceInfo;
 use risingwave_pb::plan_common::RowFormatType;

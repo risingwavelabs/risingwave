@@ -28,7 +28,7 @@ use parking_lot::Mutex;
 use prost::Message;
 use risingwave_common::monitor::rwlock::MonitoredRwLock;
 use risingwave_common::util::epoch::{Epoch, INVALID_EPOCH, UNIX_SINGULARITY_DATE_EPOCH};
-use risingwave_common::util::row_id::IdGenerator;
+use risingwave_common::util::id::IdGenerator;
 use risingwave_hummock_sdk::compact::compact_task_to_string;
 use risingwave_hummock_sdk::compaction_group::hummock_version_ext::HummockVersionExt;
 use risingwave_hummock_sdk::{

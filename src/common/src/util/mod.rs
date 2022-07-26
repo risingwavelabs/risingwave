@@ -34,7 +34,7 @@ pub mod sort_util;
 pub mod try_match;
 pub mod epoch;
 mod future_utils;
-pub mod row_id;
+pub mod id;
 pub mod scan_range;
 pub mod value_encoding;
 pub mod worker_util;
