@@ -82,7 +82,7 @@ fn row_based_deserialize_inner(data_types: &[DataType], mut row: impl Buf) -> Re
 }
 #[cfg(test)]
 mod tests {
-
+    use itertools::Itertools;
     use risingwave_common::array::Row;
     use risingwave_common::catalog::{ColumnDesc, ColumnId};
     use risingwave_common::types::{DataType, IntervalUnit, ScalarImpl};
@@ -105,12 +105,29 @@ mod tests {
             Some(ScalarImpl::Decimal("-233.3".parse().unwrap())),
             Some(ScalarImpl::Interval(IntervalUnit::new(7, 8, 9))),
         ]);
-        let column_descs = vec![ColumnDesc::new_atomic(DataType::Varchar, "unused", 2)];
-        let mut se = RowBasedSerializer::create_row_serializer(
-            &[],
-            &[ColumnDesc::new_atomic(DataType::Varchar, "unused", 2)],
-            &[ColumnId::new(1)],
-        );
+
+        let data_types = vec![
+            DataType::Varchar,
+            DataType::Boolean,
+            DataType::Int16,
+            DataType::Int32,
+            DataType::Int64,
+            DataType::Float32,
+            DataType::Float64,
+            DataType::Decimal,
+            DataType::Interval,
+        ];
+        let column_ids = (1..=row.size())
+            .map(|i| ColumnId::new(i as _))
+            .collect_vec();
+
+        let column_descs = data_types
+            .iter()
+            .zip_eq(column_ids.iter())
+            .map(|(d, i)| ColumnDesc::unnamed(*i, d.clone()))
+            .collect_vec();
+
+        let mut se = RowBasedSerializer::create_row_serializer(&[], &column_descs, &column_ids);
         let value_bytes = se.serialize(DEFAULT_VNODE, &[], row.clone()).unwrap();
         // each cell will add a is_none flag (u8)
 
