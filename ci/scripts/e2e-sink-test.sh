@@ -23,5 +23,8 @@ echo "--- Prepare RiseDev playground"
 cargo make pre-start-playground
 cargo make link-all-in-one-binaries
 
-docker run -e MYSQL_ALLOW_EMPTY_PASSWORD=true -d --name=mysql mysql/mysql-server:latest
+echo "--- e2e test w/ Rust frontend - source with kafka"
+cargo make clean-data
+cargo make ci-start
+./scripts/sink/prepare_sink.sh
 echo "This is the sink test so far"
