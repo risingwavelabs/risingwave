@@ -80,6 +80,7 @@ pub struct SharedBufferBatch {
     inner: Arc<SharedBufferBatchInner>,
     epoch: HummockEpoch,
     compaction_group_id: CompactionGroupId,
+    pub table_id: u32,
 }
 
 impl SharedBufferBatch {
@@ -88,6 +89,7 @@ impl SharedBufferBatch {
         epoch: HummockEpoch,
         buffer_release_notifier: mpsc::UnboundedSender<SharedBufferEvent>,
         compaction_group_id: CompactionGroupId,
+        table_id: u32,
     ) -> Self {
         let size: usize = Self::measure_batch_size(&sorted_items);
         Self {
@@ -98,6 +100,7 @@ impl SharedBufferBatch {
             }),
             epoch,
             compaction_group_id,
+            table_id,
         }
     }
 
@@ -313,6 +316,7 @@ mod tests {
             epoch,
             mpsc::unbounded_channel().0,
             StaticCompactionGroupId::StateDefault.into(),
+            Default::default(),
         );
 
         // Sketch
@@ -390,6 +394,7 @@ mod tests {
             epoch,
             mpsc::unbounded_channel().0,
             StaticCompactionGroupId::StateDefault.into(),
+            Default::default(),
         );
 
         // FORWARD: Seek to a key < 1st key, expect all three items to return
