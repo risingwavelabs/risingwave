@@ -119,7 +119,14 @@ impl LogicalJoin {
             join_type,
             &output_indices,
         );
-        let functional_dependency = FunctionalDependencySet::with_key(schema.len(), &pk_indices);
+        let functional_dependency = Self::derive_fd(
+            left.schema().len(),
+            right.schema().len(),
+            left.functional_dependency().clone(),
+            right.functional_dependency().clone(),
+            join_type,
+            &output_indices,
+        );
         let base = PlanBase::new_logical(ctx, schema, pk_indices, functional_dependency);
         LogicalJoin {
             base,
@@ -293,6 +300,56 @@ impl LogicalJoin {
             .map(|index| i2o.try_map(index))
             .collect::<Option<Vec<_>>>()
             .unwrap_or_default()
+    }
+
+    pub(super) fn derive_fd(
+        left_len: usize,
+        right_len: usize,
+        left_fd_set: FunctionalDependencySet,
+        right_fd_set: FunctionalDependencySet,
+        join_type: JoinType,
+        output_indices: &[usize],
+    ) -> FunctionalDependencySet {
+        let out_col_num = Self::out_column_num(left_len, right_len, join_type);
+        let get_new_left_fd_set = |left_fd_set: FunctionalDependencySet| {
+            let mut fd_set = FunctionalDependencySet::new();
+            for mut fd in left_fd_set.into_dependencies() {
+                fd.to.grow(out_col_num);
+                fd.from.grow(out_col_num);
+                fd_set.add_functional_dependency(fd);
+            }
+            fd_set
+        };
+        let get_new_right_fd_set = |right_fd_set: FunctionalDependencySet| {
+            right_fd_set.rewrite_with_mapping(ColIndexMapping::with_shift_offset(
+                right_len,
+                left_len.try_into().unwrap(),
+            ))
+        };
+        let fd_set: FunctionalDependencySet = match join_type {
+            JoinType::Inner => {
+                let mut fd_set = FunctionalDependencySet::new();
+                get_new_left_fd_set(left_fd_set)
+                    .into_dependencies()
+                    .into_iter()
+                    .chain(
+                        get_new_right_fd_set(right_fd_set)
+                            .into_dependencies()
+                            .into_iter(),
+                    )
+                    .for_each(|fd| fd_set.add_functional_dependency(fd));
+                fd_set
+            }
+            JoinType::LeftOuter => get_new_right_fd_set(right_fd_set),
+            JoinType::RightOuter => get_new_left_fd_set(left_fd_set),
+            JoinType::FullOuter => FunctionalDependencySet::new(),
+            JoinType::LeftSemi | JoinType::LeftAnti => left_fd_set,
+            JoinType::RightSemi | JoinType::RightAnti => right_fd_set,
+        };
+        fd_set.rewrite_with_mapping(ColIndexMapping::with_remaining_columns(
+            output_indices,
+            out_col_num,
+        ))
     }
 
     /// Get a reference to the logical join's on.
