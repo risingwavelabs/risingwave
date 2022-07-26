@@ -78,7 +78,7 @@ impl Rule for PullUpCorrelatedPredicateRule {
 
         // Check whether correlated_input_ref with same correlated_id exists for the join right
         // side. If yes, bail out and left for general subquery unnesting to deal with
-        let mut plan_correlated_id_finder = PlanCorrelatedIdFinder::new();
+        let mut plan_correlated_id_finder = PlanCorrelatedIdFinder::default();
         plan_correlated_id_finder.visit(project.clone());
         if plan_correlated_id_finder.contains(&correlated_id) {
             return None;

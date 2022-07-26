@@ -18,17 +18,12 @@ use crate::expr::{CorrelatedId, CorrelatedInputRef, ExprVisitor};
 use crate::optimizer::plan_node::{LogicalFilter, LogicalJoin, LogicalProject, PlanTreeNode};
 use crate::optimizer::plan_visitor::PlanVisitor;
 
+#[derive(Default)]
 pub struct PlanCorrelatedIdFinder {
     correlated_id_set: HashSet<CorrelatedId>,
 }
 
 impl PlanCorrelatedIdFinder {
-    pub fn new() -> Self {
-        Self {
-            correlated_id_set: HashSet::new(),
-        }
-    }
-
     pub fn contains(&self, correlated_id: &CorrelatedId) -> bool {
         self.correlated_id_set.contains(correlated_id)
     }
@@ -40,10 +35,7 @@ impl PlanVisitor<()> for PlanCorrelatedIdFinder {
 
     fn visit_logical_join(&mut self, plan: &LogicalJoin) {
         let mut finder = ExprCorrelatedIdFinder::new();
-        plan.on()
-            .conjunctions
-            .iter()
-            .for_each(|expr| finder.visit_expr(expr));
+        plan.on().visit_expr(&mut finder);
         self.correlated_id_set.extend(finder.correlated_id_set);
 
         plan.inputs()
@@ -53,10 +45,7 @@ impl PlanVisitor<()> for PlanCorrelatedIdFinder {
 
     fn visit_logical_filter(&mut self, plan: &LogicalFilter) {
         let mut finder = ExprCorrelatedIdFinder::new();
-        plan.predicate()
-            .conjunctions
-            .iter()
-            .for_each(|expr| finder.visit_expr(expr));
+        plan.predicate().visit_expr(&mut finder);
         self.correlated_id_set.extend(finder.correlated_id_set);
 
         plan.inputs()
@@ -75,6 +64,7 @@ impl PlanVisitor<()> for PlanCorrelatedIdFinder {
     }
 }
 
+#[derive(Default)]
 struct ExprCorrelatedIdFinder {
     correlated_id_set: HashSet<CorrelatedId>,
 }
