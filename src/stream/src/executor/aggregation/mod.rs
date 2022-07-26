@@ -349,6 +349,7 @@ pub fn generate_agg_schema(
 
 /// Generate initial [`AggState`] from `agg_calls`. For [`crate::executor::HashAggExecutor`], the
 /// group key should be provided.
+#[allow(clippy::too_many_arguments)]
 pub async fn generate_managed_agg_state<S: StateStore>(
     key: Option<&Row>,
     agg_calls: &[AggCall],

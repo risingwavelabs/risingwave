@@ -103,29 +103,26 @@ impl<S: StateStore> ManagedStringAggState<S> {
             .map(|(i, col_idx)| (*col_idx, i))
             .collect();
         // map agg column to state table column index
-        let state_table_agg_col_idx = col_mapping
+        let state_table_agg_col_idx = *col_mapping
             .get(&agg_call.args.val_indices()[0])
-            .expect("the column to be aggregate must appear in the state table")
-            .clone();
+            .expect("the column to be aggregate must appear in the state table");
         // map order by columns to state table column indices
         let order_pair = agg_call
             .order_pairs
             .iter()
             .map(|o| {
                 OrderPair::new(
-                    col_mapping
+                    *col_mapping
                         .get(&o.column_idx)
-                        .expect("the column to be order by must appear in the state table")
-                        .clone(),
+                        .expect("the column to be order by must appear in the state table"),
                     o.order_type,
                 )
             })
             .chain(pk_indices.iter().map(|idx| {
                 OrderPair::new(
-                    col_mapping
+                    *col_mapping
                         .get(idx)
-                        .expect("the pk columns must appear in the state table")
-                        .clone(),
+                        .expect("the pk columns must appear in the state table"),
                     OrderType::Ascending,
                 )
             }))
@@ -306,12 +303,12 @@ mod tests {
         agg_state.flush(&mut state_table)?;
         state_table.commit(epoch).await.unwrap();
 
-        let res = agg_state.get_output(epoch, &mut state_table).await?;
+        let res = agg_state.get_output(epoch, &state_table).await?;
         match res {
             Some(ScalarImpl::Utf8(s)) => {
                 assert!(s.len() == 2);
-                assert!(s.contains("a"));
-                assert!(s.contains("c"));
+                assert!(s.contains('a'));
+                assert!(s.contains('c'));
             }
             _ => panic!("unexpected output"),
         }
@@ -386,7 +383,7 @@ mod tests {
             state_table.commit(epoch).await.unwrap();
             epoch += 1;
 
-            let res = agg_state.get_output(epoch, &mut state_table).await?;
+            let res = agg_state.get_output(epoch, &state_table).await?;
             match res {
                 Some(ScalarImpl::Utf8(s)) => {
                     assert_eq!(s, "ca".to_string());
@@ -417,7 +414,7 @@ mod tests {
             state_table.commit(epoch).await.unwrap();
             epoch += 1;
 
-            let res = agg_state.get_output(epoch, &mut state_table).await?;
+            let res = agg_state.get_output(epoch, &state_table).await?;
             match res {
                 Some(ScalarImpl::Utf8(s)) => {
                     assert_eq!(s, "dcae".to_string());
@@ -499,7 +496,7 @@ mod tests {
             state_table.commit(epoch).await.unwrap();
             epoch += 1;
 
-            let res = agg_state.get_output(epoch, &mut state_table).await?;
+            let res = agg_state.get_output(epoch, &state_table).await?;
             match res {
                 Some(ScalarImpl::Utf8(s)) => {
                     assert_eq!(s, "ab".to_string());
@@ -530,7 +527,7 @@ mod tests {
             state_table.commit(epoch).await.unwrap();
             epoch += 1;
 
-            let res = agg_state.get_output(epoch, &mut state_table).await?;
+            let res = agg_state.get_output(epoch, &state_table).await?;
             match res {
                 Some(ScalarImpl::Utf8(s)) => {
                     assert_eq!(s, "aeb".to_string());
