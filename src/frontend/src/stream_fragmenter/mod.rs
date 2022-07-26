@@ -196,11 +196,13 @@ impl StreamFragmenter {
             // TODO: Force singleton for TopN as a workaround. We should implement two phase TopN.
             NodeBody::TopN(_) => current_fragment.is_singleton = true,
 
-            NodeBody::Chain(ref node) => {
+            // FIXME: workaround for single-fragment mview on singleton upstream mview.
+            NodeBody::Chain(node) => {
                 // memorize table id for later use
                 state
                     .dependent_table_ids
                     .insert(TableId::new(node.table_id));
+                current_fragment.is_singleton = node.is_singleton;
             }
 
             _ => {}
@@ -220,8 +222,8 @@ impl StreamFragmenter {
                         return self.build_delta_join(state, current_fragment, stream_node);
                     } else {
                         panic!(
-                        "only inner join without non-equal condition is supported for delta joins"
-                    );
+                            "only inner join without non-equal condition is supported for delta joins"
+                        );
                     }
                 }
             }
@@ -253,8 +255,7 @@ impl StreamFragmenter {
                 match child_node.get_node_body()? {
                     NodeBody::Exchange(_) if child_node.input.is_empty() => {
                         // When exchange node is generated when doing rewrites, it could be having
-                        // zero input. In this case, we won't recursively
-                        // visit its children.
+                        // zero input. In this case, we won't recursively visit its children.
                         Ok(child_node)
                     }
                     // Exchange node indicates a new child fragment.

@@ -343,6 +343,7 @@ impl LocalVersionManager {
         compaction_group_id: CompactionGroupId,
         kv_pairs: Vec<(Bytes, StorageValue)>,
         is_remote_batch: bool,
+        table_id: u32,
     ) -> HummockResult<usize> {
         let sorted_items = Self::build_shared_buffer_item_batches(kv_pairs, epoch);
 
@@ -351,6 +352,7 @@ impl LocalVersionManager {
             epoch,
             self.buffer_tracker.buffer_event_sender.clone(),
             compaction_group_id,
+            table_id,
         );
         let batch_size = batch.size();
         if self.buffer_tracker.try_write(batch_size) {
