@@ -713,12 +713,10 @@ impl LogicalAgg {
     pub fn new(agg_calls: Vec<PlanAggCall>, group_key: Vec<usize>, input: PlanRef) -> Self {
         let ctx = input.ctx();
         let schema = Self::derive_schema(input.schema(), &group_key, &agg_calls);
-        let pk_indices = match group_key.is_empty() {
-            // simple agg
-            true => vec![],
-            // group agg
-            false => group_key.clone(),
-        };
+
+        // there is only one row in simple agg's output, so its pk_indices is empty
+        let pk_indices = (0..group_key.len()).collect_vec();
+
         let base = PlanBase::new_logical(ctx, schema, pk_indices);
         Self {
             base,

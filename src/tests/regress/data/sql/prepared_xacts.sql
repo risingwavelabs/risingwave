@@ -8,7 +8,7 @@
 
 
 -- create a simple table that we'll use in the tests
-CREATE TABLE pxtest1 (foobar VARCHAR(10));
+CREATE TABLE pxtest1 (foobar VARCHAR);
 
 INSERT INTO pxtest1 VALUES ('aaa');
 
