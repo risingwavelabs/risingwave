@@ -27,12 +27,12 @@ pub use value::*;
 
 use crate::executor::aggregation::AggCall;
 use crate::executor::error::StreamExecutorResult;
-use crate::executor::managed_state::aggregation::string_agg_new::ManagedStringAggState;
+use crate::executor::managed_state::aggregation::string_agg::ManagedStringAggState;
 use crate::executor::{PkDataTypes, PkIndices};
 
 mod extreme;
 
-mod string_agg_new;
+mod string_agg;
 mod value;
 
 /// Verify if the data going through the state is valid by checking if `ops.len() ==
