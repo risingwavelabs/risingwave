@@ -1069,7 +1069,7 @@ where
     }
 
     pub async fn get_new_table_id(&self) -> Result<HummockSstableId> {
-        // TODO #4037: deprecate `get_new_table_id`
+        // TODO #4037: refactor `get_new_table_id`
         let sstable_id = get_remote_sst_id(
             self.env
                 .id_gen_manager()

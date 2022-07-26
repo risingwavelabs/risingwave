@@ -68,6 +68,8 @@ where
     }
 
     /// Schedules deletion of SSTs from object store
+    ///
+    /// Returns SSTs scheduled in worker node.
     pub async fn vacuum_sst_data(&self) -> Result<Vec<HummockSstableId>> {
         // Select SSTs to delete.
         let ssts_to_delete = {
@@ -145,7 +147,7 @@ where
         Ok(sent_batch)
     }
 
-    /// Confirms deletion of SSTs and deletes corresponding metadata.
+    /// Acknowledges deletion of SSTs and deletes corresponding metadata.
     pub async fn report_vacuum_task(&self, vacuum_task: VacuumTask) -> Result<()> {
         let deleted_sst_ids = self
             .pending_sst_ids
