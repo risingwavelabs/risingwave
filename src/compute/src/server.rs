@@ -81,7 +81,11 @@ pub async fn compute_node_serve(
 
     // Register to the cluster. We're not ready to serve until activate is called.
     let worker_id = meta_client
-        .register(&client_addr, WorkerType::ComputeNode)
+        .register(
+            WorkerType::ComputeNode,
+            &client_addr,
+            config.streaming.worker_node_parallelism,
+        )
         .await
         .unwrap();
     info!("Assigned worker node id {}", worker_id);

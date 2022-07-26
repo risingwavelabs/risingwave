@@ -29,7 +29,11 @@ use crate::scheduler::{
 };
 use crate::session::OptimizerContext;
 
-pub async fn handle_query(context: OptimizerContext, stmt: Statement) -> Result<PgResponse> {
+pub async fn handle_query(
+    context: OptimizerContext,
+    stmt: Statement,
+    format: bool,
+) -> Result<PgResponse> {
     let stmt_type = to_statement_type(&stmt);
     let session = context.session_ctx.clone();
 
@@ -62,7 +66,7 @@ pub async fn handle_query(context: OptimizerContext, stmt: Statement) -> Result<
     let mut rows = vec![];
     #[for_await]
     for chunk in data_stream {
-        rows.extend(to_pg_rows(chunk?));
+        rows.extend(to_pg_rows(chunk?, format));
     }
 
     let rows_count = match stmt_type {

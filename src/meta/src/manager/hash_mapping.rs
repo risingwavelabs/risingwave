@@ -218,7 +218,7 @@ impl HashMappingManagerCore {
 mod tests {
     use itertools::Itertools;
     use risingwave_common::types::VIRTUAL_NODE_COUNT;
-    use risingwave_pb::common::{ParallelUnit, ParallelUnitType};
+    use risingwave_pb::common::ParallelUnit;
     use static_assertions::const_assert_eq;
 
     use super::{HashMappingInfo, HashMappingManager};
@@ -232,7 +232,6 @@ mod tests {
         let parallel_units = (1..parallel_unit_count + 1)
             .map(|id| ParallelUnit {
                 id: id as u32,
-                r#type: ParallelUnitType::Hash as i32,
                 worker_node_id: 1,
             })
             .collect_vec();
