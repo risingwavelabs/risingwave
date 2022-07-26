@@ -542,11 +542,6 @@ where
             let worker_node = locations.worker_locations.get(worker_id).unwrap();
             let mut client = self.client_pool.get(worker_node).await?;
 
-            println!(
-                "broadcast to worker {}: {:?}",
-                worker_id, actor_infos_to_broadcast
-            );
-
             client
                 .broadcast_actor_info_table(BroadcastActorInfoTableRequest {
                     info: actor_infos_to_broadcast.clone(),
