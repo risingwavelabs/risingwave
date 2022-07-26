@@ -22,18 +22,13 @@ wait_server() {
     } 2>/dev/null
 }
 
-if command -v docker-compose; then
-    echo "Starting single node mysql"
-    docker-compose -f "$SCRIPT_PATH"/docker-compose.yml up -d
+echo "Starting single node mysql"
+docker-compose -f "$SCRIPT_PATH"/docker-compose.yml up -d
 
-    cd "$SCRIPT_PATH" 
-    mkdir -p ../logs 
-    docker-compose logs -f > ../logs/docker-compose.log & 
-    cd -
-else
-    echo "This script requires docker-compose, please follow docker install instructions (https://docs.docker.com/compose/install/)."
-    exit 1
-fi
+cd "$SCRIPT_PATH" 
+mkdir -p ../logs 
+docker-compose logs -f > ../logs/docker-compose.log & 
+cd -
 
 echo "Waiting for mysql sink"
 wait_server 23306
