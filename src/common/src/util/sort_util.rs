@@ -127,13 +127,13 @@ impl PartialEq for HeapElem {
 impl Eq for HeapElem {}
 
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub struct OrderableRow {
+pub struct DescOrderedRow {
     pub row: Row,
     pub encoded_row: Option<Vec<u8>>,
     pub order_pairs: Arc<Vec<OrderPair>>,
 }
 
-impl OrderableRow {
+impl DescOrderedRow {
     pub fn new(row: Row, encoded_row: Option<Vec<u8>>, order_pairs: Arc<Vec<OrderPair>>) -> Self {
         Self {
             row,
@@ -143,7 +143,7 @@ impl OrderableRow {
     }
 }
 
-impl Ord for OrderableRow {
+impl Ord for DescOrderedRow {
     fn cmp(&self, other: &Self) -> Ordering {
         let ord = if let (Some(encoded_lhs), Some(encoded_rhs)) =
             (self.encoded_row.as_ref(), other.encoded_row.as_ref())
@@ -152,11 +152,13 @@ impl Ord for OrderableRow {
         } else {
             compare_rows(&self.row, &other.row, &self.order_pairs).unwrap()
         };
-        ord.reverse() // we have to reverse the order because BinaryHeap is a max-heap
+        // We have to reverse the order because we need to use this in a max heap.
+        // Alternative option is to revert every order pair when constructing `OrderedRow`.
+        ord.reverse()
     }
 }
 
-impl PartialOrd for OrderableRow {
+impl PartialOrd for DescOrderedRow {
     fn partial_cmp(&self, other: &Self) -> Option<Ordering> {
         Some(self.cmp(other))
     }

@@ -24,7 +24,7 @@ use risingwave_common::array::Op::{Delete, Insert, UpdateDelete, UpdateInsert};
 use risingwave_common::array::{ArrayImpl, Row};
 use risingwave_common::buffer::Bitmap;
 use risingwave_common::types::{Datum, ScalarImpl};
-use risingwave_common::util::sort_util::{OrderPair, OrderType, OrderableRow};
+use risingwave_common::util::sort_util::{DescOrderedRow, OrderPair, OrderType};
 use risingwave_storage::table::state_table::RowBasedStateTable;
 use risingwave_storage::StateStore;
 
@@ -37,7 +37,7 @@ use crate::executor::PkIndices;
 struct Cache {
     dirty: Option<bool>, // None means not synced from state table (cold start)
     order_pairs: Arc<Vec<OrderPair>>,
-    rows: BTreeSet<OrderableRow>,
+    rows: BTreeSet<DescOrderedRow>,
 }
 
 impl Cache {
@@ -63,7 +63,7 @@ impl Cache {
 
     fn insert(&mut self, row: Row) {
         if !self.is_cold_start() {
-            let orderable_row = OrderableRow::new(row, None, self.order_pairs.clone());
+            let orderable_row = DescOrderedRow::new(row, None, self.order_pairs.clone());
             self.rows.insert(orderable_row);
             self.set_dirty(true);
         }
@@ -71,7 +71,7 @@ impl Cache {
 
     fn remove(&mut self, row: Row) {
         if !self.is_cold_start() {
-            let orderable_row = OrderableRow::new(row, None, self.order_pairs.clone());
+            let orderable_row = DescOrderedRow::new(row, None, self.order_pairs.clone());
             self.rows.remove(&orderable_row);
             self.set_dirty(true);
         }
@@ -229,6 +229,7 @@ impl<S: StateStore> ManagedTableState<S> for ManagedStringAggState<S> {
             self.cache.set_dirty(false); // now the cache is fully synced
         } else {
             println!("[rc] warm start");
+            // rev() is required because cache.rows is in reverse order
             for orderable_row in self.cache.rows.iter().rev() {
                 let value = orderable_row.row[self.state_table_agg_col_idx]
                     .clone()

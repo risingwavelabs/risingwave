@@ -20,7 +20,7 @@ use risingwave_common::array::{Array, ArrayBuilder, ArrayBuilderImpl, ArrayImpl,
 use risingwave_common::error::{ErrorCode, Result};
 use risingwave_common::types::{DataType, ScalarImpl};
 use risingwave_common::util::encoding_for_comparison::{encode_row, is_type_encodable};
-use risingwave_common::util::sort_util::{OrderPair, OrderableRow};
+use risingwave_common::util::sort_util::{DescOrderedRow, OrderPair};
 
 use crate::vector_op::agg::aggregator::Aggregator;
 
@@ -30,7 +30,7 @@ enum StringAggState {
     },
     WithOrder {
         order_pairs: Arc<Vec<OrderPair>>,
-        min_heap: BinaryHeap<OrderableRow>,
+        min_heap: BinaryHeap<DescOrderedRow>,
         encodable: bool,
     },
 }
@@ -85,7 +85,7 @@ impl StringAgg {
                 } else {
                     None
                 };
-                min_heap.push(OrderableRow {
+                min_heap.push(DescOrderedRow {
                     row,
                     encoded_row,
                     order_pairs: order_pairs.clone(),
