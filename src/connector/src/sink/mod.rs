@@ -91,7 +91,7 @@ impl SinkImpl {
                 SinkImpl::MySQL(Box::new(MySQLSink::new(cfg).await.map_err(RwError::from)?))
             }
             SinkConfig::Redis(cfg) => {
-                SinkImpl::Redis(Box::new(RedisSink::new(cfg).map_err(RwError::from)?))
+                SinkImpl::Redis(Box::new(RedisSink::new(cfg).await.map_err(RwError::from)?))
             }
             SinkConfig::Kafka(cfg) => {
                 SinkImpl::Kafka(Box::new(KafkaSink::new(cfg).map_err(RwError::from)?))
@@ -143,6 +143,8 @@ pub enum SinkError {
     MySQL(String),
     #[error("MySQL inner error: {0}")]
     MySQLInner(#[from] mysql_async::Error),
+    #[error("Redis inner error: {0}")]
+    Redis(#[from] redis::RedisError),
     #[error("Kafka error: {0}")]
     Kafka(#[from] rdkafka::error::KafkaError),
     #[error("Json parse error: {0}")]

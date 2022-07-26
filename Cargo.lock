@@ -549,7 +549,7 @@ dependencies = [
  "percent-encoding",
  "pin-project-lite",
  "tokio",
- "tokio-util",
+ "tokio-util 0.7.3",
  "tracing",
 ]
 
@@ -1010,7 +1010,11 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "2a604e93b79d1808327a6fca85a6f2d69de66461e7620f5a4cbf5fb4d1d7c948"
 dependencies = [
  "bytes",
+ "futures-core",
  "memchr",
+ "pin-project-lite",
+ "tokio",
+ "tokio-util 0.7.3",
 ]
 
 [[package]]
@@ -1147,6 +1151,12 @@ name = "crc-catalog"
 version = "2.1.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "2d0165d2900ae6778e36e80bbc4da3b5eefccee9ba939761f9c2882a5d9af3ff"
+
+[[package]]
+name = "crc16"
+version = "0.4.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "338089f42c427b86394a5ee60ff321da23a5c89c9d89514c829687b26359fcff"
 
 [[package]]
 name = "crc32fast"
@@ -2043,7 +2053,7 @@ dependencies = [
  "indexmap",
  "slab",
  "tokio",
- "tokio-util",
+ "tokio-util 0.7.3",
  "tracing",
 ]
 
@@ -2654,7 +2664,7 @@ dependencies = [
  "rand 0.8.5",
  "serde",
  "tokio",
- "tokio-util",
+ "tokio-util 0.7.3",
  "toml",
 ]
 
@@ -2701,7 +2711,7 @@ dependencies = [
  "postgres-protocol",
  "postgres-types",
  "socket2",
- "tokio-util",
+ "tokio-util 0.7.3",
 ]
 
 [[package]]
@@ -2928,7 +2938,7 @@ dependencies = [
  "thiserror",
  "tokio",
  "tokio-native-tls",
- "tokio-util",
+ "tokio-util 0.7.3",
  "twox-hash",
  "url",
 ]
@@ -3791,7 +3801,7 @@ dependencies = [
  "regex",
  "tokio",
  "tokio-native-tls",
- "tokio-util",
+ "tokio-util 0.7.3",
  "url",
 ]
 
@@ -3976,11 +3986,18 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "1a80b5f38d7f5a020856a0e16e40a9cfabf88ae8f0e4c2dcd8a3114c1e470852"
 dependencies = [
  "async-trait",
+ "bytes",
  "combine",
+ "crc16",
  "dtoa",
+ "futures-util",
  "itoa 0.4.8",
  "percent-encoding",
+ "pin-project-lite",
+ "rand 0.8.5",
  "sha1",
+ "tokio",
+ "tokio-util 0.6.10",
  "url",
 ]
 
@@ -4420,6 +4437,7 @@ dependencies = [
  "pulsar",
  "rand 0.8.5",
  "rdkafka",
+ "redis",
  "risingwave_common",
  "risingwave_pb",
  "risingwave_storage",
@@ -4434,7 +4452,7 @@ dependencies = [
  "thiserror",
  "tokio-retry",
  "tokio-stream",
- "tokio-util",
+ "tokio-util 0.7.3",
  "tracing",
  "twox-hash",
  "url",
@@ -5915,7 +5933,7 @@ dependencies = [
  "postgres-types",
  "socket2",
  "tokio",
- "tokio-util",
+ "tokio-util 0.7.3",
 ]
 
 [[package]]
@@ -5936,6 +5954,20 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "df54d54117d6fdc4e4fea40fe1e4e566b3505700e148a6827e59b34b0d2600d9"
 dependencies = [
  "futures-core",
+ "pin-project-lite",
+ "tokio",
+]
+
+[[package]]
+name = "tokio-util"
+version = "0.6.10"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "36943ee01a6d67977dd3f84a5a1d2efeb4ada3a1ae771cadfaa535d9d9fc6507"
+dependencies = [
+ "bytes",
+ "futures-core",
+ "futures-sink",
+ "log",
  "pin-project-lite",
  "tokio",
 ]
@@ -5988,7 +6020,7 @@ dependencies = [
  "prost-derive",
  "tokio",
  "tokio-stream",
- "tokio-util",
+ "tokio-util 0.7.3",
  "tower",
  "tower-layer",
  "tower-service",
@@ -6023,7 +6055,7 @@ dependencies = [
  "rand 0.8.5",
  "slab",
  "tokio",
- "tokio-util",
+ "tokio-util 0.7.3",
  "tower-layer",
  "tower-service",
  "tracing",
@@ -6048,7 +6080,7 @@ dependencies = [
  "percent-encoding",
  "pin-project-lite",
  "tokio",
- "tokio-util",
+ "tokio-util 0.7.3",
  "tower",
  "tower-layer",
  "tower-service",
@@ -6552,6 +6584,7 @@ dependencies = [
  "cc",
  "chrono",
  "clap 3.2.15",
+ "combine",
  "criterion",
  "crossbeam-deque",
  "crossbeam-epoch",
@@ -6591,6 +6624,7 @@ dependencies = [
  "petgraph",
  "prometheus",
  "rand 0.8.5",
+ "redis",
  "regex",
  "regex-automata",
  "regex-syntax",
@@ -6602,7 +6636,7 @@ dependencies = [
  "syn",
  "tokio",
  "tokio-stream",
- "tokio-util",
+ "tokio-util 0.7.3",
  "tower",
  "tower-http",
  "tracing",
