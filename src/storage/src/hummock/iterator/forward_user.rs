@@ -35,14 +35,16 @@ pub enum DirectedUserIterator {
 }
 
 #[allow(type_alias_bounds)]
-pub type UserIteratorPayloadType<D: HummockIteratorDirection, I: SstableIteratorType<Direction = D>> =
-    HummockIteratorUnion<
-        D,
-        SharedBufferBatchIterator<D>,
-        SharedBufferIteratorType<D, I>,
-        ConcatIteratorInner<I>,
-        I,
-    >;
+pub type UserIteratorPayloadType<
+    D: HummockIteratorDirection,
+    I: SstableIteratorType<Direction = D>,
+> = HummockIteratorUnion<
+    D,
+    SharedBufferBatchIterator<D>,
+    SharedBufferIteratorType<D, I>,
+    ConcatIteratorInner<I>,
+    I,
+>;
 
 pub trait DirectedUserIteratorBuilder {
     type Direction: HummockIteratorDirection;

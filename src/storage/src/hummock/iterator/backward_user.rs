@@ -19,7 +19,8 @@ use risingwave_hummock_sdk::key::{get_epoch, key_with_epoch, user_key as to_user
 
 use crate::hummock::iterator::merge_inner::UnorderedMergeIteratorInner;
 use crate::hummock::iterator::{
-    Backward, DirectedUserIterator, DirectedUserIteratorBuilder, HummockIterator, UserIteratorPayloadType,
+    Backward, DirectedUserIterator, DirectedUserIteratorBuilder, HummockIterator,
+    UserIteratorPayloadType,
 };
 use crate::hummock::local_version::PinnedVersion;
 use crate::hummock::value::HummockValue;
@@ -29,7 +30,8 @@ use crate::monitor::StateStoreMetrics;
 /// [`BackwardUserIterator`] can be used by user directly.
 pub struct BackwardUserIterator {
     /// Inner table iterator.
-    iterator: UnorderedMergeIteratorInner<UserIteratorPayloadType<Backward, BackwardSstableIterator>>,
+    iterator:
+        UnorderedMergeIteratorInner<UserIteratorPayloadType<Backward, BackwardSstableIterator>>,
 
     /// We just met a new key
     just_met_new_key: bool,
@@ -63,7 +65,9 @@ impl BackwardUserIterator {
     /// Creates [`BackwardUserIterator`] with maximum epoch.
     #[cfg(test)]
     pub(crate) fn new(
-        iterator: UnorderedMergeIteratorInner<UserIteratorPayloadType<Backward, BackwardSstableIterator>>,
+        iterator: UnorderedMergeIteratorInner<
+            UserIteratorPayloadType<Backward, BackwardSstableIterator>,
+        >,
         key_range: (Bound<Vec<u8>>, Bound<Vec<u8>>),
     ) -> Self {
         Self::with_epoch(iterator, key_range, Epoch::MAX, 0, None)
@@ -71,7 +75,9 @@ impl BackwardUserIterator {
 
     /// Creates [`BackwardUserIterator`] with given `read_epoch`.
     pub(crate) fn with_epoch(
-        iterator: UnorderedMergeIteratorInner<UserIteratorPayloadType<Backward, BackwardSstableIterator>>,
+        iterator: UnorderedMergeIteratorInner<
+            UserIteratorPayloadType<Backward, BackwardSstableIterator>,
+        >,
         key_range: (Bound<Vec<u8>>, Bound<Vec<u8>>),
         read_epoch: u64,
         min_epoch: u64,
@@ -270,7 +276,9 @@ impl DirectedUserIteratorBuilder for BackwardUserIterator {
     type SstableIteratorType = BackwardSstableIterator;
 
     fn create(
-        iterator_iter: impl IntoIterator<Item = UserIteratorPayloadType<Backward, BackwardSstableIterator>>,
+        iterator_iter: impl IntoIterator<
+            Item = UserIteratorPayloadType<Backward, BackwardSstableIterator>,
+        >,
         stats: Arc<StateStoreMetrics>,
         key_range: (Bound<Vec<u8>>, Bound<Vec<u8>>),
         read_epoch: u64,
