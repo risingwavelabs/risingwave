@@ -924,7 +924,6 @@ pub fn literal_type_match(data_type: &DataType, literal: Option<&ScalarImpl>) ->
                     | (DataType::Int64, ScalarImpl::Int64(_))
                     | (DataType::Float32, ScalarImpl::Float32(_))
                     | (DataType::Float64, ScalarImpl::Float64(_))
-                    | (DataType::Date, ScalarImpl::Int32(_))
                     | (DataType::Varchar, ScalarImpl::Utf8(_))
                     | (DataType::Date, ScalarImpl::NaiveDate(_))
                     | (DataType::Time, ScalarImpl::NaiveTime(_))
