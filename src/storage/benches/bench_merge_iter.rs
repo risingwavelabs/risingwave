@@ -20,9 +20,11 @@ use criterion::{criterion_group, criterion_main, BenchmarkId, Criterion};
 use futures::executor::block_on;
 use risingwave_hummock_sdk::compaction_group::StaticCompactionGroupId;
 use risingwave_storage::hummock::iterator::{
-    BoxedForwardHummockIterator, Forward, HummockIterator, MergeIterator, OrderedAwareMergeIterator,
+    Forward, HummockIterator, OrderedMergeIteratorInner, UnorderedMergeIteratorInner,
 };
-use risingwave_storage::hummock::shared_buffer::shared_buffer_batch::SharedBufferBatch;
+use risingwave_storage::hummock::shared_buffer::shared_buffer_batch::{
+    SharedBufferBatch, SharedBufferBatchIterator,
+};
 use risingwave_storage::hummock::value::HummockValue;
 use risingwave_storage::monitor::StateStoreMetrics;
 use tokio::sync::mpsc;
@@ -30,7 +32,7 @@ use tokio::sync::mpsc;
 fn gen_interleave_shared_buffer_batch_iter(
     batch_size: usize,
     batch_count: usize,
-) -> Vec<BoxedForwardHummockIterator> {
+) -> Vec<SharedBufferBatchIterator<Forward>> {
     let mut iterators = Vec::new();
     for i in 0..batch_count {
         let mut batch_data = vec![];
@@ -46,7 +48,7 @@ fn gen_interleave_shared_buffer_batch_iter(
             mpsc::unbounded_channel().0,
             StaticCompactionGroupId::StateDefault.into(),
         );
-        iterators.push(Box::new(batch.into_forward_iter()) as BoxedForwardHummockIterator);
+        iterators.push(batch.into_forward_iter());
     }
     iterators
 }
@@ -63,7 +65,7 @@ fn run_iter<I: HummockIterator<Direction = Forward>>(iter_ref: &RefCell<I>, tota
 }
 
 fn criterion_benchmark(c: &mut Criterion) {
-    let merge_iter = RefCell::new(MergeIterator::new(
+    let merge_iter = RefCell::new(UnorderedMergeIteratorInner::new(
         gen_interleave_shared_buffer_batch_iter(10000, 100),
         Arc::new(StateStoreMetrics::unused()),
     ));
@@ -77,7 +79,7 @@ fn criterion_benchmark(c: &mut Criterion) {
         },
     );
 
-    let ordered_merge_iter = RefCell::new(OrderedAwareMergeIterator::new(
+    let ordered_merge_iter = RefCell::new(OrderedMergeIteratorInner::new(
         gen_interleave_shared_buffer_batch_iter(10000, 100),
         Arc::new(StateStoreMetrics::unused()),
     ));
