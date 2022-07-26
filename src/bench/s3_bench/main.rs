@@ -165,7 +165,7 @@ pub struct Config {
     format: bool,
 
     #[clap(short, long)]
-    multithread: usize,
+    multithread: bool,
 }
 
 fn read_cases(cfg: Arc<Config>) -> Vec<Case> {
@@ -527,23 +527,33 @@ async fn main() {
 
     let mut cases = read_cases(cfg.clone());
 
-    if cfg.multithread > 1 {
-        let mut features = vec![];
+    if cfg.multithread {
+        let mut features_put = vec![];
+        let mut features_get = vec![];
         for (i, case) in cases.drain(..).enumerate() {
             debug!("running case: {:?}", case);
             let objs = objs.clone();
-            features.push(run_case(i, case, cfg.clone(), client.clone(), objs));
+            if matches!(case,Case::Put {..}) || matches!(case,Case::MultiPartUpload {..}){
+                features_put.push(run_case(i, case, cfg.clone(), client.clone(), objs));
+            }else{
+                features_get.push(run_case(i, case, cfg.clone(), client.clone(), objs));
+            }
         }
-        std::thread::spawn(move || {
-            tokio::runtime::Builder::new_multi_thread()
-                .worker_threads(cfg.multithread)
-                .enable_all()
-                .build()
-                .unwrap()
-                .block_on(async move{
-                    try_join_all(features).await.unwrap();
-                });
-        }).join().unwrap();
+        loop{
+            let mut vec = vec![];
+            if !features_put.is_empty() {
+                println!("aaaa");
+                vec.push(features_put.pop().unwrap());
+            }
+            if !features_get.is_empty(){
+                println!("bbbb");
+                vec.push(features_get.pop().unwrap());
+            }
+            if vec.is_empty(){
+                break;
+            }
+            try_join_all(vec).await.unwrap();
+        }
     }else{
         for (i, case) in cases.drain(..).enumerate() {
             debug!("running case: {:?}", case);
