@@ -323,7 +323,8 @@ impl Condition {
                             return always_false();
                         }
                     }
-                    eq_conds = scalars.into_iter().collect();
+                    // Sort to ensure a deterministic result for planner test.
+                    eq_conds = scalars.into_iter().sorted().collect();
                 } else if let Some((input_ref, op, const_expr)) = expr.as_comparison_const() &&
                     let Ok(const_expr) = const_expr.cast_implicit(input_ref.data_type) {
                     assert_eq!(input_ref.index, order_column_ids[i]);
