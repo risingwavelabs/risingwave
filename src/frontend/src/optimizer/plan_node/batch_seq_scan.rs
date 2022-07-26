@@ -79,8 +79,11 @@ impl BatchSeqScan {
                 Distribution::Single
             } else {
                 match self.logical.distribution_key() {
-                    // Should be `Single` if no distribution key.
-                    Some(dist_key) if dist_key.is_empty() => Distribution::Single,
+                    // FIXME: Should be `Single` if no distribution key.
+                    // Currently the task will be scheduled to frontend under local mode, which is
+                    // unimplemented yet. Enable this when it's done.
+                    //
+                    // Some(dist_key) if dist_key.is_empty() => Distribution::Single,
                     Some(dist_key) => Distribution::HashShard(dist_key),
                     None => Distribution::SomeShard,
                 }
@@ -164,7 +167,7 @@ impl fmt::Display for BatchSeqScan {
                 }
                 range_strs.push(range_str.join(", "));
             }
-            write!(f, ", scan_ranges: {}", range_strs.join(" OR "))?;
+            write!(f, ", scan_ranges: [{}]", range_strs.join(" OR "))?;
         }
 
         if verbose {

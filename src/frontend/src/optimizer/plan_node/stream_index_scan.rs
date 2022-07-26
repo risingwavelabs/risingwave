@@ -69,7 +69,7 @@ impl fmt::Display for StreamIndexScan {
         let verbose = self.base.ctx.is_explain_verbose();
         write!(
             f,
-            "StreamIndexScan {{ index: {}, columns: [{}], pk_indices: {:?}, distribution: {} }}",
+            "StreamIndexScan {{ index: {}, columns: [{}], pk_indices: {:?} }}",
             self.logical.table_name(),
             if verbose {
                 self.logical.column_names_with_table_prefix()
@@ -78,7 +78,6 @@ impl fmt::Display for StreamIndexScan {
             }
             .join(", "),
             self.base.pk_indices,
-            self.distribution()
         )
     }
 }

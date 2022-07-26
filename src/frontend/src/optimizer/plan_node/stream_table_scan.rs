@@ -84,6 +84,7 @@ impl fmt::Display for StreamTableScan {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         let verbose = self.base.ctx.is_explain_verbose();
         let mut builder = f.debug_struct("StreamTableScan");
+
         builder
             .field("table", &format_args!("{}", self.logical.table_name()))
             .field(
@@ -97,9 +98,13 @@ impl fmt::Display for StreamTableScan {
                     .join(", ")
                 ),
             )
-            .field("pk_indices", &format_args!("{:?}", self.base.pk_indices))
-            .field("distribution", &self.distribution())
-            .finish()
+            .field("pk_indices", &format_args!("{:?}", self.base.pk_indices));
+
+        if verbose {
+            builder.field("distribution", &self.distribution());
+        }
+
+        builder.finish()
     }
 }
 
