@@ -197,7 +197,7 @@ impl PlanRoot {
                 ApplyJoinRule::create(),
                 ApplyScanRule::create(),
             ],
-            ApplyOrder::BottomUp,
+            ApplyOrder::TopDown,
         );
 
         // Predicate Push-down
