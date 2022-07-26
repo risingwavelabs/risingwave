@@ -26,11 +26,10 @@ use risingwave_storage::StateStore;
 use crate::executor::error::StreamExecutorResult;
 use crate::executor::PkIndices;
 
-// #[expect(dead_code)]
 pub struct ManagedTopNStateNew<S: StateStore> {
     /// Relational table.
     state_table: RowBasedStateTable<S>,
-    /// The number of elements in both cache and storage.
+    /// The total number of rows in state table.
     total_count: usize,
     /// For deserializing `OrderedRow`.
     ordered_row_deserializer: OrderedRowDeserializer,

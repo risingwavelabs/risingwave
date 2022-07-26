@@ -96,7 +96,7 @@ pub struct InnerTopNExecutorNew<S: StateStore> {
     key_indices: Vec<usize>,
 }
 
-const TOPN_CACHE_DEFAULT_HIGH_CAPACITY: usize = 1024;
+const TOPN_CACHE_HIGH_CAPACITY_FACTOR: usize = 2;
 
 struct TopNCache {
     pub low: BTreeMap<OrderedRow, Row>,
@@ -106,12 +106,12 @@ struct TopNCache {
 }
 
 impl TopNCache {
-    pub fn new(_num_offset: usize, _num_limit: usize) -> Self {
+    pub fn new(num_offset: usize, num_limit: usize) -> Self {
         Self {
             low: BTreeMap::new(),
             middle: BTreeMap::new(),
             high: BTreeMap::new(),
-            high_capacity: TOPN_CACHE_DEFAULT_HIGH_CAPACITY,
+            high_capacity: (num_offset + num_limit) * TOPN_CACHE_HIGH_CAPACITY_FACTOR,
         }
     }
 
@@ -235,7 +235,8 @@ impl<S: StateStore> TopNExecutorBase for InnerTopNExecutorNew<S> {
     ) -> StreamExecutorResult<StreamChunk> {
         let mut res_ops = Vec::with_capacity(self.limit.unwrap_or_default());
         let mut res_rows = Vec::with_capacity(self.limit.unwrap_or_default());
-        let num_limit = self.limit.unwrap_or(usize::MAX);
+        // We have banned streaming query that doesn't have LIMIT, so it is safe to unwrap here
+        let num_limit = self.limit.unwrap();
 
         // apply the chunk to state table
         for (op, row_ref) in chunk.rows() {
