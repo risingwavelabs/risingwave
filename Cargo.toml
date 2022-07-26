@@ -28,6 +28,7 @@ members = [
   "src/stream",
   "src/test_runner",
   "src/tests/regress",
+  "src/tests/simulation",
   "src/tests/sqlsmith",
   "src/utils/memcomparable",
   "src/utils/pgwire",

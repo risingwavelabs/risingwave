@@ -135,6 +135,7 @@ pub mod IdCategory {
     pub const Source: IdCategoryType = 10;
     pub const HummockCompactionTask: IdCategoryType = 11;
     pub const User: IdCategoryType = 12;
+    pub const Sink: IdCategoryType = 13;
 }
 
 pub type IdGeneratorManagerRef<S> = Arc<IdGeneratorManager<S>>;
@@ -147,6 +148,7 @@ pub struct IdGeneratorManager<S> {
     database: Arc<StoredIdGenerator<S>>,
     schema: Arc<StoredIdGenerator<S>>,
     table: Arc<StoredIdGenerator<S>>,
+    sink: Arc<StoredIdGenerator<S>>,
     worker: Arc<StoredIdGenerator<S>>,
     fragment: Arc<StoredIdGenerator<S>>,
     actor: Arc<StoredIdGenerator<S>>,
@@ -175,6 +177,7 @@ where
                 )
                 .await,
             ),
+            sink: Arc::new(StoredIdGenerator::new(meta_store.clone(), "sink", None).await),
             worker: Arc::new(
                 StoredIdGenerator::new(meta_store.clone(), "worker", Some(META_NODE_ID as i32 + 1))
                     .await,
@@ -210,6 +213,7 @@ where
             IdCategory::Database => &self.database,
             IdCategory::Schema => &self.schema,
             IdCategory::Table => &self.table,
+            IdCategory::Sink => &self.sink,
             IdCategory::Fragment => &self.fragment,
             IdCategory::Actor => &self.actor,
             IdCategory::User => &self.user,

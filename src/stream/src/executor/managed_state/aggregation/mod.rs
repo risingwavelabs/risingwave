@@ -26,12 +26,13 @@ use risingwave_storage::StateStore;
 pub use value::*;
 
 use crate::executor::aggregation::AggCall;
-use crate::executor::error::{StreamExecutorError, StreamExecutorResult};
-use crate::executor::PkDataTypes;
+use crate::executor::error::StreamExecutorResult;
+use crate::executor::managed_state::aggregation::string_agg::ManagedStringAggState;
+use crate::executor::{PkDataTypes, PkIndices};
 
 mod extreme;
 
-// mod string_agg;
+mod string_agg;
 mod value;
 
 /// Verify if the data going through the state is valid by checking if `ops.len() ==
@@ -112,11 +113,13 @@ impl<S: StateStore> ManagedStateImpl<S> {
     pub async fn create_managed_state(
         agg_call: AggCall,
         row_count: Option<usize>,
+        pk_indices: PkIndices,
         pk_data_types: PkDataTypes,
         is_row_count: bool,
         key_hash_code: Option<HashCode>,
         pk: Option<&Row>,
         state_table: &RowBasedStateTable<S>,
+        state_table_col_indices: Vec<usize>,
     ) -> StreamExecutorResult<Self> {
         match agg_call.kind {
             AggKind::Max | AggKind::Min => {
@@ -142,13 +145,12 @@ impl<S: StateStore> ManagedStateImpl<S> {
                     )?))
                 }
             }
-            AggKind::StringAgg => {
-                // TODO, It seems with `order by`, `StringAgg` needs more stuff from `AggCall`
-                Err(StreamExecutorError::not_implemented(
-                    "It seems with `order by`, `StringAgg` needs more stuff from `AggCall`",
-                    None,
-                ))
-            }
+            AggKind::StringAgg => Ok(Self::Table(Box::new(ManagedStringAggState::new(
+                agg_call,
+                pk,
+                pk_indices,
+                state_table_col_indices,
+            )?))),
             // TODO: for append-only lists, we can create `ManagedValueState` instead of
             // `ManagedExtremeState`.
             AggKind::Avg | AggKind::Count | AggKind::Sum | AggKind::ApproxCountDistinct => {

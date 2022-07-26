@@ -39,6 +39,7 @@ use risingwave_storage::StateStore;
 pub use row_count::*;
 use static_assertions::const_assert_eq;
 
+use super::PkIndices;
 use crate::executor::aggregation::approx_count_distinct::StreamingApproxCountDistinct;
 use crate::executor::aggregation::single_value::StreamingSingleValueAgg;
 use crate::executor::error::{StreamExecutorError, StreamExecutorResult};
@@ -348,13 +349,16 @@ pub fn generate_agg_schema(
 
 /// Generate initial [`AggState`] from `agg_calls`. For [`crate::executor::HashAggExecutor`], the
 /// group key should be provided.
+#[allow(clippy::too_many_arguments)]
 pub async fn generate_managed_agg_state<S: StateStore>(
     key: Option<&Row>,
     agg_calls: &[AggCall],
+    pk_indices: PkIndices,
     pk_data_types: PkDataTypes,
     epoch: u64,
     key_hash_code: Option<HashCode>,
     state_tables: &[RowBasedStateTable<S>],
+    state_table_col_mappings: &[Vec<usize>],
 ) -> StreamExecutorResult<AggState<S>> {
     let mut managed_states = vec![];
 
@@ -366,11 +370,13 @@ pub async fn generate_managed_agg_state<S: StateStore>(
         let mut managed_state = ManagedStateImpl::create_managed_state(
             agg_call.clone(),
             row_count,
+            pk_indices.clone(),
             pk_data_types.clone(),
             idx == ROW_COUNT_COLUMN,
             key_hash_code.clone(),
             key,
             &state_tables[idx],
+            state_table_col_mappings[idx].clone(),
         )
         .await?;
 

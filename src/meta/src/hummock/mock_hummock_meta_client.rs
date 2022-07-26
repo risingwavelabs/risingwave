@@ -22,7 +22,7 @@ use risingwave_hummock_sdk::{
 };
 use risingwave_pb::hummock::{
     CompactTask, CompactionGroup, HummockSnapshot, HummockVersion, HummockVersionDelta,
-    SstableIdInfo, SubscribeCompactTasksResponse, VacuumTask,
+    SubscribeCompactTasksResponse, VacuumTask,
 };
 use risingwave_rpc_client::error::{Result, RpcError};
 use risingwave_rpc_client::HummockMetaClient;
@@ -163,10 +163,6 @@ impl HummockMetaClient for MockHummockMetaClient {
         _table_id: u32,
         _level: u32,
     ) -> Result<()> {
-        todo!()
-    }
-
-    async fn list_sstable_id_infos(&self, _version_id: u64) -> Result<Vec<SstableIdInfo>> {
         todo!()
     }
 }

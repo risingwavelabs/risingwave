@@ -12,7 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::collections::{HashMap, HashSet};
+use std::collections::HashSet;
 use std::sync::Arc;
 
 use itertools::Itertools;
@@ -21,7 +21,7 @@ use risingwave_common::error::{tonic_err, ErrorCode, Result as RwResult};
 use risingwave_common::util::compress::compress_data;
 use risingwave_pb::catalog::table::OptionalAssociatedSourceId;
 use risingwave_pb::catalog::*;
-use risingwave_pb::common::{ParallelUnitMapping, ParallelUnitType};
+use risingwave_pb::common::ParallelUnitMapping;
 use risingwave_pb::ddl_service::ddl_service_server::DdlService;
 use risingwave_pb::ddl_service::*;
 use risingwave_pb::stream_plan::stream_node::NodeBody;
@@ -30,8 +30,8 @@ use tokio::sync::RwLock;
 use tonic::{Request, Response, Status};
 
 use crate::cluster::ClusterManagerRef;
-use crate::manager::{CatalogManagerRef, IdCategory, MetaSrvEnv, SourceId, TableId};
-use crate::model::{FragmentId, TableFragments};
+use crate::manager::{CatalogManagerRef, IdCategory, MetaSrvEnv, Relation, SourceId, TableId};
+use crate::model::TableFragments;
 use crate::storage::MetaStore;
 use crate::stream::{
     ActorGraphBuilder, CreateMaterializedViewContext, FragmentManagerRef, GlobalStreamManagerRef,
@@ -54,6 +54,7 @@ impl<S> DdlServiceImpl<S>
 where
     S: MetaStore,
 {
+    #[allow(clippy::too_many_arguments)]
     pub fn new(
         env: MetaSrvEnv<S>,
         catalog_manager: CatalogManagerRef<S>,
@@ -233,6 +234,48 @@ where
         }))
     }
 
+    async fn create_sink(
+        &self,
+        request: Request<CreateSinkRequest>,
+    ) -> Result<Response<CreateSinkResponse>, Status> {
+        self.ddl_lock.read().await;
+        self.env.idle_manager().record_activity();
+
+        let req = request.into_inner();
+        let sink = req.get_sink().map_err(tonic_err)?.clone();
+        let fragment_graph = req.get_fragment_graph().map_err(tonic_err)?.clone();
+
+        let (sink_id, version) = self
+            .create_relation(&mut Relation::Sink(sink), fragment_graph)
+            .await
+            .map_err(tonic_err)?;
+
+        Ok(Response::new(CreateSinkResponse {
+            status: None,
+            sink_id,
+            version,
+        }))
+    }
+
+    async fn drop_sink(
+        &self,
+        request: Request<DropSinkRequest>,
+    ) -> Result<Response<DropSinkResponse>, Status> {
+        let sink_id = request.into_inner().sink_id;
+
+        // 1. Drop sink in catalog.
+        let version = self
+            .catalog_manager
+            .drop_sink(sink_id)
+            .await
+            .map_err(tonic_err)?;
+
+        Ok(Response::new(DropSinkResponse {
+            status: None,
+            version,
+        }))
+    }
+
     async fn create_materialized_view(
         &self,
         request: Request<CreateMaterializedViewRequest>,
@@ -241,113 +284,17 @@ where
         self.env.idle_manager().record_activity();
 
         let req = request.into_inner();
-        let mut mview = req.get_materialized_view().map_err(tonic_err)?.clone();
+        let mview = req.get_materialized_view().map_err(tonic_err)?.clone();
         let fragment_graph = req.get_fragment_graph().map_err(tonic_err)?.clone();
-        // 0. Generate an id from mview.
-        let id = self
-            .env
-            .id_gen_manager()
-            .generate::<{ IdCategory::Table }>()
-            .await
-            .map_err(tonic_err)? as u32;
-        mview.id = id;
 
-        // 1. Resolve the dependent relations.
-        {
-            // TODO: distinguish SourceId and TableId
-            fn resolve_dependent_relations(
-                stream_node: &StreamNode,
-                dependent_relations: &mut HashSet<TableId>,
-            ) -> RwResult<()> {
-                match stream_node.node_body.as_ref().unwrap() {
-                    NodeBody::Source(source_node) => {
-                        dependent_relations.insert(source_node.get_table_id());
-                    }
-                    NodeBody::Chain(chain_node) => {
-                        dependent_relations.insert(chain_node.get_table_id());
-                    }
-                    _ => {}
-                }
-                for child in &stream_node.input {
-                    resolve_dependent_relations(child, dependent_relations)?;
-                }
-                Ok(())
-            }
-
-            let mut dependent_relations = Default::default();
-            for fragment in fragment_graph.fragments.values() {
-                resolve_dependent_relations(
-                    fragment.node.as_ref().unwrap(),
-                    &mut dependent_relations,
-                )
-                .map_err(tonic_err)?;
-            }
-            assert!(
-                !dependent_relations.is_empty(),
-                "there should be at lease 1 dependent relation when creating materialized view"
-            );
-            mview.dependent_relations = dependent_relations.into_iter().collect();
-        }
-
-        // 2. Mark current mview as "creating" and add reference count to dependent relations.
-        self.catalog_manager
-            .start_create_table_procedure(&mview)
-            .await
-            .map_err(tonic_err)?;
-
-        // 3. Create mview in stream manager. The id in stream node will be filled.
-        let mut ctx = CreateMaterializedViewContext {
-            schema_id: mview.schema_id,
-            database_id: mview.database_id,
-            mview_name: mview.name.clone(),
-            table_properties: mview.properties.clone(),
-            affiliated_source: None,
-            ..Default::default()
-        };
-        let internal_tables = match self
-            .create_mview_on_compute_node(fragment_graph, id, &mut ctx)
-            .await
-        {
-            Err(e) => {
-                self.catalog_manager
-                    .cancel_create_table_procedure(&mview)
-                    .await
-                    .map_err(tonic_err)?;
-                return Err(e.into());
-            }
-            Ok(()) => {
-                self.set_table_mapping(&mut mview).map_err(tonic_err)?;
-                let mut internal_table = ctx
-                    .internal_table_id_map
-                    .iter()
-                    .filter(|(_, table)| table.is_some())
-                    .map(|(_, table)| table.clone().unwrap())
-                    .collect_vec();
-
-                for inner_table in &mut internal_table {
-                    self.set_table_mapping(inner_table).map_err(tonic_err)?;
-                }
-                internal_table
-            }
-        };
-
-        // tracing for checking the diff of catalog::Table and internal_table_id count
-        tracing::info!(
-            "create_materialized_view internal_table_count {} internal_table_id_count {}",
-            internal_tables.len(),
-            ctx.internal_table_id_map.len()
-        );
-
-        // 4. Finally, update the catalog.
-        let version = self
-            .catalog_manager
-            .finish_create_table_procedure(internal_tables, &mview)
+        let (table_id, version) = self
+            .create_relation(&mut Relation::Table(mview), fragment_graph)
             .await
             .map_err(tonic_err)?;
 
         Ok(Response::new(CreateMaterializedViewResponse {
             status: None,
-            table_id: id,
+            table_id,
             version,
         }))
     }
@@ -440,66 +387,161 @@ impl<S> DdlServiceImpl<S>
 where
     S: MetaStore,
 {
-    async fn create_mview_on_compute_node(
+    fn get_internal_table(&self, ctx: &CreateMaterializedViewContext) -> RwResult<Vec<Table>> {
+        let mut internal_table = ctx
+            .internal_table_id_map
+            .iter()
+            .filter(|(_, table)| table.is_some())
+            .map(|(_, table)| table.clone().unwrap())
+            .collect_vec();
+
+        for inner_table in &mut internal_table {
+            self.set_table_mapping(inner_table).map_err(tonic_err)?;
+        }
+        Ok(internal_table)
+    }
+
+    // Creates relation. `Relation` can be either a `Table` or a `Sink`.
+    async fn create_relation(
         &self,
+        relation: &mut Relation,
+        fragment_graph: StreamFragmentGraph,
+    ) -> RwResult<(u32, u64)> {
+        // 0. Generate an id from relation.
+        let id = self
+            .env
+            .id_gen_manager()
+            .generate::<{ IdCategory::Table }>()
+            .await
+            .map_err(tonic_err)? as u32;
+        relation.set_id(id);
+
+        // 1. Resolve the dependent relations.
+        let dependent_relations = get_dependent_relations(&fragment_graph)?;
+        assert!(
+            !dependent_relations.is_empty(),
+            "there should be at lease 1 dependent relation when creating sink"
+        );
+        relation.set_dependent_relations(dependent_relations);
+
+        // 2. Mark current relation as "creating" and add reference count to dependent relations.
+        self.catalog_manager
+            .start_create_procedure(relation)
+            .await
+            .map_err(tonic_err)?;
+
+        // 3. Create relation in stream manager. The id in stream node will be filled.
+        let mut ctx = CreateMaterializedViewContext {
+            schema_id: relation.schema_id(),
+            database_id: relation.database_id(),
+            mview_name: relation.name(),
+            table_properties: relation.properties(),
+            affiliated_source: None,
+            ..Default::default()
+        };
+        let internal_tables = match self
+            .create_relation_on_compute_node(relation, fragment_graph, id, &mut ctx)
+            .await
+        {
+            Err(e) => {
+                self.catalog_manager
+                    .cancel_create_procedure(relation)
+                    .await
+                    .map_err(tonic_err)?;
+                return Err(e);
+            }
+            Ok(()) => {
+                if let Relation::Table(table) = relation {
+                    self.set_table_mapping(table).map_err(tonic_err)?;
+                }
+                self.get_internal_table(&ctx)?
+            }
+        };
+
+        // tracing for checking the diff of catalog::Table and internal_table_id count
+        tracing::info!(
+            "create_{} internal_table_count {} internal_table_id_count {}",
+            match relation {
+                Relation::Table(_) => "materialized_view",
+                Relation::Sink(_) => "sink",
+            },
+            internal_tables.len(),
+            ctx.internal_table_id_map.len()
+        );
+
+        // 4. Finally, update the catalog.
+        let version = self
+            .catalog_manager
+            .finish_create_procedure(
+                match relation {
+                    Relation::Table(_) => Some(internal_tables),
+                    _ => None,
+                },
+                relation,
+            )
+            .await
+            .map_err(tonic_err)?;
+
+        Ok((id, version))
+    }
+
+    async fn create_relation_on_compute_node(
+        &self,
+        relation: &Relation,
         mut fragment_graph: StreamFragmentGraph,
         id: TableId,
         ctx: &mut CreateMaterializedViewContext,
     ) -> RwResult<()> {
         use risingwave_common::catalog::TableId;
 
-        // Fill in the correct mview id for stream node.
-        fn fill_mview_id(stream_node: &mut StreamNode, mview_id: TableId) -> usize {
-            let mut mview_count = 0;
-            if let NodeBody::Materialize(materialize_node) = stream_node.node_body.as_mut().unwrap()
-            {
-                materialize_node.table_id = mview_id.table_id();
-                mview_count += 1;
-            }
-            for input in &mut stream_node.input {
-                mview_count += fill_mview_id(input, mview_id);
-            }
-            mview_count
-        }
+        // Get relation_id and make fragment_graph immutable.
+        let (relation_id, fragment_graph) = match relation {
+            Relation::Table(_) => {
+                // Fill in the correct mview id for stream node.
+                fn fill_mview_id(stream_node: &mut StreamNode, mview_id: TableId) -> usize {
+                    let mut mview_count = 0;
+                    if let NodeBody::Materialize(materialize_node) =
+                        stream_node.node_body.as_mut().unwrap()
+                    {
+                        materialize_node.table_id = mview_id.table_id();
+                        mview_count += 1;
+                    }
+                    for input in &mut stream_node.input {
+                        mview_count += fill_mview_id(input, mview_id);
+                    }
+                    mview_count
+                }
 
-        let mview_id = TableId::new(id);
-        let mut mview_count = 0;
-        for fragment in fragment_graph.fragments.values_mut() {
-            mview_count += fill_mview_id(fragment.node.as_mut().unwrap(), mview_id);
-        }
+                let mview_id = TableId::new(id);
+                let mut mview_count = 0;
+                for fragment in fragment_graph.fragments.values_mut() {
+                    mview_count += fill_mview_id(fragment.node.as_mut().unwrap(), mview_id);
+                }
 
-        assert_eq!(
-            mview_count, 1,
-            "require exactly 1 materialize node when creating materialized view"
-        );
+                assert_eq!(
+                    mview_count, 1,
+                    "require exactly 1 materialize node when creating materialized view"
+                );
+                (mview_id, fragment_graph)
+            }
+            Relation::Sink(_) => (TableId::new(id), fragment_graph),
+        };
 
         // Resolve fragments.
-        let parallel_degree = self
-            .cluster_manager
-            .get_parallel_unit_count(Some(ParallelUnitType::Hash))
-            .await;
+        let parallel_degree = self.cluster_manager.get_parallel_unit_count().await;
 
-        let mut actor_graph_builder =
-            ActorGraphBuilder::new(self.env.id_gen_manager_ref(), &fragment_graph, ctx).await?;
-
-        // TODO(Kexiang): now simply use Count(ParallelUnit) - 1 as parallelism of each fragment
-        let parallelisms: HashMap<FragmentId, u32> = actor_graph_builder
-            .list_fragment_ids()
-            .into_iter()
-            .map(|(fragment_id, is_singleton)| {
-                if is_singleton {
-                    (fragment_id, 1)
-                } else {
-                    (fragment_id, parallel_degree as u32)
-                }
-            })
-            .collect();
+        let mut actor_graph_builder = ActorGraphBuilder::new(
+            self.env.id_gen_manager_ref(),
+            &fragment_graph,
+            parallel_degree as u32,
+            ctx,
+        )
+        .await?;
 
         let graph = actor_graph_builder
             .generate_graph(
                 self.env.id_gen_manager_ref(),
                 self.fragment_manager.clone(),
-                parallelisms,
                 ctx,
             )
             .await?;
@@ -515,7 +557,7 @@ where
             internal_table_id_set.len() as u32
         );
 
-        let table_fragments = TableFragments::new(mview_id, graph, internal_table_id_set);
+        let table_fragments = TableFragments::new(relation_id, graph, internal_table_id_set);
 
         // Create on compute node.
         self.stream_manager
@@ -597,30 +639,24 @@ where
         };
 
         let internal_tables = match self
-            .create_mview_on_compute_node(fragment_graph, mview_id, &mut ctx)
+            .create_relation_on_compute_node(
+                &Relation::Table(mview.clone()),
+                fragment_graph,
+                mview_id,
+                &mut ctx,
+            )
             .await
         {
             Err(e) => {
                 self.catalog_manager
                     .cancel_create_materialized_source_procedure(&source, &mview)
                     .await?;
-                // drop previously created source
                 self.source_manager.drop_source(source_id).await?;
                 return Err(e);
             }
             Ok(()) => {
                 self.set_table_mapping(&mut mview).map_err(tonic_err)?;
-                let mut internal_table = ctx
-                    .internal_table_id_map
-                    .iter()
-                    .filter(|(_, table)| table.is_some())
-                    .map(|(_, table)| table.clone().unwrap())
-                    .collect_vec();
-
-                for inner_table in &mut internal_table {
-                    self.set_table_mapping(inner_table).map_err(tonic_err)?;
-                }
-                internal_table
+                self.get_internal_table(&ctx)?
             }
         };
 
@@ -681,4 +717,33 @@ where
             .into()),
         }
     }
+}
+
+fn get_dependent_relations(fragment_graph: &StreamFragmentGraph) -> RwResult<Vec<TableId>> {
+    // TODO: distinguish SourceId and TableId
+    fn resolve_dependent_relations(
+        stream_node: &StreamNode,
+        dependent_relations: &mut HashSet<TableId>,
+    ) -> RwResult<()> {
+        match stream_node.node_body.as_ref().unwrap() {
+            NodeBody::Source(source_node) => {
+                dependent_relations.insert(source_node.get_table_id());
+            }
+            NodeBody::Chain(chain_node) => {
+                dependent_relations.insert(chain_node.get_table_id());
+            }
+            _ => {}
+        }
+        for child in &stream_node.input {
+            resolve_dependent_relations(child, dependent_relations)?;
+        }
+        Ok(())
+    }
+
+    let mut dependent_relations = Default::default();
+    for fragment in fragment_graph.fragments.values() {
+        resolve_dependent_relations(fragment.node.as_ref().unwrap(), &mut dependent_relations)
+            .map_err(tonic_err)?;
+    }
+    Ok(dependent_relations.into_iter().collect())
 }

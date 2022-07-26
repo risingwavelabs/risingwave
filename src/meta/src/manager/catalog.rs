@@ -26,13 +26,13 @@ use risingwave_common::error::ErrorCode::{InternalError, PermissionDenied};
 use risingwave_common::error::{Result, RwError};
 use risingwave_common::types::ParallelUnitId;
 use risingwave_pb::catalog::table::OptionalAssociatedSourceId;
-use risingwave_pb::catalog::{Database, Schema, Source, Table};
+use risingwave_pb::catalog::{Database, Schema, Sink, Source, Table};
 use risingwave_pb::common::ParallelUnit;
 use risingwave_pb::meta::subscribe_response::{Info, Operation};
 use tokio::sync::{Mutex, MutexGuard};
 
 use super::IdCategory;
-use crate::manager::{MetaSrvEnv, NotificationVersion};
+use crate::manager::{MetaSrvEnv, NotificationVersion, Relation};
 use crate::model::{MetadataModel, TableFragments, Transactional};
 use crate::storage::{MetaStore, Transaction};
 
@@ -40,9 +40,16 @@ pub type DatabaseId = u32;
 pub type SchemaId = u32;
 pub type TableId = u32;
 pub type SourceId = u32;
+pub type SinkId = u32;
 pub type RelationId = u32;
 
-pub type Catalog = (Vec<Database>, Vec<Schema>, Vec<Table>, Vec<Source>);
+pub type Catalog = (
+    Vec<Database>,
+    Vec<Schema>,
+    Vec<Table>,
+    Vec<Source>,
+    Vec<Sink>,
+);
 
 pub struct CatalogManager<S: MetaStore> {
     env: MetaSrvEnv<S>,
@@ -232,6 +239,34 @@ where
             Err(RwError::from(InternalError(
                 "schema doesn't exist".to_string(),
             )))
+        }
+    }
+
+    pub async fn start_create_procedure(&self, relation: &Relation) -> Result<()> {
+        match relation {
+            Relation::Table(table) => self.start_create_table_procedure(table).await,
+            Relation::Sink(sink) => self.start_create_sink_procedure(sink).await,
+        }
+    }
+
+    pub async fn cancel_create_procedure(&self, relation: &Relation) -> Result<()> {
+        match relation {
+            Relation::Table(table) => self.cancel_create_table_procedure(table).await,
+            Relation::Sink(sink) => self.cancel_create_sink_procedure(sink).await,
+        }
+    }
+
+    pub async fn finish_create_procedure(
+        &self,
+        internal_tables: Option<Vec<Table>>,
+        relation: &Relation,
+    ) -> Result<NotificationVersion> {
+        match relation {
+            Relation::Table(table) => {
+                self.finish_create_table_procedure(internal_tables.unwrap(), table)
+                    .await
+            }
+            Relation::Sink(sink) => self.finish_create_sink_procedure(sink).await,
         }
     }
 
@@ -612,6 +647,101 @@ where
         }
     }
 
+    pub async fn start_create_sink_procedure(&self, sink: &Sink) -> Result<()> {
+        let mut core = self.core.lock().await;
+        let key = (sink.database_id, sink.schema_id, sink.name.clone());
+        if !core.has_sink(sink) && !core.has_in_progress_creation(&key) {
+            core.mark_creating(&key);
+            for &dependent_relation_id in &sink.dependent_relations {
+                core.increase_ref_count(dependent_relation_id);
+            }
+            Ok(())
+        } else {
+            Err(RwError::from(InternalError(
+                "sink already exists or in creating procedure".to_string(),
+            )))
+        }
+    }
+
+    pub async fn finish_create_sink_procedure(&self, sink: &Sink) -> Result<NotificationVersion> {
+        let mut core = self.core.lock().await;
+        let key = (sink.database_id, sink.schema_id, sink.name.clone());
+        if !core.has_sink(sink) && core.has_in_progress_creation(&key) {
+            core.unmark_creating(&key);
+            sink.insert(self.env.meta_store()).await?;
+            core.add_sink(sink);
+
+            let version = self
+                .env
+                .notification_manager()
+                .notify_frontend(Operation::Add, Info::Sink(sink.to_owned()))
+                .await;
+
+            Ok(version)
+        } else {
+            Err(RwError::from(InternalError(
+                "sink already exist or not in creating procedure".to_string(),
+            )))
+        }
+    }
+
+    pub async fn cancel_create_sink_procedure(&self, sink: &Sink) -> Result<()> {
+        let mut core = self.core.lock().await;
+        let key = (sink.database_id, sink.schema_id, sink.name.clone());
+        if !core.has_sink(sink) && core.has_in_progress_creation(&key) {
+            core.unmark_creating(&key);
+            Ok(())
+        } else {
+            Err(RwError::from(InternalError(
+                "sink already exist or not in creating procedure".to_string(),
+            )))
+        }
+    }
+
+    pub async fn create_sink(&self, sink: &Sink) -> Result<NotificationVersion> {
+        let mut core = self.core.lock().await;
+        if !core.has_sink(sink) {
+            sink.insert(self.env.meta_store()).await?;
+            core.add_sink(sink);
+
+            let version = self
+                .env
+                .notification_manager()
+                .notify_frontend(Operation::Add, Info::Sink(sink.to_owned()))
+                .await;
+
+            Ok(version)
+        } else {
+            Err(RwError::from(InternalError(
+                "sink already exists".to_string(),
+            )))
+        }
+    }
+
+    pub async fn drop_sink(&self, sink_id: SinkId) -> Result<NotificationVersion> {
+        let mut core = self.core.lock().await;
+        let sink = Sink::select(self.env.meta_store(), &sink_id).await?;
+        if let Some(sink) = sink {
+            Sink::delete(self.env.meta_store(), &sink_id).await?;
+            core.drop_sink(&sink);
+            for &dependent_relation_id in &sink.dependent_relations {
+                core.decrease_ref_count(dependent_relation_id);
+            }
+
+            let version = self
+                .env
+                .notification_manager()
+                .notify_frontend(Operation::Delete, Info::Sink(sink))
+                .await;
+
+            Ok(version)
+        } else {
+            Err(RwError::from(InternalError(
+                "sink doesn't exist".to_string(),
+            )))
+        }
+    }
+
     pub async fn list_tables(&self, schema_id: SchemaId) -> Result<Vec<TableId>> {
         let core = self.core.lock().await;
         let tables = Table::list(core.env.meta_store()).await?;
@@ -644,6 +774,7 @@ type DatabaseKey = String;
 type SchemaKey = (DatabaseId, String);
 type TableKey = (DatabaseId, SchemaId, String);
 type SourceKey = (DatabaseId, SchemaId, String);
+type SinkKey = (DatabaseId, SchemaId, String);
 type RelationKey = (DatabaseId, SchemaId, String);
 
 /// [`CatalogManagerCore`] caches meta catalog information and maintains dependent relationship
@@ -656,6 +787,8 @@ pub struct CatalogManagerCore<S: MetaStore> {
     schemas: HashSet<SchemaKey>,
     /// Cached source key information.
     sources: HashSet<SourceKey>,
+    /// Cached sink key information.
+    sinks: HashSet<SinkKey>,
     /// Cached table key information.
     tables: HashSet<TableKey>,
     /// Relation refer count mapping.
@@ -673,6 +806,7 @@ where
         let databases = Database::list(env.meta_store()).await?;
         let schemas = Schema::list(env.meta_store()).await?;
         let sources = Source::list(env.meta_store()).await?;
+        let sinks = Sink::list(env.meta_store()).await?;
         let tables = Table::list(env.meta_store()).await?;
 
         let mut relation_ref_count = HashMap::new();
@@ -688,6 +822,11 @@ where
                 .into_iter()
                 .map(|source| (source.database_id, source.schema_id, source.name)),
         );
+        let sinks = HashSet::from_iter(
+            sinks
+                .into_iter()
+                .map(|sink| (sink.database_id, sink.schema_id, sink.name)),
+        );
         let tables = HashSet::from_iter(tables.into_iter().map(|table| {
             for depend_relation_id in &table.dependent_relations {
                 relation_ref_count.entry(*depend_relation_id).or_insert(0);
@@ -702,6 +841,7 @@ where
             databases,
             schemas,
             sources,
+            sinks,
             tables,
             relation_ref_count,
             in_progress_creation_tracker,
@@ -714,6 +854,7 @@ where
             Schema::list(self.env.meta_store()).await?,
             Table::list(self.env.meta_store()).await?,
             Source::list(self.env.meta_store()).await?,
+            Sink::list(self.env.meta_store()).await?,
         ))
     }
 
@@ -780,6 +921,25 @@ where
 
     pub async fn get_source(&self, id: SourceId) -> Result<Option<Source>> {
         Source::select(self.env.meta_store(), &id).await
+    }
+
+    fn has_sink(&self, sink: &Sink) -> bool {
+        self.sinks
+            .contains(&(sink.database_id, sink.schema_id, sink.name.clone()))
+    }
+
+    fn add_sink(&mut self, sink: &Sink) {
+        self.sinks
+            .insert((sink.database_id, sink.schema_id, sink.name.clone()));
+    }
+
+    fn drop_sink(&mut self, sink: &Sink) -> bool {
+        self.sinks
+            .remove(&(sink.database_id, sink.schema_id, sink.name.clone()))
+    }
+
+    pub async fn get_sink(&self, id: SinkId) -> Result<Option<Sink>> {
+        Sink::select(self.env.meta_store(), &id).await
     }
 
     fn get_ref_count(&self, relation_id: RelationId) -> Option<usize> {
