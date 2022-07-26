@@ -19,6 +19,7 @@ pub mod property;
 
 mod delta_join_solver;
 mod heuristic;
+mod plan_correlated_id_finder;
 mod plan_rewriter;
 mod plan_visitor;
 mod rule;
