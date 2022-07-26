@@ -88,7 +88,7 @@ pub struct InnerTopNExecutorNew<S: StateStore> {
     /// We are interested in which element is in the range of [offset, offset+limit).
     managed_state: ManagedTopNStateNew<S>,
 
-    /// In-memory cache of top (N + `TOPN_CACHE_DEFAULT_HIGH_CAPACITY`) rows
+    /// In-memory cache of top (N + N * `TOPN_CACHE_HIGH_CAPACITY_FACTOR`) rows
     cache: TopNCache,
 
     #[expect(dead_code)]
