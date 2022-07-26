@@ -12,7 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use risingwave_common::types::{DataType, Datum, ScalarImpl};
+use risingwave_common::types::{literal_type_match, DataType, Datum, ScalarImpl};
 use risingwave_pb::expr::expr_node::RexNode;
 
 use super::Expr;
@@ -45,6 +45,7 @@ impl std::fmt::Debug for Literal {
 
 impl Literal {
     pub fn new(data: Datum, data_type: DataType) -> Self {
+        assert!(literal_type_match(&data_type, data.as_ref()));
         Literal { data, data_type }
     }
 
