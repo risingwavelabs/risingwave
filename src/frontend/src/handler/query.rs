@@ -19,7 +19,7 @@ use risingwave_batch::executor::BoxedDataChunkStream;
 use risingwave_common::error::Result;
 use risingwave_common::session_config::QueryMode;
 use risingwave_sqlparser::ast::Statement;
-use tracing::{debug, info};
+use tracing::debug;
 
 use crate::binder::{Binder, BoundSetExpr, BoundStatement};
 use crate::handler::util::{to_pg_field, to_pg_rows};
@@ -141,11 +141,6 @@ fn local_execute(
             .collect::<Vec<PgFieldDescriptor>>();
 
         let plan = root.gen_batch_local_plan()?;
-
-        info!(
-            "Generated local execution plan: {:?}",
-            plan.explain_to_string()?
-        );
 
         let plan_fragmenter = BatchPlanFragmenter::new(session.env().worker_node_manager_ref());
         let query = plan_fragmenter.split(plan)?;
