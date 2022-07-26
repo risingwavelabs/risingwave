@@ -438,7 +438,6 @@ pub async fn rpc_serve_with_store<S: MetaStore>(
         ddl_lock,
     );
 
-
     let cluster_srv = ClusterServiceImpl::<S>::new(cluster_manager.clone());
     let stream_srv = StreamServiceImpl::<S>::new(
         env.clone(),
