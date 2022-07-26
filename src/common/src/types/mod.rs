@@ -929,9 +929,11 @@ pub fn literal_type_match(data_type: &DataType, literal: Option<&ScalarImpl>) ->
                     | (DataType::Date, ScalarImpl::NaiveDate(_))
                     | (DataType::Time, ScalarImpl::NaiveTime(_))
                     | (DataType::Timestamp, ScalarImpl::NaiveDateTime(_))
+                    | (DataType::Timestampz, ScalarImpl::Int64(_))
                     | (DataType::Decimal, ScalarImpl::Decimal(_))
                     | (DataType::Interval, ScalarImpl::Interval(_))
                     | (DataType::Struct { .. }, ScalarImpl::Struct(_))
+                    | (DataType::List { .. }, ScalarImpl::List(_))
             )
         }
         None => true,
