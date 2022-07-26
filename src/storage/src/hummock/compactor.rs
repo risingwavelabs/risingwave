@@ -510,6 +510,7 @@ impl Compactor {
         let mut need_quota = estimate_memory_use_for_compaction(&compact_task);
         if !context.memory_limiter.try_require_memory(need_quota) && compact_task.splits.len() > 1 {
             compact_task.splits = vec![KeyRange::inf().into()];
+            need_quota = estimate_memory_use_for_compaction(&compact_task);
         }
         let tracker = match context.memory_limiter.require_memory(need_quota).await {
             None => return false,
