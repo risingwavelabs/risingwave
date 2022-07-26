@@ -18,7 +18,7 @@ mod top_n_state_new;
 
 pub use top_n_bottom_n_state::ManagedTopNBottomNState;
 pub use top_n_state::ManagedTopNState;
-pub use top_n_state_new::{ManagedTopNStateNew, TopNStateRow};
+pub use top_n_state_new::ManagedTopNStateNew;
 
 pub mod variants {
     pub const TOP_N_MIN: usize = 0;

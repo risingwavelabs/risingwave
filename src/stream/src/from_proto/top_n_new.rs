@@ -38,7 +38,6 @@ impl ExecutorBuilder for TopNExecutorNewBuilder {
         } else {
             Some(node.limit as usize)
         };
-        let cache_size = Some(1024);
         let total_count = 0;
         let table_id_l = TableId::new(node.get_table_id_l());
         let key_indices = node
@@ -54,7 +53,6 @@ impl ExecutorBuilder for TopNExecutorNewBuilder {
             params.pk_indices,
             store,
             table_id_l,
-            cache_size,
             total_count,
             params.executor_id,
             key_indices,
