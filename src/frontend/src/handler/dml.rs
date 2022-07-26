@@ -53,7 +53,7 @@ pub async fn handle_dml(context: OptimizerContext, stmt: Statement) -> Result<Pg
         .schedule_single(execution_context, plan)
         .await?
     {
-        rows.extend(to_pg_rows(chunk?));
+        rows.extend(to_pg_rows(chunk?, false));
     }
 
     let rows_count = match stmt_type {
@@ -63,7 +63,10 @@ pub async fn handle_dml(context: OptimizerContext, stmt: Statement) -> Result<Pg
             let affected_rows_str = first_row[0]
                 .as_ref()
                 .expect("compute node should return affected rows in output");
-            affected_rows_str.parse().unwrap_or_default()
+            String::from_utf8(affected_rows_str.to_vec())
+                .unwrap()
+                .parse()
+                .unwrap_or_default()
         }
 
         _ => unreachable!(),

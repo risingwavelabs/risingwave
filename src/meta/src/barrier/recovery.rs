@@ -21,7 +21,7 @@ use futures::future::try_join_all;
 use itertools::Itertools;
 use log::{debug, error};
 use risingwave_common::error::{ErrorCode, Result, RwError};
-use risingwave_common::types::{ParallelUnitId, VIRTUAL_NODE_COUNT};
+use risingwave_common::types::VIRTUAL_NODE_COUNT;
 use risingwave_common::util::compress::decompress_data;
 use risingwave_common::util::epoch::Epoch;
 use risingwave_pb::common::worker_node::State;
@@ -151,16 +151,13 @@ where
 
     /// map expired CNs to newly joined CNs, so we can migrate actors later
     /// wait until get a sufficient amount of new CNs
-    /// return "map of `parallelUnitId` in expired CN to new CN id" and "map of `WorkerId` to
+    /// return "map of `ActorId` in expired CN to new CN id" and "map of `WorkerId` to
     /// `WorkerNode` struct in new CNs"
     async fn get_migrate_map_plan(
         &self,
         info: &BarrierActorInfo,
         expired_workers: &Vec<WorkerId>,
-    ) -> (
-        HashMap<ParallelUnitId, WorkerId>,
-        HashMap<WorkerId, WorkerNode>,
-    ) {
+    ) -> (HashMap<ActorId, WorkerId>, HashMap<WorkerId, WorkerNode>) {
         let workers_size = expired_workers.len();
         let mut cur = 0;
         let mut migrate_map = HashMap::new();

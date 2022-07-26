@@ -1,23 +1,23 @@
 CREATE TABLE supplier (
     s_suppkey INTEGER,
-    s_name VARCHAR(25),
-    s_address VARCHAR(40),
+    s_name VARCHAR,
+    s_address VARCHAR,
     s_nationkey INTEGER,
-    s_phone VARCHAR(15),
+    s_phone VARCHAR,
     s_acctbal NUMERIC,
-    s_comment VARCHAR(101)
+    s_comment VARCHAR
 );
 
 CREATE TABLE part (
     p_partkey INTEGER,
-    p_name VARCHAR(55),
-    p_mfgr VARCHAR(25),
-    p_brand VARCHAR(10),
-    p_type VARCHAR(100),
+    p_name VARCHAR,
+    p_mfgr VARCHAR,
+    p_brand VARCHAR,
+    p_type VARCHAR,
     p_size INTEGER,
-    p_container VARCHAR(10),
+    p_container VARCHAR,
     p_retailprice NUMERIC,
-    p_comment VARCHAR(23)
+    p_comment VARCHAR
 );
 
 CREATE TABLE partsupp (
@@ -25,30 +25,30 @@ CREATE TABLE partsupp (
     ps_suppkey INTEGER,
     ps_availqty INTEGER,
     ps_supplycost NUMERIC,
-    ps_comment VARCHAR(199)
+    ps_comment VARCHAR
 );
 
 CREATE TABLE customer (
     c_custkey INTEGER,
-    c_name VARCHAR(25),
-    c_address VARCHAR(40),
+    c_name VARCHAR,
+    c_address VARCHAR,
     c_nationkey INTEGER,
-    c_phone VARCHAR(15),
+    c_phone VARCHAR,
     c_acctbal NUMERIC,
-    c_mktsegment VARCHAR(10),
-    c_comment VARCHAR(117)
+    c_mktsegment VARCHAR,
+    c_comment VARCHAR
 );
 
 CREATE TABLE orders (
     o_orderkey BIGINT,
     o_custkey INTEGER,
-    o_orderstatus VARCHAR(1),
+    o_orderstatus VARCHAR,
     o_totalprice NUMERIC,
     o_orderdate DATE,
-    o_orderpriority VARCHAR(15),
-    o_clerk VARCHAR(15),
+    o_orderpriority VARCHAR,
+    o_clerk VARCHAR,
     o_shippriority INTEGER,
-    o_comment VARCHAR(79)
+    o_comment VARCHAR
 );
 
 CREATE TABLE lineitem (
@@ -60,25 +60,25 @@ CREATE TABLE lineitem (
     l_extendedprice NUMERIC,
     l_discount NUMERIC,
     l_tax NUMERIC,
-    l_returnflag VARCHAR(1),
-    l_linestatus VARCHAR(1),
+    l_returnflag VARCHAR,
+    l_linestatus VARCHAR,
     l_shipdate DATE,
     l_commitdate DATE,
     l_receiptdate DATE,
-    l_shipinstruct VARCHAR(25),
-    l_shipmode VARCHAR(10),
-    l_comment VARCHAR(44)
+    l_shipinstruct VARCHAR,
+    l_shipmode VARCHAR,
+    l_comment VARCHAR
 );
 
 CREATE TABLE nation (
     n_nationkey INTEGER,
-    n_name VARCHAR(25),
+    n_name VARCHAR,
     n_regionkey INTEGER,
-    n_comment VARCHAR(152)
+    n_comment VARCHAR
 );
 
 CREATE TABLE region (
     r_regionkey INTEGER,
-    r_name VARCHAR(25),
-    r_comment VARCHAR(152)
+    r_name VARCHAR,
+    r_comment VARCHAR
 );
