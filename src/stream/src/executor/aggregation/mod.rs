@@ -17,14 +17,16 @@ use std::sync::Arc;
 
 pub use agg_call::*;
 pub use agg_state::*;
+use anyhow::anyhow;
 use dyn_clone::{self, DynClone};
 pub use foldable::*;
 use risingwave_common::array::column::Column;
 use risingwave_common::array::stream_chunk::Ops;
+use risingwave_common::array::ArrayImpl::Bool;
 use risingwave_common::array::{
-    Array, ArrayBuilder, ArrayBuilderImpl, ArrayImpl, ArrayRef, BoolArray, DecimalArray, F32Array,
-    F64Array, I16Array, I32Array, I64Array, IntervalArray, ListArray, NaiveDateArray,
-    NaiveDateTimeArray, NaiveTimeArray, Row, StructArray, Utf8Array,
+    Array, ArrayBuilder, ArrayBuilderImpl, ArrayImpl, ArrayRef, BoolArray, DataChunk, DecimalArray,
+    F32Array, F64Array, I16Array, I32Array, I64Array, IntervalArray, ListArray, NaiveDateArray,
+    NaiveDateTimeArray, NaiveTimeArray, Row, StructArray, Utf8Array, Vis,
 };
 use risingwave_common::buffer::Bitmap;
 use risingwave_common::catalog::{Field, Schema};
@@ -403,4 +405,29 @@ pub fn generate_state_tables_from_proto<S: StateStore>(
         state_tables.push(state_table)
     }
     state_tables
+}
+
+pub fn agg_call_filter_res(
+    agg_call: &AggCall,
+    columns: &Vec<Column>,
+    vis_map: Option<&Bitmap>,
+    capacity: usize,
+) -> StreamExecutorResult<Option<Bitmap>> {
+    if let Some(ref filter) = agg_call.filter {
+        let vis = Vis::from(
+            vis_map
+                .cloned()
+                .unwrap_or_else(|| Bitmap::all_high_bits(capacity)),
+        );
+        let data_chunk = DataChunk::new(columns.to_owned(), vis);
+        if let Bool(filter_res) = filter.eval(&data_chunk)?.as_ref() {
+            Ok(Some(filter_res.to_bitmap()))
+        } else {
+            Err(StreamExecutorError::from(anyhow!(
+                "Filter can only receive bool array"
+            )))
+        }
+    } else {
+        Ok(vis_map.cloned())
+    }
 }

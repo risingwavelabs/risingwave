@@ -29,7 +29,9 @@ use risingwave_hummock_sdk::compaction_group::hummock_version_ext::HummockVersio
 use risingwave_hummock_sdk::prost_key_range::KeyRangeExt;
 use risingwave_hummock_sdk::{CompactionGroupId, HummockCompactionTaskId, HummockEpoch};
 use risingwave_pb::hummock::compaction_config::CompactionMode;
-use risingwave_pb::hummock::{CompactTask, CompactionConfig, HummockVersion, KeyRange, Level};
+use risingwave_pb::hummock::{
+    CompactTask, CompactionConfig, HummockVersion, InputLevel, KeyRange, Level, LevelType,
+};
 
 use crate::hummock::compaction::level_selector::{DynamicLevelSelector, LevelSelector};
 use crate::hummock::compaction::overlap_strategy::{
@@ -73,13 +75,17 @@ impl Clone for CompactStatus {
     }
 }
 
-#[derive(Debug, Default)]
-pub struct SearchResult {
-    select_level: Level,
-    target_level: Level,
-    split_ranges: Vec<KeyRange>,
-    compression_algorithm: String,
-    target_file_size: u64,
+pub struct CompactionInput {
+    pub input_levels: Vec<InputLevel>,
+    pub target_level: usize,
+    pub target_sub_level_id: u64,
+}
+
+pub struct CompactionTask {
+    pub input: CompactionInput,
+    pub compression_algorithm: String,
+    pub target_file_size: u64,
+    pub splits: Vec<KeyRange>,
 }
 
 pub fn create_overlap_strategy(compaction_mode: CompactionMode) -> Arc<dyn OverlapStrategy> {
@@ -124,13 +130,13 @@ impl CompactStatus {
             self.pick_compaction(levels, task_id)?
         };
 
-        let select_level_id = ret.select_level.level_idx;
-        let target_level_id = ret.target_level.level_idx;
+        let select_level_id = ret.input.input_levels[0].level_idx;
+        let target_level_id = ret.input.target_level;
 
-        let splits = if ret.split_ranges.is_empty() {
+        let splits = if ret.splits.is_empty() {
             vec![KeyRange::inf()]
         } else {
-            ret.split_ranges
+            ret.splits
         };
 
         let compression_algorithm = match ret.compression_algorithm.as_str() {
@@ -140,16 +146,15 @@ impl CompactStatus {
         };
 
         let compact_task = CompactTask {
-            input_ssts: vec![ret.select_level, ret.target_level],
+            input_ssts: ret.input.input_levels,
             splits,
             watermark: HummockEpoch::MAX,
             sorted_output_ssts: vec![],
             task_id,
-            target_level: target_level_id,
+            target_level: target_level_id as u32,
             // only gc delete keys in last level because there may be older version in more bottom
             // level.
-            gc_delete_keys: target_level_id as usize == self.level_handlers.len() - 1
-                && select_level_id > 0,
+            gc_delete_keys: target_level_id == self.level_handlers.len() - 1 && select_level_id > 0,
             task_status: false,
             compaction_group_id,
             existing_table_ids: vec![],
@@ -162,11 +167,34 @@ impl CompactStatus {
         Some(compact_task)
     }
 
+    pub fn is_trivial_move_task(task: &CompactTask) -> bool {
+        if task.input_ssts.len() != 2
+            || task.input_ssts[0].level_type != LevelType::Nonoverlapping as i32
+        {
+            return false;
+        }
+
+        // it may be a manual compaction task
+        if task.input_ssts[0].level_idx == task.input_ssts[1].level_idx
+            && task.input_ssts[0].level_idx > 0
+        {
+            return false;
+        }
+
+        if task.input_ssts[1].level_idx == task.target_level
+            && task.input_ssts[1].table_infos.is_empty()
+        {
+            return true;
+        }
+
+        false
+    }
+
     fn pick_compaction(
         &mut self,
         levels: &[Level],
         task_id: HummockCompactionTaskId,
-    ) -> Option<SearchResult> {
+    ) -> Option<CompactionTask> {
         self.compaction_selector
             .pick_compaction(task_id, levels, &mut self.level_handlers)
     }
@@ -176,7 +204,7 @@ impl CompactStatus {
         levels: &[Level],
         task_id: HummockCompactionTaskId,
         manual_compaction_option: ManualCompactionOption,
-    ) -> Option<SearchResult> {
+    ) -> Option<CompactionTask> {
         // manual_compaction no need to select level
         // level determined by option
         self.compaction_selector.manual_pick_compaction(
@@ -273,5 +301,5 @@ pub trait CompactionPicker {
         &self,
         levels: &[Level],
         level_handlers: &mut [LevelHandler],
-    ) -> Option<SearchResult>;
+    ) -> Option<CompactionInput>;
 }

@@ -16,6 +16,7 @@ pub mod pg_cast;
 pub mod pg_matviews_info;
 pub mod pg_namespace;
 pub mod pg_type;
+pub mod pg_user;
 
 use std::collections::HashMap;
 use std::sync::Arc;
@@ -23,7 +24,7 @@ use std::sync::Arc;
 use async_trait::async_trait;
 use itertools::Itertools;
 use risingwave_common::array::Row;
-use risingwave_common::catalog::{ColumnDesc, SysCatalogReader, TableId, DEFAULT_SUPPER_USER};
+use risingwave_common::catalog::{ColumnDesc, SysCatalogReader, TableId, DEFAULT_SUPER_USER_ID};
 use risingwave_common::error::{ErrorCode, Result};
 use risingwave_common::types::{DataType, ScalarImpl};
 use serde_json::json;
@@ -34,6 +35,7 @@ use crate::catalog::pg_catalog::pg_cast::*;
 use crate::catalog::pg_catalog::pg_matviews_info::*;
 use crate::catalog::pg_catalog::pg_namespace::*;
 use crate::catalog::pg_catalog::pg_type::*;
+use crate::catalog::pg_catalog::pg_user::*;
 use crate::catalog::system_catalog::SystemCatalog;
 use crate::meta_client::FrontendMetaClient;
 use crate::scheduler::worker_node_manager::WorkerNodeManagerRef;
@@ -74,17 +76,15 @@ impl SysCatalogReaderImpl {
 #[async_trait]
 impl SysCatalogReader for SysCatalogReaderImpl {
     async fn read_table(&self, table_name: &str) -> Result<Vec<Row>> {
-        // read static data.
-        if table_name == PG_TYPE_TABLE_NAME {
-            Ok(PG_TYPE_DATA_ROWS.clone())
-        } else if table_name == PG_CAST_TABLE_NAME {
-            Ok(PG_CAST_DATA_ROWS.clone())
-        } else if table_name == PG_NAMESPACE_TABLE_NAME {
-            self.read_namespace()
-        } else if table_name == PG_MATVIEWS_INFO_TABLE_NAME {
-            self.read_mviews_info().await
-        } else {
-            Err(ErrorCode::ItemNotFound(format!("Invalid system table: {}", table_name)).into())
+        match table_name {
+            PG_TYPE_TABLE_NAME => Ok(PG_TYPE_DATA_ROWS.clone()),
+            PG_CAST_TABLE_NAME => Ok(PG_CAST_DATA_ROWS.clone()),
+            PG_NAMESPACE_TABLE_NAME => self.read_namespace(),
+            PG_MATVIEWS_INFO_TABLE_NAME => self.read_mviews_info().await,
+            PG_USER_TABLE_NAME => self.read_user_info(),
+            _ => {
+                Err(ErrorCode::ItemNotFound(format!("Invalid system table: {}", table_name)).into())
+            }
         }
     }
 }
@@ -99,7 +99,25 @@ impl SysCatalogReaderImpl {
                 Row::new(vec![
                     Some(ScalarImpl::Int32(schema.id as i32)),
                     Some(ScalarImpl::Utf8(schema.name.clone())),
-                    Some(ScalarImpl::Utf8(schema.owner.clone())),
+                    Some(ScalarImpl::Int32(schema.owner as i32)),
+                ])
+            })
+            .collect_vec())
+    }
+
+    fn read_user_info(&self) -> Result<Vec<Row>> {
+        let reader = self.user_info_reader.read_guard();
+        let users = reader.get_all_users();
+        Ok(users
+            .iter()
+            .map(|user| {
+                Row::new(vec![
+                    Some(ScalarImpl::Int32(user.id as i32)),
+                    Some(ScalarImpl::Utf8(user.name.clone())),
+                    Some(ScalarImpl::Bool(user.can_create_db)),
+                    Some(ScalarImpl::Bool(user.is_supper)),
+                    // compatible with PG.
+                    Some(ScalarImpl::Utf8("********".to_string())),
                 ])
             })
             .collect_vec())
@@ -134,7 +152,7 @@ impl SysCatalogReaderImpl {
                             Some(ScalarImpl::Int32(t.id.table_id as i32)),
                             Some(ScalarImpl::Utf8(t.name.clone())),
                             Some(ScalarImpl::Utf8(schema.clone())),
-                            Some(ScalarImpl::Utf8(t.owner.clone())),
+                            Some(ScalarImpl::Int32(t.owner as i32)),
                             Some(ScalarImpl::Utf8(json!(fragments).to_string())),
                         ]));
                     }
@@ -169,7 +187,7 @@ macro_rules! def_sys_catalog {
                 })
                 .collect::<Vec<_>>(),
             pk: vec![0], // change this when multi-column pk is needed in some system table.
-            owner: DEFAULT_SUPPER_USER.to_string(),
+            owner: DEFAULT_SUPER_USER_ID,
         }
     };
 }
@@ -183,6 +201,7 @@ lazy_static::lazy_static! {
             (PG_NAMESPACE_TABLE_NAME.to_string(), def_sys_catalog!(2, PG_NAMESPACE_TABLE_NAME, PG_NAMESPACE_COLUMNS)),
             (PG_CAST_TABLE_NAME.to_string(), def_sys_catalog!(3, PG_CAST_TABLE_NAME, PG_CAST_COLUMNS)),
             (PG_MATVIEWS_INFO_TABLE_NAME.to_string(), def_sys_catalog!(4, PG_MATVIEWS_INFO_TABLE_NAME, PG_MATVIEWS_INFO_COLUMNS)),
+            (PG_USER_TABLE_NAME.to_string(), def_sys_catalog!(5, PG_USER_TABLE_NAME, PG_USER_COLUMNS)),
         ].into();
 }
 

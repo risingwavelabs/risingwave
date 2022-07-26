@@ -104,7 +104,7 @@ pub fn handle_show_object(context: OptimizerContext, command: ShowObject) -> Res
 
     let rows = names
         .into_iter()
-        .map(|n| Row::new(vec![Some(n)]))
+        .map(|n| Row::new(vec![Some(n.into())]))
         .collect_vec();
 
     Ok(PgResponse::new(
@@ -142,15 +142,15 @@ mod tests {
         assert_eq!(
             rows,
             vec![
-                "Row([Some(\"t1\")])".to_string(),
-                "Row([Some(\"t2\")])".to_string()
+                "Row([Some(b\"t1\")])".to_string(),
+                "Row([Some(b\"t2\")])".to_string()
             ]
         );
 
         let rows = frontend
             .query_formatted_result("SHOW MATERIALIZED SOURCES")
             .await;
-        assert_eq!(rows, vec!["Row([Some(\"t2\")])".to_string()]);
+        assert_eq!(rows, vec!["Row([Some(b\"t2\")])".to_string()]);
     }
 
     #[tokio::test]
@@ -172,8 +172,8 @@ mod tests {
             .iter()
             .map(|row| {
                 (
-                    row.index(0).as_ref().unwrap().as_str(),
-                    row.index(1).as_ref().unwrap().as_str(),
+                    std::str::from_utf8(row.index(0).as_ref().unwrap()).unwrap(),
+                    std::str::from_utf8(row.index(1).as_ref().unwrap()).unwrap(),
                 )
             })
             .collect::<HashMap<&str, &str>>();
