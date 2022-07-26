@@ -21,7 +21,7 @@ use risingwave_common::error::{tonic_err, ErrorCode, Result as RwResult};
 use risingwave_common::util::compress::compress_data;
 use risingwave_pb::catalog::table::OptionalAssociatedSourceId;
 use risingwave_pb::catalog::*;
-use risingwave_pb::common::{ParallelUnitMapping, ParallelUnitType};
+use risingwave_pb::common::ParallelUnitMapping;
 use risingwave_pb::ddl_service::ddl_service_server::DdlService;
 use risingwave_pb::ddl_service::*;
 use risingwave_pb::stream_plan::stream_node::NodeBody;
@@ -474,10 +474,7 @@ where
         );
 
         // Resolve fragments.
-        let parallel_degree = self
-            .cluster_manager
-            .get_parallel_unit_count(Some(ParallelUnitType::Hash))
-            .await;
+        let parallel_degree = self.cluster_manager.get_parallel_unit_count().await;
 
         let mut actor_graph_builder =
             ActorGraphBuilder::new(self.env.id_gen_manager_ref(), &fragment_graph, ctx).await?;
