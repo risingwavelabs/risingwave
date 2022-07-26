@@ -98,7 +98,7 @@ impl<S: StateStore> SourceExecutor<S> {
             metrics: streaming_metrics,
             stream_source_splits: vec![],
             source_identify: "Table_".to_string() + &source_id.table_id().to_string(),
-            split_state_store: SourceStateHandler::new(keyspace),
+            split_state_store: SourceStateHandler::new(keyspace, source_id),
             state_cache: HashMap::new(),
             expected_barrier_latency_ms,
         })

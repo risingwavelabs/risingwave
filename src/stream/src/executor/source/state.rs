@@ -17,9 +17,10 @@ use std::fmt::Debug;
 use bytes::Bytes;
 use log::error;
 use risingwave_common::bail;
+use risingwave_common::catalog::TableId;
 use risingwave_connector::source::{SplitImpl, SplitMetaData};
 use risingwave_storage::storage_value::StorageValue;
-use risingwave_storage::store::WriteOptions;
+use risingwave_storage::store::{ReadOptions, WriteOptions};
 use risingwave_storage::{Keyspace, StateStore};
 
 use crate::executor::error::StreamExecutorError;
@@ -39,6 +40,7 @@ pub trait SourceState: Debug + Clone {
 #[derive(Clone)]
 pub struct SourceStateHandler<S: StateStore> {
     keyspace: Keyspace<S>,
+    source_id: TableId,
 }
 
 impl<S: StateStore> Debug for SourceStateHandler<S> {
@@ -48,8 +50,11 @@ impl<S: StateStore> Debug for SourceStateHandler<S> {
 }
 
 impl<S: StateStore> SourceStateHandler<S> {
-    pub fn new(keyspace: Keyspace<S>) -> Self {
-        Self { keyspace }
+    pub fn new(keyspace: Keyspace<S>, source_id: TableId) -> Self {
+        Self {
+            keyspace,
+            source_id,
+        }
     }
 
     /// This function provides the ability to persist the source state
@@ -66,7 +71,7 @@ impl<S: StateStore> SourceStateHandler<S> {
         } else {
             let mut write_batch = self.keyspace.state_store().start_write_batch(WriteOptions {
                 epoch,
-                table_id: self.keyspace.table_id(),
+                table_id: self.source_id,
             });
             let mut local_batch = write_batch.prefixify(&self.keyspace);
             states.iter().for_each(|state| {
@@ -96,7 +101,14 @@ impl<S: StateStore> SourceStateHandler<S> {
         epoch: u64,
     ) -> StreamExecutorResult<Option<Bytes>> {
         self.keyspace
-            .get(state_identifier, epoch)
+            .get(
+                state_identifier,
+                ReadOptions {
+                    epoch,
+                    table_id: Some(self.source_id),
+                    ttl: None,
+                },
+            )
             .await
             .map_err(Into::into)
     }
@@ -125,9 +137,12 @@ mod tests {
     use itertools::Itertools;
     use risingwave_common::catalog::TableId;
     use risingwave_storage::memory::MemoryStateStore;
+    use risingwave_storage::store::ReadOptions;
     use serde::{Deserialize, Serialize};
 
     use super::*;
+
+    const TEST_TABLE_ID: u32 = 1;
 
     #[derive(Debug, Clone, Serialize, Deserialize)]
     struct TestSourceState {
@@ -174,7 +189,7 @@ mod tests {
 
     fn new_test_keyspace() -> Keyspace<MemoryStateStore> {
         let test_mem_state_store = MemoryStateStore::new();
-        Keyspace::table_root(test_mem_state_store, &TableId::from(1))
+        Keyspace::table_root(test_mem_state_store, &TableId::from(TEST_TABLE_ID))
     }
 
     fn test_state_store_vec() -> Vec<TestSourceState> {
@@ -199,11 +214,20 @@ mod tests {
     #[tokio::test]
     async fn test_take_snapshot() {
         let current_epoch = 1000;
-        let state_store_handler = SourceStateHandler::new(new_test_keyspace());
+        let state_store_handler =
+            SourceStateHandler::new(new_test_keyspace(), TEST_TABLE_ID.into());
         let _rs = take_snapshot_and_get_states(state_store_handler.clone(), current_epoch).await;
+
         let stored_states = state_store_handler
             .keyspace
-            .scan(None, current_epoch)
+            .scan(
+                None,
+                ReadOptions {
+                    epoch: current_epoch,
+                    table_id: Some(TEST_TABLE_ID.into()),
+                    ttl: None,
+                },
+            )
             .await
             .unwrap();
         assert_ne!(0, stored_states.len());
@@ -212,7 +236,8 @@ mod tests {
     #[tokio::test]
     async fn test_empty_state_restore() {
         let partition = "p01".to_string();
-        let state_store_handler = SourceStateHandler::new(new_test_keyspace());
+        let state_store_handler =
+            SourceStateHandler::new(new_test_keyspace(), TEST_TABLE_ID.into());
         let list_states = state_store_handler
             .restore_states(partition, u64::MAX)
             .await
@@ -223,7 +248,8 @@ mod tests {
 
     #[tokio::test]
     async fn test_state_restore() {
-        let state_store_handler = SourceStateHandler::new(new_test_keyspace());
+        let state_store_handler =
+            SourceStateHandler::new(new_test_keyspace(), TEST_TABLE_ID.into());
         let current_epoch = 1000;
         let saved_states = take_snapshot_and_get_states(state_store_handler.clone(), current_epoch)
             .await
