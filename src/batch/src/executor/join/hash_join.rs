@@ -810,7 +810,7 @@ impl<K: HashKey> HashJoinExecutor<K> {
     ) {
         let mut chunk_builder = DataChunkBuilder::with_default_size(full_data_types);
         let mut build_row_matched =
-        ChunkedData::with_chunk_sizes(build_side.iter().map(|c| c.capacity()))?;
+            ChunkedData::with_chunk_sizes(build_side.iter().map(|c| c.capacity()))?;
 
         #[for_await]
         for probe_chunk in probe_side.execute() {
@@ -993,6 +993,7 @@ impl DataChunkWrapper {
         for (&start_row_id, &end_row_id) in repeat_n(&0, 1)
             .chain(first_output_row_ids.iter())
             .tuple_windows()
+            .filter(|(start_row_id, end_row_id)| start_row_id < end_row_id)
         {
             for row_id in start_row_id..end_row_id {
                 if filter.is_set(row_id).unwrap() {
@@ -1034,6 +1035,7 @@ impl DataChunkWrapper {
         for (&start_row_id, &end_row_id) in repeat_n(&0, 1)
             .chain(first_output_row_ids.iter())
             .tuple_windows()
+            .filter(|(start_row_id, end_row_id)| start_row_id < end_row_id)
         {
             for row_id in start_row_id..end_row_id {
                 if filter.is_set(row_id).unwrap() {
@@ -1061,6 +1063,7 @@ impl DataChunkWrapper {
             }
         }
         if ANTI_JOIN && !*found_matched {
+            println!("set {start_row_id} to 1");
             new_visibility.set(start_row_id, true);
         }
 
