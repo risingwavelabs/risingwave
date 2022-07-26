@@ -118,8 +118,10 @@ impl Sstable {
 
     #[cfg(test)]
     pub fn get_sstable_info(&self) -> SstableInfo {
+        use risingwave_hummock_sdk::compaction_group::hummock_version_ext::SstableIdExt;
+        use risingwave_pb::hummock::SstableId;
         SstableInfo {
-            id: self.id,
+            id: Some(SstableId::from_int(self.id)),
             key_range: Some(KeyRange {
                 left: self.meta.smallest_key.clone(),
                 right: self.meta.largest_key.clone(),

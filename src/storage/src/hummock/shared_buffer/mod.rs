@@ -24,6 +24,7 @@ use std::sync::atomic::Ordering::Relaxed;
 use std::sync::Arc;
 
 use itertools::Itertools;
+use risingwave_hummock_sdk::compaction_group::hummock_version_ext::SstableInfoExt;
 use risingwave_hummock_sdk::key::user_key;
 use risingwave_hummock_sdk::{is_remote_sst_id, HummockEpoch, LocalSstableInfo};
 use risingwave_pb::hummock::{KeyRange, SstableInfo};
@@ -120,7 +121,9 @@ pub(crate) async fn build_ordered_merge_iter<T: HummockIteratorType>(
                         as BoxedHummockIterator<T::Direction>);
                 }
                 UncommittedData::Sst((_, table_info)) => {
-                    let table = sstable_store.sstable(table_info.id, local_stats).await?;
+                    let table = sstable_store
+                        .sstable(table_info.id_as_int(), local_stats)
+                        .await?;
                     data_iters.push(Box::new(T::SstableIteratorType::create(
                         table,
                         sstable_store.clone(),
@@ -480,7 +483,7 @@ impl SharedBuffer {
                 }
                 UncommittedData::Sst((compaction_group_id, sst)) => {
                     assert!(
-                        is_remote_sst_id(sst.id),
+                        is_remote_sst_id(sst.id_as_int()),
                         "all sst should be remote when trying to get ssts to commit"
                     );
                     ret.push((*compaction_group_id, sst.clone()));

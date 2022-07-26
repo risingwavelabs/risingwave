@@ -294,6 +294,7 @@ mod tests {
 
     use rand::distributions::Alphanumeric;
     use rand::{thread_rng, Rng};
+    use risingwave_hummock_sdk::get_sst_id_hash;
     use risingwave_hummock_sdk::key::{prev_key, user_key};
 
     use super::*;
@@ -338,9 +339,9 @@ mod tests {
         )
         .await;
         let cache = create_small_table_cache();
-        let handle0 = cache.insert(table0.id, table0.id, 1, Box::new(table0));
-        let handle1 = cache.insert(table1.id, table1.id, 1, Box::new(table1));
-        let handle2 = cache.insert(table2.id, table2.id, 1, Box::new(table2));
+        let handle0 = cache.insert(table0.id, get_sst_id_hash(table0.id), 1, Box::new(table0));
+        let handle1 = cache.insert(table1.id, get_sst_id_hash(table1.id), 1, Box::new(table1));
+        let handle2 = cache.insert(table2.id, get_sst_id_hash(table2.id), 1, Box::new(table2));
 
         let backward_iters: Vec<BoxedBackwardHummockIterator> = vec![
             Box::new(BackwardSstableIterator::new(handle1, sstable_store.clone())),
@@ -394,9 +395,9 @@ mod tests {
         )
         .await;
         let cache = create_small_table_cache();
-        let handle0 = cache.insert(table0.id, table0.id, 1, Box::new(table0));
-        let handle1 = cache.insert(table1.id, table1.id, 1, Box::new(table1));
-        let handle2 = cache.insert(table2.id, table2.id, 1, Box::new(table2));
+        let handle0 = cache.insert(table0.id, get_sst_id_hash(table0.id), 1, Box::new(table0));
+        let handle1 = cache.insert(table1.id, get_sst_id_hash(table1.id), 1, Box::new(table1));
+        let handle2 = cache.insert(table2.id, get_sst_id_hash(table2.id), 1, Box::new(table2));
         let backward_iters: Vec<BoxedBackwardHummockIterator> = vec![
             Box::new(BackwardSstableIterator::new(handle0, sstable_store.clone())),
             Box::new(BackwardSstableIterator::new(handle1, sstable_store.clone())),
@@ -476,11 +477,11 @@ mod tests {
         let cache = create_small_table_cache();
         let backward_iters: Vec<BoxedBackwardHummockIterator> = vec![
             Box::new(BackwardSstableIterator::new(
-                cache.insert(table0.id, table0.id, 1, Box::new(table0)),
+                cache.insert(table0.id, get_sst_id_hash(table0.id), 1, Box::new(table0)),
                 sstable_store.clone(),
             )),
             Box::new(BackwardSstableIterator::new(
-                cache.insert(table1.id, table1.id, 1, Box::new(table1)),
+                cache.insert(table1.id, get_sst_id_hash(table1.id), 1, Box::new(table1)),
                 sstable_store,
             )),
         ];
@@ -527,7 +528,12 @@ mod tests {
         let sstable =
             gen_iterator_test_sstable_from_kv_pair(0, kv_pairs, sstable_store.clone()).await;
         let cache = create_small_table_cache();
-        let handle = cache.insert(sstable.id, sstable.id, 1, Box::new(sstable));
+        let handle = cache.insert(
+            sstable.id,
+            get_sst_id_hash(sstable.id),
+            1,
+            Box::new(sstable),
+        );
         let backward_iters: Vec<BoxedBackwardHummockIterator> = vec![Box::new(
             BackwardSstableIterator::new(handle, sstable_store),
         )];
@@ -608,7 +614,12 @@ mod tests {
         let sstable =
             gen_iterator_test_sstable_from_kv_pair(0, kv_pairs, sstable_store.clone()).await;
         let cache = create_small_table_cache();
-        let handle = cache.insert(sstable.id, sstable.id, 1, Box::new(sstable));
+        let handle = cache.insert(
+            sstable.id,
+            get_sst_id_hash(sstable.id),
+            1,
+            Box::new(sstable),
+        );
         let backward_iters: Vec<BoxedBackwardHummockIterator> = vec![Box::new(
             BackwardSstableIterator::new(handle, sstable_store),
         )];
@@ -692,7 +703,12 @@ mod tests {
         let cache = create_small_table_cache();
         let backward_iters: Vec<BoxedBackwardHummockIterator> =
             vec![Box::new(BackwardSstableIterator::new(
-                cache.insert(sstable.id, sstable.id, 1, Box::new(sstable)),
+                cache.insert(
+                    sstable.id,
+                    get_sst_id_hash(sstable.id),
+                    1,
+                    Box::new(sstable),
+                ),
                 sstable_store,
             ))];
         let bmi = BackwardMergeIterator::new(backward_iters, Arc::new(StateStoreMetrics::unused()));
@@ -771,7 +787,12 @@ mod tests {
         let sstable =
             gen_iterator_test_sstable_from_kv_pair(0, kv_pairs, sstable_store.clone()).await;
         let cache = create_small_table_cache();
-        let handle = cache.insert(sstable.id, sstable.id, 1, Box::new(sstable));
+        let handle = cache.insert(
+            sstable.id,
+            get_sst_id_hash(sstable.id),
+            1,
+            Box::new(sstable),
+        );
 
         let backward_iters: Vec<BoxedBackwardHummockIterator> = vec![Box::new(
             BackwardSstableIterator::new(handle, sstable_store),
@@ -865,7 +886,12 @@ mod tests {
             _ => unimplemented!(),
         };
         let cache = create_small_table_cache();
-        let handle = cache.insert(sstable.id, sstable.id, 1, Box::new(sstable));
+        let handle = cache.insert(
+            sstable.id,
+            get_sst_id_hash(sstable.id),
+            1,
+            Box::new(sstable),
+        );
         let backward_iters: Vec<BoxedBackwardHummockIterator> = vec![Box::new(
             BackwardSstableIterator::new(handle, sstable_store),
         )];
@@ -1112,7 +1138,7 @@ mod tests {
         .await;
 
         let cache = create_small_table_cache();
-        let handle0 = cache.insert(table0.id, table0.id, 1, Box::new(table0));
+        let handle0 = cache.insert(table0.id, get_sst_id_hash(table0.id), 1, Box::new(table0));
 
         let backward_iters: Vec<BoxedBackwardHummockIterator> = vec![Box::new(
             BackwardSstableIterator::new(handle0, sstable_store),

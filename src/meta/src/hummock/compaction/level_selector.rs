@@ -354,8 +354,10 @@ pub mod tests {
 
     use itertools::Itertools;
     use risingwave_common::config::constant::hummock::CompactionFilterFlag;
+    use risingwave_hummock_sdk::compaction_group::hummock_version_ext::SstableIdExt;
+    use risingwave_hummock_sdk::get_local_sst_id;
     use risingwave_pb::hummock::compaction_config::CompactionMode;
-    use risingwave_pb::hummock::{KeyRange, Level, LevelType, SstableInfo};
+    use risingwave_pb::hummock::{KeyRange, Level, LevelType, SstableId, SstableInfo};
 
     use super::*;
     use crate::hummock::compaction::compaction_config::CompactionConfigBuilder;
@@ -363,14 +365,14 @@ pub mod tests {
     use crate::hummock::test_utils::iterator_test_key_of_epoch;
 
     pub fn generate_table(
-        id: u64,
+        seq_id: u64,
         table_prefix: u64,
         left: usize,
         right: usize,
         epoch: u64,
     ) -> SstableInfo {
         SstableInfo {
-            id,
+            id: Some(SstableId::from_int(get_local_sst_id(seq_id))),
             key_range: Some(KeyRange {
                 left: iterator_test_key_of_epoch(table_prefix, left, epoch),
                 right: iterator_test_key_of_epoch(table_prefix, right, epoch),

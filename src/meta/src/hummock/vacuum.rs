@@ -17,8 +17,9 @@ use std::sync::Arc;
 
 use itertools::Itertools;
 use risingwave_common::error::Result;
+use risingwave_hummock_sdk::compaction_group::hummock_version_ext::SstableIdExt;
 use risingwave_hummock_sdk::HummockSstableId;
-use risingwave_pb::hummock::VacuumTask;
+use risingwave_pb::hummock::{SstableId, VacuumTask};
 
 use crate::hummock::{CompactorManager, HummockManagerRef};
 use crate::storage::MetaStore;
@@ -119,7 +120,10 @@ where
                     Some(VacuumTask {
                         // The SST id doesn't necessarily have a counterpart SST file in S3, but
                         // it's OK trying to delete it.
-                        sstable_ids: delete_batch.clone(),
+                        sstable_ids: delete_batch
+                            .iter()
+                            .map(|s| SstableId::from_int(*s))
+                            .collect(),
                     }),
                 )
                 .await
@@ -153,7 +157,7 @@ where
             .pending_sst_ids
             .read()
             .iter()
-            .filter(|p| vacuum_task.sstable_ids.contains(p))
+            .filter(|&p| vacuum_task.sstable_ids.contains(&SstableId::from_int(*p)))
             .cloned()
             .collect_vec();
         if !deleted_sst_ids.is_empty() {
@@ -164,7 +168,14 @@ where
                 .write()
                 .retain(|p| !deleted_sst_ids.contains(p));
         }
-        tracing::info!("Finish vacuuming SSTs {:?}", vacuum_task.sstable_ids);
+        tracing::info!(
+            "Finish vacuuming SSTs {:?}",
+            vacuum_task
+                .sstable_ids
+                .iter()
+                .map(|s| s.as_int())
+                .collect_vec()
+        );
         Ok(())
     }
 }
@@ -252,7 +263,7 @@ mod tests {
                     .first()
                     .unwrap()
                     .iter()
-                    .map(|s| s.id)
+                    .map(|s| s.id.as_ref().cloned().unwrap())
                     .collect_vec(),
             })
             .await

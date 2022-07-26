@@ -17,9 +17,10 @@ use std::sync::Arc;
 use bytes::Bytes;
 use itertools::Itertools;
 use risingwave_common::config::StorageConfig;
+use risingwave_hummock_sdk::compaction_group::hummock_version_ext::SstableIdExt;
 use risingwave_hummock_sdk::key::key_with_epoch;
 use risingwave_hummock_sdk::HummockSstableId;
-use risingwave_pb::hummock::{KeyRange, SstableInfo};
+use risingwave_pb::hummock::{KeyRange, SstableId, SstableInfo};
 
 use super::{CompressionAlgorithm, SstableMeta, DEFAULT_RESTART_INTERVAL};
 use crate::hummock::iterator::test_utils::iterator_test_key_of_epoch;
@@ -70,7 +71,7 @@ pub fn gen_dummy_sst_info(id: HummockSstableId, batches: Vec<SharedBufferBatch>)
         }
     }
     SstableInfo {
-        id,
+        id: Some(SstableId::from_int(id)),
         key_range: Some(KeyRange {
             left: min_key,
             right: max_key,

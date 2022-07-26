@@ -16,9 +16,11 @@ use std::iter;
 use std::sync::Arc;
 
 use itertools::Itertools;
+use risingwave_hummock_sdk::compaction_group::hummock_version_ext::SstableIdExt;
+use risingwave_hummock_sdk::get_local_sst_id;
 use risingwave_meta::hummock::test_utils::setup_compute_env;
 use risingwave_meta::hummock::MockHummockMetaClient;
-use risingwave_pb::hummock::VacuumTask;
+use risingwave_pb::hummock::{SstableId, VacuumTask};
 use risingwave_storage::hummock::iterator::test_utils::mock_sstable_store;
 use risingwave_storage::hummock::test_utils::{
     default_builder_opt_for_test, gen_default_test_sstable,
@@ -43,11 +45,12 @@ async fn test_vacuum_tracked_data() {
 
     // Delete all existent SSTs and a nonexistent SSTs. Trying to delete a nonexistent SST is
     // OK.
-    let nonexistent_id = 11u64;
+    let nonexistent_id = get_local_sst_id(11u64);
     let vacuum_task = VacuumTask {
         sstable_ids: sst_ids
             .into_iter()
             .chain(iter::once(nonexistent_id))
+            .map(SstableId::from_int)
             .collect_vec(),
     };
     let (_env, hummock_manager_ref, _cluster_manager_ref, worker_node) =

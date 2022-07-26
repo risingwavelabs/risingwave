@@ -15,9 +15,10 @@
 use std::collections::HashMap;
 
 use itertools::Itertools;
+use risingwave_hummock_sdk::compaction_group::hummock_version_ext::{SstableIdExt, SstableInfoExt};
 use risingwave_hummock_sdk::HummockSstableId;
 use risingwave_pb::hummock::level_handler::SstTask;
-use risingwave_pb::hummock::SstableInfo;
+use risingwave_pb::hummock::{SstableId, SstableInfo};
 
 #[derive(Clone, Debug, PartialEq)]
 pub struct LevelHandler {
@@ -59,9 +60,9 @@ impl LevelHandler {
         let mut table_ids = vec![];
         let mut total_file_size = 0;
         for sst in ssts {
-            self.compacting_files.insert(sst.id, task_id);
+            self.compacting_files.insert(sst.id_as_int(), task_id);
             total_file_size += sst.file_size;
-            table_ids.push(sst.id);
+            table_ids.push(sst.id_as_int());
         }
 
         self.pending_tasks
@@ -96,7 +97,7 @@ impl From<&LevelHandler> for risingwave_pb::hummock::LevelHandler {
                 .iter()
                 .map(|(task_id, total_file_size, ssts)| SstTask {
                     task_id: *task_id,
-                    ssts: ssts.clone(),
+                    ssts: ssts.iter().map(|s| SstableId::from_int(*s)).collect(),
                     total_file_size: *total_file_size,
                 })
                 .collect_vec(),
@@ -109,9 +110,13 @@ impl From<&risingwave_pb::hummock::LevelHandler> for LevelHandler {
         let mut pending_tasks = vec![];
         let mut compacting_files = HashMap::new();
         for task in &lh.tasks {
-            pending_tasks.push((task.task_id, task.total_file_size, task.ssts.clone()));
+            pending_tasks.push((
+                task.task_id,
+                task.total_file_size,
+                task.ssts.iter().map(|s| s.as_int()).collect(),
+            ));
             for s in &task.ssts {
-                compacting_files.insert(*s, task.task_id);
+                compacting_files.insert(s.as_int(), task.task_id);
             }
         }
         Self {

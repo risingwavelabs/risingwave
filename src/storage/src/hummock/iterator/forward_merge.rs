@@ -24,6 +24,8 @@ pub type OrderedAwareMergeIterator = OrderedMergeIteratorInner<Forward>;
 mod test {
     use std::sync::Arc;
 
+    use risingwave_hummock_sdk::get_sst_id_hash;
+
     use super::*;
     use crate::hummock::iterator::test_utils::{
         default_builder_opt_for_test, gen_iterator_test_sstable_base,
@@ -161,12 +163,12 @@ mod test {
         let mut unordered_iter = MergeIterator::new(
             vec![
                 Box::new(SstableIterator::create(
-                    cache.insert(table0.id, table0.id, 1, table0),
+                    cache.insert(table0.id, get_sst_id_hash(table0.id), 1, table0),
                     sstable_store.clone(),
                     read_options.clone(),
                 )) as BoxedForwardHummockIterator,
                 Box::new(SstableIterator::create(
-                    cache.insert(table1.id, table1.id, 1, table1),
+                    cache.insert(table1.id, get_sst_id_hash(table1.id), 1, table1),
                     sstable_store.clone(),
                     read_options.clone(),
                 )) as BoxedForwardHummockIterator,
@@ -268,7 +270,7 @@ mod test {
                 Box::new(SstableIterator::create(
                     cache.insert(
                         non_overlapped_sstable.id,
-                        non_overlapped_sstable.id,
+                        get_sst_id_hash(non_overlapped_sstable.id),
                         1,
                         non_overlapped_sstable,
                     ),
@@ -278,7 +280,7 @@ mod test {
                 Box::new(SstableIterator::create(
                     cache.insert(
                         overlapped_new_sstable.id,
-                        overlapped_new_sstable.id,
+                        get_sst_id_hash(overlapped_new_sstable.id),
                         1,
                         overlapped_new_sstable,
                     ),
@@ -288,7 +290,7 @@ mod test {
                 Box::new(SstableIterator::create(
                     cache.insert(
                         overlapped_old_sstable.id,
-                        overlapped_old_sstable.id,
+                        get_sst_id_hash(overlapped_old_sstable.id),
                         1,
                         overlapped_old_sstable,
                     ),

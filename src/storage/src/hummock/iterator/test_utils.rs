@@ -16,7 +16,7 @@ use std::iter::Iterator;
 use std::sync::Arc;
 
 use risingwave_hummock_sdk::key::{key_with_epoch, Epoch};
-use risingwave_hummock_sdk::HummockSstableId;
+use risingwave_hummock_sdk::{get_sst_id_hash, HummockSstableId};
 use risingwave_object_store::object::{
     InMemObjectStore, ObjectStore, ObjectStoreImpl, ObjectStoreRef,
 };
@@ -134,7 +134,7 @@ pub async fn gen_merge_iterator_interleave_test_sstable_iters(
             key_count,
         )
         .await;
-        let handle = cache.insert(table.id, table.id, 1, Box::new(table));
+        let handle = cache.insert(table.id, get_sst_id_hash(table.id), 1, Box::new(table));
         result.push(Box::new(SstableIterator::create(
             handle,
             sstable_store.clone(),

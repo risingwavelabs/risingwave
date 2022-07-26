@@ -16,14 +16,16 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use itertools::Itertools;
-use risingwave_hummock_sdk::compaction_group::hummock_version_ext::HummockVersionExt;
+use risingwave_hummock_sdk::compaction_group::hummock_version_ext::{
+    HummockVersionExt, SstableIdExt, SstableInfoExt,
+};
 use risingwave_hummock_sdk::compaction_group::StaticCompactionGroupId;
 use risingwave_hummock_sdk::key::key_with_epoch;
 use risingwave_hummock_sdk::{
     CompactionGroupId, HummockContextId, HummockEpoch, HummockSstableId, LocalSstableInfo,
 };
 use risingwave_pb::common::{HostAddress, WorkerNode, WorkerType};
-use risingwave_pb::hummock::{HummockVersion, KeyRange, SstableInfo};
+use risingwave_pb::hummock::{HummockVersion, KeyRange, SstableId, SstableInfo};
 
 use crate::cluster::{ClusterManager, ClusterManagerRef};
 use crate::hummock::compaction::compaction_config::CompactionConfigBuilder;
@@ -52,9 +54,9 @@ where
     // Increase version by 2.
     let mut epoch: u64 = 1;
     let table_ids = vec![
-        hummock_manager.get_new_table_id().await.unwrap(),
-        hummock_manager.get_new_table_id().await.unwrap(),
-        hummock_manager.get_new_table_id().await.unwrap(),
+        hummock_manager.get_new_sst_id(context_id).await.unwrap(),
+        hummock_manager.get_new_sst_id(context_id).await.unwrap(),
+        hummock_manager.get_new_sst_id(context_id).await.unwrap(),
     ];
     let test_tables = generate_test_tables(epoch, table_ids);
     register_sstable_infos_to_compaction_group(
@@ -81,7 +83,7 @@ where
         .unwrap();
     let test_tables_2 = generate_test_tables(
         epoch,
-        vec![hummock_manager.get_new_table_id().await.unwrap()],
+        vec![hummock_manager.get_new_sst_id(context_id).await.unwrap()],
     );
     register_sstable_infos_to_compaction_group(
         hummock_manager.compaction_group_manager_ref_for_test(),
@@ -101,7 +103,7 @@ where
     epoch += 1;
     let test_tables_3 = generate_test_tables(
         epoch,
-        vec![hummock_manager.get_new_table_id().await.unwrap()],
+        vec![hummock_manager.get_new_sst_id(context_id).await.unwrap()],
     );
     register_sstable_infos_to_compaction_group(
         hummock_manager.compaction_group_manager_ref_for_test(),
@@ -122,10 +124,10 @@ pub fn generate_test_tables(epoch: u64, sst_ids: Vec<HummockSstableId>) -> Vec<S
     let mut sst_info = vec![];
     for (i, sst_id) in sst_ids.into_iter().enumerate() {
         sst_info.push(SstableInfo {
-            id: sst_id,
+            id: Some(SstableId::from_int(sst_id)),
             key_range: Some(KeyRange {
-                left: iterator_test_key_of_epoch(sst_id, i + 1, epoch),
-                right: iterator_test_key_of_epoch(sst_id, (i + 1) * 10, epoch),
+                left: iterator_test_key_of_epoch((i + 1) as u64, i + 1, epoch),
+                right: iterator_test_key_of_epoch((i + 1) as u64, (i + 1) * 10, epoch),
                 inf: false,
             }),
             file_size: 1,
@@ -187,11 +189,7 @@ pub async fn unregister_table_ids_from_compaction_group<S>(
 }
 
 /// Generate keys like `001_key_test_00002` with timestamp `epoch`.
-pub fn iterator_test_key_of_epoch(
-    table: HummockSstableId,
-    idx: usize,
-    ts: HummockEpoch,
-) -> Vec<u8> {
+pub fn iterator_test_key_of_epoch(table: u64, idx: usize, ts: HummockEpoch) -> Vec<u8> {
     // key format: {prefix_index}_version
     key_with_epoch(
         format!("{:03}_key_test_{:05}", table, idx)
@@ -202,14 +200,18 @@ pub fn iterator_test_key_of_epoch(
 }
 
 pub fn get_sorted_sstable_ids(sstables: &[SstableInfo]) -> Vec<HummockSstableId> {
-    sstables.iter().map(|table| table.id).sorted().collect_vec()
+    sstables
+        .iter()
+        .map(|table| table.id_as_int())
+        .sorted()
+        .collect_vec()
 }
 
 pub fn get_sorted_committed_sstable_ids(hummock_version: &HummockVersion) -> Vec<HummockSstableId> {
     hummock_version
         .get_compaction_group_levels(StaticCompactionGroupId::StateDefault.into())
         .iter()
-        .flat_map(|level| level.table_infos.iter().map(|info| info.id))
+        .flat_map(|level| level.table_infos.iter().map(|info| info.id_as_int()))
         .sorted()
         .collect_vec()
 }
@@ -274,7 +276,12 @@ where
 {
     let mut ret = vec![];
     for _ in 0..number {
-        ret.push(hummock_manager.get_new_table_id().await.unwrap());
+        ret.push(
+            hummock_manager
+                .get_new_sst_id(HummockContextId::MAX)
+                .await
+                .unwrap(),
+        );
     }
     ret
 }

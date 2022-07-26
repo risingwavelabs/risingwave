@@ -15,6 +15,7 @@
 use std::collections::HashSet;
 use std::sync::Arc;
 
+use risingwave_hummock_sdk::compaction_group::hummock_version_ext::SstableInfoExt;
 use risingwave_pb::hummock::{InputLevel, Level, LevelType, SstableInfo};
 
 use super::CompactionPicker;
@@ -64,7 +65,7 @@ impl MinOverlappingPicker {
             .check_base_level_overlap(target_input_ssts, select_tables);
         if select_overlap_files
             .iter()
-            .any(|table| select_level_handler.is_pending_compact(&table.id))
+            .any(|table| select_level_handler.is_pending_compact(&table.id_as_int()))
         {
             return select_input_ssts;
         }
@@ -73,12 +74,12 @@ impl MinOverlappingPicker {
         }
         let mut target_input_ids = HashSet::with_capacity(target_input_ssts.len());
         for table in target_input_ssts {
-            target_input_ids.insert(table.id);
+            target_input_ids.insert(table.id_as_int());
         }
-        let select_table_id = select_input_ssts[0].id;
+        let select_table_id = select_input_ssts[0].id_as_int();
         let mut select_overlap_results = vec![];
         for table in select_overlap_files {
-            if table.id == select_table_id {
+            if table.id_as_int() == select_table_id {
                 select_overlap_results.push(table);
                 continue;
             }
@@ -88,7 +89,7 @@ impl MinOverlappingPicker {
             let target_overlap_files = info.check_multiple_overlap(target_tables);
             if target_overlap_files
                 .iter()
-                .any(|other| !target_input_ids.contains(&other.id))
+                .any(|other| !target_input_ids.contains(&other.id_as_int()))
             {
                 continue;
             }
@@ -104,7 +105,7 @@ impl MinOverlappingPicker {
                 .check_base_level_overlap(&select_overlap_results, target_tables);
             if target_overlap_files
                 .iter()
-                .all(|table| target_input_ids.contains(&table.id))
+                .all(|table| target_input_ids.contains(&table.id_as_int()))
             {
                 return select_overlap_results;
             }
@@ -120,7 +121,7 @@ impl MinOverlappingPicker {
     ) -> (Vec<SstableInfo>, Vec<SstableInfo>) {
         let mut scores = vec![];
         for table in select_tables {
-            if level_handlers[self.level].is_pending_compact(&table.id) {
+            if level_handlers[self.level].is_pending_compact(&table.id_as_int()) {
                 continue;
             }
             let mut total_file_size = 0;
@@ -129,7 +130,7 @@ impl MinOverlappingPicker {
                 .overlap_strategy
                 .check_base_level_overlap(&[table.clone()], target_tables);
             for other in overlap_files {
-                if level_handlers[self.target_level].is_pending_compact(&other.id) {
+                if level_handlers[self.target_level].is_pending_compact(&other.id_as_int()) {
                     pending_campct = true;
                     break;
                 }
@@ -254,7 +255,7 @@ pub mod tests {
         assert_eq!(ret.input_levels[0].level_idx, 1);
         assert_eq!(ret.target_level, 2);
         assert_eq!(ret.input_levels[0].table_infos.len(), 1);
-        assert_eq!(ret.input_levels[0].table_infos[0].id, 2);
+        assert_eq!(ret.input_levels[0].table_infos[0].seq_id(), 2);
         assert_eq!(ret.input_levels[1].table_infos.len(), 0);
 
         let ret = picker
@@ -264,8 +265,8 @@ pub mod tests {
         assert_eq!(ret.target_level, 2);
         assert_eq!(ret.input_levels[0].table_infos.len(), 1);
         assert_eq!(ret.input_levels[1].table_infos.len(), 1);
-        assert_eq!(ret.input_levels[0].table_infos[0].id, 0);
-        assert_eq!(ret.input_levels[1].table_infos[0].id, 4);
+        assert_eq!(ret.input_levels[0].table_infos[0].seq_id(), 0);
+        assert_eq!(ret.input_levels[1].table_infos[0].seq_id(), 4);
 
         let ret = picker
             .pick_compaction(&levels, &mut levels_handler)
@@ -274,9 +275,9 @@ pub mod tests {
         assert_eq!(ret.target_level, 2);
         assert_eq!(ret.input_levels[0].table_infos.len(), 1);
         assert_eq!(ret.input_levels[1].table_infos.len(), 2);
-        assert_eq!(ret.input_levels[0].table_infos[0].id, 1);
-        assert_eq!(ret.input_levels[1].table_infos[0].id, 5);
-        assert_eq!(ret.input_levels[1].table_infos[1].id, 6);
+        assert_eq!(ret.input_levels[0].table_infos[0].seq_id(), 1);
+        assert_eq!(ret.input_levels[1].table_infos[0].seq_id(), 5);
+        assert_eq!(ret.input_levels[1].table_infos[1].seq_id(), 6);
     }
 
     #[test]
@@ -323,10 +324,10 @@ pub mod tests {
         assert_eq!(ret.input_levels[1].level_idx, 2);
 
         assert_eq!(ret.input_levels[0].table_infos.len(), 2);
-        assert_eq!(ret.input_levels[0].table_infos[0].id, 0);
-        assert_eq!(ret.input_levels[0].table_infos[1].id, 1);
+        assert_eq!(ret.input_levels[0].table_infos[0].seq_id(), 0);
+        assert_eq!(ret.input_levels[0].table_infos[1].seq_id(), 1);
 
         assert_eq!(ret.input_levels[1].table_infos.len(), 1);
-        assert_eq!(ret.input_levels[1].table_infos[0].id, 4);
+        assert_eq!(ret.input_levels[1].table_infos[0].seq_id(), 4);
     }
 }

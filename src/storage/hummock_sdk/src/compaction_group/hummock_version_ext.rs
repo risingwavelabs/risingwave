@@ -15,10 +15,10 @@
 use std::collections::HashSet;
 
 use itertools::Itertools;
-use risingwave_pb::hummock::{HummockVersion, HummockVersionDelta, Level, SstableInfo};
+use risingwave_pb::hummock::{HummockVersion, HummockVersionDelta, Level, SstableId, SstableInfo};
 
 use crate::prost_key_range::KeyRangeExt;
-use crate::CompactionGroupId;
+use crate::{CompactionGroupId, HummockSstableId};
 
 pub trait HummockVersionExt {
     /// Gets `compaction_group_id`'s levels
@@ -32,11 +32,11 @@ pub trait HummockVersionExt {
     ///
     /// Levels belonging to the same compaction group retain their relative order.
     fn get_combined_levels(&self) -> Vec<&Level>;
-    fn get_sst_ids(&self) -> Vec<u64>;
+    fn get_sst_ids(&self) -> Vec<HummockSstableId>;
     fn apply_compact_ssts(
         levels: &mut Vec<Level>,
         delete_sst_levels: &[u32],
-        delete_sst_ids_set: &HashSet<u64>,
+        delete_sst_ids_set: &HashSet<HummockSstableId>,
         insert_sst_level: u32,
         insert_table_infos: Vec<SstableInfo>,
     );
@@ -71,18 +71,23 @@ impl HummockVersionExt for HummockVersion {
         combined_levels
     }
 
-    fn get_sst_ids(&self) -> Vec<u64> {
+    fn get_sst_ids(&self) -> Vec<HummockSstableId> {
         self.levels
             .iter()
             .flat_map(|(_, l)| &l.levels)
-            .flat_map(|level| level.table_infos.iter().map(|table_info| table_info.id))
+            .flat_map(|level| {
+                level
+                    .table_infos
+                    .iter()
+                    .map(|table_info| table_info.id_as_int())
+            })
             .collect_vec()
     }
 
     fn apply_compact_ssts(
         levels: &mut Vec<Level>,
         delete_sst_levels: &[u32],
-        delete_sst_ids_set: &HashSet<u64>,
+        delete_sst_ids_set: &HashSet<HummockSstableId>,
         insert_sst_level: u32,
         insert_table_infos: Vec<SstableInfo>,
     ) {
@@ -112,7 +117,13 @@ impl HummockVersionExt for HummockVersion {
             for level_delta in &level_deltas.level_deltas {
                 if !level_delta.removed_table_ids.is_empty() {
                     delete_sst_levels.push(level_delta.level_idx);
-                    delete_sst_ids_set.extend(level_delta.removed_table_ids.iter().clone());
+                    delete_sst_ids_set.extend(
+                        level_delta
+                            .removed_table_ids
+                            .iter()
+                            .map(|s| s.as_int())
+                            .clone(),
+                    );
                 }
                 if !level_delta.inserted_table_infos.is_empty() {
                     insert_sst_level = level_delta.level_idx;
@@ -137,13 +148,13 @@ impl HummockVersionExt for HummockVersion {
 
 fn level_delete_ssts(
     operand: &mut Level,
-    delete_sst_ids_superset: &HashSet<u64>,
+    delete_sst_ids_superset: &HashSet<HummockSstableId>,
     l0_remove_position: &mut Option<usize>,
 ) {
     let mut new_table_infos = Vec::with_capacity(operand.table_infos.len());
     let mut new_total_file_size = 0;
     for table_info in &operand.table_infos {
-        if delete_sst_ids_superset.contains(&table_info.id) {
+        if delete_sst_ids_superset.contains(&table_info.id_as_int()) {
             if operand.level_idx == 0 && l0_remove_position.is_none() {
                 *l0_remove_position = Some(new_table_infos.len());
             }
@@ -184,5 +195,80 @@ fn level_insert_ssts(
                 a.compare(b)
             });
         }
+    }
+}
+
+pub trait SstableIdExt {
+    fn as_int(&self) -> HummockSstableId;
+    fn as_string(&self) -> String;
+    fn from_int(id: HummockSstableId) -> Self;
+}
+
+const NODE_ID_MASK: u128 = (u64::MAX as u128) << 64;
+const SEQ_ID_MASK: u128 = u64::MAX as u128;
+
+impl SstableIdExt for SstableId {
+    fn as_int(&self) -> HummockSstableId {
+        debug_assert_eq!(HummockSstableId::BITS, 128);
+        ((self.node_id as u128) << 64) | (self.seq_id as u128 & SEQ_ID_MASK)
+    }
+
+    fn as_string(&self) -> String {
+        format!("{:x}_{:x}", self.node_id, self.seq_id)
+    }
+
+    fn from_int(id: HummockSstableId) -> Self {
+        Self {
+            node_id: ((id & NODE_ID_MASK) >> 64) as u64,
+            seq_id: (id & SEQ_ID_MASK) as u64,
+        }
+    }
+}
+
+pub trait SstableInfoExt {
+    /// Returns SST id as int
+    fn id_as_int(&self) -> HummockSstableId;
+    /// Returns node id in SST id
+    fn node_id(&self) -> u64;
+    /// Returns seq id in SST id
+    fn seq_id(&self) -> u64;
+}
+
+impl SstableInfoExt for SstableInfo {
+    fn id_as_int(&self) -> HummockSstableId {
+        self.id.as_ref().unwrap().as_int()
+    }
+
+    fn node_id(&self) -> u64 {
+        self.id.as_ref().unwrap().node_id
+    }
+
+    fn seq_id(&self) -> u64 {
+        self.id.as_ref().unwrap().seq_id
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use risingwave_pb::hummock::SstableId;
+
+    use crate::SstableIdExt;
+
+    #[test]
+    fn test_sstable_id_ext() {
+        let id = SstableId {
+            node_id: 1,
+            seq_id: 2,
+        };
+        assert_eq!(id.as_int(), 18446744073709551618u128);
+        assert_eq!(id.as_string(), "1_2");
+
+        let id = SstableId {
+            node_id: u64::MAX - 1,
+            seq_id: u64::MAX - 2,
+        };
+
+        assert_eq!(id.as_int(), 340282366920938463444927863358058659837);
+        assert_eq!(id.as_string(), "fffffffffffffffe_fffffffffffffffd");
     }
 }

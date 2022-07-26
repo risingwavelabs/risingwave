@@ -25,9 +25,13 @@ use std::collections::{HashMap, HashSet};
 use std::fmt::{Debug, Formatter};
 use std::sync::Arc;
 
-use risingwave_hummock_sdk::compaction_group::hummock_version_ext::HummockVersionExt;
+use risingwave_hummock_sdk::compaction_group::hummock_version_ext::{
+    HummockVersionExt, SstableInfoExt,
+};
 use risingwave_hummock_sdk::prost_key_range::KeyRangeExt;
-use risingwave_hummock_sdk::{CompactionGroupId, HummockCompactionTaskId, HummockEpoch};
+use risingwave_hummock_sdk::{
+    CompactionGroupId, HummockCompactionTaskId, HummockEpoch, HummockSstableId,
+};
 use risingwave_pb::hummock::compaction_config::CompactionMode;
 use risingwave_pb::hummock::{
     CompactTask, CompactionConfig, HummockVersion, InputLevel, KeyRange, Level, LevelType,
@@ -242,10 +246,10 @@ impl CompactStatus {
     ) -> HummockVersion {
         let mut new_version = based_hummock_version;
         new_version.safe_epoch = std::cmp::max(new_version.safe_epoch, compact_task.watermark);
-        let mut removed_table: HashSet<u64> = HashSet::default();
+        let mut removed_table: HashSet<HummockSstableId> = HashSet::default();
         for input_level in &compact_task.input_ssts {
             for table in &input_level.table_infos {
-                removed_table.insert(table.id);
+                removed_table.insert(table.id_as_int());
             }
         }
         let new_version_levels =

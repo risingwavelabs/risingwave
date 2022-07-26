@@ -17,7 +17,9 @@ use std::cmp::Ordering;
 use itertools::Itertools;
 use risingwave_common::util::epoch::INVALID_EPOCH;
 use risingwave_hummock_sdk::compact::compact_task_to_string;
-use risingwave_hummock_sdk::compaction_group::hummock_version_ext::HummockVersionExt;
+use risingwave_hummock_sdk::compaction_group::hummock_version_ext::{
+    HummockVersionExt, SstableInfoExt,
+};
 use risingwave_hummock_sdk::compaction_group::StaticCompactionGroupId;
 // use risingwave_hummock_sdk::key_range::KeyRange;
 use risingwave_hummock_sdk::{
@@ -265,9 +267,9 @@ async fn test_hummock_table() {
             .get_compaction_group_levels(StaticCompactionGroupId::StateDefault.into())
             .iter()
             .flat_map(|level| level.table_infos.iter())
-            .map(|info| info.id)
+            .map(|info| info.id_as_int())
             .sorted()
-            .cmp(original_tables.iter().map(|ot| ot.id).sorted())
+            .cmp(original_tables.iter().map(|ot| ot.id_as_int()).sorted())
     );
 
     // Confirm tables got are equal to original tables
@@ -647,8 +649,8 @@ async fn test_pin_snapshot_response_lost() {
     let test_tables = generate_test_tables(
         epoch,
         vec![
-            hummock_manager.get_new_table_id().await.unwrap(),
-            hummock_manager.get_new_table_id().await.unwrap(),
+            hummock_manager.get_new_sst_id(context_id).await.unwrap(),
+            hummock_manager.get_new_sst_id(context_id).await.unwrap(),
         ],
     );
     register_sstable_infos_to_compaction_group(
@@ -676,8 +678,8 @@ async fn test_pin_snapshot_response_lost() {
     let test_tables = generate_test_tables(
         epoch,
         vec![
-            hummock_manager.get_new_table_id().await.unwrap(),
-            hummock_manager.get_new_table_id().await.unwrap(),
+            hummock_manager.get_new_sst_id(context_id).await.unwrap(),
+            hummock_manager.get_new_sst_id(context_id).await.unwrap(),
         ],
     );
     register_sstable_infos_to_compaction_group(
@@ -714,8 +716,8 @@ async fn test_pin_snapshot_response_lost() {
     let test_tables = generate_test_tables(
         epoch,
         vec![
-            hummock_manager.get_new_table_id().await.unwrap(),
-            hummock_manager.get_new_table_id().await.unwrap(),
+            hummock_manager.get_new_sst_id(context_id).await.unwrap(),
+            hummock_manager.get_new_sst_id(context_id).await.unwrap(),
         ],
     );
     register_sstable_infos_to_compaction_group(
@@ -743,8 +745,8 @@ async fn test_pin_snapshot_response_lost() {
     let test_tables = generate_test_tables(
         epoch,
         vec![
-            hummock_manager.get_new_table_id().await.unwrap(),
-            hummock_manager.get_new_table_id().await.unwrap(),
+            hummock_manager.get_new_sst_id(context_id).await.unwrap(),
+            hummock_manager.get_new_sst_id(context_id).await.unwrap(),
         ],
     );
     register_sstable_infos_to_compaction_group(

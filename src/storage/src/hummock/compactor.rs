@@ -27,6 +27,7 @@ use parking_lot::RwLock;
 use risingwave_common::config::constant::hummock::{CompactionFilterFlag, TABLE_OPTION_DUMMY_TTL};
 use risingwave_common::config::StorageConfig;
 use risingwave_hummock_sdk::compact::compact_task_to_string;
+use risingwave_hummock_sdk::compaction_group::hummock_version_ext::{SstableIdExt, SstableInfoExt};
 use risingwave_hummock_sdk::compaction_group::StaticCompactionGroupId;
 use risingwave_hummock_sdk::key::{
     extract_table_id_and_epoch, get_epoch, get_table_id, Epoch, FullKey,
@@ -35,7 +36,7 @@ use risingwave_hummock_sdk::key_range::KeyRange;
 use risingwave_hummock_sdk::slice_transform::SliceTransformImpl;
 use risingwave_hummock_sdk::{CompactionGroupId, HummockSstableId, VersionedComparator};
 use risingwave_pb::hummock::{
-    CompactTask, LevelType, SstableInfo, SubscribeCompactTasksResponse, VacuumTask,
+    CompactTask, LevelType, SstableId, SstableInfo, SubscribeCompactTasksResponse, VacuumTask,
 };
 use risingwave_rpc_client::HummockMetaClient;
 use tokio::sync::oneshot::Sender;
@@ -576,7 +577,7 @@ impl Compactor {
         for (_, ssts) in output_ssts {
             for (sst, table_ids) in ssts {
                 let sst_info = SstableInfo {
-                    id: sst.id,
+                    id: Some(SstableId::from_int(sst.id)),
                     key_range: Some(risingwave_pb::hummock::KeyRange {
                         left: sst.meta.smallest_key.clone(),
                         right: sst.meta.largest_key.clone(),
@@ -610,7 +611,7 @@ impl Compactor {
             .await
         {
             tracing::warn!(
-                "Failed to report compaction task: {}, error: {}",
+                "Failed to report compaction task: {}, error: {:#?}",
                 self.compact_task.task_id,
                 e
             );
@@ -787,7 +788,7 @@ impl Compactor {
                     let table = self
                         .context
                         .sstable_store
-                        .load_table(table_info.id, true, &mut stats)
+                        .load_table(table_info.id_as_int(), true, &mut stats)
                         .await?;
                     table_iters.push(Box::new(SstableIterator::create(
                         table,
@@ -810,7 +811,14 @@ impl Compactor {
         hummock_meta_client: Arc<dyn HummockMetaClient>,
     ) {
         if let Some(vacuum_task) = vacuum_task {
-            tracing::info!("Try to vacuum SSTs {:?}", vacuum_task.sstable_ids);
+            tracing::info!(
+                "Try to vacuum SSTs {:?}",
+                vacuum_task
+                    .sstable_ids
+                    .iter()
+                    .map(|s| s.as_int())
+                    .collect_vec()
+            );
             match Vacuum::vacuum(
                 sstable_store.clone(),
                 vacuum_task,

@@ -16,8 +16,11 @@
 
 mod version_cmp;
 
-use risingwave_pb::hummock::SstableInfo;
+use risingwave_pb::hummock::{SstableId, SstableInfo};
 pub use version_cmp::*;
+
+use crate::compaction_group::hummock_version_ext::SstableIdExt;
+
 pub mod compact;
 pub mod compaction_group;
 pub mod key;
@@ -25,7 +28,7 @@ pub mod key_range;
 pub mod prost_key_range;
 pub mod slice_transform;
 
-pub type HummockSstableId = u64;
+pub type HummockSstableId = u128;
 pub type HummockRefCount = u64;
 pub type HummockVersionId = u64;
 pub type HummockContextId = u32;
@@ -35,19 +38,21 @@ pub type CompactionGroupId = u64;
 pub const INVALID_VERSION_ID: HummockVersionId = 0;
 pub const FIRST_VERSION_ID: HummockVersionId = 1;
 
-pub const LOCAL_SST_ID_MASK: HummockSstableId = 1 << (HummockSstableId::BITS - 1);
-pub const REMOTE_SST_ID_MASK: HummockSstableId = !LOCAL_SST_ID_MASK;
-
 pub type LocalSstableInfo = (CompactionGroupId, SstableInfo);
 
-pub fn get_remote_sst_id(id: HummockSstableId) -> HummockSstableId {
-    id & REMOTE_SST_ID_MASK
-}
-
-pub fn get_local_sst_id(id: HummockSstableId) -> HummockSstableId {
-    id | LOCAL_SST_ID_MASK
+const INVALID_NODE_ID: u64 = u64::MAX;
+pub fn get_local_sst_id(seq_id: u64) -> HummockSstableId {
+    SstableId {
+        node_id: INVALID_NODE_ID,
+        seq_id,
+    }
+    .as_int()
 }
 
 pub fn is_remote_sst_id(id: HummockSstableId) -> bool {
-    id & LOCAL_SST_ID_MASK == 0
+    SstableId::from_int(id).node_id != INVALID_NODE_ID
+}
+
+pub fn get_sst_id_hash(id: HummockSstableId) -> u64 {
+    (id % u64::MAX as HummockSstableId) as u64
 }

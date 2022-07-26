@@ -15,9 +15,10 @@
 use std::collections::HashSet;
 use std::sync::Arc;
 
+use risingwave_hummock_sdk::compaction_group::hummock_version_ext::SstableInfoExt;
 use risingwave_hummock_sdk::key::{user_key, FullKey};
 use risingwave_hummock_sdk::prost_key_range::KeyRangeExt;
-use risingwave_hummock_sdk::HummockEpoch;
+use risingwave_hummock_sdk::{HummockEpoch, HummockSstableId};
 use risingwave_pb::hummock::{
     CompactionConfig, InputLevel, KeyRange, Level, LevelType, SstableInfo,
 };
@@ -51,7 +52,7 @@ impl CompactionPicker for TierCompactionPicker {
         let mut idx = 0;
         while idx < levels[0].table_infos.len() {
             let table = &levels[0].table_infos[idx];
-            if level_handlers[0].is_pending_compact(&table.id) {
+            if level_handlers[0].is_pending_compact(&table.id_as_int()) {
                 idx += 1;
                 continue;
             }
@@ -70,7 +71,7 @@ impl CompactionPicker for TierCompactionPicker {
             );
 
             for other in &levels[0].table_infos[idx + 1..] {
-                if level_handlers[0].is_pending_compact(&other.id) {
+                if level_handlers[0].is_pending_compact(&other.id_as_int()) {
                     break;
                 }
                 // no need to trigger a bigger compaction
@@ -128,17 +129,17 @@ pub struct LevelCompactionPicker {
 #[derive(Default)]
 pub struct TargetFilesInfo {
     tables: Vec<SstableInfo>,
-    table_ids: HashSet<u64>,
+    table_ids: HashSet<HummockSstableId>,
     compaction_bytes: u64,
 }
 
 impl TargetFilesInfo {
     fn add_tables(&mut self, new_add_tables: Vec<SstableInfo>) {
         for table in new_add_tables {
-            if self.table_ids.contains(&table.id) {
+            if self.table_ids.contains(&table.id_as_int()) {
                 continue;
             }
-            self.table_ids.insert(table.id);
+            self.table_ids.insert(table.id_as_int());
             self.compaction_bytes += table.file_size;
             self.tables.push(table);
         }
@@ -147,7 +148,7 @@ impl TargetFilesInfo {
     fn calc_inc_compaction_size(&self, new_add_tables: &[SstableInfo]) -> u64 {
         new_add_tables
             .iter()
-            .filter(|table| !self.table_ids.contains(&table.id))
+            .filter(|table| !self.table_ids.contains(&table.id_as_int()))
             .map(|table| table.file_size)
             .sum()
     }
@@ -243,7 +244,7 @@ impl LevelCompactionPicker {
             .check_base_level_overlap(select_tables, &level.table_infos);
         if new_add_tables
             .iter()
-            .any(|table| level_handlers.is_pending_compact(&table.id))
+            .any(|table| level_handlers.is_pending_compact(&table.id_as_int()))
         {
             return None;
         }
@@ -260,7 +261,7 @@ impl LevelCompactionPicker {
         let mut info = self.overlap_strategy.create_overlap_info();
         for idx in 0..select_level.table_infos.len() {
             let select_table = select_level.table_infos[idx].clone();
-            if select_level_handler.is_pending_compact(&select_table.id) {
+            if select_level_handler.is_pending_compact(&select_table.id_as_int()) {
                 info.update(&select_table);
                 continue;
             }
@@ -286,7 +287,7 @@ impl LevelCompactionPicker {
             }
             // try expand more L0 files if the currenct compaction job is too small.
             for other in &select_level.table_infos[idx + 1..] {
-                if select_level_handler.is_pending_compact(&other.id) {
+                if select_level_handler.is_pending_compact(&other.id_as_int()) {
                     break;
                 }
                 if select_compaction_bytes >= self.config.max_compaction_bytes {
@@ -403,8 +404,8 @@ pub mod tests {
             .unwrap();
         assert_eq!(levels_handler[0].get_pending_file_count(), 2);
         assert_eq!(levels_handler[1].get_pending_file_count(), 2);
-        assert_eq!(ret.input_levels[1].table_infos[0].id, 2);
-        assert_eq!(ret.input_levels[1].table_infos[1].id, 1);
+        assert_eq!(ret.input_levels[1].table_infos[0].seq_id(), 2);
+        assert_eq!(ret.input_levels[1].table_infos[1].seq_id(), 1);
 
         // no conflict with the last job
         levels[0]
@@ -420,8 +421,8 @@ pub mod tests {
             .unwrap();
         assert_eq!(levels_handler[0].get_pending_file_count(), 3);
         assert_eq!(levels_handler[1].get_pending_file_count(), 3);
-        assert_eq!(ret.input_levels[1].table_infos[0].id, 0);
-        assert_eq!(ret.input_levels[0].table_infos[0].id, 6);
+        assert_eq!(ret.input_levels[1].table_infos[0].seq_id(), 0);
+        assert_eq!(ret.input_levels[0].table_infos[0].seq_id(), 6);
 
         // the first idle table in L0 is table 6 and its confict with the last job so we can not
         // pick table 7.
@@ -448,11 +449,11 @@ pub mod tests {
         let ret = picker
             .pick_compaction(&levels, &mut levels_handler)
             .unwrap();
-        assert_eq!(ret.input_levels[0].table_infos[0].id, 7);
-        assert_eq!(ret.input_levels[0].table_infos[1].id, 8);
-        assert_eq!(ret.input_levels[0].table_infos[2].id, 9);
+        assert_eq!(ret.input_levels[0].table_infos[0].seq_id(), 7);
+        assert_eq!(ret.input_levels[0].table_infos[1].seq_id(), 8);
+        assert_eq!(ret.input_levels[0].table_infos[2].seq_id(), 9);
         levels_handler[0].remove_task(1);
-        levels[0].table_infos.retain(|table| table.id < 7);
+        levels[0].table_infos.retain(|table| table.seq_id() < 7);
         levels[0]
             .table_infos
             .push(generate_table(10, 1, 100, 200, 3));
@@ -520,7 +521,7 @@ pub mod tests {
             ret.input_levels[0]
                 .table_infos
                 .iter()
-                .map(|t| t.id)
+                .map(|t| t.seq_id())
                 .collect_vec(),
             vec![1, 2]
         );
@@ -529,7 +530,7 @@ pub mod tests {
             ret.input_levels[1]
                 .table_infos
                 .iter()
-                .map(|t| t.id)
+                .map(|t| t.seq_id())
                 .collect_vec(),
             vec![4, 5]
         );
@@ -626,7 +627,7 @@ pub mod tests {
             ret.input_levels[0]
                 .table_infos
                 .iter()
-                .map(|t| t.id)
+                .map(|t| t.seq_id())
                 .collect_vec(),
             vec![3]
         );
@@ -705,10 +706,10 @@ pub mod tests {
             .unwrap();
         assert_eq!(levels_handler[0].get_pending_file_count(), 2);
         assert_eq!(levels_handler[1].get_pending_file_count(), 2);
-        assert_eq!(ret.input_levels[0].table_infos[0].id, 1);
-        assert_eq!(ret.input_levels[0].table_infos[1].id, 2);
-        assert_eq!(ret.input_levels[1].table_infos[0].id, 4);
-        assert_eq!(ret.input_levels[1].table_infos[1].id, 5);
+        assert_eq!(ret.input_levels[0].table_infos[0].seq_id(), 1);
+        assert_eq!(ret.input_levels[0].table_infos[1].seq_id(), 2);
+        assert_eq!(ret.input_levels[1].table_infos[0].seq_id(), 4);
+        assert_eq!(ret.input_levels[1].table_infos[1].seq_id(), 5);
     }
 
     #[test]

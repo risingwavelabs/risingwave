@@ -167,6 +167,7 @@ mod tests {
     use std::sync::atomic::Ordering::SeqCst;
 
     use itertools::Itertools;
+    use risingwave_hummock_sdk::get_local_sst_id;
 
     use super::*;
     use crate::hummock::iterator::test_utils::mock_sstable_store;
@@ -181,7 +182,7 @@ mod tests {
         let table_capacity = 4 * block_size;
         let get_id_and_builder = || async {
             Ok(SstableBuilder::new(
-                next_id.fetch_add(1, SeqCst),
+                get_local_sst_id(next_id.fetch_add(1, SeqCst)),
                 SstableBuilderOptions {
                     capacity: table_capacity,
                     block_capacity: block_size,
@@ -208,7 +209,7 @@ mod tests {
         let table_capacity = 4 * block_size;
         let get_id_and_builder = || async {
             Ok(SstableBuilder::new(
-                next_id.fetch_add(1, SeqCst),
+                get_local_sst_id(next_id.fetch_add(1, SeqCst)),
                 SstableBuilderOptions {
                     capacity: table_capacity,
                     block_capacity: block_size,
@@ -246,7 +247,7 @@ mod tests {
         let mut builder = CapacitySplitTableBuilder::new(
             || async {
                 Ok(SstableBuilder::new(
-                    next_id.fetch_add(1, SeqCst),
+                    get_local_sst_id(next_id.fetch_add(1, SeqCst)),
                     default_builder_opt_for_test(),
                 ))
             },
@@ -291,7 +292,7 @@ mod tests {
         let mut builder = CapacitySplitTableBuilder::new(
             || async {
                 Ok(SstableBuilder::new(
-                    next_id.fetch_add(1, SeqCst),
+                    get_local_sst_id(next_id.fetch_add(1, SeqCst)),
                     default_builder_opt_for_test(),
                 ))
             },

@@ -20,9 +20,10 @@ use std::sync::Arc;
 use futures::FutureExt;
 use parking_lot::RwLock;
 use risingwave_common::config::StorageConfig;
+use risingwave_hummock_sdk::compaction_group::hummock_version_ext::SstableIdExt;
 use risingwave_hummock_sdk::slice_transform::SliceTransformImpl;
 use risingwave_hummock_sdk::{get_local_sst_id, HummockEpoch, LocalSstableInfo};
-use risingwave_pb::hummock::SstableInfo;
+use risingwave_pb::hummock::{SstableId, SstableInfo};
 use risingwave_rpc_client::HummockMetaClient;
 
 use crate::hummock::compaction_executor::CompactionExecutor;
@@ -136,7 +137,7 @@ impl SharedBufferUploader {
                 (
                     compaction_group_id,
                     SstableInfo {
-                        id: sst.id,
+                        id: Some(SstableId::from_int(sst.id)),
                         key_range: Some(risingwave_pb::hummock::KeyRange {
                             left: sst.meta.smallest_key.clone(),
                             right: sst.meta.largest_key.clone(),

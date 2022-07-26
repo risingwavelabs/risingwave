@@ -19,6 +19,7 @@ use std::sync::Arc;
 
 use bytes::Bytes;
 use itertools::Itertools;
+use risingwave_hummock_sdk::compaction_group::hummock_version_ext::SstableInfoExt;
 use risingwave_hummock_sdk::key::key_with_epoch;
 use risingwave_hummock_sdk::LocalSstableInfo;
 use risingwave_pb::hummock::LevelType;
@@ -164,7 +165,7 @@ impl HummockStorage {
                 for table_info in table_infos.into_iter().rev() {
                     let table = self
                         .sstable_store
-                        .sstable(table_info.id, &mut stats)
+                        .sstable(table_info.id_as_int(), &mut stats)
                         .await?;
                     overlapped_iters.push(Box::new(T::SstableIteratorType::create(
                         table,
@@ -248,7 +249,7 @@ impl HummockStorage {
                         UncommittedData::Sst((_, table_info)) => {
                             let table = self
                                 .sstable_store
-                                .sstable(table_info.id, &mut stats)
+                                .sstable(table_info.id_as_int(), &mut stats)
                                 .await?;
                             table_counts += 1;
                             if let Some(v) = self
@@ -280,7 +281,7 @@ impl HummockStorage {
                 for table_info in table_infos.into_iter().rev() {
                     let table = self
                         .sstable_store
-                        .sstable(table_info.id, &mut stats)
+                        .sstable(table_info.id_as_int(), &mut stats)
                         .await?;
                     table_counts += 1;
                     if let Some(v) = self

@@ -15,6 +15,7 @@
 use std::sync::Arc;
 
 use itertools::Itertools;
+use risingwave_hummock_sdk::compaction_group::hummock_version_ext::SstableInfoExt;
 use risingwave_pb::hummock::{InputLevel, Level, SstableInfo};
 
 use super::overlap_strategy::OverlapInfo;
@@ -87,7 +88,7 @@ impl CompactionPicker for ManualCompactionPicker {
             .collect();
 
         for table in &level_table_infos {
-            if level_handlers[level].is_pending_compact(&table.id) {
+            if level_handlers[level].is_pending_compact(&table.id_as_int()) {
                 continue;
             }
 
@@ -97,7 +98,7 @@ impl CompactionPicker for ManualCompactionPicker {
 
             if overlap_files
                 .iter()
-                .any(|table| level_handlers[target_level].is_pending_compact(&table.id))
+                .any(|table| level_handlers[target_level].is_pending_compact(&table.id_as_int()))
             {
                 continue;
             }
@@ -115,7 +116,7 @@ impl CompactionPicker for ManualCompactionPicker {
 
         if target_input_ssts
             .iter()
-            .any(|table| level_handlers[level].is_pending_compact(&table.id))
+            .any(|table| level_handlers[level].is_pending_compact(&table.id_as_int()))
         {
             return None;
         }

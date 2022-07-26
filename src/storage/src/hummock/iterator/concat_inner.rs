@@ -16,6 +16,7 @@ use std::cmp::Ordering::{Equal, Greater, Less};
 use std::sync::Arc;
 
 use async_trait::async_trait;
+use risingwave_hummock_sdk::compaction_group::hummock_version_ext::SstableInfoExt;
 use risingwave_hummock_sdk::VersionedComparator;
 use risingwave_pb::hummock::SstableInfo;
 
@@ -70,11 +71,11 @@ impl<TI: SstableIteratorType> ConcatIteratorInner<TI> {
         } else {
             let table = if self.read_options.prefetch {
                 self.sstable_store
-                    .load_table(self.tables[idx].id, true, &mut self.stats)
+                    .load_table(self.tables[idx].id_as_int(), true, &mut self.stats)
                     .await?
             } else {
                 self.sstable_store
-                    .sstable(self.tables[idx].id, &mut self.stats)
+                    .sstable(self.tables[idx].id_as_int(), &mut self.stats)
                     .await?
             };
             let mut sstable_iter =

@@ -14,6 +14,7 @@
 
 use risingwave_pb::hummock::{CompactTask, SstableInfo};
 
+use crate::compaction_group::hummock_version_ext::SstableInfoExt;
 use crate::HummockSstableId;
 
 pub fn compact_task_to_string(compact_task: &CompactTask) -> String {
@@ -34,7 +35,7 @@ pub fn compact_task_to_string(compact_task: &CompactTask) -> String {
         let tables: Vec<(HummockSstableId, String)> = level_entry
             .table_infos
             .iter()
-            .map(|table| (table.id, format!("{}KB", table.file_size / 1024)))
+            .map(|table| (table.id_as_int(), format!("{}KB", table.file_size / 1024)))
             .collect();
         writeln!(s, "Level {:?}: {:?} ", level_entry.level_idx, tables).unwrap();
     }
@@ -61,7 +62,9 @@ pub fn append_sstable_info_to_string(s: &mut String, sstable_info: &SstableInfo)
     writeln!(
         s,
         "SstableInfo: id={:?}, KeyRange={:?}, size={:?}",
-        sstable_info.id, key_range_str, sstable_info.file_size
+        sstable_info.id_as_int(),
+        key_range_str,
+        sstable_info.file_size
     )
     .unwrap();
 }

@@ -16,6 +16,7 @@ use std::cmp::Ordering;
 use std::ops::Bound::{Excluded, Included, Unbounded};
 use std::ops::RangeBounds;
 
+use risingwave_hummock_sdk::compaction_group::hummock_version_ext::SstableInfoExt;
 use risingwave_hummock_sdk::key::user_key;
 use risingwave_pb::hummock::{Level, SstableInfo};
 
@@ -64,7 +65,7 @@ pub fn validate_table_key_range(levels: &[Level]) -> HummockResult<()> {
             if t.key_range.is_none() {
                 return Err(HummockError::meta_error(format!(
                     "key_range in table [{}] is none",
-                    t.id
+                    t.id_as_int()
                 )));
             }
         }

@@ -17,8 +17,10 @@ use std::sync::Arc;
 
 use bytes::Bytes;
 use fail::fail_point;
-use risingwave_hummock_sdk::{is_remote_sst_id, HummockSstableId};
+use risingwave_hummock_sdk::compaction_group::hummock_version_ext::SstableIdExt;
+use risingwave_hummock_sdk::{get_sst_id_hash, is_remote_sst_id, HummockSstableId};
 use risingwave_object_store::object::{get_local_path, BlockLocation, ObjectStore, ObjectStoreRef};
+use risingwave_pb::hummock::SstableId;
 
 use super::{Block, BlockCache, Sstable, SstableMeta};
 use crate::hummock::{BlockHolder, CachableEntry, HummockError, HummockResult, LruCache};
@@ -95,8 +97,12 @@ impl SstableStore {
         }
 
         if let CachePolicy::Fill = policy {
-            self.meta_cache
-                .insert(sst.id, sst.id, sst.encoded_size(), Box::new(sst));
+            self.meta_cache.insert(
+                sst.id,
+                get_sst_id_hash(sst.id),
+                sst.encoded_size(),
+                Box::new(sst),
+            );
         }
 
         Ok(())
@@ -197,7 +203,11 @@ impl SstableStore {
     }
 
     pub fn get_sst_meta_path(&self, sst_id: HummockSstableId) -> String {
-        let mut ret = format!("{}/{}.meta", self.path, sst_id);
+        let mut ret = format!(
+            "{}/{}.meta",
+            self.path,
+            SstableId::from_int(sst_id).as_string()
+        );
         if !is_remote_sst_id(sst_id) {
             ret = get_local_path(&ret);
         }
@@ -205,7 +215,11 @@ impl SstableStore {
     }
 
     pub fn get_sst_data_path(&self, sst_id: HummockSstableId) -> String {
-        let mut ret = format!("{}/{}.data", self.path, sst_id);
+        let mut ret = format!(
+            "{}/{}.data",
+            self.path,
+            SstableId::from_int(sst_id).as_string()
+        );
         if !is_remote_sst_id(sst_id) {
             ret = get_local_path(&ret);
         }
@@ -240,38 +254,42 @@ impl SstableStore {
             stats.cache_meta_block_total += 1;
             let entry = self
                 .meta_cache
-                .lookup_with_request_dedup::<_, HummockError, _>(sst_id, sst_id, || {
-                    let store = self.store.clone();
-                    let meta_path = self.get_sst_meta_path(sst_id);
-                    let data_path = self.get_sst_data_path(sst_id);
-                    stats.cache_meta_block_miss += 1;
+                .lookup_with_request_dedup::<_, HummockError, _>(
+                    get_sst_id_hash(sst_id),
+                    sst_id,
+                    || {
+                        let store = self.store.clone();
+                        let meta_path = self.get_sst_meta_path(sst_id);
+                        let data_path = self.get_sst_data_path(sst_id);
+                        stats.cache_meta_block_miss += 1;
 
-                    async move {
-                        let meta = match meta_data {
-                            Some(data) => data,
-                            None => {
-                                let buf = store
-                                    .read(&meta_path, None)
+                        async move {
+                            let meta = match meta_data {
+                                Some(data) => data,
+                                None => {
+                                    let buf = store
+                                        .read(&meta_path, None)
+                                        .await
+                                        .map_err(HummockError::object_io_error)?;
+                                    SstableMeta::decode(&mut &buf[..])?
+                                }
+                            };
+                            let mut size = meta.encoded_size();
+                            let sst = if load_data {
+                                size = meta.estimated_size as usize;
+
+                                let block_data = store
+                                    .read(&data_path, None)
                                     .await
                                     .map_err(HummockError::object_io_error)?;
-                                SstableMeta::decode(&mut &buf[..])?
-                            }
-                        };
-                        let mut size = meta.encoded_size();
-                        let sst = if load_data {
-                            size = meta.estimated_size as usize;
-
-                            let block_data = store
-                                .read(&data_path, None)
-                                .await
-                                .map_err(HummockError::object_io_error)?;
-                            Sstable::new_with_data(sst_id, meta, block_data)?
-                        } else {
-                            Sstable::new(sst_id, meta)
-                        };
-                        Ok((Box::new(sst), size))
-                    }
-                })
+                                Sstable::new_with_data(sst_id, meta, block_data)?
+                            } else {
+                                Sstable::new(sst_id, meta)
+                            };
+                            Ok((Box::new(sst), size))
+                        }
+                    },
+                )
                 .await
                 .map_err(|e| {
                     HummockError::other(format!(
@@ -285,7 +303,7 @@ impl SstableStore {
             // remove sst from cache to avoid multiple thread acquire the same sstable.
             meta_data = Some(entry.value().meta.clone());
             drop(entry);
-            self.meta_cache.erase(sst_id, &sst_id);
+            self.meta_cache.erase(get_sst_id_hash(sst_id), &sst_id);
         }
     }
 

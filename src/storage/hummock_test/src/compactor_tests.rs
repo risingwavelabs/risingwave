@@ -26,7 +26,9 @@ mod tests {
     use risingwave_common::config::constant::hummock::CompactionFilterFlag;
     use risingwave_common::config::StorageConfig;
     use risingwave_common::util::epoch::Epoch;
-    use risingwave_hummock_sdk::compaction_group::hummock_version_ext::HummockVersionExt;
+    use risingwave_hummock_sdk::compaction_group::hummock_version_ext::{
+        HummockVersionExt, SstableInfoExt,
+    };
     use risingwave_hummock_sdk::compaction_group::StaticCompactionGroupId;
     use risingwave_hummock_sdk::key::get_table_id;
     use risingwave_meta::hummock::compaction::ManualCompactionOption;
@@ -190,7 +192,7 @@ mod tests {
             .table_infos
             .first()
             .unwrap()
-            .id;
+            .id_as_int();
         storage
             .local_version_manager()
             .try_update_pinned_version(None, (false, vec![], Some(version)));
@@ -288,7 +290,7 @@ mod tests {
             .table_infos
             .first()
             .unwrap()
-            .id;
+            .id_as_int();
         let table = storage
             .sstable_store()
             .sstable(output_table_id, &mut StoreLocalStatistic::default())
@@ -538,7 +540,7 @@ mod tests {
             .get_compaction_group_levels(StaticCompactionGroupId::StateDefault.into())
             .iter()
             .flat_map(|level| level.table_infos.iter())
-            .map(|table_info| table_info.id)
+            .map(|table_info| table_info.id_as_int())
             .collect::<Vec<_>>();
 
         let mut key_count = 0;
@@ -697,7 +699,7 @@ mod tests {
             .get_compaction_group_levels(StaticCompactionGroupId::StateDefault.into())
             .iter()
             .flat_map(|level| level.table_infos.iter())
-            .map(|table_info| table_info.id)
+            .map(|table_info| table_info.id_as_int())
             .collect::<Vec<_>>();
 
         let mut key_count = 0;

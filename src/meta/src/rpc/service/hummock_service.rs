@@ -17,6 +17,7 @@ use std::sync::Arc;
 
 use risingwave_common::catalog::TableId;
 use risingwave_common::error::{tonic_err, ErrorCode};
+use risingwave_hummock_sdk::compaction_group::hummock_version_ext::SstableIdExt;
 use risingwave_pb::hummock::hummock_manager_service_server::HummockManagerService;
 use risingwave_pb::hummock::*;
 use tonic::{Request, Response, Status};
@@ -183,13 +184,16 @@ where
 
     async fn get_new_table_id(
         &self,
-        _request: Request<GetNewTableIdRequest>,
+        request: Request<GetNewTableIdRequest>,
     ) -> Result<Response<GetNewTableIdResponse>, Status> {
-        let result = self.hummock_manager.get_new_table_id().await;
+        let result = self
+            .hummock_manager
+            .get_new_sst_id(request.into_inner().context_id)
+            .await;
         match result {
             Ok(table_id) => Ok(Response::new(GetNewTableIdResponse {
                 status: None,
-                table_id,
+                sst_id: Some(SstableId::from_int(table_id)),
             })),
             Err(e) => Err(tonic_err(e)),
         }

@@ -28,15 +28,17 @@ use prost::Message;
 use risingwave_common::monitor::rwlock::MonitoredRwLock;
 use risingwave_common::util::epoch::{Epoch, INVALID_EPOCH};
 use risingwave_hummock_sdk::compact::compact_task_to_string;
-use risingwave_hummock_sdk::compaction_group::hummock_version_ext::HummockVersionExt;
+use risingwave_hummock_sdk::compaction_group::hummock_version_ext::{
+    HummockVersionExt, SstableIdExt,
+};
 use risingwave_hummock_sdk::{
-    get_remote_sst_id, CompactionGroupId, HummockCompactionTaskId, HummockContextId, HummockEpoch,
-    HummockSstableId, HummockVersionId, LocalSstableInfo, FIRST_VERSION_ID,
+    CompactionGroupId, HummockCompactionTaskId, HummockContextId, HummockEpoch, HummockSstableId,
+    HummockVersionId, LocalSstableInfo, FIRST_VERSION_ID,
 };
 use risingwave_pb::hummock::hummock_version::Levels;
 use risingwave_pb::hummock::{
     CompactTask, CompactTaskAssignment, HummockPinnedSnapshot, HummockPinnedVersion,
-    HummockSnapshot, HummockVersion, HummockVersionDelta, Level, LevelDelta, LevelType,
+    HummockSnapshot, HummockVersion, HummockVersionDelta, Level, LevelDelta, LevelType, SstableId,
 };
 use risingwave_pb::meta::subscribe_response::{Info, Operation};
 use risingwave_pb::meta::MetaLeaderInfo;
@@ -219,7 +221,8 @@ impl Versioning {
             for level_deltas in delta.level_deltas.values() {
                 for level_delta in &level_deltas.level_deltas {
                     for sst_id in &level_delta.removed_table_ids {
-                        let duplicate_insert = self.ssts_to_delete.insert(*sst_id, delta.id);
+                        let duplicate_insert =
+                            self.ssts_to_delete.insert(sst_id.as_int(), delta.id);
                         assert!(duplicate_insert.is_none());
                         no_sst_to_delete = false;
                     }
@@ -870,7 +873,11 @@ where
             for level in &compact_task.input_ssts {
                 let level_delta = LevelDelta {
                     level_idx: level.level_idx,
-                    removed_table_ids: level.table_infos.iter().map(|sst| sst.id).collect_vec(),
+                    removed_table_ids: level
+                        .table_infos
+                        .iter()
+                        .map(|sst| sst.id.clone().unwrap())
+                        .collect_vec(),
                     ..Default::default()
                 };
                 level_deltas.push(level_delta);
@@ -1068,17 +1075,21 @@ where
         Ok(())
     }
 
-    pub async fn get_new_table_id(&self) -> Result<HummockSstableId> {
-        // TODO #4037: refactor `get_new_table_id`
-        let sstable_id = get_remote_sst_id(
-            self.env
-                .id_gen_manager()
-                .generate::<{ IdCategory::HummockSstableId }>()
-                .await
-                .map(|id| id as HummockSstableId)?,
-        );
-
-        Ok(sstable_id)
+    /// Generates a new SST id.
+    /// SST id = | node id | seq id |
+    /// The node id indicates the owner of this id.
+    /// The seq id increases monotonically.
+    pub async fn get_new_sst_id(&self, context_id: HummockContextId) -> Result<HummockSstableId> {
+        // TODO #4037: batch `get_new_table_id`.
+        // TODO #4037: refactor id_gen_manager to 64bit id.
+        let node_id = context_id as u64;
+        let seq_id = self
+            .env
+            .id_gen_manager()
+            .generate::<{ IdCategory::HummockSstableId }>()
+            .await? as u64;
+        let sst_id = SstableId { node_id, seq_id };
+        Ok(sst_id.as_int())
     }
 
     /// Release resources pinned by these contexts, including:

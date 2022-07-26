@@ -158,14 +158,17 @@ mod tests {
 
     async fn add_compact_task<S>(
         hummock_manager_ref: &HummockManager<S>,
-        _context_id: u32,
+        context_id: u32,
         epoch: u64,
     ) where
         S: MetaStore,
     {
         let original_tables = generate_test_tables(
             epoch,
-            vec![hummock_manager_ref.get_new_table_id().await.unwrap()],
+            vec![hummock_manager_ref
+                .get_new_sst_id(context_id)
+                .await
+                .unwrap()],
         );
         register_sstable_infos_to_compaction_group(
             hummock_manager_ref.compaction_group_manager_ref_for_test(),

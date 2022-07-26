@@ -14,6 +14,7 @@
 
 use std::sync::Arc;
 
+use risingwave_hummock_sdk::compaction_group::hummock_version_ext::SstableIdExt;
 use risingwave_object_store::object::ObjectStore;
 use risingwave_pb::hummock::VacuumTask;
 use risingwave_rpc_client::HummockMetaClient;
@@ -34,12 +35,12 @@ impl Vacuum {
         for sst_id in &sst_ids {
             // Meta
             store
-                .delete(sstable_store.get_sst_meta_path(*sst_id).as_str())
+                .delete(sstable_store.get_sst_meta_path(sst_id.as_int()).as_str())
                 .await
                 .map_err(HummockError::object_io_error)?;
             // Data
             store
-                .delete(sstable_store.get_sst_data_path(*sst_id).as_str())
+                .delete(sstable_store.get_sst_data_path(sst_id.as_int()).as_str())
                 .await
                 .map_err(HummockError::object_io_error)?;
         }

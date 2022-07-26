@@ -17,6 +17,7 @@ use std::collections::BTreeSet;
 use bytes::{BufMut, Bytes, BytesMut};
 use risingwave_common::config::StorageConfig;
 use risingwave_hummock_sdk::key::{get_table_id, user_key};
+use risingwave_hummock_sdk::HummockSstableId;
 
 use super::bloom::Bloom;
 use super::utils::CompressionAlgorithm;
@@ -83,11 +84,11 @@ pub struct SstableBuilder {
     /// Last added full key.
     last_full_key: Bytes,
     key_count: usize,
-    sstable_id: u64,
+    sstable_id: HummockSstableId,
 }
 
 impl SstableBuilder {
-    pub fn new(sstable_id: u64, options: SstableBuilderOptions) -> Self {
+    pub fn new(sstable_id: HummockSstableId, options: SstableBuilderOptions) -> Self {
         Self {
             options: options.clone(),
             buf: BytesMut::with_capacity(options.capacity),
@@ -156,7 +157,7 @@ impl SstableBuilder {
     /// ```plain
     /// | Block 0 | ... | Block N-1 | N (4B) |
     /// ```
-    pub fn finish(mut self) -> (u64, Bytes, SstableMeta, Vec<u32>) {
+    pub fn finish(mut self) -> (HummockSstableId, Bytes, SstableMeta, Vec<u32>) {
         let smallest_key = self.block_metas[0].smallest_key.clone();
         let largest_key = self.last_full_key.to_vec();
         self.build_block();
