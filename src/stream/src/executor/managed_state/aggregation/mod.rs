@@ -28,7 +28,7 @@ pub use value::*;
 use crate::executor::aggregation::AggCall;
 use crate::executor::error::StreamExecutorResult;
 use crate::executor::managed_state::aggregation::string_agg_new::ManagedStringAggState;
-use crate::executor::PkDataTypes;
+use crate::executor::{PkDataTypes, PkIndices};
 
 mod extreme;
 
@@ -113,6 +113,7 @@ impl<S: StateStore> ManagedStateImpl<S> {
     pub async fn create_managed_state(
         agg_call: AggCall,
         row_count: Option<usize>,
+        pk_indices: PkIndices,
         pk_data_types: PkDataTypes,
         is_row_count: bool,
         key_hash_code: Option<HashCode>,
@@ -160,6 +161,7 @@ impl<S: StateStore> ManagedStateImpl<S> {
                 Ok(Self::Table(Box::new(ManagedStringAggState::new(
                     agg_call,
                     pk,
+                    pk_indices,
                     state_table_col_indices,
                 )?)))
             }

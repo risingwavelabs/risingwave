@@ -162,6 +162,7 @@ impl<S: StateStore> GlobalSimpleAggExecutor<S> {
             let state = generate_managed_agg_state(
                 None,
                 agg_calls,
+                input_pk_indices.to_vec(),
                 input_pk_data_types,
                 epoch,
                 None,

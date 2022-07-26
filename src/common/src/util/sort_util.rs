@@ -133,6 +133,16 @@ pub struct OrderableRow {
     pub order_pairs: Arc<Vec<OrderPair>>,
 }
 
+impl OrderableRow {
+    pub fn new(row: Row, encoded_row: Option<Vec<u8>>, order_pairs: Arc<Vec<OrderPair>>) -> Self {
+        Self {
+            row,
+            encoded_row,
+            order_pairs,
+        }
+    }
+}
+
 impl Ord for OrderableRow {
     fn cmp(&self, other: &Self) -> Ordering {
         let ord = if let (Some(encoded_lhs), Some(encoded_rhs)) =
