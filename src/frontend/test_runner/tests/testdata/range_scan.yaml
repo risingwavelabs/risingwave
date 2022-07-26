@@ -27,16 +27,30 @@
     SELECT * FROM orders_count_by_user WHERE user_id = 42 + 1
   batch_plan: |
     BatchExchange { order: [], dist: Single }
-      BatchFilter { predicate: ($0 = (42:Int32 + 1:Int32)) }
-        BatchScan { table: orders_count_by_user, columns: [user_id, date, orders_count] }
+      BatchScan { table: orders_count_by_user, columns: [user_id, date, orders_count], scan_ranges: [user_id = Int64(43)] }
 - before:
     - create_table_and_mv
   sql: |
     SELECT * FROM orders_count_by_user WHERE user_id = 'a'
   batch_plan: |
     BatchExchange { order: [], dist: Single }
-      BatchFilter { predicate: ($0 = 'a':Varchar::Int64) }
+      BatchFilter { predicate: false:Boolean }
         BatchScan { table: orders_count_by_user, columns: [user_id, date, orders_count] }
+- before:
+    - create_table_and_mv
+  sql: |
+    SELECT * FROM orders_count_by_user WHERE user_id > 'a'
+  batch_plan: |
+    BatchExchange { order: [], dist: Single }
+      BatchFilter { predicate: false:Boolean }
+        BatchScan { table: orders_count_by_user, columns: [user_id, date, orders_count] }
+- before:
+    - create_table_and_mv
+  sql: |
+    SELECT * FROM orders_count_by_user WHERE user_id = '42'
+  batch_plan: |
+    BatchExchange { order: [], dist: Single }
+      BatchScan { table: orders_count_by_user, columns: [user_id, date, orders_count], scan_ranges: [user_id = Int64(42)] }
 - before:
     - create_table_and_mv
   sql: |
@@ -90,8 +104,7 @@
     SELECT * FROM orders_count_by_user WHERE user_id in (42, 43)
   batch_plan: |
     BatchExchange { order: [], dist: Single }
-      BatchFilter { predicate: In($0, 42:Int32::Int64, 43:Int32::Int64) }
-        BatchScan { table: orders_count_by_user, columns: [user_id, date, orders_count] }
+      BatchScan { table: orders_count_by_user, columns: [user_id, date, orders_count], scan_ranges: [user_id = Int64(42) OR user_id = Int64(43)] }
 - before:
     - create_table_and_mv
   sql: |
@@ -197,3 +210,26 @@
   batch_plan: |
     BatchExchange { order: [], dist: Single }
       BatchScan { table: orders_count_by_user_ordered, columns: [user_id, date, orders_count], scan_ranges: [orders_count = Int64(10)] }
+- id: create_small
+  sql: |
+    CREATE TABLE t(x smallint);
+    CREATE MATERIALIZED VIEW mv AS
+      SELECT x from t group by x;
+- before:
+    - create_small
+  sql: |
+    /* When the constant has a larger type and cannot be casted to the column's type, we can't convert it to scan range yet. */
+    SELECT * FROM mv WHERE x = 60000;
+  batch_plan: |
+    BatchExchange { order: [], dist: Single }
+      BatchFilter { predicate: ($0 = 60000:Int32) }
+        BatchScan { table: mv, columns: [x] }
+- before:
+    - create_small
+  sql: |
+    /* When the constant has a larger type and cannot be casted to the column's type, we can't convert it to scan range yet. */
+    SELECT * FROM mv WHERE x < 60000;
+  batch_plan: |
+    BatchExchange { order: [], dist: Single }
+      BatchFilter { predicate: ($0 < 60000:Int32) }
+        BatchScan { table: mv, columns: [x] }
