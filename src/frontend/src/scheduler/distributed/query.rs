@@ -353,9 +353,7 @@ mod tests {
 
     use risingwave_common::catalog::{ColumnDesc, TableDesc};
     use risingwave_common::types::DataType;
-    use risingwave_pb::common::{
-        HostAddress, ParallelUnit, ParallelUnitType, WorkerNode, WorkerType,
-    };
+    use risingwave_pb::common::{HostAddress, ParallelUnit, WorkerNode, WorkerType};
     use risingwave_pb::plan_common::JoinType;
     use risingwave_rpc_client::ComputeClientPool;
 
@@ -525,18 +523,11 @@ mod tests {
 
     fn generate_parallel_units(start_id: u32, node_id: u32) -> Vec<ParallelUnit> {
         let parallel_degree = 8;
-        let mut parallel_units = vec![ParallelUnit {
-            id: start_id,
-            r#type: ParallelUnitType::Single as i32,
-            worker_node_id: node_id,
-        }];
-        for id in start_id + 1..start_id + 1 + parallel_degree {
-            parallel_units.push(ParallelUnit {
+        (start_id..start_id + parallel_degree)
+            .map(|id| ParallelUnit {
                 id,
-                r#type: ParallelUnitType::Hash as i32,
                 worker_node_id: node_id,
-            });
-        }
-        parallel_units
+            })
+            .collect()
     }
 }
