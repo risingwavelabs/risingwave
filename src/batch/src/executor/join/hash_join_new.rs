@@ -209,14 +209,14 @@ impl<K: HashKey> HashJoinExecutor<K> {
             let probe_keys = K::build(&probe_key_idxs, &probe_chunk)?;
             for (probe_row_id, probe_key) in probe_keys.iter().enumerate() {
                 for build_row_id in
-                    next_build_row_with_same_key.row_id_iter(hash_map.get(&probe_key).copied())
+                    next_build_row_with_same_key.row_id_iter(hash_map.get(probe_key).copied())
                 {
                     let build_chunk = &build_side[build_row_id.chunk_id()];
                     if let Some(spilled) = Self::append_one_row(
                         &mut chunk_builder,
                         Some(&probe_chunk),
                         probe_row_id,
-                        Some(&build_chunk),
+                        Some(build_chunk),
                         build_row_id.row_id(),
                     )? {
                         yield spilled
@@ -263,7 +263,7 @@ impl<K: HashKey> HashJoinExecutor<K> {
             let probe_chunk = probe_chunk?;
             let probe_keys = K::build(&probe_key_idxs, &probe_chunk)?;
             for (probe_row_id, probe_key) in probe_keys.iter().enumerate() {
-                if let Some(first_matched_build_row_id) = hash_map.get(&probe_key) {
+                if let Some(first_matched_build_row_id) = hash_map.get(probe_key) {
                     for build_row_id in
                         next_build_row_with_same_key.row_id_iter(Some(*first_matched_build_row_id))
                     {
@@ -272,7 +272,7 @@ impl<K: HashKey> HashJoinExecutor<K> {
                             &mut chunk_builder,
                             Some(&probe_chunk),
                             probe_row_id,
-                            Some(&build_chunk),
+                            Some(build_chunk),
                             build_row_id.row_id(),
                         )? {
                             yield spilled
@@ -322,7 +322,7 @@ impl<K: HashKey> HashJoinExecutor<K> {
             let probe_keys = K::build(&probe_key_idxs, &probe_chunk)?;
             for (probe_row_id, probe_key) in probe_keys.iter().enumerate() {
                 found_non_null = false;
-                if let Some(first_matched_build_row_id) = hash_map.get(&probe_key) {
+                if let Some(first_matched_build_row_id) = hash_map.get(probe_key) {
                     first_output_row_id.push(chunk_builder.buffered_count());
                     let mut build_row_id_iter = next_build_row_with_same_key
                         .row_id_iter(Some(*first_matched_build_row_id))
@@ -333,7 +333,7 @@ impl<K: HashKey> HashJoinExecutor<K> {
                             &mut chunk_builder,
                             Some(&probe_chunk),
                             probe_row_id,
-                            Some(&build_chunk),
+                            Some(build_chunk),
                             build_row_id.row_id(),
                         )? {
                             yield Self::process_left_outer_join_non_equi_condition(
@@ -390,7 +390,7 @@ impl<K: HashKey> HashJoinExecutor<K> {
             let probe_keys = K::build(&probe_key_idxs, &probe_chunk)?;
             for (probe_row_id, probe_key) in probe_keys.iter().enumerate() {
                 if !ANTI_JOIN {
-                    if hash_map.get(&probe_key).is_some() {
+                    if hash_map.get(probe_key).is_some() {
                         if let Some(spilled) = Self::append_one_row(
                             &mut chunk_builder,
                             Some(&probe_chunk),
@@ -401,17 +401,15 @@ impl<K: HashKey> HashJoinExecutor<K> {
                             yield spilled
                         }
                     }
-                } else {
-                    if hash_map.get(&probe_key).is_none() {
-                        if let Some(spilled) = Self::append_one_row(
-                            &mut chunk_builder,
-                            Some(&probe_chunk),
-                            probe_row_id,
-                            None,
-                            0,
-                        )? {
-                            yield spilled
-                        }
+                } else if hash_map.get(probe_key).is_none() {
+                    if let Some(spilled) = Self::append_one_row(
+                        &mut chunk_builder,
+                        Some(&probe_chunk),
+                        probe_row_id,
+                        None,
+                        0,
+                    )? {
+                        yield spilled
                     }
                 }
             }
@@ -445,7 +443,7 @@ impl<K: HashKey> HashJoinExecutor<K> {
             for (probe_row_id, probe_key) in probe_keys.iter().enumerate() {
                 first_output_row_id.push(chunk_builder.buffered_count());
                 found_non_null = false;
-                if let Some(first_matched_build_row_id) = hash_map.get(&probe_key) {
+                if let Some(first_matched_build_row_id) = hash_map.get(probe_key) {
                     for build_row_id in
                         next_build_row_with_same_key.row_id_iter(Some(*first_matched_build_row_id))
                     {
@@ -454,7 +452,7 @@ impl<K: HashKey> HashJoinExecutor<K> {
                             &mut chunk_builder,
                             Some(&probe_chunk),
                             probe_row_id,
-                            Some(&build_chunk),
+                            Some(build_chunk),
                             build_row_id.row_id(),
                         )? {
                             yield Self::process_left_semi_anti_join_non_equi_condition::<false>(
@@ -503,7 +501,7 @@ impl<K: HashKey> HashJoinExecutor<K> {
             let probe_keys = K::build(&probe_key_idxs, &probe_chunk)?;
             for (probe_row_id, probe_key) in probe_keys.iter().enumerate() {
                 found_null = false;
-                if let Some(first_matched_build_row_id) = hash_map.get(&probe_key) {
+                if let Some(first_matched_build_row_id) = hash_map.get(probe_key) {
                     first_output_row_id.push(chunk_builder.buffered_count());
                     for build_row_id in
                         next_build_row_with_same_key.row_id_iter(Some(*first_matched_build_row_id))
@@ -513,7 +511,7 @@ impl<K: HashKey> HashJoinExecutor<K> {
                             &mut chunk_builder,
                             Some(&probe_chunk),
                             probe_row_id,
-                            Some(&build_chunk),
+                            Some(build_chunk),
                             build_row_id.row_id(),
                         )? {
                             yield Self::process_left_semi_anti_join_non_equi_condition::<true>(
@@ -568,7 +566,7 @@ impl<K: HashKey> HashJoinExecutor<K> {
             let probe_keys = K::build(&probe_key_idxs, &probe_chunk)?;
             for (probe_row_id, probe_key) in probe_keys.iter().enumerate() {
                 for build_row_id in
-                    next_build_row_with_same_key.row_id_iter(hash_map.get(&probe_key).copied())
+                    next_build_row_with_same_key.row_id_iter(hash_map.get(probe_key).copied())
                 {
                     build_row_matched[build_row_id] = true;
                     let build_chunk = &build_side[build_row_id.chunk_id()];
@@ -576,7 +574,7 @@ impl<K: HashKey> HashJoinExecutor<K> {
                         &mut chunk_builder,
                         Some(&probe_chunk),
                         probe_row_id,
-                        Some(&build_chunk),
+                        Some(build_chunk),
                         build_row_id.row_id(),
                     )? {
                         yield spilled
@@ -626,7 +624,7 @@ impl<K: HashKey> HashJoinExecutor<K> {
             let probe_keys = K::build(&probe_key_idxs, &probe_chunk)?;
             for (probe_row_id, probe_key) in probe_keys.iter().enumerate() {
                 for build_row_id in
-                    next_build_row_with_same_key.row_id_iter(hash_map.get(&probe_key).copied())
+                    next_build_row_with_same_key.row_id_iter(hash_map.get(probe_key).copied())
                 {
                     build_row_ids.push(build_row_id);
                     let build_chunk = &build_side[build_row_id.chunk_id()];
@@ -634,7 +632,7 @@ impl<K: HashKey> HashJoinExecutor<K> {
                         &mut chunk_builder,
                         Some(&probe_chunk),
                         probe_row_id,
-                        Some(&build_chunk),
+                        Some(build_chunk),
                         build_row_id.row_id(),
                     )? {
                         yield Self::process_right_outer_join_non_equi_condition(
@@ -694,7 +692,7 @@ impl<K: HashKey> HashJoinExecutor<K> {
             let probe_keys = K::build(&probe_key_idxs, &probe_chunk)?;
             for probe_key in &probe_keys {
                 for build_row_id in
-                    next_build_row_with_same_key.row_id_iter(hash_map.get(&probe_key).copied())
+                    next_build_row_with_same_key.row_id_iter(hash_map.get(probe_key).copied())
                 {
                     build_row_matched[build_row_id] = true;
                 }
@@ -749,7 +747,7 @@ impl<K: HashKey> HashJoinExecutor<K> {
             let probe_keys = K::build(&probe_key_idxs, &probe_chunk)?;
             for (probe_row_id, probe_key) in probe_keys.iter().enumerate() {
                 for build_row_id in
-                    next_build_row_with_same_key.row_id_iter(hash_map.get(&probe_key).copied())
+                    next_build_row_with_same_key.row_id_iter(hash_map.get(probe_key).copied())
                 {
                     build_row_ids.push(build_row_id);
                     let build_chunk = &build_side[build_row_id.chunk_id()];
@@ -757,7 +755,7 @@ impl<K: HashKey> HashJoinExecutor<K> {
                         &mut chunk_builder,
                         Some(&probe_chunk),
                         probe_row_id,
-                        Some(&build_chunk),
+                        Some(build_chunk),
                         build_row_id.row_id(),
                     )? {
                         Self::process_right_semi_anti_join_non_equi_condition(
@@ -975,11 +973,9 @@ impl DataChunkWrapper {
                         *found_matched = true;
                         new_visibility.set(row_id, true);
                     }
-                } else {
-                    if !filter.is_set(row_id).unwrap() && !*found_matched {
-                        *found_matched = true;
-                        new_visibility.set(row_id, true);
-                    }
+                } else if !filter.is_set(row_id).unwrap() && !*found_matched {
+                    *found_matched = true;
+                    new_visibility.set(row_id, true);
                 }
             }
             *found_matched = false;
@@ -992,11 +988,9 @@ impl DataChunkWrapper {
                     *found_matched = true;
                     new_visibility.set(row_id, true);
                 }
-            } else {
-                if !filter.is_set(row_id).unwrap() && !*found_matched {
-                    *found_matched = true;
-                    new_visibility.set(row_id, true);
-                }
+            } else if !filter.is_set(row_id).unwrap() && !*found_matched {
+                *found_matched = true;
+                new_visibility.set(row_id, true);
             }
         }
 
