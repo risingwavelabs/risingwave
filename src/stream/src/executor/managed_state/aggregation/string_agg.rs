@@ -58,14 +58,14 @@ impl Cache {
     }
 
     fn insert(&mut self, row: Row) {
-        if !self.is_cold_start() {
+        if self.synced {
             let orderable_row = DescOrderedRow::new(row, None, self.order_pairs.clone());
             self.rows.insert(orderable_row);
         }
     }
 
     fn remove(&mut self, row: Row) {
-        if !self.is_cold_start() {
+        if self.synced {
             let orderable_row = DescOrderedRow::new(row, None, self.order_pairs.clone());
             self.rows.remove(&orderable_row);
         }
@@ -207,6 +207,8 @@ impl<S: StateStore> ManagedTableState<S> for ManagedStringAggState<S> {
             };
             pin_mut!(all_data_iter);
 
+            self.cache.set_synced(); // after the following loop the cache should be fully synced
+
             #[for_await]
             for state_row in all_data_iter {
                 let state_row = state_row?;
@@ -219,8 +221,6 @@ impl<S: StateStore> ManagedTableState<S> for ManagedStringAggState<S> {
                     agg_result.push_str(&s);
                 }
             }
-
-            self.cache.set_synced(); // now the cache is fully synced
         } else {
             println!("[rc] warm start");
             // rev() is required because cache.rows is in reverse order
