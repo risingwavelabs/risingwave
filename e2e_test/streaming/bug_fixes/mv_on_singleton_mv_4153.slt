@@ -1,0 +1,36 @@
+statement ok
+create table t (v int);
+
+statement ok
+insert into t values (666), (233), (233);
+
+statement ok
+create materialized view mv as select v from t order by v limit 10;
+
+query I
+select * from mv;
+----
+233
+233
+666
+
+statement ok
+drop materialized view mv;
+
+statement ok
+create materialized view mvjoin as select mv1.v as vvvv from mv as mv1, mv as mv2;
+
+query I
+select * from mvjoin order by vvvv;
+----
+233
+233
+233
+233
+666
+
+statement ok
+drop materialized view mvjoin;
+
+statement ok
+drop table t;
