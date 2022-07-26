@@ -108,7 +108,7 @@ where
                 let worker_id = match r#type {
                     WorkerType::ComputeNode => core
                         .next_available_cn_id()
-                        .ok_or(internal_error("failed to generate next compute node id")),
+                        .ok_or_else(|| internal_error("failed to generate next compute node id")),
                     WorkerType::Generic => unreachable!(),
                     _ => self
                         .env
