@@ -35,7 +35,7 @@ pub(crate) fn make_prost_sink(
     name: String,
     associated_table_id: u32,
     properties: HashMap<String, String>,
-    owner: String,
+    owner: u32,
 ) -> Result<ProstSink> {
     Ok(ProstSink {
         id: 0,
@@ -101,7 +101,7 @@ pub async fn handle_create_sink(
         stmt.sink_name.to_string(),
         associated_table_id,
         with_properties.clone(),
-        session.user_name().to_string(),
+        session.user_id(),
     )?;
 
     let graph = {

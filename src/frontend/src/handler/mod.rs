@@ -47,7 +47,12 @@ mod show;
 pub mod util;
 mod variable;
 
-pub async fn handle(session: Arc<SessionImpl>, stmt: Statement, sql: &str) -> Result<PgResponse> {
+pub async fn handle(
+    session: Arc<SessionImpl>,
+    stmt: Statement,
+    sql: &str,
+    format: bool,
+) -> Result<PgResponse> {
     let context = OptimizerContext::new(session.clone(), Arc::from(sql));
     match stmt {
         Statement::Explain {
@@ -114,7 +119,7 @@ pub async fn handle(session: Arc<SessionImpl>, stmt: Statement, sql: &str) -> Re
                     .into(),
             ),
         },
-        Statement::Query(_) => query::handle_query(context, stmt).await,
+        Statement::Query(_) => query::handle_query(context, stmt, format).await,
         Statement::Insert { .. } | Statement::Delete { .. } | Statement::Update { .. } => {
             dml::handle_dml(context, stmt).await
         }

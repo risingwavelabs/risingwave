@@ -12,7 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::collections::{HashMap, HashSet};
+use std::collections::HashSet;
 use std::sync::Arc;
 
 use itertools::Itertools;
@@ -21,7 +21,7 @@ use risingwave_common::error::{tonic_err, ErrorCode, Result as RwResult};
 use risingwave_common::util::compress::compress_data;
 use risingwave_pb::catalog::table::OptionalAssociatedSourceId;
 use risingwave_pb::catalog::*;
-use risingwave_pb::common::{ParallelUnitMapping, ParallelUnitType};
+use risingwave_pb::common::ParallelUnitMapping;
 use risingwave_pb::ddl_service::ddl_service_server::DdlService;
 use risingwave_pb::ddl_service::*;
 use risingwave_pb::stream_plan::stream_node::NodeBody;
@@ -31,7 +31,7 @@ use tonic::{Request, Response, Status};
 
 use crate::cluster::ClusterManagerRef;
 use crate::manager::{CatalogManagerRef, IdCategory, MetaSrvEnv, Relation, SourceId, TableId};
-use crate::model::{FragmentId, TableFragments};
+use crate::model::TableFragments;
 use crate::storage::MetaStore;
 use crate::stream::{
     ActorGraphBuilder, CreateMaterializedViewContext, FragmentManagerRef, GlobalStreamManagerRef,
@@ -494,7 +494,8 @@ where
     ) -> RwResult<()> {
         use risingwave_common::catalog::TableId;
 
-        let relation_id = match relation {
+        // Get relation_id and make fragment_graph immutable.
+        let (relation_id, fragment_graph) = match relation {
             Relation::Table(_) => {
                 // Fill in the correct mview id for stream node.
                 fn fill_mview_id(stream_node: &mut StreamNode, mview_id: TableId) -> usize {
@@ -521,38 +522,26 @@ where
                     mview_count, 1,
                     "require exactly 1 materialize node when creating materialized view"
                 );
-                mview_id
+                (mview_id, fragment_graph)
             }
-            Relation::Sink(_) => TableId::new(id),
+            Relation::Sink(_) => (TableId::new(id), fragment_graph),
         };
 
         // Resolve fragments.
-        let parallel_degree = self
-            .cluster_manager
-            .get_parallel_unit_count(Some(ParallelUnitType::Hash))
-            .await;
+        let parallel_degree = self.cluster_manager.get_parallel_unit_count().await;
 
-        let mut actor_graph_builder =
-            ActorGraphBuilder::new(self.env.id_gen_manager_ref(), &fragment_graph, ctx).await?;
-
-        // TODO(Kexiang): now simply use Count(ParallelUnit) - 1 as parallelism of each fragment
-        let parallelisms: HashMap<FragmentId, u32> = actor_graph_builder
-            .list_fragment_ids()
-            .into_iter()
-            .map(|(fragment_id, is_singleton)| {
-                if is_singleton {
-                    (fragment_id, 1)
-                } else {
-                    (fragment_id, parallel_degree as u32)
-                }
-            })
-            .collect();
+        let mut actor_graph_builder = ActorGraphBuilder::new(
+            self.env.id_gen_manager_ref(),
+            &fragment_graph,
+            parallel_degree as u32,
+            ctx,
+        )
+        .await?;
 
         let graph = actor_graph_builder
             .generate_graph(
                 self.env.id_gen_manager_ref(),
                 self.fragment_manager.clone(),
-                parallelisms,
                 ctx,
             )
             .await?;

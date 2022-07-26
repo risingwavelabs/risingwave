@@ -12,7 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::fmt;
 
 use fixedbitset::FixedBitSet;
@@ -93,9 +93,9 @@ impl StreamMaterialize {
         let schema = &base.schema;
         let pk_indices = &base.pk_indices;
 
-        let mut col_names = HashMap::new();
+        let mut col_names = HashSet::new();
         for name in &out_names {
-            if col_names.try_insert(name.clone(), 0).is_err() {
+            if !col_names.insert(name.clone()) {
                 return Err(
                     InternalError(format!("column {} specified more than once", name)).into(),
                 );
@@ -114,14 +114,15 @@ impl StreamMaterialize {
                 c.column_desc.name = if !c.is_hidden {
                     out_name_iter.next().unwrap()
                 } else {
-                    match col_names.try_insert(field.name.clone(), 0) {
-                        Ok(_) => field.name.clone(),
-                        Err(mut err) => {
-                            let cnt = err.entry.get_mut();
-                            *cnt += 1;
-                            field.name.clone() + "#" + &cnt.to_string()
-                        }
+                    let mut name = field.name.clone();
+                    let mut count = 0;
+
+                    while !col_names.insert(name.clone()) {
+                        count += 1;
+                        name = field.name.clone() + "#" + &count.to_string();
                     }
+
+                    name
                 };
                 c
             })
@@ -157,7 +158,7 @@ impl StreamMaterialize {
             is_index_on,
             distribution_key: base.dist.dist_column_indices().to_vec(),
             appendonly: input.append_only(),
-            owner: risingwave_common::catalog::DEFAULT_SUPPER_USER.to_string(),
+            owner: risingwave_common::catalog::DEFAULT_SUPER_USER_ID,
             vnode_mapping: None,
             properties: HashMap::default(),
             read_pattern_prefix_column: 0,

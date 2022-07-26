@@ -12,7 +12,6 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::collections::HashMap;
 use std::fmt;
 
 use fixedbitset::FixedBitSet;
@@ -297,51 +296,71 @@ pub struct LogicalAgg {
 }
 
 impl LogicalAgg {
-    pub fn infer_internal_table_catalog(&self) -> (Vec<TableCatalog>, HashMap<usize, i32>) {
+    pub fn infer_internal_table_catalog(&self) -> (Vec<TableCatalog>, Vec<Vec<usize>>) {
         let mut table_catalogs = vec![];
         let out_fields = self.base.schema.fields();
         let in_fields = self.input().schema().fields().to_vec();
         let in_pks = self.input().pk_indices().to_vec();
         let in_append_only = self.input.append_only();
         let in_dist_key = self.input().distribution().dist_column_indices().to_vec();
-        let get_sorted_input_state_table =
-            |sort_keys: Vec<(OrderType, usize)>, include_keys: Vec<usize>| -> TableCatalog {
-                let mut internal_table_catalog_builder = TableCatalogBuilder::new();
-                for &idx in &self.group_key {
-                    let tb_column_idx = internal_table_catalog_builder.add_column(&in_fields[idx]);
-                    internal_table_catalog_builder
-                        .add_order_column(tb_column_idx, OrderType::Ascending);
-                }
-                for (order_type, idx) in sort_keys {
-                    let tb_column_idx = internal_table_catalog_builder.add_column(&in_fields[idx]);
-                    internal_table_catalog_builder.add_order_column(tb_column_idx, order_type);
-                }
+        let get_sorted_input_state_table = |sort_keys: Vec<(OrderType, usize)>,
+                                            include_keys: Vec<usize>,
+                                            column_mapping: &mut Vec<usize>|
+         -> TableCatalog {
+            let mut internal_table_catalog_builder = TableCatalogBuilder::new();
+            for &idx in &self.group_key {
+                let tb_column_idx = internal_table_catalog_builder.add_column(&in_fields[idx]);
+                internal_table_catalog_builder
+                    .add_order_column(tb_column_idx, OrderType::Ascending);
+                column_mapping.push(idx);
+            }
+            for (order_type, idx) in sort_keys {
+                let tb_column_idx = internal_table_catalog_builder.add_column(&in_fields[idx]);
+                internal_table_catalog_builder.add_order_column(tb_column_idx, order_type);
+                column_mapping.push(idx);
+            }
 
-                // Add upstream pk.
-                for pk_index in &in_pks {
-                    let tb_column_idx =
-                        internal_table_catalog_builder.add_column(&in_fields[*pk_index]);
-                    internal_table_catalog_builder
-                        .add_order_column(tb_column_idx, OrderType::Ascending);
-                }
+            // Add upstream pk.
+            for pk_index in &in_pks {
+                let tb_column_idx =
+                    internal_table_catalog_builder.add_column(&in_fields[*pk_index]);
+                internal_table_catalog_builder
+                    .add_order_column(tb_column_idx, OrderType::Ascending);
+                // TODO: Dedup input pks and group key.
+                column_mapping.push(*pk_index);
+            }
 
-                for inclued_key in include_keys {
-                    internal_table_catalog_builder.add_column(&in_fields[inclued_key]);
-                }
-                internal_table_catalog_builder.build(in_dist_key.clone(), in_append_only)
-            };
+            for include_key in include_keys {
+                internal_table_catalog_builder.add_column(&in_fields[include_key]);
+                column_mapping.push(include_key);
+            }
+            internal_table_catalog_builder.build_with_column_mapping(
+                in_dist_key.clone(),
+                in_append_only,
+                column_mapping,
+            )
+        };
 
-        let get_value_state_table = |value_key: usize| -> TableCatalog {
+        let get_value_state_table = |value_key: usize,
+                                     column_mapping: &mut Vec<usize>|
+         -> TableCatalog {
             let mut internal_table_catalog_builder = TableCatalogBuilder::new();
             for &idx in &self.group_key {
                 let column_idx = internal_table_catalog_builder.add_column(&in_fields[idx]);
                 internal_table_catalog_builder.add_order_column(column_idx, OrderType::Ascending);
+                column_mapping.push(idx);
             }
             internal_table_catalog_builder.add_column(&out_fields[value_key]);
-            internal_table_catalog_builder.build(in_dist_key.clone(), in_append_only)
+            internal_table_catalog_builder.build_with_column_mapping(
+                in_dist_key.clone(),
+                in_append_only,
+                column_mapping,
+            )
         };
-
+        // Map input col idx -> table col idx.
+        let mut column_mappings_vec = vec![];
         for (agg_idx, agg_call) in self.agg_calls.iter().enumerate() {
+            let mut column_mapping = vec![];
             let state_table = match agg_call.agg_kind {
                 AggKind::Min | AggKind::Max | AggKind::StringAgg => {
                     if !in_append_only {
@@ -368,9 +387,9 @@ impl LogicalAgg {
                             _ => vec![],
                         };
 
-                        get_sorted_input_state_table(sort_keys, include_keys)
+                        get_sorted_input_state_table(sort_keys, include_keys, &mut column_mapping)
                     } else {
-                        get_value_state_table(self.group_key.len() + agg_idx)
+                        get_value_state_table(self.group_key.len() + agg_idx, &mut column_mapping)
                     }
                 }
                 AggKind::Sum
@@ -378,13 +397,14 @@ impl LogicalAgg {
                 | AggKind::Avg
                 | AggKind::SingleValue
                 | AggKind::ApproxCountDistinct => {
-                    get_value_state_table(self.group_key.len() + agg_idx)
+                    get_value_state_table(self.group_key.len() + agg_idx, &mut column_mapping)
                 }
             };
             table_catalogs.push(state_table);
+            column_mappings_vec.push(column_mapping);
         }
         // TODO: fill column mapping later (#3485).
-        (table_catalogs, HashMap::new())
+        (table_catalogs, column_mappings_vec)
     }
 
     /// Two phase streaming agg.
@@ -693,12 +713,10 @@ impl LogicalAgg {
     pub fn new(agg_calls: Vec<PlanAggCall>, group_key: Vec<usize>, input: PlanRef) -> Self {
         let ctx = input.ctx();
         let schema = Self::derive_schema(input.schema(), &group_key, &agg_calls);
-        let pk_indices = match group_key.is_empty() {
-            // simple agg
-            true => vec![],
-            // group agg
-            false => group_key.clone(),
-        };
+
+        // there is only one row in simple agg's output, so its pk_indices is empty
+        let pk_indices = (0..group_key.len()).collect_vec();
+
         let base = PlanBase::new_logical(ctx, schema, pk_indices);
         Self {
             base,

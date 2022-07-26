@@ -29,6 +29,7 @@ use tokio::sync::watch::Receiver;
 
 use super::root_catalog::Catalog;
 use super::DatabaseId;
+use crate::user::UserId;
 
 pub type CatalogReadGuard = ArcRwLockReadGuard<RawRwLock, Catalog>;
 
@@ -50,13 +51,13 @@ impl CatalogReader {
 /// the version.
 #[async_trait::async_trait]
 pub trait CatalogWriter: Send + Sync {
-    async fn create_database(&self, db_name: &str, owner: String) -> Result<()>;
+    async fn create_database(&self, db_name: &str, owner: UserId) -> Result<()>;
 
     async fn create_schema(
         &self,
         db_id: DatabaseId,
         schema_name: &str,
-        owner: String,
+        owner: UserId,
     ) -> Result<()>;
 
     async fn create_materialized_view(
@@ -97,7 +98,7 @@ pub struct CatalogWriterImpl {
 
 #[async_trait::async_trait]
 impl CatalogWriter for CatalogWriterImpl {
-    async fn create_database(&self, db_name: &str, owner: String) -> Result<()> {
+    async fn create_database(&self, db_name: &str, owner: UserId) -> Result<()> {
         let (_, version) = self
             .meta_client
             .create_database(ProstDatabase {
@@ -113,7 +114,7 @@ impl CatalogWriter for CatalogWriterImpl {
         &self,
         db_id: DatabaseId,
         schema_name: &str,
-        owner: String,
+        owner: UserId,
     ) -> Result<()> {
         let (_, version) = self
             .meta_client

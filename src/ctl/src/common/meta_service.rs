@@ -56,7 +56,7 @@ risectl requires a full persistent cluster to operate. Please make sure you're n
         let mut client = MetaClient::new(&self.meta_addr).await?;
         // FIXME: don't use 127.0.0.1 for ctl
         let worker_id = client
-            .register(&"127.0.0.1:2333".parse().unwrap(), WorkerType::RiseCtl)
+            .register(WorkerType::RiseCtl, &"127.0.0.1:2333".parse().unwrap(), 0)
             .await?;
         tracing::info!("registered as RiseCtl worker, worker_id = {}", worker_id);
         // TODO: remove worker node

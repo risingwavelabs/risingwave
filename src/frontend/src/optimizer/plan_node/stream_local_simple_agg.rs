@@ -98,9 +98,11 @@ impl ToStreamProst for StreamLocalSimpleAgg {
                     )
                 })
                 .collect_vec(),
-            column_mapping: column_mapping
+            column_mappings: column_mapping
                 .into_iter()
-                .map(|(k, v)| (k as u32, v))
+                .map(|v| ColumnMapping {
+                    indices: v.iter().map(|x| *x as u32).collect(),
+                })
                 .collect(),
             is_append_only: self.input().append_only(),
         })
