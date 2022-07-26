@@ -119,6 +119,7 @@ impl Binder {
         let (_, table_name) = Self::resolve_table_name(table_name)?;
         self.bind_table_to_context(columns, table_name, alias)?;
 
+        // Other arguments are validated in `plan_window_table_function`
         let exprs: Vec<_> = args
             .map(|arg| self.bind_function_arg(arg))
             .flatten_ok()

@@ -17,7 +17,7 @@ use std::sync::Arc;
 
 use risingwave_common::array::{Array, ArrayBuilder, ArrayBuilderImpl, ArrayRef, DataChunk, Row};
 use risingwave_common::for_all_variants;
-use risingwave_common::types::{DataType, Datum, Scalar, ScalarImpl};
+use risingwave_common::types::{literal_type_match, DataType, Datum, Scalar, ScalarImpl};
 use risingwave_pb::expr::expr_node::{RexNode, Type};
 use risingwave_pb::expr::ExprNode;
 
@@ -79,31 +79,6 @@ where
         a.append(v)?
     }
     Ok(())
-}
-
-fn literal_type_match(return_type: &DataType, literal: Option<&ScalarImpl>) -> bool {
-    match literal {
-        Some(datum) => {
-            matches!(
-                (return_type, datum),
-                (DataType::Boolean, ScalarImpl::Bool(_))
-                    | (DataType::Int16, ScalarImpl::Int16(_))
-                    | (DataType::Int32, ScalarImpl::Int32(_))
-                    | (DataType::Int64, ScalarImpl::Int64(_))
-                    | (DataType::Float32, ScalarImpl::Float32(_))
-                    | (DataType::Float64, ScalarImpl::Float64(_))
-                    | (DataType::Date, ScalarImpl::Int32(_))
-                    | (DataType::Varchar, ScalarImpl::Utf8(_))
-                    | (DataType::Date, ScalarImpl::NaiveDate(_))
-                    | (DataType::Time, ScalarImpl::NaiveTime(_))
-                    | (DataType::Timestamp, ScalarImpl::NaiveDateTime(_))
-                    | (DataType::Decimal, ScalarImpl::Decimal(_))
-                    | (DataType::Interval, ScalarImpl::Interval(_))
-                    | (DataType::Struct { .. }, ScalarImpl::Struct(_))
-            )
-        }
-        None => true,
-    }
 }
 
 impl LiteralExpression {
