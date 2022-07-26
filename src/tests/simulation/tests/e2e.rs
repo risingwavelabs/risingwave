@@ -1,5 +1,6 @@
-// #![cfg(madsim)]
+#![cfg(madsim)]
 
+use std::sync::Arc;
 use std::time::Duration;
 
 use clap::Parser;
@@ -84,17 +85,66 @@ async fn basic() {
             tokio::spawn(async move {
                 connection.await.expect("Postgres connection error");
             });
-            let sql = "CREATE TABLE supplier (
-                s_suppkey INTEGER,
-                s_name VARCHAR(25),
-                s_address VARCHAR(40),
-                s_nationkey INTEGER,
-                s_phone VARCHAR(15),
-                s_acctbal NUMERIC,
-                s_comment VARCHAR(101)
-            );";
-            client.execute(sql, &[]).await.unwrap();
+            let mut tester = sqllogictest::Runner::new(Postgres {
+                client: Arc::new(client),
+            });
+            // run the following e2e tests
+            for dir in ["ddl", "batch", "streaming", "streaming_delta_join"] {
+                let files = glob::glob(&format!("../../../e2e_test/{dir}/**/*.slt"))
+                    .expect("failed to read glob pattern");
+                for file in files {
+                    tester
+                        .run_file_async(file.unwrap().as_path())
+                        .await
+                        .unwrap();
+                }
+            }
         })
         .await
         .unwrap();
+}
+
+#[derive(Clone)]
+struct Postgres {
+    client: Arc<tokio_postgres::Client>,
+}
+
+#[async_trait::async_trait]
+impl sqllogictest::AsyncDB for Postgres {
+    type Error = tokio_postgres::error::Error;
+
+    async fn run(&mut self, sql: &str) -> Result<String, Self::Error> {
+        use std::fmt::Write;
+
+        let mut output = String::new();
+        let rows = self.client.simple_query(sql).await?;
+        for row in rows {
+            match row {
+                tokio_postgres::SimpleQueryMessage::Row(row) => {
+                    for i in 0..row.len() {
+                        if i != 0 {
+                            write!(output, " ").unwrap();
+                        }
+                        match row.get(i) {
+                            Some(v) if v.is_empty() => write!(output, "(empty)").unwrap(),
+                            Some(v) => write!(output, "{}", v).unwrap(),
+                            None => write!(output, "NULL").unwrap(),
+                        }
+                    }
+                }
+                tokio_postgres::SimpleQueryMessage::CommandComplete(_) => {}
+                _ => unreachable!(),
+            }
+            writeln!(output).unwrap();
+        }
+        Ok(output)
+    }
+
+    fn engine_name(&self) -> &str {
+        "risingwave"
+    }
+
+    async fn sleep(dur: Duration) {
+        tokio::time::sleep(dur).await
+    }
 }
