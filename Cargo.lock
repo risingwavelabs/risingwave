@@ -183,6 +183,15 @@ dependencies = [
 ]
 
 [[package]]
+name = "async-ringbuffer"
+version = "0.5.5"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "a8560d41bc860fe61e04b9825e56ee96969dbbe1c3e76e4d59b204931413ff9c"
+dependencies = [
+ "futures-io",
+]
+
+[[package]]
 name = "async-stream"
 version = "0.3.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1484,6 +1493,12 @@ dependencies = [
 ]
 
 [[package]]
+name = "difference"
+version = "2.0.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "524cbf6897b527295dff137cec09ecf3a05f4fddffd7dfcd1585403449e74198"
+
+[[package]]
 name = "digest"
 version = "0.10.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -2602,12 +2617,13 @@ dependencies = [
 
 [[package]]
 name = "madsim"
-version = "0.2.0-alpha.4"
+version = "0.2.0-alpha.5"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "08eb4e2dd6827611e1c571149b244f0da5cfc3115d08d56d29d0c2f34d502610"
+checksum = "a649d1e86711d9055d3911f02ae66b1f6e73c1cb3f5558d1b0d129b45d73ec26"
 dependencies = [
  "ahash",
  "async-channel",
+ "async-ringbuffer",
  "async-task",
  "bincode",
  "bytes",
@@ -2626,9 +2642,9 @@ dependencies = [
 
 [[package]]
 name = "madsim-macros"
-version = "0.2.0-alpha.4"
+version = "0.2.0-alpha.5"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "0f9cd5b09aefa5d86980ded42f8dcfac9bcc28429a5304c6dd8ce8ed563b6ca1"
+checksum = "022ba9551f33028514d221aa84b4229aa763966963cd14b582a3bdc831df9e71"
 dependencies = [
  "darling 0.14.1",
  "proc-macro2",
@@ -2638,19 +2654,43 @@ dependencies = [
 
 [[package]]
 name = "madsim-tokio"
-version = "0.2.0-alpha.4"
+version = "0.2.0-alpha.5"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "e2f69c0f9c53088e825c02aa678f66f90c4329570e51d78fecb2b58c38fd8787"
+checksum = "431dfe91b33f17233148419716364b8bff26fb9d6af3a4883554c4162bb82d50"
 dependencies = [
+ "futures-lite",
  "madsim",
  "tokio",
 ]
 
 [[package]]
-name = "madsim-tonic"
-version = "0.2.0-alpha.4"
+name = "madsim-tokio-postgres"
+version = "0.2.0-alpha.5"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "6260fcb2f7ee2cbb4b492217cdaa03d2c3423c3af8bace179b4444be42e94b64"
+checksum = "94c8457d6936645c88a08ac951ebc74ee238cd2febe1449320f0ec9403458bab"
+dependencies = [
+ "async-trait",
+ "byteorder",
+ "bytes",
+ "fallible-iterator",
+ "futures",
+ "log",
+ "madsim-tokio",
+ "parking_lot",
+ "percent-encoding",
+ "phf",
+ "pin-project-lite",
+ "postgres-protocol",
+ "postgres-types",
+ "socket2",
+ "tokio-util",
+]
+
+[[package]]
+name = "madsim-tonic"
+version = "0.2.0-alpha.5"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "a6b7756c1ea6510062cc1288f4bbf9eef8387036aaf55f39fd902c7b45bf8b02"
 dependencies = [
  "async-stream",
  "futures",
@@ -2662,9 +2702,9 @@ dependencies = [
 
 [[package]]
 name = "madsim-tonic-build"
-version = "0.2.0-alpha.1"
+version = "0.2.0-alpha.5"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "320839c356bc1af23e730fbe460abe9bc338b5ccae220fe4c7924644b4535455"
+checksum = "3e97603efa939d999034c68ac9991f34cf4c3f6c9368263510bcc2c485954539"
 dependencies = [
  "prettyplease",
  "proc-macro2",
@@ -4166,6 +4206,7 @@ dependencies = [
  "memcomparable",
  "more-asserts",
  "num-traits",
+ "num_cpus",
  "parking_lot",
  "paste",
  "procfs",
@@ -4688,6 +4729,24 @@ dependencies = [
  "tracing",
  "tracing-opentelemetry",
  "tracing-subscriber",
+ "workspace-hack",
+]
+
+[[package]]
+name = "risingwave_simulation"
+version = "0.1.0"
+dependencies = [
+ "async-trait",
+ "clap 3.2.13",
+ "glob",
+ "madsim",
+ "madsim-tokio",
+ "madsim-tokio-postgres",
+ "risingwave_compactor",
+ "risingwave_compute",
+ "risingwave_frontend",
+ "risingwave_meta",
+ "sqllogictest",
  "workspace-hack",
 ]
 
@@ -5363,6 +5422,23 @@ dependencies = [
 ]
 
 [[package]]
+name = "sqllogictest"
+version = "0.5.5"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "0f92dff6ab30d218f0d92b2378485ec7c13b1d341f065b018dfb42819ce35fdc"
+dependencies = [
+ "async-trait",
+ "difference",
+ "futures-lite",
+ "glob",
+ "humantime",
+ "itertools",
+ "log",
+ "tempfile",
+ "thiserror",
+]
+
+[[package]]
 name = "stable_deref_trait"
 version = "1.2.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -5794,6 +5870,7 @@ checksum = "cc463cd8deddc3770d20f9852143d50bf6094e640b485cb2e189a2099085ff45"
 dependencies = [
  "bytes",
  "futures-core",
+ "futures-io",
  "futures-sink",
  "pin-project-lite",
  "tokio",

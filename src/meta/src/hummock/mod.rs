@@ -141,8 +141,6 @@ where
 
 /// Vacuum is triggered at this rate.
 const VACUUM_TRIGGER_INTERVAL: Duration = Duration::from_secs(30);
-/// Orphan SST will be deleted after this interval.
-const ORPHAN_SST_RETENTION_INTERVAL: Duration = Duration::from_secs(60 * 60 * 24);
 /// Starts a task to periodically vacuum hummock.
 pub fn start_vacuum_scheduler<S>(vacuum: Arc<VacuumTrigger<S>>) -> (JoinHandle<()>, Sender<()>)
 where
@@ -165,8 +163,8 @@ where
                 tracing::warn!("Vacuum tracked data error {}", err);
             }
             // vacuum_orphan_data can be invoked less frequently.
-            if let Err(err) = vacuum.vacuum_sst_data(ORPHAN_SST_RETENTION_INTERVAL).await {
-                tracing::warn!("Vacuum orphan data error {}", err);
+            if let Err(err) = vacuum.vacuum_sst_data().await {
+                tracing::warn!("Vacuum SST data error {}", err);
             }
         }
     });

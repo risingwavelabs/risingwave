@@ -19,9 +19,11 @@ use risingwave_common::array::column::Column;
 use risingwave_common::array::StreamChunk;
 use risingwave_common::catalog::Schema;
 use risingwave_common::error::Result;
+use risingwave_expr::expr::AggKind;
 use risingwave_storage::table::state_table::RowBasedStateTable;
 use risingwave_storage::StateStore;
 
+use super::aggregation::agg_call_filter_res;
 use super::*;
 use crate::executor::aggregation::{
     agg_input_array_refs, generate_agg_schema, generate_managed_agg_state, AggCall, AggState,
@@ -63,6 +65,10 @@ pub struct GlobalSimpleAggExecutor<S: StateStore> {
     /// Relational state tables used by this executor.
     /// One-to-one map with AggCall.
     state_tables: Vec<RowBasedStateTable<S>>,
+
+    /// State table column mappings for each aggregation calls,
+    /// Index: state table column index, Elem: agg call column index.
+    state_table_col_mappings: Vec<Vec<usize>>,
 }
 
 impl<S: StateStore> Executor for GlobalSimpleAggExecutor<S> {
@@ -90,6 +96,7 @@ impl<S: StateStore> GlobalSimpleAggExecutor<S> {
         pk_indices: PkIndices,
         executor_id: u64,
         mut state_tables: Vec<RowBasedStateTable<S>>,
+        state_table_col_mappings: Vec<Vec<usize>>,
     ) -> Result<Self> {
         let input_info = input.info();
         let schema = generate_agg_schema(input.as_ref(), &agg_calls, None);
@@ -111,6 +118,7 @@ impl<S: StateStore> GlobalSimpleAggExecutor<S> {
             states: None,
             agg_calls,
             state_tables,
+            state_table_col_mappings,
         })
     }
 
@@ -123,7 +131,9 @@ impl<S: StateStore> GlobalSimpleAggExecutor<S> {
         chunk: StreamChunk,
         epoch: u64,
         state_tables: &mut [RowBasedStateTable<S>],
+        state_table_col_mappings: &[Vec<usize>],
     ) -> StreamExecutorResult<()> {
+        let capacity = chunk.capacity();
         let (ops, columns, visibility) = chunk.into_inner();
 
         // --- Retrieve all aggregation inputs in advance ---
@@ -149,10 +159,12 @@ impl<S: StateStore> GlobalSimpleAggExecutor<S> {
             let state = generate_managed_agg_state(
                 None,
                 agg_calls,
+                input_pk_indices.to_vec(),
                 input_pk_data_types,
                 epoch,
                 None,
                 state_tables,
+                state_table_col_mappings,
             )
             .await?;
             *states = Some(state);
@@ -163,15 +175,25 @@ impl<S: StateStore> GlobalSimpleAggExecutor<S> {
         states.may_mark_as_dirty(epoch, state_tables).await?;
 
         // 3. Apply batch to each of the state (per agg_call)
-        for ((agg_state, data), state_table) in states
+        for (((agg_state, agg_call), data), state_table) in states
             .managed_states
             .iter_mut()
+            .zip_eq(agg_calls.iter())
             .zip_eq(all_agg_data.iter())
             .zip_eq(state_tables.iter_mut())
         {
-            agg_state
-                .apply_batch(&ops, visibility.as_ref(), data, epoch, state_table)
-                .await?;
+            let vis_map = agg_call_filter_res(agg_call, &columns, visibility.as_ref(), capacity)?;
+            if agg_call.kind == AggKind::StringAgg {
+                let chunk_cols = columns.iter().map(|col| col.array_ref()).collect_vec();
+                agg_state
+                    .apply_batch(&ops, vis_map.as_ref(), &chunk_cols, epoch, state_table)
+                    .await?;
+            } else {
+                // TODO(yuchao): Pass all the columns to apply_batch for other agg calls, #4185
+                agg_state
+                    .apply_batch(&ops, vis_map.as_ref(), data, epoch, state_table)
+                    .await?;
+            }
         }
 
         Ok(())
@@ -236,6 +258,7 @@ impl<S: StateStore> GlobalSimpleAggExecutor<S> {
             mut states,
             agg_calls,
             mut state_tables,
+            state_table_col_mappings,
         } = self;
         let mut input = input.execute();
 
@@ -256,6 +279,7 @@ impl<S: StateStore> GlobalSimpleAggExecutor<S> {
                         chunk,
                         epoch,
                         &mut state_tables,
+                        &state_table_col_mappings,
                     )
                     .await?;
                 }
@@ -329,25 +353,33 @@ mod tests {
                 kind: AggKind::Count,
                 args: AggArgs::None,
                 return_type: DataType::Int64,
+                order_pairs: vec![],
                 append_only,
+                filter: None,
             },
             AggCall {
                 kind: AggKind::Sum,
                 args: AggArgs::Unary(DataType::Int64, 0),
                 return_type: DataType::Int64,
+                order_pairs: vec![],
                 append_only,
+                filter: None,
             },
             AggCall {
                 kind: AggKind::Sum,
                 args: AggArgs::Unary(DataType::Int64, 1),
                 return_type: DataType::Int64,
+                order_pairs: vec![],
                 append_only,
+                filter: None,
             },
             AggCall {
                 kind: AggKind::Min,
                 args: AggArgs::Unary(DataType::Int64, 0),
                 return_type: DataType::Int64,
+                order_pairs: vec![],
                 append_only,
+                filter: None,
             },
         ];
 

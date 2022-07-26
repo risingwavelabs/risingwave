@@ -48,10 +48,10 @@ use super::{
     SstableIterator, SstableIteratorType,
 };
 use crate::hummock::compaction_executor::CompactionExecutor;
-use crate::hummock::iterator::ReadOptions;
 use crate::hummock::multi_builder::SealedSstableBuilder;
 use crate::hummock::shared_buffer::shared_buffer_uploader::UploadTaskPayload;
 use crate::hummock::shared_buffer::{build_ordered_merge_iter, UncommittedData};
+use crate::hummock::sstable::SstableIteratorReadOptions;
 use crate::hummock::sstable_store::SstableStoreRef;
 use crate::hummock::state_store::ForwardIter;
 use crate::hummock::utils::can_concat;
@@ -316,6 +316,24 @@ impl Compactor {
             }
         }
 
+        let existing_table_ids: Vec<u32> = payload
+            .iter()
+            .flat_map(|data_list| {
+                data_list
+                    .iter()
+                    .flat_map(|uncommitted_data| match uncommitted_data {
+                        UncommittedData::Sst(local_sst_info) => local_sst_info.1.table_ids.clone(),
+
+                        UncommittedData::Batch(shared_buffer_write_batch) => {
+                            vec![shared_buffer_write_batch.table_id]
+                        }
+                    })
+            })
+            .dedup()
+            .collect();
+
+        assert!(!existing_table_ids.is_empty());
+
         // Local memory compaction looks at all key ranges.
         let compact_task = CompactTask {
             input_ssts: vec![],
@@ -327,7 +345,7 @@ impl Compactor {
             gc_delete_keys: false,
             task_status: false,
             compaction_group_id: StaticCompactionGroupId::SharedBuffer.into(),
-            existing_table_ids: vec![],
+            existing_table_ids,
             target_file_size: context.options.sstable_size_mb as u64 * (1 << 20),
             compression_algorithm: 0,
             compaction_filter_mask: 0,
@@ -352,7 +370,7 @@ impl Compactor {
                 sstable_store.clone(),
                 stats.clone(),
                 &mut local_stats,
-                Arc::new(ReadOptions::default()),
+                Arc::new(SstableIteratorReadOptions::default()),
             )
             .await? as BoxedForwardHummockIterator;
             let compaction_executor = compactor.context.compaction_executor.as_ref().cloned();
@@ -756,7 +774,7 @@ impl Compactor {
     async fn build_sst_iter(&self) -> HummockResult<BoxedForwardHummockIterator> {
         let mut table_iters: Vec<BoxedForwardHummockIterator> = Vec::new();
         let mut stats = StoreLocalStatistic::default();
-        let read_options = Arc::new(ReadOptions { prefetch: true });
+        let read_options = Arc::new(SstableIteratorReadOptions { prefetch: true });
 
         // TODO: check memory limit
         for level in &self.compact_task.input_ssts {
