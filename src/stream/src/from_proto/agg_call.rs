@@ -13,10 +13,11 @@
 // limitations under the License.
 
 use std::convert::TryFrom;
+use std::sync::Arc;
 
 use risingwave_common::types::DataType;
 use risingwave_common::util::sort_util::{OrderPair, OrderType};
-use risingwave_expr::expr::AggKind;
+use risingwave_expr::expr::{build_from_prost, AggKind};
 use risingwave_pb::plan_common::OrderType as ProstOrderType;
 
 use super::*;

@@ -189,12 +189,12 @@ impl<S: StateStore> GlobalSimpleAggExecutor<S> {
             if agg_call.kind == AggKind::StringAgg {
                 let chunk_cols = columns.iter().map(|col| col.array_ref()).collect_vec();
                 agg_state
-                    .apply_batch(&ops, &vis_map, &chunk_cols, epoch, state_table)
+                    .apply_batch(&ops, vis_map.as_ref(), &chunk_cols, epoch, state_table)
                     .await?;
             } else {
                 // TODO(yuchao): Pass all the columns to agg states' apply_batch for other agg calls
                 agg_state
-                    .apply_batch(&ops, &vis_map, data, epoch, state_table)
+                    .apply_batch(&ops, vis_map.as_ref(), data, epoch, state_table)
                     .await?;
             }
         }
