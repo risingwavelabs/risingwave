@@ -19,10 +19,13 @@ mod min_overlap_compaction_picker;
 mod overlap_strategy;
 mod prost_type;
 mod tier_compaction_picker;
+pub use tier_compaction_picker::TierCompactionPicker;
+mod base_level_compaction_picker;
 use std::collections::{HashMap, HashSet};
 use std::fmt::{Debug, Formatter};
 use std::sync::Arc;
 
+pub use base_level_compaction_picker::LevelCompactionPicker;
 use risingwave_hummock_sdk::compaction_group::hummock_version_ext::HummockVersionExt;
 use risingwave_hummock_sdk::prost_key_range::KeyRangeExt;
 use risingwave_hummock_sdk::{CompactionGroupId, HummockCompactionTaskId, HummockEpoch};

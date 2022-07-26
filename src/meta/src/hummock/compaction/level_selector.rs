@@ -30,12 +30,9 @@ use crate::hummock::compaction::compaction_config::CompactionConfigBuilder;
 use crate::hummock::compaction::manual_compaction_picker::ManualCompactionPicker;
 use crate::hummock::compaction::min_overlap_compaction_picker::MinOverlappingPicker;
 use crate::hummock::compaction::overlap_strategy::OverlapStrategy;
-use crate::hummock::compaction::tier_compaction_picker::{
-    LevelCompactionPicker, TierCompactionPicker,
-};
 use crate::hummock::compaction::{
     create_overlap_strategy, CompactionInput, CompactionPicker, CompactionTask,
-    ManualCompactionOption,
+    LevelCompactionPicker, ManualCompactionOption, TierCompactionPicker,
 };
 use crate::hummock::level_handler::LevelHandler;
 

@@ -108,23 +108,23 @@ where
                     break 'compaction_trigger;
                 }
             };
-            const SCHEDULE_COMPACTION_COUNT: usize = 4;
-            request_channel.unschedule(compaction_group);
-            for _ in 0..SCHEDULE_COMPACTION_COUNT {
-                if !self.pick_and_assign(compaction_group).await {
-                    break;
-                }
-            }
+            self.pick_and_assign(compaction_group, request_channel.clone())
+                .await;
         }
         tracing::info!("Compaction scheduler is stopped");
     }
 
-    async fn pick_and_assign(&self, compaction_group: CompactionGroupId) -> bool {
+    async fn pick_and_assign(
+        &self,
+        compaction_group: CompactionGroupId,
+        request_channel: Arc<CompactionRequestChannel>,
+    ) -> bool {
         // 1. Pick a compaction task.
         let compact_task = self
             .hummock_manager
             .get_compact_task(compaction_group)
             .await;
+        request_channel.unschedule(compaction_group);
         let mut compact_task = match compact_task {
             Ok(Some(compact_task)) => compact_task,
             Ok(None) => {
@@ -189,6 +189,7 @@ where
                         compact_task_to_string_short(&compact_task)
                     );
                     // Reschedule it in case there are more tasks from this compaction group.
+                    request_channel.try_send(compaction_group);
                     return true;
                 }
                 Err(err) => {
