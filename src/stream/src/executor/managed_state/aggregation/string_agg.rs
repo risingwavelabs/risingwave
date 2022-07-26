@@ -102,7 +102,6 @@ impl<S: StateStore> ManagedStringAggState<S> {
             .enumerate()
             .map(|(i, col_idx)| (*col_idx, i))
             .collect();
-        println!("[rc] col_mapping: {:?}", col_mapping);
         // map agg column to state table column index
         let state_table_agg_col_idx = col_mapping
             .get(&agg_call.args.val_indices()[0])
@@ -131,7 +130,6 @@ impl<S: StateStore> ManagedStringAggState<S> {
                 )
             }))
             .collect();
-        println!("[rc] order_pair: {:?}", order_pair);
         Ok(Self {
             _phantom_data: PhantomData,
             group_key: group_key.cloned(),
@@ -153,10 +151,6 @@ impl<S: StateStore> ManagedTableState<S> for ManagedStringAggState<S> {
         state_table: &mut RowBasedStateTable<S>,
     ) -> StreamExecutorResult<()> {
         debug_assert!(super::verify_batch(ops, visibility, chunk_cols));
-        println!(
-            "[rc] ManagedStringAggState::apply_chunk, ops: {:?}, visibility: {:?}, chunk_cols: {:?}",
-            ops, visibility, chunk_cols
-        );
 
         for (i, op) in ops.iter().enumerate() {
             let visible = visibility.map(|x| x.is_set(i).unwrap()).unwrap_or(true);
@@ -169,11 +163,6 @@ impl<S: StateStore> ManagedTableState<S> for ManagedStringAggState<S> {
                     .iter()
                     .map(|col_idx| chunk_cols[*col_idx].datum_at(i))
                     .collect(),
-            );
-            println!("[rc] apply state_row: {:?}", state_row);
-            println!(
-                "[rc] state table schema: {:?}",
-                state_table.storage_table().schema()
             );
 
             match op {
@@ -199,7 +188,6 @@ impl<S: StateStore> ManagedTableState<S> for ManagedStringAggState<S> {
         let mut agg_result = String::new();
 
         if self.cache.is_cold_start() {
-            println!("[rc] cold start");
             let all_data_iter = if let Some(group_key) = self.group_key.as_ref() {
                 state_table.iter_with_pk_prefix(group_key, epoch).await?
             } else {
@@ -216,22 +204,16 @@ impl<S: StateStore> ManagedTableState<S> for ManagedStringAggState<S> {
                 let value = state_row[self.state_table_agg_col_idx]
                     .clone()
                     .map(ScalarImpl::into_utf8);
-                println!("[rc] state_row: {:?}, value: {:?}", state_row, value);
                 if let Some(s) = value {
                     agg_result.push_str(&s);
                 }
             }
         } else {
-            println!("[rc] warm start");
             // rev() is required because cache.rows is in reverse order
             for orderable_row in self.cache.rows.iter().rev() {
                 let value = orderable_row.row[self.state_table_agg_col_idx]
                     .clone()
                     .map(ScalarImpl::into_utf8);
-                println!(
-                    "[rc] orderable_row: {:?}, value: {:?}",
-                    orderable_row, value
-                );
                 if let Some(s) = value {
                     agg_result.push_str(&s);
                 }

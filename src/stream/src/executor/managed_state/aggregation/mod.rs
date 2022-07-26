@@ -121,12 +121,6 @@ impl<S: StateStore> ManagedStateImpl<S> {
         state_table: &RowBasedStateTable<S>,
         state_table_col_indices: Vec<usize>,
     ) -> StreamExecutorResult<Self> {
-        println!(
-            "[rc] create_managed_state, agg_call: {:?}, row_count: {:?}, state table schema: {:?}",
-            agg_call,
-            row_count,
-            state_table.storage_table().schema()
-        );
         match agg_call.kind {
             AggKind::Max | AggKind::Min => {
                 assert!(
@@ -151,20 +145,12 @@ impl<S: StateStore> ManagedStateImpl<S> {
                     )?))
                 }
             }
-            AggKind::StringAgg => {
-                // TODO, It seems with `order by`, `StringAgg` needs more stuff from `AggCall`
-                // Err(StreamExecutorError::not_implemented(
-                //     "It seems with `order by`, `StringAgg` needs more stuff from `AggCall`",
-                //     None,
-                // ))
-                println!("[rc] AggKind::StringAgg!!");
-                Ok(Self::Table(Box::new(ManagedStringAggState::new(
-                    agg_call,
-                    pk,
-                    pk_indices,
-                    state_table_col_indices,
-                )?)))
-            }
+            AggKind::StringAgg => Ok(Self::Table(Box::new(ManagedStringAggState::new(
+                agg_call,
+                pk,
+                pk_indices,
+                state_table_col_indices,
+            )?))),
             // TODO: for append-only lists, we can create `ManagedValueState` instead of
             // `ManagedExtremeState`.
             AggKind::Avg | AggKind::Count | AggKind::Sum | AggKind::ApproxCountDistinct => {
