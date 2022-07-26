@@ -1607,42 +1607,42 @@ mod tests {
     /// ```sql
     /// select t1.v2 as t1_v2, t2.v2 as t2_v2 from t1 full outer join t2 on t1.v1 = t2.v1;
     /// ```
-    #[tokio::test]
-    async fn test_full_outer_join() {
-        let test_fixture = TestFixture::with_join_type(JoinType::FullOuter);
+    // #[tokio::test]
+    // async fn test_full_outer_join() {
+    //     let test_fixture = TestFixture::with_join_type(JoinType::FullOuter);
 
-        let expected_chunk = DataChunk::from_pretty(
-            "f   F
-             6.1 .
-             .   .
-             8.4 .
-             3.9 3.7
-             3.9 .
-             .   .
-             6.6 7.5
-             .   3.7
-             .   .
-             0.7 .
-             .   .
-             5.5 .
-             .   6.1
-             .   8.9
-             .   3.5
-             .   .
-             .   .
-             .   8.0
-             .   .
-             .   9.1
-             .   .
-             .   .
-             .   9.6
-             .   .
-             .   8.18
-             .   .   ",
-        );
+    //     let expected_chunk = DataChunk::from_pretty(
+    //         "f   F
+    //          6.1 .
+    //          .   .
+    //          8.4 .
+    //          3.9 3.7
+    //          3.9 .
+    //          .   .
+    //          6.6 7.5
+    //          .   3.7
+    //          .   .
+    //          0.7 .
+    //          .   .
+    //          5.5 .
+    //          .   6.1
+    //          .   8.9
+    //          .   3.5
+    //          .   .
+    //          .   .
+    //          .   8.0
+    //          .   .
+    //          .   9.1
+    //          .   .
+    //          .   .
+    //          .   9.6
+    //          .   .
+    //          .   8.18
+    //          .   .   ",
+    //     );
 
-        test_fixture.do_test(expected_chunk, false).await;
-    }
+    //     test_fixture.do_test(expected_chunk, false).await;
+    // }
 
     #[tokio::test]
     async fn test_left_anti_join() {
