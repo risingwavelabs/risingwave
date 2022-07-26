@@ -22,7 +22,7 @@ use risingwave_hummock_sdk::compaction_group::hummock_version_ext::HummockVersio
 use risingwave_hummock_sdk::compaction_group::StaticCompactionGroupId;
 // use risingwave_hummock_sdk::key_range::KeyRange;
 use risingwave_hummock_sdk::{HummockContextId, HummockSstableId, FIRST_VERSION_ID};
-use risingwave_pb::common::{HostAddress, ParallelUnitType, WorkerType};
+use risingwave_pb::common::{HostAddress, WorkerType};
 use risingwave_pb::hummock::{
     HummockPinnedSnapshot, HummockPinnedVersion, HummockSnapshot, KeyRange,
 };
@@ -146,9 +146,7 @@ async fn test_hummock_compaction_task() {
     let sst_num = 2usize;
 
     // Construct vnode mappings for generating compaction tasks.
-    let parallel_units = cluster_manager
-        .list_parallel_units(Some(ParallelUnitType::Hash))
-        .await;
+    let parallel_units = cluster_manager.list_parallel_units().await;
     env.hash_mapping_manager()
         .build_fragment_hash_mapping(1, &parallel_units);
     for table_id in 1..sst_num + 2 {
@@ -828,9 +826,7 @@ async fn test_trigger_manual_compaction() {
     let sst_num = 2usize;
 
     // Construct vnode mappings for generating compaction tasks.
-    let parallel_units = cluster_manager
-        .list_parallel_units(Some(ParallelUnitType::Hash))
-        .await;
+    let parallel_units = cluster_manager.list_parallel_units().await;
     env.hash_mapping_manager()
         .build_fragment_hash_mapping(1, &parallel_units);
     for table_id in 1..sst_num + 2 {
