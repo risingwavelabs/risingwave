@@ -442,9 +442,9 @@
   optimized_logical_plan: |
     LogicalJoin { type: LeftSemi, on: ($0 = $2), output_indices: all }
       LogicalScan { table: t1, columns: [x, y] }
-      LogicalJoin { type: LeftSemi, on: ($1 = $2), output_indices: [0] }
+      LogicalJoin { type: LeftSemi, on: ($1 = $3) AND ($0 = $2), output_indices: [0] }
         LogicalScan { table: t2, columns: [x, y] }
-        LogicalScan { table: t3, output_columns: [y], required_columns: [$2:y, $1:x], predicate: (CorrelatedInputRef { index: 1, correlated_id: 1 } = $1) }
+        LogicalScan { table: t3, columns: [x, y] }
 - sql: |
     create table t1(x int, y int);
     create table t2(x int, y int);
@@ -453,12 +453,15 @@
   optimized_logical_plan: |
     LogicalJoin { type: LeftSemi, on: ($1 = $2), output_indices: all }
       LogicalScan { table: t1, columns: [x, y] }
-      LogicalJoin { type: Inner, on: true, output_indices: all }
-        LogicalJoin { type: Inner, on: ($0 = $1), output_indices: [] }
-          LogicalScan { table: t2, output_columns: [x], required_columns: [$1:x, $2:y], predicate: (CorrelatedInputRef { index: 2, correlated_id: 1 } = $2) }
-          LogicalScan { table: t3, output_columns: [x], required_columns: [$1:x, $2:y], predicate: (CorrelatedInputRef { index: 2, correlated_id: 1 } = $2) }
-        LogicalAgg { group_key: [$0], aggs: [] }
-          LogicalScan { table: t1, columns: [y] }
+      LogicalJoin { type: Inner, on: ($1 = $2) AND ($0 = $3), output_indices: [0] }
+        LogicalJoin { type: Inner, on: ($0 = $2), output_indices: [0, 1] }
+          LogicalJoin { type: Inner, on: ($0 = $2), output_indices: [0, 1] }
+            LogicalAgg { group_key: [$0], aggs: [] }
+              LogicalScan { table: t1, columns: [y] }
+            LogicalScan { table: t2, columns: [x, y] }
+          LogicalAgg { group_key: [$0], aggs: [] }
+            LogicalScan { table: t1, columns: [y] }
+        LogicalScan { table: t3, columns: [x, y] }
 - sql: |
     create table t1(x int, y int);
     create table t2(x int, y int);
@@ -471,3 +474,4 @@
           LogicalAgg { group_key: [$0, $1], aggs: [] }
             LogicalScan { table: t1, columns: [x, y] }
           LogicalScan { table: t2, columns: [x] }
+
