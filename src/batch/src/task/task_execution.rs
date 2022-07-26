@@ -18,6 +18,7 @@ use std::sync::Arc;
 use futures::StreamExt;
 use parking_lot::Mutex;
 use risingwave_common::array::DataChunk;
+use risingwave_common::error::ErrorCode::InternalError;
 use risingwave_common::error::{ErrorCode, Result, RwError};
 use risingwave_common::util::debug_context::{DebugContext, DEBUG_CONTEXT};
 use risingwave_pb::batch_plan::{
@@ -28,6 +29,7 @@ use risingwave_pb::task_service::GetDataResponse;
 use tokio::sync::oneshot::{Receiver, Sender};
 use tracing_futures::Instrument;
 
+use crate::error::BatchError;
 use crate::executor::{BoxedExecutor, ExecutorBuilder};
 use crate::rpc::service::exchange::ExchangeWriter;
 use crate::task::channel::{create_output_channel, ChanReceiverImpl, ChanSenderImpl};
@@ -298,7 +300,21 @@ impl<C: BatchTaskContext> BatchTaskExecution<C> {
                 res = data_chunk_stream.next() => {
                     match res {
                         Some(data_chunk) => {
-                            sender.send(Some(data_chunk?)).await?;
+                            let data_chunk = data_chunk?;
+                            if let Err(e) = sender.send(Some(data_chunk)).await {
+                                match e {
+                                    BatchError::SenderError => {
+                                        // This is possible since when we have limit executor in parent
+                                        // stage, it may early stop receiving data from downstream, which
+                                        // leads to close of channel.
+                                        warn!("Task receiver closed!");
+                                        break;
+                                    },
+                                    x => {
+                                        return Err(InternalError(format!("Failed to send data: {:?}", x)))?;
+                                    }
+                                }
+                            }
                         }
                         None => {
                             trace!("data chunk stream shuts down");
