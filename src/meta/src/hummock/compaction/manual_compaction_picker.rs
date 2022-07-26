@@ -187,16 +187,18 @@ impl CompactionPicker for ManualCompactionPicker {
                 continue;
             }
 
-            let overlap_files = self.overlap_strategy.check_base_level_overlap(
-                &[table.clone()],
-                &levels.levels[target_level - 1].table_infos,
-            );
+            if target_level != level {
+                let overlap_files = self.overlap_strategy.check_base_level_overlap(
+                    &[table.clone()],
+                    &levels.levels[target_level - 1].table_infos,
+                );
 
-            if overlap_files
-                .iter()
-                .any(|table| level_handlers[target_level].is_pending_compact(&table.id))
-            {
-                continue;
+                if overlap_files
+                    .iter()
+                    .any(|table| level_handlers[target_level].is_pending_compact(&table.id))
+                {
+                    continue;
+                }
             }
 
             select_input_ssts.push(table.clone());

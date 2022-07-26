@@ -75,6 +75,7 @@ where
         .await
         .unwrap()
         .unwrap();
+    compact_task.target_level = 6;
     hummock_manager
         .assign_compaction_task(&compact_task, context_id, async { true })
         .await
