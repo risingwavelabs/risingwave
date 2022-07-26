@@ -104,7 +104,23 @@
     SELECT * FROM orders_count_by_user WHERE user_id in (42, 43)
   batch_plan: |
     BatchExchange { order: [], dist: Single }
-      BatchScan { table: orders_count_by_user, columns: [user_id, date, orders_count], scan_ranges: [user_id = Int64(42) OR user_id = Int64(43)] }
+      BatchScan { table: orders_count_by_user, columns: [user_id, date, orders_count], scan_ranges: [user_id = Int64(43) OR user_id = Int64(42)] }
+- before:
+    - create_table_and_mv
+  sql: |
+    SELECT * FROM orders_count_by_user WHERE user_id in (42+1, 44-1)
+  batch_plan: |
+    BatchExchange { order: [], dist: Single }
+      BatchScan { table: orders_count_by_user, columns: [user_id, date, orders_count], scan_ranges: [user_id = Int64(43)] }
+- before:
+    - create_table_and_mv
+  sql: |
+    /* If the IN list has a larger type than the column, the InputRef is casted. Currently this case is not converted to scan range yet. */
+    SELECT * FROM orders_count_by_user WHERE user_id in (42.0, 43.0)
+  batch_plan: |
+    BatchExchange { order: [], dist: Single }
+      BatchFilter { predicate: In($0::Decimal, 42.0:Decimal, 43.0:Decimal) }
+        BatchScan { table: orders_count_by_user, columns: [user_id, date, orders_count] }
 - before:
     - create_table_and_mv
   sql: |
@@ -112,7 +128,7 @@
   batch_plan: |
     BatchExchange { order: [], dist: Single }
       BatchFilter { predicate: ($1 = 6666:Int32) }
-        BatchScan { table: orders_count_by_user, columns: [user_id, date, orders_count], scan_ranges: [user_id = Int64(2147483648) OR user_id = Int64(2147483649)] }
+        BatchScan { table: orders_count_by_user, columns: [user_id, date, orders_count], scan_ranges: [user_id = Int64(2147483649) OR user_id = Int64(2147483648)] }
 - before:
     - create_table_and_mv
   sql: |
