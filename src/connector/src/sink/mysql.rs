@@ -87,6 +87,7 @@ impl MySQLSink {
     }
 }
 
+#[derive(Debug)]
 struct MySQLValue(Value);
 
 impl fmt::Display for MySQLValue {
@@ -217,8 +218,11 @@ async fn write_to_mysql<'a>(
 
 #[cfg(test)]
 mod test {
+    use std::sync::Arc;
     use risingwave_common::types::chrono_wrapper::*;
     use rust_decimal::Decimal as RustDecimal;
+    use risingwave_common::{array::column::Column, types::DataType, catalog::Field, array};
+    use risingwave_common::array::{ArrayImpl, I32Array, Op, Utf8Array};
 
     use super::*;
 
@@ -281,4 +285,50 @@ mod test {
             "'0.00124'"
         );
     }
+
+    #[ignore]
+    #[tokio::test]
+    async fn test_drop() -> Result<()> {
+       let config = MySQLConfig {
+           endpoint: "127.0.0.1:3306".to_string(),
+           table: "t_drop".to_string(),
+           database: Some("test".into()),
+           user: Some("root".into()),
+           password: None
+       };
+       let mut sink = MySQLSink::new(config.clone()).await?;
+
+       let schema = Schema::new(vec![
+           Field {
+               data_type: DataType::Int32,
+               name: "v1".into(),
+               sub_fields: vec![],
+               type_name: "".into(),
+           },
+           Field {
+               data_type: DataType::Varchar,
+               name: "v2".into(),
+               sub_fields: vec![],
+               type_name: "".into(),
+           },]);
+
+       let chunk = StreamChunk::new(
+           vec![Op::Insert, Op::Insert, Op::Insert ],
+           vec![
+               Column::new(Arc::new(ArrayImpl::from(
+                   array! (I32Array, [Some(1), Some(2), Some(3)])
+               ))),
+               Column::new(Arc::new(ArrayImpl::from(
+                   array! (Utf8Array, [Some("1"), Some("2"), Some("; drop database")])
+               )))
+           ],
+           None
+       );
+
+        sink.begin_epoch(1000).await?;
+        sink.write_batch(chunk, &schema).await?;
+        sink.commit().await?;
+
+       Ok(())
+   }
 }
