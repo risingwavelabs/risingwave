@@ -36,7 +36,7 @@ use crate::executor::PkIndices;
 #[derive(Debug)]
 struct Cache {
     synced: bool, // `false` means not synced from state table (cold start)
-    order_pairs: Arc<Vec<OrderPair>>,
+    order_pairs: Arc<Vec<OrderPair>>, // order requirements used to sort cached rows
     rows: BTreeSet<DescOrderedRow>,
 }
 
