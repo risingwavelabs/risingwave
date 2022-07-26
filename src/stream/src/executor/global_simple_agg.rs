@@ -23,7 +23,7 @@ use risingwave_expr::expr::AggKind;
 use risingwave_storage::table::state_table::RowBasedStateTable;
 use risingwave_storage::StateStore;
 
-use super::aggregation::{agg_call_filter_res, agg_order_array_refs};
+use super::aggregation::agg_call_filter_res;
 use super::*;
 use crate::executor::aggregation::{
     agg_input_array_refs, generate_agg_schema, generate_managed_agg_state, AggCall, AggState,
@@ -138,7 +138,6 @@ impl<S: StateStore> GlobalSimpleAggExecutor<S> {
 
         // --- Retrieve all aggregation inputs in advance ---
         let all_agg_input_arrays = agg_input_array_refs(agg_calls, &columns);
-        let all_agg_order_arrays = agg_order_array_refs(agg_calls, &columns);
         let pk_input_arrays = pk_input_array_refs(input_pk_indices, &columns);
         let input_pk_data_types = input_pk_indices
             .iter()
@@ -148,9 +147,7 @@ impl<S: StateStore> GlobalSimpleAggExecutor<S> {
         // When applying batch, we will send columns of primary keys to the last N columns.
         let all_agg_data = all_agg_input_arrays
             .into_iter()
-            .zip_eq(all_agg_order_arrays.into_iter())
-            .map(|(mut input_arrays, order_arrays)| {
-                input_arrays.extend(order_arrays.into_iter());
+            .map(|mut input_arrays| {
                 input_arrays.extend(pk_input_arrays.iter());
                 input_arrays
             })
@@ -178,7 +175,7 @@ impl<S: StateStore> GlobalSimpleAggExecutor<S> {
         states.may_mark_as_dirty(epoch, state_tables).await?;
 
         // 3. Apply batch to each of the state (per agg_call)
-        for (((agg_state, agg_call), data /* TODO(rc): remove */), state_table) in states
+        for (((agg_state, agg_call), data), state_table) in states
             .managed_states
             .iter_mut()
             .zip_eq(agg_calls.iter())
