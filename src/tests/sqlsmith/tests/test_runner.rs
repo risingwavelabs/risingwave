@@ -109,6 +109,7 @@ fn test_batch_queries(session: Arc<SessionImpl>, tables: Vec<Table>, rng: &mut i
     }
 }
 
+/// Test stream queries by evaluating create mview statements
 async fn test_stream_queries(
     session: Arc<SessionImpl>,
     mut tables: Vec<Table>,
