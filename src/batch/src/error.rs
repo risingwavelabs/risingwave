@@ -35,6 +35,9 @@ pub enum BatchError {
     #[error("Out of range")]
     NumericOutOfRange,
 
+    #[error("Failed to send result to channel")]
+    SenderError,
+
     #[error(transparent)]
     Internal(#[from] anyhow::Error),
 }
