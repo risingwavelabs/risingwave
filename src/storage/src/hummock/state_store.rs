@@ -111,6 +111,10 @@ impl HummockStorage {
                 .await?,
             );
         }
+        self.stats
+            .iter_merge_sstable_counts
+            .with_label_values(&["memory-iter"])
+            .observe(overlapped_iters.len() as f64);
 
         // Generate iterators for versioned ssts by filter out ssts that do not overlap with given
         // `key_range`
@@ -174,9 +178,9 @@ impl HummockStorage {
                 }
             }
         }
-
         self.stats
             .iter_merge_sstable_counts
+            .with_label_values(&["sub-iter"])
             .observe(overlapped_iters.len() as f64);
 
         let key_range = (
@@ -296,6 +300,7 @@ impl HummockStorage {
         stats.report(self.stats.as_ref());
         self.stats
             .iter_merge_sstable_counts
+            .with_label_values(&["sub-iter"])
             .observe(table_counts as f64);
         Ok(None)
     }

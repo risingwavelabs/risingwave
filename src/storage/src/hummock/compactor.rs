@@ -456,9 +456,9 @@ impl Compactor {
 
     /// Handle a compaction task and report its status to hummock manager.
     /// Always return `Ok` and let hummock manager handle errors.
-    pub async fn compact(context: Arc<CompactorContext>, compact_task: CompactTask) -> bool {
+    pub async fn compact(context: Arc<CompactorContext>, mut compact_task: CompactTask) -> bool {
         use risingwave_common::catalog::TableOption;
-        tracing::info!("Ready to handle compaction task: {}", compact_task.task_id,);
+        tracing::info!("Ready to handle compaction task: {}", compact_task.task_id);
         let group_label = compact_task.compaction_group_id.to_string();
         let cur_level_label = compact_task.input_ssts[0].level_idx.to_string();
         let compaction_read_bytes = compact_task.input_ssts[0]
@@ -507,11 +507,15 @@ impl Compactor {
             .with_label_values(&[compact_task.input_ssts[0].level_idx.to_string().as_str()])
             .start_timer();
 
-        let need_quota = estimate_memory_use_for_compaction(&compact_task);
+        let mut need_quota = estimate_memory_use_for_compaction(&compact_task);
+        if !context.memory_limiter.try_require_memory(need_quota) && compact_task.splits.len() > 1 {
+            compact_task.splits = vec![KeyRange::inf().into()];
+        }
         let tracker = match context.memory_limiter.require_memory(need_quota).await {
             None => return false,
             Some(tracker) => tracker,
         };
+
         // Number of splits (key ranges) is equal to number of compaction tasks
         let parallelism = compact_task.splits.len();
         assert_ne!(parallelism, 0, "splits cannot be empty");
@@ -1052,7 +1056,7 @@ pub fn estimate_memory_use_for_compaction(task: &CompactTask) -> u64 {
     for level in &task.input_ssts {
         if level.level_type == LevelType::Nonoverlapping as i32 {
             if let Some(table) = level.table_infos.first() {
-                total_memory_size += table.file_size;
+                total_memory_size += table.file_size * task.splits.len() as u64;
             }
         } else {
             for table in &level.table_infos {
@@ -1060,5 +1064,5 @@ pub fn estimate_memory_use_for_compaction(task: &CompactTask) -> u64 {
             }
         }
     }
-    total_memory_size * task.splits.len() as u64
+    total_memory_size
 }

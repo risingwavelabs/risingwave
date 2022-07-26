@@ -56,7 +56,7 @@ macro_rules! for_all_metrics {
             write_build_l0_sst_duration: Histogram,
             write_build_l0_bytes: GenericCounter<AtomicU64>,
 
-            iter_merge_sstable_counts: Histogram,
+            iter_merge_sstable_counts: HistogramVec,
             iter_merge_seek_duration: Histogram,
 
             sst_store_block_request_counts: GenericCounterVec<AtomicU64>,
@@ -271,7 +271,8 @@ impl StateStoreMetrics {
             "Number of child iterators merged into one MergeIterator",
             exponential_buckets(1.0, 2.0, 17).unwrap() // max 65536 times
         );
-        let iter_merge_sstable_counts = register_histogram_with_registry!(opts, registry).unwrap();
+        let iter_merge_sstable_counts =
+            register_histogram_vec_with_registry!(opts, &["type"], registry).unwrap();
 
         let opts = histogram_opts!(
             "state_store_iter_merge_seek_duration",

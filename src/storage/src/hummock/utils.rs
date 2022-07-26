@@ -165,6 +165,13 @@ impl MemoryLimiter {
         }
     }
 
+    pub fn try_require_memory(&self, quota: u64) -> bool {
+        if quota > self.inner.quota {
+            return false;
+        }
+        self.inner.total_size.load(AtomicOrdering::Acquire) + quota < self.inner.quota
+    }
+
     pub async fn require_memory(&self, quota: u64) -> Option<MemoryTracker> {
         if quota > self.inner.quota {
             return None;
@@ -181,12 +188,12 @@ impl MemoryLimiter {
         }
         self.inner.check_count.fetch_add(1, AtomicOrdering::SeqCst);
         let mut current_quota = self.inner.total_size.load(AtomicOrdering::Acquire);
-        while current_quota > self.inner.quota {
+        while current_quota >= self.inner.quota {
             let notified = self.inner.notify.notified();
             self.inner.check_count.fetch_sub(1, AtomicOrdering::SeqCst);
             notified.await;
             self.inner.check_count.fetch_add(1, AtomicOrdering::SeqCst);
-            current_quota = self.inner.total_size.load(AtomicOrdering::Acquire) + quota;
+            current_quota = self.inner.total_size.load(AtomicOrdering::Acquire);
         }
         self.inner
             .total_size
