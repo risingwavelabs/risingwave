@@ -816,7 +816,7 @@ impl Compactor {
                 vacuum_task
                     .sstable_ids
                     .iter()
-                    .map(|s| s.as_int())
+                    .map(|s| s.as_string())
                     .collect_vec()
             );
             match Vacuum::vacuum(
