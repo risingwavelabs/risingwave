@@ -30,7 +30,7 @@ pub(crate) fn make_prost_sink(
     name: String,
     mv_name: String,
     properties: HashMap<String, String>,
-    owner: String,
+    owner: u32,
 ) -> Result<ProstSink> {
     Ok(ProstSink {
         id: 0,
@@ -63,7 +63,7 @@ pub async fn handle_create_sink(
         stmt.sink_name.to_string(),
         mv_name,
         handle_with_properties("create_sink", stmt.with_properties.0)?,
-        session.user_name().to_string(),
+        session.user_id(),
     )?;
 
     let catalog_writer = session.env().catalog_writer();

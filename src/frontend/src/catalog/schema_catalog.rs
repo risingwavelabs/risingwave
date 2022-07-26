@@ -43,7 +43,7 @@ pub struct SchemaCatalog {
 
     // This field only available when schema is "pg_catalog". Meanwhile, others will be empty.
     system_table_by_name: HashMap<String, SystemCatalog>,
-    owner: String,
+    owner: u32,
 }
 
 impl SchemaCatalog {
@@ -189,8 +189,8 @@ impl SchemaCatalog {
         self.name.clone()
     }
 
-    pub fn owner(&self) -> String {
-        self.owner.clone()
+    pub fn owner(&self) -> u32 {
+        self.owner
     }
 }
 
@@ -206,7 +206,7 @@ impl From<&ProstSchema> for SchemaCatalog {
             sink_id_by_name: HashMap::new(),
             sink_name_by_id: HashMap::new(),
             system_table_by_name: HashMap::new(),
-            owner: schema.owner.clone(),
+            owner: schema.owner,
         }
     }
 }

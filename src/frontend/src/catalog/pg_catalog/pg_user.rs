@@ -12,9 +12,17 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-pub(crate) mod user_authentication;
-pub(crate) mod user_manager;
-pub(crate) mod user_service;
+use risingwave_common::types::DataType;
 
-pub type UserId = u32;
-pub type UserInfoVersion = u64;
+use crate::catalog::pg_catalog::PgCatalogColumnsDef;
+
+/// The catalog `pg_user` provides access to information about database users.
+/// Ref: [`https://www.postgresql.org/docs/current/view-pg-user.html`]
+pub const PG_USER_TABLE_NAME: &str = "pg_user";
+pub const PG_USER_COLUMNS: &[PgCatalogColumnsDef] = &[
+    (DataType::Int32, "usesysid"),
+    (DataType::Varchar, "name"),
+    (DataType::Boolean, "usecreatedb"),
+    (DataType::Boolean, "usesuper"),
+    (DataType::Varchar, "passwd"),
+];

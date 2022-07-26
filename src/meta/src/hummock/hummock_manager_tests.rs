@@ -394,8 +394,13 @@ async fn test_release_context_resource() {
         host: "127.0.0.1".to_string(),
         port: 2,
     };
-    let (worker_node_2, _) = cluster_manager
-        .add_worker_node(fake_host_address_2, WorkerType::ComputeNode)
+    let fake_parallelism = 4;
+    let worker_node_2 = cluster_manager
+        .add_worker_node(
+            WorkerType::ComputeNode,
+            fake_host_address_2,
+            fake_parallelism,
+        )
         .await
         .unwrap();
     let context_id_2 = worker_node_2.id;
@@ -489,8 +494,13 @@ async fn test_hummock_manager_basic() {
         host: "127.0.0.1".to_string(),
         port: 2,
     };
-    let (worker_node_2, _) = cluster_manager
-        .add_worker_node(fake_host_address_2, WorkerType::ComputeNode)
+    let fake_parallelism = 4;
+    let worker_node_2 = cluster_manager
+        .add_worker_node(
+            WorkerType::ComputeNode,
+            fake_host_address_2,
+            fake_parallelism,
+        )
         .await
         .unwrap();
     let context_id_2 = worker_node_2.id;
