@@ -1034,9 +1034,7 @@ impl DataChunkWrapper {
         build_row_ids: &mut Vec<RowId>,
         build_row_matched: &mut ChunkedData<bool>,
     ) {
-        for (output_row_id, (output_row_non_null, &build_row_id)) in
-            filter.iter().zip_eq(build_row_ids.iter()).enumerate()
-        {
+        for (output_row_non_null, &build_row_id) in filter.iter().zip_eq(build_row_ids.iter()) {
             if output_row_non_null {
                 build_row_matched[build_row_id] = true;
             }
