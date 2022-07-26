@@ -116,7 +116,7 @@ async fn test_stream_queries(
 ) {
     // Test stream queries
     for i in 0..512 {
-        let (sql, table) = mview_sql_gen(rng, tables.clone(), &format!("m{}", i));
+        let (sql, table) = mview_sql_gen(rng, tables.clone(), &format!("sq{}", i));
         let stmts = parse_sql(&sql);
         let stmt = stmts[0].clone();
         handle(session.clone(), stmt, sql).await;
