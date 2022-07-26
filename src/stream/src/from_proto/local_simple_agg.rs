@@ -13,9 +13,10 @@
 // limitations under the License.
 
 use std::convert::TryFrom;
+use std::sync::Arc;
 
 use risingwave_common::types::DataType;
-use risingwave_expr::expr::AggKind;
+use risingwave_expr::expr::{build_from_prost, AggKind};
 
 use super::*;
 use crate::executor::aggregation::{AggArgs, AggCall};
@@ -64,10 +65,15 @@ pub fn build_agg_call_from_prost(
             )))
         }
     };
+    let filter = match agg_call_proto.filter {
+        Some(ref prost_filter) => Some(Arc::from(build_from_prost(prost_filter)?)),
+        None => None,
+    };
     Ok(AggCall {
         kind: AggKind::try_from(agg_call_proto.get_type()?)?,
         args,
         return_type: DataType::from(agg_call_proto.get_return_type()?),
         append_only,
+        filter,
     })
 }

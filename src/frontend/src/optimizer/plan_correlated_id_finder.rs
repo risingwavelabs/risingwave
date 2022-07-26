@@ -18,78 +18,55 @@ use crate::expr::{CorrelatedId, CorrelatedInputRef, ExprVisitor};
 use crate::optimizer::plan_node::{LogicalFilter, LogicalJoin, LogicalProject, PlanTreeNode};
 use crate::optimizer::plan_visitor::PlanVisitor;
 
+#[derive(Default)]
 pub struct PlanCorrelatedIdFinder {
     correlated_id_set: HashSet<CorrelatedId>,
 }
 
 impl PlanCorrelatedIdFinder {
-    pub fn new() -> Self {
-        Self {
-            correlated_id_set: HashSet::new(),
-        }
-    }
-
     pub fn contains(&self, correlated_id: &CorrelatedId) -> bool {
         self.correlated_id_set.contains(correlated_id)
     }
 }
 
 impl PlanVisitor<()> for PlanCorrelatedIdFinder {
-    /// common subquery is project, filter and join
+    /// `correlated_input_ref` can only appear in `LogicalProject`, `LogicalFilter` and
+    /// `LogicalJoin` now.
 
     fn visit_logical_join(&mut self, plan: &LogicalJoin) {
-        let mut finder = ExprCorrelatedIdFinder::new();
-        plan.on()
-            .conjunctions
-            .iter()
-            .for_each(|expr| finder.visit_expr(expr));
+        let mut finder = ExprCorrelatedIdFinder::default();
+        plan.on().visit_expr(&mut finder);
         self.correlated_id_set.extend(finder.correlated_id_set);
 
-        let mut iter = plan.inputs().into_iter();
-        self.visit(iter.next().unwrap());
-        iter.for_each(|input| {
-            self.visit(input);
-        });
+        plan.inputs()
+            .into_iter()
+            .for_each(|input| self.visit(input));
     }
 
     fn visit_logical_filter(&mut self, plan: &LogicalFilter) {
-        let mut finder = ExprCorrelatedIdFinder::new();
-        plan.predicate()
-            .conjunctions
-            .iter()
-            .for_each(|expr| finder.visit_expr(expr));
+        let mut finder = ExprCorrelatedIdFinder::default();
+        plan.predicate().visit_expr(&mut finder);
         self.correlated_id_set.extend(finder.correlated_id_set);
 
-        let mut iter = plan.inputs().into_iter();
-        self.visit(iter.next().unwrap());
-        iter.for_each(|input| {
-            self.visit(input);
-        });
+        plan.inputs()
+            .into_iter()
+            .for_each(|input| self.visit(input));
     }
 
     fn visit_logical_project(&mut self, plan: &LogicalProject) {
-        let mut finder = ExprCorrelatedIdFinder::new();
+        let mut finder = ExprCorrelatedIdFinder::default();
         plan.exprs().iter().for_each(|expr| finder.visit_expr(expr));
         self.correlated_id_set.extend(finder.correlated_id_set);
 
-        let mut iter = plan.inputs().into_iter();
-        self.visit(iter.next().unwrap());
-        iter.for_each(|input| {
-            self.visit(input);
-        });
+        plan.inputs()
+            .into_iter()
+            .for_each(|input| self.visit(input));
     }
 }
 
+#[derive(Default)]
 struct ExprCorrelatedIdFinder {
     correlated_id_set: HashSet<CorrelatedId>,
-}
-
-impl ExprCorrelatedIdFinder {
-    pub fn new() -> Self {
-        Self {
-            correlated_id_set: HashSet::new(),
-        }
-    }
 }
 
 impl ExprVisitor for ExprCorrelatedIdFinder {

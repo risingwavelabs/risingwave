@@ -45,13 +45,13 @@ impl Rule for ApplyJoinRule {
         // shortcut
         // Check whether correlated_input_ref with same correlated_id exists below apply.
         // If no, bail out and left for ApplyScan rule to deal with
-        let mut plan_correlated_id_finder = PlanCorrelatedIdFinder::new();
+        let mut plan_correlated_id_finder = PlanCorrelatedIdFinder::default();
         plan_correlated_id_finder.visit(apply_right.clone());
         if !plan_correlated_id_finder.contains(&correlated_id) {
             return None;
         }
 
-        // TODO: if the Apply are only required on one side, just push it to the corresponding side
+        // TODO: if the Apply is only required on one side, just push it to the corresponding side
 
         let apply_left_len = apply_left.schema().len();
         let join_left_len = join.left().schema().len();
