@@ -2071,10 +2071,10 @@ impl Parser {
                     Ok(DataType::Int(self.parse_optional_precision()?))
                 }
                 Keyword::BIGINT => Ok(DataType::BigInt(self.parse_optional_precision()?)),
-                Keyword::VARCHAR => Ok(DataType::Varchar(self.parse_optional_precision()?)),
+                Keyword::VARCHAR => Ok(DataType::Varchar),
                 Keyword::CHAR | Keyword::CHARACTER => {
                     if self.parse_keyword(Keyword::VARYING) {
-                        Ok(DataType::Varchar(self.parse_optional_precision()?))
+                        Ok(DataType::Varchar)
                     } else {
                         Ok(DataType::Char(self.parse_optional_precision()?))
                     }
