@@ -4747,6 +4747,7 @@ dependencies = [
  "risingwave_frontend",
  "risingwave_meta",
  "sqllogictest",
+ "workspace-hack",
 ]
 
 [[package]]
