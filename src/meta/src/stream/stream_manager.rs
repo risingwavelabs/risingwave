@@ -132,13 +132,13 @@ where
             /// Records what's the correspoding actor of each parallel unit of one table.
             upstream_parallel_unit_info: &'a HashMap<TableId, BTreeMap<ParallelUnitId, ActorId>>,
             /// Records what's the actors on each worker of one table.
-            tables_node_actors: &'a HashMap<TableId, BTreeMap<WorkerId, Vec<ActorId>>>,
+            tables_worker_actors: &'a HashMap<TableId, BTreeMap<WorkerId, Vec<ActorId>>>,
             /// Schedule information of all actors.
             locations: &'a ScheduledLocations,
             /// New dispatchers for this mview.
             dispatchers: &'a mut HashMap<ActorId, Vec<Dispatcher>>,
             /// Upstream Materialize actor ids grouped by worker id.
-            upstream_node_actors: &'a mut HashMap<WorkerId, HashSet<ActorId>>,
+            upstream_worker_actors: &'a mut HashMap<WorkerId, HashSet<ActorId>>,
         }
 
         impl Env<'_> {
@@ -203,20 +203,21 @@ where
                 }
 
                 // fill upstream node-actor info for later use
-                let upstream_table_node_actors = self.tables_node_actors.get(&table_id).unwrap();
+                let upstream_table_worker_actors =
+                    self.tables_worker_actors.get(&table_id).unwrap();
 
-                let chain_upstream_node_actors = upstream_table_node_actors
+                let chain_upstream_worker_actors = upstream_table_worker_actors
                     .iter()
-                    .flat_map(|(node_id, actor_ids)| {
-                        actor_ids.iter().map(|actor_id| (*node_id, *actor_id))
+                    .flat_map(|(worker_id, actor_ids)| {
+                        actor_ids.iter().map(|actor_id| (*worker_id, *actor_id))
                     })
                     .filter(|(_, actor_id)| upstream_actor_id == *actor_id)
                     .into_group_map();
-                for (node_id, actor_ids) in chain_upstream_node_actors {
-                    self.upstream_node_actors
-                        .entry(node_id)
+                for (worker_id, actor_ids) in chain_upstream_worker_actors {
+                    self.upstream_worker_actors
+                        .entry(worker_id)
                         .or_default()
-                        .extend(actor_ids.iter());
+                        .extend(actor_ids);
                 }
 
                 // deal with merge and batch query node, setting upstream infos.
@@ -259,17 +260,17 @@ where
             .get_sink_parallel_unit_ids(dependent_table_ids)
             .await?;
 
-        let tables_node_actors = &self
+        let tables_worker_actors = &self
             .fragment_manager
-            .get_tables_node_actors(dependent_table_ids)
+            .get_tables_worker_actors(dependent_table_ids)
             .await?;
 
         let mut env = Env {
             upstream_parallel_unit_info,
-            tables_node_actors,
+            tables_worker_actors,
             locations,
             dispatchers,
-            upstream_node_actors: upstream_worker_actors,
+            upstream_worker_actors,
         };
 
         for fragment in table_fragments.fragments.values_mut() {
@@ -365,7 +366,10 @@ where
         )
         .await?;
 
+        #[expect(clippy::no_effect_underscore_binding)]
+        let _dependent_table_ids = &*dependent_table_ids;
         let dispatchers = &*dispatchers;
+        let upstream_worker_actors = &*upstream_worker_actors;
 
         // Record vnode to parallel unit mapping for actors.
         let actor_to_vnode_mapping = {
@@ -462,6 +466,8 @@ where
             })
             .collect();
         table_fragments.set_actor_status(actor_info);
+
+        let table_fragments = table_fragments;
         let actor_map = table_fragments.actor_map();
 
         // Actors on each stream node will need to know where their upstream lies. `actor_info`
@@ -535,6 +541,11 @@ where
         for (worker_id, actors) in &worker_actors {
             let worker_node = locations.worker_locations.get(worker_id).unwrap();
             let mut client = self.client_pool.get(worker_node).await?;
+
+            println!(
+                "broadcast to worker {}: {:?}",
+                worker_id, actor_infos_to_broadcast
+            );
 
             client
                 .broadcast_actor_info_table(BroadcastActorInfoTableRequest {

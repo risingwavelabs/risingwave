@@ -564,7 +564,10 @@ pub fn pk_input_array_refs<'a>(
 pub async fn expect_first_barrier(
     stream: &mut (impl MessageStream + Unpin),
 ) -> StreamExecutorResult<Barrier> {
-    let message = stream.next().await.unwrap()?;
+    let message = stream
+        .next()
+        .await
+        .expect("failed to extract the first message: stream closed unexpectedly")?;
     let barrier = message
         .into_barrier()
         .expect("the first message must be a barrier");
