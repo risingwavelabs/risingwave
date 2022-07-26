@@ -84,6 +84,13 @@ impl Command {
         Self::Plain(Some(Mutation::Resume(ResumeMutation {})))
     }
 
+    pub fn changed_actor_ids(&self) -> Option<Vec<ActorId>> {
+        match self {
+            Command::Plain(Some(Mutation::Update(update))) => Some(update.dropped_actors.clone()),
+            _ => None,
+        }
+    }
+
     pub fn changed_table_id(&self) -> ChangedTableState {
         match self {
             Command::CreateMaterializedView {

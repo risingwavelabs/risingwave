@@ -283,7 +283,7 @@ where
     /// collected
     pub async fn load_all_actors(
         &self,
-        check_state: impl Fn(ActorState, &TableId) -> bool,
+        check_state: impl Fn(ActorId, ActorState, &TableId) -> bool,
     ) -> ActorInfos {
         let mut actor_maps = HashMap::new();
         let mut source_actor_ids = HashMap::new();
@@ -292,7 +292,7 @@ where
         for fragments in map.values() {
             for (node_id, actor_states) in fragments.node_actor_states() {
                 for actor_state in actor_states {
-                    if check_state(actor_state.1, &fragments.table_id()) {
+                    if check_state(actor_state.0, actor_state.1, &fragments.table_id()) {
                         actor_maps
                             .entry(node_id)
                             .or_insert_with(Vec::new)
@@ -304,7 +304,7 @@ where
             let source_actors = fragments.node_source_actor_states();
             for (&node_id, actor_states) in &source_actors {
                 for actor_state in actor_states {
-                    if check_state(actor_state.1, &fragments.table_id()) {
+                    if check_state(actor_state.0, actor_state.1, &fragments.table_id()) {
                         source_actor_ids
                             .entry(node_id)
                             .or_insert_with(Vec::new)

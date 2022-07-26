@@ -51,7 +51,7 @@ use crate::barrier::ChangedTableState::{Create, Drop};
 use crate::cluster::{ClusterManagerRef, META_NODE_ID};
 use crate::hummock::HummockManagerRef;
 use crate::manager::{CatalogManagerRef, MetaSrvEnv};
-use crate::model::BarrierManagerState;
+use crate::model::{ActorId, BarrierManagerState};
 use crate::rpc::metrics::MetaMetrics;
 use crate::storage::MetaStore;
 use crate::stream::FragmentManagerRef;
@@ -71,6 +71,7 @@ struct ScheduledBarriers {
     /// When `buffer` is not empty anymore, all subscribers of this watcher will be notified.
     changed_tx: watch::Sender<()>,
 }
+
 /// The table state of command
 #[derive(Debug, Clone)]
 pub enum ChangedTableState {
@@ -194,6 +195,8 @@ struct CheckpointControl<S: MetaStore> {
     /// The barrier does not send or collect the actors of these tables, even if they are
     /// `Running`.
     dropping_table_ids: HashSet<TableId>,
+
+    migrating_actor_ids: HashSet<ActorId>,
 }
 
 impl<S> CheckpointControl<S>
@@ -205,6 +208,7 @@ where
             command_ctx_queue: VecDeque::default(),
             creating_table_ids: HashSet::default(),
             dropping_table_ids: HashSet::default(),
+            migrating_actor_ids: HashSet::default(),
         }
     }
 
@@ -217,9 +221,17 @@ where
 
     /// Barrier can be sent to and collected from an actor if:
     /// 1. The actor is Running and not being dropped.
-    /// 2. The actor is Inactive and belongs to a creating MV
-    fn can_actor_send_or_collect(&self, s: ActorState, table_id: &TableId) -> bool {
-        s == ActorState::Running && !self.dropping_table_ids.contains(table_id)
+    /// 2. The actor is Running and not being migrated.
+    /// 3. The actor is Inactive and belongs to a creating MV
+    fn can_actor_send_or_collect(
+        &self,
+        actor_id: ActorId,
+        s: ActorState,
+        table_id: &TableId,
+    ) -> bool {
+        !(s != ActorState::Running
+            || self.dropping_table_ids.contains(table_id)
+                && self.migrating_actor_ids.contains(&actor_id))
             || s == ActorState::Inactive && self.creating_table_ids.contains(table_id)
     }
 
@@ -244,6 +256,11 @@ where
         if let Drop(table) = command_ctx.command.changed_table_id() {
             self.dropping_table_ids.insert(table);
         }
+
+        if let Some(actors) = command_ctx.command.changed_actor_ids() {
+            self.migrating_actor_ids.extend(actors);
+        }
+
         self.command_ctx_queue.push_back(EpochNode {
             timer: Some(timer),
             result: None,
@@ -279,7 +296,8 @@ where
         let complete_nodes: VecDeque<EpochNode<S>> =
             self.command_ctx_queue.drain(..index).collect();
         complete_nodes.iter().for_each(|node| {
-            self.remove_changed_table_ids(node.command_ctx.command.changed_table_id())
+            self.remove_changed_table_ids(node.command_ctx.command.changed_table_id());
+            self.remove_changed_actor_ids(node.command_ctx.command.changed_actor_ids());
         });
         complete_nodes
     }
@@ -288,7 +306,8 @@ where
     fn fail(&mut self) -> VecDeque<EpochNode<S>> {
         let complete_nodes: VecDeque<EpochNode<S>> = self.command_ctx_queue.drain(..).collect();
         complete_nodes.iter().for_each(|node| {
-            self.remove_changed_table_ids(node.command_ctx.command.changed_table_id())
+            self.remove_changed_table_ids(node.command_ctx.command.changed_table_id());
+            self.remove_changed_actor_ids(node.command_ctx.command.changed_actor_ids());
         });
         complete_nodes
     }
@@ -313,6 +332,14 @@ where
             _ => {}
         }
     }
+
+    pub fn remove_changed_actor_ids(&mut self, actors: Option<Vec<ActorId>>) {
+        if let Some(actors) = actors {
+            for actor_id in actors {
+                self.migrating_actor_ids.remove(&actor_id);
+            }
+        }
+    }
 }
 
 /// The state and message of this barrier
@@ -323,6 +350,7 @@ pub struct EpochNode<S: MetaStore> {
     command_ctx: Arc<CommandContext<S>>,
     notifiers: SmallVec<[Notifier; 1]>,
 }
+
 /// The state of barrier
 #[derive(PartialEq)]
 enum BarrierEpochState {
@@ -730,8 +758,8 @@ where
         &self,
         checkpoint_control: &CheckpointControl<S>,
     ) -> BarrierActorInfo {
-        let check_state = |s: ActorState, table_id: &TableId| {
-            checkpoint_control.can_actor_send_or_collect(s, table_id)
+        let check_state = |actor_id: ActorId, s: ActorState, table_id: &TableId| {
+            checkpoint_control.can_actor_send_or_collect(actor_id, s, table_id)
         };
         let all_nodes = self
             .cluster_manager
