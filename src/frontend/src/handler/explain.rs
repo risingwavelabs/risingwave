@@ -18,6 +18,7 @@ use pgwire::pg_field_descriptor::{PgFieldDescriptor, TypeOid};
 use pgwire::pg_response::{PgResponse, StatementType};
 use pgwire::types::Row;
 use risingwave_common::error::Result;
+use risingwave_common::session_config::QueryMode;
 use risingwave_sqlparser::ast::Statement;
 
 use super::create_index::gen_create_index_plan;
@@ -90,7 +91,12 @@ pub(super) fn handle_explain(
                 binder.bind(stmt)?
             };
             let logical = planner.plan(bound)?;
-            logical.gen_batch_query_plan()?
+
+            let query_mode = session.config().get_query_mode();
+            match query_mode {
+                QueryMode::Local => logical.gen_batch_local_plan()?,
+                QueryMode::Distributed => logical.gen_batch_query_plan()?,
+            }
         }
     };
 
