@@ -61,7 +61,7 @@ impl Rule for ApplyAggRule {
         );
         let new_agg: PlanRef = LogicalAgg::new(agg_calls, group_key, new_apply).into();
 
-        // left apply's on condition for predicate push to deal with
+        // leave apply's on condition for predicate push to deal with
         let filter = LogicalFilter::create(new_agg, on);
         Some(filter)
     }
