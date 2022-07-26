@@ -14,8 +14,6 @@
 
 mod chunked_data;
 pub mod hash_join;
-pub mod hash_join_new;
-mod hash_join_state;
 pub mod lookup_join;
 pub mod nested_loop_join;
 mod sort_merge_join;
