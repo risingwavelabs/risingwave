@@ -16,11 +16,13 @@ use std::future::Future;
 
 use risingwave_common::array::DataChunk;
 use risingwave_common::error::ErrorCode::InternalError;
-use risingwave_common::error::{Result, ToRwResult};
+use risingwave_common::error::Result;
 use risingwave_pb::batch_plan::exchange_info::BroadcastInfo;
 use risingwave_pb::batch_plan::*;
 use tokio::sync::mpsc;
 
+use crate::error::BatchError::SenderError;
+use crate::error::Result as BatchResult;
 use crate::task::channel::{ChanReceiver, ChanReceiverImpl, ChanSender, ChanSenderImpl};
 use crate::task::data_chunk_in_channel::DataChunkInChannel;
 use crate::task::BOUNDED_BUFFER_SIZE;
@@ -32,7 +34,7 @@ pub struct BroadcastSender {
 }
 
 impl ChanSender for BroadcastSender {
-    type SendFuture<'a> = impl Future<Output = Result<()>>;
+    type SendFuture<'a> = impl Future<Output = BatchResult<()>>;
 
     fn send(&mut self, chunk: Option<DataChunk>) -> Self::SendFuture<'_> {
         async move {
@@ -41,7 +43,7 @@ impl ChanSender for BroadcastSender {
                 sender
                     .send(broadcast_data_chunk.as_ref().cloned())
                     .await
-                    .to_rw_result_with(|| "BroadcastSender::send".into())?;
+                    .map_err(|_| SenderError)?
             }
 
             Ok(())
