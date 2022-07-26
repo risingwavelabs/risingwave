@@ -62,6 +62,7 @@ impl StreamFragment {
         Self {
             fragment_id,
             fragment_type: FragmentType::Others,
+            // FIXME: is it okay to use `false` as default value?
             is_singleton: false,
             node: None,
             table_ids_cnt: 0,
