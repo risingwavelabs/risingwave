@@ -1,38 +1,38 @@
-[[case]]
-type = "Put"
-[case.args]
-name = "s3 - put - 1MiB"
-obj = "1MiB"
-size = "1MiB"
-
-[[case]]
-type = "Put"
-[case.args]
-name = "s3 - put - 8MiB"
-obj = "8MiB"
-size = "8MiB"
-
-[[case]]
-type = "Put"
-[case.args]
-name = "s3 - put - 64MiB"
-obj = "64MiB"
-size = "64MiB"
-
-[[case]]
-type = "Put"
-[case.args]
-name = "s3 - put - 128MiB"
-obj = "128MiB"
-size = "128MiB"
-
-[[case]]
-type = "Put"
-[case.args]
-name = "s3 - put - 256MiB"
-obj = "256MiB"
-size = "256MiB"
-
+#[[case]]
+#type = "Put"
+#[case.args]
+#name = "s3 - put - 1MiB"
+#obj = "1MiB"
+#size = "1MiB"
+#
+#[[case]]
+#type = "Put"
+#[case.args]
+#name = "s3 - put - 8MiB"
+#obj = "8MiB"
+#size = "8MiB"
+#
+#[[case]]
+#type = "Put"
+#[case.args]
+#name = "s3 - put - 64MiB"
+#obj = "64MiB"
+#size = "64MiB"
+#
+#[[case]]
+#type = "Put"
+#[case.args]
+#name = "s3 - put - 128MiB"
+#obj = "128MiB"
+#size = "128MiB"
+#
+#[[case]]
+#type = "Put"
+#[case.args]
+#name = "s3 - put - 256MiB"
+#obj = "256MiB"
+#size = "256MiB"
+#
 [[case]]
 type = "MultiPartUpload"
 [case.args]
@@ -122,6 +122,12 @@ name = "s3 - get (parted) - 128MiB-p8MiB"
 obj = "128MiB"
 
 [[case]]
+type = "Get"
+[case.args]
+name = "s3 - get (parted) - 256MiB-p8MiB"
+obj = "256MiB"
+
+[[case]]
 type = "MultiPartGet"
 [case.args]
 name = "s3 - multi part get (all) - 1MiB-p8MiB"
@@ -148,6 +154,13 @@ type = "MultiPartGet"
 name = "s3 - multi part get (all) - 128MiB-p8MiB"
 obj = "128MiB-p8MiB"
 part = [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16]
+
+[[case]]
+type = "MultiPartGet"
+[case.args]
+name = "s3 - multi part get (all) - 256MiB-p8MiB"
+obj = "256MiB-p8MiB"
+part = [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16,17,18,19,20,21,22,23,24,25,26,27,28,29,30,31,32]
 
 [[case]]
 type = "MultiPartGet"

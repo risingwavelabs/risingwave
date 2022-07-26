@@ -12,6 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+#![feature(type_ascription)]
 use std::collections::hash_map::{Entry, HashMap};
 use std::ops::Div;
 use std::str::FromStr;
@@ -29,12 +30,12 @@ use log::debug;
 use rand::{Rng, SeedableRng};
 use aws_sdk_s3::Client;
 use aws_sdk_s3::model::{ CompletedMultipartUpload, CompletedPart};
+use aws_sdk_s3::output::UploadPartOutput;
 use aws_smithy_http::body::SdkBody;
+use tokio::{join, spawn};
 use tokio::sync::RwLock;
 use risingwave_common::error::RwError;
 use crate::future::try_join_all;
-
-const READ_BUFFER_SIZE: ByteSize = ByteSize::mib(8);
 
 // Avoid regenerate objs in the same size with `rand`.
 #[derive(Default)]
@@ -52,8 +53,10 @@ struct Cost {
     ttlb: Duration,
     /// time to live
     ttl: Duration,
-}
 
+    part_ttls: Vec<Duration>,
+}
+#[derive(Default)]
 struct Durations {
     min: Duration,
     max: Duration,
@@ -217,17 +220,29 @@ async fn multi_part_upload(
         .into_iter()
         .map(|chunk| chunk.to_owned())
         .collect_vec();
+
     let futures = chunks
         .into_iter()
         .enumerate()
         .map(|(i, part)| upload_part_handle(part,(i + 1) as i32))
-        .map(|a| a.send())
+        .map(|a| async move{
+            let part_t = Instant::now();
+            let result = a.send().await.unwrap();
+            let part_ttl = part_t.elapsed();
+            Ok((result,part_ttl)):Result<(UploadPartOutput,Duration),RwError>
+            }
+        )
         .collect_vec();
     let ttfb = t.elapsed();
+    let mut part_ttls = vec![];
     let completed_parts = future::try_join_all(futures)
         .await
         .unwrap()
         .into_iter()
+        .map(|(result,part_ttl)|{
+            part_ttls.push(part_ttl);
+            result
+        })
         .enumerate()
         .map(|(i, rsp)| CompletedPart::builder().set_e_tag(rsp.e_tag).set_part_number(Some((i + 1) as i32)).build())
         .collect_vec();
@@ -241,6 +256,7 @@ async fn multi_part_upload(
         bytes,
         ttfb,
         ttlb,
+        part_ttls,
         ..Default::default()
     }
 }
@@ -384,8 +400,12 @@ async fn run_case(index: usize, case: Case, cfg: Arc<Config>, client: Arc<Client
         _ => format!("{:.3?}", d),
     };
     let d2s_with_case = |case: &Case, d: &Duration| match case {
-        Case::Put { .. }  => "-".to_owned(),
+        Case::Put { .. } | Case::MultiPartGet { .. } => "-".to_owned(),
         _ => d2s(d),
+    };
+    let d2s_with_case_part = |case: &Case, d: &Duration| match case {
+        Case::MultiPartUpload { .. } => d2s(d),
+        _ => "-".to_owned(),
     };
     let data_with_name = [
         ("name".to_owned(), format!("{} ({} iters)", name, cfg.iter.clone())),
@@ -423,6 +443,30 @@ async fn run_case(index: usize, case: Case, cfg: Arc<Config>, client: Arc<Client
         (
             "ttfb-p99".to_owned(),
             d2s_with_case(&case, &analysis.ttfbs.p99),
+        ),
+        (
+            "rtt_part-avg".to_owned(),
+            d2s_with_case_part(&case, &analysis.part_rtts.avg),
+        ),
+        (
+            "rtt_part-min".to_owned(),
+            d2s_with_case_part(&case, &analysis.part_rtts.min),
+        ),
+        (
+            "rtt_part-max".to_owned(),
+            d2s_with_case_part(&case, &analysis.part_rtts.max),
+        ),
+        (
+            "rtt_part-p50".to_owned(),
+            d2s_with_case_part(&case, &analysis.part_rtts.p50),
+        ),
+        (
+            "rtt_part-p90".to_owned(),
+            d2s_with_case_part(&case, &analysis.part_rtts.p90),
+        ),
+        (
+            "rtt_part-p99".to_owned(),
+            d2s_with_case_part(&case, &analysis.part_rtts.p99),
         ),
     ];
     if cfg.format {
@@ -493,6 +537,11 @@ async fn iter_exec<F, FB>(fb: FB, iter_size: usize) -> Analysis
     let bytes = ByteSize::b(costs[0].bytes as u64);
     let ttls = Durations::gen(costs.iter().map(|cost| cost.ttl).collect_vec());
     let ttfbs = Durations::gen(costs.iter().map(|cost| cost.ttfb).collect_vec());
+    let part_rtts = if !costs[0].part_ttls.is_empty(){
+        Durations::gen(costs.iter().flat_map(|cost| cost.part_ttls.clone()).collect_vec())
+    }else{
+        Durations::default()
+    };
     let data_transfer_secs = costs
         .iter()
         .map(|cost| (cost.ttlb - cost.ttfb).as_secs_f64())
@@ -505,6 +554,7 @@ async fn iter_exec<F, FB>(fb: FB, iter_size: usize) -> Analysis
         bandwidth,
         rtts: ttls,
         ttfbs,
+        part_rtts,
     }
 }
 
@@ -513,6 +563,7 @@ struct Analysis {
     bandwidth: ByteSize,
     rtts: Durations,
     ttfbs: Durations,
+    part_rtts: Durations,
 }
 
 #[tokio::main]
@@ -539,21 +590,21 @@ async fn main() {
                 features_get.push(run_case(i, case, cfg.clone(), client.clone(), objs));
             }
         }
-        loop{
-            let mut vec = vec![];
-            if !features_put.is_empty() {
-                println!("aaaa");
-                vec.push(features_put.pop().unwrap());
+        let mut stream_put = tokio_stream::iter(features_put);
+        let mut stream_get = tokio_stream::iter(features_get);
+        let put_handle = tokio::spawn(async move {
+            while let Some(a) = stream_put.next().await {
+                println!("aaa");
+                a.await.unwrap();
             }
-            if !features_get.is_empty(){
-                println!("bbbb");
-                vec.push(features_get.pop().unwrap());
+        });
+        let get_handle = tokio::spawn( async move{
+            while let Some(a) = stream_get.next().await{
+                println!("bbb");
+                a.await.unwrap();
             }
-            if vec.is_empty(){
-                break;
-            }
-            try_join_all(vec).await.unwrap();
-        }
+        });
+        let _r = join!(put_handle,get_handle);
     }else{
         for (i, case) in cases.drain(..).enumerate() {
             debug!("running case: {:?}", case);
