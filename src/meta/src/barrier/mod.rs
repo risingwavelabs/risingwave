@@ -195,7 +195,7 @@ struct CheckpointControl<S: MetaStore> {
     /// The barrier does not send or collect the actors of these tables, even if they are
     /// `Running`.
     dropping_table_ids: HashSet<TableId>,
-
+    /// A barrier should not be sent for a source actor in migration
     migrating_actor_ids: HashSet<ActorId>,
 }
 
