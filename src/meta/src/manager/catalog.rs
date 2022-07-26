@@ -724,6 +724,9 @@ where
         if let Some(sink) = sink {
             Sink::delete(self.env.meta_store(), &sink_id).await?;
             core.drop_sink(&sink);
+            for &dependent_relation_id in &sink.dependent_relations {
+                core.decrease_ref_count(dependent_relation_id);
+            }
 
             let version = self
                 .env
