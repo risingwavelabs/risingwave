@@ -16,12 +16,10 @@ use criterion::{black_box, criterion_group, criterion_main, BatchSize, Benchmark
 use futures::StreamExt;
 use risingwave_batch::executor::hash_join_new::HashJoinExecutor;
 use risingwave_batch::executor::test_utils::{gen_projected_data, MockExecutor};
-use risingwave_batch::executor::{BoxedExecutor, EquiJoinParams, Executor, JoinType};
+use risingwave_batch::executor::{BoxedExecutor, JoinType};
 use risingwave_common::catalog::schema_test_utils::field_n;
-use risingwave_common::catalog::Schema;
 use risingwave_common::hash;
 use risingwave_common::types::{DataType, ScalarImpl};
-use risingwave_common::util::chunk_coalesce::DEFAULT_CHUNK_BUFFER_SIZE;
 use risingwave_expr::expr::build_from_prost;
 use risingwave_pb::data::data_type::TypeName;
 use risingwave_pb::expr::expr_node::RexNode;
@@ -186,13 +184,12 @@ fn bench_hash_join(c: &mut Criterion) {
     for with_cond in [false, true] {
         for join_type in &[
             JoinType::Inner,
-            // JoinType::LeftOuter,
-            // JoinType::LeftSemi,
-            // JoinType::LeftAnti,
-            // JoinType::RightOuter,
-            // JoinType::RightSemi,
-            // JoinType::RightAnti,
-            // JoinType::FullOuter,
+            JoinType::LeftOuter,
+            JoinType::LeftSemi,
+            JoinType::LeftAnti,
+            JoinType::RightOuter,
+            JoinType::RightSemi,
+            JoinType::RightAnti,
         ] {
             for chunk_size in &[32, 128, 512, 1024] {
                 c.bench_with_input(
