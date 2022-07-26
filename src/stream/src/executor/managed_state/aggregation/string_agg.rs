@@ -249,3 +249,314 @@ impl<S: StateStore> ManagedTableState<S> for ManagedStringAggState<S> {
         Ok(())
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use risingwave_common::array::{Row, StreamChunk, StreamChunkTestExt};
+    use risingwave_common::catalog::{ColumnDesc, ColumnId, TableId};
+    use risingwave_common::types::{DataType, ScalarImpl};
+    use risingwave_common::util::sort_util::{OrderPair, OrderType};
+    use risingwave_expr::expr::AggKind;
+    use risingwave_storage::memory::MemoryStateStore;
+    use risingwave_storage::table::state_table::RowBasedStateTable;
+
+    use super::ManagedStringAggState;
+    use crate::executor::aggregation::{AggArgs, AggCall};
+    use crate::executor::managed_state::aggregation::ManagedTableState;
+    use crate::executor::StreamExecutorResult;
+
+    #[tokio::test]
+    async fn test_string_agg_state_simple_agg_without_order() -> StreamExecutorResult<()> {
+        // Assumption of input schema:
+        // (a: varchar, b: int32, c: int32, _row_id: int64)
+        // where `a` is the column to aggregate
+
+        let input_pk_indices = vec![3];
+        let agg_call = AggCall {
+            kind: AggKind::StringAgg,
+            args: AggArgs::Unary(DataType::Varchar, 0),
+            return_type: DataType::Varchar,
+            order_pairs: vec![],
+            append_only: false,
+            filter: None,
+        };
+
+        // see `LogicalAgg::infer_internal_table_catalog` for the construction of state table
+        let table_id = TableId::new(6666);
+        let columns = vec![
+            ColumnDesc::unnamed(ColumnId::new(0), DataType::Int64), // _row_id
+            ColumnDesc::unnamed(ColumnId::new(1), DataType::Varchar), // a
+        ];
+        let state_table_col_indices = vec![3, 0];
+        let mut state_table = RowBasedStateTable::new_without_distribution(
+            MemoryStateStore::new(),
+            table_id,
+            columns,
+            vec![OrderType::Ascending],
+            vec![0], // [_row_id]
+        );
+
+        let mut agg_state =
+            ManagedStringAggState::new(agg_call, None, input_pk_indices, state_table_col_indices)?;
+
+        let mut epoch = 0;
+
+        let chunk = StreamChunk::from_pretty(
+            " T i i I
+            + a 1 8 123
+            + b 5 2 128
+            - b 5 2 128
+            + c 1 3 130",
+        );
+        let (ops, columns, visibility) = chunk.into_inner();
+        let chunk_cols: Vec<_> = columns.iter().map(|col| col.array_ref()).collect();
+        agg_state
+            .apply_batch(
+                &ops,
+                visibility.as_ref(),
+                &chunk_cols,
+                epoch,
+                &mut state_table,
+            )
+            .await?;
+
+        epoch += 1;
+        agg_state.flush(&mut state_table)?;
+        state_table.commit(epoch).await.unwrap();
+
+        let res = agg_state.get_output(epoch, &mut state_table).await?;
+        match res {
+            Some(ScalarImpl::Utf8(s)) => {
+                assert!(s.len() == 2);
+                assert!(s.contains("a"));
+                assert!(s.contains("c"));
+            }
+            _ => panic!("unexpected output"),
+        }
+
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn test_string_agg_state_simple_agg_with_order() -> StreamExecutorResult<()> {
+        // Assumption of input schema:
+        // (a: varchar, b: int32, c: int32, _row_id: int64)
+        // where `a` is the column to aggregate
+
+        let input_pk_indices = vec![3];
+        let agg_call = AggCall {
+            kind: AggKind::StringAgg,
+            args: AggArgs::Unary(DataType::Varchar, 0),
+            return_type: DataType::Varchar,
+            order_pairs: vec![
+                OrderPair::new(1, OrderType::Ascending),  // b ASC
+                OrderPair::new(0, OrderType::Descending), // a DESC
+            ],
+            append_only: false,
+            filter: None,
+        };
+
+        let table_id = TableId::new(6666);
+        let columns = vec![
+            ColumnDesc::unnamed(ColumnId::new(0), DataType::Int32), // b
+            ColumnDesc::unnamed(ColumnId::new(1), DataType::Varchar), // a
+            ColumnDesc::unnamed(ColumnId::new(2), DataType::Int64), // _row_id
+        ];
+        let state_table_col_indices = vec![1, 0, 3];
+        let mut state_table = RowBasedStateTable::new_without_distribution(
+            MemoryStateStore::new(),
+            table_id,
+            columns,
+            vec![
+                OrderType::Ascending,  // b ASC
+                OrderType::Descending, // a DESC
+                OrderType::Ascending,  // _row_id ASC
+            ],
+            vec![0, 1, 2], // [b, a, _row_id]
+        );
+
+        let mut agg_state =
+            ManagedStringAggState::new(agg_call, None, input_pk_indices, state_table_col_indices)?;
+
+        let mut epoch = 0;
+
+        {
+            let chunk = StreamChunk::from_pretty(
+                " T i i I
+                + a 1 8 123
+                + b 5 2 128
+                - b 5 2 128
+                + c 1 3 130",
+            );
+            let (ops, columns, visibility) = chunk.into_inner();
+            let chunk_cols: Vec<_> = columns.iter().map(|col| col.array_ref()).collect();
+            agg_state
+                .apply_batch(
+                    &ops,
+                    visibility.as_ref(),
+                    &chunk_cols,
+                    epoch,
+                    &mut state_table,
+                )
+                .await?;
+
+            agg_state.flush(&mut state_table)?;
+            state_table.commit(epoch).await.unwrap();
+            epoch += 1;
+
+            let res = agg_state.get_output(epoch, &mut state_table).await?;
+            match res {
+                Some(ScalarImpl::Utf8(s)) => {
+                    assert_eq!(s, "ca".to_string());
+                }
+                _ => panic!("unexpected output"),
+            }
+        }
+
+        {
+            let chunk = StreamChunk::from_pretty(
+                " T i i I
+                + d 0 8 134
+                + e 2 2 137",
+            );
+            let (ops, columns, visibility) = chunk.into_inner();
+            let chunk_cols: Vec<_> = columns.iter().map(|col| col.array_ref()).collect();
+            agg_state
+                .apply_batch(
+                    &ops,
+                    visibility.as_ref(),
+                    &chunk_cols,
+                    epoch,
+                    &mut state_table,
+                )
+                .await?;
+
+            agg_state.flush(&mut state_table)?;
+            state_table.commit(epoch).await.unwrap();
+            epoch += 1;
+
+            let res = agg_state.get_output(epoch, &mut state_table).await?;
+            match res {
+                Some(ScalarImpl::Utf8(s)) => {
+                    assert_eq!(s, "dcae".to_string());
+                }
+                _ => panic!("unexpected output"),
+            }
+        }
+
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn test_string_agg_state_grouped_agg_with_order() -> StreamExecutorResult<()> {
+        // Assumption of input schema:
+        // (a: varchar, b: int32, c: int32, _row_id: int64)
+        // where `a` is the column to aggregate
+
+        let input_pk_indices = vec![3];
+        let agg_call = AggCall {
+            kind: AggKind::StringAgg,
+            args: AggArgs::Unary(DataType::Varchar, 0),
+            return_type: DataType::Varchar,
+            order_pairs: vec![
+                OrderPair::new(1, OrderType::Ascending), // b ASC
+            ],
+            append_only: false,
+            filter: None,
+        };
+
+        let table_id = TableId::new(6666);
+        let columns = vec![
+            ColumnDesc::unnamed(ColumnId::new(0), DataType::Int32), // group by c
+            ColumnDesc::unnamed(ColumnId::new(1), DataType::Int32), // order by b
+            ColumnDesc::unnamed(ColumnId::new(2), DataType::Int64), // _row_id
+            ColumnDesc::unnamed(ColumnId::new(3), DataType::Varchar), // a
+        ];
+        let state_table_col_indices = vec![2, 1, 3, 0];
+        let mut state_table = RowBasedStateTable::new_without_distribution(
+            MemoryStateStore::new(),
+            table_id,
+            columns,
+            vec![
+                OrderType::Ascending, // c ASC
+                OrderType::Ascending, // b ASC
+                OrderType::Ascending, // _row_id ASC
+            ],
+            vec![0, 1, 2], // [c, b, _row_id]
+        );
+
+        let mut agg_state = ManagedStringAggState::new(
+            agg_call,
+            Some(&Row::new(vec![Some(8.into())])),
+            input_pk_indices,
+            state_table_col_indices,
+        )?;
+
+        let mut epoch = 0;
+
+        {
+            let chunk = StreamChunk::from_pretty(
+                " T i i I
+                + a 1 8 123
+                + b 5 8 128
+                + c 1 3 130 D // hide this row",
+            );
+            let (ops, columns, visibility) = chunk.into_inner();
+            let chunk_cols: Vec<_> = columns.iter().map(|col| col.array_ref()).collect();
+            agg_state
+                .apply_batch(
+                    &ops,
+                    visibility.as_ref(),
+                    &chunk_cols,
+                    epoch,
+                    &mut state_table,
+                )
+                .await?;
+
+            agg_state.flush(&mut state_table)?;
+            state_table.commit(epoch).await.unwrap();
+            epoch += 1;
+
+            let res = agg_state.get_output(epoch, &mut state_table).await?;
+            match res {
+                Some(ScalarImpl::Utf8(s)) => {
+                    assert_eq!(s, "ab".to_string());
+                }
+                _ => panic!("unexpected output"),
+            }
+        }
+
+        {
+            let chunk = StreamChunk::from_pretty(
+                " T i i I
+                + d 0 2 134 D // hide this row
+                + e 2 8 137",
+            );
+            let (ops, columns, visibility) = chunk.into_inner();
+            let chunk_cols: Vec<_> = columns.iter().map(|col| col.array_ref()).collect();
+            agg_state
+                .apply_batch(
+                    &ops,
+                    visibility.as_ref(),
+                    &chunk_cols,
+                    epoch,
+                    &mut state_table,
+                )
+                .await?;
+
+            agg_state.flush(&mut state_table)?;
+            state_table.commit(epoch).await.unwrap();
+            epoch += 1;
+
+            let res = agg_state.get_output(epoch, &mut state_table).await?;
+            match res {
+                Some(ScalarImpl::Utf8(s)) => {
+                    assert_eq!(s, "aeb".to_string());
+                }
+                _ => panic!("unexpected output"),
+            }
+        }
+
+        Ok(())
+    }
+}
