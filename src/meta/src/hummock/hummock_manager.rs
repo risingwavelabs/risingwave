@@ -24,14 +24,16 @@ use std::time::{Duration, Instant};
 
 use function_name::named;
 use itertools::Itertools;
+use parking_lot::Mutex;
 use prost::Message;
 use risingwave_common::monitor::rwlock::MonitoredRwLock;
-use risingwave_common::util::epoch::{Epoch, INVALID_EPOCH};
+use risingwave_common::util::epoch::{Epoch, INVALID_EPOCH, UNIX_SINGULARITY_DATE_EPOCH};
+use risingwave_common::util::row_id::IdGenerator;
 use risingwave_hummock_sdk::compact::compact_task_to_string;
 use risingwave_hummock_sdk::compaction_group::hummock_version_ext::HummockVersionExt;
 use risingwave_hummock_sdk::{
-    get_remote_sst_id, CompactionGroupId, HummockCompactionTaskId, HummockContextId, HummockEpoch,
-    HummockSstableId, HummockVersionId, LocalSstableInfo, FIRST_VERSION_ID,
+    CompactionGroupId, HummockCompactionTaskId, HummockContextId, HummockEpoch, HummockSstableId,
+    HummockVersionId, LocalSstableInfo, FIRST_VERSION_ID,
 };
 use risingwave_pb::hummock::hummock_version::Levels;
 use risingwave_pb::hummock::{
@@ -76,6 +78,7 @@ pub struct HummockManager<S: MetaStore> {
     compaction_scheduler: parking_lot::RwLock<Option<CompactionRequestChannelRef>>,
 
     compactor_manager: CompactorManagerRef,
+    sst_id_generator: Mutex<IdGenerator>,
 }
 
 pub type HummockManagerRef<S> = Arc<HummockManager<S>>;
@@ -262,6 +265,9 @@ where
             compaction_scheduler: parking_lot::RwLock::new(None),
             compactor_manager,
             max_committed_epoch: AtomicU64::new(0),
+            // TODO: assign worker id for each meta node in meta node cluster, so that generated id
+            // is unique within the cluster.
+            sst_id_generator: Mutex::new(IdGenerator::with_epoch(0, *UNIX_SINGULARITY_DATE_EPOCH)),
         };
 
         instance.load_meta_store_state().await?;
@@ -1068,17 +1074,8 @@ where
         Ok(())
     }
 
-    pub async fn get_new_table_id(&self) -> Result<HummockSstableId> {
-        // TODO #4037: refactor `get_new_table_id`
-        let sstable_id = get_remote_sst_id(
-            self.env
-                .id_gen_manager()
-                .generate::<{ IdCategory::HummockSstableId }>()
-                .await
-                .map(|id| id as HummockSstableId)?,
-        );
-
-        Ok(sstable_id)
+    pub fn get_new_sst_id(&self) -> HummockSstableId {
+        self.sst_id_generator.lock().next_id() as HummockSstableId
     }
 
     /// Release resources pinned by these contexts, including:

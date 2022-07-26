@@ -225,11 +225,11 @@ message HummockPinnedSnapshot {
   uint64 minimal_pinned_snapshot = 2;
 }
 
-message GetNewTableIdRequest {}
+message GetNewSstIdRequest {}
 
-message GetNewTableIdResponse {
+message GetNewSstIdResponse {
   common.Status status = 1;
-  uint64 table_id = 2;
+  uint64 sst_id = 2;
 }
 
 message SubscribeCompactTasksRequest {
@@ -280,7 +280,7 @@ service HummockManagerService {
   rpc GetEpoch(GetEpochRequest) returns (GetEpochResponse);
   rpc UnpinSnapshot(UnpinSnapshotRequest) returns (UnpinSnapshotResponse);
   rpc UnpinSnapshotBefore(UnpinSnapshotBeforeRequest) returns (UnpinSnapshotBeforeResponse);
-  rpc GetNewTableId(GetNewTableIdRequest) returns (GetNewTableIdResponse);
+  rpc GetNewSstId(GetNewSstIdRequest) returns (GetNewSstIdResponse);
   rpc SubscribeCompactTasks(SubscribeCompactTasksRequest) returns (stream SubscribeCompactTasksResponse);
   rpc ReportVacuumTask(ReportVacuumTaskRequest) returns (ReportVacuumTaskResponse);
   rpc GetCompactionGroups(GetCompactionGroupsRequest) returns (GetCompactionGroupsResponse);

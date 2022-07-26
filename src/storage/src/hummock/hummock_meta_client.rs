@@ -99,12 +99,8 @@ impl HummockMetaClient for MonitoredHummockMetaClient {
         unreachable!("Currently CNs should not call this function")
     }
 
-    async fn get_new_table_id(&self) -> Result<HummockSstableId> {
-        self.stats.get_new_table_id_counts.inc();
-        let timer = self.stats.get_new_table_id_latency.start_timer();
-        let res = self.meta_client.get_new_table_id().await;
-        timer.observe_duration();
-        res
+    async fn get_new_sst_id(&self) -> Result<HummockSstableId> {
+        self.meta_client.get_new_sst_id().await
     }
 
     async fn report_compaction_task(&self, compact_task: CompactTask) -> Result<()> {

@@ -845,63 +845,6 @@ def section_hummock_manager(panels):
         ]),
     ]
 
-
-def section_hummock_table_comparison(outer_panels):
-    panels = outer_panels.sub_panel()
-    return [
-        outer_panels.row_collapsed("gRPC Hummock Table Comparison", [
-            panels.timeseries_latency_small("get new TableID latency p50", [
-                panels.target(
-                    "histogram_quantile(0.5, sum(irate(meta_grpc_duration_seconds_bucket{path=\"/hummock.HummockManagerService/GetNewTableId\"}[$__rate_interval])) by (le))", "hummock_manager_ GetNewTableId_p50"
-                ),
-                panels.target(
-                    "histogram_quantile(0.5, sum(irate(state_store_get_new_table_id_latency_bucket[$__rate_interval])) by (le, job, instance)) ", "hummock_client_ GetNewTableId_p50 - {{instance}} "
-                ),
-            ]),
-            panels.timeseries_latency_small("get new TableID latency p90", [
-                panels.target(
-                    "histogram_quantile(0.9, sum(irate(meta_grpc_duration_seconds_bucket{path=\"/hummock.HummockManagerService/GetNewTableId\"}[$__rate_interval])) by (le))", "hummock_manager_ GetNewTableId_p90"
-                ),
-                panels.target(
-                    "histogram_quantile(0.9, sum(irate(state_store_get_new_table_id_latency_bucket[$__rate_interval])) by (le, job, instance))", "hummock_client_ GetNewTableId_p90 - {{instance}} "
-                ),
-            ]),
-            panels.timeseries_latency_small("get new TableID latency p99", [
-                panels.target(
-                    "histogram_quantile(0.99, sum(irate(meta_grpc_duration_seconds_bucket{path=\"/hummock.HummockManagerService/GetNewTableId\"}[$__rate_interval])) by (le))", "hummock_manager_ GetNewTableId_p99"
-                ),
-                panels.target(
-                    "histogram_quantile(0.99, sum(irate(state_store_get_new_table_id_latency_bucket[$__rate_interval])) by (le, job, instance))", "hummock_client_GetNewTableId_p99 - {{instance}} "
-                ),
-            ]),
-            panels.timeseries_latency_small("add tables latency p50", [
-                panels.target(
-                    "histogram_quantile(0.5, sum(irate(meta_grpc_duration_seconds_bucket{path=\"/hummock.HummockManagerService/AddTables\"}[$__rate_interval])) by (le))", "hummock_manager_ AddTables_p50"
-                ),
-                panels.target(
-                    "histogram_quantile(0.5, sum(irate(state_store_add_tables_latency_bucket[$__rate_interval])) by (le, job, instance))", "hummock_client_ AddTables_p50 - {{instance}} "
-                ),
-            ]),
-            panels.timeseries_latency_small("add tables latency p90", [
-                panels.target(
-                    "histogram_quantile(0.9, sum(irate(meta_grpc_duration_seconds_bucket{path=\"/hummock.HummockManagerService/AddTables\"}[$__rate_interval])) by (le))", "hummock_manager_ AddTables_p90"
-                ),
-                panels.target(
-                    "histogram_quantile(0.9, sum(irate(state_store_add_tables_latency_bucket[$__rate_interval])) by (le, job, instance))", "hummock_client_ AddTables_p90 - {{instance}} "
-                ),
-            ]),
-            panels.timeseries_latency_small("add tables latency p99", [
-                panels.target(
-                    "histogram_quantile(0.99, sum(irate(meta_grpc_duration_seconds_bucket{path=\"/hummock.HummockManagerService/AddTables\"}[$__rate_interval])) by (le))", "hummock_manager_ AddTables_p99"
-                ),
-                panels.target(
-                    "histogram_quantile(0.99, sum(irate(state_store_add_tables_latency_bucket[$__rate_interval])) by (le, job, instance))", "hummock_client_ AddTables_p99 - {{instance}} "
-                ),
-            ]),
-        ]),
-    ]
-
-
 def section_hummock_compaction_comparison(outer_panels):
     panels = outer_panels.sub_panel()
     return [
@@ -1288,40 +1231,6 @@ def section_grpc_hummock_meta_client(outer_panels):
                     "sum(irate(state_store_unpin_snapshot_counts[$__rate_interval])) by(job,instance)", "unpin_snapshot_counts - {{instance}} "
                 ),
             ]),
-            panels.timeseries_latency("table_latency", [
-                panels.target(
-                    "histogram_quantile(0.5, sum(irate(state_store_add_tables_latency_bucket[$__rate_interval])) by (le,instance))", "pin_snapshot_latency_p50 - {{instance}} "
-                ),
-                panels.target(
-                    "histogram_quantile(0.99, sum(irate(state_store_add_tables_latency_bucket[$__rate_interval])) by (le, job, instance))", "add_table_latency_p99 - {{instance}} "
-                ),
-                panels.target(
-                    "histogram_quantile(0.9, sum(irate(state_store_add_tables_latency_bucket[$__rate_interval])) by (le, job, instance))", "add_table_latency_p90 - {{instance}} "
-                ),
-                panels.target(
-                    "sum(irate(state_store_add_tables_latency_sum[$__rate_interval])) / sum(irate(state_store_add_tables_latency_count[$__rate_interval]))", "add_table_latency_avg"
-                ),
-                panels.target(
-                    "histogram_quantile(0.5, sum(irate(state_store_get_new_table_id_latency_bucket[$__rate_interval])) by (le, job, instance))", "get_new_table_id_latency_p50 - {{instance}} "
-                ),
-                panels.target(
-                    "histogram_quantile(0.99, sum(irate(state_store_get_new_table_id_latency_bucket[$__rate_interval])) by (le, job, instance))", "get_new_table_id_latency_p99 - {{instance}} "
-                ),
-                panels.target(
-                    "sum(irate(state_store_get_new_table_id_latency_sum[$__rate_interval])) / sum(irate(state_store_get_new_table_id_latency_count[$__rate_interval]))", "get_new_table_id_latency_avg"
-                ),
-                panels.target(
-                    "histogram_quantile(0.90, sum(irate(state_store_get_new_table_id_latency_bucket[$__rate_interval])) by (le, job, instance))", "get_new_table_id_latency_p90 - {{instance}} "
-                ),
-            ]),
-            panels.timeseries_count("table_count", [
-                panels.target(
-                    "sum(irate(state_store_add_tables_counts[$__rate_interval]))by(job,instance)", "add_tables_counts - {{instance}} "
-                ),
-                panels.target(
-                    "sum(irate(state_store_get_new_table_id_counts[$__rate_interval]))by(job,instance)", "get_new_table_id_counts - {{instance}} "
-                ),
-            ]),
             panels.timeseries_latency("compation_latency", [
                 panels.target(
                     "histogram_quantile(0.5, sum(irate(state_store_report_compaction_task_latency_bucket[$__rate_interval])) by (le, job, instance))", "report_compaction_task_latency_p50 - {{instance}}"
@@ -1360,7 +1269,6 @@ dashboard = Dashboard(
         *section_streaming_exchange(panels),
         *section_hummock(panels),
         *section_hummock_manager(panels),
-        *section_hummock_table_comparison(panels),
         *section_hummock_compaction_comparison(panels),
         *section_grpc_hummock_version_comparison(panels),
         *section_grpc_meta_catalog_service(panels),

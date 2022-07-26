@@ -69,7 +69,7 @@ pub fn get_remote_sstable_id_generator(
         let meta_client = meta_client.clone();
         async move {
             meta_client
-                .get_new_table_id()
+                .get_new_sst_id()
                 .await
                 .map_err(HummockError::meta_error)
         }

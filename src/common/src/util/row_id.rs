@@ -19,33 +19,33 @@ const WORKER_ID_SHIFT_BITS: u8 = 12;
 const SEQUENCE_UPPER_BOUND: u16 = 1 << 12;
 const WORKER_ID_UPPER_BOUND: u32 = 1 << 10;
 
-/// `RowIdGenerator` generates unique row ids using snowflake algorithm as following format:
+/// `IdGenerator` generates unique ids using snowflake algorithm as following format:
 ///
 /// | timestamp | worker id | sequence |
 /// |-----------|-----------|----------|
 /// |  41 bits  | 10 bits   | 12 bits  |
 #[derive(Debug)]
-pub struct RowIdGenerator {
-    /// Specific epoch using for generating row ids.
+pub struct IdGenerator {
+    /// Specific epoch using for generating ids.
     epoch: SystemTime,
 
-    /// Last timestamp part of row id.
+    /// Last timestamp part of id.
     last_duration_ms: i64,
     /// Current worker id.
     worker_id: u32,
-    /// Last sequence part of row id.
+    /// Last sequence part of id.
     sequence: u16,
 }
 
-pub type RowId = i64;
+pub type Id = i64;
 
-impl RowIdGenerator {
+impl IdGenerator {
     pub fn new(worker_id: u32) -> Self {
-        assert!(worker_id < WORKER_ID_UPPER_BOUND);
         Self::with_epoch(worker_id, UNIX_EPOCH)
     }
 
     pub fn with_epoch(worker_id: u32, epoch: SystemTime) -> Self {
+        assert!(worker_id < WORKER_ID_UPPER_BOUND);
         Self {
             epoch,
             last_duration_ms: epoch.elapsed().unwrap().as_millis() as i64,
@@ -54,7 +54,7 @@ impl RowIdGenerator {
         }
     }
 
-    fn row_id(&self) -> RowId {
+    fn id(&self) -> Id {
         self.last_duration_ms << TIMESTAMP_SHIFT_BITS
             | (self.worker_id << WORKER_ID_SHIFT_BITS) as i64
             | self.sequence as i64
@@ -86,12 +86,12 @@ impl RowIdGenerator {
         }
     }
 
-    pub fn next_batch(&mut self, length: usize) -> Vec<RowId> {
+    pub fn next_id_batch(&mut self, length: usize) -> Vec<Id> {
         self.try_update_duration();
         let mut ret = Vec::with_capacity(length);
         while ret.len() < length {
             if self.sequence < SEQUENCE_UPPER_BOUND {
-                ret.push(self.row_id());
+                ret.push(self.id());
                 self.sequence += 1;
             } else {
                 self.try_update_duration();
@@ -101,14 +101,14 @@ impl RowIdGenerator {
         ret
     }
 
-    pub fn next(&mut self) -> RowId {
+    pub fn next_id(&mut self) -> Id {
         self.try_update_duration();
         if self.sequence < SEQUENCE_UPPER_BOUND {
-            let row_id = self.row_id();
+            let id = self.id();
             self.sequence += 1;
-            row_id
+            id
         } else {
-            self.next()
+            self.next_id()
         }
     }
 }
@@ -121,29 +121,25 @@ mod tests {
 
     #[test]
     fn test_generator() {
-        let mut generator = RowIdGenerator::new(0);
-        let mut last_row_id = generator.next();
+        let mut generator = IdGenerator::new(0);
+        let mut last_id = generator.next_id();
         for _ in 0..100000 {
-            let row_id = generator.next();
-            assert!(row_id > last_row_id);
-            last_row_id = row_id;
+            let id = generator.next_id();
+            assert!(id > last_id);
+            last_id = id;
         }
         std::thread::sleep(Duration::from_millis(10));
-        let row_id = generator.next();
-        assert!(row_id > last_row_id);
-        assert_ne!(
-            row_id >> TIMESTAMP_SHIFT_BITS,
-            last_row_id >> TIMESTAMP_SHIFT_BITS
-        );
-        assert_eq!(row_id & (SEQUENCE_UPPER_BOUND as i64 - 1), 0);
+        let id = generator.next_id();
+        assert!(id > last_id);
+        assert_ne!(id >> TIMESTAMP_SHIFT_BITS, last_id >> TIMESTAMP_SHIFT_BITS);
+        assert_eq!(id & (SEQUENCE_UPPER_BOUND as i64 - 1), 0);
 
-        let mut generator = RowIdGenerator::new(1);
-        let row_ids = generator.next_batch((SEQUENCE_UPPER_BOUND + 10) as usize);
+        let mut generator = IdGenerator::new(1);
+        let ids = generator.next_id_batch((SEQUENCE_UPPER_BOUND + 10) as usize);
         let mut expected = (0..SEQUENCE_UPPER_BOUND).collect_vec();
         expected.extend(0..10);
         assert_eq!(
-            row_ids
-                .into_iter()
+            ids.into_iter()
                 .map(|id| (id as u16) & (SEQUENCE_UPPER_BOUND - 1))
                 .collect_vec(),
             expected

@@ -24,12 +24,12 @@ use risingwave_common::error::ErrorCode::{ConnectorError, InternalError, Protoco
 use risingwave_common::error::{Result, RwError};
 use risingwave_common::types::DataType;
 use risingwave_common::util::epoch::UNIX_SINGULARITY_DATE_EPOCH;
+use risingwave_common::util::row_id::{Id, IdGenerator};
 use risingwave_connector::source::ConnectorProperties;
 use risingwave_pb::catalog::StreamSourceInfo;
 use risingwave_pb::plan_common::RowFormatType;
 
 use crate::monitor::SourceMetrics;
-use crate::row_id::{RowId, RowIdGenerator};
 use crate::table_v2::TableSourceV2;
 use crate::{ConnectorSource, SourceFormat, SourceImpl, SourceParserImpl};
 
@@ -95,17 +95,17 @@ pub struct SourceDesc {
     // The column index of row ID. By default it's 0, which means the first column is row ID.
     // TODO: change to Option<usize> when pk supported in the future.
     pub row_id_index: usize,
-    pub row_id_generator: Arc<Mutex<RowIdGenerator>>,
+    pub row_id_generator: Arc<Mutex<IdGenerator>>,
 }
 
 impl SourceDesc {
-    pub fn next_row_id(&self) -> RowId {
-        self.row_id_generator.as_ref().lock().next()
+    pub fn next_row_id(&self) -> Id {
+        self.row_id_generator.as_ref().lock().next_id()
     }
 
-    pub fn next_row_id_batch(&self, length: usize) -> Vec<RowId> {
+    pub fn next_row_id_batch(&self, length: usize) -> Vec<Id> {
         let mut guard = self.row_id_generator.as_ref().lock();
-        guard.next_batch(length)
+        guard.next_id_batch(length)
     }
 }
 
@@ -178,7 +178,7 @@ impl SourceManager for MemSourceManager {
             format,
             columns,
             row_id_index,
-            row_id_generator: Arc::new(Mutex::new(RowIdGenerator::with_epoch(
+            row_id_generator: Arc::new(Mutex::new(IdGenerator::with_epoch(
                 self.worker_id,
                 *UNIX_SINGULARITY_DATE_EPOCH,
             ))),
@@ -214,7 +214,7 @@ impl SourceManager for MemSourceManager {
             columns: source_columns,
             format: SourceFormat::Invalid,
             row_id_index: 0, // always use the first column as row_id
-            row_id_generator: Arc::new(Mutex::new(RowIdGenerator::with_epoch(
+            row_id_generator: Arc::new(Mutex::new(IdGenerator::with_epoch(
                 self.worker_id,
                 *UNIX_SINGULARITY_DATE_EPOCH,
             ))),

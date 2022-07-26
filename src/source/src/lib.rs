@@ -51,7 +51,6 @@ mod manager;
 mod common;
 pub mod connector_source;
 pub mod monitor;
-mod row_id;
 mod table_v2;
 
 extern crate core;

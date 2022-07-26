@@ -429,9 +429,9 @@ impl HummockMetaClient for MetaClient {
         Ok(())
     }
 
-    async fn get_new_table_id(&self) -> Result<HummockSstableId> {
-        let resp = self.inner.get_new_table_id(GetNewTableIdRequest {}).await?;
-        Ok(resp.table_id)
+    async fn get_new_sst_id(&self) -> Result<HummockSstableId> {
+        let resp = self.inner.get_new_sst_id(GetNewSstIdRequest {}).await?;
+        Ok(resp.sst_id)
     }
 
     async fn report_compaction_task(&self, compact_task: CompactTask) -> Result<()> {
@@ -600,7 +600,7 @@ macro_rules! for_all_meta_rpc {
             ,{ hummock_client, unpin_snapshot, UnpinSnapshotRequest, UnpinSnapshotResponse }
             ,{ hummock_client, unpin_snapshot_before, UnpinSnapshotBeforeRequest, UnpinSnapshotBeforeResponse }
             ,{ hummock_client, report_compaction_tasks, ReportCompactionTasksRequest, ReportCompactionTasksResponse }
-            ,{ hummock_client, get_new_table_id, GetNewTableIdRequest, GetNewTableIdResponse }
+            ,{ hummock_client, get_new_sst_id, GetNewSstIdRequest, GetNewSstIdResponse }
             ,{ hummock_client, subscribe_compact_tasks, SubscribeCompactTasksRequest, Streaming<SubscribeCompactTasksResponse> }
             ,{ hummock_client, report_vacuum_task, ReportVacuumTaskRequest, ReportVacuumTaskResponse }
             ,{ hummock_client, get_compaction_groups, GetCompactionGroupsRequest, GetCompactionGroupsResponse }

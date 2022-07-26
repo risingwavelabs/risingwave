@@ -119,11 +119,8 @@ impl HummockMetaClient for MockHummockMetaClient {
             .map_err(mock_err)
     }
 
-    async fn get_new_table_id(&self) -> Result<HummockSstableId> {
-        self.hummock_manager
-            .get_new_table_id()
-            .await
-            .map_err(mock_err)
+    async fn get_new_sst_id(&self) -> Result<HummockSstableId> {
+        Ok(self.hummock_manager.get_new_sst_id())
     }
 
     async fn report_compaction_task(&self, compact_task: CompactTask) -> Result<()> {
