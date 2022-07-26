@@ -12,7 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 
 use risingwave_common::catalog::{ColumnDesc, Field};
 use risingwave_common::util::sort_util::OrderType;
@@ -106,6 +106,18 @@ impl TableCatalogBuilder {
         append_only: bool,
         column_mapping: &[usize],
     ) -> TableCatalog {
+        // Transform indices to set for checking.
+        let input_dist_key_indices_set: HashSet<usize> =
+            HashSet::from_iter(distribution_key.iter().cloned());
+        let column_mapping_indices_set: HashSet<usize> =
+            HashSet::from_iter(column_mapping.iter().cloned());
+
+        // Only if all `distribution_key` is in `column_mapping`, we return transformed dist key
+        // indices, otherwise empty.
+        if !column_mapping_indices_set.is_superset(&input_dist_key_indices_set) {
+            return self.build(vec![], append_only);
+        }
+
         // Transform `distribution_key` (based on input schema) to distribution indices on internal
         // table columns via `column_mapping` (input col idx -> state table col idx).
         let dist_indices_on_table_columns = distribution_key
@@ -114,7 +126,7 @@ impl TableCatalogBuilder {
                 column_mapping
                     .iter()
                     .position(|col_idx| *col_idx == *x)
-                    .expect("Always expect to find corresponding dist key in table columns")
+                    .expect("Have checked that all input indices must be found")
             })
             .collect();
 
