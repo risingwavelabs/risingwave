@@ -28,8 +28,10 @@ use risingwave_common::util::sort_util::OrderType;
 use risingwave_pb::batch_plan::plan_node::NodeBody;
 use risingwave_pb::batch_plan::{scan_range, ScanRange};
 use risingwave_pb::plan_common::{CellBasedTableDesc, OrderType as ProstOrderType};
-use risingwave_storage::row_serde::CellBasedRowSerde;
-use risingwave_storage::table::storage_table::{BatchDedupPkIter, StorageTable, StorageTableIter};
+use risingwave_storage::row_serde::RowBasedSerde;
+use risingwave_storage::table::storage_table::{
+    BatchDedupPkIter, RowBasedStorageTable, StorageTableIter,
+};
 use risingwave_storage::table::{Distribution, TableIter};
 use risingwave_storage::{dispatch_state_store, Keyspace, StateStore, StateStoreImpl};
 
@@ -49,8 +51,8 @@ pub struct RowSeqScanExecutor<S: StateStore> {
 }
 
 pub enum ScanType<S: StateStore> {
-    TableScan(BatchDedupPkIter<S, CellBasedRowSerde>),
-    RangeScan(StorageTableIter<S, CellBasedRowSerde>),
+    TableScan(BatchDedupPkIter<S, RowBasedSerde>),
+    RangeScan(StorageTableIter<S, RowBasedSerde>),
     PointGet(Option<Row>),
 }
 
@@ -203,7 +205,7 @@ impl BoxedExecutorBuilder for RowSeqScanExecutorBuilder {
 
         dispatch_state_store!(source.context().try_get_state_store()?, state_store, {
             let batch_stats = source.context().stats();
-            let table = StorageTable::new_partial(
+            let table = RowBasedStorageTable::new_partial(
                 state_store.clone(),
                 table_id,
                 column_descs,

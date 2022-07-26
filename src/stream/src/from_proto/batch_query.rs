@@ -16,7 +16,7 @@ use itertools::Itertools;
 use risingwave_common::catalog::{ColumnDesc, ColumnId, OrderedColumnDesc, TableId};
 use risingwave_common::util::sort_util::OrderType;
 use risingwave_pb::plan_common::{CellBasedTableDesc, OrderType as ProstOrderType};
-use risingwave_storage::table::storage_table::StorageTable;
+use risingwave_storage::table::storage_table::RowBasedStorageTable;
 use risingwave_storage::table::Distribution;
 use risingwave_storage::StateStore;
 
@@ -86,7 +86,7 @@ impl ExecutorBuilder for BatchQueryExecutorBuilder {
             },
             None => Distribution::fallback(),
         };
-        let table = StorageTable::new_partial(
+        let table = RowBasedStorageTable::new_partial(
             state_store,
             table_id,
             column_descs,
