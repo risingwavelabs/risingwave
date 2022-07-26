@@ -369,6 +369,9 @@ dependencies = ["k", "clean-data"]
 [tasks.fill-kafka]
 command = "scripts/source/prepare_source.sh"
 
+[tasks.prepare-mysql]
+command = "scripts/sink/prepare_sink.sh"
+
 [tasks.install-tools]
 category = "RiseDev - Check"
 script = """

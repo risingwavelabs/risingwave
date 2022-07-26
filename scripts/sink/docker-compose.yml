@@ -8,4 +8,4 @@ services:
     ports:
      - 23306:3306
     environment:
-     - MYSQL_ALLOW_EMPTY_PASSWORD=true=true
+     - MYSQL_ALLOW_EMPTY_PASSWORD=true
