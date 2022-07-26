@@ -68,7 +68,7 @@ pub fn gen_create_mv_plan(
     let materialize = plan_root.gen_create_mv_plan(table_name)?;
     let mut table = materialize.table().to_prost(schema_id, database_id);
     let plan: PlanRef = materialize.into();
-    table.owner = session.user_name().to_string();
+    table.owner = session.user_id();
     table.properties = properties;
 
     let ctx = plan.ctx();

@@ -80,7 +80,7 @@ pub struct TableCatalog {
     pub appendonly: bool,
 
     /// Owner of the table.
-    pub owner: String,
+    pub owner: u32,
 
     /// Mapping from vnode to parallel unit. Indicates data distribution and partition of the
     /// table.
@@ -160,7 +160,7 @@ impl TableCatalog {
                 .map(|k| *k as i32)
                 .collect_vec(),
             appendonly: self.appendonly,
-            owner: self.owner.clone(),
+            owner: self.owner,
             mapping: None,
             properties: HashMap::default(),
             read_pattern_prefix_column: self.read_pattern_prefix_column,
@@ -299,7 +299,7 @@ mod tests {
             optional_associated_source_id: OptionalAssociatedSourceId::AssociatedSourceId(233)
                 .into(),
             appendonly: false,
-            owner: risingwave_common::catalog::DEFAULT_SUPPER_USER.to_string(),
+            owner: risingwave_common::catalog::DEFAULT_SUPER_USER_ID,
             mapping: Some(ParallelUnitMapping {
                 table_id: 0,
                 original_indices,
@@ -354,7 +354,7 @@ mod tests {
                 }],
                 distribution_key: vec![],
                 appendonly: false,
-                owner: risingwave_common::catalog::DEFAULT_SUPPER_USER.to_string(),
+                owner: risingwave_common::catalog::DEFAULT_SUPER_USER_ID,
                 vnode_mapping: Some(mapping),
                 properties: HashMap::from([(String::from("ttl"), String::from("300"))]),
                 read_pattern_prefix_column: 0,
