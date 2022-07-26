@@ -159,7 +159,9 @@ where
 
         if fragment.distribution_type == FragmentDistributionType::Single as i32 {
             // Singleton fragment
-            let actor = &fragment.actors[0];
+            let [actor] = fragment.actors.as_slice() else {
+                panic!("singleton fragment should only have one actor")
+            };
 
             let parallel_unit =
                 if actor.same_worker_node_as_upstream && !actor.upstream_actor_id.is_empty() {

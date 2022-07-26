@@ -18,3 +18,36 @@
             StreamTableScan { table: m1, columns: [v1, v2, t1._row_id], pk_indices: [2] }
           StreamExchange { dist: HashShard([0]) }
             StreamTableScan { table: m2, columns: [v1, v2, t1._row_id], pk_indices: [2] }
+- id: create_singleton_mv
+  sql: |
+    create table t (v int);
+    create materialized view mv as select v from t order by v limit 10;
+- id: select_from_singleton_mv
+  before:
+    - create_singleton_mv
+  sql: |
+    select v from mv; -- FIXME: there should not be a `Single` exchange here
+  batch_plan: |
+    BatchExchange { order: [], dist: Single }
+      BatchScan { table: mv, columns: [v] }
+- id: single_fragment_mv_on_singleton_mv
+  before:
+    - create_singleton_mv
+  sql: |
+    select v from mv;
+  stream_plan: |
+    StreamMaterialize { columns: [v, mv.t._row_id(hidden)], pk_columns: [mv.t._row_id] }
+      StreamTableScan { table: mv, columns: [v, t._row_id], pk_indices: [1] }
+- id: mv_on_singleton_mv
+  before:
+    - create_singleton_mv
+  sql: |
+    select mv1.v as v from mv as mv1, mv as mv2 where mv1.v = mv2.v;
+  stream_plan: |
+    StreamMaterialize { columns: [v, mv.t._row_id(hidden), mv.t._row_id#1(hidden)], pk_columns: [mv.t._row_id, mv.t._row_id#1] }
+      StreamExchange { dist: HashShard([1, 2]) }
+        StreamHashJoin { type: Inner, predicate: $0 = $2, output_indices: [0, 1, 3] }
+          StreamExchange { dist: HashShard([0]) }
+            StreamTableScan { table: mv, columns: [v, t._row_id], pk_indices: [1] }
+          StreamExchange { dist: HashShard([0]) }
+            StreamTableScan { table: mv, columns: [v, t._row_id], pk_indices: [1] }
