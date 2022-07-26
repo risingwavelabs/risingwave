@@ -178,25 +178,48 @@ mod tests {
     use crate::hummock::iterator::test_utils::mock_sstable_store;
     use crate::hummock::sstable::utils::CompressionAlgorithm;
     use crate::hummock::test_utils::default_builder_opt_for_test;
-    use crate::hummock::{SstableBuilderOptions, DEFAULT_RESTART_INTERVAL};
+    use crate::hummock::{MemoryLimiter, SstableBuilderOptions, DEFAULT_RESTART_INTERVAL};
+
+    pub struct LocalTableBuilderFactory {
+        next_id: AtomicU64,
+        options: SstableBuilderOptions,
+        limiter: MemoryLimiter,
+    }
+
+    impl LocalTableBuilderFactory {
+        pub fn new(next_id: u64, options: SstableBuilderOptions) -> Self {
+            Self {
+                limiter: MemoryLimiter::new(1000000),
+                next_id: AtomicU64::new(next_id),
+                options,
+            }
+        }
+    }
+
+    #[async_trait::async_trait]
+    impl TableBuilderFactory for LocalTableBuilderFactory {
+        async fn open_builder(&self) -> HummockResult<(MemoryTracker, SstableBuilder)> {
+            let id = self.next_id.fetch_add(1, SeqCst);
+            let builder = SstableBuilder::new(id, self.options.clone());
+            let tracker = self.limiter.require_memory(1).await.unwrap();
+            Ok((tracker, builder))
+        }
+    }
 
     #[tokio::test]
     async fn test_empty() {
-        let next_id = AtomicU64::new(1001);
         let block_size = 1 << 10;
         let table_capacity = 4 * block_size;
-        let get_id_and_builder = || async {
-            Ok(SstableBuilder::new(
-                next_id.fetch_add(1, SeqCst),
-                SstableBuilderOptions {
-                    capacity: table_capacity,
-                    block_capacity: block_size,
-                    restart_interval: DEFAULT_RESTART_INTERVAL,
-                    bloom_false_positive: 0.1,
-                    compression_algorithm: CompressionAlgorithm::None,
-                },
-            ))
-        };
+        let get_id_and_builder = LocalTableBuilderFactory::new(
+            1001,
+            SstableBuilderOptions {
+                capacity: table_capacity,
+                block_capacity: block_size,
+                restart_interval: DEFAULT_RESTART_INTERVAL,
+                bloom_false_positive: 0.1,
+                compression_algorithm: CompressionAlgorithm::None,
+            },
+        );
         let builder = CapacitySplitTableBuilder::new(
             get_id_and_builder,
             CachePolicy::NotFill,
@@ -208,22 +231,18 @@ mod tests {
 
     #[tokio::test]
     async fn test_lots_of_tables() {
-        let next_id = AtomicU64::new(1001);
-
         let block_size = 1 << 10;
         let table_capacity = 4 * block_size;
-        let get_id_and_builder = || async {
-            Ok(SstableBuilder::new(
-                next_id.fetch_add(1, SeqCst),
-                SstableBuilderOptions {
-                    capacity: table_capacity,
-                    block_capacity: block_size,
-                    restart_interval: DEFAULT_RESTART_INTERVAL,
-                    bloom_false_positive: 0.1,
-                    compression_algorithm: CompressionAlgorithm::None,
-                },
-            ))
-        };
+        let get_id_and_builder = LocalTableBuilderFactory::new(
+            1001,
+            SstableBuilderOptions {
+                capacity: table_capacity,
+                block_capacity: block_size,
+                restart_interval: DEFAULT_RESTART_INTERVAL,
+                bloom_false_positive: 0.1,
+                compression_algorithm: CompressionAlgorithm::None,
+            },
+        );
         let mut builder = CapacitySplitTableBuilder::new(
             get_id_and_builder,
             CachePolicy::NotFill,
@@ -248,14 +267,8 @@ mod tests {
 
     #[tokio::test]
     async fn test_table_seal() {
-        let next_id = AtomicU64::new(1001);
         let mut builder = CapacitySplitTableBuilder::new(
-            || async {
-                Ok(SstableBuilder::new(
-                    next_id.fetch_add(1, SeqCst),
-                    default_builder_opt_for_test(),
-                ))
-            },
+            LocalTableBuilderFactory::new(1001, default_builder_opt_for_test()),
             CachePolicy::NotFill,
             mock_sstable_store(),
         );
@@ -293,14 +306,8 @@ mod tests {
 
     #[tokio::test]
     async fn test_initial_not_allowed_split() {
-        let next_id = AtomicU64::new(1001);
         let mut builder = CapacitySplitTableBuilder::new(
-            || async {
-                Ok(SstableBuilder::new(
-                    next_id.fetch_add(1, SeqCst),
-                    default_builder_opt_for_test(),
-                ))
-            },
+            LocalTableBuilderFactory::new(1001, default_builder_opt_for_test()),
             CachePolicy::NotFill,
             mock_sstable_store(),
         );

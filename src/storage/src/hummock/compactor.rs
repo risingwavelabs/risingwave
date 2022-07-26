@@ -458,7 +458,6 @@ impl Compactor {
     /// Always return `Ok` and let hummock manager handle errors.
     pub async fn compact(context: Arc<CompactorContext>, mut compact_task: CompactTask) -> bool {
         use risingwave_common::catalog::TableOption;
-        tracing::info!("Ready to handle compaction task: {}", compact_task.task_id);
         let group_label = compact_task.compaction_group_id.to_string();
         let cur_level_label = compact_task.input_ssts[0].level_idx.to_string();
         let compaction_read_bytes = compact_task.input_ssts[0]
@@ -512,10 +511,11 @@ impl Compactor {
             compact_task.splits = vec![KeyRange::inf().into()];
             need_quota = estimate_memory_use_for_compaction(&compact_task);
         }
-        let tracker = match context.memory_limiter.require_memory(need_quota).await {
-            None => return false,
-            Some(tracker) => tracker,
-        };
+        tracing::info!(
+            "Ready to handle compaction task: {} need memory: {}",
+            compact_task.task_id,
+            need_quota
+        );
 
         // Number of splits (key ranges) is equal to number of compaction tasks
         let parallelism = compact_task.splits.len();
@@ -591,7 +591,6 @@ impl Compactor {
                 }
             }
         }
-        drop(tracker);
 
         // Sort by split/key range index.
         output_ssts.sort_by_key(|(split_index, _)| *split_index);
