@@ -154,6 +154,10 @@ where
         worker.worker_node.state = State::Running as i32;
         worker.insert(self.env.meta_store()).await?;
 
+        self.env
+            .stream_client_pool()
+            .invalidate(&worker.worker_node)
+            .await;
         core.update_worker_node(worker.clone());
 
         // Notify frontends of new compute node.
@@ -176,6 +180,10 @@ where
         // Persist deletion.
         Worker::delete(self.env.meta_store(), &host_address).await?;
 
+        self.env
+            .stream_client_pool()
+            .invalidate(&worker.worker_node)
+            .await;
         // Update core.
         core.delete_worker_node(worker);
 
