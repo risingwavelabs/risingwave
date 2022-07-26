@@ -27,7 +27,7 @@ use super::{
 };
 use crate::catalog::ColumnId;
 use crate::expr::{CollectInputRef, ExprImpl, InputRef};
-use crate::optimizer::plan_node::{BatchSeqScan, LogicalFilter, LogicalProject};
+use crate::optimizer::plan_node::{BatchSeqScan, LogicalFilter, LogicalProject, LogicalValues};
 use crate::session::OptimizerContextRef;
 use crate::utils::{ColIndexMapping, Condition, ConditionVerboseDisplay};
 
@@ -407,6 +407,9 @@ impl ToBatch for LogicalScan {
             scan.predicate = predicate; // We want to keep `required_col_idx` unchanged, so do not call `clone_with_predicate`.
             let (scan, predicate, project_expr) = scan.predicate_pull_up();
 
+            if predicate.always_false() {
+                return LogicalValues::create(vec![], scan.schema().clone(), scan.ctx()).to_batch();
+            }
             let mut plan: PlanRef = BatchSeqScan::new(scan, scan_ranges).into();
             if !predicate.always_true() {
                 plan = BatchFilter::new(LogicalFilter::new(plan, predicate)).into();

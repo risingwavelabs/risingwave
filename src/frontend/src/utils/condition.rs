@@ -18,6 +18,7 @@ use std::ops::Bound;
 
 use fixedbitset::FixedBitSet;
 use itertools::Itertools;
+use lazy_static::lazy_static;
 use risingwave_common::catalog::Schema;
 use risingwave_common::types::ScalarImpl;
 use risingwave_common::util::scan_range::ScanRange;
@@ -81,6 +82,13 @@ impl Condition {
 
     pub fn always_true(&self) -> bool {
         self.conjunctions.is_empty()
+    }
+
+    pub fn always_false(&self) -> bool {
+        lazy_static! {
+            static ref FALSE: ExprImpl = ExprImpl::literal_bool(false);
+        }
+        !self.conjunctions.is_empty() && self.conjunctions.iter().all(|e| *e == *FALSE)
     }
 
     /// Convert condition to an expression. If always true, return `None`.
@@ -238,7 +246,7 @@ impl Condition {
         order_column_ids: &[usize],
         num_cols: usize,
     ) -> (Vec<ScanRange>, Self) {
-        fn always_false() -> (Vec<ScanRange>, Condition) {
+        fn false_cond() -> (Vec<ScanRange>, Condition) {
             (vec![], Condition::false_cond())
         }
 
@@ -295,10 +303,10 @@ impl Condition {
                     assert_eq!(input_ref.index, order_column_ids[i]);
                     let Ok(Some(value)) = const_expr.eval_row_const() else {
                         // column = NULL or failed to eval
-                        return always_false();
+                        return false_cond();
                     };
                     if !eq_conds.is_empty() && eq_conds.into_iter().all(|l| l != value) {
-                        return always_false();
+                        return false_cond();
                     }
                     eq_conds = vec![value];
                 } else if let Some((input_ref, in_const_list)) = expr.as_in_const_list() {
@@ -316,14 +324,14 @@ impl Condition {
                     }
                     if scalars.is_empty() {
                         // There're only NULLs in the in-list
-                        return always_false();
+                        return false_cond();
                     }
                     if !eq_conds.is_empty() {
                         let old: HashSet<ScalarImpl> = HashSet::from_iter(eq_conds);
                         let new = HashSet::from_iter(scalars);
                         let intersection: HashSet<_> = old.intersection(&new).collect();
                         if intersection.is_empty() {
-                            return always_false();
+                            return false_cond();
                         }
                         scalars = intersection.into_iter().cloned().collect();
                     }
@@ -333,7 +341,7 @@ impl Condition {
                     assert_eq!(input_ref.index, order_column_ids[i]);
                     let Ok(Some(value)) = const_expr.eval_row_const() else {
                         // column compare with NULL or failed to eval
-                        return always_false();
+                        return false_cond();
                     };
                     match op {
                         ExprType::LessThan => {
