@@ -424,6 +424,9 @@ impl ClusterManagerCore {
     }
 
     fn delete_worker_node(&mut self, worker: Worker) {
+        if worker.worker_type() == WorkerType::ComputeNode {
+            self.cn_available_ids.push_back(worker.worker_node.id);
+        }
         worker
             .worker_node
             .parallel_units
