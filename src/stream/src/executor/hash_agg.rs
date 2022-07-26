@@ -307,8 +307,7 @@ impl<K: HashKey, S: StateStore> HashAggExecutor<K, S> {
                         .apply_batch(&ops, vis_map.as_ref(), &chunk_cols, epoch, state_table)
                         .await?;
                 } else {
-                    // TODO(yuchao): Pass all the columns to agg states' apply_batch for other agg
-                    // calls
+                    // TODO(yuchao): Pass all the columns to apply_batch for other agg calls, #4185
                     let data = data.iter().map(|d| &**d).collect_vec();
                     agg_state
                         .apply_batch(&ops, vis_map.as_ref(), &data, epoch, state_table)
