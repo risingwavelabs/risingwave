@@ -33,9 +33,11 @@ pub struct SinkExecutor<S: StateStore> {
     pk_indices: PkIndices,
 }
 
-fn build_sink(config: SinkConfig) -> StreamExecutorResult<Box<SinkImpl>> {
+async fn build_sink(config: SinkConfig) -> StreamExecutorResult<Box<SinkImpl>> {
     Ok(Box::new(
-        SinkImpl::new(config).map_err(StreamExecutorError::sink_error)?,
+        SinkImpl::new(config)
+            .await
+            .map_err(StreamExecutorError::sink_error)?,
     ))
 }
 
