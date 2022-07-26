@@ -68,6 +68,18 @@ pub(crate) struct Opts {
     #[clap(long)]
     write_conflict_detection_enabled: bool,
 
+    #[clap(long)]
+    tiered_cache_uri: String,
+
+    #[clap(long, default_value_t = 1073741824)] // 1 GiB
+    file_cache_capacity: usize,
+
+    #[clap(long, default_value_t = 134217728)] // 128 MiB
+    file_cache_total_buffer_capacity: usize,
+
+    #[clap(long, default_value_t = 100663296)] // 96 MiB
+    file_cache_cache_file_fallocate_unit: usize,
+
     // ----- benchmarks -----
     #[clap(long)]
     benchmarks: String,
@@ -173,6 +185,7 @@ async fn main() {
     let table_id_to_slice_transform = Arc::new(RwLock::new(HashMap::new()));
     let state_store = StateStoreImpl::new(
         &opts.store,
+        &opts.tiered_cache_uri,
         config.clone(),
         mock_hummock_meta_client.clone(),
         state_store_stats.clone(),

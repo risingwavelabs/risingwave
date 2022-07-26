@@ -15,7 +15,7 @@
 use std::iter::Iterator;
 use std::sync::Arc;
 
-use risingwave_common::config::TieredCacheConfig;
+use risingwave_common::config::FileCacheConfig;
 use risingwave_hummock_sdk::key::{key_with_epoch, Epoch};
 use risingwave_hummock_sdk::HummockSstableId;
 use risingwave_object_store::object::{
@@ -67,7 +67,8 @@ pub async fn mock_sstable_store_with_object_store(store: ObjectStoreRef) -> Ssta
             path,
             64 << 20,
             64 << 20,
-            TieredCacheConfig::NoneCache,
+            "none://",
+            FileCacheConfig::default(),
         )
         .await,
     )

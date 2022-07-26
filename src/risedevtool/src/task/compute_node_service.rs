@@ -53,7 +53,9 @@ impl ComputeNodeService {
             .arg("--client-address")
             .arg(format!("{}:{}", config.address, config.port))
             .arg("--metrics-level")
-            .arg("1");
+            .arg("1")
+            .arg("--tiered-cache-uri")
+            .arg(&config.tiered_cache_uri);
 
         let provide_jaeger = config.provide_jaeger.as_ref().unwrap();
         match provide_jaeger.len() {

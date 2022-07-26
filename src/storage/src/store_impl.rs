@@ -91,6 +91,7 @@ macro_rules! dispatch_state_store {
 impl StateStoreImpl {
     pub async fn new(
         s: &str,
+        tiered_cache_uri: &str,
         config: Arc<StorageConfig>,
         hummock_meta_client: Arc<dyn HummockMetaClient>,
         state_store_stats: Arc<StateStoreMetrics>,
@@ -121,7 +122,8 @@ impl StateStoreImpl {
                         config.data_directory.to_string(),
                         config.block_cache_capacity_mb * (1 << 20),
                         config.meta_cache_capacity_mb * (1 << 20),
-                        config.tiered_cache.clone(),
+                        tiered_cache_uri,
+                        config.file_cache.clone(),
                     )
                     .await,
                 );

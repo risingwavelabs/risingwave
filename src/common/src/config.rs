@@ -169,7 +169,7 @@ pub struct StorageConfig {
     pub share_buffer_upload_concurrency: usize,
 
     #[serde(default)]
-    pub tiered_cache: TieredCacheConfig,
+    pub file_cache: FileCacheConfig,
 }
 
 impl Default for StorageConfig {
@@ -179,24 +179,8 @@ impl Default for StorageConfig {
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
-#[serde(deny_unknown_fields, tag = "type", content = "args")]
-pub enum TieredCacheConfig {
-    NoneCache,
-    FileCache(FileCacheConfig),
-}
-
-impl Default for TieredCacheConfig {
-    fn default() -> Self {
-        Self::NoneCache
-    }
-}
-
-#[derive(Clone, Debug, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct FileCacheConfig {
-    /// Directory for cache data.
-    pub dir: String,
-
     #[serde(default = "default::file_cache_capacity")]
     pub capacity: usize,
 

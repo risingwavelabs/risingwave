@@ -20,7 +20,7 @@ use std::sync::Arc;
 use bytes::{Buf, BufMut, Bytes};
 use futures::Future;
 use risingwave_common::cache::{CachableEntry, LruCache, LruCacheEventListener};
-use risingwave_common::config::TieredCacheConfig;
+use risingwave_common::config::FileCacheConfig;
 use risingwave_hummock_sdk::HummockSstableId;
 
 use crate::hummock::{
@@ -163,25 +163,33 @@ impl BlockCache {
     pub async fn new(
         capacity: usize,
         mut max_shard_bits: usize,
-        tiered_cache_config: TieredCacheConfig,
+        tiered_cache_uri: &str,
+        file_cache_config: FileCacheConfig,
     ) -> Self {
-        let tiered_cache_options = match tiered_cache_config {
-            TieredCacheConfig::NoneCache => TieredCacheOptions::NoneCache,
+        let separator = tiered_cache_uri
+            .find("://")
+            .expect("incorrect tiered cache uri");
+        let tiered_cache_options = match &tiered_cache_uri[..separator] {
+            "none" => TieredCacheOptions::NoneCache,
+            #[cfg(not(target_os = "linux"))]
+            "file" => {
+                tracing::warn!(
+                    "FileCache is not supported on not-linux targets, use NoneCache by default."
+                );
+                TieredCacheOptions::NoneCache
+            }
             #[cfg(target_os = "linux")]
-            TieredCacheConfig::FileCache(config) => {
+            "file" => {
                 use crate::hummock::file_cache::cache::FileCacheOptions;
                 TieredCacheOptions::FileCache(FileCacheOptions {
-                    dir: config.dir,
-                    capacity: config.capacity,
-                    total_buffer_capacity: config.total_buffer_capacity,
-                    cache_file_fallocate_unit: config.cache_file_fallocate_unit,
+                    dir: tiered_cache_uri[separator + "://".len()..].to_string(),
+                    capacity: file_cache_config.capacity,
+                    total_buffer_capacity: file_cache_config.total_buffer_capacity,
+                    cache_file_fallocate_unit: file_cache_config.cache_file_fallocate_unit,
                     flush_buffer_hooks: vec![],
                 })
             }
-            #[cfg(not(target_os = "linux"))]
-            TieredCacheConfig::FileCache(_) => {
-                panic!("file cache is not supported on not-linux targets")
-            }
+            _ => panic!("unsupported tiered cache protocal"),
         };
         let tiered_cache = TieredCache::open(tiered_cache_options).await.unwrap();
 
