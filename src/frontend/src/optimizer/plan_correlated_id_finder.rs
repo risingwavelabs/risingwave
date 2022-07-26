@@ -34,7 +34,7 @@ impl PlanVisitor<()> for PlanCorrelatedIdFinder {
     /// `LogicalJoin` now.
 
     fn visit_logical_join(&mut self, plan: &LogicalJoin) {
-        let mut finder = ExprCorrelatedIdFinder::new();
+        let mut finder = ExprCorrelatedIdFinder::default();
         plan.on().visit_expr(&mut finder);
         self.correlated_id_set.extend(finder.correlated_id_set);
 
@@ -44,7 +44,7 @@ impl PlanVisitor<()> for PlanCorrelatedIdFinder {
     }
 
     fn visit_logical_filter(&mut self, plan: &LogicalFilter) {
-        let mut finder = ExprCorrelatedIdFinder::new();
+        let mut finder = ExprCorrelatedIdFinder::default();
         plan.predicate().visit_expr(&mut finder);
         self.correlated_id_set.extend(finder.correlated_id_set);
 
@@ -54,7 +54,7 @@ impl PlanVisitor<()> for PlanCorrelatedIdFinder {
     }
 
     fn visit_logical_project(&mut self, plan: &LogicalProject) {
-        let mut finder = ExprCorrelatedIdFinder::new();
+        let mut finder = ExprCorrelatedIdFinder::default();
         plan.exprs().iter().for_each(|expr| finder.visit_expr(expr));
         self.correlated_id_set.extend(finder.correlated_id_set);
 
@@ -67,14 +67,6 @@ impl PlanVisitor<()> for PlanCorrelatedIdFinder {
 #[derive(Default)]
 struct ExprCorrelatedIdFinder {
     correlated_id_set: HashSet<CorrelatedId>,
-}
-
-impl ExprCorrelatedIdFinder {
-    pub fn new() -> Self {
-        Self {
-            correlated_id_set: HashSet::new(),
-        }
-    }
 }
 
 impl ExprVisitor for ExprCorrelatedIdFinder {
