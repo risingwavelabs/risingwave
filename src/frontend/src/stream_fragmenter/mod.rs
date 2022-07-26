@@ -196,7 +196,8 @@ impl StreamFragmenter {
             // TODO: Force singleton for TopN as a workaround. We should implement two phase TopN.
             NodeBody::TopN(_) => current_fragment.is_singleton = true,
 
-            NodeBody::Chain(ref node) => {
+            // FIXME: workaround for single-fragment mview on singleton upstream mview.
+            NodeBody::Chain(node) => {
                 // memorize table id for later use
                 state
                     .dependent_table_ids

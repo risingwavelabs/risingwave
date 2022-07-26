@@ -102,7 +102,10 @@ impl Distribution {
             distribution: match self {
                 Distribution::Single => None,
                 Distribution::HashShard(key) => {
-                    assert!(!key.is_empty(), "hash key should not be empty");
+                    assert!(
+                        !key.is_empty(),
+                        "hash key should not be empty, use `Single` instead"
+                    );
                     Some(DistributionProst::HashInfo(HashInfo {
                         output_count,
                         key: key.iter().map(|num| *num as u32).collect(),

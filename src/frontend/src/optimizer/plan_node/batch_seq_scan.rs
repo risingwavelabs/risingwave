@@ -79,6 +79,7 @@ impl BatchSeqScan {
                 Distribution::Single
             } else {
                 match self.logical.distribution_key() {
+                    // Should be `Single` if no distribution key.
                     Some(dist_key) if dist_key.is_empty() => Distribution::Single,
                     Some(dist_key) => Distribution::HashShard(dist_key),
                     None => Distribution::SomeShard,
@@ -132,19 +133,18 @@ impl fmt::Display for BatchSeqScan {
 
         let verbose = self.base.ctx.is_explain_verbose();
 
-        if self.scan_ranges.is_empty() {
-            write!(
-                f,
-                "BatchScan {{ table: {}, columns: [{}], distribution: {} }}",
-                self.logical.table_name(),
-                match verbose {
-                    true => self.logical.column_names_with_table_prefix(),
-                    false => self.logical.column_names(),
-                }
-                .join(", "),
-                self.distribution()
-            )
-        } else {
+        write!(
+            f,
+            "BatchScan {{ table: {}, columns: [{}]",
+            self.logical.table_name(),
+            match verbose {
+                true => self.logical.column_names_with_table_prefix(),
+                false => self.logical.column_names(),
+            }
+            .join(", "),
+        )?;
+
+        if !self.scan_ranges.is_empty() {
             let order_names = match verbose {
                 true => self.logical.order_names_with_table_prefix(),
                 false => self.logical.order_names(),
@@ -164,18 +164,14 @@ impl fmt::Display for BatchSeqScan {
                 }
                 range_strs.push(range_str.join(", "));
             }
-            write!(
-                f,
-                "BatchScan {{ table: {}, columns: [{}], scan_ranges: [{}] }}",
-                self.logical.table_name(),
-                match verbose {
-                    true => self.logical.column_names_with_table_prefix(),
-                    false => self.logical.column_names(),
-                }
-                .join(", "),
-                range_strs.join(" OR ")
-            )
+            write!(f, ", scan_ranges: {}", range_strs.join(" OR "))?;
         }
+
+        if verbose {
+            write!(f, ", distribution: {}", self.distribution())?;
+        }
+
+        write!(f, " }}")
     }
 }
 

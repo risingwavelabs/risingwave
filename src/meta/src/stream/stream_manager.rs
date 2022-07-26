@@ -160,11 +160,12 @@ where
                 // get upstream table id
                 let table_id = TableId::new(chain.table_id);
 
+                // FIXME: We assume that the chain node is always on the same parallel unit as its
+                // upstream materialize node here to find the upstream actor.
                 let upstream_actor_id = {
                     // 1. use table id to get upstream parallel_unit -> actor_id mapping
                     let upstream_parallel_actor_mapping =
                         &self.upstream_parallel_unit_info[&table_id];
-                    // dbg!(&upstream_parallel_actor_mapping);
 
                     if is_singleton {
                         // Directly find the singleton actor id.
@@ -173,7 +174,6 @@ where
                     } else {
                         // 2. use our actor id to get parallel unit id of the chain actor
                         let parallel_unit_id = self.locations.actor_locations[&actor_id].id;
-                        // dbg!(&parallel_unit_id);
                         // 3. and use chain actor's parallel unit id to get the corresponding
                         // upstream actor id
                         upstream_parallel_actor_mapping[&parallel_unit_id]
