@@ -506,11 +506,7 @@ impl Compactor {
             .with_label_values(&[compact_task.input_ssts[0].level_idx.to_string().as_str()])
             .start_timer();
 
-        let mut need_quota = estimate_memory_use_for_compaction(&compact_task);
-        if !context.memory_limiter.try_require_memory(need_quota) && compact_task.splits.len() > 1 {
-            compact_task.splits = vec![KeyRange::inf().into()];
-            need_quota = estimate_memory_use_for_compaction(&compact_task);
-        }
+        let need_quota = estimate_memory_use_for_compaction(&compact_task);
         tracing::info!(
             "Ready to handle compaction task: {} need memory: {}",
             compact_task.task_id,
