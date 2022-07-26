@@ -73,20 +73,9 @@ async fn create_tables(session: Arc<SessionImpl>, rng: &mut impl Rng) -> Vec<Tab
     tables
 }
 
-async fn run_sqlsmith_with_seed(seed: u64) {
-    let frontend = LocalFrontend::new(FrontendOpts::default()).await;
-    let session = frontend.session_ref();
-
-    let mut rng;
-    if let Ok(x) = env::var("RW_RANDOM_SEED_SQLSMITH") && x == "true" {
-        rng = rand::rngs::SmallRng::from_entropy();
-    } else {
-        rng = rand::rngs::SmallRng::seed_from_u64(seed);
-    }
-
-    let tables = create_tables(session.clone(), &mut rng).await;
+fn test_batch_queries(session: Arc<SessionImpl>, tables: Vec<Table>, rng: &mut impl Rng) {
     for _ in 0..512 {
-        let sql = sql_gen(&mut rng, tables.clone());
+        let sql = sql_gen(rng, tables.clone());
         let sql_copy = sql.clone();
         panic::set_hook(Box::new(move |e| {
             println!("Panic on SQL:\n{}\nReason:\n{}", sql_copy.clone(), e);
@@ -118,6 +107,37 @@ async fn run_sqlsmith_with_seed(seed: u64) {
             _ => unreachable!(),
         }
     }
+}
+
+async fn test_stream_queries(
+    session: Arc<SessionImpl>,
+    mut tables: Vec<Table>,
+    rng: &mut impl Rng,
+) {
+    // Test stream queries
+    for i in 0..512 {
+        let (sql, table) = mview_sql_gen(rng, tables.clone(), &format!("m{}", i));
+        let stmts = parse_sql(&sql);
+        let stmt = stmts[0].clone();
+        handle(session.clone(), stmt, sql).await;
+        tables.push(table);
+    }
+}
+
+async fn run_sqlsmith_with_seed(seed: u64) {
+    let frontend = LocalFrontend::new(FrontendOpts::default()).await;
+    let session = frontend.session_ref();
+
+    let mut rng;
+    if let Ok(x) = env::var("RW_RANDOM_SEED_SQLSMITH") && x == "true" {
+        rng = rand::rngs::SmallRng::from_entropy();
+    } else {
+        rng = rand::rngs::SmallRng::seed_from_u64(seed);
+    }
+
+    let tables = create_tables(session.clone(), &mut rng).await;
+    test_batch_queries(session.clone(), tables.clone(), &mut rng);
+    test_stream_queries(session.clone(), tables.clone(), &mut rng).await;
 }
 
 macro_rules! generate_sqlsmith_test {
