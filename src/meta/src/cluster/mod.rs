@@ -95,12 +95,14 @@ where
     /// (via `activate_worker_node`) to set its state to `Running`.
     pub async fn add_worker_node(
         &self,
-        host_address: HostAddress,
         r#type: WorkerType,
-    ) -> Result<(WorkerNode, bool)> {
+        host_address: HostAddress,
+        worker_node_parallelism: usize,
+    ) -> Result<WorkerNode> {
         let mut core = self.core.write().await;
         match core.get_worker_by_host(host_address.clone()) {
-            Some(worker) => Ok((worker.to_protobuf(), false)),
+            // TODO(zehua): update parallelism when the worker exists.
+            Some(worker) => Ok(worker.to_protobuf()),
             None => {
                 // Generate worker id.
                 let worker_id = self
@@ -110,12 +112,11 @@ where
                     .await? as WorkerId;
 
                 // Generate parallel units.
+                // TODO(zehua): Frontends' parallelism is zero. Remove `if` after removing single
+                // parallelism design.
                 let parallel_units = if r#type == WorkerType::ComputeNode {
-                    self.generate_cn_parallel_units(
-                        self.env.opts.unsafe_worker_node_parallel_degree,
-                        worker_id,
-                    )
-                    .await?
+                    self.generate_cn_parallel_units(worker_node_parallelism, worker_id)
+                        .await?
                 } else {
                     vec![]
                 };
@@ -137,7 +138,7 @@ where
                 // Update core.
                 core.add_worker_node(worker);
 
-                Ok((worker_node, true))
+                Ok(worker_node)
             }
         }
     }
@@ -515,20 +516,21 @@ mod tests {
 
         let mut worker_nodes = Vec::new();
         let worker_count = 5usize;
+        let fake_parallelism = 4;
         for i in 0..worker_count {
             let fake_host_address = HostAddress {
                 host: "localhost".to_string(),
                 port: 5000 + i as i32,
             };
-            let (worker_node, _) = cluster_manager
-                .add_worker_node(fake_host_address, WorkerType::ComputeNode)
+            let worker_node = cluster_manager
+                .add_worker_node(WorkerType::ComputeNode, fake_host_address, fake_parallelism)
                 .await
                 .unwrap();
             worker_nodes.push(worker_node);
         }
 
         let single_parallel_count = worker_count;
-        let hash_parallel_count = env.opts.unsafe_worker_node_parallel_degree * worker_count;
+        let hash_parallel_count = fake_parallelism * worker_count;
         assert_cluster_manager(&cluster_manager, single_parallel_count, hash_parallel_count).await;
 
         let worker_to_delete_count = 4usize;
@@ -542,12 +544,7 @@ mod tests {
                 .await
                 .unwrap();
         }
-        assert_cluster_manager(
-            &cluster_manager,
-            1,
-            env.opts.unsafe_worker_node_parallel_degree,
-        )
-        .await;
+        assert_cluster_manager(&cluster_manager, 1, fake_parallelism).await;
 
         Ok(())
     }
@@ -577,8 +574,13 @@ mod tests {
             host: "127.0.0.1".to_string(),
             port: 2,
         };
-        let (_worker_node_2, _) = cluster_manager
-            .add_worker_node(fake_host_address_2, WorkerType::ComputeNode)
+        let fake_parallelism = 4;
+        let _worker_node_2 = cluster_manager
+            .add_worker_node(
+                WorkerType::ComputeNode,
+                fake_host_address_2,
+                fake_parallelism,
+            )
             .await
             .unwrap();
         // Two live nodes

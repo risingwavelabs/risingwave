@@ -60,7 +60,7 @@ pub async fn handle_create_schema(
 
     let catalog_writer = session.env().catalog_writer();
     catalog_writer
-        .create_schema(db_id, &schema_name, session.user_name().to_string())
+        .create_schema(db_id, &schema_name, session.user_id())
         .await?;
     Ok(PgResponse::empty_result(StatementType::CREATE_SCHEMA))
 }
