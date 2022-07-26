@@ -43,11 +43,7 @@ impl<S: StateStore> Keyspace<S> {
     /// Creates a root [`Keyspace`] for a table.
     pub fn table_root(store: S, id: &TableId) -> Self {
         let prefix = table_prefix(id.table_id);
-        Self {
-            store,
-            prefix,
-            // table_id: *id,
-        }
+        Self { store, prefix }
     }
 
     /// Appends more bytes to the prefix and returns a new `Keyspace`
@@ -58,7 +54,6 @@ impl<S: StateStore> Keyspace<S> {
         Self {
             store: self.store.clone(),
             prefix,
-            // table_id: self.table_id,
         }
     }
 

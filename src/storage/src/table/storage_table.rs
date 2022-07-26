@@ -864,7 +864,6 @@ impl<S: StateStore, RS: RowSerde> StorageTableIterInner<S, RS> {
         keyspace: &Keyspace<S>,
         table_descs: Arc<ColumnDescMapping>,
         raw_key_range: R,
-        // epoch: u64,
         wait_epoch: bool,
         read_options: ReadOptions,
     ) -> StorageResult<Self>
