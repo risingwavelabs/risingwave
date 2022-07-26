@@ -16,10 +16,10 @@ data_directory = "hummock_001"
 block_cache_capacity_mb = 4096
 meta_cache_capacity_mb = 1024
 
-[[storage.tiered_cache]]
+[storage.tiered_cache]
 type = "FileCache"
 
-[[storage.tiered_cache.args]]
+[storage.tiered_cache.args]
 dir = "/risingwave/.risingwave/data/filecache"
 capacity = 1073741824                          # 1 GiB
 total_buffer_capacity = 134217728              # 128 MiB
