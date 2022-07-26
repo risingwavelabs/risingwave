@@ -22,3 +22,5 @@ cp ci/risedev-components.ci.env risedev-components.user.env
 echo "--- Prepare RiseDev playground"
 cargo make pre-start-playground
 cargo make link-all-in-one-binaries
+
+echo "This is the sink test so far"
