@@ -263,7 +263,7 @@ where
         let session = self.session.clone().unwrap();
         // execute query
         let res = session
-            .run_statement(sql)
+            .run_statement(sql, false)
             .await
             .map_err(|err| PsqlError::QueryError(err))?;
 
@@ -373,6 +373,7 @@ where
                 self.session.clone().unwrap(),
                 portal_name.clone(),
                 &msg.params,
+                msg.result_format_code,
             )
             .await
             .unwrap();
@@ -483,19 +484,20 @@ where
     async fn process_response_results(
         &mut self,
         res: PgResponse,
-        extended: bool,
+        is_extended: bool,
     ) -> Result<(), IoError> {
         // The possible responses to Execute are the same as those described above for queries
         // issued via simple query protocol, except that Execute doesn't cause ReadyForQuery or
         // RowDescription to be issued.
         // Quoted from: https://www.postgresql.org/docs/current/protocol-flow.html#PROTOCOL-FLOW-EXT-QUERY
-        if !extended {
+        if !is_extended {
             self.stream
                 .write(&BeMessage::RowDescription(&res.get_row_desc()))
                 .await?;
         }
 
         let mut rows_cnt = 0;
+
         let iter = res.iter();
         for val in iter {
             self.stream.write(&BeMessage::DataRow(val)).await?;
@@ -509,7 +511,7 @@ where
         // to complete the operation. The CommandComplete message indicating completion of the
         // source SQL command is not sent until the portal's execution is completed.
         // Quote from: https://www.postgresql.org/docs/current/protocol-flow.html#PROTOCOL-FLOW-EXT-QUERY:~:text=Once%20a%20portal,ErrorResponse%2C%20or%20PortalSuspended
-        if !extended || res.is_row_end() {
+        if !is_extended || res.is_row_end() {
             self.stream
                 .write_no_flush(&BeMessage::CommandComplete(BeCommandCompleteMessage {
                     stmt_type: res.get_stmt_type(),

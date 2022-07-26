@@ -184,6 +184,10 @@ impl AggCall {
     pub fn inputs(&self) -> &[ExprImpl] {
         self.inputs.as_ref()
     }
+
+    pub fn inputs_mut(&mut self) -> &mut [ExprImpl] {
+        self.inputs.as_mut()
+    }
 }
 
 impl Expr for AggCall {
