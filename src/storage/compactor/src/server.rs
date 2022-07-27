@@ -77,7 +77,8 @@ pub async fn compactor_serve(
 
     // use half of limit because any memory which would hold in meta-cache will be allocate by
     // limited at first.
-    config.storage.meta_cache_capacity_mb = config.storage.compactor_memory_limit_mb;
+    // TODO: replace meta-cache with memory limiter.
+    config.storage.meta_cache_capacity_mb = config.storage.compactor_memory_limit_mb / 2;
 
     let storage_config = Arc::new(config.storage);
     let state_store_stats = Arc::new(StateStoreMetrics::new(registry.clone()));

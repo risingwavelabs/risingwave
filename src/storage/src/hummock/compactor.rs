@@ -456,7 +456,7 @@ impl Compactor {
 
     /// Handle a compaction task and report its status to hummock manager.
     /// Always return `Ok` and let hummock manager handle errors.
-    pub async fn compact(context: Arc<CompactorContext>, mut compact_task: CompactTask) -> bool {
+    pub async fn compact(context: Arc<CompactorContext>, compact_task: CompactTask) -> bool {
         use risingwave_common::catalog::TableOption;
         let group_label = compact_task.compaction_group_id.to_string();
         let cur_level_label = compact_task.input_ssts[0].level_idx.to_string();
