@@ -54,11 +54,10 @@ message GrantPrivilege {
     uint32 schema_id = 2;
     uint32 table_id = 3;
     uint32 source_id = 4;
-    uint32 sink_id = 5;
-    uint32 all_tables_schema_id = 6;
-    uint32 all_sources_schema_id = 7;
+    uint32 all_tables_schema_id = 5;
+    uint32 all_sources_schema_id = 6;
   }
-  repeated ActionWithGrantOption action_with_opts = 8;
+  repeated ActionWithGrantOption action_with_opts = 7;
 }
 
 message CreateUserRequest {
