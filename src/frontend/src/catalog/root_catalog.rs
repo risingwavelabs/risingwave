@@ -18,8 +18,8 @@ use itertools::Itertools;
 use risingwave_common::catalog::{CatalogVersion, TableId, PG_CATALOG_SCHEMA_NAME};
 use risingwave_common::error::Result;
 use risingwave_pb::catalog::{
-    Database as ProstDatabase, Schema as ProstSchema, Sink as ProstSink, Source as ProstSource,
-    Table as ProstTable,
+    Database as ProstDatabase, Schema as ProstSchema, Sink as ProstSink,
+    Source as ProstSource, Table as ProstTable,
 };
 
 use super::source_catalog::SourceCatalog;

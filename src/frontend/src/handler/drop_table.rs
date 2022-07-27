@@ -15,15 +15,16 @@
 use std::sync::Arc;
 
 use pgwire::pg_response::{PgResponse, StatementType};
+use risingwave_common::error::ErrorCode::PermissionDenied;
 use risingwave_common::error::{ErrorCode, Result, RwError};
 use risingwave_pb::stream_plan::source_node::SourceType;
-use risingwave_pb::user::grant_privilege::{Action, Object};
+
 use risingwave_sqlparser::ast::ObjectName;
 
-use super::privilege::check_privileges;
+
 use crate::binder::Binder;
 use crate::catalog::catalog_service::CatalogReader;
-use crate::handler::privilege::ObjectCheckItem;
+
 use crate::session::{OptimizerContext, SessionImpl};
 
 pub fn check_source(
@@ -58,14 +59,9 @@ pub async fn handle_drop_table(
         let reader = catalog_reader.read_guard();
         let table = reader.get_table_by_name(session.database(), &schema_name, &table_name)?;
 
-        check_privileges(
-            &session,
-            &vec![ObjectCheckItem::new(
-                table.owner,
-                Action::Delete,
-                Object::TableId(table.id().table_id()),
-            )],
-        )?;
+        if session.user_id() != table.owner {
+            return Err(PermissionDenied("Do not have the privilege".to_string()).into());
+        }
 
         // If associated source is `None`, then it is a normal mview.
         match table.associated_source_id() {

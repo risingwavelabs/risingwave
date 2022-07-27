@@ -139,15 +139,25 @@ pub(crate) fn gen_create_index_plan(
 
     let (index_schema_name, index_table_name) = Binder::resolve_table_name(index_name)?;
     check_schema_writable(&index_schema_name)?;
-    let (index_database_id, index_schema_id) = session
-        .env()
-        .catalog_reader()
-        .read_guard()
-        .check_relation_name_duplicated(
+    let (index_database_id, index_schema_id) = {
+        let catalog_reader = session.env().catalog_reader().read_guard();
+
+        let schema = catalog_reader.get_schema_by_name(session.database(), &schema_name)?;
+        check_privileges(
+            session,
+            &vec![ObjectCheckItem::new(
+                schema.owner(),
+                Action::Create,
+                Object::SchemaId(schema.id()),
+            )],
+        )?;
+
+        catalog_reader.check_relation_name_duplicated(
             session.database(),
             &index_schema_name,
             &index_table_name,
-        )?;
+        )?
+    };
 
     let index_table = materialize
         .table()

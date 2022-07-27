@@ -13,14 +13,15 @@
 // limitations under the License.
 
 use pgwire::pg_response::{PgResponse, StatementType};
+use risingwave_common::error::ErrorCode::PermissionDenied;
 use risingwave_common::error::{ErrorCode, Result, RwError};
-use risingwave_pb::user::grant_privilege::{Action, Object};
+
 use risingwave_sqlparser::ast::ObjectName;
 
-use super::privilege::check_privileges;
+
 use crate::binder::Binder;
 use crate::handler::drop_table::check_source;
-use crate::handler::privilege::ObjectCheckItem;
+
 use crate::session::OptimizerContext;
 
 pub async fn handle_drop_index(
@@ -38,14 +39,9 @@ pub async fn handle_drop_index(
         let reader = catalog_reader.read_guard();
         let table = reader.get_table_by_name(session.database(), &schema_name, &table_name)?;
 
-        check_privileges(
-            &session,
-            &vec![ObjectCheckItem::new(
-                table.owner,
-                Action::Delete,
-                Object::TableId(table.id().table_id()),
-            )],
-        )?;
+        if session.user_id() != table.owner {
+            return Err(PermissionDenied("Do not have the privilege".to_string()).into());
+        }
 
         // If associated source is `Some`, then it is a actually a materialized source / table v2.
         if table.associated_source_id().is_some() {

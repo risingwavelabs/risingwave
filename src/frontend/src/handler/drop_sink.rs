@@ -13,15 +13,16 @@
 // limitations under the License.
 
 use pgwire::pg_response::{PgResponse, StatementType};
-use risingwave_common::catalog::DEFAULT_SUPER_USER_ID;
+
+use risingwave_common::error::ErrorCode::PermissionDenied;
 use risingwave_common::error::Result;
-use risingwave_pb::user::grant_privilege::{Action, Object};
+
 use risingwave_sqlparser::ast::ObjectName;
 
-use super::privilege::check_privileges;
+
 use crate::binder::Binder;
 use crate::handler::drop_table::check_source;
-use crate::handler::privilege::ObjectCheckItem;
+
 use crate::session::OptimizerContext;
 
 pub async fn handle_drop_sink(
@@ -41,14 +42,11 @@ pub async fn handle_drop_sink(
         &sink_name,
     )?;
 
-    check_privileges(
-        &session,
-        &vec![ObjectCheckItem::new(
-            DEFAULT_SUPER_USER_ID,
-            Action::Delete,
-            Object::SinkId(sink_id),
-        )],
-    )?;
+    // FIXME: using owner of sink instead.
+    let owner = session.user_id();
+    if owner != session.user_id() {
+        return Err(PermissionDenied("Do not have the privilege".to_string()).into());
+    }
 
     let catalog_writer = session.env().catalog_writer();
     catalog_writer.drop_sink(sink_id).await?;

@@ -14,14 +14,15 @@
 
 use pgwire::pg_response::{PgResponse, StatementType};
 use risingwave_common::catalog::PG_CATALOG_SCHEMA_NAME;
+use risingwave_common::error::ErrorCode::PermissionDenied;
 use risingwave_common::error::{ErrorCode, Result, TrackingIssue};
-use risingwave_pb::user::grant_privilege::{Action, Object};
+
 use risingwave_sqlparser::ast::{DropMode, ObjectName};
 
-use super::privilege::check_privileges;
+
 use crate::binder::Binder;
 use crate::catalog::CatalogError;
-use crate::handler::privilege::ObjectCheckItem;
+
 use crate::session::OptimizerContext;
 
 pub async fn handle_drop_schema(
@@ -89,14 +90,9 @@ pub async fn handle_drop_schema(
         }
     };
 
-    check_privileges(
-        &session,
-        &vec![ObjectCheckItem::new(
-            schema.owner(),
-            Action::Delete,
-            Object::SchemaId(schema.id()),
-        )],
-    )?;
+    if session.user_id() != schema.owner() {
+        return Err(PermissionDenied("Do not have the privilege".to_string()).into());
+    }
 
     let catalog_writer = session.env().catalog_writer();
     catalog_writer.drop_schema(schema_id).await?;
