@@ -20,7 +20,6 @@ use fixedbitset::FixedBitSet;
 use itertools::Itertools;
 use lazy_static::lazy_static;
 use risingwave_common::catalog::Schema;
-use risingwave_common::types::ScalarImpl;
 use risingwave_common::util::scan_range::ScanRange;
 
 use crate::expr::{
@@ -311,8 +310,8 @@ impl Condition {
                     eq_conds = vec![value];
                 } else if let Some((input_ref, in_const_list)) = expr.as_in_const_list() {
                     assert_eq!(input_ref.index, order_column_ids[i]);
-                    let mut scalars = vec![];
-                    for const_expr in in_const_list.into_iter().unique() {
+                    let mut scalars = HashSet::new();
+                    for const_expr in in_const_list {
                         // The cast should succeed, because otherwise the input_ref is casted
                         // and thus `as_in_const_list` returns None.
                         let const_expr = const_expr.cast_implicit(input_ref.data_type.clone()).unwrap();
@@ -320,22 +319,20 @@ impl Condition {
                         let Some(value) = value else {
                             continue;
                         };
-                        scalars.push(value);
+                        scalars.insert(value);
                     }
                     if scalars.is_empty() {
                         // There're only NULLs in the in-list
                         return false_cond();
                     }
                     if !eq_conds.is_empty() {
-                        let old: HashSet<ScalarImpl> = HashSet::from_iter(eq_conds);
-                        let new = HashSet::from_iter(scalars);
-                        let intersection: HashSet<_> = old.intersection(&new).collect();
-                        if intersection.is_empty() {
+                        scalars = scalars.intersection(&HashSet::from_iter(eq_conds)).cloned().collect();
+                        if scalars.is_empty() {
                             return false_cond();
                         }
-                        scalars = intersection.into_iter().cloned().collect();
                     }
-                    eq_conds = scalars;
+                    // Sort to ensure a deterministic result for planner test.
+                    eq_conds = scalars.into_iter().sorted().collect();
                 } else if let Some((input_ref, op, const_expr)) = expr.as_comparison_const() &&
                     let Ok(const_expr) = const_expr.cast_implicit(input_ref.data_type) {
                     assert_eq!(input_ref.index, order_column_ids[i]);
