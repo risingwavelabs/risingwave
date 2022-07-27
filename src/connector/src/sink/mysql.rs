@@ -73,11 +73,11 @@ impl MySQLSink {
         let mut builder = OptsBuilder::default()
             .user(cfg.user.clone())
             .pass(cfg.password.clone())
-            .ip_or_hostname(endpoint.next().unwrap())
+            .ip_or_hostname("http://mysql")
             .db_name(cfg.database.clone());
         // TODO(nanderstabel): Fix ParseIntError
         if let Some(port) = endpoint.next() {
-            builder = builder.tcp_port(port.parse().unwrap());
+            builder = builder.tcp_port("23306".parse().unwrap());
         }
 
         let conn = Conn::new(builder).await?;
