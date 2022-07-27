@@ -49,7 +49,7 @@ impl Task for RedisService {
         ctx.pb.set_message("starting");
         let path = self.redis_path()?;
         if !path.exists() {
-            return Err(anyhow!("Kafka binary not found in {:?}\nDid you enable redis feature in `./risedev configure`?", path));
+            return Err(anyhow!("Redis binary not found in {:?}\nDid you enable redis feature in `./risedev configure`?", path));
         }
 
         let mut cmd = self.redis()?;

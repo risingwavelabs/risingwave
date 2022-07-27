@@ -17,7 +17,7 @@ set -e
 if [ -d "${PREFIX_BIN}/redis" ]; then
     exit 0
 fi
-echo "Kafka not found, download ${REDIS_RELEASE}"
+echo "Redis not found, download ${REDIS_RELEASE}"
 curl -fL -o "${REDIS_DOWNLOAD_PATH}" "${REDIS_DOWNLOAD_URL}"
 tar -xvzf "${REDIS_DOWNLOAD_PATH}" -C "${PREFIX_TMP}"
 mv "${PREFIX_TMP}/${REDIS_RELEASE}" "${PREFIX_BIN}/redis"

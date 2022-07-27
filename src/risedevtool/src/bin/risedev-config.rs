@@ -62,13 +62,13 @@ pub enum Components {
     PrometheusAndGrafana,
     Etcd,
     Kafka,
+    Redis,
     Tracing,
     RustComponents,
     Dashboard,
     Release,
     AllInOne,
     Sanitizer,
-    Redis,
 }
 
 impl Components {
@@ -78,13 +78,13 @@ impl Components {
             Self::PrometheusAndGrafana => "[Component] Metrics: Prometheus + Grafana",
             Self::Etcd => "[Component] Etcd",
             Self::Kafka => "[Component] Kafka",
+            Self::Redis => "[Component] Redis",
             Self::RustComponents => "[Build] Rust components",
             Self::Dashboard => "[Build] Dashboard v2",
             Self::Tracing => "[Component] Tracing: Jaeger",
             Self::Release => "[Build] Enable release mode",
             Self::AllInOne => "[Build] Enable all-in-one binary",
             Self::Sanitizer => "[Build] Enable sanitizer",
-            Self::Redis => "[Component] Redis",
         }
         .into()
     }
@@ -175,13 +175,13 @@ Required if you want to sink data to redis.
             Self::PrometheusAndGrafana => "ENABLE_PROMETHEUS_GRAFANA",
             Self::Etcd => "ENABLE_ETCD",
             Self::Kafka => "ENABLE_KAFKA",
+            Self::Redis => "ENABLE_REDIS",
             Self::RustComponents => "ENABLE_BUILD_RUST",
             Self::Dashboard => "ENABLE_BUILD_DASHBOARD_V2",
             Self::Tracing => "ENABLE_COMPUTE_TRACING",
             Self::Release => "ENABLE_RELEASE_PROFILE",
             Self::AllInOne => "ENABLE_ALL_IN_ONE",
             Self::Sanitizer => "ENABLE_SANITIZER",
-            Self::Redis => "ENABLE_REDIS",
         }
         .into()
     }

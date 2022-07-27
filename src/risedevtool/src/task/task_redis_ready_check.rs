@@ -44,7 +44,11 @@ impl Task for RedisReadyCheckTask {
 
         let client = prelude::RedisClient::new(redis_config);
         let handler = client.connect(None);
-        futures::executor::block_on(client.wait_for_connect())?;
+
+        ctx.wait(|| {
+            futures::executor::block_on(client.wait_for_connect())?;
+            Ok(())
+        })?;
 
         handler.abort();
 
