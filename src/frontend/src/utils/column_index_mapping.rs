@@ -124,7 +124,8 @@ impl ColIndexMapping {
                 usize::try_from(target).ok()
             })
             .collect_vec();
-        Self::new(map)
+        let target_size = usize::try_from(source_num as isize + offset).unwrap();
+        Self::with_target_size(map, target_size)
     }
 
     /// Maps the smallest index to 0, the next smallest to 1, and so on.
