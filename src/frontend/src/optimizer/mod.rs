@@ -166,6 +166,7 @@ impl PlanRoot {
                 ApplyAggRule::create(),
                 ApplyFilterRule::create(),
                 ApplyProjRule::create(),
+                ApplyJoinRule::create(),
                 ApplyScanRule::create(),
             ],
             ApplyOrder::TopDown,

@@ -102,6 +102,7 @@ pub fn set_panic_abort() {
 }
 
 /// Init logger for RisingWave binaries.
+#[cfg(not(madsim))]
 pub fn init_risingwave_logger(settings: LoggerSettings) {
     use isahc::config::Configurable;
 
@@ -275,6 +276,7 @@ fn spawn_prof_thread(profile_path: String) -> std::thread::JoinHandle<()> {
 ///   debug mode, and disable in release mode.
 /// * `RW_PROFILE_PATH`: the path to generate flamegraph. If set, then profiling is automatically
 ///   enabled.
+#[cfg(not(madsim))]
 pub fn main_okk<F>(f: F) -> F::Output
 where
     F: Future + Send + 'static,
@@ -306,4 +308,15 @@ where
     }
 
     builder.enable_all().build().unwrap().block_on(f)
+}
+
+#[cfg(madsim)]
+pub fn init_risingwave_logger(_settings: LoggerSettings) {}
+
+#[cfg(madsim)]
+pub fn main_okk<F>(f: F) -> F::Output
+where
+    F: Future + Send + 'static,
+{
+    panic!("not yet supported in simulation");
 }
