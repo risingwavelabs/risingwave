@@ -75,6 +75,7 @@ mod source;
 mod top_n;
 mod top_n_appendonly;
 mod top_n_executor;
+mod top_n_local;
 mod union;
 
 #[cfg(test)]
