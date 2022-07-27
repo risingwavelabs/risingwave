@@ -400,7 +400,13 @@ impl StateStore for HummockStorage {
             // compaction_group_id in read/write path.
             let size = self
                 .local_version_manager
-                .write_shared_buffer(epoch, compaction_group_id, kv_pairs, false)
+                .write_shared_buffer(
+                    epoch,
+                    compaction_group_id,
+                    kv_pairs,
+                    false,
+                    write_options.table_id.into(),
+                )
                 .await?;
             Ok(size)
         }
@@ -418,7 +424,13 @@ impl StateStore for HummockStorage {
             // See comments in HummockStorage::iter_inner for details about using
             // compaction_group_id in read/write path.
             self.local_version_manager
-                .write_shared_buffer(epoch, compaction_group_id, kv_pairs, true)
+                .write_shared_buffer(
+                    epoch,
+                    compaction_group_id,
+                    kv_pairs,
+                    true,
+                    write_options.table_id.into(),
+                )
                 .await?;
 
             Ok(())

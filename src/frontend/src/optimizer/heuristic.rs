@@ -30,14 +30,14 @@ pub enum ApplyOrder {
 // TODO: we should have a builder of HeuristicOptimizer here
 /// A rule-based heuristic optimizer, which traverses every plan nodes and tries to
 /// apply each rule on them.
-pub struct HeuristicOptimizer {
-    apply_order: ApplyOrder,
-    rules: Vec<BoxedRule>,
+pub struct HeuristicOptimizer<'a> {
+    apply_order: &'a ApplyOrder,
+    rules: &'a Vec<BoxedRule>,
     stats: Stats,
 }
 
-impl HeuristicOptimizer {
-    pub fn new(apply_order: ApplyOrder, rules: Vec<BoxedRule>) -> Self {
+impl<'a> HeuristicOptimizer<'a> {
+    pub fn new(apply_order: &'a ApplyOrder, rules: &'a Vec<BoxedRule>) -> Self {
         Self {
             apply_order,
             rules,
@@ -46,7 +46,7 @@ impl HeuristicOptimizer {
     }
 
     fn optimize_node(&mut self, mut plan: PlanRef) -> PlanRef {
-        for rule in &self.rules {
+        for rule in self.rules {
             if let Some(applied) = rule.apply(plan.clone()) {
                 plan = applied;
                 self.stats.count_rule(rule);

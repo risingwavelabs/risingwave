@@ -2125,7 +2125,7 @@ SELECT * FROM check_estimated_rows('SELECT * FROM mcv_lists WHERE a < ALL (ARRAY
 (1 row)
 
 -- check change of unrelated column type does not reset the MCV statistics
-ALTER TABLE mcv_lists ALTER COLUMN d TYPE VARCHAR(64);
+ALTER TABLE mcv_lists ALTER COLUMN d TYPE VARCHAR;
 SELECT d.stxdmcv IS NOT NULL
   FROM pg_statistic_ext s, pg_statistic_ext_data d
  WHERE s.stxname = 'mcv_lists_stats'

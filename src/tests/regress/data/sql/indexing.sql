@@ -565,7 +565,7 @@ drop table idxpart;
 
 -- If the partition to be attached already has a primary key, fail if
 -- it doesn't match the parent's PK.
-CREATE TABLE idxpart (c1 INT PRIMARY KEY, c2 INT, c3 VARCHAR(10)) PARTITION BY RANGE(c1);
+CREATE TABLE idxpart (c1 INT PRIMARY KEY, c2 INT, c3 VARCHAR) PARTITION BY RANGE(c1);
 CREATE TABLE idxpart1 (LIKE idxpart);
 ALTER TABLE idxpart1 ADD PRIMARY KEY (c1, c2);
 ALTER TABLE idxpart ATTACH PARTITION idxpart1 FOR VALUES FROM (100) TO (200);

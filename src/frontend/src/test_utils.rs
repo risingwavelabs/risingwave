@@ -21,8 +21,8 @@ use parking_lot::RwLock;
 use pgwire::pg_response::PgResponse;
 use pgwire::pg_server::{BoxedError, Session, SessionManager, UserAuthenticator};
 use risingwave_common::catalog::{
-    TableId, DEFAULT_DATABASE_NAME, DEFAULT_SCHEMA_NAME, DEFAULT_SUPPER_USER,
-    PG_CATALOG_SCHEMA_NAME,
+    TableId, DEFAULT_DATABASE_NAME, DEFAULT_SCHEMA_NAME, DEFAULT_SUPER_USER, DEFAULT_SUPER_USER_ID,
+    NON_RESERVED_USER_ID, PG_CATALOG_SCHEMA_NAME,
 };
 use risingwave_common::error::Result;
 use risingwave_pb::catalog::table::OptionalAssociatedSourceId;
@@ -49,7 +49,7 @@ use crate::planner::Planner;
 use crate::session::{AuthContext, FrontendEnv, OptimizerContext, SessionImpl};
 use crate::user::user_manager::UserInfoManager;
 use crate::user::user_service::UserInfoWriter;
-use crate::user::UserName;
+use crate::user::UserId;
 use crate::FrontendOpts;
 
 /// An embedded frontend without starting meta and without starting frontend as a tcp server.
@@ -82,7 +82,7 @@ impl LocalFrontend {
         sql: impl Into<String>,
     ) -> std::result::Result<PgResponse, Box<dyn std::error::Error + Send + Sync>> {
         let sql = sql.into();
-        self.session_ref().run_statement(sql.as_str()).await
+        self.session_ref().run_statement(sql.as_str(), false).await
     }
 
     pub async fn query_formatted_result(&self, sql: impl Into<String>) -> Vec<String> {
@@ -123,7 +123,8 @@ impl LocalFrontend {
             self.env.clone(),
             Arc::new(AuthContext::new(
                 DEFAULT_DATABASE_NAME.to_string(),
-                DEFAULT_SUPPER_USER.to_string(),
+                DEFAULT_SUPER_USER.to_string(),
+                DEFAULT_SUPER_USER_ID,
             )),
             UserAuthenticator::None,
         ))
@@ -139,14 +140,14 @@ pub struct MockCatalogWriter {
 
 #[async_trait::async_trait]
 impl CatalogWriter for MockCatalogWriter {
-    async fn create_database(&self, db_name: &str, owner: String) -> Result<()> {
+    async fn create_database(&self, db_name: &str, owner: UserId) -> Result<()> {
         let database_id = self.gen_id();
         self.catalog.write().create_database(ProstDatabase {
             name: db_name.to_string(),
             id: database_id,
-            owner: owner.to_string(),
+            owner,
         });
-        self.create_schema(database_id, DEFAULT_SCHEMA_NAME, owner.clone())
+        self.create_schema(database_id, DEFAULT_SCHEMA_NAME, owner)
             .await?;
         self.create_schema(database_id, PG_CATALOG_SCHEMA_NAME, owner)
             .await?;
@@ -157,7 +158,7 @@ impl CatalogWriter for MockCatalogWriter {
         &self,
         db_id: DatabaseId,
         schema_name: &str,
-        owner: String,
+        owner: UserId,
     ) -> Result<()> {
         let id = self.gen_id();
         self.catalog.write().create_schema(ProstSchema {
@@ -260,19 +261,19 @@ impl MockCatalogWriter {
         catalog.write().create_database(ProstDatabase {
             id: 0,
             name: DEFAULT_DATABASE_NAME.to_string(),
-            owner: DEFAULT_SUPPER_USER.to_string(),
+            owner: DEFAULT_SUPER_USER_ID,
         });
         catalog.write().create_schema(ProstSchema {
             id: 1,
             name: DEFAULT_SCHEMA_NAME.to_string(),
             database_id: 0,
-            owner: DEFAULT_SUPPER_USER.to_string(),
+            owner: DEFAULT_SUPER_USER_ID,
         });
         catalog.write().create_schema(ProstSchema {
             id: 2,
             name: PG_CATALOG_SCHEMA_NAME.to_string(),
             database_id: 0,
-            owner: DEFAULT_SUPPER_USER.to_string(),
+            owner: DEFAULT_SUPER_USER_ID,
         });
         let mut map: HashMap<u32, DatabaseId> = HashMap::new();
         map.insert(1_u32, 0_u32);
@@ -357,18 +358,21 @@ impl MockCatalogWriter {
 }
 
 pub struct MockUserInfoWriter {
+    id: AtomicU32,
     user_info: Arc<RwLock<UserInfoManager>>,
 }
 
 #[async_trait::async_trait]
 impl UserInfoWriter for MockUserInfoWriter {
     async fn create_user(&self, user: UserInfo) -> Result<()> {
+        let mut user = user;
+        user.id = self.gen_id();
         self.user_info.write().create_user(user);
         Ok(())
     }
 
-    async fn drop_user(&self, user_name: &str) -> Result<()> {
-        self.user_info.write().drop_user(user_name);
+    async fn drop_user(&self, id: UserId) -> Result<()> {
+        self.user_info.write().drop_user(id);
         Ok(())
     }
 
@@ -376,10 +380,10 @@ impl UserInfoWriter for MockUserInfoWriter {
     /// `GrantAllSources` when grant privilege to user.
     async fn grant_privilege(
         &self,
-        users: Vec<UserName>,
+        users: Vec<UserId>,
         privileges: Vec<GrantPrivilege>,
         with_grant_option: bool,
-        _grantor: UserName,
+        _grantor: UserId,
     ) -> Result<()> {
         let privileges = privileges
             .into_iter()
@@ -390,8 +394,8 @@ impl UserInfoWriter for MockUserInfoWriter {
                 p
             })
             .collect::<Vec<_>>();
-        for user_name in users {
-            if let Some(u) = self.user_info.write().get_user_mut(&user_name) {
+        for user_id in users {
+            if let Some(u) = self.user_info.write().get_user_mut(user_id) {
                 u.grant_privileges.extend(privileges.clone());
             }
         }
@@ -402,15 +406,15 @@ impl UserInfoWriter for MockUserInfoWriter {
     /// `RevokeAllSources` when revoke privilege from user.
     async fn revoke_privilege(
         &self,
-        users: Vec<UserName>,
+        users: Vec<UserId>,
         privileges: Vec<GrantPrivilege>,
-        _granted_by: Option<UserName>,
-        _revoke_by: UserName,
+        _granted_by: Option<UserId>,
+        _revoke_by: UserId,
         revoke_grant_option: bool,
         _cascade: bool,
     ) -> Result<()> {
-        for user_name in users {
-            if let Some(u) = self.user_info.write().get_user_mut(&user_name) {
+        for user_id in users {
+            if let Some(u) = self.user_info.write().get_user_mut(user_id) {
                 u.grant_privileges.iter_mut().for_each(|p| {
                     for rp in &privileges {
                         if rp.object != p.object {
@@ -446,13 +450,21 @@ impl UserInfoWriter for MockUserInfoWriter {
 impl MockUserInfoWriter {
     pub fn new(user_info: Arc<RwLock<UserInfoManager>>) -> Self {
         user_info.write().create_user(UserInfo {
-            name: DEFAULT_SUPPER_USER.to_string(),
+            id: DEFAULT_SUPER_USER_ID,
+            name: DEFAULT_SUPER_USER.to_string(),
             is_supper: true,
             can_create_db: true,
             can_login: true,
             ..Default::default()
         });
-        Self { user_info }
+        Self {
+            user_info,
+            id: AtomicU32::new(NON_RESERVED_USER_ID as u32),
+        }
+    }
+
+    fn gen_id(&self) -> u32 {
+        self.id.fetch_add(1, Ordering::SeqCst)
     }
 }
 

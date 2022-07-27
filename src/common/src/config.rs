@@ -95,8 +95,8 @@ pub struct StreamingConfig {
     #[serde(default = "default::in_flight_barrier_nums")]
     pub in_flight_barrier_nums: usize,
 
-    #[serde(default = "default::unsafe_worker_node_parallel_degree")]
-    pub unsafe_worker_node_parallel_degree: usize,
+    #[serde(default = "default::worker_node_parallelism")]
+    pub worker_node_parallelism: usize,
 }
 
 impl Default for StreamingConfig {
@@ -288,8 +288,8 @@ mod default {
         8
     }
 
-    pub fn unsafe_worker_node_parallel_degree() -> usize {
-        4
+    pub fn worker_node_parallelism() -> usize {
+        num_cpus::get()
     }
 
     pub fn compactor_memory_limit_mb() -> usize {

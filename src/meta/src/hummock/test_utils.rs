@@ -257,8 +257,9 @@ pub async fn setup_compute_env(
         host: "127.0.0.1".to_string(),
         port,
     };
-    let (worker_node, _) = cluster_manager
-        .add_worker_node(fake_host_address, WorkerType::ComputeNode)
+    let fake_parallelism = 4;
+    let worker_node = cluster_manager
+        .add_worker_node(WorkerType::ComputeNode, fake_host_address, fake_parallelism)
         .await
         .unwrap();
     (env, hummock_manager, cluster_manager, worker_node)
