@@ -302,7 +302,8 @@ impl ProbeSideSourceBuilder for FakeProbeSideSourceBuilder {
              2 5.5
              4 6.8
              5 3.7
-             5 2.3",
+             5 2.3
+             . .",
         );
 
         for idx in 0..base_data_chunk.capacity() {
