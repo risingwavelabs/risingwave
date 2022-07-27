@@ -4,6 +4,7 @@
 set -euo pipefail
 
 source ci/scripts/common.env.sh
+source ci/scripts/pr.env.sh
 
 echo "+++ Run unit tests with coverage"
 # disable fuzzing tests (risingwave_sqlsmith)
