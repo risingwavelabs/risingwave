@@ -27,22 +27,6 @@ echo "--- e2e test w/ Rust frontend - sink with mysql"
 cargo make clean-data
 cargo make ci-start
 
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-docker inspect mysql
-
 wait_server() {
     # https://stackoverflow.com/a/44484835/5242660
     # Licensed by https://creativecommons.org/licenses/by-sa/3.0/
