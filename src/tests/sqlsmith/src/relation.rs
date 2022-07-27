@@ -33,13 +33,13 @@ fn create_join_on_clause(left: String, right: String) -> Expr {
 impl<'a, R: Rng> SqlGenerator<'a, R> {
     /// A relation specified in the FROM clause.
     pub(crate) fn gen_from_relation(&mut self) -> TableWithJoins {
-        match self.rng.gen_range(0..=9) {
-            0..=7 => self.gen_simple_table(),
-            8..=8 => self.gen_time_window_func(),
+        match self.rng.gen_range(0..=20) {
+            0..=17 => self.gen_simple_table(),
+            18..=18 => self.gen_time_window_func(),
             // TODO: Enable after resolving: <https://github.com/singularity-data/risingwave/issues/2771>.
-            9..=9 => self.gen_equijoin_clause(),
+            19..=19 => self.gen_equijoin_clause(),
             // TODO: Currently `gen_subquery` will cause panic due to some wrong assertions.
-            10..=10 => self.gen_subquery(),
+            20..=20 => self.gen_table_subquery(),
             _ => unreachable!(),
         }
     }
@@ -120,8 +120,8 @@ impl<'a, R: Rng> SqlGenerator<'a, R> {
         }
     }
 
-    fn gen_subquery(&mut self) -> TableWithJoins {
-        let (subquery, columns) = self.gen_query();
+    fn gen_table_subquery(&mut self) -> TableWithJoins {
+        let (subquery, columns) = self.gen_local_query();
         let alias = self.gen_table_name_with_prefix("sq");
         let table = Table {
             name: alias.clone(),
@@ -141,4 +141,8 @@ impl<'a, R: Rng> SqlGenerator<'a, R> {
         self.add_relation_to_context(table);
         relation
     }
+    
+    // fn gen_row_subquery(){
+
+    // }
 }

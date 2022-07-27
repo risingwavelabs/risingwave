@@ -87,6 +87,9 @@ struct SqlGenerator<'a, R: Rng> {
     /// We might not read from all tables.
     bound_relations: Vec<Table>,
 
+    /// Relations Outer corresponding to current subquery
+    parallel_relations: Vec<Table>,
+
     /// Columns bound in generated query.
     /// May not contain all columns from Self::bound_relations.
     /// e.g. GROUP BY clause will constrain bound_columns.
@@ -110,6 +113,7 @@ impl<'a, R: Rng> SqlGenerator<'a, R> {
             relation_id: 0,
             is_distinct_allowed,
             bound_relations: vec![],
+            parallel_relations: vec![],
             bound_columns: vec![],
             is_mview: false,
         }
@@ -123,15 +127,22 @@ impl<'a, R: Rng> SqlGenerator<'a, R> {
             relation_id: 0,
             is_distinct_allowed: false,
             bound_relations: vec![],
+            parallel_relations: vec![],
             bound_columns: vec![],
             is_mview: true,
         }
     }
 
     fn add_relation_to_context(&mut self, table: Table) {
-        let mut bound_columns = table.get_qualified_columns();
-        self.bound_columns.append(&mut bound_columns);
-        self.bound_relations.push(table);
+        self.parallel_relations.push(table);
+    }
+
+    fn merge_parallel_to_relation(&mut self) {
+        for rel in &self.parallel_relations{
+            let mut bound_columns = rel.get_qualified_columns();
+            self.bound_columns.append(&mut bound_columns);
+        }   
+        self.bound_relations.append(&mut self.parallel_relations);
     }
 
     fn gen_stmt(&mut self) -> Statement {
@@ -204,7 +215,7 @@ impl<'a, R: Rng> SqlGenerator<'a, R> {
     }
 
     /// Generates a query with local context.
-    /// Used by `WITH`, (and perhaps subquery should use this too)
+    /// Used by `WITH`, subquery
     fn gen_local_query(&mut self) -> (Query, Vec<Column>) {
         let old_ctxt = self.new_local_context();
         let t = self.gen_query();
@@ -365,6 +376,9 @@ impl<'a, R: Rng> SqlGenerator<'a, R> {
                 from.push(self.gen_from_relation());
             }
         }
+
+        self.merge_parallel_to_relation();
+
         from
     }
 
