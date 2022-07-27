@@ -19,8 +19,8 @@ use risingwave_pb::batch_plan::{PlanFragment, TaskId, TaskOutputId};
 use risingwave_pb::task_service::exchange_service_client::ExchangeServiceClient;
 use risingwave_pb::task_service::task_service_client::TaskServiceClient;
 use risingwave_pb::task_service::{
-    CreateTaskRequest, CreateTaskResponse, ExecuteRequest, GetDataRequest, GetDataResponse,
-    GetStreamRequest, GetStreamResponse,
+    CreateTaskRequest, ExecuteRequest, GetDataRequest, GetDataResponse, GetStreamRequest,
+    GetStreamResponse, TaskInfoResponse,
 };
 use tonic::transport::{Channel, Endpoint};
 use tonic::Streaming;
@@ -99,7 +99,7 @@ impl ComputeClient {
         Ok(())
     }
 
-    async fn create_task_inner(&self, req: CreateTaskRequest) -> Result<CreateTaskResponse> {
+    async fn create_task_inner(&self, req: CreateTaskRequest) -> Result<TaskInfoResponse> {
         Ok(self
             .task_client
             .to_owned()
