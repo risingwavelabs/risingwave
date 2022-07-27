@@ -20,9 +20,10 @@ use risingwave_pb::stream_plan::source_node::SourceType;
 use risingwave_pb::user::grant_privilege::{Action, Object};
 use risingwave_sqlparser::ast::ObjectName;
 
-use super::privilege::{check_privilege, get_single_check_item};
+use super::privilege::check_privileges;
 use crate::binder::Binder;
 use crate::catalog::catalog_service::CatalogReader;
+use crate::handler::privilege::ObjectCheckItem;
 use crate::session::{OptimizerContext, SessionImpl};
 
 pub fn check_source(
@@ -57,14 +58,14 @@ pub async fn handle_drop_table(
         let reader = catalog_reader.read_guard();
         let table = reader.get_table_by_name(session.database(), &schema_name, &table_name)?;
 
-        {
-            let check_items = get_single_check_item(
+        check_privileges(
+            &session,
+            &vec![ObjectCheckItem::new(
                 table.owner,
                 Action::Delete,
                 Object::TableId(table.id().table_id()),
-            );
-            check_privilege(&session, &check_items)?;
-        }
+            )],
+        )?;
 
         // If associated source is `None`, then it is a normal mview.
         match table.associated_source_id() {

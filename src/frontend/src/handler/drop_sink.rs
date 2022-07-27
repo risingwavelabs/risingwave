@@ -18,9 +18,10 @@ use risingwave_common::error::Result;
 use risingwave_pb::user::grant_privilege::{Action, Object};
 use risingwave_sqlparser::ast::ObjectName;
 
-use super::privilege::{check_privilege, get_single_check_item};
+use super::privilege::check_privileges;
 use crate::binder::Binder;
 use crate::handler::drop_table::check_source;
+use crate::handler::privilege::ObjectCheckItem;
 use crate::session::OptimizerContext;
 
 pub async fn handle_drop_sink(
@@ -40,12 +41,14 @@ pub async fn handle_drop_sink(
         &sink_name,
     )?;
 
-    {
-        let default_owner = DEFAULT_SUPER_USER_ID;
-        let check_items =
-            get_single_check_item(default_owner, Action::Delete, Object::SinkId(sink_id));
-        check_privilege(&session, &check_items)?;
-    }
+    check_privileges(
+        &session,
+        &vec![ObjectCheckItem::new(
+            DEFAULT_SUPER_USER_ID,
+            Action::Delete,
+            Object::SinkId(sink_id),
+        )],
+    )?;
 
     let catalog_writer = session.env().catalog_writer();
     catalog_writer.drop_sink(sink_id).await?;

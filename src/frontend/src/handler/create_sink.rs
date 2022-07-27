@@ -20,10 +20,11 @@ use risingwave_pb::catalog::Sink as ProstSink;
 use risingwave_pb::user::grant_privilege::{Action, Object};
 use risingwave_sqlparser::ast::CreateSinkStatement;
 
-use super::privilege::{check_privilege, get_single_check_item};
+use super::privilege::check_privileges;
 use super::util::handle_with_properties;
 use crate::binder::Binder;
 use crate::catalog::{DatabaseId, SchemaId};
+use crate::handler::privilege::ObjectCheckItem;
 use crate::session::OptimizerContext;
 
 pub(crate) fn make_prost_sink(
@@ -57,14 +58,15 @@ pub async fn handle_create_sink(
         let catalog_reader = session.env().catalog_reader().read_guard();
 
         let schema = catalog_reader.get_schema_by_name(session.database(), &schema_name)?;
-        {
-            let check_items = get_single_check_item(
+
+        check_privileges(
+            &session,
+            &vec![ObjectCheckItem::new(
                 schema.owner(),
                 Action::Create,
                 Object::SchemaId(schema.id()),
-            );
-            check_privilege(&session, &check_items)?;
-        }
+            )],
+        )?;
 
         catalog_reader.check_relation_name_duplicated(
             session.database(),

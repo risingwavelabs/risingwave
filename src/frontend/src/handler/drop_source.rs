@@ -18,8 +18,9 @@ use risingwave_pb::stream_plan::source_node::SourceType;
 use risingwave_pb::user::grant_privilege::{Action, Object};
 use risingwave_sqlparser::ast::ObjectName;
 
-use super::privilege::{check_privilege, get_single_check_item};
+use super::privilege::check_privileges;
 use crate::binder::Binder;
+use crate::handler::privilege::ObjectCheckItem;
 use crate::session::OptimizerContext;
 
 pub async fn handle_drop_source(context: OptimizerContext, name: ObjectName) -> Result<PgResponse> {
@@ -32,11 +33,14 @@ pub async fn handle_drop_source(context: OptimizerContext, name: ObjectName) -> 
         .get_source_by_name(session.database(), &schema_name, &source_name)?
         .clone();
 
-    {
-        let check_items =
-            get_single_check_item(source.owner, Action::Delete, Object::SourceId(source.id));
-        check_privilege(&session, &check_items)?;
-    }
+    check_privileges(
+        &session,
+        &vec![ObjectCheckItem::new(
+            source.owner,
+            Action::Delete,
+            Object::SourceId(source.id),
+        )],
+    )?;
 
     match source.source_type {
         SourceType::Table => {

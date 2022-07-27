@@ -17,9 +17,10 @@ use risingwave_common::error::{ErrorCode, Result, RwError};
 use risingwave_pb::user::grant_privilege::{Action, Object};
 use risingwave_sqlparser::ast::ObjectName;
 
-use super::privilege::{check_privilege, get_single_check_item};
+use super::privilege::check_privileges;
 use crate::binder::Binder;
 use crate::handler::drop_table::check_source;
+use crate::handler::privilege::ObjectCheckItem;
 use crate::session::OptimizerContext;
 
 pub async fn handle_drop_index(
@@ -37,14 +38,14 @@ pub async fn handle_drop_index(
         let reader = catalog_reader.read_guard();
         let table = reader.get_table_by_name(session.database(), &schema_name, &table_name)?;
 
-        {
-            let check_items = get_single_check_item(
+        check_privileges(
+            &session,
+            &vec![ObjectCheckItem::new(
                 table.owner,
                 Action::Delete,
                 Object::TableId(table.id().table_id()),
-            );
-            check_privilege(&session, &check_items)?;
-        }
+            )],
+        )?;
 
         // If associated source is `Some`, then it is a actually a materialized source / table v2.
         if table.associated_source_id().is_some() {

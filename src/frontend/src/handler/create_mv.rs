@@ -20,7 +20,7 @@ use risingwave_pb::catalog::Table as ProstTable;
 use risingwave_pb::user::grant_privilege::Action;
 use risingwave_sqlparser::ast::{ObjectName, Query, WithProperties};
 
-use super::privilege::{check_privilege, resolve_relation_privilege};
+use super::privilege::{check_privileges, resolve_relation_privileges};
 use super::util::handle_with_properties;
 use crate::binder::{Binder, BoundSetExpr};
 use crate::catalog::check_schema_writable;
@@ -65,8 +65,8 @@ pub fn gen_create_mv_plan(
         }
         if let Some(relation) = &select.from {
             let mut check_items = Vec::new();
-            resolve_relation_privilege(relation, Action::Select, &mut check_items);
-            check_privilege(session, &check_items)?;
+            resolve_relation_privileges(relation, Action::Select, &mut check_items);
+            check_privileges(session, &check_items)?;
         }
     }
 

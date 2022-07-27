@@ -21,27 +21,23 @@ use crate::session::SessionImpl;
 use crate::user::UserId;
 
 pub struct ObjectCheckItem {
-    pub owner: UserId, // owner of the object
-    pub action: ProstAction,
-    pub object: ProstObject,
-}
-
-/// wrap function
-pub(crate) fn get_single_check_item(
     owner: UserId,
     action: ProstAction,
     object: ProstObject,
-) -> Vec<ObjectCheckItem> {
-    let items = vec![ObjectCheckItem {
-        owner,
-        action,
-        object,
-    }];
-    items
+}
+
+impl ObjectCheckItem {
+    pub fn new(owner: UserId, action: ProstAction, object: ProstObject) -> Self {
+        Self {
+            owner,
+            action,
+            object,
+        }
+    }
 }
 
 /// resolve privileges in `relation`
-pub(crate) fn resolve_relation_privilege(
+pub(crate) fn resolve_relation_privileges(
     relation: &Relation,
     action: ProstAction,
     objects: &mut Vec<ObjectCheckItem>,
@@ -66,26 +62,26 @@ pub(crate) fn resolve_relation_privilege(
         Relation::Subquery(query) => {
             if let crate::binder::BoundSetExpr::Select(select) = &query.query.body {
                 if let Some(sub_relation) = &select.from {
-                    resolve_relation_privilege(sub_relation, action, objects);
+                    resolve_relation_privileges(sub_relation, action, objects);
                 }
             }
         }
         Relation::Join(join) => {
-            resolve_relation_privilege(&join.left, action, objects);
-            resolve_relation_privilege(&join.right, action, objects);
+            resolve_relation_privileges(&join.left, action, objects);
+            resolve_relation_privileges(&join.right, action, objects);
         }
         Relation::WindowTableFunction(table) => {
-            resolve_relation_privilege(&table.input, action, objects)
+            resolve_relation_privileges(&table.input, action, objects)
         }
         _ => {}
     };
 }
 
 /// resolve privileges in `stmt`
-pub(crate) fn resolve_privilege(stmt: &BoundStatement) -> Vec<ObjectCheckItem> {
+pub(crate) fn resolve_privileges(stmt: &BoundStatement) -> Vec<ObjectCheckItem> {
     let mut objects = Vec::new();
     match stmt {
-        crate::binder::BoundStatement::Insert(ref insert) => {
+        BoundStatement::Insert(ref insert) => {
             let object = ObjectCheckItem {
                 owner: insert.table_source.owner,
                 action: ProstAction::Insert,
@@ -94,11 +90,11 @@ pub(crate) fn resolve_privilege(stmt: &BoundStatement) -> Vec<ObjectCheckItem> {
             objects.push(object);
             if let crate::binder::BoundSetExpr::Select(select) = &insert.source.body {
                 if let Some(sub_relation) = &select.from {
-                    resolve_relation_privilege(sub_relation, ProstAction::Select, &mut objects);
+                    resolve_relation_privileges(sub_relation, ProstAction::Select, &mut objects);
                 }
             }
         }
-        crate::binder::BoundStatement::Delete(ref delete) => {
+        BoundStatement::Delete(ref delete) => {
             let object = ObjectCheckItem {
                 owner: delete.table_source.owner,
                 action: ProstAction::Delete,
@@ -106,7 +102,7 @@ pub(crate) fn resolve_privilege(stmt: &BoundStatement) -> Vec<ObjectCheckItem> {
             };
             objects.push(object);
         }
-        crate::binder::BoundStatement::Update(ref update) => {
+        BoundStatement::Update(ref update) => {
             let object = ObjectCheckItem {
                 owner: update.table_source.owner,
                 action: ProstAction::Update,
@@ -114,10 +110,10 @@ pub(crate) fn resolve_privilege(stmt: &BoundStatement) -> Vec<ObjectCheckItem> {
             };
             objects.push(object);
         }
-        crate::binder::BoundStatement::Query(ref query) => {
+        BoundStatement::Query(ref query) => {
             if let crate::binder::BoundSetExpr::Select(select) = &query.body {
                 if let Some(sub_relation) = &select.from {
-                    resolve_relation_privilege(sub_relation, ProstAction::Select, &mut objects);
+                    resolve_relation_privileges(sub_relation, ProstAction::Select, &mut objects);
                 }
             }
         }
@@ -126,7 +122,7 @@ pub(crate) fn resolve_privilege(stmt: &BoundStatement) -> Vec<ObjectCheckItem> {
 }
 
 /// check whether user in `session` has privileges in `items`
-pub(crate) fn check_privilege(session: &SessionImpl, items: &Vec<ObjectCheckItem>) -> Result<()> {
+pub(crate) fn check_privileges(session: &SessionImpl, items: &Vec<ObjectCheckItem>) -> Result<()> {
     let user_reader = session.env().user_info_reader();
     let reader = user_reader.read_guard();
 
@@ -164,7 +160,7 @@ mod tests {
     use crate::test_utils::LocalFrontend;
 
     #[tokio::test]
-    async fn test_check_privilege() {
+    async fn test_check_privileges() {
         let frontend = LocalFrontend::new(Default::default()).await;
         let session = frontend.session_ref();
         let catalog_reader = session.env().catalog_reader();
@@ -175,12 +171,12 @@ mod tests {
             .get_schema_by_name(DEFAULT_DATABASE_NAME, "schema")
             .unwrap()
             .clone();
-        let check_items = get_single_check_item(
+        let check_items = vec![ObjectCheckItem::new(
             DEFAULT_SUPER_USER_ID,
             ProstAction::Create,
             ProstObject::SchemaId(schema.id()),
-        );
-        assert!(check_privilege(&session, &check_items).is_ok());
+        )];
+        assert!(check_privileges(&session, &check_items).is_ok());
 
         frontend
             .run_sql(
@@ -199,12 +195,12 @@ mod tests {
                 .id
         };
         let session = frontend.session_user_ref(database, user_name, user_id);
-        assert!(check_privilege(&session, &check_items).is_err());
+        assert!(check_privileges(&session, &check_items).is_err());
 
         frontend
             .run_sql("GRANT CREATE ON SCHEMA schema TO user")
             .await
             .unwrap();
-        assert!(check_privilege(&session, &check_items).is_ok());
+        assert!(check_privileges(&session, &check_items).is_ok());
     }
 }
