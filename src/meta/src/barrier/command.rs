@@ -40,16 +40,22 @@ use crate::model::{ActorId, DispatcherId, FragmentId, TableFragments};
 use crate::storage::MetaStore;
 use crate::stream::FragmentManagerRef;
 
+/// [`Reschedule`] is for the [`Command::RescheduleFragment`], which is used for rescheduling actors
+/// in some fragment, like scaling or migrating.
 #[derive(Debug, Clone)]
 pub struct Reschedule {
+    /// Added actors in this fragment.
     pub added_actors: Vec<ActorId>,
+    /// Removed actors in this fragment.
     pub removed_actors: Vec<ActorId>,
 
-    pub upstream_fragment_ids: Vec<FragmentId>,
-    pub upstream_dispatcher_id: DispatcherId,
+    /// The upstream fragments of this fragment, and the dispatchers that should be updated.
+    pub upstream_fragment_dispatcher_ids: Vec<(FragmentId, DispatcherId)>,
+    /// New hash mapping of the upstream dispatcher to be updated.
     pub upstream_dispatcher_mapping: ActorMapping,
 
-    pub downstream_fragment_id: FragmentId,
+    /// The downstream fragments of this fragment.
+    pub downstream_fragment_id: Option<FragmentId>,
 }
 
 /// [`Command`] is the action of [`crate::barrier::GlobalBarrierManager`]. For different commands,
@@ -74,10 +80,11 @@ pub enum Command {
 
     /// `CreateMaterializedView` command generates a `Add` barrier by given info.
     ///
-    /// Barriers from the actors to be created, which is marked as `Creating` at first, will NOT be
-    /// collected.
+    /// Barriers from the actors to be created, which is marked as `Creating` at first, will STILL
+    /// be collected since the barrier should be passthroughed.
     /// After the barrier is collected, these newly created actors will be marked as `Created`. And
-    /// it adds the table fragments info to meta store.
+    /// it adds the table fragments info to meta store. However, the creating progress will last
+    /// for a while until the `finish` channel is signaled.
     CreateMaterializedView {
         table_fragments: TableFragments,
         table_sink_map: HashMap<TableId, Vec<ActorId>>,
@@ -85,6 +92,11 @@ pub enum Command {
         source_state: HashMap<ActorId, Vec<SplitImpl>>,
     },
 
+    /// `Reschedule` command generates a `Update` barrier by the [`Reschedule`] of each fragment.
+    /// Mainly used for scaling and migration.
+    ///
+    /// Barriers from which actors should be collected, and the post behavior of this command are
+    /// very similar to `Create` and `Drop` commands, for added and removed actors, respectively.
     RescheduleFragment(HashMap<FragmentId, Reschedule>),
 }
 
@@ -101,6 +113,7 @@ impl Command {
         Self::Plain(Some(Mutation::Resume(ResumeMutation {})))
     }
 
+    /// Changes to the actors to be sent or collected after this command is committed.
     pub fn changes(&self) -> CommandChanges {
         match self {
             Command::Plain(_) => CommandChanges::None,
@@ -124,7 +137,12 @@ impl Command {
 
     /// If we need to send a barrier to modify actor configuration, we will pause the barrier
     /// injection. return true.
+    // TODO: unused now, `Pause` still runs concurrently and may cause problems.
     pub fn should_pause_inject_barrier(&self) -> bool {
+        // Note: the meaning for `Pause` is not pausing the periodic barrier injection, but for
+        // pausing the sources on compute nodes. However, `Pause` is used for configuration change
+        // like scaling and migration, which must pause the concurrent checkpoint to ensure the
+        // previous checkpoint has been done.
         matches!(self, Self::Plain(Some(Mutation::Pause(_))))
     }
 }
@@ -218,49 +236,59 @@ where
             Command::RescheduleFragment(reschedules) => {
                 let mut actor_dispatcher_update = HashMap::new();
                 for (_fragment_id, reschedule) in reschedules.iter() {
-                    let mut upstream_actor_ids = vec![];
-                    for &upstream_fragment_id in &reschedule.upstream_fragment_ids {
-                        upstream_actor_ids.extend(
-                            self.fragment_manager
-                                .get_running_actors_of_fragment(upstream_fragment_id)
-                                .await?,
-                        );
-                    }
+                    for &(upstream_fragment_id, dispatcher_id) in
+                        &reschedule.upstream_fragment_dispatcher_ids
+                    {
+                        // Find the actors of the upstream fragment.
+                        let upstream_actor_ids = self
+                            .fragment_manager
+                            .get_running_actors_of_fragment(upstream_fragment_id)
+                            .await?;
 
-                    for actor_id in upstream_actor_ids {
-                        actor_dispatcher_update
-                            .try_insert(
-                                actor_id,
-                                ProstDispatcherUpdate {
-                                    dispatcher_id: reschedule.upstream_dispatcher_id,
-                                    hash_mapping: Some(
-                                        reschedule.upstream_dispatcher_mapping.clone(),
-                                    ),
-                                    added_downstream_actor_id: reschedule.added_actors.clone(),
-                                    removed_downstream_actor_id: reschedule.removed_actors.clone(),
-                                },
-                            )
-                            .unwrap();
+                        // Record updates for all actors.
+                        for actor_id in upstream_actor_ids {
+                            actor_dispatcher_update
+                                .try_insert(
+                                    actor_id,
+                                    ProstDispatcherUpdate {
+                                        dispatcher_id,
+                                        hash_mapping: Some(
+                                            reschedule.upstream_dispatcher_mapping.clone(),
+                                        ),
+                                        added_downstream_actor_id: reschedule.added_actors.clone(),
+                                        removed_downstream_actor_id: reschedule
+                                            .removed_actors
+                                            .clone(),
+                                    },
+                                )
+                                .unwrap();
+                        }
                     }
                 }
 
                 let mut actor_merge_update = HashMap::new();
                 for (_fragment_id, reschedule) in reschedules.iter() {
-                    let downstream_actor_ids = self
-                        .fragment_manager
-                        .get_running_actors_of_fragment(reschedule.downstream_fragment_id)
-                        .await?;
+                    if let Some(downstream_fragment_id) = reschedule.downstream_fragment_id {
+                        // Find the actors of the downstream fragment.
+                        let downstream_actor_ids = self
+                            .fragment_manager
+                            .get_running_actors_of_fragment(downstream_fragment_id)
+                            .await?;
 
-                    for actor_id in downstream_actor_ids {
-                        actor_merge_update
-                            .try_insert(
-                                actor_id,
-                                ProstMergeUpdate {
-                                    added_upstream_actor_id: reschedule.added_actors.clone(),
-                                    removed_upstream_actor_id: reschedule.removed_actors.clone(),
-                                },
-                            )
-                            .unwrap();
+                        // Record updates for all actors.
+                        for actor_id in downstream_actor_ids {
+                            actor_merge_update
+                                .try_insert(
+                                    actor_id,
+                                    ProstMergeUpdate {
+                                        added_upstream_actor_id: reschedule.added_actors.clone(),
+                                        removed_upstream_actor_id: reschedule
+                                            .removed_actors
+                                            .clone(),
+                                    },
+                                )
+                                .unwrap();
+                        }
                     }
                 }
 

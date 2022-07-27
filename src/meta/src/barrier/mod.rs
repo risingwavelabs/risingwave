@@ -71,18 +71,19 @@ struct ScheduledBarriers {
     changed_tx: watch::Sender<()>,
 }
 
-/// The table state of command
+/// Changes to the actors to be sent or collected after this command is committed.
 #[derive(Debug, Clone)]
 pub enum CommandChanges {
+    /// This table will be dropped.
     DropTable(TableId),
-
+    /// This table will be created.
     CreateTable(TableId),
-
+    /// Some actors will be added or removed.
     Actor {
         add: HashSet<ActorId>,
         remove: HashSet<ActorId>,
     },
-
+    /// No changes.
     None,
 }
 
@@ -198,14 +199,17 @@ struct CheckpointControl<S: MetaStore> {
     /// Save the state and message of barrier in order
     command_ctx_queue: VecDeque<EpochNode<S>>,
 
-    /// In addition to the actors with status `Running`.The barrier needs to send or collect the
+    /// In addition to the actors with status `Running`. The barrier needs to send or collect the
     /// actors of these tables.
     creating_tables: HashSet<TableId>,
     /// The barrier does not send or collect the actors of these tables, even if they are
     /// `Running`.
     dropping_tables: HashSet<TableId>,
 
+    /// In addition to the actors with status `Running`. The barrier needs to send or collect these
+    /// actors.
     adding_actors: HashSet<ActorId>,
+    /// The barrier does not send or collect these actors, even if they are `Running`.
     removing_actors: HashSet<ActorId>,
 }
 
@@ -223,7 +227,9 @@ where
         }
     }
 
-    /// Try to enxtend this command's `changed_table_id` in `creating_table_ids`.
+    /// Before resolving the actors to be sent or collected, we should first record the newly
+    /// created table and added actors into checkpoint control, so that `can_actor_send_or_collect`
+    /// will return `true`.
     fn pre_resolve(&mut self, command: &Command) {
         match command.changes() {
             CommandChanges::CreateTable(table) => {
@@ -249,6 +255,9 @@ where
         }
     }
 
+    /// After resolving the actors to be sent or collected, we should remove the dropped table and
+    /// removed actors from checkpoint control, so that `can_actor_send_or_collect` will return
+    /// `false`.
     fn post_resolve(&mut self, command: &Command) {
         match command.changes() {
             CommandChanges::DropTable(table) => {
@@ -282,7 +291,7 @@ where
             || s == ActorState::Inactive && self.creating_tables.contains(table_id)
     }
 
-    /// Return the nums of barrier (the nums of in-flight-barrier , the nums of all-barrier)
+    /// Return the nums of barrier (the nums of in-flight-barrier, the nums of all-barrier).
     fn get_barrier_len(&self) -> (usize, usize) {
         (
             self.command_ctx_queue
@@ -335,7 +344,7 @@ where
         let complete_nodes = self.command_ctx_queue.drain(..index).collect_vec();
         complete_nodes
             .iter()
-            .for_each(|node| self.clear_inflight_changes(node.command_ctx.command.changes()));
+            .for_each(|node| self.remove_changes(node.command_ctx.command.changes()));
         complete_nodes
     }
 
@@ -344,7 +353,7 @@ where
         let complete_nodes = self.command_ctx_queue.drain(..).collect_vec();
         complete_nodes
             .iter()
-            .for_each(|node| self.clear_inflight_changes(node.command_ctx.command.changes()));
+            .for_each(|node| self.remove_changes(node.command_ctx.command.changes()));
         complete_nodes
     }
 
@@ -357,7 +366,9 @@ where
             < in_flight_barrier_nums
     }
 
-    pub fn clear_inflight_changes(&mut self, changes: CommandChanges) {
+    /// After some command is committed, the changes will be applied to the meta store so we can
+    /// remove the changes from checkpoint control.
+    pub fn remove_changes(&mut self, changes: CommandChanges) {
         match changes {
             CommandChanges::CreateTable(table_id) => {
                 assert!(self.creating_tables.remove(&table_id));
@@ -812,6 +823,8 @@ where
         info
     }
 
+    /// Run multiple commands and return when they're all completely finished. It's ensured that
+    /// multiple commands is executed continuously and atomically.
     pub async fn run_multiple_commands(&self, commands: Vec<Command>) -> Result<()> {
         struct Context {
             collect_rx: Receiver<Result<()>>,

@@ -401,6 +401,7 @@ where
             .collect::<HashSet<_>>()
     }
 
+    /// Get the actor ids of the fragment with `fragment_id` with `Running` status.
     pub async fn get_running_actors_of_fragment(
         &self,
         fragment_id: FragmentId,
@@ -422,6 +423,7 @@ where
         bail!("fragment not found: {}", fragment_id)
     }
 
+    /// Apply `Reschedule`s to fragments.
     pub async fn apply_reschedules(
         &self,
         mut reschedules: HashMap<FragmentId, Reschedule>,
@@ -430,6 +432,7 @@ where
         let mut transaction = Transaction::default();
 
         for table_fragment in map.values_mut() {
+            // Takes out the reschedules of the fragments in this table.
             let reschedules = reschedules
                 .drain_filter(|fragment_id, _| table_fragment.fragments.contains_key(fragment_id))
                 .collect_vec();
@@ -438,7 +441,7 @@ where
             for (fragment_id, reschedule) in reschedules {
                 let fragment = table_fragment.fragments.get_mut(&fragment_id).unwrap();
 
-                // Add actors to this fragment.
+                // Add actors to this fragment: set the state to `Running`.
                 // TODO: update vnode mapping for actors.
                 for actor_id in reschedule.added_actors {
                     table_fragment
