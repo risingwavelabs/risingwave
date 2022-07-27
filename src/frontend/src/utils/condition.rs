@@ -313,6 +313,8 @@ impl Condition {
                     assert_eq!(input_ref.index, order_column_ids[i]);
                     let mut scalars = HashSet::new();
                     for const_expr in in_const_list {
+                        // The cast should succeed, because otherwise the input_ref is casted
+                        // and thus `as_in_const_list` returns None.
                         let const_expr = const_expr.cast_implicit(input_ref.data_type.clone()).unwrap();
                         let value = const_expr.eval_row_const()?;
                         let Some(value) = value else {
