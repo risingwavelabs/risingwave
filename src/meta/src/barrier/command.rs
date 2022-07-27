@@ -42,14 +42,14 @@ use crate::stream::FragmentManagerRef;
 
 #[derive(Debug, Clone)]
 pub struct Reschedule {
-    added_actors: Vec<ActorId>,
-    removed_actors: Vec<ActorId>,
+    pub added_actors: Vec<ActorId>,
+    pub removed_actors: Vec<ActorId>,
 
-    upstream_fragment_ids: Vec<FragmentId>,
-    upstream_dispatcher_id: DispatcherId,
-    upstream_dispatcher_mapping: ActorMapping,
+    pub upstream_fragment_ids: Vec<FragmentId>,
+    pub upstream_dispatcher_id: DispatcherId,
+    pub upstream_dispatcher_mapping: ActorMapping,
 
-    downstream_fragment_id: FragmentId,
+    pub downstream_fragment_id: FragmentId,
 }
 
 /// [`Command`] is the action of [`crate::barrier::GlobalBarrierManager`]. For different commands,
@@ -347,8 +347,13 @@ where
                     .await?;
             }
 
-            Command::RescheduleFragment(_reschedules) => {
-                todo!()
+            Command::RescheduleFragment(reschedules) => {
+                // TODO: drop actors on worker nodes.
+
+                // Update fragment info after rescheduling in meta store.
+                self.fragment_manager
+                    .apply_reschedules(reschedules.clone())
+                    .await?;
             }
         }
 

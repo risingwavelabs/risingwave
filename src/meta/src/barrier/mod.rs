@@ -41,8 +41,8 @@ use tokio::sync::{oneshot, watch, RwLock};
 use tokio::task::JoinHandle;
 use uuid::Uuid;
 
-pub use self::command::Command;
 use self::command::CommandContext;
+pub use self::command::{Command, Reschedule};
 use self::info::BarrierActorInfo;
 use self::notifier::Notifier;
 use crate::barrier::progress::CreateMviewProgressTracker;

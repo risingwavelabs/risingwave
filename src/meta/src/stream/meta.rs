@@ -28,6 +28,7 @@ use risingwave_pb::meta::table_fragments::ActorState;
 use risingwave_pb::stream_plan::{Dispatcher, FragmentType, StreamActor};
 use tokio::sync::RwLock;
 
+use crate::barrier::Reschedule;
 use crate::cluster::WorkerId;
 use crate::manager::{HashMappingManagerRef, MetaSrvEnv};
 use crate::model::{ActorId, FragmentId, MetadataModel, TableFragments, Transactional};
@@ -419,6 +420,55 @@ where
         }
 
         bail!("fragment not found: {}", fragment_id)
+    }
+
+    pub async fn apply_reschedules(
+        &self,
+        mut reschedules: HashMap<FragmentId, Reschedule>,
+    ) -> Result<()> {
+        let map = &mut self.core.write().await.table_fragments;
+        let mut transaction = Transaction::default();
+
+        for table_fragment in map.values_mut() {
+            let reschedules = reschedules
+                .drain_filter(|fragment_id, _| table_fragment.fragments.contains_key(fragment_id))
+                .collect_vec();
+            let updated = !reschedules.is_empty();
+
+            for (fragment_id, reschedule) in reschedules {
+                let fragment = table_fragment.fragments.get_mut(&fragment_id).unwrap();
+
+                // Add actors to this fragment.
+                // TODO: update vnode mapping for actors.
+                for actor_id in reschedule.added_actors {
+                    table_fragment
+                        .actor_status
+                        .get_mut(&actor_id)
+                        .unwrap()
+                        .set_state(ActorState::Running);
+                }
+
+                // Remove actors from this fragment.
+                let removed_actors: HashSet<_> = reschedule.removed_actors.into_iter().collect();
+                fragment
+                    .actors
+                    .retain(|a| !removed_actors.contains(&a.actor_id));
+                for actor_id in removed_actors {
+                    table_fragment.actor_status.remove(&actor_id);
+                }
+
+                // TODO: update merger at downstream and dispatcher at upstream in meta store.
+            }
+
+            if updated {
+                table_fragment.upsert_in_transaction(&mut transaction)?;
+            }
+        }
+
+        assert!(reschedules.is_empty(), "all reschedules must be applied");
+
+        self.meta_store.txn(transaction).await?;
+        Ok(())
     }
 
     pub async fn table_node_actors(
