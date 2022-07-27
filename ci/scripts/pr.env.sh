@@ -8,6 +8,7 @@ set +e
 CHANGED=$(git diff --name-only origin/main | grep "ci/scripts/pr.env.sh\|src/tests/sqlsmith")
 set -e
 
+
 if [[ -n "$CHANGED" ]]; then
     echo "Changes to Sqlsmith source files detected.";
     export RUN_SQLSMITH=1;
