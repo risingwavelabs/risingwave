@@ -15,7 +15,7 @@
 use std::fmt::{Debug, Display, Formatter};
 use std::ops::{Add, Div, Mul, Neg, Rem, Sub};
 
-use num_traits::{CheckedAdd, CheckedDiv, CheckedMul, CheckedNeg, CheckedRem, CheckedSub};
+use num_traits::{CheckedAdd, CheckedDiv, CheckedMul, CheckedNeg, CheckedRem, CheckedSub, Zero};
 pub use rust_decimal::prelude::{FromPrimitive, FromStr, ToPrimitive};
 use rust_decimal::{Decimal as RustDecimal, Error, RoundingStrategy};
 
@@ -544,6 +544,20 @@ impl FromStr for Decimal {
             "inf" | "INF" | "+inf" | "+INF" | "+Inf" => Ok(Decimal::PositiveINF),
             "-inf" | "-INF" | "-Inf" => Ok(Decimal::NegativeINF),
             s => RustDecimal::from_str(s).map(Decimal::Normalized),
+        }
+    }
+}
+
+impl Zero for Decimal {
+    fn zero() -> Self {
+        Self::Normalized(RustDecimal::zero())
+    }
+
+    fn is_zero(&self) -> bool {
+        if let Self::Normalized(d) = self {
+            d.is_zero()
+        } else {
+            false
         }
     }
 }
