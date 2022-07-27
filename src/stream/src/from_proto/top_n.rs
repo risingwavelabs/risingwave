@@ -18,9 +18,9 @@ use risingwave_common::util::sort_util::OrderPair;
 use super::*;
 use crate::executor::TopNExecutor;
 
-pub struct TopNExecutorBuilder;
+pub struct TopNExecutorNewBuilder;
 
-impl ExecutorBuilder for TopNExecutorBuilder {
+impl ExecutorBuilder for TopNExecutorNewBuilder {
     fn new_boxed_executor(
         mut params: ExecutorParams,
         node: &StreamNode,
@@ -38,11 +38,8 @@ impl ExecutorBuilder for TopNExecutorBuilder {
         } else {
             Some(node.limit as usize)
         };
-        let cache_size = Some(1024);
-        let total_count = (0, 0, 0);
+        let total_count = 0;
         let table_id_l = TableId::new(node.get_table_id_l());
-        let table_id_m = TableId::new(node.get_table_id_m());
-        let table_id_h = TableId::new(node.get_table_id_h());
         let key_indices = node
             .get_distribution_key()
             .iter()
@@ -56,9 +53,6 @@ impl ExecutorBuilder for TopNExecutorBuilder {
             params.pk_indices,
             store,
             table_id_l,
-            table_id_m,
-            table_id_h,
-            cache_size,
             total_count,
             params.executor_id,
             key_indices,
