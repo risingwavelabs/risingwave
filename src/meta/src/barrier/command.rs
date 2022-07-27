@@ -32,7 +32,6 @@ use uuid::Uuid;
 
 use super::info::BarrierActorInfo;
 use crate::barrier::ChangedTableState;
-use crate::barrier::ChangedTableState::{Create, Drop, NoTable};
 use crate::model::{ActorId, TableFragments};
 use crate::storage::MetaStore;
 use crate::stream::FragmentManagerRef;
@@ -69,6 +68,9 @@ pub enum Command {
         dispatchers: HashMap<ActorId, Vec<Dispatcher>>,
         source_state: HashMap<ActorId, Vec<SplitImpl>>,
     },
+    // RescheduleFragment {
+
+    // }
 }
 
 impl Command {
@@ -88,16 +90,16 @@ impl Command {
         match self {
             Command::CreateMaterializedView {
                 table_fragments, ..
-            } => Create(table_fragments.table_id()),
-            Command::Plain(_) => NoTable,
-            Command::DropMaterializedView(table_id) => Drop(*table_id),
+            } => ChangedTableState::CreateTable(table_fragments.table_id()),
+            Command::DropMaterializedView(table_id) => ChangedTableState::DropTable(*table_id),
+            Command::Plain(_) => ChangedTableState::None,
         }
     }
 
     /// If we need to send a barrier to modify actor configuration, we will pause the barrier
-    /// injection. return true
+    /// injection. return true.
     pub fn should_pause_inject_barrier(&self) -> bool {
-        !matches!(self, Command::Plain(_))
+        matches!(self, Self::Plain(Some(Mutation::Pause(_))))
     }
 }
 

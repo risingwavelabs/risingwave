@@ -47,11 +47,10 @@ use self::info::BarrierActorInfo;
 use self::notifier::Notifier;
 use crate::barrier::progress::CreateMviewProgressTracker;
 use crate::barrier::BarrierEpochState::{Complete, InFlight};
-use crate::barrier::ChangedTableState::{Create, Drop};
 use crate::cluster::{ClusterManagerRef, META_NODE_ID};
 use crate::hummock::HummockManagerRef;
 use crate::manager::{CatalogManagerRef, MetaSrvEnv};
-use crate::model::BarrierManagerState;
+use crate::model::{ActorId, BarrierManagerState};
 use crate::rpc::metrics::MetaMetrics;
 use crate::storage::MetaStore;
 use crate::stream::FragmentManagerRef;
@@ -74,9 +73,16 @@ struct ScheduledBarriers {
 /// The table state of command
 #[derive(Debug, Clone)]
 pub enum ChangedTableState {
-    Drop(TableId),
-    Create(TableId),
-    NoTable,
+    DropTable(TableId),
+
+    CreateTable(TableId),
+
+    Actor {
+        add: HashSet<ActorId>,
+        remove: HashSet<ActorId>,
+    },
+
+    None,
 }
 
 impl ScheduledBarriers {
@@ -188,12 +194,16 @@ pub struct GlobalBarrierManager<S: MetaStore> {
 struct CheckpointControl<S: MetaStore> {
     /// Save the state and message of barrier in order
     command_ctx_queue: VecDeque<EpochNode<S>>,
+
     /// In addition to the actors with status `Running`.The barrier needs to send or collect the
     /// actors of these tables.
-    creating_table_ids: HashSet<TableId>,
+    creating_tables: HashSet<TableId>,
     /// The barrier does not send or collect the actors of these tables, even if they are
     /// `Running`.
-    dropping_table_ids: HashSet<TableId>,
+    dropping_tables: HashSet<TableId>,
+
+    adding_actors: HashSet<ActorId>,
+    removing_actors: HashSet<ActorId>,
 }
 
 impl<S> CheckpointControl<S>
@@ -202,16 +212,62 @@ where
 {
     fn new() -> Self {
         Self {
-            command_ctx_queue: VecDeque::default(),
-            creating_table_ids: HashSet::default(),
-            dropping_table_ids: HashSet::default(),
+            command_ctx_queue: Default::default(),
+            creating_tables: Default::default(),
+            dropping_tables: Default::default(),
+            adding_actors: Default::default(),
+            removing_actors: Default::default(),
         }
     }
 
     /// Try to enxtend this command's `changed_table_id` in `creating_table_ids`.
-    fn pre_inject(&mut self, command: &Command) {
-        if let Create(table) = command.changed_table_id() {
-            self.creating_table_ids.insert(table);
+    fn pre_resolve(&mut self, command: &Command) {
+        match command.changed_table_id() {
+            ChangedTableState::CreateTable(table) => {
+                assert!(
+                    !self.dropping_tables.contains(&table),
+                    "confict table in concurrent checkpoint"
+                );
+                assert!(
+                    self.creating_tables.insert(table),
+                    "duplicated table in concurrent checkpoint"
+                );
+            }
+
+            ChangedTableState::Actor { add, .. } => {
+                assert!(
+                    self.adding_actors.is_disjoint(&add),
+                    "duplicated actor in concurrent checkpoint"
+                );
+                self.adding_actors.extend(add);
+            }
+
+            _ => {}
+        }
+    }
+
+    fn post_resolve(&mut self, command: &Command) {
+        match command.changed_table_id() {
+            ChangedTableState::DropTable(table) => {
+                assert!(
+                    !self.creating_tables.contains(&table),
+                    "confict table in concurrent checkpoint"
+                );
+                assert!(
+                    self.dropping_tables.insert(table),
+                    "duplicated table in concurrent checkpoint"
+                );
+            }
+
+            ChangedTableState::Actor { remove, .. } => {
+                assert!(
+                    self.removing_actors.is_disjoint(&remove),
+                    "duplicated actor in concurrent checkpoint"
+                );
+                self.removing_actors.extend(remove);
+            }
+
+            _ => {}
         }
     }
 
@@ -219,8 +275,8 @@ where
     /// 1. The actor is Running and not being dropped.
     /// 2. The actor is Inactive and belongs to a creating MV
     fn can_actor_send_or_collect(&self, s: ActorState, table_id: &TableId) -> bool {
-        s == ActorState::Running && !self.dropping_table_ids.contains(table_id)
-            || s == ActorState::Inactive && self.creating_table_ids.contains(table_id)
+        s == ActorState::Running && !self.dropping_tables.contains(table_id)
+            || s == ActorState::Inactive && self.creating_tables.contains(table_id)
     }
 
     /// Return the nums of barrier (the nums of in-flight-barrier , the nums of all-barrier)
@@ -234,16 +290,13 @@ where
         )
     }
 
-    /// Inject a `command_ctx` in `command_ctx_queue`, and it's state is `InFlight`.
+    /// Inject a `command_ctx` in `command_ctx_queue`, and its state is `InFlight`.
     fn inject(
         &mut self,
         command_ctx: Arc<CommandContext<S>>,
         notifiers: SmallVec<[Notifier; 1]>,
         timer: HistogramTimer,
     ) {
-        if let Drop(table) = command_ctx.command.changed_table_id() {
-            self.dropping_table_ids.insert(table);
-        }
         self.command_ctx_queue.push_back(EpochNode {
             timer: Some(timer),
             result: None,
@@ -259,7 +312,7 @@ where
         &mut self,
         prev_epoch: u64,
         result: Result<Vec<BarrierCompleteResponse>>,
-    ) -> VecDeque<EpochNode<S>> {
+    ) -> Vec<EpochNode<S>> {
         // change state to complete, and wait for nodes with the smaller epoch to commit
         if let Some(node) = self
             .command_ctx_queue
@@ -276,8 +329,7 @@ where
             .iter()
             .position(|x| !matches!(x.state, Complete))
             .unwrap_or(self.command_ctx_queue.len());
-        let complete_nodes: VecDeque<EpochNode<S>> =
-            self.command_ctx_queue.drain(..index).collect();
+        let complete_nodes: Vec<EpochNode<S>> = self.command_ctx_queue.drain(..index).collect();
         complete_nodes.iter().for_each(|node| {
             self.remove_changed_table_ids(node.command_ctx.command.changed_table_id())
         });
@@ -304,13 +356,20 @@ where
 
     pub fn remove_changed_table_ids(&mut self, remove_changed_table: ChangedTableState) {
         match remove_changed_table {
-            Create(table_id) => {
-                self.creating_table_ids.remove(&table_id);
+            ChangedTableState::CreateTable(table_id) => {
+                assert!(self.creating_tables.remove(&table_id));
             }
-            Drop(table_id) => {
-                self.dropping_table_ids.remove(&table_id);
+            ChangedTableState::DropTable(table_id) => {
+                assert!(self.dropping_tables.remove(&table_id));
             }
-            _ => {}
+            ChangedTableState::Actor { add, remove } => {
+                assert!(self.adding_actors.is_superset(&add));
+                assert!(self.removing_actors.is_superset(&remove));
+
+                self.adding_actors.retain(|a| !add.contains(a));
+                self.removing_actors.retain(|a| !remove.contains(a));
+            }
+            ChangedTableState::None => {}
         }
     }
 }
@@ -456,8 +515,9 @@ where
             }
             barrier_timer = Some(self.metrics.barrier_send_latency.start_timer());
             let (command, notifiers) = self.scheduled_barriers.pop_or_default().await;
-            checkpoint_control.pre_inject(&command);
-            let info = self.resolve_actor_info(&checkpoint_control).await;
+            let info = self
+                .resolve_actor_info(&mut checkpoint_control, &command)
+                .await;
             // When there's no actors exist in the cluster, we don't need to send the barrier. This
             // is an advance optimization. Besides if another barrier comes immediately,
             // it may send a same epoch and fail the epoch check.
@@ -728,8 +788,11 @@ where
     /// will create or drop before this barrier flow through them.
     async fn resolve_actor_info(
         &self,
-        checkpoint_control: &CheckpointControl<S>,
+        checkpoint_control: &mut CheckpointControl<S>,
+        command: &Command,
     ) -> BarrierActorInfo {
+        checkpoint_control.pre_resolve(command);
+
         let check_state = |s: ActorState, table_id: &TableId| {
             checkpoint_control.can_actor_send_or_collect(s, table_id)
         };
@@ -738,7 +801,12 @@ where
             .list_worker_node(WorkerType::ComputeNode, Some(Running))
             .await;
         let all_actor_infos = self.fragment_manager.load_all_actors(check_state).await;
-        BarrierActorInfo::resolve(all_nodes, all_actor_infos)
+
+        let info = BarrierActorInfo::resolve(all_nodes, all_actor_infos);
+
+        checkpoint_control.post_resolve(command);
+
+        info
     }
 
     async fn do_schedule(&self, command: Command, notifier: Notifier) -> Result<()> {
