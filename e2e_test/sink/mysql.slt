@@ -1,7 +1,10 @@
+statement ok
 CREATE TABLE t (v1 int);
 
+statement ok
 CREATE MATERIALIZED VIEW mv AS SELECT * FROM t;
 
+statement ok
 CREATE SINK s WITH (
     sink_type = 'mysql',
     endpoint = '127.0.0.1:3306',
@@ -10,8 +13,11 @@ CREATE SINK s WITH (
     table = 't_drop'
 );
 
+statement ok
 DROP SINK s;
 
+statement ok
 DROP MATERIALIZED VIEW mv;
 
+statement ok
 DROP TABLE t;
