@@ -12,12 +12,3 @@ CREATE SINK s FROM mv WITH (
     database = 'test',
     table = 't_drop'
 );
-
-statement ok
-DROP SINK s;
-
-statement ok
-DROP MATERIALIZED VIEW mv;
-
-statement ok
-DROP TABLE t;
