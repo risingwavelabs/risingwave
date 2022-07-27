@@ -1,0 +1,13 @@
+CREATE TABLE t (v1 int);
+
+CREATE MATERIALIZED VIEW mv AS SELECT * FROM t;
+
+CREATE SINK s WITH (
+    sink_type = 'mysql'
+);
+
+DROP SINK s;
+
+DROP MATERIALIZED VIEW mv;
+
+DROP TABLE t;
