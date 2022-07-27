@@ -25,9 +25,9 @@ fn parse_create_table_with_defaults() {
     let sql = "CREATE TABLE public.customer (
             customer_id integer DEFAULT nextval(public.customer_customer_id_seq),
             store_id smallint NOT NULL,
-            first_name character varying(45) NOT NULL,
-            last_name character varying(45) COLLATE \"es_ES\" NOT NULL,
-            email character varying(50),
+            first_name character varying NOT NULL,
+            last_name character varying COLLATE \"es_ES\" NOT NULL,
+            email character varying,
             address_id smallint NOT NULL,
             activebool boolean DEFAULT true NOT NULL,
             create_date date DEFAULT now()::text NOT NULL,
@@ -69,7 +69,7 @@ fn parse_create_table_with_defaults() {
                     ),
                     ColumnDef::new(
                         "first_name".into(),
-                        DataType::Varchar(Some(45)),
+                        DataType::Varchar,
                         None,
                         vec![ColumnOptionDef {
                             name: None,
@@ -78,14 +78,14 @@ fn parse_create_table_with_defaults() {
                     ),
                     ColumnDef::new(
                         "last_name".into(),
-                        DataType::Varchar(Some(45)),
+                        DataType::Varchar,
                         Some(ObjectName(vec![Ident::with_quote('"', "es_ES")])),
                         vec![ColumnOptionDef {
                             name: None,
                             option: ColumnOption::NotNull,
                         }],
                     ),
-                    ColumnDef::new("email".into(), DataType::Varchar(Some(50)), None, vec![],),
+                    ColumnDef::new("email".into(), DataType::Varchar, None, vec![],),
                     ColumnDef::new(
                         "address_id".into(),
                         DataType::SmallInt(None),
@@ -179,8 +179,8 @@ fn parse_create_table_from_pg_dump() {
     let sql = "CREATE TABLE public.customer (
             customer_id integer DEFAULT nextval('public.customer_customer_id_seq'::regclass) NOT NULL,
             store_id smallint NOT NULL,
-            first_name character varying(45) NOT NULL,
-            last_name character varying(45) NOT NULL,
+            first_name character varying NOT NULL,
+            last_name character varying NOT NULL,
             info text[],
             address_id smallint NOT NULL,
             activebool boolean DEFAULT true NOT NULL,
@@ -193,8 +193,8 @@ fn parse_create_table_from_pg_dump() {
     one_statement_parses_to(sql, "CREATE TABLE public.customer (\
             customer_id INT DEFAULT nextval(CAST('public.customer_customer_id_seq' AS REGCLASS)) NOT NULL, \
             store_id SMALLINT NOT NULL, \
-            first_name CHARACTER VARYING(45) NOT NULL, \
-            last_name CHARACTER VARYING(45) NOT NULL, \
+            first_name CHARACTER VARYING NOT NULL, \
+            last_name CHARACTER VARYING NOT NULL, \
             info TEXT[], \
             address_id SMALLINT NOT NULL, \
             activebool BOOLEAN DEFAULT true NOT NULL, \

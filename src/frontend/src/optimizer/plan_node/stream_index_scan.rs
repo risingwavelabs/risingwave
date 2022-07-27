@@ -149,6 +149,7 @@ impl StreamIndexScan {
                     .iter()
                     .map(|x| x.column_id.get_id())
                     .collect(),
+                is_singleton: false,
             })),
             pk_indices,
             operator_id: if auto_fields {

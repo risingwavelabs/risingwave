@@ -12,6 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+use std::collections::BTreeSet;
 use std::fmt;
 
 use fixedbitset::FixedBitSet;
@@ -334,17 +335,28 @@ impl LogicalAgg {
                 internal_table_catalog_builder.add_column(&in_fields[include_key]);
                 column_mapping.push(include_key);
             }
-            internal_table_catalog_builder.build(in_dist_key.clone(), in_append_only)
+            internal_table_catalog_builder.build_with_column_mapping(
+                in_dist_key.clone(),
+                in_append_only,
+                column_mapping,
+            )
         };
 
-        let get_value_state_table = |value_key: usize| -> TableCatalog {
+        let get_value_state_table = |value_key: usize,
+                                     column_mapping: &mut Vec<usize>|
+         -> TableCatalog {
             let mut internal_table_catalog_builder = TableCatalogBuilder::new();
             for &idx in &self.group_key {
                 let column_idx = internal_table_catalog_builder.add_column(&in_fields[idx]);
                 internal_table_catalog_builder.add_order_column(column_idx, OrderType::Ascending);
+                column_mapping.push(idx);
             }
             internal_table_catalog_builder.add_column(&out_fields[value_key]);
-            internal_table_catalog_builder.build(in_dist_key.clone(), in_append_only)
+            internal_table_catalog_builder.build_with_column_mapping(
+                in_dist_key.clone(),
+                in_append_only,
+                column_mapping,
+            )
         };
         // Map input col idx -> table col idx.
         let mut column_mappings_vec = vec![];
@@ -353,6 +365,7 @@ impl LogicalAgg {
             let state_table = match agg_call.agg_kind {
                 AggKind::Min | AggKind::Max | AggKind::StringAgg => {
                     if !in_append_only {
+                        let mut sort_column_set = BTreeSet::new();
                         let sort_keys = {
                             match agg_call.agg_kind {
                                 AggKind::Min => {
@@ -361,24 +374,32 @@ impl LogicalAgg {
                                 AggKind::Max => {
                                     vec![(OrderType::Descending, agg_call.inputs[0].index)]
                                 }
-                                AggKind::StringAgg => {
-                                    // TODO: string agg order by
-                                    todo!();
-                                }
+                                AggKind::StringAgg => agg_call
+                                    .order_by_fields
+                                    .iter()
+                                    .map(|o| {
+                                        let col_idx = o.input.index;
+                                        sort_column_set.insert(col_idx);
+                                        (o.direction.to_order(), col_idx)
+                                    })
+                                    .collect(),
                                 _ => unreachable!(),
                             }
                         };
 
                         let include_keys = match agg_call.agg_kind {
-                            AggKind::StringAgg => {
-                                vec![agg_call.inputs[0].index]
-                            }
+                            AggKind::StringAgg => agg_call
+                                .inputs
+                                .iter()
+                                .map(|i| i.index)
+                                .filter(|i| !sort_column_set.contains(i))
+                                .collect(),
                             _ => vec![],
                         };
 
                         get_sorted_input_state_table(sort_keys, include_keys, &mut column_mapping)
                     } else {
-                        get_value_state_table(self.group_key.len() + agg_idx)
+                        get_value_state_table(self.group_key.len() + agg_idx, &mut column_mapping)
                     }
                 }
                 AggKind::Sum
@@ -386,7 +407,7 @@ impl LogicalAgg {
                 | AggKind::Avg
                 | AggKind::SingleValue
                 | AggKind::ApproxCountDistinct => {
-                    get_value_state_table(self.group_key.len() + agg_idx)
+                    get_value_state_table(self.group_key.len() + agg_idx, &mut column_mapping)
                 }
             };
             table_catalogs.push(state_table);
@@ -702,12 +723,10 @@ impl LogicalAgg {
     pub fn new(agg_calls: Vec<PlanAggCall>, group_key: Vec<usize>, input: PlanRef) -> Self {
         let ctx = input.ctx();
         let schema = Self::derive_schema(input.schema(), &group_key, &agg_calls);
-        let logical_pk = match group_key.is_empty() {
-            // simple agg
-            true => vec![],
-            // group agg
-            false => group_key.clone(),
-        };
+
+        // there is only one row in simple agg's output, so its pk_indices is empty
+        let logical_pk = (0..group_key.len()).collect_vec();
+
         let base = PlanBase::new_logical(ctx, schema, logical_pk);
         Self {
             base,

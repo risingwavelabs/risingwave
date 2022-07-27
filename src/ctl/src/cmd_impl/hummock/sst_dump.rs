@@ -43,12 +43,7 @@ pub async fn sst_dump() -> anyhow::Result<()> {
     // Retrieves the latest HummockVersion from the meta client so we can access the SstableInfo
     let version = meta_client.pin_version(u64::MAX).await?.2.unwrap();
 
-    // Collect all SstableIdInfos. We need them for time stamps.
-    let mut id_info_map = HashMap::new();
-    let sstable_id_infos = meta_client.list_sstable_id_infos(version.id).await?;
-    sstable_id_infos.iter().for_each(|id_info| {
-        id_info_map.insert(id_info.id, id_info);
-    });
+    // SST's timestamp info is only available in object store
 
     let table_data = load_table_schemas(&meta_client).await?;
 
@@ -62,23 +57,9 @@ pub async fn sst_dump() -> anyhow::Result<()> {
             let sstable = sstable_cache.value().as_ref();
             let sstable_meta = &sstable.meta;
 
-            let sstable_id_info = id_info_map[&id];
-
             println!("SST id: {}", id);
             println!("-------------------------------------");
             println!("Level: {}", level.level_type);
-            println!(
-                "Creation Timestamp: {}",
-                sstable_id_info.id_create_timestamp
-            );
-            println!(
-                "Creation Timestamp (Meta): {}",
-                sstable_id_info.meta_create_timestamp
-            );
-            println!(
-                "Deletion Timestamp (Meta): {}",
-                sstable_id_info.meta_delete_timestamp
-            );
             println!("File Size: {}", sstable_info.file_size);
 
             if let Some(key_range) = sstable_info.key_range.as_ref() {

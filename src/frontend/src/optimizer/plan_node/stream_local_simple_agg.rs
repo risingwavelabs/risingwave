@@ -74,7 +74,7 @@ impl_plan_tree_node_for_unary! { StreamLocalSimpleAgg }
 impl ToStreamProst for StreamLocalSimpleAgg {
     fn to_stream_prost_body(&self) -> ProstStreamNode {
         use risingwave_pb::stream_plan::*;
-        let (internal_tables, column_mapping) = self.logical.infer_internal_table_catalog();
+        let (internal_tables, column_mappings) = self.logical.infer_internal_table_catalog();
         ProstStreamNode::LocalSimpleAgg(SimpleAggNode {
             agg_calls: self
                 .agg_calls()
@@ -97,7 +97,7 @@ impl ToStreamProst for StreamLocalSimpleAgg {
                     )
                 })
                 .collect_vec(),
-            column_mappings: column_mapping
+            column_mappings: column_mappings
                 .into_iter()
                 .map(|v| ColumnMapping {
                     indices: v.iter().map(|x| *x as u32).collect(),

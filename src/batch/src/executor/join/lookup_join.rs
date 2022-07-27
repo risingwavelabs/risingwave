@@ -17,7 +17,7 @@ use std::collections::HashMap;
 use futures::StreamExt;
 use futures_async_stream::try_stream;
 use itertools::Itertools;
-use risingwave_common::array::{Array, DataChunk, RowRef};
+use risingwave_common::array::{Array, DataChunk, Row, RowRef};
 use risingwave_common::buffer::BitmapBuilder;
 use risingwave_common::catalog::{ColumnDesc, Field, Schema};
 use risingwave_common::error::{internal_error, ErrorCode, Result, RwError};
@@ -27,6 +27,7 @@ use risingwave_common::util::scan_range::ScanRange;
 use risingwave_common::util::worker_util::get_pu_to_worker_mapping;
 use risingwave_expr::expr::expr_binary_nonnull::new_binary_expr;
 use risingwave_expr::expr::expr_binary_nullable::new_nullable_binary_expr;
+use risingwave_expr::expr::expr_unary::new_unary_expr;
 use risingwave_expr::expr::{
     build_from_prost, BoxedExpression, InputRefExpression, LiteralExpression,
 };
@@ -57,8 +58,10 @@ use crate::task::{BatchTaskContext, TaskId};
 pub struct ProbeSideSource<C> {
     table_desc: CellBasedTableDesc,
     vnode_mapping: Vec<ParallelUnitId>,
+    build_side_key_types: Vec<DataType>,
     probe_side_schema: Schema,
     probe_side_column_ids: Vec<i32>,
+    probe_side_key_types: Vec<DataType>,
     context: C,
     task_id: TaskId,
     epoch: u64,
@@ -162,9 +165,30 @@ impl<C: BatchTaskContext> ProbeSideSourceBuilder for ProbeSideSource<C> {
     /// hash map, along with the scan range's virtual node.
     fn add_scan_range(&mut self, key_scalar_impls: &[ScalarImpl]) -> Result<()> {
         let mut scan_range = ScanRange::full_table_scan();
-        key_scalar_impls
+
+        for ((scalar_impl, build_type), probe_type) in key_scalar_impls
             .iter()
-            .for_each(|scalar_impl| scan_range.eq_conds.push(scalar_impl.clone()));
+            .zip_eq(self.build_side_key_types.iter())
+            .zip_eq(self.probe_side_key_types.iter())
+        {
+            let scalar_impl = if probe_type == build_type {
+                scalar_impl.clone()
+            } else {
+                let cast_expr = new_unary_expr(
+                    Type::Cast,
+                    probe_type.clone(),
+                    Box::new(LiteralExpression::new(
+                        build_type.clone(),
+                        Some(scalar_impl.clone()),
+                    )),
+                )?;
+
+                let datum = cast_expr.eval_row(&Row(vec![]))?;
+                datum.unwrap()
+            };
+
+            scan_range.eq_conds.push(scalar_impl);
+        }
 
         let vnode = self.get_virtual_node(&scan_range)?;
         let parallel_unit_id = self.vnode_mapping[vnode as usize];
@@ -587,26 +611,16 @@ impl BoxedExecutorBuilder for LookupJoinExecutorBuilder {
             .map(|&i| probe_side_schema.fields[i as usize].data_type.clone())
             .collect_vec();
 
-        // Check that the data types of both sides of the equality predicate are the same
-        // TODO: Handle the cases where the data types of both sides are different but castable
-        // (e.g. int32 and int64)
-        if !(0..build_side_key_types.len()).all(|i| {
-            i < probe_side_key_types.len() && build_side_key_types[i] == probe_side_key_types[i]
-        }) {
-            return Err(ErrorCode::NotImplemented(
-                "Lookup Joins where the two sides of an equality predicate have different data types".to_string(),
-                None.into()
-            ).into());
-        }
-
         let vnode_mapping = lookup_join_node.get_probe_side_vnode_mapping().to_vec();
         assert!(!vnode_mapping.is_empty());
 
         let probe_side_source = ProbeSideSource {
             table_desc: table_desc.clone(),
             vnode_mapping,
+            build_side_key_types,
             probe_side_schema,
             probe_side_column_ids,
+            probe_side_key_types: probe_side_key_types.clone(),
             context: source.context().clone(),
             task_id: source.task_id.clone(),
             epoch: source.epoch(),

@@ -18,6 +18,7 @@ use pgwire::pg_field_descriptor::{PgFieldDescriptor, TypeOid};
 use pgwire::pg_response::{PgResponse, StatementType};
 use pgwire::types::Row;
 use risingwave_common::error::Result;
+use risingwave_common::session_config::QueryMode;
 use risingwave_sqlparser::ast::Statement;
 
 use super::create_index::gen_create_index_plan;
@@ -25,6 +26,7 @@ use super::create_mv::gen_create_mv_plan;
 use super::create_table::gen_create_table_plan;
 use super::util::handle_with_properties;
 use crate::binder::Binder;
+use crate::handler::util::force_local_mode;
 use crate::planner::Planner;
 use crate::session::OptimizerContext;
 
@@ -89,8 +91,17 @@ pub(super) fn handle_explain(
                 );
                 binder.bind(stmt)?
             };
+
+            let query_mode = if force_local_mode(&bound) {
+                QueryMode::Local
+            } else {
+                session.config().get_query_mode()
+            };
             let logical = planner.plan(bound)?;
-            logical.gen_batch_query_plan()?
+            match query_mode {
+                QueryMode::Local => logical.gen_batch_local_plan()?,
+                QueryMode::Distributed => logical.gen_batch_query_plan()?,
+            }
         }
     };
 
