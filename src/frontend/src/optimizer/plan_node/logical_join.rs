@@ -124,6 +124,7 @@ impl LogicalJoin {
             right.schema().len(),
             left.functional_dependency().clone(),
             right.functional_dependency().clone(),
+            &on,
             join_type,
             &output_indices,
         );
@@ -307,6 +308,7 @@ impl LogicalJoin {
         right_len: usize,
         left_fd_set: FunctionalDependencySet,
         right_fd_set: FunctionalDependencySet,
+        on: &Condition,
         join_type: JoinType,
         output_indices: &[usize],
     ) -> FunctionalDependencySet {
@@ -329,6 +331,22 @@ impl LogicalJoin {
         let fd_set: FunctionalDependencySet = match join_type {
             JoinType::Inner => {
                 let mut fd_set = FunctionalDependencySet::new();
+                for i in &on.conjunctions {
+                    if let Some((col, _)) = i.as_eq_literal() {
+                        fd_set.add_constant_column_by_index(out_col_num, col.index())
+                    } else if let Some((left, right)) = i.as_eq_cond() {
+                        fd_set.add_functional_dependency_by_column_indices(
+                            &[left.index()],
+                            &[right.index()],
+                            out_col_num,
+                        );
+                        fd_set.add_functional_dependency_by_column_indices(
+                            &[right.index()],
+                            &[left.index()],
+                            out_col_num,
+                        );
+                    }
+                }
                 get_new_left_fd_set(left_fd_set)
                     .into_dependencies()
                     .into_iter()
