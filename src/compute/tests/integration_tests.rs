@@ -35,9 +35,9 @@ use risingwave_common::util::sort_util::{OrderPair, OrderType};
 use risingwave_pb::data::data_type::TypeName;
 use risingwave_pb::plan_common::ColumnDesc as ProstColumnDesc;
 use risingwave_source::{MemSourceManager, SourceManager};
-use risingwave_storage::memory::MemoryStateStore;
+use risingwave_storage::{memory::MemoryStateStore, table::state_table::RowBasedStateTable};
 use risingwave_storage::table::state_table::StateTable;
-use risingwave_storage::table::storage_table::StorageTable;
+use risingwave_storage::table::storage_table::RowBasedStorageTable;
 use risingwave_storage::Keyspace;
 use risingwave_stream::executor::monitor::StreamingMetrics;
 use risingwave_stream::executor::{
@@ -200,7 +200,7 @@ async fn test_table_v2_materialize() -> Result<()> {
         .collect_vec();
 
     // Since we have not polled `Materialize`, we cannot scan anything from this table
-    let table = StorageTable::new_for_test(
+    let table = RowBasedStorageTable::new_for_test(
         memory_state_store.clone(),
         source_table_id,
         column_descs.clone(),
@@ -221,7 +221,7 @@ async fn test_table_v2_materialize() -> Result<()> {
         table.schema().clone(),
         vec![ScanType::TableScan(
             table
-                .batch_dedup_pk_iter(u64::MAX, &ordered_column_descs)
+                .batch_iter(u64::MAX)
                 .await?,
         )],
         1024,
@@ -283,7 +283,7 @@ async fn test_table_v2_materialize() -> Result<()> {
         table.schema().clone(),
         vec![ScanType::TableScan(
             table
-                .batch_dedup_pk_iter(u64::MAX, &ordered_column_descs)
+                .batch_iter(u64::MAX)
                 .await?,
         )],
         1024,
@@ -354,7 +354,7 @@ async fn test_table_v2_materialize() -> Result<()> {
         table.schema().clone(),
         vec![ScanType::TableScan(
             table
-                .batch_dedup_pk_iter(u64::MAX, &ordered_column_descs)
+                .batch_iter(u64::MAX)
                 .await?,
         )],
         1024,
@@ -389,7 +389,7 @@ async fn test_row_seq_scan() -> Result<()> {
         ColumnDesc::unnamed(ColumnId::from(2), schema[2].data_type.clone()),
     ];
 
-    let mut state = StateTable::new_without_distribution(
+    let mut state = RowBasedStateTable::new_without_distribution(
         memory_state_store.clone(),
         TableId::from(0x42),
         column_descs.clone(),
@@ -429,7 +429,7 @@ async fn test_row_seq_scan() -> Result<()> {
         table.schema().clone(),
         vec![ScanType::TableScan(
             table
-                .batch_dedup_pk_iter(u64::MAX, &pk_descs)
+                .batch_iter(u64::MAX)
                 .await
                 .unwrap(),
         )],

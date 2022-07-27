@@ -22,7 +22,7 @@ use risingwave_common::types::DataType;
 use risingwave_common::util::ordered::SENTINEL_CELL_ID;
 use risingwave_common::util::sort_util::{OrderPair, OrderType};
 use risingwave_common::util::value_encoding::deserialize_cell;
-use risingwave_storage::memory::MemoryStateStore;
+use risingwave_storage::{memory::MemoryStateStore, table::storage_table::RowBasedStorageTable};
 use risingwave_storage::row_serde::cell_based_encoding_util::deserialize_column_id;
 use risingwave_storage::store::ReadOptions;
 use risingwave_storage::table::storage_table::{StorageTable, READ_ONLY};
@@ -213,8 +213,8 @@ fn build_state_table_helper<S: StateStore>(
     columns: Vec<ColumnDesc>,
     order_types: Vec<OrderPair>,
     pk_indices: Vec<usize>,
-) -> StorageTable<S, READ_ONLY> {
-    StorageTable::new_partial(
+) -> RowBasedStorageTable<S, READ_ONLY> {
+    RowBasedStorageTable::new_partial(
         s,
         table_id,
         columns.clone(),

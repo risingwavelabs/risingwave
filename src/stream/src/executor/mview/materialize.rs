@@ -22,7 +22,7 @@ use risingwave_common::array::Row;
 use risingwave_common::buffer::Bitmap;
 use risingwave_common::catalog::{ColumnDesc, ColumnId, Schema, TableId};
 use risingwave_common::util::sort_util::OrderPair;
-use risingwave_storage::table::state_table::StateTable;
+use risingwave_storage::table::state_table::{StateTable, RowBasedStateTable};
 use risingwave_storage::table::Distribution;
 use risingwave_storage::StateStore;
 
@@ -35,7 +35,7 @@ use crate::executor::{
 pub struct MaterializeExecutor<S: StateStore> {
     input: BoxedExecutor,
 
-    state_table: StateTable<S>,
+    state_table: RowBasedStateTable<S>,
 
     /// Columns of arrange keys (including pk, group keys, join keys, etc.)
     arrange_columns: Vec<usize>,
@@ -76,7 +76,7 @@ impl<S: StateStore> MaterializeExecutor<S> {
             None => Distribution::fallback(),
         };
 
-        let state_table = StateTable::new_with_distribution(
+        let state_table = RowBasedStateTable::new_with_distribution(
             store,
             table_id,
             columns,
@@ -204,7 +204,7 @@ mod tests {
     use risingwave_common::catalog::{ColumnDesc, Field, Schema, TableId};
     use risingwave_common::types::DataType;
     use risingwave_common::util::sort_util::{OrderPair, OrderType};
-    use risingwave_storage::memory::MemoryStateStore;
+    use risingwave_storage::{memory::MemoryStateStore, table::storage_table::RowBasedStorageTable};
     use risingwave_storage::table::storage_table::StorageTable;
 
     use crate::executor::test_utils::*;
@@ -253,7 +253,7 @@ mod tests {
             ColumnDesc::unnamed(column_ids[1], DataType::Int32),
         ];
 
-        let table = StorageTable::new_for_test(
+        let table = RowBasedStorageTable::new_for_test(
             memory_state_store.clone(),
             table_id,
             column_descs,
