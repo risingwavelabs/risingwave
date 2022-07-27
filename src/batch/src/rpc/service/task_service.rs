@@ -18,8 +18,8 @@ use std::sync::Arc;
 use risingwave_pb::batch_plan::TaskOutputId;
 use risingwave_pb::task_service::task_service_server::TaskService;
 use risingwave_pb::task_service::{
-    AbortTaskRequest, AbortTaskResponse, CreateTaskRequest, CreateTaskResponse, ExecuteRequest,
-    GetDataResponse, GetTaskInfoRequest, GetTaskInfoResponse,
+    AbortTaskRequest, AbortTaskResponse, CreateTaskRequest, ExecuteRequest, GetDataResponse,
+    TaskInfoResponse,
 };
 use tokio_stream::wrappers::ReceiverStream;
 use tonic::{Request, Response, Status};
@@ -49,7 +49,7 @@ impl TaskService for BatchServiceImpl {
     async fn create_task(
         &self,
         request: Request<CreateTaskRequest>,
-    ) -> Result<Response<CreateTaskResponse>, Status> {
+    ) -> Result<Response<TaskInfoResponse>, Status> {
         let CreateTaskRequest {
             task_id,
             plan,
@@ -66,20 +66,15 @@ impl TaskService for BatchServiceImpl {
             )
             .await;
         match res {
-            Ok(_) => Ok(Response::new(CreateTaskResponse { status: None })),
+            Ok(_) => Ok(Response::new(TaskInfoResponse {
+                status: None,
+                task_info: None,
+            })),
             Err(e) => {
                 error!("failed to fire task {}", e);
                 Err(e.into())
             }
         }
-    }
-
-    #[cfg_attr(coverage, no_coverage)]
-    async fn get_task_info(
-        &self,
-        _: Request<GetTaskInfoRequest>,
-    ) -> Result<Response<GetTaskInfoResponse>, Status> {
-        todo!()
     }
 
     #[cfg_attr(coverage, no_coverage)]
