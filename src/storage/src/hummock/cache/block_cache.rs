@@ -171,7 +171,10 @@ impl BlockCache {
             .find("://")
             .expect("incorrect tiered cache uri");
         let tiered_cache_options = match &tiered_cache_uri[..separator] {
-            "none" => TieredCacheOptions::NoneCache,
+            "none" => {
+                tracing::info!("Using NoneCache as tiered cache.");
+                TieredCacheOptions::NoneCache
+            }
             #[cfg(not(target_os = "linux"))]
             "file" => {
                 tracing::warn!(
@@ -181,7 +184,10 @@ impl BlockCache {
             }
             #[cfg(target_os = "linux")]
             "file" => {
+                tracing::info!("Using FileCache as tiered cache.");
+
                 use crate::hummock::file_cache::cache::FileCacheOptions;
+
                 TieredCacheOptions::FileCache(FileCacheOptions {
                     dir: tiered_cache_uri[separator + "://".len()..].to_string(),
                     capacity: file_cache_config.capacity,

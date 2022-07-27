@@ -280,7 +280,7 @@ risedev:
     - use: meta-node
       unsafe-disable-recovery: true
     - use: compute-node
-      tiered-cache-uri: "file:///risingwave/.risingwave/data/filecache"
+      tiered-cache-uri: "file://.risingwave/data/filecache"
     - use: frontend
     - use: compactor
 
@@ -293,15 +293,15 @@ risedev:
     - use: compute-node
       port: 5687
       exporter-port: 1222
-      tiered-cache-uri: "file:///risingwave/.risingwave/data/filecache5687"
+      tiered-cache-uri: "file://.risingwave/data/filecache5687"
     - use: compute-node
       port: 5688
       exporter-port: 1223
-      tiered-cache-uri: "file:///risingwave/.risingwave/data/filecache5688"
+      tiered-cache-uri: "file://.risingwave/data/filecache5688"
     - use: compute-node
       port: 5689
       exporter-port: 1224
-      tiered-cache-uri: "file:///risingwave/.risingwave/data/filecache5689"
+      tiered-cache-uri: "file://.risingwave/data/filecache5689"
     - use: frontend
     - use: compactor
 
