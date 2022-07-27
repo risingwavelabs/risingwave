@@ -20,12 +20,10 @@ use std::io::Error as IoError;
 use std::sync::Arc;
 
 use memcomparable::Error as MemComparableError;
-use prost::Message;
 use risingwave_pb::common::Status;
 use risingwave_pb::ProstFieldNotFound;
 use thiserror::Error;
 use tokio::task::JoinError;
-use tonic::metadata::{MetadataMap, MetadataValue};
 use tonic::Code;
 
 use crate::array::ArrayError;
@@ -191,17 +189,8 @@ impl From<RwError> for tonic::Status {
             ErrorCode::OK => tonic::Status::ok(err.to_string()),
             ErrorCode::ExprError(e) => tonic::Status::invalid_argument(e.to_string()),
             ErrorCode::PermissionDenied(e) => tonic::Status::permission_denied(e),
-            _ => {
-                let bytes = {
-                    let status = err.to_status();
-                    let mut bytes = Vec::<u8>::with_capacity(status.encoded_len());
-                    status.encode(&mut bytes).expect("Failed to encode status.");
-                    bytes
-                };
-                let mut header = MetadataMap::new();
-                header.insert_bin(RW_ERROR_GRPC_HEADER, MetadataValue::from_bytes(&bytes));
-                tonic::Status::with_metadata(Code::Internal, err.to_string(), header)
-            }
+            ErrorCode::InternalError(e) => tonic::Status::internal(e),
+            _ => tonic::Status::internal(err.to_string()),
         }
     }
 }
@@ -386,7 +375,7 @@ impl From<tonic::Status> for RwError {
                 ErrorCode::InvalidParameterValue(err.message().to_string()).into()
             }
             Code::PermissionDenied => ErrorCode::PermissionDenied(err.message().to_string()).into(),
-            _ => ErrorCode::RpcError(err.into()).into(),
+            _ => ErrorCode::InternalError(err.message().to_string()).into(),
         }
     }
 }
