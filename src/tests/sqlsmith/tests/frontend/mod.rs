@@ -12,5 +12,5 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-#[cfg(emable_sqlsmith_unit_test)]
+#[cfg(enable_sqlsmith_unit_test)]
 mod test_runner;
