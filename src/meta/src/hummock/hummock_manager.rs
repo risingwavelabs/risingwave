@@ -36,8 +36,8 @@ use risingwave_hummock_sdk::{
 use risingwave_pb::hummock::hummock_version::Levels;
 use risingwave_pb::hummock::{
     CompactTask, CompactTaskAssignment, HummockPinnedSnapshot, HummockPinnedVersion,
-    HummockSnapshot, HummockStaleSstables, HummockVersion, HummockVersionDelta, Level, LevelDelta,
-    LevelType, OverlappingLevel, SstableIdInfo, SstableInfo,
+    HummockSnapshot, HummockVersion, HummockVersionDelta, Level, LevelDelta, LevelType,
+    OverlappingLevel,
 };
 use risingwave_pb::meta::subscribe_response::{Info, Operation};
 use risingwave_pb::meta::MetaLeaderInfo;
