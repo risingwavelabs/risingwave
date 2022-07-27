@@ -23,18 +23,34 @@ use risingwave_connector::source::SplitImpl;
 use risingwave_pb::source::{ConnectorSplit, ConnectorSplits};
 use risingwave_pb::stream_plan::add_mutation::Dispatchers;
 use risingwave_pb::stream_plan::barrier::Mutation;
+use risingwave_pb::stream_plan::update_mutation::{
+    DispatcherUpdate as ProstDispatcherUpdate, MergeUpdate as ProstMergeUpdate,
+};
 use risingwave_pb::stream_plan::{
-    AddMutation, Dispatcher, PauseMutation, ResumeMutation, StopMutation,
+    ActorMapping, AddMutation, Dispatcher, PauseMutation, ResumeMutation, StopMutation,
+    UpdateMutation,
 };
 use risingwave_pb::stream_service::DropActorsRequest;
 use risingwave_rpc_client::StreamClientPoolRef;
 use uuid::Uuid;
 
 use super::info::BarrierActorInfo;
-use crate::barrier::ChangedTableState;
-use crate::model::{ActorId, TableFragments};
+use crate::barrier::CommandChanges;
+use crate::model::{ActorId, DispatcherId, FragmentId, TableFragments};
 use crate::storage::MetaStore;
 use crate::stream::FragmentManagerRef;
+
+#[derive(Debug, Clone)]
+pub struct Reschedule {
+    added_actors: Vec<ActorId>,
+    removed_actors: Vec<ActorId>,
+
+    upstream_fragment_ids: Vec<FragmentId>,
+    upstream_dispatcher_id: DispatcherId,
+    upstream_dispatcher_mapping: ActorMapping,
+
+    downstream_fragment_id: FragmentId,
+}
 
 /// [`Command`] is the action of [`crate::barrier::GlobalBarrierManager`]. For different commands,
 /// we'll build different barriers to send, and may do different stuffs after the barrier is
@@ -68,9 +84,8 @@ pub enum Command {
         dispatchers: HashMap<ActorId, Vec<Dispatcher>>,
         source_state: HashMap<ActorId, Vec<SplitImpl>>,
     },
-    // RescheduleFragment {
 
-    // }
+    RescheduleFragment(HashMap<FragmentId, Reschedule>),
 }
 
 impl Command {
@@ -86,13 +101,24 @@ impl Command {
         Self::Plain(Some(Mutation::Resume(ResumeMutation {})))
     }
 
-    pub fn changed_table_id(&self) -> ChangedTableState {
+    pub fn changes(&self) -> CommandChanges {
         match self {
+            Command::Plain(_) => CommandChanges::None,
             Command::CreateMaterializedView {
                 table_fragments, ..
-            } => ChangedTableState::CreateTable(table_fragments.table_id()),
-            Command::DropMaterializedView(table_id) => ChangedTableState::DropTable(*table_id),
-            Command::Plain(_) => ChangedTableState::None,
+            } => CommandChanges::CreateTable(table_fragments.table_id()),
+            Command::DropMaterializedView(table_id) => CommandChanges::DropTable(*table_id),
+            Command::RescheduleFragment(reschedules) => {
+                let add = reschedules
+                    .values()
+                    .flat_map(|r| r.added_actors.iter().copied())
+                    .collect();
+                let remove = reschedules
+                    .values()
+                    .flat_map(|r| r.removed_actors.iter().copied())
+                    .collect();
+                CommandChanges::Actor { add, remove }
+            }
         }
     }
 
@@ -188,6 +214,67 @@ where
                     actor_splits,
                 }))
             }
+
+            Command::RescheduleFragment(reschedules) => {
+                let mut actor_dispatcher_update = HashMap::new();
+                for (_fragment_id, reschedule) in reschedules.iter() {
+                    let mut upstream_actor_ids = vec![];
+                    for &upstream_fragment_id in &reschedule.upstream_fragment_ids {
+                        upstream_actor_ids.extend(
+                            self.fragment_manager
+                                .get_running_actors_of_fragment(upstream_fragment_id)
+                                .await?,
+                        );
+                    }
+
+                    for actor_id in upstream_actor_ids {
+                        actor_dispatcher_update
+                            .try_insert(
+                                actor_id,
+                                ProstDispatcherUpdate {
+                                    dispatcher_id: reschedule.upstream_dispatcher_id,
+                                    hash_mapping: Some(
+                                        reschedule.upstream_dispatcher_mapping.clone(),
+                                    ),
+                                    added_downstream_actor_id: reschedule.added_actors.clone(),
+                                    removed_downstream_actor_id: reschedule.removed_actors.clone(),
+                                },
+                            )
+                            .unwrap();
+                    }
+                }
+
+                let mut actor_merge_update = HashMap::new();
+                for (_fragment_id, reschedule) in reschedules.iter() {
+                    let downstream_actor_ids = self
+                        .fragment_manager
+                        .get_running_actors_of_fragment(reschedule.downstream_fragment_id)
+                        .await?;
+
+                    for actor_id in downstream_actor_ids {
+                        actor_merge_update
+                            .try_insert(
+                                actor_id,
+                                ProstMergeUpdate {
+                                    added_upstream_actor_id: reschedule.added_actors.clone(),
+                                    removed_upstream_actor_id: reschedule.removed_actors.clone(),
+                                },
+                            )
+                            .unwrap();
+                    }
+                }
+
+                let dropped_actors = reschedules
+                    .values()
+                    .flat_map(|r| r.removed_actors.iter().copied())
+                    .collect();
+
+                Some(Mutation::Update(UpdateMutation {
+                    actor_dispatcher_update,
+                    actor_merge_update,
+                    dropped_actors,
+                }))
+            }
         };
 
         Ok(mutation)
@@ -258,6 +345,10 @@ where
                         dependent_table_actors,
                     )
                     .await?;
+            }
+
+            Command::RescheduleFragment(_reschedules) => {
+                todo!()
             }
         }
 

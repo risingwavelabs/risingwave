@@ -20,9 +20,9 @@ use itertools::Itertools;
 use risingwave_common::catalog::TableId;
 use risingwave_common::error::ErrorCode::InternalError;
 use risingwave_common::error::{Result, RwError};
-use risingwave_common::try_match_expand;
 use risingwave_common::types::{ParallelUnitId, VIRTUAL_NODE_COUNT};
 use risingwave_common::util::compress::decompress_data;
+use risingwave_common::{bail, try_match_expand};
 use risingwave_pb::common::{ParallelUnit, WorkerNode};
 use risingwave_pb::meta::table_fragments::ActorState;
 use risingwave_pb::stream_plan::{Dispatcher, FragmentType, StreamActor};
@@ -30,7 +30,7 @@ use tokio::sync::RwLock;
 
 use crate::cluster::WorkerId;
 use crate::manager::{HashMappingManagerRef, MetaSrvEnv};
-use crate::model::{ActorId, MetadataModel, TableFragments, Transactional};
+use crate::model::{ActorId, FragmentId, MetadataModel, TableFragments, Transactional};
 use crate::storage::{MetaStore, Transaction};
 use crate::stream::record_table_vnode_mappings;
 
@@ -398,6 +398,27 @@ where
         map.values()
             .flat_map(|table_fragment| table_fragment.chain_actor_ids())
             .collect::<HashSet<_>>()
+    }
+
+    pub async fn get_running_actors_of_fragment(
+        &self,
+        fragment_id: FragmentId,
+    ) -> Result<HashSet<ActorId>> {
+        let map = &self.core.read().await.table_fragments;
+
+        for table_fragment in map.values() {
+            if let Some(fragment) = table_fragment.fragments.get(&fragment_id) {
+                let running_actor_ids = fragment
+                    .actors
+                    .iter()
+                    .map(|a| a.actor_id)
+                    .filter(|a| table_fragment.actor_status[a].state == ActorState::Running as i32)
+                    .collect();
+                return Ok(running_actor_ids);
+            }
+        }
+
+        bail!("fragment not found: {}", fragment_id)
     }
 
     pub async fn table_node_actors(

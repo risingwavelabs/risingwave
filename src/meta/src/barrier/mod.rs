@@ -70,9 +70,10 @@ struct ScheduledBarriers {
     /// When `buffer` is not empty anymore, all subscribers of this watcher will be notified.
     changed_tx: watch::Sender<()>,
 }
+
 /// The table state of command
 #[derive(Debug, Clone)]
-pub enum ChangedTableState {
+pub enum CommandChanges {
     DropTable(TableId),
 
     CreateTable(TableId),
@@ -222,8 +223,8 @@ where
 
     /// Try to enxtend this command's `changed_table_id` in `creating_table_ids`.
     fn pre_resolve(&mut self, command: &Command) {
-        match command.changed_table_id() {
-            ChangedTableState::CreateTable(table) => {
+        match command.changes() {
+            CommandChanges::CreateTable(table) => {
                 assert!(
                     !self.dropping_tables.contains(&table),
                     "confict table in concurrent checkpoint"
@@ -234,7 +235,7 @@ where
                 );
             }
 
-            ChangedTableState::Actor { add, .. } => {
+            CommandChanges::Actor { add, .. } => {
                 assert!(
                     self.adding_actors.is_disjoint(&add),
                     "duplicated actor in concurrent checkpoint"
@@ -247,8 +248,8 @@ where
     }
 
     fn post_resolve(&mut self, command: &Command) {
-        match command.changed_table_id() {
-            ChangedTableState::DropTable(table) => {
+        match command.changes() {
+            CommandChanges::DropTable(table) => {
                 assert!(
                     !self.creating_tables.contains(&table),
                     "confict table in concurrent checkpoint"
@@ -259,7 +260,7 @@ where
                 );
             }
 
-            ChangedTableState::Actor { remove, .. } => {
+            CommandChanges::Actor { remove, .. } => {
                 assert!(
                     self.removing_actors.is_disjoint(&remove),
                     "duplicated actor in concurrent checkpoint"
@@ -329,19 +330,19 @@ where
             .iter()
             .position(|x| !matches!(x.state, Complete))
             .unwrap_or(self.command_ctx_queue.len());
-        let complete_nodes: Vec<EpochNode<S>> = self.command_ctx_queue.drain(..index).collect();
-        complete_nodes.iter().for_each(|node| {
-            self.remove_changed_table_ids(node.command_ctx.command.changed_table_id())
-        });
+        let complete_nodes = self.command_ctx_queue.drain(..index).collect_vec();
+        complete_nodes
+            .iter()
+            .for_each(|node| self.clear_inflight_changes(node.command_ctx.command.changes()));
         complete_nodes
     }
 
     /// Remove all nodes from queue and return them.
-    fn fail(&mut self) -> VecDeque<EpochNode<S>> {
-        let complete_nodes: VecDeque<EpochNode<S>> = self.command_ctx_queue.drain(..).collect();
-        complete_nodes.iter().for_each(|node| {
-            self.remove_changed_table_ids(node.command_ctx.command.changed_table_id())
-        });
+    fn fail(&mut self) -> Vec<EpochNode<S>> {
+        let complete_nodes = self.command_ctx_queue.drain(..).collect_vec();
+        complete_nodes
+            .iter()
+            .for_each(|node| self.clear_inflight_changes(node.command_ctx.command.changes()));
         complete_nodes
     }
 
@@ -354,22 +355,22 @@ where
             < in_flight_barrier_nums
     }
 
-    pub fn remove_changed_table_ids(&mut self, remove_changed_table: ChangedTableState) {
-        match remove_changed_table {
-            ChangedTableState::CreateTable(table_id) => {
+    pub fn clear_inflight_changes(&mut self, changes: CommandChanges) {
+        match changes {
+            CommandChanges::CreateTable(table_id) => {
                 assert!(self.creating_tables.remove(&table_id));
             }
-            ChangedTableState::DropTable(table_id) => {
+            CommandChanges::DropTable(table_id) => {
                 assert!(self.dropping_tables.remove(&table_id));
             }
-            ChangedTableState::Actor { add, remove } => {
+            CommandChanges::Actor { add, remove } => {
                 assert!(self.adding_actors.is_superset(&add));
                 assert!(self.removing_actors.is_superset(&remove));
 
                 self.adding_actors.retain(|a| !add.contains(a));
                 self.removing_actors.retain(|a| !remove.contains(a));
             }
-            ChangedTableState::None => {}
+            CommandChanges::None => {}
         }
     }
 }
