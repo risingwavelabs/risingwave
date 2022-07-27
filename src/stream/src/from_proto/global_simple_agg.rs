@@ -14,6 +14,7 @@
 
 //! Streaming Aggregators
 
+use super::agg_call::build_agg_call_from_prost;
 use super::*;
 use crate::executor::aggregation::{generate_state_tables_from_proto, AggCall};
 use crate::executor::GlobalSimpleAggExecutor;
@@ -33,6 +34,11 @@ impl ExecutorBuilder for GlobalSimpleAggExecutorBuilder {
             .iter()
             .map(|agg_call| build_agg_call_from_prost(node.is_append_only, agg_call))
             .try_collect()?;
+        let state_table_col_mappings: Vec<Vec<usize>> = node
+            .get_column_mappings()
+            .iter()
+            .map(|mapping| mapping.indices.iter().map(|idx| *idx as usize).collect())
+            .collect();
 
         let state_tables = generate_state_tables_from_proto(store, &node.internal_tables, None);
 
@@ -42,6 +48,7 @@ impl ExecutorBuilder for GlobalSimpleAggExecutorBuilder {
             params.pk_indices,
             params.executor_id,
             state_tables,
+            state_table_col_mappings,
         )?
         .boxed())
     }

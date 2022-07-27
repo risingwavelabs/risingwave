@@ -21,13 +21,14 @@ use risingwave_common::buffer::Bitmap;
 use risingwave_common::hash::HashCode;
 use risingwave_common::types::Datum;
 use risingwave_expr::expr::AggKind;
-use risingwave_storage::table::state_table::StateTable;
+use risingwave_storage::table::state_table::RowBasedStateTable;
 use risingwave_storage::StateStore;
 pub use value::*;
 
 use crate::executor::aggregation::AggCall;
-use crate::executor::error::{StreamExecutorError, StreamExecutorResult};
-use crate::executor::PkDataTypes;
+use crate::executor::error::StreamExecutorResult;
+use crate::executor::managed_state::aggregation::string_agg::ManagedStringAggState;
+use crate::executor::{PkDataTypes, PkIndices};
 
 mod extreme;
 
@@ -67,7 +68,7 @@ impl<S: StateStore> ManagedStateImpl<S> {
         visibility: Option<&Bitmap>,
         data: &[&ArrayImpl],
         epoch: u64,
-        state_table: &mut StateTable<S>,
+        state_table: &mut RowBasedStateTable<S>,
     ) -> StreamExecutorResult<()> {
         match self {
             Self::Value(state) => state.apply_batch(ops, visibility, data),
@@ -83,7 +84,7 @@ impl<S: StateStore> ManagedStateImpl<S> {
     pub async fn get_output(
         &mut self,
         epoch: u64,
-        state_table: &StateTable<S>,
+        state_table: &RowBasedStateTable<S>,
     ) -> StreamExecutorResult<Datum> {
         match self {
             Self::Value(state) => state.get_output(),
@@ -100,7 +101,7 @@ impl<S: StateStore> ManagedStateImpl<S> {
     }
 
     /// Flush the internal state to a write batch.
-    pub fn flush(&mut self, state_table: &mut StateTable<S>) -> StreamExecutorResult<()> {
+    pub fn flush(&mut self, state_table: &mut RowBasedStateTable<S>) -> StreamExecutorResult<()> {
         match self {
             Self::Value(state) => state.flush(state_table),
             Self::Table(state) => state.flush(state_table),
@@ -112,11 +113,13 @@ impl<S: StateStore> ManagedStateImpl<S> {
     pub async fn create_managed_state(
         agg_call: AggCall,
         row_count: Option<usize>,
+        pk_indices: PkIndices,
         pk_data_types: PkDataTypes,
         is_row_count: bool,
         key_hash_code: Option<HashCode>,
         pk: Option<&Row>,
-        state_table: &StateTable<S>,
+        state_table: &RowBasedStateTable<S>,
+        state_table_col_indices: Vec<usize>,
     ) -> StreamExecutorResult<Self> {
         match agg_call.kind {
             AggKind::Max | AggKind::Min => {
@@ -142,13 +145,12 @@ impl<S: StateStore> ManagedStateImpl<S> {
                     )?))
                 }
             }
-            AggKind::StringAgg => {
-                // TODO, It seems with `order by`, `StringAgg` needs more stuff from `AggCall`
-                Err(StreamExecutorError::not_implemented(
-                    "It seems with `order by`, `StringAgg` needs more stuff from `AggCall`",
-                    None,
-                ))
-            }
+            AggKind::StringAgg => Ok(Self::Table(Box::new(ManagedStringAggState::new(
+                agg_call,
+                pk,
+                pk_indices,
+                state_table_col_indices,
+            )?))),
             // TODO: for append-only lists, we can create `ManagedValueState` instead of
             // `ManagedExtremeState`.
             AggKind::Avg | AggKind::Count | AggKind::Sum | AggKind::ApproxCountDistinct => {

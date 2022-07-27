@@ -114,7 +114,7 @@
           LogicalJoin { type: Inner, on: true, output_indices: all }
             LogicalScan { table: bc, columns: [_row_id, b, c] }
             LogicalProject { exprs: [$1, $2] }
-              LogicalFilter { predicate: ($1 = CorrelatedInputRef { index: 1, depth: 2 }) }
+              LogicalFilter { predicate: ($1 = CorrelatedInputRef { index: 1, correlated_id: 0 }) }
                 LogicalScan { table: t, columns: [_row_id, v1, v2] }
 - sql: |
     /* We cannot reference columns in left table if not lateral */

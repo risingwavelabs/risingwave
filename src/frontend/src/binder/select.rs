@@ -24,7 +24,7 @@ use super::bind_context::{Clause, ColumnBinding};
 use super::UNNAMED_COLUMN;
 use crate::binder::{Binder, Relation};
 use crate::catalog::check_valid_column_name;
-use crate::expr::{Expr as _, ExprImpl, InputRef};
+use crate::expr::{CorrelatedId, Expr as _, ExprImpl, InputRef};
 
 #[derive(Debug, Clone)]
 pub struct BoundSelect {
@@ -49,18 +49,32 @@ impl BoundSelect {
             .iter()
             .chain(self.group_by.iter())
             .chain(self.where_clause.iter())
-            .any(|expr| expr.has_correlated_input_ref())
+            .any(|expr| expr.has_correlated_input_ref_by_depth())
+            || match self.from.as_ref() {
+                Some(relation) => relation.is_correlated(),
+                None => false,
+            }
     }
 
-    pub fn collect_correlated_indices(&self) -> Vec<usize> {
+    pub fn collect_correlated_indices_by_depth_and_assign_id(
+        &mut self,
+        correlated_id: CorrelatedId,
+    ) -> Vec<usize> {
         let mut correlated_indices = vec![];
         self.select_items
-            .iter()
-            .chain(self.group_by.iter())
-            .chain(self.where_clause.iter())
+            .iter_mut()
+            .chain(self.group_by.iter_mut())
+            .chain(self.where_clause.iter_mut())
             .for_each(|expr| {
-                correlated_indices.extend(expr.collect_correlated_indices());
+                correlated_indices
+                    .extend(expr.collect_correlated_indices_by_depth_and_assign_id(correlated_id));
             });
+
+        if let Some(relation) = self.from.as_mut() {
+            correlated_indices
+                .extend(relation.collect_correlated_indices_by_depth_and_assign_id(correlated_id));
+        }
+
         correlated_indices
     }
 }
