@@ -12,6 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+use std::collections::BTreeSet;
 use std::fmt;
 
 use fixedbitset::FixedBitSet;
@@ -364,6 +365,7 @@ impl LogicalAgg {
             let state_table = match agg_call.agg_kind {
                 AggKind::Min | AggKind::Max | AggKind::StringAgg => {
                     if !in_append_only {
+                        let mut sort_column_set = BTreeSet::new();
                         let sort_keys = {
                             match agg_call.agg_kind {
                                 AggKind::Min => {
@@ -372,18 +374,26 @@ impl LogicalAgg {
                                 AggKind::Max => {
                                     vec![(OrderType::Descending, agg_call.inputs[0].index)]
                                 }
-                                AggKind::StringAgg => {
-                                    // TODO: string agg order by
-                                    todo!();
-                                }
+                                AggKind::StringAgg => agg_call
+                                    .order_by_fields
+                                    .iter()
+                                    .map(|o| {
+                                        let col_idx = o.input.index;
+                                        sort_column_set.insert(col_idx);
+                                        (o.direction.to_order(), col_idx)
+                                    })
+                                    .collect(),
                                 _ => unreachable!(),
                             }
                         };
 
                         let include_keys = match agg_call.agg_kind {
-                            AggKind::StringAgg => {
-                                vec![agg_call.inputs[0].index]
-                            }
+                            AggKind::StringAgg => agg_call
+                                .inputs
+                                .iter()
+                                .map(|i| i.index)
+                                .filter(|i| !sort_column_set.contains(i))
+                                .collect(),
                             _ => vec![],
                         };
 

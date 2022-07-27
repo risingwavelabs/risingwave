@@ -53,7 +53,9 @@ mod translate_apply;
 pub use translate_apply::*;
 mod merge_multijoin;
 pub use merge_multijoin::*;
+mod apply_join;
 mod distinct_agg;
+pub use apply_join::*;
 pub use distinct_agg::*;
 
 #[macro_export]
@@ -65,6 +67,7 @@ macro_rules! for_all_rules {
             ,{ApplyFilterRule}
             ,{ApplyProjRule}
             ,{ApplyScanRule}
+            ,{ApplyJoinRule}
             ,{DistinctAggRule}
             ,{IndexDeltaJoinRule}
             ,{MergeMultiJoinRule}

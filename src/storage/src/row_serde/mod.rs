@@ -19,9 +19,11 @@ use risingwave_common::array::Row;
 use risingwave_common::catalog::{ColumnDesc, ColumnId};
 use risingwave_common::error::Result;
 use risingwave_common::types::{DataType, VirtualNode};
+use risingwave_common::util::ordered::OrderedRowSerializer;
 
 use self::cell_based_row_deserializer::CellBasedRowDeserializer;
 use self::cell_based_row_serializer::CellBasedRowSerializer;
+use self::dedup_pk_cell_based_row_serializer::DedupPkCellBasedRowSerializer;
 use self::row_based_deserializer::RowBasedDeserializer;
 use self::row_based_serializer::RowBasedSerializer;
 
@@ -39,6 +41,15 @@ pub struct CellBasedRowSerde;
 impl RowSerde for CellBasedRowSerde {
     type Deserializer = CellBasedRowDeserializer;
     type Serializer = CellBasedRowSerializer;
+}
+
+#[derive(Clone)]
+pub struct DedupPkCellBasedRowSerde;
+
+impl RowSerde for DedupPkCellBasedRowSerde {
+    // FIXME: should use `DedupPkCellBasedRowDeserializer` here.
+    type Deserializer = CellBasedRowDeserializer;
+    type Serializer = DedupPkCellBasedRowSerializer;
 }
 
 #[derive(Clone)]
@@ -88,15 +99,15 @@ pub struct ColumnDescMapping {
     pub output_columns: Vec<ColumnDesc>,
 
     pub id_to_column_index: HashMap<ColumnId, usize>,
+
+    pub all_data_types: Vec<DataType>,
 }
 
 /// `Decoding` defines an interface for decoding a key row from kv storage.
 pub trait RowDeserialize {
     /// Constructs a new serializer.
-    fn create_row_deserializer(
-        column_mapping: Arc<ColumnDescMapping>,
-        data_types: Vec<DataType>,
-    ) -> Self;
+    // TODO: more parameters might be required for pk dedup.
+    fn create_row_deserializer(column_mapping: Arc<ColumnDescMapping>) -> Self;
 
     /// When we encounter a new key, we can be sure that the previous row has been fully
     /// deserialized. Then we return the key and the value of the previous row.
@@ -125,10 +136,13 @@ pub trait RowSerde: Send + Sync + Clone {
     }
 
     /// `create_deserializer` will create a row deserializer to convert KV pairs into row.
-    fn create_deserializer(
-        column_mapping: Arc<ColumnDescMapping>,
-        data_types: Vec<DataType>,
-    ) -> Self::Deserializer {
-        RowDeserialize::create_row_deserializer(column_mapping, data_types)
+    fn create_deserializer(column_mapping: Arc<ColumnDescMapping>) -> Self::Deserializer {
+        RowDeserialize::create_row_deserializer(column_mapping)
     }
+}
+
+pub fn serialize_pk(pk: &Row, serializer: &OrderedRowSerializer) -> Vec<u8> {
+    let mut result = vec![];
+    serializer.serialize(pk, &mut result);
+    result
 }
