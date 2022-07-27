@@ -19,6 +19,7 @@ use risingwave_common::array::column::Column;
 use risingwave_common::array::StreamChunk;
 use risingwave_common::catalog::Schema;
 use risingwave_common::error::Result;
+use risingwave_expr::expr::AggKind;
 use risingwave_storage::table::state_table::RowBasedStateTable;
 use risingwave_storage::StateStore;
 
@@ -64,6 +65,10 @@ pub struct GlobalSimpleAggExecutor<S: StateStore> {
     /// Relational state tables used by this executor.
     /// One-to-one map with AggCall.
     state_tables: Vec<RowBasedStateTable<S>>,
+
+    /// State table column mappings for each aggregation calls,
+    /// Index: state table column index, Elem: agg call column index.
+    state_table_col_mappings: Vec<Vec<usize>>,
 }
 
 impl<S: StateStore> Executor for GlobalSimpleAggExecutor<S> {
@@ -91,6 +96,7 @@ impl<S: StateStore> GlobalSimpleAggExecutor<S> {
         pk_indices: PkIndices,
         executor_id: u64,
         mut state_tables: Vec<RowBasedStateTable<S>>,
+        state_table_col_mappings: Vec<Vec<usize>>,
     ) -> Result<Self> {
         let input_info = input.info();
         let schema = generate_agg_schema(input.as_ref(), &agg_calls, None);
@@ -112,6 +118,7 @@ impl<S: StateStore> GlobalSimpleAggExecutor<S> {
             states: None,
             agg_calls,
             state_tables,
+            state_table_col_mappings,
         })
     }
 
@@ -124,6 +131,7 @@ impl<S: StateStore> GlobalSimpleAggExecutor<S> {
         chunk: StreamChunk,
         epoch: u64,
         state_tables: &mut [RowBasedStateTable<S>],
+        state_table_col_mappings: &[Vec<usize>],
     ) -> StreamExecutorResult<()> {
         let capacity = chunk.capacity();
         let (ops, columns, visibility) = chunk.into_inner();
@@ -151,10 +159,12 @@ impl<S: StateStore> GlobalSimpleAggExecutor<S> {
             let state = generate_managed_agg_state(
                 None,
                 agg_calls,
+                input_pk_indices.to_vec(),
                 input_pk_data_types,
                 epoch,
                 None,
                 state_tables,
+                state_table_col_mappings,
             )
             .await?;
             *states = Some(state);
@@ -173,9 +183,17 @@ impl<S: StateStore> GlobalSimpleAggExecutor<S> {
             .zip_eq(state_tables.iter_mut())
         {
             let vis_map = agg_call_filter_res(agg_call, &columns, visibility.as_ref(), capacity)?;
-            agg_state
-                .apply_batch(&ops, vis_map.as_ref(), data, epoch, state_table)
-                .await?;
+            if agg_call.kind == AggKind::StringAgg {
+                let chunk_cols = columns.iter().map(|col| col.array_ref()).collect_vec();
+                agg_state
+                    .apply_batch(&ops, vis_map.as_ref(), &chunk_cols, epoch, state_table)
+                    .await?;
+            } else {
+                // TODO(yuchao): Pass all the columns to apply_batch for other agg calls, #4185
+                agg_state
+                    .apply_batch(&ops, vis_map.as_ref(), data, epoch, state_table)
+                    .await?;
+            }
         }
 
         Ok(())
@@ -240,6 +258,7 @@ impl<S: StateStore> GlobalSimpleAggExecutor<S> {
             mut states,
             agg_calls,
             mut state_tables,
+            state_table_col_mappings,
         } = self;
         let mut input = input.execute();
 
@@ -260,6 +279,7 @@ impl<S: StateStore> GlobalSimpleAggExecutor<S> {
                         chunk,
                         epoch,
                         &mut state_tables,
+                        &state_table_col_mappings,
                     )
                     .await?;
                 }
@@ -333,6 +353,7 @@ mod tests {
                 kind: AggKind::Count,
                 args: AggArgs::None,
                 return_type: DataType::Int64,
+                order_pairs: vec![],
                 append_only,
                 filter: None,
             },
@@ -340,6 +361,7 @@ mod tests {
                 kind: AggKind::Sum,
                 args: AggArgs::Unary(DataType::Int64, 0),
                 return_type: DataType::Int64,
+                order_pairs: vec![],
                 append_only,
                 filter: None,
             },
@@ -347,6 +369,7 @@ mod tests {
                 kind: AggKind::Sum,
                 args: AggArgs::Unary(DataType::Int64, 1),
                 return_type: DataType::Int64,
+                order_pairs: vec![],
                 append_only,
                 filter: None,
             },
@@ -354,6 +377,7 @@ mod tests {
                 kind: AggKind::Min,
                 args: AggArgs::Unary(DataType::Int64, 0),
                 return_type: DataType::Int64,
+                order_pairs: vec![],
                 append_only,
                 filter: None,
             },
