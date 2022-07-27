@@ -26,7 +26,9 @@ use itertools::Itertools;
 use log::trace;
 use risingwave_common::array::Row;
 use risingwave_common::buffer::Bitmap;
-use risingwave_common::catalog::{ColumnDesc, ColumnId, OrderedColumnDesc, Schema, TableId};
+use risingwave_common::catalog::{
+    ColumnDesc, ColumnId, OrderedColumnDesc, Schema, TableId, TableOption,
+};
 use risingwave_common::error::RwError;
 use risingwave_common::types::{Datum, VirtualNode};
 use risingwave_common::util::hash_util::CRC32FastBuilder;
@@ -44,7 +46,7 @@ use crate::row_serde::{
     serialize_pk, CellBasedRowSerde, ColumnDescMapping, RowDeserialize, RowSerde, RowSerialize,
 };
 use crate::storage_value::StorageValue;
-use crate::store::WriteOptions;
+use crate::store::{ReadOptions, WriteOptions};
 use crate::{Keyspace, StateStore, StateStoreIter};
 
 mod iter_utils;
@@ -112,6 +114,12 @@ pub struct StorageTableBase<S: StateStore, RS: RowSerde, const T: AccessType> {
 
     /// If true, sanity check is disabled on this table.
     disable_sanity_check: bool,
+
+    /// Used for catalog table_properties
+    table_option: TableOption,
+
+    // TODO: check and build bloom_filter_key by read_pattern_prefix_column
+    _read_pattern_prefix_column: u32,
 }
 
 impl<S: StateStore, RS: RowSerde, const T: AccessType> std::fmt::Debug
@@ -148,6 +156,8 @@ impl<S: StateStore, RS: RowSerde> StorageTableBase<S, RS, READ_ONLY> {
             order_types,
             pk_indices,
             distribution,
+            Default::default(),
+            0,
         )
     }
 }
@@ -173,6 +183,8 @@ impl<S: StateStore, RS: RowSerde> StorageTableBase<S, RS, READ_WRITE> {
             order_types,
             pk_indices,
             distribution,
+            Default::default(),
+            0,
         )
     }
 
@@ -252,6 +264,8 @@ impl<S: StateStore, RS: RowSerde, const T: AccessType> StorageTableBase<S, RS, T
             order_types,
             pk_indices,
             distribution,
+            TableOption::build_table_option(table_catalog.get_properties()),
+            table_catalog.read_pattern_prefix_column,
         )
     }
 
@@ -267,6 +281,8 @@ impl<S: StateStore, RS: RowSerde, const T: AccessType> StorageTableBase<S, RS, T
             dist_key_indices,
             vnodes,
         }: Distribution,
+        table_option: TableOption,
+        read_pattern_prefix_column: u32,
     ) -> Self {
         let row_serializer = RS::create_serializer(&pk_indices, &table_columns, &column_ids);
 
@@ -302,6 +318,8 @@ impl<S: StateStore, RS: RowSerde, const T: AccessType> StorageTableBase<S, RS, T
             dist_key_in_pk_indices,
             vnodes,
             disable_sanity_check: false,
+            table_option,
+            _read_pattern_prefix_column: read_pattern_prefix_column,
         }
     }
 
@@ -386,16 +404,27 @@ impl<S: StateStore, RS: RowSerde, const T: AccessType> StorageTableBase<S, RS, T
             &SENTINEL_CELL_ID,
         )
         .map_err(err)?;
+
+        let read_options = self.get_read_option(epoch);
         match sentinel_key {
             Some(sentinel_key) => {
-                if self.keyspace.get(&sentinel_key, epoch).await?.is_none() {
+                if self
+                    .keyspace
+                    .get(&sentinel_key, read_options.clone())
+                    .await?
+                    .is_none()
+                {
                     // if sentinel cell is none, this row doesn't exist
                     return Ok(None);
                 };
             }
             // if sentinel cell does not exist, the encoding format is row-based.
             None => {
-                if let Some(value) = self.keyspace.get(&serialized_pk, epoch).await? {
+                if let Some(value) = self
+                    .keyspace
+                    .get(&serialized_pk, read_options.clone())
+                    .await?
+                {
                     let deserialize_res = deserializer
                         .deserialize(&serialized_pk, &value)
                         .map_err(err)?;
@@ -409,7 +438,7 @@ impl<S: StateStore, RS: RowSerde, const T: AccessType> StorageTableBase<S, RS, T
 
         for column_id in self.column_ids() {
             let key = serialize_pk_and_column_id(&serialized_pk, &column_id).map_err(err)?;
-            if let Some(value) = self.keyspace.get(&key, epoch).await? {
+            if let Some(value) = self.keyspace.get(&key, read_options.clone()).await? {
                 let deserialize_res = deserializer.deserialize(&key, &value).map_err(err)?;
                 assert!(deserialize_res.is_none());
             }
@@ -427,9 +456,10 @@ impl<S: StateStore, RS: RowSerde, const T: AccessType> StorageTableBase<S, RS, T
         let serialized_pk = self.serialize_pk_with_vnode(pk);
         let key_range = range_of_prefix(&serialized_pk);
 
+        let read_options = self.get_read_option(epoch);
         let kv_pairs = self
             .keyspace
-            .scan_with_range(key_range, None, epoch)
+            .scan_with_range(key_range, None, read_options)
             .await?;
 
         let mut deserializer = RS::create_deserializer(self.mapping.clone());
@@ -442,6 +472,14 @@ impl<S: StateStore, RS: RowSerde, const T: AccessType> StorageTableBase<S, RS, T
             self.check_vnode_is_set(vnode);
             row
         }))
+    }
+
+    fn get_read_option(&self, epoch: u64) -> ReadOptions {
+        ReadOptions {
+            epoch,
+            table_id: Some(self.keyspace.table_id()),
+            ttl: self.table_option.ttl,
+        }
     }
 }
 
@@ -647,8 +685,8 @@ impl<S: StateStore, RS: RowSerde, const T: AccessType> StorageTableBase<S, RS, T
                     &self.keyspace,
                     self.mapping.clone(),
                     raw_key_range,
-                    epoch,
                     wait_epoch,
+                    self.get_read_option(epoch),
                 )
                 .await?
                 .into_stream();
@@ -823,20 +861,25 @@ impl<S: StateStore, RS: RowSerde> StorageTableIterInner<S, RS> {
         keyspace: &Keyspace<S>,
         table_descs: Arc<ColumnDescMapping>,
         raw_key_range: R,
-        epoch: u64,
         wait_epoch: bool,
+        read_options: ReadOptions,
     ) -> StorageResult<Self>
     where
         R: RangeBounds<B> + Send,
         B: AsRef<[u8]> + Send,
     {
         if wait_epoch {
-            keyspace.state_store().wait_epoch(epoch).await?;
+            keyspace
+                .state_store()
+                .wait_epoch(read_options.epoch)
+                .await?;
         }
 
         let row_deserializer = RS::create_deserializer(table_descs);
 
-        let iter = keyspace.iter_with_range(raw_key_range, epoch).await?;
+        let iter = keyspace
+            .iter_with_range(raw_key_range, read_options)
+            .await?;
         let iter = Self {
             iter,
             row_deserializer,
