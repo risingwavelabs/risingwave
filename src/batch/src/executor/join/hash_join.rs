@@ -38,15 +38,32 @@ use crate::executor::{
 };
 use crate::task::BatchTaskContext;
 
+/// Hash Join Executor
+/// 
+/// High-level idea:
+/// 1. Iterate over the build side (i.e. right table) and build a hash map.
+/// 2. Iterate over the probe side (i.e. left table) and compute the hash value of each row.
+///    Then find the matched build side row for each probe side row in the hash map.
+/// 3. Concatenate the matched pair of probe side row and build side row into a single row and push it into the data chunk builder.
+/// 4. Yield chunks from the builder.
 pub struct HashJoinExecutor<K> {
+    /// Join type e.g. inner, left outer, ...
     join_type: JoinType,
+    /// Output schema without applying `output_indices`
     original_schema: Schema,
+    /// Output schema after applying `output_indices`
     schema: Schema,
+    /// output_indices are the indices of the columns that we needed.
     output_indices: Vec<usize>,
+    /// Left child executor
     probe_side_source: BoxedExecutor,
+    /// Right child executor
     build_side_source: BoxedExecutor,
+    /// Column indices of left keys in equi join
     probe_key_idxs: Vec<usize>,
+    /// Column indices of right keys in equi join
     build_key_idxs: Vec<usize>,
+    /// Non-equi join condition (optional)
     cond: Option<BoxedExpression>,
     identity: String,
     _phantom: PhantomData<K>,
@@ -66,6 +83,37 @@ impl<K: HashKey> Executor for HashJoinExecutor<K> {
     }
 }
 
+/// In `JoinHashMap`, we only save the row id of the first build row that has the hash key.
+/// In fact, in the build side there may be multiple rows with the same hash key. To handle this case, we use `ChunkedData` to link them together.
+/// For example:
+/// 
+/// | id | key | row |
+/// | --- | --- | --- |
+/// | 0 | 1 | (1, 2, 3) |
+/// | 1 | 4 | (4, 5, 6) |
+/// | 2 | 1 | (1, 3, 7) |
+/// | 3 | 1 | (1, 3, 2) |
+/// | 4 | 3 | (3, 2, 1) |
+/// 
+/// The corresponding join hash map is:
+/// 
+/// | key | value |
+/// | --- | --- |
+/// | 1 | 0 |
+/// | 4 | 1 |
+/// | 3 | 4 |
+/// 
+/// And we save build rows with the same key like this:
+/// 
+/// | id | value |
+/// | --- | --- |
+/// | 0 | 2 |
+/// | 1 | None |
+/// | 2 | 3 |
+/// | 3 | None |
+/// | 4 | None |
+/// 
+/// This can be seen as an implicit linked list. For convenience, we use `RowIdIter` to iterate all build side row ids with the given key.
 type JoinHashMap<K> = HashMap<K, RowId, PrecomputedBuildHasher>;
 
 struct RowIdIter<'a> {
