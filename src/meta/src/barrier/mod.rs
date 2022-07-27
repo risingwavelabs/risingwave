@@ -117,11 +117,13 @@ impl ScheduledBarriers {
     }
 
     /// Push a scheduled barrier into the buffer.
-    async fn push(&self, scheduled: Scheduled) {
+    async fn push(&self, scheduleds: impl IntoIterator<Item = Scheduled>) {
         let mut buffer = self.buffer.write().await;
-        buffer.push_back(scheduled);
-        if buffer.len() == 1 {
-            self.changed_tx.send(()).ok();
+        for scheduled in scheduleds {
+            buffer.push_back(scheduled);
+            if buffer.len() == 1 {
+                self.changed_tx.send(()).ok();
+            }
         }
     }
 
@@ -810,65 +812,65 @@ where
         info
     }
 
-    async fn do_schedule(&self, command: Command, notifier: Notifier) -> Result<()> {
-        self.scheduled_barriers
-            .push((command, once(notifier).collect()))
-            .await;
-        Ok(())
-    }
+    pub async fn run_multiple_commands(&self, commands: Vec<Command>) -> Result<()> {
+        struct Context {
+            collect_rx: Receiver<Result<()>>,
+            finish_rx: Receiver<()>,
+            is_create_mv: bool,
+        }
 
-    /// Schedule a command and return immediately.
-    pub async fn schedule_command(&self, command: Command) -> Result<()> {
-        self.do_schedule(command, Default::default()).await
-    }
+        let mut contexts = Vec::with_capacity(commands.len());
+        let mut scheduleds = Vec::with_capacity(commands.len());
 
-    /// Schedule a command and return when its corresponding barrier is about to sent.
-    pub async fn issue_command(&self, command: Command) -> Result<()> {
-        let (tx, rx) = oneshot::channel();
-        self.do_schedule(
-            command,
-            Notifier {
-                to_send: Some(tx),
-                ..Default::default()
-            },
-        )
-        .await?;
-        rx.await.unwrap();
+        for command in commands {
+            let (collect_tx, collect_rx) = oneshot::channel();
+            let (finish_tx, finish_rx) = oneshot::channel();
+            let is_create_mv = matches!(command, Command::CreateMaterializedView { .. });
+
+            contexts.push(Context {
+                collect_rx,
+                finish_rx,
+                is_create_mv,
+            });
+            scheduleds.push((
+                command,
+                once(Notifier {
+                    collected: Some(collect_tx),
+                    finished: Some(finish_tx),
+                    ..Default::default()
+                })
+                .collect(),
+            ));
+        }
+
+        self.scheduled_barriers.push(scheduleds).await;
+
+        for Context {
+            collect_rx,
+            finish_rx,
+            is_create_mv,
+        } in contexts
+        {
+            collect_rx.await.unwrap()?; // Throw the error if it occurs when collecting this barrier.
+
+            // TODO: refactor this
+            if is_create_mv {
+                // The snapshot ingestion may last for several epochs, we should pin the epoch here.
+                // TODO: this should be done in `post_collect`
+                let _snapshot = self.hummock_manager.pin_snapshot(META_NODE_ID).await?;
+                finish_rx.await.unwrap(); // Wait for this command to be finished.
+                self.hummock_manager.unpin_snapshot(META_NODE_ID).await?;
+            } else {
+                finish_rx.await.unwrap(); // Wait for this command to be finished.
+            }
+        }
 
         Ok(())
     }
 
     /// Run a command and return when it's completely finished.
     pub async fn run_command(&self, command: Command) -> Result<()> {
-        let (collect_tx, collect_rx) = oneshot::channel();
-        let (finish_tx, finish_rx) = oneshot::channel();
-
-        let is_create_mv = matches!(command, Command::CreateMaterializedView { .. });
-
-        self.do_schedule(
-            command,
-            Notifier {
-                collected: Some(collect_tx),
-                finished: Some(finish_tx),
-                ..Default::default()
-            },
-        )
-        .await?;
-
-        collect_rx.await.unwrap()?; // Throw the error if it occurs when collecting this barrier.
-
-        // TODO: refactor this
-        if is_create_mv {
-            // The snapshot ingestion may last for several epochs, we should pin the epoch here.
-            // TODO: this should be done in `post_collect`
-            let _snapshot = self.hummock_manager.pin_snapshot(META_NODE_ID).await?;
-            finish_rx.await.unwrap(); // Wait for this command to be finished.
-            self.hummock_manager.unpin_snapshot(META_NODE_ID).await?;
-        } else {
-            finish_rx.await.unwrap(); // Wait for this command to be finished.
-        }
-
-        Ok(())
+        self.run_multiple_commands(vec![command]).await
     }
 
     /// Wait for the next barrier to collect. Note that the barrier flowing in our stream graph is
