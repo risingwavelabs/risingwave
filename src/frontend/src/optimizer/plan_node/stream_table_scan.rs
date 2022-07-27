@@ -39,12 +39,23 @@ impl StreamTableScan {
         let ctx = logical.base.ctx.clone();
 
         let batch_plan_id = ctx.next_plan_node_id();
+
+        let distribution = {
+            let distribution_key = logical
+                .distribution_key()
+                .expect("distribution key of stream chain must exist in output columns");
+            if distribution_key.is_empty() {
+                Distribution::Single
+            } else {
+                // Follows upstream distribution from TableCatalog
+                Distribution::HashShard(distribution_key)
+            }
+        };
         let base = PlanBase::new_stream(
             ctx,
             logical.schema().clone(),
             logical.base.pk_indices.clone(),
-            // follows upstream distribution from TableCatalog
-            Distribution::HashShard(logical.distribution_key().unwrap()),
+            distribution,
             logical.table_desc().appendonly,
         );
         Self {
@@ -73,6 +84,7 @@ impl fmt::Display for StreamTableScan {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         let verbose = self.base.ctx.is_explain_verbose();
         let mut builder = f.debug_struct("StreamTableScan");
+
         builder
             .field("table", &format_args!("{}", self.logical.table_name()))
             .field(
@@ -86,8 +98,13 @@ impl fmt::Display for StreamTableScan {
                     .join(", ")
                 ),
             )
-            .field("pk_indices", &format_args!("{:?}", self.base.pk_indices))
-            .finish()
+            .field("pk_indices", &format_args!("{:?}", self.base.pk_indices));
+
+        if verbose {
+            builder.field("distribution", &self.distribution());
+        }
+
+        builder.finish()
     }
 }
 
@@ -158,6 +175,7 @@ impl StreamTableScan {
                     .iter()
                     .map(|x| x.column_id.get_id())
                     .collect(),
+                is_singleton: *self.distribution() == Distribution::Single,
             })),
             pk_indices,
             operator_id: if auto_fields {

@@ -107,20 +107,15 @@ impl Rule for ApplyJoinRule {
                 right_apply_condition.extend(apply_on);
             }
             JoinType::Inner | JoinType::LeftOuter | JoinType::RightOuter | JoinType::FullOuter => {
-                let mut d_t1_bit_set =
-                    FixedBitSet::with_capacity(apply_left_len + join.base.schema.len());
-                let mut d_t2_bit_set =
-                    FixedBitSet::with_capacity(apply_left_len + join.base.schema.len());
+                let apply_len = apply_left_len + join.schema().len();
+                let mut d_t1_bit_set = FixedBitSet::with_capacity(apply_len);
+                let mut d_t2_bit_set = FixedBitSet::with_capacity(apply_len);
                 d_t1_bit_set.set_range(0..apply_left_len + join_left_len, true);
                 d_t2_bit_set.set_range(0..apply_left_len, true);
-                d_t2_bit_set.set_range(
-                    apply_left_len + join_left_len..apply_left_len + join.base.schema.len(),
-                    true,
-                );
+                d_t2_bit_set.set_range(apply_left_len + join_left_len..apply_len, true);
 
                 for (key, group) in &apply_on.into_iter().group_by(|expr| {
-                    let mut visitor =
-                        CollectInputRef::with_capacity(apply_left_len + join.base.schema.len());
+                    let mut visitor = CollectInputRef::with_capacity(apply_len);
                     visitor.visit_expr(expr);
                     let collect_bit_set = FixedBitSet::from(visitor);
                     if collect_bit_set.is_subset(&d_t1_bit_set) {
@@ -188,7 +183,7 @@ impl Rule for ApplyJoinRule {
                 Some(new_join.into())
             }
             JoinType::Inner | JoinType::LeftOuter | JoinType::RightOuter | JoinType::FullOuter => {
-                // project use to provide a natural join
+                // use project to provide a natural join
                 let mut project_exprs: Vec<ExprImpl> = vec![];
                 project_exprs.extend(
                     new_join_left
@@ -219,18 +214,15 @@ impl Rule for ApplyJoinRule {
 
                 let new_project = LogicalProject::create(new_join.into(), project_exprs);
 
-                if !other_condition.is_empty() {
-                    // left other condition for predicate push down to deal with
-                    let new_filter = LogicalFilter::create(
-                        new_project,
-                        Condition {
-                            conjunctions: other_condition,
-                        },
-                    );
-                    Some(new_filter)
-                } else {
-                    Some(new_project)
-                }
+                // left other condition for predicate push down to deal with
+                let new_filter = LogicalFilter::create(
+                    new_project,
+                    Condition {
+                        conjunctions: other_condition,
+                    },
+                );
+
+                Some(new_filter)
             }
         }
     }
