@@ -48,9 +48,23 @@ fn get_seed_table_sql() -> String {
         .collect::<String>()
 }
 
+/// Prints failing queries and their setup code.
+/// NOTE: This depends on common convention of test suites
+/// not writing to stderr, unless the test fails.
+/// (This applies to nexmark).
+fn reproduce_failing_queries(setup: &str, failing: &str) {
+    eprintln!(
+        "Failing SQL query:\n{}\nFailing SQL setup code:\n{}",
+        failing, setup
+    );
+}
+
 /// Create the tables defined in testdata.
-async fn create_tables(session: Arc<SessionImpl>, rng: &mut impl Rng) -> Vec<Table> {
+async fn create_tables(session: Arc<SessionImpl>, rng: &mut impl Rng) -> (Vec<Table>, String) {
+    let mut setup_sql = String::with_capacity(1000);
     let sql = get_seed_table_sql();
+    setup_sql.push_str(&sql);
+
     let statements = parse_sql(&sql);
     let mut tables = statements
         .iter()
@@ -65,21 +79,25 @@ async fn create_tables(session: Arc<SessionImpl>, rng: &mut impl Rng) -> Vec<Tab
     // Generate some mviews
     for i in 0..10 {
         let (sql, table) = mview_sql_gen(rng, tables.clone(), &format!("m{}", i));
+        reproduce_failing_queries(&setup_sql, &sql);
+        setup_sql.push_str(&sql);
         let stmts = parse_sql(&sql);
         let stmt = stmts[0].clone();
         handle(session.clone(), stmt, sql).await;
         tables.push(table);
     }
-    tables
+    (tables, setup_sql)
 }
 
-fn test_batch_queries(session: Arc<SessionImpl>, tables: Vec<Table>, rng: &mut impl Rng) {
+fn test_batch_queries(
+    session: Arc<SessionImpl>,
+    tables: Vec<Table>,
+    rng: &mut impl Rng,
+    setup_sql: &str,
+) {
     for _ in 0..512 {
         let sql = sql_gen(rng, tables.clone());
-        let sql_copy = sql.clone();
-        panic::set_hook(Box::new(move |e| {
-            println!("Panic on SQL:\n{}\nReason:\n{}", sql_copy.clone(), e);
-        }));
+        reproduce_failing_queries(setup_sql, &sql);
 
         // The generated SQL must be parsable.
         let statements = parse_sql(&sql);
@@ -89,20 +107,21 @@ fn test_batch_queries(session: Arc<SessionImpl>, tables: Vec<Table>, rng: &mut i
 
         match stmt.clone() {
             Statement::Query(_) => {
+                // nextest will only print to stderr if test fails
                 let mut binder = Binder::new(
                     session.env().catalog_reader().read_guard(),
                     session.database().to_string(),
                 );
                 let bound = binder
                     .bind(stmt.clone())
-                    .unwrap_or_else(|e| panic!("Failed to bind:\n{}\nReason:\n{}", sql, e));
+                    .unwrap_or_else(|e| panic!("Failed to bind:\nReason:\n{}", e));
                 let mut planner = Planner::new(context.clone());
-                let logical_plan = planner.plan(bound).unwrap_or_else(|e| {
-                    panic!("Failed to generate logical plan:\n{}\nReason:\n{}", sql, e)
-                });
-                logical_plan.gen_batch_query_plan().unwrap_or_else(|e| {
-                    panic!("Failed to generate batch plan:\n{}\nReason:\n{}", sql, e)
-                });
+                let logical_plan = planner
+                    .plan(bound)
+                    .unwrap_or_else(|e| panic!("Failed to generate logical plan:\nReason:\n{}", e));
+                logical_plan
+                    .gen_batch_query_plan()
+                    .unwrap_or_else(|e| panic!("Failed to generate batch plan:\nReason:\n{}", e));
             }
             _ => unreachable!(),
         }
@@ -136,12 +155,11 @@ async fn run_sqlsmith_with_seed(seed: u64) {
         rng = rand::rngs::SmallRng::seed_from_u64(seed);
     }
 
-    let tables = create_tables(session.clone(), &mut rng).await;
-    test_batch_queries(session.clone(), tables.clone(), &mut rng);
+    let (tables, setup_sql) = create_tables(session.clone(), &mut rng).await;
+    test_batch_queries(session.clone(), tables.clone(), &mut rng, &setup_sql);
     test_stream_queries(session.clone(), tables.clone(), &mut rng).await;
 }
 
-#[macro_export]
 macro_rules! generate_sqlsmith_test {
     ($seed:expr) => {
         paste::paste! {
