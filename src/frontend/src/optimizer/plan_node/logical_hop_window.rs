@@ -96,10 +96,8 @@ impl LogicalHopWindow {
                     fd.to.grow(original_schema.len());
                     input_fd.add_functional_dependency(fd);
                 }
-                ColIndexMapping::with_remaining_columns(
-                    &output_indices,
-                    original_schema.len(),
-                ).rewrite_functional_dependency_set(input_fd)
+                ColIndexMapping::with_remaining_columns(&output_indices, original_schema.len())
+                    .rewrite_functional_dependency_set(input_fd)
             };
             let mut current_fd = FunctionalDependencySet::new();
             for fd in input_fd.as_dependencies() {

@@ -17,8 +17,6 @@ use std::fmt;
 use fixedbitset::FixedBitSet;
 use itertools::Itertools;
 
-use crate::utils::ColIndexMapping;
-
 /// [`FunctionalDependency`] represent a dependency of from --> to.
 #[derive(Debug, PartialEq, Clone, Default)]
 pub struct FunctionalDependency {
@@ -103,7 +101,7 @@ pub struct FunctionalDependencySet {
     /// `strict` contains all strict functional dependencies.
     ///
     /// The strict functional dependency use the **NULL=** semantic. It means that all NULLs are
-    /// considered as equal. So if strict dependency A --> B holds, the following table is
+    /// considered as equal. So for following table, A --> B is not valid.
     /// **NOT** allowed. ```
     ///   A   | B
     /// ------|---
@@ -123,14 +121,14 @@ impl FunctionalDependencySet {
     ///
     /// # Examples
     /// ```rust
-    /// # use risingwave_frontend::optimizer::property::FunctionalDependencySet;
+    /// # use risingwave_frontend::optimizer::property::{FunctionalDependencySet, FunctionalDependency};
     /// # use itertools::Itertools;
     /// let mut fd = FunctionalDependencySet::with_key(4, &[1]);
     /// let fd_inner = fd.into_dependencies();
     ///
     /// assert_eq!(fd_inner.len(), 1);
     ///
-    /// let FunctionalDependency { from, to } = fd_inner[0];
+    /// let FunctionalDependency { from, to } = &fd_inner[0];
     /// // 1 --> 0, 2, 3
     /// assert_eq!(from.ones().collect_vec(), &[1]);
     /// assert_eq!(to.ones().collect_vec(), &[0, 2, 3]);
@@ -179,15 +177,15 @@ impl FunctionalDependencySet {
     /// # Examples
     ///
     /// ```rust
-    /// # use risingwave_frontend::optimizer::property::FunctionalDependencySet;
+    /// # use risingwave_frontend::optimizer::property::{FunctionalDependencySet, FunctionalDependency};
     /// # use itertools::Itertools;
     /// let mut fd = FunctionalDependencySet::new();
-    /// fd.add_key_column_by_indices(4, &[1]);
+    /// fd.add_key_column(4, &[1]);
     /// let fd_inner = fd.into_dependencies();
     ///
     /// assert_eq!(fd_inner.len(), 1);
     ///
-    /// let FunctionalDependency { from, to } = fd_inner[0];
+    /// let FunctionalDependency { from, to } = &fd_inner[0];
     /// assert_eq!(from.ones().collect_vec(), &[1]);
     /// assert_eq!(to.ones().collect_vec(), &[0, 2, 3]);
     /// ```
@@ -199,15 +197,15 @@ impl FunctionalDependencySet {
     ///
     /// # Examples
     /// ```rust
-    /// # use risingwave_frontend::optimizer::property::FunctionalDependencySet;
+    /// # use risingwave_frontend::optimizer::property::{FunctionalDependencySet, FunctionalDependency};
     /// # use itertools::Itertools;
     /// let mut fd = FunctionalDependencySet::new();
-    /// fd.add_constant_column_by_index(4, 1);
+    /// fd.add_constant_column(4, &[1]);
     /// let fd_inner = fd.into_dependencies();
     ///
     /// assert_eq!(fd_inner.len(), 1);
     ///
-    /// let FunctionalDependency { from, to } = fd_inner[0];
+    /// let FunctionalDependency { from, to } = &fd_inner[0];
     /// assert!(from.ones().collect_vec().is_empty());
     /// assert_eq!(to.ones().collect_vec(), &[1]);
     /// ```
@@ -223,7 +221,7 @@ impl FunctionalDependencySet {
     /// # Examples
     ///
     /// ```rust
-    /// # use risingwave_frontend::optimizer::property::FunctionalDependencySet;
+    /// # use risingwave_frontend::optimizer::property::{FunctionalDependencySet, FunctionalDependency};
     /// # use itertools::Itertools;
     /// let mut fd = FunctionalDependencySet::new();
     /// fd.add_functional_dependency_by_column_indices(&[1, 2], &[0], 4); // (1, 2) --> (0), 4 columns
@@ -231,7 +229,7 @@ impl FunctionalDependencySet {
     ///
     /// assert_eq!(fd_inner.len(), 1);
     ///
-    /// let FunctionalDependency { from, to } = fd_inner[0];
+    /// let FunctionalDependency { from, to } = &fd_inner[0];
     /// assert_eq!(from.ones().collect_vec(), &[1, 2]);
     /// assert_eq!(to.ones().collect_vec(), &[0]);
     /// ```
@@ -267,7 +265,7 @@ impl FunctionalDependencySet {
     /// # Examples
     ///
     /// ```rust
-    /// # use risingwave_frontend::optimizer::property::FunctionalDependencySet;
+    /// # use risingwave_frontend::optimizer::property::{FunctionalDependencySet, FunctionalDependency};
     /// # use fixedbitset::FixedBitSet;
     /// let mut fd = FunctionalDependencySet::new();
     /// fd.add_functional_dependency_by_column_indices(&[1, 2], &[0], 5); // (1, 2) --> (0)
