@@ -601,12 +601,9 @@ impl LocalStreamManagerCore {
         &mut self,
         req: stream_service::BroadcastActorInfoTableRequest,
     ) -> Result<()> {
+        let mut actor_infos = self.context.actor_infos.write();
         for actor in req.get_info() {
-            let ret = self
-                .context
-                .actor_infos
-                .write()
-                .insert(actor.get_actor_id(), actor.clone());
+            let ret = actor_infos.insert(actor.get_actor_id(), actor.clone());
             if let Some(prev_actor) = ret && actor != &prev_actor{
                 return Err(ErrorCode::InternalError(format!(
                     "actor info mismatch when broadcasting {}",

@@ -6,16 +6,6 @@ import "common.proto";
 
 option optimize_for = SPEED;
 
-message SstableIdInfo {
-  uint64 id = 1;
-  // Timestamp when the sstable id is created, in seconds.
-  uint64 id_create_timestamp = 2;
-  // Timestamp when the sstable is tracked in meta node, in seconds.
-  uint64 meta_create_timestamp = 3;
-  // Timestamp when the sstable is marked to delete, in seconds.
-  uint64 meta_delete_timestamp = 4;
-}
-
 message SstableInfo {
   uint64 id = 1;
   KeyRange key_range = 2;
@@ -245,12 +235,6 @@ message HummockPinnedSnapshot {
   uint64 minimal_pinned_snapshot = 2;
 }
 
-message HummockStaleSstables {
-  uint64 version_id = 1;
-  // sstable ids
-  repeated uint64 id = 2;
-}
-
 message GetNewTableIdRequest {}
 
 message GetNewTableIdResponse {
@@ -297,15 +281,6 @@ message TriggerManualCompactionResponse {
   common.Status status = 1;
 }
 
-message ListSstableIdInfosRequest {
-  uint64 version_id = 1;
-}
-
-message ListSstableIdInfosResponse {
-  common.Status status = 1;
-  repeated SstableIdInfo sstable_id_infos = 2;
-}
-
 service HummockManagerService {
   rpc PinVersion(PinVersionRequest) returns (PinVersionResponse);
   rpc UnpinVersion(UnpinVersionRequest) returns (UnpinVersionResponse);
@@ -320,7 +295,6 @@ service HummockManagerService {
   rpc ReportVacuumTask(ReportVacuumTaskRequest) returns (ReportVacuumTaskResponse);
   rpc GetCompactionGroups(GetCompactionGroupsRequest) returns (GetCompactionGroupsResponse);
   rpc TriggerManualCompaction(TriggerManualCompactionRequest) returns (TriggerManualCompactionResponse);
-  rpc ListSstableIdInfos(ListSstableIdInfosRequest) returns (ListSstableIdInfosResponse);
 }
 
 service CompactorService {}

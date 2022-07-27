@@ -176,11 +176,7 @@ impl SharedContext {
             .read()
             .get(actor_id)
             .cloned()
-            .ok_or_else(|| {
-                RwError::from(ErrorCode::InternalError(
-                    "actor not found in info table".into(),
-                ))
-            })
+            .ok_or_else(|| anyhow::anyhow!("actor {} not found in info table", actor_id).into())
     }
 }
 
