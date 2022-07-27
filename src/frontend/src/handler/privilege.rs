@@ -184,7 +184,7 @@ mod tests {
             .clone();
         let check_items = get_single_check_item(
             DEFAULT_SUPPER_USER.to_string(),
-            ProstAction::Delete,
+            ProstAction::Create,
             ProstObject::SchemaId(schema.id()),
         );
         assert!(check_privilege(&session, &check_items).is_ok());
