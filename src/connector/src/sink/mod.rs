@@ -84,10 +84,10 @@ pub enum SinkImpl {
 }
 
 impl SinkImpl {
-    pub fn new(cfg: SinkConfig) -> RwResult<Self> {
+    pub async fn new(cfg: SinkConfig) -> RwResult<Self> {
         Ok(match cfg {
             SinkConfig::Mysql(cfg) => {
-                SinkImpl::MySQL(Box::new(MySQLSink::new(cfg).map_err(RwError::from)?))
+                SinkImpl::MySQL(Box::new(MySQLSink::new(cfg).await.map_err(RwError::from)?))
             }
             SinkConfig::Redis(cfg) => {
                 SinkImpl::Redis(Box::new(RedisSink::new(cfg).map_err(RwError::from)?))
@@ -139,7 +139,9 @@ pub type Result<T> = std::result::Result<T, SinkError>;
 #[derive(Error, Debug)]
 pub enum SinkError {
     #[error("MySQL error: {0}")]
-    MySQL(#[from] mysql_async::Error),
+    MySQL(String),
+    #[error("MySQL inner error: {0}")]
+    MySQLInner(#[from] mysql_async::Error),
     #[error("Kafka error: {0}")]
     Kafka(#[from] rdkafka::error::KafkaError),
     #[error("Json parse error: {0}")]
