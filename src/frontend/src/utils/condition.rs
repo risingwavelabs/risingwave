@@ -19,7 +19,6 @@ use std::ops::Bound;
 use fixedbitset::FixedBitSet;
 use itertools::Itertools;
 use risingwave_common::catalog::Schema;
-use risingwave_common::types::ScalarImpl;
 use risingwave_common::util::scan_range::ScanRange;
 
 use crate::expr::{
@@ -290,57 +289,61 @@ impl Condition {
 
             // analyze exprs in the group. scan_range is not updated
             for expr in group.clone() {
-                if let Some((input_ref, lit)) = expr.as_eq_literal() {
+                if let Some((input_ref, const_expr)) = expr.as_eq_const() &&
+                    let Ok(const_expr) = const_expr.cast_implicit(input_ref.data_type) {
                     assert_eq!(input_ref.index, order_column_ids[i]);
-                    if lit.is_null() {
+                    let Ok(Some(value)) = const_expr.eval_row_const() else {
+                        // column = NULL or failed to eval
+                        return always_false();
+                    };
+                    if !eq_conds.is_empty() && eq_conds.into_iter().all(|l| l != value) {
                         return always_false();
                     }
-                    let lit = lit.eval_as(input_ref.data_type);
-                    if !eq_conds.is_empty() && eq_conds.into_iter().all(|l| l != lit) {
-                        return always_false();
-                    }
-                    eq_conds = vec![lit];
-                } else if let Some((input_ref, in_lit_list)) = expr.as_in_literal_list() {
+                    eq_conds = vec![value];
+                } else if let Some((input_ref, in_const_list)) = expr.as_in_const_list() {
                     assert_eq!(input_ref.index, order_column_ids[i]);
-                    let mut scalars = vec![];
-                    for lit in in_lit_list.into_iter().unique() {
-                        if lit.is_null() {
+                    let mut scalars = HashSet::new();
+                    for const_expr in in_const_list {
+                        // The cast should succeed, because otherwise the input_ref is casted
+                        // and thus `as_in_const_list` returns None.
+                        let const_expr = const_expr.cast_implicit(input_ref.data_type.clone()).unwrap();
+                        let value = const_expr.eval_row_const().unwrap();
+                        let Some(value) = value else {
                             continue;
-                        }
-                        scalars.push(lit.eval_as(input_ref.data_type.clone()));
+                        };
+                        scalars.insert(value);
                     }
                     if scalars.is_empty() {
                         // There're only NULLs in the in-list
                         return always_false();
                     }
                     if !eq_conds.is_empty() {
-                        let old: HashSet<ScalarImpl> = HashSet::from_iter(eq_conds);
-                        let new = HashSet::from_iter(scalars);
-                        let intersection: HashSet<_> = old.intersection(&new).collect();
-                        if intersection.is_empty() {
+                        scalars = scalars.intersection(&HashSet::from_iter(eq_conds)).cloned().collect();
+                        if scalars.is_empty() {
                             return always_false();
                         }
-                        scalars = intersection.into_iter().cloned().collect();
                     }
-                    eq_conds = scalars;
-                } else if let Some((input_ref, op, lit)) = expr.as_comparison_literal() {
+                    // Sort to ensure a deterministic result for planner test.
+                    eq_conds = scalars.into_iter().sorted().collect();
+                } else if let Some((input_ref, op, const_expr)) = expr.as_comparison_const() &&
+                    let Ok(const_expr) = const_expr.cast_implicit(input_ref.data_type) {
                     assert_eq!(input_ref.index, order_column_ids[i]);
-                    if lit.is_null() {
+                    let Ok(Some(value)) = const_expr.eval_row_const() else {
+                        // column compare with NULL or failed to eval
                         return always_false();
-                    }
-                    let lit = lit.eval_as(input_ref.data_type);
+                    };
                     match op {
                         ExprType::LessThan => {
-                            ub.push((Bound::Excluded(lit), expr));
+                            ub.push((Bound::Excluded(value), expr));
                         }
                         ExprType::LessThanOrEqual => {
-                            ub.push((Bound::Included(lit), expr));
+                            ub.push((Bound::Included(value), expr));
                         }
                         ExprType::GreaterThan => {
-                            lb.push((Bound::Excluded(lit), expr));
+                            lb.push((Bound::Excluded(value), expr));
                         }
                         ExprType::GreaterThanOrEqual => {
-                            lb.push((Bound::Included(lit), expr));
+                            lb.push((Bound::Included(value), expr));
                         }
                         _ => unreachable!(),
                     }

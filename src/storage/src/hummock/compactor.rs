@@ -346,6 +346,24 @@ impl Compactor {
             }
         }
 
+        let existing_table_ids: Vec<u32> = payload
+            .iter()
+            .flat_map(|data_list| {
+                data_list
+                    .iter()
+                    .flat_map(|uncommitted_data| match uncommitted_data {
+                        UncommittedData::Sst(local_sst_info) => local_sst_info.1.table_ids.clone(),
+
+                        UncommittedData::Batch(shared_buffer_write_batch) => {
+                            vec![shared_buffer_write_batch.table_id]
+                        }
+                    })
+            })
+            .dedup()
+            .collect();
+
+        assert!(!existing_table_ids.is_empty());
+
         // Local memory compaction looks at all key ranges.
         let compact_task = CompactTask {
             input_ssts: vec![],
@@ -357,7 +375,7 @@ impl Compactor {
             gc_delete_keys: false,
             task_status: false,
             compaction_group_id: StaticCompactionGroupId::SharedBuffer.into(),
-            existing_table_ids: vec![],
+            existing_table_ids,
             target_file_size: context.options.sstable_size_mb as u64 * (1 << 20),
             compression_algorithm: 0,
             compaction_filter_mask: 0,

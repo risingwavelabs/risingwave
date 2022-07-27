@@ -59,7 +59,7 @@ pub async fn compactor_serve(
     // Register to the cluster.
     let mut meta_client = MetaClient::new(&opts.meta_address).await.unwrap();
     let worker_id = meta_client
-        .register(&client_addr, WorkerType::Compactor)
+        .register(WorkerType::Compactor, &client_addr, 0)
         .await
         .unwrap();
     tracing::info!("Assigned compactor id {}", worker_id);

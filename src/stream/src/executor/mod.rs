@@ -72,9 +72,9 @@ mod receiver;
 mod simple;
 mod sink;
 mod source;
+mod top_n;
 mod top_n_appendonly;
 mod top_n_executor;
-mod top_n_new;
 mod union;
 
 #[cfg(test)]
@@ -108,8 +108,8 @@ use risingwave_pb::source::{ConnectorSplit, ConnectorSplits};
 use simple::{SimpleExecutor, SimpleExecutorWrapper};
 pub use sink::SinkExecutor;
 pub use source::*;
+pub use top_n::TopNExecutor;
 pub use top_n_appendonly::AppendOnlyTopNExecutor;
-pub use top_n_new::TopNExecutorNew;
 pub use union::UnionExecutor;
 
 pub type BoxedExecutor = Box<dyn Executor>;
@@ -184,6 +184,7 @@ pub enum Mutation {
     Update {
         dispatchers: HashMap<ActorId, DispatcherUpdate>,
         merges: HashMap<ActorId, MergeUpdate>,
+        dropped_actors: HashSet<ActorId>,
     },
     Add {
         adds: HashMap<ActorId, Vec<ProstDispatcher>>,
@@ -277,8 +278,12 @@ impl Barrier {
     }
 
     /// Whether this barrier is to stop the actor with `actor_id`.
-    pub fn is_stop_actor(&self, actor_id: ActorId) -> bool {
-        matches!(self.mutation.as_deref(), Some(Mutation::Stop(actors)) if actors.contains(&actor_id))
+    pub fn is_stop_or_update_drop_actor(&self, actor_id: ActorId) -> bool {
+        match self.mutation.as_deref() {
+            Some(Mutation::Stop(actors)) => actors.contains(&actor_id),
+            Some(Mutation::Update { dropped_actors, .. }) => dropped_actors.contains(&actor_id),
+            _ => false,
+        }
     }
 
     /// Whether this barrier is to add new dispatchers for the actor with `actor_id`.
@@ -327,9 +332,11 @@ impl Mutation {
             Mutation::Update {
                 dispatchers,
                 merges,
+                dropped_actors,
             } => ProstMutation::Update(UpdateMutation {
                 actor_dispatcher_update: dispatchers.clone(),
                 actor_merge_update: merges.clone(),
+                dropped_actors: dropped_actors.iter().cloned().collect(),
             }),
             Mutation::Add { adds, .. } => ProstMutation::Add(AddMutation {
                 actor_dispatchers: adds
@@ -379,6 +386,7 @@ impl Mutation {
             ProstMutation::Update(update) => Mutation::Update {
                 dispatchers: update.actor_dispatcher_update.clone(),
                 merges: update.actor_merge_update.clone(),
+                dropped_actors: update.dropped_actors.iter().cloned().collect(),
             },
 
             ProstMutation::Add(add) => Mutation::Add {
@@ -564,7 +572,10 @@ pub fn pk_input_array_refs<'a>(
 pub async fn expect_first_barrier(
     stream: &mut (impl MessageStream + Unpin),
 ) -> StreamExecutorResult<Barrier> {
-    let message = stream.next().await.unwrap()?;
+    let message = stream
+        .next()
+        .await
+        .expect("failed to extract the first message: stream closed unexpectedly")?;
     let barrier = message
         .into_barrier()
         .expect("the first message must be a barrier");

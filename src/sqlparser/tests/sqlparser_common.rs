@@ -1215,7 +1215,7 @@ fn parse_extract() {
 #[test]
 fn parse_create_table() {
     let sql = "CREATE TABLE uk_cities (\
-               name VARCHAR(100) NOT NULL,\
+               name VARCHAR NOT NULL,\
                lat DOUBLE NULL,\
                lng DOUBLE,
                constrained INT NULL CONSTRAINT pkey PRIMARY KEY NOT NULL UNIQUE CHECK (constrained > 0),
@@ -1229,7 +1229,7 @@ fn parse_create_table() {
     let ast = one_statement_parses_to(
         sql,
         "CREATE TABLE uk_cities (\
-         name CHARACTER VARYING(100) NOT NULL, \
+         name CHARACTER VARYING NOT NULL, \
          lat DOUBLE NULL, \
          lng DOUBLE, \
          constrained INT NULL CONSTRAINT pkey PRIMARY KEY NOT NULL UNIQUE CHECK (constrained > 0), \
@@ -1255,7 +1255,7 @@ fn parse_create_table() {
                 vec![
                     ColumnDef::new(
                         "name".into(),
-                        DataType::Varchar(Some(100)),
+                        DataType::Varchar,
                         None,
                         vec![ColumnOptionDef {
                             name: None,
