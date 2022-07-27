@@ -5,7 +5,7 @@ statement ok
 CREATE MATERIALIZED VIEW mv AS SELECT * FROM t;
 
 statement ok
-CREATE SINK s WITH (
+CREATE SINK s FROM mv WITH (
     sink_type = 'mysql',
     endpoint = '127.0.0.1:3306',
     user = 'root',
