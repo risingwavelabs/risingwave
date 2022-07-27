@@ -68,6 +68,7 @@ pub enum Components {
     Release,
     AllInOne,
     Sanitizer,
+    Redis,
 }
 
 impl Components {
@@ -83,6 +84,7 @@ impl Components {
             Self::Release => "[Build] Enable release mode",
             Self::AllInOne => "[Build] Enable all-in-one binary",
             Self::Sanitizer => "[Build] Enable sanitizer",
+            Self::Redis => "[Component] Redis",
         }
         .into()
     }
@@ -141,6 +143,11 @@ with thread sanitizer. The built binaries will be at
 a dev cluster.
 "
             }
+            Self::Redis => {
+                "
+Required if you want to sink data to redis.
+                "
+            }
         }
         .into()
     }
@@ -157,6 +164,7 @@ a dev cluster.
             "ENABLE_RELEASE_PROFILE" => Some(Self::Release),
             "ENABLE_ALL_IN_ONE" => Some(Self::AllInOne),
             "ENABLE_SANITIZER" => Some(Self::Sanitizer),
+            "ENABLE_REDIS" => Some(Self::Redis),
             _ => None,
         }
     }
@@ -173,6 +181,7 @@ a dev cluster.
             Self::Release => "ENABLE_RELEASE_PROFILE",
             Self::AllInOne => "ENABLE_ALL_IN_ONE",
             Self::Sanitizer => "ENABLE_SANITIZER",
+            Self::Redis => "ENABLE_REDIS",
         }
         .into()
     }

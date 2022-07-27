@@ -69,7 +69,7 @@ dependencies = [
  "byteorder",
  "bzip2",
  "crc32fast",
- "digest",
+ "digest 0.10.3",
  "lazy_static",
  "libflate",
  "log",
@@ -94,6 +94,12 @@ name = "arc-swap"
 version = "1.5.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "c5d78ce20460b82d3fa150275ed9d55e21064fc7951177baacf86a145c4a4b1f"
+
+[[package]]
+name = "arcstr"
+version = "1.1.4"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "8d5ebd6061b8b70d59b36bc58d2337540bd7cc1f23ab2bea356f452bc7fe3505"
 
 [[package]]
 name = "arrayvec"
@@ -546,7 +552,7 @@ dependencies = [
  "percent-encoding",
  "pin-project-lite",
  "tokio",
- "tokio-util",
+ "tokio-util 0.7.3",
  "tracing",
 ]
 
@@ -748,6 +754,15 @@ dependencies = [
  "radium",
  "tap",
  "wyz",
+]
+
+[[package]]
+name = "block-buffer"
+version = "0.9.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "4152116fd6e9dadb291ae18fc1ec3575ed6d84c29642d97890f4b4a3417297e4"
+dependencies = [
+ "generic-array",
 ]
 
 [[package]]
@@ -1059,7 +1074,7 @@ dependencies = [
  "crossbeam-utils",
  "futures",
  "hdrhistogram",
- "humantime",
+ "humantime 2.1.0",
  "prost-types",
  "serde",
  "serde_json",
@@ -1071,6 +1086,12 @@ dependencies = [
  "tracing-core",
  "tracing-subscriber",
 ]
+
+[[package]]
+name = "cookie-factory"
+version = "0.3.2"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "396de984970346b0d9e93d1415082923c679e5ae5c3ee3dcbd104f5610af126b"
 
 [[package]]
 name = "core-foundation"
@@ -1135,6 +1156,12 @@ name = "crc-catalog"
 version = "2.1.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "2d0165d2900ae6778e36e80bbc4da3b5eefccee9ba939761f9c2882a5d9af3ff"
+
+[[package]]
+name = "crc16"
+version = "0.4.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "338089f42c427b86394a5ee60ff321da23a5c89c9d89514c829687b26359fcff"
 
 [[package]]
 name = "crc32fast"
@@ -1262,7 +1289,7 @@ dependencies = [
  "crossterm_winapi",
  "libc",
  "mio",
- "parking_lot",
+ "parking_lot 0.12.1",
  "signal-hook",
  "signal-hook-mio",
  "winapi",
@@ -1428,7 +1455,7 @@ dependencies = [
  "cfg-if",
  "hashbrown 0.12.3",
  "lock_api",
- "parking_lot_core",
+ "parking_lot_core 0.9.3",
 ]
 
 [[package]]
@@ -1500,11 +1527,20 @@ checksum = "524cbf6897b527295dff137cec09ecf3a05f4fddffd7dfcd1585403449e74198"
 
 [[package]]
 name = "digest"
+version = "0.9.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "d3dd60d1080a57a05ab032377049e0591415d2b31afd7028356dbf3cc6dcb066"
+dependencies = [
+ "generic-array",
+]
+
+[[package]]
+name = "digest"
 version = "0.10.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "f2fb860ca6fafa5552fb6d0e816a69c8e49f0908bf524e30a90d97c85892d506"
 dependencies = [
- "block-buffer",
+ "block-buffer 0.10.2",
  "crypto-common",
  "subtle",
 ]
@@ -1576,12 +1612,25 @@ dependencies = [
 
 [[package]]
 name = "env_logger"
+version = "0.7.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "44533bbbb3bb3c1fa17d9f2e4e38bbbaf8396ba82193c4cb1b6445d711445d36"
+dependencies = [
+ "atty",
+ "humantime 1.3.0",
+ "log",
+ "regex",
+ "termcolor",
+]
+
+[[package]]
+name = "env_logger"
 version = "0.9.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "0b2cf0344971ee6c64c31be0d530793fba457d322dfec2810c453d0ef228f9c3"
 dependencies = [
  "atty",
- "humantime",
+ "humantime 2.1.0",
  "log",
  "regex",
  "termcolor",
@@ -1689,6 +1738,15 @@ dependencies = [
 ]
 
 [[package]]
+name = "float-cmp"
+version = "0.8.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "e1267f4ac4f343772758f7b1bdcbe767c218bbab93bb432acbf5162bbf85a6c4"
+dependencies = [
+ "num-traits",
+]
+
+[[package]]
 name = "fnv"
 version = "1.0.7"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1717,6 +1775,36 @@ checksum = "5fc25a87fa4fd2094bffb06925852034d90a17f0d1e05197d4956d3555752191"
 dependencies = [
  "matches",
  "percent-encoding",
+]
+
+[[package]]
+name = "fred"
+version = "5.1.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "40f00cde9b5288fdba17f9d0dde6d68be331b32a263d954cafdfdc41bb627c5f"
+dependencies = [
+ "arc-swap",
+ "arcstr",
+ "async-trait",
+ "bytes",
+ "bytes-utils",
+ "cfg-if",
+ "float-cmp",
+ "futures",
+ "lazy_static",
+ "log",
+ "native-tls",
+ "parking_lot 0.11.2",
+ "pretty_env_logger",
+ "rand 0.8.5",
+ "redis-protocol",
+ "semver 1.0.12",
+ "sha-1 0.9.8",
+ "tokio",
+ "tokio-native-tls",
+ "tokio-stream",
+ "tokio-util 0.6.10",
+ "url",
 ]
 
 [[package]]
@@ -2025,7 +2113,7 @@ dependencies = [
  "indexmap",
  "slab",
  "tokio",
- "tokio-util",
+ "tokio-util 0.7.3",
  "tracing",
 ]
 
@@ -2094,7 +2182,7 @@ version = "0.12.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "6c49c37c09c17a53d937dfbb742eb3a961d65a994e6bcdcf37e7399d0cc8ab5e"
 dependencies = [
- "digest",
+ "digest 0.10.3",
 ]
 
 [[package]]
@@ -2167,6 +2255,15 @@ name = "httpdate"
 version = "1.0.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "c4a1e36c821dbe04574f602848a19f742f4fb3c98d40449f11bcad18d6b17421"
+
+[[package]]
+name = "humantime"
+version = "1.3.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "df004cfca50ef23c36850aaaa59ad52cc70d0e90243c3c7737a4dd32dc7a3c4f"
+dependencies = [
+ "quick-error",
+]
 
 [[package]]
 name = "humantime"
@@ -2628,7 +2725,7 @@ dependencies = [
  "bincode",
  "bytes",
  "downcast-rs",
- "env_logger",
+ "env_logger 0.9.0",
  "futures",
  "log",
  "madsim-macros",
@@ -2636,7 +2733,7 @@ dependencies = [
  "rand 0.8.5",
  "serde",
  "tokio",
- "tokio-util",
+ "tokio-util 0.7.3",
  "toml",
 ]
 
@@ -2676,14 +2773,14 @@ dependencies = [
  "futures",
  "log",
  "madsim-tokio",
- "parking_lot",
+ "parking_lot 0.12.1",
  "percent-encoding",
  "phf",
  "pin-project-lite",
  "postgres-protocol",
  "postgres-types",
  "socket2",
- "tokio-util",
+ "tokio-util 0.7.3",
 ]
 
 [[package]]
@@ -2747,7 +2844,7 @@ version = "0.10.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "658646b21e0b72f7866c7038ab086d3d5e1cd6271f060fd37defb241949d0582"
 dependencies = [
- "digest",
+ "digest 0.10.3",
 ]
 
 [[package]]
@@ -2860,7 +2957,7 @@ dependencies = [
  "futures-util",
  "num_cpus",
  "once_cell",
- "parking_lot",
+ "parking_lot 0.12.1",
  "quanta",
  "scheduled-thread-pool",
  "skeptic",
@@ -2910,7 +3007,7 @@ dependencies = [
  "thiserror",
  "tokio",
  "tokio-native-tls",
- "tokio-util",
+ "tokio-util 0.7.3",
  "twox-hash",
  "url",
 ]
@@ -2943,7 +3040,7 @@ dependencies = [
  "saturating",
  "serde",
  "serde_json",
- "sha-1",
+ "sha-1 0.10.0",
  "sha2",
  "smallvec",
  "subprocess",
@@ -3118,6 +3215,12 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "0ab1bc2a289d34bd04a330323ac98a1b4bc82c9d9fcb1e66b63caa84da26b575"
 
 [[package]]
+name = "opaque-debug"
+version = "0.3.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "624a8340c38c1b80fd549087862da4ba43e08858af025b236e509b6649fc13d5"
+
+[[package]]
 name = "openssl"
 version = "0.10.41"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -3265,12 +3368,37 @@ checksum = "427c3892f9e783d91cc128285287e70a59e206ca452770ece88a76f7a3eddd72"
 
 [[package]]
 name = "parking_lot"
+version = "0.11.2"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "7d17b78036a60663b797adeaee46f5c9dfebb86948d1255007a1d6be0271ff99"
+dependencies = [
+ "instant",
+ "lock_api",
+ "parking_lot_core 0.8.5",
+]
+
+[[package]]
+name = "parking_lot"
 version = "0.12.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "3742b2c103b9f06bc9fff0a37ff4912935851bee6d36f3c02bcc755bcfec228f"
 dependencies = [
  "lock_api",
- "parking_lot_core",
+ "parking_lot_core 0.9.3",
+]
+
+[[package]]
+name = "parking_lot_core"
+version = "0.8.5"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "d76e8e1493bcac0d2766c42737f34458f1c8c50c0d23bcb24ea953affb273216"
+dependencies = [
+ "cfg-if",
+ "instant",
+ "libc",
+ "redox_syscall",
+ "smallvec",
+ "winapi",
 ]
 
 [[package]]
@@ -3522,7 +3650,7 @@ dependencies = [
  "log",
  "nix",
  "once_cell",
- "parking_lot",
+ "parking_lot 0.12.1",
  "smallvec",
  "symbolic-demangle",
  "tempfile",
@@ -3534,6 +3662,16 @@ name = "ppv-lite86"
 version = "0.2.16"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "eb9f9e6e233e5c4a35559a617bf40a4ec447db2e84c20b55a6f83167b7e57872"
+
+[[package]]
+name = "pretty_env_logger"
+version = "0.4.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "926d36b9553851b8b0005f1275891b392ee4d2d833852c417ed025477350fb9d"
+dependencies = [
+ "env_logger 0.7.1",
+ "log",
+]
 
 [[package]]
 name = "prettyplease"
@@ -3629,7 +3767,7 @@ dependencies = [
  "lazy_static",
  "libc",
  "memchr",
- "parking_lot",
+ "parking_lot 0.12.1",
  "procfs",
  "protobuf",
  "thiserror",
@@ -3762,7 +3900,7 @@ dependencies = [
  "regex",
  "tokio",
  "tokio-native-tls",
- "tokio-util",
+ "tokio-util 0.7.3",
  "url",
 ]
 
@@ -3781,6 +3919,12 @@ dependencies = [
  "web-sys",
  "winapi",
 ]
+
+[[package]]
+name = "quick-error"
+version = "1.2.3"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "a1d01941d82fa2ab50be1e79e6714289dd7cde78eba4c074bc5a4374f650dfe0"
 
 [[package]]
 name = "quick-xml"
@@ -3941,6 +4085,20 @@ dependencies = [
 ]
 
 [[package]]
+name = "redis-protocol"
+version = "4.1.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "9c31deddf734dc0a39d3112e73490e88b61a05e83e074d211f348404cee4d2c6"
+dependencies = [
+ "bytes",
+ "bytes-utils",
+ "cookie-factory",
+ "crc16",
+ "log",
+ "nom 7.1.1",
+]
+
+[[package]]
 name = "redox_syscall"
 version = "0.2.13"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -4031,6 +4189,8 @@ dependencies = [
  "console",
  "dialoguer",
  "enum-iterator",
+ "fred",
+ "futures",
  "indicatif",
  "isahc",
  "itertools",
@@ -4071,7 +4231,7 @@ dependencies = [
  "madsim-tonic",
  "memcomparable",
  "num-traits",
- "parking_lot",
+ "parking_lot 0.12.1",
  "paste",
  "prometheus",
  "prost",
@@ -4109,7 +4269,7 @@ dependencies = [
  "bytes",
  "bytesize",
  "clap 3.2.13",
- "env_logger",
+ "env_logger 0.9.0",
  "futures",
  "hdrhistogram",
  "itertools",
@@ -4119,7 +4279,7 @@ dependencies = [
  "madsim-tokio",
  "moka",
  "nix",
- "parking_lot",
+ "parking_lot 0.12.1",
  "prometheus",
  "rand 0.8.5",
  "risingwave_common",
@@ -4194,7 +4354,7 @@ dependencies = [
  "enum-as-inner",
  "futures",
  "futures-async-stream",
- "humantime",
+ "humantime 2.1.0",
  "itertools",
  "lazy_static",
  "libc",
@@ -4207,7 +4367,7 @@ dependencies = [
  "more-asserts",
  "num-traits",
  "num_cpus",
- "parking_lot",
+ "parking_lot 0.12.1",
  "paste",
  "procfs",
  "procinfo",
@@ -4256,7 +4416,7 @@ dependencies = [
  "madsim",
  "madsim-tokio",
  "madsim-tonic",
- "parking_lot",
+ "parking_lot 0.12.1",
  "prometheus",
  "risingwave_common",
  "risingwave_common_service",
@@ -4300,7 +4460,7 @@ dependencies = [
  "maplit",
  "memcomparable",
  "num-traits",
- "parking_lot",
+ "parking_lot 0.12.1",
  "paste",
  "prometheus",
  "prost",
@@ -4359,7 +4519,7 @@ dependencies = [
  "globset",
  "http",
  "http-serde",
- "humantime",
+ "humantime 2.1.0",
  "hyper",
  "itertools",
  "log",
@@ -4389,7 +4549,7 @@ dependencies = [
  "thiserror",
  "tokio-retry",
  "tokio-stream",
- "tokio-util",
+ "tokio-util 0.7.3",
  "tracing",
  "twox-hash",
  "url",
@@ -4407,7 +4567,7 @@ dependencies = [
  "clap 3.2.13",
  "futures",
  "madsim-tokio",
- "parking_lot",
+ "parking_lot 0.12.1",
  "risingwave_common",
  "risingwave_frontend",
  "risingwave_hummock_sdk",
@@ -4487,7 +4647,7 @@ dependencies = [
  "md5",
  "num-integer",
  "num-traits",
- "parking_lot",
+ "parking_lot 0.12.1",
  "paste",
  "pgwire",
  "prost",
@@ -4558,7 +4718,7 @@ dependencies = [
  "itertools",
  "madsim",
  "madsim-tokio",
- "parking_lot",
+ "parking_lot 0.12.1",
  "rand 0.8.5",
  "risingwave_common",
  "risingwave_hummock_sdk",
@@ -4600,7 +4760,7 @@ dependencies = [
  "memcomparable",
  "num-integer",
  "num-traits",
- "parking_lot",
+ "parking_lot 0.12.1",
  "paste",
  "prometheus",
  "prost",
@@ -4677,7 +4837,7 @@ version = "0.1.0"
 dependencies = [
  "anyhow",
  "clap 3.2.13",
- "env_logger",
+ "env_logger 0.9.0",
  "log",
  "madsim",
  "madsim-tokio",
@@ -4722,7 +4882,7 @@ dependencies = [
  "madsim-tokio",
  "opentelemetry",
  "opentelemetry-jaeger",
- "parking_lot",
+ "parking_lot 0.12.1",
  "pprof",
  "thrift",
  "tokio-stream",
@@ -4777,7 +4937,7 @@ dependencies = [
  "maplit",
  "memcomparable",
  "num-traits",
- "parking_lot",
+ "parking_lot 0.12.1",
  "paste",
  "prometheus",
  "prost",
@@ -4840,7 +5000,7 @@ dependencies = [
  "anyhow",
  "chrono",
  "clap 3.2.13",
- "env_logger",
+ "env_logger 0.9.0",
  "itertools",
  "lazy_static",
  "log",
@@ -4893,7 +5053,7 @@ dependencies = [
  "nix",
  "num-integer",
  "num-traits",
- "parking_lot",
+ "parking_lot 0.12.1",
  "paste",
  "prometheus",
  "prost",
@@ -4951,7 +5111,7 @@ dependencies = [
  "memcomparable",
  "minstant",
  "num-traits",
- "parking_lot",
+ "parking_lot 0.12.1",
  "paste",
  "pin-project",
  "prometheus",
@@ -5081,7 +5241,7 @@ version = "0.2.6"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "977a7519bff143a44f842fd07e80ad1329295bd71686457f18e496736f4bf9bf"
 dependencies = [
- "parking_lot",
+ "parking_lot 0.12.1",
 ]
 
 [[package]]
@@ -5260,13 +5420,26 @@ dependencies = [
 
 [[package]]
 name = "sha-1"
+version = "0.9.8"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "99cd6713db3cf16b6c84e06321e049a9b9f699826e16096d23bbcc44d15d51a6"
+dependencies = [
+ "block-buffer 0.9.0",
+ "cfg-if",
+ "cpufeatures",
+ "digest 0.9.0",
+ "opaque-debug",
+]
+
+[[package]]
+name = "sha-1"
 version = "0.10.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "028f48d513f9678cda28f6e4064755b3fbb2af6acd672f2c209b62323f7aea0f"
 dependencies = [
  "cfg-if",
  "cpufeatures",
- "digest",
+ "digest 0.10.3",
 ]
 
 [[package]]
@@ -5277,7 +5450,7 @@ checksum = "55deaec60f81eefe3cce0dc50bda92d6d8e88f2a27df7c5033b42afeb1ed2676"
 dependencies = [
  "cfg-if",
  "cpufeatures",
- "digest",
+ "digest 0.10.3",
 ]
 
 [[package]]
@@ -5431,7 +5604,7 @@ dependencies = [
  "difference",
  "futures-lite",
  "glob",
- "humantime",
+ "humantime 2.1.0",
  "itertools",
  "log",
  "tempfile",
@@ -5767,6 +5940,7 @@ dependencies = [
  "mio",
  "num_cpus",
  "once_cell",
+ "parking_lot 0.12.1",
  "pin-project-lite",
  "signal-hook-registry",
  "socket2",
@@ -5829,7 +6003,7 @@ dependencies = [
  "fallible-iterator",
  "futures",
  "log",
- "parking_lot",
+ "parking_lot 0.12.1",
  "percent-encoding",
  "phf",
  "pin-project-lite",
@@ -5837,7 +6011,7 @@ dependencies = [
  "postgres-types",
  "socket2",
  "tokio",
- "tokio-util",
+ "tokio-util 0.7.3",
 ]
 
 [[package]]
@@ -5858,6 +6032,20 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "df54d54117d6fdc4e4fea40fe1e4e566b3505700e148a6827e59b34b0d2600d9"
 dependencies = [
  "futures-core",
+ "pin-project-lite",
+ "tokio",
+]
+
+[[package]]
+name = "tokio-util"
+version = "0.6.10"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "36943ee01a6d67977dd3f84a5a1d2efeb4ada3a1ae771cadfaa535d9d9fc6507"
+dependencies = [
+ "bytes",
+ "futures-core",
+ "futures-sink",
+ "log",
  "pin-project-lite",
  "tokio",
 ]
@@ -5910,7 +6098,7 @@ dependencies = [
  "prost-derive",
  "tokio",
  "tokio-stream",
- "tokio-util",
+ "tokio-util 0.7.3",
  "tower",
  "tower-layer",
  "tower-service",
@@ -5945,7 +6133,7 @@ dependencies = [
  "rand 0.8.5",
  "slab",
  "tokio",
- "tokio-util",
+ "tokio-util 0.7.3",
  "tower-layer",
  "tower-service",
  "tracing",
@@ -5988,7 +6176,7 @@ dependencies = [
  "percent-encoding",
  "pin-project-lite",
  "tokio",
- "tokio-util",
+ "tokio-util 0.7.3",
  "tower",
  "tower-layer",
  "tower-service",
@@ -6084,7 +6272,7 @@ dependencies = [
  "ansi_term",
  "lazy_static",
  "matchers",
- "parking_lot",
+ "parking_lot 0.12.1",
  "regex",
  "sharded-slab",
  "smallvec",
@@ -6489,7 +6677,7 @@ dependencies = [
  "criterion",
  "crossbeam-deque",
  "crossbeam-epoch",
- "digest",
+ "digest 0.10.3",
  "either",
  "fail",
  "fixedbitset",
@@ -6503,6 +6691,7 @@ dependencies = [
  "futures-sink",
  "futures-task",
  "futures-util",
+ "generic-array",
  "hashbrown 0.12.3",
  "hdrhistogram",
  "hyper",
@@ -6520,8 +6709,8 @@ dependencies = [
  "nom 7.1.1",
  "num-integer",
  "num-traits",
- "parking_lot",
- "parking_lot_core",
+ "parking_lot 0.12.1",
+ "parking_lot_core 0.9.3",
  "petgraph",
  "prometheus",
  "rand 0.8.5",
@@ -6532,11 +6721,10 @@ dependencies = [
  "serde",
  "serde_json",
  "smallvec",
- "socket2",
  "syn",
  "tokio",
  "tokio-stream",
- "tokio-util",
+ "tokio-util 0.7.3",
  "tower",
  "tower-http 0.3.4",
  "tracing",
