@@ -14,6 +14,7 @@
 
 use pgwire::pg_response::{PgResponse, StatementType};
 use risingwave_common::catalog::PG_CATALOG_SCHEMA_NAME;
+use risingwave_common::error::ErrorCode::PermissionDenied;
 use risingwave_common::error::{ErrorCode, Result, TrackingIssue};
 use risingwave_sqlparser::ast::{DropMode, ObjectName};
 
@@ -85,6 +86,10 @@ pub async fn handle_drop_schema(
             .into());
         }
     };
+
+    if session.user_id() != schema.owner() {
+        return Err(PermissionDenied("Do not have the privilege".to_string()).into());
+    }
 
     let catalog_writer = session.env().catalog_writer();
     catalog_writer.drop_schema(schema_id).await?;
