@@ -32,12 +32,13 @@ use tokio::task::JoinHandle;
 
 use self::shared_buffer_batch::SharedBufferBatch;
 use crate::hummock::iterator::{
-    BoxedHummockIterator, OrderedMergeIteratorInner, ReadOptions, UnorderedMergeIteratorInner,
+    BoxedHummockIterator, OrderedMergeIteratorInner, UnorderedMergeIteratorInner,
 };
 use crate::hummock::shared_buffer::shared_buffer_uploader::UploadTaskPayload;
+use crate::hummock::sstable::SstableIteratorReadOptions;
 use crate::hummock::state_store::HummockIteratorType;
 use crate::hummock::utils::{filter_single_sst, range_overlap};
-use crate::hummock::{HummockResult, SSTableIteratorType, SstableStore};
+use crate::hummock::{HummockResult, SstableIteratorType, SstableStore};
 use crate::monitor::{StateStoreMetrics, StoreLocalStatistic};
 
 #[derive(Debug, Clone, PartialEq)]
@@ -107,7 +108,7 @@ pub(crate) async fn build_ordered_merge_iter<T: HummockIteratorType>(
     sstable_store: Arc<SstableStore>,
     stats: Arc<StateStoreMetrics>,
     local_stats: &mut StoreLocalStatistic,
-    read_options: Arc<ReadOptions>,
+    read_options: Arc<SstableIteratorReadOptions>,
 ) -> HummockResult<BoxedHummockIterator<T::Direction>> {
     let mut ordered_iters = Vec::with_capacity(uncommitted_data.len());
     for data_list in uncommitted_data {
@@ -544,6 +545,7 @@ mod tests {
             epoch,
             mpsc::unbounded_channel().0,
             StaticCompactionGroupId::StateDefault.into(),
+            Default::default(),
         );
         if is_replicate {
             shared_buffer.replicate_batch(batch.clone());

@@ -30,8 +30,8 @@ use risingwave_pb::stream_plan::source_node::SourceType;
 use risingwave_pb::stream_plan::stream_fragment_graph::{StreamFragment, StreamFragmentEdge};
 use risingwave_pb::stream_plan::stream_node::NodeBody;
 use risingwave_pb::stream_plan::{
-    DispatchStrategy, DispatcherType, ExchangeNode, FilterNode, FragmentType, MaterializeNode,
-    ProjectNode, SimpleAggNode, SourceNode, StreamFragmentGraph, StreamNode,
+    ColumnMapping, DispatchStrategy, DispatcherType, ExchangeNode, FilterNode, FragmentType,
+    MaterializeNode, ProjectNode, SimpleAggNode, SourceNode, StreamFragmentGraph, StreamNode,
 };
 
 use crate::manager::MetaSrvEnv;
@@ -195,7 +195,11 @@ fn make_stream_fragments() -> Vec<StreamFragment> {
             agg_calls: vec![make_sum_aggcall(0), make_sum_aggcall(1)],
             distribution_key: Default::default(),
             internal_tables: vec![make_internal_table(2, true), make_internal_table(3, false)],
-            column_mapping: HashMap::new(),
+            // Note: This mappings is not checked yet.
+            column_mappings: vec![
+                ColumnMapping { indices: vec![0] },
+                ColumnMapping { indices: vec![1] },
+            ],
             is_append_only: false,
         })),
         input: vec![filter_node],
@@ -236,7 +240,11 @@ fn make_stream_fragments() -> Vec<StreamFragment> {
             agg_calls: vec![make_sum_aggcall(0), make_sum_aggcall(1)],
             distribution_key: Default::default(),
             internal_tables: vec![make_internal_table(0, true), make_internal_table(1, false)],
-            column_mapping: HashMap::new(),
+            // Note: This mappings is not checked yet.
+            column_mappings: vec![
+                ColumnMapping { indices: vec![0] },
+                ColumnMapping { indices: vec![1] },
+            ],
             is_append_only: false,
         })),
         fields: vec![], // TODO: fill this later
@@ -340,8 +348,6 @@ fn make_stream_graph() -> StreamFragmentGraph {
 #[cfg(not(madsim))]
 #[tokio::test]
 async fn test_fragmenter() -> Result<()> {
-    use crate::model::FragmentId;
-
     let env = MetaSrvEnv::for_test().await;
     let fragment_manager = Arc::new(FragmentManager::new(env.clone()).await?);
     let parallel_degree = 4;
@@ -349,27 +355,10 @@ async fn test_fragmenter() -> Result<()> {
     let graph = make_stream_graph();
 
     let mut actor_graph_builder =
-        ActorGraphBuilder::new(env.id_gen_manager_ref(), &graph, &mut ctx).await?;
-
-    let parallelisms: HashMap<FragmentId, u32> = actor_graph_builder
-        .list_fragment_ids()
-        .into_iter()
-        .map(|(fragment_id, is_singleton)| {
-            if is_singleton {
-                (fragment_id, 1)
-            } else {
-                (fragment_id, parallel_degree as u32)
-            }
-        })
-        .collect();
+        ActorGraphBuilder::new(env.id_gen_manager_ref(), &graph, parallel_degree, &mut ctx).await?;
 
     let graph = actor_graph_builder
-        .generate_graph(
-            env.id_gen_manager_ref(),
-            fragment_manager,
-            parallelisms.clone(),
-            &mut ctx,
-        )
+        .generate_graph(env.id_gen_manager_ref(), fragment_manager, &mut ctx)
         .await?;
 
     let internal_table_id_set = ctx

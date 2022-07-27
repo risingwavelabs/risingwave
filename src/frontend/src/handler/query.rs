@@ -19,7 +19,7 @@ use risingwave_batch::executor::BoxedDataChunkStream;
 use risingwave_common::error::Result;
 use risingwave_common::session_config::QueryMode;
 use risingwave_sqlparser::ast::Statement;
-use tracing::{debug, info};
+use tracing::debug;
 
 use crate::binder::{Binder, BoundSetExpr, BoundStatement};
 use crate::handler::util::{to_pg_field, to_pg_rows};
@@ -29,7 +29,11 @@ use crate::scheduler::{
 };
 use crate::session::OptimizerContext;
 
-pub async fn handle_query(context: OptimizerContext, stmt: Statement) -> Result<PgResponse> {
+pub async fn handle_query(
+    context: OptimizerContext,
+    stmt: Statement,
+    format: bool,
+) -> Result<PgResponse> {
     let stmt_type = to_statement_type(&stmt);
     let session = context.session_ctx.clone();
 
@@ -62,7 +66,7 @@ pub async fn handle_query(context: OptimizerContext, stmt: Statement) -> Result<
     let mut rows = vec![];
     #[for_await]
     for chunk in data_stream {
-        rows.extend(to_pg_rows(chunk?));
+        rows.extend(to_pg_rows(chunk?, format));
     }
 
     let rows_count = match stmt_type {
@@ -137,11 +141,6 @@ fn local_execute(
             .collect::<Vec<PgFieldDescriptor>>();
 
         let plan = root.gen_batch_local_plan()?;
-
-        info!(
-            "Generated local execution plan: {:?}",
-            plan.explain_to_string()?
-        );
 
         let plan_fragmenter = BatchPlanFragmenter::new(session.env().worker_node_manager_ref());
         let query = plan_fragmenter.split(plan)?;

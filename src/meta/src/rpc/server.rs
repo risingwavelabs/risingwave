@@ -22,6 +22,7 @@ use prost::Message;
 use risingwave_common::error::ErrorCode::InternalError;
 use risingwave_common::error::{ErrorCode, Result, RwError};
 use risingwave_common::monitor::process_linux::monitor_process;
+use risingwave_common_service::metrics_manager::MetricsManager;
 use risingwave_pb::ddl_service::ddl_service_server::DdlServiceServer;
 use risingwave_pb::hummock::hummock_manager_service_server::HummockManagerServiceServer;
 use risingwave_pb::meta::cluster_service_server::ClusterServiceServer;
@@ -416,8 +417,11 @@ pub async fn rpc_serve_with_store<S: MetaStore>(
         fragment_manager.clone(),
         ddl_lock.clone(),
     );
-    let user_srv = UserServiceImpl::<S>::new(catalog_manager.clone(), user_manager.clone());
-    let scale_srv = ScaleServiceImpl::<S>::new(barrier_manager.clone(), ddl_lock);
+
+    let user_srv =
+        UserServiceImpl::<S>::new(env.clone(), catalog_manager.clone(), user_manager.clone());
+    let scale_srv =
+        ScaleServiceImpl::<S>::new(barrier_manager.clone(), fragment_manager.clone(), ddl_lock);
     let cluster_srv = ClusterServiceImpl::<S>::new(cluster_manager.clone());
     let stream_srv = StreamServiceImpl::<S>::new(
         env.clone(),
@@ -440,7 +444,10 @@ pub async fn rpc_serve_with_store<S: MetaStore>(
     );
 
     if let Some(prometheus_addr) = address_info.prometheus_addr {
-        meta_metrics.boot_metrics_service(prometheus_addr);
+        MetricsManager::boot_metrics_service(
+            prometheus_addr.to_string(),
+            Arc::new(meta_metrics.registry().clone()),
+        )
     }
 
     let mut sub_tasks = hummock::start_hummock_workers(

@@ -13,28 +13,24 @@
 // limitations under the License.
 
 use std::borrow::Cow;
-use std::ops::Index;
+use std::collections::BTreeMap;
 
-use futures::pin_mut;
-use futures::stream::StreamExt;
+use futures::{pin_mut, StreamExt};
 use risingwave_common::array::Row;
 use risingwave_common::catalog::{ColumnDesc, ColumnId, TableId};
 use risingwave_common::types::DataType;
 use risingwave_common::util::ordered::*;
-use risingwave_storage::table::state_table::StateTable;
+use risingwave_storage::table::state_table::RowBasedStateTable;
 use risingwave_storage::StateStore;
 
 use crate::executor::error::StreamExecutorResult;
 use crate::executor::PkIndices;
 
-#[expect(dead_code)]
 pub struct ManagedTopNStateNew<S: StateStore> {
     /// Relational table.
-    state_table: StateTable<S>,
-    /// The number of elements in both cache and storage.
+    state_table: RowBasedStateTable<S>,
+    /// The total number of rows in state table.
     total_count: usize,
-    /// Number of entries to retain in memory after each flush.
-    top_n_count: Option<usize>,
     /// For deserializing `OrderedRow`.
     ordered_row_deserializer: OrderedRowDeserializer,
 }
@@ -53,7 +49,6 @@ impl TopNStateRow {
 
 impl<S: StateStore> ManagedTopNStateNew<S> {
     pub fn new(
-        top_n_count: Option<usize>,
         total_count: usize,
         store: S,
         table_id: TableId,
@@ -70,7 +65,7 @@ impl<S: StateStore> ManagedTopNStateNew<S> {
                 ColumnDesc::unnamed(ColumnId::from(id as i32), data_type.clone())
             })
             .collect::<Vec<_>>();
-        let state_table = StateTable::new_without_distribution(
+        let state_table = RowBasedStateTable::new_without_distribution(
             store,
             table_id,
             column_descs,
@@ -80,7 +75,6 @@ impl<S: StateStore> ManagedTopNStateNew<S> {
         Self {
             state_table,
             total_count,
-            top_n_count,
             ordered_row_deserializer,
         }
     }
@@ -116,13 +110,14 @@ impl<S: StateStore> ManagedTopNStateNew<S> {
         let row = iter_res.into_owned();
         let mut datums = Vec::with_capacity(self.state_table.pk_indices().len());
         for pk_index in self.state_table.pk_indices() {
-            datums.push(row.index(*pk_index).clone());
+            datums.push(row[*pk_index].clone());
         }
         let pk = Row::new(datums);
         let pk_ordered = OrderedRow::new(pk, self.ordered_row_deserializer.get_order_types());
         TopNStateRow::new(pk_ordered, row)
     }
 
+    #[cfg(test)]
     /// This function will return the rows in the range of [`offset`, `offset` + `limit`),
     pub async fn find_range(
         &self,
@@ -142,6 +137,28 @@ impl<S: StateStore> ManagedTopNStateNew<S> {
         Ok(rows)
     }
 
+    pub async fn fill_cache(
+        &self,
+        cache: &mut BTreeMap<OrderedRow, Row>,
+        start_key: &OrderedRow,
+        cache_size_limit: usize,
+        epoch: u64,
+    ) -> StreamExecutorResult<()> {
+        let state_table_iter = self.state_table.iter(epoch).await?;
+        pin_mut!(state_table_iter);
+        while let Some(item) = state_table_iter.next().await {
+            let topn_row = self.get_topn_row(item?);
+            if topn_row.ordered_key <= *start_key {
+                continue;
+            }
+            cache.insert(topn_row.ordered_key, topn_row.row);
+            if cache.len() == cache_size_limit {
+                break;
+            }
+        }
+        Ok(())
+    }
+
     pub async fn flush(&mut self, epoch: u64) -> StreamExecutorResult<()> {
         self.state_table.commit(epoch).await?;
         Ok(())
@@ -155,6 +172,7 @@ mod tests {
     use risingwave_common::util::sort_util::OrderType;
     use risingwave_storage::memory::MemoryStateStore;
 
+    // use std::collections::BTreeMap;
     use super::*;
     use crate::row_nonnull;
 
@@ -164,7 +182,6 @@ mod tests {
         let data_types = vec![DataType::Varchar, DataType::Int64];
         let order_types = vec![OrderType::Ascending, OrderType::Ascending];
         let mut managed_state = ManagedTopNStateNew::new(
-            Some(10),
             0,
             store,
             TableId::from(0x11),
@@ -234,5 +251,56 @@ mod tests {
         assert_eq!(valid_rows[0].ordered_key, ordered_rows[3].clone());
         assert_eq!(valid_rows[1].ordered_key, ordered_rows[0].clone());
         assert_eq!(valid_rows[2].ordered_key, ordered_rows[2].clone());
+    }
+
+    #[tokio::test]
+    async fn test_managed_top_n_state_fill_cache() {
+        let store = MemoryStateStore::new();
+        let data_types = vec![DataType::Varchar, DataType::Int64];
+        let order_types = vec![OrderType::Ascending, OrderType::Ascending];
+        let mut managed_state = ManagedTopNStateNew::new(
+            0,
+            store,
+            TableId::from(0x11),
+            data_types.clone(),
+            OrderedRowDeserializer::new(data_types, order_types.clone()),
+            vec![0, 1],
+        );
+
+        let row1 = row_nonnull!["abc".to_string(), 2i64];
+        let row2 = row_nonnull!["abc".to_string(), 3i64];
+        let row3 = row_nonnull!["abd".to_string(), 3i64];
+        let row4 = row_nonnull!["ab".to_string(), 4i64];
+        let row5 = row_nonnull!["abcd".to_string(), 5i64];
+        let rows = vec![row1, row2, row3, row4, row5];
+
+        let mut cache = BTreeMap::<OrderedRow, Row>::new();
+        let ordered_rows = rows
+            .clone()
+            .into_iter()
+            .map(|row| OrderedRow::new(row, &order_types))
+            .collect::<Vec<_>>();
+
+        let epoch = 1;
+        managed_state
+            .insert(ordered_rows[3].clone(), rows[3].clone(), epoch)
+            .unwrap();
+        managed_state
+            .insert(ordered_rows[1].clone(), rows[1].clone(), epoch)
+            .unwrap();
+        managed_state
+            .insert(ordered_rows[2].clone(), rows[2].clone(), epoch)
+            .unwrap();
+        managed_state
+            .insert(ordered_rows[4].clone(), rows[4].clone(), epoch)
+            .unwrap();
+
+        managed_state
+            .fill_cache(&mut cache, &ordered_rows[3], 2, epoch)
+            .await
+            .unwrap();
+        assert_eq!(cache.len(), 2);
+        assert_eq!(cache.first_key_value().unwrap().0, &ordered_rows[1]);
+        assert_eq!(cache.last_key_value().unwrap().0, &ordered_rows[4]);
     }
 }

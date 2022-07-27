@@ -45,13 +45,12 @@
 #![feature(type_changing_struct_update)]
 #![feature(build_hasher_simple_hash_one)]
 #![test_runner(risingwave_test_runner::test_runner::run_failpont_tests)]
-
-pub mod encoding;
 pub mod hummock;
 pub mod keyspace;
 pub mod memory;
 pub mod monitor;
 pub mod panic_store;
+pub mod row_serde;
 pub mod storage_value;
 #[macro_use]
 pub mod store;

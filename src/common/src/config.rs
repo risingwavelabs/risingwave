@@ -95,8 +95,8 @@ pub struct StreamingConfig {
     #[serde(default = "default::in_flight_barrier_nums")]
     pub in_flight_barrier_nums: usize,
 
-    #[serde(default = "default::unsafe_worker_node_parallel_degree")]
-    pub unsafe_worker_node_parallel_degree: usize,
+    #[serde(default = "default::worker_node_parallelism")]
+    pub worker_node_parallelism: usize,
 }
 
 impl Default for StreamingConfig {
@@ -109,7 +109,7 @@ impl Default for StreamingConfig {
 #[derive(Clone, Debug, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct StorageConfig {
-    /// Target size of the SSTable.
+    /// Target size of the Sstable.
     #[serde(default = "default::sst_size_mb")]
     pub sstable_size_mb: u32,
 
@@ -284,8 +284,8 @@ mod default {
         8
     }
 
-    pub fn unsafe_worker_node_parallel_degree() -> usize {
-        4
+    pub fn worker_node_parallelism() -> usize {
+        num_cpus::get()
     }
 }
 

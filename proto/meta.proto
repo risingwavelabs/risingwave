@@ -98,6 +98,7 @@ service StreamManagerService {
 message AddWorkerNodeRequest {
   common.WorkerType worker_type = 1;
   common.HostAddress host = 2;
+  uint64 worker_node_parallelism = 3;
 }
 
 message AddWorkerNodeResponse {
@@ -201,8 +202,15 @@ message ResumeRequest {}
 
 message ResumeResponse {}
 
+message GetClusterInfoRequest {}
+
+message GetClusterInfoResponse {
+  repeated TableFragments table_fragments = 1;
+}
+
 service ScaleService {
   // TODO(Kexiang): delete them when config change interface is finished
   rpc Pause(PauseRequest) returns (PauseResponse);
   rpc Resume(ResumeRequest) returns (ResumeResponse);
+  rpc GetClusterInfo(GetClusterInfoRequest) returns (GetClusterInfoResponse);
 }

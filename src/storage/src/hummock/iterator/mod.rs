@@ -38,7 +38,7 @@ use async_trait::async_trait;
 
 use crate::monitor::StoreLocalStatistic;
 
-/// `HummockIterator` defines the interface of all iterators, including `SSTableIterator`,
+/// `HummockIterator` defines the interface of all iterators, including `SstableIterator`,
 /// `MergeIterator`, `UserIterator` and `ConcatIterator`.
 ///
 /// After creating the iterator instance,
@@ -143,9 +143,4 @@ impl HummockIteratorDirection for Backward {
     fn direction() -> DirectionEnum {
         DirectionEnum::Backward
     }
-}
-
-#[derive(Default)]
-pub struct ReadOptions {
-    pub prefetch: bool,
 }

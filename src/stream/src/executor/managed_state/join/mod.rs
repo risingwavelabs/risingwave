@@ -27,11 +27,11 @@ use risingwave_common::bail;
 use risingwave_common::collection::evictable::EvictableHashMap;
 use risingwave_common::hash::{HashKey, PrecomputedBuildHasher};
 use risingwave_common::types::{DataType, Datum, ScalarImpl};
-use risingwave_storage::table::state_table::StateTable;
+use risingwave_storage::table::state_table::RowBasedStateTable;
 use risingwave_storage::StateStore;
 use stats_alloc::{SharedStatsAlloc, StatsAlloc};
 
-use crate::executor::error::{StreamExecutorError, StreamExecutorResult};
+use crate::executor::error::StreamExecutorResult;
 use crate::executor::monitor::StreamingMetrics;
 
 type DegreeType = u64;
@@ -164,7 +164,7 @@ pub struct JoinHashMap<K: HashKey, S: StateStore> {
     /// Current epoch
     current_epoch: u64,
     /// State table
-    state_table: StateTable<S>,
+    state_table: RowBasedStateTable<S>,
     /// Metrics of the hash map
     metrics: JoinHashMapMetrics,
 }
@@ -177,7 +177,7 @@ impl<K: HashKey, S: StateStore> JoinHashMap<K, S> {
         pk_indices: Vec<usize>,
         join_key_indices: Vec<usize>,
         mut data_types: Vec<DataType>,
-        state_table: StateTable<S>,
+        state_table: RowBasedStateTable<S>,
         metrics: Arc<StreamingMetrics>,
         actor_id: u64,
         side: &'static str,
@@ -278,10 +278,7 @@ impl<K: HashKey, S: StateStore> JoinHashMap<K, S> {
     /// Fetch cache from the state store. Should only be called if the key does not exist in memory.
     /// Will return a empty `JoinEntryState` even when state does not exist in remote.
     async fn fetch_cached_state(&self, key: &K) -> StreamExecutorResult<JoinEntryState> {
-        let key = key
-            .clone()
-            .deserialize(self.join_key_data_types.iter())
-            .map_err(StreamExecutorError::serde_error)?;
+        let key = key.clone().deserialize(self.join_key_data_types.iter())?;
 
         let table_iter = self
             .state_table

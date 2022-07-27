@@ -16,7 +16,7 @@ use std::fmt::Formatter;
 use std::io::{Error, ErrorKind};
 use std::marker::Sync;
 use std::path::PathBuf;
-use std::sync::atomic::{AtomicBool, AtomicI32, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicI32, AtomicU32, Ordering};
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
@@ -26,7 +26,9 @@ use pgwire::pg_response::PgResponse;
 use pgwire::pg_server::{BoxedError, Session, SessionManager, UserAuthenticator};
 use rand::RngCore;
 #[cfg(test)]
-use risingwave_common::catalog::{DEFAULT_DATABASE_NAME, DEFAULT_SUPPER_USER};
+use risingwave_common::catalog::{
+    DEFAULT_DATABASE_NAME, DEFAULT_SUPER_USER, DEFAULT_SUPER_USER_ID,
+};
 use risingwave_common::config::FrontendConfig;
 use risingwave_common::error::Result;
 use risingwave_common::session_config::ConfigMap;
@@ -44,6 +46,7 @@ use tokio::task::JoinHandle;
 use crate::binder::Binder;
 use crate::catalog::catalog_service::{CatalogReader, CatalogWriter, CatalogWriterImpl};
 use crate::catalog::root_catalog::Catalog;
+use crate::expr::CorrelatedId;
 use crate::handler::handle;
 use crate::handler::util::to_pg_field;
 use crate::meta_client::{FrontendMetaClient, FrontendMetaClientImpl};
@@ -56,6 +59,7 @@ use crate::test_utils::MockUserInfoWriter;
 use crate::user::user_authentication::md5_hash_with_salt;
 use crate::user::user_manager::UserInfoManager;
 use crate::user::user_service::{UserInfoReader, UserInfoWriter, UserInfoWriterImpl};
+use crate::user::UserId;
 use crate::FrontendOpts;
 
 pub struct OptimizerContext {
@@ -72,6 +76,8 @@ pub struct OptimizerContext {
     pub explain_trace: AtomicBool,
     /// Store the trace of optimizer
     pub optimizer_trace: Arc<Mutex<Vec<String>>>,
+    /// Store correlated id
+    pub next_correlated_id: AtomicU32,
 }
 
 #[derive(Clone, Debug)]
@@ -99,6 +105,12 @@ impl OptimizerContextRef {
         // `QueryContextRef` not `Sync`.
         let next_id = self.inner.next_id.fetch_add(1, Ordering::Relaxed);
         PlanNodeId(next_id)
+    }
+
+    pub fn next_correlated_id(&self) -> CorrelatedId {
+        self.inner
+            .next_correlated_id
+            .fetch_add(1, Ordering::Relaxed)
     }
 
     pub fn is_explain_verbose(&self) -> bool {
@@ -130,6 +142,7 @@ impl OptimizerContext {
             explain_verbose: AtomicBool::new(false),
             explain_trace: AtomicBool::new(false),
             optimizer_trace: Arc::new(Mutex::new(vec![])),
+            next_correlated_id: AtomicU32::new(1),
         }
     }
 
@@ -144,6 +157,7 @@ impl OptimizerContext {
             explain_verbose: AtomicBool::new(false),
             explain_trace: AtomicBool::new(false),
             optimizer_trace: Arc::new(Mutex::new(vec![])),
+            next_correlated_id: AtomicU32::new(1),
         }
         .into()
     }
@@ -239,7 +253,7 @@ impl FrontendEnv {
             .unwrap();
         // Register in meta by calling `AddWorkerNode` RPC.
         meta_client
-            .register(&frontend_address, WorkerType::Frontend)
+            .register(WorkerType::Frontend, &frontend_address, 0)
             .await?;
 
         let (heartbeat_join_handle, heartbeat_shutdown_sender) = MetaClient::start_heartbeat_loop(
@@ -368,13 +382,15 @@ impl FrontendEnv {
 pub struct AuthContext {
     pub database: String,
     pub user_name: String,
+    pub user_id: UserId,
 }
 
 impl AuthContext {
-    pub fn new(database: String, user_name: String) -> Self {
+    pub fn new(database: String, user_name: String, user_id: UserId) -> Self {
         Self {
             database,
             user_name,
+            user_id,
         }
     }
 }
@@ -408,7 +424,8 @@ impl SessionImpl {
             env: FrontendEnv::mock(),
             auth_context: Arc::new(AuthContext::new(
                 DEFAULT_DATABASE_NAME.to_string(),
-                DEFAULT_SUPPER_USER.to_string(),
+                DEFAULT_SUPER_USER.to_string(),
+                DEFAULT_SUPER_USER_ID,
             )),
             user_authenticator: UserAuthenticator::None,
             config_map: Default::default(),
@@ -429,6 +446,10 @@ impl SessionImpl {
 
     pub fn user_name(&self) -> &str {
         &self.auth_context.user_name
+    }
+
+    pub fn user_id(&self) -> UserId {
+        self.auth_context.user_id
     }
 
     pub fn config(&self) -> RwLockReadGuard<ConfigMap> {
@@ -502,6 +523,7 @@ impl SessionManager for SessionManagerImpl {
                 Arc::new(AuthContext::new(
                     database.to_string(),
                     user_name.to_string(),
+                    user.id,
                 )),
                 user_authenticator,
             )
@@ -539,6 +561,11 @@ impl Session for SessionImpl {
     async fn run_statement(
         self: Arc<Self>,
         sql: &str,
+
+        // format: indicate the query PgReponse format (Only meaningful for SELECT queries).
+        // false: TEXT
+        // true: BINARY
+        format: bool,
     ) -> std::result::Result<PgResponse, BoxedError> {
         // Parse sql.
         let mut stmts = Parser::parse_sql(sql).map_err(|e| {
@@ -557,7 +584,7 @@ impl Session for SessionImpl {
             ));
         }
         let stmt = stmts.swap_remove(0);
-        let rsp = handle(self, stmt, sql).await.map_err(|e| {
+        let rsp = handle(self, stmt, sql, format).await.map_err(|e| {
             tracing::error!("failed to handle sql:\n{}:\n{}", sql, e);
             e
         })?;

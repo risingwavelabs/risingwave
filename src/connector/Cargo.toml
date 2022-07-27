@@ -31,7 +31,7 @@ humantime = "2.1"
 hyper = "0.14"
 itertools = "0.10"
 log = "0.4"
-madsim = "=0.2.0-alpha.4"
+madsim = "=0.2.0-alpha.5"
 maplit = "1.0.2"
 memcomparable = { path = "../utils/memcomparable" }
 mysql_async = "0.30"
@@ -52,11 +52,11 @@ smallvec = "1"
 static_assertions = "1"
 tempfile = "3"
 thiserror = "1"
-tokio = { version = "=0.2.0-alpha.4", package = "madsim-tokio", features = ["rt", "rt-multi-thread", "sync", "macros", "time", "signal", "fs"] }
+tokio = { version = "=0.2.0-alpha.5", package = "madsim-tokio", features = ["rt", "rt-multi-thread", "sync", "macros", "time", "signal", "fs"] }
 tokio-retry = "0.3"
 tokio-stream = "0.1"
 tokio-util = { version = "0.7", features = ["codec", "io"] }
-tonic = { version = "=0.2.0-alpha.4", package = "madsim-tonic" }
+tonic = { version = "=0.2.0-alpha.5", package = "madsim-tonic" }
 tracing = { version = "0.1" }
 twox-hash = "1"
 url = "2"

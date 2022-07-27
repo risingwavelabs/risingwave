@@ -50,6 +50,8 @@ message UpdateMutation {
   map<uint32, DispatcherUpdate> actor_dispatcher_update = 1;
   // Merge updates for each downstream actor.
   map<uint32, MergeUpdate> actor_merge_update = 2;
+
+  repeated uint32 dropped_actors = 3;
 }
 
 message SourceChangeSplitMutation {
@@ -141,17 +143,20 @@ message SimpleAggNode {
   // Only used for local simple agg, not used for global simple agg.
   repeated uint32 distribution_key = 2;
   repeated catalog.Table internal_tables = 3;
-  map<uint32, int32> column_mapping = 4;
+  repeated ColumnMapping column_mappings = 4;
   // Whether to optimize for append only stream.
   // It is true when the input is append-only
   bool is_append_only = 5;
 }
 
+message ColumnMapping {
+  repeated uint32 indices = 1;
+}
 message HashAggNode {
   repeated uint32 group_key = 1;
   repeated expr.AggCall agg_calls = 2;
   repeated catalog.Table internal_tables = 3;
-  map<uint32, int32> column_mapping = 4;
+  repeated ColumnMapping column_mappings = 4;
   // Whether to optimize for append only stream.
   // It is true when the input is append-only
   bool is_append_only = 5;
@@ -259,6 +264,10 @@ message ChainNode {
   bool disable_rearrange = 4;
   // Whether to place this chain on the same worker node as upstream actors.
   bool same_worker_node = 5;
+  // Whether the upstream materialize is and this chain should be a singleton.
+  // FIXME: This is a workaround for fragmenter since the distribution info will be lost if there's only one
+  // fragment in the downstream mview. Remove this when we refactor the fragmenter.
+  bool is_singleton = 6;
 }
 
 // BatchPlanNode is used for mv on mv snapshot read.
@@ -428,9 +437,9 @@ message StreamActor {
 }
 
 enum FragmentType {
-  SOURCE = 0;
-  SINK = 1;
-  OTHERS = 2;
+  OTHERS = 0;
+  SOURCE = 1;
+  SINK = 2;
 }
 
 message StreamFragmentGraph {

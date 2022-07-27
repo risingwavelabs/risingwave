@@ -15,7 +15,7 @@
 use std::collections::HashMap;
 use std::fs::File;
 use std::io::{BufRead, BufReader, Write};
-use std::path::Path;
+use std::path::{Path, PathBuf};
 use std::process::Stdio;
 use std::sync::Arc;
 
@@ -206,7 +206,11 @@ impl TestCase {
             "-v",
             "HIDE_TOAST_COMPRESSION=on",
         ];
-        println!("Ready to run command:\npsql {}", args.join(" "));
+        println!(
+            "Ready to run command:\npsql {}\n for test case:{}",
+            args.join(" "),
+            self.test_name
+        );
 
         let extra_lines_added_to_input = match self.opts.database_mode() {
             DatabaseMode::Risingwave => {
@@ -227,13 +231,6 @@ impl TestCase {
                 )
             })?;
 
-        let error_path = self.file_manager.error_of(&self.test_name)?;
-        let error_file = File::options()
-            .create_new(true)
-            .write(true)
-            .open(&error_path)
-            .with_context(|| format!("Failed to create {:?} for writing error.", error_path))?;
-
         let mut command = Command::new("psql");
         command.env(
             "PGAPPNAME",
@@ -249,7 +246,7 @@ impl TestCase {
             .stdout(actual_output_file.try_clone().with_context(|| {
                 format!("Failed to clone output file: {:?}", actual_output_path)
             })?)
-            .stderr(error_file)
+            .stderr(actual_output_file)
             .spawn()
             .with_context(|| format!("Failed to spawn child for test case: {}", self.test_name))?;
 
@@ -260,8 +257,19 @@ impl TestCase {
         for extra_line in &extra_lines_added_to_input {
             child_stdin.write_all(extra_line.as_bytes()).await?;
         }
+
+        let read_all_lines_from = |path: PathBuf| -> anyhow::Result<String> {
+            let input_lines = std::io::BufReader::new(File::open(path)?).lines();
+            let mut input_file_content = String::new();
+            for line in input_lines {
+                input_file_content.push_str(line?.as_str());
+                input_file_content.push('\n');
+            }
+            Ok(input_file_content)
+        };
+
         let input_path = self.file_manager.source_of(&self.test_name)?;
-        let input_file_content = read_lines(input_path, 0)?;
+        let input_file_content = read_all_lines_from(input_path)?;
         info!("input_file_content:{}", input_file_content);
         child_stdin.write_all(input_file_content.as_bytes()).await?;
 
@@ -270,8 +278,7 @@ impl TestCase {
         })?;
 
         if !status.success() {
-            let error_output = read_lines(&error_path, 0)
-                .with_context(|| format!("Failed to read error file: {:?}", error_path))?;
+            let error_output = read_all_lines_from(actual_output_path)?;
             let error_msg = format!(
                 "Execution of test case {} failed, reason:\n{}",
                 self.test_name, error_output
@@ -298,7 +305,7 @@ impl TestCase {
                 )
             })?;
 
-        if expected_output == actual_output {
+        if compare_results(&actual_output, &expected_output) {
             Ok(Same)
         } else {
             // If the output is not as expected, we output the diff for easier human reading.
@@ -308,6 +315,8 @@ impl TestCase {
                 .write(true)
                 .open(&diff_path)
                 .with_context(|| format!("Failed to create {:?} for writing diff.", diff_path))?;
+            let (expected_output, actual_output) =
+                { (expected_output.join(""), actual_output.join("")) };
             let diffs = format_diff(&expected_output, &actual_output);
             diff_file.write_all(diffs.as_bytes())?;
             error!("Diff:\n{}", diffs);
@@ -316,24 +325,178 @@ impl TestCase {
     }
 }
 
+/// Since PG and RW may output the results by different order when there is no `order by`
+/// in the SQL. We, by default, interpret the results of a select query by no order, aka we sort
+/// the results by ourselves. We remark that we have already filtered out all the comments.
+fn compare_results(actual: &[String], expected: &[String]) -> bool {
+    if actual.len() != expected.len() {
+        error!(
+            "actual output has {} lines\nexpected output has {} lines",
+            actual.len(),
+            expected.len()
+        );
+        return false;
+    }
+
+    let len = actual.len();
+    let mut al_start = 0;
+    let mut ed_start = 0;
+    while al_start < len && ed_start < len {
+        // Find the beginning line of a query.
+        al_start += actual[al_start..].iter().position(|s| s != "\n").unwrap();
+        ed_start += expected[ed_start..].iter().position(|s| s != "\n").unwrap();
+        if al_start != ed_start {
+            error!(
+                "Different starts:\nactual:{:?}\nexpected:{:?}",
+                actual[al_start], expected[ed_start],
+            );
+            return false;
+        }
+        // Find the empty line after the ending line of a query.
+        let al_end = al_start
+            + actual[al_start..]
+                .iter()
+                .position(|s| s == "\n")
+                .unwrap_or(len);
+        let ed_end = ed_start
+            + expected[ed_start..]
+                .iter()
+                .position(|s| s == "\n")
+                .unwrap_or(len);
+        if al_end != ed_end {
+            error!(
+                "Different number of lines:\nactual:{:?}\nexpected:{:?}",
+                actual[al_start..al_end].to_vec(),
+                expected[ed_start..ed_end].to_vec(),
+            );
+            return false;
+        }
+        let actual_query = &actual[al_start..al_end];
+        let expected_query = &expected[ed_start..ed_end];
+        if !compare_query(actual_query, expected_query) {
+            error!("actual_query:{:?}", actual_query);
+            error!("expected_query:{:?}", expected_query);
+            return false;
+        }
+        al_start = al_end + 1;
+        ed_start = ed_end + 1;
+    }
+    true
+}
+
+/// This function accepts a raw line instead of a line trimmed at the end.
+fn is_comment(line: &str) -> bool {
+    // We assume that the line indicating the result set of a select query must have more than two
+    // `-`.
+    line.starts_with("-- ") || line == "--\n"
+}
+
+/// We first determine whether this query is a select query, i.e. returning results.
+/// Then we determine whether it contains the `order by` keywords.
+/// Finally, we determine which lines contain the results and thus need to be actually compared,
+/// with/without order.
+///
+/// The caller should make sure that these two inputs have the same length.
+fn compare_query(actual: &[String], expected: &[String]) -> bool {
+    assert_eq!(actual.len(), expected.len());
+    let len = actual.len();
+    let is_select = actual[0].clone().to_lowercase().starts_with("select");
+    if is_select {
+        let mut is_order_by = false;
+        let mut result_line_idx = usize::MAX;
+        for (idx, line) in actual.iter().enumerate() {
+            if is_comment(line) {
+                continue;
+            } else {
+                // This could fail in the corner case.
+                // For example, a subquery has a `order by` clause, which should not be allowed and
+                // is meaningless as only the outermost `order by` clause is effective.
+                if line.to_lowercase().contains("order by") {
+                    is_order_by = true;
+                }
+                // The separator line used to show the result set
+                // We remark that the comment should start with only two "--".
+                if line.starts_with("---") {
+                    result_line_idx = idx;
+                    break;
+                }
+            }
+        }
+        // The select query must have a line indicating result set.
+        assert_ne!(result_line_idx, usize::MAX);
+        if !expected[result_line_idx].starts_with("---") {
+            return false;
+        }
+        if actual[..result_line_idx] != expected[..result_line_idx] {
+            return false;
+        }
+        // The output must contain at least one row that specifies how many rows in total are
+        // returned from the database, thus we directly unwrap here.
+        if actual.last().unwrap() != expected.last().unwrap() {
+            return false;
+        }
+        if is_order_by {
+            actual[result_line_idx + 1..] == expected[result_line_idx + 1..]
+        } else {
+            let mut actual_sorted = actual[result_line_idx + 1..len].to_vec();
+            actual_sorted.sort();
+            let mut expected_sorted = expected[result_line_idx + 1..len].to_vec();
+            expected_sorted.sort();
+            actual_sorted == expected_sorted
+        }
+    } else {
+        actual == expected
+    }
+}
+
 /// This function ignores the comments and empty lines. They are not compared between
 /// expected output file and actual output file.
-fn read_lines<P>(filename: P, mut skip: usize) -> std::io::Result<String>
+fn read_lines<P>(filename: P, mut skip: usize) -> std::io::Result<Vec<String>>
 where
     P: AsRef<Path>,
 {
     let file = File::open(filename)?;
-    let lines = std::io::BufReader::new(file).lines();
-    let mut res: String = String::new();
-    for line in lines {
-        let line = line?;
-        if !line.starts_with("--") && !line.is_empty() {
-            if skip == 0 {
-                res.push_str(&line);
-                res.push('\n');
-            } else {
-                skip -= 1;
+    let mut input = std::io::BufReader::new(file);
+    let mut res = vec![];
+    let mut last_line_is_empty = false;
+    let mut last_is_select = false;
+    let mut line = String::new();
+    // This gives a line without being trimmed at the end.
+    while input
+        .read_line(&mut line)
+        .expect("reading from cursor won't fail")
+        != 0
+    {
+        let line = std::mem::take(&mut line);
+        if is_comment(&line) {
+            last_line_is_empty = false;
+            last_is_select = false;
+            continue;
+        } else if line == "\n" {
+            // Multiple empty lines are combined into one empty line only.
+            // This is for the ease of comparing output file by strings directly.
+            last_line_is_empty = true;
+            last_is_select = false;
+        } else if skip == 0 {
+            if line.to_lowercase().starts_with("select ") {
+                last_is_select = true;
             }
+            if last_line_is_empty {
+                res.push("\n".to_string());
+                last_line_is_empty = false;
+            }
+            res.push(line.clone());
+            if line.ends_with(";\n") {
+                if !last_is_select {
+                    // We manually add a new line at the end of a select query
+                    // to determine where the result set ends.
+                    res.push("\n".to_string());
+                    last_line_is_empty = true;
+                }
+                last_is_select = false;
+            }
+        } else {
+            skip -= 1;
         }
     }
     Ok(res)

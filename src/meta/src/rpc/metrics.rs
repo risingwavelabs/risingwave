@@ -12,19 +12,11 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::net::SocketAddr;
-use std::sync::Arc;
-
-use hyper::{Body, Request, Response};
 use prometheus::{
     exponential_buckets, histogram_opts, register_histogram_vec_with_registry,
     register_histogram_with_registry, register_int_gauge_vec_with_registry,
-    register_int_gauge_with_registry, Encoder, Histogram, HistogramVec, IntGauge, IntGaugeVec,
-    Registry, TextEncoder,
+    register_int_gauge_with_registry, Histogram, HistogramVec, IntGauge, IntGaugeVec, Registry,
 };
-use tower::make::Shared;
-use tower::ServiceBuilder;
-use tower_http::add_extension::AddExtensionLayer;
 
 pub struct MetaMetrics {
     registry: Registry,
@@ -188,43 +180,8 @@ impl MetaMetrics {
         }
     }
 
-    pub fn boot_metrics_service(self: &Arc<Self>, listen_addr: SocketAddr) {
-        let meta_metrics = self.clone();
-        tokio::spawn(async move {
-            tracing::info!(
-                "Prometheus listener for Prometheus is set up on http://{}",
-                listen_addr
-            );
-
-            let service = ServiceBuilder::new()
-                .layer(AddExtensionLayer::new(meta_metrics))
-                .service_fn(Self::metrics_service);
-
-            let serve_future = hyper::Server::bind(&listen_addr).serve(Shared::new(service));
-
-            if let Err(err) = serve_future.await {
-                eprintln!("server error: {}", err);
-            }
-        });
-    }
-
     pub fn registry(&self) -> &Registry {
         &self.registry
-    }
-
-    #[expect(clippy::unused_async)]
-    async fn metrics_service(req: Request<Body>) -> Result<Response<Body>, hyper::Error> {
-        let meta_metrics = req.extensions().get::<Arc<MetaMetrics>>().unwrap();
-        let encoder = TextEncoder::new();
-        let mut buffer = vec![];
-        let mf = meta_metrics.registry.gather();
-        encoder.encode(&mf, &mut buffer).unwrap();
-        let response = Response::builder()
-            .header(hyper::header::CONTENT_TYPE, encoder.format_type())
-            .body(Body::from(buffer))
-            .unwrap();
-
-        Ok(response)
     }
 }
 impl Default for MetaMetrics {

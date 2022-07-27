@@ -233,7 +233,7 @@ impl StreamingMetrics {
         .unwrap();
 
         let join_total_lookup_count = register_int_counter_vec_with_registry!(
-            "stream_join_total_lookup_count",
+            "stream_join_lookup_total_count",
             "Join executor lookup total operation",
             &["actor_id", "side"],
             registry

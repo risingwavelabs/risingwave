@@ -17,14 +17,16 @@ use std::sync::Arc;
 
 pub use agg_call::*;
 pub use agg_state::*;
+use anyhow::anyhow;
 use dyn_clone::{self, DynClone};
 pub use foldable::*;
 use risingwave_common::array::column::Column;
 use risingwave_common::array::stream_chunk::Ops;
+use risingwave_common::array::ArrayImpl::Bool;
 use risingwave_common::array::{
-    Array, ArrayBuilder, ArrayBuilderImpl, ArrayImpl, ArrayRef, BoolArray, DecimalArray, F32Array,
-    F64Array, I16Array, I32Array, I64Array, IntervalArray, ListArray, NaiveDateArray,
-    NaiveDateTimeArray, NaiveTimeArray, Row, StructArray, Utf8Array,
+    Array, ArrayBuilder, ArrayBuilderImpl, ArrayImpl, ArrayRef, BoolArray, DataChunk, DecimalArray,
+    F32Array, F64Array, I16Array, I32Array, I64Array, IntervalArray, ListArray, NaiveDateArray,
+    NaiveDateTimeArray, NaiveTimeArray, Row, StructArray, Utf8Array, Vis,
 };
 use risingwave_common::buffer::Bitmap;
 use risingwave_common::catalog::{Field, Schema};
@@ -32,11 +34,12 @@ use risingwave_common::hash::HashCode;
 use risingwave_common::types::{DataType, Datum};
 use risingwave_expr::expr::AggKind;
 use risingwave_expr::*;
-use risingwave_storage::table::state_table::StateTable;
+use risingwave_storage::table::state_table::RowBasedStateTable;
 use risingwave_storage::StateStore;
 pub use row_count::*;
 use static_assertions::const_assert_eq;
 
+use super::PkIndices;
 use crate::executor::aggregation::approx_count_distinct::StreamingApproxCountDistinct;
 use crate::executor::aggregation::single_value::StreamingSingleValueAgg;
 use crate::executor::error::{StreamExecutorError, StreamExecutorResult};
@@ -346,13 +349,16 @@ pub fn generate_agg_schema(
 
 /// Generate initial [`AggState`] from `agg_calls`. For [`crate::executor::HashAggExecutor`], the
 /// group key should be provided.
+#[allow(clippy::too_many_arguments)]
 pub async fn generate_managed_agg_state<S: StateStore>(
     key: Option<&Row>,
     agg_calls: &[AggCall],
+    pk_indices: PkIndices,
     pk_data_types: PkDataTypes,
     epoch: u64,
     key_hash_code: Option<HashCode>,
-    state_tables: &[StateTable<S>],
+    state_tables: &[RowBasedStateTable<S>],
+    state_table_col_mappings: &[Vec<usize>],
 ) -> StreamExecutorResult<AggState<S>> {
     let mut managed_states = vec![];
 
@@ -364,11 +370,13 @@ pub async fn generate_managed_agg_state<S: StateStore>(
         let mut managed_state = ManagedStateImpl::create_managed_state(
             agg_call.clone(),
             row_count,
+            pk_indices.clone(),
             pk_data_types.clone(),
             idx == ROW_COUNT_COLUMN,
             key_hash_code.clone(),
             key,
             &state_tables[idx],
+            state_table_col_mappings[idx].clone(),
         )
         .await?;
 
@@ -393,14 +401,39 @@ pub fn generate_state_tables_from_proto<S: StateStore>(
     store: S,
     internal_tables: &[risingwave_pb::catalog::Table],
     vnodes: Option<Arc<Bitmap>>,
-) -> Vec<StateTable<S>> {
+) -> Vec<RowBasedStateTable<S>> {
     let mut state_tables = Vec::with_capacity(internal_tables.len());
 
     for table_catalog in internal_tables {
         // Parse info from proto and create state table.
         let state_table =
-            StateTable::from_table_catalog(table_catalog, store.clone(), vnodes.clone());
+            RowBasedStateTable::from_table_catalog(table_catalog, store.clone(), vnodes.clone());
         state_tables.push(state_table)
     }
     state_tables
+}
+
+pub fn agg_call_filter_res(
+    agg_call: &AggCall,
+    columns: &Vec<Column>,
+    vis_map: Option<&Bitmap>,
+    capacity: usize,
+) -> StreamExecutorResult<Option<Bitmap>> {
+    if let Some(ref filter) = agg_call.filter {
+        let vis = Vis::from(
+            vis_map
+                .cloned()
+                .unwrap_or_else(|| Bitmap::all_high_bits(capacity)),
+        );
+        let data_chunk = DataChunk::new(columns.to_owned(), vis);
+        if let Bool(filter_res) = filter.eval(&data_chunk)?.as_ref() {
+            Ok(Some(filter_res.to_bitmap()))
+        } else {
+            Err(StreamExecutorError::from(anyhow!(
+                "Filter can only receive bool array"
+            )))
+        }
+    } else {
+        Ok(vis_map.cloned())
+    }
 }
