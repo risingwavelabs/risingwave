@@ -105,6 +105,7 @@ steps:
           config: ci/docker-compose.yml
           mount-buildkite-agent: true
       - docker-compose#v3.9.0:
+          command: bash
           run: mysql
           config: ci/docker-compose.yml
           mount-buildkite-agent: true
