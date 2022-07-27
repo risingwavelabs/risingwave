@@ -214,7 +214,7 @@ pub mod global_simple_agg {
         pk_indices: &[usize],
         agg_schema: &Schema,
         input_ref: &dyn Executor,
-    ) -> StateTable<S> {
+    ) -> RowBasedStateTable<S> {
         let table_desc =
             generate_column_descs(agg_call, group_key, pk_indices, agg_schema, input_ref);
         let relational_pk_len = if agg_call.kind == AggKind::Max || agg_call.kind == AggKind::Min {
@@ -223,7 +223,7 @@ pub mod global_simple_agg {
             table_desc.len() - 1
         };
 
-        StateTable::new_without_distribution(
+        RowBasedStateTable::new_without_distribution(
             store,
             table_id,
             table_desc,
@@ -245,7 +245,7 @@ pub mod global_simple_agg {
     use risingwave_common::util::sort_util::OrderType;
     use risingwave_expr::expr::AggKind;
     use risingwave_storage::memory::MemoryStateStore;
-    use risingwave_storage::table::state_table::StateTable;
+    use risingwave_storage::table::state_table::RowBasedStateTable;
     use risingwave_storage::StateStore;
 
     use crate::executor::aggregation::{generate_agg_schema, AggCall};
@@ -260,7 +260,7 @@ pub mod global_simple_agg {
         key_indices: Vec<usize>,
     ) -> Box<dyn Executor> {
         let agg_schema = generate_agg_schema(input.as_ref(), &agg_calls, Some(&key_indices));
-        let state_tables = keyspace_gen
+        let state_tables: Vec<_> = keyspace_gen
             .iter()
             .zip_eq(agg_calls.iter())
             .map(|(ks, agg_call)| {
@@ -275,10 +275,19 @@ pub mod global_simple_agg {
                 )
             })
             .collect();
-
+        // TODO(yuchao): We are not using col_mappings in agg calls generated in unittest,
+        // so it's ok to fake it. Later we should generate real column mapping for state tables.
+        let state_table_col_mappings = (0..state_tables.len()).map(|_| vec![]).collect();
         Box::new(
-            GlobalSimpleAggExecutor::new(input, agg_calls, pk_indices, executor_id, state_tables)
-                .unwrap(),
+            GlobalSimpleAggExecutor::new(
+                input,
+                agg_calls,
+                pk_indices,
+                executor_id,
+                state_tables,
+                state_table_col_mappings,
+            )
+            .unwrap(),
         )
     }
 }

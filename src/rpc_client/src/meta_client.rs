@@ -20,7 +20,7 @@ use async_trait::async_trait;
 use paste::paste;
 use risingwave_common::catalog::{CatalogVersion, TableId};
 use risingwave_common::util::addr::HostAddr;
-use risingwave_hummock_sdk::{HummockEpoch, HummockSSTableId, HummockVersionId, LocalSstableInfo};
+use risingwave_hummock_sdk::{HummockEpoch, HummockSstableId, HummockVersionId, LocalSstableInfo};
 use risingwave_pb::catalog::{
     Database as ProstDatabase, Schema as ProstSchema, Source as ProstSource, Table as ProstTable,
 };
@@ -90,10 +90,16 @@ impl MetaClient {
     }
 
     /// Register the current node to the cluster and set the corresponding worker id.
-    pub async fn register(&mut self, addr: &HostAddr, worker_type: WorkerType) -> Result<u32> {
+    pub async fn register(
+        &mut self,
+        worker_type: WorkerType,
+        addr: &HostAddr,
+        worker_node_parallelism: usize,
+    ) -> Result<u32> {
         let request = AddWorkerNodeRequest {
             worker_type: worker_type as i32,
             host: Some(addr.to_protobuf()),
+            worker_node_parallelism: worker_node_parallelism as u64,
         };
         let resp = self.inner.add_worker_node(request).await?;
         let worker_node = resp.node.expect("AddWorkerNodeResponse::node is empty");
@@ -223,23 +229,21 @@ impl MetaClient {
         Ok(resp.version)
     }
 
-    pub async fn drop_user(&self, user_name: &str) -> Result<u64> {
-        let request = DropUserRequest {
-            name: user_name.to_string(),
-        };
+    pub async fn drop_user(&self, user_id: u32) -> Result<u64> {
+        let request = DropUserRequest { user_id };
         let resp = self.inner.drop_user(request).await?;
         Ok(resp.version)
     }
 
     pub async fn grant_privilege(
         &self,
-        users: Vec<String>,
+        user_ids: Vec<u32>,
         privileges: Vec<GrantPrivilege>,
         with_grant_option: bool,
-        granted_by: String,
+        granted_by: u32,
     ) -> Result<u64> {
         let request = GrantPrivilegeRequest {
-            users,
+            user_ids,
             privileges,
             with_grant_option,
             granted_by,
@@ -250,16 +254,16 @@ impl MetaClient {
 
     pub async fn revoke_privilege(
         &self,
-        users: Vec<String>,
+        user_ids: Vec<u32>,
         privileges: Vec<GrantPrivilege>,
-        granted_by: Option<String>,
-        revoke_by: String,
+        granted_by: Option<u32>,
+        revoke_by: u32,
         revoke_grant_option: bool,
         cascade: bool,
     ) -> Result<u64> {
         let granted_by = granted_by.unwrap_or_default();
         let request = RevokePrivilegeRequest {
-            users,
+            user_ids,
             privileges,
             granted_by,
             revoke_by,
@@ -425,7 +429,7 @@ impl HummockMetaClient for MetaClient {
         Ok(())
     }
 
-    async fn get_new_table_id(&self) -> Result<HummockSSTableId> {
+    async fn get_new_table_id(&self) -> Result<HummockSstableId> {
         let resp = self.inner.get_new_table_id(GetNewTableIdRequest {}).await?;
         Ok(resp.table_id)
     }
@@ -484,12 +488,6 @@ impl HummockMetaClient for MetaClient {
 
         self.inner.trigger_manual_compaction(req).await?;
         Ok(())
-    }
-
-    async fn list_sstable_id_infos(&self, version_id: u64) -> Result<Vec<SstableIdInfo>> {
-        let req = ListSstableIdInfosRequest { version_id };
-        let resp = self.inner.list_sstable_id_infos(req).await?;
-        Ok(resp.sstable_id_infos)
     }
 }
 
@@ -607,7 +605,6 @@ macro_rules! for_all_meta_rpc {
             ,{ hummock_client, report_vacuum_task, ReportVacuumTaskRequest, ReportVacuumTaskResponse }
             ,{ hummock_client, get_compaction_groups, GetCompactionGroupsRequest, GetCompactionGroupsResponse }
             ,{ hummock_client, trigger_manual_compaction, TriggerManualCompactionRequest, TriggerManualCompactionResponse }
-            ,{ hummock_client, list_sstable_id_infos, ListSstableIdInfosRequest, ListSstableIdInfosResponse }
             ,{ user_client, create_user, CreateUserRequest, CreateUserResponse }
             ,{ user_client, drop_user, DropUserRequest, DropUserResponse }
             ,{ user_client, grant_privilege, GrantPrivilegeRequest, GrantPrivilegeResponse }

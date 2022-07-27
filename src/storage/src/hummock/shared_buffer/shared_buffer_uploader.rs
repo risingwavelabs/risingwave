@@ -20,7 +20,7 @@ use std::sync::Arc;
 use futures::FutureExt;
 use parking_lot::RwLock;
 use risingwave_common::config::StorageConfig;
-use risingwave_hummock_sdk::slice_transform::SliceTransform;
+use risingwave_hummock_sdk::slice_transform::SliceTransformImpl;
 use risingwave_hummock_sdk::{get_local_sst_id, HummockEpoch, LocalSstableInfo};
 use risingwave_pb::hummock::SstableInfo;
 use risingwave_rpc_client::HummockMetaClient;
@@ -55,7 +55,7 @@ impl SharedBufferUploader {
         hummock_meta_client: Arc<dyn HummockMetaClient>,
         stats: Arc<StateStoreMetrics>,
         write_conflict_detector: Option<Arc<ConflictDetector>>,
-        table_id_to_slice_transform: Arc<RwLock<HashMap<u32, Arc<dyn SliceTransform>>>>,
+        table_id_to_slice_transform: Arc<RwLock<HashMap<u32, SliceTransformImpl>>>,
     ) -> Self {
         let compaction_executor = if options.share_buffer_compaction_worker_threads_number == 0 {
             None
@@ -92,7 +92,7 @@ impl SharedBufferUploader {
             is_share_buffer_compact: true,
             sstable_id_generator: get_remote_sstable_id_generator(hummock_meta_client.clone()),
             compaction_executor: compaction_executor.as_ref().cloned(),
-            table_id_to_slice_transform: table_id_to_slice_transform.clone(),
+            table_id_to_slice_transform,
         });
         Self {
             options,
@@ -132,7 +132,7 @@ impl SharedBufferUploader {
 
         let uploaded_sst_info = tables
             .into_iter()
-            .map(|(compaction_group_id, sst, unit_id, table_ids)| {
+            .map(|(compaction_group_id, sst, table_ids)| {
                 (
                     compaction_group_id,
                     SstableInfo {
@@ -144,7 +144,6 @@ impl SharedBufferUploader {
                         }),
                         file_size: sst.meta.estimated_size as u64,
                         table_ids,
-                        unit_id,
                     },
                 )
             })

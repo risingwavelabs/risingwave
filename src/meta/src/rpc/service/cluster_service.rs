@@ -51,9 +51,10 @@ where
         let req = request.into_inner();
         let worker_type = req.get_worker_type().map_err(tonic_err)?;
         let host = try_match_expand!(req.host, Some, "AddWorkerNodeRequest::host is empty")?;
-        let (worker_node, _added) = self
+        let worker_node_parallelism = req.worker_node_parallelism as usize;
+        let worker_node = self
             .cluster_manager
-            .add_worker_node(host, worker_type)
+            .add_worker_node(worker_type, host, worker_node_parallelism)
             .await?;
         Ok(Response::new(AddWorkerNodeResponse {
             status: None,

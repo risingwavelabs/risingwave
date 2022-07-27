@@ -25,7 +25,7 @@ use parking_lot::{RwLock, RwLockUpgradableReadGuard, RwLockWriteGuard};
 use risingwave_common::config::StorageConfig;
 use risingwave_hummock_sdk::compaction_group::hummock_version_ext::HummockVersionExt;
 use risingwave_hummock_sdk::key::FullKey;
-use risingwave_hummock_sdk::slice_transform::SliceTransform;
+use risingwave_hummock_sdk::slice_transform::SliceTransformImpl;
 use risingwave_hummock_sdk::{CompactionGroupId, LocalSstableInfo};
 use risingwave_pb::hummock::{HummockVersion, HummockVersionDelta};
 use risingwave_rpc_client::HummockMetaClient;
@@ -130,7 +130,7 @@ impl BufferTracker {
 }
 
 /// The `LocalVersionManager` maintains a local copy of storage service's hummock version data.
-/// By acquiring a `ScopedLocalVersion`, the `SSTables` of this version is guaranteed to be valid
+/// By acquiring a `ScopedLocalVersion`, the `Sstables` of this version is guaranteed to be valid
 /// during the lifetime of `ScopedLocalVersion`. Internally `LocalVersionManager` will pin/unpin the
 /// versions in storage service.
 pub struct LocalVersionManager {
@@ -148,7 +148,7 @@ impl LocalVersionManager {
         stats: Arc<StateStoreMetrics>,
         hummock_meta_client: Arc<dyn HummockMetaClient>,
         write_conflict_detector: Option<Arc<ConflictDetector>>,
-        table_id_to_slice_transform: Arc<RwLock<HashMap<u32, Arc<dyn SliceTransform>>>>,
+        table_id_to_slice_transform: Arc<RwLock<HashMap<u32, SliceTransformImpl>>>,
     ) -> Arc<LocalVersionManager> {
         let (version_unpin_worker_tx, version_unpin_worker_rx) =
             tokio::sync::mpsc::unbounded_channel();
@@ -343,6 +343,7 @@ impl LocalVersionManager {
         compaction_group_id: CompactionGroupId,
         kv_pairs: Vec<(Bytes, StorageValue)>,
         is_remote_batch: bool,
+        table_id: u32,
     ) -> HummockResult<usize> {
         let sorted_items = Self::build_shared_buffer_item_batches(kv_pairs, epoch);
 
@@ -351,6 +352,7 @@ impl LocalVersionManager {
             epoch,
             self.buffer_tracker.buffer_event_sender.clone(),
             compaction_group_id,
+            table_id,
         );
         let batch_size = batch.size();
         if self.buffer_tracker.try_write(batch_size) {

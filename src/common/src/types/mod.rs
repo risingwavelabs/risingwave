@@ -913,6 +913,32 @@ impl ScalarImpl {
     }
 }
 
+pub fn literal_type_match(data_type: &DataType, literal: Option<&ScalarImpl>) -> bool {
+    match literal {
+        Some(datum) => {
+            matches!(
+                (data_type, datum),
+                (DataType::Boolean, ScalarImpl::Bool(_))
+                    | (DataType::Int16, ScalarImpl::Int16(_))
+                    | (DataType::Int32, ScalarImpl::Int32(_))
+                    | (DataType::Int64, ScalarImpl::Int64(_))
+                    | (DataType::Float32, ScalarImpl::Float32(_))
+                    | (DataType::Float64, ScalarImpl::Float64(_))
+                    | (DataType::Varchar, ScalarImpl::Utf8(_))
+                    | (DataType::Date, ScalarImpl::NaiveDate(_))
+                    | (DataType::Time, ScalarImpl::NaiveTime(_))
+                    | (DataType::Timestamp, ScalarImpl::NaiveDateTime(_))
+                    | (DataType::Timestampz, ScalarImpl::Int64(_))
+                    | (DataType::Decimal, ScalarImpl::Decimal(_))
+                    | (DataType::Interval, ScalarImpl::Interval(_))
+                    | (DataType::Struct { .. }, ScalarImpl::Struct(_))
+                    | (DataType::List { .. }, ScalarImpl::List(_))
+            )
+        }
+        None => true,
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use std::ops::Neg;

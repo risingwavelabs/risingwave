@@ -30,7 +30,7 @@ pub struct SystemCatalog {
     pub pk: Vec<usize>,
 
     // owner of table, should always be default super user, keep it for compatibility.
-    pub owner: String,
+    pub owner: u32,
 }
 
 impl SystemCatalog {

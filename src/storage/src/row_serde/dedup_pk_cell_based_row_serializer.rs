@@ -20,9 +20,9 @@ use risingwave_common::catalog::{ColumnDesc, ColumnId};
 use risingwave_common::error::Result;
 use risingwave_common::types::VirtualNode;
 
-use super::cell_based_row_deserializer::CellBasedRowDeserializer;
+use super::cell_based_encoding_util::serialize_column_id;
 use super::cell_based_row_serializer::CellBasedRowSerializer;
-use super::{KeyBytes, RowSerde, RowSerialize, ValueBytes};
+use super::{KeyBytes, RowSerialize, ValueBytes};
 #[derive(Clone)]
 /// [`DedupPkCellBasedRowSerializer`] is identical to [`CellBasedRowSerializer`].
 /// Difference is that before serializing a row, pk datums are filtered out.
@@ -116,25 +116,11 @@ impl RowSerialize for DedupPkCellBasedRowSerializer {
         let row = self.remove_dup_pk_datums(row);
         self.inner.serialize_for_update(vnode, pk, row)
     }
-}
 
-impl RowSerde for DedupPkCellBasedRowSerializer {
-    type Deserializer = CellBasedRowDeserializer;
-    type Serializer = DedupPkCellBasedRowSerializer;
-
-    fn create_serializer(
-        pk_indices: &[usize],
-        column_descs: &[ColumnDesc],
-        column_ids: &[ColumnId],
-    ) -> Self::Serializer {
-        RowSerialize::create_row_serializer(pk_indices, column_descs, column_ids)
-    }
-
-    fn create_deserializer(
-        column_mapping: std::sync::Arc<super::ColumnDescMapping>,
-        data_types: Vec<risingwave_common::types::DataType>,
-    ) -> Self::Deserializer {
-        super::RowDeserialize::create_row_deserializer(column_mapping, data_types)
+    fn serialize_sentinel_cell(pk_buf: &[u8], col_id: &ColumnId) -> Result<Option<Vec<u8>>> {
+        Ok(Some(
+            [pk_buf, serialize_column_id(col_id).as_slice()].concat(),
+        ))
     }
 }
 

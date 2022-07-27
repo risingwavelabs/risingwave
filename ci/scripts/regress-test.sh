@@ -28,7 +28,16 @@ cargo make link-all-in-one-binaries
 
 echo "--- Postgres regress test"
 apt-get update -yy
-apt-get -y install postgresql-client
+apt-get -y install locales
+locale-gen C
+export LANGUAGE=C
+export LANG=C
+export LC_ALL=C
+export LC_COLLATE=C
+locale-gen C
+dpkg-reconfigure --frontend=noninteractive locales
+# All the above is required because otherwise psql would throw some warning
+# that goes into the output file and thus diverges from the expected output file.
 export PGPASSWORD='postgres';
 RUST_BACKTRACE=1 target/debug/risingwave_regress_test -h db \
   -p 5432 \

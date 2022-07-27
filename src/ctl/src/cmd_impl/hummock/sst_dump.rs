@@ -20,7 +20,7 @@ use risingwave_common::util::value_encoding::deserialize_cell;
 use risingwave_frontend::catalog::TableCatalog;
 use risingwave_hummock_sdk::compaction_group::hummock_version_ext::HummockVersionExt;
 use risingwave_hummock_sdk::key::{get_epoch, get_table_id, user_key};
-use risingwave_hummock_sdk::HummockSSTableId;
+use risingwave_hummock_sdk::HummockSstableId;
 use risingwave_object_store::object::{BlockLocation, ObjectStore};
 use risingwave_rpc_client::{HummockMetaClient, MetaClient};
 use risingwave_storage::hummock::value::HummockValue;
@@ -35,20 +35,15 @@ use crate::common::HummockServiceOpts;
 type TableData = HashMap<u32, (String, Vec<(DataType, String, bool)>)>;
 
 pub async fn sst_dump() -> anyhow::Result<()> {
-    // Retrieves the SSTable store so we can access the SSTableMeta
+    // Retrieves the Sstable store so we can access the SstableMeta
     let mut hummock_opts = HummockServiceOpts::from_env()?;
     let (meta_client, hummock) = hummock_opts.create_hummock_store().await?;
     let sstable_store = &*hummock.sstable_store();
 
-    // Retrieves the latest HummockVersion from the meta client so we can access the SSTableInfo
+    // Retrieves the latest HummockVersion from the meta client so we can access the SstableInfo
     let version = meta_client.pin_version(u64::MAX).await?.2.unwrap();
 
-    // Collect all SstableIdInfos. We need them for time stamps.
-    let mut id_info_map = HashMap::new();
-    let sstable_id_infos = meta_client.list_sstable_id_infos(version.id).await?;
-    sstable_id_infos.iter().for_each(|id_info| {
-        id_info_map.insert(id_info.id, id_info);
-    });
+    // SST's timestamp info is only available in object store
 
     let table_data = load_table_schemas(&meta_client).await?;
 
@@ -62,23 +57,9 @@ pub async fn sst_dump() -> anyhow::Result<()> {
             let sstable = sstable_cache.value().as_ref();
             let sstable_meta = &sstable.meta;
 
-            let sstable_id_info = id_info_map[&id];
-
             println!("SST id: {}", id);
             println!("-------------------------------------");
             println!("Level: {}", level.level_type);
-            println!(
-                "Creation Timestamp: {}",
-                sstable_id_info.id_create_timestamp
-            );
-            println!(
-                "Creation Timestamp (Meta): {}",
-                sstable_id_info.meta_create_timestamp
-            );
-            println!(
-                "Deletion Timestamp (Meta): {}",
-                sstable_id_info.meta_delete_timestamp
-            );
             println!("File Size: {}", sstable_info.file_size);
 
             if let Some(key_range) = sstable_info.key_range.as_ref() {
@@ -129,7 +110,7 @@ async fn load_table_schemas(meta_client: &MetaClient) -> anyhow::Result<TableDat
 
 /// Prints all blocks of a given SST including all contained KV-pairs.
 async fn print_blocks(
-    id: HummockSSTableId,
+    id: HummockSstableId,
     table_data: &TableData,
     sstable_store: &SstableStore,
     sstable_meta: &SstableMeta,
