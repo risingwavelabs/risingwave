@@ -292,9 +292,17 @@ impl FunctionalDependencySet {
     }
 
     /// Remove redundant columns from the given set.
+    ///
     /// Redundant columns can be functionally determined by other columns so there is no need to
-    /// keep them in a key. Note that the accurate minimization algorithm can take O(2^n) time,
-    /// so we use a approximate algorithm.
+    /// keep them in a key.
+    ///
+    /// Note that the accurate minimization algorithm can take O(2^n) time,
+    /// so we use a approximate algorithm which use O(cn) time. `c` is the number of columns, and
+    /// `n` is the number of functional dependency rules.
+    ///
+    /// This algorithm removes columns one by one and check
+    /// whether the remaining columns can form a key or not. If the remaining columns can form a
+    /// key, then this column can be removed.
     pub fn minimize_key(&self, key: FixedBitSet) -> FixedBitSet {
         let mut new_key = key.clone();
         for i in key.ones() {
