@@ -16,13 +16,10 @@ use pgwire::pg_response::{PgResponse, StatementType};
 use risingwave_common::catalog::PG_CATALOG_SCHEMA_NAME;
 use risingwave_common::error::ErrorCode::PermissionDenied;
 use risingwave_common::error::{ErrorCode, Result, TrackingIssue};
-
 use risingwave_sqlparser::ast::{DropMode, ObjectName};
-
 
 use crate::binder::Binder;
 use crate::catalog::CatalogError;
-
 use crate::session::OptimizerContext;
 
 pub async fn handle_drop_schema(

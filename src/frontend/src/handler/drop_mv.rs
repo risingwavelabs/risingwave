@@ -15,13 +15,10 @@
 use pgwire::pg_response::{PgResponse, StatementType};
 use risingwave_common::error::ErrorCode::PermissionDenied;
 use risingwave_common::error::{ErrorCode, Result, RwError};
-
 use risingwave_sqlparser::ast::ObjectName;
-
 
 use crate::binder::Binder;
 use crate::handler::drop_table::check_source;
-
 use crate::session::OptimizerContext;
 
 pub async fn handle_drop_mv(

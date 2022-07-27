@@ -18,13 +18,10 @@ use pgwire::pg_response::{PgResponse, StatementType};
 use risingwave_common::error::ErrorCode::PermissionDenied;
 use risingwave_common::error::{ErrorCode, Result, RwError};
 use risingwave_pb::stream_plan::source_node::SourceType;
-
 use risingwave_sqlparser::ast::ObjectName;
-
 
 use crate::binder::Binder;
 use crate::catalog::catalog_service::CatalogReader;
-
 use crate::session::{OptimizerContext, SessionImpl};
 
 pub fn check_source(
