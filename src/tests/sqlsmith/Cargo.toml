@@ -24,3 +24,6 @@ workspace-hack = { version = "0.1", path = "../../workspace-hack" }
 [[bin]]
 name = "sqlsmith"
 path = "src/bin/main.rs"
+
+[features]
+enable_sqlsmith_unit_test = []
