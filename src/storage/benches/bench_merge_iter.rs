@@ -20,7 +20,8 @@ use criterion::{criterion_group, criterion_main, BenchmarkId, Criterion};
 use futures::executor::block_on;
 use risingwave_hummock_sdk::compaction_group::StaticCompactionGroupId;
 use risingwave_storage::hummock::iterator::{
-    Forward, HummockIterator, OrderedMergeIteratorInner, UnorderedMergeIteratorInner,
+    Forward, HummockIterator, HummockIteratorUnion, OrderedMergeIteratorInner,
+    UnorderedMergeIteratorInner,
 };
 use risingwave_storage::hummock::shared_buffer::shared_buffer_batch::{
     SharedBufferBatch, SharedBufferBatchIterator,
@@ -53,6 +54,45 @@ fn gen_interleave_shared_buffer_batch_iter(
     iterators
 }
 
+#[allow(clippy::type_complexity)]
+fn gen_interleave_shared_buffer_batch_enum_iter(
+    batch_size: usize,
+    batch_count: usize,
+) -> Vec<
+    HummockIteratorUnion<
+        Forward,
+        SharedBufferBatchIterator<Forward>,
+        SharedBufferBatchIterator<Forward>,
+        SharedBufferBatchIterator<Forward>,
+        SharedBufferBatchIterator<Forward>,
+    >,
+> {
+    let mut iterators = Vec::new();
+    for i in 0..batch_count {
+        let mut batch_data = vec![];
+        for j in 0..batch_size {
+            batch_data.push((
+                Bytes::copy_from_slice(format!("test_key_{:08}", j * batch_count + i).as_bytes()),
+                HummockValue::put(Bytes::copy_from_slice("value".as_bytes())),
+            ));
+        }
+        let batch = SharedBufferBatch::new(
+            batch_data,
+            2333,
+            mpsc::unbounded_channel().0,
+            StaticCompactionGroupId::StateDefault.into(),
+        );
+        match i % 4 {
+            0 => iterators.push(HummockIteratorUnion::First(batch.into_forward_iter())),
+            1 => iterators.push(HummockIteratorUnion::Second(batch.into_forward_iter())),
+            2 => iterators.push(HummockIteratorUnion::Third(batch.into_forward_iter())),
+            3 => iterators.push(HummockIteratorUnion::Fourth(batch.into_forward_iter())),
+            _ => unreachable!(),
+        };
+    }
+    iterators
+}
+
 fn run_iter<I: HummockIterator<Direction = Forward>>(iter_ref: &RefCell<I>, total_count: usize) {
     let mut iter = iter_ref.borrow_mut();
     block_on(iter.rewind()).unwrap();
@@ -70,7 +110,7 @@ fn criterion_benchmark(c: &mut Criterion) {
         Arc::new(StateStoreMetrics::unused()),
     ));
     c.bench_with_input(
-        BenchmarkId::new("bench merge iter", "unordered"),
+        BenchmarkId::new("bench-merge-iter", "unordered"),
         &merge_iter,
         |b, iter_ref| {
             b.iter(|| {
@@ -85,7 +125,36 @@ fn criterion_benchmark(c: &mut Criterion) {
     ));
 
     c.bench_with_input(
-        BenchmarkId::new("bench merge iter", "ordered"),
+        BenchmarkId::new("bench-merge-iter", "ordered"),
+        &ordered_merge_iter,
+        |b, iter_ref| {
+            b.iter(|| {
+                run_iter(iter_ref, 100 * 10000);
+            });
+        },
+    );
+
+    let merge_iter = RefCell::new(UnorderedMergeIteratorInner::new(
+        gen_interleave_shared_buffer_batch_enum_iter(10000, 100),
+        Arc::new(StateStoreMetrics::unused()),
+    ));
+    c.bench_with_input(
+        BenchmarkId::new("bench-enum-merge-iter", "unordered"),
+        &merge_iter,
+        |b, iter_ref| {
+            b.iter(|| {
+                run_iter(iter_ref, 100 * 10000);
+            });
+        },
+    );
+
+    let ordered_merge_iter = RefCell::new(OrderedMergeIteratorInner::new(
+        gen_interleave_shared_buffer_batch_enum_iter(10000, 100),
+        Arc::new(StateStoreMetrics::unused()),
+    ));
+
+    c.bench_with_input(
+        BenchmarkId::new("bench-enum-merge-iter", "ordered"),
         &ordered_merge_iter,
         |b, iter_ref| {
             b.iter(|| {
