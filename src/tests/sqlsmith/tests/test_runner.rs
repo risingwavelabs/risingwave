@@ -12,6 +12,9 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+#![feature(backtrace)]
+
+use std::backtrace::Backtrace;
 use std::sync::Arc;
 use std::{env, panic};
 
@@ -33,6 +36,7 @@ async fn handle(session: Arc<SessionImpl>, stmt: Statement, sql: String) {
     let sql_copy = sql.clone();
     panic::set_hook(Box::new(move |e| {
         println!("Panic on SQL:\n{}\nReason:\n{}", sql_copy, e);
+        println!("Backtrace: {}", Backtrace::capture());
     }));
 
     handler::handle(session.clone(), stmt, &sql, false)
@@ -79,6 +83,7 @@ fn test_batch_queries(session: Arc<SessionImpl>, tables: Vec<Table>, rng: &mut i
         let sql_copy = sql.clone();
         panic::set_hook(Box::new(move |e| {
             println!("Panic on SQL:\n{}\nReason:\n{}", sql_copy.clone(), e);
+            println!("Backtrace: {}", Backtrace::capture());
         }));
 
         // The generated SQL must be parsable.
