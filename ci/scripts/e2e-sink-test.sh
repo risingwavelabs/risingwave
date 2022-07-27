@@ -41,7 +41,7 @@ cargo make ci-start
 
 
 
-
+docker inspect mysql
 
 wait_server() {
     # https://stackoverflow.com/a/44484835/5242660
