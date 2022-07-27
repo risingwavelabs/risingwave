@@ -45,6 +45,7 @@ fn gen_interleave_shared_buffer_batch_iter(
             2333,
             mpsc::unbounded_channel().0,
             StaticCompactionGroupId::StateDefault.into(),
+            Default::default(),
         );
         iterators.push(Box::new(batch.into_forward_iter()) as BoxedForwardHummockIterator);
     }

@@ -18,7 +18,7 @@ use risingwave_common::array::Row;
 use risingwave_common::catalog::ColumnId;
 use risingwave_common::error::Result;
 use risingwave_common::types::{VirtualNode, VIRTUAL_NODE_SIZE};
-use risingwave_common::util::ordered::{OrderedRowSerializer, SENTINEL_CELL_ID};
+use risingwave_common::util::ordered::SENTINEL_CELL_ID;
 use risingwave_common::util::value_encoding::serialize_cell;
 
 type KeyBytes = Vec<u8>;
@@ -90,12 +90,6 @@ pub fn serialize_pk_and_row_state(
         result.push((key, None));
         Ok(result)
     }
-}
-
-pub fn serialize_pk(pk: &Row, serializer: &OrderedRowSerializer) -> Vec<u8> {
-    let mut result = vec![];
-    serializer.serialize(pk, &mut result);
-    result
 }
 
 pub fn serialize_column_id(column_id: &ColumnId) -> [u8; 4] {

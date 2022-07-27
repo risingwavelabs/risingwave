@@ -354,11 +354,12 @@ mod tests {
         // 1. add sstables
         let val = Bytes::from(b"0"[..].repeat(1 << 10)); // 1024 Byte value
 
-        let keyspace = Keyspace::table_root(storage.clone(), &TableId::new(1));
+        let existing_table_id: u32 = 1;
+        let keyspace = Keyspace::table_root(storage.clone(), &TableId::new(existing_table_id));
         // Only registered table_ids are accepted in commit_epoch
         register_table_ids_to_compaction_group(
             hummock_manager_ref.compaction_group_manager_ref_for_test(),
-            &[keyspace.table_id().table_id],
+            &[existing_table_id],
             StaticCompactionGroupId::StateDefault.into(),
         )
         .await;
@@ -369,7 +370,7 @@ mod tests {
             epoch += 1;
             let mut write_batch = keyspace.state_store().start_write_batch(WriteOptions {
                 epoch,
-                table_id: keyspace.table_id(),
+                table_id: existing_table_id.into(),
             });
             let mut local = write_batch.prefixify(&keyspace);
 
@@ -385,7 +386,7 @@ mod tests {
         // Mimic dropping table
         unregister_table_ids_from_compaction_group(
             hummock_manager_ref.compaction_group_manager_ref_for_test(),
-            &[keyspace.table_id().table_id],
+            &[existing_table_id],
         )
         .await;
 
@@ -468,14 +469,14 @@ mod tests {
             let keyspace = Keyspace::table_root(storage.clone(), &TableId::new(table_id));
             register_table_ids_to_compaction_group(
                 hummock_manager_ref.compaction_group_manager_ref_for_test(),
-                &[keyspace.table_id().table_id],
+                &[table_id],
                 StaticCompactionGroupId::StateDefault.into(),
             )
             .await;
             epoch += 1;
             let mut write_batch = keyspace.state_store().start_write_batch(WriteOptions {
                 epoch,
-                table_id: keyspace.table_id(),
+                table_id: TableId::from(table_id),
             });
             let mut local = write_batch.prefixify(&keyspace);
 
@@ -621,7 +622,7 @@ mod tests {
         let keyspace = Keyspace::table_root(storage.clone(), &TableId::new(existing_table_id));
         register_table_ids_to_compaction_group(
             hummock_manager_ref.compaction_group_manager_ref_for_test(),
-            &[keyspace.table_id().table_id],
+            &[existing_table_id],
             StaticCompactionGroupId::StateDefault.into(),
         )
         .await;
@@ -631,7 +632,7 @@ mod tests {
             epoch_set.insert(epoch);
             let mut write_batch = keyspace.state_store().start_write_batch(WriteOptions {
                 epoch,
-                table_id: keyspace.table_id(),
+                table_id: TableId::from(existing_table_id),
             });
             let mut local = write_batch.prefixify(&keyspace);
 

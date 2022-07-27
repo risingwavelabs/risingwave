@@ -68,6 +68,7 @@ async fn test_update_pinned_version() {
                 StaticCompactionGroupId::StateDefault.into(),
                 batches[i].clone(),
                 false,
+                Default::default(),
             )
             .await
             .unwrap();
@@ -151,6 +152,7 @@ async fn test_update_uncommitted_ssts() {
                 StaticCompactionGroupId::StateDefault.into(),
                 kvs[i].clone(),
                 false,
+                Default::default(),
             )
             .await
             .unwrap();
@@ -160,6 +162,7 @@ async fn test_update_uncommitted_ssts() {
             epochs[i],
             mpsc::unbounded_channel().0,
             StaticCompactionGroupId::StateDefault.into(),
+            Default::default(),
         );
         assert_eq!(
             local_version
@@ -354,6 +357,7 @@ async fn test_clear_shared_buffer() {
                 StaticCompactionGroupId::StateDefault.into(),
                 batches[i].clone(),
                 false,
+                Default::default(),
             )
             .await
             .unwrap();
