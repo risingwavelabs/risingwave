@@ -67,7 +67,7 @@ pub async fn handle_drop_database(
         (database.id(), database.owner())
     };
 
-    if *session.user_name() != owner {
+    if session.user_id() != owner {
         return Err(ErrorCode::PermissionDenied("Do not have the privilege".to_string()).into());
     }
 
@@ -106,11 +106,20 @@ mod tests {
             .unwrap();
 
         frontend.run_sql("CREATE USER user WITH NOSUPERUSER NOCREATEDB PASSWORD 'md5827ccb0eea8a706c4c34a16891f84e7b'").await.unwrap();
+        let user_id = {
+            let user_reader = session.env().user_info_reader();
+            user_reader
+                .read_guard()
+                .get_user_by_name("user")
+                .unwrap()
+                .id
+        };
         let res = frontend
             .run_user_sql(
                 "DROP DATABASE database",
                 "dev".to_string(),
                 "user".to_string(),
+                user_id,
             )
             .await;
         assert!(res.is_err());

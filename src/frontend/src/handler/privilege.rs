@@ -18,25 +18,25 @@ use risingwave_pb::user::grant_privilege::{Action as ProstAction, Object as Pros
 
 use crate::binder::{BoundStatement, Relation};
 use crate::session::SessionImpl;
+use crate::user::UserId;
 
 pub struct ObjectCheckItem {
-    pub owner: String, // owner of the object
+    pub owner: UserId, // owner of the object
     pub action: ProstAction,
     pub object: ProstObject,
 }
 
 /// wrap function
 pub(crate) fn get_single_check_item(
-    owner: String,
+    owner: UserId,
     action: ProstAction,
     object: ProstObject,
 ) -> Vec<ObjectCheckItem> {
-    let item = ObjectCheckItem {
+    let items = vec![ObjectCheckItem {
         owner,
         action,
         object,
-    };
-    let items = vec![item];
+    }];
     items
 }
 
@@ -49,7 +49,7 @@ pub(crate) fn resolve_relation_privilege(
     match relation {
         Relation::Source(source) => {
             let item = ObjectCheckItem {
-                owner: source.catalog.owner.clone(),
+                owner: source.catalog.owner,
                 action,
                 object: ProstObject::SourceId(source.catalog.id),
             };
@@ -57,7 +57,7 @@ pub(crate) fn resolve_relation_privilege(
         }
         Relation::BaseTable(table) => {
             let item = ObjectCheckItem {
-                owner: table.table_catalog.owner.clone(),
+                owner: table.table_catalog.owner,
                 action,
                 object: ProstObject::TableId(table.table_id.table_id),
             };
@@ -87,7 +87,7 @@ pub(crate) fn resolve_privilege(stmt: &BoundStatement) -> Vec<ObjectCheckItem> {
     match stmt {
         crate::binder::BoundStatement::Insert(ref insert) => {
             let object = ObjectCheckItem {
-                owner: insert.table_source.owner.clone(),
+                owner: insert.table_source.owner,
                 action: ProstAction::Insert,
                 object: ProstObject::TableId(insert.table_source.source_id.table_id),
             };
@@ -100,26 +100,19 @@ pub(crate) fn resolve_privilege(stmt: &BoundStatement) -> Vec<ObjectCheckItem> {
         }
         crate::binder::BoundStatement::Delete(ref delete) => {
             let object = ObjectCheckItem {
-                owner: delete.table_source.owner.clone(),
+                owner: delete.table_source.owner,
                 action: ProstAction::Delete,
                 object: ProstObject::TableId(delete.table_source.source_id.table_id),
-            };
-            objects.push(object);
-            let object = ObjectCheckItem {
-                owner: delete.table.table_catalog.owner.clone(),
-                action: ProstAction::Select,
-                object: ProstObject::TableId(delete.table.table_id.table_id),
             };
             objects.push(object);
         }
         crate::binder::BoundStatement::Update(ref update) => {
             let object = ObjectCheckItem {
-                owner: update.table_source.owner.clone(),
+                owner: update.table_source.owner,
                 action: ProstAction::Update,
                 object: ProstObject::TableId(update.table_source.source_id.table_id),
             };
             objects.push(object);
-            resolve_relation_privilege(&update.table, ProstAction::Select, &mut objects);
         }
         crate::binder::BoundStatement::Query(ref query) => {
             if let crate::binder::BoundSetExpr::Select(select) = &query.body {
@@ -142,7 +135,7 @@ pub(crate) fn check_privilege(session: &SessionImpl, items: &Vec<ObjectCheckItem
             return Ok(());
         }
         for item in items {
-            if item.owner == info.name {
+            if item.owner == info.id {
                 continue;
             }
             let has_privilege = info.grant_privileges.iter().any(|privilege| {
@@ -165,7 +158,7 @@ pub(crate) fn check_privilege(session: &SessionImpl, items: &Vec<ObjectCheckItem
 
 #[cfg(test)]
 mod tests {
-    use risingwave_common::catalog::{DEFAULT_DATABASE_NAME, DEFAULT_SUPPER_USER};
+    use risingwave_common::catalog::{DEFAULT_DATABASE_NAME, DEFAULT_SUPER_USER_ID};
 
     use super::*;
     use crate::test_utils::LocalFrontend;
@@ -183,7 +176,7 @@ mod tests {
             .unwrap()
             .clone();
         let check_items = get_single_check_item(
-            DEFAULT_SUPPER_USER.to_string(),
+            DEFAULT_SUPER_USER_ID,
             ProstAction::Create,
             ProstObject::SchemaId(schema.id()),
         );
@@ -197,7 +190,15 @@ mod tests {
             .unwrap();
         let database = DEFAULT_DATABASE_NAME.to_string();
         let user_name = "user".to_string();
-        let session = frontend.session_user_ref(database, user_name);
+        let user_id = {
+            let user_reader = session.env().user_info_reader();
+            user_reader
+                .read_guard()
+                .get_user_by_name("user")
+                .unwrap()
+                .id
+        };
+        let session = frontend.session_user_ref(database, user_name, user_id);
         assert!(check_privilege(&session, &check_items).is_err());
 
         frontend

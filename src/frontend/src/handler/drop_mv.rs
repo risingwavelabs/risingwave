@@ -39,7 +39,7 @@ pub async fn handle_drop_mv(
 
         {
             let check_items = get_single_check_item(
-                table.owner.clone(),
+                table.owner,
                 Action::Delete,
                 Object::TableId(table.id().table_id()),
             );

@@ -33,11 +33,8 @@ pub async fn handle_drop_source(context: OptimizerContext, name: ObjectName) -> 
         .clone();
 
     {
-        let check_items = get_single_check_item(
-            source.owner.clone(),
-            Action::Delete,
-            Object::SourceId(source.id),
-        );
+        let check_items =
+            get_single_check_item(source.owner, Action::Delete, Object::SourceId(source.id));
         check_privilege(&session, &check_items)?;
     }
 

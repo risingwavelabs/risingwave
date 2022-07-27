@@ -63,7 +63,7 @@ pub async fn handle_create_schema(
 
     {
         let check_items =
-            get_single_check_item(db_owner.clone(), Action::Create, Object::DatabaseId(db_id));
+            get_single_check_item(db_owner, Action::Create, Object::DatabaseId(db_id));
         check_privilege(&session, &check_items)?;
     }
 

@@ -79,7 +79,7 @@ pub(crate) fn gen_create_index_plan(
 
     {
         let check_items = get_single_check_item(
-            table.owner.clone(),
+            table.owner,
             Action::Select,
             Object::TableId(table.id.table_id),
         );

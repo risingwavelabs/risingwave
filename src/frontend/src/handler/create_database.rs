@@ -82,21 +82,39 @@ mod tests {
         }
 
         frontend.run_sql("CREATE USER user WITH NOSUPERUSER NOCREATEDB PASSWORD 'md5827ccb0eea8a706c4c34a16891f84e7b'").await.unwrap();
+        let user_id = {
+            let user_reader = session.env().user_info_reader();
+            user_reader
+                .read_guard()
+                .get_user_by_name("user")
+                .unwrap()
+                .id
+        };
         let res = frontend
             .run_user_sql(
                 "CREATE DATABASE database2",
                 "dev".to_string(),
                 "user".to_string(),
+                user_id,
             )
             .await;
         assert!(res.is_err());
 
         frontend.run_sql("CREATE USER user2 WITH NOSUPERUSER CREATEDB PASSWORD 'md5827ccb0eea8a706c4c34a16891f84e7b'").await.unwrap();
+        let user_id = {
+            let user_reader = session.env().user_info_reader();
+            user_reader
+                .read_guard()
+                .get_user_by_name("user2")
+                .unwrap()
+                .id
+        };
         frontend
             .run_user_sql(
                 "CREATE DATABASE database2",
                 "dev".to_string(),
                 "user2".to_string(),
+                user_id,
             )
             .await
             .unwrap();

@@ -13,7 +13,7 @@
 // limitations under the License.
 
 use pgwire::pg_response::{PgResponse, StatementType};
-use risingwave_common::catalog::DEFAULT_SUPPER_USER;
+use risingwave_common::catalog::DEFAULT_SUPER_USER_ID;
 use risingwave_common::error::Result;
 use risingwave_pb::user::grant_privilege::{Action, Object};
 use risingwave_sqlparser::ast::ObjectName;
@@ -41,7 +41,7 @@ pub async fn handle_drop_sink(
     )?;
 
     {
-        let default_owner = DEFAULT_SUPPER_USER.to_string();
+        let default_owner = DEFAULT_SUPER_USER_ID;
         let check_items =
             get_single_check_item(default_owner, Action::Delete, Object::SinkId(sink_id));
         check_privilege(&session, &check_items)?;
