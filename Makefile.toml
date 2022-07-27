@@ -443,7 +443,7 @@ script = """
 #!/bin/bash
 set -e
 
-cargo build --workspace --exclude risingwave_cmd --exclude risingwave_cmd_all --exclude risingwave_rt --exclude risingwave_frontend_test_runner "$@"
+cargo build "$@"
 """
 
 [tasks.stest]
@@ -455,7 +455,7 @@ script = """
 #!/bin/bash
 set -e
 
-cargo nextest run --workspace --exclude risingwave_cmd --exclude risingwave_cmd_all --exclude risingwave_rt --exclude risingwave_frontend_test_runner "$@"
+cargo test "$@"
 """
 
 [tasks.check-hakari]

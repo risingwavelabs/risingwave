@@ -24,9 +24,8 @@ use risingwave_common::util::sort_util::OrderType;
 
 use crate::error::StorageResult;
 use crate::memory::MemoryStateStore;
-use crate::row_serde::cell_based_encoding_util::serialize_pk;
 use crate::row_serde::cell_based_row_serializer::CellBasedRowSerializer;
-use crate::row_serde::RowSerialize;
+use crate::row_serde::{serialize_pk, RowSerialize};
 use crate::storage_value::StorageValue;
 use crate::store::{StateStore, WriteOptions};
 use crate::table::state_table::{DedupPkStateTable, RowBasedStateTable, StateTable};
