@@ -67,26 +67,28 @@ impl FunctionalDependency {
 
     /// Create a [`FunctionalDependency`] for a key column. This column can determine all other
     /// columns.
-    pub fn with_key_column(column_cnt: usize, key_column_id: usize) -> Self {
+    fn with_key_column(column_cnt: usize, key_column_idx: usize) -> Self {
         let mut from = FixedBitSet::with_capacity(column_cnt);
-        from.set(key_column_id, true);
+        from.set(key_column_idx, true);
         let mut to = from.clone();
         to.toggle_range(0..to.len());
         FunctionalDependency { from, to }
     }
 
-    /// Create a [`FunctionalDependency`] for a constant column. This column can be determined by
-    /// any column.
-    pub fn with_constant_column(column_cnt: usize, constant_column_id: usize) -> Self {
+    /// Create a [`FunctionalDependency`] for constant columns.
+    /// These columns can be determined by any column.
+    pub fn with_constant(column_cnt: usize, constant_indices: &[usize]) -> Self {
         let mut to = FixedBitSet::with_capacity(column_cnt);
-        to.set(constant_column_id, true);
+        for &i in constant_indices {
+            to.set(i, true);
+        }
         FunctionalDependency {
             from: FixedBitSet::with_capacity(column_cnt),
             to,
         }
     }
 
-    pub fn into_inner(self) -> (FixedBitSet, FixedBitSet) {
+    pub fn into_parts(self) -> (FixedBitSet, FixedBitSet) {
         (self.from, self.to)
     }
 }
@@ -96,6 +98,16 @@ impl FunctionalDependency {
 /// It is used in optimizer to track the dependencies between columns.
 #[derive(Debug, PartialEq, Clone, Default)]
 pub struct FunctionalDependencySet {
+    /// `strict` contains all strict functional dependencies.
+    ///
+    /// The strict functional dependency use the **NULL=** semantic. It means that all NULLs are
+    /// considered as equal. So if strict dependency A --> B holds, the following table is
+    /// **NOT** allowed. ```
+    ///   A   | B
+    /// ------|---
+    ///  NULL | 1
+    ///  NULL | 2
+    /// ```
     strict: Vec<FunctionalDependency>,
 }
 
@@ -105,7 +117,7 @@ impl FunctionalDependencySet {
         Self { strict: Vec::new() }
     }
 
-    /// Create a [`FunctionalDependencySet`] with the indices of a key.
+    /// Create a [`FunctionalDependencySet`] with the indices of a unique key.
     ///
     /// # Examples
     /// ```rust
@@ -117,19 +129,20 @@ impl FunctionalDependencySet {
     /// assert_eq!(fd_inner.len(), 1);
     ///
     /// let FunctionalDependency { from, to } = fd_inner[0];
+    /// // 1 --> 0, 2, 3
     /// assert_eq!(from.ones().collect_vec(), &[1]);
     /// assert_eq!(to.ones().collect_vec(), &[0, 2, 3]);
     /// ```
     pub fn with_key(column_cnt: usize, key_indices: &[usize]) -> Self {
         let mut tmp = Self::new();
-        tmp.add_key_column_by_indices(column_cnt, key_indices);
+        tmp.add_key_column(column_cnt, key_indices);
         tmp
     }
 
     /// Create a [`FunctionalDependencySet`] with a dependency [`Vec`]
-    pub fn with_dependencies(dependencies: Vec<FunctionalDependency>) -> Self {
+    pub fn with_dependencies(strict_dependencies: Vec<FunctionalDependency>) -> Self {
         Self {
-            strict: dependencies,
+            strict: strict_dependencies,
         }
     }
 
@@ -159,16 +172,6 @@ impl FunctionalDependencySet {
         }
     }
 
-    fn add_key_column_by_index(&mut self, column_cnt: usize, column_id: usize) {
-        let mut from = FixedBitSet::with_capacity(column_cnt);
-        from.set(column_id, true);
-        let mut to = from.clone();
-        to.toggle_range(0..to.len());
-        self.add_functional_dependency(FunctionalDependency::with_key_column(
-            column_cnt, column_id,
-        ));
-    }
-
     /// Add key columns to a  [`FunctionalDependencySet`].
     ///
     /// # Examples
@@ -186,9 +189,9 @@ impl FunctionalDependencySet {
     /// assert_eq!(from.ones().collect_vec(), &[1]);
     /// assert_eq!(to.ones().collect_vec(), &[0, 2, 3]);
     /// ```
-    pub fn add_key_column_by_indices(&mut self, column_cnt: usize, key_indices: &[usize]) {
-        for &i in key_indices {
-            self.add_key_column_by_index(column_cnt, i);
+    pub fn add_key_column(&mut self, column_cnt: usize, key_indices: &[usize]) {
+        for &idx in key_indices {
+            self.add_functional_dependency(FunctionalDependency::with_key_column(column_cnt, idx));
         }
     }
 
@@ -208,9 +211,10 @@ impl FunctionalDependencySet {
     /// assert!(from.ones().collect_vec().is_empty());
     /// assert_eq!(to.ones().collect_vec(), &[1]);
     /// ```
-    pub fn add_constant_column_by_index(&mut self, column_cnt: usize, column_id: usize) {
-        self.add_functional_dependency(FunctionalDependency::with_constant_column(
-            column_cnt, column_id,
+    pub fn add_constant_column(&mut self, column_cnt: usize, constant_columns: &[usize]) {
+        self.add_functional_dependency(FunctionalDependency::with_constant(
+            column_cnt,
+            constant_columns,
         ));
     }
 
@@ -237,21 +241,7 @@ impl FunctionalDependencySet {
         to: &[usize],
         column_cnt: usize,
     ) {
-        let from = {
-            let mut tmp = FixedBitSet::with_capacity(column_cnt);
-            for &i in from {
-                tmp.set(i, true);
-            }
-            tmp
-        };
-        let to = {
-            let mut tmp = FixedBitSet::with_capacity(column_cnt);
-            for &i in to {
-                tmp.set(i, true);
-            }
-            tmp
-        };
-        self.add_functional_dependency(FunctionalDependency::new(from, to))
+        self.add_functional_dependency(FunctionalDependency::with_indices(column_cnt, from, to))
     }
 
     fn get_closure(&self, columns: FixedBitSet) -> FixedBitSet {
@@ -291,7 +281,7 @@ impl FunctionalDependencySet {
         self.get_closure(determinant).is_superset(&dependant)
     }
 
-    /// Return true if `columns` is a key.
+    /// Return true if the combination of `columns` can fully determine other columns.
     pub fn is_key(&self, columns: FixedBitSet) -> bool {
         let all_columns = {
             let mut tmp = columns.clone();

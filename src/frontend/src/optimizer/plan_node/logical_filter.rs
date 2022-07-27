@@ -48,8 +48,8 @@ impl LogicalFilter {
         let pk_indices = input.pk_indices().to_vec();
         let mut functional_dependency = input.functional_dependency().clone();
         for i in &predicate.conjunctions {
-            if let Some((col, _)) = i.as_eq_literal() {
-                functional_dependency.add_constant_column_by_index(column_cnt, col.index())
+            if let Some((col, _)) = i.as_eq_const() {
+                functional_dependency.add_constant_column(column_cnt, &[col.index()])
             } else if let Some((left, right)) = i.as_eq_cond() {
                 functional_dependency.add_functional_dependency_by_column_indices(
                     &[left.index()],
