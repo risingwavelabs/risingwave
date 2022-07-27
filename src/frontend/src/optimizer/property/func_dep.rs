@@ -313,24 +313,4 @@ impl FunctionalDependencySet {
         }
         new_key
     }
-
-    pub fn rewrite_with_mapping(mut self, col_change: ColIndexMapping) -> Self {
-        let mut new_fd = Vec::new();
-        for FunctionalDependency { from, to } in self.strict.drain(..) {
-            assert_eq!(from.len(), col_change.source_size());
-            assert_eq!(to.len(), col_change.source_size());
-            let new_from = from
-                .ones()
-                .map(|idx| col_change.try_map(idx))
-                .collect::<Option<FixedBitSet>>();
-            if let Some(mut new_from) = new_from {
-                new_from.grow(col_change.target_size());
-                let new_to = col_change.rewrite_bitset(&to);
-                new_fd.push(FunctionalDependency::new(new_from, new_to));
-            } else {
-                continue;
-            }
-        }
-        Self { strict: new_fd }
-    }
 }

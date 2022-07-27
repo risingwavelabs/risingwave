@@ -323,10 +323,8 @@ impl LogicalJoin {
             fd_set
         };
         let get_new_right_fd_set = |right_fd_set: FunctionalDependencySet| {
-            right_fd_set.rewrite_with_mapping(ColIndexMapping::with_shift_offset(
-                right_len,
-                left_len.try_into().unwrap(),
-            ))
+            ColIndexMapping::with_shift_offset(right_len, left_len.try_into().unwrap())
+                .rewrite_functional_dependency_set(right_fd_set)
         };
         let fd_set: FunctionalDependencySet = match join_type {
             JoinType::Inner => {
@@ -364,10 +362,8 @@ impl LogicalJoin {
             JoinType::LeftSemi | JoinType::LeftAnti => left_fd_set,
             JoinType::RightSemi | JoinType::RightAnti => right_fd_set,
         };
-        fd_set.rewrite_with_mapping(ColIndexMapping::with_remaining_columns(
-            output_indices,
-            out_col_num,
-        ))
+        ColIndexMapping::with_remaining_columns(output_indices, out_col_num)
+            .rewrite_functional_dependency_set(fd_set)
     }
 
     /// Get a reference to the logical join's on.

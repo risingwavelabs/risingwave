@@ -19,7 +19,9 @@ use fixedbitset::FixedBitSet;
 use itertools::Itertools;
 
 use crate::expr::{Expr, ExprImpl, ExprRewriter, InputRef};
-use crate::optimizer::property::{Distribution, FieldOrder, Order, RequiredDist};
+use crate::optimizer::property::{
+    Distribution, FieldOrder, FunctionalDependency, FunctionalDependencySet, Order, RequiredDist,
+};
 
 /// `ColIndexMapping` is a partial mapping from usize to usize.
 ///
@@ -338,6 +340,39 @@ impl ColIndexMapping {
             },
             _ => dist.clone(),
         }
+    }
+
+    pub fn rewrite_functional_dependency(
+        &self,
+        fd: &FunctionalDependency,
+    ) -> Option<FunctionalDependency> {
+        assert_eq!(fd.from.len(), self.source_size());
+        assert_eq!(fd.to.len(), self.source_size());
+        let new_from = fd
+            .from
+            .ones()
+            .map(|idx| self.try_map(idx))
+            .collect::<Option<FixedBitSet>>();
+        if let Some(mut new_from) = new_from {
+            new_from.grow(self.target_size());
+            let new_to = self.rewrite_bitset(&fd.to);
+            Some(FunctionalDependency::new(new_from, new_to))
+        } else {
+            None
+        }
+    }
+
+    pub fn rewrite_functional_dependency_set(
+        &self,
+        fd_set: FunctionalDependencySet,
+    ) -> FunctionalDependencySet {
+        let mut new_fd_set = FunctionalDependencySet::new();
+        for i in fd_set.into_dependencies() {
+            if let Some(fd) = self.rewrite_functional_dependency(&i) {
+                new_fd_set.add_functional_dependency(fd);
+            }
+        }
+        new_fd_set
     }
 
     pub fn rewrite_bitset(&self, bitset: &FixedBitSet) -> FixedBitSet {
