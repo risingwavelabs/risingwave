@@ -159,9 +159,10 @@ pub(crate) fn gen_create_index_plan(
         )?
     };
 
-    let index_table = materialize
+    let mut index_table = materialize
         .table()
         .to_prost(index_schema_id, index_database_id);
+    index_table.owner = session.user_id();
 
     Ok((materialize.into(), index_table))
 }
