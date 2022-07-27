@@ -14,29 +14,6 @@
 
 use risingwave_pb::hummock::{CompactTask, SstableInfo};
 
-pub fn compact_task_to_string_short(compact_task: &CompactTask) -> String {
-    use std::fmt::Write;
-
-    let mut s = String::new();
-    writeln!(
-        s,
-        "Compaction task id: {:?}, target level: {:?}",
-        compact_task.task_id, compact_task.target_level
-    )
-    .unwrap();
-    s.push_str("Compaction SSTables structure: \n");
-    for level_entry in &compact_task.input_ssts {
-        writeln!(
-            s,
-            "Level {:?}, count: {} ",
-            level_entry.level_idx,
-            level_entry.table_infos.len()
-        )
-        .unwrap();
-    }
-    s
-}
-
 pub fn compact_task_to_string(compact_task: &CompactTask) -> String {
     use std::fmt::Write;
 

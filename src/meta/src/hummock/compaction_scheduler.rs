@@ -17,7 +17,7 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use parking_lot::Mutex;
-use risingwave_hummock_sdk::compact::{compact_task_to_string, compact_task_to_string_short};
+use risingwave_hummock_sdk::compact::compact_task_to_string;
 use risingwave_hummock_sdk::CompactionGroupId;
 use tokio::sync::mpsc::UnboundedSender;
 use tokio::sync::oneshot::Receiver;
@@ -145,6 +145,10 @@ where
         if CompactStatus::is_trivial_move_task(&compact_task) {
             compact_task.task_status = true;
             compact_task.sorted_output_ssts = compact_task.input_ssts[0].table_infos.clone();
+            tracing::info!(
+                "trivial move task: \n{}",
+                compact_task_to_string(&compact_task)
+            );
             return self
                 .hummock_manager
                 .report_compact_task_impl(&compact_task, true)
@@ -184,9 +188,9 @@ where
                 Ok(_) => {
                     // TODO: timeout assigned compaction task and move send_task after
                     // assign_compaction_task
-                    tracing::info!(
+                    tracing::trace!(
                         "Assigned compaction task. {}",
-                        compact_task_to_string_short(&compact_task)
+                        compact_task_to_string(&compact_task)
                     );
                     // Reschedule it in case there are more tasks from this compaction group.
                     request_channel.try_send(compaction_group);

@@ -14,6 +14,7 @@
 
 use std::sync::Arc;
 
+use risingwave_hummock_sdk::compaction_group::hummock_version_ext::HummockLevelsExt;
 use risingwave_pb::hummock::hummock_version::Levels;
 use risingwave_pb::hummock::{
     CompactionConfig, InputLevel, Level, LevelType, OverlappingLevel, SstableInfo,
@@ -54,7 +55,8 @@ impl CompactionPicker for LevelCompactionPicker {
 
         let is_l0_pending_compact = level_handlers[0].is_level_pending_compact(&l0.sub_levels[0]);
 
-        if !is_l0_pending_compact && levels.levels[self.target_level - 1].table_infos.is_empty() {
+        // move the whole level to target level.
+        if !is_l0_pending_compact && levels.get_level(self.target_level).table_infos.is_empty() {
             level_handlers[select_level].add_pending_task(
                 next_task_id,
                 self.target_level,
@@ -78,8 +80,10 @@ impl CompactionPicker for LevelCompactionPicker {
             });
         }
 
-        let mut input_levels = self.pick_min_overlap_tables(l0, &levels.levels, level_handlers);
-
+        // Pick one table which overlap with smallest data. There may be no file in target level
+        //  which overlap with select files. That would be a trivial move.
+        let mut input_levels =
+            self.pick_min_overlap_tables(l0, levels.get_level(self.target_level), level_handlers);
         if input_levels.is_empty() {
             return None;
         }
@@ -89,10 +93,15 @@ impl CompactionPicker for LevelCompactionPicker {
         let write_amplification = cal_file_size(&input_levels[1].table_infos) * 100
             / cal_file_size(&input_levels[0].table_infos);
 
-        if write_amplification >= MAX_WRITE_AMPLIFICATION
-            && !is_l0_pending_compact
-            && level_handlers[self.target_level].get_pending_file_count() == 0
-        {
+        // Pick the whole level to reduce write amplification.
+        if write_amplification >= MAX_WRITE_AMPLIFICATION {
+            // If there is any pending compact file in sub-level 0 or target level,
+            //  we can not pick the whole level to compact.
+            if is_l0_pending_compact
+                || level_handlers[self.target_level].get_pending_file_count() > 0
+            {
+                return None;
+            }
             input_levels.clear();
             input_levels.push(InputLevel {
                 level_idx: 0,
@@ -117,7 +126,7 @@ impl CompactionPicker for LevelCompactionPicker {
             }
 
             let all_level_amplification =
-                cal_file_size(&levels.levels[self.target_level - 1].table_infos) * 100
+                cal_file_size(&levels.get_level(self.target_level).table_infos) * 100
                     / l0_total_file_size;
             if write_amplification < all_level_amplification {
                 return None;
@@ -125,10 +134,8 @@ impl CompactionPicker for LevelCompactionPicker {
             input_levels.push(InputLevel {
                 level_idx: target_level as u32,
                 level_type: LevelType::Nonoverlapping as i32,
-                table_infos: levels.levels[self.target_level - 1].table_infos.clone(),
+                table_infos: levels.get_level(self.target_level).table_infos.clone(),
             });
-        } else if write_amplification >= MAX_WRITE_AMPLIFICATION {
-            return None;
         }
 
         for input_level in &input_levels {
@@ -165,7 +172,7 @@ impl LevelCompactionPicker {
     fn pick_min_overlap_tables(
         &self,
         l0: &OverlappingLevel,
-        levels: &[Level],
+        target_level: &Level,
         level_handlers: &mut [LevelHandler],
     ) -> Vec<InputLevel> {
         let min_overlap_picker = MinOverlappingPicker::new(
@@ -175,9 +182,10 @@ impl LevelCompactionPicker {
             self.overlap_strategy.clone(),
         );
 
+        // Do not use `pick_compaction` because it can not select a sub-level.
         let (select_tables, target_tables) = min_overlap_picker.pick_tables(
             &l0.sub_levels[0].table_infos,
-            &levels[self.target_level - 1].table_infos,
+            &target_level.table_infos,
             level_handlers,
         );
         if select_tables.is_empty() {
@@ -191,7 +199,7 @@ impl LevelCompactionPicker {
             },
             InputLevel {
                 level_idx: self.target_level as u32,
-                level_type: levels[self.target_level - 1].level_type,
+                level_type: target_level.level_type,
                 table_infos: target_tables,
             },
         ]
@@ -530,7 +538,7 @@ pub mod tests {
 
     // compact the whole level and upper sub-level when the write-amplification is more than 1.5.
     #[test]
-    fn test_compact_with_write_amplification_limit() {
+    fn test_compact_whole_level_write_amplification_limit() {
         let picker = create_compaction_picker_for_test();
         let mut levels = Levels {
             levels: vec![Level {
@@ -575,16 +583,16 @@ pub mod tests {
     }
 
     #[test]
-    fn test_compact_with_write_amplification_limit_2() {
+    fn test_skip_compact_write_amplification_limit() {
         let picker = create_compaction_picker_for_test();
         let mut levels = Levels {
             levels: vec![Level {
                 level_idx: 1,
                 level_type: LevelType::Nonoverlapping as i32,
                 table_infos: vec![
-                    generate_table(1, 1, 100, 199, 2),
-                    generate_table(2, 1, 200, 260, 2),
-                    generate_table(3, 1, 300, 600, 2),
+                    generate_table(1, 1, 100, 399, 2),
+                    generate_table(2, 1, 400, 699, 2),
+                    generate_table(3, 1, 700, 999, 2),
                 ],
                 total_file_size: 0,
                 sub_level_id: 0,
@@ -595,17 +603,13 @@ pub mod tests {
             &mut levels,
             vec![
                 generate_table(4, 1, 100, 180, 2),
-                generate_table(5, 1, 190, 250, 2),
-                generate_table(6, 1, 200, 300, 2),
+                generate_table(5, 1, 400, 450, 2),
+                generate_table(6, 1, 600, 700, 2),
             ],
         );
         let mut levels_handler = vec![LevelHandler::new(0), LevelHandler::new(1)];
-        let ret = picker
-            .pick_compaction(&levels, &mut levels_handler)
-            .unwrap();
-        assert_eq!(levels_handler[0].get_pending_file_count(), 1);
-        assert_eq!(levels_handler[1].get_pending_file_count(), 1);
-        assert_eq!(ret.input_levels.len(), 2);
-        assert_eq!(ret.input_levels[0].table_infos[0].id, 4);
+        let ret = picker.pick_compaction(&levels, &mut levels_handler);
+        // Skip this compaction because the write amplification is too large.
+        assert!(ret.is_none());
     }
 }

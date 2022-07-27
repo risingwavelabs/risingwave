@@ -16,7 +16,9 @@ use std::collections::HashSet;
 
 use itertools::Itertools;
 use risingwave_pb::hummock::hummock_version::Levels;
-use risingwave_pb::hummock::{HummockVersion, HummockVersionDelta, Level, LevelType, SstableInfo};
+use risingwave_pb::hummock::{
+    HummockVersion, HummockVersionDelta, Level, LevelType, OverlappingLevel, SstableInfo,
+};
 
 use crate::prost_key_range::KeyRangeExt;
 use crate::CompactionGroupId;
@@ -277,5 +279,25 @@ fn level_insert_ssts(operand: &mut Level, insert_table_infos: Vec<SstableInfo>) 
     });
     if operand.level_type == LevelType::Overlapping as i32 {
         operand.level_type = LevelType::Nonoverlapping as i32;
+    }
+}
+
+pub trait HummockLevelsExt {
+    fn get_level0(&self) -> &OverlappingLevel;
+    fn get_level(&self, idx: usize) -> &Level;
+    fn get_level_mut(&mut self, idx: usize) -> &mut Level;
+}
+
+impl HummockLevelsExt for Levels {
+    fn get_level0(&self) -> &OverlappingLevel {
+        self.l0.as_ref().unwrap()
+    }
+
+    fn get_level(&self, level_idx: usize) -> &Level {
+        &self.levels[level_idx - 1]
+    }
+
+    fn get_level_mut(&mut self, level_idx: usize) -> &mut Level {
+        &mut self.levels[level_idx - 1]
     }
 }

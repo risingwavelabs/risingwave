@@ -27,7 +27,7 @@ use itertools::Itertools;
 use prost::Message;
 use risingwave_common::monitor::rwlock::MonitoredRwLock;
 use risingwave_common::util::epoch::{Epoch, INVALID_EPOCH};
-use risingwave_hummock_sdk::compact::{compact_task_to_string, compact_task_to_string_short};
+use risingwave_hummock_sdk::compact::compact_task_to_string;
 use risingwave_hummock_sdk::compaction_group::hummock_version_ext::HummockVersionExt;
 use risingwave_hummock_sdk::{
     get_remote_sst_id, CompactionGroupId, HummockCompactionTaskId, HummockContextId, HummockEpoch,
@@ -217,6 +217,10 @@ impl Versioning {
     ) {
         for (_, delta) in self.hummock_version_deltas.range(delta_range) {
             let mut no_sst_to_delete = true;
+            if delta.trivial_move {
+                self.deltas_to_delete.push(delta.id);
+                continue;
+            }
             for level_deltas in delta.level_deltas.values() {
                 for level_delta in &level_deltas.level_deltas {
                     for sst_id in &level_delta.removed_table_ids {
@@ -770,26 +774,7 @@ where
         &self,
         compaction_group_id: CompactionGroupId,
     ) -> Result<Option<CompactTask>> {
-        let task = self
-            .get_compact_task_impl(compaction_group_id, None)
-            .await?;
-        if let Some(mut task) = task {
-            // TODO: merge this two operation in one lock guard because the target sub-level may be
-            // removed by the other thread.
-            if CompactStatus::is_trivial_move_task(&task) {
-                task.task_status = true;
-                task.sorted_output_ssts = task.input_ssts[0].table_infos.clone();
-                let ret = self.report_compact_task_impl(&task, true).await?;
-                tracing::info!(
-                    "finished trival move task: {}",
-                    compact_task_to_string_short(&task)
-                );
-                assert!(ret);
-            } else {
-                return Ok(Some(task));
-            }
-        }
-        Ok(None)
+        self.get_compact_task_impl(compaction_group_id, None).await
     }
 
     pub async fn manual_get_compact_task(
@@ -853,7 +838,7 @@ where
     pub async fn report_compact_task_impl(
         &self,
         compact_task: &CompactTask,
-        trival_move: bool,
+        trivial_move: bool,
     ) -> Result<bool> {
         let mut compaction_guard = write_lock!(self, compaction).await;
         let start_time = Instant::now();
@@ -872,7 +857,7 @@ where
             .remove(compact_task.task_id)
             .map(|assignment| assignment.context_id);
         // The task is not found.
-        if assignee_context_id.is_none() && !trival_move {
+        if assignee_context_id.is_none() && !trivial_move {
             return Ok(false);
         }
         compact_status.report_compact_task(compact_task);
@@ -887,6 +872,7 @@ where
             let mut version_delta = HummockVersionDelta {
                 prev_id: old_version.id,
                 max_committed_epoch: old_version.max_committed_epoch,
+                trivial_move,
                 ..Default::default()
             };
             let level_deltas = &mut version_delta
@@ -916,7 +902,7 @@ where
             version_delta.id = new_version_id;
             hummock_version_deltas.insert(version_delta.id, version_delta);
 
-            if trival_move {
+            if trivial_move {
                 commit_multi_var!(
                     self,
                     assignee_context_id,
@@ -1017,6 +1003,7 @@ where
             HummockVersionDelta {
                 prev_id: old_version.id,
                 safe_epoch: old_version.safe_epoch,
+                trivial_move: false,
                 ..Default::default()
             },
         );

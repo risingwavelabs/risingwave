@@ -15,6 +15,7 @@
 use std::collections::HashSet;
 use std::sync::Arc;
 
+use risingwave_hummock_sdk::compaction_group::hummock_version_ext::HummockLevelsExt;
 use risingwave_pb::hummock::hummock_version::Levels;
 use risingwave_pb::hummock::{InputLevel, LevelType, SstableInfo};
 
@@ -169,9 +170,10 @@ impl CompactionPicker for MinOverlappingPicker {
         levels: &Levels,
         level_handlers: &mut [LevelHandler],
     ) -> Option<CompactionInput> {
+        assert!(self.level > 0);
         let (select_input_ssts, target_input_ssts) = self.pick_tables(
-            &levels.levels[self.level - 1].table_infos,
-            &levels.levels[self.level].table_infos,
+            &levels.get_level(self.level).table_infos,
+            &levels.get_level(self.target_level).table_infos,
             level_handlers,
         );
         if select_input_ssts.is_empty() {
