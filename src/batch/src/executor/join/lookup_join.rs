@@ -171,17 +171,23 @@ impl<C: BatchTaskContext> ProbeSideSourceBuilder for ProbeSideSource<C> {
             .zip_eq(self.build_side_key_types.iter())
             .zip_eq(self.probe_side_key_types.iter())
         {
-            let cast_expr = new_unary_expr(
-                Type::Cast,
-                probe_type.clone(),
-                Box::new(LiteralExpression::new(
-                    build_type.clone(),
-                    Some(scalar_impl.clone()),
-                )),
-            )?;
+            let scalar_impl = if probe_type == build_type {
+                scalar_impl.clone()
+            } else {
+                let cast_expr = new_unary_expr(
+                    Type::Cast,
+                    probe_type.clone(),
+                    Box::new(LiteralExpression::new(
+                        build_type.clone(),
+                        Some(scalar_impl.clone()),
+                    )),
+                )?;
 
-            let casted_datum = cast_expr.eval_row(&Row(vec![]))?;
-            scan_range.eq_conds.push(casted_datum.unwrap());
+                let datum = cast_expr.eval_row(&Row(vec![]))?;
+                datum.unwrap()
+            };
+
+            scan_range.eq_conds.push(scalar_impl);
         }
 
         let vnode = self.get_virtual_node(&scan_range)?;
