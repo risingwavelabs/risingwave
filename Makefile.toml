@@ -366,9 +366,6 @@ category = "RiseDev - Stop"
 description = "Kill RisingWave dev cluster and clean the data"
 dependencies = ["k", "clean-data"]
 
-[tasks.fill-kafka]
-command = "scripts/source/prepare_source.sh"
-
 [tasks.install-tools]
 category = "RiseDev - Check"
 script = """
