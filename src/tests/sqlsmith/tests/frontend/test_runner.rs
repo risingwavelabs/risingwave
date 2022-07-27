@@ -151,3 +151,36 @@ macro_rules! generate_sqlsmith_test {
         }
     };
 }
+
+generate_sqlsmith_test! { 0 }
+generate_sqlsmith_test! { 1 }
+generate_sqlsmith_test! { 2 }
+generate_sqlsmith_test! { 3 }
+generate_sqlsmith_test! { 4 }
+generate_sqlsmith_test! { 5 }
+generate_sqlsmith_test! { 6 }
+generate_sqlsmith_test! { 7 }
+generate_sqlsmith_test! { 8 }
+generate_sqlsmith_test! { 9 }
+generate_sqlsmith_test! { 10 }
+generate_sqlsmith_test! { 11 }
+generate_sqlsmith_test! { 12 }
+generate_sqlsmith_test! { 13 }
+generate_sqlsmith_test! { 14 }
+generate_sqlsmith_test! { 15 }
+generate_sqlsmith_test! { 16 }
+generate_sqlsmith_test! { 17 }
+generate_sqlsmith_test! { 18 }
+generate_sqlsmith_test! { 19 }
+generate_sqlsmith_test! { 20 }
+generate_sqlsmith_test! { 21 }
+generate_sqlsmith_test! { 22 }
+generate_sqlsmith_test! { 23 }
+generate_sqlsmith_test! { 24 }
+generate_sqlsmith_test! { 25 }
+generate_sqlsmith_test! { 26 }
+generate_sqlsmith_test! { 27 }
+generate_sqlsmith_test! { 28 }
+generate_sqlsmith_test! { 29 }
+generate_sqlsmith_test! { 30 }
+generate_sqlsmith_test! { 31 }
