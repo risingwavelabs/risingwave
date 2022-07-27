@@ -23,7 +23,7 @@ use risingwave_source::ProtobufParser;
 use risingwave_sqlparser::ast::{CreateSourceStatement, ObjectName, ProtobufSchema, SourceSchema};
 
 use super::create_table::{bind_sql_columns, gen_materialized_source_plan};
-use super::privilege::check_privilege;
+use super::privilege::{check_privilege, get_single_check_item};
 use super::util::handle_with_properties;
 use crate::binder::Binder;
 use crate::catalog::check_schema_writable;
@@ -43,8 +43,13 @@ pub(crate) fn make_prost_source(
         let catalog_reader = session.env().catalog_reader().read_guard();
 
         let schema = catalog_reader.get_schema_by_name(session.database(), &schema_name)?;
-        if schema.owner() != *session.user_name() {
-            check_privilege(session, &Object::SchemaId(schema.id()), Action::Create)?;
+        {
+            let check_items = get_single_check_item(
+                schema.owner(),
+                Action::Create,
+                Object::SchemaId(schema.id()),
+            );
+            check_privilege(session, &check_items)?;
         }
 
         catalog_reader.check_relation_name_duplicated(session.database(), &schema_name, &name)?

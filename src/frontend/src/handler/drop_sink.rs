@@ -13,11 +13,12 @@
 // limitations under the License.
 
 use pgwire::pg_response::{PgResponse, StatementType};
+use risingwave_common::catalog::DEFAULT_SUPPER_USER;
 use risingwave_common::error::Result;
 use risingwave_pb::user::grant_privilege::{Action, Object};
 use risingwave_sqlparser::ast::ObjectName;
 
-use super::privilege::check_privilege;
+use super::privilege::{check_privilege, get_single_check_item};
 use crate::binder::Binder;
 use crate::handler::drop_table::check_source;
 use crate::session::OptimizerContext;
@@ -40,7 +41,10 @@ pub async fn handle_drop_sink(
     )?;
 
     {
-        check_privilege(&session, &Object::TableId(sink_id), Action::Delete)?;
+        let default_owner = DEFAULT_SUPPER_USER.to_string();
+        let check_items =
+            get_single_check_item(default_owner, Action::Delete, Object::SinkId(sink_id));
+        check_privilege(&session, &check_items)?;
     }
 
     let catalog_writer = session.env().catalog_writer();

@@ -39,6 +39,7 @@ pub struct BoundTableSource {
     pub source_id: TableId, // TODO: refactor to source id
     pub columns: Vec<ColumnDesc>,
     pub append_only: bool,
+    pub owner: String,
 }
 
 #[derive(Debug, Clone)]
@@ -197,6 +198,8 @@ impl Binder {
             .map(|c| c.column_desc.clone())
             .collect();
 
+        let owner = source.owner.clone();
+
         // Note(bugen): do not bind context here.
 
         Ok(BoundTableSource {
@@ -204,6 +207,7 @@ impl Binder {
             source_id,
             columns,
             append_only,
+            owner,
         })
     }
 }

@@ -17,7 +17,7 @@ use risingwave_common::error::{ErrorCode, Result, RwError};
 use risingwave_pb::user::grant_privilege::{Action, Object};
 use risingwave_sqlparser::ast::ObjectName;
 
-use super::privilege::check_privilege;
+use super::privilege::{check_privilege, get_single_check_item};
 use crate::binder::Binder;
 use crate::handler::drop_table::check_source;
 use crate::session::OptimizerContext;
@@ -37,12 +37,13 @@ pub async fn handle_drop_mv(
         let reader = catalog_reader.read_guard();
         let table = reader.get_table_by_name(session.database(), &schema_name, &table_name)?;
 
-        if table.owner != *session.user_name() {
-            check_privilege(
-                &session,
-                &Object::TableId(table.id().table_id()),
+        {
+            let check_items = get_single_check_item(
+                table.owner.clone(),
                 Action::Delete,
-            )?;
+                Object::TableId(table.id().table_id()),
+            );
+            check_privilege(&session, &check_items)?;
         }
 
         // If associated source is `Some`, then it is a actually a materialized source / table v2.

@@ -20,7 +20,7 @@ use risingwave_pb::stream_plan::source_node::SourceType;
 use risingwave_pb::user::grant_privilege::{Action, Object};
 use risingwave_sqlparser::ast::ObjectName;
 
-use super::privilege::check_privilege;
+use super::privilege::{check_privilege, get_single_check_item};
 use crate::binder::Binder;
 use crate::catalog::catalog_service::CatalogReader;
 use crate::session::{OptimizerContext, SessionImpl};
@@ -57,12 +57,13 @@ pub async fn handle_drop_table(
         let reader = catalog_reader.read_guard();
         let table = reader.get_table_by_name(session.database(), &schema_name, &table_name)?;
 
-        if table.owner != *session.user_name() {
-            check_privilege(
-                &session,
-                &Object::TableId(table.id().table_id()),
+        {
+            let check_items = get_single_check_item(
+                table.owner.clone(),
                 Action::Delete,
-            )?;
+                Object::TableId(table.id().table_id()),
+            );
+            check_privilege(&session, &check_items)?;
         }
 
         // If associated source is `None`, then it is a normal mview.

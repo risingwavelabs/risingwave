@@ -17,10 +17,10 @@ use std::collections::HashMap;
 use pgwire::pg_response::{PgResponse, StatementType};
 use risingwave_common::error::{ErrorCode, Result};
 use risingwave_pb::catalog::Table as ProstTable;
-use risingwave_pb::user::grant_privilege::{Action, Object};
+use risingwave_pb::user::grant_privilege::Action;
 use risingwave_sqlparser::ast::{ObjectName, Query, WithProperties};
 
-use super::privilege::check_privilege;
+use super::privilege::{check_privilege, resolve_relation_privilege};
 use super::util::handle_with_properties;
 use crate::binder::{Binder, BoundSetExpr};
 use crate::catalog::check_schema_writable;
@@ -46,10 +46,6 @@ pub fn gen_create_mv_plan(
         .read_guard()
         .check_relation_name_duplicated(session.database(), &schema_name, &table_name)?;
 
-    {
-        check_privilege(session, &Object::SchemaId(schema_id), Action::Create)?;
-    }
-
     let bound = {
         let mut binder = Binder::new(
             session.env().catalog_reader().read_guard(),
@@ -66,6 +62,11 @@ pub fn gen_create_mv_plan(
                 "An alias must be specified for an expression".to_string(),
             )
             .into());
+        }
+        if let Some(relation) = &select.from {
+            let mut check_items = Vec::new();
+            resolve_relation_privilege(relation, Action::Select, &mut check_items);
+            check_privilege(session, &check_items)?;
         }
     }
 
@@ -108,10 +109,6 @@ pub async fn handle_create_mv(
 
         (table, graph)
     };
-
-    if table.owner != *session.user_name() {
-        check_privilege(&session, &Object::TableId(table.id), Action::Select)?;
-    }
 
     let catalog_writer = session.env().catalog_writer();
     catalog_writer

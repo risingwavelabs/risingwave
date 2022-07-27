@@ -18,7 +18,7 @@ use risingwave_common::error::{ErrorCode, Result};
 use risingwave_pb::user::grant_privilege::{Action, Object};
 use risingwave_sqlparser::ast::ObjectName;
 
-use super::privilege::check_privilege;
+use super::privilege::{check_privilege, get_single_check_item};
 use crate::binder::Binder;
 use crate::catalog::CatalogError;
 use crate::session::OptimizerContext;
@@ -61,8 +61,10 @@ pub async fn handle_create_schema(
         (db.id(), db.owner())
     };
 
-    if db_owner != *session.user_name() {
-        check_privilege(&session, &Object::DatabaseId(db_id), Action::Create)?;
+    {
+        let check_items =
+            get_single_check_item(db_owner.clone(), Action::Create, Object::DatabaseId(db_id));
+        check_privilege(&session, &check_items)?;
     }
 
     let catalog_writer = session.env().catalog_writer();

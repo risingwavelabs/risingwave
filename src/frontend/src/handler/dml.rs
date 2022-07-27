@@ -28,11 +28,6 @@ pub async fn handle_dml(context: OptimizerContext, stmt: Statement) -> Result<Pg
     let stmt_type = to_statement_type(&stmt);
     let session = context.session_ctx.clone();
 
-    let (is_owner, object, action) = resolve_privilege(&session, &stmt)?;
-    if !is_owner {
-        check_privilege(&session, &object, action)?;
-    }
-
     let bound = {
         let mut binder = Binder::new(
             session.env().catalog_reader().read_guard(),
@@ -40,6 +35,9 @@ pub async fn handle_dml(context: OptimizerContext, stmt: Statement) -> Result<Pg
         );
         binder.bind(stmt)?
     };
+
+    let check_items = resolve_privilege(&bound);
+    check_privilege(&session, &check_items)?;
 
     let (plan, pg_descs) = {
         // Subblock to make sure PlanRef (an Rc) is dropped before `await` below.

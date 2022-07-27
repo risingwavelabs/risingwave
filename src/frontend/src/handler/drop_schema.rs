@@ -18,7 +18,7 @@ use risingwave_common::error::{ErrorCode, Result, TrackingIssue};
 use risingwave_pb::user::grant_privilege::{Action, Object};
 use risingwave_sqlparser::ast::{DropMode, ObjectName};
 
-use super::privilege::check_privilege;
+use super::privilege::{check_privilege, get_single_check_item};
 use crate::binder::Binder;
 use crate::catalog::CatalogError;
 use crate::session::OptimizerContext;
@@ -88,8 +88,13 @@ pub async fn handle_drop_schema(
         }
     };
 
-    if schema.owner() != *session.user_name() {
-        check_privilege(&session, &Object::SchemaId(schema_id), Action::Delete)?;
+    {
+        let check_items = get_single_check_item(
+            schema.owner(),
+            Action::Delete,
+            Object::SchemaId(schema.id()),
+        );
+        check_privilege(&session, &check_items)?;
     }
 
     let catalog_writer = session.env().catalog_writer();

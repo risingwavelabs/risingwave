@@ -25,7 +25,7 @@ use risingwave_sqlparser::ast::{ObjectName, OrderByExpr};
 
 use crate::binder::Binder;
 use crate::catalog::check_schema_writable;
-use crate::handler::privilege::check_privilege;
+use crate::handler::privilege::{check_privilege, get_single_check_item};
 use crate::optimizer::plan_node::{LogicalScan, StreamTableScan};
 use crate::optimizer::property::{FieldOrder, Order, RequiredDist};
 use crate::optimizer::{PlanRef, PlanRoot};
@@ -76,6 +76,15 @@ pub(crate) fn gen_create_index_plan(
         .read_guard()
         .get_table_by_name(session.database(), &schema_name, &table_name)?
         .clone();
+
+    {
+        let check_items = get_single_check_item(
+            table.owner.clone(),
+            Action::Select,
+            Object::TableId(table.id.table_id),
+        );
+        check_privilege(session, &check_items)?;
+    }
 
     let table_desc = Rc::new(table.table_desc());
     let table_desc_map = table_desc
@@ -168,10 +177,6 @@ pub async fn handle_create_index(
 
         (graph, table)
     };
-
-    if table.owner != *session.user_name() {
-        check_privilege(&session, &Object::TableId(table.id), Action::Create)?;
-    }
 
     log::trace!(
         "name={}, graph=\n{}",
