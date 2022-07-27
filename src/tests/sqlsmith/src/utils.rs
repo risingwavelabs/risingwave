@@ -30,7 +30,11 @@ impl<'a, R: Rng> SqlGenerator<'a, R> {
         let current_bound_columns = mem::take(&mut self.bound_columns);
         let current_parallel_relations = mem::take(&mut self.parallel_relations);
         self.parallel_relations.clear();
-        (current_bound_columns, current_bound_relations, current_parallel_relations)
+        (
+            current_bound_columns,
+            current_bound_relations,
+            current_parallel_relations,
+        )
     }
 
     pub(crate) fn restore_context(&mut self, (old_cols, old_rels, old_parallel): Context) {

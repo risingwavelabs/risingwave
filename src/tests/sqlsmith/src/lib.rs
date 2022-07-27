@@ -87,7 +87,9 @@ struct SqlGenerator<'a, R: Rng> {
     /// We might not read from all tables.
     bound_relations: Vec<Table>,
 
-    /// Relations Outer corresponding to current subquery
+    /// Relations in generated in 'From' statement shall be added to bound_relations and
+    /// bound_columns after all the relations are generated because they are not useable among
+    /// the relations
     parallel_relations: Vec<Table>,
 
     /// Columns bound in generated query.
@@ -138,10 +140,10 @@ impl<'a, R: Rng> SqlGenerator<'a, R> {
     }
 
     fn merge_parallel_to_relation(&mut self) {
-        for rel in &self.parallel_relations{
+        for rel in &self.parallel_relations {
             let mut bound_columns = rel.get_qualified_columns();
             self.bound_columns.append(&mut bound_columns);
-        }   
+        }
         self.bound_relations.append(&mut self.parallel_relations);
     }
 
@@ -361,7 +363,9 @@ impl<'a, R: Rng> SqlGenerator<'a, R> {
                 .expect("with tables should not be empty");
             vec![create_table_with_joins_from_table(with_table)]
         } else {
-            vec![self.gen_from_relation()]
+            let rel = self.gen_from_relation();
+            self.merge_parallel_to_relation();
+            vec![rel]
         };
 
         if self.is_mview {
@@ -376,7 +380,6 @@ impl<'a, R: Rng> SqlGenerator<'a, R> {
                 from.push(self.gen_from_relation());
             }
         }
-
         self.merge_parallel_to_relation();
 
         from
