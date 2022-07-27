@@ -31,15 +31,18 @@
 - before:
     - create_table_and_mv
   sql: |
+    SELECT * FROM orders_count_by_user WHERE user_id = 1/0
+  batch_error: 'Expr error: NumericOutOfRange'
+- before:
+    - create_table_and_mv
+  sql: |
     SELECT * FROM orders_count_by_user WHERE user_id = 'a'
-  batch_plan: |
-    BatchValues { rows: [] }
+  batch_error: 'Expr error: Cast("str", "i64")'
 - before:
     - create_table_and_mv
   sql: |
     SELECT * FROM orders_count_by_user WHERE user_id > 'a'
-  batch_plan: |
-    BatchValues { rows: [] }
+  batch_error: 'Expr error: Cast("str", "i64")'
 - before:
     - create_table_and_mv
   sql: |
@@ -113,6 +116,18 @@
     BatchExchange { order: [], dist: Single }
       BatchFilter { predicate: In($0::Decimal, 42.0:Decimal, 43.0:Decimal) }
         BatchScan { table: orders_count_by_user, columns: [user_id, date, orders_count] }
+- before:
+    - create_table_and_mv
+  sql: |
+    SELECT * FROM orders_count_by_user WHERE user_id in ('42', '43')
+  batch_plan: |
+    BatchExchange { order: [], dist: Single }
+      BatchScan { table: orders_count_by_user, columns: [user_id, date, orders_count], scan_ranges: [user_id = Int64(42) OR user_id = Int64(43)] }
+- before:
+    - create_table_and_mv
+  sql: |
+    SELECT * FROM orders_count_by_user WHERE user_id in ('42', '43.0')
+  batch_error: 'Expr error: Cast("str", "i64")'
 - before:
     - create_table_and_mv
   sql: |
