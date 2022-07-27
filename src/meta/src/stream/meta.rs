@@ -487,7 +487,7 @@ where
         Ok(info)
     }
 
-    pub async fn get_tables_node_actors(
+    pub async fn get_tables_worker_actors(
         &self,
         table_ids: &HashSet<TableId>,
     ) -> Result<HashMap<TableId, BTreeMap<WorkerId, Vec<ActorId>>>> {

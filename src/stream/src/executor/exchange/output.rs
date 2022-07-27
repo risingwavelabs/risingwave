@@ -79,6 +79,7 @@ impl Output for LocalOutput {
 /// to the remote actor by [`ExchangeService`].
 ///
 /// [`ExchangeService`]: risingwave_pb::task_service::exchange_service_server::ExchangeService
+// FIXME: can we just use the same `Output` with local and compacts it in gRPC server?
 pub struct RemoteOutput {
     actor_id: ActorId,
 
@@ -125,10 +126,16 @@ pub fn new_output(
     actor_id: ActorId,
     down_id: ActorId,
 ) -> Result<BoxedOutput> {
-    let downstream_addr = context.get_actor_info(&down_id)?.get_host()?.into();
     let tx = context.take_sender(&(actor_id, down_id))?;
 
-    let output = if is_local_address(&context.addr, &downstream_addr) {
+    let is_local_address = match context.get_actor_info(&down_id) {
+        Ok(info) => is_local_address(&context.addr, &info.get_host()?.into()),
+        // If we can't get the actor info locally, it must be a remote actor.
+        // This may happen when we create a mv-on-mv on different workers from the upstream. #4153
+        Err(_) => false,
+    };
+
+    let output = if is_local_address {
         LocalOutput::new(down_id, tx).boxed()
     } else {
         RemoteOutput::new(down_id, tx).boxed()
