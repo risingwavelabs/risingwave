@@ -3,7 +3,11 @@ CREATE TABLE t (v1 int);
 CREATE MATERIALIZED VIEW mv AS SELECT * FROM t;
 
 CREATE SINK s WITH (
-    sink_type = 'mysql'
+    sink_type = 'mysql',
+    endpoint = '127.0.0.1:3306',
+    user = 'root',
+    database = 'test',
+    table = 't_drop'
 );
 
 DROP SINK s;
