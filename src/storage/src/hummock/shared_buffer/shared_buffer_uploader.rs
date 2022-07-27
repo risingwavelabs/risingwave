@@ -65,9 +65,8 @@ impl SharedBufferUploader {
             ))))
         };
         let next_local_sstable_id = Arc::new(AtomicU64::new(0));
-        let memory_limiter = Arc::new(MemoryLimiter::new(
-            options.compactor_memory_limit_mb as u64 * 1024 * 1024,
-        ));
+        // not limit memory for uploader
+        let memory_limiter = Arc::new(MemoryLimiter::new(u64::MAX - 1));
         let local_object_store_compactor_context = Arc::new(CompactorContext {
             options: options.clone(),
             hummock_meta_client: hummock_meta_client.clone(),
