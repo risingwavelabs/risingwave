@@ -18,6 +18,7 @@ use risingwave_common::error::{ErrorCode, Result, RwError};
 use risingwave_pb::stream_plan::source_node::SourceType;
 use risingwave_sqlparser::ast::ObjectName;
 
+use super::privilege::check_super_user;
 use crate::binder::Binder;
 use crate::session::OptimizerContext;
 
@@ -31,7 +32,15 @@ pub async fn handle_drop_source(context: OptimizerContext, name: ObjectName) -> 
         .get_source_by_name(session.database(), &schema_name, &source_name)?
         .clone();
 
-    if session.user_id() != source.owner {
+    let schema_owner = catalog_reader
+        .read_guard()
+        .get_schema_by_name(session.database(), &schema_name)
+        .unwrap()
+        .owner();
+    if session.user_id() != source.owner
+        && session.user_id() != schema_owner
+        && !check_super_user(&session)
+    {
         return Err(PermissionDenied("Do not have the privilege".to_string()).into());
     }
 

@@ -121,6 +121,17 @@ pub(crate) fn resolve_privileges(stmt: &BoundStatement) -> Vec<ObjectCheckItem> 
     objects
 }
 
+pub(crate) fn check_super_user(session: &SessionImpl) -> bool {
+    let user_reader = session.env().user_info_reader();
+    let reader = user_reader.read_guard();
+
+    if let Some(info) = reader.get_user_by_name(session.user_name()) {
+        info.is_supper
+    } else {
+        false
+    }
+}
+
 /// check whether user in `session` has privileges in `items`
 pub(crate) fn check_privileges(session: &SessionImpl, items: &Vec<ObjectCheckItem>) -> Result<()> {
     let user_reader = session.env().user_info_reader();

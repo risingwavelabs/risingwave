@@ -17,6 +17,7 @@ use risingwave_common::error::ErrorCode::PermissionDenied;
 use risingwave_common::error::Result;
 use risingwave_sqlparser::ast::ObjectName;
 
+use super::privilege::check_super_user;
 use crate::binder::Binder;
 use crate::handler::drop_table::check_source;
 use crate::session::OptimizerContext;
@@ -38,9 +39,17 @@ pub async fn handle_drop_sink(
         &sink_name,
     )?;
 
+    let schema_owner = catalog_reader
+        .read_guard()
+        .get_schema_by_name(session.database(), &schema_name)
+        .unwrap()
+        .owner();
     // FIXME: using owner of sink instead.
     let owner = session.user_id();
-    if owner != session.user_id() {
+    if owner != session.user_id()
+        && session.user_id() != schema_owner
+        && !check_super_user(&session)
+    {
         return Err(PermissionDenied("Do not have the privilege".to_string()).into());
     }
 

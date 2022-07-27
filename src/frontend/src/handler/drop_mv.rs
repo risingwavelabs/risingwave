@@ -17,6 +17,7 @@ use risingwave_common::error::ErrorCode::PermissionDenied;
 use risingwave_common::error::{ErrorCode, Result, RwError};
 use risingwave_sqlparser::ast::ObjectName;
 
+use super::privilege::check_super_user;
 use crate::binder::Binder;
 use crate::handler::drop_table::check_source;
 use crate::session::OptimizerContext;
@@ -36,7 +37,14 @@ pub async fn handle_drop_mv(
         let reader = catalog_reader.read_guard();
         let table = reader.get_table_by_name(session.database(), &schema_name, &table_name)?;
 
-        if session.user_id() != table.owner {
+        let schema_owner = reader
+            .get_schema_by_name(session.database(), &schema_name)
+            .unwrap()
+            .owner();
+        if session.user_id() != table.owner
+            && session.user_id() != schema_owner
+            && !check_super_user(&session)
+        {
             return Err(PermissionDenied("Do not have the privilege".to_string()).into());
         }
 
