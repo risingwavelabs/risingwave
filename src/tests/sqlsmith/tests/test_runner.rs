@@ -12,5 +12,5 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-#[cfg(enable_sqlsmith_unit_test)]
+#[cfg(feature = "enable_sqlsmith_unit_test")]
 mod frontend;

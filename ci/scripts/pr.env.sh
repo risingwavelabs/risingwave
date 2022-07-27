@@ -6,11 +6,10 @@ set -euo pipefail
 # by overriding RUSTFLAGS to enable sqlsmith feature.
 CHANGED=$(git diff --name-only origin/main | grep "ci/scripts/pr.env.sh\|src/tests/sqlsmith")
 if [[ -n "$CHANGED" ]]; then
-    echo "Configuring RUSTFLAGS for sqlsmith"
-    export RUSTFLAGS="${RUSTFLAGS} --cfg enable_sqlsmith_unit_test";
-    echo "Configured RUSTFLAGS for sqlsmith:"
-    echo "RUSTFLAGS=${RUSTFLAGS}"
+    echo "Changes to Sqlsmith source files detected.";
+    export RUN_SQLSMITH=1;
+    echo "Enabled Sqlsmith tests.";
 else
 # Otherwise we use default.
-    echo 'Running normal PR workflow';
+    export RUN_SQLSMITH=0;
 fi
