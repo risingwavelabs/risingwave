@@ -27,6 +27,7 @@ use risingwave_common::catalog::Schema;
 use risingwave_common::collection::evictable::EvictableHashMap;
 use risingwave_common::hash::{HashCode, HashKey};
 use risingwave_common::util::hash_util::CRC32FastBuilder;
+use risingwave_expr::expr::AggKind;
 use risingwave_storage::table::state_table::RowBasedStateTable;
 use risingwave_storage::StateStore;
 
@@ -83,6 +84,7 @@ struct HashAggExecutorExtra<S: StateStore> {
     key_indices: Vec<usize>,
 
     state_tables: Vec<RowBasedStateTable<S>>,
+    state_table_col_mappings: Vec<Vec<usize>>,
 }
 
 impl<K: HashKey, S: StateStore> Executor for HashAggExecutor<K, S> {
@@ -111,6 +113,7 @@ impl<K: HashKey, S: StateStore> HashAggExecutor<K, S> {
         executor_id: u64,
         key_indices: Vec<usize>,
         mut state_tables: Vec<RowBasedStateTable<S>>,
+        state_table_col_mappings: Vec<Vec<usize>>,
     ) -> StreamExecutorResult<Self> {
         let input_info = input.info();
         let schema = generate_agg_schema(input.as_ref(), &agg_calls, Some(&key_indices));
@@ -131,6 +134,7 @@ impl<K: HashKey, S: StateStore> HashAggExecutor<K, S> {
                 agg_calls,
                 key_indices,
                 state_tables,
+                state_table_col_mappings,
             },
             _phantom: PhantomData,
         })
@@ -195,6 +199,7 @@ impl<K: HashKey, S: StateStore> HashAggExecutor<K, S> {
             ref input_schema,
             ref schema,
             ref mut state_tables,
+            ref state_table_col_mappings,
             ..
         }: &mut HashAggExecutorExtra<S>,
         state_map: &mut EvictableHashMap<K, Option<Box<AggState<S>>>>,
@@ -255,10 +260,12 @@ impl<K: HashKey, S: StateStore> HashAggExecutor<K, S> {
                             generate_managed_agg_state(
                                 Some(&key.clone().deserialize(key_data_types.iter())?),
                                 agg_calls,
+                                input_pk_indices.clone(),
                                 input_pk_data_types.clone(),
                                 epoch,
                                 Some(hash_code.clone()),
                                 state_tables,
+                                state_table_col_mappings,
                             )
                             .await?,
                         ),
@@ -293,11 +300,19 @@ impl<K: HashKey, S: StateStore> HashAggExecutor<K, S> {
                 .zip_eq(all_agg_data.iter())
                 .zip_eq(state_tables.iter_mut())
             {
-                let data = data.iter().map(|d| &**d).collect_vec();
                 let vis_map = agg_call_filter_res(agg_call, &columns, Some(vis_map), capacity)?;
-                agg_state
-                    .apply_batch(&ops, vis_map.as_ref(), &data, epoch, state_table)
-                    .await?;
+                if agg_call.kind == AggKind::StringAgg {
+                    let chunk_cols = columns.iter().map(|col| col.array_ref()).collect_vec();
+                    agg_state
+                        .apply_batch(&ops, vis_map.as_ref(), &chunk_cols, epoch, state_table)
+                        .await?;
+                } else {
+                    // TODO(yuchao): Pass all the columns to apply_batch for other agg calls, #4185
+                    let data = data.iter().map(|d| &**d).collect_vec();
+                    agg_state
+                        .apply_batch(&ops, vis_map.as_ref(), &data, epoch, state_table)
+                        .await?;
+                }
             }
         }
 
@@ -470,6 +485,7 @@ mod tests {
         pk_indices: PkIndices,
         executor_id: u64,
         state_tables: Vec<RowBasedStateTable<S>>,
+        state_table_col_mappings: Vec<Vec<usize>>,
     }
 
     impl<S: StateStore> HashKeyDispatcher for HashAggExecutorDispatcher<S> {
@@ -484,6 +500,7 @@ mod tests {
                 args.executor_id,
                 args.key_indices,
                 args.state_tables,
+                args.state_table_col_mappings,
             )?))
         }
     }
@@ -501,7 +518,7 @@ mod tests {
             .map(|idx| input.schema().fields[*idx].data_type())
             .collect_vec();
         let agg_schema = generate_agg_schema(input.as_ref(), &agg_calls, Some(&key_indices));
-        let state_tables = keyspace_gen
+        let state_tables: Vec<_> = keyspace_gen
             .iter()
             .zip_eq(agg_calls.iter())
             .map(|(ks, agg_call)| {
@@ -516,6 +533,9 @@ mod tests {
                 )
             })
             .collect();
+        // TODO(yuchao): We are not using col_mappings in agg calls generated in unittest,
+        // so it's ok to fake it. Later we should generate real column mapping for state tables.
+        let state_table_col_mappings = (0..state_tables.len()).map(|_| vec![]).collect();
         let args = HashAggExecutorDispatcherArgs {
             input,
             agg_calls,
@@ -523,6 +543,7 @@ mod tests {
             pk_indices,
             executor_id,
             state_tables,
+            state_table_col_mappings,
         };
         let kind = calc_hash_key_kind(&keys);
         HashAggExecutorDispatcher::dispatch_by_kind(kind, args).unwrap()
@@ -579,6 +600,7 @@ mod tests {
                 kind: AggKind::Count,
                 args: AggArgs::None,
                 return_type: DataType::Int64,
+                order_pairs: vec![],
                 append_only,
                 filter: None,
             },
@@ -586,6 +608,7 @@ mod tests {
                 kind: AggKind::Count,
                 args: AggArgs::Unary(DataType::Int64, 0),
                 return_type: DataType::Int64,
+                order_pairs: vec![],
                 append_only,
                 filter: None,
             },
@@ -593,6 +616,7 @@ mod tests {
                 kind: AggKind::Count,
                 args: AggArgs::None,
                 return_type: DataType::Int64,
+                order_pairs: vec![],
                 append_only,
                 filter: None,
             },
@@ -669,6 +693,7 @@ mod tests {
                 kind: AggKind::Count,
                 args: AggArgs::None,
                 return_type: DataType::Int64,
+                order_pairs: vec![],
                 append_only,
                 filter: None,
             },
@@ -676,6 +701,7 @@ mod tests {
                 kind: AggKind::Sum,
                 args: AggArgs::Unary(DataType::Int64, 1),
                 return_type: DataType::Int64,
+                order_pairs: vec![],
                 append_only,
                 filter: None,
             },
@@ -684,6 +710,7 @@ mod tests {
                 kind: AggKind::Sum,
                 args: AggArgs::Unary(DataType::Int64, 2),
                 return_type: DataType::Int64,
+                order_pairs: vec![],
                 append_only,
                 filter: None,
             },
@@ -767,6 +794,7 @@ mod tests {
                 kind: AggKind::Count,
                 args: AggArgs::None,
                 return_type: DataType::Int64,
+                order_pairs: vec![],
                 append_only: false,
                 filter: None,
             },
@@ -774,6 +802,7 @@ mod tests {
                 kind: AggKind::Min,
                 args: AggArgs::Unary(DataType::Int64, 1),
                 return_type: DataType::Int64,
+                order_pairs: vec![],
                 append_only: false,
                 filter: None,
             },
@@ -858,6 +887,7 @@ mod tests {
                 kind: AggKind::Count,
                 args: AggArgs::None,
                 return_type: DataType::Int64,
+                order_pairs: vec![],
                 append_only,
                 filter: None,
             },
@@ -865,6 +895,7 @@ mod tests {
                 kind: AggKind::Min,
                 args: AggArgs::Unary(DataType::Int64, 1),
                 return_type: DataType::Int64,
+                order_pairs: vec![],
                 append_only,
                 filter: None,
             },

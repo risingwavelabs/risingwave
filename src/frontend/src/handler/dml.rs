@@ -18,6 +18,7 @@ use risingwave_common::error::Result;
 use risingwave_sqlparser::ast::Statement;
 
 use crate::binder::Binder;
+use crate::handler::privilege::{check_privileges, resolve_privileges};
 use crate::handler::util::{to_pg_field, to_pg_rows};
 use crate::planner::Planner;
 use crate::scheduler::{ExecutionContext, ExecutionContextRef};
@@ -34,6 +35,9 @@ pub async fn handle_dml(context: OptimizerContext, stmt: Statement) -> Result<Pg
         );
         binder.bind(stmt)?
     };
+
+    let check_items = resolve_privileges(&bound);
+    check_privileges(&session, &check_items)?;
 
     let (plan, pg_descs) = {
         // Subblock to make sure PlanRef (an Rc) is dropped before `await` below.

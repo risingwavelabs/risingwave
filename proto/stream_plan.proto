@@ -170,8 +170,7 @@ message TopNNode {
   repeated uint32 distribution_key = 4;
   // Used for internal table states
   uint32 table_id_l = 5;
-  uint32 table_id_m = 6;
-  uint32 table_id_h = 7;
+  uint32 table_id_h = 6;
 }
 
 message HashJoinNode {
