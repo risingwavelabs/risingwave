@@ -12,11 +12,12 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use risingwave_common::error::{ErrorCode, RwError, ToErrorStr};
+use risingwave_common::error::{ErrorCode, ToErrorStr};
 use risingwave_hummock_sdk::compaction_group::StateTableId;
 use risingwave_hummock_sdk::{CompactionGroupId, HummockContextId};
 use thiserror::Error;
 
+use crate::model::MetadataModelError;
 use crate::storage::meta_store;
 
 pub type Result<T> = std::result::Result<T, Error>;
@@ -99,15 +100,11 @@ impl From<Error> for risingwave_common::error::RwError {
     }
 }
 
-// TODO: as a workaround before refactoring `MetadataModel` error
-impl From<risingwave_common::error::RwError> for Error {
-    fn from(error: RwError) -> Self {
-        match error.inner() {
-            ErrorCode::InternalError(err) => Error::InternalError(err.to_owned()),
-            ErrorCode::ItemNotFound(err) => Error::InternalError(err.to_owned()),
-            _ => {
-                panic!("conversion not supported");
-            }
+impl From<MetadataModelError> for Error {
+    fn from(err: MetadataModelError) -> Self {
+        match err {
+            MetadataModelError::MetaStoreError(e) => e.into(),
+            e => Error::InternalError(e.to_string()),
         }
     }
 }

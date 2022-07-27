@@ -12,11 +12,10 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use risingwave_common::error::Result;
 use risingwave_common::util::epoch::{Epoch, INVALID_EPOCH};
 
 use crate::storage;
-use crate::storage::{MetaStore, DEFAULT_COLUMN_FAMILY};
+use crate::storage::{MetaStore, Result, DEFAULT_COLUMN_FAMILY};
 
 /// `BarrierManagerState` defines the necessary state of `GlobalBarrierManager`, this will be stored
 /// persistently to meta store. Add more states when needed.

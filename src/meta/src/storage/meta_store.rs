@@ -16,7 +16,7 @@ use std::fmt::{Display, Formatter};
 use std::str;
 
 use async_trait::async_trait;
-use risingwave_common::error::{ErrorCode, RwError};
+use risingwave_common::error::RwError;
 use thiserror::Error;
 
 use crate::storage::transaction::Transaction;
@@ -62,16 +62,7 @@ pub type Result<T> = std::result::Result<T, Error>;
 
 impl From<Error> for RwError {
     fn from(e: Error) -> Self {
-        match e {
-            Error::ItemNotFound(k) => RwError::from(ErrorCode::ItemNotFound(hex::encode(k))),
-            Error::TransactionAbort() => {
-                RwError::from(ErrorCode::InternalError("transaction aborted".to_owned()))
-            }
-            Error::Internal(e) => RwError::from(ErrorCode::InternalError(format!(
-                "meta internal error: {}",
-                e
-            ))),
-        }
+        crate::model::MetadataModelError::from(e).into()
     }
 }
 
