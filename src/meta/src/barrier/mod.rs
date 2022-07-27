@@ -284,11 +284,20 @@ where
     }
 
     /// Barrier can be sent to and collected from an actor if:
-    /// 1. The actor is Running and not being dropped.
-    /// 2. The actor is Inactive and belongs to a creating MV
-    fn can_actor_send_or_collect(&self, s: ActorState, table_id: &TableId) -> bool {
-        s == ActorState::Running && !self.dropping_tables.contains(table_id)
-            || s == ActorState::Inactive && self.creating_tables.contains(table_id)
+    /// 1. The actor is Running and not being dropped or removed in rescheduling.
+    /// 2. The actor is Inactive and belongs to a creating MV or adding in rescheduling.
+    fn can_actor_send_or_collect(
+        &self,
+        s: ActorState,
+        table_id: TableId,
+        actor_id: ActorId,
+    ) -> bool {
+        s == ActorState::Running
+            && !self.dropping_tables.contains(&table_id)
+            && !self.removing_actors.contains(&actor_id)
+            || s == ActorState::Inactive
+                && self.creating_tables.contains(&table_id)
+                && self.adding_actors.contains(&actor_id)
     }
 
     /// Return the nums of barrier (the nums of in-flight-barrier, the nums of all-barrier).
@@ -807,8 +816,8 @@ where
     ) -> BarrierActorInfo {
         checkpoint_control.pre_resolve(command);
 
-        let check_state = |s: ActorState, table_id: &TableId| {
-            checkpoint_control.can_actor_send_or_collect(s, table_id)
+        let check_state = |s: ActorState, table_id: TableId, actor_id: ActorId| {
+            checkpoint_control.can_actor_send_or_collect(s, table_id, actor_id)
         };
         let all_nodes = self
             .cluster_manager

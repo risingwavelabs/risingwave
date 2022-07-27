@@ -227,8 +227,8 @@ impl TableFragments {
         table_ids
     }
 
-    /// Returns states of actors group by node id.
-    pub fn node_actor_states(&self) -> BTreeMap<WorkerId, Vec<(ActorId, ActorState)>> {
+    /// Returns states of actors group by worker id.
+    pub fn worker_actor_states(&self) -> BTreeMap<WorkerId, Vec<(ActorId, ActorState)>> {
         let mut map = BTreeMap::default();
         for (&actor_id, actor_status) in &self.actor_status {
             let node_id = actor_status.get_parallel_unit().unwrap().worker_node_id as WorkerId;
@@ -239,8 +239,8 @@ impl TableFragments {
         map
     }
 
-    /// Returns actor locations group by node id.
-    pub fn node_actor_ids(&self) -> BTreeMap<WorkerId, Vec<ActorId>> {
+    /// Returns actor locations group by worker id.
+    pub fn worker_actor_ids(&self) -> BTreeMap<WorkerId, Vec<ActorId>> {
         let mut map = BTreeMap::default();
         for (&actor_id, actor_status) in &self.actor_status {
             let node_id = actor_status.get_parallel_unit().unwrap().worker_node_id as WorkerId;
@@ -263,8 +263,8 @@ impl TableFragments {
         }
     }
 
-    /// Returns the status of actors group by node id.
-    pub fn node_actors(&self, include_inactive: bool) -> BTreeMap<WorkerId, Vec<StreamActor>> {
+    /// Returns the status of actors group by worker id.
+    pub fn worker_actors(&self, include_inactive: bool) -> BTreeMap<WorkerId, Vec<StreamActor>> {
         let mut actors = BTreeMap::default();
         for fragment in self.fragments.values() {
             for actor in &fragment.actors {
