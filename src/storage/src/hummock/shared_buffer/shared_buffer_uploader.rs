@@ -97,7 +97,7 @@ impl SharedBufferUploader {
             sstable_id_generator: get_remote_sstable_id_generator(hummock_meta_client.clone()),
             compaction_executor: compaction_executor.as_ref().cloned(),
             table_id_to_slice_transform,
-            memory_limiter: memory_limiter.clone(),
+            memory_limiter,
         });
         Self {
             options,
