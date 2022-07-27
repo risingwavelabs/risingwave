@@ -58,8 +58,8 @@ steps:
     timeout_in_minutes: 5
     retry: *auto-retry
 
-  - label: "unit test"
-    command: "ci/scripts/unit-test.sh"
+  - label: "unit and fuzz test"
+    command: "ci/scripts/unit-fuzz-test.sh"
     plugins:
       - ./ci/plugins/swapfile
       - gencer/cache#v2.4.10: *cargo-cache
