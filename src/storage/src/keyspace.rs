@@ -34,7 +34,7 @@ pub struct Keyspace<S: StateStore> {
     table_id: TableId,
 }
 
-// FIX: ReadOptions with ttl
+// TODO: remove storage interface from keyspace, and and call it directly in storage_table
 impl<S: StateStore> Keyspace<S> {
     /// Creates a shared root [`Keyspace`] for all executors of the same operator.
     ///
@@ -81,17 +81,8 @@ impl<S: StateStore> Keyspace<S> {
 
     /// Treats the keyspace as a single key, and gets its value.
     /// The returned value is based on a snapshot corresponding to the given `epoch`
-    pub async fn value(&self, epoch: u64) -> StorageResult<Option<Bytes>> {
-        self.store
-            .get(
-                &self.prefix,
-                ReadOptions {
-                    epoch,
-                    table_id: Some(self.table_id),
-                    ttl: None,
-                },
-            )
-            .await
+    pub async fn value(&self, read_options: ReadOptions) -> StorageResult<Option<Bytes>> {
+        self.store.get(&self.prefix, read_options).await
     }
 
     /// Concatenates this keyspace and the given key to produce a prefixed key.
@@ -101,17 +92,12 @@ impl<S: StateStore> Keyspace<S> {
 
     /// Gets from the keyspace with the `prefixed_key` of given key.
     /// The returned value is based on a snapshot corresponding to the given `epoch`.
-    pub async fn get(&self, key: impl AsRef<[u8]>, epoch: u64) -> StorageResult<Option<Bytes>> {
-        self.store
-            .get(
-                &self.prefixed_key(key),
-                ReadOptions {
-                    epoch,
-                    table_id: Some(self.table_id),
-                    ttl: None,
-                },
-            )
-            .await
+    pub async fn get(
+        &self,
+        key: impl AsRef<[u8]>,
+        read_options: ReadOptions,
+    ) -> StorageResult<Option<Bytes>> {
+        self.store.get(&self.prefixed_key(key), read_options).await
     }
 
     /// Scans `limit` keys from the keyspace and get their values.
@@ -120,9 +106,10 @@ impl<S: StateStore> Keyspace<S> {
     pub async fn scan(
         &self,
         limit: Option<usize>,
-        epoch: u64,
+        read_options: ReadOptions,
     ) -> StorageResult<Vec<(Bytes, Bytes)>> {
-        self.scan_with_range::<_, &[u8]>(.., limit, epoch).await
+        self.scan_with_range::<_, &[u8]>(.., limit, read_options)
+            .await
     }
 
     /// Scans `limit` keys from the given `range` in this keyspace and get their values.
@@ -134,25 +121,14 @@ impl<S: StateStore> Keyspace<S> {
         &self,
         range: R,
         limit: Option<usize>,
-        epoch: u64,
+        read_options: ReadOptions,
     ) -> StorageResult<Vec<(Bytes, Bytes)>>
     where
         R: RangeBounds<B> + Send,
         B: AsRef<[u8]> + Send,
     {
         let range = prefixed_range(range, &self.prefix);
-        let mut pairs = self
-            .store
-            .scan(
-                range,
-                limit,
-                ReadOptions {
-                    epoch,
-                    table_id: Some(self.table_id),
-                    ttl: None,
-                },
-            )
-            .await?;
+        let mut pairs = self.store.scan(range, limit, read_options).await?;
         pairs
             .iter_mut()
             .for_each(|(k, _v)| *k = k.slice(self.prefix.len()..));
@@ -161,8 +137,11 @@ impl<S: StateStore> Keyspace<S> {
 
     /// Gets an iterator of this keyspace.
     /// The returned iterator will iterate data from a snapshot corresponding to the given `epoch`.
-    pub async fn iter(&self, epoch: u64) -> StorageResult<StripPrefixIterator<S::Iter>> {
-        self.iter_with_range::<_, &[u8]>(.., epoch).await
+    pub async fn iter(
+        &self,
+        read_options: ReadOptions,
+    ) -> StorageResult<StripPrefixIterator<S::Iter>> {
+        self.iter_with_range::<_, &[u8]>(.., read_options).await
     }
 
     /// Gets an iterator of the given `range` in this keyspace.
@@ -172,24 +151,14 @@ impl<S: StateStore> Keyspace<S> {
     pub async fn iter_with_range<R, B>(
         &self,
         range: R,
-        epoch: u64,
+        read_options: ReadOptions,
     ) -> StorageResult<StripPrefixIterator<S::Iter>>
     where
         R: RangeBounds<B> + Send,
         B: AsRef<[u8]> + Send,
     {
         let range = prefixed_range(range, &self.prefix);
-        let iter = self
-            .store
-            .iter(
-                range,
-                ReadOptions {
-                    epoch,
-                    table_id: Some(self.table_id),
-                    ttl: None,
-                },
-            )
-            .await?;
+        let iter = self.store.iter(range, read_options).await?;
         let strip_prefix_iterator = StripPrefixIterator {
             iter,
             prefix_len: self.prefix.len(),
