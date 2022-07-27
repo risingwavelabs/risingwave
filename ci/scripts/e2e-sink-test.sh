@@ -59,9 +59,6 @@ wait_server() {
     } 2>/dev/null
 }
 
-echo "Starting single node mysql"
-docker-compose -f ../docker-compose-mysql.yml up -d
-
 echo "Waiting for mysql sink"
 wait_server 23306
 

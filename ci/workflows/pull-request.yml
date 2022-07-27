@@ -103,6 +103,7 @@ steps:
       - docker-compose#v3.9.0:
           run: rw-build-env
           config: ci/docker-compose.yml
+          config: ci/docker-compose-mysql.yml
           mount-buildkite-agent: true
       - ./ci/plugins/upload-failure-logs
     timeout_in_minutes: 5
