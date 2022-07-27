@@ -30,9 +30,11 @@ pub struct Keyspace<S: StateStore> {
 
     /// Encoded representation for all segments.
     prefix: Vec<u8>,
+
+    table_id: TableId,
 }
 
-// FIX: ReadOptions with ttl
+// TODO: remove storage interface from keyspace, and and call it directly in storage_table
 impl<S: StateStore> Keyspace<S> {
     /// Creates a shared root [`Keyspace`] for all executors of the same operator.
     ///
@@ -43,7 +45,11 @@ impl<S: StateStore> Keyspace<S> {
     /// Creates a root [`Keyspace`] for a table.
     pub fn table_root(store: S, id: &TableId) -> Self {
         let prefix = table_prefix(id.table_id);
-        Self { store, prefix }
+        Self {
+            store,
+            prefix,
+            table_id: *id,
+        }
     }
 
     /// Appends more bytes to the prefix and returns a new `Keyspace`
@@ -54,6 +60,7 @@ impl<S: StateStore> Keyspace<S> {
         Self {
             store: self.store.clone(),
             prefix,
+            table_id: self.table_id,
         }
     }
 
@@ -99,9 +106,9 @@ impl<S: StateStore> Keyspace<S> {
     pub async fn scan(
         &self,
         limit: Option<usize>,
-        read_optionss: ReadOptions,
+        read_options: ReadOptions,
     ) -> StorageResult<Vec<(Bytes, Bytes)>> {
-        self.scan_with_range::<_, &[u8]>(.., limit, read_optionss)
+        self.scan_with_range::<_, &[u8]>(.., limit, read_options)
             .await
     }
 
@@ -162,6 +169,10 @@ impl<S: StateStore> Keyspace<S> {
     /// Gets the underlying state store.
     pub fn state_store(&self) -> S {
         self.store.clone()
+    }
+
+    pub fn table_id(&self) -> TableId {
+        self.table_id
     }
 }
 

@@ -115,8 +115,6 @@ pub struct StorageTableBase<S: StateStore, RS: RowSerde, const T: AccessType> {
     /// If true, sanity check is disabled on this table.
     disable_sanity_check: bool,
 
-    table_id: TableId,
-
     /// Used for catalog table_properties
     table_option: TableOption,
 
@@ -320,7 +318,6 @@ impl<S: StateStore, RS: RowSerde, const T: AccessType> StorageTableBase<S, RS, T
             dist_key_in_pk_indices,
             vnodes,
             disable_sanity_check: false,
-            table_id,
             table_option,
             _read_pattern_prefix_column: read_pattern_prefix_column,
         }
@@ -480,7 +477,7 @@ impl<S: StateStore, RS: RowSerde, const T: AccessType> StorageTableBase<S, RS, T
     fn get_read_option(&self, epoch: u64) -> ReadOptions {
         ReadOptions {
             epoch,
-            table_id: Some(self.table_id),
+            table_id: Some(self.keyspace.table_id()),
             ttl: self.table_option.ttl,
         }
     }
@@ -505,7 +502,7 @@ impl<S: StateStore, RS: RowSerde> StorageTableBase<S, RS, READ_WRITE> {
     ) -> StorageResult<()> {
         let mut batch = self.keyspace.state_store().start_write_batch(WriteOptions {
             epoch,
-            table_id: self.table_id,
+            table_id: self.keyspace.table_id(),
         });
         let mut local = batch.prefixify(&self.keyspace);
 
