@@ -65,11 +65,13 @@ impl FunctionalDependency {
         FunctionalDependency { from, to }
     }
 
-    /// Create a [`FunctionalDependency`] for a key column. This column can determine all other
-    /// columns.
-    fn with_key_column(column_cnt: usize, key_column_idx: usize) -> Self {
+    /// Create a [`FunctionalDependency`] with a key. The combination of these columns can determine
+    /// all other columns.
+    fn with_key(column_cnt: usize, key_indices: &[usize]) -> Self {
         let mut from = FixedBitSet::with_capacity(column_cnt);
-        from.set(key_column_idx, true);
+        for &idx in key_indices {
+            from.set(idx, true);
+        }
         let mut to = from.clone();
         to.toggle_range(0..to.len());
         FunctionalDependency { from, to }
@@ -190,9 +192,7 @@ impl FunctionalDependencySet {
     /// assert_eq!(to.ones().collect_vec(), &[0, 2, 3]);
     /// ```
     pub fn add_key_column(&mut self, column_cnt: usize, key_indices: &[usize]) {
-        for &idx in key_indices {
-            self.add_functional_dependency(FunctionalDependency::with_key_column(column_cnt, idx));
-        }
+        self.add_functional_dependency(FunctionalDependency::with_key(column_cnt, key_indices));
     }
 
     /// Add constant columns to a  [`FunctionalDependencySet`].
