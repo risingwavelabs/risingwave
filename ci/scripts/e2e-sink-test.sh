@@ -27,26 +27,4 @@ echo "--- e2e test w/ Rust frontend - sink with mysql"
 cargo make clean-data
 cargo make ci-start
 
-wait_server() {
-    # https://stackoverflow.com/a/44484835/5242660
-    # Licensed by https://creativecommons.org/licenses/by-sa/3.0/
-    {
-        failed_times=0
-        while ! echo -n >/dev/tcp/localhost/"$1"; do
-            sleep 0.5
-            failed_times=$((failed_times + 1))
-            if [ $failed_times -gt 30 ]; then
-                echo "ERROR: failed to start server $1 [timeout=15s]"
-                exit 1
-            fi
-        done
-    } 2>/dev/null
-}
-
-echo "Waiting for mysql sink"
-wait_server 23306
-
-echo "Waiting for cluster"
-sleep 10
-
-echo "end of prepare sink so far"
+timeout 2m sqllogictest -p 4566 -d dev  './e2e_test/sink/**/*.slt'
