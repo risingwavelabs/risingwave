@@ -103,11 +103,11 @@ steps:
       - docker-compose#v3.9.0:
           run: rw-build-env
           config: ci/docker-compose.yml
+          mount-buildkite-agent: true
+      - ./ci/plugins/upload-failure-logs
       - docker-compose#v3.9.0:
           run: mysql
           config: ci/docker-compose-mysql.yml
-          mount-buildkite-agent: true
-      - ./ci/plugins/upload-failure-logs
     timeout_in_minutes: 5
     retry: *auto-retry
 
