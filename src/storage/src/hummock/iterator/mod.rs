@@ -14,6 +14,7 @@
 
 use std::future::Future;
 use std::marker::PhantomData;
+use std::ops::{Deref, DerefMut};
 
 use super::{HummockResult, HummockValue};
 
@@ -245,6 +246,38 @@ impl<
                 Fourth(iter) => iter.seek(key).await,
             }
         }
+    }
+}
+
+impl<I: HummockIterator> HummockIterator for Box<I> {
+    type Direction = I::Direction;
+
+    type NextFuture<'a> = impl Future<Output = HummockResult<()>> + 'a;
+    type RewindFuture<'a> = impl Future<Output = HummockResult<()>> + 'a;
+    type SeekFuture<'a> = impl Future<Output = HummockResult<()>> + 'a;
+
+    fn next(&mut self) -> Self::NextFuture<'_> {
+        (*self).deref_mut().next()
+    }
+
+    fn key(&self) -> &[u8] {
+        (*self).deref().key()
+    }
+
+    fn value(&self) -> HummockValue<&[u8]> {
+        (*self).deref().value()
+    }
+
+    fn is_valid(&self) -> bool {
+        (*self).deref().is_valid()
+    }
+
+    fn rewind(&mut self) -> Self::RewindFuture<'_> {
+        (*self).deref_mut().rewind()
+    }
+
+    fn seek<'a>(&'a mut self, key: &'a [u8]) -> Self::SeekFuture<'a> {
+        (*self).deref_mut().seek(key)
     }
 }
 
