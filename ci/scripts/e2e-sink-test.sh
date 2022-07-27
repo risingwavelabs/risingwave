@@ -26,5 +26,46 @@ cargo make link-all-in-one-binaries
 echo "--- e2e test w/ Rust frontend - sink with mysql"
 cargo make clean-data
 cargo make ci-start
-./scripts/sink/prepare_sink.sh
-echo "This is the sink test so far"
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+wait_server() {
+    # https://stackoverflow.com/a/44484835/5242660
+    # Licensed by https://creativecommons.org/licenses/by-sa/3.0/
+    {
+        failed_times=0
+        while ! echo -n >/dev/tcp/localhost/"$1"; do
+            sleep 0.5
+            failed_times=$((failed_times + 1))
+            if [ $failed_times -gt 30 ]; then
+                echo "ERROR: failed to start server $1 [timeout=15s]"
+                exit 1
+            fi
+        done
+    } 2>/dev/null
+}
+
+echo "Starting single node mysql"
+docker-compose -f ../docker-compose-mysql.yml up -d
+
+echo "Waiting for mysql sink"
+wait_server 23306
+
+echo "Waiting for cluster"
+sleep 10
+
+echo "end of prepare sink so far"
