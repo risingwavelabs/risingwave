@@ -280,6 +280,7 @@ mod tests {
                 .sum::<usize>(),
             128
         );
+        compact_task.target_level = 6;
 
         // 3. compact
         Compactor::compact(Arc::new(compact_ctx), compact_task.clone()).await;
@@ -288,11 +289,8 @@ mod tests {
         let version = hummock_manager_ref.get_current_version().await;
         let output_table_id = version
             .get_compaction_group_levels(StaticCompactionGroupId::StateDefault.into())
-            .l0
-            .as_ref()
-            .unwrap()
-            .sub_levels
-            .first()
+            .levels
+            .last()
             .unwrap()
             .table_infos
             .first()
