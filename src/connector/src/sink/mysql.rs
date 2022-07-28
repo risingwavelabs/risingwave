@@ -81,7 +81,6 @@ impl MySQLSink {
         }
 
         let conn = Conn::new(builder).await?;
-        tracing::debug!("connection OK");
         Ok(Self {
             cfg,
             conn,
@@ -149,7 +148,6 @@ impl TryFrom<Datum> for MySQLValue {
 #[async_trait]
 impl Sink for MySQLSink {
     async fn write_batch(&mut self, chunk: StreamChunk, schema: &Schema) -> Result<()> {
-        tracing::debug!("write_batch OK");
         self.chunk_cache.push((chunk, schema.clone()));
         Ok(())
     }
@@ -159,7 +157,6 @@ impl Sink for MySQLSink {
     }
 
     async fn commit(&mut self) -> Result<()> {
-        tracing::debug!("commit OK");
         let mut txn = self.conn.start_transaction(TxOpts::default()).await?;
         for (chunk, schema) in &self.chunk_cache {
             write_to_mysql(&mut txn, chunk, schema, &self.cfg).await?;
@@ -181,7 +178,6 @@ async fn write_to_mysql<'a>(
     schema: &Schema,
     config: &MySQLConfig,
 ) -> Result<()> {
-    tracing::debug!("write_to_mysql OK");
     // Closure that takes an idx to create a vector of MySQLValues from a StreamChunk 'row'.
     let values = |idx| -> Result<Vec<MySQLValue>> {
         chunk
