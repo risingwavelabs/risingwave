@@ -473,7 +473,7 @@ impl ToStream for LogicalScan {
 
         let (scan, out_col_change) = self.rewrite_for_stream()?;
         if scan.predicate.always_true() {
-            Ok(StreamTableScan::new(scan).into())
+            Ok((StreamTableScan::new(scan).into(), out_col_change))
         } else {
             let (scan, predicate, project_expr) = self.predicate_pull_up();
             let mut plan = LogicalFilter::create(scan.into(), predicate);
