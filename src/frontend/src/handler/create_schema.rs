@@ -15,10 +15,13 @@
 use pgwire::pg_response::{PgResponse, StatementType};
 use risingwave_common::catalog::RESERVED_PG_SCHEMA_PREFIX;
 use risingwave_common::error::{ErrorCode, Result};
+use risingwave_pb::user::grant_privilege::{Action, Object};
 use risingwave_sqlparser::ast::ObjectName;
 
+use super::privilege::check_privileges;
 use crate::binder::Binder;
 use crate::catalog::CatalogError;
+use crate::handler::privilege::ObjectCheckItem;
 use crate::session::OptimizerContext;
 
 pub async fn handle_create_schema(
@@ -38,7 +41,7 @@ pub async fn handle_create_schema(
         .into());
     }
 
-    let db_id = {
+    let (db_id, db_owner) = {
         let catalog_reader = session.env().catalog_reader();
         let reader = catalog_reader.read_guard();
         if reader
@@ -55,8 +58,18 @@ pub async fn handle_create_schema(
                 Err(CatalogError::Duplicated("schema", schema_name).into())
             };
         }
-        reader.get_database_by_name(&database_name)?.id()
+        let db = reader.get_database_by_name(&database_name)?;
+        (db.id(), db.owner())
     };
+
+    check_privileges(
+        &session,
+        &vec![ObjectCheckItem::new(
+            db_owner,
+            Action::Create,
+            Object::DatabaseId(db_id),
+        )],
+    )?;
 
     let catalog_writer = session.env().catalog_writer();
     catalog_writer
