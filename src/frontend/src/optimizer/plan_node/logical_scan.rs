@@ -27,9 +27,9 @@ use super::{
 };
 use crate::catalog::ColumnId;
 use crate::expr::{CollectInputRef, ExprImpl, InputRef};
-use crate::optimizer::plan_node::{BatchSeqScan, LogicalFilter, LogicalProject};
+use crate::optimizer::plan_node::{BatchSeqScan, LogicalFilter, LogicalProject, LogicalValues};
 use crate::session::OptimizerContextRef;
-use crate::utils::{ColIndexMapping, Condition, ConditionVerboseDisplay};
+use crate::utils::{ColIndexMapping, Condition, ConditionDisplay};
 
 /// `LogicalScan` returns contents of a table or other equivalent object
 #[derive(Debug, Clone)]
@@ -135,6 +135,20 @@ impl LogicalScan {
         self.output_col_idx
             .iter()
             .map(|i| self.table_desc.columns[*i].name.clone())
+            .collect()
+    }
+
+    pub(super) fn pk_names_with_table_prefix(&self) -> Vec<String> {
+        self.base
+            .pk_indices
+            .iter()
+            .map(|i| {
+                format!(
+                    "{}.{}",
+                    self.table_name.clone(),
+                    self.table_desc.columns[*i].name
+                )
+            })
             .collect()
     }
 
@@ -341,7 +355,7 @@ impl fmt::Display for LogicalScan {
             let required_col_names = self
                 .required_col_idx
                 .iter()
-                .map(|i| format!("${}:{}", i, self.table_desc.columns[*i].name))
+                .map(|i| self.table_desc.columns[*i].name.to_string())
                 .collect_vec();
 
             write!(
@@ -354,15 +368,13 @@ impl fmt::Display for LogicalScan {
                     self.column_names()
                 }.join(", "),
                 required_col_names.join(", "),
-                if verbose {
+                {
                     let fields = self.table_desc.columns.iter().map(|col|  Field::from_with_table_name_prefix(col, &self.table_name)).collect_vec();
                     let input_schema = Schema{fields};
-                    format!("{}", ConditionVerboseDisplay{
+                    format!("{}", ConditionDisplay {
                         condition: &self.predicate,
                         input_schema: &input_schema,
                     })
-                } else {
-                    format!("{}", self.predicate)
                 }
             )
         }
@@ -402,11 +414,14 @@ impl ToBatch for LogicalScan {
             let (scan_ranges, predicate) = self.predicate.clone().split_to_scan_ranges(
                 &self.table_desc.order_column_indices(),
                 self.table_desc.columns.len(),
-            );
+            )?;
             let mut scan = self.clone();
             scan.predicate = predicate; // We want to keep `required_col_idx` unchanged, so do not call `clone_with_predicate`.
             let (scan, predicate, project_expr) = scan.predicate_pull_up();
 
+            if predicate.always_false() {
+                return LogicalValues::create(vec![], scan.schema().clone(), scan.ctx()).to_batch();
+            }
             let mut plan: PlanRef = BatchSeqScan::new(scan, scan_ranges).into();
             if !predicate.always_true() {
                 plan = BatchFilter::new(LogicalFilter::new(plan, predicate)).into();
