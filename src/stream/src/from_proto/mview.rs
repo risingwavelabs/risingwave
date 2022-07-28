@@ -50,7 +50,7 @@ impl ExecutorBuilder for MaterializeExecutorBuilder {
             .iter()
             .map(|key| *key as usize)
             .collect();
-
+        let table = node.get_table()?;
         let executor = MaterializeExecutor::new(
             params.input.remove(0),
             store,
@@ -60,6 +60,7 @@ impl ExecutorBuilder for MaterializeExecutorBuilder {
             params.executor_id,
             distribution_key,
             params.vnode_bitmap.map(Arc::new),
+            table,
         );
 
         Ok(executor.boxed())
@@ -97,6 +98,7 @@ impl ExecutorBuilder for ArrangeExecutorBuilder {
             .iter()
             .map(|key| *key as usize)
             .collect();
+        let table = arrange_node.get_table()?;
 
         // FIXME: Lookup is now implemented without cell-based table API and relies on all vnodes
         // being `DEFAULT_VNODE`, so we need to make the Arrange a singleton.
@@ -111,6 +113,7 @@ impl ExecutorBuilder for ArrangeExecutorBuilder {
             params.executor_id,
             distribution_key,
             vnodes,
+            table,
         );
 
         Ok(executor.boxed())

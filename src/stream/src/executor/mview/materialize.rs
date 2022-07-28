@@ -20,10 +20,10 @@ use itertools::Itertools;
 use risingwave_common::array::Op::*;
 use risingwave_common::array::Row;
 use risingwave_common::buffer::Bitmap;
-use risingwave_common::catalog::{ColumnDesc, ColumnId, Schema, TableId};
+use risingwave_common::catalog::{ColumnId, Schema, TableId};
 use risingwave_common::util::sort_util::OrderPair;
+use risingwave_pb::catalog::Table;
 use risingwave_storage::table::state_table::StateTable;
-use risingwave_storage::table::Distribution;
 use risingwave_storage::StateStore;
 
 use crate::executor::error::StreamExecutorError;
@@ -57,33 +57,27 @@ impl<S: StateStore> MaterializeExecutor<S> {
         executor_id: u64,
         distribution_key: Vec<usize>,
         vnodes: Option<Arc<Bitmap>>,
+        table_catalog: &Table,
     ) -> Self {
         let arrange_columns: Vec<usize> = key.iter().map(|k| k.column_idx).collect();
-        let arrange_order_types = key.iter().map(|k| k.order_type).collect();
+        // let arrange_order_types = key.iter().map(|k| k.order_type).collect();
 
         let schema = input.schema().clone();
-        let columns = column_ids
-            .into_iter()
-            .zip_eq(schema.fields.iter())
-            .map(|(column_id, field)| ColumnDesc::unnamed(column_id, field.data_type()))
-            .collect_vec();
+        // let columns = column_ids
+        //     .into_iter()
+        //     .zip_eq(schema.fields.iter())
+        //     .map(|(column_id, field)| ColumnDesc::unnamed(column_id, field.data_type()))
+        //     .collect_vec();
 
-        let distribution = match vnodes {
-            Some(vnodes) => Distribution {
-                dist_key_indices: distribution_key,
-                vnodes,
-            },
-            None => Distribution::fallback(),
-        };
+        // let distribution = match vnodes {
+        //     Some(vnodes) => Distribution {
+        //         dist_key_indices: distribution_key,
+        //         vnodes,
+        //     },
+        //     None => Distribution::fallback(),
+        // };
 
-        let state_table = StateTable::new_with_distribution(
-            store,
-            table_id,
-            columns,
-            arrange_order_types,
-            arrange_columns.clone(),
-            distribution,
-        );
+        let state_table = StateTable::from_table_catalog(table_catalog, store, vnodes);
 
         Self {
             input,
@@ -105,6 +99,7 @@ impl<S: StateStore> MaterializeExecutor<S> {
         keys: Vec<OrderPair>,
         column_ids: Vec<ColumnId>,
         executor_id: u64,
+        table_catalog: &Table,
     ) -> Self {
         Self::new(
             input,
@@ -115,6 +110,7 @@ impl<S: StateStore> MaterializeExecutor<S> {
             executor_id,
             vec![],
             None,
+            table_catalog,
         )
     }
 
