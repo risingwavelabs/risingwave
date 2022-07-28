@@ -358,6 +358,12 @@ impl MetaClient {
         let _resp = self.inner.resume(request).await?;
         Ok(())
     }
+
+    pub async fn get_cluster_info(&self) -> Result<GetClusterInfoResponse> {
+        let request = GetClusterInfoRequest {};
+        let resp = self.inner.get_cluster_info(request).await?;
+        Ok(resp)
+    }
 }
 
 #[async_trait]
@@ -611,6 +617,7 @@ macro_rules! for_all_meta_rpc {
             ,{ user_client, revoke_privilege, RevokePrivilegeRequest, RevokePrivilegeResponse }
             ,{ scale_client, pause, PauseRequest, PauseResponse }
             ,{ scale_client, resume, ResumeRequest, ResumeResponse }
+            ,{ scale_client, get_cluster_info, GetClusterInfoRequest, GetClusterInfoResponse }
         }
     };
 }

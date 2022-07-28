@@ -15,6 +15,7 @@
 mod barrier;
 mod catalog;
 mod cluster;
+mod error;
 mod stream;
 mod user;
 
@@ -27,12 +28,12 @@ use async_trait::async_trait;
 pub use barrier::*;
 pub use catalog::*;
 pub use cluster::*;
+pub use error::*;
 use prost::Message;
-use risingwave_common::error::Result;
 pub use stream::*;
 pub use user::*;
 
-use crate::storage::{self, MetaStore, Transaction};
+use crate::storage::{MetaStore, MetaStoreError, Transaction};
 
 /// A global, unique indentifier of an actor
 pub type ActorId = u32;
@@ -45,8 +46,8 @@ pub type DispatcherId = u64;
 pub type FragmentId = u32;
 
 pub trait Transactional {
-    fn upsert_in_transaction(&self, trx: &mut Transaction) -> risingwave_common::error::Result<()>;
-    fn delete_in_transaction(&self, trx: &mut Transaction) -> risingwave_common::error::Result<()>;
+    fn upsert_in_transaction(&self, trx: &mut Transaction) -> MetadataModelResult<()>;
+    fn delete_in_transaction(&self, trx: &mut Transaction) -> MetadataModelResult<()>;
 }
 
 /// `MetadataModel` defines basic model operations in CRUD.
@@ -72,10 +73,10 @@ pub trait MetadataModel: std::fmt::Debug + Sized {
     fn from_protobuf(prost: Self::ProstType) -> Self;
 
     /// Current record key.
-    fn key(&self) -> Result<Self::KeyType>;
+    fn key(&self) -> MetadataModelResult<Self::KeyType>;
 
     /// `list` returns all records in this model.
-    async fn list<S>(store: &S) -> Result<Vec<Self>>
+    async fn list<S>(store: &S) -> MetadataModelResult<Vec<Self>>
     where
         S: MetaStore,
     {
@@ -87,7 +88,7 @@ pub trait MetadataModel: std::fmt::Debug + Sized {
     }
 
     /// `insert` insert a new record in meta store, replaced it if the record already exist.
-    async fn insert<S>(&self, store: &S) -> Result<()>
+    async fn insert<S>(&self, store: &S) -> MetadataModelResult<()>
     where
         S: MetaStore,
     {
@@ -102,7 +103,7 @@ pub trait MetadataModel: std::fmt::Debug + Sized {
     }
 
     /// `delete` drop records from meta store with associated key.
-    async fn delete<S>(store: &S, key: &Self::KeyType) -> Result<()>
+    async fn delete<S>(store: &S, key: &Self::KeyType) -> MetadataModelResult<()>
     where
         S: MetaStore,
     {
@@ -113,14 +114,14 @@ pub trait MetadataModel: std::fmt::Debug + Sized {
     }
 
     /// `select` query a record with associated key and version.
-    async fn select<S>(store: &S, key: &Self::KeyType) -> Result<Option<Self>>
+    async fn select<S>(store: &S, key: &Self::KeyType) -> MetadataModelResult<Option<Self>>
     where
         S: MetaStore,
     {
         let byte_vec = match store.get_cf(&Self::cf_name(), &key.encode_to_vec()).await {
             Ok(byte_vec) => byte_vec,
             Err(err) => {
-                if !matches!(err, storage::Error::ItemNotFound(_)) {
+                if !matches!(err, MetaStoreError::ItemNotFound(_)) {
                     return Err(err.into());
                 }
                 return Ok(None);
@@ -137,7 +138,7 @@ impl<T> Transactional for T
 where
     T: MetadataModel,
 {
-    fn upsert_in_transaction(&self, trx: &mut Transaction) -> Result<()> {
+    fn upsert_in_transaction(&self, trx: &mut Transaction) -> MetadataModelResult<()> {
         trx.put(
             Self::cf_name(),
             self.key()?.encode_to_vec(),
@@ -146,7 +147,7 @@ where
         Ok(())
     }
 
-    fn delete_in_transaction(&self, trx: &mut Transaction) -> Result<()> {
+    fn delete_in_transaction(&self, trx: &mut Transaction) -> MetadataModelResult<()> {
         trx.delete(Self::cf_name(), self.key()?.encode_to_vec());
         Ok(())
     }
@@ -159,7 +160,7 @@ pub trait ValTransaction: Sized {
     fn commit(self);
 
     /// Apply the change (upsert or delete) to `txn`
-    fn apply_to_txn(&self, txn: &mut Transaction) -> Result<()>;
+    fn apply_to_txn(&self, txn: &mut Transaction) -> MetadataModelResult<()>;
 
     /// Abort the `VarTransaction` and leave the local memory value untouched
     fn abort(self) {
@@ -225,7 +226,7 @@ where
         }
     }
 
-    fn apply_to_txn(&self, txn: &mut Transaction) -> Result<()> {
+    fn apply_to_txn(&self, txn: &mut Transaction) -> MetadataModelResult<()> {
         if let Some(new_value) = &self.new_value {
             // Apply the change to `txn` only when the value is modified
             if *self.orig_value_ref != *new_value {
@@ -479,7 +480,7 @@ impl<'a, K: Ord + Debug, V: Transactional + Clone> ValTransaction
         self.commit_memory();
     }
 
-    fn apply_to_txn(&self, txn: &mut Transaction) -> Result<()> {
+    fn apply_to_txn(&self, txn: &mut Transaction) -> MetadataModelResult<()> {
         // Add the staging operation to txn
         for (k, op) in &self.staging {
             match op {
@@ -561,7 +562,7 @@ impl<'a, K: Ord, V: PartialEq + Transactional> ValTransaction
         self.tree_ref.insert(self.key, self.new_value);
     }
 
-    fn apply_to_txn(&self, txn: &mut Transaction) -> Result<()> {
+    fn apply_to_txn(&self, txn: &mut Transaction) -> MetadataModelResult<()> {
         if !self.tree_ref.contains_key(&self.key)
             || *self.tree_ref.get(&self.key).unwrap() != self.new_value
         {
@@ -585,7 +586,7 @@ mod tests {
     const TEST_CF: &str = "test-cf";
 
     impl Transactional for TestTransactional {
-        fn upsert_in_transaction(&self, trx: &mut Transaction) -> Result<()> {
+        fn upsert_in_transaction(&self, trx: &mut Transaction) -> MetadataModelResult<()> {
             trx.put(
                 TEST_CF.to_string(),
                 self.key.as_bytes().into(),
@@ -594,7 +595,7 @@ mod tests {
             Ok(())
         }
 
-        fn delete_in_transaction(&self, trx: &mut Transaction) -> Result<()> {
+        fn delete_in_transaction(&self, trx: &mut Transaction) -> MetadataModelResult<()> {
             trx.delete(TEST_CF.to_string(), self.key.as_bytes().into());
             Ok(())
         }
