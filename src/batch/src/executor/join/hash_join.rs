@@ -39,13 +39,13 @@ use crate::executor::{
 use crate::task::BatchTaskContext;
 
 /// Hash Join Executor
-/// 
+///
 /// High-level idea:
 /// 1. Iterate over the build side (i.e. right table) and build a hash map.
 /// 2. Iterate over the probe side (i.e. left table) and compute the hash value of each row.
 ///    Then find the matched build side row for each probe side row in the hash map.
-/// 3. Concatenate the matched pair of probe side row and build side row into a single row and push it into the data chunk builder.
-/// 4. Yield chunks from the builder.
+/// 3. Concatenate the matched pair of probe side row and build side row into a single row and push
+/// it into the data chunk builder. 4. Yield chunks from the builder.
 pub struct HashJoinExecutor<K> {
     /// Join type e.g. inner, left outer, ...
     join_type: JoinType,
@@ -65,6 +65,8 @@ pub struct HashJoinExecutor<K> {
     build_key_idxs: Vec<usize>,
     /// Non-equi join condition (optional)
     cond: Option<BoxedExpression>,
+    /// Whether or not to find matched build rows for probe rows with NULL keys
+    match_null: bool,
     identity: String,
     _phantom: PhantomData<K>,
 }
@@ -84,9 +86,9 @@ impl<K: HashKey> Executor for HashJoinExecutor<K> {
 }
 
 /// In `JoinHashMap`, we only save the row id of the first build row that has the hash key.
-/// In fact, in the build side there may be multiple rows with the same hash key. To handle this case, we use `ChunkedData` to link them together.
-/// For example:
-/// 
+/// In fact, in the build side there may be multiple rows with the same hash key. To handle this
+/// case, we use `ChunkedData` to link them together. For example:
+///
 /// | id | key | row |
 /// | --- | --- | --- |
 /// | 0 | 1 | (1, 2, 3) |
@@ -94,17 +96,17 @@ impl<K: HashKey> Executor for HashJoinExecutor<K> {
 /// | 2 | 1 | (1, 3, 7) |
 /// | 3 | 1 | (1, 3, 2) |
 /// | 4 | 3 | (3, 2, 1) |
-/// 
+///
 /// The corresponding join hash map is:
-/// 
+///
 /// | key | value |
 /// | --- | --- |
 /// | 1 | 0 |
 /// | 4 | 1 |
 /// | 3 | 4 |
-/// 
+///
 /// And we save build rows with the same key like this:
-/// 
+///
 /// | id | value |
 /// | --- | --- |
 /// | 0 | 2 |
@@ -112,8 +114,9 @@ impl<K: HashKey> Executor for HashJoinExecutor<K> {
 /// | 2 | 3 |
 /// | 3 | None |
 /// | 4 | None |
-/// 
-/// This can be seen as an implicit linked list. For convenience, we use `RowIdIter` to iterate all build side row ids with the given key.
+///
+/// This can be seen as an implicit linked list. For convenience, we use `RowIdIter` to iterate all
+/// build side row ids with the given key.
 type JoinHashMap<K> = HashMap<K, RowId, PrecomputedBuildHasher>;
 
 struct RowIdIter<'a> {
@@ -192,11 +195,10 @@ impl<K: HashKey> HashJoinExecutor<K> {
         // Build hash map
         for (build_chunk_id, build_chunk) in build_side.iter().enumerate() {
             let build_keys = K::build(&self.build_key_idxs, build_chunk)?;
-            // In pg `null` and `null` never joins, so we should skip them in hash table.
             for (build_row_id, build_key) in build_keys
                 .into_iter()
                 .enumerate()
-                .filter(|(_, key)| !key.has_null())
+                .filter(|(_, key)| self.match_null || !key.has_null())
             {
                 let row_id = RowId::new(build_chunk_id, build_row_id);
                 next_build_row_with_same_key[row_id] = hash_map.insert(build_key, row_id);
@@ -1460,6 +1462,8 @@ impl BoxedExecutorBuilder for HashJoinExecutor<()> {
                 right_child,
                 left_key_idxs,
                 right_key_idxs,
+                // TODO: frontend should pass match_null in plan node
+                false,
                 cond,
                 context.plan_node().get_identity().clone(),
             ),
@@ -1479,6 +1483,7 @@ impl HashKeyDispatcher for HashJoinExecutor<()> {
             input.build_side_source,
             input.probe_key_idxs,
             input.build_key_idxs,
+            input.match_null,
             input.cond,
             input.identity,
         ))
@@ -1494,6 +1499,7 @@ impl<K> HashJoinExecutor<K> {
         build_side_source: BoxedExecutor,
         probe_key_idxs: Vec<usize>,
         build_key_idxs: Vec<usize>,
+        match_null: bool,
         cond: Option<BoxedExpression>,
         identity: String,
     ) -> Self {
@@ -1523,6 +1529,7 @@ impl<K> HashJoinExecutor<K> {
             build_side_source,
             probe_key_idxs,
             build_key_idxs,
+            match_null,
             cond,
             identity,
             _phantom: PhantomData,
@@ -1762,6 +1769,7 @@ mod tests {
                 right_child,
                 vec![0],
                 vec![0],
+                false,
                 cond,
                 "HashJoinExecutor".to_string(),
             ))
