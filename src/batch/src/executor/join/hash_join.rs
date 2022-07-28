@@ -571,9 +571,10 @@ impl<K: HashKey> HashJoinExecutor<K> {
                     non_equi_params
                         .first_output_row_id
                         .push(chunk_builder.buffered_count());
-                    for build_row_id in
-                        next_build_row_with_same_key.row_id_iter(Some(*first_matched_build_row_id))
-                    {
+                    let mut build_row_id_iter = next_build_row_with_same_key
+                        .row_id_iter(Some(*first_matched_build_row_id))
+                        .peekable();
+                    while let Some(build_row_id) = build_row_id_iter.next() {
                         let build_chunk = &build_side[build_row_id.chunk_id()];
                         if let Some(spilled) = Self::append_one_row(
                             &mut chunk_builder,
@@ -582,6 +583,8 @@ impl<K: HashKey> HashJoinExecutor<K> {
                             build_chunk,
                             build_row_id.row_id(),
                         )? {
+                            non_equi_params.has_more_output_rows =
+                                build_row_id_iter.peek().is_some();
                             yield Self::process_left_semi_anti_join_non_equi_condition::<true>(
                                 spilled,
                                 cond.as_ref(),
@@ -598,6 +601,7 @@ impl<K: HashKey> HashJoinExecutor<K> {
                 }
             }
         }
+        non_equi_params.has_more_output_rows = false;
         if let Some(spilled) = chunk_builder.consume_all()? {
             yield Self::process_left_semi_anti_join_non_equi_condition::<true>(
                 spilled,
@@ -1028,8 +1032,8 @@ impl<K: HashKey> HashJoinExecutor<K> {
     /// ```rust
     /// assert_eq!(probe_column_count, 2);
     /// assert_eq!(first_out_row_id, vec![0, 1, 2, 3]);
-    /// assert_eq!(has_more_output_rows, true);
-    /// assert_eq!(found_matched, false);
+    /// assert_eq!(has_more_output_rows);
+    /// assert_eq!(!found_matched);
     /// ```
     ///
     /// In `process_left_outer_join_non_equi_condition`, we transform the chunk in following steps.
@@ -1085,9 +1089,9 @@ impl<K: HashKey> HashJoinExecutor<K> {
     /// This time We have the following precondition:
     /// ```rust
     /// assert_eq!(probe_column_count, 2);
-    /// assert_eq!(first_out_row_id, vec![0, 2, 3]);
-    /// assert_eq!(has_more_output_rows, false);
-    /// assert_eq!(found_matched, false);
+    /// assert_eq!(first_out_row_id, vec![2, 3]);
+    /// assert_eq!(!has_more_output_rows);
+    /// assert_eq!(!found_matched);
     /// ```
     ///
     /// The transformed chunk is as follows after the same steps.
@@ -1117,6 +1121,10 @@ impl<K: HashKey> HashJoinExecutor<K> {
     /// | offset | v1 | v2 | v3 |
     /// |---|---|---|---|
     /// | 0 | 5 | 3 | - |
+    ///
+    ///
+    /// For more information about how `process_*_join_non_equi_condition` work, see their unit
+    /// tests.
     fn process_left_outer_join_non_equi_condition(
         chunk: DataChunk,
         cond: &dyn Expression,
@@ -1145,6 +1153,7 @@ impl<K: HashKey> HashJoinExecutor<K> {
         LeftNonEquiJoinParams {
             first_output_row_id,
             found_matched,
+            has_more_output_rows,
             ..
         }: &mut LeftNonEquiJoinParams,
     ) -> Result<DataChunk> {
@@ -1153,6 +1162,7 @@ impl<K: HashKey> HashJoinExecutor<K> {
             .remove_duplicate_rows_for_left_semi_anti_join::<ANTI_JOIN>(
                 &filter,
                 first_output_row_id,
+                *has_more_output_rows,
                 found_matched,
             )
             .take())
@@ -1261,8 +1271,10 @@ impl<K: HashKey> HashJoinExecutor<K> {
         }
     }
 
+    // Disable clippy's annoying lifetime warning
+    #[allow(clippy::needless_lifetimes)]
     #[try_stream(ok = DataChunk, error = RwError)]
-    async fn append_chunk(chunk_builder: &'_ mut DataChunkBuilder, chunk: DataChunk) {
+    async fn append_chunk(chunk_builder: &mut DataChunkBuilder, chunk: DataChunk) {
         let (mut remain, mut output) =
             chunk_builder.append_chunk(SlicedDataChunk::new_checked(chunk)?)?;
         if let Some(output_chunk) = output {
@@ -1408,6 +1420,7 @@ impl DataChunkMutator {
         mut self,
         filter: &Bitmap,
         first_output_row_ids: &mut Vec<usize>,
+        has_more_output_rows: bool,
         found_matched: &mut bool,
     ) -> Self {
         let mut new_visibility = BitmapBuilder::zeroed(self.0.capacity());
@@ -1442,7 +1455,7 @@ impl DataChunkMutator {
                 break;
             }
         }
-        if ANTI_JOIN && !*found_matched {
+        if ANTI_JOIN && !has_more_output_rows && !*found_matched {
             new_visibility.set(start_row_id, true);
         }
 
@@ -1709,8 +1722,10 @@ mod tests {
     use risingwave_expr::expr::{BoxedExpression, InputRefExpression};
     use risingwave_pb::expr::expr_node::Type;
 
-    use crate::executor::join::hash_join::HashJoinExecutor;
-    use crate::executor::join::JoinType;
+    use super::{
+        ChunkedData, HashJoinExecutor, JoinType, LeftNonEquiJoinParams, RightNonEquiJoinParams,
+        RowId,
+    };
     use crate::executor::test_utils::MockExecutor;
     use crate::executor::BoxedExecutor;
     struct DataChunkMerger {
@@ -2344,5 +2359,615 @@ mod tests {
         );
 
         test_fixture.do_test(expected_chunk, true).await;
+    }
+
+    #[tokio::test]
+    async fn test_process_left_outer_join_non_equi_condition() {
+        let chunk = DataChunk::from_pretty(
+            "i   f   i   F
+             1   3.5 1   5.5
+             1   3.5 1   2.5
+             2   4.0 .   .
+             3   5.0 3   4.0
+             3   5.0 3   3.0
+             3   5.0 3   4.0
+             3   5.0 3   3.0
+             4   1.0 4   0
+             4   1.0 4   0.5",
+        );
+        let expect = DataChunk::from_pretty(
+            "i   f   i   F
+             1   3.5 1   5.5
+             2   4.0 .   .
+             3   5.0 .   .
+             3   5.0 .   .",
+        );
+        let cond = TestFixture::create_cond();
+        let mut params = LeftNonEquiJoinParams {
+            probe_column_count: 2,
+            first_output_row_id: vec![0, 2, 3, 5, 7],
+            has_more_output_rows: true,
+            found_matched: false,
+        };
+        assert!(is_data_chunk_eq(
+            &HashJoinExecutor::<Key32>::process_left_outer_join_non_equi_condition(
+                chunk,
+                cond.as_ref(),
+                &mut params
+            )
+            .unwrap()
+            .compact()
+            .unwrap(),
+            &expect
+        ));
+        assert_eq!(params.first_output_row_id, Vec::<usize>::new());
+        assert!(!params.found_matched);
+
+        let chunk = DataChunk::from_pretty(
+            "i   f   i   F
+             4   1.0 4   0.6
+             4   1.0 4   2.0
+             5   4.0 5   .
+             6   7.0 6   .
+             6   7.0 6   5.0",
+        );
+        let expect = DataChunk::from_pretty(
+            "i   f   i   F
+             4   1.0 4   2.0
+             5   4.0 .   .
+             6   7.0 .   .",
+        );
+        params.first_output_row_id = vec![2, 3];
+        params.has_more_output_rows = false;
+        assert!(is_data_chunk_eq(
+            &HashJoinExecutor::<Key32>::process_left_outer_join_non_equi_condition(
+                chunk,
+                cond.as_ref(),
+                &mut params
+            )
+            .unwrap()
+            .compact()
+            .unwrap(),
+            &expect
+        ));
+        assert_eq!(params.first_output_row_id, Vec::<usize>::new());
+        assert!(!params.found_matched);
+
+        let chunk = DataChunk::from_pretty(
+            "i   f   i   F
+             4   1.0 4   0.6
+             4   1.0 4   1.0
+             5   4.0 5   .
+             6   7.0 6   .
+             6   7.0 6   8.0",
+        );
+        let expect = DataChunk::from_pretty(
+            "i   f   i   F
+             4   1.0 .   .
+             5   4.0 .   .
+             6   7.0 6   8.0",
+        );
+        params.first_output_row_id = vec![2, 3];
+        params.has_more_output_rows = false;
+        assert!(is_data_chunk_eq(
+            &HashJoinExecutor::<Key32>::process_left_outer_join_non_equi_condition(
+                chunk,
+                cond.as_ref(),
+                &mut params
+            )
+            .unwrap()
+            .compact()
+            .unwrap(),
+            &expect
+        ));
+        assert_eq!(params.first_output_row_id, Vec::<usize>::new());
+        assert!(params.found_matched);
+    }
+
+    #[tokio::test]
+    async fn test_process_left_semi_join_non_equi_condition() {
+        let chunk = DataChunk::from_pretty(
+            "i   f   i   F
+             1   3.5 1   5.5
+             1   3.5 1   2.5
+             2   4.0 .   .
+             3   5.0 3   4.0
+             3   5.0 3   3.0
+             3   5.0 3   4.0
+             3   5.0 3   3.0
+             4   1.0 4   0
+             4   1.0 4   0.5",
+        );
+        let expect = DataChunk::from_pretty(
+            "i   f   i   F
+             1   3.5 1   5.5",
+        );
+        let cond = TestFixture::create_cond();
+        let mut params = LeftNonEquiJoinParams {
+            probe_column_count: 2,
+            first_output_row_id: vec![0, 2, 3, 5, 7],
+            found_matched: false,
+            ..Default::default()
+        };
+        assert!(is_data_chunk_eq(
+            &HashJoinExecutor::<Key32>::process_left_semi_anti_join_non_equi_condition::<false>(
+                chunk,
+                cond.as_ref(),
+                &mut params
+            )
+            .unwrap()
+            .compact()
+            .unwrap(),
+            &expect
+        ));
+        assert_eq!(params.first_output_row_id, Vec::<usize>::new());
+        assert!(!params.found_matched);
+
+        let chunk = DataChunk::from_pretty(
+            "i   f   i   F
+             4   1.0 4   0.6
+             4   1.0 4   2.0
+             5   4.0 5   .
+             6   7.0 6   .
+             6   7.0 6   5.0",
+        );
+        let expect = DataChunk::from_pretty(
+            "i   f   i   F
+             4   1.0 4   2.0",
+        );
+        params.first_output_row_id = vec![2, 3];
+        assert!(is_data_chunk_eq(
+            &HashJoinExecutor::<Key32>::process_left_semi_anti_join_non_equi_condition::<false>(
+                chunk,
+                cond.as_ref(),
+                &mut params
+            )
+            .unwrap()
+            .compact()
+            .unwrap(),
+            &expect
+        ));
+        assert_eq!(params.first_output_row_id, Vec::<usize>::new());
+        assert!(!params.found_matched);
+
+        let chunk = DataChunk::from_pretty(
+            "i   f   i   F
+             4   1.0 4   0.6
+             4   1.0 4   1.0
+             5   4.0 5   .
+             6   7.0 6   .
+             6   7.0 6   8.0",
+        );
+        let expect = DataChunk::from_pretty(
+            "i   f   i   F
+             6   7.0 6   8.0",
+        );
+        params.first_output_row_id = vec![2, 3];
+        assert!(is_data_chunk_eq(
+            &HashJoinExecutor::<Key32>::process_left_semi_anti_join_non_equi_condition::<false>(
+                chunk,
+                cond.as_ref(),
+                &mut params
+            )
+            .unwrap()
+            .compact()
+            .unwrap(),
+            &expect
+        ));
+        assert_eq!(params.first_output_row_id, Vec::<usize>::new());
+        assert!(params.found_matched);
+    }
+
+    #[tokio::test]
+    async fn test_process_left_anti_join_non_equi_condition() {
+        let chunk = DataChunk::from_pretty(
+            "i   f   i   F
+             1   3.5 1   5.5
+             1   3.5 1   2.5
+             2   4.0 .   .
+             3   5.0 3   4.0
+             3   5.0 3   3.0
+             3   5.0 3   4.0
+             3   5.0 3   3.0
+             4   1.0 4   0
+             4   1.0 4   0.5",
+        );
+        let expect = DataChunk::from_pretty(
+            "i   f   i   F
+             2   4.0 .   .
+             3   5.0 3   4.0
+             3   5.0 3   4.0",
+        );
+        let cond = TestFixture::create_cond();
+        let mut params = LeftNonEquiJoinParams {
+            probe_column_count: 2,
+            first_output_row_id: vec![0, 2, 3, 5, 7],
+            has_more_output_rows: true,
+            found_matched: false,
+        };
+        assert!(is_data_chunk_eq(
+            &HashJoinExecutor::<Key32>::process_left_semi_anti_join_non_equi_condition::<true>(
+                chunk,
+                cond.as_ref(),
+                &mut params
+            )
+            .unwrap()
+            .compact()
+            .unwrap(),
+            &expect
+        ));
+        assert_eq!(params.first_output_row_id, Vec::<usize>::new());
+        assert!(!params.found_matched);
+
+        let chunk = DataChunk::from_pretty(
+            "i   f   i   F
+             4   1.0 4   0.6
+             4   1.0 4   2.0
+             5   4.0 5   .
+             6   7.0 6   .
+             6   7.0 6   5.0",
+        );
+        let expect = DataChunk::from_pretty(
+            "i   f   i   F
+             5   4.0 5   .
+             6   7.0 6   .",
+        );
+        params.first_output_row_id = vec![2, 3];
+        params.has_more_output_rows = false;
+        assert!(is_data_chunk_eq(
+            &HashJoinExecutor::<Key32>::process_left_semi_anti_join_non_equi_condition::<true>(
+                chunk,
+                cond.as_ref(),
+                &mut params
+            )
+            .unwrap()
+            .compact()
+            .unwrap(),
+            &expect
+        ));
+        assert_eq!(params.first_output_row_id, Vec::<usize>::new());
+        assert!(!params.found_matched);
+
+        let chunk = DataChunk::from_pretty(
+            "i   f   i   F
+             4   1.0 4   0.6
+             4   1.0 4   1.0
+             5   4.0 5   .
+             6   7.0 6   .
+             6   7.0 6   8.0",
+        );
+        let expect = DataChunk::from_pretty(
+            "i   f   i   F
+             4   1.0 4   0.6
+             5   4.0 5   .",
+        );
+        params.first_output_row_id = vec![2, 3];
+        params.has_more_output_rows = false;
+        assert!(is_data_chunk_eq(
+            &HashJoinExecutor::<Key32>::process_left_semi_anti_join_non_equi_condition::<true>(
+                chunk,
+                cond.as_ref(),
+                &mut params
+            )
+            .unwrap()
+            .compact()
+            .unwrap(),
+            &expect
+        ));
+        assert_eq!(params.first_output_row_id, Vec::<usize>::new());
+        assert!(params.found_matched);
+    }
+
+    #[tokio::test]
+    async fn test_process_right_outer_join_non_equi_condition() {
+        let chunk = DataChunk::from_pretty(
+            "i   f   i   F
+             1   3.5 1   5.5
+             1   3.5 1   2.5
+             3   5.0 3   4.0
+             3   5.0 3   3.0
+             3   5.0 3   4.0
+             3   5.0 3   3.0
+             4   1.0 4   0
+             4   1.0 4   0.5",
+        );
+        let expect = DataChunk::from_pretty(
+            "i   f   i   F
+             1   3.5 1   5.5",
+        );
+        let cond = TestFixture::create_cond();
+        // For simplicity, all rows are in one chunk.
+        // Build side table
+        // 0  - (1, 5.5)
+        // 1  - (1, 2.5)
+        // 2  - ?
+        // 3  - (3, 4.0)
+        // 4  - (3, 3.0)
+        // 5  - (4, 0)
+        // 6  - ?
+        // 7  - (4, 0.5)
+        // 8  - (4, 0.6)
+        // 9  - (4, 2.0)
+        // 10 - (5, .)
+        // 11 - ?
+        // 12 - (6, .)
+        // 13 - (6, 5.0)
+        // Rows with '?' are never matched here.
+        let build_row_matched = ChunkedData::with_chunk_sizes([14].into_iter()).unwrap();
+        let mut params = RightNonEquiJoinParams {
+            build_row_ids: vec![
+                RowId::new(0, 0),
+                RowId::new(0, 1),
+                RowId::new(0, 3),
+                RowId::new(0, 4),
+                RowId::new(0, 3),
+                RowId::new(0, 4),
+                RowId::new(0, 5),
+                RowId::new(0, 7),
+            ],
+            build_row_matched,
+        };
+        assert!(is_data_chunk_eq(
+            &HashJoinExecutor::<Key32>::process_right_outer_join_non_equi_condition(
+                chunk,
+                cond.as_ref(),
+                &mut params
+            )
+            .unwrap()
+            .compact()
+            .unwrap(),
+            &expect
+        ));
+        assert_eq!(params.build_row_ids, Vec::new());
+        assert_eq!(
+            params.build_row_matched,
+            ChunkedData::try_from(vec![{
+                let mut v = vec![false; 14];
+                v[0] = true;
+                v
+            }])
+            .unwrap()
+        );
+
+        let chunk = DataChunk::from_pretty(
+            "i   f   i   F
+             4   1.0 4   0.6
+             4   1.0 4   2.0
+             5   4.0 5   .
+             6   7.0 6   .
+             6   7.0 6   5.0",
+        );
+        let expect = DataChunk::from_pretty(
+            "i   f   i   F
+             4   1.0 4   2.0",
+        );
+        params.build_row_ids = vec![
+            RowId::new(0, 8),
+            RowId::new(0, 9),
+            RowId::new(0, 10),
+            RowId::new(0, 12),
+            RowId::new(0, 13),
+        ];
+        assert!(is_data_chunk_eq(
+            &HashJoinExecutor::<Key32>::process_right_outer_join_non_equi_condition(
+                chunk,
+                cond.as_ref(),
+                &mut params
+            )
+            .unwrap()
+            .compact()
+            .unwrap(),
+            &expect
+        ));
+        assert_eq!(params.build_row_ids, Vec::new());
+        assert_eq!(
+            params.build_row_matched,
+            ChunkedData::try_from(vec![{
+                let mut v = vec![false; 14];
+                v[0] = true;
+                v[9] = true;
+                v
+            }])
+            .unwrap()
+        );
+    }
+
+    #[tokio::test]
+    async fn test_process_right_semi_anti_join_non_equi_condition() {
+        let chunk = DataChunk::from_pretty(
+            "i   f   i   F
+             1   3.5 1   5.5
+             1   3.5 1   2.5
+             3   5.0 3   4.0
+             3   5.0 3   3.0
+             3   5.0 3   4.0
+             3   5.0 3   3.0
+             4   1.0 4   0
+             4   1.0 4   0.5",
+        );
+        let cond = TestFixture::create_cond();
+        let build_row_matched = ChunkedData::with_chunk_sizes([14].into_iter()).unwrap();
+        let mut params = RightNonEquiJoinParams {
+            build_row_ids: vec![
+                RowId::new(0, 0),
+                RowId::new(0, 1),
+                RowId::new(0, 3),
+                RowId::new(0, 4),
+                RowId::new(0, 3),
+                RowId::new(0, 4),
+                RowId::new(0, 5),
+                RowId::new(0, 7),
+            ],
+            build_row_matched,
+        };
+
+        assert!(
+            HashJoinExecutor::<Key32>::process_right_semi_anti_join_non_equi_condition(
+                chunk,
+                cond.as_ref(),
+                &mut params
+            )
+            .is_ok()
+        );
+        assert_eq!(params.build_row_ids, Vec::new());
+        assert_eq!(
+            params.build_row_matched,
+            ChunkedData::try_from(vec![{
+                let mut v = vec![false; 14];
+                v[0] = true;
+                v
+            }])
+            .unwrap()
+        );
+
+        let chunk = DataChunk::from_pretty(
+            "i   f   i   F
+             4   1.0 4   0.6
+             4   1.0 4   2.0
+             5   4.0 5   .
+             6   7.0 6   .
+             6   7.0 6   5.0",
+        );
+        params.build_row_ids = vec![
+            RowId::new(0, 8),
+            RowId::new(0, 9),
+            RowId::new(0, 10),
+            RowId::new(0, 12),
+            RowId::new(0, 13),
+        ];
+        assert!(
+            HashJoinExecutor::<Key32>::process_right_semi_anti_join_non_equi_condition(
+                chunk,
+                cond.as_ref(),
+                &mut params
+            )
+            .is_ok()
+        );
+        assert_eq!(params.build_row_ids, Vec::new());
+        assert_eq!(
+            params.build_row_matched,
+            ChunkedData::try_from(vec![{
+                let mut v = vec![false; 14];
+                v[0] = true;
+                v[9] = true;
+                v
+            }])
+            .unwrap()
+        );
+    }
+
+    #[tokio::test]
+    async fn test_process_full_outer_join_non_equi_condition() {
+        let chunk = DataChunk::from_pretty(
+            "i   f   i   F
+             1   3.5 1   5.5
+             1   3.5 1   2.5
+             3   5.0 3   4.0
+             3   5.0 3   3.0
+             3   5.0 3   4.0
+             3   5.0 3   3.0
+             4   1.0 4   0
+             4   1.0 4   0.5",
+        );
+        let expect = DataChunk::from_pretty(
+            "i   f   i   F
+             1   3.5 1   5.5
+             3   5.0 .   .
+             3   5.0 .   .",
+        );
+        let cond = TestFixture::create_cond();
+        let mut left_params = LeftNonEquiJoinParams {
+            probe_column_count: 2,
+            first_output_row_id: vec![0, 2, 4, 6],
+            has_more_output_rows: true,
+            found_matched: false,
+        };
+        let mut right_params = RightNonEquiJoinParams {
+            build_row_ids: vec![
+                RowId::new(0, 0),
+                RowId::new(0, 1),
+                RowId::new(0, 3),
+                RowId::new(0, 4),
+                RowId::new(0, 3),
+                RowId::new(0, 4),
+                RowId::new(0, 5),
+                RowId::new(0, 7),
+            ],
+            build_row_matched: ChunkedData::with_chunk_sizes([14].into_iter()).unwrap(),
+        };
+        assert!(is_data_chunk_eq(
+            &HashJoinExecutor::<Key32>::process_full_outer_join_non_equi_condition(
+                chunk,
+                cond.as_ref(),
+                &mut left_params,
+                &mut right_params,
+            )
+            .unwrap()
+            .compact()
+            .unwrap(),
+            &expect
+        ));
+        assert_eq!(left_params.first_output_row_id, Vec::<usize>::new());
+        assert!(!left_params.found_matched);
+        assert_eq!(right_params.build_row_ids, Vec::new());
+        assert_eq!(
+            right_params.build_row_matched,
+            ChunkedData::try_from(vec![{
+                let mut v = vec![false; 14];
+                v[0] = true;
+                v
+            }])
+            .unwrap()
+        );
+
+        let chunk = DataChunk::from_pretty(
+            "i   f   i   F
+             4   1.0 4   0.6
+             4   1.0 4   2.0
+             5   4.0 5   .
+             6   7.0 6   .
+             6   7.0 6   8.0",
+        );
+        let expect = DataChunk::from_pretty(
+            "i   f   i   F
+             4   1.0 4   2.0
+             5   4.0 .   .
+             6   7.0 6   8.0",
+        );
+        left_params.first_output_row_id = vec![2, 3];
+        left_params.has_more_output_rows = false;
+        right_params.build_row_ids = vec![
+            RowId::new(0, 8),
+            RowId::new(0, 9),
+            RowId::new(0, 10),
+            RowId::new(0, 12),
+            RowId::new(0, 13),
+        ];
+        assert!(is_data_chunk_eq(
+            &HashJoinExecutor::<Key32>::process_full_outer_join_non_equi_condition(
+                chunk,
+                cond.as_ref(),
+                &mut left_params,
+                &mut right_params,
+            )
+            .unwrap()
+            .compact()
+            .unwrap(),
+            &expect
+        ));
+        assert_eq!(left_params.first_output_row_id, Vec::<usize>::new());
+        assert!(left_params.found_matched);
+        assert_eq!(right_params.build_row_ids, Vec::new());
+        assert_eq!(
+            right_params.build_row_matched,
+            ChunkedData::try_from(vec![{
+                let mut v = vec![false; 14];
+                v[0] = true;
+                v[9] = true;
+                v[13] = true;
+                v
+            }])
+            .unwrap()
+        );
     }
 }
