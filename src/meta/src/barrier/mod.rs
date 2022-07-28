@@ -90,8 +90,8 @@ pub enum CommandChanges {
     CreateTable(TableId),
     /// Some actors will be added or removed.
     Actor {
-        add: HashSet<ActorId>,
-        remove: HashSet<ActorId>,
+        to_add: HashSet<ActorId>,
+        to_remove: HashSet<ActorId>,
     },
     /// No changes.
     None,
@@ -253,12 +253,12 @@ where
                 );
             }
 
-            CommandChanges::Actor { add, .. } => {
+            CommandChanges::Actor { to_add, .. } => {
                 assert!(
-                    self.adding_actors.is_disjoint(&add),
+                    self.adding_actors.is_disjoint(&to_add),
                     "duplicated actor in concurrent checkpoint"
                 );
-                self.adding_actors.extend(add);
+                self.adding_actors.extend(to_add);
             }
 
             _ => {}
@@ -281,12 +281,12 @@ where
                 );
             }
 
-            CommandChanges::Actor { remove, .. } => {
+            CommandChanges::Actor { to_remove, .. } => {
                 assert!(
-                    self.removing_actors.is_disjoint(&remove),
+                    self.removing_actors.is_disjoint(&to_remove),
                     "duplicated actor in concurrent checkpoint"
                 );
-                self.removing_actors.extend(remove);
+                self.removing_actors.extend(to_remove);
             }
 
             _ => {}
@@ -398,12 +398,12 @@ where
             CommandChanges::DropTable(table_id) => {
                 assert!(self.dropping_tables.remove(&table_id));
             }
-            CommandChanges::Actor { add, remove } => {
-                assert!(self.adding_actors.is_superset(&add));
-                assert!(self.removing_actors.is_superset(&remove));
+            CommandChanges::Actor { to_add, to_remove } => {
+                assert!(self.adding_actors.is_superset(&to_add));
+                assert!(self.removing_actors.is_superset(&to_remove));
 
-                self.adding_actors.retain(|a| !add.contains(a));
-                self.removing_actors.retain(|a| !remove.contains(a));
+                self.adding_actors.retain(|a| !to_add.contains(a));
+                self.removing_actors.retain(|a| !to_remove.contains(a));
             }
             CommandChanges::None => {}
         }

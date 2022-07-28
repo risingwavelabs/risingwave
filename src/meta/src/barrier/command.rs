@@ -122,15 +122,15 @@ impl Command {
             } => CommandChanges::CreateTable(table_fragments.table_id()),
             Command::DropMaterializedView(table_id) => CommandChanges::DropTable(*table_id),
             Command::RescheduleFragment(reschedules) => {
-                let add = reschedules
+                let to_add = reschedules
                     .values()
                     .flat_map(|r| r.added_actors.iter().copied())
                     .collect();
-                let remove = reschedules
+                let to_remove = reschedules
                     .values()
                     .flat_map(|r| r.removed_actors.iter().copied())
                     .collect();
-                CommandChanges::Actor { add, remove }
+                CommandChanges::Actor { to_add, to_remove }
             }
         }
     }
