@@ -718,7 +718,9 @@ where
     }
 
     pub async fn list_sources(&self) -> Result<Vec<Source>> {
-        Source::list(self.env.meta_store()).await
+        Source::list(self.env.meta_store())
+            .await
+            .map_err(Into::into)
     }
 
     fn has_database(&self, database: &Database) -> bool {
@@ -779,7 +781,9 @@ where
     }
 
     pub async fn get_source(&self, id: SourceId) -> Result<Option<Source>> {
-        Source::select(self.env.meta_store(), &id).await
+        Source::select(self.env.meta_store(), &id)
+            .await
+            .map_err(Into::into)
     }
 
     fn get_ref_count(&self, relation_id: RelationId) -> Option<usize> {
