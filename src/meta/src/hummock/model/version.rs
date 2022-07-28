@@ -16,7 +16,7 @@ use prost::Message;
 use risingwave_hummock_sdk::HummockVersionId;
 use risingwave_pb::hummock::HummockVersion;
 
-use crate::model::MetadataModel;
+use crate::model::{MetadataModel, MetadataModelResult};
 
 /// Column family name for hummock version.
 /// `cf(hummock_version)`: `HummockVersionId` -> `HummockVersion`
@@ -43,7 +43,7 @@ impl MetadataModel for HummockVersion {
         prost
     }
 
-    fn key(&self) -> risingwave_common::error::Result<Self::KeyType> {
+    fn key(&self) -> MetadataModelResult<Self::KeyType> {
         Ok(0)
     }
 }

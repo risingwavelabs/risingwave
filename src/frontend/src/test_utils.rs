@@ -85,6 +85,19 @@ impl LocalFrontend {
         self.session_ref().run_statement(sql.as_str(), false).await
     }
 
+    pub async fn run_user_sql(
+        &self,
+        sql: impl Into<String>,
+        database: String,
+        user_name: String,
+        user_id: UserId,
+    ) -> std::result::Result<PgResponse, Box<dyn std::error::Error + Send + Sync>> {
+        let sql = sql.into();
+        self.session_user_ref(database, user_name, user_id)
+            .run_statement(sql.as_str(), false)
+            .await
+    }
+
     pub async fn query_formatted_result(&self, sql: impl Into<String>) -> Vec<String> {
         self.run_sql(sql)
             .await
@@ -126,6 +139,19 @@ impl LocalFrontend {
                 DEFAULT_SUPER_USER.to_string(),
                 DEFAULT_SUPER_USER_ID,
             )),
+            UserAuthenticator::None,
+        ))
+    }
+
+    pub fn session_user_ref(
+        &self,
+        database: String,
+        user_name: String,
+        user_id: UserId,
+    ) -> Arc<SessionImpl> {
+        Arc::new(SessionImpl::new(
+            self.env.clone(),
+            Arc::new(AuthContext::new(database, user_name, user_id)),
             UserAuthenticator::None,
         ))
     }

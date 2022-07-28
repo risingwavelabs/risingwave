@@ -119,10 +119,16 @@ impl PlanTreeNodeUnary for LogicalExpand {
         input: PlanRef,
         input_col_change: ColIndexMapping,
     ) -> (Self, ColIndexMapping) {
-        let mut column_subsets = self.column_subsets.clone();
-        for key in column_subsets.iter_mut().flat_map(|r| r.iter_mut()) {
-            *key = input_col_change.map(*key);
-        }
+        let column_subsets = self
+            .column_subsets
+            .iter()
+            .map(|subset| {
+                subset
+                    .iter()
+                    .filter_map(|i| input_col_change.try_map(*i))
+                    .collect_vec()
+            })
+            .collect_vec();
         let (mut map, new_input_col_num) = input_col_change.into_parts();
         assert_eq!(new_input_col_num, input.schema().len());
         map.push(Some(new_input_col_num));
@@ -142,20 +148,6 @@ impl fmt::Display for LogicalExpand {
 impl ColPrunable for LogicalExpand {
     fn prune_col(&self, required_cols: &[usize]) -> PlanRef {
         let pos_of_flag = self.input.schema().len();
-        {
-            let mut sorted_indices = required_cols.to_owned();
-            sorted_indices.sort();
-            sorted_indices.dedup();
-
-            let mut expaneded_cols = self.column_subsets.iter().flatten().cloned().collect_vec();
-            expaneded_cols.sort();
-            expaneded_cols.dedup();
-            expaneded_cols.push(pos_of_flag);
-
-            // expaned columns and `flag` are what required.
-            assert_eq!(sorted_indices, expaneded_cols);
-        }
-
         let input_required_cols = required_cols
             .iter()
             .copied()
