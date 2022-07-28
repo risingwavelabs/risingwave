@@ -1039,7 +1039,7 @@ impl<K: HashKey> HashJoinExecutor<K> {
     /// | 4 | 3 | 3 | 3 |
     ///
     /// We have the following precondition:
-    /// ```rust
+    /// ```ignore
     /// assert_eq!(probe_column_count, 2);
     /// assert_eq!(first_out_row_id, vec![0, 1, 2, 3]);
     /// assert_eq!(has_more_output_rows);
@@ -1097,7 +1097,7 @@ impl<K: HashKey> HashJoinExecutor<K> {
     /// | 4 | 5 | 3 | - |
     ///
     /// This time We have the following precondition:
-    /// ```rust
+    /// ```ignore
     /// assert_eq!(probe_column_count, 2);
     /// assert_eq!(first_out_row_id, vec![2, 3]);
     /// assert_eq!(!has_more_output_rows);
