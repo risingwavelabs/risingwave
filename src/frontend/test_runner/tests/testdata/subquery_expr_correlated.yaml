@@ -510,7 +510,7 @@
   optimized_logical_plan: |
     LogicalJoin { type: LeftSemi, on: ($1 = $2), output_indices: all }
       LogicalScan { table: t1, columns: [x, y] }
-      LogicalJoin { type: RightOuter, on: ($1 = $3) AND ($0 = $4) AND ($0 = $2), output_indices: [0] }
+      LogicalJoin { type: RightOuter, on: ($1 = $3) AND ($0 = $4) AND ($0 = $2), output_indices: [2] }
         LogicalJoin { type: Inner, on: ($0 = $2), output_indices: [0, 1] }
           LogicalAgg { group_key: [$0], aggs: [] }
             LogicalScan { table: t1, columns: [y] }
