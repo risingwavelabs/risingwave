@@ -15,7 +15,7 @@
 use std::sync::Arc;
 
 use risingwave_common::array::{
-    ArrayBuilder, ArrayImpl, ArrayRef, DataChunk, I32ArrayBuilder, Row,
+    ArrayBuilder, ArrayImpl, ArrayRef, DataChunk, I16ArrayBuilder, Row,
 };
 use risingwave_common::types::{DataType, Datum};
 use risingwave_common::util::hash_util::CRC32FastBuilder;
@@ -41,7 +41,7 @@ impl<'a> TryFrom<&'a ExprNode> for VnodeExpression {
 
     fn try_from(prost: &'a ExprNode) -> Result<Self> {
         ensure!(prost.get_expr_type().unwrap() == Type::Vnode);
-        ensure!(DataType::from(prost.get_return_type().unwrap()) == DataType::Int32);
+        ensure!(DataType::from(prost.get_return_type().unwrap()) == DataType::Int16);
 
         let RexNode::FuncCall(func_call_node) = prost.get_rex_node().unwrap() else {
             bail!("Expected RexNode::FuncCall");
@@ -59,7 +59,7 @@ impl<'a> TryFrom<&'a ExprNode> for VnodeExpression {
 
 impl Expression for VnodeExpression {
     fn return_type(&self) -> DataType {
-        DataType::Int32
+        DataType::Int16
     }
 
     fn eval(&self, input: &DataChunk) -> Result<ArrayRef> {
@@ -71,7 +71,7 @@ impl Expression for VnodeExpression {
 
         let row_len = input.capacity();
         let vis = input.vis();
-        let mut builder = I32ArrayBuilder::new(row_len);
+        let mut builder = I16ArrayBuilder::new(row_len);
 
         for row_idx in 0..row_len {
             if !vis.is_set(row_idx) {
@@ -84,7 +84,7 @@ impl Expression for VnodeExpression {
                 .map(|col| col.datum_at(row_idx))
                 .collect();
             let dist_key_row = Row::new(dist_key);
-            let vnode = dist_key_row.hash_row(&CRC32FastBuilder {}).to_vnode() as i32;
+            let vnode = dist_key_row.hash_row(&CRC32FastBuilder {}).to_vnode() as i16;
             builder.append(Some(vnode))?;
         }
         let output = builder.finish()?;
@@ -98,7 +98,7 @@ impl Expression for VnodeExpression {
             .map(|c| c.eval_row(input))
             .collect::<Result<Vec<_>>>()?;
         let dist_key_row = Row::new(dist_key);
-        let vnode = dist_key_row.hash_row(&CRC32FastBuilder {}).to_vnode() as i32;
+        let vnode = dist_key_row.hash_row(&CRC32FastBuilder {}).to_vnode() as i16;
         Ok(Some(vnode.into()))
     }
 }
@@ -121,7 +121,7 @@ mod tests {
         ExprNode {
             expr_type: Vnode as i32,
             return_type: Some(ProstDataType {
-                type_name: TypeName::Int32 as i32,
+                type_name: TypeName::Int16 as i32,
                 ..Default::default()
             }),
             rex_node: Some(RexNode::FuncCall(FunctionCall { children })),
@@ -147,9 +147,9 @@ mod tests {
         );
         let actual = vnode_expr.eval(&chunk).unwrap();
         actual.iter().for_each(|vnode| {
-            let vnode = vnode.unwrap().into_int32();
+            let vnode = vnode.unwrap().into_int16();
             assert!(vnode >= 0);
-            assert!(vnode < VIRTUAL_NODE_COUNT as i32);
+            assert!((vnode as usize) < VIRTUAL_NODE_COUNT);
         });
     }
 
@@ -173,9 +173,9 @@ mod tests {
         let rows: Vec<_> = chunk.rows().map(|row| row.to_owned_row()).collect();
         for row in rows {
             let actual = vnode_expr.eval_row(&row).unwrap();
-            let vnode = actual.unwrap().into_int32();
+            let vnode = actual.unwrap().into_int16();
             assert!(vnode >= 0);
-            assert!(vnode < VIRTUAL_NODE_COUNT as i32);
+            assert!((vnode as usize) < VIRTUAL_NODE_COUNT);
         }
     }
 }
