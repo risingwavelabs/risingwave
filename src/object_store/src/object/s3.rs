@@ -65,7 +65,7 @@ impl ObjectStore for S3ObjectStore {
         let resp = req.send().await?;
 
         let mut body = resp.body.collect().await?;
-        let mut val = Vec::with_capacity(body.remaining());
+        let mut val = vec![0; body.remaining()];
         body.copy_to_slice(&mut val);
 
         if block_loc.is_some() && block_loc.as_ref().unwrap().size != val.len() {
