@@ -16,7 +16,7 @@ use risingwave_common::error::{ErrorCode, RwError};
 use risingwave_pb::ProstFieldNotFound;
 use thiserror::Error;
 
-use crate::storage::Error as MetaStoreError;
+use crate::storage::MetaStoreError;
 
 pub type MetadataModelResult<T> = std::result::Result<T, MetadataModelError>;
 
@@ -41,6 +41,7 @@ impl From<ProstFieldNotFound> for MetadataModelError {
     }
 }
 
+// TODO(zehua): replace `RwError` with meta's own error type.
 impl From<MetadataModelError> for RwError {
     fn from(err: MetadataModelError) -> Self {
         RwError::from(ErrorCode::InternalError(err.to_string()))

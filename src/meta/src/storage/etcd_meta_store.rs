@@ -22,11 +22,11 @@ use etcd_client::{
 use futures::Future;
 use tokio::sync::Mutex;
 
-use super::{Error, Key, MetaStore, Result, Snapshot, Transaction, Value};
+use super::{Key, MetaStore, MetaStoreError, MetaStoreResult, Snapshot, Transaction, Value};
 
-impl From<EtcdError> for Error {
+impl From<EtcdError> for MetaStoreError {
     fn from(err: EtcdError) -> Self {
-        Error::Internal(anyhow::Error::new(err))
+        MetaStoreError::Internal(anyhow::Error::new(err))
     }
 }
 
@@ -52,7 +52,7 @@ fn encode_etcd_key(cf: &str, key: &[u8]) -> Vec<u8> {
 }
 
 impl EtcdSnapshot {
-    async fn view_inner<V: SnapshotViewer>(&self, view: V) -> Result<V::Output> {
+    async fn view_inner<V: SnapshotViewer>(&self, view: V) -> MetaStoreResult<V::Output> {
         loop {
             let revision = self.revision.load(atomic::Ordering::Relaxed);
             if revision != REVISION_UNINITIALIZED {
@@ -77,7 +77,7 @@ impl EtcdSnapshot {
 
 trait SnapshotViewer {
     type Output;
-    type OutputFuture<'a>: Future<Output = Result<(i64, Self::Output)>> + 'a
+    type OutputFuture<'a>: Future<Output = MetaStoreResult<(i64, Self::Output)>> + 'a
     where
         Self: 'a;
 
@@ -91,7 +91,7 @@ struct GetViewer {
 impl SnapshotViewer for GetViewer {
     type Output = Vec<u8>;
 
-    type OutputFuture<'a> = impl Future<Output = Result<(i64, Self::Output)>> + 'a;
+    type OutputFuture<'a> = impl Future<Output = MetaStoreResult<(i64, Self::Output)>> + 'a;
 
     fn view(&self, mut client: KvClient, revision: i64) -> Self::OutputFuture<'_> {
         async move {
@@ -104,7 +104,7 @@ impl SnapshotViewer for GetViewer {
             let new_revision = if let Some(header) = res.header() {
                 header.revision()
             } else {
-                return Err(Error::Internal(anyhow::anyhow!(
+                return Err(MetaStoreError::Internal(anyhow::anyhow!(
                     "Etcd response missing header"
                 )));
             };
@@ -112,7 +112,7 @@ impl SnapshotViewer for GetViewer {
                 .kvs()
                 .first()
                 .map(|kv| kv.value().to_vec())
-                .ok_or_else(|| Error::ItemNotFound(hex::encode(self.key.clone())))?;
+                .ok_or_else(|| MetaStoreError::ItemNotFound(hex::encode(self.key.clone())))?;
             Ok((new_revision, value))
         }
     }
@@ -125,7 +125,7 @@ struct ListViewer {
 impl SnapshotViewer for ListViewer {
     type Output = Vec<Vec<u8>>;
 
-    type OutputFuture<'a> = impl Future<Output = Result<(i64, Self::Output)>> + 'a;
+    type OutputFuture<'a> = impl Future<Output = MetaStoreResult<(i64, Self::Output)>> + 'a;
 
     fn view(&self, mut client: KvClient, revision: i64) -> Self::OutputFuture<'_> {
         async move {
@@ -138,7 +138,7 @@ impl SnapshotViewer for ListViewer {
             let new_revision = if let Some(header) = res.header() {
                 header.revision()
             } else {
-                return Err(Error::Internal(anyhow::anyhow!(
+                return Err(MetaStoreError::Internal(anyhow::anyhow!(
                     "Etcd response missing header"
                 )));
             };
@@ -150,14 +150,14 @@ impl SnapshotViewer for ListViewer {
 
 #[async_trait]
 impl Snapshot for EtcdSnapshot {
-    async fn list_cf(&self, cf: &str) -> Result<Vec<Vec<u8>>> {
+    async fn list_cf(&self, cf: &str) -> MetaStoreResult<Vec<Vec<u8>>> {
         let view = ListViewer {
             key: encode_etcd_key(cf, &[]),
         };
         self.view_inner(view).await
     }
 
-    async fn get_cf(&self, cf: &str, key: &[u8]) -> Result<Vec<u8>> {
+    async fn get_cf(&self, cf: &str, key: &[u8]) -> MetaStoreResult<Vec<u8>> {
         let view = GetViewer {
             key: encode_etcd_key(cf, key),
         };
@@ -183,7 +183,7 @@ impl MetaStore for EtcdMetaStore {
         }
     }
 
-    async fn put_cf(&self, cf: &str, key: Key, value: Value) -> Result<()> {
+    async fn put_cf(&self, cf: &str, key: Key, value: Value) -> MetaStoreResult<()> {
         self.client
             .kv_client()
             .put(encode_etcd_key(cf, &key), value, None)
@@ -191,7 +191,7 @@ impl MetaStore for EtcdMetaStore {
         Ok(())
     }
 
-    async fn delete_cf(&self, cf: &str, key: &[u8]) -> Result<()> {
+    async fn delete_cf(&self, cf: &str, key: &[u8]) -> MetaStoreResult<()> {
         self.client
             .kv_client()
             .delete(encode_etcd_key(cf, key), None)
@@ -199,7 +199,7 @@ impl MetaStore for EtcdMetaStore {
         Ok(())
     }
 
-    async fn txn(&self, trx: Transaction) -> Result<()> {
+    async fn txn(&self, trx: Transaction) -> MetaStoreResult<()> {
         let (preconditions, operations) = trx.into_parts();
         let when = preconditions
             .into_iter()
@@ -230,7 +230,7 @@ impl MetaStore for EtcdMetaStore {
 
         let etcd_txn = Txn::new().when(when).and_then(then);
         if !self.client.kv_client().txn(etcd_txn).await?.succeeded() {
-            Err(Error::TransactionAbort())
+            Err(MetaStoreError::TransactionAbort())
         } else {
             Ok(())
         }

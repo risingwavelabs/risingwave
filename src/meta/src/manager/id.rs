@@ -20,7 +20,7 @@ use tokio::sync::RwLock;
 
 use crate::cluster::META_NODE_ID;
 use crate::model::MetadataModelResult;
-use crate::storage::{self, MetaStore, DEFAULT_COLUMN_FAMILY};
+use crate::storage::{MetaStore, MetaStoreError, DEFAULT_COLUMN_FAMILY};
 
 pub const ID_PREALLOCATE_INTERVAL: i32 = 1000;
 
@@ -58,7 +58,7 @@ where
             .await;
         let current_id = match res {
             Ok(value) => i32::from_be_bytes(value.as_slice().try_into().unwrap()),
-            Err(storage::Error::ItemNotFound(_)) => start.unwrap_or(0),
+            Err(MetaStoreError::ItemNotFound(_)) => start.unwrap_or(0),
             Err(e) => panic!("{:?}", e),
         };
 

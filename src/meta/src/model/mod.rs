@@ -33,7 +33,7 @@ use prost::Message;
 pub use stream::*;
 pub use user::*;
 
-use crate::storage::{self, MetaStore, Transaction};
+use crate::storage::{MetaStore, MetaStoreError, Transaction};
 
 /// A global, unique indentifier of an actor
 pub type ActorId = u32;
@@ -121,7 +121,7 @@ pub trait MetadataModel: std::fmt::Debug + Sized {
         let byte_vec = match store.get_cf(&Self::cf_name(), &key.encode_to_vec()).await {
             Ok(byte_vec) => byte_vec,
             Err(err) => {
-                if !matches!(err, storage::Error::ItemNotFound(_)) {
+                if !matches!(err, MetaStoreError::ItemNotFound(_)) {
                     return Err(err.into());
                 }
                 return Ok(None);

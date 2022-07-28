@@ -18,7 +18,7 @@ use risingwave_hummock_sdk::{CompactionGroupId, HummockContextId};
 use thiserror::Error;
 
 use crate::model::MetadataModelError;
-use crate::storage::meta_store;
+use crate::storage::MetaStoreError;
 
 pub type Result<T> = std::result::Result<T, Error>;
 
@@ -48,18 +48,18 @@ impl Error {
     }
 }
 
-impl From<meta_store::Error> for Error {
-    fn from(error: meta_store::Error) -> Self {
+impl From<MetaStoreError> for Error {
+    fn from(error: MetaStoreError) -> Self {
         match error {
-            meta_store::Error::ItemNotFound(err) => Error::InternalError(err),
-            meta_store::Error::TransactionAbort() => {
+            MetaStoreError::ItemNotFound(err) => Error::InternalError(err),
+            MetaStoreError::TransactionAbort() => {
                 // TODO: need more concrete error from meta store.
                 Error::InvalidContext(0)
             }
-            // TODO: Currently meta_store::Error::Internal is equivalent to EtcdError, which
-            // includes both retryable and non-retryable. Need to expand meta_store::Error::Internal
+            // TODO: Currently MetaStoreError::Internal is equivalent to EtcdError, which
+            // includes both retryable and non-retryable. Need to expand MetaStoreError::Internal
             // to more detail meta_store errors.
-            meta_store::Error::Internal(err) => Error::MetaStoreError(err),
+            MetaStoreError::Internal(err) => Error::MetaStoreError(err),
         }
     }
 }
