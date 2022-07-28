@@ -21,6 +21,7 @@ tests: boolean
 # How to run
 
 * Install `psql` and ensure that it's in your path.
+* `cd` to the root directory of risingwave.
 * Start risingwave cluster.
 * Run tests against RisingWave.
 ```shell
@@ -43,9 +44,18 @@ RUST_BACKTRACE=1 target/debug/risingwave_regress_test -h 127.0.0.1 \
   --output `pwd`/src/tests/regress/output \
   --schedule `pwd`/src/tests/regress/data/schedule \
   --mode postgres
+
 ```
 Please remove the `output` directory before running the test again.
+```shell
+rm -rf `pwd`/src/tests/regress/output
+```
 
 # Reference
 
 The `data` folder contains test cases migrated from [postgres](https://github.com/postgres/postgres/).
+
+# Caveat
+
+This regress test is executed for both Postgres and RisingWave. As the result set of a query without `order by` 
+is order-unaware, we need to interpret the output file by ourselves. 

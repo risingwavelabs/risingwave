@@ -12,13 +12,14 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use risingwave_common::error::Result;
-use risingwave_pb::catalog::{Database, Schema, Source, Table};
+use risingwave_pb::catalog::{Database, Schema, Sink, Source, Table};
 
-use crate::model::MetadataModel;
+use crate::model::{MetadataModel, MetadataModelResult};
 
 /// Column family name for source catalog.
 const CATALOG_SOURCE_CF_NAME: &str = "cf/catalog_source";
+/// Column family name for sink catalog.
+const CATALOG_SINK_CF_NAME: &str = "cf/catalog_sink";
 /// Column family name for table catalog.
 const CATALOG_TABLE_CF_NAME: &str = "cf/catalog_table";
 /// Column family name for schema catalog.
@@ -44,7 +45,7 @@ macro_rules! impl_model_for_catalog {
                 prost
             }
 
-            fn key(&self) -> Result<Self::KeyType> {
+            fn key(&self) -> MetadataModelResult<Self::KeyType> {
                 Ok(self.$key_fn())
             }
         }
@@ -52,6 +53,7 @@ macro_rules! impl_model_for_catalog {
 }
 
 impl_model_for_catalog!(Source, CATALOG_SOURCE_CF_NAME, u32, get_id);
+impl_model_for_catalog!(Sink, CATALOG_SINK_CF_NAME, u32, get_id);
 impl_model_for_catalog!(Table, CATALOG_TABLE_CF_NAME, u32, get_id);
 impl_model_for_catalog!(Schema, CATALOG_SCHEMA_CF_NAME, u32, get_id);
 impl_model_for_catalog!(Database, CATALOG_DATABASE_CF_NAME, u32, get_id);
@@ -67,12 +69,12 @@ mod tests {
         Database {
             id,
             name: format!("database_{}", id),
-            owner: risingwave_common::catalog::DEFAULT_SUPPER_USER.to_string(),
+            owner: risingwave_common::catalog::DEFAULT_SUPER_USER_ID,
         }
     }
 
     #[tokio::test]
-    async fn test_database() -> Result<()> {
+    async fn test_database() -> MetadataModelResult<()> {
         let env = MetaSrvEnv::for_test().await;
         let store = env.meta_store();
         let databases = Database::list(store).await?;
@@ -82,7 +84,7 @@ mod tests {
         future::join_all((0..100).map(|i| async move { database_for_id(i).insert(store).await }))
             .await
             .into_iter()
-            .collect::<Result<Vec<_>>>()?;
+            .collect::<MetadataModelResult<Vec<_>>>()?;
 
         for i in 0..100 {
             let database = Database::select(store, &i).await?.unwrap();

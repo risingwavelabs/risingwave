@@ -19,9 +19,9 @@ use parking_lot::RwLock;
 use risingwave_common::error::{ErrorCode, Result};
 use risingwave_common_service::observer_manager::ObserverNodeImpl;
 use risingwave_hummock_sdk::slice_transform::{
-    DummySliceTransform, SchemaSliceTransform, SliceTransformImpl,
+    FullKeySliceTransform, SchemaSliceTransform, SliceTransformImpl,
 };
-use risingwave_pb::catalog::Table;
+use risingwave_pb::catalog::{Source, Table};
 use risingwave_pb::meta::subscribe_response::{Info, Operation};
 use risingwave_pb::meta::SubscribeResponse;
 
@@ -41,6 +41,11 @@ impl ObserverNodeImpl for CompactorObserverNode {
             Info::Table(table_catalog) => {
                 self.handle_catalog_notification(resp.operation(), table_catalog);
             }
+
+            Info::Source(source_catalog) => {
+                self.handle_source_notification(resp.operation(), source_catalog);
+            }
+
             _ => {
                 panic!("error type notification");
             }
@@ -88,7 +93,9 @@ impl CompactorObserverNode {
         match operation {
             Operation::Add | Operation::Update => {
                 let slice_transform = if table_catalog.read_pattern_prefix_column < 1 {
-                    SliceTransformImpl::Dummy(DummySliceTransform::default())
+                    // for now frontend had not infer the table_id_to_slice_transform, so we use
+                    // FullKeySliceTransform
+                    SliceTransformImpl::FullKey(FullKeySliceTransform::default())
                 } else {
                     SliceTransformImpl::Schema(SchemaSliceTransform::new(&table_catalog))
                 };
@@ -97,6 +104,24 @@ impl CompactorObserverNode {
 
             Operation::Delete => {
                 guard.remove(&table_catalog.id);
+            }
+
+            _ => panic!("receive an unsupported notify {:?}", operation),
+        }
+    }
+
+    fn handle_source_notification(&mut self, operation: Operation, source_catalog: Source) {
+        let mut guard = self.table_id_to_slice_transform.write();
+        match operation {
+            Operation::Add | Operation::Update => {
+                guard.insert(
+                    source_catalog.id,
+                    SliceTransformImpl::FullKey(FullKeySliceTransform::default()),
+                );
+            }
+
+            Operation::Delete => {
+                guard.remove(&source_catalog.id);
             }
 
             _ => panic!("receive an unsupported notify {:?}", operation),

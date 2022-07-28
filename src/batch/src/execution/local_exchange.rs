@@ -78,7 +78,6 @@ mod tests {
     use std::net::SocketAddr;
     use std::sync::atomic::{AtomicBool, Ordering};
     use std::sync::Arc;
-    use std::thread::sleep;
     use std::time::Duration;
 
     use risingwave_common::util::addr::HostAddr;
@@ -90,6 +89,7 @@ mod tests {
     use risingwave_pb::task_service::{
         GetDataRequest, GetDataResponse, GetStreamRequest, GetStreamResponse,
     };
+    use tokio::time::sleep;
     use tokio_stream::wrappers::ReceiverStream;
     use tonic::{Request, Response, Status};
 
@@ -153,7 +153,7 @@ mod tests {
                 .unwrap();
         });
 
-        sleep(Duration::from_secs(1));
+        sleep(Duration::from_secs(1)).await;
         assert!(server_run.load(Ordering::SeqCst));
 
         let exchange_source = ProstExchangeSource {

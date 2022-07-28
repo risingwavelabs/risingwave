@@ -15,21 +15,22 @@
 use risingwave_pb::plan_common::JoinType;
 
 use super::{BoxedRule, Rule};
-use crate::optimizer::plan_node::{LogicalAgg, PlanTreeNodeBinary};
+use crate::optimizer::plan_node::{LogicalAgg, LogicalApply, LogicalFilter};
 use crate::optimizer::PlanRef;
-use crate::utils::ColIndexMapping;
+use crate::utils::{ColIndexMapping, Condition};
 
 /// Push `LogicalApply` down `LogicalAgg`.
 pub struct ApplyAggRule {}
 impl Rule for ApplyAggRule {
     fn apply(&self, plan: PlanRef) -> Option<PlanRef> {
-        let apply = plan.as_logical_apply()?;
-        assert_eq!(apply.join_type(), JoinType::Inner);
-        let right = apply.right();
+        let apply: &LogicalApply = plan.as_logical_apply()?;
+        let (left, right, on, join_type, correlated_id, correlated_indices) =
+            apply.clone().decompose();
+        assert_eq!(join_type, JoinType::Inner);
         let agg = right.as_logical_agg()?;
 
         // Insert all the columns of `LogicalApply`'s left at the beginning of `LogicalAgg`.
-        let apply_left_len = apply.left().schema().len();
+        let apply_left_len = left.schema().len();
         let mut group_key: Vec<usize> = (0..apply_left_len).collect();
         let (mut agg_calls, agg_group_key, input) = agg.clone().decompose();
         group_key.extend(agg_group_key.into_iter().map(|key| key + apply_left_len));
@@ -48,9 +49,21 @@ impl Rule for ApplyAggRule {
             agg_call.filter = agg_call.filter.clone().rewrite_expr(&mut shift_index);
         });
 
-        let new_apply = apply.clone_with_left_right(apply.left(), input);
-        let new_agg = LogicalAgg::new(agg_calls, group_key, new_apply.into());
-        Some(new_agg.into())
+        let new_apply = LogicalApply::create(
+            left,
+            input,
+            join_type,
+            Condition {
+                conjunctions: vec![],
+            },
+            correlated_id,
+            correlated_indices,
+        );
+        let new_agg: PlanRef = LogicalAgg::new(agg_calls, group_key, new_apply).into();
+
+        // leave apply's on condition for predicate push to deal with
+        let filter = LogicalFilter::create(new_agg, on);
+        Some(filter)
     }
 }
 

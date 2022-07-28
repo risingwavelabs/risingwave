@@ -106,3 +106,6 @@ create table "T2" ("V1" int);
 
 statement ok
 insert into "T2" ("V1") values (1);
+
+statement error
+create tabke C1 (c1 varchar(5));

@@ -334,7 +334,6 @@ pub enum BeMessage<'a> {
     ParameterDescription(&'a [TypeOid]),
     NoData,
     DataRow(&'a Row),
-    BinaryRow(&'a Vec<Option<Bytes>>),
     ParameterStatus(BeParameterStatusMessage<'a>),
     ReadyForQuery,
     RowDescription(&'a [PgFieldDescriptor]),
@@ -479,23 +478,6 @@ impl<'a> BeMessage<'a> {
                     for val_opt in vals.values() {
                         if let Some(val) = val_opt {
                             buf.put_u32(val.len() as u32);
-                            buf.put_slice(val.as_bytes());
-                        } else {
-                            buf.put_i32(-1);
-                        }
-                    }
-                    Ok(())
-                })
-                .unwrap();
-            }
-
-            BeMessage::BinaryRow(vals) => {
-                buf.put_u8(b'D');
-                write_body(buf, |buf| {
-                    buf.put_u16(vals.len() as u16); // num of cols
-                    for val_opt in vals.iter() {
-                        if let Some(val) = val_opt {
-                            buf.put_u32(val.len() as u32);
                             buf.put_slice(val);
                         } else {
                             buf.put_i32(-1);
@@ -505,6 +487,7 @@ impl<'a> BeMessage<'a> {
                 })
                 .unwrap();
             }
+
             // RowDescription
             // +-----+-----------+--------------+-------+-----+-------+
             // | 'T' | int32 len | int16 colNum | field | ... | field |

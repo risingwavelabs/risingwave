@@ -22,7 +22,8 @@ use risingwave_common::array::{Op, StreamChunk};
 use risingwave_common::catalog::Schema;
 
 use super::aggregation::{
-    create_streaming_agg_state, generate_agg_schema, AggCall, StreamingAggStateImpl,
+    agg_call_filter_res, create_streaming_agg_state, generate_agg_schema, AggCall,
+    StreamingAggStateImpl,
 };
 use super::error::StreamExecutorError;
 use super::*;
@@ -57,18 +58,21 @@ impl LocalSimpleAggExecutor {
         states: &mut [Box<dyn StreamingAggStateImpl>],
         chunk: StreamChunk,
     ) -> StreamExecutorResult<()> {
+        let capacity = chunk.capacity();
         let (ops, columns, visibility) = chunk.into_inner();
         agg_calls
             .iter()
             .zip_eq(states.iter_mut())
             .try_for_each(|(agg_call, state)| {
+                let vis_map =
+                    agg_call_filter_res(agg_call, &columns, visibility.as_ref(), capacity)?;
                 let cols = agg_call
                     .args
                     .val_indices()
                     .iter()
                     .map(|idx| columns[*idx].array_ref())
                     .collect_vec();
-                state.apply_batch(&ops, visibility.as_ref(), &cols[..])
+                state.apply_batch(&ops, vis_map.as_ref(), &cols[..])
             })?;
         Ok(())
     }
@@ -186,7 +190,9 @@ mod tests {
             kind: AggKind::Count,
             args: AggArgs::None,
             return_type: DataType::Int64,
+            order_pairs: vec![],
             append_only: false,
+            filter: None,
         }];
 
         let simple_agg = Box::new(LocalSimpleAggExecutor::new(
@@ -240,19 +246,25 @@ mod tests {
                 kind: AggKind::Count,
                 args: AggArgs::None,
                 return_type: DataType::Int64,
+                order_pairs: vec![],
                 append_only: false,
+                filter: None,
             },
             AggCall {
                 kind: AggKind::Sum,
                 args: AggArgs::Unary(DataType::Int64, 0),
                 return_type: DataType::Int64,
+                order_pairs: vec![],
                 append_only: false,
+                filter: None,
             },
             AggCall {
                 kind: AggKind::Sum,
                 args: AggArgs::Unary(DataType::Int64, 1),
                 return_type: DataType::Int64,
+                order_pairs: vec![],
                 append_only: false,
+                filter: None,
             },
         ];
 

@@ -260,7 +260,7 @@ pub mod global_simple_agg {
         key_indices: Vec<usize>,
     ) -> Box<dyn Executor> {
         let agg_schema = generate_agg_schema(input.as_ref(), &agg_calls, Some(&key_indices));
-        let state_tables = keyspace_gen
+        let state_tables: Vec<_> = keyspace_gen
             .iter()
             .zip_eq(agg_calls.iter())
             .map(|(ks, agg_call)| {
@@ -275,10 +275,19 @@ pub mod global_simple_agg {
                 )
             })
             .collect();
-
+        // TODO(yuchao): We are not using col_mappings in agg calls generated in unittest,
+        // so it's ok to fake it. Later we should generate real column mapping for state tables.
+        let state_table_col_mappings = (0..state_tables.len()).map(|_| vec![]).collect();
         Box::new(
-            GlobalSimpleAggExecutor::new(input, agg_calls, pk_indices, executor_id, state_tables)
-                .unwrap(),
+            GlobalSimpleAggExecutor::new(
+                input,
+                agg_calls,
+                pk_indices,
+                executor_id,
+                state_tables,
+                state_table_col_mappings,
+            )
+            .unwrap(),
         )
     }
 }

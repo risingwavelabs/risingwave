@@ -33,7 +33,8 @@ pub struct TranslateApplyRule {}
 impl Rule for TranslateApplyRule {
     fn apply(&self, plan: PlanRef) -> Option<PlanRef> {
         let apply = plan.as_logical_apply()?;
-        let (left, right, on, join_type, correlated_indices) = apply.clone().decompose();
+        let (left, right, on, join_type, correlated_id, correlated_indices) =
+            apply.clone().decompose();
         let apply_left_len = left.schema().len();
         let correlated_indices_len = correlated_indices.len();
 
@@ -79,6 +80,7 @@ impl Rule for TranslateApplyRule {
                 let data_type = data_types.get(&correlated_index).unwrap().clone();
                 let left = InputRef::new(correlated_index, data_type.clone());
                 let right = InputRef::new(shifted_index, data_type);
+                // TODO: use is not distinct from instead of equal
                 FunctionCall::new_unchecked(
                     ExprType::Equal,
                     vec![left.into(), right.into()],
@@ -96,6 +98,7 @@ impl Rule for TranslateApplyRule {
             right,
             JoinType::Inner,
             Condition::true_cond(),
+            correlated_id,
             correlated_indices,
         );
         let new_join = LogicalJoin::new(left, new_apply, join_type, on);

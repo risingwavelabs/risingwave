@@ -159,8 +159,6 @@ impl BlockCache {
     #[cfg(any(test, feature = "test"))]
     pub fn clear(&self) {
         // This is only a method for test. Therefore it should be safe to call the unsafe method.
-        unsafe {
-            self.inner.clear();
-        }
+        self.inner.clear();
     }
 }

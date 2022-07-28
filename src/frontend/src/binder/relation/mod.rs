@@ -34,6 +34,8 @@ pub use subquery::BoundSubquery;
 pub use table_or_source::{BoundBaseTable, BoundSource, BoundSystemTable, BoundTableSource};
 pub use window_table_function::{BoundWindowTableFunction, WindowTableFunctionKind};
 
+use crate::expr::CorrelatedId;
+
 /// A validated item that refers to a table-like entity, including base table, subquery, join, etc.
 /// It is usually part of the `from` clause.
 #[derive(Debug, Clone)]
@@ -63,6 +65,46 @@ impl Relation {
                 j.left.contains_sys_table() || j.right.contains_sys_table()
             },
             _ => false,
+        }
+    }
+
+    pub fn is_correlated(&self) -> bool {
+        match self {
+            Relation::Subquery(subquery) => subquery.query.is_correlated(),
+            Relation::Join(join) => {
+                join.cond.has_correlated_input_ref_by_depth()
+                    || join.left.is_correlated()
+                    || join.right.is_correlated()
+            }
+            _ => false,
+        }
+    }
+
+    pub fn collect_correlated_indices_by_depth_and_assign_id(
+        &mut self,
+        correlated_id: CorrelatedId,
+    ) -> Vec<usize> {
+        match self {
+            Relation::Subquery(subquery) => subquery
+                .query
+                .collect_correlated_indices_by_depth_and_assign_id(correlated_id),
+            Relation::Join(join) => {
+                let mut correlated_indices = vec![];
+                correlated_indices.extend(
+                    join.cond
+                        .collect_correlated_indices_by_depth_and_assign_id(correlated_id),
+                );
+                correlated_indices.extend(
+                    join.left
+                        .collect_correlated_indices_by_depth_and_assign_id(correlated_id),
+                );
+                correlated_indices.extend(
+                    join.right
+                        .collect_correlated_indices_by_depth_and_assign_id(correlated_id),
+                );
+                correlated_indices
+            }
+            _ => vec![],
         }
     }
 }
