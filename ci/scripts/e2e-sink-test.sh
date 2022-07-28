@@ -28,8 +28,10 @@ apt-get update
 echo "debug stuff 2"
 apt install docker.io -y
 echo "debug stuff 3"
-snap install docker -y
+apt install snapd -y
 echo "debug stuff 4"
+snap install docker -y
+echo "debug stuff 5"
 docker port mysql
 
 echo "--- e2e test w/ Rust frontend - sink with mysql"
