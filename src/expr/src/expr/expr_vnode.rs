@@ -51,7 +51,7 @@ impl<'a> TryFrom<&'a ExprNode> for VnodeExpression {
             .children
             .iter()
             .map(expr_build_from_prost)
-            .collect::<Result<Vec<_>>>()?;
+            .try_collect()?;
 
         Ok(VnodeExpression::new(dist_key_exprs))
     }
