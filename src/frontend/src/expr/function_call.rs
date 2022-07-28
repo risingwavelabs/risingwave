@@ -166,7 +166,7 @@ impl FunctionCall {
                     )
                     .into());
                 }
-                Ok(DataType::Int32)
+                Ok(DataType::Int16)
             }
             _ => {
                 // TODO(xiangjin): move variadic functions above as part of `infer_type`, as its
