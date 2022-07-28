@@ -263,7 +263,40 @@ impl LogicalMultiJoin {
                 .collect::<Option<Vec<_>>>()
                 .unwrap_or_default()
         };
-        let functional_dependency = FunctionalDependencySet::with_key(schema.len(), &pk_indices);
+        let functional_dependency = {
+            let mut fd_set = FunctionalDependencySet::new();
+            let mut column_cnt: usize = 0;
+            let id_mapping = ColIndexMapping::identity(tot_col_num);
+            for i in &inputs {
+                let mapping =
+                    ColIndexMapping::with_shift_offset(i.schema().len(), column_cnt as isize)
+                        .composite(&id_mapping);
+                mapping
+                    .rewrite_functional_dependency_set(i.functional_dependency().clone())
+                    .into_dependencies()
+                    .into_iter()
+                    .for_each(|fd| fd_set.add_functional_dependency(fd));
+                column_cnt += i.schema().len();
+            }
+            for i in &on.conjunctions {
+                if let Some((col, _)) = i.as_eq_const() {
+                    fd_set.add_constant_column(tot_col_num, &[col.index()])
+                } else if let Some((left, right)) = i.as_eq_cond() {
+                    fd_set.add_functional_dependency_by_column_indices(
+                        &[left.index()],
+                        &[right.index()],
+                        tot_col_num,
+                    );
+                    fd_set.add_functional_dependency_by_column_indices(
+                        &[right.index()],
+                        &[left.index()],
+                        tot_col_num,
+                    );
+                }
+            }
+            ColIndexMapping::with_remaining_columns(&output_indices, tot_col_num)
+                .rewrite_functional_dependency_set(fd_set)
+        };
         let base =
             PlanBase::new_logical(inputs[0].ctx(), schema, pk_indices, functional_dependency);
 

@@ -188,7 +188,7 @@ impl ColIndexMapping {
     }
 
     /// Union two mapping, the result mapping `target_size` and source size will be the max size
-    /// ofthe two mappings.
+    /// of the two mappings.
     ///
     /// # Panics
     ///
@@ -420,6 +420,12 @@ mod tests {
         assert_eq!(mapping.map(2), 2);
         assert_eq!(mapping.try_map(3), None);
         assert_eq!(mapping.try_map(4), None);
+    }
+
+    #[test]
+    fn test_shift_0_source() {
+        let mapping = ColIndexMapping::with_shift_offset(0, 3);
+        assert_eq!(mapping.target_size(), 3);
     }
 
     #[test]

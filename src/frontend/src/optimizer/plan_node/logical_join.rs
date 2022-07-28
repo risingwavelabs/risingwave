@@ -313,14 +313,11 @@ impl LogicalJoin {
         output_indices: &[usize],
     ) -> FunctionalDependencySet {
         let out_col_num = Self::out_column_num(left_len, right_len, join_type);
+
         let get_new_left_fd_set = |left_fd_set: FunctionalDependencySet| {
-            let mut fd_set = FunctionalDependencySet::new();
-            for mut fd in left_fd_set.into_dependencies() {
-                fd.to.grow(out_col_num);
-                fd.from.grow(out_col_num);
-                fd_set.add_functional_dependency(fd);
-            }
-            fd_set
+            ColIndexMapping::with_shift_offset(left_len, 0)
+                .composite(&ColIndexMapping::identity(out_col_num))
+                .rewrite_functional_dependency_set(left_fd_set)
         };
         let get_new_right_fd_set = |right_fd_set: FunctionalDependencySet| {
             ColIndexMapping::with_shift_offset(right_len, left_len.try_into().unwrap())
