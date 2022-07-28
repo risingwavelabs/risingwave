@@ -666,7 +666,8 @@ where
                 Ok(())
             }
             None => Err(ErrorCode::InternalError(
-                "no data distribution found for materialized view".to_string(),
+                format!("no data distribution found for materialized view table_id = {}" ,table.id)
+                
             )
             .into()),
         }
