@@ -12,8 +12,10 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+use std::collections::HashMap;
 use std::fmt;
 
+use fixedbitset::FixedBitSet;
 use risingwave_common::catalog::{Field, Schema};
 use risingwave_common::types::DataType;
 
@@ -24,7 +26,7 @@ use super::{
 use crate::expr::{
     Expr, ExprDisplay, ExprImpl, ExprRewriter, FunctionCall, InputRef, TableFunction,
 };
-use crate::optimizer::property::FunctionalDependencySet;
+use crate::optimizer::property::{FunctionalDependency, FunctionalDependencySet};
 use crate::risingwave_common::error::Result;
 use crate::utils::{ColIndexMapping, Condition};
 
@@ -53,7 +55,7 @@ impl LogicalProjectSet {
         let ctx = input.ctx();
         let schema = Self::derive_schema(&select_list, input.schema());
         let pk_indices = Self::derive_pk(input.schema(), input.pk_indices(), &select_list);
-        let functional_dependency = FunctionalDependencySet::with_key(schema.len(), &pk_indices);
+        let functional_dependency = Self::derive_fd(input.functional_dependency(), &select_list);
         let base = PlanBase::new_logical(ctx, schema, pk_indices, functional_dependency);
         LogicalProjectSet {
             base,
@@ -212,6 +214,54 @@ impl LogicalProjectSet {
         // add `projected_row_id` to pk
         pk.push(0);
         pk
+    }
+
+    fn derive_fd(
+        input_fd_set: &FunctionalDependencySet,
+        select_list: &[ExprImpl],
+    ) -> FunctionalDependencySet {
+        // input indices -> current indices
+        let i2o: HashMap<usize, usize> = select_list
+            .iter()
+            .enumerate()
+            .filter_map(|(idx, expr)| {
+                expr.as_input_ref()
+                    .map(|input_ref| (input_ref.index(), idx + 1)) // `idx` + 1 here because of the
+                                                                   // hidden column
+            })
+            .collect();
+        let mut fd_set = FunctionalDependencySet::new();
+        for i in input_fd_set.as_dependencies() {
+            // if all columns in the left side are kept, and some columns in the right side are
+            // kept, then we can make use of this functional dependency.
+            if i.from
+                .ones()
+                .all(|column_index| i2o.contains_key(&column_index))
+                && i.to.ones().any(|idx| i2o.contains_key(&idx))
+            {
+                let from = {
+                    // because of the hidden column, the column count of this operator is
+                    // select_list.len() + 1
+                    let mut from = FixedBitSet::with_capacity(select_list.len() + 1);
+                    from.set(0, true);
+                    for i in i.from.ones() {
+                        from.set(i2o[&(i + 1)], true);
+                    }
+                    from
+                };
+                let to = {
+                    let mut to = FixedBitSet::with_capacity(select_list.len() + 1);
+                    for i in i.to.ones() {
+                        if let Some(new_idx) = i2o.get(&i) {
+                            to.set(*new_idx, true);
+                        }
+                    }
+                    to
+                };
+                fd_set.add_functional_dependency(FunctionalDependency::new(from, to));
+            }
+        }
+        fd_set
     }
 
     pub fn select_list(&self) -> &[ExprImpl] {

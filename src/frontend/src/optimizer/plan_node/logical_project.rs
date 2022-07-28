@@ -207,7 +207,8 @@ impl LogicalProject {
         input_fd_set: &FunctionalDependencySet,
         exprs: &[ExprImpl],
     ) -> FunctionalDependencySet {
-        let input_refs: HashMap<_, _> = exprs
+        // input indices -> current indices
+        let i2o: HashMap<usize, usize> = exprs
             .iter()
             .enumerate()
             .filter_map(|(idx, expr)| {
@@ -217,22 +218,24 @@ impl LogicalProject {
             .collect();
         let mut fd_set = FunctionalDependencySet::new();
         for i in input_fd_set.as_dependencies() {
+            // if all columns in the left side are kept, and some columns in the right side are
+            // kept, then we can make use of this functional dependency.
             if i.from
                 .ones()
-                .all(|column_index| input_refs.contains_key(&column_index))
-                && i.to.ones().any(|idx| input_refs.contains_key(&idx))
+                .all(|column_index| i2o.contains_key(&column_index))
+                && i.to.ones().any(|idx| i2o.contains_key(&idx))
             {
                 let from = {
                     let mut from = FixedBitSet::with_capacity(exprs.len());
                     for i in i.from.ones() {
-                        from.set(input_refs[&i], true);
+                        from.set(i2o[&i], true);
                     }
                     from
                 };
                 let to = {
                     let mut to = FixedBitSet::with_capacity(exprs.len());
                     for i in i.to.ones() {
-                        if let Some(new_idx) = input_refs.get(&i) {
+                        if let Some(new_idx) = i2o.get(&i) {
                             to.set(*new_idx, true);
                         }
                     }
