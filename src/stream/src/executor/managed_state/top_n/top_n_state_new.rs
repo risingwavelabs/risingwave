@@ -118,8 +118,8 @@ impl<S: StateStore> ManagedTopNStateNew<S> {
     }
 
     /// This function will return the rows in the range of [`offset`, `offset` + `limit`),
-    /// if `pk_prefix` is None, it will can rows from the relational table from the very beginning
-    /// else it will scan rows from the relational table begin with specific `pk_prefix`
+    /// if `pk_prefix` is None, it will can rows from the relational table from the very beginning,
+    /// else it will scan rows from the relational table begin with specific `pk_prefix`.
     /// if `num_limit` is None, it will scan with no limit.
     pub async fn find_range(
         &self,
