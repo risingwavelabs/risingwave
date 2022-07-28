@@ -181,10 +181,9 @@ impl<K: HashKey> HashJoinExecutor<K> {
         #[for_await]
         for build_chunk in self.build_side_source.execute() {
             let build_chunk = build_chunk?;
-            // Assume build_chunk is compacted already.
-            if build_chunk.capacity() > 0 {
-                build_row_count += build_chunk.capacity();
-                build_side.push(build_chunk)
+            if build_chunk.cardinality() > 0 {
+                build_row_count += build_chunk.cardinality();
+                build_side.push(build_chunk.compact()?)
             }
         }
         let mut hash_map =
