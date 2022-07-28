@@ -56,7 +56,9 @@ impl Task for RedisService {
         cmd.arg("--bind")
             .arg(&self.config.address)
             .arg("--port")
-            .arg(self.config.port.to_string());
+            .arg(self.config.port.to_string())
+            .arg("--shutdown-on-sigint")
+            .arg("nosave");
 
         ctx.run_command(ctx.tmux_run(cmd)?)?;
         ctx.pb.set_message("started");
