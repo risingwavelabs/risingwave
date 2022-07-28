@@ -90,7 +90,7 @@ struct SqlGenerator<'a, R: Rng> {
     /// Relations in generated in 'From' statement shall be added to bound_relations and
     /// bound_columns after all the relations are generated because they are not useable among
     /// the relations
-    parallel_relations: Vec<Table>,
+    lateral_contexts: Vec<Table>,
 
     /// Columns bound in generated query.
     /// May not contain all columns from Self::bound_relations.
@@ -115,7 +115,7 @@ impl<'a, R: Rng> SqlGenerator<'a, R> {
             relation_id: 0,
             is_distinct_allowed,
             bound_relations: vec![],
-            parallel_relations: vec![],
+            lateral_contexts: vec![],
             bound_columns: vec![],
             is_mview: false,
         }
@@ -129,22 +129,22 @@ impl<'a, R: Rng> SqlGenerator<'a, R> {
             relation_id: 0,
             is_distinct_allowed: false,
             bound_relations: vec![],
-            parallel_relations: vec![],
+            lateral_contexts: vec![],
             bound_columns: vec![],
             is_mview: true,
         }
     }
 
     fn add_relation_to_context(&mut self, table: Table) {
-        self.parallel_relations.push(table);
+        self.lateral_contexts.push(table);
     }
 
-    fn merge_parallel_to_relation(&mut self) {
-        for rel in &self.parallel_relations {
+    fn merge_lateral_to_relation(&mut self) {
+        for rel in &self.lateral_contexts {
             let mut bound_columns = rel.get_qualified_columns();
             self.bound_columns.append(&mut bound_columns);
         }
-        self.bound_relations.append(&mut self.parallel_relations);
+        self.bound_relations.append(&mut self.lateral_contexts);
     }
 
     fn gen_stmt(&mut self) -> Statement {
@@ -364,7 +364,7 @@ impl<'a, R: Rng> SqlGenerator<'a, R> {
             vec![create_table_with_joins_from_table(with_table)]
         } else {
             let rel = self.gen_from_relation();
-            self.merge_parallel_to_relation();
+            self.merge_lateral_to_relation();
             vec![rel]
         };
 
@@ -380,7 +380,7 @@ impl<'a, R: Rng> SqlGenerator<'a, R> {
                 from.push(self.gen_from_relation());
             }
         }
-        self.merge_parallel_to_relation();
+        self.merge_lateral_to_relation();
 
         from
     }

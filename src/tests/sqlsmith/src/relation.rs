@@ -141,8 +141,4 @@ impl<'a, R: Rng> SqlGenerator<'a, R> {
         self.add_relation_to_context(table);
         relation
     }
-
-    // fn gen_row_subquery(){
-
-    // }
 }

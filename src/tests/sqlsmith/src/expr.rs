@@ -75,8 +75,8 @@ impl<'a, R: Rng> SqlGenerator<'a, R> {
         }
 
         // TODO:  https://github.com/singularity-data/risingwave/issues/3989.
-        // let range = if can_agg & !inside_agg { 99 } else { 90 };
-        let range = 90;
+        let range = if can_agg & !inside_agg { 99 } else { 90 };
+        // let range = 90;
 
         match self.rng.gen_range(0..=range) {
             0..=90 => self.gen_func(typ, can_agg, inside_agg),
