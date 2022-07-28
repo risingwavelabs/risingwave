@@ -20,10 +20,12 @@ use itertools::Itertools;
 use pgwire::pg_response::{PgResponse, StatementType};
 use risingwave_common::error::{ErrorCode, Result, RwError};
 use risingwave_pb::catalog::Table as ProstTable;
+use risingwave_pb::user::grant_privilege::{Action, Object};
 use risingwave_sqlparser::ast::{ObjectName, OrderByExpr};
 
 use crate::binder::Binder;
 use crate::catalog::check_schema_writable;
+use crate::handler::privilege::{check_privileges, ObjectCheckItem};
 use crate::optimizer::plan_node::{LogicalScan, StreamTableScan};
 use crate::optimizer::property::{FieldOrder, Order, RequiredDist};
 use crate::optimizer::{PlanRef, PlanRoot};
@@ -74,6 +76,15 @@ pub(crate) fn gen_create_index_plan(
         .read_guard()
         .get_table_by_name(session.database(), &schema_name, &table_name)?
         .clone();
+
+    check_privileges(
+        session,
+        &vec![ObjectCheckItem::new(
+            table.owner,
+            Action::Select,
+            Object::TableId(table.id.table_id),
+        )],
+    )?;
 
     let table_desc = Rc::new(table.table_desc());
     let table_desc_map = table_desc
@@ -128,19 +139,30 @@ pub(crate) fn gen_create_index_plan(
 
     let (index_schema_name, index_table_name) = Binder::resolve_table_name(index_name)?;
     check_schema_writable(&index_schema_name)?;
-    let (index_database_id, index_schema_id) = session
-        .env()
-        .catalog_reader()
-        .read_guard()
-        .check_relation_name_duplicated(
+    let (index_database_id, index_schema_id) = {
+        let catalog_reader = session.env().catalog_reader().read_guard();
+
+        let schema = catalog_reader.get_schema_by_name(session.database(), &schema_name)?;
+        check_privileges(
+            session,
+            &vec![ObjectCheckItem::new(
+                schema.owner(),
+                Action::Create,
+                Object::SchemaId(schema.id()),
+            )],
+        )?;
+
+        catalog_reader.check_relation_name_duplicated(
             session.database(),
             &index_schema_name,
             &index_table_name,
-        )?;
+        )?
+    };
 
-    let index_table = materialize
+    let mut index_table = materialize
         .table()
         .to_prost(index_schema_id, index_database_id);
+    index_table.owner = session.user_id();
 
     Ok((materialize.into(), index_table))
 }

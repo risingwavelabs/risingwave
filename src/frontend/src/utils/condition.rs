@@ -18,8 +18,9 @@ use std::ops::Bound;
 
 use fixedbitset::FixedBitSet;
 use itertools::Itertools;
+use lazy_static::lazy_static;
 use risingwave_common::catalog::Schema;
-use risingwave_common::types::ScalarImpl;
+use risingwave_common::error::Result;
 use risingwave_common::util::scan_range::ScanRange;
 
 use crate::expr::{
@@ -81,6 +82,13 @@ impl Condition {
 
     pub fn always_true(&self) -> bool {
         self.conjunctions.is_empty()
+    }
+
+    pub fn always_false(&self) -> bool {
+        lazy_static! {
+            static ref FALSE: ExprImpl = ExprImpl::literal_bool(false);
+        }
+        !self.conjunctions.is_empty() && self.conjunctions.iter().all(|e| *e == *FALSE)
     }
 
     /// Convert condition to an expression. If always true, return `None`.
@@ -237,8 +245,8 @@ impl Condition {
         self,
         order_column_ids: &[usize],
         num_cols: usize,
-    ) -> (Vec<ScanRange>, Self) {
-        fn always_false() -> (Vec<ScanRange>, Condition) {
+    ) -> Result<(Vec<ScanRange>, Self)> {
+        fn false_cond() -> (Vec<ScanRange>, Condition) {
             (vec![], Condition::false_cond())
         }
 
@@ -272,7 +280,7 @@ impl Condition {
             let group = std::mem::take(&mut groups[i]);
             if group.is_empty() {
                 groups.push(other_conds);
-                return (
+                return Ok((
                     if scan_range.is_full_table_scan() {
                         vec![]
                     } else {
@@ -281,7 +289,7 @@ impl Condition {
                     Self {
                         conjunctions: groups[i + 1..].concat(),
                     },
-                );
+                ));
             }
             let mut lb = vec![];
             let mut ub = vec![];
@@ -293,47 +301,45 @@ impl Condition {
                 if let Some((input_ref, const_expr)) = expr.as_eq_const() &&
                     let Ok(const_expr) = const_expr.cast_implicit(input_ref.data_type) {
                     assert_eq!(input_ref.index, order_column_ids[i]);
-                    let Ok(Some(value)) = const_expr.eval_row_const() else {
-                        // column = NULL or failed to eval
-                        return always_false();
+                    let Some(value) = const_expr.eval_row_const()? else {
+                        // column = NULL
+                        return Ok(false_cond());
                     };
                     if !eq_conds.is_empty() && eq_conds.into_iter().all(|l| l != value) {
-                        return always_false();
+                        return Ok(false_cond());
                     }
                     eq_conds = vec![value];
                 } else if let Some((input_ref, in_const_list)) = expr.as_in_const_list() {
                     assert_eq!(input_ref.index, order_column_ids[i]);
-                    let mut scalars = vec![];
-                    for const_expr in in_const_list.into_iter().unique() {
+                    let mut scalars = HashSet::new();
+                    for const_expr in in_const_list {
                         // The cast should succeed, because otherwise the input_ref is casted
                         // and thus `as_in_const_list` returns None.
                         let const_expr = const_expr.cast_implicit(input_ref.data_type.clone()).unwrap();
-                        let value = const_expr.eval_row_const().unwrap();
+                        let value = const_expr.eval_row_const()?;
                         let Some(value) = value else {
                             continue;
                         };
-                        scalars.push(value);
+                        scalars.insert(value);
                     }
                     if scalars.is_empty() {
                         // There're only NULLs in the in-list
-                        return always_false();
+                        return Ok(false_cond());
                     }
                     if !eq_conds.is_empty() {
-                        let old: HashSet<ScalarImpl> = HashSet::from_iter(eq_conds);
-                        let new = HashSet::from_iter(scalars);
-                        let intersection: HashSet<_> = old.intersection(&new).collect();
-                        if intersection.is_empty() {
-                            return always_false();
+                        scalars = scalars.intersection(&HashSet::from_iter(eq_conds)).cloned().collect();
+                        if scalars.is_empty() {
+                            return Ok(false_cond());
                         }
-                        scalars = intersection.into_iter().cloned().collect();
                     }
-                    eq_conds = scalars;
+                    // Sort to ensure a deterministic result for planner test.
+                    eq_conds = scalars.into_iter().sorted().collect();
                 } else if let Some((input_ref, op, const_expr)) = expr.as_comparison_const() &&
                     let Ok(const_expr) = const_expr.cast_implicit(input_ref.data_type) {
                     assert_eq!(input_ref.index, order_column_ids[i]);
-                    let Ok(Some(value)) = const_expr.eval_row_const() else {
-                        // column compare with NULL or failed to eval
-                        return always_false();
+                    let Some(value) = const_expr.eval_row_const()? else {
+                        // column compare with NULL
+                        return Ok(false_cond());
                     };
                     match op {
                         ExprType::LessThan => {
@@ -398,17 +404,17 @@ impl Condition {
                             scan_range
                         })
                         .collect();
-                    return (
+                    return Ok((
                         scan_ranges,
                         Self {
                             conjunctions: other_conds,
                         },
-                    );
+                    ));
                 }
             }
         }
 
-        (
+        Ok((
             if scan_range.is_full_table_scan() {
                 vec![]
             } else {
@@ -417,7 +423,7 @@ impl Condition {
             Self {
                 conjunctions: other_conds,
             },
-        )
+        ))
     }
 
     /// Split the condition expressions into `N` groups.

@@ -38,10 +38,6 @@ message CreateTaskRequest {
   uint64 epoch = 3;
 }
 
-message CreateTaskResponse {
-  common.Status status = 1;
-}
-
 message AbortTaskRequest {
   batch_plan.TaskId task_id = 1;
 }
@@ -54,7 +50,7 @@ message GetTaskInfoRequest {
   batch_plan.TaskId task_id = 1;
 }
 
-message GetTaskInfoResponse {
+message TaskInfoResponse {
   common.Status status = 1;
   TaskInfo task_info = 2;
 }
@@ -78,8 +74,7 @@ message ExecuteRequest {
 }
 
 service TaskService {
-  rpc CreateTask(CreateTaskRequest) returns (CreateTaskResponse);
-  rpc GetTaskInfo(GetTaskInfoRequest) returns (GetTaskInfoResponse);
+  rpc CreateTask(CreateTaskRequest) returns (TaskInfoResponse);
   rpc AbortTask(AbortTaskRequest) returns (AbortTaskResponse);
   rpc Execute(ExecuteRequest) returns (stream GetDataResponse);
 }

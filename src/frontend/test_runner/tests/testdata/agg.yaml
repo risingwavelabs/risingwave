@@ -656,3 +656,12 @@
     create table t(x int, y varchar);
     select single_value(distinct x) from t;
   binder_error: 'Invalid input syntax: single_value(distinct) is disallowed'
+- sql: |
+    /* prune key of column_subsets */
+    create table t(v1 int, v2 int);
+    with z(a, b) as (select count(distinct v1), count(v2) from t) select a from z;
+  optimized_logical_plan: |
+    LogicalAgg { aggs: [count($0) filter(($1 = 1:Int64))] }
+      LogicalAgg { group_key: [$0, $1], aggs: [] }
+        LogicalExpand { column_subsets: [[], [0]] }
+          LogicalScan { table: t, columns: [v1] }
