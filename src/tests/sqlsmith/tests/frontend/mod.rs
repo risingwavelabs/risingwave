@@ -29,15 +29,11 @@ use risingwave_sqlsmith::{
 
 /// Executes sql queries
 /// It captures panics so it can recover and print failing sql query.
-async fn handle(session: Arc<SessionImpl>, stmt: Statement, sql: String) {
-    let sql_copy = sql.clone();
-    panic::set_hook(Box::new(move |e| {
-        println!("Panic on SQL:\n{}\nReason:\n{}", sql_copy, e);
-    }));
-
-    handler::handle(session.clone(), stmt, &sql, false)
+async fn handle(session: Arc<SessionImpl>, stmt: Statement, setup_sql: &str, sql: &str) {
+    reproduce_failing_queries(setup_sql, sql);
+    handler::handle(session.clone(), stmt, sql, false)
         .await
-        .unwrap_or_else(|e| panic!("Failed to handle SQL:\n{}\nReason:\n{}", sql, e));
+        .unwrap_or_else(|e| panic!("Panic Reason:\n{}", e));
 }
 
 fn get_seed_table_sql() -> String {
@@ -73,17 +69,16 @@ async fn create_tables(session: Arc<SessionImpl>, rng: &mut impl Rng) -> (Vec<Ta
 
     for s in statements.into_iter() {
         let create_sql = s.to_string();
-        handle(session.clone(), s, create_sql).await;
+        handle(session.clone(), s, &setup_sql, &create_sql).await;
     }
 
     // Generate some mviews
     for i in 0..10 {
         let (sql, table) = mview_sql_gen(rng, tables.clone(), &format!("m{}", i));
-        reproduce_failing_queries(&setup_sql, &sql);
         setup_sql.push_str(&sql);
         let stmts = parse_sql(&sql);
         let stmt = stmts[0].clone();
-        handle(session.clone(), stmt, sql).await;
+        handle(session.clone(), stmt, &setup_sql, &sql).await;
         tables.push(table);
     }
     (tables, setup_sql)
@@ -133,13 +128,14 @@ async fn test_stream_queries(
     session: Arc<SessionImpl>,
     mut tables: Vec<Table>,
     rng: &mut impl Rng,
+    setup_sql: &str,
 ) {
     // Test stream queries
     for i in 0..512 {
         let (sql, table) = mview_sql_gen(rng, tables.clone(), &format!("sq{}", i));
         let stmts = parse_sql(&sql);
         let stmt = stmts[0].clone();
-        handle(session.clone(), stmt, sql).await;
+        handle(session.clone(), stmt, setup_sql, &sql).await;
         tables.push(table);
     }
 }
@@ -157,7 +153,7 @@ async fn run_sqlsmith_with_seed(seed: u64) {
 
     let (tables, setup_sql) = create_tables(session.clone(), &mut rng).await;
     test_batch_queries(session.clone(), tables.clone(), &mut rng, &setup_sql);
-    test_stream_queries(session.clone(), tables.clone(), &mut rng).await;
+    test_stream_queries(session.clone(), tables.clone(), &mut rng, &setup_sql).await;
 }
 
 macro_rules! generate_sqlsmith_test {
