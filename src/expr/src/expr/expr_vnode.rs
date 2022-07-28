@@ -14,7 +14,6 @@
 
 use std::sync::Arc;
 
-use risingwave_common::array::column::Column;
 use risingwave_common::array::{
     ArrayBuilder, ArrayImpl, ArrayRef, DataChunk, I16ArrayBuilder, Row,
 };
@@ -23,17 +22,18 @@ use risingwave_common::util::hash_util::CRC32FastBuilder;
 use risingwave_pb::expr::expr_node::{RexNode, Type};
 use risingwave_pb::expr::ExprNode;
 
-use super::{build_from_prost as expr_build_from_prost, BoxedExpression, Expression};
+use super::Expression;
+use crate::expr::InputRefExpression;
 use crate::{bail, ensure, ExprError, Result};
 
 #[derive(Debug)]
 pub struct VnodeExpression {
-    dist_key_exprs: Vec<BoxedExpression>,
+    dist_key_indices: Vec<usize>,
 }
 
 impl VnodeExpression {
-    pub fn new(dist_key_exprs: Vec<BoxedExpression>) -> Self {
-        VnodeExpression { dist_key_exprs }
+    pub fn new(dist_key_indices: Vec<usize>) -> Self {
+        VnodeExpression { dist_key_indices }
     }
 }
 
@@ -48,13 +48,18 @@ impl<'a> TryFrom<&'a ExprNode> for VnodeExpression {
             bail!("Expected RexNode::FuncCall");
         };
 
-        let dist_key_exprs = func_call_node
-            .children
+        for child in func_call_node.get_children() {
+            ensure!(child.get_expr_type().unwrap() == Type::InputRef);
+        }
+
+        let dist_key_input_refs = func_call_node
+            .get_children()
             .iter()
-            .map(expr_build_from_prost)
+            .map(InputRefExpression::try_from)
+            .map(|res| res.map(|input| input.index()))
             .try_collect()?;
 
-        Ok(VnodeExpression::new(dist_key_exprs))
+        Ok(VnodeExpression::new(dist_key_input_refs))
     }
 }
 
@@ -64,34 +69,16 @@ impl Expression for VnodeExpression {
     }
 
     fn eval(&self, input: &DataChunk) -> Result<ArrayRef> {
-        let dist_key_columns = self
-            .dist_key_exprs
-            .iter()
-            .map(|c| c.eval_checked(input))
-            .map(|res| res.map(Column::new))
-            .try_collect()?;
-        let dist_key_chunk = DataChunk::new(dist_key_columns, input.vis());
-
-        let hash_values = dist_key_chunk.get_hash_values(
-            &(0..self.dist_key_exprs.len()).collect::<Vec<_>>(),
-            CRC32FastBuilder {},
-        )?;
-
+        let hash_values = input.get_hash_values(&self.dist_key_indices, CRC32FastBuilder {})?;
         let mut builder = I16ArrayBuilder::new(input.capacity());
         hash_values
             .into_iter()
             .try_for_each(|h| builder.append(Some(h.to_vnode() as i16)))?;
-
         Ok(Arc::new(ArrayImpl::from(builder.finish()?)))
     }
 
     fn eval_row(&self, input: &Row) -> Result<Datum> {
-        let dist_key = self
-            .dist_key_exprs
-            .iter()
-            .map(|c| c.eval_row(input))
-            .collect::<Result<Vec<_>>>()?;
-        let dist_key_row = Row::new(dist_key);
+        let dist_key_row = input.by_indices(&self.dist_key_indices);
         // FIXME: currently the implementation of the hash function in Row::hash_row differs from
         // Array::hash_at, so their result might be different. #3457
         let vnode = dist_key_row.hash_row(&CRC32FastBuilder {}).to_vnode() as i16;
