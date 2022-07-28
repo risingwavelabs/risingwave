@@ -28,7 +28,7 @@ apt-get update
 echo "debug stuff 2"
 apt install docker.io -y
 echo "debug stuff 3"
-sudo snap install docker -y
+snap install docker -y
 echo "debug stuff 4"
 docker port mysql
 
