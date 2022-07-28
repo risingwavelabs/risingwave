@@ -19,12 +19,14 @@ use std::option::Option;
 use risingwave_common::array::DataChunk;
 use risingwave_common::buffer::Bitmap;
 use risingwave_common::error::ErrorCode::InternalError;
-use risingwave_common::error::{Result, ToRwResult};
+use risingwave_common::error::Result;
 use risingwave_common::util::hash_util::CRC32FastBuilder;
 use risingwave_pb::batch_plan::exchange_info::HashInfo;
 use risingwave_pb::batch_plan::*;
 use tokio::sync::mpsc;
 
+use crate::error::BatchError::{Array, SenderError};
+use crate::error::Result as BatchResult;
 use crate::task::channel::{ChanReceiver, ChanReceiverImpl, ChanSender, ChanSenderImpl};
 use crate::task::data_chunk_in_channel::DataChunkInChannel;
 use crate::task::BOUNDED_BUFFER_SIZE;
@@ -38,7 +40,7 @@ pub struct HashShuffleReceiver {
     receiver: mpsc::Receiver<Option<DataChunkInChannel>>,
 }
 
-fn generate_hash_values(chunk: &DataChunk, hash_info: &HashInfo) -> Result<Vec<usize>> {
+fn generate_hash_values(chunk: &DataChunk, hash_info: &HashInfo) -> BatchResult<Vec<usize>> {
     let output_count = hash_info.output_count as usize;
 
     let hasher_builder = CRC32FastBuilder {};
@@ -52,7 +54,7 @@ fn generate_hash_values(chunk: &DataChunk, hash_info: &HashInfo) -> Result<Vec<u
                 .collect::<Vec<_>>(),
             hasher_builder,
         )
-        .map_err(|e| InternalError(format!("get_hash_values:{}", e)))?
+        .map_err(Array)?
         .iter_mut()
         .map(|hash_value| hash_value.hash_code() as usize % output_count)
         .collect::<Vec<_>>();
@@ -96,7 +98,7 @@ fn generate_new_data_chunks(
 }
 
 impl ChanSender for HashShuffleSender {
-    type SendFuture<'a> = impl Future<Output = Result<()>>;
+    type SendFuture<'a> = impl Future<Output = BatchResult<()>>;
 
     fn send(&mut self, chunk: Option<DataChunk>) -> Self::SendFuture<'_> {
         async move {
@@ -109,7 +111,7 @@ impl ChanSender for HashShuffleSender {
 }
 
 impl HashShuffleSender {
-    async fn send_chunk(&mut self, chunk: DataChunk) -> Result<()> {
+    async fn send_chunk(&mut self, chunk: DataChunk) -> BatchResult<()> {
         let hash_values = generate_hash_values(&chunk, &self.hash_info)?;
         let new_data_chunks = generate_new_data_chunks(&chunk, &self.hash_info, &hash_values);
 
@@ -125,18 +127,15 @@ impl HashShuffleSender {
                 self.senders[sink_id]
                     .send(Some(DataChunkInChannel::new(new_data_chunk)))
                     .await
-                    .to_rw_result_with(|| "HashShuffleSender::send".into())?;
+                    .map_err(|_| SenderError)?
             }
         }
         Ok(())
     }
 
-    async fn send_done(&mut self) -> Result<()> {
+    async fn send_done(&mut self) -> BatchResult<()> {
         for sender in &self.senders {
-            sender
-                .send(None)
-                .await
-                .to_rw_result_with(|| "HashShuffleSender::send".into())?;
+            sender.send(None).await.map_err(|_| SenderError)?
         }
 
         Ok(())

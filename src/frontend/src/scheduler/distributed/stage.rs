@@ -20,8 +20,6 @@ use anyhow::anyhow;
 use arc_swap::ArcSwap;
 use futures::{stream, StreamExt};
 use itertools::Itertools;
-use risingwave_common::bail;
-use risingwave_common::util::worker_util::get_workers_by_parallel_unit_ids;
 use risingwave_pb::batch_plan::plan_node::NodeBody;
 use risingwave_pb::batch_plan::{
     ExchangeNode, ExchangeSource, MergeSortExchangeNode, PlanFragment, PlanNode as PlanNodeProst,
@@ -305,11 +303,7 @@ impl StageRunner {
             // the task.
             // We schedule the task to the worker node that owns the data partition.
             let parallel_unit_ids = vnode_bitmaps.keys().cloned().collect_vec();
-            let all_workers = self.worker_node_manager.list_worker_nodes();
-            let workers = match get_workers_by_parallel_unit_ids(&all_workers, &parallel_unit_ids) {
-                Ok(workers) => workers,
-                Err(e) => bail!("{}", e)
-            };
+            let workers = self.worker_node_manager.get_workers_by_parallel_unit_ids(&parallel_unit_ids)?;
 
             for (i, (parallel_unit_id, worker)) in parallel_unit_ids
                 .into_iter()

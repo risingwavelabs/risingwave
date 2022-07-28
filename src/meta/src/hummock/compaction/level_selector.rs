@@ -19,8 +19,11 @@
 
 use std::sync::Arc;
 
-use risingwave_hummock_sdk::HummockCompactionTaskId;
-use risingwave_pb::hummock::{CompactionConfig, Level};
+use itertools::Itertools;
+use risingwave_hummock_sdk::key::{user_key, FullKey};
+use risingwave_hummock_sdk::prost_key_range::KeyRangeExt;
+use risingwave_hummock_sdk::{HummockCompactionTaskId, HummockEpoch, VersionedComparator};
+use risingwave_pb::hummock::{CompactionConfig, KeyRange, Level};
 
 use crate::hummock::compaction::compaction_config::CompactionConfigBuilder;
 use crate::hummock::compaction::manual_compaction_picker::ManualCompactionPicker;
@@ -30,7 +33,8 @@ use crate::hummock::compaction::tier_compaction_picker::{
     LevelCompactionPicker, TierCompactionPicker,
 };
 use crate::hummock::compaction::{
-    create_overlap_strategy, CompactionPicker, ManualCompactionOption, SearchResult,
+    create_overlap_strategy, CompactionInput, CompactionPicker, CompactionTask,
+    ManualCompactionOption,
 };
 use crate::hummock::level_handler::LevelHandler;
 
@@ -44,7 +48,7 @@ pub trait LevelSelector: Sync + Send {
         task_id: HummockCompactionTaskId,
         levels: &[Level],
         level_handlers: &mut [LevelHandler],
-    ) -> Option<SearchResult>;
+    ) -> Option<CompactionTask>;
 
     fn manual_pick_compaction(
         &self,
@@ -52,7 +56,7 @@ pub trait LevelSelector: Sync + Send {
         levels: &[Level],
         level_handlers: &mut [LevelHandler],
         option: ManualCompactionOption,
-    ) -> Option<SearchResult>;
+    ) -> Option<CompactionTask>;
 
     fn name(&self) -> &'static str;
 }
@@ -112,6 +116,7 @@ impl DynamicLevelSelector {
             Box::new(MinOverlappingPicker::new(
                 task_id,
                 select_level,
+                select_level + 1,
                 self.overlap_strategy.clone(),
             ))
         }
@@ -221,22 +226,66 @@ impl DynamicLevelSelector {
         ctx
     }
 
-    fn set_compaction_config_for_level(&self, input: &mut SearchResult, base_level: usize) {
-        if input.select_level.level_idx == 0 && input.target_level.level_idx == 0 {
-            // TODO: reduce `target_file_size` after we implement sub-level.
-            input.target_file_size = self.config.min_compaction_bytes;
-        } else if input.select_level.level_idx == 0 {
-            input.target_file_size = self.config.target_file_size_base;
+    fn generate_task_by_compaction_config(
+        &self,
+        input: CompactionInput,
+        base_level: usize,
+    ) -> CompactionTask {
+        let target_file_size = if input.target_level == 0 {
+            self.config.target_file_size_base
         } else {
-            assert!(input.target_level.level_idx as usize >= base_level);
-            input.target_file_size = self.config.target_file_size_base
-                << (input.target_level.level_idx as usize - base_level);
+            assert!(input.target_level >= base_level);
+            self.config.target_file_size_base << (input.target_level - base_level)
+        };
+        let compression_algorithm = if input.target_level == 0 {
+            self.config.compression_algorithm[0].clone()
+        } else {
+            let idx = input.target_level - base_level + 1;
+            self.config.compression_algorithm[idx].clone()
+        };
+        let mut splits = vec![];
+        const SPLIT_RANGE_STEP: usize = 8;
+        let mut keys = input
+            .input_levels
+            .iter()
+            .flat_map(|level| level.table_infos.iter())
+            .map(|table| {
+                FullKey::from_user_key_slice(
+                    user_key(&table.key_range.as_ref().unwrap().left),
+                    HummockEpoch::MAX,
+                )
+                .into_inner()
+            })
+            .collect_vec();
+        let total_file_size = input
+            .input_levels
+            .iter()
+            .flat_map(|level| level.table_infos.iter())
+            .map(|table| table.file_size)
+            .sum::<u64>();
+
+        if total_file_size > self.config.min_compaction_bytes && keys.len() >= SPLIT_RANGE_STEP * 2
+        {
+            splits.push(KeyRange::new(vec![], vec![]));
+            keys.sort_by(|a, b| VersionedComparator::compare_key(a.as_ref(), b.as_ref()));
+            let concurrency = std::cmp::min(
+                keys.len() / SPLIT_RANGE_STEP,
+                self.config.max_sub_compaction as usize,
+            );
+            let step = (keys.len() + concurrency - 1) / concurrency;
+            assert!(step > 1);
+            for (idx, key) in keys.into_iter().enumerate() {
+                if idx > 0 && idx % step == 0 {
+                    splits.last_mut().unwrap().right = key.clone();
+                    splits.push(KeyRange::new(key, vec![]));
+                }
+            }
         }
-        if input.target_level.level_idx == 0 {
-            input.compression_algorithm = self.config.compression_algorithm[0].clone();
-        } else {
-            let idx = input.target_level.level_idx as usize - base_level + 1;
-            input.compression_algorithm = self.config.compression_algorithm[idx].clone();
+        CompactionTask {
+            input,
+            compression_algorithm,
+            target_file_size,
+            splits,
         }
     }
 }
@@ -255,16 +304,15 @@ impl LevelSelector for DynamicLevelSelector {
         task_id: HummockCompactionTaskId,
         levels: &[Level],
         level_handlers: &mut [LevelHandler],
-    ) -> Option<SearchResult> {
+    ) -> Option<CompactionTask> {
         let ctx = self.get_priority_levels(levels, level_handlers);
         for (score, select_level, target_level) in ctx.score_levels {
             if score <= SCORE_BASE {
                 return None;
             }
             let picker = self.create_compaction_picker(select_level, target_level, task_id);
-            if let Some(mut ret) = picker.pick_compaction(levels, level_handlers) {
-                self.set_compaction_config_for_level(&mut ret, ctx.base_level);
-                return Some(ret);
+            if let Some(ret) = picker.pick_compaction(levels, level_handlers) {
+                return Some(self.generate_task_by_compaction_config(ret, ctx.base_level));
             }
         }
         None
@@ -276,7 +324,7 @@ impl LevelSelector for DynamicLevelSelector {
         levels: &[Level],
         level_handlers: &mut [LevelHandler],
         option: ManualCompactionOption,
-    ) -> Option<SearchResult> {
+    ) -> Option<CompactionTask> {
         let ctx = self.get_priority_levels(levels, level_handlers);
         let target_level = if option.level == 0 {
             ctx.base_level
@@ -291,9 +339,8 @@ impl LevelSelector for DynamicLevelSelector {
             target_level,
         );
 
-        let mut ret = picker.pick_compaction(levels, level_handlers)?;
-        self.set_compaction_config_for_level(&mut ret, ctx.base_level);
-        Some(ret)
+        let ret = picker.pick_compaction(levels, level_handlers)?;
+        Some(self.generate_task_by_compaction_config(ret, ctx.base_level))
     }
 
     fn name(&self) -> &'static str {
@@ -308,12 +355,31 @@ pub mod tests {
     use itertools::Itertools;
     use risingwave_common::config::constant::hummock::CompactionFilterFlag;
     use risingwave_pb::hummock::compaction_config::CompactionMode;
-    use risingwave_pb::hummock::{LevelType, SstableInfo};
+    use risingwave_pb::hummock::{KeyRange, Level, LevelType, SstableInfo};
 
     use super::*;
     use crate::hummock::compaction::compaction_config::CompactionConfigBuilder;
     use crate::hummock::compaction::overlap_strategy::RangeOverlapStrategy;
-    use crate::hummock::compaction::tier_compaction_picker::tests::generate_table;
+    use crate::hummock::test_utils::iterator_test_key_of_epoch;
+
+    pub fn generate_table(
+        id: u64,
+        table_prefix: u64,
+        left: usize,
+        right: usize,
+        epoch: u64,
+    ) -> SstableInfo {
+        SstableInfo {
+            id,
+            key_range: Some(KeyRange {
+                left: iterator_test_key_of_epoch(table_prefix, left, epoch),
+                right: iterator_test_key_of_epoch(table_prefix, right, epoch),
+                inf: false,
+            }),
+            file_size: (right - left + 1) as u64,
+            table_ids: vec![],
+        }
+    }
 
     pub fn generate_tables(
         ids: Range<u64>,
@@ -333,7 +399,7 @@ pub mod tests {
         tables
     }
 
-    fn generate_level(level_idx: u32, table_infos: Vec<SstableInfo>) -> Level {
+    pub fn generate_level(level_idx: u32, table_infos: Vec<SstableInfo>) -> Level {
         let total_file_size = table_infos.iter().map(|sst| sst.file_size).sum();
         Level {
             level_idx,
@@ -454,10 +520,9 @@ pub mod tests {
         let compaction = selector
             .pick_compaction(1, &levels, &mut levels_handlers)
             .unwrap();
-        assert_eq!(compaction.select_level.level_idx, 0);
-        assert_eq!(compaction.target_level.level_idx, 0);
-        assert_eq!(compaction.select_level.table_infos.len(), 10);
-        assert_eq!(compaction.target_level.table_infos.len(), 0);
+        assert_eq!(compaction.input.input_levels[0].level_idx, 0);
+        assert_eq!(compaction.input.target_level, 0);
+        assert_eq!(compaction.input.input_levels[0].table_infos.len(), 10);
 
         let compaction_filter_flag = CompactionFilterFlag::STATE_CLEAN | CompactionFilterFlag::TTL;
         let config = CompactionConfigBuilder::new_with(config)
@@ -474,10 +539,10 @@ pub mod tests {
         let compaction = selector
             .pick_compaction(1, &levels, &mut levels_handlers)
             .unwrap();
-        assert_eq!(compaction.select_level.level_idx, 0);
-        assert_eq!(compaction.target_level.level_idx, 2);
-        assert_eq!(compaction.select_level.table_infos.len(), 10);
-        assert_eq!(compaction.target_level.table_infos.len(), 3);
+        assert_eq!(compaction.input.input_levels[0].level_idx, 0);
+        assert_eq!(compaction.input.target_level, 2);
+        assert_eq!(compaction.input.input_levels[0].table_infos.len(), 10);
+        assert_eq!(compaction.input.input_levels[1].table_infos.len(), 3);
         assert_eq!(compaction.target_file_size, config.target_file_size_base);
 
         levels_handlers[0].remove_task(1);
@@ -487,10 +552,10 @@ pub mod tests {
         let compaction = selector
             .pick_compaction(2, &levels, &mut levels_handlers)
             .unwrap();
-        assert_eq!(compaction.select_level.level_idx, 3);
-        assert_eq!(compaction.target_level.level_idx, 4);
-        assert_eq!(compaction.select_level.table_infos.len(), 1);
-        assert_eq!(compaction.target_level.table_infos.len(), 1);
+        assert_eq!(compaction.input.input_levels[0].level_idx, 3);
+        assert_eq!(compaction.input.target_level, 4);
+        assert_eq!(compaction.input.input_levels[0].table_infos.len(), 1);
+        assert_eq!(compaction.input.input_levels[1].table_infos.len(), 1);
         assert_eq!(
             compaction.target_file_size,
             config.target_file_size_base * 4

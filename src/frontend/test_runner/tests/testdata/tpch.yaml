@@ -3,51 +3,51 @@
   sql: |
     CREATE TABLE supplier (
             s_suppkey  INTEGER,
-            s_name VARCHAR(25),
-            s_address VARCHAR(40),
+            s_name VARCHAR,
+            s_address VARCHAR,
             s_nationkey INTEGER,
-            s_phone VARCHAR(15),
+            s_phone VARCHAR,
             s_acctbal NUMERIC,
-            s_comment VARCHAR(101));
+            s_comment VARCHAR);
 
     CREATE TABLE part (
             p_partkey INTEGER,
-            p_name VARCHAR(55),
-            p_mfgr VARCHAR(25),
-            p_brand VARCHAR(10),
-            p_type VARCHAR(100),
+            p_name VARCHAR,
+            p_mfgr VARCHAR,
+            p_brand VARCHAR,
+            p_type VARCHAR,
             p_size INTEGER,
-            p_container VARCHAR(10),
+            p_container VARCHAR,
             p_retailprice NUMERIC,
-            p_comment VARCHAR(23));
+            p_comment VARCHAR);
 
     CREATE TABLE partsupp (
             ps_partkey INTEGER,
             ps_suppkey INTEGER,
             ps_availqty INTEGER,
             ps_supplycost NUMERIC,
-            ps_comment VARCHAR(199));
+            ps_comment VARCHAR);
 
     CREATE TABLE customer (
             c_custkey INTEGER,
-            c_name VARCHAR(25),
-            c_address VARCHAR(40),
+            c_name VARCHAR,
+            c_address VARCHAR,
             c_nationkey INTEGER,
-            c_phone VARCHAR(15),
+            c_phone VARCHAR,
             c_acctbal NUMERIC,
-            c_mktsegment VARCHAR(10),
-            c_comment VARCHAR(117));
+            c_mktsegment VARCHAR,
+            c_comment VARCHAR);
 
     CREATE TABLE orders (
             o_orderkey BIGINT,
             o_custkey INTEGER,
-            o_orderstatus VARCHAR(1),
+            o_orderstatus VARCHAR,
             o_totalprice NUMERIC,
             o_orderdate DATE,
-            o_orderpriority VARCHAR(15),
-            o_clerk VARCHAR(15),
+            o_orderpriority VARCHAR,
+            o_clerk VARCHAR,
             o_shippriority INTEGER,
-            o_comment VARCHAR(79));
+            o_comment VARCHAR);
 
     CREATE TABLE lineitem (
             l_orderkey BIGINT,
@@ -58,25 +58,25 @@
             l_extendedprice NUMERIC,
             l_discount NUMERIC,
             l_tax NUMERIC,
-            l_returnflag VARCHAR(1),
-            l_linestatus VARCHAR(1),
+            l_returnflag VARCHAR,
+            l_linestatus VARCHAR,
             l_shipdate DATE,
             l_commitdate DATE,
             l_receiptdate DATE,
-            l_shipinstruct VARCHAR(25),
-            l_shipmode VARCHAR(10),
-            l_comment VARCHAR(44));
+            l_shipinstruct VARCHAR,
+            l_shipmode VARCHAR,
+            l_comment VARCHAR);
 
     CREATE TABLE nation (
             n_nationkey INTEGER,
-            n_name VARCHAR(25),
+            n_name VARCHAR,
             n_regionkey INTEGER,
-            n_comment VARCHAR(152));
+            n_comment VARCHAR);
 
     CREATE TABLE region (
             r_regionkey INTEGER,
-            r_name VARCHAR(25),
-            r_comment VARCHAR(152));
+            r_name VARCHAR,
+            r_comment VARCHAR);
 - id: tpch_q1
   before:
     - create_tables
@@ -184,7 +184,7 @@
     LogicalTopN { order: "[$0 DESC, $2 ASC, $1 ASC, $3 ASC]", limit: 100, offset: 0 }
       LogicalProject { exprs: [$22, $18, $26, $7, $9, $19, $21, $23] }
         LogicalFilter { predicate: ($7 = $1) AND ($17 = $2) AND ($12 = 4:Int32) AND Like($11, '%TIN':Varchar) AND ($20 = $25) AND ($27 = $30) AND ($31 = 'AFRICA':Varchar) AND ($4 = $33) }
-          LogicalApply { type: LeftOuter, on: true }
+          LogicalApply { type: LeftOuter, on: true, correlated_id: 1 }
             LogicalJoin { type: Inner, on: true, output_indices: all }
               LogicalJoin { type: Inner, on: true, output_indices: all }
                 LogicalJoin { type: Inner, on: true, output_indices: all }
@@ -197,7 +197,7 @@
             LogicalProject { exprs: [$0] }
               LogicalAgg { aggs: [min($0)] }
                 LogicalProject { exprs: [$4] }
-                  LogicalFilter { predicate: (CorrelatedInputRef { index: 7, depth: 1 } = $1) AND ($7 = $2) AND ($10 = $15) AND ($17 = $20) AND ($21 = 'AFRICA':Varchar) }
+                  LogicalFilter { predicate: (CorrelatedInputRef { index: 7, correlated_id: 1 } = $1) AND ($7 = $2) AND ($10 = $15) AND ($17 = $20) AND ($21 = 'AFRICA':Varchar) }
                     LogicalJoin { type: Inner, on: true, output_indices: all }
                       LogicalJoin { type: Inner, on: true, output_indices: all }
                         LogicalJoin { type: Inner, on: true, output_indices: all }
@@ -438,10 +438,10 @@
       LogicalAgg { group_key: [$0], aggs: [count] }
         LogicalProject { exprs: [$6] }
           LogicalFilter { predicate: ($5 >= '1997-07-01':Varchar::Date) AND ($5 < ('1997-07-01':Varchar::Date + '3 mons 00:00:00':Interval)) }
-            LogicalApply { type: LeftSemi, on: true }
+            LogicalApply { type: LeftSemi, on: true, correlated_id: 1 }
               LogicalScan { table: orders, columns: [_row_id, o_orderkey, o_custkey, o_orderstatus, o_totalprice, o_orderdate, o_orderpriority, o_clerk, o_shippriority, o_comment] }
               LogicalProject { exprs: [$1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16] }
-                LogicalFilter { predicate: ($1 = CorrelatedInputRef { index: 1, depth: 1 }) AND ($12 < $13) }
+                LogicalFilter { predicate: ($1 = CorrelatedInputRef { index: 1, correlated_id: 1 }) AND ($12 < $13) }
                   LogicalScan { table: lineitem, columns: [_row_id, l_orderkey, l_partkey, l_suppkey, l_linenumber, l_quantity, l_extendedprice, l_discount, l_tax, l_returnflag, l_linestatus, l_shipdate, l_commitdate, l_receiptdate, l_shipinstruct, l_shipmode, l_comment] }
   optimized_logical_plan: |
     LogicalAgg { group_key: [$0], aggs: [count] }
@@ -1740,14 +1740,14 @@
       LogicalAgg { aggs: [sum($0)] }
         LogicalProject { exprs: [$6] }
           LogicalFilter { predicate: ($18 = $2) AND ($21 = 'Brand#13':Varchar) AND ($24 = 'JUMBO PKG':Varchar) AND ($5 < $27) }
-            LogicalApply { type: LeftOuter, on: true }
+            LogicalApply { type: LeftOuter, on: true, correlated_id: 1 }
               LogicalJoin { type: Inner, on: true, output_indices: all }
                 LogicalScan { table: lineitem, columns: [_row_id, l_orderkey, l_partkey, l_suppkey, l_linenumber, l_quantity, l_extendedprice, l_discount, l_tax, l_returnflag, l_linestatus, l_shipdate, l_commitdate, l_receiptdate, l_shipinstruct, l_shipmode, l_comment] }
                 LogicalScan { table: part, columns: [_row_id, p_partkey, p_name, p_mfgr, p_brand, p_type, p_size, p_container, p_retailprice, p_comment] }
               LogicalProject { exprs: [(0.2:Decimal * ($0 / $1))] }
                 LogicalAgg { aggs: [sum($0), count($0)] }
                   LogicalProject { exprs: [$5] }
-                    LogicalFilter { predicate: ($2 = CorrelatedInputRef { index: 18, depth: 1 }) }
+                    LogicalFilter { predicate: ($2 = CorrelatedInputRef { index: 18, correlated_id: 1 }) }
                       LogicalScan { table: lineitem, columns: [_row_id, l_orderkey, l_partkey, l_suppkey, l_linenumber, l_quantity, l_extendedprice, l_discount, l_tax, l_returnflag, l_linestatus, l_shipdate, l_commitdate, l_receiptdate, l_shipinstruct, l_shipmode, l_comment] }
   optimized_logical_plan: |
     LogicalProject { exprs: [RoundDigit(($0 / 7.0:Decimal), 16:Int32)] }
@@ -2043,7 +2043,7 @@
             LogicalScan { table: nation, columns: [_row_id, n_nationkey, n_name, n_regionkey, n_comment] }
           LogicalProject { exprs: [$2] }
             LogicalFilter { predicate: ($3 > $6) }
-              LogicalApply { type: LeftOuter, on: true }
+              LogicalApply { type: LeftOuter, on: true, correlated_id: 3 }
                 LogicalJoin { type: LeftSemi, on: ($1 = $6), output_indices: all }
                   LogicalScan { table: partsupp, columns: [_row_id, ps_partkey, ps_suppkey, ps_availqty, ps_supplycost, ps_comment] }
                   LogicalProject { exprs: [$1] }
@@ -2052,7 +2052,7 @@
                 LogicalProject { exprs: [(0.5:Decimal * $0)] }
                   LogicalAgg { aggs: [sum($0)] }
                     LogicalProject { exprs: [$5] }
-                      LogicalFilter { predicate: ($2 = CorrelatedInputRef { index: 1, depth: 1 }) AND ($3 = CorrelatedInputRef { index: 2, depth: 1 }) AND ($11 >= '1994-01-01':Varchar::Date) AND ($11 < ('1994-01-01':Varchar::Date + '1 year 00:00:00':Interval)) }
+                      LogicalFilter { predicate: ($2 = CorrelatedInputRef { index: 1, correlated_id: 3 }) AND ($3 = CorrelatedInputRef { index: 2, correlated_id: 3 }) AND ($11 >= '1994-01-01':Varchar::Date) AND ($11 < ('1994-01-01':Varchar::Date + '1 year 00:00:00':Interval)) }
                         LogicalScan { table: lineitem, columns: [_row_id, l_orderkey, l_partkey, l_suppkey, l_linenumber, l_quantity, l_extendedprice, l_discount, l_tax, l_returnflag, l_linestatus, l_shipdate, l_commitdate, l_receiptdate, l_shipinstruct, l_shipmode, l_comment] }
   optimized_logical_plan: |
     LogicalJoin { type: LeftSemi, on: ($0 = $3), output_indices: [1, 2] }
@@ -2176,8 +2176,8 @@
         LogicalAgg { group_key: [$0], aggs: [count] }
           LogicalProject { exprs: [$2] }
             LogicalFilter { predicate: ($1 = $11) AND ($26 = $9) AND ($28 = 'F':Varchar) AND ($21 > $20) AND ($4 = $36) AND ($37 = 'GERMANY':Varchar) }
-              LogicalApply { type: LeftAnti, on: true }
-                LogicalApply { type: LeftSemi, on: true }
+              LogicalApply { type: LeftAnti, on: true, correlated_id: 2 }
+                LogicalApply { type: LeftSemi, on: true, correlated_id: 1 }
                   LogicalJoin { type: Inner, on: true, output_indices: all }
                     LogicalJoin { type: Inner, on: true, output_indices: all }
                       LogicalJoin { type: Inner, on: true, output_indices: all }
@@ -2186,10 +2186,10 @@
                       LogicalScan { table: orders, columns: [_row_id, o_orderkey, o_custkey, o_orderstatus, o_totalprice, o_orderdate, o_orderpriority, o_clerk, o_shippriority, o_comment] }
                     LogicalScan { table: nation, columns: [_row_id, n_nationkey, n_name, n_regionkey, n_comment] }
                   LogicalProject { exprs: [$1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16] }
-                    LogicalFilter { predicate: ($1 = CorrelatedInputRef { index: 9, depth: 1 }) AND ($3 <> CorrelatedInputRef { index: 11, depth: 1 }) }
+                    LogicalFilter { predicate: ($1 = CorrelatedInputRef { index: 9, correlated_id: 1 }) AND ($3 <> CorrelatedInputRef { index: 11, correlated_id: 1 }) }
                       LogicalScan { table: lineitem, columns: [_row_id, l_orderkey, l_partkey, l_suppkey, l_linenumber, l_quantity, l_extendedprice, l_discount, l_tax, l_returnflag, l_linestatus, l_shipdate, l_commitdate, l_receiptdate, l_shipinstruct, l_shipmode, l_comment] }
                 LogicalProject { exprs: [$1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16] }
-                  LogicalFilter { predicate: ($1 = CorrelatedInputRef { index: 9, depth: 1 }) AND ($3 <> CorrelatedInputRef { index: 11, depth: 1 }) AND ($13 > $12) }
+                  LogicalFilter { predicate: ($1 = CorrelatedInputRef { index: 9, correlated_id: 2 }) AND ($3 <> CorrelatedInputRef { index: 11, correlated_id: 2 }) AND ($13 > $12) }
                     LogicalScan { table: lineitem, columns: [_row_id, l_orderkey, l_partkey, l_suppkey, l_linenumber, l_quantity, l_extendedprice, l_discount, l_tax, l_returnflag, l_linestatus, l_shipdate, l_commitdate, l_receiptdate, l_shipinstruct, l_shipmode, l_comment] }
   optimized_logical_plan: |
     LogicalTopN { order: "[$1 DESC, $0 ASC]", limit: 100, offset: 0 }
@@ -2319,10 +2319,10 @@
           LogicalProject { exprs: [Substr($5, 1:Int32, 2:Int32), $6] }
             LogicalFilter { predicate: In(Substr($5, 1:Int32, 2:Int32), '30':Varchar, '24':Varchar, '31':Varchar, '38':Varchar, '25':Varchar, '34':Varchar, '37':Varchar) AND ($6 > $9) }
               LogicalJoin { type: LeftOuter, on: true, output_indices: all }
-                LogicalApply { type: LeftAnti, on: true }
+                LogicalApply { type: LeftAnti, on: true, correlated_id: 1 }
                   LogicalScan { table: customer, columns: [_row_id, c_custkey, c_name, c_address, c_nationkey, c_phone, c_acctbal, c_mktsegment, c_comment] }
                   LogicalProject { exprs: [$1, $2, $3, $4, $5, $6, $7, $8, $9] }
-                    LogicalFilter { predicate: ($2 = CorrelatedInputRef { index: 1, depth: 1 }) }
+                    LogicalFilter { predicate: ($2 = CorrelatedInputRef { index: 1, correlated_id: 1 }) }
                       LogicalScan { table: orders, columns: [_row_id, o_orderkey, o_custkey, o_orderstatus, o_totalprice, o_orderdate, o_orderpriority, o_clerk, o_shippriority, o_comment] }
                 LogicalProject { exprs: [($0 / $1)] }
                   LogicalAgg { aggs: [sum($0), count($0)] }

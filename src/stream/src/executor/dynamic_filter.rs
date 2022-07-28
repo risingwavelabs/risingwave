@@ -27,7 +27,7 @@ use risingwave_expr::expr::expr_binary_nonnull::new_binary_expr;
 use risingwave_expr::expr::{BoxedExpression, InputRefExpression, LiteralExpression};
 use risingwave_pb::expr::expr_node::Type as ExprNodeType;
 use risingwave_pb::expr::expr_node::Type::*;
-use risingwave_storage::table::state_table::StateTable;
+use risingwave_storage::table::state_table::RowBasedStateTable;
 use risingwave_storage::StateStore;
 
 use super::barrier_align::*;
@@ -46,7 +46,7 @@ pub struct DynamicFilterExecutor<S: StateStore> {
     identity: String,
     comparator: ExprNodeType,
     range_cache: RangeCache<S>,
-    right_table: StateTable<S>,
+    right_table: RowBasedStateTable<S>,
     is_right_table_writer: bool,
     actor_id: u64,
     schema: Schema,
@@ -62,8 +62,8 @@ impl<S: StateStore> DynamicFilterExecutor<S> {
         pk_indices: PkIndices,
         executor_id: u64,
         comparator: ExprNodeType,
-        mut state_table_l: StateTable<S>,
-        mut state_table_r: StateTable<S>,
+        mut state_table_l: RowBasedStateTable<S>,
+        mut state_table_r: RowBasedStateTable<S>,
         is_right_table_writer: bool,
         actor_id: u64,
         metrics: Arc<StreamingMetrics>,
@@ -258,8 +258,7 @@ impl<S: StateStore> DynamicFilterExecutor<S> {
         );
 
         let mut stream_chunk_builder =
-            StreamChunkBuilder::new(PROCESSING_WINDOW_SIZE, &self.schema.data_types(), 0, 0)
-                .map_err(StreamExecutorError::eval_error)?;
+            StreamChunkBuilder::new(PROCESSING_WINDOW_SIZE, &self.schema.data_types(), 0, 0)?;
 
         #[for_await]
         for msg in aligned_stream {
@@ -318,22 +317,16 @@ impl<S: StateStore> DynamicFilterExecutor<S> {
                         let (range, latest_is_lower, is_insert) = self.get_range(&curr, prev);
                         for (_, rows) in self.range_cache.range(range, latest_is_lower) {
                             for row in rows {
-                                if let Some(chunk) = stream_chunk_builder
-                                    .append_row_matched(
-                                        // All rows have a single identity at this point
-                                        if is_insert { Op::Insert } else { Op::Delete },
-                                        row,
-                                    )
-                                    .map_err(StreamExecutorError::eval_error)?
-                                {
+                                if let Some(chunk) = stream_chunk_builder.append_row_matched(
+                                    // All rows have a single identity at this point
+                                    if is_insert { Op::Insert } else { Op::Delete },
+                                    row,
+                                )? {
                                     yield Message::Chunk(chunk);
                                 }
                             }
                         }
-                        if let Some(chunk) = stream_chunk_builder
-                            .take()
-                            .map_err(StreamExecutorError::eval_error)?
-                        {
+                        if let Some(chunk) = stream_chunk_builder.take()? {
                             yield Message::Chunk(chunk);
                         }
                     }
@@ -391,19 +384,21 @@ mod tests {
     use super::*;
     use crate::executor::test_utils::{MessageSender, MockSource};
 
-    fn create_in_memory_state_table() -> (StateTable<MemoryStateStore>, StateTable<MemoryStateStore>)
-    {
+    fn create_in_memory_state_table() -> (
+        RowBasedStateTable<MemoryStateStore>,
+        RowBasedStateTable<MemoryStateStore>,
+    ) {
         let mem_state = MemoryStateStore::new();
 
         let column_descs = ColumnDesc::unnamed(ColumnId::new(0), DataType::Int64);
-        let state_table_l = StateTable::new_without_distribution(
+        let state_table_l = RowBasedStateTable::new_without_distribution(
             mem_state.clone(),
             TableId::new(0),
             vec![column_descs.clone()],
             vec![OrderType::Ascending],
             vec![0],
         );
-        let state_table_r = StateTable::new_without_distribution(
+        let state_table_r = RowBasedStateTable::new_without_distribution(
             mem_state,
             TableId::new(1),
             vec![column_descs],
