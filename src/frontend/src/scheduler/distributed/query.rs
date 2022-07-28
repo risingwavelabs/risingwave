@@ -429,6 +429,8 @@ mod tests {
             ctx,
         )
         .to_batch()
+        .unwrap()
+        .to_distributed()
         .unwrap();
         let batch_exchange_node1: PlanRef = BatchExchange::new(
             batch_plan_node.clone(),
