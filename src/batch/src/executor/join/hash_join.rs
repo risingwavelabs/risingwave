@@ -28,7 +28,7 @@ use risingwave_common::hash::{
     calc_hash_key_kind, HashKey, HashKeyDispatcher, PrecomputedBuildHasher,
 };
 use risingwave_common::types::DataType;
-use risingwave_common::util::chunk_coalesce::DataChunkBuilder;
+use risingwave_common::util::chunk_coalesce::{DataChunkBuilder, SlicedDataChunk};
 use risingwave_expr::expr::{build_from_prost, BoxedExpression, Expression};
 use risingwave_pb::batch_plan::plan_node::NodeBody;
 
@@ -249,9 +249,22 @@ impl<K: HashKey> HashJoinExecutor<K> {
             }
         };
 
+        let mut output_chunk_builder =
+            DataChunkBuilder::with_default_size(self.schema.data_types());
+
         #[for_await]
         for chunk in stream {
-            yield chunk?.reorder_columns(&self.output_indices)
+            #[for_await]
+            for output_chunk in Self::append_chunk(
+                &mut output_chunk_builder,
+                chunk?.reorder_columns(&self.output_indices),
+            ) {
+                yield output_chunk?
+            }
+        }
+
+        if let Some(output_chunk) = output_chunk_builder.consume_all()? {
+            yield output_chunk
         }
     }
 
@@ -303,9 +316,7 @@ impl<K: HashKey> HashJoinExecutor<K> {
         for chunk in Self::do_inner_join(params) {
             let mut chunk = chunk?;
             chunk.set_visibility(cond.eval(&chunk)?.as_bool().iter().collect());
-            if chunk.cardinality() > 0 {
-                yield chunk.compact()?
-            }
+            yield chunk
         }
     }
 
@@ -991,8 +1002,7 @@ impl<K: HashKey> HashJoinExecutor<K> {
                 *has_more_output_rows,
                 found_matched,
             )
-            .take()
-            .compact()?)
+            .take())
     }
 
     fn process_left_semi_anti_join_non_equi_condition<const ANTI_JOIN: bool>(
@@ -1011,8 +1021,7 @@ impl<K: HashKey> HashJoinExecutor<K> {
                 first_output_row_id,
                 found_matched,
             )
-            .take()
-            .compact()?)
+            .take())
     }
 
     fn process_right_outer_join_non_equi_condition(
@@ -1026,8 +1035,7 @@ impl<K: HashKey> HashJoinExecutor<K> {
         let filter = cond.eval(&chunk)?.as_bool().iter().collect();
         Ok(DataChunkMutator(chunk)
             .remove_duplicate_rows_for_right_outer_join(&filter, build_row_ids, build_row_matched)
-            .take()
-            .compact()?)
+            .take())
     }
 
     fn process_right_semi_anti_join_non_equi_condition(
@@ -1064,8 +1072,7 @@ impl<K: HashKey> HashJoinExecutor<K> {
                 left_non_equi_params,
                 right_non_equi_params,
             )
-            .take()
-            .compact()?)
+            .take())
     }
 
     #[try_stream(ok = DataChunk, error = RwError)]
@@ -1117,6 +1124,21 @@ impl<K: HashKey> HashJoinExecutor<K> {
         }
         if let Some(spilled) = chunk_builder.consume_all()? {
             yield spilled
+        }
+    }
+
+    #[try_stream(ok = DataChunk, error = RwError)]
+    async fn append_chunk(chunk_builder: &mut DataChunkBuilder, chunk: DataChunk) {
+        let (mut remain, mut output) =
+            chunk_builder.append_chunk(SlicedDataChunk::new_checked(chunk)?)?;
+        if let Some(output_chunk) = output {
+            yield output_chunk
+        }
+        while let Some(remain_chunk) = remain {
+            (remain, output) = chunk_builder.append_chunk(remain_chunk)?;
+            if let Some(output_chunk) = output {
+                yield output_chunk
+            }
         }
     }
 
