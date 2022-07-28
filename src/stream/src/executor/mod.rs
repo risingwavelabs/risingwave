@@ -55,6 +55,7 @@ pub mod exchange;
 mod expand;
 mod filter;
 mod global_simple_agg;
+mod group_top_n;
 mod hash_agg;
 pub mod hash_join;
 mod hop_window;
@@ -75,7 +76,6 @@ mod source;
 mod top_n;
 mod top_n_appendonly;
 mod top_n_executor;
-mod top_n_local;
 mod union;
 
 #[cfg(test)]

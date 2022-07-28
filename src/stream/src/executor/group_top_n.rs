@@ -27,9 +27,9 @@ use super::managed_state::top_n::{ManagedTopNStateNew, TopNStateRow};
 use super::top_n_executor::{generate_output, TopNExecutorBase, TopNExecutorWrapper};
 use super::{BoxedMessageStream, Executor, ExecutorInfo, PkIndices, PkIndicesRef};
 
-pub type LocalTopNExecutor<S> = TopNExecutorWrapper<InnerLocalTopNExecutorNew<S>>;
+pub type GroupTopNExecutor<S> = TopNExecutorWrapper<InnerGroupTopNExecutorNew<S>>;
 
-impl<S: StateStore> LocalTopNExecutor<S> {
+impl<S: StateStore> GroupTopNExecutor<S> {
     #[allow(clippy::too_many_arguments)]
     pub fn new(
         input: Box<dyn Executor>,
@@ -49,7 +49,7 @@ impl<S: StateStore> LocalTopNExecutor<S> {
 
         Ok(TopNExecutorWrapper {
             input,
-            inner: InnerLocalTopNExecutorNew::new(
+            inner: InnerGroupTopNExecutorNew::new(
                 info,
                 schema,
                 order_pairs,
@@ -66,7 +66,7 @@ impl<S: StateStore> LocalTopNExecutor<S> {
     }
 }
 
-pub struct InnerLocalTopNExecutorNew<S: StateStore> {
+pub struct InnerGroupTopNExecutorNew<S: StateStore> {
     info: ExecutorInfo,
 
     /// Schema of the executor.
@@ -127,7 +127,7 @@ pub fn generate_internal_key(
     )
 }
 
-impl<S: StateStore> InnerLocalTopNExecutorNew<S> {
+impl<S: StateStore> InnerGroupTopNExecutorNew<S> {
     #[allow(clippy::too_many_arguments)]
     pub fn new(
         input_info: ExecutorInfo,
@@ -186,7 +186,7 @@ impl<S: StateStore> InnerLocalTopNExecutorNew<S> {
     }
 }
 
-impl<S: StateStore> Executor for InnerLocalTopNExecutorNew<S> {
+impl<S: StateStore> Executor for InnerGroupTopNExecutorNew<S> {
     fn execute(self: Box<Self>) -> BoxedMessageStream {
         panic!("Should execute by wrapper");
     }
@@ -205,7 +205,7 @@ impl<S: StateStore> Executor for InnerLocalTopNExecutorNew<S> {
 }
 
 #[async_trait]
-impl<S: StateStore> TopNExecutorBase for InnerLocalTopNExecutorNew<S> {
+impl<S: StateStore> TopNExecutorBase for InnerGroupTopNExecutorNew<S> {
     async fn apply_chunk(
         &mut self,
         chunk: StreamChunk,
@@ -412,7 +412,7 @@ mod tests {
         let order_types = create_order_pairs();
         let source = create_source();
         let top_n_executor = Box::new(
-            LocalTopNExecutor::new(
+            GroupTopNExecutor::new(
                 source as Box<dyn Executor>,
                 order_types,
                 (0, Some(2)),
@@ -500,7 +500,7 @@ mod tests {
         let order_types = create_order_pairs();
         let source = create_source();
         let top_n_executor = Box::new(
-            LocalTopNExecutor::new(
+            GroupTopNExecutor::new(
                 source as Box<dyn Executor>,
                 order_types,
                 (1, Some(2)),
@@ -580,7 +580,7 @@ mod tests {
         let order_types = create_order_pairs();
         let source = create_source();
         let top_n_executor = Box::new(
-            LocalTopNExecutor::new(
+            GroupTopNExecutor::new(
                 source as Box<dyn Executor>,
                 order_types,
                 (0, None),
