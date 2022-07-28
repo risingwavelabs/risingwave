@@ -26,7 +26,7 @@ use risingwave_pb::plan_common::ColumnDesc as ProstColumnDesc;
 use super::{PlanBase, PlanRef, ToBatchProst, ToDistributedBatch};
 use crate::catalog::ColumnId;
 use crate::optimizer::plan_node::{LogicalScan, ToLocalBatch};
-use crate::optimizer::property::{Distribution, Order};
+use crate::optimizer::property::{Distribution, DistributionDisplay, Order};
 
 /// `BatchSeqScan` implements [`super::LogicalScan`] to scan from a row-oriented table
 #[derive(Debug, Clone)]
@@ -171,7 +171,14 @@ impl fmt::Display for BatchSeqScan {
         }
 
         if verbose {
-            write!(f, ", distribution: {}", self.distribution())?;
+            write!(
+                f,
+                ", distribution: {}",
+                &DistributionDisplay {
+                    distribution: self.distribution(),
+                    input_schema: &self.base.schema,
+                }
+            )?;
         }
 
         write!(f, " }}")
