@@ -89,17 +89,13 @@ impl LogicalHopWindow {
             input_pk.chain(window_pk).collect_vec()
         })();
         let functional_dependency = {
-            let input_fd = {
-                let mut input_fd = FunctionalDependencySet::new();
-                for fd in input.functional_dependency().as_dependencies() {
-                    let mut fd = fd.clone();
-                    fd.from.grow(original_schema.len());
-                    fd.to.grow(original_schema.len());
-                    input_fd.add_functional_dependency(fd);
-                }
-                ColIndexMapping::with_remaining_columns(&output_indices, original_schema.len())
-                    .rewrite_functional_dependency_set(input_fd)
-            };
+            let input_fd =
+                ColIndexMapping::identity_or_none(input.schema().len(), original_schema.len())
+                    .composite(&ColIndexMapping::with_remaining_columns(
+                        &output_indices,
+                        original_schema.len(),
+                    ))
+                    .rewrite_functional_dependency_set(input.functional_dependency().clone());
             let mut current_fd = FunctionalDependencySet::new();
             for fd in input_fd.as_dependencies() {
                 let mut fd = fd.clone();

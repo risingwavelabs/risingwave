@@ -51,13 +51,14 @@ impl LogicalExpand {
 
         let schema = Self::derive_schema(input.schema());
         let ctx = input.ctx();
+        let flag_index = schema.len() - 1; // assume that `flag` is the last column
         let functional_dependency = {
             let input_fd = input.functional_dependency().clone().into_dependencies();
             let mut current_fd = FunctionalDependencySet::new();
             for mut fd in input_fd {
                 fd.from.grow(schema.len());
                 fd.to.grow(schema.len());
-                fd.from.set(schema.len() - 1, true);
+                fd.from.set(flag_index, true);
                 current_fd.add_functional_dependency(fd);
             }
             current_fd
