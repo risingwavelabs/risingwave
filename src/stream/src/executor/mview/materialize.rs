@@ -17,13 +17,14 @@ use std::sync::Arc;
 use futures::StreamExt;
 use futures_async_stream::try_stream;
 use itertools::Itertools;
-use risingwave_common::{array::Op::*, catalog::ColumnDesc};
+use risingwave_common::array::Op::*;
 use risingwave_common::array::Row;
 use risingwave_common::buffer::Bitmap;
-use risingwave_common::catalog::{ColumnId, Schema, TableId};
+use risingwave_common::catalog::{ColumnDesc, ColumnId, Schema, TableId};
 use risingwave_common::util::sort_util::OrderPair;
-use risingwave_pb::{catalog::Table, plan_common::OrderType};
+use risingwave_pb::catalog::Table;
 use risingwave_storage::table::state_table::StateTable;
+use risingwave_storage::table::Distribution;
 use risingwave_storage::StateStore;
 
 use crate::executor::error::StreamExecutorError;
@@ -47,23 +48,17 @@ impl<S: StateStore> MaterializeExecutor<S> {
     /// Create a new `MaterializeExecutor` with distribution specified with `distribution_keys` and
     /// `vnodes`. For singleton distribution, `distribution_keys` should be empty and `vnodes`
     /// should be `None`.
-    #[allow(clippy::too_many_arguments)]
     pub fn new(
         input: BoxedExecutor,
         store: S,
-        table_id: TableId,
         key: Vec<OrderPair>,
-        column_ids: Vec<ColumnId>,
         executor_id: u64,
-        distribution_key: Vec<usize>,
         vnodes: Option<Arc<Bitmap>>,
         table_catalog: &Table,
     ) -> Self {
         let arrange_columns: Vec<usize> = key.iter().map(|k| k.column_idx).collect();
-        // let arrange_order_types = key.iter().map(|k| k.order_type).collect();
 
         let schema = input.schema().clone();
-    
 
         let state_table = StateTable::from_table_catalog(table_catalog, store, vnodes);
 
@@ -87,19 +82,36 @@ impl<S: StateStore> MaterializeExecutor<S> {
         keys: Vec<OrderPair>,
         column_ids: Vec<ColumnId>,
         executor_id: u64,
-        table_catalog: &Table,
     ) -> Self {
-        Self::new(
-            input,
+        let arrange_columns: Vec<usize> = keys.iter().map(|k| k.column_idx).collect();
+        let arrange_order_types = keys.iter().map(|k| k.order_type).collect();
+        let schema = input.schema().clone();
+        let columns = column_ids
+            .into_iter()
+            .zip_eq(schema.fields.iter())
+            .map(|(column_id, field)| ColumnDesc::unnamed(column_id, field.data_type()))
+            .collect_vec();
+
+        let distribution = Distribution::fallback();
+
+        let state_table = StateTable::new_with_distribution(
             store,
             table_id,
-            keys,
-            column_ids,
-            executor_id,
-            vec![],
-            None,
-            table_catalog,
-        )
+            columns,
+            arrange_order_types,
+            arrange_columns.clone(),
+            distribution,
+        );
+        Self {
+            input,
+            state_table,
+            arrange_columns: arrange_columns.clone(),
+            info: ExecutorInfo {
+                schema,
+                pk_indices: arrange_columns,
+                identity: format!("MaterializeExecutor {:X}", executor_id),
+            },
+        }
     }
 
     #[try_stream(ok = Message, error = StreamExecutorError)]

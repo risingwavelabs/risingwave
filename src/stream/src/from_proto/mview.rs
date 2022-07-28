@@ -14,7 +14,6 @@
 
 use std::sync::Arc;
 
-use risingwave_common::catalog::{ColumnId, TableId};
 use risingwave_common::util::sort_util::OrderPair;
 
 use super::*;
@@ -31,35 +30,18 @@ impl ExecutorBuilder for MaterializeExecutorBuilder {
     ) -> Result<BoxedExecutor> {
         let node = try_match_expand!(node.get_node_body().unwrap(), NodeBody::Materialize)?;
 
-        let table_id = TableId::new(node.table_id);
         let order_key = node
             .column_orders
             .iter()
             .map(OrderPair::from_prost)
             .collect();
-        let column_ids = node
-            .get_table()?
-            .get_columns()
-            .iter()
-            .map(|t| ColumnId::from(t.column_desc.as_ref().unwrap().column_id))
-            .collect();
 
-        let distribution_key = node
-            .get_table()?
-            .get_distribution_key()
-            .iter()
-            .map(|key| *key as usize)
-            .collect();
         let table = node.get_table()?;
-        // println!("table  = {:?}", table);
         let executor = MaterializeExecutor::new(
             params.input.remove(0),
             store,
-            table_id,
             order_key,
-            column_ids,
             params.executor_id,
-            distribution_key,
             params.vnode_bitmap.map(Arc::new),
             table,
         );
@@ -78,7 +60,6 @@ impl ExecutorBuilder for ArrangeExecutorBuilder {
         _stream: &mut LocalStreamManagerCore,
     ) -> Result<BoxedExecutor> {
         let arrange_node = try_match_expand!(node.get_node_body().unwrap(), NodeBody::Arrange)?;
-        let table_id = TableId::from(arrange_node.table_id);
 
         let keys = arrange_node
             .get_table_info()?
@@ -87,18 +68,6 @@ impl ExecutorBuilder for ArrangeExecutorBuilder {
             .map(OrderPair::from_prost)
             .collect();
 
-        let column_ids = arrange_node
-            .get_table_info()?
-            .column_descs
-            .iter()
-            .map(|x| ColumnId::from(x.column_id))
-            .collect();
-
-        let distribution_key = arrange_node
-            .distribution_key
-            .iter()
-            .map(|key| *key as usize)
-            .collect();
         let table = arrange_node.get_table()?;
 
         // FIXME: Lookup is now implemented without cell-based table API and relies on all vnodes
@@ -108,11 +77,8 @@ impl ExecutorBuilder for ArrangeExecutorBuilder {
         let executor = MaterializeExecutor::new(
             params.input.remove(0),
             store,
-            table_id,
             keys,
-            column_ids,
             params.executor_id,
-            distribution_key,
             vnodes,
             table,
         );
