@@ -262,34 +262,6 @@ where
         }
     }
 
-    pub async fn start_create_procedure(&self, relation: &Relation) -> Result<()> {
-        match relation {
-            Relation::Table(table) => self.start_create_table_procedure(table).await,
-            Relation::Sink(sink) => self.start_create_sink_procedure(sink).await,
-        }
-    }
-
-    pub async fn cancel_create_procedure(&self, relation: &Relation) -> Result<()> {
-        match relation {
-            Relation::Table(table) => self.cancel_create_table_procedure(table).await,
-            Relation::Sink(sink) => self.cancel_create_sink_procedure(sink).await,
-        }
-    }
-
-    pub async fn finish_create_procedure(
-        &self,
-        internal_tables: Option<Vec<Table>>,
-        relation: &Relation,
-    ) -> Result<NotificationVersion> {
-        match relation {
-            Relation::Table(table) => {
-                self.finish_create_table_procedure(internal_tables.unwrap(), table)
-                    .await
-            }
-            Relation::Sink(sink) => self.finish_create_sink_procedure(sink).await,
-        }
-    }
-
     pub async fn start_create_table_procedure(&self, table: &Table) -> Result<()> {
         let mut core = self.core.lock().await;
         let key = (table.database_id, table.schema_id, table.name.clone());
@@ -724,101 +696,6 @@ where
         }
     }
 
-    pub async fn start_create_sink_procedure(&self, sink: &Sink) -> Result<()> {
-        let mut core = self.core.lock().await;
-        let key = (sink.database_id, sink.schema_id, sink.name.clone());
-        if !core.has_sink(sink) && !core.has_in_progress_creation(&key) {
-            core.mark_creating(&key);
-            for &dependent_relation_id in &sink.dependent_relations {
-                core.increase_ref_count(dependent_relation_id);
-            }
-            Ok(())
-        } else {
-            Err(RwError::from(InternalError(
-                "sink already exists or in creating procedure".to_string(),
-            )))
-        }
-    }
-
-    pub async fn finish_create_sink_procedure(&self, sink: &Sink) -> Result<NotificationVersion> {
-        let mut core = self.core.lock().await;
-        let key = (sink.database_id, sink.schema_id, sink.name.clone());
-        if !core.has_sink(sink) && core.has_in_progress_creation(&key) {
-            core.unmark_creating(&key);
-            sink.insert(self.env.meta_store()).await?;
-            core.add_sink(sink);
-
-            let version = self
-                .env
-                .notification_manager()
-                .notify_frontend(Operation::Add, Info::Sink(sink.to_owned()))
-                .await;
-
-            Ok(version)
-        } else {
-            Err(RwError::from(InternalError(
-                "sink already exist or not in creating procedure".to_string(),
-            )))
-        }
-    }
-
-    pub async fn cancel_create_sink_procedure(&self, sink: &Sink) -> Result<()> {
-        let mut core = self.core.lock().await;
-        let key = (sink.database_id, sink.schema_id, sink.name.clone());
-        if !core.has_sink(sink) && core.has_in_progress_creation(&key) {
-            core.unmark_creating(&key);
-            Ok(())
-        } else {
-            Err(RwError::from(InternalError(
-                "sink already exist or not in creating procedure".to_string(),
-            )))
-        }
-    }
-
-    pub async fn create_sink(&self, sink: &Sink) -> Result<NotificationVersion> {
-        let mut core = self.core.lock().await;
-        if !core.has_sink(sink) {
-            sink.insert(self.env.meta_store()).await?;
-            core.add_sink(sink);
-
-            let version = self
-                .env
-                .notification_manager()
-                .notify_frontend(Operation::Add, Info::Sink(sink.to_owned()))
-                .await;
-
-            Ok(version)
-        } else {
-            Err(RwError::from(InternalError(
-                "sink already exists".to_string(),
-            )))
-        }
-    }
-
-    pub async fn drop_sink(&self, sink_id: SinkId) -> Result<NotificationVersion> {
-        let mut core = self.core.lock().await;
-        let sink = Sink::select(self.env.meta_store(), &sink_id).await?;
-        if let Some(sink) = sink {
-            Sink::delete(self.env.meta_store(), &sink_id).await?;
-            core.drop_sink(&sink);
-            for &dependent_relation_id in &sink.dependent_relations {
-                core.decrease_ref_count(dependent_relation_id);
-            }
-
-            let version = self
-                .env
-                .notification_manager()
-                .notify_frontend(Operation::Delete, Info::Sink(sink))
-                .await;
-
-            Ok(version)
-        } else {
-            Err(RwError::from(InternalError(
-                "sink doesn't exist".to_string(),
-            )))
-        }
-    }
-
     pub async fn list_tables(&self, schema_id: SchemaId) -> Result<Vec<TableId>> {
         let core = self.core.lock().await;
         let tables = Table::list(core.env.meta_store()).await?;
@@ -1023,25 +900,6 @@ where
         Sink::select(self.env.meta_store(), &id)
             .await
             .map_err(Into::into)
-    }
-
-    fn has_sink(&self, sink: &Sink) -> bool {
-        self.sinks
-            .contains(&(sink.database_id, sink.schema_id, sink.name.clone()))
-    }
-
-    fn add_sink(&mut self, sink: &Sink) {
-        self.sinks
-            .insert((sink.database_id, sink.schema_id, sink.name.clone()));
-    }
-
-    fn drop_sink(&mut self, sink: &Sink) -> bool {
-        self.sinks
-            .remove(&(sink.database_id, sink.schema_id, sink.name.clone()))
-    }
-
-    pub async fn get_sink(&self, id: SinkId) -> Result<Option<Sink>> {
-        Sink::select(self.env.meta_store(), &id).await
     }
 
     fn get_ref_count(&self, relation_id: RelationId) -> Option<usize> {
