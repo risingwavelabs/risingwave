@@ -215,8 +215,8 @@ impl<K: HashKey> HashJoinExecutor<K> {
             next_build_row_with_same_key,
         };
 
-        let stream = if let Some(cond) = self.cond {
-            match self.join_type {
+        if let Some(cond) = self.cond {
+            let stream = match self.join_type {
                 JoinType::Inner => Self::do_inner_join_with_non_equi_condition(params, cond),
                 JoinType::LeftOuter => {
                     Self::do_left_outer_join_with_non_equi_condition(params, cond)
@@ -235,9 +235,25 @@ impl<K: HashKey> HashJoinExecutor<K> {
                 JoinType::FullOuter => {
                     Self::do_full_outer_join_with_non_equi_condition(params, cond)
                 }
+            };
+            // For non-equi join, we need an output chunk builder to align the output chunks.
+            let mut output_chunk_builder =
+                DataChunkBuilder::with_default_size(self.schema.data_types());
+            #[for_await]
+            for chunk in stream {
+                #[for_await]
+                for output_chunk in Self::append_chunk(
+                    &mut output_chunk_builder,
+                    chunk?.reorder_columns(&self.output_indices),
+                ) {
+                    yield output_chunk?
+                }
+            }
+            if let Some(output_chunk) = output_chunk_builder.consume_all()? {
+                yield output_chunk
             }
         } else {
-            match self.join_type {
+            let stream = match self.join_type {
                 JoinType::Inner => Self::do_inner_join(params),
                 JoinType::LeftOuter => Self::do_left_outer_join(params),
                 JoinType::LeftSemi => Self::do_left_semi_anti_join::<false>(params),
@@ -246,25 +262,11 @@ impl<K: HashKey> HashJoinExecutor<K> {
                 JoinType::RightSemi => Self::do_right_semi_anti_join::<false>(params),
                 JoinType::RightAnti => Self::do_right_semi_anti_join::<true>(params),
                 JoinType::FullOuter => Self::do_full_outer_join(params),
-            }
-        };
-
-        let mut output_chunk_builder =
-            DataChunkBuilder::with_default_size(self.schema.data_types());
-
-        #[for_await]
-        for chunk in stream {
+            };
             #[for_await]
-            for output_chunk in Self::append_chunk(
-                &mut output_chunk_builder,
-                chunk?.reorder_columns(&self.output_indices),
-            ) {
-                yield output_chunk?
+            for chunk in stream {
+                yield chunk?.reorder_columns(&self.output_indices)
             }
-        }
-
-        if let Some(output_chunk) = output_chunk_builder.consume_all()? {
-            yield output_chunk
         }
     }
 
@@ -983,6 +985,138 @@ impl<K: HashKey> HashJoinExecutor<K> {
         }
     }
 
+    /// Process output chunk for left outer join when non-equi condition is presented.
+    ///
+    /// # Arguments
+    /// * `chunk` - Output chunk from `do_left_outer_join_with_non_equi_condition`, containing:
+    ///     - Concatenation of probe row and its corresponding build row according to the hash map.
+    ///     - Concatenation of probe row and `NULL` build row, if there is no matched build row
+    ///       found for the probe row.
+    /// * `cond` - Non-equi join condition.
+    /// * `probe_column_count` - The number of columns in the probe side.
+    /// * `first_output_row_id` - The offset of the first output row in `chunk` for each probe side
+    ///   row that has been processed.
+    /// * `has_more_output_rows` - Whether the probe row being processed currently has output rows
+    ///   in next output chunk.
+    /// * `found_matched` - Whether the probe row being processed currently has matched non-NULL
+    ///   build rows in previous output chunk.
+    ///
+    /// # Examples
+    /// Assume we have two tables `t1` and `t2` as probe side and build side, respectively.
+    /// ```sql
+    /// CREATE TABLE t1 (v1 int, v2 int);
+    /// CREATE TABLE t2 (v3 int);
+    /// ```
+    ///
+    /// Now we de left outer join on `t1` and `t2`, as the following query shows:
+    /// ```sql
+    /// SELECT * FROM t1 LEFT JOIN t2 ON t1.v1 = t2.v3 AND t1.v2 <> t2.v3;
+    /// ```
+    ///
+    /// Assume the chunk builder in `do_left_outer_join_with_non_equi_condition` has buffer size 5,
+    /// and we have the following chunk as the first output ('-' represents NULL).
+    ///
+    /// | offset | v1 | v2 | v3 |
+    /// |---|---|---|---|
+    /// | 0 | 1 | 2 | 1 |
+    /// | 1 | 1 | 1 | 1 |
+    /// | 2 | 2 | 3 | - |
+    /// | 3 | 3 | 3 | 3 |
+    /// | 4 | 3 | 3 | 3 |
+    ///
+    /// We have the following precondition:
+    /// ```rust
+    /// assert_eq!(probe_column_count, 2);
+    /// assert_eq!(first_out_row_id, vec![0, 1, 2, 3]);
+    /// assert_eq!(has_more_output_rows, true);
+    /// assert_eq!(found_matched, false);
+    /// ```
+    ///
+    /// In `process_left_outer_join_non_equi_condition`, we transform the chunk in following steps.
+    ///
+    /// 1. Evaluate the non-equi condition on the chunk. Here the condition is `t1.v2 <> t2.v3`.
+    ///
+    /// We get the result array:
+    ///
+    /// | offset | value |
+    /// | --- | --- |
+    /// | 0 | true |
+    /// | 1 | false |
+    /// | 2 | false |
+    /// | 3 | false |
+    /// | 4 | false |
+    ///
+    /// 2. Set the build side columns to NULL if the corresponding result value is false.
+    ///
+    /// The chunk is changed to:
+    ///
+    /// | offset | v1 | v2 | v3 |
+    /// |---|---|---|---|
+    /// | 0 | 1 | 2 | 1 |
+    /// | 1 | 1 | 1 | - |
+    /// | 2 | 2 | 3 | - |
+    /// | 3 | 3 | 3 | - |
+    /// | 4 | 3 | 3 | - |
+    ///
+    /// 3. Remove duplicate rows with NULL build side. This is done by setting the visibility bitmap
+    /// of the chunk.
+    ///
+    /// | offset | v1 | v2 | v3 |
+    /// |---|---|---|---|
+    /// | 0 | 1 | 2 | 1 |
+    /// | 1 | 1 | 1 | - |
+    /// | 2 | 2 | 3 | - |
+    /// | 3 | ~~3~~ | ~~3~~ | ~~-~~ |
+    /// | 4 | ~~3~~ | ~~3~~ | ~~-~~ |
+    ///
+    /// For the probe row being processed currently (`(3, 3)` here), we don't have output rows with
+    /// non-NULL build side, so we set `found_matched` to false.
+    ///
+    /// In `do_left_outer_join_with_non_equi_condition`, we have next output chunk as follows:
+    ///
+    /// | offset | v1 | v2 | v3 |
+    /// |---|---|---|---|
+    /// | 0 | 3 | 3 | 3 |
+    /// | 1 | 3 | 3 | 3 |
+    /// | 2 | 5 | 5 | - |
+    /// | 3 | 5 | 3 | - |
+    /// | 4 | 5 | 3 | - |
+    ///
+    /// This time We have the following precondition:
+    /// ```rust
+    /// assert_eq!(probe_column_count, 2);
+    /// assert_eq!(first_out_row_id, vec![0, 2, 3]);
+    /// assert_eq!(has_more_output_rows, false);
+    /// assert_eq!(found_matched, false);
+    /// ```
+    ///
+    /// The transformed chunk is as follows after the same steps.
+    ///
+    /// | offset | v1 | v2 | v3 |
+    /// |---|---|---|---|
+    /// | 0 | ~~3~~ | ~~3~~ | ~~3~~ |
+    /// | 1 | 3 | 3 | - |
+    /// | 2 | 5 | 5 | - |
+    /// | 3 | 5 | 3 | - |
+    /// | 4 | ~~5~~ | ~~3~~ | ~~-~~ |
+    ///
+    /// After we add these chunks to output chunk builder in `do_execute`, we get the final output:
+    ///
+    /// Chunk 1
+    ///
+    /// | offset | v1 | v2 | v3 |
+    /// |---|---|---|---|
+    /// | 0 | 1 | 2 | 1 |
+    /// | 1 | 1 | 1 | - |
+    /// | 2 | 2 | 3 | - |
+    /// | 3 | 3 | 3 | - |
+    /// | 4 | 5 | 5 | - |
+    ///
+    /// Chunk 2
+    ///
+    /// | offset | v1 | v2 | v3 |
+    /// |---|---|---|---|
+    /// | 0 | 5 | 3 | - |
     fn process_left_outer_join_non_equi_condition(
         chunk: DataChunk,
         cond: &dyn Expression,
@@ -1128,7 +1262,7 @@ impl<K: HashKey> HashJoinExecutor<K> {
     }
 
     #[try_stream(ok = DataChunk, error = RwError)]
-    async fn append_chunk(chunk_builder: &mut DataChunkBuilder, chunk: DataChunk) {
+    async fn append_chunk(chunk_builder: &'_ mut DataChunkBuilder, chunk: DataChunk) {
         let (mut remain, mut output) =
             chunk_builder.append_chunk(SlicedDataChunk::new_checked(chunk)?)?;
         if let Some(output_chunk) = output {
