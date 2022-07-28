@@ -14,7 +14,7 @@
 
 use std::collections::BTreeSet;
 
-use bytes::{BufMut, Bytes, BytesMut};
+use bytes::BufMut;
 use risingwave_common::config::StorageConfig;
 use risingwave_hummock_sdk::key::{get_table_id, user_key};
 
@@ -71,7 +71,7 @@ pub struct SstableBuilder {
     /// Options.
     options: SstableBuilderOptions,
     /// Write buffer.
-    buf: BytesMut,
+    buf: Vec<u8>,
     /// Current block builder.
     block_builder: Option<BlockBuilder>,
     /// Block metadata vec.
@@ -81,7 +81,7 @@ pub struct SstableBuilder {
     /// Hashes of user keys.
     user_key_hashes: Vec<u32>,
     /// Last added full key.
-    last_full_key: Bytes,
+    last_full_key: Vec<u8>,
     key_count: usize,
     sstable_id: u64,
 }
@@ -90,12 +90,12 @@ impl SstableBuilder {
     pub fn new(sstable_id: u64, options: SstableBuilderOptions) -> Self {
         Self {
             options: options.clone(),
-            buf: BytesMut::with_capacity(options.capacity),
+            buf: Vec::with_capacity(options.capacity),
             block_builder: None,
             block_metas: Vec::with_capacity(options.capacity / options.block_capacity + 1),
             table_ids: BTreeSet::new(),
             user_key_hashes: Vec::with_capacity(options.capacity / DEFAULT_ENTRY_SIZE + 1),
-            last_full_key: Bytes::default(),
+            last_full_key: Vec::default(),
             key_count: 0,
             sstable_id,
         }
@@ -120,13 +120,11 @@ impl SstableBuilder {
 
         let block_builder = self.block_builder.as_mut().unwrap();
 
-        // TODO: refine me
-        let mut raw_value = BytesMut::default();
+        let mut raw_value = Vec::default();
         value.encode(&mut raw_value);
         if let Some(table_id) = get_table_id(full_key) {
             self.table_ids.insert(table_id);
         }
-        let raw_value = raw_value.freeze();
 
         block_builder.add(full_key, &raw_value);
 
@@ -136,7 +134,7 @@ impl SstableBuilder {
         if self.last_full_key.is_empty() {
             self.block_metas.last_mut().unwrap().smallest_key = full_key.to_vec();
         }
-        self.last_full_key = Bytes::copy_from_slice(full_key);
+        self.last_full_key = full_key.to_vec();
 
         if block_builder.approximate_len() >= self.options.block_capacity {
             self.build_block();
@@ -156,7 +154,7 @@ impl SstableBuilder {
     /// ```plain
     /// | Block 0 | ... | Block N-1 | N (4B) |
     /// ```
-    pub fn finish(mut self) -> (u64, Bytes, SstableMeta, Vec<u32>) {
+    pub fn finish(mut self) -> (u64, Vec<u8>, SstableMeta, Vec<u32>) {
         let smallest_key = self.block_metas[0].smallest_key.clone();
         let largest_key = self.last_full_key.to_vec();
         self.build_block();
@@ -182,7 +180,7 @@ impl SstableBuilder {
 
         (
             self.sstable_id,
-            self.buf.freeze(),
+            self.buf,
             meta,
             self.table_ids.into_iter().collect(),
         )

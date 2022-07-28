@@ -136,7 +136,8 @@ impl<F: TableBuilderFactory> CapacitySplitTableBuilder<F> {
             let tracker = self.tracker.take();
             let upload_join_handle = tokio::spawn(async move {
                 let ret = if policy == CachePolicy::Fill {
-                    let sst = Sstable::new_with_data(table_id, meta_clone, data.clone())?;
+                    // TODO(MrCroxx): There will be a buffer copy here. Can we reduce it?
+                    let sst = Sstable::new_with_data(table_id, meta_clone, data.to_vec())?;
                     sstable_store.put(sst, data, CachePolicy::Fill).await
                 } else {
                     sstable_store

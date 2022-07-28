@@ -16,7 +16,6 @@ use std::clone::Clone;
 use std::mem::size_of;
 use std::sync::Arc;
 
-use bytes::Bytes;
 use fail::fail_point;
 use risingwave_hummock_sdk::{is_remote_sst_id, HummockSstableId};
 use risingwave_object_store::object::{get_local_path, BlockLocation, ObjectStore, ObjectStoreRef};
@@ -86,7 +85,7 @@ impl SstableStore {
         }
     }
 
-    pub async fn put(&self, sst: Sstable, data: Bytes, policy: CachePolicy) -> HummockResult<()> {
+    pub async fn put(&self, sst: Sstable, data: Vec<u8>, policy: CachePolicy) -> HummockResult<()> {
         self.put_sst_data(sst.id, data.clone()).await?;
 
         fail_point!("metadata_upload_err");
@@ -132,14 +131,14 @@ impl SstableStore {
 
     async fn put_meta(&self, sst: &Sstable) -> HummockResult<()> {
         let meta_path = self.get_sst_meta_path(sst.id);
-        let meta = Bytes::from(sst.meta.encode_to_bytes());
+        let meta = sst.meta.encode_to_bytes();
         self.store
             .upload(&meta_path, meta)
             .await
             .map_err(HummockError::object_io_error)
     }
 
-    async fn put_sst_data(&self, sst_id: HummockSstableId, data: Bytes) -> HummockResult<()> {
+    async fn put_sst_data(&self, sst_id: HummockSstableId, data: Vec<u8>) -> HummockResult<()> {
         let data_path = self.get_sst_data_path(sst_id);
         self.store
             .upload(&data_path, data)
@@ -159,7 +158,7 @@ impl SstableStore {
         &self,
         sst_id: HummockSstableId,
         block_idx: u64,
-        block_data: Bytes,
+        block_data: Vec<u8>,
     ) -> HummockResult<()> {
         let block = Box::new(Block::decode(block_data)?);
         self.block_cache.insert(sst_id, block_idx, block);

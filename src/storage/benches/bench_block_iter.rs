@@ -96,7 +96,7 @@ fn bench_block_iter(c: &mut Criterion) {
 criterion_group!(benches, bench_block_iter);
 criterion_main!(benches);
 
-fn build_block_data(t: u32, i: u64) -> Bytes {
+fn build_block_data(t: u32, i: u64) -> Vec<u8> {
     let options = BlockBuilderOptions {
         capacity: BLOCK_CAPACITY,
         compression_algorithm: CompressionAlgorithm::None,

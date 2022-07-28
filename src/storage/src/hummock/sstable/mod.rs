@@ -29,7 +29,7 @@ pub mod builder;
 pub use builder::*;
 mod forward_sstable_iterator;
 pub mod multi_builder;
-use bytes::{Buf, BufMut, Bytes};
+use bytes::{Buf, BufMut};
 use fail::fail_point;
 pub use forward_sstable_iterator::*;
 mod backward_sstable_iterator;
@@ -78,12 +78,12 @@ impl Sstable {
     pub fn new_with_data(
         id: HummockSstableId,
         meta: SstableMeta,
-        data: Bytes,
+        data: Vec<u8>,
     ) -> HummockResult<Self> {
         let mut blocks = vec![];
         for block_meta in &meta.block_metas {
             let end_offset = (block_meta.offset + block_meta.len) as usize;
-            let block = Block::decode(data.slice(block_meta.offset as usize..end_offset))?;
+            let block = Block::decode(data[block_meta.offset as usize..end_offset].to_vec())?;
             blocks.push(Arc::new(block));
         }
         Ok(Self { id, meta, blocks })

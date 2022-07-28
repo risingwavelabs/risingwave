@@ -14,7 +14,7 @@
 
 use std::collections::HashMap;
 
-use bytes::{Buf, Bytes};
+use bytes::Buf;
 use risingwave_common::types::DataType;
 use risingwave_common::util::value_encoding::deserialize_cell;
 use risingwave_frontend::catalog::TableCatalog;
@@ -147,7 +147,7 @@ async fn print_blocks(
 }
 
 /// Prints the data of KV-Pairs of a given block out to the terminal.
-fn print_kv_pairs(block_data: Bytes, table_data: &TableData) -> anyhow::Result<()> {
+fn print_kv_pairs(block_data: Vec<u8>, table_data: &TableData) -> anyhow::Result<()> {
     println!("\tKV-Pairs:");
 
     let block = Box::new(Block::decode(block_data).unwrap());
