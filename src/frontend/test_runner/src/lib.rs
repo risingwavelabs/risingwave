@@ -82,6 +82,12 @@ pub struct TestCase {
     /// Error of optimizer
     pub optimizer_error: Option<String>,
 
+    /// Error of `.gen_batch_query_plan()`
+    pub batch_error: Option<String>,
+
+    /// Error of `.gen_batch_local_plan()`
+    pub batch_local_error: Option<String>,
+
     /// Support using file content or file location to create source.
     pub create_source: Option<CreateSource>,
 
@@ -132,6 +138,12 @@ pub struct TestCaseResult {
 
     /// Error of optimizer
     pub optimizer_error: Option<String>,
+
+    /// Error of `.gen_batch_query_plan()`
+    pub batch_error: Option<String>,
+
+    /// Error of `.gen_batch_local_plan()`
+    pub batch_local_error: Option<String>,
 }
 
 impl TestCaseResult {
@@ -161,6 +173,8 @@ impl TestCaseResult {
             batch_plan_proto: self.batch_plan_proto,
             planner_error: self.planner_error,
             optimizer_error: self.optimizer_error,
+            batch_error: self.batch_error,
+            batch_local_error: self.batch_local_error,
             binder_error: self.binder_error,
             create_source: original_test_case.create_source.clone(),
             with_config_map: original_test_case.with_config_map.clone(),
@@ -348,8 +362,17 @@ impl TestCase {
                 Some(explain_plan(&logical_plan.gen_optimized_logical_plan()));
         }
 
-        if self.batch_plan.is_some() || self.batch_plan_proto.is_some() {
-            let batch_plan = logical_plan.gen_batch_query_plan()?;
+        if self.batch_plan.is_some()
+            || self.batch_plan_proto.is_some()
+            || self.batch_error.is_some()
+        {
+            let batch_plan = match logical_plan.gen_batch_query_plan() {
+                Ok(batch_plan) => batch_plan,
+                Err(err) => {
+                    ret.batch_error = Some(err.to_string());
+                    return Ok(ret);
+                }
+            };
 
             // Only generate batch_plan if it is specified in test case
             if self.batch_plan.is_some() {
@@ -364,8 +387,14 @@ impl TestCase {
             }
         }
 
-        if self.batch_local_plan.is_some() {
-            let batch_plan = logical_plan.gen_batch_local_plan()?;
+        if self.batch_local_plan.is_some() || self.batch_local_error.is_some() {
+            let batch_plan = match logical_plan.gen_batch_local_plan() {
+                Ok(batch_plan) => batch_plan,
+                Err(err) => {
+                    ret.batch_local_error = Some(err.to_string());
+                    return Ok(ret);
+                }
+            };
 
             // Only generate batch_plan if it is specified in test case
             if self.batch_local_plan.is_some() {
@@ -417,6 +446,12 @@ fn check_result(expected: &TestCase, actual: &TestCaseResult) -> Result<()> {
         "optimizer",
         &expected.optimizer_error,
         &actual.optimizer_error,
+    )?;
+    check_err("batch", &expected.batch_error, &actual.batch_error)?;
+    check_err(
+        "batch_local",
+        &expected.batch_local_error,
+        &actual.batch_local_error,
     )?;
     check_option_plan_eq("logical_plan", &expected.logical_plan, &actual.logical_plan)?;
     check_option_plan_eq(

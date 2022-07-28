@@ -19,7 +19,7 @@ use log::error;
 use risingwave_common::bail;
 use risingwave_connector::source::{SplitImpl, SplitMetaData};
 use risingwave_storage::storage_value::StorageValue;
-use risingwave_storage::store::WriteOptions;
+use risingwave_storage::store::{ReadOptions, WriteOptions};
 use risingwave_storage::{Keyspace, StateStore};
 
 use crate::executor::error::StreamExecutorError;
@@ -96,7 +96,14 @@ impl<S: StateStore> SourceStateHandler<S> {
         epoch: u64,
     ) -> StreamExecutorResult<Option<Bytes>> {
         self.keyspace
-            .get(state_identifier, epoch)
+            .get(
+                state_identifier,
+                ReadOptions {
+                    epoch,
+                    table_id: Some(self.keyspace.table_id()),
+                    ttl: None,
+                },
+            )
             .await
             .map_err(Into::into)
     }
@@ -125,9 +132,12 @@ mod tests {
     use itertools::Itertools;
     use risingwave_common::catalog::TableId;
     use risingwave_storage::memory::MemoryStateStore;
+    use risingwave_storage::store::ReadOptions;
     use serde::{Deserialize, Serialize};
 
     use super::*;
+
+    const TEST_TABLE_ID: u32 = 1;
 
     #[derive(Debug, Clone, Serialize, Deserialize)]
     struct TestSourceState {
@@ -174,7 +184,7 @@ mod tests {
 
     fn new_test_keyspace() -> Keyspace<MemoryStateStore> {
         let test_mem_state_store = MemoryStateStore::new();
-        Keyspace::table_root(test_mem_state_store, &TableId::from(1))
+        Keyspace::table_root(test_mem_state_store, &TableId::from(TEST_TABLE_ID))
     }
 
     fn test_state_store_vec() -> Vec<TestSourceState> {
@@ -201,9 +211,17 @@ mod tests {
         let current_epoch = 1000;
         let state_store_handler = SourceStateHandler::new(new_test_keyspace());
         let _rs = take_snapshot_and_get_states(state_store_handler.clone(), current_epoch).await;
+
         let stored_states = state_store_handler
             .keyspace
-            .scan(None, current_epoch)
+            .scan(
+                None,
+                ReadOptions {
+                    epoch: current_epoch,
+                    table_id: Some(state_store_handler.keyspace.table_id()),
+                    ttl: None,
+                },
+            )
             .await
             .unwrap();
         assert_ne!(0, stored_states.len());

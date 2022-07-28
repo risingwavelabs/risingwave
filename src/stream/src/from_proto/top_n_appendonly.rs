@@ -40,6 +40,7 @@ impl ExecutorBuilder for AppendOnlyTopNExecutorBuilder {
         };
         let cache_size = Some(1024);
         let total_count = (0, 0);
+        // TODO: refactor to one state table likes the non-append-only version
         let table_id_l = TableId::new(node.table_id_l);
         let table_id_h = TableId::new(node.table_id_h);
         let key_indices = node

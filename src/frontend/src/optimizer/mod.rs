@@ -114,7 +114,7 @@ impl PlanRoot {
         rules: Vec<BoxedRule>,
         apply_order: ApplyOrder,
     ) -> PlanRef {
-        let mut heuristic_optimizer = HeuristicOptimizer::new(apply_order, rules);
+        let mut heuristic_optimizer = HeuristicOptimizer::new(&apply_order, &rules);
         let plan = heuristic_optimizer.optimize(plan);
         let stats = heuristic_optimizer.get_stats();
 
@@ -127,6 +127,34 @@ impl PlanRoot {
         }
 
         plan
+    }
+
+    fn optimize_by_rules_until_fix_point(
+        &self,
+        plan: PlanRef,
+        stage_name: String,
+        rules: Vec<BoxedRule>,
+        apply_order: ApplyOrder,
+    ) -> PlanRef {
+        let mut output_plan = plan;
+
+        loop {
+            let mut heuristic_optimizer = HeuristicOptimizer::new(&apply_order, &rules);
+            output_plan = heuristic_optimizer.optimize(output_plan);
+            let stats = heuristic_optimizer.get_stats();
+
+            let ctx = output_plan.ctx();
+            let explain_trace = ctx.is_explain_trace();
+            if explain_trace && stats.has_applied_rule() {
+                ctx.trace(format!("{}:", stage_name));
+                ctx.trace(format!("{}", stats));
+                ctx.trace(output_plan.explain_to_string().unwrap());
+            }
+
+            if !stats.has_applied_rule() {
+                return output_plan;
+            }
+        }
     }
 
     /// Apply logical optimization to the plan.
@@ -159,7 +187,7 @@ impl PlanRoot {
             ApplyOrder::BottomUp,
         );
 
-        plan = self.optimize_by_rules(
+        plan = self.optimize_by_rules_until_fix_point(
             plan,
             "General Unnesting(Push Down Apply)".to_string(),
             vec![
@@ -306,7 +334,7 @@ impl PlanRoot {
 
     /// Generate create index or create materialize view plan.
     fn gen_stream_plan(&mut self) -> Result<PlanRef> {
-        let plan = match self.plan.convention() {
+        let mut plan = match self.plan.convention() {
             Convention::Logical => {
                 let plan = self.gen_optimized_logical_plan();
                 let (plan, out_col_change) = plan.logical_rewrite_for_stream()?;
@@ -333,11 +361,12 @@ impl PlanRoot {
         }
 
         // Rewrite joins with index to delta join
-        let plan = {
-            let rules = vec![IndexDeltaJoinRule::create()];
-            let mut heuristic_optimizer = HeuristicOptimizer::new(ApplyOrder::BottomUp, rules);
-            heuristic_optimizer.optimize(plan)
-        };
+        plan = self.optimize_by_rules(
+            plan,
+            "To IndexDeltaJoin".to_string(),
+            vec![IndexDeltaJoinRule::create()],
+            ApplyOrder::BottomUp,
+        );
 
         Ok(plan)
     }

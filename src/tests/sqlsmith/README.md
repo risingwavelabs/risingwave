@@ -12,7 +12,7 @@ SqlSmith has two modes. The first one focuses on testing the frontend, i.e, test
 This test will be run as a unit test:
 
 ``` sh
-./risedev test run_sqlsmith_on_frontend
+./risedev test run_sqlsmith_on_frontend --features enable_sqlsmith_unit_test
 ```
 
 ## E2E

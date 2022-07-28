@@ -19,7 +19,7 @@ use risingwave_common::error::{ErrorCode, Result};
 use risingwave_common::types::DataType;
 
 use super::{align_types, cast_ok, infer_type, CastContext, Expr, ExprImpl, Literal};
-use crate::expr::{ExprType, ExprVerboseDisplay};
+use crate::expr::{ExprDisplay, ExprType};
 
 #[derive(Clone, Eq, PartialEq, Hash)]
 pub struct FunctionCall {
@@ -273,18 +273,18 @@ impl Expr for FunctionCall {
     }
 }
 
-pub struct FunctionCallVerboseDisplay<'a> {
+pub struct FunctionCallDisplay<'a> {
     pub function_call: &'a FunctionCall,
     pub input_schema: &'a Schema,
 }
 
-impl std::fmt::Debug for FunctionCallVerboseDisplay<'_> {
+impl std::fmt::Debug for FunctionCallDisplay<'_> {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         let that = self.function_call;
         match &that.func_type {
             ExprType::Cast => {
                 assert_eq!(that.inputs.len(), 1);
-                ExprVerboseDisplay {
+                ExprDisplay {
                     expr: &that.inputs[0],
                     input_schema: self.input_schema,
                 }
@@ -337,7 +337,7 @@ impl std::fmt::Debug for FunctionCallVerboseDisplay<'_> {
                 let func_name = format!("{:?}", that.func_type);
                 let mut builder = f.debug_tuple(&func_name);
                 that.inputs.iter().for_each(|child| {
-                    builder.field(&ExprVerboseDisplay {
+                    builder.field(&ExprDisplay {
                         expr: child,
                         input_schema: self.input_schema,
                     });
@@ -359,13 +359,13 @@ fn explain_verbose_binary_op(
     assert_eq!(inputs.len(), 2);
 
     write!(f, "(")?;
-    ExprVerboseDisplay {
+    ExprDisplay {
         expr: &inputs[0],
         input_schema,
     }
     .fmt(f)?;
     write!(f, " {} ", op)?;
-    ExprVerboseDisplay {
+    ExprDisplay {
         expr: &inputs[1],
         input_schema,
     }
