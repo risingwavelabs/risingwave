@@ -41,6 +41,7 @@ impl<S: StateStore> LocalTopNExecutor<S> {
         total_count: usize,
         executor_id: u64,
         key_indices: Vec<usize>,
+        // TODO: support multiple group keys
         group_by: usize,
     ) -> StreamExecutorResult<Self> {
         let info = input.info();
