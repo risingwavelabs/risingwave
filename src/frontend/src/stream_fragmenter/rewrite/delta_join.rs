@@ -456,8 +456,10 @@ impl StreamFragmenter {
             Some(NodeBody::HashJoin(node)) => node,
             _ => unreachable!(),
         };
-        let table_l = hash_join_node.get_left_table()?;
-        let table_r = hash_join_node.get_right_table()?;
+        let mut table_l = hash_join_node.get_left_table()?.clone();
+        table_l.columns.pop();
+        let mut table_r = hash_join_node.get_right_table()?.clone();
+        table_r.columns.pop();
         assert_eq!(node.input.len(), 2);
 
         // Previous plan:
@@ -492,14 +494,14 @@ impl StreamFragmenter {
             &exchange_i0a0,
             hash_join_node.left_key.clone(),
             hash_join_node.left_table.as_ref().unwrap().id,
-            table_l,
+            &table_l,
         );
         let (arrange_1_info, arrange_1) = self.build_arrange_for_delta_join(
             state,
             &exchange_i1a1,
             hash_join_node.right_key.clone(),
             hash_join_node.right_table.as_ref().unwrap().id,
-            table_r,
+            &table_r,
         );
 
         let arrange_0_frag = self.build_and_add_fragment(state, arrange_0)?;
