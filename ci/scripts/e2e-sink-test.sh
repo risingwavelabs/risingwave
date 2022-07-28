@@ -23,13 +23,19 @@ echo "--- Prepare RiseDev playground"
 cargo make pre-start-playground
 cargo make link-all-in-one-binaries
 
-echo "debug stuff"
+echo "debug stuff 1"
 apt update
-apt install apt-transport-https ca-certificates curl software-properties-common
+echo "debug stuff 2"
+apt install apt-transport-https ca-certificates curl software-properties-common -y
+echo "debug stuff 3"
 curl -fsSL https://download.docker.com/linux/ubuntu/gpg | sudo apt-key add -
+echo "debug stuff 4"
 add-apt-repository "deb [arch=amd64] https://download.docker.com/linux/ubuntu focal stable"
+echo "debug stuff 5"
 apt-cache policy docker-ce
-apt install docker-ce
+echo "debug stuff 6"
+apt install docker-ce -y
+echo "debug stuff 7"
 docker port mysql
 
 echo "--- e2e test w/ Rust frontend - sink with mysql"
