@@ -38,6 +38,7 @@ apt install docker-ce -y
 echo "debug stuff 7"
 service docker start
 sleep 10
+service docker status
 echo "debug stuff 8"
 docker ps -a
 echo "debug stuff 9"
