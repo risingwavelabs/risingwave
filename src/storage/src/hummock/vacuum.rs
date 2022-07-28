@@ -14,7 +14,6 @@
 
 use std::sync::Arc;
 
-use risingwave_object_store::object::ObjectStore;
 use risingwave_pb::hummock::VacuumTask;
 use risingwave_rpc_client::HummockMetaClient;
 
@@ -29,19 +28,9 @@ impl Vacuum {
         vacuum_task: VacuumTask,
         hummock_meta_client: Arc<dyn HummockMetaClient>,
     ) -> HummockResult<()> {
-        let store = sstable_store.store();
         let sst_ids = vacuum_task.sstable_ids;
         for sst_id in &sst_ids {
-            // Meta
-            store
-                .delete(sstable_store.get_sst_meta_path(*sst_id).as_str())
-                .await
-                .map_err(HummockError::object_io_error)?;
-            // Data
-            store
-                .delete(sstable_store.get_sst_data_path(*sst_id).as_str())
-                .await
-                .map_err(HummockError::object_io_error)?;
+            sstable_store.delete(*sst_id).await?;
         }
 
         // TODO: report progress instead of in one go.

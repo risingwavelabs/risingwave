@@ -163,4 +163,44 @@ statement ok
 drop table t5;
 
 statement ok
+create table t1 (v1 int);
+
+statement ok
+create table t2 (v1 int);
+
+statement ok
+create materialized view t3 as select v1 from t2 group by v1;
+
+statement ok
+insert into t1 values (null);
+
+statement ok
+insert into t2 values (null);
+
+query II
+select * from t1 join t3 on t1.v1 = t3.v1;
+----
+
+query II
+select * from t1 left join t3 on t1.v1 = t3.v1;
+----
+NULL NULL
+
+statement ok
+insert into t1 values (1);
+
+query II
+select * from t1 join t3 on t1.v1 = t3.v1;
+----
+
+statement ok
+drop materialized view t3;
+
+statement ok
+drop table t1;
+
+statement ok
+drop table t2;
+
+statement ok
 set rw_batch_enable_lookup_join to false;
