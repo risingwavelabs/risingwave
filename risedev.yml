@@ -83,14 +83,6 @@ risedev:
     - use: etcd
     - use: meta-node
     - use: compute-node
-      port: 5687
-      exporter-port: 1222
-    - use: compute-node
-      port: 5688
-      exporter-port: 1223
-    - use: compute-node
-      port: 5689
-      exporter-port: 1224
     - use: frontend
     - use: compactor
     - use: prometheus
@@ -322,6 +314,18 @@ risedev:
       persist-data: true
     - use: kafka
       persist-data: true
+
+  ci-redis:
+    - use: minio
+    - use: etcd
+      unsafe-no-fsync: true
+    - use: meta-node
+      unsafe-disable-recovery: true
+    - use: compute-node
+    - use: frontend
+    - use: compactor
+    - use: redis
+
 
 compose:
   risingwave: "ghcr.io/singularity-data/risingwave:latest"
@@ -639,3 +643,14 @@ template:
 
     # Memory limit for Redpanda
     memory: 16G
+
+  # redis service
+  redis:
+    # Id to be picked-up by services
+    id: redis
+
+    # listen port of redis
+    port: 6379
+
+    # address of redis
+    address: "127.0.0.1"

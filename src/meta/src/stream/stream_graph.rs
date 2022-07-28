@@ -600,23 +600,19 @@ impl StreamGraphBuilder {
 
                     NodeBody::TopN(node) => {
                         node.table_id_l += table_id_offset;
-                        node.table_id_m += table_id_offset;
                         node.table_id_h += table_id_offset;
 
                         // TODO add catalog::Table to TopNNode
                         check_and_fill_internal_table(node.table_id_l, None);
-                        check_and_fill_internal_table(node.table_id_m, None);
                         check_and_fill_internal_table(node.table_id_h, None);
                     }
 
                     NodeBody::AppendOnlyTopN(node) => {
                         node.table_id_l += table_id_offset;
-                        node.table_id_m += table_id_offset;
                         node.table_id_h += table_id_offset;
 
                         // TODO add catalog::Table to AppendOnlyTopN
                         check_and_fill_internal_table(node.table_id_l, None);
-                        check_and_fill_internal_table(node.table_id_m, None);
                         check_and_fill_internal_table(node.table_id_h, None);
                     }
 

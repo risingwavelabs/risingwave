@@ -695,6 +695,9 @@ def section_hummock(panels):
             panels.target(
                 "avg(state_store_block_cache_size) by (job,instance)", "data cache - {{job}} @ {{instance}}"
             ),
+            panels.target(
+                "avg(state_store_limit_memory_size) by (job)", "data cache - {{job}}"
+            ),
         ]),
         panels.timeseries_ops("Write Ops", [
             panels.target(
@@ -741,7 +744,7 @@ def section_hummock(panels):
                 "histogram_quantile(0.9, sum(rate(state_store_iter_merge_sstable_counts_bucket[$__rate_interval])) by (le, job, instance))", "# merged ssts p90  - {{job}} @ {{instance}}", True
             ),
             panels.target(
-                "histogram_quantile(0.99, sum(rate(state_store_iter_merge_sstable_counts_bucket[$__rate_interval])) by (le, job, instance))", "# merged ssts p99  - {{job}} @ {{instance}}", True
+                "histogram_quantile(0.99, sum(rate(state_store_iter_merge_sstable_counts_bucket[$__rate_interval])) by (le, job, type))", "# merged ssts p99  - {{job}} @ {{instance}}", True
             ),
             panels.target(
                 "sum by(le, job, instance)(rate(state_store_iter_merge_sstable_counts_sum[$__rate_interval]))  / sum by(le, job, instance)(rate(state_store_iter_merge_sstable_counts_count[$__rate_interval]))", "# merged ssts avg  - {{job}} @ {{instance}}"
@@ -793,7 +796,7 @@ def section_hummock(panels):
                 "sum(rate(state_store_shared_buffer_to_sstable_size_sum[$__rate_interval]))by(job,instance) / sum(rate(state_store_shared_buffer_to_sstable_size_count[$__rate_interval]))by(job,instance)", "sync - {{job}} @ {{instance}}"
             ),
         ]),
-        panels.timeseries_bytes("sync size every epoch", [
+        panels.timeseries_bytes("checkpoint sync size", [
             panels.target(
                 "sum by(le, job, instance) (rate(state_store_write_l0_size_per_epoch_sum[$__rate_interval])) / sum by(le, job, instance) (rate(state_store_write_l0_size_per_epoch_count[$__rate_interval]))", "avg - {{job}} @ {{instance}}"
             ),

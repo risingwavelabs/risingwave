@@ -20,7 +20,7 @@ use risingwave_pb::batch_plan::OrderByNode;
 
 use super::{PlanBase, PlanRef, PlanTreeNodeUnary, ToBatchProst, ToDistributedBatch};
 use crate::optimizer::plan_node::ToLocalBatch;
-use crate::optimizer::property::{Order, OrderVerboseDisplay};
+use crate::optimizer::property::{Order, OrderDisplay};
 
 /// `BatchSort` buffers all data from input and sort these rows by specified order, providing the
 /// collation required by user or parent plan node.
@@ -42,19 +42,14 @@ impl BatchSort {
 
 impl fmt::Display for BatchSort {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-        let verbose = self.base.ctx.is_explain_verbose();
-        if verbose {
-            write!(
-                f,
-                "BatchSort {{ order: {} }}",
-                OrderVerboseDisplay {
-                    order: self.order(),
-                    input_schema: self.input.schema()
-                }
-            )
-        } else {
-            write!(f, "BatchSort {{ order: {} }}", self.order())
-        }
+        write!(
+            f,
+            "BatchSort {{ order: {} }}",
+            OrderDisplay {
+                order: self.order(),
+                input_schema: self.input.schema()
+            }
+        )
     }
 }
 

@@ -18,14 +18,17 @@ use risingwave_common::error::Result;
 use risingwave_pb::catalog::source::Info;
 use risingwave_pb::catalog::{Source as ProstSource, StreamSourceInfo};
 use risingwave_pb::plan_common::{ColumnCatalog as ProstColumnCatalog, RowFormatType};
+use risingwave_pb::user::grant_privilege::{Action, Object};
 use risingwave_source::ProtobufParser;
 use risingwave_sqlparser::ast::{CreateSourceStatement, ObjectName, ProtobufSchema, SourceSchema};
 
 use super::create_table::{bind_sql_columns, gen_materialized_source_plan};
+use super::privilege::check_privileges;
 use super::util::handle_with_properties;
 use crate::binder::Binder;
 use crate::catalog::check_schema_writable;
 use crate::catalog::column_catalog::ColumnCatalog;
+use crate::handler::privilege::ObjectCheckItem;
 use crate::session::{OptimizerContext, SessionImpl};
 use crate::stream_fragmenter::StreamFragmenter;
 
@@ -37,11 +40,21 @@ pub(crate) fn make_prost_source(
     let (schema_name, name) = Binder::resolve_table_name(name)?;
     check_schema_writable(&schema_name)?;
 
-    let (database_id, schema_id) = session
-        .env()
-        .catalog_reader()
-        .read_guard()
-        .check_relation_name_duplicated(session.database(), &schema_name, &name)?;
+    let (database_id, schema_id) = {
+        let catalog_reader = session.env().catalog_reader().read_guard();
+
+        let schema = catalog_reader.get_schema_by_name(session.database(), &schema_name)?;
+        check_privileges(
+            session,
+            &vec![ObjectCheckItem::new(
+                schema.owner(),
+                Action::Create,
+                Object::SchemaId(schema.id()),
+            )],
+        )?;
+
+        catalog_reader.check_relation_name_duplicated(session.database(), &schema_name, &name)?
+    };
 
     Ok(ProstSource {
         id: 0,
