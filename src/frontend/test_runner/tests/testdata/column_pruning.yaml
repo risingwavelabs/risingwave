@@ -140,16 +140,16 @@
     select a, window_end from hop(t1, created_at, interval '15' minute, interval '30' minute)
   logical_plan: |
     LogicalProject { exprs: [t1.a, window_end] }
-      LogicalHopWindow { time_col: t1.created_at, slide: 00:15:00, size: 00:30:00, output_indices: all }
+      LogicalHopWindow { time_col: t1.created_at, slide: 00:15:00, size: 00:30:00, output: all }
         LogicalScan { table: t1, columns: [_row_id, a, b, created_at] }
   optimized_logical_plan: |
-    LogicalHopWindow { time_col: t1.created_at, slide: 00:15:00, size: 00:30:00, output_indices: [0, 3] }
+    LogicalHopWindow { time_col: t1.created_at, slide: 00:15:00, size: 00:30:00, output: [t1.a, window_end] }
       LogicalScan { table: t1, columns: [a, created_at] }
   batch_plan: |
-    BatchHopWindow { time_col: t1.created_at, slide: 00:15:00, size: 00:30:00, output_indices: [0, 3] }
+    BatchHopWindow { time_col: t1.created_at, slide: 00:15:00, size: 00:30:00, output: [t1.a, window_end] }
       BatchExchange { order: [], dist: Single }
         BatchScan { table: t1, columns: [a, created_at] }
   stream_plan: |
     StreamMaterialize { columns: [a, window_end, t1._row_id(hidden)], pk_columns: [t1._row_id, window_end] }
-      StreamHopWindow { time_col: t1.created_at, slide: 00:15:00, size: 00:30:00, output_indices: [0, 4, 2] }
+      StreamHopWindow { time_col: t1.created_at, slide: 00:15:00, size: 00:30:00, output: [t1.a, window_end, t1._row_id] }
         StreamTableScan { table: t1, columns: [a, created_at, _row_id] }

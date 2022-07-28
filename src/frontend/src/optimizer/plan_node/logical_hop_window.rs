@@ -25,6 +25,7 @@ use super::{
     PredicatePushdown, StreamHopWindow, ToBatch, ToStream,
 };
 use crate::expr::{InputRef, InputRefDisplay};
+use crate::optimizer::plan_node::utils::IndicesDisplay;
 use crate::utils::{ColIndexMapping, Condition};
 
 /// `LogicalHopWindow` implements Hop Table Function.
@@ -172,7 +173,7 @@ impl LogicalHopWindow {
     pub fn fmt_with_name(&self, f: &mut fmt::Formatter, name: &str) -> fmt::Result {
         write!(
             f,
-            "{} {{ time_col: {}, slide: {}, size: {}, output_indices: {} }}",
+            "{} {{ time_col: {}, slide: {}, size: {}, output: {} }}",
             name,
             format_args!(
                 "{}",
@@ -191,7 +192,24 @@ impl LogicalHopWindow {
             {
                 "all".to_string()
             } else {
-                format!("{:?}", self.output_indices)
+                let original_schema: Schema = self
+                    .input
+                    .schema()
+                    .clone()
+                    .into_fields()
+                    .into_iter()
+                    .chain([
+                        Field::with_name(DataType::Timestamp, "window_start"),
+                        Field::with_name(DataType::Timestamp, "window_end"),
+                    ])
+                    .collect();
+                format!(
+                    "{:?}",
+                    &IndicesDisplay {
+                        vec: &self.output_indices,
+                        input_schema: &original_schema,
+                    }
+                )
             },
         )
     }
