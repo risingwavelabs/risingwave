@@ -108,7 +108,7 @@ impl ToBatch for LogicalInsert {
 }
 
 impl ToStream for LogicalInsert {
-    fn to_stream(&self) -> Result<PlanRef> {
+    fn to_stream(&self) -> Result<(PlanRef, ColIndexMapping)> {
         unreachable!("insert should always be converted to batch plan");
     }
 
