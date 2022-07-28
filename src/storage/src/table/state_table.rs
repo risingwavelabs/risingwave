@@ -32,14 +32,14 @@ use super::mem_table::{MemTable, RowOp};
 use super::storage_table::{StorageTableBase, READ_WRITE};
 use super::Distribution;
 use crate::error::{StorageError, StorageResult};
-use crate::row_serde::cell_based_encoding_util::serialize_pk;
-use crate::row_serde::dedup_pk_cell_based_row_serializer::DedupPkCellBasedRowSerializer;
-use crate::row_serde::{CellBasedRowSerde, RowBasedSerde, RowSerde};
+use crate::row_serde::{
+    serialize_pk, CellBasedRowSerde, DedupPkCellBasedRowSerde, RowBasedSerde, RowSerde,
+};
 use crate::StateStore;
 
 /// Identical to `StateTable`. Used when we want to
 /// rows to have dedup pk cell encoding.
-pub type DedupPkStateTable<S> = StateTableBase<S, DedupPkCellBasedRowSerializer>;
+pub type DedupPkStateTable<S> = StateTableBase<S, DedupPkCellBasedRowSerde>;
 
 /// `StateTable` is the interface accessing relational data in KV(`StateStore`) with cell-based
 /// encoding.

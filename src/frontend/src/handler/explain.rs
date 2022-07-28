@@ -26,6 +26,7 @@ use super::create_mv::gen_create_mv_plan;
 use super::create_table::gen_create_table_plan;
 use super::util::handle_with_properties;
 use crate::binder::Binder;
+use crate::handler::util::force_local_mode;
 use crate::planner::Planner;
 use crate::session::OptimizerContext;
 
@@ -90,9 +91,13 @@ pub(super) fn handle_explain(
                 );
                 binder.bind(stmt)?
             };
-            let logical = planner.plan(bound)?;
 
-            let query_mode = session.config().get_query_mode();
+            let query_mode = if force_local_mode(&bound) {
+                QueryMode::Local
+            } else {
+                session.config().get_query_mode()
+            };
+            let logical = planner.plan(bound)?;
             match query_mode {
                 QueryMode::Local => logical.gen_batch_local_plan()?,
                 QueryMode::Distributed => logical.gen_batch_query_plan()?,

@@ -2,7 +2,7 @@
 
 ## How it works
 
-There are two phases:
+There are three phases:
 1. Setup phase - Creates relations e.g. `CREATE TABLE`.
 2. Query phase - Generate and send queries e.g. `SELECT * FROM t`.
 3. Cleanup phase - Cleanup created relations.
