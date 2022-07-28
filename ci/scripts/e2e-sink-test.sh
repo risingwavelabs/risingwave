@@ -34,12 +34,6 @@ apt-get -y install apt-transport-https \
 echo "debug stuff 3"
 curl -fsSL https://download.docker.com/linux/$(. /etc/os-release; echo "$ID")/gpg > /tmp/dkey; apt-key add /tmp/dkey
 echo "debug stuff 4"
-add-apt-repository \
-   "deb [arch=amd64] https://download.docker.com/linux/$(. /etc/os-release; echo "$ID") \
-   $(lsb_release -cs) \
-   stable"
-sleep 5
-yes "" | command
 echo "debug stuff 5"
 apt-get update
 echo "debug stuff 6"
