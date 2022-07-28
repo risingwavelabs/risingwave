@@ -50,7 +50,7 @@ fn get_seed_table_sql() -> String {
 /// (This applies to nexmark).
 fn reproduce_failing_queries(setup: &str, failing: &str) {
     eprintln!(
-        "Failing SQL query:\n{}\nFailing SQL setup code:\n{}",
+        "-- Failing SQL setup code:\n{}\n-- Failing SQL query:\n{}\n",
         failing, setup
     );
 }
