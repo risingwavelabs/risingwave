@@ -27,8 +27,7 @@ use super::{
     PlanTreeNodeBinary, PlanTreeNodeUnary, PredicatePushdown, StreamHashJoin, StreamProject,
     ToBatch, ToStream,
 };
-use crate::expr::{Expr, ExprImpl, ExprRewriter, ExprType, FunctionCall, InputRef};
-use crate::expr::{ExprImpl, ExprType};
+use crate::expr::{align_types, Expr, ExprImpl, ExprRewriter, ExprType, FunctionCall, InputRef};
 use crate::optimizer::plan_node::utils::IndicesDisplay;
 use crate::optimizer::plan_node::{
     BatchFilter, BatchHashJoin, BatchLookupJoin, BatchNestedLoopJoin, EqJoinPredicate,
@@ -116,116 +115,13 @@ impl LogicalJoin {
     }
 
     pub(crate) fn new_with_output_indices(
-        mut left: PlanRef,
-        mut right: PlanRef,
+        left: PlanRef,
+        right: PlanRef,
         join_type: JoinType,
-        mut on: Condition,
-        mut output_indices: Vec<usize>,
+        on: Condition,
+        output_indices: Vec<usize>,
     ) -> Self {
         assert!(!has_duplicate_index(&output_indices));
-        {
-            let left_col_num = left.schema().len();
-            let right_col_num = right.schema().len();
-            let left_bit_map = FixedBitSet::from_iter(0..left_col_num);
-            let right_bit_map = FixedBitSet::from_iter(left_col_num..left_col_num + right_col_num);
-
-            let exprs = on.conjunctions;
-            let mut left_exprs = vec![];
-            let mut right_exprs = vec![];
-            let mut indices_and_ty_of_func_calls = vec![];
-            let is_comparison_type = |ty| {
-                matches!(
-                    ty,
-                    Type::LessThan
-                        | Type::LessThanOrEqual
-                        | Type::Equal
-                        | Type::GreaterThan
-                        | Type::GreaterThanOrEqual
-                )
-            };
-            for (index, expr) in exprs.iter().enumerate() {
-                if let ExprImpl::FunctionCall(func) = expr && is_comparison_type(func.get_expr_type()) {
-                    let (ty, left, right) = func.clone().decompose_as_binary();
-                    let left_input_bits =
-                        left.collect_input_refs(left_col_num + right_col_num);
-                    let right_input_bits =
-                        right.collect_input_refs(left_col_num + right_col_num);
-                    let (l, r) = if left_input_bits.is_subset(&left_bit_map)
-                        && right_input_bits.is_subset(&right_bit_map)
-                    {
-                        (left, right)
-                    } else if left_input_bits.is_subset(&right_bit_map)
-                        && right_input_bits.is_subset(&left_bit_map)
-                    {
-                        (right, left)
-                    } else {
-                        continue;
-                    };
-                    // TODO: cast type here.
-                    // filter out those types which are unnecessary to cast.
-                    let (left, right) = (l, r);
-                    left_exprs.push(left);
-                    {
-                        let mut shift_with_offset = ColIndexMapping::with_shift_offset(left_col_num + right_col_num, -(left_col_num as isize));
-                        let right = shift_with_offset.rewrite_expr(right);
-                        right_exprs.push(right);
-                    }
-                    indices_and_ty_of_func_calls.push((index, ty));
-                }
-            }
-            let mut col_index_mapping = {
-                let map = (0..left_col_num)
-                    .chain(
-                        (left_col_num..left_col_num + right_col_num).map(|i| i + left_exprs.len()),
-                    )
-                    .map(Some)
-                    .collect_vec();
-                ColIndexMapping::new(map)
-            };
-            let mut exprs: Vec<ExprImpl> = exprs
-                .into_iter()
-                .map(|expr| col_index_mapping.rewrite_expr(expr))
-                .collect();
-            let mut left_index = left_col_num;
-            let mut right_index = left_col_num + left_exprs.len() + right_col_num;
-            for (i, (index_of_func_call, ty)) in
-                indices_and_ty_of_func_calls.into_iter().enumerate()
-            {
-                let left_input = InputRef::new(left_index, left_exprs[i].return_type());
-                let right_input = InputRef::new(right_index, right_exprs[i].return_type());
-                exprs[index_of_func_call] =
-                    FunctionCall::new(ty, vec![left_input.into(), right_input.into()])
-                        .unwrap()
-                        .into();
-                left_index += 1;
-                right_index += 1;
-            }
-            on = Condition {
-                conjunctions: exprs,
-            };
-
-            // TODO: use `col_index_mapping` here.
-            output_indices.iter_mut().for_each(|i| {
-                if *i >= left_col_num {
-                    *i += left_exprs.len();
-                }
-            });
-
-            let new_input = |input: PlanRef, appended_exprs| {
-                let mut exprs = input
-                    .schema()
-                    .data_types()
-                    .into_iter()
-                    .enumerate()
-                    .map(|(i, data_type)| InputRef::new(i, data_type).into())
-                    .collect_vec();
-                exprs.extend(appended_exprs);
-                LogicalProject::create(input, exprs)
-            };
-            left = new_input(left, left_exprs);
-            right = new_input(right, right_exprs);
-        }
-
         let ctx = left.ctx();
         let schema = Self::derive_schema(left.schema(), right.schema(), join_type, &output_indices);
         let pk_indices = Self::derive_pk(
@@ -702,6 +598,11 @@ impl_plan_tree_node_for_binary! { LogicalJoin }
 
 impl ColPrunable for LogicalJoin {
     fn prune_col(&self, required_cols: &[usize]) -> PlanRef {
+        // TODO: refactor.
+        let required_cols = required_cols
+            .iter()
+            .map(|i| self.output_indices[*i])
+            .collect_vec();
         let left_len = self.left.schema().fields.len();
 
         let total_len = self.left().schema().len() + self.right().schema().len();
@@ -747,10 +648,8 @@ impl ColPrunable for LogicalJoin {
 
             let mapping =
                 ColIndexMapping::with_remaining_columns(required_inputs_in_output, total_len);
-            required_cols
-                .iter()
-                .map(|&i| mapping.map(self.output_indices[i]))
-                .collect_vec()
+            // FIXME: bug!
+            required_cols.iter().map(|&i| mapping.map(i)).collect_vec()
         };
 
         LogicalJoin::new_with_output_indices(
@@ -795,7 +694,6 @@ impl PredicatePushdown for LogicalJoin {
 
         // rewrite output col referencing indices as internal cols
         let mut mapping = self.o2i_col_mapping();
-
         predicate = predicate.rewrite_expr(&mut mapping);
 
         let (left_from_filter, right_from_filter, on) = LogicalJoin::push_down(
@@ -807,9 +705,9 @@ impl PredicatePushdown for LogicalJoin {
             LogicalJoin::can_push_on_from_filter(join_type),
         );
 
-        let mut new_on = self.on.clone().and(on);
-        let (left_from_on, right_from_on, on) = LogicalJoin::push_down(
-            &mut new_on,
+        let mut on = self.on.clone().and(on);
+        let (left_from_on, right_from_on, old_on) = LogicalJoin::push_down(
+            &mut on,
             left_col_num,
             right_col_num,
             LogicalJoin::can_push_left_from_on(join_type),
@@ -817,16 +715,124 @@ impl PredicatePushdown for LogicalJoin {
             false,
         );
         assert!(
-            on.always_true(),
+            old_on.always_true(),
             "On-clause should not be pushed to on-clause."
         );
 
         let left_predicate = left_from_filter.and(left_from_on);
         let right_predicate = right_from_filter.and(right_from_on);
 
-        let new_left = self.left.predicate_pushdown(left_predicate);
-        let new_right = self.right.predicate_pushdown(right_predicate);
-        let new_join = LogicalJoin::new(new_left, new_right, join_type, new_on);
+        let mut left = self.left.predicate_pushdown(left_predicate);
+        let mut right = self.right.predicate_pushdown(right_predicate);
+        let mut output_indices = self.output_indices().to_owned();
+        {
+            let left_bit_map = FixedBitSet::from_iter(0..left_col_num);
+            let right_bit_map = FixedBitSet::from_iter(left_col_num..left_col_num + right_col_num);
+
+            let exprs = on.conjunctions;
+            let mut left_exprs = vec![];
+            let mut right_exprs = vec![];
+            let mut indices_and_ty_of_func_calls = vec![];
+            let is_comparison_type = |ty| {
+                matches!(
+                    ty,
+                    Type::LessThan
+                        | Type::LessThanOrEqual
+                        | Type::Equal
+                        | Type::GreaterThan
+                        | Type::GreaterThanOrEqual
+                )
+            };
+            for (index, expr) in exprs.iter().enumerate() {
+                if let ExprImpl::FunctionCall(func) = expr && is_comparison_type(func.get_expr_type()) {
+                    let (ty, left, right) = func.clone().decompose_as_binary();
+                    let left_input_bits =
+                        left.collect_input_refs(left_col_num + right_col_num);
+                    let right_input_bits =
+                        right.collect_input_refs(left_col_num + right_col_num);
+                    let (left, right) = if left_input_bits.is_subset(&left_bit_map)
+                        && right_input_bits.is_subset(&right_bit_map)
+                    {
+                        (left, right)
+                    } else if left_input_bits.is_subset(&right_bit_map)
+                        && right_input_bits.is_subset(&left_bit_map)
+                    {
+                        (right, left)
+                    } else {
+                        continue;
+                    };
+                    if left.as_input_ref().is_some() && right.as_input_ref().is_some() && left.return_type() == right.return_type() {
+                        continue;
+                    }
+                    let (left, right) = {
+                        let mut v = vec![left, right];
+                        let _data_type = align_types(v.iter_mut()).unwrap();
+                        v.into_iter().next_tuple().unwrap()
+                    };
+                    left_exprs.push(left);
+                    {
+                        let mut shift_with_offset = ColIndexMapping::with_shift_offset(left_col_num + right_col_num, -(left_col_num as isize));
+                        let right = shift_with_offset.rewrite_expr(right);
+                        right_exprs.push(right);
+                    }
+                    indices_and_ty_of_func_calls.push((index, ty));
+                }
+            }
+            let mut col_index_mapping = {
+                let map = (0..left_col_num)
+                    .chain(
+                        (left_col_num..left_col_num + right_col_num).map(|i| i + left_exprs.len()),
+                    )
+                    .map(Some)
+                    .collect_vec();
+                ColIndexMapping::new(map)
+            };
+            let mut exprs: Vec<ExprImpl> = exprs
+                .into_iter()
+                .map(|expr| col_index_mapping.rewrite_expr(expr))
+                .collect();
+            let mut left_index = left_col_num;
+            let mut right_index = left_col_num + left_exprs.len() + right_col_num;
+            for (i, (index_of_func_call, ty)) in
+                indices_and_ty_of_func_calls.into_iter().enumerate()
+            {
+                let left_input = InputRef::new(left_index, left_exprs[i].return_type());
+                let right_input = InputRef::new(right_index, right_exprs[i].return_type());
+                exprs[index_of_func_call] =
+                    FunctionCall::new(ty, vec![left_input.into(), right_input.into()])
+                        .unwrap()
+                        .into();
+                left_index += 1;
+                right_index += 1;
+            }
+            on = Condition {
+                conjunctions: exprs,
+            };
+
+            output_indices
+                .iter_mut()
+                .for_each(|i| *i = col_index_mapping.map(*i));
+
+            let new_input = |input: PlanRef, appended_exprs: Vec<ExprImpl>| {
+                if appended_exprs.is_empty() {
+                    return input;
+                }
+                let mut exprs = input
+                    .schema()
+                    .data_types()
+                    .into_iter()
+                    .enumerate()
+                    .map(|(i, data_type)| InputRef::new(i, data_type).into())
+                    .collect_vec();
+                exprs.extend(appended_exprs);
+                LogicalProject::create(input, exprs)
+            };
+            left = new_input(left, left_exprs);
+            right = new_input(right, right_exprs);
+        }
+
+        let new_join =
+            LogicalJoin::new_with_output_indices(left, right, join_type, on, output_indices);
         LogicalFilter::create(new_join.into(), predicate)
     }
 }

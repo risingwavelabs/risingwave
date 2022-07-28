@@ -280,4 +280,8 @@
     create table t2(x int, y int);
     select * from t1, t2 where t1.x + t1.y = t2.x + t2.y;
   optimized_logical_plan: |
-
+    LogicalJoin { type: Inner, on: ((t1.x + t1.y) = (t2.x + t2.y)) }
+      LogicalProject { exprs: [t1.x, t1.y, (t1.x + t1.y)] }
+        LogicalScan { table: t1, columns: [x, y] }
+      LogicalProject { exprs: [t2.x, t2.y, (t2.x + t2.y)] }
+        LogicalScan { table: t2, columns: [x, y] }
