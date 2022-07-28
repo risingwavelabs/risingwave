@@ -330,11 +330,7 @@ where
     }
 
     /// Inject a `command_ctx` in `command_ctx_queue`, and its state is `InFlight`.
-    fn inject(
-        &mut self,
-        command_ctx: Arc<CommandContext<S>>,
-        notifiers: SmallVec<[Notifier; 1]>,
-    ) {
+    fn inject(&mut self, command_ctx: Arc<CommandContext<S>>, notifiers: SmallVec<[Notifier; 1]>) {
         let timer = self.metrics.barrier_latency.start_timer();
         self.command_ctx_queue.push_back(EpochNode {
             timer: Some(timer),
@@ -354,7 +350,7 @@ where
         result: Result<Vec<BarrierCompleteResponse>>,
     ) -> Vec<EpochNode<S>> {
         // change state to complete, and wait for nodes with the smaller epoch to commit
-            let wait_commit_timer = self.metrics.barrier_wait_commit_latency.start_timer();
+        let wait_commit_timer = self.metrics.barrier_wait_commit_latency.start_timer();
         if let Some(node) = self
             .command_ctx_queue
             .iter_mut()
