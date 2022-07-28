@@ -102,7 +102,8 @@ pub struct FunctionalDependencySet {
     ///
     /// The strict functional dependency use the **NULL=** semantic. It means that all NULLs are
     /// considered as equal. So for following table, A --> B is not valid.
-    /// **NOT** allowed. ```
+    /// **NOT** allowed.
+    /// ```text
     ///   A   | B
     /// ------|---
     ///  NULL | 1
@@ -158,7 +159,7 @@ impl FunctionalDependencySet {
         self.strict
     }
 
-    /// Add a dependency to [`FunctionalDependencySet`] using [`FixedBitset`].
+    /// Add a functional dependency to a [`FunctionalDependencySet`].
     pub fn add_functional_dependency(&mut self, fd: FunctionalDependency) {
         let FunctionalDependency { from, to } = fd;
         assert_eq!(
