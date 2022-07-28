@@ -102,3 +102,80 @@ impl Expression for VnodeExpression {
         Ok(Some(vnode.into()))
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use risingwave_common::array::{DataChunk, DataChunkTestExt};
+    use risingwave_common::types::VIRTUAL_NODE_COUNT;
+    use risingwave_pb::data::data_type::TypeName;
+    use risingwave_pb::data::DataType as ProstDataType;
+    use risingwave_pb::expr::expr_node::RexNode;
+    use risingwave_pb::expr::expr_node::Type::Vnode;
+    use risingwave_pb::expr::{ExprNode, FunctionCall};
+
+    use super::VnodeExpression;
+    use crate::expr::test_utils::make_input_ref;
+    use crate::expr::Expression;
+
+    pub fn make_vnode_function(children: Vec<ExprNode>) -> ExprNode {
+        ExprNode {
+            expr_type: Vnode as i32,
+            return_type: Some(ProstDataType {
+                type_name: TypeName::Int32 as i32,
+                ..Default::default()
+            }),
+            rex_node: Some(RexNode::FuncCall(FunctionCall { children })),
+        }
+    }
+
+    #[test]
+    fn test_vnode_expr_eval() {
+        let input_node1 = make_input_ref(0, TypeName::Int32);
+        let input_node2 = make_input_ref(0, TypeName::Int64);
+        let input_node3 = make_input_ref(0, TypeName::Varchar);
+        let vnode_expr = VnodeExpression::try_from(&make_vnode_function(vec![
+            input_node1,
+            input_node2,
+            input_node3,
+        ]))
+        .unwrap();
+        let chunk = DataChunk::from_pretty(
+            "i  I  T
+             1  10 abc
+             2  32 def
+             3  88 ghi",
+        );
+        let actual = vnode_expr.eval(&chunk).unwrap();
+        actual.iter().for_each(|vnode| {
+            let vnode = vnode.unwrap().into_int32();
+            assert!(vnode >= 0);
+            assert!(vnode < VIRTUAL_NODE_COUNT as i32);
+        });
+    }
+
+    #[test]
+    fn test_vnode_expr_eval_row() {
+        let input_node1 = make_input_ref(0, TypeName::Int32);
+        let input_node2 = make_input_ref(0, TypeName::Int64);
+        let input_node3 = make_input_ref(0, TypeName::Varchar);
+        let vnode_expr = VnodeExpression::try_from(&make_vnode_function(vec![
+            input_node1,
+            input_node2,
+            input_node3,
+        ]))
+        .unwrap();
+        let chunk = DataChunk::from_pretty(
+            "i  I  T
+             1  10 abc
+             2  32 def
+             3  88 ghi",
+        );
+        let rows: Vec<_> = chunk.rows().map(|row| row.to_owned_row()).collect();
+        for row in rows {
+            let actual = vnode_expr.eval_row(&row).unwrap();
+            let vnode = actual.unwrap().into_int32();
+            assert!(vnode >= 0);
+            assert!(vnode < VIRTUAL_NODE_COUNT as i32);
+        }
+    }
+}
