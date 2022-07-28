@@ -77,6 +77,7 @@ impl SinkConfig {
     }
 }
 
+#[derive(Debug)]
 pub enum SinkImpl {
     MySQL(Box<MySQLSink>),
     Redis(Box<RedisSink>),

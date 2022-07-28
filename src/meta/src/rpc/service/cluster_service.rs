@@ -13,7 +13,6 @@
 // limitations under the License.
 
 use risingwave_common::error::tonic_err;
-use risingwave_common::try_match_expand;
 use risingwave_pb::meta::cluster_service_server::ClusterService;
 use risingwave_pb::meta::{
     ActivateWorkerNodeRequest, ActivateWorkerNodeResponse, AddWorkerNodeRequest,
@@ -50,7 +49,7 @@ where
     ) -> Result<Response<AddWorkerNodeResponse>, Status> {
         let req = request.into_inner();
         let worker_type = req.get_worker_type().map_err(tonic_err)?;
-        let host = try_match_expand!(req.host, Some, "AddWorkerNodeRequest::host is empty")?;
+        let host = req.get_host().map_err(tonic_err)?.clone();
         let worker_node_parallelism = req.worker_node_parallelism as usize;
         let worker_node = self
             .cluster_manager
@@ -67,7 +66,7 @@ where
         request: Request<ActivateWorkerNodeRequest>,
     ) -> Result<Response<ActivateWorkerNodeResponse>, Status> {
         let req = request.into_inner();
-        let host = try_match_expand!(req.host, Some, "ActivateWorkerNodeRequest::host is empty")?;
+        let host = req.get_host().map_err(tonic_err)?.clone();
         self.cluster_manager.activate_worker_node(host).await?;
         Ok(Response::new(ActivateWorkerNodeResponse { status: None }))
     }
@@ -77,7 +76,7 @@ where
         request: Request<DeleteWorkerNodeRequest>,
     ) -> Result<Response<DeleteWorkerNodeResponse>, Status> {
         let req = request.into_inner();
-        let host = try_match_expand!(req.host, Some, "ActivateWorkerNodeRequest::host is empty")?;
+        let host = req.get_host().map_err(tonic_err)?.clone();
         self.cluster_manager.delete_worker_node(host).await?;
         Ok(Response::new(DeleteWorkerNodeResponse { status: None }))
     }

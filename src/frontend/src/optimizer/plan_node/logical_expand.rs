@@ -15,7 +15,7 @@
 use std::fmt;
 
 use itertools::Itertools;
-use risingwave_common::catalog::{Field, FieldVerboseDisplay, Schema};
+use risingwave_common::catalog::{Field, FieldDisplay, Schema};
 use risingwave_common::types::DataType;
 
 use super::{
@@ -72,35 +72,25 @@ impl LogicalExpand {
         &self.column_subsets
     }
 
-    pub fn column_subsets_verbose_display(&self) -> Vec<Vec<FieldVerboseDisplay>> {
+    pub fn column_subsets_display(&self) -> Vec<Vec<FieldDisplay>> {
         self.column_subsets()
             .iter()
             .map(|subset| {
                 subset
                     .iter()
-                    .map(|&i| FieldVerboseDisplay(self.input.schema().fields.get(i).unwrap()))
+                    .map(|&i| FieldDisplay(self.input.schema().fields.get(i).unwrap()))
                     .collect_vec()
             })
             .collect_vec()
     }
 
     pub(super) fn fmt_with_name(&self, f: &mut fmt::Formatter<'_>, name: &str) -> fmt::Result {
-        let verbose = self.base.ctx.is_explain_verbose();
-        if verbose {
-            write!(
-                f,
-                "{} {{ column_subsets: {:?} }}",
-                name,
-                self.column_subsets_verbose_display()
-            )
-        } else {
-            write!(
-                f,
-                "{} {{ column_subsets: {:?} }}",
-                name,
-                self.column_subsets()
-            )
-        }
+        write!(
+            f,
+            "{} {{ column_subsets: {:?} }}",
+            name,
+            self.column_subsets_display()
+        )
     }
 }
 

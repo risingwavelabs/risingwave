@@ -12,10 +12,9 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use risingwave_common::error::Result;
 use risingwave_pb::common::{HostAddress, WorkerNode, WorkerType};
 
-use crate::model::MetadataModel;
+use crate::model::{MetadataModel, MetadataModelResult};
 
 /// Column family name for cluster.
 const WORKER_CF_NAME: &str = "cf/worker";
@@ -47,7 +46,7 @@ impl MetadataModel for Worker {
         }
     }
 
-    fn key(&self) -> Result<Self::KeyType> {
+    fn key(&self) -> MetadataModelResult<Self::KeyType> {
         Ok(self.worker_node.get_host()?.clone())
     }
 }
