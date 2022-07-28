@@ -31,19 +31,23 @@
 - before:
     - create_table_and_mv
   sql: |
+    SELECT * FROM orders_count_by_user WHERE user_id = 1/0
+  batch_error: 'Expr error: DivisionByZero'
+- before:
+    - create_table_and_mv
+  sql: |
+    SELECT * FROM orders_count_by_user WHERE user_id = 2147483647 + 1
+  batch_error: 'Expr error: NumericOutOfRange'
+- before:
+    - create_table_and_mv
+  sql: |
     SELECT * FROM orders_count_by_user WHERE user_id = 'a'
-  batch_plan: |
-    BatchExchange { order: [], dist: Single }
-      BatchFilter { predicate: false:Boolean }
-        BatchScan { table: orders_count_by_user, columns: [user_id, date, orders_count] }
+  batch_error: 'Expr error: Cast("str", "i64")'
 - before:
     - create_table_and_mv
   sql: |
     SELECT * FROM orders_count_by_user WHERE user_id > 'a'
-  batch_plan: |
-    BatchExchange { order: [], dist: Single }
-      BatchFilter { predicate: false:Boolean }
-        BatchScan { table: orders_count_by_user, columns: [user_id, date, orders_count] }
+  batch_error: 'Expr error: Cast("str", "i64")'
 - before:
     - create_table_and_mv
   sql: |
@@ -56,9 +60,7 @@
   sql: |
     SELECT * FROM orders_count_by_user WHERE user_id = NULL
   batch_plan: |
-    BatchExchange { order: [], dist: Single }
-      BatchFilter { predicate: false:Boolean }
-        BatchScan { table: orders_count_by_user, columns: [user_id, date, orders_count] }
+    BatchValues { rows: [] }
 - before:
     - create_table_and_mv
   sql: |
@@ -72,9 +74,7 @@
   sql: |
     SELECT * FROM orders_count_by_user WHERE user_id > NULL
   batch_plan: |
-    BatchExchange { order: [], dist: Single }
-      BatchFilter { predicate: false:Boolean }
-        BatchScan { table: orders_count_by_user, columns: [user_id, date, orders_count] }
+    BatchValues { rows: [] }
 - before:
     - create_table_and_mv
   sql: |
@@ -124,6 +124,18 @@
 - before:
     - create_table_and_mv
   sql: |
+    SELECT * FROM orders_count_by_user WHERE user_id in ('42', '43')
+  batch_plan: |
+    BatchExchange { order: [], dist: Single }
+      BatchScan { table: orders_count_by_user, columns: [user_id, date, orders_count], scan_ranges: [user_id = Int64(42) OR user_id = Int64(43)] }
+- before:
+    - create_table_and_mv
+  sql: |
+    SELECT * FROM orders_count_by_user WHERE user_id in ('42', '43.0')
+  batch_error: 'Expr error: Cast("str", "i64")'
+- before:
+    - create_table_and_mv
+  sql: |
     SELECT * FROM orders_count_by_user WHERE user_id in (2147483648, 2147483649) AND date = 6666
   batch_plan: |
     BatchExchange { order: [], dist: Single }
@@ -158,9 +170,7 @@
     /* test NULL in in-list */
     SELECT * FROM orders_count_by_user WHERE user_id = 42 AND date in (NULL)
   batch_plan: |
-    BatchExchange { order: [], dist: Single }
-      BatchFilter { predicate: false:Boolean }
-        BatchScan { table: orders_count_by_user, columns: [user_id, date, orders_count] }
+    BatchValues { rows: [] }
 - before:
     - create_table_and_mv
   sql: |
@@ -183,9 +193,7 @@
     /* test eq & in-list */
     SELECT * FROM orders_count_by_user WHERE user_id = 42 AND date in (2222, 3333) AND date = 4444
   batch_plan: |
-    BatchExchange { order: [], dist: Single }
-      BatchFilter { predicate: false:Boolean }
-        BatchScan { table: orders_count_by_user, columns: [user_id, date, orders_count] }
+    BatchValues { rows: [] }
 - before:
     - create_table_and_mv
   sql: |
