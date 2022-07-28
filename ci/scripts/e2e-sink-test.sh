@@ -35,9 +35,11 @@ add-apt-repository \
    "deb [arch=amd64] https://download.docker.com/linux/$(. /etc/os-release; echo "$ID") \
    $(lsb_release -cs) \
    stable" && \
-apt-get update && \
-apt-get -y install docker-ce
+apt-get update
 echo "debug stuff 2"
+apt-get -y install docker-ce
+yes "" | command
+echo "debug stuff 3"
 docker port mysql
 
 echo "--- e2e test w/ Rust frontend - sink with mysql"
