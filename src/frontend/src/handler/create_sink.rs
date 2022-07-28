@@ -191,7 +191,8 @@ pub mod tests {
         let sink = catalog_reader
             .read_guard()
             .get_sink_by_name(DEFAULT_DATABASE_NAME, DEFAULT_SCHEMA_NAME, "snk1")
-            .unwrap().clone();
+            .unwrap()
+            .clone();
         assert_eq!(sink.name, "snk1");
     }
 }
