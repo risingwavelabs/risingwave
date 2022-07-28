@@ -56,7 +56,7 @@ macro_rules! for_all_metrics {
             write_build_l0_sst_duration: Histogram,
             write_build_l0_bytes: GenericCounter<AtomicU64>,
 
-            iter_merge_sstable_counts: Histogram,
+            iter_merge_sstable_counts: HistogramVec,
 
             sst_store_block_request_counts: GenericCounterVec<AtomicU64>,
 

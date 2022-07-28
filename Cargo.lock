@@ -4660,7 +4660,7 @@ version = "0.1.10"
 dependencies = [
  "anyhow",
  "bytes 1.2.0",
- "clap 3.2.13",
+ "clap 3.2.15",
  "comfy-table",
  "futures",
  "madsim-tokio",
@@ -4726,7 +4726,7 @@ dependencies = [
  "async-trait",
  "byteorder",
  "bytes 1.2.0",
- "clap 3.2.13",
+ "clap 3.2.15",
  "derivative",
  "downcast-rs",
  "dyn-clone",
@@ -6050,7 +6050,7 @@ dependencies = [
 name = "tokio"
 version = "1.20.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "7a8325f63a7d4774dd041e363b2409ed1c5cbbd0f867795e661df066b2b0a581"
+checksum = "57aec3cfa4c296db7255446efb4928a6be304b431a806216105542a67b6ca82e"
 dependencies = [
  "autocfg",
  "bytes 1.2.0",
