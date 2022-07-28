@@ -15,7 +15,7 @@
 use std::cmp::Ordering;
 use std::ops::Bound::{Excluded, Included, Unbounded};
 use std::ops::RangeBounds;
-use std::sync::atomic::{AtomicU64, AtomicUsize};
+use std::sync::atomic::AtomicU64;
 use std::sync::Arc;
 
 use risingwave_hummock_sdk::key::user_key;
@@ -128,17 +128,13 @@ where
 struct MemoryLimiterInner {
     total_size: AtomicU64,
     notify: Notify,
-    check_count: AtomicUsize,
     quota: u64,
 }
 
 impl MemoryLimiterInner {
-    pub fn may_notify(&self, quota: u64) {
-        while self.check_count.load(AtomicOrdering::SeqCst) > 0 {}
-        let total_size = self.total_size.fetch_sub(quota, AtomicOrdering::Release);
-        if total_size >= self.quota {
-            self.notify.notify_waiters();
-        }
+    pub fn release_quota(&self, quota: u64) {
+        self.total_size.fetch_sub(quota, AtomicOrdering::Release);
+        self.notify.notify_waiters();
     }
 }
 
@@ -159,13 +155,12 @@ impl MemoryLimiter {
             inner: Arc::new(MemoryLimiterInner {
                 total_size: AtomicU64::new(0),
                 notify: Notify::new(),
-                check_count: AtomicUsize::new(0),
                 quota,
             }),
         }
     }
 
-    pub fn try_require_memory(&self, quota: u64) -> bool {
+    pub fn can_require_memory(&self, quota: u64) -> bool {
         if quota > self.inner.quota {
             return false;
         }
@@ -176,31 +171,47 @@ impl MemoryLimiter {
         if quota > self.inner.quota {
             return None;
         }
-        let mut current_quota = self
-            .inner
-            .total_size
-            .fetch_add(quota, AtomicOrdering::SeqCst);
-        if current_quota < self.inner.quota {
+        let current_quota = self.inner.total_size.load(AtomicOrdering::Acquire);
+        if current_quota + quota <= self.inner.quota
+            && self
+                .inner
+                .total_size
+                .compare_exchange(
+                    current_quota,
+                    current_quota + quota,
+                    AtomicOrdering::SeqCst,
+                    AtomicOrdering::SeqCst,
+                )
+                .is_ok()
+        {
+            // fast path.
             return Some(MemoryTracker {
                 limiter: self.inner.clone(),
                 quota,
             });
         }
-        self.inner.check_count.fetch_add(1, AtomicOrdering::SeqCst);
-        while current_quota >= self.inner.quota {
-            self.inner
-                .total_size
-                .fetch_sub(quota, AtomicOrdering::Acquire);
+        loop {
             let notified = self.inner.notify.notified();
-            self.inner.check_count.fetch_sub(1, AtomicOrdering::SeqCst);
+            let current_quota = self.inner.total_size.load(AtomicOrdering::Acquire);
+            if current_quota + quota <= self.inner.quota {
+                match self.inner.total_size.compare_exchange(
+                    current_quota,
+                    current_quota + quota,
+                    AtomicOrdering::SeqCst,
+                    AtomicOrdering::SeqCst,
+                ) {
+                    Ok(_) => break,
+                    Err(old_quota) => {
+                        // The quota is enough but just changed by other threads. So just try to
+                        // update again without waiting notify.
+                        if old_quota + quota <= self.inner.quota {
+                            continue;
+                        }
+                    }
+                }
+            }
             notified.await;
-            self.inner.check_count.fetch_add(1, AtomicOrdering::SeqCst);
-            current_quota = self
-                .inner
-                .total_size
-                .fetch_add(quota, AtomicOrdering::SeqCst);
         }
-        self.inner.check_count.fetch_sub(1, AtomicOrdering::SeqCst);
         Some(MemoryTracker {
             limiter: self.inner.clone(),
             quota,
@@ -214,6 +225,6 @@ impl MemoryLimiter {
 
 impl Drop for MemoryTracker {
     fn drop(&mut self) {
-        self.limiter.may_notify(self.quota);
+        self.limiter.release_quota(self.quota);
     }
 }

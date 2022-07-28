@@ -749,10 +749,12 @@ impl<K: LruKey, T: LruValue> LruCache<K, T> {
     /// # Safety
     ///
     /// This method can only be called when no cache entry are referenced outside.
-    pub unsafe fn clear(&self) {
+    pub fn clear(&self) {
         for shard in &self.shards {
-            let mut shard = shard.lock();
-            shard.clear();
+            unsafe {
+                let mut shard = shard.lock();
+                shard.clear();
+            }
         }
     }
 }

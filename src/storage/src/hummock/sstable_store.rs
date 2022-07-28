@@ -257,6 +257,11 @@ impl SstableStore {
         self.block_cache.clear();
     }
 
+    #[cfg(any(test, feature = "test"))]
+    pub fn clear_meta_cache(&self) {
+        self.meta_cache.clear();
+    }
+
     pub async fn load_table(
         &self,
         sst_id: HummockSstableId,

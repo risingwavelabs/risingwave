@@ -90,21 +90,6 @@ impl TableBuilderFactory for RemoteBuilderFactory {
     }
 }
 
-pub fn get_remote_sstable_id_generator(
-    meta_client: Arc<dyn HummockMetaClient>,
-) -> SstableIdGenerator {
-    Arc::new(move || {
-        let meta_client = meta_client.clone();
-        async move {
-            meta_client
-                .get_new_table_id()
-                .await
-                .map_err(HummockError::meta_error)
-        }
-        .boxed()
-    })
-}
-
 /// A `CompactorContext` describes the context of a compactor.
 #[derive(Clone)]
 pub struct CompactorContext {
@@ -122,8 +107,6 @@ pub struct CompactorContext {
 
     /// True if it is a memory compaction (from shared buffer).
     pub is_share_buffer_compact: bool,
-
-    pub sstable_id_generator: SstableIdGenerator,
 
     pub compaction_executor: Option<Arc<CompactionExecutor>>,
 
@@ -899,7 +882,6 @@ impl Compactor {
             sstable_store: sstable_store.clone(),
             stats,
             is_share_buffer_compact: false,
-            sstable_id_generator: get_remote_sstable_id_generator(hummock_meta_client.clone()),
             compaction_executor,
             table_id_to_slice_transform,
             memory_limiter,
