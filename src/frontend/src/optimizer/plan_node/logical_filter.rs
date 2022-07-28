@@ -24,7 +24,7 @@ use super::{
 use crate::expr::{assert_input_ref, ExprImpl};
 use crate::optimizer::plan_node::{BatchFilter, StreamFilter};
 use crate::risingwave_common::error::Result;
-use crate::utils::{ColIndexMapping, Condition, ConditionVerboseDisplay};
+use crate::utils::{ColIndexMapping, Condition, ConditionDisplay};
 
 /// `LogicalFilter` iterates over its input and returns elements for which `predicate` evaluates to
 /// true, filtering out the others.
@@ -92,22 +92,17 @@ impl LogicalFilter {
     }
 
     pub(super) fn fmt_with_name(&self, f: &mut fmt::Formatter, name: &str) -> fmt::Result {
-        let verbose = self.base.ctx.is_explain_verbose();
-        if verbose {
-            let input = self.input();
-            let input_schema = input.schema();
-            write!(
-                f,
-                "{} {{ predicate: {} }}",
-                name,
-                ConditionVerboseDisplay {
-                    condition: self.predicate(),
-                    input_schema
-                }
-            )
-        } else {
-            write!(f, "{} {{ predicate: {} }}", name, self.predicate())
-        }
+        let input = self.input();
+        let input_schema = input.schema();
+        write!(
+            f,
+            "{} {{ predicate: {} }}",
+            name,
+            ConditionDisplay {
+                condition: self.predicate(),
+                input_schema
+            }
+        )
     }
 }
 

@@ -24,7 +24,7 @@ use super::{
     ToBatch, ToStream,
 };
 use crate::optimizer::plan_node::{BatchTopN, LogicalProject, StreamTopN};
-use crate::optimizer::property::{FieldOrder, Order, OrderVerboseDisplay, RequiredDist};
+use crate::optimizer::property::{FieldOrder, Order, OrderDisplay, RequiredDist};
 use crate::planner::LIMIT_ALL_COUNT;
 use crate::utils::{ColIndexMapping, Condition};
 
@@ -79,25 +79,18 @@ impl LogicalTopN {
 
     pub(super) fn fmt_with_name(&self, f: &mut fmt::Formatter, name: &str) -> fmt::Result {
         let mut builder = f.debug_struct(name);
-
-        let verbose = self.base.ctx.is_explain_verbose();
-        if verbose {
-            let input = self.input();
-            let input_schema = input.schema();
-            builder.field(
-                "order",
-                &format!(
-                    "{}",
-                    OrderVerboseDisplay {
-                        order: self.topn_order(),
-                        input_schema
-                    }
-                ),
-            );
-        } else {
-            builder.field("order", &format!("{}", self.topn_order()));
-        }
-
+        let input = self.input();
+        let input_schema = input.schema();
+        builder.field(
+            "order",
+            &format!(
+                "{}",
+                OrderDisplay {
+                    order: self.topn_order(),
+                    input_schema
+                }
+            ),
+        );
         builder
             .field("limit", &format_args!("{}", self.limit()))
             .field("offset", &format_args!("{}", self.offset()))

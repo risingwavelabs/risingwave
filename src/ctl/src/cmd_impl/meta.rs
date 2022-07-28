@@ -12,6 +12,8 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+mod cluster_info;
 mod pause_resume;
 
+pub use cluster_info::*;
 pub use pause_resume::*;

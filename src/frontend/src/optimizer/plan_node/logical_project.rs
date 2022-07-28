@@ -26,7 +26,7 @@ use super::{
     PredicatePushdown, StreamProject, ToBatch, ToStream,
 };
 use crate::expr::{
-    assert_input_ref, Expr, ExprImpl, ExprRewriter, ExprVerboseDisplay, ExprVisitor, InputRef,
+    assert_input_ref, Expr, ExprDisplay, ExprImpl, ExprRewriter, ExprVisitor, InputRef,
 };
 use crate::optimizer::plan_node::CollectInputRef;
 use crate::optimizer::property::{
@@ -183,7 +183,7 @@ impl LogicalProject {
                         (field.name, field.sub_fields, field.type_name)
                     }
                     None => (
-                        format!("{:?}", ExprVerboseDisplay { expr, input_schema }),
+                        format!("{:?}", ExprDisplay { expr, input_schema }),
                         vec![],
                         String::new(),
                     ),
@@ -249,23 +249,18 @@ impl LogicalProject {
     }
 
     pub(super) fn fmt_with_name(&self, f: &mut fmt::Formatter, name: &str) -> fmt::Result {
-        let verbose = self.base.ctx.is_explain_verbose();
         let mut builder = f.debug_struct(name);
-        if verbose {
-            builder.field(
-                "exprs",
-                &self
-                    .exprs()
-                    .iter()
-                    .map(|expr| ExprVerboseDisplay {
-                        expr,
-                        input_schema: self.input.schema(),
-                    })
-                    .collect_vec(),
-            );
-        } else {
-            builder.field("exprs", self.exprs());
-        }
+        builder.field(
+            "exprs",
+            &self
+                .exprs()
+                .iter()
+                .map(|expr| ExprDisplay {
+                    expr,
+                    input_schema: self.input.schema(),
+                })
+                .collect_vec(),
+        );
         builder.finish()
     }
 

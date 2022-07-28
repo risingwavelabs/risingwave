@@ -23,7 +23,7 @@ use risingwave_hummock_sdk::compaction_group::StateTableId;
 use risingwave_hummock_sdk::CompactionGroupId;
 use risingwave_pb::hummock::CompactionConfig;
 
-use crate::model::MetadataModel;
+use crate::model::{MetadataModel, MetadataModelResult};
 
 #[derive(Debug, Clone, PartialEq)]
 pub struct CompactionGroup {
@@ -116,7 +116,7 @@ impl MetadataModel for CompactionGroup {
         prost.borrow().into()
     }
 
-    fn key(&self) -> risingwave_common::error::Result<Self::KeyType> {
+    fn key(&self) -> MetadataModelResult<Self::KeyType> {
         Ok(self.group_id)
     }
 }
