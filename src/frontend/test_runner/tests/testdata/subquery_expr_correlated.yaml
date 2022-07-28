@@ -14,7 +14,7 @@
                 LogicalFilter { predicate: (CorrelatedInputRef { index: 2, correlated_id: 1 } = t2.y) AND (t2.y = 1000:Int32) }
                   LogicalScan { table: t2, columns: [_row_id, x, y] }
   optimized_logical_plan: |
-    LogicalJoin { type: Inner, predicate: (t1.y = t2.y) AND (t1.x > (1.5:Decimal * min(t2.x))) }
+    LogicalJoin { type: Inner, on: (t1.y = t2.y) AND (t1.x > (1.5:Decimal * min(t2.x))) }
       LogicalScan { table: t1, columns: [x, y] }
       LogicalProject { exprs: [t2.y, (1.5:Decimal * min(t2.x))] }
         LogicalAgg { group_key: [t2.y], aggs: [min(t2.x)] }
@@ -33,7 +33,7 @@
             LogicalAgg { aggs: [min(t2.x)] }
               LogicalProject { exprs: [t2.x] }
                 LogicalFilter { predicate: (t2.y = CorrelatedInputRef { index: 2, correlated_id: 1 }) }
-                  LogicalJoin { type: LeftOuter, predicate: true }
+                  LogicalJoin { type: LeftOuter, on: true }
                     LogicalScan { table: t2, columns: [_row_id, x, y] }
                     LogicalProject { exprs: [CorrelatedInputRef { index: 2, correlated_id: 1 }] }
                       LogicalValues { rows: [[]], schema: Schema { fields: [] } }
@@ -51,13 +51,13 @@
             LogicalAgg { aggs: [min(t2.x)] }
               LogicalProject { exprs: [t2.x] }
                 LogicalFilter { predicate: (CorrelatedInputRef { index: 2, correlated_id: 1 } = t2.y) AND (CorrelatedInputRef { index: 1, correlated_id: 1 } = max(t3.x)) }
-                  LogicalJoin { type: LeftOuter, predicate: true }
+                  LogicalJoin { type: LeftOuter, on: true }
                     LogicalScan { table: t2, columns: [_row_id, x, y] }
                     LogicalProject { exprs: [max(t3.x)] }
                       LogicalAgg { aggs: [max(t3.x)] }
                         LogicalProject { exprs: [t3.x] }
                           LogicalFilter { predicate: (t3.y = CorrelatedInputRef { index: 2, correlated_id: 1 }) }
-                            LogicalJoin { type: Inner, predicate: true }
+                            LogicalJoin { type: Inner, on: true }
                               LogicalScan { table: t3, columns: [_row_id, x, y] }
                               LogicalProject { exprs: [1:Int32] }
                                 LogicalValues { rows: [[]], schema: Schema { fields: [] } }
@@ -73,7 +73,7 @@
           LogicalFilter { predicate: (t2.y = 100:Int32) AND (CorrelatedInputRef { index: 1, correlated_id: 1 } = t2.x) AND (t2.x = 1000:Int32) AND (CorrelatedInputRef { index: 2, correlated_id: 1 } = t2.y) }
             LogicalScan { table: t2, columns: [_row_id, x, y] }
   optimized_logical_plan: |
-    LogicalJoin { type: LeftSemi, predicate: (t1.x = t2.x) AND (t1.y = t2.y) }
+    LogicalJoin { type: LeftSemi, on: (t1.x = t2.x) AND (t1.y = t2.y) }
       LogicalScan { table: t1, columns: [x, y] }
       LogicalScan { table: t2, output_columns: [x, y], required_columns: [x, y], predicate: (t2.y = 100:Int32) AND (t2.x = 1000:Int32) }
 - sql: |
@@ -91,7 +91,7 @@
                 LogicalFilter { predicate: (CorrelatedInputRef { index: 2, correlated_id: 1 } = t2.y) }
                   LogicalScan { table: t2, columns: [_row_id, x, y] }
   optimized_logical_plan: |
-    LogicalJoin { type: Inner, predicate: (t1.y = t2.y) AND (t1.x > (1.5:Decimal * min(t2.x))) }
+    LogicalJoin { type: Inner, on: (t1.y = t2.y) AND (t1.x > (1.5:Decimal * min(t2.x))) }
       LogicalScan { table: t1, columns: [x, y] }
       LogicalProject { exprs: [t2.y, (1.5:Decimal * min(t2.x))] }
         LogicalAgg { group_key: [t2.y], aggs: [min(t2.x)] }
@@ -112,7 +112,7 @@
                 LogicalFilter { predicate: (CorrelatedInputRef { index: 2, correlated_id: 1 } = t2.y) }
                   LogicalScan { table: t2, columns: [_row_id, x, y] }
   optimized_logical_plan: |
-    LogicalJoin { type: Inner, predicate: (t1.y = t2.y) AND (t1.x > count) }
+    LogicalJoin { type: Inner, on: (t1.y = t2.y) AND (t1.x > count) }
       LogicalScan { table: t1, columns: [x, y] }
       LogicalAgg { group_key: [t2.y], aggs: [count] }
         LogicalScan { table: t2, columns: [y] }
@@ -131,7 +131,7 @@
                 LogicalFilter { predicate: (CorrelatedInputRef { index: 2, correlated_id: 1 } = t2.y) }
                   LogicalScan { table: t2, columns: [_row_id, x, y] }
   optimized_logical_plan: |
-    LogicalJoin { type: Inner, predicate: (t1.y = t2.y) AND (t1.x > (count + count)) }
+    LogicalJoin { type: Inner, on: (t1.y = t2.y) AND (t1.x > (count + count)) }
       LogicalScan { table: t1, columns: [x, y] }
       LogicalProject { exprs: [t2.y, (count + count)] }
         LogicalAgg { group_key: [t2.y], aggs: [count, count] }
@@ -148,7 +148,7 @@
           LogicalFilter { predicate: (CorrelatedInputRef { index: 1, correlated_id: 1 } = t2.x) }
             LogicalScan { table: t2, columns: [_row_id, x, y] }
   optimized_logical_plan: |
-    LogicalJoin { type: LeftSemi, predicate: (t1.y = t2.y) AND (t1.x = t2.x) }
+    LogicalJoin { type: LeftSemi, on: (t1.y = t2.y) AND (t1.x = t2.x) }
       LogicalScan { table: t1, columns: [x, y] }
       LogicalProject { exprs: [t2.y, t2.x] }
         LogicalScan { table: t2, columns: [x, y] }
@@ -168,7 +168,7 @@
           LogicalFilter { predicate: ((CorrelatedInputRef { index: 1, correlated_id: 1 } + t2.x) = 100:Int32) AND (CorrelatedInputRef { index: 2, correlated_id: 1 } = 1000:Int32) }
             LogicalScan { table: t2, columns: [_row_id, x, y] }
   optimized_logical_plan: |
-    LogicalJoin { type: LeftSemi, predicate: (t1.y = t2.y) AND ((t1.x + t2.x) = 100:Int32) }
+    LogicalJoin { type: LeftSemi, on: (t1.y = t2.y) AND ((t1.x + t2.x) = 100:Int32) }
       LogicalScan { table: t1, output_columns: [x, y], required_columns: [x, y], predicate: (t1.y = 1000:Int32) }
       LogicalProject { exprs: [t2.y, t2.x] }
         LogicalScan { table: t2, columns: [x, y] }
@@ -184,7 +184,7 @@
           LogicalFilter { predicate: (CorrelatedInputRef { index: 1, correlated_id: 1 } > (t2.x + 1000:Int32)) }
             LogicalScan { table: t2, columns: [_row_id, x, y] }
   optimized_logical_plan: |
-    LogicalJoin { type: LeftSemi, predicate: (t1.y = t2.y) AND (t1.x > (t2.x + 1000:Int32)) }
+    LogicalJoin { type: LeftSemi, on: (t1.y = t2.y) AND (t1.x > (t2.x + 1000:Int32)) }
       LogicalScan { table: t1, columns: [x, y] }
       LogicalProject { exprs: [t2.y, t2.x] }
         LogicalScan { table: t2, columns: [x, y] }
@@ -205,16 +205,16 @@
         LogicalScan { table: t1, columns: [_row_id, x, y] }
         LogicalProject { exprs: [t2.x] }
           LogicalFilter { predicate: (t2.y = CorrelatedInputRef { index: 2, correlated_id: 1 }) AND (t2.x > min(t3.x)) }
-            LogicalJoin { type: LeftOuter, predicate: true }
+            LogicalJoin { type: LeftOuter, on: true }
               LogicalScan { table: t2, columns: [_row_id, x, y] }
               LogicalProject { exprs: [min(t3.x)] }
                 LogicalAgg { aggs: [min(t3.x)] }
                   LogicalProject { exprs: [t3.x] }
                     LogicalScan { table: t3, columns: [_row_id, x, y] }
   optimized_logical_plan: |
-    LogicalJoin { type: LeftSemi, predicate: (t1.y = t2.x) AND (t2.y = t1.y) }
+    LogicalJoin { type: LeftSemi, on: (t1.y = t2.x) AND (t2.y = t1.y) }
       LogicalScan { table: t1, columns: [x, y] }
-      LogicalJoin { type: Inner, predicate: (t2.x > min(t3.x)) }
+      LogicalJoin { type: Inner, on: (t2.x > min(t3.x)) }
         LogicalScan { table: t2, columns: [x, y] }
         LogicalAgg { aggs: [min(t3.x)] }
           LogicalScan { table: t3, columns: [x] }
@@ -229,7 +229,7 @@
       LogicalApply { type: LeftSemi, on: (t1.y = t2.x), correlated_id: 1 }
         LogicalScan { table: t1, columns: [_row_id, x, y] }
         LogicalProject { exprs: [t2.x] }
-          LogicalJoin { type: LeftSemi, predicate: (t2.y = t3.y) }
+          LogicalJoin { type: LeftSemi, on: (t2.y = t3.y) }
             LogicalScan { table: t2, columns: [_row_id, x, y] }
             LogicalProject { exprs: [t3.y] }
               LogicalFilter { predicate: (CorrelatedInputRef { index: 2, correlated_id: 1 } = t3.y) }
@@ -242,7 +242,7 @@
     select x from t1 where y in (select x from t2 where y in (select y from t3 where t2.y = t3.y));
   logical_plan: |
     LogicalProject { exprs: [t1.x] }
-      LogicalJoin { type: LeftSemi, predicate: (t1.y = t2.x) }
+      LogicalJoin { type: LeftSemi, on: (t1.y = t2.x) }
         LogicalScan { table: t1, columns: [_row_id, x, y] }
         LogicalProject { exprs: [t2.x] }
           LogicalApply { type: LeftSemi, on: (t2.y = t3.y), correlated_id: 2 }
@@ -251,9 +251,9 @@
               LogicalFilter { predicate: (CorrelatedInputRef { index: 2, correlated_id: 2 } = t3.y) }
                 LogicalScan { table: t3, columns: [_row_id, x, y] }
   optimized_logical_plan: |
-    LogicalJoin { type: LeftSemi, predicate: (t1.y = t2.x) }
+    LogicalJoin { type: LeftSemi, on: (t1.y = t2.x) }
       LogicalScan { table: t1, columns: [x, y] }
-      LogicalJoin { type: LeftSemi, predicate: (t2.y = t3.y) AND (t2.y = t3.y) }
+      LogicalJoin { type: LeftSemi, on: (t2.y = t3.y) AND (t2.y = t3.y) }
         LogicalScan { table: t2, columns: [x, y] }
         LogicalProject { exprs: [t3.y, t3.y] }
           LogicalScan { table: t3, columns: [y] }
@@ -313,7 +313,7 @@
   optimized_logical_plan: |
     LogicalTopN { order: "[t2.x ASC]", limit: 100, offset: 0 }
       LogicalProject { exprs: [t2.x, t1.x, t2.x] }
-        LogicalJoin { type: LeftOuter, predicate: (t1.y = t2.y) }
+        LogicalJoin { type: LeftOuter, on: (t1.y = t2.y) }
           LogicalScan { table: t2, output_columns: [x, y], required_columns: [x, y], predicate: (t2.x > 100:Int32) }
           LogicalScan { table: t1, columns: [x, y] }
 - sql: |
@@ -321,7 +321,7 @@
     create table t2(x int, y int);
     select * from t1 where exists(select x from t2 where t1.x = t2.x and t1.y = t2.y)
   optimized_logical_plan: |
-    LogicalJoin { type: LeftSemi, predicate: (t1.x = t2.x) AND (t1.y = t2.y) }
+    LogicalJoin { type: LeftSemi, on: (t1.x = t2.x) AND (t1.y = t2.y) }
       LogicalScan { table: t1, columns: [x, y] }
       LogicalScan { table: t2, columns: [x, y] }
 - sql: |
@@ -330,8 +330,8 @@
     create table t3(x int, y int);
     select * from t1, t2 where exists(select x from t3 where t3.x = t1.x and t3.y <> t2.y);
   optimized_logical_plan: |
-    LogicalJoin { type: LeftSemi, predicate: (t3.x = t1.x) AND (t3.y <> t2.y) }
-      LogicalJoin { type: Inner, predicate: true }
+    LogicalJoin { type: LeftSemi, on: (t3.x = t1.x) AND (t3.y <> t2.y) }
+      LogicalJoin { type: Inner, on: true }
         LogicalScan { table: t1, columns: [x, y] }
         LogicalScan { table: t2, columns: [x, y] }
       LogicalScan { table: t3, columns: [x, y] }
@@ -341,8 +341,8 @@
     create table t3(x int, y int);
     select * from t1, t2 where exists(select x from t3 where t3.x = t2.y and t3.y = t1.x);
   optimized_logical_plan: |
-    LogicalJoin { type: LeftSemi, predicate: (t3.x = t2.y) AND (t3.y = t1.x) }
-      LogicalJoin { type: Inner, predicate: true }
+    LogicalJoin { type: LeftSemi, on: (t3.x = t2.y) AND (t3.y = t1.x) }
+      LogicalJoin { type: Inner, on: true }
         LogicalScan { table: t1, columns: [x, y] }
         LogicalScan { table: t2, columns: [x, y] }
       LogicalScan { table: t3, columns: [x, y] }
@@ -353,9 +353,9 @@
     create table t4(x int, y int, z int);
     select * from t1, t2, t3 where exists(select x from t4 where t4.x = t2.y and t4.y = t1.x and t4.z = t3.x);
   optimized_logical_plan: |
-    LogicalJoin { type: LeftSemi, predicate: (t4.x = t2.y) AND (t4.y = t1.x) AND (t4.z = t3.x) }
-      LogicalJoin { type: Inner, predicate: true }
-        LogicalJoin { type: Inner, predicate: true }
+    LogicalJoin { type: LeftSemi, on: (t4.x = t2.y) AND (t4.y = t1.x) AND (t4.z = t3.x) }
+      LogicalJoin { type: Inner, on: true }
+        LogicalJoin { type: Inner, on: true }
           LogicalScan { table: t1, columns: [x, y] }
           LogicalScan { table: t2, columns: [x, y] }
         LogicalScan { table: t3, columns: [x, y] }
@@ -367,8 +367,8 @@
     select count(*) from a, b where a3 = b2 and 3 = (select count(*) from c where b2 = c2 and a3 = c3);
   optimized_logical_plan: |
     LogicalAgg { aggs: [count] }
-      LogicalJoin { type: Inner, predicate: (a.a3 = c.c3) AND (b.b2 = c.c2) }
-        LogicalJoin { type: Inner, predicate: (a.a3 = b.b2) }
+      LogicalJoin { type: Inner, on: (a.a3 = c.c3) AND (b.b2 = c.c2) }
+        LogicalJoin { type: Inner, on: (a.a3 = b.b2) }
           LogicalScan { table: a, columns: [a3] }
           LogicalScan { table: b, columns: [b2] }
         LogicalProject { exprs: [c.c3, c.c2] }
@@ -382,10 +382,10 @@
     select count(*) from a where a.x=3 and a.y = (select count(*) from b where b.z = a.z and a.x = 3);
   optimized_logical_plan: |
     LogicalAgg { aggs: [count] }
-      LogicalJoin { type: Inner, predicate: (a.x = a.x) AND (a.z = a.z) AND (a.y = count) }
+      LogicalJoin { type: Inner, on: (a.x = a.x) AND (a.z = a.z) AND (a.y = count) }
         LogicalScan { table: a, output_columns: [x, y, z], required_columns: [x, y, z], predicate: (a.x = 3:Int32) }
         LogicalAgg { group_key: [a.x, a.z], aggs: [count] }
-          LogicalJoin { type: Inner, predicate: (b.z = a.z) }
+          LogicalJoin { type: Inner, on: (b.z = a.z) }
             LogicalAgg { group_key: [a.x, a.z], aggs: [] }
               LogicalScan { table: a, output_columns: [x, z], required_columns: [x, z], predicate: (a.x = 3:Int32) }
             LogicalScan { table: b, columns: [z] }
@@ -395,7 +395,7 @@
     select count(*) from a where a.x=3 and a.y = (select count(*) from b where b.z = a.z);
   optimized_logical_plan: |
     LogicalAgg { aggs: [count] }
-      LogicalJoin { type: Inner, predicate: (a.z = b.z) AND (a.y = count) }
+      LogicalJoin { type: Inner, on: (a.z = b.z) AND (a.y = count) }
         LogicalScan { table: a, output_columns: [y, z], required_columns: [y, z, x], predicate: (a.x = 3:Int32) }
         LogicalAgg { group_key: [b.z], aggs: [count] }
           LogicalScan { table: b, columns: [z] }
@@ -405,7 +405,7 @@
     select count(*) from a where a.y = (select string_agg(x order by x) from b where b.z = a.z);
   optimized_logical_plan: |
     LogicalAgg { aggs: [count] }
-      LogicalJoin { type: Inner, predicate: (a.z = b.z) AND (a.y = string_agg(b.x order_by(b.x ASC NULLS LAST))) }
+      LogicalJoin { type: Inner, on: (a.z = b.z) AND (a.y = string_agg(b.x order_by(b.x ASC NULLS LAST))) }
         LogicalScan { table: a, columns: [y, z] }
         LogicalAgg { group_key: [b.z], aggs: [string_agg(b.x order_by(b.x ASC NULLS LAST))] }
           LogicalProject { exprs: [b.z, b.x] }
@@ -416,7 +416,7 @@
     select count(*) from a where a.y = (select count(distinct x) from b where b.z = a.z);
   optimized_logical_plan: |
     LogicalAgg { aggs: [count] }
-      LogicalJoin { type: Inner, predicate: (a.z = b.z) AND (a.y = count(b.x) filter((flag = 0:Int64))) }
+      LogicalJoin { type: Inner, on: (a.z = b.z) AND (a.y = count(b.x) filter((flag = 0:Int64))) }
         LogicalScan { table: a, columns: [y, z] }
         LogicalAgg { group_key: [b.z], aggs: [count(b.x) filter((flag = 0:Int64))] }
           LogicalAgg { group_key: [b.z, b.x, flag], aggs: [] }
@@ -429,7 +429,7 @@
     select count(*) from a where a.y = (select count(x) filter(where x < 100) from b where b.z = a.z);
   optimized_logical_plan: |
     LogicalAgg { aggs: [count] }
-      LogicalJoin { type: Inner, predicate: (a.z = b.z) AND (a.y = count(b.x) filter((b.x < 100:Int32))) }
+      LogicalJoin { type: Inner, on: (a.z = b.z) AND (a.y = count(b.x) filter((b.x < 100:Int32))) }
         LogicalScan { table: a, columns: [y, z] }
         LogicalAgg { group_key: [b.z], aggs: [count(b.x) filter((b.x < 100:Int32))] }
           LogicalProject { exprs: [b.z, b.x] }
@@ -440,9 +440,9 @@
     create table t3(x int, y int);
     select * from t1 where exists(select x from t2 where t1.x = t2.x and t2.y in (select t3.y from t3 where t1.x = t3.x));
   optimized_logical_plan: |
-    LogicalJoin { type: LeftSemi, predicate: (t1.x = t2.x) }
+    LogicalJoin { type: LeftSemi, on: (t1.x = t2.x) }
       LogicalScan { table: t1, columns: [x, y] }
-      LogicalJoin { type: LeftSemi, predicate: (t2.y = t3.y) AND (t2.x = t3.x) }
+      LogicalJoin { type: LeftSemi, on: (t2.y = t3.y) AND (t2.x = t3.x) }
         LogicalScan { table: t2, columns: [x, y] }
         LogicalScan { table: t3, columns: [x, y] }
 - sql: |
@@ -451,11 +451,11 @@
     create table t3(x int, y int);
     select * from t1 where exists(select t2.x from t2 join t3 on t2.x = t3.x and t1.y = t2.y and t1.y = t3.y);
   optimized_logical_plan: |
-    LogicalJoin { type: LeftSemi, predicate: (t1.y = t1.y) }
+    LogicalJoin { type: LeftSemi, on: (t1.y = t1.y) }
       LogicalScan { table: t1, columns: [x, y] }
-      LogicalJoin { type: Inner, predicate: (t2.x = t3.x) AND (t1.y = t3.y) }
-        LogicalJoin { type: Inner, predicate: (t1.y = t1.y) }
-          LogicalJoin { type: Inner, predicate: (t1.y = t2.y) }
+      LogicalJoin { type: Inner, on: (t2.x = t3.x) AND (t1.y = t3.y) }
+        LogicalJoin { type: Inner, on: (t1.y = t1.y) }
+          LogicalJoin { type: Inner, on: (t1.y = t2.y) }
             LogicalAgg { group_key: [t1.y], aggs: [] }
               LogicalScan { table: t1, columns: [y] }
             LogicalScan { table: t2, columns: [x, y] }
@@ -467,10 +467,10 @@
     create table t2(x int, y int);
     select * from t1 where t1.y in (select t1.y from t2 where t1.x = t2.x);
   optimized_logical_plan: |
-    LogicalJoin { type: LeftSemi, predicate: (t1.y = t1.y) AND (t1.x = t1.x) AND (t1.y = t1.y) }
+    LogicalJoin { type: LeftSemi, on: (t1.y = t1.y) AND (t1.x = t1.x) AND (t1.y = t1.y) }
       LogicalScan { table: t1, columns: [x, y] }
       LogicalProject { exprs: [t1.x, t1.y, t1.y] }
-        LogicalJoin { type: Inner, predicate: (t1.x = t2.x) }
+        LogicalJoin { type: Inner, on: (t1.x = t2.x) }
           LogicalAgg { group_key: [t1.x, t1.y], aggs: [] }
             LogicalScan { table: t1, columns: [x, y] }
           LogicalScan { table: t2, columns: [x] }
@@ -480,9 +480,9 @@
     create table t3(x int, y int);
     select * from t1 where not exists(select x from t2 where t1.x = t2.x and t2.y not in (select t3.y from t3 where t1.x = t3.x));
   optimized_logical_plan: |
-    LogicalJoin { type: LeftAnti, predicate: (t1.x = t2.x) }
+    LogicalJoin { type: LeftAnti, on: (t1.x = t2.x) }
       LogicalScan { table: t1, columns: [x, y] }
-      LogicalJoin { type: LeftAnti, predicate: (t2.y = t3.y) AND (t2.x = t3.x) }
+      LogicalJoin { type: LeftAnti, on: (t2.y = t3.y) AND (t2.x = t3.x) }
         LogicalScan { table: t2, columns: [x, y] }
         LogicalScan { table: t3, columns: [x, y] }
 - sql: |
@@ -491,14 +491,14 @@
     create table t3(x int, y int);
     select * from t1 where exists(select t2.x from t2 left join t3 on t2.x = t3.x and t1.y = t2.y and t1.y = t3.y);
   optimized_logical_plan: |
-    LogicalJoin { type: LeftSemi, predicate: (t1.y = t1.y) }
+    LogicalJoin { type: LeftSemi, on: (t1.y = t1.y) }
       LogicalScan { table: t1, columns: [x, y] }
-      LogicalJoin { type: LeftOuter, predicate: (t1.y = t2.y) AND (t2.x = t3.x) AND (t1.y = t3.y) AND (t1.y = t1.y) }
-        LogicalJoin { type: Inner, predicate: true }
+      LogicalJoin { type: LeftOuter, on: (t1.y = t2.y) AND (t2.x = t3.x) AND (t1.y = t3.y) AND (t1.y = t1.y) }
+        LogicalJoin { type: Inner, on: true }
           LogicalAgg { group_key: [t1.y], aggs: [] }
             LogicalScan { table: t1, columns: [y] }
           LogicalScan { table: t2, columns: [x, y] }
-        LogicalJoin { type: Inner, predicate: true }
+        LogicalJoin { type: Inner, on: true }
           LogicalAgg { group_key: [t1.y], aggs: [] }
             LogicalScan { table: t1, columns: [y] }
           LogicalScan { table: t3, columns: [x, y] }
@@ -508,14 +508,14 @@
     create table t3(x int, y int);
     select * from t1 where exists(select t2.x from t2 right join t3 on t2.x = t3.x and t1.y = t2.y and t1.y = t3.y);
   optimized_logical_plan: |
-    LogicalJoin { type: LeftSemi, predicate: (t1.y = t1.y) }
+    LogicalJoin { type: LeftSemi, on: (t1.y = t1.y) }
       LogicalScan { table: t1, columns: [x, y] }
-      LogicalJoin { type: RightOuter, predicate: (t2.x = t3.x) AND (t1.y = t3.y) AND (t1.y = t1.y) }
-        LogicalJoin { type: Inner, predicate: (t1.y = t2.y) }
+      LogicalJoin { type: RightOuter, on: (t2.x = t3.x) AND (t1.y = t3.y) AND (t1.y = t1.y) }
+        LogicalJoin { type: Inner, on: (t1.y = t2.y) }
           LogicalAgg { group_key: [t1.y], aggs: [] }
             LogicalScan { table: t1, columns: [y] }
           LogicalScan { table: t2, columns: [x, y] }
-        LogicalJoin { type: Inner, predicate: true }
+        LogicalJoin { type: Inner, on: true }
           LogicalAgg { group_key: [t1.y], aggs: [] }
             LogicalScan { table: t1, columns: [y] }
           LogicalScan { table: t3, columns: [x, y] }
@@ -525,14 +525,14 @@
     create table t3(x int, y int);
     select * from t1 where exists(select t2.x from t2 full join t3 on t2.x = t3.x and t1.y = t2.y and t1.y = t3.y);
   optimized_logical_plan: |
-    LogicalJoin { type: LeftSemi, predicate: (t1.y = t1.y) }
+    LogicalJoin { type: LeftSemi, on: (t1.y = t1.y) }
       LogicalScan { table: t1, columns: [x, y] }
-      LogicalJoin { type: FullOuter, predicate: (t1.y = t2.y) AND (t2.x = t3.x) AND (t1.y = t3.y) AND (t1.y = t1.y) }
-        LogicalJoin { type: Inner, predicate: true }
+      LogicalJoin { type: FullOuter, on: (t1.y = t2.y) AND (t2.x = t3.x) AND (t1.y = t3.y) AND (t1.y = t1.y) }
+        LogicalJoin { type: Inner, on: true }
           LogicalAgg { group_key: [t1.y], aggs: [] }
             LogicalScan { table: t1, columns: [y] }
           LogicalScan { table: t2, columns: [x, y] }
-        LogicalJoin { type: Inner, predicate: true }
+        LogicalJoin { type: Inner, on: true }
           LogicalAgg { group_key: [t1.y], aggs: [] }
             LogicalScan { table: t1, columns: [y] }
           LogicalScan { table: t3, columns: [x, y] }
@@ -542,12 +542,12 @@
     create table t3(x int, y int);
     select * from t1 where exists(select x from t2 where t1.x = t2.x and t2.y in (select t3.y + t2.y from t3 where t1.x = t3.x));
   optimized_logical_plan: |
-    LogicalJoin { type: LeftSemi, predicate: (t1.x = t2.x) }
+    LogicalJoin { type: LeftSemi, on: (t1.x = t2.x) }
       LogicalScan { table: t1, columns: [x, y] }
-      LogicalJoin { type: LeftSemi, predicate: (t2.y = (t3.y + t2.y)) AND (t2.y = t2.y) AND (t2.x = t3.x) }
+      LogicalJoin { type: LeftSemi, on: (t2.y = (t3.y + t2.y)) AND (t2.y = t2.y) AND (t2.x = t3.x) }
         LogicalScan { table: t2, columns: [x, y] }
         LogicalProject { exprs: [t3.x, t2.y, (t3.y + t2.y)] }
-          LogicalJoin { type: Inner, predicate: true }
+          LogicalJoin { type: Inner, on: true }
             LogicalAgg { group_key: [t2.y], aggs: [] }
               LogicalScan { table: t2, columns: [y] }
             LogicalScan { table: t3, columns: [x, y] }

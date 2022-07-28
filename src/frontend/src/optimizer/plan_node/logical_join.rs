@@ -61,7 +61,7 @@ impl fmt::Display for LogicalJoin {
         concat_schema.extend(self.right().schema().fields.clone());
         let concat_schema = Schema::new(concat_schema);
         builder.field(
-            "predicate",
+            "on",
             &format_args!(
                 "{}",
                 ConditionDisplay {

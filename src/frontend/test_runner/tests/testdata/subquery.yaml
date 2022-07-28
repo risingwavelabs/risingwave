@@ -55,7 +55,7 @@
     select * from (select * from t), t;
   logical_plan: |
     LogicalProject { exprs: [t.v1, t.v2, t.v1, t.v2] }
-      LogicalJoin { type: Inner, predicate: true }
+      LogicalJoin { type: Inner, on: true }
         LogicalProject { exprs: [t.v1, t.v2] }
           LogicalScan { table: t, columns: [_row_id, v1, v2] }
         LogicalScan { table: t, columns: [_row_id, v1, v2] }
@@ -65,7 +65,7 @@
     select * from (select * from t) as tt join t on tt.v1=t.v1;
   logical_plan: |
     LogicalProject { exprs: [t.v1, t.v2, t.v1, t.v2] }
-      LogicalJoin { type: Inner, predicate: (t.v1 = t.v1) }
+      LogicalJoin { type: Inner, on: (t.v1 = t.v1) }
         LogicalProject { exprs: [t.v1, t.v2] }
           LogicalScan { table: t, columns: [_row_id, v1, v2] }
         LogicalScan { table: t, columns: [_row_id, v1, v2] }
@@ -75,7 +75,7 @@
     select * from (select * from t) as tt(a) join t on a=v1;
   logical_plan: |
     LogicalProject { exprs: [t.v1, t.v2, t.v1, t.v2] }
-      LogicalJoin { type: Inner, predicate: (t.v1 = t.v1) }
+      LogicalJoin { type: Inner, on: (t.v1 = t.v1) }
         LogicalProject { exprs: [t.v1, t.v2] }
           LogicalScan { table: t, columns: [_row_id, v1, v2] }
         LogicalScan { table: t, columns: [_row_id, v1, v2] }
@@ -108,10 +108,10 @@
     );
   logical_plan: |
     LogicalProject { exprs: [ab.a, ab.b] }
-      LogicalJoin { type: LeftSemi, predicate: true }
+      LogicalJoin { type: LeftSemi, on: true }
         LogicalScan { table: ab, columns: [_row_id, a, b] }
         LogicalProject { exprs: [bc.b, bc.c, t.v1, t.v2] }
-          LogicalJoin { type: Inner, predicate: true }
+          LogicalJoin { type: Inner, on: true }
             LogicalScan { table: bc, columns: [_row_id, b, c] }
             LogicalProject { exprs: [t.v1, t.v2] }
               LogicalFilter { predicate: (t.v1 = CorrelatedInputRef { index: 1, correlated_id: 0 }) }

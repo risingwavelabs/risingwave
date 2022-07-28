@@ -6,11 +6,11 @@
   logical_plan: |
     LogicalProject { exprs: [t1.v1, t1.v2, t1.v3, t2.v1, t2.v2, t2.v3] }
       LogicalFilter { predicate: (t2.v2 > 2:Int32) }
-        LogicalJoin { type: Inner, predicate: (t1.v1 = t2.v2) AND (t1.v1 > 1:Int32) }
+        LogicalJoin { type: Inner, on: (t1.v1 = t2.v2) AND (t1.v1 > 1:Int32) }
           LogicalScan { table: t1, columns: [_row_id, v1, v2, v3] }
           LogicalScan { table: t2, columns: [_row_id, v1, v2, v3] }
   optimized_logical_plan: |
-    LogicalJoin { type: Inner, predicate: (t1.v1 = t2.v2) }
+    LogicalJoin { type: Inner, on: (t1.v1 = t2.v2) }
       LogicalScan { table: t1, output_columns: [v1, v2, v3], required_columns: [v1, v2, v3], predicate: (t1.v1 > 1:Int32) }
       LogicalScan { table: t2, output_columns: [v1, v2, v3], required_columns: [v1, v2, v3], predicate: (t2.v2 > 2:Int32) }
 - sql: |

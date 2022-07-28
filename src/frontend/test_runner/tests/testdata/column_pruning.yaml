@@ -24,11 +24,11 @@
     select t1.v1, t2.v1 from t1 join t2 on t1.v2 = t2.v2;
   logical_plan: |
     LogicalProject { exprs: [t1.v1, t2.v1] }
-      LogicalJoin { type: Inner, predicate: (t1.v2 = t2.v2) }
+      LogicalJoin { type: Inner, on: (t1.v2 = t2.v2) }
         LogicalScan { table: t1, columns: [_row_id, v1, v2, v3] }
         LogicalScan { table: t2, columns: [_row_id, v1, v2, v3] }
   optimized_logical_plan: |
-    LogicalJoin { type: Inner, predicate: (t1.v2 = t2.v2) }
+    LogicalJoin { type: Inner, on: (t1.v2 = t2.v2) }
       LogicalScan { table: t1, columns: [v1, v2] }
       LogicalScan { table: t2, columns: [v1, v2] }
 - sql: |
@@ -113,11 +113,11 @@
   logical_plan: |
     LogicalProject { exprs: [t1.v1, t2.v1] }
       LogicalFilter { predicate: (t1.v3 < 1:Int32) }
-        LogicalJoin { type: Inner, predicate: (t1.v2 = t2.v2) }
+        LogicalJoin { type: Inner, on: (t1.v2 = t2.v2) }
           LogicalScan { table: t1, columns: [_row_id, v1, v2, v3] }
           LogicalScan { table: t2, columns: [_row_id, v1, v2, v3] }
   optimized_logical_plan: |
-    LogicalJoin { type: Inner, predicate: (t1.v2 = t2.v2) }
+    LogicalJoin { type: Inner, on: (t1.v2 = t2.v2) }
       LogicalScan { table: t1, output_columns: [v1, v2], required_columns: [v1, v2, v3], predicate: (t1.v3 < 1:Int32) }
       LogicalScan { table: t2, columns: [v1, v2] }
 - sql: |
