@@ -149,7 +149,7 @@ impl Rule for ApplyJoinRule {
                     .map(|expr| right_apply_condition_rewriter.rewrite_expr(expr))
                     .collect_vec();
             }
-            _ => panic!("Unspecified"),
+            JoinType::Unspecified => unreachable!(),
         }
 
         let new_join_left = LogicalApply::create(
@@ -248,7 +248,7 @@ impl Rule for ApplyJoinRule {
 
                 Some(new_filter)
             }
-            _ => panic!("Unspecified"),
+            JoinType::Unspecified => unreachable!(),
         }
     }
 }

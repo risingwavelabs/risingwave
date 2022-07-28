@@ -14,23 +14,23 @@ message IntervalUnit {
 
 message DataType {
   enum IntervalType {
-    INTERVAL_UNSPECIFIED = 0;
-    YEAR = 2;
-    MONTH = 3;
-    DAY = 4;
-    HOUR = 5;
-    MINUTE = 6;
-    SECOND = 7;
-    YEAR_TO_MONTH = 8;
-    DAY_TO_HOUR = 9;
-    DAY_TO_MINUTE = 10;
-    DAY_TO_SECOND = 11;
-    HOUR_TO_MINUTE = 12;
-    HOUR_TO_SECOND = 13;
-    MINUTE_TO_SECOND = 14;
+    UNSPECIFIED = 0;
+    YEAR = 1;
+    MONTH = 2;
+    DAY = 3;
+    HOUR = 4;
+    MINUTE = 5;
+    SECOND = 6;
+    YEAR_TO_MONTH = 7;
+    DAY_TO_HOUR = 8;
+    DAY_TO_MINUTE = 9;
+    DAY_TO_SECOND = 10;
+    HOUR_TO_MINUTE = 11;
+    HOUR_TO_SECOND = 12;
+    MINUTE_TO_SECOND = 13;
   }
   enum TypeName {
-    TYPENAME_UNSPECIFIED = 0;
+    TYPE_UNSPECIFIED = 0;
     INT16 = 1;
     INT32 = 2;
     INT64 = 3;
@@ -75,7 +75,7 @@ message ListArrayData {
 }
 
 enum ArrayType {
-  ARRAY_UNSPECIFIED = 0;
+  UNSPECIFIED = 0;
   INT16 = 1;
   INT32 = 2;
   INT64 = 3;

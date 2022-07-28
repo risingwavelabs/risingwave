@@ -18,7 +18,7 @@ message TaskId {
 
 message TaskInfo {
   enum TaskStatus {
-    TASK_STATUS_UNSPECIFIED = 0;
+    UNSPECIFIED = 0;
     NOT_FOUND = 1;
     PENDING = 2;
     RUNNING = 3;

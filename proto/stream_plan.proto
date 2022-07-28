@@ -99,7 +99,7 @@ message ActorMapping {
 // todo: StreamSourceNode or TableSourceNode
 message SourceNode {
   enum SourceType {
-    SOURCE_UNSPECIFIED = 0;
+    UNSPECIFIED = 0;
     TABLE = 1;
     SOURCE = 2;
   }
@@ -380,7 +380,7 @@ message StreamNode {
 }
 
 enum DispatcherType {
-  DISPATCHER_UNSPECIFIED = 0;
+  UNSPECIFIED = 0;
   // Dispatch by hash key, hashed by consistent hash.
   HASH = 1;
   // Broadcast to all downstreams.

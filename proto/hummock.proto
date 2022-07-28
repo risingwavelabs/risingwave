@@ -14,7 +14,7 @@ message SstableInfo {
 }
 
 enum LevelType {
-  TYPE_UNSPECIFIED = 0;
+  UNSPECIFIED = 0;
   NONOVERLAPPING = 1;
   OVERLAPPING = 2;
 }
@@ -293,7 +293,7 @@ service CompactorService {}
 
 message CompactionConfig {
   enum CompactionMode {
-    COMPACTION_MODE_UNSPECIFIED = 0;
+    UNSPECIFIED = 0;
     RANGE = 1;
     CONSISTENT_HASH = 2;
   }

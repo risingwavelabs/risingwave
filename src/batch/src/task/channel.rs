@@ -89,6 +89,7 @@ pub fn create_output_channel(
         ShuffleDistributionMode::Single => Ok(new_fifo_channel()),
         ShuffleDistributionMode::Hash => Ok(new_hash_shuffle_channel(shuffle)),
         ShuffleDistributionMode::Broadcast => Ok(new_broadcast_channel(shuffle)),
-        _ => panic!("Unspecified"),
+        ShuffleDistributionMode::Unspecified => unreachable!(),
+
     }
 }

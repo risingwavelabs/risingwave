@@ -211,7 +211,7 @@ impl Direction {
         match order_type {
             ProstOrderType::Ascending => Self::Asc,
             ProstOrderType::Descending => Self::Desc,
-            _ => panic!("Unspecified"),
+            ProstOrderType::OrderUnspecified => unreachable!(),
         }
     }
 

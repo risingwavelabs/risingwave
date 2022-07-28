@@ -25,7 +25,7 @@ message ActorInfo {
 }
 
 enum WorkerType {
-  WORKER_UNSPECIFIED = 0;
+  UNSPECIFIED = 0;
   FRONTEND = 1;
   COMPUTE_NODE = 2;
   RISE_CTL = 3;
@@ -41,7 +41,7 @@ message ParallelUnit {
 
 message WorkerNode {
   enum State {
-    STATE_UNSPECIFIED = 0;
+    UNSPECIFIED = 0;
     STARTING = 1;
     RUNNING = 2;
   }
@@ -55,8 +55,8 @@ message WorkerNode {
 
 message Buffer {
   enum CompressionType {
-    COMPRESSION_UNSPECIFIED = 0;
-    NONE = 2;
+    UNSPECIFIED = 0;
+    NONE = 1;
   }
   CompressionType compression = 1;
   bytes body = 2;

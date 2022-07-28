@@ -35,7 +35,7 @@ impl OrderType {
         match order_type {
             ProstOrderType::Ascending => OrderType::Ascending,
             ProstOrderType::Descending => OrderType::Descending,
-            _ => panic!("invalid order type"),
+            ProstOrderType::OrderUnspecified => unreachable!(),
         }
     }
 

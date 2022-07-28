@@ -26,7 +26,7 @@ service HeartbeatService {
 message TableFragments {
   // Current state of actor
   enum ActorState {
-    ACTOR_STATE_UNSPECIFIED = 0;
+    UNSPECIFIED = 0;
     // Initial state after creation
     INACTIVE = 1;
     // Running normally
@@ -41,7 +41,7 @@ message TableFragments {
   }
   message Fragment {
     enum FragmentDistributionType {
-      FRAGMENT_DISTRIBUTION_UNSPECIFIED = 0;
+      UNSPECIFIED = 0;
       SINGLE = 1;
       HASH = 2;
     }
@@ -159,7 +159,7 @@ message MetaSnapshot {
 
 message SubscribeResponse {
   enum Operation {
-    OPERATION_UNSPECIFIED = 0;
+    UNSPECIFIED = 0;
     ADD = 1;
     DELETE = 2;
     UPDATE = 3;

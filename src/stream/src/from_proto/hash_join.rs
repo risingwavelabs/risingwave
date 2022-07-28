@@ -85,7 +85,7 @@ impl ExecutorBuilder for HashJoinExecutorBuilder {
                 ) -> Result<BoxedExecutor> {
                     match typ {
                         $( JoinTypeProto::$join_type_proto => HashJoinExecutorDispatcher::<_, {JoinType::$join_type}>::dispatch_by_kind(kind, args), )*
-                        _ => panic!("Unspecified"),
+                        JoinTypeProto::Unspecified => unreachable!(),
                         // _ => todo!("Join type {:?} not implemented", typ),
                     }
                 }

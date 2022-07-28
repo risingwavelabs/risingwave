@@ -66,7 +66,7 @@ pub async fn handle_drop_source(context: OptimizerContext, name: ObjectName) -> 
                 catalog_writer.drop_source(source.id).await?;
             }
         }
-        _ => panic!("Unspecified"),
+        SourceType::Unspecified => unreachable!(),
     }
 
     Ok(PgResponse::empty_result(StatementType::DROP_SOURCE))

@@ -9,7 +9,7 @@ option optimize_for = SPEED;
 
 message ExprNode {
   enum Type {
-    TYPE_UNSPECIFIED = 0;
+    UNSPECIFIED = 0;
     INPUT_REF = 1;
     CONSTANT_VALUE = 2;
     // arithmetics operators
@@ -109,7 +109,7 @@ message ExprNode {
 
 message TableFunction {
   enum Type {
-    TYPE_UNSPECIFIED = 0;
+    UNSPECIFIED = 0;
     GENERATE = 1;
     UNNEST = 2;
     REGEXP_MATCHES = 3;
@@ -181,7 +181,7 @@ message FunctionCall {
 // Aggregate Function Calls for Aggregation
 message AggCall {
   enum Type {
-    TYPE_UNSPECIFIED = 0;
+    UNSPECIFIED = 0;
     SUM = 1;
     MIN = 2;
     MAX = 3;

@@ -41,7 +41,7 @@ message CellBasedTableDesc {
 enum JoinType {
   // Note that it comes from Calcite's JoinRelType.
   // DO NOT HAVE direction for SEMI and ANTI now.
-  JOIN_UNSPECIFIED = 0;
+  UNSPECIFIED = 0;
   INNER = 1;
   LEFT_OUTER = 2;
   RIGHT_OUTER = 3;
@@ -65,7 +65,7 @@ message ColumnOrder {
 }
 
 enum RowFormatType {
-  ROW_FORMAT_UNSPECIFIED = 0;
+  ROW_UNSPECIFIED = 0;
   JSON = 1;
   PROTOBUF = 2;
   DEBEZIUM_JSON = 3;

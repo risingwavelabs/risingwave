@@ -9,7 +9,7 @@ option optimize_for = SPEED;
 // AuthInfo is the information required to login to a server.
 message AuthInfo {
   enum EncryptionType {
-    ENCRYPTION_UNSPECIFIED = 0;
+    UNSPECIFIED = 0;
     UNKNOWN = 1;
     PLAINTEXT = 2;
     SHA256 = 3;
