@@ -4651,6 +4651,7 @@ dependencies = [
  "anyhow",
  "bytes 1.2.0",
  "clap 3.2.13",
+ "comfy-table",
  "futures",
  "madsim-tokio",
  "parking_lot",
