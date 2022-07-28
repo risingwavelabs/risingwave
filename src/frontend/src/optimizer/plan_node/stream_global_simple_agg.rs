@@ -20,7 +20,7 @@ use risingwave_pb::stream_plan::stream_node::NodeBody as ProstStreamNode;
 
 use super::logical_agg::PlanAggCall;
 use super::{LogicalAgg, PlanBase, PlanRef, PlanTreeNodeUnary, ToStreamProst};
-use crate::optimizer::plan_node::PlanAggCallVerboseDisplay;
+use crate::optimizer::plan_node::PlanAggCallDisplay;
 use crate::optimizer::property::Distribution;
 
 #[derive(Debug, Clone)]
@@ -49,8 +49,8 @@ impl StreamGlobalSimpleAgg {
         self.logical.agg_calls()
     }
 
-    pub fn agg_calls_verbose_display(&self) -> Vec<PlanAggCallVerboseDisplay> {
-        self.logical.agg_calls_verbose_display()
+    pub fn agg_calls_verbose_display(&self) -> Vec<PlanAggCallDisplay> {
+        self.logical.agg_calls_display()
     }
 }
 
