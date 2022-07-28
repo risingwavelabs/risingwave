@@ -23,7 +23,7 @@ use super::{
     PredicatePushdown, ToBatch, ToStream,
 };
 use crate::catalog::TableId;
-use crate::utils::Condition;
+use crate::utils::{ColIndexMapping, Condition};
 
 /// `LogicalInsert` iterates on input relation and insert the data into specified table.
 ///
