@@ -205,7 +205,8 @@ message ResumeResponse {}
 message GetClusterInfoRequest {}
 
 message GetClusterInfoResponse {
-  repeated TableFragments table_fragments = 1;
+  repeated common.WorkerNode worker_nodes = 1;
+  repeated TableFragments table_fragments = 2;
 }
 
 service ScaleService {
