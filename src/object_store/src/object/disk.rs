@@ -19,6 +19,7 @@ use std::io::{Error, ErrorKind};
 use std::os::unix::fs::FileExt;
 use std::path::PathBuf;
 use std::sync::Arc;
+use std::time::SystemTime;
 
 use bytes::Bytes;
 use futures::future::try_join_all;
@@ -238,7 +239,22 @@ impl ObjectStore for DiskObjectStore {
     async fn metadata(&self, path: &str) -> ObjectResult<ObjectMetadata> {
         let file_holder = self.get_read_file(path).await?;
         let metadata = utils::get_metadata(file_holder).await?;
+        let last_modified = match metadata.modified() {
+            Ok(last_modified) => match last_modified.duration_since(SystemTime::UNIX_EPOCH) {
+                Ok(last_modified) => last_modified.as_secs_f64(),
+                Err(_) => {
+                    tracing::warn!("last_modified is not available.");
+                    f64::MAX
+                }
+            },
+            Err(_) => {
+                tracing::warn!("last_modified is not available.");
+                f64::MAX
+            }
+        };
         Ok(ObjectMetadata {
+            key: path.to_owned(),
+            last_modified,
             total_size: metadata.len() as usize,
         })
     }
@@ -248,6 +264,10 @@ impl ObjectStore for DiskObjectStore {
             .await
             .map_err(|e| ObjectError::disk(format!("failed to delete {}", path), e))?;
         Ok(())
+    }
+
+    async fn list(&self, _prefix: &str) -> ObjectResult<Vec<ObjectMetadata>> {
+        unimplemented!()
     }
 }
 

@@ -238,12 +238,21 @@ message SubscribeCompactTasksRequest {
 }
 
 message SubscribeCompactTasksResponse {
-  CompactTask compact_task = 1;
-  VacuumTask vacuum_task = 2;
+  oneof task {
+    CompactTask compact_task = 1;
+    VacuumTask vacuum_task = 2;
+    FullScanTask full_scan_task = 3;
+  }
 }
 
+// Delete SSTs in object store
 message VacuumTask {
   repeated uint64 sstable_ids = 1;
+}
+
+// Scan object store to get candidate orphan SSTs.
+message FullScanTask {
+  uint64 timestamp_watermark = 1;
 }
 
 message ReportVacuumTaskRequest {

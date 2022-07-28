@@ -64,7 +64,11 @@ impl ObjectStore for InMemObjectStore {
 
     async fn metadata(&self, path: &str) -> ObjectResult<ObjectMetadata> {
         let total_size = self.get_object(path, |v| v.len()).await?;
-        Ok(ObjectMetadata { total_size })
+        Ok(ObjectMetadata {
+            key: path.to_owned(),
+            last_modified: f64::MAX,
+            total_size,
+        })
     }
 
     async fn delete(&self, path: &str) -> ObjectResult<()> {
@@ -73,6 +77,10 @@ impl ObjectStore for InMemObjectStore {
         )));
         self.objects.lock().await.remove(path);
         Ok(())
+    }
+
+    async fn list(&self, _prefix: &str) -> ObjectResult<Vec<ObjectMetadata>> {
+        unimplemented!()
     }
 }
 
