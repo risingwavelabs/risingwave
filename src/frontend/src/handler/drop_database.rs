@@ -53,7 +53,7 @@ pub async fn handle_drop_database(
             }
         }
     };
-    let database_id = {
+    let (database_id, owner) = {
         // If the mode is `Restrict` or `None`, the `database` need to be empty.
         if !database.is_empty() {
             return Err(CatalogError::NotEmpty(
@@ -64,8 +64,12 @@ pub async fn handle_drop_database(
             )
             .into());
         }
-        database.id()
+        (database.id(), database.owner())
     };
+
+    if session.user_id() != owner {
+        return Err(ErrorCode::PermissionDenied("Do not have the privilege".to_string()).into());
+    }
 
     let catalog_writer = session.env().catalog_writer();
     catalog_writer.drop_database(database_id).await?;
@@ -100,6 +104,25 @@ mod tests {
             .run_sql("DROP SCHEMA database.public")
             .await
             .unwrap();
+
+        frontend.run_sql("CREATE USER user WITH NOSUPERUSER NOCREATEDB PASSWORD 'md5827ccb0eea8a706c4c34a16891f84e7b'").await.unwrap();
+        let user_id = {
+            let user_reader = session.env().user_info_reader();
+            user_reader
+                .read_guard()
+                .get_user_by_name("user")
+                .unwrap()
+                .id
+        };
+        let res = frontend
+            .run_user_sql(
+                "DROP DATABASE database",
+                "dev".to_string(),
+                "user".to_string(),
+                user_id,
+            )
+            .await;
+        assert!(res.is_err());
 
         frontend.run_sql("DROP DATABASE database").await.unwrap();
 

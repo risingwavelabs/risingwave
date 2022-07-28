@@ -67,15 +67,15 @@ impl Field {
     }
 }
 
-pub struct FieldVerboseDisplay<'a>(pub &'a Field);
+pub struct FieldDisplay<'a>(pub &'a Field);
 
-impl std::fmt::Debug for FieldVerboseDisplay<'_> {
+impl std::fmt::Debug for FieldDisplay<'_> {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         write!(f, "{}", self.0.name)
     }
 }
 
-impl std::fmt::Display for FieldVerboseDisplay<'_> {
+impl std::fmt::Display for FieldDisplay<'_> {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         write!(f, "{}", self.0.name)
     }
