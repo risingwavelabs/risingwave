@@ -5,6 +5,7 @@ package meta;
 import "catalog.proto";
 import "common.proto";
 import "hummock.proto";
+import "source.proto";
 import "stream_plan.proto";
 import "user.proto";
 
@@ -217,6 +218,8 @@ message GetClusterInfoRequest {}
 message GetClusterInfoResponse {
   repeated common.WorkerNode worker_nodes = 1;
   repeated TableFragments table_fragments = 2;
+  map<uint32, source.ConnectorSplits> actor_splits = 3;
+  map<uint32, catalog.StreamSourceInfo> stream_source_infos = 4;
 }
 
 service ScaleService {
