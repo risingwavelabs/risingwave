@@ -30,7 +30,7 @@ apt install apt-transport-https ca-certificates curl software-properties-common 
 echo "debug stuff 3"
 curl -fsSL https://download.docker.com/linux/ubuntu/gpg | apt-key add -
 echo "debug stuff 4"
-add-apt-repository "deb [arch=amd64] https://download.docker.com/linux/ubuntu `lsb_release -cs` test"
+add-apt-repository "deb [arch=amd64] https://download.docker.com/linux/ubuntu `lsb_release -cs` test" -y
 echo "debug stuff 5"
 apt update
 echo "debug stuff 6"
