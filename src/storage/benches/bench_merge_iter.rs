@@ -82,6 +82,7 @@ fn gen_interleave_shared_buffer_batch_enum_iter(
             2333,
             mpsc::unbounded_channel().0,
             StaticCompactionGroupId::StateDefault.into(),
+            Default::default(),
         );
         match i % 4 {
             0 => iterators.push(HummockIteratorUnion::First(batch.into_forward_iter())),

@@ -161,6 +161,18 @@ impl<D: HummockIteratorDirection> HummockIterator for PhantomHummockIterator<D> 
     }
 }
 
+/// The `HummockIteratorUnion` acts like a wrapper over multiple types of `HummockIterator`, so that
+/// the `MergeIterator`, which previously takes multiple different `HummockIterator`s as input
+/// through `Box<dyn HummockIterator>`, can now wrap all its underlying `HummockIterator` over such
+/// `HummockIteratorUnion`, and the input type of the `MergeIterator` so that the input type of
+/// `HummockIterator` can be determined statically at compile time.
+///
+/// For example, in `ForwardUserIterator`, it accepts inputs from 4 sources for its underlying
+/// `MergeIterator`. First, the shared buffer replicated batches, and second, the shared buffer
+/// uncommitted data, and third, the overlapping L0 data, and last, the non-L0 non-overlapping
+/// concat-able. These sources used to be passed in as `Box<dyn HummockIterator>`. Now if we want
+/// the `MergeIterator` to be statically typed, the input type of `MergeIterator` will become the
+/// `HummockIteratorUnion` of these 4 sources.
 pub enum HummockIteratorUnion<
     D: HummockIteratorDirection,
     I1: HummockIterator<Direction = D>,
