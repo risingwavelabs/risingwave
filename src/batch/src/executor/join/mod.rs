@@ -70,6 +70,7 @@ impl JoinType {
             JoinTypeProst::RightSemi => JoinType::RightSemi,
             JoinTypeProst::RightAnti => JoinType::RightAnti,
             JoinTypeProst::FullOuter => JoinType::FullOuter,
+            _ => panic!("Unspecified"),
         }
     }
 

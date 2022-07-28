@@ -128,6 +128,7 @@ impl SourceManager for MemSourceManager {
             RowFormatType::Protobuf => SourceFormat::Protobuf,
             RowFormatType::DebeziumJson => SourceFormat::DebeziumJson,
             RowFormatType::Avro => SourceFormat::Avro,
+            _ => panic!("Unspecified Row Format"),
         };
 
         if format == SourceFormat::Protobuf && info.row_schema_location.is_empty() {

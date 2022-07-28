@@ -14,8 +14,9 @@ message SstableInfo {
 }
 
 enum LevelType {
-  NONOVERLAPPING = 0;
-  OVERLAPPING = 1;
+  TYPE_UNSPECIFIED = 0;
+  NONOVERLAPPING = 1;
+  OVERLAPPING = 2;
 }
 
 message Level {
@@ -292,8 +293,9 @@ service CompactorService {}
 
 message CompactionConfig {
   enum CompactionMode {
-    RANGE = 0;
-    CONSISTENT_HASH = 1;
+    COMPACTION_MODE_UNSPECIFIED = 0;
+    RANGE = 1;
+    CONSISTENT_HASH = 2;
   }
   uint64 max_bytes_for_level_base = 1;
   uint64 max_level = 2;

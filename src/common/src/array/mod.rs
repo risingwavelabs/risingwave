@@ -598,6 +598,7 @@ impl ArrayImpl {
             ProstArrayType::Interval => read_interval_unit_array(array, cardinality)?,
             ProstArrayType::Struct => StructArray::from_protobuf(array)?,
             ProstArrayType::List => ListArray::from_protobuf(array)?,
+            _ => panic!("unspecified enum"),
         };
         Ok(array)
     }

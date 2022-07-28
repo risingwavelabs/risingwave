@@ -38,6 +38,8 @@
 #![feature(type_alias_impl_trait)]
 #![feature(generators)]
 
+extern crate core;
+
 pub mod error;
 pub mod expr;
 pub mod table_function;

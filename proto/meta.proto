@@ -26,10 +26,11 @@ service HeartbeatService {
 message TableFragments {
   // Current state of actor
   enum ActorState {
+    ACTOR_STATE_UNSPECIFIED = 0;
     // Initial state after creation
-    INACTIVE = 0;
+    INACTIVE = 1;
     // Running normally
-    RUNNING = 1;
+    RUNNING = 2;
   }
   // Runtime information of an actor
   message ActorStatus {
@@ -40,8 +41,9 @@ message TableFragments {
   }
   message Fragment {
     enum FragmentDistributionType {
-      SINGLE = 0;
-      HASH = 1;
+      FRAGMENT_DISTRIBUTION_UNSPECIFIED = 0;
+      SINGLE = 1;
+      HASH = 2;
     }
     uint32 fragment_id = 1;
     stream_plan.FragmentType fragment_type = 2;
@@ -157,7 +159,7 @@ message MetaSnapshot {
 
 message SubscribeResponse {
   enum Operation {
-    INVALID = 0;
+    OPERATION_UNSPECIFIED = 0;
     ADD = 1;
     DELETE = 2;
     UPDATE = 3;

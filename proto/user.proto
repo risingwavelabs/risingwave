@@ -9,10 +9,11 @@ option optimize_for = SPEED;
 // AuthInfo is the information required to login to a server.
 message AuthInfo {
   enum EncryptionType {
-    UNKNOWN = 0;
-    PLAINTEXT = 1;
-    SHA256 = 2;
-    MD5 = 3;
+    ENCRYPTION_UNSPECIFIED = 0;
+    UNKNOWN = 1;
+    PLAINTEXT = 2;
+    SHA256 = 3;
+    MD5 = 4;
   }
   EncryptionType encryption_type = 1;
   bytes encrypted_value = 2;
@@ -34,13 +35,14 @@ message UserInfo {
 // GrantPrivilege defines a privilege granted to a user.
 message GrantPrivilege {
   enum Action {
-    UNKNOWN = 0;
-    SELECT = 1;
-    INSERT = 2;
-    UPDATE = 3;
-    DELETE = 4;
-    CREATE = 5;
-    CONNECT = 6;
+    ACTION_UNSPECIFIED = 0;
+    UNKNOWN = 1;
+    SELECT = 2;
+    INSERT = 3;
+    UPDATE = 4;
+    DELETE = 5;
+    CREATE = 6;
+    CONNECT = 7;
   }
 
   message ActionWithGrantOption {

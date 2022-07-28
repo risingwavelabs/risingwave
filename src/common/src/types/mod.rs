@@ -124,6 +124,7 @@ impl From<&ProstDataType> for DataType {
                 // The first (and only) item is the list element type.
                 datatype: Box::new((&proto.field_type[0]).into()),
             },
+            _ => panic!("Unspecified Datatype"),
         }
     }
 }
