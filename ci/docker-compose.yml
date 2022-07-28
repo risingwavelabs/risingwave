@@ -21,6 +21,9 @@ services:
         condition: service_healthy
     volumes:
       - ..:/risingwave
+    networks:
+      nw:
+        ipv4_address: 172.24.2.1
 
   regress-test-env:
     image: public.ecr.aws/x5u3w5h6/rw-build-env:v20220722
@@ -35,7 +38,7 @@ services:
     hostname: mysql
     container_name: mysql
     ports:
-      - '23306:3306'
+      - '3306:3306'
     volumes:
       - ./init:/docker-entrypoint-initdb.d
     environment:
@@ -44,3 +47,14 @@ services:
       test: ["CMD", "mysqladmin" ,"ping", "-h", "localhost"]
       timeout: 40s
       retries: 5
+    networks:
+      nw:
+        ipv4_address: 172.24.2.2
+
+networks:
+  nw:
+    driver: bridge
+    ipam:
+        driver: default
+        config:
+            - subnet: "172.24.2.0/16"

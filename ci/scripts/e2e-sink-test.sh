@@ -27,6 +27,4 @@ echo "--- e2e test w/ Rust frontend - sink with mysql"
 cargo make clean-data
 cargo make ci-start
 
-echo pwd
-
 timeout 2m sqllogictest -p 4566 -d dev  './e2e_test/sink/**/*.slt'
