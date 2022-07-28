@@ -866,7 +866,7 @@ impl ScalarImpl {
             ),
             TypeName::Interval => ScalarImpl::Interval(IntervalUnit::from_protobuf_bytes(
                 b,
-                data_type.get_interval_type().unwrap_or_else(|_| Unspecified),
+                data_type.get_interval_type().unwrap_or(Unspecified),
             )?),
             TypeName::Timestamp => {
                 ScalarImpl::NaiveDateTime(NaiveDateTimeWrapper::from_protobuf_bytes(b)?)

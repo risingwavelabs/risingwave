@@ -121,7 +121,7 @@ mod tests {
     #[test]
     fn test_enum_unspecified() {
         let mut data_type: DataType = DataType::default();
-        data_type.type_name = data_type::TypeName::TypenameUnspecified as i32;
+        data_type.type_name = data_type::TypeName::TypeUnspecified as i32;
         assert!(data_type.get_type_name().is_err());
     }
 
