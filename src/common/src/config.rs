@@ -215,6 +215,7 @@ mod default {
         1000
     }
 
+    #[expect(dead_code)]
     pub fn chunk_size() -> u32 {
         1024
     }
@@ -239,6 +240,7 @@ mod default {
         4
     }
 
+    #[expect(dead_code)]
     pub fn shared_buffer_threshold() -> u32 {
         // 192MB
         201326592
