@@ -22,11 +22,12 @@ use risingwave_common::cache::LruCache;
 use tokio::sync::Notify;
 
 use super::buffer::TwoLevelBuffer;
-use super::coding::{CacheKey, HashBuilder};
+use super::coding::HashBuilder;
 use super::error::Result;
 use super::meta::SlotId;
 use super::store::{Store, StoreOptions, StoreRef};
 use super::{utils, LRU_SHARD_BITS};
+use crate::hummock::TieredCacheKey;
 
 pub struct FileCacheOptions {
     pub dir: String,
@@ -50,7 +51,7 @@ pub trait FlushBufferHook: Send + Sync + 'static {
 
 struct BufferFlusher<K, S>
 where
-    K: CacheKey,
+    K: TieredCacheKey,
     S: HashBuilder,
 {
     buffer: TwoLevelBuffer<K>,
@@ -65,7 +66,7 @@ where
 
 impl<K, S> BufferFlusher<K, S>
 where
-    K: CacheKey,
+    K: TieredCacheKey,
     S: HashBuilder,
 {
     async fn run(&self) -> Result<()> {
@@ -113,7 +114,7 @@ where
 #[derive(Clone)]
 pub struct FileCache<K, S = RandomState>
 where
-    K: CacheKey,
+    K: TieredCacheKey,
     S: HashBuilder,
 {
     hash_builder: S,
@@ -128,7 +129,7 @@ where
 
 impl<K> FileCache<K, RandomState>
 where
-    K: CacheKey,
+    K: TieredCacheKey,
 {
     pub async fn open(options: FileCacheOptions) -> Result<Self> {
         let hash_builder = RandomState::new();
@@ -138,7 +139,7 @@ where
 
 impl<K, S> FileCache<K, S>
 where
-    K: CacheKey,
+    K: TieredCacheKey,
     S: HashBuilder,
 {
     pub async fn open_with_hasher(options: FileCacheOptions, hash_builder: S) -> Result<Self> {

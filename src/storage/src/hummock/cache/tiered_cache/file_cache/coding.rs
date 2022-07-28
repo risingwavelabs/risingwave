@@ -14,8 +14,4 @@
 
 use std::hash::BuildHasher;
 
-use crate::hummock::cache::tiered_cache::TieredCacheKey;
-
-pub trait CacheKey = TieredCacheKey;
-
 pub trait HashBuilder = BuildHasher + Clone + Send + Sync + 'static;

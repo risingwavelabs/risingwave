@@ -79,9 +79,8 @@ unsafe impl Sync for BlockHolder {}
 
 #[derive(PartialEq, Eq, Hash, Clone, Debug)]
 pub struct CacheKey {
-    sst: u64,
-    // TODO: To be compatible, use u64 for now. u32 is enough for idx.
-    idx: u64,
+    sst_id: u64,
+    block_idx: u64,
 }
 
 impl TieredCacheKey for CacheKey {
@@ -90,14 +89,14 @@ impl TieredCacheKey for CacheKey {
     }
 
     fn encode(&self, mut buf: &mut [u8]) {
-        buf.put_u64(self.sst);
-        buf.put_u64(self.idx);
+        buf.put_u64(self.sst_id);
+        buf.put_u64(self.block_idx);
     }
 
     fn decode(mut buf: &[u8]) -> Self {
-        let sst = buf.get_u64();
-        let idx = buf.get_u64();
-        Self { sst, idx }
+        let sst_id = buf.get_u64();
+        let block_idx = buf.get_u64();
+        Self { sst_id, block_idx }
     }
 }
 
@@ -140,8 +139,8 @@ impl LruCacheEventListener for MemoryBlockCacheEventListener {
 
     fn on_evict(&self, key: &Self::K, value: &Self::T) {
         let tiered_cache_key = CacheKey {
-            sst: key.0,
-            idx: key.1,
+            sst_id: key.0,
+            block_idx: key.1,
         };
         let tiered_cache_value = encode_block(value);
         // TODO(MrCroxx): handle error?
@@ -231,10 +230,7 @@ impl BlockCache {
         // TODO(MrCroxx): handle error
         if let Some(data) = self
             .tiered_cache
-            .get(&CacheKey {
-                sst: sst_id,
-                idx: block_idx,
-            })
+            .get(&CacheKey { sst_id, block_idx })
             .await
             .unwrap()
         {
@@ -279,8 +275,8 @@ impl BlockCache {
                 async move {
                     if let Some(data) = tiered_cache
                         .get(&CacheKey {
-                            sst: key.0,
-                            idx: key.1,
+                            sst_id: key.0,
+                            block_idx: key.1,
                         })
                         .await
                         .map_err(HummockError::tiered_cache)?

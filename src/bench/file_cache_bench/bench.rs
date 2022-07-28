@@ -21,7 +21,6 @@ use clap::Parser;
 use itertools::Itertools;
 use rand::{Rng, SeedableRng};
 use risingwave_storage::hummock::file_cache::cache::{FileCache, FileCacheOptions};
-use risingwave_storage::hummock::file_cache::coding::CacheKey;
 use risingwave_storage::hummock::TieredCacheKey;
 use tokio::sync::oneshot;
 
