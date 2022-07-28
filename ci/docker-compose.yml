@@ -42,5 +42,5 @@ services:
       - MYSQL_ALLOW_EMPTY_PASSWORD=true
     healthcheck:
       test: ["CMD", "mysqladmin" ,"ping", "-h", "localhost"]
-      timeout: 30s
-      retries: 10
+      timeout: 40s
+      retries: 5
