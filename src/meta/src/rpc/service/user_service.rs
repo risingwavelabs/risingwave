@@ -18,6 +18,7 @@ use risingwave_pb::user::user_service_server::UserService;
 use risingwave_pb::user::{
     CreateUserRequest, CreateUserResponse, DropUserRequest, DropUserResponse, GrantPrivilege,
     GrantPrivilegeRequest, GrantPrivilegeResponse, RevokePrivilegeRequest, RevokePrivilegeResponse,
+    UpdateUserRequest, UpdateUserResponse,
 };
 use tonic::{Request, Response, Status};
 
@@ -139,6 +140,25 @@ impl<S: MetaStore> UserService for UserServiceImpl<S> {
             .map_err(tonic_err)?;
 
         Ok(Response::new(DropUserResponse {
+            status: None,
+            version,
+        }))
+    }
+
+    #[cfg_attr(coverage, no_coverage)]
+    async fn update_user(
+        &self,
+        request: Request<UpdateUserRequest>,
+    ) -> Result<Response<UpdateUserResponse>, Status> {
+        let req = request.into_inner();
+        let user = req.get_user().map_err(tonic_err)?.clone();
+        let version = self
+            .user_manager
+            .update_user(&user)
+            .await
+            .map_err(tonic_err)?;
+
+        Ok(Response::new(UpdateUserResponse {
             status: None,
             version,
         }))

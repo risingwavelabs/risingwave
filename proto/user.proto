@@ -78,6 +78,15 @@ message DropUserResponse {
   uint64 version = 2;
 }
 
+message UpdateUserRequest {
+  UserInfo user = 1;
+}
+
+message UpdateUserResponse {
+  common.Status status = 1;
+  uint64 version = 2;
+}
+
 message GrantPrivilegeRequest {
   repeated uint32 user_ids = 1;
   repeated GrantPrivilege privileges = 2;
@@ -109,6 +118,7 @@ service UserService {
   // https://developers.google.com/protocol-buffers/docs/reference/java/com/google/protobuf/FieldMask.html.
   rpc CreateUser(CreateUserRequest) returns (CreateUserResponse);
   rpc DropUser(DropUserRequest) returns (DropUserResponse);
+  rpc UpdateUser(UpdateUserRequest) returns (UpdateUserResponse);
 
   // GrantPrivilege grants a privilege to a user.
   rpc GrantPrivilege(GrantPrivilegeRequest) returns (GrantPrivilegeResponse);

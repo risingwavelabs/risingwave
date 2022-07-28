@@ -348,6 +348,20 @@ pub struct CreateUserStatement {
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 #[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
+pub struct AlterUserStatement {
+    pub user_name: ObjectName,
+    pub mode: AlterUserMode,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+#[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
+pub enum AlterUserMode {
+    Options(CreateUserWithOptions),
+    Rename(ObjectName),
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+#[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
 pub enum CreateUserOption {
     SuperUser,
     NoSuperUser,
@@ -457,6 +471,50 @@ impl fmt::Display for CreateUserStatement {
         impl_fmt_display!(user_name, v, self);
         impl_fmt_display!(with_options, v, self);
         v.iter().join(" ").fmt(f)
+    }
+}
+
+impl fmt::Display for AlterUserMode {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            AlterUserMode::Options(options) => {
+                write!(f, "{}", options)
+            }
+            AlterUserMode::Rename(new_name) => {
+                write!(f, "RENAME TO {}", new_name)
+            }
+        }
+    }
+}
+
+impl fmt::Display for AlterUserStatement {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        let mut v: Vec<String> = vec![];
+        impl_fmt_display!(user_name, v, self);
+        impl_fmt_display!(mode, v, self);
+        v.iter().join(" ").fmt(f)
+    }
+}
+
+impl ParseTo for AlterUserStatement {
+    fn parse_to(p: &mut Parser) -> Result<Self, ParserError> {
+        impl_parse_to!(user_name: ObjectName, p);
+        impl_parse_to!(mode: AlterUserMode, p);
+
+        Ok(AlterUserStatement { user_name, mode })
+    }
+}
+
+impl ParseTo for AlterUserMode {
+    fn parse_to(p: &mut Parser) -> Result<Self, ParserError> {
+        if p.parse_keyword(Keyword::RENAME) {
+            p.expect_keyword(Keyword::TO)?;
+            impl_parse_to!(new_name: ObjectName, p);
+            Ok(AlterUserMode::Rename(new_name))
+        } else {
+            impl_parse_to!(with_options: CreateUserWithOptions, p);
+            Ok(AlterUserMode::Options(with_options))
+        }
     }
 }
 

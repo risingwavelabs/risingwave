@@ -402,6 +402,11 @@ impl UserInfoWriter for MockUserInfoWriter {
         Ok(())
     }
 
+    async fn update_user(&self, user: UserInfo) -> Result<()> {
+        self.user_info.write().update_user(user);
+        Ok(())
+    }
+
     /// In `MockUserInfoWriter`, we don't support expand privilege with `GrantAllTables` and
     /// `GrantAllSources` when grant privilege to user.
     async fn grant_privilege(

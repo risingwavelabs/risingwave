@@ -45,6 +45,8 @@ pub trait UserInfoWriter: Send + Sync {
 
     async fn drop_user(&self, id: UserId) -> Result<()>;
 
+    async fn update_user(&self, ser_info: UserInfo) -> Result<()>;
+
     async fn grant_privilege(
         &self,
         users: Vec<UserId>,
@@ -79,6 +81,11 @@ impl UserInfoWriter for UserInfoWriterImpl {
 
     async fn drop_user(&self, id: UserId) -> Result<()> {
         let version = self.meta_client.drop_user(id).await?;
+        self.wait_version(version).await
+    }
+
+    async fn update_user(&self, user_info: UserInfo) -> Result<()> {
+        let version = self.meta_client.update_user(user_info).await?;
         self.wait_version(version).await
     }
 
