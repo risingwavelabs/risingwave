@@ -117,20 +117,36 @@ impl<S: StateStore> ManagedTopNStateNew<S> {
         TopNStateRow::new(pk_ordered, row)
     }
 
-    #[cfg(test)]
     /// This function will return the rows in the range of [`offset`, `offset` + `limit`),
+    /// if `pk_prefix` is None, it will can rows from the relational table from the very beginning,
+    /// else it will scan rows from the relational table begin with specific `pk_prefix`.
+    /// if `num_limit` is None, it will scan with no limit.
     pub async fn find_range(
         &self,
+        pk_prefix: Option<&Row>,
         offset: usize,
-        num_limit: usize,
+        num_limit: Option<usize>,
         epoch: u64,
     ) -> StreamExecutorResult<Vec<TopNStateRow>> {
-        let state_table_iter = self.state_table.iter(epoch).await?;
+        let state_table_iter = if let Some(prefix) = pk_prefix {
+            self.state_table.iter_with_pk_prefix(prefix, epoch).await?
+        } else {
+            self.state_table.iter(epoch).await?
+        };
         pin_mut!(state_table_iter);
 
-        let mut rows = Vec::with_capacity(num_limit.min(1024));
         // here we don't expect users to have large OFFSET.
-        let mut stream = state_table_iter.skip(offset).take(num_limit);
+        let (mut rows, mut stream) = if let Some(limits) = num_limit {
+            (
+                Vec::with_capacity(limits.min(1024)),
+                state_table_iter.skip(offset).take(limits),
+            )
+        } else {
+            (
+                Vec::with_capacity(1024),
+                state_table_iter.skip(offset).take(1024),
+            )
+        };
         while let Some(item) = stream.next().await {
             rows.push(self.get_topn_row(item?));
         }
@@ -207,7 +223,10 @@ mod tests {
             .unwrap();
 
         // now ("ab", 4)
-        let valid_rows = managed_state.find_range(0, 1, epoch).await.unwrap();
+        let valid_rows = managed_state
+            .find_range(None, 0, Some(1), epoch)
+            .await
+            .unwrap();
 
         assert_eq!(valid_rows.len(), 1);
         assert_eq!(valid_rows[0].ordered_key, ordered_rows[3].clone());
@@ -215,7 +234,10 @@ mod tests {
         managed_state
             .insert(ordered_rows[2].clone(), rows[2].clone(), epoch)
             .unwrap();
-        let valid_rows = managed_state.find_range(1, 1, epoch).await.unwrap();
+        let valid_rows = managed_state
+            .find_range(None, 1, Some(1), epoch)
+            .await
+            .unwrap();
         assert_eq!(valid_rows.len(), 1);
         assert_eq!(valid_rows[0].ordered_key, ordered_rows[2].clone());
 
@@ -224,7 +246,10 @@ mod tests {
             .unwrap();
         assert_eq!(3, managed_state.total_count());
 
-        let valid_rows = managed_state.find_range(1, 2, epoch).await.unwrap();
+        let valid_rows = managed_state
+            .find_range(None, 1, Some(2), epoch)
+            .await
+            .unwrap();
         assert_eq!(valid_rows.len(), 2);
         assert_eq!(
             valid_rows.first().unwrap().ordered_key,
@@ -245,7 +270,10 @@ mod tests {
             .insert(ordered_rows[0].clone(), rows[0].clone(), epoch)
             .unwrap();
 
-        let valid_rows = managed_state.find_range(0, 3, epoch).await.unwrap();
+        let valid_rows = managed_state
+            .find_range(None, 0, Some(3), epoch)
+            .await
+            .unwrap();
 
         assert_eq!(valid_rows.len(), 3);
         assert_eq!(valid_rows[0].ordered_key, ordered_rows[3].clone());

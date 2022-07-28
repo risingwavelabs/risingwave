@@ -85,6 +85,19 @@ impl LocalFrontend {
         self.session_ref().run_statement(sql.as_str(), false).await
     }
 
+    pub async fn run_user_sql(
+        &self,
+        sql: impl Into<String>,
+        database: String,
+        user_name: String,
+        user_id: UserId,
+    ) -> std::result::Result<PgResponse, Box<dyn std::error::Error + Send + Sync>> {
+        let sql = sql.into();
+        self.session_user_ref(database, user_name, user_id)
+            .run_statement(sql.as_str(), false)
+            .await
+    }
+
     pub async fn query_formatted_result(&self, sql: impl Into<String>) -> Vec<String> {
         self.run_sql(sql)
             .await
@@ -126,6 +139,19 @@ impl LocalFrontend {
                 DEFAULT_SUPER_USER.to_string(),
                 DEFAULT_SUPER_USER_ID,
             )),
+            UserAuthenticator::None,
+        ))
+    }
+
+    pub fn session_user_ref(
+        &self,
+        database: String,
+        user_name: String,
+        user_id: UserId,
+    ) -> Arc<SessionImpl> {
+        Arc::new(SessionImpl::new(
+            self.env.clone(),
+            Arc::new(AuthContext::new(database, user_name, user_id)),
             UserAuthenticator::None,
         ))
     }
@@ -204,8 +230,8 @@ impl CatalogWriter for MockCatalogWriter {
         self.create_source_inner(source).map(|_| ())
     }
 
-    async fn create_sink(&self, sink: ProstSink) -> Result<()> {
-        self.create_sink_inner(sink).map(|_| ())
+    async fn create_sink(&self, sink: ProstSink, graph: StreamFragmentGraph) -> Result<()> {
+        self.create_sink_inner(sink, graph)
     }
 
     async fn drop_materialized_source(&self, source_id: u32, table_id: TableId) -> Result<()> {
@@ -341,7 +367,7 @@ impl MockCatalogWriter {
         Ok(source.id)
     }
 
-    fn create_sink_inner(&self, mut sink: ProstSink) -> Result<()> {
+    fn create_sink_inner(&self, mut sink: ProstSink, _graph: StreamFragmentGraph) -> Result<()> {
         sink.id = self.gen_id();
         self.catalog.write().create_sink(sink.clone());
         self.add_table_or_sink_id(sink.id, sink.schema_id, sink.database_id);

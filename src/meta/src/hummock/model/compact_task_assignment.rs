@@ -16,7 +16,7 @@ use prost::Message;
 use risingwave_hummock_sdk::HummockCompactionTaskId;
 use risingwave_pb::hummock::CompactTaskAssignment;
 
-use crate::model::MetadataModel;
+use crate::model::{MetadataModel, MetadataModelResult};
 
 /// `cf(compact_task_assignment)`: `CompactTaskId` -> `CompactTaskAssignment`
 const HUMMOCK_COMPACT_TASK_ASSIGNMENT: &str = "cf/compact_task_assignment";
@@ -42,7 +42,7 @@ impl MetadataModel for CompactTaskAssignment {
         prost
     }
 
-    fn key(&self) -> risingwave_common::error::Result<Self::KeyType> {
+    fn key(&self) -> MetadataModelResult<Self::KeyType> {
         Ok(self.compact_task.as_ref().unwrap().task_id)
     }
 }

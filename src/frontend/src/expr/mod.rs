@@ -37,11 +37,8 @@ mod utils;
 
 pub use agg_call::{AggCall, AggOrderBy, AggOrderByExpr};
 pub use correlated_input_ref::{CorrelatedId, CorrelatedInputRef};
-pub use function_call::{FunctionCall, FunctionCallVerboseDisplay};
-pub use input_ref::{
-    as_alias_display, input_ref_to_column_indices, InputRef, InputRefDisplay,
-    InputRefVerboseDisplay,
-};
+pub use function_call::{FunctionCall, FunctionCallDisplay};
+pub use input_ref::{as_alias_display, input_ref_to_column_indices, InputRef, InputRefDisplay};
 pub use literal::Literal;
 pub use subquery::{Subquery, SubqueryKind};
 pub use table_function::{TableFunction, TableFunctionType};
@@ -600,19 +597,19 @@ impl std::fmt::Debug for ExprImpl {
     }
 }
 
-pub struct ExprVerboseDisplay<'a> {
+pub struct ExprDisplay<'a> {
     pub expr: &'a ExprImpl,
     pub input_schema: &'a Schema,
 }
 
-impl std::fmt::Debug for ExprVerboseDisplay<'_> {
+impl std::fmt::Debug for ExprDisplay<'_> {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         let that = self.expr;
         match that {
             ExprImpl::InputRef(x) => write!(
                 f,
                 "{:?}",
-                InputRefVerboseDisplay {
+                InputRefDisplay {
                     input_ref: x,
                     input_schema: self.input_schema
                 }
@@ -621,7 +618,7 @@ impl std::fmt::Debug for ExprVerboseDisplay<'_> {
             ExprImpl::FunctionCall(x) => write!(
                 f,
                 "{:?}",
-                FunctionCallVerboseDisplay {
+                FunctionCallDisplay {
                     function_call: x,
                     input_schema: self.input_schema
                 }

@@ -16,12 +16,11 @@ use std::borrow::Borrow;
 use std::sync::Arc;
 
 use itertools::Itertools;
-use risingwave_common::error::Result;
 use risingwave_hummock_sdk::CompactionGroupId;
 
 use crate::hummock::compaction::level_selector::DynamicLevelSelector;
 use crate::hummock::compaction::{create_overlap_strategy, CompactStatus};
-use crate::model::MetadataModel;
+use crate::model::{MetadataModel, MetadataModelResult};
 
 const HUMMOCK_COMPACTION_STATUS_CF_NAME: &str = "cf/hummock_compaction_status";
 
@@ -41,7 +40,7 @@ impl MetadataModel for CompactStatus {
         prost.borrow().into()
     }
 
-    fn key(&self) -> Result<Self::KeyType> {
+    fn key(&self) -> MetadataModelResult<Self::KeyType> {
         Ok(self.compaction_group_id)
     }
 }

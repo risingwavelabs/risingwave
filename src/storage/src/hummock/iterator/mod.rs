@@ -12,6 +12,10 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+use std::future::Future;
+use std::marker::PhantomData;
+use std::ops::{Deref, DerefMut};
+
 use super::{HummockResult, HummockValue};
 
 mod forward_concat;
@@ -31,10 +35,11 @@ mod merge_inner;
 pub use forward_user::*;
 pub use merge_inner::{OrderedMergeIteratorInner, UnorderedMergeIteratorInner};
 
+use crate::hummock::iterator::HummockIteratorUnion::{First, Fourth, Second, Third};
+use crate::hummock::SstableIterator;
+
 #[cfg(any(test, feature = "test"))]
 pub mod test_utils;
-
-use async_trait::async_trait;
 
 use crate::monitor::StoreLocalStatistic;
 
@@ -44,10 +49,17 @@ use crate::monitor::StoreLocalStatistic;
 /// After creating the iterator instance,
 /// - if you want to iterate from the beginning, you need to then call its `rewind` method.
 /// - if you want to iterate from some specific position, you need to then call its `seek` method.
-#[async_trait]
-pub trait HummockIterator: Send + Sync {
+pub trait HummockIterator: Send + Sync + 'static {
     type Direction: HummockIteratorDirection;
-
+    type NextFuture<'a>: Future<Output = HummockResult<()>> + Send + 'a
+    where
+        Self: 'a;
+    type RewindFuture<'a>: Future<Output = HummockResult<()>> + Send + 'a
+    where
+        Self: 'a;
+    type SeekFuture<'a>: Future<Output = HummockResult<()>> + Send + 'a
+    where
+        Self: 'a;
     /// Moves a valid iterator to the next key.
     ///
     /// Note:
@@ -59,7 +71,7 @@ pub trait HummockIterator: Send + Sync {
     ///
     /// # Panics
     /// This function will panic if the iterator is invalid.
-    async fn next(&mut self) -> HummockResult<()>;
+    fn next(&mut self) -> Self::NextFuture<'_>;
 
     /// Retrieves the current key.
     ///
@@ -97,7 +109,7 @@ pub trait HummockIterator: Send + Sync {
     /// - Do not decide whether the position is valid or not by checking the returned error of this
     ///   function. This function WON'T return an `Err` if invalid. You should check `is_valid`
     ///   before starting iteration.
-    async fn rewind(&mut self) -> HummockResult<()>;
+    fn rewind(&mut self) -> Self::RewindFuture<'_>;
 
     /// Resets iterator and seeks to the first position where the key >= provided key, or key <=
     /// provided key if this is a backward iterator.
@@ -106,18 +118,180 @@ pub trait HummockIterator: Send + Sync {
     /// - Do not decide whether the position is valid or not by checking the returned error of this
     ///   function. This function WON'T return an `Err` if invalid. You should check `is_valid`
     ///   before starting iteration.
-    async fn seek(&mut self, key: &[u8]) -> HummockResult<()>;
+    fn seek<'a>(&'a mut self, key: &'a [u8]) -> Self::SeekFuture<'a>;
 
     /// take local statistic info from iterator to report metrics.
     fn collect_local_statistic(&self, _stats: &mut StoreLocalStatistic) {}
 }
 
-pub trait ForwardHummockIterator = HummockIterator<Direction = Forward>;
-pub trait BackwardHummockIterator = HummockIterator<Direction = Backward>;
+/// This is a placeholder trait used in `HummockIteratorUnion`
+pub struct PhantomHummockIterator<D: HummockIteratorDirection> {
+    _phantom: PhantomData<D>,
+}
 
-pub type BoxedForwardHummockIterator = Box<dyn ForwardHummockIterator>;
-pub type BoxedBackwardHummockIterator = Box<dyn BackwardHummockIterator>;
-pub type BoxedHummockIterator<D> = Box<dyn HummockIterator<Direction = D>>;
+impl<D: HummockIteratorDirection> HummockIterator for PhantomHummockIterator<D> {
+    type Direction = D;
+
+    type NextFuture<'a> = impl Future<Output = HummockResult<()>> + 'a;
+    type RewindFuture<'a> = impl Future<Output = HummockResult<()>> + 'a;
+    type SeekFuture<'a> = impl Future<Output = HummockResult<()>> + 'a;
+
+    fn next(&mut self) -> Self::NextFuture<'_> {
+        async { unreachable!() }
+    }
+
+    fn key(&self) -> &[u8] {
+        unreachable!()
+    }
+
+    fn value(&self) -> HummockValue<&[u8]> {
+        unreachable!()
+    }
+
+    fn is_valid(&self) -> bool {
+        unreachable!()
+    }
+
+    fn rewind(&mut self) -> Self::RewindFuture<'_> {
+        async { unreachable!() }
+    }
+
+    fn seek<'a>(&'a mut self, _key: &'a [u8]) -> Self::SeekFuture<'a> {
+        async { unreachable!() }
+    }
+}
+
+/// The `HummockIteratorUnion` acts like a wrapper over multiple types of `HummockIterator`, so that
+/// the `MergeIterator`, which previously takes multiple different `HummockIterator`s as input
+/// through `Box<dyn HummockIterator>`, can now wrap all its underlying `HummockIterator` over such
+/// `HummockIteratorUnion`, and the input type of the `MergeIterator` so that the input type of
+/// `HummockIterator` can be determined statically at compile time.
+///
+/// For example, in `ForwardUserIterator`, it accepts inputs from 4 sources for its underlying
+/// `MergeIterator`. First, the shared buffer replicated batches, and second, the shared buffer
+/// uncommitted data, and third, the overlapping L0 data, and last, the non-L0 non-overlapping
+/// concat-able. These sources used to be passed in as `Box<dyn HummockIterator>`. Now if we want
+/// the `MergeIterator` to be statically typed, the input type of `MergeIterator` will become the
+/// `HummockIteratorUnion` of these 4 sources.
+pub enum HummockIteratorUnion<
+    D: HummockIteratorDirection,
+    I1: HummockIterator<Direction = D>,
+    I2: HummockIterator<Direction = D>,
+    I3: HummockIterator<Direction = D> = PhantomHummockIterator<D>,
+    I4: HummockIterator<Direction = D> = PhantomHummockIterator<D>,
+> {
+    First(I1),
+    Second(I2),
+    Third(I3),
+    Fourth(I4),
+}
+
+impl<
+        D: HummockIteratorDirection,
+        I1: HummockIterator<Direction = D>,
+        I2: HummockIterator<Direction = D>,
+        I3: HummockIterator<Direction = D>,
+        I4: HummockIterator<Direction = D>,
+    > HummockIterator for HummockIteratorUnion<D, I1, I2, I3, I4>
+{
+    type Direction = D;
+
+    type NextFuture<'a> = impl Future<Output = HummockResult<()>> + 'a;
+    type RewindFuture<'a> = impl Future<Output = HummockResult<()>> + 'a;
+    type SeekFuture<'a> = impl Future<Output = HummockResult<()>> + 'a;
+
+    fn next(&mut self) -> Self::NextFuture<'_> {
+        async move {
+            match self {
+                First(iter) => iter.next().await,
+                Second(iter) => iter.next().await,
+                Third(iter) => iter.next().await,
+                Fourth(iter) => iter.next().await,
+            }
+        }
+    }
+
+    fn key(&self) -> &[u8] {
+        match self {
+            First(iter) => iter.key(),
+            Second(iter) => iter.key(),
+            Third(iter) => iter.key(),
+            Fourth(iter) => iter.key(),
+        }
+    }
+
+    fn value(&self) -> HummockValue<&[u8]> {
+        match self {
+            First(iter) => iter.value(),
+            Second(iter) => iter.value(),
+            Third(iter) => iter.value(),
+            Fourth(iter) => iter.value(),
+        }
+    }
+
+    fn is_valid(&self) -> bool {
+        match self {
+            First(iter) => iter.is_valid(),
+            Second(iter) => iter.is_valid(),
+            Third(iter) => iter.is_valid(),
+            Fourth(iter) => iter.is_valid(),
+        }
+    }
+
+    fn rewind(&mut self) -> Self::RewindFuture<'_> {
+        async move {
+            match self {
+                First(iter) => iter.rewind().await,
+                Second(iter) => iter.rewind().await,
+                Third(iter) => iter.rewind().await,
+                Fourth(iter) => iter.rewind().await,
+            }
+        }
+    }
+
+    fn seek<'a>(&'a mut self, key: &'a [u8]) -> Self::SeekFuture<'a> {
+        async move {
+            match self {
+                First(iter) => iter.seek(key).await,
+                Second(iter) => iter.seek(key).await,
+                Third(iter) => iter.seek(key).await,
+                Fourth(iter) => iter.seek(key).await,
+            }
+        }
+    }
+}
+
+impl<I: HummockIterator> HummockIterator for Box<I> {
+    type Direction = I::Direction;
+
+    type NextFuture<'a> = impl Future<Output = HummockResult<()>> + 'a;
+    type RewindFuture<'a> = impl Future<Output = HummockResult<()>> + 'a;
+    type SeekFuture<'a> = impl Future<Output = HummockResult<()>> + 'a;
+
+    fn next(&mut self) -> Self::NextFuture<'_> {
+        (*self).deref_mut().next()
+    }
+
+    fn key(&self) -> &[u8] {
+        (*self).deref().key()
+    }
+
+    fn value(&self) -> HummockValue<&[u8]> {
+        (*self).deref().value()
+    }
+
+    fn is_valid(&self) -> bool {
+        (*self).deref().is_valid()
+    }
+
+    fn rewind(&mut self) -> Self::RewindFuture<'_> {
+        (*self).deref_mut().rewind()
+    }
+
+    fn seek<'a>(&'a mut self, key: &'a [u8]) -> Self::SeekFuture<'a> {
+        (*self).deref_mut().seek(key)
+    }
+}
 
 #[derive(PartialEq, Eq, Debug)]
 pub enum DirectionEnum {
@@ -144,3 +318,6 @@ impl HummockIteratorDirection for Backward {
         DirectionEnum::Backward
     }
 }
+
+pub type MultiSstIterator =
+    UnorderedMergeIteratorInner<HummockIteratorUnion<Forward, ConcatIterator, SstableIterator>>;
