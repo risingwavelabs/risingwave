@@ -56,8 +56,7 @@ macro_rules! for_all_metrics {
             write_build_l0_sst_duration: Histogram,
             write_build_l0_bytes: GenericCounter<AtomicU64>,
 
-            iter_merge_sstable_counts: HistogramVec,
-            iter_merge_seek_duration: Histogram,
+            iter_merge_sstable_counts: Histogram,
 
             sst_store_block_request_counts: GenericCounterVec<AtomicU64>,
 
@@ -274,13 +273,6 @@ impl StateStoreMetrics {
         let iter_merge_sstable_counts =
             register_histogram_vec_with_registry!(opts, &["type"], registry).unwrap();
 
-        let opts = histogram_opts!(
-            "state_store_iter_merge_seek_duration",
-            "Seek() time conducted by MergeIterators",
-            exponential_buckets(1.0, 2.0, 17).unwrap() // max 65536 times
-        );
-        let iter_merge_seek_duration = register_histogram_with_registry!(opts, registry).unwrap();
-
         // ----- sst store -----
         let sst_store_block_request_counts = register_int_counter_vec_with_registry!(
             "state_store_sst_store_block_request_counts",
@@ -410,7 +402,6 @@ impl StateStoreMetrics {
             write_build_l0_sst_duration,
             write_build_l0_bytes,
             iter_merge_sstable_counts,
-            iter_merge_seek_duration,
             sst_store_block_request_counts,
             shared_buffer_to_l0_duration,
             shared_buffer_to_sstable_size,
