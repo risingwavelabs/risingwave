@@ -60,7 +60,7 @@ fn reproduce_failing_queries(setup: &str, failing: &str) {
 
 ---- END
 ",
-        failing, setup
+        setup, failing
     );
 }
 
@@ -93,6 +93,10 @@ async fn create_tables(session: Arc<SessionImpl>, rng: &mut impl Rng) -> (Vec<Ta
     (tables, setup_sql)
 }
 
+#[allow(dead_code)]
+#[allow(unreachable_code)]
+#[allow(unused_variables)]
+#[allow(unused_mut)]
 fn test_batch_queries(
     session: Arc<SessionImpl>,
     tables: Vec<Table>,
@@ -116,9 +120,11 @@ fn test_batch_queries(
                     session.env().catalog_reader().read_guard(),
                     session.database().to_string(),
                 );
-                let bound = binder
-                    .bind(stmt.clone())
-                    .unwrap_or_else(|e| panic!("Failed to bind:\nReason:\n{}", e));
+                panic!("Failed to bind");
+                let bound = todo!();
+                // let bound = binder
+                //     .bind(stmt.clone())
+                //     .unwrap_or_else(|e| panic!("Failed to bind:\nReason:\n{}", e));
                 let mut planner = Planner::new(context.clone());
                 let logical_plan = planner
                     .plan(bound)
