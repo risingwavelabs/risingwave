@@ -26,18 +26,15 @@ cargo make link-all-in-one-binaries
 echo "debug stuff 1"
 apt-get update
 echo "debug stuff 2"
-apt-get -y install apt-transport-https \
-     ca-certificates \
-     curl \
-     gnupg2 \
-     software-properties-common
+apt install apt-transport-https ca-certificates curl software-properties-common
 echo "debug stuff 3"
-curl -fsSL https://download.docker.com/linux/$(. /etc/os-release; echo "$ID")/gpg > /tmp/dkey; apt-key add /tmp/dkey
+curl -fsSL https://download.docker.com/linux/ubuntu/gpg | apt-key add -
 echo "debug stuff 4"
+add-apt-repository "deb [arch=amd64] https://download.docker.com/linux/ubuntu `lsb_release -cs` test"
 echo "debug stuff 5"
-apt-get update
+apt update
 echo "debug stuff 6"
-apt-get -y install docker-ce
+apt install docker-ce
 echo "debug stuff 7"
 docker port mysql
 
