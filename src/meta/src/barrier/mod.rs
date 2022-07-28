@@ -378,13 +378,29 @@ where
         complete_nodes
     }
 
-    /// Pause inject barrier until True
+    /// Pause inject barrier until True.
     fn can_inject_barrier(&self, in_flight_barrier_nums: usize) -> bool {
-        self.command_ctx_queue
+        let in_flight_not_full = self
+            .command_ctx_queue
             .iter()
             .filter(|x| matches!(x.state, InFlight))
             .count()
-            < in_flight_barrier_nums
+            < in_flight_barrier_nums;
+
+        // Whether some command requires pausing concurrent barrier. If so, it must be the last one.
+        let should_pause = self
+            .command_ctx_queue
+            .back()
+            .map(|x| x.command_ctx.command.should_pause_inject_barrier())
+            .unwrap_or(false);
+        debug_assert_eq!(
+            self.command_ctx_queue
+                .iter()
+                .any(|x| x.command_ctx.command.should_pause_inject_barrier()),
+            should_pause
+        );
+
+        in_flight_not_full && !should_pause
     }
 
     /// After some command is committed, the changes will be applied to the meta store so we can
