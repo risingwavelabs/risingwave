@@ -89,6 +89,7 @@ pub struct InnerLocalTopNExecutorNew<S: StateStore> {
     /// We are interested in which element is in the range of [offset, offset+limit).
     managed_state: ManagedTopNStateNew<S>,
 
+    // TODO: support multiple group keys
     /// which column we used to group the data.
     group_by: usize,
 
@@ -209,9 +210,9 @@ impl<S: StateStore> TopNExecutorBase for InnerLocalTopNExecutorNew<S> {
         chunk: StreamChunk,
         epoch: u64,
     ) -> StreamExecutorResult<StreamChunk> {
-        let mut res_ops = Vec::with_capacity(self.limit.unwrap_or_default());
-        let mut res_rows = Vec::with_capacity(self.limit.unwrap_or_default());
-        let num_limit = self.limit.unwrap();
+        let mut res_ops = Vec::with_capacity(self.limit.unwrap_or(1024));
+        let mut res_rows = Vec::with_capacity(self.limit.unwrap_or(1024));
+
         // Record all groups encountered in the input
         let mut unique_group_keys = HashSet::new();
 
@@ -228,7 +229,7 @@ impl<S: StateStore> TopNExecutorBase for InnerLocalTopNExecutorNew<S> {
                 let prefix_key = Row::new(vec![datum.clone()]);
                 let old_rows = self
                     .managed_state
-                    .find_range(Some(&prefix_key), self.offset, num_limit, epoch)
+                    .find_range(Some(&prefix_key), self.offset, self.limit, epoch)
                     .await?;
                 // TODO: Don't delete all the previous data and then insert new data,
                 emit_multi_rows(&mut res_ops, &mut res_rows, Op::Delete, old_rows);
@@ -253,7 +254,7 @@ impl<S: StateStore> TopNExecutorBase for InnerLocalTopNExecutorNew<S> {
             let prefix_key = Row::new(vec![group_key.clone()]);
             let new_rows = self
                 .managed_state
-                .find_range(Some(&prefix_key), self.offset, num_limit, epoch)
+                .find_range(Some(&prefix_key), self.offset, self.limit, epoch)
                 .await?;
             emit_multi_rows(&mut res_ops, &mut res_rows, Op::Insert, new_rows);
         }
@@ -304,6 +305,22 @@ mod tests {
     use crate::executor::test_utils::MockSource;
     use crate::executor::{Barrier, Message};
 
+    fn create_schema() -> Schema {
+        Schema {
+            fields: vec![
+                Field::unnamed(DataType::Int64),
+                Field::unnamed(DataType::Int64),
+            ],
+        }
+    }
+
+    fn create_order_pairs() -> Vec<OrderPair> {
+        vec![
+            OrderPair::new(1, OrderType::Ascending),
+            OrderPair::new(0, OrderType::Ascending),
+        ]
+    }
+
     fn create_stream_chunks() -> Vec<StreamChunk> {
         let chunk0 = StreamChunk::from_pretty(
             "  I I
@@ -336,22 +353,6 @@ mod tests {
         vec![chunk0, chunk1, chunk2, chunk3]
     }
 
-    fn create_schema() -> Schema {
-        Schema {
-            fields: vec![
-                Field::unnamed(DataType::Int64),
-                Field::unnamed(DataType::Int64),
-            ],
-        }
-    }
-
-    fn create_order_pairs() -> Vec<OrderPair> {
-        vec![
-            OrderPair::new(1, OrderType::Ascending),
-            OrderPair::new(0, OrderType::Ascending),
-        ]
-    }
-
     fn create_source() -> Box<MockSource> {
         let mut chunks = create_stream_chunks();
         let schema = create_schema();
@@ -377,19 +378,36 @@ mod tests {
         let mut rhs_message = HashSet::new();
         for (op, row_ref) in lhs_chunk.rows() {
             let row = row_ref.to_owned_row();
-            lhs_message.insert((op, row.clone()));
+            let op_code = match op {
+                Op::Insert => 1,
+                Op::Delete => 2,
+                Op::UpdateDelete => 3,
+                Op::UpdateInsert => 4,
+            };
+            lhs_message.insert((op_code, row.clone()));
         }
 
         for (op, row_ref) in rhs_chunk.rows() {
             let row = row_ref.to_owned_row();
-            rhs_message.insert((op, row.clone()));
+            let op_code = match op {
+                Op::Insert => 1,
+                Op::Delete => 2,
+                Op::UpdateDelete => 3,
+                Op::UpdateInsert => 4,
+            };
+            rhs_message.insert((op_code, row.clone()));
         }
 
         assert_eq!(lhs_message, rhs_message);
     }
 
     #[tokio::test]
-    async fn test_local_top_n_executor_with_offset() {
+    async fn test_local_top_n_executor() {
+        test_without_offset_and_with_limits().await;
+        test_with_offset_and_with_limits().await;
+        test_without_limits().await;
+    }
+    async fn test_without_offset_and_with_limits() {
         let order_types = create_order_pairs();
         let source = create_source();
         let top_n_executor = Box::new(
@@ -473,6 +491,178 @@ mod tests {
                 "  I I
             +  2 1
             +  3 1",
+            ),
+        );
+    }
+
+    async fn test_with_offset_and_with_limits() {
+        let order_types = create_order_pairs();
+        let source = create_source();
+        let top_n_executor = Box::new(
+            LocalTopNExecutor::new(
+                source as Box<dyn Executor>,
+                order_types,
+                (1, Some(2)),
+                vec![1, 0],
+                MemoryStateStore::new(),
+                TableId::from(0x2333),
+                0,
+                1,
+                vec![],
+                1,
+            )
+            .unwrap(),
+        );
+        let mut top_n_executor = top_n_executor.execute();
+
+        // consume the init barrier
+        top_n_executor.next().await.unwrap().unwrap();
+        let res = top_n_executor.next().await.unwrap().unwrap();
+        compare_stream_chunk(
+            res.as_chunk().unwrap(),
+            &StreamChunk::from_pretty(
+                "  I I
+            +  8 8
+            +  9 1
+            + 10 1",
+            ),
+        );
+
+        // barrier
+        assert_matches!(
+            top_n_executor.next().await.unwrap().unwrap(),
+            Message::Barrier(_)
+        );
+        let res = top_n_executor.next().await.unwrap().unwrap();
+        compare_stream_chunk(
+            res.as_chunk().unwrap(),
+            &StreamChunk::from_pretty(
+                "  I I
+            -  8 8
+            -  9 1
+            - 10 1
+            +  9 1",
+            ),
+        );
+
+        // barrier
+        assert_matches!(
+            top_n_executor.next().await.unwrap().unwrap(),
+            Message::Barrier(_)
+        );
+        let res = top_n_executor.next().await.unwrap().unwrap();
+        compare_stream_chunk(
+            res.as_chunk().unwrap(),
+            &StreamChunk::from_pretty(
+                "  I I
+            -  9 1",
+            ),
+        );
+
+        // barrier
+        assert_matches!(
+            top_n_executor.next().await.unwrap().unwrap(),
+            Message::Barrier(_)
+        );
+        let res = top_n_executor.next().await.unwrap().unwrap();
+        compare_stream_chunk(
+            res.as_chunk().unwrap(),
+            &StreamChunk::from_pretty(
+                "  I I
+            +  3 1
+            +  4 1",
+            ),
+        );
+    }
+
+    async fn test_without_limits() {
+        let order_types = create_order_pairs();
+        let source = create_source();
+        let top_n_executor = Box::new(
+            LocalTopNExecutor::new(
+                source as Box<dyn Executor>,
+                order_types,
+                (0, None),
+                vec![1, 0],
+                MemoryStateStore::new(),
+                TableId::from(0x2333),
+                0,
+                1,
+                vec![],
+                1,
+            )
+            .unwrap(),
+        );
+        let mut top_n_executor = top_n_executor.execute();
+
+        // consume the init barrier
+        top_n_executor.next().await.unwrap().unwrap();
+        let res = top_n_executor.next().await.unwrap().unwrap();
+        compare_stream_chunk(
+            res.as_chunk().unwrap(),
+            &StreamChunk::from_pretty(
+                "  I I
+            + 10 9
+            +  8 8
+            +  7 8
+            +  9 1
+            + 10 1
+            +  8 1",
+            ),
+        );
+
+        // barrier
+        assert_matches!(
+            top_n_executor.next().await.unwrap().unwrap(),
+            Message::Barrier(_)
+        );
+        let res = top_n_executor.next().await.unwrap().unwrap();
+        compare_stream_chunk(
+            res.as_chunk().unwrap(),
+            &StreamChunk::from_pretty(
+                "  I I
+            - 10 9
+            -  8 8
+            -  7 8
+            -  9 1
+            - 10 1
+            -  8 1
+            +  7 8
+            +  9 1
+            +  8 1",
+            ),
+        );
+
+        // barrier
+        assert_matches!(
+            top_n_executor.next().await.unwrap().unwrap(),
+            Message::Barrier(_)
+        );
+        let res = top_n_executor.next().await.unwrap().unwrap();
+        compare_stream_chunk(
+            res.as_chunk().unwrap(),
+            &StreamChunk::from_pretty(
+                "  I I
+            -  9 1
+            -  8 1
+            -  7 8",
+            ),
+        );
+
+        // barrier
+        assert_matches!(
+            top_n_executor.next().await.unwrap().unwrap(),
+            Message::Barrier(_)
+        );
+        let res = top_n_executor.next().await.unwrap().unwrap();
+        compare_stream_chunk(
+            res.as_chunk().unwrap(),
+            &StreamChunk::from_pretty(
+                "  I  I
+            +  5  1
+            +  2  1
+            +  3  1
+            +  4  1",
             ),
         );
     }
