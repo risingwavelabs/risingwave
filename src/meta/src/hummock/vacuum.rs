@@ -14,16 +14,17 @@
 
 use std::collections::HashSet;
 use std::sync::Arc;
+use std::time::Duration;
 
 use itertools::Itertools;
-use risingwave_common::error::Result;
 use risingwave_hummock_sdk::HummockSstableId;
-use risingwave_pb::hummock::VacuumTask;
+use risingwave_pb::hummock::subscribe_compact_tasks_response::Task;
+use risingwave_pb::hummock::{FullScanTask, VacuumTask};
 
+use crate::hummock::error::{Error, Result};
 use crate::hummock::{CompactorManager, HummockManagerRef};
 use crate::storage::MetaStore;
 
-// TODO #4037: GC orphan SSTs in object store
 pub struct VacuumTrigger<S: MetaStore> {
     hummock_manager: HummockManagerRef<S>,
     /// Use the CompactorManager to dispatch VacuumTask.
@@ -50,7 +51,7 @@ where
     /// Tries to make checkpoint at the minimum pinned version.
     ///
     /// Returns number of deleted deltas
-    pub async fn vacuum_version_metadata(&self) -> Result<usize> {
+    pub async fn vacuum_metadata(&self) -> Result<usize> {
         self.hummock_manager.proceed_version_checkpoint().await?;
         let batch_size = 64usize;
         let mut total_deleted = 0;
@@ -114,14 +115,11 @@ where
 
             // 2. Send task.
             match compactor
-                .send_task(
-                    None,
-                    Some(VacuumTask {
-                        // The SST id doesn't necessarily have a counterpart SST file in S3, but
-                        // it's OK trying to delete it.
-                        sstable_ids: delete_batch.clone(),
-                    }),
-                )
+                .send_task(Task::VacuumTask(VacuumTask {
+                    // The SST id doesn't necessarily have a counterpart SST file in S3, but
+                    // it's OK trying to delete it.
+                    sstable_ids: delete_batch.clone(),
+                }))
                 .await
             {
                 Ok(_) => {
@@ -167,11 +165,33 @@ where
         tracing::info!("Finish vacuuming SSTs {:?}", vacuum_task.sstable_ids);
         Ok(())
     }
+
+    /// Runs a full GC.
+    /// 1. Meta node sends a `FullScanTask` to a compactor in this method.
+    /// 2. The compactor returns scan result of object store to meta node. See
+    /// `Vacuum::full_scan_inner` in storage crate. 3. Meta node decides which SSTs to delete.
+    /// See `HummockManager::extend_ssts_to_delete_from_scan`.
+    pub async fn run_full_gc(&self, sst_retention_time: Duration) -> Result<()> {
+        let compactor = match self.compactor_manager.next_compactor() {
+            None => {
+                tracing::warn!("Try full GC but no available worker.");
+                return Ok(());
+            }
+            Some(compactor) => compactor,
+        };
+        compactor
+            .send_task(Task::FullScanTask(FullScanTask {
+                sst_retention_time_sec: sst_retention_time.as_secs(),
+            }))
+            .await
+            .map_err(|_| Error::CompactorUnreachable(compactor.context_id()))
+    }
 }
 
 #[cfg(test)]
 mod tests {
     use std::sync::Arc;
+    use std::time::Duration;
 
     use itertools::Itertools;
     use risingwave_pb::hummock::VacuumTask;
@@ -184,7 +204,8 @@ mod tests {
         let (_env, hummock_manager, _cluster_manager, _worker_node) = setup_compute_env(80).await;
         let compactor_manager = Arc::new(CompactorManager::new());
         let vacuum = Arc::new(VacuumTrigger::new(hummock_manager, compactor_manager));
-        let (join_handle, shutdown_sender) = start_vacuum_scheduler(vacuum);
+        let (join_handle, shutdown_sender) =
+            start_vacuum_scheduler(vacuum, Duration::from_secs(60));
         shutdown_sender.send(()).unwrap();
         join_handle.await.unwrap();
     }
@@ -200,12 +221,7 @@ mod tests {
         ));
         let _receiver = compactor_manager.add_compactor(0);
 
-        assert_eq!(
-            VacuumTrigger::vacuum_version_metadata(&vacuum)
-                .await
-                .unwrap(),
-            0
-        );
+        assert_eq!(VacuumTrigger::vacuum_metadata(&vacuum).await.unwrap(), 0);
 
         assert_eq!(
             VacuumTrigger::vacuum_sst_data(&vacuum).await.unwrap().len(),
@@ -218,12 +234,7 @@ mod tests {
 
         // Makes checkpoint and extends deltas_to_delete. Deletes deltas of v0->v1 and v2->v3.
         // Delta of v1->v2 cannot be deleted yet because it's used by ssts_to_delete.
-        assert_eq!(
-            VacuumTrigger::vacuum_version_metadata(&vacuum)
-                .await
-                .unwrap(),
-            2
-        );
+        assert_eq!(VacuumTrigger::vacuum_metadata(&vacuum).await.unwrap(), 2);
 
         // Found ssts_to_delete
         assert_eq!(
@@ -238,12 +249,7 @@ mod tests {
         );
 
         // The delta cannot be deleted yet.
-        assert_eq!(
-            VacuumTrigger::vacuum_version_metadata(&vacuum)
-                .await
-                .unwrap(),
-            0
-        );
+        assert_eq!(VacuumTrigger::vacuum_metadata(&vacuum).await.unwrap(), 0);
 
         // The vacuum task is reported.
         vacuum
@@ -259,12 +265,7 @@ mod tests {
             .unwrap();
 
         // The delta can be deleted now.
-        assert_eq!(
-            VacuumTrigger::vacuum_version_metadata(&vacuum)
-                .await
-                .unwrap(),
-            1
-        );
+        assert_eq!(VacuumTrigger::vacuum_metadata(&vacuum).await.unwrap(), 1);
 
         // No ssts_to_delete.
         assert_eq!(
@@ -272,6 +273,4 @@ mod tests {
             0
         );
     }
-
-    // TODO #4081: re-enable after orphan SST GC via listing object store is implemented
 }

@@ -17,30 +17,26 @@ use std::sync::Arc;
 use rand::Rng;
 use risingwave_common::error::{ErrorCode, Result, ToErrorStr};
 use risingwave_hummock_sdk::HummockContextId;
-use risingwave_pb::hummock::{CompactTask, SubscribeCompactTasksResponse, VacuumTask};
+use risingwave_pb::hummock::subscribe_compact_tasks_response::Task;
+use risingwave_pb::hummock::SubscribeCompactTasksResponse;
 use tokio::sync::mpsc::{Receiver, Sender};
 
 const STREAM_BUFFER_SIZE: usize = 4;
 
 pub type CompactorManagerRef = Arc<CompactorManager>;
 
+/// Wraps the stream between meta node and compactor node.
+/// Compactor node will re-establish the stream when the previous one fails.
 pub struct Compactor {
     context_id: HummockContextId,
     sender: Sender<Result<SubscribeCompactTasksResponse>>,
 }
 
 impl Compactor {
-    pub async fn send_task(
-        &self,
-        compact_task: Option<CompactTask>,
-        vacuum_task: Option<VacuumTask>,
-    ) -> Result<()> {
+    pub async fn send_task(&self, task: Task) -> Result<()> {
         // TODO: compactor node backpressure
         self.sender
-            .send(Ok(SubscribeCompactTasksResponse {
-                compact_task,
-                vacuum_task,
-            }))
+            .send(Ok(SubscribeCompactTasksResponse { task: Some(task) }))
             .await
             .map_err(|e| ErrorCode::InternalError(e.to_error_str()).into())
     }
@@ -128,12 +124,12 @@ impl CompactorManager {
             context_id,
             sender: tx,
         }));
-        tracing::info!("Added compactor {}", context_id);
+        tracing::info!("Added compactor session {}", context_id);
         rx
     }
 
     pub fn remove_compactor(&self, context_id: HummockContextId) {
-        tracing::info!("Removed compactor {}", context_id);
+        tracing::info!("Removed compactor session {}", context_id);
         self.inner
             .write()
             .compactors
@@ -145,7 +141,9 @@ impl CompactorManager {
 mod tests {
     use std::collections::HashMap;
 
+    use risingwave_common::try_match_expand;
     use risingwave_hummock_sdk::compaction_group::StaticCompactionGroupId;
+    use risingwave_pb::hummock::subscribe_compact_tasks_response::Task;
     use risingwave_pb::hummock::CompactTask;
     use tokio::sync::mpsc::error::TryRecvError;
 
@@ -223,12 +221,14 @@ mod tests {
             .first()
             .unwrap()
             .clone();
-        compactor.send_task(Some(task.clone()), None).await.unwrap();
+        compactor
+            .send_task(Task::CompactTask(task.clone()))
+            .await
+            .unwrap();
         // Receive a compact task.
-        assert_eq!(
-            receiver.try_recv().unwrap().unwrap().compact_task.unwrap(),
-            task
-        );
+        let received_task = receiver.try_recv().unwrap().unwrap().task.unwrap();
+        let received_compact_task = try_match_expand!(received_task, Task::CompactTask).unwrap();
+        assert_eq!(received_compact_task, task);
 
         compactor_manager.remove_compactor(compactor.context_id);
         assert_eq!(compactor_manager.inner.read().compactors.len(), 0);
@@ -264,12 +264,14 @@ mod tests {
             .await
             .unwrap()
             .unwrap();
-        compactor.send_task(Some(task.clone()), None).await.unwrap();
+        compactor
+            .send_task(Task::CompactTask(task.clone()))
+            .await
+            .unwrap();
         // Get a compact task.
-        assert_eq!(
-            receiver.try_recv().unwrap().unwrap().compact_task.unwrap(),
-            task
-        );
+        let received_task = receiver.try_recv().unwrap().unwrap().task.unwrap();
+        let received_compact_task = try_match_expand!(received_task, Task::CompactTask).unwrap();
+        assert_eq!(received_compact_task, task);
 
         compactor_manager.remove_compactor(compactor.context_id());
         assert_eq!(compactor_manager.inner.read().compactors.len(), 0);
