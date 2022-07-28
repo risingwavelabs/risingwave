@@ -14,6 +14,7 @@
 
 use std::sync::Arc;
 
+use risingwave_common::array::column::Column;
 use risingwave_common::array::{
     ArrayBuilder, ArrayImpl, ArrayRef, DataChunk, I16ArrayBuilder, Row,
 };
@@ -67,28 +68,21 @@ impl Expression for VnodeExpression {
             .dist_key_exprs
             .iter()
             .map(|c| c.eval_checked(input))
-            .collect::<Result<Vec<_>>>()?;
+            .map(|res| res.map(Column::new))
+            .try_collect()?;
+        let dist_key_chunk = DataChunk::new(dist_key_columns, input.vis());
 
-        let row_len = input.capacity();
-        let vis = input.vis();
-        let mut builder = I16ArrayBuilder::new(row_len);
+        let hash_values = dist_key_chunk.get_hash_values(
+            &(0..self.dist_key_exprs.len()).collect::<Vec<_>>(),
+            CRC32FastBuilder {},
+        )?;
 
-        for row_idx in 0..row_len {
-            if !vis.is_set(row_idx) {
-                builder.append(None)?;
-                continue;
-            }
+        let mut builder = I16ArrayBuilder::new(input.capacity());
+        hash_values
+            .into_iter()
+            .try_for_each(|h| builder.append(Some(h.to_vnode() as i16)))?;
 
-            let dist_key = dist_key_columns
-                .iter()
-                .map(|col| col.datum_at(row_idx))
-                .collect();
-            let dist_key_row = Row::new(dist_key);
-            let vnode = dist_key_row.hash_row(&CRC32FastBuilder {}).to_vnode() as i16;
-            builder.append(Some(vnode))?;
-        }
-        let output = builder.finish()?;
-        Ok(Arc::new(ArrayImpl::from(output)))
+        Ok(Arc::new(ArrayImpl::from(builder.finish()?)))
     }
 
     fn eval_row(&self, input: &Row) -> Result<Datum> {
