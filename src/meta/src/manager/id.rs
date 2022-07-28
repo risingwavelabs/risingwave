@@ -135,6 +135,7 @@ pub mod IdCategory {
     pub const Source: IdCategoryType = 10;
     pub const HummockCompactionTask: IdCategoryType = 11;
     pub const User: IdCategoryType = 12;
+    pub const Sink: IdCategoryType = 13;
 }
 
 pub type IdGeneratorManagerRef<S> = Arc<IdGeneratorManager<S>>;
