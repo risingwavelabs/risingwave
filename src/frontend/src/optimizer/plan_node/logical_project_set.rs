@@ -245,7 +245,7 @@ impl LogicalProjectSet {
                     let mut from = FixedBitSet::with_capacity(select_list.len() + 1);
                     from.set(0, true);
                     for i in i.from.ones() {
-                        from.set(i2o[&(i + 1)], true);
+                        from.set(i2o[&i], true);
                     }
                     from
                 };
