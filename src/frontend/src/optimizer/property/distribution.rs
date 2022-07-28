@@ -175,12 +175,12 @@ pub struct DistributionDisplay<'a> {
 impl DistributionDisplay<'_> {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         let that = self.distribution;
-        f.write_str("[")?;
         match that {
-            Distribution::Single => f.write_str("Single")?,
-            Distribution::SomeShard => f.write_str("SomeShard")?,
-            Distribution::Broadcast => f.write_str("Broadcast")?,
+            Distribution::Single => f.write_str("Single"),
+            Distribution::SomeShard => f.write_str("SomeShard"),
+            Distribution::Broadcast => f.write_str("Broadcast"),
             Distribution::HashShard(vec) => {
+                f.write_str("HashShard(")?;
                 for key in vec.iter().copied().with_position() {
                     std::fmt::Debug::fmt(
                         &FieldDisplay(self.input_schema.fields.get(key.into_inner()).unwrap()),
@@ -193,9 +193,9 @@ impl DistributionDisplay<'_> {
                         _ => {}
                     }
                 }
+                f.write_str(")")
             }
         }
-        f.write_str("]")
     }
 }
 
