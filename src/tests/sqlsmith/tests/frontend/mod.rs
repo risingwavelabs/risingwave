@@ -33,7 +33,7 @@ async fn handle(session: Arc<SessionImpl>, stmt: Statement, setup_sql: &str, sql
     reproduce_failing_queries(setup_sql, sql);
     handler::handle(session.clone(), stmt, sql, false)
         .await
-        .unwrap_or_else(|e| panic!("Panic Reason:\n{}", e));
+        .unwrap_or_else(|e| panic!("Error Reason:\n{}", e));
 }
 
 fn get_seed_table_sql() -> String {
@@ -50,7 +50,16 @@ fn get_seed_table_sql() -> String {
 /// (This applies to nexmark).
 fn reproduce_failing_queries(setup: &str, failing: &str) {
     eprintln!(
-        "-- Failing SQL setup code:\n{}\n-- Failing SQL query:\n{}\n",
+        "
+---- START
+
+-- Failing SQL setup code:
+{}
+-- Failing SQL query:
+{}
+
+---- END
+",
         failing, setup
     );
 }
