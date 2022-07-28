@@ -36,6 +36,8 @@ apt update
 echo "debug stuff 6"
 apt install docker-ce -y
 echo "debug stuff 7"
+systemctl start docker
+echo "debug stuff 7"
 docker port mysql
 
 echo "--- e2e test w/ Rust frontend - sink with mysql"
