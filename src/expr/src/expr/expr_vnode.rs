@@ -85,7 +85,7 @@ impl Expression for VnodeExpression {
                 .collect();
             let dist_key_row = Row::new(dist_key);
             let vnode = dist_key_row.hash_row(&CRC32FastBuilder {}).to_vnode() as i32;
-            builder.append(Some(vnode.into()))?;
+            builder.append(Some(vnode))?;
         }
         let output = builder.finish()?;
         Ok(Arc::new(ArrayImpl::from(output)))

@@ -161,9 +161,9 @@ impl FunctionCall {
             }),
             ExprType::Vnode => {
                 if inputs.is_empty() {
-                    return Err(ErrorCode::BindError(format!(
-                        "Function `Vnode` takes at least 1 arguments (0 given)"
-                    ))
+                    return Err(ErrorCode::BindError(
+                        "Function `Vnode` takes at least 1 arguments (0 given)".to_string(),
+                    )
                     .into());
                 }
                 Ok(DataType::Int32)
