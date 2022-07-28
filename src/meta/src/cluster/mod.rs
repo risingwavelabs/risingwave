@@ -22,7 +22,6 @@ use std::time::{Duration, SystemTime};
 
 use itertools::Itertools;
 use risingwave_common::error::{internal_error, ErrorCode, Result};
-use risingwave_common::try_match_expand;
 use risingwave_common::types::ParallelUnitId;
 use risingwave_pb::common::worker_node::State;
 use risingwave_pb::common::{HostAddress, ParallelUnit, WorkerNode, WorkerType};
@@ -339,7 +338,7 @@ impl ClusterManagerCore {
     where
         S: MetaStore,
     {
-        let workers = try_match_expand!(Worker::list(&*meta_store).await, Ok, "Worker::list fail")?;
+        let workers = Worker::list(&*meta_store).await?;
         let mut worker_map = HashMap::new();
         let mut parallel_units = Vec::new();
 
@@ -407,7 +406,7 @@ impl ClusterManagerCore {
                 None => true,
                 Some(state) => state as i32 == w.state,
             })
-            .collect::<Vec<_>>()
+            .collect_vec()
     }
 
     fn list_parallel_units(&self) -> Vec<ParallelUnit> {

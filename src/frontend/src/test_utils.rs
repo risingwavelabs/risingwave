@@ -230,8 +230,8 @@ impl CatalogWriter for MockCatalogWriter {
         self.create_source_inner(source).map(|_| ())
     }
 
-    async fn create_sink(&self, sink: ProstSink) -> Result<()> {
-        self.create_sink_inner(sink).map(|_| ())
+    async fn create_sink(&self, sink: ProstSink, graph: StreamFragmentGraph) -> Result<()> {
+        self.create_sink_inner(sink, graph)
     }
 
     async fn drop_materialized_source(&self, source_id: u32, table_id: TableId) -> Result<()> {
@@ -367,7 +367,7 @@ impl MockCatalogWriter {
         Ok(source.id)
     }
 
-    fn create_sink_inner(&self, mut sink: ProstSink) -> Result<()> {
+    fn create_sink_inner(&self, mut sink: ProstSink, _graph: StreamFragmentGraph) -> Result<()> {
         sink.id = self.gen_id();
         self.catalog.write().create_sink(sink.clone());
         self.add_table_or_sink_id(sink.id, sink.schema_id, sink.database_id);

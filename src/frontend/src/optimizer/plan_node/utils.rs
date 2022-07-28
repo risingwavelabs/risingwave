@@ -13,8 +13,10 @@
 // limitations under the License.
 
 use std::collections::{HashMap, HashSet};
+use std::fmt;
 
-use risingwave_common::catalog::{ColumnDesc, Field};
+use itertools::Itertools;
+use risingwave_common::catalog::{ColumnDesc, Field, Schema};
 use risingwave_common::util::sort_util::OrderType;
 
 use crate::catalog::column_catalog::ColumnCatalog;
@@ -131,5 +133,39 @@ impl TableCatalogBuilder {
             .collect();
 
         self.build(dist_indices_on_table_columns, append_only)
+    }
+}
+
+#[derive(Clone, Copy)]
+pub struct IndicesDisplay<'a> {
+    pub vec: &'a [usize],
+    pub input_schema: &'a Schema,
+}
+
+impl fmt::Display for IndicesDisplay<'_> {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(
+            f,
+            "[{}]",
+            self.vec
+                .iter()
+                .map(|i| self.input_schema.fields.get(*i).unwrap().name.clone())
+                .collect_vec()
+                .join(", ")
+        )
+    }
+}
+
+impl fmt::Debug for IndicesDisplay<'_> {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(
+            f,
+            "[{}]",
+            self.vec
+                .iter()
+                .map(|i| self.input_schema.fields.get(*i).unwrap().name.clone())
+                .collect_vec()
+                .join(", ")
+        )
     }
 }

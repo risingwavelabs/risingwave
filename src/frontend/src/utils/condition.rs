@@ -25,8 +25,7 @@ use risingwave_common::util::scan_range::ScanRange;
 
 use crate::expr::{
     factorization_expr, fold_boolean_constant, push_down_not, to_conjunctions,
-    try_get_bool_constant, ExprImpl, ExprRewriter, ExprType, ExprVerboseDisplay, ExprVisitor,
-    InputRef,
+    try_get_bool_constant, ExprDisplay, ExprImpl, ExprRewriter, ExprType, ExprVisitor, InputRef,
 };
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
@@ -520,12 +519,12 @@ impl Condition {
     }
 }
 
-pub struct ConditionVerboseDisplay<'a> {
+pub struct ConditionDisplay<'a> {
     pub condition: &'a Condition,
     pub input_schema: &'a Schema,
 }
 
-impl ConditionVerboseDisplay<'_> {
+impl ConditionDisplay<'_> {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         let that = self.condition;
         let mut conjunctions = that.conjunctions.iter();
@@ -533,7 +532,7 @@ impl ConditionVerboseDisplay<'_> {
             write!(
                 f,
                 "{:?}",
-                ExprVerboseDisplay {
+                ExprDisplay {
                     expr,
                     input_schema: self.input_schema
                 }
@@ -546,7 +545,7 @@ impl ConditionVerboseDisplay<'_> {
                 write!(
                     f,
                     " AND {:?}",
-                    ExprVerboseDisplay {
+                    ExprDisplay {
                         expr,
                         input_schema: self.input_schema
                     }
@@ -557,13 +556,13 @@ impl ConditionVerboseDisplay<'_> {
     }
 }
 
-impl fmt::Display for ConditionVerboseDisplay<'_> {
+impl fmt::Display for ConditionDisplay<'_> {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         self.fmt(f)
     }
 }
 
-impl fmt::Debug for ConditionVerboseDisplay<'_> {
+impl fmt::Debug for ConditionDisplay<'_> {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         self.fmt(f)
     }
