@@ -34,6 +34,9 @@ pub enum ExprError {
     #[error("Out of range")]
     NumericOutOfRange,
 
+    #[error("Division by zero")]
+    DivisionByZero,
+
     #[error("Parse error: {0}")]
     Parse(&'static str),
 

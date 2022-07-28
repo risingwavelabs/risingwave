@@ -12,10 +12,9 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use risingwave_common::error::Result;
 use risingwave_pb::catalog::{Database, Schema, Sink, Source, Table};
 
-use crate::model::MetadataModel;
+use crate::model::{MetadataModel, MetadataModelResult};
 
 /// Column family name for source catalog.
 const CATALOG_SOURCE_CF_NAME: &str = "cf/catalog_source";
@@ -46,7 +45,7 @@ macro_rules! impl_model_for_catalog {
                 prost
             }
 
-            fn key(&self) -> Result<Self::KeyType> {
+            fn key(&self) -> MetadataModelResult<Self::KeyType> {
                 Ok(self.$key_fn())
             }
         }
@@ -75,7 +74,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn test_database() -> Result<()> {
+    async fn test_database() -> MetadataModelResult<()> {
         let env = MetaSrvEnv::for_test().await;
         let store = env.meta_store();
         let databases = Database::list(store).await?;
@@ -85,7 +84,7 @@ mod tests {
         future::join_all((0..100).map(|i| async move { database_for_id(i).insert(store).await }))
             .await
             .into_iter()
-            .collect::<Result<Vec<_>>>()?;
+            .collect::<MetadataModelResult<Vec<_>>>()?;
 
         for i in 0..100 {
             let database = Database::select(store, &i).await?.unwrap();

@@ -92,13 +92,14 @@ impl KafkaConfig {
 #[derive(Debug, Clone, PartialEq, enum_as_inner::EnumAsInner)]
 enum KafkaSinkState {
     Init,
+    // State running with epoch.
     Running(u64),
 }
 
 pub struct KafkaSink {
     pub config: KafkaConfig,
     pub conductor: KafkaTransactionConductor,
-    latest_success_epoch: KafkaSinkState,
+    state: KafkaSinkState,
     in_transaction_epoch: Option<u64>,
 }
 
@@ -108,7 +109,7 @@ impl KafkaSink {
             config: config.clone(),
             conductor: KafkaTransactionConductor::new(config)?,
             in_transaction_epoch: None,
-            latest_success_epoch: KafkaSinkState::Init,
+            state: KafkaSinkState::Init,
         })
     }
 
@@ -194,7 +195,7 @@ impl KafkaSink {
 impl Sink for KafkaSink {
     async fn write_batch(&mut self, chunk: StreamChunk, schema: &Schema) -> Result<()> {
         // when sinking the snapshot, it is required to begin epoch 0 for transaction
-        if let (KafkaSinkState::Running(epoch), in_txn_epoch) = (&self.latest_success_epoch, &self.in_transaction_epoch.unwrap()) && in_txn_epoch <= epoch {
+        if let (KafkaSinkState::Running(epoch), in_txn_epoch) = (&self.state, &self.in_transaction_epoch.unwrap()) && in_txn_epoch <= epoch {
             return Ok(())
         }
         if self.config.sink_type.as_str() == "append_only" {
@@ -210,7 +211,7 @@ impl Sink for KafkaSink {
     // transaction.
     async fn begin_epoch(&mut self, epoch: u64) -> Result<()> {
         self.in_transaction_epoch = Some(epoch);
-        if self.latest_success_epoch == KafkaSinkState::Init {
+        if self.state == KafkaSinkState::Init {
             self.do_with_retry(|conductor| conductor.init_transaction())
                 .await
                 .map_err(SinkError::Kafka)?;
@@ -233,15 +234,15 @@ impl Sink for KafkaSink {
             .await
             .map_err(SinkError::Kafka)?;
         if let Some(epoch) = self.in_transaction_epoch.take() {
-            self.latest_success_epoch = KafkaSinkState::Running(epoch);
+            self.state = KafkaSinkState::Running(epoch);
         } else {
             tracing::error!(
                 "commit without begin_epoch, last success epoch {:?}",
-                self.latest_success_epoch
+                self.state
             );
             return Err(SinkError::Kafka(KafkaError::Canceled));
         }
-        tracing::debug!("commit epoch {:?}", self.latest_success_epoch);
+        tracing::debug!("commit epoch {:?}", self.state);
         Ok(())
     }
 
