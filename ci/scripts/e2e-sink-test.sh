@@ -30,7 +30,7 @@ apt install docker.io -y
 echo "debug stuff 3"
 apt install snapd -y
 echo "debug stuff 4"
-snap install docker -y
+snap install docker
 echo "debug stuff 5"
 docker port mysql
 
