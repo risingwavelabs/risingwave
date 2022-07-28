@@ -835,7 +835,6 @@ mod tests {
     async fn test_left_outer_join() {
         let expected = DataChunk::from_pretty(
             "i f   i f
-             . .   . .
              1 6.1 1 9.2
              2 5.5 2 4.4
              2 5.5 2 5.5
@@ -845,7 +844,8 @@ mod tests {
              5 4.1 5 3.7
              5 4.1 5 2.3
              5 9.1 5 3.7
-             5 9.1 5 2.3",
+             5 9.1 5 2.3
+             . .   . .",
         );
 
         do_test(JoinType::LeftOuter, None, expected).await;
@@ -869,8 +869,8 @@ mod tests {
     async fn test_left_anti_join() {
         let expected = DataChunk::from_pretty(
             "i f
-             . .
-             3 3.9",
+             3 3.9
+             . .",
         );
 
         do_test(JoinType::LeftAnti, None, expected).await;
@@ -902,13 +902,13 @@ mod tests {
     async fn test_left_outer_join_with_condition() {
         let expected = DataChunk::from_pretty(
             "i f   i f
-             . .   . .
              1 6.1 1 9.2
              2 5.5 2 5.5
              2 8.4 2 5.5
              3 3.9 . .
              5 4.1 . .
-             5 9.1 . .",
+             5 9.1 . .
+             . .   . .",
         );
 
         let condition = Some(new_binary_expr(
@@ -950,10 +950,10 @@ mod tests {
     async fn test_left_anti_join_with_condition() {
         let expected = DataChunk::from_pretty(
             "i f
-            . .
             3 3.9
             5 4.1
-            5 9.1",
+            5 9.1
+            . .",
         );
 
         let condition = Some(new_binary_expr(

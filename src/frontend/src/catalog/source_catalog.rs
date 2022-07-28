@@ -11,6 +11,7 @@
 // WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 // See the License for the specific language governing permissions and
 // limitations under the License.
+
 use std::collections::HashMap;
 
 use itertools::Itertools;
@@ -21,10 +22,9 @@ use risingwave_pb::stream_plan::source_node::SourceType;
 use super::column_catalog::ColumnCatalog;
 use super::{ColumnId, SourceId, TABLE_SOURCE_PK_COLID};
 
-#[expect(non_snake_case, non_upper_case_globals)]
-pub mod WithOptions {
-    pub const AppenOnly: &str = "appendonly";
-    pub const Connector: &str = "connector";
+pub mod with_options {
+    pub const APPEND_ONLY: &str = "appendonly";
+    pub const CONNECTOR: &str = "connector";
 }
 
 pub const KAFKA_CONNECTOR: &str = "kafka";
@@ -106,12 +106,12 @@ impl From<&ProstSource> for SourceCatalog {
 }
 
 fn check_append_only(with_options: &HashMap<String, String>) -> bool {
-    if let Some(val) = with_options.get(WithOptions::AppenOnly) {
+    if let Some(val) = with_options.get(with_options::APPEND_ONLY) {
         if val.to_lowercase() == "true" {
             return true;
         }
     }
-    if let Some(val) = with_options.get(WithOptions::Connector) {
+    if let Some(val) = with_options.get(with_options::CONNECTOR) {
         // Kafka source is append-only
         if val.to_lowercase() == KAFKA_CONNECTOR {
             return true;

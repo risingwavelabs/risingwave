@@ -41,13 +41,16 @@ use risingwave_rpc_client::HummockMetaClient;
 use tokio::sync::oneshot::Sender;
 use tokio::task::JoinHandle;
 
-use super::iterator::{BoxedForwardHummockIterator, ConcatIterator, MergeIterator};
+use super::iterator::ConcatIterator;
 use super::multi_builder::CapacitySplitTableBuilder;
 use super::{
     CompressionAlgorithm, HummockResult, Sstable, SstableBuilder, SstableBuilderOptions,
     SstableIterator, SstableIteratorType,
 };
 use crate::hummock::compaction_executor::CompactionExecutor;
+use crate::hummock::iterator::{
+    Forward, HummockIterator, HummockIteratorUnion, MultiSstIterator, UnorderedMergeIteratorInner,
+};
 use crate::hummock::multi_builder::{SealedSstableBuilder, TableBuilderFactory};
 use crate::hummock::shared_buffer::shared_buffer_uploader::UploadTaskPayload;
 use crate::hummock::shared_buffer::{build_ordered_merge_iter, UncommittedData};
@@ -385,7 +388,7 @@ impl Compactor {
                 &mut local_stats,
                 Arc::new(SstableIteratorReadOptions::default()),
             )
-            .await? as BoxedForwardHummockIterator;
+            .await?;
             let compaction_executor = compactor.context.compaction_executor.as_ref().cloned();
 
             let split_task = async move { compactor.compact_key_range(split_index, iter).await };
@@ -664,7 +667,7 @@ impl Compactor {
     async fn compact_key_range_impl(
         &self,
         split_index: usize,
-        iter: BoxedForwardHummockIterator,
+        iter: impl HummockIterator<Direction = Forward>,
         compaction_filter: impl CompactionFilter,
     ) -> HummockResult<CompactOutput> {
         let split = self.compact_task.splits[split_index].clone();
@@ -772,7 +775,7 @@ impl Compactor {
     async fn compact_key_range(
         &self,
         split_index: usize,
-        iter: BoxedForwardHummockIterator,
+        iter: impl HummockIterator<Direction = Forward>,
     ) -> HummockResult<CompactOutput> {
         let dummy_compaction_filter = DummyCompactionFilter {};
         self.compact_key_range_impl(split_index, iter, dummy_compaction_filter)
@@ -782,7 +785,7 @@ impl Compactor {
     async fn compact_key_range_with_filter(
         &self,
         split_index: usize,
-        iter: BoxedForwardHummockIterator,
+        iter: impl HummockIterator<Direction = Forward>,
         compaction_filter: impl CompactionFilter,
     ) -> HummockResult<CompactOutput> {
         self.compact_key_range_impl(split_index, iter, compaction_filter)
@@ -790,8 +793,8 @@ impl Compactor {
     }
 
     /// Build the merge iterator based on the given input ssts.
-    async fn build_sst_iter(&self) -> HummockResult<BoxedForwardHummockIterator> {
-        let mut table_iters: Vec<BoxedForwardHummockIterator> = Vec::new();
+    async fn build_sst_iter(&self) -> HummockResult<MultiSstIterator> {
+        let mut table_iters = Vec::new();
         let mut stats = StoreLocalStatistic::default();
         let read_options = Arc::new(SstableIteratorReadOptions { prefetch: true });
 
@@ -814,11 +817,11 @@ impl Compactor {
 
             if level.level_type == LevelType::Nonoverlapping as i32 {
                 debug_assert!(can_concat(&level.table_infos.iter().collect_vec()));
-                table_iters.push(Box::new(ConcatIterator::new(
+                table_iters.push(HummockIteratorUnion::First(ConcatIterator::new(
                     level.table_infos.clone(),
                     self.context.sstable_store.clone(),
                     read_options.clone(),
-                )) as BoxedForwardHummockIterator);
+                )));
             } else {
                 for table_info in &level.table_infos {
                     let table = self
@@ -826,7 +829,7 @@ impl Compactor {
                         .sstable_store
                         .load_table(table_info.id, true, &mut stats)
                         .await?;
-                    table_iters.push(Box::new(SstableIterator::create(
+                    table_iters.push(HummockIteratorUnion::Second(SstableIterator::create(
                         table,
                         self.context.sstable_store.clone(),
                         read_options.clone(),
@@ -835,10 +838,11 @@ impl Compactor {
             }
         }
         stats.report(self.context.stats.as_ref());
-        Ok(Box::new(MergeIterator::new(
+
+        Ok(UnorderedMergeIteratorInner::new(
             table_iters,
             self.context.stats.clone(),
-        )))
+        ))
     }
 
     pub async fn try_vacuum(
@@ -976,7 +980,7 @@ impl Compactor {
     async fn compact_and_build_sst<T: TableBuilderFactory>(
         sst_builder: &mut CapacitySplitTableBuilder<T>,
         kr: KeyRange,
-        mut iter: BoxedForwardHummockIterator,
+        mut iter: impl HummockIterator<Direction = Forward>,
         gc_delete_keys: bool,
         watermark: Epoch,
         mut compaction_filter: impl CompactionFilter,
