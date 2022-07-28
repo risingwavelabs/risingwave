@@ -29,7 +29,7 @@ pub struct InputRef {
 }
 
 #[derive(Clone, Copy)]
-pub struct InputRefDisplay(pub usize);
+pub struct RawInputRefDisplay(pub usize);
 
 #[derive(Clone, Copy)]
 pub struct AliasDisplay<'a>(Option<&'a str>);
@@ -42,25 +42,25 @@ pub fn input_ref_to_column_indices(input_refs: &[InputRef]) -> Vec<usize> {
     input_refs.iter().map(|x| x.index()).collect_vec()
 }
 
-impl fmt::Display for InputRefDisplay {
+impl fmt::Display for RawInputRefDisplay {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         write!(f, "${}", self.0)
     }
 }
 
-impl fmt::Debug for InputRefDisplay {
+impl fmt::Debug for RawInputRefDisplay {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         write!(f, "${}", self.0)
     }
 }
 
 #[derive(Clone, Copy)]
-pub struct InputRefVerboseDisplay<'a> {
+pub struct InputRefDisplay<'a> {
     pub input_ref: &'a InputRef,
     pub input_schema: &'a Schema,
 }
 
-impl fmt::Display for InputRefVerboseDisplay<'_> {
+impl fmt::Display for InputRefDisplay<'_> {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         write!(
             f,
@@ -74,7 +74,7 @@ impl fmt::Display for InputRefVerboseDisplay<'_> {
     }
 }
 
-impl fmt::Debug for InputRefVerboseDisplay<'_> {
+impl fmt::Debug for InputRefDisplay<'_> {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         write!(
             f,
@@ -90,7 +90,7 @@ impl fmt::Debug for InputRefVerboseDisplay<'_> {
 
 impl fmt::Display for InputRef {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        write!(f, "{:?}", InputRefDisplay(self.index))
+        write!(f, "{:?}", RawInputRefDisplay(self.index))
     }
 }
 
@@ -117,7 +117,7 @@ impl fmt::Debug for InputRef {
                 .field("data_type", &self.data_type)
                 .finish()
         } else {
-            write!(f, "{}", InputRefDisplay(self.index))
+            write!(f, "{}", RawInputRefDisplay(self.index))
         }
     }
 }
