@@ -86,7 +86,8 @@ impl SstableStore {
     }
 
     pub async fn put(&self, sst: Sstable, data: Vec<u8>, policy: CachePolicy) -> HummockResult<()> {
-        self.put_sst_data(sst.id, data.clone()).await?;
+        let data_len = data.len();
+        self.put_sst_data(sst.id, data).await?;
 
         fail_point!("metadata_upload_err");
         if let Err(e) = self.put_meta(&sst).await {
@@ -102,7 +103,7 @@ impl SstableStore {
                 .sum::<usize>()
                 * size_of::<usize>()
                 + sst.meta.encoded_size()
-                + data.len();
+                + data_len;
             self.meta_cache
                 .insert(sst.id, sst.id, charge, Box::new(sst));
         }
