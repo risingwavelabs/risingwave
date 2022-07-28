@@ -6,5 +6,4 @@ FLUSH PRIVILEGES;
 
 -- Create test database with table for testing.
 CREATE DATABASE test;
-USE test;
-CREATE TABLE t_drop (v1 int, v2 varchar(20));
+CREATE TABLE test.t1 (v1 int, v2 varchar(20));
