@@ -47,7 +47,7 @@ itoa = { version = "0.4", features = ["i128", "std"] }
 libc = { version = "0.2", features = ["extra_traits", "std"] }
 libz-sys = { version = "1", features = ["libc", "stock-zlib"] }
 lock_api = { version = "0.4", default-features = false, features = ["arc_lock"] }
-log = { version = "0.4", default-features = false, features = ["kv_unstable", "release_max_level_info", "std", "value-bag"] }
+log = { version = "0.4", default-features = false, features = ["release_max_level_info", "std"] }
 madsim-tokio = { version = "0.2.0-alpha.5", default-features = false, features = ["fs", "macros", "process", "rt", "rt-multi-thread", "signal", "sync", "time", "tracing"] }
 memchr = { version = "2", features = ["std", "use_std"] }
 minimal-lexical = { version = "0.2", default-features = false, features = ["std"] }
@@ -116,7 +116,7 @@ itoa = { version = "0.4", features = ["i128", "std"] }
 libc = { version = "0.2", features = ["extra_traits", "std"] }
 libz-sys = { version = "1", features = ["libc", "stock-zlib"] }
 lock_api = { version = "0.4", default-features = false, features = ["arc_lock"] }
-log = { version = "0.4", default-features = false, features = ["kv_unstable", "release_max_level_info", "std", "value-bag"] }
+log = { version = "0.4", default-features = false, features = ["release_max_level_info", "std"] }
 madsim-tokio = { version = "0.2.0-alpha.5", default-features = false, features = ["fs", "macros", "process", "rt", "rt-multi-thread", "signal", "sync", "time", "tracing"] }
 memchr = { version = "2", features = ["std", "use_std"] }
 minimal-lexical = { version = "0.2", default-features = false, features = ["std"] }
