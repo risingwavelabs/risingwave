@@ -1362,6 +1362,7 @@ impl<K: HashKey> HashJoinExecutor<K> {
     }
 }
 
+/// `DataChunkMutator` transforms the given data chunk for non-equi join.
 #[repr(transparent)]
 struct DataChunkMutator(DataChunk);
 
