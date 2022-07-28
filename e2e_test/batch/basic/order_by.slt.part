@@ -91,17 +91,17 @@ insert into t values (null, 7, null);
 query III
 select * from t order by v1 limit 2;
 ----
-NULL 7 NULL
 1 4 2
+2 3 3
 
 query III
 select * from t order by v1 desc limit 7;
 ----
+NULL 7 NULL
 4 3 5
 3 4 4
 2 3 3
 1 4 2
-NULL 7 NULL
 
 statement ok
 drop table t;
