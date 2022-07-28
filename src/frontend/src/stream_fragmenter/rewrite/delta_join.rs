@@ -456,9 +456,13 @@ impl StreamFragmenter {
             Some(NodeBody::HashJoin(node)) => node,
             _ => unreachable!(),
         };
+
         let mut table_l = hash_join_node.get_left_table()?.clone();
-        table_l.columns.pop();
         let mut table_r = hash_join_node.get_right_table()?.clone();
+
+        // Note: the last column of hash_join table catalog is degree, which is not used by Arrange
+        // Node.
+        table_l.columns.pop();
         table_r.columns.pop();
         assert_eq!(node.input.len(), 2);
 

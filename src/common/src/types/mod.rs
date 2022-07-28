@@ -97,9 +97,6 @@ pub fn unnested_list_type(datatype: DataType) -> DataType {
     }
 }
 
-const DECIMAL_DEFAULT_PRECISION: u32 = 20;
-const DECIMAL_DEFAULT_SCALE: u32 = 6;
-
 impl From<&ProstDataType> for DataType {
     #[expect(clippy::needless_borrow)]
     fn from(proto: &ProstDataType) -> DataType {

@@ -18,12 +18,9 @@ use std::collections::{BinaryHeap, LinkedList};
 use std::future::Future;
 use std::sync::Arc;
 
-use async_trait::async_trait;
 use risingwave_hummock_sdk::VersionedComparator;
 
-use crate::hummock::iterator::{
-    BoxedHummockIterator, DirectionEnum, HummockIterator, HummockIteratorDirection,
-};
+use crate::hummock::iterator::{DirectionEnum, HummockIterator, HummockIteratorDirection};
 use crate::hummock::value::HummockValue;
 use crate::hummock::HummockResult;
 use crate::monitor::{StateStoreMetrics, StoreLocalStatistic};
@@ -37,13 +34,13 @@ type OrderedNodeExtra = usize;
 impl NodeExtraOrderInfo for UnorderedNodeExtra {}
 impl NodeExtraOrderInfo for OrderedNodeExtra {}
 
-pub struct Node<D: HummockIteratorDirection, T: NodeExtraOrderInfo> {
-    iter: BoxedHummockIterator<D>,
+pub struct Node<I: HummockIterator, T: NodeExtraOrderInfo> {
+    iter: I,
     extra_order_info: T,
 }
 
-impl<T: NodeExtraOrderInfo, D: HummockIteratorDirection> Eq for Node<D, T> where Self: PartialEq {}
-impl<T: NodeExtraOrderInfo, D: HummockIteratorDirection> Ord for Node<D, T>
+impl<I: HummockIterator, T: NodeExtraOrderInfo> Eq for Node<I, T> where Self: PartialEq {}
+impl<I: HummockIterator, T: NodeExtraOrderInfo> Ord for Node<I, T>
 where
     Self: PartialOrd,
 {
@@ -53,12 +50,12 @@ where
 }
 
 /// Implement `PartialOrd` for unordered iter node. Only compare the key.
-impl<D: HummockIteratorDirection> PartialOrd for Node<D, UnorderedNodeExtra> {
+impl<I: HummockIterator> PartialOrd for Node<I, UnorderedNodeExtra> {
     fn partial_cmp(&self, other: &Self) -> Option<std::cmp::Ordering> {
         // Note: to implement min-heap by using max-heap internally, the comparing
         // order should be reversed.
 
-        Some(match D::direction() {
+        Some(match I::Direction::direction() {
             DirectionEnum::Forward => {
                 VersionedComparator::compare_key(other.iter.key(), self.iter.key())
             }
@@ -70,10 +67,10 @@ impl<D: HummockIteratorDirection> PartialOrd for Node<D, UnorderedNodeExtra> {
 }
 
 /// Implement `PartialOrd` for ordered iter node. Compare key and use order index as tie breaker.
-impl<D: HummockIteratorDirection> PartialOrd for Node<D, OrderedNodeExtra> {
+impl<I: HummockIterator> PartialOrd for Node<I, OrderedNodeExtra> {
     fn partial_cmp(&self, other: &Self) -> Option<std::cmp::Ordering> {
         // The `extra_info` is used as a tie-breaker when the keys are equal.
-        Some(match D::direction() {
+        Some(match I::Direction::direction() {
             DirectionEnum::Forward => {
                 VersionedComparator::compare_key(other.iter.key(), self.iter.key())
                     .then_with(|| other.extra_order_info.cmp(&self.extra_order_info))
@@ -86,38 +83,36 @@ impl<D: HummockIteratorDirection> PartialOrd for Node<D, OrderedNodeExtra> {
     }
 }
 
-impl<D: HummockIteratorDirection> PartialEq for Node<D, UnorderedNodeExtra> {
+impl<I: HummockIterator> PartialEq for Node<I, UnorderedNodeExtra> {
     fn eq(&self, other: &Self) -> bool {
         self.iter.key() == other.iter.key()
     }
 }
 
-impl<D: HummockIteratorDirection> PartialEq for Node<D, OrderedNodeExtra> {
+impl<I: HummockIterator> PartialEq for Node<I, OrderedNodeExtra> {
     fn eq(&self, other: &Self) -> bool {
         self.iter.key() == other.iter.key() && self.extra_order_info.eq(&other.extra_order_info)
     }
 }
 
 /// Iterates on multiple iterators, a.k.a. `MergeIterator`.
-pub struct MergeIteratorInner<D: HummockIteratorDirection, NE: NodeExtraOrderInfo> {
+pub struct MergeIteratorInner<I: HummockIterator, NE: NodeExtraOrderInfo> {
     /// Invalid or non-initialized iterators.
-    unused_iters: LinkedList<Node<D, NE>>,
+    unused_iters: LinkedList<Node<I, NE>>,
 
     /// The heap for merge sort.
-    heap: BinaryHeap<Node<D, NE>>,
+    heap: BinaryHeap<Node<I, NE>>,
 
     /// Statistics.
     stats: Arc<StateStoreMetrics>,
 }
 
 /// An order aware merge iterator.
-pub type OrderedMergeIteratorInner<D> = MergeIteratorInner<D, OrderedNodeExtra>;
+#[allow(type_alias_bounds)]
+pub type OrderedMergeIteratorInner<I: HummockIterator> = MergeIteratorInner<I, OrderedNodeExtra>;
 
-impl<D: HummockIteratorDirection> OrderedMergeIteratorInner<D> {
-    pub fn new(
-        iterators: impl IntoIterator<Item = BoxedHummockIterator<D>>,
-        stats: Arc<StateStoreMetrics>,
-    ) -> Self {
+impl<I: HummockIterator> OrderedMergeIteratorInner<I> {
+    pub fn new(iterators: impl IntoIterator<Item = I>, stats: Arc<StateStoreMetrics>) -> Self {
         Self {
             unused_iters: iterators
                 .into_iter()
@@ -133,7 +128,7 @@ impl<D: HummockIteratorDirection> OrderedMergeIteratorInner<D> {
     }
 }
 
-impl<D: HummockIteratorDirection, NE: NodeExtraOrderInfo> MergeIteratorInner<D, NE> {
+impl<I: HummockIterator, NE: NodeExtraOrderInfo> MergeIteratorInner<I, NE> {
     fn collect_local_statistic_impl(&self, stats: &mut StoreLocalStatistic) {
         for node in &self.heap {
             node.iter.collect_local_statistic(stats);
@@ -143,13 +138,13 @@ impl<D: HummockIteratorDirection, NE: NodeExtraOrderInfo> MergeIteratorInner<D, 
         }
     }
 }
-pub type UnorderedMergeIteratorInner<D> = MergeIteratorInner<D, UnorderedNodeExtra>;
 
-impl<D: HummockIteratorDirection> UnorderedMergeIteratorInner<D> {
-    pub fn new(
-        iterators: impl IntoIterator<Item = BoxedHummockIterator<D>>,
-        stats: Arc<StateStoreMetrics>,
-    ) -> Self {
+#[allow(type_alias_bounds)]
+pub type UnorderedMergeIteratorInner<I: HummockIterator> =
+    MergeIteratorInner<I, UnorderedNodeExtra>;
+
+impl<I: HummockIterator> UnorderedMergeIteratorInner<I> {
+    pub fn new(iterators: impl IntoIterator<Item = I>, stats: Arc<StateStoreMetrics>) -> Self {
         Self {
             unused_iters: iterators
                 .into_iter()
@@ -164,9 +159,9 @@ impl<D: HummockIteratorDirection> UnorderedMergeIteratorInner<D> {
     }
 }
 
-impl<D: HummockIteratorDirection, NE: NodeExtraOrderInfo> MergeIteratorInner<D, NE>
+impl<I: HummockIterator, NE: NodeExtraOrderInfo> MergeIteratorInner<I, NE>
 where
-    Node<D, NE>: Ord,
+    Node<I, NE>: Ord,
 {
     /// Moves all iterators from the `heap` to the linked list.
     fn reset_heap(&mut self) {
@@ -194,7 +189,7 @@ trait MergeIteratorNext {
     fn next_inner(&mut self) -> Self::HummockResultFuture<'_>;
 }
 
-impl<D: HummockIteratorDirection> MergeIteratorNext for OrderedMergeIteratorInner<D> {
+impl<I: HummockIterator> MergeIteratorNext for OrderedMergeIteratorInner<I> {
     type HummockResultFuture<'a> = impl Future<Output = HummockResult<()>>;
 
     fn next_inner(&mut self) -> Self::HummockResultFuture<'_> {
@@ -242,7 +237,7 @@ impl<D: HummockIteratorDirection> MergeIteratorNext for OrderedMergeIteratorInne
     }
 }
 
-impl<D: HummockIteratorDirection> MergeIteratorNext for UnorderedMergeIteratorInner<D> {
+impl<I: HummockIterator> MergeIteratorNext for UnorderedMergeIteratorInner<I> {
     type HummockResultFuture<'a> = impl Future<Output = HummockResult<()>>;
 
     fn next_inner(&mut self) -> Self::HummockResultFuture<'_> {
@@ -278,17 +273,19 @@ impl<D: HummockIteratorDirection> MergeIteratorNext for UnorderedMergeIteratorIn
     }
 }
 
-#[async_trait]
-impl<D: HummockIteratorDirection, NE: NodeExtraOrderInfo> HummockIterator
-    for MergeIteratorInner<D, NE>
+impl<I: HummockIterator, NE: NodeExtraOrderInfo> HummockIterator for MergeIteratorInner<I, NE>
 where
     Self: MergeIteratorNext + 'static,
-    Node<D, NE>: Ord,
+    Node<I, NE>: Ord,
 {
-    type Direction = D;
+    type Direction = I::Direction;
 
-    async fn next(&mut self) -> HummockResult<()> {
-        self.next_inner().await
+    type NextFuture<'a> = impl Future<Output = HummockResult<()>> + 'a;
+    type RewindFuture<'a> = impl Future<Output = HummockResult<()>> + 'a;
+    type SeekFuture<'a> = impl Future<Output = HummockResult<()>> + 'a;
+
+    fn next(&mut self) -> Self::NextFuture<'_> {
+        async move { self.next_inner().await }
     }
 
     fn key(&self) -> &[u8] {
@@ -303,20 +300,24 @@ where
         self.heap.peek().map_or(false, |n| n.iter.is_valid())
     }
 
-    async fn rewind(&mut self) -> HummockResult<()> {
-        self.reset_heap();
-        futures::future::try_join_all(self.unused_iters.iter_mut().map(|x| x.iter.rewind()))
-            .await?;
-        self.build_heap();
-        Ok(())
+    fn rewind(&mut self) -> Self::RewindFuture<'_> {
+        async move {
+            self.reset_heap();
+            futures::future::try_join_all(self.unused_iters.iter_mut().map(|x| x.iter.rewind()))
+                .await?;
+            self.build_heap();
+            Ok(())
+        }
     }
 
-    async fn seek(&mut self, key: &[u8]) -> HummockResult<()> {
-        self.reset_heap();
-        futures::future::try_join_all(self.unused_iters.iter_mut().map(|x| x.iter.seek(key)))
-            .await?;
-        self.build_heap();
-        Ok(())
+    fn seek<'a>(&'a mut self, key: &'a [u8]) -> Self::SeekFuture<'a> {
+        async move {
+            self.reset_heap();
+            futures::future::try_join_all(self.unused_iters.iter_mut().map(|x| x.iter.seek(key)))
+                .await?;
+            self.build_heap();
+            Ok(())
+        }
     }
 
     fn collect_local_statistic(&self, stats: &mut StoreLocalStatistic) {
@@ -324,7 +325,7 @@ where
     }
 }
 
-impl<D: HummockIteratorDirection, NE: NodeExtraOrderInfo> Drop for MergeIteratorInner<D, NE> {
+impl<I: HummockIterator, NE: NodeExtraOrderInfo> Drop for MergeIteratorInner<I, NE> {
     fn drop(&mut self) {
         let mut stats = StoreLocalStatistic::default();
         self.collect_local_statistic_impl(&mut stats);

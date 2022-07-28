@@ -24,7 +24,6 @@ use risingwave_common::catalog::{ColumnDesc, ColumnId, Schema, TableId};
 use risingwave_common::util::sort_util::OrderPair;
 use risingwave_pb::catalog::Table;
 use risingwave_storage::table::state_table::StateTable;
-use risingwave_storage::table::Distribution;
 use risingwave_storage::StateStore;
 
 use crate::executor::error::StreamExecutorError;
@@ -92,15 +91,12 @@ impl<S: StateStore> MaterializeExecutor<S> {
             .map(|(column_id, field)| ColumnDesc::unnamed(column_id, field.data_type()))
             .collect_vec();
 
-        let distribution = Distribution::fallback();
-
-        let state_table = StateTable::new_with_distribution(
+        let state_table = StateTable::new_without_distribution(
             store,
             table_id,
             columns,
             arrange_order_types,
             arrange_columns.clone(),
-            distribution,
         );
         Self {
             input,
