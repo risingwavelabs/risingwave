@@ -98,6 +98,8 @@ impl Expression for VnodeExpression {
             .map(|c| c.eval_row(input))
             .collect::<Result<Vec<_>>>()?;
         let dist_key_row = Row::new(dist_key);
+        // FIXME: currently the implementation of the hash function in Row::hash_row differs from
+        // Array::hash_at, so their result might be different. #3457
         let vnode = dist_key_row.hash_row(&CRC32FastBuilder {}).to_vnode() as i16;
         Ok(Some(vnode.into()))
     }
