@@ -12,12 +12,9 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::default::Default;
 use std::io::Write;
 
 use anyhow::Result;
-use fred::interfaces::ClientLike;
-use fred::prelude;
 
 use crate::{ExecuteContext, RedisConfig, Task};
 
@@ -34,23 +31,14 @@ impl RedisReadyCheckTask {
 impl Task for RedisReadyCheckTask {
     fn execute(&mut self, ctx: &mut ExecuteContext<impl Write>) -> Result<()> {
         ctx.pb.set_message("waiting for online...");
-        let redis_config = prelude::RedisConfig {
-            server: prelude::ServerConfig::new_centralized(
-                self.config.address.clone(),
-                self.config.port,
-            ),
-            ..Default::default()
-        };
-
-        let client = prelude::RedisClient::new(redis_config);
-        let handler = client.connect(None);
+        let client = redis::Client::open(
+            "redis://".to_string() + &format!("{}:{}", self.config.address, self.config.port),
+        )?;
 
         ctx.wait(|| {
-            futures::executor::block_on(client.wait_for_connect())?;
+            let _ = client.get_connection()?;
             Ok(())
         })?;
-
-        handler.abort();
 
         ctx.complete_spin();
         Ok(())

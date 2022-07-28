@@ -38,7 +38,6 @@ futures-io = { version = "0.3", features = ["std"] }
 futures-sink = { version = "0.3", features = ["alloc", "std"] }
 futures-task = { version = "0.3", default-features = false, features = ["alloc", "std"] }
 futures-util = { version = "0.3", features = ["alloc", "async-await", "async-await-macro", "channel", "futures-channel", "futures-io", "futures-macro", "futures-sink", "io", "memchr", "sink", "slab", "std"] }
-generic-array = { version = "0.14", default-features = false, features = ["more_lengths"] }
 hashbrown = { version = "0.12", features = ["ahash", "inline-more", "raw"] }
 hdrhistogram = { version = "7", features = ["base64", "crossbeam-channel", "flate2", "nom", "serialization", "sync"] }
 hyper = { version = "0.14", features = ["client", "full", "h2", "http1", "http2", "runtime", "server", "socket2", "stream", "tcp"] }
@@ -48,9 +47,9 @@ itoa = { version = "0.4", features = ["i128", "std"] }
 libc = { version = "0.2", features = ["extra_traits", "std"] }
 libz-sys = { version = "1", features = ["libc", "stock-zlib"] }
 lock_api = { version = "0.4", default-features = false, features = ["arc_lock"] }
-log = { version = "0.4", default-features = false, features = ["release_max_level_info", "std"] }
+log = { version = "0.4", default-features = false, features = ["kv_unstable", "release_max_level_info", "std", "value-bag"] }
 madsim-tokio = { version = "0.2.0-alpha.5", default-features = false, features = ["fs", "macros", "process", "rt", "rt-multi-thread", "signal", "sync", "time", "tracing"] }
-memchr = { version = "2", features = ["std"] }
+memchr = { version = "2", features = ["std", "use_std"] }
 minimal-lexical = { version = "0.2", default-features = false, features = ["std"] }
 nix = { version = "0.24", features = ["acct", "aio", "dir", "env", "event", "feature", "fs", "hostname", "inotify", "ioctl", "kmod", "memoffset", "mman", "mount", "mqueue", "net", "personality", "poll", "process", "pthread", "ptrace", "quota", "reboot", "resource", "sched", "signal", "socket", "term", "time", "ucontext", "uio", "user", "zerocopy"] }
 nom = { version = "7", features = ["alloc", "std"] }
@@ -68,7 +67,8 @@ scopeguard = { version = "1", features = ["use_std"] }
 serde = { version = "1", features = ["alloc", "derive", "serde_derive", "std"] }
 serde_json = { version = "1", features = ["raw_value", "std"] }
 smallvec = { version = "1", default-features = false, features = ["serde", "union", "write"] }
-tokio = { version = "1", features = ["bytes", "fs", "full", "io-std", "io-util", "libc", "macros", "memchr", "mio", "net", "num_cpus", "once_cell", "parking_lot", "process", "rt", "rt-multi-thread", "signal", "signal-hook-registry", "socket2", "stats", "sync", "time", "tokio-macros", "tracing"] }
+socket2 = { version = "0.4", default-features = false, features = ["all"] }
+tokio = { version = "1", features = ["bytes", "fs", "io-std", "io-util", "libc", "macros", "memchr", "mio", "net", "num_cpus", "once_cell", "process", "rt", "rt-multi-thread", "signal", "signal-hook-registry", "socket2", "stats", "sync", "time", "tokio-macros", "tracing"] }
 tokio-stream = { version = "0.1", features = ["net", "time"] }
 tokio-util = { version = "0.7", features = ["codec", "io", "tracing"] }
 tower = { version = "0.4", features = ["__common", "balance", "buffer", "discover", "futures-core", "futures-util", "indexmap", "limit", "load", "load-shed", "log", "make", "pin-project", "pin-project-lite", "rand", "ready-cache", "retry", "slab", "timeout", "tokio", "tokio-util", "tracing", "util"] }
@@ -107,7 +107,6 @@ futures-io = { version = "0.3", features = ["std"] }
 futures-sink = { version = "0.3", features = ["alloc", "std"] }
 futures-task = { version = "0.3", default-features = false, features = ["alloc", "std"] }
 futures-util = { version = "0.3", features = ["alloc", "async-await", "async-await-macro", "channel", "futures-channel", "futures-io", "futures-macro", "futures-sink", "io", "memchr", "sink", "slab", "std"] }
-generic-array = { version = "0.14", default-features = false, features = ["more_lengths"] }
 hashbrown = { version = "0.12", features = ["ahash", "inline-more", "raw"] }
 hdrhistogram = { version = "7", features = ["base64", "crossbeam-channel", "flate2", "nom", "serialization", "sync"] }
 hyper = { version = "0.14", features = ["client", "full", "h2", "http1", "http2", "runtime", "server", "socket2", "stream", "tcp"] }
@@ -117,9 +116,9 @@ itoa = { version = "0.4", features = ["i128", "std"] }
 libc = { version = "0.2", features = ["extra_traits", "std"] }
 libz-sys = { version = "1", features = ["libc", "stock-zlib"] }
 lock_api = { version = "0.4", default-features = false, features = ["arc_lock"] }
-log = { version = "0.4", default-features = false, features = ["release_max_level_info", "std"] }
+log = { version = "0.4", default-features = false, features = ["kv_unstable", "release_max_level_info", "std", "value-bag"] }
 madsim-tokio = { version = "0.2.0-alpha.5", default-features = false, features = ["fs", "macros", "process", "rt", "rt-multi-thread", "signal", "sync", "time", "tracing"] }
-memchr = { version = "2", features = ["std"] }
+memchr = { version = "2", features = ["std", "use_std"] }
 minimal-lexical = { version = "0.2", default-features = false, features = ["std"] }
 nix = { version = "0.24", features = ["acct", "aio", "dir", "env", "event", "feature", "fs", "hostname", "inotify", "ioctl", "kmod", "memoffset", "mman", "mount", "mqueue", "net", "personality", "poll", "process", "pthread", "ptrace", "quota", "reboot", "resource", "sched", "signal", "socket", "term", "time", "ucontext", "uio", "user", "zerocopy"] }
 nom = { version = "7", features = ["alloc", "std"] }
@@ -137,8 +136,9 @@ scopeguard = { version = "1", features = ["use_std"] }
 serde = { version = "1", features = ["alloc", "derive", "serde_derive", "std"] }
 serde_json = { version = "1", features = ["raw_value", "std"] }
 smallvec = { version = "1", default-features = false, features = ["serde", "union", "write"] }
+socket2 = { version = "0.4", default-features = false, features = ["all"] }
 syn = { version = "1", features = ["clone-impls", "derive", "extra-traits", "full", "parsing", "printing", "proc-macro", "quote", "visit", "visit-mut"] }
-tokio = { version = "1", features = ["bytes", "fs", "full", "io-std", "io-util", "libc", "macros", "memchr", "mio", "net", "num_cpus", "once_cell", "parking_lot", "process", "rt", "rt-multi-thread", "signal", "signal-hook-registry", "socket2", "stats", "sync", "time", "tokio-macros", "tracing"] }
+tokio = { version = "1", features = ["bytes", "fs", "io-std", "io-util", "libc", "macros", "memchr", "mio", "net", "num_cpus", "once_cell", "process", "rt", "rt-multi-thread", "signal", "signal-hook-registry", "socket2", "stats", "sync", "time", "tokio-macros", "tracing"] }
 tokio-stream = { version = "0.1", features = ["net", "time"] }
 tokio-util = { version = "0.7", features = ["codec", "io", "tracing"] }
 tower = { version = "0.4", features = ["__common", "balance", "buffer", "discover", "futures-core", "futures-util", "indexmap", "limit", "load", "load-shed", "log", "make", "pin-project", "pin-project-lite", "rand", "ready-cache", "retry", "slab", "timeout", "tokio", "tokio-util", "tracing", "util"] }
