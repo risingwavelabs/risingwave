@@ -564,6 +564,7 @@ mod tests {
             epoch,
             mpsc::unbounded_channel().0,
             StaticCompactionGroupId::StateDefault.into(),
+            Default::default(),
         );
         if is_replicate {
             shared_buffer.replicate_batch(batch.clone());
