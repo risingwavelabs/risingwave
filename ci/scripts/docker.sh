@@ -67,4 +67,3 @@ if [ "$PUSH_GHCR" = true ]; then
     docker push "${ghcraddr}/${component}:latest-${arch}"
   done
 fi
-}
