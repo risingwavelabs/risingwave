@@ -47,7 +47,7 @@ use std::fmt::Debug;
 
 use fixedbitset::FixedBitSet;
 use itertools::Itertools;
-use risingwave_common::catalog::{FieldVerboseDisplay, Schema};
+use risingwave_common::catalog::{FieldDisplay, Schema};
 use risingwave_common::error::Result;
 use risingwave_pb::batch_plan::exchange_info::{
     Distribution as DistributionProst, DistributionMode, HashInfo,
@@ -167,25 +167,23 @@ impl fmt::Display for Distribution {
     }
 }
 
-pub struct DistributionVerboseDisplay<'a> {
+pub struct DistributionDisplay<'a> {
     pub distribution: &'a Distribution,
     pub input_schema: &'a Schema,
 }
 
-impl DistributionVerboseDisplay<'_> {
+impl DistributionDisplay<'_> {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         let that = self.distribution;
-        f.write_str("[")?;
         match that {
-            Distribution::Single => f.write_str("Single")?,
-            Distribution::SomeShard => f.write_str("SomeShard")?,
-            Distribution::Broadcast => f.write_str("Broadcast")?,
+            Distribution::Single => f.write_str("Single"),
+            Distribution::SomeShard => f.write_str("SomeShard"),
+            Distribution::Broadcast => f.write_str("Broadcast"),
             Distribution::HashShard(vec) => {
+                f.write_str("HashShard(")?;
                 for key in vec.iter().copied().with_position() {
                     std::fmt::Debug::fmt(
-                        &FieldVerboseDisplay(
-                            self.input_schema.fields.get(key.into_inner()).unwrap(),
-                        ),
+                        &FieldDisplay(self.input_schema.fields.get(key.into_inner()).unwrap()),
                         f,
                     )?;
                     match key {
@@ -195,19 +193,19 @@ impl DistributionVerboseDisplay<'_> {
                         _ => {}
                     }
                 }
+                f.write_str(")")
             }
         }
-        f.write_str("]")
     }
 }
 
-impl fmt::Debug for DistributionVerboseDisplay<'_> {
+impl fmt::Debug for DistributionDisplay<'_> {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         self.fmt(f)
     }
 }
 
-impl fmt::Display for DistributionVerboseDisplay<'_> {
+impl fmt::Display for DistributionDisplay<'_> {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         self.fmt(f)
     }
