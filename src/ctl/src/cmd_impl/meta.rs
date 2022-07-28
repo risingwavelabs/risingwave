@@ -13,5 +13,7 @@
 // limitations under the License.
 
 mod pause_resume;
+mod cluster_info;
 
 pub use pause_resume::*;
+pub use cluster_info::*;
