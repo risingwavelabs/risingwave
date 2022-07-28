@@ -17,13 +17,13 @@ use std::collections::{HashMap, HashSet};
 use std::option::Option::Some;
 use std::sync::Arc;
 
+use anyhow::{bail, Result};
 use itertools::Itertools;
 use risingwave_common::catalog::{
     DEFAULT_DATABASE_NAME, DEFAULT_SCHEMA_NAME, DEFAULT_SUPER_USER_ID, PG_CATALOG_SCHEMA_NAME,
 };
 use risingwave_common::ensure;
-use risingwave_common::error::ErrorCode::{InternalError, PermissionDenied};
-use risingwave_common::error::{Result, RwError};
+use risingwave_common::error::ErrorCode::PermissionDenied;
 use risingwave_common::types::ParallelUnitId;
 use risingwave_pb::catalog::table::OptionalAssociatedSourceId;
 use risingwave_pb::catalog::{Database, Schema, Sink, Source, Table};
@@ -162,9 +162,7 @@ where
 
             Ok(version)
         } else {
-            Err(RwError::from(InternalError(
-                "database already exists".to_string(),
-            )))
+            bail!("database already exists")
         }
     }
 
@@ -195,9 +193,7 @@ where
 
             Ok(version)
         } else {
-            Err(RwError::from(InternalError(
-                "database doesn't exist".to_string(),
-            )))
+            bail!("database doesn't exist".to_string(),)
         }
     }
 
@@ -215,9 +211,7 @@ where
 
             Ok(version)
         } else {
-            Err(RwError::from(InternalError(
-                "schema already exists".to_string(),
-            )))
+            bail!("schema already exists".to_string(),)
         }
     }
 
@@ -236,9 +230,7 @@ where
 
             Ok(version)
         } else {
-            Err(RwError::from(InternalError(
-                "schema doesn't exist".to_string(),
-            )))
+            bail!("schema doesn't exist".to_string(),)
         }
     }
 
@@ -280,9 +272,7 @@ where
             }
             Ok(())
         } else {
-            Err(RwError::from(InternalError(
-                "table already exists or in creating procedure".to_string(),
-            )))
+            bail!("table already exists or in creating procedure".to_string(),)
         }
     }
 
@@ -315,9 +305,7 @@ where
 
             Ok(version)
         } else {
-            Err(RwError::from(InternalError(
-                "table already exist or not in creating procedure".to_string(),
-            )))
+            bail!("table already exist or not in creating procedure",)
         }
     }
 
@@ -331,9 +319,7 @@ where
             }
             Ok(())
         } else {
-            Err(RwError::from(InternalError(
-                "table already exist or not in creating procedure".to_string(),
-            )))
+            bail!("table already exist or not in creating procedure",)
         }
     }
 
@@ -362,9 +348,7 @@ where
                 }
             }
         } else {
-            Err(RwError::from(InternalError(
-                "table doesn't exist".to_string(),
-            )))
+            bail!("table doesn't exist",)
         }
     }
 
@@ -375,9 +359,7 @@ where
             core.mark_creating(&key);
             Ok(())
         } else {
-            Err(RwError::from(InternalError(
-                "source already exists or in creating procedure".to_string(),
-            )))
+            bail!("source already exists or in creating procedure",)
         }
     }
 
@@ -398,9 +380,7 @@ where
 
             Ok(version)
         } else {
-            Err(RwError::from(InternalError(
-                "source already exist or not in creating procedure".to_string(),
-            )))
+            bail!("source already exist or not in creating procedure",)
         }
     }
 
@@ -411,9 +391,7 @@ where
             core.unmark_creating(&key);
             Ok(())
         } else {
-            Err(RwError::from(InternalError(
-                "source already exist or not in creating procedure".to_string(),
-            )))
+            bail!("source already exist or not in creating procedure",)
         }
     }
 
@@ -480,9 +458,7 @@ where
                 }
             }
         } else {
-            Err(RwError::from(InternalError(
-                "source doesn't exist".to_string(),
-            )))
+            bail!("source doesn't exist",)
         }
     }
 
@@ -504,9 +480,7 @@ where
             ensure!(mview.dependent_relations.is_empty());
             Ok(())
         } else {
-            Err(RwError::from(InternalError(
-                "source or table already exist".to_string(),
-            )))
+            bail!("source or table already exist".to_string(),)
         }
     }
 
@@ -552,9 +526,7 @@ where
                 .await;
             Ok(version)
         } else {
-            Err(RwError::from(InternalError(
-                "source already exist or not in creating procedure".to_string(),
-            )))
+            bail!("source already exist or not in creating procedure",)
         }
     }
 
@@ -575,9 +547,7 @@ where
             core.unmark_creating(&mview_key);
             Ok(())
         } else {
-            Err(RwError::from(InternalError(
-                "source already exist or not in creating procedure".to_string(),
-            )))
+            bail!("source already exist or not in creating procedure",)
         }
     }
 
@@ -596,14 +566,10 @@ where
                     mview.optional_associated_source_id
                 {
                     if associated_source_id != source_id {
-                        return Err(RwError::from(InternalError(
-                            "mview's associated source id doesn't match source id".to_string(),
-                        )));
+                        bail!("mview's associated source id doesn't match source id");
                     }
                 } else {
-                    return Err(RwError::from(InternalError(
-                        "mview do not have associated source id".to_string(),
-                    )));
+                    bail!("mview do not have associated source id");
                 }
                 // check ref count
                 if let Some(ref_count) = core.get_ref_count(mview_id) {
@@ -641,9 +607,7 @@ where
                 Ok(version)
             }
 
-            _ => Err(RwError::from(InternalError(
-                "table or source doesn't exist".to_string(),
-            ))),
+            _ => bail!("table or source doesn't exist"),
         }
     }
 
@@ -657,9 +621,7 @@ where
             }
             Ok(())
         } else {
-            Err(RwError::from(InternalError(
-                "sink already exists or in creating procedure".to_string(),
-            )))
+            bail!("sink already exists or in creating procedure")
         }
     }
 
@@ -679,9 +641,7 @@ where
 
             Ok(version)
         } else {
-            Err(RwError::from(InternalError(
-                "sink already exist or not in creating procedure".to_string(),
-            )))
+            bail!("sink already exist or not in creating procedure")
         }
     }
 
@@ -692,9 +652,7 @@ where
             core.unmark_creating(&key);
             Ok(())
         } else {
-            Err(RwError::from(InternalError(
-                "sink already exist or not in creating procedure".to_string(),
-            )))
+            bail!("sink already exist or not in creating procedure")
         }
     }
 
@@ -712,9 +670,7 @@ where
 
             Ok(version)
         } else {
-            Err(RwError::from(InternalError(
-                "sink already exists".to_string(),
-            )))
+            bail!("sink already exists")
         }
     }
 
@@ -736,9 +692,7 @@ where
 
             Ok(version)
         } else {
-            Err(RwError::from(InternalError(
-                "sink doesn't exist".to_string(),
-            )))
+            bail!("sink doesn't exist")
         }
     }
 
@@ -943,7 +897,9 @@ where
     }
 
     pub async fn get_sink(&self, id: SinkId) -> Result<Option<Sink>> {
-        Sink::select(self.env.meta_store(), &id).await
+        Sink::select(self.env.meta_store(), &id)
+            .await
+            .map_err(Into::into)
     }
 
     fn get_ref_count(&self, relation_id: RelationId) -> Option<usize> {

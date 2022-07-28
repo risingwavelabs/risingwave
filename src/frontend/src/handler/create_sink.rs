@@ -26,11 +26,11 @@ use super::privilege::check_privileges;
 use super::util::handle_with_properties;
 use crate::binder::Binder;
 use crate::catalog::{DatabaseId, SchemaId};
+use crate::handler::privilege::ObjectCheckItem;
 use crate::optimizer::plan_node::{LogicalScan, StreamSink, StreamTableScan};
 use crate::optimizer::PlanRef;
 use crate::session::{OptimizerContext, OptimizerContextRef};
 use crate::stream_fragmenter::StreamFragmenter;
-use crate::handler::privilege::ObjectCheckItem;
 
 pub(crate) fn make_prost_sink(
     database_id: DatabaseId,
