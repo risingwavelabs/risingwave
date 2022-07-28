@@ -17,12 +17,12 @@ use std::sync::Arc;
 use futures::StreamExt;
 use futures_async_stream::try_stream;
 use itertools::Itertools;
-use risingwave_common::array::Op::*;
+use risingwave_common::{array::Op::*, catalog::ColumnDesc};
 use risingwave_common::array::Row;
 use risingwave_common::buffer::Bitmap;
 use risingwave_common::catalog::{ColumnId, Schema, TableId};
 use risingwave_common::util::sort_util::OrderPair;
-use risingwave_pb::catalog::Table;
+use risingwave_pb::{catalog::Table, plan_common::OrderType};
 use risingwave_storage::table::state_table::StateTable;
 use risingwave_storage::StateStore;
 
@@ -63,19 +63,7 @@ impl<S: StateStore> MaterializeExecutor<S> {
         // let arrange_order_types = key.iter().map(|k| k.order_type).collect();
 
         let schema = input.schema().clone();
-        // let columns = column_ids
-        //     .into_iter()
-        //     .zip_eq(schema.fields.iter())
-        //     .map(|(column_id, field)| ColumnDesc::unnamed(column_id, field.data_type()))
-        //     .collect_vec();
-
-        // let distribution = match vnodes {
-        //     Some(vnodes) => Distribution {
-        //         dist_key_indices: distribution_key,
-        //         vnodes,
-        //     },
-        //     None => Distribution::fallback(),
-        // };
+    
 
         let state_table = StateTable::from_table_catalog(table_catalog, store, vnodes);
 

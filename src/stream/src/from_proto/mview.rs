@@ -51,6 +51,7 @@ impl ExecutorBuilder for MaterializeExecutorBuilder {
             .map(|key| *key as usize)
             .collect();
         let table = node.get_table()?;
+        // println!("table  = {:?}", table);
         let executor = MaterializeExecutor::new(
             params.input.remove(0),
             store,
