@@ -28,7 +28,7 @@ apt update
 echo "debug stuff 2"
 apt install apt-transport-https ca-certificates curl software-properties-common -y
 echo "debug stuff 3"
-curl -fsSL https://download.docker.com/linux/ubuntu/gpg | sudo apt-key add -
+curl -fsSL https://download.docker.com/linux/ubuntu/gpg | apt-key add -
 echo "debug stuff 4"
 add-apt-repository "deb [arch=amd64] https://download.docker.com/linux/ubuntu focal stable"
 echo "debug stuff 5"
