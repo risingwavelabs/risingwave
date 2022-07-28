@@ -24,14 +24,20 @@ cargo make pre-start-playground
 cargo make link-all-in-one-binaries
 
 echo "debug stuff 1"
-apt-get update
+apt-get update && \
+apt-get -y install apt-transport-https \
+     ca-certificates \
+     curl \
+     gnupg2 \
+     software-properties-common && \
+curl -fsSL https://download.docker.com/linux/$(. /etc/os-release; echo "$ID")/gpg > /tmp/dkey; apt-key add /tmp/dkey && \
+add-apt-repository \
+   "deb [arch=amd64] https://download.docker.com/linux/$(. /etc/os-release; echo "$ID") \
+   $(lsb_release -cs) \
+   stable" && \
+apt-get update && \
+apt-get -y install docker-ce
 echo "debug stuff 2"
-apt install docker.io -y
-echo "debug stuff 3"
-apt install snapd -y
-echo "debug stuff 4"
-snap install docker
-echo "debug stuff 5"
 docker port mysql
 
 echo "--- e2e test w/ Rust frontend - sink with mysql"
