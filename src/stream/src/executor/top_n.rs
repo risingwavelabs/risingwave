@@ -12,10 +12,10 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::collections::HashSet;
+use std::collections::BTreeMap;
 
 use async_trait::async_trait;
-use risingwave_common::array::{Op, StreamChunk};
+use risingwave_common::array::{Op, Row, StreamChunk};
 use risingwave_common::catalog::{Schema, TableId};
 use risingwave_common::types::DataType;
 use risingwave_common::util::ordered::{OrderedRow, OrderedRowDeserializer};
@@ -23,14 +23,13 @@ use risingwave_common::util::sort_util::{OrderPair, OrderType};
 use risingwave_storage::StateStore;
 
 use super::error::StreamExecutorResult;
-use super::managed_state::top_n::variants::{TOP_N_MAX, TOP_N_MIN};
-use super::managed_state::top_n::{ManagedTopNBottomNState, ManagedTopNState};
+use super::managed_state::top_n::ManagedTopNStateNew;
 use super::top_n_executor::{generate_output, TopNExecutorBase, TopNExecutorWrapper};
 use super::{BoxedMessageStream, Executor, ExecutorInfo, PkIndices, PkIndicesRef};
 
 /// `TopNExecutor` works with input with modification, it keeps all the data
 /// records/rows that have been seen, and returns topN records overall.
-pub type TopNExecutor<S> = TopNExecutorWrapper<InnerTopNExecutor<S>>;
+pub type TopNExecutor<S> = TopNExecutorWrapper<InnerTopNExecutorNew<S>>;
 
 impl<S: StateStore> TopNExecutor<S> {
     #[allow(clippy::too_many_arguments)]
@@ -40,11 +39,8 @@ impl<S: StateStore> TopNExecutor<S> {
         offset_and_limit: (usize, Option<usize>),
         pk_indices: PkIndices,
         store: S,
-        table_id_l: TableId,
-        table_id_m: TableId,
-        table_id_h: TableId,
-        cache_size: Option<usize>,
-        total_count: (usize, usize, usize),
+        table_id: TableId,
+        total_count: usize,
         executor_id: u64,
         key_indices: Vec<usize>,
     ) -> StreamExecutorResult<Self> {
@@ -53,17 +49,14 @@ impl<S: StateStore> TopNExecutor<S> {
 
         Ok(TopNExecutorWrapper {
             input,
-            inner: InnerTopNExecutor::new(
+            inner: InnerTopNExecutorNew::new(
                 info,
                 schema,
                 order_pairs,
                 offset_and_limit,
                 pk_indices,
                 store,
-                table_id_l,
-                table_id_m,
-                table_id_h,
-                cache_size,
+                table_id,
                 total_count,
                 executor_id,
                 key_indices,
@@ -72,13 +65,13 @@ impl<S: StateStore> TopNExecutor<S> {
     }
 }
 
-pub struct InnerTopNExecutor<S: StateStore> {
+pub struct InnerTopNExecutorNew<S: StateStore> {
     info: ExecutorInfo,
 
     /// Schema of the executor.
     schema: Schema,
 
-    /// `LIMIT XXX`. `None` means no limit.
+    /// `LIMIT XXX`. None means no limit.
     limit: Option<usize>,
     /// `OFFSET XXX`. `0` means no offset.
     offset: usize,
@@ -92,19 +85,39 @@ pub struct InnerTopNExecutor<S: StateStore> {
     /// The order of internal keys of the `TopNExecutor`
     internal_key_order_types: Vec<OrderType>,
 
-    /// We are interested in which element is in the range of [offset, offset+limit). But we
-    /// still need to record elements in the other two ranges.
-    managed_lowest_state: ManagedTopNState<S, TOP_N_MAX>,
-    managed_middle_state: ManagedTopNBottomNState<S>,
-    managed_highest_state: ManagedTopNState<S, TOP_N_MIN>,
+    /// We are interested in which element is in the range of [offset, offset+limit).
+    managed_state: ManagedTopNStateNew<S>,
 
-    /// Marks whether this is first-time execution. If yes, we need to fill in the cache from
-    /// storage.
-    first_execution: bool,
+    /// In-memory cache of top (N + N * `TOPN_CACHE_HIGH_CAPACITY_FACTOR`) rows
+    cache: TopNCache,
 
     #[expect(dead_code)]
     /// Indices of the columns on which key distribution depends.
     key_indices: Vec<usize>,
+}
+
+const TOPN_CACHE_HIGH_CAPACITY_FACTOR: usize = 2;
+
+struct TopNCache {
+    pub low: BTreeMap<OrderedRow, Row>,
+    pub middle: BTreeMap<OrderedRow, Row>,
+    pub high: BTreeMap<OrderedRow, Row>,
+    high_capacity: usize,
+}
+
+impl TopNCache {
+    pub fn new(num_offset: usize, num_limit: usize) -> Self {
+        Self {
+            low: BTreeMap::new(),
+            middle: BTreeMap::new(),
+            high: BTreeMap::new(),
+            high_capacity: (num_offset + num_limit) * TOPN_CACHE_HIGH_CAPACITY_FACTOR,
+        }
+    }
+
+    fn is_high_cache_full(&self) -> bool {
+        self.high.len() == self.high_capacity
+    }
 }
 
 pub fn generate_internal_key(
@@ -112,11 +125,9 @@ pub fn generate_internal_key(
     pk_indices: PkIndicesRef,
     schema: &Schema,
 ) -> (PkIndices, Vec<DataType>, Vec<OrderType>) {
-    let mut exists_key_index = HashSet::new();
     let mut internal_key_indices = vec![];
     let mut internal_order_types = vec![];
     for order_pair in order_pairs {
-        exists_key_index.insert(order_pair.column_idx);
         internal_key_indices.push(order_pair.column_idx);
         internal_order_types.push(order_pair.order_type);
     }
@@ -137,7 +148,7 @@ pub fn generate_internal_key(
     )
 }
 
-impl<S: StateStore> InnerTopNExecutor<S> {
+impl<S: StateStore> InnerTopNExecutorNew<S> {
     #[allow(clippy::too_many_arguments)]
     pub fn new(
         input_info: ExecutorInfo,
@@ -146,11 +157,8 @@ impl<S: StateStore> InnerTopNExecutor<S> {
         offset_and_limit: (usize, Option<usize>),
         pk_indices: PkIndices,
         store: S,
-        table_id_l: TableId,
-        table_id_m: TableId,
-        table_id_h: TableId,
-        cache_size: Option<usize>,
-        total_count: (usize, usize, usize),
+        table_id: TableId,
+        total_count: usize,
         executor_id: u64,
         key_indices: Vec<usize>,
     ) -> StreamExecutorResult<Self> {
@@ -166,61 +174,41 @@ impl<S: StateStore> InnerTopNExecutor<S> {
             .map(|field| field.data_type.clone())
             .collect::<Vec<_>>();
 
-        let managed_lowest_state = ManagedTopNState::<S, TOP_N_MAX>::new(
-            cache_size,
-            total_count.0,
-            store.clone(),
-            table_id_l,
-            row_data_types.clone(),
-            ordered_row_deserializer.clone(),
-            internal_key_indices.clone(),
-        );
-        let managed_middle_state = ManagedTopNBottomNState::new(
-            cache_size,
-            total_count.1,
-            store.clone(),
-            table_id_m,
-            row_data_types.clone(),
-            ordered_row_deserializer.clone(),
-            internal_key_indices.clone(),
-        );
-        let managed_highest_state = ManagedTopNState::<S, TOP_N_MIN>::new(
-            cache_size,
-            total_count.2,
+        let num_offset = offset_and_limit.0;
+        let num_limit = offset_and_limit.1.unwrap_or_default();
+        let managed_state = ManagedTopNStateNew::<S>::new(
+            total_count,
             store,
-            table_id_h,
+            table_id,
             row_data_types,
             ordered_row_deserializer,
             internal_key_indices.clone(),
         );
+
         Ok(Self {
             info: ExecutorInfo {
                 schema: input_info.schema,
                 pk_indices: input_info.pk_indices,
-                identity: format!("TopNExecutor {:X}", executor_id),
+                identity: format!("TopNExecutorNew {:X}", executor_id),
             },
             schema,
             offset: offset_and_limit.0,
             limit: offset_and_limit.1,
-            managed_lowest_state,
-            managed_middle_state,
-            managed_highest_state,
+            managed_state,
             pk_indices,
             internal_key_indices,
             internal_key_order_types,
-            first_execution: true,
+            cache: TopNCache::new(num_offset, num_limit),
             key_indices,
         })
     }
 
     async fn flush_inner(&mut self, epoch: u64) -> StreamExecutorResult<()> {
-        self.managed_highest_state.flush(epoch).await?;
-        self.managed_middle_state.flush(epoch).await?;
-        self.managed_lowest_state.flush(epoch).await
+        self.managed_state.flush(epoch).await
     }
 }
 
-impl<S: StateStore> Executor for InnerTopNExecutor<S> {
+impl<S: StateStore> Executor for InnerTopNExecutorNew<S> {
     fn execute(self: Box<Self>) -> BoxedMessageStream {
         panic!("Should execute by wrapper");
     }
@@ -239,191 +227,180 @@ impl<S: StateStore> Executor for InnerTopNExecutor<S> {
 }
 
 #[async_trait]
-impl<S: StateStore> TopNExecutorBase for InnerTopNExecutor<S> {
+impl<S: StateStore> TopNExecutorBase for InnerTopNExecutorNew<S> {
     async fn apply_chunk(
         &mut self,
         chunk: StreamChunk,
         epoch: u64,
     ) -> StreamExecutorResult<StreamChunk> {
-        if self.first_execution {
-            self.managed_lowest_state.fill_in_cache(epoch).await?;
-            self.managed_middle_state.fill_in_cache(epoch).await?;
-            self.managed_highest_state.fill_in_cache(epoch).await?;
-            self.first_execution = false;
-        }
+        let mut res_ops = Vec::with_capacity(self.limit.unwrap_or_default());
+        let mut res_rows = Vec::with_capacity(self.limit.unwrap_or_default());
+        // We have banned streaming query that doesn't have LIMIT, so it is safe to unwrap here
+        let num_limit = self.limit.unwrap();
 
-        let num_limit = self.limit.unwrap_or(usize::MAX);
-        let mut new_ops = vec![];
-        let mut new_rows = vec![];
-
+        // apply the chunk to state table
         for (op, row_ref) in chunk.rows() {
             let pk_row = row_ref.row_by_indices(&self.internal_key_indices);
             let ordered_pk_row = OrderedRow::new(pk_row, &self.internal_key_order_types);
             let row = row_ref.to_owned_row();
-
             match op {
                 Op::Insert | Op::UpdateInsert => {
-                    if self.managed_lowest_state.total_count() < self.offset {
-                        // `elem` is in the range of `[0, offset)`,
-                        // we ignored it for now as it is not in the result set.
-                        self.managed_lowest_state
-                            .insert(ordered_pk_row, row, epoch)
-                            .await?;
+                    // First insert input row to state store
+                    self.managed_state
+                        .insert(ordered_pk_row.clone(), row.clone(), epoch)?;
+
+                    // Then insert input row to corresponding cache range according to its order key
+                    if self.cache.low.len() < self.offset {
+                        debug_assert!(self.cache.middle.is_empty());
+                        debug_assert!(self.cache.high.is_empty());
+                        self.cache.low.insert(ordered_pk_row, row);
                         continue;
                     }
 
-                    // We remark that when offset is 0, every input row has nothing to do with
-                    // `managed_lower_state`.
-                    let element_to_compare_with_middle = if self.offset > 0
-                        && &ordered_pk_row < self.managed_lowest_state.top_element().unwrap().0
+                    // If offset is 0, every input row has noting to do with `cache.low`
+                    let elem_to_compare_with_middle = if self.offset > 0
+                        && ordered_pk_row <= *self.cache.low.last_key_value().unwrap().0
                     {
-                        // If the new element is smaller than the largest element in [0, offset),
-                        // the largest element need to move to [offset, offset+limit).
-                        let res = self
-                            .managed_lowest_state
-                            .pop_top_element(epoch)
-                            .await?
-                            .unwrap();
-                        self.managed_lowest_state
-                            .insert(ordered_pk_row, row, epoch)
-                            .await?;
+                        // If the new row is in the range of [0, offset), the largest row in
+                        // `cache.low` needs be moved to `cache.middle`
+                        // which covers the range of [offset, offset+limit)
+                        let res = self.cache.low.pop_last().unwrap();
+                        self.cache.low.insert(ordered_pk_row, row);
                         res
                     } else {
                         (ordered_pk_row, row)
                     };
 
-                    if self.managed_middle_state.total_count() < num_limit {
-                        // `elem` is in the range of `[offset, offset+limit)`,
-                        self.managed_middle_state
-                            .insert(
-                                element_to_compare_with_middle.0,
-                                element_to_compare_with_middle.1.clone(),
-                            )
-                            .await;
-                        new_ops.push(Op::Insert);
-                        new_rows.push(element_to_compare_with_middle.1);
+                    if self.cache.middle.len() < num_limit {
+                        self.cache.middle.insert(
+                            elem_to_compare_with_middle.0,
+                            elem_to_compare_with_middle.1.clone(),
+                        );
+                        res_ops.push(Op::Insert);
+                        res_rows.push(elem_to_compare_with_middle.1);
                         continue;
                     }
 
-                    let element_to_compare_with_highest = if &element_to_compare_with_middle.0
-                        < self.managed_middle_state.top_element().unwrap().0
+                    let elem_to_compare_with_high = if elem_to_compare_with_middle.0
+                        <= *self.cache.middle.last_key_value().unwrap().0
                     {
-                        let res = self
-                            .managed_middle_state
-                            .pop_top_element(epoch)
-                            .await?
-                            .unwrap();
-                        new_ops.push(Op::Delete);
-                        new_rows.push(res.1.clone());
-                        new_ops.push(Op::Insert);
-                        new_rows.push(element_to_compare_with_middle.1.clone());
-                        self.managed_middle_state
-                            .insert(
-                                element_to_compare_with_middle.0,
-                                element_to_compare_with_middle.1,
-                            )
-                            .await;
+                        // If the row in the range of [offset, offset+limit), the largest row in
+                        // `cache.middle` needs to be moved to `cache.high`
+                        let res = self.cache.middle.pop_last().unwrap();
+                        res_ops.push(Op::Delete);
+                        res_rows.push(res.1.clone());
+                        res_ops.push(Op::Insert);
+                        res_rows.push(elem_to_compare_with_middle.1.clone());
+                        self.cache
+                            .middle
+                            .insert(elem_to_compare_with_middle.0, elem_to_compare_with_middle.1);
                         res
                     } else {
-                        element_to_compare_with_middle
+                        elem_to_compare_with_middle
                     };
 
-                    // `elem` is in the range of `[offset+limit, +inf)`.
-                    self.managed_highest_state
-                        .insert(
-                            element_to_compare_with_highest.0,
-                            element_to_compare_with_highest.1,
-                            epoch,
-                        )
-                        .await?;
+                    if !self.cache.is_high_cache_full() {
+                        self.cache
+                            .high
+                            .insert(elem_to_compare_with_high.0, elem_to_compare_with_high.1);
+                    } else if elem_to_compare_with_high.0
+                        <= *self.cache.high.last_key_value().unwrap().0
+                    {
+                        self.cache.high.pop_last();
+                        self.cache
+                            .high
+                            .insert(elem_to_compare_with_high.0, elem_to_compare_with_high.1);
+                    }
                 }
+
                 Op::Delete | Op::UpdateDelete => {
-                    // The extra care we need to take for deletion is that when we delete an element
-                    // from a managed state, we may need to move an element from
-                    // a higher range to the current range. And this process may
-                    // be recursive. Since this is a delete operator, the key
-                    // must already exist in one of the three managed states. We
-                    // first check whether the element is in the highest state.
-                    if self.managed_middle_state.total_count() == num_limit
-                        && ordered_pk_row > *self.managed_middle_state.top_element().unwrap().0
+                    // First remove the row from state store
+                    self.managed_state
+                        .delete(&ordered_pk_row, row.clone(), epoch)?;
+
+                    // Then we need to remove the row from cache
+                    if self.cache.middle.len() == num_limit
+                        && ordered_pk_row > *self.cache.middle.last_key_value().unwrap().0
                     {
-                        // The current element in in the range of `[offset+limit, +inf)`
-                        self.managed_highest_state
-                            .delete(&ordered_pk_row, row.clone(), epoch)
-                            .await?;
-                    } else if self.managed_lowest_state.total_count() == self.offset
+                        // The row in the range of [offset+limit, +inf)
+                        self.cache.high.remove(&ordered_pk_row);
+                    } else if self.cache.low.len() == self.offset
                         && (self.offset == 0
-                            || ordered_pk_row > *self.managed_lowest_state.top_element().unwrap().0)
+                            || ordered_pk_row > *self.cache.low.last_key_value().unwrap().0)
                     {
-                        // The current element in in the range of `[offset, offset+limit)`
-                        self.managed_middle_state
-                            .delete(&ordered_pk_row, row.clone(), epoch)
-                            .await?;
-                        new_ops.push(Op::Delete);
-                        new_rows.push(row.clone());
-                        // We need to bring one, if any, from highest to lowest.
-                        if self.managed_highest_state.total_count() > 0 {
-                            let smallest_element_from_highest_state = self
-                                .managed_highest_state
-                                .pop_top_element(epoch)
-                                .await?
-                                .unwrap();
-                            new_ops.push(Op::Insert);
-                            new_rows.push(smallest_element_from_highest_state.1.clone());
-                            self.managed_middle_state
-                                .insert(
-                                    smallest_element_from_highest_state.0,
-                                    smallest_element_from_highest_state.1,
-                                )
-                                .await;
-                        }
-                    } else {
-                        // The current element in in the range of `[0, offset)`
-                        self.managed_lowest_state
-                            .delete(&ordered_pk_row, row.clone(), epoch)
-                            .await?;
-                        // We need to bring one, if any, from middle to lowest.
-                        if self.managed_middle_state.total_count() > 0 {
-                            let smallest_element_from_middle_state = self
-                                .managed_middle_state
-                                .pop_bottom_element(epoch)
-                                .await?
-                                .unwrap();
-                            new_ops.push(Op::Delete);
-                            new_rows.push(smallest_element_from_middle_state.1.clone());
-                            self.managed_lowest_state
-                                .insert(
-                                    smallest_element_from_middle_state.0,
-                                    smallest_element_from_middle_state.1,
+                        // The row in the range of [offset, offset+limit) which is the result set
+                        // Try to fill the high cache if it is empty
+                        let largest_ordered_key_in_middle =
+                            self.cache.middle.last_key_value().unwrap().0;
+                        if self.cache.high.is_empty() {
+                            self.managed_state
+                                .fill_cache(
+                                    &mut self.cache.high,
+                                    largest_ordered_key_in_middle,
+                                    self.cache.high_capacity,
                                     epoch,
                                 )
                                 .await?;
                         }
-                        // We check whether we need to/can bring one from highest to middle.
-                        // We remark that if `self.limit` is Some, it cannot be 0 as this should be
-                        // optimized away in the frontend.
-                        if self.managed_middle_state.total_count() == (num_limit - 1)
-                            && self.managed_highest_state.total_count() > 0
+
+                        self.cache.middle.remove(&ordered_pk_row);
+                        res_ops.push(Op::Delete);
+                        res_rows.push(row.clone());
+
+                        // Bring one element, if any, from high cache to middle cache
+                        if !self.cache.high.is_empty() {
+                            let smallest_elem_in_high = self.cache.high.pop_first().unwrap();
+                            res_ops.push(Op::Insert);
+                            res_rows.push(smallest_elem_in_high.1.clone());
+
+                            self.cache
+                                .middle
+                                .insert(smallest_elem_in_high.0, smallest_elem_in_high.1);
+                        }
+                    } else {
+                        // The row in the range of [0, offset)
+                        self.cache.low.remove(&ordered_pk_row);
+                        // Bring one element, if any, from middle cache to low cache
+                        if !self.cache.middle.is_empty() {
+                            // Try to fill the high cache if it is empty
+                            let largest_ordered_key_in_middle =
+                                self.cache.middle.last_key_value().unwrap().0;
+                            if self.cache.high.is_empty() {
+                                self.managed_state
+                                    .fill_cache(
+                                        &mut self.cache.high,
+                                        largest_ordered_key_in_middle,
+                                        self.cache.high_capacity,
+                                        epoch,
+                                    )
+                                    .await?;
+                            }
+
+                            let smallest_elem_in_middle = self.cache.middle.pop_first().unwrap();
+                            res_ops.push(Op::Delete);
+                            res_rows.push(smallest_elem_in_middle.1.clone());
+                            self.cache
+                                .low
+                                .insert(smallest_elem_in_middle.0, smallest_elem_in_middle.1);
+                        }
+
+                        // Bring one element, if any, from high cache to middle cache
+                        if !self.cache.high.is_empty() && self.cache.middle.len() == (num_limit - 1)
                         {
-                            let smallest_element_from_highest_state = self
-                                .managed_highest_state
-                                .pop_top_element(epoch)
-                                .await?
-                                .unwrap();
-                            new_ops.push(Op::Insert);
-                            new_rows.push(smallest_element_from_highest_state.1.clone());
-                            self.managed_middle_state
-                                .insert(
-                                    smallest_element_from_highest_state.0,
-                                    smallest_element_from_highest_state.1,
-                                )
-                                .await;
+                            let smallest_elem_in_high = self.cache.high.pop_first().unwrap();
+
+                            res_ops.push(Op::Insert);
+                            res_rows.push(smallest_elem_in_high.1.clone());
+                            self.cache
+                                .middle
+                                .insert(smallest_elem_in_high.0, smallest_elem_in_high.1);
                         }
                     }
                 }
             }
         }
-        generate_output(new_rows, new_ops, &self.schema)
+        // compare the those two ranges and emit the differantial result
+        generate_output(res_rows, res_ops, &self.schema)
     }
 
     async fn flush_data(&mut self, epoch: u64) -> StreamExecutorResult<()> {
@@ -508,6 +485,49 @@ mod tests {
         ]
     }
 
+    fn create_source_new() -> Box<MockSource> {
+        let mut chunks = vec![
+            StreamChunk::from_pretty(
+                " I I I I
+            +  1 1 4 1001",
+            ),
+            StreamChunk::from_pretty(
+                " I I I I
+            +  5 1 4 1002 ",
+            ),
+            StreamChunk::from_pretty(
+                " I I I I
+            +  1 9 1 1003
+            +  9 8 1 1004
+            +  0 2 3 1005",
+            ),
+            StreamChunk::from_pretty(
+                " I I I I
+            +  1 0 2 1006",
+            ),
+        ];
+        let schema = Schema {
+            fields: vec![
+                Field::unnamed(DataType::Int64),
+                Field::unnamed(DataType::Int64),
+                Field::unnamed(DataType::Int64),
+                Field::unnamed(DataType::Int64),
+            ],
+        };
+        Box::new(MockSource::with_messages(
+            schema,
+            PkIndices::new(),
+            vec![
+                Message::Barrier(Barrier::new_test_barrier(1)),
+                Message::Chunk(std::mem::take(&mut chunks[0])),
+                Message::Chunk(std::mem::take(&mut chunks[1])),
+                Message::Chunk(std::mem::take(&mut chunks[2])),
+                Message::Chunk(std::mem::take(&mut chunks[3])),
+                Message::Barrier(Barrier::new_test_barrier(2)),
+            ],
+        ))
+    }
+
     fn create_source() -> Box<MockSource> {
         let mut chunks = create_stream_chunks();
         let schema = create_schema();
@@ -536,14 +556,11 @@ mod tests {
             TopNExecutor::new(
                 source as Box<dyn Executor>,
                 order_types,
-                (3, None),
+                (3, Some(1000)),
                 vec![0, 1],
                 MemoryStateStore::new(),
                 TableId::from(0x2333),
-                TableId::from(0x2334),
-                TableId::from(0x2335),
-                Some(2),
-                (0, 0, 0),
+                0,
                 1,
                 vec![],
             )
@@ -563,7 +580,6 @@ mod tests {
                 +  8 5"
             )
         );
-        // Now (1, 2, 3) -> (8, 9, 10)
         // Barrier
         assert_matches!(
             top_n_executor.next().await.unwrap().unwrap(),
@@ -583,7 +599,6 @@ mod tests {
             )
         );
 
-        // (5, 7, 8) -> (9, 10, 11)
         // barrier
         assert_matches!(
             top_n_executor.next().await.unwrap().unwrap(),
@@ -591,6 +606,7 @@ mod tests {
         );
 
         let res = top_n_executor.next().await.unwrap().unwrap();
+        // (8, 9, 10, 11, 12, 13, 14)
         assert_eq!(
             *res.as_chunk().unwrap(),
             StreamChunk::from_pretty(
@@ -601,13 +617,13 @@ mod tests {
                 + 14 12"
             )
         );
-        // (5, 6, 7) -> (8, 9, 10, 11, 12, 13, 14)
         // barrier
         assert_matches!(
             top_n_executor.next().await.unwrap().unwrap(),
             Message::Barrier(_)
         );
 
+        // (10, 12, 13, 14)
         let res = top_n_executor.next().await.unwrap().unwrap();
         assert_eq!(
             *res.as_chunk().unwrap(),
@@ -618,7 +634,6 @@ mod tests {
                 - 11 8"
             )
         );
-        // (7, 8, 9) -> (10, 13, 14, _)
         // barrier
         assert_matches!(
             top_n_executor.next().await.unwrap().unwrap(),
@@ -638,10 +653,7 @@ mod tests {
                 vec![0, 1],
                 MemoryStateStore::new(),
                 TableId::from(0x2333),
-                TableId::from(0x2334),
-                TableId::from(0x2335),
-                Some(2),
-                (0, 0, 0),
+                0,
                 1,
                 vec![],
             )
@@ -666,7 +678,7 @@ mod tests {
                 +  8 5"
             )
         );
-        // now () -> (1, 2, 3, 8) -> (9, 10)
+        // now () -> (1, 2, 3, 8)
 
         // barrier
         assert_matches!(
@@ -691,7 +703,7 @@ mod tests {
             )
         );
 
-        // () -> (5, 7, 8, 9) -> (10, 11)
+        // (5, 7, 8, 9)
         // barrier
         assert_matches!(
             top_n_executor.next().await.unwrap().unwrap(),
@@ -707,7 +719,7 @@ mod tests {
                 +  6 9"
             )
         );
-        // () -> (5, 6, 7, 8) -> (9, 10, 11, 12, 13, 14)
+        // (5, 6, 7, 8)
         // barrier
         assert_matches!(
             top_n_executor.next().await.unwrap().unwrap(),
@@ -725,7 +737,7 @@ mod tests {
                 + 10 3"
             )
         );
-        // () -> (7, 8, 9, 10) -> (13, 14)
+        // (7, 8, 9, 10)
         // barrier
         assert_matches!(
             top_n_executor.next().await.unwrap().unwrap(),
@@ -745,10 +757,7 @@ mod tests {
                 vec![0, 1],
                 MemoryStateStore::new(),
                 TableId::from(0x2333),
-                TableId::from(0x2334),
-                TableId::from(0x2335),
-                Some(2),
-                (0, 0, 0),
+                0,
                 1,
                 vec![],
             )
@@ -768,8 +777,6 @@ mod tests {
                 +  8 5"
             )
         );
-        // now (1, 2, 3) -> (8, 9, 10, _) -> ()
-
         // barrier
         assert_matches!(
             top_n_executor.next().await.unwrap().unwrap(),
@@ -788,7 +795,6 @@ mod tests {
                 + 11 8"
             )
         );
-        // (5, 7, 8) -> (9, 10, 11, _) -> ()
         // barrier
         assert_matches!(
             top_n_executor.next().await.unwrap().unwrap(),
@@ -803,7 +809,6 @@ mod tests {
                 +  8 5"
             )
         );
-        // (5, 6, 7) -> (8, 9, 10, 11) -> (12, 13, 14)
         // barrier
         assert_matches!(
             top_n_executor.next().await.unwrap().unwrap(),
@@ -822,8 +827,76 @@ mod tests {
                 + 14 12"
             )
         );
+        // barrier
+        assert_matches!(
+            top_n_executor.next().await.unwrap().unwrap(),
+            Message::Barrier(_)
+        );
+    }
 
-        // (7, 8, 9) -> (10, 13, 14, _)
+    #[tokio::test]
+    async fn test_top_n_executor_with_offset_and_limit_new() {
+        let order_types = vec![OrderPair::new(0, OrderType::Ascending)];
+
+        let source = create_source_new();
+        let top_n_executor = Box::new(
+            TopNExecutor::new(
+                source as Box<dyn Executor>,
+                order_types,
+                (1, Some(3)),
+                vec![3],
+                MemoryStateStore::new(),
+                TableId::from(0x2333),
+                0,
+                1,
+                vec![],
+            )
+            .unwrap(),
+        );
+        let mut top_n_executor = top_n_executor.execute();
+
+        // consume the init barrier
+        top_n_executor.next().await.unwrap().unwrap();
+
+        let res = top_n_executor.next().await.unwrap().unwrap();
+        // should be empty
+        assert_eq!(
+            *res.as_chunk().unwrap(),
+            StreamChunk::from_pretty("  I I I I")
+        );
+
+        let res = top_n_executor.next().await.unwrap().unwrap();
+        assert_eq!(
+            *res.as_chunk().unwrap(),
+            StreamChunk::from_pretty(
+                "  I I I I
+                +  5 1 4 1002
+                "
+            )
+        );
+
+        let res = top_n_executor.next().await.unwrap().unwrap();
+        assert_eq!(
+            *res.as_chunk().unwrap(),
+            StreamChunk::from_pretty(
+                "  I I I I
+                +  1 9 1 1003
+                +  9 8 1 1004
+                -  9 8 1 1004
+                +  1 1 4 1001",
+            ),
+        );
+
+        let res = top_n_executor.next().await.unwrap().unwrap();
+        assert_eq!(
+            *res.as_chunk().unwrap(),
+            StreamChunk::from_pretty(
+                "  I I I I
+                -  5 1 4 1002
+                +  1 0 2 1006",
+            )
+        );
+
         // barrier
         assert_matches!(
             top_n_executor.next().await.unwrap().unwrap(),

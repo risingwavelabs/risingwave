@@ -355,13 +355,11 @@ impl StreamFragmenter {
 
             NodeBody::TopN(top_n_node) => {
                 top_n_node.table_id_l = state.gen_table_id();
-                top_n_node.table_id_m = state.gen_table_id();
                 top_n_node.table_id_h = state.gen_table_id();
             }
 
             NodeBody::AppendOnlyTopN(append_only_top_n_node) => {
                 append_only_top_n_node.table_id_l = state.gen_table_id();
-                append_only_top_n_node.table_id_m = state.gen_table_id();
                 append_only_top_n_node.table_id_h = state.gen_table_id();
             }
 
@@ -561,7 +559,7 @@ mod tests {
             StreamFragmenter::assign_local_table_id_to_stream_node(&mut state, &mut stream_node);
 
             if let NodeBody::TopN(top_n_node) = stream_node.node_body.as_ref().unwrap() {
-                expect_table_id += 3;
+                expect_table_id += 2;
                 assert_eq!(expect_table_id, top_n_node.table_id_h);
             }
         }
@@ -579,7 +577,7 @@ mod tests {
             if let NodeBody::AppendOnlyTopN(append_only_top_n_node) =
                 stream_node.node_body.as_ref().unwrap()
             {
-                expect_table_id += 3;
+                expect_table_id += 2;
                 assert_eq!(expect_table_id, append_only_top_n_node.table_id_h);
             }
         }
