@@ -101,6 +101,10 @@ steps:
     plugins:
       - gencer/cache#v2.4.10: *cargo-cache
       - docker-compose#v3.9.0:
+          run: mysql
+          config: ci/docker-compose.yml
+          mount-buildkite-agent: true
+      - docker-compose#v3.9.0:
           run: rw-build-env
           config: ci/docker-compose.yml
           mount-buildkite-agent: true
