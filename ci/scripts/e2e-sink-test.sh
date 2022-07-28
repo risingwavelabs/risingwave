@@ -38,6 +38,7 @@ add-apt-repository \
    "deb [arch=amd64] https://download.docker.com/linux/$(. /etc/os-release; echo "$ID") \
    $(lsb_release -cs) \
    stable"
+sleep 5
 yes "" | command
 echo "debug stuff 5"
 apt-get update
