@@ -31,6 +31,7 @@ mod expr_quaternary_bytes;
 mod expr_regexp;
 mod expr_ternary_bytes;
 pub mod expr_unary;
+mod expr_vnode;
 mod template;
 
 use std::convert::TryFrom;
@@ -50,6 +51,7 @@ use crate::expr::expr_concat_ws::ConcatWsExpression;
 use crate::expr::expr_field::FieldExpression;
 use crate::expr::expr_nested_construct::NestedConstructExpression;
 use crate::expr::expr_regexp::RegexpMatchExpr;
+use crate::expr::expr_vnode::VnodeExpression;
 use crate::ExprError;
 
 pub type ExpressionRef = Arc<dyn Expression>;
@@ -122,6 +124,7 @@ pub fn build_from_prost(prost: &ExprNode) -> Result<BoxedExpression> {
         Array => NestedConstructExpression::try_from(prost).map(Expression::boxed),
         Row => NestedConstructExpression::try_from(prost).map(Expression::boxed),
         RegexpMatch => RegexpMatchExpr::try_from(prost).map(Expression::boxed),
+        Vnode => VnodeExpression::try_from(prost).map(Expression::boxed),
         _ => Err(ExprError::UnsupportedFunction(format!(
             "{:?}",
             prost.get_expr_type()
