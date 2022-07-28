@@ -93,8 +93,8 @@ where
             .await;
 
         Ok(Response::new(GetClusterInfoResponse {
-            table_fragments,
             worker_nodes,
+            table_fragments,
         }))
     }
 }
