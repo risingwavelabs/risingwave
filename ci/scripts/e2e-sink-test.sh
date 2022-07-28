@@ -37,6 +37,7 @@ echo "debug stuff 6"
 apt install docker-ce -y
 echo "debug stuff 7"
 service docker start
+sleep 10
 echo "debug stuff 8"
 docker ps -a
 echo "debug stuff 9"
