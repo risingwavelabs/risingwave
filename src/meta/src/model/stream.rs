@@ -16,7 +16,6 @@ use std::collections::{BTreeMap, HashMap, HashSet, VecDeque};
 
 use itertools::Itertools;
 use risingwave_common::catalog::TableId;
-use risingwave_common::error::Result;
 use risingwave_common::types::ParallelUnitId;
 use risingwave_pb::common::ParallelUnit;
 use risingwave_pb::meta::table_fragments::{ActorState, ActorStatus, Fragment};
@@ -28,7 +27,7 @@ use risingwave_pb::stream_plan::{FragmentType, StreamActor, StreamNode};
 use super::{ActorId, FragmentId};
 use crate::cluster::WorkerId;
 use crate::manager::SourceId;
-use crate::model::MetadataModel;
+use crate::model::{MetadataModel, MetadataModelResult};
 
 /// Column family name for table fragments.
 const TABLE_FRAGMENTS_CF_NAME: &str = "cf/table_fragments";
@@ -78,7 +77,7 @@ impl MetadataModel for TableFragments {
         }
     }
 
-    fn key(&self) -> Result<Self::KeyType> {
+    fn key(&self) -> MetadataModelResult<Self::KeyType> {
         Ok(self.table_id.table_id())
     }
 }

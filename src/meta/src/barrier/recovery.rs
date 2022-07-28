@@ -222,7 +222,8 @@ where
         let res = self
             .catalog_manager
             .update_table_mapping(&new_fragments, &migrate_map)
-            .await;
+            .await
+            .map_err(RwError::from);
         // update hash mapping
         for fragments in new_fragments {
             for (fragment_id, fragment) in fragments.fragments {

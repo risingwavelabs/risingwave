@@ -80,6 +80,7 @@ impl Rule for TranslateApplyRule {
                 let data_type = data_types.get(&correlated_index).unwrap().clone();
                 let left = InputRef::new(correlated_index, data_type.clone());
                 let right = InputRef::new(shifted_index, data_type);
+                // TODO: use is not distinct from instead of equal
                 FunctionCall::new_unchecked(
                     ExprType::Equal,
                     vec![left.into(), right.into()],
