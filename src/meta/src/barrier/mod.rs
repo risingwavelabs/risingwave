@@ -64,6 +64,9 @@ mod recovery;
 type Scheduled = (Command, SmallVec<[Notifier; 1]>);
 
 /// A buffer or queue for scheduling barriers.
+///
+/// We manually implement one here instead of using channels since we may need to update the front
+/// of the queue to add some notifiers for instant flushes.
 struct ScheduledBarriers {
     buffer: RwLock<VecDeque<Scheduled>>,
 
@@ -72,6 +75,13 @@ struct ScheduledBarriers {
 }
 
 /// Changes to the actors to be sent or collected after this command is committed.
+///
+/// Since the checkpoints might be concurrent, the meta store of table fragments is only updated
+/// after the command is committed. When resolving the actor info for those commands after this
+/// command, this command might be in-flight and the changes are not yet committed, so we need to
+/// record these uncommited changes and assume they will be eventually successful.
+///
+/// See also [`CheckpointControl::can_actor_send_or_collect`].
 #[derive(Debug, Clone)]
 pub enum CommandChanges {
     /// This table will be dropped.
@@ -199,13 +209,13 @@ struct CheckpointControl<S: MetaStore> {
     /// Save the state and message of barrier in order
     command_ctx_queue: VecDeque<EpochNode<S>>,
 
+    // Below for uncommited changes for the inflight barriers.
     /// In addition to the actors with status `Running`. The barrier needs to send or collect the
     /// actors of these tables.
     creating_tables: HashSet<TableId>,
     /// The barrier does not send or collect the actors of these tables, even if they are
     /// `Running`.
     dropping_tables: HashSet<TableId>,
-
     /// In addition to the actors with status `Running`. The barrier needs to send or collect these
     /// actors.
     adding_actors: HashSet<ActorId>,
@@ -292,12 +302,15 @@ where
         table_id: TableId,
         actor_id: ActorId,
     ) -> bool {
-        s == ActorState::Running
-            && !self.dropping_tables.contains(&table_id)
-            && !self.removing_actors.contains(&actor_id)
-            || s == ActorState::Inactive
-                && self.creating_tables.contains(&table_id)
-                && self.adding_actors.contains(&actor_id)
+        let removing =
+            self.dropping_tables.contains(&table_id) || self.removing_actors.contains(&actor_id);
+        let adding =
+            self.creating_tables.contains(&table_id) || self.adding_actors.contains(&actor_id);
+
+        match s {
+            ActorState::Inactive => adding,
+            ActorState::Running => !removing,
+        }
     }
 
     /// Return the nums of barrier (the nums of in-flight-barrier, the nums of all-barrier).
@@ -397,7 +410,7 @@ where
     }
 }
 
-/// The state and message of this barrier
+/// The state and message of this barrier, a node for concurrent checkpoint.
 pub struct EpochNode<S: MetaStore> {
     timer: Option<HistogramTimer>,
     result: Option<Result<Vec<BarrierCompleteResponse>>>,
@@ -405,7 +418,8 @@ pub struct EpochNode<S: MetaStore> {
     command_ctx: Arc<CommandContext<S>>,
     notifiers: SmallVec<[Notifier; 1]>,
 }
-/// The state of barrier
+
+/// The state of barrier.
 #[derive(PartialEq)]
 enum BarrierEpochState {
     InFlight,
