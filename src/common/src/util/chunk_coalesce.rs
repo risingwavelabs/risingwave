@@ -57,12 +57,6 @@ impl DataChunkBuilder {
         }
     }
 
-    /// Number of tuples left in one batch.
-    #[inline(always)]
-    fn left_buffer_count(&self) -> usize {
-        self.batch_size - self.buffered_count
-    }
-
     fn ensure_builders(&mut self) -> ArrayResult<()> {
         if self.array_builders.len() != self.data_types.len() {
             self.array_builders = self
@@ -315,10 +309,6 @@ impl SlicedDataChunk {
 
     pub fn with_new_offset_checked(self, new_offset: usize) -> ArrayResult<Self> {
         SlicedDataChunk::with_offset_checked(self.data_chunk, new_offset)
-    }
-
-    fn capacity(&self) -> usize {
-        self.data_chunk.capacity() - self.offset
     }
 }
 

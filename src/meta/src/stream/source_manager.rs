@@ -52,7 +52,9 @@ use crate::barrier::{BarrierManagerRef, Command};
 use crate::cluster::ClusterManagerRef;
 use crate::hummock::compaction_group::manager::CompactionGroupManagerRef;
 use crate::manager::{CatalogManagerRef, MetaSrvEnv, SourceId};
-use crate::model::{ActorId, FragmentId, MetadataModel, TableFragments, Transactional};
+use crate::model::{
+    ActorId, FragmentId, MetadataModel, MetadataModelResult, TableFragments, Transactional,
+};
 use crate::storage::{MetaStore, Transaction};
 use crate::stream::FragmentManagerRef;
 
@@ -120,7 +122,7 @@ impl MetadataModel for SourceActorInfo {
         }
     }
 
-    fn key(&self) -> Result<Self::KeyType> {
+    fn key(&self) -> MetadataModelResult<Self::KeyType> {
         Ok(self.actor_id)
     }
 }

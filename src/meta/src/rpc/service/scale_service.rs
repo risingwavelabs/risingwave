@@ -14,6 +14,7 @@
 
 use std::sync::Arc;
 
+use risingwave_pb::common::WorkerType;
 use risingwave_pb::meta::scale_service_server::ScaleService;
 use risingwave_pb::meta::{
     GetClusterInfoRequest, GetClusterInfoResponse, PauseRequest, PauseResponse, ResumeRequest,
@@ -23,6 +24,7 @@ use tokio::sync::RwLock;
 use tonic::{Request, Response, Status};
 
 use crate::barrier::{BarrierManagerRef, Command};
+use crate::cluster::ClusterManagerRef;
 use crate::model::MetadataModel;
 use crate::storage::MetaStore;
 use crate::stream::FragmentManagerRef;
@@ -30,6 +32,7 @@ use crate::stream::FragmentManagerRef;
 pub struct ScaleServiceImpl<S: MetaStore> {
     barrier_manager: BarrierManagerRef<S>,
     fragment_manager: FragmentManagerRef<S>,
+    cluster_manager: ClusterManagerRef<S>,
     ddl_lock: Arc<RwLock<()>>,
 }
 
@@ -40,11 +43,13 @@ where
     pub fn new(
         barrier_manager: BarrierManagerRef<S>,
         fragment_manager: FragmentManagerRef<S>,
+        cluster_manager: ClusterManagerRef<S>,
         ddl_lock: Arc<RwLock<()>>,
     ) -> Self {
         Self {
             barrier_manager,
             fragment_manager,
+            cluster_manager,
             ddl_lock,
         }
     }
@@ -74,10 +79,22 @@ where
         &self,
         _: Request<GetClusterInfoRequest>,
     ) -> Result<Response<GetClusterInfoResponse>, Status> {
-        let table_fragments = self.fragment_manager.list_table_fragments().await?;
-        let table_fragments_proto = table_fragments.iter().map(|tf| tf.to_protobuf()).collect();
+        let table_fragments = self
+            .fragment_manager
+            .list_table_fragments()
+            .await?
+            .iter()
+            .map(|tf| tf.to_protobuf())
+            .collect();
+
+        let worker_nodes = self
+            .cluster_manager
+            .list_worker_node(WorkerType::ComputeNode, None)
+            .await;
+
         Ok(Response::new(GetClusterInfoResponse {
-            table_fragments: table_fragments_proto,
+            worker_nodes,
+            table_fragments,
         }))
     }
 }
