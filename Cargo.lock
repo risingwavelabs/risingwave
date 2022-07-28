@@ -1606,27 +1606,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "errno"
-version = "0.2.8"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "f639046355ee4f37944e44f60642c6f3a7efa3cf6b78c78a0d989a8ce6c396a1"
-dependencies = [
- "errno-dragonfly",
- "libc",
- "winapi",
-]
-
-[[package]]
-name = "errno-dragonfly"
-version = "0.1.2"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "aa68f1b12764fab894d2755d2518754e71b4fd80ecfb822714a1206c2aab39bf"
-dependencies = [
- "cc",
- "libc",
-]
-
-[[package]]
 name = "error-chain"
 version = "0.12.4"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -2341,12 +2320,6 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "8bb03732005da905c88227371639bf1ad885cc712789c011c31c5fb3ab3ccf02"
 
 [[package]]
-name = "io-lifetimes"
-version = "0.7.2"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "24c3f4eff5495aee4c0399d7b6a0dc2b6e81be84242ffbfcf253ebacccc1d0cb"
-
-[[package]]
 name = "isahc"
 version = "1.7.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -2583,12 +2556,6 @@ name = "linked-hash-map"
 version = "0.5.6"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "0717cef1bc8b636c6e1c1bbdefc09e6322da8a9321966e8928ef80d20f7f770f"
-
-[[package]]
-name = "linux-raw-sys"
-version = "0.0.46"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "d4d2456c373231a208ad294c33dc5bff30051eafd954cd4caae83a712b12854d"
 
 [[package]]
 name = "lock_api"
@@ -3659,19 +3626,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "procfs"
-version = "0.13.2"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "979e5cb47caafb8e14653bb083358e19917ca8c9c4c2648932eccd935f5c4d80"
-dependencies = [
- "bitflags",
- "byteorder",
- "hex",
- "lazy_static",
- "rustix",
-]
-
-[[package]]
 name = "procinfo"
 version = "0.4.2"
 source = "git+https://github.com/tikv/procinfo-rs?rev=6599eb9dca74229b2c1fcc44118bef7eff127128#6599eb9dca74229b2c1fcc44118bef7eff127128"
@@ -3694,7 +3648,7 @@ dependencies = [
  "libc",
  "memchr",
  "parking_lot",
- "procfs 0.12.0",
+ "procfs",
  "protobuf",
  "thiserror",
 ]
@@ -4289,7 +4243,7 @@ dependencies = [
  "num_cpus",
  "parking_lot",
  "paste",
- "procfs 0.13.2",
+ "procfs",
  "procinfo",
  "prometheus",
  "prost",
@@ -5117,20 +5071,6 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "bfa0f585226d2e68097d4f95d113b15b83a82e819ab25717ec0590d9584ef366"
 dependencies = [
  "semver 1.0.12",
-]
-
-[[package]]
-name = "rustix"
-version = "0.35.7"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "d51cc38aa10f6bbb377ed28197aa052aa4e2b762c22be9d3153d01822587e787"
-dependencies = [
- "bitflags",
- "errno",
- "io-lifetimes",
- "libc",
- "linux-raw-sys",
- "windows-sys",
 ]
 
 [[package]]
