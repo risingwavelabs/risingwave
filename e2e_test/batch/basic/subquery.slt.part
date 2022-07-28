@@ -27,12 +27,12 @@ select * from t1 where exists(select * from t2 where t1.x = t2.x and t1.y <> t2.
 query III
 select * from t1 where not exists(select * from t2 where t1.x = t2.x and t1.y <> t2.y) order by t1.x, t1.y
 ----
-NULL NULL
+1 NULL
+2 2
+2 NULL
 NULL 1
 NULL 2
-1 NULL
-2 NULL
-2 2
+NULL NULL
 
 query III
 select * from t1 where t1.y in (select t1.y from t2 where t1.x = t2.x) order by t1.x, t1.y
@@ -43,16 +43,16 @@ select * from t1 where t1.y in (select t1.y from t2 where t1.x = t2.x) order by 
 query III
 select * from t1 where exists(select x from t2 where t1.x = t2.x and t2.y in (select t3.y from t3 where t1.x = t3.x)) order by t1.x, t1.y
 ----
-1 NULL
 1 1
-2 NULL
+1 NULL
 2 2
+2 NULL
 
 query III
 select * from t1 where exists(select t2.x from t2 join t3 on t2.x = t3.x and t1.y = t2.y and t1.y = t3.y) order by t1.x, t1.y
 ----
-NULL 2
 2 2
+NULL 2
 
 
 statement ok
