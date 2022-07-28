@@ -14,7 +14,6 @@
 
 use std::collections::HashMap;
 
-use bimap::BiMap;
 use risingwave_common::catalog::{valid_table_name, TableId, PG_CATALOG_SCHEMA_NAME};
 use risingwave_pb::catalog::{
     Schema as ProstSchema, Sink as ProstSink, Source as ProstSource, Table as ProstTable,
@@ -22,6 +21,7 @@ use risingwave_pb::catalog::{
 use risingwave_pb::stream_plan::source_node::SourceType;
 
 use super::source_catalog::SourceCatalog;
+use crate::catalog::sink_catalog::SinkCatalog;
 use crate::catalog::system_catalog::SystemCatalog;
 use crate::catalog::table_catalog::TableCatalog;
 use crate::catalog::SchemaId;
@@ -37,7 +37,8 @@ pub struct SchemaCatalog {
     table_name_by_id: HashMap<TableId, String>,
     source_by_name: HashMap<String, SourceCatalog>,
     source_name_by_id: HashMap<SourceId, String>,
-    sink_bimap: BiMap<SinkId, String>,
+    sink_by_name: HashMap<String, SinkCatalog>,
+    sink_name_by_id: HashMap<SinkId, String>,
 
     // This field only available when schema is "pg_catalog". Meanwhile, others will be empty.
     system_table_by_name: HashMap<String, SystemCatalog>,
@@ -93,11 +94,16 @@ impl SchemaCatalog {
     pub fn create_sink(&mut self, prost: ProstSink) {
         let name = prost.name.clone();
         let id = prost.id;
-        self.sink_bimap.insert_no_overwrite(id, name).unwrap();
+
+        self.sink_by_name
+            .try_insert(name.clone(), SinkCatalog::from(&prost))
+            .unwrap();
+        self.sink_name_by_id.try_insert(id, name).unwrap();
     }
 
     pub fn drop_sink(&mut self, id: SinkId) {
-        self.sink_bimap.remove_by_left(&id).unwrap();
+        let name = self.sink_name_by_id.remove(&id).unwrap();
+        self.sink_by_name.remove(&name).unwrap();
     }
 
     pub fn iter_table(&self) -> impl Iterator<Item = &TableCatalog> {
@@ -151,11 +157,6 @@ impl SchemaCatalog {
             .map(|(_, v)| v)
     }
 
-    /// Iterate all sinks.
-    pub fn iter_sink(&self) -> impl Iterator<Item = &u32> {
-        self.sink_bimap.iter().map(|(v, _)| v)
-    }
-
     pub fn iter_system_tables(&self) -> impl Iterator<Item = &SystemCatalog> {
         self.system_table_by_name.iter().map(|(_, v)| v)
     }
@@ -168,9 +169,8 @@ impl SchemaCatalog {
         self.source_by_name.get(source_name)
     }
 
-    pub fn get_sink_id_by_name(&self, sink_name: &str) -> Option<SinkId> {
-        let ret = self.sink_bimap.get_by_right(sink_name).cloned();
-        ret
+    pub fn get_sink_by_name(&self, sink_name: &str) -> Option<&SinkCatalog> {
+        self.sink_by_name.get(sink_name)
     }
 
     pub fn get_system_table_by_name(&self, table_name: &str) -> Option<&SystemCatalog> {
@@ -199,7 +199,8 @@ impl From<&ProstSchema> for SchemaCatalog {
             table_name_by_id: HashMap::new(),
             source_by_name: HashMap::new(),
             source_name_by_id: HashMap::new(),
-            sink_bimap: BiMap::new(),
+            sink_by_name: HashMap::new(),
+            sink_name_by_id: HashMap::new(),
             system_table_by_name: HashMap::new(),
             owner: schema.owner,
         }
