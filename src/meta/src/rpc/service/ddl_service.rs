@@ -665,10 +665,10 @@ where
                 });
                 Ok(())
             }
-            None => Err(ErrorCode::InternalError(
-                format!("no data distribution found for materialized view table_id = {}" ,table.id)
-                
-            )
+            None => Err(ErrorCode::InternalError(format!(
+                "no data distribution found for materialized view table_id = {}",
+                table.id
+            ))
             .into()),
         }
     }
