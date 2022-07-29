@@ -343,6 +343,10 @@ impl ColIndexMapping {
         }
     }
 
+    /// Rewrite the indices in a functional dependency.
+    ///
+    /// If all the indices in the left side can be mapped and more than 1 indices in the right side
+    /// can be mapped, the rewrite will succeed.
     pub fn rewrite_functional_dependency(
         &self,
         fd: &FunctionalDependency,

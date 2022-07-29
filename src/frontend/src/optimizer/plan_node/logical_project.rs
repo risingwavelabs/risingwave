@@ -29,9 +29,7 @@ use crate::expr::{
     assert_input_ref, Expr, ExprDisplay, ExprImpl, ExprRewriter, ExprVisitor, InputRef,
 };
 use crate::optimizer::plan_node::CollectInputRef;
-use crate::optimizer::property::{
-    Distribution, FunctionalDependency, FunctionalDependencySet, Order, RequiredDist,
-};
+use crate::optimizer::property::{Distribution, FunctionalDependencySet, Order, RequiredDist};
 use crate::utils::{ColIndexMapping, Condition, Substitute};
 
 /// Construct a `LogicalProject` and dedup expressions.

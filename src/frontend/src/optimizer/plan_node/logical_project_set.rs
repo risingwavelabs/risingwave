@@ -12,10 +12,8 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::collections::HashMap;
 use std::fmt;
 
-use fixedbitset::FixedBitSet;
 use risingwave_common::catalog::{Field, Schema};
 use risingwave_common::types::DataType;
 
@@ -26,7 +24,7 @@ use super::{
 use crate::expr::{
     Expr, ExprDisplay, ExprImpl, ExprRewriter, FunctionCall, InputRef, TableFunction,
 };
-use crate::optimizer::property::{FunctionalDependency, FunctionalDependencySet};
+use crate::optimizer::property::FunctionalDependencySet;
 use crate::risingwave_common::error::Result;
 use crate::utils::{ColIndexMapping, Condition};
 
