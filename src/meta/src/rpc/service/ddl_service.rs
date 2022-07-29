@@ -504,6 +504,7 @@ where
                         stream_node.node_body.as_mut().unwrap()
                     {
                         materialize_node.table_id = mview_id.table_id();
+                        materialize_node.table.as_mut().unwrap().id = mview_id.table_id();
                         mview_count += 1;
                     }
                     for input in &mut stream_node.input {
@@ -711,9 +712,10 @@ where
                 });
                 Ok(())
             }
-            None => Err(ErrorCode::InternalError(
-                "no data distribution found for materialized view".to_string(),
-            )
+            None => Err(ErrorCode::InternalError(format!(
+                "no data distribution found for materialized view table_id = {}",
+                table.id
+            ))
             .into()),
         }
     }
