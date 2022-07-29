@@ -16,8 +16,9 @@ use std::sync::Arc;
 use std::{env, panic};
 
 use futures::executor::block_on;
-
 use itertools::Itertools;
+use libtest_mimic::{run_tests, Arguments, Outcome, Test};
+use rand::rngs::SmallRng;
 use rand::{Rng, SeedableRng};
 use risingwave_frontend::binder::Binder;
 use risingwave_frontend::planner::Planner;
@@ -28,8 +29,6 @@ use risingwave_sqlparser::ast::Statement;
 use risingwave_sqlsmith::{
     create_table_statement_to_table, mview_sql_gen, parse_sql, sql_gen, Table,
 };
-use rand::rngs::SmallRng;
-use libtest_mimic::{run_tests, Arguments, Outcome, Test};
 
 #[derive(Clone)]
 pub struct SqlsmithEnv {
@@ -111,12 +110,7 @@ async fn create_tables(session: Arc<SessionImpl>, rng: &mut impl Rng) -> (Vec<Ta
 #[allow(unreachable_code)]
 #[allow(unused_variables)]
 #[allow(unused_mut)]
-fn test_batch_queries(
-    session: Arc<SessionImpl>,
-    tables: Vec<Table>,
-    seed: u64,
-    setup_sql: &str,
-) {
+fn test_batch_queries(session: Arc<SessionImpl>, tables: Vec<Table>, seed: u64, setup_sql: &str) {
     let mut rng;
     if let Ok(x) = env::var("RW_RANDOM_SEED_SQLSMITH") && x == "true" {
         rng = SmallRng::from_entropy();
@@ -183,19 +177,24 @@ pub fn run() {
     let args = Arguments::from_args();
 
     let num_tests = 512;
-    let tests = (0..num_tests).map(|i| {
-        Test {
+    let tests = (0..num_tests)
+        .map(|i| Test {
             name: format!("run_sqlsmith_on_frontend_{}", i),
             kind: "".into(),
             is_ignored: false,
             is_bench: false,
             data: i,
-        }
-    }).collect();
+        })
+        .collect();
 
     run_tests(&args, tests, |test| {
-        let SqlsmithEnv { session, tables, setup_sql } = &*SQLSMITH_ENV;
+        let SqlsmithEnv {
+            session,
+            tables,
+            setup_sql,
+        } = &*SQLSMITH_ENV;
         test_batch_queries(session.clone(), tables.clone(), test.data, &setup_sql);
         Outcome::Passed
-    }).exit();
+    })
+    .exit();
 }
