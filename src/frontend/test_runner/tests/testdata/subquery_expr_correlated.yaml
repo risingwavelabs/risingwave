@@ -14,9 +14,8 @@
                 LogicalFilter { predicate: (CorrelatedInputRef { index: 2, correlated_id: 1 } = t2.y) AND (t2.y = 1000:Int32) }
                   LogicalScan { table: t2, columns: [_row_id, x, y] }
   optimized_logical_plan: |
-    LogicalJoin { type: Inner, on: (t1.y = t2.y) AND (t1.x::Decimal > (1.5:Decimal * min(t2.x))) }
-      LogicalProject { exprs: [t1.x, t1.y, t1.x::Decimal] }
-        LogicalScan { table: t1, columns: [x, y] }
+    LogicalJoin { type: Inner, on: (t1.y = t2.y) AND (t1.x > (1.5:Decimal * min(t2.x))) }
+      LogicalScan { table: t1, columns: [x, y] }
       LogicalProject { exprs: [t2.y, (1.5:Decimal * min(t2.x))] }
         LogicalAgg { group_key: [t2.y], aggs: [min(t2.x)] }
           LogicalProject { exprs: [t2.y, t2.x] }
@@ -92,9 +91,8 @@
                 LogicalFilter { predicate: (CorrelatedInputRef { index: 2, correlated_id: 1 } = t2.y) }
                   LogicalScan { table: t2, columns: [_row_id, x, y] }
   optimized_logical_plan: |
-    LogicalJoin { type: Inner, on: (t1.y = t2.y) AND (t1.x::Decimal > (1.5:Decimal * min(t2.x))) }
-      LogicalProject { exprs: [t1.x, t1.y, t1.x::Decimal] }
-        LogicalScan { table: t1, columns: [x, y] }
+    LogicalJoin { type: Inner, on: (t1.y = t2.y) AND (t1.x > (1.5:Decimal * min(t2.x))) }
+      LogicalScan { table: t1, columns: [x, y] }
       LogicalProject { exprs: [t2.y, (1.5:Decimal * min(t2.x))] }
         LogicalAgg { group_key: [t2.y], aggs: [min(t2.x)] }
           LogicalProject { exprs: [t2.y, t2.x] }
@@ -114,9 +112,8 @@
                 LogicalFilter { predicate: (CorrelatedInputRef { index: 2, correlated_id: 1 } = t2.y) }
                   LogicalScan { table: t2, columns: [_row_id, x, y] }
   optimized_logical_plan: |
-    LogicalJoin { type: Inner, on: (t1.y = t2.y) AND (t1.x::Int64 > count) }
-      LogicalProject { exprs: [t1.x, t1.y, t1.x::Int64] }
-        LogicalScan { table: t1, columns: [x, y] }
+    LogicalJoin { type: Inner, on: (t1.y = t2.y) AND (t1.x > count) }
+      LogicalScan { table: t1, columns: [x, y] }
       LogicalAgg { group_key: [t2.y], aggs: [count] }
         LogicalScan { table: t2, columns: [y] }
 - sql: |
@@ -134,9 +131,8 @@
                 LogicalFilter { predicate: (CorrelatedInputRef { index: 2, correlated_id: 1 } = t2.y) }
                   LogicalScan { table: t2, columns: [_row_id, x, y] }
   optimized_logical_plan: |
-    LogicalJoin { type: Inner, on: (t1.y = t2.y) AND (t1.x::Int64 > (count + count)) }
-      LogicalProject { exprs: [t1.x, t1.y, t1.x::Int64] }
-        LogicalScan { table: t1, columns: [x, y] }
+    LogicalJoin { type: Inner, on: (t1.y = t2.y) AND (t1.x > (count + count)) }
+      LogicalScan { table: t1, columns: [x, y] }
       LogicalProject { exprs: [t2.y, (count + count)] }
         LogicalAgg { group_key: [t2.y], aggs: [count, count] }
           LogicalScan { table: t2, columns: [y] }

@@ -434,6 +434,90 @@ impl LogicalJoin {
         )
     }
 
+    /// find the comparison exprs and return their inputs, types and indices.
+    fn find_comparison_exprs(
+        left_col_num: usize,
+        right_col_num: usize,
+        exprs: &[ExprImpl],
+    ) -> (Vec<ExprImpl>, Vec<ExprImpl>, Vec<(usize, Type)>) {
+        let left_bit_map = FixedBitSet::from_iter(0..left_col_num);
+        let right_bit_map = FixedBitSet::from_iter(left_col_num..left_col_num + right_col_num);
+
+        let mut left_exprs = vec![];
+        let mut right_exprs = vec![];
+        // indices and return types of function calls whose's inputs will be calculated in
+        // `project`s
+        let mut indices_and_ty_of_func_calls = vec![];
+        let is_comparison_type = |ty| {
+            matches!(
+                ty,
+                Type::LessThan
+                    | Type::LessThanOrEqual
+                    | Type::Equal
+                    | Type::GreaterThan
+                    | Type::GreaterThanOrEqual
+            )
+        };
+        for (index, expr) in exprs.iter().enumerate() {
+            if let ExprImpl::FunctionCall(func) = expr && is_comparison_type(func.get_expr_type()) {
+                let (ty, left, right) = func.clone().decompose_as_binary();
+                // we just cast the return types of inputs of equal conditions for `HashJoin`.
+                // non-equal conditions don't need unnecssary explicit cast.
+                let can_cast = ty == Type::Equal;
+                let left_input_bits =
+                    left.collect_input_refs(left_col_num + right_col_num);
+                let right_input_bits =
+                    right.collect_input_refs(left_col_num + right_col_num);
+                let (mut left, mut right) = if left_input_bits.is_subset(&left_bit_map)
+                    && right_input_bits.is_subset(&right_bit_map)
+                {
+                    (left, right)
+                } else if left_input_bits.is_subset(&right_bit_map)
+                    && right_input_bits.is_subset(&left_bit_map)
+                {
+                    (right, left)
+                } else {
+                    continue;
+                };
+                // when both `left` and `right` are `input_ref`, and they have the same return type or `func` is non-equal comparison expression, there is no need to calculate them in project.
+                if left.as_input_ref().is_some() && right.as_input_ref().is_some() && (left.return_type() == right.return_type() || !can_cast) {
+                    continue;
+                }
+                if can_cast {
+                    // align return types to avoid error when executing join.
+                    let mut v = vec![left, right];
+                    let _data_type = align_types(v.iter_mut()).unwrap();
+                    (left, right) = v.into_iter().next_tuple().unwrap();
+                }
+                left_exprs.push(left);
+                {
+                    let mut shift_with_offset = ColIndexMapping::with_shift_offset(left_col_num + right_col_num, -(left_col_num as isize));
+                    let right = shift_with_offset.rewrite_expr(right);
+                    right_exprs.push(right);
+                }
+                indices_and_ty_of_func_calls.push((index, ty));
+            }
+        }
+        (left_exprs, right_exprs, indices_and_ty_of_func_calls)
+    }
+
+    /// use `col_index_mapping` to remap `exprs` and `output_indices`.
+    fn remap_exprs_and_output_indices(
+        exprs: Vec<ExprImpl>,
+        output_indices: Vec<usize>,
+        col_index_mapping: &mut ColIndexMapping,
+    ) -> (Vec<ExprImpl>, Vec<usize>) {
+        let exprs: Vec<ExprImpl> = exprs
+            .into_iter()
+            .map(|expr| col_index_mapping.rewrite_expr(expr))
+            .collect();
+        let output_indices = output_indices
+            .into_iter()
+            .map(|i| col_index_mapping.map(i))
+            .collect();
+        (exprs, output_indices)
+    }
+
     /// Try to simplify the outer join with the predicate on the top of the join
     ///
     /// now it is just a naive implementation for comparison expression, we can give a more general
@@ -727,62 +811,10 @@ impl PredicatePushdown for LogicalJoin {
         // This code block pushes the calculation of inputs of join's comparison condition to join's
         // two sides.
         {
-            let left_bit_map = FixedBitSet::from_iter(0..left_col_num);
-            let right_bit_map = FixedBitSet::from_iter(left_col_num..left_col_num + right_col_num);
-
             let exprs = on.conjunctions;
-            let mut left_exprs = vec![];
-            let mut right_exprs = vec![];
-            // indices and return types of function calls whose's inputs will be calculated in
-            // `project`s
-            let mut indices_and_ty_of_func_calls = vec![];
-            let is_comparison_type = |ty| {
-                matches!(
-                    ty,
-                    Type::LessThan
-                        | Type::LessThanOrEqual
-                        | Type::Equal
-                        | Type::GreaterThan
-                        | Type::GreaterThanOrEqual
-                )
-            };
-            for (index, expr) in exprs.iter().enumerate() {
-                if let ExprImpl::FunctionCall(func) = expr && is_comparison_type(func.get_expr_type()) {
-                    let (ty, left, right) = func.clone().decompose_as_binary();
-                    let left_input_bits =
-                        left.collect_input_refs(left_col_num + right_col_num);
-                    let right_input_bits =
-                        right.collect_input_refs(left_col_num + right_col_num);
-                    let (left, right) = if left_input_bits.is_subset(&left_bit_map)
-                        && right_input_bits.is_subset(&right_bit_map)
-                    {
-                        (left, right)
-                    } else if left_input_bits.is_subset(&right_bit_map)
-                        && right_input_bits.is_subset(&left_bit_map)
-                    {
-                        (right, left)
-                    } else {
-                        continue;
-                    };
-                    // when `left` and `right` are `input_ref` and have the same return type, there is no need to calculate them in project.
-                    if left.as_input_ref().is_some() && right.as_input_ref().is_some() && left.return_type() == right.return_type() {
-                        continue;
-                    }
-                    let (left, right) = {
-                        // align return types to avoid error when executing join.
-                        let mut v = vec![left, right];
-                        let _data_type = align_types(v.iter_mut()).unwrap();
-                        v.into_iter().next_tuple().unwrap()
-                    };
-                    left_exprs.push(left);
-                    {
-                        let mut shift_with_offset = ColIndexMapping::with_shift_offset(left_col_num + right_col_num, -(left_col_num as isize));
-                        let right = shift_with_offset.rewrite_expr(right);
-                        right_exprs.push(right);
-                    }
-                    indices_and_ty_of_func_calls.push((index, ty));
-                }
-            }
+            let (left_exprs, right_exprs, indices_and_ty_of_func_calls) =
+                Self::find_comparison_exprs(left_col_num, right_col_num, &exprs);
+
             // used to shift indices of input_refs pointing the right side of `join` with
             // `left_exprs.len`.
             let mut col_index_mapping = {
@@ -794,13 +826,19 @@ impl PredicatePushdown for LogicalJoin {
                     .collect_vec();
                 ColIndexMapping::new(map)
             };
-            let mut exprs: Vec<ExprImpl> = exprs
-                .into_iter()
-                .map(|expr| col_index_mapping.rewrite_expr(expr))
-                .collect();
-            // replace function calls.
+            let (mut exprs, new_output_indices) =
+                Self::remap_exprs_and_output_indices(exprs, output_indices, &mut col_index_mapping);
+            output_indices = new_output_indices;
+
+            // ```ignore
+            // the internal table of join has has the following schema:
+            // original left's columns | left_exprs | original right's columns | right_exprs
+            //```
+            // `left_index` and `right_index` will scan through `left_exprs` and `right_exprs`
+            // respectively.
             let mut left_index = left_col_num;
             let mut right_index = left_col_num + left_exprs.len() + right_col_num;
+            // replace chosen function calls.
             for (i, (index_of_func_call, ty)) in
                 indices_and_ty_of_func_calls.into_iter().enumerate()
             {
@@ -817,10 +855,7 @@ impl PredicatePushdown for LogicalJoin {
                 conjunctions: exprs,
             };
 
-            output_indices
-                .iter_mut()
-                .for_each(|i| *i = col_index_mapping.map(*i));
-
+            // add project to do the calculation.
             let new_input = |input: PlanRef, appended_exprs: Vec<ExprImpl>| {
                 let mut exprs = input
                     .schema()
