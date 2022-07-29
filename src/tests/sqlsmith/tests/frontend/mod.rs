@@ -138,24 +138,25 @@ fn test_batch_queries(
     }
 }
 
-/// Test stream queries by evaluating create mview statements
-async fn test_stream_queries(
-    session: Arc<SessionImpl>,
-    mut tables: Vec<Table>,
-    rng: &mut impl Rng,
-    setup_sql: &str,
-) {
-    // Test stream queries
-    for i in 0..512 {
-        let (sql, table) = mview_sql_gen(rng, tables.clone(), &format!("sq{}", i));
-        let stmts = parse_sql(&sql);
-        let stmt = stmts[0].clone();
-        handle(session.clone(), stmt, setup_sql, &sql).await;
-        tables.push(table);
-    }
-}
+// TODO: Remove if not needed after current refactor.
+// /// Test stream queries by evaluating create mview statements
+// async fn test_stream_queries(
+//     session: Arc<SessionImpl>,
+//     mut tables: Vec<Table>,
+//     rng: &mut impl Rng,
+//     setup_sql: &str,
+// ) {
+//     // Test stream queries
+//     for i in 0..512 {
+//         let (sql, table) = mview_sql_gen(rng, tables.clone(), &format!("sq{}", i));
+//         let stmts = parse_sql(&sql);
+//         let stmt = stmts[0].clone();
+//         handle(session.clone(), stmt, setup_sql, &sql).await;
+//         tables.push(table);
+//     }
+// }
 
-async fn run_sqlsmith_with_seed(seed: u64) {
+pub async fn run_sqlsmith_with_seed(seed: u64) {
     let frontend = LocalFrontend::new(FrontendOpts::default()).await;
     let session = frontend.session_ref();
 
@@ -168,49 +169,49 @@ async fn run_sqlsmith_with_seed(seed: u64) {
 
     let (tables, setup_sql) = create_tables(session.clone(), &mut rng).await;
     test_batch_queries(session.clone(), tables.clone(), &mut rng, &setup_sql);
-    test_stream_queries(session.clone(), tables.clone(), &mut rng, &setup_sql).await;
+    // test_stream_queries(session.clone(), tables.clone(), &mut rng, &setup_sql).await;
 }
 
-macro_rules! generate_sqlsmith_test {
-    ($seed:expr) => {
-        paste::paste! {
-            #[tokio::test]
-            async fn [<run_sqlsmith_on_frontend_ $seed>]() {
-                run_sqlsmith_with_seed($seed).await;
-            }
-        }
-    };
-}
+// macro_rules! generate_sqlsmith_test {
+//     ($seed:expr) => {
+//         paste::paste! {
+//             #[tokio::test]
+//             async fn [<run_sqlsmith_on_frontend_ $seed>]() {
+//                 run_sqlsmith_with_seed($seed).await;
+//             }
+//         }
+//     };
+// }
 
-generate_sqlsmith_test! { 0 }
-generate_sqlsmith_test! { 1 }
-generate_sqlsmith_test! { 2 }
-generate_sqlsmith_test! { 3 }
-generate_sqlsmith_test! { 4 }
-generate_sqlsmith_test! { 5 }
-generate_sqlsmith_test! { 6 }
-generate_sqlsmith_test! { 7 }
-generate_sqlsmith_test! { 8 }
-generate_sqlsmith_test! { 9 }
-generate_sqlsmith_test! { 10 }
-generate_sqlsmith_test! { 11 }
-generate_sqlsmith_test! { 12 }
-generate_sqlsmith_test! { 13 }
-generate_sqlsmith_test! { 14 }
-generate_sqlsmith_test! { 15 }
-generate_sqlsmith_test! { 16 }
-generate_sqlsmith_test! { 17 }
-generate_sqlsmith_test! { 18 }
-generate_sqlsmith_test! { 19 }
-generate_sqlsmith_test! { 20 }
-generate_sqlsmith_test! { 21 }
-generate_sqlsmith_test! { 22 }
-generate_sqlsmith_test! { 23 }
-generate_sqlsmith_test! { 24 }
-generate_sqlsmith_test! { 25 }
-generate_sqlsmith_test! { 26 }
-generate_sqlsmith_test! { 27 }
-generate_sqlsmith_test! { 28 }
-generate_sqlsmith_test! { 29 }
-generate_sqlsmith_test! { 30 }
-generate_sqlsmith_test! { 31 }
+// generate_sqlsmith_test! { 0 }
+// generate_sqlsmith_test! { 1 }
+// generate_sqlsmith_test! { 2 }
+// generate_sqlsmith_test! { 3 }
+// generate_sqlsmith_test! { 4 }
+// generate_sqlsmith_test! { 5 }
+// generate_sqlsmith_test! { 6 }
+// generate_sqlsmith_test! { 7 }
+// generate_sqlsmith_test! { 8 }
+// generate_sqlsmith_test! { 9 }
+// generate_sqlsmith_test! { 10 }
+// generate_sqlsmith_test! { 11 }
+// generate_sqlsmith_test! { 12 }
+// generate_sqlsmith_test! { 13 }
+// generate_sqlsmith_test! { 14 }
+// generate_sqlsmith_test! { 15 }
+// generate_sqlsmith_test! { 16 }
+// generate_sqlsmith_test! { 17 }
+// generate_sqlsmith_test! { 18 }
+// generate_sqlsmith_test! { 19 }
+// generate_sqlsmith_test! { 20 }
+// generate_sqlsmith_test! { 21 }
+// generate_sqlsmith_test! { 22 }
+// generate_sqlsmith_test! { 23 }
+// generate_sqlsmith_test! { 24 }
+// generate_sqlsmith_test! { 25 }
+// generate_sqlsmith_test! { 26 }
+// generate_sqlsmith_test! { 27 }
+// generate_sqlsmith_test! { 28 }
+// generate_sqlsmith_test! { 29 }
+// generate_sqlsmith_test! { 30 }
+// generate_sqlsmith_test! { 31 }

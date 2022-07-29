@@ -28,3 +28,7 @@ path = "src/bin/main.rs"
 
 [features]
 enable_sqlsmith_unit_test = []
+
+[[test]]
+name = "test_runner"
+harness = false

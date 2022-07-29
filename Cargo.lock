@@ -4843,6 +4843,7 @@ dependencies = [
  "env_logger",
  "itertools",
  "lazy_static",
+ "libtest-mimic",
  "log",
  "madsim",
  "madsim-tokio",

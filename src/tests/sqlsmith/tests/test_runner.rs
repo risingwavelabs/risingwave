@@ -14,3 +14,11 @@
 
 #[cfg(feature = "enable_sqlsmith_unit_test")]
 mod frontend;
+
+#[tokio::main]
+async fn main() {
+    let num_tests = 512;
+    for i in 0..num_tests {
+        frontend::run_sqlsmith_with_seed(i).await;
+    }
+}
