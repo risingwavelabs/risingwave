@@ -35,7 +35,6 @@ enum StringAggState {
     },
 }
 
-// TODO(yuchao): support delimiter
 pub struct StringAgg {
     agg_col_idx: usize,
     delimiter: ExpressionRef,
@@ -268,7 +267,12 @@ mod tests {
     use risingwave_common::util::sort_util::{OrderPair, OrderType};
 
     use super::*;
+    use crate::expr::{Expression, ExpressionRef, LiteralExpression};
     use crate::vector_op::agg::aggregator::Aggregator;
+
+    fn empty_delimiter() -> ExpressionRef {
+        Arc::from(LiteralExpression::new(DataType::Varchar, Some("".to_string().into())).boxed())
+    }
 
     #[test]
     fn test_basic_string_agg() -> Result<()> {
@@ -279,7 +283,7 @@ mod tests {
              ccc
              ddd",
         );
-        let mut agg = StringAgg::new(0, vec![], vec![]);
+        let mut agg = StringAgg::new(0, empty_delimiter(), vec![], vec![]);
         let mut builder = ArrayBuilderImpl::Utf8(Utf8ArrayBuilder::new(0));
         agg.update_multi(&chunk, 0, chunk.cardinality())?;
         agg.output(&mut builder)?;
@@ -303,6 +307,7 @@ mod tests {
         );
         let mut agg = StringAgg::new(
             0,
+            empty_delimiter(),
             vec![
                 OrderPair::new(1, OrderType::Ascending),
                 OrderPair::new(2, OrderType::Descending),
