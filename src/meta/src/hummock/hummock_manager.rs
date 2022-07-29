@@ -34,7 +34,6 @@ use risingwave_hummock_sdk::{
     HummockSstableId, HummockVersionId, LocalSstableInfo, FIRST_VERSION_ID,
 };
 use risingwave_pb::hummock::hummock_version::Levels;
-use risingwave_pb::hummock::subscribe_compact_tasks_response::Task;
 use risingwave_pb::hummock::{
     CompactTask, CompactTaskAssignment, HummockPinnedSnapshot, HummockPinnedVersion,
     HummockSnapshot, HummockVersion, HummockVersionDelta, Level, LevelDelta, LevelType,
@@ -1386,7 +1385,7 @@ where
         let send_task = async {
             tokio::time::timeout(Duration::from_secs(3), async {
                 compactor
-                    .send_task(Task::CompactTask(compact_task.clone()))
+                    .send_task(Some(compact_task.clone()), None)
                     .await
                     .is_ok()
             })

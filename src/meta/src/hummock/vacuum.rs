@@ -18,7 +18,6 @@ use std::sync::Arc;
 use itertools::Itertools;
 use risingwave_common::error::Result;
 use risingwave_hummock_sdk::HummockSstableId;
-use risingwave_pb::hummock::subscribe_compact_tasks_response::Task;
 use risingwave_pb::hummock::VacuumTask;
 
 use crate::hummock::{CompactorManager, HummockManagerRef};
@@ -115,11 +114,14 @@ where
 
             // 2. Send task.
             match compactor
-                .send_task(Task::VacuumTask(VacuumTask {
-                    // The SST id doesn't necessarily have a counterpart SST file in S3, but
-                    // it's OK trying to delete it.
-                    sstable_ids: delete_batch.clone(),
-                }))
+                .send_task(
+                    None,
+                    Some(VacuumTask {
+                        // The SST id doesn't necessarily have a counterpart SST file in S3, but
+                        // it's OK trying to delete it.
+                        sstable_ids: delete_batch.clone(),
+                    }),
+                )
                 .await
             {
                 Ok(_) => {
@@ -270,4 +272,6 @@ mod tests {
             0
         );
     }
+
+    // TODO #4081: re-enable after orphan SST GC via listing object store is implemented
 }
