@@ -203,7 +203,6 @@ impl SysCatalogReaderImpl {
                     .chain(mvs.into_iter())
                     .chain(indexes.into_iter())
                     .chain(sources.into_iter())
-                    .chain(msources.into_iter())
                     .chain(sys_tables.into_iter())
                     .collect_vec()
             })
