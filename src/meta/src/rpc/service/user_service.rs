@@ -151,10 +151,11 @@ impl<S: MetaStore> UserService for UserServiceImpl<S> {
         request: Request<UpdateUserRequest>,
     ) -> Result<Response<UpdateUserResponse>, Status> {
         let req = request.into_inner();
-        let user = req.get_user().map_err(tonic_err)?.clone();
+        let update_fields = &req.update_fields;
+        let mut user = req.get_user().map_err(tonic_err)?.clone();
         let version = self
             .user_manager
-            .update_user(&user)
+            .update_user(&mut user, update_fields)
             .await
             .map_err(tonic_err)?;
 

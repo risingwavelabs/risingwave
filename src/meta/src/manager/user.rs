@@ -23,6 +23,7 @@ use risingwave_common::error::ErrorCode::{InternalError, PermissionDenied};
 use risingwave_common::error::{Result, RwError};
 use risingwave_pb::meta::subscribe_response::{Info, Operation};
 use risingwave_pb::user::grant_privilege::{ActionWithGrantOption, Object};
+use risingwave_pb::user::update_user_request::UpdateField;
 use risingwave_pb::user::{GrantPrivilege, UserInfo};
 use tokio::sync::{Mutex, MutexGuard};
 
@@ -79,6 +80,26 @@ impl UserManagerInner {
     fn create_user(&mut self, user: UserInfo) {
         self.all_users.insert(user.name.clone());
         self.user_info.insert(user.id, user);
+    }
+
+    fn update_user(&mut self, update_user: UserInfo, update_fields: &[i32]) {
+        let mut user = self.user_info.get(&update_user.id).unwrap().clone();
+        update_fields.iter().for_each(|&field| {
+            if field == UpdateField::Super as i32 {
+                user.is_supper = update_user.is_supper;
+            } else if field == UpdateField::Login as i32 {
+                user.can_login = update_user.can_login;
+            } else if field == UpdateField::CreateDb as i32 {
+                user.can_create_db = update_user.can_create_db;
+            } else if field == UpdateField::AuthInfo as i32 {
+                user.auth_info = update_user.auth_info.clone();
+            } else if field == UpdateField::Rename as i32 {
+                self.all_users.remove(&user.name);
+                user.name = update_user.name.clone();
+            }
+        });
+        self.all_users.insert(update_user.name.clone());
+        self.user_info.insert(update_user.id, user);
     }
 
     fn drop_user(&mut self, user_id: UserId) {
@@ -162,16 +183,23 @@ impl<S: MetaStore> UserManager<S> {
         Ok(version)
     }
 
-    pub async fn update_user(&self, user: &UserInfo) -> Result<NotificationVersion> {
+    pub async fn update_user(
+        &self,
+        user: &mut UserInfo,
+        update_fields: &[i32],
+    ) -> Result<NotificationVersion> {
         let mut core = self.core.lock().await;
-        if !core.all_users.contains(&user.name) {
+        let rename_flag = update_fields
+            .iter()
+            .any(|&field| field == UpdateField::Rename as i32);
+        if rename_flag && core.all_users.contains(&user.name) {
             return Err(RwError::from(PermissionDenied(format!(
-                "User {} not exists",
+                "User {} already exists",
                 user.name
             ))));
         }
         user.insert(self.env.meta_store()).await?;
-        core.create_user(user.clone());
+        core.update_user(user.clone(), update_fields);
 
         let version = self
             .env

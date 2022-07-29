@@ -81,7 +81,7 @@ pub async fn handle_alter_user(
 ) -> Result<PgResponse> {
     let session = context.session_ctx;
     let user_name = Binder::resolve_user_name(stmt.user_name.clone())?;
-    let old_info = {
+    let mut old_info = {
         let user_reader = session.env().user_info_reader();
         let reader = user_reader.read_guard();
         if let Some(origin_info) = reader.get_user_by_name(&user_name) {
@@ -95,17 +95,16 @@ pub async fn handle_alter_user(
             alter_prost_user_info(old_info, &options)?
         }
         risingwave_sqlparser::ast::AlterUserMode::Rename(new_name) => {
-            let mut new_info = old_info.clone();
-            new_info.name = Binder::resolve_user_name(new_name)?;
+            old_info.name = Binder::resolve_user_name(new_name)?;
             UpdateUserRequest {
-                user: Some(new_info),
+                user: Some(old_info),
                 update_fields: vec![UpdateField::Rename as i32],
             }
         }
     };
     let user_info_writer = session.env().user_info_writer();
     user_info_writer.update_user(request).await?;
-    Ok(PgResponse::empty_result(StatementType::CREATE_USER))
+    Ok(PgResponse::empty_result(StatementType::UPDATE_USER))
 }
 
 #[cfg(test)]
