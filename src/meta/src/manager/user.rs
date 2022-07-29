@@ -96,9 +96,10 @@ impl UserManagerInner {
             } else if field == UpdateField::Rename as i32 {
                 self.all_users.remove(&user.name);
                 user.name = update_user.name.clone();
+                self.all_users.insert(update_user.name.clone());
             }
         });
-        self.all_users.insert(update_user.name.clone());
+        
         self.user_info.insert(update_user.id, user);
     }
 

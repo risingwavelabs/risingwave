@@ -12,7 +12,7 @@ ALTER USER user RENAME TO ddl_user;
 
 # Alter user properties.
 statement ok
-ALTER USER ddl_user WITH NOSUPERUSER CREATEDB PASSWORD 'md59f2fa6a30871a92249bdd2f1eeee4ef6;
+ALTER USER ddl_user WITH NOSUPERUSER CREATEDB PASSWORD 'md59f2fa6a30871a92249bdd2f1eeee4ef6';
 
 # Drop the user if exists.
 statement ok
