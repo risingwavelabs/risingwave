@@ -10,6 +10,7 @@ clap = { version = "3", features = ["derive"] }
 env_logger = { version = "0.9" }
 itertools = "0.10"
 lazy_static = "1"
+libtest-mimic = "0.4.1"
 log = "0.4"
 madsim = "=0.2.0-alpha.5"
 paste = "1"
