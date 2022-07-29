@@ -137,12 +137,12 @@ impl LruCacheEventListener for MemoryBlockCacheEventListener {
     type K = (HummockSstableId, u64);
     type T = Box<Block>;
 
-    fn on_evict(&self, key: &Self::K, value: &Self::T) {
+    fn on_release(&self, key: Self::K, value: Self::T) {
         let tiered_cache_key = CacheKey {
             sst_id: key.0,
             block_idx: key.1,
         };
-        let tiered_cache_value = encode_block(value);
+        let tiered_cache_value = encode_block(&value);
         // TODO(MrCroxx): handle error?
         self.tiered_cache
             .insert(tiered_cache_key, tiered_cache_value)
@@ -209,7 +209,7 @@ impl BlockCache {
         while (capacity >> max_shard_bits) < MIN_BUFFER_SIZE_PER_SHARD && max_shard_bits > 0 {
             max_shard_bits -= 1;
         }
-        let cache = LruCache::with_event_listeners(max_shard_bits, capacity, vec![listener]);
+        let cache = LruCache::with_event_listener(max_shard_bits, capacity, Some(listener));
 
         Self {
             inner: Arc::new(cache),
