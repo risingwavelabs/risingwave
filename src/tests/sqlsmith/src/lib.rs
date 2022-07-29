@@ -87,11 +87,6 @@ struct SqlGenerator<'a, R: Rng> {
     /// We might not read from all tables.
     bound_relations: Vec<Table>,
 
-    /// Relations in generated in 'From' statement shall be added to bound_relations and
-    /// bound_columns after all the relations are generated because they are not useable among
-    /// the relations
-    lateral_contexts: Vec<Table>,
-
     /// Columns bound in generated query.
     /// May not contain all columns from Self::bound_relations.
     /// e.g. GROUP BY clause will constrain bound_columns.
@@ -115,7 +110,6 @@ impl<'a, R: Rng> SqlGenerator<'a, R> {
             relation_id: 0,
             is_distinct_allowed,
             bound_relations: vec![],
-            lateral_contexts: vec![],
             bound_columns: vec![],
             is_mview: false,
         }
@@ -129,22 +123,17 @@ impl<'a, R: Rng> SqlGenerator<'a, R> {
             relation_id: 0,
             is_distinct_allowed: false,
             bound_relations: vec![],
-            lateral_contexts: vec![],
             bound_columns: vec![],
             is_mview: true,
         }
     }
 
-    fn add_relation_to_context(&mut self, table: Table) {
-        self.lateral_contexts.push(table);
-    }
-
-    fn merge_lateral_to_relation(&mut self) {
-        for rel in &self.lateral_contexts {
+    fn add_relations_to_context(&mut self, mut tables: Vec<Table>) {
+        for rel in &tables {
             let mut bound_columns = rel.get_qualified_columns();
             self.bound_columns.append(&mut bound_columns);
         }
-        self.bound_relations.append(&mut self.lateral_contexts);
+        self.bound_relations.append(&mut tables);
     }
 
     fn gen_stmt(&mut self) -> Statement {
@@ -363,8 +352,8 @@ impl<'a, R: Rng> SqlGenerator<'a, R> {
                 .expect("with tables should not be empty");
             vec![create_table_with_joins_from_table(with_table)]
         } else {
-            let rel = self.gen_from_relation();
-            self.merge_lateral_to_relation();
+            let (rel, tables) = self.gen_from_relation();
+            self.add_relations_to_context(tables);
             vec![rel]
         };
 
@@ -374,14 +363,15 @@ impl<'a, R: Rng> SqlGenerator<'a, R> {
             assert!(!self.tables.is_empty());
             return from;
         }
-
+        let mut lateral_contexts = vec![];
         for _ in 0..self.tables.len() {
             if self.flip_coin() {
-                from.push(self.gen_from_relation());
+                let (table_with_join, mut table) = self.gen_from_relation();
+                from.push(table_with_join);
+                lateral_contexts.append(&mut table);
             }
         }
-        self.merge_lateral_to_relation();
-
+        self.add_relations_to_context(lateral_contexts);
         from
     }
 

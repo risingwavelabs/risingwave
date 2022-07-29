@@ -21,26 +21,22 @@ use risingwave_sqlparser::ast::{
 
 use crate::{Column, Expr, Ident, ObjectName, SqlGenerator, Table};
 
-type Context = (Vec<Column>, Vec<Table>, Vec<Table>);
+type Context = (Vec<Column>, Vec<Table>);
 
 /// Context utils
 impl<'a, R: Rng> SqlGenerator<'a, R> {
     pub(crate) fn new_local_context(&mut self) -> Context {
         let current_bound_relations = mem::take(&mut self.bound_relations);
         let current_bound_columns = mem::take(&mut self.bound_columns);
-        let current_lateral_contexts = mem::take(&mut self.lateral_contexts);
-        self.lateral_contexts.clear();
         (
             current_bound_columns,
             current_bound_relations,
-            current_lateral_contexts,
         )
     }
 
-    pub(crate) fn restore_context(&mut self, (old_cols, old_rels, old_lateral): Context) {
+    pub(crate) fn restore_context(&mut self, (old_cols, old_rels): Context) {
         self.bound_relations = old_rels;
         self.bound_columns = old_cols;
-        self.lateral_contexts = old_lateral;
     }
 }
 
