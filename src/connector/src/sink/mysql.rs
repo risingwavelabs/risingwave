@@ -316,7 +316,7 @@ mod test {
     #[tokio::test]
     async fn test_drop() -> Result<()> {
         let config = MySQLConfig {
-            endpoint: "127.0.0.1:23306".to_string(),
+            endpoint: "127.0.0.1:3306".to_string(),
             table: "t_drop".to_string(),
             database: Some("test".into()),
             user: Some("root".into()),
