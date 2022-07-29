@@ -21,6 +21,10 @@ use std::time::{Duration, Instant};
 
 extern crate bytesize;
 
+use aws_sdk_s3::model::{CompletedMultipartUpload, CompletedPart};
+use aws_sdk_s3::output::UploadPartOutput;
+use aws_sdk_s3::Client;
+use aws_smithy_http::body::SdkBody;
 use bytesize::ByteSize;
 use clap::Parser;
 use futures::stream::{self, StreamExt};
@@ -28,20 +32,13 @@ use futures::{future, Future, FutureExt};
 use itertools::Itertools;
 use log::debug;
 use rand::{Rng, SeedableRng};
-use aws_sdk_s3::Client;
-use aws_sdk_s3::model::{ CompletedMultipartUpload, CompletedPart};
-use aws_sdk_s3::output::UploadPartOutput;
-use aws_smithy_http::body::SdkBody;
-use tokio::{join, spawn};
-use tokio::sync::RwLock;
 use risingwave_common::error::RwError;
-use crate::future::try_join_all;
+use tokio::join;
+use tokio::sync::RwLock;
 
 // Avoid regenerate objs in the same size with `rand`.
 #[derive(Default)]
-struct ObjPool(
-    HashMap<(ByteSize,String), Vec<u8>>
-);
+struct ObjPool(HashMap<(ByteSize, String), Vec<u8>>);
 
 #[derive(Default)]
 struct Cost {
@@ -92,10 +89,10 @@ impl Durations {
 }
 
 impl ObjPool {
-    fn obj(&mut self, key: (ByteSize,String)) -> Vec<u8> {
+    fn obj(&mut self, key: (ByteSize, String)) -> Vec<u8> {
         match self.0.entry(key.clone()) {
             Entry::Occupied(o) => o.get().to_owned(),
-            Entry::Vacant(v) => v.insert(gen_obj(key.0.clone())).to_owned(),
+            Entry::Vacant(v) => v.insert(gen_obj(key.0)).to_owned(),
         }
     }
 }
@@ -163,7 +160,7 @@ pub struct Config {
     #[clap(short, long)]
     format: bool,
 
-    ///Concurrent get and put
+    /// Concurrent get and put
     #[clap(short, long)]
     multithread: bool,
 }
@@ -180,8 +177,14 @@ async fn put(cfg: Arc<Config>, client: Arc<Client>, name: String, obj: Vec<u8>) 
     let t = Instant::now();
     let bytes = obj.len();
     let ttfb = t.elapsed();
-    client.put_object().bucket(&cfg.bucket).body(SdkBody::from(obj).into())
-        .key(name).send().await.unwrap();
+    client
+        .put_object()
+        .bucket(&cfg.bucket)
+        .body(SdkBody::from(obj).into())
+        .key(name)
+        .send()
+        .await
+        .unwrap();
     let ttlb = t.elapsed();
     Cost {
         bytes,
@@ -191,7 +194,6 @@ async fn put(cfg: Arc<Config>, client: Arc<Client>, name: String, obj: Vec<u8>) 
     }
 }
 
-
 async fn multi_part_upload(
     cfg: Arc<Config>,
     client: Arc<Client>,
@@ -199,18 +201,28 @@ async fn multi_part_upload(
     obj: Vec<u8>,
     part_size: ByteSize,
 ) -> Cost {
-
     let t = Instant::now();
     let bytes = obj.len();
     let bucket = cfg.bucket.clone();
-    let rsp = client.create_multipart_upload().bucket(bucket.clone()).key(name.clone()).send().await.unwrap();
+    let rsp = client
+        .create_multipart_upload()
+        .bucket(bucket.clone())
+        .key(name.clone())
+        .send()
+        .await
+        .unwrap();
     let upload_id = rsp.upload_id.unwrap();
     let upload_id_clone = upload_id.clone();
     let name_clone = name.clone();
     let client_clone = client.clone();
-    let upload_part_handle = move |part: Vec<u8>, part_number: i32|{
-        client_clone.upload_part().bucket(bucket.clone()).key(name_clone.clone())
-            .upload_id(upload_id_clone.clone()).part_number(part_number).body(SdkBody::from(part).into())
+    let upload_part_handle = move |part: Vec<u8>, part_number: i32| {
+        client_clone
+            .upload_part()
+            .bucket(bucket.clone())
+            .key(name_clone.clone())
+            .upload_id(upload_id_clone.clone())
+            .part_number(part_number)
+            .body(SdkBody::from(part).into())
     };
     let chunks = obj
         .chunks(part_size.as_u64() as usize)
@@ -221,14 +233,13 @@ async fn multi_part_upload(
     let futures = chunks
         .into_iter()
         .enumerate()
-        .map(|(i, part)| upload_part_handle(part,(i + 1) as i32))
-        .map(|a| async move{
+        .map(|(i, part)| upload_part_handle(part, (i + 1) as i32))
+        .map(|a| async move {
             let part_t = Instant::now();
             let result = a.send().await.unwrap();
             let part_ttl = part_t.elapsed();
-            Ok((result,part_ttl)):Result<(UploadPartOutput,Duration),RwError>
-            }
-        )
+            Ok((result, part_ttl)): Result<(UploadPartOutput, Duration), RwError>
+        })
         .collect_vec();
     let ttfb = t.elapsed();
     let mut part_ttls = vec![];
@@ -236,18 +247,33 @@ async fn multi_part_upload(
         .await
         .unwrap()
         .into_iter()
-        .map(|(result,part_ttl)|{
+        .map(|(result, part_ttl)| {
             part_ttls.push(part_ttl);
             result
         })
         .enumerate()
-        .map(|(i, rsp)| CompletedPart::builder().set_e_tag(rsp.e_tag).set_part_number(Some((i + 1) as i32)).build())
+        .map(|(i, rsp)| {
+            CompletedPart::builder()
+                .set_e_tag(rsp.e_tag)
+                .set_part_number(Some((i + 1) as i32))
+                .build()
+        })
         .collect_vec();
     let ttlb = t.elapsed();
 
-    client.complete_multipart_upload().bucket(cfg.bucket.clone())
-        .key(name.clone()).upload_id(upload_id.clone()).multipart_upload(
-        CompletedMultipartUpload::builder().set_parts(Some(completed_parts)).build()).send().await.unwrap();
+    client
+        .complete_multipart_upload()
+        .bucket(cfg.bucket.clone())
+        .key(name.clone())
+        .upload_id(upload_id.clone())
+        .multipart_upload(
+            CompletedMultipartUpload::builder()
+                .set_parts(Some(completed_parts))
+                .build(),
+        )
+        .send()
+        .await
+        .unwrap();
 
     Cost {
         bytes,
@@ -265,7 +291,8 @@ async fn get(cfg: Arc<Config>, client: Arc<Client>, name: String) -> Cost {
         .bucket(&cfg.bucket)
         .key(name)
         .send()
-        .await.unwrap();
+        .await
+        .unwrap();
     let ttfb = t.elapsed();
     let bytes = resp.body.collect().await.unwrap().into_bytes().len();
     let ttlb = t.elapsed();
@@ -278,21 +305,37 @@ async fn get(cfg: Arc<Config>, client: Arc<Client>, name: String) -> Cost {
 }
 
 async fn multi_part_get(
-    cfg: Arc<Config>, client: Arc<Client>,
+    cfg: Arc<Config>,
+    client: Arc<Client>,
     name: String,
     part_numbers: Vec<i32>,
 ) -> Cost {
     let t = Instant::now();
     let create_part_get = move |part_number| {
-        client.get_object().bucket(cfg.bucket.clone()).key(name.clone()).part_number(part_number).send()
+        client
+            .get_object()
+            .bucket(cfg.bucket.clone())
+            .key(name.clone())
+            .part_number(part_number)
+            .send()
     };
     let futures = part_numbers
         .into_iter()
-        .map(|part_number|create_part_get(part_number))
-        .map(|resp| {
-            async move { let result:Result<(usize,Duration),RwError>= Ok((resp.await.unwrap().body.collect().await.unwrap().into_bytes().len(), t.elapsed()));
+        .map(create_part_get)
+        .map(|resp| async move {
+            let result: Result<(usize, Duration), RwError> = Ok((
+                resp.await
+                    .unwrap()
+                    .body
+                    .collect()
+                    .await
+                    .unwrap()
+                    .into_bytes()
+                    .len(),
+                t.elapsed(),
+            ));
             result
-        }})
+        })
         .collect_vec();
     let (bytes, ttfb) = future::try_join_all(futures)
         .await
@@ -311,14 +354,21 @@ async fn multi_part_get(
 }
 
 async fn byte_range_get(
-    cfg: Arc<Config>, client: Arc<Client>,
+    cfg: Arc<Config>,
+    client: Arc<Client>,
     name: String,
     start: u64,
     end: u64,
 ) -> Cost {
     let t = Instant::now();
-    let resp = client.get_object().bucket(cfg.bucket.clone()).key(name.clone()).range(format!("bytes={}-{}", start, end))
-        .send().await.unwrap();
+    let resp = client
+        .get_object()
+        .bucket(cfg.bucket.clone())
+        .key(name.clone())
+        .range(format!("bytes={}-{}", start, end))
+        .send()
+        .await
+        .unwrap();
     let ttfb = t.elapsed();
     let bytes = resp.body.collect().await.unwrap().into_bytes().len();
     let ttlb = t.elapsed();
@@ -330,17 +380,23 @@ async fn byte_range_get(
     }
 }
 
-async fn run_case(index: usize, case: Case, cfg: Arc<Config>, client: Arc<Client>, objs: Arc<RwLock<ObjPool>>)->Result<(),RwError> {
+async fn run_case(
+    index: usize,
+    case: Case,
+    cfg: Arc<Config>,
+    client: Arc<Client>,
+    objs: Arc<RwLock<ObjPool>>,
+) -> Result<(), RwError> {
     let (name, analysis) = match case.clone() {
         Case::Put {
             name,
             obj: obj_name,
             size: obj_size,
         } => {
-            let obj = objs.write().await.obj((obj_size,obj_name.clone()));
+            let obj = objs.write().await.obj((obj_size, obj_name.clone()));
             (
                 name.to_owned(),
-                iter_exec(|| put(cfg.clone(), client, obj_name, obj), cfg.iter.clone()).await,
+                iter_exec(|| put(cfg.clone(), client, obj_name, obj), cfg.iter).await,
             )
         }
         Case::MultiPartUpload {
@@ -349,14 +405,14 @@ async fn run_case(index: usize, case: Case, cfg: Arc<Config>, client: Arc<Client
             size: obj_size,
             part: part_size,
         } => {
-            let obj = objs.write().await.obj((obj_size,obj_name.clone()));
+            let obj = objs.write().await.obj((obj_size, obj_name.clone()));
             (
                 name.to_owned(),
                 iter_exec(
                     || multi_part_upload(cfg.clone(), client, obj_name, obj, part_size),
-                    cfg.iter.clone(),
+                    cfg.iter,
                 )
-                    .await,
+                .await,
             )
         }
         Case::Get {
@@ -364,7 +420,7 @@ async fn run_case(index: usize, case: Case, cfg: Arc<Config>, client: Arc<Client
             obj: obj_name,
         } => (
             name.to_owned(),
-            iter_exec(|| get(cfg.clone(), client, obj_name), cfg.iter.clone()).await,
+            iter_exec(|| get(cfg.clone(), client, obj_name), cfg.iter).await,
         ),
         Case::MultiPartGet {
             name,
@@ -374,9 +430,9 @@ async fn run_case(index: usize, case: Case, cfg: Arc<Config>, client: Arc<Client
             name.to_owned(),
             iter_exec(
                 || multi_part_get(cfg.clone(), client, obj_name, part_numbers),
-                cfg.iter.clone(),
+                cfg.iter,
             )
-                .await,
+            .await,
         ),
         Case::ByteRangeGet {
             name,
@@ -387,9 +443,9 @@ async fn run_case(index: usize, case: Case, cfg: Arc<Config>, client: Arc<Client
             name.to_owned(),
             iter_exec(
                 || byte_range_get(cfg.clone(), client, obj_name, start, end),
-                cfg.iter.clone(),
+                cfg.iter,
             )
-                .await,
+            .await,
         ),
     };
     let d2s = |d: &Duration| match d.as_nanos() {
@@ -405,7 +461,10 @@ async fn run_case(index: usize, case: Case, cfg: Arc<Config>, client: Arc<Client
         _ => "-".to_owned(),
     };
     let data_with_name = [
-        ("name".to_owned(), format!("{} ({} iters)", name, cfg.iter.clone())),
+        (
+            "name".to_owned(),
+            format!("{} ({} iters)", name, cfg.iter.clone()),
+        ),
         ("bytes".to_owned(), analysis.bytes.to_string_as(true)),
         (
             "bandwidth".to_owned(),
@@ -488,9 +547,9 @@ async fn run_case(index: usize, case: Case, cfg: Arc<Config>, client: Arc<Client
     Ok(())
 }
 async fn exec<F, FB>(fb: FB) -> Cost
-    where
-        F: Future<Output = Cost>,
-        FB: FnOnce() -> F + Clone,
+where
+    F: Future<Output = Cost>,
+    FB: FnOnce() -> F + Clone,
 {
     let start = Instant::now();
     let mut cost = fb().await;
@@ -499,8 +558,8 @@ async fn exec<F, FB>(fb: FB) -> Cost
 }
 
 fn de_size_str<'de, D>(deserializer: D) -> Result<ByteSize, D::Error>
-    where
-        D: serde::Deserializer<'de>,
+where
+    D: serde::Deserializer<'de>,
 {
     struct StringVisitor;
 
@@ -512,8 +571,8 @@ fn de_size_str<'de, D>(deserializer: D) -> Result<ByteSize, D::Error>
         }
 
         fn visit_str<E>(self, value: &str) -> Result<ByteSize, E>
-            where
-                E: serde::de::Error,
+        where
+            E: serde::de::Error,
         {
             Ok(FromStr::from_str(value).unwrap())
         }
@@ -523,9 +582,9 @@ fn de_size_str<'de, D>(deserializer: D) -> Result<ByteSize, D::Error>
 }
 
 async fn iter_exec<F, FB>(fb: FB, iter_size: usize) -> Analysis
-    where
-        F: Future<Output = Cost>,
-        FB: FnOnce() -> F + Clone,
+where
+    F: Future<Output = Cost>,
+    FB: FnOnce() -> F + Clone,
 {
     let costs = stream::iter(0..iter_size)
         .flat_map(|_| exec(fb.clone()).into_stream())
@@ -534,9 +593,14 @@ async fn iter_exec<F, FB>(fb: FB, iter_size: usize) -> Analysis
     let bytes = ByteSize::b(costs[0].bytes as u64);
     let ttls = Durations::gen(costs.iter().map(|cost| cost.ttl).collect_vec());
     let ttfbs = Durations::gen(costs.iter().map(|cost| cost.ttfb).collect_vec());
-    let part_rtts = if !costs[0].part_ttls.is_empty(){
-        Durations::gen(costs.iter().flat_map(|cost| cost.part_ttls.clone()).collect_vec())
-    }else{
+    let part_rtts = if !costs[0].part_ttls.is_empty() {
+        Durations::gen(
+            costs
+                .iter()
+                .flat_map(|cost| cost.part_ttls.clone())
+                .collect_vec(),
+        )
+    } else {
         Durations::default()
     };
     let data_transfer_secs = costs
@@ -581,9 +645,9 @@ async fn main() {
         for (i, case) in cases.drain(..).enumerate() {
             debug!("running case: {:?}", case);
             let objs = objs.clone();
-            if matches!(case,Case::Put {..}) || matches!(case,Case::MultiPartUpload {..}){
+            if matches!(case, Case::Put { .. }) || matches!(case, Case::MultiPartUpload { .. }) {
                 features_put.push(run_case(i, case, cfg.clone(), client.clone(), objs));
-            }else{
+            } else {
                 features_get.push(run_case(i, case, cfg.clone(), client.clone(), objs));
             }
         }
@@ -594,16 +658,18 @@ async fn main() {
                 a.await.unwrap();
             }
         });
-        let get_handle = tokio::spawn( async move{
-            while let Some(a) = stream_get.next().await{
+        let get_handle = tokio::spawn(async move {
+            while let Some(a) = stream_get.next().await {
                 a.await.unwrap();
             }
         });
-        let _r = join!(put_handle,get_handle);
-    }else{
+        let _r = join!(put_handle, get_handle);
+    } else {
         for (i, case) in cases.drain(..).enumerate() {
             debug!("running case: {:?}", case);
-            run_case(i, case, cfg.clone(), client.clone(), objs.clone()).await.unwrap();
+            run_case(i, case, cfg.clone(), client.clone(), objs.clone())
+                .await
+                .unwrap();
         }
     }
 }
