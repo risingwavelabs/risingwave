@@ -204,8 +204,8 @@ mod tests {
         array.sort();
         // option 1 byte || number 2 bytes
         assert_eq!(array[0][2], !6i16.to_be_bytes()[1]);
-        assert_eq!(&array[1][3..], [1, 1, b'a', b'b', b'c', 0, 0, 0, 0, 0, 3u8]);
-        assert_eq!(&array[2][3..], [1, 1, b'a', b'b', b'd', 0, 0, 0, 0, 0, 3u8]);
+        assert_eq!(&array[1][3..], [0, 1, b'a', b'b', b'c', 0, 0, 0, 0, 0, 3u8]);
+        assert_eq!(&array[2][3..], [0, 1, b'a', b'b', b'd', 0, 0, 0, 0, 0, 3u8]);
     }
 
     #[test]
@@ -249,7 +249,7 @@ mod tests {
         assert_eq!(
             array[0][..11],
             [
-                !(1u8),
+                !(0u8),
                 !(1u8),
                 !(b'a'),
                 !(b'b'),
@@ -262,8 +262,8 @@ mod tests {
                 !(3u8)
             ]
         );
-        assert_eq!(array[1][11..], [1, 1, b'j', b'm', b'z', 0, 0, 0, 0, 0, 3u8]);
-        assert_eq!(array[2][11..], [1, 1, b'm', b'j', b'z', 0, 0, 0, 0, 0, 3u8]);
+        assert_eq!(array[1][11..], [0, 1, b'j', b'm', b'z', 0, 0, 0, 0, 0, 3u8]);
+        assert_eq!(array[2][11..], [0, 1, b'm', b'j', b'z', 0, 0, 0, 0, 0, 3u8]);
     }
 
     #[test]

@@ -29,14 +29,12 @@ use crate::execution::local_exchange::LocalExchangeSource;
 use crate::executor::ExecutorBuilder;
 use crate::task::{BatchTaskContext, TaskId};
 
-pub type ExchangeExecutor<C> = GenericExchangeExecutor<DefaultCreateSource, C>;
+pub type ExchangeExecutor<C> = GenericExchangeExecutor<C>;
 use crate::executor::{BoxedDataChunkStream, BoxedExecutor, BoxedExecutorBuilder, Executor};
-pub struct GenericExchangeExecutor<CS, C> {
-    sources: Vec<ProstExchangeSource>,
+pub struct GenericExchangeExecutor<C> {
+    sources: Vec<ExchangeSourceImpl>,
     context: C,
 
-    // Mock-able CreateSource.
-    source_creators: Vec<CS>,
     schema: Schema,
     task_id: TaskId,
     identity: String,
@@ -106,24 +104,30 @@ impl BoxedExecutorBuilder for GenericExchangeExecutorBuilder {
         )?;
 
         ensure!(!node.get_sources().is_empty());
-        let sources: Vec<ProstExchangeSource> = node.get_sources().to_vec();
-        let source_creators = vec![DefaultCreateSource {}; sources.len()];
+        let prost_sources: Vec<ProstExchangeSource> = node.get_sources().to_vec();
+        let source_creators = vec![DefaultCreateSource {}; prost_sources.len()];
+        let mut sources: Vec<ExchangeSourceImpl> = vec![];
+
+        for (prost_source, source_creator) in prost_sources.iter().zip_eq(source_creators) {
+            let source = source_creator
+                .create_source(source.context.clone(), prost_source)
+                .await?;
+            sources.push(source);
+        }
+
         let input_schema: Vec<NodeField> = node.get_input_schema().to_vec();
         let fields = input_schema.iter().map(Field::from).collect::<Vec<Field>>();
-        Ok(Box::new(
-            GenericExchangeExecutor::<DefaultCreateSource, C> {
-                sources,
-                context: source.context().clone(),
-                source_creators,
-                schema: Schema { fields },
-                task_id: source.task_id.clone(),
-                identity: source.plan_node().get_identity().clone(),
-            },
-        ))
+        Ok(Box::new(GenericExchangeExecutor::<C> {
+            sources,
+            context: source.context().clone(),
+            schema: Schema { fields },
+            task_id: source.task_id.clone(),
+            identity: source.plan_node().get_identity().clone(),
+        }))
     }
 }
 
-impl<CS: 'static + CreateSource, C: BatchTaskContext> Executor for GenericExchangeExecutor<CS, C> {
+impl<C: BatchTaskContext> Executor for GenericExchangeExecutor<C> {
     fn schema(&self) -> &Schema {
         &self.schema
     }
@@ -137,20 +141,16 @@ impl<CS: 'static + CreateSource, C: BatchTaskContext> Executor for GenericExchan
     }
 }
 
-impl<CS: 'static + CreateSource, C: BatchTaskContext> GenericExchangeExecutor<CS, C> {
+impl<C: BatchTaskContext> GenericExchangeExecutor<C> {
     #[try_stream(boxed, ok = DataChunk, error = RwError)]
     async fn do_execute(self: Box<Self>) {
-        let mut sources: Vec<ExchangeSourceImpl> = vec![];
-
-        for (prost_source, source_creator) in self.sources.iter().zip_eq(self.source_creators) {
-            let source = source_creator
-                .create_source(self.context.clone(), prost_source)
-                .await?;
-            sources.push(source);
-        }
-
-        let mut stream =
-            select_all(sources.into_iter().map(data_chunk_stream).collect_vec()).boxed();
+        let mut stream = select_all(
+            self.sources
+                .into_iter()
+                .map(data_chunk_stream)
+                .collect_vec(),
+        )
+        .boxed();
 
         while let Some(data_chunk) = stream.next().await {
             let data_chunk = data_chunk?;
@@ -189,10 +189,9 @@ mod tests {
     use crate::task::ComputeNodeContext;
     #[tokio::test]
     async fn test_exchange_multiple_sources() {
-        let mut sources: Vec<ProstExchangeSource> = vec![];
-        let mut source_creators = vec![];
+        let context = ComputeNodeContext::new_for_test();
+        let mut sources = vec![];
         for _ in 0..2 {
-            sources.push(ProstExchangeSource::default());
             let mut rng = rand::thread_rng();
             let i = rng.gen_range(1..=100000);
             let chunk = DataChunk::new(
@@ -204,21 +203,22 @@ mod tests {
             let chunks = vec![Some(chunk); 100];
             let fake_exchange_source = FakeExchangeSource::new(chunks);
             let fake_create_source = FakeCreateSource::new(fake_exchange_source);
-            source_creators.push(fake_create_source);
+            let source = fake_create_source
+                .create_source(context.clone(), &ProstExchangeSource::default())
+                .await
+                .unwrap();
+            sources.push(source);
         }
 
-        let executor = Box::new(
-            GenericExchangeExecutor::<FakeCreateSource, ComputeNodeContext> {
-                sources,
-                source_creators,
-                context: ComputeNodeContext::new_for_test(),
-                schema: Schema {
-                    fields: vec![Field::unnamed(DataType::Int32)],
-                },
-                task_id: TaskId::default(),
-                identity: "GenericExchangeExecutor2".to_string(),
+        let executor = Box::new(GenericExchangeExecutor::<ComputeNodeContext> {
+            sources,
+            context,
+            schema: Schema {
+                fields: vec![Field::unnamed(DataType::Int32)],
             },
-        );
+            task_id: TaskId::default(),
+            identity: "GenericExchangeExecutor2".to_string(),
+        });
 
         let mut stream = executor.execute();
         let mut chunks: Vec<DataChunk> = vec![];

@@ -13,9 +13,9 @@
 // limitations under the License.
 
 use std::cmp::Ordering::{Equal, Less};
+use std::future::Future;
 use std::sync::Arc;
 
-use async_trait::async_trait;
 use risingwave_hummock_sdk::VersionedComparator;
 
 use crate::hummock::iterator::{Backward, HummockIterator};
@@ -82,20 +82,25 @@ impl BackwardSstableIterator {
     }
 }
 
-#[async_trait]
 impl HummockIterator for BackwardSstableIterator {
     type Direction = Backward;
 
-    async fn next(&mut self) -> HummockResult<()> {
-        self.stats.scan_key_count += 1;
-        let block_iter = self.block_iter.as_mut().expect("no block iter");
-        block_iter.prev();
+    type NextFuture<'a> = impl Future<Output = HummockResult<()>> + 'a;
+    type RewindFuture<'a> = impl Future<Output = HummockResult<()>> + 'a;
+    type SeekFuture<'a> = impl Future<Output = HummockResult<()>> + 'a;
 
-        if block_iter.is_valid() {
-            Ok(())
-        } else {
-            // seek to the previous block
-            self.seek_idx(self.cur_idx as isize - 1, None).await
+    fn next(&mut self) -> Self::NextFuture<'_> {
+        async move {
+            self.stats.scan_key_count += 1;
+            let block_iter = self.block_iter.as_mut().expect("no block iter");
+            block_iter.prev();
+
+            if block_iter.is_valid() {
+                Ok(())
+            } else {
+                // seek to the previous block
+                self.seek_idx(self.cur_idx as isize - 1, None).await
+            }
         }
     }
 
@@ -115,34 +120,39 @@ impl HummockIterator for BackwardSstableIterator {
 
     /// Instead of setting idx to 0th block, a `BackwardSstableIterator` rewinds to the last block
     /// in the sstable.
-    async fn rewind(&mut self) -> HummockResult<()> {
-        self.seek_idx(self.sst.value().block_count() as isize - 1, None)
-            .await
+    fn rewind(&mut self) -> Self::RewindFuture<'_> {
+        async move {
+            self.seek_idx(self.sst.value().block_count() as isize - 1, None)
+                .await
+        }
     }
 
-    async fn seek(&mut self, key: &[u8]) -> HummockResult<()> {
-        let block_idx = self
-            .sst
-            .value()
-            .meta
-            .block_metas
-            .partition_point(|block_meta| {
-                // Compare by version comparator
-                // Note: we are comparing against the `smallest_key` of the `block`, thus the
-                // partition point should be `prev(<=)` instead of `<`.
-                let ord = VersionedComparator::compare_key(block_meta.smallest_key.as_slice(), key);
-                ord == Less || ord == Equal
-            })
-            .saturating_sub(1); // considering the boundary of 0
-        let block_idx = block_idx as isize;
+    fn seek<'a>(&'a mut self, key: &'a [u8]) -> Self::SeekFuture<'a> {
+        async move {
+            let block_idx = self
+                .sst
+                .value()
+                .meta
+                .block_metas
+                .partition_point(|block_meta| {
+                    // Compare by version comparator
+                    // Note: we are comparing against the `smallest_key` of the `block`, thus the
+                    // partition point should be `prev(<=)` instead of `<`.
+                    let ord =
+                        VersionedComparator::compare_key(block_meta.smallest_key.as_slice(), key);
+                    ord == Less || ord == Equal
+                })
+                .saturating_sub(1); // considering the boundary of 0
+            let block_idx = block_idx as isize;
 
-        self.seek_idx(block_idx, Some(key)).await?;
-        if !self.is_valid() {
-            // Seek to prev block
-            self.seek_idx(block_idx - 1, None).await?;
+            self.seek_idx(block_idx, Some(key)).await?;
+            if !self.is_valid() {
+                // Seek to prev block
+                self.seek_idx(block_idx - 1, None).await?;
+            }
+
+            Ok(())
         }
-
-        Ok(())
     }
 
     fn collect_local_statistic(&self, stats: &mut StoreLocalStatistic) {

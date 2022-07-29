@@ -783,7 +783,8 @@ impl PredicatePushdown for LogicalJoin {
                     indices_and_ty_of_func_calls.push((index, ty));
                 }
             }
-            // used to shift indices of input_refs pointing the right side of `join` with `left_exprs.len`.
+            // used to shift indices of input_refs pointing the right side of `join` with
+            // `left_exprs.len`.
             let mut col_index_mapping = {
                 let map = (0..left_col_num)
                     .chain(

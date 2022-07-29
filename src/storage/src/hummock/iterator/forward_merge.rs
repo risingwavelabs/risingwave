@@ -12,25 +12,19 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use crate::hummock::iterator::merge_inner::{
-    OrderedMergeIteratorInner, UnorderedMergeIteratorInner,
-};
-use crate::hummock::iterator::Forward;
-
-pub type MergeIterator = UnorderedMergeIteratorInner<Forward>;
-pub type OrderedAwareMergeIterator = OrderedMergeIteratorInner<Forward>;
-
 #[cfg(test)]
 mod test {
     use std::sync::Arc;
 
-    use super::*;
     use crate::hummock::iterator::test_utils::{
         default_builder_opt_for_test, gen_iterator_test_sstable_base,
         gen_merge_iterator_interleave_test_sstable_iters, iterator_test_key_of,
         iterator_test_value_of, mock_sstable_store, TEST_KEYS_COUNT,
     };
-    use crate::hummock::iterator::{BoxedForwardHummockIterator, HummockIterator};
+    use crate::hummock::iterator::{
+        Forward, HummockIterator, HummockIteratorUnion, OrderedMergeIteratorInner,
+        UnorderedMergeIteratorInner,
+    };
     use crate::hummock::sstable::{
         SstableIterator, SstableIteratorReadOptions, SstableIteratorType,
     };
@@ -40,18 +34,25 @@ mod test {
 
     #[tokio::test]
     async fn test_merge_basic() {
-        let mut unordered_iter = MergeIterator::new(
+        let mut unordered_iter: HummockIteratorUnion<
+            Forward,
+            UnorderedMergeIteratorInner<SstableIterator>,
+            OrderedMergeIteratorInner<SstableIterator>,
+        > = HummockIteratorUnion::First(UnorderedMergeIteratorInner::new(
             gen_merge_iterator_interleave_test_sstable_iters(TEST_KEYS_COUNT, 3).await,
             Arc::new(StateStoreMetrics::unused()),
-        );
-        let mut ordered_iter = OrderedAwareMergeIterator::new(
+        ));
+        let mut ordered_iter: HummockIteratorUnion<
+            Forward,
+            UnorderedMergeIteratorInner<SstableIterator>,
+            OrderedMergeIteratorInner<SstableIterator>,
+        > = HummockIteratorUnion::Second(OrderedMergeIteratorInner::new(
             gen_merge_iterator_interleave_test_sstable_iters(TEST_KEYS_COUNT, 3).await,
             Arc::new(StateStoreMetrics::unused()),
-        );
+        ));
 
         // Test both ordered and unordered iterators
-        let test_iters: Vec<&mut dyn HummockIterator<Direction = Forward>> =
-            vec![&mut unordered_iter, &mut ordered_iter];
+        let test_iters = vec![&mut unordered_iter, &mut ordered_iter];
         for iter in test_iters {
             let mut i = 0;
             iter.rewind().await.unwrap();
@@ -76,18 +77,25 @@ mod test {
 
     #[tokio::test]
     async fn test_merge_seek() {
-        let mut unordered_iter = MergeIterator::new(
+        let mut unordered_iter: HummockIteratorUnion<
+            Forward,
+            UnorderedMergeIteratorInner<SstableIterator>,
+            OrderedMergeIteratorInner<SstableIterator>,
+        > = HummockIteratorUnion::First(UnorderedMergeIteratorInner::new(
             gen_merge_iterator_interleave_test_sstable_iters(TEST_KEYS_COUNT, 3).await,
             Arc::new(StateStoreMetrics::unused()),
-        );
-        let mut ordered_iter = OrderedAwareMergeIterator::new(
+        ));
+        let mut ordered_iter: HummockIteratorUnion<
+            Forward,
+            UnorderedMergeIteratorInner<SstableIterator>,
+            OrderedMergeIteratorInner<SstableIterator>,
+        > = HummockIteratorUnion::Second(OrderedMergeIteratorInner::new(
             gen_merge_iterator_interleave_test_sstable_iters(TEST_KEYS_COUNT, 3).await,
             Arc::new(StateStoreMetrics::unused()),
-        );
+        ));
 
         // Test both ordered and unordered iterators
-        let test_iters: Vec<&mut dyn HummockIterator<Direction = Forward>> =
-            vec![&mut unordered_iter, &mut ordered_iter];
+        let test_iters = vec![&mut unordered_iter, &mut ordered_iter];
 
         for iter in test_iters {
             // right edge case
@@ -158,40 +166,47 @@ mod test {
 
         let cache = create_small_table_cache();
 
-        let mut unordered_iter = MergeIterator::new(
+        let mut unordered_iter: HummockIteratorUnion<
+            Forward,
+            UnorderedMergeIteratorInner<SstableIterator>,
+            OrderedMergeIteratorInner<SstableIterator>,
+        > = HummockIteratorUnion::First(UnorderedMergeIteratorInner::new(
             vec![
-                Box::new(SstableIterator::create(
+                SstableIterator::create(
                     cache.insert(table0.id, table0.id, 1, table0),
                     sstable_store.clone(),
                     read_options.clone(),
-                )) as BoxedForwardHummockIterator,
-                Box::new(SstableIterator::create(
+                ),
+                SstableIterator::create(
                     cache.insert(table1.id, table1.id, 1, table1),
                     sstable_store.clone(),
                     read_options.clone(),
-                )) as BoxedForwardHummockIterator,
+                ),
             ],
             Arc::new(StateStoreMetrics::unused()),
-        );
-        let mut ordered_iter = OrderedAwareMergeIterator::new(
+        ));
+        let mut ordered_iter: HummockIteratorUnion<
+            Forward,
+            UnorderedMergeIteratorInner<SstableIterator>,
+            OrderedMergeIteratorInner<SstableIterator>,
+        > = HummockIteratorUnion::Second(OrderedMergeIteratorInner::new(
             vec![
-                Box::new(SstableIterator::create(
+                SstableIterator::create(
                     cache.lookup(0, &0).unwrap(),
                     sstable_store.clone(),
                     read_options.clone(),
-                )) as BoxedForwardHummockIterator,
-                Box::new(SstableIterator::create(
+                ),
+                SstableIterator::create(
                     cache.lookup(1, &1).unwrap(),
                     sstable_store.clone(),
                     read_options.clone(),
-                )) as BoxedForwardHummockIterator,
+                ),
             ],
             Arc::new(StateStoreMetrics::unused()),
-        );
+        ));
 
         // Test both ordered and unordered iterators
-        let test_iters: Vec<&mut dyn HummockIterator<Direction = Forward>> =
-            vec![&mut unordered_iter, &mut ordered_iter];
+        let test_iters = vec![&mut unordered_iter, &mut ordered_iter];
 
         for iter in test_iters {
             iter.rewind().await.unwrap();
@@ -263,9 +278,9 @@ mod test {
         );
         let cache = create_small_table_cache();
 
-        let mut iter = OrderedAwareMergeIterator::new(
+        let mut iter = OrderedMergeIteratorInner::new(
             vec![
-                Box::new(SstableIterator::create(
+                SstableIterator::create(
                     cache.insert(
                         non_overlapped_sstable.id,
                         non_overlapped_sstable.id,
@@ -274,8 +289,8 @@ mod test {
                     ),
                     sstable_store.clone(),
                     read_options.clone(),
-                )) as BoxedForwardHummockIterator,
-                Box::new(SstableIterator::create(
+                ),
+                SstableIterator::create(
                     cache.insert(
                         overlapped_new_sstable.id,
                         overlapped_new_sstable.id,
@@ -284,8 +299,8 @@ mod test {
                     ),
                     sstable_store.clone(),
                     read_options.clone(),
-                )) as BoxedForwardHummockIterator,
-                Box::new(SstableIterator::create(
+                ),
+                SstableIterator::create(
                     cache.insert(
                         overlapped_old_sstable.id,
                         overlapped_old_sstable.id,
@@ -294,7 +309,7 @@ mod test {
                     ),
                     sstable_store.clone(),
                     read_options.clone(),
-                )) as BoxedForwardHummockIterator,
+                ),
             ],
             Arc::new(StateStoreMetrics::unused()),
         );
