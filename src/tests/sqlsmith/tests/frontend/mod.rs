@@ -103,38 +103,36 @@ fn test_batch_queries(
     rng: &mut impl Rng,
     setup_sql: &str,
 ) {
-    for _ in 0..512 {
-        let sql = sql_gen(rng, tables.clone());
-        reproduce_failing_queries(setup_sql, &sql);
+    let sql = sql_gen(rng, tables.clone());
+    reproduce_failing_queries(setup_sql, &sql);
 
-        // The generated SQL must be parsable.
-        let statements = parse_sql(&sql);
-        let stmt = statements[0].clone();
-        let context: OptimizerContextRef =
-            OptimizerContext::new(session.clone(), Arc::from(sql.clone())).into();
+    // The generated SQL must be parsable.
+    let statements = parse_sql(&sql);
+    let stmt = statements[0].clone();
+    let context: OptimizerContextRef =
+        OptimizerContext::new(session.clone(), Arc::from(sql.clone())).into();
 
-        match stmt.clone() {
-            Statement::Query(_) => {
-                // nextest will only print to stderr if test fails
-                let mut binder = Binder::new(
-                    session.env().catalog_reader().read_guard(),
-                    session.database().to_string(),
-                );
-                panic!("Failed to bind");
-                let bound = todo!();
-                // let bound = binder
-                //     .bind(stmt.clone())
-                //     .unwrap_or_else(|e| panic!("Failed to bind:\nReason:\n{}", e));
-                let mut planner = Planner::new(context.clone());
-                let logical_plan = planner
-                    .plan(bound)
-                    .unwrap_or_else(|e| panic!("Failed to generate logical plan:\nReason:\n{}", e));
-                logical_plan
-                    .gen_batch_query_plan()
-                    .unwrap_or_else(|e| panic!("Failed to generate batch plan:\nReason:\n{}", e));
-            }
-            _ => unreachable!(),
+    match stmt.clone() {
+        Statement::Query(_) => {
+            // nextest will only print to stderr if test fails
+            let mut binder = Binder::new(
+                session.env().catalog_reader().read_guard(),
+                session.database().to_string(),
+            );
+            panic!("Failed to bind");
+            let bound = todo!();
+            // let bound = binder
+            //     .bind(stmt.clone())
+            //     .unwrap_or_else(|e| panic!("Failed to bind:\nReason:\n{}", e));
+            let mut planner = Planner::new(context.clone());
+            let logical_plan = planner
+                .plan(bound)
+                .unwrap_or_else(|e| panic!("Failed to generate logical plan:\nReason:\n{}", e));
+            logical_plan
+                .gen_batch_query_plan()
+                .unwrap_or_else(|e| panic!("Failed to generate batch plan:\nReason:\n{}", e));
         }
+        _ => panic!("Invalid Query: {}", stmt),
     }
 }
 
