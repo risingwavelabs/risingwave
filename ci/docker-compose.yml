@@ -42,10 +42,10 @@ services:
       - MYSQL_ALLOW_EMPTY_PASSWORD=true
     healthcheck:
       test: ["CMD", "mysqladmin" ,"ping", "-h", "localhost"]
-      timeout: 50s
+      timeout: 40s
       retries: 5
-    userns_mode: "host"
-    pid: "host"
+    # userns_mode: "host"
+    # pid: "host"
 #     networks:
 #       nw:
 #         ipv4_address: 172.24.2.1
