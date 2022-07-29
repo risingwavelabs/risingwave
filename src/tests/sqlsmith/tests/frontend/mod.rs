@@ -91,7 +91,7 @@ async fn create_tables(session: Arc<SessionImpl>, rng: &mut impl Rng) -> (Vec<Ta
 
     for s in statements.into_iter() {
         let create_sql = s.to_string();
-        handle(session.clone(), s, &setup_sql, &create_sql).await;
+        handle(session.clone(), s, &create_sql).await;
     }
 
     // Generate some mviews
@@ -100,7 +100,7 @@ async fn create_tables(session: Arc<SessionImpl>, rng: &mut impl Rng) -> (Vec<Ta
         setup_sql.push_str(&sql);
         let stmts = parse_sql(&sql);
         let stmt = stmts[0].clone();
-        handle(session.clone(), stmt, &setup_sql, &sql).await;
+        handle(session.clone(), stmt, &sql).await;
         tables.push(table);
     }
     (tables, setup_sql)
