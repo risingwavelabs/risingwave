@@ -81,27 +81,6 @@ pub struct ObjectMetadata {
     pub total_size: usize,
 }
 
-impl BlockLocation {
-    /// Generates the HTTP bytes range specifier limited to the block.
-    /// That is, the range starts at the first and ends at the last byte of the block.
-    pub fn byte_range_specifier(&self) -> Option<String> {
-        Some(format!(
-            "bytes={}-{}",
-            self.offset,
-            self.offset + self.size - 1 // Upper bound is inclusive.
-        ))
-    }
-
-    /// Generates the HTTP bytes range specifier without an end.
-    /// That is, the range starts at the first byte of the block and has no upper limit.
-    pub fn byte_start_specifier(&self) -> Option<String> {
-        // ToDo: Function returns `Option<String>`, because `byte_range_specifier` does so. It is
-        // unclear why `byte_range_specifier` is not just returning `String`, since it never returns
-        // `None`.
-        Some(format!("bytes={}-", self.offset))
-    }
-}
-
 /// The implementation must be thread-safe.
 #[async_trait::async_trait]
 pub trait ObjectStore: Send + Sync {
