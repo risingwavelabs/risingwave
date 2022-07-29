@@ -29,7 +29,7 @@ use risingwave_sqlsmith::{
     create_table_statement_to_table, mview_sql_gen, parse_sql, sql_gen, Table,
 };
 
-#[derive(Clone)]
+/// Environment for Sqlsmith to generate and test queries
 pub struct SqlsmithEnv {
     session: Arc<SessionImpl>,
     tables: Vec<Table>,
