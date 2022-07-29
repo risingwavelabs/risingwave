@@ -6,7 +6,7 @@ option optimize_for = SPEED;
 
 message Status {
   enum Code {
-    CODE_UNSPECIFIED = 0;
+    UNSPECIFIED = 0;
     OK = 1;
   }
   Code code = 1;
