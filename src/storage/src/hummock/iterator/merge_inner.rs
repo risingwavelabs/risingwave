@@ -187,12 +187,6 @@ pub trait MergeIteratorNext {
     where
         Self: 'a;
     fn next_inner(&mut self) -> Self::HummockResultFuture<'_>;
-
-    fn key_inner(&self) -> &[u8];
-
-    fn value_inner(&self) -> HummockValue<&[u8]>;
-
-    fn is_valid_inner(&self) -> bool;
 }
 
 impl<I: HummockIterator> MergeIteratorNext for OrderedMergeIteratorInner<I> {
@@ -241,18 +235,6 @@ impl<I: HummockIterator> MergeIteratorNext for OrderedMergeIteratorInner<I> {
             Ok(())
         }
     }
-
-    fn key_inner(&self) -> &[u8] {
-        self.heap.peek().expect("no inner iter").iter.key()
-    }
-
-    fn value_inner(&self) -> HummockValue<&[u8]> {
-        self.heap.peek().expect("no inner iter").iter.value()
-    }
-
-    fn is_valid_inner(&self) -> bool {
-        self.heap.peek().map_or(false, |n| n.iter.is_valid())
-    }
 }
 
 impl<I: HummockIterator> MergeIteratorNext for UnorderedMergeIteratorInner<I> {
@@ -288,18 +270,6 @@ impl<I: HummockIterator> MergeIteratorNext for UnorderedMergeIteratorInner<I> {
 
             Ok(())
         }
-    }
-
-    fn key_inner(&self) -> &[u8] {
-        self.heap.peek().expect("no inner iter").iter.key()
-    }
-
-    fn value_inner(&self) -> HummockValue<&[u8]> {
-        self.heap.peek().expect("no inner iter").iter.value()
-    }
-
-    fn is_valid_inner(&self) -> bool {
-        self.heap.peek().map_or(false, |n| n.iter.is_valid())
     }
 }
 

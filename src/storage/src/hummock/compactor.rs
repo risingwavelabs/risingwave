@@ -41,13 +41,11 @@ use risingwave_rpc_client::HummockMetaClient;
 use tokio::sync::oneshot::Sender;
 use tokio::task::JoinHandle;
 
-
-use super::iterator::ConcatIterator;
 use super::multi_builder::CapacitySplitTableBuilder;
 use super::{CompressionAlgorithm, HummockResult, Sstable, SstableBuilderOptions};
 use crate::hummock::compaction_executor::CompactionExecutor;
-use crate::hummock::multi_builder::SealedSstableBuilder;
-    Forward, HummockIterator, HummockIteratorUnion, MultiSstIterator, UnorderedMergeIteratorInner,
+use crate::hummock::iterator::{
+    ConcatSstableIterator, Forward, HummockIterator, UnorderedMergeIteratorInner,
 };
 use crate::hummock::multi_builder::{SealedSstableBuilder, TableBuilderFactory};
 use crate::hummock::shared_buffer::shared_buffer_uploader::UploadTaskPayload;
@@ -668,6 +666,13 @@ impl Compactor {
         iter: impl HummockIterator<Direction = Forward>,
         compaction_filter: impl CompactionFilter,
     ) -> HummockResult<CompactOutput> {
+        let split = self.compact_task.splits[split_index].clone();
+        let kr = KeyRange {
+            left: Bytes::copy_from_slice(split.get_left()),
+            right: Bytes::copy_from_slice(split.get_right()),
+            inf: split.get_inf(),
+        };
+
         let get_id_time = Arc::new(AtomicU64::new(0));
         let max_target_file_size = self.context.options.sstable_size_mb as usize * (1 << 20);
         let cache_policy = if self.compact_task.target_level == 0 {
@@ -769,18 +774,7 @@ impl Compactor {
         iter: impl HummockIterator<Direction = Forward>,
     ) -> HummockResult<CompactOutput> {
         let dummy_compaction_filter = DummyCompactionFilter {};
-        let split = self.compact_task.splits[split_index].clone();
-        let kr = KeyRange {
-            left: Bytes::copy_from_slice(split.get_left()),
-            right: Bytes::copy_from_slice(split.get_right()),
-            inf: split.get_inf(),
-        };
-        if !kr.left.is_empty() {
-            iter.seek(&kr.left).await?;
-        } else {
-            iter.rewind().await?;
-        }
-        self.compact_key_range_impl(split_index, iter, kr, dummy_compaction_filter)
+        self.compact_key_range_impl(split_index, iter, dummy_compaction_filter)
             .await
     }
 
@@ -790,23 +784,12 @@ impl Compactor {
         iter: impl HummockIterator<Direction = Forward>,
         compaction_filter: impl CompactionFilter,
     ) -> HummockResult<CompactOutput> {
-        let split = self.compact_task.splits[split_index].clone();
-        let kr = KeyRange {
-            left: Bytes::copy_from_slice(split.get_left()),
-            right: Bytes::copy_from_slice(split.get_right()),
-            inf: split.get_inf(),
-        };
-        if !kr.left.is_empty() {
-            iter.seek(&kr.left).await?;
-        } else {
-            iter.rewind().await?;
-        }
-        self.compact_key_range_impl(split_index, iter, kr, compaction_filter)
+        self.compact_key_range_impl(split_index, iter, compaction_filter)
             .await
     }
 
     /// Build the merge iterator based on the given input ssts.
-    fn build_sst_iter(&self) -> HummockResult<Box<FastMergeConcatIterator>> {
+    fn build_sst_iter(&self) -> HummockResult<impl HummockIterator<Direction = Forward>> {
         let mut table_iters = Vec::new();
         let read_options = Arc::new(SstableIteratorReadOptions { prefetch: true });
 
@@ -819,17 +802,23 @@ impl Compactor {
 
             if level.level_type == LevelType::Nonoverlapping as i32 {
                 debug_assert!(can_concat(&level.table_infos.iter().collect_vec()));
-                table_iters.push(level.table_infos.clone());
+                table_iters.push(ConcatSstableIterator::new(
+                    level.table_infos.clone(),
+                    self.context.sstable_store.clone(),
+                    read_options.clone(),
+                ));
             } else {
                 for table_info in &level.table_infos {
-                    table_iters.push(vec![table_info.clone()]);
+                    table_iters.push(ConcatSstableIterator::new(
+                        vec![table_info.clone()],
+                        self.context.sstable_store.clone(),
+                        read_options.clone(),
+                    ));
                 }
             }
         }
-        Ok(Box::new(FastMergeConcatIterator::new(
+        Ok(UnorderedMergeIteratorInner::new(
             table_iters,
-            self.context.sstable_store.clone(),
-            read_options,
             self.context.stats.clone(),
         ))
     }
@@ -966,8 +955,7 @@ impl Compactor {
         (join_handle, shutdown_tx)
     }
 
-
-    async fn compact_and_build_sst<T: TableBuilderFactory>(
+    pub async fn compact_and_build_sst<T: TableBuilderFactory>(
         sst_builder: &mut CapacitySplitTableBuilder<T>,
         kr: KeyRange,
         mut iter: impl HummockIterator<Direction = Forward>,
@@ -984,8 +972,8 @@ impl Compactor {
         let mut last_key = BytesMut::new();
         let mut watermark_can_see_last_key = false;
 
-        while iter.is_valid_inner() {
-            let iter_key = iter.key_inner();
+        while iter.is_valid() {
+            let iter_key = iter.key();
 
             let is_new_user_key =
                 last_key.is_empty() || !VersionedComparator::same_user_key(iter_key, &last_key);
@@ -1011,7 +999,7 @@ impl Compactor {
             // in our design, frontend avoid to access keys which had be deleted, so we dont
             // need to consider the epoch when the compaction_filter match (it
             // means that mv had drop)
-            if (epoch <= watermark && gc_delete_keys && iter.value_inner().is_delete())
+            if (epoch <= watermark && gc_delete_keys && iter.value().is_delete())
                 || (epoch < watermark && watermark_can_see_last_key)
             {
                 drop = true;
@@ -1026,20 +1014,16 @@ impl Compactor {
             }
 
             if drop {
-                iter.next_inner().await?;
+                iter.next().await?;
                 continue;
             }
 
             // Don't allow two SSTs to share same user key
             sst_builder
-                .add_full_key(
-                    FullKey::from_slice(iter_key),
-                    iter.value_inner(),
-                    is_new_user_key,
-                )
+                .add_full_key(FullKey::from_slice(iter_key), iter.value(), is_new_user_key)
                 .await?;
 
-            iter.next_inner().await?;
+            iter.next().await?;
         }
         Ok(())
     }

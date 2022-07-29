@@ -27,16 +27,16 @@ use risingwave_object_store::object::{InMemObjectStore, ObjectStore, ObjectStore
 use risingwave_pb::hummock::SstableInfo;
 use risingwave_storage::hummock::compactor::{Compactor, DummyCompactionFilter};
 use risingwave_storage::hummock::iterator::{
-    BoxedForwardHummockIterator, ConcatIterator, FastMergeConcatIterator, HummockIterator,
-    MergeIterator, MergeIteratorNext,
+    ConcatIterator, ConcatSstableIterator, Forward, HummockIterator, HummockIteratorUnion,
+    MultiSstIterator, UnorderedMergeIteratorInner,
 };
-use risingwave_storage::hummock::multi_builder::CapacitySplitTableBuilder;
+use risingwave_storage::hummock::multi_builder::{CapacitySplitTableBuilder, TableBuilderFactory};
 use risingwave_storage::hummock::sstable::SstableIteratorReadOptions;
 use risingwave_storage::hummock::sstable_store::SstableStoreRef;
 use risingwave_storage::hummock::value::HummockValue;
 use risingwave_storage::hummock::{
-    CachePolicy, CompressionAlgorithm, Sstable, SstableBuilder, SstableBuilderOptions,
-    SstableIterator, SstableMeta, SstableStore,
+    CachePolicy, CompressionAlgorithm, HummockResult, MemoryLimiter, Sstable, SstableBuilder,
+    SstableBuilderOptions, SstableIterator, SstableMeta, SstableStore,
 };
 use risingwave_storage::monitor::{StateStoreMetrics, StoreLocalStatistic};
 
@@ -91,19 +91,6 @@ async fn scan_all_table(sstable_store: SstableStoreRef) {
     }
 }
 
-async fn scan_all_table_inline(sstable_store: SstableStoreRef) {
-    let mut stats = StoreLocalStatistic::default();
-    let table = sstable_store.sstable(1, &mut stats).await.unwrap();
-    let default_read_options = Arc::new(SstableIteratorReadOptions::default());
-    // warm up to make them all in memory. I do not use CachePolicy::Fill because it will fetch
-    // block from meta.
-    let mut iter = SstableIterator::new(table, sstable_store.clone(), default_read_options);
-    iter.rewind().await.unwrap();
-    while iter.is_valid() {
-        iter.next_inner().await.unwrap();
-    }
-}
-
 fn bench_table_build(c: &mut Criterion) {
     c.bench_function("bench_table_build", |b| {
         b.iter(|| {
@@ -136,31 +123,48 @@ fn bench_table_scan(c: &mut Criterion) {
         b.to_async(FuturesExecutor)
             .iter(|| scan_all_table(sstable_store.clone()));
     });
-
-    c.bench_function("bench_table_iterator_inline", |b| {
-        b.to_async(FuturesExecutor)
-            .iter(|| scan_all_table_inline(sstable_store.clone()));
-    });
 }
 
-async fn compact<I: MergeIteratorNext>(iter: Box<I>, sstable_store: SstableStoreRef) {
+pub struct LocalTableBuilderFactory {
+    global_table_id: AtomicU64,
+    options: SstableBuilderOptions,
+    limiter: MemoryLimiter,
+}
+
+#[async_trait::async_trait]
+impl TableBuilderFactory for LocalTableBuilderFactory {
+    async fn open_builder(
+        &self,
+    ) -> HummockResult<(
+        risingwave_storage::hummock::utils::MemoryTracker,
+        SstableBuilder,
+    )> {
+        let table_id = self.global_table_id.fetch_add(1, Ordering::SeqCst);
+        Ok((
+            self.limiter.require_memory(1).await.unwrap(),
+            SstableBuilder::new(table_id, self.options.clone()),
+        ))
+    }
+}
+
+async fn compact<I: HummockIterator<Direction = Forward>>(iter: I, sstable_store: SstableStoreRef) {
     let global_table_id = AtomicU64::new(32);
     let mut builder = CapacitySplitTableBuilder::new(
-        || async {
-            let table_id = global_table_id.fetch_add(1, Ordering::SeqCst);
-            let options = SstableBuilderOptions {
+        LocalTableBuilderFactory {
+            global_table_id,
+            options: SstableBuilderOptions {
                 capacity: 32 * 1024 * 1024,
                 block_capacity: 64 * 1024,
                 restart_interval: 16,
                 bloom_false_positive: 0.01,
                 compression_algorithm: CompressionAlgorithm::None,
-            };
-            let builder = SstableBuilder::new(table_id, options);
-            Ok(builder)
+            },
+            limiter: MemoryLimiter::new(100000),
         },
         CachePolicy::NotFill,
         sstable_store.clone(),
     );
+
     Compactor::compact_and_build_sst(
         &mut builder,
         KeyRange::inf(),
@@ -229,47 +233,44 @@ fn bench_merge_iterator_compactor(c: &mut Criterion) {
     });
     let level2 = generate_tables(vec![(1, meta1), (2, meta2)]);
     let read_options = Arc::new(SstableIteratorReadOptions { prefetch: true });
-    c.bench_function("bench_fast_merge_iterator", |b| {
+    c.bench_function("bench_union_merge_iterator", |b| {
         let stats = Arc::new(StateStoreMetrics::unused());
         b.to_async(FuturesExecutor).iter(|| {
             let sstable_store1 = sstable_store.clone();
-
-            let mut iter = Box::new(FastMergeConcatIterator::new(
-                vec![level1.clone(), level2.clone()],
-                sstable_store.clone(),
-                read_options.clone(),
-                stats.clone(),
-            ));
-            async move {
-                iter.rewind().await.unwrap();
-                compact(iter, sstable_store1).await;
-            }
-        });
-    });
-    c.bench_function("bench_normal_merge_iterator", |b| {
-        let stats = Arc::new(StateStoreMetrics::unused());
-        let runtime = tokio::runtime::Builder::new_current_thread()
-            .build()
-            .unwrap();
-        b.iter(|| {
-            let sstable_store1 = sstable_store.clone();
             let sub_iters = vec![
-                Box::new(ConcatIterator::new(
+                HummockIteratorUnion::First(ConcatIterator::new(
                     level1.clone(),
                     sstable_store.clone(),
                     read_options.clone(),
-                )) as BoxedForwardHummockIterator,
-                Box::new(ConcatIterator::new(
+                )),
+                HummockIteratorUnion::First(ConcatIterator::new(
                     level2.clone(),
                     sstable_store.clone(),
                     read_options.clone(),
-                )) as BoxedForwardHummockIterator,
+                )),
             ];
-            let mut iter = Box::new(MergeIterator::new(sub_iters, stats.clone()));
-            runtime.block_on(async move {
-                iter.rewind().await.unwrap();
-                compact(iter, sstable_store1).await;
-            });
+            let iter = MultiSstIterator::new(sub_iters, stats.clone());
+            async move { compact(iter, sstable_store1).await }
+        });
+    });
+    c.bench_function("bench_merge_iterator", |b| {
+        let stats = Arc::new(StateStoreMetrics::unused());
+        b.to_async(FuturesExecutor).iter(|| {
+            let sstable_store1 = sstable_store.clone();
+            let sub_iters = vec![
+                ConcatSstableIterator::new(
+                    level1.clone(),
+                    sstable_store.clone(),
+                    read_options.clone(),
+                ),
+                ConcatSstableIterator::new(
+                    level2.clone(),
+                    sstable_store.clone(),
+                    read_options.clone(),
+                ),
+            ];
+            let iter = UnorderedMergeIteratorInner::new(sub_iters, stats.clone());
+            async move { compact(iter, sstable_store1).await }
         });
     });
 }
