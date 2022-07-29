@@ -158,6 +158,7 @@ impl LogicalJoin {
             }
             JoinType::LeftSemi | JoinType::LeftAnti => left_len,
             JoinType::RightSemi | JoinType::RightAnti => right_len,
+            JoinType::Unspecified => unreachable!(),
         }
     }
 
@@ -181,6 +182,7 @@ impl LogicalJoin {
 
             JoinType::LeftSemi | JoinType::LeftAnti => ColIndexMapping::identity(left_len),
             JoinType::RightSemi | JoinType::RightAnti => ColIndexMapping::empty(right_len),
+            JoinType::Unspecified => unreachable!(),
         }
     }
 
@@ -195,6 +197,7 @@ impl LogicalJoin {
             }
             JoinType::LeftSemi | JoinType::LeftAnti => ColIndexMapping::empty(left_len),
             JoinType::RightSemi | JoinType::RightAnti => ColIndexMapping::identity(right_len),
+            JoinType::Unspecified => unreachable!(),
         }
     }
 
