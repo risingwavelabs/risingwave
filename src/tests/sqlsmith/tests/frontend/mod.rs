@@ -194,17 +194,10 @@ async fn setup_sqlsmith_with_seed_inner(seed: u64) -> SqlsmithEnv {
     }
 }
 
-// async fn run_sqlsmith_with_seed(seed: u64) {
-//     let SqlsmithEnv { session, tables, mut rng, setup_sql } = setup_sqlsmith_with_seed(0).await;
-//     test_batch_queries(session.clone(), tables.clone(), &mut rng, &setup_sql);
-//     // test_stream_queries(session.clone(), tables.clone(), &mut rng, &setup_sql).await;
-// }
-
 pub fn run() {
     let args = Arguments::from_args();
 
     let num_tests = 512;
-    // let SqlsmithEnv { session, tables, setup_sql } = setup_sqlsmith_with_seed(0);
     let tests = (0..num_tests).map(|i| {
         Test {
             name: format!("run_sqlsmith_on_frontend_{}", i),
