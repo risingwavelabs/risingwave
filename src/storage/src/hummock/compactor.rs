@@ -45,7 +45,7 @@ use super::iterator::{BoxedForwardHummockIterator, ConcatIterator, MergeIterator
 use super::multi_builder::CapacitySplitTableBuilder;
 use super::{
     CompressionAlgorithm, HummockResult, Sstable, SstableBuilder, SstableBuilderOptions,
-    SSTableStreamIterator, SstableIteratorType,
+    SstableIteratorType, SstableStreamIterator,
 };
 use crate::hummock::compaction_executor::CompactionExecutor;
 use crate::hummock::multi_builder::{SealedSstableBuilder, TableBuilderFactory};
@@ -824,10 +824,13 @@ impl Compactor {
                     let table = self
                         .context
                         .sstable_store
-                        // Change to false (only load meta data).
-                        .load_table(table_info.id, false, &mut stats)
+                        .load_table(
+                            table_info.id,
+                            false, // Only load meta data. Remaining data is streamed.
+                            &mut stats,
+                        )
                         .await?;
-                    table_iters.push(Box::new(SSTableStreamIterator::create(
+                    table_iters.push(Box::new(SstableStreamIterator::create(
                         table,
                         self.context.sstable_store.clone(),
                         read_options.clone(),

@@ -25,7 +25,7 @@ use crate::hummock::{BlockIterator, BlockStream, SstableStoreRef, TableHolder};
 use crate::monitor::StoreLocalStatistic;
 
 /// Iterates on a table while downloading it.
-pub struct SSTableStreamIterator {
+pub struct SstableStreamIterator {
     /// Iterates over the blocks of the table.
     block_stream: Option<BlockStream>,
 
@@ -42,7 +42,7 @@ pub struct SSTableStreamIterator {
     stats: StoreLocalStatistic,
 }
 
-impl SSTableStreamIterator {
+impl SstableStreamIterator {
     pub fn new(table: TableHolder, sstable_store: SstableStoreRef) -> Self {
         Self {
             block_stream: None,
@@ -125,7 +125,7 @@ impl SSTableStreamIterator {
 }
 
 #[async_trait]
-impl HummockIterator for SSTableStreamIterator {
+impl HummockIterator for SstableStreamIterator {
     type Direction = Forward;
 
     /// Moves to the next KV-pair in the table. Assumes that the current position is valid. Even if
@@ -231,13 +231,13 @@ impl HummockIterator for SSTableStreamIterator {
     }
 }
 
-impl SstableIteratorType for SSTableStreamIterator {
+impl SstableIteratorType for SstableStreamIterator {
     fn create(
         table: TableHolder,
         sstable_store: SstableStoreRef,
         _options_: Arc<SstableIteratorReadOptions>,
     ) -> Self {
-        SSTableStreamIterator::new(table, sstable_store)
+        SstableStreamIterator::new(table, sstable_store)
     }
 }
 
@@ -259,7 +259,7 @@ mod tests {
     async fn inner_test_forward_iterator(sstable_store: SstableStoreRef, handle: TableHolder) {
         // We should have at least 10 blocks, so that table iterator test could cover more code
         // path.
-        let mut sstable_iter = SSTableStreamIterator::create(
+        let mut sstable_iter = SstableStreamIterator::create(
             handle,
             sstable_store,
             Arc::new(SstableIteratorReadOptions::default()),
@@ -314,7 +314,7 @@ mod tests {
         let cache = create_small_table_cache();
         let handle = cache.insert(0, 0, 1, Box::new(table));
 
-        let mut sstable_iter = SSTableStreamIterator::create(
+        let mut sstable_iter = SstableStreamIterator::create(
             handle,
             sstable_store,
             Arc::new(SstableIteratorReadOptions::default()),
@@ -393,7 +393,7 @@ mod tests {
             .unwrap();
 
         let mut stats = StoreLocalStatistic::default();
-        let mut sstable_iter = SSTableStreamIterator::create(
+        let mut sstable_iter = SstableStreamIterator::create(
             sstable_store.sstable(0, &mut stats).await.unwrap(),
             sstable_store,
             Arc::new(SstableIteratorReadOptions { prefetch: true }),
