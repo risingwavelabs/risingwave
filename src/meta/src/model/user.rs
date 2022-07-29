@@ -14,14 +14,14 @@
 
 use risingwave_pb::user::UserInfo;
 
-use crate::model::MetadataModel;
+use crate::model::{MetadataModel, MetadataModelResult};
 
 /// Column family name for user info.
 const USER_INFO_CF_NAME: &str = "cf/user_info";
 
 /// `UserInfo` stores the user information.
 impl MetadataModel for UserInfo {
-    type KeyType = String;
+    type KeyType = u32;
     type ProstType = UserInfo;
 
     fn cf_name() -> String {
@@ -36,7 +36,7 @@ impl MetadataModel for UserInfo {
         prost
     }
 
-    fn key(&self) -> risingwave_common::error::Result<Self::KeyType> {
-        Ok(self.name.clone())
+    fn key(&self) -> MetadataModelResult<Self::KeyType> {
+        Ok(self.id)
     }
 }

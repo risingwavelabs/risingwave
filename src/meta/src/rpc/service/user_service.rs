@@ -21,12 +21,14 @@ use risingwave_pb::user::{
 };
 use tonic::{Request, Response, Status};
 
-use crate::manager::{CatalogManagerRef, UserInfoManagerRef};
+use crate::manager::{CatalogManagerRef, IdCategory, MetaSrvEnv, UserInfoManagerRef};
 use crate::storage::MetaStore;
 
 // TODO: Change user manager as a part of the catalog manager, to ensure that operations on Catalog
 // and User are transactional.
 pub struct UserServiceImpl<S: MetaStore> {
+    env: MetaSrvEnv<S>,
+
     catalog_manager: CatalogManagerRef<S>,
     user_manager: UserInfoManagerRef<S>,
 }
@@ -35,8 +37,13 @@ impl<S> UserServiceImpl<S>
 where
     S: MetaStore,
 {
-    pub fn new(catalog_manager: CatalogManagerRef<S>, user_manager: UserInfoManagerRef<S>) -> Self {
+    pub fn new(
+        env: MetaSrvEnv<S>,
+        catalog_manager: CatalogManagerRef<S>,
+        user_manager: UserInfoManagerRef<S>,
+    ) -> Self {
         Self {
+            env,
             catalog_manager,
             user_manager,
         }
@@ -99,10 +106,17 @@ impl<S: MetaStore> UserService for UserServiceImpl<S> {
         request: Request<CreateUserRequest>,
     ) -> Result<Response<CreateUserResponse>, Status> {
         let req = request.into_inner();
-        let user = req.get_user().map_err(tonic_err)?;
+        let id = self
+            .env
+            .id_gen_manager()
+            .generate::<{ IdCategory::User }>()
+            .await
+            .map_err(tonic_err)? as u32;
+        let mut user = req.get_user().map_err(tonic_err)?.clone();
+        user.id = id;
         let version = self
             .user_manager
-            .create_user(user)
+            .create_user(&user)
             .await
             .map_err(tonic_err)?;
 
@@ -118,10 +132,9 @@ impl<S: MetaStore> UserService for UserServiceImpl<S> {
         request: Request<DropUserRequest>,
     ) -> Result<Response<DropUserResponse>, Status> {
         let req = request.into_inner();
-        let user_name = req.name;
         let version = self
             .user_manager
-            .drop_user(&user_name)
+            .drop_user(req.user_id)
             .await
             .map_err(tonic_err)?;
 
@@ -143,7 +156,7 @@ impl<S: MetaStore> UserService for UserServiceImpl<S> {
             .map_err(tonic_err)?;
         let version = self
             .user_manager
-            .grant_privilege(&req.users, &new_privileges, req.granted_by)
+            .grant_privilege(&req.user_ids, &new_privileges, req.granted_by)
             .await
             .map_err(tonic_err)?;
 
@@ -167,7 +180,7 @@ impl<S: MetaStore> UserService for UserServiceImpl<S> {
         let version = self
             .user_manager
             .revoke_privilege(
-                &req.users,
+                &req.user_ids,
                 &privileges,
                 req.granted_by,
                 req.revoke_by,

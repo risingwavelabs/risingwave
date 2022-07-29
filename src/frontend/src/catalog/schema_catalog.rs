@@ -21,6 +21,7 @@ use risingwave_pb::catalog::{
 use risingwave_pb::stream_plan::source_node::SourceType;
 
 use super::source_catalog::SourceCatalog;
+use crate::catalog::sink_catalog::SinkCatalog;
 use crate::catalog::system_catalog::SystemCatalog;
 use crate::catalog::table_catalog::TableCatalog;
 use crate::catalog::SchemaId;
@@ -36,14 +37,12 @@ pub struct SchemaCatalog {
     table_name_by_id: HashMap<TableId, String>,
     source_by_name: HashMap<String, SourceCatalog>,
     source_name_by_id: HashMap<SourceId, String>,
-
-    // TODO(nanderstabel): Can be replaced with a bijective map: https://crates.io/crates/bimap.
-    sink_id_by_name: HashMap<String, SinkId>,
+    sink_by_name: HashMap<String, SinkCatalog>,
     sink_name_by_id: HashMap<SinkId, String>,
 
     // This field only available when schema is "pg_catalog". Meanwhile, others will be empty.
     system_table_by_name: HashMap<String, SystemCatalog>,
-    owner: String,
+    owner: u32,
 }
 
 impl SchemaCatalog {
@@ -96,13 +95,15 @@ impl SchemaCatalog {
         let name = prost.name.clone();
         let id = prost.id;
 
-        self.sink_id_by_name.try_insert(name.clone(), id).unwrap();
+        self.sink_by_name
+            .try_insert(name.clone(), SinkCatalog::from(&prost))
+            .unwrap();
         self.sink_name_by_id.try_insert(id, name).unwrap();
     }
 
     pub fn drop_sink(&mut self, id: SinkId) {
         let name = self.sink_name_by_id.remove(&id).unwrap();
-        self.sink_id_by_name.remove(&name).unwrap();
+        self.sink_by_name.remove(&name).unwrap();
     }
 
     pub fn iter_table(&self) -> impl Iterator<Item = &TableCatalog> {
@@ -156,11 +157,6 @@ impl SchemaCatalog {
             .map(|(_, v)| v)
     }
 
-    /// Iterate all sinks.
-    pub fn iter_sink(&self) -> impl Iterator<Item = &u32> {
-        self.sink_id_by_name.iter().map(|(_, v)| v)
-    }
-
     pub fn iter_system_tables(&self) -> impl Iterator<Item = &SystemCatalog> {
         self.system_table_by_name.iter().map(|(_, v)| v)
     }
@@ -173,8 +169,8 @@ impl SchemaCatalog {
         self.source_by_name.get(source_name)
     }
 
-    pub fn get_sink_id_by_name(&self, sink_name: &str) -> Option<SinkId> {
-        self.sink_id_by_name.get(sink_name).cloned()
+    pub fn get_sink_by_name(&self, sink_name: &str) -> Option<&SinkCatalog> {
+        self.sink_by_name.get(sink_name)
     }
 
     pub fn get_system_table_by_name(&self, table_name: &str) -> Option<&SystemCatalog> {
@@ -189,8 +185,8 @@ impl SchemaCatalog {
         self.name.clone()
     }
 
-    pub fn owner(&self) -> String {
-        self.owner.clone()
+    pub fn owner(&self) -> u32 {
+        self.owner
     }
 }
 
@@ -203,10 +199,10 @@ impl From<&ProstSchema> for SchemaCatalog {
             table_name_by_id: HashMap::new(),
             source_by_name: HashMap::new(),
             source_name_by_id: HashMap::new(),
-            sink_id_by_name: HashMap::new(),
+            sink_by_name: HashMap::new(),
             sink_name_by_id: HashMap::new(),
             system_table_by_name: HashMap::new(),
-            owner: schema.owner.clone(),
+            owner: schema.owner,
         }
     }
 }

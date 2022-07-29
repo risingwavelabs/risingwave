@@ -17,14 +17,14 @@ use std::sync::Arc;
 use async_trait::async_trait;
 use risingwave_hummock_sdk::LocalSstableInfo;
 use risingwave_pb::hummock::{
-    CompactTask, CompactionGroup, HummockVersion, HummockVersionDelta, SstableIdInfo,
+    CompactTask, CompactionGroup, HummockVersion, HummockVersionDelta,
     SubscribeCompactTasksResponse, VacuumTask,
 };
 use risingwave_rpc_client::error::Result;
 use risingwave_rpc_client::{HummockMetaClient, MetaClient};
 use tonic::Streaming;
 
-use crate::hummock::{HummockEpoch, HummockSSTableId, HummockVersionId};
+use crate::hummock::{HummockEpoch, HummockSstableId, HummockVersionId};
 use crate::monitor::HummockMetrics;
 
 pub struct MonitoredHummockMetaClient {
@@ -99,7 +99,7 @@ impl HummockMetaClient for MonitoredHummockMetaClient {
         unreachable!("Currently CNs should not call this function")
     }
 
-    async fn get_new_table_id(&self) -> Result<HummockSSTableId> {
+    async fn get_new_table_id(&self) -> Result<HummockSstableId> {
         self.stats.get_new_table_id_counts.inc();
         let timer = self.stats.get_new_table_id_latency.start_timer();
         let res = self.meta_client.get_new_table_id().await;
@@ -144,9 +144,5 @@ impl HummockMetaClient for MonitoredHummockMetaClient {
         self.meta_client
             .trigger_manual_compaction(compaction_group_id, table_id, level)
             .await
-    }
-
-    async fn list_sstable_id_infos(&self, _version_id: u64) -> Result<Vec<SstableIdInfo>> {
-        todo!()
     }
 }

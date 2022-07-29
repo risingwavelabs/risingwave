@@ -13,9 +13,9 @@
 // limitations under the License.
 
 use async_trait::async_trait;
-use risingwave_hummock_sdk::{HummockEpoch, HummockSSTableId, HummockVersionId, LocalSstableInfo};
+use risingwave_hummock_sdk::{HummockEpoch, HummockSstableId, HummockVersionId, LocalSstableInfo};
 use risingwave_pb::hummock::{
-    CompactTask, CompactionGroup, HummockVersion, HummockVersionDelta, SstableIdInfo,
+    CompactTask, CompactionGroup, HummockVersion, HummockVersionDelta,
     SubscribeCompactTasksResponse, VacuumTask,
 };
 use tonic::Streaming;
@@ -34,7 +34,7 @@ pub trait HummockMetaClient: Send + Sync + 'static {
     async fn unpin_snapshot(&self) -> Result<()>;
     async fn unpin_snapshot_before(&self, pinned_epochs: HummockEpoch) -> Result<()>;
     async fn get_epoch(&self) -> Result<HummockEpoch>;
-    async fn get_new_table_id(&self) -> Result<HummockSSTableId>;
+    async fn get_new_table_id(&self) -> Result<HummockSstableId>;
     async fn report_compaction_task(&self, compact_task: CompactTask) -> Result<()>;
     // We keep `commit_epoch` only for test/benchmark like ssbench.
     async fn commit_epoch(
@@ -51,5 +51,4 @@ pub trait HummockMetaClient: Send + Sync + 'static {
         table_id: u32,
         level: u32,
     ) -> Result<()>;
-    async fn list_sstable_id_infos(&self, version_id: u64) -> Result<Vec<SstableIdInfo>>;
 }

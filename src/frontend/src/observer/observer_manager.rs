@@ -156,6 +156,13 @@ impl FrontendObserverNode {
                 }
                 _ => panic!("receive an unsupported notify {:?}", resp),
             },
+            Info::Sink(sink) => match resp.operation() {
+                Operation::Add => catalog_guard.create_sink(sink.clone()),
+                Operation::Delete => {
+                    catalog_guard.drop_sink(sink.database_id, sink.schema_id, sink.id)
+                }
+                _ => panic!("receive an unsupported notify {:?}", resp),
+            },
             _ => unreachable!(),
         }
         assert!(
@@ -177,7 +184,7 @@ impl FrontendObserverNode {
         match info {
             Info::User(user) => match resp.operation() {
                 Operation::Add => user_guard.create_user(user.clone()),
-                Operation::Delete => user_guard.drop_user(&user.name),
+                Operation::Delete => user_guard.drop_user(user.id),
                 Operation::Update => user_guard.update_user(user.clone()),
                 _ => panic!("receive an unsupported notify {:?}", resp),
             },

@@ -36,7 +36,7 @@ pub enum SliceTransformImpl {
     Multi(MultiSliceTransform),
 }
 
-macro_rules! impl_dispatcher {
+macro_rules! impl_slice_transform {
     ([], $( { $variant_name:ident } ),*) => {
         impl SliceTransformImpl {
             pub fn transform<'a>(&mut self, full_key: &'a [u8]) -> &'a [u8]{
@@ -48,7 +48,7 @@ macro_rules! impl_dispatcher {
     }
 }
 
-macro_rules! for_all_dispatcher_variants {
+macro_rules! for_all_slice_transform_variants {
     ($macro:ident $(, $x:tt)*) => {
         $macro! {
             [$($x), *],
@@ -60,7 +60,7 @@ macro_rules! for_all_dispatcher_variants {
     };
 }
 
-for_all_dispatcher_variants! { impl_dispatcher }
+for_all_slice_transform_variants! { impl_slice_transform }
 
 #[derive(Default, Clone)]
 pub struct FullKeySliceTransform;
@@ -326,7 +326,7 @@ mod tests {
             distribution_key: vec![],
             optional_associated_source_id: None,
             appendonly: false,
-            owner: risingwave_common::catalog::DEFAULT_SUPPER_USER.to_string(),
+            owner: risingwave_common::catalog::DEFAULT_SUPER_USER_ID,
             mapping: None,
             properties: HashMap::from([(String::from("ttl"), String::from("300"))]),
             read_pattern_prefix_column: column_count, // 1 column

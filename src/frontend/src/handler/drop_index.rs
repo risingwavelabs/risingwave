@@ -13,6 +13,7 @@
 // limitations under the License.
 
 use pgwire::pg_response::{PgResponse, StatementType};
+use risingwave_common::error::ErrorCode::PermissionDenied;
 use risingwave_common::error::{ErrorCode, Result, RwError};
 use risingwave_sqlparser::ast::ObjectName;
 
@@ -34,6 +35,10 @@ pub async fn handle_drop_index(
     let table_id = {
         let reader = catalog_reader.read_guard();
         let table = reader.get_table_by_name(session.database(), &schema_name, &table_name)?;
+
+        if session.user_id() != table.owner {
+            return Err(PermissionDenied("Do not have the privilege".to_string()).into());
+        }
 
         // If associated source is `Some`, then it is a actually a materialized source / table v2.
         if table.associated_source_id().is_some() {

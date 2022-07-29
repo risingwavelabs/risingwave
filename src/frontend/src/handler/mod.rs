@@ -42,12 +42,18 @@ pub mod drop_user;
 mod explain;
 mod flush;
 pub mod handle_privilege;
+pub mod privilege;
 pub mod query;
 mod show;
 pub mod util;
 mod variable;
 
-pub async fn handle(session: Arc<SessionImpl>, stmt: Statement, sql: &str) -> Result<PgResponse> {
+pub async fn handle(
+    session: Arc<SessionImpl>,
+    stmt: Statement,
+    sql: &str,
+    format: bool,
+) -> Result<PgResponse> {
     let context = OptimizerContext::new(session.clone(), Arc::from(sql));
     match stmt {
         Statement::Explain {
@@ -114,7 +120,7 @@ pub async fn handle(session: Arc<SessionImpl>, stmt: Statement, sql: &str) -> Re
                     .into(),
             ),
         },
-        Statement::Query(_) => query::handle_query(context, stmt).await,
+        Statement::Query(_) => query::handle_query(context, stmt, format).await,
         Statement::Insert { .. } | Statement::Delete { .. } | Statement::Update { .. } => {
             dml::handle_dml(context, stmt).await
         }
@@ -152,7 +158,7 @@ pub async fn handle(session: Arc<SessionImpl>, stmt: Statement, sql: &str) -> Re
                 )
                 .into());
             }
-            create_index::handle_create_index(context, name, table_name, columns).await
+            create_index::handle_create_index(context, name, table_name, columns.to_vec()).await
         }
         // Ignore `StartTransaction` and `Abort` temporarily.Its not final implementation.
         // 1. Fully support transaction is too hard and gives few benefits to us.

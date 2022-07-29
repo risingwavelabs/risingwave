@@ -16,13 +16,13 @@ use prost::Message;
 use risingwave_hummock_sdk::HummockVersionId;
 use risingwave_pb::hummock::HummockVersionDelta;
 
-use crate::model::MetadataModel;
+use crate::model::{MetadataModel, MetadataModelResult};
 
 /// Column family name for hummock version delta.
 /// `cf(hummock_version_delta)`: `HummockVersionId` -> `HummockVersionDelta`
 const HUMMOCK_VERSION_DELTA_CF_NAME: &str = "cf/hummock_version_delta";
 
-/// `HummockVersionDelta` tracks delta of `SSTables` in given version based on previous version.
+/// `HummockVersionDelta` tracks delta of `Sstables` in given version based on previous version.
 impl MetadataModel for HummockVersionDelta {
     type KeyType = HummockVersionId;
     type ProstType = HummockVersionDelta;
@@ -43,7 +43,7 @@ impl MetadataModel for HummockVersionDelta {
         prost
     }
 
-    fn key(&self) -> risingwave_common::error::Result<Self::KeyType> {
+    fn key(&self) -> MetadataModelResult<Self::KeyType> {
         Ok(self.id)
     }
 }

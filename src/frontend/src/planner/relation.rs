@@ -30,7 +30,7 @@ use crate::optimizer::plan_node::{
 use crate::planner::Planner;
 
 impl Planner {
-    pub(super) fn plan_relation(&mut self, relation: Relation) -> Result<PlanRef> {
+    pub fn plan_relation(&mut self, relation: Relation) -> Result<PlanRef> {
         match relation {
             Relation::BaseTable(t) => self.plan_base_table(*t),
             Relation::SystemTable(st) => self.plan_sys_table(*st),
@@ -165,6 +165,9 @@ impl Planner {
         let Some(ScalarImpl::Interval(window_size)) = *window_size.get_data() else {
             return Err(ErrorCode::BindError("Invalid arguments for HOP window function".to_string()).into());
         };
+        if window_size.exact_div(&window_slide).is_none() {
+            return Err(ErrorCode::BindError(format!("Invalid arguments for HOP window function: window_size {} cannot be divided by window_slide {}",window_size, window_slide)).into());
+        }
         Ok(LogicalHopWindow::create(
             input,
             time_col,

@@ -35,7 +35,7 @@ impl OrderType {
         match order_type {
             ProstOrderType::Ascending => OrderType::Ascending,
             ProstOrderType::Descending => OrderType::Descending,
-            ProstOrderType::Invalid => panic!("invalid order type"),
+            ProstOrderType::OrderUnspecified => unreachable!(),
         }
     }
 
@@ -126,6 +126,44 @@ impl PartialEq for HeapElem {
 
 impl Eq for HeapElem {}
 
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct DescOrderedRow {
+    pub row: Row,
+    pub encoded_row: Option<Vec<u8>>,
+    pub order_pairs: Arc<Vec<OrderPair>>,
+}
+
+impl DescOrderedRow {
+    pub fn new(row: Row, encoded_row: Option<Vec<u8>>, order_pairs: Arc<Vec<OrderPair>>) -> Self {
+        Self {
+            row,
+            encoded_row,
+            order_pairs,
+        }
+    }
+}
+
+impl Ord for DescOrderedRow {
+    fn cmp(&self, other: &Self) -> Ordering {
+        let ord = if let (Some(encoded_lhs), Some(encoded_rhs)) =
+            (self.encoded_row.as_ref(), other.encoded_row.as_ref())
+        {
+            encoded_lhs.as_slice().cmp(encoded_rhs.as_slice())
+        } else {
+            compare_rows(&self.row, &other.row, &self.order_pairs).unwrap()
+        };
+        // We have to reverse the order because we need to use this in a max heap.
+        // Alternative option is to revert every order pair when constructing `OrderedRow`.
+        ord.reverse()
+    }
+}
+
+impl PartialOrd for DescOrderedRow {
+    fn partial_cmp(&self, other: &Self) -> Option<Ordering> {
+        Some(self.cmp(other))
+    }
+}
+
 fn compare_values<'a, T>(lhs: Option<&T>, rhs: Option<&T>, order_type: &'a OrderType) -> Ordering
 where
     T: Ord,
@@ -134,11 +172,8 @@ where
         (Some(l), Some(r)) => l.cmp(r),
         (None, None) => Ordering::Equal,
         // TODO(yuchao): `null first` / `null last` is not supported yet.
-        // To be consistent with memcomparable (#116) encoding, `null` is treated as less than any
-        // non-null value. This is contrary to PostgreSQL's default behavior, where `null`
-        // is treated as largest.
-        (Some(_), None) => Ordering::Greater,
-        (None, Some(_)) => Ordering::Less,
+        (Some(_), None) => Ordering::Less,
+        (None, Some(_)) => Ordering::Greater,
     };
     if *order_type == OrderType::Descending {
         ord.reverse()

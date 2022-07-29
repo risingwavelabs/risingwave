@@ -22,12 +22,12 @@ use crate::hummock::iterator::test_utils::{
     mock_sstable_store, TEST_KEYS_COUNT,
 };
 use crate::hummock::iterator::{
-    Backward, BackwardConcatIterator, BackwardMergeIterator, BackwardUserIterator,
-    BoxedBackwardHummockIterator, BoxedForwardHummockIterator, ConcatIterator, Forward,
-    HummockIterator, MergeIterator, ReadOptions, UserIterator,
+    BackwardConcatIterator, BackwardUserIterator, ConcatIterator, HummockIterator,
+    HummockIteratorUnion, UnorderedMergeIteratorInner, UserIterator,
 };
+use crate::hummock::sstable::SstableIteratorReadOptions;
 use crate::hummock::test_utils::default_builder_opt_for_test;
-use crate::hummock::{BackwardSSTableIterator, SSTableIterator};
+use crate::hummock::{BackwardSstableIterator, SstableIterator};
 use crate::monitor::{StateStoreMetrics, StoreLocalStatistic};
 
 #[tokio::test]
@@ -56,7 +56,7 @@ async fn test_failpoints_concat_read_err() {
     let mut iter = ConcatIterator::new(
         vec![table0.get_sstable_info(), table1.get_sstable_info()],
         sstable_store,
-        Arc::new(ReadOptions::default()),
+        Arc::new(SstableIteratorReadOptions::default()),
     );
     iter.rewind().await.unwrap();
     fail::cfg(mem_read_err, "return").unwrap();
@@ -117,7 +117,7 @@ async fn test_failpoints_backward_concat_read_err() {
     let mut iter = BackwardConcatIterator::new(
         vec![table1.get_sstable_info(), table0.get_sstable_info()],
         sstable_store.clone(),
-        Arc::new(ReadOptions::default()),
+        Arc::new(SstableIteratorReadOptions::default()),
     );
     iter.rewind().await.unwrap();
     fail::cfg(mem_read_err, "return").unwrap();
@@ -172,19 +172,18 @@ async fn test_failpoints_merge_invalid_key() {
     )
     .await;
     let tables = vec![table0, table1];
-    let mut mi = MergeIterator::new(
+    let mut mi = UnorderedMergeIteratorInner::new(
         {
             let mut iters = vec![];
             for table in &tables {
-                iters.push(Box::new(SSTableIterator::new(
+                iters.push(SstableIterator::new(
                     sstable_store
                         .sstable(table.id, &mut StoreLocalStatistic::default())
                         .await
                         .unwrap(),
                     sstable_store.clone(),
-                    Arc::new(ReadOptions::default()),
-                ))
-                    as Box<dyn HummockIterator<Direction = Forward>>);
+                    Arc::new(SstableIteratorReadOptions::default()),
+                ));
             }
             iters
         },
@@ -228,18 +227,17 @@ async fn test_failpoints_backward_merge_invalid_key() {
     )
     .await;
     let tables = vec![table0, table1];
-    let mut mi = BackwardMergeIterator::new(
+    let mut mi = UnorderedMergeIteratorInner::new(
         {
             let mut iters = vec![];
             for table in &tables {
-                iters.push(Box::new(BackwardSSTableIterator::new(
+                iters.push(BackwardSstableIterator::new(
                     sstable_store
                         .sstable(table.id, &mut StoreLocalStatistic::default())
                         .await
                         .unwrap(),
                     sstable_store.clone(),
-                ))
-                    as Box<dyn HummockIterator<Direction = Backward>>);
+                ));
             }
             iters
         },
@@ -283,20 +281,20 @@ async fn test_failpoints_user_read_err() {
     )
     .await;
     let mut stats = StoreLocalStatistic::default();
-    let iters: Vec<BoxedForwardHummockIterator> = vec![
-        Box::new(SSTableIterator::new(
+    let iters = vec![
+        HummockIteratorUnion::Fourth(SstableIterator::new(
             sstable_store.sstable(table0.id, &mut stats).await.unwrap(),
             sstable_store.clone(),
-            Arc::new(ReadOptions::default()),
+            Arc::new(SstableIteratorReadOptions::default()),
         )),
-        Box::new(SSTableIterator::new(
+        HummockIteratorUnion::Fourth(SstableIterator::new(
             sstable_store.sstable(table1.id, &mut stats).await.unwrap(),
             sstable_store.clone(),
-            Arc::new(ReadOptions::default()),
+            Arc::new(SstableIteratorReadOptions::default()),
         )),
     ];
 
-    let mi = MergeIterator::new(iters, Arc::new(StateStoreMetrics::unused()));
+    let mi = UnorderedMergeIteratorInner::new(iters, Arc::new(StateStoreMetrics::unused()));
     let mut ui = UserIterator::for_test(mi, (Unbounded, Unbounded));
     ui.rewind().await.unwrap();
 
@@ -345,18 +343,18 @@ async fn test_failpoints_backward_user_read_err() {
     )
     .await;
     let mut stats = StoreLocalStatistic::default();
-    let iters: Vec<BoxedBackwardHummockIterator> = vec![
-        Box::new(BackwardSSTableIterator::new(
+    let iters = vec![
+        HummockIteratorUnion::Fourth(BackwardSstableIterator::new(
             sstable_store.sstable(table0.id, &mut stats).await.unwrap(),
             sstable_store.clone(),
         )),
-        Box::new(BackwardSSTableIterator::new(
+        HummockIteratorUnion::Fourth(BackwardSstableIterator::new(
             sstable_store.sstable(table1.id, &mut stats).await.unwrap(),
             sstable_store.clone(),
         )),
     ];
 
-    let mi = BackwardMergeIterator::new(iters, Arc::new(StateStoreMetrics::unused()));
+    let mi = UnorderedMergeIteratorInner::new(iters, Arc::new(StateStoreMetrics::unused()));
     let mut ui = BackwardUserIterator::new(mi, (Unbounded, Unbounded));
     ui.rewind().await.unwrap();
 
