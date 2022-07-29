@@ -173,9 +173,51 @@ impl SysCatalogReaderImpl {
                     })
                     .collect_vec();
 
+                let sources = schema
+                    .iter_source()
+                    .map(|source| {
+                        Row::new(vec![
+                            Some(ScalarImpl::Int32(source.id as i32)),
+                            Some(ScalarImpl::Utf8(source.name.clone())),
+                            Some(ScalarImpl::Int32(schema_info.id as i32)),
+                            Some(ScalarImpl::Int32(source.owner as i32)),
+                            Some(ScalarImpl::Utf8("source".to_string())),
+                        ])
+                    })
+                    .collect_vec();
+
+                let msources = schema
+                    .iter_materialized_source()
+                    .map(|msource| {
+                        Row::new(vec![
+                            Some(ScalarImpl::Int32(msource.id as i32)),
+                            Some(ScalarImpl::Utf8(msource.name.clone())),
+                            Some(ScalarImpl::Int32(schema_info.id as i32)),
+                            Some(ScalarImpl::Int32(msource.owner as i32)),
+                            Some(ScalarImpl::Utf8("materialized source".to_string())),
+                        ])
+                    })
+                    .collect_vec();
+
+                let sys_tables = schema
+                    .iter_system_tables()
+                    .map(|table| {
+                        Row::new(vec![
+                            Some(ScalarImpl::Int32(table.id.table_id() as i32)),
+                            Some(ScalarImpl::Utf8(table.name.clone())),
+                            Some(ScalarImpl::Int32(schema_info.id as i32)),
+                            Some(ScalarImpl::Int32(table.owner as i32)),
+                            Some(ScalarImpl::Utf8("system table".to_string())),
+                        ])
+                    })
+                    .collect_vec();
+
                 rows.into_iter()
                     .chain(mvs.into_iter())
                     .chain(indexes.into_iter())
+                    .chain(sources.into_iter())
+                    .chain(msources.into_iter())
+                    .chain(sys_tables.into_iter())
                     .collect_vec()
             })
             .collect_vec())
