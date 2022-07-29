@@ -18,9 +18,9 @@ use std::sync::Arc;
 
 use bytes::Bytes;
 use fail::fail_point;
-use risingwave_hummock_sdk::{HummockSstableId, is_remote_sst_id};
+use risingwave_hummock_sdk::{is_remote_sst_id, HummockSstableId};
 use risingwave_object_store::object::{
-    BlockLocation, ObjectError, ObjectStore, ObjectStoreRef, get_local_path,
+    get_local_path, BlockLocation, ObjectError, ObjectStore, ObjectStoreRef,
 };
 use tokio::io::{AsyncRead, AsyncReadExt};
 
@@ -45,50 +45,73 @@ pub enum CachePolicy {
     NotFill,
 }
 
-pub struct SstableStore {
-    path: String,
-    store: ObjectStoreRef,
-    block_cache: BlockCache,
-    meta_cache: Arc<LruCache<HummockSstableId, Box<Sstable>>>,
-}
-
+/// An iterator that reads the blocks of an SSTable step by step from a given stream of bytes.
 pub struct BlockStream {
+    /// The stream that provides raw data.
     byte_stream: Box<dyn AsyncRead + Unpin + Send + Sync>,
+
+    /// The index of the next block. Note that `block_idx` is relative to the start index of the
+    /// stream (and is compatible with `block_len_vec`); it is not relative to the corresponding
+    /// SST. That is, if streaming starts at block 2 of a given SST `T`, then `block_idx = 0`
+    /// refers to the third block of `T`.
     block_idx: usize,
-    block_metas: Vec<BlockMeta>,
+
+    /// The length of each block the stream reads. Note that it does not contain the length of
+    /// blocks which precede the first streamed block. That is, if streaming starts at block 2 of a
+    /// given SST, then the list does not contain information about block 0 and block 1.
+    block_len_vec: Vec<usize>,
 }
 
 impl BlockStream {
-    pub fn new(
-        // Download stream.
+    /// Constructs a new `BlockStream` object that reads from the given `byte_stream` and interprets
+    /// the data as block of the SST described in `sst_meta`, starting at block `block_index`.
+    ///
+    /// If `block_index >= sst_meta.block_metas.len()`, then `BlockStream` will not read any data
+    /// from `byte_stream`.
+    fn new(
+        // The stream that provides raw data.
         byte_stream: Box<dyn AsyncRead + Unpin + Send + Sync>,
 
-        // Index of the next block.
-        block_idx: usize,
+        // Index of the SST's block where the stream starts.
+        block_index: usize,
 
-        // Meta data of the expected block.
-        block_metas: Vec<BlockMeta>,
+        // Meta data of the SST that is streamed.
+        sst_meta: &SstableMeta,
     ) -> Self {
+        let metas = &sst_meta.block_metas;
+
+        // Avoid panicking if `block_index` is too large.
+        let block_len_vec = if block_index >= metas.len() {
+            Vec::new()
+        } else {
+            let mut vec = Vec::with_capacity(metas.len() - block_index);
+            sst_meta.block_metas[block_index..]
+                .iter()
+                .for_each(|b_meta| vec.push(b_meta.len as usize));
+
+            vec
+        };
+
         Self {
             byte_stream,
-            block_idx: block_idx,
-            block_metas,
+            block_idx: 0,
+            block_len_vec,
         }
     }
 
+    /// Reads the next block from the stream and returns it. Returns `None` if there are no blocks
+    /// left to read.
     pub async fn next(&mut self) -> HummockResult<Option<BlockHolder>> {
-        if self.block_idx >= self.block_metas.len() {
+        if self.block_idx >= self.block_len_vec.len() {
             return Ok(None);
         }
 
-        let block_meta = self.block_metas.get(self.block_idx).unwrap();
-
-        let block_len = block_meta.len as usize;
-        let mut variable_allocation = vec![0; block_len];
+        let block_len = *self.block_len_vec.get(self.block_idx).unwrap();
+        let mut buffer = vec![0; block_len];
 
         let bytes_read = self
             .byte_stream
-            .read_exact(&mut variable_allocation[..])
+            .read_exact(&mut buffer[..])
             .await
             .map_err(|e| HummockError::object_io_error(ObjectError::internal(e)))?;
 
@@ -96,16 +119,23 @@ impl BlockStream {
             return Err(HummockError::object_io_error(ObjectError::internal(
                 format!(
                     "unexpected number of bytes: expected: {} read: {}",
-                    block_meta.len, bytes_read
+                    block_len, bytes_read
                 ),
             )));
         }
 
-        let boxed_block = Box::new(Block::decode(Bytes::from(variable_allocation))?);
+        let boxed_block = Box::new(Block::decode(Bytes::from(buffer))?);
         self.block_idx += 1;
 
         Ok(Some(BlockHolder::from_owned_block(boxed_block)))
     }
+}
+
+pub struct SstableStore {
+    path: String,
+    store: ObjectStoreRef,
+    block_cache: BlockCache,
+    meta_cache: Arc<LruCache<HummockSstableId, Box<Sstable>>>,
 }
 
 impl SstableStore {
@@ -287,18 +317,18 @@ impl SstableStore {
         &self,
         sst: &Sstable,
         block_index: Option<usize>,
+        // ToDo: What about `CachePolicy` and `StoreLocalStatistic`?
     ) -> HummockResult<BlockStream> {
-
         let start_pos = match block_index {
             None => None,
             Some(index) => {
                 let block_meta = sst
-                .meta
-                .block_metas
-                .get(index)
-                .ok_or_else(HummockError::invalid_block)?;
+                    .meta
+                    .block_metas
+                    .get(index)
+                    .ok_or_else(HummockError::invalid_block)?;
 
-               Some(block_meta.offset as usize)
+                Some(block_meta.offset as usize)
             }
         };
 
@@ -309,8 +339,8 @@ impl SstableStore {
                 .streaming_read(&data_path, start_pos)
                 .await
                 .map_err(HummockError::object_io_error)?,
-                block_index.unwrap_or(0),
-            sst.meta.block_metas.clone(),
+            block_index.unwrap_or(0),
+            &sst.meta,
         ))
     }
 
@@ -438,7 +468,7 @@ mod tests {
     use crate::hummock::sstable::SstableIteratorReadOptions;
     use crate::hummock::test_utils::{default_builder_opt_for_test, gen_test_sstable_data};
     use crate::hummock::value::HummockValue;
-    use crate::hummock::{BlockIterator, CachePolicy, SstableIterator, Sstable};
+    use crate::hummock::{BlockIterator, CachePolicy, Sstable, SstableIterator};
     use crate::monitor::StoreLocalStatistic;
 
     #[tokio::test]
