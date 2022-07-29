@@ -598,7 +598,7 @@ impl_plan_tree_node_for_binary! { LogicalJoin }
 
 impl ColPrunable for LogicalJoin {
     fn prune_col(&self, required_cols: &[usize]) -> PlanRef {
-        // TODO: refactor.
+        // make `required_cols` point to internal table instead of output schema.
         let required_cols = required_cols
             .iter()
             .map(|i| self.output_indices[*i])
@@ -648,7 +648,6 @@ impl ColPrunable for LogicalJoin {
 
             let mapping =
                 ColIndexMapping::with_remaining_columns(required_inputs_in_output, total_len);
-            // FIXME: bug!
             required_cols.iter().map(|&i| mapping.map(i)).collect_vec()
         };
 
@@ -725,6 +724,8 @@ impl PredicatePushdown for LogicalJoin {
         let mut left = self.left.predicate_pushdown(left_predicate);
         let mut right = self.right.predicate_pushdown(right_predicate);
         let mut output_indices = self.output_indices().to_owned();
+        // This code block pushes the calculation of inputs of join's comparison condition to join's
+        // two sides.
         {
             let left_bit_map = FixedBitSet::from_iter(0..left_col_num);
             let right_bit_map = FixedBitSet::from_iter(left_col_num..left_col_num + right_col_num);
@@ -732,6 +733,8 @@ impl PredicatePushdown for LogicalJoin {
             let exprs = on.conjunctions;
             let mut left_exprs = vec![];
             let mut right_exprs = vec![];
+            // indices and return types of function calls whose's inputs will be calculated in
+            // `project`s
             let mut indices_and_ty_of_func_calls = vec![];
             let is_comparison_type = |ty| {
                 matches!(
@@ -761,10 +764,12 @@ impl PredicatePushdown for LogicalJoin {
                     } else {
                         continue;
                     };
+                    // when `left` and `right` are `input_ref` and have the same return type, there is no need to calculate them in project.
                     if left.as_input_ref().is_some() && right.as_input_ref().is_some() && left.return_type() == right.return_type() {
                         continue;
                     }
                     let (left, right) = {
+                        // align return types to avoid error when executing join.
                         let mut v = vec![left, right];
                         let _data_type = align_types(v.iter_mut()).unwrap();
                         v.into_iter().next_tuple().unwrap()
@@ -778,6 +783,7 @@ impl PredicatePushdown for LogicalJoin {
                     indices_and_ty_of_func_calls.push((index, ty));
                 }
             }
+            // used to shift indices of input_refs pointing the right side of `join` with `left_exprs.len`.
             let mut col_index_mapping = {
                 let map = (0..left_col_num)
                     .chain(
@@ -791,6 +797,7 @@ impl PredicatePushdown for LogicalJoin {
                 .into_iter()
                 .map(|expr| col_index_mapping.rewrite_expr(expr))
                 .collect();
+            // replace function calls.
             let mut left_index = left_col_num;
             let mut right_index = left_col_num + left_exprs.len() + right_col_num;
             for (i, (index_of_func_call, ty)) in
@@ -814,9 +821,6 @@ impl PredicatePushdown for LogicalJoin {
                 .for_each(|i| *i = col_index_mapping.map(*i));
 
             let new_input = |input: PlanRef, appended_exprs: Vec<ExprImpl>| {
-                if appended_exprs.is_empty() {
-                    return input;
-                }
                 let mut exprs = input
                     .schema()
                     .data_types()
@@ -827,8 +831,11 @@ impl PredicatePushdown for LogicalJoin {
                 exprs.extend(appended_exprs);
                 LogicalProject::create(input, exprs)
             };
-            left = new_input(left, left_exprs);
-            right = new_input(right, right_exprs);
+            if !left_exprs.is_empty() {
+                // avoid unnecessary `project`s.
+                left = new_input(left, left_exprs);
+                right = new_input(right, right_exprs);
+            }
         }
 
         let new_join =
