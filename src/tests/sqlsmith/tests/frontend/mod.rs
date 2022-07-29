@@ -42,10 +42,9 @@ lazy_static::lazy_static! {
     static ref SQLSMITH_ENV: SqlsmithEnv = setup_sqlsmith_with_seed(0);
 }
 
-/// Executes sql queries
-/// It captures panics so it can recover and print failing sql query.
+/// Executes sql queries, prints recoverable errors.
+/// Panic recovery happens separately.
 async fn handle(session: Arc<SessionImpl>, stmt: Statement, setup_sql: &str, sql: &str) {
-    reproduce_failing_queries(setup_sql, sql);
     handler::handle(session.clone(), stmt, sql, false)
         .await
         .unwrap_or_else(|e| panic!("Error Reason:\n{}", e));
