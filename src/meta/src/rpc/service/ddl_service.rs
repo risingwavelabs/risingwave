@@ -504,6 +504,7 @@ where
                         stream_node.node_body.as_mut().unwrap()
                     {
                         materialize_node.table_id = mview_id.table_id();
+                        materialize_node.table.as_mut().unwrap().id = mview_id.table_id();
                         mview_count += 1;
                     }
                     for input in &mut stream_node.input {
