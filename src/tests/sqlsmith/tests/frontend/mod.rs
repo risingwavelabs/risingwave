@@ -43,7 +43,7 @@ lazy_static::lazy_static! {
 
 /// Executes sql queries, prints recoverable errors.
 /// Panic recovery happens separately.
-async fn handle(session: Arc<SessionImpl>, stmt: Statement, setup_sql: &str, sql: &str) {
+async fn handle(session: Arc<SessionImpl>, stmt: Statement, sql: &str) {
     handler::handle(session.clone(), stmt, sql, false)
         .await
         .unwrap_or_else(|e| panic!("Error Reason:\n{}", e));
