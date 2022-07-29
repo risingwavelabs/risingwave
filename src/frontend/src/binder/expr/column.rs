@@ -36,12 +36,18 @@ impl Binder {
             }
         };
 
-        if let Ok(index) = self
-            .context
-            .get_column_binding_index(&table_name, &column_name)
-        {
-            let column = &self.context.columns[index];
-            return Ok(InputRef::new(column.index, column.field.data_type.clone()).into());
+        let result = self.context.get_column_binding_index(&table_name, &column_name);
+        match result {
+            Ok(index) => {
+                let column = &self.context.columns[index];
+                return Ok(InputRef::new(column.index, column.field.data_type.clone()).into());
+            }
+            Err(e) => {
+                // If the error message is that the column name is ambiguous, throw the error
+                if let ErrorCode::InternalError(_) = e.inner() {
+                    return Err(e);
+                }
+            }
         }
 
         // Try to find a correlated column in `upper_contexts`, starting from the innermost context.
