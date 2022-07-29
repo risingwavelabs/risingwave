@@ -261,6 +261,7 @@ mod stream_local_simple_agg;
 mod stream_materialize;
 mod stream_project;
 mod stream_project_set;
+mod stream_sink;
 mod stream_source;
 mod stream_table_scan;
 mod stream_topn;
@@ -319,6 +320,7 @@ pub use stream_local_simple_agg::StreamLocalSimpleAgg;
 pub use stream_materialize::StreamMaterialize;
 pub use stream_project::StreamProject;
 pub use stream_project_set::StreamProjectSet;
+pub use stream_sink::StreamSink;
 pub use stream_source::StreamSource;
 pub use stream_table_scan::StreamTableScan;
 pub use stream_topn::StreamTopN;
@@ -384,6 +386,7 @@ macro_rules! for_all_plan_nodes {
             , { Stream, Project }
             , { Stream, Filter }
             , { Stream, TableScan }
+            , { Stream, Sink }
             , { Stream, Source }
             , { Stream, HashJoin }
             , { Stream, Exchange }
@@ -473,6 +476,7 @@ macro_rules! for_stream_plan_nodes {
             , { Stream, HashJoin }
             , { Stream, Exchange }
             , { Stream, TableScan }
+            , { Stream, Sink }
             , { Stream, Source }
             , { Stream, HashAgg }
             , { Stream, LocalSimpleAgg }
