@@ -233,10 +233,8 @@ impl LogicalProjectSet {
         let mut fd_set = FunctionalDependencySet::new();
         for i in input_fd_set.as_dependencies() {
             // if all columns in the left side are kept, and some columns in the right side are
-            // kept, then we can make use of this functional dependency.
-            if i.from
-                .ones()
-                .all(|column_index| i2o.contains_key(&column_index))
+            // kept, then we can keep this functional dependency.
+            if i.from.ones().all(|idx| i2o.contains_key(&idx))
                 && i.to.ones().any(|idx| i2o.contains_key(&idx))
             {
                 let from = {

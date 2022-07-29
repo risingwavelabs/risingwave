@@ -118,7 +118,9 @@ impl FunctionalDependencySet {
         Self { strict: Vec::new() }
     }
 
-    /// Create a [`FunctionalDependencySet`] with the indices of a unique key.
+    /// Create a [`FunctionalDependencySet`] with the indices of a key.
+    /// 
+    /// The **combination** of these columns can determine all other columns.
     ///
     /// # Examples
     /// ```rust

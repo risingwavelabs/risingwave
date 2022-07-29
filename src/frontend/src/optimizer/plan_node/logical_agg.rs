@@ -725,7 +725,12 @@ impl LogicalAgg {
         let schema = Self::derive_schema(input.schema(), &group_key, &agg_calls);
         // there is only one row in simple agg's output, so its pk_indices is empty
         let pk_indices = (0..group_key.len()).into_iter().collect_vec();
-        let functional_dependency = FunctionalDependencySet::with_key(schema.len(), &pk_indices);
+        let functional_dependency = Self::derive_fd(
+            schema.len(),
+            input.schema().len(),
+            input.functional_dependency(),
+            &group_key,
+        );
         let base = PlanBase::new_logical(ctx, schema, pk_indices, functional_dependency);
         Self {
             base,
@@ -768,6 +773,28 @@ impl LogicalAgg {
             }))
             .collect();
         Schema { fields }
+    }
+
+    fn derive_fd(
+        column_cnt: usize,
+        input_column_cnt: usize,
+        input_fd_set: &FunctionalDependencySet,
+        group_key: &[usize],
+    ) -> FunctionalDependencySet {
+        let mut fd_set = FunctionalDependencySet::with_key(
+            column_cnt,
+            &(0..group_key.len()).into_iter().collect_vec(),
+        );
+        // take group keys from input_columns, then grow the target size to column_cnt
+        let i2o = ColIndexMapping::with_remaining_columns(group_key, input_column_cnt).composite(
+            &ColIndexMapping::identity_or_none(group_key.len(), column_cnt),
+        );
+        for fd in input_fd_set.as_dependencies() {
+            if let Some(fd) = i2o.rewrite_functional_dependency(fd) {
+                fd_set.add_functional_dependency(fd);
+            }
+        }
+        fd_set
     }
 
     /// `create` will analyze select exprs, group exprs and having, and construct a plan like

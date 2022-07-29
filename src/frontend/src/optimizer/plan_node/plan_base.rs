@@ -128,6 +128,9 @@ macro_rules! impl_base_delegate {
                 pub fn append_only(&self) -> bool {
                     self.plan_base().append_only
                 }
+                pub fn functional_dependency(&self) -> &FunctionalDependencySet {
+                    &self.plan_base().functional_dependency
+                }
             }
         })*
     }
