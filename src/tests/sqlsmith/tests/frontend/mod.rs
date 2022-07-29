@@ -15,6 +15,8 @@
 use std::sync::Arc;
 use std::{env, panic};
 
+use futures::executor::block_on;
+
 use itertools::Itertools;
 use rand::{Rng, SeedableRng};
 use risingwave_frontend::binder::Binder;
@@ -27,12 +29,17 @@ use risingwave_sqlsmith::{
     create_table_statement_to_table, mview_sql_gen, parse_sql, sql_gen, Table,
 };
 use rand::rngs::SmallRng;
+use libtest_mimic::{run_tests, Arguments, Outcome, Test};
 
+#[derive(Clone)]
 pub struct SqlsmithEnv {
     session: Arc<SessionImpl>,
     tables: Vec<Table>,
-    rng: SmallRng,
     setup_sql: String,
+}
+
+lazy_static::lazy_static! {
+    static ref SQLSMITH_ENV: SqlsmithEnv = setup_sqlsmith_with_seed(0);
 }
 
 /// Executes sql queries
@@ -108,10 +115,17 @@ async fn create_tables(session: Arc<SessionImpl>, rng: &mut impl Rng) -> (Vec<Ta
 fn test_batch_queries(
     session: Arc<SessionImpl>,
     tables: Vec<Table>,
-    rng: &mut impl Rng,
+    seed: u64,
     setup_sql: &str,
 ) {
-    let sql = sql_gen(rng, tables.clone());
+    let mut rng;
+    if let Ok(x) = env::var("RW_RANDOM_SEED_SQLSMITH") && x == "true" {
+        rng = SmallRng::from_entropy();
+    } else {
+        rng = SmallRng::seed_from_u64(seed);
+    }
+
+    let sql = sql_gen(&mut rng, tables.clone());
     reproduce_failing_queries(setup_sql, &sql);
 
     // The generated SQL must be parsable.
@@ -158,7 +172,11 @@ fn test_batch_queries(
 //     tables.push(table);
 // }
 
-pub async fn setup_sqlsmith_with_seed(seed: u64) -> SqlsmithEnv {
+fn setup_sqlsmith_with_seed(seed: u64) -> SqlsmithEnv {
+    block_on(setup_sqlsmith_with_seed_inner(seed))
+}
+
+async fn setup_sqlsmith_with_seed_inner(seed: u64) -> SqlsmithEnv {
     let frontend = LocalFrontend::new(FrontendOpts::default()).await;
     let session = frontend.session_ref();
 
@@ -172,15 +190,36 @@ pub async fn setup_sqlsmith_with_seed(seed: u64) -> SqlsmithEnv {
     SqlsmithEnv {
         session,
         tables,
-        rng,
         setup_sql,
     }
 }
 
-pub async fn run_sqlsmith_with_seed(seed: u64) {
-    let SqlsmithEnv { session, tables, mut rng, setup_sql } = setup_sqlsmith_with_seed(seed).await;
-    test_batch_queries(session.clone(), tables.clone(), &mut rng, &setup_sql);
-    // test_stream_queries(session.clone(), tables.clone(), &mut rng, &setup_sql).await;
+// async fn run_sqlsmith_with_seed(seed: u64) {
+//     let SqlsmithEnv { session, tables, mut rng, setup_sql } = setup_sqlsmith_with_seed(0).await;
+//     test_batch_queries(session.clone(), tables.clone(), &mut rng, &setup_sql);
+//     // test_stream_queries(session.clone(), tables.clone(), &mut rng, &setup_sql).await;
+// }
+
+pub fn run() {
+    let args = Arguments::from_args();
+
+    let num_tests = 512;
+    // let SqlsmithEnv { session, tables, setup_sql } = setup_sqlsmith_with_seed(0);
+    let tests = (0..num_tests).map(|i| {
+        Test {
+            name: format!("run_sqlsmith_on_frontend_{}", i),
+            kind: "".into(),
+            is_ignored: false,
+            is_bench: false,
+            data: i,
+        }
+    }).collect();
+
+    run_tests(&args, tests, |test| {
+        let SqlsmithEnv { session, tables, setup_sql } = &*SQLSMITH_ENV;
+        test_batch_queries(session.clone(), tables.clone(), test.data, &setup_sql);
+        Outcome::Passed
+    }).exit();
 }
 
 // macro_rules! generate_sqlsmith_test {

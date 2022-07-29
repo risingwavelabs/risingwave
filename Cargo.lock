@@ -4841,6 +4841,7 @@ dependencies = [
  "chrono",
  "clap 3.2.13",
  "env_logger",
+ "futures",
  "itertools",
  "lazy_static",
  "libtest-mimic",
