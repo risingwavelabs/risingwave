@@ -16,6 +16,9 @@
 
 mod version_cmp;
 
+#[macro_use]
+extern crate num_derive;
+
 use risingwave_pb::hummock::SstableInfo;
 pub use version_cmp::*;
 pub mod compact;

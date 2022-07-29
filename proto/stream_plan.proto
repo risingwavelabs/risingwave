@@ -295,6 +295,8 @@ message ArrangeNode {
   ArrangementInfo table_info = 3;
   // Hash key of the materialize node, which is a subset of pk.
   repeated uint32 distribution_key = 4;
+  // Used for internal table states.
+  catalog.Table table = 5;
 }
 
 // Special node for shared state. LookupNode will join an arrangement with a stream.

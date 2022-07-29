@@ -24,7 +24,7 @@ use risingwave_common::array::{DataChunk, DataChunkTestExt};
 use risingwave_common::catalog::Schema;
 use risingwave_common::error::{Result, RwError};
 use risingwave_common::field_generator::FieldGeneratorImpl;
-use risingwave_common::types::{DataType, ScalarImpl, ToOwnedDatum};
+use risingwave_common::types::{DataType, Datum, ScalarImpl, ToOwnedDatum};
 use risingwave_pb::batch_plan::ExchangeSource as ProstExchangeSource;
 
 use crate::exchange_source::{ExchangeSource, ExchangeSourceImpl};
@@ -278,14 +278,14 @@ impl CreateSource for FakeCreateSource {
 
 pub struct FakeProbeSideSourceBuilder {
     schema: Schema,
-    scalar_impls: Vec<Vec<ScalarImpl>>,
+    datums: Vec<Vec<Datum>>,
 }
 
 impl FakeProbeSideSourceBuilder {
     pub fn new(schema: Schema) -> Self {
         Self {
             schema,
-            scalar_impls: vec![],
+            datums: vec![],
         }
     }
 }
@@ -302,13 +302,14 @@ impl ProbeSideSourceBuilder for FakeProbeSideSourceBuilder {
              2 5.5
              4 6.8
              5 3.7
-             5 2.3",
+             5 2.3
+             . .",
         );
 
         for idx in 0..base_data_chunk.capacity() {
             let probe_row = base_data_chunk.row_at_unchecked_vis(idx);
-            for scalar_impl in &self.scalar_impls {
-                if scalar_impl[0] == probe_row.value_at(0).to_owned_datum().unwrap() {
+            for datum in &self.datums {
+                if datum[0] == probe_row.value_at(0).to_owned_datum() {
                     let owned_row = probe_row.to_owned_row();
                     let chunk =
                         DataChunk::from_rows(&[owned_row], &[DataType::Int32, DataType::Float32])?;
@@ -321,13 +322,12 @@ impl ProbeSideSourceBuilder for FakeProbeSideSourceBuilder {
         Ok(Box::new(mock_executor))
     }
 
-    fn add_scan_range(&mut self, key_scalar_impls: &[ScalarImpl]) -> Result<()> {
-        self.scalar_impls
-            .push(key_scalar_impls.iter().cloned().collect_vec());
+    fn add_scan_range(&mut self, key_datums: &[Datum]) -> Result<()> {
+        self.datums.push(key_datums.iter().cloned().collect_vec());
         Ok(())
     }
 
     fn reset(&mut self) {
-        self.scalar_impls = vec![];
+        self.datums = vec![];
     }
 }

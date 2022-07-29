@@ -16,11 +16,11 @@ use std::sync::atomic::{AtomicI32, Ordering};
 use std::sync::Arc;
 
 use risingwave_common::catalog::{NON_RESERVED_PG_CATALOG_TABLE_ID, NON_RESERVED_USER_ID};
-use risingwave_common::error::Result;
 use tokio::sync::RwLock;
 
 use crate::cluster::META_NODE_ID;
-use crate::storage::{self, MetaStore, DEFAULT_COLUMN_FAMILY};
+use crate::model::MetadataModelResult;
+use crate::storage::{MetaStore, MetaStoreError, DEFAULT_COLUMN_FAMILY};
 
 pub const ID_PREALLOCATE_INTERVAL: i32 = 1000;
 
@@ -31,10 +31,10 @@ pub type Id = i32;
 pub trait IdGenerator: Sync + Send + 'static {
     /// Generate a batch of identities.
     /// The valid id range will be [result_id, result_id + interval)
-    async fn generate_interval(&self, interval: i32) -> Result<Id>;
+    async fn generate_interval(&self, interval: i32) -> MetadataModelResult<Id>;
 
     /// Generate an identity.
-    async fn generate(&self) -> Result<Id> {
+    async fn generate(&self) -> MetadataModelResult<Id> {
         self.generate_interval(1).await
     }
 }
@@ -58,7 +58,7 @@ where
             .await;
         let current_id = match res {
             Ok(value) => i32::from_be_bytes(value.as_slice().try_into().unwrap()),
-            Err(storage::Error::ItemNotFound(_)) => start.unwrap_or(0),
+            Err(MetaStoreError::ItemNotFound(_)) => start.unwrap_or(0),
             Err(e) => panic!("{:?}", e),
         };
 
@@ -88,7 +88,7 @@ impl<S> IdGenerator for StoredIdGenerator<S>
 where
     S: MetaStore,
 {
-    async fn generate_interval(&self, interval: i32) -> Result<Id> {
+    async fn generate_interval(&self, interval: i32) -> MetadataModelResult<Id> {
         let id = self.current_id.fetch_add(interval, Ordering::Relaxed);
         let next_allocate_id = { *self.next_allocate_id.read().await };
         if id + interval > next_allocate_id {
@@ -135,6 +135,7 @@ pub mod IdCategory {
     pub const Source: IdCategoryType = 10;
     pub const HummockCompactionTask: IdCategoryType = 11;
     pub const User: IdCategoryType = 12;
+    pub const Sink: IdCategoryType = 13;
 }
 
 pub type IdGeneratorManagerRef<S> = Arc<IdGeneratorManager<S>>;
@@ -223,13 +224,16 @@ where
     }
 
     /// [`Self::generate`] function generates id as `current_id`.
-    pub async fn generate<const C: IdCategoryType>(&self) -> Result<Id> {
+    pub async fn generate<const C: IdCategoryType>(&self) -> MetadataModelResult<Id> {
         self.get::<C>().generate().await
     }
 
     /// [`Self::generate_interval`] function generates ids as [`current_id`, `current_id` +
     /// interval), the next id will be `current_id` + interval.
-    pub async fn generate_interval<const C: IdCategoryType>(&self, interval: i32) -> Result<Id> {
+    pub async fn generate_interval<const C: IdCategoryType>(
+        &self,
+        interval: i32,
+    ) -> MetadataModelResult<Id> {
         self.get::<C>().generate_interval(interval).await
     }
 }
@@ -244,7 +248,7 @@ mod tests {
     use crate::storage::MemStore;
 
     #[tokio::test]
-    async fn test_id_generator() -> Result<()> {
+    async fn test_id_generator() -> MetadataModelResult<()> {
         let meta_store = Arc::new(MemStore::default());
         let id_generator = StoredIdGenerator::new(meta_store.clone(), "default", None).await;
         let ids = future::join_all((0..10000).map(|_i| {
@@ -253,7 +257,7 @@ mod tests {
         }))
         .await
         .into_iter()
-        .collect::<Result<Vec<_>>>()?;
+        .collect::<MetadataModelResult<Vec<_>>>()?;
         assert_eq!(ids, (0..10000).collect::<Vec<_>>());
 
         let id_generator_two = StoredIdGenerator::new(meta_store.clone(), "default", None).await;
@@ -263,7 +267,7 @@ mod tests {
         }))
         .await
         .into_iter()
-        .collect::<Result<Vec<_>>>()?;
+        .collect::<MetadataModelResult<Vec<_>>>()?;
         assert_eq!(ids, (10000..20000).collect::<Vec<_>>());
 
         let id_generator_three = StoredIdGenerator::new(meta_store.clone(), "table", None).await;
@@ -273,7 +277,7 @@ mod tests {
         }))
         .await
         .into_iter()
-        .collect::<Result<Vec<_>>>()?;
+        .collect::<MetadataModelResult<Vec<_>>>()?;
         assert_eq!(ids, (0..10000).collect::<Vec<_>>());
 
         let actor_id_generator = StoredIdGenerator::new(meta_store.clone(), "actor", Some(1)).await;
@@ -283,7 +287,7 @@ mod tests {
         }))
         .await
         .into_iter()
-        .collect::<Result<Vec<_>>>()?;
+        .collect::<MetadataModelResult<Vec<_>>>()?;
 
         let vec_expect = (0..100).map(|e| e * 100 + 1).collect::<Vec<_>>();
         assert_eq!(ids, vec_expect);
@@ -295,7 +299,7 @@ mod tests {
         }))
         .await
         .into_iter()
-        .collect::<Result<Vec<_>>>()?;
+        .collect::<MetadataModelResult<Vec<_>>>()?;
 
         let vec_expect = (0..100).map(|e| 10001 + e * 10).collect::<Vec<_>>();
         assert_eq!(ids, vec_expect);
@@ -304,7 +308,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn test_id_generator_manager() -> Result<()> {
+    async fn test_id_generator_manager() -> MetadataModelResult<()> {
         let meta_store = Arc::new(MemStore::default());
         let manager = IdGeneratorManager::new(meta_store.clone()).await;
         let ids = future::join_all((0..10000).map(|_i| {
@@ -313,7 +317,7 @@ mod tests {
         }))
         .await
         .into_iter()
-        .collect::<Result<Vec<_>>>()?;
+        .collect::<MetadataModelResult<Vec<_>>>()?;
         assert_eq!(ids, (0..10000).collect::<Vec<_>>());
 
         let ids = future::join_all((0..100).map(|_i| {
@@ -326,7 +330,7 @@ mod tests {
         }))
         .await
         .into_iter()
-        .collect::<Result<Vec<_>>>()?;
+        .collect::<MetadataModelResult<Vec<_>>>()?;
         let vec_expect = (0..100).map(|e| e * 9999 + 1).collect::<Vec<_>>();
         assert_eq!(ids, vec_expect);
 

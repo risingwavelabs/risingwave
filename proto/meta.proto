@@ -153,7 +153,8 @@ message MetaSnapshot {
   repeated catalog.Database database = 2;
   repeated catalog.Schema schema = 3;
   repeated catalog.Source source = 4;
-  repeated catalog.Table table = 5;
+  repeated catalog.Sink sink = 5;
+  repeated catalog.Table table = 6;
   repeated user.UserInfo users = 7;
 }
 
@@ -207,7 +208,8 @@ message ResumeResponse {}
 message GetClusterInfoRequest {}
 
 message GetClusterInfoResponse {
-  repeated TableFragments table_fragments = 1;
+  repeated common.WorkerNode worker_nodes = 1;
+  repeated TableFragments table_fragments = 2;
 }
 
 service ScaleService {
