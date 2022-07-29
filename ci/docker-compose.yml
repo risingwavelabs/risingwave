@@ -1,4 +1,7 @@
 version: "3.9"
+
+userns_mode: "host"
+
 services:
   db:
     image: postgres
