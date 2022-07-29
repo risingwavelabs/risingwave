@@ -169,7 +169,6 @@ impl HummockStorage {
                     iter_read_options.clone(),
                 )));
             } else {
-                let mut iters = vec![];
                 for table_info in table_infos.into_iter().rev() {
                     let table = self
                         .sstable_store

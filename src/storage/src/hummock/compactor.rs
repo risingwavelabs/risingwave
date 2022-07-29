@@ -827,7 +827,6 @@ impl Compactor {
                     read_options.clone(),
                 )));
             } else {
-                let mut data_iters = vec![];
                 for table_info in &level.table_infos {
                     let table = self
                         .context
