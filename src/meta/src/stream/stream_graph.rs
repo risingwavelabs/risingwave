@@ -1011,7 +1011,7 @@ impl ActorGraphBuilder {
                         dispatch_edge.same_worker_node,
                     );
                 }
-                DispatcherType::Invalid => unreachable!(),
+                DispatcherType::Unspecified => unreachable!(),
             }
         }
 

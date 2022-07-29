@@ -241,9 +241,10 @@ message PlanNode {
 message ExchangeInfo {
   enum DistributionMode {
     // No partitioning at all, used for root segment which aggregates query results
-    SINGLE = 0;
-    BROADCAST = 1;
-    HASH = 2;
+    UNSPECIFIED = 0;
+    SINGLE = 1;
+    BROADCAST = 2;
+    HASH = 3;
   }
   message BroadcastInfo {
     uint32 count = 1;

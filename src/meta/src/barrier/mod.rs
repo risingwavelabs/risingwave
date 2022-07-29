@@ -310,6 +310,7 @@ where
         match s {
             ActorState::Inactive => adding,
             ActorState::Running => !removing,
+            ActorState::Unspecified => unreachable!(),
         }
     }
 
