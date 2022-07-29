@@ -23,8 +23,10 @@ use risingwave_common::array::{ArrayBuilder, I64ArrayBuilder, StreamChunk};
 use risingwave_common::bail;
 use risingwave_common::catalog::{ColumnId, Schema, TableId};
 use risingwave_common::error::Result;
+use risingwave_common::util::epoch::UNIX_SINGULARITY_DATE_EPOCH;
 use risingwave_connector::source::{ConnectorState, SplitImpl, SplitMetaData};
 use risingwave_source::connector_source::SourceContext;
+use risingwave_source::row_id::RowIdGenerator;
 use risingwave_source::*;
 use risingwave_storage::{Keyspace, StateStore};
 use tokio::sync::mpsc::UnboundedReceiver;
@@ -42,6 +44,9 @@ pub struct SourceExecutor<S: StateStore> {
     source_id: TableId,
     source_desc: SourceDesc,
 
+    /// Row id generator for this source executor.
+    row_id_generator: RowIdGenerator,
+
     column_ids: Vec<ColumnId>,
     schema: Schema,
     pk_indices: PkIndices,
@@ -52,7 +57,7 @@ pub struct SourceExecutor<S: StateStore> {
     /// Receiver of barrier channel.
     barrier_receiver: Option<UnboundedReceiver<Barrier>>,
 
-    // monitor
+    /// Metrics for monitor.
     metrics: Arc<StreamingMetrics>,
 
     /// Split info for stream source
@@ -75,6 +80,7 @@ impl<S: StateStore> SourceExecutor<S> {
         actor_id: ActorId,
         source_id: TableId,
         source_desc: SourceDesc,
+        vnodes: Bitmap,
         keyspace: Keyspace<S>,
         column_ids: Vec<ColumnId>,
         schema: Schema,
@@ -86,10 +92,15 @@ impl<S: StateStore> SourceExecutor<S> {
         streaming_metrics: Arc<StreamingMetrics>,
         expected_barrier_latency_ms: u64,
     ) -> Result<Self> {
+        let vnode_id = vnodes.next_set_bit(0).unwrap_or(0);
         Ok(Self {
             actor_id,
             source_id,
             source_desc,
+            row_id_generator: RowIdGenerator::with_epoch(
+                vnode_id as u32,
+                *UNIX_SINGULARITY_DATE_EPOCH,
+            ),
             column_ids,
             schema,
             pk_indices,
@@ -107,7 +118,7 @@ impl<S: StateStore> SourceExecutor<S> {
     /// Generate a row ID column.
     fn gen_row_id_column(&mut self, len: usize) -> Column {
         let mut builder = I64ArrayBuilder::new(len);
-        let row_ids = self.source_desc.next_row_id_batch(len);
+        let row_ids = self.row_id_generator.next_batch(len);
 
         for row_id in row_ids {
             builder.append(Some(row_id)).unwrap();
@@ -351,6 +362,7 @@ impl<S: StateStore> Debug for SourceExecutor<S> {
 mod tests {
     use std::sync::Arc;
 
+    use bytes::Bytes;
     use futures::StreamExt;
     use maplit::hashmap;
     use risingwave_common::array::stream_chunk::StreamChunkTestExt;
@@ -434,11 +446,13 @@ mod tests {
 
         let (barrier_sender, barrier_receiver) = unbounded_channel();
         let keyspace = Keyspace::table_root(MemoryStateStore::new(), &TableId::from(0x2333));
+        let vnodes = Bitmap::from_bytes(Bytes::from_static(&[0b11111111]));
 
         let executor = SourceExecutor::new(
             0x3f3f3f,
             table_id,
             source_desc,
+            vnodes,
             keyspace,
             column_ids,
             schema,
@@ -557,10 +571,12 @@ mod tests {
 
         let (barrier_sender, barrier_receiver) = unbounded_channel();
         let keyspace = Keyspace::table_root(MemoryStateStore::new(), &TableId::from(0x2333));
+        let vnodes = Bitmap::from_bytes(Bytes::from_static(&[0b11111111]));
         let executor = SourceExecutor::new(
             0x3f3f3f,
             table_id,
             source_desc,
+            vnodes,
             keyspace,
             column_ids,
             schema,
@@ -677,11 +693,13 @@ mod tests {
         let schema = get_schema(&column_ids, &source_desc);
         let pk_indices = vec![0_usize];
         let (barrier_tx, barrier_rx) = unbounded_channel::<Barrier>();
+        let vnodes = Bitmap::from_bytes(Bytes::from_static(&[0b11111111]));
 
         let source_exec = SourceExecutor::new(
             actor_id,
             source_table_id,
             source_desc,
+            vnodes,
             keyspace.clone(),
             column_ids.clone(),
             schema,

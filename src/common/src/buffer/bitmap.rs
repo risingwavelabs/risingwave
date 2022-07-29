@@ -185,7 +185,6 @@ impl Bitmap {
         }
     }
 
-    #[cfg(test)]
     pub fn from_bytes(buf: Bytes) -> Self {
         let num_bits = buf.len() << 3;
         Self::from_bytes_with_num_bits(buf, num_bits)
