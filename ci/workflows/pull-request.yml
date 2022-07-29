@@ -109,7 +109,6 @@ steps:
   - label: "end-to-end sink test"
     depends_on:
       - "build"
-      - "mysql"
     plugins:
       - gencer/cache#v2.4.10: *cargo-cache
       - docker-compose#v3.9.0:
