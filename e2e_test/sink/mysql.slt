@@ -14,4 +14,4 @@ CREATE SINK s FROM mv WITH (
 );
 
 statement ok
-INSERT INTO t VALUES (1), (1), (2), (3), (5), (8), (13), (21);
+INSERT INTO t VALUES (1), (1), (2), (3), (5), (8), (13), (21), (34);
