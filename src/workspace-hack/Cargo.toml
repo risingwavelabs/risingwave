@@ -85,7 +85,7 @@ anyhow = { version = "1", features = ["backtrace", "std"] }
 auto_enums = { version = "0.7", features = ["futures", "std"] }
 auto_enums_derive = { version = "0.7", default-features = false, features = ["futures", "futures03", "std"] }
 axum = { version = "0.5", features = ["form", "http1", "json", "matched-path", "original-uri", "query", "serde_json", "serde_urlencoded", "tower-log"] }
-bstr = { version = "0.2", features = ["lazy_static", "regex-automata", "serde", "serde1", "serde1-nostd", "std", "unicode"] }
+bstr = { version = "0.2", features = ["lazy_static", "regex-automata", "serde1", "serde1-nostd", "std", "unicode"] }
 bytes = { version = "1", features = ["serde", "std"] }
 cc = { version = "1", default-features = false, features = ["jobserver", "parallel"] }
 chrono = { version = "0.4", features = ["clock", "libc", "oldtime", "serde", "std", "time", "winapi"] }
