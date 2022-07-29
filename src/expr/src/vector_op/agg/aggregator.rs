@@ -168,7 +168,6 @@ impl AggStateFactory {
                 self.filter.clone(),
             )))
         } else if let AggKind::StringAgg = self.agg_kind {
-            println!("[rc] self.extra_arg: {:?}", self.extra_arg);
             Ok(Box::new(StringAgg::new(
                 self.input_col_idx,
                 self.extra_arg.clone().unwrap(),
