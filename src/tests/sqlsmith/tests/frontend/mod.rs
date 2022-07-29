@@ -26,6 +26,14 @@ use risingwave_sqlparser::ast::Statement;
 use risingwave_sqlsmith::{
     create_table_statement_to_table, mview_sql_gen, parse_sql, sql_gen, Table,
 };
+use rand::rngs::SmallRng;
+
+pub struct SqlsmithEnv {
+    session: Arc<SessionImpl>,
+    tables: Vec<Table>,
+    rng: SmallRng,
+    setup_sql: String,
+}
 
 /// Executes sql queries
 /// It captures panics so it can recover and print failing sql query.
@@ -136,36 +144,41 @@ fn test_batch_queries(
     }
 }
 
-// TODO: Remove if not needed after current refactor.
-// /// Test stream queries by evaluating create mview statements
+/// Test stream queries by evaluating create mview statements
 // async fn test_stream_queries(
 //     session: Arc<SessionImpl>,
 //     mut tables: Vec<Table>,
 //     rng: &mut impl Rng,
 //     setup_sql: &str,
 // ) {
-//     // Test stream queries
-//     for i in 0..512 {
-//         let (sql, table) = mview_sql_gen(rng, tables.clone(), &format!("sq{}", i));
-//         let stmts = parse_sql(&sql);
-//         let stmt = stmts[0].clone();
-//         handle(session.clone(), stmt, setup_sql, &sql).await;
-//         tables.push(table);
-//     }
+//     let (sql, table) = mview_sql_gen(rng, tables.clone(), &format!("sq{}", i));
+//     let stmts = parse_sql(&sql);
+//     let stmt = stmts[0].clone();
+//     handle(session.clone(), stmt, setup_sql, &sql).await;
+//     tables.push(table);
 // }
 
-pub async fn run_sqlsmith_with_seed(seed: u64) {
+pub async fn setup_sqlsmith_with_seed(seed: u64) -> SqlsmithEnv {
     let frontend = LocalFrontend::new(FrontendOpts::default()).await;
     let session = frontend.session_ref();
 
     let mut rng;
     if let Ok(x) = env::var("RW_RANDOM_SEED_SQLSMITH") && x == "true" {
-        rng = rand::rngs::SmallRng::from_entropy();
+        rng = SmallRng::from_entropy();
     } else {
-        rng = rand::rngs::SmallRng::seed_from_u64(seed);
+        rng = SmallRng::seed_from_u64(seed);
     }
-
     let (tables, setup_sql) = create_tables(session.clone(), &mut rng).await;
+    SqlsmithEnv {
+        session,
+        tables,
+        rng,
+        setup_sql,
+    }
+}
+
+pub async fn run_sqlsmith_with_seed(seed: u64) {
+    let SqlsmithEnv { session, tables, mut rng, setup_sql } = setup_sqlsmith_with_seed(seed).await;
     test_batch_queries(session.clone(), tables.clone(), &mut rng, &setup_sql);
     // test_stream_queries(session.clone(), tables.clone(), &mut rng, &setup_sql).await;
 }
