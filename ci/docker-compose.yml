@@ -17,9 +17,6 @@ services:
 
   rw-build-env:
     image: public.ecr.aws/x5u3w5h6/rw-build-env:v20220729
-    depends_on:
-      mysql:
-        condition: service_healthy
     volumes:
       - ..:/risingwave
 
@@ -27,6 +24,14 @@ services:
     image: public.ecr.aws/x5u3w5h6/rw-build-env:v20220729
     depends_on:
       db:
+        condition: service_healthy
+    volumes:
+      - ..:/risingwave
+
+  sink-build-env:
+    image: public.ecr.aws/x5u3w5h6/rw-build-env:v20220729
+    depends_on:
+      mysql:
         condition: service_healthy
     volumes:
       - ..:/risingwave
