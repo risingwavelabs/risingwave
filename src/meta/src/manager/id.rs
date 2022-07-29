@@ -148,7 +148,6 @@ pub struct IdGeneratorManager<S> {
     database: Arc<StoredIdGenerator<S>>,
     schema: Arc<StoredIdGenerator<S>>,
     table: Arc<StoredIdGenerator<S>>,
-    sink: Arc<StoredIdGenerator<S>>,
     worker: Arc<StoredIdGenerator<S>>,
     fragment: Arc<StoredIdGenerator<S>>,
     actor: Arc<StoredIdGenerator<S>>,
@@ -177,7 +176,6 @@ where
                 )
                 .await,
             ),
-            sink: Arc::new(StoredIdGenerator::new(meta_store.clone(), "sink", None).await),
             worker: Arc::new(
                 StoredIdGenerator::new(meta_store.clone(), "worker", Some(META_NODE_ID as i32 + 1))
                     .await,
@@ -213,7 +211,6 @@ where
             IdCategory::Database => &self.database,
             IdCategory::Schema => &self.schema,
             IdCategory::Table => &self.table,
-            IdCategory::Sink => &self.sink,
             IdCategory::Fragment => &self.fragment,
             IdCategory::Actor => &self.actor,
             IdCategory::User => &self.user,
