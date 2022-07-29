@@ -24,7 +24,8 @@ use super::{
     ToDistributedBatch,
 };
 use crate::expr::Expr;
-use crate::optimizer::plan_node::{EqJoinPredicateVerboseDisplay, ToLocalBatch};
+use crate::optimizer::plan_node::utils::IndicesDisplay;
+use crate::optimizer::plan_node::{EqJoinPredicateDisplay, ToLocalBatch};
 use crate::optimizer::property::{Distribution, Order, RequiredDist};
 use crate::utils::ColIndexMapping;
 
@@ -83,24 +84,24 @@ impl BatchHashJoin {
 impl fmt::Display for BatchHashJoin {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         let verbose = self.base.ctx.is_explain_verbose();
-        write!(
-            f,
-            "BatchHashJoin {{ type: {:?}, predicate: {}, output_indices: {} }}",
-            self.logical.join_type(),
-            if verbose {
-                let mut concat_schema = self.left().schema().fields.clone();
-                concat_schema.extend(self.right().schema().fields.clone());
-                let concat_schema = Schema::new(concat_schema);
-                format!(
-                    "{}",
-                    EqJoinPredicateVerboseDisplay {
-                        eq_join_predicate: self.eq_join_predicate(),
-                        input_schema: &concat_schema
-                    }
-                )
-            } else {
-                format!("{}", self.eq_join_predicate())
-            },
+        let mut builder = f.debug_struct("BatchHashJoin");
+        builder.field("type", &format_args!("{:?}", self.logical.join_type()));
+
+        let mut concat_schema = self.left().schema().fields.clone();
+        concat_schema.extend(self.right().schema().fields.clone());
+        let concat_schema = Schema::new(concat_schema);
+        builder.field(
+            "predicate",
+            &format_args!(
+                "{}",
+                EqJoinPredicateDisplay {
+                    eq_join_predicate: self.eq_join_predicate(),
+                    input_schema: &concat_schema
+                }
+            ),
+        );
+
+        if verbose {
             if self
                 .logical
                 .output_indices()
@@ -108,11 +109,22 @@ impl fmt::Display for BatchHashJoin {
                 .copied()
                 .eq(0..self.logical.internal_column_num())
             {
-                "all".to_string()
+                builder.field("output", &format_args!("all"));
             } else {
-                format!("{:?}", self.logical.output_indices())
+                builder.field(
+                    "output",
+                    &format_args!(
+                        "{:?}",
+                        &IndicesDisplay {
+                            vec: self.logical.output_indices(),
+                            input_schema: &concat_schema,
+                        }
+                    ),
+                );
             }
-        )
+        }
+
+        builder.finish()
     }
 }
 

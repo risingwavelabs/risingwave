@@ -16,8 +16,10 @@ use std::sync::atomic::Ordering;
 use std::time::{SystemTime, UNIX_EPOCH};
 
 use itertools::enumerate;
+use num_traits::FromPrimitive;
 use prost::Message;
 use risingwave_hummock_sdk::compaction_group::hummock_version_ext::HummockVersionExt;
+use risingwave_hummock_sdk::compaction_group::StaticCompactionGroupId;
 use risingwave_hummock_sdk::CompactionGroupId;
 use risingwave_pb::hummock::HummockVersion;
 
@@ -57,7 +59,11 @@ pub fn trigger_sst_stat(
     for (idx, level_handler) in enumerate(compact_status.level_handlers.iter()) {
         let sst_num = level_sst_cnt(idx);
         let compact_cnt = level_handler.get_pending_file_count();
-        let level_label = format!("cg{}_level{}", compaction_group_id, idx);
+        let level_label = format!(
+            "{}_{}",
+            idx,
+            StaticCompactionGroupId::from_u64(compaction_group_id).unwrap(),
+        );
         metrics
             .level_sst_num
             .with_label_values(&[&level_label])
