@@ -95,16 +95,16 @@ steps:
   #   timeout_in_minutes: 5
   #   retry: *auto-retry
 
-  - label: "initialize mysql"
-    key: "mysql"
-    plugins:
-      - gencer/cache#v2.4.10: *cargo-cache
-      - docker-compose#v3.9.0:
-          run: mysql
-          config: ci/docker-compose.yml
-          mount-buildkite-agent: true
-    timeout_in_minutes: 5
-    retry: *auto-retry
+  # - label: "initialize mysql"
+  #   key: "mysql"
+  #   plugins:
+  #     - gencer/cache#v2.4.10: *cargo-cache
+  #     - docker-compose#v3.9.0:
+  #         run: mysql
+  #         config: ci/docker-compose.yml
+  #         mount-buildkite-agent: true
+  #   timeout_in_minutes: 5
+  #   retry: *auto-retry
 
   - label: "end-to-end sink test"
     command: "ci/scripts/e2e-sink-test.sh"
