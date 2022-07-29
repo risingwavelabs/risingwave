@@ -95,7 +95,9 @@ pub trait ObjectStore: Send + Sync {
 
     async fn readv(&self, path: &str, block_locs: &[BlockLocation]) -> ObjectResult<Vec<Bytes>>;
 
-    /// Returns a stream that implements `AsyncStream`
+    /// Returns a stream reading the object specified in `path`. If given, the stream starts at the
+    /// byte with index `start_pos` (0-based). As far as possible, the stream only loads the amount
+    /// of data into memory that is read from the stream.
     async fn streaming_read(
         &self,
         path: &str,
@@ -202,6 +204,9 @@ impl ObjectStore for ObjectStoreImpl {
         object_store_impl_method_body!(self, metadata, path)
     }
 
+    /// Returns a stream reading the object specified in `path`. If given, the stream starts at the
+    /// byte with index `start_pos` (0-based). As far as possible, the stream only loads the amount
+    /// of data into memory that is read from the stream.
     async fn streaming_read(
         &self,
         path: &str,
@@ -280,6 +285,9 @@ impl<OS: ObjectStore> MonitoredObjectStore<OS> {
         Ok(ret)
     }
 
+    /// Returns a stream reading the object specified in `path`. If given, the stream starts at the
+    /// byte with index `start_pos` (0-based). As far as possible, the stream only loads the amount
+    /// of data into memory that is read from the stream.
     async fn streaming_read(
         &self,
         path: &str,
