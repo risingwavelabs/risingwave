@@ -20,7 +20,6 @@ use std::io::Error as IoError;
 use std::sync::Arc;
 
 use memcomparable::Error as MemComparableError;
-use risingwave_pb::common::Status;
 use risingwave_pb::ProstFieldNotFound;
 use thiserror::Error;
 use tokio::task::JoinError;
@@ -196,18 +195,6 @@ impl From<RwError> for tonic::Status {
 }
 
 impl RwError {
-    /// Converting to risingwave's status.
-    ///
-    /// We can't use grpc/tonic's library directly because we need to customized error code and
-    /// information.
-    fn to_status(&self) -> Status {
-        // TODO: We need better error reporting for stacktrace.
-        Status {
-            code: self.inner.get_code() as i32,
-            message: self.to_string(),
-        }
-    }
-
     pub fn inner(&self) -> &ErrorCode {
         &self.inner
     }
@@ -300,46 +287,6 @@ impl std::error::Error for RwError {
 impl PartialEq for RwError {
     fn eq(&self, other: &Self) -> bool {
         self.inner == other.inner
-    }
-}
-
-impl ErrorCode {
-    fn get_code(&self) -> u32 {
-        match self {
-            ErrorCode::OK => 0,
-            ErrorCode::InternalError(_) => 1,
-            ErrorCode::MemoryError { .. } => 2,
-            ErrorCode::StreamError(_) => 3,
-            ErrorCode::NotImplemented(..) => 4,
-            ErrorCode::IoError(_) => 5,
-            ErrorCode::StorageError(_) => 6,
-            ErrorCode::ParseError(_) => 7,
-            ErrorCode::NumericValueOutOfRange => 8,
-            ErrorCode::ProtocolError(_) => 9,
-            ErrorCode::TaskNotFound => 10,
-            ErrorCode::ProstError(_) => 11,
-            ErrorCode::ItemNotFound(_) => 13,
-            ErrorCode::InvalidInputSyntax(_) => 14,
-            ErrorCode::MemComparableError(_) => 15,
-            ErrorCode::ValueEncodingError(_) => 16,
-            ErrorCode::InvalidConfigValue { .. } => 17,
-            ErrorCode::MetaError(_) => 18,
-            ErrorCode::CatalogError(..) => 21,
-            ErrorCode::Eof => 22,
-            ErrorCode::BindError(_) => 23,
-            ErrorCode::UnknownWorker => 24,
-            ErrorCode::ConnectorError(_) => 25,
-            ErrorCode::InvalidParameterValue(_) => 26,
-            ErrorCode::UnrecognizedConfigurationParameter(_) => 27,
-            ErrorCode::ExprError(_) => 28,
-            ErrorCode::ArrayError(_) => 29,
-            ErrorCode::SchedulerError(_) => 30,
-            ErrorCode::SinkError(_) => 31,
-            ErrorCode::RpcError(_) => 32,
-            ErrorCode::BatchError(_) => 33,
-            ErrorCode::PermissionDenied(_) => 34,
-            ErrorCode::UnknownError(_) => 101,
-        }
     }
 }
 
