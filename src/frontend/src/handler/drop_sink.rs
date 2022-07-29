@@ -33,20 +33,17 @@ pub async fn handle_drop_sink(
 
     check_source(catalog_reader, session.clone(), &schema_name, &sink_name)?;
 
-    let sink_id = catalog_reader.read_guard().get_sink_id_by_name(
-        session.database(),
-        &schema_name,
-        &sink_name,
-    )?;
+    let sink = catalog_reader
+        .read_guard()
+        .get_sink_by_name(session.database(), &schema_name, &sink_name)?
+        .clone();
 
     let schema_owner = catalog_reader
         .read_guard()
         .get_schema_by_name(session.database(), &schema_name)
         .unwrap()
         .owner();
-    // FIXME: using owner of sink instead.
-    let owner = session.user_id();
-    if owner != session.user_id()
+    if sink.owner != session.user_id()
         && session.user_id() != schema_owner
         && !check_super_user(&session)
     {
@@ -54,7 +51,7 @@ pub async fn handle_drop_sink(
     }
 
     let catalog_writer = session.env().catalog_writer();
-    catalog_writer.drop_sink(sink_id).await?;
+    catalog_writer.drop_sink(sink.id).await?;
 
     Ok(PgResponse::empty_result(StatementType::DROP_SINK))
 }

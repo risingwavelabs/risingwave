@@ -26,6 +26,7 @@ use super::source_catalog::SourceCatalog;
 use super::{CatalogError, SinkId, SourceId};
 use crate::catalog::database_catalog::DatabaseCatalog;
 use crate::catalog::schema_catalog::SchemaCatalog;
+use crate::catalog::sink_catalog::SinkCatalog;
 use crate::catalog::system_catalog::SystemCatalog;
 use crate::catalog::table_catalog::TableCatalog;
 use crate::catalog::{pg_catalog, DatabaseId, SchemaId};
@@ -219,14 +220,14 @@ impl Catalog {
             .ok_or_else(|| CatalogError::NotFound("source", source_name.to_string()).into())
     }
 
-    pub fn get_sink_id_by_name(
+    pub fn get_sink_by_name(
         &self,
         db_name: &str,
         schema_name: &str,
         sink_name: &str,
-    ) -> Result<u32> {
+    ) -> Result<&SinkCatalog> {
         self.get_schema_by_name(db_name, schema_name)?
-            .get_sink_id_by_name(sink_name)
+            .get_sink_by_name(sink_name)
             .ok_or_else(|| CatalogError::NotFound("sink", sink_name.to_string()).into())
     }
 
@@ -250,6 +251,7 @@ impl Catalog {
                 risingwave_pb::stream_plan::source_node::SourceType::Source => {
                     Err(CatalogError::Duplicated("source", relation_name.to_string()).into())
                 }
+                risingwave_pb::stream_plan::source_node::SourceType::Unspecified => unreachable!(),
             }
         } else if let Some(_table) = schema.get_table_by_name(relation_name) {
             Err(CatalogError::Duplicated("materialized view", relation_name.to_string()).into())

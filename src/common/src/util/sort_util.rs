@@ -35,7 +35,7 @@ impl OrderType {
         match order_type {
             ProstOrderType::Ascending => OrderType::Ascending,
             ProstOrderType::Descending => OrderType::Descending,
-            ProstOrderType::Invalid => panic!("invalid order type"),
+            ProstOrderType::OrderUnspecified => unreachable!(),
         }
     }
 
@@ -172,11 +172,8 @@ where
         (Some(l), Some(r)) => l.cmp(r),
         (None, None) => Ordering::Equal,
         // TODO(yuchao): `null first` / `null last` is not supported yet.
-        // To be consistent with memcomparable (#116) encoding, `null` is treated as less than any
-        // non-null value. This is contrary to PostgreSQL's default behavior, where `null`
-        // is treated as largest.
-        (Some(_), None) => Ordering::Greater,
-        (None, Some(_)) => Ordering::Less,
+        (Some(_), None) => Ordering::Less,
+        (None, Some(_)) => Ordering::Greater,
     };
     if *order_type == OrderType::Descending {
         ord.reverse()

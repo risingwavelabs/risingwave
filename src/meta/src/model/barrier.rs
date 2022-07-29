@@ -12,11 +12,9 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use risingwave_common::error::Result;
 use risingwave_common::util::epoch::{Epoch, INVALID_EPOCH};
 
-use crate::storage;
-use crate::storage::{MetaStore, DEFAULT_COLUMN_FAMILY};
+use crate::storage::{MetaStore, MetaStoreError, MetaStoreResult, DEFAULT_COLUMN_FAMILY};
 
 /// `BarrierManagerState` defines the necessary state of `GlobalBarrierManager`, this will be stored
 /// persistently to meta store. Add more states when needed.
@@ -38,7 +36,7 @@ impl BarrierManagerState {
             .await
         {
             Ok(byte_vec) => u64::from_be_bytes(byte_vec.as_slice().try_into().unwrap()).into(),
-            Err(storage::Error::ItemNotFound(_)) => INVALID_EPOCH.into(),
+            Err(MetaStoreError::ItemNotFound(_)) => INVALID_EPOCH.into(),
             Err(e) => panic!("{:?}", e),
         };
         Self {
@@ -46,7 +44,7 @@ impl BarrierManagerState {
         }
     }
 
-    pub async fn update_inflight_prev_epoch<S>(&self, store: &S) -> Result<()>
+    pub async fn update_inflight_prev_epoch<S>(&self, store: &S) -> MetaStoreResult<()>
     where
         S: MetaStore,
     {

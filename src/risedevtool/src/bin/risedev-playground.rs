@@ -30,7 +30,7 @@ use risedev::{
     compute_risectl_env, preflight_check, AwsS3Config, CompactorService, ComputeNodeService,
     ConfigExpander, ConfigureTmuxTask, EnsureStopService, ExecuteContext, FrontendService,
     GrafanaService, JaegerService, KafkaService, MetaNodeService, MinioService, PrometheusService,
-    ServiceConfig, Task, ZooKeeperService, RISEDEV_SESSION_NAME,
+    RedisService, ServiceConfig, Task, ZooKeeperService, RISEDEV_SESSION_NAME,
 };
 use tempfile::tempdir;
 use yaml_rust::YamlEmitter;
@@ -123,6 +123,7 @@ fn task_main(
             ServiceConfig::Grafana(c) => Some((c.port, c.id.clone())),
             ServiceConfig::Jaeger(c) => Some((c.dashboard_port, c.id.clone())),
             ServiceConfig::Kafka(c) => Some((c.port, c.id.clone())),
+            ServiceConfig::Redis(c) => Some((c.port, c.id.clone())),
             ServiceConfig::ZooKeeper(c) => Some((c.port, c.id.clone())),
             ServiceConfig::AwsS3(_) => None,
             ServiceConfig::RedPanda(_) => None,
@@ -305,6 +306,16 @@ fn task_main(
             }
             ServiceConfig::RedPanda(_) => {
                 return Err(anyhow!("redpanda is only supported in RiseDev compose."));
+            }
+            ServiceConfig::Redis(c) => {
+                let mut ctx =
+                    ExecuteContext::new(&mut logger, manager.new_progress(), status_dir.clone());
+                let mut service = RedisService::new(c.clone())?;
+                service.execute(&mut ctx)?;
+                let mut task = risedev::RedisReadyCheckTask::new(c.clone())?;
+                task.execute(&mut ctx)?;
+                ctx.pb
+                    .set_message(format!("redis {}:{}", c.address, c.port));
             }
         }
 

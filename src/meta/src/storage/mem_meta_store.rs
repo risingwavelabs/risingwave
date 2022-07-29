@@ -18,7 +18,9 @@ use std::sync::Arc;
 use async_trait::async_trait;
 use tokio::sync::{OwnedRwLockReadGuard, RwLock};
 
-use super::{ColumnFamily, Error, Key, MetaStore, Result, Snapshot, Transaction, Value};
+use super::{
+    ColumnFamily, Key, MetaStore, MetaStoreError, MetaStoreResult, Snapshot, Transaction, Value,
+};
 
 pub struct MemSnapshot(OwnedRwLockReadGuard<MemStoreInner>);
 
@@ -49,7 +51,7 @@ impl MemStoreInner {
 #[async_trait]
 impl Snapshot for MemSnapshot {
     #[inline(always)]
-    async fn list_cf(&self, cf: &str) -> Result<Vec<Value>> {
+    async fn list_cf(&self, cf: &str) -> MetaStoreResult<Vec<Value>> {
         Ok(match self.0.cf_ref(cf) {
             Some(cf) => cf.values().cloned().collect(),
             None => vec![],
@@ -57,11 +59,11 @@ impl Snapshot for MemSnapshot {
     }
 
     #[inline(always)]
-    async fn get_cf(&self, cf: &str, key: &[u8]) -> Result<Value> {
+    async fn get_cf(&self, cf: &str, key: &[u8]) -> MetaStoreResult<Value> {
         self.0
             .cf_ref(cf)
             .and_then(|cf| cf.get(key).cloned())
-            .ok_or_else(|| Error::ItemNotFound(hex::encode(key)))
+            .ok_or_else(|| MetaStoreError::ItemNotFound(hex::encode(key)))
     }
 }
 
@@ -74,19 +76,19 @@ impl MetaStore for MemStore {
         MemSnapshot(guard)
     }
 
-    async fn put_cf(&self, cf: &str, key: Key, value: Value) -> Result<()> {
+    async fn put_cf(&self, cf: &str, key: Key, value: Value) -> MetaStoreResult<()> {
         let mut inner = self.inner.write().await;
         inner.cf_mut(cf).insert(key, value);
         Ok(())
     }
 
-    async fn delete_cf(&self, cf: &str, key: &[u8]) -> Result<()> {
+    async fn delete_cf(&self, cf: &str, key: &[u8]) -> MetaStoreResult<()> {
         let mut inner = self.inner.write().await;
         inner.cf_mut(cf).remove(key);
         Ok(())
     }
 
-    async fn txn(&self, txn: Transaction) -> Result<()> {
+    async fn txn(&self, txn: Transaction) -> MetaStoreResult<()> {
         use super::Operation::*;
         use super::Precondition::*;
 
@@ -101,7 +103,7 @@ impl MetaStore for MemStore {
                         .map(|cf| cf.contains_key(&key[..]))
                         .unwrap_or(false)
                     {
-                        return Err(Error::TransactionAbort());
+                        return Err(MetaStoreError::TransactionAbort());
                     }
                 }
                 KeyEqual { cf, key, value } => {
@@ -110,7 +112,7 @@ impl MetaStore for MemStore {
                         .map(|cf| cf.get(key.as_slice()))
                         .unwrap_or(None);
                     if !v.map_or(false, |v| v.eq(&value)) {
-                        return Err(Error::TransactionAbort());
+                        return Err(MetaStoreError::TransactionAbort());
                     }
                 }
             }
