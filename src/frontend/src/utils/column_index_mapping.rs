@@ -345,25 +345,19 @@ impl ColIndexMapping {
 
     /// Rewrite the indices in a functional dependency.
     ///
-    /// If all the indices in the left side can be mapped and more than 1 indices in the right side
-    /// can be mapped, the rewrite will succeed.
+    /// If either the `from` and `to` become empty after mapping, this function will return [`None`]
     pub fn rewrite_functional_dependency(
         &self,
         fd: &FunctionalDependency,
     ) -> Option<FunctionalDependency> {
         assert_eq!(fd.from.len(), self.source_size());
         assert_eq!(fd.to.len(), self.source_size());
-        let new_from = fd
-            .from
-            .ones()
-            .map(|idx| self.try_map(idx))
-            .collect::<Option<FixedBitSet>>();
-        if let Some(mut new_from) = new_from {
-            new_from.grow(self.target_size());
-            let new_to = self.rewrite_bitset(&fd.to);
-            Some(FunctionalDependency::new(new_from, new_to))
-        } else {
+        let new_from = self.rewrite_bitset(&fd.from);
+        let new_to = self.rewrite_bitset(&fd.to);
+        if new_from.is_clear() || new_to.is_clear() {
             None
+        } else {
+            Some(FunctionalDependency::new(new_from, new_to))
         }
     }
 

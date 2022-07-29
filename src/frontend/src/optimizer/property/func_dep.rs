@@ -114,7 +114,7 @@ pub struct FunctionalDependencySet {
 
 impl fmt::Display for FunctionalDependencySet {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        f.write_str("FdSet: {")?;
+        f.write_str("{")?;
         for fd in self.strict.iter().with_position() {
             match fd {
                 itertools::Position::First(fd) | itertools::Position::Middle(fd) => {
@@ -139,6 +139,8 @@ impl FunctionalDependencySet {
     ///
     /// The **combination** of these columns can determine all other columns.
     ///
+    /// Note that if `key_indices` empty, an empty fd set will be returned.
+    ///
     /// # Examples
     /// ```rust
     /// # use risingwave_frontend::optimizer::property::{FunctionalDependencySet, FunctionalDependency};
@@ -155,7 +157,9 @@ impl FunctionalDependencySet {
     /// ```
     pub fn with_key(column_cnt: usize, key_indices: &[usize]) -> Self {
         let mut tmp = Self::new();
-        tmp.add_key_column(column_cnt, key_indices);
+        if !key_indices.is_empty() {
+            tmp.add_key_column(column_cnt, key_indices);
+        }
         tmp
     }
 
@@ -186,9 +190,11 @@ impl FunctionalDependencySet {
             to.len(),
             "from and to should have the same length"
         );
-        match self.strict.iter().position(|elem| elem.from == from) {
-            Some(idx) => self.strict[idx].to.union_with(&to),
-            None => self.strict.push(FunctionalDependency::new(from, to)),
+        if !to.is_clear() {
+            match self.strict.iter().position(|elem| elem.from == from) {
+                Some(idx) => self.strict[idx].to.union_with(&to),
+                None => self.strict.push(FunctionalDependency::new(from, to)),
+            }
         }
     }
 
