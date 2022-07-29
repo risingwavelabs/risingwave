@@ -122,6 +122,7 @@ async fn test_failpoints_state_store_read_upload() {
         .await;
     // clear block cache
     sstable_store.clear_block_cache();
+    sstable_store.clear_meta_cache();
     fail::cfg(mem_read_err, "return").unwrap();
 
     let result = hummock_storage

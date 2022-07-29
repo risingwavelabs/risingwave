@@ -7,7 +7,7 @@
       BatchScan { table: t, columns: [country] }
   stream_plan: |
     StreamMaterialize { columns: [country, t._row_id(hidden)], pk_columns: [t._row_id] }
-      StreamTableScan { table: t, columns: [country, _row_id], pk_indices: [1] }
+      StreamTableScan { table: t, columns: [country, _row_id] }
   create_source:
     row_format: protobuf
     name: s
@@ -33,7 +33,7 @@
     create materialized view t as select * from s;
     select (t).country.city,(t).country,(country).city.address from t;
   logical_plan: |
-    LogicalProject { exprs: [Field($1, 1:Int32), $1, Field(Field($1, 1:Int32), 0:Int32)] }
+    LogicalProject { exprs: [Field(t.country, 1:Int32), t.country, Field(Field(t.country, 1:Int32), 0:Int32)] }
       LogicalScan { table: t, columns: [id, country, zipcode, rate, _row_id] }
   create_source:
     row_format: protobuf
@@ -60,7 +60,7 @@
     create materialized view t as select * from s;
     select (t).country1.city.*,(t.country2).*,(country3).city.* from t;
   logical_plan: |
-    LogicalProject { exprs: [Field(Field($1, 1:Int32), 0:Int32), Field(Field($1, 1:Int32), 1:Int32), Field($2, 0:Int32), Field($2, 1:Int32), Field($2, 2:Int32), Field(Field($3, 1:Int32), 0:Int32), Field(Field($3, 1:Int32), 1:Int32)] }
+    LogicalProject { exprs: [Field(Field(t.country1, 1:Int32), 0:Int32), Field(Field(t.country1, 1:Int32), 1:Int32), Field(t.country2, 0:Int32), Field(t.country2, 1:Int32), Field(t.country2, 2:Int32), Field(Field(t.country3, 1:Int32), 0:Int32), Field(Field(t.country3, 1:Int32), 1:Int32)] }
       LogicalScan { table: t, columns: [id, country1, country2, country3, zipcode, rate, _row_id] }
   create_source:
     row_format: protobuf
@@ -89,8 +89,8 @@
     create materialized view t as select * from s;
     select (c).zipcode from (select (t).country.city as c from t);
   logical_plan: |
-    LogicalProject { exprs: [Field($0, 1:Int32)] }
-      LogicalProject { exprs: [Field($1, 1:Int32)] }
+    LogicalProject { exprs: [Field(Field(t.country, 1:Int32), 1:Int32)] }
+      LogicalProject { exprs: [Field(t.country, 1:Int32)] }
         LogicalScan { table: t, columns: [id, country, zipcode, rate, _row_id] }
   create_source:
     row_format: protobuf
@@ -117,10 +117,10 @@
     create materialized view t as select * from s;
     select (c).zipcode from (select min((t).country.city) as c from t);
   logical_plan: |
-    LogicalProject { exprs: [Field($0, 1:Int32)] }
-      LogicalProject { exprs: [$0] }
-        LogicalAgg { aggs: [min($0)] }
-          LogicalProject { exprs: [Field($1, 1:Int32)] }
+    LogicalProject { exprs: [Field(min(Field(t.country, 1:Int32)), 1:Int32)] }
+      LogicalProject { exprs: [min(Field(t.country, 1:Int32))] }
+        LogicalAgg { aggs: [min(Field(t.country, 1:Int32))] }
+          LogicalProject { exprs: [Field(t.country, 1:Int32)] }
             LogicalScan { table: t, columns: [id, country, zipcode, rate, _row_id] }
   create_source:
     row_format: protobuf
@@ -147,9 +147,9 @@
     create materialized view t as select * from s;
     select * from (select (country).city as c from t) as vv join t on (c).zipcode=(t.country).zipcode;
   logical_plan: |
-    LogicalProject { exprs: [$0, $1, $2, $3, $4] }
-      LogicalJoin { type: Inner, on: (Field($0, 1:Int32) = Field($2, 2:Int32)), output_indices: all }
-        LogicalProject { exprs: [Field($1, 1:Int32)] }
+    LogicalProject { exprs: [Field(t.country, 1:Int32), t.id, t.country, t.zipcode, t.rate] }
+      LogicalJoin { type: Inner, on: (Field(Field(t.country, 1:Int32), 1:Int32) = Field(t.country, 2:Int32)) }
+        LogicalProject { exprs: [Field(t.country, 1:Int32)] }
           LogicalScan { table: t, columns: [id, country, zipcode, rate, _row_id] }
         LogicalScan { table: t, columns: [id, country, zipcode, rate, _row_id] }
   create_source:
@@ -177,9 +177,9 @@
     create materialized view t as select * from s;
     select min((t.country).city.address) + max((t.country).city.address) * count(zipcode) from t;
   logical_plan: |
-    LogicalProject { exprs: [($0 + ($1 * $2))] }
-      LogicalAgg { aggs: [min($0), max($0), count($1)] }
-        LogicalProject { exprs: [Field(Field($1, 1:Int32), 0:Int32), $2] }
+    LogicalProject { exprs: [(min(Field(Field(t.country, 1:Int32), 0:Int32)) + (max(Field(Field(t.country, 1:Int32), 0:Int32)) * count(t.zipcode)))] }
+      LogicalAgg { aggs: [min(Field(Field(t.country, 1:Int32), 0:Int32)), max(Field(Field(t.country, 1:Int32), 0:Int32)), count(t.zipcode)] }
+        LogicalProject { exprs: [Field(Field(t.country, 1:Int32), 0:Int32), t.zipcode] }
           LogicalScan { table: t, columns: [id, country, zipcode, rate, _row_id] }
   create_source:
     row_format: protobuf
@@ -206,10 +206,10 @@
     create materialized view t as select * from s;
     select count(1), count((country).city.zipcode) from t where (country).city.address>1;
   logical_plan: |
-    LogicalProject { exprs: [$0, $1] }
-      LogicalAgg { aggs: [count($0), count($1)] }
-        LogicalProject { exprs: [1:Int32, Field(Field($1, 1:Int32), 1:Int32)] }
-          LogicalFilter { predicate: (Field(Field($1, 1:Int32), 0:Int32) > 1:Int32) }
+    LogicalProject { exprs: [count(1:Int32), count(Field(Field(t.country, 1:Int32), 1:Int32))] }
+      LogicalAgg { aggs: [count(1:Int32), count(Field(Field(t.country, 1:Int32), 1:Int32))] }
+        LogicalProject { exprs: [1:Int32, Field(Field(t.country, 1:Int32), 1:Int32)] }
+          LogicalFilter { predicate: (Field(Field(t.country, 1:Int32), 0:Int32) > 1:Int32) }
             LogicalScan { table: t, columns: [id, country, zipcode, rate, _row_id] }
   create_source:
     row_format: protobuf
@@ -346,8 +346,8 @@
 - sql: |
     select * from s where s.v3 = (1,2,(1,2,3));
   logical_plan: |
-    LogicalProject { exprs: [$1, $2, $3] }
-      LogicalFilter { predicate: ($3 = Row(1:Int32, 2:Int32, Row(1:Int32, 2:Int32, 3:Int32))) }
+    LogicalProject { exprs: [s.v1, s.v2, s.v3] }
+      LogicalFilter { predicate: (s.v3 = Row(1:Int32, 2:Int32, Row(1:Int32, 2:Int32, 3:Int32))) }
         LogicalScan { table: s, columns: [_row_id, v1, v2, v3] }
   create_source:
     row_format: protobuf

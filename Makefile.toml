@@ -5,6 +5,7 @@ extend = [
   { path = "src/risedevtool/etcd.toml" },
   { path = "src/risedevtool/jaeger.toml" },
   { path = "src/risedevtool/kafka.toml" },
+  { path = "src/risedevtool/redis.toml" },
   { path = "src/risedevtool/risedev-components.toml" },
   { path = "src/frontend/test_runner/planner_test.toml" },
 ]
@@ -271,6 +272,7 @@ dependencies = [
   "download-prometheus",
   "download-jaeger",
   "download-kafka",
+  "download-redis",
   "build-risingwave",
   "post-build-risingwave",
   "extract-dashboard-artifact",
@@ -289,6 +291,7 @@ dependencies = [
   "download-prometheus",
   "download-jaeger",
   "download-kafka",
+  "download-redis",
 ]
 
 [tasks.p]

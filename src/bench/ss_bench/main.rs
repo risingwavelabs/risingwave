@@ -27,7 +27,8 @@ use risingwave_common::monitor::Print;
 use risingwave_meta::hummock::test_utils::setup_compute_env;
 use risingwave_meta::hummock::MockHummockMetaClient;
 use risingwave_storage::hummock::compaction_executor::CompactionExecutor;
-use risingwave_storage::hummock::compactor::{get_remote_sstable_id_generator, CompactorContext};
+use risingwave_storage::hummock::compactor::CompactorContext;
+use risingwave_storage::hummock::MemoryLimiter;
 use risingwave_storage::monitor::{ObjectStoreMetrics, StateStoreMetrics};
 use risingwave_storage::{dispatch_state_store, StateStoreImpl};
 
@@ -172,7 +173,7 @@ async fn main() {
         local_object_store: "memory".to_string(),
         share_buffer_compaction_worker_threads_number: 1,
         share_buffer_upload_concurrency: 4,
-        ..Default::default()
+        compactor_memory_limit_mb: opts.meta_cache_capacity_mb as usize * 2,
     });
 
     let (_env, hummock_manager_ref, _cluster_manager_ref, worker_node) =
@@ -203,13 +204,11 @@ async fn main() {
                 sstable_store: hummock.sstable_store(),
                 stats: state_store_stats.clone(),
                 is_share_buffer_compact: false,
-                sstable_id_generator: get_remote_sstable_id_generator(
-                    mock_hummock_meta_client.clone(),
-                ),
                 compaction_executor: Some(Arc::new(CompactionExecutor::new(Some(
                     config.share_buffer_compaction_worker_threads_number as usize,
                 )))),
                 table_id_to_slice_transform: table_id_to_slice_transform.clone(),
+                memory_limiter: Arc::new(MemoryLimiter::new(1024 * 1024 * 128)),
             }),
             hummock.local_version_manager(),
         ));

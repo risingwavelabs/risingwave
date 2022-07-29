@@ -45,6 +45,7 @@ mod state_store;
 #[cfg(any(test, feature = "test"))]
 pub mod test_utils;
 mod utils;
+pub use utils::MemoryLimiter;
 pub mod vacuum;
 pub mod value;
 

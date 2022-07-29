@@ -124,6 +124,7 @@ impl From<&ProstDataType> for DataType {
                 // The first (and only) item is the list element type.
                 datatype: Box::new((&proto.field_type[0]).into()),
             },
+            TypeName::TypeUnspecified => unreachable!(),
         }
     }
 }
@@ -359,11 +360,12 @@ pub fn serialize_datum_ref_into(
     datum_ref: &DatumRef,
     serializer: &mut memcomparable::Serializer<impl BufMut>,
 ) -> memcomparable::Result<()> {
+    // By default, `null` is treated as largest in PostgreSQL.
     if let Some(datum_ref) = datum_ref {
-        1u8.serialize(&mut *serializer)?;
+        0u8.serialize(&mut *serializer)?;
         datum_ref.serialize(serializer)?;
     } else {
-        0u8.serialize(serializer)?;
+        1u8.serialize(serializer)?;
     }
     Ok(())
 }
@@ -384,11 +386,12 @@ pub fn serialize_datum_into(
     datum: &Datum,
     serializer: &mut memcomparable::Serializer<impl BufMut>,
 ) -> memcomparable::Result<()> {
+    // By default, `null` is treated as largest in PostgreSQL.
     if let Some(datum) = datum {
-        1u8.serialize(&mut *serializer)?;
+        0u8.serialize(&mut *serializer)?;
         datum.serialize(serializer)?;
     } else {
-        0u8.serialize(serializer)?;
+        1u8.serialize(serializer)?;
     }
     Ok(())
 }
@@ -411,8 +414,8 @@ pub fn deserialize_datum_from(
 ) -> memcomparable::Result<Datum> {
     let null_tag = u8::deserialize(&mut *deserializer)?;
     match null_tag {
-        0 => Ok(None),
-        1 => Ok(Some(ScalarImpl::deserialize(ty.clone(), deserializer)?)),
+        1 => Ok(None),
+        0 => Ok(Some(ScalarImpl::deserialize(ty.clone(), deserializer)?)),
         _ => Err(memcomparable::Error::InvalidTagEncoding(null_tag as _)),
     }
 }
@@ -757,8 +760,8 @@ impl ScalarImpl {
         let base_position = deserializer.position();
         let null_tag = u8::deserialize(&mut *deserializer)?;
         match null_tag {
-            0 => {}
-            1 => {
+            1 => {}
+            0 => {
                 use std::mem::size_of;
                 let len = match data_type {
                     DataType::Int16 => size_of::<i16>(),
@@ -865,7 +868,7 @@ impl ScalarImpl {
             ),
             TypeName::Interval => ScalarImpl::Interval(IntervalUnit::from_protobuf_bytes(
                 b,
-                data_type.get_interval_type()?,
+                data_type.get_interval_type().unwrap_or(Unspecified),
             )?),
             TypeName::Timestamp => {
                 ScalarImpl::NaiveDateTime(NaiveDateTimeWrapper::from_protobuf_bytes(b)?)

@@ -250,6 +250,18 @@ pub struct RedPandaConfig {
     pub memory: String,
 }
 
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "kebab-case")]
+#[serde(deny_unknown_fields)]
+pub struct RedisConfig {
+    #[serde(rename = "use")]
+    phantom_use: Option<String>,
+    pub id: String,
+
+    pub port: u16,
+    pub address: String,
+}
+
 /// All service configuration
 #[derive(Clone, Debug, PartialEq)]
 pub enum ServiceConfig {
@@ -264,6 +276,7 @@ pub enum ServiceConfig {
     Jaeger(JaegerConfig),
     AwsS3(AwsS3Config),
     Kafka(KafkaConfig),
+    Redis(RedisConfig),
     ZooKeeper(ZooKeeperConfig),
     RedPanda(RedPandaConfig),
 }
@@ -283,6 +296,7 @@ impl ServiceConfig {
             Self::AwsS3(c) => &c.id,
             Self::ZooKeeper(c) => &c.id,
             Self::Kafka(c) => &c.id,
+            Self::Redis(c) => &c.id,
             Self::RedPanda(c) => &c.id,
         }
     }
