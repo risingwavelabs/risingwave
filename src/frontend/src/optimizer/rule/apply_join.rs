@@ -149,6 +149,7 @@ impl Rule for ApplyJoinRule {
                     .map(|expr| right_apply_condition_rewriter.rewrite_expr(expr))
                     .collect_vec();
             }
+            JoinType::Unspecified => unreachable!(),
         }
 
         let new_join_left = LogicalApply::create(
@@ -185,12 +186,35 @@ impl Rule for ApplyJoinRule {
             JoinType::Inner | JoinType::LeftOuter | JoinType::RightOuter | JoinType::FullOuter => {
                 // use project to provide a natural join
                 let mut project_exprs: Vec<ExprImpl> = vec![];
+
+                let d_offset = if join.join_type() == JoinType::RightOuter {
+                    new_join_left.schema().len()
+                } else {
+                    0
+                };
+
+                project_exprs.extend(
+                    apply_left
+                        .schema()
+                        .fields
+                        .iter()
+                        .enumerate()
+                        .map(|(i, field)| {
+                            ExprImpl::InputRef(Box::new(InputRef::new(
+                                i + d_offset,
+                                field.data_type.clone(),
+                            )))
+                        })
+                        .collect_vec(),
+                );
+
                 project_exprs.extend(
                     new_join_left
                         .schema()
                         .fields
                         .iter()
                         .enumerate()
+                        .skip(apply_left_len)
                         .map(|(i, field)| {
                             ExprImpl::InputRef(Box::new(InputRef::new(i, field.data_type.clone())))
                         })
@@ -205,7 +229,7 @@ impl Rule for ApplyJoinRule {
                         .skip(apply_left_len)
                         .map(|(i, field)| {
                             ExprImpl::InputRef(Box::new(InputRef::new(
-                                i + new_join_left.schema().fields.len(),
+                                i + new_join_left.schema().len(),
                                 field.data_type.clone(),
                             )))
                         })
@@ -224,6 +248,7 @@ impl Rule for ApplyJoinRule {
 
                 Some(new_filter)
             }
+            JoinType::Unspecified => unreachable!(),
         }
     }
 }
@@ -235,6 +260,7 @@ impl ApplyJoinRule {
         right: usize,
         right_data_type: DataType,
     ) -> ExprImpl {
+        // TODO: use is not distinct from instead of equal
         ExprImpl::FunctionCall(Box::new(FunctionCall::new_unchecked(
             ExprType::Equal,
             vec![

@@ -99,8 +99,9 @@ message ActorMapping {
 // todo: StreamSourceNode or TableSourceNode
 message SourceNode {
   enum SourceType {
-    TABLE = 0;
-    SOURCE = 1;
+    UNSPECIFIED = 0;
+    TABLE = 1;
+    SOURCE = 2;
   }
   uint32 table_id = 1;
   repeated int32 column_ids = 2;
@@ -294,6 +295,8 @@ message ArrangeNode {
   ArrangementInfo table_info = 3;
   // Hash key of the materialize node, which is a subset of pk.
   repeated uint32 distribution_key = 4;
+  // Used for internal table states.
+  catalog.Table table = 5;
 }
 
 // Special node for shared state. LookupNode will join an arrangement with a stream.
@@ -379,7 +382,7 @@ message StreamNode {
 }
 
 enum DispatcherType {
-  INVALID = 0;
+  UNSPECIFIED = 0;
   // Dispatch by hash key, hashed by consistent hash.
   HASH = 1;
   // Broadcast to all downstreams.
@@ -436,9 +439,10 @@ message StreamActor {
 }
 
 enum FragmentType {
-  OTHERS = 0;
-  SOURCE = 1;
-  SINK = 2;
+  FRAGMENT_UNSPECIFIED = 0;
+  OTHERS = 1;
+  SOURCE = 2;
+  SINK = 3;
 }
 
 message StreamFragmentGraph {
