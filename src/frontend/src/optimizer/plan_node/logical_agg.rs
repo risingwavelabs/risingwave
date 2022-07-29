@@ -777,7 +777,7 @@ impl LogicalAgg {
 
     fn derive_fd(
         column_cnt: usize,
-        input_column_cnt: usize,
+        input_len: usize,
         input_fd_set: &FunctionalDependencySet,
         group_key: &[usize],
     ) -> FunctionalDependencySet {
@@ -786,7 +786,7 @@ impl LogicalAgg {
             &(0..group_key.len()).into_iter().collect_vec(),
         );
         // take group keys from input_columns, then grow the target size to column_cnt
-        let i2o = ColIndexMapping::with_remaining_columns(group_key, input_column_cnt).composite(
+        let i2o = ColIndexMapping::with_remaining_columns(group_key, input_len).composite(
             &ColIndexMapping::identity_or_none(group_key.len(), column_cnt),
         );
         for fd in input_fd_set.as_dependencies() {

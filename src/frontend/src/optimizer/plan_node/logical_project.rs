@@ -94,7 +94,8 @@ impl LogicalProject {
             assert!(!expr.has_subquery());
             assert!(!expr.has_agg_call());
         }
-        let functional_dependency = Self::derive_fd(input.functional_dependency(), &exprs);
+        let functional_dependency =
+            Self::derive_fd(input.schema().len(), input.functional_dependency(), &exprs);
         let base = PlanBase::new_logical(ctx, schema, pk_indices, functional_dependency);
         LogicalProject { base, exprs, input }
     }
@@ -204,42 +205,15 @@ impl LogicalProject {
     }
 
     fn derive_fd(
+        input_len: usize,
         input_fd_set: &FunctionalDependencySet,
         exprs: &[ExprImpl],
     ) -> FunctionalDependencySet {
-        // input indices -> current indices
-        let i2o: HashMap<usize, usize> = exprs
-            .iter()
-            .enumerate()
-            .filter_map(|(idx, expr)| {
-                expr.as_input_ref()
-                    .map(|input_ref| (input_ref.index(), idx))
-            })
-            .collect();
+        let i2o = Self::i2o_col_mapping_inner(input_len, exprs);
         let mut fd_set = FunctionalDependencySet::new();
-        for i in input_fd_set.as_dependencies() {
-            // if all columns in the left side are kept, and some columns in the right side are
-            // kept, then we can keep this functional dependency.
-            if i.from.ones().all(|idx| i2o.contains_key(&idx))
-                && i.to.ones().any(|idx| i2o.contains_key(&idx))
-            {
-                let from = {
-                    let mut from = FixedBitSet::with_capacity(exprs.len());
-                    for i in i.from.ones() {
-                        from.set(i2o[&i], true);
-                    }
-                    from
-                };
-                let to = {
-                    let mut to = FixedBitSet::with_capacity(exprs.len());
-                    for i in i.to.ones() {
-                        if let Some(new_idx) = i2o.get(&i) {
-                            to.set(*new_idx, true);
-                        }
-                    }
-                    to
-                };
-                fd_set.add_functional_dependency(FunctionalDependency::new(from, to));
+        for fd in input_fd_set.as_dependencies() {
+            if let Some(fd) = i2o.rewrite_functional_dependency(fd) {
+                fd_set.add_functional_dependency(fd);
             }
         }
         fd_set
