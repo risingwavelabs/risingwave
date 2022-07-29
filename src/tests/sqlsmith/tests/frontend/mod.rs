@@ -106,7 +106,7 @@ async fn create_tables(session: Arc<SessionImpl>, rng: &mut impl Rng) -> (Vec<Ta
     (tables, setup_sql)
 }
 
-fn test_batch_queries(session: Arc<SessionImpl>, tables: Vec<Table>, seed: u64, setup_sql: &str) {
+fn test_batch_query(session: Arc<SessionImpl>, tables: Vec<Table>, seed: u64, setup_sql: &str) {
     let mut rng;
     if let Ok(x) = env::var("RW_RANDOM_SEED_SQLSMITH") && x == "true" {
         rng = SmallRng::from_entropy();
@@ -190,7 +190,7 @@ pub fn run() {
             tables,
             setup_sql,
         } = &*SQLSMITH_ENV;
-        test_batch_queries(session.clone(), tables.clone(), test.data, &setup_sql);
+        test_batch_query(session.clone(), tables.clone(), test.data, &setup_sql);
         Outcome::Passed
     })
     .exit();
