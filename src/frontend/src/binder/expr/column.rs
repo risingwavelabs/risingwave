@@ -36,7 +36,9 @@ impl Binder {
             }
         };
 
-        let result = self.context.get_column_binding_index(&table_name, &column_name);
+        let result = self
+            .context
+            .get_column_binding_index(&table_name, &column_name);
         match result {
             Ok(index) => {
                 let column = &self.context.columns[index];
