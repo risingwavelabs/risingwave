@@ -185,6 +185,7 @@ async fn write_to_mysql<'a>(
             .iter()
             .zip_eq(schema.names().iter())
             .filter_map(|(c, n)| {
+                // Exclude row id column.
                 if !n.ends_with("_row_id") {
                     Some(MySQLValue::try_from(c.array_ref().datum_at(idx)))
                 } else {
