@@ -96,7 +96,7 @@ steps:
   #   retry: *auto-retry
 
   - label: "initialize mysql"
-    key: "initialize mysql"
+    key: "mysql"
     plugins:
       - gencer/cache#v2.4.10: *cargo-cache
       - docker-compose#v3.9.0:
@@ -108,8 +108,8 @@ steps:
 
   - label: "end-to-end sink test"
     depends_on:
-      "build"
-      "initialize mysql"
+      - "build"
+      - "mysql"
     plugins:
       - gencer/cache#v2.4.10: *cargo-cache
       - docker-compose#v3.9.0:
