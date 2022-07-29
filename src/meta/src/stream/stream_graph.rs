@@ -579,7 +579,17 @@ impl StreamGraphBuilder {
 
                     NodeBody::Arrange(node) => {
                         node.table_id += table_id_offset;
-                        check_and_fill_internal_table(node.table_id, None);
+                        if let Some(table) = &mut node.table {
+                            table.id += table_id_offset;
+                            table.schema_id = ctx.schema_id;
+                            table.database_id = ctx.database_id;
+                            table.name = generate_intertable_name_with_type(
+                                &ctx.mview_name,
+                                table.id,
+                                "ArrangeNode",
+                            );
+                            check_and_fill_internal_table(table.id, Some(table.clone()));
+                        }
                     }
 
                     NodeBody::HashAgg(node) => {
