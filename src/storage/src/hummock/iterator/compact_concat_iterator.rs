@@ -13,8 +13,6 @@
 // limitations under the License.
 
 use std::cmp::Ordering;
-use std::collections::binary_heap::PeekMut;
-use std::collections::{BinaryHeap, LinkedList};
 use std::future::Future;
 use std::sync::Arc;
 
@@ -26,7 +24,7 @@ use crate::hummock::sstable::SstableIteratorReadOptions;
 use crate::hummock::sstable_store::SstableStoreRef;
 use crate::hummock::value::HummockValue;
 use crate::hummock::{HummockResult, SstableIterator};
-use crate::monitor::{StateStoreMetrics, StoreLocalStatistic};
+use crate::monitor::StoreLocalStatistic;
 
 pub struct ConcatSstableIterator {
     /// The iterator of the current table.

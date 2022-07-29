@@ -35,10 +35,8 @@ mod merge_inner;
 pub use forward_user::*;
 pub use merge_inner::{MergeIteratorNext, OrderedMergeIteratorInner, UnorderedMergeIteratorInner};
 
-mod fast_merge_concat_iterator;
-pub use fast_merge_concat_iterator::{
-    new_fast_merge_concat_iterator, ConcatSstableIterator, FastMergeConcatIterator,
-};
+mod compact_concat_iterator;
+pub use compact_concat_iterator::ConcatSstableIterator;
 
 use crate::hummock::iterator::HummockIteratorUnion::{First, Fourth, Second, Third};
 use crate::hummock::SstableIterator;
