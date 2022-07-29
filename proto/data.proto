@@ -14,7 +14,7 @@ message IntervalUnit {
 
 message DataType {
   enum IntervalType {
-    INVALID = 0;
+    UNSPECIFIED = 0;
     YEAR = 1;
     MONTH = 2;
     DAY = 3;
@@ -30,12 +30,13 @@ message DataType {
     MINUTE_TO_SECOND = 13;
   }
   enum TypeName {
-    INT16 = 0;
-    INT32 = 1;
-    INT64 = 2;
-    FLOAT = 3;
-    DOUBLE = 4;
-    BOOLEAN = 5;
+    TYPE_UNSPECIFIED = 0;
+    INT16 = 1;
+    INT32 = 2;
+    INT64 = 3;
+    FLOAT = 4;
+    DOUBLE = 5;
+    BOOLEAN = 6;
     VARCHAR = 7;
     DECIMAL = 8;
     TIME = 9;
@@ -74,20 +75,21 @@ message ListArrayData {
 }
 
 enum ArrayType {
-  INT16 = 0;
-  INT32 = 1;
-  INT64 = 2;
-  FLOAT32 = 3;
-  FLOAT64 = 4;
-  UTF8 = 5;
-  BOOL = 6;
-  DECIMAL = 7;
-  DATE = 8;
-  TIME = 9;
-  TIMESTAMP = 10;
-  INTERVAL = 11;
-  STRUCT = 12;
-  LIST = 13;
+  UNSPECIFIED = 0;
+  INT16 = 1;
+  INT32 = 2;
+  INT64 = 3;
+  FLOAT32 = 4;
+  FLOAT64 = 5;
+  UTF8 = 6;
+  BOOL = 7;
+  DECIMAL = 8;
+  DATE = 9;
+  TIME = 10;
+  TIMESTAMP = 11;
+  INTERVAL = 12;
+  STRUCT = 13;
+  LIST = 14;
 }
 
 message Array {
@@ -111,10 +113,11 @@ message DataChunk {
 }
 
 enum Op {
-  INSERT = 0;
-  DELETE = 1;
-  UPDATE_INSERT = 2;
-  UPDATE_DELETE = 3;
+  OP_UNSPECIFIED = 0;
+  INSERT = 1;
+  DELETE = 2;
+  UPDATE_INSERT = 3;
+  UPDATE_DELETE = 4;
 }
 
 message StreamChunk {
