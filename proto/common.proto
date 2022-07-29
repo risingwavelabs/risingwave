@@ -6,7 +6,8 @@ option optimize_for = SPEED;
 
 message Status {
   enum Code {
-    OK = 0;
+    UNSPECIFIED = 0;
+    OK = 1;
   }
   Code code = 1;
   string message = 2;
@@ -24,10 +25,11 @@ message ActorInfo {
 }
 
 enum WorkerType {
-  FRONTEND = 0;
-  COMPUTE_NODE = 1;
-  RISE_CTL = 2;
-  COMPACTOR = 3;
+  UNSPECIFIED = 0;
+  FRONTEND = 1;
+  COMPUTE_NODE = 2;
+  RISE_CTL = 3;
+  COMPACTOR = 4;
 
   GENERIC = 100;
 }
@@ -39,8 +41,9 @@ message ParallelUnit {
 
 message WorkerNode {
   enum State {
-    STARTING = 0;
-    RUNNING = 1;
+    UNSPECIFIED = 0;
+    STARTING = 1;
+    RUNNING = 2;
   }
   uint32 id = 1;
   WorkerType type = 2;
@@ -51,7 +54,7 @@ message WorkerNode {
 
 message Buffer {
   enum CompressionType {
-    INVALID = 0;
+    UNSPECIFIED = 0;
     NONE = 1;
   }
   CompressionType compression = 1;
@@ -63,10 +66,4 @@ message ParallelUnitMapping {
   uint32 table_id = 1;
   repeated uint64 original_indices = 2;
   repeated uint32 data = 3;
-}
-
-// Bitmap that records whether vnodes are present.
-message VNodeBitmap {
-  uint32 table_id = 1;
-  Buffer bitmap = 2;
 }

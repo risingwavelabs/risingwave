@@ -406,7 +406,7 @@ impl ClusterManagerCore {
                 None => true,
                 Some(state) => state as i32 == w.state,
             })
-            .collect::<Vec<_>>()
+            .collect_vec()
     }
 
     fn list_parallel_units(&self) -> Vec<ParallelUnit> {
