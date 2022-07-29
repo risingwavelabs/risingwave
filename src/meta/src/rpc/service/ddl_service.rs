@@ -503,7 +503,6 @@ where
                     if let NodeBody::Materialize(materialize_node) =
                         stream_node.node_body.as_mut().unwrap()
                     {
-                        materialize_node.table_id = mview_id.table_id();
                         materialize_node.table.as_mut().unwrap().id = mview_id.table_id();
                         mview_count += 1;
                     }
