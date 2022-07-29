@@ -29,7 +29,6 @@ services:
 
   mysql:
     image: mysql/mysql-server:latest
-    hostname: mysql
     container_name: mysql
     ports:
       - '3306:3306'
@@ -44,12 +43,6 @@ services:
     networks:
       nw:
         ipv4_address: 172.24.2.1
-
-  sink:
-    image: rw-build-env
-    depends_on:
-      mysql:
-        condition: service_healthy
 
 networks:
   nw:
