@@ -21,5 +21,4 @@ fn main() {
 }
 
 #[cfg(not(feature = "enable_sqlsmith_unit_test"))]
-fn main() {
-}
+fn main() {}

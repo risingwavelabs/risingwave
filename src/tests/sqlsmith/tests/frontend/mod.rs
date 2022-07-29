@@ -156,9 +156,7 @@ fn setup_sqlsmith_with_seed(seed: u64) -> SqlsmithEnv {
         .enable_all()
         .build()
         .unwrap()
-        .block_on(async {
-            setup_sqlsmith_with_seed_inner(seed).await
-        })
+        .block_on(setup_sqlsmith_with_seed_inner(seed))
 }
 
 async fn setup_sqlsmith_with_seed_inner(seed: u64) -> SqlsmithEnv {
