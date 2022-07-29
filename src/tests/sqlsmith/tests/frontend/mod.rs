@@ -15,7 +15,6 @@
 use std::sync::Arc;
 use std::{env, panic};
 
-use futures::executor::block_on;
 use itertools::Itertools;
 use libtest_mimic::{run_tests, Arguments, Outcome, Test};
 use rand::rngs::SmallRng;
@@ -152,7 +151,13 @@ fn test_batch_queries(session: Arc<SessionImpl>, tables: Vec<Table>, seed: u64, 
 }
 
 fn setup_sqlsmith_with_seed(seed: u64) -> SqlsmithEnv {
-    block_on(setup_sqlsmith_with_seed_inner(seed))
+    tokio::runtime::Builder::new_multi_thread()
+        .enable_all()
+        .build()
+        .unwrap()
+        .block_on(async {
+            setup_sqlsmith_with_seed_inner(seed).await
+        })
 }
 
 async fn setup_sqlsmith_with_seed_inner(seed: u64) -> SqlsmithEnv {
