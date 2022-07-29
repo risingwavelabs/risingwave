@@ -137,7 +137,6 @@ impl Command {
 
     /// If we need to send a barrier to modify actor configuration, we will pause the barrier
     /// injection. return true.
-    // TODO: unused now, `Pause` still runs concurrently and may cause problems.
     pub fn should_pause_inject_barrier(&self) -> bool {
         // Note: the meaning for `Pause` is not pausing the periodic barrier injection, but for
         // pausing the sources on compute nodes. However, `Pause` is used for configuration change
