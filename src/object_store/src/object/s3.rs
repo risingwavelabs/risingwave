@@ -50,7 +50,7 @@ impl ObjectStore for S3ObjectStore {
         fail_point!("s3_read_err", |_| Err(ObjectError::internal(
             "s3 read error"
         )));
-        let req = self.obj_store_request(path, block_loc);
+        let req = self.obj_store_request(path, block_loc, true);
         let resp = req.send().await?;
         let val = resp.body.collect().await?.into_bytes();
 
@@ -98,22 +98,11 @@ impl ObjectStore for S3ObjectStore {
         fail_point!("s3_streaming_read_err", |_| Err(ObjectError::internal(
             "s3 streaming read error"
         )));
-        let req = self.obj_store_request(path, block_loc);
 
+        let req = self.obj_store_request(path, block_loc, false);
         let resp = req.send().await?;
-        Ok(Box::new(resp.body.into_async_read()))
 
-        // TODO: we may wrap stream to check an `expected_bytes: Option<usize>` parameter.
-        //
-        // if block_loc.is_some() && block_loc.as_ref().unwrap().size != val.len() {
-        //     return Err(ObjectError::internal(format!(
-        //         "mismatched size: expected {}, found {} when reading {} at {:?}",
-        //         block_loc.as_ref().unwrap().size,
-        //         val.len(),
-        //         path,
-        //         block_loc.as_ref().unwrap()
-        //     )));
-        // }
+        Ok(Box::new(resp.body.into_async_read()))
     }
 
     /// Permanently deletes the whole object.
@@ -169,18 +158,33 @@ impl S3ObjectStore {
         }
     }
 
-    fn obj_store_request(&self, path: &str, block_loc: Option<BlockLocation>) -> GetObject {
+    /// Generates an HTTP GET request to download the object specified in `path`. If `block_loc` is
+    /// given, the request is adjusted to start at that block and, if `limit_to_block` is true, to
+    /// only download that block. If `block_loc` is `None`, the function ignores `limit_to_block`.
+    fn obj_store_request(
+        &self,
+        path: &str,
+        block_loc: Option<BlockLocation>,
+        limit_to_block: bool,
+    ) -> GetObject {
         let req = self.client.get_object().bucket(&self.bucket).key(path);
 
-        let range = match block_loc.as_ref() {
-            None => None,
-            Some(block_location) => block_location.byte_range_specifier(),
-        };
+        match block_loc {
+            None => {
+                // Return request without range.
+                req
+            }
+            Some(block_location) => {
+                let range = if limit_to_block {
+                    block_location.byte_range_specifier()
+                } else {
+                    block_location.byte_start_specifier()
+                };
 
-        if let Some(range) = range {
-            req.range(range)
-        } else {
-            req
+                req.range(
+                    range.unwrap(), // Both functions never return `None`.
+                )
+            }
         }
     }
 }
