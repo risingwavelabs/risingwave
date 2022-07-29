@@ -50,7 +50,7 @@ struct Cost {
     ttlb: Duration,
     /// time to live
     ttl: Duration,
-
+    /// time to per part
     part_ttls: Vec<Duration>,
 }
 #[derive(Default)]
@@ -139,12 +139,11 @@ enum Case {
 
 #[derive(Parser, Debug)]
 pub struct Config {
-    /// AWS S3 Bucket, either <BUCKET> or <ENDPOINT> should be given.
+    /// AWS S3 Bucket, either <BUCKET> should be given.
     #[clap(short, long)]
     bucket: String,
 
-    /// AWS S3 Endpoint, either <BUCKET> or <ENDPOINT> should be given.
-    /// Format: <AccessPointName>-<AccountId>.s3-accesspoint.<Region>.amazonaws.com[.cn]
+    /// AWS S3 Endpoint
     #[clap(short, long)]
     endpoint: Option<String>,
 
