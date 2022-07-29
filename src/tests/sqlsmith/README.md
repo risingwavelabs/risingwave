@@ -33,10 +33,3 @@ you can try:
 ```
 
 Check out ft.txt that will contain all the function signatures.
-
-## Debugging
-
-SQLSmith will currently just print to stdout, without pretty printing.
-
-In the future pretty printing may be supported as a cli option.
-For now you could pipe output to `pgformatter` or other formatting tools.
