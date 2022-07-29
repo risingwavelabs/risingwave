@@ -97,6 +97,8 @@ message ExprNode {
     // Search operator and Search ARGument
     SEARCH = 998;
     SARG = 999;
+    // Internal functions
+    VNODE = 1101;
   }
   Type expr_type = 1;
   data.DataType return_type = 3;
