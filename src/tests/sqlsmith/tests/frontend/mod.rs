@@ -106,10 +106,6 @@ async fn create_tables(session: Arc<SessionImpl>, rng: &mut impl Rng) -> (Vec<Ta
     (tables, setup_sql)
 }
 
-#[allow(dead_code)]
-#[allow(unreachable_code)]
-#[allow(unused_variables)]
-#[allow(unused_mut)]
 fn test_batch_queries(session: Arc<SessionImpl>, tables: Vec<Table>, seed: u64, setup_sql: &str) {
     let mut rng;
     if let Ok(x) = env::var("RW_RANDOM_SEED_SQLSMITH") && x == "true" {
@@ -129,16 +125,13 @@ fn test_batch_queries(session: Arc<SessionImpl>, tables: Vec<Table>, seed: u64, 
 
     match stmt.clone() {
         Statement::Query(_) => {
-            // nextest will only print to stderr if test fails
             let mut binder = Binder::new(
                 session.env().catalog_reader().read_guard(),
                 session.database().to_string(),
             );
-            panic!("Failed to bind");
-            let bound = todo!();
-            // let bound = binder
-            //     .bind(stmt.clone())
-            //     .unwrap_or_else(|e| panic!("Failed to bind:\nReason:\n{}", e));
+            let bound = binder
+                .bind(stmt.clone())
+                .unwrap_or_else(|e| panic!("Failed to bind:\nReason:\n{}", e));
             let mut planner = Planner::new(context.clone());
             let logical_plan = planner
                 .plan(bound)
