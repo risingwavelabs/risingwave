@@ -112,6 +112,23 @@ pub struct FunctionalDependencySet {
     strict: Vec<FunctionalDependency>,
 }
 
+impl fmt::Display for FunctionalDependencySet {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.write_str("FdSet: {")?;
+        for fd in self.strict.iter().with_position() {
+            match fd {
+                itertools::Position::First(fd) | itertools::Position::Middle(fd) => {
+                    f.write_fmt(format_args!("{}, ", fd))?;
+                }
+                itertools::Position::Last(fd) | itertools::Position::Only(fd) => {
+                    f.write_fmt(format_args!("{}", fd))?;
+                }
+            }
+        }
+        f.write_str("}")
+    }
+}
+
 impl FunctionalDependencySet {
     /// Create a empty [`FunctionalDependencySet`]
     pub fn new() -> Self {
@@ -304,7 +321,14 @@ impl FunctionalDependencySet {
     /// This algorithm removes columns one by one and check
     /// whether the remaining columns can form a key or not. If the remaining columns can form a
     /// key, then this column can be removed.
-    pub fn minimize_key(&self, key: FixedBitSet) -> FixedBitSet {
+    pub fn minimize_key(&self, key_indices: &[usize], column_cnt: usize) -> Vec<usize> {
+        let mut key_bitset = FixedBitSet::from_iter(key_indices.iter().copied());
+        key_bitset.grow(column_cnt);
+        let res = self.minimize_key_inner(key_bitset);
+        res.ones().collect_vec()
+    }
+
+    fn minimize_key_inner(&self, key: FixedBitSet) -> FixedBitSet {
         let mut new_key = key.clone();
         for i in key.ones() {
             new_key.set(i, false);
