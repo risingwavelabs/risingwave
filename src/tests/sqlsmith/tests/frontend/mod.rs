@@ -67,6 +67,7 @@ fn reproduce_failing_queries(setup: &str, failing: &str) {
 
 -- Failing SQL setup code:
 {}
+
 -- Failing SQL query:
 {}
 
