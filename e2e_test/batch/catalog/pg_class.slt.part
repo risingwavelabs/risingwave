@@ -1,0 +1,23 @@
+statement ok
+create table t1;
+
+statement ok
+create materialized view t2 as select * from t1;
+
+query ITIIT
+SELECT * FROM pg_catalog.pg_class ORDER BY oid;
+----
+1 pg_type 1 1 system table
+2 pg_namespace 1 1 system table
+3 pg_cast 1 1 system table
+4 pg_matviews_info 1 1 system table
+5 pg_user 1 1 system table
+6 pg_class 1 1 system table
+1002 t1 0 2 table
+1003 t2 0 2 materialized view
+
+statement ok
+drop materialized view t2;
+
+statement ok
+drop table t1;
