@@ -82,25 +82,23 @@ impl UserManagerInner {
         self.user_info.insert(user.id, user);
     }
 
-    fn update_user(&mut self, update_user: UserInfo, update_fields: &[i32]) {
+    fn update_user(&mut self, update_user: &UserInfo, update_fields: &[UpdateField]) -> UserInfo {
         let mut user = self.user_info.get(&update_user.id).unwrap().clone();
-        update_fields.iter().for_each(|&field| {
-            if field == UpdateField::Super as i32 {
-                user.is_supper = update_user.is_supper;
-            } else if field == UpdateField::Login as i32 {
-                user.can_login = update_user.can_login;
-            } else if field == UpdateField::CreateDb as i32 {
-                user.can_create_db = update_user.can_create_db;
-            } else if field == UpdateField::AuthInfo as i32 {
-                user.auth_info = update_user.auth_info.clone();
-            } else if field == UpdateField::Rename as i32 {
+        update_fields.iter().for_each(|&field| match field {
+            UpdateField::Unknown => unreachable!(),
+            UpdateField::Super => user.is_supper = update_user.is_supper,
+            UpdateField::Login => user.can_login = update_user.can_login,
+            UpdateField::CreateDb => user.can_create_db = update_user.can_create_db,
+            UpdateField::AuthInfo => user.auth_info = update_user.auth_info.clone(),
+            UpdateField::Rename => {
                 self.all_users.remove(&user.name);
                 user.name = update_user.name.clone();
                 self.all_users.insert(update_user.name.clone());
             }
         });
 
-        self.user_info.insert(update_user.id, user);
+        self.user_info.insert(update_user.id, user.clone());
+        user
     }
 
     fn drop_user(&mut self, user_id: UserId) {
@@ -186,13 +184,13 @@ impl<S: MetaStore> UserManager<S> {
 
     pub async fn update_user(
         &self,
-        user: &mut UserInfo,
-        update_fields: &[i32],
+        user: &UserInfo,
+        update_fields: &[UpdateField],
     ) -> Result<NotificationVersion> {
         let mut core = self.core.lock().await;
         let rename_flag = update_fields
             .iter()
-            .any(|&field| field == UpdateField::Rename as i32);
+            .any(|&field| field == UpdateField::Rename);
         if rename_flag && core.all_users.contains(&user.name) {
             return Err(RwError::from(PermissionDenied(format!(
                 "User {} already exists",
@@ -200,12 +198,12 @@ impl<S: MetaStore> UserManager<S> {
             ))));
         }
         user.insert(self.env.meta_store()).await?;
-        core.update_user(user.clone(), update_fields);
+        let new_user = core.update_user(user, update_fields);
 
         let version = self
             .env
             .notification_manager()
-            .notify_frontend(Operation::Update, Info::User(user.to_owned()))
+            .notify_frontend(Operation::Update, Info::User(new_user))
             .await;
         Ok(version)
     }
