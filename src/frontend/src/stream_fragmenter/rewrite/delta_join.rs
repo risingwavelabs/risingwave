@@ -17,6 +17,7 @@ use risingwave_common::catalog::{ColumnDesc, ColumnId, DatabaseId, Field, Schema
 use risingwave_common::error::Result;
 use risingwave_common::try_match_expand;
 use risingwave_common::util::sort_util::{OrderPair, OrderType};
+use risingwave_pb::catalog::Table;
 use risingwave_pb::plan_common::{ColumnOrder, Field as ProstField, OrderType as ProstOrderType};
 use risingwave_pb::stream_plan::lookup_node::ArrangementTableId;
 use risingwave_pb::stream_plan::stream_node::NodeBody;
@@ -115,6 +116,7 @@ impl StreamFragmenter {
         exchange_node: &StreamNode,
         arrange_key_indexes: Vec<i32>,
         table_id: u32,
+        table_catalog: &Table,
     ) -> (ArrangementInfo, StreamNode) {
         // Set materialize keys as arrange key + pk
         let arrange_key_orders = arrange_key_indexes
@@ -149,7 +151,6 @@ impl StreamFragmenter {
             arrange_key_orders,
             column_descs,
         };
-
         (
             arrangement_info.clone(),
             StreamNode {
@@ -163,6 +164,7 @@ impl StreamFragmenter {
                     // Requires arrange key at the first few columns. This is always true for delta
                     // join.
                     distribution_key: arrange_key_indexes.iter().map(|x| *x as _).collect(),
+                    table: Some(table_catalog.clone()),
                 })),
                 input: vec![exchange_node.clone()],
                 append_only: exchange_node.append_only,
@@ -455,6 +457,13 @@ impl StreamFragmenter {
             _ => unreachable!(),
         };
 
+        let mut table_l = hash_join_node.get_left_table()?.clone();
+        let mut table_r = hash_join_node.get_right_table()?.clone();
+
+        // Note: the last column of hash_join table catalog is degree, which is not used by Arrange
+        // Node.
+        table_l.columns.pop();
+        table_r.columns.pop();
         assert_eq!(node.input.len(), 2);
 
         // Previous plan:
@@ -489,12 +498,14 @@ impl StreamFragmenter {
             &exchange_i0a0,
             hash_join_node.left_key.clone(),
             hash_join_node.left_table.as_ref().unwrap().id,
+            &table_l,
         );
         let (arrange_1_info, arrange_1) = self.build_arrange_for_delta_join(
             state,
             &exchange_i1a1,
             hash_join_node.right_key.clone(),
             hash_join_node.right_table.as_ref().unwrap().id,
+            &table_r,
         );
 
         let arrange_0_frag = self.build_and_add_fragment(state, arrange_0)?;
