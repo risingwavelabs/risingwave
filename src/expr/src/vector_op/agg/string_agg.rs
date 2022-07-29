@@ -67,7 +67,7 @@ impl StringAgg {
     }
 
     fn eval_delimiter(expr: &ExpressionRef, row: &Row) -> Result<String> {
-        match expr.eval_row(&row)? {
+        match expr.eval_row(row)? {
             None => Ok("".to_string()),
             Some(delim_str) => Ok(delim_str.into_utf8()),
         }
