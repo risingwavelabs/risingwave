@@ -53,6 +53,7 @@ pub enum StatementType {
     SHOW_PARAMETERS,
     SHOW_COMMAND,
     START_TRANSACTION,
+    UPDATE_USER,
     ABORT,
     FLUSH,
     OTHER,

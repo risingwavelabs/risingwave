@@ -56,9 +56,9 @@ pub enum SinkConfig {
 
 #[derive(Clone, Debug, EnumAsInner, Serialize, Deserialize)]
 pub enum SinkState {
-    Kafka(),
-    Mysql(),
-    Redis(),
+    Kafka,
+    Mysql,
+    Redis,
 }
 
 impl SinkConfig {

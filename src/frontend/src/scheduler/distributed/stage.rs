@@ -348,7 +348,6 @@ impl StageRunner {
             .host
             .unwrap();
 
-        #[expect(clippy::needless_borrow)]
         let compute_client = self
             .compute_client_pool
             .get_client_for_addr((&worker_node_addr).into())

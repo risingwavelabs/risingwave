@@ -73,7 +73,6 @@ impl Catalog {
         let name = db.name.clone();
         let id = db.id;
 
-        #[expect(clippy::needless_borrow)]
         self.database_by_name
             .try_insert(name.clone(), (&db).into())
             .unwrap();
@@ -251,6 +250,7 @@ impl Catalog {
                 risingwave_pb::stream_plan::source_node::SourceType::Source => {
                     Err(CatalogError::Duplicated("source", relation_name.to_string()).into())
                 }
+                risingwave_pb::stream_plan::source_node::SourceType::Unspecified => unreachable!(),
             }
         } else if let Some(_table) = schema.get_table_by_name(relation_name) {
             Err(CatalogError::Duplicated("materialized view", relation_name.to_string()).into())
