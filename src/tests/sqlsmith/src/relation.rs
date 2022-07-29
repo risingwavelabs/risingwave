@@ -46,10 +46,13 @@ impl<'a, R: Rng> SqlGenerator<'a, R> {
     fn gen_simple_table(&mut self) -> (TableWithJoins, Vec<Table>) {
         let (relation, _, table) = self.gen_simple_table_factor();
 
-        (TableWithJoins {
-            relation,
-            joins: vec![],
-        },table)
+        (
+            TableWithJoins {
+                relation,
+                joins: vec![],
+            },
+            table,
+        )
     }
 
     fn gen_simple_table_factor(&mut self) -> (TableFactor, Vec<Column>, Vec<Table>) {
@@ -112,10 +115,13 @@ impl<'a, R: Rng> SqlGenerator<'a, R> {
             join_operator: JoinOperator::Inner(JoinConstraint::On(join_on_expr)),
         };
         left_table.append(&mut right_table);
-        (TableWithJoins {
-            relation: left_factor,
-            joins: vec![right_factor_with_join],
-        }, left_table)
+        (
+            TableWithJoins {
+                relation: left_factor,
+                joins: vec![right_factor_with_join],
+            },
+            left_table,
+        )
     }
 
     fn gen_table_subquery(&mut self) -> (TableWithJoins, Vec<Table>) {
@@ -136,7 +142,7 @@ impl<'a, R: Rng> SqlGenerator<'a, R> {
             },
             joins: vec![],
         };
-        
-        (relation,vec![table])
+
+        (relation, vec![table])
     }
 }

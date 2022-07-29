@@ -52,14 +52,13 @@ impl<'a, R: Rng> SqlGenerator<'a, R> {
         let relation = create_tvf("tumble", alias, args);
 
         let table = Table::new(table_name, schema.clone());
-        
 
         (relation, vec![table])
     }
 
     /// Generates `HOP`.
     /// HOP(data: TABLE, timecol: COLUMN, slide: INTERVAL, size: INTERVAL, offset?: INTERVAL)
-    fn gen_hop(&mut self) -> (TableWithJoins,Vec<Table>) {
+    fn gen_hop(&mut self) -> (TableWithJoins, Vec<Table>) {
         let tables = find_tables_with_timestamp_cols(self.tables.clone());
         let (source_table_name, time_cols, schema) = tables
             .choose(&mut self.rng)
