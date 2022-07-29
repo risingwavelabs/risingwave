@@ -100,7 +100,7 @@ steps:
     plugins:
       - gencer/cache#v2.4.10: *cargo-cache
       - docker-compose#v3.9.0:
-          run: mysql
+          run: mysql -d
           config: ci/docker-compose.yml
       - docker-compose#v3.9.0:
           command: "ci/scripts/e2e-sink-test.sh"
