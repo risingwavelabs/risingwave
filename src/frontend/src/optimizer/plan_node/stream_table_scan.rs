@@ -104,9 +104,9 @@ impl fmt::Display for StreamTableScan {
             builder.field(
                 "pk",
                 &IndicesDisplay {
-                    indices: &self.pk_indices(),
+                    indices: self.pk_indices(),
                     input_schema: &self.base.schema,
-                }
+                },
             );
             builder.field(
                 "distribution",
