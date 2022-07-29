@@ -1,5 +1,5 @@
 query ITIIT
-SELECT * FROM pg_catalog.pg_class ORDER BY oid;
+SELECT * FROM pg_catalog.pg_class ORDER BY oid limit 6;
 ----
 1 pg_type 1 1 system table
 2 pg_namespace 1 1 system table
