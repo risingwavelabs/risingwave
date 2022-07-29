@@ -186,19 +186,6 @@ impl SysCatalogReaderImpl {
                     })
                     .collect_vec();
 
-                let msources = schema
-                    .iter_materialized_source()
-                    .map(|msource| {
-                        Row::new(vec![
-                            Some(ScalarImpl::Int32(msource.id as i32)),
-                            Some(ScalarImpl::Utf8(msource.name.clone())),
-                            Some(ScalarImpl::Int32(schema_info.id as i32)),
-                            Some(ScalarImpl::Int32(msource.owner as i32)),
-                            Some(ScalarImpl::Utf8("materialized source".to_string())),
-                        ])
-                    })
-                    .collect_vec();
-
                 let sys_tables = schema
                     .iter_system_tables()
                     .map(|table| {
