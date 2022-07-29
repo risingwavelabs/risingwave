@@ -50,6 +50,10 @@ impl InputRefExpression {
         InputRefExpression { return_type, idx }
     }
 
+    pub fn index(&self) -> usize {
+        self.idx
+    }
+
     pub fn eval_immut(&self, input: &DataChunk) -> Result<ArrayRef> {
         Ok(input.column_at(self.idx).array())
     }

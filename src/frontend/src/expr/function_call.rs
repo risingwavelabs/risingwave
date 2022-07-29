@@ -159,7 +159,15 @@ impl FunctionCall {
             ExprType::RegexpMatch => Ok(DataType::List {
                 datatype: Box::new(DataType::Varchar),
             }),
-
+            ExprType::Vnode => {
+                if inputs.is_empty() {
+                    return Err(ErrorCode::BindError(
+                        "Function `Vnode` takes at least 1 arguments (0 given)".to_string(),
+                    )
+                    .into());
+                }
+                Ok(DataType::Int16)
+            }
             _ => {
                 // TODO(xiangjin): move variadic functions above as part of `infer_type`, as its
                 // interface has been enhanced to support mutating (casting) inputs as well.
