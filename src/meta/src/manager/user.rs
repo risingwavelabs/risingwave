@@ -99,7 +99,7 @@ impl UserManagerInner {
                 self.all_users.insert(update_user.name.clone());
             }
         });
-        
+
         self.user_info.insert(update_user.id, user);
     }
 
