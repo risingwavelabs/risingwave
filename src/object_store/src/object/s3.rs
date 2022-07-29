@@ -123,6 +123,9 @@ impl ObjectStore for S3ObjectStore {
     async fn list(&self, prefix: &str) -> ObjectResult<Vec<ObjectMetadata>> {
         let mut ret: Vec<ObjectMetadata> = vec![];
         let mut next_continuation_token = None;
+        // list_objects_v2 returns up to 1000 keys and truncated the exceeded parts.
+        // Use `continuation_token` given by last response to fetch more parts of the result,
+        // until result is no longer truncated.
         loop {
             let mut request = self
                 .client

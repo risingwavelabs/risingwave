@@ -76,7 +76,9 @@ pub struct BlockLocation {
     pub size: usize,
 }
 
+#[derive(Debug, Clone)]
 pub struct ObjectMetadata {
+    // Full path
     pub key: String,
     // Seconds since unix epoch.
     pub last_modified: f64,
