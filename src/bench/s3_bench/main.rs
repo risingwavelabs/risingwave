@@ -142,10 +142,6 @@ enum Case {
 
 #[derive(Parser, Debug)]
 pub struct Config {
-    // /// AWS S3 Region.
-    // #[clap(short, long)]
-    // region: String,
-
     /// AWS S3 Bucket, either <BUCKET> or <ENDPOINT> should be given.
     #[clap(short, long)]
     bucket: String,
@@ -594,13 +590,11 @@ async fn main() {
         let mut stream_get = tokio_stream::iter(features_get);
         let put_handle = tokio::spawn(async move {
             while let Some(a) = stream_put.next().await {
-                println!("aaa");
                 a.await.unwrap();
             }
         });
         let get_handle = tokio::spawn( async move{
             while let Some(a) = stream_get.next().await{
-                println!("bbb");
                 a.await.unwrap();
             }
         });
