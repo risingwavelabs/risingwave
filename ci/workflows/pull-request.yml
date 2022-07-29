@@ -100,8 +100,9 @@ steps:
     plugins:
       - gencer/cache#v2.4.10: *cargo-cache
       - docker-compose#v3.9.0:
-          run: mysql -d
+          run: mysql
           config: ci/docker-compose.yml
+          mount-buildkite-agent: true
       - docker-compose#v3.9.0:
           command: "ci/scripts/e2e-sink-test.sh"
           run: rw-build-env
