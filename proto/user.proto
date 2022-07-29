@@ -35,7 +35,7 @@ message UserInfo {
 // GrantPrivilege defines a privilege granted to a user.
 message GrantPrivilege {
   enum Action {
-    ACTION_UNSPECIFIED = 0;
+    UNSPECIFIED = 0;
     UNKNOWN = 1;
     SELECT = 2;
     INSERT = 3;
