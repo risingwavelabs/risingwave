@@ -1513,7 +1513,13 @@ impl Parser {
         })
     }
 
-    pub fn parse_create_user(&mut self) -> Result<Statement, ParserError> {
+    // CREATE USER name [ [ WITH ] option [ ... ] ]
+    // where option can be:
+    //       SUPERUSER | NOSUPERUSER
+    //     | CREATEDB | NOCREATEDB
+    //     | LOGIN | NOLOGIN
+    //     | [ ENCRYPTED ] PASSWORD 'password' | PASSWORD NULL
+    fn parse_create_user(&mut self) -> Result<Statement, ParserError> {
         Ok(Statement::CreateUser(CreateUserStatement::parse_to(self)?))
     }
 

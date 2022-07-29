@@ -164,9 +164,9 @@ impl<S: MetaStore> UserManager<S> {
 
     pub async fn update_user(&self, user: &UserInfo) -> Result<NotificationVersion> {
         let mut core = self.core.lock().await;
-        if core.all_users.contains(&user.name) {
+        if !core.all_users.contains(&user.name) {
             return Err(RwError::from(PermissionDenied(format!(
-                "User {} already exists",
+                "User {} not exists",
                 user.name
             ))));
         }
@@ -176,7 +176,7 @@ impl<S: MetaStore> UserManager<S> {
         let version = self
             .env
             .notification_manager()
-            .notify_frontend(Operation::Add, Info::User(user.to_owned()))
+            .notify_frontend(Operation::Update, Info::User(user.to_owned()))
             .await;
         Ok(version)
     }

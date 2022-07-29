@@ -1,10 +1,18 @@
 # Create a user.
 statement ok
-CREATE USER ddl_user WITH NOSUPERUSER CREATEDB PASSWORD 'md5827ccb0eea8a706c4c34a16891f84e7b';
+CREATE USER user WITH SUPERUSER NOCREATEDB PASSWORD 'md5827ccb0eea8a706c4c34a16891f84e7b';
 
 # Create another user with duplicate name.
 statement error
-CREATE USER ddl_user;
+CREATE USER user;
+
+# Alter user name.
+statement ok
+ALTER USER user RENAME TO ddl_user;
+
+# Alter user properties.
+statement ok
+ALTER USER ddl_user WITH NOSUPERUSER CREATEDB PASSWORD 'md59f2fa6a30871a92249bdd2f1eeee4ef6;
 
 # Drop the user if exists.
 statement ok

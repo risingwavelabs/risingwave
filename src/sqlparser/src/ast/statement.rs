@@ -343,7 +343,7 @@ impl<T> From<AstOption<T>> for Option<T> {
 #[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
 pub struct CreateUserStatement {
     pub user_name: ObjectName,
-    pub with_options: CreateUserWithOptions,
+    pub with_options: UserOptions,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
@@ -356,13 +356,13 @@ pub struct AlterUserStatement {
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 #[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
 pub enum AlterUserMode {
-    Options(CreateUserWithOptions),
+    Options(UserOptions),
     Rename(ObjectName),
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 #[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
-pub enum CreateUserOption {
+pub enum UserOption {
     SuperUser,
     NoSuperUser,
     CreateDB,
@@ -373,27 +373,27 @@ pub enum CreateUserOption {
     Password(Option<AstString>),
 }
 
-impl fmt::Display for CreateUserOption {
+impl fmt::Display for UserOption {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
-            CreateUserOption::SuperUser => write!(f, "SUPERUSER"),
-            CreateUserOption::NoSuperUser => write!(f, "NOSUPERUSER"),
-            CreateUserOption::CreateDB => write!(f, "CREATEDB"),
-            CreateUserOption::NoCreateDB => write!(f, "NOCREATEDB"),
-            CreateUserOption::Login => write!(f, "LOGIN"),
-            CreateUserOption::NoLogin => write!(f, "NOLOGIN"),
-            CreateUserOption::EncryptedPassword(p) => write!(f, "ENCRYPTED PASSWORD {}", p),
-            CreateUserOption::Password(None) => write!(f, "PASSWORD NULL"),
-            CreateUserOption::Password(Some(p)) => write!(f, "PASSWORD {}", p),
+            UserOption::SuperUser => write!(f, "SUPERUSER"),
+            UserOption::NoSuperUser => write!(f, "NOSUPERUSER"),
+            UserOption::CreateDB => write!(f, "CREATEDB"),
+            UserOption::NoCreateDB => write!(f, "NOCREATEDB"),
+            UserOption::Login => write!(f, "LOGIN"),
+            UserOption::NoLogin => write!(f, "NOLOGIN"),
+            UserOption::EncryptedPassword(p) => write!(f, "ENCRYPTED PASSWORD {}", p),
+            UserOption::Password(None) => write!(f, "PASSWORD NULL"),
+            UserOption::Password(Some(p)) => write!(f, "PASSWORD {}", p),
         }
     }
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 #[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
-pub struct CreateUserWithOptions(pub Vec<CreateUserOption>);
+pub struct UserOptions(pub Vec<UserOption>);
 
-impl ParseTo for CreateUserWithOptions {
+impl ParseTo for UserOptions {
     fn parse_to(parser: &mut Parser) -> Result<Self, ParserError> {
         let mut options = vec![];
         if parser.parse_keyword(Keyword::WITH) {
@@ -406,22 +406,22 @@ impl ParseTo for CreateUserWithOptions {
                 if let Token::Word(ref w) = token {
                     parser.next_token();
                     let option = match w.keyword {
-                        Keyword::SUPERUSER => CreateUserOption::SuperUser,
-                        Keyword::NOSUPERUSER => CreateUserOption::NoSuperUser,
-                        Keyword::CREATEDB => CreateUserOption::CreateDB,
-                        Keyword::NOCREATEDB => CreateUserOption::NoCreateDB,
-                        Keyword::LOGIN => CreateUserOption::Login,
-                        Keyword::NOLOGIN => CreateUserOption::NoLogin,
+                        Keyword::SUPERUSER => UserOption::SuperUser,
+                        Keyword::NOSUPERUSER => UserOption::NoSuperUser,
+                        Keyword::CREATEDB => UserOption::CreateDB,
+                        Keyword::NOCREATEDB => UserOption::NoCreateDB,
+                        Keyword::LOGIN => UserOption::Login,
+                        Keyword::NOLOGIN => UserOption::NoLogin,
                         Keyword::PASSWORD => {
                             if parser.parse_keyword(Keyword::NULL) {
-                                CreateUserOption::Password(None)
+                                UserOption::Password(None)
                             } else {
-                                CreateUserOption::Password(Some(AstString::parse_to(parser)?))
+                                UserOption::Password(Some(AstString::parse_to(parser)?))
                             }
                         }
                         Keyword::ENCRYPTED => {
                             parser.expect_keyword(Keyword::PASSWORD)?;
-                            CreateUserOption::EncryptedPassword(AstString::parse_to(parser)?)
+                            UserOption::EncryptedPassword(AstString::parse_to(parser)?)
                         }
                         _ => parser.expected(
                             "SUPERUSER | NOSUPERUSER | CREATEDB | NOCREATEDB | LOGIN \
@@ -443,7 +443,7 @@ impl ParseTo for CreateUserWithOptions {
     }
 }
 
-impl fmt::Display for CreateUserWithOptions {
+impl fmt::Display for UserOptions {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         if !self.0.is_empty() {
             write!(f, "WITH {}", display_separated(self.0.as_slice(), " "))
@@ -456,7 +456,7 @@ impl fmt::Display for CreateUserWithOptions {
 impl ParseTo for CreateUserStatement {
     fn parse_to(p: &mut Parser) -> Result<Self, ParserError> {
         impl_parse_to!(user_name: ObjectName, p);
-        impl_parse_to!(with_options: CreateUserWithOptions, p);
+        impl_parse_to!(with_options: UserOptions, p);
 
         Ok(CreateUserStatement {
             user_name,
@@ -512,7 +512,7 @@ impl ParseTo for AlterUserMode {
             impl_parse_to!(new_name: ObjectName, p);
             Ok(AlterUserMode::Rename(new_name))
         } else {
-            impl_parse_to!(with_options: CreateUserWithOptions, p);
+            impl_parse_to!(with_options: UserOptions, p);
             Ok(AlterUserMode::Options(with_options))
         }
     }

@@ -14,8 +14,9 @@
 
 use pgwire::pg_response::{PgResponse, StatementType};
 use risingwave_common::error::Result;
-use risingwave_pb::user::UserInfo;
-use risingwave_sqlparser::ast::{AlterUserStatement, CreateUserOption, CreateUserWithOptions};
+use risingwave_pb::user::update_user_request::UpdateField;
+use risingwave_pb::user::{UpdateUserRequest, UserInfo};
+use risingwave_sqlparser::ast::{AlterUserStatement, UserOption, UserOptions};
 
 use crate::binder::Binder;
 use crate::catalog::CatalogError;
@@ -24,30 +25,54 @@ use crate::user::user_authentication::{encrypt_default, encrypted_password};
 
 fn alter_prost_user_info(
     mut user_info: UserInfo,
-    options: &CreateUserWithOptions,
-) -> Result<UserInfo> {
+    options: &UserOptions,
+) -> Result<UpdateUserRequest> {
+    let mut update_fields = Vec::new();
     for option in &options.0 {
         match option {
-            CreateUserOption::SuperUser => user_info.is_supper = true,
-            CreateUserOption::NoSuperUser => user_info.is_supper = false,
-            CreateUserOption::CreateDB => user_info.can_create_db = true,
-            CreateUserOption::NoCreateDB => user_info.can_create_db = false,
-            CreateUserOption::Login => user_info.can_login = true,
-            CreateUserOption::NoLogin => user_info.can_login = false,
-            CreateUserOption::EncryptedPassword(p) => {
+            UserOption::SuperUser => {
+                user_info.is_supper = true;
+                update_fields.push(UpdateField::Super as i32);
+            }
+            UserOption::NoSuperUser => {
+                user_info.is_supper = false;
+                update_fields.push(UpdateField::Super as i32);
+            }
+            UserOption::CreateDB => {
+                user_info.can_create_db = true;
+                update_fields.push(UpdateField::CreateDb as i32);
+            }
+            UserOption::NoCreateDB => {
+                user_info.can_create_db = false;
+                update_fields.push(UpdateField::CreateDb as i32);
+            }
+            UserOption::Login => {
+                user_info.can_login = true;
+                update_fields.push(UpdateField::Login as i32);
+            }
+            UserOption::NoLogin => {
+                user_info.can_login = false;
+                update_fields.push(UpdateField::Login as i32);
+            }
+            UserOption::EncryptedPassword(p) => {
                 if !p.0.is_empty() {
                     user_info.auth_info = Some(encrypt_default(&user_info.name, &p.0));
+                    update_fields.push(UpdateField::AuthInfo as i32);
                 }
             }
-            CreateUserOption::Password(opt) => {
+            UserOption::Password(opt) => {
                 if let Some(password) = opt {
                     user_info.auth_info = encrypted_password(&user_info.name, &password.0);
+                    update_fields.push(UpdateField::AuthInfo as i32);
                 }
             }
         }
     }
-
-    Ok(user_info)
+    let request = UpdateUserRequest {
+        user: Some(user_info),
+        update_fields,
+    };
+    Ok(request)
 }
 
 pub async fn handle_alter_user(
@@ -65,18 +90,21 @@ pub async fn handle_alter_user(
             return Err(CatalogError::NotFound("user", user_name).into());
         }
     };
-    let new_info = match stmt.mode {
+    let request = match stmt.mode {
         risingwave_sqlparser::ast::AlterUserMode::Options(options) => {
             alter_prost_user_info(old_info, &options)?
         }
         risingwave_sqlparser::ast::AlterUserMode::Rename(new_name) => {
             let mut new_info = old_info.clone();
             new_info.name = Binder::resolve_user_name(new_name)?;
-            new_info
+            UpdateUserRequest {
+                user: Some(new_info),
+                update_fields: vec![UpdateField::Rename as i32],
+            }
         }
     };
     let user_info_writer = session.env().user_info_writer();
-    user_info_writer.update_user(new_info).await?;
+    user_info_writer.update_user(request).await?;
     Ok(PgResponse::empty_result(StatementType::CREATE_USER))
 }
 
@@ -88,12 +116,26 @@ mod tests {
     use crate::test_utils::LocalFrontend;
 
     #[tokio::test]
-    async fn test_create_user() {
+    async fn test_alter_user() {
         let frontend = LocalFrontend::new(Default::default()).await;
         let session = frontend.session_ref();
         let user_info_reader = session.env().user_info_reader();
 
-        frontend.run_sql("CREATE USER user WITH NOSUPERUSER CREATEDB PASSWORD 'md5827ccb0eea8a706c4c34a16891f84e7b'").await.unwrap();
+        frontend.run_sql("CREATE USER userB WITH SUPERUSER NOCREATEDB PASSWORD 'md5827ccb0eea8a706c4c34a16891f84e7b'").await.unwrap();
+        frontend
+            .run_sql("ALTER USER userB RENAME TO user")
+            .await
+            .unwrap();
+        assert!(user_info_reader
+            .read_guard()
+            .get_user_by_name("userB")
+            .is_none());
+        assert!(user_info_reader
+            .read_guard()
+            .get_user_by_name("user")
+            .is_some());
+
+        frontend.run_sql("ALTER USER user WITH NOSUPERUSER CREATEDB PASSWORD 'md59f2fa6a30871a92249bdd2f1eeee4ef6'").await.unwrap();
 
         let user_info = user_info_reader
             .read_guard()
@@ -101,13 +143,12 @@ mod tests {
             .cloned()
             .unwrap();
         assert!(!user_info.is_supper);
-        assert!(user_info.can_login);
         assert!(user_info.can_create_db);
         assert_eq!(
             user_info.auth_info,
             Some(AuthInfo {
                 encryption_type: EncryptionType::Md5 as i32,
-                encrypted_value: b"827ccb0eea8a706c4c34a16891f84e7b".to_vec()
+                encrypted_value: b"9f2fa6a30871a92249bdd2f1eeee4ef6".to_vec()
             })
         );
     }

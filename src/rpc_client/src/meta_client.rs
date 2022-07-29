@@ -235,8 +235,7 @@ impl MetaClient {
         Ok(resp.version)
     }
 
-    pub async fn update_user(&self, user: UserInfo) -> Result<u64> {
-        let request = UpdateUserRequest { user: Some(user) };
+    pub async fn update_user(&self, request: UpdateUserRequest) -> Result<u64> {
         let resp = self.inner.update_user(request).await?;
         Ok(resp.version)
     }
