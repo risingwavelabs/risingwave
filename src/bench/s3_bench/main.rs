@@ -163,6 +163,7 @@ pub struct Config {
     #[clap(short, long)]
     format: bool,
 
+    ///Concurrent get and put
     #[clap(short, long)]
     multithread: bool,
 }
