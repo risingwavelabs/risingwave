@@ -67,16 +67,27 @@ impl ObjectStore for InMemObjectStore {
     async fn streaming_read(
         &self,
         path: &str,
-        block_loc: Option<BlockLocation>,
+        start_pos: Option<usize>,
     ) -> ObjectResult<Box<dyn AsyncRead + Unpin + Send + Sync>> {
         fail_point!("mem_streaming_read_err", |_| Err(ObjectError::internal(
             "mem streaming read error"
         )));
-        let bytes = if let Some(loc) = block_loc {
-            self.get_object(path, |obj| find_block(obj, loc)).await?
+
+        let bytes = if let Some(pos) = start_pos {
+            self.get_object(path, |obj| {
+                find_block(
+                    obj,
+                    BlockLocation {
+                        offset: pos,
+                        size: obj.len() - pos,
+                    },
+                )
+            })
+            .await?
         } else {
             self.get_object(path, |obj| Ok(obj.clone())).await?
         };
+
         Ok(Box::new(Cursor::new(bytes?)))
     }
 

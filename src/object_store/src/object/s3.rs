@@ -50,7 +50,17 @@ impl ObjectStore for S3ObjectStore {
         fail_point!("s3_read_err", |_| Err(ObjectError::internal(
             "s3 read error"
         )));
-        let req = self.obj_store_request(path, block_loc, true);
+
+        let (start_pos, end_pos) = block_loc.as_ref().map_or((None, None), |block_loc| {
+            (
+                Some(block_loc.offset),
+                Some(
+                    block_loc.offset + block_loc.size - 1, // End is inclusive.
+                ),
+            )
+        });
+
+        let req = self.obj_store_request(path, start_pos, end_pos);
         let resp = req.send().await?;
         let val = resp.body.collect().await?.into_bytes();
 
@@ -93,13 +103,13 @@ impl ObjectStore for S3ObjectStore {
     async fn streaming_read(
         &self,
         path: &str,
-        block_loc: Option<BlockLocation>,
+        start_pos: Option<usize>,
     ) -> ObjectResult<Box<dyn AsyncRead + Unpin + Send + Sync>> {
         fail_point!("s3_streaming_read_err", |_| Err(ObjectError::internal(
             "s3 streaming read error"
         )));
 
-        let req = self.obj_store_request(path, block_loc, false);
+        let req = self.obj_store_request(path, start_pos, None);
         let resp = req.send().await?;
 
         Ok(Box::new(resp.body.into_async_read()))
@@ -158,32 +168,30 @@ impl S3ObjectStore {
         }
     }
 
-    /// Generates an HTTP GET request to download the object specified in `path`. If `block_loc` is
-    /// given, the request is adjusted to start at that block and, if `limit_to_block` is true, to
-    /// only download that block. If `block_loc` is `None`, the function ignores `limit_to_block`.
+    /// Generates an HTTP GET request to download the object specified in `path`. If given,
+    /// `start_pos` and `end_pos` specify the first and last byte to download, respectively. Both
+    /// are inclusive and 0-based. For example, set `start_pos = 0` and `end_pos = 7` to download
+    /// the first 8 bytes. If neither is given, the request will download the whole object.
     fn obj_store_request(
         &self,
         path: &str,
-        block_loc: Option<BlockLocation>,
-        limit_to_block: bool,
+        start_pos: Option<usize>,
+        end_pos: Option<usize>,
     ) -> GetObject {
         let req = self.client.get_object().bucket(&self.bucket).key(path);
 
-        match block_loc {
-            None => {
-                // Return request without range.
+        match (start_pos, end_pos) {
+            (None, None) => {
+                // No range is given. Return request as is.
                 req
             }
-            Some(block_location) => {
-                let range = if limit_to_block {
-                    block_location.byte_range_specifier()
-                } else {
-                    block_location.byte_start_specifier()
-                };
-
-                req.range(
-                    range.unwrap(), // Both functions never return `None`.
-                )
+            _ => {
+                // At least one boundary is given. Return request with range limitation.
+                req.range(format!(
+                    "bytes={}-{}",
+                    start_pos.map_or(String::new(), |pos| pos.to_string()),
+                    end_pos.map_or(String::new(), |pos| pos.to_string())
+                ))
             }
         }
     }

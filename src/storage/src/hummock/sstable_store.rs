@@ -64,14 +64,14 @@ impl BlockStream {
         byte_stream: Box<dyn AsyncRead + Unpin + Send + Sync>,
 
         // Index of the next block.
-        block_idx: u64,
+        block_idx: usize,
 
         // Meta data of the expected block.
         block_metas: Vec<BlockMeta>,
     ) -> Self {
         Self {
             byte_stream,
-            block_idx: block_idx as usize,
+            block_idx: block_idx,
             block_metas,
         }
     }
@@ -286,41 +286,30 @@ impl SstableStore {
     pub async fn get_block_stream(
         &self,
         sst: &Sstable,
-        block_index: u64,
+        block_index: Option<usize>,
     ) -> HummockResult<BlockStream> {
-        // TODO: if sst has owned blocks, start from `max(start_block_idx,
-        // first_missing_sst_block_idx)`
-        let start_block_index = block_index as usize;
-        let block_loc = if start_block_index != 0 {
-            let block_meta = sst
+
+        let start_pos = match block_index {
+            None => None,
+            Some(index) => {
+                let block_meta = sst
                 .meta
                 .block_metas
-                .get(start_block_index)
+                .get(index)
                 .ok_or_else(HummockError::invalid_block)?;
 
-            let total_len: u32 = sst.meta.block_metas[start_block_index..]
-                .iter()
-                .map(|m| m.len)
-                .sum();
-
-            let block_loc = BlockLocation {
-                offset: block_meta.offset as usize,
-                size: total_len as usize,
-            };
-
-            Some(block_loc)
-        } else {
-            None
+               Some(block_meta.offset as usize)
+            }
         };
 
         let data_path = self.get_sst_data_path(sst.id);
 
         Ok(BlockStream::new(
             self.store
-                .streaming_read(&data_path, block_loc)
+                .streaming_read(&data_path, start_pos)
                 .await
                 .map_err(HummockError::object_io_error)?,
-                block_index,
+                block_index.unwrap_or(0),
             sst.meta.block_metas.clone(),
         ))
     }
@@ -514,7 +503,7 @@ mod tests {
             .await
             .unwrap();
         let mut stream = sstable_store
-            .get_block_stream(&Sstable::new(1, meta.clone()), 0)
+            .get_block_stream(&Sstable::new(1, meta.clone()), None)
             .await
             .unwrap();
 
@@ -538,7 +527,7 @@ mod tests {
             let mut i = start_index as usize;
             let mut num_blocks = 0;
             let mut stream = sstable_store
-                .get_block_stream(&Sstable::new(1, meta.clone()), start_index)
+                .get_block_stream(&Sstable::new(1, meta.clone()), Some(start_index))
                 .await
                 .unwrap();
             while let Some(block) = stream.next().await.expect("invalid block") {

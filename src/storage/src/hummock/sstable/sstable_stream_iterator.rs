@@ -87,8 +87,8 @@ impl SSTableStreamIterator {
             .sstable_store
             .get_block_stream(
                 self.sst.value(),
-                block_idx as u64, /* ToDo: What about parameters used before (CachePolicy,
-                                   * &StoreLocalStatistic)? */
+                Some(block_idx), /* ToDo: What about parameters used before (CachePolicy,
+                                  * &StoreLocalStatistic)? */
             )
             .await?;
 

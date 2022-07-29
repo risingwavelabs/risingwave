@@ -120,7 +120,7 @@ pub trait ObjectStore: Send + Sync {
     async fn streaming_read(
         &self,
         path: &str,
-        block_loc: Option<BlockLocation>,
+        start_pos: Option<usize>,
     ) -> ObjectResult<Box<dyn AsyncRead + Unpin + Send + Sync>>;
 
     /// Obtains the object metadata.
@@ -226,9 +226,9 @@ impl ObjectStore for ObjectStoreImpl {
     async fn streaming_read(
         &self,
         path: &str,
-        block_loc: Option<BlockLocation>,
+        start_loc: Option<usize>,
     ) -> ObjectResult<Box<dyn AsyncRead + Unpin + Send + Sync>> {
-        object_store_impl_method_body!(self, streaming_read, path, block_loc)
+        object_store_impl_method_body!(self, streaming_read, path, start_loc)
     }
 
     async fn delete(&self, path: &str) -> ObjectResult<()> {
@@ -304,10 +304,10 @@ impl<OS: ObjectStore> MonitoredObjectStore<OS> {
     async fn streaming_read(
         &self,
         path: &str,
-        block_loc: Option<BlockLocation>,
+        start_pos: Option<usize>,
     ) -> ObjectResult<Box<dyn AsyncRead + Unpin + Send + Sync>> {
         // TODO: add metrics
-        self.inner.streaming_read(path, block_loc).await
+        self.inner.streaming_read(path, start_pos).await
     }
 
     pub async fn metadata(&self, path: &str) -> ObjectResult<ObjectMetadata> {

@@ -239,7 +239,7 @@ impl ObjectStore for DiskObjectStore {
     async fn streaming_read(
         &self,
         _path: &str,
-        _block_loc: Option<BlockLocation>,
+        _start_pos: Option<usize>,
     ) -> ObjectResult<Box<dyn AsyncRead + Unpin + Send + Sync>> {
         unimplemented!()
     }
