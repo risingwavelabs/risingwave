@@ -1,7 +1,5 @@
 version: "3.9"
 
-userns_mode: "host"
-
 services:
   db:
     image: postgres
@@ -46,6 +44,7 @@ services:
       test: ["CMD", "mysqladmin" ,"ping", "-h", "localhost"]
       timeout: 40s
       retries: 5
+    userns_mode: "host"
     pid: "host"
 #     networks:
 #       nw:
