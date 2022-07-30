@@ -73,7 +73,6 @@ impl Catalog {
         let name = db.name.clone();
         let id = db.id;
 
-        #[expect(clippy::needless_borrow)]
         self.database_by_name
             .try_insert(name.clone(), (&db).into())
             .unwrap();
