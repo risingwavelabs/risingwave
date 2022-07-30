@@ -129,17 +129,9 @@ fn test_batch_query(session: Arc<SessionImpl>, tables: Vec<Table>, seed: u64, se
                 session.env().catalog_reader().read_guard(),
                 session.database().to_string(),
             );
-            let bound = if rng.gen_bool(0.6) {
-                binder
-                    .bind(stmt.clone())
-                    .unwrap_or_else(|e| panic!("Failed to bind:\nReason:\n{}", e))
-            } else {
-                panic!("randomly fail")
-            };
-
-            // let bound = binder
-            //     .bind(stmt.clone())
-            //     .unwrap_or_else(|e| panic!("Failed to bind:\nReason:\n{}", e));
+            let bound = binder
+                .bind(stmt.clone())
+                .unwrap_or_else(|e| panic!("Failed to bind:\nReason:\n{}", e));
             let mut planner = Planner::new(context.clone());
             let logical_plan = planner
                 .plan(bound)
