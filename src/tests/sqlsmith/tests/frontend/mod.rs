@@ -69,7 +69,7 @@ fn reproduce_failing_queries(setup: &str, failing: &str) {
 {}
 
 -- Failing SQL query:
-{}
+{};
 
 ---- END
 ",
@@ -97,7 +97,7 @@ async fn create_tables(session: Arc<SessionImpl>, rng: &mut impl Rng) -> (Vec<Ta
     // Generate some mviews
     for i in 0..10 {
         let (sql, table) = mview_sql_gen(rng, tables.clone(), &format!("m{}", i));
-        setup_sql.push_str(&sql);
+        setup_sql.push_str(&format!("{};", &sql));
         let stmts = parse_sql(&sql);
         let stmt = stmts[0].clone();
         handle(session.clone(), stmt, &sql).await;
