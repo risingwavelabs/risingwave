@@ -45,10 +45,8 @@ impl Binder {
                 return Ok(InputRef::new(column.index, column.field.data_type.clone()).into());
             }
             Err(e) => {
-                // If the error message is that the column name is ambiguous, throw the error
-                if let ErrorCode::InternalError(_) = e.inner() {
-                    return Err(e);
-                }
+                // If the error message is not that the column is not found, throw the error
+                if let ErrorCode::ItemNotFound(_) = e.inner() {} else { return Err(e) }
             }
         }
 
