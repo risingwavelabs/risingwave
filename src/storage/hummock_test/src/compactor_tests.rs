@@ -640,6 +640,7 @@ mod tests {
         }
 
         storage.sync(None).await.unwrap();
+
         for epoch in &epoch_set {
             hummock_meta_client
                 .commit_epoch(
