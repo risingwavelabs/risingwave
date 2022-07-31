@@ -366,9 +366,9 @@ where
             .position(|x| !matches!(x.state, Completed(_)))
             .unwrap_or(self.command_ctx_queue.len());
         let complete_nodes = self.command_ctx_queue.drain(..index).collect_vec();
-        complete_nodes
-            .iter()
-            .for_each(|node| self.remove_changes(node.command_ctx.command.changes()));
+        // complete_nodes
+        //     .iter()
+        //     .for_each(|node| self.remove_changes(node.command_ctx.command.changes()));
         complete_nodes
     }
 
@@ -751,7 +751,10 @@ where
         let (mut index, mut err_msg) = (0, None);
         for (i, node) in complete_nodes.iter_mut().enumerate() {
             assert!(matches!(node.state, Completed(_)));
-            if let Err(err) = self.complete_barriers(node, tracker).await {
+            if let Err(err) = self
+                .complete_barriers(node, tracker, checkpoint_control)
+                .await
+            {
                 index = i;
                 err_msg = Some(err);
                 break;
@@ -798,6 +801,7 @@ where
         &self,
         node: &mut EpochNode<S>,
         tracker: &mut CreateMviewProgressTracker,
+        checkpoint_control: &mut CheckpointControl<S>,
     ) -> Result<()> {
         let prev_epoch = node.command_ctx.prev_epoch.0;
         match &node.state {
@@ -833,6 +837,7 @@ where
                     while let Some((command_ctx, mut notifiers)) =
                         self.sync_queue.write().await.pop()
                     {
+                        checkpoint_control.remove_changes(command_ctx.command.changes());
                         command_ctx.post_collect().await?;
 
                         // Notify about collected first.
@@ -845,6 +850,7 @@ where
                             tracker.update(progress);
                         }
                     }
+                    checkpoint_control.remove_changes(node.command_ctx.command.changes());
                     node.command_ctx.post_collect().await?;
 
                     // Notify about collected first.
