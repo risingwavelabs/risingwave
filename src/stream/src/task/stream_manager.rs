@@ -181,17 +181,20 @@ impl LocalStreamManager {
         rx.await.unwrap()
     }
 
-    pub async fn sync_epoch(&self, epoch: u64) -> Vec<LocalSstableInfo> {
-        dispatch_state_store!(self.state_store(), store, {
-            match store.sync(Some(epoch)).await {
-                Ok(_) => store.get_uncommitted_ssts(epoch),
-                // TODO: Handle sync failure by propagating it back to global barrier manager
-                Err(e) => panic!(
+    pub async fn sync_epoch(&self, epoch: u64) -> (Vec<LocalSstableInfo>, bool) {
+        (
+            dispatch_state_store!(self.state_store(), store, {
+                match store.sync(Some(epoch)).await {
+                    Ok(_) => store.get_uncommitted_ssts(epoch),
+                    // TODO: Handle sync failure by propagating it back to global barrier manager
+                    Err(e) => panic!(
                     "Failed to sync state store after receiving barrier prev_epoch {:?} due to {}",
                     epoch, e
                 ),
-            }
-        })
+                }
+            }),
+            true,
+        )
     }
 
     pub async fn clear_storage_buffer(&self) {

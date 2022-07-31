@@ -203,6 +203,8 @@ pub struct GlobalBarrierManager<S: MetaStore> {
     metrics: Arc<MetaMetrics>,
 
     env: MetaSrvEnv<S>,
+
+    sync_queue: Arc<RwLock<Vec<(Arc<CommandContext<S>>, SmallVec<[Notifier; 1]>)>>>,
 }
 
 /// Controls the concurrent execution of commands.
@@ -484,6 +486,7 @@ where
             metrics,
             env,
             in_flight_barrier_nums,
+            sync_queue: Arc::new(RwLock::new(vec![])),
         }
     }
 
@@ -676,6 +679,7 @@ where
                         barrier: Some(barrier),
                         actor_ids_to_send,
                         actor_ids_to_collect,
+                        is_sync: true,
                     };
                     tracing::trace!(
                         target: "events::meta::barrier::inject_barrier",
@@ -796,7 +800,6 @@ where
         tracker: &mut CreateMviewProgressTracker,
     ) -> Result<()> {
         let prev_epoch = node.command_ctx.prev_epoch.0;
-
         match &node.state {
             Completed(Ok(resps)) => {
                 // We must ensure all epochs are committed in ascending order,
@@ -824,20 +827,54 @@ where
                         .commit_epoch(prev_epoch, synced_ssts)
                         .await?;
                 }
-
                 node.timer.take().unwrap().observe_duration();
-                node.command_ctx.post_collect().await?;
 
-                // Notify about collected first.
-                let mut notifiers = take(&mut node.notifiers);
-                notifiers.iter_mut().for_each(Notifier::notify_collected);
+                if resps.iter().all(|node| node.is_sync) {
+                    while let Some((command_ctx, mut notifiers)) =
+                        self.sync_queue.write().await.pop()
+                    {
+                        command_ctx.post_collect().await?;
 
-                // Then try to finish the barrier for Create MVs.
-                let actors_to_finish = node.command_ctx.actors_to_track();
-                tracker.add(node.command_ctx.curr_epoch, actors_to_finish, notifiers);
-                for progress in resps.iter().flat_map(|r| &r.create_mview_progress) {
-                    tracker.update(progress);
+                        // Notify about collected first.
+                        notifiers.iter_mut().for_each(Notifier::notify_collected);
+
+                        // Then try to finish the barrier for Create MVs.
+                        let actors_to_finish = command_ctx.actors_to_track();
+                        tracker.add(node.command_ctx.curr_epoch, actors_to_finish, notifiers);
+                        for progress in resps.iter().flat_map(|r| &r.create_mview_progress) {
+                            tracker.update(progress);
+                        }
+                    }
+                    node.command_ctx.post_collect().await?;
+
+                    // Notify about collected first.
+                    let mut notifiers = take(&mut node.notifiers);
+                    notifiers.iter_mut().for_each(Notifier::notify_collected);
+
+                    // Then try to finish the barrier for Create MVs.
+                    let actors_to_finish = node.command_ctx.actors_to_track();
+                    tracker.add(node.command_ctx.curr_epoch, actors_to_finish, notifiers);
+                    for progress in resps.iter().flat_map(|r| &r.create_mview_progress) {
+                        tracker.update(progress);
+                    }
+                } else {
+                    let notifiers = take(&mut node.notifiers);
+                    let command_ctx = node.command_ctx.clone();
+                    self.sync_queue.write().await.push((command_ctx, notifiers));
                 }
+
+                // node.command_ctx.post_collect().await?;
+                //
+                // // Notify about collected first.
+                // let mut notifiers = take(&mut node.notifiers);
+                // notifiers.iter_mut().for_each(Notifier::notify_collected);
+                //
+                // // Then try to finish the barrier for Create MVs.
+                // let actors_to_finish = node.command_ctx.actors_to_track();
+                // tracker.add(node.command_ctx.curr_epoch, actors_to_finish, notifiers);
+                // for progress in resps.iter().flat_map(|r| &r.create_mview_progress) {
+                //     tracker.update(progress);
+                // }
 
                 Ok(())
             }

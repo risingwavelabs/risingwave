@@ -66,6 +66,7 @@ message InjectBarrierRequest {
   stream_plan.Barrier barrier = 2;
   repeated uint32 actor_ids_to_send = 3;
   repeated uint32 actor_ids_to_collect = 4;
+  bool is_sync = 5;
 }
 
 message InjectBarrierResponse {
@@ -91,6 +92,7 @@ message BarrierCompleteResponse {
     hummock.SstableInfo sst = 2;
   }
   repeated GroupedSstableInfo synced_sstables = 4;
+  bool is_sync = 5;
 }
 
 // Before starting streaming, the leader node broadcast the actor-host table to needed workers.
