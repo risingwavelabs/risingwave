@@ -1056,6 +1056,10 @@ async fn test_range_sync() {
         .unwrap();
     let ssts = hummock_storage.get_uncommitted_ssts(epoch3);
     hummock_meta_client
+        .commit_epoch(epoch2, vec![])
+        .await
+        .unwrap();
+    hummock_meta_client
         .commit_epoch(epoch3, ssts)
         .await
         .unwrap();
@@ -1065,7 +1069,7 @@ async fn test_range_sync() {
             .get(
                 "bb".as_bytes(),
                 ReadOptions {
-                    epoch: epoch3,
+                    epoch: epoch2,
                     table_id: Default::default(),
                     ttl: None,
                 }
@@ -1073,6 +1077,6 @@ async fn test_range_sync() {
             .await
             .unwrap()
             .unwrap(),
-        "123"
+        "222"
     );
 }

@@ -155,19 +155,20 @@ impl StreamService for StreamServiceImpl {
         let collect_result = self.mgr.collect_barrier(req.prev_epoch).await;
         // Must finish syncing data written in the epoch before respond back to ensure persistency
         // of the state.
-        let synced_sstables = self.mgr.sync_epoch(req.prev_epoch).await;
+        let (synced_sstables, is_sync) = self.mgr.sync_epoch(req.prev_epoch).await;
 
         Ok(Response::new(BarrierCompleteResponse {
             request_id: req.request_id,
             status: None,
             create_mview_progress: collect_result.create_mview_progress,
-            sycned_sstables: synced_sstables
+            synced_sstables: synced_sstables
                 .into_iter()
                 .map(|(compaction_group_id, sst)| GroupedSstableInfo {
                     compaction_group_id,
                     sst: Some(sst),
                 })
                 .collect_vec(),
+            is_sync,
         }))
     }
 

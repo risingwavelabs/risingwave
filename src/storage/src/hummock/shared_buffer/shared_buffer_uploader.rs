@@ -101,6 +101,7 @@ impl SharedBufferUploader {
         _epoch: HummockEpoch,
         is_local: bool,
         payload: UploadTaskPayload,
+        water_epoch: HummockEpoch,
     ) -> HummockResult<Vec<LocalSstableInfo>> {
         if payload.is_empty() {
             return Ok(vec![]);
@@ -113,9 +114,12 @@ impl SharedBufferUploader {
             self.remote_object_store_compactor_context.clone()
         };
 
-        let tables =
-            Compactor::compact_shared_buffer_by_compaction_group(mem_compactor_ctx, payload)
-                .await?;
+        let tables = Compactor::compact_shared_buffer_by_compaction_group(
+            mem_compactor_ctx,
+            payload,
+            water_epoch,
+        )
+        .await?;
 
         let uploaded_sst_info = tables
             .into_iter()

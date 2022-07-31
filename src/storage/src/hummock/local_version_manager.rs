@@ -306,15 +306,30 @@ impl LocalVersionManager {
         }
         let mut receiver = self.worker_context.version_update_notifier_tx.subscribe();
         loop {
-            {
+            let (pinned_version_id, pinned_version_epoch) = {
                 let current_version = self.local_version.read();
                 if current_version.pinned_version().max_committed_epoch() >= epoch {
                     return Ok(());
                 }
-            }
+                (
+                    current_version.pinned_version().id(),
+                    current_version.pinned_version().max_committed_epoch(),
+                )
+            };
             match tokio::time::timeout(Duration::from_secs(10), receiver.changed()).await {
                 Err(_) => {
-                    return Err(HummockError::wait_epoch("timeout"));
+                    // The reason that we need to retry here is batch scan in chain/rearrange_chain
+                    // is waiting for an uncommitted epoch carried by the CreateMV barrier, which
+                    // can take unbounded time to become committed and propagate
+                    // to the CN. We should consider removing the retry as well as wait_epoch for
+                    // chain/rearrange_chain if we enforce chain/rearrange_chain to be
+                    // scheduled on the same CN with the same distribution as
+                    // the upstream MV. See #3845 for more details.
+                    tracing::warn!(
+                        "wait_epoch {} timeout when waiting for version update. pinned_version_id {}, pinned_version_epoch {}.",
+                        epoch, pinned_version_id, pinned_version_epoch
+                    );
+                    continue;
                 }
                 Ok(Err(_)) => {
                     return Err(HummockError::wait_epoch("tx dropped"));
@@ -440,7 +455,7 @@ impl LocalVersionManager {
             );
             // TODO: may apply different `is_local` according to whether local spill is enabled.
             let _ = self
-                .run_upload_task(order_index, epoch, payload, true)
+                .run_upload_task(order_index, epoch, payload, true, u64::MAX)
                 .await
                 .inspect_err(|err| {
                     error!(
@@ -474,7 +489,8 @@ impl LocalVersionManager {
         if epochs.is_empty() {
             return Ok(());
         }
-        let epoch_range = epoch_range.unwrap_or_else(|| (0, *epochs.last().unwrap()));
+        let epoch_range =
+            epoch_range.unwrap_or_else(|| (*epochs.get(0).unwrap() - 1, *epochs.last().unwrap()));
         let (tx, rx) = oneshot::channel();
         self.buffer_tracker
             .send_event(SharedBufferEvent::SyncEpoch(epochs.clone(), tx));
@@ -502,9 +518,15 @@ impl LocalVersionManager {
                 if key != &epoch {
                     size += value.read().get_upload_size();
                 }
-                (*value).clone()
+                let uncommitted_data = value.write().get_uncommitted_data();
+                uncommitted_data.into_iter().map(|(key_1,value)| {
+                    let new_key = (key_1.0, key_1.1 + (key - epoch_range.0) as usize);
+                    (new_key, value)
+                }).collect()
             })
-            .flat_map(|value| value.write().get_uncommitted_data())
+            .flat_map(|value:KeyIndexedUncommittedData| {
+                value
+            })
             .collect::<KeyIndexedUncommittedData>();
         let (order_index, task_payload, task_write_batch_size) = match self
             .local_version
@@ -521,7 +543,7 @@ impl LocalVersionManager {
         };
 
         let ret = self
-            .run_upload_task(order_index, epoch, task_payload, false)
+            .run_upload_task(order_index, epoch, task_payload, false, epoch_range.0)
             .await;
         tracing::trace!(
             "sync epoch {} finished. Task size {}",
@@ -540,10 +562,11 @@ impl LocalVersionManager {
         epoch: HummockEpoch,
         task_payload: UploadTaskPayload,
         is_local: bool,
+        water_epoch: HummockEpoch,
     ) -> HummockResult<()> {
         let task_result = self
             .shared_buffer_uploader
-            .flush(epoch, is_local, task_payload)
+            .flush(epoch, is_local, task_payload, water_epoch)
             .await;
 
         let local_version_guard = self.local_version.read();
