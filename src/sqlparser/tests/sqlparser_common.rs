@@ -3090,10 +3090,10 @@ fn parse_create_user() {
             assert_eq!(
                 stmt.with_options.0,
                 vec![
-                    CreateUserOption::NoSuperUser,
-                    CreateUserOption::CreateDB,
-                    CreateUserOption::Login,
-                    CreateUserOption::Password(Some(AstString(
+                    UserOption::NoSuperUser,
+                    UserOption::CreateDB,
+                    UserOption::Login,
+                    UserOption::Password(Some(AstString(
                         "md5827ccb0eea8a706c4c34a16891f84e7b".into()
                     ))),
                 ]
