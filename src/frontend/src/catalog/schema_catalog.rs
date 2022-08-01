@@ -14,13 +14,15 @@
 
 use std::collections::HashMap;
 
-use risingwave_common::catalog::{valid_table_name, TableId, PG_CATALOG_SCHEMA_NAME};
+use risingwave_common::catalog::{valid_table_name, IndexId, TableId, PG_CATALOG_SCHEMA_NAME};
 use risingwave_pb::catalog::{
-    Schema as ProstSchema, Sink as ProstSink, Source as ProstSource, Table as ProstTable,
+    Index as ProstIndex, Schema as ProstSchema, Sink as ProstSink, Source as ProstSource,
+    Table as ProstTable,
 };
 use risingwave_pb::stream_plan::source_node::SourceType;
 
 use super::source_catalog::SourceCatalog;
+use crate::catalog::index_catalog::IndexCatalog;
 use crate::catalog::sink_catalog::SinkCatalog;
 use crate::catalog::system_catalog::SystemCatalog;
 use crate::catalog::table_catalog::TableCatalog;
@@ -39,6 +41,8 @@ pub struct SchemaCatalog {
     source_name_by_id: HashMap<SourceId, String>,
     sink_by_name: HashMap<String, SinkCatalog>,
     sink_name_by_id: HashMap<SinkId, String>,
+    index_by_name: HashMap<String, IndexCatalog>,
+    index_name_by_id: HashMap<IndexId, String>,
 
     // This field only available when schema is "pg_catalog". Meanwhile, others will be empty.
     system_table_by_name: HashMap<String, SystemCatalog>,
@@ -74,6 +78,20 @@ impl SchemaCatalog {
     pub fn drop_table(&mut self, id: TableId) {
         let name = self.table_name_by_id.remove(&id).unwrap();
         self.table_by_name.remove(&name).unwrap();
+    }
+
+    pub fn create_index(&mut self, prost: &ProstIndex) {
+        let name = prost.name.clone();
+        let id = prost.id.into();
+        let index: IndexCatalog = prost.into();
+
+        self.index_by_name.try_insert(name.clone(), index).unwrap();
+        self.index_name_by_id.try_insert(id, name).unwrap();
+    }
+
+    pub fn drop_index(&mut self, id: IndexId) {
+        let name = self.index_name_by_id.remove(&id).unwrap();
+        self.index_by_name.remove(&name).unwrap();
     }
 
     pub fn create_source(&mut self, prost: ProstSource) {
@@ -173,6 +191,10 @@ impl SchemaCatalog {
         self.sink_by_name.get(sink_name)
     }
 
+    pub fn get_index_by_name(&self, index_name: &str) -> Option<&IndexCatalog> {
+        self.index_by_name.get(index_name)
+    }
+
     pub fn get_system_table_by_name(&self, table_name: &str) -> Option<&SystemCatalog> {
         self.system_table_by_name.get(table_name)
     }
@@ -201,6 +223,8 @@ impl From<&ProstSchema> for SchemaCatalog {
             source_name_by_id: HashMap::new(),
             sink_by_name: HashMap::new(),
             sink_name_by_id: HashMap::new(),
+            index_by_name: HashMap::new(),
+            index_name_by_id: HashMap::new(),
             system_table_by_name: HashMap::new(),
             owner: schema.owner,
         }

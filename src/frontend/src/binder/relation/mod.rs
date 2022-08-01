@@ -169,6 +169,11 @@ impl Binder {
         Self::resolve_single_name(name.0, "user name")
     }
 
+    /// return the (`schema_name`, `index_name`)
+    pub fn resolve_index_name(name: ObjectName) -> Result<(String, String)> {
+        Self::resolve_double_name(name.0, "empty index name", DEFAULT_SCHEMA_NAME)
+    }
+
     /// Fill the [`BindContext`](super::BindContext) for table.
     pub(super) fn bind_table_to_context(
         &mut self,

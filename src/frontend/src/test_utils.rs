@@ -21,14 +21,14 @@ use parking_lot::RwLock;
 use pgwire::pg_response::PgResponse;
 use pgwire::pg_server::{BoxedError, Session, SessionManager, UserAuthenticator};
 use risingwave_common::catalog::{
-    TableId, DEFAULT_DATABASE_NAME, DEFAULT_SCHEMA_NAME, DEFAULT_SUPER_USER, DEFAULT_SUPER_USER_ID,
-    NON_RESERVED_USER_ID, PG_CATALOG_SCHEMA_NAME,
+    IndexId, TableId, DEFAULT_DATABASE_NAME, DEFAULT_SCHEMA_NAME, DEFAULT_SUPER_USER,
+    DEFAULT_SUPER_USER_ID, NON_RESERVED_USER_ID, PG_CATALOG_SCHEMA_NAME,
 };
 use risingwave_common::error::Result;
 use risingwave_pb::catalog::table::OptionalAssociatedSourceId;
 use risingwave_pb::catalog::{
-    Database as ProstDatabase, Schema as ProstSchema, Sink as ProstSink, Source as ProstSource,
-    Table as ProstTable,
+    Database as ProstDatabase, Index as ProstIndex, Schema as ProstSchema, Sink as ProstSink,
+    Source as ProstSource, Table as ProstTable,
 };
 use risingwave_pb::common::ParallelUnitMapping;
 use risingwave_pb::meta::list_table_fragments_response::TableFragmentInfo;
@@ -235,6 +235,26 @@ impl CatalogWriter for MockCatalogWriter {
         self.create_sink_inner(sink, graph)
     }
 
+    async fn create_index(
+        &self,
+        mut index: ProstIndex,
+        mut table: ProstTable,
+        _graph: StreamFragmentGraph,
+    ) -> Result<()> {
+        table.id = self.gen_id();
+        table.mapping = Some(ParallelUnitMapping {
+            table_id: table.id,
+            original_indices: [0, 10, 20].to_vec(),
+            data: [1, 2, 3].to_vec(),
+        });
+        self.catalog.write().create_table(&table);
+        self.add_table_or_index_id(table.id, table.schema_id, table.database_id);
+
+        index.id = table.id;
+        self.catalog.write().create_index(&index);
+        Ok(())
+    }
+
     async fn drop_materialized_source(&self, source_id: u32, table_id: TableId) -> Result<()> {
         let (database_id, schema_id) = self.drop_table_or_source_id(source_id);
         self.drop_table_or_source_id(table_id.table_id);
@@ -268,6 +288,14 @@ impl CatalogWriter for MockCatalogWriter {
         self.catalog
             .write()
             .drop_sink(database_id, schema_id, sink_id);
+        Ok(())
+    }
+
+    async fn drop_index(&self, index_id: IndexId) -> Result<()> {
+        let (database_id, schema_id) = self.drop_table_or_index_id(index_id.index_id);
+        self.catalog
+            .write()
+            .drop_index(database_id, schema_id, index_id);
         Ok(())
     }
 
@@ -339,7 +367,22 @@ impl MockCatalogWriter {
             .insert(table_id, schema_id);
     }
 
+    fn add_table_or_index_id(&self, table_id: u32, schema_id: SchemaId, _database_id: DatabaseId) {
+        self.table_id_to_schema_id
+            .write()
+            .insert(table_id, schema_id);
+    }
+
     fn drop_table_or_sink_id(&self, table_id: u32) -> (DatabaseId, SchemaId) {
+        let schema_id = self
+            .table_id_to_schema_id
+            .write()
+            .remove(&table_id)
+            .unwrap();
+        (self.get_database_id_by_schema(schema_id), schema_id)
+    }
+
+    fn drop_table_or_index_id(&self, table_id: u32) -> (DatabaseId, SchemaId) {
         let schema_id = self
             .table_id_to_schema_id
             .write()

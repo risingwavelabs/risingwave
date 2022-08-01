@@ -238,6 +238,7 @@ define_keywords!(
     IGNORE,
     ILIKE,
     IN,
+    INCLUDE,
     INDEX,
     INDICATOR,
     INNER,

@@ -48,6 +48,7 @@ impl ObserverNodeImpl for FrontendObserverNode {
             | Info::Schema(_)
             | Info::Table(_)
             | Info::Source(_)
+            | Info::Index(_)
             | Info::Sink(_) => {
                 self.handle_catalog_notification(resp);
             }
@@ -160,6 +161,13 @@ impl FrontendObserverNode {
                 Operation::Add => catalog_guard.create_sink(sink.clone()),
                 Operation::Delete => {
                     catalog_guard.drop_sink(sink.database_id, sink.schema_id, sink.id)
+                }
+                _ => panic!("receive an unsupported notify {:?}", resp),
+            },
+            Info::Index(index) => match resp.operation() {
+                Operation::Add => catalog_guard.create_index(index),
+                Operation::Delete => {
+                    catalog_guard.drop_index(index.database_id, index.schema_id, index.id.into())
                 }
                 _ => panic!("receive an unsupported notify {:?}", resp),
             },

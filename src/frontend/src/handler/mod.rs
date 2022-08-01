@@ -145,6 +145,7 @@ pub async fn handle(
             name,
             table_name,
             columns,
+            include,
             unique,
             if_not_exists,
         } => {
@@ -160,7 +161,8 @@ pub async fn handle(
                 )
                 .into());
             }
-            create_index::handle_create_index(context, name, table_name, columns.to_vec()).await
+            create_index::handle_create_index(context, name, table_name, columns.to_vec(), include)
+                .await
         }
         // Ignore `StartTransaction` and `Abort` temporarily.Its not final implementation.
         // 1. Fully support transaction is too hard and gives few benefits to us.

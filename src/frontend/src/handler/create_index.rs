@@ -12,21 +12,23 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::rc::Rc;
 
 use fixedbitset::FixedBitSet;
 use itertools::Itertools;
 use pgwire::pg_response::{PgResponse, StatementType};
+use risingwave_common::catalog::{IndexId, TableId};
 use risingwave_common::error::{ErrorCode, Result, RwError};
-use risingwave_pb::catalog::Table as ProstTable;
+use risingwave_pb::catalog::{Index as ProstIndex, Table as ProstTable};
 use risingwave_pb::user::grant_privilege::{Action, Object};
-use risingwave_sqlparser::ast::{ObjectName, OrderByExpr};
+use risingwave_sqlparser::ast::{Ident, ObjectName, OrderByExpr};
 
 use crate::binder::Binder;
-use crate::catalog::check_schema_writable;
+use crate::catalog::{check_schema_writable, IndexCatalog};
+use crate::expr::{ExprImpl, InputRef};
 use crate::handler::privilege::{check_privileges, ObjectCheckItem};
-use crate::optimizer::plan_node::{LogicalScan, StreamTableScan};
+use crate::optimizer::plan_node::{LogicalProject, LogicalScan};
 use crate::optimizer::property::{FieldOrder, Order, RequiredDist};
 use crate::optimizer::{PlanRef, PlanRoot};
 use crate::session::{OptimizerContext, OptimizerContextRef, SessionImpl};
@@ -38,7 +40,8 @@ pub(crate) fn gen_create_index_plan(
     index_name: ObjectName,
     table_name: ObjectName,
     columns: Vec<OrderByExpr>,
-) -> Result<(PlanRef, ProstTable)> {
+    include: Vec<Ident>,
+) -> Result<(PlanRef, ProstTable, ProstIndex)> {
     let columns = columns
         .iter()
         .map(|column| {
@@ -93,7 +96,7 @@ pub(crate) fn gen_create_index_plan(
         .enumerate()
         .map(|(x, y)| (y.name.clone(), x))
         .collect::<HashMap<_, _>>();
-    let arrange_key = columns
+    let mut index_columns = columns
         .iter()
         .map(|x| {
             let x = x.to_string();
@@ -104,34 +107,71 @@ pub(crate) fn gen_create_index_plan(
         })
         .try_collect::<_, Vec<_>, RwError>()?;
 
+    let mut include_columns = include
+        .iter()
+        .map(|x| {
+            let x = x.to_string();
+            table_desc_map
+                .get(&x)
+                .cloned()
+                .ok_or_else(|| ErrorCode::ItemNotFound(x).into())
+        })
+        .try_collect::<_, Vec<_>, RwError>()?;
+
+    // remove duplicate column
+    let mut set = HashSet::new();
+    index_columns = index_columns
+        .into_iter()
+        .filter(|x| set.insert(*x))
+        .collect_vec();
+
+    // remove include columns are already in index columns
+    include_columns = include_columns
+        .into_iter()
+        .filter(|x| set.insert(*x))
+        .collect_vec();
+
     // Manually assemble the materialization plan for the index MV.
     let materialize = {
-        let mut required_cols = FixedBitSet::with_capacity(table_desc.columns.len());
-        required_cols.toggle_range(..);
-        required_cols.toggle(0);
-        let mut out_names: Vec<String> =
-            table_desc.columns.iter().map(|c| c.name.clone()).collect();
-        out_names.remove(0);
+        let out_names: Vec<String> = index_columns
+            .iter()
+            .chain(include_columns.iter())
+            .map(|&i| table_desc.columns.get(i).unwrap().name.clone())
+            .collect_vec();
 
-        let scan_node = StreamTableScan::new(LogicalScan::create(
+        let exprs = index_columns
+            .iter()
+            .chain(include_columns.iter())
+            .map(|&i| {
+                ExprImpl::InputRef(
+                    InputRef::new(i, table_desc.columns.get(i).unwrap().data_type.clone()).into(),
+                )
+            })
+            .collect_vec();
+
+        let logical_scan = LogicalScan::create(
             table_name,
             false,
-            table_desc,
+            table_desc.clone(),
             // indexes are only used by DeltaJoin rule, and we don't need to provide them here.
             vec![],
             context,
-        ));
+        );
+
+        let logical_project = LogicalProject::create(logical_scan.into(), exprs);
+        let mut project_required_cols = FixedBitSet::with_capacity(logical_project.schema().len());
+        project_required_cols.toggle_range(0..logical_project.schema().len());
 
         PlanRoot::new(
-            scan_node.into(),
+            logical_project,
             RequiredDist::AnyShard,
             Order::new(
-                arrange_key
-                    .iter()
-                    .map(|id| FieldOrder::ascending(*id))
+                (0..index_columns.len())
+                    .into_iter()
+                    .map(FieldOrder::ascending)
                     .collect(),
             ),
-            required_cols,
+            project_required_cols,
             out_names,
         )
         .gen_create_index_plan(index_name.to_string(), table.id())?
@@ -164,7 +204,25 @@ pub(crate) fn gen_create_index_plan(
         .to_prost(index_schema_id, index_database_id);
     index_table.owner = session.user_id();
 
-    Ok((materialize.into(), index_table))
+    let index = IndexCatalog {
+        id: IndexId::placeholder(),
+        schema_id: index_schema_id,
+        database_id: index_database_id,
+        name: index_table_name,
+        table_id: TableId::placeholder(),
+        indexed_table_id: table.id,
+        index_columns: index_columns
+            .iter()
+            .map(|&i| InputRef::new(i, table_desc.columns.get(i).unwrap().data_type.clone()))
+            .collect_vec(),
+        include_columns: include_columns
+            .iter()
+            .map(|&i| InputRef::new(i, table_desc.columns.get(i).unwrap().data_type.clone()))
+            .collect_vec(),
+    }
+    .to_prost(index_schema_id, index_database_id);
+
+    Ok((materialize.into(), index_table, index))
 }
 
 pub async fn handle_create_index(
@@ -172,21 +230,23 @@ pub async fn handle_create_index(
     name: ObjectName,
     table_name: ObjectName,
     columns: Vec<OrderByExpr>,
+    include: Vec<Ident>,
 ) -> Result<PgResponse> {
     let session = context.session_ctx.clone();
 
-    let (graph, table) = {
-        let (plan, table) = gen_create_index_plan(
+    let (graph, table, index) = {
+        let (plan, table, index) = gen_create_index_plan(
             &session,
             context.into(),
             name.clone(),
             table_name.clone(),
             columns,
+            include,
         )?;
         let plan = plan.to_stream_prost();
         let graph = StreamFragmenter::build_graph(plan);
 
-        (graph, table)
+        (graph, table, index)
     };
 
     log::trace!(
@@ -196,9 +256,7 @@ pub async fn handle_create_index(
     );
 
     let catalog_writer = session.env().catalog_writer();
-    catalog_writer
-        .create_materialized_view(table, graph)
-        .await?;
+    catalog_writer.create_index(index, table, graph).await?;
 
-    Ok(PgResponse::empty_result(StatementType::CREATE_TABLE))
+    Ok(PgResponse::empty_result(StatementType::CREATE_INDEX))
 }
