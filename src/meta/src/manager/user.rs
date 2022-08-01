@@ -23,6 +23,7 @@ use risingwave_common::error::ErrorCode::{InternalError, PermissionDenied};
 use risingwave_common::error::{Result, RwError};
 use risingwave_pb::meta::subscribe_response::{Info, Operation};
 use risingwave_pb::user::grant_privilege::{ActionWithGrantOption, Object};
+use risingwave_pb::user::update_user_request::UpdateField;
 use risingwave_pb::user::{GrantPrivilege, UserInfo};
 use tokio::sync::{Mutex, MutexGuard};
 
@@ -79,6 +80,25 @@ impl UserManagerInner {
     fn create_user(&mut self, user: UserInfo) {
         self.all_users.insert(user.name.clone());
         self.user_info.insert(user.id, user);
+    }
+
+    fn update_user(&mut self, update_user: &UserInfo, update_fields: &[UpdateField]) -> UserInfo {
+        let mut user = self.user_info.get(&update_user.id).unwrap().clone();
+        update_fields.iter().for_each(|&field| match field {
+            UpdateField::Unknown => unreachable!(),
+            UpdateField::Super => user.is_supper = update_user.is_supper,
+            UpdateField::Login => user.can_login = update_user.can_login,
+            UpdateField::CreateDb => user.can_create_db = update_user.can_create_db,
+            UpdateField::AuthInfo => user.auth_info = update_user.auth_info.clone(),
+            UpdateField::Rename => {
+                self.all_users.remove(&user.name);
+                user.name = update_user.name.clone();
+                self.all_users.insert(update_user.name.clone());
+            }
+        });
+
+        self.user_info.insert(update_user.id, user.clone());
+        user
     }
 
     fn drop_user(&mut self, user_id: UserId) {
@@ -158,6 +178,32 @@ impl<S: MetaStore> UserManager<S> {
             .env
             .notification_manager()
             .notify_frontend(Operation::Add, Info::User(user.to_owned()))
+            .await;
+        Ok(version)
+    }
+
+    pub async fn update_user(
+        &self,
+        user: &UserInfo,
+        update_fields: &[UpdateField],
+    ) -> Result<NotificationVersion> {
+        let mut core = self.core.lock().await;
+        let rename_flag = update_fields
+            .iter()
+            .any(|&field| field == UpdateField::Rename);
+        if rename_flag && core.all_users.contains(&user.name) {
+            return Err(RwError::from(PermissionDenied(format!(
+                "User {} already exists",
+                user.name
+            ))));
+        }
+        user.insert(self.env.meta_store()).await?;
+        let new_user = core.update_user(user, update_fields);
+
+        let version = self
+            .env
+            .notification_manager()
+            .notify_frontend(Operation::Update, Info::User(new_user))
             .await;
         Ok(version)
     }

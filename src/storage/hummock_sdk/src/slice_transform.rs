@@ -249,7 +249,6 @@ mod tests {
     }
 
     fn build_table_with_prefix_column_num(column_count: u32) -> ProstTable {
-        #[expect(clippy::needless_borrow)]
         ProstTable {
             is_index: false,
             index_on_id: 0,
