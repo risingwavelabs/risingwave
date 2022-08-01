@@ -23,9 +23,9 @@ use serde::{Deserialize, Serialize};
 
 use crate::{
     CompactorConfig, CompactorService, ComputeNodeConfig, ComputeNodeService, EtcdConfig,
-    EtcdService, FrontendConfig, FrontendService, GrafanaConfig, GrafanaGen, MetaNodeConfig,
-    MetaNodeService, MinioConfig, MinioService, PrometheusConfig, PrometheusGen, PrometheusService,
-    RedPandaConfig,
+    EtcdService, FrontendConfig, FrontendService, GrafanaConfig, GrafanaGen,
+    HummockInMemoryStrategy, MetaNodeConfig, MetaNodeService, MinioConfig, MinioService,
+    PrometheusConfig, PrometheusGen, PrometheusService, RedPandaConfig,
 };
 
 #[serde_with::skip_serializing_none]
@@ -150,7 +150,11 @@ fn health_check_port(port: u16) -> HealthCheck {
 impl Compose for ComputeNodeConfig {
     fn compose(&self, config: &ComposeConfig) -> Result<ComposeService> {
         let mut command = Command::new("compute-node");
-        ComputeNodeService::apply_command_args(&mut command, self)?;
+        ComputeNodeService::apply_command_args(
+            &mut command,
+            self,
+            HummockInMemoryStrategy::Disallowed,
+        )?;
         command.arg("--config-path").arg("/risingwave.toml");
 
         std::fs::copy(
