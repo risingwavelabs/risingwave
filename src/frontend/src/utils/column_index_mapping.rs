@@ -472,15 +472,18 @@ mod tests {
             new_fd(&[0, 1], &[2, 3]),
             new_fd(&[2], &[0, 1]),
             new_fd(&[1], &[0]),
+            // empty mappings will be removed
+            new_fd(&[], &[]),
+            new_fd(&[1], &[]),
+            // constant column mapping will be kept
+            new_fd(&[], &[0]),
         ]);
         let mapping = ColIndexMapping::with_remaining_columns(&[1, 0], 4);
         let result = mapping.rewrite_functional_dependency_set(fd_set);
-        let expected =
-            FunctionalDependencySet::with_dependencies(vec![FunctionalDependency::with_indices(
-                2,
-                &[0],
-                &[1],
-            )]);
+        let expected = FunctionalDependencySet::with_dependencies(vec![
+            FunctionalDependency::with_indices(2, &[0], &[1]),
+            FunctionalDependency::with_indices(2, &[], &[1]),
+        ]);
         assert_eq!(result, expected);
     }
 }

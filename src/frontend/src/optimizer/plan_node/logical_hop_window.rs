@@ -102,7 +102,8 @@ impl LogicalHopWindow {
                     let mut fd = fd.clone();
                     fd.from.set(start_idx, true);
                     current_fd.add_functional_dependency(fd);
-                } else if let Some(end_idx) = window_end_index {
+                }
+                if let Some(end_idx) = window_end_index {
                     let mut fd = fd.clone();
                     fd.from.set(end_idx, true);
                     current_fd.add_functional_dependency(fd);
