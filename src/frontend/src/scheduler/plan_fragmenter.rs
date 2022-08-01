@@ -26,7 +26,7 @@ use risingwave_pb::common::Buffer;
 use risingwave_pb::plan_common::Field as FieldProst;
 use uuid::Uuid;
 
-use crate::optimizer::plan_node::{BatchSeqScan, PlanNodeId, PlanNodeType};
+use crate::optimizer::plan_node::{PlanNodeId, PlanNodeType};
 use crate::optimizer::property::Distribution;
 use crate::optimizer::PlanRef;
 use crate::scheduler::worker_node_manager::WorkerNodeManagerRef;
@@ -225,7 +225,13 @@ struct QueryStageBuilder {
 }
 
 impl QueryStageBuilder {
-    fn new(id: StageId, query_id: QueryId, parallelism: u32, exchange_info: ExchangeInfo) -> Self {
+    fn new(
+        id: StageId,
+        query_id: QueryId,
+        parallelism: u32,
+        exchange_info: ExchangeInfo,
+        table_scan_info: Option<TableScanInfo>,
+    ) -> Self {
         Self {
             query_id,
             id,
@@ -233,7 +239,7 @@ impl QueryStageBuilder {
             parallelism,
             exchange_info,
             children_stages: vec![],
-            table_scan_info: None,
+            table_scan_info,
         }
     }
 
@@ -243,14 +249,7 @@ impl QueryStageBuilder {
             id: self.id,
             root: self.root.unwrap(),
             exchange_info: self.exchange_info,
-            parallelism: match &self.table_scan_info {
-                None => self.parallelism,
-                Some(info) => info
-                    .partitions
-                    .as_ref()
-                    .map(|m| m.len() as u32)
-                    .unwrap_or(1),
-            },
+            parallelism: self.parallelism,
             table_scan_info: self.table_scan_info,
         });
 
@@ -360,9 +359,23 @@ impl BatchPlanFragmenter {
     fn new_stage(&mut self, root: PlanRef, exchange_info: ExchangeInfo) -> QueryStageRef {
         let next_stage_id = self.next_stage_id;
         self.next_stage_id += 1;
+
+        let table_scan_info = Self::collect_stage_table_scan(root.clone());
         let parallelism = match root.distribution() {
-            Distribution::Single => 1,
-            _ => self.worker_node_manager.worker_node_count(),
+            Distribution::Single => {
+                assert!(
+                    table_scan_info.is_none()
+                        || table_scan_info.as_ref().unwrap().partitions.is_none(),
+                    "The stage has single distribution, but contains a partitioned table scan
+                node.\nplan: {:#?}",
+                    root
+                );
+                1
+            }
+            _ => match &table_scan_info {
+                None => self.worker_node_manager.worker_node_count(),
+                Some(info) => info.partitions.as_ref().map(|m| m.len()).unwrap_or(1),
+            },
         };
 
         let mut builder = QueryStageBuilder::new(
@@ -370,6 +383,7 @@ impl BatchPlanFragmenter {
             self.query_id.clone(),
             parallelism as u32,
             exchange_info,
+            table_scan_info,
         );
 
         self.visit_node(root, &mut builder, None);
@@ -399,27 +413,6 @@ impl BatchPlanFragmenter {
                 } else {
                     builder.root = Some(Arc::new(execution_plan_node));
                 }
-                // Check out the comments for `has_table_scan` in `QueryStage`.
-                let scan_node: Option<&BatchSeqScan> = node.as_batch_seq_scan();
-                if let Some(scan_node) = scan_node {
-                    if builder.table_scan_info.is_some() {
-                        // There is already a scan node in this stage.
-                        // The nodes have the same distribution, but maybe different vnodes
-                        // partition. We just use the same partition for all
-                        // the scan nodes.
-                        return;
-                    }
-
-                    builder.table_scan_info = Some({
-                        let table_desc = scan_node.logical().table_desc();
-
-                        let partitions = table_desc.vnode_mapping.as_ref().map(|vnode_mapping| {
-                            derive_partitions(scan_node.scan_ranges(), table_desc, vnode_mapping)
-                        });
-
-                        TableScanInfo { partitions }
-                    });
-                }
             }
         }
     }
@@ -442,6 +435,33 @@ impl BatchPlanFragmenter {
         }
 
         builder.children_stages.push(child_stage);
+    }
+
+    /// Check whether this stage contains a table scan node and the table's information if so.
+    ///
+    /// If there are multiple scan nodes in this stage, they must have the same distribution, but
+    /// maybe different vnodes partition. We just use the same partition for all
+    /// the scan nodes.
+    fn collect_stage_table_scan(node: PlanRef) -> Option<TableScanInfo> {
+        if node.node_type() == PlanNodeType::BatchExchange {
+            // Do not visit next stage.
+            return None;
+        }
+
+        if let Some(scan_node) = node.as_batch_seq_scan() {
+            Some({
+                let table_desc = scan_node.logical().table_desc();
+                let partitions = table_desc.vnode_mapping.as_ref().map(|vnode_mapping| {
+                    derive_partitions(scan_node.scan_ranges(), table_desc, vnode_mapping)
+                });
+                TableScanInfo { partitions }
+            })
+        } else {
+            node.inputs()
+                .into_iter()
+                .map(Self::collect_stage_table_scan)
+                .find_map(|o| o)
+        }
     }
 }
 
@@ -543,9 +563,7 @@ mod tests {
     use risingwave_common::catalog::{ColumnDesc, TableDesc};
     use risingwave_common::types::DataType;
     use risingwave_pb::batch_plan::plan_node::NodeBody;
-    use risingwave_pb::common::{
-        HostAddress, ParallelUnit, ParallelUnitType, WorkerNode, WorkerType,
-    };
+    use risingwave_pb::common::{HostAddress, ParallelUnit, WorkerNode, WorkerType};
     use risingwave_pb::plan_common::JoinType;
 
     use crate::expr::InputRef;
@@ -603,6 +621,8 @@ mod tests {
             ctx,
         )
         .to_batch()
+        .unwrap()
+        .to_distributed()
         .unwrap();
         let batch_filter = BatchFilter::new(LogicalFilter::new(
             batch_plan_node.clone(),
@@ -780,18 +800,11 @@ mod tests {
 
     fn generate_parallel_units(start_id: u32, node_id: u32) -> Vec<ParallelUnit> {
         let parallel_degree = 8;
-        let mut parallel_units = vec![ParallelUnit {
-            id: start_id,
-            r#type: ParallelUnitType::Single as i32,
-            worker_node_id: node_id,
-        }];
-        for id in start_id + 1..start_id + 1 + parallel_degree {
-            parallel_units.push(ParallelUnit {
+        (start_id..start_id + parallel_degree)
+            .map(|id| ParallelUnit {
                 id,
-                r#type: ParallelUnitType::Hash as i32,
                 worker_node_id: node_id,
-            });
-        }
-        parallel_units
+            })
+            .collect()
     }
 }

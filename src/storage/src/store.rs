@@ -34,14 +34,27 @@ pub trait IngestBatchFutureTrait<'a> = Future<Output = StorageResult<usize>> + S
 macro_rules! define_state_store_associated_type {
     () => {
         type GetFuture<'a> = impl GetFutureTrait<'a>;
-        type ScanFuture<'a, R, B> = impl ScanFutureTrait<'a, R, B> where R: 'static + Send, B: 'static + Send;
-        type BackwardScanFuture<'a, R, B> = impl ScanFutureTrait<'a, R, B> where R: 'static + Send, B: 'static + Send;
+        type ScanFuture<'a, R, B> = impl ScanFutureTrait<'a, R, B>
+            where
+                R: 'static + Send + RangeBounds<B>,
+                B: 'static + Send + AsRef<[u8]>;
+        type BackwardScanFuture<'a, R, B> = impl ScanFutureTrait<'a, R, B>
+            where
+                R: 'static + Send + RangeBounds<B>,
+                B: 'static + Send + AsRef<[u8]>;
+
         type IngestBatchFuture<'a> = impl IngestBatchFutureTrait<'a>;
         type ReplicateBatchFuture<'a> = impl EmptyFutureTrait<'a>;
         type WaitEpochFuture<'a> = impl EmptyFutureTrait<'a>;
         type SyncFuture<'a> = impl EmptyFutureTrait<'a>;
-        type IterFuture<'a, R, B> = impl Future<Output = $crate::error::StorageResult<Self::Iter>> + Send where R: 'static + Send, B: 'static + Send;
-        type BackwardIterFuture<'a, R, B> = impl Future<Output = $crate::error::StorageResult<Self::Iter>> + Send where R: 'static + Send, B: 'static + Send;
+        type IterFuture<'a, R, B> = impl Future<Output = $crate::error::StorageResult<Self::Iter>> + Send
+            where
+                R: 'static + Send + RangeBounds<B>,
+                B: 'static + Send + AsRef<[u8]>;
+        type BackwardIterFuture<'a, R, B> = impl Future<Output = $crate::error::StorageResult<Self::Iter>> + Send
+            where
+                R: 'static + Send + RangeBounds<B>,
+                B: 'static + Send + AsRef<[u8]>;
         type ClearSharedBufferFuture<'a> = impl EmptyFutureTrait<'a>;
     }
 }
@@ -53,13 +66,13 @@ pub trait StateStore: Send + Sync + 'static + Clone {
 
     type ScanFuture<'a, R, B>: ScanFutureTrait<'a, R, B>
     where
-        R: 'static + Send,
-        B: 'static + Send;
+        R: 'static + Send + RangeBounds<B>,
+        B: 'static + Send + AsRef<[u8]>;
 
     type BackwardScanFuture<'a, R, B>: ScanFutureTrait<'a, R, B>
     where
-        R: 'static + Send,
-        B: 'static + Send;
+        R: 'static + Send + RangeBounds<B>,
+        B: 'static + Send + AsRef<[u8]>;
 
     type IngestBatchFuture<'a>: IngestBatchFutureTrait<'a>;
 
@@ -71,13 +84,13 @@ pub trait StateStore: Send + Sync + 'static + Clone {
 
     type IterFuture<'a, R, B>: Future<Output = StorageResult<Self::Iter>> + Send
     where
-        R: 'static + Send,
-        B: 'static + Send;
+        R: 'static + Send + RangeBounds<B>,
+        B: 'static + Send + AsRef<[u8]>;
 
     type BackwardIterFuture<'a, R, B>: Future<Output = StorageResult<Self::Iter>> + Send
     where
-        R: 'static + Send,
-        B: 'static + Send;
+        R: 'static + Send + RangeBounds<B>,
+        B: 'static + Send + AsRef<[u8]>;
 
     type ClearSharedBufferFuture<'a>: EmptyFutureTrait<'a>;
 
@@ -170,7 +183,7 @@ pub trait StateStore: Send + Sync + 'static + Clone {
         MonitoredStateStore::new(self, stats)
     }
 
-    /// Gets `epoch`'s uncommitted `SSTables`.
+    /// Gets `epoch`'s uncommitted `Sstables`.
     fn get_uncommitted_ssts(&self, _epoch: u64) -> Vec<LocalSstableInfo> {
         todo!()
     }

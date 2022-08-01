@@ -14,17 +14,15 @@
 
 use std::collections::{BTreeMap, HashMap};
 use std::iter::empty;
-use std::sync::atomic::{AtomicUsize, Ordering};
 
 use anyhow::anyhow;
+use rand::prelude::SliceRandom;
 use risingwave_common::bail;
 use risingwave_common::buffer::BitmapBuilder;
 use risingwave_common::error::Result;
 use risingwave_common::types::VIRTUAL_NODE_COUNT;
 use risingwave_common::util::compress::compress_data;
-use risingwave_pb::common::{
-    ActorInfo, ParallelUnit, ParallelUnitMapping, ParallelUnitType, WorkerNode,
-};
+use risingwave_pb::common::{ActorInfo, ParallelUnit, ParallelUnitMapping, WorkerNode};
 use risingwave_pb::meta::table_fragments::fragment::FragmentDistributionType;
 use risingwave_pb::meta::table_fragments::Fragment;
 
@@ -39,8 +37,6 @@ pub struct Scheduler<S: MetaStore> {
     cluster_manager: ClusterManagerRef<S>,
     /// Maintains vnode mappings of all scheduled fragments.
     hash_mapping_manager: HashMappingManagerRef,
-    /// Round robin counter for singleton fragments
-    single_rr: AtomicUsize,
 }
 
 /// [`ScheduledLocations`] represents the location of scheduled result.
@@ -145,16 +141,13 @@ where
         Self {
             cluster_manager,
             hash_mapping_manager,
-            single_rr: AtomicUsize::new(0),
         }
     }
 
     /// [`Self::schedule`] schedules input fragments to different parallel units (workers).
     /// The schedule procedure is two-fold:
-    /// (1) For singleton fragments, we apply the round robin strategy. One single parallel unit in
-    /// the cluster is assigned to a singleton fragment once, and all the single parallel units take
-    /// turns.
-    /// (2) For normal fragments, we schedule them to all the hash parallel units in the cluster.
+    /// (1) For singleton fragments, we schedule each to one parallel unit randomly.
+    /// (2) For normal fragments, we schedule them to all the parallel units in the cluster.
     pub async fn schedule(
         &self,
         fragment: &mut Fragment,
@@ -166,26 +159,21 @@ where
 
         if fragment.distribution_type == FragmentDistributionType::Single as i32 {
             // Singleton fragment
-            let actor = &fragment.actors[0];
+            let [actor] = fragment.actors.as_slice() else {
+                panic!("singleton fragment should only have one actor")
+            };
 
             let parallel_unit =
                 if actor.same_worker_node_as_upstream && !actor.upstream_actor_id.is_empty() {
                     // Schedule the fragment to the same parallel unit as upstream.
                     locations.schedule_colocate_with(&actor.upstream_actor_id)?
                 } else {
-                    // Choose one parallel unit to schedule from single parallel units.
-                    let single_parallel_units = self
-                        .cluster_manager
-                        .list_parallel_units(Some(ParallelUnitType::Single))
-                        .await;
-                    let single_idx = self
-                        .single_rr
-                        .fetch_update(Ordering::SeqCst, Ordering::SeqCst, |idx| {
-                            Some((idx + 1) % single_parallel_units.len())
-                        })
-                        .unwrap();
-
-                    single_parallel_units[single_idx].clone()
+                    // Randomly choose one parallel unit to schedule from all parallel units.
+                    let parallel_units = self.cluster_manager.list_parallel_units().await;
+                    parallel_units
+                        .choose(&mut rand::thread_rng())
+                        .unwrap()
+                        .clone()
                 };
 
             // Build vnode mapping. However, we'll leave vnode field of actors unset for singletons.
@@ -199,10 +187,7 @@ where
             // Normal fragment
 
             // Find out all the hash parallel units in the cluster.
-            let mut parallel_units = self
-                .cluster_manager
-                .list_parallel_units(Some(ParallelUnitType::Hash))
-                .await;
+            let mut parallel_units = self.cluster_manager.list_parallel_units().await;
             // FIXME(Kexiang): select appropriate parallel_units, currently only support
             // `parallel_degree < parallel_units.size()`
             parallel_units.truncate(fragment.actors.len());
@@ -306,13 +291,14 @@ mod test {
             Arc::new(ClusterManager::new(env.clone(), Duration::from_secs(3600)).await?);
 
         let node_count = 4;
+        let fake_parallelism = 4;
         for i in 0..node_count {
             let host = HostAddress {
                 host: "127.0.0.1".to_string(),
                 port: i as i32,
             };
             cluster_manager
-                .add_worker_node(host.clone(), WorkerType::ComputeNode)
+                .add_worker_node(WorkerType::ComputeNode, host.clone(), fake_parallelism)
                 .await?;
             cluster_manager.activate_worker_node(host).await?;
         }
@@ -348,7 +334,7 @@ mod test {
             })
             .collect_vec();
 
-        let parallel_degree = env.opts.unsafe_worker_node_parallel_degree;
+        let parallel_degree = fake_parallelism;
         let mut normal_fragments = (6..8u32)
             .map(|fragment_id| {
                 let actors = (actor_id..actor_id + node_count * parallel_degree as u32)
@@ -368,7 +354,7 @@ mod test {
                         vnode_bitmap: None,
                     })
                     .collect_vec();
-                actor_id += node_count * 7;
+                actor_id += node_count * parallel_degree as u32;
                 Fragment {
                     fragment_id,
                     fragment_type: 0,
@@ -383,11 +369,6 @@ mod test {
         for fragment in &mut single_fragments {
             scheduler.schedule(fragment, &mut locations).await.unwrap();
         }
-        assert_eq!(locations.actor_locations.get(&1).unwrap().id, 0);
-        assert_eq!(
-            locations.actor_locations.get(&1),
-            locations.actor_locations.get(&5)
-        );
         for fragment in single_fragments {
             assert_ne!(
                 env.hash_mapping_manager()

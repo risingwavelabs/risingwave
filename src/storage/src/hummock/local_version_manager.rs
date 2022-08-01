@@ -25,7 +25,7 @@ use parking_lot::{RwLock, RwLockUpgradableReadGuard, RwLockWriteGuard};
 use risingwave_common::config::StorageConfig;
 use risingwave_hummock_sdk::compaction_group::hummock_version_ext::HummockVersionExt;
 use risingwave_hummock_sdk::key::FullKey;
-use risingwave_hummock_sdk::slice_transform::SliceTransform;
+use risingwave_hummock_sdk::slice_transform::SliceTransformImpl;
 use risingwave_hummock_sdk::{CompactionGroupId, LocalSstableInfo};
 use risingwave_pb::hummock::{HummockVersion, HummockVersionDelta};
 use risingwave_rpc_client::HummockMetaClient;
@@ -130,7 +130,7 @@ impl BufferTracker {
 }
 
 /// The `LocalVersionManager` maintains a local copy of storage service's hummock version data.
-/// By acquiring a `ScopedLocalVersion`, the `SSTables` of this version is guaranteed to be valid
+/// By acquiring a `ScopedLocalVersion`, the `Sstables` of this version is guaranteed to be valid
 /// during the lifetime of `ScopedLocalVersion`. Internally `LocalVersionManager` will pin/unpin the
 /// versions in storage service.
 pub struct LocalVersionManager {
@@ -148,7 +148,7 @@ impl LocalVersionManager {
         stats: Arc<StateStoreMetrics>,
         hummock_meta_client: Arc<dyn HummockMetaClient>,
         write_conflict_detector: Option<Arc<ConflictDetector>>,
-        table_id_to_slice_transform: Arc<RwLock<HashMap<u32, Arc<dyn SliceTransform>>>>,
+        table_id_to_slice_transform: Arc<RwLock<HashMap<u32, SliceTransformImpl>>>,
     ) -> Arc<LocalVersionManager> {
         let (version_unpin_worker_tx, version_unpin_worker_rx) =
             tokio::sync::mpsc::unbounded_channel();
@@ -304,15 +304,30 @@ impl LocalVersionManager {
         }
         let mut receiver = self.worker_context.version_update_notifier_tx.subscribe();
         loop {
-            {
+            let (pinned_version_id, pinned_version_epoch) = {
                 let current_version = self.local_version.read();
                 if current_version.pinned_version().max_committed_epoch() >= epoch {
                     return Ok(());
                 }
-            }
+                (
+                    current_version.pinned_version().id(),
+                    current_version.pinned_version().max_committed_epoch(),
+                )
+            };
             match tokio::time::timeout(Duration::from_secs(10), receiver.changed()).await {
                 Err(_) => {
-                    return Err(HummockError::wait_epoch("timeout"));
+                    // The reason that we need to retry here is batch scan in chain/rearrange_chain
+                    // is waiting for an uncommitted epoch carried by the CreateMV barrier, which
+                    // can take unbounded time to become committed and propagate
+                    // to the CN. We should consider removing the retry as well as wait_epoch for
+                    // chain/rearrange_chain if we enforce chain/rearrange_chain to be
+                    // scheduled on the same CN with the same distribution as
+                    // the upstream MV. See #3845 for more details.
+                    tracing::warn!(
+                        "wait_epoch {} timeout when waiting for version update. pinned_version_id {}, pinned_version_epoch {}.",
+                        epoch, pinned_version_id, pinned_version_epoch
+                    );
+                    continue;
                 }
                 Ok(Err(_)) => {
                     return Err(HummockError::wait_epoch("tx dropped"));
@@ -343,6 +358,7 @@ impl LocalVersionManager {
         compaction_group_id: CompactionGroupId,
         kv_pairs: Vec<(Bytes, StorageValue)>,
         is_remote_batch: bool,
+        table_id: u32,
     ) -> HummockResult<usize> {
         let sorted_items = Self::build_shared_buffer_item_batches(kv_pairs, epoch);
 
@@ -351,6 +367,7 @@ impl LocalVersionManager {
             epoch,
             self.buffer_tracker.buffer_event_sender.clone(),
             compaction_group_id,
+            table_id,
         );
         let batch_size = batch.size();
         if self.buffer_tracker.try_write(batch_size) {

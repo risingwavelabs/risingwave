@@ -95,8 +95,8 @@ pub struct StreamingConfig {
     #[serde(default = "default::in_flight_barrier_nums")]
     pub in_flight_barrier_nums: usize,
 
-    #[serde(default = "default::unsafe_worker_node_parallel_degree")]
-    pub unsafe_worker_node_parallel_degree: usize,
+    #[serde(default = "default::worker_node_parallelism")]
+    pub worker_node_parallelism: usize,
 }
 
 impl Default for StreamingConfig {
@@ -109,7 +109,7 @@ impl Default for StreamingConfig {
 #[derive(Clone, Debug, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct StorageConfig {
-    /// Target size of the SSTable.
+    /// Target size of the Sstable.
     #[serde(default = "default::sst_size_mb")]
     pub sstable_size_mb: u32,
 
@@ -167,6 +167,10 @@ pub struct StorageConfig {
     /// Number of tasks shared buffer can upload in parallel.
     #[serde(default = "default::share_buffer_upload_concurrency")]
     pub share_buffer_upload_concurrency: usize,
+
+    /// Capacity of sstable meta cache.
+    #[serde(default = "default::compactor_memory_limit_mb")]
+    pub compactor_memory_limit_mb: usize,
 }
 
 impl Default for StorageConfig {
@@ -211,6 +215,7 @@ mod default {
         1000
     }
 
+    #[expect(dead_code)]
     pub fn chunk_size() -> u32 {
         1024
     }
@@ -235,6 +240,7 @@ mod default {
         4
     }
 
+    #[expect(dead_code)]
     pub fn shared_buffer_threshold() -> u32 {
         // 192MB
         201326592
@@ -284,8 +290,12 @@ mod default {
         8
     }
 
-    pub fn unsafe_worker_node_parallel_degree() -> usize {
-        4
+    pub fn worker_node_parallelism() -> usize {
+        num_cpus::get()
+    }
+
+    pub fn compactor_memory_limit_mb() -> usize {
+        512
     }
 }
 

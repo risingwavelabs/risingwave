@@ -54,7 +54,7 @@ use crate::rpc::service::hummock_service::HummockServiceImpl;
 use crate::rpc::service::stream_service::StreamServiceImpl;
 use crate::rpc::service::user_service::UserServiceImpl;
 use crate::rpc::{META_CF_NAME, META_LEADER_KEY, META_LEASE_KEY};
-use crate::storage::{Error, EtcdMetaStore, MemStore, MetaStore, Transaction};
+use crate::storage::{EtcdMetaStore, MemStore, MetaStore, MetaStoreError, Transaction};
 use crate::stream::{FragmentManager, GlobalStreamManager, SourceManager};
 
 #[derive(Debug)]
@@ -145,7 +145,7 @@ pub async fn register_leader_for_meta<S: MetaStore>(
             .get_cf(META_CF_NAME, META_LEADER_KEY.as_bytes())
             .await
         {
-            Err(Error::ItemNotFound(_)) => vec![],
+            Err(MetaStoreError::ItemNotFound(_)) => vec![],
             Ok(v) => v,
             _ => {
                 continue;
@@ -155,7 +155,7 @@ pub async fn register_leader_for_meta<S: MetaStore>(
             .get_cf(META_CF_NAME, META_LEASE_KEY.as_bytes())
             .await
         {
-            Err(Error::ItemNotFound(_)) => vec![],
+            Err(MetaStoreError::ItemNotFound(_)) => vec![],
             Ok(v) => v,
             _ => {
                 continue;
@@ -216,7 +216,10 @@ pub async fn register_leader_for_meta<S: MetaStore>(
                 )
                 .await
             {
-                tracing::warn!("new cluster put leader info failed, Error: {:?}", e);
+                tracing::warn!(
+                    "new cluster put leader info failed, MetaStoreError: {:?}",
+                    e
+                );
                 continue;
             }
             txn.check_equal(
@@ -231,7 +234,10 @@ pub async fn register_leader_for_meta<S: MetaStore>(
             lease_info.encode_to_vec(),
         );
         if let Err(e) = meta_store.txn(txn).await {
-            tracing::warn!("add leader info failed, Error: {:?}, try again later", e);
+            tracing::warn!(
+                "add leader info failed, MetaStoreError: {:?}, try again later",
+                e
+            );
             continue;
         }
         let leader = leader_info.clone();
@@ -260,14 +266,17 @@ pub async fn register_leader_for_meta<S: MetaStore>(
                 );
                 if let Err(e) = meta_store.txn(txn).await {
                     match e {
-                        Error::TransactionAbort() => {
+                        MetaStoreError::TransactionAbort() => {
                             panic!("keep lease failed, another node has become new leader");
                         }
-                        Error::Internal(e) => {
-                            tracing::warn!("keep lease failed, try again later, Error: {:?}", e);
+                        MetaStoreError::Internal(e) => {
+                            tracing::warn!(
+                                "keep lease failed, try again later, MetaStoreError: {:?}",
+                                e
+                            );
                         }
-                        Error::ItemNotFound(e) => {
-                            tracing::warn!("keep lease failed, Error: {:?}", e);
+                        MetaStoreError::ItemNotFound(e) => {
+                            tracing::warn!("keep lease failed, MetaStoreError: {:?}", e);
                         }
                     }
                 }
@@ -417,8 +426,15 @@ pub async fn rpc_serve_with_store<S: MetaStore>(
         fragment_manager.clone(),
         ddl_lock.clone(),
     );
-    let user_srv = UserServiceImpl::<S>::new(catalog_manager.clone(), user_manager.clone());
-    let scale_srv = ScaleServiceImpl::<S>::new(barrier_manager.clone(), ddl_lock);
+
+    let user_srv =
+        UserServiceImpl::<S>::new(env.clone(), catalog_manager.clone(), user_manager.clone());
+    let scale_srv = ScaleServiceImpl::<S>::new(
+        barrier_manager.clone(),
+        fragment_manager.clone(),
+        cluster_manager.clone(),
+        ddl_lock,
+    );
     let cluster_srv = ClusterServiceImpl::<S>::new(cluster_manager.clone());
     let stream_srv = StreamServiceImpl::<S>::new(
         env.clone(),

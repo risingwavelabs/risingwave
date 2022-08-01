@@ -12,27 +12,33 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+use core::default::Default;
 use std::collections::HashMap;
 
 use futures::StreamExt;
 use futures_async_stream::try_stream;
 use risingwave_common::catalog::Schema;
-use risingwave_common::error::Result;
-use risingwave_connector::sink::{SinkConfig, SinkImpl};
+use risingwave_connector::sink::{Sink, SinkConfig, SinkImpl};
 use risingwave_storage::StateStore;
 
-use super::error::StreamExecutorError;
+use super::error::{StreamExecutorError, StreamExecutorResult};
 use super::{BoxedExecutor, Executor, Message};
+use crate::executor::PkIndices;
 
 pub struct SinkExecutor<S: StateStore> {
     input: BoxedExecutor,
     _store: S,
     properties: HashMap<String, String>,
     identity: String,
+    pk_indices: PkIndices,
 }
 
-fn build_sink(config: SinkConfig) -> Result<Box<SinkImpl>> {
-    Ok(Box::new(SinkImpl::new(config)?))
+async fn build_sink(config: SinkConfig) -> StreamExecutorResult<Box<SinkImpl>> {
+    Ok(Box::new(
+        SinkImpl::new(config)
+            .await
+            .map_err(StreamExecutorError::sink_error)?,
+    ))
 }
 
 impl<S: StateStore> SinkExecutor<S> {
@@ -50,6 +56,7 @@ impl<S: StateStore> SinkExecutor<S> {
             _store,
             properties,
             identity: format!("SinkExecutor_{:?}", executor_id),
+            pk_indices: Default::default(), // todo
         }
     }
 
@@ -57,23 +64,66 @@ impl<S: StateStore> SinkExecutor<S> {
     async fn execute_inner(self) {
         let sink_config = SinkConfig::from_hashmap(self.properties.clone())
             .map_err(StreamExecutorError::sink_error)?;
-        let _sink = build_sink(sink_config);
 
-        // TODO(tabVersion): the flag is required because kafka transaction requires at least one
+        let mut sink = build_sink(sink_config)
+            .await
+            .map_err(StreamExecutorError::sink_error)?;
+
+        // the flag is required because kafka transaction requires at least one
         // message, so we should abort the transaction if the flag is true.
-        #[allow(clippy::no_effect_underscore_binding)]
-        let _empty_epoch_flag = true;
+        let mut empty_epoch_flag = true;
+        let mut in_transaction = false;
+        let mut epoch = 0;
+
+        let schema = self.schema().clone();
 
         let input = self.input.execute();
+
         #[for_await]
         for msg in input {
             match msg? {
                 Message::Chunk(chunk) => {
-                    let _visible_chunk = chunk.clone().compact()?;
+                    if !in_transaction {
+                        sink.begin_epoch(epoch)
+                            .await
+                            .map_err(StreamExecutorError::sink_error)?;
+                        in_transaction = true;
+                    }
+
+                    let visible_chunk = chunk.clone().compact()?;
+                    if let Err(e) = sink
+                        .write_batch(visible_chunk, &schema)
+                        .await
+                        .map_err(StreamExecutorError::sink_error)
+                    {
+                        sink.abort()
+                            .await
+                            .map_err(StreamExecutorError::sink_error)?;
+                        return Err(e);
+                    }
+                    empty_epoch_flag = false;
 
                     yield Message::Chunk(chunk);
                 }
                 Message::Barrier(barrier) => {
+                    if in_transaction {
+                        if empty_epoch_flag {
+                            sink.abort()
+                                .await
+                                .map_err(StreamExecutorError::sink_error)?;
+                            tracing::debug!(
+                                "transaction abort due to empty epoch, epoch: {:?}",
+                                epoch
+                            );
+                        } else {
+                            sink.commit()
+                                .await
+                                .map_err(StreamExecutorError::sink_error)?;
+                        }
+                    }
+                    in_transaction = false;
+                    empty_epoch_flag = true;
+                    epoch = barrier.epoch.curr;
                     yield Message::Barrier(barrier);
                 }
             }
@@ -91,7 +141,7 @@ impl<S: StateStore> Executor for SinkExecutor<S> {
     }
 
     fn pk_indices(&self) -> super::PkIndicesRef {
-        todo!();
+        &self.pk_indices
     }
 
     fn identity(&self) -> &str {
@@ -106,7 +156,6 @@ mod test {
 
     use super::*;
     use crate::executor::test_utils::*;
-    use crate::executor::*;
 
     #[test]
     fn test_mysqlsink() {

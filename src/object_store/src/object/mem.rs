@@ -64,19 +64,33 @@ impl ObjectStore for InMemObjectStore {
         try_join_all(futures).await
     }
 
+    /// Returns a stream reading the object specified in `path`. If given, the stream starts at the
+    /// byte with index `start_pos` (0-based). As far as possible, the stream only loads the amount
+    /// of data into memory that is read from the stream.
     async fn streaming_read(
         &self,
         path: &str,
-        block_loc: Option<BlockLocation>,
-    ) -> ObjectResult<Box<dyn AsyncRead + Unpin>> {
+        start_pos: Option<usize>,
+    ) -> ObjectResult<Box<dyn AsyncRead + Unpin + Send + Sync>> {
         fail_point!("mem_streaming_read_err", |_| Err(ObjectError::internal(
             "mem streaming read error"
         )));
-        let bytes = if let Some(loc) = block_loc {
-            self.get_object(path, |obj| find_block(obj, loc)).await?
+
+        let bytes = if let Some(pos) = start_pos {
+            self.get_object(path, |obj| {
+                find_block(
+                    obj,
+                    BlockLocation {
+                        offset: pos,
+                        size: obj.len() - pos,
+                    },
+                )
+            })
+            .await?
         } else {
             self.get_object(path, |obj| Ok(obj.clone())).await?
         };
+
         Ok(Box::new(Cursor::new(bytes?)))
     }
 

@@ -91,12 +91,8 @@ pub(crate) fn gen_create_table_plan(
             properties: properties.clone(),
         }),
     )?;
-    let (plan, table) = gen_materialized_source_plan(
-        context,
-        source.clone(),
-        session.user_name().to_string(),
-        properties,
-    )?;
+    let (plan, table) =
+        gen_materialized_source_plan(context, source.clone(), session.user_id(), properties)?;
     Ok((plan, source, table))
 }
 
@@ -105,12 +101,11 @@ pub(crate) fn gen_create_table_plan(
 pub(crate) fn gen_materialized_source_plan(
     context: OptimizerContextRef,
     source: ProstSource,
-    owner: String,
+    owner: u32,
     properties: HashMap<String, String>,
 ) -> Result<(PlanRef, ProstTable)> {
     let materialize = {
         // Manually assemble the materialization plan for the table.
-        #[expect(clippy::needless_borrow)]
         let source_node: PlanRef =
             StreamSource::new(LogicalSource::new(Rc::new((&source).into()), context)).into();
         let mut required_cols = FixedBitSet::with_capacity(source_node.schema().len());
