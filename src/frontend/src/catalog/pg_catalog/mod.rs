@@ -19,7 +19,7 @@ pub mod pg_namespace;
 pub mod pg_type;
 pub mod pg_user;
 
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::sync::Arc;
 
 use async_trait::async_trait;
@@ -28,6 +28,7 @@ use risingwave_common::array::Row;
 use risingwave_common::catalog::{ColumnDesc, SysCatalogReader, TableId, DEFAULT_SUPER_USER_ID};
 use risingwave_common::error::{ErrorCode, Result};
 use risingwave_common::types::{DataType, ScalarImpl};
+use risingwave_pb::user::grant_privilege::{Action, Object};
 use serde_json::json;
 
 use crate::catalog::catalog_service::CatalogReader;
@@ -94,10 +95,33 @@ impl SysCatalogReader for SysCatalogReaderImpl {
 
 impl SysCatalogReaderImpl {
     fn read_namespace(&self) -> Result<Vec<Row>> {
+        let privileges = {
+            let user_reader = self.user_info_reader.read_guard();
+            user_reader
+                .get_user_by_name(&self.auth_context.user_name)
+                .unwrap()
+                .grant_privileges
+                .clone()
+        };
+        let mut allowed_schemas = HashSet::new();
+        privileges.iter().for_each(|privilege| {
+            if let Some(Object::SchemaId(id)) = privilege.object {
+                if privilege
+                    .action_with_opts
+                    .iter()
+                    .any(|action| action.action == Action::Select as i32)
+                {
+                    allowed_schemas.insert(id);
+                }
+            }
+        });
         let reader = self.catalog_reader.read_guard();
         let schemas = reader.get_all_schema_info(&self.auth_context.database)?;
         Ok(schemas
             .iter()
+            .filter(|&schema| {
+                schema.owner == self.auth_context.user_id || allowed_schemas.contains(&schema.id)
+            })
             .map(|schema| {
                 Row::new(vec![
                     Some(ScalarImpl::Int32(schema.id as i32)),
