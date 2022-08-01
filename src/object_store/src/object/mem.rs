@@ -117,8 +117,10 @@ impl InMemObjectStore {
         }
     }
 
-    /// Create a shared reference to the in-memory object store in this process. Used for multiple
-    /// compute-nodes or compactors in the same process by `risedev playground`.
+    /// Create a shared reference to the in-memory object store in this process.
+    ///
+    /// Note: Should only be used for `risedev playground`, when there're multiple compute-nodes or
+    /// compactors in the same process.
     pub fn shared() -> Self {
         lazy_static::lazy_static! {
             static ref SHARED: InMemObjectStore = InMemObjectStore::new();
