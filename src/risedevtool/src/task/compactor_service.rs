@@ -20,7 +20,10 @@ use std::process::Command;
 use anyhow::Result;
 
 use crate::util::{get_program_args, get_program_env_cmd, get_program_name};
-use crate::{add_meta_node, add_storage_backend, CompactorConfig, ExecuteContext, Task};
+use crate::{
+    add_meta_node, add_storage_backend, CompactorConfig, ExecuteContext, HummockInMemoryStrategy,
+    Task,
+};
 
 pub struct CompactorService {
     config: CompactorConfig,
@@ -55,7 +58,13 @@ impl CompactorService {
 
         let provide_minio = config.provide_minio.as_ref().unwrap();
         let provide_aws_s3 = config.provide_aws_s3.as_ref().unwrap();
-        add_storage_backend(&config.id, provide_minio, provide_aws_s3, false, cmd)?;
+        add_storage_backend(
+            &config.id,
+            provide_minio,
+            provide_aws_s3,
+            HummockInMemoryStrategy::Shared,
+            cmd,
+        )?;
 
         let provide_meta_node = config.provide_meta_node.as_ref().unwrap();
         add_meta_node(provide_meta_node, cmd)?;

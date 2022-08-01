@@ -14,6 +14,7 @@
 
 use std::collections::HashMap;
 use std::io::Cursor;
+use std::sync::Arc;
 use std::time::{SystemTime, UNIX_EPOCH};
 
 use bytes::Bytes;
@@ -27,9 +28,9 @@ use super::{ObjectError, ObjectResult};
 use crate::object::{BlockLocation, ObjectMetadata, ObjectStore};
 
 /// In-memory object storage, useful for testing.
-#[derive(Default)]
+#[derive(Default, Clone)]
 pub struct InMemObjectStore {
-    objects: Mutex<HashMap<String, (ObjectMetadata, Bytes)>>,
+    objects: Arc<Mutex<HashMap<String, (ObjectMetadata, Bytes)>>>,
 }
 
 #[async_trait::async_trait]
@@ -144,8 +145,19 @@ impl ObjectStore for InMemObjectStore {
 impl InMemObjectStore {
     pub fn new() -> Self {
         Self {
-            objects: Mutex::new(HashMap::new()),
+            objects: Arc::new(Mutex::new(HashMap::new())),
         }
+    }
+
+    /// Create a shared reference to the in-memory object store in this process.
+    ///
+    /// Note: Should only be used for `risedev playground`, when there're multiple compute-nodes or
+    /// compactors in the same process.
+    pub(super) fn shared() -> Self {
+        lazy_static::lazy_static! {
+            static ref SHARED: InMemObjectStore = InMemObjectStore::new();
+        }
+        SHARED.clone()
     }
 
     async fn get_object<R, F>(&self, path: &str, f: F) -> ObjectResult<R>
