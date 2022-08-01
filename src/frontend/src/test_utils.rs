@@ -33,7 +33,8 @@ use risingwave_pb::catalog::{
 use risingwave_pb::common::ParallelUnitMapping;
 use risingwave_pb::meta::list_table_fragments_response::TableFragmentInfo;
 use risingwave_pb::stream_plan::StreamFragmentGraph;
-use risingwave_pb::user::{GrantPrivilege, UserInfo};
+use risingwave_pb::user::update_user_request::UpdateField;
+use risingwave_pb::user::{GrantPrivilege, UpdateUserRequest, UserInfo};
 use risingwave_rpc_client::error::Result as RpcResult;
 use risingwave_sqlparser::ast::Statement;
 use risingwave_sqlparser::parser::Parser;
@@ -85,6 +86,19 @@ impl LocalFrontend {
         self.session_ref().run_statement(sql.as_str(), false).await
     }
 
+    pub async fn run_user_sql(
+        &self,
+        sql: impl Into<String>,
+        database: String,
+        user_name: String,
+        user_id: UserId,
+    ) -> std::result::Result<PgResponse, Box<dyn std::error::Error + Send + Sync>> {
+        let sql = sql.into();
+        self.session_user_ref(database, user_name, user_id)
+            .run_statement(sql.as_str(), false)
+            .await
+    }
+
     pub async fn query_formatted_result(&self, sql: impl Into<String>) -> Vec<String> {
         self.run_sql(sql)
             .await
@@ -126,6 +140,19 @@ impl LocalFrontend {
                 DEFAULT_SUPER_USER.to_string(),
                 DEFAULT_SUPER_USER_ID,
             )),
+            UserAuthenticator::None,
+        ))
+    }
+
+    pub fn session_user_ref(
+        &self,
+        database: String,
+        user_name: String,
+        user_id: UserId,
+    ) -> Arc<SessionImpl> {
+        Arc::new(SessionImpl::new(
+            self.env.clone(),
+            Arc::new(AuthContext::new(database, user_name, user_id)),
             UserAuthenticator::None,
         ))
     }
@@ -204,8 +231,8 @@ impl CatalogWriter for MockCatalogWriter {
         self.create_source_inner(source).map(|_| ())
     }
 
-    async fn create_sink(&self, sink: ProstSink) -> Result<()> {
-        self.create_sink_inner(sink).map(|_| ())
+    async fn create_sink(&self, sink: ProstSink, graph: StreamFragmentGraph) -> Result<()> {
+        self.create_sink_inner(sink, graph)
     }
 
     async fn drop_materialized_source(&self, source_id: u32, table_id: TableId) -> Result<()> {
@@ -341,7 +368,7 @@ impl MockCatalogWriter {
         Ok(source.id)
     }
 
-    fn create_sink_inner(&self, mut sink: ProstSink) -> Result<()> {
+    fn create_sink_inner(&self, mut sink: ProstSink, _graph: StreamFragmentGraph) -> Result<()> {
         sink.id = self.gen_id();
         self.catalog.write().create_sink(sink.clone());
         self.add_table_or_sink_id(sink.id, sink.schema_id, sink.database_id);
@@ -373,6 +400,29 @@ impl UserInfoWriter for MockUserInfoWriter {
 
     async fn drop_user(&self, id: UserId) -> Result<()> {
         self.user_info.write().drop_user(id);
+        Ok(())
+    }
+
+    async fn update_user(&self, request: UpdateUserRequest) -> Result<()> {
+        let mut lock = self.user_info.write();
+        let update_user = request.user.unwrap();
+        let id = update_user.get_id();
+        let old_name = lock.get_user_name_by_id(id).unwrap();
+        let mut user_info = lock.get_user_by_name(&old_name).unwrap().clone();
+        request.update_fields.into_iter().for_each(|field| {
+            if field == UpdateField::Super as i32 {
+                user_info.is_supper = update_user.is_supper;
+            } else if field == UpdateField::Login as i32 {
+                user_info.can_login = update_user.can_login;
+            } else if field == UpdateField::CreateDb as i32 {
+                user_info.can_create_db = update_user.can_create_db;
+            } else if field == UpdateField::AuthInfo as i32 {
+                user_info.auth_info = update_user.auth_info.clone();
+            } else if field == UpdateField::Rename as i32 {
+                user_info.name = update_user.name.clone();
+            }
+        });
+        lock.update_user(update_user);
         Ok(())
     }
 

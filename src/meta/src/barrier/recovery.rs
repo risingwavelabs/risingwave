@@ -61,6 +61,11 @@ where
             .map(jitter)
     }
 
+    async fn resolve_actor_info_for_recovery(&self) -> BarrierActorInfo {
+        self.resolve_actor_info(&mut CheckpointControl::new(), &Command::checkpoint())
+            .await
+    }
+
     /// Recovery the whole cluster from the latest epoch.
     pub(crate) async fn recovery(&self, prev_epoch: Epoch) -> RecoveryResult {
         // Abort buffered schedules, they might be dirty already.
@@ -69,13 +74,13 @@ where
         debug!("recovery start!");
         let retry_strategy = Self::get_retry_strategy();
         let (new_epoch, responses) = tokio_retry::Retry::spawn(retry_strategy, || async {
-            let mut info = self.resolve_actor_info(&CheckpointControl::new()).await;
+            let mut info = self.resolve_actor_info_for_recovery().await;
             let mut new_epoch = prev_epoch.next();
 
             if self.enable_migrate {
                 // Migrate expired actors to newly joined node by changing actor_map
                 self.migrate_actors(&info).await?;
-                info = self.resolve_actor_info(&CheckpointControl::new()).await;
+                info = self.resolve_actor_info_for_recovery().await;
             }
 
             // Reset all compute nodes, stop and drop existing actors.
@@ -217,7 +222,8 @@ where
         let res = self
             .catalog_manager
             .update_table_mapping(&new_fragments, &migrate_map)
-            .await;
+            .await
+            .map_err(RwError::from);
         // update hash mapping
         for fragments in new_fragments {
             for (fragment_id, fragment) in fragments.fragments {

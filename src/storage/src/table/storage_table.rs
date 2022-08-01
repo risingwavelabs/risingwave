@@ -39,11 +39,12 @@ use risingwave_pb::catalog::Table;
 
 use super::mem_table::RowOp;
 use super::{Distribution, TableIter};
-use crate::{error::{StorageError, StorageResult}, row_serde::RowBasedSerde};
+use crate::error::{StorageError, StorageResult};
 use crate::keyspace::StripPrefixIterator;
 use crate::row_serde::cell_based_encoding_util::serialize_pk_and_column_id;
 use crate::row_serde::{
-    serialize_pk, CellBasedRowSerde, ColumnDescMapping, RowDeserialize, RowSerde, RowSerialize,
+    serialize_pk, CellBasedRowSerde, ColumnDescMapping, RowBasedSerde, RowDeserialize, RowSerde,
+    RowSerialize,
 };
 use crate::storage_value::StorageValue;
 use crate::store::{ReadOptions, WriteOptions};

@@ -28,8 +28,10 @@ use risingwave_common::util::sort_util::OrderType;
 use risingwave_pb::batch_plan::plan_node::NodeBody;
 use risingwave_pb::batch_plan::{scan_range, ScanRange};
 use risingwave_pb::plan_common::{CellBasedTableDesc, OrderType as ProstOrderType};
-use risingwave_storage::{row_serde::{CellBasedRowSerde, RowBasedSerde}, table::storage_table::RowBasedStorageTable};
-use risingwave_storage::table::storage_table::{BatchDedupPkIter, StorageTable, StorageTableIter};
+use risingwave_storage::row_serde::{CellBasedRowSerde, RowBasedSerde};
+use risingwave_storage::table::storage_table::{
+    BatchDedupPkIter, RowBasedStorageTable, StorageTable, StorageTableIter,
+};
 use risingwave_storage::table::{Distribution, TableIter};
 use risingwave_storage::{dispatch_state_store, Keyspace, StateStore, StateStoreImpl};
 

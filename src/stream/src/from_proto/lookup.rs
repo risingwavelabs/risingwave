@@ -16,7 +16,7 @@ use std::sync::Arc;
 
 use risingwave_common::catalog::{ColumnDesc, Field, Schema};
 use risingwave_common::util::sort_util::OrderPair;
-use risingwave_storage::table::storage_table::{StorageTable, RowBasedStorageTable};
+use risingwave_storage::table::storage_table::{RowBasedStorageTable, StorageTable};
 
 use super::*;
 use crate::executor::{LookupExecutor, LookupExecutorParams};

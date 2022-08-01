@@ -12,12 +12,13 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use risingwave_common::error::{ErrorCode, RwError, ToErrorStr};
+use risingwave_common::error::{ErrorCode, ToErrorStr};
 use risingwave_hummock_sdk::compaction_group::StateTableId;
-use risingwave_hummock_sdk::{CompactionGroupId, HummockContextId};
+use risingwave_hummock_sdk::{CompactionGroupId, HummockContextId, HummockSstableId};
 use thiserror::Error;
 
-use crate::storage::meta_store;
+use crate::model::MetadataModelError;
+use crate::storage::MetaStoreError;
 
 pub type Result<T> = std::result::Result<T, Error>;
 
@@ -37,6 +38,8 @@ pub enum Error {
     InvalidCompactionGroup(CompactionGroupId),
     #[error("compaction group member {0} not found")]
     InvalidCompactionGroupMember(StateTableId),
+    #[error("SST {0} is invalid")]
+    InvalidSst(HummockSstableId),
     #[error("internal error: {0}")]
     InternalError(String),
 }
@@ -47,18 +50,18 @@ impl Error {
     }
 }
 
-impl From<meta_store::Error> for Error {
-    fn from(error: meta_store::Error) -> Self {
+impl From<MetaStoreError> for Error {
+    fn from(error: MetaStoreError) -> Self {
         match error {
-            meta_store::Error::ItemNotFound(err) => Error::InternalError(err),
-            meta_store::Error::TransactionAbort() => {
+            MetaStoreError::ItemNotFound(err) => Error::InternalError(err),
+            MetaStoreError::TransactionAbort() => {
                 // TODO: need more concrete error from meta store.
                 Error::InvalidContext(0)
             }
-            // TODO: Currently meta_store::Error::Internal is equivalent to EtcdError, which
-            // includes both retryable and non-retryable. Need to expand meta_store::Error::Internal
+            // TODO: Currently MetaStoreError::Internal is equivalent to EtcdError, which
+            // includes both retryable and non-retryable. Need to expand MetaStoreError::Internal
             // to more detail meta_store errors.
-            meta_store::Error::Internal(err) => Error::MetaStoreError(err),
+            MetaStoreError::Internal(err) => Error::MetaStoreError(err),
         }
     }
 }
@@ -86,8 +89,11 @@ impl From<Error> for ErrorCode {
             Error::InvalidCompactionGroup(group_id) => {
                 ErrorCode::InternalError(format!("invalid compaction group {}", group_id))
             }
-            Error::InvalidCompactionGroupMember(prefix) => {
-                ErrorCode::InternalError(format!("invalid compaction group member {}", prefix))
+            Error::InvalidCompactionGroupMember(table_id) => {
+                ErrorCode::InternalError(format!("invalid compaction group member {}", table_id))
+            }
+            Error::InvalidSst(sst_id) => {
+                ErrorCode::InternalError(format!("SST {} is invalid", sst_id))
             }
         }
     }
@@ -99,15 +105,11 @@ impl From<Error> for risingwave_common::error::RwError {
     }
 }
 
-// TODO: as a workaround before refactoring `MetadataModel` error
-impl From<risingwave_common::error::RwError> for Error {
-    fn from(error: RwError) -> Self {
-        match error.inner() {
-            ErrorCode::InternalError(err) => Error::InternalError(err.to_owned()),
-            ErrorCode::ItemNotFound(err) => Error::InternalError(err.to_owned()),
-            _ => {
-                panic!("conversion not supported");
-            }
+impl From<MetadataModelError> for Error {
+    fn from(err: MetadataModelError) -> Self {
+        match err {
+            MetadataModelError::MetaStoreError(e) => e.into(),
+            e => Error::InternalError(e.to_string()),
         }
     }
 }

@@ -1,19 +1,19 @@
 [package]
 edition = "2021"
 name = "risingwave_connector"
-version = "0.1.10"
+version = "0.1.11"
 
 [dependencies]
 anyhow = "1"
 async-stream = "0.3"
 async-trait = "0.1"
-aws-config = { version = "0.15", default-features = false, features = ["rt-tokio", "native-tls"] }
-aws-sdk-kinesis = { version = "0.15", default-features = false, features = ["rt-tokio", "native-tls"] }
-aws-sdk-s3 = { version = "0.15", default-features = false, features = ["rt-tokio","native-tls"] }
-aws-sdk-sqs = { version = "0.15", default-features = false, features = ["rt-tokio", "native-tls"] }
-aws-smithy-http = "0.45"
-aws-smithy-types = "0.45"
-aws-types = { version = "0.15", features = ["hardcoded-credentials"] }
+aws-config = { version = "0.46", default-features = false, features = ["rt-tokio", "native-tls"] }
+aws-sdk-kinesis = { version = "0.16", default-features = false, features = ["rt-tokio", "native-tls"] }
+aws-sdk-s3 = { version = "0.16", default-features = false, features = ["rt-tokio","native-tls"] }
+aws-sdk-sqs = { version = "0.16", default-features = false, features = ["rt-tokio", "native-tls"] }
+aws-smithy-http = "0.46"
+aws-smithy-types = "0.46"
+aws-types = { version = "0.46", features = ["hardcoded-credentials"] }
 byteorder = "1"
 bytes = { version = "1", features = ["serde"] }
 chrono = { version = "0.4", default-features = false, features = ["clock", "std"] }
@@ -23,7 +23,7 @@ enum-as-inner = "0.5"
 farmhash = "1"
 futures = { version = "0.3", default-features = false, features = ["alloc"] }
 futures-async-stream = "0.2"
-futures-concurrency = "2.0.3"
+futures-concurrency = "3"
 globset = "0.4.8"
 http = "0.2"
 http-serde = "1.1.0"

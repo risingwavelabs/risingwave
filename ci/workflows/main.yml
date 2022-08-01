@@ -125,7 +125,7 @@ steps:
     retry: *auto-retry
 
   - label: "unit test"
-    command: "ci/scripts/unit-test.sh"
+    command: "ci/scripts/pr-unit-test.sh"
     plugins:
       - ./ci/plugins/swapfile
       - gencer/cache#v2.4.10: *cargo-cache
@@ -195,8 +195,9 @@ steps:
     timeout_in_minutes: 5
     retry: *auto-retry
 
-  - label: "release docker image"
+  - label: "release docker image: amd64"
     command: "ci/scripts/docker.sh"
+    key: "build-amd64"
     if: build.tag != null
     env:
       PUSH_GHCR: true
@@ -206,4 +207,34 @@ steps:
             GHCR_USERNAME: ghcr-username
             GHCR_TOKEN: ghcr-token
     timeout_in_minutes: 25
+    retry: *auto-retry
+
+  - label: "docker-build-push: aarch64"
+    command: "ci/scripts/docker.sh"
+    key: "build-aarch64"
+    if: build.tag != null
+    env:
+      PUSH_GHCR: true
+    plugins:
+      - seek-oss/aws-sm#v2.3.1:
+          env:
+            GHCR_USERNAME: ghcr-username
+            GHCR_TOKEN: ghcr-token
+    timeout_in_minutes: 25
+    retry: *auto-retry
+    agents:
+      queue: "linux-arm64"
+
+  - label: "multi arch image create push"
+    command: "ci/scripts/multi-arch-docker.sh"
+    if: build.tag != null
+    depends_on:
+      - "build-amd64"
+      - "build-aarch64"
+    plugins:
+      - seek-oss/aws-sm#v2.3.1:
+          env:
+            GHCR_USERNAME: ghcr-username
+            GHCR_TOKEN: ghcr-token
+    timeout_in_minutes: 10
     retry: *auto-retry

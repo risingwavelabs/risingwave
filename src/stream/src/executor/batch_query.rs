@@ -16,7 +16,7 @@ use futures::{pin_mut, StreamExt};
 use futures_async_stream::try_stream;
 use risingwave_common::array::{Op, StreamChunk};
 use risingwave_common::catalog::{OrderedColumnDesc, Schema};
-use risingwave_storage::table::storage_table::{StorageTable, READ_ONLY, RowBasedStorageTable};
+use risingwave_storage::table::storage_table::{RowBasedStorageTable, StorageTable, READ_ONLY};
 use risingwave_storage::table::TableIter;
 use risingwave_storage::StateStore;
 
@@ -60,10 +60,7 @@ where
 
     #[try_stream(ok = Message, error = StreamExecutorError)]
     async fn execute_inner(self, epoch: u64) {
-        let iter = self
-            .table
-            .batch_iter(epoch)
-            .await?;
+        let iter = self.table.batch_iter(epoch).await?;
         pin_mut!(iter);
 
         while let Some(data_chunk) = iter

@@ -35,8 +35,8 @@ use risingwave_common::util::sort_util::{OrderPair, OrderType};
 use risingwave_pb::data::data_type::TypeName;
 use risingwave_pb::plan_common::ColumnDesc as ProstColumnDesc;
 use risingwave_source::{MemSourceManager, SourceManager};
-use risingwave_storage::{memory::MemoryStateStore, table::state_table::RowBasedStateTable};
-use risingwave_storage::table::state_table::StateTable;
+use risingwave_storage::memory::MemoryStateStore;
+use risingwave_storage::table::state_table::{RowBasedStateTable, StateTable};
 use risingwave_storage::table::storage_table::RowBasedStorageTable;
 use risingwave_storage::Keyspace;
 use risingwave_stream::executor::monitor::StreamingMetrics;
@@ -219,11 +219,7 @@ async fn test_table_v2_materialize() -> Result<()> {
 
     let scan = Box::new(RowSeqScanExecutor::new(
         table.schema().clone(),
-        vec![ScanType::TableScan(
-            table
-                .batch_iter(u64::MAX)
-                .await?,
-        )],
+        vec![ScanType::TableScan(table.batch_iter(u64::MAX).await?)],
         1024,
         "RowSeqExecutor2".to_string(),
         Arc::new(BatchMetrics::unused()),
@@ -281,11 +277,7 @@ async fn test_table_v2_materialize() -> Result<()> {
     // Scan the table again, we are able to get the data now!
     let scan = Box::new(RowSeqScanExecutor::new(
         table.schema().clone(),
-        vec![ScanType::TableScan(
-            table
-                .batch_iter(u64::MAX)
-                .await?,
-        )],
+        vec![ScanType::TableScan(table.batch_iter(u64::MAX).await?)],
         1024,
         "RowSeqScanExecutor2".to_string(),
         Arc::new(BatchMetrics::unused()),
@@ -352,11 +344,7 @@ async fn test_table_v2_materialize() -> Result<()> {
     // Scan the table again, we are able to see the deletion now!
     let scan = Box::new(RowSeqScanExecutor::new(
         table.schema().clone(),
-        vec![ScanType::TableScan(
-            table
-                .batch_iter(u64::MAX)
-                .await?,
-        )],
+        vec![ScanType::TableScan(table.batch_iter(u64::MAX).await?)],
         1024,
         "RowSeqScanExecutor2".to_string(),
         Arc::new(BatchMetrics::unused()),
@@ -428,10 +416,7 @@ async fn test_row_seq_scan() -> Result<()> {
     let executor = Box::new(RowSeqScanExecutor::new(
         table.schema().clone(),
         vec![ScanType::TableScan(
-            table
-                .batch_iter(u64::MAX)
-                .await
-                .unwrap(),
+            table.batch_iter(u64::MAX).await.unwrap(),
         )],
         1,
         "RowSeqScanExecutor2".to_string(),
