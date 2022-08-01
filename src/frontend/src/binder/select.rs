@@ -20,9 +20,9 @@ use risingwave_common::error::{ErrorCode, Result};
 use risingwave_common::types::DataType;
 use risingwave_sqlparser::ast::{Expr, Ident, Select, SelectItem};
 
-use super::bind_context::{Clause, ColumnBinding, COLUMN_GROUP_PREFIX};
+use super::bind_context::{Clause, ColumnBinding};
 use super::UNNAMED_COLUMN;
-use crate::binder::{Binder, Relation};
+use crate::binder::{Binder, Relation, COLUMN_GROUP_PREFIX};
 use crate::catalog::check_valid_column_name;
 use crate::expr::{Expr as _, ExprImpl, ExprType, FunctionCall, InputRef};
 

@@ -19,8 +19,7 @@ use risingwave_sqlparser::ast::{
     BinaryOperator, Expr, Ident, JoinConstraint, JoinOperator, TableFactor, TableWithJoins, Value,
 };
 
-use crate::binder::bind_context::COLUMN_GROUP_PREFIX;
-use crate::binder::{Binder, Relation};
+use crate::binder::{Binder, Relation, COLUMN_GROUP_PREFIX};
 use crate::expr::{Expr as _, ExprImpl};
 
 #[derive(Debug, Clone)]

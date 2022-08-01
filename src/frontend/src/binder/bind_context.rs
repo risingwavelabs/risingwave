@@ -19,7 +19,7 @@ use std::fmt::Display;
 use risingwave_common::catalog::Field;
 use risingwave_common::error::{ErrorCode, Result};
 
-pub const COLUMN_GROUP_PREFIX: &str = "_column_group_id_";
+use crate::binder::COLUMN_GROUP_PREFIX;
 
 #[derive(Debug, Clone)]
 pub struct ColumnBinding {
@@ -90,7 +90,8 @@ pub struct ColumnGroupContext {
 pub struct ColumnGroup {
     /// Indices of the columns in the group
     pub indices: HashSet<usize>,
-    /// A min-nullable column is one that is never NULL if any other column in the group is NULL.
+    /// A min-nullable column is one that is never NULL if any other column in the group is not
+    /// NULL.
     ///
     /// If `None`, ambiguous references to the column name will be resolved to a `COALESCE(col1,
     /// col2, ..., coln)` over each column in the group
@@ -101,7 +102,7 @@ pub struct ColumnGroup {
 
 impl BindContext {
     /// If return Vec has len > 1, it means we have an unqualified reference to a column which has
-    /// been naturally joined upon, wherein each input column is possibly nullable. This will be
+    /// been naturally joined upon, wherein none of the columns are min-nullable. This will be
     /// handled in downstream as a `COALESCE` expression
     pub fn get_column_binding_index(
         &self,
@@ -125,11 +126,10 @@ impl BindContext {
     }
 
     pub fn get_group_id(&self, column_name: &String) -> Result<Option<u32>> {
-        let columns = self
+        if let Some(columns) = self
             .indexs_of
-            .get(column_name)
-            .ok_or_else(|| ErrorCode::ItemNotFound(format!("Invalid column: {column_name}")))?;
-        if columns.len() > 1 {
+            .get(column_name) && columns.len() > 1
+        {
             // If there is some group containing the columns and the ambiguous columns are all in
             // the group
             if let Some(group_id) = self.column_group_context.mapping.get(&columns[0]) {
@@ -151,7 +151,9 @@ impl BindContext {
             Ok(vec![*min_nullable])
         } else {
             // These will be converted to a `COALESCE(col1, col2, ..., coln)`
-            return Ok(group.indices.iter().copied().collect());
+            let mut indices: Vec<_> = group.indices.iter().copied().collect();
+            indices.sort(); // ensure a deterministic result
+            Ok(indices)
         }
     }
 

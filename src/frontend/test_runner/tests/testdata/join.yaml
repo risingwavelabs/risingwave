@@ -140,11 +140,12 @@
     select * from t1 join t2 using(v1);
   batch_plan: |
     BatchExchange { order: [], dist: Single }
-      BatchHashJoin { type: Inner, predicate: $0 = $2, output_indices: all }
-        BatchExchange { order: [], dist: HashShard([0]) }
-          BatchScan { table: t1, columns: [v1, v2] }
-        BatchExchange { order: [], dist: HashShard([0]) }
-          BatchScan { table: t2, columns: [v1, v3] }
+      BatchProject { exprs: [$1, $2, $0] }
+        BatchHashJoin { type: Inner, predicate: $0 = $2, output_indices: [0, 1, 3] }
+          BatchExchange { order: [], dist: HashShard([0]) }
+            BatchScan { table: t1, columns: [v1, v2] }
+          BatchExchange { order: [], dist: HashShard([0]) }
+            BatchScan { table: t2, columns: [v1, v3] }
 - sql: |
     create table ab (a int, b int);
     create table bc (b int, c int);
@@ -152,15 +153,16 @@
     select * from ab join bc using(b) join ca using(c);
   batch_plan: |
     BatchExchange { order: [], dist: Single }
-      BatchHashJoin { type: Inner, predicate: $3 = $4, output_indices: all }
-        BatchExchange { order: [], dist: HashShard([3]) }
-          BatchHashJoin { type: Inner, predicate: $1 = $2, output_indices: all }
-            BatchExchange { order: [], dist: HashShard([1]) }
-              BatchScan { table: ab, columns: [a, b] }
-            BatchExchange { order: [], dist: HashShard([0]) }
-              BatchScan { table: bc, columns: [b, c] }
-        BatchExchange { order: [], dist: HashShard([0]) }
-          BatchScan { table: ca, columns: [c, a] }
+      BatchProject { exprs: [$0, $3, $1, $2] }
+        BatchHashJoin { type: Inner, predicate: $2 = $3, output_indices: [0, 1, 2, 4] }
+          BatchExchange { order: [], dist: HashShard([2]) }
+            BatchHashJoin { type: Inner, predicate: $1 = $2, output_indices: [0, 1, 3] }
+              BatchExchange { order: [], dist: HashShard([1]) }
+                BatchScan { table: ab, columns: [a, b] }
+              BatchExchange { order: [], dist: HashShard([0]) }
+                BatchScan { table: bc, columns: [b, c] }
+          BatchExchange { order: [], dist: HashShard([0]) }
+            BatchScan { table: ca, columns: [c, a] }
 - sql: |
     /* Only push to left */
     create table t1 (v1 int, v2 int);
@@ -218,7 +220,7 @@
     create table t3(v2 varchar);
     select * from t3, t1 join t2 using (v1);
   logical_plan: |
-    LogicalProject { exprs: [$1, $3, $5] }
+    LogicalProject { exprs: [$1, $3] }
       LogicalJoin { type: Inner, on: true, output_indices: all }
         LogicalScan { table: t3, columns: [_row_id, v2] }
         LogicalJoin { type: Inner, on: ($1 = $3), output_indices: all }
@@ -244,7 +246,7 @@
     create table t3(v2 varchar);
     select * from t3, t1 left join t2 using (v1);
   logical_plan: |
-    LogicalProject { exprs: [$1, $3, $5] }
+    LogicalProject { exprs: [$1, $3] }
       LogicalJoin { type: Inner, on: true, output_indices: all }
         LogicalScan { table: t3, columns: [_row_id, v2] }
         LogicalJoin { type: LeftOuter, on: ($1 = $3), output_indices: all }
@@ -282,12 +284,22 @@
     create table c(y int);
     select * from a natural join b natural join c;
   logical_plan: |
+    LogicalProject { exprs: [$5, $1] }
+      LogicalJoin { type: Inner, on: true, output_indices: all }
+        LogicalJoin { type: Inner, on: ($1 = $3), output_indices: all }
+          LogicalScan { table: a, columns: [_row_id, x] }
+          LogicalScan { table: b, columns: [_row_id, x] }
+        LogicalScan { table: c, columns: [_row_id, y] }
 - sql: |
     /* Ensure that natural joins can disambiguate columns */
     create table a(x int);
     create table b(x int);
     select x, a.x, b.x from a natural join b;
   logical_plan: |
+    LogicalProject { exprs: [$1, $1, $3] }
+      LogicalJoin { type: Inner, on: ($1 = $3), output_indices: all }
+        LogicalScan { table: a, columns: [_row_id, x] }
+        LogicalScan { table: b, columns: [_row_id, x] }
 - sql: |
     /* Ensure that natural joins bind the correct columns */
     create table a(x int);
@@ -385,7 +397,7 @@
     select x, a.x, b.x, c.x from a natural full join b natural full join c;
   logical_plan: |
     LogicalProject { exprs: [Coalesce($1, $4, $7), $1, $4, $7] }
-      LogicalJoin { type: FullOuter, on: (Coalesce($4, $1) = $7), output_indices: all }
+      LogicalJoin { type: FullOuter, on: (Coalesce($1, $4) = $7), output_indices: all }
         LogicalJoin { type: FullOuter, on: ($1 = $4), output_indices: all }
           LogicalScan { table: a, columns: [_row_id, x, y] }
           LogicalScan { table: b, columns: [_row_id, x, z] }
@@ -397,7 +409,7 @@
     create table c(x int, a int);
     select a, x, a.a, c.a, b.x, c.x from a natural full join b natural full join c;
   logical_plan: |
-    LogicalProject { exprs: [Coalesce($8, $1), Coalesce($7, $4), $1, $8, $4, $7] }
+    LogicalProject { exprs: [Coalesce($1, $8), Coalesce($4, $7), $1, $8, $4, $7] }
       LogicalJoin { type: FullOuter, on: ($1 = $8) AND ($4 = $7), output_indices: all }
         LogicalJoin { type: FullOuter, on: true, output_indices: all }
           LogicalScan { table: a, columns: [_row_id, a, y] }
