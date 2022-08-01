@@ -24,3 +24,6 @@ DROP MATERIALIZED VIEW mv2;
 
 statement ok
 DROP TABLE t2;
+
+statement ok
+FLUSH;

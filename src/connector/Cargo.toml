@@ -50,6 +50,8 @@ serde_json = "1"
 serde_with = "1"
 smallvec = "1"
 static_assertions = "1"
+strum = { version = "0.24", features = ["derive"] }
+strum_macros = "0.24"
 tempfile = "3"
 thiserror = "1"
 tokio = { version = "=0.2.0-alpha.5", package = "madsim-tokio", features = ["rt", "rt-multi-thread", "sync", "macros", "time", "signal", "fs"] }

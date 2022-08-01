@@ -77,6 +77,11 @@ impl<S: StateStore> SinkExecutor<S> {
 
         let schema = self.schema().clone();
 
+        // prepare external sink before writing if needed.
+        sink.prepare(&schema)
+            .await
+            .map_err(StreamExecutorError::sink_error)?;
+
         let input = self.input.execute();
 
         #[for_await]
@@ -151,27 +156,56 @@ impl<S: StateStore> Executor for SinkExecutor<S> {
 
 #[cfg(test)]
 mod test {
-
-    use risingwave_connector::sink::mysql::{MySQLConfig, MySQLSink};
-
     use super::*;
     use crate::executor::test_utils::*;
 
-    #[test]
-    fn test_mysqlsink() {
-        let cfg = MySQLConfig {
-            endpoint: String::from("127.0.0.1:3306"),
-            table: String::from("<table_name>"),
-            database: Some(String::from("<database_name>")),
-            user: Some(String::from("<user_name>")),
-            password: Some(String::from("<password>")),
-        };
+    #[ignore]
+    #[tokio::test]
+    async fn test_mysqlsink() {
+        use risingwave_common::array::stream_chunk::StreamChunk;
+        use risingwave_common::array::StreamChunkTestExt;
+        use risingwave_common::catalog::Field;
+        use risingwave_common::types::DataType;
+        use risingwave_storage::memory::MemoryStateStore;
 
-        let _mysql_sink = MySQLSink::new(cfg);
+        use crate::executor::Barrier;
+
+        let mut properties = HashMap::new();
+        properties.insert("sink_type".into(), "mysql".into());
+        properties.insert("endpoint".into(), "127.0.0.1:3306".into());
+        properties.insert("database".into(), "db".into());
+        properties.insert("table".into(), "t".into());
+        properties.insert("user".into(), "root".into());
 
         // Mock `child`
-        let _mock = MockSource::with_messages(Schema::default(), PkIndices::new(), vec![]);
+        let mock = MockSource::with_messages(
+            Schema::new(vec![
+                Field::with_name(DataType::Int32, "v1"),
+                Field::with_name(DataType::Int32, "v2"),
+                Field::with_name(DataType::Int32, "v3"),
+            ]),
+            PkIndices::new(),
+            vec![
+                Message::Chunk(std::mem::take(&mut StreamChunk::from_pretty(
+                    " I I I
+            +  3 2 1",
+                ))),
+                Message::Barrier(Barrier::new_test_barrier(1)),
+                Message::Chunk(std::mem::take(&mut StreamChunk::from_pretty(
+                    " I I I
+            +  6 5 4",
+                ))),
+            ],
+        );
 
-        // let _sink_executor = SinkExecutor::_new(Box::new(mock), mysql_sink);
+        let sink_executor =
+            SinkExecutor::new(Box::new(mock), MemoryStateStore::new(), properties, 0);
+
+        let mut executor = SinkExecutor::execute(Box::new(sink_executor));
+
+        executor.next().await.unwrap().unwrap();
+        executor.next().await.unwrap().unwrap();
+        executor.next().await.unwrap().unwrap();
+        executor.next().await.unwrap().unwrap();
     }
 }

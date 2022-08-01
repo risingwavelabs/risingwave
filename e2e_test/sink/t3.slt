@@ -21,3 +21,6 @@ DROP SINK s3;
 
 statement ok
 DROP MATERIALIZED VIEW mv3;
+
+statement ok
+FLUSH;

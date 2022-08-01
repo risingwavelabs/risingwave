@@ -193,6 +193,10 @@ impl KafkaSink {
 
 #[async_trait::async_trait]
 impl Sink for KafkaSink {
+    async fn prepare(&mut self, _schema: &Schema) -> Result<()> {
+        unimplemented!();
+    }
+
     async fn write_batch(&mut self, chunk: StreamChunk, schema: &Schema) -> Result<()> {
         // when sinking the snapshot, it is required to begin epoch 0 for transaction
         if let (KafkaSinkState::Running(epoch), in_txn_epoch) = (&self.state, &self.in_transaction_epoch.unwrap()) && in_txn_epoch <= epoch {

@@ -32,6 +32,10 @@ impl RedisSink {
 
 #[async_trait]
 impl Sink for RedisSink {
+    async fn prepare(&mut self, _schema: &Schema) -> Result<()> {
+        unimplemented!();
+    }
+
     async fn write_batch(&mut self, _chunk: StreamChunk, _schema: &Schema) -> Result<()> {
         todo!();
     }
