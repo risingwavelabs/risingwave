@@ -737,47 +737,44 @@ impl<S: StateStore, RS: RowSerde, const T: AccessType> StorageTableBase<S, RS, T
         wait_epoch: bool,
         ordered: bool,
     ) -> StorageResult<StorageTableIter<S, RS>> {
-        let pk_prefix_serializer = self.pk_serializer.prefix(pk_prefix.size());
-        let serialized_pk_prefix = serialize_pk(pk_prefix, &pk_prefix_serializer);
-
         fn serialize_pk_bound(
             pk_serializer: &OrderedRowSerializer,
             pk_prefix: &Row,
-            mut serialized_pk_prefix: Vec<u8>,
             next_col_bound: Bound<&Datum>,
             is_start_bound: bool,
         ) -> Bound<Vec<u8>> {
             match next_col_bound {
                 Included(k) => {
-                    let mut key = Row::default();
+                    let pk_prefix_serializer = pk_serializer.prefix(pk_prefix.size() + 1);
+                    let mut key = pk_prefix.clone();
                     key.0.push(k.clone());
-                    let serialized_col_bound_key = serialize_pk(&key, pk_serializer);
-                    serialized_pk_prefix.extend_from_slice(&serialized_col_bound_key);
-
+                    let serialized_key = serialize_pk(&key, &pk_prefix_serializer);
                     if is_start_bound {
-                        Included(serialized_pk_prefix)
+                        Included(serialized_key)
                     } else {
                         // Should use excluded next key for end bound.
                         // Otherwise keys starting with the bound is not included.
-                        end_bound_of_prefix(&serialized_pk_prefix)
+                        end_bound_of_prefix(&serialized_key)
                     }
                 }
                 Excluded(k) => {
-                    let mut key = Row::default();
+                    let pk_prefix_serializer = pk_serializer.prefix(pk_prefix.size() + 1);
+                    let mut key = pk_prefix.clone();
                     key.0.push(k.clone());
-                    let serialized_col_bound_key = serialize_pk(&key, pk_serializer);
-                    serialized_pk_prefix.extend_from_slice(&serialized_col_bound_key);
+                    let serialized_key = serialize_pk(&key, &pk_prefix_serializer);
                     if is_start_bound {
                         // storage doesn't support excluded begin key yet, so transform it to
                         // included
                         // FIXME: What if `serialized_key` is `\xff\xff..`? Should the frontend
                         // reject this?
-                        Included(next_key(&serialized_pk_prefix))
+                        Included(next_key(&serialized_key))
                     } else {
-                        Excluded(serialized_pk_prefix)
+                        Excluded(serialized_key)
                     }
                 }
                 Unbounded => {
+                    let pk_prefix_serializer = pk_serializer.prefix(pk_prefix.size());
+                    let serialized_pk_prefix = serialize_pk(pk_prefix, &pk_prefix_serializer);
                     if pk_prefix.size() == 0 {
                         Unbounded
                     } else if is_start_bound {
@@ -792,14 +789,12 @@ impl<S: StateStore, RS: RowSerde, const T: AccessType> StorageTableBase<S, RS, T
         let start_key = serialize_pk_bound(
             &self.pk_serializer,
             pk_prefix,
-            serialized_pk_prefix.clone(),
             next_col_bounds.start_bound(),
             true,
         );
         let end_key = serialize_pk_bound(
             &self.pk_serializer,
             pk_prefix,
-            serialized_pk_prefix.clone(),
             next_col_bounds.end_bound(),
             false,
         );
@@ -810,9 +805,11 @@ impl<S: StateStore, RS: RowSerde, const T: AccessType> StorageTableBase<S, RS, T
             end_key
         );
 
-        let filter_key = if pk_prefix.0.is_empty() {
+        let filter_key = if pk_prefix.size() == 0 {
             None
         } else {
+            let pk_prefix_serializer = self.pk_serializer.prefix(pk_prefix.size());
+            let serialized_pk_prefix = serialize_pk(pk_prefix, &pk_prefix_serializer);
             Some(serialized_pk_prefix)
         };
 
