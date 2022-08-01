@@ -62,7 +62,7 @@ impl From<&SourceCatalog> for BoundSource {
 }
 
 impl Binder {
-    pub(super) fn bind_table_or_source(
+    pub fn bind_table_or_source(
         &mut self,
         schema_name: &str,
         table_name: &str,
@@ -125,7 +125,6 @@ impl Binder {
             }
         };
 
-        #[expect(clippy::needless_borrow)]
         self.bind_table_to_context(
             columns
                 .iter()
@@ -166,7 +165,6 @@ impl Binder {
 
         let columns = table_catalog.columns.clone();
 
-        #[expect(clippy::needless_borrow)]
         self.bind_table_to_context(
             columns
                 .iter()

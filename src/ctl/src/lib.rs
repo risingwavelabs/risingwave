@@ -97,6 +97,8 @@ enum MetaCommands {
     Pause,
     /// resume the stream graph
     Resume,
+    /// get cluster info
+    ClusterInfo,
 }
 
 pub async fn start(opts: CliOpts) -> Result<()> {
@@ -130,6 +132,9 @@ pub async fn start(opts: CliOpts) -> Result<()> {
         Commands::Bench(cmd) => tokio::spawn(cmd_impl::bench::do_bench(cmd)).await??,
         Commands::Meta(MetaCommands::Pause) => tokio::spawn(cmd_impl::meta::pause()).await??,
         Commands::Meta(MetaCommands::Resume) => tokio::spawn(cmd_impl::meta::resume()).await??,
+        Commands::Meta(MetaCommands::ClusterInfo) => {
+            tokio::spawn(cmd_impl::meta::cluster_info()).await??
+        }
     }
     Ok(())
 }

@@ -26,7 +26,8 @@ use super::utils::TableCatalogBuilder;
 use super::{LogicalJoin, PlanBase, PlanRef, PlanTreeNodeBinary, StreamDeltaJoin, ToStreamProst};
 use crate::catalog::table_catalog::TableCatalog;
 use crate::expr::Expr;
-use crate::optimizer::plan_node::{EqJoinPredicate, EqJoinPredicateVerboseDisplay};
+use crate::optimizer::plan_node::utils::IndicesDisplay;
+use crate::optimizer::plan_node::{EqJoinPredicate, EqJoinPredicateDisplay};
 use crate::optimizer::property::Distribution;
 use crate::utils::ColIndexMapping;
 
@@ -132,40 +133,44 @@ impl fmt::Display for StreamHashJoin {
         let verbose = self.base.ctx.is_explain_verbose();
         builder.field("type", &format_args!("{:?}", self.logical.join_type()));
 
-        if verbose {
-            let mut concat_schema = self.left().schema().fields.clone();
-            concat_schema.extend(self.right().schema().fields.clone());
-            let concat_schema = Schema::new(concat_schema);
-            builder.field(
-                "predicate",
-                &format_args!(
-                    "{}",
-                    EqJoinPredicateVerboseDisplay {
-                        eq_join_predicate: self.eq_join_predicate(),
-                        input_schema: &concat_schema
-                    }
-                ),
-            );
-        } else {
-            builder.field("predicate", &format_args!("{}", self.eq_join_predicate()));
-        }
+        let mut concat_schema = self.left().schema().fields.clone();
+        concat_schema.extend(self.right().schema().fields.clone());
+        let concat_schema = Schema::new(concat_schema);
+        builder.field(
+            "predicate",
+            &format_args!(
+                "{}",
+                EqJoinPredicateDisplay {
+                    eq_join_predicate: self.eq_join_predicate(),
+                    input_schema: &concat_schema
+                }
+            ),
+        );
 
         if self.append_only() {
             builder.field("append_only", &format_args!("{}", true));
         }
-        if self
-            .logical
-            .output_indices()
-            .iter()
-            .copied()
-            .eq(0..self.logical.internal_column_num())
-        {
-            builder.field("output_indices", &format_args!("all"));
-        } else {
-            builder.field(
-                "output_indices",
-                &format_args!("{:?}", self.logical.output_indices()),
-            );
+        if verbose {
+            if self
+                .logical
+                .output_indices()
+                .iter()
+                .copied()
+                .eq(0..self.logical.internal_column_num())
+            {
+                builder.field("output", &format_args!("all"));
+            } else {
+                builder.field(
+                    "output",
+                    &format_args!(
+                        "{:?}",
+                        &IndicesDisplay {
+                            vec: self.logical.output_indices(),
+                            input_schema: &concat_schema,
+                        }
+                    ),
+                );
+            }
         }
 
         builder.finish()
