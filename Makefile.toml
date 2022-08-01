@@ -434,7 +434,7 @@ description = "Run unit tests"
 category = "RiseDev - Build in simulation mode"
 description = "Build in simulation mode"
 dependencies = ["warn-on-missing-tools"]
-env = { RUSTFLAGS = "--cfg tokio_unstable --cfg madsim", CARGO_TARGET_DIR = "target/sim" }
+env = { RUSTFLAGS = "--cfg tokio_unstable --cfg madsim", RUSTDOCFLAGS = "--cfg madsim", CARGO_TARGET_DIR = "target/sim" }
 script = """
 #!/bin/bash
 set -e
@@ -446,12 +446,12 @@ cargo build "$@"
 category = "RiseDev - Deterministic Simulation Test"
 description = "Run unit tests in deterministic simulation mode"
 dependencies = ["warn-on-missing-tools"]
-env = { RUSTFLAGS = "--cfg tokio_unstable --cfg madsim", CARGO_TARGET_DIR = "target/sim" }
+env = { RUSTFLAGS = "--cfg tokio_unstable --cfg madsim", RUSTDOCFLAGS = "--cfg madsim", CARGO_TARGET_DIR = "target/sim" }
 script = """
 #!/bin/bash
 set -e
 
-cargo test "$@"
+cargo nextest run "$@"
 """
 
 [tasks.check-hakari]
