@@ -27,8 +27,8 @@ use risingwave_pb::expr::AggCall as ProstAggCall;
 
 use super::{
     BatchHashAgg, BatchSimpleAgg, ColPrunable, LogicalProjectBuilder, PlanBase, PlanRef,
-    PlanTreeNodeUnary, PredicatePushdown, StreamGlobalSimpleAgg, StreamHashAgg,
-    StreamLocalSimpleAgg, StreamProject, ToBatch, ToStream,
+    PlanTreeNodeUnary, PredicatePushdown, StreamGlobalSimpleAgg, StreamHashAgg, StreamProject,
+    ToBatch, ToStream,
 };
 use crate::catalog::table_catalog::TableCatalog;
 use crate::expr::{
@@ -1102,22 +1102,20 @@ impl ToStream for LogicalAgg {
         if !dist_key.is_empty() && agg_calls_can_use_two_phase {
             // 2-phase-agg
             self.gen_two_phase_streaming_agg_plan(input_stream, &dist_key)
+        } else if self.group_key().is_empty() {
+            // simple 1-phase-agg
+            Ok(StreamGlobalSimpleAgg::new(
+                self.clone_with_input(input.to_stream_with_dist_required(&RequiredDist::single())?),
+            )
+            .into())
         } else {
-            if self.group_key().is_empty() {
-                // simple 1-phase-agg
-                Ok(StreamGlobalSimpleAgg::new(self.clone_with_input(
-                    input.to_stream_with_dist_required(&RequiredDist::single())?,
-                ))
-                .into())
-            } else {
-                // hash 1-phase-agg
-                Ok(
-                    StreamHashAgg::new(self.clone_with_input(input.to_stream_with_dist_required(
-                        &RequiredDist::shard_by_key(input.schema().len(), self.group_key()),
-                    )?))
-                    .into(),
-                )
-            }
+            // hash 1-phase-agg
+            Ok(
+                StreamHashAgg::new(self.clone_with_input(input.to_stream_with_dist_required(
+                    &RequiredDist::shard_by_key(input.schema().len(), self.group_key()),
+                )?))
+                .into(),
+            )
         }
     }
 
