@@ -78,26 +78,20 @@ impl Deref for BlockHolder {
 unsafe impl Send for BlockHolder {}
 unsafe impl Sync for BlockHolder {}
 
-#[derive(PartialEq, Eq, Hash, Clone, Debug)]
-pub struct CacheKey {
-    sst_id: u64,
-    block_idx: u64,
-}
-
-impl TieredCacheKey for CacheKey {
+impl TieredCacheKey for (HummockSstableId, u64) {
     fn encoded_len() -> usize {
         16
     }
 
     fn encode(&self, mut buf: &mut [u8]) {
-        buf.put_u64(self.sst_id);
-        buf.put_u64(self.block_idx);
+        buf.put_u64(self.0);
+        buf.put_u64(self.1);
     }
 
     fn decode(mut buf: &[u8]) -> Self {
         let sst_id = buf.get_u64();
         let block_idx = buf.get_u64();
-        Self { sst_id, block_idx }
+        (sst_id, block_idx)
     }
 }
 
@@ -125,7 +119,7 @@ fn decode_block(_buf: &[u8]) -> Block {
 }
 
 pub struct MemoryBlockCacheEventListener {
-    tiered_cache: TieredCache<CacheKey>,
+    tiered_cache: TieredCache<(HummockSstableId, u64)>,
 }
 
 impl LruCacheEventListener for MemoryBlockCacheEventListener {
@@ -133,15 +127,9 @@ impl LruCacheEventListener for MemoryBlockCacheEventListener {
     type T = Box<Block>;
 
     fn on_release(&self, key: Self::K, value: Self::T) {
-        let tiered_cache_key = CacheKey {
-            sst_id: key.0,
-            block_idx: key.1,
-        };
         let tiered_cache_value = encode_block(&value);
         // TODO(MrCroxx): handle error?
-        self.tiered_cache
-            .insert(tiered_cache_key, tiered_cache_value)
-            .unwrap();
+        self.tiered_cache.insert(key, tiered_cache_value).unwrap();
     }
 }
 
@@ -150,7 +138,7 @@ pub struct BlockCache {
     // TODO: replace `(HummockSstableId, u64)` with CacheKey.
     inner: Arc<LruCache<(HummockSstableId, u64), Box<Block>>>,
 
-    tiered_cache: TieredCache<CacheKey>,
+    tiered_cache: TieredCache<(HummockSstableId, u64)>,
 }
 
 impl BlockCache {
@@ -223,12 +211,7 @@ impl BlockCache {
         }
 
         // TODO(MrCroxx): handle error
-        if let Some(data) = self
-            .tiered_cache
-            .get(&CacheKey { sst_id, block_idx })
-            .await
-            .unwrap()
-        {
+        if let Some(data) = self.tiered_cache.get(&(sst_id, block_idx)).await.unwrap() {
             let block = Box::new(decode_block(&data));
             return Some(BlockHolder::from_owned_block(block));
         }
@@ -269,10 +252,7 @@ impl BlockCache {
                 let f = f();
                 async move {
                     if let Some(data) = tiered_cache
-                        .get(&CacheKey {
-                            sst_id: key.0,
-                            block_idx: key.1,
-                        })
+                        .get(&key)
                         .await
                         .map_err(HummockError::tiered_cache)?
                     {
