@@ -16,7 +16,7 @@ use std::future::Future;
 use std::marker::PhantomData;
 use std::ops::{Deref, DerefMut};
 
-use super::{HummockResult, HummockValue};
+use super::{HummockResult, HummockValue, SstableStreamIterator};
 
 mod forward_concat;
 pub use forward_concat::*;
@@ -321,3 +321,7 @@ impl HummockIteratorDirection for Backward {
 
 pub type MultiSstIterator =
     UnorderedMergeIteratorInner<HummockIteratorUnion<Forward, ConcatIterator, SstableIterator>>;
+
+pub type MultiSstStreamIterator = UnorderedMergeIteratorInner<
+    HummockIteratorUnion<Forward, ConcatIterator, SstableStreamIterator>,
+>;

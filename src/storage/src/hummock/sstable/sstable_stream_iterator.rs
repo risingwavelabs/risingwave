@@ -13,9 +13,9 @@
 // limitations under the License.
 
 use std::cmp::Ordering::{Equal, Less};
+use std::future::Future;
 use std::sync::Arc;
 
-use async_trait::async_trait;
 use risingwave_hummock_sdk::VersionedComparator;
 
 use super::super::{HummockResult, HummockValue};
@@ -155,13 +155,16 @@ impl SstableStreamIterator {
     }
 }
 
-#[async_trait]
 impl HummockIterator for SstableStreamIterator {
     type Direction = Forward;
 
+    type NextFuture<'a> = impl Future<Output = HummockResult<()>> + 'a;
+    type RewindFuture<'a> = impl Future<Output = HummockResult<()>> + 'a;
+    type SeekFuture<'a> = impl Future<Output = HummockResult<()>> + 'a;
+
     /// Moves to the next KV-pair in the table. Assumes that the current position is valid. Even if
     /// the next position is invalid, the function return `Ok(())`.
-    async fn next(&mut self) -> HummockResult<()> {
+    fn next(&mut self) -> Self::NextFuture<'_> {
         // We have to handle two internal iterators.
         //   `block_stream`: iterates over the blocks of the table.
         //     `block_iter`: iterates over the KV-pairs of the current block.
@@ -177,20 +180,22 @@ impl HummockIterator for SstableStreamIterator {
         // If possible, we also use data from blocks already stored in memory before we start a new
         // BlockStream. However, once we created such a stream, we always use it.
 
-        self.stats.scan_key_count += 1;
+        async move {
+            self.stats.scan_key_count += 1;
 
-        // Unwrap internal iterator.
-        let block_iter = self.block_iter.as_mut().expect("no block iterator");
+            // Unwrap internal iterator.
+            let block_iter = self.block_iter.as_mut().expect("no block iterator");
 
-        // Note that we assume that we are at a valid position.
+            // Note that we assume that we are at a valid position.
 
-        // Can we continue in current block?
-        block_iter.next();
-        if block_iter.is_valid() {
-            Ok(())
-        } else {
-            // No, block is exhausted. We need to load the next block.
-            self.next_block().await
+            // Can we continue in current block?
+            block_iter.next();
+            if block_iter.is_valid() {
+                Ok(())
+            } else {
+                // No, block is exhausted. We need to load the next block.
+                self.next_block().await
+            }
         }
     }
 
@@ -214,8 +219,8 @@ impl HummockIterator for SstableStreamIterator {
     /// Do not decide whether the position is valid or not by checking the returned error of this
     /// function. This function WILL NOT return an `Err` if invalid. You should check `is_valid`
     /// before starting iteration.
-    async fn rewind(&mut self) -> HummockResult<()> {
-        self.init(0, None).await
+    fn rewind(&mut self) -> Self::RewindFuture<'_> {
+        async move { self.init(0, None).await }
     }
 
     /// Resets iterator and seeks to the first position where the stored key >= provided key.
@@ -224,42 +229,49 @@ impl HummockIterator for SstableStreamIterator {
     /// Do not decide whether the position is valid or not by checking the returned error of this
     /// function. This function WON'T return an `Err` if invalid. You should check `is_valid` before
     /// starting iteration.
-    async fn seek(&mut self, key: &[u8]) -> HummockResult<()> {
-        let block_idx = self
-            .sst
-            .value()
-            .meta
-            .block_metas
-            .partition_point(|block_meta| {
-                // compare by version comparator
-                // Note: we are comparing against the `smallest_key` of the `block`, thus the
-                // partition point should be `prev(<=)` instead of `<`.
+    fn seek<'a>(&'a mut self, key: &'a [u8]) -> Self::SeekFuture<'a> {
+        async move {
+            let block_idx = self
+                .sst
+                .value()
+                .meta
+                .block_metas
+                .partition_point(|block_meta| {
+                    // compare by version comparator
+                    // Note: we are comparing against the `smallest_key` of the `block`, thus the
+                    // partition point should be `prev(<=)` instead of `<`.
 
-                // It would be better to compare based on the largest key of a block. However, we do
-                // not have this information in the meta data. Since we can only compare against the
-                // smallest key of a block and we want that all (search) keys within a block create
-                // the same result, we use <= here (note that we are given a fixed key and search
-                // over a set of min-keys). Subsequently, our search returns the index of the first
-                // block for which we know that it does not contain our search key. We therefore
-                // subtract 1 from the resulting index.
+                    // It would be better to compare based on the largest key of a block. However,
+                    // we do not have this information in the meta data. Since
+                    // we can only compare against the smallest key of a block
+                    // and we want that all (search) keys within a block create
+                    // the same result, we use <= here (note that we are given a fixed key and
+                    // search over a set of min-keys). Subsequently, our search
+                    // returns the index of the first block for which we know
+                    // that it does not contain our search key. We therefore
+                    // subtract 1 from the resulting index.
 
-                let ord = VersionedComparator::compare_key(block_meta.smallest_key.as_slice(), key);
-                ord == Less || ord == Equal
-            })
-            .saturating_sub(1); // considering the boundary of 0
+                    let ord =
+                        VersionedComparator::compare_key(block_meta.smallest_key.as_slice(), key);
+                    ord == Less || ord == Equal
+                })
+                .saturating_sub(1); // considering the boundary of 0
 
-        self.init(block_idx, Some(key)).await?;
+            self.init(block_idx, Some(key)).await?;
 
-        // Assume that our table contains two blocks `A: [k l m]` and `B: [s t u]` and that we
-        // search for the key `p`. The search above then returns `A` (first `B` and then subtracts
-        // 1). The `seek_idx()` of `SstableIterator` then searches over `A` for `p`. Since `A` does
-        // not contain `p`, the search eventually reaches the end of `A` and leaves the iterator in
-        // an invalid state. To compensate for that, `SstableIterator::seek()` then restarts the
-        // search for the next block without a search key. We divert from that approach to avoid a
-        // second call of `init()`. Instead, we implement `start_stream()` in such a way that it
-        // handles this case without the need to start a second download.
+            // Assume that our table contains two blocks `A: [k l m]` and `B: [s t u]` and that we
+            // search for the key `p`. The search above then returns `A` (first `B` and then
+            // subtracts 1). The `seek_idx()` of `SstableIterator` then searches over
+            // `A` for `p`. Since `A` does not contain `p`, the search eventually
+            // reaches the end of `A` and leaves the iterator in an invalid state. To
+            // compensate for that, `SstableIterator::seek()` then restarts the
+            // search for the next block without a search key. We divert from that approach to avoid
+            // a second call of `init()`. Instead, we implement `start_stream()` in such
+            // a way that it handles this case without the need to start a second
+            // download.
 
-        Ok(())
+            Ok(())
+        }
     }
 
     fn collect_local_statistic(&self, stats: &mut StoreLocalStatistic) {
@@ -271,7 +283,7 @@ impl SstableIteratorType for SstableStreamIterator {
     fn create(
         table: TableHolder,
         sstable_store: SstableStoreRef,
-        _options_: Arc<SstableIteratorReadOptions>,
+        _options: Arc<SstableIteratorReadOptions>,
     ) -> Self {
         SstableStreamIterator::new(table, sstable_store)
     }

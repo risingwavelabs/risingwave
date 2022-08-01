@@ -24,7 +24,7 @@ use risingwave_object_store::object::{
 };
 use tokio::io::{AsyncRead, AsyncReadExt};
 
-use super::{Block, BlockCache, BlockMeta, Sstable, SstableMeta};
+use super::{Block, BlockCache, Sstable, SstableMeta};
 use crate::hummock::{BlockHolder, CachableEntry, HummockError, HummockResult, LruCache};
 use crate::monitor::StoreLocalStatistic;
 

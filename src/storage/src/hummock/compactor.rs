@@ -41,7 +41,7 @@ use risingwave_rpc_client::HummockMetaClient;
 use tokio::sync::oneshot::Sender;
 use tokio::task::JoinHandle;
 
-use super::iterator::ConcatIterator;
+use super::iterator::{ConcatIterator, MultiSstStreamIterator};
 use super::multi_builder::CapacitySplitTableBuilder;
 use super::{
     CompressionAlgorithm, HummockResult, Sstable, SstableBuilder, SstableBuilderOptions,
@@ -49,7 +49,7 @@ use super::{
 };
 use crate::hummock::compaction_executor::CompactionExecutor;
 use crate::hummock::iterator::{
-    Forward, HummockIterator, HummockIteratorUnion, MultiSstIterator, UnorderedMergeIteratorInner,
+    Forward, HummockIterator, HummockIteratorUnion, UnorderedMergeIteratorInner,
 };
 use crate::hummock::multi_builder::{SealedSstableBuilder, TableBuilderFactory};
 use crate::hummock::shared_buffer::shared_buffer_uploader::UploadTaskPayload;
@@ -793,7 +793,7 @@ impl Compactor {
     }
 
     /// Build the merge iterator based on the given input ssts.
-    async fn build_sst_iter(&self) -> HummockResult<MultiSstIterator> {
+    async fn build_sst_iter(&self) -> HummockResult<MultiSstStreamIterator> {
         let mut table_iters = Vec::new();
         let mut stats = StoreLocalStatistic::default();
         let read_options = Arc::new(SstableIteratorReadOptions { prefetch: true });
