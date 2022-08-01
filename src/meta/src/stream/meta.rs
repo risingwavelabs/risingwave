@@ -22,9 +22,8 @@ use risingwave_common::error::ErrorCode::InternalError;
 use risingwave_common::error::{Result, RwError};
 use risingwave_common::types::{ParallelUnitId, VIRTUAL_NODE_COUNT};
 use risingwave_common::util::compress::decompress_data;
-
 use risingwave_common::{bail, try_match_expand};
-use risingwave_pb::common::{ParallelUnit, ParallelUnitType, WorkerNode};
+use risingwave_pb::common::{ParallelUnit, WorkerNode};
 use risingwave_pb::meta::table_fragments::{ActorState, ActorStatus};
 use risingwave_pb::stream_plan::{Dispatcher, FragmentType, StreamActor};
 use tokio::sync::RwLock;

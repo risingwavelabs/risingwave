@@ -15,8 +15,8 @@
 use std::collections::HashMap;
 use std::sync::Arc;
 
-use risingwave_pb::common::WorkerType;
 use risingwave_common::catalog::TableId;
+use risingwave_pb::common::WorkerType;
 use risingwave_pb::meta::scale_service_server::ScaleService;
 use risingwave_pb::meta::{
     GetClusterInfoRequest, GetClusterInfoResponse, MigrateActorRequest, MigrateActorResponse,
