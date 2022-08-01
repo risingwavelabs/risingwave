@@ -119,7 +119,7 @@ impl CreateMviewProgressTracker {
 
     /// Update the progress of `actor` according to the Prost struct. If all actors in this MV have
     /// finished, `notify_finished` will be called on registered notifiers.
-    pub fn update(&mut self, progress: CreateMviewProgress) {
+    pub fn update(&mut self, progress: &CreateMviewProgress) {
         let actor = progress.chain_actor_id;
         let Some(epoch) = self.actor_map.get(&actor).copied() else {
             panic!("no tracked progress for actor {}, is it already finished?", actor);
