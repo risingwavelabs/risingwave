@@ -92,6 +92,7 @@ impl<S: StateStore> SourceExecutor<S> {
         streaming_metrics: Arc<StreamingMetrics>,
         expected_barrier_latency_ms: u64,
     ) -> Result<Self> {
+        // Using vnode range start for row id generator.
         let vnode_id = vnodes.next_set_bit(0).unwrap_or(0);
         Ok(Self {
             actor_id,
