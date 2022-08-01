@@ -15,16 +15,14 @@
 use pgwire::pg_response::{PgResponse, StatementType};
 use risingwave_common::error::Result;
 use risingwave_pb::user::UserInfo;
-use risingwave_sqlparser::ast::{
-    CreateUserOption, CreateUserStatement, CreateUserWithOptions, ObjectName,
-};
+use risingwave_sqlparser::ast::{CreateUserStatement, ObjectName, UserOption, UserOptions};
 
 use crate::binder::Binder;
 use crate::catalog::CatalogError;
 use crate::session::OptimizerContext;
 use crate::user::user_authentication::{encrypt_default, encrypted_password};
 
-fn make_prost_user_info(name: ObjectName, options: &CreateUserWithOptions) -> Result<UserInfo> {
+pub(crate) fn make_prost_user_info(name: ObjectName, options: &UserOptions) -> Result<UserInfo> {
     let mut user_info = UserInfo {
         name: Binder::resolve_user_name(name)?,
         // the LOGIN option is implied if it is not explicitly specified.
@@ -33,18 +31,18 @@ fn make_prost_user_info(name: ObjectName, options: &CreateUserWithOptions) -> Re
     };
     for option in &options.0 {
         match option {
-            CreateUserOption::SuperUser => user_info.is_supper = true,
-            CreateUserOption::NoSuperUser => user_info.is_supper = false,
-            CreateUserOption::CreateDB => user_info.can_create_db = true,
-            CreateUserOption::NoCreateDB => user_info.can_create_db = false,
-            CreateUserOption::Login => user_info.can_login = true,
-            CreateUserOption::NoLogin => user_info.can_login = false,
-            CreateUserOption::EncryptedPassword(p) => {
+            UserOption::SuperUser => user_info.is_supper = true,
+            UserOption::NoSuperUser => user_info.is_supper = false,
+            UserOption::CreateDB => user_info.can_create_db = true,
+            UserOption::NoCreateDB => user_info.can_create_db = false,
+            UserOption::Login => user_info.can_login = true,
+            UserOption::NoLogin => user_info.can_login = false,
+            UserOption::EncryptedPassword(p) => {
                 if !p.0.is_empty() {
                     user_info.auth_info = Some(encrypt_default(&user_info.name, &p.0));
                 }
             }
-            CreateUserOption::Password(opt) => {
+            UserOption::Password(opt) => {
                 if let Some(password) = opt {
                     user_info.auth_info = encrypted_password(&user_info.name, &password.0);
                 }

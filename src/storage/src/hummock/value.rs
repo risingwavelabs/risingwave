@@ -27,7 +27,7 @@ pub const VALUE_PUT: u8 = 0;
 #[derive(Debug, Clone)]
 pub enum HummockValue<T> {
     Put(T),
-    Delete(),
+    Delete,
 }
 
 impl<T> Copy for HummockValue<T> where T: Copy {}
@@ -36,7 +36,7 @@ impl<T: PartialEq> PartialEq for HummockValue<T> {
     fn eq(&self, other: &Self) -> bool {
         match (self, other) {
             (Self::Put(l0), Self::Put(r0)) => l0.eq(r0),
-            (Self::Delete(), Self::Delete()) => true,
+            (Self::Delete, Self::Delete) => true,
             _ => false,
         }
     }
@@ -51,7 +51,7 @@ where
     pub fn encoded_len(&self) -> usize {
         match self {
             HummockValue::Put(val) => 1 + val.as_ref().len(),
-            HummockValue::Delete() => 1,
+            HummockValue::Delete => 1,
         }
     }
 
@@ -63,7 +63,7 @@ where
                 buffer.put_u8(VALUE_PUT);
                 buffer.put_slice(val.as_ref());
             }
-            HummockValue::Delete() => {
+            HummockValue::Delete => {
                 // set flag
                 buffer.put_u8(VALUE_DELETE);
             }
@@ -75,12 +75,12 @@ where
     pub fn into_user_value(self) -> Option<T> {
         match self {
             Self::Put(val) => Some(val),
-            Self::Delete() => None,
+            Self::Delete => None,
         }
     }
 
     pub fn is_delete(&self) -> bool {
-        matches!(self, Self::Delete())
+        matches!(self, Self::Delete)
     }
 
     pub fn put(data: T) -> Self {
@@ -88,7 +88,7 @@ where
     }
 
     pub fn delete() -> Self {
-        Self::Delete()
+        Self::Delete
     }
 }
 
@@ -100,7 +100,7 @@ impl HummockValue<Vec<u8>> {
         }
         match buffer.get_u8() {
             VALUE_PUT => Ok(Self::Put(Vec::from(buffer.chunk()))),
-            VALUE_DELETE => Ok(Self::Delete()),
+            VALUE_DELETE => Ok(Self::Delete),
             _ => Err(HummockError::decode_error("non-empty but format error")),
         }
     }
@@ -108,7 +108,7 @@ impl HummockValue<Vec<u8>> {
     pub fn as_slice(&self) -> HummockValue<&[u8]> {
         match self {
             HummockValue::Put(data) => HummockValue::Put(data),
-            HummockValue::Delete() => HummockValue::Delete(),
+            HummockValue::Delete => HummockValue::Delete,
         }
     }
 }
@@ -121,7 +121,7 @@ impl<'a> HummockValue<&'a [u8]> {
         }
         match buffer.get_u8() {
             VALUE_PUT => Ok(Self::Put(buffer)),
-            VALUE_DELETE => Ok(Self::Delete()),
+            VALUE_DELETE => Ok(Self::Delete),
             _ => Err(HummockError::decode_error("non-empty but format error")),
         }
     }
@@ -130,7 +130,7 @@ impl<'a> HummockValue<&'a [u8]> {
     pub fn to_owned_value(&self) -> HummockValue<Vec<u8>> {
         match self {
             HummockValue::Put(value) => HummockValue::Put(value.to_vec()),
-            HummockValue::Delete() => HummockValue::Delete(),
+            HummockValue::Delete => HummockValue::Delete,
         }
     }
 }
@@ -139,14 +139,14 @@ impl HummockValue<Bytes> {
     pub fn as_slice(&self) -> HummockValue<&[u8]> {
         match self {
             HummockValue::Put(data) => HummockValue::Put(&data[..]),
-            HummockValue::Delete() => HummockValue::Delete(),
+            HummockValue::Delete => HummockValue::Delete,
         }
     }
 
     pub fn to_vec(&self) -> HummockValue<Vec<u8>> {
         match self {
             HummockValue::Put(data) => HummockValue::Put(data.to_vec()),
-            HummockValue::Delete() => HummockValue::Delete(),
+            HummockValue::Delete => HummockValue::Delete,
         }
     }
 }
@@ -155,7 +155,7 @@ impl From<HummockValue<Vec<u8>>> for HummockValue<Bytes> {
     fn from(data: HummockValue<Vec<u8>>) -> Self {
         match data {
             HummockValue::Put(data) => HummockValue::Put(data.into()),
-            HummockValue::Delete() => HummockValue::Delete(),
+            HummockValue::Delete => HummockValue::Delete,
         }
     }
 }
@@ -165,7 +165,7 @@ impl From<StorageValue> for HummockValue<Bytes> {
         if data.is_some() {
             HummockValue::Put(data.user_value.unwrap_or_default())
         } else {
-            HummockValue::Delete()
+            HummockValue::Delete
         }
     }
 }
