@@ -45,7 +45,7 @@ pub enum CachePolicy {
     NotFill,
 }
 
-/// An iterator that reads the blocks of an SSTable step by step from a given stream of bytes.
+/// An iterator that reads the blocks of an SST step by step from a given stream of bytes.
 pub struct BlockStream {
     /// The stream that provides raw data.
     byte_stream: Box<dyn AsyncRead + Unpin + Send + Sync>,
