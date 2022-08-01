@@ -651,28 +651,26 @@ pub fn display_datum_ref(d: &DatumRef<'_>) -> String {
 }
 
 impl ScalarRefImpl<'_> {
-    /// Serializes the scalar to binary format.
-    pub fn binary_serialize(
-        &self,
-        ser: &mut pgtype_binary::Serializer,
-    ) -> pgtype_binary::Result<()> {
+    /// Encode the scalar to postgresql binary format.
+    /// The encoder implements encoding using <https://docs.rs/postgres-types/0.2.3/postgres_types/trait.ToSql.html>
+    pub fn binary_serialize(&self, encoder: &mut pgwire::BinaryEncoder) {
         match self {
-            Self::Int64(v) => v.serialize(ser)?,
-            Self::Float32(v) => v.0.serialize(ser)?,
-            Self::Float64(v) => v.0.serialize(ser)?,
-            Self::Utf8(v) => v.serialize(ser)?,
-            Self::Bool(v) => v.serialize(ser)?,
-            Self::Int16(v) => v.serialize(ser)?,
-            Self::Int32(v) => v.serialize(ser)?,
+            Self::Int64(v) => encoder.serialize_i64(*v),
+            Self::Float32(v) => encoder.serialize_f32(v.0),
+            Self::Float64(v) => encoder.serialize_f64(v.0),
+            Self::Utf8(v) => encoder.serialize_str(v),
+            Self::Bool(v) => encoder.serialize_bool(*v),
+            Self::Int16(v) => encoder.serialize_i16(*v),
+            Self::Int32(v) => encoder.serialize_i32(*v),
             Self::Decimal(v) => match v {
-                Decimal::Normalized(v) => ser.serialize_decimal(Some(*v))?,
+                Decimal::Normalized(v) => encoder.serialize_decimal(Some(*v)),
                 Decimal::NaN | Decimal::PositiveINF | Decimal::NegativeINF => {
-                    ser.serialize_decimal(None)?
+                    encoder.serialize_decimal(None);
                 }
             },
-            Self::NaiveDate(v) => ser.serialize_naivedate(v.0)?,
-            Self::NaiveDateTime(v) => ser.serialize_naivedatetime(v.0)?,
-            Self::NaiveTime(v) => ser.serialize_naivetime(v.0)?,
+            Self::NaiveDate(v) => encoder.serialize_naivedate(v.0),
+            Self::NaiveDateTime(v) => encoder.serialize_naivedatetime(v.0),
+            Self::NaiveTime(v) => encoder.serialize_naivetime(v.0),
             Self::Struct(_) => {
                 todo!("Don't support struct serialization yet")
             }
@@ -683,7 +681,6 @@ impl ScalarRefImpl<'_> {
                 todo!("Don't support interval serialization yet")
             }
         };
-        Ok(())
     }
 
     /// Serialize the scalar.

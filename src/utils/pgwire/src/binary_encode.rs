@@ -12,9 +12,9 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use bytes::{BytesMut, Bytes, BufMut};
-use chrono::{NaiveDate, NaiveTime, NaiveDateTime};
-use postgres_types::{Type, ToSql};
+use bytes::{BufMut, Bytes, BytesMut};
+use chrono::{NaiveDate, NaiveDateTime, NaiveTime};
+use postgres_types::{ToSql, Type};
 use rust_decimal::Decimal;
 
 /// A structure for encoding Rust values into a binary bytes.
@@ -37,39 +37,39 @@ impl BinaryEncoder {
         self.output.clone().freeze()
     }
 
-    fn serialize_bool(&mut self, v: bool) {
+    pub fn serialize_bool(&mut self, v: bool) {
         v.to_sql(&self.placeholder, &mut self.output).unwrap();
     }
 
-    fn serialize_i8(&mut self, v: i8) {
+    pub fn serialize_i8(&mut self, v: i8) {
         v.to_sql(&self.placeholder, &mut self.output).unwrap();
     }
 
-    fn serialize_i16(&mut self, v: i16)  {
+    pub fn serialize_i16(&mut self, v: i16) {
         v.to_sql(&self.placeholder, &mut self.output).unwrap();
     }
 
-    fn serialize_i32(&mut self, v: i32) {
+    pub fn serialize_i32(&mut self, v: i32) {
         v.to_sql(&self.placeholder, &mut self.output).unwrap();
     }
 
-    fn serialize_i64(&mut self, v: i64) {
+    pub fn serialize_i64(&mut self, v: i64) {
         v.to_sql(&self.placeholder, &mut self.output).unwrap();
     }
 
-    fn serialize_f32(&mut self, v: f32) {
+    pub fn serialize_f32(&mut self, v: f32) {
         v.to_sql(&self.placeholder, &mut self.output).unwrap();
     }
 
-    fn serialize_f64(&mut self, v: f64)  {
+    pub fn serialize_f64(&mut self, v: f64) {
         v.to_sql(&self.placeholder, &mut self.output).unwrap();
     }
 
-    fn serialize_str(&mut self, v: &str){
+    pub fn serialize_str(&mut self, v: &str) {
         v.to_sql(&self.placeholder, &mut self.output).unwrap();
     }
 
-    fn serialize_bytes(&mut self, v: &[u8]) {
+    pub fn serialize_bytes(&mut self, v: &[u8]) {
         v.to_sql(&self.placeholder, &mut self.output).unwrap();
     }
 
@@ -91,24 +91,21 @@ impl BinaryEncoder {
                 self.output.put_i16(0);
             }
         }
-    
     }
 
     /// Serialize a NaiveDate value.
-    pub fn serialize_naivedate(&mut self, v: NaiveDate){
+    pub fn serialize_naivedate(&mut self, v: NaiveDate) {
         v.to_sql(&self.placeholder, &mut self.output).unwrap();
-       
     }
 
     /// Serialize a NaiveTimeWrapper value.
-    pub fn serialize_naivetime(&mut self, v: NaiveTime){
+    pub fn serialize_naivetime(&mut self, v: NaiveTime) {
         v.to_sql(&self.placeholder, &mut self.output).unwrap();
     }
 
     /// Serialize a NaiveDateTime value.
     pub fn serialize_naivedatetime(&mut self, v: NaiveDateTime) {
         v.to_sql(&self.placeholder, &mut self.output).unwrap();
-    
     }
 }
 impl Default for BinaryEncoder {

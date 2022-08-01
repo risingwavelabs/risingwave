@@ -17,9 +17,9 @@ use std::collections::HashMap;
 use bytes::Bytes;
 use itertools::Itertools;
 use num_traits::Float;
-use pgtype_binary::Serializer;
 use pgwire::pg_field_descriptor::{PgFieldDescriptor, TypeOid};
 use pgwire::types::Row;
+use pgwire::BinaryEncoder;
 use risingwave_common::array::DataChunk;
 use risingwave_common::catalog::{ColumnDesc, Field};
 use risingwave_common::error::ErrorCode::ProtocolError;
@@ -41,9 +41,9 @@ fn pg_value_format(d: ScalarRefImpl, format: bool) -> Bytes {
             _ => d.to_string().into(),
         }
     } else {
-        let mut serializer = Serializer::new();
-        d.binary_serialize(&mut serializer).unwrap();
-        serializer.get_ouput()
+        let mut encoder = BinaryEncoder::new();
+        d.binary_serialize(&mut encoder);
+        encoder.get_ouput()
     }
 }
 
