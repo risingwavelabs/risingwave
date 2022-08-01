@@ -23,7 +23,6 @@ use dyn_clone::DynClone;
 use futures::future::try_join_all;
 use futures::{stream, FutureExt, StreamExt, TryFutureExt};
 use itertools::Itertools;
-use parking_lot::RwLock;
 use risingwave_common::config::constant::hummock::{CompactionFilterFlag, TABLE_OPTION_DUMMY_TTL};
 use risingwave_common::config::StorageConfig;
 use risingwave_hummock_sdk::compact::compact_task_to_string;
@@ -32,7 +31,7 @@ use risingwave_hummock_sdk::key::{
     extract_table_id_and_epoch, get_epoch, get_table_id, Epoch, FullKey,
 };
 use risingwave_hummock_sdk::key_range::KeyRange;
-use risingwave_hummock_sdk::slice_transform::SliceTransformImpl;
+use risingwave_hummock_sdk::slice_transform::SliceTransformManagerRef;
 use risingwave_hummock_sdk::{CompactionGroupId, VersionedComparator};
 use risingwave_pb::hummock::{
     CompactTask, LevelType, SstableInfo, SubscribeCompactTasksResponse, VacuumTask,
@@ -102,7 +101,7 @@ pub struct CompactorContext {
 
     pub compaction_executor: Option<Arc<CompactionExecutor>>,
 
-    pub table_id_to_slice_transform: Arc<RwLock<HashMap<u32, SliceTransformImpl>>>,
+    pub slice_transform_manager: SliceTransformManagerRef,
 
     pub memory_limiter: Arc<MemoryLimiter>,
 
@@ -851,7 +850,7 @@ impl Compactor {
         sstable_store: SstableStoreRef,
         stats: Arc<StateStoreMetrics>,
         compaction_executor: Option<Arc<CompactionExecutor>>,
-        table_id_to_slice_transform: Arc<RwLock<HashMap<u32, SliceTransformImpl>>>,
+        slice_transform_manager: SliceTransformManagerRef,
         memory_limiter: Arc<MemoryLimiter>,
         sstable_id_manager: SstableIdManagerRef,
     ) -> (JoinHandle<()>, Sender<()>) {
@@ -862,7 +861,7 @@ impl Compactor {
             stats,
             is_share_buffer_compact: false,
             compaction_executor,
-            table_id_to_slice_transform,
+            slice_transform_manager,
             memory_limiter,
             sstable_id_manager,
         });

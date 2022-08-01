@@ -12,14 +12,18 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::fmt::Debug;
+use std::sync::atomic::{AtomicU64, Ordering as AtomicOrdering};
+use std::sync::Arc;
 
+use parking_lot::RwLock;
 use risingwave_common::catalog::ColumnDesc;
 use risingwave_common::types::VIRTUAL_NODE_SIZE;
 use risingwave_common::util::ordered::OrderedRowDeserializer;
 use risingwave_common::util::sort_util::OrderType;
 use risingwave_pb::catalog::Table;
+use tokio::sync::Notify;
 
 use crate::key::{get_table_id, TABLE_PREFIX_LEN};
 
@@ -215,10 +219,94 @@ impl SliceTransform for MultiSliceTransform {
     }
 }
 
+#[derive(Default)]
+pub struct SliceTransformManagerInner {
+    table_id_to_slice_transform: RwLock<HashMap<u32, SliceTransformImpl>>,
+    version: AtomicU64,
+    notify: Notify,
+}
+
+impl SliceTransformManagerInner {
+    fn update(&self, table_id: u32, slice_transform: SliceTransformImpl) {
+        self.table_id_to_slice_transform
+            .write()
+            .insert(table_id, slice_transform);
+    }
+
+    fn remove(&self, table_id: u32) {
+        self.table_id_to_slice_transform.write().remove(&table_id);
+    }
+
+    async fn acquire(&self, mut remaining_table_id_set: HashSet<u32>) -> MultiSliceTransform {
+        let mut multi_slice_transform = MultiSliceTransform::default();
+
+        while !remaining_table_id_set.is_empty() {
+            {
+                let guard = self.table_id_to_slice_transform.read();
+                remaining_table_id_set.drain_filter(|table_id| match guard.get(table_id) {
+                    Some(slice_transform) => {
+                        multi_slice_transform.register(*table_id, slice_transform.clone());
+                        true
+                    }
+
+                    None => false,
+                });
+            }
+
+            if !remaining_table_id_set.is_empty() {
+                let notified = self.notify.notified();
+                notified.await;
+            }
+        }
+
+        multi_slice_transform
+    }
+
+    fn set_version(&self, version: u64) {
+        self.version.store(version, AtomicOrdering::SeqCst);
+        self.notify.notify_waiters();
+    }
+
+    fn version(&self) -> u64 {
+        self.version.load(AtomicOrdering::SeqCst)
+    }
+}
+
+#[derive(Default)]
+pub struct SliceTransformManager {
+    inner: SliceTransformManagerInner,
+}
+
+impl SliceTransformManager {
+    pub fn update(&self, table_id: u32, slice_transform: SliceTransformImpl) {
+        self.inner.update(table_id, slice_transform);
+    }
+
+    pub fn remove(&self, table_id: u32) {
+        self.inner.remove(table_id);
+    }
+
+    pub async fn acquire(&self, remaining_table_id_set: HashSet<u32>) -> MultiSliceTransform {
+        self.inner.acquire(remaining_table_id_set).await
+    }
+
+    pub fn set_version(&self, version: u64) {
+        self.inner.set_version(version);
+    }
+
+    pub fn version(&self) -> u64 {
+        self.inner.version()
+    }
+}
+
+pub type SliceTransformManagerRef = Arc<SliceTransformManager>;
+
 #[cfg(test)]
 mod tests {
-    use std::collections::HashMap;
+    use std::collections::{HashMap, HashSet};
     use std::mem;
+    use std::sync::Arc;
+    use std::time::Duration;
 
     use bytes::{BufMut, BytesMut};
     use risingwave_common::array::Row;
@@ -229,10 +317,13 @@ mod tests {
     use risingwave_common::util::sort_util::OrderType;
     use risingwave_pb::catalog::Table as ProstTable;
     use risingwave_pb::plan_common::{ColumnCatalog as ProstColumnCatalog, ColumnOrder};
+    use tokio::task;
 
     use super::{DummySliceTransform, SchemaSliceTransform, SliceTransform};
     use crate::key::TABLE_PREFIX_LEN;
-    use crate::slice_transform::{FullKeySliceTransform, MultiSliceTransform, SliceTransformImpl};
+    use crate::slice_transform::{
+        FullKeySliceTransform, MultiSliceTransform, SliceTransformImpl, SliceTransformManager,
+    };
 
     #[test]
     fn test_default_slice_transform() {
@@ -490,5 +581,30 @@ mod tests {
             assert!(last_state.is_some());
             assert_eq!(3, last_state.as_ref().unwrap().0);
         }
+    }
+
+    #[tokio::test(flavor = "multi_thread")]
+    async fn test_slice_transform_manager() {
+        let slice_transform_manager = Arc::new(SliceTransformManager::default());
+        let version = slice_transform_manager.version();
+        assert_eq!(0, version);
+        let slice_transform_manager_ref = slice_transform_manager.clone();
+        let slice_transform_manager_ref2 = slice_transform_manager_ref.clone();
+
+        task::spawn(async move {
+            tokio::time::sleep(Duration::from_millis(500)).await;
+            slice_transform_manager_ref
+                .update(1, SliceTransformImpl::Dummy(DummySliceTransform::default()));
+            slice_transform_manager_ref.set_version(slice_transform_manager.version() + 1);
+        });
+
+        let remaining_table_id_set = HashSet::from([1]);
+        let multi_slice_transform = slice_transform_manager_ref2
+            .acquire(remaining_table_id_set)
+            .await;
+
+        let after_version = slice_transform_manager_ref2.version();
+        assert_eq!(version + 1, after_version);
+        assert_eq!(1, multi_slice_transform.size());
     }
 }

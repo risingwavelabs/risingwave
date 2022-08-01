@@ -13,6 +13,8 @@
 // limitations under the License.
 
 #![feature(lint_reasons)]
+#![feature(hash_drain_filter)]
+#![feature(async_closure)]
 
 mod version_cmp;
 
