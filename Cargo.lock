@@ -4993,6 +4993,7 @@ dependencies = [
  "fail",
  "futures",
  "itertools",
+ "lazy_static",
  "madsim",
  "madsim-tokio",
  "prometheus",
