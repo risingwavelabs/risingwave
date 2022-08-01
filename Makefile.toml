@@ -391,10 +391,6 @@ echo "check: $(tput setaf 4)tmux >= v3.2a$(tput sgr0)"
 tmux -V || echo "$(tput setaf 3)tmux$(tput sgr0) not found."
 echo
 
-echo "check: $(tput setaf 4)yq >= 4$(tput sgr0)"
-yq -V || echo "$(tput setaf 3)yq$(tput sgr0) not found."
-echo
-
 echo "check: $(tput setaf 4)psql >= 14$(tput sgr0)"
 psql -V || echo "$(tput setaf 3)psql$(tput sgr0) not found."
 echo
