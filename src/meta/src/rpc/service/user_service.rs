@@ -12,12 +12,15 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+use itertools::Itertools;
 use risingwave_common::error::{tonic_err, Result as RwResult};
 use risingwave_pb::user::grant_privilege::Object;
+use risingwave_pb::user::update_user_request::UpdateField;
 use risingwave_pb::user::user_service_server::UserService;
 use risingwave_pb::user::{
     CreateUserRequest, CreateUserResponse, DropUserRequest, DropUserResponse, GrantPrivilege,
     GrantPrivilegeRequest, GrantPrivilegeResponse, RevokePrivilegeRequest, RevokePrivilegeResponse,
+    UpdateUserRequest, UpdateUserResponse,
 };
 use tonic::{Request, Response, Status};
 
@@ -139,6 +142,30 @@ impl<S: MetaStore> UserService for UserServiceImpl<S> {
             .map_err(tonic_err)?;
 
         Ok(Response::new(DropUserResponse {
+            status: None,
+            version,
+        }))
+    }
+
+    #[cfg_attr(coverage, no_coverage)]
+    async fn update_user(
+        &self,
+        request: Request<UpdateUserRequest>,
+    ) -> Result<Response<UpdateUserResponse>, Status> {
+        let req = request.into_inner();
+        let update_fields = req
+            .update_fields
+            .iter()
+            .map(|i| UpdateField::from_i32(*i).unwrap())
+            .collect_vec();
+        let user = req.get_user().map_err(tonic_err)?.clone();
+        let version = self
+            .user_manager
+            .update_user(&user, &update_fields)
+            .await
+            .map_err(tonic_err)?;
+
+        Ok(Response::new(UpdateUserResponse {
             status: None,
             version,
         }))
