@@ -447,12 +447,12 @@ impl LogicalAgg {
     /// input must be converted to stream form.
     fn gen_two_phase_streaming_agg_plan_v2(
         &self,
-        input_stream: PlanRef,
+        input: PlanRef,
         dist_key: &[usize],
     ) -> Result<PlanRef> {
-        assert!(self.group_key().is_empty()); // TODO(yuchao): only support simple agg currently
+        let input_fields = input.schema().fields();
+        let input_col_num = input_fields.len();
 
-        let input_fields = input_stream.schema().fields();
         let mut exprs: Vec<_> = input_fields
             .iter()
             .enumerate()
@@ -469,10 +469,11 @@ impl LogicalAgg {
             .into(),
         );
         let vnode_col_idx = exprs.len() - 1;
-        let project = StreamProject::new(LogicalProject::new(input_stream, exprs));
+        let project = StreamProject::new(LogicalProject::new(input, exprs));
         println!("[rc] project dist: {:?}", project.distribution());
 
-        let local_group_key = vec![vnode_col_idx];
+        let mut local_group_key = self.group_key().to_vec();
+        local_group_key.push(vnode_col_idx);
         let n_local_group_key = local_group_key.len();
         let local_agg = StreamHashAgg::new(LogicalAgg::new(
             self.agg_calls().to_vec(),
@@ -480,23 +481,37 @@ impl LogicalAgg {
             project.into(),
         ));
 
-        let exchange =
-            RequiredDist::single().enforce_if_not_satisfies(local_agg.into(), &Order::any())?;
-        let global_agg = StreamGlobalSimpleAgg::new(LogicalAgg::new(
-            self.agg_calls()
-                .iter()
-                .enumerate()
-                .map(|(partial_output_idx, agg_call)| {
-                    agg_call.partial_to_total_agg_call(n_local_group_key + partial_output_idx)
-                })
-                .collect(),
-            self.group_key().to_vec(),
-            exchange,
-        ));
-
-        println!("[rc] self.group_key: {:?}", self.group_key());
-
-        Ok(global_agg.into())
+        if self.group_key().is_empty() {
+            let exchange =
+                RequiredDist::single().enforce_if_not_satisfies(local_agg.into(), &Order::any())?;
+            let global_agg = StreamGlobalSimpleAgg::new(LogicalAgg::new(
+                self.agg_calls()
+                    .iter()
+                    .enumerate()
+                    .map(|(partial_output_idx, agg_call)| {
+                        agg_call.partial_to_total_agg_call(n_local_group_key + partial_output_idx)
+                    })
+                    .collect(),
+                self.group_key().to_vec(),
+                exchange,
+            ));
+            Ok(global_agg.into())
+        } else {
+            let exchange = RequiredDist::shard_by_key(input_col_num, self.group_key())
+                .enforce_if_not_satisfies(local_agg.into(), &Order::any())?;
+            let global_agg = StreamHashAgg::new(LogicalAgg::new(
+                self.agg_calls()
+                    .iter()
+                    .enumerate()
+                    .map(|(partial_output_idx, agg_call)| {
+                        agg_call.partial_to_total_agg_call(n_local_group_key + partial_output_idx)
+                    })
+                    .collect(),
+                self.group_key().to_vec(),
+                exchange,
+            ));
+            Ok(global_agg.into())
+        }
     }
 
     /// Check if the aggregation result will be affected by order by clause, if any.
@@ -1100,20 +1115,18 @@ impl ToBatch for LogicalAgg {
 impl ToStream for LogicalAgg {
     fn to_stream(&self) -> Result<PlanRef> {
         let input = self.input();
-        // simple-agg
+        let input_stream = input.to_stream()?;
+        let dist_key = input_stream.distribution().dist_column_indices().to_vec();
+
+        let agg_calls_can_use_two_phase = self.agg_calls.iter().all(|c| {
+            matches!(
+                c.agg_kind,
+                AggKind::Min | AggKind::Max | AggKind::Sum | AggKind::Count
+            ) && c.order_by_fields.is_empty()
+        });
+
         if self.group_key().is_empty() {
-            let agg_calls_can_use_two_phase = self.agg_calls.iter().all(|c| {
-                matches!(
-                    c.agg_kind,
-                    AggKind::Min | AggKind::Max | AggKind::Sum | AggKind::Count
-                ) && c.order_by_fields.is_empty()
-            });
-
-            let input_stream = input.to_stream()?;
-            let input_distribution = input_stream.distribution();
-            println!("[rc] input_distribution: {:?}", input_distribution);
-            let dist_key = input_distribution.dist_column_indices().to_vec();
-
+            // simple-agg
             if !dist_key.is_empty() && agg_calls_can_use_two_phase {
                 // simple 2-phase-agg
                 // TODO(rc)
@@ -1128,12 +1141,18 @@ impl ToStream for LogicalAgg {
             }
         } else {
             // hash-agg
-            Ok(
-                StreamHashAgg::new(self.clone_with_input(input.to_stream_with_dist_required(
-                    &RequiredDist::shard_by_key(input.schema().len(), self.group_key()),
-                )?))
-                .into(),
-            )
+            if !dist_key.is_empty() && agg_calls_can_use_two_phase {
+                // hash 2-phase-agg
+                self.gen_two_phase_streaming_agg_plan_v2(input_stream, &dist_key)
+            } else {
+                // hash 1-phase-agg
+                Ok(
+                    StreamHashAgg::new(self.clone_with_input(input.to_stream_with_dist_required(
+                        &RequiredDist::shard_by_key(input.schema().len(), self.group_key()),
+                    )?))
+                    .into(),
+                )
+            }
         }
     }
 
