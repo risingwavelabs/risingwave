@@ -136,6 +136,7 @@ risedev:
       port: 5689
       exporter-port: 1224
     - use: frontend
+    - use: compactor
 
   docker-playground:
     - use: meta-node
