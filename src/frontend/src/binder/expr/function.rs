@@ -154,6 +154,7 @@ impl Binder {
             "current_database" if inputs.is_empty() => {
                 return Ok(ExprImpl::literal_varchar(self.db_name.clone()));
             }
+            "__rw_vnode" => ExprType::Vnode,
             _ => {
                 return Err(ErrorCode::NotImplemented(
                     format!("unsupported function: {:?}", function_name),
