@@ -25,7 +25,7 @@ use risingwave_common::util::value_encoding::deserialize_cell;
 use risingwave_storage::memory::MemoryStateStore;
 use risingwave_storage::row_serde::cell_based_encoding_util::deserialize_column_id;
 use risingwave_storage::store::ReadOptions;
-use risingwave_storage::table::storage_table::{RowBasedStorageTable, StorageTable, READ_ONLY};
+use risingwave_storage::table::storage_table::{RowBasedStorageTable, READ_ONLY};
 use risingwave_storage::table::Distribution;
 use risingwave_storage::StateStore;
 
@@ -40,14 +40,14 @@ fn arrangement_col_descs() -> Vec<ColumnDesc> {
     vec![
         ColumnDesc {
             data_type: DataType::Int64,
-            column_id: ColumnId::new(1),
+            column_id: ColumnId::new(0),
             name: "rowid_column".to_string(),
             field_descs: vec![],
             type_name: "".to_string(),
         },
         ColumnDesc {
             data_type: DataType::Int64,
-            column_id: ColumnId::new(2),
+            column_id: ColumnId::new(1),
             name: "join_column".to_string(),
             field_descs: vec![],
             type_name: "".to_string(),

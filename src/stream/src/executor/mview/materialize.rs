@@ -23,8 +23,7 @@ use risingwave_common::buffer::Bitmap;
 use risingwave_common::catalog::{ColumnDesc, ColumnId, Schema, TableId};
 use risingwave_common::util::sort_util::OrderPair;
 use risingwave_pb::catalog::Table;
-use risingwave_storage::table::state_table::{RowBasedStateTable, StateTable};
-use risingwave_storage::table::Distribution;
+use risingwave_storage::table::state_table::RowBasedStateTable;
 use risingwave_storage::StateStore;
 
 use crate::executor::error::StreamExecutorError;
@@ -198,7 +197,7 @@ mod tests {
     use risingwave_common::types::DataType;
     use risingwave_common::util::sort_util::{OrderPair, OrderType};
     use risingwave_storage::memory::MemoryStateStore;
-    use risingwave_storage::table::storage_table::{RowBasedStorageTable, StorageTable};
+    use risingwave_storage::table::storage_table::RowBasedStorageTable;
 
     use crate::executor::test_utils::*;
     use crate::executor::*;

@@ -26,7 +26,7 @@ use risingwave_batch::executor::{
     RowSeqScanExecutor, ScanType,
 };
 use risingwave_common::array::{Array, DataChunk, F64Array, I64Array, Row};
-use risingwave_common::catalog::{ColumnDesc, ColumnId, Field, OrderedColumnDesc, Schema, TableId};
+use risingwave_common::catalog::{ColumnDesc, ColumnId, Field, Schema, TableId};
 use risingwave_common::column_nonnull;
 use risingwave_common::error::{Result, RwError};
 use risingwave_common::test_prelude::DataChunkTestExt;
@@ -36,7 +36,7 @@ use risingwave_pb::data::data_type::TypeName;
 use risingwave_pb::plan_common::ColumnDesc as ProstColumnDesc;
 use risingwave_source::{MemSourceManager, SourceManager};
 use risingwave_storage::memory::MemoryStateStore;
-use risingwave_storage::table::state_table::{RowBasedStateTable, StateTable};
+use risingwave_storage::table::state_table::RowBasedStateTable;
 use risingwave_storage::table::storage_table::RowBasedStorageTable;
 use risingwave_storage::Keyspace;
 use risingwave_stream::executor::monitor::StreamingMetrics;
@@ -207,15 +207,6 @@ async fn test_table_v2_materialize() -> Result<()> {
         vec![OrderType::Ascending],
         vec![0],
     );
-
-    let ordered_column_descs: Vec<OrderedColumnDesc> = column_descs
-        .iter()
-        .take(1)
-        .map(|d| OrderedColumnDesc {
-            column_desc: d.clone(),
-            order: OrderType::Ascending,
-        })
-        .collect();
 
     let scan = Box::new(RowSeqScanExecutor::new(
         table.schema().clone(),
@@ -403,15 +394,6 @@ async fn test_row_seq_scan() -> Result<()> {
         ]))
         .unwrap();
     state.commit(epoch).await.unwrap();
-
-    let pk_descs: Vec<OrderedColumnDesc> = column_descs
-        .iter()
-        .take(1)
-        .map(|d| OrderedColumnDesc {
-            column_desc: d.clone(),
-            order: OrderType::Ascending,
-        })
-        .collect();
 
     let executor = Box::new(RowSeqScanExecutor::new(
         table.schema().clone(),

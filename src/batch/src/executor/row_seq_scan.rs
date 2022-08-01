@@ -20,7 +20,7 @@ use futures_async_stream::try_stream;
 use itertools::Itertools;
 use risingwave_common::array::{DataChunk, Row};
 use risingwave_common::buffer::Bitmap;
-use risingwave_common::catalog::{ColumnDesc, ColumnId, OrderedColumnDesc, Schema, TableId};
+use risingwave_common::catalog::{ColumnDesc, ColumnId, Schema, TableId};
 use risingwave_common::error::{Result, RwError};
 use risingwave_common::types::{DataType, Datum, ScalarImpl};
 use risingwave_common::util::select_all;
@@ -28,10 +28,8 @@ use risingwave_common::util::sort_util::OrderType;
 use risingwave_pb::batch_plan::plan_node::NodeBody;
 use risingwave_pb::batch_plan::{scan_range, ScanRange};
 use risingwave_pb::plan_common::{CellBasedTableDesc, OrderType as ProstOrderType};
-use risingwave_storage::row_serde::{CellBasedRowSerde, RowBasedSerde};
-use risingwave_storage::table::storage_table::{
-    BatchDedupPkIter, RowBasedStorageTable, StorageTable, StorageTableIter,
-};
+use risingwave_storage::row_serde::RowBasedSerde;
+use risingwave_storage::table::storage_table::{RowBasedStorageTable, StorageTableIter};
 use risingwave_storage::table::{Distribution, TableIter};
 use risingwave_storage::{dispatch_state_store, Keyspace, StateStore, StateStoreImpl};
 
@@ -158,15 +156,6 @@ impl BoxedExecutorBuilder for RowSeqScanExecutorBuilder {
             .map(ColumnId::from)
             .collect();
 
-        // TODO: remove this
-        let pk_descs = table_desc
-            .order_key
-            .iter()
-            .map(|order| OrderedColumnDesc {
-                column_desc: column_descs[order.index as usize].clone(),
-                order: OrderType::from_prost(&ProstOrderType::from_i32(order.order_type).unwrap()),
-            })
-            .collect_vec();
         let pk_types = table_desc
             .order_key
             .iter()

@@ -15,6 +15,7 @@
 use std::sync::Arc;
 
 use bytes::{Buf, Bytes};
+use itertools::Itertools;
 use risingwave_common::array::Row;
 use risingwave_common::error::{ErrorCode, Result};
 use risingwave_common::types::{DataType, VirtualNode, VIRTUAL_NODE_SIZE};
@@ -64,11 +65,19 @@ impl RowBasedDeserializer {
         }
 
         let (vnode, key_bytes) = parse_raw_key_to_vnode_and_key(raw_key);
-        Ok(Some((
-            vnode,
-            key_bytes.to_vec(),
-            row_based_deserialize_inner(&self.column_mapping.all_data_types, value.as_ref())?,
-        )))
+        let origin_row =
+            row_based_deserialize_inner(&self.column_mapping.all_data_types, value.as_ref())?;
+        let output_column_ids = self
+            .column_mapping
+            .output_columns
+            .iter()
+            .map(|c| c.column_id)
+            .collect_vec();
+        let mut output_row = vec![];
+        for col_id in output_column_ids {
+            output_row.push(origin_row.0[col_id.get_id() as usize].clone());
+        }
+        Ok(Some((vnode, key_bytes.to_vec(), Row(output_row))))
     }
 }
 
@@ -117,7 +126,7 @@ mod tests {
             DataType::Decimal,
             DataType::Interval,
         ];
-        let column_ids = (1..=row.size())
+        let column_ids = (0..=row.size() - 1)
             .map(|i| ColumnId::new(i as _))
             .collect_vec();
 

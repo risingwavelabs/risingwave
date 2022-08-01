@@ -16,7 +16,7 @@ use itertools::Itertools;
 use risingwave_common::catalog::{ColumnDesc, ColumnId, OrderedColumnDesc, TableId};
 use risingwave_common::util::sort_util::OrderType;
 use risingwave_pb::plan_common::{CellBasedTableDesc, OrderType as ProstOrderType};
-use risingwave_storage::table::storage_table::{RowBasedStorageTable, StorageTable};
+use risingwave_storage::table::storage_table::RowBasedStorageTable;
 use risingwave_storage::table::Distribution;
 use risingwave_storage::StateStore;
 
@@ -65,6 +65,11 @@ impl ExecutorBuilder for BatchQueryExecutorBuilder {
             .copied()
             .map(ColumnId::from)
             .collect();
+        // let column_ids = table_desc
+        //     .columns
+        //     .iter()
+        //     .map(|c| ColumnId::from(c.column_id))
+        //     .collect_vec();
 
         // Use indices based on full table instead of streaming executor output.
         let pk_indices = table_desc

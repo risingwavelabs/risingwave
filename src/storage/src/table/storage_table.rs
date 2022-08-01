@@ -879,7 +879,6 @@ impl<S: StateStore, RS: RowSerde> StorageTableIterInner<S, RS> {
         }
 
         let row_deserializer = RS::create_deserializer(table_descs);
-
         let iter = keyspace
             .iter_with_range(raw_key_range, read_options)
             .await?;

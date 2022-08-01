@@ -16,7 +16,7 @@ use futures::{pin_mut, StreamExt};
 use futures_async_stream::try_stream;
 use risingwave_common::array::{Op, StreamChunk};
 use risingwave_common::catalog::{OrderedColumnDesc, Schema};
-use risingwave_storage::table::storage_table::{RowBasedStorageTable, StorageTable, READ_ONLY};
+use risingwave_storage::table::storage_table::{RowBasedStorageTable, READ_ONLY};
 use risingwave_storage::table::TableIter;
 use risingwave_storage::StateStore;
 
@@ -32,10 +32,6 @@ pub struct BatchQueryExecutor<S: StateStore> {
     batch_size: usize,
 
     info: ExecutorInfo,
-
-    /// public key field descriptors. Used to decode pk into datums
-    /// for dedup pk encoding.
-    pk_descs: Vec<OrderedColumnDesc>,
 }
 
 impl<S> BatchQueryExecutor<S>
@@ -48,13 +44,12 @@ where
         table: RowBasedStorageTable<S, READ_ONLY>,
         batch_size: Option<usize>,
         info: ExecutorInfo,
-        pk_descs: Vec<OrderedColumnDesc>,
+        _pk_descs: Vec<OrderedColumnDesc>,
     ) -> Self {
         Self {
             table,
             batch_size: batch_size.unwrap_or(Self::DEFAULT_BATCH_SIZE),
             info,
-            pk_descs,
         }
     }
 
