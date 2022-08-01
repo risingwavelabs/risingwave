@@ -89,11 +89,9 @@ impl StoreLocalStatistic {
                 .bloom_filter_might_positive_counts
                 .inc_by(self.bloom_filter_might_positive_count);
         }
-
-        if self.remote_io_time.load(Ordering::SeqCst) as f64 > 0.0 {
-            metrics
-                .remote_read_time
-                .observe(self.remote_io_time.load(Ordering::Relaxed) as f64);
+        let t = self.remote_io_time.load(Ordering::Relaxed) as f64;
+        if t > 0.0 {
+            metrics.remote_read_time.observe(t);
         }
     }
 }
