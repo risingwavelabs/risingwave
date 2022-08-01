@@ -12,44 +12,17 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::cmp::Ordering;
 use std::collections::BinaryHeap;
 use std::sync::Arc;
 
-use itertools::Itertools;
 use risingwave_common::array::{Array, ArrayBuilder, ArrayBuilderImpl, ArrayImpl, DataChunk, Row};
 use risingwave_common::error::{ErrorCode, Result};
 use risingwave_common::types::{DataType, ScalarImpl};
 use risingwave_common::util::encoding_for_comparison::{encode_row, is_type_encodable};
-use risingwave_common::util::sort_util::{compare_rows, OrderPair};
+use risingwave_common::util::sort_util::{DescOrderedRow, OrderPair};
 
+use crate::expr::ExpressionRef;
 use crate::vector_op::agg::aggregator::Aggregator;
-
-#[derive(Debug, Clone, PartialEq, Eq)]
-struct OrderableRow {
-    row: Row,
-    encoded_row: Option<Vec<u8>>,
-    order_pairs: Arc<Vec<OrderPair>>,
-}
-
-impl Ord for OrderableRow {
-    fn cmp(&self, other: &Self) -> Ordering {
-        let ord = if let (Some(encoded_lhs), Some(encoded_rhs)) =
-            (self.encoded_row.as_ref(), other.encoded_row.as_ref())
-        {
-            encoded_lhs.as_slice().cmp(encoded_rhs.as_slice())
-        } else {
-            compare_rows(&self.row, &other.row, &self.order_pairs).unwrap()
-        };
-        ord.reverse() // we have to reverse the order because BinaryHeap is a max-heap
-    }
-}
-
-impl PartialOrd for OrderableRow {
-    fn partial_cmp(&self, other: &Self) -> Option<Ordering> {
-        Some(self.cmp(other))
-    }
-}
 
 enum StringAggState {
     WithoutOrder {
@@ -57,25 +30,27 @@ enum StringAggState {
     },
     WithOrder {
         order_pairs: Arc<Vec<OrderPair>>,
-        min_heap: BinaryHeap<OrderableRow>,
+        min_heap: BinaryHeap<DescOrderedRow>,
         encodable: bool,
     },
 }
 
-// TODO(yuchao): support delimiter
 pub struct StringAgg {
     agg_col_idx: usize,
+    delimiter: ExpressionRef,
     state: StringAggState,
 }
 
 impl StringAgg {
     pub fn new(
         agg_col_idx: usize,
+        delimiter: ExpressionRef,
         order_pairs: Vec<OrderPair>,
         order_col_types: Vec<DataType>,
     ) -> Self {
         StringAgg {
             agg_col_idx,
+            delimiter,
             state: if order_pairs.is_empty() {
                 StringAggState::WithoutOrder { result: None }
             } else {
@@ -91,10 +66,24 @@ impl StringAgg {
         }
     }
 
+    fn eval_delimiter(expr: &ExpressionRef, row: &Row) -> Result<String> {
+        match expr.eval_row(row)? {
+            None => Ok("".to_string()),
+            Some(delim_str) => Ok(delim_str.into_utf8()),
+        }
+    }
+
     fn push_row(&mut self, s: &str, chunk: &DataChunk, row_id: usize) -> Result<()> {
         match &mut self.state {
             StringAggState::WithoutOrder { result } => match result {
-                Some(result) => result.push_str(s),
+                Some(result) => {
+                    let (row_ref, vis) = chunk.row_at(row_id)?;
+                    assert!(vis);
+                    let row = row_ref.to_owned_row();
+                    let delim = Self::eval_delimiter(&self.delimiter, &row)?;
+                    result.push_str(&delim);
+                    result.push_str(s);
+                }
                 None => {
                     *result = Some(s.to_string());
                 }
@@ -112,7 +101,7 @@ impl StringAgg {
                 } else {
                     None
                 };
-                min_heap.push(OrderableRow {
+                min_heap.push(DescOrderedRow {
                     row,
                     encoded_row,
                     order_pairs: order_pairs.clone(),
@@ -122,38 +111,44 @@ impl StringAgg {
         Ok(())
     }
 
-    fn get_result(&self) -> Option<String> {
+    fn get_result(&self) -> Result<Option<String>> {
         match &self.state {
-            StringAggState::WithoutOrder { result } => result.clone(),
+            StringAggState::WithoutOrder { result } => Ok(result.clone()),
             StringAggState::WithOrder {
                 order_pairs: _,
                 min_heap,
                 encodable: _,
             } => {
                 if min_heap.is_empty() {
-                    None
+                    Ok(None)
                 } else {
-                    Some(
-                        min_heap
-                            .clone()
-                            .into_iter_sorted()
-                            .map(|mut orow| match orow.row.0[self.agg_col_idx] {
-                                Some(ScalarImpl::Utf8(ref mut s)) => std::mem::take(s),
-                                _ => panic!("Expected Utf8"),
-                            })
-                            .join(""),
-                    )
+                    let mut result = String::new();
+                    let mut first = true;
+                    for orow in min_heap.clone().into_iter_sorted() {
+                        let mut row = orow.row;
+                        if !first {
+                            let delim = Self::eval_delimiter(&self.delimiter, &row)?;
+                            result.push_str(&delim);
+                        }
+                        let value = match row.0[self.agg_col_idx] {
+                            Some(ScalarImpl::Utf8(ref mut s)) => std::mem::take(s),
+                            _ => panic!("Expected Utf8"),
+                        };
+                        result.push_str(&value);
+                        first = false;
+                    }
+                    Ok(Some(result))
                 }
             }
         }
     }
 
-    fn get_result_and_reset(&mut self) -> Option<String> {
+    fn get_result_and_reset(&mut self) -> Result<Option<String>> {
         match &mut self.state {
             StringAggState::WithoutOrder { result } => {
                 let res = result.clone();
                 *result = None;
-                res
+                Ok(res)
             }
             StringAggState::WithOrder {
                 order_pairs: _,
@@ -161,17 +156,24 @@ impl StringAgg {
                 encodable: _,
             } => {
                 if min_heap.is_empty() {
-                    None
+                    Ok(None)
                 } else {
-                    Some(
-                        min_heap
-                            .drain_sorted()
-                            .map(|mut orow| match orow.row.0[self.agg_col_idx] {
-                                Some(ScalarImpl::Utf8(ref mut s)) => std::mem::take(s),
-                                _ => panic!("Expected Utf8"),
-                            })
-                            .join(""),
-                    )
+                    let mut result = String::new();
+                    let mut first = true;
+                    for orow in min_heap.drain_sorted() {
+                        let mut row = orow.row;
+                        if !first {
+                            let delim = Self::eval_delimiter(&self.delimiter, &row)?;
+                            result.push_str(&delim);
+                        }
+                        let value = match row.0[self.agg_col_idx] {
+                            Some(ScalarImpl::Utf8(ref mut s)) => std::mem::take(s),
+                            _ => panic!("Expected Utf8"),
+                        };
+                        result.push_str(&value);
+                        first = false;
+                    }
+                    Ok(Some(result))
                 }
             }
         }
@@ -225,7 +227,7 @@ impl Aggregator for StringAgg {
 
     fn output(&self, builder: &mut ArrayBuilderImpl) -> Result<()> {
         if let ArrayBuilderImpl::Utf8(builder) = builder {
-            let s = self.get_result();
+            let s = self.get_result()?;
             if let Some(s) = s {
                 builder.append(Some(&s))
             } else {
@@ -242,7 +244,7 @@ impl Aggregator for StringAgg {
 
     fn output_and_reset(&mut self, builder: &mut ArrayBuilderImpl) -> Result<()> {
         if let ArrayBuilderImpl::Utf8(builder) = builder {
-            let s = self.get_result_and_reset();
+            let s = self.get_result_and_reset()?;
             if let Some(s) = s {
                 builder.append(Some(&s))
             } else {
@@ -265,7 +267,12 @@ mod tests {
     use risingwave_common::util::sort_util::{OrderPair, OrderType};
 
     use super::*;
+    use crate::expr::{Expression, ExpressionRef, LiteralExpression};
     use crate::vector_op::agg::aggregator::Aggregator;
+
+    fn empty_delimiter() -> ExpressionRef {
+        Arc::from(LiteralExpression::new(DataType::Varchar, Some("".to_string().into())).boxed())
+    }
 
     #[test]
     fn test_basic_string_agg() -> Result<()> {
@@ -276,7 +283,7 @@ mod tests {
              ccc
              ddd",
         );
-        let mut agg = StringAgg::new(0, vec![], vec![]);
+        let mut agg = StringAgg::new(0, empty_delimiter(), vec![], vec![]);
         let mut builder = ArrayBuilderImpl::Utf8(Utf8ArrayBuilder::new(0));
         agg.update_multi(&chunk, 0, chunk.cardinality())?;
         agg.output(&mut builder)?;
@@ -300,6 +307,7 @@ mod tests {
         );
         let mut agg = StringAgg::new(
             0,
+            empty_delimiter(),
             vec![
                 OrderPair::new(1, OrderType::Ascending),
                 OrderPair::new(2, OrderType::Descending),

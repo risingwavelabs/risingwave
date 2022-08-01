@@ -13,11 +13,11 @@
 // limitations under the License.
 
 use std::fmt::Debug;
+use std::future::Future;
 use std::marker::PhantomData;
 use std::ops::Deref;
 use std::sync::Arc;
 
-use async_trait::async_trait;
 use bytes::Bytes;
 use risingwave_hummock_sdk::CompactionGroupId;
 use tokio::sync::mpsc;
@@ -80,6 +80,7 @@ pub struct SharedBufferBatch {
     inner: Arc<SharedBufferBatchInner>,
     epoch: HummockEpoch,
     compaction_group_id: CompactionGroupId,
+    pub table_id: u32,
 }
 
 impl SharedBufferBatch {
@@ -88,8 +89,15 @@ impl SharedBufferBatch {
         epoch: HummockEpoch,
         buffer_release_notifier: mpsc::UnboundedSender<SharedBufferEvent>,
         compaction_group_id: CompactionGroupId,
+        table_id: u32,
     ) -> Self {
         let size: usize = Self::measure_batch_size(&sorted_items);
+
+        #[cfg(debug_assertions)]
+        {
+            Self::check_table_prefix(table_id, &sorted_items)
+        }
+
         Self {
             inner: Arc::new(SharedBufferBatchInner {
                 payload: sorted_items,
@@ -98,6 +106,7 @@ impl SharedBufferBatch {
             }),
             epoch,
             compaction_group_id,
+            table_id,
         }
     }
 
@@ -109,7 +118,7 @@ impl SharedBufferBatch {
                 k.len() + {
                     match v {
                         HummockValue::Put(val) => val.len(),
-                        HummockValue::Delete() => 0,
+                        HummockValue::Delete => 0,
                     }
                 }
             })
@@ -171,6 +180,22 @@ impl SharedBufferBatch {
     pub fn compaction_group_id(&self) -> CompactionGroupId {
         self.compaction_group_id
     }
+
+    #[cfg(debug_assertions)]
+    fn check_table_prefix(check_table_id: u32, sorted_items: &Vec<SharedBufferItem>) {
+        use risingwave_hummock_sdk::key::table_prefix;
+
+        if check_table_id == 0 {
+            // for unit-test
+            return;
+        }
+
+        let prefix = table_prefix(check_table_id);
+
+        for (key, _value) in sorted_items {
+            assert!(prefix == key[0..prefix.len()]);
+        }
+    }
 }
 
 pub struct SharedBufferBatchIterator<D: HummockIteratorDirection> {
@@ -198,14 +223,19 @@ impl<D: HummockIteratorDirection> SharedBufferBatchIterator<D> {
     }
 }
 
-#[async_trait]
 impl<D: HummockIteratorDirection> HummockIterator for SharedBufferBatchIterator<D> {
     type Direction = D;
 
-    async fn next(&mut self) -> HummockResult<()> {
-        assert!(self.is_valid());
-        self.current_idx += 1;
-        Ok(())
+    type NextFuture<'a> = impl Future<Output = HummockResult<()>> + 'a;
+    type RewindFuture<'a> = impl Future<Output = HummockResult<()>> + 'a;
+    type SeekFuture<'a> = impl Future<Output = HummockResult<()>> + 'a;
+
+    fn next(&mut self) -> Self::NextFuture<'_> {
+        async move {
+            assert!(self.is_valid());
+            self.current_idx += 1;
+            Ok(())
+        }
     }
 
     fn key(&self) -> &[u8] {
@@ -220,55 +250,58 @@ impl<D: HummockIteratorDirection> HummockIterator for SharedBufferBatchIterator<
         self.current_idx < self.inner.len()
     }
 
-    async fn rewind(&mut self) -> HummockResult<()> {
-        self.current_idx = 0;
-        Ok(())
+    fn rewind(&mut self) -> Self::RewindFuture<'_> {
+        async move {
+            self.current_idx = 0;
+            Ok(())
+        }
     }
 
-    async fn seek(&mut self, key: &[u8]) -> HummockResult<()> {
-        // Perform binary search on user key because the items in SharedBufferBatch is ordered by
-        // user key.
-        let partition_point = self
-            .inner
-            .binary_search_by(|probe| key::user_key(&probe.0).cmp(key::user_key(key)));
-        let seek_key_epoch = key::get_epoch(key);
-        match D::direction() {
-            DirectionEnum::Forward => {
-                match partition_point {
-                    Ok(i) => {
-                        self.current_idx = i;
-                        // The user key part must be the same if we reach here.
-                        let current_key_epoch = key::get_epoch(&self.inner[i].0);
-                        if current_key_epoch > seek_key_epoch {
-                            // Move onto the next key for forward iteration if the current key has a
-                            // larger epoch
-                            self.current_idx += 1;
+    fn seek<'a>(&'a mut self, key: &'a [u8]) -> Self::SeekFuture<'a> {
+        async move {
+            // Perform binary search on user key because the items in SharedBufferBatch is ordered
+            // by user key.
+            let partition_point = self
+                .inner
+                .binary_search_by(|probe| key::user_key(&probe.0).cmp(key::user_key(key)));
+            let seek_key_epoch = key::get_epoch(key);
+            match D::direction() {
+                DirectionEnum::Forward => {
+                    match partition_point {
+                        Ok(i) => {
+                            self.current_idx = i;
+                            // The user key part must be the same if we reach here.
+                            let current_key_epoch = key::get_epoch(&self.inner[i].0);
+                            if current_key_epoch > seek_key_epoch {
+                                // Move onto the next key for forward iteration if the current key
+                                // has a larger epoch
+                                self.current_idx += 1;
+                            }
                         }
+                        Err(i) => self.current_idx = i,
                     }
-                    Err(i) => self.current_idx = i,
+                }
+                DirectionEnum::Backward => {
+                    match partition_point {
+                        Ok(i) => {
+                            self.current_idx = self.inner.len() - i - 1;
+                            // The user key part must be the same if we reach here.
+                            let current_key_epoch = key::get_epoch(&self.inner[i].0);
+                            if current_key_epoch < seek_key_epoch {
+                                // Move onto the prev key for backward iteration if the current key
+                                // has a smaller epoch
+                                self.current_idx += 1;
+                            }
+                        }
+                        // Seek to one item before the seek partition_point:
+                        // If i == 0, the iterator will be invalidated with self.current_idx ==
+                        // self.inner.len().
+                        Err(i) => self.current_idx = self.inner.len() - i,
+                    }
                 }
             }
-            DirectionEnum::Backward => {
-                match partition_point {
-                    Ok(i) => {
-                        self.current_idx = self.inner.len() - i - 1;
-                        // The user key part must be the same if we reach here.
-                        let current_key_epoch = key::get_epoch(&self.inner[i].0);
-                        if current_key_epoch < seek_key_epoch {
-                            // Move onto the prev key for backward iteration if the current key has
-                            // a smaller epoch
-                            self.current_idx += 1;
-                        }
-                    }
-                    // Seek to one item before the seek partition_point:
-                    // If i == 0, the iterator will be invalidated with self.current_idx ==
-                    // self.inner.len().
-                    Err(i) => self.current_idx = self.inner.len() - i,
-                }
-            }
+            Ok(())
         }
-
-        Ok(())
     }
 }
 
@@ -313,6 +346,7 @@ mod tests {
             epoch,
             mpsc::unbounded_channel().0,
             StaticCompactionGroupId::StateDefault.into(),
+            Default::default(),
         );
 
         // Sketch
@@ -390,6 +424,7 @@ mod tests {
             epoch,
             mpsc::unbounded_channel().0,
             StaticCompactionGroupId::StateDefault.into(),
+            Default::default(),
         );
 
         // FORWARD: Seek to a key < 1st key, expect all three items to return

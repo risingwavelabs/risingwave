@@ -32,8 +32,10 @@ use tokio::task::JoinHandle;
 
 use self::shared_buffer_batch::SharedBufferBatch;
 use crate::hummock::iterator::{
-    BoxedHummockIterator, OrderedMergeIteratorInner, UnorderedMergeIteratorInner,
+    HummockIteratorDirection, HummockIteratorUnion, OrderedMergeIteratorInner,
+    UnorderedMergeIteratorInner,
 };
+use crate::hummock::shared_buffer::shared_buffer_batch::SharedBufferBatchIterator;
 use crate::hummock::shared_buffer::shared_buffer_uploader::UploadTaskPayload;
 use crate::hummock::sstable::SstableIteratorReadOptions;
 use crate::hummock::state_store::HummockIteratorType;
@@ -103,47 +105,64 @@ pub(crate) fn to_order_sorted(
     order_indexed_data.into_values().rev().collect()
 }
 
+#[allow(type_alias_bounds)]
+pub type UncommittedDataIteratorType<
+    D: HummockIteratorDirection,
+    I: SstableIteratorType<Direction = D>,
+> = HummockIteratorUnion<D, SharedBufferBatchIterator<D>, I>;
+
+#[allow(type_alias_bounds)]
+pub type SharedBufferIteratorType<
+    D: HummockIteratorDirection,
+    I: SstableIteratorType<Direction = D>,
+> = OrderedMergeIteratorInner<
+    HummockIteratorUnion<
+        D,
+        UncommittedDataIteratorType<D, I>,
+        UnorderedMergeIteratorInner<UncommittedDataIteratorType<D, I>>,
+    >,
+>;
+
 pub(crate) async fn build_ordered_merge_iter<T: HummockIteratorType>(
     uncommitted_data: &OrderSortedUncommittedData,
     sstable_store: Arc<SstableStore>,
     stats: Arc<StateStoreMetrics>,
     local_stats: &mut StoreLocalStatistic,
     read_options: Arc<SstableIteratorReadOptions>,
-) -> HummockResult<BoxedHummockIterator<T::Direction>> {
+) -> HummockResult<SharedBufferIteratorType<T::Direction, T::SstableIteratorType>> {
     let mut ordered_iters = Vec::with_capacity(uncommitted_data.len());
     for data_list in uncommitted_data {
         let mut data_iters = Vec::new();
         for data in data_list {
             match data {
                 UncommittedData::Batch(batch) => {
-                    data_iters.push(Box::new(batch.clone().into_directed_iter::<T::Direction>())
-                        as BoxedHummockIterator<T::Direction>);
+                    data_iters.push(UncommittedDataIteratorType::First(
+                        batch.clone().into_directed_iter::<T::Direction>(),
+                    ));
                 }
                 UncommittedData::Sst((_, table_info)) => {
                     let table = sstable_store.sstable(table_info.id, local_stats).await?;
-                    data_iters.push(Box::new(T::SstableIteratorType::create(
-                        table,
-                        sstable_store.clone(),
-                        read_options.clone(),
-                    )));
+                    data_iters.push(UncommittedDataIteratorType::Second(
+                        T::SstableIteratorType::create(
+                            table,
+                            sstable_store.clone(),
+                            read_options.clone(),
+                        ),
+                    ));
                 }
             }
         }
         if data_iters.is_empty() {
             continue;
         } else if data_iters.len() == 1 {
-            ordered_iters.push(data_iters.pop().unwrap());
+            ordered_iters.push(HummockIteratorUnion::First(data_iters.pop().unwrap()));
         } else {
-            ordered_iters.push(Box::new(UnorderedMergeIteratorInner::<T::Direction>::new(
-                data_iters,
-                stats.clone(),
-            )) as BoxedHummockIterator<T::Direction>);
+            ordered_iters.push(HummockIteratorUnion::Second(
+                UnorderedMergeIteratorInner::new(data_iters, stats.clone()),
+            ));
         }
     }
-    Ok(Box::new(OrderedMergeIteratorInner::<T::Direction>::new(
-        ordered_iters,
-        stats.clone(),
-    )))
+    Ok(OrderedMergeIteratorInner::new(ordered_iters, stats.clone()))
 }
 
 #[derive(Debug)]
@@ -545,6 +564,7 @@ mod tests {
             epoch,
             mpsc::unbounded_channel().0,
             StaticCompactionGroupId::StateDefault.into(),
+            Default::default(),
         );
         if is_replicate {
             shared_buffer.replicate_batch(batch.clone());

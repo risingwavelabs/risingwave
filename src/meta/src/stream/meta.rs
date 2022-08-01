@@ -20,17 +20,18 @@ use itertools::Itertools;
 use risingwave_common::catalog::TableId;
 use risingwave_common::error::ErrorCode::InternalError;
 use risingwave_common::error::{Result, RwError};
-use risingwave_common::try_match_expand;
 use risingwave_common::types::{ParallelUnitId, VIRTUAL_NODE_COUNT};
 use risingwave_common::util::compress::decompress_data;
+use risingwave_common::{bail, try_match_expand};
 use risingwave_pb::common::{ParallelUnit, WorkerNode};
 use risingwave_pb::meta::table_fragments::ActorState;
 use risingwave_pb::stream_plan::{Dispatcher, FragmentType, StreamActor};
 use tokio::sync::RwLock;
 
+use crate::barrier::Reschedule;
 use crate::cluster::WorkerId;
 use crate::manager::{HashMappingManagerRef, MetaSrvEnv};
-use crate::model::{ActorId, MetadataModel, TableFragments, Transactional};
+use crate::model::{ActorId, FragmentId, MetadataModel, TableFragments, Transactional};
 use crate::storage::{MetaStore, Transaction};
 use crate::stream::record_table_vnode_mappings;
 
@@ -283,32 +284,32 @@ where
     /// collected
     pub async fn load_all_actors(
         &self,
-        check_state: impl Fn(ActorState, &TableId) -> bool,
+        check_state: impl Fn(ActorState, TableId, ActorId) -> bool,
     ) -> ActorInfos {
         let mut actor_maps = HashMap::new();
-        let mut source_actor_ids = HashMap::new();
+        let mut source_actor_maps = HashMap::new();
 
         let map = &self.core.read().await.table_fragments;
         for fragments in map.values() {
-            for (node_id, actor_states) in fragments.node_actor_states() {
-                for actor_state in actor_states {
-                    if check_state(actor_state.1, &fragments.table_id()) {
+            for (worker_id, actor_states) in fragments.worker_actor_states() {
+                for (actor_id, actor_state) in actor_states {
+                    if check_state(actor_state, fragments.table_id(), actor_id) {
                         actor_maps
-                            .entry(node_id)
+                            .entry(worker_id)
                             .or_insert_with(Vec::new)
-                            .push(actor_state.0);
+                            .push(actor_id);
                     }
                 }
             }
 
             let source_actors = fragments.node_source_actor_states();
-            for (&node_id, actor_states) in &source_actors {
-                for actor_state in actor_states {
-                    if check_state(actor_state.1, &fragments.table_id()) {
-                        source_actor_ids
-                            .entry(node_id)
+            for (worker_id, actor_states) in source_actors {
+                for (actor_id, actor_state) in actor_states {
+                    if check_state(actor_state, fragments.table_id(), actor_id) {
+                        source_actor_maps
+                            .entry(worker_id)
                             .or_insert_with(Vec::new)
-                            .push(actor_state.0);
+                            .push(actor_id);
                     }
                 }
             }
@@ -316,7 +317,7 @@ where
 
         ActorInfos {
             actor_maps,
-            source_actor_maps: source_actor_ids,
+            source_actor_maps,
         }
     }
 
@@ -383,7 +384,7 @@ where
 
         let map = &self.core.read().await.table_fragments;
         for fragments in map.values() {
-            for (node_id, actor_ids) in fragments.node_actors(include_inactive) {
+            for (node_id, actor_ids) in fragments.worker_actors(include_inactive) {
                 let node_actor_ids = actor_maps.entry(node_id).or_insert_with(Vec::new);
                 node_actor_ids.extend(actor_ids);
             }
@@ -400,13 +401,86 @@ where
             .collect::<HashSet<_>>()
     }
 
+    /// Get the actor ids of the fragment with `fragment_id` with `Running` status.
+    pub async fn get_running_actors_of_fragment(
+        &self,
+        fragment_id: FragmentId,
+    ) -> Result<HashSet<ActorId>> {
+        let map = &self.core.read().await.table_fragments;
+
+        for table_fragment in map.values() {
+            if let Some(fragment) = table_fragment.fragments.get(&fragment_id) {
+                let running_actor_ids = fragment
+                    .actors
+                    .iter()
+                    .map(|a| a.actor_id)
+                    .filter(|a| table_fragment.actor_status[a].state == ActorState::Running as i32)
+                    .collect();
+                return Ok(running_actor_ids);
+            }
+        }
+
+        bail!("fragment not found: {}", fragment_id)
+    }
+
+    /// Apply `Reschedule`s to fragments.
+    pub async fn apply_reschedules(
+        &self,
+        mut reschedules: HashMap<FragmentId, Reschedule>,
+    ) -> Result<()> {
+        let map = &mut self.core.write().await.table_fragments;
+        let mut transaction = Transaction::default();
+
+        for table_fragment in map.values_mut() {
+            // Takes out the reschedules of the fragments in this table.
+            let reschedules = reschedules
+                .drain_filter(|fragment_id, _| table_fragment.fragments.contains_key(fragment_id))
+                .collect_vec();
+            let updated = !reschedules.is_empty();
+
+            for (fragment_id, reschedule) in reschedules {
+                let fragment = table_fragment.fragments.get_mut(&fragment_id).unwrap();
+
+                // Add actors to this fragment: set the state to `Running`.
+                // TODO: update vnode mapping for actors.
+                for actor_id in reschedule.added_actors {
+                    table_fragment
+                        .actor_status
+                        .get_mut(&actor_id)
+                        .unwrap()
+                        .set_state(ActorState::Running);
+                }
+
+                // Remove actors from this fragment.
+                let removed_actors: HashSet<_> = reschedule.removed_actors.into_iter().collect();
+                fragment
+                    .actors
+                    .retain(|a| !removed_actors.contains(&a.actor_id));
+                for actor_id in removed_actors {
+                    table_fragment.actor_status.remove(&actor_id);
+                }
+
+                // TODO: update merger at downstream and dispatcher at upstream in meta store.
+            }
+
+            if updated {
+                table_fragment.upsert_in_transaction(&mut transaction)?;
+            }
+        }
+
+        assert!(reschedules.is_empty(), "all reschedules must be applied");
+
+        self.meta_store.txn(transaction).await?;
+        Ok(())
+    }
+
     pub async fn table_node_actors(
         &self,
         table_id: &TableId,
     ) -> Result<BTreeMap<WorkerId, Vec<ActorId>>> {
         let map = &self.core.read().await.table_fragments;
         match map.get(table_id) {
-            Some(table_fragment) => Ok(table_fragment.node_actor_ids()),
+            Some(table_fragment) => Ok(table_fragment.worker_actor_ids()),
             None => Err(RwError::from(InternalError(format!(
                 "table_fragment not exist: id={}",
                 table_id
@@ -448,7 +522,7 @@ where
             match map.get(table_id) {
                 Some(table_fragment) => {
                     info.table_node_actors
-                        .insert(*table_id, table_fragment.node_actor_ids());
+                        .insert(*table_id, table_fragment.worker_actor_ids());
                     info.table_sink_actor_ids
                         .insert(*table_id, table_fragment.sink_actor_ids());
                 }
@@ -487,7 +561,7 @@ where
         Ok(info)
     }
 
-    pub async fn get_tables_node_actors(
+    pub async fn get_tables_worker_actors(
         &self,
         table_ids: &HashSet<TableId>,
     ) -> Result<HashMap<TableId, BTreeMap<WorkerId, Vec<ActorId>>>> {
@@ -497,7 +571,7 @@ where
         for table_id in table_ids {
             match map.get(table_id) {
                 Some(table_fragment) => {
-                    info.insert(*table_id, table_fragment.node_actor_ids());
+                    info.insert(*table_id, table_fragment.worker_actor_ids());
                 }
                 None => {
                     return Err(RwError::from(InternalError(format!(

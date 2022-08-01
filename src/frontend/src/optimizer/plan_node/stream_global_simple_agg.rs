@@ -20,7 +20,7 @@ use risingwave_pb::stream_plan::stream_node::NodeBody as ProstStreamNode;
 
 use super::logical_agg::PlanAggCall;
 use super::{LogicalAgg, PlanBase, PlanRef, PlanTreeNodeUnary, ToStreamProst};
-use crate::optimizer::plan_node::PlanAggCallVerboseDisplay;
+use crate::optimizer::plan_node::PlanAggCallDisplay;
 use crate::optimizer::property::Distribution;
 
 #[derive(Debug, Clone)]
@@ -49,8 +49,8 @@ impl StreamGlobalSimpleAgg {
         self.logical.agg_calls()
     }
 
-    pub fn agg_calls_verbose_display(&self) -> Vec<PlanAggCallVerboseDisplay> {
-        self.logical.agg_calls_verbose_display()
+    pub fn agg_calls_verbose_display(&self) -> Vec<PlanAggCallDisplay> {
+        self.logical.agg_calls_display()
     }
 }
 
@@ -79,7 +79,7 @@ impl_plan_tree_node_for_unary! { StreamGlobalSimpleAgg }
 impl ToStreamProst for StreamGlobalSimpleAgg {
     fn to_stream_prost_body(&self) -> ProstStreamNode {
         use risingwave_pb::stream_plan::*;
-        let (internal_tables, column_mapping) = self.logical.infer_internal_table_catalog();
+        let (internal_tables, column_mappings) = self.logical.infer_internal_table_catalog();
         ProstStreamNode::GlobalSimpleAgg(SimpleAggNode {
             agg_calls: self
                 .agg_calls()
@@ -102,7 +102,7 @@ impl ToStreamProst for StreamGlobalSimpleAgg {
                     )
                 })
                 .collect_vec(),
-            column_mappings: column_mapping
+            column_mappings: column_mappings
                 .into_iter()
                 .map(|v| ColumnMapping {
                     indices: v.iter().map(|x| *x as u32).collect(),

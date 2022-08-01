@@ -38,11 +38,9 @@ mod tests {
     use risingwave_pb::hummock::{HummockVersion, TableOption};
     use risingwave_rpc_client::HummockMetaClient;
     use risingwave_storage::hummock::compaction_group_client::DummyCompactionGroupClient;
-    use risingwave_storage::hummock::compactor::{
-        get_remote_sstable_id_generator, Compactor, CompactorContext,
-    };
+    use risingwave_storage::hummock::compactor::{Compactor, CompactorContext};
     use risingwave_storage::hummock::iterator::test_utils::mock_sstable_store;
-    use risingwave_storage::hummock::HummockStorage;
+    use risingwave_storage::hummock::{HummockStorage, MemoryLimiter};
     use risingwave_storage::monitor::{StateStoreMetrics, StoreLocalStatistic};
     use risingwave_storage::storage_value::StorageValue;
     use risingwave_storage::store::{ReadOptions, WriteOptions};
@@ -121,9 +119,9 @@ mod tests {
             hummock_meta_client: hummock_meta_client.clone(),
             stats: Arc::new(StateStoreMetrics::unused()),
             is_share_buffer_compact: false,
-            sstable_id_generator: get_remote_sstable_id_generator(hummock_meta_client.clone()),
             compaction_executor: None,
             table_id_to_slice_transform: Arc::new(RwLock::new(HashMap::new())),
+            memory_limiter: Arc::new(MemoryLimiter::new(1024 * 1024 * 128)),
         }
     }
 
@@ -346,19 +344,20 @@ mod tests {
             hummock_meta_client: hummock_meta_client.clone(),
             stats: Arc::new(StateStoreMetrics::unused()),
             is_share_buffer_compact: false,
-            sstable_id_generator: get_remote_sstable_id_generator(hummock_meta_client.clone()),
             compaction_executor: None,
             table_id_to_slice_transform: Arc::new(RwLock::new(HashMap::new())),
+            memory_limiter: Arc::new(MemoryLimiter::new(1024 * 1024 * 128)),
         };
 
         // 1. add sstables
         let val = Bytes::from(b"0"[..].repeat(1 << 10)); // 1024 Byte value
 
-        let keyspace = Keyspace::table_root(storage.clone(), &TableId::new(1));
+        let existing_table_id: u32 = 1;
+        let keyspace = Keyspace::table_root(storage.clone(), &TableId::new(existing_table_id));
         // Only registered table_ids are accepted in commit_epoch
         register_table_ids_to_compaction_group(
             hummock_manager_ref.compaction_group_manager_ref_for_test(),
-            &[keyspace.table_id().table_id],
+            &[existing_table_id],
             StaticCompactionGroupId::StateDefault.into(),
         )
         .await;
@@ -369,7 +368,7 @@ mod tests {
             epoch += 1;
             let mut write_batch = keyspace.state_store().start_write_batch(WriteOptions {
                 epoch,
-                table_id: keyspace.table_id(),
+                table_id: existing_table_id.into(),
             });
             let mut local = write_batch.prefixify(&keyspace);
 
@@ -385,7 +384,7 @@ mod tests {
         // Mimic dropping table
         unregister_table_ids_from_compaction_group(
             hummock_manager_ref.compaction_group_manager_ref_for_test(),
-            &[keyspace.table_id().table_id],
+            &[existing_table_id],
         )
         .await;
 
@@ -447,9 +446,9 @@ mod tests {
             hummock_meta_client: hummock_meta_client.clone(),
             stats: Arc::new(StateStoreMetrics::unused()),
             is_share_buffer_compact: false,
-            sstable_id_generator: get_remote_sstable_id_generator(hummock_meta_client.clone()),
             compaction_executor: None,
             table_id_to_slice_transform: Arc::new(RwLock::new(HashMap::new())),
+            memory_limiter: Arc::new(MemoryLimiter::new(1024 * 1024 * 128)),
         };
 
         // 1. add sstables
@@ -468,14 +467,14 @@ mod tests {
             let keyspace = Keyspace::table_root(storage.clone(), &TableId::new(table_id));
             register_table_ids_to_compaction_group(
                 hummock_manager_ref.compaction_group_manager_ref_for_test(),
-                &[keyspace.table_id().table_id],
+                &[table_id],
                 StaticCompactionGroupId::StateDefault.into(),
             )
             .await;
             epoch += 1;
             let mut write_batch = keyspace.state_store().start_write_batch(WriteOptions {
                 epoch,
-                table_id: keyspace.table_id(),
+                table_id: TableId::from(table_id),
             });
             let mut local = write_batch.prefixify(&keyspace);
 
@@ -604,9 +603,9 @@ mod tests {
             hummock_meta_client: hummock_meta_client.clone(),
             stats: Arc::new(StateStoreMetrics::unused()),
             is_share_buffer_compact: false,
-            sstable_id_generator: get_remote_sstable_id_generator(hummock_meta_client.clone()),
             compaction_executor: None,
             table_id_to_slice_transform: Arc::new(RwLock::new(HashMap::new())),
+            memory_limiter: Arc::new(MemoryLimiter::new(1024 * 1024 * 128)),
         };
 
         // 1. add sstables
@@ -621,7 +620,7 @@ mod tests {
         let keyspace = Keyspace::table_root(storage.clone(), &TableId::new(existing_table_id));
         register_table_ids_to_compaction_group(
             hummock_manager_ref.compaction_group_manager_ref_for_test(),
-            &[keyspace.table_id().table_id],
+            &[existing_table_id],
             StaticCompactionGroupId::StateDefault.into(),
         )
         .await;
@@ -631,7 +630,7 @@ mod tests {
             epoch_set.insert(epoch);
             let mut write_batch = keyspace.state_store().start_write_batch(WriteOptions {
                 epoch,
-                table_id: keyspace.table_id(),
+                table_id: TableId::from(existing_table_id),
             });
             let mut local = write_batch.prefixify(&keyspace);
 

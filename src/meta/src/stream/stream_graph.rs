@@ -578,8 +578,17 @@ impl StreamGraphBuilder {
                     }
 
                     NodeBody::Arrange(node) => {
-                        node.table_id += table_id_offset;
-                        check_and_fill_internal_table(node.table_id, None);
+                        if let Some(table) = &mut node.table {
+                            table.id += table_id_offset;
+                            table.schema_id = ctx.schema_id;
+                            table.database_id = ctx.database_id;
+                            table.name = generate_intertable_name_with_type(
+                                &ctx.mview_name,
+                                table.id,
+                                "ArrangeNode",
+                            );
+                            check_and_fill_internal_table(table.id, Some(table.clone()));
+                        }
                     }
 
                     NodeBody::HashAgg(node) => {
@@ -600,23 +609,19 @@ impl StreamGraphBuilder {
 
                     NodeBody::TopN(node) => {
                         node.table_id_l += table_id_offset;
-                        node.table_id_m += table_id_offset;
                         node.table_id_h += table_id_offset;
 
                         // TODO add catalog::Table to TopNNode
                         check_and_fill_internal_table(node.table_id_l, None);
-                        check_and_fill_internal_table(node.table_id_m, None);
                         check_and_fill_internal_table(node.table_id_h, None);
                     }
 
                     NodeBody::AppendOnlyTopN(node) => {
                         node.table_id_l += table_id_offset;
-                        node.table_id_m += table_id_offset;
                         node.table_id_h += table_id_offset;
 
                         // TODO add catalog::Table to AppendOnlyTopN
                         check_and_fill_internal_table(node.table_id_l, None);
-                        check_and_fill_internal_table(node.table_id_m, None);
                         check_and_fill_internal_table(node.table_id_h, None);
                     }
 
@@ -767,7 +772,7 @@ impl BuildActorGraphState {
 /// [`ActorGraphBuilder`] generates the proto for interconnected actors for a streaming pipeline.
 pub struct ActorGraphBuilder {
     /// GlobalFragmentId -> parallel_degree
-    parallelisms: Option<HashMap<FragmentId, u32>>,
+    parallelisms: HashMap<FragmentId, u32>,
 
     fragment_graph: StreamFragmentGraph,
 }
@@ -776,6 +781,7 @@ impl ActorGraphBuilder {
     pub async fn new<S>(
         id_gen_manager: IdGeneratorManagerRef<S>,
         fragment_graph: &StreamFragmentGraphProto,
+        default_parallelism: u32,
         ctx: &mut CreateMaterializedViewContext,
     ) -> Result<Self>
     where
@@ -801,9 +807,26 @@ impl ActorGraphBuilder {
             .await? as _;
         ctx.table_id_offset = start_table_id;
 
+        let fragment_graph = StreamFragmentGraph::from_protobuf(fragment_graph.clone(), offset);
+
+        // TODO(Kexiang): now simply use Count(ParallelUnit) as parallelism of each fragment
+        let parallelisms: HashMap<FragmentId, u32> = fragment_graph
+            .fragments()
+            .iter()
+            .map(|(id, fragment)| {
+                let id = id.as_global_id();
+                let parallel_degree = if fragment.is_singleton {
+                    1
+                } else {
+                    default_parallelism
+                };
+                (id, parallel_degree)
+            })
+            .collect();
+
         Ok(Self {
-            fragment_graph: StreamFragmentGraph::from_protobuf(fragment_graph.clone(), offset),
-            parallelisms: None,
+            parallelisms,
+            fragment_graph,
         })
     }
 
@@ -811,23 +834,13 @@ impl ActorGraphBuilder {
         &mut self,
         id_gen_manager: IdGeneratorManagerRef<S>,
         fragment_manager: FragmentManagerRef<S>,
-        parallelisms: HashMap<FragmentId, u32>,
         ctx: &mut CreateMaterializedViewContext,
     ) -> Result<BTreeMap<FragmentId, Fragment>>
     where
         S: MetaStore,
     {
-        self.parallelisms = Some(parallelisms);
         self.generate_graph_inner(id_gen_manager, fragment_manager, ctx)
             .await
-    }
-
-    pub fn list_fragment_ids(&self) -> Vec<(FragmentId, bool)> {
-        self.fragment_graph
-            .fragments()
-            .iter()
-            .map(|(id, fragment)| (id.as_global_id(), fragment.is_singleton))
-            .collect_vec()
     }
 
     /// Build a stream graph by duplicating each fragment as parallel actors.
@@ -885,7 +898,7 @@ impl ActorGraphBuilder {
                     fragment_id,
                     Fragment {
                         fragment_id,
-                        fragment_type: fragment.fragment_type as i32,
+                        fragment_type: fragment.fragment_type,
                         distribution_type: if fragment.is_singleton {
                             FragmentDistributionType::Single
                         } else {
@@ -959,8 +972,6 @@ impl ActorGraphBuilder {
 
         let parallel_degree = self
             .parallelisms
-            .as_ref()
-            .unwrap()
             .get(&fragment_id.as_global_id())
             .unwrap()
             .to_owned();
@@ -999,7 +1010,7 @@ impl ActorGraphBuilder {
                         dispatch_edge.same_worker_node,
                     );
                 }
-                DispatcherType::Invalid => unreachable!(),
+                DispatcherType::Unspecified => unreachable!(),
             }
         }
 

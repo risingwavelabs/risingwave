@@ -99,8 +99,9 @@ message ActorMapping {
 // todo: StreamSourceNode or TableSourceNode
 message SourceNode {
   enum SourceType {
-    TABLE = 0;
-    SOURCE = 1;
+    UNSPECIFIED = 0;
+    TABLE = 1;
+    SOURCE = 2;
   }
   uint32 table_id = 1;
   repeated int32 column_ids = 2;
@@ -131,9 +132,9 @@ message FilterNode {
 message MaterializeNode {
   uint32 table_id = 1;
   // Column indexes and orders of primary key
-  repeated plan_common.ColumnOrder column_orders = 3;
+  repeated plan_common.ColumnOrder column_orders = 2;
   // Used for internal table states.
-  catalog.Table table = 4;
+  catalog.Table table = 3;
 }
 
 // Remark by Yanghao: for both local and global we use the same node in the protobuf.
@@ -170,8 +171,7 @@ message TopNNode {
   repeated uint32 distribution_key = 4;
   // Used for internal table states
   uint32 table_id_l = 5;
-  uint32 table_id_m = 6;
-  uint32 table_id_h = 7;
+  uint32 table_id_h = 6;
 }
 
 message HashJoinNode {
@@ -264,6 +264,10 @@ message ChainNode {
   bool disable_rearrange = 4;
   // Whether to place this chain on the same worker node as upstream actors.
   bool same_worker_node = 5;
+  // Whether the upstream materialize is and this chain should be a singleton.
+  // FIXME: This is a workaround for fragmenter since the distribution info will be lost if there's only one
+  // fragment in the downstream mview. Remove this when we refactor the fragmenter.
+  bool is_singleton = 6;
 }
 
 // BatchPlanNode is used for mv on mv snapshot read.
@@ -285,12 +289,12 @@ message ArrangementInfo {
 // Special node for shared state, which will only be produced in fragmenter. ArrangeNode will
 // produce a special Materialize executor, which materializes data for downstream to query.
 message ArrangeNode {
-  // Table Id of the arrangement
-  uint32 table_id = 2;
   // Info about the arrangement
-  ArrangementInfo table_info = 3;
+  ArrangementInfo table_info = 1;
   // Hash key of the materialize node, which is a subset of pk.
-  repeated uint32 distribution_key = 4;
+  repeated uint32 distribution_key = 2;
+  // Used for internal table states.
+  catalog.Table table = 3;
 }
 
 // Special node for shared state. LookupNode will join an arrangement with a stream.
@@ -376,7 +380,7 @@ message StreamNode {
 }
 
 enum DispatcherType {
-  INVALID = 0;
+  UNSPECIFIED = 0;
   // Dispatch by hash key, hashed by consistent hash.
   HASH = 1;
   // Broadcast to all downstreams.
@@ -433,9 +437,10 @@ message StreamActor {
 }
 
 enum FragmentType {
-  SOURCE = 0;
-  SINK = 1;
-  OTHERS = 2;
+  FRAGMENT_UNSPECIFIED = 0;
+  OTHERS = 1;
+  SOURCE = 2;
+  SINK = 3;
 }
 
 message StreamFragmentGraph {

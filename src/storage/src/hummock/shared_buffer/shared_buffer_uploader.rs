@@ -13,23 +13,20 @@
 // limitations under the License.
 
 use std::collections::HashMap;
-use std::sync::atomic::AtomicU64;
-use std::sync::atomic::Ordering::Relaxed;
 use std::sync::Arc;
 
-use futures::FutureExt;
 use parking_lot::RwLock;
 use risingwave_common::config::StorageConfig;
 use risingwave_hummock_sdk::slice_transform::SliceTransformImpl;
-use risingwave_hummock_sdk::{get_local_sst_id, HummockEpoch, LocalSstableInfo};
+use risingwave_hummock_sdk::{HummockEpoch, LocalSstableInfo};
 use risingwave_pb::hummock::SstableInfo;
 use risingwave_rpc_client::HummockMetaClient;
 
 use crate::hummock::compaction_executor::CompactionExecutor;
-use crate::hummock::compactor::{get_remote_sstable_id_generator, Compactor, CompactorContext};
+use crate::hummock::compactor::{Compactor, CompactorContext};
 use crate::hummock::conflict_detector::ConflictDetector;
 use crate::hummock::shared_buffer::OrderSortedUncommittedData;
-use crate::hummock::{HummockResult, SstableStoreRef};
+use crate::hummock::{HummockResult, MemoryLimiter, SstableStoreRef};
 use crate::monitor::StateStoreMetrics;
 
 pub(crate) type UploadTaskPayload = OrderSortedUncommittedData;
@@ -41,7 +38,6 @@ pub struct SharedBufferUploader {
 
     sstable_store: SstableStoreRef,
     hummock_meta_client: Arc<dyn HummockMetaClient>,
-    next_local_sstable_id: Arc<AtomicU64>,
     stats: Arc<StateStoreMetrics>,
     compaction_executor: Option<Arc<CompactionExecutor>>,
     local_object_store_compactor_context: Arc<CompactorContext>,
@@ -64,25 +60,17 @@ impl SharedBufferUploader {
                 options.share_buffer_compaction_worker_threads_number as usize,
             ))))
         };
-        let next_local_sstable_id = Arc::new(AtomicU64::new(0));
+        // not limit memory for uploader
+        let memory_limiter = Arc::new(MemoryLimiter::new(u64::MAX - 1));
         let local_object_store_compactor_context = Arc::new(CompactorContext {
             options: options.clone(),
             hummock_meta_client: hummock_meta_client.clone(),
             sstable_store: sstable_store.clone(),
             stats: stats.clone(),
             is_share_buffer_compact: true,
-            sstable_id_generator: {
-                let atomic = next_local_sstable_id.clone();
-                Arc::new(move || {
-                    {
-                        let atomic = atomic.clone();
-                        async move { Ok(get_local_sst_id(atomic.fetch_add(1, Relaxed))) }
-                    }
-                    .boxed()
-                })
-            },
             compaction_executor: compaction_executor.as_ref().cloned(),
             table_id_to_slice_transform: table_id_to_slice_transform.clone(),
+            memory_limiter: memory_limiter.clone(),
         });
         let remote_object_store_compactor_context = Arc::new(CompactorContext {
             options: options.clone(),
@@ -90,16 +78,15 @@ impl SharedBufferUploader {
             sstable_store: sstable_store.clone(),
             stats: stats.clone(),
             is_share_buffer_compact: true,
-            sstable_id_generator: get_remote_sstable_id_generator(hummock_meta_client.clone()),
             compaction_executor: compaction_executor.as_ref().cloned(),
             table_id_to_slice_transform,
+            memory_limiter,
         });
         Self {
             options,
             write_conflict_detector,
             sstable_store,
             hummock_meta_client,
-            next_local_sstable_id,
             stats,
             compaction_executor,
             local_object_store_compactor_context,

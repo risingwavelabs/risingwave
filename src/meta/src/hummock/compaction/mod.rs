@@ -92,6 +92,7 @@ pub fn create_overlap_strategy(compaction_mode: CompactionMode) -> Arc<dyn Overl
     match compaction_mode {
         CompactionMode::Range => Arc::new(RangeOverlapStrategy::default()),
         CompactionMode::ConsistentHash => Arc::new(HashStrategy::default()),
+        CompactionMode::Unspecified => unreachable!(),
     }
 }
 

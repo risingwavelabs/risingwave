@@ -26,7 +26,7 @@ use risingwave_pb::plan_common::ColumnDesc as ProstColumnDesc;
 use super::{PlanBase, PlanRef, ToBatchProst, ToDistributedBatch};
 use crate::catalog::ColumnId;
 use crate::optimizer::plan_node::{LogicalScan, ToLocalBatch};
-use crate::optimizer::property::{Distribution, Order};
+use crate::optimizer::property::{Distribution, DistributionDisplay, Order};
 
 /// `BatchSeqScan` implements [`super::LogicalScan`] to scan from a row-oriented table
 #[derive(Debug, Clone)]
@@ -68,6 +68,7 @@ impl BatchSeqScan {
     }
 
     pub fn new(logical: LogicalScan, scan_ranges: Vec<ScanRange>) -> Self {
+        // Use `Single` by default, will be updated later with `clone_with_dist`.
         Self::new_inner(logical, Distribution::Single, scan_ranges)
     }
 
@@ -78,6 +79,11 @@ impl BatchSeqScan {
                 Distribution::Single
             } else {
                 match self.logical.distribution_key() {
+                    // FIXME: Should be `Single` if no distribution key.
+                    // Currently the task will be scheduled to frontend under local mode, which is
+                    // unimplemented yet. Enable this when it's done.
+                    //
+                    // Some(dist_key) if dist_key.is_empty() => Distribution::Single,
                     Some(dist_key) => Distribution::HashShard(dist_key),
                     None => Distribution::SomeShard,
                 }
@@ -130,18 +136,18 @@ impl fmt::Display for BatchSeqScan {
 
         let verbose = self.base.ctx.is_explain_verbose();
 
-        if self.scan_ranges.is_empty() {
-            write!(
-                f,
-                "BatchScan {{ table: {}, columns: [{}] }}",
-                self.logical.table_name(),
-                match verbose {
-                    true => self.logical.column_names_with_table_prefix(),
-                    false => self.logical.column_names(),
-                }
-                .join(", ")
-            )
-        } else {
+        write!(
+            f,
+            "BatchScan {{ table: {}, columns: [{}]",
+            self.logical.table_name(),
+            match verbose {
+                true => self.logical.column_names_with_table_prefix(),
+                false => self.logical.column_names(),
+            }
+            .join(", "),
+        )?;
+
+        if !self.scan_ranges.is_empty() {
             let order_names = match verbose {
                 true => self.logical.order_names_with_table_prefix(),
                 false => self.logical.order_names(),
@@ -161,18 +167,21 @@ impl fmt::Display for BatchSeqScan {
                 }
                 range_strs.push(range_str.join(", "));
             }
+            write!(f, ", scan_ranges: [{}]", range_strs.join(" OR "))?;
+        }
+
+        if verbose {
             write!(
                 f,
-                "BatchScan {{ table: {}, columns: [{}], scan_ranges: [{}] }}",
-                self.logical.table_name(),
-                match verbose {
-                    true => self.logical.column_names_with_table_prefix(),
-                    false => self.logical.column_names(),
+                ", distribution: {}",
+                &DistributionDisplay {
+                    distribution: self.distribution(),
+                    input_schema: &self.base.schema,
                 }
-                .join(", "),
-                range_strs.join(" OR ")
-            )
+            )?;
         }
+
+        write!(f, " }}")
     }
 }
 

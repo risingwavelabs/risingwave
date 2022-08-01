@@ -14,8 +14,9 @@ message SstableInfo {
 }
 
 enum LevelType {
-  NONOVERLAPPING = 0;
-  OVERLAPPING = 1;
+  UNSPECIFIED = 0;
+  NONOVERLAPPING = 1;
+  OVERLAPPING = 2;
 }
 
 message Level {
@@ -67,6 +68,7 @@ message HummockVersionDelta {
   // Snapshots with epoch less than the safe epoch have been GCed.
   // Reads against such an epoch will fail.
   uint64 safe_epoch = 5;
+  bool trivial_move = 6;
 }
 
 message HummockSnapshot {
@@ -208,7 +210,8 @@ message GetCompactionTasksResponse {
 }
 
 message ReportCompactionTasksRequest {
-  CompactTask compact_task = 1;
+  uint32 context_id = 1;
+  CompactTask compact_task = 2;
 }
 
 message ReportCompactionTasksResponse {
@@ -291,8 +294,9 @@ service CompactorService {}
 
 message CompactionConfig {
   enum CompactionMode {
-    RANGE = 0;
-    CONSISTENT_HASH = 1;
+    UNSPECIFIED = 0;
+    RANGE = 1;
+    CONSISTENT_HASH = 2;
   }
   uint64 max_bytes_for_level_base = 1;
   uint64 max_level = 2;

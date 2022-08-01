@@ -14,7 +14,7 @@
 
 use std::borrow::{Borrow, BorrowMut};
 use std::cmp;
-use std::collections::{BTreeMap, HashSet, VecDeque};
+use std::collections::{BTreeMap, HashMap, HashSet, VecDeque};
 use std::future::Future;
 use std::ops::Bound::{Excluded, Included};
 use std::ops::{DerefMut, RangeBounds};
@@ -216,6 +216,10 @@ impl Versioning {
     ) {
         for (_, delta) in self.hummock_version_deltas.range(delta_range) {
             let mut no_sst_to_delete = true;
+            if delta.trivial_move {
+                self.deltas_to_delete.push(delta.id);
+                continue;
+            }
             for level_deltas in delta.level_deltas.values() {
                 for level_delta in &level_deltas.level_deltas {
                     for sst_id in &level_delta.removed_table_ids {
@@ -815,8 +819,13 @@ where
         Ok(())
     }
 
-    pub async fn report_compact_task(&self, compact_task: &CompactTask) -> Result<bool> {
-        self.report_compact_task_impl(compact_task, false).await
+    pub async fn report_compact_task(
+        &self,
+        context_id: HummockContextId,
+        compact_task: &CompactTask,
+    ) -> Result<bool> {
+        self.report_compact_task_impl(context_id, compact_task, false)
+            .await
     }
 
     /// `report_compact_task` is retryable. `task_id` in `compact_task` parameter is used as the
@@ -825,8 +834,9 @@ where
     #[named]
     pub async fn report_compact_task_impl(
         &self,
+        context_id: HummockContextId,
         compact_task: &CompactTask,
-        trival_move: bool,
+        trivial_move: bool,
     ) -> Result<bool> {
         let mut compaction_guard = write_lock!(self, compaction).await;
         let start_time = Instant::now();
@@ -845,7 +855,17 @@ where
             .remove(compact_task.task_id)
             .map(|assignment| assignment.context_id);
         // The task is not found.
-        if assignee_context_id.is_none() && !trival_move {
+        if assignee_context_id.is_none() && !trivial_move {
+            tracing::warn!("Compaction task {} not found", compact_task.task_id);
+            return Ok(false);
+        }
+        if *assignee_context_id.as_ref().unwrap() != context_id {
+            tracing::warn!(
+                "Wrong reporter {}. Compaction task {} is assigned to {}",
+                context_id,
+                compact_task.task_id,
+                *assignee_context_id.as_ref().unwrap(),
+            );
             return Ok(false);
         }
         compact_status.report_compact_task(compact_task);
@@ -860,6 +880,7 @@ where
             let mut version_delta = HummockVersionDelta {
                 prev_id: old_version.id,
                 max_committed_epoch: old_version.max_committed_epoch,
+                trivial_move,
                 ..Default::default()
             };
             let level_deltas = &mut version_delta
@@ -888,7 +909,7 @@ where
             version_delta.id = new_version_id;
             hummock_version_deltas.insert(version_delta.id, version_delta);
 
-            if trival_move {
+            if trivial_move {
                 commit_multi_var!(
                     self,
                     assignee_context_id,
@@ -951,6 +972,7 @@ where
         &self,
         epoch: HummockEpoch,
         sstables: Vec<LocalSstableInfo>,
+        sst_to_context: HashMap<HummockSstableId, HummockContextId>,
     ) -> Result<()> {
         // Warn of table_ids that is not found in expected compaction group.
         // It indicates:
@@ -980,6 +1002,24 @@ where
 
         let mut versioning_guard = write_lock!(self, versioning).await;
         let _timer = start_measure_real_process_timer!(self);
+
+        for (sst_id, context_id) in &sst_to_context {
+            #[cfg(test)]
+            {
+                if *context_id == META_NODE_ID {
+                    continue;
+                }
+            }
+            if self
+                .cluster_manager
+                .get_worker_by_id(*context_id)
+                .await
+                .is_none()
+            {
+                return Err(Error::InvalidSst(*sst_id));
+            }
+        }
+
         let old_version = versioning_guard.current_version.clone();
         let new_version_id = old_version.id + 1;
         let versioning = versioning_guard.deref_mut();
@@ -990,6 +1030,7 @@ where
             HummockVersionDelta {
                 prev_id: old_version.id,
                 safe_epoch: old_version.safe_epoch,
+                trivial_move: false,
                 ..Default::default()
             },
         );
