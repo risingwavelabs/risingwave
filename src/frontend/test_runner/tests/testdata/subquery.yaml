@@ -3,17 +3,17 @@
     create table t (v1 bigint, v2 double precision);
     select v1 from (select * from t) where v2 > 1;
   logical_plan: |
-    LogicalProject { exprs: [$0] }
-      LogicalFilter { predicate: ($1 > 1:Int32) }
-        LogicalProject { exprs: [$1, $2] }
+    LogicalProject { exprs: [t.v1] }
+      LogicalFilter { predicate: (t.v2 > 1:Int32) }
+        LogicalProject { exprs: [t.v1, t.v2] }
           LogicalScan { table: t, columns: [_row_id, v1, v2] }
 - sql: |
     /* merge and then eliminate */
     create table t (v1 bigint, v2 double precision);
     select a1 as v1, a2 as v2 from (select v1 as a1, v2 as a2 from t);
   logical_plan: |
-    LogicalProject { exprs: [$0, $1] }
-      LogicalProject { exprs: [$1, $2] }
+    LogicalProject { exprs: [t.v1, t.v2] }
+      LogicalProject { exprs: [t.v1, t.v2] }
         LogicalScan { table: t, columns: [_row_id, v1, v2] }
   optimized_logical_plan: |
     LogicalScan { table: t, columns: [v1, v2] }
@@ -25,27 +25,27 @@
     create table t (v1 bigint, v2 double precision);
     select v3 from (select v2, v1 as v3 from t) where v2 > 1;
   logical_plan: |
-    LogicalProject { exprs: [$1] }
-      LogicalFilter { predicate: ($0 > 1:Int32) }
-        LogicalProject { exprs: [$2, $1] }
+    LogicalProject { exprs: [t.v1] }
+      LogicalFilter { predicate: (t.v2 > 1:Int32) }
+        LogicalProject { exprs: [t.v2, t.v1] }
           LogicalScan { table: t, columns: [_row_id, v1, v2] }
 - sql: |
     /* consecutive projects are merged */
     create table t (v1 bigint, v2 double precision);
     select v1, 2 from (select v1, v2, 1 from t);
   logical_plan: |
-    LogicalProject { exprs: [$0, 2:Int32] }
-      LogicalProject { exprs: [$1, $2, 1:Int32] }
+    LogicalProject { exprs: [t.v1, 2:Int32] }
+      LogicalProject { exprs: [t.v1, t.v2, 1:Int32] }
         LogicalScan { table: t, columns: [_row_id, v1, v2] }
   optimized_logical_plan: |
-    LogicalProject { exprs: [$0, 2:Int32] }
+    LogicalProject { exprs: [t.v1, 2:Int32] }
       LogicalScan { table: t, columns: [v1] }
 - sql: |
     create table t (v1 bigint, v2 double precision);
     select * from (select * from t);
   logical_plan: |
-    LogicalProject { exprs: [$0, $1] }
-      LogicalProject { exprs: [$1, $2] }
+    LogicalProject { exprs: [t.v1, t.v2] }
+      LogicalProject { exprs: [t.v1, t.v2] }
         LogicalScan { table: t, columns: [_row_id, v1, v2] }
   optimized_logical_plan: |
     LogicalScan { table: t, columns: [v1, v2] }
@@ -54,9 +54,9 @@
     create table t (v1 bigint, v2 double precision);
     select * from (select * from t), t;
   logical_plan: |
-    LogicalProject { exprs: [$0, $1, $3, $4] }
-      LogicalJoin { type: Inner, on: true, output_indices: all }
-        LogicalProject { exprs: [$1, $2] }
+    LogicalProject { exprs: [t.v1, t.v2, t.v1, t.v2] }
+      LogicalJoin { type: Inner, on: true }
+        LogicalProject { exprs: [t.v1, t.v2] }
           LogicalScan { table: t, columns: [_row_id, v1, v2] }
         LogicalScan { table: t, columns: [_row_id, v1, v2] }
 - sql: |
@@ -64,9 +64,9 @@
     create table t (v1 bigint, v2 double precision);
     select * from (select * from t) as tt join t on tt.v1=t.v1;
   logical_plan: |
-    LogicalProject { exprs: [$0, $1, $3, $4] }
-      LogicalJoin { type: Inner, on: ($0 = $3), output_indices: all }
-        LogicalProject { exprs: [$1, $2] }
+    LogicalProject { exprs: [t.v1, t.v2, t.v1, t.v2] }
+      LogicalJoin { type: Inner, on: (t.v1 = t.v1) }
+        LogicalProject { exprs: [t.v1, t.v2] }
           LogicalScan { table: t, columns: [_row_id, v1, v2] }
         LogicalScan { table: t, columns: [_row_id, v1, v2] }
 - sql: |
@@ -74,16 +74,17 @@
     create table t (v1 bigint, v2 double precision);
     select * from (select * from t) as tt(a) join t on a=v1;
   logical_plan: |
-    LogicalProject { exprs: [$0, $1, $3, $4] }
-      LogicalJoin { type: Inner, on: ($0 = $3), output_indices: all }
-        LogicalProject { exprs: [$1, $2] }
+    LogicalProject { exprs: [t.v1, t.v2, t.v1, t.v2] }
+      LogicalJoin { type: Inner, on: (t.v1 = t.v1) }
+        LogicalProject { exprs: [t.v1, t.v2] }
           LogicalScan { table: t, columns: [_row_id, v1, v2] }
         LogicalScan { table: t, columns: [_row_id, v1, v2] }
 - sql: |
     /* alias more columns than available */
     create table t (v1 bigint, v2 double precision);
     select * from (select * from t) as tt(a, b, c) join t on a=v1;
-  binder_error: 'Bind error: table "tt" has less columns available but more aliases specified'
+  binder_error: 'Bind error: table "tt" has less columns available but more aliases
+    specified'
 - sql: |
     create table t(x int);
     select * from t, (select * from t as t2 order by t.x desc) as t3;
@@ -107,14 +108,14 @@
       ) as t0
     );
   logical_plan: |
-    LogicalProject { exprs: [$1, $2] }
-      LogicalJoin { type: LeftSemi, on: true, output_indices: all }
+    LogicalProject { exprs: [ab.a, ab.b] }
+      LogicalJoin { type: LeftSemi, on: true }
         LogicalScan { table: ab, columns: [_row_id, a, b] }
-        LogicalProject { exprs: [$1, $2, $3, $4] }
-          LogicalJoin { type: Inner, on: true, output_indices: all }
+        LogicalProject { exprs: [bc.b, bc.c, t.v1, t.v2] }
+          LogicalJoin { type: Inner, on: true }
             LogicalScan { table: bc, columns: [_row_id, b, c] }
-            LogicalProject { exprs: [$1, $2] }
-              LogicalFilter { predicate: ($1 = CorrelatedInputRef { index: 1, depth: 2 }) }
+            LogicalProject { exprs: [t.v1, t.v2] }
+              LogicalFilter { predicate: (t.v1 = CorrelatedInputRef { index: 1, correlated_id: 0 }) }
                 LogicalScan { table: t, columns: [_row_id, v1, v2] }
 - sql: |
     /* We cannot reference columns in left table if not lateral */

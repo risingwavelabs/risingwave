@@ -23,7 +23,6 @@ use risingwave_batch::task::TaskId;
 use risingwave_common::array::DataChunk;
 use risingwave_common::bail;
 use risingwave_common::error::RwError;
-use risingwave_common::util::worker_util::get_workers_by_parallel_unit_ids;
 use risingwave_pb::batch_plan::exchange_info::DistributionMode;
 use risingwave_pb::batch_plan::exchange_source::LocalExecutePlan::Plan;
 use risingwave_pb::batch_plan::plan_node::NodeBody;
@@ -192,11 +191,7 @@ impl LocalQueryExecution {
                     // `exchange_source`.
                     let (parallel_unit_ids, vnode_bitmaps): (Vec<_>, Vec<_>) =
                         vnode_bitmaps.into_iter().unzip();
-                    let all_workers = self.front_env.worker_node_manager().list_worker_nodes();
-                    let workers = match get_workers_by_parallel_unit_ids(&all_workers, &parallel_unit_ids) {
-                        Ok(workers) => workers,
-                        Err(e) => bail!("{}", e)
-                    };
+                    let workers = self.front_env.worker_node_manager().get_workers_by_parallel_unit_ids(&parallel_unit_ids)?;
 
                     for (idx, (worker_node, partition)) in
                         (workers.into_iter().zip_eq(vnode_bitmaps.into_iter())).enumerate()
@@ -289,9 +284,10 @@ impl LocalQueryExecution {
                 let mut node_body = execution_plan_node.node.clone();
                 match &mut node_body {
                     NodeBody::RowSeqScan(ref mut scan_node) => {
-                        let partition = partition.unwrap();
-                        scan_node.vnode_bitmap = Some(partition.vnode_bitmap);
-                        scan_node.scan_ranges = partition.scan_ranges;
+                        if let Some(partition) = partition {
+                            scan_node.vnode_bitmap = Some(partition.vnode_bitmap);
+                            scan_node.scan_ranges = partition.scan_ranges;
+                        }
                     }
                     NodeBody::SysRowSeqScan(_) => {}
                     _ => unreachable!(),

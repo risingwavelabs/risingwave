@@ -97,11 +97,7 @@ pub fn unnested_list_type(datatype: DataType) -> DataType {
     }
 }
 
-const DECIMAL_DEFAULT_PRECISION: u32 = 20;
-const DECIMAL_DEFAULT_SCALE: u32 = 6;
-
 impl From<&ProstDataType> for DataType {
-    #[expect(clippy::needless_borrow)]
     fn from(proto: &ProstDataType) -> DataType {
         match proto.get_type_name().expect("missing type field") {
             TypeName::Int16 => DataType::Int16,
@@ -127,6 +123,7 @@ impl From<&ProstDataType> for DataType {
                 // The first (and only) item is the list element type.
                 datatype: Box::new((&proto.field_type[0]).into()),
             },
+            TypeName::TypeUnspecified => unreachable!(),
         }
     }
 }
@@ -362,11 +359,12 @@ pub fn serialize_datum_ref_into(
     datum_ref: &DatumRef,
     serializer: &mut memcomparable::Serializer<impl BufMut>,
 ) -> memcomparable::Result<()> {
+    // By default, `null` is treated as largest in PostgreSQL.
     if let Some(datum_ref) = datum_ref {
-        1u8.serialize(&mut *serializer)?;
+        0u8.serialize(&mut *serializer)?;
         datum_ref.serialize(serializer)?;
     } else {
-        0u8.serialize(serializer)?;
+        1u8.serialize(serializer)?;
     }
     Ok(())
 }
@@ -387,11 +385,12 @@ pub fn serialize_datum_into(
     datum: &Datum,
     serializer: &mut memcomparable::Serializer<impl BufMut>,
 ) -> memcomparable::Result<()> {
+    // By default, `null` is treated as largest in PostgreSQL.
     if let Some(datum) = datum {
-        1u8.serialize(&mut *serializer)?;
+        0u8.serialize(&mut *serializer)?;
         datum.serialize(serializer)?;
     } else {
-        0u8.serialize(serializer)?;
+        1u8.serialize(serializer)?;
     }
     Ok(())
 }
@@ -414,8 +413,8 @@ pub fn deserialize_datum_from(
 ) -> memcomparable::Result<Datum> {
     let null_tag = u8::deserialize(&mut *deserializer)?;
     match null_tag {
-        0 => Ok(None),
-        1 => Ok(Some(ScalarImpl::deserialize(ty.clone(), deserializer)?)),
+        1 => Ok(None),
+        0 => Ok(Some(ScalarImpl::deserialize(ty.clone(), deserializer)?)),
         _ => Err(memcomparable::Error::InvalidTagEncoding(null_tag as _)),
     }
 }
@@ -760,8 +759,8 @@ impl ScalarImpl {
         let base_position = deserializer.position();
         let null_tag = u8::deserialize(&mut *deserializer)?;
         match null_tag {
-            0 => {}
-            1 => {
+            1 => {}
+            0 => {
                 use std::mem::size_of;
                 let len = match data_type {
                     DataType::Int16 => size_of::<i16>(),
@@ -868,7 +867,7 @@ impl ScalarImpl {
             ),
             TypeName::Interval => ScalarImpl::Interval(IntervalUnit::from_protobuf_bytes(
                 b,
-                data_type.get_interval_type()?,
+                data_type.get_interval_type().unwrap_or(Unspecified),
             )?),
             TypeName::Timestamp => {
                 ScalarImpl::NaiveDateTime(NaiveDateTimeWrapper::from_protobuf_bytes(b)?)
@@ -910,6 +909,32 @@ impl ScalarImpl {
             _ => bail!("Unrecognized type name: {:?}", data_type.get_type_name()),
         };
         Ok(value)
+    }
+}
+
+pub fn literal_type_match(data_type: &DataType, literal: Option<&ScalarImpl>) -> bool {
+    match literal {
+        Some(datum) => {
+            matches!(
+                (data_type, datum),
+                (DataType::Boolean, ScalarImpl::Bool(_))
+                    | (DataType::Int16, ScalarImpl::Int16(_))
+                    | (DataType::Int32, ScalarImpl::Int32(_))
+                    | (DataType::Int64, ScalarImpl::Int64(_))
+                    | (DataType::Float32, ScalarImpl::Float32(_))
+                    | (DataType::Float64, ScalarImpl::Float64(_))
+                    | (DataType::Varchar, ScalarImpl::Utf8(_))
+                    | (DataType::Date, ScalarImpl::NaiveDate(_))
+                    | (DataType::Time, ScalarImpl::NaiveTime(_))
+                    | (DataType::Timestamp, ScalarImpl::NaiveDateTime(_))
+                    | (DataType::Timestampz, ScalarImpl::Int64(_))
+                    | (DataType::Decimal, ScalarImpl::Decimal(_))
+                    | (DataType::Interval, ScalarImpl::Interval(_))
+                    | (DataType::Struct { .. }, ScalarImpl::Struct(_))
+                    | (DataType::List { .. }, ScalarImpl::List(_))
+            )
+        }
+        None => true,
     }
 }
 

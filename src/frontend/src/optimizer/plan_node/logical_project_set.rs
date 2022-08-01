@@ -22,7 +22,7 @@ use super::{
     PlanTreeNodeUnary, PredicatePushdown, StreamProjectSet, ToBatch, ToStream,
 };
 use crate::expr::{
-    Expr, ExprImpl, ExprRewriter, ExprVerboseDisplay, FunctionCall, InputRef, TableFunction,
+    Expr, ExprDisplay, ExprImpl, ExprRewriter, FunctionCall, InputRef, TableFunction,
 };
 use crate::risingwave_common::error::Result;
 use crate::utils::{ColIndexMapping, Condition};
@@ -185,7 +185,7 @@ impl LogicalProjectSet {
                     (field.name, field.sub_fields, field.type_name)
                 }
                 None => (
-                    format!("{:?}", ExprVerboseDisplay { expr, input_schema }),
+                    format!("{:?}", ExprDisplay { expr, input_schema }),
                     vec![],
                     String::new(),
                 ),

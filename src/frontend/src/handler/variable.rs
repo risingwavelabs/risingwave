@@ -48,7 +48,7 @@ pub(super) fn handle_show(context: OptimizerContext, variable: Vec<Ident>) -> Re
     if name.eq_ignore_ascii_case("ALL") {
         return handle_show_all(&context);
     }
-    let row = Row::new(vec![Some(config_reader.get(name)?)]);
+    let row = Row::new(vec![Some(config_reader.get(name)?.into())]);
 
     Ok(PgResponse::new(
         StatementType::SHOW_COMMAND,
@@ -71,9 +71,9 @@ pub(super) fn handle_show_all(context: &OptimizerContext) -> Result<PgResponse> 
         .iter()
         .map(|info| {
             Row::new(vec![
-                Some(info.name.to_string()),
-                Some(info.setting.to_string()),
-                Some(info.description.to_string()),
+                Some(info.name.clone().into()),
+                Some(info.setting.clone().into()),
+                Some(info.description.clone().into()),
             ])
         })
         .collect();

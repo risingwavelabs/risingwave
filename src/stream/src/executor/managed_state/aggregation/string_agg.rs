@@ -12,610 +12,552 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-#![allow(dead_code)]
+use std::collections::{BTreeSet, HashMap};
+use std::marker::PhantomData;
+use std::sync::Arc;
 
-use std::collections::BTreeMap;
-
-use bytes::Bytes;
-use itertools::Itertools;
-use risingwave_common::array::stream_chunk::{Op, Ops};
-use risingwave_common::array::ArrayImpl;
+use async_trait::async_trait;
+use futures::pin_mut;
+use futures_async_stream::for_await;
+use risingwave_common::array::stream_chunk::Ops;
+use risingwave_common::array::Op::{Delete, Insert, UpdateDelete, UpdateInsert};
+use risingwave_common::array::{ArrayImpl, Row};
 use risingwave_common::buffer::Bitmap;
-use risingwave_common::types::{DataType, Datum, ScalarImpl};
-use risingwave_common::util::ordered::OrderedArraysSerializer;
-use risingwave_common::util::value_encoding::{deserialize_cell, serialize_cell};
-use risingwave_storage::storage_value::StorageValue;
+use risingwave_common::types::{Datum, ScalarImpl};
+use risingwave_common::util::sort_util::{DescOrderedRow, OrderPair, OrderType};
 use risingwave_storage::table::state_table::RowBasedStateTable;
-use risingwave_storage::write_batch::WriteBatch;
-use risingwave_storage::{Keyspace, StateStore};
+use risingwave_storage::StateStore;
 
-use super::super::flush_status::BtreeMapFlushStatus as FlushStatus;
-use crate::executor::error::{StreamExecutorError, StreamExecutorResult};
+use super::ManagedTableState;
+use crate::executor::aggregation::AggCall;
+use crate::executor::error::StreamExecutorResult;
+use crate::executor::PkIndices;
+
+#[derive(Debug)]
+struct Cache {
+    synced: bool, // `false` means not synced from state table (cold start)
+    order_pairs: Arc<Vec<OrderPair>>, // order requirements used to sort cached rows
+    rows: BTreeSet<DescOrderedRow>,
+}
+
+impl Cache {
+    fn new(order_pairs: Vec<OrderPair>) -> Cache {
+        Cache {
+            synced: false,
+            order_pairs: Arc::new(order_pairs),
+            rows: BTreeSet::new(),
+        }
+    }
+
+    fn is_cold_start(&self) -> bool {
+        !self.synced
+    }
+
+    fn set_synced(&mut self) {
+        self.synced = true;
+    }
+
+    fn insert(&mut self, row: Row) {
+        if self.synced {
+            let orderable_row = DescOrderedRow::new(row, None, self.order_pairs.clone());
+            self.rows.insert(orderable_row);
+        }
+    }
+
+    fn remove(&mut self, row: Row) {
+        if self.synced {
+            let orderable_row = DescOrderedRow::new(row, None, self.order_pairs.clone());
+            self.rows.remove(&orderable_row);
+        }
+    }
+}
 
 pub struct ManagedStringAggState<S: StateStore> {
-    cache: BTreeMap<Bytes, FlushStatus<ScalarImpl>>,
+    _phantom_data: PhantomData<S>,
 
-    /// A cached result.
-    result: Option<String>,
+    /// Group key to aggregate with group.
+    /// None for simple agg, Some for group key of hash agg.
+    group_key: Option<Row>,
 
-    /// Marks whether there are modifications, i.e. cache != storage
-    dirty: bool,
+    /// Contains the column indices in upstream schema that are selected into state table.
+    state_table_col_indices: Vec<usize>,
 
-    /// Number of items in the state.
-    total_count: usize,
+    /// The column to aggregate in state table.
+    state_table_agg_col_idx: usize,
 
-    /// Sort key indices.
-    /// We remark two things:
-    /// 1. it is possible that `string_agg(...)` does not have `order by` in it.
-    /// 2. the primary key is not necessarily equal to columns in the `order by`
-    /// For example, `select string_agg(c1, order by c2 DESC) from t`. The primary key
-    /// should be `row_id` of table t, and the sort key is `c2`. However, `sort_key_indices`
-    /// would be the indices of `c2` and `row_id`. And the ordering embedded in
-    /// `sort_key_serializer` would be `Descending` and `Ascending`(as default).
-    sort_key_indices: Vec<usize>,
+    /// The column as delimiter in state table.
+    state_table_delim_col_idx: usize,
 
-    /// Value index.
-    /// If concatenating multiple columns is needed such as `select string_agg('a' || c1 || 'b')
-    /// from t`, `concat` should first be done in a project node.
-    /// `ManagedStringAggState` require only one column as the value.
-    value_index: usize,
-
-    /// Delimiter.
-    delimiter: String,
-
-    /// The keyspace to operate on.
-    keyspace: Keyspace<S>,
-
-    /// Serializer to get the bytes of sorted columns.
-    sorted_arrays_serializer: OrderedArraysSerializer,
+    /// In-memory fully synced cache.
+    cache: Cache,
 }
 
 impl<S: StateStore> ManagedStringAggState<S> {
-    /// Create a managed string agg state based on `Keyspace`.
-    // TODO: enable string agg state
     pub fn new(
-        keyspace: Keyspace<S>,
-        row_count: usize,
-        sort_key_indices: Vec<usize>,
-        value_index: usize,
-        delimiter: String,
-        sort_key_serializer: OrderedArraysSerializer,
+        agg_call: AggCall,
+        group_key: Option<&Row>,
+        pk_indices: PkIndices,
+        state_table_col_indices: Vec<usize>,
     ) -> StreamExecutorResult<Self> {
+        // construct a hashmap from the selected columns in the state table
+        let col_mapping: HashMap<usize, usize> = state_table_col_indices
+            .iter()
+            .enumerate()
+            .map(|(i, col_idx)| (*col_idx, i))
+            .collect();
+        // map agg column to state table column index
+        let state_table_agg_col_idx = *col_mapping
+            .get(&agg_call.args.val_indices()[0])
+            .expect("the column to be aggregate must appear in the state table");
+        let state_table_delim_col_idx = *col_mapping
+            .get(&agg_call.args.val_indices()[1])
+            .expect("the column as delimiter must appear in the state table");
+        // map order by columns to state table column indices
+        let order_pair = agg_call
+            .order_pairs
+            .iter()
+            .map(|o| {
+                OrderPair::new(
+                    *col_mapping
+                        .get(&o.column_idx)
+                        .expect("the column to be order by must appear in the state table"),
+                    o.order_type,
+                )
+            })
+            .chain(pk_indices.iter().map(|idx| {
+                OrderPair::new(
+                    *col_mapping
+                        .get(idx)
+                        .expect("the pk columns must appear in the state table"),
+                    OrderType::Ascending,
+                )
+            }))
+            .collect();
         Ok(Self {
-            cache: BTreeMap::new(),
-            result: None,
-            dirty: false,
-            total_count: row_count,
-            sort_key_indices,
-            value_index,
-            delimiter,
-            keyspace,
-            sorted_arrays_serializer: sort_key_serializer,
+            _phantom_data: PhantomData,
+            group_key: group_key.cloned(),
+            state_table_col_indices,
+            state_table_agg_col_idx,
+            state_table_delim_col_idx,
+            cache: Cache::new(order_pair),
         })
     }
-
-    #[cfg(test)]
-    pub fn get_row_count(&self) -> usize {
-        self.total_count
-    }
-
-    #[expect(dead_code)]
-    pub fn clear_cache(&mut self) {
-        assert!(
-            !self.is_dirty(),
-            "cannot clear cache while string agg state is dirty"
-        );
-        self.cache.clear();
-    }
 }
 
-impl<S: StateStore> ManagedStringAggState<S> {
-    async fn read_all_into_memory(&mut self, epoch: u64) -> StreamExecutorResult<()> {
-        // We cannot read from storage into memory when the cache has not been flushed onto the
-        // storage.
-        assert!(!self.is_dirty());
-        // Read all.
-        let all_data = self.keyspace.scan(None, epoch).await?;
-        for (raw_key, mut raw_value) in all_data {
-            // We only need to deserialize the value, and keep the key as bytes.
-            let value = deserialize_cell(&mut raw_value, &DataType::Varchar)
-                .map_err(StreamExecutorError::serde_error)?
-                .unwrap();
-            let value_string: String = value.into_utf8();
-            self.cache.insert(
-                raw_key,
-                // Here we abuse the semantics of `DeleteInsert` for those values already existed
-                // on the storage, and now we are loading them into memory.
-                FlushStatus::DeleteInsert(value_string.into()),
-            );
-        }
-        self.dirty = false;
-        Ok(())
-    }
-
-    fn concat_strings_in_cache_into_result(&mut self) {
-        if self.result.is_some() {
-            return;
-        }
-        if self.total_count == 0 {
-            return;
-        }
-        let res = self
-            .cache
-            .values()
-            .filter_map(|value| value.as_option())
-            .map(|scalar| scalar.as_utf8())
-            .join(&self.delimiter);
-        self.result = Some(res);
-    }
-
-    fn get_result(&self) -> Datum {
-        self.result.as_ref().map(|res| res.clone().into())
-    }
-}
-
-impl<S: StateStore> ManagedStringAggState<S> {
+#[async_trait]
+impl<S: StateStore> ManagedTableState<S> for ManagedStringAggState<S> {
     async fn apply_batch(
         &mut self,
         ops: Ops<'_>,
         visibility: Option<&Bitmap>,
-        data: &[&ArrayImpl],
-        epoch: u64,
-        _state_table: &mut RowBasedStateTable<S>,
+        chunk_cols: &[&ArrayImpl], // contains all upstream columns
+        _epoch: u64,
+        state_table: &mut RowBasedStateTable<S>,
     ) -> StreamExecutorResult<()> {
-        debug_assert!(super::verify_batch(ops, visibility, data));
-        for sort_key_index in &self.sort_key_indices {
-            debug_assert!(*sort_key_index < data.len());
-        }
-        debug_assert!(self.value_index < data.len());
+        debug_assert!(super::verify_batch(ops, visibility, chunk_cols));
 
-        if self.total_count > self.cache.len() {
-            assert_eq!(self.cache.len(), 0);
-            // The current policy is all-or-nothing, so no values in the memory.
-            // It means the cache gets flushed onto disk.
-            self.read_all_into_memory(epoch).await?;
-        }
-
-        let mut row_keys = vec![];
-        self.sorted_arrays_serializer.serialize(data, &mut row_keys);
-
-        for (row_idx, (op, key_bytes)) in ops.iter().zip_eq(row_keys.into_iter()).enumerate() {
-            let visible = visibility
-                .map(|x| x.is_set(row_idx).unwrap())
-                .unwrap_or(true);
+        for (i, op) in ops.iter().enumerate() {
+            let visible = visibility.map(|x| x.is_set(i).unwrap()).unwrap_or(true);
             if !visible {
                 continue;
             }
 
-            let value = match data[self.value_index].datum_at(row_idx) {
-                Some(scalar) => scalar.into_utf8(),
-                None => "".to_string(),
-            };
+            let state_row = Row::new(
+                self.state_table_col_indices
+                    .iter()
+                    .map(|col_idx| chunk_cols[*col_idx].datum_at(i))
+                    .collect(),
+            );
+
             match op {
-                Op::Insert | Op::UpdateInsert => {
-                    FlushStatus::do_insert(self.cache.entry(key_bytes.into()), value.into());
-                    self.total_count += 1;
+                Insert | UpdateInsert => {
+                    self.cache.insert(state_row.clone());
+                    state_table.insert(state_row)?;
                 }
-                Op::Delete | Op::UpdateDelete => {
-                    FlushStatus::do_delete(self.cache.entry(key_bytes.into()));
-                    self.total_count -= 1;
+                Delete | UpdateDelete => {
+                    self.cache.remove(state_row.clone());
+                    state_table.delete(state_row)?;
                 }
             }
-            // TODO: This can be further optimized as `Delete` and `Insert` may cancel each other.
-            self.dirty = true;
-            self.result = None;
         }
+
         Ok(())
     }
 
     async fn get_output(
         &mut self,
         epoch: u64,
-        _state_table: &RowBasedStateTable<S>,
+        state_table: &RowBasedStateTable<S>,
     ) -> StreamExecutorResult<Datum> {
-        // We allow people to get output when the data is dirty.
-        // As this is easier compared to `ManagedMinState` as we have a all-or-nothing cache policy
-        // here.
-        if !self.is_dirty() {
-            // If we have already cached the result, we return it directly.
-            if let Some(res) = &self.result {
-                return Ok(Some(res.clone().into()));
-            } else if self.total_count == 0 {
-                // If there is simply no data, we return empty string.
-                return Ok(None);
-            } else if !self.cache.is_empty() {
-                // Since we have a all-or-nothing policy, cache must either contain all the values
-                // or be empty.
-                self.concat_strings_in_cache_into_result();
-                return Ok(Some(self.result.clone().unwrap().into()));
+        let mut agg_result = String::new();
+        let mut first = true;
+
+        if self.cache.is_cold_start() {
+            let all_data_iter = if let Some(group_key) = self.group_key.as_ref() {
+                state_table.iter_with_pk_prefix(group_key, epoch).await?
+            } else {
+                state_table.iter(epoch).await?
+            };
+            pin_mut!(all_data_iter);
+
+            self.cache.set_synced(); // after the following loop the cache should be fully synced
+
+            #[for_await]
+            for state_row in all_data_iter {
+                let state_row = state_row?;
+                self.cache.insert(state_row.as_ref().to_owned());
+                if !first {
+                    let delim = state_row[self.state_table_delim_col_idx]
+                        .clone()
+                        .map(ScalarImpl::into_utf8);
+                    agg_result.push_str(&delim.unwrap_or_default());
+                }
+                first = false;
+                let value = state_row[self.state_table_agg_col_idx]
+                    .clone()
+                    .map(ScalarImpl::into_utf8);
+                agg_result.push_str(&value.unwrap_or_default());
+            }
+        } else {
+            // rev() is required because cache.rows is in reverse order
+            for orderable_row in self.cache.rows.iter().rev() {
+                if !first {
+                    let delim = orderable_row.row[self.state_table_delim_col_idx]
+                        .clone()
+                        .map(ScalarImpl::into_utf8);
+                    agg_result.push_str(&delim.unwrap_or_default());
+                }
+                first = false;
+                let value = orderable_row.row[self.state_table_agg_col_idx]
+                    .clone()
+                    .map(ScalarImpl::into_utf8);
+                agg_result.push_str(&value.unwrap_or_default());
             }
         }
-        if self.is_dirty() {
-            // If the state is dirty, we must have a non-empty cache.
-            // do nothing
-        } else {
-            // or we don't have the state in memory,
-            // then we need to load all the state from the memory.
-            self.read_all_into_memory(epoch).await?;
-        }
-        self.concat_strings_in_cache_into_result();
-        Ok(self.get_result())
+
+        Ok(Some(agg_result.into()))
     }
 
     fn is_dirty(&self) -> bool {
-        self.dirty
+        false
     }
 
-    fn flush(
-        &mut self,
-        write_batch: &mut WriteBatch<S>,
-        _state_table: &mut RowBasedStateTable<S>,
-    ) -> StreamExecutorResult<()> {
-        if !self.is_dirty() {
-            return Ok(());
-        }
-
-        let mut local = write_batch.prefixify(&self.keyspace);
-
-        for (key, value) in std::mem::take(&mut self.cache) {
-            let value = value.into_option();
-            match value {
-                Some(val) => {
-                    // TODO(Yuanxin): Implement value meta
-                    local.put(
-                        key,
-                        StorageValue::new_default_put(
-                            serialize_cell(&Some(val)).map_err(StreamExecutorError::serde_error)?,
-                        ),
-                    );
-                }
-                None => {
-                    local.delete(key);
-                }
-            }
-        }
-        self.dirty = false;
+    fn flush(&mut self, _state_table: &mut RowBasedStateTable<S>) -> StreamExecutorResult<()> {
         Ok(())
     }
 }
 
 #[cfg(test)]
 mod tests {
-    use risingwave_common::array::{I64Array, Op, Utf8Array};
-    use risingwave_common::catalog::TableId;
-    use risingwave_common::types::ScalarImpl;
+    use risingwave_common::array::{Row, StreamChunk, StreamChunkTestExt};
+    use risingwave_common::catalog::{ColumnDesc, ColumnId, TableId};
+    use risingwave_common::types::{DataType, ScalarImpl};
     use risingwave_common::util::sort_util::{OrderPair, OrderType};
+    use risingwave_expr::expr::AggKind;
     use risingwave_storage::memory::MemoryStateStore;
-    use risingwave_storage::store::WriteOptions;
-    use risingwave_storage::StateStore;
+    use risingwave_storage::table::state_table::RowBasedStateTable;
 
-    use super::*;
+    use super::ManagedStringAggState;
+    use crate::executor::aggregation::{AggArgs, AggCall};
+    use crate::executor::managed_state::aggregation::ManagedTableState;
+    use crate::executor::StreamExecutorResult;
 
-    fn create_managed_state<S: StateStore>(
-        store: S,
-        table_id: TableId,
-        row_count: usize,
-    ) -> ManagedStringAggState<S> {
-        let sort_key_indices = vec![0, 1];
-        let value_index = 0;
-        let orderings = vec![OrderType::Descending, OrderType::Ascending];
-        let order_pairs = orderings
-            .into_iter()
-            .zip_eq(sort_key_indices.clone().into_iter())
-            .map(|(ord, idx)| OrderPair::new(idx, ord))
-            .collect::<Vec<_>>();
-        let sort_key_serializer = OrderedArraysSerializer::new(order_pairs);
-        let keyspace = Keyspace::table_root(store, &table_id);
-        ManagedStringAggState::new(
-            keyspace,
-            row_count,
-            sort_key_indices,
-            value_index,
-            "||".to_string(),
-            sort_key_serializer,
-        )
-        .unwrap()
-    }
+    #[tokio::test]
+    async fn test_string_agg_state_simple_agg_without_order() -> StreamExecutorResult<()> {
+        // Assumption of input schema:
+        // (a: varchar, _delim: varchar, b: int32, c: int32, _row_id: int64)
+        // where `a` is the column to aggregate
 
-    fn mock_state_table<S: StateStore>(store: S, table_id: TableId) -> RowBasedStateTable<S> {
-        RowBasedStateTable::new_without_distribution(store, table_id, vec![], vec![], vec![])
+        let input_pk_indices = vec![4];
+        let agg_call = AggCall {
+            kind: AggKind::StringAgg,
+            args: AggArgs::Binary([DataType::Varchar, DataType::Varchar], [0, 1]),
+            return_type: DataType::Varchar,
+            order_pairs: vec![],
+            append_only: false,
+            filter: None,
+        };
+
+        // see `LogicalAgg::infer_internal_table_catalog` for the construction of state table
+        let table_id = TableId::new(6666);
+        let columns = vec![
+            ColumnDesc::unnamed(ColumnId::new(0), DataType::Int64), // _row_id
+            ColumnDesc::unnamed(ColumnId::new(1), DataType::Varchar), // a
+            ColumnDesc::unnamed(ColumnId::new(2), DataType::Varchar), // _delim
+        ];
+        let state_table_col_indices = vec![4, 0, 1];
+        let mut state_table = RowBasedStateTable::new_without_distribution(
+            MemoryStateStore::new(),
+            table_id,
+            columns,
+            vec![OrderType::Ascending],
+            vec![0], // [_row_id]
+        );
+
+        let mut agg_state =
+            ManagedStringAggState::new(agg_call, None, input_pk_indices, state_table_col_indices)?;
+
+        let mut epoch = 0;
+
+        let chunk = StreamChunk::from_pretty(
+            " T T i i I
+            + a , 1 8 123
+            + b , 5 2 128
+            - b , 5 2 128
+            + c , 1 3 130",
+        );
+        let (ops, columns, visibility) = chunk.into_inner();
+        let chunk_cols: Vec<_> = columns.iter().map(|col| col.array_ref()).collect();
+        agg_state
+            .apply_batch(
+                &ops,
+                visibility.as_ref(),
+                &chunk_cols,
+                epoch,
+                &mut state_table,
+            )
+            .await?;
+
+        epoch += 1;
+        agg_state.flush(&mut state_table)?;
+        state_table.commit(epoch).await.unwrap();
+
+        let res = agg_state.get_output(epoch, &state_table).await?;
+        match res {
+            Some(ScalarImpl::Utf8(s)) => {
+                assert!(s.len() == 3);
+                assert!(s.contains('a'));
+                assert!(s.contains('c'));
+                assert!(&s[1..2] == ",");
+            }
+            _ => panic!("unexpected output"),
+        }
+
+        Ok(())
     }
 
     #[tokio::test]
-    async fn test_managed_string_agg_state() {
-        let store = MemoryStateStore::new();
-        let mut managed_state = create_managed_state(store.clone(), TableId::from(0x2333), 0);
-        assert!(!managed_state.is_dirty());
-        let mut epoch: u64 = 0;
-        let mut state_table = mock_state_table(MemoryStateStore::new(), TableId::from(0x2333));
+    async fn test_string_agg_state_simple_agg_with_order() -> StreamExecutorResult<()> {
+        // Assumption of input schema:
+        // (a: varchar, _delim: varchar, b: int32, c: int32, _row_id: int64)
+        // where `a` is the column to aggregate
 
-        // Insert.
-        managed_state
-            .apply_batch(
-                &[Op::Insert, Op::Insert, Op::Insert],
-                None,
-                &[
-                    &Utf8Array::from_slice(&[Some("abc"), Some("def"), Some("ghi")])
-                        .unwrap()
-                        .into(),
-                    &I64Array::from_slice(&[Some(0), Some(1), Some(2)])
-                        .unwrap()
-                        .into(),
-                ],
-                epoch,
-                &mut state_table,
-            )
-            .await
-            .unwrap();
-        assert!(managed_state.is_dirty());
+        let input_pk_indices = vec![4];
+        let agg_call = AggCall {
+            kind: AggKind::StringAgg,
+            args: AggArgs::Binary([DataType::Varchar, DataType::Varchar], [0, 1]),
+            return_type: DataType::Varchar,
+            order_pairs: vec![
+                OrderPair::new(2, OrderType::Ascending),  // b ASC
+                OrderPair::new(0, OrderType::Descending), // a DESC
+            ],
+            append_only: false,
+            filter: None,
+        };
 
-        // Check output after insertion.
-        assert_eq!(
-            managed_state.get_output(epoch, &state_table).await.unwrap(),
-            Some(ScalarImpl::Utf8("ghi||def||abc".to_string()))
+        let table_id = TableId::new(6666);
+        let columns = vec![
+            ColumnDesc::unnamed(ColumnId::new(0), DataType::Int32), // b
+            ColumnDesc::unnamed(ColumnId::new(1), DataType::Varchar), // a
+            ColumnDesc::unnamed(ColumnId::new(2), DataType::Int64), // _row_id
+            ColumnDesc::unnamed(ColumnId::new(3), DataType::Varchar), // _delim
+        ];
+        let state_table_col_indices = vec![2, 0, 4, 1];
+        let mut state_table = RowBasedStateTable::new_without_distribution(
+            MemoryStateStore::new(),
+            table_id,
+            columns,
+            vec![
+                OrderType::Ascending,  // b ASC
+                OrderType::Descending, // a DESC
+                OrderType::Ascending,  // _row_id ASC
+            ],
+            vec![0, 1, 2], // [b, a, _row_id]
         );
 
-        let mut write_batch = store.start_write_batch(WriteOptions {
-            epoch,
-            table_id: Default::default(),
-        });
-        managed_state
-            .flush(&mut write_batch, &mut state_table)
-            .unwrap();
-        write_batch.ingest().await.unwrap();
-        assert!(!managed_state.is_dirty());
+        let mut agg_state =
+            ManagedStringAggState::new(agg_call, None, input_pk_indices, state_table_col_indices)?;
 
-        // Insert and delete.
-        managed_state
-            .apply_batch(
-                &[Op::Insert, Op::Delete, Op::Insert],
-                None,
-                &[
-                    &Utf8Array::from_slice(&[Some("def"), Some("abc"), Some("abc")])
-                        .unwrap()
-                        .into(),
-                    &I64Array::from_slice(&[Some(3), Some(0), Some(4)])
-                        .unwrap()
-                        .into(),
-                ],
-                epoch,
-                &mut state_table,
-            )
-            .await
-            .unwrap();
-        assert!(managed_state.is_dirty());
+        let mut epoch = 0;
 
-        // Check output after insertion and deletion.
-        assert_eq!(
-            managed_state.get_output(epoch, &state_table).await.unwrap(),
-            Some(ScalarImpl::Utf8("ghi||def||def||abc".to_string()))
+        {
+            let chunk = StreamChunk::from_pretty(
+                " T T i i I
+                + a , 1 8 123
+                + b / 5 2 128
+                - b / 5 2 128
+                + c _ 1 3 130",
+            );
+            let (ops, columns, visibility) = chunk.into_inner();
+            let chunk_cols: Vec<_> = columns.iter().map(|col| col.array_ref()).collect();
+            agg_state
+                .apply_batch(
+                    &ops,
+                    visibility.as_ref(),
+                    &chunk_cols,
+                    epoch,
+                    &mut state_table,
+                )
+                .await?;
+
+            agg_state.flush(&mut state_table)?;
+            state_table.commit(epoch).await.unwrap();
+            epoch += 1;
+
+            let res = agg_state.get_output(epoch, &state_table).await?;
+            match res {
+                Some(ScalarImpl::Utf8(s)) => {
+                    assert_eq!(s, "c,a".to_string());
+                }
+                _ => panic!("unexpected output"),
+            }
+        }
+
+        {
+            let chunk = StreamChunk::from_pretty(
+                " T T i i I
+                + d - 0 8 134
+                + e + 2 2 137",
+            );
+            let (ops, columns, visibility) = chunk.into_inner();
+            let chunk_cols: Vec<_> = columns.iter().map(|col| col.array_ref()).collect();
+            agg_state
+                .apply_batch(
+                    &ops,
+                    visibility.as_ref(),
+                    &chunk_cols,
+                    epoch,
+                    &mut state_table,
+                )
+                .await?;
+
+            agg_state.flush(&mut state_table)?;
+            state_table.commit(epoch).await.unwrap();
+            epoch += 1;
+
+            let res = agg_state.get_output(epoch, &state_table).await?;
+            match res {
+                Some(ScalarImpl::Utf8(s)) => {
+                    assert_eq!(s, "d_c,a+e".to_string());
+                }
+                _ => panic!("unexpected output"),
+            }
+        }
+
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn test_string_agg_state_grouped_agg_with_order() -> StreamExecutorResult<()> {
+        // Assumption of input schema:
+        // (a: varchar, _delim: varchar, b: int32, c: int32, _row_id: int64)
+        // where `a` is the column to aggregate
+
+        let input_pk_indices = vec![4];
+        let agg_call = AggCall {
+            kind: AggKind::StringAgg,
+            args: AggArgs::Binary([DataType::Varchar, DataType::Varchar], [0, 1]),
+            return_type: DataType::Varchar,
+            order_pairs: vec![
+                OrderPair::new(2, OrderType::Ascending), // b ASC
+            ],
+            append_only: false,
+            filter: None,
+        };
+
+        let table_id = TableId::new(6666);
+        let columns = vec![
+            ColumnDesc::unnamed(ColumnId::new(0), DataType::Int32), // group by c
+            ColumnDesc::unnamed(ColumnId::new(1), DataType::Int32), // order by b
+            ColumnDesc::unnamed(ColumnId::new(2), DataType::Int64), // _row_id
+            ColumnDesc::unnamed(ColumnId::new(3), DataType::Varchar), // a
+            ColumnDesc::unnamed(ColumnId::new(4), DataType::Varchar), // _delim
+        ];
+        let state_table_col_indices = vec![3, 2, 4, 0, 1];
+        let mut state_table = RowBasedStateTable::new_without_distribution(
+            MemoryStateStore::new(),
+            table_id,
+            columns,
+            vec![
+                OrderType::Ascending, // c ASC
+                OrderType::Ascending, // b ASC
+                OrderType::Ascending, // _row_id ASC
+            ],
+            vec![0, 1, 2], // [c, b, _row_id]
         );
 
-        epoch += 1;
-        let mut write_batch = store.start_write_batch(WriteOptions {
-            epoch,
-            table_id: Default::default(),
-        });
-        managed_state
-            .flush(&mut write_batch, &mut state_table)
-            .unwrap();
-        write_batch.ingest().await.unwrap();
-        assert!(!managed_state.is_dirty());
+        let mut agg_state = ManagedStringAggState::new(
+            agg_call,
+            Some(&Row::new(vec![Some(8.into())])),
+            input_pk_indices,
+            state_table_col_indices,
+        )?;
 
-        // Deletion.
-        managed_state
-            .apply_batch(
-                &[Op::Delete, Op::Delete, Op::Delete],
-                None,
-                &[
-                    &Utf8Array::from_slice(&[Some("def"), Some("def"), Some("abc")])
-                        .unwrap()
-                        .into(),
-                    &I64Array::from_slice(&[Some(3), Some(1), Some(4)])
-                        .unwrap()
-                        .into(),
-                ],
-                epoch,
-                &mut state_table,
-            )
-            .await
-            .unwrap();
+        let mut epoch = 0;
 
-        assert!(managed_state.is_dirty());
+        {
+            let chunk = StreamChunk::from_pretty(
+                " T T i i I
+                + a _ 1 8 123
+                + b _ 5 8 128
+                + c _ 1 3 130 D // hide this row",
+            );
+            let (ops, columns, visibility) = chunk.into_inner();
+            let chunk_cols: Vec<_> = columns.iter().map(|col| col.array_ref()).collect();
+            agg_state
+                .apply_batch(
+                    &ops,
+                    visibility.as_ref(),
+                    &chunk_cols,
+                    epoch,
+                    &mut state_table,
+                )
+                .await?;
 
-        // Check output after deletion.
-        assert_eq!(
-            managed_state.get_output(epoch, &state_table).await.unwrap(),
-            Some(ScalarImpl::Utf8("ghi".to_string()))
-        );
+            agg_state.flush(&mut state_table)?;
+            state_table.commit(epoch).await.unwrap();
+            epoch += 1;
 
-        epoch += 1;
-        let mut write_batch = store.start_write_batch(WriteOptions {
-            epoch,
-            table_id: Default::default(),
-        });
-        managed_state
-            .flush(&mut write_batch, &mut state_table)
-            .unwrap();
-        write_batch.ingest().await.unwrap();
-        assert!(!managed_state.is_dirty());
+            let res = agg_state.get_output(epoch, &state_table).await?;
+            match res {
+                Some(ScalarImpl::Utf8(s)) => {
+                    assert_eq!(s, "a_b".to_string());
+                }
+                _ => panic!("unexpected output"),
+            }
+        }
 
-        // Check output after flush.
-        assert_eq!(
-            managed_state.get_output(epoch, &state_table).await.unwrap(),
-            Some(ScalarImpl::Utf8("ghi".to_string()))
-        );
+        {
+            let chunk = StreamChunk::from_pretty(
+                " T T i i I
+                + d , 0 2 134 D // hide this row
+                + e , 2 8 137",
+            );
+            let (ops, columns, visibility) = chunk.into_inner();
+            let chunk_cols: Vec<_> = columns.iter().map(|col| col.array_ref()).collect();
+            agg_state
+                .apply_batch(
+                    &ops,
+                    visibility.as_ref(),
+                    &chunk_cols,
+                    epoch,
+                    &mut state_table,
+                )
+                .await?;
 
-        // Drop the state like machine crashes.
-        let row_count = managed_state.get_row_count();
-        drop(managed_state);
+            agg_state.flush(&mut state_table)?;
+            state_table.commit(epoch).await.unwrap();
+            epoch += 1;
 
-        // Recover the state by `row_count`.
-        let mut managed_state =
-            create_managed_state(store.clone(), TableId::from(0x2333), row_count);
-        assert!(!managed_state.is_dirty());
-        // Get the output after recovery
-        assert_eq!(
-            managed_state.get_output(epoch, &state_table).await.unwrap(),
-            Some(ScalarImpl::Utf8("ghi".to_string()))
-        );
+            let res = agg_state.get_output(epoch, &state_table).await?;
+            match res {
+                Some(ScalarImpl::Utf8(s)) => {
+                    assert_eq!(s, "a,e_b".to_string());
+                }
+                _ => panic!("unexpected output"),
+            }
+        }
 
-        // Insert and delete the same string.
-        managed_state
-            .apply_batch(
-                &[Op::Insert, Op::Delete, Op::Insert],
-                None,
-                &[
-                    &Utf8Array::from_slice(&[Some("ghi"), Some("ghi"), Some("ghi")])
-                        .unwrap()
-                        .into(),
-                    &I64Array::from_slice(&[Some(5), Some(2), Some(6)])
-                        .unwrap()
-                        .into(),
-                ],
-                epoch,
-                &mut state_table,
-            )
-            .await
-            .unwrap();
-        assert!(managed_state.is_dirty());
-        assert_eq!(
-            managed_state.get_output(epoch, &state_table).await.unwrap(),
-            Some(ScalarImpl::Utf8("ghi||ghi".to_string()))
-        );
-        // Check dirtiness after getting the output.
-        // Since no flushing happened, it is still dirty.
-        assert!(managed_state.is_dirty());
-
-        // Delete all the strings.
-        managed_state
-            .apply_batch(
-                &[Op::Delete, Op::Delete],
-                None,
-                &[
-                    &Utf8Array::from_slice(&[Some("ghi"), Some("ghi")])
-                        .unwrap()
-                        .into(),
-                    &I64Array::from_slice(&[Some(5), Some(6)]).unwrap().into(),
-                ],
-                epoch,
-                &mut state_table,
-            )
-            .await
-            .unwrap();
-        assert!(managed_state.is_dirty());
-        assert_eq!(
-            managed_state.get_output(epoch, &state_table).await.unwrap(),
-            None,
-        );
-        assert_eq!(managed_state.get_row_count(), 0);
-
-        managed_state
-            .apply_batch(
-                &[Op::Insert, Op::Insert],
-                None,
-                &[
-                    &Utf8Array::from_slice(&[Some("code"), Some("miko")])
-                        .unwrap()
-                        .into(),
-                    &I64Array::from_slice(&[Some(7), Some(8)]).unwrap().into(),
-                ],
-                epoch,
-                &mut state_table,
-            )
-            .await
-            .unwrap();
-
-        epoch += 1;
-        let mut write_batch = store.start_write_batch(WriteOptions {
-            epoch,
-            table_id: Default::default(),
-        });
-        managed_state
-            .flush(&mut write_batch, &mut state_table)
-            .unwrap();
-        write_batch.ingest().await.unwrap();
-        assert!(!managed_state.is_dirty());
-        let row_count = managed_state.get_row_count();
-
-        drop(managed_state);
-        let mut managed_state =
-            create_managed_state(store.clone(), TableId::from(0x2333), row_count);
-        // Delete right after recovery.
-        managed_state
-            .apply_batch(
-                &[Op::Delete, Op::Insert],
-                None,
-                &[
-                    &Utf8Array::from_slice(&[Some("code"), Some("miko")])
-                        .unwrap()
-                        .into(),
-                    &I64Array::from_slice(&[Some(7), Some(9)]).unwrap().into(),
-                ],
-                epoch,
-                &mut state_table,
-            )
-            .await
-            .unwrap();
-        assert_eq!(
-            managed_state.get_output(epoch, &state_table).await.unwrap(),
-            Some(ScalarImpl::Utf8("miko||miko".to_string()))
-        );
-
-        epoch += 1;
-        let mut write_batch = store.start_write_batch(WriteOptions {
-            epoch,
-            table_id: Default::default(),
-        });
-        managed_state
-            .flush(&mut write_batch, &mut state_table)
-            .unwrap();
-        write_batch.ingest().await.unwrap();
-        assert!(!managed_state.is_dirty());
-
-        let row_count = managed_state.get_row_count();
-
-        drop(managed_state);
-        let mut managed_state =
-            create_managed_state(store.clone(), TableId::from(0x2333), row_count);
-        assert_eq!(
-            managed_state.get_output(epoch, &state_table).await.unwrap(),
-            Some(ScalarImpl::Utf8("miko||miko".to_string()))
-        );
-
-        // Insert and Delete but not flush before crash.
-        managed_state
-            .apply_batch(
-                &[Op::Insert, Op::Delete, Op::Insert],
-                None,
-                &[
-                    &Utf8Array::from_slice(&[Some("naive"), Some("miko"), Some("simple")])
-                        .unwrap()
-                        .into(),
-                    &I64Array::from_slice(&[Some(10), Some(9), Some(11)])
-                        .unwrap()
-                        .into(),
-                ],
-                epoch,
-                &mut state_table,
-            )
-            .await
-            .unwrap();
-        assert_eq!(
-            managed_state.get_output(epoch, &state_table).await.unwrap(),
-            Some(ScalarImpl::Utf8("simple||naive||miko".to_string()))
-        );
-
-        let row_count = managed_state.get_row_count();
-
-        drop(managed_state);
-        let mut managed_state =
-            create_managed_state(store.clone(), TableId::from(0x2333), row_count);
-        // As we didn't flush the changes, the result should be the same as the result before last
-        // changes.
-        assert_eq!(
-            managed_state.get_output(epoch, &state_table).await.unwrap(),
-            Some(ScalarImpl::Utf8("miko||miko".to_string()))
-        );
+        Ok(())
     }
 }

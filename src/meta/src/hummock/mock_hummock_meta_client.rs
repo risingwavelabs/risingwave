@@ -22,7 +22,7 @@ use risingwave_hummock_sdk::{
 };
 use risingwave_pb::hummock::{
     CompactTask, CompactionGroup, HummockSnapshot, HummockVersion, HummockVersionDelta,
-    SstableIdInfo, SubscribeCompactTasksResponse, VacuumTask,
+    SubscribeCompactTasksResponse, VacuumTask,
 };
 use risingwave_rpc_client::error::{Result, RpcError};
 use risingwave_rpc_client::HummockMetaClient;
@@ -128,7 +128,7 @@ impl HummockMetaClient for MockHummockMetaClient {
 
     async fn report_compaction_task(&self, compact_task: CompactTask) -> Result<()> {
         self.hummock_manager
-            .report_compact_task(&compact_task)
+            .report_compact_task(self.context_id, &compact_task)
             .await
             .map(|_| ())
             .map_err(mock_err)
@@ -139,8 +139,12 @@ impl HummockMetaClient for MockHummockMetaClient {
         epoch: HummockEpoch,
         sstables: Vec<LocalSstableInfo>,
     ) -> Result<()> {
+        let sst_to_worker = sstables
+            .iter()
+            .map(|(_, sst)| (sst.id, self.context_id))
+            .collect();
         self.hummock_manager
-            .commit_epoch(epoch, sstables)
+            .commit_epoch(epoch, sstables, sst_to_worker)
             .await
             .map_err(mock_err)
     }
@@ -163,10 +167,6 @@ impl HummockMetaClient for MockHummockMetaClient {
         _table_id: u32,
         _level: u32,
     ) -> Result<()> {
-        todo!()
-    }
-
-    async fn list_sstable_id_infos(&self, _version_id: u64) -> Result<Vec<SstableIdInfo>> {
         todo!()
     }
 }

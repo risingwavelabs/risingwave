@@ -26,11 +26,18 @@ pub struct ApplyScanRule {}
 impl Rule for ApplyScanRule {
     fn apply(&self, plan: PlanRef) -> Option<PlanRef> {
         let apply = plan.as_logical_apply()?;
-        let (left, right, on, join_type, correlated_indices) = apply.clone().decompose();
+        let (left, right, on, join_type, _correlated_id, correlated_indices) =
+            apply.clone().decompose();
         let apply_left_len = left.schema().len();
         assert_eq!(join_type, JoinType::Inner);
-        // TODO: Push `LogicalApply` down `LogicalJoin`.
-        if let (None, None) = (right.as_logical_scan(), right.as_logical_join()) {
+
+        // LogicalJoin with correlated inputs in join condition has been handled by ApplyJoin. This
+        // handles the ones without correlation
+        if let (None, None, None) = (
+            right.as_logical_scan(),
+            right.as_logical_join(),
+            right.as_logical_values(),
+        ) {
             return None;
         }
 
@@ -54,8 +61,9 @@ impl Rule for ApplyScanRule {
             // See the fourth section of Unnesting Arbitrary Queries for how to do the optimization.
             let mut exprs: Vec<ExprImpl> = correlated_indices
                 .into_iter()
-                .map(|correlated_index| {
-                    let (col_index, data_type) = column_mapping.get(&correlated_index).unwrap();
+                .enumerate()
+                .map(|(i, _)| {
+                    let (col_index, data_type) = column_mapping.get(&i).unwrap();
                     InputRef::new(*col_index - apply_left_len, data_type.clone()).into()
                 })
                 .collect();

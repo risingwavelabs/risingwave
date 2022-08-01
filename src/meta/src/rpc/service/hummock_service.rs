@@ -128,7 +128,7 @@ where
             Some(compact_task) => {
                 let result = self
                     .hummock_manager
-                    .report_compact_task(&compact_task)
+                    .report_compact_task(req.context_id, &compact_task)
                     .await;
                 match result {
                     Ok(_) => Ok(Response::new(ReportCompactionTasksResponse {
@@ -300,24 +300,6 @@ where
             status: result_state,
         };
         Ok(Response::new(resp))
-    }
-
-    async fn list_sstable_id_infos(
-        &self,
-        request: Request<ListSstableIdInfosRequest>,
-    ) -> Result<Response<ListSstableIdInfosResponse>, Status> {
-        let version_id = request.into_inner().version_id;
-        let result = self
-            .hummock_manager
-            .list_sstable_id_infos(Some(version_id))
-            .await;
-        match result {
-            Ok(sstable_id_infos) => Ok(Response::new(ListSstableIdInfosResponse {
-                status: None,
-                sstable_id_infos,
-            })),
-            Err(e) => Err(tonic_err(e)),
-        }
     }
 
     async fn get_epoch(

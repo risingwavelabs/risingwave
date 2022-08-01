@@ -14,8 +14,10 @@
 
 use std::sync::{Arc, RwLock};
 
-use rand::distributions::{Distribution as RandDistribution, Uniform};
+use rand::seq::SliceRandom;
 use risingwave_common::bail;
+use risingwave_common::types::ParallelUnitId;
+use risingwave_common::util::worker_util::get_pu_to_worker_mapping;
 use risingwave_pb::common::WorkerNode;
 
 use crate::scheduler::SchedulerResult;
@@ -65,18 +67,38 @@ impl WorkerNodeManager {
     /// Get a random worker node.
     pub fn next_random(&self) -> SchedulerResult<WorkerNode> {
         let current_nodes = self.worker_nodes.read().unwrap();
-        let mut rng = rand::thread_rng();
         if current_nodes.is_empty() {
             tracing::error!("No worker node available.");
             bail!("No worker node available");
         }
 
-        let die = Uniform::from(0..current_nodes.len());
-        Ok(current_nodes.get(die.sample(&mut rng)).unwrap().clone())
+        Ok(current_nodes
+            .choose(&mut rand::thread_rng())
+            .unwrap()
+            .clone())
     }
 
     pub fn worker_node_count(&self) -> usize {
         self.worker_nodes.read().unwrap().len()
+    }
+
+    pub fn get_workers_by_parallel_unit_ids(
+        &self,
+        parallel_unit_ids: &[ParallelUnitId],
+    ) -> SchedulerResult<Vec<WorkerNode>> {
+        let pu_to_worker = get_pu_to_worker_mapping(&self.worker_nodes.read().unwrap());
+
+        let mut workers = Vec::with_capacity(parallel_unit_ids.len());
+        for parallel_unit_id in parallel_unit_ids {
+            match pu_to_worker.get(parallel_unit_id) {
+                Some(worker) => workers.push(worker.clone()),
+                None => bail!(
+                    "No worker node found for parallel unit id: {}",
+                    parallel_unit_id
+                ),
+            }
+        }
+        Ok(workers)
     }
 }
 

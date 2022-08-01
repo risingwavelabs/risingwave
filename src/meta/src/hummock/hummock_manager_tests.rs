@@ -12,8 +12,8 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+use std::borrow::Borrow;
 use std::cmp::Ordering;
-use std::time::Duration;
 
 use itertools::Itertools;
 use risingwave_common::util::epoch::INVALID_EPOCH;
@@ -21,16 +21,19 @@ use risingwave_hummock_sdk::compact::compact_task_to_string;
 use risingwave_hummock_sdk::compaction_group::hummock_version_ext::HummockVersionExt;
 use risingwave_hummock_sdk::compaction_group::StaticCompactionGroupId;
 // use risingwave_hummock_sdk::key_range::KeyRange;
-use risingwave_hummock_sdk::{HummockContextId, HummockSstableId, FIRST_VERSION_ID};
-use risingwave_pb::common::{HostAddress, ParallelUnitType, WorkerType};
+use risingwave_hummock_sdk::{HummockContextId, HummockEpoch, HummockVersionId, FIRST_VERSION_ID};
+use risingwave_pb::common::{HostAddress, WorkerType};
 use risingwave_pb::hummock::{
     HummockPinnedSnapshot, HummockPinnedVersion, HummockSnapshot, KeyRange,
 };
 
+use crate::cluster::WorkerId;
 use crate::hummock::compaction::ManualCompactionOption;
 use crate::hummock::error::Error;
 use crate::hummock::test_utils::*;
+use crate::hummock::HummockManagerRef;
 use crate::model::MetadataModel;
+use crate::storage::MemStore;
 
 fn pin_versions_sum(pin_versions: &[HummockPinnedVersion]) -> usize {
     pin_versions.iter().len()
@@ -146,9 +149,7 @@ async fn test_hummock_compaction_task() {
     let sst_num = 2usize;
 
     // Construct vnode mappings for generating compaction tasks.
-    let parallel_units = cluster_manager
-        .list_parallel_units(Some(ParallelUnitType::Hash))
-        .await;
+    let parallel_units = cluster_manager.list_parallel_units().await;
     env.hash_mapping_manager()
         .build_fragment_hash_mapping(1, &parallel_units);
     for table_id in 1..sst_num + 2 {
@@ -172,10 +173,13 @@ async fn test_hummock_compaction_task() {
         StaticCompactionGroupId::StateDefault.into(),
     )
     .await;
-    hummock_manager
-        .commit_epoch(epoch, to_local_sstable_info(&original_tables))
-        .await
-        .unwrap();
+    commit_from_meta_node(
+        hummock_manager.borrow(),
+        epoch,
+        to_local_sstable_info(&original_tables),
+    )
+    .await
+    .unwrap();
 
     // Get a compaction task.
     let mut compact_task = hummock_manager
@@ -200,12 +204,12 @@ async fn test_hummock_compaction_task() {
     // Cancel the task and succeed.
     compact_task.task_status = false;
     assert!(hummock_manager
-        .report_compact_task(&compact_task)
+        .report_compact_task(context_id, &compact_task)
         .await
         .unwrap());
     // Cancel the task and told the task is not found, which may have been processed previously.
     assert!(!hummock_manager
-        .report_compact_task(&compact_task)
+        .report_compact_task(context_id, &compact_task)
         .await
         .unwrap());
 
@@ -224,12 +228,12 @@ async fn test_hummock_compaction_task() {
     compact_task.task_status = true;
 
     assert!(hummock_manager
-        .report_compact_task(&compact_task)
+        .report_compact_task(context_id, &compact_task)
         .await
         .unwrap());
     // Finish the task and told the task is not found, which may have been processed previously.
     assert!(!hummock_manager
-        .report_compact_task(&compact_task)
+        .report_compact_task(context_id, &compact_task)
         .await
         .unwrap());
 }
@@ -247,10 +251,13 @@ async fn test_hummock_table() {
         StaticCompactionGroupId::StateDefault.into(),
     )
     .await;
-    hummock_manager
-        .commit_epoch(epoch, to_local_sstable_info(&original_tables))
-        .await
-        .unwrap();
+    commit_from_meta_node(
+        hummock_manager.borrow(),
+        epoch,
+        to_local_sstable_info(&original_tables),
+    )
+    .await
+    .unwrap();
 
     let pinned_version = hummock_manager
         .pin_version(context_id, u64::MAX)
@@ -308,10 +315,13 @@ async fn test_hummock_transaction() {
         hummock_manager.unpin_version(context_id).await.unwrap();
 
         // Commit epoch1
-        hummock_manager
-            .commit_epoch(epoch1, to_local_sstable_info(&tables_in_epoch1))
-            .await
-            .unwrap();
+        commit_from_meta_node(
+            hummock_manager.borrow(),
+            epoch1,
+            to_local_sstable_info(&tables_in_epoch1),
+        )
+        .await
+        .unwrap();
         committed_tables.extend(tables_in_epoch1.clone());
 
         // Get tables after committing epoch1. All tables committed in epoch1 should be returned
@@ -359,10 +369,13 @@ async fn test_hummock_transaction() {
         hummock_manager.unpin_version(context_id).await.unwrap();
 
         // Commit epoch2
-        hummock_manager
-            .commit_epoch(epoch2, to_local_sstable_info(&tables_in_epoch2))
-            .await
-            .unwrap();
+        commit_from_meta_node(
+            hummock_manager.borrow(),
+            epoch2,
+            to_local_sstable_info(&tables_in_epoch2),
+        )
+        .await
+        .unwrap();
         committed_tables.extend(tables_in_epoch2);
 
         // Get tables after committing epoch2. tables_in_epoch1 and tables_in_epoch2 should be
@@ -391,8 +404,13 @@ async fn test_release_context_resource() {
         host: "127.0.0.1".to_string(),
         port: 2,
     };
-    let (worker_node_2, _) = cluster_manager
-        .add_worker_node(fake_host_address_2, WorkerType::ComputeNode)
+    let fake_parallelism = 4;
+    let worker_node_2 = cluster_manager
+        .add_worker_node(
+            WorkerType::ComputeNode,
+            fake_host_address_2,
+            fake_parallelism,
+        )
         .await
         .unwrap();
     let context_id_2 = worker_node_2.id;
@@ -486,103 +504,153 @@ async fn test_hummock_manager_basic() {
         host: "127.0.0.1".to_string(),
         port: 2,
     };
-    let (worker_node_2, _) = cluster_manager
-        .add_worker_node(fake_host_address_2, WorkerType::ComputeNode)
+    let fake_parallelism = 4;
+    let worker_node_2 = cluster_manager
+        .add_worker_node(
+            WorkerType::ComputeNode,
+            fake_host_address_2,
+            fake_parallelism,
+        )
         .await
         .unwrap();
     let context_id_2 = worker_node_2.id;
 
-    // test list_version_ids_asc
+    // initial version id
     assert_eq!(
-        hummock_manager.list_version_ids_asc().await.unwrap().len(),
-        1
+        hummock_manager.get_current_version().await.id,
+        FIRST_VERSION_ID
     );
 
-    // Add some sstables and commit.
-    let epoch: u64 = 1;
-    let original_tables = generate_test_tables(epoch, get_sst_ids(&hummock_manager, 2).await);
-    register_sstable_infos_to_compaction_group(
-        hummock_manager.compaction_group_manager_ref_for_test(),
-        &original_tables,
-        StaticCompactionGroupId::StateDefault.into(),
-    )
-    .await;
-    hummock_manager
-        .commit_epoch(epoch, to_local_sstable_info(&original_tables))
+    let mut epoch = 1;
+    let commit_one = |epoch: HummockEpoch, hummock_manager: HummockManagerRef<MemStore>| async move {
+        let original_tables = generate_test_tables(epoch, get_sst_ids(&hummock_manager, 2).await);
+        register_sstable_infos_to_compaction_group(
+            hummock_manager.compaction_group_manager_ref_for_test(),
+            &original_tables,
+            StaticCompactionGroupId::StateDefault.into(),
+        )
+        .await;
+        commit_from_meta_node(
+            hummock_manager.borrow(),
+            epoch,
+            to_local_sstable_info(&original_tables),
+        )
         .await
         .unwrap();
+    };
 
-    // test list_version_ids_asc
+    commit_one(epoch, hummock_manager.clone()).await;
+    epoch += 1;
+
+    // increased version id
     assert_eq!(
-        hummock_manager.list_version_ids_asc().await.unwrap(),
-        vec![FIRST_VERSION_ID, FIRST_VERSION_ID + 1]
+        hummock_manager.get_current_version().await.id,
+        FIRST_VERSION_ID + 1
     );
 
-    // test get_version_pin_count
+    // min pinned version id if no clients
+    assert_eq!(
+        hummock_manager.get_min_pinned_version_id().await,
+        HummockVersionId::MAX
+    );
+    for _ in 0..2 {
+        hummock_manager.unpin_version(context_id_1).await.unwrap();
+        assert_eq!(
+            hummock_manager.get_min_pinned_version_id().await,
+            HummockVersionId::MAX
+        );
+
+        // should pin latest because u64::MAX
+        let version = hummock_manager
+            .pin_version(context_id_1, HummockVersionId::MAX)
+            .await
+            .unwrap()
+            .2
+            .unwrap();
+        assert_eq!(version.id, FIRST_VERSION_ID + 1);
+        assert_eq!(
+            hummock_manager.get_min_pinned_version_id().await,
+            FIRST_VERSION_ID + 1
+        );
+    }
+
+    commit_one(epoch, hummock_manager.clone()).await;
+    // epoch += 1;
+
+    for _ in 0..2 {
+        // should pin latest because deltas cannot contain INVALID_EPOCH
+        let version = hummock_manager
+            .pin_version(context_id_2, INVALID_EPOCH)
+            .await
+            .unwrap()
+            .2
+            .unwrap();
+        assert_eq!(version.id, FIRST_VERSION_ID + 2);
+        // pinned by context_id_1
+        assert_eq!(
+            hummock_manager.get_min_pinned_version_id().await,
+            FIRST_VERSION_ID + 1
+        );
+    }
+
+    // ssts_to_delete is always empty because no compaction is ever invoked.
+    assert!(hummock_manager.get_ssts_to_delete().await.is_empty());
     assert_eq!(
         hummock_manager
-            .get_version_pin_count(FIRST_VERSION_ID + 1)
+            .delete_version_deltas(usize::MAX)
             .await
             .unwrap(),
+        (0, 0)
+    );
+    assert_eq!(
+        hummock_manager.proceed_version_checkpoint().await.unwrap(),
+        1
+    );
+    assert!(hummock_manager.get_ssts_to_delete().await.is_empty());
+    assert_eq!(
+        hummock_manager
+            .delete_version_deltas(usize::MAX)
+            .await
+            .unwrap(),
+        (1, 0)
+    );
+
+    hummock_manager.unpin_version(context_id_1).await.unwrap();
+    assert_eq!(
+        hummock_manager.get_min_pinned_version_id().await,
+        FIRST_VERSION_ID + 2
+    );
+    assert!(hummock_manager.get_ssts_to_delete().await.is_empty());
+    assert_eq!(
+        hummock_manager
+            .delete_version_deltas(usize::MAX)
+            .await
+            .unwrap(),
+        (0, 0)
+    );
+    assert_eq!(
+        hummock_manager.proceed_version_checkpoint().await.unwrap(),
+        1
+    );
+    assert!(hummock_manager.get_ssts_to_delete().await.is_empty());
+    assert_eq!(
+        hummock_manager
+            .delete_version_deltas(usize::MAX)
+            .await
+            .unwrap(),
+        (1, 0)
+    );
+
+    hummock_manager.unpin_version(context_id_2).await.unwrap();
+    assert_eq!(
+        hummock_manager.get_min_pinned_version_id().await,
+        HummockVersionId::MAX
+    );
+
+    assert_eq!(
+        hummock_manager.proceed_version_checkpoint().await.unwrap(),
         0
     );
-    for _ in 0..2 {
-        let version = hummock_manager
-            .pin_version(context_id_1, u64::MAX)
-            .await
-            .unwrap()
-            .2
-            .unwrap();
-        assert_eq!(version.id, FIRST_VERSION_ID + 1);
-        assert_eq!(
-            hummock_manager
-                .get_version_pin_count(FIRST_VERSION_ID + 1)
-                .await
-                .unwrap(),
-            1
-        );
-    }
-
-    for _ in 0..2 {
-        let version = hummock_manager
-            .pin_version(context_id_2, u64::MAX)
-            .await
-            .unwrap()
-            .2
-            .unwrap();
-        assert_eq!(version.id, FIRST_VERSION_ID + 1);
-        assert_eq!(
-            hummock_manager
-                .get_version_pin_count(FIRST_VERSION_ID + 1)
-                .await
-                .unwrap(),
-            2
-        );
-    }
-
-    // test get_ssts_to_delete
-    assert!(hummock_manager
-        .get_ssts_to_delete(FIRST_VERSION_ID)
-        .await
-        .unwrap()
-        .is_empty());
-    assert!(hummock_manager
-        .get_ssts_to_delete(FIRST_VERSION_ID + 1)
-        .await
-        .unwrap()
-        .is_empty());
-    // even nonexistent version
-    assert!(hummock_manager
-        .get_ssts_to_delete(FIRST_VERSION_ID + 100)
-        .await
-        .unwrap()
-        .is_empty());
-
-    // test delete_version
-    hummock_manager
-        .delete_versions(&[FIRST_VERSION_ID])
-        .await
-        .unwrap();
 }
 
 #[tokio::test]
@@ -605,10 +673,13 @@ async fn test_pin_snapshot_response_lost() {
     )
     .await;
     // [ ] -> [ e0 ]
-    hummock_manager
-        .commit_epoch(epoch, to_local_sstable_info(&test_tables))
-        .await
-        .unwrap();
+    commit_from_meta_node(
+        hummock_manager.borrow(),
+        epoch,
+        to_local_sstable_info(&test_tables),
+    )
+    .await
+    .unwrap();
     epoch += 1;
 
     // Pin a snapshot with smallest last_pin
@@ -634,10 +705,13 @@ async fn test_pin_snapshot_response_lost() {
     )
     .await;
     // [ e0:pinned ] -> [ e0:pinned, e1 ]
-    hummock_manager
-        .commit_epoch(epoch, to_local_sstable_info(&test_tables))
-        .await
-        .unwrap();
+    commit_from_meta_node(
+        hummock_manager.borrow(),
+        epoch,
+        to_local_sstable_info(&test_tables),
+    )
+    .await
+    .unwrap();
     epoch += 1;
 
     // Assume the response of the previous rpc is lost.
@@ -672,10 +746,13 @@ async fn test_pin_snapshot_response_lost() {
     )
     .await;
     // [ e0, e1:pinned ] -> [ e0, e1:pinned, e2 ]
-    hummock_manager
-        .commit_epoch(epoch, to_local_sstable_info(&test_tables))
-        .await
-        .unwrap();
+    commit_from_meta_node(
+        hummock_manager.borrow(),
+        epoch,
+        to_local_sstable_info(&test_tables),
+    )
+    .await
+    .unwrap();
     epoch += 1;
 
     // Use correct snapshot id.
@@ -701,10 +778,13 @@ async fn test_pin_snapshot_response_lost() {
     )
     .await;
     // [ e0, e1:pinned, e2:pinned ] -> [ e0, e1:pinned, e2:pinned, e3 ]
-    hummock_manager
-        .commit_epoch(epoch, to_local_sstable_info(&test_tables))
-        .await
-        .unwrap();
+    commit_from_meta_node(
+        hummock_manager.borrow(),
+        epoch,
+        to_local_sstable_info(&test_tables),
+    )
+    .await
+    .unwrap();
     epoch += 1;
 
     // Use u64::MAX as epoch to pin greatest snapshot
@@ -729,10 +809,13 @@ async fn test_print_compact_task() {
         StaticCompactionGroupId::StateDefault.into(),
     )
     .await;
-    hummock_manager
-        .commit_epoch(epoch, to_local_sstable_info(&original_tables))
-        .await
-        .unwrap();
+    commit_from_meta_node(
+        hummock_manager.borrow(),
+        epoch,
+        to_local_sstable_info(&original_tables),
+    )
+    .await
+    .unwrap();
 
     // Get a compaction task.
     let compact_task = hummock_manager
@@ -755,60 +838,33 @@ async fn test_print_compact_task() {
 
 #[tokio::test]
 async fn test_invalid_sst_id() {
-    let (_, hummock_manager, _cluster_manager, _) = setup_compute_env(80).await;
+    let (_, hummock_manager, _cluster_manager, worker_node) = setup_compute_env(80).await;
+    let context_id = worker_node.id;
     let epoch = 1;
-    let ssts = generate_test_tables(epoch, vec![HummockSstableId::MAX]);
+    let ssts = generate_test_tables(epoch, vec![1]);
     register_sstable_infos_to_compaction_group(
         hummock_manager.compaction_group_manager_ref_for_test(),
         &ssts,
         StaticCompactionGroupId::StateDefault.into(),
     )
     .await;
+    let ssts = to_local_sstable_info(&ssts);
+    // reject due to invalid context id
+    let sst_to_worker = ssts
+        .iter()
+        .map(|(_, sst)| (sst.id, WorkerId::MAX))
+        .collect();
     let error = hummock_manager
-        .commit_epoch(epoch, to_local_sstable_info(&ssts))
+        .commit_epoch(epoch, ssts.clone(), sst_to_worker)
         .await
         .unwrap_err();
-    assert!(matches!(error, Error::InternalError(_)));
-}
+    assert!(matches!(error, Error::InvalidSst(1)));
 
-#[tokio::test]
-async fn test_mark_orphan_ssts() {
-    let (_, hummock_manager, _cluster_manager, _) = setup_compute_env(80).await;
-    let epoch = 1;
-
-    // No SST is marked.
-    let marked = hummock_manager
-        .mark_orphan_ssts(Duration::from_secs(3600))
+    let sst_to_worker = ssts.iter().map(|(_, sst)| (sst.id, context_id)).collect();
+    hummock_manager
+        .commit_epoch(epoch, ssts, sst_to_worker)
         .await
         .unwrap();
-    assert!(marked.is_empty());
-
-    let ssts = generate_test_tables(
-        epoch,
-        vec![hummock_manager.get_new_table_id().await.unwrap()],
-    );
-    register_sstable_infos_to_compaction_group(
-        hummock_manager.compaction_group_manager_ref_for_test(),
-        &ssts,
-        StaticCompactionGroupId::StateDefault.into(),
-    )
-    .await;
-    let marked = hummock_manager
-        .mark_orphan_ssts(Duration::from_secs(0))
-        .await
-        .unwrap();
-    // The SST is marked.
-    assert_eq!(marked.len(), 1);
-    assert_eq!(
-        marked.first().as_ref().unwrap().id,
-        ssts.first().as_ref().unwrap().id
-    );
-    // Cannot commit_epoch for marked SST ids.
-    let error = hummock_manager
-        .commit_epoch(epoch, to_local_sstable_info(&ssts))
-        .await
-        .unwrap_err();
-    assert!(matches!(error, Error::InternalError(_)));
 }
 
 #[tokio::test]
@@ -818,9 +874,7 @@ async fn test_trigger_manual_compaction() {
     let sst_num = 2usize;
 
     // Construct vnode mappings for generating compaction tasks.
-    let parallel_units = cluster_manager
-        .list_parallel_units(Some(ParallelUnitType::Hash))
-        .await;
+    let parallel_units = cluster_manager.list_parallel_units().await;
     env.hash_mapping_manager()
         .build_fragment_hash_mapping(1, &parallel_units);
     for table_id in 1..sst_num + 2 {
@@ -861,10 +915,13 @@ async fn test_trigger_manual_compaction() {
         StaticCompactionGroupId::StateDefault.into(),
     )
     .await;
-    hummock_manager
-        .commit_epoch(epoch, to_local_sstable_info(&original_tables))
-        .await
-        .unwrap();
+    commit_from_meta_node(
+        hummock_manager.borrow(),
+        epoch,
+        to_local_sstable_info(&original_tables),
+    )
+    .await
+    .unwrap();
 
     {
         // to check compactor send task fail

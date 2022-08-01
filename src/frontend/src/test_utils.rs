@@ -21,8 +21,8 @@ use parking_lot::RwLock;
 use pgwire::pg_response::PgResponse;
 use pgwire::pg_server::{BoxedError, Session, SessionManager, UserAuthenticator};
 use risingwave_common::catalog::{
-    TableId, DEFAULT_DATABASE_NAME, DEFAULT_SCHEMA_NAME, DEFAULT_SUPPER_USER,
-    PG_CATALOG_SCHEMA_NAME,
+    TableId, DEFAULT_DATABASE_NAME, DEFAULT_SCHEMA_NAME, DEFAULT_SUPER_USER, DEFAULT_SUPER_USER_ID,
+    NON_RESERVED_USER_ID, PG_CATALOG_SCHEMA_NAME,
 };
 use risingwave_common::error::Result;
 use risingwave_pb::catalog::table::OptionalAssociatedSourceId;
@@ -33,7 +33,8 @@ use risingwave_pb::catalog::{
 use risingwave_pb::common::ParallelUnitMapping;
 use risingwave_pb::meta::list_table_fragments_response::TableFragmentInfo;
 use risingwave_pb::stream_plan::StreamFragmentGraph;
-use risingwave_pb::user::{GrantPrivilege, UserInfo};
+use risingwave_pb::user::update_user_request::UpdateField;
+use risingwave_pb::user::{GrantPrivilege, UpdateUserRequest, UserInfo};
 use risingwave_rpc_client::error::Result as RpcResult;
 use risingwave_sqlparser::ast::Statement;
 use risingwave_sqlparser::parser::Parser;
@@ -49,7 +50,7 @@ use crate::planner::Planner;
 use crate::session::{AuthContext, FrontendEnv, OptimizerContext, SessionImpl};
 use crate::user::user_manager::UserInfoManager;
 use crate::user::user_service::UserInfoWriter;
-use crate::user::UserName;
+use crate::user::UserId;
 use crate::FrontendOpts;
 
 /// An embedded frontend without starting meta and without starting frontend as a tcp server.
@@ -82,7 +83,20 @@ impl LocalFrontend {
         sql: impl Into<String>,
     ) -> std::result::Result<PgResponse, Box<dyn std::error::Error + Send + Sync>> {
         let sql = sql.into();
-        self.session_ref().run_statement(sql.as_str()).await
+        self.session_ref().run_statement(sql.as_str(), false).await
+    }
+
+    pub async fn run_user_sql(
+        &self,
+        sql: impl Into<String>,
+        database: String,
+        user_name: String,
+        user_id: UserId,
+    ) -> std::result::Result<PgResponse, Box<dyn std::error::Error + Send + Sync>> {
+        let sql = sql.into();
+        self.session_user_ref(database, user_name, user_id)
+            .run_statement(sql.as_str(), false)
+            .await
     }
 
     pub async fn query_formatted_result(&self, sql: impl Into<String>) -> Vec<String> {
@@ -123,8 +137,22 @@ impl LocalFrontend {
             self.env.clone(),
             Arc::new(AuthContext::new(
                 DEFAULT_DATABASE_NAME.to_string(),
-                DEFAULT_SUPPER_USER.to_string(),
+                DEFAULT_SUPER_USER.to_string(),
+                DEFAULT_SUPER_USER_ID,
             )),
+            UserAuthenticator::None,
+        ))
+    }
+
+    pub fn session_user_ref(
+        &self,
+        database: String,
+        user_name: String,
+        user_id: UserId,
+    ) -> Arc<SessionImpl> {
+        Arc::new(SessionImpl::new(
+            self.env.clone(),
+            Arc::new(AuthContext::new(database, user_name, user_id)),
             UserAuthenticator::None,
         ))
     }
@@ -139,14 +167,14 @@ pub struct MockCatalogWriter {
 
 #[async_trait::async_trait]
 impl CatalogWriter for MockCatalogWriter {
-    async fn create_database(&self, db_name: &str, owner: String) -> Result<()> {
+    async fn create_database(&self, db_name: &str, owner: UserId) -> Result<()> {
         let database_id = self.gen_id();
         self.catalog.write().create_database(ProstDatabase {
             name: db_name.to_string(),
             id: database_id,
-            owner: owner.to_string(),
+            owner,
         });
-        self.create_schema(database_id, DEFAULT_SCHEMA_NAME, owner.clone())
+        self.create_schema(database_id, DEFAULT_SCHEMA_NAME, owner)
             .await?;
         self.create_schema(database_id, PG_CATALOG_SCHEMA_NAME, owner)
             .await?;
@@ -157,7 +185,7 @@ impl CatalogWriter for MockCatalogWriter {
         &self,
         db_id: DatabaseId,
         schema_name: &str,
-        owner: String,
+        owner: UserId,
     ) -> Result<()> {
         let id = self.gen_id();
         self.catalog.write().create_schema(ProstSchema {
@@ -203,8 +231,8 @@ impl CatalogWriter for MockCatalogWriter {
         self.create_source_inner(source).map(|_| ())
     }
 
-    async fn create_sink(&self, sink: ProstSink) -> Result<()> {
-        self.create_sink_inner(sink).map(|_| ())
+    async fn create_sink(&self, sink: ProstSink, graph: StreamFragmentGraph) -> Result<()> {
+        self.create_sink_inner(sink, graph)
     }
 
     async fn drop_materialized_source(&self, source_id: u32, table_id: TableId) -> Result<()> {
@@ -260,19 +288,19 @@ impl MockCatalogWriter {
         catalog.write().create_database(ProstDatabase {
             id: 0,
             name: DEFAULT_DATABASE_NAME.to_string(),
-            owner: DEFAULT_SUPPER_USER.to_string(),
+            owner: DEFAULT_SUPER_USER_ID,
         });
         catalog.write().create_schema(ProstSchema {
             id: 1,
             name: DEFAULT_SCHEMA_NAME.to_string(),
             database_id: 0,
-            owner: DEFAULT_SUPPER_USER.to_string(),
+            owner: DEFAULT_SUPER_USER_ID,
         });
         catalog.write().create_schema(ProstSchema {
             id: 2,
             name: PG_CATALOG_SCHEMA_NAME.to_string(),
             database_id: 0,
-            owner: DEFAULT_SUPPER_USER.to_string(),
+            owner: DEFAULT_SUPER_USER_ID,
         });
         let mut map: HashMap<u32, DatabaseId> = HashMap::new();
         map.insert(1_u32, 0_u32);
@@ -340,7 +368,7 @@ impl MockCatalogWriter {
         Ok(source.id)
     }
 
-    fn create_sink_inner(&self, mut sink: ProstSink) -> Result<()> {
+    fn create_sink_inner(&self, mut sink: ProstSink, _graph: StreamFragmentGraph) -> Result<()> {
         sink.id = self.gen_id();
         self.catalog.write().create_sink(sink.clone());
         self.add_table_or_sink_id(sink.id, sink.schema_id, sink.database_id);
@@ -357,18 +385,44 @@ impl MockCatalogWriter {
 }
 
 pub struct MockUserInfoWriter {
+    id: AtomicU32,
     user_info: Arc<RwLock<UserInfoManager>>,
 }
 
 #[async_trait::async_trait]
 impl UserInfoWriter for MockUserInfoWriter {
     async fn create_user(&self, user: UserInfo) -> Result<()> {
+        let mut user = user;
+        user.id = self.gen_id();
         self.user_info.write().create_user(user);
         Ok(())
     }
 
-    async fn drop_user(&self, user_name: &str) -> Result<()> {
-        self.user_info.write().drop_user(user_name);
+    async fn drop_user(&self, id: UserId) -> Result<()> {
+        self.user_info.write().drop_user(id);
+        Ok(())
+    }
+
+    async fn update_user(&self, request: UpdateUserRequest) -> Result<()> {
+        let mut lock = self.user_info.write();
+        let update_user = request.user.unwrap();
+        let id = update_user.get_id();
+        let old_name = lock.get_user_name_by_id(id).unwrap();
+        let mut user_info = lock.get_user_by_name(&old_name).unwrap().clone();
+        request.update_fields.into_iter().for_each(|field| {
+            if field == UpdateField::Super as i32 {
+                user_info.is_supper = update_user.is_supper;
+            } else if field == UpdateField::Login as i32 {
+                user_info.can_login = update_user.can_login;
+            } else if field == UpdateField::CreateDb as i32 {
+                user_info.can_create_db = update_user.can_create_db;
+            } else if field == UpdateField::AuthInfo as i32 {
+                user_info.auth_info = update_user.auth_info.clone();
+            } else if field == UpdateField::Rename as i32 {
+                user_info.name = update_user.name.clone();
+            }
+        });
+        lock.update_user(update_user);
         Ok(())
     }
 
@@ -376,10 +430,10 @@ impl UserInfoWriter for MockUserInfoWriter {
     /// `GrantAllSources` when grant privilege to user.
     async fn grant_privilege(
         &self,
-        users: Vec<UserName>,
+        users: Vec<UserId>,
         privileges: Vec<GrantPrivilege>,
         with_grant_option: bool,
-        _grantor: UserName,
+        _grantor: UserId,
     ) -> Result<()> {
         let privileges = privileges
             .into_iter()
@@ -390,8 +444,8 @@ impl UserInfoWriter for MockUserInfoWriter {
                 p
             })
             .collect::<Vec<_>>();
-        for user_name in users {
-            if let Some(u) = self.user_info.write().get_user_mut(&user_name) {
+        for user_id in users {
+            if let Some(u) = self.user_info.write().get_user_mut(user_id) {
                 u.grant_privileges.extend(privileges.clone());
             }
         }
@@ -402,15 +456,15 @@ impl UserInfoWriter for MockUserInfoWriter {
     /// `RevokeAllSources` when revoke privilege from user.
     async fn revoke_privilege(
         &self,
-        users: Vec<UserName>,
+        users: Vec<UserId>,
         privileges: Vec<GrantPrivilege>,
-        _granted_by: Option<UserName>,
-        _revoke_by: UserName,
+        _granted_by: Option<UserId>,
+        _revoke_by: UserId,
         revoke_grant_option: bool,
         _cascade: bool,
     ) -> Result<()> {
-        for user_name in users {
-            if let Some(u) = self.user_info.write().get_user_mut(&user_name) {
+        for user_id in users {
+            if let Some(u) = self.user_info.write().get_user_mut(user_id) {
                 u.grant_privileges.iter_mut().for_each(|p| {
                     for rp in &privileges {
                         if rp.object != p.object {
@@ -446,13 +500,21 @@ impl UserInfoWriter for MockUserInfoWriter {
 impl MockUserInfoWriter {
     pub fn new(user_info: Arc<RwLock<UserInfoManager>>) -> Self {
         user_info.write().create_user(UserInfo {
-            name: DEFAULT_SUPPER_USER.to_string(),
+            id: DEFAULT_SUPER_USER_ID,
+            name: DEFAULT_SUPER_USER.to_string(),
             is_supper: true,
             can_create_db: true,
             can_login: true,
             ..Default::default()
         });
-        Self { user_info }
+        Self {
+            user_info,
+            id: AtomicU32::new(NON_RESERVED_USER_ID as u32),
+        }
+    }
+
+    fn gen_id(&self) -> u32 {
+        self.id.fetch_add(1, Ordering::SeqCst)
     }
 }
 

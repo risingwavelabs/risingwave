@@ -18,7 +18,7 @@ use std::sync::Arc;
 use risingwave_common::hash::{calc_hash_key_kind, HashKey, HashKeyDispatcher, HashKeyKind};
 use risingwave_expr::expr::{build_from_prost, BoxedExpression};
 use risingwave_pb::plan_common::JoinType as JoinTypeProto;
-use risingwave_storage::table::state_table::StateTable;
+use risingwave_storage::table::state_table::RowBasedStateTable;
 
 use super::*;
 use crate::executor::hash_join::*;
@@ -85,6 +85,7 @@ impl ExecutorBuilder for HashJoinExecutorBuilder {
                 ) -> Result<BoxedExecutor> {
                     match typ {
                         $( JoinTypeProto::$join_type_proto => HashJoinExecutorDispatcher::<_, {JoinType::$join_type}>::dispatch_by_kind(kind, args), )*
+                        JoinTypeProto::Unspecified => unreachable!(),
                         // _ => todo!("Join type {:?} not implemented", typ),
                     }
                 }
@@ -115,8 +116,8 @@ impl ExecutorBuilder for HashJoinExecutorBuilder {
         let kind = calc_hash_key_kind(&keys);
 
         let state_table_l =
-            StateTable::from_table_catalog(table_l, store.clone(), Some(vnodes.clone()));
-        let state_table_r = StateTable::from_table_catalog(table_r, store, Some(vnodes));
+            RowBasedStateTable::from_table_catalog(table_l, store.clone(), Some(vnodes.clone()));
+        let state_table_r = RowBasedStateTable::from_table_catalog(table_r, store, Some(vnodes));
 
         let args = HashJoinExecutorDispatcherArgs {
             source_l,
@@ -153,8 +154,8 @@ struct HashJoinExecutorDispatcherArgs<S: StateStore> {
     executor_id: u64,
     cond: Option<BoxedExpression>,
     op_info: String,
-    state_table_l: StateTable<S>,
-    state_table_r: StateTable<S>,
+    state_table_l: RowBasedStateTable<S>,
+    state_table_r: RowBasedStateTable<S>,
     is_append_only: bool,
     actor_id: u64,
     metrics: Arc<StreamingMetrics>,
