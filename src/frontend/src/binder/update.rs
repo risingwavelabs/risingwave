@@ -19,6 +19,7 @@ use std::collections::HashMap;
 use itertools::Itertools;
 use risingwave_common::ensure;
 use risingwave_common::error::{ErrorCode, Result};
+use risingwave_common::types::ParallelUnitId;
 use risingwave_sqlparser::ast::{Assignment, Expr, TableFactor, TableWithJoins};
 
 use super::{Binder, BoundTableSource, Relation};
@@ -28,6 +29,9 @@ use crate::expr::{Expr as _, ExprImpl};
 pub struct BoundUpdate {
     /// Used for injecting new chunks to the source.
     pub table_source: BoundTableSource,
+
+    /// Used for scheduling.
+    pub vnode_mapping: Option<Vec<ParallelUnitId>>,
 
     /// Used for scanning the records to update with the `selection`.
     pub table: Relation,
@@ -46,14 +50,13 @@ impl Binder {
         assignments: Vec<Assignment>,
         selection: Option<Expr>,
     ) -> Result<BoundUpdate> {
-        let table_source = {
-            ensure!(table.joins.is_empty());
-            let name = match &table.relation {
-                TableFactor::Table { name, .. } => name.clone(),
-                _ => unreachable!(),
-            };
-            self.bind_table_source(name)?
+        ensure!(table.joins.is_empty());
+        let source_name = match &table.relation {
+            TableFactor::Table { name, .. } => name.clone(),
+            _ => unreachable!(),
         };
+        let (schema_name, table_name) = Self::resolve_table_name(source_name.clone())?;
+        let table_source = self.bind_table_source(source_name)?;
 
         if table_source.append_only {
             return Err(ErrorCode::BindError(
@@ -61,6 +64,10 @@ impl Binder {
             )
             .into());
         }
+        let vnode_mapping = self
+            .bind_table(&schema_name, &table_name, None)?
+            .table_catalog
+            .vnode_mapping;
 
         let table = self.bind_vec_table_with_joins(vec![table])?.unwrap();
         assert_matches!(table, Relation::BaseTable(_));
@@ -123,6 +130,7 @@ impl Binder {
 
         Ok(BoundUpdate {
             table_source,
+            vnode_mapping,
             table,
             selection,
             exprs,
