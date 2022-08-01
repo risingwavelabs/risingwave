@@ -20,7 +20,7 @@ use anyhow::{anyhow, Result};
 
 use super::{ExecuteContext, Task};
 use crate::util::{get_program_args, get_program_env_cmd, get_program_name};
-use crate::{add_meta_node, add_storage_backend, ComputeNodeConfig};
+use crate::{add_meta_node, add_storage_backend, ComputeNodeConfig, HummockInMemoryStrategy};
 
 pub struct ComputeNodeService {
     config: ComputeNodeConfig,
@@ -73,8 +73,13 @@ impl ComputeNodeService {
         let provide_aws_s3 = config.provide_aws_s3.as_ref().unwrap();
         let provide_compute_node = config.provide_compute_node.as_ref().unwrap();
 
-        let is_shared_backend =
-            add_storage_backend(&config.id, provide_minio, provide_aws_s3, true, cmd)?;
+        let is_shared_backend = add_storage_backend(
+            &config.id,
+            provide_minio,
+            provide_aws_s3,
+            HummockInMemoryStrategy::Shared,
+            cmd,
+        )?;
         if provide_compute_node.len() > 1 && !is_shared_backend {
             return Err(anyhow!(
                 "should use a shared backend (e.g. MinIO) for multiple compute-node configuration. Consider adding `use: minio` in risedev config."
