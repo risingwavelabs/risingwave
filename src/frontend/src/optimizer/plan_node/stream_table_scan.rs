@@ -186,7 +186,7 @@ impl StreamTableScan {
                     .logical
                     .output_column_indices()
                     .iter()
-                    .map(|&i| i as u64)
+                    .map(|&i| i as _)
                     .collect(),
                 is_singleton: *self.distribution() == Distribution::Single,
             })),
