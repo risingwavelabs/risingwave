@@ -79,7 +79,7 @@
             r_comment VARCHAR);
 - id: tpch_q1
   before:
-    - create_tables
+  - create_tables
   sql: |
     select
       l_returnflag,
@@ -132,7 +132,7 @@
                 StreamTableScan { table: lineitem, columns: [l_quantity, l_extendedprice, l_discount, l_tax, l_returnflag, l_linestatus, _row_id, l_shipdate] }
 - id: tpch_q2
   before:
-    - create_tables
+  - create_tables
   sql: |
     select
         s_acctbal,
@@ -318,7 +318,7 @@
                     StreamTableScan { table: region, columns: [r_regionkey, _row_id, r_name] }
 - id: tpch_q3
   before:
-    - create_tables
+  - create_tables
   sql: |
     select
       l_orderkey,
@@ -410,7 +410,7 @@
                           StreamTableScan { table: lineitem, columns: [l_orderkey, l_extendedprice, l_discount, _row_id, l_shipdate] }
 - id: tpch_q4
   before:
-    - create_tables
+  - create_tables
   sql: |
     select
       o_orderpriority,
@@ -477,7 +477,7 @@
                   StreamTableScan { table: lineitem, columns: [l_orderkey, _row_id, l_commitdate, l_receiptdate] }
 - id: tpch_q5
   before:
-    - create_tables
+  - create_tables
   sql: |
     select
       n_name,
@@ -596,7 +596,7 @@
                     StreamTableScan { table: region, columns: [r_regionkey, _row_id, r_name] }
 - id: tpch_q6
   before:
-    - create_tables
+  - create_tables
   sql: |
     select
       sum(l_extendedprice * l_discount) as revenue
@@ -634,7 +634,7 @@
                 StreamTableScan { table: lineitem, columns: [l_extendedprice, l_discount, _row_id, l_quantity, l_shipdate] }
 - id: tpch_q7
   before:
-    - create_tables
+  - create_tables
   sql: |
     select
       supp_nation,
@@ -765,7 +765,7 @@
                   StreamTableScan { table: nation, columns: [n_nationkey, n_name, _row_id] }
 - id: tpch_q8
   before:
-    - create_tables
+  - create_tables
   sql: |
     select
       o_year,
@@ -929,7 +929,7 @@
                       StreamTableScan { table: region, columns: [r_regionkey, _row_id, r_name] }
 - id: tpch_q9
   before:
-    - create_tables
+  - create_tables
   sql: |
     select
       nation,
@@ -1058,7 +1058,7 @@
                   StreamTableScan { table: nation, columns: [n_nationkey, n_name, _row_id] }
 - id: tpch_q10
   before:
-    - create_tables
+  - create_tables
   sql: |
     select
       c_custkey,
@@ -1169,7 +1169,7 @@
                           StreamTableScan { table: lineitem, columns: [l_orderkey, l_extendedprice, l_discount, _row_id, l_returnflag] }
 - id: tpch_q11
   before:
-    - create_tables
+  - create_tables
   sql: |
     select
       ps_partkey,
@@ -1310,7 +1310,7 @@
                                 StreamTableScan { table: nation, columns: [n_nationkey, _row_id, n_name] }
 - id: tpch_q12
   before:
-    - create_tables
+  - create_tables
   sql: |
     select
         l_shipmode,
@@ -1381,7 +1381,7 @@
                     StreamTableScan { table: lineitem, columns: [l_orderkey, l_shipmode, _row_id, l_shipdate, l_commitdate, l_receiptdate] }
 - id: tpch_q13
   before:
-    - create_tables
+  - create_tables
   sql: |
     select
       c_count,
@@ -1449,7 +1449,7 @@
                       StreamTableScan { table: orders, columns: [o_orderkey, o_custkey, _row_id, o_comment] }
 - id: tpch_q14
   before:
-    - create_tables
+  - create_tables
   sql: |
     select
       100.00 * sum(case
@@ -1508,7 +1508,7 @@
                     StreamTableScan { table: part, columns: [p_partkey, p_type, _row_id] }
 - id: tpch_q15
   before:
-    - create_tables
+  - create_tables
   sql: |
     with revenue0 (supplier_no, total_revenue) as (
       select
@@ -1619,7 +1619,7 @@
                           StreamTableScan { table: lineitem, columns: [l_suppkey, l_extendedprice, l_discount, _row_id, l_shipdate] }
 - id: tpch_q16
   before:
-    - create_tables
+  - create_tables
   sql: |
     select
       p_brand,
@@ -1716,7 +1716,7 @@
                           StreamTableScan { table: supplier, columns: [s_suppkey, _row_id, s_comment] }
 - id: tpch_q17
   before:
-    - create_tables
+  - create_tables
   sql: |
     select
       ROUND(sum(l_extendedprice) / 7.0, 16) as avg_yearly
@@ -1802,7 +1802,7 @@
                           StreamTableScan { table: lineitem, columns: [l_partkey, l_quantity, _row_id] }
 - id: tpch_q18
   before:
-    - create_tables
+  - create_tables
   sql: |
     select
       c_name,
@@ -1913,7 +1913,7 @@
                         StreamTableScan { table: lineitem, columns: [l_orderkey, l_quantity, _row_id] }
 - id: tpch_q19
   before:
-    - create_tables
+  - create_tables
   sql: |
     select
       sum(l_extendedprice* (1 - l_discount)) as revenue
@@ -1995,7 +1995,7 @@
                       StreamTableScan { table: part, columns: [p_partkey, p_brand, p_size, p_container, _row_id] }
 - id: tpch_q20
   before:
-    - create_tables
+  - create_tables
   sql: |
     select
       s_name,
@@ -2128,7 +2128,7 @@
                             StreamTableScan { table: lineitem, columns: [l_partkey, l_suppkey, l_quantity, _row_id, l_shipdate] }
 - id: tpch_q21
   before:
-    - create_tables
+  - create_tables
   sql: |
     select
       s_name,
@@ -2273,7 +2273,7 @@
                       StreamTableScan { table: lineitem, columns: [l_orderkey, l_suppkey, _row_id, l_commitdate, l_receiptdate] }
 - id: tpch_q22
   before:
-    - create_tables
+  - create_tables
   sql: |
     select
       cntrycode,

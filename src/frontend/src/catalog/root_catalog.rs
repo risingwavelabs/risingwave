@@ -73,7 +73,6 @@ impl Catalog {
         let name = db.name.clone();
         let id = db.id;
 
-        #[expect(clippy::needless_borrow)]
         self.database_by_name
             .try_insert(name.clone(), (&db).into())
             .unwrap();
@@ -175,6 +174,10 @@ impl Catalog {
 
     pub fn get_all_schema_info(&self, db_name: &str) -> Result<Vec<ProstSchema>> {
         Ok(self.get_database_by_name(db_name)?.get_all_schema_info())
+    }
+
+    pub fn iter_schemas(&self, db_name: &str) -> Result<impl Iterator<Item = &SchemaCatalog>> {
+        Ok(self.get_database_by_name(db_name)?.iter_schemas())
     }
 
     pub fn get_all_database_names(&self) -> Vec<String> {

@@ -90,7 +90,6 @@ impl From<&DataType> for DataTypeName {
 }
 
 impl From<DataType> for DataTypeName {
-    #[expect(clippy::needless_borrow)]
     fn from(ty: DataType) -> Self {
         (&ty).into()
     }
