@@ -66,15 +66,30 @@ pub async fn playground() -> Result<()> {
                 profile
             );
             tracing::info!("steps: {:?}", steps);
+
+            let steps: Vec<_> = steps
+                .into_iter()
+                .map(|step| services.get(&step).expect("service not found"))
+                .collect();
+
+            let compute_node_count = steps
+                .iter()
+                .filter(|s| matches!(s, ServiceConfig::ComputeNode(_)))
+                .count();
+
             let mut rw_services = vec![];
             for step in steps {
-                match services.get(&step).expect("service not found") {
+                match step {
                     ServiceConfig::ComputeNode(c) => {
                         let mut command = Command::new("compute-node");
                         ComputeNodeService::apply_command_args(
                             &mut command,
                             c,
-                            HummockInMemoryStrategy::Shared,
+                            if compute_node_count > 1 {
+                                HummockInMemoryStrategy::Shared
+                            } else {
+                                HummockInMemoryStrategy::Isolated
+                            },
                         )?;
                         rw_services.push(RisingWaveService::Compute(
                             command.get_args().map(ToOwned::to_owned).collect(),
@@ -102,7 +117,7 @@ pub async fn playground() -> Result<()> {
                         ));
                     }
                     _ => {
-                        return Err(anyhow!("unsupported service: {}", step));
+                        return Err(anyhow!("unsupported service: {:?}", step));
                     }
                 }
             }
