@@ -33,29 +33,35 @@ pub async fn handle_drop_index(
     check_source(catalog_reader, session.clone(), &schema_name, &index_name)?;
     let index_id = {
         let reader = catalog_reader.read_guard();
-        let index = reader.get_index_by_name(session.database(), &schema_name, &index_name)?;
+        let index_result = reader.get_index_by_name(session.database(), &schema_name, &index_name);
         // Currently index_name is the same as the table_name
-        let table = reader.get_table_by_name(session.database(), &schema_name, &index_name)?;
+        let table_result = reader.get_table_by_name(session.database(), &schema_name, &index_name);
 
-        if session.user_id() != table.owner {
-            return Err(PermissionDenied("Do not have the privilege".to_string()).into());
-        }
+        if index_result.is_ok() {
+            assert!(table_result.is_ok());
+            let table = table_result.unwrap();
+            if session.user_id() != table.owner {
+                return Err(PermissionDenied("Do not have the privilege".to_string()).into());
+            }
+        } else if table_result.is_ok() {
+            let table = table_result.unwrap();
+            // If associated source is `Some`, then it is a actually a materialized source / table v2.
+            if table.associated_source_id().is_some() {
+                return Err(RwError::from(ErrorCode::InvalidInputSyntax(
+                    "Use `DROP TABLE` to drop a table.".to_owned(),
+                )));
+            }
 
-        // If associated source is `Some`, then it is a actually a materialized source / table v2.
-        if table.associated_source_id().is_some() {
-            return Err(RwError::from(ErrorCode::InvalidInputSyntax(
-                "Use `DROP TABLE` to drop a table.".to_owned(),
-            )));
-        }
-
-        // If is index on is `None`, then it is a actually a materialized view.
-        if table.is_index_on.is_none() {
+            // If is index on is `None`, then it is a actually a materialized view.
+            assert!(table.is_index_on.is_none());
             return Err(RwError::from(ErrorCode::InvalidInputSyntax(
                 "Use `DROP MATERIALIZED VIEW` to drop a materialized view.".to_owned(),
             )));
+        } else { // table_result.is_err
+            return Err(index_result.expect_err("must fail"));
         }
 
-        index.id
+        index_result.unwrap().id
     };
 
     let catalog_writer = session.env().catalog_writer();
