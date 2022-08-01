@@ -148,7 +148,7 @@ fn test_batch_query(session: Arc<SessionImpl>, tables: Vec<Table>, seed: u64, se
 /// It is synchronous as constrained by the `libtest_mimic` framework.
 fn setup_sqlsmith_with_seed(seed: u64) -> SqlsmithEnv {
     // tokio runtime is required by frontend to execute query phases.
-    tokio::runtime::Builder::new_multi_thread()
+    tokio::runtime::Builder::new_current_thread()
         .enable_all()
         .build()
         .unwrap()
