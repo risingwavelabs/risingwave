@@ -1124,25 +1124,16 @@ impl ToStream for LogicalAgg {
             ) && c.order_by_fields.is_empty()
         });
 
-        if self.group_key().is_empty() {
-            // simple-agg
-            if !dist_key.is_empty() && agg_calls_can_use_two_phase {
-                // simple 2-phase-agg
-                // TODO(rc)
-                // self.gen_two_phase_streaming_agg_plan(input_stream)
-                self.gen_two_phase_streaming_agg_plan_v2(input_stream, &dist_key)
-            } else {
+        if !dist_key.is_empty() && agg_calls_can_use_two_phase {
+            // 2-phase-agg
+            self.gen_two_phase_streaming_agg_plan_v2(input_stream, &dist_key)
+        } else {
+            if self.group_key().is_empty() {
                 // simple 1-phase-agg
                 Ok(StreamGlobalSimpleAgg::new(self.clone_with_input(
                     input.to_stream_with_dist_required(&RequiredDist::single())?,
                 ))
                 .into())
-            }
-        } else {
-            // hash-agg
-            if !dist_key.is_empty() && agg_calls_can_use_two_phase {
-                // hash 2-phase-agg
-                self.gen_two_phase_streaming_agg_plan_v2(input_stream, &dist_key)
             } else {
                 // hash 1-phase-agg
                 Ok(
