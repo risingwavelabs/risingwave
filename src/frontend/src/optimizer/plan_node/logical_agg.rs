@@ -28,7 +28,7 @@ use risingwave_pb::expr::AggCall as ProstAggCall;
 use super::{
     BatchHashAgg, BatchSimpleAgg, ColPrunable, LogicalProjectBuilder, PlanBase, PlanRef,
     PlanTreeNodeUnary, PredicatePushdown, StreamGlobalSimpleAgg, StreamHashAgg,
-    StreamLocalSimpleAgg, ToBatch, ToStream,
+    StreamLocalSimpleAgg, StreamProject, ToBatch, ToStream,
 };
 use crate::catalog::table_catalog::TableCatalog;
 use crate::expr::{
@@ -442,11 +442,66 @@ impl LogicalAgg {
         Ok(StreamGlobalSimpleAgg::new(total_agg_logical_plan).into())
     }
 
+    fn gen_two_phase_streaming_agg_plan_v2(
+        &self,
+        input_stream: PlanRef,
+        dist_key: &[usize],
+    ) -> Result<PlanRef> {
+        assert!(self.group_key().is_empty()); // TODO(yuchao): only support simple agg currently
+
+        let input_fields = input_stream.schema().fields();
+        let mut exprs: Vec<_> = input_fields
+            .iter()
+            .enumerate()
+            .map(|(idx, field)| InputRef::new(idx, field.data_type.clone()).into())
+            .collect();
+        exprs.push(
+            FunctionCall::new(
+                ExprType::Vnode,
+                dist_key
+                    .iter()
+                    .map(|idx| InputRef::new(*idx, input_fields[*idx].data_type()).into())
+                    .collect(),
+            )?
+            .into(),
+        );
+        let vnode_col_idx = exprs.len() - 1;
+        let project = StreamProject::new(LogicalProject::new(input_stream, exprs));
+        println!("[rc] project dist: {:?}", project.distribution());
+
+        let local_group_key = vec![vnode_col_idx];
+        let n_local_group_key = local_group_key.len();
+        let local_agg = StreamHashAgg::new(LogicalAgg::new(
+            self.agg_calls().to_vec(),
+            local_group_key,
+            project.into(),
+        ));
+
+        let exchange =
+            RequiredDist::single().enforce_if_not_satisfies(local_agg.into(), &Order::any())?;
+        let global_agg = StreamGlobalSimpleAgg::new(LogicalAgg::new(
+            self.agg_calls()
+                .iter()
+                .enumerate()
+                .map(|(partial_output_idx, agg_call)| {
+                    agg_call.partial_to_total_agg_call(n_local_group_key + partial_output_idx)
+                })
+                .collect(),
+            self.group_key().to_vec(),
+            exchange,
+        ));
+
+        println!("[rc] self.group_key: {:?}", self.group_key());
+
+        Ok(global_agg.into())
+    }
+
     /// Check if the aggregation result will be affected by order by clause, if any.
     pub(crate) fn is_agg_result_affected_by_order(&self) -> bool {
-        self.agg_calls
-            .iter()
-            .any(|call| matches!(call.agg_kind, AggKind::StringAgg))
+        self.agg_calls.iter().any(|call| match call.agg_kind {
+            AggKind::StringAgg => !call.order_by_fields.is_empty(),
+            _ => false,
+        })
     }
 }
 
@@ -1052,21 +1107,23 @@ impl ToStream for LogicalAgg {
 
             let input_stream = input.to_stream()?;
             let input_distribution = input_stream.distribution();
+            println!("[rc] input_distribution: {:?}", input_distribution);
+            let dist_key = input_distribution.dist_column_indices().to_vec();
 
-            // simple 2-phase-agg
-            if input_distribution.satisfies(&RequiredDist::AnyShard) && agg_calls_can_use_two_phase
-            {
-                self.gen_two_phase_streaming_agg_plan(input_stream)
-                // simple 1-phase-agg
+            if !dist_key.is_empty() && agg_calls_can_use_two_phase {
+                // simple 2-phase-agg
+                // TODO(rc)
+                // self.gen_two_phase_streaming_agg_plan(input_stream)
+                self.gen_two_phase_streaming_agg_plan_v2(input_stream, &dist_key)
             } else {
+                // simple 1-phase-agg
                 Ok(StreamGlobalSimpleAgg::new(self.clone_with_input(
                     input.to_stream_with_dist_required(&RequiredDist::single())?,
                 ))
                 .into())
             }
-
-            // hash-agg
         } else {
+            // hash-agg
             Ok(
                 StreamHashAgg::new(self.clone_with_input(input.to_stream_with_dist_required(
                     &RequiredDist::shard_by_key(input.schema().len(), self.group_key()),
