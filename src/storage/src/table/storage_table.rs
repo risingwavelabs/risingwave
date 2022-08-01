@@ -66,6 +66,8 @@ pub const DEFAULT_VNODE: VirtualNode = 0;
 /// if the key of the column id does not exist, it will be Null in the relation
 pub type StorageTable<S, const T: AccessType> = StorageTableBase<S, CellBasedRowSerde, T>;
 
+/// [`RowBasedStorageTable`] is the interface accessing relational data in KV(`StateStore`) with
+/// row-based encoding format.
 pub type RowBasedStorageTable<S, const T: AccessType> = StorageTableBase<S, RowBasedSerde, T>;
 /// [`StorageTableBase`] is the interface accessing relational data in KV(`StateStore`) with
 /// encoding format: [keyspace | pk | `column_id` (4B)] -> value.

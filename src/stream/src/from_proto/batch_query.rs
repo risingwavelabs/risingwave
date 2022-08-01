@@ -65,11 +65,6 @@ impl ExecutorBuilder for BatchQueryExecutorBuilder {
             .copied()
             .map(ColumnId::from)
             .collect();
-        // let column_ids = table_desc
-        //     .columns
-        //     .iter()
-        //     .map(|c| ColumnId::from(c.column_id))
-        //     .collect_vec();
 
         // Use indices based on full table instead of streaming executor output.
         let pk_indices = table_desc

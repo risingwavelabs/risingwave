@@ -25,7 +25,7 @@ use super::{Executor, ExecutorInfo, Message};
 use crate::executor::BoxedMessageStream;
 
 pub struct BatchQueryExecutor<S: StateStore> {
-    /// The [`StorageTable`] that needs to be queried
+    /// The [`RowBasedStorageTable`] that needs to be queried
     table: RowBasedStorageTable<S, READ_ONLY>,
 
     /// The number of tuples in one [`StreamChunk`]
