@@ -41,8 +41,7 @@ impl<S: StateStore> GroupTopNExecutor<S> {
         total_count: usize,
         executor_id: u64,
         key_indices: Vec<usize>,
-        // TODO: support multiple group keys
-        group_by: usize,
+        group_by: Vec<usize>,
     ) -> StreamExecutorResult<Self> {
         let info = input.info();
         let schema = input.schema().clone();
@@ -90,9 +89,8 @@ pub struct InnerGroupTopNExecutorNew<S: StateStore> {
     /// We are interested in which element is in the range of [offset, offset+limit).
     managed_state: ManagedTopNStateNew<S>,
 
-    // TODO: support multiple group keys
     /// which column we used to group the data.
-    group_by: usize,
+    group_by: Vec<usize>,
 
     #[expect(dead_code)]
     /// Indices of the columns on which key distribution depends.
@@ -140,7 +138,7 @@ impl<S: StateStore> InnerGroupTopNExecutorNew<S> {
         total_count: usize,
         executor_id: u64,
         key_indices: Vec<usize>,
-        group_by: usize,
+        group_by: Vec<usize>,
     ) -> StreamExecutorResult<Self> {
         let (internal_key_indices, internal_key_data_types, internal_key_order_types) =
             generate_internal_key(&order_pairs, &pk_indices, &schema);
@@ -216,25 +214,28 @@ impl<S: StateStore> TopNExecutorBase for InnerGroupTopNExecutorNew<S> {
 
         // Record all groups encountered in the input
         let mut unique_group_keys = HashSet::new();
+        let datum_num_in_group_key = self.group_by.len();
 
         // Iterate over all the input, identify which groups they cover.
         for (op, row_ref) in chunk.rows() {
             let row = row_ref.to_owned_row();
-            let datum = row[self.group_by].clone();
-
+            let mut group_key = Vec::with_capacity(datum_num_in_group_key);
+            for &col_id in &self.group_by {
+                group_key.push(row[col_id].clone());
+            }
             // The group is encountered for the first time in this input
-            if !unique_group_keys.contains(&datum) {
+            if !unique_group_keys.contains(&group_key) {
                 // Because our state table is already set up to sort by the column value which is
                 // specified by `self.group_by` . Therefore, the first row of the current group
                 //  can be directly obtained by prefix scanning
-                let prefix_key = Row::new(vec![datum.clone()]);
+                let prefix_key = Row::new(group_key.clone());
                 let old_rows = self
                     .managed_state
                     .find_range(Some(&prefix_key), self.offset, self.limit, epoch)
                     .await?;
                 // TODO: Don't delete all the previous data and then insert new data,
                 emit_multi_rows(&mut res_ops, &mut res_rows, Op::Delete, old_rows);
-                unique_group_keys.insert(datum);
+                unique_group_keys.insert(group_key);
             }
 
             let pk_row = row_ref.row_by_indices(&self.internal_key_indices);
@@ -251,8 +252,8 @@ impl<S: StateStore> TopNExecutorBase for InnerGroupTopNExecutorNew<S> {
         }
 
         // Generate new messages based on the current state table
-        for group_key in unique_group_keys {
-            let prefix_key = Row::new(vec![group_key.clone()]);
+        for group_keys in unique_group_keys {
+            let prefix_key = Row::new(group_keys);
             let new_rows = self
                 .managed_state
                 .find_range(Some(&prefix_key), self.offset, self.limit, epoch)
@@ -311,6 +312,7 @@ mod tests {
             fields: vec![
                 Field::unnamed(DataType::Int64),
                 Field::unnamed(DataType::Int64),
+                Field::unnamed(DataType::Int64),
             ],
         }
     }
@@ -318,38 +320,39 @@ mod tests {
     fn create_order_pairs() -> Vec<OrderPair> {
         vec![
             OrderPair::new(1, OrderType::Ascending),
+            OrderPair::new(2, OrderType::Ascending),
             OrderPair::new(0, OrderType::Ascending),
         ]
     }
 
     fn create_stream_chunks() -> Vec<StreamChunk> {
         let chunk0 = StreamChunk::from_pretty(
-            "  I I
-            + 10 9
-            +  8 8
-            +  7 8
-            +  9 1
-            + 10 1
-            +  8 1",
+            "  I I I
+            + 10 9 1
+            +  8 8 2
+            +  7 8 2
+            +  9 1 1
+            + 10 1 1
+            +  8 1 3",
         );
         let chunk1 = StreamChunk::from_pretty(
-            "  I I
-            - 10 9
-            -  8 8
-            - 10 1",
+            "  I I I
+            - 10 9 1
+            -  8 8 2
+            - 10 1 1",
         );
         let chunk2 = StreamChunk::from_pretty(
-            "  I I
-            -  7 8
-            -  8 1
-            -  9 1",
+            "  I I I
+            -  7 8 2
+            -  8 1 3
+            -  9 1 1",
         );
         let chunk3 = StreamChunk::from_pretty(
-            "  I  I
-            +  5  1
-            +  2  1
-            +  3  1
-            +  4  1",
+            "  I I I
+            +  5 1 1
+            +  2 1 1
+            +  3 1 2
+            +  4 1 3",
         );
         vec![chunk0, chunk1, chunk2, chunk3]
     }
@@ -407,6 +410,7 @@ mod tests {
         test_without_offset_and_with_limits().await;
         test_with_offset_and_with_limits().await;
         test_without_limits().await;
+        test_multi_group_key().await;
     }
     async fn test_without_offset_and_with_limits() {
         let order_types = create_order_pairs();
@@ -416,13 +420,13 @@ mod tests {
                 source as Box<dyn Executor>,
                 order_types,
                 (0, Some(2)),
-                vec![1, 0],
+                vec![],
                 MemoryStateStore::new(),
                 TableId::from(0x2333),
                 0,
                 1,
                 vec![],
-                1,
+                vec![1],
             )
             .unwrap(),
         );
@@ -434,12 +438,12 @@ mod tests {
         compare_stream_chunk(
             res.as_chunk().unwrap(),
             &StreamChunk::from_pretty(
-                "  I I
-            + 10 9
-            +  8 8
-            +  7 8
-            +  9 1
-            +  8 1",
+                "  I I I
+                +  9 1 1
+                + 10 1 1
+                +  7 8 2
+                +  8 8 2
+                + 10 9 1",
             ),
         );
 
@@ -452,15 +456,15 @@ mod tests {
         compare_stream_chunk(
             res.as_chunk().unwrap(),
             &StreamChunk::from_pretty(
-                "  I I
-            - 10 9
-            -  8 8
-            -  7 8
-            -  9 1
-            -  8 1
-            +  7 8
-            +  9 1
-            +  8 1",
+                "  I I I
+                -  9 1 1
+                - 10 1 1
+                -  7 8 2
+                -  8 8 2
+                - 10 9 1
+                +  9 1 1
+                +  8 1 3
+                +  7 8 2",
             ),
         );
 
@@ -473,10 +477,10 @@ mod tests {
         compare_stream_chunk(
             res.as_chunk().unwrap(),
             &StreamChunk::from_pretty(
-                "  I I
-            -  7 8
-            -  9 1
-            -  8 1",
+                "  I I I
+                -  9 1 1
+                -  8 1 3
+                -  7 8 2",
             ),
         );
 
@@ -489,9 +493,9 @@ mod tests {
         compare_stream_chunk(
             res.as_chunk().unwrap(),
             &StreamChunk::from_pretty(
-                "  I I
-            +  2 1
-            +  3 1",
+                " I I I
+                + 2 1 1
+                + 5 1 1",
             ),
         );
     }
@@ -504,13 +508,13 @@ mod tests {
                 source as Box<dyn Executor>,
                 order_types,
                 (1, Some(2)),
-                vec![1, 0],
+                vec![],
                 MemoryStateStore::new(),
                 TableId::from(0x2333),
                 0,
                 1,
                 vec![],
-                1,
+                vec![1],
             )
             .unwrap(),
         );
@@ -522,10 +526,10 @@ mod tests {
         compare_stream_chunk(
             res.as_chunk().unwrap(),
             &StreamChunk::from_pretty(
-                "  I I
-            +  8 8
-            +  9 1
-            + 10 1",
+                "  I I I
+                + 10 1 1
+                +  8 1 3
+                +  8 8 2",
             ),
         );
 
@@ -538,11 +542,11 @@ mod tests {
         compare_stream_chunk(
             res.as_chunk().unwrap(),
             &StreamChunk::from_pretty(
-                "  I I
-            -  8 8
-            -  9 1
-            - 10 1
-            +  9 1",
+                "  I I I
+                - 10 1 1
+                -  8 1 3
+                -  8 8 2
+                +  8 1 3",
             ),
         );
 
@@ -555,8 +559,8 @@ mod tests {
         compare_stream_chunk(
             res.as_chunk().unwrap(),
             &StreamChunk::from_pretty(
-                "  I I
-            -  9 1",
+                "  I I I
+                -  8 1 3",
             ),
         );
 
@@ -569,9 +573,9 @@ mod tests {
         compare_stream_chunk(
             res.as_chunk().unwrap(),
             &StreamChunk::from_pretty(
-                "  I I
-            +  3 1
-            +  4 1",
+                " I I I
+                + 3 1 2
+                + 5 1 1",
             ),
         );
     }
@@ -584,13 +588,13 @@ mod tests {
                 source as Box<dyn Executor>,
                 order_types,
                 (0, None),
-                vec![1, 0],
+                vec![],
                 MemoryStateStore::new(),
                 TableId::from(0x2333),
                 0,
                 1,
                 vec![],
-                1,
+                vec![1],
             )
             .unwrap(),
         );
@@ -602,13 +606,13 @@ mod tests {
         compare_stream_chunk(
             res.as_chunk().unwrap(),
             &StreamChunk::from_pretty(
-                "  I I
-            + 10 9
-            +  8 8
-            +  7 8
-            +  9 1
-            + 10 1
-            +  8 1",
+                "  I I I
+                + 10 9 1
+                +  8 8 2
+                +  7 8 2
+                +  9 1 1
+                + 10 1 1
+                +  8 1 3",
             ),
         );
 
@@ -621,16 +625,16 @@ mod tests {
         compare_stream_chunk(
             res.as_chunk().unwrap(),
             &StreamChunk::from_pretty(
-                "  I I
-            - 10 9
-            -  8 8
-            -  7 8
-            -  9 1
-            - 10 1
-            -  8 1
-            +  7 8
-            +  9 1
-            +  8 1",
+                "  I I I
+                - 10 9 1
+                -  8 8 2
+                -  7 8 2
+                -  9 1 1
+                - 10 1 1
+                -  8 1 3
+                +  9 1 1
+                +  8 1 3
+                +  7 8 2",
             ),
         );
 
@@ -643,10 +647,10 @@ mod tests {
         compare_stream_chunk(
             res.as_chunk().unwrap(),
             &StreamChunk::from_pretty(
-                "  I I
-            -  9 1
-            -  8 1
-            -  7 8",
+                "  I I I
+                -  9 1 1
+                -  8 1 3
+                -  7 8 2",
             ),
         );
 
@@ -659,11 +663,100 @@ mod tests {
         compare_stream_chunk(
             res.as_chunk().unwrap(),
             &StreamChunk::from_pretty(
-                "  I  I
-            +  5  1
-            +  2  1
-            +  3  1
-            +  4  1",
+                "  I I I
+                +  5 1 1
+                +  2 1 1
+                +  3 1 2
+                +  4 1 3",
+            ),
+        );
+    }
+    async fn test_multi_group_key() {
+        let order_types = create_order_pairs();
+        let source = create_source();
+        let top_n_executor = Box::new(
+            GroupTopNExecutor::new(
+                source as Box<dyn Executor>,
+                order_types,
+                (0, Some(2)),
+                vec![],
+                MemoryStateStore::new(),
+                TableId::from(0x2333),
+                0,
+                1,
+                vec![],
+                vec![1, 2],
+            )
+            .unwrap(),
+        );
+        let mut top_n_executor = top_n_executor.execute();
+
+        // consume the init barrier
+        top_n_executor.next().await.unwrap().unwrap();
+        let res = top_n_executor.next().await.unwrap().unwrap();
+        compare_stream_chunk(
+            res.as_chunk().unwrap(),
+            &StreamChunk::from_pretty(
+                "  I I I
+                + 10 9 1
+                +  8 8 2
+                +  7 8 2
+                +  9 1 1
+                + 10 1 1
+                +  8 1 3",
+            ),
+        );
+
+        // barrier
+        assert_matches!(
+            top_n_executor.next().await.unwrap().unwrap(),
+            Message::Barrier(_)
+        );
+        let res = top_n_executor.next().await.unwrap().unwrap();
+        compare_stream_chunk(
+            res.as_chunk().unwrap(),
+            &StreamChunk::from_pretty(
+                "  I I I
+                - 10 9 1
+                -  8 8 2
+                -  7 8 2
+                -  9 1 1
+                - 10 1 1
+                +  9 1 1
+                +  7 8 2",
+            ),
+        );
+
+        // barrier
+        assert_matches!(
+            top_n_executor.next().await.unwrap().unwrap(),
+            Message::Barrier(_)
+        );
+        let res = top_n_executor.next().await.unwrap().unwrap();
+        compare_stream_chunk(
+            res.as_chunk().unwrap(),
+            &StreamChunk::from_pretty(
+                "  I I I
+                -  7 8 2
+                -  8 1 3
+                -  9 1 1",
+            ),
+        );
+
+        // barrier
+        assert_matches!(
+            top_n_executor.next().await.unwrap().unwrap(),
+            Message::Barrier(_)
+        );
+        let res = top_n_executor.next().await.unwrap().unwrap();
+        compare_stream_chunk(
+            res.as_chunk().unwrap(),
+            &StreamChunk::from_pretty(
+                "  I I I
+                +  5 1 1
+                +  2 1 1
+                +  3 1 2
+                +  4 1 3",
             ),
         );
     }

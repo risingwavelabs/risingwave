@@ -13,7 +13,6 @@
 // limitations under the License.
 
 use aws_sdk_s3::{Client, Endpoint, Region};
-use aws_smithy_http::body::SdkBody;
 use fail::fail_point;
 use futures::future::try_join_all;
 use itertools::Itertools;
@@ -36,7 +35,7 @@ impl ObjectStore for S3ObjectStore {
         self.client
             .put_object()
             .bucket(&self.bucket)
-            .body(SdkBody::from(obj).into())
+            .body(aws_sdk_s3::types::ByteStream::from(obj))
             .key(path)
             .send()
             .await?;

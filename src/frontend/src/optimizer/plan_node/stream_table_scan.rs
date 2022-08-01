@@ -22,7 +22,8 @@ use risingwave_pb::stream_plan::StreamNode as ProstStreamPlan;
 
 use super::{LogicalScan, PlanBase, PlanNodeId, StreamIndexScan, ToStreamProst};
 use crate::catalog::ColumnId;
-use crate::optimizer::property::Distribution;
+use crate::optimizer::plan_node::utils::IndicesDisplay;
+use crate::optimizer::property::{Distribution, DistributionDisplay};
 
 /// `StreamTableScan` is a virtual plan node to represent a stream table scan. It will be converted
 /// to chain + merge node (for upstream materialize) + batch table scan when converting to `MView`
@@ -97,11 +98,23 @@ impl fmt::Display for StreamTableScan {
                     }
                     .join(", ")
                 ),
-            )
-            .field("pk_indices", &format_args!("{:?}", self.base.pk_indices));
+            );
 
         if verbose {
-            builder.field("distribution", &self.distribution());
+            builder.field(
+                "pk",
+                &IndicesDisplay {
+                    indices: self.pk_indices(),
+                    input_schema: &self.base.schema,
+                },
+            );
+            builder.field(
+                "distribution",
+                &DistributionDisplay {
+                    distribution: self.distribution(),
+                    input_schema: &self.base.schema,
+                },
+            );
         }
 
         builder.finish()
