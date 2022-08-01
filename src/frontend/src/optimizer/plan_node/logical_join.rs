@@ -373,6 +373,7 @@ impl LogicalJoin {
             JoinType::FullOuter => FunctionalDependencySet::new(),
             JoinType::LeftSemi | JoinType::LeftAnti => left_fd_set,
             JoinType::RightSemi | JoinType::RightAnti => right_fd_set,
+            JoinType::Unspecified => unreachable!(),
         };
         ColIndexMapping::with_remaining_columns(output_indices, out_col_num)
             .rewrite_functional_dependency_set(fd_set)

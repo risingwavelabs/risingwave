@@ -109,6 +109,9 @@ pub struct FunctionalDependencySet {
     ///  NULL | 1
     ///  NULL | 2
     /// ```
+    ///
+    /// Currently we only have strict dependencies, but we may also have lax dependencies in the
+    /// future.
     strict: Vec<FunctionalDependency>,
 }
 
@@ -343,5 +346,28 @@ impl FunctionalDependencySet {
             }
         }
         new_key
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::FunctionalDependencySet;
+
+    #[test]
+    fn test_minimize_key() {
+        let mut fd_set = FunctionalDependencySet::new();
+        // [0, 2, 3, 4] is a key
+        fd_set.add_key_column(5, &[0, 2, 3, 4]);
+        // 0 is constant
+        fd_set.add_constant_column(5, &[0]);
+        // 1, 2 --> 3
+        fd_set.add_functional_dependency_by_column_indices(&[1, 2], &[3], 5);
+        // 0, 2 --> 3
+        fd_set.add_functional_dependency_by_column_indices(&[0, 2], &[3], 5);
+        // 3, 4 --> 2
+        fd_set.add_functional_dependency_by_column_indices(&[3, 4], &[2], 5);
+        // therefore, column 0 and column 2 can be removed from key
+        let key = fd_set.minimize_key(&[0, 2, 3, 4], 5);
+        assert_eq!(key, &[3, 4]);
     }
 }
