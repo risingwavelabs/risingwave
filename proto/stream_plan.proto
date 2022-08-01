@@ -99,8 +99,9 @@ message ActorMapping {
 // todo: StreamSourceNode or TableSourceNode
 message SourceNode {
   enum SourceType {
-    TABLE = 0;
-    SOURCE = 1;
+    UNSPECIFIED = 0;
+    TABLE = 1;
+    SOURCE = 2;
   }
   uint32 table_id = 1;
   repeated int32 column_ids = 2;
@@ -381,7 +382,7 @@ message StreamNode {
 }
 
 enum DispatcherType {
-  INVALID = 0;
+  UNSPECIFIED = 0;
   // Dispatch by hash key, hashed by consistent hash.
   HASH = 1;
   // Broadcast to all downstreams.
@@ -438,9 +439,10 @@ message StreamActor {
 }
 
 enum FragmentType {
-  OTHERS = 0;
-  SOURCE = 1;
-  SINK = 2;
+  FRAGMENT_UNSPECIFIED = 0;
+  OTHERS = 1;
+  SOURCE = 2;
+  SINK = 3;
 }
 
 message StreamFragmentGraph {
