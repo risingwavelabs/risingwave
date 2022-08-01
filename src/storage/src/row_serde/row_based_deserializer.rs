@@ -13,13 +13,11 @@
 // limitations under the License.
 
 use std::sync::Arc;
-use std::usize;
 
 use bytes::{Buf, Bytes};
-use itertools::Itertools;
 use risingwave_common::array::Row;
 use risingwave_common::error::{ErrorCode, Result};
-use risingwave_common::types::{DataType, ScalarImpl, VirtualNode, VIRTUAL_NODE_SIZE};
+use risingwave_common::types::{DataType, VirtualNode, VIRTUAL_NODE_SIZE};
 use risingwave_common::util::value_encoding::deserialize_datum;
 
 use super::cell_based_encoding_util::parse_raw_key_to_vnode_and_key;

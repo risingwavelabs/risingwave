@@ -15,7 +15,7 @@
 use futures::{pin_mut, StreamExt};
 use futures_async_stream::try_stream;
 use risingwave_common::array::{Op, StreamChunk};
-use risingwave_common::catalog::{OrderedColumnDesc, Schema};
+use risingwave_common::catalog::Schema;
 use risingwave_storage::table::storage_table::{RowBasedStorageTable, READ_ONLY};
 use risingwave_storage::table::TableIter;
 use risingwave_storage::StateStore;
@@ -44,7 +44,6 @@ where
         table: RowBasedStorageTable<S, READ_ONLY>,
         batch_size: Option<usize>,
         info: ExecutorInfo,
-        _pk_descs: Vec<OrderedColumnDesc>,
     ) -> Self {
         Self {
             table,
@@ -100,9 +99,6 @@ mod test {
     use std::vec;
 
     use futures_async_stream::for_await;
-    use risingwave_common::catalog::{ColumnDesc, ColumnId};
-    use risingwave_common::types::DataType;
-    use risingwave_common::util::sort_util::OrderType;
 
     use super::*;
     use crate::executor::mview::test_utils::gen_basic_table;
@@ -119,23 +115,7 @@ mod test {
             identity: "BatchQuery".to_owned(),
         };
 
-        let pk_descs = vec![
-            OrderedColumnDesc {
-                column_desc: ColumnDesc::unnamed(ColumnId::from(0), DataType::Int32),
-                order: OrderType::Ascending,
-            },
-            OrderedColumnDesc {
-                column_desc: ColumnDesc::unnamed(ColumnId::from(1), DataType::Int32),
-                order: OrderType::Descending,
-            },
-        ];
-
-        let executor = Box::new(BatchQueryExecutor::new(
-            table,
-            Some(test_batch_size),
-            info,
-            pk_descs,
-        ));
+        let executor = Box::new(BatchQueryExecutor::new(table, Some(test_batch_size), info));
 
         let stream = executor.execute_with_epoch(u64::MAX);
         let mut batch_cnt = 0;

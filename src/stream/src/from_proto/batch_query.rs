@@ -13,7 +13,7 @@
 // limitations under the License.
 
 use itertools::Itertools;
-use risingwave_common::catalog::{ColumnDesc, ColumnId, OrderedColumnDesc, TableId};
+use risingwave_common::catalog::{ColumnDesc, ColumnId, TableId};
 use risingwave_common::util::sort_util::OrderType;
 use risingwave_pb::plan_common::{CellBasedTableDesc, OrderType as ProstOrderType};
 use risingwave_storage::table::storage_table::RowBasedStorageTable;
@@ -49,15 +49,6 @@ impl ExecutorBuilder for BatchQueryExecutorBuilder {
             .columns
             .iter()
             .map(ColumnDesc::from)
-            .collect_vec();
-        // TODO: remove this
-        let pk_descs = table_desc
-            .order_key
-            .iter()
-            .map(|order| OrderedColumnDesc {
-                column_desc: column_descs[order.index as usize].clone(),
-                order: OrderType::from_prost(&ProstOrderType::from_i32(order.order_type).unwrap()),
-            })
             .collect_vec();
         let column_ids = node
             .column_ids
@@ -105,7 +96,6 @@ impl ExecutorBuilder for BatchQueryExecutorBuilder {
                 pk_indices: params.pk_indices,
                 identity: "BatchQuery".to_owned(),
             },
-            pk_descs,
         );
 
         Ok(executor.boxed())
