@@ -64,7 +64,7 @@ pub struct BlockStream {
 
 impl BlockStream {
     /// Constructs a new `BlockStream` object that reads from the given `byte_stream` and interprets
-    /// the data as block of the SST described in `sst_meta`, starting at block `block_index`.
+    /// the data as blocks of the SST described in `sst_meta`, starting at block `block_index`.
     ///
     /// If `block_index >= sst_meta.block_metas.len()`, then `BlockStream` will not read any data
     /// from `byte_stream`.

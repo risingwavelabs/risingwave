@@ -21,7 +21,7 @@ use risingwave_hummock_sdk::VersionedComparator;
 use super::super::{HummockResult, HummockValue};
 use super::{SstableIteratorReadOptions, SstableIteratorType};
 use crate::hummock::iterator::{Forward, HummockIterator};
-use crate::hummock::{BlockIterator, BlockStream, SstableStoreRef, TableHolder};
+use crate::hummock::{BlockHolder, BlockIterator, BlockStream, SstableStoreRef, TableHolder};
 use crate::monitor::StoreLocalStatistic;
 
 /// Iterates on a table while downloading it.
@@ -57,42 +57,17 @@ impl SstableStreamIterator {
     /// Seeks to a block, and then seeks to the first position where the key >= `start_key` (if
     /// given). If the the block does not contain such a key, the iterator continues to the first
     /// key of the next block.
-    async fn start_stream(
-        &mut self,
-        block_idx: usize,
-        start_key: Option<&[u8]>,
-    ) -> HummockResult<()> {
-        tracing::trace!(
-            target: "events::storage::sstable::block_seek",
-            "table iterator seek: table_id = {}, block_id = {}",
-            self.sst.value().id,
-            block_idx,
-        );
-
-        // When all data are in block cache, it is highly possible that this iterator will stay on a
-        // worker thread for a full time. Therefore, we use tokio's unstable API consume_budget to
-        // do cooperative scheduling.
-        tokio::task::consume_budget().await;
-
+    async fn init(&mut self, block_idx: usize, start_key: Option<&[u8]>) -> HummockResult<()> {
+        // Enforce the use of new stream and iterators.
+        self.block_stream = None;
+        self.block_iter = None;
         self.cur_idx = block_idx;
 
-        if block_idx >= self.sst.value().block_count() {
-            self.block_stream = None;
-            self.block_iter = None;
-
+        if self.cur_idx >= self.sst.value().block_count() {
             return Ok(());
         }
 
-        let mut block_stream = self
-            .sstable_store
-            .get_block_stream(
-                self.sst.value(),
-                Some(block_idx), /* ToDo: What about parameters used before (CachePolicy,
-                                  * &StoreLocalStatistic)? */
-            )
-            .await?;
-
-        let mut block_iter = BlockIterator::new(block_stream.next().await?.unwrap());
+        let block_iter = self.load_block().await?;
 
         if let Some(key) = start_key {
             block_iter.seek(key);
@@ -100,25 +75,81 @@ impl SstableStreamIterator {
             block_iter.seek_to_first();
         }
 
-        if block_iter.is_valid() {
-            self.block_stream = Some(block_stream);
-            self.block_iter = Some(block_iter);
-        } else {
-            // If `key` is larger than anything stored in the current block, then `block_iter`
-            // searches through the whole block and eventually ends in an invalid state. We
-            // therefore move to the start of the next block.
-            self.cur_idx += 1;
-
-            if let Some(block) = block_stream.next().await? {
-                let mut block_iter = BlockIterator::new(block);
-                block_iter.seek_to_first();
-                self.block_iter = Some(block_iter);
-            } else {
-                // Reached end of table.
-                self.block_stream = None;
-                self.block_iter = None;
-            }
+        // If `key` is larger than anything stored in the current block, then `block_iter` searches
+        // through the whole block and eventually ends in an invalid state. We therefore move to the
+        // start of the next block.
+        if !block_iter.is_valid() {
+            self.next_block().await?;
         }
+
+        Ok(())
+    }
+
+    /// Loads a new block, creates a new iterator for it, stores that iterator in `self.block_iter`,
+    /// and returns a reference to it.
+    ///
+    /// If there is an active block stream the function returns the next block from that stream.
+    /// Otherwise, the function loads the block with index `self.cur_idx`. Let `B` be that block. If
+    /// `B` is already in memory, the function loads it from there. Otherwise, the function starts a
+    /// new stream which starts with block `B`.
+    async fn load_block(&mut self) -> HummockResult<&mut BlockIterator> {
+        tracing::trace!(
+            target: "events::storage::sstable::block_seek",
+            "table iterator seek: table_id = {}, block_id = {}",
+            self.sst.value().id,
+            self.cur_idx,
+        );
+
+        // When all data are in block cache, it is highly possible that this iterator will stay on a
+        // worker thread for a full time. Therefore, we use tokio's unstable API consume_budget to
+        // do cooperative scheduling.
+        tokio::task::consume_budget().await;
+
+        // We use the block stream (i.e. download the next block) if we already started a download,
+        // or if the desired block is not in memory.
+        let block = if self.block_stream.is_some() || self.cur_idx >= self.sst.value().blocks.len()
+        {
+            // Start a new block stream if needed.
+            if self.block_stream.is_none() {
+                self.block_stream = Some(
+                    self.sstable_store
+                        .get_block_stream(
+                            self.sst.value(),
+                            Some(self.cur_idx),
+                            // ToDo: What about parameters used before (CachePolicy,
+                            // &StoreLocalStatistic)?
+                        )
+                        .await?,
+                );
+            }
+
+            self.block_stream
+                .as_mut()
+                .expect("no block stream")
+                .next()
+                .await?
+                .unwrap()
+        } else {
+            BlockHolder::from_ref_block(self.sst.value().blocks[self.cur_idx].clone())
+        };
+
+        self.block_iter = Some(BlockIterator::new(block));
+        Ok(self.block_iter.as_mut().unwrap())
+    }
+
+    /// Continues the iterator at the next block.
+    async fn next_block(&mut self) -> HummockResult<()> {
+        self.cur_idx += 1;
+
+        if self.cur_idx >= self.sst.value().block_count() {
+            self.block_stream = None;
+            self.block_iter = None;
+
+            return Ok(());
+        }
+
+        // Load next block and move iterator to first key.
+        self.load_block().await?.seek_to_first();
 
         Ok(())
     }
@@ -129,11 +160,11 @@ impl HummockIterator for SstableStreamIterator {
     type Direction = Forward;
 
     /// Moves to the next KV-pair in the table. Assumes that the current position is valid. Even if
-    /// the next position is valid, the function return `Ok(())`.
+    /// the next position is invalid, the function return `Ok(())`.
     async fn next(&mut self) -> HummockResult<()> {
         // We have to handle two internal iterators.
-        //   - block_stream: iterates over the blocks of the table.
-        //   - block_iter: iterates over the KV-pairs of the current block.
+        //   `block_stream`: iterates over the blocks of the table.
+        //     `block_iter`: iterates over the KV-pairs of the current block.
         // These iterators work in different ways.
 
         // BlockIterator (and Self) works as follows: After new(), we call seek(). That brings us
@@ -143,31 +174,24 @@ impl HummockIterator for SstableStreamIterator {
         // BlockStream follows a different approach. After new(), we do not seek, instead next()
         // returns the first value.
 
+        // If possible, we also use data from blocks already stored in memory before we start a new
+        // BlockStream. However, once we created such a stream, we always use it.
+
         self.stats.scan_key_count += 1;
 
-        // Unwrap internal iterators.
-        let block_stream = self.block_stream.as_mut().expect("no block stream");
+        // Unwrap internal iterator.
         let block_iter = self.block_iter.as_mut().expect("no block iterator");
 
         // Note that we assume that we are at a valid position.
 
         // Can we continue in current block?
         block_iter.next();
-        if !block_iter.is_valid() {
-            // No, block is exhausted. Load next.
-            self.cur_idx += 1;
-            if let Some(block) = block_stream.next().await? {
-                let mut block_iter = BlockIterator::new(block);
-                block_iter.seek_to_first();
-                self.block_iter = Some(block_iter);
-            } else {
-                // Reached end of table.
-                self.block_stream = None;
-                self.block_iter = None;
-            }
+        if block_iter.is_valid() {
+            Ok(())
+        } else {
+            // No, block is exhausted. We need to load the next block.
+            self.next_block().await
         }
-
-        Ok(())
     }
 
     fn key(&self) -> &[u8] {
@@ -181,13 +205,25 @@ impl HummockIterator for SstableStreamIterator {
     }
 
     fn is_valid(&self) -> bool {
-        self.block_iter.as_ref().map_or(false, |i| i.is_valid())
+        self.block_iter.is_some() && self.block_iter.as_ref().unwrap().is_valid()
     }
 
+    /// Resets the position of the iterator.
+    ///
+    /// ***Note:***
+    /// Do not decide whether the position is valid or not by checking the returned error of this
+    /// function. This function WILL NOT return an `Err` if invalid. You should check `is_valid`
+    /// before starting iteration.
     async fn rewind(&mut self) -> HummockResult<()> {
-        self.start_stream(0, None).await
+        self.init(0, None).await
     }
 
+    /// Resets iterator and seeks to the first position where the stored key >= provided key.
+    ///
+    /// ***Note:***
+    /// Do not decide whether the position is valid or not by checking the returned error of this
+    /// function. This function WON'T return an `Err` if invalid. You should check `is_valid` before
+    /// starting iteration.
     async fn seek(&mut self, key: &[u8]) -> HummockResult<()> {
         let block_idx = self
             .sst
@@ -212,16 +248,16 @@ impl HummockIterator for SstableStreamIterator {
             })
             .saturating_sub(1); // considering the boundary of 0
 
-        self.start_stream(block_idx, Some(key)).await?;
+        self.init(block_idx, Some(key)).await?;
 
         // Assume that our table contains two blocks `A: [k l m]` and `B: [s t u]` and that we
         // search for the key `p`. The search above then returns `A` (first `B` and then subtracts
         // 1). The `seek_idx()` of `SSTableIterator` then searches over `A` for `p`. Since `A` does
         // not contain `p`, the search eventually reaches the end of `A` and leaves the iterator in
-        // an invalid state. To compensate for that `SSTableIterator::seek()` then restarts the
+        // an invalid state. To compensate for that, `SstableIterator::seek()` then restarts the
         // search for the next block without a search key. We divert from that approach to avoid a
-        // second call of `start_stream`. Instead, we implement `start_stream()` in such a way that
-        // it handles this case without the need to start a second download.
+        // second call of `start_stream()`. Instead, we implement `start_stream()` in such a way
+        // that it handles this case without the need to start a second download.
 
         Ok(())
     }
