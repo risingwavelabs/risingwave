@@ -73,7 +73,6 @@ impl Catalog {
         let name = db.name.clone();
         let id = db.id;
 
-        #[expect(clippy::needless_borrow)]
         self.database_by_name
             .try_insert(name.clone(), (&db).into())
             .unwrap();
@@ -177,6 +176,10 @@ impl Catalog {
         Ok(self.get_database_by_name(db_name)?.get_all_schema_info())
     }
 
+    pub fn iter_schemas(&self, db_name: &str) -> Result<impl Iterator<Item = &SchemaCatalog>> {
+        Ok(self.get_database_by_name(db_name)?.iter_schemas())
+    }
+
     pub fn get_all_database_names(&self) -> Vec<String> {
         self.database_by_name.keys().cloned().collect_vec()
     }
@@ -251,6 +254,7 @@ impl Catalog {
                 risingwave_pb::stream_plan::source_node::SourceType::Source => {
                     Err(CatalogError::Duplicated("source", relation_name.to_string()).into())
                 }
+                risingwave_pb::stream_plan::source_node::SourceType::Unspecified => unreachable!(),
             }
         } else if let Some(_table) = schema.get_table_by_name(relation_name) {
             Err(CatalogError::Duplicated("materialized view", relation_name.to_string()).into())

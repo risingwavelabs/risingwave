@@ -12,13 +12,17 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-#[cfg(feature = "enable_sqlsmith_unit_test")]
-mod frontend;
+use risingwave_common::types::DataType;
 
-#[cfg(feature = "enable_sqlsmith_unit_test")]
-fn main() {
-    frontend::run();
-}
+use crate::catalog::pg_catalog::PgCatalogColumnsDef;
 
-#[cfg(not(feature = "enable_sqlsmith_unit_test"))]
-fn main() {}
+/// The catalog `pg_user` provides access to information about database users.
+/// Ref: [`https://www.postgresql.org/docs/current/view-pg-user.html`]
+pub const PG_CLASS_TABLE_NAME: &str = "pg_class";
+pub const PG_CLASS_COLUMNS: &[PgCatalogColumnsDef] = &[
+    (DataType::Int32, "oid"),
+    (DataType::Varchar, "classname"),
+    (DataType::Int32, "namespaceoid"),
+    (DataType::Int32, "owneroid"),
+    (DataType::Varchar, "classkind"),
+];

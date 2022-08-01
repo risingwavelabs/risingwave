@@ -18,7 +18,7 @@ use parking_lot::lock_api::ArcRwLockReadGuard;
 use parking_lot::{RawRwLock, RwLock};
 use risingwave_common::error::ErrorCode::InternalError;
 use risingwave_common::error::{Result, RwError};
-use risingwave_pb::user::{GrantPrivilege, UserInfo};
+use risingwave_pb::user::{GrantPrivilege, UpdateUserRequest, UserInfo};
 use risingwave_rpc_client::MetaClient;
 use tokio::sync::watch::Receiver;
 
@@ -44,6 +44,8 @@ pub trait UserInfoWriter: Send + Sync {
     async fn create_user(&self, user_info: UserInfo) -> Result<()>;
 
     async fn drop_user(&self, id: UserId) -> Result<()>;
+
+    async fn update_user(&self, request: UpdateUserRequest) -> Result<()>;
 
     async fn grant_privilege(
         &self,
@@ -79,6 +81,11 @@ impl UserInfoWriter for UserInfoWriterImpl {
 
     async fn drop_user(&self, id: UserId) -> Result<()> {
         let version = self.meta_client.drop_user(id).await?;
+        self.wait_version(version).await
+    }
+
+    async fn update_user(&self, request: UpdateUserRequest) -> Result<()> {
+        let version = self.meta_client.update_user(request).await?;
         self.wait_version(version).await
     }
 

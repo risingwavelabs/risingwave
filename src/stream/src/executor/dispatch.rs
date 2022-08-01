@@ -323,7 +323,7 @@ impl DispatcherImpl {
                 let [output]: [_; 1] = outputs.try_into().unwrap();
                 DispatcherImpl::Simple(SimpleDispatcher::new(output, dispatcher.dispatcher_id))
             }
-            Invalid => unreachable!(),
+            Unspecified => unreachable!(),
         };
 
         Ok(dispatcher_impl)

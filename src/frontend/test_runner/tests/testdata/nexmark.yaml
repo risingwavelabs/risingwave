@@ -34,14 +34,14 @@
     );
 - id: nexmark_q0
   before:
-    - create_tables
+  - create_tables
   sql: |
     CREATE MATERIALIZED VIEW nexmark_q0
       AS
     SELECT auction, bidder, price, date_time FROM bid;
 - id: nexmark_q0
   before:
-    - create_tables
+  - create_tables
   sql: |
     SELECT auction, bidder, price, date_time FROM bid;
   batch_plan: |
@@ -52,7 +52,7 @@
       StreamTableScan { table: bid, columns: [auction, bidder, price, date_time, _row_id] }
 - id: nexmark_q1
   before:
-    - create_tables
+  - create_tables
   sql: |
     SELECT
       auction,
@@ -70,8 +70,9 @@
         StreamTableScan { table: bid, columns: [auction, bidder, price, date_time, _row_id] }
 - id: nexmark_q2
   before:
-    - create_tables
-  sql: SELECT auction, price FROM bid WHERE auction = 1007 OR auction = 1020 OR auction = 2001 OR auction = 2019 OR auction = 2087;
+  - create_tables
+  sql: SELECT auction, price FROM bid WHERE auction = 1007 OR auction = 1020 OR auction
+    = 2001 OR auction = 2019 OR auction = 2087;
   batch_plan: |
     BatchExchange { order: [], dist: Single }
       BatchFilter { predicate: (((((bid.auction = 1007:Int32) OR (bid.auction = 1020:Int32)) OR (bid.auction = 2001:Int32)) OR (bid.auction = 2019:Int32)) OR (bid.auction = 2087:Int32)) }
@@ -82,7 +83,7 @@
         StreamTableScan { table: bid, columns: [auction, price, _row_id] }
 - id: nexmark_q3
   before:
-    - create_tables
+  - create_tables
   sql: |
     SELECT
         P.name, P.city, P.state, A.id
@@ -115,7 +116,7 @@
                 StreamTableScan { table: person, columns: [id, name, city, state, _row_id] }
 - id: nexmark_q4
   before:
-    - create_tables
+  - create_tables
   sql: |
     SELECT
         Q.category,
@@ -157,7 +158,7 @@
                         StreamTableScan { table: bid, columns: [auction, price, date_time, _row_id] }
 - id: nexmark_q5
   before:
-    - create_tables
+  - create_tables
   sql: |
     SELECT AuctionBids.auction, AuctionBids.num FROM (
       SELECT
@@ -229,7 +230,7 @@
                           StreamTableScan { table: bid, columns: [auction, date_time, _row_id] }
 - id: nexmark_q6
   before:
-    - create_tables
+  - create_tables
   sql: |
     SELECT
         Q.seller,
@@ -242,10 +243,11 @@
         WHERE A.id = B.auction and B.date_time between A.date_time and A.expires
         GROUP BY A.id, A.seller
     ) AS Q;
-  binder_error: 'Feature is not yet implemented: over window function: AVG, Tracking issue: https://github.com/singularity-data/risingwave/issues/3646'
+  binder_error: 'Feature is not yet implemented: over window function: AVG, Tracking
+    issue: https://github.com/singularity-data/risingwave/issues/3646'
 - id: nexmark_q7
   before:
-    - create_tables
+  - create_tables
   sql: |
     SELECT
       B.auction,
@@ -295,7 +297,7 @@
                         StreamTableScan { table: bid, columns: [price, date_time, _row_id] }
 - id: nexmark_q8
   before:
-    - create_tables
+  - create_tables
   sql: |
     SELECT
       P.id,
@@ -355,7 +357,7 @@
               StreamTableScan { table: auction, columns: [date_time, seller, _row_id] }
 - id: nexmark_q9
   before:
-    - create_tables
+  - create_tables
   sql: |
     SELECT
       id, item_name, description, initial_bid, reserve, date_time, expires, seller, category,
@@ -367,10 +369,11 @@
       WHERE A.id = B.auction AND B.date_time BETWEEN A.date_time AND A.expires
     )
     WHERE rownum <= 1;
-  binder_error: 'Feature is not yet implemented: over window function: ROW_NUMBER, Tracking issue: https://github.com/singularity-data/risingwave/issues/3646'
+  binder_error: 'Feature is not yet implemented: over window function: ROW_NUMBER,
+    Tracking issue: https://github.com/singularity-data/risingwave/issues/3646'
 - id: nexmark_q10
   before:
-    - create_tables
+  - create_tables
   sql: |
     SELECT auction, bidder, price, date_time, TO_CHAR(date_time, 'YYYY-MM-DD') as date, TO_CHAR(date_time, 'HH:MI') as time FROM bid;
   batch_plan: |
@@ -383,7 +386,7 @@
         StreamTableScan { table: bid, columns: [auction, bidder, price, date_time, _row_id] }
 - id: nexmark_q11
   before:
-    - create_tables
+  - create_tables
   sql: |
     SELECT
       B.bidder,
@@ -392,10 +395,11 @@
       SESSION_END(B.date_time, INTERVAL '10' SECOND) as endtime
     FROM bid B
     GROUP BY B.bidder, SESSION(B.date_time, INTERVAL '10' SECOND);
-  binder_error: 'Feature is not yet implemented: unsupported function: "session", Tracking issue: https://github.com/singularity-data/risingwave/issues/112'
+  binder_error: 'Feature is not yet implemented: unsupported function: "session",
+    Tracking issue: https://github.com/singularity-data/risingwave/issues/112'
 - id: nexmark_q12
   before:
-    - create_tables
+  - create_tables
   sql: |
     SELECT
         B.bidder,
@@ -404,10 +408,11 @@
         TUMBLE_END(B.p_time, INTERVAL '10' SECOND) as endtime
     FROM (SELECT *, PROCTIME() as p_time FROM bid) B
     GROUP BY B.bidder, TUMBLE(B.p_time, INTERVAL '10' SECOND);
-  binder_error: 'Feature is not yet implemented: unsupported function: "proctime", Tracking issue: https://github.com/singularity-data/risingwave/issues/112'
+  binder_error: 'Feature is not yet implemented: unsupported function: "proctime",
+    Tracking issue: https://github.com/singularity-data/risingwave/issues/112'
 - id: nexmark_q13
   before:
-    - create_tables
+  - create_tables
   sql: |
     /* SELECT
         B.auction,
@@ -421,7 +426,7 @@
     select 1;
 - id: nexmark_q14
   before:
-    - create_tables
+  - create_tables
   sql: |
     SELECT
       auction,
@@ -457,7 +462,7 @@
           StreamTableScan { table: bid, columns: [auction, bidder, price, date_time, extra, _row_id] }
 - id: nexmark_q15
   before:
-    - create_tables
+  - create_tables
   sql: |
     SELECT
         TO_CHAR(date_time, 'yyyy-MM-dd') as day,
@@ -497,7 +502,7 @@
                     StreamTableScan { table: bid, columns: [auction, bidder, price, date_time, _row_id] }
 - id: nexmark_q16
   before:
-    - create_tables
+  - create_tables
   sql: |
     SELECT
       channel,
@@ -539,7 +544,7 @@
                     StreamTableScan { table: bid, columns: [auction, bidder, price, channel, date_time, _row_id] }
 - id: nexmark_q17
   before:
-    - create_tables
+  - create_tables
   sql: |
     SELECT
         auction,
@@ -570,24 +575,26 @@
               StreamTableScan { table: bid, columns: [auction, price, date_time, _row_id] }
 - id: nexmark_q18
   before:
-    - create_tables
+  - create_tables
   sql: |
     SELECT auction, bidder, price, channel, url, date_time, extra
     FROM (SELECT *, ROW_NUMBER() OVER (PARTITION BY bidder, auction ORDER BY date_time DESC) AS rank_number
           FROM bid)
     WHERE rank_number <= 1;
-  binder_error: 'Feature is not yet implemented: over window function: ROW_NUMBER, Tracking issue: https://github.com/singularity-data/risingwave/issues/3646'
+  binder_error: 'Feature is not yet implemented: over window function: ROW_NUMBER,
+    Tracking issue: https://github.com/singularity-data/risingwave/issues/3646'
 - id: nexmark_q19
   before:
-    - create_tables
+  - create_tables
   sql: |
     SELECT * FROM
     (SELECT *, ROW_NUMBER() OVER (PARTITION BY auction ORDER BY price DESC) AS rank_number FROM bid)
     WHERE rank_number <= 10;
-  binder_error: 'Feature is not yet implemented: over window function: ROW_NUMBER, Tracking issue: https://github.com/singularity-data/risingwave/issues/3646'
+  binder_error: 'Feature is not yet implemented: over window function: ROW_NUMBER,
+    Tracking issue: https://github.com/singularity-data/risingwave/issues/3646'
 - id: nexmark_q20
   before:
-    - create_tables
+  - create_tables
   sql: |
     SELECT
         auction, bidder, price, channel, url, B.date_time as date_timeB,
@@ -614,7 +621,7 @@
               StreamTableScan { table: auction, columns: [id, item_name, description, initial_bid, reserve, date_time, expires, seller, category, _row_id] }
 - id: nexmark_q21
   before:
-    - create_tables
+  - create_tables
   sql: |
     SELECT
         auction, bidder, price, channel,
@@ -628,10 +635,11 @@
         AS channel_id FROM bid
         where REGEXP_EXTRACT(url, '(&|^)channel_id=([^&]*)', 2) is not null or
               lower(channel) in ('apple', 'google', 'facebook', 'baidu');
-  binder_error: 'Feature is not yet implemented: unsupported function: "regexp_extract", Tracking issue: https://github.com/singularity-data/risingwave/issues/112'
+  binder_error: 'Feature is not yet implemented: unsupported function: "regexp_extract",
+    Tracking issue: https://github.com/singularity-data/risingwave/issues/112'
 - id: nexmark_q22
   before:
-    - create_tables
+  - create_tables
   sql: |
     SELECT
         auction, bidder, price, channel,
