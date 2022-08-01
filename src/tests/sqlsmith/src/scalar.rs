@@ -27,14 +27,14 @@ impl<'a, R: Rng> SqlGenerator<'a, R> {
     pub(crate) fn gen_simple_scalar(&mut self, typ: DataTypeName) -> Expr {
         use DataTypeName as T;
         match typ {
-            T::Int64 => Expr::Value(Value::Number(self.rng.gen_range(0..100).to_string(), false)),
+            T::Int64 => Expr::Value(Value::Number(self.gen_int(i64::MIN as isize, i64::MAX as isize), false)),
             T::Int32 => Expr::TypedString {
                 data_type: DataType::Int(None),
-                value: self.gen_int(),
+                value: self.gen_int(i32::MIN as isize, i32::MAX as isize),
             },
             T::Int16 => Expr::TypedString {
                 data_type: DataType::SmallInt(None),
-                value: self.gen_int(),
+                value: self.gen_int(i16::MIN as isize, i16::MAX as isize),
             },
             T::Varchar => Expr::Value(Value::SingleQuotedString(
                 (0..10)
@@ -71,8 +71,15 @@ impl<'a, R: Rng> SqlGenerator<'a, R> {
         }
     }
 
-    fn gen_int(&mut self) -> String {
-        self.rng.gen_range(0..100).to_string()
+    fn gen_int(&mut self, min: isize, max: isize) -> String {
+        let n = match self.rng.gen_range(0..=3) {
+            0 => min,
+            1 => max,
+            2 => 0,
+            3 => self.rng.gen_range(min..=max),
+            _ => unreachable!(),
+        };
+        n.to_string()
     }
 
     fn gen_float(&mut self) -> String {
