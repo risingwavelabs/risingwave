@@ -470,7 +470,6 @@ impl LogicalAgg {
         );
         let vnode_col_idx = exprs.len() - 1;
         let project = StreamProject::new(LogicalProject::new(input, exprs));
-        println!("[rc] project dist: {:?}", project.distribution());
 
         let mut local_group_key = self.group_key().to_vec();
         local_group_key.push(vnode_col_idx);
