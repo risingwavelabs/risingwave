@@ -72,12 +72,28 @@ impl ComputeNodeService {
         let provide_minio = config.provide_minio.as_ref().unwrap();
         let provide_aws_s3 = config.provide_aws_s3.as_ref().unwrap();
         let provide_compute_node = config.provide_compute_node.as_ref().unwrap();
+        let provide_compactor = config.provide_compactor.as_ref().unwrap();
+
+        let hummock_in_memory_strategy = match (provide_minio.as_slice(), provide_aws_s3.as_slice())
+        {
+            ([], []) => {
+                // memory backend
+
+                if !provide_compactor.is_empty() {
+                    HummockInMemoryStrategy::Shared
+                } else {
+                    HummockInMemoryStrategy::Isolated
+                }
+            }
+
+            _ => HummockInMemoryStrategy::Shared,
+        };
 
         let is_shared_backend = add_storage_backend(
             &config.id,
             provide_minio,
             provide_aws_s3,
-            HummockInMemoryStrategy::Shared,
+            hummock_in_memory_strategy,
             cmd,
         )?;
         if provide_compute_node.len() > 1 && !is_shared_backend {
@@ -89,7 +105,6 @@ impl ComputeNodeService {
         let provide_meta_node = config.provide_meta_node.as_ref().unwrap();
         add_meta_node(provide_meta_node, cmd)?;
 
-        let provide_compactor = config.provide_compactor.as_ref().unwrap();
         if is_shared_backend && provide_compactor.is_empty() {
             return Err(anyhow!(
                 "When minio or aws-s3 is enabled, at least one compactor is required. Consider adding `use: compactor` in risedev config."
