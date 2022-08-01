@@ -117,7 +117,7 @@ impl SstableIterator {
             if self.cur_idx + 1 >= self.sst.value().block_count() {
                 self.block_iter = None;
             } else {
-                assert!(self.sst.value().blocks.len() > 0);
+                debug_assert!(!self.sst.value().blocks.is_empty());
                 let block =
                     BlockHolder::from_ref_block(self.sst.value().blocks[self.cur_idx + 1].clone());
                 let mut block_iter = BlockIterator::new(block);
