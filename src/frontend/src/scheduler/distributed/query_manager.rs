@@ -17,7 +17,7 @@ use std::fmt::{Debug, Formatter};
 use futures::StreamExt;
 use futures_async_stream::try_stream;
 use log::debug;
-use rand::distributions::{Distribution as RandDistribution, Uniform};
+use rand::seq::SliceRandom;
 use risingwave_common::array::DataChunk;
 use risingwave_common::error::RwError;
 use risingwave_common::types::ParallelUnitId;
@@ -82,10 +82,8 @@ impl QueryManager {
                 let candidates = self
                     .worker_node_manager
                     .get_workers_by_parallel_unit_ids(&parallel_unit_ids)?;
-                let mut rng = rand::thread_rng();
-                let die = Uniform::from(0..candidates.len());
                 candidates
-                    .get(die.sample(&mut rng))
+                    .choose(&mut rand::thread_rng())
                     .unwrap()
                     .clone()
                     .host
