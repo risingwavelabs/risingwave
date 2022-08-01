@@ -11,10 +11,11 @@
 // WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 // See the License for the specific language governing permissions and
 // limitations under the License.
-
 use std::clone::Clone;
 use std::mem::size_of;
+use std::sync::atomic::Ordering;
 use std::sync::Arc;
+use std::time::Instant;
 
 use bytes::Bytes;
 use fail::fail_point;
@@ -278,8 +279,9 @@ impl SstableStore {
                     let meta_path = self.get_sst_meta_path(sst_id);
                     let data_path = self.get_sst_data_path(sst_id);
                     stats.cache_meta_block_miss += 1;
-
+                    let stats_ptr = stats.remote_io_time.clone();
                     async move {
+                        let now = Instant::now();
                         let meta = match meta_data {
                             Some(data) => data,
                             None => {
@@ -308,6 +310,7 @@ impl SstableStore {
                         } else {
                             Sstable::new(sst_id, meta)
                         };
+                        stats_ptr.fetch_add(now.elapsed().as_secs(), Ordering::SeqCst);
                         Ok((Box::new(sst), size))
                     }
                 })
