@@ -44,8 +44,8 @@ impl StoreLocalStatistic {
         self.bloom_filter_true_negative_count += other.bloom_filter_true_negative_count;
         self.bloom_filter_might_positive_count += other.bloom_filter_might_positive_count;
         self.remote_io_time.fetch_add(
-            other.remote_io_time.load(Ordering::SeqCst),
-            Ordering::SeqCst,
+            other.remote_io_time.load(Ordering::Relaxed),
+            Ordering::Relaxed,
         );
     }
 
@@ -93,7 +93,7 @@ impl StoreLocalStatistic {
         if self.remote_io_time.load(Ordering::SeqCst) as f64 > 0.0 {
             metrics
                 .remote_read_time
-                .observe(self.remote_io_time.load(Ordering::SeqCst) as f64);
+                .observe(self.remote_io_time.load(Ordering::Relaxed) as f64);
         }
     }
 }

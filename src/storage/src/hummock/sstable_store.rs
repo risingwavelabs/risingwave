@@ -310,7 +310,7 @@ impl SstableStore {
                         } else {
                             Sstable::new(sst_id, meta)
                         };
-                        stats_ptr.fetch_add(now.elapsed().as_secs(), Ordering::SeqCst);
+                        stats_ptr.fetch_add(now.elapsed().as_secs(), Ordering::Relaxed);
                         Ok((Box::new(sst), size))
                     }
                 })
