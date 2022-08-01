@@ -129,13 +129,14 @@ impl Binder {
                     _ => unreachable!(),
                 };
 
-                let columns = self
+                let mut columns = self
                     .context
                     .indexs_of
                     .iter()
                     .filter(|(s, _)| *s != "_row_id") // filter out `_row_id`
                     .map(|(s, idxes)| (Ident::new(s.to_owned()), idxes))
                     .collect::<Vec<_>>();
+                columns.sort_by(|a, b| a.0.value.partial_cmp(&b.0.value).unwrap());
 
                 let mut col_indices = Vec::new();
                 let mut binary_expr = Expr::Value(Value::Boolean(true));

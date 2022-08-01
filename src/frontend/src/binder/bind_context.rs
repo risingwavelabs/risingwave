@@ -13,7 +13,7 @@
 // limitations under the License.
 
 use std::collections::hash_map::Entry;
-use std::collections::{HashMap, HashSet};
+use std::collections::{HashMap, BTreeMap, HashSet};
 use std::fmt::Display;
 
 use risingwave_common::catalog::Field;
@@ -81,7 +81,8 @@ pub struct ColumnGroupContext {
     // Maps naturally-joined/USING columns to their column group id
     pub mapping: HashMap<usize, u32>,
     // Maps column group ids to their column group data
-    pub groups: HashMap<u32, ColumnGroup>,
+    // We use a BTreeMap to ensure that iteration over the groups is ordered.
+    pub groups: BTreeMap<u32, ColumnGroup>,
 
     next_group_id: u32,
 }
