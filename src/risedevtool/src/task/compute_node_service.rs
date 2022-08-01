@@ -42,7 +42,11 @@ impl ComputeNodeService {
     }
 
     /// Apply command args accroding to config
-    pub fn apply_command_args(cmd: &mut Command, config: &ComputeNodeConfig) -> Result<()> {
+    pub fn apply_command_args(
+        cmd: &mut Command,
+        config: &ComputeNodeConfig,
+        hummock_in_memory_strategy: HummockInMemoryStrategy,
+    ) -> Result<()> {
         cmd.arg("--host")
             .arg(format!("{}:{}", config.listen_address, config.port))
             .arg("--prometheus-listener-addr")
@@ -77,7 +81,7 @@ impl ComputeNodeService {
             &config.id,
             provide_minio,
             provide_aws_s3,
-            HummockInMemoryStrategy::Shared,
+            hummock_in_memory_strategy,
             cmd,
         )?;
         if provide_compute_node.len() > 1 && !is_shared_backend {
@@ -121,7 +125,7 @@ impl Task for ComputeNodeService {
         }
         cmd.arg("--config-path")
             .arg(Path::new(&prefix_config).join("risingwave.toml"));
-        Self::apply_command_args(&mut cmd, &self.config)?;
+        Self::apply_command_args(&mut cmd, &self.config, HummockInMemoryStrategy::Isolated)?;
 
         if !self.config.user_managed {
             ctx.run_command(ctx.tmux_run(cmd)?)?;

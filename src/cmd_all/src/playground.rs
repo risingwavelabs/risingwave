@@ -19,8 +19,8 @@ use std::process::Command;
 use anyhow::{anyhow, Result};
 use clap::StructOpt;
 use risedev::{
-    CompactorService, ComputeNodeService, ConfigExpander, FrontendService, MetaNodeService,
-    ServiceConfig,
+    CompactorService, ComputeNodeService, ConfigExpander, FrontendService, HummockInMemoryStrategy,
+    MetaNodeService, ServiceConfig,
 };
 use tokio::fs::File;
 use tokio::io::AsyncReadExt;
@@ -71,7 +71,11 @@ pub async fn playground() -> Result<()> {
                 match services.get(&step).expect("service not found") {
                     ServiceConfig::ComputeNode(c) => {
                         let mut command = Command::new("compute-node");
-                        ComputeNodeService::apply_command_args(&mut command, c)?;
+                        ComputeNodeService::apply_command_args(
+                            &mut command,
+                            c,
+                            HummockInMemoryStrategy::Shared,
+                        )?;
                         rw_services.push(RisingWaveService::Compute(
                             command.get_args().map(ToOwned::to_owned).collect(),
                         ));
