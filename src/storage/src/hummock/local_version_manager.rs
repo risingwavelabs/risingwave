@@ -304,15 +304,30 @@ impl LocalVersionManager {
         }
         let mut receiver = self.worker_context.version_update_notifier_tx.subscribe();
         loop {
-            {
+            let (pinned_version_id, pinned_version_epoch) = {
                 let current_version = self.local_version.read();
                 if current_version.pinned_version().max_committed_epoch() >= epoch {
                     return Ok(());
                 }
-            }
+                (
+                    current_version.pinned_version().id(),
+                    current_version.pinned_version().max_committed_epoch(),
+                )
+            };
             match tokio::time::timeout(Duration::from_secs(10), receiver.changed()).await {
                 Err(_) => {
-                    return Err(HummockError::wait_epoch("timeout"));
+                    // The reason that we need to retry here is batch scan in chain/rearrange_chain
+                    // is waiting for an uncommitted epoch carried by the CreateMV barrier, which
+                    // can take unbounded time to become committed and propagate
+                    // to the CN. We should consider removing the retry as well as wait_epoch for
+                    // chain/rearrange_chain if we enforce chain/rearrange_chain to be
+                    // scheduled on the same CN with the same distribution as
+                    // the upstream MV. See #3845 for more details.
+                    tracing::warn!(
+                        "wait_epoch {} timeout when waiting for version update. pinned_version_id {}, pinned_version_epoch {}.",
+                        epoch, pinned_version_id, pinned_version_epoch
+                    );
+                    continue;
                 }
                 Ok(Err(_)) => {
                     return Err(HummockError::wait_epoch("tx dropped"));

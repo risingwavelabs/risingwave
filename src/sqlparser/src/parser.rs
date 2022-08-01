@@ -1798,8 +1798,17 @@ impl Parser {
     }
 
     pub fn parse_alter(&mut self) -> Result<Statement, ParserError> {
-        self.expect_keyword(Keyword::TABLE)?;
-        self.parse_alter_table()
+        if self.parse_keyword(Keyword::TABLE) {
+            self.parse_alter_table()
+        } else if self.parse_keyword(Keyword::USER) {
+            self.parse_alter_user()
+        } else {
+            self.expected("TABLE or USER after ALTER", self.peek_token())
+        }
+    }
+
+    pub fn parse_alter_user(&mut self) -> Result<Statement, ParserError> {
+        Ok(Statement::AlterUser(AlterUserStatement::parse_to(self)?))
     }
 
     pub fn parse_alter_table(&mut self) -> Result<Statement, ParserError> {
