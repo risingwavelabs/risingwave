@@ -19,7 +19,8 @@ use either::Either;
 use futures::StreamExt;
 use futures_async_stream::try_stream;
 use risingwave_common::array::column::Column;
-use risingwave_common::array::{ArrayBuilder, I64ArrayBuilder, StreamChunk};
+use risingwave_common::array::stream_chunk::Ops;
+use risingwave_common::array::{ArrayBuilder, I64ArrayBuilder, Op, StreamChunk};
 use risingwave_common::bail;
 use risingwave_common::catalog::{ColumnId, Schema, TableId};
 use risingwave_common::error::Result;
@@ -128,7 +129,28 @@ impl<S: StateStore> SourceExecutor<S> {
         builder.finish().unwrap().into()
     }
 
-    fn refill_row_id_column(&mut self, chunk: StreamChunk) -> StreamChunk {
+    /// Generate a row ID column according to ops.
+    fn gen_row_id_column_by_op(&mut self, column: &Column, ops: Ops<'_>) -> Column {
+        let len = column.array_ref().len();
+        let mut builder = I64ArrayBuilder::new(len);
+
+        for i in 0..len {
+            // Only refill row_id for insert operation.
+            if ops.get(i) == Some(&Op::Insert) {
+                builder.append(Some(self.row_id_generator.next())).unwrap();
+            } else {
+                builder
+                    .append(Some(
+                        i64::try_from(column.array_ref().datum_at(i).unwrap()).unwrap(),
+                    ))
+                    .unwrap();
+            }
+        }
+
+        Column::new(Arc::new(ArrayImpl::from(builder.finish().unwrap())))
+    }
+
+    fn refill_row_id_column(&mut self, chunk: StreamChunk, append_only: bool) -> StreamChunk {
         let row_id_index = self.source_desc.row_id_index;
         let row_id_column_id = self.source_desc.columns[row_id_index as usize].column_id;
 
@@ -138,7 +160,11 @@ impl<S: StateStore> SourceExecutor<S> {
             .position(|column_id| *column_id == row_id_column_id)
         {
             let (ops, mut columns, bitmap) = chunk.into_inner();
-            columns[idx] = self.gen_row_id_column(columns[idx].array().len());
+            if append_only {
+                columns[idx] = self.gen_row_id_column(columns[idx].array().len());
+            } else {
+                columns[idx] = self.gen_row_id_column_by_op(&columns[idx], &ops);
+            }
             return StreamChunk::new(ops, columns, bitmap);
         }
         chunk
@@ -313,12 +339,12 @@ impl<S: StateStore> SourceExecutor<S> {
                         self.state_cache.extend(state);
                     }
 
-                    match self.source_desc.source.as_ref() {
+                    chunk = match self.source_desc.source.as_ref() {
                         // Refill row id column for connector sources.
-                        SourceImpl::Connector(_) => chunk = self.refill_row_id_column(chunk),
+                        SourceImpl::Connector(_) => self.refill_row_id_column(chunk, true),
                         // The row id column of table v2 is already set in `TableSource`.
-                        SourceImpl::TableV2(_) => {}
-                    }
+                        SourceImpl::TableV2(_) => self.refill_row_id_column(chunk, false),
+                    };
 
                     self.metrics
                         .source_output_row_count
@@ -423,15 +449,15 @@ mod tests {
 
         let chunk1 = StreamChunk::from_pretty(
             " I i T
-            + 0 1 foo
-            + 0 2 bar
-            + 0 3 baz",
+            U+ 1 1 foo
+            U+ 2 2 bar
+            U+ 3 3 baz",
         );
         let chunk2 = StreamChunk::from_pretty(
             " I i T
-            + 0 4 hello
-            + 0 5 .
-            + 0 6 world",
+            U+ 4 4 hello
+            U+ 5 5 .
+            U+ 6 6 world",
         );
 
         let schema = Schema {
@@ -487,9 +513,9 @@ mod tests {
                     chunk,
                     StreamChunk::from_pretty(
                         " I i T
-                        + 0 1 foo
-                        + 0 2 bar
-                        + 0 3 baz",
+                        U+ 1 1 foo
+                        U+ 2 2 bar
+                        U+ 3 3 baz",
                     )
                 ),
                 Message::Barrier(barrier) => {
@@ -506,9 +532,9 @@ mod tests {
             msg.into_chunk().unwrap(),
             StreamChunk::from_pretty(
                 " I i T
-                + 0 4 hello
-                + 0 5 .
-                + 0 6 world",
+                U+ 4 4 hello
+                U+ 5 5 .
+                U+ 6 6 world",
             )
         );
 
