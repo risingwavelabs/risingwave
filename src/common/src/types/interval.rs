@@ -88,7 +88,7 @@ impl IntervalUnit {
                 let ms = i64::from_be_bytes(bytes);
                 Ok(IntervalUnit::from_millis(ms))
             }
-            Invalid => {
+            Unspecified => {
                 // Invalid means the interval is from the new frontend.
                 // TODO: make this default path later.
                 let mut cursor = Cursor::new(bytes);

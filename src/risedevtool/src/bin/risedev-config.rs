@@ -62,6 +62,7 @@ pub enum Components {
     PrometheusAndGrafana,
     Etcd,
     Kafka,
+    Redis,
     Tracing,
     RustComponents,
     Dashboard,
@@ -77,6 +78,7 @@ impl Components {
             Self::PrometheusAndGrafana => "[Component] Metrics: Prometheus + Grafana",
             Self::Etcd => "[Component] Etcd",
             Self::Kafka => "[Component] Kafka",
+            Self::Redis => "[Component] Redis",
             Self::RustComponents => "[Build] Rust components",
             Self::Dashboard => "[Build] Dashboard v2",
             Self::Tracing => "[Component] Tracing: Jaeger",
@@ -141,6 +143,11 @@ with thread sanitizer. The built binaries will be at
 a dev cluster.
 "
             }
+            Self::Redis => {
+                "
+Required if you want to sink data to redis.
+                "
+            }
         }
         .into()
     }
@@ -157,6 +164,7 @@ a dev cluster.
             "ENABLE_RELEASE_PROFILE" => Some(Self::Release),
             "ENABLE_ALL_IN_ONE" => Some(Self::AllInOne),
             "ENABLE_SANITIZER" => Some(Self::Sanitizer),
+            "ENABLE_REDIS" => Some(Self::Redis),
             _ => None,
         }
     }
@@ -167,6 +175,7 @@ a dev cluster.
             Self::PrometheusAndGrafana => "ENABLE_PROMETHEUS_GRAFANA",
             Self::Etcd => "ENABLE_ETCD",
             Self::Kafka => "ENABLE_KAFKA",
+            Self::Redis => "ENABLE_REDIS",
             Self::RustComponents => "ENABLE_BUILD_RUST",
             Self::Dashboard => "ENABLE_BUILD_DASHBOARD_V2",
             Self::Tracing => "ENABLE_COMPUTE_TRACING",
