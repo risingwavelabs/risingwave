@@ -163,7 +163,7 @@ fn print_kv_pairs(block_data: Vec<u8>, table_data: &TableData) -> anyhow::Result
         let humm_val = HummockValue::from_slice(block_iter.value())?;
         let (is_put, user_val) = match humm_val {
             HummockValue::Put(uval) => (true, uval),
-            HummockValue::Delete() => (false, &[] as &[u8]),
+            HummockValue::Delete => (false, &[] as &[u8]),
         };
 
         let epoch = get_epoch(full_key);

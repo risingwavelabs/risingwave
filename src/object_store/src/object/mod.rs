@@ -74,7 +74,12 @@ pub struct BlockLocation {
     pub size: usize,
 }
 
+#[derive(Debug, Clone)]
 pub struct ObjectMetadata {
+    // Full path
+    pub key: String,
+    // Seconds since unix epoch.
+    pub last_modified: f64,
     pub total_size: usize,
 }
 
@@ -115,6 +120,8 @@ pub trait ObjectStore: Send + Sync {
     {
         MonitoredObjectStore::new(self, metrics)
     }
+
+    async fn list(&self, prefix: &str) -> ObjectResult<Vec<ObjectMetadata>>;
 }
 
 pub type ObjectStoreRef = Arc<ObjectStoreImpl>;
@@ -206,6 +213,10 @@ impl ObjectStore for ObjectStoreImpl {
     async fn delete(&self, path: &str) -> ObjectResult<()> {
         object_store_impl_method_body!(self, delete, path)
     }
+
+    async fn list(&self, prefix: &str) -> ObjectResult<Vec<ObjectMetadata>> {
+        object_store_impl_method_body!(self, list, prefix)
+    }
 }
 
 pub struct MonitoredObjectStore<OS: ObjectStore> {
@@ -293,6 +304,15 @@ impl<OS: ObjectStore> MonitoredObjectStore<OS> {
             .with_label_values(&["delete"])
             .start_timer();
         self.inner.delete(path).await
+    }
+
+    async fn list(&self, prefix: &str) -> ObjectResult<Vec<ObjectMetadata>> {
+        let _timer = self
+            .object_store_metrics
+            .operation_latency
+            .with_label_values(&["list"])
+            .start_timer();
+        self.inner.list(prefix).await
     }
 }
 

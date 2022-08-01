@@ -84,6 +84,7 @@ impl ObjectStore for S3ObjectStore {
             .iter()
             .map(|block_loc| self.read(path, Some(*block_loc)))
             .collect_vec();
+        // TODO(MrCroxx): `try_join_all` will not spawn new tasks, mind if decoding cost too much.
         try_join_all(futures).await
     }
 
@@ -99,6 +100,11 @@ impl ObjectStore for S3ObjectStore {
             .send()
             .await?;
         Ok(ObjectMetadata {
+            key: path.to_owned(),
+            last_modified: resp
+                .last_modified()
+                .expect("last_modified required")
+                .as_secs_f64(),
             total_size: resp.content_length as usize,
         })
     }
@@ -116,6 +122,46 @@ impl ObjectStore for S3ObjectStore {
             .send()
             .await?;
         Ok(())
+    }
+
+    async fn list(&self, prefix: &str) -> ObjectResult<Vec<ObjectMetadata>> {
+        let mut ret: Vec<ObjectMetadata> = vec![];
+        let mut next_continuation_token = None;
+        // list_objects_v2 returns up to 1000 keys and truncated the exceeded parts.
+        // Use `continuation_token` given by last response to fetch more parts of the result,
+        // until result is no longer truncated.
+        loop {
+            let mut request = self
+                .client
+                .list_objects_v2()
+                .bucket(&self.bucket)
+                .prefix(prefix);
+            if let Some(continuation_token) = next_continuation_token.take() {
+                request = request.continuation_token(continuation_token);
+            }
+            let result = request.send().await?;
+            let is_truncated = result.is_truncated;
+            ret.append(
+                &mut result
+                    .contents()
+                    .unwrap_or_default()
+                    .iter()
+                    .map(|obj| ObjectMetadata {
+                        key: obj.key().expect("key required").to_owned(),
+                        last_modified: obj
+                            .last_modified()
+                            .expect("last_modified required")
+                            .as_secs_f64(),
+                        total_size: obj.size() as usize,
+                    })
+                    .collect_vec(),
+            );
+            next_continuation_token = result.next_continuation_token;
+            if !is_truncated {
+                break;
+            }
+        }
+        Ok(ret)
     }
 }
 

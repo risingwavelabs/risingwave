@@ -939,6 +939,8 @@ pub enum Statement {
     },
     /// CREATE USER
     CreateUser(CreateUserStatement),
+    /// ALTER USER
+    AlterUser(AlterUserStatement),
     /// FLUSH the current barrier.
     ///
     /// Note: RisingWave specific statement.
@@ -1328,6 +1330,9 @@ impl fmt::Display for Statement {
             }
             Statement::CreateUser(statement) => {
                 write!(f, "CREATE USER {}", statement)
+            }
+            Statement::AlterUser(statement) => {
+                write!(f, "ALTER USER {}", statement)
             }
             Statement::Flush => {
                 write!(f, "FLUSH")
