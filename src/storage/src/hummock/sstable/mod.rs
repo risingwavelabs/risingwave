@@ -113,7 +113,7 @@ impl Sstable {
 
     #[inline]
     pub fn encoded_size(&self) -> usize {
-        8 /* id */ + self.meta.encoded_size() + self.blocks.iter().map(|block|block.data().len()).sum::<usize>()
+        8 /* id */ + self.meta.encoded_size() + self.blocks.iter().map(|block|block.len()).sum::<usize>()
     }
 
     #[cfg(test)]

@@ -29,16 +29,19 @@ pub const DEFAULT_RESTART_INTERVAL: usize = 16;
 pub const DEFAULT_ENTRY_SIZE: usize = 16;
 
 pub struct Block {
-    /// Uncompressed entries data.
+    /// Uncompressed entries data, with restart encoded restart points info.
     data: Bytes,
+    /// Uncompressed entried data length.
+    data_len: usize,
     /// Restart points.
     restart_points: Vec<u32>,
 }
 
 impl Block {
-    pub fn new(data: Bytes, restart_points: Vec<u32>) -> Self {
+    pub fn new(data: Bytes, data_len: usize, restart_points: Vec<u32>) -> Self {
         Block {
             data,
+            data_len,
             restart_points,
         }
     }
@@ -83,7 +86,8 @@ impl Block {
         }
 
         Ok(Block {
-            data: buf.slice(..data_len),
+            data: buf,
+            data_len,
             restart_points,
         })
     }
@@ -92,7 +96,7 @@ impl Block {
     #[expect(clippy::len_without_is_empty)]
     pub fn len(&self) -> usize {
         assert!(!self.data.is_empty());
-        self.data.len()
+        self.data_len
     }
 
     /// Gets restart point by index.
@@ -121,8 +125,8 @@ impl Block {
         self.restart_points.partition_point(pred)
     }
 
-    pub fn data(&self) -> &Bytes {
-        &self.data
+    pub fn data(&self) -> &[u8] {
+        &self.data[..self.data_len]
     }
 }
 
@@ -254,7 +258,6 @@ impl BlockBuilder {
         // Update restart point if needed and calculate diff key.
         let diff_key = if self.entry_count % self.restart_count == 0 {
             self.restart_points.push(self.buf.len() as u32);
-            self.last_key = key.to_vec();
             key
         } else {
             bytes_diff(&self.last_key, key)

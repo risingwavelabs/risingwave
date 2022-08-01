@@ -17,7 +17,7 @@ use std::hash::{Hash, Hasher};
 use std::ops::Deref;
 use std::sync::Arc;
 
-use bytes::{Buf, BufMut, Bytes};
+use bytes::{Buf, BufMut};
 use futures::Future;
 use risingwave_common::cache::{CachableEntry, LruCache, LruCacheEventListener};
 use risingwave_common::config::FileCacheConfig;
@@ -25,6 +25,7 @@ use risingwave_hummock_sdk::HummockSstableId;
 
 use crate::hummock::{
     Block, HummockError, HummockResult, TieredCache, TieredCacheKey, TieredCacheOptions,
+    TieredCacheValue,
 };
 
 const MIN_BUFFER_SIZE_PER_SHARD: usize = 32 * 1024 * 1024;
@@ -100,33 +101,27 @@ impl TieredCacheKey for CacheKey {
     }
 }
 
-// N (4B) + N * restart point len (N * 4B) + data len
-fn encode_block(block: &Block) -> Vec<u8> {
-    let mut buf = Vec::with_capacity(block.len() + 4 + block.restart_point_len() * 4);
-    buf.put_u32(block.restart_point_len() as u32);
-    for i in 0..block.restart_point_len() {
-        buf.put_u32(block.restart_point(i));
+impl TieredCacheValue for Box<Block> {
+    fn len(&self) -> usize {
+        Block::len(self)
     }
-    buf.extend_from_slice(block.data());
-    buf
+
+    fn encode(&self, _buf: &mut [u8]) {
+        todo!()
+    }
+
+    fn decode(_buf: &[u8]) -> Self {
+        todo!()
+    }
 }
 
-fn decode_block(buf: &[u8]) -> Block {
-    let mut cursor = 0;
+// N (4B) + N * restart point len (N * 4B) + data len
+fn encode_block(_block: &Block) -> Vec<u8> {
+    todo!()
+}
 
-    let restart_points_len = (&buf[cursor..cursor + 4]).get_u32() as usize;
-    cursor += 4;
-
-    let mut restart_points = Vec::with_capacity(restart_points_len);
-    for _ in 0..restart_points_len {
-        let restart_point = (&buf[cursor..cursor + 4]).get_u32();
-        cursor += 4;
-        restart_points.push(restart_point);
-    }
-
-    let data = Bytes::copy_from_slice(&buf[cursor..]);
-
-    Block::new(data, restart_points)
+fn decode_block(_buf: &[u8]) -> Block {
+    todo!()
 }
 
 pub struct MemoryBlockCacheEventListener {

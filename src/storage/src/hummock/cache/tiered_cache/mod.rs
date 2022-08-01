@@ -22,6 +22,15 @@ pub trait TieredCacheKey: Eq + Send + Sync + Hash + Clone + 'static + std::fmt::
     fn decode(buf: &[u8]) -> Self;
 }
 
+#[expect(clippy::len_without_is_empty)]
+pub trait TieredCacheValue: Send + Sync + 'static {
+    fn len(&self) -> usize;
+
+    fn encode(&self, buf: &mut [u8]);
+
+    fn decode(buf: &[u8]) -> Self;
+}
+
 #[cfg(target_os = "linux")]
 pub mod file_cache;
 
