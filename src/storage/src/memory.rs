@@ -245,7 +245,7 @@ impl StateStore for MemoryStateStore {
 
     fn prefix_iter<R, B>(
         &self,
-        _prefix_key: Vec<u8>,
+        _prefix_hint: Option<Vec<u8>>,
         key_range: R,
         read_options: ReadOptions,
     ) -> Self::PrefixIterFuture<'_, R, B>
@@ -265,7 +265,7 @@ impl StateStore for MemoryStateStore {
 
     fn prefix_scan<R, B>(
         &self,
-        _prefix_key: Vec<u8>,
+        _prefix_hint: Option<Vec<u8>>,
         _col_bound_range: R,
         _limit: Option<usize>,
         _read_options: ReadOptions,

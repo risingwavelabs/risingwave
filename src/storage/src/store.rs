@@ -142,7 +142,7 @@ pub trait StateStore: Send + Sync + 'static + Clone {
 
     fn prefix_scan<R, B>(
         &self,
-        prefix_key: Vec<u8>,
+        prefix_key: Option<Vec<u8>>,
         key_range: R,
         limit: Option<usize>,
         read_options: ReadOptions,
@@ -191,13 +191,13 @@ pub trait StateStore: Send + Sync + 'static + Clone {
         R: RangeBounds<B> + Send,
         B: AsRef<[u8]> + Send;
 
-    /// Opens and returns an iterator for given `prefix_key` and `suffix_range`.
-    /// Inner will `check_bloom_filter` with `prefix_key` and concate them before iter
-    /// The returned iterator will iterate data based on a snapshot corresponding to the given
-    /// `epoch`.
+    /// Opens and returns an iterator for given `prefix_hit` and `full_key_range`
+    /// Internally, `prefix_hit` will be used to construct `filter_key` Option for `bloom_filter`
+    /// filtering and use `full_key_range` for iter The returned iterator will iterate data
+    /// based on a snapshot corresponding to the given `epoch`.
     fn prefix_iter<R, B>(
         &self,
-        prefix_key: Vec<u8>,
+        prefix_hit: Option<Vec<u8>>,
         key_range: R,
         read_options: ReadOptions,
     ) -> Self::PrefixIterFuture<'_, R, B>

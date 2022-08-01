@@ -75,6 +75,8 @@ impl HummockIteratorType for BackwardIter {
 }
 
 impl HummockStorage {
+    /// `iter_inner` impletements the `bloom_filter` filtering of sstable by `filter_key` (iff when
+    /// its Some), and builds iterator by `key_range`
     async fn iter_inner<R, B, T>(
         &self,
         _filter_key: Option<Vec<u8>>,
@@ -373,7 +375,7 @@ impl StateStore for HummockStorage {
 
     fn prefix_scan<R, B>(
         &self,
-        prefix_key: Vec<u8>,
+        prefix_hint: Option<Vec<u8>>,
         key_range: R,
         limit: Option<usize>,
         read_options: ReadOptions,
@@ -383,7 +385,7 @@ impl StateStore for HummockStorage {
         B: AsRef<[u8]> + Send,
     {
         async move {
-            self.prefix_iter(prefix_key, key_range, read_options)
+            self.prefix_iter(prefix_hint, key_range, read_options)
                 .await?
                 .collect(limit)
                 .await
@@ -478,7 +480,7 @@ impl StateStore for HummockStorage {
 
     fn prefix_iter<R, B>(
         &self,
-        prefix_key: Vec<u8>,
+        prefix_hint: Option<Vec<u8>>,
         key_range: R,
         read_options: ReadOptions,
     ) -> Self::PrefixIterFuture<'_, R, B>
@@ -486,7 +488,7 @@ impl StateStore for HummockStorage {
         R: RangeBounds<B> + Send,
         B: AsRef<[u8]> + Send,
     {
-        self.iter_inner::<R, B, ForwardIter>(Some(prefix_key), key_range, read_options)
+        self.iter_inner::<R, B, ForwardIter>(prefix_hint, key_range, read_options)
     }
 
     /// Returns a backward iterator that scans from the end key to the begin key

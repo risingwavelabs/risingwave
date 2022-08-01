@@ -141,7 +141,8 @@ impl<S: StateStore> Keyspace<S> {
         &self,
         read_options: ReadOptions,
     ) -> StorageResult<StripPrefixIterator<S::Iter>> {
-        self.iter_with_range::<_, &[u8]>(.., read_options).await
+        self.iter_with_range::<_, &[u8]>(None, .., read_options)
+            .await
     }
 
     /// Gets an iterator of the given `range` in this keyspace.
@@ -150,6 +151,7 @@ impl<S: StateStore> Keyspace<S> {
     /// **Note**: the `range` should not be prepended with the prefix of this keyspace.
     pub async fn iter_with_range<R, B>(
         &self,
+        filter_hint: Option<Vec<u8>>,
         range: R,
         read_options: ReadOptions,
     ) -> StorageResult<StripPrefixIterator<S::Iter>>
@@ -158,35 +160,18 @@ impl<S: StateStore> Keyspace<S> {
         B: AsRef<[u8]> + Send,
     {
         let range = prefixed_range(range, &self.prefix);
-        let iter = self.store.iter(range, read_options).await?;
-        let strip_prefix_iterator = StripPrefixIterator {
-            iter,
-            prefix_len: self.prefix.len(),
-        };
-        Ok(strip_prefix_iterator)
-    }
-
-    pub async fn prefix_iter_with_range<R, B>(
-        &self,
-        prefix_key: Vec<u8>,
-        range: R,
-        read_options: ReadOptions,
-    ) -> StorageResult<StripPrefixIterator<S::Iter>>
-    where
-        R: RangeBounds<B> + Send,
-        B: AsRef<[u8]> + Send,
-    {
-        let range = prefixed_range(range, &self.prefix);
-        let prefix_key = [self.prefix.to_vec(), prefix_key].concat();
+        let prefix_hint =
+            filter_hint.map(|filter_hint| [self.prefix.to_vec(), filter_hint].concat());
 
         let iter = self
             .store
-            .prefix_iter(prefix_key, range, read_options)
+            .prefix_iter(prefix_hint, range, read_options)
             .await?;
         let strip_prefix_iterator = StripPrefixIterator {
             iter,
             prefix_len: self.prefix.len(),
         };
+
         Ok(strip_prefix_iterator)
     }
 

@@ -272,7 +272,7 @@ where
 
     fn prefix_iter<R, B>(
         &self,
-        prefix_key: Vec<u8>,
+        prefix_hint: Option<Vec<u8>>,
         key_range: R,
         read_options: ReadOptions,
     ) -> Self::PrefixIterFuture<'_, R, B>
@@ -281,14 +281,14 @@ where
         B: AsRef<[u8]> + Send,
     {
         async move {
-            self.monitored_iter(self.inner.prefix_iter(prefix_key, key_range, read_options))
+            self.monitored_iter(self.inner.prefix_iter(prefix_hint, key_range, read_options))
                 .await
         }
     }
 
     fn prefix_scan<R, B>(
         &self,
-        prefix_key: Vec<u8>,
+        prefix_hint: Option<Vec<u8>>,
         col_bound_range: R,
         limit: Option<usize>,
         read_options: ReadOptions,
@@ -301,7 +301,7 @@ where
             let timer = self.stats.range_scan_duration.start_timer();
             let result = self
                 .inner
-                .prefix_scan(prefix_key, col_bound_range, limit, read_options)
+                .prefix_scan(prefix_hint, col_bound_range, limit, read_options)
                 .await
                 .inspect_err(|e| error!("Failed in scan: {:?}", e))?;
             timer.observe_duration();
