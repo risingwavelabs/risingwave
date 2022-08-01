@@ -28,6 +28,7 @@ use crate::write_batch::WriteBatch;
 pub trait GetFutureTrait<'a> = Future<Output = StorageResult<Option<Bytes>>> + Send;
 pub trait ScanFutureTrait<'a, R, B> = Future<Output = StorageResult<Vec<(Bytes, Bytes)>>> + Send;
 pub trait EmptyFutureTrait<'a> = Future<Output = StorageResult<()>> + Send;
+pub trait SyncFutureTrait<'a> = Future<Output = StorageResult<usize>> + Send;
 pub trait IngestBatchFutureTrait<'a> = Future<Output = StorageResult<usize>> + Send;
 
 #[macro_export]
@@ -46,7 +47,7 @@ macro_rules! define_state_store_associated_type {
         type IngestBatchFuture<'a> = impl IngestBatchFutureTrait<'a>;
         type ReplicateBatchFuture<'a> = impl EmptyFutureTrait<'a>;
         type WaitEpochFuture<'a> = impl EmptyFutureTrait<'a>;
-        type SyncFuture<'a> = impl EmptyFutureTrait<'a>;
+        type SyncFuture<'a> = impl SyncFutureTrait<'a>;
         type IterFuture<'a, R, B> = impl Future<Output = $crate::error::StorageResult<Self::Iter>> + Send
             where
                 R: 'static + Send + RangeBounds<B>,
@@ -80,7 +81,7 @@ pub trait StateStore: Send + Sync + 'static + Clone {
 
     type WaitEpochFuture<'a>: EmptyFutureTrait<'a>;
 
-    type SyncFuture<'a>: EmptyFutureTrait<'a>;
+    type SyncFuture<'a>: SyncFutureTrait<'a>;
 
     type IterFuture<'a, R, B>: Future<Output = StorageResult<Self::Iter>> + Send
     where
