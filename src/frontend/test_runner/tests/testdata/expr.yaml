@@ -104,7 +104,7 @@
 - sql: |
     select +1.0, -2.0;
   batch_plan: |
-    BatchProject { exprs: [1.0:Decimal, Neg(2.0:Decimal)] }
+    BatchProject { exprs: [1.0:Decimal, -2.0:Decimal] }
       BatchValues { rows: [[]] }
 - sql: |
     values(round(42.4382, 2));

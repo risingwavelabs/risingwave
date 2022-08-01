@@ -452,7 +452,7 @@ impl Parser {
                 }
                 Ok(Expr::UnaryOp {
                     op,
-                    expr: Box::new(self.parse_subexpr(Self::PLUS_MINUS_PREC)?),
+                    expr: Box::new(sub_expr),
                 })
             }
             tok @ Token::DoubleExclamationMark
