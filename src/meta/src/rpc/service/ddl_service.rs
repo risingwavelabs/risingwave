@@ -261,12 +261,20 @@ where
         &self,
         request: Request<DropSinkRequest>,
     ) -> Result<Response<DropSinkResponse>, Status> {
+        use risingwave_common::catalog::TableId;
+
         let sink_id = request.into_inner().sink_id;
 
         // 1. Drop sink in catalog.
         let version = self
             .catalog_manager
             .drop_sink(sink_id)
+            .await
+            .map_err(tonic_err)?;
+
+        // 2. drop sink in stream manager
+        self.stream_manager
+            .drop_materialized_view(&TableId::new(sink_id))
             .await
             .map_err(tonic_err)?;
 
