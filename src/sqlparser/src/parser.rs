@@ -439,7 +439,10 @@ impl Parser {
                 // TODO: Deal with nested unary exp: -(-(-(1))) => -1
                 // Tracked by: <https://github.com/singularity-data/risingwave/issues/4344>
                 match sub_expr {
-                    Expr::Value(Value::Number(ref mut s, _)) | Expr::TypedString { value: ref mut s, ..} => {
+                    Expr::Value(Value::Number(ref mut s, _))
+                    | Expr::TypedString {
+                        value: ref mut s, ..
+                    } => {
                         if tok == Token::Minus {
                             *s = format!("-{}", s);
                         }
@@ -447,11 +450,6 @@ impl Parser {
                     }
                     _ => {}
                 }
-                // if let Expr::Value(Value::Number(s, l)) = sub_expr
-                //     || let Expr::TypeString(s, l) = sub_expr
-                //     && tok == Token::Minus {
-                //     return Ok(Expr::Value(Value::Number(format!("-{}", s), l)));
-                // }
                 Ok(Expr::UnaryOp {
                     op,
                     expr: Box::new(self.parse_subexpr(Self::PLUS_MINUS_PREC)?),
