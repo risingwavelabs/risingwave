@@ -45,7 +45,8 @@ pub async fn handle_drop_index(
             }
         } else if table_result.is_ok() {
             let table = table_result.unwrap();
-            // If associated source is `Some`, then it is a actually a materialized source / table v2.
+            // If associated source is `Some`, then it is a actually a materialized source / table
+            // v2.
             if table.associated_source_id().is_some() {
                 return Err(RwError::from(ErrorCode::InvalidInputSyntax(
                     "Use `DROP TABLE` to drop a table.".to_owned(),
@@ -57,7 +58,8 @@ pub async fn handle_drop_index(
             return Err(RwError::from(ErrorCode::InvalidInputSyntax(
                 "Use `DROP MATERIALIZED VIEW` to drop a materialized view.".to_owned(),
             )));
-        } else { // table_result.is_err
+        } else {
+            // table_result.is_err
             return Err(index_result.expect_err("must fail"));
         }
 
