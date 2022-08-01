@@ -243,31 +243,36 @@ impl StateStore for MemoryStateStore {
         async move { Ok(()) }
     }
 
-    fn prefix_iter<R, B, P>(
+    fn prefix_iter<R, B>(
         &self,
-        _prefix_key: P,
-        _key_range: R,
-        _read_options: ReadOptions,
-    ) -> Self::PrefixIterFuture<'_, R, B, P>
+        _prefix_key: Vec<u8>,
+        key_range: R,
+        read_options: ReadOptions,
+    ) -> Self::PrefixIterFuture<'_, R, B>
     where
         R: RangeBounds<B> + Send,
         B: AsRef<[u8]> + Send,
-        P: AsRef<[u8]> + Send,
     {
-        async move { unimplemented!() }
+        async move {
+            Ok(MemoryStateStoreIter::new(
+                self.scan(key_range, None, read_options)
+                    .await
+                    .unwrap()
+                    .into_iter(),
+            ))
+        }
     }
 
-    fn prefix_scan<R, B, P>(
+    fn prefix_scan<R, B>(
         &self,
-        _prefix_key: P,
+        _prefix_key: Vec<u8>,
         _col_bound_range: R,
         _limit: Option<usize>,
         _read_options: ReadOptions,
-    ) -> Self::PrefixScanFuture<'_, R, B, P>
+    ) -> Self::PrefixScanFuture<'_, R, B>
     where
-        R: RangeBounds<B> + Send + 'static,
-        B: AsRef<[u8]> + Send + 'static,
-        P: AsRef<[u8]> + Send + 'static,
+        R: RangeBounds<B> + Send,
+        B: AsRef<[u8]> + Send,
     {
         async move { unimplemented!() }
     }

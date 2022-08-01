@@ -129,33 +129,31 @@ impl StateStore for PanicStateStore {
         }
     }
 
-    fn prefix_iter<R, B, P>(
+    fn prefix_iter<R, B>(
         &self,
-        _prefix_key: P,
+        _prefix_key: Vec<u8>,
         _key_range: R,
         _read_options: ReadOptions,
-    ) -> Self::PrefixIterFuture<'_, R, B, P>
+    ) -> Self::PrefixIterFuture<'_, R, B>
     where
         R: RangeBounds<B> + Send,
         B: AsRef<[u8]> + Send,
-        P: AsRef<[u8]> + Send,
     {
         async move {
             panic!("should not create prefix_iter from the state store!");
         }
     }
 
-    fn prefix_scan<R, B, P>(
+    fn prefix_scan<R, B>(
         &self,
-        _prefix_key: P,
+        _prefix_key: Vec<u8>,
         _col_bound_range: R,
         _limit: Option<usize>,
         _read_options: ReadOptions,
-    ) -> Self::PrefixScanFuture<'_, R, B, P>
+    ) -> Self::PrefixScanFuture<'_, R, B>
     where
-        R: RangeBounds<B> + Send + 'static,
-        B: AsRef<[u8]> + Send + 'static,
-        P: AsRef<[u8]> + Send + 'static,
+        R: RangeBounds<B> + Send,
+        B: AsRef<[u8]> + Send,
     {
         async move {
             panic!("should not prefix scan from the state store!");

@@ -650,7 +650,7 @@ impl<S: StateStore, RS: RowSerde, const T: AccessType> StorageTableBase<S, RS, T
     /// `vnode_hint`, and merge or concat them by given `ordered`.
     async fn iter_with_encoded_key_range<R, B>(
         &self,
-        _prefix_key: impl AsRef<[u8]>,
+        filter_key: Option<Vec<u8>>,
         encoded_key_range: R,
         epoch: u64,
         vnode_hint: Option<VirtualNode>,
@@ -680,17 +680,40 @@ impl<S: StateStore, RS: RowSerde, const T: AccessType> StorageTableBase<S, RS, T
         // can use a single iterator.
         let iterators: Vec<_> = try_join_all(vnodes.map(|vnode| {
             let raw_key_range = prefixed_range(encoded_key_range.clone(), &vnode.to_be_bytes());
+            // let prefix_key = match filter_key.as_ref() {
+            //     Some(filter_key) => [&vnode.to_be_bytes(), filter_key.as_slice()].concat(),
 
+            //     None => Vec::new(),
+            // };
+
+            let filter_key = filter_key.clone();
             async move {
-                let iter = StorageTableIterInner::<S, RS>::new(
-                    &self.keyspace,
-                    self.mapping.clone(),
-                    raw_key_range,
-                    wait_epoch,
-                    self.get_read_option(epoch),
-                )
-                .await?
-                .into_stream();
+                let iter = match filter_key {
+                    Some(filter_key) => {
+                        let filter_key = [&vnode.to_be_bytes(), filter_key.as_slice()].concat();
+                        StorageTableIterInner::<S, RS>::new_with_filter(
+                            &self.keyspace,
+                            self.mapping.clone(),
+                            filter_key,
+                            raw_key_range,
+                            wait_epoch,
+                            self.get_read_option(epoch),
+                        )
+                        .await?
+                        .into_stream()
+                    }
+
+                    None => StorageTableIterInner::<S, RS>::new(
+                        &self.keyspace,
+                        self.mapping.clone(),
+                        raw_key_range,
+                        wait_epoch,
+                        self.get_read_option(epoch),
+                    )
+                    .await?
+                    .into_stream(),
+                };
+
                 Ok::<_, StorageError>(iter)
             }
         }))
@@ -721,9 +744,9 @@ impl<S: StateStore, RS: RowSerde, const T: AccessType> StorageTableBase<S, RS, T
         ordered: bool,
     ) -> StorageResult<StorageTableIter<S, RS>> {
         let pk_prefix_serializer = self.pk_serializer.prefix(pk_prefix.size());
-        let serialized_pk_prefix = serialize_pk(&pk_prefix, &pk_prefix_serializer);
+        let serialized_pk_prefix = serialize_pk(pk_prefix, &pk_prefix_serializer);
 
-        fn serialize_col_bound(
+        fn serialize_pk_bound(
             pk_serializer: &OrderedRowSerializer,
             pk_prefix: &Row,
             mut serialized_pk_prefix: Vec<u8>,
@@ -747,10 +770,6 @@ impl<S: StateStore, RS: RowSerde, const T: AccessType> StorageTableBase<S, RS, T
                     }
                 }
                 Excluded(k) => {
-                    // let pk_prefix_serializer = pk_serializer.prefix(pk_prefix.size() + 1);
-                    // let mut key = pk_prefix.clone();
-                    // key.0.push(k.clone());
-
                     let mut key = Row::default();
                     key.0.push(k.clone());
                     let serialized_col_bound_key = serialize_pk(&key, &col_bound_key_serializer);
@@ -766,8 +785,6 @@ impl<S: StateStore, RS: RowSerde, const T: AccessType> StorageTableBase<S, RS, T
                     }
                 }
                 Unbounded => {
-                    // let pk_prefix_serializer = pk_serializer.prefix(pk_prefix.size());
-                    // let serialized_pk_prefix = serialize_pk(pk_prefix, &pk_prefix_serializer);
                     if pk_prefix.size() == 0 {
                         Unbounded
                     } else if is_start_bound {
@@ -779,16 +796,16 @@ impl<S: StateStore, RS: RowSerde, const T: AccessType> StorageTableBase<S, RS, T
             }
         }
 
-        let start_key = serialize_col_bound(
+        let start_key = serialize_pk_bound(
             &self.pk_serializer,
-            &pk_prefix,
+            pk_prefix,
             serialized_pk_prefix.clone(),
             next_col_bounds.start_bound(),
             true,
         );
-        let end_key = serialize_col_bound(
+        let end_key = serialize_pk_bound(
             &self.pk_serializer,
-            &pk_prefix,
+            pk_prefix,
             serialized_pk_prefix.clone(),
             next_col_bounds.end_bound(),
             false,
@@ -800,10 +817,14 @@ impl<S: StateStore, RS: RowSerde, const T: AccessType> StorageTableBase<S, RS, T
             end_key
         );
 
-        // let key_range = prefixed_range((start_key, end_key), &serialized_pk_prefix);
+        let filter_key = if pk_prefix.0.is_empty() {
+            None
+        } else {
+            Some(serialized_pk_prefix)
+        };
 
         self.iter_with_encoded_key_range(
-            serialized_pk_prefix,
+            filter_key,
             (start_key, end_key),
             epoch,
             self.try_compute_vnode_by_pk_prefix(pk_prefix),
@@ -881,8 +902,8 @@ impl<S: StateStore, RS: RowSerde> StorageTableIterInner<S, RS> {
         read_options: ReadOptions,
     ) -> StorageResult<Self>
     where
-        R: RangeBounds<B> + Send,
-        B: AsRef<[u8]> + Send,
+        R: RangeBounds<B> + Send + 'static,
+        B: AsRef<[u8]> + Send + 'static,
     {
         if wait_epoch {
             keyspace
@@ -895,6 +916,37 @@ impl<S: StateStore, RS: RowSerde> StorageTableIterInner<S, RS> {
 
         let iter = keyspace
             .iter_with_range(raw_key_range, read_options)
+            .await?;
+        let iter = Self {
+            iter,
+            row_deserializer,
+        };
+        Ok(iter)
+    }
+
+    async fn new_with_filter<R, B>(
+        keyspace: &Keyspace<S>,
+        table_descs: Arc<ColumnDescMapping>,
+        filter_key: Vec<u8>,
+        raw_key_range: R,
+        wait_epoch: bool,
+        read_options: ReadOptions,
+    ) -> StorageResult<Self>
+    where
+        R: RangeBounds<B> + Send + 'static,
+        B: AsRef<[u8]> + Send + 'static,
+    {
+        if wait_epoch {
+            keyspace
+                .state_store()
+                .wait_epoch(read_options.epoch)
+                .await?;
+        }
+
+        let row_deserializer = RS::create_deserializer(table_descs);
+
+        let iter = keyspace
+            .prefix_iter_with_range(filter_key, raw_key_range, read_options)
             .await?;
         let iter = Self {
             iter,

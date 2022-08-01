@@ -26,8 +26,8 @@ use crate::storage_value::StorageValue;
 use crate::write_batch::WriteBatch;
 
 pub trait GetFutureTrait<'a> = Future<Output = StorageResult<Option<Bytes>>> + Send;
-pub trait ScanFutureTrait<'a, R, B, P> = Future<Output = StorageResult<Vec<(Bytes, Bytes)>>> + Send;
-pub trait IterFutureTrait<'a, I: StateStoreIter<Item = (Bytes, Bytes)>, R, B, P> =
+pub trait ScanFutureTrait<'a, R, B> = Future<Output = StorageResult<Vec<(Bytes, Bytes)>>> + Send;
+pub trait IterFutureTrait<'a, I: StateStoreIter<Item = (Bytes, Bytes)>, R, B> =
     Future<Output = StorageResult<I>> + Send;
 pub trait EmptyFutureTrait<'a> = Future<Output = StorageResult<()>> + Send;
 pub trait SyncFutureTrait<'a> = Future<Output = StorageResult<usize>> + Send;
@@ -42,19 +42,36 @@ macro_rules! define_state_store_associated_type {
         type WaitEpochFuture<'a> = impl EmptyFutureTrait<'a>;
         type SyncFuture<'a> = impl EmptyFutureTrait<'a>;
 
-        type BackwardIterFuture<'a, R, B> = impl IterFutureTrait<'a, Self::Iter, R, B, &'static [u8]>
-              where R: 'static + Send, B: 'static + Send;
-        type IterFuture<'a, R, B>  = impl IterFutureTrait<'a, Self::Iter, R, B,  &'static [u8]>
-        where R: 'static + Send, B: 'static + Send;
-        type PrefixIterFuture<'a, R, B, P>  = impl IterFutureTrait<'a, Self::Iter, R, B, P>
-        where R: 'static + Send, B: 'static + Send, P: 'static + Send;
+        type BackwardIterFuture<'a, R, B> = impl IterFutureTrait<'a, Self::Iter, R, B>
+                                                            where
+                                                                R: 'static + Send + RangeBounds<B>,
+                                                                B: 'static + Send + AsRef<[u8]>;
 
-        type BackwardScanFuture<'a, R, B> =impl ScanFutureTrait<'a, R, B, &'static [u8]>
-                                     where R: 'static + Send, B: 'static + Send;
-        type PrefixScanFuture<'a, R, B, P> = impl ScanFutureTrait<'a, R, B, P>
-                                     where R: 'static + Send, B: 'static + Send, P: 'static + Send;
-        type ScanFuture<'a, R, B> = impl ScanFutureTrait<'a, R, B, &'static [u8]>
-                                     where R: 'static + Send, B: 'static + Send;
+        type IterFuture<'a, R, B>  = impl IterFutureTrait<'a, Self::Iter, R, B>
+                                                            where
+                                                                R: 'static + Send + RangeBounds<B>,
+                                                                B: 'static + Send + AsRef<[u8]>;
+
+        type PrefixIterFuture<'a, R, B>  = impl IterFutureTrait<'a, Self::Iter, R, B>
+                                                            where
+                                                                R: 'static + Send + RangeBounds<B>,
+                                                                B: 'static + Send + AsRef<[u8]>;
+
+        type BackwardScanFuture<'a, R, B> =impl ScanFutureTrait<'a, R, B>
+                                                            where
+                                                                R: 'static + Send + RangeBounds<B>,
+                                                                B: 'static + Send + AsRef<[u8]>;
+
+        type PrefixScanFuture<'a, R, B> = impl ScanFutureTrait<'a, R, B>
+                                                            where
+                                                                R: 'static + Send + RangeBounds<B>,
+                                                                B: 'static + Send + AsRef<[u8]>;
+
+        type ScanFuture<'a, R, B> = impl ScanFutureTrait<'a, R, B>
+                                                            where
+                                                                R: 'static + Send + RangeBounds<B>,
+                                                                B: 'static + Send + AsRef<[u8]>;
+
         type ClearSharedBufferFuture<'a> = impl EmptyFutureTrait<'a>;
     };
 }
@@ -64,12 +81,12 @@ pub trait StateStore: Send + Sync + 'static + Clone {
 
     type GetFuture<'a>: GetFutureTrait<'a>;
 
-    type ScanFuture<'a, R, B>: ScanFutureTrait<'a, R, B, &'static [u8]>
+    type ScanFuture<'a, R, B>: ScanFutureTrait<'a, R, B>
     where
         R: 'static + Send + RangeBounds<B>,
         B: 'static + Send + AsRef<[u8]>;
 
-    type BackwardScanFuture<'a, R, B>: ScanFutureTrait<'a, R, B, &'static [u8]>
+    type BackwardScanFuture<'a, R, B>: ScanFutureTrait<'a, R, B>
     where
         R: 'static + Send + RangeBounds<B>,
         B: 'static + Send + AsRef<[u8]>;
@@ -82,24 +99,22 @@ pub trait StateStore: Send + Sync + 'static + Clone {
 
     type SyncFuture<'a>: SyncFutureTrait<'a>;
 
-    type IterFuture<'a, R, B>: IterFutureTrait<'a, Self::Iter, R, B, &'static [u8]>
+    type IterFuture<'a, R, B>: IterFutureTrait<'a, Self::Iter, R, B>
     where
         R: 'static + Send + RangeBounds<B>,
         B: 'static + Send + AsRef<[u8]>;
 
-    type PrefixIterFuture<'a, R, B, P>: IterFutureTrait<'a, Self::Iter, R, B, P>
+    type PrefixIterFuture<'a, R, B>: IterFutureTrait<'a, Self::Iter, R, B>
     where
-        R: 'static + Send,
-        B: 'static + Send,
-        P: 'static + Send;
+        R: 'static + Send + RangeBounds<B>,
+        B: 'static + Send + AsRef<[u8]>;
 
-    type PrefixScanFuture<'a, R, B, P>: ScanFutureTrait<'a, R, B, P>
+    type PrefixScanFuture<'a, R, B>: ScanFutureTrait<'a, R, B>
     where
-        R: 'static + Send,
-        B: 'static + Send,
-        P: 'static + Send;
+        R: 'static + Send + RangeBounds<B>,
+        B: 'static + Send + AsRef<[u8]>;
 
-    type BackwardIterFuture<'a, R, B>: IterFutureTrait<'a, Self::Iter, R, B, &'static [u8]>
+    type BackwardIterFuture<'a, R, B>: IterFutureTrait<'a, Self::Iter, R, B>
     where
         R: 'static + Send + RangeBounds<B>,
         B: 'static + Send + AsRef<[u8]>;
@@ -125,17 +140,16 @@ pub trait StateStore: Send + Sync + 'static + Clone {
         R: RangeBounds<B> + Send,
         B: AsRef<[u8]> + Send;
 
-    fn prefix_scan<R, B, P>(
+    fn prefix_scan<R, B>(
         &self,
-        prefix_key: P,
+        prefix_key: Vec<u8>,
         key_range: R,
         limit: Option<usize>,
         read_options: ReadOptions,
-    ) -> Self::PrefixScanFuture<'_, R, B, P>
+    ) -> Self::PrefixScanFuture<'_, R, B>
     where
         R: RangeBounds<B> + Send + 'static,
-        B: AsRef<[u8]> + Send + 'static,
-        P: AsRef<[u8]> + Send + 'static;
+        B: AsRef<[u8]> + Send + 'static;
 
     fn backward_scan<R, B>(
         &self,
@@ -178,19 +192,18 @@ pub trait StateStore: Send + Sync + 'static + Clone {
         B: AsRef<[u8]> + Send;
 
     /// Opens and returns an iterator for given `prefix_key` and `suffix_range`.
-    /// Inner will check_bloom_filter with `prefix_key` and concate them before iter
+    /// Inner will `check_bloom_filter` with `prefix_key` and concate them before iter
     /// The returned iterator will iterate data based on a snapshot corresponding to the given
     /// `epoch`.
-    fn prefix_iter<R, B, P>(
+    fn prefix_iter<R, B>(
         &self,
-        prefix_key: P,
+        prefix_key: Vec<u8>,
         key_range: R,
         read_options: ReadOptions,
-    ) -> Self::PrefixIterFuture<'_, R, B, P>
+    ) -> Self::PrefixIterFuture<'_, R, B>
     where
         R: RangeBounds<B> + Send,
-        B: AsRef<[u8]> + Send,
-        P: AsRef<[u8]> + Send;
+        B: AsRef<[u8]> + Send;
 
     /// Opens and returns a backward iterator for given `key_range`.
     /// The returned iterator will iterate data based on a snapshot corresponding to the given

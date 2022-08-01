@@ -166,19 +166,19 @@ impl<S: StateStore> Keyspace<S> {
         Ok(strip_prefix_iterator)
     }
 
-    pub async fn prefix_iter_with_range<R, B, P>(
+    pub async fn prefix_iter_with_range<R, B>(
         &self,
-        prefix_key: P,
+        prefix_key: Vec<u8>,
         range: R,
         read_options: ReadOptions,
     ) -> StorageResult<StripPrefixIterator<S::Iter>>
     where
         R: RangeBounds<B> + Send + 'static,
         B: AsRef<[u8]> + Send + 'static,
-        P: AsRef<[u8]> + Send + 'static,
     {
-        // let range = prefixed_range(range, &self.prefix);
-        let prefix_key = [self.prefix.as_slice(), prefix_key.as_ref()].concat();
+        let range = prefixed_range(range, &self.prefix);
+        let prefix_key = [self.prefix.to_vec(), prefix_key].concat();
+
         let iter = self
             .store
             .prefix_iter(prefix_key, range, read_options)

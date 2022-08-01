@@ -75,9 +75,9 @@ impl HummockIteratorType for BackwardIter {
 }
 
 impl HummockStorage {
-    async fn iter_inner<R, B, T, P>(
+    async fn iter_inner<R, B, T>(
         &self,
-        _prefix_key: P,
+        _filter_key: Option<Vec<u8>>,
         key_range: R,
         read_options: ReadOptions,
     ) -> StorageResult<HummockStateStoreIter>
@@ -85,7 +85,6 @@ impl HummockStorage {
         R: RangeBounds<B> + Send,
         B: AsRef<[u8]> + Send,
         T: HummockIteratorType,
-        P: AsRef<[u8]> + Send,
     {
         let epoch = read_options.epoch;
         let compaction_group_id = match read_options.table_id.as_ref() {
@@ -372,17 +371,16 @@ impl StateStore for HummockStorage {
         }
     }
 
-    fn prefix_scan<R, B, P>(
+    fn prefix_scan<R, B>(
         &self,
-        prefix_key: P,
+        prefix_key: Vec<u8>,
         key_range: R,
         limit: Option<usize>,
         read_options: ReadOptions,
-    ) -> Self::PrefixScanFuture<'_, R, B, P>
+    ) -> Self::PrefixScanFuture<'_, R, B>
     where
-        R: RangeBounds<B> + Send + 'static,
-        B: AsRef<[u8]> + Send + 'static,
-        P: AsRef<[u8]> + Send + 'static,
+        R: RangeBounds<B> + Send,
+        B: AsRef<[u8]> + Send,
     {
         async move {
             self.prefix_iter(prefix_key, key_range, read_options)
@@ -475,21 +473,20 @@ impl StateStore for HummockStorage {
         R: RangeBounds<B> + Send,
         B: AsRef<[u8]> + Send,
     {
-        self.iter_inner::<_, _, ForwardIter, _>(b"", key_range, read_options)
+        self.iter_inner::<_, _, ForwardIter>(None, key_range, read_options)
     }
 
-    fn prefix_iter<R, B, P>(
+    fn prefix_iter<R, B>(
         &self,
-        prefix_key: P,
+        prefix_key: Vec<u8>,
         key_range: R,
         read_options: ReadOptions,
-    ) -> Self::PrefixIterFuture<'_, R, B, P>
+    ) -> Self::PrefixIterFuture<'_, R, B>
     where
         R: RangeBounds<B> + Send,
         B: AsRef<[u8]> + Send,
-        P: AsRef<[u8]> + Send,
     {
-        self.iter_inner::<R, B, ForwardIter, P>(prefix_key, key_range, read_options)
+        self.iter_inner::<R, B, ForwardIter>(Some(prefix_key), key_range, read_options)
     }
 
     /// Returns a backward iterator that scans from the end key to the begin key
@@ -507,7 +504,7 @@ impl StateStore for HummockStorage {
             key_range.end_bound().map(|v| v.as_ref().to_vec()),
             key_range.start_bound().map(|v| v.as_ref().to_vec()),
         );
-        self.iter_inner::<_, _, BackwardIter, _>(b"", key_range, read_options)
+        self.iter_inner::<_, _, BackwardIter>(None, key_range, read_options)
     }
 
     fn wait_epoch(&self, epoch: u64) -> Self::WaitEpochFuture<'_> {
