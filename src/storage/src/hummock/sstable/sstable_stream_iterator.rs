@@ -252,12 +252,12 @@ impl HummockIterator for SstableStreamIterator {
 
         // Assume that our table contains two blocks `A: [k l m]` and `B: [s t u]` and that we
         // search for the key `p`. The search above then returns `A` (first `B` and then subtracts
-        // 1). The `seek_idx()` of `SSTableIterator` then searches over `A` for `p`. Since `A` does
+        // 1). The `seek_idx()` of `SstableIterator` then searches over `A` for `p`. Since `A` does
         // not contain `p`, the search eventually reaches the end of `A` and leaves the iterator in
         // an invalid state. To compensate for that, `SstableIterator::seek()` then restarts the
         // search for the next block without a search key. We divert from that approach to avoid a
-        // second call of `start_stream()`. Instead, we implement `start_stream()` in such a way
-        // that it handles this case without the need to start a second download.
+        // second call of `init()`. Instead, we implement `start_stream()` in such a way that it
+        // handles this case without the need to start a second download.
 
         Ok(())
     }

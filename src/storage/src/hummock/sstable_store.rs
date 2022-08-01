@@ -80,17 +80,13 @@ impl BlockStream {
     ) -> Self {
         let metas = &sst_meta.block_metas;
 
-        // Avoid panicking if `block_index` is too large.
-        let block_len_vec = if block_index >= metas.len() {
-            Vec::new()
-        } else {
-            let mut vec = Vec::with_capacity(metas.len() - block_index);
-            sst_meta.block_metas[block_index..]
-                .iter()
-                .for_each(|b_meta| vec.push(b_meta.len as usize));
+        // Avoids panicking if `block_index` is too large.
+        let block_index = std::cmp::min(block_index, metas.len());
 
-            vec
-        };
+        let mut block_len_vec = Vec::with_capacity(metas.len() - block_index);
+        sst_meta.block_metas[block_index..]
+            .iter()
+            .for_each(|b_meta| block_len_vec.push(b_meta.len as usize));
 
         Self {
             byte_stream,
