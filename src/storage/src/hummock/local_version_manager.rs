@@ -47,8 +47,8 @@ use crate::hummock::shared_buffer::UploadTaskType::{FlushWriteBatch, SyncEpoch};
 use crate::hummock::shared_buffer::{OrderIndex, SharedBufferEvent, WriteRequest};
 use crate::hummock::utils::validate_table_key_range;
 use crate::hummock::{
-    HummockEpoch, HummockError, HummockResult, HummockVersionId, SstableIdManager,
-    SstableIdManagerRef, INVALID_VERSION_ID,
+    HummockEpoch, HummockError, HummockResult, HummockVersionId, SstableIdManagerRef,
+    INVALID_VERSION_ID,
 };
 use crate::monitor::StateStoreMetrics;
 use crate::storage_value::StorageValue;
@@ -234,7 +234,7 @@ impl LocalVersionManager {
             hummock_meta_client.clone(),
             write_conflict_detector,
             Arc::new(RwLock::new(HashMap::new())),
-            Arc::new(SstableIdManager::new(
+            Arc::new(crate::hummock::SstableIdManager::new(
                 hummock_meta_client,
                 options.sstable_id_remote_fetch_number,
             )),

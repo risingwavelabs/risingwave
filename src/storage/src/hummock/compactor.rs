@@ -866,6 +866,7 @@ impl Compactor {
 
     /// The background compaction thread that receives compaction tasks from hummock compaction
     /// manager and runs compaction tasks.
+    #[allow(clippy::too_many_arguments)]
     pub fn start_compactor(
         options: Arc<StorageConfig>,
         hummock_meta_client: Arc<dyn HummockMetaClient>,
