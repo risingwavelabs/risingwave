@@ -1,3 +1,17 @@
+// Copyright 2022 Singularity Data
+//
+// Licensed under the Apache License, Version 2.0 (the "License");
+// you may not use this file except in compliance with the License.
+// You may obtain a copy of the License at
+//
+// http://www.apache.org/licenses/LICENSE-2.0
+//
+// Unless required by applicable law or agreed to in writing, software
+// distributed under the License is distributed on an "AS IS" BASIS,
+// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+// See the License for the specific language governing permissions and
+// limitations under the License.
+
 use risingwave_pb::stream_plan::update_mutation::DispatcherUpdate;
 use itertools::Itertools;
 use std::collections::{HashMap, HashSet};
@@ -9,7 +23,7 @@ use risingwave_common::catalog::TableId;
 use crate::storage::MetaStore;
 use crate::stream::GlobalStreamManager;
 use risingwave_common::error::Result;
-use risingwave_common::types::VIRTUAL_NODE_COUNT;
+use risingwave_common::types::{ParallelUnitId, VIRTUAL_NODE_COUNT};
 use risingwave_pb::common::{ActorInfo, WorkerNode, WorkerType};
 use risingwave_pb::stream_plan::{DispatcherType, StreamActor, UpdateMutation};
 use risingwave_pb::stream_plan::barrier::Mutation;
@@ -18,9 +32,13 @@ use risingwave_pb::stream_service::{BroadcastActorInfoTableRequest, BuildActorsR
 use crate::barrier::Command;
 use crate::cluster::WorkerId;
 use crate::manager::IdCategory;
-use crate::model::{ActorId, TableFragments};
+use crate::model::{ActorId, FragmentId, TableFragments};
 
 impl<S> GlobalStreamManager<S> where S: MetaStore {
+    pub async fn reschedule_actors(&self, reschedule: HashMap<FragmentId, (Vec<ParallelUnitId>, Vec<ParallelUnitId>)>) -> Result<()> {
+        todo!()
+    }
+
     #[allow(clippy::too_many_arguments)]
     #[async_recursion]
     async fn resolve_migrate_dependent_actors(
