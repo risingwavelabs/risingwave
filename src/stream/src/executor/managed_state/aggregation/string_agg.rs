@@ -85,6 +85,9 @@ pub struct ManagedStringAggState<S: StateStore> {
     /// The column to aggregate in state table.
     state_table_agg_col_idx: usize,
 
+    /// The column as delimiter in state table.
+    state_table_delim_col_idx: usize,
+
     /// In-memory fully synced cache.
     cache: Cache,
 }
@@ -106,6 +109,9 @@ impl<S: StateStore> ManagedStringAggState<S> {
         let state_table_agg_col_idx = *col_mapping
             .get(&agg_call.args.val_indices()[0])
             .expect("the column to be aggregate must appear in the state table");
+        let state_table_delim_col_idx = *col_mapping
+            .get(&agg_call.args.val_indices()[1])
+            .expect("the column as delimiter must appear in the state table");
         // map order by columns to state table column indices
         let order_pair = agg_call
             .order_pairs
@@ -132,6 +138,7 @@ impl<S: StateStore> ManagedStringAggState<S> {
             group_key: group_key.cloned(),
             state_table_col_indices,
             state_table_agg_col_idx,
+            state_table_delim_col_idx,
             cache: Cache::new(order_pair),
         })
     }
@@ -183,6 +190,7 @@ impl<S: StateStore> ManagedTableState<S> for ManagedStringAggState<S> {
         state_table: &RowBasedStateTable<S>,
     ) -> StreamExecutorResult<Datum> {
         let mut agg_result = String::new();
+        let mut first = true;
 
         if self.cache.is_cold_start() {
             let all_data_iter = if let Some(group_key) = self.group_key.as_ref() {
@@ -198,22 +206,32 @@ impl<S: StateStore> ManagedTableState<S> for ManagedStringAggState<S> {
             for state_row in all_data_iter {
                 let state_row = state_row?;
                 self.cache.insert(state_row.as_ref().to_owned());
+                if !first {
+                    let delim = state_row[self.state_table_delim_col_idx]
+                        .clone()
+                        .map(ScalarImpl::into_utf8);
+                    agg_result.push_str(&delim.unwrap_or_default());
+                }
+                first = false;
                 let value = state_row[self.state_table_agg_col_idx]
                     .clone()
                     .map(ScalarImpl::into_utf8);
-                if let Some(s) = value {
-                    agg_result.push_str(&s);
-                }
+                agg_result.push_str(&value.unwrap_or_default());
             }
         } else {
             // rev() is required because cache.rows is in reverse order
             for orderable_row in self.cache.rows.iter().rev() {
+                if !first {
+                    let delim = orderable_row.row[self.state_table_delim_col_idx]
+                        .clone()
+                        .map(ScalarImpl::into_utf8);
+                    agg_result.push_str(&delim.unwrap_or_default());
+                }
+                first = false;
                 let value = orderable_row.row[self.state_table_agg_col_idx]
                     .clone()
                     .map(ScalarImpl::into_utf8);
-                if let Some(s) = value {
-                    agg_result.push_str(&s);
-                }
+                agg_result.push_str(&value.unwrap_or_default());
             }
         }
 
