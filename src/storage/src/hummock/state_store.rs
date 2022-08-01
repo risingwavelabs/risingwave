@@ -79,7 +79,7 @@ impl HummockStorage {
     /// its Some), and builds iterator by `key_range`
     async fn iter_inner<R, B, T>(
         &self,
-        _filter_key: Option<Vec<u8>>,
+        filter_key: Option<Vec<u8>>,
         key_range: R,
         read_options: ReadOptions,
     ) -> StorageResult<HummockStateStoreIter>
@@ -152,34 +152,49 @@ impl HummockStorage {
                 assert!(start_table_idx < table_infos.len() && end_table_idx < table_infos.len());
                 let matched_table_infos = &table_infos[start_table_idx..=end_table_idx];
 
-                let tables = match T::Direction::direction() {
-                    DirectionEnum::Backward => matched_table_infos
-                        .iter()
-                        .rev()
-                        .map(|&info| info.clone())
-                        .collect_vec(),
-                    DirectionEnum::Forward => matched_table_infos
-                        .iter()
-                        .map(|&info| info.clone())
-                        .collect_vec(),
+                let pruned_sstables = match T::Direction::direction() {
+                    DirectionEnum::Backward => matched_table_infos.iter().rev().collect_vec(),
+                    DirectionEnum::Forward => matched_table_infos.iter().collect_vec(),
                 };
+
+                let mut sstables = vec![];
+                for sstable_info in pruned_sstables {
+                    if let Some(bloom_filter_key) = filter_key.as_ref() {
+                        let sstable = self
+                            .sstable_store
+                            .sstable(sstable_info.id, &mut stats)
+                            .await?;
+
+                        if !sstable.value().surely_not_have_user_key(bloom_filter_key) {
+                            sstables.push((*sstable_info).clone());
+                        }
+                    } else {
+                        sstables.push((*sstable_info).clone());
+                    }
+                }
 
                 overlapped_iters.push(HummockIteratorUnion::Third(ConcatIteratorInner::<
                     T::SstableIteratorType,
                 >::new(
-                    tables,
+                    sstables,
                     self.sstable_store(),
                     iter_read_options.clone(),
                 )));
             } else {
                 for table_info in table_infos.into_iter().rev() {
-                    let table = self
+                    let sstable = self
                         .sstable_store
                         .sstable(table_info.id, &mut stats)
                         .await?;
+                    if let Some(bloom_filter_key) = filter_key.as_ref() {
+                        if sstable.value().surely_not_have_user_key(bloom_filter_key) {
+                            continue;
+                        }
+                    }
+
                     overlapped_iters.push(HummockIteratorUnion::Fourth(
                         T::SstableIteratorType::create(
-                            table,
+                            sstable,
                             self.sstable_store(),
                             iter_read_options.clone(),
                         ),
@@ -480,7 +495,7 @@ impl StateStore for HummockStorage {
 
     fn prefix_iter<R, B>(
         &self,
-        prefix_hint: Option<Vec<u8>>,
+        _prefix_hint: Option<Vec<u8>>,
         key_range: R,
         read_options: ReadOptions,
     ) -> Self::PrefixIterFuture<'_, R, B>
@@ -488,7 +503,8 @@ impl StateStore for HummockStorage {
         R: RangeBounds<B> + Send,
         B: AsRef<[u8]> + Send,
     {
-        self.iter_inner::<R, B, ForwardIter>(prefix_hint, key_range, read_options)
+        // TODO: transfer prefix_hint to iter_inner next pr
+        self.iter_inner::<R, B, ForwardIter>(None, key_range, read_options)
     }
 
     /// Returns a backward iterator that scans from the end key to the begin key
