@@ -167,7 +167,8 @@ fn validate_response<_Row>(setup_sql: &str, query: &str, response: Result<_Row, 
             {
                 return;
             }
-            panic!("
+            panic!(
+                "
 Query failed:
 ---- START
 -- Setup
@@ -178,7 +179,9 @@ Query failed:
 
 Reason:
 {}
-", setup_sql, query, e);
+",
+                setup_sql, query, e
+            );
         }
     }
 }
