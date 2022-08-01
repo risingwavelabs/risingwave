@@ -29,6 +29,11 @@ use crate::catalog::ColumnId;
 use crate::optimizer::plan_node::{PlanBase, PlanNode};
 use crate::optimizer::property::{Direction, Distribution, FieldOrder, Order, RequiredDist};
 
+/// The first column id to allocate for a new materialized view.
+///
+/// Note: not starting from 0 helps us to debug misusing of the column id and the index.
+const COLUMN_ID_BASE: i32 = 1000;
+
 /// Materializes a stream.
 #[derive(Debug, Clone)]
 pub struct StreamMaterialize {
@@ -108,7 +113,10 @@ impl StreamMaterialize {
             .enumerate()
             .map(|(i, field)| {
                 let mut c = ColumnCatalog {
-                    column_desc: ColumnDesc::from_field_with_column_id(field, i as i32),
+                    column_desc: ColumnDesc::from_field_with_column_id(
+                        field,
+                        i as i32 + COLUMN_ID_BASE,
+                    ),
                     is_hidden: !user_cols.contains(i),
                 };
                 c.column_desc.name = if !c.is_hidden {
