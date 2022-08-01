@@ -22,8 +22,8 @@ use crate::hummock::iterator::test_utils::{
     mock_sstable_store, TEST_KEYS_COUNT,
 };
 use crate::hummock::iterator::{
-    BackwardConcatIterator, BackwardUserIterator, ConcatIterator, ConcatStreamIterator, HummockIterator,
-    HummockIteratorUnion, UnorderedMergeIteratorInner, UserIterator,
+    BackwardConcatIterator, BackwardUserIterator, ConcatIterator, ConcatStreamIterator,
+    HummockIterator, HummockIteratorUnion, UnorderedMergeIteratorInner, UserIterator,
 };
 use crate::hummock::sstable::SstableIteratorReadOptions;
 use crate::hummock::test_utils::default_builder_opt_for_test;
@@ -61,7 +61,6 @@ async fn test_failpoints_concat_read_err() {
     );
     test_iterator(iter, "mem_read_err").await;
 
-
     let stream_iter = ConcatStreamIterator::new(
         vec![table0.get_sstable_info(), table1.get_sstable_info()],
         sstable_store,
@@ -70,7 +69,7 @@ async fn test_failpoints_concat_read_err() {
     test_iterator(stream_iter, "mem_streaming_read_err").await;
 }
 
-async fn test_iterator (mut iter: impl HummockIterator, err: &str) {
+async fn test_iterator(mut iter: impl HummockIterator, err: &str) {
     iter.rewind().await.unwrap();
     fail::cfg(err, "return").unwrap();
     let result = iter.seek(iterator_test_key_of(22).as_slice()).await;
