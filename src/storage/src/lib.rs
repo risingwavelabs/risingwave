@@ -44,6 +44,7 @@
 #![feature(stmt_expr_attributes)]
 #![feature(type_changing_struct_update)]
 #![feature(build_hasher_simple_hash_one)]
+#![feature(assert_matches)]
 #![test_runner(risingwave_test_runner::test_runner::run_failpont_tests)]
 pub mod hummock;
 pub mod keyspace;

@@ -5285,6 +5285,7 @@ dependencies = [
  "risingwave_pb",
  "risingwave_rpc_client",
  "risingwave_test_runner",
+ "scopeguard",
  "serde",
  "smallvec",
  "spin 0.9.4",

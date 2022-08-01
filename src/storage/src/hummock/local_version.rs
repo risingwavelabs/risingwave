@@ -72,9 +72,19 @@ impl LocalVersion {
             .clone()
     }
 
-    pub fn set_pinned_version(&mut self, new_pinned_version: HummockVersion) {
+    /// Returns epochs cleaned from shared buffer.
+    pub fn set_pinned_version(&mut self, new_pinned_version: HummockVersion) -> Vec<HummockEpoch> {
         // Clean shared buffer and uncommitted ssts below (<=) new max committed epoch
+        let mut cleaned_epoch = vec![];
         if self.pinned_version.max_committed_epoch() < new_pinned_version.max_committed_epoch {
+            cleaned_epoch.append(
+                &mut self
+                    .shared_buffer
+                    .keys()
+                    .filter(|e| **e <= new_pinned_version.max_committed_epoch)
+                    .cloned()
+                    .collect_vec(),
+            );
             self.shared_buffer
                 .retain(|epoch, _| epoch > &new_pinned_version.max_committed_epoch);
         }
@@ -86,6 +96,7 @@ impl LocalVersion {
             version: new_pinned_version,
             unpin_worker_tx: self.pinned_version.unpin_worker_tx.clone(),
         });
+        cleaned_epoch
     }
 
     pub fn read_version(this: &RwLock<Self>, read_epoch: HummockEpoch) -> ReadVersion {
@@ -118,8 +129,10 @@ impl LocalVersion {
         }
     }
 
-    pub fn clear_shared_buffer(&mut self) {
+    pub fn clear_shared_buffer(&mut self) -> Vec<HummockEpoch> {
+        let cleaned_epochs = self.shared_buffer.keys().cloned().collect_vec();
         self.shared_buffer.clear();
+        cleaned_epochs
     }
 }
 
