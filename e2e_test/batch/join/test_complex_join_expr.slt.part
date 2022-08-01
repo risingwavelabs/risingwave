@@ -1,4 +1,4 @@
-# Test joins with comparisons involving both sides of the join
+# description: Test joins with comparisons involving both sides of the join
 
 statement ok
 SET RW_IMPLICIT_FLUSH TO true;
