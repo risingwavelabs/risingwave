@@ -442,6 +442,9 @@ impl LogicalAgg {
         Ok(StreamGlobalSimpleAgg::new(total_agg_logical_plan).into())
     }
 
+    /// Two phase streaming agg.
+    /// Should only be used iff input is distributed.
+    /// input must be converted to stream form.
     fn gen_two_phase_streaming_agg_plan_v2(
         &self,
         input_stream: PlanRef,
@@ -1100,9 +1103,11 @@ impl ToStream for LogicalAgg {
         let input = self.input();
         // simple-agg
         if self.group_key().is_empty() {
-            // TODO: Other agg calls will be supported by stateful local agg eventually.
             let agg_calls_can_use_two_phase = self.agg_calls.iter().all(|c| {
-                matches!(c.agg_kind, AggKind::Count | AggKind::Sum) && c.order_by_fields.is_empty()
+                matches!(
+                    c.agg_kind,
+                    AggKind::Min | AggKind::Max | AggKind::Sum | AggKind::Count
+                ) && c.order_by_fields.is_empty()
             });
 
             let input_stream = input.to_stream()?;
