@@ -226,7 +226,8 @@ impl LogicalProjectSet {
         let i2o = Self::i2o_col_mapping_inner(input_len, select_list);
         let mut fd_set = FunctionalDependencySet::new();
         for fd in input_fd_set.as_dependencies() {
-            if let Some(fd) = i2o.rewrite_functional_dependency(fd) {
+            if let Some(mut fd) = i2o.rewrite_functional_dependency(fd) {
+                fd.from.set(0, true);
                 fd_set.add_functional_dependency(fd);
             }
         }
@@ -369,5 +370,58 @@ impl ToStream for LogicalProjectSet {
         let new_input = self.input().to_stream()?;
         let new_logical = self.clone_with_input(new_input);
         Ok(StreamProjectSet::new(new_logical).into())
+    }
+}
+
+mod test {
+    use risingwave_common::catalog::{Field, Schema};
+    use risingwave_common::types::DataType;
+
+    use super::*;
+    use crate::expr::{ExprImpl, InputRef, TableFunction};
+    use crate::optimizer::plan_node::LogicalValues;
+    use crate::optimizer::property::FunctionalDependency;
+    use crate::session::OptimizerContext;
+
+    #[tokio::test]
+    async fn fd_derivation_project_set() {
+        let ctx = OptimizerContext::mock().await;
+        let fields: Vec<Field> = vec![
+            Field::with_name(DataType::Int32, "v1"),
+            Field::with_name(DataType::Int32, "v2"),
+            Field::with_name(DataType::Int32, "v3"),
+        ];
+        let mut values = LogicalValues::new(vec![], Schema { fields }, ctx);
+        values
+            .base
+            .functional_dependency
+            .add_functional_dependency_by_column_indices(&[1], &[2], 3);
+        let project_set = LogicalProjectSet::new(
+            values.into(),
+            vec![
+                ExprImpl::InputRef(Box::new(InputRef::new(2, DataType::Int32))),
+                ExprImpl::InputRef(Box::new(InputRef::new(1, DataType::Int32))),
+                ExprImpl::TableFunction(Box::new(
+                    TableFunction::new(
+                        crate::expr::TableFunctionType::Generate,
+                        vec![
+                            ExprImpl::InputRef(Box::new(InputRef::new(0, DataType::Int32))),
+                            ExprImpl::InputRef(Box::new(InputRef::new(1, DataType::Int32))),
+                            ExprImpl::InputRef(Box::new(InputRef::new(2, DataType::Int32))),
+                        ],
+                    )
+                    .unwrap(),
+                )),
+            ],
+        );
+        let fd_set = project_set.base.functional_dependency;
+        let expected_fd_set = vec![FunctionalDependency::with_indices(4, &[0, 2], &[1])];
+        for i in fd_set.as_dependencies() {
+            assert!(
+                expected_fd_set.contains(i),
+                "{} should be in expected_fd_set",
+                i
+            );
+        }
     }
 }

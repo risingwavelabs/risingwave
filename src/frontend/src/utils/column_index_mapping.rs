@@ -346,6 +346,11 @@ impl ColIndexMapping {
     /// Rewrite the indices in a functional dependency.
     ///
     /// If either the `from` and `to` become empty after mapping, this function will return [`None`]
+    ///
+    /// If the `from` side of a functional dependency becomes empty, this indicates that these
+    /// columns are removed, so columns in the `to` side are free now. Similarly, If the `to` side
+    /// of a functional dependency becomes empty after rewriting, it means that this dependency is
+    /// no longer valid.
     pub fn rewrite_functional_dependency(
         &self,
         fd: &FunctionalDependency,
