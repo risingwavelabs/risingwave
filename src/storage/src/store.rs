@@ -40,7 +40,7 @@ macro_rules! define_state_store_associated_type {
         type IngestBatchFuture<'a> = impl IngestBatchFutureTrait<'a>;
         type ReplicateBatchFuture<'a> = impl EmptyFutureTrait<'a>;
         type WaitEpochFuture<'a> = impl EmptyFutureTrait<'a>;
-        type SyncFuture<'a> = impl EmptyFutureTrait<'a>;
+        type SyncFuture<'a> = impl SyncFutureTrait<'a>;
 
         type BackwardIterFuture<'a, R, B> = impl IterFutureTrait<'a, Self::Iter, R, B>
                                                             where

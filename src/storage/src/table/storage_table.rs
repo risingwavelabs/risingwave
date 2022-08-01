@@ -747,12 +747,11 @@ impl<S: StateStore, RS: RowSerde, const T: AccessType> StorageTableBase<S, RS, T
             next_col_bound: Bound<&Datum>,
             is_start_bound: bool,
         ) -> Bound<Vec<u8>> {
-            let col_bound_key_serializer = pk_serializer.prefix(1);
             match next_col_bound {
                 Included(k) => {
                     let mut key = Row::default();
                     key.0.push(k.clone());
-                    let serialized_col_bound_key = serialize_pk(&key, &col_bound_key_serializer);
+                    let serialized_col_bound_key = serialize_pk(&key, pk_serializer);
                     serialized_pk_prefix.extend_from_slice(&serialized_col_bound_key);
 
                     if is_start_bound {
@@ -766,7 +765,7 @@ impl<S: StateStore, RS: RowSerde, const T: AccessType> StorageTableBase<S, RS, T
                 Excluded(k) => {
                     let mut key = Row::default();
                     key.0.push(k.clone());
-                    let serialized_col_bound_key = serialize_pk(&key, &col_bound_key_serializer);
+                    let serialized_col_bound_key = serialize_pk(&key, pk_serializer);
                     serialized_pk_prefix.extend_from_slice(&serialized_col_bound_key);
                     if is_start_bound {
                         // storage doesn't support excluded begin key yet, so transform it to
