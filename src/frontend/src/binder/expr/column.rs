@@ -12,11 +12,11 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use risingwave_common::error::{ErrorCode, Result};
+use risingwave_common::error::{ErrorCode, Result, TrackingIssue};
 use risingwave_sqlparser::ast::Ident;
 
 use crate::binder::Binder;
-use crate::expr::{CorrelatedInputRef, ExprImpl, InputRef};
+use crate::expr::{CorrelatedInputRef, ExprImpl, InputRef, FunctionCall, ExprType};
 
 impl Binder {
     pub fn bind_column(&mut self, idents: &[Ident]) -> Result<ExprImpl> {
@@ -36,12 +36,25 @@ impl Binder {
             }
         };
 
-        if let Ok(index) = self
+        if let Ok(indices) = self
             .context
             .get_column_binding_index(&table_name, &column_name)
         {
-            let column = &self.context.columns[index];
-            return Ok(InputRef::new(column.index, column.field.data_type.clone()).into());
+            match indices.len() {
+                0 => unreachable!(),
+                1 => {
+                    let index = indices[0];
+                    let column = &self.context.columns[index];
+                    return Ok(InputRef::new(column.index, column.field.data_type.clone()).into());
+                }
+                _ => {
+                    let inputs = indices.iter().map(|index| {
+                        let column = &self.context.columns[*index];
+                        InputRef::new(column.index, column.field.data_type.clone()).into()
+                    }).collect::<Vec<_>>();
+                    return Ok(FunctionCall::new(ExprType::Coalesce, inputs)?.into())
+                }
+            }
         }
 
         // Try to find a correlated column in `upper_contexts`, starting from the innermost context.
@@ -50,14 +63,23 @@ impl Binder {
             // `depth` starts from 1.
             let depth = i + 1;
             match context.get_column_binding_index(&table_name, &column_name) {
-                Ok(index) => {
-                    let column = &context.columns[index];
-                    return Ok(CorrelatedInputRef::new(
-                        column.index,
-                        column.field.data_type.clone(),
-                        depth,
-                    )
-                    .into());
+                Ok(indices) => {
+                    match indices.len() {
+                        0 => unreachable!(),
+                        1 => {
+                            let index = indices[0];
+                            let column = &context.columns[index];
+                            return Ok(CorrelatedInputRef::new(
+                                column.index,
+                                column.field.data_type.clone(),
+                                depth,
+                            )
+                            .into());
+                        },
+                        _ => {
+                            return Err(ErrorCode::NotImplemented("Ambiguous columns not allowed for correlated references".into(), TrackingIssue::from(None)).into());
+                        }
+                    }
                 }
                 Err(e) => {
                     err = e;

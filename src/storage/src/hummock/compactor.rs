@@ -306,8 +306,7 @@ impl Compactor {
             let buffer_per_split = start_user_keys.len() / split_num;
             for i in 1..split_num {
                 key_split_append(
-                    &FullKey::from_user_key_slice(
-                        start_user_keys[i * buffer_per_split],
+                    &FullKey::from_user_key_slice(start_user_keys[i * buffer_per_split],
                         Epoch::MAX,
                     )
                     .into_inner()

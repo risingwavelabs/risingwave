@@ -275,3 +275,16 @@
     create table b(b1 int);
     select * from a join lateral (select * from b where a1 = b1);
   binder_error: 'Feature is not yet implemented: lateral subqueries are not yet supported, Tracking issue: https://github.com/singularity-data/risingwave/issues/3815'
+- sql: |
+    /* Ensure that natural joins bind the correct columns */
+    create table a(x int);
+    create table b(x int);
+    create table c(y int);
+    select * from a natural join b natural join c;
+  logical_plan: |
+- sql: |
+    /* Ensure that natural joins can disambiguate columns */
+    create table a(x int);
+    create table b(x int);
+    select x, a.x, b.x from a natural join b;
+  logical_plan: |
