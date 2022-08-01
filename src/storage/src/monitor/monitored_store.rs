@@ -288,7 +288,7 @@ where
 
     fn prefix_scan<R, B>(
         &self,
-        prefix_hint: Option<Vec<u8>>,
+        prefix: Vec<u8>,
         col_bound_range: R,
         limit: Option<usize>,
         read_options: ReadOptions,
@@ -301,7 +301,7 @@ where
             let timer = self.stats.range_scan_duration.start_timer();
             let result = self
                 .inner
-                .prefix_scan(prefix_hint, col_bound_range, limit, read_options)
+                .prefix_scan(prefix, col_bound_range, limit, read_options)
                 .await
                 .inspect_err(|e| error!("Failed in scan: {:?}", e))?;
             timer.observe_duration();

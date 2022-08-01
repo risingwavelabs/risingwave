@@ -142,7 +142,7 @@ pub trait StateStore: Send + Sync + 'static + Clone {
 
     fn prefix_scan<R, B>(
         &self,
-        prefix_key: Option<Vec<u8>>,
+        prefix_key: Vec<u8>,
         key_range: R,
         limit: Option<usize>,
         read_options: ReadOptions,

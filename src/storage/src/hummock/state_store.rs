@@ -390,7 +390,7 @@ impl StateStore for HummockStorage {
 
     fn prefix_scan<R, B>(
         &self,
-        prefix_hint: Option<Vec<u8>>,
+        prefix: Vec<u8>,
         key_range: R,
         limit: Option<usize>,
         read_options: ReadOptions,
@@ -400,7 +400,7 @@ impl StateStore for HummockStorage {
         B: AsRef<[u8]> + Send,
     {
         async move {
-            self.prefix_iter(prefix_hint, key_range, read_options)
+            self.prefix_iter(Some(prefix), key_range, read_options)
                 .await?
                 .collect(limit)
                 .await
