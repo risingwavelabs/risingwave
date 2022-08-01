@@ -49,7 +49,6 @@ impl Binder {
         assignments: Vec<Assignment>,
         selection: Option<Expr>,
     ) -> Result<BoundUpdate> {
-        ensure!(table.joins.is_empty());
         let table_source = {
             ensure!(table.joins.is_empty());
             let name = match &table.relation {
