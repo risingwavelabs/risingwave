@@ -90,7 +90,7 @@ message BarrierCompleteResponse {
     uint64 compaction_group_id = 1;
     hummock.SstableInfo sst = 2;
   }
-  repeated GroupedSstableInfo sycned_sstables = 4;
+  repeated GroupedSstableInfo synced_sstables = 4;
   uint32 worker_id = 5;
 }
 

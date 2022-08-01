@@ -256,6 +256,11 @@ impl MetaClient {
         Ok(resp.version)
     }
 
+    pub async fn update_user(&self, request: UpdateUserRequest) -> Result<u64> {
+        let resp = self.inner.update_user(request).await?;
+        Ok(resp.version)
+    }
+
     pub async fn grant_privilege(
         &self,
         user_ids: Vec<u32>,
@@ -636,6 +641,7 @@ macro_rules! for_all_meta_rpc {
             ,{ hummock_client, get_compaction_groups, GetCompactionGroupsRequest, GetCompactionGroupsResponse }
             ,{ hummock_client, trigger_manual_compaction, TriggerManualCompactionRequest, TriggerManualCompactionResponse }
             ,{ user_client, create_user, CreateUserRequest, CreateUserResponse }
+            ,{ user_client, update_user, UpdateUserRequest, UpdateUserResponse }
             ,{ user_client, drop_user, DropUserRequest, DropUserResponse }
             ,{ user_client, grant_privilege, GrantPrivilegeRequest, GrantPrivilegeResponse }
             ,{ user_client, revoke_privilege, RevokePrivilegeRequest, RevokePrivilegeResponse }

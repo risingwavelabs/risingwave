@@ -21,7 +21,7 @@
     create index iii_index_1 on iii_t1(v1);
     create index iii_index_2 on iii_t2(v3);
 - before:
-    - index_slt
+  - index_slt
   sql: |
     select * from iii_t1, iii_t2 where iii_t1.v1 = iii_t2.v3;
   stream_plan: |
@@ -31,7 +31,7 @@
           StreamIndexScan { index: iii_index_1, columns: [v1, v2, iii_t1._row_id], pk_indices: [2] }
           StreamIndexScan { index: iii_index_2, columns: [v3, v4, iii_t2._row_id], pk_indices: [2] }
 - before:
-    - index_slt
+  - index_slt
   sql: |
     select v4 from iii_t1, iii_t2 where iii_t1.v1 = iii_t2.v3;
   stream_plan: |

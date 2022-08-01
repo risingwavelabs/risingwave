@@ -7,7 +7,7 @@
     create materialized view m2 as select v1, v2 from t1 where v2 = 1;
 - id: mv_on_mv_join
   before:
-    - create_tables
+  - create_tables
   sql: |
     select m1.v1 as m1v1, m1.v2 as m1v2, m2.v1 as m2v1, m2.v2 as m2v2 from m1 join m2 on m1.v1 = m2.v1;
   stream_plan: |
@@ -24,7 +24,7 @@
     create materialized view mv as select v from t order by v limit 10;
 - id: select_from_singleton_mv
   before:
-    - create_singleton_mv
+  - create_singleton_mv
   sql: |
     select v from mv; -- FIXME: there should not be a `Single` exchange here
   batch_plan: |
@@ -32,7 +32,7 @@
       BatchScan { table: mv, columns: [v] }
 - id: single_fragment_mv_on_singleton_mv
   before:
-    - create_singleton_mv
+  - create_singleton_mv
   sql: |
     select v from mv;
   stream_plan: |
@@ -40,7 +40,7 @@
       StreamTableScan { table: mv, columns: [v, t._row_id] }
 - id: mv_on_singleton_mv
   before:
-    - create_singleton_mv
+  - create_singleton_mv
   sql: |
     select mv1.v as v from mv as mv1, mv as mv2 where mv1.v = mv2.v;
   stream_plan: |

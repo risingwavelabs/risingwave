@@ -98,7 +98,6 @@ pub fn unnested_list_type(datatype: DataType) -> DataType {
 }
 
 impl From<&ProstDataType> for DataType {
-    #[expect(clippy::needless_borrow)]
     fn from(proto: &ProstDataType) -> DataType {
         match proto.get_type_name().expect("missing type field") {
             TypeName::Int16 => DataType::Int16,
