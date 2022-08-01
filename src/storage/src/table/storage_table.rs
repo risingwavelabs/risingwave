@@ -373,8 +373,9 @@ impl<S: StateStore, RS: RowSerde, const T: AccessType> StorageTableBase<S, RS, T
 
         tracing::trace!(target: "events::storage::storage_table", "compute vnode: {:?} key {:?} => {}", row, indices, vnode);
 
-        // TODO(rc): tmp
-        // self.check_vnode_is_set(vnode);
+        if !indices.is_empty() {
+            self.check_vnode_is_set(vnode);
+        }
         vnode
     }
 
