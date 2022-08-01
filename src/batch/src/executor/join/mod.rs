@@ -69,6 +69,7 @@ impl JoinType {
             JoinTypeProst::RightSemi => JoinType::RightSemi,
             JoinTypeProst::RightAnti => JoinType::RightAnti,
             JoinTypeProst::FullOuter => JoinType::FullOuter,
+            JoinTypeProst::Unspecified => unreachable!(),
         }
     }
 

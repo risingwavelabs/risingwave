@@ -56,6 +56,7 @@ impl Op {
             Some(ProstOp::Delete) => Op::Delete,
             Some(ProstOp::UpdateInsert) => Op::UpdateInsert,
             Some(ProstOp::UpdateDelete) => Op::UpdateDelete,
+            Some(ProstOp::Unspecified) => unreachable!(),
             None => bail!("No such op type"),
         };
         Ok(op)

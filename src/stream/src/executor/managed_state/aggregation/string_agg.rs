@@ -85,6 +85,9 @@ pub struct ManagedStringAggState<S: StateStore> {
     /// The column to aggregate in state table.
     state_table_agg_col_idx: usize,
 
+    /// The column as delimiter in state table.
+    state_table_delim_col_idx: usize,
+
     /// In-memory fully synced cache.
     cache: Cache,
 }
@@ -106,6 +109,9 @@ impl<S: StateStore> ManagedStringAggState<S> {
         let state_table_agg_col_idx = *col_mapping
             .get(&agg_call.args.val_indices()[0])
             .expect("the column to be aggregate must appear in the state table");
+        let state_table_delim_col_idx = *col_mapping
+            .get(&agg_call.args.val_indices()[1])
+            .expect("the column as delimiter must appear in the state table");
         // map order by columns to state table column indices
         let order_pair = agg_call
             .order_pairs
@@ -132,6 +138,7 @@ impl<S: StateStore> ManagedStringAggState<S> {
             group_key: group_key.cloned(),
             state_table_col_indices,
             state_table_agg_col_idx,
+            state_table_delim_col_idx,
             cache: Cache::new(order_pair),
         })
     }
@@ -183,6 +190,7 @@ impl<S: StateStore> ManagedTableState<S> for ManagedStringAggState<S> {
         state_table: &RowBasedStateTable<S>,
     ) -> StreamExecutorResult<Datum> {
         let mut agg_result = String::new();
+        let mut first = true;
 
         if self.cache.is_cold_start() {
             let all_data_iter = if let Some(group_key) = self.group_key.as_ref() {
@@ -198,22 +206,32 @@ impl<S: StateStore> ManagedTableState<S> for ManagedStringAggState<S> {
             for state_row in all_data_iter {
                 let state_row = state_row?;
                 self.cache.insert(state_row.as_ref().to_owned());
+                if !first {
+                    let delim = state_row[self.state_table_delim_col_idx]
+                        .clone()
+                        .map(ScalarImpl::into_utf8);
+                    agg_result.push_str(&delim.unwrap_or_default());
+                }
+                first = false;
                 let value = state_row[self.state_table_agg_col_idx]
                     .clone()
                     .map(ScalarImpl::into_utf8);
-                if let Some(s) = value {
-                    agg_result.push_str(&s);
-                }
+                agg_result.push_str(&value.unwrap_or_default());
             }
         } else {
             // rev() is required because cache.rows is in reverse order
             for orderable_row in self.cache.rows.iter().rev() {
+                if !first {
+                    let delim = orderable_row.row[self.state_table_delim_col_idx]
+                        .clone()
+                        .map(ScalarImpl::into_utf8);
+                    agg_result.push_str(&delim.unwrap_or_default());
+                }
+                first = false;
                 let value = orderable_row.row[self.state_table_agg_col_idx]
                     .clone()
                     .map(ScalarImpl::into_utf8);
-                if let Some(s) = value {
-                    agg_result.push_str(&s);
-                }
+                agg_result.push_str(&value.unwrap_or_default());
             }
         }
 
@@ -247,13 +265,13 @@ mod tests {
     #[tokio::test]
     async fn test_string_agg_state_simple_agg_without_order() -> StreamExecutorResult<()> {
         // Assumption of input schema:
-        // (a: varchar, b: int32, c: int32, _row_id: int64)
+        // (a: varchar, _delim: varchar, b: int32, c: int32, _row_id: int64)
         // where `a` is the column to aggregate
 
-        let input_pk_indices = vec![3];
+        let input_pk_indices = vec![4];
         let agg_call = AggCall {
             kind: AggKind::StringAgg,
-            args: AggArgs::Unary(DataType::Varchar, 0),
+            args: AggArgs::Binary([DataType::Varchar, DataType::Varchar], [0, 1]),
             return_type: DataType::Varchar,
             order_pairs: vec![],
             append_only: false,
@@ -265,8 +283,9 @@ mod tests {
         let columns = vec![
             ColumnDesc::unnamed(ColumnId::new(0), DataType::Int64), // _row_id
             ColumnDesc::unnamed(ColumnId::new(1), DataType::Varchar), // a
+            ColumnDesc::unnamed(ColumnId::new(2), DataType::Varchar), // _delim
         ];
-        let state_table_col_indices = vec![3, 0];
+        let state_table_col_indices = vec![4, 0, 1];
         let mut state_table = RowBasedStateTable::new_without_distribution(
             MemoryStateStore::new(),
             table_id,
@@ -281,11 +300,11 @@ mod tests {
         let mut epoch = 0;
 
         let chunk = StreamChunk::from_pretty(
-            " T i i I
-            + a 1 8 123
-            + b 5 2 128
-            - b 5 2 128
-            + c 1 3 130",
+            " T T i i I
+            + a , 1 8 123
+            + b , 5 2 128
+            - b , 5 2 128
+            + c , 1 3 130",
         );
         let (ops, columns, visibility) = chunk.into_inner();
         let chunk_cols: Vec<_> = columns.iter().map(|col| col.array_ref()).collect();
@@ -306,9 +325,10 @@ mod tests {
         let res = agg_state.get_output(epoch, &state_table).await?;
         match res {
             Some(ScalarImpl::Utf8(s)) => {
-                assert!(s.len() == 2);
+                assert!(s.len() == 3);
                 assert!(s.contains('a'));
                 assert!(s.contains('c'));
+                assert!(&s[1..2] == ",");
             }
             _ => panic!("unexpected output"),
         }
@@ -319,16 +339,16 @@ mod tests {
     #[tokio::test]
     async fn test_string_agg_state_simple_agg_with_order() -> StreamExecutorResult<()> {
         // Assumption of input schema:
-        // (a: varchar, b: int32, c: int32, _row_id: int64)
+        // (a: varchar, _delim: varchar, b: int32, c: int32, _row_id: int64)
         // where `a` is the column to aggregate
 
-        let input_pk_indices = vec![3];
+        let input_pk_indices = vec![4];
         let agg_call = AggCall {
             kind: AggKind::StringAgg,
-            args: AggArgs::Unary(DataType::Varchar, 0),
+            args: AggArgs::Binary([DataType::Varchar, DataType::Varchar], [0, 1]),
             return_type: DataType::Varchar,
             order_pairs: vec![
-                OrderPair::new(1, OrderType::Ascending),  // b ASC
+                OrderPair::new(2, OrderType::Ascending),  // b ASC
                 OrderPair::new(0, OrderType::Descending), // a DESC
             ],
             append_only: false,
@@ -340,8 +360,9 @@ mod tests {
             ColumnDesc::unnamed(ColumnId::new(0), DataType::Int32), // b
             ColumnDesc::unnamed(ColumnId::new(1), DataType::Varchar), // a
             ColumnDesc::unnamed(ColumnId::new(2), DataType::Int64), // _row_id
+            ColumnDesc::unnamed(ColumnId::new(3), DataType::Varchar), // _delim
         ];
-        let state_table_col_indices = vec![1, 0, 3];
+        let state_table_col_indices = vec![2, 0, 4, 1];
         let mut state_table = RowBasedStateTable::new_without_distribution(
             MemoryStateStore::new(),
             table_id,
@@ -361,11 +382,11 @@ mod tests {
 
         {
             let chunk = StreamChunk::from_pretty(
-                " T i i I
-                + a 1 8 123
-                + b 5 2 128
-                - b 5 2 128
-                + c 1 3 130",
+                " T T i i I
+                + a , 1 8 123
+                + b / 5 2 128
+                - b / 5 2 128
+                + c _ 1 3 130",
             );
             let (ops, columns, visibility) = chunk.into_inner();
             let chunk_cols: Vec<_> = columns.iter().map(|col| col.array_ref()).collect();
@@ -386,7 +407,7 @@ mod tests {
             let res = agg_state.get_output(epoch, &state_table).await?;
             match res {
                 Some(ScalarImpl::Utf8(s)) => {
-                    assert_eq!(s, "ca".to_string());
+                    assert_eq!(s, "c,a".to_string());
                 }
                 _ => panic!("unexpected output"),
             }
@@ -394,9 +415,9 @@ mod tests {
 
         {
             let chunk = StreamChunk::from_pretty(
-                " T i i I
-                + d 0 8 134
-                + e 2 2 137",
+                " T T i i I
+                + d - 0 8 134
+                + e + 2 2 137",
             );
             let (ops, columns, visibility) = chunk.into_inner();
             let chunk_cols: Vec<_> = columns.iter().map(|col| col.array_ref()).collect();
@@ -417,7 +438,7 @@ mod tests {
             let res = agg_state.get_output(epoch, &state_table).await?;
             match res {
                 Some(ScalarImpl::Utf8(s)) => {
-                    assert_eq!(s, "dcae".to_string());
+                    assert_eq!(s, "d_c,a+e".to_string());
                 }
                 _ => panic!("unexpected output"),
             }
@@ -429,16 +450,16 @@ mod tests {
     #[tokio::test]
     async fn test_string_agg_state_grouped_agg_with_order() -> StreamExecutorResult<()> {
         // Assumption of input schema:
-        // (a: varchar, b: int32, c: int32, _row_id: int64)
+        // (a: varchar, _delim: varchar, b: int32, c: int32, _row_id: int64)
         // where `a` is the column to aggregate
 
-        let input_pk_indices = vec![3];
+        let input_pk_indices = vec![4];
         let agg_call = AggCall {
             kind: AggKind::StringAgg,
-            args: AggArgs::Unary(DataType::Varchar, 0),
+            args: AggArgs::Binary([DataType::Varchar, DataType::Varchar], [0, 1]),
             return_type: DataType::Varchar,
             order_pairs: vec![
-                OrderPair::new(1, OrderType::Ascending), // b ASC
+                OrderPair::new(2, OrderType::Ascending), // b ASC
             ],
             append_only: false,
             filter: None,
@@ -450,8 +471,9 @@ mod tests {
             ColumnDesc::unnamed(ColumnId::new(1), DataType::Int32), // order by b
             ColumnDesc::unnamed(ColumnId::new(2), DataType::Int64), // _row_id
             ColumnDesc::unnamed(ColumnId::new(3), DataType::Varchar), // a
+            ColumnDesc::unnamed(ColumnId::new(4), DataType::Varchar), // _delim
         ];
-        let state_table_col_indices = vec![2, 1, 3, 0];
+        let state_table_col_indices = vec![3, 2, 4, 0, 1];
         let mut state_table = RowBasedStateTable::new_without_distribution(
             MemoryStateStore::new(),
             table_id,
@@ -475,10 +497,10 @@ mod tests {
 
         {
             let chunk = StreamChunk::from_pretty(
-                " T i i I
-                + a 1 8 123
-                + b 5 8 128
-                + c 1 3 130 D // hide this row",
+                " T T i i I
+                + a _ 1 8 123
+                + b _ 5 8 128
+                + c _ 1 3 130 D // hide this row",
             );
             let (ops, columns, visibility) = chunk.into_inner();
             let chunk_cols: Vec<_> = columns.iter().map(|col| col.array_ref()).collect();
@@ -499,7 +521,7 @@ mod tests {
             let res = agg_state.get_output(epoch, &state_table).await?;
             match res {
                 Some(ScalarImpl::Utf8(s)) => {
-                    assert_eq!(s, "ab".to_string());
+                    assert_eq!(s, "a_b".to_string());
                 }
                 _ => panic!("unexpected output"),
             }
@@ -507,9 +529,9 @@ mod tests {
 
         {
             let chunk = StreamChunk::from_pretty(
-                " T i i I
-                + d 0 2 134 D // hide this row
-                + e 2 8 137",
+                " T T i i I
+                + d , 0 2 134 D // hide this row
+                + e , 2 8 137",
             );
             let (ops, columns, visibility) = chunk.into_inner();
             let chunk_cols: Vec<_> = columns.iter().map(|col| col.array_ref()).collect();
@@ -530,7 +552,7 @@ mod tests {
             let res = agg_state.get_output(epoch, &state_table).await?;
             match res {
                 Some(ScalarImpl::Utf8(s)) => {
-                    assert_eq!(s, "aeb".to_string());
+                    assert_eq!(s, "a,e_b".to_string());
                 }
                 _ => panic!("unexpected output"),
             }

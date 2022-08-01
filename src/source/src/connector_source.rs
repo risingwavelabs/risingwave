@@ -92,7 +92,7 @@ impl InnerConnectorSourceReader {
         metrics: Arc<SourceMetrics>,
         context: SourceContext,
     ) -> Result<Self> {
-        log::debug!(
+        tracing::debug!(
             "Spawning new connector source inner reader with config {:?}, split {:?}",
             prop,
             split
@@ -141,7 +141,7 @@ impl InnerConnectorSourceReader {
                 biased;
                 // stop chan has high priority
                 _ = stop.borrow_mut() => {
-                    log::debug!("connector reader {} stop signal received", id);
+                    tracing::debug!("connector reader {} stop signal received", id);
                     break;
                 }
 
@@ -152,12 +152,12 @@ impl InnerConnectorSourceReader {
 
             match chunk.map_err(|e| internal_error(e.to_string())) {
                 Err(e) => {
-                    log::error!("connector reader {} error happened {}", id, e.to_string());
+                    tracing::error!("connector reader {} error happened {}", id, e.to_string());
                     output.send(Either::Right(e)).await.ok();
                     break;
                 }
                 Ok(None) => {
-                    log::warn!("connector reader {} stream stopped", id);
+                    tracing::warn!("connector reader {} stream stopped", id);
                     break;
                 }
                 Ok(Some(msg)) => {
@@ -192,7 +192,13 @@ impl StreamSourceReader for ConnectorSourceReader {
                 *split_offset_mapping
                     .entry(msg.split_id.clone())
                     .or_insert_with(|| "".to_string()) = msg.offset.to_string();
-                events.push(self.parser.parse(content.as_ref(), &self.columns)?);
+                match self.parser.parse(content.as_ref(), &self.columns) {
+                    Err(e) => {
+                        tracing::warn!("message parsing failed {}, skipping", e.to_string());
+                        continue;
+                    }
+                    Ok(result) => events.push(result),
+                }
             }
         }
         let mut ops = Vec::with_capacity(events.iter().map(|e| e.ops.len()).sum());
@@ -323,7 +329,7 @@ impl ConnectorSource {
         };
         let readers =
             try_join_all(to_reader_splits.into_iter().map(|split| {
-                log::debug!("spawning connector split reader for split {:?}", split);
+                tracing::debug!("spawning connector split reader for split {:?}", split);
                 let props = config.clone();
                 let columns = columns.clone();
                 let metrics = source_metrics.clone();
