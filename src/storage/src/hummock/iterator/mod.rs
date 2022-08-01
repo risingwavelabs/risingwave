@@ -323,5 +323,5 @@ pub type MultiSstIterator =
     UnorderedMergeIteratorInner<HummockIteratorUnion<Forward, ConcatIterator, SstableIterator>>;
 
 pub type MultiSstStreamIterator = UnorderedMergeIteratorInner<
-    HummockIteratorUnion<Forward, ConcatIterator, SstableStreamIterator>,
+    HummockIteratorUnion<Forward, ConcatStreamIterator, SstableStreamIterator>,
 >;

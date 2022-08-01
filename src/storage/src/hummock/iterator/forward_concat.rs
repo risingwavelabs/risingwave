@@ -13,10 +13,11 @@
 // limitations under the License.
 
 use crate::hummock::iterator::concat_inner::ConcatIteratorInner;
-use crate::hummock::SstableStreamIterator;
+use crate::hummock::{SstableIterator, SstableStreamIterator};
 
 /// Iterates on multiple non-overlapping tables.
-pub type ConcatIterator = ConcatIteratorInner<SstableStreamIterator>;
+pub type ConcatIterator = ConcatIteratorInner<SstableIterator>;
+pub type ConcatStreamIterator = ConcatIteratorInner<SstableStreamIterator>;
 
 #[cfg(test)]
 mod tests {

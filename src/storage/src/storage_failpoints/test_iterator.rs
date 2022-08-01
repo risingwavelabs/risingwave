@@ -22,7 +22,7 @@ use crate::hummock::iterator::test_utils::{
     mock_sstable_store, TEST_KEYS_COUNT,
 };
 use crate::hummock::iterator::{
-    BackwardConcatIterator, BackwardUserIterator, ConcatIterator, HummockIterator,
+    BackwardConcatIterator, BackwardUserIterator, ConcatIterator, ConcatStreamIterator, HummockIterator,
     HummockIteratorUnion, UnorderedMergeIteratorInner, UserIterator,
 };
 use crate::hummock::sstable::SstableIteratorReadOptions;
@@ -35,7 +35,7 @@ use crate::monitor::{StateStoreMetrics, StoreLocalStatistic};
 async fn test_failpoints_concat_read_err() {
     fail::cfg("disable_block_cache", "return").unwrap();
     fail::cfg("disable_bloom_filter", "return").unwrap();
-    let mem_read_err = "mem_read_err";
+
     let sstable_store = mock_sstable_store();
     let table0 = gen_iterator_test_sstable_base(
         0,
@@ -53,13 +53,26 @@ async fn test_failpoints_concat_read_err() {
         TEST_KEYS_COUNT,
     )
     .await;
-    let mut iter = ConcatIterator::new(
+
+    let iter = ConcatIterator::new(
+        vec![table0.get_sstable_info(), table1.get_sstable_info()],
+        sstable_store.clone(),
+        Arc::new(SstableIteratorReadOptions::default()),
+    );
+    test_iterator(iter, "mem_read_err").await;
+
+
+    let stream_iter = ConcatStreamIterator::new(
         vec![table0.get_sstable_info(), table1.get_sstable_info()],
         sstable_store,
         Arc::new(SstableIteratorReadOptions::default()),
     );
+    test_iterator(stream_iter, "mem_streaming_read_err").await;
+}
+
+async fn test_iterator (mut iter: impl HummockIterator, err: &str) {
     iter.rewind().await.unwrap();
-    fail::cfg(mem_read_err, "return").unwrap();
+    fail::cfg(err, "return").unwrap();
     let result = iter.seek(iterator_test_key_of(22).as_slice()).await;
     assert!(result.is_err());
     let result = iter
@@ -68,9 +81,9 @@ async fn test_failpoints_concat_read_err() {
     assert!(result.is_err());
     let result = iter.seek(iterator_test_key_of(23).as_slice()).await;
     assert!(result.is_err());
-    fail::remove(mem_read_err);
+    fail::remove(err);
     iter.rewind().await.unwrap();
-    fail::cfg(mem_read_err, "return").unwrap();
+    fail::cfg(err, "return").unwrap();
     let mut i = 0;
     while iter.is_valid() {
         let key = iter.key();
@@ -89,8 +102,9 @@ async fn test_failpoints_concat_read_err() {
     }
     assert!(i < 2 * TEST_KEYS_COUNT);
     assert!(!iter.is_valid());
-    fail::remove(mem_read_err);
+    fail::remove(err);
 }
+
 #[tokio::test]
 #[cfg(feature = "failpoints")]
 async fn test_failpoints_backward_concat_read_err() {

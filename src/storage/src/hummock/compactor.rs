@@ -41,7 +41,7 @@ use risingwave_rpc_client::HummockMetaClient;
 use tokio::sync::oneshot::Sender;
 use tokio::task::JoinHandle;
 
-use super::iterator::{ConcatIterator, MultiSstStreamIterator};
+use super::iterator::{ConcatStreamIterator, MultiSstStreamIterator};
 use super::multi_builder::CapacitySplitTableBuilder;
 use super::{
     CompressionAlgorithm, HummockResult, Sstable, SstableBuilder, SstableBuilderOptions,
@@ -817,7 +817,7 @@ impl Compactor {
 
             if level.level_type == LevelType::Nonoverlapping as i32 {
                 debug_assert!(can_concat(&level.table_infos.iter().collect_vec()));
-                table_iters.push(HummockIteratorUnion::First(ConcatIterator::new(
+                table_iters.push(HummockIteratorUnion::First(ConcatStreamIterator::new(
                     level.table_infos.clone(),
                     self.context.sstable_store.clone(),
                     read_options.clone(),
