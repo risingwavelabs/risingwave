@@ -73,10 +73,11 @@ impl<'a, R: Rng> SqlGenerator<'a, R> {
 
     fn gen_int(&mut self, min: isize, max: isize) -> String {
         let n = match self.rng.gen_range(0..=3) {
-            0 => min,
-            1 => max,
-            2 => 0,
-            3 => self.rng.gen_range(min..=max),
+            // Tracking issue:
+            // 0 => min,
+            // 1 => max,
+            0 => 0,
+            1..=3 => self.rng.gen_range(min+1..max),
             _ => unreachable!(),
         };
         n.to_string()
