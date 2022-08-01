@@ -230,15 +230,15 @@ impl Binder {
                         Some(c.field.name.clone()),
                     )
                 } else {
-                    let mut input_idxes = g
-                        .indices
-                        .iter().collect::<Vec<_>>();
+                    let mut input_idxes = g.indices.iter().collect::<Vec<_>>();
                     input_idxes.sort();
-                    let inputs = input_idxes.into_iter().map(|index| {
-                        let column = &self.context.columns[*index];
-                        InputRef::new(column.index, column.field.data_type.clone()).into()
-                    })
-                    .collect::<Vec<_>>();
+                    let inputs = input_idxes
+                        .into_iter()
+                        .map(|index| {
+                            let column = &self.context.columns[*index];
+                            InputRef::new(column.index, column.field.data_type.clone()).into()
+                        })
+                        .collect::<Vec<_>>();
                     let c = &self.context.columns[*g.indices.iter().next().unwrap()];
                     (
                         FunctionCall::new(ExprType::Coalesce, inputs)
