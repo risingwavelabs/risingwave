@@ -558,3 +558,18 @@
             LogicalAgg { group_key: [t2.y], aggs: [] }
               LogicalScan { table: t2, columns: [y] }
             LogicalScan { table: t3, columns: [x, y] }
+- sql: |
+    create table t1 (a int, b int);
+    create table t2 (b int, c int);
+    select a, (select t1.a), c from t1, t2 where t1.b = t2.b order by c;
+  optimized_logical_plan: |
+    LogicalProject { exprs: [t1.a, t1.a, t2.c] }
+      LogicalJoin { type: LeftOuter, on: (t1.a = t1.a) }
+        LogicalJoin { type: Inner, on: (t1.b = t2.b) }
+          LogicalScan { table: t1, columns: [a, b] }
+          LogicalScan { table: t2, columns: [b, c] }
+        LogicalProject { exprs: [t1.a, t1.a] }
+          LogicalJoin { type: Inner, on: true }
+            LogicalAgg { group_key: [t1.a], aggs: [] }
+              LogicalScan { table: t1, columns: [a] }
+            LogicalValues { rows: [[]], schema: Schema { fields: [] } }
