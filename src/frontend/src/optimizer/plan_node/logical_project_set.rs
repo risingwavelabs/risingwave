@@ -373,6 +373,7 @@ impl ToStream for LogicalProjectSet {
     }
 }
 
+#[cfg(test)]
 mod test {
     use risingwave_common::catalog::{Field, Schema};
     use risingwave_common::types::DataType;
