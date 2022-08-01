@@ -519,9 +519,10 @@ impl<S: StateStore, RS: RowSerde> StorageTableBase<S, RS, READ_WRITE> {
                         // `.disable_sanity_check()` on state table to disable this check.
                         assert!(
                             storage_row.is_none(),
-                            "overwriting an existing row:\nin-storage: {:?}\nto-be-written: {:?}",
+                            "overwriting an existing row:\nin-storage: {:?}\nto-be-written: {:?},epoch{:?}",
                             storage_row.unwrap(),
-                            row
+                            row,
+                            epoch
                         );
                     }
 
@@ -544,12 +545,13 @@ impl<S: StateStore, RS: RowSerde> StorageTableBase<S, RS, READ_WRITE> {
 
                         // It's normal for some executors to fail this assert, you can use
                         // `.disable_sanity_check()` on state table to disable this check.
-                        assert!(storage_row.is_some(), "deleting an non-existing row");
+                        assert!(storage_row.is_some(), "deleting an non-existing row {:?}",epoch);
                         assert!(
                             storage_row.as_ref().unwrap() == &old_row,
-                            "inconsistent deletion:\nin-storage: {:?}\nold-value: {:?}",
+                            "inconsistent deletion:\nin-storage: {:?}\nold-value: {:?} {:?}",
                             storage_row.as_ref().unwrap(),
                             old_row
+                            ,epoch
                         );
                     }
 
@@ -574,14 +576,16 @@ impl<S: StateStore, RS: RowSerde> StorageTableBase<S, RS, READ_WRITE> {
                         // `.disable_sanity_check()` on state table to disable this check.
                         assert!(
                             storage_row.is_some(),
-                            "update a non-existing row: {:?}",
-                            old_row
+                            "update a non-existing row: {:?} {:?}",
+                            old_row,
+                            epoch
                         );
                         assert!(
                             storage_row.as_ref().unwrap() == &old_row,
-                            "value mismatch when updating row: {:?} != {:?}",
+                            "value mismatch when updating row: {:?} != {:?} {:?}",
                             storage_row,
-                            old_row
+                            old_row,
+                            epoch
                         );
                     }
 

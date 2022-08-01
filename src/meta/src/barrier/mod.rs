@@ -843,9 +843,7 @@ where
                 node.timer.take().unwrap().observe_duration();
 
                 if resps.iter().all(|node| node.is_sync) {
-                    while let Some((command_ctx, mut notifiers, a)) =
-                        self.sync_queue.write().await.pop()
-                    {
+                    while let Some((command_ctx, mut notifiers, a)) = self.sync_queue.write().await.pop(){
                         println!("epoch {:?}",command_ctx.curr_epoch);
                         checkpoint_control.remove_changes(command_ctx.command.changes());
                         command_ctx.post_collect().await?;
@@ -860,6 +858,7 @@ where
                             tracker.update(&progress);
                         }
                     }
+                    self.sync_queue.write().await.clear();
                     checkpoint_control.remove_changes(node.command_ctx.command.changes());
                     node.command_ctx.post_collect().await?;
 
@@ -884,7 +883,8 @@ where
                     self.sync_queue
                         .write()
                         .await
-                        .push((command_ctx, notifiers, a));
+                        .insert(0,(command_ctx, notifiers, a));
+                        //.push((command_ctx, notifiers, a));
                 }
 
                 // node.command_ctx.post_collect().await?;

@@ -1069,6 +1069,21 @@ async fn test_range_sync() {
             .get(
                 "bb".as_bytes(),
                 ReadOptions {
+                    epoch: epoch1,
+                    table_id: Default::default(),
+                    ttl: None,
+                }
+            )
+            .await
+            .unwrap()
+            .unwrap(),
+        "222"
+    );
+    assert_eq!(
+        hummock_storage
+            .get(
+                "bb".as_bytes(),
+                ReadOptions {
                     epoch: epoch2,
                     table_id: Default::default(),
                     ttl: None,
@@ -1078,5 +1093,20 @@ async fn test_range_sync() {
             .unwrap()
             .unwrap(),
         "222"
+    );
+    assert_eq!(
+        hummock_storage
+            .get(
+                "bb".as_bytes(),
+                ReadOptions {
+                    epoch: epoch3,
+                    table_id: Default::default(),
+                    ttl: None,
+                }
+            )
+            .await
+            .unwrap()
+            .unwrap(),
+        "123"
     );
 }
