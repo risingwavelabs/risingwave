@@ -105,7 +105,8 @@ impl SstableIterator {
         Ok(())
     }
 
-    pub async fn next_inner(&mut self) -> HummockResult<()> {
+    // Only for compaction because it would not load block from sstablestore.
+    pub fn next_inner(&mut self) -> HummockResult<()> {
         self.stats.scan_key_count += 1;
         let block_iter = self.block_iter.as_mut().expect("no block iter");
         block_iter.next();
@@ -113,7 +114,18 @@ impl SstableIterator {
             Ok(())
         } else {
             // seek to next block
-            self.seek_idx(self.cur_idx + 1, None).await
+            if self.cur_idx + 1 >= self.sst.value().block_count() {
+                self.block_iter = None;
+            } else {
+                assert!(self.sst.value().blocks.len() > 0);
+                let block =
+                    BlockHolder::from_ref_block(self.sst.value().blocks[self.cur_idx + 1].clone());
+                let mut block_iter = BlockIterator::new(block);
+                block_iter.seek_to_first();
+                self.block_iter = Some(block_iter);
+                self.cur_idx += 1;
+            }
+            Ok(())
         }
     }
 }

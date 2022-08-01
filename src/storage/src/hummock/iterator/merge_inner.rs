@@ -285,7 +285,7 @@ where
     type SeekFuture<'a> = impl Future<Output = HummockResult<()>> + 'a;
 
     fn next(&mut self) -> Self::NextFuture<'_> {
-        async move { self.next_inner().await }
+        self.next_inner()
     }
 
     fn key(&self) -> &[u8] {

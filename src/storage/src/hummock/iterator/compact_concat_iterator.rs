@@ -68,18 +68,12 @@ impl ConcatSstableIterator {
                 old_iter.collect_local_statistic(&mut self.stats);
             }
         } else {
-            let table = if self.read_options.prefetch {
-                self.sstable_store
-                    .load_table(self.tables[idx].id, true, &mut self.stats)
-                    .await?
-            } else {
-                self.sstable_store
-                    .sstable(self.tables[idx].id, &mut self.stats)
-                    .await?
-            };
+            let table = self
+                .sstable_store
+                .load_table(self.tables[idx].id, true, &mut self.stats)
+                .await?;
             let mut sstable_iter =
                 SstableIterator::new(table, self.sstable_store.clone(), self.read_options.clone());
-
             if let Some(key) = seek_key {
                 sstable_iter.seek(key).await?;
             } else {
@@ -107,7 +101,7 @@ impl HummockIterator for ConcatSstableIterator {
     fn next(&mut self) -> Self::NextFuture<'_> {
         async {
             let sstable_iter = self.sstable_iter.as_mut().expect("no table iter");
-            sstable_iter.next_inner().await?;
+            sstable_iter.next_inner()?;
 
             if sstable_iter.is_valid() {
                 Ok(())
