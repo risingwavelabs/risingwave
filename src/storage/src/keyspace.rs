@@ -173,8 +173,8 @@ impl<S: StateStore> Keyspace<S> {
         read_options: ReadOptions,
     ) -> StorageResult<StripPrefixIterator<S::Iter>>
     where
-        R: RangeBounds<B> + Send + 'static,
-        B: AsRef<[u8]> + Send + 'static,
+        R: RangeBounds<B> + Send,
+        B: AsRef<[u8]> + Send,
     {
         let range = prefixed_range(range, &self.prefix);
         let prefix_key = [self.prefix.to_vec(), prefix_key].concat();

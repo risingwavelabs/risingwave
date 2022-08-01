@@ -680,12 +680,6 @@ impl<S: StateStore, RS: RowSerde, const T: AccessType> StorageTableBase<S, RS, T
         // can use a single iterator.
         let iterators: Vec<_> = try_join_all(vnodes.map(|vnode| {
             let raw_key_range = prefixed_range(encoded_key_range.clone(), &vnode.to_be_bytes());
-            // let prefix_key = match filter_key.as_ref() {
-            //     Some(filter_key) => [&vnode.to_be_bytes(), filter_key.as_slice()].concat(),
-
-            //     None => Vec::new(),
-            // };
-
             let filter_key = filter_key.clone();
             async move {
                 let iter = match filter_key {
@@ -902,8 +896,8 @@ impl<S: StateStore, RS: RowSerde> StorageTableIterInner<S, RS> {
         read_options: ReadOptions,
     ) -> StorageResult<Self>
     where
-        R: RangeBounds<B> + Send + 'static,
-        B: AsRef<[u8]> + Send + 'static,
+        R: RangeBounds<B> + Send,
+        B: AsRef<[u8]> + Send,
     {
         if wait_epoch {
             keyspace
@@ -933,8 +927,8 @@ impl<S: StateStore, RS: RowSerde> StorageTableIterInner<S, RS> {
         read_options: ReadOptions,
     ) -> StorageResult<Self>
     where
-        R: RangeBounds<B> + Send + 'static,
-        B: AsRef<[u8]> + Send + 'static,
+        R: RangeBounds<B> + Send,
+        B: AsRef<[u8]> + Send,
     {
         if wait_epoch {
             keyspace
