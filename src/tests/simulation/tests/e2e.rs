@@ -60,7 +60,8 @@ async fn basic() {
         .build();
 
     // compute node
-    for i in 1..=3 {
+    // TODO: support multiple nodes
+    for i in 1..=1 {
         handle
             .create_node()
             .name(format!("compute-{i}"))
@@ -105,20 +106,16 @@ async fn basic() {
                 client: Arc::new(client),
             });
             // run the following e2e tests
-            // for dir in ["ddl", "batch", "streaming", "streaming_delta_join"] {
-            //     let files = glob::glob(&format!("../../../e2e_test/{dir}/**/*.slt"))
-            //         .expect("failed to read glob pattern");
-            //     for file in files {
-            //         tester
-            //             .run_file_async(file.unwrap().as_path())
-            //             .await
-            //             .unwrap();
-            //     }
-            // }
-            tester
-                .run_file_async("../../../e2e_test/batch/local_mode.slt")
-                .await
-                .unwrap();
+            for dir in ["ddl", "batch", "streaming", "streaming_delta_join"] {
+                let files = glob::glob(&format!("../../../e2e_test/{dir}/**/*.slt"))
+                    .expect("failed to read glob pattern");
+                for file in files {
+                    tester
+                        .run_file_async(file.unwrap().as_path())
+                        .await
+                        .unwrap();
+                }
+            }
         })
         .await
         .unwrap();
