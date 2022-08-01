@@ -408,6 +408,7 @@ impl Debug for ColIndexMapping {
 
 #[cfg(test)]
 mod tests {
+    use crate::optimizer::property::{FunctionalDependency, FunctionalDependencySet};
     use crate::utils::ColIndexMapping;
 
     #[test]
@@ -435,5 +436,41 @@ mod tests {
         assert_eq!(composite.map(0), 0); // 0+3 = 3， 3 -> 0
         assert_eq!(composite.try_map(1), None);
         assert_eq!(composite.map(2), 1); // 2+3 = 5, 5 -> 1
+    }
+
+    #[test]
+    fn test_rewrite_fd() {
+        let mapping = ColIndexMapping::with_remaining_columns(&[1, 0], 4);
+        let new_fd = |from, to| FunctionalDependency::with_indices(4, from, to);
+        let fds_with_expected_res = vec![
+            (new_fd(&[0, 1], &[2, 3]), None),
+            (new_fd(&[2], &[0, 1]), None),
+            (
+                new_fd(&[1], &[0]),
+                Some(FunctionalDependency::with_indices(2, &[0], &[1])),
+            ),
+        ];
+        for (input, expected) in fds_with_expected_res {
+            assert_eq!(mapping.rewrite_functional_dependency(&input), expected);
+        }
+    }
+
+    #[test]
+    fn test_rewrite_fd_set() {
+        let new_fd = |from, to| FunctionalDependency::with_indices(4, from, to);
+        let fd_set = FunctionalDependencySet::with_dependencies(vec![
+            new_fd(&[0, 1], &[2, 3]),
+            new_fd(&[2], &[0, 1]),
+            new_fd(&[1], &[0]),
+        ]);
+        let mapping = ColIndexMapping::with_remaining_columns(&[1, 0], 4);
+        let result = mapping.rewrite_functional_dependency_set(fd_set);
+        let expected =
+            FunctionalDependencySet::with_dependencies(vec![FunctionalDependency::with_indices(
+                2,
+                &[0],
+                &[1],
+            )]);
+        assert_eq!(result, expected);
     }
 }
