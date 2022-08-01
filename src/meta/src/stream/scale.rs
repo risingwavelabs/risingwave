@@ -14,7 +14,7 @@
 
 use risingwave_pb::stream_plan::update_mutation::DispatcherUpdate;
 use itertools::Itertools;
-use std::collections::{HashMap, HashSet};
+use std::collections::{BTreeMap, HashMap, HashSet};
 use std::collections::BTreeSet;
 use uuid::Uuid;
 use async_recursion::async_recursion;
@@ -34,19 +34,152 @@ use crate::cluster::WorkerId;
 use crate::manager::IdCategory;
 use crate::model::{ActorId, FragmentId, TableFragments};
 
+pub struct Reschedule {
+    pub added_parallel_units: Vec<ParallelUnitId>,
+    pub removed_parallel_units: Vec<ParallelUnitId>,
+}
+
 impl<S> GlobalStreamManager<S> where S: MetaStore {
-    pub async fn reschedule_actors(&self, reschedule: HashMap<FragmentId, (Vec<ParallelUnitId>, Vec<ParallelUnitId>)>) -> Result<()> {
+    pub async fn reschedule_actors(&self, reschedule: HashMap<FragmentId, Reschedule>) -> Result<()> {
+        let frag_id_to_table_id = self.fragment_manager.find_table_ids_for_fragment_ids(reschedule.keys().cloned().collect()).await;
+        let table_ids = frag_id_to_table_id.values().cloned().collect();
+
+        let mut table_fragments_map = HashMap::new();
+        self.resolv_dependent_table_fragments(table_ids, &mut table_fragments_map, &mut HashSet::new()).await?;
+
+        let mut actor_map = HashMap::new();
+        let mut actor_status = BTreeMap::new();
+        for (_, table_fragments) in &table_fragments_map {
+            actor_map.extend(table_fragments.actor_map());
+            actor_status.extend(table_fragments.actor_status.clone());
+        }
+
+        let mut parallel_unit_id_to_actor_id = HashMap::new();
+
+        for (actor_id, actor_status) in &actor_status {
+            if let Some(parallel_unit) = actor_status.parallel_unit.as_ref() {
+                parallel_unit_id_to_actor_id.insert(parallel_unit.id as ParallelUnitId, *actor_id as ActorId);
+            }
+        }
+
+        let mut downstream_actors = HashMap::new();
+        let mut upstream_actors = HashMap::new();
+        for (actor_id, stream_actor) in &actor_map {
+            for dispatcher in &stream_actor.dispatcher {
+                for downstream_actor_id in &dispatcher.downstream_actor_id {
+                    downstream_actors
+                        .entry(*actor_id as ActorId)
+                        .or_insert(vec![])
+                        .push(*downstream_actor_id as ActorId);
+                    upstream_actors
+                        .entry(*downstream_actor_id as ActorId)
+                        .or_insert(vec![])
+                        .push((*actor_id, dispatcher.dispatcher_id));
+                }
+            }
+        }
+
+
+        for (fragment_id, Reschedule {added_parallel_units, removed_parallel_units}) in &reschedule {
+            if removed_parallel_units.len() != added_parallel_units.len() {
+                bail!("only migration is supported now");
+            }
+
+
+
+
+        }
+
+
+        let actor_ids: BTreeSet<ActorId> = actors
+            .values()
+            .flat_map(|value| value.keys().into_iter().cloned())
+            .collect();
+
+        let mut recreated_actor_ids = HashMap::new();
+        let mut recreated_actors = HashMap::new();
+
+        for actor_id in &actor_ids {
+            let id = self
+                .id_gen_manager
+                .generate::<{ IdCategory::Actor }>()
+                .await? as ActorId;
+            recreated_actor_ids.insert(*actor_id, id);
+
+            let old_actor = actor_map.get(actor_id).unwrap();
+            let mut new_actor = old_actor.clone();
+
+            if chain_actor_ids.contains(actor_id) {
+                let upstream_actor_ids = upstream_actors.get(actor_id).unwrap();
+                assert_eq!(upstream_actor_ids.len(), 1);
+                let (upstream_actor_id, _) = upstream_actor_ids.iter().next().unwrap();
+                if actor_ids.contains(upstream_actor_id) {
+                    new_actor.same_worker_node_as_upstream = false;
+                }
+            }
+
+            for upstream_actor_id in &mut new_actor.upstream_actor_id {
+                if let Some(new_actor_id) = recreated_actor_ids.get(upstream_actor_id) {
+                    *upstream_actor_id = *new_actor_id as u32;
+                }
+            }
+
+            for dispatcher in &mut new_actor.dispatcher {
+                for downstream_actor_id in &mut dispatcher.downstream_actor_id {
+                    if let Some(new_actor_id) = recreated_actor_ids.get(downstream_actor_id) {
+                        *downstream_actor_id = *new_actor_id as u32;
+                    }
+                }
+            }
+
+            new_actor.actor_id = id;
+            recreated_actors.insert(*actor_id as ActorId, new_actor);
+        }
+
+        //
+        // let mut chain_actor_ids = HashSet::new();
+        // let mut actor_id_to_worker_id = HashMap::new();
+        // let mut actor_map = HashMap::new();
         todo!()
     }
 
+    #[async_recursion]
+    async fn resolv_dependent_table_fragments(&self, table_ids: HashSet<TableId>, table_fragments_map: &mut HashMap<TableId, TableFragments>, cache: &mut HashSet<TableId>) -> Result<()> {
+        for table_id in table_ids {
+            if cache.contains(&table_id) {
+                continue;
+            }
+
+            let fragments = self
+                .fragment_manager
+                .select_table_fragments_by_table_id(&table_id)
+                .await?;
+
+            if !fragments.chain_actor_ids().is_empty() {
+                let dependent_table_ids = fragments.dependent_table_ids();
+                self.resolv_dependent_table_fragments(
+                    dependent_table_ids,
+                    table_fragments_map,
+                    cache,
+                )
+                    .await?;
+            }
+
+            table_fragments_map.insert(table_id, fragments);
+            cache.insert(table_id);
+        }
+
+        Ok(())
+    }
+
+
     #[allow(clippy::too_many_arguments)]
     #[async_recursion]
-    async fn resolve_migrate_dependent_actors(
+    async fn resolve_migrate_dependent_actors2(
         &self,
         table_ids: HashSet<TableId>,
         actor_map: &mut HashMap<ActorId, StreamActor>,
         actor_id_to_worker_id: &mut HashMap<ActorId, WorkerId>,
-        actors: &mut HashMap<TableId, HashMap<ActorId, WorkerId>>,
         chain_actor_ids: &mut HashSet<ActorId>,
         table_fragments: &mut HashMap<TableId, TableFragments>,
         cache: &mut HashSet<TableId>,
@@ -76,7 +209,56 @@ impl<S> GlobalStreamManager<S> where S: MetaStore {
                     dependent_table_ids,
                     actor_map,
                     actor_id_to_worker_id,
-                    actors,
+                    chain_actor_ids,
+                    table_fragments,
+                    cache,
+                )
+                    .await?;
+            }
+
+            table_fragments.insert(table_id, fragments);
+            cache.insert(table_id);
+        }
+
+        Ok(())
+    }
+
+    #[allow(clippy::too_many_arguments)]
+    #[async_recursion]
+    async fn resolve_migrate_dependent_actors(
+        &self,
+        table_ids: HashSet<TableId>,
+        actor_map: &mut HashMap<ActorId, StreamActor>,
+        actor_id_to_worker_id: &mut HashMap<ActorId, WorkerId>,
+        chain_actor_ids: &mut HashSet<ActorId>,
+        table_fragments: &mut HashMap<TableId, TableFragments>,
+        cache: &mut HashSet<TableId>,
+    ) -> Result<()> {
+        for table_id in table_ids {
+            if cache.contains(&table_id) {
+                continue;
+            }
+
+            let fragments = self
+                .fragment_manager
+                .select_table_fragments_by_table_id(&table_id)
+                .await?;
+            actor_id_to_worker_id.extend(fragments.actor_to_node());
+
+            let table_actor_map = fragments.actor_map();
+
+            for (actor_id, actor) in table_actor_map {
+                actor_map.insert(actor_id, actor.clone());
+            }
+
+            let table_chain_actor_ids = fragments.chain_actor_ids();
+            if !table_chain_actor_ids.is_empty() {
+                chain_actor_ids.extend(table_chain_actor_ids);
+                let dependent_table_ids = fragments.dependent_table_ids();
+                self.resolve_migrate_dependent_actors(
+                    dependent_table_ids,
+                    actor_map,
+                    actor_id_to_worker_id,
                     chain_actor_ids,
                     table_fragments,
                     cache,
@@ -110,8 +292,6 @@ impl<S> GlobalStreamManager<S> where S: MetaStore {
             bail!("no available compute node in the cluster");
         }
 
-        let mut actors = actors;
-
         let mut chain_actor_ids = HashSet::new();
         let mut actor_id_to_worker_id = HashMap::new();
         let mut actor_map = HashMap::new();
@@ -121,7 +301,6 @@ impl<S> GlobalStreamManager<S> where S: MetaStore {
             actors.keys().cloned().collect(),
             &mut actor_map,
             &mut actor_id_to_worker_id,
-            &mut actors,
             &mut chain_actor_ids,
             &mut table_fragments,
             &mut _cache,

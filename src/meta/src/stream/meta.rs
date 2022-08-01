@@ -94,6 +94,22 @@ where
         Ok(map.values().cloned().collect())
     }
 
+    pub async fn find_table_ids_for_fragment_ids(&self, fragment_ids: HashSet<FragmentId>) -> HashMap<FragmentId, TableId> {
+        let mut result = HashMap::new();
+
+        let map = &self.core.read().await.table_fragments;
+
+        for (table_id, table_fragments) in map {
+            for fragment_id in table_fragments.fragments.keys() {
+                if fragment_ids.contains(fragment_id) {
+                    result.insert(*fragment_id, *table_id);
+                }
+            }
+        }
+
+        result
+    }
+
     pub async fn batch_update_table_fragments(
         &self,
         table_fragments: &[TableFragments],
