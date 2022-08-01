@@ -13,12 +13,13 @@
 // limitations under the License.
 
 use std::sync::Arc;
+use std::usize;
 
 use bytes::{Buf, Bytes};
 use itertools::Itertools;
 use risingwave_common::array::Row;
 use risingwave_common::error::{ErrorCode, Result};
-use risingwave_common::types::{DataType, VirtualNode, VIRTUAL_NODE_SIZE};
+use risingwave_common::types::{DataType, ScalarImpl, VirtualNode, VIRTUAL_NODE_SIZE};
 use risingwave_common::util::value_encoding::deserialize_datum;
 
 use super::cell_based_encoding_util::parse_raw_key_to_vnode_and_key;
@@ -65,17 +66,17 @@ impl RowBasedDeserializer {
         }
 
         let (vnode, key_bytes) = parse_raw_key_to_vnode_and_key(raw_key);
-        let origin_row =
+        let mut origin_row =
             row_based_deserialize_inner(&self.column_mapping.all_data_types, value.as_ref())?;
         let output_column_ids = self
             .column_mapping
             .output_columns
             .iter()
-            .map(|c| c.column_id)
-            .collect_vec();
+            .map(|c| c.column_id.get_id() as usize);
+
         let mut output_row = vec![];
         for col_id in output_column_ids {
-            output_row.push(origin_row.0[col_id.get_id() as usize].clone());
+            output_row.push(origin_row.0[col_id].take());
         }
         Ok(Some((vnode, key_bytes.to_vec(), Row(output_row))))
     }
