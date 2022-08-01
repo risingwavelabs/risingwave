@@ -19,6 +19,7 @@ mod stream_graph;
 mod stream_manager;
 #[cfg(test)]
 mod test_fragmenter;
+mod scale;
 
 pub use meta::*;
 use risingwave_common::error::Result;
