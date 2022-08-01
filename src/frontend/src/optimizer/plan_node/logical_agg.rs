@@ -420,32 +420,7 @@ impl LogicalAgg {
     /// Two phase streaming agg.
     /// Should only be used iff input is distributed.
     /// input must be converted to stream form.
-    fn gen_two_phase_streaming_agg_plan(&self, input_stream: PlanRef) -> Result<PlanRef> {
-        // partial agg
-        let partial_agg_plan =
-            StreamLocalSimpleAgg::new(self.clone_with_input(input_stream)).into();
-
-        let input =
-            RequiredDist::single().enforce_if_not_satisfies(partial_agg_plan, &Order::any())?;
-
-        // insert total agg
-        let total_agg_types = self
-            .agg_calls()
-            .iter()
-            .enumerate()
-            .map(|(partial_output_idx, agg_call)| {
-                agg_call.partial_to_total_agg_call(partial_output_idx)
-            })
-            .collect();
-        let total_agg_logical_plan =
-            LogicalAgg::new(total_agg_types, self.group_key().to_vec(), input);
-        Ok(StreamGlobalSimpleAgg::new(total_agg_logical_plan).into())
-    }
-
-    /// Two phase streaming agg.
-    /// Should only be used iff input is distributed.
-    /// input must be converted to stream form.
-    fn gen_two_phase_streaming_agg_plan_v2(
+    fn gen_two_phase_streaming_agg_plan(
         &self,
         input: PlanRef,
         dist_key: &[usize],
@@ -1126,7 +1101,7 @@ impl ToStream for LogicalAgg {
 
         if !dist_key.is_empty() && agg_calls_can_use_two_phase {
             // 2-phase-agg
-            self.gen_two_phase_streaming_agg_plan_v2(input_stream, &dist_key)
+            self.gen_two_phase_streaming_agg_plan(input_stream, &dist_key)
         } else {
             if self.group_key().is_empty() {
                 // simple 1-phase-agg
