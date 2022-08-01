@@ -98,7 +98,6 @@ pub fn unnested_list_type(datatype: DataType) -> DataType {
 }
 
 impl From<&ProstDataType> for DataType {
-    #[expect(clippy::needless_borrow)]
     fn from(proto: &ProstDataType) -> DataType {
         match proto.get_type_name().expect("missing type field") {
             TypeName::Int16 => DataType::Int16,
@@ -124,6 +123,7 @@ impl From<&ProstDataType> for DataType {
                 // The first (and only) item is the list element type.
                 datatype: Box::new((&proto.field_type[0]).into()),
             },
+            TypeName::TypeUnspecified => unreachable!(),
         }
     }
 }
@@ -867,7 +867,7 @@ impl ScalarImpl {
             ),
             TypeName::Interval => ScalarImpl::Interval(IntervalUnit::from_protobuf_bytes(
                 b,
-                data_type.get_interval_type()?,
+                data_type.get_interval_type().unwrap_or(Unspecified),
             )?),
             TypeName::Timestamp => {
                 ScalarImpl::NaiveDateTime(NaiveDateTimeWrapper::from_protobuf_bytes(b)?)

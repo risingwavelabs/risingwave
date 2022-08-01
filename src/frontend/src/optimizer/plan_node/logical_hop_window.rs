@@ -230,7 +230,7 @@ impl LogicalHopWindow {
                 format!(
                     "{:?}",
                     &IndicesDisplay {
-                        vec: &self.output_indices,
+                        indices: &self.output_indices,
                         input_schema: &original_schema,
                     }
                 )
