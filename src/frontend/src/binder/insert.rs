@@ -53,9 +53,10 @@ impl Binder {
             .collect();
 
         let vnode_mapping = self
-            .bind_table(&schema_name, &table_name, None)?
-            .table_catalog
-            .vnode_mapping;
+            .catalog
+            .get_table_by_name(&self.db_name, &schema_name, &table_name)?
+            .vnode_mapping
+            .clone();
 
         // When the column types of `source` query does not match `expected_types`, casting is
         // needed.

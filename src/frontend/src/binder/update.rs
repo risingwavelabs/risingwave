@@ -12,7 +12,6 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::assert_matches::assert_matches;
 use std::collections::hash_map::Entry;
 use std::collections::HashMap;
 
@@ -51,12 +50,14 @@ impl Binder {
         selection: Option<Expr>,
     ) -> Result<BoundUpdate> {
         ensure!(table.joins.is_empty());
-        let source_name = match &table.relation {
-            TableFactor::Table { name, .. } => name.clone(),
-            _ => unreachable!(),
+        let table_source = {
+            ensure!(table.joins.is_empty());
+            let name = match &table.relation {
+                TableFactor::Table { name, .. } => name.clone(),
+                _ => unreachable!(),
+            };
+            self.bind_table_source(name)?
         };
-        let (schema_name, table_name) = Self::resolve_table_name(source_name.clone())?;
-        let table_source = self.bind_table_source(source_name)?;
 
         if table_source.append_only {
             return Err(ErrorCode::BindError(
@@ -64,13 +65,13 @@ impl Binder {
             )
             .into());
         }
-        let vnode_mapping = self
-            .bind_table(&schema_name, &table_name, None)?
-            .table_catalog
-            .vnode_mapping;
 
         let table = self.bind_vec_table_with_joins(vec![table])?.unwrap();
-        assert_matches!(table, Relation::BaseTable(_));
+        let vnode_mapping = if let Relation::BaseTable(base_table) = &table {
+            base_table.table_catalog.vnode_mapping.clone()
+        } else {
+            unreachable!()
+        };
 
         let selection = selection.map(|expr| self.bind_expr(expr)).transpose()?;
 
