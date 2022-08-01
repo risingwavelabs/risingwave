@@ -87,7 +87,6 @@ pub trait TableIter: Send {
         for _ in 0..chunk_size.unwrap_or(usize::MAX) {
             match self.next_row().await? {
                 Some(row) => {
-                    println!("Row = {:?}", row);
                     for (datum, builder) in row.0.into_iter().zip_eq(builders.iter_mut()) {
                         builder.append_datum(&datum)?;
                     }
