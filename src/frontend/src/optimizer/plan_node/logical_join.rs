@@ -1066,12 +1066,13 @@ impl ToStream for LogicalJoin {
 mod tests {
 
     use risingwave_common::catalog::Field;
-    use risingwave_common::types::{DataType, Datum};
+    use risingwave_common::types::{DataType, Datum, ScalarImpl};
     use risingwave_pb::expr::expr_node::Type;
 
     use super::*;
     use crate::expr::{assert_eq_input_ref, FunctionCall, InputRef, Literal};
     use crate::optimizer::plan_node::{LogicalValues, PlanTreeNodeUnary};
+    use crate::optimizer::property::FunctionalDependency;
     use crate::session::OptimizerContext;
 
     /// Pruning
@@ -1537,5 +1538,114 @@ mod tests {
         let right = join.right();
         let right = right.as_logical_values().unwrap();
         assert_eq!(right.schema().fields(), &fields[3..4]);
+    }
+
+    #[tokio::test]
+    async fn fd_derivation_inner_outer_join() {
+        let ctx = OptimizerContext::mock().await;
+        let left = {
+            let fields: Vec<Field> = vec![
+                Field::with_name(DataType::Int32, "l0"),
+                Field::with_name(DataType::Int32, "l1"),
+            ];
+            let mut values = LogicalValues::new(vec![], Schema { fields }, ctx.clone());
+            // 0 --> 1
+            values
+                .base
+                .functional_dependency
+                .add_functional_dependency_by_column_indices(&[0], &[1], 2);
+            values
+        };
+        let right = {
+            let fields: Vec<Field> = vec![
+                Field::with_name(DataType::Int32, "r0"),
+                Field::with_name(DataType::Int32, "r1"),
+                Field::with_name(DataType::Int32, "r2"),
+            ];
+            let mut values = LogicalValues::new(vec![], Schema { fields }, ctx);
+            // 0 --> 1, 2
+            values
+                .base
+                .functional_dependency
+                .add_functional_dependency_by_column_indices(&[0], &[1, 2], 3);
+            values
+        };
+        // l0 = 0 AND l1 = r1
+        let on = ExprImpl::FunctionCall(Box::new(
+            FunctionCall::new(
+                Type::And,
+                vec![
+                    ExprImpl::FunctionCall(Box::new(
+                        FunctionCall::new(
+                            Type::Equal,
+                            vec![
+                                ExprImpl::InputRef(Box::new(InputRef::new(0, DataType::Int32))),
+                                ExprImpl::Literal(Box::new(Literal::new(
+                                    Some(ScalarImpl::Int32(0)),
+                                    DataType::Int32,
+                                ))),
+                            ],
+                        )
+                        .unwrap(),
+                    )),
+                    ExprImpl::FunctionCall(Box::new(
+                        FunctionCall::new(
+                            Type::Equal,
+                            vec![
+                                ExprImpl::InputRef(Box::new(InputRef::new(1, DataType::Int32))),
+                                ExprImpl::InputRef(Box::new(InputRef::new(3, DataType::Int32))),
+                            ],
+                        )
+                        .unwrap(),
+                    )),
+                ],
+            )
+            .unwrap(),
+        ));
+        let expected_fd_set = [
+            (
+                JoinType::Inner,
+                vec![
+                    // inherit from left
+                    FunctionalDependency::with_indices(5, &[0], &[1]),
+                    // inherit from right
+                    FunctionalDependency::with_indices(5, &[2], &[3, 4]),
+                    // constant column in join condition
+                    FunctionalDependency::with_indices(5, &[], &[0]),
+                    // eq column in join condition
+                    FunctionalDependency::with_indices(5, &[1], &[3]),
+                    FunctionalDependency::with_indices(5, &[3], &[1]),
+                ],
+            ),
+            (JoinType::FullOuter, vec![]),
+            (
+                JoinType::LeftOuter,
+                vec![
+                    // inherit from right
+                    FunctionalDependency::with_indices(5, &[2], &[3, 4]),
+                ],
+            ),
+            (
+                JoinType::RightOuter,
+                vec![
+                    // inherit from left
+                    FunctionalDependency::with_indices(5, &[0], &[1]),
+                ],
+            ),
+        ];
+
+        for (join_type, expected_res) in expected_fd_set {
+            let join = LogicalJoin::new(
+                left.clone().into(),
+                right.clone().into(),
+                join_type,
+                Condition::with_expr(on.clone()),
+            );
+            let fd_set = join.functional_dependency();
+            assert_eq!(fd_set.as_dependencies().len(), expected_res.len());
+            for i in fd_set.as_dependencies() {
+                assert!(expected_res.contains(i), "{} should be in expected_res", i);
+            }
+        }
     }
 }

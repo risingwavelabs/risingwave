@@ -417,6 +417,7 @@ mod test {
         );
         let fd_set = project_set.base.functional_dependency;
         let expected_fd_set = vec![FunctionalDependency::with_indices(4, &[0, 2], &[1])];
+        assert_eq!(fd_set.as_dependencies().len(), expected_fd_set.len());
         for i in fd_set.as_dependencies() {
             assert!(
                 expected_fd_set.contains(i),

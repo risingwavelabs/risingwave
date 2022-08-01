@@ -461,6 +461,7 @@ mod tests {
             FunctionalDependency::with_indices(4, &[1], &[2]),
             FunctionalDependency::with_indices(4, &[2], &[1]),
         ];
+        assert_eq!(fd_set.as_dependencies().len(), expected_fd_set.len());
         for i in fd_set.as_dependencies() {
             assert!(
                 expected_fd_set.contains(i),

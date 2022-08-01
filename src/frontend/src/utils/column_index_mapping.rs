@@ -345,7 +345,8 @@ impl ColIndexMapping {
 
     /// Rewrite the indices in a functional dependency.
     ///
-    /// If either the `from` and `to` become empty after mapping, this function will return [`None`]
+    /// If either the `from` and `to` **becomes** empty after mapping, this function will return
+    /// [`None`]
     ///
     /// If the `from` side of a functional dependency becomes empty, this indicates that these
     /// columns are removed, so columns in the `to` side are free now. Similarly, If the `to` side
@@ -357,9 +358,13 @@ impl ColIndexMapping {
     ) -> Option<FunctionalDependency> {
         assert_eq!(fd.from.len(), self.source_size());
         assert_eq!(fd.to.len(), self.source_size());
+        if fd.to.is_clear() {
+            return None;
+        }
         let new_from = self.rewrite_bitset(&fd.from);
         let new_to = self.rewrite_bitset(&fd.to);
-        if new_from.is_clear() || new_to.is_clear() {
+        if (!fd.from.is_clear() && new_from.is_clear()) || (!fd.to.is_clear() && new_to.is_clear())
+        {
             None
         } else {
             Some(FunctionalDependency::new(new_from, new_to))
