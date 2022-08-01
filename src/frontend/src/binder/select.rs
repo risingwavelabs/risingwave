@@ -18,13 +18,13 @@ use itertools::Itertools;
 use risingwave_common::catalog::{Field, Schema};
 use risingwave_common::error::{ErrorCode, Result};
 use risingwave_common::types::DataType;
-use risingwave_sqlparser::ast::{Expr, Select, SelectItem};
+use risingwave_sqlparser::ast::{Expr, Ident, Select, SelectItem};
 
-use super::bind_context::{Clause, ColumnBinding};
+use super::bind_context::{Clause, ColumnBinding, COLUMN_GROUP_PREFIX};
 use super::UNNAMED_COLUMN;
 use crate::binder::{Binder, Relation};
 use crate::catalog::check_valid_column_name;
-use crate::expr::{Expr as _, ExprImpl, InputRef};
+use crate::expr::{Expr as _, ExprImpl, ExprType, FunctionCall, InputRef};
 
 #[derive(Debug, Clone)]
 pub struct BoundSelect {
@@ -127,7 +127,17 @@ impl Binder {
                 SelectItem::UnnamedExpr(expr) => {
                     let (select_expr, alias) = match &expr.clone() {
                         Expr::Identifier(ident) => {
-                            (self.bind_expr(expr)?, Some(ident.real_value()))
+                            if let Some(group_id) =
+                                self.context.get_group_id(&ident.real_value())?
+                            {
+                                let new_expr = Expr::CompoundIdentifier(vec![
+                                    Ident::new(format!("{COLUMN_GROUP_PREFIX}{group_id}")),
+                                    ident.clone(),
+                                ]);
+                                (self.bind_expr(new_expr)?, Some(ident.real_value()))
+                            } else {
+                                (self.bind_expr(expr)?, Some(ident.real_value()))
+                            }
                         }
                         Expr::CompoundIdentifier(idents) => (
                             self.bind_expr(expr)?,
@@ -151,17 +161,14 @@ impl Binder {
                 }
                 SelectItem::QualifiedWildcard(obj_name) => {
                     let table_name = &obj_name.0.last().unwrap().real_value();
-                    let (mut begin, end) =
-                        self.context.range_of.get(table_name).ok_or_else(|| {
-                            ErrorCode::ItemNotFound(format!("relation \"{}\"", table_name))
-                        })?;
-                    // Here we make the assumption that the hidden columns are always at the
-                    // beginning.
-                    while begin < *end && self.context.columns[begin].is_hidden {
-                        begin += 1;
-                    }
-                    let (exprs, names) =
-                        Self::iter_bound_columns(self.context.columns[begin..*end].iter());
+                    let (begin, end) = self.context.range_of.get(table_name).ok_or_else(|| {
+                        ErrorCode::ItemNotFound(format!("relation \"{}\"", table_name))
+                    })?;
+                    let (exprs, names) = Self::iter_bound_columns(
+                        self.context.columns[*begin..*end]
+                            .iter()
+                            .filter(|c| !c.is_hidden),
+                    );
                     select_list.extend(exprs);
                     aliases.extend(names);
                 }
@@ -171,11 +178,26 @@ impl Binder {
                     aliases.extend(names);
                 }
                 SelectItem::Wildcard => {
-                    let (exprs, names) = Self::iter_bound_columns(
-                        self.context.columns[..].iter().filter(|c| !c.is_hidden),
-                    );
+                    // Bind columns that are not in groups
+                    let (exprs, names) =
+                        Self::iter_bound_columns(self.context.columns[..].iter().filter(|c| {
+                            !c.is_hidden
+                                && !self
+                                    .context
+                                    .column_group_context
+                                    .mapping
+                                    .contains_key(&c.index)
+                        }));
                     select_list.extend(exprs);
                     aliases.extend(names);
+                    // Bind the column groups
+                    let (exprs, names) = self.iter_column_groups();
+                    select_list.extend(exprs);
+                    aliases.extend(names);
+                    // TODO: we will need to be able to handle wildcard expressions bound to aliases
+                    // in the future We'd then need a `NaturalGroupContext`
+                    // bound to each alias to correctly disambiguate column
+                    // references
                 }
             }
         }
@@ -191,6 +213,39 @@ impl Binder {
                     InputRef::new(c.index, c.field.data_type.clone()).into(),
                     Some(c.field.name.clone()),
                 )
+            })
+            .unzip()
+    }
+
+    pub fn iter_column_groups(&self) -> (Vec<ExprImpl>, Vec<Option<String>>) {
+        self.context
+            .column_group_context
+            .groups
+            .values()
+            .map(|g| {
+                if let Some(col) = &g.min_nullable_column {
+                    let c = &self.context.columns[*col];
+                    (
+                        InputRef::new(c.index, c.field.data_type.clone()).into(),
+                        Some(c.field.name.clone()),
+                    )
+                } else {
+                    let inputs = g
+                        .indices
+                        .iter()
+                        .map(|index| {
+                            let column = &self.context.columns[*index];
+                            InputRef::new(column.index, column.field.data_type.clone()).into()
+                        })
+                        .collect::<Vec<_>>();
+                    let c = &self.context.columns[*g.indices.iter().next().unwrap()];
+                    (
+                        FunctionCall::new(ExprType::Coalesce, inputs)
+                            .expect("Failure binding COALESCE function call")
+                            .into(),
+                        Some(c.field.name.clone()),
+                    )
+                }
             })
             .unzip()
     }

@@ -19,6 +19,7 @@ use risingwave_sqlparser::ast::{
     BinaryOperator, Expr, Ident, JoinConstraint, JoinOperator, TableFactor, TableWithJoins, Value,
 };
 
+use crate::binder::bind_context::COLUMN_GROUP_PREFIX;
 use crate::binder::{Binder, Relation};
 use crate::expr::{Expr as _, ExprImpl};
 
@@ -70,13 +71,17 @@ impl Binder {
             };
             let right: Relation;
             let cond: ExprImpl;
-            if let JoinConstraint::Using(_col) = constraint.clone() {
+            if matches!(
+                constraint.clone(),
+                JoinConstraint::Using(_) | JoinConstraint::Natural
+            ) {
                 let option_rel: Option<Relation>;
-                (cond, option_rel) = self.bind_join_constraint(constraint, Some(join.relation))?;
+                (cond, option_rel) =
+                    self.bind_join_constraint(constraint, Some(join.relation), join_type)?;
                 right = option_rel.unwrap();
             } else {
                 right = self.bind_table_factor(join.relation.clone())?;
-                (cond, _) = self.bind_join_constraint(constraint, None)?;
+                (cond, _) = self.bind_join_constraint(constraint, None, join_type)?;
             }
             let join = BoundJoin {
                 join_type,
@@ -94,10 +99,11 @@ impl Binder {
         &mut self,
         constraint: JoinConstraint,
         table_factor: Option<TableFactor>,
+        join_type: JoinType,
     ) -> Result<(ExprImpl, Option<Relation>)> {
         Ok(match constraint {
             JoinConstraint::None => (ExprImpl::literal_bool(true), None),
-            JoinConstraint::Natural => {
+            c @ JoinConstraint::Natural | c @ JoinConstraint::Using(_) => {
                 // First, we identify columns with the same name.
                 let old_context = self.context.clone();
                 let l_len = old_context.columns.len();
@@ -106,22 +112,24 @@ impl Binder {
                 let table_factor = table_factor.unwrap();
                 let right_table = get_table_name(&table_factor);
                 let relation = self.bind_table_factor(table_factor)?;
-                for (column, idxes) in &self.context.indexs_of {
-                    if idxes.len() > 1 {
-                        return Err(ErrorCode::InternalError(format!(
-                            "Ambiguous column name: {}",
-                            column
-                        ))
-                        .into());
+
+                let using_columns = match c {
+                    JoinConstraint::Natural => None,
+                    JoinConstraint::Using(cols) => {
+                        // sanity check
+                        for col in &cols {
+                            if old_context.indexs_of.get(&col.value).is_none() {
+                                return Err(ErrorCode::ItemNotFound(format!("column \"{:?}\" specified in USING clause does not exist in left table", col.value)).into());
+                            }
+                            if self.context.indexs_of.get(&col.value).is_none() {
+                                return Err(ErrorCode::ItemNotFound(format!("column \"{:?}\" specified in USING clause does not exist in right table", col.value)).into());
+                            }
+                        }
+                        Some(cols)
                     }
-                    if idxes.is_empty() {
-                        return Err(ErrorCode::ItemNotFound(format!(
-                            "Column {} does not have an associated index",
-                            column
-                        ))
-                        .into());
-                    }
-                }
+                    _ => unreachable!(),
+                };
+
                 let columns = self
                     .context
                     .indexs_of
@@ -135,6 +143,12 @@ impl Binder {
 
                 // Walk the LHS cols, checking to see if any share a name with the RHS cols
                 for (column, idxes) in columns {
+                    // TODO: is it ok to ignore quote style?
+                    // If we have a `USING` constraint, we only bind the columns appearing in the
+                    // constraint.
+                    if let Some(cols) = &using_columns && !cols.contains(&column) {
+                        continue;
+                    }
                     let indices = match old_context.get_unqualified_index(&column.value) {
                         Err(e) => {
                             if let ErrorCode::ItemNotFound(_) = e.inner() {
@@ -147,26 +161,64 @@ impl Binder {
                     };
                     // Select at most one column from each natural column group from left and right
                     col_indices.push((indices[0], idxes[0] + l_len));
+                    let left_expr = if indices.len() == 1 {
+                        let left_table = old_context.columns[indices[0]].table_name.clone();
+                        Expr::CompoundIdentifier(vec![
+                            Ident::new(left_table.clone()),
+                            column.clone(),
+                        ])
+                    } else {
+                        let group_id = old_context
+                            .column_group_context
+                            .mapping
+                            .get(&indices[0])
+                            .unwrap();
+                        Expr::CompoundIdentifier(vec![
+                            Ident::new(format!("{COLUMN_GROUP_PREFIX}{}", group_id)),
+                            column.clone(),
+                        ])
+                    };
+                    let right_expr = if idxes.len() == 1 {
+                        let mut right_table_clone = right_table.clone().unwrap();
+                        right_table_clone.push(column.clone());
+                        Expr::CompoundIdentifier(right_table_clone)
+                    } else {
+                        let group_id = self
+                            .context
+                            .column_group_context
+                            .mapping
+                            .get(&idxes[0])
+                            .unwrap();
+                        Expr::CompoundIdentifier(vec![
+                            Ident::new(format!("{COLUMN_GROUP_PREFIX}{}", group_id)),
+                            column.clone(),
+                        ])
+                    };
+                    // We manually bind the expression since the left and right
                     binary_expr = Expr::BinaryOp {
                         left: Box::new(binary_expr),
                         op: BinaryOperator::And,
                         right: Box::new(Expr::BinaryOp {
-                            left: Box::new(Expr::Identifier(column.clone())),
+                            left: Box::new(left_expr),
                             op: BinaryOperator::Eq,
-                            right: Box::new(Expr::Identifier(column.clone())),
-                        }), 
+                            right: Box::new(right_expr),
+                        }),
                     }
                 }
                 self.pop_and_merge_lateral_context()?;
+                // Bind the expression first, before allowing disambiguation of the columns involved
+                // in the join
+                let expr = self.bind_expr(binary_expr)?;
                 for (l, r) in col_indices {
                     let non_nullable = match join_type {
-                        JoinType::LefOuter | JoinType::Inner => Some(l),
+                        JoinType::LeftOuter | JoinType::Inner => Some(l),
                         JoinType::RightOuter => Some(r),
                         JoinType::FullOuter => None,
                         _ => unreachable!(),
                     };
                     self.context.add_natural_columns(l, r, non_nullable);
                 }
+                (expr, Some(relation))
             }
             JoinConstraint::On(expr) => {
                 let bound_expr = self.bind_expr(expr)?;
@@ -178,30 +230,6 @@ impl Binder {
                     .into());
                 }
                 (bound_expr, None)
-            }
-            JoinConstraint::Using(columns) => {
-                let table_factor = table_factor.unwrap();
-                let right_table = get_table_name(&table_factor);
-                let mut binary_expr = Expr::Value(Value::Boolean(true));
-                for column in columns {
-                    // TODO: we should be able to handle qualified column names as well
-                    binary_expr = Expr::BinaryOp {
-                        left: Box::new(binary_expr),
-                        op: BinaryOperator::And,
-                        right: Box::new(Expr::BinaryOp {
-                            left: Box::new(Expr::Identifier(column.clone())),
-                            op: BinaryOperator::Eq,
-                            right: Box::new(Expr::CompoundIdentifier({
-                                let mut right_table_clone = right_table.clone().unwrap();
-                                right_table_clone.push(column.clone());
-                                right_table_clone
-                            })),
-                        }),
-                    }
-                }
-                // We cannot move this into ret expression since it should be done before bind_expr
-                let relation = self.bind_table_factor(table_factor)?;
-                (self.bind_expr(binary_expr)?, Some(relation))
             }
         })
     }

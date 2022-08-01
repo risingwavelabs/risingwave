@@ -16,7 +16,7 @@ use risingwave_common::error::{ErrorCode, Result, TrackingIssue};
 use risingwave_sqlparser::ast::Ident;
 
 use crate::binder::Binder;
-use crate::expr::{CorrelatedInputRef, ExprImpl, InputRef, FunctionCall, ExprType};
+use crate::expr::{CorrelatedInputRef, ExprImpl, ExprType, FunctionCall, InputRef};
 
 impl Binder {
     pub fn bind_column(&mut self, idents: &[Ident]) -> Result<ExprImpl> {
@@ -36,23 +36,31 @@ impl Binder {
             }
         };
 
-        if let Ok(indices) = self
+        match self
             .context
             .get_column_binding_index(&table_name, &column_name)
         {
-            match indices.len() {
-                0 => unreachable!(),
-                1 => {
-                    let index = indices[0];
-                    let column = &self.context.columns[index];
-                    return Ok(InputRef::new(column.index, column.field.data_type.clone()).into());
+            Ok(mut indices) => {
+                match indices.len() {
+                    0 => unreachable!(),
+                    1 => {
+                        let index = indices[0];
+                        let column = &self.context.columns[index];
+                        return Ok(InputRef::new(column.index, column.field.data_type.clone()).into());
+                    }
+                    _ => {
+                        indices.sort(); // make sure we have a consistent result
+                        let inputs = indices.iter().map(|index| {
+                            let column = &self.context.columns[*index];
+                            InputRef::new(column.index, column.field.data_type.clone()).into()
+                        }).collect::<Vec<_>>();
+                        return Ok(FunctionCall::new(ExprType::Coalesce, inputs)?.into())
+                    }
                 }
-                _ => {
-                    let inputs = indices.iter().map(|index| {
-                        let column = &self.context.columns[*index];
-                        InputRef::new(column.index, column.field.data_type.clone()).into()
-                    }).collect::<Vec<_>>();
-                    return Ok(FunctionCall::new(ExprType::Coalesce, inputs)?.into())
+            }
+            Err(e) => {
+                if let ErrorCode::InternalError(s) = e.inner() && s.starts_with("Ambiguous column name:") {
+                    return Err(e)
                 }
             }
         }
@@ -63,24 +71,26 @@ impl Binder {
             // `depth` starts from 1.
             let depth = i + 1;
             match context.get_column_binding_index(&table_name, &column_name) {
-                Ok(indices) => {
-                    match indices.len() {
-                        0 => unreachable!(),
-                        1 => {
-                            let index = indices[0];
-                            let column = &context.columns[index];
-                            return Ok(CorrelatedInputRef::new(
-                                column.index,
-                                column.field.data_type.clone(),
-                                depth,
-                            )
-                            .into());
-                        },
-                        _ => {
-                            return Err(ErrorCode::NotImplemented("Ambiguous columns not allowed for correlated references".into(), TrackingIssue::from(None)).into());
-                        }
+                Ok(indices) => match indices.len() {
+                    0 => unreachable!(),
+                    1 => {
+                        let index = indices[0];
+                        let column = &context.columns[index];
+                        return Ok(CorrelatedInputRef::new(
+                            column.index,
+                            column.field.data_type.clone(),
+                            depth,
+                        )
+                        .into());
                     }
-                }
+                    _ => {
+                        return Err(ErrorCode::NotImplemented(
+                            "Ambiguous columns not allowed for correlated references".into(),
+                            TrackingIssue::from(None),
+                        )
+                        .into());
+                    }
+                },
                 Err(e) => {
                     err = e;
                 }
