@@ -138,7 +138,7 @@ fn main() -> Result<()> {
 
     /// Get the launch target of this all-in-one binary
     fn get_target(cmds: Vec<&str>) -> (String, Vec<String>) {
-        if let Some(cmd) = env::args().nth(1) && cmds.contains(&cmd.as_str()){
+        if let Some(cmd) = env::args().nth(1) && cmds.contains(&cmd.as_str()) {
             // ./risingwave meta <args>
             return (cmd, env::args().skip(1).collect());
         }
