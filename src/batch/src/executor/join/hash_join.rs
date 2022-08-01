@@ -45,7 +45,8 @@ use crate::task::BatchTaskContext;
 /// 2. Iterate over the probe side (i.e. left table) and compute the hash value of each row.
 ///    Then find the matched build side row for each probe side row in the hash map.
 /// 3. Concatenate the matched pair of probe side row and build side row into a single row and push
-/// it into the data chunk builder. 4. Yield chunks from the builder.
+/// it into the data chunk builder. 
+/// 4. Yield chunks from the builder.
 pub struct HashJoinExecutor<K> {
     /// Join type e.g. inner, left outer, ...
     join_type: JoinType,
