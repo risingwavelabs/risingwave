@@ -89,7 +89,6 @@ impl SstableStore {
 
     pub async fn put(&self, sst: Sstable, data: Bytes, policy: CachePolicy) -> HummockResult<()> {
         self.put_sst_data(sst.id, data.clone()).await?;
-
         fail_point!("metadata_upload_err");
         if let Err(e) = self.put_meta(&sst).await {
             self.delete_sst_data(sst.id).await?;
@@ -270,6 +269,7 @@ impl SstableStore {
         stats: &mut StoreLocalStatistic,
     ) -> HummockResult<TableHolder> {
         let mut meta_data = None;
+        tracing::warn!("load table start");
         loop {
             stats.cache_meta_block_total += 1;
             let entry = self
@@ -310,7 +310,8 @@ impl SstableStore {
                         } else {
                             Sstable::new(sst_id, meta)
                         };
-                        stats_ptr.fetch_add(now.elapsed().as_secs(), Ordering::Relaxed);
+                        let add = (now.elapsed().as_secs_f64() * 1000.0) as u64;
+                        stats_ptr.fetch_add(add, Ordering::Relaxed);
                         Ok((Box::new(sst), size))
                     }
                 })

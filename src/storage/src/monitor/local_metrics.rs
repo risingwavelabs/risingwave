@@ -91,7 +91,7 @@ impl StoreLocalStatistic {
         }
         let t = self.remote_io_time.load(Ordering::Relaxed) as f64;
         if t > 0.0 {
-            metrics.remote_read_time.observe(t);
+            metrics.remote_read_time.observe(t / 1000.0);
         }
     }
 }
