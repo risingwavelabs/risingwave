@@ -46,8 +46,9 @@ impl Binder {
                     .iter()
                     .any(|e| ident.real_value().as_str() == *e)
                 {
-                    // NOTE: Rewrite a system variable to a function call. Here we don't 100% follow the 
-                    // behavior of Postgres, as it doesn't allow `session_user()` while we do.
+                    // NOTE: Rewrite a system variable to a function call. Here we don't 100% follow
+                    // the behavior of Postgres, as it doesn't allow
+                    // `session_user()` while we do.
                     self.bind_function(Function::no_arg(ObjectName(vec![ident])))
                 } else {
                     self.bind_column(&[ident])
