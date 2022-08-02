@@ -267,7 +267,7 @@ mod tests {
             let res = f64_field.generate(i as u64);
             assert!(res.is_number());
             let res = res.as_f64().unwrap();
-            assert!(res >= 5. && res <= 10.);
+            assert!((5. ..10.).contains(&res));
         }
 
         // test overflow
@@ -286,7 +286,7 @@ mod tests {
             assert!(res.is_number());
             // it seems there is no `as_f32`...
             let res = res.as_f64().unwrap();
-            assert!(res >= 5. && res <= 10.);
+            assert!((5. ..10.).contains(&res));
         }
 
         // test overflow
