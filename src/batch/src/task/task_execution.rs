@@ -319,6 +319,10 @@ impl<C: BatchTaskContext> BatchTaskExecution<C> {
                         }
                     };
 
+                    // We should stop here since `data_chunk_stream` continues return `None`
+                    // after all data return.
+                    let should_stop = data_chunk.is_none();
+
                     if let Err(e) = sender.send(data_chunk).await {
                         match e {
                             BatchError::SenderError => {
@@ -332,6 +336,11 @@ impl<C: BatchTaskContext> BatchTaskExecution<C> {
                                 return Err(InternalError(format!("Failed to send data: {:?}", x)))?;
                             }
                         }
+                    }
+
+                    if should_stop {
+                        info!("Task done!");
+                        break;
                     }
                 }
             }
