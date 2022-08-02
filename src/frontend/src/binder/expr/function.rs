@@ -163,7 +163,8 @@ impl Binder {
                     self.auth_context.user_name.clone(),
                 ));
             }
-            "__rw_vnode" => ExprType::Vnode,
+            // internal
+            "rw_vnode" => ExprType::Vnode,
             _ => {
                 return Err(ErrorCode::NotImplemented(
                     format!("unsupported function: {:?}", function_name),
