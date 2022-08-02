@@ -3,7 +3,3 @@ SELECT current_schema();
 ----
 public
 
-query T
-SELECT session_user;
-----
-root
