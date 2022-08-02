@@ -149,7 +149,7 @@ impl Binder {
                     if let Some(cols) = &using_columns && !cols.contains(&column) {
                         continue;
                     }
-                    let indices = match old_context.get_unqualified_index(&column.value) {
+                    let indices = match old_context.get_unqualified_indices(&column.value) {
                         Err(e) => {
                             if let ErrorCode::ItemNotFound(_) = e.inner() {
                                 continue;

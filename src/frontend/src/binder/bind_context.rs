@@ -103,10 +103,24 @@ pub struct ColumnGroup {
 }
 
 impl BindContext {
+    pub fn get_column_binding_index(
+        &self,
+        table_name: &Option<String>,
+        column_name: &String,
+    ) -> Result<usize> {
+        match &self.get_column_binding_indices(table_name, column_name)?[..] {
+            [] => unreachable!(),
+            [idx] => Ok(*idx),
+            _ => Err(
+                ErrorCode::InternalError(format!("Ambiguous column name: {}", column_name)).into(),
+            ),
+        }
+    }
+
     /// If return Vec has len > 1, it means we have an unqualified reference to a column which has
     /// been naturally joined upon, wherein none of the columns are min-nullable. This will be
     /// handled in downstream as a `COALESCE` expression
-    pub fn get_column_binding_index(
+    pub fn get_column_binding_indices(
         &self,
         table_name: &Option<String>,
         column_name: &String,
@@ -123,11 +137,11 @@ impl BindContext {
                     ])
                 }
             }
-            None => self.get_unqualified_index(column_name),
+            None => self.get_unqualified_indices(column_name),
         }
     }
 
-    pub fn get_group_id(&self, column_name: &String) -> Result<Option<u32>> {
+    pub fn get_group_id(&self, column_name: &String) -> Option<u32> {
         if let Some(columns) = self
             .indexs_of
             .get(column_name) && columns.len() > 1
@@ -135,11 +149,11 @@ impl BindContext {
             if let Some(group_id) = self.column_group_context.mapping.get(&columns[0]) {
                 let group = self.column_group_context.groups.get(group_id).unwrap();
                 if columns.iter().all(|idx| group.indices.contains(idx)) {
-                    return Ok(Some(*group_id));
+                    return Some(*group_id);
                 }
             }
         }
-        Ok(None)
+        None
     }
 
     fn get_indices_with_group_id(&self, group_id: u32, column_name: &String) -> Result<Vec<usize>> {
@@ -157,7 +171,7 @@ impl BindContext {
         }
     }
 
-    pub fn get_unqualified_index(&self, column_name: &String) -> Result<Vec<usize>> {
+    pub fn get_unqualified_indices(&self, column_name: &String) -> Result<Vec<usize>> {
         let columns = self
             .indexs_of
             .get(column_name)
@@ -191,8 +205,8 @@ impl BindContext {
         non_nullable_column: Option<usize>,
     ) {
         match (
-            self.column_group_context.mapping.get(&left).map(|v| *v),
-            self.column_group_context.mapping.get(&right).map(|v| *v),
+            self.column_group_context.mapping.get(&left).copied(),
+            self.column_group_context.mapping.get(&right).copied(),
         ) {
             (None, None) => {
                 let group_id = self.column_group_context.next_group_id;

@@ -50,7 +50,7 @@ impl Binder {
                 };
                 let index = self
                     .context
-                    .get_column_binding_index(&Some(table_name), &column)?[0];
+                    .get_column_binding_index(&Some(table_name), &column)?;
                 Ok((&self.context.columns[index], ids))
             }
             // For Identifier, we will first use the ident as
@@ -64,13 +64,13 @@ impl Binder {
                     if indexs.len() == 1 {
                         let index = self
                             .context
-                            .get_column_binding_index(&None, &ident.real_value())?[0];
+                            .get_column_binding_index(&None, &ident.real_value())?;
                         Ok((&self.context.columns[index], ids))
                     } else {
                         let column_name = ids[0].real_value();
                         let index = self
                             .context
-                            .get_column_binding_index(&Some(ident.real_value()), &column_name)?[0];
+                            .get_column_binding_index(&Some(ident.real_value()), &column_name)?;
                         Ok((&self.context.columns[index], ids[1..].to_vec()))
                     }
                 }
@@ -78,7 +78,7 @@ impl Binder {
                     let column_name = ids[0].real_value();
                     let index = self
                         .context
-                        .get_column_binding_index(&Some(ident.real_value()), &column_name)?[0];
+                        .get_column_binding_index(&Some(ident.real_value()), &column_name)?;
                     Ok((&self.context.columns[index], ids[1..].to_vec()))
                 }
             },

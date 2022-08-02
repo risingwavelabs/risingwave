@@ -12,7 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use risingwave_common::error::{ErrorCode, Result, TrackingIssue};
+use risingwave_common::error::{ErrorCode, Result};
 use risingwave_sqlparser::ast::Ident;
 
 use crate::binder::Binder;
@@ -38,7 +38,7 @@ impl Binder {
 
         match self
             .context
-            .get_column_binding_index(&table_name, &column_name)
+            .get_column_binding_indices(&table_name, &column_name)
         {
             Ok(mut indices) => {
                 match indices.len() {
@@ -78,26 +78,15 @@ impl Binder {
             // `depth` starts from 1.
             let depth = i + 1;
             match context.get_column_binding_index(&table_name, &column_name) {
-                Ok(indices) => match indices.len() {
-                    0 => unreachable!(),
-                    1 => {
-                        let index = indices[0];
-                        let column = &context.columns[index];
-                        return Ok(CorrelatedInputRef::new(
-                            column.index,
-                            column.field.data_type.clone(),
-                            depth,
-                        )
-                        .into());
-                    }
-                    _ => {
-                        return Err(ErrorCode::NotImplemented(
-                            "Ambiguous columns not allowed for correlated references".into(),
-                            TrackingIssue::from(None),
-                        )
-                        .into());
-                    }
-                },
+                Ok(index) => {
+                    let column = &context.columns[index];
+                    return Ok(CorrelatedInputRef::new(
+                        column.index,
+                        column.field.data_type.clone(),
+                        depth,
+                    )
+                    .into());
+                }
                 Err(e) => {
                     err = e;
                 }

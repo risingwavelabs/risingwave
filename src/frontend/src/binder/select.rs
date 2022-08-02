@@ -141,9 +141,10 @@ impl Binder {
                 SelectItem::UnnamedExpr(expr) => {
                     let (select_expr, alias) = match &expr.clone() {
                         Expr::Identifier(ident) => {
-                            if let Some(group_id) =
-                                self.context.get_group_id(&ident.real_value())?
-                            {
+                            // We allow binding a column if the group is exactly equivalent to
+                            // the set of columns with same name in the current level of the bind
+                            // context.
+                            if let Some(group_id) = self.context.get_group_id(&ident.real_value()) {
                                 let new_expr = Expr::CompoundIdentifier(vec![
                                     Ident::new(format!("{COLUMN_GROUP_PREFIX}{group_id}")),
                                     ident.clone(),
