@@ -20,7 +20,7 @@ use futures_async_stream::try_stream;
 use itertools::Itertools;
 use risingwave_common::array::{DataChunk, Row};
 use risingwave_common::buffer::Bitmap;
-use risingwave_common::catalog::{ColumnDesc, ColumnId, OrderedColumnDesc, Schema, TableId};
+use risingwave_common::catalog::{ColumnDesc, ColumnId, Schema, TableId};
 use risingwave_common::error::{Result, RwError};
 use risingwave_common::types::{DataType, Datum, ScalarImpl};
 use risingwave_common::util::select_all;
@@ -28,8 +28,8 @@ use risingwave_common::util::sort_util::OrderType;
 use risingwave_pb::batch_plan::plan_node::NodeBody;
 use risingwave_pb::batch_plan::{scan_range, ScanRange};
 use risingwave_pb::plan_common::{CellBasedTableDesc, OrderType as ProstOrderType};
-use risingwave_storage::row_serde::CellBasedRowSerde;
-use risingwave_storage::table::storage_table::{BatchDedupPkIter, StorageTable, StorageTableIter};
+use risingwave_storage::row_serde::RowBasedSerde;
+use risingwave_storage::table::storage_table::{RowBasedStorageTable, StorageTableIter};
 use risingwave_storage::table::{Distribution, TableIter};
 use risingwave_storage::{dispatch_state_store, Keyspace, StateStore, StateStoreImpl};
 
@@ -49,8 +49,8 @@ pub struct RowSeqScanExecutor<S: StateStore> {
 }
 
 pub enum ScanType<S: StateStore> {
-    TableScan(BatchDedupPkIter<S, CellBasedRowSerde>),
-    RangeScan(StorageTableIter<S, CellBasedRowSerde>),
+    TableScan(StorageTableIter<S, RowBasedSerde>),
+    RangeScan(StorageTableIter<S, RowBasedSerde>),
     PointGet(Option<Row>),
 }
 
@@ -156,15 +156,6 @@ impl BoxedExecutorBuilder for RowSeqScanExecutorBuilder {
             .map(ColumnId::from)
             .collect();
 
-        // TODO: remove this
-        let pk_descs = table_desc
-            .order_key
-            .iter()
-            .map(|order| OrderedColumnDesc {
-                column_desc: column_descs[order.index as usize].clone(),
-                order: OrderType::from_prost(&ProstOrderType::from_i32(order.order_type).unwrap()),
-            })
-            .collect_vec();
         let pk_types = table_desc
             .order_key
             .iter()
@@ -203,7 +194,7 @@ impl BoxedExecutorBuilder for RowSeqScanExecutorBuilder {
 
         dispatch_state_store!(source.context().try_get_state_store()?, state_store, {
             let batch_stats = source.context().stats();
-            let table = StorageTable::new_partial(
+            let table = RowBasedStorageTable::new_partial(
                 state_store.clone(),
                 table_id,
                 column_descs,
@@ -215,7 +206,7 @@ impl BoxedExecutorBuilder for RowSeqScanExecutorBuilder {
             let keyspace = Keyspace::table_root(state_store.clone(), &table_id);
 
             if seq_scan_node.scan_ranges.is_empty() {
-                let iter = table.batch_dedup_pk_iter(source.epoch, &pk_descs).await?;
+                let iter = table.batch_iter(source.epoch).await?;
                 return Ok(Box::new(RowSeqScanExecutor::new(
                     table.schema().clone(),
                     vec![ScanType::TableScan(iter)],
