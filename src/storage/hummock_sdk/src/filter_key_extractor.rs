@@ -26,7 +26,7 @@ use tokio::sync::Notify;
 
 use crate::key::{get_table_id, TABLE_PREFIX_LEN};
 
-/// Slice Transform generally used to extract key which will store in BloomFilter
+/// `FilterKeyExtractor` generally used to extract key which will store in BloomFilter
 pub trait FilterKeyExtractor: Send + Sync {
     fn extract<'a>(&self, full_key: &'a [u8]) -> &'a [u8];
 }
@@ -152,22 +152,20 @@ impl SchemaFilterKeyExtractor {
 
 #[derive(Default)]
 pub struct MultiFilterKeyExtractor {
-    id_to_filter_key_extractor: Mutex<HashMap<u32, Arc<FilterKeyExtractorImpl>>>,
+    id_to_filter_key_extractor: HashMap<u32, Arc<FilterKeyExtractorImpl>>,
 
     // cached state
     last_filter_key_extractor_state: Mutex<Option<(u32, Arc<FilterKeyExtractorImpl>)>>,
 }
 
 impl MultiFilterKeyExtractor {
-    pub fn register(&self, table_id: u32, filter_key_extractor: Arc<FilterKeyExtractorImpl>) {
+    pub fn register(&mut self, table_id: u32, filter_key_extractor: Arc<FilterKeyExtractorImpl>) {
         self.id_to_filter_key_extractor
-            .try_lock()
-            .unwrap()
             .insert(table_id, filter_key_extractor);
     }
 
     pub fn size(&self) -> usize {
-        self.id_to_filter_key_extractor.try_lock().unwrap().len()
+        self.id_to_filter_key_extractor.len()
     }
 
     #[cfg(test)]
@@ -191,14 +189,16 @@ impl FilterKeyExtractor for MultiFilterKeyExtractor {
 
         let table_id = get_table_id(full_key).unwrap();
         let mut last_state = self.last_filter_key_extractor_state.try_lock().unwrap();
-        let id_to_filter_key_extractor = self.id_to_filter_key_extractor.try_lock().unwrap();
 
         match last_state.as_ref() {
             Some(last_filter_key_extractor_state) => {
                 if table_id != last_filter_key_extractor_state.0 {
                     last_state.replace((
                         table_id,
-                        id_to_filter_key_extractor.get(&table_id).unwrap().clone(),
+                        self.id_to_filter_key_extractor
+                            .get(&table_id)
+                            .unwrap()
+                            .clone(),
                     ));
                 }
             }
@@ -206,7 +206,10 @@ impl FilterKeyExtractor for MultiFilterKeyExtractor {
             None => {
                 last_state.replace((
                     table_id,
-                    id_to_filter_key_extractor.get(&table_id).unwrap().clone(),
+                    self.id_to_filter_key_extractor
+                        .get(&table_id)
+                        .unwrap()
+                        .clone(),
                 ));
             }
         }
@@ -239,7 +242,7 @@ impl FilterKeyExtractorManagerInner {
     }
 
     async fn acquire(&self, mut table_id_set: HashSet<u32>) -> MultiFilterKeyExtractor {
-        let multi_filter_key_extractor = MultiFilterKeyExtractor::default();
+        let mut multi_filter_key_extractor = MultiFilterKeyExtractor::default();
 
         while !table_id_set.is_empty() {
             let notified = self.notify.notified();
@@ -452,7 +455,7 @@ mod tests {
 
     #[test]
     fn test_multi_filter_key_extractor() {
-        let multi_filter_key_extractor = MultiFilterKeyExtractor::default();
+        let mut multi_filter_key_extractor = MultiFilterKeyExtractor::default();
         let last_state = multi_filter_key_extractor.last_filter_key_extractor_state();
         assert!(last_state.is_none());
 
