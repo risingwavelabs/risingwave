@@ -44,6 +44,7 @@ use crate::catalog::system_catalog::SystemCatalog;
 use crate::meta_client::FrontendMetaClient;
 use crate::scheduler::worker_node_manager::WorkerNodeManagerRef;
 use crate::session::AuthContext;
+use crate::user::user_privilege::available_prost_privilege;
 use crate::user::user_service::UserInfoReader;
 use crate::user::UserId;
 
@@ -103,11 +104,15 @@ fn get_acl_items(
 ) -> String {
     let mut res = String::new();
     for user in users {
-        let privileges = user
-            .get_grant_privileges()
-            .iter()
-            .filter(|&privilege| privilege.object.as_ref().unwrap() == object)
-            .collect_vec();
+        let super_privilege = available_prost_privilege(object.clone());
+        let privileges = if user.get_is_supper() {
+            vec![&super_privilege]
+        } else {
+            user.get_grant_privileges()
+                .iter()
+                .filter(|&privilege| privilege.object.as_ref().unwrap() == object)
+                .collect_vec()
+        };
         if privileges.is_empty() {
             continue;
         };
