@@ -39,6 +39,7 @@ impl StateStore for PanicStateStore {
 
     fn scan<R, B>(
         &self,
+        _prefix_hint: Option<Vec<u8>>,
         _key_range: R,
         _limit: Option<usize>,
         _read_options: ReadOptions,
@@ -87,7 +88,12 @@ impl StateStore for PanicStateStore {
         }
     }
 
-    fn iter<R, B>(&self, _key_range: R, _read_options: ReadOptions) -> Self::IterFuture<'_, R, B>
+    fn iter<R, B>(
+        &self,
+        _prefix_hint: Option<Vec<u8>>,
+        _key_range: R,
+        _read_options: ReadOptions,
+    ) -> Self::IterFuture<'_, R, B>
     where
         R: RangeBounds<B> + Send,
         B: AsRef<[u8]> + Send,
@@ -126,37 +132,6 @@ impl StateStore for PanicStateStore {
     fn clear_shared_buffer(&self) -> Self::ClearSharedBufferFuture<'_> {
         async move {
             panic!("should not clear shared buffer from the panic state store!");
-        }
-    }
-
-    fn prefix_iter<R, B>(
-        &self,
-        _prefix_hint: Option<Vec<u8>>,
-        _key_range: R,
-        _read_options: ReadOptions,
-    ) -> Self::PrefixIterFuture<'_, R, B>
-    where
-        R: RangeBounds<B> + Send,
-        B: AsRef<[u8]> + Send,
-    {
-        async move {
-            panic!("should not create prefix_iter from the state store!");
-        }
-    }
-
-    fn prefix_scan<R, B>(
-        &self,
-        _prefix: Vec<u8>,
-        _col_bound_range: R,
-        _limit: Option<usize>,
-        _read_options: ReadOptions,
-    ) -> Self::PrefixScanFuture<'_, R, B>
-    where
-        R: RangeBounds<B> + Send,
-        B: AsRef<[u8]> + Send,
-    {
-        async move {
-            panic!("should not prefix scan from the state store!");
         }
     }
 }

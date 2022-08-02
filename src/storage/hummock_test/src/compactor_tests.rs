@@ -569,6 +569,7 @@ mod tests {
         // 6. scan kv to check key table_id
         let scan_result = storage
             .scan::<_, Vec<u8>>(
+                None,
                 ..,
                 None,
                 ReadOptions {
@@ -729,6 +730,7 @@ mod tests {
         // 6. scan kv to check key table_id
         let scan_result = storage
             .scan::<_, Vec<u8>>(
+                None,
                 ..,
                 None,
                 ReadOptions {

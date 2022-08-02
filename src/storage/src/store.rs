@@ -52,17 +52,7 @@ macro_rules! define_state_store_associated_type {
                                                                 R: 'static + Send + RangeBounds<B>,
                                                                 B: 'static + Send + AsRef<[u8]>;
 
-        type PrefixIterFuture<'a, R, B>  = impl IterFutureTrait<'a, Self::Iter, R, B>
-                                                            where
-                                                                R: 'static + Send + RangeBounds<B>,
-                                                                B: 'static + Send + AsRef<[u8]>;
-
         type BackwardScanFuture<'a, R, B> =impl ScanFutureTrait<'a, R, B>
-                                                            where
-                                                                R: 'static + Send + RangeBounds<B>,
-                                                                B: 'static + Send + AsRef<[u8]>;
-
-        type PrefixScanFuture<'a, R, B> = impl ScanFutureTrait<'a, R, B>
                                                             where
                                                                 R: 'static + Send + RangeBounds<B>,
                                                                 B: 'static + Send + AsRef<[u8]>;
@@ -104,16 +94,6 @@ pub trait StateStore: Send + Sync + 'static + Clone {
         R: 'static + Send + RangeBounds<B>,
         B: 'static + Send + AsRef<[u8]>;
 
-    type PrefixIterFuture<'a, R, B>: IterFutureTrait<'a, Self::Iter, R, B>
-    where
-        R: 'static + Send + RangeBounds<B>,
-        B: 'static + Send + AsRef<[u8]>;
-
-    type PrefixScanFuture<'a, R, B>: ScanFutureTrait<'a, R, B>
-    where
-        R: 'static + Send + RangeBounds<B>,
-        B: 'static + Send + AsRef<[u8]>;
-
     type BackwardIterFuture<'a, R, B>: IterFutureTrait<'a, Self::Iter, R, B>
     where
         R: 'static + Send + RangeBounds<B>,
@@ -126,12 +106,15 @@ pub trait StateStore: Send + Sync + 'static + Clone {
     fn get<'a>(&'a self, key: &'a [u8], read_options: ReadOptions) -> Self::GetFuture<'_>;
 
     /// Scans `limit` number of keys from a key range. If `limit` is `None`, scans all elements.
+    /// Internally, `prefix_hint` will be used to for checking `bloom_filter` and
+    /// `full_key_range` used for iter.
     /// The result is based on a snapshot corresponding to the given `epoch`.
     ///
     ///
     /// By default, this simply calls `StateStore::iter` to fetch elements.
     fn scan<R, B>(
         &self,
+        prefix_hint: Option<Vec<u8>>,
         key_range: R,
         limit: Option<usize>,
         read_options: ReadOptions,
@@ -139,17 +122,6 @@ pub trait StateStore: Send + Sync + 'static + Clone {
     where
         R: RangeBounds<B> + Send,
         B: AsRef<[u8]> + Send;
-
-    fn prefix_scan<R, B>(
-        &self,
-        prefix_key: Vec<u8>,
-        key_range: R,
-        limit: Option<usize>,
-        read_options: ReadOptions,
-    ) -> Self::PrefixScanFuture<'_, R, B>
-    where
-        R: RangeBounds<B> + Send + 'static,
-        B: AsRef<[u8]> + Send + 'static;
 
     fn backward_scan<R, B>(
         &self,
@@ -183,24 +155,17 @@ pub trait StateStore: Send + Sync + 'static + Clone {
         write_options: WriteOptions,
     ) -> Self::ReplicateBatchFuture<'_>;
 
-    /// Opens and returns an iterator for given `key_range`.
-    /// The returned iterator will iterate data based on a snapshot corresponding to the given
-    /// `epoch`.
-    fn iter<R, B>(&self, key_range: R, read_options: ReadOptions) -> Self::IterFuture<'_, R, B>
-    where
-        R: RangeBounds<B> + Send,
-        B: AsRef<[u8]> + Send;
-
-    /// Opens and returns an iterator for given `prefix_hit` and `full_key_range`
-    /// Internally, `prefix_hit` will be used to construct `filter_key` Option for `bloom_filter`
-    /// filtering and use `full_key_range` for iter The returned iterator will iterate data
-    /// based on a snapshot corresponding to the given `epoch`.
-    fn prefix_iter<R, B>(
+    /// Opens and returns an iterator for given `prefix_hint` and `full_key_range`
+    /// Internally, `prefix_hint` will be used to for checking `bloom_filter` and
+    /// `full_key_range` used for iter. (if the `prefix_hint` not None, it should be be included in
+    /// `key_range`) The returned iterator will iterate data based on a snapshot corresponding to
+    /// the given `epoch`.
+    fn iter<R, B>(
         &self,
-        prefix_hit: Option<Vec<u8>>,
+        prefix_hint: Option<Vec<u8>>,
         key_range: R,
         read_options: ReadOptions,
-    ) -> Self::PrefixIterFuture<'_, R, B>
+    ) -> Self::IterFuture<'_, R, B>
     where
         R: RangeBounds<B> + Send,
         B: AsRef<[u8]> + Send;

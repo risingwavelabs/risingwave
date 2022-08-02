@@ -267,6 +267,7 @@ async fn test_lookup_this_epoch() {
 
     for (k, v) in store
         .scan::<_, Vec<u8>>(
+            None,
             ..,
             None,
             ReadOptions {

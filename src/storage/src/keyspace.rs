@@ -128,7 +128,7 @@ impl<S: StateStore> Keyspace<S> {
         B: AsRef<[u8]> + Send,
     {
         let range = prefixed_range(range, &self.prefix);
-        let mut pairs = self.store.scan(range, limit, read_options).await?;
+        let mut pairs = self.store.scan(None, range, limit, read_options).await?;
         pairs
             .iter_mut()
             .for_each(|(k, _v)| *k = k.slice(self.prefix.len()..));
@@ -163,10 +163,7 @@ impl<S: StateStore> Keyspace<S> {
         let prefix_hint =
             filter_hint.map(|filter_hint| [self.prefix.to_vec(), filter_hint].concat());
 
-        let iter = self
-            .store
-            .prefix_iter(prefix_hint, range, read_options)
-            .await?;
+        let iter = self.store.iter(prefix_hint, range, read_options).await?;
         let strip_prefix_iterator = StripPrefixIterator {
             iter,
             prefix_len: self.prefix.len(),

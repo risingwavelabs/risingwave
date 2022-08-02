@@ -19,7 +19,7 @@ use std::sync::Arc;
 
 use bytes::Bytes;
 use itertools::Itertools;
-use risingwave_hummock_sdk::key::key_with_epoch;
+use risingwave_hummock_sdk::key::{end_bound_of_prefix, key_with_epoch, next_key};
 use risingwave_hummock_sdk::LocalSstableInfo;
 use risingwave_pb::hummock::LevelType;
 
@@ -372,6 +372,7 @@ impl StateStore for HummockStorage {
 
     fn scan<R, B>(
         &self,
+        prefix_hint: Option<Vec<u8>>,
         key_range: R,
         limit: Option<usize>,
         read_options: ReadOptions,
@@ -381,26 +382,7 @@ impl StateStore for HummockStorage {
         B: AsRef<[u8]> + Send,
     {
         async move {
-            self.iter(key_range, read_options)
-                .await?
-                .collect(limit)
-                .await
-        }
-    }
-
-    fn prefix_scan<R, B>(
-        &self,
-        prefix: Vec<u8>,
-        key_range: R,
-        limit: Option<usize>,
-        read_options: ReadOptions,
-    ) -> Self::PrefixScanFuture<'_, R, B>
-    where
-        R: RangeBounds<B> + Send,
-        B: AsRef<[u8]> + Send,
-    {
-        async move {
-            self.prefix_iter(Some(prefix), key_range, read_options)
+            self.iter(prefix_hint, key_range, read_options)
                 .await?
                 .collect(limit)
                 .await
@@ -485,26 +467,77 @@ impl StateStore for HummockStorage {
 
     /// Returns an iterator that scan from the begin key to the end key
     /// The result is based on a snapshot corresponding to the given `epoch`.
-    fn iter<R, B>(&self, key_range: R, read_options: ReadOptions) -> Self::IterFuture<'_, R, B>
-    where
-        R: RangeBounds<B> + Send,
-        B: AsRef<[u8]> + Send,
-    {
-        self.iter_inner::<_, _, ForwardIter>(None, key_range, read_options)
-    }
-
-    fn prefix_iter<R, B>(
+    fn iter<R, B>(
         &self,
-        _prefix_hint: Option<Vec<u8>>,
+        prefix_hint: Option<Vec<u8>>,
         key_range: R,
         read_options: ReadOptions,
-    ) -> Self::PrefixIterFuture<'_, R, B>
+    ) -> Self::IterFuture<'_, R, B>
     where
         R: RangeBounds<B> + Send,
         B: AsRef<[u8]> + Send,
     {
+        if let Some(prefix_hint) = prefix_hint.as_ref() {
+            // learn more detail about start_bound with storage_table.rs.
+            match key_range.start_bound() {
+                // it guarantees that the start bound must be included (some different case)
+                // 1. Include(pk + col_bound) => prefix_hint <= start_bound <=
+                // next_key(prefix_hint)
+                //
+                // for case2, frontend need to reject this, avoid excluded start_bound and
+                // transform it to included(next_key), without this case we can just guarantee
+                // that start_bound < next_key
+                //
+                // 2. Include(next_key(pk +
+                // col_bound)) => prefix_hint <= start_bound <= next_key(prefix_hint)
+                //
+                // 3. Include(pk) => prefix_hint <= start_bound <= next_key(prefix_hint)
+                Included(range_start) => {
+                    let next_key = next_key(prefix_hint);
+                    assert!(range_start.as_ref() >= prefix_hint.as_slice());
+                    assert!(range_start.as_ref() < next_key.as_slice());
+                }
+
+                _ => unreachable!(),
+            }
+
+            match key_range.end_bound() {
+                Included(_) => {
+                    // it guarantees that the end bound must be excluded or unbounded
+                    unreachable!()
+                }
+
+                // for case 1, Should use excluded next key for end bound so need
+                // end_bound_of_prefix
+                //
+                // 1. Excluded(end_bound_of_prefix(pk + col)) => prefix_hint < end_bound <=
+                // end_bound_of_prefix(prefix_hint)
+                //
+                // 2. Excluded(pk + bound) => prefix_hint < end_bound <=
+                // end_bound_of_prefix(prefix_hint)
+                //
+                // 3. Unbound => do not check
+                Excluded(range_end) => {
+                    let prefix_end_bound = end_bound_of_prefix(prefix_hint.as_slice());
+                    assert!(range_end.as_ref() > prefix_hint.as_slice());
+                    match prefix_end_bound {
+                        Included(_) => unreachable!(),
+                        Excluded(prefix_end_bound_key) => {
+                            assert!(range_end.as_ref() <= prefix_end_bound_key.as_slice());
+                        }
+
+                        std::ops::Bound::Unbounded => {}
+                    }
+                }
+
+                std::ops::Bound::Unbounded => {}
+            }
+        } else {
+            // not check
+        }
+
         // TODO: transfer prefix_hint to iter_inner next pr
-        self.iter_inner::<R, B, ForwardIter>(None, key_range, read_options)
+        self.iter_inner::<_, _, ForwardIter>(None, key_range, read_options)
     }
 
     /// Returns a backward iterator that scans from the end key to the begin key
