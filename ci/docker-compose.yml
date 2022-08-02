@@ -47,7 +47,7 @@ services:
       test: ["CMD", "mysqladmin" ,"ping", "-h", "localhost"]
       timeout: 40s
       retries: 5
-    userns: "host"
+    userns_node: "host"
     network_mode: "host"
     # networks:
     #   nw:
