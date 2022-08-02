@@ -149,11 +149,9 @@ mod tests {
     use risingwave_pb::hummock::CompactTask;
     use tokio::sync::mpsc::error::TryRecvError;
 
-    use crate::hummock::test_utils::{
-        commit_from_meta_node, generate_test_tables, get_sst_ids,
-        register_sstable_infos_to_compaction_group, setup_compute_env, to_local_sstable_info,
-    };
+    use crate::hummock::test_utils::{commit_from_meta_node, generate_test_tables, get_sst_ids, register_sstable_infos_to_compaction_group, setup_compute_env_with_config, to_local_sstable_info};
     use crate::hummock::{CompactorManager, HummockManager};
+    use crate::hummock::compaction::compaction_config::CompactionConfigBuilder;
     use crate::storage::MetaStore;
 
     async fn add_compact_task<S>(hummock_manager: &HummockManager<S>, _context_id: u32, epoch: u64)
@@ -242,7 +240,11 @@ mod tests {
 
     #[tokio::test]
     async fn test_next_compactor() {
-        let (_, hummock_manager, _, worker_node) = setup_compute_env(80).await;
+        let config = CompactionConfigBuilder::new()
+            .level0_tier_compact_file_number(1)
+            .max_bytes_for_level_base(1)
+            .build();
+        let (_, hummock_manager, _, worker_node) = setup_compute_env_with_config(80, config).await;
         let context_id = worker_node.id;
         let compactor_manager = CompactorManager::new();
         add_compact_task(hummock_manager.as_ref(), context_id, 1).await;

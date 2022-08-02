@@ -23,7 +23,7 @@ use risingwave_hummock_sdk::{
     CompactionGroupId, HummockContextId, HummockEpoch, HummockSstableId, LocalSstableInfo,
 };
 use risingwave_pb::common::{HostAddress, WorkerNode, WorkerType};
-use risingwave_pb::hummock::{HummockVersion, KeyRange, SstableInfo};
+use risingwave_pb::hummock::{CompactionConfig, HummockVersion, KeyRange, SstableInfo};
 
 use crate::cluster::{ClusterManager, ClusterManagerRef, META_NODE_ID};
 use crate::hummock::compaction::compaction_config::CompactionConfigBuilder;
@@ -211,9 +211,9 @@ pub fn get_sorted_committed_sstable_ids(hummock_version: &HummockVersion) -> Vec
         .sorted()
         .collect_vec()
 }
-
-pub async fn setup_compute_env(
+pub async fn setup_compute_env_with_config(
     port: i32,
+    config: CompactionConfig,
 ) -> (
     MetaSrvEnv<MemStore>,
     HummockManagerRef<MemStore>,
@@ -227,9 +227,6 @@ pub async fn setup_compute_env(
             .unwrap(),
     );
 
-    let config = CompactionConfigBuilder::new()
-        .level0_tier_compact_file_number(1)
-        .build();
     let compaction_group_manager = Arc::new(
         CompactionGroupManager::new_with_config(env.clone(), config.clone())
             .await
@@ -246,8 +243,8 @@ pub async fn setup_compute_env(
             compaction_group_manager,
             compactor_manager,
         )
-        .await
-        .unwrap(),
+            .await
+            .unwrap(),
     );
     let fake_host_address = HostAddress {
         host: "127.0.0.1".to_string(),
@@ -259,6 +256,20 @@ pub async fn setup_compute_env(
         .await
         .unwrap();
     (env, hummock_manager, cluster_manager, worker_node)
+}
+
+pub async fn setup_compute_env(
+    port: i32,
+) -> (
+    MetaSrvEnv<MemStore>,
+    HummockManagerRef<MemStore>,
+    ClusterManagerRef<MemStore>,
+    WorkerNode,
+) {
+    let config = CompactionConfigBuilder::new()
+        .level0_tier_compact_file_number(1)
+        .build();
+    setup_compute_env_with_config(port, config).await
 }
 
 pub async fn get_sst_ids<S>(
