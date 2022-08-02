@@ -229,7 +229,6 @@ pub async fn setup_compute_env(
 
     let config = CompactionConfigBuilder::new()
         .level0_tier_compact_file_number(1)
-        .max_bytes_for_level_base(1)
         .build();
     let compaction_group_manager = Arc::new(
         CompactionGroupManager::new_with_config(env.clone(), config.clone())
