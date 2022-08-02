@@ -56,7 +56,6 @@ impl ExecutorBuilder for SourceExecutorBuilder {
         let vnodes = params
             .vnode_bitmap
             .expect("vnodes not set for source executor");
-        println!("SourceExecutor vnode: {:?}", vnodes.next_set_bit(0));
 
         Ok(Box::new(SourceExecutor::new(
             params.actor_id,

@@ -339,10 +339,9 @@ impl<S: StateStore> SourceExecutor<S> {
                         self.state_cache.extend(state);
                     }
 
+                    // Refill row id column for source.
                     chunk = match self.source_desc.source.as_ref() {
-                        // Refill row id column for connector sources.
                         SourceImpl::Connector(_) => self.refill_row_id_column(chunk, true),
-                        // The row id column of table v2 is already set in `TableSource`.
                         SourceImpl::TableV2(_) => self.refill_row_id_column(chunk, false),
                     };
 
