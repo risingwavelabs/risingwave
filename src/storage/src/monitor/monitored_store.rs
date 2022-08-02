@@ -24,7 +24,7 @@ use super::StateStoreMetrics;
 use crate::error::StorageResult;
 use crate::hummock::local_version_manager::LocalVersionManager;
 use crate::hummock::sstable_store::SstableStoreRef;
-use crate::hummock::HummockStorage;
+use crate::hummock::{HummockStorage, SstableIdManagerRef};
 use crate::storage_value::StorageValue;
 use crate::store::*;
 use crate::{define_state_store_associated_type, StateStore, StateStoreIter};
@@ -111,6 +111,7 @@ where
 
     fn scan<R, B>(
         &self,
+        prefix_hint: Option<Vec<u8>>,
         key_range: R,
         limit: Option<usize>,
         read_options: ReadOptions,
@@ -123,7 +124,7 @@ where
             let timer = self.stats.range_scan_duration.start_timer();
             let result = self
                 .inner
-                .scan(key_range, limit, read_options)
+                .scan(prefix_hint, key_range, limit, read_options)
                 .await
                 .inspect_err(|e| error!("Failed in scan: {:?}", e))?;
             timer.observe_duration();
@@ -150,7 +151,7 @@ where
             let timer = self.stats.range_backward_scan_duration.start_timer();
             let result = self
                 .inner
-                .scan(key_range, limit, read_options)
+                .scan(None, key_range, limit, read_options)
                 .await
                 .inspect_err(|e| error!("Failed in backward_scan: {:?}", e))?;
             timer.observe_duration();
@@ -189,13 +190,18 @@ where
         }
     }
 
-    fn iter<R, B>(&self, key_range: R, read_options: ReadOptions) -> Self::IterFuture<'_, R, B>
+    fn iter<R, B>(
+        &self,
+        prefix_hint: Option<Vec<u8>>,
+        key_range: R,
+        read_options: ReadOptions,
+    ) -> Self::IterFuture<'_, R, B>
     where
         R: RangeBounds<B> + Send,
         B: AsRef<[u8]> + Send,
     {
         async move {
-            self.monitored_iter(self.inner.iter(key_range, read_options))
+            self.monitored_iter(self.inner.iter(prefix_hint, key_range, read_options))
                 .await
         }
     }
@@ -227,12 +233,16 @@ where
     fn sync(&self, epoch: Option<u64>) -> Self::SyncFuture<'_> {
         async move {
             let timer = self.stats.shared_buffer_to_l0_duration.start_timer();
-            self.inner
+            let size = self
+                .inner
                 .sync(epoch)
                 .await
                 .inspect_err(|e| error!("Failed in sync: {:?}", e))?;
             timer.observe_duration();
-            Ok(())
+            if size != 0 {
+                self.stats.write_l0_size_per_epoch.observe(size as _);
+            }
+            Ok(size)
         }
     }
 
@@ -274,6 +284,10 @@ impl MonitoredStateStore<HummockStorage> {
 
     pub fn local_version_manager(&self) -> Arc<LocalVersionManager> {
         self.inner.local_version_manager().clone()
+    }
+
+    pub fn sstable_id_manager(&self) -> SstableIdManagerRef {
+        self.inner.sstable_id_manager().clone()
     }
 }
 

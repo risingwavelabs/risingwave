@@ -113,7 +113,7 @@ impl StateStore for MemoryStateStore {
         async move {
             let range_bounds = key.to_vec()..=key.to_vec();
             // We do not really care about vnodes here, so we just use the default value.
-            let res = self.scan(range_bounds, Some(1), read_options).await?;
+            let res = self.scan(None, range_bounds, Some(1), read_options).await?;
 
             Ok(match res.as_slice() {
                 [] => None,
@@ -125,6 +125,7 @@ impl StateStore for MemoryStateStore {
 
     fn scan<R, B>(
         &self,
+        _prefix_hint: Option<Vec<u8>>,
         key_range: R,
         limit: Option<usize>,
         read_options: ReadOptions,
@@ -198,14 +199,19 @@ impl StateStore for MemoryStateStore {
         async move { unimplemented!() }
     }
 
-    fn iter<R, B>(&self, key_range: R, read_options: ReadOptions) -> Self::IterFuture<'_, R, B>
+    fn iter<R, B>(
+        &self,
+        _prefix_hint: Option<Vec<u8>>,
+        key_range: R,
+        read_options: ReadOptions,
+    ) -> Self::IterFuture<'_, R, B>
     where
         R: RangeBounds<B> + Send,
         B: AsRef<[u8]> + Send,
     {
         async move {
             Ok(MemoryStateStoreIter::new(
-                self.scan(key_range, None, read_options)
+                self.scan(None, key_range, None, read_options)
                     .await
                     .unwrap()
                     .into_iter(),
@@ -235,7 +241,7 @@ impl StateStore for MemoryStateStore {
     fn sync(&self, _epoch: Option<u64>) -> Self::SyncFuture<'_> {
         async move {
             // memory backend doesn't support push to S3, so this is a no-op
-            Ok(())
+            Ok(0)
         }
     }
 
@@ -313,6 +319,7 @@ mod tests {
         assert_eq!(
             state_store
                 .scan(
+                    None,
                     "a"..="b",
                     None,
                     ReadOptions {
@@ -331,6 +338,7 @@ mod tests {
         assert_eq!(
             state_store
                 .scan(
+                    None,
                     "a"..="b",
                     Some(1),
                     ReadOptions {
@@ -346,6 +354,7 @@ mod tests {
         assert_eq!(
             state_store
                 .scan(
+                    None,
                     "a"..="b",
                     None,
                     ReadOptions {

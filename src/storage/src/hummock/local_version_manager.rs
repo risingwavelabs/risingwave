@@ -24,8 +24,10 @@ use itertools::Itertools;
 use parking_lot::{RwLock, RwLockUpgradableReadGuard, RwLockWriteGuard};
 use risingwave_common::config::StorageConfig;
 use risingwave_hummock_sdk::compaction_group::hummock_version_ext::HummockVersionExt;
+#[cfg(any(test, feature = "test"))]
+use risingwave_hummock_sdk::filter_key_extractor::FilterKeyExtractorManager;
+use risingwave_hummock_sdk::filter_key_extractor::FilterKeyExtractorManagerRef;
 use risingwave_hummock_sdk::key::FullKey;
-use risingwave_hummock_sdk::slice_transform::SliceTransformImpl;
 use risingwave_hummock_sdk::{CompactionGroupId, LocalSstableInfo};
 use risingwave_pb::hummock::{HummockVersion, HummockVersionDelta};
 use risingwave_rpc_client::HummockMetaClient;
@@ -47,7 +49,8 @@ use crate::hummock::shared_buffer::UploadTaskType::{FlushWriteBatch, SyncEpoch};
 use crate::hummock::shared_buffer::{OrderIndex, SharedBufferEvent, WriteRequest};
 use crate::hummock::utils::validate_table_key_range;
 use crate::hummock::{
-    HummockEpoch, HummockError, HummockResult, HummockVersionId, INVALID_VERSION_ID,
+    HummockEpoch, HummockError, HummockResult, HummockVersionId, SstableIdManagerRef,
+    INVALID_VERSION_ID,
 };
 use crate::monitor::StateStoreMetrics;
 use crate::storage_value::StorageValue;
@@ -148,7 +151,8 @@ impl LocalVersionManager {
         stats: Arc<StateStoreMetrics>,
         hummock_meta_client: Arc<dyn HummockMetaClient>,
         write_conflict_detector: Option<Arc<ConflictDetector>>,
-        table_id_to_slice_transform: Arc<RwLock<HashMap<u32, SliceTransformImpl>>>,
+        sstable_id_manager: SstableIdManagerRef,
+        filter_key_extractor_manager: FilterKeyExtractorManagerRef,
     ) -> Arc<LocalVersionManager> {
         let (version_unpin_worker_tx, version_unpin_worker_rx) =
             tokio::sync::mpsc::unbounded_channel();
@@ -191,7 +195,8 @@ impl LocalVersionManager {
                 hummock_meta_client.clone(),
                 stats,
                 write_conflict_detector,
-                table_id_to_slice_transform.clone(),
+                sstable_id_manager,
+                filter_key_extractor_manager.clone(),
             )),
         });
 
@@ -225,12 +230,16 @@ impl LocalVersionManager {
         write_conflict_detector: Option<Arc<ConflictDetector>>,
     ) -> Arc<LocalVersionManager> {
         Self::new(
-            options,
+            options.clone(),
             sstable_store,
             Arc::new(StateStoreMetrics::unused()),
-            hummock_meta_client,
+            hummock_meta_client.clone(),
             write_conflict_detector,
-            Arc::new(RwLock::new(HashMap::new())),
+            Arc::new(crate::hummock::SstableIdManager::new(
+                hummock_meta_client,
+                options.sstable_id_remote_fetch_number,
+            )),
+            Arc::new(FilterKeyExtractorManager::default()),
         )
         .await
     }
@@ -469,7 +478,7 @@ impl LocalVersionManager {
         Some((epoch, join_handle))
     }
 
-    pub async fn sync_shared_buffer(&self, epoch: Option<HummockEpoch>) -> HummockResult<()> {
+    pub async fn sync_shared_buffer(&self, epoch: Option<HummockEpoch>) -> HummockResult<usize> {
         let epochs = match epoch {
             Some(epoch) => vec![epoch],
             None => self
@@ -479,13 +488,14 @@ impl LocalVersionManager {
                 .map(|(epoch, _)| *epoch)
                 .collect(),
         };
+        let mut size = 0;
         for epoch in epochs {
-            self.sync_shared_buffer_epoch(epoch).await?;
+            size += self.sync_shared_buffer_epoch(epoch).await?
         }
-        Ok(())
+        Ok(size)
     }
 
-    pub async fn sync_shared_buffer_epoch(&self, epoch: HummockEpoch) -> HummockResult<()> {
+    pub async fn sync_shared_buffer_epoch(&self, epoch: HummockEpoch) -> HummockResult<usize> {
         tracing::trace!("sync epoch {}", epoch);
         let (tx, rx) = oneshot::channel();
         self.buffer_tracker
@@ -503,13 +513,12 @@ impl LocalVersionManager {
             Some(task) => task,
             None => {
                 tracing::trace!("sync epoch {} has no more task to do", epoch);
-                return Ok(());
+                return Ok(0);
             }
         };
 
-        let ret = self
-            .run_upload_task(order_index, epoch, task_payload, false)
-            .await;
+        self.run_upload_task(order_index, epoch, task_payload, false)
+            .await?;
         tracing::trace!(
             "sync epoch {} finished. Task size {}",
             epoch,
@@ -520,7 +529,7 @@ impl LocalVersionManager {
         }
         self.buffer_tracker
             .send_event(SharedBufferEvent::EpochSynced(epoch));
-        ret
+        Ok(task_write_batch_size)
     }
 
     async fn run_upload_task(

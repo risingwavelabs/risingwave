@@ -19,9 +19,9 @@ auto_enums = { version = "0.7", features = ["futures", "std"] }
 axum = { version = "0.5", features = ["form", "http1", "json", "matched-path", "original-uri", "query", "serde_json", "serde_urlencoded", "tower-log"] }
 bstr = { version = "0.2", features = ["lazy_static", "regex-automata", "serde", "serde1", "serde1-nostd", "std", "unicode"] }
 bytes = { version = "1", features = ["serde", "std"] }
-chrono = { version = "0.4", features = ["clock", "libc", "oldtime", "std", "time", "winapi"] }
+chrono = { version = "0.4", features = ["clock", "libc", "oldtime", "serde", "std", "time", "winapi"] }
 clap = { version = "3", features = ["atty", "clap_derive", "color", "derive", "env", "once_cell", "std", "strsim", "suggestions", "termcolor"] }
-criterion = { version = "0.3", features = ["async", "async_tokio", "cargo_bench_support", "futures", "tokio"] }
+criterion = { version = "0.3", features = ["async", "async_futures", "async_tokio", "cargo_bench_support", "futures", "tokio"] }
 crossbeam-deque = { version = "0.8", features = ["crossbeam-epoch", "crossbeam-utils", "std"] }
 crossbeam-epoch = { version = "0.9", features = ["alloc", "once_cell", "std"] }
 digest = { version = "0.10", features = ["alloc", "block-buffer", "core-api", "mac", "std", "subtle"] }
@@ -58,11 +58,13 @@ num-traits = { version = "0.2", features = ["i128", "std"] }
 parking_lot = { version = "0.12", features = ["arc_lock", "deadlock_detection"] }
 parking_lot_core = { version = "0.9", default-features = false, features = ["backtrace", "deadlock_detection", "petgraph", "thread-id"] }
 petgraph = { version = "0.6", features = ["graphmap", "matrix_graph", "stable_graph"] }
+postgres-types = { version = "0.2", default-features = false, features = ["chrono-04", "derive", "postgres-derive", "with-chrono-0_4"] }
 prometheus = { version = "0.13", features = ["libc", "process", "procfs", "protobuf"] }
 rand = { version = "0.8", features = ["alloc", "getrandom", "libc", "rand_chacha", "small_rng", "std", "std_rng"] }
 regex = { version = "1", features = ["aho-corasick", "memchr", "perf", "perf-cache", "perf-dfa", "perf-inline", "perf-literal", "std", "unicode", "unicode-age", "unicode-bool", "unicode-case", "unicode-gencat", "unicode-perl", "unicode-script", "unicode-segment"] }
 regex-automata = { version = "0.1", features = ["regex-syntax", "std"] }
 regex-syntax = { version = "0.6", features = ["unicode", "unicode-age", "unicode-bool", "unicode-case", "unicode-gencat", "unicode-perl", "unicode-script", "unicode-segment"] }
+rust_decimal = { version = "1", features = ["byteorder", "bytes", "db-tokio-postgres", "postgres", "serde", "std", "tokio-postgres"] }
 scopeguard = { version = "1", features = ["use_std"] }
 serde = { version = "1", features = ["alloc", "derive", "serde_derive", "std"] }
 serde_json = { version = "1", features = ["raw_value", "std"] }
@@ -85,12 +87,12 @@ anyhow = { version = "1", features = ["backtrace", "std"] }
 auto_enums = { version = "0.7", features = ["futures", "std"] }
 auto_enums_derive = { version = "0.7", default-features = false, features = ["futures", "futures03", "std"] }
 axum = { version = "0.5", features = ["form", "http1", "json", "matched-path", "original-uri", "query", "serde_json", "serde_urlencoded", "tower-log"] }
-bstr = { version = "0.2", features = ["lazy_static", "regex-automata", "serde", "serde1", "serde1-nostd", "std", "unicode"] }
+bstr = { version = "0.2", features = ["lazy_static", "regex-automata", "serde1", "serde1-nostd", "std", "unicode"] }
 bytes = { version = "1", features = ["serde", "std"] }
 cc = { version = "1", default-features = false, features = ["jobserver", "parallel"] }
-chrono = { version = "0.4", features = ["clock", "libc", "oldtime", "std", "time", "winapi"] }
+chrono = { version = "0.4", features = ["clock", "libc", "oldtime", "serde", "std", "time", "winapi"] }
 clap = { version = "3", features = ["atty", "clap_derive", "color", "derive", "env", "once_cell", "std", "strsim", "suggestions", "termcolor"] }
-criterion = { version = "0.3", features = ["async", "async_tokio", "cargo_bench_support", "futures", "tokio"] }
+criterion = { version = "0.3", features = ["async", "async_futures", "async_tokio", "cargo_bench_support", "futures", "tokio"] }
 crossbeam-deque = { version = "0.8", features = ["crossbeam-epoch", "crossbeam-utils", "std"] }
 crossbeam-epoch = { version = "0.9", features = ["alloc", "once_cell", "std"] }
 digest = { version = "0.10", features = ["alloc", "block-buffer", "core-api", "mac", "std", "subtle"] }
@@ -127,11 +129,13 @@ num-traits = { version = "0.2", features = ["i128", "std"] }
 parking_lot = { version = "0.12", features = ["arc_lock", "deadlock_detection"] }
 parking_lot_core = { version = "0.9", default-features = false, features = ["backtrace", "deadlock_detection", "petgraph", "thread-id"] }
 petgraph = { version = "0.6", features = ["graphmap", "matrix_graph", "stable_graph"] }
+postgres-types = { version = "0.2", default-features = false, features = ["chrono-04", "derive", "postgres-derive", "with-chrono-0_4"] }
 prometheus = { version = "0.13", features = ["libc", "process", "procfs", "protobuf"] }
 rand = { version = "0.8", features = ["alloc", "getrandom", "libc", "rand_chacha", "small_rng", "std", "std_rng"] }
 regex = { version = "1", features = ["aho-corasick", "memchr", "perf", "perf-cache", "perf-dfa", "perf-inline", "perf-literal", "std", "unicode", "unicode-age", "unicode-bool", "unicode-case", "unicode-gencat", "unicode-perl", "unicode-script", "unicode-segment"] }
 regex-automata = { version = "0.1", features = ["regex-syntax", "std"] }
 regex-syntax = { version = "0.6", features = ["unicode", "unicode-age", "unicode-bool", "unicode-case", "unicode-gencat", "unicode-perl", "unicode-script", "unicode-segment"] }
+rust_decimal = { version = "1", features = ["byteorder", "bytes", "db-tokio-postgres", "postgres", "serde", "std", "tokio-postgres"] }
 scopeguard = { version = "1", features = ["use_std"] }
 serde = { version = "1", features = ["alloc", "derive", "serde_derive", "std"] }
 serde_json = { version = "1", features = ["raw_value", "std"] }

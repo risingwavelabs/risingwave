@@ -128,7 +128,7 @@ where
             Some(compact_task) => {
                 let result = self
                     .hummock_manager
-                    .report_compact_task(&compact_task)
+                    .report_compact_task(req.context_id, &compact_task)
                     .await;
                 match result {
                     Ok(_) => Ok(Response::new(ReportCompactionTasksResponse {
@@ -181,15 +181,19 @@ where
         Ok(Response::new(UnpinSnapshotBeforeResponse { status: None }))
     }
 
-    async fn get_new_table_id(
+    async fn get_new_sst_ids(
         &self,
-        _request: Request<GetNewTableIdRequest>,
-    ) -> Result<Response<GetNewTableIdResponse>, Status> {
-        let result = self.hummock_manager.get_new_table_id().await;
+        request: Request<GetNewSstIdsRequest>,
+    ) -> Result<Response<GetNewSstIdsResponse>, Status> {
+        let result = self
+            .hummock_manager
+            .get_new_sst_ids(request.into_inner().number)
+            .await;
         match result {
-            Ok(table_id) => Ok(Response::new(GetNewTableIdResponse {
+            Ok(sst_id_range) => Ok(Response::new(GetNewSstIdsResponse {
                 status: None,
-                table_id,
+                start_id: sst_id_range.start_id,
+                end_id: sst_id_range.end_id,
             })),
             Err(e) => Err(tonic_err(e)),
         }
@@ -250,6 +254,7 @@ where
         let compaction_group_id = request.compaction_group_id;
         let mut option = ManualCompactionOption {
             level: request.level as usize,
+            sst_ids: request.sst_ids,
             ..Default::default()
         };
 

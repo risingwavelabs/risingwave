@@ -138,20 +138,6 @@ impl LogicalScan {
             .collect()
     }
 
-    pub(super) fn pk_names_with_table_prefix(&self) -> Vec<String> {
-        self.base
-            .pk_indices
-            .iter()
-            .map(|i| {
-                format!(
-                    "{}.{}",
-                    self.table_name.clone(),
-                    self.table_desc.columns[*i].name
-                )
-            })
-            .collect()
-    }
-
     pub(super) fn column_names_with_table_prefix(&self) -> Vec<String> {
         self.output_col_idx
             .iter()
@@ -214,6 +200,10 @@ impl LogicalScan {
             .iter()
             .map(|i| self.table_desc.columns[*i].column_id)
             .collect()
+    }
+
+    pub fn output_column_indices(&self) -> &[usize] {
+        &self.output_col_idx
     }
 
     /// Get all indexes on this table
