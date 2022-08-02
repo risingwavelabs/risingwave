@@ -9,10 +9,10 @@
 - sql: |
     select * from pg_catalog.pg_namespace
   logical_plan: |
-    LogicalProject { exprs: [pg_namespace.oid, pg_namespace.nspname, pg_namespace.nspowner] }
-      LogicalScan { table: pg_namespace, columns: [pg_namespace.oid, pg_namespace.nspname, pg_namespace.nspowner] }
+    LogicalProject { exprs: [pg_namespace.oid, pg_namespace.nspname, pg_namespace.nspowner, pg_namespace.nspacl] }
+      LogicalScan { table: pg_namespace, columns: [pg_namespace.oid, pg_namespace.nspname, pg_namespace.nspowner, pg_namespace.nspacl] }
   batch_plan: |
-    BatchScan { table: pg_namespace, columns: [pg_namespace.oid, pg_namespace.nspname, pg_namespace.nspowner], distribution: Single }
+    BatchScan { table: pg_namespace, columns: [pg_namespace.oid, pg_namespace.nspname, pg_namespace.nspowner, pg_namespace.nspacl], distribution: Single }
 - sql: |
     select * from pg_catalog.pg_cast
   logical_plan: |
