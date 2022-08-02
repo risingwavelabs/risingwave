@@ -540,18 +540,26 @@ impl LocalStreamManagerCore {
             );
 
             let monitor = tokio_metrics::TaskMonitor::new();
-            let trace_context = self
-                .trace_context_manager
-                .register(format!("actor {actor_id}"), "actor_root");
+            // let trace_context = self
+            //     .trace_context_manager
+            //     .register(format!("actor {actor_id}"), "actor_root");
+
+            // self.handles.insert(
+            //     actor_id,
+            //     tokio::spawn(
+            //         monitor.instrument(TRACE_CONTEXT.scope(trace_context, async move {
+            //             // unwrap the actor result to panic on error
+            //             actor.run().await.expect("actor failed");
+            //         })),
+            //     ),
+            // );
 
             self.handles.insert(
                 actor_id,
-                tokio::spawn(
-                    monitor.instrument(TRACE_CONTEXT.scope(trace_context, async move {
-                        // unwrap the actor result to panic on error
-                        actor.run().await.expect("actor failed");
-                    })),
-                ),
+                tokio::spawn(monitor.instrument(async move {
+                    // unwrap the actor result to panic on error
+                    actor.run().await.expect("actor failed");
+                })),
             );
 
             let actor_id_str = actor_id.to_string();

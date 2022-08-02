@@ -1,26 +1,31 @@
 use std::borrow::Cow;
+use std::cell::{RefCell, RefMut};
 use std::collections::HashMap;
 use std::fmt::{Debug, Write};
 use std::pin::Pin;
+use std::rc::Rc;
 use std::sync::{Arc, RwLock, RwLockWriteGuard, Weak};
 use std::task::Poll;
 
 use futures::future::Fuse;
 use futures::{Future, FutureExt};
 use pin_project::{pin_project, pinned_drop};
+use tokio::sync::watch;
 
 pub type SpanValue = Cow<'static, str>;
 
 #[derive(Clone)]
 pub struct StackTreeNode {
-    // TODO: use ref_cell if we start monitor in the same task.
-    inner: Arc<RwLock<StackTreeNodeInner>>,
+    inner: Rc<RefCell<StackTreeNodeInner>>,
 }
+
+// SAFETY: we'll never clone the `Rc` in multiple threads.
+unsafe impl Send for StackTreeNode {}
 
 impl From<StackTreeNodeInner> for StackTreeNode {
     fn from(inner: StackTreeNodeInner) -> Self {
         Self {
-            inner: Arc::new(RwLock::new(inner)),
+            inner: Rc::new(RefCell::new(inner)),
         }
     }
 }
@@ -33,7 +38,7 @@ struct StackTreeNodeInner {
 
 impl Debug for StackTreeNode {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        self.inner.read().unwrap().fmt(f)
+        self.inner.borrow().fmt(f)
     }
 }
 
@@ -67,7 +72,7 @@ impl StackTreeNode {
 
     fn add_child(&self, value: SpanValue) -> Self {
         let child = Self::new(self.clone(), value);
-        let mut inner = self.inner.write().unwrap();
+        let mut inner = self.inner.borrow_mut();
         inner.children.push(child.clone());
         child
     }
@@ -76,36 +81,35 @@ impl StackTreeNode {
         let parent = self.parent();
         assert!(parent.has_child(self));
 
-        let mut parent_inner = parent.inner.write().unwrap();
+        let mut parent_inner = parent.inner.borrow_mut();
         parent_inner
             .children
-            .retain(|x| !Arc::ptr_eq(&x.inner, &self.inner));
+            .retain(|x| !Rc::ptr_eq(&x.inner, &self.inner));
     }
 
     fn delete_unchecked(&self) {
         let parent = self.parent();
 
-        let mut parent_inner = parent.inner.write().unwrap();
+        let mut parent_inner = parent.inner.borrow_mut();
         parent_inner
             .children
-            .retain(|x| !Arc::ptr_eq(&x.inner, &self.inner));
+            .retain(|x| !Rc::ptr_eq(&x.inner, &self.inner));
     }
 
     fn parent(&self) -> Self {
-        self.inner.read().unwrap().parent.clone().unwrap()
+        self.inner.borrow().parent.clone().unwrap()
     }
 
     fn has_child(&self, child: &StackTreeNode) -> bool {
         self.inner
-            .read()
-            .unwrap()
+            .borrow()
             .children
             .iter()
-            .any(|x| Arc::ptr_eq(&x.inner, &child.inner))
+            .any(|x| Rc::ptr_eq(&x.inner, &child.inner))
     }
 
     fn clear_children(&self) {
-        self.inner.write().unwrap().children.clear();
+        self.inner.borrow_mut().children.clear();
     }
 }
 
@@ -126,7 +130,7 @@ impl std::fmt::Display for TraceContext {
         ) -> std::fmt::Result {
             f.write_str(&" ".repeat(depth * 2))?;
 
-            let inner = node.inner.read().unwrap();
+            let inner = node.inner.borrow();
             f.write_str(inner.value.as_ref())?;
             f.write_char('\n')?;
             for child in inner.children.iter() {
@@ -173,15 +177,15 @@ impl TraceContext {
 }
 
 tokio::task_local! {
-    pub static TRACE_CONTEXT: Arc<RwLock<TraceContext>>
+    pub static TRACE_CONTEXT: RefCell<TraceContext>
 }
 
 fn with_write_context<F, R>(f: F) -> R
 where
-    F: FnOnce(RwLockWriteGuard<TraceContext>) -> R,
+    F: FnOnce(RefMut<TraceContext>) -> R,
 {
     TRACE_CONTEXT.with(|trace_context| {
-        let trace_context = trace_context.write().unwrap();
+        let trace_context = trace_context.borrow_mut();
         f(trace_context)
     })
 }
@@ -190,24 +194,19 @@ fn context_exists() -> bool {
     TRACE_CONTEXT.try_with(|_| {}).is_ok()
 }
 
+pub type TraceSender = watch::Sender<String>;
+pub type TraceReceiver = watch::Receiver<String>;
+
 #[derive(Default, Debug)]
 pub struct TraceContextManager {
-    contexts: RwLock<HashMap<String, Weak<RwLock<TraceContext>>>>,
+    rxs: RwLock<HashMap<String, TraceReceiver>>,
 }
 
 impl TraceContextManager {
-    pub fn register(
-        &self,
-        key: String,
-        root_span: impl Into<SpanValue>,
-    ) -> Arc<RwLock<TraceContext>> {
-        let context = Arc::new(RwLock::new(TraceContext::new(root_span.into())));
-        self.contexts
-            .write()
-            .unwrap()
-            .try_insert(key, Arc::downgrade(&context))
-            .unwrap();
-        context
+    pub fn register(&self, key: String) -> TraceSender {
+        let (tx, rx) = watch::channel("<not reported>".to_owned());
+        self.rxs.write().unwrap().try_insert(key, rx).unwrap();
+        tx
     }
 }
 
@@ -292,7 +291,7 @@ pub trait StackTrace: Future + Sized {
 #[cfg(test)]
 mod tests {
     use futures::future::{join_all, select_all};
-    use tokio::sync::oneshot;
+    use tokio::sync::{oneshot, watch};
 
     use super::*;
 
@@ -351,27 +350,46 @@ mod tests {
 
     #[tokio::test]
     async fn test_stack_trace() {
-        let manager = Box::leak(Box::new(TraceContextManager::default()));
-        let (tx, mut rx) = oneshot::channel();
+        let (watch_tx, mut watch_rx) = watch::channel(String::new());
 
-        let _handle = {
-            let manager = &*manager;
-            tokio::spawn(async move {
-                TRACE_CONTEXT
-                    .scope(manager.register("actor 233".to_string(), "233"), hello())
-                    .await;
-                tx.send(()).unwrap();
-            })
-        };
-
-        while rx.try_recv().is_err() {
-            for (key, context) in manager.contexts.read().unwrap().iter() {
-                if let Some(context) = context.upgrade() {
-                    let context = context.read().unwrap();
-                    println!("{}\n{}", key, context);
-                }
+        let collector = tokio::spawn(async move {
+            while watch_rx.changed().await.is_ok() {
+                println!("{}", &*watch_rx.borrow());
             }
-            tokio::time::sleep(std::time::Duration::from_millis(200)).await;
-        }
+        });
+
+        TRACE_CONTEXT
+            .scope(
+                RefCell::new(TraceContext::new("actor 233".into())),
+                async move {
+                    let (tx, mut rx) = oneshot::channel();
+
+                    let monitor = async move {
+                        println!("Start monitor!");
+                        while rx.try_recv().is_err() {
+                            let new_report = TRACE_CONTEXT.with(|c| format!("{}", c.borrow()));
+                            watch_tx.send_if_modified(|report| {
+                                if report != &new_report {
+                                    *report = new_report;
+                                    true
+                                } else {
+                                    false
+                                }
+                            });
+                            tokio::time::sleep(std::time::Duration::from_millis(100)).await;
+                        }
+                    };
+
+                    let work = async move {
+                        hello().await;
+                        tx.send(()).unwrap();
+                    };
+
+                    select_all([monitor.boxed(), work.boxed()]).await;
+                },
+            )
+            .await;
+
+        collector.await.unwrap();
     }
 }
