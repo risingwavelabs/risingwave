@@ -1281,7 +1281,7 @@ mod tests {
         // TODO: check memory and metastore consistent
         assert_eq!(
             select_err_1.to_string(),
-            "internal error: table_fragment not exist: id=0"
+            "table_fragment not exist: id=0"
         );
 
         services.stop().await;
