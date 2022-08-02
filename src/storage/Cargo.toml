@@ -48,6 +48,7 @@ risingwave_hummock_sdk = { path = "../storage/hummock_sdk" }
 risingwave_object_store = { path = "../object_store" }
 risingwave_pb = { path = "../prost" }
 risingwave_rpc_client = { path = "../rpc_client" }
+scopeguard = "1"
 # rocksdb = { git = "https://github.com/tikv/rust-rocksdb.git", rev = "fa83ff19", features = [
 #     "encryption",
 #     "static_libcpp",
@@ -55,7 +56,6 @@ risingwave_rpc_client = { path = "../rpc_client" }
 serde = { version = "1", features = ["derive"] }
 smallvec = "1"
 spin = "0.9"
-scopeguard = "1"
 tempfile = "3"
 thiserror = "1"
 # tikv-client = { git = "https://github.com/tikv/client-rust", rev = "5714b2", optional = true }
@@ -79,7 +79,7 @@ workspace-hack = { version = "0.1", path = "../workspace-hack" }
 zstd = "0.11.2"
 
 [dev-dependencies]
-criterion = { version = "0.3", features = ["async_futures"]}
+criterion = { version = "0.3", features = ["async_futures"] }
 risingwave_test_runner = { path = "../test_runner" }
 uuid = { version = "1", features = ["v4"] }
 
