@@ -14,7 +14,6 @@
 // limitations under the License.
 #![feature(lint_reasons)]
 
-pub mod binary_encode;
 pub mod error;
 pub mod pg_extended;
 pub mod pg_field_descriptor;
@@ -23,5 +22,3 @@ pub mod pg_protocol;
 pub mod pg_response;
 pub mod pg_server;
 pub mod types;
-
-pub use binary_encode::BinaryEncoder;
