@@ -1279,10 +1279,7 @@ mod tests {
             .unwrap_err();
 
         // TODO: check memory and metastore consistent
-        assert_eq!(
-            select_err_1.to_string(),
-            "table_fragment not exist: id=0"
-        );
+        assert_eq!(select_err_1.to_string(), "table_fragment not exist: id=0");
 
         services.stop().await;
     }
