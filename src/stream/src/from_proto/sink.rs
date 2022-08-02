@@ -24,7 +24,7 @@ impl ExecutorBuilder for SinkExecutorBuilder {
         mut params: ExecutorParams,
         node: &StreamNode,
         store: impl StateStore,
-        _stream: &mut LocalStreamManagerCore,
+        stream: &mut LocalStreamManagerCore,
     ) -> Result<BoxedExecutor> {
         let node = try_match_expand!(node.get_node_body().unwrap(), NodeBody::Sink)?;
         let _sink_id = TableId::from(node.table_id);
@@ -37,6 +37,7 @@ impl ExecutorBuilder for SinkExecutorBuilder {
         Ok(Box::new(SinkExecutor::new(
             params.input.remove(0),
             store,
+            stream.streaming_metrics.clone(),
             node.properties.clone(),
             params.executor_id,
         )))
