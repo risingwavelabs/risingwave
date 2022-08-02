@@ -3702,9 +3702,9 @@ dependencies = [
  "bytes",
  "madsim",
  "madsim-tokio",
+ "madsim-tokio-postgres",
  "regex",
  "thiserror",
- "tokio-postgres",
  "tracing",
  "workspace-hack",
 ]
@@ -5281,12 +5281,12 @@ dependencies = [
  "log",
  "madsim",
  "madsim-tokio",
+ "madsim-tokio-postgres",
  "paste",
  "rand 0.8.5",
  "risingwave_expr",
  "risingwave_frontend",
  "risingwave_sqlparser",
- "tokio-postgres",
  "workspace-hack",
 ]
 
@@ -6282,29 +6282,6 @@ checksum = "f7d995660bd2b7f8c1568414c1126076c13fbb725c40112dc0120b78eb9b717b"
 dependencies = [
  "native-tls",
  "tokio",
-]
-
-[[package]]
-name = "tokio-postgres"
-version = "0.7.6"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "19c88a47a23c5d2dc9ecd28fb38fba5fc7e5ddc1fe64488ec145076b0c71c8ae"
-dependencies = [
- "async-trait",
- "byteorder",
- "bytes",
- "fallible-iterator",
- "futures",
- "log",
- "parking_lot",
- "percent-encoding",
- "phf",
- "pin-project-lite",
- "postgres-protocol",
- "postgres-types",
- "socket2",
- "tokio",
- "tokio-util",
 ]
 
 [[package]]

@@ -106,6 +106,7 @@ pub struct PartitionedTopicMetadata {
 }
 
 #[cfg(test)]
+#[cfg(not(madsim))] // MockServer is not supported in simulation.
 mod test {
     use wiremock::{Mock, MockServer, ResponseTemplate};
 

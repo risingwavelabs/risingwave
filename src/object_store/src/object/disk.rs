@@ -330,6 +330,7 @@ impl ObjectStore for DiskObjectStore {
 }
 
 #[cfg(test)]
+#[cfg(not(madsim))] // TODO: remove this when madsim supports fs
 mod tests {
     use std::fs::OpenOptions;
     use std::io::Read;
