@@ -24,10 +24,10 @@ use itertools::Itertools;
 use parking_lot::{RwLock, RwLockUpgradableReadGuard, RwLockWriteGuard};
 use risingwave_common::config::StorageConfig;
 use risingwave_hummock_sdk::compaction_group::hummock_version_ext::HummockVersionExt;
-use risingwave_hummock_sdk::key::FullKey;
 #[cfg(any(test, feature = "test"))]
-use risingwave_hummock_sdk::slice_transform::SliceTransformManager;
-use risingwave_hummock_sdk::slice_transform::SliceTransformManagerRef;
+use risingwave_hummock_sdk::filter_key_extractor::FilterKeyExtractorManager;
+use risingwave_hummock_sdk::filter_key_extractor::FilterKeyExtractorManagerRef;
+use risingwave_hummock_sdk::key::FullKey;
 use risingwave_hummock_sdk::{CompactionGroupId, LocalSstableInfo};
 use risingwave_pb::hummock::{HummockVersion, HummockVersionDelta};
 use risingwave_rpc_client::HummockMetaClient;
@@ -152,7 +152,7 @@ impl LocalVersionManager {
         hummock_meta_client: Arc<dyn HummockMetaClient>,
         write_conflict_detector: Option<Arc<ConflictDetector>>,
         sstable_id_manager: SstableIdManagerRef,
-        slice_transform_manager: SliceTransformManagerRef,
+        filter_key_extractor_manager: FilterKeyExtractorManagerRef,
     ) -> Arc<LocalVersionManager> {
         let (version_unpin_worker_tx, version_unpin_worker_rx) =
             tokio::sync::mpsc::unbounded_channel();
@@ -196,7 +196,7 @@ impl LocalVersionManager {
                 stats,
                 write_conflict_detector,
                 sstable_id_manager,
-                slice_transform_manager.clone(),
+                filter_key_extractor_manager.clone(),
             )),
         });
 
@@ -239,7 +239,7 @@ impl LocalVersionManager {
                 hummock_meta_client,
                 options.sstable_id_remote_fetch_number,
             )),
-            Arc::new(SliceTransformManager::default()),
+            Arc::new(FilterKeyExtractorManager::default()),
         )
         .await
     }

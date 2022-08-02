@@ -24,7 +24,7 @@ use risingwave_common::monitor::process_linux::monitor_process;
 use risingwave_common::util::addr::HostAddr;
 use risingwave_common_service::metrics_manager::MetricsManager;
 use risingwave_common_service::observer_manager::ObserverManager;
-use risingwave_hummock_sdk::slice_transform::SliceTransformManager;
+use risingwave_hummock_sdk::filter_key_extractor::FilterKeyExtractorManager;
 use risingwave_pb::common::WorkerType;
 use risingwave_pb::stream_service::stream_service_server::StreamServiceServer;
 use risingwave_pb::task_service::exchange_service_server::ExchangeServiceServer;
@@ -113,8 +113,8 @@ pub async fn compute_node_serve(
     ));
 
     let mut join_handle_vec = vec![];
-    let slice_transform_manager = Arc::new(SliceTransformManager::default());
-    let compute_observer_node = ComputeObserverNode::new(slice_transform_manager.clone());
+    let filter_key_extractor_manager = Arc::new(FilterKeyExtractorManager::default());
+    let compute_observer_node = ComputeObserverNode::new(filter_key_extractor_manager.clone());
     // todo use ObserverManager
     let observer_manager = ObserverManager::new(
         meta_client.clone(),
@@ -133,7 +133,7 @@ pub async fn compute_node_serve(
         hummock_meta_client.clone(),
         state_store_metrics.clone(),
         object_store_metrics,
-        slice_transform_manager.clone(),
+        filter_key_extractor_manager.clone(),
     )
     .await
     .unwrap();
@@ -155,7 +155,7 @@ pub async fn compute_node_serve(
                 storage.sstable_store(),
                 state_store_metrics.clone(),
                 Some(Arc::new(CompactionExecutor::new(Some(1)))),
-                slice_transform_manager.clone(),
+                filter_key_extractor_manager.clone(),
                 memory_limiter.clone(),
                 storage.sstable_id_manager(),
             );

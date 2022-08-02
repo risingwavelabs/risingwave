@@ -27,8 +27,8 @@ mod tests {
     use risingwave_common::util::epoch::Epoch;
     use risingwave_hummock_sdk::compaction_group::hummock_version_ext::HummockVersionExt;
     use risingwave_hummock_sdk::compaction_group::StaticCompactionGroupId;
+    use risingwave_hummock_sdk::filter_key_extractor::FilterKeyExtractorManager;
     use risingwave_hummock_sdk::key::get_table_id;
-    use risingwave_hummock_sdk::slice_transform::SliceTransformManager;
     use risingwave_meta::hummock::compaction::ManualCompactionOption;
     use risingwave_meta::hummock::test_utils::{
         register_table_ids_to_compaction_group, setup_compute_env,
@@ -120,7 +120,7 @@ mod tests {
             stats: Arc::new(StateStoreMetrics::unused()),
             is_share_buffer_compact: false,
             compaction_executor: None,
-            slice_transform_manager: Arc::new(SliceTransformManager::default()),
+            filter_key_extractor_manager: Arc::new(FilterKeyExtractorManager::default()),
             memory_limiter: Arc::new(MemoryLimiter::new(1024 * 1024 * 128)),
             sstable_id_manager: Arc::new(SstableIdManager::new(
                 hummock_meta_client.clone(),

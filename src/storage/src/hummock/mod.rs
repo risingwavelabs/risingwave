@@ -52,7 +52,9 @@ pub mod file_cache;
 pub use error::*;
 pub use risingwave_common::cache::{CachableEntry, LookupResult, LruCache};
 use risingwave_common::catalog::TableId;
-use risingwave_hummock_sdk::slice_transform::{SliceTransformManager, SliceTransformManagerRef};
+use risingwave_hummock_sdk::filter_key_extractor::{
+    FilterKeyExtractorManager, FilterKeyExtractorManagerRef,
+};
 use value::*;
 
 use self::iterator::HummockIterator;
@@ -102,7 +104,7 @@ impl HummockStorage {
             hummock_meta_client,
             hummock_metrics,
             compaction_group_client,
-            Arc::new(SliceTransformManager::default()),
+            Arc::new(FilterKeyExtractorManager::default()),
         )
         .await
     }
@@ -115,7 +117,7 @@ impl HummockStorage {
         // TODO: separate `HummockStats` from `StateStoreMetrics`.
         stats: Arc<StateStoreMetrics>,
         compaction_group_client: Arc<dyn CompactionGroupClient>,
-        slice_transform_manager: SliceTransformManagerRef,
+        filter_key_extractor_manager: FilterKeyExtractorManagerRef,
     ) -> HummockResult<Self> {
         // For conflict key detection. Enabled by setting `write_conflict_detection_enabled` to
         // true in `StorageConfig`
@@ -131,7 +133,7 @@ impl HummockStorage {
             hummock_meta_client.clone(),
             write_conflict_detector,
             sstable_id_manager.clone(),
-            slice_transform_manager,
+            filter_key_extractor_manager,
         )
         .await;
 

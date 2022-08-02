@@ -15,7 +15,7 @@
 use std::sync::Arc;
 
 use risingwave_common::config::StorageConfig;
-use risingwave_hummock_sdk::slice_transform::SliceTransformManagerRef;
+use risingwave_hummock_sdk::filter_key_extractor::FilterKeyExtractorManagerRef;
 use risingwave_hummock_sdk::{HummockEpoch, LocalSstableInfo};
 use risingwave_pb::hummock::SstableInfo;
 use risingwave_rpc_client::HummockMetaClient;
@@ -50,7 +50,7 @@ impl SharedBufferUploader {
         stats: Arc<StateStoreMetrics>,
         write_conflict_detector: Option<Arc<ConflictDetector>>,
         sstable_id_manager: SstableIdManagerRef,
-        slice_transform_manager: SliceTransformManagerRef,
+        filter_key_extractor_manager: FilterKeyExtractorManagerRef,
     ) -> Self {
         let compaction_executor = if options.share_buffer_compaction_worker_threads_number == 0 {
             None
@@ -68,7 +68,7 @@ impl SharedBufferUploader {
             stats: stats.clone(),
             is_share_buffer_compact: true,
             compaction_executor: compaction_executor.as_ref().cloned(),
-            slice_transform_manager: slice_transform_manager.clone(),
+            filter_key_extractor_manager: filter_key_extractor_manager.clone(),
             memory_limiter: memory_limiter.clone(),
             sstable_id_manager: sstable_id_manager.clone(),
         });
@@ -79,7 +79,7 @@ impl SharedBufferUploader {
             stats: stats.clone(),
             is_share_buffer_compact: true,
             compaction_executor: compaction_executor.as_ref().cloned(),
-            slice_transform_manager,
+            filter_key_extractor_manager,
             memory_limiter,
             sstable_id_manager,
         });

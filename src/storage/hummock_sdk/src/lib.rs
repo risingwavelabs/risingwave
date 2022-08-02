@@ -25,10 +25,10 @@ use risingwave_pb::hummock::SstableInfo;
 pub use version_cmp::*;
 pub mod compact;
 pub mod compaction_group;
+pub mod filter_key_extractor;
 pub mod key;
 pub mod key_range;
 pub mod prost_key_range;
-pub mod slice_transform;
 
 pub type HummockSstableId = u64;
 pub type HummockRefCount = u64;

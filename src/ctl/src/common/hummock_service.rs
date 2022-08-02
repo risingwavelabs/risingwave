@@ -18,7 +18,7 @@ use std::time::Duration;
 
 use anyhow::{anyhow, bail, Result};
 use risingwave_common::config::StorageConfig;
-use risingwave_hummock_sdk::slice_transform::SliceTransformManager;
+use risingwave_hummock_sdk::filter_key_extractor::FilterKeyExtractorManager;
 use risingwave_rpc_client::MetaClient;
 use risingwave_storage::hummock::hummock_meta_client::MonitoredHummockMetaClient;
 use risingwave_storage::hummock::HummockStorage;
@@ -105,7 +105,7 @@ risectl requires a full persistent cluster to operate. Please make sure you're n
             object_store_metrics: Arc::new(ObjectStoreMetrics::unused()),
         };
 
-        let slice_transform_manager = Arc::new(SliceTransformManager::default());
+        let filter_key_extractor_manager = Arc::new(FilterKeyExtractorManager::default());
         let state_store_impl = StateStoreImpl::new(
             &self.hummock_url,
             Arc::new(config),
@@ -115,7 +115,7 @@ risectl requires a full persistent cluster to operate. Please make sure you're n
             )),
             metrics.state_store_metrics.clone(),
             metrics.object_store_metrics.clone(),
-            slice_transform_manager.clone(),
+            filter_key_extractor_manager.clone(),
         )
         .await?;
 

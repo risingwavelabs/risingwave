@@ -17,7 +17,7 @@ use std::sync::Arc;
 
 use enum_as_inner::EnumAsInner;
 use risingwave_common::config::StorageConfig;
-use risingwave_hummock_sdk::slice_transform::SliceTransformManagerRef;
+use risingwave_hummock_sdk::filter_key_extractor::FilterKeyExtractorManagerRef;
 use risingwave_object_store::object::{
     parse_local_object_store, parse_remote_object_store, ObjectStoreImpl,
 };
@@ -93,7 +93,7 @@ impl StateStoreImpl {
         hummock_meta_client: Arc<dyn HummockMetaClient>,
         state_store_stats: Arc<StateStoreMetrics>,
         object_store_metrics: Arc<ObjectStoreMetrics>,
-        slice_transform_manager: SliceTransformManagerRef,
+        filter_key_extractor_manager: FilterKeyExtractorManagerRef,
     ) -> StorageResult<Self> {
         let store = match s {
             hummock if hummock.starts_with("hummock+") => {
@@ -127,7 +127,7 @@ impl StateStoreImpl {
                     hummock_meta_client.clone(),
                     state_store_stats.clone(),
                     compaction_group_client,
-                    slice_transform_manager,
+                    filter_key_extractor_manager,
                 )
                 .await?;
                 StateStoreImpl::HummockStateStore(inner.monitored(state_store_stats))
