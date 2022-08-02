@@ -114,7 +114,12 @@ impl From<anyhow::Error> for MetaError {
 
 impl From<MetaError> for tonic::Status {
     fn from(err: MetaError) -> Self {
-        tonic::Status::internal(err.to_string())
+        match &*err.inner {
+            MetaErrorInner::PermissionDenied(_) => {
+                tonic::Status::permission_denied(err.to_string())
+            }
+            _ => tonic::Status::internal(err.to_string()),
+        }
     }
 }
 
