@@ -106,7 +106,7 @@ impl SstableIterator {
     }
 
     // Only for compaction because it would not load block from sstablestore.
-    pub fn next_inner(&mut self) -> HummockResult<()> {
+    pub fn next_for_compact(&mut self) -> HummockResult<()> {
         self.stats.scan_key_count += 1;
         let block_iter = self.block_iter.as_mut().expect("no block iter");
         block_iter.next();

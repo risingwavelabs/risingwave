@@ -101,7 +101,7 @@ impl HummockIterator for ConcatSstableIterator {
     fn next(&mut self) -> Self::NextFuture<'_> {
         async {
             let sstable_iter = self.sstable_iter.as_mut().expect("no table iter");
-            sstable_iter.next_inner()?;
+            sstable_iter.next_for_compact()?;
 
             if sstable_iter.is_valid() {
                 Ok(())
