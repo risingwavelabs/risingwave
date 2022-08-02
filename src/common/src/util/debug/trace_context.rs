@@ -7,12 +7,13 @@ use std::task::Poll;
 
 use futures::future::Fuse;
 use futures::{Future, FutureExt};
-use pin_project::pin_project;
+use pin_project::{pin_project, pinned_drop};
 
 pub type SpanValue = Cow<'static, str>;
 
 #[derive(Clone)]
 pub struct StackTreeNode {
+    // TODO: use ref_cell if we start monitor in the same task.
     inner: Arc<RwLock<StackTreeNodeInner>>,
 }
 
@@ -81,6 +82,15 @@ impl StackTreeNode {
             .retain(|x| !Arc::ptr_eq(&x.inner, &self.inner));
     }
 
+    fn delete_unchecked(&self) {
+        let parent = self.parent();
+
+        let mut parent_inner = parent.inner.write().unwrap();
+        parent_inner
+            .children
+            .retain(|x| !Arc::ptr_eq(&x.inner, &self.inner));
+    }
+
     fn parent(&self) -> Self {
         self.inner.read().unwrap().parent.clone().unwrap()
     }
@@ -92,6 +102,10 @@ impl StackTreeNode {
             .children
             .iter()
             .any(|x| Arc::ptr_eq(&x.inner, &child.inner))
+    }
+
+    fn clear_children(&self) {
+        self.inner.write().unwrap().children.clear();
     }
 }
 
@@ -196,8 +210,8 @@ impl TraceContextManager {
     }
 }
 
-#[pin_project]
-pub struct StackTraced<F> {
+#[pin_project(PinnedDrop)]
+pub struct StackTraced<F: Future> {
     #[pin]
     inner: Fuse<F>,
 
@@ -237,12 +251,29 @@ impl<F: Future> Future for StackTraced<F> {
         match this.inner.poll(cx) {
             Poll::Ready(r) => {
                 with_write_context(|mut c| c.pop(this_node));
+                *this.this_node = None;
                 Poll::Ready(r)
             }
             Poll::Pending => {
                 with_write_context(|mut c| c.step_out());
                 Poll::Pending
             }
+        }
+    }
+}
+
+#[pinned_drop]
+impl<F: Future> PinnedDrop for StackTraced<F> {
+    fn drop(self: Pin<&mut Self>) {
+        // TODO: check we have correctly handle future cancellation here
+        let this = self.project();
+
+        match this.this_node {
+            Some(this_node) => {
+                this_node.delete_unchecked();
+                this_node.clear_children();
+            }
+            None => {} // not polled or ready
         }
     }
 }
@@ -257,7 +288,7 @@ pub trait StackTrace: Future + Sized {
 
 #[cfg(test)]
 mod tests {
-    use futures::future::join_all;
+    use futures::future::{join_all, select_all};
     use tokio::sync::oneshot;
 
     use super::*;
@@ -297,6 +328,14 @@ mod tests {
                     StackTraced::new(sleep(2200), "sleep 2200"),
                 ])
                 .await;
+
+                select_all([
+                    StackTraced::new(sleep(666).boxed(), "sleep 666"),
+                    StackTraced::new(sleep_nested().boxed(), "sleep nested (should be cancelled)"),
+                ])
+                .await;
+
+                StackTraced::new(sleep(233), "sleep 233").await;
             },
             "hello",
         )
