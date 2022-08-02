@@ -17,6 +17,7 @@ use std::sync::Arc;
 use futures::{pin_mut, StreamExt};
 use futures_async_stream::try_stream;
 use risingwave_common::util::debug::context::{DebugContext, DEBUG_CONTEXT};
+use risingwave_common::util::debug::trace_context::StackTrace;
 use tracing::event;
 use tracing_futures::Instrument;
 
@@ -62,6 +63,7 @@ pub async fn trace(
 
     while let Some(message) = DEBUG_CONTEXT
         .scope(debug_context(), input.next())
+        .stack_trace(info.identity.clone())
         .instrument(span())
         .await
         .transpose()?

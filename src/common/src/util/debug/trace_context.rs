@@ -55,11 +55,11 @@ impl StackTreeNode {
         .into()
     }
 
-    fn root() -> Self {
+    fn root(value: SpanValue) -> Self {
         StackTreeNodeInner {
             parent: None,
             children: Vec::new(),
-            value: "root".into(),
+            value,
         }
         .into()
     }
@@ -126,6 +126,15 @@ impl std::fmt::Display for TraceContext {
 }
 
 impl TraceContext {
+    fn new(root_span: SpanValue) -> Self {
+        let root = StackTreeNode::root(root_span);
+
+        Self {
+            root: root.clone(),
+            current: root,
+        }
+    }
+
     fn push(&mut self, span: SpanValue) -> StackTreeNode {
         let current_node = self.current.clone();
         let new_current_node = current_node.add_child(span);
@@ -145,17 +154,6 @@ impl TraceContext {
 
     fn step_out(&mut self) {
         self.current = self.current.parent();
-    }
-}
-
-impl Default for TraceContext {
-    fn default() -> Self {
-        let root = StackTreeNode::root();
-
-        Self {
-            root: root.clone(),
-            current: root,
-        }
     }
 }
 
@@ -182,13 +180,13 @@ pub struct TraceContextManager {
     contexts: RwLock<HashMap<String, Weak<RwLock<TraceContext>>>>,
 }
 
-lazy_static::lazy_static! {
-    pub static ref TRACE_CONTEXT_MANAGER: TraceContextManager = Default::default();
-}
-
 impl TraceContextManager {
-    pub fn register(&self, key: String) -> Arc<RwLock<TraceContext>> {
-        let context = Arc::new(RwLock::new(TraceContext::default()));
+    pub fn register(
+        &self,
+        key: String,
+        root_span: impl Into<SpanValue>,
+    ) -> Arc<RwLock<TraceContext>> {
+        let context = Arc::new(RwLock::new(TraceContext::new(root_span.into())));
         self.contexts
             .write()
             .unwrap()
@@ -249,8 +247,10 @@ impl<F: Future> Future for StackTraced<F> {
     }
 }
 
-pub trait StackTraceExt: Future + Sized {
-    fn stack_traced(self, span: impl Into<SpanValue>) -> StackTraced<Self> {
+impl<T> StackTrace for T where T: Future {}
+
+pub trait StackTrace: Future + Sized {
+    fn stack_trace(self, span: impl Into<SpanValue>) -> StackTraced<Self> {
         StackTraced::new(self, span)
     }
 }
@@ -312,7 +312,7 @@ mod tests {
             let manager = &*manager;
             tokio::spawn(async move {
                 TRACE_CONTEXT
-                    .scope(manager.register("actor 233".to_string()), hello())
+                    .scope(manager.register("actor 233".to_string(), "233"), hello())
                     .await;
                 tx.send(()).unwrap();
             })

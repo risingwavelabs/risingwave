@@ -24,6 +24,7 @@ use risingwave_common::buffer::Bitmap;
 use risingwave_common::config::StreamingConfig;
 use risingwave_common::error::{ErrorCode, Result, RwError};
 use risingwave_common::util::addr::HostAddr;
+use risingwave_common::util::debug::trace_context::{TraceContextManager, TRACE_CONTEXT};
 use risingwave_hummock_sdk::LocalSstableInfo;
 use risingwave_pb::common::ActorInfo;
 use risingwave_pb::{stream_plan, stream_service};
@@ -69,6 +70,8 @@ pub struct LocalStreamManagerCore {
 
     /// Config of streaming engine
     pub(crate) config: StreamingConfig,
+
+    trace_context_manager: TraceContextManager,
 }
 
 /// `LocalStreamManager` manages all stream executors in this project.
@@ -359,6 +362,7 @@ impl LocalStreamManagerCore {
             state_store,
             streaming_metrics,
             config,
+            trace_context_manager: Default::default(),
         }
     }
 
@@ -534,14 +538,20 @@ impl LocalStreamManagerCore {
                 self.streaming_metrics.clone(),
                 actor_context,
             );
+
             let monitor = tokio_metrics::TaskMonitor::new();
+            let trace_context = self
+                .trace_context_manager
+                .register(format!("actor {actor_id}"), "actor_root");
 
             self.handles.insert(
                 actor_id,
-                tokio::spawn(monitor.instrument(async move {
-                    // unwrap the actor result to panic on error
-                    actor.run().await.expect("actor failed");
-                })),
+                tokio::spawn(
+                    monitor.instrument(TRACE_CONTEXT.scope(trace_context, async move {
+                        // unwrap the actor result to panic on error
+                        actor.run().await.expect("actor failed");
+                    })),
+                ),
             );
 
             let actor_id_str = actor_id.to_string();
