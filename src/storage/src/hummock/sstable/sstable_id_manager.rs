@@ -12,12 +12,10 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::cmp;
-use std::collections::VecDeque;
 use std::ops::DerefMut;
 use std::sync::Arc;
 
-use risingwave_hummock_sdk::HummockSstableId;
+use risingwave_hummock_sdk::{HummockSstableId, SstIdRange};
 use risingwave_rpc_client::HummockMetaClient;
 use tokio::sync::Mutex;
 
@@ -28,12 +26,7 @@ pub type SstableIdManagerRef = Arc<SstableIdManager>;
 /// 1. Caches SST ids fetched from meta.
 /// 2. TODO #4037: Maintains watermark SST ids. It will be used by SST full GC.
 pub struct SstableIdManager {
-    // Lock order: `unused_sst_ids` before `max_fetched_sst_id`
-    // TODO: optimization https://github.com/singularity-data/risingwave/pull/4308#discussion_r934411543
-    unused_sst_ids: Mutex<VecDeque<HummockSstableId>>,
-    // Newly fetched SST id should >= `max_fetched_sst_id`,
-    // in order to ensure SST id served locally is monotonic increasing.
-    max_fetched_sst_id: parking_lot::Mutex<HummockSstableId>,
+    available_sst_ids: Mutex<SstIdRange>,
     remote_fetch_number: u32,
     hummock_meta_client: Arc<dyn HummockMetaClient>,
 }
@@ -41,36 +34,35 @@ pub struct SstableIdManager {
 impl SstableIdManager {
     pub fn new(hummock_meta_client: Arc<dyn HummockMetaClient>, remote_fetch_number: u32) -> Self {
         Self {
-            unused_sst_ids: Default::default(),
+            available_sst_ids: Mutex::new(SstIdRange::new(
+                HummockSstableId::MIN,
+                HummockSstableId::MIN,
+            )),
             remote_fetch_number,
             hummock_meta_client,
-            max_fetched_sst_id: parking_lot::Mutex::new(HummockSstableId::MIN),
         }
     }
 
     pub async fn get_next_sst_id(&self) -> HummockResult<HummockSstableId> {
-        let mut guard = self.unused_sst_ids.lock().await;
-        let unused_sst_ids = guard.deref_mut();
-        if unused_sst_ids.is_empty() {
-            let sst_id_range = self
+        let mut guard = self.available_sst_ids.lock().await;
+        let available_sst_ids = guard.deref_mut();
+        if available_sst_ids.peek_next_sst_id().is_none() {
+            let new_sst_ids = self
                 .hummock_meta_client
                 .get_new_sst_ids(self.remote_fetch_number)
                 .await
                 .map_err(HummockError::meta_error)?;
 
-            {
-                let mut max_fetched_sst_id = self.max_fetched_sst_id.lock();
-                assert!(
-                    *max_fetched_sst_id <= sst_id_range.start_id,
-                    "SST id moves backwards"
-                );
-                *max_fetched_sst_id = cmp::max(*max_fetched_sst_id, sst_id_range.end_id);
+            if new_sst_ids.start_id < available_sst_ids.end_id {
+                return Err(HummockError::meta_error(format!(
+                    "SST id moves backwards. new {} < old {}",
+                    new_sst_ids.start_id, available_sst_ids.end_id
+                )));
             }
-
-            unused_sst_ids.append(&mut (sst_id_range.start_id..sst_id_range.end_id).collect());
+            *available_sst_ids = new_sst_ids;
         }
-        unused_sst_ids
-            .pop_front()
-            .ok_or_else(|| HummockError::meta_error("get_new_sst_ids returns empty result"))
+        available_sst_ids
+            .get_next_sst_id()
+            .ok_or_else(|| HummockError::meta_error("get_new_sst_ids RPC returns empty result"))
     }
 }

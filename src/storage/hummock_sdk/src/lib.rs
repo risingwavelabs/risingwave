@@ -66,4 +66,18 @@ impl SstIdRange {
     pub fn new(start_id: HummockSstableId, end_id: HummockSstableId) -> Self {
         Self { start_id, end_id }
     }
+
+    pub fn peek_next_sst_id(&self) -> Option<HummockSstableId> {
+        if self.start_id < self.end_id {
+            return Some(self.start_id);
+        }
+        None
+    }
+
+    /// Pops and returns next SST id.
+    pub fn get_next_sst_id(&mut self) -> Option<HummockSstableId> {
+        let next_id = self.peek_next_sst_id();
+        self.start_id += 1;
+        next_id
+    }
 }
