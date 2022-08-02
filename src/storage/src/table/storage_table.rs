@@ -680,7 +680,10 @@ impl<S: StateStore, RS: RowSerde, const T: AccessType> StorageTableBase<S, RS, T
         // can use a single iterator.
         let iterators: Vec<_> = try_join_all(vnodes.map(|vnode| {
             let raw_key_range = prefixed_range(encoded_key_range.clone(), &vnode.to_be_bytes());
-            let filter_hint = filter_hint.clone();
+            let filter_hint = filter_hint
+                .clone()
+                .map(|filter_hint| [&vnode.to_be_bytes(), filter_hint.as_slice()].concat());
+
             async move {
                 let iter = StorageTableIterInner::<S, RS>::new(
                     &self.keyspace,
@@ -784,12 +787,6 @@ impl<S: StateStore, RS: RowSerde, const T: AccessType> StorageTableBase<S, RS, T
             false,
         );
 
-        trace!(
-            "iter_with_pk_bounds: start_key: {:?}, end_key: {:?}",
-            start_key,
-            end_key
-        );
-
         let filter_key = if pk_prefix.size() == 0 {
             None
         } else {
@@ -797,6 +794,13 @@ impl<S: StateStore, RS: RowSerde, const T: AccessType> StorageTableBase<S, RS, T
             let serialized_pk_prefix = serialize_pk(pk_prefix, &pk_prefix_serializer);
             Some(serialized_pk_prefix)
         };
+
+        trace!(
+            "iter_with_pk_bounds: filter_key {:?} start_key: {:?}, end_key: {:?}",
+            filter_key,
+            start_key,
+            end_key
+        );
 
         self.iter_with_encoded_key_range(
             filter_key,

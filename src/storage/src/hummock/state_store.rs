@@ -481,7 +481,7 @@ impl StateStore for HummockStorage {
             // learn more detail about start_bound with storage_table.rs.
             match key_range.start_bound() {
                 // it guarantees that the start bound must be included (some different case)
-                // 1. Include(pk + col_bound) => prefix_hint <= start_bound <=
+                // 1. Include(pk + col_bound) => prefix_hint <= start_bound <
                 // next_key(prefix_hint)
                 //
                 // for case2, frontend need to reject this, avoid excluded start_bound and
@@ -491,7 +491,7 @@ impl StateStore for HummockStorage {
                 // 2. Include(next_key(pk +
                 // col_bound)) => prefix_hint <= start_bound <= next_key(prefix_hint)
                 //
-                // 3. Include(pk) => prefix_hint <= start_bound <= next_key(prefix_hint)
+                // 3. Include(pk) => prefix_hint <= start_bound < next_key(prefix_hint)
                 Included(range_start) => {
                     let next_key = next_key(prefix_hint);
                     assert!(range_start.as_ref() >= prefix_hint.as_slice());
