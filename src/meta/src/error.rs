@@ -38,6 +38,9 @@ enum MetaErrorInner {
     #[error("Rpc error: {0}")]
     RpcError(RpcError),
 
+    #[error("PermissionDenied: {0}")]
+    PermissionDenied(String),
+
     #[error(transparent)]
     Internal(anyhow::Error),
 }
@@ -77,6 +80,11 @@ impl MetaError {
     /// `MetaStore` transaction error.
     pub fn transaction_error(e: MetaStoreError) -> Self {
         MetaErrorInner::TransactionError(e).into()
+    }
+
+    /// PermissionDenied
+    pub fn permission_denied(s: String) -> Self {
+        MetaErrorInner::PermissionDenied(s).into()
     }
 }
 

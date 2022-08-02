@@ -166,7 +166,10 @@ impl<S: MetaStore> UserManager<S> {
     pub async fn create_user(&self, user: &UserInfo) -> MetaResult<NotificationVersion> {
         let mut core = self.core.lock().await;
         if core.all_users.contains(&user.name) {
-            return Err(anyhow!("user {} already exists", user.name).into());
+            return Err(MetaError::permission_denied(format!(
+                "User {} already exists",
+                user.name
+            )));
         }
         user.insert(self.env.meta_store()).await?;
         core.create_user(user.clone());
@@ -189,7 +192,10 @@ impl<S: MetaStore> UserManager<S> {
             .iter()
             .any(|&field| field == UpdateField::Rename);
         if rename_flag && core.all_users.contains(&user.name) {
-            return Err(anyhow!("User {} already exists", user.name).into());
+            return Err(MetaError::permission_denied(format!(
+                "User {} already exists",
+                user.name
+            )));
         }
         user.insert(self.env.meta_store()).await?;
         let new_user = core.update_user(user, update_fields);
@@ -219,17 +225,24 @@ impl<S: MetaStore> UserManager<S> {
         let user = core.user_info.get(&id).cloned().unwrap();
 
         if user.name == DEFAULT_SUPER_USER || user.name == DEFAULT_SUPER_USER_FOR_PG {
-            return Err(anyhow!("Cannot drop default super user {}", id).into());
+            return Err(MetaError::permission_denied(format!(
+                "Cannot drop default super user {}",
+                id
+            )));
         }
         if !core.user_info.get(&id).unwrap().grant_privileges.is_empty() {
-            return Err(anyhow!("Cannot drop user {} with privileges", id).into());
+            return Err(MetaError::permission_denied(format!(
+                "Cannot drop user {} with privileges",
+                id
+            )));
         }
         if core.user_grant_relation.contains_key(&id)
             && !core.user_grant_relation.get(&id).unwrap().is_empty()
         {
-            return Err(
-                anyhow!("Cannot drop user {} with privileges granted to others", id).into(),
-            );
+            return Err(MetaError::permission_denied(format!(
+                "Cannot drop user {} with privileges granted to others",
+                id
+            )));
         }
         UserInfo::delete(self.env.meta_store(), &id).await?;
         core.drop_user(id);
@@ -330,7 +343,10 @@ impl<S: MetaStore> UserManager<S> {
             let grant_user = core.user_grant_relation.get_mut(&grantor).unwrap();
 
             if user.is_supper {
-                return Err(anyhow!("Cannot grant privilege to super user {}", user_id).into());
+                return Err(MetaError::permission_denied(format!(
+                    "Cannot grant privilege to super user {}",
+                    user_id
+                )));
             }
             if !grantor_info.is_supper {
                 for new_grant_privilege in new_grant_privileges {
@@ -340,18 +356,16 @@ impl<S: MetaStore> UserManager<S> {
                         .find(|p| p.object == new_grant_privilege.object)
                     {
                         if !Self::check_privilege(privilege, new_grant_privilege, true) {
-                            return Err(anyhow!(
+                            return Err(MetaError::permission_denied(format!(
                                 "Cannot grant privilege without grant permission for user {}",
                                 grantor
-                            )
-                            .into());
+                            )));
                         }
                     } else {
-                        return Err(anyhow!(
+                        return Err(MetaError::permission_denied(format!(
                             "Grantor {} does not have one of the privileges",
                             grantor
-                        )
-                        .into());
+                        )));
                     }
                 }
             }
@@ -453,18 +467,16 @@ impl<S: MetaStore> UserManager<S> {
                     .find(|p| p.object == privilege.object)
                 {
                     if !Self::check_privilege(user_privilege, privilege, same_user) {
-                        return Err(anyhow!(
+                        return Err(MetaError::permission_denied(format!(
                             "Cannot revoke privilege without permission for user {}",
                             &revoke_by.name
-                        )
-                        .into());
+                        )));
                     }
                 } else {
-                    return Err(anyhow!(
+                    return Err(MetaError::permission_denied(format!(
                         "User {} does not have one of the privileges",
                         &revoke_by.name
-                    )
-                    .into());
+                    )));
                 }
             }
         }
@@ -476,7 +488,10 @@ impl<S: MetaStore> UserManager<S> {
                 .ok_or_else(|| anyhow!("User {} does not exist", user_id))
                 .cloned()?;
             if user.is_supper {
-                return Err(anyhow!("Cannot revoke privilege from supper user {}", user_id).into());
+                return Err(MetaError::permission_denied(format!(
+                    "Cannot revoke privilege from supper user {}",
+                    user_id
+                )));
             }
             users_info.push_back(user);
         }
@@ -509,11 +524,10 @@ impl<S: MetaStore> UserManager<S> {
             if recursive_flag {
                 // check with cascade/restrict strategy
                 if !cascade && !users.contains(&now_user.id) {
-                    return Err(anyhow!(
+                    return Err(MetaError::permission_denied(format!(
                         "Cannot revoke privilege from user {} for restrict",
                         &now_user.name
-                    )
-                    .into());
+                    )));
                 }
                 for next_user_id in now_relations {
                     if core.user_info.contains_key(&next_user_id)
