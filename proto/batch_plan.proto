@@ -196,7 +196,7 @@ message MergeSortExchangeNode {
 message LookupJoinNode {
   plan_common.JoinType join_type = 1;
   expr.ExprNode condition = 2;
-  repeated int32 build_side_key = 3;
+  repeated uint32 build_side_key = 3;
   plan_common.CellBasedTableDesc probe_side_table_desc = 4;
   repeated uint32 probe_side_vnode_mapping = 5;
   repeated int32 probe_side_column_ids = 6;
