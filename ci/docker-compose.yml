@@ -37,8 +37,8 @@ services:
   mysql:
     image: mysql/mysql-server:latest
     container_name: mysql
-    ports:
-      - '3306:3306'
+    # ports:
+    #   - '3306:3306'
     volumes:
       - ./init:/docker-entrypoint-initdb.d
     environment:
