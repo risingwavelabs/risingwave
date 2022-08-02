@@ -420,6 +420,7 @@ impl LogicalAgg {
     /// Generate plan for stateless 2-phase streaming agg.
     /// Should only be used iff input is distributed. Input must be converted to stream form.
     fn gen_two_phase_stateless_streaming_agg_plan(&self, stream_input: PlanRef) -> Result<PlanRef> {
+        debug_assert!(self.group_key().is_empty());
         let local_agg = StreamLocalSimpleAgg::new(self.clone_with_input(stream_input));
         let exchange =
             RequiredDist::single().enforce_if_not_satisfies(local_agg.into(), &Order::any())?;
@@ -431,7 +432,7 @@ impl LogicalAgg {
                     agg_call.partial_to_total_agg_call(partial_output_idx)
                 })
                 .collect(),
-            self.group_key().to_vec(),
+            vec![],
             exchange,
         ));
         Ok(global_agg.into())
@@ -1124,19 +1125,21 @@ impl ToStream for LogicalAgg {
             matches!(c.agg_kind, AggKind::Sum | AggKind::Count)
                 || (matches!(c.agg_kind, AggKind::Min | AggKind::Max) && input_append_only)
         });
+        let is_simple_agg = self.group_key().is_empty();
 
-        if input_dist.satisfies(&RequiredDist::AnyShard)
+        if is_simple_agg
+            && input_dist.satisfies(&RequiredDist::AnyShard)
             && agg_calls_can_use_two_phase
             && agg_calls_are_stateless
         {
-            // stateless 2-phase agg
-            // can be applied on stateless agg calls with input distributed by any shard
+            // stateless 2-phase simple agg
+            // can be applied on stateless simple agg calls with input distributed by any shard
             self.gen_two_phase_stateless_streaming_agg_plan(stream_input)
         } else if !input_dist.dist_column_indices().is_empty() && agg_calls_can_use_two_phase {
             // 2-phase agg
             // can be applied on agg calls not affected by order with input distributed by dist_key
             self.gen_two_phase_streaming_agg_plan(stream_input, input_dist.dist_column_indices())
-        } else if self.group_key().is_empty() {
+        } else if is_simple_agg {
             // simple 1-phase agg
             Ok(StreamGlobalSimpleAgg::new(self.clone_with_input(
                 RequiredDist::single().enforce_if_not_satisfies(stream_input, &Order::any())?,
