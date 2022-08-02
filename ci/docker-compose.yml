@@ -45,10 +45,14 @@ services:
       - ./init:/docker-entrypoint-initdb.d
     environment:
       - MYSQL_ALLOW_EMPTY_PASSWORD=true
+    # healthcheck:
+    #   test: ["CMD", "mysqladmin" ,"ping", "-h", "localhost"]
+    #   timeout: 40s
+    #   retries: 5
     healthcheck:
-      test: ["CMD", "mysqladmin" ,"ping", "-h", "localhost"]
-      timeout: 40s
-      retries: 5
+      test: "/etc/init.d/mysql status"
+      interval: 1s
+      retries: 120
     userns_mode: host
     network_mode: host
     # networks:
