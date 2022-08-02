@@ -18,19 +18,20 @@
               - columnType:
                   typeName: INT64
                   isNullable: true
+                columnId: 1000
                 name: _row_id
               - columnType:
                   typeName: INT32
                   isNullable: true
-                columnId: 1
+                columnId: 1001
                 name: v1
               orderKey:
               - orderType: ASCENDING
               distKeyIndices:
               - 0
             columnIds:
-            - 1
-            - 0
+            - 1001
+            - 1000
         pkIndices:
         - 1
         fields:
@@ -53,7 +54,7 @@
               typeName: INT32
               isNullable: true
             name: v1
-          columnIds:
+          upstreamColumnIndices:
           - 1
           - 0
       pkIndices:
@@ -111,12 +112,13 @@
             columnType:
               typeName: INT32
               isNullable: true
+            columnId: 1000
             name: v1
         - columnDesc:
             columnType:
               typeName: INT64
               isNullable: true
-            columnId: 1
+            columnId: 1001
             name: t._row_id
           isHidden: true
         orderKey:
@@ -135,12 +137,13 @@
         columnType:
           typeName: INT32
           isNullable: true
+        columnId: 1000
         name: v1
     - columnDesc:
         columnType:
           typeName: INT64
           isNullable: true
-        columnId: 1
+        columnId: 1001
         name: t._row_id
       isHidden: true
     orderKey:
@@ -169,19 +172,20 @@
             - columnType:
                 typeName: INT64
                 isNullable: true
+              columnId: 1000
               name: _row_id
             - columnType:
                 typeName: INT32
                 isNullable: true
-              columnId: 1
+              columnId: 1001
               name: v1
             orderKey:
             - orderType: ASCENDING
             distKeyIndices:
             - 0
           columnIds:
-          - 1
-          - 0
+          - 1001
+          - 1000
       pkIndices:
       - 1
       fields:
@@ -204,7 +208,7 @@
             typeName: INT32
             isNullable: true
           name: v1
-        columnIds:
+        upstreamColumnIndices:
         - 1
         - 0
     pkIndices:
@@ -232,12 +236,13 @@
             columnType:
               typeName: INT32
               isNullable: true
+            columnId: 1000
             name: v1
         - columnDesc:
             columnType:
               typeName: INT64
               isNullable: true
-            columnId: 1
+            columnId: 1001
             name: t._row_id
           isHidden: true
         orderKey:
@@ -256,12 +261,13 @@
         columnType:
           typeName: INT32
           isNullable: true
+        columnId: 1000
         name: v1
     - columnDesc:
         columnType:
           typeName: INT64
           isNullable: true
-        columnId: 1
+        columnId: 1001
         name: t._row_id
       isHidden: true
     orderKey:
@@ -290,24 +296,25 @@
             - columnType:
                 typeName: INT64
                 isNullable: true
+              columnId: 1000
               name: _row_id
             - columnType:
                 typeName: INT32
                 isNullable: true
-              columnId: 1
+              columnId: 1001
               name: v1
             - columnType:
                 typeName: INT32
                 isNullable: true
-              columnId: 2
+              columnId: 1002
               name: v2
             orderKey:
             - orderType: ASCENDING
             distKeyIndices:
             - 0
           columnIds:
-          - 1
-          - 0
+          - 1001
+          - 1000
       pkIndices:
       - 1
       fields:
@@ -334,7 +341,7 @@
             typeName: INT32
             isNullable: true
           name: v2
-        columnIds:
+        upstreamColumnIndices:
         - 1
         - 0
     pkIndices:
@@ -362,12 +369,13 @@
             columnType:
               typeName: INT32
               isNullable: true
+            columnId: 1000
             name: v1
         - columnDesc:
             columnType:
               typeName: INT64
               isNullable: true
-            columnId: 1
+            columnId: 1001
             name: t._row_id
           isHidden: true
         orderKey:
@@ -386,12 +394,13 @@
         columnType:
           typeName: INT32
           isNullable: true
+        columnId: 1000
         name: v1
     - columnDesc:
         columnType:
           typeName: INT64
           isNullable: true
-        columnId: 1
+        columnId: 1001
         name: t._row_id
       isHidden: true
     orderKey:
@@ -423,19 +432,20 @@
                   - columnType:
                       typeName: INT64
                       isNullable: true
+                    columnId: 1000
                     name: _row_id
                   - columnType:
                       typeName: INT32
                       isNullable: true
-                    columnId: 1
+                    columnId: 1001
                     name: v1
                   orderKey:
                   - orderType: ASCENDING
                   distKeyIndices:
                   - 0
                 columnIds:
-                - 1
-                - 0
+                - 1001
+                - 1000
             pkIndices:
             - 1
             fields:
@@ -458,7 +468,7 @@
                   typeName: INT32
                   isNullable: true
                 name: v1
-              columnIds:
+              upstreamColumnIndices:
               - 1
               - 0
           fields:
@@ -597,13 +607,14 @@
             columnType:
               typeName: INT64
               isNullable: true
+            columnId: 1000
             name: sum(count)
           isHidden: true
         - columnDesc:
             columnType:
               typeName: INT64
               isNullable: true
-            columnId: 1
+            columnId: 1001
             name: sum
         owner: 1
     id: 4294967294
@@ -614,13 +625,14 @@
         columnType:
           typeName: INT64
           isNullable: true
+        columnId: 1000
         name: sum(count)
       isHidden: true
     - columnDesc:
         columnType:
           typeName: INT64
           isNullable: true
-        columnId: 1
+        columnId: 1001
         name: sum
     owner: 1
 - sql: |
@@ -645,25 +657,26 @@
                     - columnType:
                         typeName: INT64
                         isNullable: true
+                      columnId: 1000
                       name: _row_id
                     - columnType:
                         typeName: INT32
                         isNullable: true
-                      columnId: 1
+                      columnId: 1001
                       name: v1
                     - columnType:
                         typeName: INT32
                         isNullable: true
-                      columnId: 2
+                      columnId: 1002
                       name: v2
                     orderKey:
                     - orderType: ASCENDING
                     distKeyIndices:
                     - 0
                   columnIds:
-                  - 1
-                  - 2
-                  - 0
+                  - 1001
+                  - 1002
+                  - 1000
               pkIndices:
               - 2
               fields:
@@ -694,7 +707,7 @@
                     typeName: INT32
                     isNullable: true
                   name: v2
-                columnIds:
+                upstreamColumnIndices:
                 - 1
                 - 2
                 - 0
@@ -884,12 +897,13 @@
             columnType:
               typeName: INT64
               isNullable: true
+            columnId: 1000
             name: sum_v1
         - columnDesc:
             columnType:
               typeName: INT32
               isNullable: true
-            columnId: 1
+            columnId: 1001
             name: t.v2
           isHidden: true
         orderKey:
@@ -908,12 +922,13 @@
         columnType:
           typeName: INT64
           isNullable: true
+        columnId: 1000
         name: sum_v1
     - columnDesc:
         columnType:
           typeName: INT32
           isNullable: true
-        columnId: 1
+        columnId: 1001
         name: t.v2
       isHidden: true
     orderKey:

@@ -78,7 +78,7 @@ workspace-hack = { version = "0.1", path = "../workspace-hack" }
 zstd = "0.11.2"
 
 [dev-dependencies]
-criterion = "0.3"
+criterion = { version = "0.3", features = ["async_futures"]}
 risingwave_test_runner = { path = "../test_runner" }
 uuid = { version = "1", features = ["v4"] }
 
@@ -112,3 +112,8 @@ harness = false
 [[bench]]
 name = "bench_compression"
 harness = false
+
+[[bench]]
+name = "bench_compactor"
+harness = false
+

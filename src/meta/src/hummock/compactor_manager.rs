@@ -150,31 +150,25 @@ mod tests {
     use tokio::sync::mpsc::error::TryRecvError;
 
     use crate::hummock::test_utils::{
-        commit_from_meta_node, generate_test_tables, register_sstable_infos_to_compaction_group,
-        setup_compute_env, to_local_sstable_info,
+        commit_from_meta_node, generate_test_tables, get_sst_ids,
+        register_sstable_infos_to_compaction_group, setup_compute_env, to_local_sstable_info,
     };
     use crate::hummock::{CompactorManager, HummockManager};
     use crate::storage::MetaStore;
 
-    async fn add_compact_task<S>(
-        hummock_manager_ref: &HummockManager<S>,
-        _context_id: u32,
-        epoch: u64,
-    ) where
+    async fn add_compact_task<S>(hummock_manager: &HummockManager<S>, _context_id: u32, epoch: u64)
+    where
         S: MetaStore,
     {
-        let original_tables = generate_test_tables(
-            epoch,
-            vec![hummock_manager_ref.get_new_table_id().await.unwrap()],
-        );
+        let original_tables = generate_test_tables(epoch, get_sst_ids(hummock_manager, 1).await);
         register_sstable_infos_to_compaction_group(
-            hummock_manager_ref.compaction_group_manager_ref_for_test(),
+            hummock_manager.compaction_group_manager_ref_for_test(),
             &original_tables,
             StaticCompactionGroupId::StateDefault.into(),
         )
         .await;
         commit_from_meta_node(
-            hummock_manager_ref,
+            hummock_manager,
             epoch,
             to_local_sstable_info(&original_tables),
         )
