@@ -75,6 +75,14 @@ impl SinkConfig {
             _ => unimplemented!(),
         }
     }
+
+    pub fn get_connector(&self) -> &'static str {
+        match self {
+            SinkConfig::Mysql(_) => "mysql",
+            SinkConfig::Kafka(_) => "kafka",
+            SinkConfig::Redis(_) => "redis",
+        }
+    }
 }
 
 #[derive(Debug)]
