@@ -31,6 +31,7 @@ use risingwave_common::catalog::{
 };
 use risingwave_common::error::RwError;
 use risingwave_common::types::{Datum, VirtualNode};
+use risingwave_common::util::debug::trace_context::StackTrace;
 use risingwave_common::util::hash_util::CRC32FastBuilder;
 use risingwave_common::util::ordered::*;
 use risingwave_common::util::sort_util::OrderType;
@@ -877,12 +878,14 @@ impl<S: StateStore, RS: RowSerde> StorageTableIterInner<S, RS> {
             keyspace
                 .state_store()
                 .wait_epoch(read_options.epoch)
+                .stack_trace("wait_epoch")
                 .await?;
         }
 
         let row_deserializer = RS::create_deserializer(table_descs);
         let iter = keyspace
             .iter_with_range(raw_key_range, read_options)
+            .stack_trace("create_iter")
             .await?;
         let iter = Self {
             iter,
@@ -894,7 +897,7 @@ impl<S: StateStore, RS: RowSerde> StorageTableIterInner<S, RS> {
     /// Yield a row with its primary key.
     #[try_stream(ok = (Vec<u8>, Row), error = StorageError)]
     async fn into_stream(mut self) {
-        while let Some((key, value)) = self.iter.next().await? {
+        while let Some((key, value)) = self.iter.next().stack_trace("iter_next").await? {
             if let Some((_vnode, pk, row)) = self
                 .row_deserializer
                 .deserialize(&key, &value)
