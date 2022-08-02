@@ -145,7 +145,8 @@ fn get_acl_items(
                     }
                 });
             res.push('/');
-            res.push_str(username_map.get(key).as_ref().unwrap()); // should be able to query grantor's name
+            // should be able to query grantor's name
+            res.push_str(username_map.get(key).as_ref().unwrap()); 
         }
     }
     res
