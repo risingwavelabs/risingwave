@@ -14,6 +14,7 @@
 
 pub(crate) mod user_authentication;
 pub(crate) mod user_manager;
+pub mod user_privilege;
 pub(crate) mod user_service;
 
 pub type UserId = u32;

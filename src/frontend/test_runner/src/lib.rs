@@ -18,6 +18,7 @@
 mod resolve_id;
 
 use std::collections::{BTreeMap, HashMap};
+use std::sync::atomic::Ordering;
 use std::sync::Arc;
 
 use anyhow::{anyhow, Result};
@@ -262,6 +263,7 @@ impl TestCase {
         let statements = Parser::parse_sql(sql).unwrap();
         for stmt in statements {
             let context = OptimizerContext::new(session.clone(), Arc::from(sql));
+            context.explain_verbose.store(true, Ordering::Relaxed); // use explain verbose in planner tests
             match stmt.clone() {
                 Statement::Query(_)
                 | Statement::Insert { .. }
