@@ -79,7 +79,7 @@ pub struct CreateMaterializedViewContext {
 /// `GlobalStreamManager` manages all the streams in the system.
 pub struct GlobalStreamManager<S: MetaStore> {
     /// Manages definition and status of fragments and actors
-    pub(crate) fragment_manager: FragmentManagerRef<S>,
+    pub(super) fragment_manager: FragmentManagerRef<S>,
 
     /// Broadcasts and collect barriers
     pub(crate) barrier_manager: BarrierManagerRef<S>,

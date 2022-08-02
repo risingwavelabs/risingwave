@@ -32,7 +32,7 @@ use risingwave_pb::stream_service::{BroadcastActorInfoTableRequest, BuildActorsR
 use crate::barrier::Command;
 use crate::cluster::WorkerId;
 use crate::manager::IdCategory;
-use crate::model::{ActorId, FragmentId, TableFragments};
+use crate::model::{ActorId, DispatcherId, FragmentId, TableFragments};
 
 pub struct Reschedule {
     pub added_parallel_units: Vec<ParallelUnitId>,
@@ -41,27 +41,33 @@ pub struct Reschedule {
 
 impl<S> GlobalStreamManager<S> where S: MetaStore {
     pub async fn reschedule_actors(&self, reschedule: HashMap<FragmentId, Reschedule>) -> Result<()> {
-        let frag_id_to_table_id = self.fragment_manager.find_table_ids_for_fragment_ids(reschedule.keys().cloned().collect()).await;
-        let table_ids = frag_id_to_table_id.values().cloned().collect();
 
+        // first, we collect necessary infos
+        let table_ids = self.fragment_manager.find_table_ids_for_fragment_ids(reschedule.keys().cloned().collect()).await.values().cloned().collect();
         let mut table_fragments_map = HashMap::new();
         self.resolv_dependent_table_fragments(table_ids, &mut table_fragments_map, &mut HashSet::new()).await?;
 
+        let mut chain_actor_ids = HashSet::new();
         let mut actor_map = HashMap::new();
         let mut actor_status = BTreeMap::new();
-        for (_, table_fragments) in &table_fragments_map {
-            actor_map.extend(table_fragments.actor_map());
-            actor_status.extend(table_fragments.actor_status.clone());
-        }
-
         let mut parallel_unit_id_to_actor_id = HashMap::new();
+        for (_, table_fragments) in &table_fragments_map {
+            chain_actor_ids.extend(table_fragments.chain_actor_ids());
+            let table_actor_status = table_fragments.actor_status.clone();
+            for (fragment_id, fragment) in &table_fragments.fragments {
+                for actor in &fragment.actors {
+                    actor_map.insert(actor.actor_id, actor.clone());
 
-        for (actor_id, actor_status) in &actor_status {
-            if let Some(parallel_unit) = actor_status.parallel_unit.as_ref() {
-                parallel_unit_id_to_actor_id.insert(parallel_unit.id as ParallelUnitId, *actor_id as ActorId);
+                    if let Some(parallel_unit) = table_actor_status.get(&actor.actor_id).and_then(|status| status.parallel_unit.as_ref()) {
+                        parallel_unit_id_to_actor_id.insert((*fragment_id, parallel_unit.id as ParallelUnitId), actor.actor_id);
+                    }
+                }
             }
+            actor_status.extend(table_actor_status);
         }
 
+
+        // then, we collect all available upstream and downstream
         let mut downstream_actors = HashMap::new();
         let mut upstream_actors = HashMap::new();
         for (actor_id, stream_actor) in &actor_map {
@@ -74,48 +80,62 @@ impl<S> GlobalStreamManager<S> where S: MetaStore {
                     upstream_actors
                         .entry(*downstream_actor_id as ActorId)
                         .or_insert(vec![])
-                        .push((*actor_id, dispatcher.dispatcher_id));
+                        .push((*actor_id as ActorId, dispatcher.dispatcher_id as DispatcherId));
                 }
             }
         }
 
+        //
+        // // if add.len == removed.len, enter migration logic
+        // let mut actor_migration_plan = HashMap::new();
 
-        for (fragment_id, Reschedule {added_parallel_units, removed_parallel_units}) in &reschedule {
+        let mut to_remove = HashMap::new();
+        let mut to_add = HashMap::new();
+
+        for (fragment_id, Reschedule { added_parallel_units, removed_parallel_units }) in &reschedule {
             if removed_parallel_units.len() != added_parallel_units.len() {
                 bail!("only migration is supported now");
             }
 
-
-
-
+            for (removed_parallel_unit_id, added_parallel_unit_id) in removed_parallel_units.iter().zip_eq(added_parallel_units) {
+                let fragment_parallel_unit_id = (*fragment_id, *removed_parallel_unit_id);
+                // if let Some(actor_id) = parallel_unit_id_to_actor_id.get(&fragment_parallel_unit_id) {
+                //     actor_migration_plan.insert(*actor_id as ActorId, (removed_parallel_unit_id, added_parallel_unit_id));
+                // } else {
+                //     bail!("could not find actor id for parallel_unit")
+                // }
+            }
         }
 
 
-        let actor_ids: BTreeSet<ActorId> = actors
-            .values()
-            .flat_map(|value| value.keys().into_iter().cloned())
-            .collect();
 
+        // generate new actor ids
         let mut recreated_actor_ids = HashMap::new();
-        let mut recreated_actors = HashMap::new();
-
-        for actor_id in &actor_ids {
+        for (actor_id, _) in &actor_migration_plan {
             let id = self
                 .id_gen_manager
                 .generate::<{ IdCategory::Actor }>()
                 .await? as ActorId;
+
             recreated_actor_ids.insert(*actor_id, id);
+        }
+
+        // dump actor info, and modify actor upstream/downstream
+        let mut recreated_actors = HashMap::new();
+        for (actor_id, _) in &actor_migration_plan {
+            let new_actor_id = recreated_actor_ids.get(actor_id).unwrap();
 
             let old_actor = actor_map.get(actor_id).unwrap();
             let mut new_actor = old_actor.clone();
 
             if chain_actor_ids.contains(actor_id) {
-                let upstream_actor_ids = upstream_actors.get(actor_id).unwrap();
-                assert_eq!(upstream_actor_ids.len(), 1);
-                let (upstream_actor_id, _) = upstream_actor_ids.iter().next().unwrap();
-                if actor_ids.contains(upstream_actor_id) {
-                    new_actor.same_worker_node_as_upstream = false;
-                }
+                todo!()
+                // let upstream_actor_ids = upstream_actors.get(actor_id).unwrap();
+                // assert_eq!(upstream_actor_ids.len(), 1);
+                // let (upstream_actor_id, _) = upstream_actor_ids.iter().next().unwrap();
+                // if actor_ids.contains(upstream_actor_id) {
+                //     new_actor.same_worker_node_as_upstream = false;
+                // }
             }
 
             for upstream_actor_id in &mut new_actor.upstream_actor_id {
@@ -132,14 +152,49 @@ impl<S> GlobalStreamManager<S> where S: MetaStore {
                 }
             }
 
-            new_actor.actor_id = id;
+            new_actor.actor_id = *new_actor_id;
             recreated_actors.insert(*actor_id as ActorId, new_actor);
         }
 
-        //
-        // let mut chain_actor_ids = HashSet::new();
-        // let mut actor_id_to_worker_id = HashMap::new();
-        // let mut actor_map = HashMap::new();
+        let mut node_hanging_channels: HashMap<WorkerId, Vec<HangingChannel>> = HashMap::new();
+
+        for (actor_id, &(from, to)) in &actor_migration_plan {
+            // let worker_id = actor_id_to_target_id.get(actor_id).unwrap();
+            // let worker = worker_nodes.get(worker_id).unwrap();
+            // if let Some(upstream_actor_ids) = upstream_actors.get(actor_id) {
+            //     for (upstream_actor_id, _upstream_dispatcher_id) in upstream_actor_ids {
+            //         if actor_ids.contains(upstream_actor_id) {
+            //             continue;
+            //         }
+            //
+            //         let new_actor_id = recreated_actor_ids.get(actor_id).unwrap();
+            //
+            //         let upstream_worker_id = actor_id_to_worker_id.get(upstream_actor_id).unwrap();
+            //
+            //         // note: Before PR #4045, we need to remove the local-to-local hanging_channels
+            //         // if worker_id == upstream_worker_id {
+            //         //     continue;
+            //         // }
+            //
+            //         node_hanging_channels
+            //             .entry(*upstream_worker_id)
+            //             .or_default()
+            //             .push(HangingChannel {
+            //                 upstream: Some(ActorInfo {
+            //                     actor_id: *upstream_actor_id,
+            //                     host: None,
+            //                 }),
+            //                 downstream: Some(ActorInfo {
+            //                     actor_id: *new_actor_id,
+            //                     host: worker.host.clone(),
+            //                 }),
+            //             })
+            //     }
+            // }
+        }
+
+
+
         todo!()
     }
 
