@@ -17,6 +17,7 @@ use std::time::{Duration, SystemTime};
 use chrono::{DateTime, Utc};
 use rand::distributions::Alphanumeric;
 use rand::Rng;
+use rand::prelude::SliceRandom;
 use risingwave_frontend::expr::DataTypeName;
 use risingwave_sqlparser::ast::{DataType, Expr, Value};
 
@@ -41,14 +42,14 @@ impl<'a, R: Rng> SqlGenerator<'a, R> {
                     .map(|_| self.rng.sample(Alphanumeric) as char)
                     .collect(),
             )),
-            T::Decimal => Expr::Value(Value::Number(self.gen_float(), false)),
+            T::Decimal => Expr::Value(Value::Number(self.gen_float(f64::MIN, f64::MAX), false)),
             T::Float64 => Expr::TypedString {
                 data_type: DataType::Float(None),
-                value: self.gen_float(),
+                value: self.gen_float(f64::MIN, f64::MAX),
             },
             T::Float32 => Expr::TypedString {
                 data_type: DataType::Real,
-                value: self.gen_float(),
+                value: self.gen_float(f32::MIN as f64, f32::MAX as f64),
             },
             T::Boolean => Expr::Value(Value::Boolean(self.rng.gen_bool(0.5))),
             T::Date => Expr::TypedString {
@@ -71,27 +72,44 @@ impl<'a, R: Rng> SqlGenerator<'a, R> {
         }
     }
 
-    fn gen_int(&mut self, min: isize, max: isize) -> String {
-        let n = match self.rng.gen_range(0..=3) {
-            // Tracking issue:
-            // 0 => min,
-            // 1 => max,
+    fn gen_int(&mut self, _min: isize, max: isize) -> String {
+        let n = match self.rng.gen_range(0..=4) {
             0 => 0,
-            1..=3 => self.rng.gen_range(min+1..max),
+            1 => 1,
+            2 => max,
+            // Tracking issue: <https://github.com/singularity-data/risingwave/issues/4344>
+            // 3 => min, // tests for negative too
+            3..=4 => self.rng.gen_range(1..max),
             _ => unreachable!(),
         };
         n.to_string()
     }
 
-    fn gen_float(&mut self) -> String {
-        self.rng.gen_range(0.0..100.0).to_string()
-    }
+    fn gen_float(&mut self, _min: f64, max: f64) -> String {
+        let n = match self.rng.gen_range(0..=4) {
+            0 => 0.0,
+            1 => 1.0,
+            2 => max,
+            // Tracking issue: <https://github.com/singularity-data/risingwave/issues/4344>
+            // 3 => min, // tests for negative too
+            3..=4 => self.rng.gen_range(1.0..max),
+            _ => unreachable!(),
+        };
+        n.to_string()
+     }
 
     fn gen_temporal_scalar(&mut self, typ: DataTypeName) -> String {
         use DataTypeName as T;
 
-        let secs = self.rng.gen_range(0..1000000) as u64;
-        let tm = DateTime::<Utc>::from(SystemTime::now() - Duration::from_secs(secs));
+        let rand_secs = self.rng.gen_range(2..1000000) as u64;
+        let minute = 60;
+        let hour = 60 * minute;
+        let day = 24 * hour;
+        let week = 7 * day;
+        let choices = [0, 1, minute, hour, day, week, rand_secs];
+        let secs = choices.choose(&mut self.rng).unwrap();
+
+        let tm = DateTime::<Utc>::from(SystemTime::now() - Duration::from_secs(*secs));
         match typ {
             T::Date => tm.format("%F").to_string(),
             T::Timestamp | T::Timestampz => tm.format("%Y-%m-%d %H:%M:%S").to_string(),
