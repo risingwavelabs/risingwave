@@ -117,7 +117,7 @@ impl<C: BatchTaskContext> ProbeSideSource<C> {
             .table_desc
             .order_key
             .iter()
-            .map(|col| self.table_desc.columns[col.index as usize].column_id as usize)
+            .map(|col| col.index as _)
             .collect_vec();
 
         let virtual_node = scan_range.try_compute_vnode(&dist_keys, &pk_indices);
@@ -608,7 +608,14 @@ impl BoxedExecutorBuilder for LookupJoinExecutorBuilder {
         let probe_side_schema = Schema {
             fields: probe_side_column_ids
                 .iter()
-                .map(|&i| Field::from(&ColumnDesc::from(table_desc.columns[i as usize].clone())))
+                .map(|&id| {
+                    let column = table_desc
+                        .columns
+                        .iter()
+                        .find(|c| c.column_id == id)
+                        .unwrap();
+                    Field::from(&ColumnDesc::from(column))
+                })
                 .collect_vec(),
         };
 

@@ -12,24 +12,23 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::collections::HashMap;
 use std::net::SocketAddr;
 use std::path::PathBuf;
 use std::sync::Arc;
 use std::time::Duration;
 
-use parking_lot::RwLock;
 use risingwave_common::monitor::process_linux::monitor_process;
 use risingwave_common::util::addr::HostAddr;
 use risingwave_common_service::metrics_manager::MetricsManager;
 use risingwave_common_service::observer_manager::ObserverManager;
+use risingwave_hummock_sdk::filter_key_extractor::FilterKeyExtractorManager;
 use risingwave_object_store::object::parse_remote_object_store;
 use risingwave_pb::common::WorkerType;
 use risingwave_pb::hummock::compactor_service_server::CompactorServiceServer;
 use risingwave_rpc_client::MetaClient;
 use risingwave_storage::hummock::compaction_executor::CompactionExecutor;
 use risingwave_storage::hummock::hummock_meta_client::MonitoredHummockMetaClient;
-use risingwave_storage::hummock::{MemoryLimiter, SstableStore};
+use risingwave_storage::hummock::{MemoryLimiter, SstableIdManager, SstableStore};
 use risingwave_storage::monitor::{
     monitor_cache, HummockMetrics, ObjectStoreMetrics, StateStoreMetrics,
 };
@@ -98,8 +97,8 @@ pub async fn compactor_serve(
         storage_config.meta_cache_capacity_mb * (1 << 20),
     ));
 
-    let table_id_to_slice_transform = Arc::new(RwLock::new(HashMap::new()));
-    let compactor_observer_node = CompactorObserverNode::new(table_id_to_slice_transform.clone());
+    let filter_key_extractor_manager = Arc::new(FilterKeyExtractorManager::default());
+    let compactor_observer_node = CompactorObserverNode::new(filter_key_extractor_manager.clone());
     // todo use ObserverManager
     let observer_manager = ObserverManager::new(
         meta_client.clone(),
@@ -114,6 +113,10 @@ pub async fn compactor_serve(
         (storage_config.compactor_memory_limit_mb as u64) << 20,
     ));
     monitor_cache(sstable_store.clone(), memory_limiter.clone(), &registry).unwrap();
+    let sstable_id_manager = Arc::new(SstableIdManager::new(
+        hummock_meta_client.clone(),
+        storage_config.sstable_id_remote_fetch_number,
+    ));
 
     let sub_tasks = vec![
         MetaClient::start_heartbeat_loop(
@@ -126,8 +129,9 @@ pub async fn compactor_serve(
             sstable_store,
             state_store_stats,
             Some(Arc::new(CompactionExecutor::new(None))),
-            table_id_to_slice_transform.clone(),
+            filter_key_extractor_manager.clone(),
             memory_limiter,
+            sstable_id_manager,
         ),
     ];
 
