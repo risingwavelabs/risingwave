@@ -17,8 +17,8 @@ use risingwave_common::catalog::{ColumnDesc, ColumnId};
 use risingwave_common::error::{ErrorCode, Result};
 use risingwave_common::types::DataType;
 use risingwave_sqlparser::ast::{
-    BinaryOperator, DataType as AstDataType, DateTimeField, Expr, Query, StructField,
-    TrimWhereField, UnaryOperator,
+    BinaryOperator, DataType as AstDataType, DateTimeField, Expr, Function, ObjectName, Query,
+    StructField, TrimWhereField, UnaryOperator,
 };
 
 use crate::binder::Binder;
@@ -41,7 +41,16 @@ impl Binder {
             }
             Expr::Row(exprs) => self.bind_row(exprs),
             // input ref
-            Expr::Identifier(ident) => self.bind_column(&[ident]),
+            Expr::Identifier(ident) => {
+                if ["session_user"]
+                    .iter()
+                    .any(|e| ident.real_value().as_str() == *e)
+                {
+                    self.bind_function(Function::no_arg(ObjectName(vec![ident])))
+                } else {
+                    self.bind_column(&[ident])
+                }
+            }
             Expr::CompoundIdentifier(idents) => self.bind_column(&idents),
             Expr::FieldIdentifier(field_expr, idents) => {
                 self.bind_single_field_column(*field_expr, &idents)
