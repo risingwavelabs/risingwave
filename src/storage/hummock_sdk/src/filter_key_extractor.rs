@@ -14,7 +14,6 @@
 
 use std::collections::{HashMap, HashSet};
 use std::fmt::Debug;
-use std::sync::atomic::{AtomicU64, Ordering as AtomicOrdering};
 use std::sync::Arc;
 
 use parking_lot::{Mutex, RwLock};
@@ -219,7 +218,6 @@ impl FilterKeyExtractor for MultiFilterKeyExtractor {
 #[derive(Default)]
 struct FilterKeyExtractorManagerInner {
     table_id_to_filter_key_extractor: RwLock<HashMap<u32, Arc<FilterKeyExtractorImpl>>>,
-    version: AtomicU64,
     notify: Notify,
 }
 
@@ -228,18 +226,24 @@ impl FilterKeyExtractorManagerInner {
         self.table_id_to_filter_key_extractor
             .write()
             .insert(table_id, filter_key_extractor);
+
+        self.notify.notify_waiters();
     }
 
     fn remove(&self, table_id: u32) {
         self.table_id_to_filter_key_extractor
             .write()
             .remove(&table_id);
+
+        self.notify.notify_waiters();
     }
 
     async fn acquire(&self, mut table_id_set: HashSet<u32>) -> MultiFilterKeyExtractor {
         let multi_filter_key_extractor = MultiFilterKeyExtractor::default();
 
         while !table_id_set.is_empty() {
+            let notified = self.notify.notified();
+
             {
                 let guard = self.table_id_to_filter_key_extractor.read();
                 table_id_set.drain_filter(|table_id| match guard.get(table_id) {
@@ -254,21 +258,11 @@ impl FilterKeyExtractorManagerInner {
             }
 
             if !table_id_set.is_empty() {
-                let notified = self.notify.notified();
                 notified.await;
             }
         }
 
         multi_filter_key_extractor
-    }
-
-    fn set_version(&self, version: u64) {
-        self.version.store(version, AtomicOrdering::SeqCst);
-        self.notify.notify_waiters();
-    }
-
-    fn version(&self) -> u64 {
-        self.version.load(AtomicOrdering::SeqCst)
     }
 }
 
@@ -295,18 +289,6 @@ impl FilterKeyExtractorManager {
     /// table_id does not util version update (notify), and retry to get
     pub async fn acquire(&self, table_id_set: HashSet<u32>) -> MultiFilterKeyExtractor {
         self.inner.acquire(table_id_set).await
-    }
-
-    /// Update `version` of `FilterKeyExtractorManager`, the input `version` must be greater than
-    /// the local `version`
-    pub fn set_version(&self, version: u64) {
-        assert!(version > self.version());
-        self.inner.set_version(version);
-    }
-
-    /// Get the local `vession` of `FilterKeyExtractorManager`
-    pub fn version(&self) -> u64 {
-        self.inner.version()
     }
 }
 
@@ -608,8 +590,6 @@ mod tests {
     #[tokio::test(flavor = "multi_thread")]
     async fn test_filter_key_extractor_manager() {
         let filter_key_extractor_manager = Arc::new(FilterKeyExtractorManager::default());
-        let version = filter_key_extractor_manager.version();
-        assert_eq!(0, version);
         let filter_key_extractor_manager_ref = filter_key_extractor_manager.clone();
         let filter_key_extractor_manager_ref2 = filter_key_extractor_manager_ref.clone();
 
@@ -621,8 +601,6 @@ mod tests {
                     DummyFilterKeyExtractor::default(),
                 )),
             );
-            filter_key_extractor_manager_ref
-                .set_version(filter_key_extractor_manager.version() + 1);
         });
 
         let remaining_table_id_set = HashSet::from([1]);
@@ -630,8 +608,6 @@ mod tests {
             .acquire(remaining_table_id_set)
             .await;
 
-        let after_version = filter_key_extractor_manager_ref2.version();
-        assert_eq!(version + 1, after_version);
         assert_eq!(1, multi_filter_key_extractor.size());
     }
 }

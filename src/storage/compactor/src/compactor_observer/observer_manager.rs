@@ -26,7 +26,6 @@ use risingwave_pb::meta::SubscribeResponse;
 
 pub struct CompactorObserverNode {
     filter_key_extractor_manager: FilterKeyExtractorManagerRef,
-
     version: u64,
 }
 
@@ -65,6 +64,8 @@ impl ObserverNodeImpl for CompactorObserverNode {
                 for table in snapshot.table {
                     self.handle_catalog_notification(Operation::Add, table);
                 }
+
+                self.version = resp.version;
             }
             _ => {
                 return Err(ErrorCode::InternalError(format!(

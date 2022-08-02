@@ -65,6 +65,8 @@ impl ObserverNodeImpl for ComputeObserverNode {
                 for table in snapshot.table {
                     self.handle_catalog_notification(Operation::Add, table);
                 }
+
+                self.version = resp.version;
             }
             _ => {
                 return Err(ErrorCode::InternalError(format!(
