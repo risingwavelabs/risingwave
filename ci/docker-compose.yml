@@ -49,7 +49,7 @@ services:
       retries: 5
     userns_mode: "host"
     pid: "host"
-    # network_mode: "host"
+    network_mode: "host"
     # networks:
     #   nw:
     #     ipv4_address: 172.24.2.1
