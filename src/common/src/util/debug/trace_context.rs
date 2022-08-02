@@ -109,6 +109,7 @@ impl StackTreeNode {
     }
 }
 
+// TODO: may use a better name
 #[derive(Debug)]
 pub struct TraceContext {
     pub root: StackTreeNode,
@@ -233,6 +234,7 @@ impl<F: Future> StackTraced<F> {
 impl<F: Future> Future for StackTraced<F> {
     type Output = F::Output;
 
+    // TODO: may disable on cfg(not(debug_assertions))
     fn poll(self: Pin<&mut Self>, cx: &mut std::task::Context<'_>) -> Poll<Self::Output> {
         let this = self.project();
 
@@ -266,6 +268,7 @@ impl<F: Future> Future for StackTraced<F> {
 impl<F: Future> PinnedDrop for StackTraced<F> {
     fn drop(self: Pin<&mut Self>) {
         // TODO: check we have correctly handle future cancellation here
+        // TODO: may use `Weak` here
         let this = self.project();
 
         match this.this_node {
@@ -315,6 +318,7 @@ mod tests {
     async fn hello() {
         StackTraced::new(
             async move {
+                // Join
                 join_all([
                     StackTraced::new(sleep(1000).boxed(), format!("sleep {}", 1000)),
                     StackTraced::new(sleep(2000).boxed(), "sleep 2000"),
@@ -323,18 +327,21 @@ mod tests {
                 ])
                 .await;
 
+                // Join another
                 join_all([
                     StackTraced::new(sleep(1200), "sleep 1200"),
                     StackTraced::new(sleep(2200), "sleep 2200"),
                 ])
                 .await;
 
+                // Cancel
                 select_all([
                     StackTraced::new(sleep(666).boxed(), "sleep 666"),
                     StackTraced::new(sleep_nested().boxed(), "sleep nested (should be cancelled)"),
                 ])
                 .await;
 
+                // Check whether cleaned up
                 StackTraced::new(sleep(233), "sleep 233").await;
             },
             "hello",
