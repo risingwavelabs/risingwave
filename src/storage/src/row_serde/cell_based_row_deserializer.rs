@@ -33,14 +33,14 @@ impl ColumnDescMapping {
         all_data_types: Vec<DataType>,
         output_index: Vec<usize>,
     ) -> Arc<Self> {
-        let ouput_id_to_index = output_columns
+        let output_id_to_index = output_columns
             .iter()
             .enumerate()
             .map(|(index, d)| (d.column_id, index))
             .collect();
         Self {
             output_columns,
-            ouput_id_to_index,
+            output_id_to_index,
             all_data_types,
             output_index,
         }
@@ -77,7 +77,7 @@ impl ColumnDescMapping {
 
     /// Get the [`ColumnDesc`] and its index in the output with given `id`.
     pub fn get(&self, id: ColumnId) -> Option<(&ColumnDesc, usize)> {
-        self.ouput_id_to_index
+        self.output_id_to_index
             .get(&id)
             .map(|&index| (&self.output_columns[index], index))
     }

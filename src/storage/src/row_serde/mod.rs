@@ -99,12 +99,13 @@ pub struct ColumnDescMapping {
     /// output_columns are some of the columns that to be partialy scan.
     pub output_columns: Vec<ColumnDesc>,
 
-    pub ouput_id_to_index: HashMap<ColumnId, usize>,
+    /// The output column's column index in output row, which is used in cell-based deserialize.
+    pub output_id_to_index: HashMap<ColumnId, usize>,
 
-    /// all_data_types is the full row data types, which is used in row-based deserialize.
+    /// The full row data types, which is used in row-based deserialize.
     pub all_data_types: Vec<DataType>,
 
-    /// output_index is the output column's column index in full row.
+    /// The output column's column index in full row, which is used in row-based deserialize.
     pub output_index: Vec<usize>,
 }
 
