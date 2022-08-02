@@ -16,6 +16,9 @@
 
 mod version_cmp;
 
+#[macro_use]
+extern crate num_derive;
+
 use risingwave_pb::hummock::SstableInfo;
 pub use version_cmp::*;
 pub mod compact;
@@ -50,4 +53,31 @@ pub fn get_local_sst_id(id: HummockSstableId) -> HummockSstableId {
 
 pub fn is_remote_sst_id(id: HummockSstableId) -> bool {
     id & LOCAL_SST_ID_MASK == 0
+}
+
+pub struct SstIdRange {
+    // inclusive
+    pub start_id: HummockSstableId,
+    // exclusive
+    pub end_id: HummockSstableId,
+}
+
+impl SstIdRange {
+    pub fn new(start_id: HummockSstableId, end_id: HummockSstableId) -> Self {
+        Self { start_id, end_id }
+    }
+
+    pub fn peek_next_sst_id(&self) -> Option<HummockSstableId> {
+        if self.start_id < self.end_id {
+            return Some(self.start_id);
+        }
+        None
+    }
+
+    /// Pops and returns next SST id.
+    pub fn get_next_sst_id(&mut self) -> Option<HummockSstableId> {
+        let next_id = self.peek_next_sst_id();
+        self.start_id += 1;
+        next_id
+    }
 }

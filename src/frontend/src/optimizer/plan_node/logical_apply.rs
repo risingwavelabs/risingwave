@@ -23,7 +23,7 @@ use super::{
     ToStream,
 };
 use crate::expr::CorrelatedId;
-use crate::utils::{ColIndexMapping, Condition, ConditionVerboseDisplay};
+use crate::utils::{ColIndexMapping, Condition, ConditionDisplay};
 
 /// `LogicalApply` represents a correlated join, where the right side may refer to columns from the
 /// left side.
@@ -44,24 +44,21 @@ pub struct LogicalApply {
 
 impl fmt::Display for LogicalApply {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-        let verbose = self.base.ctx.is_explain_verbose();
         write!(
             f,
             "LogicalApply {{ type: {:?}, on: {}, correlated_id: {} }}",
             &self.join_type,
-            if verbose {
+            {
                 let mut concat_schema = self.left().schema().fields.clone();
                 concat_schema.extend(self.right().schema().fields.clone());
                 let concat_schema = Schema::new(concat_schema);
                 format!(
                     "{}",
-                    ConditionVerboseDisplay {
+                    ConditionDisplay {
                         condition: &self.on,
                         input_schema: &concat_schema
                     }
                 )
-            } else {
-                format!("{}", &self.on)
             },
             self.correlated_id
         )

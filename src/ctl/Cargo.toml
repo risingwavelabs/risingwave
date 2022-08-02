@@ -1,12 +1,13 @@
 [package]
 name = "risingwave_ctl"
-version = "0.1.10"
+version = "0.1.11"
 edition = "2021"
 
 [dependencies]
 anyhow = "1"
 bytes = "1"
 clap = { version = "3", features = ["derive"] }
+comfy-table = "6"
 futures = { version = "0.3", default-features = false, features = ["alloc"] }
 parking_lot = "0.12"
 risingwave_common = { path = "../common" }

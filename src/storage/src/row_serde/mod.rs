@@ -96,11 +96,17 @@ pub trait RowSerialize: Clone {
 /// Record mapping from [`ColumnDesc`], [`ColumnId`], and output index of columns in a table.
 #[derive(Clone)]
 pub struct ColumnDescMapping {
+    /// output_columns are some of the columns that to be partialy scan.
     pub output_columns: Vec<ColumnDesc>,
 
-    pub id_to_column_index: HashMap<ColumnId, usize>,
+    /// The output column's column index in output row, which is used in cell-based deserialize.
+    pub output_id_to_index: HashMap<ColumnId, usize>,
 
+    /// The full row data types, which is used in row-based deserialize.
     pub all_data_types: Vec<DataType>,
+
+    /// The output column's column index in full row, which is used in row-based deserialize.
+    pub output_index: Vec<usize>,
 }
 
 /// `Decoding` defines an interface for decoding a key row from kv storage.

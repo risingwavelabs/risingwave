@@ -29,7 +29,7 @@ use crate::catalog::ColumnId;
 use crate::expr::{CollectInputRef, ExprImpl, InputRef};
 use crate::optimizer::plan_node::{BatchSeqScan, LogicalFilter, LogicalProject, LogicalValues};
 use crate::session::OptimizerContextRef;
-use crate::utils::{ColIndexMapping, Condition, ConditionVerboseDisplay};
+use crate::utils::{ColIndexMapping, Condition, ConditionDisplay};
 
 /// `LogicalScan` returns contents of a table or other equivalent object
 #[derive(Debug, Clone)]
@@ -200,6 +200,10 @@ impl LogicalScan {
             .iter()
             .map(|i| self.table_desc.columns[*i].column_id)
             .collect()
+    }
+
+    pub fn output_column_indices(&self) -> &[usize] {
+        &self.output_col_idx
     }
 
     /// Get all indexes on this table
@@ -380,7 +384,7 @@ impl fmt::Display for LogicalScan {
             let required_col_names = self
                 .required_col_idx
                 .iter()
-                .map(|i| format!("${}:{}", i, self.table_desc.columns[*i].name))
+                .map(|i| self.table_desc.columns[*i].name.to_string())
                 .collect_vec();
 
             write!(
@@ -393,15 +397,13 @@ impl fmt::Display for LogicalScan {
                     self.column_names()
                 }.join(", "),
                 required_col_names.join(", "),
-                if verbose {
+                {
                     let fields = self.table_desc.columns.iter().map(|col|  Field::from_with_table_name_prefix(col, &self.table_name)).collect_vec();
                     let input_schema = Schema{fields};
-                    format!("{}", ConditionVerboseDisplay{
+                    format!("{}", ConditionDisplay {
                         condition: &self.predicate,
                         input_schema: &input_schema,
                     })
-                } else {
-                    format!("{}", self.predicate)
                 }
             )
         }

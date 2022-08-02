@@ -30,8 +30,8 @@ use super::utils::{can_concat, search_sst_idx, validate_epoch};
 use super::{BackwardSstableIterator, HummockStorage, SstableIterator, SstableIteratorType};
 use crate::error::StorageResult;
 use crate::hummock::iterator::{
-    Backward, BoxedHummockIterator, DirectedUserIteratorBuilder, DirectionEnum, Forward,
-    HummockIteratorDirection,
+    Backward, DirectedUserIteratorBuilder, DirectionEnum, Forward, HummockIteratorDirection,
+    HummockIteratorUnion,
 };
 use crate::hummock::local_version::PinnedVersion;
 use crate::hummock::shared_buffer::shared_buffer_batch::SharedBufferBatch;
@@ -49,7 +49,10 @@ use crate::{define_state_store_associated_type, StateStore, StateStoreIter};
 pub(crate) trait HummockIteratorType {
     type Direction: HummockIteratorDirection;
     type SstableIteratorType: SstableIteratorType<Direction = Self::Direction>;
-    type UserIteratorBuilder: DirectedUserIteratorBuilder<Direction = Self::Direction>;
+    type UserIteratorBuilder: DirectedUserIteratorBuilder<
+        Direction = Self::Direction,
+        SstableIteratorType = Self::SstableIteratorType,
+    >;
 
     fn direction() -> DirectionEnum {
         Self::Direction::direction()
@@ -97,10 +100,9 @@ impl HummockStorage {
 
         for (replicated_batches, uncommitted_data) in shared_buffer_data {
             for batch in replicated_batches {
-                overlapped_iters
-                    .push(Box::new(batch.into_directed_iter()) as BoxedHummockIterator<_>);
+                overlapped_iters.push(HummockIteratorUnion::First(batch.into_directed_iter()));
             }
-            overlapped_iters.push(
+            overlapped_iters.push(HummockIteratorUnion::Second(
                 build_ordered_merge_iter::<T>(
                     &uncommitted_data,
                     self.sstable_store.clone(),
@@ -109,7 +111,7 @@ impl HummockStorage {
                     iter_read_options.clone(),
                 )
                 .await?,
-            );
+            ));
         }
         self.stats
             .iter_merge_sstable_counts
@@ -159,22 +161,26 @@ impl HummockStorage {
                         .collect_vec(),
                 };
 
-                overlapped_iters.push(Box::new(ConcatIteratorInner::<T::SstableIteratorType>::new(
+                overlapped_iters.push(HummockIteratorUnion::Third(ConcatIteratorInner::<
+                    T::SstableIteratorType,
+                >::new(
                     tables,
                     self.sstable_store(),
                     iter_read_options.clone(),
-                )) as BoxedHummockIterator<T::Direction>);
+                )));
             } else {
                 for table_info in table_infos.into_iter().rev() {
                     let table = self
                         .sstable_store
                         .sstable(table_info.id, &mut stats)
                         .await?;
-                    overlapped_iters.push(Box::new(T::SstableIteratorType::create(
-                        table,
-                        self.sstable_store(),
-                        iter_read_options.clone(),
-                    )));
+                    overlapped_iters.push(HummockIteratorUnion::Fourth(
+                        T::SstableIteratorType::create(
+                            table,
+                            self.sstable_store(),
+                            iter_read_options.clone(),
+                        ),
+                    ));
                 }
             }
         }
@@ -188,6 +194,8 @@ impl HummockStorage {
             key_range.end_bound().map(|b| b.as_ref().to_owned()),
         );
 
+        // The input of the user iterator is a `HummockIteratorUnion` of 4 different types. We use
+        // the union because the underlying merge iterator
         let mut user_iterator = T::UserIteratorBuilder::create(
             overlapped_iters,
             self.stats.clone(),
@@ -471,10 +479,11 @@ impl StateStore for HummockStorage {
 
     fn sync(&self, epoch: Option<u64>) -> Self::SyncFuture<'_> {
         async move {
-            self.local_version_manager()
+            let size = self
+                .local_version_manager()
                 .sync_shared_buffer(epoch)
                 .await?;
-            Ok(())
+            Ok(size)
         }
     }
 

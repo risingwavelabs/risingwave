@@ -27,12 +27,13 @@ use super::{
     ToBatch, ToStream,
 };
 use crate::expr::{ExprImpl, ExprType};
+use crate::optimizer::plan_node::utils::IndicesDisplay;
 use crate::optimizer::plan_node::{
     BatchFilter, BatchHashJoin, BatchLookupJoin, BatchNestedLoopJoin, EqJoinPredicate,
     LogicalFilter, StreamDynamicFilter, StreamFilter,
 };
 use crate::optimizer::property::{Distribution, RequiredDist};
-use crate::utils::{ColIndexMapping, Condition, ConditionVerboseDisplay};
+use crate::utils::{ColIndexMapping, Condition, ConditionDisplay};
 
 /// `LogicalJoin` combines two relations according to some condition.
 ///
@@ -53,35 +54,46 @@ pub struct LogicalJoin {
 impl fmt::Display for LogicalJoin {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         let verbose = self.base.ctx.is_explain_verbose();
-        write!(
-            f,
-            "LogicalJoin {{ type: {:?}, on: {}, output_indices: {} }}",
-            &self.join_type,
-            if verbose {
-                let mut concat_schema = self.left().schema().fields.clone();
-                concat_schema.extend(self.right().schema().fields.clone());
-                let concat_schema = Schema::new(concat_schema);
-                format!(
-                    "{}",
-                    ConditionVerboseDisplay {
-                        condition: self.on(),
-                        input_schema: &concat_schema
-                    }
-                )
-            } else {
-                format!("{}", self.on())
-            },
+        let mut builder = f.debug_struct("LogicalJoin");
+        builder.field("type", &format_args!("{:?}", self.join_type()));
+
+        let mut concat_schema = self.left().schema().fields.clone();
+        concat_schema.extend(self.right().schema().fields.clone());
+        let concat_schema = Schema::new(concat_schema);
+        builder.field(
+            "on",
+            &format_args!(
+                "{}",
+                ConditionDisplay {
+                    condition: self.on(),
+                    input_schema: &concat_schema
+                }
+            ),
+        );
+
+        if verbose {
             if self
-                .output_indices
+                .output_indices()
                 .iter()
                 .copied()
                 .eq(0..self.internal_column_num())
             {
-                "all".to_string()
+                builder.field("output", &format_args!("all"));
             } else {
-                format!("{:?}", self.output_indices)
+                builder.field(
+                    "output",
+                    &format_args!(
+                        "{:?}",
+                        &IndicesDisplay {
+                            indices: self.output_indices(),
+                            input_schema: &concat_schema,
+                        }
+                    ),
+                );
             }
-        )
+        }
+
+        builder.finish()
     }
 }
 
@@ -146,6 +158,7 @@ impl LogicalJoin {
             }
             JoinType::LeftSemi | JoinType::LeftAnti => left_len,
             JoinType::RightSemi | JoinType::RightAnti => right_len,
+            JoinType::Unspecified => unreachable!(),
         }
     }
 
@@ -169,6 +182,7 @@ impl LogicalJoin {
 
             JoinType::LeftSemi | JoinType::LeftAnti => ColIndexMapping::identity(left_len),
             JoinType::RightSemi | JoinType::RightAnti => ColIndexMapping::empty(right_len),
+            JoinType::Unspecified => unreachable!(),
         }
     }
 
@@ -183,6 +197,7 @@ impl LogicalJoin {
             }
             JoinType::LeftSemi | JoinType::LeftAnti => ColIndexMapping::empty(left_len),
             JoinType::RightSemi | JoinType::RightAnti => ColIndexMapping::identity(right_len),
+            JoinType::Unspecified => unreachable!(),
         }
     }
 
@@ -488,14 +503,17 @@ impl LogicalJoin {
         let eq_col_warn_message = "In Lookup Join, the right columns of the equality join \
         predicates must be the same as the primary key. A different join will be used instead.";
 
-        let order_col_indices = table_desc.order_column_indices();
-        if order_col_indices.len() != predicate.right_eq_indexes().len() {
+        let order_col_ids = table_desc.order_column_ids();
+        if order_col_ids.len() != predicate.right_eq_indexes().len() {
             log::warn!("{}", eq_col_warn_message);
             return None;
         }
 
-        for (i, eq_idx) in predicate.right_eq_indexes().into_iter().enumerate() {
-            if order_col_indices[i] != output_column_ids[eq_idx].get_id() as usize {
+        for (order_col_id, eq_idx) in order_col_ids
+            .into_iter()
+            .zip_eq(predicate.right_eq_indexes())
+        {
+            if order_col_id != output_column_ids[eq_idx] {
                 log::warn!("{}", eq_col_warn_message);
                 return None;
             }

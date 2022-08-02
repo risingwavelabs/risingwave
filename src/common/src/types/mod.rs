@@ -17,7 +17,7 @@ use std::hash::Hash;
 use std::sync::Arc;
 
 use anyhow::anyhow;
-use bytes::{Buf, BufMut};
+use bytes::{Buf, BufMut, Bytes, BytesMut};
 use risingwave_pb::data::DataType as ProstDataType;
 use serde::{Deserialize, Serialize};
 
@@ -50,6 +50,7 @@ use itertools::Itertools;
 pub use ops::CheckedAdd;
 pub use ordered_float::IntoOrdered;
 use paste::paste;
+use postgres_types::{ToSql, Type};
 use prost::Message;
 use risingwave_pb::expr::{ListValue as ProstListValue, StructValue as ProstStructValue};
 
@@ -98,7 +99,6 @@ pub fn unnested_list_type(datatype: DataType) -> DataType {
 }
 
 impl From<&ProstDataType> for DataType {
-    #[expect(clippy::needless_borrow)]
     fn from(proto: &ProstDataType) -> DataType {
         match proto.get_type_name().expect("missing type field") {
             TypeName::Int16 => DataType::Int16,
@@ -124,6 +124,7 @@ impl From<&ProstDataType> for DataType {
                 // The first (and only) item is the list element type.
                 datatype: Box::new((&proto.field_type[0]).into()),
             },
+            TypeName::TypeUnspecified => unreachable!(),
         }
     }
 }
@@ -359,11 +360,12 @@ pub fn serialize_datum_ref_into(
     datum_ref: &DatumRef,
     serializer: &mut memcomparable::Serializer<impl BufMut>,
 ) -> memcomparable::Result<()> {
+    // By default, `null` is treated as largest in PostgreSQL.
     if let Some(datum_ref) = datum_ref {
-        1u8.serialize(&mut *serializer)?;
+        0u8.serialize(&mut *serializer)?;
         datum_ref.serialize(serializer)?;
     } else {
-        0u8.serialize(serializer)?;
+        1u8.serialize(serializer)?;
     }
     Ok(())
 }
@@ -384,11 +386,12 @@ pub fn serialize_datum_into(
     datum: &Datum,
     serializer: &mut memcomparable::Serializer<impl BufMut>,
 ) -> memcomparable::Result<()> {
+    // By default, `null` is treated as largest in PostgreSQL.
     if let Some(datum) = datum {
-        1u8.serialize(&mut *serializer)?;
+        0u8.serialize(&mut *serializer)?;
         datum.serialize(serializer)?;
     } else {
-        0u8.serialize(serializer)?;
+        1u8.serialize(serializer)?;
     }
     Ok(())
 }
@@ -411,8 +414,8 @@ pub fn deserialize_datum_from(
 ) -> memcomparable::Result<Datum> {
     let null_tag = u8::deserialize(&mut *deserializer)?;
     match null_tag {
-        0 => Ok(None),
-        1 => Ok(Some(ScalarImpl::deserialize(ty.clone(), deserializer)?)),
+        1 => Ok(None),
+        0 => Ok(Some(ScalarImpl::deserialize(ty.clone(), deserializer)?)),
         _ => Err(memcomparable::Error::InvalidTagEncoding(null_tag as _)),
     }
 }
@@ -649,6 +652,67 @@ pub fn display_datum_ref(d: &DatumRef<'_>) -> String {
 }
 
 impl ScalarRefImpl<'_> {
+    /// Encode the scalar to postgresql binary format.
+    /// The encoder implements encoding using <https://docs.rs/postgres-types/0.2.3/postgres_types/trait.ToSql.html>
+    pub fn binary_serialize(&self) -> Bytes {
+        let placeholder = Type::ANY;
+        let mut output = BytesMut::new();
+        match self {
+            Self::Int64(v) => {
+                v.to_sql(&placeholder, &mut output).unwrap();
+            }
+            Self::Float32(v) => {
+                v.to_sql(&placeholder, &mut output).unwrap();
+            }
+            Self::Float64(v) => {
+                v.to_sql(&placeholder, &mut output).unwrap();
+            }
+            Self::Utf8(v) => {
+                v.to_sql(&placeholder, &mut output).unwrap();
+            }
+            Self::Bool(v) => {
+                v.to_sql(&placeholder, &mut output).unwrap();
+            }
+            Self::Int16(v) => {
+                v.to_sql(&placeholder, &mut output).unwrap();
+            }
+            Self::Int32(v) => {
+                v.to_sql(&placeholder, &mut output).unwrap();
+            }
+            Self::Decimal(v) => match v {
+                Decimal::Normalized(v) => {
+                    v.to_sql(&placeholder, &mut output).unwrap();
+                }
+                Decimal::NaN | Decimal::PositiveINF | Decimal::NegativeINF => {
+                    output.reserve(8);
+                    output.put_u16(0);
+                    output.put_i16(0);
+                    output.put_u16(0xC000);
+                    output.put_i16(0);
+                }
+            },
+            Self::NaiveDate(v) => {
+                v.0.to_sql(&placeholder, &mut output).unwrap();
+            }
+            Self::NaiveDateTime(v) => {
+                v.0.to_sql(&placeholder, &mut output).unwrap();
+            }
+            Self::NaiveTime(v) => {
+                v.0.to_sql(&placeholder, &mut output).unwrap();
+            }
+            Self::Struct(_) => {
+                todo!("Don't support struct serialization yet")
+            }
+            Self::List(_) => {
+                todo!("Don't support list serialization yet")
+            }
+            Self::Interval(_) => {
+                todo!("Don't support interval serialization yet")
+            }
+        };
+        output.freeze()
+    }
+
     /// Serialize the scalar.
     pub fn serialize(
         &self,
@@ -757,8 +821,8 @@ impl ScalarImpl {
         let base_position = deserializer.position();
         let null_tag = u8::deserialize(&mut *deserializer)?;
         match null_tag {
-            0 => {}
-            1 => {
+            1 => {}
+            0 => {
                 use std::mem::size_of;
                 let len = match data_type {
                     DataType::Int16 => size_of::<i16>(),
@@ -865,7 +929,7 @@ impl ScalarImpl {
             ),
             TypeName::Interval => ScalarImpl::Interval(IntervalUnit::from_protobuf_bytes(
                 b,
-                data_type.get_interval_type()?,
+                data_type.get_interval_type().unwrap_or(Unspecified),
             )?),
             TypeName::Timestamp => {
                 ScalarImpl::NaiveDateTime(NaiveDateTimeWrapper::from_protobuf_bytes(b)?)

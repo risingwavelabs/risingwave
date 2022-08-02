@@ -20,9 +20,10 @@ use async_trait::async_trait;
 use paste::paste;
 use risingwave_common::catalog::{CatalogVersion, TableId};
 use risingwave_common::util::addr::HostAddr;
-use risingwave_hummock_sdk::{HummockEpoch, HummockSstableId, HummockVersionId, LocalSstableInfo};
+use risingwave_hummock_sdk::{HummockEpoch, HummockVersionId, LocalSstableInfo, SstIdRange};
 use risingwave_pb::catalog::{
-    Database as ProstDatabase, Schema as ProstSchema, Source as ProstSource, Table as ProstTable,
+    Database as ProstDatabase, Schema as ProstSchema, Sink as ProstSink, Source as ProstSource,
+    Table as ProstTable,
 };
 use risingwave_pb::common::WorkerType;
 use risingwave_pb::ddl_service::ddl_service_client::DdlServiceClient;
@@ -174,6 +175,20 @@ impl MetaClient {
         Ok((resp.source_id, resp.version))
     }
 
+    pub async fn create_sink(
+        &self,
+        sink: ProstSink,
+        graph: StreamFragmentGraph,
+    ) -> Result<(u32, CatalogVersion)> {
+        let request = CreateSinkRequest {
+            sink: Some(sink),
+            fragment_graph: Some(graph),
+        };
+
+        let resp = self.inner.create_sink(request).await?;
+        Ok((resp.sink_id, resp.version))
+    }
+
     pub async fn create_materialized_source(
         &self,
         source: ProstSource,
@@ -210,6 +225,12 @@ impl MetaClient {
         Ok(resp.version)
     }
 
+    pub async fn drop_sink(&self, sink_id: u32) -> Result<CatalogVersion> {
+        let request = DropSinkRequest { sink_id };
+        let resp = self.inner.drop_sink(request).await?;
+        Ok(resp.version)
+    }
+
     pub async fn drop_database(&self, database_id: u32) -> Result<CatalogVersion> {
         let request = DropDatabaseRequest { database_id };
         let resp = self.inner.drop_database(request).await?;
@@ -232,6 +253,11 @@ impl MetaClient {
     pub async fn drop_user(&self, user_id: u32) -> Result<u64> {
         let request = DropUserRequest { user_id };
         let resp = self.inner.drop_user(request).await?;
+        Ok(resp.version)
+    }
+
+    pub async fn update_user(&self, request: UpdateUserRequest) -> Result<u64> {
+        let resp = self.inner.update_user(request).await?;
         Ok(resp.version)
     }
 
@@ -358,6 +384,12 @@ impl MetaClient {
         let _resp = self.inner.resume(request).await?;
         Ok(())
     }
+
+    pub async fn get_cluster_info(&self) -> Result<GetClusterInfoResponse> {
+        let request = GetClusterInfoRequest {};
+        let resp = self.inner.get_cluster_info(request).await?;
+        Ok(resp)
+    }
 }
 
 #[async_trait]
@@ -429,13 +461,17 @@ impl HummockMetaClient for MetaClient {
         Ok(())
     }
 
-    async fn get_new_table_id(&self) -> Result<HummockSstableId> {
-        let resp = self.inner.get_new_table_id(GetNewTableIdRequest {}).await?;
-        Ok(resp.table_id)
+    async fn get_new_sst_ids(&self, number: u32) -> Result<SstIdRange> {
+        let resp = self
+            .inner
+            .get_new_sst_ids(GetNewSstIdsRequest { number })
+            .await?;
+        Ok(SstIdRange::new(resp.start_id, resp.end_id))
     }
 
     async fn report_compaction_task(&self, compact_task: CompactTask) -> Result<()> {
         let req = ReportCompactionTasksRequest {
+            context_id: self.worker_id(),
             compact_task: Some(compact_task),
         };
         self.inner.report_compaction_tasks(req).await?;
@@ -584,11 +620,13 @@ macro_rules! for_all_meta_rpc {
             ,{ ddl_client, create_materialized_source, CreateMaterializedSourceRequest, CreateMaterializedSourceResponse }
             ,{ ddl_client, create_materialized_view, CreateMaterializedViewRequest, CreateMaterializedViewResponse }
             ,{ ddl_client, create_source, CreateSourceRequest, CreateSourceResponse }
+            ,{ ddl_client, create_sink, CreateSinkRequest, CreateSinkResponse }
             ,{ ddl_client, create_schema, CreateSchemaRequest, CreateSchemaResponse }
             ,{ ddl_client, create_database, CreateDatabaseRequest, CreateDatabaseResponse }
             ,{ ddl_client, drop_materialized_source, DropMaterializedSourceRequest, DropMaterializedSourceResponse }
             ,{ ddl_client, drop_materialized_view, DropMaterializedViewRequest, DropMaterializedViewResponse }
             ,{ ddl_client, drop_source, DropSourceRequest, DropSourceResponse }
+            ,{ ddl_client, drop_sink, DropSinkRequest, DropSinkResponse }
             ,{ ddl_client, drop_database, DropDatabaseRequest, DropDatabaseResponse }
             ,{ ddl_client, drop_schema, DropSchemaRequest, DropSchemaResponse }
             ,{ ddl_client, risectl_list_state_tables, RisectlListStateTablesRequest, RisectlListStateTablesResponse }
@@ -600,17 +638,19 @@ macro_rules! for_all_meta_rpc {
             ,{ hummock_client, unpin_snapshot, UnpinSnapshotRequest, UnpinSnapshotResponse }
             ,{ hummock_client, unpin_snapshot_before, UnpinSnapshotBeforeRequest, UnpinSnapshotBeforeResponse }
             ,{ hummock_client, report_compaction_tasks, ReportCompactionTasksRequest, ReportCompactionTasksResponse }
-            ,{ hummock_client, get_new_table_id, GetNewTableIdRequest, GetNewTableIdResponse }
+            ,{ hummock_client, get_new_sst_ids, GetNewSstIdsRequest, GetNewSstIdsResponse }
             ,{ hummock_client, subscribe_compact_tasks, SubscribeCompactTasksRequest, Streaming<SubscribeCompactTasksResponse> }
             ,{ hummock_client, report_vacuum_task, ReportVacuumTaskRequest, ReportVacuumTaskResponse }
             ,{ hummock_client, get_compaction_groups, GetCompactionGroupsRequest, GetCompactionGroupsResponse }
             ,{ hummock_client, trigger_manual_compaction, TriggerManualCompactionRequest, TriggerManualCompactionResponse }
             ,{ user_client, create_user, CreateUserRequest, CreateUserResponse }
+            ,{ user_client, update_user, UpdateUserRequest, UpdateUserResponse }
             ,{ user_client, drop_user, DropUserRequest, DropUserResponse }
             ,{ user_client, grant_privilege, GrantPrivilegeRequest, GrantPrivilegeResponse }
             ,{ user_client, revoke_privilege, RevokePrivilegeRequest, RevokePrivilegeResponse }
             ,{ scale_client, pause, PauseRequest, PauseResponse }
             ,{ scale_client, resume, ResumeRequest, ResumeResponse }
+            ,{ scale_client, get_cluster_info, GetClusterInfoRequest, GetClusterInfoResponse }
         }
     };
 }
