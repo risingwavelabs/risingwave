@@ -41,23 +41,38 @@ pub fn add_meta_node(provide_meta_node: &[MetaNodeConfig], cmd: &mut Command) ->
     Ok(())
 }
 
+/// Strategy for whether to enable in-memory hummock if no minio and s3 is provided.
+pub enum HummockInMemoryStrategy {
+    /// Enable isolated in-memory hummock.
+    Isolated,
+    /// Enable in-memory hummock shared in the process. Used by risedev playground.
+    Shared,
+    /// Disallow in-memory hummock. Always requires minio or s3.
+    Disallowed,
+}
+
 /// Add a storage backend to the parameters. Returns whether this is a shared backend.
 pub fn add_storage_backend(
     id: &str,
     provide_minio: &[MinioConfig],
     provide_aws_s3: &[AwsS3Config],
-    allow_hummock_in_memory: bool,
+    hummock_in_memory_strategy: HummockInMemoryStrategy,
     cmd: &mut Command,
 ) -> Result<bool> {
     let is_shared_backend = match (provide_minio, provide_aws_s3) {
         ([], []) => {
-            if allow_hummock_in_memory {
-                cmd.arg("--state-store").arg("hummock+memory");
-                false
-            } else {
-                return Err(anyhow!(
+            match hummock_in_memory_strategy {
+                HummockInMemoryStrategy::Isolated => {
+                    cmd.arg("--state-store").arg("hummock+memory");
+                    false
+                }
+                HummockInMemoryStrategy::Shared => {
+                    cmd.arg("--state-store").arg("hummock+memory-shared");
+                    true
+                },
+                HummockInMemoryStrategy::Disallowed => return Err(anyhow!(
                     "{} is not compatible with in-memory state backend. Need to enable either minio or aws-s3.", id
-                ));
+                )),
             }
         }
         ([minio], []) => {

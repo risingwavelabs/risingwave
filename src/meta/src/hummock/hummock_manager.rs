@@ -30,8 +30,8 @@ use risingwave_common::util::epoch::{Epoch, INVALID_EPOCH};
 use risingwave_hummock_sdk::compact::compact_task_to_string;
 use risingwave_hummock_sdk::compaction_group::hummock_version_ext::HummockVersionExt;
 use risingwave_hummock_sdk::{
-    get_remote_sst_id, CompactionGroupId, HummockCompactionTaskId, HummockContextId, HummockEpoch,
-    HummockSstableId, HummockVersionId, LocalSstableInfo, FIRST_VERSION_ID,
+    CompactionGroupId, HummockCompactionTaskId, HummockContextId, HummockEpoch, HummockSstableId,
+    HummockVersionId, LocalSstableInfo, SstIdRange, FIRST_VERSION_ID,
 };
 use risingwave_pb::hummock::hummock_version::Levels;
 use risingwave_pb::hummock::{
@@ -854,19 +854,29 @@ where
         let assignee_context_id = compact_task_assignment
             .remove(compact_task.task_id)
             .map(|assignment| assignment.context_id);
-        // The task is not found.
-        if assignee_context_id.is_none() && !trivial_move {
-            tracing::warn!("Compaction task {} not found", compact_task.task_id);
-            return Ok(false);
-        }
-        if *assignee_context_id.as_ref().unwrap() != context_id {
-            tracing::warn!(
-                "Wrong reporter {}. Compaction task {} is assigned to {}",
-                context_id,
-                compact_task.task_id,
-                *assignee_context_id.as_ref().unwrap(),
-            );
-            return Ok(false);
+
+        // For trivial_move task, there is no need to check the task assignment because
+        // we won't populate compact_task_assignment for it.
+        if !trivial_move {
+            match assignee_context_id {
+                Some(id) => {
+                    // Assignee id mismatch.
+                    if id != context_id {
+                        tracing::warn!(
+                            "Wrong reporter {}. Compaction task {} is assigned to {}",
+                            context_id,
+                            compact_task.task_id,
+                            *assignee_context_id.as_ref().unwrap(),
+                        );
+                        return Ok(false);
+                    }
+                }
+                None => {
+                    // The task is not found.
+                    tracing::warn!("Compaction task {} not found", compact_task.task_id);
+                    return Ok(false);
+                }
+            }
         }
         compact_status.report_compact_task(compact_task);
         if compact_task.task_status {
@@ -1109,17 +1119,17 @@ where
         Ok(())
     }
 
-    pub async fn get_new_table_id(&self) -> Result<HummockSstableId> {
-        // TODO #4037: refactor `get_new_table_id`
-        let sstable_id = get_remote_sst_id(
-            self.env
-                .id_gen_manager()
-                .generate::<{ IdCategory::HummockSstableId }>()
-                .await
-                .map(|id| id as HummockSstableId)?,
-        );
-
-        Ok(sstable_id)
+    pub async fn get_new_sst_ids(&self, number: u32) -> Result<SstIdRange> {
+        // TODO: refactor id generator to u64
+        assert!(number <= (i32::MAX as u32), "number overflow");
+        let start_id = self
+            .env
+            .id_gen_manager()
+            .generate_interval::<{ IdCategory::HummockSstableId }>(number as i32)
+            .await
+            .map(|id| id as u64)?;
+        assert!(start_id <= u64::MAX - number as u64, "SST id overflow");
+        Ok(SstIdRange::new(start_id, start_id + number as u64))
     }
 
     /// Release resources pinned by these contexts, including:
