@@ -445,26 +445,24 @@
                   - 0
               pkIndices:
               - 1
-              fields:
-              - dataType:
-                  typeName: INT32
-                  isNullable: true
-                name: t.v1
-              - dataType:
-                  typeName: INT64
-                  isNullable: true
-                name: t._row_id
-              chain:
-                tableId: 4
-                upstreamFields:
-                - dataType:
-                    typeName: INT64
-                    isNullable: true
-                  name: _row_id
-                - dataType:
-                    typeName: INT32
-                    isNullable: true
-                  name: v1
+              appendOnly: true
+              batchPlan:
+                tableDesc:
+                  tableId: 4
+                  columns:
+                  - columnType:
+                      typeName: INT64
+                      isNullable: true
+                    name: _row_id
+                  - columnType:
+                      typeName: INT32
+                      isNullable: true
+                    columnId: 1
+                    name: v1
+                  orderKey:
+                  - orderType: ASCENDING
+                  distKeyIndices:
+                  - 0
                 columnIds:
                 - 1001
                 - 1000
@@ -479,36 +477,21 @@
                 typeName: INT64
                 isNullable: true
               name: t._row_id
-            - dataType:
-                typeName: INT16
-                isNullable: true
-              name: Vnode(t._row_id)
-            project:
-              selectList:
-              - exprType: INPUT_REF
-                returnType:
-                  typeName: INT32
-                  isNullable: true
-                inputRef: {}
-              - exprType: INPUT_REF
-                returnType:
+            chain:
+              tableId: 4
+              upstreamFields:
+              - dataType:
                   typeName: INT64
                   isNullable: true
-                inputRef:
-                  columnIdx: 1
-              - exprType: VNODE
-                returnType:
-                  typeName: INT16
+                name: _row_id
+              - dataType:
+                  typeName: INT32
                   isNullable: true
                 name: v1
               upstreamColumnIndices:
               - 1
               - 0
           fields:
-          - dataType:
-              typeName: INT16
-              isNullable: true
-            name: Vnode(t._row_id)
           - dataType:
               typeName: INT64
               isNullable: true
@@ -517,9 +500,7 @@
               typeName: INT64
               isNullable: true
             name: sum(t.v1)
-          hashAgg:
-            groupKey:
-            - 2
+          localSimpleAgg:
             aggCalls:
             - type: COUNT
               returnType:
@@ -534,6 +515,8 @@
               returnType:
                 typeName: INT64
                 isNullable: true
+            distributionKey:
+            - 1
             internalTables:
             - id: 4294967294
               schemaId: 2147483646
@@ -541,19 +524,9 @@
               columns:
               - columnDesc:
                   columnType:
-                    typeName: INT16
-                    isNullable: true
-                  name: Vnode(t._row_id)
-              - columnDesc:
-                  columnType:
                     typeName: INT64
                     isNullable: true
-                  columnId: 1
                   name: count
-              orderKey:
-              - orderType: ASCENDING
-              pk:
-              - 0
               owner: 1
             - id: 4294967294
               schemaId: 2147483646
@@ -561,32 +534,14 @@
               columns:
               - columnDesc:
                   columnType:
-                    typeName: INT16
-                    isNullable: true
-                  name: Vnode(t._row_id)
-              - columnDesc:
-                  columnType:
                     typeName: INT64
                     isNullable: true
-                  columnId: 1
                   name: sum(t.v1)
-              orderKey:
-              - orderType: ASCENDING
-              pk:
-              - 0
               owner: 1
             columnMappings:
-            - indices:
-              - 2
-            - indices:
-              - 2
-        pkIndices:
-        - 0
+            - {}
+            - {}
         fields:
-        - dataType:
-            typeName: INT16
-            isNullable: true
-          name: Vnode(t._row_id)
         - dataType:
             typeName: INT64
             isNullable: true
@@ -611,8 +566,7 @@
         aggCalls:
         - type: SUM
           args:
-          - input:
-              columnIdx: 1
+          - input: {}
             type:
               typeName: INT64
               isNullable: true
@@ -622,7 +576,7 @@
         - type: SUM
           args:
           - input:
-              columnIdx: 2
+              columnIdx: 1
             type:
               typeName: INT64
               isNullable: true

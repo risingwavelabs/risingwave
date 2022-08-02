@@ -1275,7 +1275,7 @@
     StreamMaterialize { columns: [ps_partkey, value], pk_columns: [ps_partkey], order_descs: [value, ps_partkey] }
       StreamExchange { dist: HashShard(partsupp.ps_partkey) }
         StreamProject { exprs: [partsupp.ps_partkey, sum((partsupp.ps_supplycost * partsupp.ps_availqty))] }
-          StreamDynamicFilter { predicate: (sum((partsupp.ps_supplycost * partsupp.ps_availqty)) > (sum((partsupp.ps_supplycost * partsupp.ps_availqty)) * 0.0001000000:Decimal)) }
+          StreamDynamicFilter { predicate: (sum((partsupp.ps_supplycost * partsupp.ps_availqty)) > (sum(sum((partsupp.ps_supplycost * partsupp.ps_availqty))) * 0.0001000000:Decimal)) }
             StreamExchange { dist: HashShard(sum((partsupp.ps_supplycost * partsupp.ps_availqty))) }
               StreamHashAgg { group_key: [partsupp.ps_partkey], aggs: [count, sum((partsupp.ps_supplycost * partsupp.ps_availqty)), sum((partsupp.ps_supplycost * partsupp.ps_availqty))] }
                 StreamExchange { dist: HashShard(partsupp.ps_partkey) }
@@ -1292,8 +1292,8 @@
                           StreamFilter { predicate: (nation.n_name = 'ARGENTINA':Varchar) }
                             StreamTableScan { table: nation, columns: [nation.n_nationkey, nation._row_id, nation.n_name], pk: [nation._row_id], distribution: HashShard(nation._row_id) }
             StreamExchange { dist: Broadcast }
-              StreamProject { exprs: [(sum((partsupp.ps_supplycost * partsupp.ps_availqty)) * 0.0001000000:Decimal)] }
-                StreamGlobalSimpleAgg { aggs: [count, sum((partsupp.ps_supplycost * partsupp.ps_availqty))] }
+              StreamProject { exprs: [(sum(sum((partsupp.ps_supplycost * partsupp.ps_availqty))) * 0.0001000000:Decimal)] }
+                StreamGlobalSimpleAgg { aggs: [sum(count), sum(sum((partsupp.ps_supplycost * partsupp.ps_availqty)))] }
                   StreamExchange { dist: Single }
                     StreamLocalSimpleAgg { aggs: [count, sum((partsupp.ps_supplycost * partsupp.ps_availqty))] }
                       StreamProject { exprs: [(partsupp.ps_supplycost * partsupp.ps_availqty), partsupp._row_id, supplier._row_id, nation._row_id] }
@@ -1494,8 +1494,8 @@
                   BatchScan { table: part, columns: [part.p_partkey, part.p_type], distribution: SomeShard }
   stream_plan: |
     StreamMaterialize { columns: [promo_revenue], pk_columns: [] }
-      StreamProject { exprs: [((100.00:Decimal * sum(Case(Like(part.p_type, 'PROMO%':Varchar), (lineitem.l_extendedprice * (1:Int32 - lineitem.l_discount)), 0:Int32::Decimal))) / sum((lineitem.l_extendedprice * (1:Int32 - lineitem.l_discount))))] }
-        StreamGlobalSimpleAgg { aggs: [count, sum(Case(Like(part.p_type, 'PROMO%':Varchar), (lineitem.l_extendedprice * (1:Int32 - lineitem.l_discount)), 0:Int32::Decimal)), sum((lineitem.l_extendedprice * (1:Int32 - lineitem.l_discount)))] }
+      StreamProject { exprs: [((100.00:Decimal * sum(sum(Case(Like(part.p_type, 'PROMO%':Varchar), (lineitem.l_extendedprice * (1:Int32 - lineitem.l_discount)), 0:Int32::Decimal)))) / sum(sum((lineitem.l_extendedprice * (1:Int32 - lineitem.l_discount)))))] }
+        StreamGlobalSimpleAgg { aggs: [sum(count), sum(sum(Case(Like(part.p_type, 'PROMO%':Varchar), (lineitem.l_extendedprice * (1:Int32 - lineitem.l_discount)), 0:Int32::Decimal))), sum(sum((lineitem.l_extendedprice * (1:Int32 - lineitem.l_discount))))] }
           StreamExchange { dist: Single }
             StreamLocalSimpleAgg { aggs: [count, sum(Case(Like(part.p_type, 'PROMO%':Varchar), (lineitem.l_extendedprice * (1:Int32 - lineitem.l_discount)), 0:Int32::Decimal)), sum((lineitem.l_extendedprice * (1:Int32 - lineitem.l_discount)))] }
               StreamProject { exprs: [Case(Like(part.p_type, 'PROMO%':Varchar), (lineitem.l_extendedprice * (1:Int32 - lineitem.l_discount)), 0:Int32::Decimal), (lineitem.l_extendedprice * (1:Int32 - lineitem.l_discount)), lineitem._row_id, part._row_id] }
@@ -1781,8 +1781,8 @@
                         BatchScan { table: lineitem, columns: [lineitem.l_partkey, lineitem.l_quantity], distribution: SomeShard }
   stream_plan: |
     StreamMaterialize { columns: [avg_yearly], pk_columns: [] }
-      StreamProject { exprs: [RoundDigit((sum(lineitem.l_extendedprice) / 7.0:Decimal), 16:Int32)] }
-        StreamGlobalSimpleAgg { aggs: [count, sum(lineitem.l_extendedprice)] }
+      StreamProject { exprs: [RoundDigit((sum(sum(lineitem.l_extendedprice)) / 7.0:Decimal), 16:Int32)] }
+        StreamGlobalSimpleAgg { aggs: [sum(count), sum(sum(lineitem.l_extendedprice))] }
           StreamExchange { dist: Single }
             StreamLocalSimpleAgg { aggs: [count, sum(lineitem.l_extendedprice)] }
               StreamProject { exprs: [lineitem.l_extendedprice, lineitem._row_id, part._row_id, lineitem.l_partkey] }
@@ -1979,8 +1979,8 @@
                   BatchFilter { predicate: (part.p_size >= 1:Int32) }
                     BatchScan { table: part, columns: [part.p_partkey, part.p_brand, part.p_size, part.p_container], distribution: SomeShard }
   stream_plan: |
-    StreamMaterialize { columns: [count(hidden), revenue], pk_columns: [] }
-      StreamGlobalSimpleAgg { aggs: [count, sum((lineitem.l_extendedprice * (1:Int32 - lineitem.l_discount)))] }
+    StreamMaterialize { columns: [sum(count)(hidden), revenue], pk_columns: [] }
+      StreamGlobalSimpleAgg { aggs: [sum(count), sum(sum((lineitem.l_extendedprice * (1:Int32 - lineitem.l_discount))))] }
         StreamExchange { dist: Single }
           StreamLocalSimpleAgg { aggs: [count, sum((lineitem.l_extendedprice * (1:Int32 - lineitem.l_discount)))] }
             StreamProject { exprs: [(lineitem.l_extendedprice * (1:Int32 - lineitem.l_discount)), lineitem._row_id, part._row_id] }
